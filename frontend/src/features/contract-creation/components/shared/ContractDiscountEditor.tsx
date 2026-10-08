@@ -10,7 +10,7 @@ export interface ContractDiscountSummaryItem {
 }
 
 export function ContractDiscountEditor({ mode, value, label, max, disabled = false, description,
-  summaryItems, result, warning, error, onModeChange, onValueChange }: {
+  summaryItems, result, warning, error, commitOnBlur = true, onModeChange, onValueChange }: {
   mode: 'percent' | 'amount';
   value: string;
   label: string;
@@ -21,6 +21,7 @@ export function ContractDiscountEditor({ mode, value, label, max, disabled = fal
   result?: string;
   warning?: string;
   error?: string;
+  commitOnBlur?: boolean;
   onModeChange?: (mode: 'percent' | 'amount') => void;
   onValueChange: (value: string) => void;
 }) {
@@ -35,7 +36,7 @@ export function ContractDiscountEditor({ mode, value, label, max, disabled = fal
     </dl>}
     <div className="max-w-xs"><ErpField label={label} error={error}>{mode === 'amount'
       ? <ErpRialInput dir="ltr" value={value} disabled={disabled} onValueChange={onValueChange} />
-      : <FormattedNumberInput value={value} onTextChange={onValueChange} min={0} max={maximum}
+      : <FormattedNumberInput value={value} onTextChange={onValueChange} min={0} max={maximum} commitOnBlur={commitOnBlur}
         step={0.1} decimalScale={2} disabled={disabled} />}</ErpField></div>
     {warning && <p className="text-sm text-[var(--sds-warning)]">{warning}</p>}
     {result && <p className="text-sm font-medium text-[var(--sds-success)]">{result}</p>}

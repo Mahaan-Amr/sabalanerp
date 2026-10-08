@@ -40,6 +40,84 @@ const inFixture = async (run: (tx: Prisma.TransactionClient, contract: any) => P
   } finally { await database.$disconnect(); }
 };
 
+for (const flowVersion of [0, 1]) test(`editor save commits its edits and cancellation together (flow ${flowVersion})`, () => inFixture(async (tx, contract) => {
+  const source = await tx.salesContract.findFirstOrThrow({ where: { partnerKind: null, partnerCaseId: null,
+    productGraphState: { isNot: null }, id: { not: contract.id }, contractData: { not: Prisma.DbNull } } });
+  const admin = await tx.user.findFirstOrThrow({ where: { role: 'ADMIN' } });
+  await tx.salesContract.update({ where: { id: contract.id }, data: {
+    contractData: source.contractData as Prisma.InputJsonValue, content: source.content,
+    totalAmount: source.totalAmount, currency: source.currency, commercialFlowVersion: flowVersion,
+  } });
+  const client = new Proxy(tx, { get(target, property) {
+    if (property === '$transaction') return (work: (transaction: Prisma.TransactionClient) => unknown) => work(tx);
+    return Reflect.get(target, property);
+  } }) as unknown as PrismaClient;
+  const edit = { notes: 'ویرایش همراه لغو', cancelContract: true };
+  const authority = { cancellationAuthority: { canCancelApproved: true } };
+  await assert.rejects(updateContract(contract.id, edit, admin.id, client), /Access denied/);
+  await tx.salesContract.update({ where: { id: contract.id }, data: { status: 'APPROVED' } });
+  await assert.rejects(updateContract(contract.id, edit, admin.id, client,
+    { cancellationAuthority: { canCancelApproved: false } }), /بدون دسترسی ویژه/);
+  await tx.salesContract.update({ where: { id: contract.id }, data: { status: 'DRAFT' } });
+  let correctionId: string | undefined;
+  if (flowVersion === 1) {
+    await tx.salesContract.update({ where: { id: contract.id }, data: { status: 'SIGNED',
+      salesApprovalRevision: 1, customerAcceptanceRevision: 1 } });
+    await tx.accountingFinancialRecord.create({ data: { kind: 'INVOICE_CANDIDATE', sourceKind: 'SALES_CONTRACT',
+      contractId: contract.id, amount: Number(source.totalAmount), createdBy: admin.id } });
+    await snapshotRealizedSale(tx, contract.id, admin.id, new Date(), 'FINANCIAL_RECORD');
+    await assert.rejects(updateContract(contract.id, edit, admin.id, client, authority), /approved formal correction/);
+    const requested = await requestAccountingSalesContractCorrection(tx, { contractId: contract.id,
+      actorUserId: admin.id, category: 'OTHER', priority: 'MEDIUM', reason: 'آزمون لغو همراه اصلاح', idempotencyKey: randomUUID() });
+    correctionId = requested.correction.id;
+    await respondToCrossWorkspaceDuty(tx, { dutyId: requested.duty.id, actorUserId: admin.id,
+      actionCode: 'APPROVE', expectedSourceVersion: 1, expectedEnvelopeVersion: 1, reason: null, policyVersion: 2 });
+  }
+  const before = await tx.salesContract.findUniqueOrThrow({ where: { id: contract.id } });
+  const graphBefore = await tx.salesContractProductGraphState.findUniqueOrThrow({ where: { contractId: contract.id } });
+  const failingClient = new Proxy(client, { get(target, property) {
+    if (property !== '$transaction') return Reflect.get(target, property);
+    return async (work: (transaction: Prisma.TransactionClient) => unknown) => {
+      await tx.$executeRawUnsafe('SAVEPOINT cancellation_save_failure');
+      try {
+        return await work(new Proxy(tx, { get(transaction, key) {
+          if (key === 'contractConfirmationAuditLog') return new Proxy(transaction.contractConfirmationAuditLog, {
+            get(delegate, method) { return method === 'create' ? () => { throw new Error('injected cancellation audit failure'); }
+              : Reflect.get(delegate, method); },
+          });
+          return Reflect.get(transaction, key);
+        } }));
+      } catch (error) {
+        await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT cancellation_save_failure');
+        throw error;
+      } finally {
+        await tx.$executeRawUnsafe('RELEASE SAVEPOINT cancellation_save_failure');
+      }
+    };
+  } });
+  await assert.rejects(updateContract(contract.id, edit, admin.id, failingClient, authority), /injected cancellation audit failure/);
+  assert.deepEqual(await tx.salesContract.findUniqueOrThrow({ where: { id: contract.id } }), before);
+  assert.deepEqual(await tx.salesContractProductGraphState.findUniqueOrThrow({ where: { contractId: contract.id } }), graphBefore);
+  assert.equal(await tx.contractConfirmationAuditLog.count({ where: { contractId: contract.id } }), 0);
+  if (correctionId) assert.equal((await tx.accountingCorrectionRequest.findUniqueOrThrow({ where: { id: correctionId } })).status,
+    'APPROVED_FOR_SALES_EDIT');
+  const saved = await updateContract(contract.id, edit,
+    admin.id, client, { cancellationAuthority: { canCancelApproved: true } });
+  assert.equal(saved.status, 'CANCELLED');
+  assert.equal(saved.notes, 'ویرایش همراه لغو');
+  assert.equal(saved.commercialRevision, flowVersion === 1 ? 2 : 1);
+  if (flowVersion === 1) assert.equal(saved.commercialExpiresAt!.getTime(), contract.commercialExpiresAt.getTime());
+  assert.equal((saved.signatures as any).cancellation.previousStatus, 'DRAFT');
+  assert.equal(await tx.contractConfirmationAuditLog.count({ where: { contractId: contract.id, eventType: 'CONTRACT_CANCELLED' } }), 1);
+  if (correctionId) {
+    assert.equal((await tx.accountingCorrectionRequest.findUniqueOrThrow({ where: { id: correctionId } })).status, 'SALES_EDITED');
+    assert.equal(await tx.crossWorkspaceDuty.count({ where: { sourceId: correctionId,
+      sourceActionCode: 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION', status: 'OPEN' } }), 1);
+    assert.equal((await tx.salesReportingEvent.findMany({ where: { contractId: contract.id } }))
+      .reduce((net, event) => net + Number(event.amount), 0), 0);
+  }
+}));
+
 test('both approval orders require evidence from the current revision and commercial finality gates finance', () => inFixture(async (tx, contract) => {
   await assert.rejects(assertOrdinaryAccountingCommercialGate(tx, contract.id, 'CREATE_INVOICE'));
   const salesFirst = await approveOrdinarySales(tx, contract.id, contract.createdBy, undefined, 1);

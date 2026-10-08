@@ -81,6 +81,15 @@ test('direct activation converts an eligible user atomically without identity, t
     assert.equal(replay.ok && replay.value.replayed, true);
     const activeView = await service.query({ schemaVersion: 4, purpose: 'PARTNER_DIRECT_ACTIVATION', userId });
     assert.equal(activeView.ok && activeView.value.subject.canRevert, true);
+    assert.equal(activeView.ok && activeView.value.subject.convertedBy, actorId);
+    assert.equal(activeView.ok && activeView.value.subject.convertedByLabel, `مدیر آزمون (@${actorId})`);
+    await database.user.update({ where: { id: actorId }, data: { erasedAt: new Date(),
+      erasedDisplayName: 'مدیر پیشین', firstName: 'Deleted', lastName: 'User', username: `deleted-${suffix}` } });
+    const erasedActorView = await service.query({ schemaVersion: 4, purpose: 'PARTNER_DIRECT_ACTIVATION', userId });
+    assert.equal(erasedActorView.ok && erasedActorView.value.subject.convertedBy, actorId);
+    assert.equal(erasedActorView.ok && erasedActorView.value.subject.convertedByLabel, 'کاربر حذف‌شده — مدیر پیشین');
+    await database.user.update({ where: { id: actorId }, data: { erasedAt: null,
+      erasedDisplayName: null, firstName: 'مدیر', lastName: 'آزمون', username: actorId } });
     const revertIntent = { schemaVersion: 4 as const, type: 'PROFILE_DIRECT_ACTIVATION_REVERT' as const,
       userId, profileId: activated.value.profileId, expectedProfileRevision: activated.value.profileRevision,
       consequenceConfirmed: true as const };

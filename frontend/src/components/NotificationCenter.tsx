@@ -99,7 +99,12 @@ export function NotificationCenter() {
     }
   }, []);
 
-  useEffect(() => { void loadCount().catch(() => undefined); }, [loadCount]);
+  useEffect(() => {
+    const refresh = () => { void loadCount().catch(() => undefined); };
+    refresh();
+    window.addEventListener('notifications:read-state-changed', refresh);
+    return () => window.removeEventListener('notifications:read-state-changed', refresh);
+  }, [loadCount]);
 
   useEffect(() => {
     if (!socket) return;
@@ -114,11 +119,6 @@ export function NotificationCenter() {
   }, [socket]);
 
   const openNotification = async (item: NotificationItem) => {
-    if (item.type === 'NEW_BROWSER_LOGIN') {
-      setOpen(false);
-      router.push(securityNotificationUrl(item));
-      return;
-    }
     if (!item.readAt) {
       try {
         await notificationsAPI.markRead(item.id);
@@ -131,9 +131,10 @@ export function NotificationCenter() {
         return;
       }
     }
-    if (item.actionUrl) {
+    const destination = item.type === 'NEW_BROWSER_LOGIN' ? securityNotificationUrl(item) : item.actionUrl;
+    if (destination) {
       setOpen(false);
-      router.push(item.actionUrl);
+      router.push(destination);
     }
   };
 

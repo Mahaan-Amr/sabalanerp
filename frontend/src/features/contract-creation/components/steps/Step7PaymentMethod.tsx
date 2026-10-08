@@ -1,12 +1,12 @@
-﻿// Step 7: Payment Method Component
+// Step 7: Payment Method Component
 // Payment entries management
 
 import React from 'react';
-import { ErpNeumorphicCard, ErpPressable, ErpSegmentedControl, ErpSelect } from '@/components/erp';
-import { FaPlus, FaCheck } from 'react-icons/fa';
+import { ErpNeumorphicCard, ErpSummaryGrid, ErpSegmentedControl, ErpSelect } from '@/components/erp';
+import { FaCheck } from 'react-icons/fa';
 import { formatPrice, formatDisplayNumber, sumNumericValues, tomanToRial, toFiniteNumber } from '@/lib/numberFormat';
 import type { ContractWizardData, PaymentEntry, PaymentEntryMethod } from '../../types/contract.types';
-import { ContractPaymentEntriesList } from '../shared/ContractPaymentEntriesList';
+import { ContractPaymentEntriesSection } from '../shared/ContractPaymentEntriesSection';
 import { ContractDiscountEditor } from '../shared/ContractDiscountEditor';
 
 interface Step7PaymentMethodProps {
@@ -96,11 +96,11 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
           />
         </div>
         <ContractDiscountEditor
+          commitOnBlur={false}
           mode={discountEntryMode === 'PERCENT' ? 'percent' : 'amount'}
           value={discountEntryMode === 'PERCENT' ? String(discountPercentInput) : String(Math.round(discountAmount))}
           label={discountEntryMode === 'PERCENT' ? 'درصد تخفیف' : 'مبلغ تخفیف (تومان)'}
-          max={discountEntryMode === 'PERCENT' ? String(maxDiscountPercent) : undefined}
-          disabled={!hasMatchingDiscountRange || baseSubtotal <= 0}
+          error={errors.discount}
           description="تخفیف فقط روی جمع پایه محصولات سنگی اعمال می‌شود."
           summaryItems={[
             { label: 'جمع پایه', value: formatPrice(baseSubtotal, 'تومان') },
@@ -108,7 +108,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
             { label: 'سقف مجاز', value: `${formatPrice(maxDiscountAmount, 'تومان')} (${formatDisplayNumber(maxDiscountPercent)}٪)` },
           ]}
           warning={!hasMatchingDiscountRange && baseSubtotal > 0 ? 'برای این مبلغ پایه، بازه تخفیف فعالی تعریف نشده است.' : undefined}
-          result={discountAmount > 0 ? `تخفیف اعمال‌شده: ${formatPrice(discountAmount, 'تومان')} (حدود ${formatDisplayNumber(Number(discountPercent.toFixed(2)))}٪)` : undefined}
+          result={!errors.discount && discountAmount > 0 ? `تخفیف اعمال‌شده: ${formatPrice(discountAmount, 'تومان')} (حدود ${formatDisplayNumber(Number(discountPercent.toFixed(2)))}٪)` : undefined}
           onValueChange={value => {
             if (discountEntryMode === 'PERCENT') onDiscountPercentChange(Number(value) || 0);
             else onDiscountAmountChange(Number(value) || 0);
@@ -116,54 +116,17 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
 
         {/* Summary Section */}
         <ErpNeumorphicCard className="p-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبلغ قرارداد:</span>
-              <div className="mr-2">
-                <span className="font-semibold text-[var(--sds-text-primary)]">
-                  {formatPrice(totalContractAmount, wizardData.payment.currency)}
-                </span>
-                {wizardData.payment.currency === 'تومان' && (
-                  <span className="mr-2 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
-                    ({formatDisplayNumber(tomanToRial(totalContractAmount))} ریال)
-                  </span>
-                )}
-              </div>
-            </div>
-            <div>
-              <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">جمع پرداخت:</span>
-              <div className="mr-2">
-                <span className={`font-semibold ${(existingContract ? isPaymentCovered : paymentSumMatchesTotal) ? 'text-[var(--sds-success)] dark:text-[var(--sds-success)]' : hasExtraPayment ? 'text-[var(--sds-danger)]' : 'text-[var(--sds-warning)] dark:text-[var(--sds-warning)]'}`}>
-                  {formatPrice(paymentSum, wizardData.payment.currency)}
-                </span>
-                {wizardData.payment.currency === 'تومان' && (
-                  <span className="mr-2 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
-                    ({formatDisplayNumber(tomanToRial(paymentSum))} ریال)
-                  </span>
-                )}
-              </div>
-            </div>
-            {(!hasExtraPayment || existingContract) && <div>
-              <span className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{hasExtraPayment ? 'مبلغ اضافه:' : 'باقیمانده:'}</span>
-              <div className="mr-2">
-                <span className={`font-semibold ${
-                  Math.abs(remainingAmount) < 0.01 
-                    ? 'text-[var(--sds-success)] dark:text-[var(--sds-success)]'
-                    : remainingAmount > 0 
-                      ? 'text-[var(--sds-warning)] dark:text-[var(--sds-warning)]'
-                      : 'text-[var(--sds-info)] dark:text-[var(--sds-info)]'
-                }`}>
-                  {formatPrice(Math.abs(remainingAmount), wizardData.payment.currency)}
-                </span>
-                {wizardData.payment.currency === 'تومان' && (
-                  <span className="mr-2 text-xs text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
-                    ({formatDisplayNumber(tomanToRial(remainingAmount))} ریال)
-                  </span>
-                )}
-              </div>
-            </div>}
-          </div>
-          
+          <ErpSummaryGrid columns={3} items={[
+            { label: 'مبلغ قرارداد:', value: formatPrice(totalContractAmount, wizardData.payment.currency),
+              hint: wizardData.payment.currency === 'تومان' ? `(${formatDisplayNumber(tomanToRial(totalContractAmount))} ریال)` : undefined },
+            { label: 'جمع پرداخت:', value: formatPrice(paymentSum, wizardData.payment.currency),
+              tone: (existingContract ? isPaymentCovered : paymentSumMatchesTotal) ? 'success' : hasExtraPayment ? 'danger' : 'warning',
+              hint: wizardData.payment.currency === 'تومان' ? `(${formatDisplayNumber(tomanToRial(paymentSum))} ریال)` : undefined },
+            ...(!hasExtraPayment || existingContract ? [{ label: hasExtraPayment ? 'مبلغ اضافه:' : 'باقیمانده:',
+              value: formatPrice(Math.abs(remainingAmount), wizardData.payment.currency),
+              tone: (Math.abs(remainingAmount) < 0.01 ? 'success' : remainingAmount > 0 ? 'warning' : 'info') as 'success' | 'warning' | 'info',
+              hint: wizardData.payment.currency === 'تومان' ? `(${formatDisplayNumber(tomanToRial(remainingAmount))} ریال)` : undefined }] : []),
+          ]} />
           {remainingAmount > 0.01 && (
             <div className="mt-3 p-3 bg-[var(--sds-warning-surface)] dark:bg-[var(--sds-warning-surface)] border border-[var(--sds-warning-border)] dark:border-[var(--sds-warning-border)] rounded">
               <p className="text-[var(--sds-warning)] dark:text-[var(--sds-warning)] text-sm">
@@ -217,49 +180,13 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
           )}
         </ErpNeumorphicCard>
 
-        {/* Payment Entries List */}
-        <div className="space-y-3">
-          <div className="flex justify-between items-center">
-            <h4 className="text-lg font-medium text-[var(--sds-text-primary)]">
-              لیست پرداخت‌ها
-            </h4>
-            <ErpPressable
-              onClick={handleAddPaymentEntry}
-              className="sds-tone-primary sds-action-solid flex items-center gap-2 px-4 py-2 font-medium"
-            >
-              <FaPlus className="w-4 h-4" />
-              <span>افزودن پرداخت</span>
-              {remainingAmount > 0 && (
-                <span className="text-xs font-normal opacity-90">
-                  مانده: {formatPrice(remainingAmount, wizardData.payment.currency)}
-                </span>
-              )}
-            </ErpPressable>
-          </div>
-
-          {wizardData.payment.payments.length === 0 ? (
-            <div className="p-8 text-center border-2 border-dashed border-[var(--sds-border-default)] dark:border-[var(--sds-border-default)] rounded-lg">
-              <p className="text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)] mb-4">
-                هنوز پرداختی ثبت نشده است
-              </p>
-              <ErpPressable
-                onClick={handleAddPaymentEntry}
-                tone="primary"
-                variant="outline"
-                className="px-4 py-2"
-              >
-                ایجاد پرداخت جدید
-              </ErpPressable>
-            </div>
-          ) : (
-            <ContractPaymentEntriesList payments={wizardData.payment.payments} currency={wizardData.payment.currency}
-              onEdit={payment => {
-                if (onEditPaymentEntry && payment.id) onEditPaymentEntry(payment.id);
-                else setShowPaymentEntryModal(true);
-              }} onRemove={handleRemovePayment} />
-          )}
-        </div>
-
+        <ContractPaymentEntriesSection payments={wizardData.payment.payments} currency={wizardData.payment.currency}
+          remaining={remainingAmount > 0 ? formatPrice(remainingAmount, wizardData.payment.currency) : undefined}
+          onAdd={handleAddPaymentEntry} onRemove={handleRemovePayment}
+          onEdit={payment => {
+            if (onEditPaymentEntry && payment.id) onEditPaymentEntry(payment.id);
+            else setShowPaymentEntryModal(true);
+          }} />
         {(errors.paymentMethod || errors.payments) && (
           <p className="text-[var(--sds-danger)] text-sm mt-2">{errors.paymentMethod || errors.payments}</p>
         )}

@@ -1,7 +1,7 @@
 import { confirmationResendCooldownError } from './contractConfirmationPolicy';
 import { prisma } from '../lib/prisma';
 import { isOrdinaryCommercialFlow, assertCommercialActionAvailable, markCustomerAcceptance, lockOrdinaryContract } from './ordinaryContractLifecycle';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import smsService from './smsService';
 import { recordContractCancellation, recordContractReactivation } from './salesAttributionService';
@@ -149,7 +149,7 @@ async function createAuditLog(params: {
   providerMessageId?: string;
   providerRawResponse?: any;
   meta?: RequestEvidenceMeta;
-}) {
+}, client: PrismaClient | Prisma.TransactionClient = prisma) {
   const payloadHash = hashValue(
     JSON.stringify({
       contractId: params.contractId,
@@ -162,7 +162,7 @@ async function createAuditLog(params: {
     })
   );
 
-  await prisma.contractConfirmationAuditLog.create({
+  await client.contractConfirmationAuditLog.create({
     data: {
       contractId: params.contractId,
       sessionId: params.sessionId || null,
@@ -971,10 +971,16 @@ export class ContractConfirmationService {
     requestedBy: string;
     canCancelApproved: boolean;
     meta?: RequestEvidenceMeta;
+    transaction?: Prisma.TransactionClient;
   }) {
-    const partner = await this.partnerOutput?.cancelContract(params);
+    const client = params.transaction || prisma;
+    if (params.transaction) {
+      const ordinary = await client.salesContract.findUnique({ where: { id: params.contractId } });
+      if (ordinary?.partnerKind || ordinary?.partnerCaseId) throw new Error('Access denied');
+    }
+    const partner = params.transaction ? undefined : await this.partnerOutput?.cancelContract(params);
     if (partner !== undefined) return partner;
-    const contract = await prisma.salesContract.findUnique({
+    const contract = await client.salesContract.findUnique({
       where: { id: params.contractId }
     });
 
@@ -994,7 +1000,7 @@ export class ContractConfirmationService {
     }
 
     const cancellationAt = new Date();
-    await prisma.$transaction(async (tx) => {
+    const commitCancellation = async (tx: Prisma.TransactionClient) => {
       const reportingEventSourceKey = await recordContractCancellation(
         tx,
         contract.id,
@@ -1027,7 +1033,9 @@ export class ContractConfirmationService {
           cancelledAt: new Date()
         }
       });
-    });
+    };
+    if (params.transaction) await commitCancellation(params.transaction);
+    else await prisma.$transaction(commitCancellation);
 
     await createAuditLog({
       contractId: contract.id,
@@ -1037,7 +1045,7 @@ export class ContractConfirmationService {
         previousStatus: contract.status
       },
       meta: params.meta
-    });
+    }, client);
 
     return {
       success: true,

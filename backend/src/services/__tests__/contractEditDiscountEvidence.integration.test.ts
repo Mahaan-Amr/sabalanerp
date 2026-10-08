@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { createContract, updateContract } from '../contractService';
+import { CONTRACT_DISCOUNT_REENTRY_REQUIRED } from '../contractDiscountSavePolicy';
 
 const prisma = new PrismaClient();
 const rollback = Symbol('contract edit eligibility regression rollback');
@@ -44,8 +45,45 @@ async function run() {
     assert.equal((edited.contractData as any).products[0].meta.isLayer, false);
     assert.equal(edited.totalAmount?.toString(), '26000000');
     assert.deepEqual((edited.contractData as any).discount, (created.contractData as any).discount);
+    const staleDiscountData = structuredClone(edited.contractData) as any;
+    const changedProduct = staleDiscountData.products[0];
+    changedProduct.pricePerSquareMeter = 600000;
+    changedProduct.longitudinalPolicyInput.baseRateToman = '600000';
+    changedProduct.originalTotalPrice = 21000000;
+    changedProduct.totalPrice = 24500000;
+    changedProduct.meta.pricing.materialBase = 21000000;
+    changedProduct.meta.pricing.totalPrice = 24500000;
+    staleDiscountData.payment.totalContractAmount = 24250000;
+    await assert.rejects(updateContract(created.id, { contractData: staleDiscountData, totalAmount: 24250000 }, reference.createdBy, client),
+      { message: CONTRACT_DISCOUNT_REENTRY_REQUIRED });
+    const afterRejectedSave = await tx.salesContract.findUniqueOrThrow({ where: { id: created.id } });
+    assert.deepEqual(afterRejectedSave.contractData, edited.contractData, 'rejected discount must not persist any commercial changes');
+    assert.equal(afterRejectedSave.totalAmount?.toString(), edited.totalAmount?.toString());
     const graph = await tx.salesContractProductGraphState.findUnique({ where: { contractId: created.id } });
     assert.equal((graph?.graph as any).rows[0].commercial.legacySnapshot.meta.isLayer, false);
+    const financialCountBefore = await tx.accountingFinancialRecord.count({ where: { contractId: created.id } });
+    assert.equal(financialCountBefore, 0);
+    const explicitlyReenteredData = structuredClone(staleDiscountData);
+    explicitlyReenteredData.discount = {
+      ...explicitlyReenteredData.discount,
+      baseSubtotal: 21000000,
+      inputMode: 'AMOUNT_TOMAN',
+      percent: Number((250000 * 100 / 21000000).toFixed(12)),
+    };
+    const saved = await updateContract(created.id, {
+      contractData: explicitlyReenteredData, totalAmount: 24250000,
+    }, reference.createdBy, client);
+    const savedDiscount = (saved.contractData as any).discount;
+    assert.equal(savedDiscount.amount, 250000, 'explicit reentry may preserve the agreed amount');
+    assert.equal(savedDiscount.baseSubtotal, 21000000);
+    assert.equal(Math.round(savedDiscount.baseSubtotal * savedDiscount.percent / 100), savedDiscount.amount);
+    assert.equal(savedDiscount.rangeId, (edited.contractData as any).discount.rangeId);
+    assert.equal(savedDiscount.maxDiscountPercent, (edited.contractData as any).discount.maxDiscountPercent);
+    assert.equal(saved.totalAmount?.toString(), '24250000');
+    const persistedAfterReentry = await tx.salesContract.findUniqueOrThrow({ where: { id: created.id } });
+    assert.deepEqual((persistedAfterReentry.contractData as any).discount, savedDiscount);
+    assert.equal(await tx.accountingFinancialRecord.count({ where: { contractId: created.id } }), financialCountBefore,
+      'commercial correction must not create or change financial record ownership');
     throw rollback;
   }, { timeout: 30000 }), error => error === rollback);
   assert(createdId);

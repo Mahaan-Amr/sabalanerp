@@ -74,6 +74,7 @@ export const PartnerDirectActivationViewV4Schema = z.object({
     responderId: IdSchema.optional(),
     convertedAt: InstantSchema.optional(),
     convertedBy: IdSchema.optional(),
+    convertedByLabel: TextSchema.optional(),
     canActivate: z.boolean(),
     blocker: PartnerErrorSchema.optional(),
     canRevert: z.boolean(),

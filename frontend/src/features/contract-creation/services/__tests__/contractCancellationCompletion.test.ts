@@ -12,6 +12,9 @@ assert.deepEqual(getContractStatusAction('CANCELLED'), {
   label: 'فعال‌سازی قرارداد',
   tone: 'success'
 });
+assert.deepEqual(getContractStatusAction('APPROVED', true), {
+  action: 'withdraw-cancel', label: 'انصراف از لغو', tone: 'neutral'
+});
 
 const wizardSource = readFileSync(
   new URL('../../CreateContractWizardClient.tsx', import.meta.url),
@@ -25,8 +28,15 @@ assert.ok(cancellationHandler, 'the contract cancellation handler must remain di
 assert.match(
   cancellationHandler[0],
   /salesAPI\.cancelContract/,
-  'the check must cover the real cancellation request handler'
+  'the existing immediate creation flow must remain available'
 );
+const editBranch = cancellationHandler[0].match(/if \(isContractEditMode\) \{([\s\S]*?)\n    \}/)?.[1];
+assert.ok(editBranch, 'the actual editor handler must stage cancellation');
+assert.match(editBranch, /cancellationPending: !wizardData.signature.cancellationPending/);
+assert.match(editBranch, /return;/);
+assert.doesNotMatch(editBranch, /salesAPI\./, 'choosing or withdrawing cancellation must not write to the server');
+const submission = readFileSync(new URL('../../hooks/useContractSubmission.ts', import.meta.url), 'utf8');
+assert.match(submission, /isEditMode && wizardData.signature\?\.cancellationPending \? \{ cancelContract: true \}/);
 assert.doesNotMatch(
   cancellationHandler[0],
   /router\.(?:push|replace)|window\.location|finalizeSuccessfulContractCancellation/,

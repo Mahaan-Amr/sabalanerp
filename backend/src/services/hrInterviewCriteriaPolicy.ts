@@ -77,10 +77,9 @@ export const normalizeInterviewCriteriaPublication = (items: InterviewCriterionP
   if (
     protectedCriterion.title !== PERSONALITY_TEST_SUMMARY_CRITERION.title
     || protectedCriterion.answerType !== PERSONALITY_TEST_SUMMARY_CRITERION.answerType
-    || protectedCriterion.isActive !== true
     || protectedCriterion.allowUnassessed !== false
   ) {
-    throw new Error('معیار سیستمی خلاصه آزمون‌های شخصیتی قابل تغییر یا غیرفعال‌سازی نیست.');
+    throw new Error('عنوان، نوع پاسخ و الزام ارزیابی معیار سیستمی خلاصه آزمون‌های شخصیتی قابل تغییر نیست.');
   }
   return normalized;
 };

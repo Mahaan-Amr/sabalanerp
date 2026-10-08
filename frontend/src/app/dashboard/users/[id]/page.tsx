@@ -126,7 +126,6 @@ export default function UserDetailsPage(props: { params: Promise<{ id: string }>
 
     <ErpSection title="منشأ ایجاد حساب"><ErpSummaryGrid columns={3} items={[
       { label: 'ایجادکننده', value: creator, tone: user.creatorDisplayNameSnapshot ? 'info' : 'warning' },
-      { label: 'شناسه ایجادکننده', value: user.createdByUserId || '—' },
       { label: 'نوع انتساب', value: user.creatorAttributionKind === 'AUTOMATIC' ? 'ثبت خودکار' : user.creatorAttributionKind === 'MANUAL' ? 'ثبت دستی و حسابرسی‌شده' : 'نامشخص تاریخی' },
       { label: 'منبع ایجاد', value: user.creationSource },
       { label: 'زمان انتساب', value: user.creatorAttributedAt ? new Date(user.creatorAttributedAt).toLocaleString('fa-IR') : '—' },

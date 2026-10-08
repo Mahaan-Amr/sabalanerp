@@ -123,7 +123,8 @@ import {
 } from '@/features/contract-creation/services/contractCreationDraftPolicy';
 import { resolveProductModalRecoveryState } from '@/features/contract-creation/utils/contractRecoveryModalPolicy';
 import { getContractEditRecoveryMessage } from '@/features/contract-creation/utils/contractEditRecoveryConflictPolicy';
-import { clampContractDiscountToman, contractDiscountDisplayPercent, contractDiscountEquivalentPercent, contractDiscountTomanFromPercent, maximumContractDiscountToman } from '@/features/contract-creation/utils/contractDiscountAmount';
+import { contractDiscountEquivalentPercent, maximumContractDiscountToman } from '@/features/contract-creation/utils/contractDiscountAmount';
+import { contractDiscountInputError, contractDiscountSnapshotError, enterContractDiscount, getContractDiscountBaseSubtotal } from '@/features/contract-creation/utils/contractDiscountEdit';
 import { assertSuccessfulSalesDownload, assertSuccessfulSalesResponse, getSalesErrorSummary, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 
@@ -512,15 +513,6 @@ interface DiscountRange {
   isActive: boolean;
 }
 
-const getContractBaseSubtotal = (products: ContractProduct[]) =>
-  sumNumericValues(products, (product) => {
-    if ((product.meta as any)?.isLayer) return 0;
-    const originalTotal = toFiniteNumber(product.originalTotalPrice);
-    if (originalTotal > 0) return originalTotal;
-    if (isPreparedProductType(product.productType)) return toFiniteNumber(product.totalPrice);
-    return toFiniteNumber(product.squareMeters) * toFiniteNumber(product.pricePerSquareMeter);
-  });
-
 const LAYER_SHORTAGE_SOURCE_LABELS = {
   fullOrigin: 'سنگ کامل هم‌مبدا',
   manualWarehouse: 'ابعاد انبار',
@@ -774,6 +766,9 @@ export default function CreateContractWizard({
       ?? (initialWizardData?.discount && !initialWizardData.discount.inputMode ? 'PERCENT' : 'AMOUNT_TOMAN')
   );
   const [discountTouched, setDiscountTouched] = useState(false);
+  const [discountInputBaseSubtotal, setDiscountInputBaseSubtotal] = useState<number | null>(
+    () => initialWizardData?.discount?.baseSubtotal ?? null
+  );
   const [discountRangesLoaded, setDiscountRangesLoaded] = useState(false);
   const [serviceSearchTerm, setServiceSearchTerm] = useState('');
   const [serviceSourceType, setServiceSourceType] = useState<ContractServiceRowSourceType>('tool');
@@ -923,7 +918,7 @@ export default function CreateContractWizard({
   );
 
   const discountBaseSubtotal = useMemo(
-    () => getContractBaseSubtotal(wizardData.products),
+    () => getContractDiscountBaseSubtotal(wizardData.products),
     [wizardData.products]
   );
   const matchingDiscountRange = useMemo(
@@ -934,12 +929,17 @@ export default function CreateContractWizard({
     ? toFiniteNumber(matchingDiscountRange.maxDiscountPercent)
     : 0;
   const maxDiscountAmount = maximumContractDiscountToman(discountBaseSubtotal, maxDiscountPercent);
-  const appliedDiscountAmount = isContractEditMode && !discountTouched
+  const appliedDiscountAmount = !discountTouched
     ? toFiniteNumber(wizardData.discount?.amount)
-    : clampContractDiscountToman(discountAmountInput, maxDiscountAmount);
-  const appliedDiscountPercent = isContractEditMode && !discountTouched
+    : discountAmountInput;
+  const appliedDiscountPercent = !discountTouched || discountInputBaseSubtotal !== discountBaseSubtotal
     ? toFiniteNumber(wizardData.discount?.percent)
-    : contractDiscountEquivalentPercent(appliedDiscountAmount, discountBaseSubtotal);
+    : contractDiscountEquivalentPercent(appliedDiscountAmount, discountInputBaseSubtotal);
+  const discountError = discountTouched
+    ? contractDiscountInputError({ amount: discountAmountInput, percentInput: discountPercentInput,
+        inputBaseSubtotal: discountInputBaseSubtotal, baseSubtotal: discountBaseSubtotal,
+        maxPercent: maxDiscountPercent, hasRange: Boolean(matchingDiscountRange) })
+    : contractDiscountSnapshotError(wizardData.discount, discountBaseSubtotal);
   const deliverableProductEntries = useMemo(
     () => getDeliverableProductEntries(wizardData.products),
     [wizardData.products]
@@ -972,7 +972,9 @@ export default function CreateContractWizard({
   }, [currentStep, setCurrentStep, shouldSkipDeliveryStep]);
   const grossContractTotal = getContractGrossPayableTotal(wizardData.products, wizardData.serviceRows || []);
   const payableContractTotal = getContractPayableTotal(
-    wizardData.products, wizardData.serviceRows || [], appliedDiscountAmount, applyContractMonetaryRounding
+    wizardData.products, wizardData.serviceRows || [],
+    discountError ? toFiniteNumber(wizardData.discount?.amount) : appliedDiscountAmount,
+    applyContractMonetaryRounding
   );
 
   useEffect(() => {
@@ -994,20 +996,8 @@ export default function CreateContractWizard({
   }, []);
 
   useEffect(() => {
-    if (discountRangesLoaded && !isContractEditMode && discountAmountInput > maxDiscountAmount) {
-      setDiscountAmountInput(maxDiscountAmount);
-    }
-  }, [discountAmountInput, discountRangesLoaded, isContractEditMode, maxDiscountAmount]);
-
-  useEffect(() => {
-    if (discountRangesLoaded && !isContractEditMode && discountPercentInput > maxDiscountPercent) {
-      setDiscountPercentInput(maxDiscountPercent);
-    }
-  }, [discountPercentInput, discountRangesLoaded, isContractEditMode, maxDiscountPercent]);
-
-  useEffect(() => {
-    if (!discountRangesLoaded) return;
-    if (isContractEditMode && !discountTouched) {
+    if (!discountRangesLoaded || discountError) return;
+    if (!discountTouched && (isContractEditMode || wizardData.discount)) {
       setWizardData(prev => prev.payment.totalContractAmount === payableContractTotal
         ? prev
         : {
@@ -1046,6 +1036,7 @@ export default function CreateContractWizard({
     appliedDiscountPercent,
     discountBaseSubtotal,
     discountRangesLoaded,
+    discountError,
     discountTouched,
     discountEntryMode,
     isContractEditMode,
@@ -1991,6 +1982,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setDiscountEntryMode(initialWizardData.discount?.entryMode
       ?? (initialWizardData.discount && !initialWizardData.discount.inputMode ? 'PERCENT' : 'AMOUNT_TOMAN'));
     setDiscountTouched(false);
+    setDiscountInputBaseSubtotal(initialWizardData.discount?.baseSubtotal ?? null);
     setCurrentStep(1);
     setStateRestored(true);
     setAutosaveHydrated(true);
@@ -2540,7 +2532,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setDiscountPercentInput(toFiniteNumber(normalizedWizardData.discount?.percent));
     setDiscountEntryMode(normalizedWizardData.discount?.entryMode
       ?? (normalizedWizardData.discount && !normalizedWizardData.discount.inputMode ? 'PERCENT' : 'AMOUNT_TOMAN'));
-    setDiscountTouched(true);
+    setDiscountTouched(false);
+    setDiscountInputBaseSubtotal(normalizedWizardData.discount?.baseSubtotal ?? null);
     const identityNormalization = normalizeContractProductRowIdentities(
       normalizedWizardData.products
     );
@@ -2876,7 +2869,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   ]);
 
   const buildContractAutosaveDraft = useCallback(() => {
-    if (!hasMeaningfulDraftProgress) {
+    if (!isContractEditMode && !hasMeaningfulDraftProgress) {
       return null;
     }
 
@@ -2936,6 +2929,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     currentStep,
     contractDateChanged,
     hasMeaningfulDraftProgress,
+    isContractEditMode,
     wizardData,
     customerSearchTerm,
     productSearchTerm,
@@ -3004,7 +2998,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   useEffect(() => {
     if (!editRecovery.ready || editRecovery.blocked) return;
-    if (wizardData.signature?.contractId) return;
+    if (!isContractEditMode && wizardData.signature?.contractId) return;
     const draft = buildContractAutosaveDraft();
     if (!draft) return;
     editRecovery.queueRecovery(draft);
@@ -3013,6 +3007,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     editRecovery.blocked,
     editRecovery.queueRecovery,
     editRecovery.ready,
+    isContractEditMode,
     wizardData.signature?.contractId
   ]);
 
@@ -3082,7 +3077,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             setDiscountPercentInput(toFiniteNumber(savedWizardData.discount?.percent));
             setDiscountEntryMode(savedWizardData.discount?.entryMode
               ?? (savedWizardData.discount && !savedWizardData.discount.inputMode ? 'PERCENT' : 'AMOUNT_TOMAN'));
-            setDiscountTouched(true);
+            setDiscountTouched(false);
+            setDiscountInputBaseSubtotal(savedWizardData.discount?.baseSubtotal ?? null);
             setStateRestored(true);
             restorationAttempted.current = true;
 
@@ -4757,6 +4753,15 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
 
+    if (isContractEditMode) {
+      updateWizardData({ signature: {
+        ...wizardData.signature,
+        cancellationPending: !wizardData.signature.cancellationPending,
+      } });
+      clearSignatureError(errorSource);
+      return;
+    }
+
     digitalSignature.setSendingCode(true);
     try {
       const response = await salesAPI.cancelContract(wizardData.signature.contractId);
@@ -5818,6 +5823,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }
         break;
       case 6:
+        if (discountError) newErrors.discount = discountError;
         if (wizardData.payment.payments.length === 0) {
           newErrors.paymentMethod = 'حداقل یک پرداخت باید اضافه شود';
         } else {
@@ -5995,7 +6001,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             existingContract={isContractEditMode}
             wizardData={wizardData}
             updateWizardData={updateWizardData}
-            errors={errors}
+            errors={{ ...errors, discount: discountError || errors.discount }}
             baseSubtotal={discountBaseSubtotal}
             productsTotal={grossContractTotal}
             discountPercent={appliedDiscountPercent}
@@ -6003,29 +6009,27 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             maxDiscountAmount={maxDiscountAmount}
             discountAmount={appliedDiscountAmount}
             discountEntryMode={discountEntryMode}
-            discountPercentInput={isContractEditMode && !discountTouched
+            discountPercentInput={!discountTouched
               ? toFiniteNumber(wizardData.discount?.percent)
               : discountPercentInput}
             hasMatchingDiscountRange={!!matchingDiscountRange}
             onDiscountAmountChange={value => {
+              const entry = enterContractDiscount('AMOUNT_TOMAN', value, discountBaseSubtotal);
               setDiscountTouched(true);
-              const amount = clampContractDiscountToman(value, maxDiscountAmount);
-              setDiscountAmountInput(amount);
-              setDiscountPercentInput(contractDiscountDisplayPercent(amount, discountBaseSubtotal));
+              setErrors(previous => ({ ...previous, discount: '' }));
+              setDiscountInputBaseSubtotal(entry.inputBaseSubtotal);
+              setDiscountAmountInput(entry.amount);
+              setDiscountPercentInput(entry.percentInput);
             }}
             onDiscountPercentChange={value => {
+              const entry = enterContractDiscount('PERCENT', value, discountBaseSubtotal);
               setDiscountTouched(true);
-              const percent = Math.min(Math.max(value, 0), maxDiscountPercent);
-              setDiscountPercentInput(percent);
-              setDiscountAmountInput(contractDiscountTomanFromPercent(discountBaseSubtotal, percent, maxDiscountAmount));
+              setErrors(previous => ({ ...previous, discount: '' }));
+              setDiscountInputBaseSubtotal(entry.inputBaseSubtotal);
+              setDiscountPercentInput(entry.percentInput);
+              setDiscountAmountInput(entry.amount);
             }}
-            onDiscountEntryModeChange={mode => {
-              if (mode === discountEntryMode) return;
-              setDiscountTouched(true);
-              setDiscountAmountInput(clampContractDiscountToman(Math.round(appliedDiscountAmount), maxDiscountAmount));
-              setDiscountPercentInput(contractDiscountDisplayPercent(appliedDiscountAmount, discountBaseSubtotal));
-              setDiscountEntryMode(mode);
-            }}
+            onDiscountEntryModeChange={setDiscountEntryMode}
             showPaymentEntryModal={paymentHandlers.showPaymentEntryModal}
             setShowPaymentEntryModal={paymentHandlers.setShowPaymentEntryModal}
             onAddPaymentEntry={paymentHandlers.handleAddPaymentEntry}
@@ -6220,7 +6224,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             wizardData={wizardData}
             errors={errors}
             signatureErrorKind={signatureErrorKind}
-            sendingCode={digitalSignature.sendingCode}
+            sendingCode={digitalSignature.sendingCode || wizardLoading}
             onSendForConfirmation={handleSendForConfirmation}
             onResendConfirmation={handleResendConfirmation}
             onRefreshStatus={refreshConfirmationStatus}
@@ -6254,6 +6258,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   // Contract submission is now provided by useContractSubmission hook
   const contractSubmission = useContractSubmission({
+    discountValidationError: discountError,
     applyMonetaryRounding: applyContractMonetaryRounding,
     wizardData,
     updateWizardData,

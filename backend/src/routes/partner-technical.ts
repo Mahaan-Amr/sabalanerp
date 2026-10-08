@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { PARTNER_CREATION_TRANSACTION_OPTIONS } from '../services/partnerSales/creationTransactionBudget';
 import { Router } from 'express';
 import { PartnerTechnicalLeaseRequestSchema, PartnerTechnicalLeaseReceiptSchema, partnerError,
   type PartnerTechnicalCatalogPort, type PartnerTechnicalLeasePort, type PartnerTechnicalRecoveryPort,
@@ -91,10 +92,10 @@ export function createPartnerTechnicalRequestServices(input: {
           recoveryId: acquired.session.draftId, browserSessionId: acquired.session.browserSessionId,
           leaseToken: acquired.session.leaseToken, baseRevision: acquired.session.baseRevision,
           updatedAt: acquired.session.updatedAt.toISOString(), takenOver: acquired.takenOver }) };
-      });
+      }, PARTNER_CREATION_TRANSACTION_OPTIONS);
     } },
     catalog: { read: query => input.database.$transaction(tx =>
-      createPartnerTechnicalCatalogReader(tx, binding).read(query)) },
+      createPartnerTechnicalCatalogReader(tx, binding).read(query), PARTNER_CREATION_TRANSACTION_OPTIONS) },
     recovery: createPrismaPartnerTechnicalRecoveryService({ database: input.database,
       actorId: input.actorId, authorize }),
     saved: createPrismaPartnerTechnicalSaveService({ database: input.database,

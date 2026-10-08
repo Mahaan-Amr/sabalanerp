@@ -1242,6 +1242,10 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     const creditFailure = knownCustomerCreditFailure(error);
     if (creditFailure) return res.status(creditFailure.status).json(creditFailure.body);
     console.error('Create sales contract error:', error);
+    const knownCreateDiscountFailure = knownContractUpdateBusinessFailure(error.message);
+    if (knownCreateDiscountFailure?.body.code === 'SALES_CONTRACT_DISCOUNT_REENTRY_REQUIRED') {
+      return res.status(knownCreateDiscountFailure.status).json(knownCreateDiscountFailure.body);
+    }
     if (error instanceof ContractPayableTotalError) {
       return res.status(422).json({ success: false, code: error.code, error: error.message,
         expected: error.expected, received: error.received, field: error.field });
@@ -1409,7 +1413,11 @@ router.post(
 // @desc    Update sales contract
 // @route   PUT /api/sales/contracts/:id
 // @access  Private/Sales Workspace
-router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT), [
+router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SALES_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT),
+  (req: any, res: Response, next: NextFunction) => req.body.cancelContract === true
+    ? requireFeatureAccess(FEATURES.SALES_CONTRACTS_DELETE, FEATURE_PERMISSIONS.EDIT)(req, res, next)
+    : next(), [
+  body('cancelContract').optional().isBoolean({ strict: true }).withMessage('انتخاب لغو قرارداد معتبر نیست؛ فرم را بازبینی کنید.'),
   body('title').optional().notEmpty().withMessage('عنوان قرارداد نمی‌تواند خالی باشد؛ عنوان را وارد کنید.'),
   body('titlePersian').optional().notEmpty().withMessage('عنوان فارسی قرارداد نمی‌تواند خالی باشد؛ عنوان را وارد کنید.'),
   body('content').optional().notEmpty().withMessage('متن قرارداد نمی‌تواند خالی باشد؛ مراحل قرارداد را بازبینی کنید.'),
@@ -1428,7 +1436,11 @@ router.put('/contracts/:id', rejectContractGraphWritesWhenReadOnly, protect, req
       return res.status(409).json({ success: false, conflict: editOwnership });
     }
 
-    const updatedContract = await updateContract(req.params.id, req.body, req.user.id);
+    const updatedContract = await updateContract(req.params.id, req.body, req.user.id, prisma,
+      req.body.cancelContract === true ? { cancellationAuthority: {
+        canCancelApproved: await userHasCancelAfterApprovalPermission(req.user),
+        meta: getRequestEvidence(req),
+      } } : {});
 
     await releaseCommittedContractEditSession(req, 0);
     res.json({

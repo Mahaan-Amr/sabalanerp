@@ -1,4 +1,5 @@
 import { CustomerCreditError } from '../services/specialCustomerCreditPolicy';
+import { CONTRACT_DISCOUNT_REENTRY_REQUIRED } from '../services/contractDiscountSavePolicy';
 
 export const knownCustomerCreditFailure = (error: unknown) => error instanceof CustomerCreditError
   ? { status: error.status, body: { success: false as const, code: 'CUSTOMER_CREDIT_VALIDATION', error: error.message } }
@@ -66,7 +67,11 @@ export const knownContractUpdateBusinessFailure = (message: unknown): {
         error: 'این قرارداد امضا یا چاپ شده یا رکورد مالی دارد؛ تغییر آن باید از مسیر اصلاح رسمی تأییدشده انجام شود.',
       },
     }
-  : null;
+  : message === 'این قرارداد تایید شده است و بدون دسترسی ویژه قابل لغو نیست'
+    ? { status: 403, body: { success: false, code: 'SALES_CONTRACT_CANCELLATION_DENIED', error: message } }
+    : message === CONTRACT_DISCOUNT_REENTRY_REQUIRED
+      ? { status: 400, body: { success: false, code: 'SALES_CONTRACT_DISCOUNT_REENTRY_REQUIRED', error: message } }
+      : null;
 
 export const ensureSalesErrorTracking = (
   payload: unknown,

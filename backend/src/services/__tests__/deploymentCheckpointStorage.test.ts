@@ -45,6 +45,45 @@ const run = async () => {
     const transientUpload = await transientStore.uploadVerified(source, 'release-transient/deployment-transient.sabrec');
     assert.equal(await fs.promises.readFile(transientUpload.objectPath, 'utf8'), 'verified-checkpoint');
     assert.equal(transientCopyAttempts, 2, 'a transient remote write must resume inside the same deployment attempt');
+    const hashFile = (await import('../recoveryCrypto')).sha256File;
+    let transientReadAttempts = 0;
+    const transientReadStore = new FilesystemRemoteCheckpointStore(root, {
+      retryDelayMs: 1,
+      readChecksum: async filePath => {
+        transientReadAttempts += 1;
+        if (transientReadAttempts === 1) {
+          throw Object.assign(new Error('simulated remote read close failure'), { code: 'EIO' });
+        }
+        return hashFile(filePath);
+      },
+    });
+    const recoveredRead = await transientReadStore.uploadVerified(source, 'release-read/deployment-read.sabrec');
+    assert.equal(recoveredRead.checksum, uploaded.checksum);
+    assert.equal(transientReadAttempts, 2, 'a transient read must retry a complete checksum, never accept partial verification');
+    let persistentReadAttempts = 0;
+    const persistentReadStore = new FilesystemRemoteCheckpointStore(root, {
+      retryDelayMs: 1,
+      readChecksum: async () => {
+        persistentReadAttempts += 1;
+        throw Object.assign(new Error('persistent remote read failure'), { code: 'EIO' });
+      },
+    });
+    await assert.rejects(
+      () => persistentReadStore.uploadVerified(source, 'release-read-failed/deployment-read-failed.sabrec'),
+      (error: any) => error?.code === 'EIO',
+    );
+    assert.equal(persistentReadAttempts, 4, 'persistent verification failure must stop after three retries');
+    assert.equal(fs.existsSync(path.join(root, 'release-read-failed/deployment-read-failed.sabrec')), false);
+    let corruptReadAttempts = 0;
+    const corruptReadStore = new FilesystemRemoteCheckpointStore(root, {
+      retryDelayMs: 1,
+      readChecksum: async () => { corruptReadAttempts += 1; return 'corrupt-checksum'; },
+    });
+    await assert.rejects(
+      () => corruptReadStore.uploadVerified(source, 'release-read-corrupt/deployment-read-corrupt.sabrec'),
+      (error: any) => error?.code === 'DEPLOYMENT_REMOTE_CHECKSUM_MISMATCH',
+    );
+    assert.equal(corruptReadAttempts, 1, 'checksum corruption must fail immediately');
     assert.deepEqual(await assertRemoteCheckpointFingerprint(uploaded.objectPath, uploaded.fingerprint), uploaded.fingerprint);
     await fs.promises.appendFile(uploaded.objectPath, '-changed');
     await assert.rejects(

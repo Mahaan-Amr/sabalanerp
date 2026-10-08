@@ -4852,7 +4852,7 @@ The durable Persian-first application inbox that is the source of truth for dire
 _Avoid_: treating the bell sheet as the complete inbox, creating separate feature inboxes, placing ticket details on a lock screen, or relying on online socket delivery as durable notification storage
 
 **Notification Inbox State**:
-The recipient's durable, newest-first view of notification history, organized through All, Unread, Important, search, and relevant workspace or category filters. Important means only existing HIGH and URGENT priorities; users may change read state but cannot delete or archive notification records.
+The recipient's durable, newest-first view of notification history, organized through All, Unread, Important, search, and relevant workspace or category filters. Important means only existing HIGH and URGENT priorities; opening an unread notification or choosing read-all marks it read, including account-security alerts, while all records remain in history and cannot be deleted or archived by users. Read state does not acknowledge ownership of a login or revoke a session.
 _Avoid_: introducing a separate archive lifecycle, allowing user deletion of accountability history, or treating filtered-out notifications as removed
 
 **Notification Delivery Preferences**:

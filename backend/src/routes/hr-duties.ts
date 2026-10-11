@@ -51,6 +51,8 @@ const dutyOperationalMessage = (code: string) => ({
   DUTY_ALREADY_CLAIMED: 'این وظیفه قبلاً توسط کاربر دیگری دریافت شده است. فهرست را به‌روزرسانی کنید.',
   DUTY_CLAIM_CONFLICT: 'دریافت وظیفه متوقف شد؛ وضعیت آن هم‌زمان تغییر کرده است. فهرست را به‌روزرسانی کنید.',
   SOURCE_STATE_CHANGED: 'وضعیت درخواست اصلاح تغییر کرده است. فهرست را به‌روزرسانی و از مرحله جاری ادامه دهید.',
+  DUTY_SALES_EDIT_EXPIRED: 'مهلت اصلاح پایان یافته؛ درخواست به حسابداری ارجاع شد.',
+  DUTY_CORRECTION_FINANCIAL_WORKFLOW_INCOMPLETE: 'بستن درخواست ممکن نیست؛ رسیدگی مالی وابسته را در پرونده حسابداری تکمیل کنید و دوباره بررسی کنید.',
   CONTRACT_INACTIVE: 'تصمیم‌گیری متوقف شد؛ قرارداد غیرفعال است. مدیر مجاز باید ابتدا آن را از مسیر رسمی فعال‌سازی مجدد بازگرداند.',
   RESPONSIBLE_SELLER_REQUIRED: 'تأیید اصلاح متوقف شد؛ فروشنده مسئول قرارداد مشخص نیست. مدیر فروش باید ابتدا مسئول قرارداد را تعیین کند.',
   DUTY_HISTORY_SEEN_THROUGH_REQUIRED: 'ثبت مشاهده تاریخچه انجام نشد؛ صفحه را دوباره باز کنید.',
@@ -333,6 +335,7 @@ router.get(
       actorUserId: req.user!.id,
       workspaceCode: res.locals.destinationWorkspaceCode,
       view: view as 'assigned' | 'available' | 'triage' | 'history',
+      search: typeof req.query.search === 'string' ? req.query.search.slice(0, 200) : undefined,
     });
     res.json({ success: true, data });
   }),

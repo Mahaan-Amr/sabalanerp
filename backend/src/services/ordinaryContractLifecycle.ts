@@ -188,14 +188,17 @@ export const startOrdinaryContractExpiry = (database: PrismaClient) => {
 
 export const expireCommercialCorrectionPeriods = async (database: PrismaClient, now = new Date()) => {
   const due = await database.crossWorkspaceDuty.findMany({ where: { status: 'OPEN', sourceType: 'SALES_CONTRACT_CORRECTION',
-    sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', dueAt: { lt: now } }, select: { sourceId: true } });
+    sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', dueAt: { lte: now } }, select: { sourceId: true } });
   for (const duty of due) await database.$transaction(async tx => {
     const correction = await tx.accountingCorrectionRequest.findUnique({ where: { id: duty.sourceId } });
     if (!correction?.contractId || correction.status !== 'APPROVED_FOR_SALES_EDIT') return;
     const identity = await tx.salesContract.findUnique({ where: { id: correction.contractId }, select: { partnerCaseId: true } });
     if (identity?.partnerCaseId) await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${identity.partnerCaseId} FOR UPDATE`;
     const contract = await lockOrdinaryContract(tx, correction.contractId);
-    if (!isOrdinaryCommercialFlow(contract) && !(contract.commercialFlowVersion === 2 && contract.partnerKind === 'PARTNER_CUSTOMER')) return;
+    // The contract lock serializes expiry with editor saves. Recheck after
+    // waiting: another worker or save may have already advanced this chain.
+    const current = await tx.accountingCorrectionRequest.findUnique({ where: { id: correction.id } });
+    if (current?.status !== 'APPROVED_FOR_SALES_EDIT') return;
     await completeSalesContractCorrectionEdit(tx, { contractId: contract.id, actorUserId: 'system:commercial-correction-expiry',
       note: 'مهلت ویرایش پایان یافت؛ تغییرات ذخیره‌شده برای بررسی حسابداری حفظ شد. ویرایش بعدی نیاز به تصمیم تازه مدیر دارد.',
       policyVersion: 2, periodExpired: true, now });

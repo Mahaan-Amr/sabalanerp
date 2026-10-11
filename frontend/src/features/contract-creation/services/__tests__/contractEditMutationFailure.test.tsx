@@ -20,6 +20,9 @@ const downstreamFailure = { response: { status: 409, data: {
 } } };
 assert.equal(reportMutationFailure(downstreamFailure), null,
   'a protected-row rejection must not revoke edit ownership or replace the business error');
+assert.equal(reportMutationFailure({ response: { status: 409, data: { code: 'DUTY_SALES_EDIT_EXPIRED' } } }),
+  'مهلت اصلاح پایان یافته؛ درخواست به حسابداری ارجاع شد. تغییرات ذخیره‌نشده برای بازیابی حفظ شده است.',
+  'expiry blocks editing with its own business state instead of a lease takeover prompt');
 assert.equal(getContractSubmissionRecovery(409, true, downstreamFailure.response.data.code).uncertainMutation, false,
   'the rejected transaction is known to have rolled back; do not imply an uncertain save');
 assert.ok(getSalesOperationalErrorMessage(downstreamFailure, {

@@ -54,8 +54,8 @@ export const crossWorkspaceDutyApi = {
   summary: (workspace: string) => api.get<{ success: true; data: CrossWorkspaceDutySummary }>(
     `/duties/workspaces/${workspace}/summary`,
   ),
-  list: (workspace: string, view: CrossWorkspaceDutyView) => api.get<{ success: true; data: CrossWorkspaceDuty[] }>(
-    `/duties/workspaces/${workspace}/duties`, { params: { view } },
+  list: (workspace: string, view: CrossWorkspaceDutyView, search?: string) => api.get<{ success: true; data: CrossWorkspaceDuty[] }>(
+    `/duties/workspaces/${workspace}/duties`, { params: { view, ...(view === 'history' && search ? { search } : {}) } },
   ),
   detail: (workspace: string, dutyId: string) => api.get<{ success: true; data: CrossWorkspaceDuty }>(
     `/duties/workspaces/${workspace}/duties/${dutyId}`,

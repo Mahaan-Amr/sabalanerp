@@ -272,16 +272,20 @@ test('ADMIN may execute every correction stage through the audited workflow with
         dutyId: created.duty.id, eventCode: 'SYSTEM_ADMIN_SELF_DECISION', actorUserId: admin.id,
       } }), 1);
       assert.equal(approved.successor.currentAssigneeUserId, seller.id);
+      await assert.rejects(completeSalesContractCorrectionEdit(tx, {
+        contractId: contract.id, actorUserId: admin.id, note: 'تلاش پس از پایان مهلت', policyVersion: 2,
+        now: fixtureTime('2026-09-01T10:03:00.000Z'),
+      }), /DUTY_SALES_EDIT_EXPIRED/, 'ADMIN also requires a renewed opportunity after expiry');
       const edited = await completeSalesContractCorrectionEdit(tx, {
         contractId: contract.id, actorUserId: admin.id, note: 'ویرایش با Admin Override ثبت شد.', policyVersion: 2,
-        now: fixtureTime('2026-09-01T10:03:00.000Z'),
+        now: fixtureTime('2026-08-23T10:03:00.000Z'),
       });
       assert.equal(edited.successor.currentAssigneeUserId, null);
       const verified = await respondToCrossWorkspaceDuty(tx, {
         dutyId: edited.successor.id, actorUserId: admin.id, actionCode: 'VERIFY',
         expectedSourceVersion: 3, expectedEnvelopeVersion: 1,
         reason: 'تغییرات توسط مدیر سیستم بازبینی شد.', policyVersion: 2,
-        now: fixtureTime('2026-09-01T10:04:00.000Z'),
+        now: fixtureTime('2026-08-23T10:04:00.000Z'),
       });
       assert.equal(verified.correction.status, 'RESOLVED');
       const actors = await tx.accountingAuditLog.findMany({
@@ -291,7 +295,7 @@ test('ADMIN may execute every correction stage through the audited workflow with
       assert.ok(actors.every(({ actorId }) => actorId === admin.id));
       assert.equal(await tx.crossWorkspaceDutyAuditVersion.count({ where: {
         dutyId: approved.successor.id, eventCode: 'ADMIN_OVERRIDE_EXPIRED_DUTY', actorUserId: admin.id,
-      } }), 1);
+      } }), 0);
       throw rollback;
     }, { timeout: 120_000 }), (error: unknown) => error === rollback);
   } finally {
@@ -429,7 +433,7 @@ test('Responsible Seller creates one correction request assigned to an eligible 
       });
       assert.deepEqual(detail.fields, {
         title: `اصلاح قرارداد ${contract.contractNumber}`,
-        description: 'مبلغ قرارداد نیازمند اصلاح است.',
+        description: 'مشتری: Test Customer\nمبلغ قرارداد نیازمند اصلاح است.',
         dueAt: fixtureTime('2026-08-17T08:00:00.000Z').toISOString(),
       });
       const reconciliation = await reconcileSalesContractCorrectionDuties(tx, { sourceIds: [created.correction.id] });

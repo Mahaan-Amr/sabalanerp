@@ -614,6 +614,7 @@ interface CreateContractWizardProps {
   contractId?: string;
   initialWizardData?: ContractWizardData | null;
   initialContractStatus?: string | null;
+  correctionExpiresAt?: string | null;
 }
 
 const normalizeProductSearchText = (value: unknown): string =>
@@ -701,7 +702,8 @@ export default function CreateContractWizard({
   contractKind = 'standard',
   contractId,
   initialWizardData,
-  initialContractStatus = null
+  initialContractStatus = null,
+  correctionExpiresAt = null,
 }: CreateContractWizardProps = {}) {
   const router = useRouter();
   const isContractEditMode = mode === 'edit';
@@ -2718,6 +2720,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setDiscoveredRecoveryDraftId(freshDraftId);
   }, [recoveryUserId]);
   const editRecovery = useContractEditRecovery({
+    correctionExpiresAt,
     scope: recoveryScope,
     contractId: isContractEditMode ? contractId : null,
     enabled: isContractEditMode || hasMeaningfulDraftProgress || draftRecoveryActivated,
@@ -6408,7 +6411,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                 : 'stale'}
             title={getContractEditRecoveryMessage(editRecovery.blockReason)}
             className="mb-4"
-            action={editRecovery.blockReason === 'permission' ||
+            action={editRecovery.blockReason === 'correction-expired'
+              ? { label: 'مشاهده وظایف فروش', href: '/dashboard/sales/duties' }
+              : editRecovery.blockReason === 'permission' ||
               editRecovery.blockReason === 'recovery-conflict'
               ? undefined
               : editRecovery.blockReason === 'revision-conflict'
@@ -6426,6 +6431,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                     variant: 'solid'
                   }}
             actions={editRecovery.blockReason === 'permission' ||
+              editRecovery.blockReason === 'correction-expired' ||
               editRecovery.blockReason === 'revision-conflict' ||
               editRecovery.blockReason === 'recovery-conflict'
               ? []

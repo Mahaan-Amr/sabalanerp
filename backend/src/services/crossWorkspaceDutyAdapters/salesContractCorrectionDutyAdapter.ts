@@ -926,7 +926,7 @@ export const openPartnerCommercialEditPermission = async (database: Prisma.Trans
 
 export const completeSalesCorrectionEditDuty = async (
   database: Parameters<CrossWorkspaceDutySourceAdapter['respond']>[0],
-  input: { contractId: string; actorUserId: string; note: string | null; policyVersion: number; now: Date; commercialFinality?: boolean; periodExpired?: boolean },
+  input: { contractId: string; actorUserId: string; note: string | null; policyVersion: number; now: Date; commercialFinality?: boolean; periodExpired?: boolean; contractCancelled?: boolean },
 ) => {
   const correction = await database.accountingCorrectionRequest.findFirst({
     where: { contractId: input.contractId, status: 'APPROVED_FOR_SALES_EDIT' },
@@ -951,9 +951,10 @@ export const completeSalesCorrectionEditDuty = async (
   if (!salesDuty || salesDuty.status !== 'OPEN') throw new Error('DUTY_SALES_EDIT_ALREADY_CONSUMED');
   if (!salesDuty.dueAt) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
   const actorIsAdmin = await isSystemAdmin(database, input.actorUserId);
-  const commercialClosing = input.commercialFinality || input.periodExpired;
+  const commercialClosing = input.commercialFinality || input.periodExpired || input.contractCancelled;
   if (commercialClosing) {
     const contract = await database.salesContract.findUnique({ where: { id: input.contractId } });
+    if (input.contractCancelled && (!contract || contract.partnerKind || contract.partnerCaseId || contract.status !== 'CANCELLED')) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
     if (!contract || (input.commercialFinality && !((contract.commercialFlowVersion === 1 && !contract.partnerKind && !contract.partnerCaseId) || (contract.partnerKind === 'PARTNER_CUSTOMER' && contract.partnerCaseId)))) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
     if (input.commercialFinality && !hasSpecialCustomerCreditAuthorization(contract) && (contract.status !== 'SIGNED' || (contract.commercialFlowVersion === 2 || !contract.partnerKind) && (contract.salesApprovalRevision !== contract.commercialRevision
       || contract.customerAcceptanceRevision !== contract.commercialRevision))) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
@@ -1082,7 +1083,7 @@ export const salesContractCorrectionDutyAdapter = {
     if (!correction?.contractId) throw new Error('DUTY_SOURCE_CHANGED');
     const contract = await database.salesContract.findUnique({
       where: { id: correction.contractId },
-      select: { contractNumber: true, partnerCaseId: true, customer: { select: { firstName: true, lastName: true } } },
+      select: { contractNumber: true, status: true, partnerCaseId: true, customer: { select: { firstName: true, lastName: true } } },
     });
     if (!contract) throw new Error('DUTY_SOURCE_CHANGED');
     return {
@@ -1091,7 +1092,7 @@ export const salesContractCorrectionDutyAdapter = {
         ? `${correction.accountantNote}\nمبلغ اصلاح‌شده و رکورد مالی قبلی را در قرارداد بررسی کنید؛ در صورت نیاز ابطال و جایگزینی را پیش از تأیید تکمیل کنید.`
         : correction.accountantNote),
       ...(input.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION'
-        ? { destinationHref: `/dashboard/sales/contracts/${correction.contractId}/edit` }
+        ? { destinationHref: `/dashboard/sales/contracts/${correction.contractId}${contract.status === 'CANCELLED' ? '' : '/edit'}` }
         : input.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION'
           ? { destinationHref: contract.partnerCaseId ? `/dashboard/accounting/contracts/partner/${contract.partnerCaseId}?section=financial` : `/dashboard/accounting/contracts/${correction.contractId}?section=financial` }
         : {}),

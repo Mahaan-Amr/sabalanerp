@@ -691,8 +691,8 @@ export const salesAPI = {
   cancelContract: (contractId: string) =>
     api.post(`/sales/contracts/${contractId}/cancel`),
 
-  reactivateContract: (contractId: string) =>
-    api.post(`/sales/contracts/${contractId}/reactivate`),
+  reactivateContract: (contractId: string, reason: string, expectedRevision: number) =>
+    api.post(`/sales/contracts/${contractId}/reactivate`, { reason, expectedRevision }),
   
   // Contract Items
   createContractItem: (contractId: string, itemData: any) => api.post(`/sales/contracts/${contractId}/items`, itemData),

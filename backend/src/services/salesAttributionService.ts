@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import { isOrdinaryCommercialFlow } from './ordinaryContractLifecycle';
+import { isOrdinaryCommercialFlow, isCommerciallyFinal } from './ordinaryContractLifecycle';
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -35,6 +35,7 @@ export const snapshotRealizedSale = async (
   const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
   if (!contract) throw new Error('Contract not found');
   if (isOrdinaryCommercialFlow(contract) && trigger !== 'FINANCIAL_RECORD') return contract;
+  if ((contract.signatures as any)?.reactivation?.reportingSuspended && !isCommerciallyFinal(contract)) return contract;
   if (contract.realizedAt) return contract;
 
   const amount = decimal(contract.totalAmount);
@@ -75,11 +76,17 @@ export const reconcileOrdinaryFinancialRealization = async (
   const contract = await tx.salesContract.findUnique({ where: { id: input.contractId }, include: { reportingEvents: true } });
   if (!contract || !isOrdinaryCommercialFlow(contract)) return;
   const original = contract.reportingEvents.find(event => event.eventType === 'REALIZED');
+  const suspended = (contract.signatures as any)?.reactivation?.reportingSuspended === true;
+  const reactivated = typeof (contract.signatures as any)?.reactivation?.revision === 'number';
   // Adoption never rewrites a realization earned under the historical commercial trigger.
-  if (original && (original.metadata as any)?.trigger !== 'FINANCIAL_RECORD') return;
-  if (contract.realizedAt && !original) return;
+  if (original && (original.metadata as any)?.trigger !== 'FINANCIAL_RECORD' && !reactivated) return;
+  if (contract.realizedAt && !original && !reactivated) return;
   const valid = await countValidOrdinaryFinancialRecords(tx, input.contractId);
   const effectiveAt = input.effectiveAt || new Date();
+  if (suspended && !isCommerciallyFinal(contract)) return;
+  if (suspended && valid > 0) await tx.salesContract.update({ where: { id: contract.id }, data: {
+    signatures: { ...((contract.signatures as any) || {}), reactivation: {
+      ...((contract.signatures as any)?.reactivation || {}), reportingSuspended: false, reportingRestoredAt: effectiveAt.toISOString() } } } });
   if (!contract.realizedAt) {
     if (valid > 0) await snapshotRealizedSale(tx, contract.id, input.actorId, effectiveAt, 'FINANCIAL_RECORD');
     return;
@@ -89,7 +96,7 @@ export const reconcileOrdinaryFinancialRealization = async (
   const delta = target.minus(net);
   if (delta.isZero()) return;
   await tx.salesReportingEvent.upsert({ where: { sourceKey: input.sourceKey }, update: {}, create: {
-    contractId: contract.id, eventType: 'ADJUSTMENT', amount: delta, effectiveAt,
+    contractId: contract.id, eventType: suspended && valid > 0 ? 'REACTIVATION' : 'ADJUSTMENT', amount: delta, effectiveAt,
     sellerId: contract.realizedSellerId, sourceKey: input.sourceKey, createdBy: input.actorId,
     reason: valid > 0 ? 'Accounting financial record restored realized sales value' : 'Last valid accounting financial record removed',
     metadata: { trigger: 'FINANCIAL_RECORD', validRecordCount: valid, previousNet: net.toString(), nextNet: target.toString() }
@@ -110,8 +117,10 @@ export const recordRealizedAdjustment = async (
 ) => {
   const contract = await tx.salesContract.findUnique({ where: { id: params.contractId }, include: { reportingEvents: true } });
   if (!contract?.realizedAt) return null;
+  if ((contract.signatures as any)?.reactivation?.reportingSuspended) return null;
   if (isOrdinaryCommercialFlow(contract)
-    && contract.reportingEvents.some(event => event.eventType === 'REALIZED' && (event.metadata as any)?.trigger === 'FINANCIAL_RECORD')
+    && (typeof (contract.signatures as any)?.reactivation?.revision === 'number'
+      || contract.reportingEvents.some(event => event.eventType === 'REALIZED' && (event.metadata as any)?.trigger === 'FINANCIAL_RECORD'))
     && await countValidOrdinaryFinancialRecords(tx, contract.id) === 0) return null;
   const delta = decimal(params.nextAmount).minus(decimal(params.previousAmount));
   if (delta.isZero()) return null;

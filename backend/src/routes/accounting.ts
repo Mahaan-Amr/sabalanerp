@@ -159,7 +159,9 @@ const projectAccountingActions = <T extends { sourceKind?: string; nextBestActio
     ...(record.nextBestActions || []),
     ...(record.sourceKind === 'PARTNER_INTERNAL_RECORD' ? [] : [{ kind: 'FLAG_CONTRACT', labelFa: 'ثبت پرچم حسابداری', enabled: true }]),
   ].map((action) => {
-    const visible = Boolean(capabilities[action.kind]) && ordinaryFinancialActionsAllowed(record as any);
+    const cancellationReview = action.kind === 'CREATE_CORRECTION_REQUEST'
+      && record.status === 'CANCELLED' && !record.isInactive && action.enabled === true;
+    const visible = Boolean(capabilities[action.kind]) && (ordinaryFinancialActionsAllowed(record as any) || cancellationReview);
     return {
       ...action,
       visible,

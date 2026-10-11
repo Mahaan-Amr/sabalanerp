@@ -6,6 +6,7 @@ import { partnerInactiveIsCancellation } from './partnerSales/cases/commercialEd
 import { createAuditedPartnerAuthorization } from './partnerSales/authorization/audited';
 import { lockPartnerCommercialContract } from './partnerSales/cases/commercialLifecycle';
 import { hasSpecialCustomerCreditAuthorization } from './specialCustomerCreditPolicy';
+import { readOrdinaryFinancialRegistration, readOrdinaryCancellationTime } from './ordinaryContractReactivation';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 
@@ -88,7 +89,10 @@ export const requestAccountingSalesContractCorrection = (
   if (pair && !pair.root.committedAt) throw new Error('مجوز حسابداری برای قرارداد قبلاً قطعی‌شده قابل درخواست است.');
   if (!contract) throw new Error('CONTRACT_NOT_FOUND');
   if (contract.isInactive && !(contract.partnerKind === 'PARTNER_CUSTOMER' && contract.status === 'CANCELLED')) throw new Error('CONTRACT_INACTIVE');
-  if (isOrdinaryCommercialFlow(contract) && !isCommerciallyFinal(contract) && !hasSpecialCustomerCreditAuthorization(contract)) throw new Error('قرارداد باید قطعی باشد یا مجوز اعتباری مشتری خاص برای نسخه جاری داشته باشد.');
+  const cancelledOrdinary = !contract.partnerKind && !contract.partnerCaseId && contract.status === 'CANCELLED';
+  const reactivationCorrection = cancelledOrdinary && !!await readOrdinaryFinancialRegistration(tx, contract);
+  if (cancelledOrdinary && !reactivationCorrection) throw new Error('این قرارداد ثبت مالی ندارد؛ فعال‌سازی را از صفحه قرارداد در فروش انجام دهید.');
+  if (isOrdinaryCommercialFlow(contract) && !reactivationCorrection && !isCommerciallyFinal(contract) && !hasSpecialCustomerCreditAuthorization(contract)) throw new Error('قرارداد باید قطعی باشد یا مجوز اعتباری مشتری خاص برای نسخه جاری داشته باشد.');
   if (!contract.responsibleSellerId) throw new Error('RESPONSIBLE_SELLER_REQUIRED');
 
   const replaySource = await tx.accountingCorrectionRequest.findUnique({
@@ -111,10 +115,20 @@ export const requestAccountingSalesContractCorrection = (
     return { correction: replaySource, duty, replayed: true, joined: false, queuedSuccessor: false };
   }
 
-  const active = await tx.accountingCorrectionRequest.findFirst({
+  let active = await tx.accountingCorrectionRequest.findFirst({
     where: { contractId: contract.id, status: { in: ['OPEN', 'ACKNOWLEDGED', 'APPROVED_FOR_SALES_EDIT', 'SALES_EDITED'] } },
   });
   if (active) {
+    if (reactivationCorrection && active.status === 'APPROVED_FOR_SALES_EDIT') {
+      const staleDuty = await tx.crossWorkspaceDuty.findFirst({ where: { sourceId: active.id,
+        sourceType: 'SALES_CONTRACT_CORRECTION', sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN' } });
+      if (staleDuty && staleDuty.createdAt < await readOrdinaryCancellationTime(tx, contract)) {
+        await completeSalesCorrectionEditDuty(tx, { contractId: contract.id, actorUserId: input.actorUserId,
+          note: 'قرارداد لغو شده است؛ فعال‌سازی به تصمیم تازه مدیر حسابداری نیاز دارد.',
+          now, policyVersion: 2, contractCancelled: true });
+        active = await tx.accountingCorrectionRequest.findUniqueOrThrow({ where: { id: active.id } });
+      }
+    }
     const duty = await tx.crossWorkspaceDuty.findFirst({
       where: { sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: active.id, status: 'OPEN' },
       orderBy: { createdAt: 'desc' },
@@ -292,7 +306,7 @@ export const requestSalesContractCorrection = (
 
 export const completeSalesContractCorrectionEdit = (
   database: Database,
-  input: { contractId: string; actorUserId: string; note?: string | null; policyVersion: number; now?: Date; commercialFinality?: boolean; periodExpired?: boolean },
+  input: { contractId: string; actorUserId: string; note?: string | null; policyVersion: number; now?: Date; commercialFinality?: boolean; periodExpired?: boolean; contractCancelled?: boolean },
 ) => inTransaction(database, (tx) => completeSalesCorrectionEditDuty(tx, {
   contractId: input.contractId,
   actorUserId: input.actorUserId,
@@ -301,6 +315,7 @@ export const completeSalesContractCorrectionEdit = (
   now: input.now ?? new Date(),
   commercialFinality: input.commercialFinality,
   periodExpired: input.periodExpired,
+  contractCancelled: input.contractCancelled,
 }));
 
 const correctionStage = (status: string) => ({

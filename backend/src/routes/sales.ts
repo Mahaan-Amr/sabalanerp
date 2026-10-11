@@ -1,5 +1,6 @@
 import { readPartnerCommercialState } from '../services/partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
+import { reactivateOrdinaryContract, readOrdinaryReactivationActions, OrdinaryContractReactivationError } from '../services/ordinaryContractReactivation';
 import { isOrdinaryCommercialFlow, commercialDeadlinePassed, isCommerciallyFinal, renewOrdinaryContract, readCommercialExpiryDays, lockOrdinaryContract, canManageCommercialSettings } from '../services/ordinaryContractLifecycle';
 import express, { Response, NextFunction } from 'express';
 import { randomUUID } from 'node:crypto';
@@ -175,7 +176,7 @@ const projectCommercialActions = async (contract: any, user: any) => {
   return { canApproveSales: available && permitted(FEATURES.SALES_CONTRACTS_APPROVE) && contract.salesApprovalRevision !== contract.commercialRevision,
     canSendConfirmation: available && permitted(FEATURES.SALES_CONTRACTS_SIGN) && !isCommerciallyFinal(contract),
     canEdit: available && permitted(FEATURES.SALES_CONTRACTS_EDIT) && (!(financial || contract.firstFinancialRecordAt) || !!opportunity),
-    canRenew: accessible && !contract.isInactive && !contract.firstFinancialRecordAt && (contract.status === 'EXPIRED' || commercialDeadlinePassed(contract)) && await canManageCommercialSettings(prisma, user),
+    canRenew: accessible && !contract.isInactive && contract.status !== 'CANCELLED' && !contract.firstFinancialRecordAt && (contract.status === 'EXPIRED' || commercialDeadlinePassed(contract)) && await canManageCommercialSettings(prisma, user),
   };
 };
 
@@ -946,7 +947,8 @@ router.get('/contracts/:id', protect, requireSalesDetailRead, async (req: any, r
     res.setHeader('Cache-Control', contract.partnerKind === 'PARTNER_CUSTOMER' ? 'private, no-store' : 'private');
     res.json({
       success: true,
-      data: { ...responseContract, commercialActions: await projectCommercialActions(contract, req.user) }
+      data: { ...responseContract, commercialActions: await projectCommercialActions(contract, req.user),
+        reactivationActions: await readOrdinaryReactivationActions(prisma, contract, req.user.id) }
     });
     return;
   } catch (error: any) {
@@ -2538,7 +2540,7 @@ router.post(
   '/contracts/:contractId/reactivate',
   protect,
   requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
-  requireFeatureAccess(FEATURES.SALES_CONTRACTS_DELETE, FEATURE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.SALES_CONTRACTS_EDIT, FEATURE_PERMISSIONS.EDIT),
   async (req: any, res: Response) => {
     try {
       const contract = await prisma.salesContract.findUnique({
@@ -2563,24 +2565,22 @@ router.post(
         });
       }
 
-      const result = await contractConfirmationService.reactivateContract({
-        contractId: contract.id,
-        requestedBy: req.user.id,
-        meta: getRequestEvidence(req)
-      });
-      if (!result.success) {
-        return res.status(400).json({ success: false, error: result.error });
+      if (typeof req.body.reason !== 'string' || !Number.isInteger(req.body.expectedRevision)) {
+        return res.status(400).json({ success: false, error: 'دلیل فعال‌سازی را وارد کنید و نسخه قرارداد را بازبینی کنید.' });
       }
+      const result = await reactivateOrdinaryContract(prisma, { contractId: contract.id,
+        actorId: req.user.id, reason: req.body.reason, expectedRevision: req.body.expectedRevision, meta: getRequestEvidence(req) });
       return res.status(200).json({
         success: true,
         message: 'Contract reactivated successfully',
-        data: result.data
+        data: result
       });
     } catch (error) {
       console.error('Reactivate contract error:', error);
-      return res.status(500).json({
+      if (!(error instanceof OrdinaryContractReactivationError)) return sendUnexpectedSalesFailure(res, error, 'فعال‌سازی قرارداد', 'SALES_REACTIVATION_UNEXPECTED');
+      return res.status(409).json({
         success: false,
-        error: 'فعال‌سازی قرارداد انجام نشد؛ دوباره تلاش کنید.'
+        error: error.message
       });
     }
   }

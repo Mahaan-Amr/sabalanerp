@@ -8,6 +8,7 @@ import { recordFinancialCreditTransition } from './contractDispatchCredit';
 import { isNewOrdinaryCommercialFlow, ordinaryFinancialActionsAllowed, OrdinaryAccountingCommercialError,
   assertOrdinaryAccountingCommercialGate } from './ordinaryAccountingCommercialGate';
 import { reconcileOrdinaryFinancialRealization } from './salesAttributionService';
+import { readOrdinaryFinancialRegistration } from './ordinaryContractReactivation';
 import { accountingContractListSelect, accountingFinancialSummarySelect, attachAccountingListDates,
   accountingFinancialRegisterSelect, accountingAuditRegisterSelect, attachPartnerRegisterSnapshots } from './accountingListProjection';
 import { attachAccountingTrendAuditState } from './accountingReadProjection';
@@ -950,7 +951,9 @@ const buildContractRow = async (contract: any, settings: any) => {
     {
       kind: 'CREATE_CORRECTION_REQUEST',
       labelFa: 'درخواست اصلاح',
-      enabled: !contract.isInactive && ordinaryFinancialActionsAllowed(contract),
+      enabled: !contract.isInactive && (ordinaryFinancialActionsAllowed(contract)
+        || contract.status === 'CANCELLED' && !contract.partnerKind && !contract.partnerCaseId
+          && !!await readOrdinaryFinancialRegistration(prisma, contract)),
       disabledReason: contract.isInactive ? 'قرارداد غیرفعال و فقط‌خواندنی است' : undefined
     }
   ];

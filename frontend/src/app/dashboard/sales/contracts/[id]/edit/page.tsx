@@ -108,6 +108,11 @@ export default function SalesContractEditPage() {
           return;
         }
 
+        if (nextContract.status === 'CANCELLED') {
+          setError('قرارداد لغو شده است؛ فعال‌سازی را از صفحه مشاهده قرارداد انجام دهید.');
+          setErrorKind('stale');
+          return;
+        }
         if (nextContract.isInactive) {
           setError('این قرارداد غیرفعال و فقط‌خواندنی است. به صفحه مشاهده قرارداد برگردید.');
           setErrorKind('stale');

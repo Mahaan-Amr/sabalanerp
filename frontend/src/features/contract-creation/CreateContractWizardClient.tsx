@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { useRouter } from 'next/navigation';
+import { ContractReactivation, type ContractReactivationTarget } from '@/features/sales/ContractReactivation';
 import dynamic from 'next/dynamic';
 import {
   FaArrowRight,
@@ -613,6 +614,7 @@ interface CreateContractWizardProps {
   contractKind?: ContractKind;
   contractId?: string;
   initialWizardData?: ContractWizardData | null;
+  replacementWizardData?: ContractWizardData;
   initialContractStatus?: string | null;
   correctionExpiresAt?: string | null;
 }
@@ -702,10 +704,13 @@ export default function CreateContractWizard({
   contractKind = 'standard',
   contractId,
   initialWizardData,
+  replacementWizardData,
   initialContractStatus = null,
   correctionExpiresAt = null,
 }: CreateContractWizardProps = {}) {
   const router = useRouter();
+  const [reactivationTarget, setReactivationTarget] = useState<ContractReactivationTarget | null>(null);
+  const replacementInitialized = useRef(false);
   const isContractEditMode = mode === 'edit';
   const applyContractMonetaryRounding = !isContractEditMode || initialContractStatus === 'DRAFT' ||
     Boolean(initialWizardData?.monetaryRounding);
@@ -1953,6 +1958,14 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   };
 
   useEffect(() => {
+    if (isContractEditMode || !replacementWizardData || replacementInitialized.current) return;
+    replacementInitialized.current = true;
+    setWizardData(normalizeWizardFinishingProducts(replacementWizardData));
+    setCurrentStep(1);
+    setAutosaveHydrated(true);
+  }, [isContractEditMode, replacementWizardData, setWizardData, setCurrentStep]);
+
+  useEffect(() => {
     if (!isContractEditMode || !initialWizardData) return;
     setWizardData(normalizeWizardFinishingProducts({
       ...initialWizardData,
@@ -2667,8 +2680,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   const recoveryUserId = currentUser?.id || currentUser?.username || null;
   const freshEntryRequestedRef = useRef(
-    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('fresh') === '1'
+    !!replacementWizardData || typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('fresh') === '1'
   );
+  const replacementDraftIdRef = useRef<string | null>(null);
   const recoveryBaseRevision = Number(
     (initialWizardData as any)?.productGraphRevision ??
     (initialWizardData as any)?.canonicalRevision ??
@@ -2679,10 +2693,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   const [discoveredRecoveryDraftId, setDiscoveredRecoveryDraftId] = useState<string | null>(null);
   const recoveryDraftId = useMemo(
     () => recoveryUserId
-      ? discoveredRecoveryDraftId ??
-        getOrCreateContractDraftId(recoveryUserId, isContractEditMode ? contractId : null)
+      ? replacementWizardData && !isContractEditMode
+        ? replacementDraftIdRef.current ?? (replacementDraftIdRef.current = createFreshContractDraftId(recoveryUserId))
+        : discoveredRecoveryDraftId ?? getOrCreateContractDraftId(recoveryUserId, isContractEditMode ? contractId : null)
       : null,
-    [contractId, discoveredRecoveryDraftId, isContractEditMode, recoveryUserId]
+    [contractId, discoveredRecoveryDraftId, isContractEditMode, recoveryUserId, replacementWizardData]
   );
   const recoveryScope = useMemo<ContractRecoveryScope | null>(
     () => recoveryUserId && recoveryDraftId
@@ -2837,7 +2852,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
 
-    const freshRequested = urlParams.get('fresh') === '1';
+    const freshRequested = !!replacementWizardData || urlParams.get('fresh') === '1';
     if (freshRequested) {
       setAutosaveHydrated(true);
       return;
@@ -2868,7 +2883,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     autosaveHydrated,
     contractDraftStorageKey,
     isContractEditMode,
-    recoveryDraftId
+    recoveryDraftId,
+    replacementWizardData
   ]);
 
   const buildContractAutosaveDraft = useCallback(() => {
@@ -4799,7 +4815,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
     digitalSignature.setSendingCode(true);
     try {
-      const response = await salesAPI.reactivateContract(wizardData.signature.contractId);
+      const response = await salesAPI.getContract(wizardData.signature.contractId);
       if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
       if (!response.data.success) {
         const failure = { response };
@@ -4810,7 +4826,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }), getSalesOperationalErrorKind(failure));
         return;
       }
-      await refreshConfirmationStatus();
+      const actions = response.data.data?.reactivationActions;
+      if (!actions?.canReactivate) throw new Error(actions?.reason || 'فعال‌سازی را از صفحه مشاهده قرارداد بررسی کنید.');
+      setReactivationTarget({ id: wizardData.signature.contractId, expectedRevision: actions.expectedRevision });
       clearSignatureError(errorSource);
     } catch (error: any) {
       if (!isLatestSignatureOperation(errorSource, requestSequence)) return;
@@ -6392,6 +6410,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           ? 'قرارداد همکاری در فروش'
           : 'ایجاد قرارداد'}
     >
+      <ContractReactivation target={reactivationTarget} onClose={() => setReactivationTarget(null)}
+        onReactivated={() => window.location.assign(`/dashboard/sales/contracts/${wizardData.signature?.contractId}/edit`)} />
 
         {editRecoverySuccessMessage && (
           <ErpInlineState

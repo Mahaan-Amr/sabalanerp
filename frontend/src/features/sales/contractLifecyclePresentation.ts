@@ -1,5 +1,7 @@
 import { partnerCommercialLabels, type PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
 export type ContractLifecyclePresentation = {
+  reactivationActions?: { canReactivate: boolean; canCreateReplacement: boolean;
+    requiresAccountingAuthorization: boolean; expectedRevision: number; reason: string };
   status: string;
   commercialFlowVersion?: number;
   partnerCommercialStatus?: string;

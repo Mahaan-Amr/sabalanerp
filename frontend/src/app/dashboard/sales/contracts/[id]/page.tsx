@@ -1,10 +1,11 @@
 "use client";
 import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCreditPanel';
 import { ContractRenewal } from '@/features/sales/ContractRenewal';
+import { ContractReactivation } from '@/features/sales/ContractReactivation';
 import { contractLifecycleLabel, contractLifecycleFilterOptions, isCurrentContractFlow, type ContractLifecyclePresentation } from '@/features/sales/contractLifecyclePresentation';
 import { ErpPressable, ErpSelect, ErpTextarea } from "@/components/erp";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import {
   FaCalendarAlt,
   FaCheck,
@@ -247,6 +248,8 @@ export default function ContractDetailPage() {
   );
 
   const [renewalOpen, setRenewalOpen] = useState(false);
+  const [reactivationOpen, setReactivationOpen] = useState(false);
+  const reactivationRouter = useRouter();
   const [contract, setContract] = useState<Contract | null>(null);
   const [detailSection, setDetailSection] = useState<
     "summary" | "items" | "financial" | "history"
@@ -940,7 +943,7 @@ export default function ContractDetailPage() {
 
   const canEdit = isCurrentContractFlow(contract)
     ? contract.commercialActions?.canEdit === true
-    : !contract.isInactive &&
+    : !contract.isInactive && contract.status !== 'CANCELLED' &&
       (!contract.accountingEditLocked || contract.canOpenCorrectionEdit) &&
       (contractPermissions.canEdit || contract.createdByUser.id === currentUser?.id);
   const canDownloadPdf = contractPermissions.canView;
@@ -953,6 +956,10 @@ export default function ContractDetailPage() {
     hasFeatureAccess(currentUser, "sales_verification_send", "edit");
 
   const actions: ErpAction[] = [
+    ...(contract.reactivationActions?.canReactivate ? [{ label: 'فعال‌سازی قرارداد', icon: FaRedo,
+      tone: 'success' as ErpTone, onClick: () => setReactivationOpen(true) }] : []),
+    ...(contract.reactivationActions?.canCreateReplacement ? [{ label: 'ایجاد قرارداد جدید از این اطلاعات', icon: FaFileContract,
+      tone: 'primary' as ErpTone, href: `/dashboard/sales/contracts/create?fresh=1&copyFrom=${encodeURIComponent(contract.id)}` }] : []),
     ...(contract.commercialActions?.canRenew ? [{ label: "تمدید مهلت", icon: FaRedo, tone: "warning" as ErpTone, onClick: () => setRenewalOpen(true) }] : []),
     ...(canEdit
       ? [
@@ -1060,6 +1067,10 @@ export default function ContractDetailPage() {
   return (
     <>
       <ContractRenewal contractId={renewalOpen ? contract.id : null} onClose={() => setRenewalOpen(false)} onRenewed={loadContract} />
+      <ContractReactivation target={reactivationOpen && contract.reactivationActions ? { id: contract.id,
+        expectedRevision: contract.reactivationActions.expectedRevision } : null}
+        onClose={() => setReactivationOpen(false)}
+        onReactivated={() => reactivationRouter.push(`/dashboard/sales/contracts/${contract.id}/edit`)} />
       <ErpPage
       eyebrow="قرارداد فروش"
       title={sanitizeUiTextWithCandidates(
@@ -1072,6 +1083,7 @@ export default function ContractDetailPage() {
       metrics={metrics}
     >
       {isCurrentContractFlow(contract) && !contract.firstFinancialRecordAt && contract.commercialExpiresAt && <ErpInlineState kind={contract.status === "EXPIRED" ? "stale" : "empty"} title={`مهلت ثبت اولین رکورد مالی: ${PersianCalendar.formatForDisplay(contract.commercialExpiresAt)}`} />}
+      {contract.reactivationActions?.reason && <ErpInlineState kind="stale" title={contract.reactivationActions.reason} />}
       {contract.isInactive && (
         <ErpInlineState
           kind="stale"

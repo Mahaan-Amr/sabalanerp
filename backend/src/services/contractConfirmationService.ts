@@ -1,14 +1,13 @@
 import { confirmationResendCooldownError } from './contractConfirmationPolicy';
 import { prisma } from '../lib/prisma';
 import { isOrdinaryCommercialFlow, assertCommercialActionAvailable, markCustomerAcceptance, lockOrdinaryContract } from './ordinaryContractLifecycle';
-import { PrismaClient, type Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import crypto from 'crypto';
 import smsService from './smsService';
-import { recordContractCancellation, recordContractReactivation } from './salesAttributionService';
+import { recordContractCancellation } from './salesAttributionService';
 import type { PartnerConfirmationHooks } from './partnerSales/customerOutput/existingFlow';
 import { createPrismaPartnerConfirmationHooks } from './partnerSales/customerOutput/prismaHooks';
 import { provisionApprovedSalesContractCustomer } from './accountingCustomerTreasuryPrisma';
-import { readContractCancellationEvidence, resolveContractReactivationStatus } from './contractCancellationPolicy';
 
 
 const LINK_TTL_DAYS = parseInt(process.env.CONTRACT_CONFIRM_LINK_TTL_DAYS || '60', 10);
@@ -972,7 +971,7 @@ export class ContractConfirmationService {
     canCancelApproved: boolean;
     meta?: RequestEvidenceMeta;
     transaction?: Prisma.TransactionClient;
-  }) {
+  }): Promise<any> {
     const client = params.transaction || prisma;
     if (params.transaction) {
       const ordinary = await client.salesContract.findUnique({ where: { id: params.contractId } });
@@ -980,6 +979,8 @@ export class ContractConfirmationService {
     }
     const partner = params.transaction ? undefined : await this.partnerOutput?.cancelContract(params);
     if (partner !== undefined) return partner;
+    if (!params.transaction) return prisma.$transaction(tx => this.cancelContract({ ...params, transaction: tx }));
+    await client.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" = ${params.contractId} FOR UPDATE`);
     const contract = await client.salesContract.findUnique({
       where: { id: params.contractId }
     });
@@ -1056,71 +1057,6 @@ export class ContractConfirmationService {
     };
   }
 
-  async reactivateContract(params: {
-    contractId: string;
-    requestedBy: string;
-    meta?: RequestEvidenceMeta;
-  }) {
-    const contract = await prisma.salesContract.findUnique({ where: { id: params.contractId } });
-    if (!contract) return { success: false, error: 'قرارداد یافت نشد' };
-    if (contract.status !== 'CANCELLED') {
-      return { success: true, data: { contractId: contract.id, status: contract.status } };
-    }
-
-    const restoredStatus = resolveContractReactivationStatus(contract.signatures);
-    const cancellationEvidence = readContractCancellationEvidence(contract.signatures);
-    if (!restoredStatus || !cancellationEvidence) {
-      return {
-        success: false,
-        error: 'وضعیت قرارداد پیش از لغو قابل بازیابی نیست؛ قرارداد را برای بررسی به مدیر فروش ارجاع دهید.'
-      };
-    }
-
-    const reactivatedAt = new Date();
-    await prisma.$transaction(async (tx) => {
-      await recordContractReactivation(
-        tx,
-        contract.id,
-        params.requestedBy,
-        typeof cancellationEvidence.reportingEventSourceKey === 'string'
-          ? cancellationEvidence.reportingEventSourceKey
-          : null,
-        reactivatedAt
-      );
-      await tx.salesContract.update({
-        where: { id: contract.id },
-        data: {
-          status: restoredStatus,
-          signatures: {
-            ...((contract.signatures as Record<string, unknown>) || {}),
-            cancellation: {
-              ...cancellationEvidence,
-              reactivatedBy: params.requestedBy,
-              reactivatedAt: reactivatedAt.toISOString()
-            },
-            reactivation: {
-              by: params.requestedBy,
-              at: reactivatedAt.toISOString(),
-              restoredStatus
-            }
-          } as any
-        }
-      });
-    });
-
-    await createAuditLog({
-      contractId: contract.id,
-      eventType: 'CONTRACT_REACTIVATED',
-      eventPayloadJson: {
-        reactivatedBy: params.requestedBy,
-        restoredStatus,
-        cancellationAt: cancellationEvidence.at || null
-      },
-      meta: params.meta
-    });
-
-    return { success: true, data: { contractId: contract.id, status: restoredStatus } };
-  }
 }
 
 export const contractConfirmationService = new ContractConfirmationService(createPrismaPartnerConfirmationHooks());

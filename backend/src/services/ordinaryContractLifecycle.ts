@@ -8,6 +8,7 @@ import { ordinaryContractDispatchEligible } from './ordinaryContractDispatchElig
 import { processContractCreditReminders } from './contractCreditReminders';
 import { authorizeSpecialCustomerCredit } from './specialCustomerCredit';
 import { hasSpecialCustomerCreditAuthorization } from './specialCustomerCreditPolicy';
+import { reconcileOrdinaryFinancialRealization } from './salesAttributionService';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 export type CommercialContract = {
@@ -116,6 +117,8 @@ export const approveOrdinarySales = async (tx: Database, contractId: string, act
     updated.dispatchExpiryExempt = await ordinaryContractDispatchEligible(tx, updated);
     await tx.salesContract.update({ where: { id: contractId }, data: { dispatchExpiryExempt: updated.dispatchExpiryExempt } });
   }
+  if (status === 'SIGNED') await reconcileOrdinaryFinancialRealization(tx, { contractId, actorId,
+    sourceKey: `reactivation-finality:${contractId}:${revision}` });
   return updated;
 };
 export const markCustomerAcceptance = async (tx: Database, input: {
@@ -142,13 +145,15 @@ export const markCustomerAcceptance = async (tx: Database, input: {
     await finishCommercialCorrection(tx, contract.id, input.actorId);
     updated.dispatchExpiryExempt = await ordinaryContractDispatchEligible(tx, updated);
     await tx.salesContract.update({ where: { id: contract.id }, data: { dispatchExpiryExempt: updated.dispatchExpiryExempt } });
+    await reconcileOrdinaryFinancialRealization(tx, { contractId: contract.id, actorId: input.actorId,
+      sourceKey: `reactivation-finality:${contract.id}:${input.revision}` });
   }
   return updated;
 };
 export const renewOrdinaryContract = async (tx: Database, contractId: string, actorId: string, reason: string) => {
   if (!reason.trim()) throw new Error('دلیل تمدید قرارداد الزامی است.');
   const contract = await lockOrdinaryContract(tx, contractId);
-  if (!isOrdinaryCommercialFlow(contract) || contract.firstFinancialRecordAt || contract.isInactive
+  if (!isOrdinaryCommercialFlow(contract) || contract.status === 'CANCELLED' || contract.firstFinancialRecordAt || contract.isInactive
     || !(contract.status === 'EXPIRED' || commercialDeadlinePassed(contract))) throw new Error('قرارداد قابل تمدید نیست.');
   const duration = contract.commercialExpiryDays || 10;
   const updated = await tx.salesContract.update({ where: { id: contractId }, data: { status: 'DRAFT',

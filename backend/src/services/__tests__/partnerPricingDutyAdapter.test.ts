@@ -10,7 +10,7 @@ test('resolved case pricing creates a return duty assigned to the Partner seller
       id: 'inquiry-1', caseId: 'case-1', revision: 4,
       case: { caseNumber: 'PF-1001' }, profile: { userId: 'partner-user-1' },
       rows: [{ outcome: 'APPROVED' }, { outcome: 'REJECTED' }],
-    }) },
+    }), findFirst: async () => ({ id: 'inquiry-1' }), findMany: async () => [] },
     crossWorkspaceDutyEnvelope: { upsert: async () => ({ id: 'envelope-1' }) },
     crossWorkspaceDuty: { upsert: async ({ create }: { create: Record<string, unknown> }) => {
       createdDuty = create; return { id: 'duty-1', ...create };
@@ -102,7 +102,7 @@ test('replacing a pricing duty records waiver in audit without completed-respons
   let audit: Record<string, unknown> | undefined;
   const database = {
     partnerInquiry: { findUniqueOrThrow: async () => ({ id: 'inquiry-1', caseId: 'case-1', revision: 5,
-      case: { caseNumber: 'PF-1001' }, assignments: [{ responderId: 'seller-1' }] }) },
+      case: { caseNumber: 'PF-1001' }, assignments: [{ responderId: 'seller-1' }] }), findMany: async () => [] },
     crossWorkspaceDutyEnvelope: { upsert: async () => ({}) },
     crossWorkspaceDuty: {
       findMany: async () => [{ id: 'old-duty', sourceVersion: 4, envelopeVersion: 1, createdAt: new Date() }],

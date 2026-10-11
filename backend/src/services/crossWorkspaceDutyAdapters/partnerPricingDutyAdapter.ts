@@ -1,4 +1,4 @@
-import { resolveSavedTechnicalConfiguration } from '../partnerSales/inquiries/adapters';
+import { createSavedTechnicalConfigurationResolver } from '../partnerSales/inquiries/adapters';
 import { parseInquiryDefinition } from '../partnerSales/inquiries/definition';
 import { Prisma } from '@prisma/client';
 import type { CrossWorkspaceDutySourceAdapter } from './types';
@@ -126,10 +126,11 @@ export const createPartnerPricingDuty = async (database: any, input: {
 };
 
 async function materialPriceRows(database: any, inquiry: any) {
+  const resolveConfiguration = createSavedTechnicalConfigurationResolver();
   const rows: typeof inquiry.rows = [];
   for (const row of inquiry.rows) {
     const definition = parseInquiryDefinition(row.definition);
-    const resolved = definition && inquiry.profile?.userId && await resolveSavedTechnicalConfiguration(database, {
+    const resolved = definition && inquiry.profile?.userId && await resolveConfiguration(database, {
       actorId: inquiry.profile.userId, reference: definition.configurationRef,
     });
     if (resolved?.ok && resolved.value.paidSourceProductRowId) continue;

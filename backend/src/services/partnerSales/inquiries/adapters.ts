@@ -171,15 +171,19 @@ export function presentSavedTechnicalConfiguration(input: {
 /** Resolves an opaque saved reference from the protected recovery journal. The
  * returned public display is rebuilt from its frozen safe catalog projection;
  * private rates, graph context and pricing hashes never leave this adapter. */
-type SavedHistoryCache = Map<string, Promise<TechnicalSavedSnapshot[] | undefined>>;
+type SavedHistoryCache = {
+  histories: Map<string, Promise<unknown[] | undefined>>;
+  revisions: Map<string, Promise<TechnicalSavedSnapshot[] | undefined>>;
+};
+const savedHistoryCache = (): SavedHistoryCache => ({ histories: new Map(), revisions: new Map() });
 
-/** Cache verified evidence only within one database snapshot, never across requests
- * or transactions. Ownership and integrity validation remain identical. */
+/** Create inside one read operation or transaction, never at module scope. A
+ * long-lived Prisma client does not itself delimit an operation or DB snapshot. */
 export function createSavedTechnicalConfigurationResolver(): PartnerInquiryDependencies['resolveConfiguration'] {
   const transactions = new WeakMap<object, SavedHistoryCache>();
   return (tx, input) => {
     let cache = transactions.get(tx);
-    if (!cache) { cache = new Map(); transactions.set(tx, cache); }
+    if (!cache) { cache = savedHistoryCache(); transactions.set(tx, cache); }
     return resolveSavedConfiguration(tx, input, cache);
   };
 }
@@ -187,10 +191,10 @@ export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['res
   resolveSavedConfiguration(tx, input);
 
 async function resolveSavedConfiguration(tx: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[0],
-  input: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[1], cache?: SavedHistoryCache):
+  input: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[1], cache = savedHistoryCache()):
   ReturnType<PartnerInquiryDependencies['resolveConfiguration']> {
   const key = JSON.stringify([input.actorId, input.reference.recoveryId]);
-  let reading = cache?.get(key);
+  let reading = cache.histories.get(key);
   if (!reading) {
     reading = (async () => {
       const session = await tx.salesContractEditSession.findUnique({ where: { draftId: input.reference.recoveryId },
@@ -200,12 +204,26 @@ async function resolveSavedConfiguration(tx: Parameters<PartnerInquiryDependenci
         ? (session.recovery as Record<string, unknown>).validatedSnapshots
         : await readSubmittedTechnicalSnapshots(tx, input.actorId, input.reference.recoveryId);
       if (!Array.isArray(history)) return undefined;
-      const decoded = await Promise.all(history.map(record => decodeTechnicalSavedSnapshot(record)));
+      return history;
+    })();
+    cache.histories.set(key, reading);
+  }
+  const revisionKey = JSON.stringify([input.actorId, input.reference.recoveryId, input.reference.recoveryRevision]);
+  let verifying = cache.revisions.get(revisionKey);
+  if (!verifying) {
+    verifying = (async () => {
+      const records = await reading;
+      if (!records) return undefined;
+      // This untrusted hint only narrows work. Every selected candidate still
+      // passes the full envelope, graph, identity and view integrity decoder.
+      const candidates = records.filter(record => (record as { payload?: { view?: { recoveryRevision?: unknown } } } | null)
+        ?.payload?.view?.recoveryRevision === input.reference.recoveryRevision);
+      const decoded = await Promise.all(candidates.map(record => decodeTechnicalSavedSnapshot(record)));
       return decoded.filter((record): record is TechnicalSavedSnapshot => record !== undefined);
     })();
-    cache?.set(key, reading);
+    cache.revisions.set(revisionKey, verifying);
   }
-  const history = await reading;
+  const history = await verifying;
   if (!history) return { ok: false, error: partnerError('NOT_FOUND') };
   for (const snapshot of history) {
     if (!snapshot || snapshot.view.recoveryRevision !== input.reference.recoveryRevision) continue;

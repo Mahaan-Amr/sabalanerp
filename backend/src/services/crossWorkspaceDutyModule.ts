@@ -90,6 +90,22 @@ export const loadCrossWorkspaceDutySourceProjection = (
   input: CrossWorkspaceDutySourceProjectionInput,
 ) => registeredAdapter(input.sourceType).loadInboxProjection(database, input);
 
+/** One read operation only. Source evidence is shared; actor authority is never cached. */
+export const createCrossWorkspaceDutySourceProjectionReader = () => {
+  const databases = new WeakMap<object, Map<string, ReturnType<typeof loadCrossWorkspaceDutySourceProjection>>>();
+  return (database: CrossWorkspaceDutyDatabase, input: CrossWorkspaceDutySourceProjectionInput) => {
+    let projections = databases.get(database);
+    if (!projections) { projections = new Map(); databases.set(database, projections); }
+    const key = JSON.stringify([input.sourceType, input.sourceId, input.sourceActionCode, input.sourceVersion]);
+    let reading = projections.get(key);
+    if (!reading) {
+      reading = loadCrossWorkspaceDutySourceProjection(database, input);
+      projections.set(key, reading);
+    }
+    return reading;
+  };
+};
+
 export const respondToCrossWorkspaceDuty = async (
   database: CrossWorkspaceDutyDatabase,
   input: RespondToCrossWorkspaceDutyInput,

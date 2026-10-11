@@ -4,6 +4,7 @@
   "description": "ERP Backend API",
   "main": "dist/index.js",
   "scripts": {
+    "test:duty-read-performance": "tsx --test src/services/__tests__/dutySummaryPerformance.test.ts src/services/__tests__/savedTechnicalResolutionPerformance.test.ts",
     "duty:baseline": "tsx src/scripts/report-hr-duty-baseline.ts",
     "duty:reconcile:sales-contract-corrections": "tsx src/scripts/report-sales-contract-correction-duty-reconciliation.ts",
     "duty:migrate:shared-decisions:dry": "tsx src/scripts/migrate-open-shared-decision-duties.ts",

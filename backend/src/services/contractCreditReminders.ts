@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { actualContractReceiptsRials } from './ordinaryContractDispatchEligibility';
-import { dispatchCreditAccess, canReviewManagerDispatch, rials, tehranDay } from './contractDispatchCredit';
+import { dispatchCreditAccess, rials, tehranDay } from './contractDispatchCredit';
 import { publishNotificationEvent } from './notificationService';
 import { consumedCustomerCredit, lockCustomerCredit, canManageCustomerCredit } from './specialCustomerCredit';
 
@@ -51,11 +51,12 @@ export const processContractCreditReminders = async (database: PrismaClient, now
         for (const user of users) {
           const access = await dispatchCreditAccess(tx, current.contract, user.id);
           if (current.kind === 'CREDIT' ? access.manage || access.request || (access.read && user.id === current.contract.responsibleSellerId)
-            : await canReviewManagerDispatch(tx, user.id) || (access.read && user.id === current.requestedBy)) {
+            : access.managerDecision || (access.read && user.id === current.requestedBy)) {
             await publishNotificationEvent(tx, { type: 'CONTRACT_PAYMENT_PROMISE_DUE',
               deduplicationKey: `contract-payment-promise:${current.contractId}:${day}:${user.id}`,
               recipientIds: [user.id], resourceType: 'CONTRACT_DISPATCH', resourceId: current.contractId,
-              actionUrl: access.manage || access.request ? `/dashboard/accounting/contracts/${current.contractId}` : `/dashboard/sales/contracts/${current.contractId}`,
+              actionUrl: access.manage || access.request || (current.kind === 'MANAGER' && access.managerDecision)
+                ? `/dashboard/accounting/contracts/${current.contractId}` : `/dashboard/sales/contracts/${current.contractId}`,
               payload: { contractNumber: current.contract.contractNumber, promisedDate: row.promisedDate!.toLocaleDateString('fa-IR', { timeZone: 'UTC' }) } });
           }
         }

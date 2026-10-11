@@ -18,15 +18,23 @@ export const CONTRACT_DISPATCH_DUTY_DEFINITIONS = {
   CONTRACT_CREDIT_TRANSFER: definition('CONTRACT_CREDIT_TRANSFER', 'SALES', false),
 };
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
+const upsertContractDispatchEnvelope = (db: CrossWorkspaceDutyDatabase, d: ReturnType<typeof definition>, actorId: string) => {
+  const data = { destinationWorkspaceCode: d.destinationWorkspaceCode, destinationFeatureCode: 'ACCOUNTING_ACTIONS_MANAGE',
+    allowedFieldsJson: d.allowedFields, allowedEvidenceJson: d.allowedEvidence, allowedActionCodesJson: d.allowedActionCodes,
+    responseSchemaJson: json(d.responseSchema), isActive: true };
+  return db.crossWorkspaceDutyEnvelope.upsert({ where: { code_version: { code: d.envelopeCode, version: 1 } },
+    update: data, create: { ...data, code: d.envelopeCode, version: 1, createdByUserId: actorId } });
+};
+export const syncContractDispatchDutyDefinitions = async (db: CrossWorkspaceDutyDatabase, actorId: string) => {
+  const envelopes: Awaited<ReturnType<typeof upsertContractDispatchEnvelope>>[] = [];
+  for (const d of Object.values(CONTRACT_DISPATCH_DUTY_DEFINITIONS)) envelopes.push(await upsertContractDispatchEnvelope(db, d, actorId));
+  return envelopes;
+};
 export const createContractDispatchDuty = async (db: CrossWorkspaceDutyDatabase, requestId: string) => {
   const request = await db.contractDispatchAuthority.findUniqueOrThrow({ where: { id: requestId }, include: { contract: true } });
   const d = request.kind === 'TRANSFER' ? CONTRACT_DISPATCH_DUTY_DEFINITIONS.CONTRACT_CREDIT_TRANSFER
     : CONTRACT_DISPATCH_DUTY_DEFINITIONS.CONTRACT_DISPATCH_DECISION;
-  const envelopeData = { destinationWorkspaceCode: d.destinationWorkspaceCode, destinationFeatureCode: 'ACCOUNTING_ACTIONS_MANAGE',
-    allowedFieldsJson: d.allowedFields, allowedEvidenceJson: d.allowedEvidence, allowedActionCodesJson: d.allowedActionCodes,
-    responseSchemaJson: json(d.responseSchema), isActive: true };
-  await db.crossWorkspaceDutyEnvelope.upsert({ where: { code_version: { code: d.envelopeCode, version: 1 } },
-    update: envelopeData, create: { ...envelopeData, code: d.envelopeCode, version: 1, createdByUserId: request.requestedBy } });
+  await upsertContractDispatchEnvelope(db, d, request.requestedBy);
   const duty = await db.crossWorkspaceDuty.create({ data: { stableKey: `CONTRACT_DISPATCH:${request.id}`,
     sourceType: 'CONTRACT_DISPATCH', sourceId: request.id, sourceActionCode: d.sourceActionCode, sourceVersion: request.revision,
     envelopeCode: d.envelopeCode, envelopeVersion: 1, destinationWorkspaceCode: d.destinationWorkspaceCode,

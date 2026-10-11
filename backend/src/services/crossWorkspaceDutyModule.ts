@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import { CONTRACT_DISPATCH_DUTY_DEFINITIONS, contractDispatchDutyAdapter } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
+import { CONTRACT_DISPATCH_DUTY_DEFINITIONS, contractDispatchDutyAdapter, syncContractDispatchDutyDefinitions } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import { hrWorkItemDutyAdapter } from './crossWorkspaceDutyAdapters/hrWorkItemDutyAdapter';
 import {
   SALES_CONTRACT_CORRECTION_DUTY_DEFINITIONS,
@@ -76,7 +76,8 @@ export const synchronizeCrossWorkspaceDutyDefinitions = async (
   const salesCorrection = await syncSalesContractCorrectionDutyDefinitions(database, actorUserId);
   const hiringFinance = await syncHrHiringFinanceDutyDefinitions(database, actorUserId);
   const partnerPricing = await syncPartnerPricingDutyDefinitions(database, actorUserId);
-  return [...hr, ...salesCorrection, ...hiringFinance, ...partnerPricing];
+  const contractDispatch = await syncContractDispatchDutyDefinitions(database, actorUserId);
+  return [...hr, ...salesCorrection, ...hiringFinance, ...partnerPricing, ...contractDispatch];
 };
 
 export const synchronizeCrossWorkspaceDutySource = async (

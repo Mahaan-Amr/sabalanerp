@@ -65,9 +65,9 @@ router.get('/balance', handle(async req => {
 router.get('/contracts/:id', handle(async req => {
   const { contract, access } = await accessibleContract(prisma, req.params.id, req.user.id);
   const authorities = await prisma.contractDispatchAuthority.findMany({ where: { contractId: contract.id }, orderBy: { createdAt: 'desc' } });
-  const sellers = await prisma.user.findMany({ where: { id: { in: [...new Set([contract.responsibleSellerId, ...authorities.flatMap(row => [row.sellerId, row.decidedBy]).filter((id): id is string => !!id)])] } },
+  const authorityUsers = await prisma.user.findMany({ where: { id: { in: [...new Set([contract.responsibleSellerId, ...authorities.flatMap(row => [row.sellerId, row.decidedBy]).filter((id): id is string => !!id)])] } },
     select: { id: true, firstName: true, lastName: true, username: true } });
-  const names = new Map(sellers.map(user => [user.id, `${user.firstName} ${user.lastName}`.trim() || user.username]));
+  const names = new Map(authorityUsers.map(user => [user.id, `${user.firstName} ${user.lastName}`.trim() || user.username]));
   return { authorities: authorities.map(row => ({ ...row, sellerName: row.sellerId ? names.get(row.sellerId) : undefined,
     deciderName: row.decidedBy ? names.get(row.decidedBy) : undefined,
     canDecide: row.status === 'PENDING' && (row.kind === 'MANAGER' ? access.managerDecision && row.requestedBy !== req.user.id

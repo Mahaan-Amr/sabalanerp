@@ -157,6 +157,29 @@ test('due reminder is published once without changing dispatch permission', () =
   assert.equal(await ordinaryContractDispatchEligible(tx, contract), before);
 }));
 
+test('managerial promise reminder links a view-only Accounting manager to the Accounting contract', () => fixture(async (tx, contract, seller, admin) => {
+  const manager = await tx.user.create({ data: { email: `${randomUUID()}@manager-qa.invalid`, username: `reminder-manager-${randomUUID()}`,
+    password: 'non-login-qa-fixture', firstName: 'مدیر', lastName: 'یادآوری', role: 'MANAGER' } });
+  await tx.workspacePermission.create({ data: { userId: manager.id, workspace: 'accounting', permissionLevel: 'view' } });
+  await tx.featurePermission.create({ data: { userId: manager.id, workspace: 'accounting', feature: 'accounting_contracts_view', permissionLevel: 'view' } });
+  assert.equal(await tx.workspacePermission.count({ where: { userId: manager.id, workspace: 'sales' } }), 0);
+  const request = await createDispatchRequest(tx, contract, seller.id, { kind: 'MANAGER' });
+  await decideDispatchRequest(tx, request.id, admin.id, 'APPROVE', undefined, '2099-01-01');
+  const worker = new Proxy(tx, { get(target, key) {
+    if (key === '$transaction') return (work: (db: Prisma.TransactionClient) => Promise<void>) => work(tx);
+    if (key === 'user') return { findMany: async () => [{ id: manager.id }] };
+    if (key === 'contractDispatchAuthority') return {
+      findMany: (input: any) => tx.contractDispatchAuthority.findMany({ ...input, where: { ...input.where, contractId: contract.id } }),
+    };
+    return Reflect.get(target, key);
+  } }) as unknown as PrismaClient;
+  await processContractCreditReminders(worker, new Date('2099-01-01T10:00:00Z'));
+  await processContractCreditReminders(worker, new Date('2099-01-01T11:00:00Z'));
+  const notices = await tx.notification.findMany({ where: { event: { resourceId: contract.id }, userId: manager.id, type: 'CONTRACT_PAYMENT_PROMISE_DUE' } });
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].actionUrl, `/dashboard/accounting/contracts/${contract.id}`);
+}));
+
 test('two concurrent Contract commits cannot spend the same available credit', async () => {
   const db = new PrismaClient({ datasources: { db: { url } } });
   const ids: string[] = [];

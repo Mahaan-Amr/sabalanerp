@@ -65,3 +65,18 @@ test('scoped resolution separates revisions and actors; a new operation rereads 
   assert.equal((await createSavedTechnicalConfigurationResolver()(database as any, { actorId: 'actor', reference: first.reference })).ok, false);
 });
 
+test('legacy saved views and submitted evidence retain full integrity checks', async () => {
+  const { record, reference } = await evidence();
+  const payload = structuredClone(record.payload) as any;
+  delete payload.view.graphHash;
+  const legacy = { payload, integrityHash: await canonicalHash(payload) };
+  const outcome = { schemaVersion: 1, validatedSnapshots: [legacy] };
+  let payloadHash = await canonicalHash(outcome);
+  const database = { salesContractEditSession: { findUnique: async () => null },
+    partnerCommandOutcome: { findUnique: async ({ where }: any) =>
+      where.actorId_operation_targetScope_key.actorId === 'actor' ? { outcome, payloadHash } : null } };
+  assert.equal((await resolveSavedTechnicalConfiguration(database as any, { actorId: 'actor', reference })).ok, true);
+  assert.equal((await resolveSavedTechnicalConfiguration(database as any, { actorId: 'foreign', reference })).ok, false);
+  payloadHash = 'corrupt';
+  await assert.rejects(resolveSavedTechnicalConfiguration(database as any, { actorId: 'actor', reference }), /integrity conflict/);
+});

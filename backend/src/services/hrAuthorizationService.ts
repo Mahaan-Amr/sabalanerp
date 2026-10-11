@@ -45,6 +45,7 @@ export const loadHrAuthorizationSnapshot = async (
       })),
     // Legacy business-authority rows are retained as history but are not authorization input.
     authorityGrants: [],
+    disabledFeatures: effectiveAccess.disabledFeatures,
     assignedDutyIds: duties.map(({ id }) => id),
   };
 };
@@ -93,7 +94,7 @@ export const activeHrAuthoritiesForUser = async (
   const broadOverride = evaluateHrAuthorization(snapshot, { workspaceLevel: 'ADMIN' }, at).allowed
     && (snapshot.user.role === 'ADMIN' || snapshot.user.role === 'MANAGER');
   const legacyCodes = ['HR_PROCESSOR', 'HR_MANAGER', 'COMPANY_MANAGER', 'HR_PAYROLL_PROCESSOR', 'HR_PAYROLL_MANAGER', 'FINANCE_RECORDER', 'FINANCE_MANAGER'];
-  if (broadOverride) return legacyCodes;
+  if (broadOverride) return legacyCodes.filter(code => !actionPermissionsForLegacyAuthority(code).some(key => snapshot.disabledFeatures?.includes(key)));
   const activeFeatureCodes = new Set(snapshot.featureGrants
     .filter((grant) => !grant.bootstrapOnly && grant.status === 'ACTIVE' && grant.effectiveFrom <= at && (!grant.effectiveTo || grant.effectiveTo > at))
     .map((grant) => grant.featureCode));

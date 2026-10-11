@@ -35,7 +35,9 @@ assert.deepEqual(Array.from(draft.selectedFeatures).sort(), [
 assert.deepEqual(Array.from(draft.automaticallyAddedFeatures).sort(), ['VIEW_INITIAL_INTERVIEW_CRITERIA']);
 
 const protectedPrerequisite = setFeatureSelection(draft, definitions, 'VIEW_INITIAL_INTERVIEW_CRITERIA', false);
-assert.deepEqual(Array.from(protectedPrerequisite.selectedFeatures).sort(), Array.from(draft.selectedFeatures).sort(), 'a required prerequisite stays checked');
+assert.ok(!protectedPrerequisite.selectedFeatures.has('VIEW_INITIAL_INTERVIEW_CRITERIA'));
+assert.ok(!protectedPrerequisite.selectedFeatures.has('RECORD_INITIAL_INTERVIEW'), 'unchecking a prerequisite disables dependent operations');
+assert.equal(protectedPrerequisite.workspaceLevels.hr, 'edit', 'operation changes preserve workspace level');
 
 let crossWorkspaceDraft = createAccessDraft({}, definitions);
 crossWorkspaceDraft = setFeatureSelection(crossWorkspaceDraft, definitions, 'RECORD_INITIAL_INTERVIEW', true);
@@ -49,13 +51,13 @@ draft = setFeatureSelection(draft, definitions, 'RECORD_INITIAL_INTERVIEW', fals
 assert.deepEqual(Array.from(draft.selectedFeatures), ['RECRUITMENT_CASES'], 'persisted explicit access is not removed with its dependent');
 
 draft = selectAllInWorkspace(draft, definitions, 'sales', 'admin');
-assert.equal(draft.workspaceLevels.sales, 'admin');
+assert.equal(draft.workspaceLevels.sales, 'view');
 assert.ok(draft.selectedFeatures.has('sales_contracts_view'));
 assert.ok(draft.selectedFeatures.has('sales_contracts_edit'));
 assert.ok(draft.selectedFeatures.has('RECRUITMENT_CASES'), 'select all does not alter another workspace');
 
 draft = deselectAllInWorkspace(draft, definitions, 'sales');
-assert.equal(draft.workspaceLevels.sales, null);
+assert.equal(draft.workspaceLevels.sales, 'view', 'unchecking all operations preserves manager level');
 assert.ok(!draft.selectedFeatures.has('sales_contracts_view'));
 assert.ok(!draft.selectedFeatures.has('sales_contracts_edit'));
 assert.ok(draft.selectedFeatures.has('RECRUITMENT_CASES'), 'deselect all is scoped to one workspace');

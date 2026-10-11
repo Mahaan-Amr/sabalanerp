@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+ADR-0124 makes an unchecked operation permission authoritative over all administrator defaults while preserving role and workspace levels. Existing ownership, assignment, separation, and domain restrictions otherwise remain governed by their policies.
+
 Accounting access profiles, operational authority, and emergency override are narrowed by ADR-0077; this ADR continues to govern the shared authorization foundation and Accounting-originated Sales Contract correction workflow.
 
 ADR-0110 replaces the one-save Sales opportunity only for the new ordinary Contract flow with a three-working-day, multi-save correction period ending at renewed commercial finality. Correction authorization, Accounting verification, immutable financial evidence, and the legacy workflow remain governed by this ADR.

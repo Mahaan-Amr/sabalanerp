@@ -1,3 +1,4 @@
+import { partnerOperationFeature } from './operationFeature';
 import { checkPartnerDomainRestrictions, partnerError, PartnerActionSchema, PartnerActionV2Schema, PermissionContextSchema,
   type PartnerActionV2, type PartnerAuthorizationPort, type PartnerAuthorizationV2Port, type PermissionContext } from '@sabalanerp/partner-sales-contracts';
 import type { AuthorizationBinding, AuthorizationSource } from './contracts';
@@ -30,6 +31,10 @@ function createAuthorization(source: AuthorizationSource<PartnerActionV2>, bindi
     }
     const partner = actor.partnerProfile;
     const admin = !partner && actor.role === 'ADMIN';
+    const operationFeature = partnerOperationFeature(action, binding.purpose);
+    if (operationFeature && actor.disabledFeatures?.includes(operationFeature)) {
+      return { ok: false, error: partnerError('FORBIDDEN') };
+    }
     if (partner && (resource.partnerSellerId !== actor.id ||
         (partner.state === 'PENDING' && !(action === 'PROFILE_READ' && root.kind === 'PROFILE' && binding.purpose === 'ONBOARDING')))) {
       return { ok: false, error: partnerError('NOT_FOUND') };

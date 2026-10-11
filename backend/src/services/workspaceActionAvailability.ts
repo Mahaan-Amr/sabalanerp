@@ -110,9 +110,6 @@ export const resolveWorkspaceActionAvailability = async (
   input: { userId: string; role: string; workspace: keyof typeof WORKSPACE_ACTION_RULES },
 ): Promise<WorkspaceActionAvailability> => {
   const rules = WORKSPACE_ACTION_RULES[input.workspace];
-  if (input.role === 'ADMIN') return Object.fromEntries(Object.keys(rules).map((action) => [action, {
-    visible: true, enabled: true, reason: null,
-  }]));
   const effective = await getEffectiveUserAccess(prisma, { userId: input.userId, userRole: input.role });
   const workspaceLevel = effective.workspaces.find(({ workspace }) => workspace === input.workspace)?.permission;
   const decisions = await Promise.all(Object.entries(rules).map(async ([action, rule]) => {

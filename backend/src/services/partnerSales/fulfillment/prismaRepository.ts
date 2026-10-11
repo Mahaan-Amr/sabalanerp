@@ -6,6 +6,7 @@ import {
   type Result,
 } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
+import { hasSharedOperationAuthority } from '../authorization/sharedOperationAuthority';
 import { lockPartnerOperationsControl } from '../authorization/technicalRollout';
 import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from '../cases/lifecycle';
 import { buildPartnerPhysicalLineage, canonicalPartnerQuantity } from './lineage';
@@ -60,6 +61,9 @@ export function createPrismaPartnerFulfillmentRepository(input: {
             purpose: 'FULFILLMENT', channel: 'API' }, { correlationId: input.correlationId, reason: input.reason })
             .authorize(authAction, { kind: 'CASE', id: row.id });
           if (!authorization.ok) return authorization;
+          if (action === 'MATERIALIZE' && !await hasSharedOperationAuthority(tx, input.actorId, 'logistics', 'logistics_loadings_create')) {
+            return { ok: false, error: partnerError('FORBIDDEN') };
+          }
           if (['MATERIALIZE', 'SELECT_DELIVERY'].includes(action) && !await partnerCommercialDispatchEligible(tx, row.id)) return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') };
           if (!await readCurrentPartnerCaseViews(tx, row.id)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
           const historical = action === 'INSPECT_LOADING';

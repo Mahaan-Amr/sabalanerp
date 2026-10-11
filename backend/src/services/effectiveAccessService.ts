@@ -23,6 +23,7 @@ export type EffectiveFeatureAccess = {
 export type EffectiveUserAccess = {
   workspaces: EffectiveWorkspaceAccess[];
   features: EffectiveFeatureAccess[];
+  disabledFeatures?: string[];
   provenance: {
     workspaces: Array<EffectiveWorkspaceAccess & { source: AuthorizationProvenanceSource; grantId: string | null }>;
     features: Array<EffectiveFeatureAccess & { source: AuthorizationProvenanceSource; grantId: string | null }>;
@@ -84,17 +85,22 @@ export const getEffectiveUserAccess = async (
   client: EffectiveAccessClient,
   input: { userId: string; userRole: string; at?: Date },
 ): Promise<EffectiveUserAccess> => {
+  const at = input.at ?? new Date();
   if (input.userRole === 'ADMIN') {
+    const rows = await client.featurePermission.findMany({ where: { userId: input.userId, isActive: true, permissionLevel: 'none' } });
+    const disabledFeatures = rows.filter(row => row.permissionLevel === 'none' && activeLegacyGrant(row, at)).map(row => row.feature);
+    const disabled = new Set(disabledFeatures);
     const workspaces = ADMIN_WORKSPACES.map((workspace) => ({ workspace, permission: 'admin' as const }));
     const features = [
         ...Object.entries(FEATURE_WORKSPACE_MAP)
           .filter(([, workspace]) => workspace !== 'hr')
           .map(([feature, workspace]) => ({ feature, workspace, permission: 'admin' as const })),
         ...HR_FEATURE_CODES.map((feature) => ({ feature, workspace: 'hr', permission: 'admin' as const })),
-      ];
+      ].filter(row => !disabled.has(row.feature));
     return {
       workspaces,
       features,
+      disabledFeatures,
       provenance: {
         workspaces: workspaces.map((grant) => ({ ...grant, source: 'SYSTEM_ADMIN_OVERRIDE', grantId: null })),
         features: features.map((grant) => ({ ...grant, source: 'SYSTEM_ADMIN_OVERRIDE', grantId: null })),
@@ -102,7 +108,6 @@ export const getEffectiveUserAccess = async (
     };
   }
 
-  const at = input.at ?? new Date();
   const [
     directWorkspaces,
     roleWorkspaces,
@@ -125,6 +130,8 @@ export const getEffectiveUserAccess = async (
     }),
   ]);
 
+  const disabledFeatures = directFeatures.filter(row => row.permissionLevel === 'none' && activeLegacyGrant(row, at)).map(row => row.feature);
+  const disabled = new Set(disabledFeatures);
   const activeDirect = directWorkspaces.filter((grant) => grant.workspace !== 'hr' && activeLegacyGrant(grant, at));
   const directWorkspaceCodes = new Set(activeDirect.map((grant) => grant.workspace));
   const canonicalHr = canonicalHrWorkspaces.find((grant) => (
@@ -214,7 +221,7 @@ export const getEffectiveUserAccess = async (
     };
       });
 
-  const features = [...nonHrFeatures, ...hrFeatures];
+  const features = [...nonHrFeatures, ...hrFeatures].filter(row => !disabled.has(row.feature));
   const workspaceProvenance = workspaces.map((grant) => {
     if (grant.workspace === 'hr') {
       return { ...grant, source: canonicalHr ? 'CANONICAL_HR_WORKSPACE' as const : 'ROLE_WORKSPACE' as const,
@@ -248,5 +255,5 @@ export const getEffectiveUserAccess = async (
     if (roleFeature) return { ...grant, source: 'ROLE_FEATURE' as const, grantId: roleFeature.id };
     return { ...grant, source: 'ROLE_WORKSPACE' as const, grantId: roleWorkspace?.id ?? null };
   });
-  return { workspaces, features, provenance: { workspaces: workspaceProvenance, features: featureProvenance } };
+  return { workspaces, features, disabledFeatures, provenance: { workspaces: workspaceProvenance, features: featureProvenance } };
 };

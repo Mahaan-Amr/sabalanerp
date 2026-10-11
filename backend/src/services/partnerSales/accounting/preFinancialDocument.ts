@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
+import { hasSharedOperationAuthority } from '../authorization/sharedOperationAuthority';
 import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { projectPartnerInternalContent, partnerInternalPhysicalFacts } from './internalDocumentContent';
 import { withAccountingReadScope } from './readScope';
@@ -23,7 +24,8 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
   if (!commercial) return null;
   const write = !root.customerContract.isInactive && commercial.status === 'FINAL' && (await createAuditedPartnerAuthorization(tx,
     { actorId, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: randomUUID(), reason: 'بررسی امکان ثبت مالی قرارداد قطعی همکار' })
-    .authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok;
+    .authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok &&
+    await hasSharedOperationAuthority(tx, actorId, 'accounting', 'accounting_invoice_candidates_manage');
   const owner = { caseId, revision: root.headRevision, integrityHash: root.integrityHash };
   const projection = object(root.head.internalProjection);
   const accounting = object(projection.accounting), partner = object(projection.partner);

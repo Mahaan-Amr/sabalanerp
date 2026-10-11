@@ -130,9 +130,10 @@ export function prismaAuthorizationSource<Action extends PartnerActionV2>(tx: Pr
       }
     }
     const authority = actor?.isActive && resource ? await resolveAuthority(tx, { actorId, root }) : { grants: [], authorizationRevision: 1 };
+    const off = await tx.featurePermission.findMany({ where: { userId: actorId, isActive: true, permissionLevel: 'none', OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { feature: true } });
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
     return { ...authority, evaluatedAt: clock.now.toISOString(), resource, actor: {
-      id: actorId, active: actor?.isActive ?? false, role: actor?.role ?? 'USER',
+      disabledFeatures: off.map(row => row.feature), id: actorId, active: actor?.isActive ?? false, role: actor?.role ?? 'USER',
       ...(actor?.departmentId ? { departmentId: actor.departmentId } : {}),
       ...(actor?.partnerProfile ? { partnerProfile: actor.partnerProfile } : {}),
     } };

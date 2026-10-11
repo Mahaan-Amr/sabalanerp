@@ -17,7 +17,7 @@ import {
 } from '../services/hrActionPermissionCatalog';
 
 const router = express.Router();
-const administer = authorize('ADMIN', 'MANAGER');
+const administer = [authorize('ADMIN', 'MANAGER'), requireHrFeature('AUTHORITY_RESPONSIBILITY_ADMINISTRATION', 'ADMIN')];
 export const viewAuthorizationContext = requireHrFeature('AUTHORITY_RESPONSIBILITY_ADMINISTRATION', 'VIEW');
 const levelValues = new Set(HR_REDESIGN_CATALOG.featureLevels);
 const authorityValues = new Set<string>(HR_REDESIGN_CATALOG.businessAuthorities);
@@ -168,8 +168,7 @@ router.get('/effective-access/:userId', viewAuthorizationContext, asyncHandler(a
     userRole: target.role,
   });
   res.json({ success: true, data: {
-    workspaces: effective.workspaces.filter(({ workspace }) => workspace === 'hr'),
-    features: effective.features.filter(({ workspace }) => workspace === 'hr'),
+    ...effective,
     evaluatedAt: new Date(),
   } });
 }));
@@ -183,6 +182,8 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
   const requestedWorkspaces = (req.body.workspaceLevels && typeof req.body.workspaceLevels === 'object')
     ? req.body.workspaceLevels as Record<string, string | null>
     : {};
+  const preserveFeatureInheritance = req.body.preserveFeatureInheritance === true;
+  const managedFeatures = Array.isArray(req.body.managedFeatures) ? [...new Set<string>(req.body.managedFeatures.map(text))] : [];
   const requestedFeatures = Array.isArray(req.body.features) ? req.body.features : [];
   const now = new Date();
   const legacyFeatures = Object.values(FEATURES);
@@ -205,13 +206,15 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
   const updated = await prisma.$transaction(async (tx) => {
     const target = await tx.user.findUniqueOrThrow({ where: { id: targetUserId }, select: { id: true, role: true, isActive: true } });
     if (!target.isActive) throw conflict('حساب کاربر غیرفعال است.');
+    const previousAccess = await getEffectiveUserAccess(tx, { userId: targetUserId, userRole: target.role });
     if (!canAssignSystemRole({ actorRole: req.user!.role, targetRole: target.role, requestedRole })) {
       throw forbidden('مدیر نمی‌تواند حساب مدیر سامانه را تغییر دهد یا نقش مدیر سامانه بسازد.');
     }
     const validRoles = new Set(['USER', 'SALES', 'MODERATOR', 'MANAGER', 'ADMIN']);
     if (!validRoles.has(requestedRole)) throw badRequest('نقش معتبر نیست.');
     const validLevels = new Set(['view', 'edit', 'admin']);
-    if (req.user!.role === 'MANAGER' && Object.values(requestedWorkspaces).some((level) => level === 'admin')) {
+    if (req.user!.role === 'MANAGER' && Object.entries(requestedWorkspaces).some(([workspace, level]) => level === 'admin'
+      && (!preserveFeatureInheritance || previousAccess.workspaces.find(row => row.workspace === workspace)?.permission !== 'admin')))  {
       throw forbidden('مدیر نمی‌تواند سطح مدیریت اعطا کند.');
     }
 
@@ -223,8 +226,10 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
       ...persistedHrFeatureSet,
       ...HR_ACTION_PERMISSION_GROUPS.flatMap(({ permissions }) => permissions.map(({ code }) => code)),
     ]);
+    if (managedFeatures.some(feature => !legacyFeatureSet.has(feature as never) && !validHrFeatures.has(feature))) throw badRequest('فهرست مجوزهای قابل مدیریت معتبر نیست.');
+    if (req.user!.role === 'MANAGER' && managedFeatures.some(feature => getHrActionPermissionDefinition(feature)?.level === 'ADMIN' && !desiredHr.includes(feature))) throw forbidden('مدیر نمی‌تواند مجوز مدیریت را تغییر دهد.');
     if (desiredHr.some((feature) => !validHrFeatures.has(feature))) throw badRequest('یک یا چند مجوز منابع انسانی معتبر نیست.');
-    for (const featureCode of desiredHr.filter((feature) => contractHrFeatureSet.has(feature as never) && !persistedHrFeatureSet.has(feature))) {
+    for (const featureCode of desiredHr.filter(feature => !preserveFeatureInheritance || managedFeatures.includes(feature)).filter((feature) => contractHrFeatureSet.has(feature as never) && !persistedHrFeatureSet.has(feature))) {
       await tx.hrFeatureCatalog.upsert({
         where: { code: featureCode },
         update: { workspaceCode: HR_REDESIGN_CATALOG.workspaceCode, version: HR_REDESIGN_CATALOG.contractVersion, isActive: true },
@@ -244,6 +249,8 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
       const level = requestedWorkspaces[workspace];
       const existing = existingWorkspacePermissions.find((permission) => permission.workspace === workspace);
       const nextExpiry = expiryWasProvided ? effectiveTo ?? null : existing?.expiresAt ?? null;
+      if (preserveFeatureInheritance && !expiryWasProvided
+        && (level || null) === (existing?.isActive ? existing.permissionLevel : null)) continue;
       if (level && !validLevels.has(level)) throw badRequest('سطح فضای کاری معتبر نیست.');
       if (!level) await tx.workspacePermission.deleteMany({ where: { userId: targetUserId, workspace } });
       else await tx.workspacePermission.upsert({
@@ -259,53 +266,103 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
     const managedLegacyFeatures = legacyFeatures.filter((feature) => FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP] !== 'hr');
     const managedLegacyFeatureSet = new Set<string>(managedLegacyFeatures);
     const existingFeaturePermissions = await tx.featurePermission.findMany({ where: { userId: targetUserId, feature: { in: managedLegacyFeatures } } });
-    await tx.featurePermission.deleteMany({
-      where: { userId: targetUserId, feature: { in: managedLegacyFeatures.filter((feature) => !desiredLegacy.includes(feature)) } },
-    });
-    for (const feature of desiredLegacy.filter((candidate) => managedLegacyFeatureSet.has(candidate))) {
-      const workspace = String(FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP]);
-      const level = requestedLevelByFeature.get(feature) || (feature.endsWith('_view') ? 'view' : 'edit');
-      const existing = existingFeaturePermissions.find((permission) => permission.feature === feature);
-      const nextExpiry = expiryWasProvided ? effectiveTo ?? null : existing?.expiresAt ?? null;
-      if (req.user!.role === 'MANAGER' && level === 'admin') throw forbidden('مدیر نمی‌تواند سطح مدیریت اعطا کند.');
-      await tx.featurePermission.upsert({
-        where: { userId_workspace_feature: { userId: targetUserId, workspace, feature } },
-        create: { userId: targetUserId, workspace, feature, permissionLevel: level, grantedBy: actorId(req), expiresAt: nextExpiry },
-        update: { permissionLevel: level, grantedBy: actorId(req), grantedAt: now, expiresAt: nextExpiry, isActive: true },
+    if (!preserveFeatureInheritance) {
+      await tx.featurePermission.deleteMany({
+        where: { userId: targetUserId, permissionLevel: { not: 'none' }, feature: { in: managedLegacyFeatures.filter((feature) => !desiredLegacy.includes(feature)) } },
       });
+      for (const feature of desiredLegacy.filter((candidate) => managedLegacyFeatureSet.has(candidate))) {
+        const workspace = String(FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP]);
+        const level = requestedLevelByFeature.get(feature) || (feature.endsWith('_view') ? 'view' : 'edit');
+        const existing = existingFeaturePermissions.find((permission) => permission.feature === feature);
+        const nextExpiry = expiryWasProvided ? effectiveTo ?? null : existing?.expiresAt ?? null;
+        if (req.user!.role === 'MANAGER' && level === 'admin') throw forbidden('مدیر نمی‌تواند سطح مدیریت اعطا کند.');
+        await tx.featurePermission.upsert({
+          where: { userId_workspace_feature: { userId: targetUserId, workspace, feature } },
+          create: { userId: targetUserId, workspace, feature, permissionLevel: level, grantedBy: actorId(req), expiresAt: nextExpiry },
+          update: { permissionLevel: level, grantedBy: actorId(req), grantedAt: now, expiresAt: nextExpiry, isActive: true },
+        });
+      }
+
     }
 
     const activeHrWorkspace = await tx.hrWorkspaceAccessGrant.findMany({ where: { userId: targetUserId, workspaceCode: 'HUMAN_RESOURCES', status: 'ACTIVE' } });
-    for (const grant of activeHrWorkspace) {
-      await tx.hrWorkspaceAccessGrant.update({ where: { id: grant.id }, data: { status: 'REVOKED', effectiveTo: now, revokedAt: now, revokedByUserId: actorId(req), reason } });
-    }
-    const hrLevel = text(requestedWorkspaces.hr).toUpperCase();
-    if (hrLevel) {
-      if (!levelValues.has(hrLevel as never)) throw badRequest('سطح منابع انسانی معتبر نیست.');
-      if (req.user!.role === 'MANAGER' && hrLevel === 'ADMIN') throw forbidden('مدیر نمی‌تواند سطح مدیریت اعطا کند.');
-      await tx.hrWorkspaceAccessGrant.create({ data: {
-        stableKey: `hr-access:${targetUserId}:workspace:${now.toISOString()}:${crypto.randomUUID()}`,
-        userId: targetUserId, workspaceCode: 'HUMAN_RESOURCES', level: hrLevel as never,
-        effectiveFrom: now, effectiveTo: expiryWasProvided ? effectiveTo ?? null : activeHrWorkspace[0]?.effectiveTo ?? null, grantedByUserId: actorId(req), reason,
-      } });
+    const hrWorkspaceChanged = !preserveFeatureInheritance || expiryWasProvided
+      || text(requestedWorkspaces.hr).toUpperCase() !== (activeHrWorkspace[0]?.level ?? '');
+    if (hrWorkspaceChanged) {
+      for (const grant of activeHrWorkspace) {
+        await tx.hrWorkspaceAccessGrant.update({ where: { id: grant.id }, data: { status: 'REVOKED', effectiveTo: now, revokedAt: now, revokedByUserId: actorId(req), reason } });
+      }
+      const hrLevel = text(requestedWorkspaces.hr).toUpperCase();
+      if (hrLevel) {
+        if (!levelValues.has(hrLevel as never)) throw badRequest('سطح منابع انسانی معتبر نیست.');
+        if (req.user!.role === 'MANAGER' && hrLevel === 'ADMIN') throw forbidden('مدیر نمی‌تواند سطح مدیریت اعطا کند.');
+        await tx.hrWorkspaceAccessGrant.create({ data: {
+          stableKey: `hr-access:${targetUserId}:workspace:${now.toISOString()}:${crypto.randomUUID()}`,
+          userId: targetUserId, workspaceCode: 'HUMAN_RESOURCES', level: hrLevel as never,
+          effectiveFrom: now, effectiveTo: expiryWasProvided ? effectiveTo ?? null : activeHrWorkspace[0]?.effectiveTo ?? null, grantedByUserId: actorId(req), reason,
+        } });
+      }
+
     }
 
     const activeHrFeatures = await tx.hrFeatureAccessGrant.findMany({ where: { userId: targetUserId, status: 'ACTIVE' } });
-    for (const grant of activeHrFeatures) {
-      await tx.hrFeatureAccessGrant.update({ where: { id: grant.id }, data: { status: 'REVOKED', effectiveTo: now, revokedAt: now, revokedByUserId: actorId(req), reason } });
+    if (!preserveFeatureInheritance) {
+      for (const grant of activeHrFeatures) {
+        await tx.hrFeatureAccessGrant.update({ where: { id: grant.id }, data: { status: 'REVOKED', effectiveTo: now, revokedAt: now, revokedByUserId: actorId(req), reason } });
+      }
+      for (const featureCode of desiredHr) {
+        const requested = requestedLevelByFeature.get(featureCode)?.toUpperCase();
+        const definitionLevel = getHrActionPermissionDefinition(featureCode)?.level ?? 'VIEW';
+        const level = requested && levelValues.has(requested as never) ? requested : definitionLevel;
+        if (req.user!.role === 'MANAGER' && level === 'ADMIN') throw forbidden('مدیر نمی‌تواند سطح مدیریت اعطا کند.');
+        await tx.hrFeatureAccessGrant.create({ data: {
+          stableKey: `hr-access:${targetUserId}:feature:${featureCode}:${now.toISOString()}:${crypto.randomUUID()}`,
+          userId: targetUserId, featureCode, level: level as never, effectiveFrom: now,
+          effectiveTo: expiryWasProvided ? effectiveTo ?? null : activeHrFeatures.find((grant) => grant.featureCode === featureCode)?.effectiveTo ?? null, grantedByUserId: actorId(req), reason,
+        } });
+      }
     }
-    for (const featureCode of desiredHr) {
-      const requested = requestedLevelByFeature.get(featureCode)?.toUpperCase();
-      const definitionLevel = getHrActionPermissionDefinition(featureCode)?.level ?? 'VIEW';
-      const level = requested && levelValues.has(requested as never) ? requested : definitionLevel;
-      if (req.user!.role === 'MANAGER' && level === 'ADMIN') throw forbidden('مدیر نمی‌تواند سطح مدیریت اعطا کند.');
-      await tx.hrFeatureAccessGrant.create({ data: {
-        stableKey: `hr-access:${targetUserId}:feature:${featureCode}:${now.toISOString()}:${crypto.randomUUID()}`,
-        userId: targetUserId, featureCode, level: level as never, effectiveFrom: now,
-        effectiveTo: expiryWasProvided ? effectiveTo ?? null : activeHrFeatures.find((grant) => grant.featureCode === featureCode)?.effectiveTo ?? null, grantedByUserId: actorId(req), reason,
-      } });
+    // An unchecked operation is a durable, direct off decision, not deletion
+    // of a grant (which would restore inherited or administrator access).
+    const enabled = new Set<string>([...desiredLegacy, ...desiredHr]);
+    for (const feature of managedFeatures) {
+      const workspace = legacyFeatureSet.has(feature as never)
+        ? String(FEATURE_WORKSPACE_MAP[feature as keyof typeof FEATURE_WORKSPACE_MAP]) : 'hr';
+      if (enabled.has(feature)) {
+        await tx.featurePermission.deleteMany({ where: { userId: targetUserId, workspace, feature, permissionLevel: 'none' } });
+        if (preserveFeatureInheritance) {
+          // Restore inheritance before considering a new direct grant. Untouched
+          // permissions never enter this branch and retain their original source.
+          const restored = await getEffectiveUserAccess(tx, { userId: targetUserId, userRole: requestedRole as never });
+          const level = requestedLevelByFeature.get(feature) || 'view';
+          const rank: Record<string, number> = { view: 1, edit: 2, admin: 3 };
+          const inherited = restored.features.find(row => row.feature === feature);
+          if (!inherited || rank[inherited.permission] < rank[level]) {
+            if (req.user!.role === 'MANAGER' && level === 'admin') throw forbidden('مدیر نمی‌تواند سطح مدیریت اعطا کند.');
+            if (workspace === 'hr') {
+              await tx.hrFeatureAccessGrant.create({ data: {
+                stableKey: `hr-access:${targetUserId}:feature:${feature}:${now.toISOString()}:${crypto.randomUUID()}`,
+                userId: targetUserId, featureCode: feature, level: level.toUpperCase() as never,
+                effectiveFrom: now, effectiveTo: effectiveTo ?? null, grantedByUserId: actorId(req), reason,
+              } });
+            } else {
+              await tx.featurePermission.upsert({
+                where: { userId_workspace_feature: { userId: targetUserId, workspace, feature } },
+                create: { userId: targetUserId, workspace, feature, permissionLevel: level, grantedBy: actorId(req), expiresAt: effectiveTo ?? null },
+                update: { permissionLevel: level, isActive: true, expiresAt: effectiveTo ?? null, grantedBy: actorId(req), grantedAt: now },
+              });
+            }
+          }
+        }
+      } else {
+        await tx.featurePermission.upsert({
+          where: { userId_workspace_feature: { userId: targetUserId, workspace, feature } },
+          create: { userId: targetUserId, workspace, feature, permissionLevel: 'none', grantedBy: actorId(req) },
+          update: { permissionLevel: 'none', isActive: true, expiresAt: null, grantedBy: actorId(req), grantedAt: now },
+        });
+      }
     }
-    await writeAudit(tx, { entityType: 'USER_ACCESS', entityId: targetUserId, action: 'REPLACED', actorUserId: actorId(req), reason, effectiveAt: now, before: target, after: { role: requestedRole, workspaceLevels: requestedWorkspaces, features: [...desiredLegacy, ...desiredHr], effectiveTo } });
+    await writeAudit(tx, { entityType: 'USER_ACCESS', entityId: targetUserId, action: 'REPLACED', actorUserId: actorId(req), reason, effectiveAt: now, before: { ...target, access: previousAccess }, after: { role: requestedRole, workspaceLevels: requestedWorkspaces, features: [...desiredLegacy, ...desiredHr], disabledFeatures: managedFeatures.filter(feature => !enabled.has(feature)), effectiveTo } });
     return { userId: targetUserId, role: requestedRole, workspaceLevels: requestedWorkspaces, features: [...desiredLegacy, ...desiredHr] };
   });
   res.json({ success: true, data: updated });

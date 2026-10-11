@@ -14,7 +14,8 @@ Sales policy changes are included. **This does not complete issue 319.**
   composition values; evidence is freshly resolved on every call, never accepted
   as an HTTP permission payload. The fixed Partner bundle cannot be expanded by
   internal grants or a stray ADMIN role. Internal grants must already be resolved
-  explicit action/root-kind/purpose/scope evidence from the central owner (#296).
+  action/root-kind/purpose/scope evidence from the central owner (#296), including
+  the fixed existing-workspace operation bridge defined in ADR-0123.
 - `projectActionAvailability` projects canonical Persian denials, omits hidden
   resources and deduplicates actions. It is advisory; it is not a write permit.
 - `createPartnerAuthorizationV2`, `createPrismaPartnerAuthorizationV2` and
@@ -88,7 +89,9 @@ so an earlier grant expiry timestamp cannot survive the wait as a permit.
 exported by `effectiveAccessService.ts`. It reads explicit persisted grants,
 preserves direct narrowing, expiry and revocation, and holds the central authority
 revision/absence lock through commit. The injected `ResolvePartnerAuthority`
-seam remains available for non-runtime tests. There is no workspace fallback.
+seam remains available for non-runtime tests. The fixed workspace bridge supplies
+only absent shared-operation authority; active explicit prohibitions and narrowed
+audiences take precedence. Commands retain their current narrow feature checks.
 See `../../effectiveAuthorization/README.md` for shared grant provenance,
 provisioning, lock order and migration boundaries.
 
@@ -112,9 +115,9 @@ those facts or acquire database locks itself.
 
 ## Acceptance still open
 
-- #296 legacy grant dry-run/cutover and ordinary cross-workspace parity remain
-  separate. New grants are explicit; existing generic feature/workspace rows
-  are never guessed into resource scopes.
+- #296 legacy grant dry-run/cutover remains separate. Shared-operation parity
+  derives fixed backend scopes from current operation permissions (ADR-0123),
+  without a per-user grant migration or client-selected resource scope.
 - Creation/discovery transport and owning command integration. Pre-Case technical
   recovery and catalog now have authenticated, cohort-gated closed transport;
   the central Partner creation UI/channel is not activated.

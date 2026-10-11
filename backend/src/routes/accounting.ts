@@ -857,6 +857,11 @@ router.post('/contracts/partner/:caseId/edit-permission', protect,
         const allowed = await createAuditedPartnerAuthorization(tx, { actorId: req.user!.id, purpose: 'ACCOUNTING', channel: 'API' },
           { correlationId: randomUUID(), reason: req.body.reason }).authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: req.params.caseId });
         if (!allowed.ok) throw new Error('PARTNER_CONTRACT_NOT_AVAILABLE');
+        const { hasSharedOperationAuthority } = await import('../services/partnerSales/authorization/sharedOperationAuthority');
+        if (!await hasSharedOperationAuthority(tx, req.user!.id, 'accounting', FEATURES.ACCOUNTING_CORRECTIONS_MANAGE) &&
+            !await hasSharedOperationAuthority(tx, req.user!.id, 'accounting', FEATURES.ACCOUNTING_CORRECTIONS_APPROVE)) {
+          throw new Error('PARTNER_CONTRACT_NOT_AVAILABLE');
+        }
         const root = await tx.partnerSaleCase.findUnique({ where: { id: req.params.caseId } });
         if (!root?.customerContractId) throw new Error('PARTNER_CONTRACT_NOT_AVAILABLE');
         const { openPartnerCommercialEditPermission } = await import('../services/crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter');

@@ -25,6 +25,7 @@ import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from '
 import { PartnerCollectionIntegrityError } from './collections';
 import { withCurrentSabalanPlan } from './sabalanPlan';
 import { readPartnerAccountingCapabilities } from './capabilities';
+import { hasSharedOperationAuthority } from '../authorization/sharedOperationAuthority';
 import { readPartnerInvoiceSource } from './invoiceSource';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -92,6 +93,10 @@ export function createPrismaPartnerAccountingRepository(input: {
               reason: `اقدام حسابداری پرونده همکار: ${action}` })
             .authorize(authAction, { kind: 'CASE', id: row.id });
           if (!allowed.ok) return allowed;
+          if ((action === 'QUEUE' && !await hasSharedOperationAuthority(tx, input.actorId, 'accounting', 'accounting_invoice_candidates_manage')) ||
+              (action === 'PUBLISH_FACT' && !await hasSharedOperationAuthority(tx, input.actorId, 'accounting', 'accounting_evidence_manage'))) {
+            return { ok: false, error: partnerError('FORBIDDEN') };
+          }
           if (action !== 'PUBLISH_FACT') {
             try { await assertPartnerFinancialFinality(tx, row.id); }
             catch { return { ok: false, error: partnerError('STATE_CONFLICT') }; }

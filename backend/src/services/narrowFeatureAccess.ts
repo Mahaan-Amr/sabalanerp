@@ -19,6 +19,7 @@ export const evaluateNarrowFeatureAccess = (input: {
   userWorkspace: NarrowPermissionRecord;
   roleWorkspace: NarrowPermissionRecord;
 }, at = new Date()): { allowed: boolean; permissionLevel: NarrowPermissionLevel | null } => {
+  if (activeAt(input.userFeature, at) && input.userFeature?.permissionLevel === 'none') return { allowed: false, permissionLevel: null };
   if (input.role === 'ADMIN') return { allowed: true, permissionLevel: 'admin' };
   const directFeature = activeAt(input.userFeature, at) ? input.userFeature : null;
   const directWorkspace = activeAt(input.userWorkspace, at) ? input.userWorkspace : null;

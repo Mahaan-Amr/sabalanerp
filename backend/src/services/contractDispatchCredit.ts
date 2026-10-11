@@ -35,7 +35,6 @@ export const canManageDispatch = async (db: CreditDb, actorId: string) => {
 export const canReviewManagerDispatch = async (db: CreditDb, actorId: string) => {
   const actor = await db.user.findUnique({ where: { id: actorId } });
   if (!actor?.isActive || !['ADMIN', 'MANAGER'].includes(actor.role)) return false;
-  if (actor.role === 'ADMIN') return true;
   const access = await getEffectiveUserAccess(db, { userId: actor.id, userRole: actor.role });
   return access.workspaces.some(item => item.workspace === 'accounting')
     && access.features.some(item => item.workspace === 'accounting' && item.feature === 'accounting_contracts_view');
@@ -51,7 +50,7 @@ export const dispatchCreditAccess = async (db: CreditDb, contract: SalesContract
   const user = await db.user.findUnique({ where: { id: actorId } });
   if (!user?.isActive) return { read: false, request: false, manage: false, managerDecision: false, seller: false };
   const access = await getEffectiveUserAccess(db, { userId: user.id, userRole: user.role });
-  const feature = (workspace: string, name: string, edit = false) => user.role === 'ADMIN' ||
+  const feature = (workspace: string, name: string, edit = false) =>
     (access.workspaces.some(item => item.workspace === workspace && (!edit || item.permission !== 'view'))
       && access.features.some(item => item.workspace === workspace && item.feature === name && (!edit || item.permission !== 'view')));
   const accounting = feature('accounting', 'accounting_contracts_view');

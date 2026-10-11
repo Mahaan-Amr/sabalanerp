@@ -535,6 +535,10 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     // Allow the actual step edit and initial approval binding to persist first.
     await page.waitForTimeout(1_500);
     const writesBeforePolling = wizardWrites;
+    await expect(workflow(page).getByText(/^آخرین دریافت:/)).toBeVisible();
+    const readsBeforeManual = pricingReads;
+    await workflow(page).getByRole('button', { name: 'بررسی تازه استعلام', exact: true }).click();
+    await expect.poll(() => pricingReads).toBeGreaterThan(readsBeforeManual);
     const readsBeforePolling = pricingReads;
     await expect.poll(() => pricingReads, { timeout: 30_000 }).toBeGreaterThanOrEqual(readsBeforePolling + 2);
     await page.waitForTimeout(1_000);
@@ -552,9 +556,11 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     });
     await expect.poll(() => pricingReads).toBeGreaterThan(readsBeforeHidden);
     await page.waitForTimeout(500);
+    const lastSuccessfulRead = await workflow(page).getByText(/^آخرین دریافت:/).textContent();
     pricingUnavailable = true;
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await expect(workflow(page).getByText('دریافت پاسخ جدید استعلام انجام نشد؛ اطلاعات قبلی حفظ شده است.', { exact: true })).toBeVisible();
+    await expect(workflow(page).getByText(/^آخرین دریافت:/)).toHaveText(lastSuccessfulRead!);
     await expect(workflow(page).getByRole('table', { name: 'محصولات قرارداد', exact: true })).toBeVisible();
     await expect(workflow(page).getByRole('button', { name: 'ثبت یادداشت قرارداد', exact: true })).toBeDisabled();
     pricingUnavailable = false;

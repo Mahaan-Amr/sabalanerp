@@ -468,6 +468,12 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         title="محصول اصلاح‌شده ذخیره شده است. برای دریافت قیمت تازه، استعلام همان محصول را ارسال کنید." />}
       {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
       {submissionError && <ErpInlineState kind="error" title={submissionError} />}
+      {pricingRefresh && ['pricing', 'confirmation'].includes(draft.step) && <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-sm">{pricingRefresh.lastReadAt === null ? 'هنوز پاسخ تازه دریافت نشده است.'
+          : `آخرین دریافت: ${new Date(pricingRefresh.lastReadAt).toLocaleString('fa-IR')}`}</span>
+        <ErpButton variant="outline" label="بررسی تازه استعلام" onClick={pricingRefresh.onRefresh}
+          disabled={mutatePending || quotePending || actionPending} />
+      </div>}
       {pricingRefresh?.error && <ErpInlineState kind="stale" title={pricingRefresh.error} action={{ label: 'تلاش مجدد', onClick: pricingRefresh.onRefresh }} />}
       {externalError && !error && <ErpInlineState kind="error" title={externalError} />}
       {mutationBlockReason && <ErpInlineState kind="stale" title={mutationBlockReason}

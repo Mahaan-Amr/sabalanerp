@@ -44,3 +44,8 @@ assert.equal(destinationDutyHref('sales', {
 }), '/dashboard/sales/contracts/create?caseId=case-1');
 
 console.log('cross-workspace duty destination tests passed');
+
+assert.equal(destinationDutyHref('accounting', {
+  id: 'dispatch-duty', status: 'OPEN', sourceActionCode: 'CONTRACT_DISPATCH_DECISION',
+  destinationHref: '/dashboard/accounting/contracts/contract-1',
+}), '/dashboard/accounting/contracts/contract-1');

@@ -17,3 +17,11 @@ Managerial approval does not itself release already consumed Seller credit. Chan
 The capabilities also apply to existing active ordinary Contracts that satisfy the eligibility conditions, without rewriting historical evidence or assigning credit or managerial authority automatically.
 
 The user confirmed the complete shared understanding on 2026-10-03. This decision supersedes ADR-0110 solely for dispatch eligibility and the dispatch-based exemption from no-financial-record expiration; other lifecycle, evidence, financial-record, reporting, recovery, and physical-operation safeguards remain applicable.
+
+## Independent managerial decision — 2026-10-11
+
+The owner approved a separate managerial dispatch decision for every request, including requests submitted by an Admin or Manager. Submitting never grants dispatch authority, and the requester cannot approve or reject their own managerial request. Only active users with the `MANAGER` or `ADMIN` role and permission to review the Accounting Contract can decide; broad Accounting management permissions alone do not qualify an Accountant.
+
+The Accountant submits without a promised-payment date. Eligible independent Managers and Admins receive a notification and one shared decision duty linking to the full Accounting Contract case. The first committed decision wins. The approver determines a mandatory promised-payment date of today or a future day during approval; rejection requires a reason and no date. The requesting Accountant receives a result notification. The Contract case displays status, decision-maker identity, decision time, the approved promised-payment date, and rejection reason when applicable.
+
+This supersedes this ADR's initial request-date requirement and self-decision allowance for managerial dispatch requests only. Existing Seller-credit, date-change, transfer, financial, commercial-finality, expiry, revocation, reminder and other dispatch rules remain in force. Historical decisions and dates are preserved; earlier approval records are not assigned invented decision times. A commercial revision still requires renewed managerial approval. Losing an approver's current review access removes their actionable task and notification access.

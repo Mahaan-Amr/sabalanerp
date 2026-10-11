@@ -1138,7 +1138,7 @@ export async function updateContract(
         sourceType: 'SALES_CONTRACT_CORRECTION', sourceId: transactionCorrection.id,
         sourceActionCode: 'SALES_EDIT_CONTRACT_CORRECTION', status: 'OPEN',
       } });
-      if (!correctionDuty || correctionDuty.dueAt < new Date()) throw new Error('DUTY_SALES_EDIT_EXPIRED');
+      if (!correctionDuty?.dueAt || correctionDuty.dueAt < new Date()) throw new Error('DUTY_SALES_EDIT_EXPIRED');
       if (user.role !== 'ADMIN' && correctionDuty.currentAssigneeUserId !== userId) throw new Error('Access denied');
     }
 

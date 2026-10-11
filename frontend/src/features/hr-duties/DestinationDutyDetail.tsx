@@ -230,6 +230,7 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
   }
 
   const duty = state.data;
+  const contractDispatchDecision = duty.sourceActionCode === 'CONTRACT_DISPATCH_DECISION' && !!duty.destinationHref;
   const isCollateralVerificationDecision = ['HIRING_COLLATERAL_VERIFY_RECEIPT', 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN'].includes(duty.sourceActionCode);
   const structuredResult = duty.result && typeof duty.result === 'object' && !Array.isArray(duty.result)
     ? duty.result as { actionCode?: string; reason?: string | null }
@@ -368,7 +369,10 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
           </div>
         </ErpSection>
       )}
-      {!isCollateralVerificationDecision && duty.allowedActionCodes.length > 0 && ['ASSIGNEE', 'SHARED'].includes(duty.access) && duty.status === 'OPEN' && (
+      {contractDispatchDecision && duty.status === 'OPEN' && <ErpSection title="بررسی قرارداد">
+        <ErpButton label="مشاهده قرارداد و ثبت تصمیم" href={duty.destinationHref!} tone="primary" />
+      </ErpSection>}
+      {!contractDispatchDecision && !isCollateralVerificationDecision && duty.allowedActionCodes.length > 0 && ['ASSIGNEE', 'SHARED'].includes(duty.access) && duty.status === 'OPEN' && (
         <ErpSection title="ثبت نتیجه" description="نتیجه مستقیماً و یک‌بار به فرایند مبدأ بازگردانده می‌شود.">
           {correctionAction && (
             <div className="mb-4">

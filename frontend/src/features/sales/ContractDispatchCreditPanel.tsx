@@ -5,6 +5,7 @@ import PersianCalendarComponent from '@/components/PersianCalendar';
 import { dispatchCreditApi, type DispatchAuthority, type DispatchCreditView } from './dispatchCreditApi';
 import { userFacingError } from '@/features/dispatch/userFacingError';
 import { formatCustomerCreditRials } from '@/features/crm/customerCreditPresentation';
+import { announceCrossWorkspaceDutyChanged } from '@/features/cross-workspace-duties/crossWorkspaceDutyApi';
 
 const labels: Record<string, string> = { MANAGER: 'مجوز مدیریتی', CREDIT: 'ضمانت فروشنده', DATE: 'تغییر وعده پرداخت', CUSTOMER_DATE: 'تغییر وعده پرداخت اعتباری مشتری خاص', TRANSFER: 'انتقال ضمانت',
   PENDING: 'در انتظار تصمیم', APPROVED: 'تأییدشده', REJECTED: 'ردشده', REVOKED: 'لغوشده', WITHDRAWN: 'پس‌گرفته‌شده', SUPERSEDED: 'جایگزین‌شده' };
@@ -24,20 +25,23 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
     catch (failure) { setError(userFacingError(failure, 'وضعیت مجوز ارسال دریافت نشد.')); }
   }, [contractId]);
   useEffect(() => { void load(); }, [load, refreshKey]);
-  const open = (next: Operation) => { setReason(''); setDate(next.kind === 'CUSTOMER_DATE' ? view?.customerCredit?.promisedDate.slice(0, 10) ?? '' : next.authority?.promisedDate.slice(0, 10) ?? ''); setError(null); setOperation(next); };
+  const open = (next: Operation) => { setReason(''); setDate(next.kind === 'CUSTOMER_DATE' ? view?.customerCredit?.promisedDate.slice(0, 10) ?? ''
+    : next.kind === 'ACTION' && next.action === 'APPROVE' && next.authority?.kind === 'MANAGER' ? '' : next.authority?.promisedDate?.slice(0, 10) ?? ''); setError(null); setOperation(next); };
+  const needsDate = !!operation && (['DATE', 'CUSTOMER_DATE'].includes(operation.kind)
+    || (operation.kind === 'ACTION' && operation.action === 'APPROVE' && operation.authority?.kind === 'MANAGER'));
   const save = async () => {
     if (!operation || pending) return;
     setPending(true); setError(null);
     try {
-      if (operation.kind === 'ACTION') await dispatchCreditApi.act(operation.authority!.id, operation.action!, reason);
-      else await dispatchCreditApi.request(contractId, { kind: operation.kind, promisedDate: date, reason,
+      if (operation.kind === 'ACTION') await dispatchCreditApi.act(operation.authority!.id, operation.action!, reason, needsDate ? date : undefined);
+      else await dispatchCreditApi.request(contractId, { kind: operation.kind, promisedDate: needsDate ? date : undefined, reason,
         targetAuthorityId: operation.authority?.id, targetSellerId: operation.kind === 'TRANSFER' ? view?.responsibleSeller.id : undefined });
-      setOperation(null); await load(); onChanged?.();
+      announceCrossWorkspaceDutyChanged(); setOperation(null); await load(); onChanged?.();
     } catch (failure) { setError(userFacingError(failure, 'درخواست ثبت نشد.')); }
     finally { setPending(false); }
   };
   const actions = (row: DispatchAuthority) => <div className="flex flex-wrap gap-2">
-    {row.status === 'PENDING' && ((row.kind === 'CUSTOMER_DATE' ? view?.canManageCustomerDate : view?.access.manage && row.kind !== 'TRANSFER') || row.targetSellerId === view?.actorId) && <>
+    {row.status === 'PENDING' && (row.kind === 'CUSTOMER_DATE' ? view?.canManageCustomerDate : row.canDecide) && <>
       <ErpButton label="تأیید" tone="success" onClick={() => open({ kind: 'ACTION', authority: row, action: 'APPROVE' })} />
       <ErpButton label="رد درخواست" tone="danger" variant="outline" onClick={() => open({ kind: 'ACTION', authority: row, action: 'DECLINE' })} />
     </>}
@@ -52,14 +56,18 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
   </div>;
   const renderRow = (row: DispatchAuthority) => <ErpCard key={row.id} className="space-y-2 p-3">
     <p>{labels[row.kind]} — {labels[row.status]}</p>
-    <p className="text-sm sds-text-secondary">وعده پرداخت: {formatDate(row.promisedDate)}{row.kind === 'CREDIT' ? ` — ${BigInt(row.amountRials).toLocaleString('fa-IR')} ریال` : ''}
+    <p className="text-sm sds-text-secondary">{row.promisedDate ? `وعده پرداخت: ${formatDate(row.promisedDate)}` : 'تاریخ وعده پرداخت هنگام تأیید تعیین می‌شود.'}{row.kind === 'CREDIT' ? ` — ${BigInt(row.amountRials).toLocaleString('fa-IR')} ریال` : ''}
       {row.sellerName ? ` — ضامن: ${row.sellerName}` : ''}</p>
+    {row.kind === 'MANAGER' && row.decidedBy && <p className="text-sm sds-text-secondary">
+      {row.status === 'APPROVED' ? 'تأییدکننده' : 'تصمیم‌گیرنده'}: {row.deciderName || 'کاربر ثبت‌شده'}
+      {row.decidedAt ? ` — زمان تصمیم: ${new Date(row.decidedAt).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' })}` : ''}
+    </p>}
     {row.reason && <p className="text-sm sds-text-muted">{row.reason}</p>}{actions(row)}
   </ErpCard>;
   const needsReason = operation && (['DATE','CUSTOMER_DATE','TRANSFER'].includes(operation.kind) || ['DECLINE','REVOKE'].includes(operation.action ?? ''));
   return <div className="space-y-3">
     <div className="flex flex-wrap gap-2">{children}
-      {(view?.access.request || view?.access.manage) && <ErpButton label="درخواست تأیید مدیریتی" variant="outline" tone="primary"
+      {(view?.access.request || view?.access.manage || view?.access.managerDecision) && <ErpButton label="درخواست تأیید مدیریتی" variant="outline" tone="primary"
         disabled={pending || !view.canRequestManager || !!view.activeManagerId || view.authorities.some(row => row.kind === 'MANAGER' && row.status === 'PENDING')}
         onClick={() => open({ kind: 'MANAGER' })} />}
     </div>
@@ -78,10 +86,12 @@ export default function ContractDispatchCreditPanel({ contractId, refreshKey, ch
     <ErpSheet open={!!operation} onClose={() => setOperation(null)} pending={pending} presentation="modal"
       title={operation?.kind === 'ACTION' ? operation.action === 'APPROVE' ? 'تأیید درخواست' : operation.action === 'DECLINE' ? 'رد درخواست' : 'لغو درخواست یا مجوز'
         : labels[operation?.kind ?? 'MANAGER']}
-      footer={<ErpButton label="ثبت" disabled={pending || (!operation?.action && !date) || (!!needsReason && !reason.trim())} onClick={() => void save()} />}>
+      footer={<ErpButton label={operation?.kind === 'MANAGER' ? 'ارسال درخواست' : operation?.action === 'APPROVE' ? 'تأیید درخواست' : 'ثبت'}
+        disabled={pending || (needsDate && !date) || (!!needsReason && !reason.trim())} onClick={() => void save()} />}>
       <div className="space-y-3">
-        {operation?.kind !== 'ACTION' && operation?.kind !== 'TRANSFER' && <ErpField label="تاریخ وعده پرداخت مشتری"><PersianCalendarComponent valueFormat="gregorian"
+        {needsDate && <ErpField label="تاریخ وعده پرداخت مشتری" required><PersianCalendarComponent valueFormat="gregorian"
           value={date} onChange={setDate} disablePastDates disabled={pending} /></ErpField>}
+        {operation?.kind === 'MANAGER' && <p>درخواست برای تصمیم مدیر یا ادمین ارسال می‌شود. تاریخ وعده پرداخت را تأییدکننده تعیین می‌کند.</p>}
         {(needsReason || operation?.kind === 'ACTION') && <ErpField label={needsReason ? 'دلیل (الزامی)' : 'توضیح'}>
           <ErpTextarea value={reason} disabled={pending} onChange={event => setReason(event.target.value)} /></ErpField>}
         {operation?.kind === 'TRANSFER' && <p>فروشنده جدید باید انتقال ضمانت را در وظایف خود بپذیرد.</p>}

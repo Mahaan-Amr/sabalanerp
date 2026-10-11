@@ -20,6 +20,7 @@ export type RespondToCrossWorkspaceDutyInput = {
   reason: string | null;
   policyVersion: number;
   targetUserId?: string;
+  promisedDate?: string;
   now?: Date;
 };
 

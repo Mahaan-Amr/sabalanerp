@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { PrismaClient, Prisma, type SalesContract } from '@prisma/client';
-import { activeCreditForContract, creditBalance, synchronizeSellerCredit, createDispatchRequest, decideDispatchRequest } from '../contractDispatchCredit';
+import { activeCreditForContract, creditBalance, synchronizeSellerCredit, createDispatchRequest, decideDispatchRequest, canReviewManagerDispatch } from '../contractDispatchCredit';
 import { ordinaryContractDispatchEligible } from '../ordinaryContractDispatchEligibility';
 import { createContractDispatchDuty } from '../crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import { respondToCrossWorkspaceDuty } from '../crossWorkspaceDutyModule';
 import { processContractCreditReminders } from '../contractCreditReminders';
+import { getCrossWorkspaceDutyDetail } from '../crossWorkspaceDutyInbox';
+import { filterCurrentlyAuthorizedNotifications } from '../notificationAuthorization';
 
 const url = process.env.LOCAL_QA_DATABASE_URL;
 assert.ok(url, 'Use the existing sabalanerp-local database via LOCAL_QA_DATABASE_URL');
@@ -59,15 +61,81 @@ test('whole guarantee and managerial shared duty preserve first-decision and rev
   await tx.payment.create({ data: { contractId: contract.id, paymentMethod: 'SELLER_CREDIT', totalAmount: 1000, currency: 'ریال', paymentDate: new Date('2099-01-01') } });
   await synchronizeSellerCredit(tx, contract, seller.id);
   assert.equal(await ordinaryContractDispatchEligible(tx, contract), true);
-  const request = await createDispatchRequest(tx, contract, seller.id, { kind: 'MANAGER', promisedDate: '2099-01-01' });
+  const request = await createDispatchRequest(tx, contract, seller.id, { kind: 'MANAGER' });
   const duty = await createContractDispatchDuty(tx, request.id);
   await respondToCrossWorkspaceDuty(tx, { dutyId: duty.id, actorUserId: admin.id, actionCode: 'APPROVE', expectedSourceVersion: 1,
-    expectedEnvelopeVersion: 1, reason: null, policyVersion: 1 });
+    expectedEnvelopeVersion: 1, reason: null, policyVersion: 1, promisedDate: '2099-01-01' });
   assert.equal((await creditBalance(tx, seller.id)).availableRials, '0', 'manager approval does not release Seller guarantee');
   await assert.rejects(decideDispatchRequest(tx, request.id, admin.id, 'DECLINE', 'تصمیم دوم'));
   await assert.rejects(createDispatchRequest(tx, contract, seller.id, { kind: 'MANAGER', promisedDate: '2099-01-02' }), /تأیید مدیریتی این نسخه برقرار است/);
   const changed = await tx.salesContract.update({ where: { id: contract.id }, data: { commercialRevision: 2, salesApprovalRevision: null, status: 'DRAFT' } });
   assert.equal(await ordinaryContractDispatchEligible(tx, changed), false);
+}));
+
+test('managerial request waits without a date, notifies independent role owners and publishes their explicit dated decision', () => fixture(async (tx, contract, seller, admin) => {
+  // Broad Accounting administration does not make an ordinary user a Manager.
+  await tx.workspacePermission.create({ data: { userId: seller.id, workspace: 'accounting', permissionLevel: 'admin' } });
+  await tx.featurePermission.create({ data: { userId: seller.id, workspace: 'accounting', feature: 'accounting_actions_manage', permissionLevel: 'edit' } });
+  assert.equal(await canReviewManagerDispatch(tx, seller.id), false);
+  const manager = await tx.user.create({ data: { email: `${randomUUID()}@manager-qa.invalid`, username: `manager-${randomUUID()}`,
+    password: 'non-login-qa-fixture', firstName: 'مدیر', lastName: 'آزمون', role: 'MANAGER' } });
+  await tx.workspacePermission.create({ data: { userId: manager.id, workspace: 'accounting', permissionLevel: 'view' } });
+  await tx.featurePermission.create({ data: { userId: manager.id, workspace: 'accounting', feature: 'accounting_contracts_view', permissionLevel: 'view' } });
+  assert.equal(await canReviewManagerDispatch(tx, manager.id), true);
+  const request = await createDispatchRequest(tx, contract, seller.id, { kind: 'MANAGER', promisedDate: '2099-01-01' });
+  assert.equal(request.promisedDate, null, 'the requester cannot determine the payment promise');
+  const duty = await createContractDispatchDuty(tx, request.id);
+  assert.equal(duty.status, 'OPEN');
+  assert.equal(duty.dueAt, null);
+  assert.equal(await ordinaryContractDispatchEligible(tx, contract), false);
+  const notices = await tx.notification.findMany({ where: { referenceId: request.id }, include: { event: true } });
+  assert.ok(notices.some(row => row.userId === admin.id && row.type === 'CONTRACT_MANAGER_DISPATCH_REQUESTED'));
+  assert.ok(notices.some(row => row.userId === manager.id));
+  assert.ok(!notices.some(row => row.userId === seller.id));
+  const detail = await getCrossWorkspaceDutyDetail(tx, { dutyId: duty.id, actorUserId: manager.id, workspaceCode: 'ACCOUNTING' });
+  assert.equal(detail.destinationHref, `/dashboard/accounting/contracts/${contract.id}`);
+  assert.equal(detail.overdue, false);
+  await assert.rejects(decideDispatchRequest(tx, request.id, seller.id, 'APPROVE', undefined, '2099-01-01'), /مجوز تصمیم/);
+  await assert.rejects(decideDispatchRequest(tx, request.id, admin.id, 'APPROVE'), /تاریخ وعده پرداخت/);
+  await assert.rejects(decideDispatchRequest(tx, request.id, manager.id, 'APPROVE', undefined, '2000-01-01'), /تاریخ وعده پرداخت/);
+  await respondToCrossWorkspaceDuty(tx, { dutyId: duty.id, actorUserId: manager.id, actionCode: 'APPROVE', expectedSourceVersion: 1,
+    expectedEnvelopeVersion: 1, reason: null, policyVersion: 1, promisedDate: '2099-02-03' });
+  const approved = await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: request.id } });
+  assert.equal(approved.status, 'APPROVED');
+  assert.equal(approved.promisedDate!.toISOString().slice(0, 10), '2099-02-03');
+  assert.equal(approved.decidedBy, manager.id);
+  assert.ok(approved.decidedAt);
+  assert.equal(await ordinaryContractDispatchEligible(tx, contract), true);
+  assert.equal((await tx.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } })).status, 'COMPLETED');
+  const result = await tx.notification.findFirstOrThrow({ where: { referenceId: request.id, userId: seller.id, type: 'CONTRACT_MANAGER_DISPATCH_DECIDED' } });
+  assert.equal(result.actionUrl, `/dashboard/accounting/contracts/${contract.id}`);
+  await assert.rejects(decideDispatchRequest(tx, request.id, admin.id, 'DECLINE', 'تصمیم دوم'), /قبلاً تعیین تکلیف/);
+  await tx.user.update({ where: { id: manager.id }, data: { isActive: false } });
+  assert.equal(await canReviewManagerDispatch(tx, manager.id), false);
+  const managerNotice = notices.filter(row => row.userId === manager.id);
+  assert.equal((await filterCurrentlyAuthorizedNotifications(tx, { id: manager.id, role: 'MANAGER', isActive: false }, managerNotice)).length, 0);
+}));
+
+test('Admin requester cannot decide their own request; independent rejection needs a reason and no date and permits a fresh request', () => fixture(async (tx, contract, seller, admin) => {
+  const own = await createDispatchRequest(tx, contract, admin.id, { kind: 'MANAGER' });
+  const duty = await createContractDispatchDuty(tx, own.id);
+  await assert.rejects(decideDispatchRequest(tx, own.id, admin.id, 'APPROVE', undefined, '2099-01-01'), /مجوز تصمیم/);
+  await assert.rejects(decideDispatchRequest(tx, own.id, admin.id, 'DECLINE', 'رد توسط درخواست‌کننده'), /مجوز تصمیم/);
+  await assert.rejects(getCrossWorkspaceDutyDetail(tx, { dutyId: duty.id, actorUserId: admin.id, workspaceCode: 'ACCOUNTING' }));
+  await tx.user.update({ where: { id: seller.id }, data: { role: 'ADMIN' } });
+  await assert.rejects(decideDispatchRequest(tx, own.id, seller.id, 'DECLINE'), /دلیل رد/);
+  await respondToCrossWorkspaceDuty(tx, { dutyId: duty.id, actorUserId: seller.id, actionCode: 'DECLINE', expectedSourceVersion: 1,
+    expectedEnvelopeVersion: 1, reason: 'پرداخت پیش از ارسال لازم است', policyVersion: 1 });
+  const rejected = await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: own.id } });
+  assert.equal(rejected.status, 'REJECTED');
+  assert.equal(rejected.promisedDate, null);
+  assert.equal(rejected.decidedBy, seller.id);
+  assert.ok(rejected.decidedAt);
+  assert.equal(await ordinaryContractDispatchEligible(tx, contract), false);
+  const resubmitted = await createDispatchRequest(tx, contract, admin.id, { kind: 'MANAGER' });
+  assert.notEqual(resubmitted.id, own.id);
+  assert.equal(resubmitted.status, 'PENDING');
+  assert.equal(await tx.notification.count({ where: { referenceId: own.id, userId: admin.id, type: 'CONTRACT_MANAGER_DISPATCH_DECIDED' } }), 1);
 }));
 
 test('due reminder is published once without changing dispatch permission', () => fixture(async (tx, contract, seller, admin) => {
@@ -131,7 +199,7 @@ test('date decisions preserve the previous deadline until approval and guarantee
   await synchronizeSellerCredit(tx, contract, seller.id);
   const original = await tx.contractDispatchAuthority.findFirstOrThrow({ where: { contractId: contract.id, kind: 'CREDIT', status: 'APPROVED' } });
   const dateRequest = await createDispatchRequest(tx, contract, seller.id, { kind: 'DATE', targetAuthorityId: original.id, promisedDate: '2099-02-01', reason: 'وعده جدید مشتری' });
-  assert.equal((await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: original.id } })).promisedDate.toISOString().slice(0, 10), '2099-01-01');
+  assert.equal((await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: original.id } })).promisedDate!.toISOString().slice(0, 10), '2099-01-01');
   await decideDispatchRequest(tx, dateRequest.id, admin.id, 'APPROVE');
   assert.equal((await tx.payment.findFirstOrThrow({ where: { contractId: contract.id, paymentMethod: 'SELLER_CREDIT' } })).paymentDate!.toISOString().slice(0, 10), '2099-02-01');
   const balance = await creditBalance(tx, admin.id);

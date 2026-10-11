@@ -811,7 +811,7 @@ export const reconcileHrDutyAssignment = (
     currentEnvelopeVersion: duty.envelopeVersion,
     nextAssigneeUserId,
     nextEnvelopeVersion: definition.envelopeVersion,
-    dueAt: duty.dueAt,
+    dueAt: duty.dueAt ?? source.dueDate,
     resetDueAt: input.resetDueAt ?? null,
   });
   if (!assignmentPlan && !sourceChanged) return null;
@@ -956,6 +956,7 @@ export const processHrDutyDeadlines = (
   });
   const result = { nearDue: 0, overdue: 0, escalated: 0 };
   for (const duty of duties) {
+    if (!duty.dueAt) continue;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`hr-duty-deadline:${duty.id}`}))`;
     const existingAudits = await tx.crossWorkspaceDutyAuditVersion.findMany({
       where: { dutyId: duty.id }, orderBy: { version: 'asc' }, select: { version: true, eventCode: true },

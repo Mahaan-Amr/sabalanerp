@@ -33,6 +33,18 @@ export interface NotificationPolicyDraft {
 }
 
 const REGISTERED_NOTIFICATION_EVENTS = {
+  CONTRACT_MANAGER_DISPATCH_REQUESTED: {
+    type: 'CONTRACT_MANAGER_DISPATCH_REQUESTED', mandatory: true, titleTemplate: 'درخواست تأیید مدیریتی ارسال',
+    messageTemplate: 'درخواست ارسال پیش از تسویه قرارداد {{contractNumber}} برای بررسی آماده است.',
+    priority: 'HIGH', allowedVariables: ['contractNumber'],
+    allowedChannels: ['IN_APP', 'REALTIME'], allowedRecipientResolvers: ['DIRECT_USER'],
+  },
+  CONTRACT_MANAGER_DISPATCH_DECIDED: {
+    type: 'CONTRACT_MANAGER_DISPATCH_DECIDED', mandatory: true, titleTemplate: 'نتیجه درخواست تأیید مدیریتی ارسال',
+    messageTemplate: 'درخواست ارسال پیش از تسویه قرارداد {{contractNumber}} {{decision}}.',
+    priority: 'HIGH', allowedVariables: ['contractNumber', 'decision'],
+    allowedChannels: ['IN_APP', 'REALTIME'], allowedRecipientResolvers: ['DIRECT_USER'],
+  },
   CONTRACT_PAYMENT_PROMISE_DUE: {
     type: 'CONTRACT_PAYMENT_PROMISE_DUE', mandatory: true, titleTemplate: 'یادآوری وعده پرداخت مشتری',
     messageTemplate: 'موعد پرداخت قرارداد {{contractNumber}} در تاریخ {{promisedDate}} رسیده است؛ پرداخت مشتری را پیگیری کنید.',

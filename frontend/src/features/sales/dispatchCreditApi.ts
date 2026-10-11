@@ -1,8 +1,9 @@
 import api from '@/lib/api';
 export type SellerCreditBalance = { sellerId: string; limitRials: string; usedRials: string; availableRials: string; balanceRials: string; contractReservedRials?: string };
 export type DispatchAuthority = { id: string; kind: 'MANAGER' | 'CREDIT' | 'DATE' | 'TRANSFER' | 'CUSTOMER_DATE'; status: string;
-  revision: number; amountRials: string; promisedDate: string; requestedBy: string; sellerId?: string; sellerName?: string; reason?: string; targetSellerId?: string };
-export type DispatchCreditView = { authorities: DispatchAuthority[]; access: { read: boolean; request: boolean; manage: boolean; seller: boolean };
+  revision: number; amountRials: string; promisedDate: string | null; requestedBy: string; sellerId?: string; sellerName?: string; reason?: string; targetSellerId?: string;
+  decidedBy?: string | null; decidedAt?: string | null; deciderName?: string; canDecide: boolean };
+export type DispatchCreditView = { authorities: DispatchAuthority[]; access: { read: boolean; request: boolean; manage: boolean; managerDecision: boolean; seller: boolean };
   customerCredit: { amountRials: string; consumedRials: string; promisedDate: string; active: boolean } | null;
   canManageCustomerDate: boolean;
   eligible: boolean; balance: SellerCreditBalance; activeManagerId: string | null; actorId: string; canRequestManager: boolean;
@@ -16,7 +17,7 @@ export const dispatchCreditApi = {
   sellers: async () => data<Array<SellerCreditBalance & { id: string; firstName: string; lastName: string; username: string }>>(await api.get('/dispatch-credit/sellers')),
   limit: async (id: string, limitRials: string) => data<SellerCreditBalance>(await api.put(`/dispatch-credit/sellers/${id}`, { limitRials })),
   contract: async (id: string) => data<DispatchCreditView>(await api.get(`/dispatch-credit/contracts/${id}`)),
-  request: async (id: string, input: { kind: 'MANAGER' | 'DATE' | 'TRANSFER' | 'CUSTOMER_DATE'; promisedDate: string; reason?: string; targetAuthorityId?: string; targetSellerId?: string }) =>
+  request: async (id: string, input: { kind: 'MANAGER' | 'DATE' | 'TRANSFER' | 'CUSTOMER_DATE'; promisedDate?: string; reason?: string; targetAuthorityId?: string; targetSellerId?: string }) =>
     data(await api.post(`/dispatch-credit/contracts/${id}/requests`, input)),
-  act: async (id: string, action: string, reason?: string) => data(await api.post(`/dispatch-credit/authorities/${id}/actions`, { action, reason })),
+  act: async (id: string, action: string, reason?: string, promisedDate?: string) => data(await api.post(`/dispatch-credit/authorities/${id}/actions`, { action, reason, promisedDate })),
 };

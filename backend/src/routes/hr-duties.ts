@@ -109,15 +109,15 @@ const dutyResponseRequest = (req: AuthRequest, res: Response, next: NextFunction
     return next(error);
   }
 };
-const serializeDuty = <Duty extends { dueAt: Date }>(duty: Duty) => ({
+const serializeDuty = <Duty extends { dueAt: Date | null }>(duty: Duty) => ({
   ...duty,
-  dueAtDisplay: formatCrossWorkspaceDutyDeadlineTehran(duty.dueAt),
+  dueAtDisplay: duty.dueAt ? formatCrossWorkspaceDutyDeadlineTehran(duty.dueAt) : 'بدون مهلت',
 });
 type CrossWorkspaceDutyResponseResult<Duty> =
   | { duty: Duty; predecessor?: never; replayed?: boolean }
   | { duty?: never; predecessor: Duty; successor?: unknown; correction?: unknown; replayed?: boolean };
 
-export const serializeCrossWorkspaceDutyResponse = <Duty extends { dueAt: Date }>(
+export const serializeCrossWorkspaceDutyResponse = <Duty extends { dueAt: Date | null }>(
   result: CrossWorkspaceDutyResponseResult<Duty>,
 ) => {
   const completedDuty = result.duty ?? result.predecessor;
@@ -432,6 +432,7 @@ router.post(
       expectedEnvelopeVersion: positiveVersion(req.body.expectedEnvelopeVersion, 'HR_DUTY_ENVELOPE_VERSION_REQUIRED'),
       reason: String(req.body.reason ?? '').trim() || null,
       targetUserId: String(req.body.targetUserId ?? '').trim() || undefined,
+      promisedDate: String(req.body.promisedDate ?? '').trim() || undefined,
       policyVersion: 1,
     });
     res.json({ success: true, ...serializeCrossWorkspaceDutyResponse(result) });

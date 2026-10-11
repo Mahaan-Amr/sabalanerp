@@ -28,7 +28,7 @@ export type CrossWorkspaceDuty = {
   sourceActionCode: string;
   sourceVersion: number;
   envelopeVersion: number;
-  dueAt: string;
+  dueAt: string | null;
   dueAtDisplay: string;
   overdue: boolean;
   fields: Record<string, string | null>;

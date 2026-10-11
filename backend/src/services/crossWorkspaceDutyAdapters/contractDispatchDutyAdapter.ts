@@ -1,8 +1,9 @@
 import { Prisma } from '@prisma/client';
 import type { CrossWorkspaceDutySourceAdapter, CrossWorkspaceDutyDatabase } from './types';
-import { canManageDispatch, decideDispatchRequest } from '../contractDispatchCredit';
+import { canManageDispatch, canReviewManagerDispatch, decideDispatchRequest } from '../contractDispatchCredit';
 import { ordinaryContractDispatchEligible } from '../ordinaryContractDispatchEligibility';
 import { canManageCustomerCredit } from '../specialCustomerCredit';
+import { publishNotificationEvent } from '../notificationService';
 
 const definition = (code: string, workspace: string, shared: boolean) => ({
   sourceActionCode: code, envelopeCode: code, envelopeVersion: 1, destinationWorkspaceCode: workspace,
@@ -10,7 +11,7 @@ const definition = (code: string, workspace: string, shared: boolean) => ({
   workspaceAdminOverrideDenied: !shared,
   allowedFields: ['title', 'description', 'dueAt'], allowedEvidence: [], allowedActionCodes: ['APPROVE', 'DECLINE'],
   responseSchema: { type: 'object', properties: { actionCode: { type: 'string', enum: ['APPROVE','DECLINE'] },
-    reason: { type: ['string','null'] } }, required: ['actionCode','reason'], additionalProperties: false },
+    reason: { type: ['string','null'] }, ...(shared ? { promisedDate: { type: 'string' } } : {}) }, required: ['actionCode','reason'], additionalProperties: false },
 });
 export const CONTRACT_DISPATCH_DUTY_DEFINITIONS = {
   CONTRACT_DISPATCH_DECISION: definition('CONTRACT_DISPATCH_DECISION', 'ACCOUNTING', true),
@@ -18,7 +19,7 @@ export const CONTRACT_DISPATCH_DUTY_DEFINITIONS = {
 };
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 export const createContractDispatchDuty = async (db: CrossWorkspaceDutyDatabase, requestId: string) => {
-  const request = await db.contractDispatchAuthority.findUniqueOrThrow({ where: { id: requestId } });
+  const request = await db.contractDispatchAuthority.findUniqueOrThrow({ where: { id: requestId }, include: { contract: true } });
   const d = request.kind === 'TRANSFER' ? CONTRACT_DISPATCH_DUTY_DEFINITIONS.CONTRACT_CREDIT_TRANSFER
     : CONTRACT_DISPATCH_DUTY_DEFINITIONS.CONTRACT_DISPATCH_DECISION;
   const envelopeData = { destinationWorkspaceCode: d.destinationWorkspaceCode, destinationFeatureCode: 'ACCOUNTING_ACTIONS_MANAGE',
@@ -37,6 +38,16 @@ export const createContractDispatchDuty = async (db: CrossWorkspaceDutyDatabase,
   if (request.kind === 'TRANSFER') await db.crossWorkspaceDutyAssignmentHistory.create({ data: {
     dutyId: duty.id, sequence: 1, assignedUserId: request.targetSellerId, destinationWorkspaceCode: 'SALES',
     destinationQueueCode: d.sourceActionCode, startedAt: new Date(), changedByUserId: request.requestedBy, policyVersion: 1 } });
+  if (request.kind === 'MANAGER') {
+    const candidates = await db.user.findMany({ where: { isActive: true, role: { in: ['ADMIN', 'MANAGER'] }, id: { not: request.requestedBy } }, select: { id: true } });
+    const recipients: string[] = [];
+    for (const candidate of candidates) if (await canReviewManagerDispatch(db, candidate.id)) recipients.push(candidate.id);
+    await publishNotificationEvent(db, { type: 'CONTRACT_MANAGER_DISPATCH_REQUESTED',
+      deduplicationKey: `manager-dispatch-requested:${request.id}`, recipientIds: recipients, actorId: request.requestedBy,
+      resourceType: 'CONTRACT_DISPATCH', resourceId: request.contractId, referenceId: request.id,
+      actionUrl: `/dashboard/accounting/contracts/${request.contractId}`,
+      payload: { contractNumber: request.contract.contractNumber } });
+  }
   return duty;
 };
 export const closeContractDispatchDuty = async (db: CrossWorkspaceDutyDatabase, requestId: string, actorId: string,
@@ -44,8 +55,10 @@ export const closeContractDispatchDuty = async (db: CrossWorkspaceDutyDatabase, 
   const duty = await db.crossWorkspaceDuty.findUnique({ where: { stableKey: `CONTRACT_DISPATCH:${requestId}` } });
   if (!duty || duty.status !== 'OPEN') return;
   const completed = ['APPROVE','DECLINE'].includes(action);
+  const authority = await db.contractDispatchAuthority.findUniqueOrThrow({ where: { id: requestId } });
   await db.crossWorkspaceDuty.update({ where: { id: duty.id }, data: { status: completed ? 'COMPLETED' : 'CANCELLED',
-    respondedAt: new Date(), respondedByUserId: actorId, structuredResultJson: json({ actionCode: action, reason: reason ?? null }) } });
+    respondedAt: new Date(), respondedByUserId: actorId, structuredResultJson: json({ actionCode: action, reason: reason ?? null,
+      ...(authority.kind === 'MANAGER' && action === 'APPROVE' ? { promisedDate: authority.promisedDate } : {}) }) } });
   await db.crossWorkspaceDutyAssignmentHistory.updateMany({ where: { dutyId: duty.id, endedAt: null },
     data: { endedAt: new Date(), changedByUserId: actorId, endReason: completed ? 'COMPLETED' : 'CANCELLED' } });
   const maximum = await db.crossWorkspaceDutyAuditVersion.aggregate({ where: { dutyId: duty.id }, _max: { version: true } });
@@ -60,11 +73,11 @@ export const contractDispatchDutyAdapter: CrossWorkspaceDutySourceAdapter = {
     const duty = await db.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: input.dutyId } });
     if (duty.status !== 'OPEN' || duty.sourceVersion !== input.expectedSourceVersion || input.expectedEnvelopeVersion !== 1
       || !['APPROVE','DECLINE'].includes(input.actionCode)) throw new Error('DUTY_SOURCE_NOT_ACTIONABLE');
-    const result = await decideDispatchRequest(db, duty.sourceId, input.actorUserId, input.actionCode as 'APPROVE' | 'DECLINE', input.reason ?? undefined);
+    const result = await decideDispatchRequest(db, duty.sourceId, input.actorUserId, input.actionCode as 'APPROVE' | 'DECLINE', input.reason ?? undefined, input.promisedDate);
     await closeContractDispatchDuty(db, duty.sourceId, input.actorUserId, input.actionCode, input.reason ?? undefined);
     const contract = await db.salesContract.findUniqueOrThrow({ where: { id: result.contractId } });
     await db.salesContract.update({ where: { id: contract.id }, data: { dispatchExpiryExempt: await ordinaryContractDispatchEligible(db, contract) } });
-    return result;
+    return { duty: await db.crossWorkspaceDuty.findUniqueOrThrow({ where: { id: duty.id } }) };
   },
   claim: async () => { throw new Error('DUTY_NOT_CLAIMABLE'); }, canClaim: async () => false,
   claimRequiresReason: async () => false, responseRequiresReason: async () => false,
@@ -72,7 +85,9 @@ export const contractDispatchDutyAdapter: CrossWorkspaceDutySourceAdapter = {
     const duty = await db.crossWorkspaceDuty.findUnique({ where: { id: input.dutyId } });
     if (!duty || duty.sourceType !== 'CONTRACT_DISPATCH' || duty.sourceActionCode !== 'CONTRACT_DISPATCH_DECISION'
       || (!input.includeCompleted && duty.status !== 'OPEN')) return false;
-    const request = await db.contractDispatchAuthority.findUnique({ where: { id: duty.sourceId }, select: { kind: true } });
+    const request = await db.contractDispatchAuthority.findUnique({ where: { id: duty.sourceId }, select: { kind: true, requestedBy: true } });
+    if (request?.kind === 'MANAGER') return (input.includeCompleted || request.requestedBy !== input.actorUserId)
+      && await canReviewManagerDispatch(db, input.actorUserId);
     return request?.kind === 'CUSTOMER_DATE' ? canManageCustomerCredit(db, input.actorUserId) : canManageDispatch(db, input.actorUserId);
   },
   canReassign: async () => false, reassign: async () => { throw new Error('DUTY_REASSIGNMENT_NOT_ALLOWED'); },
@@ -85,7 +100,7 @@ export const contractDispatchDutyAdapter: CrossWorkspaceDutySourceAdapter = {
       return { title: `سابقه مجوز یا ضمانت — ${before?.contractNumber ?? ''}`, description: 'قرارداد از مسیر مجاز حذف شده و سابقه تصمیم در ممیزی حفظ شده است.', sourceIsCurrent: false };
     }
     return { title: `${request?.kind === 'TRANSFER' ? 'پذیرش انتقال ضمانت' : ['DATE','CUSTOMER_DATE'].includes(request.kind) ? 'تغییر وعده پرداخت' : 'درخواست تأیید مدیریتی'} — ${request?.contract.contractNumber ?? ''}`,
-      description: request ? `وعده پرداخت: ${request.promisedDate.toLocaleDateString('fa-IR', { timeZone: 'UTC' })}${request.reason ? ` — ${request.reason}` : ''}` : null,
+      description: `${request.promisedDate ? `وعده پرداخت: ${request.promisedDate.toLocaleDateString('fa-IR', { timeZone: 'UTC' })}` : 'تاریخ وعده پرداخت هنگام تأیید تعیین می‌شود.'}${request.reason ? ` — ${request.reason}` : ''}`,
       sourceIsCurrent: !!request && request.status === 'PENDING' && request.revision === request.contract.commercialRevision
         && !request.contract.isInactive && !['CANCELLED','EXPIRED'].includes(request.contract.status),
       destinationHref: `/dashboard/accounting/contracts/${request?.contractId ?? ''}` };

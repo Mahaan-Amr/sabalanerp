@@ -4,6 +4,7 @@ import { resolveWorkspaceDutyAuthority } from './crossWorkspaceDutyAuthority';
 import { assertCommercialActionAvailable, isCommerciallyFinal, refreshDispatchExpiryExemption } from './ordinaryContractLifecycle';
 import { hasSpecialCustomerCreditAuthorization } from './specialCustomerCreditPolicy';
 import { canManageCustomerCredit, lockCustomerCredit } from './specialCustomerCredit';
+import { publishNotificationEvent } from './notificationService';
 
 export type CreditDb = PrismaClient | Prisma.TransactionClient;
 export const ordinaryContract = (contract: Pick<SalesContract, 'partnerKind' | 'partnerCaseId'>) =>
@@ -30,6 +31,15 @@ export const canManageDispatch = async (db: CreditDb, actorId: string) => {
   const authority = await resolveWorkspaceDutyAuthority(db, { userId: actorId, workspace: 'accounting', feature: 'accounting_actions_manage' });
   return authority.canSelfDecide;
 };
+/** Managerial dispatch is a role-owned decision, separate from Accounting administration. */
+export const canReviewManagerDispatch = async (db: CreditDb, actorId: string) => {
+  const actor = await db.user.findUnique({ where: { id: actorId } });
+  if (!actor?.isActive || !['ADMIN', 'MANAGER'].includes(actor.role)) return false;
+  if (actor.role === 'ADMIN') return true;
+  const access = await getEffectiveUserAccess(db, { userId: actor.id, userRole: actor.role });
+  return access.workspaces.some(item => item.workspace === 'accounting')
+    && access.features.some(item => item.workspace === 'accounting' && item.feature === 'accounting_contracts_view');
+};
 export const canEditCredit = async (db: CreditDb, actorId: string) => {
   const actor = await db.user.findUnique({ where: { id: actorId } });
   if (!actor?.isActive) return false;
@@ -39,7 +49,7 @@ export const canEditCredit = async (db: CreditDb, actorId: string) => {
 };
 export const dispatchCreditAccess = async (db: CreditDb, contract: SalesContract, actorId: string) => {
   const user = await db.user.findUnique({ where: { id: actorId } });
-  if (!user?.isActive) return { read: false, request: false, manage: false, seller: false };
+  if (!user?.isActive) return { read: false, request: false, manage: false, managerDecision: false, seller: false };
   const access = await getEffectiveUserAccess(db, { userId: user.id, userRole: user.role });
   const feature = (workspace: string, name: string, edit = false) => user.role === 'ADMIN' ||
     (access.workspaces.some(item => item.workspace === workspace && (!edit || item.permission !== 'view'))
@@ -47,9 +57,10 @@ export const dispatchCreditAccess = async (db: CreditDb, contract: SalesContract
   const accounting = feature('accounting', 'accounting_contracts_view');
   const sales = feature('sales', 'sales_contracts_view') && (!user.departmentId || user.departmentId === contract.departmentId);
   const manage = await canManageDispatch(db, user.id);
+  const managerDecision = await canReviewManagerDispatch(db, user.id);
   const manageCustomerCredit = !!contract.customerCreditCustomerId && await canManageCustomerCredit(db, actorId);
   return { read: accounting || sales || manage || manageCustomerCredit, request: accounting && feature('accounting', 'accounting_actions_manage', true),
-    manage, seller: sales && contract.responsibleSellerId === user.id };
+    manage, managerDecision, seller: sales && contract.responsibleSellerId === user.id };
 };
 export const hasFinancialDispatchApproval = async (db: CreditDb, contractId: string, expectedRevision?: number) => {
   const records = await db.accountingFinancialRecord.findMany({ where: {
@@ -123,7 +134,7 @@ export const synchronizeSellerCredit = async (db: CreditDb, contract: SalesContr
   if (current && current.sellerId !== contract.responsibleSellerId && !amount.equals(current.amountRials)) {
     throw new Error('تغییر مبلغ ضمانت پس از تغییر فروشنده، به انتقال ضمانت با پذیرش فروشنده جدید نیاز دارد.');
   }
-  if (current && payment && current.promisedDate.toISOString().slice(0, 10) !== date!.toISOString().slice(0, 10)) {
+  if (current && payment && current.promisedDate?.toISOString().slice(0, 10) !== date!.toISOString().slice(0, 10)) {
     throw new Error('تغییر موعد اعتبار ثبت‌شده باید از درخواست تغییر تاریخ انجام شود.');
   }
   if (!current && payment) promisedDate(date!.toISOString().slice(0, 10));
@@ -158,12 +169,12 @@ export const assertAuthorityContract = (contract: SalesContract) => {
   if (!ordinaryContract(contract) || contract.isInactive || ['CANCELLED', 'EXPIRED'].includes(contract.status)) throw new Error('قرارداد برای این درخواست قابل استفاده نیست.');
 };
 export const createDispatchRequest = async (db: CreditDb, contract: SalesContract, actorId: string, input: {
-  kind: 'MANAGER' | 'DATE' | 'TRANSFER' | 'CUSTOMER_DATE'; promisedDate: string; reason?: string; targetAuthorityId?: string; targetSellerId?: string;
+  kind: 'MANAGER' | 'DATE' | 'TRANSFER' | 'CUSTOMER_DATE'; promisedDate?: string; reason?: string; targetAuthorityId?: string; targetSellerId?: string;
 }) => {
   assertAuthorityContract(contract);
   await refreshDispatchExpiryExemption(db, contract);
   assertCommercialActionAvailable(contract);
-  let date = promisedDate(input.promisedDate, input.kind !== 'TRANSFER');
+  let date = input.kind === 'MANAGER' || input.kind === 'TRANSFER' ? null : promisedDate(input.promisedDate);
   if (input.kind === 'MANAGER' && !isCommerciallyFinal(contract)) throw new Error('درخواست تأیید مدیریتی به قرارداد قطعی نیاز دارد.');
   if (input.kind === 'MANAGER' && await activeManagerApproval(db, contract)) throw new Error('تأیید مدیریتی این نسخه برقرار است؛ تغییر موعد را جداگانه درخواست کنید.');
   if (input.kind !== 'MANAGER' && !input.reason?.trim()) throw new Error('دلیل درخواست الزامی است.');
@@ -188,17 +199,19 @@ export const createDispatchRequest = async (db: CreditDb, contract: SalesContrac
   return request;
 };
 
-export const decideDispatchRequest = async (db: CreditDb, id: string, actorId: string, action: 'APPROVE' | 'DECLINE', reason?: string) => {
+export const decideDispatchRequest = async (db: CreditDb, id: string, actorId: string, action: 'APPROVE' | 'DECLINE', reason?: string, approvalPromisedDate?: string) => {
   const candidate = await db.contractDispatchAuthority.findUniqueOrThrow({ where: { id } });
   await db.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id"=${candidate.contractId} FOR UPDATE`);
   const request = await db.contractDispatchAuthority.findUniqueOrThrow({ where: { id }, include: { contract: true } });
   if (request.status !== 'PENDING' || request.revision !== request.contract.commercialRevision) throw new Error('درخواست قبلاً تعیین تکلیف شده یا قرارداد تغییر کرده است.');
   assertAuthorityContract(request.contract);
   const authorized = request.kind === 'TRANSFER' ? request.targetSellerId === actorId
+    : request.kind === 'MANAGER' ? request.requestedBy !== actorId && await canReviewManagerDispatch(db, actorId)
     : request.kind === 'CUSTOMER_DATE' ? await canManageCustomerCredit(db, actorId) : await canManageDispatch(db, actorId);
   if (!authorized) throw new Error('مجوز تصمیم برای این درخواست ندارید.');
   if (action === 'DECLINE' && !reason?.trim()) throw new Error('دلیل رد درخواست الزامی است.');
   if (action === 'APPROVE' && request.kind === 'MANAGER' && !isCommerciallyFinal(request.contract)) throw new Error('قرارداد باید قطعی باشد.');
+  const decisionDate = action === 'APPROVE' && request.kind === 'MANAGER' ? promisedDate(approvalPromisedDate) : request.promisedDate;
   if (request.kind === 'CUSTOMER_DATE') {
     if (!hasSpecialCustomerCreditAuthorization(request.contract)) throw new Error('مجوز اعتباری مشتری تغییر کرده است.');
     if (action === 'APPROVE') {
@@ -225,7 +238,14 @@ export const decideDispatchRequest = async (db: CreditDb, id: string, actorId: s
     }
   }
   const updated = await db.contractDispatchAuthority.update({ where: { id }, data: { status: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
-    decidedBy: actorId, reason: reason?.trim() || request.reason } });
+    decidedBy: actorId, decidedAt: new Date(), promisedDate: decisionDate, reason: reason?.trim() || request.reason } });
   await auditDispatchCredit(db, request.contractId, actorId, `DISPATCH_${request.kind}_${action}`, id, request, updated, reason);
+  if (request.kind === 'MANAGER') {
+    await publishNotificationEvent(db, { type: 'CONTRACT_MANAGER_DISPATCH_DECIDED',
+      deduplicationKey: `manager-dispatch-decided:${id}`, recipientIds: [request.requestedBy], actorId,
+      resourceType: 'CONTRACT_DISPATCH', resourceId: request.contractId, referenceId: id,
+      actionUrl: `/dashboard/accounting/contracts/${request.contractId}`,
+      payload: { contractNumber: request.contract.contractNumber, decision: action === 'APPROVE' ? 'تأیید شد' : 'رد شد' } });
+  }
   return updated;
 };

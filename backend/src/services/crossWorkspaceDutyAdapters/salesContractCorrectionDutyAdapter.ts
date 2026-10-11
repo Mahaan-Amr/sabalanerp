@@ -909,6 +909,7 @@ export const completeSalesCorrectionEditDuty = async (
   await lockDutyAuditStream(database, salesDuty.id);
   salesDuty = await database.crossWorkspaceDuty.findUnique({ where: { id: salesDuty.id } });
   if (!salesDuty || salesDuty.status !== 'OPEN') throw new Error('DUTY_SALES_EDIT_ALREADY_CONSUMED');
+  if (!salesDuty.dueAt) throw new Error('DUTY_SALES_EDIT_NOT_AVAILABLE');
   const actorIsAdmin = await isSystemAdmin(database, input.actorUserId);
   const commercialClosing = input.commercialFinality || input.periodExpired;
   if (commercialClosing) {

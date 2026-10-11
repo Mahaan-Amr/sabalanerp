@@ -88,7 +88,7 @@ export const projectCrossWorkspaceDuty = (input: {
     sourceVersion: number;
     envelopeVersion: number;
     destinationWorkspaceCode: string;
-    dueAt: Date;
+    dueAt: Date | null;
     createdAt: Date;
     respondedAt: Date | null;
     updatedAt: Date;
@@ -122,7 +122,7 @@ export const projectCrossWorkspaceDuty = (input: {
   const fields: Record<string, string | null> = {};
   if (allowedFields.has('title')) fields.title = input.source.title;
   if (allowedFields.has('description')) fields.description = input.source.description;
-  if (allowedFields.has('dueAt')) fields.dueAt = input.duty.dueAt.toISOString();
+  if (allowedFields.has('dueAt')) fields.dueAt = input.duty.dueAt?.toISOString() ?? null;
   return {
     id: input.duty.id,
     status: input.duty.status,
@@ -138,9 +138,9 @@ export const projectCrossWorkspaceDuty = (input: {
     sourceActionCode: input.duty.sourceActionCode,
     sourceVersion: input.duty.sourceVersion,
     envelopeVersion: input.duty.envelopeVersion,
-    dueAt: input.duty.dueAt.toISOString(),
-    dueAtDisplay: formatCrossWorkspaceDutyDeadlineTehran(input.duty.dueAt),
-    overdue: input.duty.status === 'OPEN' && input.duty.dueAt < input.now,
+    dueAt: input.duty.dueAt?.toISOString() ?? null,
+    dueAtDisplay: input.duty.dueAt ? formatCrossWorkspaceDutyDeadlineTehran(input.duty.dueAt) : 'بدون مهلت',
+    overdue: input.duty.status === 'OPEN' && !!input.duty.dueAt && input.duty.dueAt < input.now,
     fields,
     destinationHref: input.source.destinationHref ?? null,
     // Evidence is deliberately a type-only capability descriptor. The duty schema stores no
@@ -439,7 +439,7 @@ export const getCrossWorkspaceDutySummary = async (
     availableUnseen,
     attention: assigned.length + availableUnseen,
     dueSoon: assigned.filter((duty) => (
-      new Date(duty.dueAt).getTime() <= now.getTime() + 24 * 60 * 60 * 1_000
+      duty.dueAt && new Date(duty.dueAt).getTime() <= now.getTime() + 24 * 60 * 60 * 1_000
     )).length,
     overdue: assigned.filter((duty) => duty.overdue).length,
     triage: triage.length,

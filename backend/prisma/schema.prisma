@@ -7341,10 +7341,11 @@ model ContractDispatchAuthority {
   targetAuthority    ContractDispatchAuthority? @relation("DispatchCreditProposal", fields: [targetAuthorityId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   proposals          ContractDispatchAuthority[] @relation("DispatchCreditProposal")
   amountRials        Decimal       @default(0) @db.Decimal(18, 0)
-  promisedDate       DateTime      @db.Date
+  promisedDate       DateTime?     @db.Date
   notifiedFor        String?
   requestedBy        String
   decidedBy          String?
+  decidedAt          DateTime?
   reason             String?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
@@ -9556,7 +9557,7 @@ model CrossWorkspaceDuty {
   routingScopeType              String?
   routingScopeId                String?
   sourceActorUserId             String?
-  dueAt                         DateTime
+  dueAt                         DateTime?
   structuredResultJson          Json?
   respondedAt                   DateTime?
   respondedByUserId             String?

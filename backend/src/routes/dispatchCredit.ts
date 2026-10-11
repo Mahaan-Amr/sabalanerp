@@ -65,10 +65,13 @@ router.get('/balance', handle(async req => {
 router.get('/contracts/:id', handle(async req => {
   const { contract, access } = await accessibleContract(prisma, req.params.id, req.user.id);
   const authorities = await prisma.contractDispatchAuthority.findMany({ where: { contractId: contract.id }, orderBy: { createdAt: 'desc' } });
-  const sellers = await prisma.user.findMany({ where: { id: { in: [...new Set([contract.responsibleSellerId, ...authorities.map(row => row.sellerId).filter((id): id is string => !!id)])] } },
+  const sellers = await prisma.user.findMany({ where: { id: { in: [...new Set([contract.responsibleSellerId, ...authorities.flatMap(row => [row.sellerId, row.decidedBy]).filter((id): id is string => !!id)])] } },
     select: { id: true, firstName: true, lastName: true, username: true } });
   const names = new Map(sellers.map(user => [user.id, `${user.firstName} ${user.lastName}`.trim() || user.username]));
-  return { authorities: authorities.map(row => ({ ...row, sellerName: row.sellerId ? names.get(row.sellerId) : undefined })),
+  return { authorities: authorities.map(row => ({ ...row, sellerName: row.sellerId ? names.get(row.sellerId) : undefined,
+    deciderName: row.decidedBy ? names.get(row.decidedBy) : undefined,
+    canDecide: row.status === 'PENDING' && (row.kind === 'MANAGER' ? access.managerDecision && row.requestedBy !== req.user.id
+      : row.kind === 'CUSTOMER_DATE' ? false : row.kind === 'TRANSFER' ? row.targetSellerId === req.user.id : access.manage) })),
     customerCredit: contract.customerCreditCustomerId ? { amountRials: contract.customerCreditAmountRials.toString(),
       consumedRials: (await consumedCustomerCredit(prisma, contract)).toString(), promisedDate: contract.customerCreditPromisedDate,
       active: hasSpecialCustomerCreditAuthorization(contract) } : null,
@@ -82,10 +85,10 @@ router.post('/contracts/:id/requests', handle(req => prisma.$transaction(async t
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id"=${req.params.id} FOR UPDATE`);
   const { contract, access } = await accessibleContract(tx, req.params.id, req.user.id);
   const kind = req.body.kind;
-  if (!['MANAGER','DATE','TRANSFER','CUSTOMER_DATE'].includes(kind) || !(access.manage || (kind === 'CUSTOMER_DATE' && await canManageCustomerCredit(tx, req.user.id)) || (kind === 'MANAGER' ? access.request : ['DATE','CUSTOMER_DATE'].includes(kind) && (access.request || access.seller)))) throw new Error('مجوز ثبت این درخواست ندارید.');
+  if (!['MANAGER','DATE','TRANSFER','CUSTOMER_DATE'].includes(kind) || !(access.manage || (kind === 'CUSTOMER_DATE' && await canManageCustomerCredit(tx, req.user.id)) || (kind === 'MANAGER' ? access.request || access.managerDecision : ['DATE','CUSTOMER_DATE'].includes(kind) && (access.request || access.seller)))) throw new Error('مجوز ثبت این درخواست ندارید.');
   const request = await createDispatchRequest(tx, contract, req.user.id, req.body);
   await createContractDispatchDuty(tx, request.id);
-  if (kind !== 'TRANSFER' && (kind === 'CUSTOMER_DATE' ? await canManageCustomerCredit(tx, req.user.id) : await canManageDispatch(tx, req.user.id))) {
+  if (kind !== 'MANAGER' && kind !== 'TRANSFER' && (kind === 'CUSTOMER_DATE' ? await canManageCustomerCredit(tx, req.user.id) : await canManageDispatch(tx, req.user.id))) {
     await decideDispatchRequest(tx, request.id, req.user.id, 'APPROVE', req.body.reason);
     await closeContractDispatchDuty(tx, request.id, req.user.id, 'APPROVE', req.body.reason);
   }
@@ -99,7 +102,7 @@ router.post('/authorities/:id/actions', handle(req => prisma.$transaction(async 
   const current = await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: candidate.id } });
   const { action, reason } = req.body;
   if (['APPROVE','DECLINE'].includes(action)) {
-    await decideDispatchRequest(tx, current.id, req.user.id, action, reason);
+    await decideDispatchRequest(tx, current.id, req.user.id, action, reason, req.body.promisedDate);
     await closeContractDispatchDuty(tx, current.id, req.user.id, action, reason);
   } else {
     const withdraw = action === 'WITHDRAW' && current.status === 'PENDING' && (current.requestedBy === req.user.id || access.manage);
@@ -107,7 +110,7 @@ router.post('/authorities/:id/actions', handle(req => prisma.$transaction(async 
     if (!withdraw && !revoke) throw new Error('این اقدام برای درخواست مجاز نیست.');
     if (revoke && !String(reason ?? '').trim()) throw new Error('دلیل لغو مجوز الزامی است.');
     const updated = await tx.contractDispatchAuthority.update({ where: { id: current.id }, data: {
-      status: withdraw ? 'WITHDRAWN' : 'REVOKED', decidedBy: req.user.id, reason: reason ?? current.reason } });
+      status: withdraw ? 'WITHDRAWN' : 'REVOKED', decidedBy: req.user.id, decidedAt: new Date(), reason: reason ?? current.reason } });
     await auditDispatchCredit(tx, contract.id, req.user.id, `DISPATCH_${action}`, current.id, current, updated, reason);
     await closeContractDispatchDuty(tx, current.id, req.user.id, action, reason);
   }

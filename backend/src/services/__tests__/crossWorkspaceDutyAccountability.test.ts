@@ -3,6 +3,8 @@ import test from 'node:test';
 import { CROSS_WORKSPACE_DUTY_DEFINITIONS } from '../crossWorkspaceDutyModule';
 
 const expectedAccountability = {
+  CONTRACT_DISPATCH_DECISION: ['SHARED_DECISION', false],
+  CONTRACT_CREDIT_TRANSFER: ['INDIVIDUAL_EXECUTION', true],
   LEGACY_HR_WORK_ITEM_REVIEW: ['SHARED_DECISION', true],
   FINANCE_RECORDING: ['INDIVIDUAL_EXECUTION', true],
   FINANCE_APPROVAL: ['SHARED_DECISION', true],

@@ -43,6 +43,7 @@ async function useProfile(tx: Prisma.TransactionClient, profileId: string) {
 function customerSummary(row: { id: string; partnerRevision: number | null; firstName: string; lastName: string;
   companyName: string | null; customerType: string; status: string; isBlacklisted: boolean; isLocked: boolean;
   nationalCode: string | null; city: string | null; address: string | null;
+  ownerUser?: { id: string; firstName: string; lastName: string } | null;
   phoneNumbers: { number: string; isPrimary: boolean }[]; _count: { potentialProjects: number } }): PartnerCustomerSummary | undefined {
   if (!row.partnerRevision) return undefined;
   const phone = row.phoneNumbers.find(item => item.isPrimary)?.number ?? row.phoneNumbers[0]?.number;
@@ -55,6 +56,8 @@ function customerSummary(row: { id: string; partnerRevision: number | null; firs
     personType: personType(row.customerType), status: row.status, isBlacklisted: row.isBlacklisted,
     isLocked: row.isLocked, ...(row.nationalCode ? { nationalCode: row.nationalCode } : {}),
     ...(row.city ? { city: row.city } : {}), ...(row.address ? { address: row.address } : {}),
+    ...(row.ownerUser ? { responsibleSeller: { id: row.ownerUser.id,
+      displayName: `${row.ownerUser.firstName} ${row.ownerUser.lastName}`.trim() } } : {}),
     phone, projectCount: row._count.potentialProjects };
 }
 
@@ -97,6 +100,7 @@ function nextActionView(row: { id: string; potentialProjectId: string | null; pa
 const customerSelect = { id: true, isActive: true, partnerRevision: true, firstName: true, lastName: true, companyName: true,
   customerType: true, status: true, isBlacklisted: true, isLocked: true, nationalCode: true,
   city: true, address: true, ownerUserId: true, partnerOwnerProfileId: true,
+  ownerUser: { select: { id: true, firstName: true, lastName: true } },
   _count: { select: { potentialProjects: { where: { isActive: true } } } },
   phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' as const }, { id: 'asc' as const }],
     select: { number: true, isPrimary: true } } };

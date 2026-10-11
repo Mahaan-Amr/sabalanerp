@@ -7,6 +7,27 @@ import { createPartnerTechnicalRequestServices } from '../partner-technical';
 
 const expired = Object.assign(new Error('transaction expired; private SQL lease-token secret'), { code: 'P2028' });
 
+test('case list reports transaction expiry as temporary failure, not stale case evidence', async () => {
+  const logs: unknown[] = [];
+  const app = express();
+  app.use(express.json());
+  app.use(createPartnerCaseRouter({ database: { async $transaction() { throw expired; } } as never,
+    reportCreationFailure: value => logs.push(value),
+    authenticate: (request, _response, next) => { (request as any).user = { id: 'partner-list-test' }; next(); } }));
+  const server = app.listen(0); await once(server, 'listening');
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing address');
+    const response = await fetch(`http://127.0.0.1:${address.port}/query-v2`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const body = await response.json() as { code: string; supportReference: string };
+    assert.equal(response.status, 503);
+    assert.equal(body.code, 'TEMPORARY_FAILURE');
+    assert.deepEqual(logs, [{ supportReference: body.supportReference, code: 'TEMPORARY_FAILURE', databaseCode: 'P2028' }]);
+    assert.doesNotMatch(JSON.stringify({ body, logs }), /private|secret|lease-token|SQL/);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
 function budgetProbe(failure: unknown = expired) {
   let attempts = 0;
   const budgets: unknown[] = [];
@@ -82,4 +103,18 @@ test('technical catalog, lease, recovery read and checkpoint use bounded owning 
     await assert.rejects(operation, error => error === expired);
     assert.equal(probe.attempts(), index + 1, 'expiry must not retry a business transaction');
   }
+});
+
+for (const endpoint of ['/drafts/recovery-1/wizard', '/approval-matches']) test(`expired ${endpoint} retains temporary failure status`, async () => {
+  const database = { async $transaction() { throw expired; }, salesContractEditSession: { async findUnique() { throw expired; } } };
+  const app = express(); app.use(express.json());
+  app.use(createPartnerCaseRouter({ database: database as never, reportCreationFailure: () => {},
+    authenticate: (request, _response, next) => { (request as any).user = { id: 'partner-budget-test' }; next(); } }));
+  const server = app.listen(0); await once(server, 'listening');
+  try {
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing address');
+    const response = await fetch(`http://127.0.0.1:${address.port}${endpoint}`, endpoint.startsWith('/drafts') ? undefined :
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schemaVersion: 1, recoveryId: 'recovery-1', recoveryRevision: 1 }) });
+    assert.equal(response.status, 503); assert.equal((await response.json() as { code: string }).code, 'TEMPORARY_FAILURE');
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });

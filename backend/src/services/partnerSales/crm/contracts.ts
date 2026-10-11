@@ -142,7 +142,7 @@ export type PartnerCustomerSummary = { schemaVersion: 1; purpose: 'PARTNER_CRM_C
   revision: number; displayName: string; firstName: string; lastName: string; companyName?: string;
   customerType: 'Individual' | 'Company' | 'Government'; personType: 'NATURAL' | 'LEGAL'; status: string;
   isBlacklisted: boolean; isLocked: boolean; nationalCode?: string; city?: string; address?: string;
-  phone: string; projectCount: number };
+  phone: string; projectCount: number; responsibleSeller?: { id: string; displayName: string } };
 export type PartnerProjectView = { projectId: string; revision: number; title: string; status: string; workType: string;
   address?: string; probability?: number; expectedCloseDate?: string; description?: string; lostReason?: string;
   dormantReason?: string; revisitDate?: string };

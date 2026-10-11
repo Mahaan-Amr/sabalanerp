@@ -49,7 +49,7 @@ export function PartnerContractCancellation({ caseId, presentation }: { caseId: 
           if (cancelled) window.location.reload();
           else router.replace(row.customerContractId
             ? `/dashboard/sales/contracts/${encodeURIComponent(row.customerContractId)}`
-            : `/dashboard/sales/partner-cases?caseId=${encodeURIComponent(caseId)}`);
+            : `/dashboard/sales/contracts?caseId=${encodeURIComponent(caseId)}`);
         }).catch(failure => setError(partnerSalesActionFeedback(failure, cancelled ? 'فعال‌سازی قرارداد' : 'لغو قرارداد').message))
           .finally(() => { lifecycleFlight.current = false; setPending(false); });
       }} /> }>

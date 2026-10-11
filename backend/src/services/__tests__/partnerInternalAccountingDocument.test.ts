@@ -41,7 +41,7 @@ test('internal Partner PDF uses the Sabalan debtor and amount without leaking re
   assert.match(html, /لایه: دوبل · جلو/);
   assert.match(html, /۲/);
   assert.match(html, /برنامه پرداخت به سبلان هنوز ثبت نشده/);
-  assert.match(html, /جمع خرید از سبلان: 120000000 ریال/);
+  assert.match(html, /جمع خرید از سبلان: 120,000,000 ریال \(12,000,000 تومان\)/);
   assert.match(html, /class="sheet\s*"/);
   assert.match(html, /<th>نرخ - ریال<\/th>/);
   assert.match(html, /۶۰٬۰۰۰٬۰۰۰ ریال/);
@@ -52,6 +52,11 @@ test('internal Partner PDF uses the Sabalan debtor and amount without leaking re
     const rendered = renderPartnerInternalDocumentHtml(document as unknown as Parameters<typeof renderPartnerInternalDocumentHtml>[0], { variant });
     assert.doesNotMatch(rendered, /PRIVATE_RETAIL_PRICE|PRIVATE_PAYMENT_PLAN|PC-secret|\/private/);
     if (variant === 'workshop') assert.doesNotMatch(rendered, /120000000|۱۲۰٬۰۰۰٬۰۰۰|۶۰٬۰۰۰٬۰۰۰/);
+    else {
+      assert.match(rendered, /<th>نرخ - ریال<\/th>/);
+      assert.match(rendered, /۶۰٬۰۰۰٬۰۰۰ ریال/);
+      assert.match(rendered, /جمع خرید از سبلان: 120,000,000 ریال \(12,000,000 تومان\)/);
+    }
   }
   const custom = renderPartnerInternalDocumentHtml(document as unknown as Parameters<typeof renderPartnerInternalDocumentHtml>[0], { variant: 'custom', customPrint: { showPrices: false, showTotals: false } });
   assert.doesNotMatch(custom, /120000000|۱۲۰٬۰۰۰٬۰۰۰|۶۰٬۰۰۰٬۰۰۰/);
@@ -77,8 +82,23 @@ test('frozen wholesale mandatory prints separately without repricing customer mo
   assert.match(html, /۳۶٬۰۰۰٬۰۰۰ ریال/);
   assert.match(html, /۱۸۰٬۰۰۰٬۰۰۰ ریال/);
   assert.match(html, /۱۰٬۰۰۰٬۰۰۰ ریال/);
-  assert.match(html, /جمع خرید از سبلان: 226000000 ریال/);
+  assert.match(html, /جمع خرید از سبلان: 226,000,000 ریال \(22,600,000 تومان\)/);
   for (const options of [{ variant: 'workshop' as const }, { variant: 'custom' as const, customPrint: { showPrices: false, showTotals: false } }]) {
     assert.doesNotMatch(renderPartnerInternalDocumentHtml(document, options), /۳۶٬۰۰۰٬۰۰۰|۱۸۰٬۰۰۰٬۰۰۰|۱۰٬۰۰۰٬۰۰۰/);
+  }
+});
+
+test('Partner delivery retains exact decimal quantities and the contracted unit in every PDF layout', () => {
+  const document = { amount: '100', currency: 'IRT', createdAt: new Date('2026-10-11'),
+    partnerContext: { customerContractNumber: '100347', internalRecordNumber: 'PI-100347', debtor: { displayName: 'همکار' }, endCustomer: { displayName: 'مشتری' } },
+    items: [{ productRowId: 'tread', description: 'کف پله', productType: 'stair', quantity: '15.4', unit: 'squareMeter', unitPrice: '1', totalPrice: '15.4' },
+      { productRowId: 'riser', description: 'خیز', productType: 'stair', quantity: '9.2575', unit: 'squareMeter', unitPrice: '1', totalPrice: '9.2575' }],
+    deliveries: [{ date: '2026-10-12', destination: 'محلی', items: [{ productRowId: 'tread', quantity: '15.4' }, { productRowId: 'riser', quantity: '9.2575' }] }]
+  } as unknown as Parameters<typeof renderPartnerInternalDocumentHtml>[0];
+  for (const variant of ['original', 'accounting', 'custom', 'workshop'] as const) {
+    const html = renderPartnerInternalDocumentHtml(document, { variant });
+    assert.match(html, /۱۵٫۴ متر مربع/);
+    assert.match(html, /۹٫۲۵۷۵ متر مربع/);
+    assert.doesNotMatch(html, /۱۵ عدد|۹ عدد/);
   }
 });

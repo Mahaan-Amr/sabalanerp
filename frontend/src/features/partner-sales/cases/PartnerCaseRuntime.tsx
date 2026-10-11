@@ -11,7 +11,7 @@ import { ErpBadge, ErpPagination, ErpButton, ErpCheckbox, ErpEmptyState, ErpFiel
 import { FaEye, FaFileContract, FaPlus, FaSync } from 'react-icons/fa';
 import { PartnerCaseWorkspace } from './PartnerCaseWorkspace';
 import {
-  cancelPartnerCase, finalizePartnerCase, openPartnerPdf, readPartnerCases, readPartnerCollections,
+  cancelPartnerCase, finalizePartnerCase, openPartnerPdf, readPartnerCaseListing, readPartnerCollections,
   readPartnerCorrection, recordPartnerCollection, requestPartnerCorrection, reversePartnerCollection,
   savePartnerRetailCorrection, sendPartnerConfirmation, type PartnerCaseRuntimeRow,
 } from './partnerCaseHttpPort';
@@ -22,15 +22,16 @@ import { assertSuccessfulSalesResult, getSalesOperationalErrorKind, getSalesOper
 import { normalizePartnerSalesOperationalError } from '../partnerSalesErrorMessage';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 import { formatPartnerMoney } from '../presentation';
-import { partnerCaseListPage, partnerCaseListTag, partnerCaseListTags } from './partnerCaseList';
+import { partnerUnifiedCaseListPage, partnerCaseListTags, type PartnerCaseIssue, type PartnerRecoveryListRow, type PartnerUnifiedListRow } from './partnerCaseList';
 
 type CaseError = { key: string; message: string; kind: 'error' | 'permission' | 'stale'; caseId: string; order: number };
 
-export function PartnerCaseRuntime() {
+export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDrafts?: PartnerRecoveryListRow[] }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedCaseId = searchParams.get('caseId') || undefined;
   const [rows, setRows] = useState<PartnerCaseRuntimeRow[]>([]);
+  const [issues, setIssues] = useState<PartnerCaseIssue[]>([]);
   const [search, setSearch] = useState('');
   const [tag, setTag] = useState('ALL');
   const [page, setPage] = useState(1);
@@ -74,10 +75,12 @@ export function PartnerCaseRuntime() {
     const requestSequence = ++loadSequenceRef.current;
     setBusy(true);
     try {
-      const cases = await readPartnerCases(selectedCaseId);
+      const listing = await readPartnerCaseListing(selectedCaseId);
+      const cases = listing.cases;
       if (requestSequence !== loadSequenceRef.current) return;
       setRows(cases);
-      const supplementary = await Promise.all(cases.map(async row => {
+      setIssues(listing.issues ?? []);
+      const supplementary = await Promise.all((selectedCaseId ? cases : []).map(async row => {
         const caseId = row.view.owner.caseId;
         const collectionsResult = ['COMMITTED', 'VOIDED'].includes(row.view.state)
           ? await readPartnerCollections(row.view.owner).then(value => ({ ok: true as const, value })).catch(reason => ({ ok: false as const, reason }))
@@ -175,36 +178,40 @@ export function PartnerCaseRuntime() {
   useEffect(() => { void load(); }, [load]);
   if (busy) return <ErpLoading />;
   if (!selectedCaseId) {
-    const listing = partnerCaseListPage(rows, search, tag, page);
-    const columns: ErpColumn<PartnerCaseRuntimeRow>[] = [
+    const listing = partnerUnifiedCaseListPage(rows, issues, recoverableDrafts, search, tag, page);
+    const columns: ErpColumn<PartnerUnifiedListRow>[] = [
       { id: 'number', header: 'قرارداد', priority: 'primary', cell: row => <div>
-        <strong>{row.view.customerContractNumber ? 'شماره قرارداد' : 'کد پیگیری'} {partnerCustomerContractLabel(row.view.caseNumber, row.view.customerContractNumber, row.view.trackingNumber)}</strong>
-        {row.view.customerContractNumber && <p className="sds-text-secondary mt-1 text-xs">کد پیگیری {partnerTrackingCode(row.view.caseNumber, row.view.trackingNumber)}</p>}
+        <strong>{row.number}</strong>
+        {row.case?.view.customerContractNumber && <p className="sds-text-secondary mt-1 text-xs">کد پیگیری {partnerTrackingCode(row.case.view.caseNumber, row.case.view.trackingNumber)}</p>}
+        {row.issue && <p className="sds-text-secondary mt-1 text-xs">نیازمند بررسی · کد پیگیری {partnerTrackingCode(row.issue.caseNumber, row.issue.trackingNumber)}</p>}
+        {row.draft && <p className="sds-text-secondary mt-1 text-xs">{row.title}</p>}
       </div> },
-      { id: 'status', header: 'وضعیت', priority: 'secondary', cell: row => {
-        const status = partnerCaseListTags[partnerCaseListTag(row.view, row.pricingResponseState, row.commercial)];
-        return <ErpBadge tone={status.tone}>{status.label}</ErpBadge>;
-      } },
-      { id: 'products', header: 'اقلام', priority: 'meta', cell: row => row.view.products.length.toLocaleString('fa-IR') },
+      { id: 'status', header: 'وضعیت', priority: 'secondary', cell: row => <ErpBadge tone={row.tone}>
+        {row.status === 'REVIEW' ? 'نیازمند بررسی' : row.status === 'RECOVERY' ? 'پیش‌نویس ایجاد قرارداد' : partnerCaseListTags[row.status as keyof typeof partnerCaseListTags].label}
+      </ErpBadge> },
+      { id: 'products', header: 'اقلام', priority: 'meta', cell: row => row.case ? row.case.view.products.length.toLocaleString('fa-IR') : '—' },
       { id: 'retail', header: 'مبلغ فروش مشتری', priority: 'secondary', align: 'end',
-        cell: row => formatPartnerMoney(row.view.retailTotals.payable, row.view.retailTotals.currency) },
+        cell: row => row.case ? formatPartnerMoney(row.case.view.retailTotals.payable, row.case.view.retailTotals.currency, 'IRT') : '—' },
     ];
-    const rowActions = (row: PartnerCaseRuntimeRow): ErpAction[] => [
-      { label: 'بررسی قرارداد', icon: FaEye,
-        href: `/dashboard/sales/partner-cases?caseId=${encodeURIComponent(row.view.owner.caseId)}` },
-      ...(row.actions.canContinue && row.commercial?.inquiry !== 'ACCEPTED' && row.editRecovery ? [{ label: 'ادامه تکمیل',
-        href: `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(row.view.owner.caseId)}&draftId=${encodeURIComponent(row.editRecovery.recoveryId)}&baseRevision=${row.editRecovery.baseRevision}` }] : []),
-    ];
-    return <ErpListPage eyebrow="فروش همکار" title="پیش نویس ها و پرونده ها"
+    const rowActions = (entry: PartnerUnifiedListRow): ErpAction[] => {
+      if (entry.issue) return [];
+      if (entry.draft) return [{ label: 'ادامه تکمیل', href: `/dashboard/sales/contracts/create?${entry.draft.caseId ? 'caseId' : 'draftId'}=${encodeURIComponent(entry.draft.caseId ?? entry.draft.recoveryId)}` }];
+      const row = entry.case!;
+      return [{ label: 'بررسی قرارداد', icon: FaEye,
+        href: `/dashboard/sales/contracts?caseId=${encodeURIComponent(row.view.owner.caseId)}` },
+        ...(row.actions.canContinue && row.commercial?.inquiry !== 'ACCEPTED' && row.editRecovery ? [{ label: 'ادامه تکمیل',
+          href: `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(row.view.owner.caseId)}&draftId=${encodeURIComponent(row.editRecovery.recoveryId)}&baseRevision=${row.editRecovery.baseRevision}` }] : [])];
+    };
+    return <ErpListPage eyebrow="فروش همکار" title="قراردادهای فروش"
       description="پرونده را انتخاب کنید تا جزئیات، تحویل، پرداخت و اقدام‌های مجاز آن را ببینید."
       actions={[{ label: 'ثبت قرارداد', icon: FaPlus, href: '/dashboard/sales/contracts/create' },
         { label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' }]}
       filters={[{ id: 'search', label: 'جستجو', type: 'search', value: search,
         onChange: value => { setSearch(value); setPage(1); }, placeholder: 'شماره قرارداد، پرونده یا محصول...' },
         { id: 'tag', label: 'وضعیت پرونده', type: 'select', value: tag,
-          options: [{ label: 'همه وضعیت‌ها', value: 'ALL' }, ...Object.entries(partnerCaseListTags).map(([value, status]) => ({ value, label: status.label }))],
+          options: [{ label: 'همه وضعیت‌ها', value: 'ALL' }, { label: 'نیازمند بررسی', value: 'REVIEW' }, { label: 'پیش‌نویس ایجاد قرارداد', value: 'RECOVERY' }, ...Object.entries(partnerCaseListTags).map(([value, status]) => ({ value, label: status.label }))],
           onChange: value => { setTag(value); setPage(1); } }]}
-      rows={listing.rows} rowKey={row => row.view.owner.caseId} columns={columns} rowActions={rowActions}
+      rows={listing.rows} rowKey={row => row.id} columns={columns} rowActions={rowActions}
       footer={<ErpPagination currentPage={listing.currentPage} totalPages={listing.totalPages}
         totalItems={listing.totalItems} itemsPerPage={listing.pageSize} onPageChange={setPage} itemLabel="پرونده" />}
       emptyState={<ErpEmptyState icon={FaFileContract} title="پرونده‌ای یافت نشد" />}
@@ -231,13 +238,12 @@ export function PartnerCaseRuntime() {
             decisionActions: row.commercial ? [
               ...(row.actions.canCancel ? [{ label: 'رد', tone: 'danger' as const, onClick: () => { setCancelTarget(row); setCancelReason(''); } }] : []),
               ...(row.actions.canRenew ? [{ label: 'تمدید مهلت', tone: 'warning' as const, onClick: () => { setRenewTarget(true); setRejectPricing(false); setRejectDraftTarget(row); setRejectDraftReason(''); } }] : []),
-              ...(row.commercial && !row.commercial.firstFinancialRecordAt && row.commercial.inquiry !== 'ACCEPTED' && ['READY', 'PARTIAL'].includes(row.pricingResponseState || '') ? [{ label: 'رد استعلام', tone: 'danger' as const, onClick: () => { setRenewTarget(false); setRejectPricing(true); setRejectDraftTarget(row); setRejectDraftReason(''); } }] : []),
               ...(row.actions.canApproveSales && row.commercial ? [{ label: 'تایید', tone: 'success' as const,
                 onClick: () => void runAction(caseId, 'approve-sales', 'تأیید فروش', () => decidePartnerCommercial(caseId, row.commercial!.revision, 'APPROVE_SALES')) }] : []),
             ] : undefined,
             canEditDraft: Boolean(row.commercial && row.actions.canRejectDraft),
             onEditDraft: () => { setRenewTarget(false); setRejectPricing(false); setRejectDraftTarget(row); setRejectDraftReason(''); },
-            onContinue: row.editRecovery ? () => router.push(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}`) : undefined,
+            onContinue: row.editRecovery ? () => router.push(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}${row.commercial?.inquiry !== 'ACCEPTED' && ['READY', 'PARTIAL', 'REJECTED'].includes(row.pricingResponseState || '') ? '&returnTo=contract&step=5' : ''}`) : undefined,
             onPreview: () => void previewPdf(caseId, row.view.state === 'COMMITTED' ? undefined : row.snapshotId ?? undefined, 'PREVIEW', row.view.owner),
             onIssue: () => void previewPdf(caseId, undefined, 'FINAL', row.view.owner),
             onFinalize: () => { setFinalizeTarget(row); setLossAccepted(false); },

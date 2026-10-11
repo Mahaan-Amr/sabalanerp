@@ -47,12 +47,18 @@ assert.match(html, /طولی مرمریت/);
 assert.match(html, /۱\.۲۵/);
 assert.match(html, /۰\.۴/);
 assert.match(html, /۱۰/);
-assert.match(html, /۱۰۰۰۰۰۰۰/);
+assert.match(html, /۱۰٬۰۰۰٬۰۰۰ تومان/);
 assert.match(html, /پروژه گل‌دشت/);
 assert.match(html, /معالی‌آباد/);
 assert.match(html, /انبار مشتری/);
 assert.match(html, /برنامه پرداخت/);
 assert.doesNotMatch(html, /wholesaleUnitPrice|approvalEvidenceId|resaleDifference/);
+
+const fractionalRate = { ...output, products: [{ ...output.products[0], retailUnitPrice: '4764025.974025974' }] };
+const formattedRate = renderCustomerContractPrint(fractionalRate).htmlContent;
+assert.match(formattedRate, /۴٬۷۶۴٬۰۲۶ تومان/);
+assert.match(formattedRate, /۱۰٬۰۰۰٬۰۰۰ تومان/);
+assert.equal(fractionalRate.products[0].retailUnitPrice, '4764025.974025974');
 
 const localized = renderCustomerContractPrint(CustomerContractOutputSchema.parse({ ...output,
   products: [{ ...output.products[0], unit: 'meter' }],

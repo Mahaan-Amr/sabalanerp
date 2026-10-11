@@ -240,11 +240,19 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
       const product = products.find(item => item.catalogItemId === row.catalogItemId && item.catalogSnapshotVersion === row.catalogSnapshotVersion);
       const current = currentProducts.find(item => item.catalogItemId === row.catalogItemId && item.isAvailable
         && item.families.includes(row.family));
-      if (catalogState !== 'ready') return <ErpCard key={row.productRowId} className="space-y-2 p-4" data-contract-row-id={row.productRowId}>
-        <strong className="sds-text-primary text-sm">{row.contractualTitle || product?.name || row.catalogItemId}</strong>
+      if (catalogState !== 'ready' && !product) return <ErpCard key={row.productRowId} className="space-y-2 p-4" data-contract-row-id={row.productRowId}>
+        <strong className="sds-text-primary text-sm">{row.contractualTitle || row.catalogItemId}</strong>
+        <div className="sds-text-secondary flex flex-wrap gap-3 text-xs">
+          <span>{labels[row.family]}</span>
+          {'lengthMeters' in row.configuration && <span>طول: {row.configuration.lengthMeters} متر</span>}
+          {'widthMeters' in row.configuration && <span>عرض: {row.configuration.widthMeters} متر</span>}
+          {'crossDimensionMeters' in row.configuration && <span>عرض: {row.configuration.crossDimensionMeters} متر</span>}
+          <span>تعداد: {row.configuration.quantity}</span>
+        </div>
+        {row.description && <p className="sds-text-secondary text-xs">{row.description}</p>}
         {row.retailUnitPrice && <div className="sds-text-secondary text-sm">{partnerMoneyText(row.retailUnitPrice.amount, row.retailUnitPrice.currency)}</div>}
       </ErpCard>;
-      if (!product || !current) {
+      if (!product || (!current && catalogState === 'ready')) {
         return <ErpCard key={row.productRowId} className="space-y-3 p-4" data-contract-row-id={row.productRowId}>
           <div className="space-y-1"><strong className="sds-text-primary text-sm">{product?.name ?? row.catalogItemId}</strong>
             <p className="sds-text-secondary text-xs">{labels[row.family]} · نسخهٔ ثبت‌شدهٔ محصول</p></div>
@@ -268,6 +276,8 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
       const calculation = preview.ok ? preview.value.rows.find(item => item.productRowId === row.productRowId)?.calculation : undefined;
       const facts = calculation?.ok ? calculation.result as unknown as Record<string, unknown> : undefined;
       const customerOrderArea = partnerCustomerOrderArea(facts);
+      const consumedArea = facts?.consumedMaterialAreaSquareMeters ?? facts?.consumedMotherAreaSquareMeters ?? facts?.materialAreaSquareMeters
+        ?? (Array.isArray(facts?.pricingLines) ? (facts.pricingLines as Array<{ lineId?: string; quantity?: string }>).find(line => line.lineId === 'base-material')?.quantity : undefined);
       const geometry = row.family === 'prepared'
         ? `${formatDisplayNumber(Number(row.configuration.quantity) || 0)} ${partnerQuantityUnitCopy[row.configuration.unit] ?? row.configuration.unit}`
         : `${formatDisplayNumber(Number(facts?.lengthMeters) || 0)} متر × ${formatDisplayNumber(Number(facts && ('widthMeters' in facts ? facts.widthMeters : facts.crossDimensionMeters)) || 0)} متر`;
@@ -283,9 +293,10 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
             <strong className="sds-text-primary text-sm">{row.contractualTitle || product.name}</strong><span className="sds-text-muted text-xs">{labels[row.family]}</span>
           </div><div className="sds-text-secondary mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"><span>{geometry}</span>
             {customerOrderArea !== undefined && <span>مساحت سفارش مشتری: {formatSquareMeters(customerOrderArea)}</span>}
+            {typeof consumedArea === 'string' && <span>مساحت مصرف سنگ مادر: {formatSquareMeters(Number(consumedArea))}</span>}
             {physicalCount !== null && Number.isSafeInteger(physicalCount) && physicalCount > 0 &&
               <span>تعداد: {formatDisplayNumber(physicalCount)} عدد</span>}
-            {row.retailUnitPrice?.amount && retailUnitLabel && <strong className="sds-text-primary">{formatPrice(Number(row.retailUnitPrice.amount), 'تومان')} · {retailUnitLabel}</strong>}
+            {row.retailUnitPrice?.amount && retailUnitLabel && <strong className="sds-text-primary">{partnerMoneyText(row.retailUnitPrice.amount, row.retailUnitPrice.currency)} · {retailUnitLabel}</strong>}
           </div></div>
           {confirmingDelete ? <div className="flex items-center gap-2 text-xs"><span>حذف این محصول؟</span>
             <ErpPressable type="button" onClick={() => setDeleteRowId(null)}>انصراف</ErpPressable>
@@ -293,11 +304,11 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
             : <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
               {current && current.catalogSnapshotVersion !== row.catalogSnapshotVersion &&
                 <ErpBadge tone="warning">نسخهٔ کاتالوگ تغییر کرده است</ErpBadge>}
-              <ErpPressable type="button" onClick={() => setModal({
+              <ErpPressable type="button" disabled={catalogState !== 'ready' || !dependenciesReady} onClick={() => setModal({
                 draft: draftForPartnerTechnicalEdit(draft, row.productRowId, currentProducts),
                 productRowId: row.productRowId, mode: 'edit',
               })}>ویرایش</ErpPressable>
-              <ErpPressable type="button" onClick={() => {
+              <ErpPressable type="button" disabled={catalogState !== 'ready' || !dependenciesReady} onClick={() => {
                 try { const next = duplicatePartnerTechnicalProduct(draft, row.productRowId, { products, operations, sawKerfMeters });
                   setDuplicateError(null); onChange(next); }
                 catch (error) { setDuplicateError(error instanceof Error ? error.message : 'تکثیر محصول انجام نشد.'); }
@@ -305,13 +316,13 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
               <ErpPressable type="button" tone="danger" onClick={() => setDeleteRowId(row.productRowId)}>حذف</ErpPressable>
             </div>}
         </div>
-        {calculation && !calculation.ok && <ErpInlineState kind="stale" className="mt-2" title={`مشخصات این ردیف کامل نیست. ${calculation.conflicts[0]?.message ?? ''}`} />}
-        {preview.ok && <RemainderEditor draft={draft} parentProductRowId={row.productRowId} products={products}
+        {catalogState === 'ready' && dependenciesReady && calculation && !calculation.ok && <ErpInlineState kind="stale" className="mt-2" title={`مشخصات این ردیف کامل نیست. ${calculation.conflicts[0]?.message ?? ''}`} />}
+        {catalogState === 'ready' && dependenciesReady && preview.ok && <RemainderEditor draft={draft} parentProductRowId={row.productRowId} products={products}
           inventory={preview.value.inventory} onChange={onChange} onEdit={setEditingDependentId} onUse={setRemainderSelection} />}
       </div>;
     })}
     </ErpCard></section>
-    {partnerTechnicalSaveIssue(preview) && <ErpInlineState kind="stale" title={partnerTechnicalSaveIssue(preview)!} />}
+    {catalogState === 'ready' && dependenciesReady && partnerTechnicalSaveIssue(preview) && <ErpInlineState kind="stale" title={partnerTechnicalSaveIssue(preview)!} />}
     {modal && <PartnerProductConfigurationFlow state={modal} products={products} operations={operations} sawKerfMeters={sawKerfMeters}
       dependenciesReady={dependenciesReady}
       mandatoryDefaults={mandatoryDefaults}

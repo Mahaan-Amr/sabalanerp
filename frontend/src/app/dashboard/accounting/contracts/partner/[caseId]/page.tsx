@@ -1,5 +1,6 @@
 'use client';
 
+import { formatPartnerMoneyTotal } from '@/features/partner-sales/presentation';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ErpButton, ErpInlineState, ErpLoading, ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
@@ -139,7 +140,7 @@ export default function PartnerInternalAccountingContractPage() {
       <ErpSummaryGrid items={[
         { label: 'طرف‌حساب سبلان', value: document.partnerContext.debtor.displayName },
         { label: 'صورتحساب', value: document.systemInvoiceNumber || '—' },
-        { label: 'مبلغ دریافتنی', value: money(document.amount, document.currency) },
+        { label: 'مبلغ دریافتنی', value: formatPartnerMoneyTotal(document.amount, document.currency, 'IRR') },
       ]} />
       {error && <ErpInlineState kind="error" title={error} />}
     </ErpSheet>

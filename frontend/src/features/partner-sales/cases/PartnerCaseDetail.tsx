@@ -57,7 +57,7 @@ export function PartnerCaseDetail({ view, actions, customerOutput, history, comm
   const status = commercial ? { label: partnerCommercialLabels[commercial.status], tone: (commercial.status === 'FINAL' ? 'success' : 'neutral') as ErpTone } : stateCopy[view.state];
   const pageActions = partnerCasePageActions(actions);
   return <ErpPage eyebrow="پرونده فروش همکار" title={`${view.customerContractNumber ? 'شماره قرارداد' : 'کد پیگیری'} ${partnerCustomerContractLabel(view.caseNumber, view.customerContractNumber, view.trackingNumber)}`} description={`کد پیگیری: ${partnerTrackingCode(view.caseNumber, view.trackingNumber)}`}
-    backHref="/dashboard/sales/partner-cases" actions={pageActions} metrics={partnerCaseMetrics(view, status)}><PartnerCaseDetailContent
+    backHref="/dashboard/sales/contracts" actions={pageActions} metrics={partnerCaseMetrics(view, status)}><PartnerCaseDetailContent
       view={view} actions={actions} customerOutput={customerOutput} history={history} commercial={commercial} />{children}
   </ErpPage>;
 }
@@ -67,7 +67,7 @@ export function partnerCasePageActions(actions: PartnerCaseActions): ErpAction[]
     ...(actions.decisionActions ?? []),
     ...(actions.canEditDraft ? [{ label: 'ویرایش', icon: FaEdit, tone: 'info' as const, onClick: actions.onEditDraft }] : []),
     ...(!actions.canEditDraft && actions.canContinue ? [{ label: 'ویرایش', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
-    ...(actions.canContinue && actions.canReviewPricing ? [{ label: 'ادامه تکمیل قرارداد', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
+    ...(actions.canContinue && actions.canReviewPricing ? [{ label: 'بررسی استعلام سبلان', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
     ...(!actions.canEditDraft && !actions.canContinue && actions.canRequestCorrection ? [{ label: 'درخواست اصلاح', icon: FaEdit,
       tone: 'info' as const, onClick: actions.onRequestCorrection, disabled: actions.pending }] : []),
     ...(!actions.decisionActions && actions.canCancel ? [{ label: 'لغو پیش‌نویس', icon: FaBan, tone: 'danger' as const,

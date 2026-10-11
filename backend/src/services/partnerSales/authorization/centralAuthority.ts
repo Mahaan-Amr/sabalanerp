@@ -18,6 +18,19 @@ export const resolvePartnerScopedAuthority: ResolvePartnerAuthority<PartnerActio
     if (action.success && kind.success && purpose.success) grants.push({ ...grant, action: action.data, rootKind: kind.data, purpose: purpose.data });
   }
   for (const grant of workspace.grants) {
+    if (grant.action === 'ACCOUNTING_READ') {
+      // An explicit scoped decision (including DENY or a narrower ALLOW) owns
+      // this action. The feature bridge only supplies absent read authority.
+      const explicit = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT g.id FROM effective_action_grants g JOIN users u ON u.id = ${input.actorId}
+        WHERE g.domain = 'PARTNER' AND g.action = 'ACCOUNTING_READ'
+          AND g."rootKind" = 'CASE' AND g.purpose = 'ACCOUNTING' AND g."revokedAt" IS NULL
+          AND g."effectiveFrom" <= clock_timestamp()
+          AND (g."expiresAt" IS NULL OR g."expiresAt" > clock_timestamp())
+          AND ((g."principalKind" = 'USER' AND g."principalId" = u.id)
+            OR (g."principalKind" = 'ROLE' AND g."principalId" = u.role::text)) LIMIT 1`;
+      if (explicit.length) continue;
+    }
     const action = PartnerActionV2Schema.safeParse(grant.action);
     const kind = PermissionContextSchema.shape.root.shape.kind.safeParse(grant.rootKind);
     const purpose = PermissionContextSchema.shape.purpose.safeParse(grant.purpose);

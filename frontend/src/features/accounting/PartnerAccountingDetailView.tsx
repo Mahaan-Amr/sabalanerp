@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { formatPartnerMoneyTotal } from '@/features/partner-sales/presentation';
 import { FaBalanceScale, FaFileInvoice, FaFlag, FaMoneyCheckAlt, FaReceipt, FaSync, FaExclamationTriangle } from 'react-icons/fa';
 import { partnerTrackingCode, partnerCommercialLabels } from '@sabalanerp/partner-sales-contracts';
 import { ErpButton, ErpCard, ErpInlineState, ErpPage, ErpSection, ErpSegmentedControl, ErpSummaryGrid, ErpTwoColumn } from '@/components/erp';
@@ -72,7 +73,7 @@ export function PartnerAccountingDetailView({ lifecyclePanel, financialVoidPanel
     description={`کد پیگیری ${partnerTrackingCode(context.caseNumber, context.trackingNumber)} · سند داخلی فروش سبلان به همکار`}
     backHref="/dashboard/accounting/contracts" actions={[{ label: 'به‌روزرسانی', icon: FaSync, variant: 'outline', disabled: pending, onClick: onRefresh }]}
     metrics={[
-      { label: 'مبلغ قرارداد', value: doc.amountKnown === false ? 'پس از پذیرش قیمت‌ها' : money(doc.amount, doc.currency), icon: FaBalanceScale, tone: 'primary' },
+      { label: 'مبلغ قرارداد', value: <span className="block whitespace-normal break-words [overflow-wrap:anywhere]">{doc.amountKnown === false ? 'پس از پذیرش قیمت‌ها' : formatPartnerMoneyTotal(doc.amount, doc.currency, 'IRR')}</span>, icon: FaBalanceScale, tone: 'primary' },
       { label: 'صورتحساب شده', value: money(issued ? doc.amount : '0', doc.currency), icon: FaFileInvoice, tone: 'info' },
       { label: 'دریافت شده', value: money(doc.receivedAmount || '0', doc.currency), icon: FaReceipt, tone: 'success' },
       { label: 'مانده', value: doc.amountKnown === false ? 'پس از پذیرش قیمت‌ها' : money(doc.remainingAmount || doc.amount, doc.currency), icon: FaMoneyCheckAlt, tone: 'warning' },

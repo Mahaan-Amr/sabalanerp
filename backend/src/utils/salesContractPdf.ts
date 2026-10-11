@@ -163,6 +163,8 @@ export const buildSalesContractPdfFingerprint = (
     titlePersian: contract?.titlePersian,
     status: contract?.status,
     commercialFlowVersion: contract?.commercialFlowVersion,
+    ...(contract?.partnerKind === 'PARTNER_CUSTOMER' ? { partnerPresentationVersion: 3,
+      commercialRevision: contract?.commercialRevision, customerAcceptanceRevision: contract?.customerAcceptanceRevision } : {}),
     type: contract?.type,
     totalAmount: contract?.totalAmount,
     currency: contract?.currency,

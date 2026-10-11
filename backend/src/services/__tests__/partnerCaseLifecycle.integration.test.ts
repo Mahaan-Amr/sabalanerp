@@ -1483,6 +1483,14 @@ test('real-schema correction HTTP dispatch approves a requested retail correctio
           owner: { ...successor, caseId: `${ids.caseId}-foreign` } } } } });
     });
     assert.equal((await post('/cases/query-v2', { caseId: ids.caseId })).body.code, 'INTEGRITY_CONFLICT');
+    const partialList = await post('/cases/query-v2', {});
+    assert.equal(partialList.status, 200, JSON.stringify(partialList.body));
+    assert.equal(partialList.body.data.cases.some((row: any) => row.view.owner.caseId === ids.caseId), false);
+    const issue = partialList.body.data.issues.find((row: any) => row.caseId === ids.caseId);
+    assert.ok(issue, 'an authorized damaged case remains visible by trusted identity');
+    assert.equal(issue.code, 'INTEGRITY_CONFLICT');
+    assert.equal('view' in issue || 'amount' in issue || 'actions' in issue, false,
+      'damaged economics and business actions must not be invented');
     const calendar = await database.$transaction(async tx => {
       await tx.sabalanCalendarEntry.create({ data: { date: new Date('2026-09-03T08:00:00Z'), isHoliday: true,
         title: 'تعطیل آزمایشی', eventType: 'COMPANY_HOLIDAY', createdBy: actorId } });
@@ -1786,4 +1794,37 @@ test('Partner Accounting lifecycle shares ordinary requests and dependency guard
       'backend/src/services/__tests__/partnerContractLifecycleProbe.ts'], { timeout: 30_000, env: { ...process.env,
         DATABASE_URL: temporary.databaseUrl, PARTNER_LIFECYCLE_TEST_IDS: JSON.stringify(ids) } });
   } finally { await database.$disconnect(); await temporary.cleanup(); }
+});
+
+test('unified case query retains healthy and damaged authorized identities while excluding foreign cases', async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(process.cwd()), sourceDatabaseUrl: databaseUrl() });
+  const database = temporary.client();
+  const good = idsFor(`list-good-${temporary.runId}`), bad = idsFor(`list-bad-${temporary.runId}`), foreign = idsFor(`list-foreign-${temporary.runId}`);
+  const actorId = good.partnerId;
+  const app = express(); app.use(express.json());
+  app.use(createPartnerCaseRouter({ database, authenticate: (request, _response, next) => {
+    (request as AuthRequest).user = { id: actorId, role: 'USER' } as AuthRequest['user']; next(); } }));
+  const server = app.listen(0);
+  try {
+    await database.$transaction(async tx => {
+      await seedCase(tx, good); await seedCase(tx, bad); await seedCase(tx, foreign);
+      await tx.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+
+    });
+    await database.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+      await tx.partnerSaleCase.update({ where: { id: bad.caseId }, data: { profileId: good.profileId } });
+      for (const ids of [bad, foreign]) await tx.partnerCaseRevision.update({ where: { caseId_revision: { caseId: ids.caseId, revision: 1 } },
+        data: { internalProjection: { partner: { invalid: true } } } });
+    });
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing address');
+    const response = await fetch(`http://127.0.0.1:${address.port}/query-v2`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const body = await response.json() as any; assert.equal(response.status, 200, JSON.stringify(body));
+    assert.deepEqual(body.data.cases.map((row: any) => row.view.owner.caseId), [good.caseId]);
+    assert.deepEqual(body.data.issues.map((row: any) => row.caseId), [bad.caseId]);
+    assert.equal(body.data.issues[0].retailTotals, undefined);
+    assert.equal(body.data.issues[0].actions, undefined);
+    assert.ok(!JSON.stringify(body).includes(foreign.caseId));
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); await database.$disconnect(); await temporary.cleanup(); }
 });

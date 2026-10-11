@@ -2600,7 +2600,7 @@ export function renderReportPdfHeaderTemplate(meta: {
 }
 
 const customerMoney = (amount: string, output: CustomerContractOutput) =>
-  `${escapeHtml(amount)} ${output.totals.currency === 'IRR' ? 'ریال' : 'تومان'}`;
+  `${formatMoneyNumber(amount)} ${output.totals.currency === 'IRR' ? 'ریال' : 'تومان'}`;
 
 function renderCustomerProductRows(output: CustomerContractOutput, columns: Array<{ key: ContractPrintColumnKey }>): string {
   const rows = output.products.map((row, index) => {
@@ -2660,6 +2660,8 @@ export function renderCustomerContractPrint(output: CustomerContractOutput) {
 }
 
 type RenderContractHtmlOptions = {
+  /** Accounting workspace currency is independent of the selected print layout. */
+  displayInRials?: boolean;
   unavailableMoneyLabel?: string;
   /** Internal typed adapter only; validate/hash-check at the output boundary. */
   customerOutput?: CustomerContractOutput;
@@ -2681,6 +2683,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   if (output) contract = { contractNumber: output.contractNumber, status: output.status, createdAt: output.contractDate };
   const variant = options.variant || 'original';
   const isAccountingVariant = variant === 'accounting';
+  const displayInRials = isAccountingVariant || options.displayInRials === true;
   const isWorkshopVariant = variant === 'workshop';
   const isCustomVariant = variant === 'custom';
   const isSummaryVariant = variant === 'summary';
@@ -2690,7 +2693,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
       ? { productRowsMode: 'summarized' as const }
       : {};
   const priceFormatOptions: PrintMoneyOptions = {
-    ...(isAccountingVariant ? { displayInRials: true } : {}),
+    ...(displayInRials ? { displayInRials: true } : {}),
     ...(options.unavailableMoneyLabel ? { unavailableMoneyLabel: options.unavailableMoneyLabel } : {}),
   };
   const showFormalSection = variant === 'original' || isSummaryVariant;
@@ -2757,8 +2760,8 @@ export function renderContractHtml(contract: RenderableContract, options: Render
     { key: 'count', className: 'main-area-col', label: 'تعداد' },
     { key: 'linearMeasurement', className: 'main-linear-col', label: 'متر طول' },
     { key: 'squareMeasurement', className: 'main-square-col', label: 'متر مربع' },
-    { key: 'rate', className: 'main-rate-col', label: `نرخ - ${output ? (output.totals.currency === 'IRR' ? 'ریال' : 'تومان') : isAccountingVariant ? 'ریال' : 'تومان'}` },
-    { key: 'total', className: 'main-total-col', label: `مبلغ کل - ${output ? (output.totals.currency === 'IRR' ? 'ریال' : 'تومان') : isAccountingVariant ? 'ریال' : 'تومان'}` }
+    { key: 'rate', className: 'main-rate-col', label: `نرخ - ${output ? (output.totals.currency === 'IRR' ? 'ریال' : 'تومان') : displayInRials ? 'ریال' : 'تومان'}` },
+    { key: 'total', className: 'main-total-col', label: `مبلغ کل - ${output ? (output.totals.currency === 'IRR' ? 'ریال' : 'تومان') : displayInRials ? 'ریال' : 'تومان'}` }
   ];
   const visibleProductColumnDefinitions = productColumnDefinitions.filter((column) => productColumns[column.key]);
 

@@ -13,14 +13,25 @@ export const partnerProductTypeCopy: Record<string, string> = {
   prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله',
 };
 
-export function formatPartnerMoney(amount: string | number | null | undefined, currency: 'IRR' | 'IRT' | string) {
+export function formatPartnerMoney(amount: string | number | null | undefined, currency: 'IRR' | 'IRT' | string,
+  displayCurrency: 'IRR' | 'IRT' = currency as 'IRR' | 'IRT') {
   if (!['IRR', 'IRT'].includes(currency) || (typeof amount === 'number' && !Number.isSafeInteger(amount))) return 'داده معتبر در دسترس نیست';
-  const value = readPartnerDecimalInput(amount == null ? '' : String(amount));
-  if (value === null) return 'داده معتبر در دسترس نیست';
+  const parsed = exactDecimal(amount == null ? '' : String(amount));
+  if (!parsed || !['IRR', 'IRT'].includes(displayCurrency)) return 'داده معتبر در دسترس نیست';
+  const value = exactText(currency === displayCurrency ? parsed : currency === 'IRT'
+    ? { digits: parsed.digits * BigInt(10), scale: parsed.scale }
+    : { digits: parsed.digits, scale: parsed.scale + 1 });
   const [integer, fraction] = value.split('.');
   const whole = integer === '-0' ? '−۰' : BigInt(integer).toLocaleString('fa-IR');
   const decimal = fraction ? `٫${fraction.replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])}` : '';
-  return `${whole}${decimal} ${currency === 'IRT' ? 'تومان' : 'ریال'}`;
+  return `${whole}${decimal} ${displayCurrency === 'IRT' ? 'تومان' : 'ریال'}`;
+}
+
+export function formatPartnerMoneyTotal(amount: string | number | null | undefined, currency: string,
+  displayCurrency: 'IRR' | 'IRT') {
+  const main = formatPartnerMoney(amount, currency, displayCurrency);
+  return main === 'داده معتبر در دسترس نیست' ? main
+    : `${main} (${formatPartnerMoney(amount, currency, displayCurrency === 'IRR' ? 'IRT' : 'IRR')})`;
 }
 
 /** Exact input normalization only; no financial calculation or rounding. */

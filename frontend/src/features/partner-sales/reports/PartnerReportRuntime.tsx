@@ -122,6 +122,6 @@ function PartnerSalesReportRuntime() {
   return <div className="space-y-4">{periodControl}{filters}
     {error && <ErpInlineState kind="error" title={error} />}
     {report.rows.length ? <PartnerReportView report={report} canExport={!exporting} onExport={() => void exportReport()}
-      onOpenCase={row => router.push(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(row.caseId)}`)} />
+      onOpenCase={row => router.push(`/dashboard/sales/contracts?caseId=${encodeURIComponent(row.caseId)}`)} />
       : <ErpEmptyState icon={FaChartLine} title="در این محدوده گزارشی وجود ندارد" description="بازه تاریخ، وضعیت یا عبارت جست‌وجو را تغییر دهید." />}</div>;
 }

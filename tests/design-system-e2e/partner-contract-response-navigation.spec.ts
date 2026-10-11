@@ -7,7 +7,7 @@ for (const width of [1280, 390]) for (const outcome of ['READY', 'PARTIAL', 'REJ
   await page.setViewportSize({ width, height: 900 });
   const fixture = createPartnerFixtures();
   const view = { ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY', customerConfirmationState: 'NOT_SENT',
-    products: fixture.partner.products.map(({ wholesaleUnitPrice, ...row }) => row), sabalanTotals: undefined, sabalanPaymentPlan: undefined, resaleDifference: undefined };
+    products: fixture.partner.products.map(({ wholesaleUnitPrice, approvalEvidenceId, ...row }) => row), sabalanTotals: undefined, sabalanPaymentPlan: undefined, resaleDifference: undefined };
   let approved = false;
   const commands: string[] = [];
   await page.route('**/api/sales/contracts/response-test', route => route.fulfill({ json: { success: true, data: {
@@ -34,7 +34,7 @@ for (const width of [1280, 390]) for (const outcome of ['READY', 'PARTIAL', 'REJ
   expect(commands).toEqual(['APPROVE_SALES']);
   await expect(page.getByRole('button', { name: 'تایید', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'ویرایش', exact: true })).toBeVisible();
-  await page.screenshot({ path: `tmp/qa/partner-visual-2026-10-03/response-${outcome}-${width}.png`, fullPage: true });
-  await page.getByRole('button', { name: 'ادامه تکمیل قرارداد', exact: true }).click();
+  await page.screenshot({ path: `tmp/qa/partner-sales-2026-10-11/offer-response-${outcome}-${width}.png`, fullPage: true });
+  await page.getByRole('button', { name: 'بررسی استعلام سبلان', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`caseId=${encodeURIComponent(view.owner.caseId)}&draftId=response-draft&baseRevision=0&returnTo=contract&step=5`));
 });

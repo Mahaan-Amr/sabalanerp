@@ -348,6 +348,10 @@ async function main() {
         await prisma.workspacePermission.update({ where: { userId_workspace: { userId: actor.userId, workspace: 'accounting' } },
           data: { permissionLevel: 'edit' } });
       }
+      await prisma.effectiveActionGrant.create({ data: { id: `${recordId}-explicit-read-denial`,
+        principalKind: 'USER', principalId: actor.userId, subjectUserId: actor.userId, domain: 'PARTNER',
+        action: 'ACCOUNTING_READ', rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'DENY',
+        grantedBy: actor.userId, reason: 'آزمون منع صریح خواندن پرونده همکار', correlationId: `${recordId}-read-denial` } });
       for (const path of ['/financial-records', '/receivables', `/receivables?recordId=${receivable.id}`,
         '/payments', `/payments?recordId=${paymentEventId}`, '/tax', '/audit', '/workspace']) {
         const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting${path}`,
@@ -361,6 +365,9 @@ async function main() {
         assert.equal(body.includes(orphanAudit.id), false, `orphan audit leaks Partner evidence at ${path}`);
         assert.equal(body.includes(mixedInvoice.id), false, `ordinary discriminator leaks retained Partner preparation at ${path}`);
       }
+      await prisma.effectiveActionGrant.update({ where: { id: `${recordId}-explicit-read-denial` }, data: {
+        revokedAt: new Date(), revokedBy: actor.userId, revocationReason: 'پایان آزمون منع صریح',
+        revocationCorrelationId: `${recordId}-read-denial-end` } });
       await prisma.effectiveActionGrant.create({ data: { ...grant, id: `${grant.id}-read`, action: 'ACCOUNTING_READ',
         correlationId: `${recordId}-read`, reason: 'مجوز خواندن پرونده برای آزمون' } });
       const visible = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/receivables?recordId=${receivable.id}`,

@@ -10,7 +10,7 @@ export async function readPartnerSnapshot<T>(database: PrismaClient, read: (tx: 
       return await database.$transaction(async tx => {
         // Multi-root authority takes inquiry/profile update locks; serialize its
         // complete lock graph before acquiring any root.
-        if (options.multiRootAuthority) await lockPartnerOperationsControl(tx);
+        if (options.multiRootAuthority !== false) await lockPartnerOperationsControl(tx);
         else await lockPartnerOperationsControlForRead(tx);
         return read(tx);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000 });

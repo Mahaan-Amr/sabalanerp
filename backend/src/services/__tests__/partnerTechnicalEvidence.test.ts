@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalHash, PartnerTechnicalDraftSchema, type PartnerTechnicalDraft } from '@sabalanerp/partner-sales-contracts';
 import { Prisma } from '@prisma/client';
+import { parseCanonicalDecimal } from '@sabalanerp/contract-product-graph';
+import { compileOrReuseTechnicalSavedGraph } from '../partnerSales/cases/technicalSavedGraph';
+import type { TechnicalSavedSnapshot } from '../partnerSales/cases/technicalSavedRecords';
 import { compilePartnerTechnicalGraph } from '../partnerSales/cases/technicalGraph';
 import { partnerCustomerGraphTotal } from '../partnerSales/cases/customerGraphTotal';
 import { projectPartnerTechnicalProduct } from '../partnerSales/crm/technicalCatalog';
@@ -439,4 +442,34 @@ test('real evidence resolver binds current private rates and reuses frozen ident
   assert.ok(successor.ok);
   assert.deepEqual(successor.value.identities, first.value.identities);
   assert.equal(successor.value.context.products[0].preparedRates?.[0].rateToman, '1200000');
+});
+
+for (const family of ['longitudinal', 'stair', 'slab'] as const) test(`${family}: editable legacy replay prices consumed mother area without rewriting its predecessor`, async () => {
+  const draft = manualPriceDraft(family);
+  const resolved = await createPartnerTechnicalEvidenceResolver()(unpricedTransaction() as any,
+    { actorId: 'partner-1', recoveryId: 'legacy-draft', draft, previous: null });
+  assert.ok(resolved.ok);
+  const compiled = compilePartnerTechnicalGraph(draft, resolved.value.context); assert.ok(compiled.ok);
+  const firstRow = compiled.value.graph.rows[0];
+  const { partnerPricingBasis: _oldBasis, ...snapshot } = firstRow.commercial.calculationSnapshot!;
+  const graph = { ...compiled.value.graph, rows: [{ ...firstRow, commercial: { ...firstRow.commercial,
+    calculationSnapshot: snapshot, totalAmountToman: parseCanonicalDecimal('999999999') } }, ...compiled.value.graph.rows.slice(1)] };
+  const frozenBefore = JSON.stringify(graph);
+  const previous: TechnicalSavedSnapshot = { version: 1, sessionId: 'legacy-session', draft, context: resolved.value.context, graph,
+    identities: resolved.value.identities, view: { schemaVersion: 1, recoveryId: 'legacy-draft', recoveryRevision: 1,
+      inputRevision: draft.inputRevision, graphHash: await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph }),
+      updatedAt: '2026-10-11T00:00:00.000Z', rows: [{ configurationRef: { recoveryId: 'legacy-draft', recoveryRevision: 1,
+        productRowId: firstRow.productRowId }, quantity: '1.6', unit: 'squareMeter', configurationChange: 'UNCHANGED' }] } };
+  const next = compileOrReuseTechnicalSavedGraph(draft, resolved.value.context, previous); assert.ok(next.ok);
+  assert.equal(JSON.stringify(graph), frozenBefore, 'historical snapshot stays immutable');
+  assert.deepEqual(next.value.graph, compiled.value.graph);
+  assert.equal(next.value.measures[0].unit, 'squareMeter');
+  const facts = next.value.graph.rows[0].commercial.calculationSnapshot!;
+  const material = family === 'slab' ? facts.materialPricingLine as { quantity: string; amountToman: string }
+    : (facts.pricingLines as Array<{ lineId: string; quantity: string; amountToman: string }>).find(item => item.lineId === 'base-material');
+  assert.ok(material);
+  const area = family === 'longitudinal' ? '1.6' : facts.consumedMotherAreaSquareMeters ?? facts.materialAreaSquareMeters;
+  assert.equal(material.quantity, area);
+  assert.equal(next.value.measures[0].quantity, material.quantity);
+  assert.equal(material.amountToman, new Prisma.Decimal(material.quantity).mul('3000000').toFixed());
 });

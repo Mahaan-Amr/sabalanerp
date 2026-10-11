@@ -3,7 +3,7 @@ import { PartnerTechnicalCatalogQuerySchema, PartnerTechnicalCatalogPageSchema, 
   type PartnerTechnicalCatalogPort, type PartnerTechnicalFamily, type PartnerTechnicalProduct,
   type PartnerTechnicalOperation, type Result } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
-import { authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
+import { lockPartnerOperationsControlForRead, authorizePartnerTechnicalRollout } from '../authorization/technicalRollout';
 import { projectPartnerTechnicalProduct, projectPartnerTechnicalOperation } from './technicalCatalog';
 
 // Query the public technical projection and its optional ordinary catalog suggestion. Notes,
@@ -25,6 +25,9 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
   return { async read(input) {
     const parsed = PartnerTechnicalCatalogQuerySchema.safeParse(input);
     if (!parsed.success) return { ok: false, error: partnerError('INVALID_PAYLOAD') };
+    // Enter the shared read boundary before Profile/User/central locks. A
+    // multi-root read owns the exclusive boundary before acquiring any root.
+    await lockPartnerOperationsControlForRead(tx);
     const profile = await tx.partnerProfile.findUnique({ where: { userId: binding.actorId }, select: { id: true } });
     if (!profile) return { ok: false, error: partnerError('NOT_FOUND') };
     const root = { kind: 'PROFILE' as const, id: profile.id };

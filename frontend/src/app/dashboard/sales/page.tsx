@@ -86,7 +86,7 @@ export default function SalesWorkspacePage() {
     ...baseSalesActions.slice(1),
     ...(canManageSettings ? [{ title: 'تنظیمات فروش', href: '/dashboard/sales/settings', icon: FaCog }] : []),
     ...(canViewPartnerCases ? [{
-      title: 'پیش‌نویس‌ها و پرونده‌های من',
+      title: 'قراردادها و پرونده‌های فروش',
       href: '/dashboard/sales/partner-cases',
       icon: FaFileContract,
     }] : []),

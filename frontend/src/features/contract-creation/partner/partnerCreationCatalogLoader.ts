@@ -1,18 +1,38 @@
 import type { PartnerTechnicalCatalogPage, PartnerTechnicalOperation, PartnerTechnicalProduct, PartnerTechnicalServiceCatalogItem } from '@sabalanerp/partner-sales-contracts';
 
 type ReadPages = (kind: PartnerTechnicalCatalogPage['kind'], sourceType?: 'tool' | 'cutting' | 'finishing') => Promise<PartnerTechnicalCatalogPage[]>;
-/** Share only in-flight reads within one authenticated creator. Failures are
- * evicted so an explicit retry performs a fresh authorized request. */
-export function coalescePartnerCatalogReads(read: ReadPages): ReadPages {
+/** One creator owns this cache. Frozen versioned display pages expire after
+ * their original receive time; permissions and command authority never use it.
+ * Failed flights are evicted and a denied read clears all private entries. */
+export function coalescePartnerCatalogReads(read: ReadPages, options: {
+  ttlMs?: number; now?: () => number; onFresh?: (at: number) => void;
+} = {}): ReadPages & { clear: () => void } {
   const flights = new Map<string, Promise<PartnerTechnicalCatalogPage[]>>();
-  return (kind, sourceType) => {
+  const cached = new Map<string, { at: number; pages: PartnerTechnicalCatalogPage[] }>();
+  const now = options.now ?? Date.now;
+  let generation = 0;
+  const reader: ReadPages = (kind, sourceType) => {
     const key = `${kind}:${sourceType ?? ''}`;
+    const entry = cached.get(key);
+    if (entry && now() - entry.at < (options.ttlMs ?? 0)) return Promise.resolve(entry.pages);
     const existing = flights.get(key);
     if (existing) return existing;
-    const flight = read(kind, sourceType).finally(() => { flights.delete(key); });
+    const startedGeneration = generation;
+    const flight = read(kind, sourceType).then(pages => {
+      if (startedGeneration === generation) {
+        const at = now(); cached.set(key, { at, pages }); options.onFresh?.(at);
+      }
+      return pages;
+    }).catch(error => {
+      if (['FORBIDDEN', 'UNAUTHORIZED', 'ACCESS_DENIED'].includes(error?.code)) {
+        generation++; cached.clear(); flights.clear();
+      }
+      throw error;
+    }).finally(() => { if (flights.get(key) === flight) flights.delete(key); });
     flights.set(key, flight);
     return flight;
   };
+  return Object.assign(reader, { clear: () => { generation++; cached.clear(); flights.clear(); } });
 }
 export async function loadPartnerCreationCatalog(read: ReadPages, publishProducts: (products: PartnerTechnicalProduct[]) => void,
   publishDependencies: (operations: PartnerTechnicalOperation[], services: PartnerTechnicalServiceCatalogItem[]) => void,

@@ -70,6 +70,18 @@ export function partnerRetailIntentRows(rows: PartnerRetailRow[]): PartnerDraftI
   });
 }
 
+/** Reading an offer is presentation; only retain decisions already in the saved intent. */
+export function partnerRetailDraftRows(rows: PartnerRetailRow[], accepted: PartnerDraftIntent['rows']): PartnerDraftIntent['rows'] {
+  return partnerRetailIntentRows(rows).map(row => {
+    const previous = accepted.find(item => item.productRowId === row.productRowId)?.approvedRowBinding;
+    const offered = row.approvedRowBinding;
+    const same = previous && offered && previous.inquiryId === offered.inquiryId
+      && previous.rowId === offered.rowId && previous.revision === offered.revision;
+    const { approvedRowBinding: _binding, ...retail } = row;
+    return same ? { ...retail, approvedRowBinding: previous } : retail;
+  });
+}
+
 // Only a preview of net commercial difference. The Case writer owns final
 // reconciliation and declared precision. No tax, fee, inferred FX or binary
 // floating-point amount participates in this warning.

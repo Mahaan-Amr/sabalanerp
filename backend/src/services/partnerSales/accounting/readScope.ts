@@ -40,7 +40,7 @@ export type AccountingReadScope = Awaited<ReturnType<typeof createScope>>;
  * pagination, aggregate calculations and independent focused-record lookup. */
 export function withAccountingReadScope<T>(database: PrismaClient, actor: AccountingReadActor | undefined,
   read: (scope: AccountingReadScope) => Promise<T>): Promise<T> {
-  if (actor) return readPartnerSnapshot(database, async tx => read(await createScope(tx, actor)));
+  if (actor) return readPartnerSnapshot(database, async tx => read(await createScope(tx, actor)), { multiRootAuthority: true });
   return database.$transaction(async tx => read(await createScope(tx, actor)), {
     isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 30_000,
   });

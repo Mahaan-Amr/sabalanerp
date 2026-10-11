@@ -194,7 +194,7 @@ export const correctionStatusLabels: Record<string, string> = {
 };
 
 export const money = (amount?: string | number | null, _currency = 'ریال') => {
-  if (_currency === 'IRR' || _currency === 'IRT') return formatPartnerMoney(amount, _currency);
+  if (_currency === 'IRR' || _currency === 'IRT') return formatPartnerMoney(amount, _currency, 'IRR');
   const value = toFiniteNumber(amount);
   return formatPrice(value, 'ریال');
 };

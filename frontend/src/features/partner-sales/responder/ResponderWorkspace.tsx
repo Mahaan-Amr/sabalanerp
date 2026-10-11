@@ -1,5 +1,5 @@
 'use client';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ResponderWorkspaceViewV2Schema } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerCommandPort, PartnerQueryV2Port, PartnerQueryV2 } from '@sabalanerp/partner-sales-contracts';
@@ -13,15 +13,21 @@ export function ResponderWorkspace({ queryPort, inquiryQueryPort = queryPort, co
   queryPort: PartnerQueryV2Port; inquiryQueryPort?: PartnerQueryV2Port; commandPort: PartnerCommandPort;
 }) {
   const params = useSearchParams();
-  const [view, setView] = useState<Query['view']>(params.get('view') === 'pending' ? 'pending' : 'all');
+  const inquiryId = params.get('inquiryId');
+  if (inquiryId) return <ResponderContractWorkspace inquiryId={inquiryId} queryPort={queryPort} inquiryQueryPort={inquiryQueryPort} commandPort={commandPort} />;
+  return <ResponderList queryPort={queryPort} initialView={params.get('view') === 'pending' ? 'pending' : 'all'} />;
+}
+function ResponderList({ queryPort, initialView }: { queryPort: PartnerQueryV2Port; initialView: Query['view'] }) {
+  const [view, setView] = useState<Query['view']>(initialView);
   const [status, setStatus] = useState<Query['status']>('all');
   const [search, setSearch] = useState('');
+  const [querySearch, setQuerySearch] = useState('');
+  useEffect(() => { const timer = window.setTimeout(() => setQuerySearch(search.trim()), 250); return () => window.clearTimeout(timer); }, [search]);
   const load = useCallback(async (cursor?: string) => {
-    const response = await queryPort.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view, status, search, ...(cursor ? { cursor } : {}) });
+    const response = await queryPort.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view, status, search: querySearch, ...(cursor ? { cursor } : {}) });
     return response.ok ? { ok: true as const, value: ResponderWorkspaceViewV2Schema.parse(response.value) } : response;
-  }, [queryPort, view, status, search]);
-  const resource = useWorkspaceQuery(load, `${view}:${status}:${search}`);
-  if (params.get('inquiryId')) return <ResponderContractWorkspace inquiryId={params.get('inquiryId')!} queryPort={queryPort} inquiryQueryPort={inquiryQueryPort} commandPort={commandPort} />;
+  }, [queryPort, view, status, querySearch]);
+  const resource = useWorkspaceQuery(load, `${view}:${status}:${querySearch}`);
   const rows = resource.view?.contracts ?? responderContracts(resource.view?.inquiries ?? []);
   return <div className="mx-auto w-full max-w-6xl"><ErpListPage title="استعلام های همکار" eyebrow="فروش" rows={rows} rowKey={row => row.id} isLoading={resource.loading}
     actions={[{ label: 'به‌روزرسانی', variant: 'outline', tone: 'neutral', onClick: () => void resource.refresh().catch(() => undefined) }]}

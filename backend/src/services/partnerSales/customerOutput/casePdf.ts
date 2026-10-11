@@ -20,7 +20,9 @@ export async function resolveCasePdfSnapshot(tx: Prisma.TransactionClient, caseI
   if (!current) throw new CustomerOutputError('INTEGRITY_CONFLICT');
   if (contracts.checkExpectedRevision(expected, current.partner.owner)) throw new CustomerOutputError('ROW_STALE');
   if (current.row.state !== 'COMMITTED' && current.row.commercialFlowVersion !== 1) throw new CustomerOutputError('STATE_CONFLICT');
-  const content = contracts.CustomerContractOutputSchema.parse(current.row.head.customerProjection);
+  const frozen = contracts.CustomerContractOutputSchema.parse(current.row.head.customerProjection);
+  const confirmation = await readCasePdfConfirmation(tx, caseId, expected.revision);
+  const content = await casePdfContent(frozen, 'PREVIEW', confirmation);
   const digits = content.customer.phone.replace(/\D/g, '');
   const recipient = digits.startsWith('0098') ? `+${digits.slice(2)}` : digits.startsWith('98') ? `+${digits}`
     : digits.startsWith('0') ? `+98${digits.slice(1)}` : `+98${digits}`;
@@ -34,7 +36,7 @@ export async function resolveCasePdfSnapshot(tx: Prisma.TransactionClient, caseI
         existing.integrityHash !== expected.integrityHash || existing.caseRevision !== expected.revision ||
         existing.contractNumber !== sealed.content.contractNumber || sealed.normalizedRecipient !== recipient)
       throw new CustomerOutputError('INTEGRITY_CONFLICT');
-    return sealed;
+    return mode === 'PREVIEW' ? { ...sealed, content: await casePdfContent(sealed.content, mode, confirmation) } : sealed;
   }
   const { seller, outputHash: _outputHash, ...retail } = content;
   const now = new Date();
@@ -50,9 +52,28 @@ export async function resolveCasePdfSnapshot(tx: Prisma.TransactionClient, caseI
 }
 
 /** Final printing is independent of customer OTP. Never invent a signature. */
-export async function casePdfContent(content: contracts.CustomerContractOutput, mode: 'PREVIEW' | 'FINAL' | 'DOWNLOAD_EXISTING') {
-  if (mode === 'PREVIEW') return content;
+export async function casePdfContent(content: contracts.CustomerContractOutput, mode: 'PREVIEW' | 'FINAL' | 'DOWNLOAD_EXISTING', confirmation?: contracts.CustomerContractOutput['confirmation']) {
+  if (mode === 'PREVIEW' && confirmation === undefined) return content;
   const { outputHash: _outputHash, ...evidence } = content;
-  const final = { ...evidence, status: content.status === 'SIGNED' ? 'SIGNED' as const : 'PRINTED' as const };
+  const status = mode === 'PREVIEW' ? (confirmation === 'VERIFIED' ? 'APPROVED' as const : content.status)
+    : content.status === 'SIGNED' ? 'SIGNED' as const : 'PRINTED' as const;
+  const final = { ...evidence, status, ...(confirmation !== undefined ? { confirmation } : {}) };
   return snapshots.content({ ...final, outputHash: await contracts.canonicalHash(final) });
+}
+
+/** Resolve only current revision evidence. Archived snapshot bytes remain immutable. */
+export async function readCasePdfConfirmation(tx: Prisma.TransactionClient, caseId: string, revision: number): Promise<contracts.CustomerContractOutput['confirmation']> {
+  const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId },
+    select: { headRevision: true, commercialFlowVersion: true, customerConfirmationState: true, state: true, customerContractId: true } });
+  if (!root || root.headRevision !== revision || ['CANCELLED', 'VOIDED'].includes(root.state)) return 'INVALIDATED';
+  if (root.commercialFlowVersion === 1) {
+    const sale = root.customerContractId ? await tx.salesContract.findUnique({ where: { id: root.customerContractId },
+      select: { commercialRevision: true, customerAcceptanceRevision: true, customerAcceptanceMethod: true } }) : null;
+    if (sale && sale.customerAcceptanceRevision === sale.commercialRevision && sale.customerAcceptanceMethod === 'DIGITAL') return 'VERIFIED';
+    const pending = sale && await tx.contractPublicConfirmation.findFirst({ where: { contractId: root.customerContractId!,
+      commercialRevision: sale.commercialRevision, status: 'PENDING', cancelledAt: null }, select: { id: true } });
+    return pending ? 'PENDING' : 'NOT_SENT';
+  }
+  return root.customerConfirmationState === 'APPROVED' ? 'VERIFIED'
+    : root.customerConfirmationState === 'SENT' ? 'PENDING' : 'NOT_SENT';
 }

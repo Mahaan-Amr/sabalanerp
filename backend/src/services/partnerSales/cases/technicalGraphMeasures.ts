@@ -1,15 +1,21 @@
 import type { CanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { QuantitySchema, type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
 import { Prisma } from '@prisma/client';
+import { partnerQuotedQuantity } from './canonicalWholesale';
 
 export type TechnicalGraphMeasure = Pick<PartnerTechnicalSavedView['rows'][number], 'quantity' | 'unit'> & { productRowId: string };
 
-/** Allowlisted requested commercial measures, not packing piece counts or money.
+/** Allowlisted commercial measures. Current cut stone uses consumed square meters;
+ * immutable legacy graphs retain their original negotiated units.
  * This projection never seals Accounting precision or changes frozen witnesses. */
 export function technicalGraphMeasures(graph: CanonicalProductGraph): TechnicalGraphMeasure[] {
   return graph.rows.map(row => {
     const facts = row.commercial;
     let unit: TechnicalGraphMeasure['unit'], quantity: string;
+    if (facts.calculationSnapshot?.partnerPricingBasis === 'ordinary-sale-v1' &&
+        ['longitudinal', 'stair', 'slab'].includes(row.productType)) {
+      return { productRowId: row.productRowId, unit: 'squareMeter', quantity: QuantitySchema.parse(partnerQuotedQuantity(row).toFixed()) };
+    }
     switch (row.productType) {
       case 'prepared': case 'volumetric': {
         const selectedUnit = facts.calculationSnapshot?.unit;

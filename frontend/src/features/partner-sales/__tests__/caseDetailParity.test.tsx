@@ -9,7 +9,7 @@ import { partnerSaleReturnStep } from '../../contract-creation/partner/partnerWi
 test('price response continuation is explicit and returns to pricing', () => {
   assert.equal(partnerSaleReturnStep(new URLSearchParams('returnTo=contract&step=5')), 'pricing');
   const labels = partnerCasePageActions({ canContinue: true, canReviewPricing: true, canEditDraft: true, canPreview: false, canIssue: false, canCancel: false, canRequestVoid: false, canRequestCorrection: false }).map(action => action.label);
-  assert.ok(labels.includes('ادامه تکمیل قرارداد'));
+  assert.ok(labels.includes('بررسی استعلام سبلان'));
   assert.ok(labels.includes('ویرایش'));
 });
 

@@ -1,3 +1,4 @@
+import { casePdfContent, readCasePdfConfirmation } from '../services/partnerSales/customerOutput/casePdf';
 import { readPartnerCommercialState } from '../services/partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
 import { reactivateOrdinaryContract, readOrdinaryReactivationActions, OrdinaryContractReactivationError } from '../services/ordinaryContractReactivation';
@@ -1075,7 +1076,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
           const projectId = typeof customerContent?.projectId === 'string' ? customerContent.projectId : undefined;
           const project = projectId ? await tx.crmPotentialProject.findUnique({ where: { id: projectId },
             select: { title: true, address: true } }) : null;
-          return CustomerContractOutputSchema.parse({ ...parsed.data,
+          return casePdfContent(CustomerContractOutputSchema.parse({ ...parsed.data,
             products: parsed.data.products.map(row => {
               const facts = projected.get(row.productRowId);
               const graphRow = graphRows.get(row.productRowId);
@@ -1092,7 +1093,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
             }),
             ...(!parsed.data.project && project ? { project: { title: project.title,
               ...(project.address ? { address: project.address } : {}) } } : {}),
-          });
+          }), 'PREVIEW', await readCasePdfConfirmation(tx, contract.partnerCaseId!, current.row.headRevision));
         }) : undefined;
     if (contract.partnerKind === 'PARTNER_CUSTOMER' && variant === 'original' && !partnerCustomerOutput) {
       return res.status(409).json({ success: false,

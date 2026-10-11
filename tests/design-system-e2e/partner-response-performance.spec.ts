@@ -19,6 +19,7 @@ for (const width of [1280, 390]) for (const lostAcknowledgement of [false, true]
   await page.route('**/api/partner/cases/creation-context', route => route.fulfill({ json: { success: true, data: { schemaVersion: 1, kind: 'ORDINARY_SALES' } } }));
   await page.route('**/api/partner/inquiries/query-v2', route => route.fulfill({ json: { success: true, data: inquiry } }));
   await page.route('**/api/partner/workspaces/query-v2', async route => {
+    expect(route.request().postDataJSON().contractId, 'deep links must not fetch the entire responder list').toBe('performance-case');
     if (submitted && refreshRequests++ === 0) {
       await refreshGate;
       return route.fulfill({ status: 503, json: partnerError('TEMPORARY_FAILURE') });

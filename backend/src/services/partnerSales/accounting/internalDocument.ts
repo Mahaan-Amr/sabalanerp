@@ -139,6 +139,7 @@ export function partnerInternalPrintInput(document: NonNullable<Awaited<ReturnTy
       deliveries: (document.deliveries || []).map(delivery => ({ deliveryDate: delivery.date,
         deliveryAddress: delivery.destination, receiverName: delivery.receiverName,
         products: delivery.items.map(line => ({ productRowId: line.productRowId, quantity: Number(line.quantity), amount: Number(line.quantity),
+          unit: document.items.find(item => item.productRowId === line.productRowId)?.unit,
           productName: document.items.find(item => item.productRowId === line.productRowId)?.description })) })),
       payment: { payments: (document.paymentPlan?.installments || []).map(item => ({
         method: item.method, amount: Number(item.amount.amount), paymentDate: item.dueDate,
@@ -153,18 +154,22 @@ export function renderPartnerInternalDocumentHtml(document: NonNullable<Awaited<
   const variant = options.variant || 'accounting';
   const showMoney = !('amountKnown' in document && document.amountKnown === false) && variant !== 'workshop' && options.customPrint?.showPrices !== false && options.customPrint?.showTotals !== false;
   const unpriced = 'amountKnown' in document && document.amountKnown === false;
-  const html = renderContractHtml(input, { ...options, variant, reservePdfHeaderSpace: true,
+  const html = renderContractHtml(input, { ...options, variant, displayInRials: true, reservePdfHeaderSpace: true,
     ...(unpriced ? { unavailableMoneyLabel: 'در انتظار استعلام' } : {}) });
   const escape = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
-  const amount = (value: string) => new Prisma.Decimal(value).mul(variant === 'accounting' && document.currency === 'IRT' ? 10 : 1).toFixed();
-  const currencyLabel = variant === 'accounting' || document.currency === 'IRR' ? 'ریال' : 'تومان';
+  const grouped = (value: Prisma.Decimal) => {
+    const [whole, fraction] = value.toFixed().split('.');
+    return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fraction ? `.${fraction}` : '');
+  };
+  const amount = (value: string) => grouped(new Prisma.Decimal(value).mul(document.currency === 'IRT' ? 10 : 1));
+  const currencyLabel = 'ریال';
   const totals = document.totals;
-  const internalSection = `<section class="section"><h2>سند داخلی فروش سبلان به همکار</h2>
+  const internalSection = `<section class="section" style="break-inside:avoid;page-break-inside:avoid"><h2>سند داخلی فروش سبلان به همکار</h2>
     ${variant !== 'workshop' && options.customPrint?.showCustomerSection !== false ? `<div>طرف‌حساب سبلان: ${escape(document.partnerContext.debtor.displayName)}</div>
     <div>مشتری نهایی مرتبط: ${escape(document.partnerContext.endCustomer.displayName)}</div>` : ''}
     <div>سند داخلی: ${escape(document.partnerContext.internalRecordNumber)}</div>
     ${totals && showMoney ? `<div>جمع اقلام: ${amount(totals.net)} ${currencyLabel} · تخفیف: ${amount(totals.discount)} ${currencyLabel} · مالیات: ${amount(totals.tax)} ${currencyLabel} · هزینه‌های جانبی: ${amount(totals.charges)} ${currencyLabel}</div>` : ''}
-    ${showMoney ? `<strong>جمع خرید از سبلان: ${amount(document.amount)} ${currencyLabel}</strong>` : unpriced && variant !== 'workshop' && options.customPrint?.showPrices !== false && options.customPrint?.showTotals !== false ? '<strong>جمع خرید از سبلان: در انتظار استعلام</strong>' : ''}
+    ${showMoney ? `<strong>جمع خرید از سبلان: ${amount(document.amount)} ${currencyLabel} (${grouped(new Prisma.Decimal(document.amount).div(document.currency === 'IRR' ? 10 : 1))} تومان)</strong>` : unpriced && variant !== 'workshop' && options.customPrint?.showPrices !== false && options.customPrint?.showTotals !== false ? '<strong>جمع خرید از سبلان: در انتظار استعلام</strong>' : ''}
     ${variant !== 'workshop' && options.customPrint?.showPaymentSection !== false && !document.paymentPlan?.installments.length ? '<div>برنامه پرداخت به سبلان هنوز ثبت نشده است.</div>' : ''}
     ${document.technicalEvidenceAvailable === false ? '<div>جزئیات فنی نسخه قطعی در دسترس نیست.</div>' : ''}
   </section>`;

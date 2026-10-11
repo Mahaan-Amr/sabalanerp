@@ -53,3 +53,20 @@ test('leaving the creator stops its remaining catalog requests and publications'
   }, () => assert.fail('stale products published'), () => assert.fail('stale dependencies published'), () => false);
   assert.deepEqual(reads, ['PRODUCT']);
 });
+
+test('display cache expires at sixty seconds, does not extend on reuse and clears private data on denial', async () => {
+  let now = 0, calls = 0, denied = false;
+  const read = coalescePartnerCatalogReads(async kind => {
+    calls++; if (denied) throw { code: 'FORBIDDEN' };
+    return [{ schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG', kind, items: [] }];
+  }, { ttlMs: 60_000, now: () => now });
+  await read('PRODUCT'); now = 59_999; await read('PRODUCT'); assert.equal(calls, 1);
+  now = 60_000; await read('PRODUCT'); assert.equal(calls, 2);
+  denied = true; await assert.rejects(read('TOOL'));
+  denied = false; await read('PRODUCT'); assert.equal(calls, 4, 'permission denial evicts previously cached products');
+  const otherActor = coalescePartnerCatalogReads(async kind => {
+    calls++; return [{ schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG', kind, items: [] }];
+  }, { ttlMs: 60_000 });
+  await otherActor('PRODUCT'); assert.equal(calls, 5, 'another actor never reuses the first actor cache');
+  read.clear(); await read('PRODUCT'); assert.equal(calls, 6);
+});

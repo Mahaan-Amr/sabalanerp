@@ -278,7 +278,7 @@ test('Partner product configuration includes one compact customer unit-price fie
   assert.match(html, /طولی/);
   assert.doesNotMatch(html, /سنگ حجمی|کوپ/);
   assert.match(html, /قیمت واحد \(تومان\)/);
-  assert.match(html, /۱٬۲۵۰٬۰۰۰/);
+  assert.match(html, /۱,۲۵۰,۰۰۰/);
   assert.doesNotMatch(html, /قیمت خرید شما از سبلان/);
 });
 

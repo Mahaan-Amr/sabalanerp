@@ -1,6 +1,38 @@
 import type { PartnerCaseView, PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
 import { partnerCommercialLabels, partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import type { ErpTone } from '@/components/erp';
+import type { PartnerCreationContext, PartnerCaseRuntimeResultSchema } from '@sabalanerp/partner-sales-contracts';
+
+export type PartnerCaseIssue = NonNullable<ReturnType<typeof PartnerCaseRuntimeResultSchema.parse>['issues']>[number];
+export type PartnerRecoveryListRow = NonNullable<Extract<PartnerCreationContext, { kind: 'PARTNER' }>['recoverableDrafts']>[number];
+export type PartnerUnifiedListRow = { id: string; number: string; title: string; status: string; tone: ErpTone;
+  case?: PartnerCaseRuntimeRow; issue?: PartnerCaseIssue; draft?: PartnerRecoveryListRow };
+
+export function partnerUnifiedCaseListPage(cases: readonly PartnerCaseRuntimeRow[], issues: readonly PartnerCaseIssue[],
+  drafts: readonly PartnerRecoveryListRow[], search: string, tag: string, requestedPage: number) {
+  const known = new Set([...cases.map(row => row.view.owner.caseId), ...issues.map(row => row.caseId)]);
+  const entries: PartnerUnifiedListRow[] = [
+    ...cases.map(row => { const status = partnerCaseListTag(row.view, row.pricingResponseState, row.commercial);
+      return { id: row.view.owner.caseId, number: partnerCustomerLabel(row.view), title: row.view.products.map(item => item.description).join('، '),
+        status, tone: partnerCaseListTags[status].tone, case: row }; }),
+    ...issues.map(issue => ({ id: issue.caseId, number: issue.customerContractNumber ?? partnerTrackingCode(issue.caseNumber, issue.trackingNumber),
+      title: 'نیازمند بررسی', status: 'REVIEW', tone: 'warning' as const, issue })),
+    ...drafts.filter(draft => !draft.caseId || !known.has(draft.caseId)).map(draft => ({
+      id: draft.caseId ?? draft.recoveryId, number: draft.trackingNumber ? String(draft.trackingNumber).padStart(5, '0') : 'بدون شماره',
+      title: draft.title ?? 'پیش‌نویس ایجاد قرارداد', status: 'RECOVERY', tone: 'neutral' as const, draft })),
+  ];
+  const normalize = (text: string) => text.toLocaleLowerCase('fa-IR').replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))).replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)));
+  const needle = normalize(search.trim());
+  const filtered = entries.filter(row => (tag === 'ALL' || row.status === tag) &&
+    (!needle || normalize(`${row.number} ${row.title} ${row.id}`).includes(needle)));
+  const pageSize = 10, totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.max(1, Math.min(requestedPage, totalPages));
+  return { rows: filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize), totalItems: filtered.length, totalPages, currentPage, pageSize };
+}
+
+function partnerCustomerLabel(view: PartnerCaseView) {
+  return view.customerContractNumber ?? partnerTrackingCode(view.caseNumber, view.trackingNumber);
+}
 
 export const partnerCaseListTags = {
   NOTE: { label: partnerCommercialLabels.NOTE, tone: 'neutral' },

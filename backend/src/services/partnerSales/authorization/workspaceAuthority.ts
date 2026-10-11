@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { FEATURES } from '../../../middleware/feature';
 import { getEffectiveUserAccess, type EffectiveWorkspacePermission } from '../../../services/effectiveAccessService';
+import { readPartnerCommercialAccountingCapabilities } from '../accounting/capabilities';
 
 const rank: Record<EffectiveWorkspacePermission, number> = { view: 1, edit: 2, admin: 3 };
 
@@ -46,6 +47,10 @@ export async function resolvePartnerWorkspaceAuthority(
     if (!grants.some(item => item.action === grant.action && item.rootKind === grant.rootKind &&
         item.purpose === grant.purpose && item.scope === grant.scope)) grants.push(grant);
   };
+
+  if ((await readPartnerCommercialAccountingCapabilities(tx, actorId)).view) {
+    add({ action: 'ACCOUNTING_READ', rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY' });
+  }
 
   if (isSystemAdmin || atLeast(FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE, 'edit')) {
     add({ action: 'CUSTOMER_READ', rootKind: 'CUSTOMER', purpose: 'CRM', scope: 'COMPANY' });

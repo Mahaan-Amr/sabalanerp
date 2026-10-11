@@ -5,7 +5,7 @@ import {
   PartnerTechnicalCheckpointReceiptSchema, canonicalHash, canonicalJson,
   PartnerTechnicalPreviewCatalogSchema,
   partnerError, type Result, type PartnerTechnicalRecoveryPort, type PartnerTechnicalRecoveryAccess,
-  type PartnerTechnicalDraft,
+  type PartnerTechnicalDraft, isPartnerCaseEditableState,
 } from '@sabalanerp/partner-sales-contracts';
 import { CONTRACT_EDIT_LEASE_TTL_MS, CONTRACT_CREATION_DRAFT_TTL_MS } from '../../contractEditSessionService';
 import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../../contractRecoveryProtection';
@@ -67,12 +67,28 @@ export function technicalRecoveryLease(dependencies: PartnerTechnicalRecoveryDep
       if (session.baseRevision !== access.baseRevision) return { ok: false, error: partnerError('ROW_STALE') };
       const recovery = session.recovery === null ? null : decodeTechnicalRecovery(session.recovery);
       if (recovery === undefined) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
-      if (recovery && (recovery.updatedAt > now.getTime() || (!session.contractId && now.getTime() - recovery.updatedAt > CONTRACT_CREATION_DRAFT_TTL_MS))) {
+      if (recovery && (recovery.updatedAt > now.getTime() ||
+          await technicalRecoveryExpired(tx, session.contractId, recovery, dependencies.actorId, now))) {
         return { ok: false, error: partnerError('STATE_CONFLICT') };
       }
       return work(tx, session, recovery, now);
     }, operation);
   };
+}
+
+/** A numbered, owned editable Case retains its recovery independently of the
+ * seven-day lifetime of an unsubmitted creation draft. Lease and authority
+ * checks still run before this retention decision. */
+export async function technicalRecoveryExpired(
+  tx: Pick<Prisma.TransactionClient, 'partnerSaleCase'>, contractId: string | null,
+  recovery: TechnicalRecoveryRecord, actorId: string, now: Date,
+): Promise<boolean> {
+  if (contractId || now.getTime() - recovery.updatedAt <= CONTRACT_CREATION_DRAFT_TTL_MS) return false;
+  if (typeof recovery.partnerCaseId !== 'string' || !recovery.partnerCaseId) return true;
+  const bound = await tx.partnerSaleCase.findFirst({ where: {
+    id: recovery.partnerCaseId, profile: { userId: actorId },
+  }, select: { state: true } });
+  return !bound || !isPartnerCaseEditableState(bound.state);
 }
 
 export function createPartnerTechnicalRecoveryService(dependencies: PartnerTechnicalRecoveryDependencies): PartnerTechnicalRecoveryPort {

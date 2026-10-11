@@ -46,3 +46,7 @@ test('draft action stays on the contract and opens the canonical inline financia
   for (const label of ['شماره فاکتور سیستمی', 'تاریخ فاکتور سیستمی', 'مبلغ سپیدار', 'تایید مالی']) assert(opened.includes(label), label);
   assert.doesNotMatch(opened, /PRIVATE_CUSTOMER_PRICE|PRIVATE_PLAN/);
 });
+
+test('Partner total and its toman equivalent wrap instead of being truncated on narrow screens', () => {
+  assert.match(render('summary'), /class="block whitespace-normal break-words \[overflow-wrap:anywhere\]"/);
+});

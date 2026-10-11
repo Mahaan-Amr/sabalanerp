@@ -3,7 +3,7 @@ import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createWizardFixtures as createPartnerFixtures } from './wizardFixtures';
-import { PartnerContractWizard, partnerCaseNeedsAutomaticPricingInquiry, partnerWizardStepsForDraft,
+import { PartnerContractWizard, partnerWizardSubmissionIntent, partnerCaseNeedsAutomaticPricingInquiry, partnerWizardStepsForDraft,
   requiredPartnerWizardStep, type PartnerWizardDraft } from '../../contract-creation/partner/PartnerContractWizard';
 import { createPartnerCaseSubmission, saveCompletedPartnerDraft } from '../../contract-creation/partner/partnerCaseSubmission';
 import { remainingPartnerAmount, defaultPartnerRetailRows, partnerMoneyText, partnerRetailIntentRows,
@@ -120,10 +120,10 @@ test('first product-correction click changes the mounted Partner session to the 
     new URLSearchParams('configure=1&draftId=recovery-a&caseId=case-a&focusProductRowId=row-b'), 'sale'));
 });
 
-test('a numbered pricing result opens at pricing even when the saved wizard was on products', () => {
+test('a numbered draft keeps the saved product or delivery step on resume', () => {
   assert.equal(requiredPartnerWizardStep('products', true, false), 'products');
-  assert.equal(partnerCaseResultStep('products', true), 'pricing');
-  assert.equal(partnerCaseResultStep('delivery', true), 'pricing');
+  assert.equal(partnerCaseResultStep('products', true), 'products');
+  assert.equal(partnerCaseResultStep('delivery', true), 'delivery');
   assert.equal(partnerCaseResultStep('products', false), 'products');
 });
 
@@ -260,6 +260,18 @@ test('unsubmitted placeholder prices explain automatic pricing instead of claimi
   assert.doesNotMatch(html, /بسته قیمت این پرونده منقضی شده|استعلام مجدد/);
 });
 
+test('blocked resumed draft retains its delivery step and offers product review without enabling submission', () => {
+  const html = renderToStaticMarkup(<PartnerContractWizard draft={{ ...draft, step: 'delivery' }} onChange={() => undefined}
+    mutationBlockReason="مشتری این پرونده غیرفعال است؛ اطلاعات قبلی حفظ شده‌اند."
+    recovery={{ state: 'writable' }} submission={submission()} now={Date.parse('2026-08-27T09:00:00.000Z')}
+    renderSection={() => <p>تحویل ذخیره‌شده ۴٫۰۹۵ متر مربع</p>} validateStep={() => null}
+    onEditProducts={() => undefined} onReinquire={() => undefined} onOpenCase={() => undefined} />);
+  assert.match(html, /مشتری این پرونده غیرفعال/);
+  assert.match(html, /تحویل ذخیره‌شده ۴٫۰۹۵/);
+  assert.match(html, /مشاهده تغییرات ذخیره‌شده محصولات/);
+  assert.match(html, /<fieldset disabled/);
+});
+
 test('a centrally blocked Partner entry never mounts the ordinary Sales wizard', () => {
   const html = renderToStaticMarkup(<PartnerCreationChannelProvider value={{ kind: 'blocked', message: 'ابتدا تأیید قیمت دریافت کنید.' }}>
     <PartnerCreationBoundary><p>ordinary-sales-sentinel</p></PartnerCreationBoundary>
@@ -359,6 +371,20 @@ test('the pricing step reveals each Sabalan offer and exposes explicit partner a
   assert.ok(html.includes(partnerMoneyText('800', 'IRR')));
   assert.match(html, /پذیرش قیمت‌ها/);
   assert.doesNotMatch(html, /در انتظار تکمیل استعلام|ساخت پرونده و ورود به Wizard/);
+});
+
+test('editing accepted prices hides repeat acceptance but preserves re-inquiry', () => {
+  const render = (value: PartnerWizardDraft) => renderToStaticMarkup(<PartnerContractWizard draft={{ ...value, step: 'pricing' }} onChange={() => undefined}
+    recovery={{ state: 'writable' }} submission={submission({ ...fixture.partner, state: 'DRAFT', pricingState: 'READY_TO_FINALIZE' })}
+    now={Date.parse('2026-08-27T09:00:00.000Z')} renderSection={() => null} validateStep={() => null}
+    onRejectPrice={async () => undefined} onReinquire={() => undefined} onOpenCase={() => undefined} />);
+  const accepted = render(draft);
+  assert.doesNotMatch(accepted, /پذیرش قیمت‌ها/);
+  assert.match(accepted, /رد قیمت و درخواست پیشنهاد مجدد/);
+  assert.doesNotMatch(accepted, /آماده پذیرش/);
+  const changedOffer = { ...draft, rows: draft.rows.map(row => ({ ...row, inquiryRow: { ...row.inquiryRow,
+    revision: row.inquiryRow.revision + 1, approvedRowBinding: { ...row.inquiryRow.approvedRowBinding!, revision: row.inquiryRow.approvedRowBinding!.revision + 1 } } })) };
+  assert.match(render(changedOffer), /پذیرش قیمت‌ها/);
 });
 
 test('a rejected row shows the responder reason and both correction and re-inquiry actions', () => {
@@ -539,7 +565,7 @@ test('Case-scoped published inquiries restore replacement requests regardless of
 test('initial reviewed correction opens at date, while pricing results and subsequent product edits retain their flow', () => {
   assert.equal(partnerCaseResultStep('payment', true, true), 'date');
   assert.equal(partnerCaseResultStep('confirmation', true, true), 'date');
-  assert.equal(partnerCaseResultStep('products', true), 'pricing');
+  assert.equal(partnerCaseResultStep('products', true), 'products');
 });
 
 
@@ -560,4 +586,39 @@ test('service-only drafts keep the ordinary seven-step sequence', () => {
     quantity: '1', unit: 'count', retailUnitPrice: { amount: '1000', currency: 'IRR' as const }, wholesaleUnitPrice: { amount: '800', currency: 'IRR' as const } }] };
   assert.equal(partnerWizardStepsForDraft(serviceOnly).length, 7);
   assert.equal(partnerWizardStepsForDraft(serviceOnly).some(step => step.id === 'pricing'), false);
+});
+
+
+test('receiving a Sabalan offer displays its price without accepting it in a new wizard intent', () => {
+  const { graphHash, rows, belowCostConfirmed, ...base } = draft.intent;
+  const initialized = enterPartnerWizard({ inquiry: fixture.inquiry, now: Date.parse('2026-08-27T09:00:00Z'),
+    validated: fixture.technicalSaved, base });
+  assert.ok(initialized);
+  assert.ok(initialized.rows[0].inquiryRow.approvedRowBinding);
+  assert.equal(initialized.intent.rows[0].approvedRowBinding, undefined);
+  assert.deepEqual(initialized.intent.additionalMaterialApprovals ?? [], []);
+});
+
+
+test('note saving never accepts displayed offers, including a restored wizard with offer bindings', () => {
+  const now = Date.parse('2026-08-27T09:00:00Z');
+  const note = partnerWizardSubmissionIntent(draft, true, false, now);
+  assert.equal(note.preparationCompleted, true);
+  assert.equal(note.rows[0].approvedRowBinding, undefined);
+  assert.deepEqual(note.additionalMaterialApprovals, []);
+  assert.deepEqual(note.deliveries, draft.intent.deliveries);
+  assert.deepEqual(note.customerPaymentPlan, draft.intent.customerPaymentPlan);
+  const explicit = partnerWizardSubmissionIntent(draft, true, true, now);
+  assert.deepEqual(explicit.rows[0].approvedRowBinding, draft.rows[0].inquiryRow.approvedRowBinding);
+  assert.equal(partnerWizardSubmissionIntent(draft, true, true, Date.parse('2027-01-01T00:00:00Z')).rows[0].approvedRowBinding, undefined);
+});
+
+
+test('note saves preserve earlier explicit acceptance but cannot accept a replacement offer', () => {
+  const now = Date.parse('2026-08-27T09:00:00Z');
+  assert.deepEqual(partnerWizardSubmissionIntent(draft, true, false, now, [], true).rows[0].approvedRowBinding,
+    draft.intent.rows[0].approvedRowBinding);
+  const replaced = { ...draft, rows: draft.rows.map(row => ({ ...row, inquiryRow: { ...row.inquiryRow,
+    revision: row.inquiryRow.revision + 1, approvedRowBinding: { ...row.inquiryRow.approvedRowBinding!, revision: row.inquiryRow.revision + 1 } } })) };
+  assert.equal(partnerWizardSubmissionIntent(replaced, true, false, now, [], true).rows[0].approvedRowBinding, undefined);
 });

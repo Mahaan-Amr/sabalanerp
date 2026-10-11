@@ -40,6 +40,7 @@ import { parseContractStatusQuery } from '@/features/sales/contractListQuery';
 import { assertSuccessfulSalesDownload, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
 import { createLatestRequestTracker } from '@/features/sales/latestRequestTracker';
 import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
+import { PartnerContractListEntry } from '@/features/partner-sales/cases/PartnerContractListEntry';
 
 interface Contract extends ContractLifecyclePresentation {
   id: string;
@@ -147,6 +148,10 @@ const getContractCreatorName = (contract: Contract) =>
   );
 
 export default function ContractsPage() {
+  return <PartnerContractListEntry ordinary={<OrdinaryContractsPage />} />;
+}
+
+function OrdinaryContractsPage() {
   useWorkspace();
   const router = useRouter();
   const searchParams = useSearchParams();

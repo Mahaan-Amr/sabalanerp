@@ -2,7 +2,7 @@ import { IdSchema, QuantitySchema, PartnerCaseViewSchema, PartnerErrorSchema, Pa
   type PartnerTechnicalSavedView } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerInquiryRow, PartnerInquiryView } from '../../partner-sales/inquiries/inquiryPresentation';
 import { isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
-import { defaultPartnerRetailRows, partnerRetailIntentRows, remainingPartnerAmount, type PartnerRetailServiceRow } from './partnerRetail';
+import { defaultPartnerRetailRows, partnerRetailDraftRows, remainingPartnerAmount, type PartnerRetailServiceRow } from './partnerRetail';
 import type { PartnerWizardDraft } from './PartnerContractWizard';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
 
@@ -52,8 +52,22 @@ export function partnerCreationRequestedInquiry(params: Pick<URLSearchParams, 'g
   return params.get('inquiryId') || (params.get('draftId') ? null : latestInquiryId) || null;
 }
 
-export function partnerCaseResultStep(savedStep: PartnerWizardDraft['step'], openingNumberedResult: boolean, reviewedCorrection = false): PartnerWizardDraft['step'] {
-  return reviewedCorrection ? 'date' : openingNumberedResult ? 'pricing' : savedStep;
+export function partnerCaseResultStep(savedStep: PartnerWizardDraft['step'], _openingNumberedResult: boolean, reviewedCorrection = false): PartnerWizardDraft['step'] {
+  return reviewedCorrection ? 'date' : savedStep;
+}
+
+export function partnerWizardNeedsRetailQuote(step: PartnerWizardDraft['step']): boolean {
+  return ['products', 'pricing', 'payment', 'confirmation'].includes(step);
+}
+
+/** A technical checkpoint is not a validated product save. Resume the exact
+ * immutable product evidence referenced by the retained commercial wizard. */
+export function partnerNumberedRecoveryRevision(intent: Pick<PartnerDraftIntent, 'recoveryId' | 'recoveryRevision'>,
+  recoveryId: string, checkpointRevision: number): number {
+  if (intent.recoveryId !== recoveryId || intent.recoveryRevision > checkpointRevision) {
+    throw new Error('Numbered recovery identity mismatch');
+  }
+  return intent.recoveryRevision;
 }
 
 export const partnerCaseReviewMessage = (caseReference: string, trackingNumber?: number) =>
@@ -232,11 +246,8 @@ export function enterPartnerWizard({ inquiry, inquiryRows, now, base, validated,
   }
   if (configured.length !== saved.data.rows.length || new Set(configured.map(row => row.productRowId)).size !== configured.length) return null;
   const rows = defaultPartnerRetailRows(configured);
-  const additionalMaterialApprovals = subjectRows.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&
-    subject.configurationRef.productRowId === row.configurationRef.productRowId) && row.approvedRowBinding
-    ? [{ pricingSubjectId: row.configurationRef.productRowId, approvedRowBinding: row.approvedRowBinding }] : []);
-  const intent = { ...base, preparationCompleted: base.preparationCompleted ?? false, graphHash: saved.data.graphHash, belowCostConfirmed: false, additionalMaterialApprovals,
-    rows: partnerRetailIntentRows(rows),
+  const intent = { ...base, preparationCompleted: base.preparationCompleted ?? false, graphHash: saved.data.graphHash,
+    belowCostConfirmed: false, additionalMaterialApprovals: [], rows: partnerRetailDraftRows(rows, []),
     ...(serviceRows.length ? { serviceRows: serviceRows.map(row => ({ serviceRowId: row.serviceRowId })) } : {}),
   };
   const materialInquiryRows = subjectRows.flatMap(row => subjects.some(subject => subject.role === 'ADDITIONAL_MATERIAL' &&

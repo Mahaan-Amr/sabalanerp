@@ -166,7 +166,7 @@ test('recovered inquiry command cannot be replayed into a different inquiry scop
 });
 
 
-test('wizard product presentation keeps exact approvals and financial rows intact', () => {
+test('wizard presentation keeps offered evidence without accepting it and preserves financial rows', () => {
   const fixture = createPartnerFixtures();
   const { graphHash: _hash, ...reference } = fixture.draftSubmissionReference;
   const draft = enterPartnerWizard({ inquiry: fixture.inquiry, now: Date.parse('2026-08-27T09:00:00.000Z'),
@@ -175,7 +175,8 @@ test('wizard product presentation keeps exact approvals and financial rows intac
     productPresentation: new Map([[fixture.configurationDraft.productRowId, { title: 'نام واقعی سنگ', parentProductRowId: 'parent-row' }]]) });
   assert.equal(draft?.rows[0].inquiryRow.description, 'نام واقعی سنگ');
   assert.equal(draft?.rows[0].parentProductRowId, 'parent-row');
-  assert.deepEqual(draft?.intent.rows[0].approvedRowBinding, fixture.inquiry.rows[0].approvedRowBinding);
+  assert.deepEqual(draft?.rows[0].inquiryRow.approvedRowBinding, fixture.inquiry.rows[0].approvedRowBinding);
+  assert.equal(draft?.intent.rows[0].approvedRowBinding, undefined);
   assert.equal('parentProductRowId' in draft!.intent.rows[0], false);
 });
 

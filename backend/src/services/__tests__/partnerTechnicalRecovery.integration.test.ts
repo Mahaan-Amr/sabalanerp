@@ -261,7 +261,7 @@ test('a checkpointed longitudinal Partner row with no catalog price saves its en
       expectedRecoveryRevision: checkpoint.value.recoveryRevision, idempotencyKey: 'longitudinal-save', draft });
     if (!result.ok) throw new Error(result.error.code);
     assert.deepEqual(result.value.rows.map(row => ({ unit: row.unit, quantity: row.quantity })), [
-      { unit: 'meter', quantity: '1.25' },
+      { unit: 'squareMeter', quantity: '0.4375' },
     ]);
   });
 });

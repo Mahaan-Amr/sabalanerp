@@ -914,6 +914,7 @@ test('Partner CRM commands use CAS and idempotency while list/count/detail remai
       if (list.ok) {
         assert.equal(list.value.total, 1);
         assert.deepEqual(list.value.items.map(item => item.customerId), [customerId]);
+        assert.deepEqual(list.value.items[0].responsibleSeller, { id: partnerId, displayName: 'Fixture Commands' });
       }
       const detail = await service.readCustomer({ customerId, correlationId: `detail-${suffix}` });
       assert.equal(detail.ok, true);

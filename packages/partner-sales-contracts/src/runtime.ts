@@ -4,6 +4,7 @@ import { DecimalSchema, DeliveryFieldsSchema, IdSchema, InstantSchema, RevisionR
 import { CustomerContractOutputSchema, PartnerCaseViewSchema } from './projections';
 import { CaseDraftIntentSchema, PartnerDraftEditLeaseSchema } from './commands';
 import { PartnerInquiryRowV2Schema } from './inquiry-v2';
+import { PartnerTechnicalDraftSchema } from './technical-draft';
 
 export const PartnerCaseRuntimeQuerySchema = z.object({ caseId: IdSchema.optional() }).strict();
 
@@ -40,6 +41,11 @@ export const PartnerCaseRuntimeRowSchema = z.object({
 
 export const PartnerCaseRuntimeResultSchema = z.object({
   cases: z.array(PartnerCaseRuntimeRowSchema),
+  issues: z.array(z.object({
+    caseId: IdSchema, caseNumber: IdSchema, trackingNumber: z.number().int().positive().optional(),
+    customerContractNumber: IdSchema.optional(),
+    code: z.literal('INTEGRITY_CONFLICT'), supportReference: z.string().uuid(),
+  }).strict()).optional(),
 }).strict();
 
 export const PartnerCustomerOutputRequestSchema = z.object({
@@ -76,6 +82,10 @@ export const PartnerCreationContextSchema = z.discriminatedUnion('kind', [
       updatedAt: InstantSchema, title: z.string().trim().min(1).max(200).optional() }).strict()).max(50).optional(),
     customers: z.array(z.object({ id: IdSchema, displayName: z.string().min(1).max(240),
       address: z.string().min(1).max(2000), phone: z.string().min(1).max(30).optional() }).strict()),
+    // Read-only identity of the inactive customer of this actor-owned Case.
+    // It is deliberately separate from selectable active customers.
+    retainedCustomer: z.object({ id: IdSchema, displayName: z.string().min(1).max(240),
+      address: z.string().min(1).max(2000), phone: z.string().min(1).max(30).optional() }).strict().optional(),
     projects: z.array(z.object({ id: IdSchema, customerId: IdSchema, title: z.string().min(1).max(500),
       address: z.string().min(1).max(2000).optional(), city: z.string().min(1).max(500).optional(),
       projectType: z.string().min(1).max(500).optional(), projectManagerName: z.string().min(1).max(500).optional(),
@@ -111,6 +121,7 @@ export const PartnerWizardRecoverySnapshotSchema = z.object({
   step: PartnerWizardStepSchema,
   intent: PartnerWizardRecoveryIntentSchema,
   updatedAt: InstantSchema,
+  validatedDraft: PartnerTechnicalDraftSchema.optional(),
 }).strict();
 export type PartnerWizardRecoverySave = z.infer<typeof PartnerWizardRecoverySaveSchema>;
 export type PartnerWizardRecoverySnapshot = z.infer<typeof PartnerWizardRecoverySnapshotSchema>;

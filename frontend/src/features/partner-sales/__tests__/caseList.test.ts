@@ -2,8 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 import type { PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
-import { partnerCaseListPage, partnerCaseListTag } from '../cases/partnerCaseList';
+import { partnerCaseListPage, partnerCaseListTag, partnerUnifiedCaseListPage } from '../cases/partnerCaseList';
 const fixture = createPartnerFixtures();
+
+test('unified list retains damaged identity and private draft, deduplicating the linked recovery', () => {
+  const issue = { caseId: 'damaged-case', caseNumber: 'PC-damaged', trackingNumber: 10,
+    code: 'INTEGRITY_CONFLICT' as const, supportReference: '96fcc17e-9816-4254-bd97-5588344ed1e6' };
+  const drafts = [{ recoveryId: 'damaged-recovery', caseId: issue.caseId, baseRevision: 1, updatedAt: '2026-10-11T00:00:00.000Z' },
+    { recoveryId: 'private-draft', baseRevision: 0, updatedAt: '2026-10-11T00:00:00.000Z' }];
+  const result = partnerUnifiedCaseListPage(rows.slice(0, 1), [issue], drafts, '', 'ALL', 1);
+  assert.equal(result.totalItems, 3);
+  const damaged = result.rows.find(row => row.id === issue.caseId)!;
+  assert.equal(damaged.status, 'REVIEW');
+  assert.equal(damaged.case, undefined);
+  assert.equal(damaged.draft, undefined);
+  assert.equal(partnerUnifiedCaseListPage(rows, [issue], drafts, '00010', 'REVIEW', 1).totalItems, 1);
+});
 const rows: PartnerCaseRuntimeRow[] = Array.from({ length: 23 }, (_, index) => ({
   view: { ...fixture.partner, state: 'DRAFT', pricingState: index % 2 ? 'AWAITING_INQUIRY' : 'READY_TO_FINALIZE',
     caseNumber: `case-${index}`, owner: { ...fixture.partner.owner, caseId: `case-${index}` } },

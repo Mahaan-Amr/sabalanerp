@@ -16,6 +16,7 @@ type PartnerCustomer = {
   companyName?: string; customerType: 'Individual' | 'Company'; personType: 'NATURAL' | 'LEGAL';
   status: string; isBlacklisted: boolean; isLocked: boolean; nationalCode?: string; city?: string;
   address?: string; phone: string; projectCount: number;
+  responsibleSeller?: { id: string; displayName: string };
 };
 type PartnerCustomerDetail = PartnerCustomer & { projects?: Array<{ projectId: string; title: string; status: string }> };
 type ListPayload = { items: PartnerCustomer[]; total: number; nextCursor?: string };
@@ -118,7 +119,7 @@ export function PartnerCustomersRuntime() {
     { id: 'customer', header: 'مشتری', priority: 'primary', cell: customer => <div>
       <p className="font-semibold text-[var(--sds-text-primary)]">{customer.firstName} {customer.lastName}</p>
       {customer.companyName && <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{customer.companyName}</p>}
-      <p className="mt-1 text-xs text-[var(--sds-info)]">مسئول فروش: حساب همکار من</p>
+      <p className="mt-1 text-xs text-[var(--sds-info)]">مسئول فروش: {customer.responsibleSeller?.displayName || '—'}</p>
       {customer.nationalCode && <p className="mt-1 text-xs text-[var(--sds-text-muted)]">کد ملی: {customer.nationalCode}</p>}
     </div> },
     { id: 'status', header: 'وضعیت', priority: 'secondary', cell: customer => <div className="flex flex-wrap gap-1.5">

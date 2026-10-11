@@ -1,3 +1,4 @@
+import { casePdfContent } from './casePdf';
 import { appendPartnerCommercialEvent } from '../cases/commercialEvents';
 import { isPartnerCommercialFlow, partnerDeadlinePassed, assertPartnerCommercialAvailable, acceptPartnerCustomer, rejectPartnerCustomer } from '../cases/commercialLifecycle';
 import { confirmationResendCooldownError } from '../../contractConfirmationPolicy';
@@ -254,7 +255,7 @@ async function getPublic(session: Awaited<ReturnType<typeof publicSession>>, met
     await tx.contractConfirmationAuditLog.create({ data: { contractId: locked.contractId, sessionId: locked.id,
       eventType: 'PARTNER_LINK_OPENED', eventPayloadJson: json({ snapshotId: snapshot.snapshotId }),
       ipAddress: meta?.ipAddress, userAgent: meta?.userAgent } });
-    return { success: true, data: { contract: snapshot.content, verifiedAt: locked.verifiedAt?.toISOString() || null,
+    return { success: true, data: { contract: await casePdfContent(snapshot.content, 'PREVIEW', locked.verifiedAt ? 'VERIFIED' : locked.status === 'REJECTED' ? 'INVALIDATED' : 'PENDING'), verifiedAt: locked.verifiedAt?.toISOString() || null,
       linkExpiresAt: snapshot.expiresAt, sellerFinalized: isPartnerCommercialFlow(source.contract) ? source.contract.status === 'SIGNED' : source.case.state === 'COMMITTED',
       decision: locked.status === 'REJECTED' ? 'REJECTED' : locked.verifiedAt ? 'APPROVED' : 'PENDING',
       ...disposition, readOnly: disposition.readOnly || locked.status === 'REJECTED' || isPartnerCommercialFlow(source.contract) && (source.contract.isInactive || source.contract.status === 'EXPIRED' || partnerDeadlinePassed(source.contract)) } satisfies PublicCustomerConfirmation };

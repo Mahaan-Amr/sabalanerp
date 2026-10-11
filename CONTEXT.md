@@ -2,6 +2,14 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**مساحت مبنای قیمت سنگ برشی**:
+مساحت مصرف سنگ مادر برای محاسبه مبلغ اصل سنگ طولی، پله و اسلب، مطابق قاعده فروش عادی سبلان؛ این مقدار می‌تواند با مساحت نهایی سفارش متفاوت باشد. ابزار، برش و خدمات واحد قیمت خود را دارند و محصولات آماده و حجمی واحد تجاری تعریف‌شده خود را حفظ می‌کنند.
+_Avoid_: متر طول به‌عنوان مبنای مبلغ اصل سنگ برشی، یکی‌دانستن مساحت مصرف با مساحت تحویلی، یا تغییر خودکار مبلغ توافق تأییدشده
+
+**ثبات مبلغ در توافق فروش همکار**:
+یکسان‌بودن مبلغ و معنای قیمت در همه نمایش‌ها و اسناد متعلق به یک توافق؛ توافق خرید همکار از سبلان و توافق فروش همکار به مشتری مستقل‌اند و تبدیل ریال و تومان مبلغ اقتصادی هر توافق را تغییر نمی‌دهد.
+_Avoid_: الزام برابری قیمت خرید و فروش همکار، افشای قیمت خرید به مشتری، یا یکی‌دانستن واحد نمایش با مبنای محاسبه
+
 **استعلام نشده در استعلام های همکار**:
 قرارداد فروش همکار که دست‌کم یک ردیف از درخواست جاری آن هنوز پاسخ سبلان ندارد؛ پاسخ‌گرفتن بخشی از ردیف‌ها این وضعیت را تغییر نمی‌دهد.
 _Avoid_: نداشتن هیچ پاسخ، رد قیمت توسط همکار، یا منقضی‌شدن قیمت پاسخ‌داده‌شده
@@ -993,7 +1001,7 @@ The immutable, integrity-verifiable record binding one Partner Sale Case revisio
 _Avoid_: mutable approval evidence, anonymous decisions, accepting a changed Case revision under stale evidence, relying on current assignment to explain history, losing a row outcome inside a bulk command, or recording only the latest state
 
 **قیمت فروش سبلان به فروشنده همکار**:
-The Partner Seller's final purchase amount from Sabalan for one Contract Product row, calculated by the ordinary Contract pricing engine exactly once. The Case-scoped responder rate is multiplied by the canonical family quantity: square meters for Longitudinal, finished tread count for `کف پله`, finished riser count for `خیز`, finished landing count for `پاگرد`, consumed mother-stone count for Slab, and catalog-unit quantity for Prepared Product. The same canonical system-calculated mandatory charges, cutting, adhesive, tools, finishing, and other Sabalan-supplied components used in the customer projection are then added. Generated consumption rows present the calculation and are neither separate quote subjects nor second charges. The successful Case snapshots the result without constraining or revealing the Partner's retail rate.
+The Partner Seller's final purchase amount from Sabalan for one Contract Product row, calculated by the ordinary Contract pricing engine exactly once. The Case-scoped responder rate is multiplied by the canonical family quantity: square meters of billable mother-stone consumption for Longitudinal, each Stair section (`کف پله`, `خیز`, and `پاگرد`), and Slab, and catalog-unit quantity for Prepared Product. Finalized historical agreements retain their recorded unit and amount. The same canonical system-calculated mandatory charges, cutting, adhesive, tools, finishing, and other Sabalan-supplied components used in the customer projection are then added. Generated consumption rows present the calculation and are neither separate quote subjects nor second charges. The successful Case snapshots the result without constraining or revealing the Partner's retail rate.
 _Avoid_: using the wrong family quantity, attaching a second responder rate to a generated consumption row, charging main material twice, carrying one Case's quote to another, letting either actor manually price ancillary components, diverging ancillary calculations between the two projections, or repricing a finalized Case after quote expiry
 
 **مصرف تأیید قیمت فروشنده همکار**:
@@ -1001,7 +1009,7 @@ The append-only evidence that one Partner Sale Case revision finalized with the 
 _Avoid_: applying approval to another Case or revision, matching rows by position or label, changing the catalog-owned unit, omitting canonical calculation evidence, pricing a consumed-stone display row independently, or exposing wholesale evidence to the Customer
 
 **قیمت فروش فروشنده همکار به مشتری**:
-The customer-facing amount calculated from the Partner Seller's freely chosen family rate using the same fixed basis as the hidden Sabalan rate: square meters for Longitudinal, per tread, riser, or landing for Stair sections, per consumed mother-stone unit for Slab, and catalog unit for Prepared Product. The same system-calculated cutting, adhesive, tool, finishing and other ancillary components used in the Sabalan projection are added. Only the base Product-family rate differs between the two projections. The responder cannot see or approve this retail rate; both rates remain preserved for restricted dual-price reporting, and their difference is not Sabalan income.
+The customer-facing amount calculated from the Partner Seller's freely chosen family rate using the same fixed basis as the hidden Sabalan rate: square meters of billable mother-stone consumption for Longitudinal, each Stair section, and Slab, and catalog unit for Prepared Product. Finalized historical agreements retain their recorded unit and amount. The same system-calculated cutting, adhesive, tool, finishing and other ancillary components used in the Sabalan projection are added. Only the base Product-family rate differs between the two projections. The responder cannot see or approve this retail rate; both rates remain preserved for restricted dual-price reporting, and their difference is not Sabalan income.
 _Avoid_: letting the Partner manually price system-owned ancillary components, using a different unit or ancillary calculation in the two projections, forcing equality with the responder quote, exposing the retail rate to the responder, treating a higher Partner price as Sabalan revenue, overwriting either price with the other, or storing only the difference
 
 **بازفروش مستقل فروشنده همکار**:
@@ -5206,3 +5214,10 @@ A **Compatible Partner Preparation Plan** refers to delivery/service allocations
 **ردیف کنارگذاشته‌شده قرارداد فروش عادی**:
 ردیف محصولی که با مجوز اصلاح حسابداری از نسخه جاری قرارداد خارج شده، ولی هویت و مشخصات قبلی و تمام سوابق مالی آن برای مراجعه تاریخی محفوظ است؛ محصول جایگزین ردیف مستقل دارد.
 _Avoid_: حذف سابقه، انتقال سابقه به محصول جایگزین، یا امکان بارگیری تازه از ردیف کنارگذاشته‌شده
+
+
+### تازگی داده نمایشی فروش همکار
+
+**تازگی داده نمایشی**:
+وضعیت آخرین اطلاعات دریافت‌شده برای نمایش به همان حساب، همراه با زمان دریافت و وضعیت به‌روزرسانی؛ اطلاعات قبلی در قطع موقت ارتباط می‌تواند برای مشاهده باقی بماند.
+_Avoid_: اعتبار جاری قیمت، مجوز مشاهده یا ثبت، نسخه معتبر پرونده، یا نتیجه قطعی عملیات

@@ -283,7 +283,7 @@ test('private operation pricing uses canonical child-independent scope and does 
   if (!result.ok) throw new Error(result.error.code);
   assert.equal(result.value.graph.rows[0].commercial.baseAmountToman, '800000');
   assert.equal(result.value.graph.rows[0].commercial.totalAmountToman, '845000');
-  assert.deepEqual(result.value.measures, [{ productRowId: 'with-tool', quantity: '2', unit: 'meter' }]);
+  assert.deepEqual(result.value.measures, [{ productRowId: 'with-tool', quantity: '0.8', unit: 'squareMeter' }]);
   const tool = result.value.graph.toolSelections[0];
   assert.equal(tool.toolSelectionId, 'own-tool');
   assert.equal(tool.automaticQuantity, '2');
@@ -315,7 +315,7 @@ test('longitudinal private graph uses canonical packing and costing without repl
   assert.equal(row.commercial.requestedAreaSquareMeters, '0.78');
   assert.equal(row.commercial.baseAmountToman, '1933750');
   assert.equal(row.commercial.totalAmountToman, '2063750');
-  assert.deepEqual(result.value.measures, [{ productRowId: 'long-a', quantity: '6.5', unit: 'meter' }]);
+  assert.deepEqual(result.value.measures, [{ productRowId: 'long-a', quantity: '1.1375', unit: 'squareMeter' }]);
   assert.equal(result.value.graph.sourceBatches[0].ownerProductRowId, 'long-a');
   assert.equal(result.value.graph.sourceBatches[0].sourceBatchId, 'long-stock');
   const technical = result.value.preview.rows[0].calculation;
@@ -348,7 +348,7 @@ test('Partner row mandatory choice overrides the policy default in the protected
   assert.equal(row.commercial.totalAmountToman, '1040000');
 });
 
-test('safe longitudinal measure preserves every supplied decimal digit instead of applying Decimal default precision', () => {
+test('current square-meter measure uses canonical consumed area while requested geometry preserves supplied precision', () => {
   const catalog = createPartnerTechnicalCatalogFixtures(), product = catalog.products[0];
   const result = compilePartnerTechnicalGraph({ schemaVersion: 1, inputRevision: 1, rows: [{
     productRowId: 'precise-row', catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
@@ -361,5 +361,5 @@ test('safe longitudinal measure preserves every supplied decimal digit instead o
         longitudinalCutRateToman: c('10'), calibrationCutRateToman: c('10') } }] });
   if (!result.ok) throw new Error(result.error.code);
   assert.equal(result.value.graph.rows[0].commercial.requestedLengthMeters, '1.23456789012345678901');
-  assert.deepEqual(result.value.measures, [{ productRowId: 'precise-row', quantity: '1.23456789012345678901', unit: 'meter' }]);
+  assert.deepEqual(result.value.measures, [{ productRowId: 'precise-row', quantity: '0.4938271560493827156', unit: 'squareMeter' }]);
 });

@@ -245,7 +245,8 @@ export const createContractLifecycleRequest = async ({
       kind,
       reason: normalizedReason,
       requestedBy: actorId,
-      contractSnapshot: toJson(contract),
+      contractSnapshot: toJson({ ...contract,
+        ...(partnerOwned(contract) && partnerLifecycle ? { partnerLifecycle: true } : {}) }),
     },
   });
   });
@@ -317,7 +318,8 @@ export const executeContractLifecycleAction = async ({
           decidedBy: actorId,
           decidedAt: new Date(),
           blockers: toJson(blockers),
-          contractSnapshot: toJson(contract),
+          contractSnapshot: toJson({ ...contract,
+        ...(partnerOwned(contract) && partnerLifecycle ? { partnerLifecycle: true } : {}) }),
         },
       });
     }
@@ -387,7 +389,8 @@ export const executeContractLifecycleAction = async ({
           kind: action as ContractLifecycleRequestKind,
           reason: normalizedReason,
           requestedBy: actorId,
-          contractSnapshot: toJson(contract),
+          contractSnapshot: toJson({ ...contract,
+        ...(partnerOwned(contract) && partnerLifecycle ? { partnerLifecycle: true } : {}) }),
           ...requestData,
         },
       });
@@ -472,6 +475,9 @@ export const decideContractLifecycleRequest = async ({
     reason: reason?.trim() || request.reason,
     actorId,
     requestId,
-    partnerLifecycle: true,
+    // Only a request created through the Partner lifecycle boundary may
+    // execute that exception. Legacy/ordinary requests cannot acquire it at approval.
+    partnerLifecycle: Boolean(request.contractSnapshot && typeof request.contractSnapshot === 'object' &&
+      !Array.isArray(request.contractSnapshot) && request.contractSnapshot.partnerLifecycle === true),
   });
 };

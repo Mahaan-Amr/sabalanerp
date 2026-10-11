@@ -1,7 +1,7 @@
 import { contractLifecycleLabel } from '@/features/sales/contractLifecyclePresentation';
 import React from 'react';
 import type { CustomerContractOutput } from '@sabalanerp/partner-sales-contracts';
-import { formatPartnerMoney, subtractPartnerDecimal, multiplyPartnerDecimal, partnerPaymentMethodCopy, partnerProductTypeCopy } from '@/features/partner-sales/presentation';
+import { formatPartnerMoney, formatPartnerMoneyTotal, subtractPartnerDecimal, multiplyPartnerDecimal, partnerPaymentMethodCopy, partnerProductTypeCopy } from '@/features/partner-sales/presentation';
 import { ErpNeumorphicCard, ErpNeumorphicDisclosure } from '@/components/erp';
 import { formatDisplayNumber, formatPriceWithRial, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -129,7 +129,7 @@ export function buildManualContractSummary(data: PublicContract) {
 
 export function buildPartnerManualContractSummary(output: CustomerContractOutput) {
   // Use only the frozen customer projection. Never read wholesale or current catalog rates.
-  const money = (amount: unknown) => typeof amount === 'string' ? formatPartnerMoney(amount, output.totals.currency) : '—';
+  const money = (amount: unknown) => typeof amount === 'string' ? formatPartnerMoney(amount, output.totals.currency, 'IRT') : '—';
   const payments = output.customerPaymentPlan.installments.map(item => ({
     id: item.installmentId, methodLabel: partnerPaymentMethodCopy[item.method], amount: item.amount.amount,
     paymentDate: item.dueDate, handoverDate: item.check?.handoverDate, checkNumber: item.check?.number,
@@ -196,7 +196,8 @@ export default function ManualContractSummary({ data, customerOutput }: { data?:
           <Field label={customerOutput ? 'جمع برنامه پرداخت' : 'جمع پرداختی'}>{money(summary.paymentTotal)}</Field>
           {customerOutput && <><Field label="مالیات">{money(customerOutput.totals.tax)}</Field>
             <Field label="هزینه‌های جانبی">{money(customerOutput.totals.charges)}</Field></>}
-          <div className="border-t border-[var(--sds-border-default)] pt-2"><Field label="مبلغ نهایی قرارداد">{money(summary.grandTotal)}</Field></div>
+          <div className="border-t border-[var(--sds-border-default)] pt-2"><Field label="مبلغ نهایی قرارداد">{customerOutput
+            ? formatPartnerMoneyTotal(customerOutput.totals.payable, customerOutput.totals.currency, 'IRT') : money(summary.grandTotal)}</Field></div>
           <Field label={customerOutput ? 'مبلغ خارج از برنامه پرداخت' : 'مانده پرداخت'}>{money(summary.remaining)}</Field>
         </ErpNeumorphicCard>
           <ErpNeumorphicCard className="p-4"><Field label="وضعیت تایید مشتری">{status(customerOutput?.confirmation === 'VERIFIED' ? 'VERIFIED' : data?.status ?? 'PENDING')}</Field></ErpNeumorphicCard>

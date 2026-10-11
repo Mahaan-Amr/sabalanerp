@@ -9,7 +9,7 @@ import type { WizardStep } from '../components/shared/WizardProgressBar';
 import { ContractWizardFrame } from '../components/shared/ContractWizardFrame';
 import { WIZARD_STEPS } from '../constants/contract.constants';
 import { PartnerRetailStep } from './PartnerRetailStep';
-import { partnerRetailSummary, partnerRetailIntentRows, partnerMoneyText, type PartnerRetailRow, type PartnerRetailServiceRow } from './partnerRetail';
+import { partnerRetailSummary, partnerRetailIntentRows, partnerRetailDraftRows, partnerMoneyText, type PartnerRetailRow, type PartnerRetailServiceRow } from './partnerRetail';
 import { saveCompletedPartnerDraft, type PartnerDraftIntent, type createPartnerCaseSubmission } from './partnerCaseSubmission';
 import { inquiryRowState, isUsableInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 import { partnerCaseReviewMessage, partnerDeliveryPlanIssue } from './partnerWizardEntry';
@@ -26,6 +26,38 @@ export interface PartnerWizardDraft {
   materialInquiryRows?: Array<{ pricingSubjectId: string; inquiryRow: PartnerRetailRow['inquiryRow'] }>;
   step: PartnerWizardStep;
 }
+export function partnerWizardSubmissionIntent(draft: PartnerWizardDraft, preparationCompleted: boolean,
+  acceptOffer: boolean, now: number, mismatchedRowIds: readonly string[] = [], retainAcceptance = false): PartnerDraftIntent {
+  const rows = draft.rows.map(row => {
+    if (row.parentProductRowId || isUsableInquiryRow(row.inquiryRow, now) && !mismatchedRowIds.includes(row.inquiryRow.rowId)) return row;
+    const { approvedRowBinding: _binding, ...inquiryRow } = row.inquiryRow;
+    return { ...row, inquiryRow };
+  });
+  const usableMaterials = new Map((draft.materialInquiryRows ?? []).filter(({ inquiryRow }) =>
+    isUsableInquiryRow(inquiryRow, now) && !mismatchedRowIds.includes(inquiryRow.rowId))
+    .map(({ pricingSubjectId, inquiryRow }) => [pricingSubjectId, inquiryRow.approvedRowBinding]));
+  const accepted = acceptOffer;
+  return { ...draft.intent, preparationCompleted, rows: accepted ? partnerRetailIntentRows(rows) : partnerRetailDraftRows(rows, retainAcceptance ? draft.intent.rows : []),
+    additionalMaterialApprovals: accepted ? Array.from(usableMaterials, ([pricingSubjectId, approvedRowBinding]) =>
+      ({ pricingSubjectId, approvedRowBinding: approvedRowBinding! })) : retainAcceptance
+      ? draft.intent.additionalMaterialApprovals?.filter(binding => {
+        const offered = usableMaterials.get(binding.pricingSubjectId);
+        return offered?.inquiryId === binding.approvedRowBinding.inquiryId && offered?.rowId === binding.approvedRowBinding.rowId
+          && offered?.revision === binding.approvedRowBinding.revision;
+      }) : [],
+    deliveries: draft.intent.deliveries };
+}
+
+function partnerWizardPricesAlreadyAccepted(draft: PartnerWizardDraft, view?: PartnerCaseView) {
+  if (view?.pricingState !== 'READY_TO_FINALIZE') return false;
+  const sameBinding = (left: PartnerDraftIntent['rows'][number]['approvedRowBinding'], right: typeof left) =>
+    Boolean(left && right && left.inquiryId === right.inquiryId && left.rowId === right.rowId && left.revision === right.revision);
+  const acceptedRows = new Map(draft.intent.rows.map(row => [row.productRowId, row.approvedRowBinding]));
+  const acceptedMaterials = new Map((draft.intent.additionalMaterialApprovals ?? []).map(row => [row.pricingSubjectId, row.approvedRowBinding]));
+  return partnerRetailIntentRows(draft.rows).every(row => sameBinding(row.approvedRowBinding, acceptedRows.get(row.productRowId)))
+    && (draft.materialInquiryRows ?? []).every(row => sameBinding(row.inquiryRow.approvedRowBinding, acceptedMaterials.get(row.pricingSubjectId)));
+}
+
 export type PartnerRecoverySurface =
   | { state: 'loading' }
   | { state: 'writable' }
@@ -91,7 +123,7 @@ const intentWithPricingRequest = (source: PartnerWizardDraft) => {
   ];
   return { ...source.intent, ...(pricingRows.length ? { pricingRequest: {
     inquiryId: `partner-case-pricing:${source.intent.recoveryId}:1`, rows: pricingRows,
-  } } : { pricingRequest: undefined }), rows: partnerRetailIntentRows(source.rows),
+  } } : { pricingRequest: undefined }), rows: partnerRetailDraftRows(source.rows, []), additionalMaterialApprovals: [],
   customerPaymentPlan: source.intent.customerPaymentPlan };
 };
 
@@ -107,6 +139,8 @@ export interface PartnerContractWizardProps {
   submission: ReturnType<typeof createPartnerCaseSubmission>;
   now: number;
   externalError?: string | null;
+  mutationBlockReason?: string | null;
+  pricingRefresh?: { error: string | null; lastReadAt: number | null; onRefresh: () => void };
   correctionReason?: string | null;
   correctionDueAt?: string | null;
   readCommercialState?: (view: PartnerCaseView) => Promise<PartnerCommercialState | undefined>;
@@ -126,7 +160,7 @@ export interface PartnerContractWizardProps {
   onOpenCase: (caseId: string) => Promise<void> | void;
 }
 
-export function PartnerContractWizard({ draft, onChange, recovery, submission, now, externalError, correctionReason, correctionDueAt, readCommercialState, mismatchedRowIds = [],
+export function PartnerContractWizard({ draft, onChange, recovery, submission, now, externalError, mutationBlockReason, pricingRefresh, correctionReason, correctionDueAt, readCommercialState, mismatchedRowIds = [],
   canonicalRetailReady = true, renderSection, validateStep, onReinquire, onEditProducts, onEditProduct,
   onSendConfirmation, onFinalize, onCaseNumbered, onOpenCase, onPreparePricingQuote, onRejectPrice }: PartnerContractWizardProps) {
   const result = useSyncExternalStore(submission.subscribe, submission.getSnapshot, submission.getSnapshot);
@@ -187,7 +221,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const expiredRows = unusable.filter(({ inquiryRow }) => inquiryRowState(inquiryRow, now) === 'EXPIRED');
   const rejectedRows = unusable.filter(({ inquiryRow }) => inquiryRow.state === 'REJECTED');
   const mutatePending = result.phase === 'submitting' || result.phase === 'uncertain';
-  const disabled = correctionExpired || recovery.state !== 'writable' || mutatePending || quotePending || actionPending;
+  const disabled = Boolean(mutationBlockReason) || Boolean(pricingRefresh?.error) || correctionExpired || recovery.state !== 'writable' || mutatePending || quotePending || actionPending;
   const [commercialSnapshot, setCommercialSnapshot] = useState<{ key: string; value: PartnerCommercialState } | null>(null);
   const commercialKey = result.case ? `${result.case.owner.caseId}:${result.case.owner.revision}:${result.case.owner.integrityHash}` : '';
   useEffect(() => {
@@ -203,8 +237,9 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     .includes(result.case.customerConfirmationState) && !confirmationSent;
   const pricingReady = Boolean(result.case && (pricingEntries.length > 0 || Boolean(draft.serviceRows?.length)) && unusable.length === 0 &&
     pricingEntries.every(({ inquiryRow }) => inquiryRow.state === 'APPROVED' && inquiryRow.approvedPrice && inquiryRow.approvedRowBinding));
+  const pricesAlreadyAccepted = pricingReady && partnerWizardPricesAlreadyAccepted(draft, result.case);
   const pricingStatus = result.case?.state === 'DRAFT'
-    ? pricingReady ? 'آماده پذیرش'
+    ? pricesAlreadyAccepted ? 'پذیرفته‌شده' : pricingReady ? 'آماده پذیرش'
       : rejectedRows.length ? 'نیازمند اصلاح'
         : expiredRows.length ? 'پایان اعتبار قیمت'
           : waitingForSabalan ? 'در انتظار پاسخ' : compactStatus?.pricing
@@ -218,13 +253,14 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         : result.message : null;
 
   React.useEffect(() => {
+    if (mutationBlockReason) return;
     const serviceOnly = !draft.rows.length && Boolean(draft.serviceRows?.length);
     const requested = draft.step === 'products' ? 'pricing' : draft.step;
     const required = serviceOnly && ['pricing', 'products'].includes(draft.step) ? 'delivery'
       : serviceOnly ? (!result.case && ['delivery', 'payment', 'confirmation'].includes(draft.step) ? 'delivery' : draft.step)
         : requiredPartnerWizardStep(requested, Boolean(result.case), pricingReady);
     if (required !== draft.step) onChange({ ...draft, step: required });
-  }, [draft, onChange, pricingReady, result.case]);
+  }, [draft, onChange, pricingReady, result.case, mutationBlockReason]);
 
   React.useEffect(() => {
     setConfirmationSent(false);
@@ -233,7 +269,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   // The technical editor already collected retail prices. Enter pricing directly,
   // number the case once, and keep retries on the submission controller's identity.
   const requestInitialPricing = useCallback(async () => {
-    if (initialPricingFlight.current || recovery.state !== 'writable' ||
+    if (mutationBlockReason || initialPricingFlight.current || recovery.state !== 'writable' ||
       submission.getSnapshot().case || ['submitting', 'uncertain'].includes(submission.getSnapshot().phase)) return;
     initialPricingFlight.current = true;
     setError(null); setQuotePending(true);
@@ -251,7 +287,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     } catch {
       setError('ارسال استعلام انجام نشد؛ دوباره تلاش کنید. اطلاعات محصولات حفظ شده است.');
     } finally { initialPricingFlight.current = false; setQuotePending(false); }
-  }, [canonicalRetailReady, draft, onCaseNumbered, onPreparePricingQuote, recovery.state, submission]);
+  }, [canonicalRetailReady, draft, onCaseNumbered, onPreparePricingQuote, recovery.state, submission, mutationBlockReason]);
   useEffect(() => {
     const serviceOnly = !draft.rows.length && Boolean(draft.serviceRows?.length);
     if (recovery.state !== 'writable' || result.case || mutatePending ||
@@ -286,7 +322,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
 
   const updateRetail = (rows: PartnerRetailRow[]) => onChange({ ...draft, rows, intent: {
     ...draft.intent, belowCostConfirmed: false,
-    rows: partnerRetailIntentRows(rows),
+    rows: partnerRetailDraftRows(rows, draft.intent.rows),
   } });
   const move = (index: number) => {
     const target = visibleSteps[index]?.id;
@@ -296,20 +332,9 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     onChange({ ...draft, step: target === 'products' ? 'pricing' : target });
     requestAnimationFrame(() => heading.current?.focus());
   };
-  const currentIntent = (preparationCompleted: boolean): PartnerDraftIntent => {
-    const rows = draft.rows.map(row => {
-      if (row.parentProductRowId || isUsableInquiryRow(row.inquiryRow, now) && !mismatchedRowIds.includes(row.inquiryRow.rowId)) return row;
-      const { approvedRowBinding: _binding, ...inquiryRow } = row.inquiryRow;
-      return { ...row, inquiryRow };
-    });
-    const usableMaterials = new Map((draft.materialInquiryRows ?? []).filter(({ inquiryRow }) =>
-      isUsableInquiryRow(inquiryRow, now) && !mismatchedRowIds.includes(inquiryRow.rowId))
-      .map(({ pricingSubjectId, inquiryRow }) => [pricingSubjectId, inquiryRow.approvedRowBinding]));
-    return { ...draft.intent, preparationCompleted, rows: partnerRetailIntentRows(rows),
-      additionalMaterialApprovals: draft.intent.additionalMaterialApprovals?.filter(binding =>
-        usableMaterials.has(binding.pricingSubjectId)),
-      deliveries: draft.intent.deliveries };
-  };
+  const currentIntent = (preparationCompleted: boolean, acceptOffer = false) => partnerWizardSubmissionIntent(
+    draft, preparationCompleted, acceptOffer, now, mismatchedRowIds,
+    submission.getSnapshot().case?.pricingState === 'READY_TO_FINALIZE');
   const submit = async () => {
     if (disabled || stepIndex < 0) return;
     const invalid = visibleSteps.map(step => ({ step, failure: validateWizardStep(step.id, draft) })).find(item => item.failure);
@@ -342,7 +367,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     }
     setActionPending(true); setError(null);
     try {
-      await submission.submit(currentIntent(true));
+      await submission.submit(currentIntent(true, true));
       const saved = submission.getSnapshot();
       if (saved.phase !== 'created' || !saved.case || saved.case.pricingState !== 'READY_TO_FINALIZE') return;
       await onFinalize?.(saved.case);
@@ -362,9 +387,12 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     }
     setActionPending(true); setError(null);
     try {
-      await submission.submit(currentIntent(Boolean(draft.intent.preparationCompleted)));
+      const intent = currentIntent(Boolean(draft.intent.preparationCompleted), true);
+      await submission.submit(intent);
       const saved = submission.getSnapshot();
-      if (saved.phase === 'created' && saved.case?.pricingState === 'READY_TO_FINALIZE') setPricingDecision('accepted');
+      if (saved.phase === 'created' && saved.case?.pricingState === 'READY_TO_FINALIZE') {
+        onChange({ ...draft, intent }); setPricingDecision('accepted');
+      }
     } finally { setActionPending(false); }
   };
   const openDecisionContract = async () => {
@@ -440,7 +468,10 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         title="محصول اصلاح‌شده ذخیره شده است. برای دریافت قیمت تازه، استعلام همان محصول را ارسال کنید." />}
       {result.phase === 'uncertain' && <ErpInlineState kind="stale" title={result.message || 'نتیجه ثبت را با همان درخواست بررسی کنید.'} action={{ label: 'بررسی نتیجه ثبت', onClick: () => void submission.retry() }} />}
       {submissionError && <ErpInlineState kind="error" title={submissionError} />}
+      {pricingRefresh?.error && <ErpInlineState kind="stale" title={pricingRefresh.error} action={{ label: 'تلاش مجدد', onClick: pricingRefresh.onRefresh }} />}
       {externalError && !error && <ErpInlineState kind="error" title={externalError} />}
+      {mutationBlockReason && <ErpInlineState kind="stale" title={mutationBlockReason}
+        action={onEditProducts ? { label: 'مشاهده تغییرات ذخیره‌شده محصولات', onClick: onEditProducts } : undefined} />}
       {error && <ErpInlineState kind="error" title={error} />}
     </div>}
     navigation={{
@@ -530,9 +561,9 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
                 disabled={disabled || inquiryRow.successor?.state === 'PENDING'} onClick={() => onReinquire(inquiryRow)} />}
             </ErpCard>;
           })}
-          {pricingReady && <ErpButton label={'پذیرش قیمت‌ها'} disabled={disabled} onClick={() => void acceptPrices()} />}
+          {pricingReady && !pricesAlreadyAccepted && <ErpButton label={'پذیرش قیمت‌ها'} disabled={disabled} onClick={() => void acceptPrices()} />}
           {result.case && (pricingReady
-            ? <ErpInlineState kind="success" title="قیمت همه محصولات دریافت شده است؛ می‌توانید قیمت‌ها را بپذیرید یا مراحل پیش‌نویس را ادامه دهید." />
+            ? <ErpInlineState kind="success" title={pricesAlreadyAccepted ? "قیمت‌های سبلان پذیرفته شده است؛ می‌توانید مراحل قرارداد را ادامه دهید." : "قیمت همه محصولات دریافت شده است؛ می‌توانید قیمت‌ها را بپذیرید یا مراحل پیش‌نویس را ادامه دهید."} />
             : <ErpInlineState kind="empty" title={rejectedRows.length ? 'دلیل رد را بررسی و همان محصول را ویرایش کنید؛ قیمت ردیف‌های دیگر حفظ می‌شود.'
               : expiredRows.length ? 'اعتبار برخی قیمت‌ها پایان یافته است؛ همان ردیف‌ها را دوباره استعلام کنید.'
                 : 'در انتظار پاسخ سبلان؛ می‌توانید مراحل تحویل و پرداخت را ادامه دهید.'} />)}

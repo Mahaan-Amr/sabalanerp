@@ -8,10 +8,14 @@ import api from '@/lib/api';
 export type { PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
 
 export async function readPartnerCases(caseId?: string): Promise<PartnerCaseRuntimeRow[]> {
+  return (await readPartnerCaseListing(caseId)).cases;
+}
+
+export async function readPartnerCaseListing(caseId?: string) {
   const response = await api.post('/partner/cases/query-v2', caseId ? { caseId } : {});
   const parsed = PartnerCaseRuntimeResultSchema.safeParse((response.data as { data?: unknown })?.data);
   if (!parsed.success) throw partnerError('INTEGRITY_CONFLICT');
-  return parsed.data.cases;
+  return parsed.data;
 }
 
 export async function readPartnerAccount() {

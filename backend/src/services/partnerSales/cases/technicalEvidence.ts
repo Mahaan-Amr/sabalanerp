@@ -351,9 +351,9 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
     const layerIds = [...new Set(selections.layers.map(item => item.catalogItemId))];
     const [tools, finishings, layers] = await Promise.all([
       tx.subService.findMany({ where: { id: { in: toolIds } }, select: { id: true, updatedAt: true, isActive: true,
-        namePersian: true, calculationBase: true, pricePerMeter: true } }),
+        namePersian: true, calculationBase: true, minimumQuantity: true, pricePerMeter: true } }),
       tx.stoneFinishing.findMany({ where: { id: { in: finishingIds } }, select: { id: true, updatedAt: true,
-        isActive: true, namePersian: true, calculationBase: true, pricePerSquareMeter: true, unitPrice: true } }),
+        isActive: true, namePersian: true, calculationBase: true, minimumQuantity: true, pricePerSquareMeter: true, unitPrice: true } }),
       tx.layerType.findMany({ where: { id: { in: layerIds } }, select: { id: true, updatedAt: true, isActive: true,
         name: true, calculationUnit: true, pricePerLayer: true } }),
     ]);

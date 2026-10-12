@@ -176,6 +176,7 @@ export const FEATURES = {
   INVENTORY_SUB_SERVICES_VIEW: 'inventory_sub_services_view',
   INVENTORY_SUB_SERVICES_CREATE: 'inventory_sub_services_create',
   INVENTORY_SUB_SERVICES_EDIT: 'inventory_sub_services_edit',
+  INVENTORY_OPERATION_MINIMUM_EDIT: 'inventory_operation_minimum_edit',
   INVENTORY_SUB_SERVICES_DELETE: 'inventory_sub_services_delete',
   INVENTORY_SUB_SERVICES_TOGGLE: 'inventory_sub_services_toggle',
   INVENTORY_STAIR_STANDARD_LENGTHS_VIEW: 'inventory_stair_standard_lengths_view',
@@ -469,6 +470,7 @@ export const FEATURE_WORKSPACE_MAP: Record<Feature, string> = {
   [FEATURES.INVENTORY_SUB_SERVICES_VIEW]: 'inventory',
   [FEATURES.INVENTORY_SUB_SERVICES_CREATE]: 'inventory',
   [FEATURES.INVENTORY_SUB_SERVICES_EDIT]: 'inventory',
+  [FEATURES.INVENTORY_OPERATION_MINIMUM_EDIT]: 'inventory',
   [FEATURES.INVENTORY_SUB_SERVICES_DELETE]: 'inventory',
   [FEATURES.INVENTORY_SUB_SERVICES_TOGGLE]: 'inventory',
   [FEATURES.INVENTORY_STAIR_STANDARD_LENGTHS_VIEW]: 'inventory',
@@ -741,6 +743,7 @@ const FEATURE_ACTION_LABELS_FA: ReadonlyArray<readonly [string, string]> = [
 ];
 
 const featureLabelFa = (feature: Feature): string => {
+  if (feature === FEATURES.INVENTORY_OPERATION_MINIMUM_EDIT) return 'تغییر حداقل مقدار ابزار و فرآوری سنگ';
   if (feature === FEATURES.CRM_CUSTOMERS_VIEW_ALL) return 'مشاهده همه مشتریان داخلی و همکار';
   if (feature === FEATURES.CRM_CUSTOMERS_DELETE) return 'حذف دائمی مشتری بدون سابقه';
   const action = FEATURE_ACTION_LABELS_FA.find(([suffix]) => feature.endsWith(`_${suffix}`));

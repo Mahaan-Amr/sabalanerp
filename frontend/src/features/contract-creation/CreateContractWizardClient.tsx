@@ -1,5 +1,7 @@
 'use client';
 
+import { OperationMinimumContext, OperationMinimumSummary, contractOperationMinimumState } from './components/product-modal-system/OperationMinimumContext';
+import { evaluateOperationMinimums, operationMinimumMessage } from '@sabalanerp/contract-product-graph';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { useRouter } from 'next/navigation';
@@ -6304,6 +6306,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     onEditSessionFailure: editRecovery.reportMutationFailure,
     draftStorageKey: contractDraftStorageKey
   });
+  const operationMinimumState = useMemo(() => contractOperationMinimumState(wizardData.products, wizardData.serviceRows || [], subServices, stoneFinishings),
+    [wizardData.products, wizardData.serviceRows, subServices, stoneFinishings]);
   const handleWizardSubmit = () => {
     if (isContractCreationComplete) {
       router.push('/dashboard/sales/contracts?created=1');
@@ -6318,6 +6322,11 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
 
+    const deficits = evaluateOperationMinimums(operationMinimumState.quantities, operationMinimumState.rules);
+    if (!isContractEditMode && (operationMinimumState.error || deficits.length)) {
+      setErrors({ general: operationMinimumState.error || deficits.map(operationMinimumMessage).join('\n') });
+      return;
+    }
     contractSubmission.handleCreateContract();
   };
 
@@ -6403,6 +6412,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   };
 
   return (
+    <OperationMinimumContext.Provider value={operationMinimumState}>
     <ErpNeumorphicWorkflowLayout
       title={isContractEditMode
         ? 'ویرایش قرارداد'
@@ -7234,6 +7244,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                 setDraft({ ...draft, operationPolicyInput })}
                               loadTools={async () => subServices.map(tool => ({
                                 catalogItemId: tool.id,
+                minimumQuantity: tool.minimumQuantity,
                                 catalogSnapshotVersion: String(
                                   (tool as SubService & { updatedAt?: string }).updatedAt ||
                                   'current'
@@ -7249,6 +7260,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                               }))}
                               loadFinishings={async () => stoneFinishings.map(finishing => ({
                                 catalogItemId: finishing.id,
+                minimumQuantity: finishing.minimumQuantity,
                                 catalogSnapshotVersion: String(
                                   (finishing as StoneFinishing & { updatedAt?: string }).updatedAt ||
                                   'current'
@@ -8451,6 +8463,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         finishingCacheKey="stair-layer-finishings"
                                         loadTools={async () => subServices.map(tool => ({
                                           catalogItemId: tool.id,
+                minimumQuantity: tool.minimumQuantity,
                                           catalogSnapshotVersion: String(
                                             (tool as SubService & { updatedAt?: string }).updatedAt ||
                                             'current'
@@ -8466,6 +8479,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                                         }))}
                                         loadFinishings={async () => stoneFinishings.map(finishing => ({
                                           catalogItemId: finishing.id,
+                minimumQuantity: finishing.minimumQuantity,
                                           catalogSnapshotVersion: String(
                                             (finishing as StoneFinishing & { updatedAt?: string }).updatedAt ||
                                             'current'
@@ -11155,7 +11169,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             onContinueNationalCodeConflict={paymentHandlers.handleContinueNationalCodeConflict}
           />
         )}
+          {(currentStep === 5 || currentStep === 8) && <OperationMinimumSummary />}
         </div>
     </ErpNeumorphicWorkflowLayout>
+    </OperationMinimumContext.Provider>
   );
 }

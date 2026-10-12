@@ -1,6 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
+import { OperationMinimumContext, OperationMinimumCatalogHint } from '../components/product-modal-system/OperationMinimumContext';
+import { FaLock } from 'react-icons/fa';
+import { evaluateOperationMinimums, operationMinimumMessage } from '@sabalanerp/contract-product-graph';
 import { PartnerTechnicalDraftSchema, type PartnerTechnicalDraft, type PartnerTechnicalServiceCatalogItem } from '@sabalanerp/partner-sales-contracts';
 import { multiplyContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
 import { ErpButton, ErpCard, ErpField, ErpInput, ErpPressable, ErpSegmentedControl } from '@/components/erp';
@@ -16,6 +19,8 @@ export function PartnerStandaloneServiceEditor({ draft, catalog, onChange }: {
   draft: PartnerTechnicalDraft; catalog: PartnerTechnicalServiceCatalogItem[]; onChange: (draft: PartnerTechnicalDraft) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const minimumState = React.useContext(OperationMinimumContext);
+  const minimumDeficits = evaluateOperationMinimums(minimumState.quantities, minimumState.rules);
   const [sourceType, setSourceType] = useState<'tool' | 'cutting' | 'finishing'>('tool');
   const [query, setQuery] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -45,7 +50,7 @@ export function PartnerStandaloneServiceEditor({ draft, catalog, onChange }: {
           onClick={() => { commit([...(draft.serviceRows ?? []), { serviceRowId: `service-row:${crypto.randomUUID()}`,
             sourceType: item.sourceType, catalogItemId: item.catalogItemId, catalogSnapshotVersion: item.catalogSnapshotVersion,
             title: item.name, unit: item.unit, quantity: '1', retailUnitPrice: item.suggestedRetailUnitPrice }]); setQuery(''); }}>
-          <span>{item.name}</span><span>{item.suggestedRetailUnitPrice && partnerMoneyText(item.suggestedRetailUnitPrice.amount, item.suggestedRetailUnitPrice.currency)} · افزودن</span>
+          <span>{item.name}<OperationMinimumCatalogHint kind={item.sourceType} catalogItemId={item.catalogItemId} /></span><span>{item.suggestedRetailUnitPrice && partnerMoneyText(item.suggestedRetailUnitPrice.amount, item.suggestedRetailUnitPrice.currency)} · افزودن</span>
         </ErpPressable></div>)}
         {!matches.length && <p className="sds-text-muted py-3 text-sm">خدمتی پیدا نشد</p>}
       </div>
@@ -57,6 +62,8 @@ export function PartnerStandaloneServiceEditor({ draft, catalog, onChange }: {
       return <div key={row.serviceRowId} className="space-y-2 border-b border-[var(--sds-border-subtle)] py-3 last:border-b-0">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><strong className="sds-text-primary text-sm">{row.title || 'خدمت'}</strong>
+            {minimumDeficits.filter(item => item.kind === row.sourceType && item.catalogItemId === row.catalogItemId).map(item =>
+              <p key={`${item.kind}:${item.catalogItemId}`} role="status" className="flex items-center gap-2 text-xs text-[var(--sds-warning)]"><FaLock aria-hidden="true" />{operationMinimumMessage(item)}</p>)}
             <p className="sds-text-secondary text-xs">{getServiceRowSourceLabel(row.sourceType)} · {getServiceRowUnitLabel(row.unit)}
               {amount && ` · ${partnerMoneyText(amount, row.retailUnitPrice!.currency)}`}</p></div>
           {deleteId === row.serviceRowId ? <div className="flex gap-3">

@@ -99,7 +99,7 @@ router.post(
     try {
       const catalog = resolveCatalog(req.params.catalog);
       if (!catalog) return res.status(404).json({ success: false, error: 'Catalog not found' });
-      const plan = await applyCatalogPlan(prisma, String(req.body.importId || ''));
+      const plan = await applyCatalogPlan(prisma, String(req.body.importId || ''), req.user);
       return res.json({ success: true, data: plan });
     } catch (error: any) {
       console.error('Catalog apply failed:', error);

@@ -1,6 +1,7 @@
 'use client';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { getOperationalErrorMessage } from '@/lib/operationalError';
 import { servicesAPI } from '@/lib/api';
 import { InventoryMasterDataForm, InventoryMasterDataPage } from '@/features/inventory/master-data/InventoryMasterDataUi';
 
@@ -12,6 +13,7 @@ const CreateSubServicePage: React.FC = () => {
     name: '',
     namePersian: '',
     description: '',
+    minimumQuantity: '',
     pricePerMeter: '',
     calculationBase: 'length' as 'length' | 'squareMeters',
     images: [] as string[],
@@ -43,7 +45,7 @@ const CreateSubServicePage: React.FC = () => {
         });
         setErrors(newErrors);
       } else {
-        setErrors({ general: 'خطا در ایجاد ابزار' });
+        setErrors({ general: getOperationalErrorMessage(error, { failedAction: 'ذخیره اطلاعات خدمات', nextStep: 'اطلاعات حفظ شده است؛ مقدار و مجوز خود را بررسی و دوباره تلاش کنید.' }) });
       }
     } finally {
       setLoading(false);

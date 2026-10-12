@@ -2,6 +2,7 @@
 import { ErpLoading } from '@/components/erp';
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { getOperationalErrorMessage } from '@/lib/operationalError';
 import { servicesAPI } from '@/lib/api';
 import { InventoryMasterDataForm, InventoryMasterDataPage } from '@/features/inventory/master-data/InventoryMasterDataUi';
 
@@ -17,6 +18,7 @@ const EditStoneFinishingPage: React.FC = () => {
     namePersian: '',
     name: '',
     description: '',
+    minimumQuantity: '',
     pricePerSquareMeter: '',
     calculationBase: 'squareMeters' as 'length' | 'squareMeters',
     images: [] as string[],
@@ -36,6 +38,7 @@ const EditStoneFinishingPage: React.FC = () => {
             namePersian: data.namePersian || '',
             name: data.name || '',
             description: data.description || '',
+            minimumQuantity: data.minimumQuantity?.toString() || '',
             pricePerSquareMeter: (data.unitPrice ?? data.pricePerSquareMeter)?.toString() || '',
             calculationBase: data.calculationBase === 'length' ? 'length' : 'squareMeters',
             images: data.images || [],
@@ -89,7 +92,7 @@ const EditStoneFinishingPage: React.FC = () => {
         });
         setErrors(newErrors);
       } else {
-        setErrors({ general: 'فرآوری سنگ یافت نشد' });
+        setErrors({ general: getOperationalErrorMessage(error, { failedAction: 'ذخیره اطلاعات خدمات', nextStep: 'اطلاعات حفظ شده است؛ مقدار و مجوز خود را بررسی و دوباره تلاش کنید.' }) });
       }
     } finally {
       setLoading(false);

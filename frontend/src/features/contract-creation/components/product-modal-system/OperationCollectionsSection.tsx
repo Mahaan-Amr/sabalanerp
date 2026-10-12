@@ -1,6 +1,9 @@
 'use client';
 
 import React from 'react';
+import { FaLock } from 'react-icons/fa';
+import { evaluateOperationMinimums, operationMinimumKey, operationMinimumMessage, type OperationMinimumQuantity } from '@sabalanerp/contract-product-graph';
+import { OperationMinimumContext } from './OperationMinimumContext';
 import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpPressable, ErpInput, ErpSelect } from '@/components/erp';
 import {
@@ -36,6 +39,7 @@ export interface OperationCatalogItem {
   readonly name: string;
   readonly unit: 'meter' | 'squareMeter';
   readonly rateToman?: string | null;
+  readonly minimumQuantity?: string | number | null;
   readonly incompatibleCatalogItemIds?: readonly string[];
 }
 
@@ -102,12 +106,14 @@ function CatalogResults({
   items,
   onSelect,
   showPricing,
+  minimumLabel,
   focusOnMount = false
 }: {
   kind: 'tool' | 'finishing';
   items: readonly OperationCatalogItem[];
   onSelect: (item: OperationCatalogItem) => void;
   showPricing: boolean;
+  minimumLabel?: (item: OperationCatalogItem) => string | undefined;
   focusOnMount?: boolean;
 }) {
   const [query, setQuery] = React.useState('');
@@ -148,7 +154,9 @@ function CatalogResults({
             onClick={() => onSelect(item)}
             className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-start text-xs hover:bg-[var(--sds-surface-subtle)]"
           >
-            <span className="font-semibold">{item.name}</span>
+            <span className="space-y-1"><span className="font-semibold">{item.name}</span>
+              {minimumLabel?.(item) && <span className="flex items-center gap-2 text-[var(--sds-warning)]"><FaLock aria-hidden="true" />{minimumLabel(item)} — تنظیم عملیات</span>}
+            </span>
             {showPricing && <span className="text-[var(--sds-text-muted)]">
               {item.rateToman === undefined || item.rateToman === null
                 ? 'نرخ ثبت نشده'
@@ -181,6 +189,7 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
 }) {
   const pricingVisible = useProductPricingVisibility();
   const showPricing = pricingVisible && !('inputRevision' in input);
+  const minimumContext = React.useContext(OperationMinimumContext);
   const [addingTool, setAddingTool] = React.useState(false);
   const [addingFinishing, setAddingFinishing] = React.useState(false);
   const [overrideEditing, setOverrideEditing] = React.useState<string | null>(null);
@@ -194,12 +203,12 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
   const toolCatalog = useCachedProductModalSection(
     toolCacheKey,
     loadTools,
-    addingTool
+    addingTool || input.tools.length > 0
   );
   const finishingCatalog = useCachedProductModalSection(
     finishingCacheKey,
     loadFinishings,
-    addingFinishing
+    addingFinishing || input.finishings.length > 0
   );
   const presentation = React.useMemo(
     () => 'inputRevision' in input
@@ -212,6 +221,31 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
     presentation.toolsById.get(id);
   const calculatedFinishing = (id: string) =>
     presentation.finishingsById.get(id);
+  const scopeId = String(input.operationScopeId ?? input.productRowId);
+  const selectionIds = new Set([...input.tools.map(tool => String(tool.toolSelectionId)), ...input.finishings.map(item => String(item.finishingSelectionId))]);
+  const minimumQuantities: OperationMinimumQuantity[] = [
+    ...minimumContext.quantities.filter(item => item.scopeId !== scopeId && !selectionIds.has(item.selectionId)),
+    ...input.tools.map(tool => ({ kind: 'tool' as const, catalogItemId: tool.catalogItemId, unit: tool.unit,
+      quantity: calculatedTool(tool.toolSelectionId)?.finalQuantity ?? '0', selectionId: String(tool.toolSelectionId) })),
+    ...input.finishings.map(item => ({ kind: 'finishing' as const, catalogItemId: item.catalogItemId, unit: item.unit,
+      quantity: calculatedFinishing(item.finishingSelectionId)?.finalQuantity ?? '0', selectionId: String(item.finishingSelectionId) })),
+  ];
+  const minimumRules = [...minimumContext.rules];
+  for (const [kind, items] of [['tool', toolCatalog.data ?? []], ['finishing', finishingCatalog.data ?? []]] as const) {
+    for (const item of items) if (!minimumRules.some(rule => rule.kind === kind && rule.catalogItemId === item.catalogItemId))
+      minimumRules.push({ kind, ...item });
+  }
+  const minimumDeficits = new Map(evaluateOperationMinimums(minimumQuantities, minimumRules)
+    .map(item => [operationMinimumKey(item.kind, item.catalogItemId), item]));
+  const catalogMinimumLabel = (kind: 'tool' | 'finishing', item: OperationCatalogItem) => {
+    const rule = minimumRules.find(rule => rule.kind === kind && rule.catalogItemId === item.catalogItemId);
+    const minimum = rule?.minimumQuantity ?? item.minimumQuantity;
+    if (!minimum || Number(minimum) <= 0) return undefined;
+    const deficit = minimumDeficits.get(operationMinimumKey(kind, item.catalogItemId));
+    const selected = minimumQuantities.some(quantity => quantity.kind === kind && quantity.catalogItemId === item.catalogItemId);
+    if (selected && !deficit) return undefined;
+    return `حداقل ${String(minimum).replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} ${item.unit === 'meter' ? 'متر طول' : 'متر مربع'}`;
+  };
   const conflictFor = (id: string) => {
     const conflict = presentation.conflictByEntityId.get(id);
     return !showPricing && conflict?.code === 'inventory-rate-missing' ? undefined : conflict;
@@ -407,6 +441,7 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
                   <CatalogResults
                     showPricing={showPricing || Boolean(retailRateFor)}
                     kind="tool"
+                    minimumLabel={item => catalogMinimumLabel('tool', item)}
                     items={toolCatalog.data ?? []}
                     onSelect={addTool}
                     focusOnMount
@@ -440,6 +475,9 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-bold">{tool.name}</span>
+                {minimumDeficits.has(operationMinimumKey('tool', tool.catalogItemId)) && <span role="status" className="flex items-center gap-2 text-[var(--sds-warning)]">
+                  <FaLock aria-hidden="true" />{operationMinimumMessage(minimumDeficits.get(operationMinimumKey('tool', tool.catalogItemId))!)}
+                </span>}
                 {tool.outsideCurrentCatalog && (
                   <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
@@ -651,9 +689,10 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
                   <CatalogResults
                     showPricing={showPricing || Boolean(retailRateFor)}
                     kind="finishing"
+                    focusOnMount
+                    minimumLabel={item => catalogMinimumLabel('finishing', item)}
                     items={finishingCatalog.data ?? []}
                     onSelect={addFinishing}
-                    focusOnMount
                   />
                 )
         )}
@@ -674,6 +713,9 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-bold">{finishing.name}</span>
+                {minimumDeficits.has(operationMinimumKey('finishing', finishing.catalogItemId)) && <span role="status" className="flex items-center gap-2 text-[var(--sds-warning)]">
+                  <FaLock aria-hidden="true" />{operationMinimumMessage(minimumDeficits.get(operationMinimumKey('finishing', finishing.catalogItemId))!)}
+                </span>}
                 {finishing.outsideCurrentCatalog && (
                   <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}

@@ -2,6 +2,7 @@
 import { ErpLoading } from '@/components/erp';
 import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { getOperationalErrorMessage } from '@/lib/operationalError';
 import { servicesAPI } from '@/lib/api';
 import { InventoryMasterDataForm, InventoryMasterDataPage } from '@/features/inventory/master-data/InventoryMasterDataUi';
 
@@ -17,6 +18,7 @@ const EditSubServicePage: React.FC = () => {
     name: '',
     namePersian: '',
     description: '',
+    minimumQuantity: '',
     pricePerMeter: '',
     calculationBase: 'length' as 'length' | 'squareMeters',
     images: [] as string[],
@@ -40,6 +42,7 @@ const EditSubServicePage: React.FC = () => {
           name: subService.name || '',
           namePersian: subService.namePersian,
           description: subService.description || '',
+          minimumQuantity: subService.minimumQuantity?.toString() || '',
           pricePerMeter: subService.pricePerMeter.toString(),
           calculationBase: subService.calculationBase || 'length',
           images: subService.images || [],
@@ -80,7 +83,7 @@ const EditSubServicePage: React.FC = () => {
         });
         setErrors(newErrors);
       } else {
-        setErrors({ general: 'خطا در ذخیره ابزار' });
+        setErrors({ general: getOperationalErrorMessage(error, { failedAction: 'ذخیره اطلاعات خدمات', nextStep: 'اطلاعات حفظ شده است؛ مقدار و مجوز خود را بررسی و دوباره تلاش کنید.' }) });
       }
     } finally {
       setLoading(false);

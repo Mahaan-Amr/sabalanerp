@@ -173,6 +173,7 @@ export interface StonePartition {
 }
 
 export interface SubService {
+  minimumQuantity?: string | number | null;
   id: string;
   code: string;
   name?: string;
@@ -196,6 +197,7 @@ export interface CuttingType {
 }
 
 export interface StoneFinishing {
+  minimumQuantity?: string | number | null;
   id: string;
   code?: string;
   name?: string;

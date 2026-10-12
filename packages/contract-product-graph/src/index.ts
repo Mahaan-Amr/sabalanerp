@@ -262,3 +262,5 @@ export type { RemainderTechnicalInput, RemainderTechnicalIntent, RemainderTechni
   RemainderTechnicalReplay, RemainderTechnicalAllocation } from './remainderTechnical';
 export { calculatePreparedTechnical } from './preparedTechnical';
 export type { PreparedKind, PreparedUnit, PreparedTechnicalInput, PreparedTechnicalResult, PreparedTechnicalCalculation } from './preparedTechnical';
+export { evaluateOperationMinimums, operationMinimumKey, operationMinimumMessage, collectCalculatedOperationQuantities, collectProductOperationQuantities } from './operationMinimum';
+export type { OperationMinimumRule, OperationMinimumQuantity, OperationMinimumDeficit, MinimumOperationKind } from './operationMinimum';

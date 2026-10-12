@@ -1,3 +1,4 @@
+import { OperationMinimumError } from '../services/operationMinimumGuard';
 import { casePdfContent, readCasePdfConfirmation } from '../services/partnerSales/customerOutput/casePdf';
 import { readPartnerCommercialState } from '../services/partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
@@ -83,6 +84,7 @@ const sendUnexpectedSalesFailure = (
   code: string,
   preserveInput = false,
 ) => {
+  if (error instanceof OperationMinimumError) return res.status(409).json({ success: false, code: error.code, error: error.message, details: error.details });
   const creditFailure = knownCustomerCreditFailure(error);
   if (creditFailure) return res.status(creditFailure.status).json(creditFailure.body);
   const trackingId = randomUUID();
@@ -1249,6 +1251,7 @@ router.post('/contracts', rejectContractGraphWritesWhenReadOnly, protect, requir
     }
     const creditFailure = knownCustomerCreditFailure(error);
     if (creditFailure) return res.status(creditFailure.status).json(creditFailure.body);
+    if (error instanceof OperationMinimumError) return res.status(409).json({ success: false, code: error.code, error: error.message, details: error.details });
     console.error('Create sales contract error:', error);
     const knownCreateDiscountFailure = knownContractUpdateBusinessFailure(error.message);
     if (knownCreateDiscountFailure?.body.code === 'SALES_CONTRACT_DISCOUNT_REENTRY_REQUIRED') {

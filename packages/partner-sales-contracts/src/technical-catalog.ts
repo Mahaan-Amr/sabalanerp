@@ -40,10 +40,11 @@ export type PartnerTechnicalProduct = z.infer<typeof PartnerTechnicalProductSche
 const operationIdentity = {
   catalogItemId: IdSchema, catalogSnapshotVersion: InstantSchema, name: TextSchema,
 };
+const operationMinimum = { minimumQuantity: z.string().regex(/^\d+(?:\.\d+)?$/).nullable().optional() };
 const operationUnit = z.enum(['meter', 'squareMeter']);
 export const PartnerTechnicalOperationSchema = z.discriminatedUnion('kind', [
-  z.object({ ...operationIdentity, kind: z.literal('TOOL'), unit: operationUnit }).strict(),
-  z.object({ ...operationIdentity, kind: z.literal('FINISHING'), unit: operationUnit,
+  z.object({ ...operationIdentity, ...operationMinimum, kind: z.literal('TOOL'), unit: operationUnit }).strict(),
+  z.object({ ...operationIdentity, ...operationMinimum, kind: z.literal('FINISHING'), unit: operationUnit,
     incompatibleCatalogItemIds: z.array(IdSchema).refine(ids => new Set(ids).size === ids.length),
   }).strict(),
   z.object({ ...operationIdentity, kind: z.literal('LAYER'),

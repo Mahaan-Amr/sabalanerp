@@ -1,6 +1,7 @@
 'use client';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { getOperationalErrorMessage } from '@/lib/operationalError';
 import { servicesAPI } from '@/lib/api';
 import { InventoryMasterDataForm, InventoryMasterDataPage } from '@/features/inventory/master-data/InventoryMasterDataUi';
 
@@ -12,6 +13,7 @@ const CreateStoneFinishingPage: React.FC = () => {
     namePersian: '',
     name: '',
     description: '',
+    minimumQuantity: '',
     pricePerSquareMeter: '',
     calculationBase: 'squareMeters' as 'length' | 'squareMeters',
     images: [] as string[],
@@ -52,7 +54,7 @@ const CreateStoneFinishingPage: React.FC = () => {
         });
         setErrors(newErrors);
       } else {
-        setErrors({ general: 'خطا در ایجاد فرآوری سنگ' });
+        setErrors({ general: getOperationalErrorMessage(error, { failedAction: 'ذخیره اطلاعات خدمات', nextStep: 'اطلاعات حفظ شده است؛ مقدار و مجوز خود را بررسی و دوباره تلاش کنید.' }) });
       }
     } finally {
       setLoading(false);

@@ -144,6 +144,7 @@ const operationCatalogFromTools = (
   tools: readonly SubService[]
 ) => tools.map(tool => ({
   catalogItemId: tool.id,
+                minimumQuantity: tool.minimumQuantity,
   catalogSnapshotVersion: String((tool as SubService & { updatedAt?: string }).updatedAt || 'current'),
   name: tool.namePersian || tool.name || tool.code || 'ابزار',
   unit: tool.calculationBase === 'squareMeters' ? 'squareMeter' as const : 'meter' as const,
@@ -156,6 +157,7 @@ const operationCatalogFromFinishings = (
   finishings: readonly StoneFinishing[]
 ) => finishings.map(finishing => ({
   catalogItemId: finishing.id,
+                minimumQuantity: finishing.minimumQuantity,
   catalogSnapshotVersion: String((finishing as StoneFinishing & { updatedAt?: string }).updatedAt || 'current'),
   name: finishing.namePersian || finishing.name || finishing.code || 'پرداخت',
   unit: finishing.calculationBase === 'length' ? 'meter' as const : 'squareMeter' as const,

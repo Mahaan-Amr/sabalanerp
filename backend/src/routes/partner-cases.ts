@@ -1,3 +1,4 @@
+import { OperationMinimumError } from '../services/operationMinimumGuard';
 import { readWholesaleMandatory } from '../services/partnerSales/cases/canonicalWholesale';
 import { PARTNER_CREATION_TRANSACTION_OPTIONS } from '../services/partnerSales/creationTransactionBudget';
 import { technicalTransportFailure, type TechnicalFailureDiagnostic } from './partnerTechnicalFailure';
@@ -83,6 +84,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
   const router = Router();
   router.use(input.authenticate ?? protect);
   const respondReadFailure = (response: Response, failure: unknown, fallback: 'INTEGRITY_CONFLICT' | 'INVALID_PAYLOAD' = 'INTEGRITY_CONFLICT') => {
+    if (failure instanceof OperationMinimumError) { respond(response, { ok: false, error: partnerError('OPERATION_MINIMUM_NOT_MET') }); return; }
     const supportReference = randomUUID();
     const diagnostic = technicalTransportFailure(failure, supportReference);
     (input.reportCreationFailure ?? (value => console.error('Partner case read failed', value)))(diagnostic);
@@ -704,6 +706,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       }
       respond(response, result);
     } catch (error) {
+      if (error instanceof OperationMinimumError) { respond(response, { ok: false, error: partnerError('OPERATION_MINIMUM_NOT_MET') }); return; }
       console.error('Partner Case command failed:', { correlationId, error });
       const result = error && typeof error === 'object' && 'result' in error
         ? (error as { result: Result<unknown> }).result : undefined;

@@ -1,3 +1,4 @@
+import { parseOperationMinimum, authorizeOperationMinimumChange } from './operationMinimumPermission';
 import crypto from 'crypto';
 import fs from 'fs';
 import XLSX from 'xlsx';
@@ -416,6 +417,9 @@ const parseSimpleCatalog = (catalog: CatalogKey, workbook: XLSX.WorkBook) => {
       data = { code: text(cell(row, headers, ['کد'])), namePersian: text(cell(row, headers, ['نام فارسی'])), name: text(cell(row, headers, ['نام انگلیسی/داخلی'])), unitPrice: decimal(cell(row, headers, ['قیمت واحد'])), pricePerSquareMeter: decimal(cell(row, headers, ['قیمت واحد'])), calculationBase: normalizeText(cell(row, headers, ['مبنای محاسبه'])) === 'متر طول' ? 'length' : text(cell(row, headers, ['مبنای محاسبه'])) || 'squareMeters', description: text(cell(row, headers, ['توضیحات'])) || null, isActive: parseBoolean(cell(row, headers, ['فعال']), true) };
       key = data.code;
     }
+    if (['sub-services', 'stone-finishings'].includes(catalog) && headers.has(normalizeText('حداقل مقدار'))) {
+      data.minimumQuantity = parseOperationMinimum(cell(row, headers, ['حداقل مقدار']));
+    }
     if (!key) errors.push({ row: rowNumber, error: 'کلید پایدار رکورد خالی است' });
     else parsed.push({ key, rowNumber, label: data.namePersian || data.name || data.label || key, data });
   }
@@ -572,7 +576,7 @@ export const buildCatalogPlan = async (prisma: PrismaClient, catalog: CatalogKey
   return plan;
 };
 
-export const applyCatalogPlan = async (prisma: PrismaClient, importId: string) => {
+export const applyCatalogPlan = async (prisma: PrismaClient, importId: string, actor?: { id: string; role: string }) => {
   cleanupPlans();
   const stored = plans.get(importId);
   if (!stored) throw new Error('پیش‌نمایش منقضی شده است. فایل را دوباره بارگذاری کنید');
@@ -616,8 +620,15 @@ export const applyCatalogPlan = async (prisma: PrismaClient, importId: string) =
       const txModel = prismaModel(tx, catalog);
       for (const row of rows) {
         const current = existingMap.get(normalizeText(row.key)) as any;
-        if (current) await txModel.update({ where: { id: current.id }, data: row.data });
-        else await txModel.create({ data: row.data });
+        const data = { ...row.data };
+        if (Object.prototype.hasOwnProperty.call(row.data, 'minimumQuantity')) {
+          if (!actor) throw new Error('مجوز تغییر حداقل مقدار برای اعمال فایل اکسل بررسی نشده است.');
+          const minimum = await authorizeOperationMinimumChange(actor, row.data.minimumQuantity?.toString() ?? null, current?.minimumQuantity ?? null);
+          if (minimum ? minimum.eq(current?.minimumQuantity ?? 0) : !current?.minimumQuantity || current.minimumQuantity.isZero()) delete data.minimumQuantity;
+          else data.minimumQuantity = minimum;
+        }
+        if (current) await txModel.update({ where: { id: current.id }, data });
+        else await txModel.create({ data });
       }
       for (const removal of removals) {
         const current = existingMap.get(normalizeText(removal.key)) as any;
@@ -644,8 +655,8 @@ export const buildTemplateWorkbook = (catalog: CatalogKey) => {
     headers = ['کد', 'نام فارسی', 'نام انگلیسی/داخلی', 'قیمت هر متر', 'توضیحات', 'فعال'];
     sample = ['CT-001', 'نوع ابزار نمونه', '', 100000, '', 'فعال'];
   } else if (catalog === 'sub-services') {
-    headers = ['کد', 'نام فارسی', 'نام انگلیسی/داخلی', 'قیمت', 'مبنای محاسبه', 'توضیحات', 'فعال'];
-    sample = ['TOOL-001', 'ابزار نمونه', '', 100000, 'length', '', 'فعال'];
+    headers = ['کد', 'نام فارسی', 'نام انگلیسی/داخلی', 'قیمت', 'مبنای محاسبه', 'توضیحات', 'فعال', 'حداقل مقدار'];
+    sample = ['TOOL-001', 'ابزار نمونه', '', 100000, 'length', '', 'فعال', ''];
   } else if (catalog === 'stair-lengths') {
     headers = ['مقدار', 'واحد', 'برچسب', 'توضیحات', 'فعال'];
     sample = [1.2, 'm', '۱.۲ متر', '', 'فعال'];
@@ -653,8 +664,8 @@ export const buildTemplateWorkbook = (catalog: CatalogKey) => {
     headers = ['کد', 'نام', 'قیمت هر لایه', 'توضیحات', 'فعال'];
     sample = ['LT-001', 'لایه نمونه', 100000, '', 'فعال'];
   } else {
-    headers = ['کد', 'نام فارسی', 'نام انگلیسی/داخلی', 'قیمت واحد', 'مبنای محاسبه', 'توضیحات', 'فعال'];
-    sample = ['SF-001', 'فرآوری نمونه', '', 100000, 'squareMeters', '', 'فعال'];
+    headers = ['کد', 'نام فارسی', 'نام انگلیسی/داخلی', 'قیمت واحد', 'مبنای محاسبه', 'توضیحات', 'فعال', 'حداقل مقدار'];
+    sample = ['SF-001', 'فرآوری نمونه', '', 100000, 'squareMeters', '', 'فعال', ''];
   }
   const worksheet = XLSX.utils.aoa_to_sheet([headers, sample]);
   worksheet['!cols'] = headers.map(() => ({ wch: 22 }));
@@ -681,10 +692,10 @@ export const buildExportWorkbook = async (prisma: PrismaClient, catalog: Catalog
     data.push(...items.map((item: any) => {
       if (catalog === 'services') return [item.code, item.namePersian, item.name || '', item.description || '', item.isActive ? 'فعال' : 'غیرفعال'];
       if (catalog === 'cutting-types') return [item.code, item.namePersian, item.name || '', item.pricePerMeter?.toString() || '', item.description || '', item.isActive ? 'فعال' : 'غیرفعال'];
-      if (catalog === 'sub-services') return [item.code, item.namePersian, item.name || '', item.pricePerMeter?.toString() || '', item.calculationBase, item.description || '', item.isActive ? 'فعال' : 'غیرفعال'];
+      if (catalog === 'sub-services') return [item.code, item.namePersian, item.name || '', item.pricePerMeter?.toString() || '', item.calculationBase, item.description || '', item.isActive ? 'فعال' : 'غیرفعال', item.minimumQuantity?.toString() || ''];
       if (catalog === 'stair-lengths') return [item.value?.toString() || '', item.unit, item.label || '', item.description || '', item.isActive ? 'فعال' : 'غیرفعال'];
       if (catalog === 'layer-types') return [item.code, item.name, item.pricePerLayer?.toString() || '', item.description || '', item.isActive ? 'فعال' : 'غیرفعال'];
-      return [item.code, item.namePersian, item.name || '', (item.unitPrice || item.pricePerSquareMeter)?.toString() || '', item.calculationBase, item.description || '', item.isActive ? 'فعال' : 'غیرفعال'];
+      return [item.code, item.namePersian, item.name || '', (item.unitPrice || item.pricePerSquareMeter)?.toString() || '', item.calculationBase, item.description || '', item.isActive ? 'فعال' : 'غیرفعال', item.minimumQuantity?.toString() || ''];
     }));
   }
   const worksheet = XLSX.utils.aoa_to_sheet(data);

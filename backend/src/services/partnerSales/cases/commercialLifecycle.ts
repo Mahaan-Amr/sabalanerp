@@ -1,4 +1,5 @@
 import { recordPartnerRecommitment } from './recommitment';
+import { assertContractOperationMinimums } from '../../operationMinimumGuard';
 import { recordPartnerCommercialCorrectionFinality } from './commercialCorrectionFinality';
 import { readCasePricingResponse } from './pricingResponse';
 import { appendPartnerCommercialEvent } from './commercialEvents';
@@ -107,6 +108,7 @@ export async function approvePartnerCommercialSales(tx: Tx, input: { caseId: str
   await assertPartnerPreparationComplete(tx, root);
   if (contract.commercialRevision !== input.revision) throw new Error('قرارداد تغییر کرده است؛ صفحه را تازه‌سازی کنید.');
   if (contract.salesApprovalRevision !== input.revision) {
+    await assertContractOperationMinimums(tx, contract.id);
     const updated = await tx.salesContract.update({ where: { id: contract.id }, data: {
       salesApprovalRevision: input.revision, approvedBy: input.actorId,
     } });

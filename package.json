@@ -20,6 +20,7 @@
     "test:partner-sales:local": "node scripts/run-partner-sales-tests.mjs all",
     "test:partner-sales:inventory": "node scripts/run-partner-sales-tests.mjs check-inventory",
     "build:contract-product-graph": "npm --prefix packages/contract-product-graph run build",
+    "test:operation-minimums": "npm --prefix packages/contract-product-graph run test:operation-minimums && npm --prefix backend run test:operation-minimums && npm --prefix frontend run test:operation-minimums",
     "test:contract-product-graph": "npm --prefix packages/contract-product-graph test",
     "typecheck:contract-product-graph": "npm --prefix packages/contract-product-graph run typecheck",
     "build:frontend": "cd frontend && npm run build",

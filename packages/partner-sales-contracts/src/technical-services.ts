@@ -13,5 +13,6 @@ export const PartnerTechnicalServiceCatalogItemSchema = z.object({
   catalogItemId: IdSchema, catalogSnapshotVersion: InstantSchema,
   sourceType: z.enum(['tool', 'cutting', 'finishing']), name: TextSchema,
   unit: z.enum(['meter', 'squareMeter', 'count']), suggestedRetailUnitPrice: MoneySchema.optional(),
+  minimumQuantity: z.string().regex(/^\d+(?:\.\d+)?$/).nullable().optional(),
 }).strict();
 export type PartnerTechnicalServiceCatalogItem = z.infer<typeof PartnerTechnicalServiceCatalogItemSchema>;

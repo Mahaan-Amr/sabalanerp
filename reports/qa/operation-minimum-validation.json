@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-12",
+  "timezone": "Asia/Tehran",
+  "feature": "Per-item tool and stone-finishing minimum operation quantity",
+  "codeStatus": "implemented",
+  "localProject": "sabalanerp-local",
+  "localMigration": "20261012090000_operation_minimum_quantity applied to existing local database on port 55432",
+  "validation": {
+    "operationMinimumTests": { "status": "passed", "tests": 13, "log": "operation-minimum-tests.log" },
+    "localTransactionIntegration": "passed; temporary tool and contract fixtures rolled back; client disconnected",
+    "contractProductGraphSuite": { "status": "passed", "log": "operation-minimum-graph-tests.log" },
+    "partnerSalesContractsSuite": { "status": "passed", "tests": 89, "log": "operation-minimum-partner-tests.log" },
+    "productSelectionStep5Suite": { "status": "passed", "log": "operation-minimum-step5-tests.log" },
+    "designSystemCheck": "passed without baseline changes",
+    "designSystemFoundation": "passed: 25 tests",
+    "designSystemAdoption": "passed: 14 tests",
+    "databaseClientOwnership": "passed",
+    "backendBuild": { "status": "passed", "log": "operation-minimum-backend-build.log" },
+    "frontendBuild": { "status": "passed", "log": "operation-minimum-frontend-build.log" },
+    "diffWhitespaceCheck": "passed"
+  },
+  "remaining": {
+    "localImageRefresh": "not performed; Docker CLI commands did not return",
+    "browserE2E": "blocked at existing Compose project inspection; interrupted before any browser tests ran",
+    "log": "operation-minimum-e2e.log",
+    "nextAction": "Restore Docker Desktop responsiveness, inspect docker-compose.local.yml project, refresh only sabalanerp-local through approved root scripts, run docker:verify and relevant design-system E2E acceptance."
+  },
+  "constraintsPreserved": [
+    "No positive default minimum; empty or zero is unrestricted",
+    "Only final valid quantities of the same catalog item contribute; different units are never combined",
+    "Product rows remain saveable below minimum; commercial completion and new sales approval are guarded",
+    "Existing sales approvals remain unchanged; commercial corrections use the current rule at renewed approval",
+    "Independent feature permission with Admin and Manager ownership and explicit user/role grants",
+    "No second Compose project, replacement service or temporary PostgreSQL container",
+    "Runtime database code reuses the canonical application Prisma client"
+  ]
+}

@@ -997,6 +997,7 @@ export async function createContract(
           ]
         });
         await assertContractQuantityEvidenceReadyForFinalization(tx, contract.id);
+        await assertContractOperationMinimums(tx, contract.id);
         if (potentialProject) {
           await tx.crmPotentialProject.update({
             where: { id: potentialProject.id },
@@ -1587,6 +1588,7 @@ export async function approveContract(
     const currentContract = await lockOrdinaryContract(tx, contractId);
     if (isOrdinaryCommercialFlow(currentContract)) throw new Error('Contract changed concurrently; reload before saving');
     if (currentContract.isInactive || !['DRAFT', 'PENDING_APPROVAL'].includes(currentContract.status)) throw new Error('Contract cannot be approved in current status');
+    await assertContractOperationMinimums(tx, contractId);
     const updated = await tx.salesContract.update({
       where: { id: contractId },
       data: {
@@ -1651,3 +1653,4 @@ export async function rejectContract(
 
   return updatedContract;
 }
+import { assertContractOperationMinimums } from './operationMinimumGuard';

@@ -1,3 +1,4 @@
+import { authorizeOperationMinimumChange, canEditOperationMinimum } from '../services/operationMinimumPermission';
 import { prisma } from '../lib/prisma';
 import express, { Request, Response } from 'express';
 import { body, query, validationResult } from 'express-validator';
@@ -7,6 +8,32 @@ import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../mi
 import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
+
+router.get('/minimum-access', protect, async (req: any, res: Response) => {
+  try { return res.json({ success: true, data: { canEdit: await canEditOperationMinimum(req.user) } }); }
+  catch (error: any) { console.error('Operation minimum permission failed', error);
+    return res.status(500).json({ success: false, error: 'بررسی مجوز حداقل مقدار انجام نشد؛ دوباره تلاش کنید.' }); }
+});
+
+router.patch('/:id/minimum', protect, async (req: any, res: Response) => {
+  try {
+    if (!await canEditOperationMinimum(req.user)) return res.status(403).json({ success: false,
+      error: 'مجوز تغییر حداقل مقدار ابزار و فرآوری سنگ برای شما فعال نیست.' });
+    if (!Object.prototype.hasOwnProperty.call(req.body, 'minimumQuantity')) return res.status(400).json({ success: false,
+      error: 'حداقل مقدار را وارد کنید؛ برای حذف محدودیت مقدار را خالی بگذارید.' });
+    const existing = await prisma.subService.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'ابزار یا فرآوری سنگ یافت نشد.' });
+    const minimumQuantity = await authorizeOperationMinimumChange(req.user, req.body.minimumQuantity, existing.minimumQuantity);
+    const data = await prisma.subService.update({ where: { id: existing.id }, data: { minimumQuantity } });
+    return res.json({ success: true, data });
+  } catch (error: any) {
+    console.error('Operation minimum update failed', error);
+    const validation = error.message?.startsWith('حداقل مقدار');
+    return res.status(error.status || (validation ? 400 : 500)).json({ success: false,
+      error: error.status || validation ? error.message : 'ذخیره حداقل مقدار انجام نشد؛ دوباره تلاش کنید.' });
+  }
+});
+
 
 // @desc    Get all sub-services with filtering and search
 // @route   GET /api/sub-services
@@ -27,7 +54,7 @@ router.get('/', protect, requireAnyFeatureAccess([
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'اطلاعات ابزار معتبر نیست؛ فیلدهای مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -80,11 +107,11 @@ router.get('/', protect, requireAnyFeatureAccess([
         hasPrevPage: page > 1
       }
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching sub-services:', error);
     return res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'عملیات ابزار انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -108,7 +135,7 @@ router.get('/:id', protect, requireAnyFeatureAccess([
     if (!subService) {
       return res.status(404).json({
         success: false,
-        error: 'Sub-service not found'
+        error: 'ابزار یافت نشد.'
       });
     }
 
@@ -116,11 +143,11 @@ router.get('/:id', protect, requireAnyFeatureAccess([
       success: true,
       data: subService
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching sub-service:', error);
     return res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'عملیات ابزار انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -129,12 +156,12 @@ router.get('/:id', protect, requireAnyFeatureAccess([
 // @route   POST /api/sub-services
 // @access  Private/Inventory Workspace
 router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.INVENTORY_SUB_SERVICES_CREATE, FEATURE_PERMISSIONS.EDIT), [
-  body('code').notEmpty().withMessage('Code is required'),
-  body('namePersian').notEmpty().withMessage('Persian name is required'),
+  body('code').notEmpty().withMessage('کد ابزار الزامی است.'),
+  body('namePersian').notEmpty().withMessage('نام فارسی ابزار الزامی است.'),
   body('name').optional().isString(),
   body('description').optional().isString(),
-  body('pricePerMeter').notEmpty().withMessage('Price per meter is required').isNumeric().withMessage('Price per meter must be a number'),
-  body('calculationBase').optional().isIn(['length', 'squareMeters']).withMessage('Calculation base must be either "length" or "squareMeters"'),
+  body('pricePerMeter').notEmpty().withMessage('قیمت پایه ابزار الزامی است.').isNumeric().withMessage('قیمت پایه ابزار باید عدد باشد.'),
+  body('calculationBase').optional().isIn(['length', 'squareMeters']).withMessage('واحد محاسبه ابزار باید متر طول یا متر مربع باشد.'),
   body('images').optional().isArray(),
   body('isActive').optional().isBoolean()
 ], async (req: any, res: Response) => {
@@ -143,7 +170,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'اطلاعات ابزار معتبر نیست؛ فیلدهای مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -158,10 +185,11 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
     if (existingSubService) {
       return res.status(400).json({
         success: false,
-        error: 'Sub-service with this code already exists'
+        error: 'ابزاری با این کد وجود دارد؛ کد دیگری وارد کنید.'
       });
     }
 
+    const minimumQuantity = await authorizeOperationMinimumChange(req.user, req.body.minimumQuantity);
     const subService = await prisma.subService.create({
       data: {
         code,
@@ -170,6 +198,7 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
         description,
         pricePerMeter: parseFloat(pricePerMeter),
         calculationBase,
+        minimumQuantity,
         images,
         isActive
       }
@@ -179,11 +208,12 @@ router.post('/', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPACE
       success: true,
       data: subService
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating sub-service:', error);
+    if (error.status || error.message?.startsWith('حداقل مقدار')) return res.status(error.status || 400).json({ success: false, error: error.message, details: [{ path: 'minimumQuantity', msg: error.message }] });
     return res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'عملیات ابزار انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -196,8 +226,8 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
   body('name').optional().isString(),
   body('namePersian').optional().isString(),
   body('description').optional().isString(),
-  body('pricePerMeter').optional().isNumeric().withMessage('Price per meter must be a number'),
-  body('calculationBase').optional().isIn(['length', 'squareMeters']).withMessage('Calculation base must be either "length" or "squareMeters"'),
+  body('pricePerMeter').optional().isNumeric().withMessage('قیمت پایه ابزار باید عدد باشد.'),
+  body('calculationBase').optional().isIn(['length', 'squareMeters']).withMessage('واحد محاسبه ابزار باید متر طول یا متر مربع باشد.'),
   body('images').optional().isArray(),
   body('isActive').optional().isBoolean()
 ], async (req: any, res: Response) => {
@@ -206,7 +236,7 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
     if (!errors.isEmpty()) {
       return res.status(400).json({
         success: false,
-        error: 'Validation failed',
+        error: 'اطلاعات ابزار معتبر نیست؛ فیلدهای مشخص‌شده را اصلاح کنید.',
         details: errors.array()
       });
     }
@@ -228,8 +258,14 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
     if (!existingSubService) {
       return res.status(404).json({
         success: false,
-        error: 'Sub-service not found'
+        error: 'ابزار یافت نشد.'
       });
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'minimumQuantity')) {
+      const minimumQuantity = await authorizeOperationMinimumChange(req.user, req.body.minimumQuantity, existingSubService.minimumQuantity);
+      if (minimumQuantity ? !minimumQuantity.eq(existingSubService.minimumQuantity ?? 0) : Boolean(existingSubService.minimumQuantity && !existingSubService.minimumQuantity.isZero())) updateData.minimumQuantity = minimumQuantity;
+      else delete updateData.minimumQuantity;
     }
 
     // Check if new code already exists (if code is being updated)
@@ -241,7 +277,7 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
       if (codeExists) {
         return res.status(400).json({
           success: false,
-          error: 'Sub-service with this code already exists'
+          error: 'ابزاری با این کد وجود دارد؛ کد دیگری وارد کنید.'
         });
       }
     }
@@ -255,11 +291,12 @@ router.put('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORKSPA
       success: true,
       data: subService
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error updating sub-service:', error);
+    if (error.status || error.message?.startsWith('حداقل مقدار')) return res.status(error.status || 400).json({ success: false, error: error.message, details: [{ path: 'minimumQuantity', msg: error.message }] });
     return res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'عملیات ابزار انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -279,7 +316,7 @@ router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORK
     if (!existingSubService) {
       return res.status(404).json({
         success: false,
-        error: 'Sub-service not found'
+        error: 'ابزار یافت نشد.'
       });
     }
 
@@ -289,13 +326,13 @@ router.delete('/:id', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY, WORK
 
     res.json({
       success: true,
-      message: 'Sub-service deleted successfully'
+      message: 'ابزار حذف شد.'
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error deleting sub-service:', error);
     return res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'عملیات ابزار انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });
@@ -314,7 +351,7 @@ router.patch('/:id/toggle', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY
     if (!subService) {
       return res.status(404).json({
         success: false,
-        error: 'Sub-service not found'
+        error: 'ابزار یافت نشد.'
       });
     }
 
@@ -327,11 +364,11 @@ router.patch('/:id/toggle', protect, requireWorkspaceAccess(WORKSPACES.INVENTORY
       success: true,
       data: updatedSubService
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error toggling sub-service status:', error);
     return res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'عملیات ابزار انجام نشد؛ دوباره تلاش کنید.'
     });
   }
 });

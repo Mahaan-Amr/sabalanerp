@@ -2,7 +2,7 @@
 import { ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpTextarea, useErpPresentationScope } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
 import { CustomerRemovalConfirmation } from '@/features/crm/customer-workflow/CustomerRemovalConfirmation';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   FaArrowRight,
@@ -130,6 +130,8 @@ const normalizePhoneTypeValue = (value: unknown): PhoneType => {
 };
 export default function EditCustomerPage() {
   const params = useParams();
+  const ownerPortal = usePathname().startsWith('/dashboard/sales/partner-customers/');
+  const listPath = ownerPortal ? '/dashboard/sales/partner-customers' : '/dashboard/crm/customers';
   const router = useRouter();
   const searchParams = useSearchParams();
   const customerId = params.id as string;
@@ -163,6 +165,8 @@ export default function EditCustomerPage() {
   const [phones, setPhones] = useState<EditablePhone[]>([]);
   const [contacts, setContacts] = useState<EditableContact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [partnerCapabilities, setPartnerCapabilities] = useState<Record<string, boolean> | null>(null);
+  const canOperation = (key: string) => !partnerCapabilities || Boolean(partnerCapabilities[key]);
   const [partnerCard, setPartnerCard] = useState<{ revision: number; version: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -177,8 +181,8 @@ export default function EditCustomerPage() {
     if (returnTo === 'contract' && step) {
       return `/dashboard/sales/contracts/create?returnTo=contract&step=${step}`;
     }
-    return `/dashboard/crm/customers/${customerId}`;
-  }, [customerId, searchParams]);
+    return `${listPath}/${customerId}`;
+  }, [customerId, searchParams, listPath]);
 
   useEffect(() => {
     const load = async () => {
@@ -187,7 +191,7 @@ export default function EditCustomerPage() {
         setError(null);
         const [profileResponse, customerResponse] = await Promise.all([
           dashboardAPI.getProfile(),
-          crmAPI.getCustomer(customerId)
+          ownerPortal ? api.get(`/crm/partner/customers/${customerId}/full-card`) : crmAPI.getCustomer(customerId)
         ]);
 
         if (profileResponse.data.success) {
@@ -202,6 +206,7 @@ export default function EditCustomerPage() {
         const customer = customerResponse.data.data;
         if (customer.partnerOwnerProfileId) {
           if (!customer.canManageCustomerCard) { setError('مجوز ویرایش مشتری همکار ندارید'); return; }
+          setPartnerCapabilities(customer.crmCapabilities || null);
           setPartnerCard({ revision: customer.partnerRevision, version: customer.cardVersion });
         }
         setFormData({
@@ -421,11 +426,11 @@ export default function EditCustomerPage() {
       };
       if (partnerCard) {
         const clean = <T extends { id?: string; isActive: boolean }>(rows: T[]) => rows.map(({ id, ...row }) => ({ ...(id ? { id } : {}), ...row }));
-        await api.put(`/crm/customers/${customerId}/admin-card`, { ...customerPayload,
+        await api.put(ownerPortal ? `/crm/partner/customers/${customerId}/full-card` : `/crm/customers/${customerId}/admin-card`, { ...customerPayload,
           expectedRevision: partnerCard.revision, expectedCardVersion: partnerCard.version,
           projects: clean(projects),
           phones: clean(phones),
-          contacts: clean(contacts) });
+          ...(canOperation('contacts_view') ? { contacts: clean(contacts) } : {}) });
         router.push(returnPath); return;
       }
       await crmAPI.updateCustomer(customerId, customerPayload);
@@ -502,15 +507,15 @@ export default function EditCustomerPage() {
 
   if (error && !formData.firstName) {
     return (
-      <CustomerWorkflowPage title="ویرایش مشتری" backHref="/dashboard/crm/customers">
-        <ErpInlineState kind="error" title={error} action={{ label: 'بازگشت به لیست', href: '/dashboard/crm/customers' }} />
+      <CustomerWorkflowPage title="ویرایش مشتری" backHref={listPath}>
+        <ErpInlineState kind="error" title={error} action={{ label: 'بازگشت به لیست', href: listPath }} />
       </CustomerWorkflowPage>
     );
   }
 
-  if (!permissions.canEditCustomers) {
+  if (!(ownerPortal ? Boolean(partnerCard) : permissions.canEditCustomers)) {
     return (
-      <CustomerWorkflowPage title="ویرایش مشتری" backHref="/dashboard/crm/customers">
+      <CustomerWorkflowPage title="ویرایش مشتری" backHref={listPath}>
         <ErpInlineState kind="permission" title="شما دسترسی لازم برای ویرایش مشتری را ندارید" />
       </CustomerWorkflowPage>
     );
@@ -581,7 +586,7 @@ export default function EditCustomerPage() {
 
       <CustomerWorkflowSection title="پروژه‌ها">
         <div className="flex items-center justify-between mb-6">
-          <ErpPressable type="button" onClick={() => setProjects((prev) => [...prev, emptyProject()])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
+          <ErpPressable type="button" disabled={!canOperation('project_addresses_create')} onClick={() => setProjects((prev) => [...prev, emptyProject()])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
             <FaPlus />
             افزودن پروژه
           </ErpPressable>
@@ -593,24 +598,24 @@ export default function EditCustomerPage() {
             return (
               <ErpCard key={project.id || index} className="p-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <ErpInput aria-label={`نام پروژه ${visibleIndex + 1}`} placeholder="نام پروژه" value={project.projectName} onChange={(e) => updateProject(index, 'projectName', e.target.value)} />
-                  <ErpInput aria-label={`شهر پروژه ${visibleIndex + 1}`} placeholder="شهر" value={project.city} onChange={(e) => updateProject(index, 'city', e.target.value)} />
+                  <ErpInput disabled={Boolean(project.id) && !canOperation('project_addresses_edit')} aria-label={`نام پروژه ${visibleIndex + 1}`} placeholder="نام پروژه" value={project.projectName} onChange={(e) => updateProject(index, 'projectName', e.target.value)} />
+                  <ErpInput disabled={Boolean(project.id) && !canOperation('project_addresses_edit')} aria-label={`شهر پروژه ${visibleIndex + 1}`} placeholder="شهر" value={project.city} onChange={(e) => updateProject(index, 'city', e.target.value)} />
                   <EnhancedDropdown
-                    value={project.projectType}
+                    disabled={Boolean(project.id) && !canOperation('project_addresses_edit')} value={project.projectType}
                     onChange={(value) => updateProject(index, 'projectType', value)}
                     placeholder="انتخاب نوع پروژه"
                     options={[{ value: '', label: 'بدون نوع پروژه' }, ...PROJECT_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))]}
                     searchable
                     noOptionsText="نوع پروژه‌ای پیدا نشد"
                   />
-                  <ErpInput aria-label={`نام مدیر پروژه ${visibleIndex + 1}`} placeholder="نام مدیر پروژه" value={project.projectManagerName} onChange={(e) => updateProject(index, 'projectManagerName', e.target.value)} />
-                  <ErpInput aria-label={`شماره مدیر پروژه ${visibleIndex + 1}`} aria-invalid={!!errors.projects && !!validateOptionalIranianMobile(project.projectManagerNumber)} aria-describedby={errors.projects && validateOptionalIranianMobile(project.projectManagerNumber) ? 'customer-projects-error' : undefined} placeholder="شماره مدیر پروژه" value={project.projectManagerNumber} onChange={(e) => updateProject(index, 'projectManagerNumber', e.target.value)} />
-                  <ErpInput aria-label={`نام بازاریاب پروژه ${visibleIndex + 1}`} placeholder="نام بازاریاب" value={project.marketerFirstName} onChange={(e) => updateProject(index, 'marketerFirstName', e.target.value)} />
-                  <ErpInput aria-label={`نام خانوادگی بازاریاب پروژه ${visibleIndex + 1}`} placeholder="نام خانوادگی بازاریاب" value={project.marketerLastName} onChange={(e) => updateProject(index, 'marketerLastName', e.target.value)} />
-                  <ErpInput aria-label={`شماره بازاریاب پروژه ${visibleIndex + 1}`} aria-invalid={!!errors.projects && !!validateOptionalIranianMobile(project.marketerPhoneNumber)} aria-describedby={errors.projects && validateOptionalIranianMobile(project.marketerPhoneNumber) ? 'customer-projects-error' : undefined} placeholder="شماره تماس بازاریاب" value={project.marketerPhoneNumber} onChange={(e) => updateProject(index, 'marketerPhoneNumber', e.target.value)} />
-                  <ErpTextarea aria-label={`آدرس پروژه ${visibleIndex + 1}`} aria-invalid={!!errors.projects && !project.address.trim()} aria-describedby={errors.projects && !project.address.trim() ? 'customer-projects-error' : undefined} className="md:col-span-2" rows={2} placeholder="آدرس پروژه *" value={project.address} onChange={(e) => updateProject(index, 'address', e.target.value)} />
+                  <ErpInput disabled={Boolean(project.id) && !canOperation('project_addresses_edit')} aria-label={`نام مدیر پروژه ${visibleIndex + 1}`} placeholder="نام مدیر پروژه" value={project.projectManagerName} onChange={(e) => updateProject(index, 'projectManagerName', e.target.value)} />
+                  <ErpInput disabled={Boolean(project.id) && !canOperation('project_addresses_edit')} aria-label={`شماره مدیر پروژه ${visibleIndex + 1}`} aria-invalid={!!errors.projects && !!validateOptionalIranianMobile(project.projectManagerNumber)} aria-describedby={errors.projects && validateOptionalIranianMobile(project.projectManagerNumber) ? 'customer-projects-error' : undefined} placeholder="شماره مدیر پروژه" value={project.projectManagerNumber} onChange={(e) => updateProject(index, 'projectManagerNumber', e.target.value)} />
+                  <ErpInput disabled={Boolean(project.id) && !canOperation('project_addresses_edit')} aria-label={`نام بازاریاب پروژه ${visibleIndex + 1}`} placeholder="نام بازاریاب" value={project.marketerFirstName} onChange={(e) => updateProject(index, 'marketerFirstName', e.target.value)} />
+                  <ErpInput disabled={Boolean(project.id) && !canOperation('project_addresses_edit')} aria-label={`نام خانوادگی بازاریاب پروژه ${visibleIndex + 1}`} placeholder="نام خانوادگی بازاریاب" value={project.marketerLastName} onChange={(e) => updateProject(index, 'marketerLastName', e.target.value)} />
+                  <ErpInput disabled={Boolean(project.id) && !canOperation('project_addresses_edit')} aria-label={`شماره بازاریاب پروژه ${visibleIndex + 1}`} aria-invalid={!!errors.projects && !!validateOptionalIranianMobile(project.marketerPhoneNumber)} aria-describedby={errors.projects && validateOptionalIranianMobile(project.marketerPhoneNumber) ? 'customer-projects-error' : undefined} placeholder="شماره تماس بازاریاب" value={project.marketerPhoneNumber} onChange={(e) => updateProject(index, 'marketerPhoneNumber', e.target.value)} />
+                  <ErpTextarea disabled={Boolean(project.id) && !canOperation('project_addresses_edit')} aria-label={`آدرس پروژه ${visibleIndex + 1}`} aria-invalid={!!errors.projects && !project.address.trim()} aria-describedby={errors.projects && !project.address.trim() ? 'customer-projects-error' : undefined} className="md:col-span-2" rows={2} placeholder="آدرس پروژه *" value={project.address} onChange={(e) => updateProject(index, 'address', e.target.value)} />
                 </div>
-                <ErpPressable type="button" onClick={() => removeProject(index)} tone="danger" variant="ghost" className="mt-3 inline-flex items-center gap-2">
+                <ErpPressable type="button" disabled={Boolean(project.id) && !canOperation('project_addresses_delete')} onClick={() => removeProject(index)} tone="danger" variant="ghost" className="mt-3 inline-flex items-center gap-2">
                   <FaTrash />
                   حذف پروژه {visibleIndex + 1}
                 </ErpPressable>
@@ -625,7 +630,7 @@ export default function EditCustomerPage() {
 
       <CustomerWorkflowSection title="شماره‌های تماس">
         <div className="flex items-center justify-between mb-6">
-          <ErpPressable type="button" onClick={() => setPhones((prev) => [...prev, emptyPhone(prev.filter((phone) => phone.isActive).length === 0)])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
+          <ErpPressable type="button" disabled={!canOperation('phone_numbers_create')} onClick={() => setPhones((prev) => [...prev, emptyPhone(prev.filter((phone) => phone.isActive).length === 0)])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
             <FaPlus />
             افزودن شماره
           </ErpPressable>
@@ -636,7 +641,7 @@ export default function EditCustomerPage() {
             const index = phones.findIndex((item) => item === phone);
             return (
               <ErpCard key={phone.id || index} className="grid grid-cols-1 gap-4 p-4 md:grid-cols-4">
-                <ErpInput aria-label={`شماره تماس ${visibleIndex + 1}`} aria-invalid={!!errors.phones && !!validateRequiredIranianMobile(phone.number)} aria-describedby={errors.phones && validateRequiredIranianMobile(phone.number) ? 'customer-phones-error' : undefined} placeholder="شماره تماس *" value={phone.number} onChange={(e) => updatePhone(index, 'number', e.target.value)} />
+                <ErpInput disabled={Boolean(phone.id) && !canOperation('phone_numbers_edit')} aria-label={`شماره تماس ${visibleIndex + 1}`} aria-invalid={!!errors.phones && !!validateRequiredIranianMobile(phone.number)} aria-describedby={errors.phones && validateRequiredIranianMobile(phone.number) ? 'customer-phones-error' : undefined} placeholder="شماره تماس *" value={phone.number} onChange={(e) => updatePhone(index, 'number', e.target.value)} />
                 <EnhancedDropdown
                   value={phone.type}
                   onChange={(value) => updatePhone(index, 'type', value as PhoneType)}
@@ -648,8 +653,8 @@ export default function EditCustomerPage() {
                   ]}
                   searchable
                 />
-                <ErpCheckbox label="شماره اصلی" checked={phone.isPrimary} onChange={(e) => updatePhone(index, 'isPrimary', e.target.checked)} />
-                <ErpPressable type="button" onClick={() => removePhone(index)} tone="danger" variant="ghost" className="inline-flex items-center gap-2">
+                <ErpCheckbox disabled={Boolean(phone.id) && !canOperation('phone_numbers_edit')} label="شماره اصلی" checked={phone.isPrimary} onChange={(e) => updatePhone(index, 'isPrimary', e.target.checked)} />
+                <ErpPressable type="button" disabled={Boolean(phone.id) && !canOperation('phone_numbers_delete')} onClick={() => removePhone(index)} tone="danger" variant="ghost" className="inline-flex items-center gap-2">
                   <FaTrash />
                   حذف شماره {visibleIndex + 1}
                 </ErpPressable>
@@ -661,7 +666,7 @@ export default function EditCustomerPage() {
 
       <CustomerWorkflowSection title="مخاطبین">
         <div className="flex items-center justify-between mb-6">
-          <ErpPressable type="button" onClick={() => setContacts((prev) => [...prev, emptyContact()])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
+          <ErpPressable type="button" disabled={!canOperation('contacts_create')} onClick={() => setContacts((prev) => [...prev, emptyContact()])} tone="primary" variant="solid" className="inline-flex items-center gap-2 px-4 py-2">
             <FaPlus />
             افزودن مخاطب
           </ErpPressable>
@@ -673,16 +678,16 @@ export default function EditCustomerPage() {
             return (
               <ErpCard key={contact.id || index} className="p-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <ErpInput aria-label={`نام مخاطب ${visibleIndex + 1}`} aria-invalid={!!errors.contacts && !contact.firstName.trim()} aria-describedby={errors.contacts && !contact.firstName.trim() ? 'customer-contacts-error' : undefined} placeholder="نام *" value={contact.firstName} onChange={(e) => updateContact(index, 'firstName', e.target.value)} />
-                  <ErpInput aria-label={`نام خانوادگی مخاطب ${visibleIndex + 1}`} aria-invalid={!!errors.contacts && !contact.lastName.trim()} aria-describedby={errors.contacts && !contact.lastName.trim() ? 'customer-contacts-error' : undefined} placeholder="نام خانوادگی *" value={contact.lastName} onChange={(e) => updateContact(index, 'lastName', e.target.value)} />
-                  <ErpInput aria-label={`سمت مخاطب ${visibleIndex + 1}`} placeholder="سمت" value={contact.position} onChange={(e) => updateContact(index, 'position', e.target.value)} />
-                  <ErpInput aria-label={`ایمیل مخاطب ${visibleIndex + 1}`} placeholder="ایمیل" value={contact.email} onChange={(e) => updateContact(index, 'email', e.target.value)} />
-                  <ErpInput aria-label={`تلفن مخاطب ${visibleIndex + 1}`} placeholder="تلفن" value={contact.phone} onChange={(e) => updateContact(index, 'phone', e.target.value)} />
-                  <ErpInput aria-label={`موبایل مخاطب ${visibleIndex + 1}`} aria-invalid={!!errors.contacts && !!validateOptionalIranianMobile(contact.mobile)} aria-describedby={errors.contacts && validateOptionalIranianMobile(contact.mobile) ? 'customer-contacts-error' : undefined} placeholder="موبایل" value={contact.mobile} onChange={(e) => updateContact(index, 'mobile', e.target.value)} />
+                  <ErpInput disabled={Boolean(contact.id) && !canOperation('contacts_edit')} aria-label={`نام مخاطب ${visibleIndex + 1}`} aria-invalid={!!errors.contacts && !contact.firstName.trim()} aria-describedby={errors.contacts && !contact.firstName.trim() ? 'customer-contacts-error' : undefined} placeholder="نام *" value={contact.firstName} onChange={(e) => updateContact(index, 'firstName', e.target.value)} />
+                  <ErpInput disabled={Boolean(contact.id) && !canOperation('contacts_edit')} aria-label={`نام خانوادگی مخاطب ${visibleIndex + 1}`} aria-invalid={!!errors.contacts && !contact.lastName.trim()} aria-describedby={errors.contacts && !contact.lastName.trim() ? 'customer-contacts-error' : undefined} placeholder="نام خانوادگی *" value={contact.lastName} onChange={(e) => updateContact(index, 'lastName', e.target.value)} />
+                  <ErpInput disabled={Boolean(contact.id) && !canOperation('contacts_edit')} aria-label={`سمت مخاطب ${visibleIndex + 1}`} placeholder="سمت" value={contact.position} onChange={(e) => updateContact(index, 'position', e.target.value)} />
+                  <ErpInput disabled={Boolean(contact.id) && !canOperation('contacts_edit')} aria-label={`ایمیل مخاطب ${visibleIndex + 1}`} placeholder="ایمیل" value={contact.email} onChange={(e) => updateContact(index, 'email', e.target.value)} />
+                  <ErpInput disabled={Boolean(contact.id) && !canOperation('contacts_edit')} aria-label={`تلفن مخاطب ${visibleIndex + 1}`} placeholder="تلفن" value={contact.phone} onChange={(e) => updateContact(index, 'phone', e.target.value)} />
+                  <ErpInput disabled={Boolean(contact.id) && !canOperation('contacts_edit')} aria-label={`موبایل مخاطب ${visibleIndex + 1}`} aria-invalid={!!errors.contacts && !!validateOptionalIranianMobile(contact.mobile)} aria-describedby={errors.contacts && validateOptionalIranianMobile(contact.mobile) ? 'customer-contacts-error' : undefined} placeholder="موبایل" value={contact.mobile} onChange={(e) => updateContact(index, 'mobile', e.target.value)} />
                 </div>
                 <div className="mt-3 flex items-center gap-6">
-                  <ErpCheckbox label="مخاطب اصلی" checked={contact.isPrimary} onChange={(e) => updateContact(index, 'isPrimary', e.target.checked)} />
-                  <ErpPressable type="button" onClick={() => removeContact(index)} tone="danger" variant="ghost" className="inline-flex items-center gap-2">
+                  <ErpCheckbox disabled={Boolean(contact.id) && !canOperation('contacts_edit')} label="مخاطب اصلی" checked={contact.isPrimary} onChange={(e) => updateContact(index, 'isPrimary', e.target.checked)} />
+                  <ErpPressable type="button" disabled={Boolean(contact.id) && !canOperation('contacts_delete')} onClick={() => removeContact(index)} tone="danger" variant="ghost" className="inline-flex items-center gap-2">
                     <FaTrash />
                     حذف مخاطب {visibleIndex + 1}
                   </ErpPressable>
@@ -699,7 +704,7 @@ export default function EditCustomerPage() {
       <CustomerWorkflowSection title="کنترل دسترسی" collapsible>
         <div className="flex flex-wrap gap-4">
           <ErpPressable type="button"
-            onClick={() => updateField('isBlacklisted', !formData.isBlacklisted)}
+            disabled={!canOperation('customers_blacklist')} onClick={() => updateField('isBlacklisted', !formData.isBlacklisted)}
             tone={formData.isBlacklisted ? 'danger' : 'neutral'}
             variant={formData.isBlacklisted ? 'soft' : 'outline'}
             aria-pressed={formData.isBlacklisted}
@@ -708,7 +713,7 @@ export default function EditCustomerPage() {
             {formData.isBlacklisted ? 'در لیست سیاه' : 'خارج از لیست سیاه'}
           </ErpPressable>
           <ErpPressable type="button"
-            onClick={() => updateField('isLocked', !formData.isLocked)}
+            disabled={!canOperation('customers_lock')} onClick={() => updateField('isLocked', !formData.isLocked)}
             tone={formData.isLocked ? 'warning' : 'neutral'}
             variant={formData.isLocked ? 'soft' : 'outline'}
             aria-pressed={formData.isLocked}

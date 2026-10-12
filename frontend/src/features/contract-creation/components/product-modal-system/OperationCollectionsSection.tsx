@@ -150,7 +150,7 @@ function CatalogResults({
           >
             <span className="font-semibold">{item.name}</span>
             {showPricing && <span className="text-[var(--sds-text-muted)]">
-              {item.rateToman === undefined || item.rateToman === null
+              {(kind === 'finishing' && item.unit === 'meter') || item.rateToman === undefined || item.rateToman === null
                 ? 'نرخ ثبت نشده'
                 : `${formatPrice(item.rateToman)} / ${operationUnitLabel(item.unit)}`}
             </span>}

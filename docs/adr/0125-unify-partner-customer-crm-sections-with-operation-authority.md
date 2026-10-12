@@ -1,0 +1,13 @@
+---
+status: accepted
+---
+
+# Unify Partner customer CRM sections with scoped operation authority
+
+The product owner confirmed that an authorized CRM viewer must see the same four customer-detail sections for Partner-owned and internal Customers: Project Addresses, Contacts, Leads, and Contracts, including their empty states. Project Addresses, Contacts, and Leads offer create, edit, and delete actions according to the actor's exact effective operation permissions and authorized Customer scope. These actions never transfer Customer ownership. Customer Projects remain distinct from Potential Projects under ADR-0099.
+
+This extends ADR-0108's read-only Company Manager policy: an authorized manager may perform these CRM operations on a Partner Customer when the corresponding existing operation checkbox grants access. View-all alone remains insufficient to mutate anything. The existing `crm_project_addresses_{create,edit,delete}`, `crm_contacts_{view,create,edit,delete}`, and `crm_leads_{view,create,edit,delete}` permissions are used rather than introducing a second Partner permission set. Existing view-all eligibility, owner boundaries, business validation, audited atomic changes, concurrency protection, and explicit off decisions under ADR-0124 remain authoritative. This decision does not extend manager authority over Customer identity, blacklist, lock, permanent Customer-card deletion, or ownership transfer.
+
+The Contracts section shows contract number, date, status, and an authorized view action. Creating, editing, deleting, or cancelling Contracts from this CRM section is outside this change; the existing Partner sales lifecycle remains authoritative. `sales_contracts_view` is not permission to disclose private Partner economics. Private financial information may be shown only through the existing authorized Partner reporting projection, using `bi_partner_reports_view` for managerial reporting and checking the actual Case scope and purpose. Accounting read authority does not grant retail prices, margins, or Customer collections. A CRM view must not widen the audience of the linked Contract or its financial evidence.
+
+The trade-off is shared CRM presentation and operation permissions while retaining distinct Partner ownership and commercial boundaries. Copying the complete internal Customer response would expose private economics; retaining the reduced Partner card would prevent the agreed CRM work. These are accepted product decisions, not evidence of implementation, local acceptance, or production rollout. At the decision date, the Partner detail response still uses the reduced management projection; Lead edit/delete commands and the required per-operation Partner card checks require implementation.

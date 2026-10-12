@@ -1739,6 +1739,13 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const recoverableDrafts = context.recoverableDrafts?.length
     ? context.recoverableDrafts
     : context.recoverableDraft ? [context.recoverableDraft] : [];
+  const recoveryLabel = (item: typeof recoverableDrafts[number]) => {
+    if (item.customerContractNumber) return `قرارداد ${item.customerContractNumber.replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])}`;
+    const entry = readSessionEntry(context.actorId, item.recoveryId);
+    const customer = entry?.actorId === context.actorId && entry.recoveryId === item.recoveryId
+      ? context.customers.find(customer => customer.id === entry.customerId) : undefined;
+    return item.customerName || customer?.displayName || item.title || 'پیش‌نویس قرارداد';
+  };
   if (!runtime && !draftAccess && shouldOfferPartnerDraftChoice(recoverableDrafts.length, searchParams, freshInquiryRef.current)) {
     const latestDraft = recoverableDrafts[0];
     return <ErpNeumorphicWorkflowLayout title="ایجاد قرارداد">
@@ -1746,8 +1753,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         className="mb-4"
         pending={pending}
         preservePrevious={Boolean(latestDraft.caseId)}
-        draftLabel={latestDraft.trackingNumber ? `همکار-${latestDraft.trackingNumber.toLocaleString('fa-IR',
-          { useGrouping: false, minimumIntegerDigits: 5 })}` : latestDraft.title}
+        draftLabel={latestDraft.customerContractNumber ? recoveryLabel(latestDraft) : latestDraft.title}
         onResume={() => router.replace(`${mode === 'inquiry'
           ? '/dashboard/sales/partner-inquiries?'
           : '/dashboard/sales/contracts/create?'}${latestDraft.caseId
@@ -1759,8 +1765,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         <p className="font-semibold">سایر پرونده‌های ناتمام</p>
         <div className="flex flex-wrap gap-2">{recoverableDrafts.slice(1).map(item => <ErpButton
           key={item.recoveryId} variant="outline"
-          label={item.trackingNumber ? `ادامه همکار-${item.trackingNumber.toLocaleString('fa-IR',
-            { useGrouping: false, minimumIntegerDigits: 5 })}` : item.title || 'ادامه پیش‌نویس'}
+          label={`ادامه ${recoveryLabel(item)}`}
           onClick={() => router.replace(`${mode === 'inquiry'
             ? '/dashboard/sales/partner-inquiries?'
             : '/dashboard/sales/contracts/create?'}${item.caseId
@@ -1777,6 +1782,15 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         onClick={() => window.location.reload()} />}
     {error && <ErpInlineState kind="error" title={error} />}
   </section>;
+  // Numbering remounts this session. Keep its existing recovery and catalog
+  // effects running, but do not expose the default entry step before the saved
+  // wizard is ready. Explicit product edits use the entry editor instead.
+  if (mode === 'sale' && searchParams.get('caseId') && searchParams.get('configure') !== '1'
+      && (!wizard || !submission)) return <ErpNeumorphicWorkflowLayout title="ایجاد قرارداد همکار">
+    {error ? <ErpInlineState kind="error" title={error}
+      action={{ label: 'تلاش مجدد', onClick: () => window.location.reload() }} />
+      : <div role="status" aria-label="در حال بازیابی قرارداد" aria-busy="true"><ErpLoading /></div>}
+  </ErpNeumorphicWorkflowLayout>;
   const resumeWriteBlock = inactiveCaseCustomer
     ? 'مشتری این پرونده غیرفعال است. اطلاعات و مرحله قبلی حفظ شده‌اند؛ ثبت و ارسال تا رفع محدودیت مشتری امکان‌پذیر نیست.'
     : unvalidatedProductCheckpoint ? 'تغییرات ذخیره‌شده محصولات هنوز اعتبارسنجی نشده‌اند. نسخه معتبر قبلی نمایش داده می‌شود؛ برای ادامه، تغییرات محصولات را بررسی و ذخیره کنید.' : null;

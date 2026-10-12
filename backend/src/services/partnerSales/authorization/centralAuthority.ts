@@ -63,6 +63,7 @@ export async function readPartnerRouteAuthority(tx: Prisma.TransactionClient, ac
 function bridgeWithinExplicitReadScope(grant: { action: string; rootKind: string; purpose: string; scope: 'ASSIGNED' | 'COMPANY' },
   current: Awaited<ReturnType<typeof readScopedActions>>['grants'], explicit: Set<string>) {
   const readAction = grant.purpose === 'ACCOUNTING' && grant.action !== 'ACCOUNTING_READ' ? 'ACCOUNTING_READ'
+    : grant.purpose === 'CRM' && grant.action === 'CUSTOMER_WRITE' ? 'CUSTOMER_READ'
     : grant.purpose === 'FULFILLMENT' && grant.action !== 'FULFILLMENT_READ' ? 'FULFILLMENT_READ' : undefined;
   if (!readAction || !explicit.has(decisionKey({ ...grant, action: readAction }))) {
     return [{ ...grant, boundRootId: undefined, expiresAt: undefined }];

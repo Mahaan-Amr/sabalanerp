@@ -5,7 +5,7 @@ import type { PartnerCreationContext, PartnerCaseRuntimeResultSchema } from '@sa
 
 export type PartnerCaseIssue = NonNullable<ReturnType<typeof PartnerCaseRuntimeResultSchema.parse>['issues']>[number];
 export type PartnerRecoveryListRow = NonNullable<Extract<PartnerCreationContext, { kind: 'PARTNER' }>['recoverableDrafts']>[number];
-export type PartnerUnifiedListRow = { id: string; number: string; title: string; status: string; tone: ErpTone;
+export type PartnerUnifiedListRow = { id: string; number: string; customerName?: string; title: string; status: string; tone: ErpTone;
   case?: PartnerCaseRuntimeRow; issue?: PartnerCaseIssue; draft?: PartnerRecoveryListRow };
 
 export function partnerUnifiedCaseListPage(cases: readonly PartnerCaseRuntimeRow[], issues: readonly PartnerCaseIssue[],
@@ -13,25 +13,25 @@ export function partnerUnifiedCaseListPage(cases: readonly PartnerCaseRuntimeRow
   const known = new Set([...cases.map(row => row.view.owner.caseId), ...issues.map(row => row.caseId)]);
   const entries: PartnerUnifiedListRow[] = [
     ...cases.map(row => { const status = partnerCaseListTag(row.view, row.pricingResponseState, row.commercial);
-      return { id: row.view.owner.caseId, number: partnerCustomerLabel(row.view), title: row.view.products.map(item => item.description).join('، '),
+      return { id: row.view.owner.caseId, number: partnerCustomerLabel(row.view), customerName: row.customerName ?? row.customerOutput?.customer.displayName, title: row.view.products.map(item => item.description).join('، '),
         status, tone: partnerCaseListTags[status].tone, case: row }; }),
-    ...issues.map(issue => ({ id: issue.caseId, number: issue.customerContractNumber ?? partnerTrackingCode(issue.caseNumber, issue.trackingNumber),
+    ...issues.map(issue => ({ id: issue.caseId, number: issue.customerContractNumber ?? 'در انتظار شماره قرارداد',
       title: 'نیازمند بررسی', status: 'REVIEW', tone: 'warning' as const, issue })),
     ...drafts.filter(draft => !draft.caseId || !known.has(draft.caseId)).map(draft => ({
-      id: draft.caseId ?? draft.recoveryId, number: draft.trackingNumber ? String(draft.trackingNumber).padStart(5, '0') : 'بدون شماره',
+      id: draft.caseId ?? draft.recoveryId, number: draft.customerContractNumber ?? 'در انتظار شماره قرارداد', customerName: draft.customerName,
       title: draft.title ?? 'پیش‌نویس ایجاد قرارداد', status: 'RECOVERY', tone: 'neutral' as const, draft })),
   ];
   const normalize = (text: string) => text.toLocaleLowerCase('fa-IR').replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))).replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)));
   const needle = normalize(search.trim());
   const filtered = entries.filter(row => (tag === 'ALL' || row.status === tag) &&
-    (!needle || normalize(`${row.number} ${row.title} ${row.id}`).includes(needle)));
+    (!needle || normalize(`${row.number} ${row.customerName ?? ''} ${row.title} ${row.id} ${row.issue ? partnerTrackingCode(row.issue.caseNumber, row.issue.trackingNumber) : row.case ? partnerTrackingCode(row.case.view.caseNumber, row.case.view.trackingNumber) : ''}`).includes(needle)));
   const pageSize = 10, totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.max(1, Math.min(requestedPage, totalPages));
   return { rows: filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize), totalItems: filtered.length, totalPages, currentPage, pageSize };
 }
 
 function partnerCustomerLabel(view: PartnerCaseView) {
-  return view.customerContractNumber ?? partnerTrackingCode(view.caseNumber, view.trackingNumber);
+  return view.customerContractNumber ?? 'در انتظار شماره قرارداد';
 }
 
 export const partnerCaseListTags = {

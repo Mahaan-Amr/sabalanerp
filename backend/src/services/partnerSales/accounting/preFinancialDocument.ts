@@ -6,6 +6,7 @@ import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { projectPartnerInternalContent, partnerInternalPhysicalFacts } from './internalDocumentContent';
 import { withAccountingReadScope } from './readScope';
 import { prisma } from '../../../lib/prisma';
+import { partnerCustomerPrintSelect } from './customerPrintInformation';
 
 const object = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 
@@ -18,6 +19,7 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
   const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: {
     head: true, internalRecord: true, customerContract: true, trackingCode: true,
     profile: { include: { commercialAccount: true } },
+    customer: { select: partnerCustomerPrintSelect },
   } });
   if (!root?.internalRecord || !root.customerContract) return null;
   const commercial = await readPartnerCommercialState(tx, caseId);
@@ -47,14 +49,17 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
       customerContractNumber: root.customerContract.contractNumber, internalRecordNumber: root.internalRecord.recordNumber,
       partnerSellerId: root.profile.userId, commercialAccountId: root.profile.commercialAccount?.id ?? '',
       debtor: { displayName: String(object(parties.partner).displayName ?? '') },
-      endCustomer: { displayName: String(object(parties.customer).displayName ?? '') }, revision: root.headRevision,
+      endCustomer: { displayName: String(object(parties.customer).displayName ?? ''),
+        phone: typeof object(parties.customer).phone === 'string' ? object(parties.customer).phone : undefined }, revision: root.headRevision,
       actionUrl: `/dashboard/accounting/contracts/partner/${encodeURIComponent(caseId)}`, accountingWritable: false },
     ...content, items, contractDate: typeof context.contractDate === 'string' ? context.contractDate : undefined,
+    customerInformation: root.customer,
     project: context.project ? { title: String(object(context.project).title ?? ''), address: String(object(context.project).address ?? '') } : undefined,
     deliveries: (Array.isArray(context.deliveries) ? context.deliveries : []).map((value: unknown) => {
       const delivery = object(value);
       return { deliveryId: String(delivery.deliveryId), date: String(delivery.date), destination: String(delivery.destination),
         receiverName: typeof delivery.receiverName === 'string' ? delivery.receiverName : undefined,
+        projectManagerName: typeof delivery.projectManagerName === 'string' ? delivery.projectManagerName : undefined,
         items: (Array.isArray(delivery.items) ? delivery.items : []).map((value: unknown) => { const item = object(value);
           return { productRowId: String(item.productRowId), quantity: String(item.quantity) }; }) };
     }),

@@ -27,7 +27,7 @@ const workflow = (page: Page) => page.locator('main.sds-workspace.sds-neumorphic
 const next = (page: Page) => workflow(page).getByRole('button', { name: 'بعدی', exact: true });
 const previous = (page: Page) => workflow(page).getByRole('button', { name: 'قبلی', exact: true });
 
-for (const saveMode of ['normal', 'delayed', 'failure', 'missing checkpoint'] as const) test(`initial Partner inquiry persists its pricing step before numbering and survives immediate reload: ${saveMode}`, async ({ page }) => {
+for (const saveMode of ['normal', 'delayed', 'failure', 'missing checkpoint', 'restore failure'] as const) test(`initial Partner inquiry persists its pricing step before numbering and survives immediate reload: ${saveMode}`, async ({ page }) => {
   await loginAsAdmin(page);
   const state = await mockPartner(page, true);
   state.recoveryDraft = { schemaVersion: 1, inputRevision: 1, rows: [{
@@ -40,7 +40,7 @@ for (const saveMode of ['normal', 'delayed', 'failure', 'missing checkpoint'] as
   const { sabalanTotals: _wholesaleTotal, sabalanPaymentPlan: _wholesalePlan,
     resaleDifference: _difference, ...unpriced } = fixture.partner;
   const view = { ...unpriced, products: unpriced.products.map(({ wholesaleUnitPrice: _rate, wholesalePricing: _pricing, ...row }) => row),
-    state: 'DRAFT', pricingState: 'AWAITING_INQUIRY', preparationCompleted: false };
+    state: 'DRAFT', trackingNumber: 12, pricingState: 'AWAITING_INQUIRY', preparationCompleted: false };
   let creates = 0;
   let numberedWithoutRecovery = false;
   let rejectSave = saveMode === 'failure';
@@ -76,10 +76,20 @@ for (const saveMode of ['normal', 'delayed', 'failure', 'missing checkpoint'] as
     return route.fulfill({ json: { success: true, data: { commandId: command.commandId,
       replayed: false, case: view, eventIds: [] } } });
   });
-  await page.route('**/api/partner/cases/query-v2', route => route.fulfill({ json: { success: true,
-    data: { cases: [{ view, snapshotId: null, actions: { canContinue: true, canPreview: false,
-      canIssue: false, canFinalize: false, canSendConfirmation: false, canRequestCorrection: false,
-      canCancel: true, canRequestVoid: false } }] } } }));
+  let releaseRestore!: () => void;
+  let markRestoreRequested!: () => void;
+  const restoreGate = new Promise<void>(resolve => { releaseRestore = resolve; });
+  const restoreRequested = new Promise<void>(resolve => { markRestoreRequested = resolve; });
+  let restoreUnavailable = saveMode === 'restore failure';
+  await page.route('**/api/partner/cases/query-v2', async route => {
+    markRestoreRequested();
+    await restoreGate;
+    if (restoreUnavailable) return route.fulfill({ status: 503, json: { success: false, code: 'TEMPORARY_FAILURE' } });
+    return route.fulfill({ json: { success: true,
+      data: { cases: [{ view, snapshotId: null, actions: { canContinue: true, canPreview: false,
+        canIssue: false, canFinalize: false, canSendConfirmation: false, canRequestCorrection: false,
+        canCancel: true, canRequestVoid: false } }] } } });
+  });
   await page.route('**/api/partner/cases/approval-matches', route => route.fulfill({ json: { success: true,
     data: { schemaVersion: 1, recoveryId: oldRecoveryId, recoveryRevision: 1,
       rows: [], missingPricingSubjectIds: ['old-product'] } } }));
@@ -94,9 +104,40 @@ for (const saveMode of ['normal', 'delayed', 'failure', 'missing checkpoint'] as
   await expect.poll(() => creates).toBe(1);
   expect(numberedWithoutRecovery, 'the successful inquiry must already have a durable pricing step').toBe(false);
   await expect(page).toHaveURL(new RegExp(`caseId=${caseId}`));
+  await restoreRequested;
+  try {
+    await expect(page.getByText('پیش‌نمایش شماره احتمالی قرارداد همکار', { exact: true })).toHaveCount(0);
+    await expect(next(page)).toHaveCount(0);
+    await expect(page.getByRole('status', { name: 'در حال بازیابی قرارداد', exact: true })).toBeVisible();
+    if (saveMode === 'normal') {
+      for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const) {
+        await page.setViewportSize({ width, height: 900 });
+        await setTheme(page, theme);
+        await assertNoHorizontalOverflow(page);
+        await expect(page.getByRole('status', { name: 'در حال بازیابی قرارداد', exact: true })).toBeVisible();
+        await expect(next(page)).toHaveCount(0);
+        await page.screenshot({ path: `reports/qa/partner-restoration/loading-${width}-${theme}.png`, fullPage: true });
+      }
+    }
+  } finally { releaseRestore(); }
+  if (restoreUnavailable) {
+    await expect(workflow(page).getByText('بازیابی پرونده ذخیره‌شده انجام نشد؛ هیچ تغییری ثبت نشده است.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('status', { name: 'در حال بازیابی قرارداد', exact: true })).toHaveCount(0);
+    await expect(next(page)).toHaveCount(0);
+    restoreUnavailable = false;
+    await workflow(page).getByRole('button', { name: 'تلاش مجدد', exact: true }).click();
+  }
+  await expect(page.getByLabel('ایجاد پرونده فروش همکار').getByRole('heading', { name: 'استعلام قیمت', exact: true })).toBeVisible();
+  await expect(workflow(page).getByText('شماره پرونده: ۱۲', { exact: true })).toHaveCount(0);
+  await expect(workflow(page).getByText('شماره قرارداد: ' + view.customerContractNumber!.replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]), { exact: true })).toBeVisible();
+  await expect(page.getByText('همکار-۰۰۰۱۲', { exact: true })).toHaveCount(0);
+  if (saveMode === 'normal') {
+    await assertNoHorizontalOverflow(page);
+    await page.screenshot({ path: 'reports/qa/partner-restoration/pricing-390-dark.png', fullPage: true });
+  }
   await page.reload();
   await expect(workflow(page).getByText('بازیابی پرونده ذخیره‌شده انجام نشد؛ هیچ تغییری ثبت نشده است.', { exact: true })).toHaveCount(0);
-  await expect(workflow(page).getByRole('heading', { name: 'استعلام قیمت', exact: true })).toBeVisible();
+  await expect(page.getByLabel('ایجاد پرونده فروش همکار').getByRole('heading', { name: 'استعلام قیمت', exact: true })).toBeVisible();
   expect(creates).toBe(1);
 });
 
@@ -315,7 +356,14 @@ test('sidebar new-contract entry preserves the live draft choice without silentl
     json: { success: true, data: { allowed: true } },
   }));
   const state = await mockPartner(page, true);
-  await seedStale(page);
+  // Resume an entry draft. A legacy inquiry runtime can start automatic Case
+  // submission and make the previous-button assertion depend on its timing.
+  state.recoveryDraft = { schemaVersion: 1, inputRevision: 1, rows: [] };
+  await page.evaluate(({ key, entry }) => localStorage.setItem(key, JSON.stringify(entry)), {
+    key: `partner-creation-entry:${actorId}:${oldRecoveryId}`,
+    entry: { actorId, recoveryId: oldRecoveryId, baseRevision: 0, recoveryRevision: 1,
+      contractDate: '2026-10-12', customerId: oldCustomer.id, projectId: 'old-project', step: 'products' },
+  });
   await page.goto(`/dashboard/sales/contracts/create?draftId=${oldRecoveryId}`);
   await expect(previous(page)).toBeEnabled();
   await page.getByRole('navigation', { name: 'ناوبری فضای کاری' })
@@ -357,7 +405,10 @@ test('Partner payments have no discount editor and preserve the full balance thr
       items: [{ productRowId: 'old-product', quantity: '2' }] }],
     retailDiscount: { amount: '0', currency: 'IRT' }, belowCostConfirmed: false };
   await loginAsAdmin(page);
-  await mockPartner(page, true);
+  const recoveryState = await mockPartner(page, true);
+  // Exercise an editable saved Case, not an absent technical draft that the
+  // checkpoint harness turns into a newer, unvalidated revision.
+  recoveryState.recoveryDraft = { schemaVersion: 1, inputRevision: saved.inputRevision, rows: [] };
   await page.route('**/api/partner/cases/quote', route => {
     const { intent: quotedIntent } = route.request().postDataJSON();
     return route.fulfill({ json: { success: true, data: { schemaVersion: 1,
@@ -384,8 +435,7 @@ test('Partner payments have no discount editor and preserve the full balance thr
       updatedAt: new Date().toISOString() },
   } }));
   await page.goto(`/dashboard/sales/contracts/create?caseId=${caseId}`);
-  await workflow(page).getByRole('button', { name: 'مرحله بعدی', exact: true }).click();
-  await next(page).click();
+  await expect(workflow(page).getByRole('heading', { name: 'روش پرداخت', exact: true })).toBeVisible();
   const remaining = workflow(page).getByText('باقیمانده:', { exact: true }).locator('..');
   await expect(workflow(page).getByRole('textbox', { name: /تخفیف/ })).toHaveCount(0);
   await expect(workflow(page).getByRole('radio', { name: 'درصد', exact: true })).toHaveCount(0);
@@ -580,10 +630,15 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
 for (const width of [1280, 390]) test(`Partner unified contracts retain a damaged case and private recovery at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 });
   await loginAsAdmin(page);
+  // Route admission is part of this authorized Partner fixture. Do not depend
+  // on the local admin's persisted feature grants for a list/redirect UI test.
+  await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({
+    json: { success: true, data: { allowed: true } },
+  }));
   await mockPartner(page, true);
   const fixture = createPartnerFixtures();
   await page.route('**/api/partner/cases/query-v2', route => route.fulfill({ json: { success: true, data: {
-    cases: [{ view: { ...fixture.partner, trackingNumber: 11 }, snapshotId: null, actions: {
+    cases: [{ customerName: 'مشتری نمونه جدول', view: { ...fixture.partner, trackingNumber: 11, customerContractNumber: '100351' }, snapshotId: null, actions: {
       canContinue: false, canPreview: false, canIssue: false, canFinalize: false, canSendConfirmation: false,
       canRequestCorrection: false, canCancel: false, canRequestVoid: false } }],
     issues: [{ caseId: 'damaged-case', caseNumber: 'PC-damaged', trackingNumber: 10,
@@ -592,7 +647,12 @@ for (const width of [1280, 390]) test(`Partner unified contracts retain a damage
   await page.goto('/dashboard/sales/contracts');
   await expect(page.getByRole('heading', { name: 'قراردادهای فروش', exact: true })).toBeVisible();
   await expect(page.getByText('نیازمند بررسی', { exact: true }).filter({ visible: true }).first()).toBeVisible();
-  await expect(page.getByText('کد پیگیری ۰۰۰۱۰', { exact: false }).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText(/کد پیگیری/)).toHaveCount(0);
+  if (width >= 640) await expect(page.getByRole('columnheader', { name: 'نام مشتری', exact: true })).toBeVisible();
+  else await expect(page.getByText('نام مشتری', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText('مشتری نمونه جدول', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText('100351', { exact: true }).filter({ visible: true }).first()).toBeVisible();
+  await page.screenshot({ path: `reports/qa/partner-restoration/contract-list-${width}.png`, fullPage: true });
   await expect(page.getByRole('link', { name: 'ادامه تکمیل', exact: true }).filter({ visible: true }).first()).toHaveAttribute('href',
     `/dashboard/sales/contracts/create?draftId=${oldRecoveryId}`);
   await assertNoHorizontalOverflow(page);
@@ -763,4 +823,28 @@ for (const action of ['note', 'arrival', 'accept', 'review'] as const) test(`off
     await expect(workflow(page).getByRole('button', { name: 'رد قیمت و درخواست پیشنهاد مجدد', exact: true })).toBeVisible();
     await page.screenshot({ path: 'tmp/qa/partner-sales-2026-10-11/accepted-offer-actions.png', fullPage: true });
   }
+});
+
+for (const width of [1280, 390]) test(`unfinished Partner choices use customer names only before contract numbering at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 });
+  await loginAsAdmin(page);
+  await mockPartner(page);
+  await page.route('**/api/partner/cases/creation-context*', route => route.fulfill({ json: { success: true, data: {
+    schemaVersion: 1, kind: 'PARTNER', actorId, actorDisplayName: 'همکار آزمون', profileId: 'partner-entry-profile',
+    writable: true, inquiryIds: [], customers: [oldCustomer, newCustomer], projects,
+    recoverableDrafts: [
+      { recoveryId: oldRecoveryId, baseRevision: 0, updatedAt: new Date().toISOString(), title: 'پیش‌نویس قبلی' },
+      { recoveryId: 'numbered-draft', caseId: 'numbered-case', trackingNumber: 12,
+        customerContractNumber: '100351', customerName: 'نام نباید جای شماره بنشیند', baseRevision: 0, updatedAt: new Date().toISOString() },
+      { recoveryId: 'unnumbered-draft', caseId: 'unnumbered-case', trackingNumber: 13,
+        customerName: 'مشتری پیش از شماره‌گذاری', baseRevision: 0, updatedAt: new Date().toISOString() },
+    ],
+  } } }));
+  await page.goto('/dashboard/sales/contracts/create?entry=new-contract');
+  await expect(page.getByText('سایر پرونده‌های ناتمام', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ادامه قرارداد ۱۰۰۳۵۱', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ادامه مشتری پیش از شماره‌گذاری', exact: true })).toBeVisible();
+  await expect(page.getByText(/کد پیگیری|شماره پرونده:/)).toHaveCount(0);
+  await expect(page.getByText('نام نباید جای شماره بنشیند', { exact: false })).toHaveCount(0);
+  await assertNoHorizontalOverflow(page);
 });

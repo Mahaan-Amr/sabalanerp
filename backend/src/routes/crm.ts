@@ -1,3 +1,4 @@
+import { readPartnerCustomerCrm, mutatePartnerCustomerCrm, readPartnerCustomerContractFinance } from '../services/partnerCustomerCrm';
 import { customerCardVersion, updateAdminPartnerCustomerCard } from '../services/adminPartnerCustomerCard';
 import { canManageCustomerCredit, customerCreditBalance, updateCustomerCreditPolicy, CustomerCreditError } from '../services/specialCustomerCredit';
 import { customerManagementCapabilities, CustomerManagementError, previewCustomerDeletion, deleteCustomerInTransaction } from '../services/crmCustomerManagement';
@@ -58,7 +59,7 @@ const sendPartnerResult = (res: Response, result: Result<unknown>): void => {
 const partnerCrmEndpoint = (handler: (req: any, res: Response) => Promise<void>) =>
   async (req: any, res: Response, _next: NextFunction): Promise<void> => {
     try { await handler(req, res); }
-    catch { res.status(500).json({ success: false, code: 'INTERNAL_ERROR', error: 'Server error' }); }
+    catch (error) { if (error instanceof CustomerManagementError) { res.status(error.status).json({ success: false, code: error.code, error: error.message }); return; } res.status(500).json({ success: false, code: 'INTERNAL_ERROR', error: 'Server error' }); }
   };
 
 const isOwnerScopedUser = (req: any) => req?.user?.role && req.user.role !== 'ADMIN';
@@ -533,6 +534,12 @@ const ensureOwnershipOrDeny = async (
     return false;
   }
 
+  const partnerCard = await prisma.crmCustomer.findUnique({ where: { id: customer.id }, select: { partnerOwnerProfileId: true } });
+  if (partnerCard?.partnerOwnerProfileId) {
+    res.status(403).json({ success: false, error: 'تغییر مشتری همکار باید از مسیر مجاز مدیریت کارت انجام شود.' });
+    return false;
+  }
+
   if (
     isOwnerScopedUser(req) &&
     customer.ownerUserId !== req.user.id &&
@@ -737,6 +744,15 @@ router.post('/partner/contract-customers/:id/projects', protect, partnerCrmEndpo
   }));
 }));
 
+router.get('/partner/customers/:id/full-card', protect, partnerCrmEndpoint(async (req: any, res: Response) => {
+  if (!await prisma.partnerProfile.findUnique({ where: { userId: req.user.id }, select: { id: true } })) { res.status(403).json({ success: false, error: 'این مسیر مخصوص فروشنده همکار است.' }); return; }
+  const data = await prisma.$transaction(tx => readPartnerCustomerCrm(tx, req.user.id, req.params.id), { timeout: 30000 });
+  res.json({ success: true, data });
+}));
+router.put('/partner/customers/:id/full-card', protect, partnerCrmEndpoint(async (req: any, res: Response) => {
+  await updateAdminPartnerCustomerCard(prisma, req.user.id, req.params.id, 'EDIT', req.body, 'owner');
+  res.json({ success: true });
+}));
 router.put('/partner/customers/:id', protect, partnerCrmEndpoint(async (req: any, res: Response): Promise<void> => {
   const correlationId = partnerCorrelationId(req);
   sendPartnerResult(res, await partnerCrmForRequest(req, correlationId).updateCustomer({ ...req.body,
@@ -985,6 +1001,10 @@ const customerManagementEndpoint = (handler: (req: any) => Promise<unknown>) => 
 };
 router.put('/customers/:id/admin-card', protect, customerManagementEndpoint(async req =>
   managedCustomerResponse(await updateAdminPartnerCustomerCard(prisma, req.user.id, req.params.id, 'EDIT', req.body), true)));
+router.post('/customers/:id/crm-actions', protect, customerManagementEndpoint(req => prisma.$transaction(tx =>
+  mutatePartnerCustomerCrm(tx, req.user.id, req.params.id, req.body), { timeout: 30000 })));
+router.get('/customers/:id/contracts/:caseId/finance', protect, customerManagementEndpoint(req =>
+  readPartnerCustomerContractFinance(prisma, req.user.id, req.params.id, req.params.caseId)));
 router.get('/customers/:id/deletion-preview', protect, customerManagementEndpoint(req =>
   previewCustomerDeletion(prisma, req.user.id, req.params.id)));
 router.delete('/customers/:id', protect, customerManagementEndpoint(req => prisma.$transaction(tx =>
@@ -1018,7 +1038,11 @@ router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
       include: { contacts: true, phoneNumbers: true, projectAddresses: true,
         ownerUser: { select: { id: true, firstName: true, lastName: true, username: true } } } });
     if (!managed) { res.status(404).json({ success: false, error: 'Customer not found' }); return; }
-    if (managed.partnerOwnerProfileId || (req.user.role !== 'ADMIN' && managed.ownerUserId !== req.user.id && !(await canAssignCustomerOwner(req)))) {
+    if (managed.partnerOwnerProfileId) {
+      const data = await prisma.$transaction(tx => readPartnerCustomerCrm(tx, req.user.id, managed.id), { timeout: 30000 });
+      res.json({ success: true, data }); return;
+    }
+    if ((req.user.role !== 'ADMIN' && managed.ownerUserId !== req.user.id && !(await canAssignCustomerOwner(req)))) {
       res.json({ success: true, data: managedCustomerResponse(managed, Boolean(managed.partnerOwnerProfileId) && req.user.role === 'ADMIN') }); return;
     }
 
@@ -1095,6 +1119,7 @@ router.get('/customers/:id', protect, requireAnyFeatureAccess([FEATURES.CRM_CUST
       data: customer
     });
   } catch (error) {
+    if (error instanceof CustomerManagementError) { res.status(error.status).json({ success: false, code: error.code, error: error.message }); return; }
     console.error('Get CRM customer error:', error);
     res.status(500).json({
       success: false,
@@ -2410,6 +2435,10 @@ router.post('/leads', protect, requireWorkspaceAccess(WORKSPACES.CRM, WORKSPACE_
       probability
     } = req.body;
 
+    if (customerId) {
+      const customer = await prisma.crmCustomer.findUnique({ where: { id: customerId }, select: { id: true, ownerUserId: true } });
+      if (!await ensureOwnershipOrDeny(req, res, customer, 'lead-create')) return;
+    }
     const lead = await prisma.crmLead.create({
       data: {
         customerId,

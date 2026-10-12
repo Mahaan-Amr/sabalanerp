@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { readManagedCrmOperations } from '../../crmOperationAuthority';
 import { FEATURES } from '../../../middleware/feature';
 import { getEffectiveUserAccess, type EffectiveWorkspacePermission } from '../../../services/effectiveAccessService';
 import { readPartnerCommercialAccountingCapabilities } from '../accounting/capabilities';
@@ -88,6 +89,15 @@ export async function resolvePartnerWorkspaceAuthority(
     FEATURES.LOGISTICS_LOADINGS_FINALIZE, FEATURES.LOGISTICS_DRIVERS_MANAGE].map(feature => shared('logistics', feature)))).some(Boolean)
       || await shared('security', null)) {
     add({ action: 'FULFILLMENT_WRITE', rootKind: 'CASE', purpose: 'FULFILLMENT', scope: 'COMPANY' });
+  }
+
+  const crm = await readManagedCrmOperations(tx, actorId);
+  if (crm.visible) {
+    add({ action: 'CUSTOMER_READ', rootKind: 'CUSTOMER', purpose: 'CRM', scope: 'COMPANY' });
+    if ((await Promise.all(['project_addresses', 'contacts', 'leads'].flatMap(subject =>
+      ['create', 'edit', 'delete'].map(operation => crm.has(`crm_${subject}_${operation}`))))).some(Boolean)) {
+      add({ action: 'CUSTOMER_WRITE', rootKind: 'CUSTOMER', purpose: 'CRM', scope: 'COMPANY' });
+    }
   }
 
   if (atLeast(FEATURES.CRM_PARTNER_CUSTOMER_TRANSFERS_MANAGE, 'edit')) {

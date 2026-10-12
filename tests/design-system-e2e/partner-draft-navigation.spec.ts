@@ -97,6 +97,13 @@ test('saved draft destination requests and displays only the newly saved Case de
 
 test('Partner draft list tags filter all records before ten-item pagination and search resets the page', async ({ page }) => {
   await loginAsAdmin(page);
+  await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({
+    json: { success: true, data: { allowed: true } },
+  }));
+  await page.route('**/api/partner/cases/creation-context*', route => route.fulfill({ json: { success: true, data: {
+    schemaVersion: 1, kind: 'PARTNER', actorId: 'partner-pagination-test', profileId: 'partner-pagination-profile',
+    writable: true, inquiryIds: [], recoverableDrafts: [], customers: [], projects: [],
+  } } }));
   const fixture = createPartnerFixtures();
   const cases = Array.from({ length: 23 }, (_, index) => {
     const view = { ...fixture.partner, state: 'DRAFT', caseNumber: `draft-page-${index}`,
@@ -127,7 +134,7 @@ test('Partner draft list tags filter all records before ten-item pagination and 
   await expect(page.getByRole('button', { name: 'قبلی', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'بعدی', exact: true }).click();
   await expect(table.getByRole('row')).toHaveCount(3);
-  await page.getByPlaceholder('شماره قرارداد، پرونده یا محصول...').fill('draft-page-22');
+  await page.getByPlaceholder('نام مشتری، شماره قرارداد یا محصول...').fill('draft-page-22');
   await expect(table.getByRole('row')).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'قبلی', exact: true })).toBeDisabled();
   await page.getByLabel('وضعیت پرونده', { exact: true }).click();

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
+import { PartnerCaseRuntimeRowSchema } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
 import { partnerCaseListPage, partnerCaseListTag, partnerUnifiedCaseListPage } from '../cases/partnerCaseList';
 const fixture = createPartnerFixtures();
@@ -61,4 +62,18 @@ test('current response tags drive filtering without changing accepted or termina
   assert.equal(partnerCaseListTag(offered.view, 'REJECTED'), 'INCOMPLETE');
   assert.equal(partnerCaseListTag(offered.view, 'EXPIRED'), 'EXPIRED');
   assert.equal(partnerCaseListTag({ ...offered.view, state: 'COMMITTED' }, 'EXPIRED'), 'COMMITTED');
+});
+
+test('contract rows show only the allocated contract number and search the customer name', () => {
+  const row = { ...rows[0], customerName: 'مشتری ثبت‌شده', view: { ...rows[0].view,
+    trackingNumber: 12, customerContractNumber: '100351' } };
+  const numbered = partnerUnifiedCaseListPage([row], [], [], '', 'ALL', 1).rows[0];
+  assert.equal(numbered.number, '100351');
+  assert.equal(numbered.customerName, 'مشتری ثبت‌شده');
+  assert.equal(PartnerCaseRuntimeRowSchema.safeParse({ ...row, customerName: 'الف'.repeat(100) }).success, true,
+    'display metadata must retain the existing party-name length contract');
+  assert.equal(partnerUnifiedCaseListPage([row], [], [], 'مشتری ثبت‌شده', 'ALL', 1).totalItems, 1);
+  const { customerContractNumber: _number, ...unnumbered } = row.view;
+  assert.equal(partnerUnifiedCaseListPage([{ ...row, view: unnumbered }], [], [], '', 'ALL', 1).rows[0].number,
+    'در انتظار شماره قرارداد');
 });

@@ -3,6 +3,36 @@ import test from 'node:test';
 import { renderPartnerInternalDocumentHtml, partnerInternalPrintInput } from '../partnerSales/accounting/internalDocument';
 import { projectPartnerInternalContent } from '../partnerSales/accounting/internalDocumentContent';
 
+test('Partner customer section prints saved identity and delivery managers, with double-dash missing values', () => {
+  const document = { amount: '100', currency: 'IRT', createdAt: new Date('2026-10-12'),
+    partnerContext: { customerContractNumber: '100697', internalRecordNumber: 'PI-100697',
+      debtor: { displayName: 'همکار خصوصی' }, endCustomer: { displayName: 'مشتری', phone: '09120000000' } },
+    customerInformation: { nationalCode: '0012345678', companyName: '<شرکت مشتری>', brandName: 'برند جایگزین',
+      projectManagerName: 'مدیر ثبت‌شده مشتری', projectManagerNumber: '09121112233' },
+    items: [], deliveries: [
+      { date: '2026-10-13', destination: 'پروژه', projectManagerName: 'مدیر تحویل اول', receiverName: 'گیرنده جداگانه', items: [] },
+      { date: '2026-10-14', destination: 'پروژه', projectManagerName: 'مدیر تحویل دوم', items: [] },
+      { date: '2026-10-15', destination: 'پروژه', projectManagerName: 'مدیر تحویل اول', items: [] },
+    ] };
+  const section = (value: unknown) => renderPartnerInternalDocumentHtml(value as Parameters<typeof partnerInternalPrintInput>[0])
+    .match(/<h2>مشخصات مشتری و پروژه<\/h2>([\s\S]*?)<\/section>/)?.[1] || '';
+  const rendered = section(document);
+  assert.match(rendered, /کد ملی:<\/strong> ۰۰۱۲۳۴۵۶۷۸/);
+  assert.match(rendered, /نام برند\/شرکت:<\/strong> &lt;شرکت مشتری&gt;/);
+  assert.match(rendered, /مدیر پروژه:<\/strong> مدیر تحویل اول، مدیر تحویل دوم/);
+  assert.match(rendered, /شماره مدیر پروژه:<\/strong> ۰۹۱۲۱۱۱۲۲۳۳/);
+  assert.doesNotMatch(rendered, /همکار خصوصی|گیرنده جداگانه|مدیر ثبت‌شده مشتری|برند جایگزین/);
+  const brandOnly = { ...document, deliveries: [], customerInformation: { ...document.customerInformation, companyName: '  ' } };
+  assert.match(section(brandOnly), /نام برند\/شرکت:<\/strong> برند جایگزین/);
+  assert.match(section(brandOnly), /مدیر پروژه:<\/strong> مدیر ثبت‌شده مشتری/);
+  const missing = { ...document, customerInformation: { nationalCode: ' ', companyName: '', brandName: null, projectManagerName: '', projectManagerNumber: ' ' },
+    partnerContext: { ...document.partnerContext, endCustomer: { displayName: 'مشتری', phone: '' } },
+    deliveries: [{ date: '2026-10-13', destination: '', projectManagerName: ' ', receiverName: 'گیرنده جداگانه', items: [] }] };
+  for (const label of ['کد ملی', 'نام برند/شرکت', 'شماره تماس', 'مدیر پروژه', 'شماره مدیر پروژه']) {
+    assert.ok(section(missing).includes(`${label}:</strong> --`), `${label} must show -- when missing`);
+  }
+});
+
 test('internal document recovers frozen Sabalan rows even when invoice items are absent', () => {
   const content = projectPartnerInternalContent({ partnerPreparation: {
     owner: { caseId: 'case-1', revision: 1, integrityHash: `sha256-v1:${'a'.repeat(64)}` },
@@ -28,7 +58,7 @@ test('internal Partner PDF uses the Sabalan debtor and amount without leaking re
     createdAt: new Date('2026-09-26T00:00:00Z'), systemInvoiceNumber: '100329',
     partnerContext: { caseId: 'case-1', caseNumber: 'PC-secret', customerContractNumber: '100329',
       internalRecordNumber: 'PI-100329', debtor: { displayName: 'فروشنده همکار' },
-      endCustomer: { displayName: '<مشتری نهایی>' }, revision: 1, actionUrl: '/private' },
+      endCustomer: { displayName: '<مشتری نهایی>', phone: '09120000000' }, revision: 1, actionUrl: '/private' },
     items: [{ description: '<سنگ>', quantity: '2', unitPrice: '6000000', totalPrice: '12000000', unit: 'count', details: ['تعداد: 2', 'لایه: دوبل · جلو'] }],
     technicalEvidenceAvailable: true, deliveries: [],
     receivables: [], taxRecords: [], flags: [],
@@ -37,6 +67,15 @@ test('internal Partner PDF uses the Sabalan debtor and amount without leaking re
   const html = renderPartnerInternalDocumentHtml(document as unknown as Parameters<typeof renderPartnerInternalDocumentHtml>[0]);
   assert.match(html, /طرف‌حساب سبلان: فروشنده همکار/);
   assert.match(html, /مشتری نهایی مرتبط: &lt;مشتری نهایی&gt;/);
+  const customerSection = html.match(/<h2>مشخصات مشتری و پروژه<\/h2>([\s\S]*?)<\/section>/)?.[1] || '';
+  assert.match(customerSection, /نام مشتری:<\/strong> &lt;مشتری نهایی&gt;/);
+  assert.match(customerSection, /شماره تماس:<\/strong> ۰۹۱۲۰۰۰۰۰۰۰/);
+  assert.match(customerSection, /نام برند\/شرکت:<\/strong> --/);
+  assert.doesNotMatch(customerSection, /فروشنده همکار/);
+  const noPhoneDocument = { ...document, partnerContext: { ...document.partnerContext,
+    endCustomer: { displayName: document.partnerContext.endCustomer.displayName } } };
+  const noPhoneHtml = renderPartnerInternalDocumentHtml(noPhoneDocument as unknown as Parameters<typeof renderPartnerInternalDocumentHtml>[0]);
+  assert.match(noPhoneHtml, /شماره تماس:<\/strong> --/);
   assert.match(html, /&lt;سنگ&gt;/);
   assert.match(html, /لایه: دوبل · جلو/);
   assert.match(html, /۲/);
@@ -51,6 +90,12 @@ test('internal Partner PDF uses the Sabalan debtor and amount without leaking re
   for (const variant of ['original', 'accounting', 'workshop', 'custom'] as const) {
     const rendered = renderPartnerInternalDocumentHtml(document as unknown as Parameters<typeof renderPartnerInternalDocumentHtml>[0], { variant });
     assert.doesNotMatch(rendered, /PRIVATE_RETAIL_PRICE|PRIVATE_PAYMENT_PLAN|PC-secret|\/private/);
+    const section = rendered.match(/<h2>مشخصات مشتری و پروژه<\/h2>([\s\S]*?)<\/section>/)?.[1];
+    if (variant !== 'workshop') {
+      assert.match(section || '', /نام مشتری:<\/strong> &lt;مشتری نهایی&gt;/);
+      assert.match(section || '', /شماره تماس:<\/strong> ۰۹۱۲۰۰۰۰۰۰۰/);
+      assert.doesNotMatch(section || '', /فروشنده همکار/);
+    }
     if (variant === 'workshop') assert.doesNotMatch(rendered, /120000000|۱۲۰٬۰۰۰٬۰۰۰|۶۰٬۰۰۰٬۰۰۰/);
     else {
       assert.match(rendered, /<th>نرخ - ریال<\/th>/);

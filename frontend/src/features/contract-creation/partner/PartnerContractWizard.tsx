@@ -16,7 +16,7 @@ import { partnerCaseReviewMessage, partnerDeliveryPlanIssue } from './partnerWiz
 import { partnerSalesActionFeedback } from '../../partner-sales/partnerSalesErrorMessage';
 import { contractCorrectionBannerTitle } from '../services/contractCorrectionPresentation';
 import { formatPartnerMoney } from '../../partner-sales/presentation';
-import { partnerCommercialLabels, partnerTrackingCode, type PartnerCommercialState, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
+import { partnerCommercialLabels, partnerCustomerContractLabel, type PartnerCommercialState, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 
 export type PartnerWizardStep = 'date' | 'customer' | 'project' | 'products' | 'pricing' | 'delivery' | 'payment' | 'confirmation';
 export interface PartnerWizardDraft {
@@ -443,7 +443,8 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
         action={{ label: 'مشاهده وظایف فروش', href: '/dashboard/sales/duties' }} />
         : correctionReason && <ErpInlineState kind="stale" title={contractCorrectionBannerTitle(correctionReason)} />}
       {['pricing', 'confirmation'].includes(draft.step) && result.case && compactStatus && <ErpCard className="flex flex-wrap items-center gap-2 p-2">
-        <span className="text-sm font-bold">{partnerTrackingCode(result.case.caseNumber, result.case.trackingNumber)}</span>
+        <span className="text-sm font-bold">{result.case.customerContractNumber
+          ? `شماره قرارداد: ${partnerCustomerContractLabel('', result.case.customerContractNumber)}` : 'قرارداد فروش همکار'}</span>
         <ErpBadge tone="neutral">قرارداد: {compactStatus.contract}</ErpBadge>
         <ErpBadge tone={pricingReady || result.case.pricingState === 'READY_TO_FINALIZE' ? 'success' : rejectedRows.length ? 'danger' : 'warning'}>
           قیمت سبلان: {pricingStatus}

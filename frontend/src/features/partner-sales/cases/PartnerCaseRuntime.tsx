@@ -15,7 +15,6 @@ import {
   readPartnerCorrection, recordPartnerCollection, requestPartnerCorrection, reversePartnerCollection,
   savePartnerRetailCorrection, sendPartnerConfirmation, type PartnerCaseRuntimeRow,
 } from './partnerCaseHttpPort';
-import { partnerCustomerContractLabel, partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
 import { assertSuccessfulSalesResult, getSalesOperationalErrorKind, getSalesOperationalErrorMessage, normalizeSalesBlobError } from '@/features/sales/salesOperationalError';
@@ -182,10 +181,10 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
     const columns: ErpColumn<PartnerUnifiedListRow>[] = [
       { id: 'number', header: 'قرارداد', priority: 'primary', cell: row => <div>
         <strong>{row.number}</strong>
-        {row.case?.view.customerContractNumber && <p className="sds-text-secondary mt-1 text-xs">کد پیگیری {partnerTrackingCode(row.case.view.caseNumber, row.case.view.trackingNumber)}</p>}
-        {row.issue && <p className="sds-text-secondary mt-1 text-xs">نیازمند بررسی · کد پیگیری {partnerTrackingCode(row.issue.caseNumber, row.issue.trackingNumber)}</p>}
+        {row.issue && <p className="sds-text-secondary mt-1 text-xs">نیازمند بررسی</p>}
         {row.draft && <p className="sds-text-secondary mt-1 text-xs">{row.title}</p>}
       </div> },
+      { id: 'customer', header: 'نام مشتری', priority: 'secondary', cell: row => row.customerName || '—' },
       { id: 'status', header: 'وضعیت', priority: 'secondary', cell: row => <ErpBadge tone={row.tone}>
         {row.status === 'REVIEW' ? 'نیازمند بررسی' : row.status === 'RECOVERY' ? 'پیش‌نویس ایجاد قرارداد' : partnerCaseListTags[row.status as keyof typeof partnerCaseListTags].label}
       </ErpBadge> },
@@ -207,7 +206,7 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
       actions={[{ label: 'ثبت قرارداد', icon: FaPlus, href: '/dashboard/sales/contracts/create' },
         { label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' }]}
       filters={[{ id: 'search', label: 'جستجو', type: 'search', value: search,
-        onChange: value => { setSearch(value); setPage(1); }, placeholder: 'شماره قرارداد، پرونده یا محصول...' },
+        onChange: value => { setSearch(value); setPage(1); }, placeholder: 'نام مشتری، شماره قرارداد یا محصول...' },
         { id: 'tag', label: 'وضعیت پرونده', type: 'select', value: tag,
           options: [{ label: 'همه وضعیت‌ها', value: 'ALL' }, { label: 'نیازمند بررسی', value: 'REVIEW' }, { label: 'پیش‌نویس ایجاد قرارداد', value: 'RECOVERY' }, ...Object.entries(partnerCaseListTags).map(([value, status]) => ({ value, label: status.label }))],
           onChange: value => { setTag(value); setPage(1); } }]}

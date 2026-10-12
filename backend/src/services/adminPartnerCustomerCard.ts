@@ -1,3 +1,5 @@
+import { requireManagedCrmOperation } from './crmOperationAuthority';
+import { createAuditedPartnerAuthorization } from './partnerSales/authorization/audited';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
@@ -9,12 +11,12 @@ const text = z.string().trim().nullable().optional();
 const mobile = text.transform(value => value === undefined ? undefined : value ? digits(value) : null).refine(value => !value || /^09\d{9}$/.test(value), 'شماره موبایل نامعتبر است.');
 const phone = z.object({ id: z.string().optional(), number: z.string().transform(digits), type: z.enum(['mobile', 'home', 'work', 'other']),
   isPrimary: z.boolean(), isActive: z.boolean() }).strict().refine(value => !value.isActive || /^09\d{9}$/.test(value.number), 'شماره تماس فعال باید موبایل معتبر باشد.');
-const project = z.object({ id: z.string().optional(), address: z.string().trim(), city: text, postalCode: text,
+export const partnerCardProjectSchema = z.object({ id: z.string().optional(), address: z.string().trim(), city: text, postalCode: text.transform(value => value ? digits(value) : value),
   projectName: text, projectType: text, projectManagerName: text, projectManagerNumber: mobile,
   marketerFirstName: text, marketerLastName: text, marketerPhoneNumber: mobile, isActive: z.boolean() }).strict()
   .refine(value => !value.isActive || value.address.length > 0, 'نشانی پروژه الزامی است.');
-const contact = z.object({ id: z.string().optional(), firstName: z.string().trim(), lastName: z.string().trim(),
-  position: text, email: text, phone: text, mobile, isPrimary: z.boolean(), isActive: z.boolean() }).strict()
+export const partnerCardContactSchema = z.object({ id: z.string().optional(), firstName: z.string().trim(), lastName: z.string().trim(),
+  position: text, email: text.refine(value => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value), 'ایمیل نامعتبر است.'), phone: text.transform(value => value ? digits(value) : value), mobile, isPrimary: z.boolean(), isActive: z.boolean() }).strict()
   .refine(value => !value.isActive || Boolean(value.firstName && value.lastName), 'نام مخاطب الزامی است.');
 const card = z.object({
   expectedRevision: z.number().int().positive().optional(), expectedCardVersion: z.string().optional(),
@@ -24,7 +26,7 @@ const card = z.object({
   homeAddress: text, homeNumber: text, workAddress: text, workNumber: text,
   projectManagerName: text, projectManagerNumber: mobile, referrerFirstName: text, referrerLastName: text, referrerPhoneNumber: mobile,
   isBlacklisted: z.boolean().optional(), isLocked: z.boolean().optional(),
-  projects: z.array(project).max(500).optional(), phones: z.array(phone).max(500).optional(), contacts: z.array(contact).max(500).optional(),
+  projects: z.array(partnerCardProjectSchema).max(500).optional(), phones: z.array(phone).max(500).optional(), contacts: z.array(partnerCardContactSchema).max(500).optional(),
 }).strict();
 
 export function customerCardVersion(customer: { updatedAt: Date | string; partnerRevision: number | null;
@@ -36,7 +38,7 @@ export function customerCardVersion(customer: { updatedAt: Date | string; partne
 }
 
 export async function updateAdminPartnerCustomerCard(database: PrismaClient, actorId: string, customerId: string,
-  operation: 'EDIT' | 'BLACKLIST' | 'LOCK', raw: unknown = {}) {
+  operation: 'EDIT' | 'BLACKLIST' | 'LOCK', raw: unknown = {}, mode: 'admin' | 'owner' = 'admin') {
   if (operation !== 'EDIT' && (!raw || typeof raw !== 'object' || Object.keys(raw).length)) {
     throw new CustomerManagementError(400, 'INVALID_CUSTOMER_CARD', 'این اقدام فقط وضعیت مشتری را تغییر می‌دهد.');
   }
@@ -45,7 +47,8 @@ export async function updateAdminPartnerCustomerCard(database: PrismaClient, act
   return database.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM users WHERE id = ${actorId} FOR UPDATE`;
     const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
-    if (!actor?.isActive || actor.role !== 'ADMIN' || await tx.partnerProfile.findUnique({ where: { userId: actorId }, select: { id: true } })) {
+    const partnerActor = await tx.partnerProfile.findUnique({ where: { userId: actorId }, select: { id: true, state: true } });
+    if (!actor?.isActive || (mode === 'admin' ? actor.role !== 'ADMIN' || Boolean(partnerActor) : !partnerActor || partnerActor.state !== 'ACTIVE')) {
       throw new CustomerManagementError(403, 'ADMIN_CUSTOMER_CARD_REQUIRED', 'مدیریت کارت مشتری همکار فقط برای Admin مجاز است.');
     }
     const initial = await tx.crmCustomer.findUnique({ where: { id: customerId }, select: { partnerOwnerProfileId: true } });
@@ -56,9 +59,30 @@ export async function updateAdminPartnerCustomerCard(database: PrismaClient, act
     const customer = await tx.crmCustomer.findUniqueOrThrow({ where: { id: customerId }, include: { phoneNumbers: true, contacts: true, projectAddresses: true } });
     if (customer.cardDeletedAt) throw new CustomerManagementError(404, 'CUSTOMER_NOT_FOUND', 'کارت مشتری حذف شده است.');
     if (customer.partnerOwnerProfileId !== initial.partnerOwnerProfileId) throw new CustomerManagementError(409, 'CUSTOMER_CARD_STALE', 'مالک مشتری تغییر کرده است؛ اطلاعات را دوباره دریافت کنید.');
+    if (mode === 'owner' && customer.partnerOwnerProfileId !== partnerActor?.id) throw new CustomerManagementError(403, 'CUSTOMER_CARD_FORBIDDEN', 'این مشتری متعلق به شما نیست.');
     const { expectedRevision, expectedCardVersion, projects, phones, contacts, ...patch } = parsed.data;
     if (operation === 'EDIT' && (expectedRevision !== customer.partnerRevision || expectedCardVersion !== customerCardVersion(customer))) {
       throw new CustomerManagementError(409, 'CUSTOMER_CARD_STALE', 'اطلاعات مشتری تغییر کرده است؛ دوباره دریافت کنید.');
+    }
+    const requireOperation = async (feature: string) => {
+      if (mode === 'admin') return requireManagedCrmOperation(tx, actorId, feature);
+      const off = await tx.featurePermission.findUnique({ where: { userId_workspace_feature: { userId: actorId, workspace: 'crm', feature } } });
+      if (off?.isActive && off.permissionLevel === 'none' && (!off.expiresAt || off.expiresAt > new Date())) throw new CustomerManagementError(403, 'CRM_OPERATION_FORBIDDEN', 'مجوز این عملیات فعال نیست.');
+    };
+    if (operation !== 'EDIT') await requireOperation(operation === 'LOCK' ? 'crm_customers_lock' : 'crm_customers_blacklist');
+    else {
+      const identityChanged = Object.entries(patch).some(([key, value]) => !['isBlacklisted', 'isLocked'].includes(key) && (customer as any)[key] !== value && !((customer as any)[key] == null && value === ''));
+      if (identityChanged) await requireOperation('crm_customers_edit');
+      if ('isBlacklisted' in patch && patch.isBlacklisted !== customer.isBlacklisted) await requireOperation('crm_customers_blacklist');
+      if ('isLocked' in patch && patch.isLocked !== customer.isLocked) await requireOperation('crm_customers_lock');
+      for (const [subject, rows, existing] of [ ['project_addresses', projects, customer.projectAddresses], ['contacts', contacts, customer.contacts], ['phone_numbers', phones, customer.phoneNumbers] ] as const) {
+        for (const row of rows || []) {
+          const before = existing.find(entry => entry.id === row.id);
+          if (!row.id && row.isActive) await requireOperation(`crm_${subject}_create`);
+          else if (before && before.isActive && !row.isActive) await requireOperation(`crm_${subject}_delete`);
+          else if (before && Object.entries(row).some(([key, value]) => (before as any)[key] !== value && !((before as any)[key] == null && value === ''))) await requireOperation(`crm_${subject}_edit`);
+        }
+      }
     }
     const nationalCode = patch.nationalCode ? digits(patch.nationalCode) : null;
     if ('nationalCode' in patch && nationalCode && nationalCode.length !== ((patch.customerType || customer.customerType) === 'Individual' ? 10 : 11)) {
@@ -80,6 +104,9 @@ export async function updateAdminPartnerCustomerCard(database: PrismaClient, act
     if (witnesses.length && await tx.crmCustomer.findFirst({ where: { id: { not: customerId }, isActive: true, OR: witnesses }, select: { id: true } })) {
       throw new CustomerManagementError(409, 'DUPLICATE_CUSTOMER', 'شماره تماس یا شناسه برای مشتری دیگری ثبت شده است.');
     }
+    const access = await createAuditedPartnerAuthorization(tx, { actorId, purpose: 'CRM', channel: 'API' }, { correlationId: randomUUID() })
+      .authorize(mode === 'owner' ? 'CUSTOMER_WRITE' : 'CUSTOMER_READ', { kind: 'CUSTOMER', id: customerId });
+    if (!access.ok) throw new CustomerManagementError(access.error.status, access.error.code, access.error.message);
     await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${customer.partnerOwnerProfileId}, true)`;
     for (const row of projects || []) {
       const { id, ...data } = row;
@@ -106,8 +133,8 @@ export async function updateAdminPartnerCustomerCard(database: PrismaClient, act
       partnerRevision: { increment: 1 }, updatedBy: actorId,
     } });
     await appendAuthorizationDecision(tx, { domain: 'CRM', actorId, action: `ADMIN_CUSTOMER_CARD_${operation}`,
-      rootKind: 'CUSTOMER', rootId: customerId, purpose: 'CRM', channel: 'API', allowed: true, isAdmin: true,
-      code: 'UPDATED', scope: 'CUSTOMER_CARD', reason: 'مدیریت کارت مشتری همکار توسط Admin', correlationId: randomUUID(),
+      rootKind: 'CUSTOMER', rootId: customerId, purpose: 'CRM', channel: 'API', allowed: true, isAdmin: actor.role === 'ADMIN',
+      code: 'UPDATED', scope: 'CUSTOMER_CARD', reason: mode === 'owner' ? 'مدیریت کارت مشتری توسط فروشنده همکار مالک' : 'مدیریت کارت مشتری همکار توسط Admin', correlationId: randomUUID(),
       authorizationRevision: null, lifecycleRevision: customer.partnerRevision, assignmentId: null, assignmentRevision: null,
       evaluatedAt: new Date(), evaluatedGrantIds: [] });
     return tx.crmCustomer.findUniqueOrThrow({ where: { id: customerId }, include: { phoneNumbers: true, contacts: true, projectAddresses: true,

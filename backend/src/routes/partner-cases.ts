@@ -176,14 +176,21 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const editableOwnedCases = boundCaseIds.length ? await tx.partnerSaleCase.findMany({ where: {
           id: { in: boundCaseIds }, profileId: profile.id,
           OR: [{ state: { in: [...partnerContracts.PARTNER_EDITABLE_CASE_STATES] } }, { state: 'COMMITTED' }],
-        }, select: { id: true, trackingCode: { select: { number: true } } } }) : [];
+        }, select: { id: true, trackingCode: { select: { number: true } }, customerContract: { select: { contractNumber: true } },
+          head: { select: { partySnapshots: true } } } }) : [];
         const editableOwnedCaseIds = new Set(editableOwnedCases.map(row => row.id));
+        const displayByCaseId = new Map(editableOwnedCases.map(row => {
+          const customer = partnerContracts.CustomerDisplayPartySchema.safeParse((row.head?.partySnapshots as { customer?: unknown } | null)?.customer);
+          return [row.id, { ...(row.customerContract ? { customerContractNumber: row.customerContract.contractNumber } : {}),
+            ...(customer.success ? { customerName: customer.data.displayName } : {}) }];
+        }));
         const trackingByCaseId = new Map(editableOwnedCases.map(row => [row.id, row.trackingCode?.number]));
         const visibleRecoveries = retainedDraftRows.flatMap(item => {
           const rawCaseId = decodeTechnicalRecovery(item.recovery)?.partnerCaseId;
           const caseId = typeof rawCaseId === 'string' ? rawCaseId : undefined;
           return shouldExposePartnerRecovery(caseId, editableOwnedCaseIds)
             ? [{ ...item, ...(caseId ? { caseId,
+              ...displayByCaseId.get(caseId),
               ...(trackingByCaseId.get(caseId) ? { trackingNumber: trackingByCaseId.get(caseId) } : {}) } : {}) }]
             : [];
         });
@@ -220,12 +227,12 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           ...(profile.inquiries[0] ? { latestInquiryId: profile.inquiries[0].id } : {}),
           inquiryIds: profile.inquiries.map(inquiry => inquiry.id),
           ...(recoverableDraft ? { recoverableDraft: { recoveryId: recoverableDraft.draftId,
-            ...(recoverableDraft.caseId ? { caseId: recoverableDraft.caseId } : {}),
+            ...(recoverableDraft.caseId ? { caseId: recoverableDraft.caseId, ...displayByCaseId.get(recoverableDraft.caseId) } : {}),
             ...(recoverableDraft.trackingNumber ? { trackingNumber: recoverableDraft.trackingNumber } : {}),
             baseRevision: recoverableDraft.baseRevision, updatedAt: recoverableDraft.updatedAt.toISOString(),
             ...(recoverableDraft.title ? { title: recoverableDraft.title } : {}) } } : {}),
           recoverableDrafts: recoverableDrafts.map(item => ({ recoveryId: item.draftId,
-            ...(item.caseId ? { caseId: item.caseId } : {}),
+            ...(item.caseId ? { caseId: item.caseId, ...displayByCaseId.get(item.caseId) } : {}),
             ...(item.trackingNumber ? { trackingNumber: item.trackingNumber } : {}),
             baseRevision: item.baseRevision, updatedAt: item.updatedAt.toISOString(), ...(item.title ? { title: item.title } : {}) })),
           customers: profile.customers.map(customer => ({ id: customer.id,
@@ -766,7 +773,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           orderBy: { createdAt: 'desc' }, select: { id: true, state: true, committedAt: true, commercialFlowVersion: true, pricingState: true,
             customerConfirmationState: true, headRevision: true, integrityHash: true,
             caseNumber: true, customerContractId: true, customerContract: { select: { contractNumber: true } }, trackingCode: { select: { number: true } },
-            head: { select: { internalProjection: true, customerProjection: true } },
+            head: { select: { internalProjection: true, customerProjection: true, partySnapshots: true } },
             events: { orderBy: { sequence: 'desc' }, take: body.caseId ? undefined : 0,
               select: { sequence: true, type: true, recordedAt: true } },
             outputs: { orderBy: { recordedAt: 'desc' }, take: 1, select: { id: true } } } });
@@ -843,7 +850,8 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           const pricingResponseState = (row.state === 'DRAFT' || !!commercial) && actorProfile && editableRecovery
             ? await readCasePricingResponse(tx, { caseId: row.id, headRevision: row.headRevision,
               profileId: actorProfile.id, actorId: request.user!.id, recovery: editableRecovery.recovery }) : undefined;
-          const runtimeRow = { ...(commercial ? { commercial: await readPartnerCommercialState(tx, row.id, pricingResponseState) } : {}), ...(pricingResponseState ? { pricingResponseState } : {}), view: { ...view.data, ...(row.commercialFlowVersion === 1 ? { commercialFlowVersion: 1 as const } : {}), ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}), state: row.state,
+          const customerIdentity = partnerContracts.CustomerDisplayPartySchema.safeParse((row.head?.partySnapshots as { customer?: unknown } | null)?.customer);
+          const runtimeRow = { ...(customerIdentity.success ? { customerName: customerIdentity.data.displayName } : {}), ...(commercial ? { commercial: await readPartnerCommercialState(tx, row.id, pricingResponseState) } : {}), ...(pricingResponseState ? { pricingResponseState } : {}), view: { ...view.data, ...(row.customerContract ? { customerContractNumber: row.customerContract.contractNumber } : {}), ...(row.commercialFlowVersion === 1 ? { commercialFlowVersion: 1 as const } : {}), ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}), state: row.state,
             pricingState: row.pricingState, customerConfirmationState: row.customerConfirmationState },
             ...(edit && correctionDuty ? { reviewedCorrection: { requestId: correctionDuty.sourceId,
               reason: correctionDuty.accountantNote, ...(correctionDuty.dueAt ? { dueAt: correctionDuty.dueAt.toISOString() } : {}) } } : {}),

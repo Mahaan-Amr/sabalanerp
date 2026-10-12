@@ -5171,6 +5171,14 @@ _Avoid_: hard deletion, using voiding for a real visit that ended without loadin
 **Admin Partner Customer Card Management**:
 The Admin authority to edit a Partner-owned Customer’s identity, phones, contacts and addresses and toggle blacklist or lock status without transferring its ownership. Updates are atomic, reject stale card versions and retain an immutable audit decision. Company Manager view-all permission alone does not grant this authority; private Partner financial and commercial evidence remains outside the editable card.
 
+**پرونده مشتری همکار**:
+اطلاعات یک مشتری متعلق به فروشنده همکار، شامل مشخصات، آدرس‌های پروژه، مخاطبین، سرنخ‌ها و قراردادهای همان مشتری. یکسانی ساختار پرونده با مشتری داخلی، مالکیت یا حدود اختیار مشاهده و تغییر اطلاعات تجاری و مالی را تغییر نمی‌دهد.
+_Avoid_: پرونده فروش همکار، مشتری مستقیم سبلان، یا مجوز ضمنی مشاهده مشتریان دیگر
+
+**مدیریت عملیاتی مشتری همکار در CRM**:
+ثبت، ویرایش و حذف آدرس‌های پروژه، مخاطبین و سرنخ‌های مشتری فروشنده همکار توسط کاربر مجاز در محدوده همان مشتری، با حفظ مالکیت همکار و سابقه حسابرسی. اختیار مشاهده مشتری به‌تنهایی مجوز تغییر این اطلاعات یا مشاهده اطلاعات مالی خصوصی همکار نیست.
+_Avoid_: انتقال مالکیت با ویرایش، اعطای اختیار تغییر با مشاهده همه مشتریان، یا یکی‌دانستن مدیریت کارت مشتری و مدیریت قرارداد فروش همکار
+
 **هویت تاریخی مشتری**:
 مشخصات ثابت مشتری که پس از حذف دائمی کارت عملیاتی، فقط برای نگهداری و نمایش سوابق قبلی او باقی می‌ماند و برای ایجاد مشتری یا قرارداد مستقل جدید قابل انتخاب نیست.
 _Avoid_: مشتری فعال CRM، امکان بازگردانی کارت حذف‌شده، پاک‌کردن مشخصات از قراردادهای سابق

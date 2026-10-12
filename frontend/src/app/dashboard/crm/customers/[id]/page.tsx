@@ -1,8 +1,9 @@
 'use client';
+import { PartnerCustomerSections, type PartnerCrmCustomer } from '@/features/crm/customer-workflow/PartnerCustomerSections';
 import { DirectCustomerTransfer } from '@/features/partner-sales/customers/DirectCustomerTransfer';
 import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSection, ErpSheet, ErpTextarea, useErpPresentationScope } from '@/components/erp';
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   FaEdit,
@@ -25,7 +26,7 @@ import {
   FaEye
 } from 'react-icons/fa';
 import CustomerCreditPanel from '@/features/crm/CustomerCreditPanel';
-import { crmAPI, dashboardAPI } from '@/lib/api';
+import api, { crmAPI, dashboardAPI } from '@/lib/api';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import PersianCalendar from '@/lib/persian-calendar';
 import { formatPrice } from '@/lib/numberFormat';
@@ -136,6 +137,7 @@ interface OwnerOption {
 
 export default function CustomerDetailPage() {
   const params = useParams();
+  const ownerPortal = usePathname().startsWith('/dashboard/sales/partner-customers/');
   const router = useRouter();
   const { hasPermission } = useWorkspace();
   const [customer, setCustomer] = useState<CrmCustomer | null>(null);
@@ -206,7 +208,7 @@ export default function CustomerDetailPage() {
       setLoading(true);
       setError(null);
 
-      const response = await crmAPI.getCustomer(params.id as string);
+      const response = await (ownerPortal ? api.get(`/crm/partner/customers/${params.id}/full-card`) : crmAPI.getCustomer(params.id as string));
 
       if (response.data.success) {
         setCustomer(response.data.data);
@@ -543,13 +545,15 @@ export default function CustomerDetailPage() {
 
   if (error || !customer) {
     return (
-      <CustomerWorkflowPage title="جزئیات مشتری" backHref="/dashboard/crm/customers">
+      <CustomerWorkflowPage title="جزئیات مشتری" backHref={ownerPortal ? '/dashboard/sales/partner-customers' : '/dashboard/crm/customers'}>
         <ErpInlineState kind="error" title={error || 'مشتری یافت نشد'} action={{ label: 'بازگشت به لیست', href: '/dashboard/crm/customers' }} />
       </CustomerWorkflowPage>
     );
   }
 
-  if (customer.managementReadOnly) return <CustomerWorkflowPage title={`${customer.firstName} ${customer.lastName}`} backHref="/dashboard/crm/customers"
+  if ((customer as unknown as PartnerCrmCustomer).partnerCrmSections) return <PartnerCustomerSections customer={customer as unknown as PartnerCrmCustomer} onRefresh={fetchCustomer} />;
+
+  if (customer.managementReadOnly) return <CustomerWorkflowPage title={`${customer.firstName} ${customer.lastName}`} backHref={ownerPortal ? '/dashboard/sales/partner-customers' : '/dashboard/crm/customers'}
     feedback={error ? { kind: 'error', title: error } : undefined}
     actions={customer.canManageCustomerCard ? [{ label: 'ویرایش', icon: FaEdit, href: `/dashboard/crm/customers/${customer.id}/edit` }] : []}>
     <DirectCustomerTransfer customerId={customer.id} onTransferred={() => void fetchCustomer()} />
@@ -582,7 +586,7 @@ export default function CustomerDetailPage() {
     <CustomerWorkflowPage
       title={`${customer.firstName} ${customer.lastName}`}
       description={<>{customer.companyName && `${customer.companyName} • `}{getCustomerTypeLabel(customer.customerType)}</>}
-      backHref="/dashboard/crm/customers"
+      backHref={ownerPortal ? '/dashboard/sales/partner-customers' : '/dashboard/crm/customers'}
       actions={hasPermission('crm' as any, 'edit' as any) ? [{ label: 'ویرایش', icon: FaEdit, href: `/dashboard/crm/customers/${customer.id}/edit` }] : []}
     >
       <DirectCustomerTransfer customerId={customer.id} onTransferred={() => void fetchCustomer()} />

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { assertNoSeriousAxeViolations, loginAsAdmin, setTheme, setViewportAndZoom } from './support/design-system';
-import { createPartnerFixtures } from '../../packages/partner-sales-contracts/dist/testing';
+import { createPartnerFixtures, createPartnerTechnicalCatalogFixtures } from '../../packages/partner-sales-contracts/dist/testing';
 
 test('Partner contract header exposes Sales toolbar actions with the preserved SMS label', async ({ page }) => {
   await loginAsAdmin(page);
@@ -140,22 +140,16 @@ test('Partner creation consumes the shared eight-step date, customer, and projec
   await assertNoSeriousAxeViolations(page);
 });
 
-test('a resumed Partner inquiry stays inside the shared eight-step contract wizard', async ({ page }) => {
+test('a resumed Partner product draft stays inside the shared eight-step contract wizard', async ({ page }) => {
   await loginAsAdmin(page);
   await page.route('**/api/partner/**', route => route.fulfill({ status: 404,
     json: { success: false, code: 'NOT_FOUND' } }));
   await page.addInitScript(() => {
-    window.localStorage.setItem('partner-creation-runtime:partner-e2e:partner-inquiry-e2e', JSON.stringify({
+    // An unnumbered draft resumes the entry checkpoint. An inquiry runtime is
+    // not a substitute for the Case-bound wizard required after numbering.
+    window.localStorage.setItem('partner-creation-entry:partner-e2e:partner-recovery-e2e', JSON.stringify({
       actorId: 'partner-e2e',
-      inquiryId: 'partner-inquiry-e2e',
-      access: { schemaVersion: 1, recoveryId: 'partner-recovery-e2e', browserSessionId: 'partner-browser-e2e',
-        leaseToken: 'partner-lease-e2e', baseRevision: 1 },
-      saved: { schemaVersion: 1, recoveryId: 'partner-recovery-e2e', recoveryRevision: 1, inputRevision: 1,
-        graphHash: `sha256-v1:${'a'.repeat(64)}`, updatedAt: new Date().toISOString(), rows: [{
-          configurationRef: { recoveryId: 'partner-recovery-e2e', recoveryRevision: 1, productRowId: 'resume-product' },
-          quantity: '2', unit: 'meter', configurationChange: 'NEW',
-        }], replayed: true },
-      configuredRows: [],
+      recoveryId: 'partner-recovery-e2e', baseRevision: 1, recoveryRevision: 1, step: 'products',
       customerId: 'partner-customer-e2e',
       contractDate: '2026-09-16',
       projectId: 'partner-project-e2e',
@@ -178,9 +172,12 @@ test('a resumed Partner inquiry stays inside the shared eight-step contract wiza
       projects: [{ id: 'partner-project-e2e', customerId: 'partner-customer-e2e', title: 'پروژه همکار آزمایشی' }],
     } }),
   }));
+  const retainedProduct = { ...createPartnerTechnicalCatalogFixtures().products[0],
+    catalogItemId: 'resume-stone', catalogSnapshotVersion: '2026-10-03T00:00:00.000Z', name: 'سنگ بازیابی‌شده' };
   await page.route('**/api/partner/technical/catalog/query', route => route.fulfill({ json: {
     success: true, data: { schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG',
-      kind: route.request().postDataJSON().kind, items: [] },
+      kind: route.request().postDataJSON().kind,
+      items: route.request().postDataJSON().kind === 'PRODUCT' ? [retainedProduct] : [] },
   } }));
   await page.route('**/api/partner/technical/recoveries/acquire', route => route.fulfill({ json: {
     success: true, data: { schemaVersion: 1, recoveryId: 'partner-recovery-e2e',
@@ -189,20 +186,12 @@ test('a resumed Partner inquiry stays inside the shared eight-step contract wiza
   } }));
   await page.route('**/api/partner/technical/recoveries/read', route => route.fulfill({ json: {
     success: true, data: { schemaVersion: 1, recoveryId: 'partner-recovery-e2e', recoveryRevision: 1,
-      updatedAt: new Date().toISOString(), draft: null },
+      updatedAt: new Date().toISOString(), draft: { schemaVersion: 1, inputRevision: 1, rows: [{
+        productRowId: 'resume-product', catalogItemId: 'resume-stone', catalogSnapshotVersion: '2026-10-03T00:00:00.000Z',
+        family: 'prepared', configuration: { kind: 'readyPiece', unit: 'count', quantity: '2' },
+        contractualTitle: 'سنگ بازیابی‌شده', retailUnitPrice: { amount: '1000', currency: 'IRT' },
+      }] } },
   } }));
-  await page.route('**/api/partner/technical/recoveries/read-saved', route => route.fulfill({ json: {
-    success: true, data: { schemaVersion: 1, recoveryId: 'partner-recovery-e2e', recoveryRevision: 1,
-      inputRevision: 1, graphHash: `sha256-v1:${'a'.repeat(64)}`, updatedAt: new Date().toISOString(),
-      rows: [{ configurationRef: { recoveryId: 'partner-recovery-e2e', recoveryRevision: 1, productRowId: 'resume-product' },
-        quantity: '2', unit: 'meter', configurationChange: 'NEW' }],
-    },
-  } }));
-  await page.route('**/api/partner/inquiries/query-v2', route => route.fulfill({
-    status: 409,
-    contentType: 'application/json',
-    body: JSON.stringify({ code: 'STATE_CONFLICT', status: 409, message: 'fixture inquiry remains pending' }),
-  }));
   await page.goto('/dashboard/sales/contracts/create?draftId=partner-recovery-e2e');
   await setTheme(page, 'light');
   const workflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
@@ -214,17 +203,18 @@ test('a resumed Partner inquiry stays inside the shared eight-step contract wiza
   await previous.click();
   await expect(workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ })).toHaveAttribute('aria-pressed', 'true');
   await previous.click();
-  // Customer creation uses the shared CRM route; its cancellation/return is
-  // exercised separately below. This test keeps the resumed inquiry identity.
+  // Customer creation uses the shared CRM route; this test retains the same
+  // recovery while navigating back and forward through its entry fields.
   await expect(workflow.getByRole('button', { name: 'ایجاد مشتری', exact: true }).first()).toBeVisible();
   await workflow.getByRole('button', { name: /مشتری همکار آزمایشی/ }).click();
   await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
   await workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ }).click();
   await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
-  await expect(workflow.getByRole('button', { name: 'ویرایش محصولات', exact: true })).toBeVisible();
+  await expect(workflow.getByRole('region', { name: 'محصولات قرارداد', exact: true })
+    .getByText('سنگ بازیابی‌شده', { exact: true }).first()).toBeVisible();
   await expect.poll(() => page.evaluate(() => JSON.parse(window.localStorage
-    .getItem('partner-creation-runtime:partner-e2e:partner-inquiry-e2e') || '{}')))
-    .toMatchObject({ inquiryId: 'partner-inquiry-e2e', customerId: 'partner-customer-e2e', projectId: 'partner-project-e2e' });
+    .getItem('partner-creation-entry:partner-e2e:partner-recovery-e2e') || '{}')))
+    .toMatchObject({ recoveryId: 'partner-recovery-e2e', step: 'products', customerId: 'partner-customer-e2e', projectId: 'partner-project-e2e' });
   await setTheme(page, 'dark');
   await setViewportAndZoom(page, { width: 390, height: 844 });
   expect(await workflow.evaluate(element => element.getBoundingClientRect().right <= document.documentElement.clientWidth + 1)).toBe(true);

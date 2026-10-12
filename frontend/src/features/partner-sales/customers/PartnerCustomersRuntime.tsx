@@ -3,27 +3,26 @@ import { partnerSalesActionFeedback } from '../partnerSalesErrorMessage';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ErpBadge, ErpButton, ErpEmptyState, ErpField, ErpFieldView, ErpInput, ErpListPage,
-  ErpInlineState, ErpSelect, ErpSheet, ErpTextarea, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
-import { FaBan, FaBuilding, FaCheckCircle, FaEdit, FaExclamationTriangle, FaEye,
+import { ErpBadge, ErpButton, ErpEmptyState, ErpListPage,
+  ErpInlineState, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
+import { FaBan, FaBuilding, FaCheckCircle, FaEdit, FaEye,
   FaFileContract, FaLock, FaMapMarkerAlt, FaPhone, FaPlus, FaUser, FaUsers } from 'react-icons/fa';
 import api from '@/lib/api';
-import { buildPartnerCustomerUpdateCommand, emptyPartnerCustomerDraft, validatePartnerCustomerDraft,
+import { buildPartnerCustomerUpdateCommand,
   type PartnerCustomerDraft } from '@/features/contract-creation/partner/partnerCustomerCreation';
 
 type PartnerCustomer = {
   customerId: string; revision: number; displayName: string; firstName: string; lastName: string;
-  companyName?: string; customerType: 'Individual' | 'Company'; personType: 'NATURAL' | 'LEGAL';
+  companyName?: string; customerType: 'Individual' | 'Company' | 'Government'; personType: 'NATURAL' | 'LEGAL';
   status: string; isBlacklisted: boolean; isLocked: boolean; nationalCode?: string; city?: string;
   address?: string; phone: string; projectCount: number;
   responsibleSeller?: { id: string; displayName: string };
 };
-type PartnerCustomerDetail = PartnerCustomer & { projects?: Array<{ projectId: string; title: string; status: string }> };
 type ListPayload = { items: PartnerCustomer[]; total: number; nextCursor?: string };
 
 const statusTone: Record<string, ErpTone> = { Active: 'success', Inactive: 'neutral', Prospect: 'info', Lead: 'warning' };
 const statusLabel = (value: string) => ({ Active: 'فعال', Inactive: 'غیرفعال', Prospect: 'بالقوه', Lead: 'سرنخ' }[value] ?? value);
-const typeLabel = (value: PartnerCustomer['customerType']) => value === 'Company' ? 'حقوقی' : 'حقیقی';
+const typeLabel = (value: PartnerCustomer['customerType']) => value === 'Government' ? 'دولتی' : value === 'Company' ? 'حقوقی' : 'حقیقی';
 const toDraft = (customer: PartnerCustomer): PartnerCustomerDraft => ({
   firstName: customer.firstName, lastName: customer.lastName, companyName: customer.companyName ?? '',
   customerType: customer.customerType, city: customer.city ?? '', address: customer.address ?? '',
@@ -41,9 +40,6 @@ export function PartnerCustomersRuntime() {
   const [pending, setPending] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ReturnType<typeof partnerSalesActionFeedback>>();
-  const [detail, setDetail] = useState<PartnerCustomerDetail>();
-  const [editing, setEditing] = useState<PartnerCustomer>();
-  const [draft, setDraft] = useState<PartnerCustomerDraft>(emptyPartnerCustomerDraft);
 
   const load = useCallback(async () => {
     setPending(true); setError(undefined);
@@ -69,30 +65,6 @@ export function PartnerCustomersRuntime() {
     && (!blacklist || customer.isBlacklisted === (blacklist === 'true'))
     && (!locked || customer.isLocked === (locked === 'true'))), [blacklist, customerType, customers, locked, status]);
 
-  const openDetail = async (customer: PartnerCustomer) => {
-    setError(undefined);
-    try {
-      const response = await api.get(`/crm/partner/customers/${encodeURIComponent(customer.customerId)}`);
-      const value = (response.data as { data?: PartnerCustomerDetail })?.data;
-      if (!value?.customerId) throw new Error('invalid customer');
-      setDetail(value);
-    } catch (failure) { setError(partnerSalesActionFeedback(failure, 'دریافت جزئیات مشتری')); }
-  };
-  const beginEdit = (customer: PartnerCustomer) => { setEditing(customer); setDraft(toDraft(customer)); };
-  const saveEdit = async () => {
-    if (!editing || saving || !validatePartnerCustomerDraft(draft)) return;
-    setSaving(true); setError(undefined);
-    try {
-      const command = await buildPartnerCustomerUpdateCommand(draft, { customerId: editing.customerId,
-        expectedRevision: editing.revision, commandId: `partner-customer-update-${crypto.randomUUID()}`,
-        correlationId: `partner-customer-update-correlation-${crypto.randomUUID()}`,
-        idempotencyKey: `partner-customer-update-idempotency-${crypto.randomUUID()}` });
-      await api.put(`/crm/partner/customers/${encodeURIComponent(editing.customerId)}`, command,
-        { headers: { 'X-Correlation-Id': command.correlationId } });
-      setEditing(undefined); await load();
-    } catch (failure) { setError(partnerSalesActionFeedback(failure, 'ذخیره تغییرات مشتری')); }
-    finally { setSaving(false); }
-  };
   const toggleRestriction = async (customer: PartnerCustomer, kind: 'blacklist' | 'lock') => {
     if (saving) return;
     setSaving(true); setError(undefined);
@@ -153,7 +125,7 @@ export function PartnerCustomersRuntime() {
           { label: 'همه وضعیت‌ها', value: '' }, { label: 'فعال', value: 'Active' }, { label: 'غیرفعال', value: 'Inactive' },
           { label: 'بالقوه', value: 'Prospect' }, { label: 'سرنخ', value: 'Lead' }] },
         { id: 'customerType', label: 'نوع مشتری', type: 'select', value: customerType, onChange: setCustomerType, options: [
-          { label: 'همه انواع', value: '' }, { label: 'حقیقی', value: 'Individual' }, { label: 'حقوقی', value: 'Company' }] },
+          { label: 'همه انواع', value: '' }, { label: 'حقیقی', value: 'Individual' }, { label: 'حقوقی', value: 'Company' }, { label: 'دولتی', value: 'Government' }] },
         { id: 'blacklist', label: 'بلک‌لیست', type: 'select', value: blacklist, onChange: setBlacklist, options: [
           { label: 'همه', value: '' }, { label: 'خیر', value: 'false' }, { label: 'بله', value: 'true' }] },
         { id: 'locked', label: 'قفل', type: 'select', value: locked, onChange: setLocked, options: [
@@ -161,8 +133,8 @@ export function PartnerCustomersRuntime() {
       ]}
       isLoading={pending} rows={visible} rowKey={customer => customer.customerId} columns={columns}
       rowActions={customer => [
-        { label: 'مشاهده مشتری', icon: FaEye, onClick: () => void openDetail(customer) },
-        { label: 'ویرایش', icon: FaEdit, onClick: () => beginEdit(customer) },
+        { label: 'مشاهده مشتری', icon: FaEye, href: `/dashboard/sales/partner-customers/${encodeURIComponent(customer.customerId)}` },
+        { label: 'ویرایش', icon: FaEdit, href: `/dashboard/sales/partner-customers/${encodeURIComponent(customer.customerId)}/edit` },
         { label: customer.isBlacklisted ? 'حذف از بلک‌لیست' : 'افزودن به بلک‌لیست',
           icon: customer.isBlacklisted ? FaCheckCircle : FaBan, tone: customer.isBlacklisted ? 'success' : 'danger',
           onClick: () => void toggleRestriction(customer, 'blacklist') },
@@ -177,28 +149,6 @@ export function PartnerCustomersRuntime() {
         <ErpButton label="پاک کردن فیلترها" tone="neutral" variant="outline" onClick={() => { setSearch(''); setStatus(''); setCustomerType(''); setBlacklist(''); setLocked(''); }} />
       </div> : undefined} />
 
-    <ErpSheet open={Boolean(detail)} onClose={() => setDetail(undefined)} title="مشاهده مشتری" presentation="modal">
-      {detail && <div className="space-y-4" dir="rtl"><div className="grid gap-3 sm:grid-cols-2">
-        <ErpFieldView label="نام مشتری" value={detail.displayName} /><ErpFieldView label="شماره تماس" value={detail.phone} />
-        <ErpFieldView label="نوع مشتری" value={typeLabel(detail.customerType)} /><ErpFieldView label="نشانی" value={detail.address ?? '—'} />
-      </div><ErpFieldView label="پروژه‌ها" value={(detail.projects?.length ?? detail.projectCount).toLocaleString('fa-IR')} /></div>}
-    </ErpSheet>
-
-    <ErpSheet open={Boolean(editing)} onClose={() => setEditing(undefined)} title="ویرایش مشتری" presentation="modal" pending={saving}
-      footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" variant="outline" disabled={saving} onClick={() => setEditing(undefined)} />
-        <ErpButton label="ذخیره تغییرات" icon={FaCheckCircle} disabled={saving || !validatePartnerCustomerDraft(draft)} onClick={() => void saveEdit()} /></div>}>
-      {error && <ErpInlineState kind={error.kind} title={error.message} />}
-      <div className="grid gap-4 sm:grid-cols-2" dir="rtl">
-        <ErpField label="نام"><ErpInput value={draft.firstName} onChange={event => setDraft(value => ({ ...value, firstName: event.target.value }))} /></ErpField>
-        <ErpField label="نام خانوادگی"><ErpInput value={draft.lastName} onChange={event => setDraft(value => ({ ...value, lastName: event.target.value }))} /></ErpField>
-        <ErpField label="نوع مشتری"><ErpSelect value={draft.customerType} onChange={event => setDraft(value => ({ ...value, customerType: event.target.value as PartnerCustomerDraft['customerType'] }))}><option value="Individual">حقیقی</option><option value="Company">حقوقی</option></ErpSelect></ErpField>
-        <ErpField label="نام شرکت"><ErpInput value={draft.companyName} onChange={event => setDraft(value => ({ ...value, companyName: event.target.value }))} /></ErpField>
-        <ErpField label="شماره تماس"><ErpInput value={draft.phone} onChange={event => setDraft(value => ({ ...value, phone: event.target.value }))} /></ErpField>
-        <ErpField label="کد ملی"><ErpInput value={draft.nationalCode} onChange={event => setDraft(value => ({ ...value, nationalCode: event.target.value }))} /></ErpField>
-        <ErpField label="شهر"><ErpInput value={draft.city} onChange={event => setDraft(value => ({ ...value, city: event.target.value }))} /></ErpField>
-        <ErpField label="نشانی" className="sm:col-span-2"><ErpTextarea value={draft.address} onChange={event => setDraft(value => ({ ...value, address: event.target.value }))} /></ErpField>
-      </div>
-    </ErpSheet>
-    {error && !editing && customers.length > 0 && <div className="mt-4"><ErpInlineState kind={error.kind} title={error.message} /></div>}
+    {error && customers.length > 0 && <div className="mt-4"><ErpInlineState kind={error.kind} title={error.message} /></div>}
   </>;
 }

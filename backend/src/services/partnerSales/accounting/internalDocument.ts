@@ -12,6 +12,7 @@ import { readPartnerRevisionProjections } from '../cases/lifecycle';
 import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { readPartnerPreparationDocument } from './preFinancialDocument';
 import { buildAccountingVoidWorkflow } from '../../accountingVoidWorkflow';
+import { partnerCustomerPrintSelect, partnerPrintValue } from './customerPrintInformation';
 
 /** Only the Sabalan-to-Partner financial source enters this document. */
 export async function readPartnerInternalDocument(caseId: string, actorUserId: string) {
@@ -32,14 +33,16 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
     const owner = RevisionRefSchema.safeParse(snapshot?.partnerPreparation?.owner);
     const revision = owner.success ? await scope.database.partnerCaseRevision.findUnique({ where: {
       caseId_revision: { caseId: owner.data.caseId, revision: owner.data.revision } },
-      select: { graph: true, integrityHash: true, customerContent: true, internalProjection: true } }) : null;
+      select: { graph: true, integrityHash: true, partySnapshots: true, customerContent: true, internalProjection: true } }) : null;
     const matchingRevision = owner.success && revision?.integrityHash === owner.data.integrityHash ? revision : null;
     const content = projectPartnerInternalContent(record.sourceSnapshot, matchingRevision?.graph);
     const views = owner.success && matchingRevision ? await readPartnerRevisionProjections(scope.database, owner.data) : undefined;
     const projection = matchingRevision?.internalProjection as { fulfillment?: unknown } | null;
     const fulfillment = views ? FulfillmentViewSchema.safeParse(projection?.fulfillment) : undefined;
     const contextContent = matchingRevision?.customerContent as { contractDate?: string; project?: { title?: string; address?: string } } | undefined;
-    const sale = await scope.database.partnerSaleCase.findUnique({ where: { id: caseId }, select: { state: true, headRevision: true, integrityHash: true } });
+    const customerParty = (matchingRevision?.partySnapshots as { customer?: { phone?: string } } | undefined)?.customer;
+    const sale = await scope.database.partnerSaleCase.findUnique({ where: { id: caseId }, select: { state: true, headRevision: true, integrityHash: true,
+      customer: { select: partnerCustomerPrintSelect } } });
     const received = record.receivables.reduce((sum, row) => sum.add(row.paidAmount), new Prisma.Decimal(0));
     const remaining = record.receivables.length ? record.receivables.reduce((sum, row) => sum.add(row.remainingAmount), new Prisma.Decimal(0)) : record.amount;
     const flags = await scope.database.accountingContractFlag.findMany({
@@ -67,7 +70,9 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
       sepidarAmount: record.sepidarAmount?.toString() ?? null,
       metadata: (record.metadata as { mode?: string } | null)?.mode === 'PARTNER_SHARED_CORRECTION_REPLACEMENT'
         ? { mode: 'PARTNER_SHARED_CORRECTION_REPLACEMENT' } : undefined,
-      partnerContext: record.partnerContext,
+      partnerContext: { ...record.partnerContext, endCustomer: { ...record.partnerContext.endCustomer,
+        phone: typeof customerParty?.phone === 'string' ? customerParty.phone : undefined } },
+      customerInformation: sale?.customer,
       ...content,
       contractDate: contextContent?.contractDate,
       project: contextContent?.project ? { title: contextContent.project.title, address: contextContent.project.address } : undefined,
@@ -120,11 +125,17 @@ export async function withPartnerInternalAccountingTarget<T>(caseId: string, act
  * the linked customer contract or its graph/commercial envelopes to the printer. */
 export function partnerInternalPrintInput(document: NonNullable<Awaited<ReturnType<typeof readPartnerInternalDocument>>>) {
   const totals = document.totals;
+  const customer = document.customerInformation;
+  const deliveryManagers = [...new Set((document.deliveries || []).map(delivery => delivery.projectManagerName?.trim()).filter(Boolean))];
+  const managerName = deliveryManagers.length ? deliveryManagers.join('، ') : customer?.projectManagerName;
   return {
     contractNumber: document.partnerContext.customerContractNumber,
     titlePersian: 'سند داخلی فروش سبلان به همکار', partnerCommercialStatus: document.commercial?.status, status: document.caseState === 'COMMITTED' ? 'SIGNED' : 'DRAFT',
     createdAt: document.contractDate || document.createdAt, currency: document.currency == 'IRT' ? 'تومان' : document.currency == 'IRR' ? 'ریال' : document.currency,
-    totalAmount: Number(document.amount), customer: { companyName: document.partnerContext.debtor.displayName },
+    totalAmount: Number(document.amount), customer: { firstName: partnerPrintValue(document.partnerContext.endCustomer.displayName),
+      nationalCode: partnerPrintValue(customer?.nationalCode),
+      companyName: partnerPrintValue(customer?.companyName?.trim() || customer?.brandName),
+      phoneNumbers: [{ number: partnerPrintValue(document.partnerContext.endCustomer.phone), isPrimary: true }] },
     items: document.items.map(item => ({ productRowId: item.productRowId,
       product: { namePersian: item.description, code: item.productCode }, description: (item.details || []).join('، '),
       quantity: Number(item.quantity), pieceCount: Number('pieceCount' in item ? item.pieceCount ?? item.quantity : item.quantity),
@@ -136,10 +147,11 @@ export function partnerInternalPrintInput(document: NonNullable<Awaited<ReturnTy
       unitPrice: Number(item.unitPrice), totalPrice: Number(item.totalPrice),
       ...('wholesalePricing' in item && item.wholesalePricing ? { frozenPricingBreakdown: item.wholesalePricing } : {}) })),
     contractData: {
-      project: { projectName: document.project?.title, address: document.project?.address },
+      project: { projectName: partnerPrintValue(document.project?.title), address: partnerPrintValue(document.project?.address),
+        projectManagerName: partnerPrintValue(managerName), projectManagerNumber: partnerPrintValue(customer?.projectManagerNumber) },
       discount: { amount: Number(totals?.discount || 0), inputMode: 'AMOUNT_TOMAN' },
       deliveries: (document.deliveries || []).map(delivery => ({ deliveryDate: delivery.date,
-        deliveryAddress: delivery.destination, receiverName: delivery.receiverName,
+        deliveryAddress: delivery.destination, receiverName: delivery.receiverName, projectManagerName: delivery.projectManagerName,
         products: delivery.items.map(line => ({ productRowId: line.productRowId, quantity: Number(line.quantity), amount: Number(line.quantity),
           unit: document.items.find(item => item.productRowId === line.productRowId)?.unit,
           productName: document.items.find(item => item.productRowId === line.productRowId)?.description })) })),

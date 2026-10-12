@@ -35,30 +35,11 @@ export const hasFeatureAccess = (
 ): boolean => {
   if (!user) return false;
 
-  // Super admin has access to all features
-  if (user.role === 'ADMIN') return true;
-
-
-  // Check if user has the specific feature permission
-  const featurePermission = user.permissions?.features?.find(
+  // Effective features are projected by the server. Reconstructing access
+  // from ADMIN or workspace level would restore an unchecked operation.
+  return Boolean(user.permissions?.features?.some(
     p => p.feature === feature && hasPermissionLevel(p.permissionLevel, requiredPermission)
-  );
-
-  if (featurePermission) {
-    return true;
-  }
-
-  // Check if user has workspace-level access that might include this feature
-  const workspacePermission = user.permissions?.workspaces?.find(
-    p => p.workspace === getFeatureWorkspace(feature) && 
-         hasPermissionLevel(p.permissionLevel, requiredPermission)
-  );
-
-  if (workspacePermission) {
-    return true;
-  }
-
-  return false;
+  ));
 };
 
 /**

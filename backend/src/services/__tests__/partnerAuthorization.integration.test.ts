@@ -212,7 +212,7 @@ test('persisted Inquiry authority follows its immutable Partner owner, not a sup
   });
 });
 
-test('only the latest persisted Inquiry assignment and current responder authority permit a response, including ADMIN', async () => {
+test('assigned responders require the latest assignment while ADMIN retains the company responder override', async () => {
   await fixture(async (tx, partner, actor) => {
     await tx.partnerProfile.create({ data: { id: partner, userId: partner, state: 'ACTIVE' } });
     const inquiry = await tx.partnerInquiry.create({ data: { profileId: partner } });
@@ -229,14 +229,20 @@ test('only the latest persisted Inquiry assignment and current responder authori
     granted = false;
     assert.equal((await port.authorize('INQUIRY_RESPOND', root)).ok, false, 'historical eligibility cannot replace a current grant');
     await tx.user.update({ where: { id: actor }, data: { role: 'ADMIN' } });
-    assert.equal((await port.authorize('INQUIRY_RESPOND', root)).ok, true, 'named ADMIN action still requires the real assignment');
+    assert.equal((await port.authorize('INQUIRY_RESPOND', root)).ok, true, 'ADMIN retains current company response authority');
+    await tx.user.update({ where: { id: actor }, data: { role: 'USER' } });
+    granted = true;
     const replacement = `authorization-${randomUUID()}`;
     await tx.user.create({ data: { id: replacement, username: replacement, email: `${replacement}@example.invalid`,
       password: 'not-a-login', firstName: 'Fixture', lastName: 'Replacement' } });
     await tx.partnerInquiryAssignment.create({ data: { inquiryId: inquiry.id, revision: 2,
       responderId: replacement, actorId: actor, reason: 'انتساب مجدد آزمون', eligibilityEvidence: { historical: true } } });
     const obsolete = await port.authorize('INQUIRY_RESPOND', root);
-    assert.equal(obsolete.ok ? null : obsolete.error.code, 'NOT_ASSIGNED');
+    assert.equal(obsolete.ok ? null : obsolete.error.code, 'NOT_FOUND', 'an obsolete assigned scope no longer reveals the inquiry');
+    // ADR-0058 deliberately allows ADMIN to answer another assignment; the
+    // responder command owns the audited atomic takeover, not this read policy.
+    await tx.user.update({ where: { id: actor }, data: { role: 'ADMIN' } });
+    assert.equal((await port.authorize('INQUIRY_RESPOND', root)).ok, true);
   });
 });
 

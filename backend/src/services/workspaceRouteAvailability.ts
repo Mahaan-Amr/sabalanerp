@@ -86,7 +86,7 @@ export const resolveWorkspaceRouteAvailability = async (
   const transferStatusId = input.path.match(/^\/dashboard\/crm\/customer-transfers\/([A-Za-z0-9:_-]+)$/)?.[1];
   if (transferStatusId) { const allowed = await canReadTransferNotice(prisma, input.userId, transferStatusId);
     return { allowed, reason: allowed ? null : 'این درخواست در محدوده مجاز شما نیست.' }; }
-  if (input.role === 'ADMIN' || /\/duties(?:\/|$)/.test(input.path)) return { allowed: true, reason: null };
+  if (/\/duties(?:\/|$)/.test(input.path)) return { allowed: true, reason: null };
   const ownedDetailId = input.path.match(/^\/dashboard\/sales\/contracts\/([A-Za-z0-9:_-]+)(?:\/edit)?$/)?.[1];
   if (ownedDetailId && !['create', 'collaboration'].includes(ownedDetailId) &&
       await ownsPartnerCustomerContract(prisma, input.userId, ownedDetailId)) return { allowed: true, reason: null };

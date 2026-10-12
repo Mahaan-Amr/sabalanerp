@@ -34,7 +34,7 @@ export const readOrdinaryReactivationActions = async (tx: Database, contract: Om
   if (!actor || !actor.isActive || !validateContractAccess(contract, actor)) return unavailable;
   const access = await getEffectiveUserAccess(tx, { userId: actor.id, userRole: actor.role, at: now });
   const workspace = actor.role === 'ADMIN' || access.workspaces.some(item => item.workspace === 'sales' && ['edit', 'admin'].includes(item.permission));
-  const permitted = (feature: string) => actor.role === 'ADMIN' || access.features.some(item => item.feature === feature && ['edit', 'admin'].includes(item.permission));
+  const permitted = (feature: string) => access.features.some(item => item.feature === feature && ['edit', 'admin'].includes(item.permission));
   const financialAt = await readOrdinaryFinancialRegistration(tx, contract);
   const expired = !financialAt && !!contract.commercialExpiresAt && contract.commercialExpiresAt <= now;
   if (expired) return { ...unavailable, canCreateReplacement: workspace && permitted('sales_contracts_create'),

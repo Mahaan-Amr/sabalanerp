@@ -22,6 +22,7 @@ export type HrAuthorizationSnapshot = {
   featureGrants: Array<EffectiveGrant & { featureCode: string; level: HrAccessLevel }>;
   authorityGrants: Array<EffectiveGrant & { authorityCode: string }>;
   assignedDutyIds: string[];
+  disabledFeatures?: string[];
 };
 
 export type HrAuthorizationRequirement = {
@@ -68,6 +69,7 @@ export const evaluateHrAuthorization = (
     return { allowed: false, missingLayers: [...missingLayers] };
   }
 
+  const disabled = new Set(snapshot.disabledFeatures ?? []);
   const baseline = hasFullHrBaseline(snapshot, at);
   const missingLayers: HrAuthorizationLayer[] = [];
   if (requirement.workspaceLevel && !baseline) {
@@ -79,16 +81,16 @@ export const evaluateHrAuthorization = (
     ));
     if (!grant) missingLayers.push('WORKSPACE');
   }
-  if (requirement.feature && !baseline) {
+  if (requirement.feature && (disabled.has(requirement.feature.code) || !baseline)) {
     const grant = snapshot.featureGrants.find((candidate) => (
-      candidate.featureCode === requirement.feature!.code
+      !disabled.has(candidate.featureCode) && candidate.featureCode === requirement.feature!.code
       && isEffective(candidate, at)
       && !candidate.bootstrapOnly
       && accessRank[candidate.level] >= accessRank[requirement.feature!.level]
     ));
     if (!grant) missingLayers.push('FEATURE');
   }
-  const hasFeatureAt = (code: string, level: HrAccessLevel) => snapshot.featureGrants.some((candidate) => (
+  const hasFeatureAt = (code: string, level: HrAccessLevel) => !disabled.has(code) && snapshot.featureGrants.some((candidate) => (
     candidate.featureCode === code && isEffective(candidate, at) && !candidate.bootstrapOnly
     && accessRank[candidate.level] >= accessRank[level]
   ));
@@ -100,11 +102,11 @@ export const evaluateHrAuthorization = (
   const requiresIndependentGrant = actionPermissionCodes.some((code) => (
     INDEPENDENT_PERFORMANCE_ACTION_PERMISSION_CODES.includes(code)
   ));
-  if (actionPermissionCodes.length && (!baseline || requiresIndependentGrant)) {
+  if (actionPermissionCodes.length && (!baseline || requiresIndependentGrant || actionPermissionCodes.some(code => expandHrActionPermissionSelection([code]).some(key => disabled.has(key))))) {
     const authorized = actionPermissionCodes.some(hasActionPermission);
     if (!authorized) missingLayers.push('ACTION_PERMISSION');
   }
-  if (requirement.authorityCodes?.length && !baseline) {
+  if (requirement.authorityCodes?.length && (!baseline || requirement.authorityCodes.some(code => actionPermissionsForLegacyAuthority(code).some(key => disabled.has(key))))) {
     const authorized = requirement.authorityCodes.some((authorityCode) => {
       const bundle = actionPermissionsForLegacyAuthority(authorityCode).filter((code) => getHrActionPermissionDefinition(code));
       return bundle.length > 0 && bundle.every(hasActionPermission);

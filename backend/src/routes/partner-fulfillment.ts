@@ -7,6 +7,7 @@ import { protect, type AuthRequest } from '../middleware/auth';
 import { createPartnerFulfillmentAdapter } from '../services/partnerSales/fulfillment/adapter';
 import { createPrismaPartnerFulfillmentRepository } from '../services/partnerSales/fulfillment/prismaRepository';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
+import { hasSharedOperationAuthority } from '../services/partnerSales/authorization/sharedOperationAuthority';
 import { readPartnerSnapshot } from '../services/partnerSales/authorization/readSnapshot';
 
 const correlation = (request: Request) => {
@@ -34,6 +35,9 @@ router.get('/:caseId', async (request: AuthRequest, response) => {
       purpose: 'FULFILLMENT', channel: 'DETAIL' }, { correlationId: correlation(request) })
       .authorize('FULFILLMENT_READ', { kind: 'CASE', id: row.id });
     if (!allowed.ok) return allowed;
+    if (!await hasSharedOperationAuthority(tx, request.user!.id, 'logistics', 'logistics_loadings_view', 'view')) {
+      return { ok: false as const, error: partnerError('FORBIDDEN') };
+    }
     const projection = row.head.internalProjection && typeof row.head.internalProjection === 'object' &&
       !Array.isArray(row.head.internalProjection)
       ? (row.head.internalProjection as Prisma.JsonObject).fulfillment : undefined;

@@ -67,7 +67,13 @@ export const setFeatureSelection = (
 ): AccessDraft => {
   const explicit = new Set(draft.explicitlySelectedFeatures);
   if (selected) explicit.add(feature);
-  else explicit.delete(feature);
+  else {
+    explicit.delete(feature);
+    // Turning off a prerequisite also turns off dependent operations.
+    for (const key of Array.from(explicit)) {
+      if (closePrerequisites(new Set([key]), definitions).has(feature)) explicit.delete(key);
+    }
+  }
   return rebuild(draft.workspaceLevels, explicit, definitions);
 };
 
@@ -75,11 +81,11 @@ export const selectAllInWorkspace = (
   draft: AccessDraft,
   definitions: readonly AccessFeatureDefinition[],
   workspace: string,
-  level: AccessLevel,
+  _level: AccessLevel,
 ): AccessDraft => {
   const explicit = new Set(draft.explicitlySelectedFeatures);
   definitions.filter((definition) => definition.workspace === workspace).forEach(({ key }) => explicit.add(key));
-  return rebuild({ ...draft.workspaceLevels, [workspace]: level }, explicit, definitions);
+  return rebuild(draft.workspaceLevels, explicit, definitions);
 };
 
 export const deselectAllInWorkspace = (
@@ -93,5 +99,5 @@ export const deselectAllInWorkspace = (
   const explicit = new Set(
     Array.from(draft.explicitlySelectedFeatures).filter((feature) => !workspaceFeatures.has(feature)),
   );
-  return rebuild({ ...draft.workspaceLevels, [workspace]: null }, explicit, definitions);
+  return rebuild(draft.workspaceLevels, explicit, definitions);
 };

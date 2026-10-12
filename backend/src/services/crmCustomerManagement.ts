@@ -15,7 +15,10 @@ export async function customerManagementCapabilities(db: Database, actorId: stri
   if (await db.partnerProfile.findUnique({ where: { userId: actorId }, select: { id: true } })) {
     return { canViewAllCustomers: false, canDeleteCustomers: false, grantIds: [] as string[] };
   }
-  if (actor.role === 'ADMIN') return { canViewAllCustomers: true, canDeleteCustomers: true, grantIds: [] as string[] };
+  if (actor.role === 'ADMIN') {
+    const off = await db.featurePermission.findMany({ where: { userId: actorId, workspace: 'crm', isActive: true, permissionLevel: 'none', OR: [{ expiresAt: null }, { expiresAt: { gt: at } }] } });
+    return { canViewAllCustomers: !off.some(row => row.feature === 'crm_customers_view_all'), canDeleteCustomers: !off.some(row => row.feature === 'crm_customers_delete'), grantIds: [] as string[] };
+  }
   const manager = (await activeHrAuthoritiesForUser(db, actorId, at)).includes('COMPANY_MANAGER');
   const grants = manager ? await db.featurePermission.findMany({ where: {
     userId: actorId, workspace: 'crm', isActive: true,

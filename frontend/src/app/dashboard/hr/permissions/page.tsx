@@ -38,6 +38,7 @@ type DirectPermission = { id: string; workspace: string; permissionLevel: Access
 type RolePermission = { id: string; role: string; workspace: string; permissionLevel: AccessLevel; feature?: string; isActive: boolean };
 type HrGrant = { id: string; userId: string; level: 'VIEW' | 'EDIT' | 'ADMIN'; status: string; effectiveFrom: string; effectiveTo?: string | null; workspaceCode?: string; featureCode?: string };
 type EffectiveAccess = {
+  disabledFeatures?: string[];
   workspaces: Array<{ workspace: string; permission: AccessLevel }>;
   features: Array<{ feature: string; permission: AccessLevel; workspace: string }>;
 };
@@ -103,6 +104,7 @@ export default function PermissionsPage() {
   const [directFeatures, setDirectFeatures] = useState<DirectPermission[]>([]);
   const [hrWorkspaces, setHrWorkspaces] = useState<HrGrant[]>([]);
   const [hrFeatures, setHrFeatures] = useState<HrGrant[]>([]);
+  const [baselineFeatures, setBaselineFeatures] = useState<Set<string>>(new Set());
   const [effectiveAccess, setEffectiveAccess] = useState<EffectiveAccess>({ workspaces: [], features: [] });
   const [draft, setDraft] = useState<AccessDraft>(() => createAccessDraft());
   const [draftRole, setDraftRole] = useState('USER');
@@ -191,14 +193,19 @@ export default function PermissionsPage() {
       setSelectedUser(user);
       setDraftRole(user?.role || 'USER');
       setDirectWorkspaces(workspaces);
-      setDirectFeatures(features);
+      setDirectFeatures(features.filter(permission => String(permission.permissionLevel) !== 'none'));
       setHrWorkspaces(activeHrWorkspaces);
       setHrFeatures(activeHrFeatures);
       setEffectiveAccess(effectiveResponse.data.data as EffectiveAccess);
-      setDraft(createAccessDraft({
+      let loadedDraft = createAccessDraft({
         workspaceLevels: levels,
-        explicitlySelectedFeatures: [...features.map((permission: DirectPermission) => permission.feature!), ...activeHrFeatures.map((permission: HrGrant) => permission.featureCode!)],
-      }, definitions));
+        explicitlySelectedFeatures: (effectiveResponse.data.data as EffectiveAccess).features.map(({ feature }) => feature),
+      }, definitions);
+      for (const feature of (effectiveResponse.data.data as EffectiveAccess).disabledFeatures ?? []) {
+        loadedDraft = setFeatureSelection(loadedDraft, definitions, feature, false);
+      }
+      setDraft(loadedDraft);
+      setBaselineFeatures(new Set(loadedDraft.selectedFeatures));
       setExpiresAt('');
       setReason('');
     } catch (error: any) {
@@ -227,6 +234,9 @@ export default function PermissionsPage() {
     try {
       await hrAuthorizationAPI.saveUserAccess(selectedUser.id, {
         role: draftRole,
+        preserveFeatureInheritance: true,
+        managedFeatures: definitions.filter(definition => (actor?.role === 'ADMIN' || definition.requiredLevel !== 'admin')
+          && draft.selectedFeatures.has(definition.key) !== baselineFeatures.has(definition.key)).map(({ key }) => key),
         workspaceLevels: draft.workspaceLevels,
         features: definitions.filter(({ key }) => draft.selectedFeatures.has(key)).map((definition) => ({
           key: definition.key,
@@ -349,10 +359,10 @@ export default function PermissionsPage() {
                       const isAutomatic = draft.automaticallyAddedFeatures.has(definition.key);
                       const direct = draft.explicitlySelectedFeatures.has(definition.key);
                       const serverEffectiveLevel = effectiveHrFeatureLevels.get(definition.key);
-                      const checked = implicitSystemAdmin || (canEdit
-                        ? draft.selectedFeatures.has(definition.key) || inherited
+                      const checked = (canEdit
+                        ? draft.selectedFeatures.has(definition.key)
                         : Boolean(serverEffectiveLevel));
-                      return <div key={`${definition.source}-${definition.key}`} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3"><ErpCheckbox checked={checked} disabled={implicitSystemAdmin || !canEdit || inherited || isAutomatic || (actor?.role === 'MANAGER' && definition.requiredLevel === 'admin')} onChange={(event) => setDraft((current) => setFeatureSelection(current, definitions, definition.key, event.target.checked))} label={<span>{definition.label} {implicitSystemAdmin && <ErpBadge tone="info">از نقش مدیر سامانه</ErpBadge>} {direct && canEdit && <ErpBadge tone="primary">مستقیم · {LEVEL_LABELS[definition.requiredLevel]}</ErpBadge>} {inherited && canEdit && <ErpBadge tone="info">از نقش · مؤثر</ErpBadge>} {!canEdit && serverEffectiveLevel && <ErpBadge tone="info">مؤثر · {LEVEL_LABELS[serverEffectiveLevel]}</ErpBadge>} {isAutomatic && canEdit && <ErpBadge tone="purple">پیش‌نیاز</ErpBadge>}</span>} /></div>;
+                      return <div key={`${definition.source}-${definition.key}`} className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3"><ErpCheckbox checked={checked} disabled={!canEdit || (actor?.role === 'MANAGER' && definition.requiredLevel === 'admin')} onChange={(event) => setDraft((current) => setFeatureSelection(current, definitions, definition.key, event.target.checked))} label={<span>{definition.label} {implicitSystemAdmin && checked && <ErpBadge tone="info">از نقش مدیر سامانه</ErpBadge>} {direct && canEdit && <ErpBadge tone="primary">مستقیم · {LEVEL_LABELS[definition.requiredLevel]}</ErpBadge>} {inherited && checked && canEdit && <ErpBadge tone="info">از نقش · مؤثر</ErpBadge>} {!canEdit && serverEffectiveLevel && <ErpBadge tone="info">مؤثر · {LEVEL_LABELS[serverEffectiveLevel]}</ErpBadge>} {isAutomatic && canEdit && <ErpBadge tone="purple">پیش‌نیاز</ErpBadge>}</span>} /></div>;
                     })}</div>{automatic.length > 0 && <ErpCard tone="info" className="mt-4 p-3"><strong className="text-sm">پیش‌نیازهای افزوده‌شده</strong><div className="mt-2 flex flex-wrap gap-2">{automatic.map((definition) => <ErpBadge key={definition.key} tone="info">{definition.label}</ErpBadge>)}</div></ErpCard>}</div>}
                   </ErpSection>;
                 })}

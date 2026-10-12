@@ -1571,6 +1571,8 @@ export const hrAuthorizationAPI = {
     headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
   }),
   saveUserAccess: (userId: string, data: {
+    preserveFeatureInheritance?: boolean;
+    managedFeatures?: string[];
     role: string;
     workspaceLevels: Record<string, string | null>;
     features: Array<{ key: string; level: string }>;

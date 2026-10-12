@@ -773,7 +773,10 @@ export const requireFeatureAccess = (feature: Feature, requiredPermission: Featu
         });
       }
 
-      // Super admin has access to all features
+      const disabled = await prisma.featurePermission.findUnique({ where: { userId_workspace_feature: { userId: req.user.id, workspace: FEATURE_WORKSPACE_MAP[feature], feature } } });
+      if (isPermissionActiveAndNotExpired(disabled) && disabled!.permissionLevel === 'none') return res.status(403).json({ success: false, error: 'مجوز این عملیات برای شما فعال نیست.' });
+
+      // Super admin has access to all unrevoked features
       if (req.user.role === 'ADMIN') {
         req.featurePermission = FEATURE_PERMISSIONS.ADMIN;
         return next();
@@ -782,15 +785,7 @@ export const requireFeatureAccess = (feature: Feature, requiredPermission: Featu
       const workspace = FEATURE_WORKSPACE_MAP[feature];
 
       // Check user-specific feature permissions
-      const userFeaturePermission = await prisma.featurePermission.findUnique({
-        where: {
-          userId_workspace_feature: {
-            userId: req.user.id,
-            workspace: workspace,
-            feature: feature
-          }
-        }
-      });
+      const userFeaturePermission = disabled;
 
       // Check role-based feature permissions
       const roleFeaturePermission = await prisma.roleFeaturePermission.findUnique({
@@ -945,10 +940,6 @@ export const requireAnyFeatureAccessWithClient = (
         });
       }
 
-      if (globallyEligibleRoles.includes(req.user.role)) {
-        req.featurePermission = FEATURE_PERMISSIONS.ADMIN;
-        return next();
-      }
 
       for (const feature of features) {
         const workspace = FEATURE_WORKSPACE_MAP[feature];
@@ -962,6 +953,9 @@ export const requireAnyFeatureAccessWithClient = (
             }
           }
         });
+
+        if (isPermissionActiveAndNotExpired(userFeaturePermission) && userFeaturePermission!.permissionLevel === 'none') continue;
+        if (globallyEligibleRoles.includes(req.user.role)) { req.featurePermission = FEATURE_PERMISSIONS.ADMIN; return next(); }
 
         const roleFeaturePermission = await permissionClient.roleFeaturePermission.findUnique({
           where: {
@@ -1033,9 +1027,11 @@ export const getUserFeatures = async (userId: string, userRole: string): Promise
   try {
     const features: { feature: Feature; permission: FeaturePermission; workspace: string }[] = [];
 
-    // Super admin has access to all features
+    const disabledRows = await prisma.featurePermission.findMany({ where: { userId, isActive: true, permissionLevel: 'none' } });
+    const disabled = new Set(disabledRows.filter(row => row.permissionLevel === 'none' && isPermissionActiveAndNotExpired(row)).map(row => row.feature));
+    // Super admin has access to all unrevoked features
     if (userRole === 'ADMIN') {
-      return Object.entries(FEATURE_WORKSPACE_MAP).map(([feature, workspace]) => ({
+      return Object.entries(FEATURE_WORKSPACE_MAP).filter(([feature]) => !disabled.has(feature)).map(([feature, workspace]) => ({
         feature: feature as Feature,
         permission: FEATURE_PERMISSIONS.ADMIN,
         workspace
@@ -1085,6 +1081,7 @@ export const getUserFeatures = async (userId: string, userRole: string): Promise
     ]);
 
     for (const feature of allFeatures) {
+      if (disabled.has(feature)) continue;
       const workspace = FEATURE_WORKSPACE_MAP[feature as Feature];
       
       const userFeaturePermission = userFeaturePermissions.find(

@@ -241,3 +241,19 @@ test('company manager response uses real authorization and availability; title, 
   evidence.grants[0].scope = 'COMPANY'; evidence.grants[0].expiresAt = evidence.evaluatedAt;
   assert.equal((await policy.authorize('INQUIRY_RESPOND', evidence.resource!.root)).ok, false);
 });
+
+test('an unchecked responder operation stops ADMIN and explicit scoped grants on an already-created port', async () => {
+  const { evidence, source } = fixture();
+  evidence.actor = { id: 'internal-a', active: true, role: 'ADMIN' };
+  evidence.resource!.root = { kind: 'INQUIRY', id: 'case-a' };
+  evidence.grants = [{ action: 'INQUIRY_RESPOND', rootKind: 'INQUIRY', purpose: 'RESPONDER', scope: 'COMPANY' }];
+  const port = createPartnerAuthorization(source, { actorId: 'internal-a', purpose: 'RESPONDER', channel: 'API' });
+  assert.equal((await port.authorize('INQUIRY_RESPOND', evidence.resource!.root)).ok, true);
+  evidence.actor.disabledFeatures = ['sales_partner_inquiries_respond'];
+  const revoked = await port.authorize('INQUIRY_RESPOND', evidence.resource!.root);
+  assert.equal(revoked.ok ? null : revoked.error.code, 'FORBIDDEN');
+  evidence.actor.role = 'MANAGER';
+  assert.equal((await port.authorize('INQUIRY_RESPOND', evidence.resource!.root)).ok, false);
+  evidence.actor.disabledFeatures = [];
+  assert.equal((await port.authorize('INQUIRY_RESPOND', evidence.resource!.root)).ok, true);
+});

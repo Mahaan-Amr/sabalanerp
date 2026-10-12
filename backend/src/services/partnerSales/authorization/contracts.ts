@@ -6,7 +6,7 @@ export type AuthorizationBinding = Pick<PermissionContext, 'actorId' | 'purpose'
 export interface AuthorizationEvidence<Action extends PartnerActionV2 = PartnerAction> {
   evaluatedAt: string;
   authorizationRevision: number;
-  actor: { id: string; active: boolean; role: string; departmentId?: string;
+  actor: { id: string; active: boolean; role: string; disabledFeatures?: string[]; departmentId?: string;
     partnerProfile?: { state: PermissionContext['partnerStatus']; revision: number } };
   resource: { root: AuthorizationRoot; partnerSellerId: string;
     partnerStatus: PermissionContext['partnerStatus']; lifecycleRevision: number; departmentId?: string;

@@ -1,3 +1,4 @@
+import { requireHrFeature } from '../middleware/hrAuthorization';
 import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
@@ -8,6 +9,11 @@ import { expandFeaturePrerequisites, featurePrerequisites } from '../services/fe
 import { expandHrActionPermissionSelection, getHrActionPermissionDefinition } from '../services/hrActionPermissionCatalog';
 
 const router = express.Router();
+// Legacy administrative writers obey the same operation checkbox as the canonical editor.
+router.use((req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  return protect(req, res, () => requireHrFeature('AUTHORITY_RESPONSIBILITY_ADMINISTRATION', 'ADMIN')(req, res, next));
+});
 
 const isManager = (req: any) => req.user?.role === 'MANAGER';
 const isAdminPermissionLevel = (permissionLevel?: string) =>

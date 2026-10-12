@@ -43,7 +43,7 @@ test('v2 availability never expands the Partner bundle and retains all ADMIN dom
   const partner = createPartnerAuthorizationV2(source, { actorId: 'partner-a', purpose: 'MANAGEMENT', channel: 'DETAIL' });
   const unavailable = await projectActionAvailabilityV2(partner, root, ['COMMERCIAL_TERMS_MANAGE', 'COMMERCIAL_TERMS_MANAGE']);
   assert.deepEqual(unavailable, [{ action: 'COMMERCIAL_TERMS_MANAGE', enabled: false, disabledReason: {
-    code: 'FORBIDDEN', status: 403, message: 'اجازه انجام این اقدام را ندارید.',
+    code: 'FORBIDDEN', status: 403, message: 'اجازه انجام این اقدام را ندارید؛ با حساب دارای دسترسی وارد شوید یا به صفحه قبل برگردید.',
   } }]);
   evidence.actor = { id: 'admin-a', active: true, role: 'ADMIN' };
   const admin = createPartnerAuthorizationV2(source, { actorId: 'admin-a', purpose: 'MANAGEMENT', channel: 'API' });
@@ -57,7 +57,7 @@ test('v2 availability never expands the Partner bundle and retains all ADMIN dom
   ] as const) {
     evidence.resource!.root = { kind, id: 'resource-a' }; evidence.resource!.requesterId = 'admin-a';
     const port = createPartnerAuthorizationV2(source, { actorId: 'admin-a', purpose, channel: 'API' });
-    assert.equal((await port.authorize(action, evidence.resource!.root)).ok, false, action);
+    assert.equal((await port.authorize(action, evidence.resource!.root)).ok, action === 'INQUIRY_RESPOND', action);
   }
   evidence.resource = null;
   assert.deepEqual(await projectActionAvailabilityV2(admin, root, ['COMMERCIAL_TERMS_MANAGE']), []);

@@ -5,8 +5,9 @@ const run = async () => {
   assert.deepEqual(Object.keys(WORKSPACE_ACTION_RULES).sort(), [
     'accounting', 'bi', 'crm', 'hr', 'inventory', 'logistics', 'sales', 'security',
   ]);
+  const adminClient = { featurePermission: { findMany: async () => [], findUnique: async () => null }, roleFeaturePermission: { findUnique: async () => null }, workspacePermission: { findUnique: async () => null }, roleWorkspacePermission: { findUnique: async () => null } };
   for (const workspace of Object.keys(WORKSPACE_ACTION_RULES) as Array<keyof typeof WORKSPACE_ACTION_RULES>) {
-    const availability = await resolveWorkspaceActionAvailability({} as never, {
+    const availability = await resolveWorkspaceActionAvailability(adminClient as never, {
       userId: 'system-admin', role: 'ADMIN', workspace,
     });
     assert.equal(Object.keys(availability).length, Object.keys(WORKSPACE_ACTION_RULES[workspace]).length);

@@ -1,5 +1,6 @@
 import { readPartnerCommercialState, acceptPartnerCustomer } from '../services/partnerSales/cases/commercialLifecycle';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
+import { hasSharedOperationAuthority } from '../services/partnerSales/authorization/sharedOperationAuthority';
 import { readPartnerCommercialAccountingCapabilities } from '../services/partnerSales/accounting/capabilities';
 import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response, type RequestHandler } from 'express';
@@ -63,7 +64,9 @@ router.get('/commercial-candidates', guarded(async (request, response) => {
       const write = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: correlation(request), reason: 'بررسی مجوز اقدام حسابداری پرونده همکار' }).authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: root.id });
       rows.push({ caseId: root.id, caseNumber: root.caseNumber, contractNumber: root.customerContract!.contractNumber,
         owner: { caseId: root.id, revision: root.headRevision, integrityHash: root.integrityHash }, commercial,
-        canRegister: write.ok && commercial.status === 'FINAL', canPaper: write.ok && capabilities.paper && commercial.status === 'FINAL' && !commercial.customerAccepted });
+        canRegister: write.ok && commercial.status === 'FINAL' &&
+          await hasSharedOperationAuthority(tx, request.user!.id, 'accounting', 'accounting_invoice_candidates_manage'),
+        canPaper: write.ok && capabilities.paper && commercial.status === 'FINAL' && !commercial.customerAccepted });
     }
     return { ok: true as const, value: rows };
   });

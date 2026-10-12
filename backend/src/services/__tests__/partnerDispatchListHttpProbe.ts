@@ -57,8 +57,8 @@ async function main() {
     assert.equal(response.headers.get('X-Dispatch-Documents-Permission'), 'MANAGE');
     assert.equal(body.data.find((row: any) => row.id === expected.ordinary)?.canManage, true,
       'ordinary candidates retain workspace-level mutation availability');
-    assert.equal(body.data.find((row: any) => row.id === expected.allowed)?.canManage, false,
-      'Partner candidates require Case-scoped ACCOUNTING_WRITE even when the workspace grants MANAGE');
+    assert.equal(body.data.find((row: any) => row.id === expected.allowed)?.canManage, true,
+      'current dispatch management permission covers the authorized Partner Case without a duplicate write grant');
     for (const row of body.data) {
       assert.equal('allocationRevision' in row, false);
       assert.equal('allocationRevisionId' in row, false);

@@ -295,6 +295,8 @@ export const filterCurrentlyAuthorizedNotifications = async <
     if (performanceAccess.has(row.id)) return performanceAccess.get(row.id) === true;
     // Performance notifications are protected by their resource-specific checks above.
     // ADMIN bypass applies only to ordinary workspace/feature notifications.
+    if (event?.feature && event.workspace && event.resourceType !== 'HR_DUTY' &&
+        !accessibleFeatures.includes(`${event.workspace}:${event.feature}`)) return false;
     if (user.role === 'ADMIN') return true;
     if (!event) return true;
     if (event.resourceType === 'support-ticket' && event.resourceId) {

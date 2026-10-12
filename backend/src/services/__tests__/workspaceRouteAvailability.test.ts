@@ -55,9 +55,9 @@ const run = async () => {
   });
   assert.equal(unrelated.allowed, true);
   for (const featureCode of [
-    'SUBMIT_PERFORMANCE_EVALUATION',
-    'REVIEW_PERFORMANCE_EVALUATION',
-    'MANAGE_PERFORMANCE_CYCLE',
+    'EVALUATE_DIRECT_REPORTS',
+    'VIEW_PERFORMANCE_EVALUATIONS',
+    'MANAGE_PERFORMANCE_PROFILES',
   ]) {
     const performance = await resolveWorkspaceRouteAvailability(clientWithHrFeature(featureCode) as never, {
       userId: 'operator', role: 'USER', path: '/dashboard/hr/personnel/performance',
@@ -65,7 +65,7 @@ const run = async () => {
     assert.equal(performance.allowed, true, `${featureCode} must admit its holder to the performance workspace`);
   }
   const personnelWithoutPersonnelGrant = await resolveWorkspaceRouteAvailability(
-    clientWithHrFeature('SUBMIT_PERFORMANCE_EVALUATION') as never,
+    clientWithHrFeature('EVALUATE_DIRECT_REPORTS') as never,
     { userId: 'operator', role: 'USER', path: '/dashboard/hr/personnel' },
   );
   assert.equal(personnelWithoutPersonnelGrant.allowed, false,

@@ -3,6 +3,7 @@ import { renderContractHtml, renderContractPdfHeaderTemplate, type ContractCusto
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../../../lib/prisma';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
+import { hasSharedOperationAuthority } from '../authorization/sharedOperationAuthority';
 import { withAccountingReadScope } from './readScope';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE } from './source';
 import { projectPartnerInternalContent } from './internalDocumentContent';
@@ -110,6 +111,7 @@ export async function withPartnerInternalAccountingTarget<T>(caseId: string, act
       { actorId: actorUserId, purpose: 'ACCOUNTING', channel: 'API' },
       { correlationId: randomUUID(), reason: 'ثبت اقدام حسابداری سند داخلی همکار' });
     if (!(await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok) return null;
+    if (!await hasSharedOperationAuthority(scope.database, actorUserId, 'accounting', 'accounting_actions_manage')) return null;
     return work(scope.database, { customerContractId: sale.customerContractId, invoiceRecordId: invoice.id });
   });
 }

@@ -1,4 +1,5 @@
 import { partnerReactivationAt } from './reactivationPricing';
+import { cancelPartnerCaseInquiries } from '../inquiries/caseCancellation';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
@@ -450,6 +451,8 @@ Promise<ExecutionResult> {
       const { closePartnerCommercialEditPermission } = await import('../../crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter');
       await closePartnerCommercialEditPermission(tx, { dutyId: permission.id, actorUserId: dependencies.actorId,
         reason: command.reason, now: new Date(at.instant) });
+      await cancelPartnerCaseInquiries(tx, { caseId, actorId: dependencies.actorId, commandId: command.commandId,
+        correlationId: command.correlationId, reason: command.reason, now: new Date(at.instant) });
       await saveOutcome(tx, { ...key, caseId, payloadHash, commandId: command.commandId, owner, state: 'VOIDED', eventIds: [adjustmentId, eventId] });
       return { ok: true, value: { commandId: command.commandId, replayed: false, case: { ...partner, state: 'VOIDED' }, eventIds: [adjustmentId, eventId] } };
     }
@@ -469,6 +472,8 @@ Promise<ExecutionResult> {
       evidence: json({ publicEvent: event, authorizationEvidenceId: authorization.value.evidenceId,
         invalidatedSessionIds: retained.value.invalidatedSessionIds,
         preservedSnapshotIds: retained.value.preservedSnapshotIds }), recordedAt: new Date(at.instant) } });
+    await cancelPartnerCaseInquiries(tx, { caseId, actorId: dependencies.actorId, commandId: command.commandId,
+      correlationId: command.correlationId, reason: command.reason, now: new Date(at.instant) });
     await saveOutcome(tx, { ...key, caseId, payloadHash, commandId: command.commandId, owner,
       state: 'CANCELLED', eventIds: [eventId] });
     return { ok: true, value: { commandId: command.commandId, replayed: false,

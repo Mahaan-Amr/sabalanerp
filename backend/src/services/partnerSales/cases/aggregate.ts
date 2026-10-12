@@ -320,6 +320,12 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     ? projectCustomerVisibleRevisionContent(nextCustomerOutput.data) : undefined;
   const customerVisibleChanged = !previousCustomer || !nextCustomer ||
     await canonicalHash(previousCustomer) !== await canonicalHash(nextCustomer);
+  const productSelection = (graph: unknown) => {
+    const { revision: _revision, ...selection } = graph as Record<string, unknown>;
+    return selection;
+  };
+  const customerAgreementChanged = customerVisibleChanged || current.customerConfirmationState === 'REJECTED' ||
+    await canonicalHash(productSelection(current.head.graph)) !== await canonicalHash(productSelection(evidence.value.graph));
   // Workflow/recovery identifiers are not commercial changes. Wholesale terms,
   // technical configuration and payment instructions are still material.
   const basis = (wholesale: unknown, payment: unknown, graph: unknown, retail: unknown) => {
@@ -331,7 +337,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     }) : [], technical, preparationCompleted: (retail as { preparationCompleted?: boolean }).preparationCompleted !== false,
     sabalanPlan: plan ? { effectiveDate: plan.effectiveDate, installments: plan.installments.map(({ installmentId: _id, ...item }) => item) } : null };
   };
-  const commercialChanged = customerVisibleChanged || current.customerConfirmationState === 'REJECTED' ||
+  const commercialChanged = customerAgreementChanged ||
     current.state === 'COMMITTED' && (await canonicalHash(basis(current.head.wholesaleEnvelope, current.head.paymentEvidence, current.head.graph, current.head.retailEnvelope)) !==
     await canonicalHash(basis(evidence.value.wholesaleEnvelope, evidence.value.paymentEvidence, evidence.value.graph, evidence.value.retailEnvelope)));
   if (command.intent.preparationCompleted && (commercialChanged || current.customerContract?.salesApprovalRevision !== current.customerContract?.commercialRevision)) {
@@ -352,7 +358,7 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   }
   const nextState = current.commercialFlowVersion === 1 || current.state === 'COMMITTED' ? current.state
     : customerVisibleChanged ? 'DRAFT' as const : current.state;
-  const nextConfirmationState = commercialChanged && current.customerConfirmationState !== 'NOT_SENT'
+  const nextConfirmationState = customerAgreementChanged && current.customerConfirmationState !== 'NOT_SENT'
     ? 'RECONFIRMATION_REQUIRED' as const : current.customerConfirmationState;
   const eventId = randomUUID();
   const maximum = await tx.partnerCaseEvent.aggregate({ where: { caseId }, _max: { sequence: true } });
@@ -477,7 +483,8 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
     caseId, ...(current.customerContractId ? { customerContractId: current.customerContractId } : {}) });
   if (!consumed.ok) return consumed;
   if (current.customerContractId && commercialChanged) {
-    await resetPartnerCommercialApprovals(tx, caseId, dependencies.actorId);
+    await resetPartnerCommercialApprovals(tx, caseId, dependencies.actorId, undefined,
+      { preserveCustomerAcceptance: !customerAgreementChanged });
   }
   if (command.intent.preparationCompleted !== false && !current.customerContractId) {
     const allocated = await allocatePartnerLinkedPair(tx, { caseId, actorId: dependencies.actorId, consumeRecovery: dependencies.consumeRecovery,

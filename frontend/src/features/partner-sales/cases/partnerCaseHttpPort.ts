@@ -1,4 +1,4 @@
-import { PartnerAccountViewSchema, PartnerCaseRuntimeResultSchema, partnerInputHash as canonicalHash, partnerError,
+import { PartnerAccountViewSchema, PartnerCaseRuntimeResultSchema, PartnerCaseChangeVersionSchema, partnerInputHash as canonicalHash, partnerError,
   type PartnerCaseRuntimeRow, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
@@ -16,6 +16,11 @@ export async function readPartnerCaseListing(caseId?: string) {
   const parsed = PartnerCaseRuntimeResultSchema.safeParse((response.data as { data?: unknown })?.data);
   if (!parsed.success) throw partnerError('INTEGRITY_CONFLICT');
   return parsed.data;
+}
+
+export async function readPartnerCaseChangeVersion(caseId?: string) {
+  const response = await api.post('/partner/cases/changes-v2', caseId ? { caseId } : {});
+  return PartnerCaseChangeVersionSchema.parse((response.data as { data?: unknown }).data).version;
 }
 
 export async function readPartnerAccount() {

@@ -76,7 +76,11 @@ export function createPrismaPartnerWorkspaceQuery(input: {
           SELECT i.id, COALESCE(i."caseId", i.id) AS "groupId",
             COALESCE(NULLIF(customer."companyName", ''), NULLIF(trim(concat_ws(' ', customer."firstName", customer."lastName")), ''), 'نام مشتری ثبت نشده') AS customer,
             trim(concat_ws(' ', u."firstName", u."lastName")) AS "partnerDisplayName",
-            sc."contractNumber", tc.number AS "trackingNumber"
+            sc."contractNumber", tc.number AS "trackingNumber",
+            (COALESCE(c.state IN ('CANCELLED', 'VOIDED'), false) OR COALESCE(sc.status = 'CANCELLED', false) OR EXISTS (
+              SELECT 1 FROM partner_case_events reactivation WHERE reactivation."caseId" = c.id
+                AND reactivation.type = 'CASE_REACTIVATED' AND i."submittedAt" <= reactivation."recordedAt"
+            )) AS "caseClosed"
           FROM partner_inquiries i
           JOIN partner_profiles p ON p.id = i."profileId"
           JOIN users u ON u.id = p."userId"
@@ -95,19 +99,20 @@ export function createPrismaPartnerWorkspaceQuery(input: {
           SELECT e."groupId", array_agg(DISTINCT e.id ORDER BY e.id) AS "inquiryIds",
             min(e.customer) AS customer, min(e."partnerDisplayName") AS "partnerDisplayName",
             min(e."contractNumber") AS "contractNumber", min(e."trackingNumber") AS "trackingNumber",
-            count(*) FILTER (WHERE successor.id IS NULL)::int AS "currentRows",
-            count(*) FILTER (WHERE successor.id IS NULL AND r.outcome IN ('APPROVED', 'REJECTED'))::int AS "answeredRows",
+            count(*) FILTER (WHERE NOT e."caseClosed" AND successor.id IS NULL)::int AS "currentRows",
+            count(*) FILTER (WHERE NOT e."caseClosed" AND successor.id IS NULL AND r.outcome IN ('APPROVED', 'REJECTED'))::int AS "answeredRows",
             min(r."submittedAt") AS "firstSubmittedAt",
-            bool_or(r.outcome = 'PENDING' AND successor.id IS NULL) AS pending,
-            bool_or(successor.id IS NULL AND r.outcome IN ('REJECTED', 'APPROVED')) AS answered,
+            bool_or(NOT e."caseClosed" AND r.outcome = 'PENDING' AND successor.id IS NULL) AS pending,
+            bool_or(NOT e."caseClosed" AND successor.id IS NULL AND r.outcome IN ('REJECTED', 'APPROVED')) AS answered,
             bool_or(successor.id IS NULL AND r.outcome = 'APPROVED' AND approval."expiresAt" > CURRENT_TIMESTAMP) AS approved,
             bool_or(successor.id IS NULL AND r.outcome = 'REJECTED') AS rejected,
             bool_or(successor.id IS NULL AND r.outcome = 'APPROVED' AND approval."expiresAt" <= CURRENT_TIMESTAMP) AS expired,
-            bool_or(r.outcome = 'CANCELLED') AS cancelled,
+            bool_and(e."caseClosed" OR r.outcome = 'CANCELLED') AS cancelled,
+            bool_and(e."caseClosed") AS "caseClosed",
             bool_or(successor.id IS NOT NULL) AS superseded,
-            min(r."submittedAt") FILTER (WHERE r.outcome = 'PENDING' AND successor.id IS NULL) AS "requestedAt",
+            min(r."submittedAt") FILTER (WHERE NOT e."caseClosed" AND r.outcome = 'PENDING' AND successor.id IS NULL) AS "requestedAt",
             max(COALESCE(approval."approvedAt", decision."answeredAt", r."submittedAt")) FILTER (WHERE successor.id IS NULL AND r.outcome IN ('APPROVED', 'REJECTED')) AS "answeredAt",
-            bool_or(successor.id IS NOT NULL OR r.outcome = 'CANCELLED' OR
+            bool_or(e."caseClosed" OR successor.id IS NOT NULL OR r.outcome = 'CANCELLED' OR
               (r.outcome = 'APPROVED' AND approval."expiresAt" <= CURRENT_TIMESTAMP)) AS history
           FROM eligible e JOIN partner_inquiry_rows r ON r."inquiryId" = e.id AND NOT (r.id = ANY(${paidRowIds}::text[]))
           LEFT JOIN partner_inquiry_rows successor ON successor."predecessorId" = r.id
@@ -130,7 +135,8 @@ export function createPrismaPartnerWorkspaceQuery(input: {
             (SELECT count(*)::int FROM filtered WHERE pending) AS "pendingCount",
             (SELECT count(*)::int FROM filtered WHERE answered AND NOT pending) AS "answeredCount",
             (SELECT count(*)::int FROM filtered WHERE history) AS "historyCount"
-          FROM filtered WHERE CASE ${page.view ?? 'all'}
+          FROM filtered WHERE (${page.contractId ?? ''} <> '' OR ${page.view ?? 'all'} = 'history' OR NOT "caseClosed")
+            AND CASE ${page.view ?? 'all'}
             WHEN 'pending' THEN pending WHEN 'answered' THEN answered AND NOT pending WHEN 'history' THEN history ELSE true END
         )
         , selected AS (

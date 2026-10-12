@@ -19,6 +19,7 @@ import {
   type ProductOperationsTechnicalInput,
   type OperationQuantityOverride,
   type CanonicalDecimal,
+  type ProductOperationsConflict,
   type ToolSelectionDraft
 } from '@sabalanerp/contract-product-graph';
 import {
@@ -56,7 +57,7 @@ const operationUnitLabel = (unit: 'meter' | 'squareMeter') =>
   unit === 'meter' ? 'm' : 'm²';
 
 function RetailOperationPrice({ rate, unit, quantity }: { rate?: string; unit: 'meter' | 'squareMeter'; quantity?: string }) {
-  return <><span>{rate === undefined ? 'نرخ ثبت نشده' : `${formatPrice(rate)} / ${operationUnitLabel(unit)}`}</span>
+  return <><span>{rate === undefined ? `نرخ ثبت نشده / ${operationUnitLabel(unit)}` : `${formatPrice(rate)} / ${operationUnitLabel(unit)}`}</span>
     <span className="font-semibold">{rate !== undefined && quantity !== undefined
       ? formatPrice(multiplyContractMonetaryAmounts(rate, quantity)) : '—'}</span></>;
 }
@@ -159,7 +160,7 @@ function CatalogResults({
             </span>
             {showPricing && <span className="text-[var(--sds-text-muted)]">
               {(kind === 'finishing' && item.unit === 'meter') || item.rateToman === undefined || item.rateToman === null
-                ? 'نرخ ثبت نشده'
+                ? `نرخ ثبت نشده / ${operationUnitLabel(item.unit)}`
                 : `${formatPrice(item.rateToman)} / ${operationUnitLabel(item.unit)}`}
             </span>}
           </ErpPressable>
@@ -176,7 +177,8 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
   loadFinishings,
   toolCacheKey = 'contract-product-tools',
   finishingCacheKey = 'contract-product-finishings',
-  retailRateFor
+  retailRateFor,
+  requireRetailFinishingRates = false
 }: {
   input: Input;
   onChange: (input: Input) => void;
@@ -186,6 +188,7 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
   finishingCacheKey?: string;
   /** Authorized customer-sale suggestion for display only; never enters technical selections. */
   retailRateFor?: (kind: 'tool' | 'finishing', item: OperationCatalogItem) => string | undefined;
+  requireRetailFinishingRates?: boolean;
 }) {
   const pricingVisible = useProductPricingVisibility();
   const showPricing = pricingVisible && !('inputRevision' in input);
@@ -246,8 +249,14 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
     if (selected && !deficit) return undefined;
     return `حداقل ${String(minimum).replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} ${item.unit === 'meter' ? 'متر طول' : 'متر مربع'}`;
   };
-  const conflictFor = (id: string) => {
+  const missingRetailFinishings = requireRetailFinishingRates
+    ? input.finishings.filter(item => retailRateFor?.('finishing', item) === undefined) : [];
+  const conflictFor = (id: string): ProductOperationsConflict | undefined => {
     const conflict = presentation.conflictByEntityId.get(id);
+    if (!conflict && missingRetailFinishings.some(item => item.finishingSelectionId === id)) {
+      return { code: 'inventory-rate-missing', entityId: id, path: ['finishings', 'rateToman'],
+        message: 'Finishing rate is not registered in inventory.' };
+    }
     return !showPricing && conflict?.code === 'inventory-rate-missing' ? undefined : conflict;
   };
   const conflictMessage = (
@@ -482,7 +491,7 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
                   <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(tool.unit)}</span>
-                {showPricing && <span>{!('rateToman' in tool) || tool.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(tool.rateToman)}</span>}
+                {showPricing && <span>{!('rateToman' in tool) || tool.rateToman === undefined ? `نرخ ثبت نشده / ${operationUnitLabel(tool.unit)}` : formatPrice(tool.rateToman)}</span>}
                 {showPricing && <span className="font-semibold">{calculated && 'amountToman' in calculated && typeof calculated.amountToman === 'string' ? formatPrice(calculated.amountToman) : '—'}</span>}
                 {!showPricing && retailRateFor && <RetailOperationPrice rate={retailRateFor('tool', tool)}
                   unit={tool.unit} quantity={calculated?.finalQuantity} />}
@@ -720,7 +729,7 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
                   <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(finishing.unit)}</span>
-                {showPricing && <span>{!('rateToman' in finishing) || finishing.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(finishing.rateToman)}</span>}
+                {showPricing && <span>{!('rateToman' in finishing) || finishing.rateToman === undefined ? `نرخ ثبت نشده / ${operationUnitLabel(finishing.unit)}` : formatPrice(finishing.rateToman)}</span>}
                 {showPricing && <span className="font-semibold">{calculated && 'amountToman' in calculated && typeof calculated.amountToman === 'string' ? formatPrice(calculated.amountToman) : '—'}</span>}
                 {!showPricing && retailRateFor && <RetailOperationPrice rate={retailRateFor('finishing', finishing)}
                   unit={finishing.unit} quantity={calculated?.finalQuantity} />}
@@ -882,7 +891,7 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
         })}
       </InlineCollectionSection>
 
-      {!calculation.ok && calculation.conflicts.some(conflict => showPricing || conflict.code !== 'inventory-rate-missing') && (
+      {(missingRetailFinishings.length > 0 || (!calculation.ok && calculation.conflicts.some(conflict => showPricing || conflict.code !== 'inventory-rate-missing'))) && (
         <div
           data-operation-total-incomplete
           className="border-t border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-2 py-2 text-xs font-semibold text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]"

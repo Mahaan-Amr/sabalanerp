@@ -24,7 +24,7 @@ export function ResponderEditor({ inquiry, editableRowIds, rowStatus, session, r
   const [review, setReview] = useState<Decisions | null>(null);
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState<CommandFeedback | null>(null);
-  const fresh = useResponderRefresh(refresh, inquiry.inquiryId);
+  const fresh = useResponderRefresh(refresh, inquiry.inquiryId, pending || feedback?.kind === 'uncertain');
   const running = useRef(false);
   const locked = pending || feedback?.kind === 'uncertain';
   useEffect(() => {

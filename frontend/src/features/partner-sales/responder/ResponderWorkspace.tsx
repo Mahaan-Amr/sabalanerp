@@ -15,7 +15,7 @@ export function ResponderWorkspace({ queryPort, inquiryQueryPort = queryPort, co
   const params = useSearchParams();
   const inquiryId = params.get('inquiryId');
   if (inquiryId) return <ResponderContractWorkspace inquiryId={inquiryId} queryPort={queryPort} inquiryQueryPort={inquiryQueryPort} commandPort={commandPort} />;
-  return <ResponderList queryPort={queryPort} initialView={params.get('view') === 'pending' ? 'pending' : 'all'} />;
+  return <ResponderList queryPort={queryPort} initialView={params.get('view') === 'history' ? 'history' : params.get('view') === 'pending' ? 'pending' : 'all'} />;
 }
 function ResponderList({ queryPort, initialView }: { queryPort: PartnerQueryV2Port; initialView: Query['view'] }) {
   const [view, setView] = useState<Query['view']>(initialView);
@@ -33,13 +33,13 @@ function ResponderList({ queryPort, initialView }: { queryPort: PartnerQueryV2Po
     actions={[{ label: 'به‌روزرسانی', variant: 'outline', tone: 'neutral', onClick: () => void resource.refresh().catch(() => undefined) }]}
     filters={[
       { id: 'search', label: 'جستجو', type: 'search', value: search, onChange: setSearch, placeholder: 'نام مشتری، همکار یا شماره قرارداد' },
-      { id: 'response', label: 'وضعیت پاسخ', type: 'select', value: view ?? 'all', onChange: value => setView(value as Query['view']), options: [{ value: 'all', label: 'همه' }, { value: 'pending', label: 'نیازمند پاسخ' }, { value: 'answered', label: 'پاسخ داده شده' }] },
+      { id: 'response', label: 'وضعیت پاسخ', type: 'select', value: view ?? 'all', onChange: value => setView(value as Query['view']), options: [{ value: 'all', label: 'همه' }, { value: 'pending', label: 'نیازمند پاسخ' }, { value: 'answered', label: 'پاسخ داده شده' }, { value: 'history', label: 'سوابق' }] },
       { id: 'status', label: 'وضعیت استعلام', type: 'select', value: status ?? 'all', onChange: value => setStatus(value as Query['status']), options: [{ value: 'all', label: 'همه وضعیت‌ها' }, { value: 'approved', label: 'قیمت ارائه‌شده' }, { value: 'rejected', label: 'رد جهت اصلاح' }, { value: 'expired', label: 'قیمت منقضی‌شده' }, { value: 'cancelled', label: 'لغوشده' }, { value: 'superseded', label: 'جایگزین‌شده' }] },
     ]}
     columns={[
       { id: 'customer', header: 'نام مشتری', cell: row => <div><p className="font-semibold">{row.customer}</p><p className="text-xs sds-text-secondary">{row.partnerDisplayName}</p></div> },
       { id: 'number', header: 'شماره قرارداد', cell: row => <div><p>{row.label}</p><p className="text-xs sds-text-secondary">{row.pending ? 'درخواست' : 'پاسخ'}: {time(row.pending ? row.requestedAt : row.answeredAt ?? row.requestedAt)}</p></div> },
-      { id: 'status', header: 'وضعیت', cell: row => <div className="space-y-1"><ErpBadge tone={row.pending ? 'warning' : row.answeredRows ? 'success' : 'neutral'}>{row.pending ? 'استعلام نشده' : row.answeredRows ? 'استعلام شده' : row.cancelled ? 'لغوشده' : 'جایگزین‌شده'}</ErpBadge>{row.pending && <p className="text-xs sds-text-secondary">{row.answeredRows.toLocaleString('fa-IR')} از {row.currentRows.toLocaleString('fa-IR')} ردیف پاسخ گرفته‌اند</p>}</div> },
+      { id: 'status', header: 'وضعیت', cell: row => <div className="space-y-1"><ErpBadge tone={row.pending ? 'warning' : row.cancelled ? 'neutral' : row.answeredRows ? 'success' : 'neutral'}>{row.pending ? 'استعلام نشده' : row.cancelled ? 'لغوشده' : row.answeredRows ? 'استعلام شده' : 'جایگزین‌شده'}</ErpBadge>{row.pending && <p className="text-xs sds-text-secondary">{row.answeredRows.toLocaleString('fa-IR')} از {row.currentRows.toLocaleString('fa-IR')} ردیف پاسخ گرفته‌اند</p>}</div> },
       { id: 'tools', header: 'ابزارها', cell: row => <ErpButton label="مشاهده قرارداد" variant="outline" href={`/dashboard/sales/partner-inquiries/${encodeURIComponent(row.id)}`} /> },
     ]}
     emptyState={<ErpEmptyState title="استعلامی با این فیلتر وجود ندارد." />}

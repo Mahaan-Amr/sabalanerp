@@ -9,7 +9,8 @@ import { approvePartnerCommercialSales, readPartnerCommercialState, resetPartner
 import { casePdfAvailability, resolveCasePdfSnapshot } from '../services/partnerSales/customerOutput/casePdf';
 import { createCustomerOutputSnapshots } from '../services/partnerSales/customerOutput/snapshots';
 import { CustomerOutputError } from '../services/partnerSales/customerOutput/contracts';
-import { readCasePricingResponse } from '../services/partnerSales/cases/pricingResponse';
+import { readCasePricingResponse, readCasePricingPresentation } from '../services/partnerSales/cases/pricingResponse';
+import { readPartnerCaseChangeVersion } from '../services/partnerSales/cases/changeVersion';
 import { z } from 'zod';
 import { createPartnerTechnicalEvidenceResolver } from '../services/partnerSales/cases/technicalEvidence';
 import { compilePartnerTechnicalGraph } from '../services/partnerSales/cases/technicalGraph';
@@ -30,6 +31,7 @@ import { buildCaseProjections } from '../services/partnerSales/cases/projections
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readAuthorizationDecisionByCorrelation } from '../services/effectiveAuthorization/audit';
 import { generateCustomerContractPdf } from '../utils/pdf';
+import { partnerCustomerPrintDetails, readPartnerPrintCodes } from '../utils/partnerProductPrint';
 import { contractConfirmationService } from '../services/contractConfirmationService';
 import { authorizePartnerTechnicalRollout, lockPartnerOperationsControl } from '../services/partnerSales/authorization/technicalRollout';
 import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../services/contractRecoveryProtection';
@@ -760,6 +762,26 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       respond(response, await service.execute(command.data));
     } catch { respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); }
   });
+  router.post('/changes-v2', async (request: AuthRequest, response) => {
+    if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
+    const query = partnerContracts.PartnerCaseRuntimeQuerySchema.safeParse(request.body);
+    if (!query.success) { respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return; }
+    try {
+      const result = await prisma.$transaction(async tx => {
+        await lockPartnerOperationsControl(tx);
+        const profile = await tx.partnerProfile.findUnique({ where: { userId: request.user!.id }, select: { id: true } });
+        // This heartbeat is exclusively owner-scoped. Internal workspaces retain their normal reads.
+        if (!profile) return { ok: true as const, value: { version: null } };
+        const allowed = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id, purpose: 'PARTNER', channel: 'LIST' },
+          { correlationId: correlation(request) }).authorize('CASE_READ', { kind: 'PROFILE', id: profile.id });
+        if (!allowed.ok) return allowed;
+        return { ok: true as const, value: { version: await readPartnerCaseChangeVersion(tx, profile.id,
+          allowed.value.authorizationRevision, query.data.caseId,
+          { revision: allowed.value.lifecycleRevision, state: allowed.value.partnerStatus }) } };
+      }, { maxWait: 5_000, timeout: 10_000 });
+      respond(response, result);
+    } catch { respond(response, { ok: false, error: partnerError('TEMPORARY_FAILURE') }); }
+  });
   router.post('/query-v2', async (request: AuthRequest, response) => {
     if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
     const query = partnerContracts.PartnerCaseRuntimeQuerySchema.safeParse(request.body);
@@ -850,11 +872,12 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             await tx.accountingContractFlag.findMany({ where: { contractId: row.customerContractId,
               status: 'OPEN', trackingCode: { startsWith: 'partner-internal-correction:' } },
               select: { id: true, note: true, createdAt: true }, orderBy: { createdAt: 'desc' } }) : [];
-          const pricingResponseState = (row.state === 'DRAFT' || !!commercial) && actorProfile && editableRecovery
-            ? await readCasePricingResponse(tx, { caseId: row.id, headRevision: row.headRevision,
+          const pricingPresentation = (row.state === 'DRAFT' || !!commercial) && actorProfile && editableRecovery
+            ? await readCasePricingPresentation(tx, { caseId: row.id, headRevision: row.headRevision,
               profileId: actorProfile.id, actorId: request.user!.id, recovery: editableRecovery.recovery }) : undefined;
+          const pricingResponseState = pricingPresentation?.state;
           const customerIdentity = partnerContracts.CustomerDisplayPartySchema.safeParse((row.head?.partySnapshots as { customer?: unknown } | null)?.customer);
-          const runtimeRow = { ...(customerIdentity.success ? { customerName: customerIdentity.data.displayName } : {}), ...(commercial ? { commercial: await readPartnerCommercialState(tx, row.id, pricingResponseState) } : {}), ...(pricingResponseState ? { pricingResponseState } : {}), view: { ...view.data, ...(row.customerContract ? { customerContractNumber: row.customerContract.contractNumber } : {}), ...(row.commercialFlowVersion === 1 ? { commercialFlowVersion: 1 as const } : {}), ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}), state: row.state,
+          const runtimeRow = { ...(customerIdentity.success ? { customerName: customerIdentity.data.displayName } : {}), ...(commercial ? { commercial: await readPartnerCommercialState(tx, row.id, pricingResponseState, pricingPresentation) } : {}), ...(pricingResponseState ? { pricingResponseState } : {}), inquiryResponseComplete: pricingPresentation?.complete ?? false, view: { ...view.data, ...(row.customerContract ? { customerContractNumber: row.customerContract.contractNumber } : {}), ...(row.commercialFlowVersion === 1 ? { commercialFlowVersion: 1 as const } : {}), ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}), state: row.state,
             pricingState: row.pricingState, customerConfirmationState: row.customerConfirmationState },
             ...(edit && correctionDuty ? { reviewedCorrection: { requestId: correctionDuty.sourceId,
               reason: correctionDuty.accountantNote, ...(correctionDuty.dueAt ? { dueAt: correctionDuty.dueAt.toISOString() } : {}) } } : {}),
@@ -1110,7 +1133,11 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         }
         const existing = mode === 'PREVIEW' ? null : await tx.partnerCustomerArtifact.findUnique({
           where: { snapshotId_mode: { snapshotId: snapshot.snapshotId, mode: 'FINAL' } } });
-        return { ok: true as const, value: { snapshot, row, existing } };
+        const revision = await tx.partnerCaseRevision.findUnique({ where: { caseId_revision: {
+          caseId: row.id, revision: snapshot.owner.revision } }, select: { graph: true, integrityHash: true } });
+        const printDetails = revision && revision.integrityHash === snapshot.owner.integrityHash
+          ? partnerCustomerPrintDetails(snapshot.content, revision.graph, await readPartnerPrintCodes(tx, revision.graph)) : [];
+        return { ok: true as const, value: { snapshot, row, existing, printDetails } };
       });
       if (!prepared.ok) { respond(response, prepared); return; }
       if (mode === 'DOWNLOAD_EXISTING' && !prepared.value.existing) {
@@ -1125,8 +1152,12 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           respond(response, { ok: false, error: partnerError('INTEGRITY_CONFLICT') }); return;
         }
       }
-      let bytes = prepared.value.existing?.content ?? await generateCustomerContractPdf(partnerContracts,
-        prepared.value.snapshot.content);
+      // An explicit archive download returns the original verified bytes. A
+      // reprint uses today's layout over the same immutable revision evidence;
+      // it never replaces the issued artifact or repeats publication.
+      let bytes = mode === 'DOWNLOAD_EXISTING' && prepared.value.existing
+        ? prepared.value.existing.content
+        : await generateCustomerContractPdf(partnerContracts, prepared.value.snapshot.content, prepared.value.printDetails);
       if (mode === 'FINAL' && !prepared.value.existing) {
         const byteHash = `sha256-v1:${createHash('sha256').update(bytes).digest('hex')}`;
         const committed = await prisma.$transaction(async tx => {

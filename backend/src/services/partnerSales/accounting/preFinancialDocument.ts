@@ -6,6 +6,7 @@ import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { projectPartnerInternalContent, partnerInternalPhysicalFacts } from './internalDocumentContent';
 import { withAccountingReadScope } from './readScope';
 import { prisma } from '../../../lib/prisma';
+import { fillPartnerPrintCodes, partnerPhysicalPrintDetails, readPartnerPrintCodes } from '../../../utils/partnerProductPrint';
 import { partnerCustomerPrintSelect } from './customerPrintInformation';
 
 const object = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -35,9 +36,13 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
   const content = projectPartnerInternalContent({ partnerPreparation: { owner,
     products: accounting.products, totals: accounting.totals, paymentPlan: accounting.sabalanPaymentPlan } }, root.head.graph);
   const amountKnown = Boolean(content.totals);
+  const codes = await readPartnerPrintCodes(tx, root.head.graph);
+  content.items = content.items.map(item => ({ ...item, productCode: item.productCode || item.printDetails?.code || codes.get(item.productRowId),
+    ...(item.printDetails ? { printDetails: fillPartnerPrintCodes({ ...item.printDetails, code: item.printDetails.code || item.productCode }, codes) } : {}) }));
   const items = amountKnown ? content.items : (Array.isArray(partner.products) ? partner.products : []).map((row: Record<string, any>) => ({
       ...partnerInternalPhysicalFacts(String(row.productRowId), root.head.graph),
-      productCode: typeof row.productCode === 'string' ? row.productCode : partnerInternalPhysicalFacts(String(row.productRowId), root.head.graph).productCode,
+      printDetails: partnerPhysicalPrintDetails(String(row.productRowId), root.head.graph),
+      productCode: typeof row.productCode === 'string' ? row.productCode : codes.get(String(row.productRowId)),
       productRowId: String(row.productRowId), description: String(row.description), quantity: String(row.quantity),
       unit: String(row.unit), unitPrice: '0', totalPrice: '0',
     }));
@@ -51,7 +56,7 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
       debtor: { displayName: String(object(parties.partner).displayName ?? '') },
       endCustomer: { displayName: String(object(parties.customer).displayName ?? ''),
         phone: typeof object(parties.customer).phone === 'string' ? object(parties.customer).phone : undefined }, revision: root.headRevision,
-      actionUrl: `/dashboard/accounting/contracts/partner/${encodeURIComponent(caseId)}`, accountingWritable: false },
+      actionUrl: `/dashboard/accounting/contracts/partner/${encodeURIComponent(caseId)}`, accountingWritable: false, accountingDraftDeletionWritable: false },
     ...content, items, contractDate: typeof context.contractDate === 'string' ? context.contractDate : undefined,
     customerInformation: root.customer,
     project: context.project ? { title: String(object(context.project).title ?? ''), address: String(object(context.project).address ?? '') } : undefined,

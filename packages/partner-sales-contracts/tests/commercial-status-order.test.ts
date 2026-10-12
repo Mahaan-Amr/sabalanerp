@@ -14,3 +14,13 @@ test('partner main status follows sales approval customer acceptance offer and f
   assert.equal(partnerCommercialStatus({ ...initial, pricingReceived: true, expired: true }), 'EXPIRED');
   assert.equal(partnerCommercialStatus({ ...initial, pricingReceived: true, cancelled: true }), 'CANCELLED');
 });
+
+test('post-edit note wins until Partner confirmation, including existing customer acceptance and complete answers', () => {
+  const edited = { edited: true, salesApproved: false, customerAccepted: true, pricingAccepted: false, pricingReceived: true };
+  assert.equal(partnerCommercialStatus(edited), 'NOTE');
+  assert.equal(partnerCommercialStatus({ ...edited, salesApproved: true }), 'QUOTED');
+  assert.equal(partnerCommercialStatus({ ...edited, inquiryWaiting: true }), 'NOTE');
+  assert.equal(partnerCommercialStatus({ ...edited, salesApproved: true, pricingReceived: false, inquiryWaiting: true }), 'WAITING');
+  assert.equal(partnerCommercialStatus({ ...edited, expired: true }), 'EXPIRED');
+  assert.equal(partnerCommercialStatus({ ...edited, cancelled: true }), 'CANCELLED');
+});

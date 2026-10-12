@@ -32,6 +32,84 @@ const graphFor = (productRowId: string) => parseCanonicalProductGraph({ schemaVe
 const configurationHash = `sha256-v1:${'1'.repeat(64)}`;
 const approvalEvidenceHash = `sha256-v1:${'2'.repeat(64)}`;
 
+test('wholesale-only authorized correction preserves accepted customer evidence but requires Partner reconfirmation', async () => {
+  const { resetPartnerCommercialApprovals, readPartnerCommercialState } = await import('../partnerSales/cases/commercialLifecycle');
+  await fixture(async (tx, ids) => {
+    const final = await finalCommercialFixture(tx, ids);
+    const before = await tx.salesContract.findUniqueOrThrow({ where: { id: final.root.customerContractId! } });
+    await approvePartnerEdit(tx, { contractId: before.id, actorUserId: ids.responderId,
+      reason: 'اصلاح صرف توافق خرید از سبلان', requestKey: randomUUID(), now: new Date() });
+    const after = await resetPartnerCommercialApprovals(tx, ids.caseId, ids.partnerId, undefined,
+      { preserveCustomerAcceptance: true });
+    assert.equal(after.customerAcceptanceRevision, after.commercialRevision);
+    assert.equal(after.customerAcceptanceMethod, before.customerAcceptanceMethod);
+    assert.equal(after.signedAt?.getTime(), before.signedAt?.getTime());
+    assert.equal(after.salesApprovalRevision, null);
+    const current = await readPartnerCommercialState(tx, ids.caseId, 'READY', { complete: true, resubmittedWaiting: false });
+    assert.equal(current?.status, 'NOTE');
+    assert.equal(current?.customerAccepted, true);
+  });
+});
+
+test('change-version detects inquiry row responses without parent revision changes and binds owner scope', async () => {
+  const { readPartnerCaseChangeVersion } = await import('../partnerSales/cases/changeVersion');
+  await fixture(async (tx, ids) => {
+    assert.ok((await service(tx, ids).execute(await command(ids))).ok);
+    await tx.partnerInquiry.update({ where: { id: ids.inquiryId }, data: { caseId: ids.caseId, caseRevision: 1 } });
+    const pendingId = `${ids.caseId}-metadata-pending`;
+    await tx.partnerInquiryRow.create({ data: { id: pendingId, inquiryId: ids.inquiryId, version: 1,
+      revision: 1, outcome: 'PENDING', configurationHash: `sha256-v1:${'3'.repeat(64)}`, definition: { fixture: true } } });
+    const started = performance.now();
+    const before = await readPartnerCaseChangeVersion(tx, ids.profileId, 1, ids.caseId);
+    const unchanged = await readPartnerCaseChangeVersion(tx, ids.profileId, 1, ids.caseId);
+    assert.equal(unchanged, before);
+    await tx.partnerInquiryRow.update({ where: { id: pendingId }, data: { outcome: 'REJECTED', revision: 2 } });
+    assert.notEqual(await readPartnerCaseChangeVersion(tx, ids.profileId, 1, ids.caseId), before);
+    assert.notEqual(await readPartnerCaseChangeVersion(tx, ids.profileId, 2, ids.caseId), before);
+    const foreign = await readPartnerCaseChangeVersion(tx, 'another-profile', 1, ids.caseId);
+    await tx.partnerInquiryRow.create({ data: { id: `${pendingId}-another`, inquiryId: ids.inquiryId, version: 1,
+      revision: 1, outcome: 'PENDING', configurationHash: `sha256-v1:${'4'.repeat(64)}`, definition: { fixture: true } } });
+    assert.equal(await readPartnerCaseChangeVersion(tx, 'another-profile', 1, ids.caseId), foreign);
+    console.log(`Partner metadata version: six reads ${(performance.now() - started).toFixed(1)}ms on isolated local fixture`);
+  });
+});
+
+test('change-version HTTP transport is owner-scoped, no-store, and rechecks actor deactivation', async () => {
+  const express = (await import('express')).default;
+  const { createPartnerCaseRouter } = await import('../../routes/partner-cases');
+  await fixture(async (tx, ids) => {
+    assert.ok((await service(tx, ids).execute(await command(ids))).ok);
+    const app = express(); app.use(express.json());
+    const database = { $transaction: (work: (client: Prisma.TransactionClient) => unknown) => work(tx) };
+    app.use('/cases', createPartnerCaseRouter({ database: database as never, authenticate: (req, _res, next) => {
+      (req as { user?: { id: string } }).user = { id: ids.partnerId }; next();
+    } }));
+    const server = app.listen(0); await new Promise<void>(resolve => server.once('listening', resolve));
+    try {
+      const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing address');
+      const post = (data: unknown) => fetch(`http://127.0.0.1:${address.port}/cases/changes-v2`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      const started = performance.now();
+      const response = await post({ caseId: ids.caseId });
+      const body = await response.json() as { data?: { version: string }; code?: string };
+      assert.equal(response.status, 200, JSON.stringify(body));
+      assert.match(response.headers.get('cache-control') ?? '', /private, no-store/);
+      assert.match(body.data?.version ?? '', /^sha256-v1:[a-f0-9]{64}$/);
+      assert.deepEqual(Object.keys(body.data ?? {}), ['version']);
+      console.log(`Partner authorized heartbeat: ${(performance.now() - started).toFixed(1)}ms; ${JSON.stringify(body).length} bytes`);
+      assert.equal((await post({ caseId: ids.caseId, profileId: 'foreign-profile' })).status, 400);
+      await tx.partnerProfile.update({ where: { id: ids.profileId }, data: { revision: { increment: 1 } } });
+      const updated = await post({ caseId: ids.caseId });
+      assert.equal(updated.status, 200);
+      assert.notEqual((await updated.json() as { data: { version: string } }).data.version, body.data?.version,
+        'current Profile lifecycle is part of freshness, not only Case revisions');
+      await tx.user.update({ where: { id: ids.partnerId }, data: { isActive: false } });
+      const denied = await post({ caseId: ids.caseId });
+      assert.equal(denied.status, 404, JSON.stringify(await denied.json()));
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+});
+
 test('customer-visible comparison ignores revision-owned identifiers but retains commercial content', () => {
   const original = createPartnerFixtures().customer;
   const revised = { ...original, revision: original.revision + 1,
@@ -388,7 +466,7 @@ test('customer-complete save creates one linked numbered unpriced note without o
   });
 });
 
-test('concurrent first-save retries create one numbered unpriced Case and one durable outcome', async () => {
+test('concurrent first-save retries and cancellation serialize Case pricing decisions', async () => {
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(__dirname, '../../../../'),
     sourceDatabaseUrl: databaseUrl() });
   const setup = temporary.client(), firstClient = temporary.client(), secondClient = temporary.client();
@@ -476,6 +554,63 @@ test('concurrent first-save retries create one numbered unpriced Case and one du
       { ...binding, recoveryRevision: 2 }));
     assert.equal(altered.ok, false);
     if (!altered.ok) assert.equal(altered.error.code, 'INTEGRITY_CONFLICT');
+    const responderId = `${prefix}-responder`;
+    await setup.user.create({ data: { id: responderId, username: responderId, email: `${responderId}@example.invalid`,
+      password: 'not-a-login', firstName: 'Responder', lastName: 'Concurrent' } });
+    for (const cancellationFirst of [true, false]) {
+      const scoped = { ...ids, responderId, caseId: `${ids.caseId}-race-${cancellationFirst}` };
+      const submit = await command(scoped);
+      const saved = await setup.$transaction(tx => service(tx, scoped).execute(submit));
+      assert.ok(saved.ok && saved.value.case, JSON.stringify(saved));
+      if (!saved.ok || !saved.value.case) continue;
+      const inquiryId = `${scoped.caseId}-pricing`, rowId = `${inquiryId}-row`;
+      const definition = { version: 1, configurationRef: { recoveryId: `${scoped.caseId}-recovery`, recoveryRevision: 1,
+        productRowId: `${scoped.caseId}-product-row` }, identity: { schemaVersion: 1 as const, partnerSellerId: ids.partnerId,
+        catalogProductId: 'catalog-stone', family: 'prepared' as const, unit: 'count' as const,
+        configuration: [{ key: 'technicalConfigurationHash', value: configurationHash }], materialRateEvidenceId: 'fixture-rate',
+        materialRateHash: configurationHash, components: [], currency: 'IRT' as const, calculationPolicyVersion: 'fixture-v1',
+        roundingPolicyVersion: 'fixture-v1' }, description: 'سنگ همزمانی', configuration: [{ label: 'تعداد', value: '۲' }] };
+      await setup.partnerInquiry.create({ data: { id: inquiryId, profileId: ids.profileId, caseId: scoped.caseId,
+        caseRevision: 1, revision: 1, submittedAt: new Date(),
+        assignments: { create: { id: `${inquiryId}-assignment`, revision: 1, responderId, actorId: ids.partnerId,
+          reason: 'تخصیص استعلام همزمانی', eligibilityEvidence: {} } },
+        rows: { create: { id: rowId, version: 1, revision: 1, outcome: 'PENDING', configurationHash, definition } } } });
+      let reached!: () => void, release!: () => void;
+      const entered = new Promise<void>(resolve => { reached = resolve; });
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const pause = async () => { reached(); await gate; };
+      const reason = 'لغو قرارداد همزمان با پاسخ';
+      const lifecycle = createPartnerCaseLifecycleService({ actorId: ids.partnerId, cancellationPurpose: 'PARTNER',
+        transaction: work => firstClient.$transaction(work, { timeout: 30_000 }),
+        authorize: async () => ({ ok: true, value: { evidenceId: 'race-cancel' } }),
+        verifyOutputEvidence: async () => ({ ok: false, error: { code: 'STATE_CONFLICT', status: 409, message: 'unused' } }),
+        cancelConfirmationSessions: async () => { if (cancellationFirst) await pause();
+          return { ok: true, value: { invalidatedSessionIds: [], preservedSnapshotIds: [] } }; }, recordEvidenceReview: async () => undefined });
+      const responder = createPartnerInquiryService({ actorId: responderId,
+        transaction: work => secondClient.$transaction(work, { timeout: 30_000 }),
+        resolveInitialResponder: async () => ({ ok: true, value: { responderId, eligibilityEvidence: {} } }),
+        authorize: async () => { if (!cancellationFirst) await pause(); return { ok: true, value: { evidenceId: 'race-answer' } }; },
+        resolveConfiguration: async () => ({ ok: true, value: definition }) });
+      const answer = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId, expectedAssignmentRevision: 1,
+        decisions: [{ rowId, expectedRevision: 1, outcome: 'APPROVED' as const, wholesaleUnitPrice: { amount: '100', currency: 'IRT' as const } }] };
+      const cancelCommand = { schemaVersion: 1 as const, type: 'CASE_CANCEL' as const, commandId: `${inquiryId}-cancel`, correlationId: inquiryId,
+        expected: saved.value.case.owner, expectedState: 'DRAFT' as const, reason,
+        idempotency: { actorId: ids.partnerId, operation: 'CASE_CANCEL' as const, targetId: scoped.caseId, key: `${inquiryId}-cancel`,
+          payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_CANCEL', reason }) } };
+      const answerCommand = { ...answer, commandId: `${inquiryId}-answer`, correlationId: inquiryId,
+        idempotency: { actorId: responderId, operation: answer.type, targetId: inquiryId, key: `${inquiryId}-answer`, payloadHash: await canonicalHash(answer) } };
+      const winner = cancellationFirst ? lifecycle.execute(cancelCommand) : responder.execute(answerCommand);
+      await Promise.race([entered, winner.then(result => { throw new Error(`Race did not reach its lock barrier: ${JSON.stringify(result)}`); })]);
+      const loser = cancellationFirst ? responder.execute(answerCommand) : lifecycle.execute(cancelCommand);
+      release();
+      const [won, lost] = await Promise.all([winner, loser]);
+      assert.ok(won.ok, JSON.stringify(won));
+      if (cancellationFirst) assert.ok(!lost.ok && lost.error.code === 'INQUIRY_CASE_CANCELLED', JSON.stringify(lost));
+      else assert.ok(lost.ok, JSON.stringify(lost));
+      assert.equal((await setup.partnerSaleCase.findUniqueOrThrow({ where: { id: scoped.caseId } })).state, 'CANCELLED');
+      assert.equal((await setup.partnerInquiryRow.findUniqueOrThrow({ where: { id: rowId } })).outcome, cancellationFirst ? 'CANCELLED' : 'APPROVED');
+      assert.equal(await setup.partnerInquiryApproval.count({ where: { rowId } }), cancellationFirst ? 0 : 1);
+    }
   } finally {
     await Promise.all([setup.$disconnect(), firstClient.$disconnect(), secondClient.$disconnect()]);
     await temporary.cleanup();
@@ -1075,7 +1210,8 @@ test('customer OTP is sent only through SMS, responses hide it and old code fail
       const nextToken = new URL(next!.data!.publicLink!).pathname.split('/').at(-1)!;
       assert.equal((await hooks.verifyPublicOtp({ token: nextToken, code: messages.at(-1)!.code }))?.success, true);
       const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: root.customerContractId! } });
-      assert.equal(contract.status, 'APPROVED', 'customer acceptance alone does not finalize pending wholesale pricing');
+      assert.equal(contract.status, 'DRAFT', 'post-edit note remains until Partner approval even after fresh customer acceptance');
+      assert.equal(contract.customerAcceptanceRevision, contract.commercialRevision);
       await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
     });
   } finally {
@@ -1133,11 +1269,35 @@ test('commercial finality waits for both approvals, creates no automatic financi
     const database = new Proxy(tx, { get(target, key) { if (key === '$transaction') return async (work: (value: Prisma.TransactionClient) => unknown) => work(tx); return Reflect.get(target, key); } }) as unknown as PrismaClient;
     await tx.user.update({ where: { id: ids.responderId }, data: { role: 'USER' } });
     for (const action of ['ACCOUNTING_READ', 'ACCOUNTING_WRITE']) await tx.effectiveActionGrant.create({ data: { id: randomUUID(), principalKind: 'USER', principalId: ids.responderId, subjectUserId: ids.responderId, domain: 'PARTNER', action, rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY', effect: 'ALLOW', grantedBy: ids.responderId, reason: 'isolated accounting fixture', correlationId: randomUUID() } });
-    const accounting = createPartnerAccountingAdapter(createPrismaPartnerAccountingRepository({ database, actorId: ids.responderId, correlationId: randomUUID() }));
+    const { hasSharedOperationAuthority } = await import('../partnerSales/authorization/sharedOperationAuthority');
+    const repository = createPrismaPartnerAccountingRepository({ database, actorId: ids.responderId, correlationId: randomUUID() });
+    const accounting = createPartnerAccountingAdapter(repository);
+    const prepared = await repository.transaction(source => source.readAuthorizedSource(views!.accounting!.owner, 'PREPARE'));
+    assert.ok(prepared.ok, 'the scoped Accounting read grant admits preparation');
+    const enqueue = () => accounting.enqueueCommitted({ ...views!.accounting!, state: 'COMMITTED' }, commitment);
+    const missingOperation = await enqueue();
+    assert.equal(missingOperation.ok ? null : missingOperation.error.code, 'FORBIDDEN', 'broad Partner grants do not replace the invoice operation');
+    await tx.workspacePermission.create({ data: { userId: ids.responderId, workspace: 'accounting', permissionLevel: 'edit' } });
+    assert.equal(await hasSharedOperationAuthority(tx, ids.responderId, 'accounting', 'accounting_invoice_candidates_manage'), false,
+      'workspace edit alone does not authorize a narrow financial operation');
+    const workspaceOnly = await enqueue();
+    assert.equal(workspaceOnly.ok ? null : workspaceOnly.error.code, 'FORBIDDEN');
+    assert.equal(await tx.accountingFinancialRecord.count({ where: { sourceId: root.internalRecordId } }), 0);
+    assert.equal(await tx.salesReportingEvent.count({ where: { contractId: root.customerContractId! } }), 0);
+    const invoicePermission = await tx.featurePermission.create({ data: { userId: ids.responderId, workspace: 'accounting',
+      feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit', grantedBy: ids.managerId } });
+    assert.equal(await hasSharedOperationAuthority(tx, ids.responderId, 'accounting', 'accounting_invoice_candidates_manage'), true);
+    assert.equal(await hasSharedOperationAuthority(tx, ids.responderId, 'accounting', 'accounting_payments_manage'), false);
     const saved = await accounting.enqueueCommitted({ ...views!.accounting!, state: 'COMMITTED' }, commitment);
     assert.equal(saved.ok, true, JSON.stringify(saved));
     assert.equal((await tx.salesContract.findUniqueOrThrow({ where: { id: root.customerContractId! } })).realizedAmount?.toString(), '240', 'wholesale total includes twenty percent mandatory; retail remains 300');
     assert.equal(await tx.salesReportingEvent.count({ where: { contractId: root.customerContractId! } }), 1);
+    await tx.featurePermission.update({ where: { id: invoicePermission.id }, data: { permissionLevel: 'none' } });
+    const revoked = await enqueue();
+    assert.equal(revoked.ok ? null : revoked.error.code, 'FORBIDDEN', 'revocation also blocks access to an existing queue receipt');
+    assert.equal(await tx.accountingFinancialRecord.count({ where: { sourceId: root.internalRecordId } }), 1);
+    assert.equal(await tx.salesReportingEvent.count({ where: { contractId: root.customerContractId! } }), 1);
+    await tx.featurePermission.update({ where: { id: invoicePermission.id }, data: { permissionLevel: 'edit' } });
     assert.equal((await accounting.enqueueCommitted({ ...views!.accounting!, state: 'COMMITTED' }, commitment)).ok, true);
     assert.equal(await tx.salesReportingEvent.count({ where: { contractId: root.customerContractId! } }), 1);
     const record = await tx.accountingFinancialRecord.findFirstOrThrow({ where: { sourceId: root.internalRecordId } });
@@ -1285,6 +1445,14 @@ test('seller rejection cancels an approved pending-price case without deleting i
     const first = await service(tx, ids).execute(await command(ids));
     assert.equal(first.ok, true, JSON.stringify(first));
     if (!first.ok || !first.value.case) return;
+    await tx.partnerInquiry.update({ where: { id: ids.inquiryId }, data: { caseId: ids.caseId, caseRevision: 1 } });
+    const answeredRow = await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: ids.inquiryRowId } });
+    const pendingRowId = `${ids.inquiryRowId}-pending`;
+    await tx.partnerInquiryRow.create({ data: { id: pendingRowId, inquiryId: ids.inquiryId, version: 1,
+      revision: 1, outcome: 'PENDING', configurationHash, definition: answeredRow.definition as Prisma.InputJsonValue } });
+    const { createPartnerPricingDuty } = await import('../crossWorkspaceDutyAdapters/partnerPricingDutyAdapter');
+    await createPartnerPricingDuty(tx, { inquiryId: ids.inquiryId,
+      actorUserId: ids.partnerId, inquiryRevision: 2 });
     await approvePartnerCommercialSales(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: 1 });
     const reason = 'لغو قرارداد به درخواست فروشنده';
     const lifecycle = createPartnerCaseLifecycleService({ actorId: ids.partnerId, cancellationPurpose: 'PARTNER', transaction: work => work(tx),
@@ -1301,7 +1469,15 @@ test('seller rejection cancels an approved pending-price case without deleting i
     assert.equal(root.state, 'CANCELLED');
     assert.equal(root.customerContract?.status, 'CANCELLED');
     assert.equal(root.committedAt, null);
-  });
+    const pendingRow = await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: pendingRowId } });
+    assert.equal(pendingRow.outcome, 'CANCELLED');
+    assert.equal(pendingRow.revision, 2);
+    assert.equal((await tx.partnerInquiryRow.findUniqueOrThrow({ where: { id: ids.inquiryRowId } })).outcome, 'APPROVED');
+    assert.equal(await tx.partnerInquiryApproval.count({ where: { id: ids.approvalId } }), 1);
+    const event = await tx.partnerInquiryEvent.findFirstOrThrow({ where: { inquiryId: ids.inquiryId, type: 'INQUIRY_CANCELLED' } });
+    assert.equal(event.reason, reason);
+    assert.equal(await tx.crossWorkspaceDuty.count({ where: { sourceId: ids.inquiryId, status: 'OPEN' } }), 0);
+  }, undefined, true);
 });
 
 test('contract list statuses distinguish approval customer acceptance and received pricing', async () => {
@@ -1443,6 +1619,21 @@ test('Partner reactivation returns to note, requires manager authority, rejects 
     await grant();
     await reactivatePartnerCase(tx, input);
     await reactivatePartnerCase(tx, input);
+    const previousInquiry = await tx.partnerInquiry.findFirstOrThrow({ where: { caseId: ids.caseId }, include: { rows: true } });
+    const oldInquiryPort = createPartnerInquiryService({ actorId: ids.responderId, transaction: work => work(tx),
+      authorize: async () => ({ ok: true, value: { evidenceId: 'reactivation-responder' } }),
+      resolveInitialResponder: async () => ({ ok: true, value: { responderId: ids.responderId, eligibilityEvidence: {} } }),
+      resolveConfiguration: async () => ({ ok: false, error: { code: 'NOT_FOUND', status: 404, message: 'retained facts' } }) });
+    const previousView = await oldInquiryPort.query({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: previousInquiry.id });
+    assert.ok(previousView.ok && previousView.value.cancelled && previousView.value.actions.length === 0, JSON.stringify(previousView));
+    if (previousView.ok) assert.ok(previousView.value.rows.some(row => row.approvedPrice), 'old offered prices remain visible');
+    const lateIntent = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId: previousInquiry.id,
+      expectedAssignmentRevision: 1, decisions: [{ rowId: previousInquiry.rows[0].id,
+        expectedRevision: previousInquiry.rows[0].revision, outcome: 'REJECTED' as const, reason: 'تلاش پاسخ به نوبت قبلی' }] };
+    const lateAnswer = await oldInquiryPort.execute({ ...lateIntent, commandId: randomUUID(), correlationId: randomUUID(),
+      idempotency: { actorId: ids.responderId, operation: lateIntent.type, targetId: previousInquiry.id,
+        key: randomUUID(), payloadHash: await canonicalHash(lateIntent) } });
+    assert.ok(!lateAnswer.ok && lateAnswer.error.code === 'INQUIRY_CASE_CANCELLED', JSON.stringify(lateAnswer));
     assert.equal((await readPartnerCommercialState(tx, ids.caseId))?.status, 'NOTE');
     assert.equal(await currentPricingEvidenceIsValid(tx, final.owner), false);
     await assert.rejects(() => assertPartnerFinancialFinality(tx, ids.caseId), /قطعی/);
@@ -1516,7 +1707,7 @@ test('Partner reactivation returns to note, requires manager authority, rejects 
     assert.equal(history.voided, undefined);
     assert.equal(history.effective?.revision, root.headRevision + 1);
     await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
-  });
+  }, undefined, true);
 });
 
 test('one Accounting permission permits repeated Partner edits, resets both approvals, expires and can be renewed', async () => {
@@ -1701,6 +1892,27 @@ test('responder SQL pages twenty authorized contracts with package grouping, glo
     const all = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE' });
     assert.ok(all.ok && all.value.contractCounts?.pending === 40 && all.value.contractCounts?.answered === 3, JSON.stringify(all));
     if (all.ok) assert.deepEqual(all.value.contracts!.map(item => item.id), [...caseIds].reverse().slice(2, 22));
+    // Legacy cancellation left both pending rows and answered rows untouched.
+    // Queue eligibility must follow the contract even before data reconciliation.
+    for (const index of [39, 41]) {
+      const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: caseIds[index] } });
+      await tx.partnerSaleCase.update({ where: { id: root.id }, data: { state: 'CANCELLED', stateRevision: { increment: 1 } } });
+      await tx.salesContract.update({ where: { id: root.customerContractId! }, data: { status: 'CANCELLED' } });
+    }
+    const active = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE' });
+    assert.ok(active.ok && active.value.contractCounts?.pending === 39 && active.value.contractCounts?.answered === 2,
+      'cancelled contracts must leave active counts');
+    const history = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'history', status: 'cancelled' });
+    assert.ok(history.ok && history.value.contracts?.some(item => item.id === caseIds[39] && item.cancelled && !item.pending));
+    const cancelledDetail = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', contractId: caseIds[39] });
+    assert.ok(cancelledDetail.ok && cancelledDetail.value.inquiries[0].actions.length === 0,
+      'an already-open cancelled inquiry must be read-only');
+    const inquiryId = `${caseIds[39]}-pricing`;
+    const payload = { schemaVersion: 1 as const, type: 'INQUIRY_DECIDE' as const, inquiryId, expectedAssignmentRevision: 1,
+      decisions: [{ rowId: `${inquiryId}-row`, expectedRevision: 1, outcome: 'REJECTED' as const, reason: 'اصلاح مشخصات محصول' }] };
+    const blocked = await responder.execute({ ...payload, commandId: `${inquiryId}-late`, correlationId: `${inquiryId}-late`,
+      idempotency: { actorId: ids.responderId, operation: payload.type, targetId: inquiryId, key: `${inquiryId}-late`, payloadHash: await canonicalHash(payload) } });
+    assert.ok(!blocked.ok, 'direct response after cancellation must be rejected');
   });
 });
 
@@ -1841,8 +2053,10 @@ test('edited Partner note changes effective commitment only at renewed finality,
     assert.equal(contract.status, 'DRAFT');
     assert.equal(await tx.partnerFinancialAdjustment.count({ where: { caseId: ids.caseId } }), 0);
     await approvePartnerCommercialSales(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: contract.commercialRevision });
-    assert.equal(await tx.partnerFinancialAdjustment.count({ where: { caseId: ids.caseId } }), 0);
-    await acceptPartnerCustomer(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: contract.commercialRevision, method: 'DIGITAL' });
+    const retained = await tx.salesContract.findUniqueOrThrow({ where: { id: contract.id } });
+    assert.equal(retained.customerAcceptanceRevision, retained.commercialRevision,
+      'wholesale-only correction retains customer acceptance without asking again');
+    assert.equal(await tx.partnerFinancialAdjustment.count({ where: { caseId: ids.caseId } }), 1);
     await reconcilePartnerCommercialFinality(tx, ids.caseId, ids.partnerId);
     const adjustments = await tx.partnerFinancialAdjustment.findMany({ where: { caseId: ids.caseId } });
     assert.equal(adjustments.length, 1);
@@ -1938,4 +2152,72 @@ test('approved finalized Partner correction can request a successor price while 
     assert.equal((await tx.salesContract.findUniqueOrThrow({ where: { id: final.root.customerContractId! } })).status, 'SIGNED');
     assert.ok((await inquiries.execute(command)).ok, 'same request replays');
   }, 48 * 60 * 60 * 1000, true);
+});
+
+test('Partner draft deletion preserves correction permission and financial history and unblocks committed cancellation', async () => {
+  const { deleteDraftAccountingRecordInTransaction } = await import('../accountingService');
+  const { readCurrentPartnerCaseViews } = await import('../partnerSales/cases/lifecycle');
+  const { preparePartnerFinancialSource } = await import('../partnerSales/accounting/source');
+  const { reconcilePartnerFinancialRealization } = await import('../partnerSales/accounting/commercialRealization');
+  const { readPartnerCommercialEditPermission } = await import('../partnerSales/cases/commercialEditPermission');
+  await fixture(async (tx, ids) => {
+    const final = await finalCommercialFixture(tx, ids);
+    const views = await readCurrentPartnerCaseViews(tx, ids.caseId);
+    assert.ok(views?.accounting);
+    const prepared = await preparePartnerFinancialSource({ view: { ...views.accounting, state: 'COMMITTED' }, partnerSellerId: ids.partnerId }, final.owner);
+    assert.ok(prepared.ok);
+    const record = await tx.accountingFinancialRecord.create({ data: { id: `${ids.caseId}-draft`, kind: 'INVOICE_CANDIDATE',
+      status: 'DRAFT', sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: final.root.internalRecordId!, amount: prepared.value.amount.amount,
+      currency: prepared.value.amount.currency, createdBy: ids.managerId, sourceSnapshot: JSON.parse(JSON.stringify({ partnerPreparation: prepared.value })),
+      metadata: { partnerCaseId: ids.caseId, commitmentEventId: final.root.commitmentEventId } } });
+    await reconcilePartnerFinancialRealization(tx, ids.caseId, ids.managerId, `${record.id}-create`);
+    await approvePartnerEdit(tx, { contractId: final.root.customerContractId!, actorUserId: ids.responderId,
+      reason: 'لغو شود', requestKey: randomUUID(), now: new Date() });
+    const remove = { kind: 'DELETE_DRAFT_ACCOUNTING_RECORD' as const, recordId: record.id, note: 'حذف پیش‌نویس برای لغو قرارداد' };
+    await assert.rejects(deleteDraftAccountingRecordInTransaction(tx, remove, { userId: ids.partnerId, role: 'USER' }), /مجوز|دسترسی/);
+    await tx.accountingFinancialRecord.update({ where: { id: record.id }, data: { status: 'ISSUED' } });
+    await assert.rejects(deleteDraftAccountingRecordInTransaction(tx, remove, { userId: ids.managerId, role: 'ADMIN' }), /فقط پیش‌نویس/);
+    await tx.accountingFinancialRecord.update({ where: { id: record.id }, data: { status: 'DRAFT' } });
+    const deny = await tx.featurePermission.create({ data: { userId: ids.managerId, workspace: 'accounting',
+      feature: 'accounting_records_approve_void', permissionLevel: 'none', grantedBy: ids.managerId } });
+    await assert.rejects(deleteDraftAccountingRecordInTransaction(tx, remove, { userId: ids.managerId, role: 'ADMIN' }), /مجوز/);
+    await tx.featurePermission.delete({ where: { id: deny.id } });
+    const receivable = await tx.accountingReceivable.create({ data: { invoiceRecordId: record.id, originalAmount: record.amount,
+      remainingAmount: record.amount, dueDate: new Date(), createdBy: ids.managerId } });
+    await assert.rejects(deleteDraftAccountingRecordInTransaction(tx, remove, { userId: ids.managerId, role: 'ADMIN' }), /وابسته/);
+    await tx.accountingReceivable.delete({ where: { id: receivable.id } });
+    const tax = await tx.accountingTaxRecord.create({ data: { invoiceRecordId: record.id, submissionStatus: 'SUBMITTED_EXTERNALLY',
+      missingFields: [], createdBy: ids.managerId } });
+    await assert.rejects(deleteDraftAccountingRecordInTransaction(tx, remove, { userId: ids.managerId, role: 'ADMIN' }), /مالیاتی/);
+    await tx.accountingTaxRecord.delete({ where: { id: tax.id } });
+    const lifecycle = createPartnerCaseLifecycleService({ actorId: ids.partnerId, cancellationPurpose: 'PARTNER', transaction: work => work(tx),
+      authorize: async () => ({ ok: true, value: { evidenceId: 'fixture-cancel' } }),
+      verifyOutputEvidence: async () => ({ ok: false, error: { code: 'STATE_CONFLICT', status: 409, message: 'unused' } }),
+      cancelConfirmationSessions: async () => ({ ok: true, value: { invalidatedSessionIds: [], preservedSnapshotIds: [] } }),
+      recordEvidenceReview: async () => undefined });
+    const reason = 'لغو پس از حذف پیش‌نویس مالی';
+    const cancel = { schemaVersion: 1 as const, type: 'CASE_CANCEL' as const, commandId: randomUUID(), correlationId: randomUUID(),
+      expected: final.owner, expectedState: 'COMMITTED' as const, reason,
+      idempotency: { actorId: ids.partnerId, operation: 'CASE_CANCEL' as const, targetId: ids.caseId, key: randomUUID(),
+        payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_CANCEL', reason }) } };
+    const blocked = await lifecycle.execute(cancel);
+    assert.equal(blocked.ok ? null : blocked.error.code, 'DEPENDENCY_BLOCKED');
+    const { resetPartnerCommercialApprovals } = await import('../partnerSales/cases/commercialLifecycle');
+    await resetPartnerCommercialApprovals(tx, ids.caseId, ids.partnerId, 'اصلاح پیش از لغو');
+    await deleteDraftAccountingRecordInTransaction(tx, remove, { userId: ids.managerId, role: 'ADMIN' });
+    assert.equal(await tx.accountingFinancialRecord.findUnique({ where: { id: record.id } }), null);
+    assert.ok(await readPartnerCommercialEditPermission(tx, final.root.customerContractId!, ids.partnerId));
+    const log = await tx.accountingAuditLog.findFirstOrThrow({ where: { recordId: record.id, action: 'DELETE_DRAFT_ACCOUNTING_RECORD' } });
+    assert.equal((log.beforeState as Prisma.JsonObject).sourceKind, 'PARTNER_INTERNAL_RECORD');
+    const { nextPartnerQueueEvidenceId } = await import('../partnerSales/accounting/prismaRepository');
+    assert.notEqual(await nextPartnerQueueEvidenceId(tx, ids.caseId, record.id), record.id, 'recreating a draft never aliases deleted financial evidence');
+    const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: final.root.customerContractId! } });
+    assert.ok(contract.firstFinancialRecordAt, 'deletion must not reset the financial/edit boundary');
+    const reporting = await tx.salesReportingEvent.findMany({ where: { contractId: contract.id } });
+    assert.equal(reporting.reduce((total, event) => total.plus(event.amount), new Prisma.Decimal(0)).toString(), '0');
+    const cancelled = await lifecycle.execute(cancel);
+    assert.ok(cancelled.ok, JSON.stringify(cancelled));
+    assert.equal((await tx.salesContract.findUniqueOrThrow({ where: { id: contract.id } })).status, 'CANCELLED');
+    await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+  });
 });

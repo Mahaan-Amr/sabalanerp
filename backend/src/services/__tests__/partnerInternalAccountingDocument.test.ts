@@ -125,8 +125,8 @@ test('frozen wholesale mandatory prints separately without repricing customer mo
   const html = renderPartnerInternalDocumentHtml(document);
   assert.match(html, /حکمی سبلان ۲۰٪/);
   assert.match(html, /۳۶٬۰۰۰٬۰۰۰ ریال/);
-  assert.match(html, /۱۸۰٬۰۰۰٬۰۰۰ ریال/);
-  assert.match(html, /۱۰٬۰۰۰٬۰۰۰ ریال/);
+  assert.match(html, /۱۹۰٬۰۰۰٬۰۰۰ ریال/);
+  assert.doesNotMatch(html, /مبلغ تجمیعی ثبت‌شده/);
   assert.match(html, /جمع خرید از سبلان: 226,000,000 ریال \(22,600,000 تومان\)/);
   for (const options of [{ variant: 'workshop' as const }, { variant: 'custom' as const, customPrint: { showPrices: false, showTotals: false } }]) {
     assert.doesNotMatch(renderPartnerInternalDocumentHtml(document, options), /۳۶٬۰۰۰٬۰۰۰|۱۸۰٬۰۰۰٬۰۰۰|۱۰٬۰۰۰٬۰۰۰/);

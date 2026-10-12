@@ -809,6 +809,7 @@ router.get('/contracts/partner/:caseId/internal', accountingContractsView, async
     const writable = document.partnerContext.accountingWritable && (!document.commercial || document.commercial.status === 'FINAL');
     return res.json({ success: true, data: { ...document, actions: { canResolveFlag: canResolveFlag && writable,
       canVoidRecord: capabilities.START_ACCOUNTING_VOID_CASE,
+      canDeleteDraft: capabilities.DELETE_DRAFT_ACCOUNTING_RECORD && Boolean(document.partnerContext.accountingDraftDeletionWritable),
       canCreateInvoice: capabilities.CREATE_INVOICE && (writable || 'canRegister' in document && document.canRegister), canFlag: capabilities.FLAG_CONTRACT && writable,
       canRequestCorrection: capabilities.CREATE_CORRECTION_REQUEST && ['COMMITTED', 'VOIDED'].includes(document.caseState || ''),
       canReviewInvoice: capabilities.APPROVE_FINANCIAL_INVOICE && writable,

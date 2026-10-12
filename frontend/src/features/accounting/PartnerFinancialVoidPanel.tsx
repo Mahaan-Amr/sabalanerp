@@ -8,7 +8,7 @@ import AccountingVoidWorkflowPanel from './AccountingVoidWorkflowPanel';
 import type { PartnerInternalDocument } from './PartnerAccountingDetailView';
 import { money, invoiceStatusLabels } from './accountingUi';
 
-type Target = { kind: 'START_ACCOUNTING_VOID_CASE' | 'VOID_ACCOUNTING_RECORD' | 'VOID_ACCOUNTING_RECEIVABLE' | 'RESOLVE_TAX_FOR_VOID' | 'CANCEL_ACCOUNTING_VOID_CASE'; id: string };
+type Target = { kind: 'DELETE_DRAFT_ACCOUNTING_RECORD' | 'START_ACCOUNTING_VOID_CASE' | 'VOID_ACCOUNTING_RECORD' | 'VOID_ACCOUNTING_RECEIVABLE' | 'RESOLVE_TAX_FOR_VOID' | 'CANCEL_ACCOUNTING_VOID_CASE'; id: string };
 export default function PartnerFinancialVoidPanel({ document: doc, pending, refresh }: {
   document: PartnerInternalDocument; pending: boolean; refresh: () => Promise<void>;
 }) {
@@ -17,6 +17,7 @@ export default function PartnerFinancialVoidPanel({ document: doc, pending, refr
   const [error, setError] = useState<string>();
   const [requestKey, setRequestKey] = useState('');
   const open = (kind: Target['kind'], id: string) => { setTarget({ kind, id }); setRequestKey(crypto.randomUUID()); setError(undefined); };
+  const deleting = target?.kind === 'DELETE_DRAFT_ACCOUNTING_RECORD';
   const start = target?.kind === 'START_ACCOUNTING_VOID_CASE';
   const final = target?.kind === 'VOID_ACCOUNTING_RECORD';
   const cancel = target?.kind === 'CANCEL_ACCOUNTING_VOID_CASE';
@@ -28,7 +29,8 @@ export default function PartnerFinancialVoidPanel({ document: doc, pending, refr
         ...(cancel ? { voidCaseId: target.id, cancellationReason: String(values.reason) }
           : target.kind === 'VOID_ACCOUNTING_RECEIVABLE' ? { receivableId: target.id }
           : target.kind === 'RESOLVE_TAX_FOR_VOID' ? { taxRecordId: target.id } : { recordId: target.id }),
-        ...(!final && !cancel ? { reason: String(values.reason).trim(), effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString() } : {}),
+        ...(deleting ? { note: String(values.reason).trim() } : {}),
+        ...(!deleting && !final && !cancel ? { reason: String(values.reason).trim(), effectiveAt: PersianCalendar.toGregorian(String(values.effectiveAt)).toISOString() } : {}),
         ...(start ? { reasonKind: String(values.reasonKind), ...(values.reasonKind === 'DUPLICATE_ISSUE' ? { retainedRecordId: String(values.retainedRecordId) } : {}) } : {}),
         idempotencyKey: requestKey, correlationId: requestKey,
       });
@@ -42,6 +44,7 @@ export default function PartnerFinancialVoidPanel({ document: doc, pending, refr
     {(doc.financialRecords || []).map(record => <ErpCard key={record.id} className="space-y-2 p-4">
       <strong>صورتحساب {record.systemInvoiceNumber || 'بدون شماره'}</strong>
       <p>{invoiceStatusLabels[record.status] || record.status} · {money(record.amount, record.currency)}</p>
+      {record.status === 'DRAFT' && doc.actions.canDeleteDraft && <ErpButton label="حذف پیش‌نویس" tone="danger" variant="outline" disabled={pending || busy} onClick={() => open('DELETE_DRAFT_ACCOUNTING_RECORD', record.id)} />}
       {['ISSUED', 'POSTED'].includes(record.status) && doc.actions.canVoidRecord &&
         !doc.voidWorkflows?.some(workflow => workflow.sourceRecordId === record.id && workflow.status === 'OPEN') &&
         <ErpButton label="شروع ابطال" tone="danger" variant="outline" disabled={pending || busy} onClick={() => open('START_ACCOUNTING_VOID_CASE', record.id)} />}
@@ -49,8 +52,8 @@ export default function PartnerFinancialVoidPanel({ document: doc, pending, refr
     <AccountingVoidWorkflowPanel workflows={doc.voidWorkflows || []} busy={pending || busy} canAct={Boolean(doc.actions.canVoidRecord)}
       onResolveTax={(_, id) => open('RESOLVE_TAX_FOR_VOID', id)} onVoidReceivable={(_, id) => open('VOID_ACCOUNTING_RECEIVABLE', id)}
       onVoidRecord={(_, id) => open('VOID_ACCOUNTING_RECORD', id)} onCancel={workflow => open('CANCEL_ACCOUNTING_VOID_CASE', workflow.id)} />
-    <AccountingActionModal open={Boolean(target)} title={start ? 'شروع پرونده ابطال مالی' : final ? 'تکمیل ابطال رکورد مالی' : cancel ? 'لغو پرونده ابطال' : target?.kind === 'RESOLVE_TAX_FOR_VOID' ? 'تعیین‌تکلیف مالیات' : 'ابطال دریافتنی'}
-      description={final ? 'قرارداد مشتری و تعهد خرید همکار باقی می‌مانند. رکورد مالی باطل می‌شود و سابقه آن حفظ می‌شود.' : undefined}
+    <AccountingActionModal open={Boolean(target)} title={deleting ? 'حذف پیش‌نویس رکورد مالی' : start ? 'شروع پرونده ابطال مالی' : final ? 'تکمیل ابطال رکورد مالی' : cancel ? 'لغو پرونده ابطال' : target?.kind === 'RESOLVE_TAX_FOR_VOID' ? 'تعیین‌تکلیف مالیات' : 'ابطال دریافتنی'}
+      description={deleting ? 'پیش‌نویس مالی حذف می‌شود؛ قرارداد، مجوز اصلاح و سابقه حسابرسی حفظ می‌شوند.' : final ? 'قرارداد مشتری و تعهد خرید همکار باقی می‌مانند. رکورد مالی باطل می‌شود و سابقه آن حفظ می‌شود.' : undefined}
       fields={[
         ...(start ? [{ id: 'reasonKind', label: 'نوع دلیل', type: 'select' as const, required: true, defaultValue: 'ENTRY_ERROR', options: [
           { label: 'صدور تکراری', value: 'DUPLICATE_ISSUE' }, { label: 'اشتباه ثبت', value: 'ENTRY_ERROR' }, { label: 'لغو معامله', value: 'SALE_CANCELLED' }, { label: 'سایر', value: 'OTHER' },
@@ -59,7 +62,7 @@ export default function PartnerFinancialVoidPanel({ document: doc, pending, refr
           options: (doc.financialRecords || []).filter(record => record.id !== target?.id && ['ISSUED', 'POSTED'].includes(record.status))
             .map(record => ({ label: `فاکتور ${record.systemInvoiceNumber || record.id}`, value: record.id })) }] : []),
         ...(!final ? [{ id: 'reason', label: 'دلیل', type: 'textarea' as const, required: true }] : []),
-        ...(!final && !cancel ? [{ id: 'effectiveAt', label: 'تاریخ مؤثر', type: 'date' as const, required: true }] : []),
-      ]} destructive busy={busy} error={error} onClose={() => { if (!busy) setTarget(undefined); }} onSubmit={submit} />
+        ...(!deleting && !final && !cancel ? [{ id: 'effectiveAt', label: 'تاریخ مؤثر', type: 'date' as const, required: true }] : []),
+      ]} submitLabel={deleting ? 'حذف پیش‌نویس' : undefined} destructive busy={busy} error={error} onClose={() => { if (!busy) setTarget(undefined); }} onSubmit={submit} />
   </div>;
 }

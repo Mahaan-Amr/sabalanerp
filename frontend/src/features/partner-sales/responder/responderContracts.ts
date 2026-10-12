@@ -12,10 +12,12 @@ export function responderContracts(inquiries: readonly ResponderInquiryViewV2[])
     contracts.set(id, [...(contracts.get(id) ?? []), inquiry]);
   }
   return Array.from(contracts, ([id, items]) => {
-    const rows = items.flatMap(inquiry => inquiry.rows).filter(row => !row.superseded);
-    const pending = rows.some(row => row.state === 'PENDING');
+    const currentItems = items.filter(inquiry => !inquiry.cancelled);
+    const rows = (currentItems.length ? currentItems : items).flatMap(inquiry => inquiry.rows).filter(row => !row.superseded);
+    const cancelled = items.every(inquiry => inquiry.cancelled || inquiry.rows.every(row => row.state === 'CANCELLED'));
+    const pending = items.some(inquiry => !inquiry.cancelled && inquiry.rows.some(row => !row.superseded && row.state === 'PENDING'));
     return { id, inquiries: items, partnerDisplayName: items[0].partnerDisplayName,
-      cancelled: items.some(inquiry => inquiry.rows.some(row => row.state === 'CANCELLED')), customer: items[0].customerDisplayName ?? 'نام مشتری ثبت نشده',
+      cancelled, customer: items[0].customerDisplayName ?? 'نام مشتری ثبت نشده',
       label: items[0].customerContractNumber
         ? `شماره قرارداد ${partnerCustomerContractLabel('', items[0].customerContractNumber)}`
         : items[0].trackingNumber ? `کد پیگیری ${items[0].trackingNumber.toLocaleString('fa-IR', { useGrouping: false })}` : 'استعلام همکار',
@@ -30,7 +32,9 @@ type Row = ResponderInquiryViewV2['rows'][number];
 export type ResponderProductGroup = { key: string; rows: Row[]; display: Row };
 export function responderProductGroups(inquiries: readonly ResponderInquiryViewV2[]): ResponderProductGroup[] {
   const groups = new Map<string, Row[]>();
-  for (const row of inquiries.flatMap(inquiry => inquiry.rows).filter(row => !row.superseded && row.state !== 'CANCELLED')) {
+  const current = inquiries.filter(inquiry => !inquiry.cancelled);
+  const displayed = current.length ? current : inquiries;
+  for (const row of displayed.flatMap(inquiry => inquiry.rows).filter(row => !row.superseded && row.state !== 'CANCELLED')) {
     const code = row.configuration.find(fact => ['کد محصول', 'کد سنگ'].includes(fact.label))?.value ?? row.identity.catalogProductId;
     const key = JSON.stringify([code, row.description, row.identity.family, row.identity.unit, row.identity.currency]);
     groups.set(key, [...(groups.get(key) ?? []), row]);

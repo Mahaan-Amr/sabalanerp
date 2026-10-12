@@ -7,6 +7,7 @@ import { PartnerInquiryRowV2Schema } from './inquiry-v2';
 import { PartnerTechnicalDraftSchema } from './technical-draft';
 
 export const PartnerCaseRuntimeQuerySchema = z.object({ caseId: IdSchema.optional() }).strict();
+export const PartnerCaseChangeVersionSchema = z.object({ version: z.string().regex(/^sha256-v1:[a-f0-9]{64}$/).nullable() }).strict();
 
 export const PartnerCaseRuntimeActionsSchema = z.object({
   canContinue: z.boolean(),
@@ -30,6 +31,7 @@ export const PartnerCaseRuntimeRowSchema = z.object({
   reviewedCorrection: z.object({ requestId: IdSchema, reason: z.string().min(1), dueAt: InstantSchema.optional() }).strict().optional(),
   commercial: PartnerCommercialStateSchema.optional(),
   pricingResponseState: z.enum(['READY', 'PARTIAL', 'WAITING', 'REJECTED', 'EXPIRED']).optional(),
+  inquiryResponseComplete: z.boolean().optional(),
   accountingCorrectionRequests: z.array(z.object({ id: IdSchema, reason: z.string().min(1),
     createdAt: InstantSchema }).strict()).optional(),
   customerOutput: CustomerContractOutputSchema.optional(),

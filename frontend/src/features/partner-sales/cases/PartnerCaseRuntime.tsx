@@ -2,6 +2,9 @@
 
 import { partnerInquiryLabels } from '@sabalanerp/partner-sales-contracts';
 import { decidePartnerCommercial } from './partnerCaseHttpPort';
+import { readPartnerCaseChangeVersion } from './partnerCaseHttpPort';
+import { usePartnerCaseRefresh } from './usePartnerCaseRefresh';
+import { canReviewPartnerInquiry } from './inquiryReview';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -58,6 +61,7 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
   const [reversalReason, setReversalReason] = useState('');
   const caseErrorSequenceRef = useRef(0);
   const loadSequenceRef = useRef(0);
+  const changeVersionRef = useRef<string | null>();
   const actionTrackerRef = useRef(createLatestRequestTracker());
   const actionPending = pendingActionCount > 0;
 
@@ -70,15 +74,21 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
   const clearCaseError = useCallback((key: string) => setCaseErrors(current => current.filter(item => item.key !== key)), []);
   const latestCaseError = (caseId: string) => caseErrors.filter(item => item.caseId === caseId).sort((left, right) => right.order - left.order)[0];
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false, knownVersion?: string) => {
     const requestSequence = ++loadSequenceRef.current;
-    setBusy(true);
+    if (!background) setBusy(true);
     try {
+      const version = knownVersion ?? await readPartnerCaseChangeVersion(selectedCaseId);
       const listing = await readPartnerCaseListing(selectedCaseId);
       const cases = listing.cases;
-      if (requestSequence !== loadSequenceRef.current) return;
+      if (requestSequence !== loadSequenceRef.current) return false;
       setRows(cases);
       setIssues(listing.issues ?? []);
+      if (background) {
+        changeVersionRef.current = version;
+        setLoadError(undefined);
+        return true;
+      }
       const supplementary = await Promise.all((selectedCaseId ? cases : []).map(async row => {
         const caseId = row.view.owner.caseId;
         const collectionsResult = ['COMMITTED', 'VOIDED'].includes(row.view.state)
@@ -117,16 +127,21 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
         }
       });
       setLoadError(undefined);
+      changeVersionRef.current = version;
+      return true;
     } catch (reason) {
       if (requestSequence !== loadSequenceRef.current) return;
       const normalizedReason = normalizePartnerSalesOperationalError(reason);
       setLoadError({ kind: getSalesOperationalErrorKind(normalizedReason), message: getSalesOperationalErrorMessage(normalizedReason, {
         failedAction: 'دریافت پرونده‌های فروش همکار', nextStep: 'اتصال را بررسی کنید و دوباره تلاش کنید.',
       }) });
+      return false;
     } finally {
       if (requestSequence === loadSequenceRef.current) setBusy(false);
     }
   }, [clearCaseError, reportCaseError, selectedCaseId]);
+  const automaticRefresh = usePartnerCaseRefresh(selectedCaseId, changeVersionRef,
+    version => load(true, version).then(Boolean), actionPending || busy);
 
   const runAction = useCallback(async (caseId: string, operation: string, name: string, action: () => Promise<unknown>): Promise<boolean> => {
     const errorKey = `${caseId}:${operation}`;
@@ -174,7 +189,7 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
     }
   }, [beginCaseAction, clearCaseError, isLatestCaseAction, load, reportCaseError]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { changeVersionRef.current = undefined; void load(); return () => { loadSequenceRef.current++; }; }, [load]);
   if (busy) return <ErpLoading />;
   if (!selectedCaseId) {
     const listing = partnerUnifiedCaseListPage(rows, issues, recoverableDrafts, search, tag, page);
@@ -204,7 +219,7 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
     return <ErpListPage eyebrow="فروش همکار" title="قراردادهای فروش"
       description="پرونده را انتخاب کنید تا جزئیات، تحویل، پرداخت و اقدام‌های مجاز آن را ببینید."
       actions={[{ label: 'ثبت قرارداد', icon: FaPlus, href: '/dashboard/sales/contracts/create' },
-        { label: 'به‌روزرسانی', icon: FaSync, onClick: load, tone: 'neutral' }]}
+        { label: 'به‌روزرسانی', icon: FaSync, onClick: () => void load(), tone: 'neutral' }]}
       filters={[{ id: 'search', label: 'جستجو', type: 'search', value: search,
         onChange: value => { setSearch(value); setPage(1); }, placeholder: 'نام مشتری، شماره قرارداد یا محصول...' },
         { id: 'tag', label: 'وضعیت پرونده', type: 'select', value: tag,
@@ -215,10 +230,14 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
         totalItems={listing.totalItems} itemsPerPage={listing.pageSize} onPageChange={setPage} itemLabel="پرونده" />}
       emptyState={<ErpEmptyState icon={FaFileContract} title="پرونده‌ای یافت نشد" />}
       isLoading={false}>{loadError && <ErpInlineState kind={loadError.kind} title={loadError.message}
-        action={{ label: 'تلاش دوباره', onClick: load }} />}</ErpListPage>;
+        action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
+      {automaticRefresh.failed && <ErpInlineState kind="stale" title="دریافت وضعیت تازه انجام نشد."
+        action={{ label: 'تلاش دوباره', onClick: automaticRefresh.retry }} />}</ErpListPage>;
   }
   return <ErpWorkspacePage title="پرونده‌های فروش همکار" context="وضعیت پرونده و وصول مشتری">
-    {loadError && <ErpInlineState kind={loadError.kind} title={loadError.message} action={{ label: 'تلاش دوباره', onClick: load }} />}
+    {loadError && <ErpInlineState kind={loadError.kind} title={loadError.message} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
+    {automaticRefresh.failed && <ErpInlineState kind="stale" title="دریافت وضعیت تازه انجام نشد."
+      action={{ label: 'تلاش دوباره', onClick: automaticRefresh.retry }} />}
     {!loadError && !rows.length && <ErpEmptyState icon={FaFileContract} title="پرونده‌ای ثبت نشده است" />}
     <div className="space-y-8">{rows.map(row => {
       const caseId = row.view.owner.caseId;
@@ -233,7 +252,7 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
           onRequestCorrection={scope => void runAction(caseId, `request-correction:${scope}`, 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, scope))}
           onSaveCorrection={input => void runAction(caseId, 'save-correction', 'ذخیره اصلاح فروش همکار', () => savePartnerRetailCorrection(row.view, input))}
           actions={{ ...row.actions,
-            canReviewPricing: row.commercial?.inquiry !== 'ACCEPTED' && ['READY', 'PARTIAL', 'REJECTED'].includes(row.pricingResponseState || ''),
+            canReviewPricing: canReviewPartnerInquiry(row),
             decisionActions: row.commercial ? [
               ...(row.actions.canCancel ? [{ label: 'رد', tone: 'danger' as const, onClick: () => { setCancelTarget(row); setCancelReason(''); } }] : []),
               ...(row.actions.canRenew ? [{ label: 'تمدید مهلت', tone: 'warning' as const, onClick: () => { setRenewTarget(true); setRejectPricing(false); setRejectDraftTarget(row); setRejectDraftReason(''); } }] : []),
@@ -242,7 +261,7 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
             ] : undefined,
             canEditDraft: Boolean(row.commercial && row.actions.canRejectDraft),
             onEditDraft: () => { setRenewTarget(false); setRejectPricing(false); setRejectDraftTarget(row); setRejectDraftReason(''); },
-            onContinue: row.editRecovery ? () => router.push(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}${row.commercial?.inquiry !== 'ACCEPTED' && ['READY', 'PARTIAL', 'REJECTED'].includes(row.pricingResponseState || '') ? '&returnTo=contract&step=5' : ''}`) : undefined,
+            onContinue: row.editRecovery ? () => router.push(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}${canReviewPartnerInquiry(row) ? '&returnTo=contract&step=5' : ''}`) : undefined,
             onPreview: () => void previewPdf(caseId, row.view.state === 'COMMITTED' ? undefined : row.snapshotId ?? undefined, 'PREVIEW', row.view.owner),
             onIssue: () => void previewPdf(caseId, undefined, 'FINAL', row.view.owner),
             onFinalize: () => { setFinalizeTarget(row); setLossAccepted(false); },

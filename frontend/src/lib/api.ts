@@ -682,11 +682,14 @@ export const salesAPI = {
   sendForConfirmation: (contractId: string) =>
     api.post(`/sales/contracts/${contractId}/send-for-confirmation`),
 
-  resendConfirmation: (contractId: string) =>
-    api.post(`/sales/contracts/${contractId}/resend-confirmation`),
+  resendConfirmation: (contractId: string, phoneNumber?: string) =>
+    api.post(`/sales/contracts/${contractId}/resend-confirmation`, { phoneNumber }),
 
   getConfirmationStatus: (contractId: string) =>
     api.get(`/sales/contracts/${contractId}/confirmation-status`),
+
+  getConfirmationRecipients: (contractId: string) =>
+    api.get(`/sales/contracts/${contractId}/confirmation-recipients`),
 
   cancelContract: (contractId: string) =>
     api.post(`/sales/contracts/${contractId}/cancel`),

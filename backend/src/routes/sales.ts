@@ -2398,6 +2398,7 @@ router.post(
         contractId,
         requestedBy: req.user.id,
         resend: true,
+        recipientPhoneNumber: req.body?.phoneNumber,
         meta: getRequestEvidence(req)
       });
 
@@ -2422,6 +2423,27 @@ router.post(
     }
   }
 );
+
+// The send dialog uses send authority; viewing verification timing is a
+// separate permission and must not prevent an authorized seller from sending.
+router.get('/contracts/:contractId/confirmation-recipients', protect,
+  requireWorkspaceAccess(WORKSPACES.SALES, WORKSPACE_PERMISSIONS.EDIT),
+  requireFeatureAccess(FEATURES.SALES_VERIFICATION_SEND, FEATURE_PERMISSIONS.EDIT),
+  async (req: any, res: Response) => {
+    try {
+      const contract = await prisma.salesContract.findUnique({ where: { id: req.params.contractId } });
+      if (!contract) return res.status(404).json({ success: false, error: 'قرارداد پیدا نشد.' });
+      if (req.user.role !== 'ADMIN' && req.user.departmentId && contract.departmentId !== req.user.departmentId) {
+        return res.status(403).json({ success: false, error: 'اجازه انجام این عملیات را ندارید.' });
+      }
+      const result = await contractConfirmationService.getConfirmationStatus(contract.id);
+      if (!result.success || !result.data) return res.status(400).json({ success: false, error: result.error });
+      const { availablePhoneNumbers, defaultPhoneNumber, phoneNumber, sessionStatus } = result.data;
+      return res.json({ success: true, data: { availablePhoneNumbers, defaultPhoneNumber, phoneNumber, sessionStatus } });
+    } catch {
+      return res.status(500).json({ success: false, error: 'دریافت شماره‌های مشتری انجام نشد؛ دوباره تلاش کنید.' });
+    }
+  });
 
 // @desc    Get contract confirmation status
 // @route   GET /api/sales/contracts/:contractId/confirmation-status

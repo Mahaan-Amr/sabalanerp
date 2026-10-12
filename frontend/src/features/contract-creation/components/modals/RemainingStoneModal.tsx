@@ -387,6 +387,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
               }))}
               loadTools={async () => subServices.map(tool => ({
                 catalogItemId: tool.id,
+                minimumQuantity: tool.minimumQuantity,
                 catalogSnapshotVersion: String(
                   (tool as SubService & { updatedAt?: string }).updatedAt || 'current'
                 ),
@@ -405,6 +406,7 @@ export const RemainingStoneModal: React.FC<RemainingStoneModalProps> = ({
                   : finishing.pricePerSquareMeter ?? finishing.unitPrice;
                 return {
                   catalogItemId: finishing.id,
+                minimumQuantity: finishing.minimumQuantity,
                   catalogSnapshotVersion: String(
                     (finishing as StoneFinishing & { updatedAt?: string }).updatedAt ||
                     'current'

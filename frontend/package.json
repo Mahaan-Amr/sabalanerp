@@ -26,7 +26,8 @@
     "test:hr-performance-workflow": "npx tsx src/features/hr/performance-workflow/performanceWorkflowModel.test.ts && npx tsx src/features/hr/performance-workflow/performanceProfileDraftModel.test.ts",
     "test:hr-performance-disclosure": "npx tsx src/features/hr/performance-badge/performanceBadgeModel.test.ts",
     "test:hr-duty-surfaces": "npx tsx src/features/hr-duties/destinationDutyState.test.ts",
-    "test:hr-e2e": "playwright test e2e/hr-role-workflows.spec.ts"
+    "test:hr-e2e": "playwright test e2e/hr-role-workflows.spec.ts",
+    "test:operation-minimums": "tsx --test src/features/contract-creation/components/product-modal-system/__tests__/operationMinimumPresentation.test.tsx src/features/contract-creation/partner/partnerOperationMinimum.test.ts"
   },
   "dependencies": {
     "@react-three/fiber": "^8.18.0",

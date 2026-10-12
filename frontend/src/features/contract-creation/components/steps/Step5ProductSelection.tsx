@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { OperationMinimumRowStatus, OperationMinimumCatalogHint } from '../product-modal-system/OperationMinimumContext';
 import { ErpButton, ErpInput, ErpInlineState, ErpPressable } from '@/components/erp';
 import { resolveBackendAssetUrl } from '@/lib/api';
 import {
@@ -360,6 +361,7 @@ const ServiceRow: React.FC<{
     <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
       <div>
         <strong className="text-sm sds-text-primary">{row.title}</strong>
+        <OperationMinimumRowStatus kind={row.sourceType} catalogItemId={row.sourceId} />
         <div className="mt-1 text-xs sds-text-secondary ">
           {getServiceRowSourceLabel(row.sourceType)} · {formatDisplayNumber(row.quantity)} {getServiceRowUnitLabel(row.unit)}
           {' · '}{formatPrice(row.totalPrice, row.currency)}
@@ -660,7 +662,7 @@ export const Step5ProductSelection: React.FC<Step5ProductSelectionProps> = ({
                   onClick={() => addStandaloneService(item)}
                   className="flex w-full items-center justify-between border-b border-[var(--sds-border-subtle)] py-2 text-right text-xs last:border-b-0"
                 >
-                  <span>{item.namePersian || item.name}</span>
+                  <span>{item.namePersian || item.name}<OperationMinimumCatalogHint kind={services.sourceType} catalogItemId={item.id} /></span>
                   <span>
                     {formatPrice(getServiceRowUnitPriceFromCatalog(services.sourceType, item), 'تومان')}
                     {' · '}افزودن

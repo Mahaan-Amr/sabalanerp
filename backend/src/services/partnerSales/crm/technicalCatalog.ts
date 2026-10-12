@@ -25,8 +25,8 @@ export function catalogMaterialRateToman(value: InventoryDecimal, currency: stri
 }
 
 type TechnicalOperationSource = { id: string; updatedAt: Date; isActive: boolean } & (
-  | { kind: 'TOOL'; namePersian: string; calculationBase: string }
-  | { kind: 'FINISHING'; namePersian: string; calculationBase: string; incompatibleCatalogItemIds: readonly string[] }
+  | { kind: 'TOOL'; namePersian: string; calculationBase: string; minimumQuantity?: InventoryDecimal | null }
+  | { kind: 'FINISHING'; namePersian: string; calculationBase: string; minimumQuantity?: InventoryDecimal | null; incompatibleCatalogItemIds: readonly string[] }
   | { kind: 'LAYER'; name: string; calculationUnit: string }
 );
 
@@ -38,6 +38,7 @@ export function projectPartnerTechnicalOperation(source: TechnicalOperationSourc
     const item = source.kind === 'LAYER'
       ? { ...identity, kind: source.kind, name: source.name, unit: source.calculationUnit }
       : { ...identity, kind: source.kind, name: source.namePersian, unit: operationUnit(source.calculationBase),
+          ...(source.minimumQuantity != null ? { minimumQuantity: source.minimumQuantity.toString() } : {}),
           ...(source.kind === 'FINISHING' ? { incompatibleCatalogItemIds: source.incompatibleCatalogItemIds } : {}),
         };
     return { ok: true, value: PartnerTechnicalOperationSchema.parse(item) };

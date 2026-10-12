@@ -6,6 +6,7 @@ import { FaPlus, FaEdit, FaTrash, FaToggleOn, FaToggleOff, FaFileExcel } from 'r
 import { dashboardAPI, servicesAPI } from '@/lib/api';
 import { ErpButton, ErpInlineState, ErpLoading, ErpQuickFilters, ErpListPage, ErpEmptyState, ErpPresentationProvider, ErpSheet } from '@/components/erp';
 import CatalogExcelSyncModal from '@/components/CatalogExcelSyncModal';
+import { getOperationalErrorMessage } from '@/lib/operationalError';
 import { formatPrice } from '@/lib/numberFormat';
 
 interface Service {
@@ -32,6 +33,7 @@ interface CuttingType {
 }
 
 interface SubService {
+  minimumQuantity?: string | number | null;
   id: string;
   code: string;
   name?: string;
@@ -67,6 +69,7 @@ interface LayerType {
 }
 
 interface StoneFinishing {
+  minimumQuantity?: string | number | null;
   id: string;
   code: string;
   name?: string;
@@ -137,6 +140,11 @@ const ServicesPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showExcelModal, setShowExcelModal] = useState(false);
   const [availability, setAvailability] = useState<Availability>({});
+  const [minimumAccess, setMinimumAccess] = useState(false);
+  const [minimumTarget, setMinimumTarget] = useState<{ id: string; kind: 'tool' | 'finishing'; name: string; unit: string } | null>(null);
+  const [minimumValue, setMinimumValue] = useState('');
+  const [minimumError, setMinimumError] = useState('');
+  const [minimumSaving, setMinimumSaving] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -146,6 +154,8 @@ const ServicesPage: React.FC = () => {
     try {
       setLoading(true);
       setLoadError('');
+      const minimumPermission = await servicesAPI.getOperationMinimumAccess();
+      setMinimumAccess(minimumPermission.data.data?.canEdit === true);
       const availabilityResponse = await dashboardAPI.getActionAvailability('inventory');
       const actions = (availabilityResponse.data.data || {}) as Availability;
       setAvailability(actions);
@@ -468,7 +478,7 @@ const ServicesPage: React.FC = () => {
     return <ErpLoading />;
   }
 
-  type CatalogRow = { id: string; title: string; code?: string; englishName?: string; description?: string; isActive: boolean; rate?: number | null; unit?: string; edit: () => void };
+  type CatalogRow = { id: string; title: string; code?: string; englishName?: string; description?: string; isActive: boolean; rate?: number | null; unit?: string; minimumQuantity?: string | number | null; edit: () => void };
   const rowsByTab: Record<ActiveTab, CatalogRow[]> = {
     services: filteredServices.map(item => ({ ...item, title: item.namePersian, englishName: item.name, edit: () => router.push(`/dashboard/inventory/services/services/edit/${item.id}`) })),
     'cutting-types': filteredCuttingTypes.map(item => ({ ...item, title: item.namePersian, englishName: item.name, rate: item.pricePerMeter, unit: 'متر طول', edit: () => router.push(`/dashboard/inventory/services/cutting-types/edit/${item.id}`) })),
@@ -504,11 +514,16 @@ const ServicesPage: React.FC = () => {
         ...(!inline ? [{ id: 'englishName', header: 'نام انگلیسی', cell: (item: CatalogRow) => item.englishName || '—' }] : []),
         ...(activeTab !== 'services' && activeTab !== 'stair-lengths' ? [{ id: 'rate', header: 'قیمت (تومان)', cell: (item: CatalogRow) => item.rate == null ? '—' : formatPrice(item.rate) }] : []),
         ...(activeTab !== 'services' ? [{ id: 'unit', header: activeTab === 'stair-lengths' ? 'طول / واحد' : 'واحد محاسبه', cell: (item: CatalogRow) => item.unit || '—' }] : []),
+        ...(['sub-services', 'stone-finishings'].includes(activeTab) ? [{ id: 'minimumQuantity', header: 'حداقل مقدار', cell: (item: CatalogRow) => Number(item.minimumQuantity) > 0
+          ? `${Number(item.minimumQuantity).toLocaleString('fa-IR', { maximumFractionDigits: 3 })} ${item.unit}` : 'بدون محدودیت' }] : []),
         { id: 'description', header: 'توضیحات', cell: item => <span className="break-words">{item.description || '—'}</span> },
         { id: 'status', header: 'وضعیت', cell: item => <ErpBadge tone={item.isActive ? 'success' : 'neutral'}>{item.isActive ? 'فعال' : 'غیرفعال'}</ErpBadge> },
       ]}
       rowActions={item => [
         ...(can('EDIT') ? [{ label: 'ویرایش', icon: FaEdit, onClick: item.edit, tone: 'neutral' as const }] : []),
+        ...(minimumAccess && ['sub-services', 'stone-finishings'].includes(activeTab) ? [{ label: 'تغییر حداقل مقدار', icon: FaEdit, tone: 'neutral' as const,
+          onClick: () => { setMinimumValue(item.minimumQuantity?.toString() ?? ''); setMinimumError('');
+            setMinimumTarget({ id: item.id, kind: activeTab === 'sub-services' ? 'tool' : 'finishing', name: item.title, unit: item.unit || '' }); } }] : []),
         ...(can('TOGGLE') ? [{ label: item.isActive ? 'غیرفعال کردن' : 'فعال کردن', icon: item.isActive ? FaToggleOn : FaToggleOff, onClick: () => handleToggleStatus(typeByTab[activeTab], item.id), tone: 'neutral' as const }] : []),
         ...(can('DELETE') ? [{ label: 'حذف', icon: FaTrash, onClick: () => setDeleteTarget({ type: typeByTab[activeTab], id: item.id, name: item.title }), tone: 'danger' as const }] : []),
       ]}
@@ -517,6 +532,22 @@ const ServicesPage: React.FC = () => {
       {loadError && <ErpInlineState kind="error" title={loadError} action={{ label: 'تلاش مجدد', onClick: loadData }} />}
     </ErpListPage>
     </div></ErpPresentationProvider>
+    <ErpSheet open={minimumTarget !== null} onClose={() => setMinimumTarget(null)} title={`حداقل مقدار ${minimumTarget?.name ?? ''}`}
+      presentation="modal" pending={minimumSaving}
+      footer={<div className="flex flex-wrap gap-3"><ErpButton label="انصراف" variant="outline" disabled={minimumSaving} onClick={() => setMinimumTarget(null)} />
+        <ErpButton label={minimumSaving ? 'در حال ذخیره…' : 'ذخیره حداقل مقدار'} disabled={minimumSaving} onClick={async () => {
+          if (!minimumTarget) return;
+          setMinimumSaving(true); setMinimumError('');
+          try {
+            await servicesAPI.updateOperationMinimum(minimumTarget.kind, minimumTarget.id, minimumValue);
+            setMinimumTarget(null); await loadData();
+          } catch (error: any) { setMinimumError(getOperationalErrorMessage(error, { failedAction: 'ذخیره حداقل مقدار', nextStep: 'مقدار و مجوز خود را بررسی و دوباره تلاش کنید.' })); }
+          finally { setMinimumSaving(false); }
+        }} /></div>}>
+      <ErpField label={`حداقل مقدار (${minimumTarget?.unit ?? ''})`} error={minimumError} hint="خالی یا صفر یعنی بدون محدودیت.">
+        <ErpInput type="number" min={0} step="0.001" value={minimumValue} disabled={minimumSaving} onChange={event => setMinimumValue(event.target.value)} />
+      </ErpField>
+    </ErpSheet>
     <ErpSheet open={showInlineForm && inline} onClose={closeInline} title={`${editingInline ? 'ویرایش' : 'افزودن'} ${tabLabels[activeTab]}`} presentation="modal" size="wide" pending={savingInline}
       footer={<div className="flex flex-wrap justify-end gap-3"><ErpButton label="انصراف" variant="outline" disabled={savingInline} onClick={closeInline} /><ErpButton label={savingInline ? 'در حال ذخیره…' : editingInline ? 'ذخیره تغییرات' : 'ثبت'} disabled={savingInline || !can(editingInline ? 'EDIT' : 'CREATE')} onClick={activeTab === 'stair-lengths' ? handleSaveStairLength : handleSaveLayerType} /></div>}
     >

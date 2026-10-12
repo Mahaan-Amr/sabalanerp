@@ -1,4 +1,5 @@
 import { ContractStatus, Prisma, type PrismaClient } from '@prisma/client';
+import { assertContractOperationMinimums } from './operationMinimumGuard';
 import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDuty';
 import { closePartnerCommercialEditPermission } from './crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter';
 import { withRecoveryBackgroundWrite } from './recoveryRuntime';
@@ -104,6 +105,7 @@ export const approveOrdinarySales = async (tx: Database, contractId: string, act
   const revision = contract.commercialRevision;
   if (expectedRevision !== revision) throw new Error('Contract changed concurrently; reload before saving');
   if (contract.salesApprovalRevision === revision) return contract;
+  await assertContractOperationMinimums(tx, contractId);
   const status = commercialApprovalStatus(revision, revision, contract.customerAcceptanceRevision);
   if (status === 'SIGNED') await assertContractQuantityEvidenceReadyForFinalization(tx as Prisma.TransactionClient, contractId);
   let updated = await tx.salesContract.update({ where: { id: contractId }, data: {

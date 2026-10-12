@@ -22,3 +22,6 @@ assert.deepEqual(expandFeaturePrerequisites(['sales_contracts_edit'], features),
 ]);
 
 console.log('Feature permission prerequisite tests passed.');
+assert.deepEqual(expandFeaturePrerequisites(['inventory_operation_minimum_edit'], [
+  'inventory_operation_minimum_edit', 'inventory_dashboard_view', 'inventory_sub_services_view', 'inventory_stone_finishings_view',
+]), ['inventory_dashboard_view', 'inventory_sub_services_view', 'inventory_stone_finishings_view', 'inventory_operation_minimum_edit']);

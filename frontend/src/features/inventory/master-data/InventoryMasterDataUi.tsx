@@ -3,6 +3,7 @@
 import React from 'react';
 import { ErpButton, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpPage, ErpSection, ErpSelect, ErpTextarea, type ErpAction } from '@/components/erp';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
+import { servicesAPI } from '@/lib/api';
 
 export type InventoryMasterDataKind = 'service' | 'cuttingType' | 'stoneFinishing' | 'subService';
 
@@ -14,6 +15,7 @@ export type InventoryMasterDataValues = {
   pricePerMeter?: string;
   pricePerSquareMeter?: string;
   calculationBase?: 'length' | 'squareMeters';
+  minimumQuantity?: string;
   images: string[];
   isActive: boolean;
 };
@@ -86,6 +88,19 @@ export function InventoryMasterDataForm({
   deleteAction?: { label: string; onClick: () => void };
 }) {
   const copy = configurations[kind];
+  const supportsMinimum = kind === 'subService' || kind === 'stoneFinishing';
+  const [minimumAccess, setMinimumAccess] = React.useState(false);
+  const [minimumAccessError, setMinimumAccessError] = React.useState('');
+  React.useEffect(() => {
+    if (!supportsMinimum) return;
+    let active = true;
+    servicesAPI.getOperationMinimumAccess().then(response => {
+      if (active) setMinimumAccess(response.data.data?.canEdit === true);
+    }).catch(() => {
+      if (active) setMinimumAccessError('بررسی مجوز تغییر حداقل مقدار انجام نشد؛ صفحه را تازه کنید.');
+    });
+    return () => { active = false; };
+  }, [supportsMinimum]);
   const price = copy.price;
   const priceValue = price?.key === 'pricePerSquareMeter' ? values.pricePerSquareMeter : values.pricePerMeter;
   const priceError = price ? errors[price.key] || (price.legacyError ? errors[price.legacyError] : undefined) : undefined;
@@ -120,6 +135,15 @@ export function InventoryMasterDataForm({
             <option value="length">طول (متر)</option>
             <option value="squareMeters">مساحت (متر مربع)</option>
           </ErpSelect>
+        </ErpField>
+      )}
+      {supportsMinimum && (
+        <ErpField label={`حداقل مقدار (${values.calculationBase === 'squareMeters' ? 'متر مربع' : 'متر طول'})`}
+          error={errors.minimumQuantity || minimumAccessError}
+          hint={minimumAccess ? 'خالی یا صفر یعنی بدون محدودیت. مجموع اجرای همین قلم در قرارداد بررسی می‌شود.' : 'برای تغییر این مقدار به مجوز مستقل حداقل مقدار نیاز دارید.'}>
+          <ErpInput id={`${kind}-minimum-quantity`} type="number" min={0} step="0.001"
+            value={values.minimumQuantity ?? ''} disabled={!minimumAccess || pending}
+            onChange={event => onChange({ minimumQuantity: event.target.value })} />
         </ErpField>
       )}
       </div>

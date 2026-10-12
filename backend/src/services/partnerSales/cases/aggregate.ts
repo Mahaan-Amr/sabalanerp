@@ -1,3 +1,5 @@
+import { assertOperationQuantityMinimums, standaloneMinimumQuantities } from '../../operationMinimumGuard';
+import { collectCalculatedOperationQuantities } from '@sabalanerp/contract-product-graph';
 import { finishCommercialCorrection } from '../../ordinaryContractLifecycle';
 import { inquiryBelongsToCurrentActivation } from './reactivationPricing';
 import { allocatePartnerLinkedPair } from './linkedPair';
@@ -332,6 +334,9 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   const commercialChanged = customerVisibleChanged || current.customerConfirmationState === 'REJECTED' ||
     current.state === 'COMMITTED' && (await canonicalHash(basis(current.head.wholesaleEnvelope, current.head.paymentEvidence, current.head.graph, current.head.retailEnvelope)) !==
     await canonicalHash(basis(evidence.value.wholesaleEnvelope, evidence.value.paymentEvidence, evidence.value.graph, evidence.value.retailEnvelope)));
+  if (command.intent.preparationCompleted && (commercialChanged || current.customerContract?.salesApprovalRevision !== current.customerContract?.commercialRevision)) {
+    await assertOperationQuantityMinimums(tx, [...collectCalculatedOperationQuantities(evidence.value.graph), ...standaloneMinimumQuantities(resolved.value.serviceRows)]);
+  }
   if (!commercialChanged && current.customerContract?.status === 'SIGNED') {
     markMutated();
     const consumed = await dependencies.consumeRecovery(tx, { actorId: dependencies.actorId,
@@ -614,6 +619,10 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
           evidence: { recoveryRevision: command.intent.recoveryRevision } });
         return evidence;
       }
+      if (command.intent.preparationCompleted) await assertOperationQuantityMinimums(tx, [
+        ...collectCalculatedOperationQuantities(evidence.value.graph),
+        ...standaloneMinimumQuantities(resolved.value.serviceRows),
+      ]);
       const integrityHash = await canonicalHash({ purpose: 'PARTNER_CASE_REVISION', schemaVersion: 1,
         graphHash: evidence.value.graphHash, graph: evidence.value.graph, partySnapshots: evidence.value.partySnapshots,
         wholesaleEnvelope: evidence.value.wholesaleEnvelope, retailEnvelope: evidence.value.retailEnvelope,

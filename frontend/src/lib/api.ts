@@ -682,11 +682,14 @@ export const salesAPI = {
   sendForConfirmation: (contractId: string) =>
     api.post(`/sales/contracts/${contractId}/send-for-confirmation`),
 
-  resendConfirmation: (contractId: string) =>
-    api.post(`/sales/contracts/${contractId}/resend-confirmation`),
+  resendConfirmation: (contractId: string, phoneNumber?: string) =>
+    api.post(`/sales/contracts/${contractId}/resend-confirmation`, { phoneNumber }),
 
   getConfirmationStatus: (contractId: string) =>
     api.get(`/sales/contracts/${contractId}/confirmation-status`),
+
+  getConfirmationRecipients: (contractId: string) =>
+    api.get(`/sales/contracts/${contractId}/confirmation-recipients`),
 
   cancelContract: (contractId: string) =>
     api.post(`/sales/contracts/${contractId}/cancel`),
@@ -1644,6 +1647,9 @@ export const servicesAPI = {
   getSubServices: (params?: any) => api.get('/sub-services', { params }),
   getSubService: (id: string) => api.get(`/sub-services/${id}`),
   createSubService: (data: any) => api.post('/sub-services', data),
+  getOperationMinimumAccess: () => api.get('/sub-services/minimum-access'),
+  updateOperationMinimum: (kind: 'tool' | 'finishing', id: string, minimumQuantity: string) =>
+    api.patch(`/${kind === 'tool' ? 'sub-services' : 'stone-finishings'}/${id}/minimum`, { minimumQuantity }),
   updateSubService: (id: string, data: any) => api.put(`/sub-services/${id}`, data),
   deleteSubService: (id: string) => api.delete(`/sub-services/${id}`),
   toggleSubServiceStatus: (id: string) => api.patch(`/sub-services/${id}/toggle`),

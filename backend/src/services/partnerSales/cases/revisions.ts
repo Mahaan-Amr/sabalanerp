@@ -153,6 +153,8 @@ export function buildRevisionEvidence(input: { command: Extract<PartnerCommand, 
       : { schemaVersion: 1, status: 'UNPRICED' as const, products: [] },
     retailEnvelope: { schemaVersion: 1, products: products.map(({ wholesaleUnitPrice: _wholesale, wholesaleLineTotal: _wholesaleTotal, wholesalePricing: _wholesalePricing, approvalEvidenceId: _approval,
       configurationHash: _configuration, ...row }) => row), totals: retailTotals,
+      operationMinimumServices: services.map(({ serviceRowId, sourceType, catalogItemId, quantity, unit }) =>
+        ({ serviceRowId, sourceType, catalogItemId, quantity, unit })),
       belowCostConfirmed: input.command.intent.belowCostConfirmed,
       ...(input.command.intent.preparationCompleted !== undefined
         ? { preparationCompleted: input.command.intent.preparationCompleted } : {}) },

@@ -1,3 +1,4 @@
+import { authorizeOperationMinimumChange, canEditOperationMinimum } from '../services/operationMinimumPermission';
 import { prisma } from '../lib/prisma';
 import express, { Request, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
@@ -7,6 +8,32 @@ import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../mi
 import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
+
+router.get('/minimum-access', protect, async (req: any, res: Response) => {
+  try { return res.json({ success: true, data: { canEdit: await canEditOperationMinimum(req.user) } }); }
+  catch (error: any) { console.error('Operation minimum permission failed', error);
+    return res.status(500).json({ success: false, error: 'بررسی مجوز حداقل مقدار انجام نشد؛ دوباره تلاش کنید.' }); }
+});
+
+router.patch('/:id/minimum', protect, async (req: any, res: Response) => {
+  try {
+    if (!await canEditOperationMinimum(req.user)) return res.status(403).json({ success: false,
+      error: 'مجوز تغییر حداقل مقدار ابزار و فرآوری سنگ برای شما فعال نیست.' });
+    if (!Object.prototype.hasOwnProperty.call(req.body, 'minimumQuantity')) return res.status(400).json({ success: false,
+      error: 'حداقل مقدار را وارد کنید؛ برای حذف محدودیت مقدار را خالی بگذارید.' });
+    const existing = await prisma.stoneFinishing.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, error: 'ابزار یا فرآوری سنگ یافت نشد.' });
+    const minimumQuantity = await authorizeOperationMinimumChange(req.user, req.body.minimumQuantity, existing.minimumQuantity);
+    const data = await prisma.stoneFinishing.update({ where: { id: existing.id }, data: { minimumQuantity } });
+    return res.json({ success: true, data });
+  } catch (error: any) {
+    console.error('Operation minimum update failed', error);
+    const validation = error.message?.startsWith('حداقل مقدار');
+    return res.status(error.status || (validation ? 400 : 500)).json({ success: false,
+      error: error.status || validation ? error.message : 'ذخیره حداقل مقدار انجام نشد؛ دوباره تلاش کنید.' });
+  }
+});
+
 
 const handleValidationErrors = (req: Request, res: Response) => {
   const errors = validationResult(req);
@@ -126,7 +153,7 @@ router.get(
           pages: Math.ceil(total / limit)
         }
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching stone finishings:', error);
       return res.status(500).json({
         success: false,
@@ -169,7 +196,7 @@ router.get(
         success: true,
         data: finishing
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching stone finishing:', error);
       return res.status(500).json({
         success: false,
@@ -191,6 +218,7 @@ router.post(
 
     try {
       const unitPrice = decimalFromInput(getUnitPriceInput(req.body));
+      const minimumQuantity = await authorizeOperationMinimumChange((req as any).user, req.body.minimumQuantity);
       const finishing = await prisma.stoneFinishing.create({
         data: {
           code: req.body.code ? String(req.body.code).trim() : `SF-${Date.now()}`,
@@ -200,6 +228,7 @@ router.post(
           pricePerSquareMeter: unitPrice,
           unitPrice,
           calculationBase: req.body.calculationBase || 'squareMeters',
+          minimumQuantity,
           images: req.body.images || [],
           isActive: true
         }
@@ -209,8 +238,9 @@ router.post(
         success: true,
         data: finishing
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating stone finishing:', error);
+    if (error.status || error.message?.startsWith('حداقل مقدار')) return res.status(error.status || 400).json({ success: false, error: error.message, details: [{ path: 'minimumQuantity', msg: error.message }] });
       return res.status(500).json({
         success: false,
         error: 'خطا در ایجاد پرداخت سنگ'
@@ -246,6 +276,9 @@ router.put(
         });
       }
 
+      const minimumQuantity = Object.prototype.hasOwnProperty.call(req.body, 'minimumQuantity')
+        ? await authorizeOperationMinimumChange((req as any).user, req.body.minimumQuantity, existing.minimumQuantity)
+        : existing.minimumQuantity;
       const updated = await prisma.stoneFinishing.update({
         where: { id: req.params.id },
         data: {
@@ -256,6 +289,8 @@ router.put(
           pricePerSquareMeter: unitPrice,
           unitPrice,
           calculationBase: req.body.calculationBase || existing.calculationBase || 'squareMeters',
+          ...((minimumQuantity ? !minimumQuantity.eq(existing.minimumQuantity ?? 0) : Boolean(existing.minimumQuantity && !existing.minimumQuantity.isZero()))
+            ? { minimumQuantity } : {}),
           images: req.body.images !== undefined ? req.body.images : existing.images,
           isActive:
             typeof req.body.isActive === 'boolean'
@@ -268,8 +303,9 @@ router.put(
         success: true,
         data: updated
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating stone finishing:', error);
+    if (error.status || error.message?.startsWith('حداقل مقدار')) return res.status(error.status || 400).json({ success: false, error: error.message, details: [{ path: 'minimumQuantity', msg: error.message }] });
       return res.status(500).json({
         success: false,
         error: 'خطا در بروزرسانی پرداخت سنگ'
@@ -308,7 +344,7 @@ router.delete(
         success: true,
         message: 'پرداخت سنگ حذف شد'
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting stone finishing:', error);
       return res.status(500).json({
         success: false,
@@ -349,7 +385,7 @@ router.patch(
         success: true,
         data: updated
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error toggling stone finishing status:', error);
       return res.status(500).json({
         success: false,

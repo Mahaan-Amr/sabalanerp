@@ -1,5 +1,7 @@
 'use client';
 
+import { OperationMinimumContext, OperationMinimumSummary } from '../components/product-modal-system/OperationMinimumContext';
+import { partnerOperationMinimumState } from './partnerOperationMinimum';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft,
@@ -207,7 +209,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
         : { family: selectedFamily, productRowId, sourceBatchId };
     setModal({ draft: addPartnerTechnicalProduct(draft, product, input), productRowId, mode: 'create' });
   };
-  return <RetailOperationCatalog.Provider value={retailOperationCatalog}><TechnicalProductConfiguration><section className="space-y-4" aria-label="محصولات فروش همکار">
+  return <OperationMinimumContext.Provider value={partnerOperationMinimumState(preview, operations, draft.serviceRows, retailOperationCatalog)}><RetailOperationCatalog.Provider value={retailOperationCatalog}><TechnicalProductConfiguration><section className="space-y-4" aria-label="محصولات فروش همکار">
     {catalogState !== 'ready' && <ErpInlineState kind={catalogState === 'error' ? 'error' : 'empty'}
       title={catalogState === 'error' ? 'دریافت کاتالوگ فنی انجام نشد؛ محصولات قرارداد حفظ شده‌اند.' : 'در حال دریافت کاتالوگ محصولات'}
       action={catalogState === 'error' && onRetryCatalog ? { label: 'تلاش مجدد دریافت کاتالوگ', onClick: onRetryCatalog } : undefined} />}
@@ -336,7 +338,8 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
         row={{ productRowId }}
         calculation={calculation} catalog={operations} onChange={onChange} intentOverride={intent ?? { groups: [], tools: [], finishings: [] }}
         onOperationsChange={onOperationsChange} />} />}
-  </section></TechnicalProductConfiguration></RetailOperationCatalog.Provider>;
+    <OperationMinimumSummary />
+  </section></TechnicalProductConfiguration></RetailOperationCatalog.Provider></OperationMinimumContext.Provider>;
 }
 
 function PartnerProductConfigurationFlow({ state, products, operations, sawKerfMeters, mandatoryDefaults, dependenciesReady, onDraftChange, onClose, onSave }: {
@@ -350,6 +353,7 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
   onClose: () => void;
   onSave: () => void;
 }) {
+  const minimumRetailCatalog = React.useContext(RetailOperationCatalog);
   const row = state.draft.rows.find(item => item.productRowId === state.productRowId);
   const product = row && products.find(item => item.catalogItemId === row.catalogItemId
     && item.catalogSnapshotVersion === row.catalogSnapshotVersion);
@@ -375,7 +379,7 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
       value={row.retailUnitPrice?.amount ?? ''}
       onValueChange={amount => onDraftChange(setPartnerTechnicalRetailUnitPrice(state.draft, row.productRowId, amount))} />
   </ErpField> : null;
-  return <CentralProductModalShell open title={state.mode === 'edit' ? 'ویرایش تنظیمات محصول' : 'تنظیمات محصول'}
+  return <OperationMinimumContext.Provider value={partnerOperationMinimumState(preview, operations, state.draft.serviceRows, minimumRetailCatalog)}><CentralProductModalShell open title={state.mode === 'edit' ? 'ویرایش تنظیمات محصول' : 'تنظیمات محصول'}
     view="main" onClose={onClose} primaryLabel={state.mode === 'edit' ? 'ذخیره تغییرات' : 'افزودن محصول'} pending={false}
     onPrimary={() => { if (!blockingConflict) onSave(); }} error={blockingConflict}>
     <div className="px-0 py-0 sm:px-2">
@@ -445,7 +449,7 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
         previewDependents={preview.value.dependents}
         inventory={preview.value.inventory} onChange={onDraftChange} />}
     </div>
-  </CentralProductModalShell>;
+  </CentralProductModalShell></OperationMinimumContext.Provider>;
 }
 
 export function PartnerStairLayerEditor({ parentProductRowId, draft, products, operations, previewRows, previewDependents, inventory, onChange }: { parentProductRowId: string; draft: PartnerTechnicalDraft; products: PartnerTechnicalProduct[];

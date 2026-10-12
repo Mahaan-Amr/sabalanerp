@@ -23,6 +23,9 @@ export const featurePrerequisites = (
 ): string[] => {
   if (feature.endsWith('_view')) return [];
   const available = new Set(availableFeatures);
+  if (feature === 'inventory_operation_minimum_edit') return [
+    'inventory_dashboard_view', 'inventory_sub_services_view', 'inventory_stone_finishings_view',
+  ].filter(required => available.has(required));
   const explicitPrefix = Object.keys(EXPLICIT_VIEW_REQUIREMENTS).find((prefix) => feature.startsWith(`${prefix}_`));
   if (explicitPrefix && available.has(EXPLICIT_VIEW_REQUIREMENTS[explicitPrefix])) return [EXPLICIT_VIEW_REQUIREMENTS[explicitPrefix]];
 

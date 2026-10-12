@@ -1,0 +1,9 @@
+# Check operation minimums at commercial confirmation
+
+Each tool or stone-finishing catalog item may have its own minimum operation quantity, with empty or zero meaning unrestricted and no positive default. Eligibility aggregates the final valid quantity of that same catalog item across one contract, in its calculation unit, including chosen edges and valid manual quantity overrides. Reaching the minimum exactly is sufficient; different catalog items and stone quantities without the operation do not contribute.
+
+Product rows and their operation selections must remain saveable below the minimum so sellers can assemble a qualifying order across multiple rows. Below-minimum selections remain visible with their deficit, while commercial completion is blocked until the quantity is sufficient or that operation is removed; reducing quantities must not silently remove selections. This applies to ordinary sales, partner sales, and standalone rows for these services.
+
+Current catalog minimums govern new contracts and contracts awaiting sales confirmation. Confirmed contracts and their historical meaning remain intact when catalog minimums change; commercial corrections must satisfy the current minimum at renewed sales confirmation. Retroactively rewriting confirmed operations would change an existing agreement, while freezing minimums forever would allow new commercial corrections to bypass the current production requirement. Existing approval, correction, pricing, and historical-evidence rules remain authoritative.
+
+An independent minimum-edit permission is exposed through HR permissions, enabled for Admin and Manager and grantable to other users. User-visible validation and failure messages are Persian and identify the affected operation and, where applicable, its required quantity, current total, unit, and deficit.

@@ -65,37 +65,36 @@ function normalizeIranMobileNumber(value: unknown): string | null {
   return /^09\d{9}$/.test(normalized) ? normalized : null;
 }
 
-function firstValidMobile(values: unknown[]): string | null {
-  for (const value of values) {
-    const mobile = normalizeIranMobileNumber(value);
-    if (mobile) {
-      return mobile;
-    }
-  }
-
-  return null;
-}
-
-function extractCustomerPhone(customer: any): string | null {
-  const phoneNumbers = Array.isArray(customer?.phoneNumbers) ? customer.phoneNumbers : [];
+export function customerConfirmationRecipients(customer: any): string[] {
+  const allRecords = Array.isArray(customer?.phoneNumbers) ? customer.phoneNumbers : [];
+  const phoneNumbers = allRecords.filter((p: any) => p?.isActive !== false);
+  const activeNumbers = new Set(phoneNumbers.map((p: any) => normalizeIranMobileNumber(p?.number)));
+  const inactiveNumbers = new Set(allRecords.filter((p: any) => p?.isActive === false)
+    .map((p: any) => normalizeIranMobileNumber(p?.number)));
   const primaryMobile = phoneNumbers.find((p: any) => p?.isPrimary && p?.type === 'mobile')?.number;
   const mobileNumbers = phoneNumbers.filter((p: any) => p?.type === 'mobile').map((p: any) => p?.number);
   const primaryPhone = phoneNumbers.find((p: any) => p?.isPrimary)?.number;
   const activePhones = phoneNumbers.filter((p: any) => p?.isActive !== false).map((p: any) => p?.number);
   const allPhones = phoneNumbers.map((p: any) => p?.number);
 
-  return firstValidMobile([
+  const contact = customer?.primaryContact?.isActive === false ? null : customer?.primaryContact;
+  return [...new Set([
     primaryMobile,
     ...mobileNumbers,
     primaryPhone,
-    customer?.primaryContact?.mobile,
-    customer?.primaryContact?.phone,
+    contact?.mobile,
+    contact?.phone,
     customer?.projectManagerNumber,
     ...activePhones,
     ...allPhones,
     customer?.homeNumber,
     customer?.workNumber
-  ]);
+  ].map(normalizeIranMobileNumber).filter((phone): phone is string => phone !== null
+    && (!inactiveNumbers.has(phone) || activeNumbers.has(phone))))];
+}
+
+function extractCustomerPhone(customer: any): string | null {
+  return customerConfirmationRecipients(customer)[0] || null;
 }
 
 function extractCustomerName(customer: any): string {
@@ -130,7 +129,7 @@ function serializePublicContract(session: any) {
         firstName: contract.customer.firstName,
         lastName: contract.customer.lastName,
         companyName: contract.customer.companyName,
-        phoneNumber: extractCustomerPhone(contract.customer)
+        phoneNumber: session.phoneNumber
       },
       items: contract.items,
       deliveries: contract.deliveries,
@@ -204,7 +203,7 @@ export class ContractConfirmationService {
         },
         customer: {
           include: {
-            phoneNumbers: true,
+            phoneNumbers: { orderBy: { createdAt: 'asc' } },
             primaryContact: true
           }
         },
@@ -259,198 +258,218 @@ export class ContractConfirmationService {
     requestedBy: string;
     resend?: boolean;
     explicitToken?: string;
+    recipientPhoneNumber?: string;
+    publicResend?: boolean;
     meta?: RequestEvidenceMeta;
   }): Promise<SendConfirmationResult> {
     const partner = await this.partnerOutput?.sendForConfirmation(params);
     if (partner !== undefined) return partner;
-    const contract = await prisma.salesContract.findUnique({
-      where: { id: params.contractId },
-      include: {
-        customer: {
-          include: {
-            phoneNumbers: true,
-            primaryContact: true
+    // Serialize send, edit and acceptance on the same contract. Do not rotate
+    // usable credentials until the provider has accepted their replacement.
+    return prisma.$transaction(async tx => {
+      const locked = await lockOrdinaryContract(tx, params.contractId);
+      const contract = await tx.salesContract.findUnique({
+        where: { id: params.contractId },
+        include: {
+          customer: {
+            include: {
+              phoneNumbers: { orderBy: { createdAt: 'asc' } },
+              primaryContact: true
+            }
           }
         }
-      }
-    });
-
-    if (!contract) {
-      return { success: false, error: 'قرارداد یافت نشد' };
-    }
-
-    if (contract.status === 'CANCELLED') {
-      return { success: false, error: 'قرارداد لغو شده است' };
-    }
-    if (isOrdinaryCommercialFlow(contract)) {
-      try { assertCommercialActionAvailable(contract); } catch { return { success: false, error: 'قرارداد منقضی یا غیرفعال است؛ مدیر فروش باید وضعیت آن را بررسی کند.' }; }
-      if (contract.customerAcceptanceRevision === contract.commercialRevision) return { success: false, error: 'پذیرش این نسخه قرارداد قبلاً ثبت شده است.' };
-    }
-
-    const phoneNumber = extractCustomerPhone(contract.customer);
-    if (!phoneNumber) {
-      return { success: false, error: 'شماره موبایل معتبر برای مشتری در CRM ثبت نشده است' };
-    }
-
-    const existingActiveSession = await prisma.contractPublicConfirmation.findFirst({
-      where: {
-        contractId: params.contractId,
-        ...(isOrdinaryCommercialFlow(contract) ? { commercialRevision: contract.commercialRevision } : {}),
-        status: 'PENDING',
-        linkExpiresAt: { gt: new Date() }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    const otpCode = generateOtp();
-    const otpCodeHash = hashValue(otpCode);
-    const otpExpiresAt = nowPlusMinutes(OTP_TTL_MINUTES);
-
-    let rawToken: string | null = null;
-    let session = existingActiveSession;
-
-    if (session && params.resend) {
-      const cooldownError = confirmationResendCooldownError(session.lastSentAt, new Date());
-      if (cooldownError) return { success: false, error: cooldownError };
-
-      session = await prisma.contractPublicConfirmation.update({
-        where: { id: session.id },
-        data: {
-          otpCodeHash,
-          otpExpiresAt,
-          attemptsUsed: 0,
-          resendCount: session.resendCount + 1,
-          lastSentAt: new Date()
-        }
       });
-      rawToken = params.explicitToken || null;
-    } else {
-      await prisma.contractPublicConfirmation.updateMany({
+
+      if (!contract) {
+        return { success: false, error: 'قرارداد یافت نشد' };
+      }
+
+      if (contract.isInactive || contract.status === 'CANCELLED') {
+        return { success: false, error: 'قرارداد لغو شده است' };
+      }
+      if (isOrdinaryCommercialFlow(contract)) {
+        try { assertCommercialActionAvailable(locked); } catch { return { success: false, error: 'قرارداد منقضی یا غیرفعال است؛ مدیر فروش باید وضعیت آن را بررسی کند.' }; }
+        if (contract.customerAcceptanceRevision === contract.commercialRevision) return { success: false, error: 'پذیرش این نسخه قرارداد قبلاً ثبت شده است.' };
+      }
+
+      const recipients = customerConfirmationRecipients(contract.customer);
+      const phoneNumber = params.recipientPhoneNumber === undefined ? recipients[0]
+        : normalizeIranMobileNumber(params.recipientPhoneNumber);
+      if (params.recipientPhoneNumber !== undefined && (!phoneNumber || !recipients.includes(phoneNumber))) {
+        return { success: false, error: 'شماره انتخاب‌شده دیگر در اطلاعات فعال مشتری نیست؛ شماره‌های مشتری را تازه‌سازی کنید.' };
+      }
+      if (!phoneNumber) {
+        return { success: false, error: 'شماره موبایل معتبر برای مشتری در CRM ثبت نشده است' };
+      }
+
+      const existingActiveSession = await tx.contractPublicConfirmation.findFirst({
         where: {
           contractId: params.contractId,
-          status: 'PENDING'
-        },
-        data: {
-          status: 'CANCELLED',
-          cancelledAt: new Date()
-        }
-      });
-
-      rawToken = generatePublicToken();
-      session = await prisma.contractPublicConfirmation.create({
-        data: {
-          contractId: params.contractId,
-          commercialRevision: isOrdinaryCommercialFlow(contract) ? contract.commercialRevision : null,
-          tokenHash: hashValue(rawToken),
-          phoneNumber,
-          otpCodeHash,
-          otpExpiresAt,
-          linkExpiresAt: nowPlusDays(LINK_TTL_DAYS),
+          ...(isOrdinaryCommercialFlow(contract) ? { commercialRevision: contract.commercialRevision } : {}),
           status: 'PENDING',
-          maxAttempts: MAX_ATTEMPTS,
-          attemptsUsed: 0,
-          lastSentAt: new Date(),
-          resendCount: params.resend ? 1 : 0,
-          createdBy: params.requestedBy
-        }
+          linkExpiresAt: { gt: new Date() }
+        },
+        orderBy: { createdAt: 'desc' }
       });
-    }
 
-    if (!session) {
-      return { success: false, error: 'ایجاد نشست تایید قرارداد ممکن نبود' };
-    }
+      if (params.publicResend && (!existingActiveSession || normalizePhoneNumber(existingActiveSession.phoneNumber) !== phoneNumber
+        || (params.explicitToken && existingActiveSession.tokenHash !== hashValue(params.explicitToken)))) {
+        return { success: false, error: 'شماره یا درخواست تأیید تغییر کرده است؛ ارسال تازه را از فروشنده بخواهید.' };
+      }
+      if (existingActiveSession) {
+        const cooldownError = confirmationResendCooldownError(existingActiveSession.lastSentAt, new Date());
+        if (cooldownError) return { success: false, error: cooldownError };
+      }
 
-    if (!rawToken) {
-      rawToken = generatePublicToken();
-      await prisma.contractPublicConfirmation.update({
-        where: { id: session.id },
-        data: { tokenHash: hashValue(rawToken) }
+      const otpCode = generateOtp();
+      const otpCodeHash = hashValue(otpCode);
+      const otpExpiresAt = nowPlusMinutes(OTP_TTL_MINUTES);
+
+      const smsResult = await smsService.sendContractConfirmationMessage({
+        phoneNumber, code: otpCode, customerName: extractCustomerName(contract.customer), contractNumber: contract.contractNumber
       });
-    }
-
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    const publicLink = `${frontendUrl}/contracts/confirm/${rawToken}`;
-
-    const smsResult = await smsService.sendContractConfirmationMessage({
-      phoneNumber,
-      code: otpCode,
-      customerName: extractCustomerName(contract.customer),
-      contractNumber: contract.contractNumber
-    });
-
-    await createAuditLog({
-      contractId: contract.id,
-      sessionId: session.id,
-      eventType: 'LINK_CREATED',
-      eventPayloadJson: {
-        linkExpiresAt: session.linkExpiresAt.toISOString(),
-        otpExpiresAt: session.otpExpiresAt.toISOString(),
-        resend: !!params.resend
-      },
-      meta: params.meta
-    });
-
-    await createAuditLog({
-      contractId: contract.id,
-      sessionId: session.id,
-      eventType: 'SMS_SENT',
-      eventPayloadJson: {
-        resend: !!params.resend,
-        smsSuccess: smsResult.success
-      },
-      provider: 'sms.ir',
-      providerMessageId: smsResult.messageId ? String(smsResult.messageId) : undefined,
-      providerRawResponse: smsResult.rawResponse,
-      meta: params.meta
-    });
-
-    if (!smsResult.success) {
-      return {
-        success: false,
-        error: smsResult.error || 'ارسال پیامک تایید انجام نشد'
-      };
-    }
-
-    const sentStatus = await prisma.$transaction(async tx => {
-      const current = await lockOrdinaryContract(tx, contract.id);
-      const active = await tx.contractPublicConfirmation.findUnique({ where: { id: session!.id } });
-      const changed = current.commercialFlowVersion !== contract.commercialFlowVersion
-        || (isOrdinaryCommercialFlow(current) && current.commercialRevision !== session!.commercialRevision);
-      let unavailable = changed || active?.status !== 'PENDING';
-      try { assertCommercialActionAvailable(current); } catch { unavailable = true; }
-      if (unavailable) {
-        await tx.contractPublicConfirmation.updateMany({ where: { id: session!.id, status: 'PENDING' }, data: { status: 'CANCELLED', cancelledAt: new Date() } });
-        return null;
+      if (!smsResult.success) {
+        await createAuditLog({ contractId: contract.id, sessionId: existingActiveSession?.id,
+          eventType: 'SMS_FAILED', eventPayloadJson: { resend: !!params.resend, phoneNumber, requestedBy: params.requestedBy },
+          provider: 'sms.ir', providerRawResponse: smsResult.rawResponse, meta: params.meta }, tx);
+        return { success: false, error: smsResult.error || 'ارسال پیامک تایید انجام نشد' };
       }
-      if (current.status === 'DRAFT' && !isOrdinaryCommercialFlow(current)) {
-        await tx.salesContract.update({ where: { id: current.id }, data: { status: 'PENDING_APPROVAL',
-          signatures: { ...((current.signatures as any) || {}), digitalConfirmation: { status: 'PENDING',
-            sentAt: new Date().toISOString(), phoneNumber, sessionId: session!.id } },
-        } });
-        return 'PENDING_APPROVAL';
-      }
-      return current.status;
-    });
-    if (!sentStatus) return { success: false, error: 'نسخه یا وضعیت قرارداد هنگام ارسال تغییر کرد؛ صفحه را تازه کنید و برای نسخه فعلی دوباره پیام تأیید بفرستید.' };
 
-    return {
-      success: true,
-      data: {
+      let rawToken: string | null = null;
+      let session = existingActiveSession;
+
+      if (session && params.resend && normalizePhoneNumber(session.phoneNumber) === phoneNumber) {
+        session = await tx.contractPublicConfirmation.update({
+          where: { id: session.id },
+          data: {
+            otpCodeHash,
+            otpExpiresAt,
+            attemptsUsed: 0,
+            resendCount: session.resendCount + 1,
+            lastSentAt: new Date()
+          }
+        });
+        rawToken = params.explicitToken || null;
+      } else {
+        await tx.contractPublicConfirmation.updateMany({
+          where: {
+            contractId: params.contractId,
+            status: 'PENDING'
+          },
+          data: {
+            status: 'CANCELLED',
+            cancelledAt: new Date()
+          }
+        });
+
+        rawToken = generatePublicToken();
+        session = await tx.contractPublicConfirmation.create({
+          data: {
+            contractId: params.contractId,
+            commercialRevision: isOrdinaryCommercialFlow(contract) ? contract.commercialRevision : null,
+            tokenHash: hashValue(rawToken),
+            phoneNumber,
+            otpCodeHash,
+            otpExpiresAt,
+            linkExpiresAt: nowPlusDays(LINK_TTL_DAYS),
+            status: 'PENDING',
+            maxAttempts: MAX_ATTEMPTS,
+            attemptsUsed: 0,
+            lastSentAt: new Date(),
+            resendCount: params.resend ? 1 : 0,
+            createdBy: params.requestedBy
+          }
+        });
+      }
+
+      if (!session) {
+        return { success: false, error: 'ایجاد نشست تایید قرارداد ممکن نبود' };
+      }
+
+      if (!rawToken) {
+        rawToken = generatePublicToken();
+        await tx.contractPublicConfirmation.update({
+          where: { id: session.id },
+          data: { tokenHash: hashValue(rawToken) }
+        });
+      }
+
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const publicLink = `${frontendUrl}/contracts/confirm/${rawToken}`;
+
+      await createAuditLog({
         contractId: contract.id,
-        status: sentStatus,
-        phoneNumber,
-        publicLink,
-        expiresAt: session.linkExpiresAt.toISOString(),
-        otpExpiresAt: session.otpExpiresAt.toISOString(),
-        messageId: smsResult.messageId ? String(smsResult.messageId) : undefined
-      }
-    };
+        sessionId: session.id,
+        eventType: 'LINK_CREATED',
+        eventPayloadJson: {
+          linkExpiresAt: session.linkExpiresAt.toISOString(),
+          otpExpiresAt: session.otpExpiresAt.toISOString(),
+          resend: !!params.resend,
+          phoneNumber,
+          previousPhoneNumber: existingActiveSession?.phoneNumber || null,
+          requestedBy: params.requestedBy
+        },
+        meta: params.meta
+      }, tx);
+
+      await createAuditLog({
+        contractId: contract.id,
+        sessionId: session.id,
+        eventType: 'SMS_SENT',
+        eventPayloadJson: {
+          resend: !!params.resend,
+          smsSuccess: smsResult.success,
+          phoneNumber,
+          requestedBy: params.requestedBy
+        },
+        provider: 'sms.ir',
+        providerMessageId: smsResult.messageId ? String(smsResult.messageId) : undefined,
+        providerRawResponse: smsResult.rawResponse,
+        meta: params.meta
+      }, tx);
+
+      const sentStatus = await (async () => {
+        const current = await lockOrdinaryContract(tx, contract.id);
+        const active = await tx.contractPublicConfirmation.findUnique({ where: { id: session!.id } });
+        const changed = current.commercialFlowVersion !== contract.commercialFlowVersion
+          || (isOrdinaryCommercialFlow(current) && current.commercialRevision !== session!.commercialRevision);
+        let unavailable = changed || active?.status !== 'PENDING';
+        try { assertCommercialActionAvailable(current); } catch { unavailable = true; }
+        if (unavailable) {
+          await tx.contractPublicConfirmation.updateMany({ where: { id: session!.id, status: 'PENDING' }, data: { status: 'CANCELLED', cancelledAt: new Date() } });
+          return null;
+        }
+        if (current.status === 'DRAFT' && !isOrdinaryCommercialFlow(current)) {
+          await tx.salesContract.update({ where: { id: current.id }, data: { status: 'PENDING_APPROVAL',
+            signatures: { ...((current.signatures as any) || {}), digitalConfirmation: { status: 'PENDING',
+              sentAt: new Date().toISOString(), phoneNumber, sessionId: session!.id } },
+          } });
+          return 'PENDING_APPROVAL';
+        }
+        return current.status;
+      })();
+      if (!sentStatus) return { success: false, error: 'نسخه یا وضعیت قرارداد هنگام ارسال تغییر کرد؛ صفحه را تازه کنید و برای نسخه فعلی دوباره پیام تأیید بفرستید.' };
+
+      return {
+        success: true,
+        data: {
+          contractId: contract.id,
+          status: sentStatus,
+          phoneNumber,
+          publicLink,
+          expiresAt: session.linkExpiresAt.toISOString(),
+          otpExpiresAt: session.otpExpiresAt.toISOString(),
+          messageId: smsResult.messageId ? String(smsResult.messageId) : undefined
+        }
+      };
+    }, { maxWait: 10_000, timeout: Math.max(45_000, Number.parseInt(process.env.SMS_IR_TIMEOUT_MS || '30000', 10) + 15_000) });
   }
 
   async getConfirmationStatus(contractId: string) {
     const contract = await prisma.salesContract.findUnique({
       where: { id: contractId },
       include: {
+        customer: { include: { phoneNumbers: { orderBy: { createdAt: 'asc' } }, primaryContact: true } },
         publicConfirmations: {
           orderBy: { createdAt: 'desc' },
           take: 1
@@ -481,6 +500,8 @@ export class ContractConfirmationService {
         commercialFlowVersion: contract.commercialFlowVersion,
         sessionStatus: session?.status || null,
         phoneNumber: session?.phoneNumber || null,
+        availablePhoneNumbers: customerConfirmationRecipients(contract.customer),
+        defaultPhoneNumber: extractCustomerPhone(contract.customer),
         linkExpiresAt: session?.linkExpiresAt || null,
         otpExpiresAt: session?.otpExpiresAt || null,
         attemptsUsed: session?.attemptsUsed || 0,
@@ -937,6 +958,8 @@ export class ContractConfirmationService {
       requestedBy: 'public-resend',
       resend: true,
       explicitToken: params.token,
+      recipientPhoneNumber: (await prisma.contractPublicConfirmation.findUniqueOrThrow({ where: { tokenHash } })).phoneNumber,
+      publicResend: true,
       meta: params.meta
     });
   }
@@ -961,6 +984,8 @@ export class ContractConfirmationService {
       contractId: lookup.session.contractId,
       requestedBy: 'public-manual-resend',
       resend: true,
+      recipientPhoneNumber: lookup.session.phoneNumber,
+      publicResend: true,
       meta: params.meta
     });
   }

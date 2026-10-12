@@ -45,12 +45,12 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
       const paging = { where, take: limit + 1, orderBy: { id: 'asc' as const } };
       const identity = { id: true, updatedAt: true, namePersian: true } as const;
       const rows = query.sourceType === 'tool'
-        ? (await tx.subService.findMany({ ...paging, select: { ...identity, calculationBase: true, pricePerMeter: true } }))
+        ? (await tx.subService.findMany({ ...paging, select: { ...identity, calculationBase: true, minimumQuantity: true, pricePerMeter: true } }))
           .map(row => ({ ...row, rate: row.pricePerMeter, unit: row.calculationBase === 'squareMeters' ? 'squareMeter' : 'meter' }))
         : query.sourceType === 'cutting'
           ? (await tx.cuttingType.findMany({ ...paging, select: { ...identity, pricePerMeter: true } }))
             .map(row => ({ ...row, rate: row.pricePerMeter, unit: 'meter' }))
-          : (await tx.stoneFinishing.findMany({ ...paging, select: { ...identity, calculationBase: true, unitPrice: true, pricePerSquareMeter: true } }))
+          : (await tx.stoneFinishing.findMany({ ...paging, select: { ...identity, calculationBase: true, minimumQuantity: true, unitPrice: true, pricePerSquareMeter: true } }))
             .map(row => ({ ...row, rate: row.unitPrice,
               unit: row.calculationBase === 'squareMeters' ? 'squareMeter' : 'meter' }));
       const refreshed = await authority.authorize('CASE_READ', root);
@@ -60,6 +60,7 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
       const page = PartnerTechnicalCatalogPageSchema.safeParse({ schemaVersion: 1, purpose: query.purpose, kind: query.kind,
         items: rows.slice(0, limit).map(row => ({ catalogItemId: row.id, catalogSnapshotVersion: row.updatedAt.toISOString(),
           sourceType: query.sourceType, name: row.namePersian, unit: row.unit,
+          ...('minimumQuantity' in row && row.minimumQuantity != null ? { minimumQuantity: row.minimumQuantity.toString() } : {}),
           ...(row.rate && row.rate.gt(0) ? { suggestedRetailUnitPrice: { amount: row.rate.toFixed(), currency: 'IRT' } } : {}) })),
         ...(rows.length > limit ? { nextCursor: rows[limit - 1].id } : {}) });
       return page.success ? { ok: true, value: page.data } : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
@@ -70,7 +71,7 @@ export function createPartnerTechnicalCatalogReader(tx: Prisma.TransactionClient
         ...(query.search ? { OR: [{ code: { contains: query.search, mode: 'insensitive' as const } },
           query.kind === 'LAYER' ? { name: { contains: query.search, mode: 'insensitive' as const } }
             : { namePersian: { contains: query.search, mode: 'insensitive' as const } }] } : {}) };
-      const selection = { id: true, updatedAt: true, isActive: true, namePersian: true, calculationBase: true } as const;
+      const selection = { id: true, updatedAt: true, isActive: true, namePersian: true, calculationBase: true, minimumQuantity: true } as const;
       projectedRows = query.kind === 'TOOL'
         ? (await tx.subService.findMany({ where, select: selection, take: limit + 1, orderBy: { id: 'asc' } }))
           .map(row => ({ id: row.id, result: projectPartnerTechnicalOperation({ ...row, kind: 'TOOL' }) }))

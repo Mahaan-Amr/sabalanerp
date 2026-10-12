@@ -51,6 +51,8 @@ import { enterPartnerWizard, partnerDeliveryPlanIssue, preservePartnerDeliveries
 import { partnerMoneyText, partnerRetailIntentRows, partnerRetailDraftRows, refreshPartnerInquiryRow,
   partnerRetailDiscountFromPercent, partnerPaymentAllocation, partnerRetailSummary, remainingPartnerAmount, stepPartnerDeliveryAmount, newPartnerPaymentInstallment } from './partnerRetail';
 import { coalescePartnerCatalogReads, loadPartnerCreationCatalog } from './partnerCreationCatalogLoader';
+import { OperationMinimumContext } from '../components/product-modal-system/OperationMinimumContext';
+import { partnerOperationMinimumState, partnerOperationMinimumFailure } from './partnerOperationMinimum';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
 import { PartnerStandaloneServiceEditor, partnerServiceDraftReady } from './PartnerStandaloneServiceEditor';
 import { finalizePartnerCase, sendPartnerConfirmation } from '../../partner-sales/cases/partnerCaseHttpPort';
@@ -1813,6 +1815,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       return prepared;
     }}
     validateStep={(step, draft) => step === 'date' && !draft.intent.contractDate ? 'تاریخ قرارداد را وارد کنید.'
+      : step === 'confirmation' ? partnerOperationMinimumFailure(technicalPreview, technicalOperations, technicalDraft.serviceRows, serviceCatalog)
       : step === 'customer' && !draft.intent.customerId ? 'مشتری را انتخاب کنید.'
       : step === 'project' && !draft.intent.projectId ? 'پروژه را انتخاب کنید.'
       : step === 'delivery' ? partnerDeliveryPlanIssue(draft.intent.deliveries, draft.rows, draft.serviceRows)
@@ -1972,7 +1975,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
             onChange={(field, value) => setProjectForm(current => ({ ...current, [field]: value }))} />
         </ErpSheet>
       </div>; })()}
-      {saleStep === 'products' && <>
+      {saleStep === 'products' && <OperationMinimumContext.Provider value={partnerOperationMinimumState(technicalPreview, technicalOperations, technicalDraft.serviceRows, serviceCatalog)}>
         {catalogFreshAt && <p className="text-sm sds-text-secondary">آخرین دریافت کاتالوگ: {new Date(catalogFreshAt).toLocaleTimeString('fa-IR')}؛ {catalogDependenciesState === 'loading' ? 'در حال به‌روزرسانی' : catalogDependenciesState === 'error' ? 'به‌روزرسانی کامل نشد؛ اطلاعات قبلی حفظ شده است' : 'داده نمایشی تا ۶۰ ثانیه قابل استفاده مجدد است'}</p>}
         {catalogState === 'ready' && catalogDependenciesState === 'loading' &&
           <ErpInlineState kind="empty" title="در حال دریافت ابزار، پرداخت و خدمات" />}
@@ -1998,7 +2001,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           preview={technicalPreview} focusProductRowId={searchParams.get('focusProductRowId') ?? undefined}
           onChange={next => setTechnicalDraft(repairPartnerTechnicalOperationIds(next))} />
         {catalogState === 'ready' && <PartnerStandaloneServiceEditor draft={technicalDraft} catalog={serviceCatalog} onChange={setTechnicalDraft} />}
-      </>}
+      </OperationMinimumContext.Provider>}
       <ErpSheet open={initialInquiryOpen} onClose={() => setInitialInquiryOpen(false)} title="استعلام جدید"
         presentation="modal" pending={pending} footer={<div className="flex flex-wrap gap-2"><ErpButton
           label={initialInquiryMatches?.missingPricingSubjectIds.length === 0 ? 'ادامه با قیمت‌های معتبر' : 'ارسال ردیف‌های انتخاب‌شده'}

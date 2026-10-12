@@ -1,4 +1,5 @@
 "use client";
+import { ContractConfirmationResend } from '@/features/sales/ContractConfirmationResend';
 import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCreditPanel';
 import { ContractRenewal } from '@/features/sales/ContractRenewal';
 import { ContractReactivation } from '@/features/sales/ContractReactivation';
@@ -248,6 +249,8 @@ export default function ContractDetailPage() {
   );
 
   const [renewalOpen, setRenewalOpen] = useState(false);
+  const [resendOpen, setResendOpen] = useState(false);
+  const [confirmationSentPhone, setConfirmationSentPhone] = useState<string | null>(null);
   const [reactivationOpen, setReactivationOpen] = useState(false);
   const reactivationRouter = useRouter();
   const [contract, setContract] = useState<Contract | null>(null);
@@ -700,49 +703,6 @@ export default function ContractDetailPage() {
     }
   };
 
-  const handleResendConfirmation = async () => {
-    if (!contract) return;
-    const errorSource = "resend-confirmation";
-    const requestSequence = beginOperation(errorSource);
-    setOperationPending(errorSource, true);
-    try {
-      const response = await salesAPI.resendConfirmation(contract.id);
-      if (!isLatestOperation(errorSource, requestSequence)) return;
-      if (response.data?.success) {
-        clearOperationalError(errorSource);
-      } else {
-        showOperationalError(
-          errorSource,
-          getSalesOperationalErrorMessage(
-            { response },
-            {
-              failedAction: "ارسال دوباره کد تأیید",
-              nextStep:
-                "شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.",
-              uncertainMutation: true,
-            },
-          ),
-          getSalesOperationalErrorKind({ response }),
-        );
-      }
-    } catch (error: any) {
-      if (!isLatestOperation(errorSource, requestSequence)) return;
-      showOperationalError(
-        errorSource,
-        getSalesOperationalErrorMessage(error, {
-          failedAction: "ارسال دوباره کد تأیید",
-          nextStep:
-            "شماره تماس مشتری و زمان مجاز ارسال را بررسی کنید و دوباره تلاش کنید.",
-          uncertainMutation: true,
-        }),
-        getSalesOperationalErrorKind(error),
-      );
-    } finally {
-      if (isLatestOperation(errorSource, requestSequence))
-        setOperationPending(errorSource, false);
-    }
-  };
-
   const products = useMemo(() => {
     if (!contract) return [];
     return contract.contractData?.products?.length
@@ -1017,7 +977,7 @@ export default function ContractDetailPage() {
   if (canResendConfirmation) {
     actions.push({
       label: "ارسال دوباره کد تایید",
-      onClick: handleResendConfirmation,
+      onClick: () => { setConfirmationSentPhone(null); setResendOpen(true); },
       icon: FaRedo,
       tone: "info" as ErpTone,
       disabled: pendingOperations.has("resend-confirmation"),
@@ -1066,6 +1026,8 @@ export default function ContractDetailPage() {
 
   return (
     <>
+      <ContractConfirmationResend contractId={resendOpen ? contract.id : null} onClose={() => setResendOpen(false)}
+        onSent={phone => { setConfirmationSentPhone(phone); clearOperationalError("resend-confirmation"); }} />
       <ContractRenewal contractId={renewalOpen ? contract.id : null} onClose={() => setRenewalOpen(false)} onRenewed={loadContract} />
       <ContractReactivation target={reactivationOpen && contract.reactivationActions ? { id: contract.id,
         expectedRevision: contract.reactivationActions.expectedRevision } : null}
@@ -1091,6 +1053,7 @@ export default function ContractDetailPage() {
           className="mb-4"
         />
       )}
+      {confirmationSentPhone && <ErpInlineState kind="empty" title={`درخواست ارسال کد به ${confirmationSentPhone} با موفقیت ثبت شد.`} />}
       {loadError && (
         <ErpInlineState
           kind="stale"

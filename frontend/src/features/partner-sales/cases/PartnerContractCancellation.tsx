@@ -1,4 +1,5 @@
 'use client';
+import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
@@ -7,6 +8,7 @@ import { cancelPartnerCase, reactivatePartnerCase, readPartnerCases, sendPartner
 import { partnerSalesActionFeedback } from '../partnerSalesErrorMessage';
 import { assertSuccessfulSalesResult } from '@/features/sales/salesOperationalError';
 export function PartnerContractCancellation({ caseId, presentation }: { caseId: string; presentation?: 'wizard' }) {
+  const smsSuccess = useSmsSuccess();
   const router = useRouter();
   const [row, setRow] = useState<PartnerCaseRuntimeRow>();
   const [open, setOpen] = useState(false);
@@ -22,6 +24,7 @@ export function PartnerContractCancellation({ caseId, presentation }: { caseId: 
   useEffect(() => { let active = true; setRow(undefined); void readPartnerCases(caseId).then(rows => { if (active) setRow(rows.find(item => item.view.owner.caseId === caseId)); }).catch(() => { if (active) setRow(undefined); }); return () => { active = false; }; }, [caseId]);
   if (!row || (!row.actions.canCancel && !row.actions.canSendConfirmation && !cancelled)) return null;
   const content = <>
+    {smsSuccess.feedback}
     <div className="flex flex-wrap gap-3">
       {row.actions.canSendConfirmation && <ErpButton label="ارسال پیامک تأیید" tone="primary" disabled={pending} onClick={() => {
         if (confirmationFlight.current) return;
@@ -29,7 +32,7 @@ export function PartnerContractCancellation({ caseId, presentation }: { caseId: 
         setPending(true); setConfirmationFeedback(undefined);
         void sendPartnerConfirmation(caseId).then(result => {
           assertSuccessfulSalesResult(result);
-          setConfirmationFeedback({ kind: 'success', message: 'پیامک تأیید قرارداد برای مشتری ارسال شد.' });
+          smsSuccess.show();
         }).catch(failure => setConfirmationFeedback({ kind: 'error', message: partnerSalesActionFeedback(failure, 'ارسال پیامک تأیید').message }))
           .finally(() => { confirmationFlight.current = false; setPending(false); });
       }} />}

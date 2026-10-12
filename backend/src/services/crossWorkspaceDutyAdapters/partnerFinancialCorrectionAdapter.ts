@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { enqueueContractCancellationNotice } from '../contractCancellationNotice';
 import { readRetailCorrectionState } from '../partnerSales/corrections/persistedRetailState';
 import { caseComparableAmount } from '../partnerSales/reporting/comparable';
 import { subtract } from '../partnerSales/reporting/money';
@@ -557,6 +558,8 @@ async function finalizeVoid(tx: Transaction, input: {
       customerContractCancellation: { contractNumber: input.snapshot.customerContractNumber, status: 'CANCELLED' },
       internalObligationVoid: { recordNumber: input.snapshot.internalRecordNumber, adjustmentEventId } }) } });
   const noticeOutboxId = randomUUID();
+  await enqueueContractCancellationNotice(tx, { contractId: current.customerContractId,
+    eventKey: `partner-cancel:${voidEventId}`, at: new Date(instant) });
   await tx.partnerOutboxMessage.create({ data: { id: noticeOutboxId, eventId: voidEventId,
     purpose: 'CUSTOMER_CANCELLATION_NOTICE', deduplicationKey: `partner-void-notice:${input.command.correctionId}`,
     safePayload: json({ schemaVersion: 1, kind: 'CUSTOMER_CANCELLED',

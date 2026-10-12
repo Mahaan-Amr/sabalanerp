@@ -1431,11 +1431,16 @@ test('Partner reactivation returns to note, requires manager authority, rejects 
       reason: 'درخواست و تأیید مستقل مدیر', requestKey: randomUUID(), now: new Date() });
     await grant();
     const reason = 'لغو قرارداد برای آزمون فعال‌سازی';
+    await tx.contractPublicConfirmation.create({ data: { contractId: final.root.customerContractId!, tokenHash: randomUUID(),
+      phoneNumber: '09120000001', otpCodeHash: 'qa', otpExpiresAt: new Date(), linkExpiresAt: new Date(),
+      commercialRevision: 1, status: 'VERIFIED', verifiedAt: new Date(), lastSentAt: new Date() } });
     const cancelled = await lifecycle.execute({ schemaVersion: 1, type: 'CASE_CANCEL', commandId: randomUUID(), correlationId: randomUUID(),
       expected: final.owner, expectedState: 'COMMITTED', reason,
       idempotency: { actorId: ids.partnerId, operation: 'CASE_CANCEL', targetId: ids.caseId, key: randomUUID(),
         payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_CANCEL', reason }) } });
     assert.ok(cancelled.ok, JSON.stringify(cancelled));
+    const cancellationNotice = await tx.contractCancellationNotice.findFirstOrThrow({ where: { contractId: final.root.customerContractId! } });
+    assert.equal(cancellationNotice.status, 'PENDING', 'Partner commercial void enqueues a customer SMS');
     const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: final.root.customerContractId! } });
     const input = { caseId: ids.caseId, actorId: ids.partnerId, expected: final.owner, expectedState: 'VOIDED',
       commercialRevision: contract.commercialRevision, commandId: randomUUID(), reason: 'فعال‌سازی با استعلام تازه' };
@@ -1443,6 +1448,11 @@ test('Partner reactivation returns to note, requires manager authority, rejects 
     await grant();
     await reactivatePartnerCase(tx, input);
     await reactivatePartnerCase(tx, input);
+    assert.equal((await tx.contractCancellationNotice.findUniqueOrThrow({ where: { id: cancellationNotice.id } })).status, 'SUPPRESSED');
+    const { enqueueContractCancellationNotice } = await import('../contractCancellationNotice');
+    assert.equal(await enqueueContractCancellationNotice(tx, { contractId: final.root.customerContractId!,
+      eventKey: `qa-old-period:${randomUUID()}`, at: new Date() }), null,
+      'A real Partner reactivation excludes digital acceptance from its previous activation period');
     assert.equal((await readPartnerCommercialState(tx, ids.caseId))?.status, 'NOTE');
     assert.equal(await currentPricingEvidenceIsValid(tx, final.owner), false);
     await assert.rejects(() => assertPartnerFinancialFinality(tx, ids.caseId), /قطعی/);

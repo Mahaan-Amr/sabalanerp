@@ -41,6 +41,9 @@ const inFixture = async (run: (tx: Prisma.TransactionClient, contract: any) => P
 };
 
 for (const flowVersion of [0, 1]) test(`editor save commits its edits and cancellation together (flow ${flowVersion})`, () => inFixture(async (tx, contract) => {
+  await tx.contractPublicConfirmation.create({ data: { contractId: contract.id, tokenHash: randomUUID(),
+    phoneNumber: '09120000001', otpCodeHash: 'qa', otpExpiresAt: new Date(), linkExpiresAt: new Date(),
+    commercialRevision: 1, status: 'VERIFIED', verifiedAt: new Date(), lastSentAt: new Date() } });
   const source = await tx.salesContract.findFirstOrThrow({ where: { partnerKind: null, partnerCaseId: null,
     productGraphState: { isNot: null }, id: { not: contract.id }, contractData: { not: Prisma.DbNull } } });
   const admin = await tx.user.findFirstOrThrow({ where: { role: 'ADMIN' } });
@@ -96,6 +99,8 @@ for (const flowVersion of [0, 1]) test(`editor save commits its edits and cancel
     };
   } });
   await assert.rejects(updateContract(contract.id, edit, admin.id, failingClient, authority), /injected cancellation audit failure/);
+  assert.equal(await tx.contractCancellationNotice.count({ where: { contractId: contract.id } }), 0,
+    'An editor-save rollback must not retain a cancellation notification');
   assert.deepEqual(await tx.salesContract.findUniqueOrThrow({ where: { id: contract.id } }), before);
   assert.deepEqual(await tx.salesContractProductGraphState.findUniqueOrThrow({ where: { contractId: contract.id } }), graphBefore);
   assert.equal(await tx.contractConfirmationAuditLog.count({ where: { contractId: contract.id } }), 0);
@@ -104,6 +109,8 @@ for (const flowVersion of [0, 1]) test(`editor save commits its edits and cancel
   const saved = await updateContract(contract.id, edit,
     admin.id, client, { cancellationAuthority: { canCancelApproved: true } });
   assert.equal(saved.status, 'CANCELLED');
+  assert.equal(await tx.contractCancellationNotice.count({ where: { contractId: contract.id } }), 1,
+    'The accepted customer is notified atomically with actual editor-save cancellation');
   assert.equal(saved.notes, 'ویرایش همراه لغو');
   assert.equal(saved.commercialRevision, flowVersion === 1 ? 2 : 1);
   if (flowVersion === 1) assert.equal(saved.commercialExpiresAt!.getTime(), contract.commercialExpiresAt.getTime());

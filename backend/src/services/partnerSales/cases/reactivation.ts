@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { suppressContractCancellationNotices } from '../../contractCancellationNotice';
 import { Prisma } from '@prisma/client';
 import { PartnerEventSchema, canonicalHash, checkExpectedRevision, type RevisionRef } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
@@ -64,6 +65,7 @@ export async function reactivatePartnerCase(tx: Prisma.TransactionClient, input:
   await tx.salesContract.update({ where: { id: contract.id }, data: { isInactive: false,
     inactiveAt: null, inactiveBy: null, inactiveReason: null, lostAt: null } });
   const updated = await resetPartnerCommercialApprovals(tx, root.id, input.actorId, input.reason);
+  await suppressContractCancellationNotices(tx, contract.id);
   const sessions = await tx.salesContractEditSession.findMany({ where: { ownerUserId: input.actorId, purpose: 'PARTNER_TECHNICAL',
     OR: [{ contractId: contract.id }, { recovery: { path: ['partnerCaseId'], equals: root.id } }] } });
   for (const session of sessions) {

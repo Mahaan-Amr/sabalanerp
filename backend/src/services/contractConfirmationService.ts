@@ -1,4 +1,5 @@
 import { confirmationResendCooldownError } from './contractConfirmationPolicy';
+import { enqueueContractCancellationNotice } from './contractCancellationNotice';
 import { prisma } from '../lib/prisma';
 import { isOrdinaryCommercialFlow, assertCommercialActionAvailable, markCustomerAcceptance, lockOrdinaryContract } from './ordinaryContractLifecycle';
 import { PrismaClient, Prisma } from '@prisma/client';
@@ -1059,6 +1060,8 @@ export class ContractConfirmationService {
           cancelledAt: new Date()
         }
       });
+      await enqueueContractCancellationNotice(tx, { contractId: contract.id,
+        eventKey: `ordinary-cancel:${crypto.randomUUID()}`, at: cancellationAt });
     };
     if (params.transaction) await commitCancellation(params.transaction);
     else await prisma.$transaction(commitCancellation);

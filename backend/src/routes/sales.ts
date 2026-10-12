@@ -33,6 +33,7 @@ import {
 } from '../services/contractService';
 import { getNextContractNumberPreview } from '../services/contractNumberService';
 import { contractConfirmationService } from '../services/contractConfirmationService';
+import { readContractCancellationNotice, retryContractCancellationNotice } from '../services/contractCancellationNotice';
 import { buildAccountingSummaryForContracts } from '../services/accountingService';
 import { getRequestEvidence } from '../utils/requestEvidence';
 import { buildContractSearchConditions, parseContractStatuses } from '../services/contractListQuery';
@@ -2442,6 +2443,55 @@ router.get('/contracts/:contractId/confirmation-recipients', protect,
       return res.json({ success: true, data: { availablePhoneNumbers, defaultPhoneNumber, phoneNumber, sessionStatus } });
     } catch {
       return res.status(500).json({ success: false, error: 'دریافت شماره‌های مشتری انجام نشد؛ دوباره تلاش کنید.' });
+    }
+  });
+
+const cancellationNoticeAuthority = async (tx: Prisma.TransactionClient, req: any) => {
+  const contract = await tx.salesContract.findUnique({ where: { id: req.params.contractId } });
+  if (!contract || !validateContractAccess(contract, req.user)
+    || !await canPartnerReadSalesContract(prisma, { userId: req.user.id, role: req.user.role, contractId: contract.id })) {
+    throw new Error('قرارداد در دسترس نیست.');
+  }
+  if (contract.partnerCaseId) {
+    const decision = await createAuditedPartnerAuthorization(tx, { actorId: req.user.id, purpose: 'PARTNER', channel: 'DETAIL' },
+      { correlationId: randomUUID() }).authorize('CASE_READ', { kind: 'CASE', id: contract.partnerCaseId });
+    if (!decision.ok) throw new Error('اجازه مشاهده این پرونده را ندارید.');
+    const output = await createAuditedPartnerAuthorization(tx, { actorId: req.user.id, purpose: 'CUSTOMER_OUTPUT', channel: 'API' },
+      { correlationId: randomUUID() }).authorize('CUSTOMER_OUTPUT', { kind: 'CASE', id: contract.partnerCaseId });
+    return output.ok;
+  }
+  const access = await resolveNarrowFeatureAccess(tx, { userId: req.user.id, role: req.user.role,
+    workspace: WORKSPACES.SALES, feature: FEATURES.SALES_VERIFICATION_SEND, requiredPermission: 'edit' });
+  const effective = await getEffectiveUserAccess(tx, { userId: req.user.id, userRole: req.user.role });
+  return access.allowed && effective.workspaces.some(workspace => workspace.workspace === WORKSPACES.SALES
+    && ['edit', 'admin'].includes(workspace.permission));
+};
+
+router.get('/contracts/:contractId/cancellation-notice', protect, requireSalesDetailRead, async (req: any, res: Response) => {
+  try {
+    const data = await prisma.$transaction(async tx => {
+      const canSend = await cancellationNoticeAuthority(tx, req);
+      const notice = await readContractCancellationNotice(tx, req.params.contractId);
+      return notice ? { ...notice, canRetry: canSend && notice.canRetry } : null;
+    });
+    return res.json({ success: true, data });
+  } catch {
+    return res.status(403).json({ success: false, error: 'اطلاع‌رسانی این قرارداد در دسترس نیست.' });
+  }
+});
+
+router.post('/contracts/:contractId/cancellation-notice/retry', protect,
+  requireSalesDetailRead,
+  async (req: any, res: Response) => {
+    try {
+      const data = await prisma.$transaction(async tx => {
+        if (!await cancellationNoticeAuthority(tx, req)) throw new Error('اجازه ارسال پیامک را ندارید.');
+        return retryContractCancellationNotice(tx, { contractId: req.params.contractId,
+          actorId: req.user.id, phoneNumber: typeof req.body?.phoneNumber === 'string' ? req.body.phoneNumber : undefined });
+      });
+      return res.json({ success: true, data });
+    } catch (error) {
+      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'درخواست ارسال انجام نشد.' });
     }
   });
 

@@ -5,7 +5,7 @@ export type PartnerCustomerDraft = {
   firstName: string;
   lastName: string;
   companyName: string;
-  customerType: 'Individual' | 'Company';
+  customerType: 'Individual' | 'Company' | 'Government';
   city: string;
   address: string;
   nationalCode: string;

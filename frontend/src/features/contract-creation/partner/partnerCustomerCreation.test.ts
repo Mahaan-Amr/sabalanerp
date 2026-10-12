@@ -60,3 +60,14 @@ test('builds an integrity-protected owner-scoped customer update command', async
   assert.equal(command.phone, '09398373570');
   assert.match(command.payloadHash, /^sha256-v1:[a-f0-9]{64}$/);
 });
+
+test('retains Government customer type when building a restriction update', async () => {
+  const command = await buildPartnerCustomerUpdateCommand({
+    firstName: 'علی', lastName: 'نمونه', companyName: 'سازمان نمونه', customerType: 'Government',
+    city: 'تهران', address: 'نشانی نمونه', nationalCode: '', phone: '09120000000',
+  }, { customerId: 'government-customer', expectedRevision: 1, commandId: 'government-update',
+    correlationId: 'government-correlation', idempotencyKey: 'government-idempotency', isLocked: true });
+  assert.equal(command.customerType, 'Government');
+  assert.equal(command.isLocked, true);
+  assert.match(command.payloadHash, /^sha256-v1:[a-f0-9]{64}$/);
+});

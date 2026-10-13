@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { withRecoveryBackgroundWrite } from './recoveryRuntime';
 
 /** Expected abandonment erases only temporary ciphertext; command evidence remains. */
 export const purgeExpiredBiometricCaptures = (prisma: PrismaClient | Prisma.TransactionClient, now = new Date()) =>
@@ -10,7 +11,7 @@ export const startBiometricStagedCaptureMaintenance = (prisma: PrismaClient) => 
   const run = async () => {
     if (running) return;
     running = true;
-    try { await purgeExpiredBiometricCaptures(prisma); }
+    try { await withRecoveryBackgroundWrite(() => purgeExpiredBiometricCaptures(prisma)); }
     catch { console.error('Temporary biometric capture expiry cleanup failed.'); }
     finally { running = false; }
   };

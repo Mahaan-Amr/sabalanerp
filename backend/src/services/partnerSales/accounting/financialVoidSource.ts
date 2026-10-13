@@ -10,7 +10,7 @@ import { PartnerAccountingCommandError } from './errors';
  * collections. The linked customer contract identifies the workflow only;
  * accounting records themselves must retain their internal-source ownership. */
 export async function lockPartnerFinancialVoidSource(tx: Prisma.TransactionClient, recordId: string,
-  actorId: string, correlationId: string) {
+  actorId: string, correlationId: string, operation: 'VOID' | 'DELETE_DRAFT' = 'VOID') {
   const target = await tx.accountingFinancialRecord.findUnique({ where: { id: recordId } });
   if (target?.sourceKind !== PARTNER_INTERNAL_ACCOUNTING_SOURCE) return null;
   const metadata = target.metadata as Record<string, unknown> | null;
@@ -19,9 +19,11 @@ export async function lockPartnerFinancialVoidSource(tx: Prisma.TransactionClien
   await lockPartnerOperationsControl(tx);
   await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
   const allowed = await createAuditedPartnerAuthorization(tx, { actorId, purpose: 'ACCOUNTING', channel: 'API' },
-    { correlationId, reason: 'رسیدگی به ابطال رکورد مالی همکار' }).authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId });
-  if (!allowed.ok || !(await readPartnerAccountingCapabilities(tx, actorId)).approve) {
-    throw new PartnerAccountingCommandError('FORBIDDEN', 'مجوز ابطال سند مالی این همکار فعال نیست.');
+    { correlationId, reason: operation === 'DELETE_DRAFT' ? 'حذف پیش‌نویس رکورد مالی همکار' : 'رسیدگی به ابطال رکورد مالی همکار' }).authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId });
+  const capabilities = await readPartnerAccountingCapabilities(tx, actorId);
+  if (!allowed.ok || !(operation === 'DELETE_DRAFT' ? capabilities.deleteDraft : capabilities.approve)) {
+    throw new PartnerAccountingCommandError('FORBIDDEN', operation === 'DELETE_DRAFT'
+      ? 'مجوز حذف پیش‌نویس مالی این همکار فعال نیست.' : 'مجوز ابطال سند مالی این همکار فعال نیست.');
   }
   const invoice = await tx.accountingFinancialRecord.findUniqueOrThrow({ where: { id: recordId } });
   const { current } = await readPartnerInvoiceSource(tx, invoice, caseId);

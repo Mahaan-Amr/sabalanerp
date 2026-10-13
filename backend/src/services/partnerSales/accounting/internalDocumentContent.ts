@@ -1,5 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { RevisionRefSchema, SabalanInternalRecordViewSchema } from '@sabalanerp/partner-sales-contracts';
+import { partnerPhysicalPrintDetails, partnerWholesalePrintDetails } from '../../../utils/partnerProductPrint';
+import { parseCanonicalProductGraph, type CanonicalProductGraph } from '@sabalanerp/contract-product-graph';
+import { describeWholesaleAncillaryCharges } from '../inquiries/ancillaryCharges';
 
 const object = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
   ? value as Record<string, unknown> : {};
@@ -42,6 +45,8 @@ export function partnerInternalPhysicalFacts(productRowId: string, graph?: unkno
 /** Copy only approved Sabalan money and allowlisted physical facts. The graph's
  * commercial amounts and the customer projection are never serialized here. */
 export function projectPartnerInternalContent(sourceSnapshot: unknown, graph?: unknown) {
+  let canonicalGraph: CanonicalProductGraph | undefined;
+  try { if (graph) canonicalGraph = parseCanonicalProductGraph(graph); } catch { /* Historical incomplete geometry cannot prove a monetary breakdown. */ }
   const preparation = object(object(sourceSnapshot).partnerPreparation);
   const parsed = SabalanInternalRecordViewSchema.pick({ products: true, totals: true, sabalanPaymentPlan: true }).safeParse({
     products: array(preparation.products).map(row => ({ productRowId: row.productRowId, description: row.description,
@@ -55,13 +60,29 @@ export function projectPartnerInternalContent(sourceSnapshot: unknown, graph?: u
   if (!parsed.success || !owner.success) return { items: [], totals: undefined, paymentPlan: undefined };
   const items = parsed.data.products.map(product => {
     const physical = partnerInternalPhysicalFacts(product.productRowId, graph);
+    const printPhysical = partnerPhysicalPrintDetails(product.productRowId, graph);
+    let wholesalePricing = product.wholesalePricing;
+    const graphRow = canonicalGraph?.rows.find(row => row.productRowId === product.productRowId);
+    if (wholesalePricing && !wholesalePricing.ancillaryCharges && canonicalGraph && graphRow) {
+      const mainMandatory = wholesalePricing.mandatoryCharges.find(charge => charge.subjectId === product.productRowId);
+      // Historical quotes already froze these operation costs. Recover only
+      // when their exact sum proves the approved wholesale component amount;
+      // never copy retail material, mandatory or total prices to Accounting.
+      const charges = describeWholesaleAncillaryCharges(graphRow, canonicalGraph, wholesalePricing,
+        { enabled: Boolean(mainMandatory), percentage: mainMandatory?.percentage || '0' });
+      if (charges) wholesalePricing = { ...wholesalePricing, ancillaryCharges: charges };
+    }
+    const printDetails = wholesalePricing
+      ? partnerWholesalePrintDetails(printPhysical || { productRowId: product.productRowId, sources: [], operations: [], mandatory: [] }, wholesalePricing, product.quantity)
+      : printPhysical;
     const ExactDecimal = Prisma.Decimal.clone({ precision: product.quantity.length + product.wholesaleUnitPrice.length + 4 });
     return { ...physical, productCode: typeof array(preparation.products).find(row => row.productRowId === product.productRowId)?.productCode === 'string'
         ? String(array(preparation.products).find(row => row.productRowId === product.productRowId)!.productCode) : physical.productCode, productRowId: product.productRowId, description: product.description,
       productType: product.productType === 'service' ? 'service' : physical.productType,
       quantity: product.quantity, unit: product.unit,
+      ...(printDetails ? { printDetails } : {}),
       unitPrice: product.wholesaleUnitPrice,
-      ...(product.wholesalePricing ? { wholesalePricing: product.wholesalePricing } : {}),
+      ...(wholesalePricing ? { wholesalePricing } : {}),
       totalPrice: product.wholesaleLineTotal ?? new ExactDecimal(product.quantity).mul(product.wholesaleUnitPrice).toFixed() };
   });
   return { items, totals: parsed.data.totals, paymentPlan: parsed.data.sabalanPaymentPlan };

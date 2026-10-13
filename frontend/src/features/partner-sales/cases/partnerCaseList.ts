@@ -43,7 +43,7 @@ export const partnerCaseListTags = {
   COMMERCIAL_EXPIRED: { label: partnerCommercialLabels.EXPIRED, tone: 'warning' },
   READY: { label: 'آماده تکمیل', tone: 'success' },
   PARTIAL: { label: 'بخشی از قیمت‌ها دریافت شد', tone: 'warning' },
-  WAITING: { label: 'در انتظار پاسخ سبلان', tone: 'info' },
+  WAITING: { label: 'در انتظار استعلام', tone: 'info' },
   INCOMPLETE: { label: 'نیازمند تکمیل یا اصلاح', tone: 'warning' },
   EXPIRED: { label: 'نیازمند استعلام مجدد', tone: 'warning' },
   CUSTOMER_PENDING: { label: 'در انتظار تأیید مشتری', tone: 'info' },

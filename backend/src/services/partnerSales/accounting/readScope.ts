@@ -26,7 +26,7 @@ type ListRow = { id: string; invoiceRecordId?: string | null; receivableId?: str
 type ListKind = 'FINANCIAL' | 'RECEIVABLE' | 'PAYMENT' | 'TAX' | 'AUDIT';
 type PartnerAccountingContext = { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string; internalRecordNumber: string;
   partnerSellerId: string; commercialAccountId: string; debtor: { displayName: string };
-  endCustomer: { displayName: string }; revision: number; actionUrl: string; accountingWritable: boolean; caseState?: string; commercialStatus?: string };
+  endCustomer: { displayName: string }; revision: number; actionUrl: string; accountingWritable: boolean; accountingDraftDeletionWritable?: boolean; caseState?: string; commercialStatus?: string };
 type AccountingRowContext = { sourceKind?: string; partnerContext?: PartnerAccountingContext;
   partnerFinancialSource?: PartnerFinancialPreparation['totals']; partnerActions?: {
     registerReceipt?: boolean; reverseReceipt?: boolean; checkStatuses?: string[]; taxStatuses?: string[];
@@ -188,6 +188,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
           `${row.customer.firstName} ${row.customer.lastName}`.trim() },
         revision: owner.data.revision, caseState: row.state, commercialStatus: commercialByCase.get(row.id),
         accountingWritable: writableCases.has(row.id) && finalCases.has(row.id),
+        accountingDraftDeletionWritable: writableCases.has(row.id),
         actionUrl: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(views.accounting.caseNumber)}` });
       preparationByInvoice.set(invoice.id, preparation);
     }

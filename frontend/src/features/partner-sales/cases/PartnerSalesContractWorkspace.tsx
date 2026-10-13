@@ -1,6 +1,9 @@
 'use client';
 import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 import { PartnerContractCancellation } from './PartnerContractCancellation';
+import { usePartnerCaseRefresh } from './usePartnerCaseRefresh';
+import { canReviewPartnerInquiry } from './inquiryReview';
+import { readPartnerCaseChangeVersion } from './partnerCaseHttpPort';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -28,19 +31,26 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
   const [cancelReason, setCancelReason] = useState('');
   const [finalizeOpen, setFinalizeOpen] = useState(false);
   const [lossAccepted, setLossAccepted] = useState(false);
-  const load = useCallback(async (allowNewRevision = false) => {
+  const changeVersionRef = useRef<string | null>();
+  const load = useCallback(async (allowNewRevision = false, knownVersion?: string) => {
     try {
+      const version = knownVersion ?? await readPartnerCaseChangeVersion(view.owner.caseId);
       const next = (await readPartnerCases(view.owner.caseId))[0];
       if (!next || (!allowNewRevision && (next.view.owner.revision !== view.owner.revision ||
           next.view.owner.integrityHash !== view.owner.integrityHash))) {
         setError({ kind: 'stale', message: 'نسخهٔ پرونده تغییر کرده است. صفحه را دوباره باز کنید.' });
-        return;
+        return false;
       }
       setRow(next); setError(undefined);
+      changeVersionRef.current = version;
+      return true;
     } catch (failure) {
       setError(partnerSalesActionFeedback(failure, 'دریافت اقدام‌های پرونده'));
+      return false;
     }
   }, [view.owner.caseId, view.owner.revision, view.owner.integrityHash]);
+  const automaticRefresh = usePartnerCaseRefresh(view.owner.caseId, changeVersionRef,
+    version => load(true, version), pending);
   useEffect(() => { void load(); }, [load]);
 
   const run = async (action: () => Promise<unknown>): Promise<boolean> => {
@@ -57,6 +67,8 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
     {smsSuccess.feedback}
     {['CANCELLED', 'VOIDED'].includes(currentView.state) && <PartnerContractCancellation caseId={currentView.owner.caseId} />}
     {error && <ErpInlineState kind={error.kind} title={error.message} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
+    {automaticRefresh.failed && <ErpInlineState kind="stale" title="دریافت وضعیت تازه انجام نشد."
+      action={{ label: 'تلاش دوباره', onClick: automaticRefresh.retry }} />}
     <PartnerCaseWorkspace view={currentView}
       commercial={row?.commercial}
       customerOutput={row?.customerOutput} history={row?.history}
@@ -72,7 +84,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
         ] : row ? decisionActions : [],
         canPreview: Boolean(actions?.canPreview), canIssue: Boolean(actions?.canIssue),
         canContinue: Boolean(actions?.canContinue), canFinalize: Boolean(actions?.canFinalize),
-        canReviewPricing: row?.commercial?.inquiry !== 'ACCEPTED' && ['READY', 'PARTIAL', 'REJECTED'].includes(row?.pricingResponseState || ''),
+        canReviewPricing: canReviewPartnerInquiry(row),
         canSendConfirmation: Boolean(actions?.canSendConfirmation),
         canRequestCorrection: Boolean(actions?.canRequestCorrection),
         canCancel: false, canRequestVoid: Boolean(actions?.canRequestVoid),
@@ -85,7 +97,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
           return result;
         }); },
         onContinue: row?.editRecovery ? () => router.push(
-          `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(view.owner.caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}${['READY', 'PARTIAL', 'REJECTED'].includes(row.pricingResponseState || '') ? '&returnTo=contract&step=5' : ''}`) : undefined,
+          `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(view.owner.caseId)}&draftId=${encodeURIComponent(row.editRecovery!.recoveryId)}&baseRevision=${row.editRecovery!.baseRevision}${canReviewPartnerInquiry(row) ? '&returnTo=contract&step=5' : ''}`) : undefined,
         onRequestCorrection: () => { if (!pending) void run(() => requestPartnerCorrection(currentView, 'RETAIL_ONLY')); },
         onCancel: () => { if (!pending) setCancelOpen(true); },
         onRequestVoid: () => { if (!pending) void run(() => requestPartnerCorrection(currentView, 'VOID')); },

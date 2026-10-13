@@ -1,6 +1,7 @@
 import fs from 'fs';
 import { contractStatusLabel } from './contractStatusLabel';
 import path from 'path';
+import type { PartnerProductPrintDetails } from './partnerProductPrint';
 import { WholesalePricingBreakdownSchema, type WholesalePricingBreakdown, type CustomerContractOutput } from '../../../packages/partner-sales-contracts';
 import { parseCanonicalProductGraph, projectCanonicalRemainderConsumption,
   type CanonicalProjectedRemainderConsumption } from '@sabalanerp/contract-product-graph';
@@ -114,6 +115,7 @@ interface NormalizedLayerDetails {
 }
 
 interface NormalizedProduct {
+  partnerPrintDetails?: PartnerProductPrintDetails;
   frozenPricingBreakdown?: WholesalePricingBreakdown;
   billingUnit?: string;
   billingQuantity?: number;
@@ -1319,6 +1321,7 @@ const normalizeProducts = (
   }
 
   return relationItems.map((item: any, index: number) => ({
+    ...(item?.partnerPrintDetails ? { partnerPrintDetails: item.partnerPrintDetails } : {}),
     ...(item?.frozenPricingBreakdown ? { frozenPricingBreakdown: WholesalePricingBreakdownSchema.parse(item.frozenPricingBreakdown) } : {}),
     id: item?.id || `item-${index}`,
     rowId: String(item?.productRowId || ''),
@@ -1737,6 +1740,55 @@ function measurementCellsFromLabel(value: string): Pick<FlatProductRow, 'linearM
   return cells;
 }
 
+const buildPartnerProductRows = (product: NormalizedProduct, details: PartnerProductPrintDetails, index: number,
+  currency: string, options: PrintMoneyOptions & { showExplanatoryRows?: boolean } = {}): FlatProductRow[] => {
+  const groupKey = product.rowId || product.id;
+  const blank = { groupKey, indexLabel: '', code: '', description: '', category: '', length: '', width: '', ...emptyMeasurementCells(), rate: '', total: '' };
+  const measurement = (value: { length?: string; width?: string; count?: string; area?: string }) => ({
+    length: value.length === undefined ? '' : toFaNumber(value.length, 4),
+    width: value.width === undefined ? '' : toFaNumber(value.width, 4),
+    count: value.count === undefined ? '' : toFaNumber(value.count, 4),
+    squareMeasurement: value.area === undefined ? '' : toFaNumber(value.area, 4),
+  });
+  const money = (value?: string) => value === undefined ? '' : formatPrintMoneyCell(toNumber(value), currency, options);
+  const hasUnitemizedServices = details.aggregateAmount !== undefined;
+  const presentedBase = toNumber(details.materialAmount) + toNumber(details.aggregateAmount);
+  const chargeOnSource = !hasUnitemizedServices && details.materialAmount !== undefined && details.sources.length > 0 && options.showExplanatoryRows !== false;
+  const isPrepared = ['prepared', 'volumetric'].includes(details.productType || product.productTypeCode);
+  const preparedQuantity = isPrepared ? toFaNumber(product.billingQuantity, 4) : '';
+  const rows: FlatProductRow[] = [{ ...blank, indexLabel: toFaNumber(index), code: details.code || product.code,
+    description: hasUnitemizedServices ? `${product.name} (بهای محصول و خدمات)` : product.name, category: details.category || product.stairPart !== EMPTY && product.stairPart || 'محصول',
+    ...splitDimensionColumns(product.dimensions), ...buildProductQuantityColumns(product),
+    ...measurement(details),
+    // Geometry is independent of the quantity used to price consumed material.
+    ...(isPrepared ? { count: product.billingUnit === 'count' ? preparedQuantity : '',
+      squareMeasurement: ['squareMeter', 'm2'].includes(product.billingUnit || '') ? preparedQuantity : '' } : {}),
+    linearMeasurement: product.billingUnit === 'meter' || product.billingUnit === 'm' ? toFaNumber(product.billingQuantity, 4)
+      : isPrepared && product.billingUnit === 'ton' ? `${preparedQuantity} تن` : '',
+    rate: chargeOnSource ? '' : hasUnitemizedServices ? (product.billingQuantity ? formatPrintMoneyCell(presentedBase / product.billingQuantity, currency, options) : '')
+      : details.materialAmount !== undefined ? money(details.materialRate) : formatPrintMoneyCell(product.unitPrice, currency, options),
+    total: chargeOnSource ? '' : hasUnitemizedServices ? formatPrintMoneyCell(presentedBase, currency, options)
+      : details.materialAmount !== undefined ? money(details.materialAmount) : formatPrintMoneyCell(product.totalPrice, currency, options) }];
+  if (options.showExplanatoryRows !== false) details.sources.forEach((source, sourceIndex) => rows.push({ ...blank,
+    code: source.code || details.code || product.code, description: `سنگ مصرفی برای ${source.name || product.name}`, category: 'سنگ مصرفی', ...measurement(source),
+    rate: chargeOnSource && sourceIndex === 0 ? money(details.materialRate) : '',
+    total: chargeOnSource && sourceIndex === 0 ? money(details.materialAmount) : '' }));
+  for (const charge of details.mandatory) rows.push({ ...blank, description: `${charge.name} ${toFaNumber(charge.percentage)}٪`, category: 'حکمی',
+    rate: `${toFaNumber(charge.percentage)}٪`, total: money(charge.amount) });
+  for (const operation of details.operations) {
+    const quantity = operation.quantity === undefined ? '' : toFaNumber(operation.quantity, 4);
+    const unitLabel = deliveryUnitLabel(operation.unit);
+    rows.push({ ...blank, code: operation.code || '', description: withSelectedEdges(operation.name, operation.edges), category: operation.category,
+      ...(operation.unit === 'meter' || operation.unit === 'm' ? { linearMeasurement: quantity }
+        : operation.unit === 'squareMeter' || operation.unit === 'm2' ? { squareMeasurement: quantity }
+          : { count: quantity ? `${quantity}${operation.unit && !['count', 'physicalPiece'].includes(operation.unit) ? ` ${unitLabel}` : ''}` : '' }),
+      ...(operation.length || operation.width || operation.area || operation.count ? measurement(operation) : {}),
+      rate: operation.rate === undefined ? '' : formatPrintRate(toNumber(operation.rate), currency, operation.unit ? unitLabel : undefined, options),
+      total: money(operation.amount) });
+  }
+  return rows;
+};
+
 const buildProductQuantityColumns = (product: NormalizedProduct): Pick<FlatProductRow, 'linearMeasurement' | 'squareMeasurement' | 'count'> => {
   if (product.billingUnit) {
     const quantity = toFaNumber(product.billingQuantity, 4);
@@ -1868,6 +1920,10 @@ const buildFlatProductRows = (
       });
     }
 
+    if (product.partnerPrintDetails && !isSummarized) {
+      rows.push(...buildPartnerProductRows(product, product.partnerPrintDetails, ++topLevelProductIndex, currency, options));
+      return;
+    }
     if (product.layer && !isSummarized) {
       const layer = product.layer;
       const layerQuantityColumns = emptyMeasurementCells();
@@ -2602,8 +2658,22 @@ export function renderReportPdfHeaderTemplate(meta: {
 const customerMoney = (amount: string, output: CustomerContractOutput) =>
   `${formatMoneyNumber(amount)} ${output.totals.currency === 'IRR' ? 'ریال' : 'تومان'}`;
 
-function renderCustomerProductRows(output: CustomerContractOutput, columns: Array<{ key: ContractPrintColumnKey }>): string {
+function renderCustomerProductRows(output: CustomerContractOutput, columns: Array<{ key: ContractPrintColumnKey }>, details: PartnerProductPrintDetails[] = []): string {
+  const detailed = new Map(details.map(detail => [detail.productRowId, detail]));
   const rows = output.products.map((row, index) => {
+    const physical = detailed.get(row.productRowId);
+    if (physical) {
+      const normalized = normalizeProducts({ items: [{ productRowId: row.productRowId,
+        product: { code: row.productCode, namePersian: row.description }, productType: row.productType,
+        quantity: row.quantity, pieceCount: row.count, billingUnit: row.unit, dimensions: `طول: ${row.lengthMeters || ''}m، عرض: ${row.widthMeters || ''}m`,
+        unitPrice: row.retailUnitPrice, totalPrice: row.retailLineTotal || toNumber(row.quantity) * toNumber(row.retailUnitPrice) }] })[0];
+      return '<tbody class="product-group">' + buildPartnerProductRows(normalized, physical, index + 1, output.totals.currency === 'IRR' ? 'ریال' : 'تومان').map(detail => {
+        const cells: Partial<Record<ContractPrintColumnKey, string>> = { index: detail.indexLabel, code: detail.code, description: detail.description,
+          category: detail.category, length: detail.length, width: detail.width, count: detail.count,
+          linearMeasurement: detail.linearMeasurement, squareMeasurement: detail.squareMeasurement, rate: detail.rate, total: detail.total };
+        return `<tr>${columns.map(column => `<td>${escapeHtml(cells[column.key] || EMPTY)}</td>`).join('')}</tr>`;
+      }).join('') + '</tbody>';
+    }
     const cells: Partial<Record<ContractPrintColumnKey, string>> = {
       index: escapeHtml(String(index + 1)),
       code: escapeHtml(row.productCode || EMPTY),
@@ -2617,11 +2687,11 @@ function renderCustomerProductRows(output: CustomerContractOutput, columns: Arra
       rate: customerMoney(row.retailUnitPrice, output),
       total: customerMoney(row.retailLineTotal || row.retailUnitPrice, output),
     };
-    return `<tr>${columns.map(column => `<td>${cells[column.key] || EMPTY}</td>`).join('')}</tr>`;
+    return `<tbody class="product-group"><tr>${columns.map(column => `<td>${cells[column.key] || EMPTY}</td>`).join('')}</tr></tbody>`;
   });
   const totals = [['جمع خالص', output.totals.net], ['تخفیف', output.totals.discount],
     ['مالیات', output.totals.tax], ['هزینه‌ها', output.totals.charges], ['مبلغ نهایی قرارداد', output.totals.payable]];
-  return rows.join('') + totals.map(([label, amount]) => `<tr><td colspan="${columns.length - 1}">${label}</td><td>${customerMoney(amount, output)}</td></tr>`).join('');
+  return rows.join('') + '<tbody>' + totals.map(([label, amount]) => `<tr><td colspan="${columns.length - 1}">${label}</td><td>${customerMoney(amount, output)}</td></tr>`).join('') + '</tbody>';
 }
 
 function renderCustomerDeliveryRows(output: CustomerContractOutput): string {
@@ -2649,12 +2719,12 @@ function renderCustomerPaymentRows(output: CustomerContractOutput): string {
 
 /** Called only after the customer-output boundary validates schema and hash.
  * Both PDF and browser print consume this same existing contract template. */
-export function renderCustomerContractPrint(output: CustomerContractOutput) {
+export function renderCustomerContractPrint(output: CustomerContractOutput, printDetails: PartnerProductPrintDetails[] = []) {
   const contract: RenderableContract = {
     contractNumber: output.contractNumber, status: output.status, createdAt: output.contractDate,
   };
   return {
-    htmlContent: renderContractHtml(contract, { customerOutput: output, reservePdfHeaderSpace: true }),
+    htmlContent: renderContractHtml(contract, { customerOutput: output, customerPrintDetails: printDetails, reservePdfHeaderSpace: true }),
     headerTemplate: renderContractPdfHeaderTemplate(contract, output),
   };
 }
@@ -2665,6 +2735,7 @@ type RenderContractHtmlOptions = {
   unavailableMoneyLabel?: string;
   /** Internal typed adapter only; validate/hash-check at the output boundary. */
   customerOutput?: CustomerContractOutput;
+  customerPrintDetails?: PartnerProductPrintDetails[];
   reservePdfHeaderSpace?: boolean;
   variant?: ContractPrintVariant;
   customPrint?: ContractCustomPrintOptions;
@@ -2804,7 +2875,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
             ${visibleProductColumnDefinitions.map((column) => `<th>${column.label}</th>`).join('')}
           </tr>
         </thead>
-        ${output ? `<tbody>${renderCustomerProductRows(output, visibleProductColumnDefinitions)}</tbody>` : renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, {
+        ${output ? renderCustomerProductRows(output, visibleProductColumnDefinitions, options.customerPrintDetails) : renderProductMainRows(normalizedProducts, normalizedStandaloneServices, financials.currency, financials.grandTotal, financials, {
             hidePrices: !showPriceColumns,
             accountingDetail: isAccountingVariant,
             productRowsMode: customPrint.productRowsMode || (customPrint.preset === 'summarized' ? 'summarized' : 'detailed'),

@@ -9,7 +9,7 @@ import { resolveNarrowFeatureAccess } from '../../narrowFeatureAccess';
  * newly inserted overrides. Do not lock individual permission rows here: bulk
  * permission replacement owns those rows before entering the revision fence. */
 export async function readPartnerAccountingCapabilities(tx: Prisma.TransactionClient, actorId: string) {
-  const denied = { payments: false, tax: false, approve: false, receivables: false };
+  const denied = { payments: false, tax: false, approve: false, deleteDraft: false, receivables: false };
   const actor = await tx.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
   if (!actor?.isActive) return denied;
   const effective = await getEffectiveUserAccess(tx, { userId: actorId, userRole: actor.role });
@@ -20,7 +20,7 @@ export async function readPartnerAccountingCapabilities(tx: Prisma.TransactionCl
   const [payments, tax, approve, receivables] = await Promise.all([
     allowed('accounting_payments_manage'), allowed('accounting_tax_manage'), allowed('accounting_records_approve_void'), allowed('accounting_receivables_manage'),
   ]);
-  return { payments, tax, receivables, approve: approve && (actor.role === 'ADMIN' || workspace === 'admin') };
+  return { payments, tax, receivables, deleteDraft: approve, approve: approve && (actor.role === 'ADMIN' || workspace === 'admin') };
 }
 
 /** Re-evaluate the narrow dispatch mutation capability in the transaction that

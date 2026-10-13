@@ -3667,7 +3667,16 @@ const deleteDraftAccountingRecord = async (command: AccountingActionRequest, act
   const recordId = command.recordId || command.invoiceId;
   if (!recordId) throw new Error('شناسه پیش‌نویس رکورد مالی الزامی است.');
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(tx => deleteDraftAccountingRecordInTransaction(tx, command, actor));
+  return actionResponse('APPLIED', 'پیش‌نویس رکورد مالی حذف شد. پس از تکمیل اصلاح مبدأ، پیش‌فاکتور تازه ایجاد کنید.',
+    { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
+};
+
+export async function deleteDraftAccountingRecordInTransaction(tx: Prisma.TransactionClient, command: AccountingActionRequest, actor: Actor) {
+    const recordId = command.recordId || command.invoiceId;
+    if (!recordId) throw new Error('شناسه پیش‌نویس رکورد مالی الزامی است.');
+    // Serialize with Partner approval, receipts and cancellation, then re-read.
+    const partner = await lockPartnerFinancialVoidSource(tx, recordId, actor.userId, command.correlationId || randomUUID(), 'DELETE_DRAFT');
     const before = await tx.accountingFinancialRecord.findUnique({
       where: { id: recordId },
       include: {
@@ -3678,17 +3687,19 @@ const deleteDraftAccountingRecord = async (command: AccountingActionRequest, act
       }
     });
     if (!before) throw new Error('پیش‌نویس رکورد مالی پیدا نشد.');
-    if (before.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
-      throw new Error('سوابق این صورتحساب در گردش اصلاح پرونده همکار نگهداری می‌شود و قابل حذف نیست.');
-    }
-    if (hasConflictingPartnerAccountingEvidence(before)) {
+    if (!partner && hasConflictingPartnerAccountingEvidence(before)) {
       throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'شواهد منبع پرونده همکار قابل حذف از مسیر عمومی نیست.');
     }
-    if (before.status !== AccountingRecordStatus.DRAFT || before.financiallyApprovedAt || before.systemInvoiceNumber || before.postedAt) {
+    if (before.kind !== FinancialRecordKind.INVOICE_CANDIDATE || before.status !== AccountingRecordStatus.DRAFT || before.financiallyApprovedAt || before.systemInvoiceNumber || before.postedAt) {
       throw new Error('فقط پیش‌نویس ارسال‌نشده و تأییدنشده قابل حذف است.');
     }
     if (before.receivables.length > 0 || before.journalVouchers.length > 0) {
       throw new Error('این پیش‌نویس دارای ثبت‌های حسابداری وابسته است و قابل حذف نیست.');
+    }
+
+    if (partner && (before.taxRecords.some(item => isSubmittedTaxStatus(item.submissionStatus)) ||
+        await tx.accountingFinancialVoidCase.count({ where: { sourceRecordId: before.id } }))) {
+      throw new Error('پیش‌نویس دارای سابقه مالیاتی یا پرونده ابطال قابل حذف نیست.');
     }
 
     const supersededReviewCases = await tx.accountingContractFlag.findMany({
@@ -3742,14 +3753,7 @@ const deleteDraftAccountingRecord = async (command: AccountingActionRequest, act
     });
 
     return before;
-  });
-
-  return actionResponse(
-    'APPLIED',
-    'پیش‌نویس رکورد مالی حذف شد. پس از تکمیل اصلاح مبدأ، پیش‌فاکتور تازه ایجاد کنید.',
-    { contractId: result.contractId || undefined, financialRecordIds: [result.id] },
-  );
-};
+}
 
 const actionResponse = (status: 'APPLIED' | 'REJECTED' | 'NEEDS_CONFIRMATION', messageFa: string, affected: Record<string, unknown>) => ({
   actionId: `act_${Date.now()}`,

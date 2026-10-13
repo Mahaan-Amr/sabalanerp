@@ -67,7 +67,7 @@ export function partnerCasePageActions(actions: PartnerCaseActions): ErpAction[]
     ...(actions.decisionActions ?? []),
     ...(actions.canEditDraft ? [{ label: 'ویرایش', icon: FaEdit, tone: 'info' as const, onClick: actions.onEditDraft }] : []),
     ...(!actions.canEditDraft && actions.canContinue ? [{ label: 'ویرایش', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
-    ...(actions.canContinue && actions.canReviewPricing ? [{ label: 'بررسی استعلام سبلان', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
+    ...(actions.canContinue && actions.canReviewPricing ? [{ label: 'بررسی پاسخ سبلان', icon: FaEdit, tone: 'info' as const, onClick: actions.onContinue }] : []),
     ...(!actions.canEditDraft && !actions.canContinue && actions.canRequestCorrection ? [{ label: 'درخواست اصلاح', icon: FaEdit,
       tone: 'info' as const, onClick: actions.onRequestCorrection, disabled: actions.pending }] : []),
     ...(!actions.decisionActions && actions.canCancel ? [{ label: 'لغو پیش‌نویس', icon: FaBan, tone: 'danger' as const,

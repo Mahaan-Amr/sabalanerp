@@ -1,4 +1,5 @@
 import { partnerContractWasDeleted } from '../cases/operationalDeletion';
+import { inquiryBelongsToCurrentActivation } from '../cases/reactivationPricing';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import {
@@ -133,16 +134,25 @@ async function decideInquiry(dependencies: PartnerInquiryDependencies,
         : { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as const;
     }
     const locking = performance.now();
+    // Use the same Case -> Inquiry lock order as cancellation and replacement.
+    const owner = await tx.partnerInquiry.findUnique({ where: { id: command.inquiryId }, select: { caseId: true } });
+    if (owner?.caseId) await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${owner.caseId} FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM partner_inquiries WHERE id = ${command.inquiryId} FOR UPDATE`;
     observeTiming(dependencies, 'inquiry_lock', locking);
     const inquiry = await tx.partnerInquiry.findUnique({ where: { id: command.inquiryId },
-      select: { id: true, profileId: true, revision: true, submittedAt: true, profile: { select: { userId: true } } } });
+      select: { id: true, profileId: true, revision: true, submittedAt: true, profile: { select: { userId: true } },
+        case: { select: { id: true, state: true, customerContract: { select: { status: true } } } } } });
     if (!inquiry) return { ok: false, error: partnerError('NOT_FOUND') } as const;
     const authorization = await dependencies.authorize(tx, { actorId: dependencies.actorId,
       action: 'INQUIRY_RESPOND', purpose: 'RESPONDER', reason: command.decisions.map(decision =>
         decision.outcome === 'REJECTED' ? decision.reason : 'پاسخ قیمت سبلان').join('؛ '),
       root: { kind: 'INQUIRY', id: inquiry.id } });
     if (!authorization.ok) return authorization;
+    if (inquiry.case && (['CANCELLED', 'VOIDED'].includes(inquiry.case.state) ||
+        inquiry.case.customerContract?.status === 'CANCELLED' ||
+        !await inquiryBelongsToCurrentActivation(tx, inquiry.case.id, inquiry.id))) {
+      return { ok: false, error: partnerError('INQUIRY_CASE_CANCELLED') } as const;
+    }
     const rollout = await authorizePartnerTechnicalRollout(tx, inquiry.profileId, 'MUTATE');
     if (!rollout.ok) return rollout;
     let assignment = await tx.partnerInquiryAssignment.findFirst({ where: { inquiryId: inquiry.id },

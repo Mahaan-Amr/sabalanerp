@@ -7,6 +7,7 @@ import { hasSharedOperationAuthority } from '../authorization/sharedOperationAut
 import { withAccountingReadScope } from './readScope';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE } from './source';
 import { projectPartnerInternalContent } from './internalDocumentContent';
+import { fillPartnerPrintCodes, readPartnerPrintCodes } from '../../../utils/partnerProductPrint';
 import { RevisionRefSchema, FulfillmentViewSchema } from '@sabalanerp/partner-sales-contracts';
 import { readPartnerRevisionProjections } from '../cases/lifecycle';
 import { readPartnerCommercialState } from '../cases/commercialLifecycle';
@@ -36,6 +37,9 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
       select: { graph: true, integrityHash: true, partySnapshots: true, customerContent: true, internalProjection: true } }) : null;
     const matchingRevision = owner.success && revision?.integrityHash === owner.data.integrityHash ? revision : null;
     const content = projectPartnerInternalContent(record.sourceSnapshot, matchingRevision?.graph);
+    const codes = await readPartnerPrintCodes(scope.database, matchingRevision?.graph);
+    content.items = content.items.map(item => ({ ...item, productCode: item.productCode || item.printDetails?.code || codes.get(item.productRowId),
+      ...(item.printDetails ? { printDetails: fillPartnerPrintCodes({ ...item.printDetails, code: item.printDetails.code || item.productCode }, codes) } : {}) }));
     const views = owner.success && matchingRevision ? await readPartnerRevisionProjections(scope.database, owner.data) : undefined;
     const projection = matchingRevision?.internalProjection as { fulfillment?: unknown } | null;
     const fulfillment = views ? FulfillmentViewSchema.safeParse(projection?.fulfillment) : undefined;
@@ -145,7 +149,8 @@ export function partnerInternalPrintInput(document: NonNullable<Awaited<ReturnTy
       squareMeters: 'areaSquareMeters' in item ? Number(item.areaSquareMeters) : undefined,
       dimensions: (item.details || []).filter(detail => /^(طول|عرض|مساحت):/.test(detail)).join('، '),
       unitPrice: Number(item.unitPrice), totalPrice: Number(item.totalPrice),
-      ...('wholesalePricing' in item && item.wholesalePricing ? { frozenPricingBreakdown: item.wholesalePricing } : {}) })),
+      ...('wholesalePricing' in item && item.wholesalePricing ? { frozenPricingBreakdown: item.wholesalePricing } : {}),
+      ...('printDetails' in item && item.printDetails ? { partnerPrintDetails: item.printDetails } : {}) })),
     contractData: {
       project: { projectName: partnerPrintValue(document.project?.title), address: partnerPrintValue(document.project?.address),
         projectManagerName: partnerPrintValue(managerName), projectManagerNumber: partnerPrintValue(customer?.projectManagerNumber) },

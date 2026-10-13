@@ -32,7 +32,6 @@ export function ResponderContractWorkspace({ contractId, inquiryId, queryPort, i
     return response.ok ? { ok: true as const, value: ResponderWorkspaceViewV2Schema.parse(response.value) } : response;
   }, [contractId, inquiryId, queryPort, inquiryQueryPort]);
   const resource = useWorkspaceQuery(load, contractId ?? inquiryId);
-  const fresh = useResponderRefresh(resource.refresh, contractId ?? inquiryId ?? 'default');
   const inquiries = resource.view?.inquiries ?? [];
   const contract = responderContracts(inquiries)[0];
   const groups = responderProductGroups(inquiries);
@@ -41,6 +40,7 @@ export function ResponderContractWorkspace({ contractId, inquiryId, queryPort, i
   const [feedback, setFeedback] = useState<CommandFeedback | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
+  const fresh = useResponderRefresh(resource.refresh, contractId ?? inquiryId ?? 'default', pending || feedback?.kind === 'uncertain');
   const running = useRef(false);
   const actor = useRef<string>();
   const retryIndex = useRef(0);
@@ -49,10 +49,10 @@ export function ResponderContractWorkspace({ contractId, inquiryId, queryPort, i
   const now = Date.now();
   const editable = new Set(inquiries.flatMap(inquiry => actionPresentation(inquiry.actions, 'INQUIRY_RESPOND', now)?.enabled
     ? inquiry.rows.filter(row => row.state === 'PENDING' && actionPresentation(row.actions, 'INQUIRY_RESPOND', now)?.enabled).map(row => row.rowId) : []));
-  const signature = JSON.stringify(inquiries.map(inquiry => [inquiry.inquiryId, inquiry.assignmentRevision, inquiry.rows.map(row => [row.rowId, row.revision])]));
+  const signature = JSON.stringify(inquiries.map(inquiry => [inquiry.inquiryId, inquiry.assignmentRevision, inquiry.cancelled, inquiry.rows.map(row => [row.rowId, row.revision, row.state])]));
   useEffect(() => {
     if (running.current || feedback?.kind === 'uncertain') return;
-    const pendingIds = new Set(inquiries.flatMap(inquiry => inquiry.rows.filter(row => row.state === 'PENDING').map(row => row.rowId)));
+    const pendingIds = new Set(inquiries.flatMap(inquiry => inquiry.rows.filter(row => !inquiry.cancelled && row.state === 'PENDING').map(row => row.rowId)));
     setDrafts(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => pendingIds.has(id))));
     setReview(null);
   // Fresh evidence invalidates the review; unresolved commands retain their exact retry payload.
@@ -106,6 +106,7 @@ export function ResponderContractWorkspace({ contractId, inquiryId, queryPort, i
     backHref="/dashboard/sales/partner-inquiries" actions={[{ label: 'به‌روزرسانی', variant: 'outline', disabled: locked || fresh.state === 'loading', onClick: () => void fresh.refresh() }]}>
     {resource.loading && !resource.view && <ErpLoading />}
     {resource.error && fresh.state === 'idle' && <ErpInlineState kind="error" title={resource.error} />}
+    {contract?.cancelled && <ErpInlineState kind="stale" title="این قرارداد لغو شده و امکان پاسخ به استعلام وجود ندارد." />}
     <CommandFeedbackView feedback={feedback} pending={pending} onRetry={() => void send(true)} onRefresh={() => void fresh.refresh()} />
     <ResponderRefreshState state={fresh.state} recorded={feedback?.kind === 'success'} onRefresh={() => void fresh.refresh()} />
     {errors.selection && <ErpInlineState kind="error" title={errors.selection} />}
@@ -131,8 +132,8 @@ export function ResponderContractWorkspace({ contractId, inquiryId, queryPort, i
           </div>)}
         </ErpDisclosure>} />;
     })}</div>
-    {inquiries.some(inquiry => inquiry.rows.some(row => row.superseded || row.state === 'CANCELLED')) && <ErpDisclosure title="نوبت‌های قبلی و لغوشده">
-      {inquiries.flatMap(inquiry => inquiry.rows).filter(row => row.superseded || row.state === 'CANCELLED').map((row, index) => <div key={row.rowId} className="space-y-2 py-3">
+    {inquiries.some(inquiry => inquiry.cancelled || inquiry.rows.some(row => row.superseded || row.state === 'CANCELLED')) && <ErpDisclosure title="نوبت‌های قبلی و لغوشده">
+      {inquiries.flatMap(inquiry => inquiry.rows.filter(row => inquiry.cancelled || row.superseded || row.state === 'CANCELLED')).map((row, index) => <div key={row.rowId} className="space-y-2 py-3">
         <p>ردیف {(index + 1).toLocaleString('fa-IR')} · {row.description} · {row.superseded ? 'جایگزین‌شده' : 'لغوشده'}</p>
         <p>{row.configuration.map(fact => `${fact.label}: ${fact.value}`).join(' · ')}</p>
         {row.approvedPrice && <p>قیمت قبلی: {formatPartnerMoney(row.approvedPrice.amount, row.approvedPrice.currency)}</p>}

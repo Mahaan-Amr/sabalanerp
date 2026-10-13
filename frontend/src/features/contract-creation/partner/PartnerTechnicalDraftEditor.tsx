@@ -32,6 +32,7 @@ import { PartnerRemainderConfigurationFlow, type PartnerRemainderSelection } fro
 import { partnerProductCartSummary, partnerCustomerOrderArea } from './partnerProductCartSummary';
 import { clonePartnerLayerOperations, partnerLayerSharedOperations } from './partnerLayerOperations';
 import { partnerMoneyText } from './partnerRetail';
+import { partnerFinishingRate, partnerProductHasMissingFinishingRate } from './partnerFinishingRate';
 import { partnerQuantityUnitCopy } from '../../partner-sales/presentation';
 
 const labels: Record<PartnerTechnicalFamily, string> = { prepared: 'سنگ آماده', volumetric: 'سنگ حجمی', longitudinal: 'سنگ طولی', slab: 'اسلب', stair: 'پله' };
@@ -367,6 +368,7 @@ function PartnerProductConfigurationFlow({ state, products, operations, sawKerfM
   const blockingConflict = !dependenciesReady ? 'ابزار، پرداخت و خدمات هنوز آماده نیستند؛ پس از دریافت آن‌ها می‌توانید محصول را ذخیره کنید.'
     : calculation && !calculation.ok ? partnerTechnicalConflictMessage(calculation.conflicts[0], 'مشخصات این محصول را کامل کنید.')
     : rowOperations && !rowOperations.ok ? partnerTechnicalConflictMessage(rowOperations.conflicts[0], 'عملیات این محصول را بررسی کنید.')
+    : partnerProductHasMissingFinishingRate(state.draft, row.productRowId, minimumRetailCatalog) ? 'نرخ در موجودی ثبت نشده است'
     : !(Number(row.retailUnitPrice?.amount) > 0) ? 'قیمت فروش سنگ به مشتری را وارد کنید.'
       : state.draft.dependents?.some(item => item.kind === 'layer' && item.parentProductRowId === row.productRowId &&
         item.source?.kind === 'new-material' && (!item.source.retailUnitPrice || Number(item.source.retailUnitPrice.amount) <= 0))
@@ -676,13 +678,15 @@ function OperationsEditor({ draft, row, calculation, catalog, onChange, intentOv
   onOperationsChange?: (operations: NonNullable<Extract<PartnerTechnicalDraft['rows'][number], { family: 'stair' }>['operations']>) => void }) {
   const retailCatalog = React.useContext(RetailOperationCatalog);
   const retailRateFor = (kind: 'tool' | 'finishing', item: { catalogItemId: string; catalogSnapshotVersion: string; unit: 'meter' | 'squareMeter' }) =>
-    retailCatalog.find(rate => rate.sourceType === kind && rate.catalogItemId === item.catalogItemId &&
+    kind === 'finishing' ? partnerFinishingRate(item, retailCatalog,
+      draft.rows.find(candidate => candidate.productRowId === row.productRowId)?.family === 'stair' && !operationScopeId)
+    : retailCatalog.find(rate => rate.sourceType === kind && rate.catalogItemId === item.catalogItemId &&
       rate.catalogSnapshotVersion === item.catalogSnapshotVersion && rate.unit === item.unit)?.suggestedRetailUnitPrice?.amount;
   const intent = intentOverride ?? row.operations ?? { groups: [], tools: [], finishings: [] };
   const input = createPartnerTechnicalOperationInput({ inputRevision: draft.inputRevision, productRowId: row.productRowId,
     calculation, catalog, intent, operationScopeId });
   const operationCatalog = catalog.filter((item): item is Extract<PartnerTechnicalOperation, { kind: 'TOOL' | 'FINISHING' }> => item.kind !== 'LAYER');
-  return <OperationCollectionsSection input={input} retailRateFor={retailRateFor}
+  return <OperationCollectionsSection input={input} retailRateFor={retailRateFor} requireRetailFinishingRates
     loadTools={async () => operationCatalog.filter(item => item.kind === 'TOOL').map(item => ({ ...item, rateToman: retailRateFor('tool', item) }))}
     loadFinishings={async () => operationCatalog.filter(item => item.kind === 'FINISHING').map(item => ({ ...item, rateToman: retailRateFor('finishing', item) }))}
     toolCacheKey={`partner-tools:${row.productRowId}`} finishingCacheKey={`partner-finishings:${row.productRowId}`}

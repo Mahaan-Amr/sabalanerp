@@ -16,7 +16,7 @@ export type PartnerInternalDocument = {
   currency: string; systemInvoiceNumber: string | null; contractDate?: string; technicalEvidenceAvailable?: boolean;
   systemInvoiceDate?: string | null; sepidarAmount?: string | null; metadata?: { mode?: string };
   project?: { title?: string; address?: string };
-  actions: { canOpenEdit?: boolean; canVoidRecord?: boolean; canCreateInvoice?: boolean; canResolveFlag: boolean; canFlag: boolean; canRequestCorrection: boolean; canReviewInvoice: boolean; canCreateReceivable: boolean };
+  actions: { canOpenEdit?: boolean; canVoidRecord?: boolean; canDeleteDraft?: boolean; canCreateInvoice?: boolean; canResolveFlag: boolean; canFlag: boolean; canRequestCorrection: boolean; canReviewInvoice: boolean; canCreateReceivable: boolean };
   financialRecords?: Array<{ id: string; status: string; amount: string; currency: string; systemInvoiceNumber: string | null }>;
   voidWorkflows?: import('./AccountingVoidWorkflowPanel').AccountingVoidWorkflowView[];
   partnerContext: { caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string;

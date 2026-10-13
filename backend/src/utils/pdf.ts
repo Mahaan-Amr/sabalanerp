@@ -4,12 +4,13 @@ import puppeteer from 'puppeteer';
 import type { ContractRuntime, Output } from '../services/partnerSales/customerOutput/contracts';
 import { createCustomerOutputSnapshots } from '../services/partnerSales/customerOutput/snapshots';
 import { renderCustomerContractPrint } from './printTemplate';
+import type { PartnerProductPrintDetails } from './partnerProductPrint';
 
 /** Buffer-only consumer hook: no static file, status mutation or commitment.
  * The authenticated issuance adapter owns publication through the Case port. */
-export async function generateCustomerContractPdf(contract: ContractRuntime, input: Output): Promise<Buffer> {
+export async function generateCustomerContractPdf(contract: ContractRuntime, input: Output, printDetails: PartnerProductPrintDetails[] = []): Promise<Buffer> {
   const content = await createCustomerOutputSnapshots(contract).content(input);
-  const template = renderCustomerContractPrint(content);
+  const template = renderCustomerContractPrint(content, printDetails);
   return generatePdfBufferFromHtml({ ...template, displayHeaderFooter: true,
     footerTemplate: '<span></span>', margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
 }
@@ -26,8 +27,8 @@ export async function generateCustomerContractPdfFile(contract: ContractRuntime,
 /** File adapter for a customer output that was already schema/hash validated by
  * the owning Case lifecycle. Render-only enrichment must not be published as a
  * new customer-output snapshot. */
-export async function writeValidatedCustomerContractPdfFile(input: Output, fileName: string): Promise<string> {
-  const template = renderCustomerContractPrint(input);
+export async function writeValidatedCustomerContractPdfFile(input: Output, fileName: string, printDetails: PartnerProductPrintDetails[] = []): Promise<string> {
+  const template = renderCustomerContractPrint(input, printDetails);
   return generatePdfFromHtml({ ...template, displayHeaderFooter: true,
     footerTemplate: '<span></span>', fileName, landscape: false, scale: 1, widthMm: 210, heightMm: 297,
     margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });

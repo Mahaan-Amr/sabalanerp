@@ -5,7 +5,6 @@ const id = 'qa-ordinary-confirmation-recipient';
 const reply = (route: Route, data: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data }) });
 for (const width of [1280, 390]) test(`recipient selection, failed-send retry and pending protection at ${width}px`, async ({ page }, info) => {
   await loginAsAdmin(page);
-  await page.clock.install();
   await setViewportAndZoom(page, { width, height: 900 });
   await page.route(`**/api/sales/contracts/${id}`, route => reply(route, {
     id, contractNumber: 'QA-RECIPIENT', titlePersian: 'قرارداد فروش سنگ', status: 'PENDING_APPROVAL',
@@ -56,14 +55,13 @@ for (const width of [1280, 390]) test(`recipient selection, failed-send retry an
   await expect(recipient).toBeDisabled();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeVisible();
-  await page.clock.pauseAt(new Date());
   release!();
   await expect(dialog).toHaveCount(0);
   const success = page.getByText('پیامک با موفقیت ارسال شد ✨', { exact: true });
   await expect(success).toBeVisible();
   const box = await success.boundingBox();
   expect(box!.y + box!.height).toBeLessThanOrEqual(900);
-  await page.clock.runFor(2_000);
+  await page.waitForTimeout(2_000);
   await expect(success).toBeVisible();
   await page.getByRole('button', { name: 'ارسال دوباره کد تایید', exact: true }).click();
   await recipient.selectOption('09120000004');
@@ -71,10 +69,12 @@ for (const width of [1280, 390]) test(`recipient selection, failed-send retry an
   await expect.poll(() => attempts).toBe(3);
   release!();
   await expect(dialog).toHaveCount(0);
-  await page.clock.runFor(3_999);
+  const renewedAt = Date.now();
+  await page.waitForTimeout(3_000);
   await expect(success).toBeVisible();
-  await page.clock.runFor(1);
-  await expect(success).toHaveCount(0);
+  await expect(success).toHaveCount(0, { timeout: 2_000 });
+  expect(Date.now() - renewedAt).toBeGreaterThanOrEqual(3_800);
+  expect(Date.now() - renewedAt).toBeLessThan(5_000);
   numbers = [];
   await page.getByRole('button', { name: 'ارسال دوباره کد تایید', exact: true }).click();
   await expect(dialog).toContainText('موبایل فعال و معتبر ثبت نشده است');

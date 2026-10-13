@@ -86,3 +86,26 @@ test('new enabled mandatory defaults to twenty percent and explicit zero remains
     }
   }
 });
+
+
+test('cancelled contracts retain their answered prices without remaining pending', () => {
+  const inquiry = structuredClone(createPartnerWorkspaceFixturesV2().responder);
+  inquiry.cancelled = true;
+  const contract = responderContracts([inquiry])[0];
+  assert.equal(contract.cancelled, true);
+  assert.equal(contract.pending, false);
+  assert.ok(inquiry.rows.some(row => row.approvedPrice));
+});
+
+test('fresh reactivation inquiry is active while old cancelled work remains historical', () => {
+  const old = structuredClone(createPartnerWorkspaceFixturesV2().responder);
+  old.caseId = 'reactivated-case'; old.cancelled = true;
+  const fresh = structuredClone(old);
+  fresh.inquiryId = 'fresh-inquiry'; fresh.cancelled = false;
+  fresh.rows = fresh.rows.filter(row => row.state === 'PENDING').map(row => ({ ...row, rowId: 'fresh-row' }));
+  const contract = responderContracts([old, fresh])[0];
+  assert.equal(contract.pending, true);
+  assert.equal(contract.cancelled, false);
+  assert.equal(contract.currentRows, 1);
+  assert.equal(responderProductGroups([old, fresh])[0].rows.length, 1, 'old quantities never double the fresh pricing request');
+});

@@ -31,3 +31,20 @@ test('retail operation presentation follows technical edges without persisting r
   assert.equal(JSON.stringify(input), original);
   assert.ok(!original.includes('rateToman'));
 });
+
+test('required missing finishing rates show the ordinary error and incomplete total without a suggested amount', () => {
+  const group = identity('operation-group', 'missing-rate');
+  const input: ProductOperationsTechnicalInput = {
+    inputRevision: 1, productRowId: identity('product-row', 'missing-rate'),
+    lengthMeters: decimal('2'), widthMeters: decimal('0.3'), quantity: 1,
+    groups: [{ operationGroupId: group, scope: decimal('1') }], tools: [],
+    finishings: [{ finishingSelectionId: identity('finishing-selection', 'missing-rate'), operationGroupId: group,
+      catalogItemId: 'meter-finishing', catalogSnapshotVersion: 'current', name: 'پرداخت متری', unit: 'meter', incompatibleCatalogItemIds: [] }],
+  };
+  const html = renderToStaticMarkup(<OperationCollectionsSection input={input} onChange={() => assert.fail('Must not mutate')}
+    loadTools={async () => []} loadFinishings={async () => []} retailRateFor={() => undefined} requireRetailFinishingRates />);
+  assert.ok(html.includes('نرخ در موجودی ثبت نشده است'));
+  assert.ok(html.includes('جمع عملیات ناقص است'));
+  assert.ok(html.includes('data-operation-conflict="true"'));
+  assert.ok(!html.includes('تومان / m'));
+});

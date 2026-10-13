@@ -110,6 +110,7 @@ const responderRow = ResponderInquiryViewSchema.shape.rows.element.extend({
 });
 export const ResponderInquiryViewV2Schema = ResponderInquiryViewSchema.extend({
   schemaVersion: z.literal(2), submittedAt: InstantSchema, actions,
+  cancelled: z.boolean().optional(),
   caseId: IdSchema.optional(), caseNumber: TextSchema.optional(), customerContractNumber: TextSchema.optional(),
   trackingNumber: z.number().int().positive().optional(), customerDisplayName: TextSchema.optional(),
   rows: z.array(responderRow).refine(rows => new Set(rows.map(row => row.rowId)).size === rows.length, 'Duplicate inquiry row'),

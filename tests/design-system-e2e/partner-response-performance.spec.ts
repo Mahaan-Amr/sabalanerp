@@ -51,7 +51,8 @@ for (const width of [1280, 390]) for (const lostAcknowledgement of [false, true]
     }
     await expect(page.getByRole('dialog')).toBeHidden();
     await expect(page.getByText('1 ردیف ثبت شد؛ 0 ردیف نیازمند بررسی است.', { exact: true })).toBeVisible();
-    await expect(page.getByText('پاسخ قیمت ثبت شد؛ در حال دریافت وضعیت تازه…', { exact: true })).toBeVisible();
+    await expect(page.getByText('پاسخ قیمت ثبت شد؛ در حال دریافت وضعیت تازه…', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('در حال دریافت وضعیت تازه…', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('textbox', { name: /قیمت هر/ })).toBeDisabled();
     release();
     await expect(page.getByText('پاسخ قیمت ثبت شد؛ دریافت وضعیت تازه انجام نشد.', { exact: true })).toBeVisible();

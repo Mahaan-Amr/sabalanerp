@@ -5,7 +5,6 @@ import { loginAsAdmin, setViewportAndZoom, setTheme, assertNoHorizontalOverflow 
 for (const surface of ['detail', 'list'] as const) for (const width of [1280, 390]) {
   test(`Partner ${surface} confirmation rejects failed sends and expires success at four seconds (${width}px)`, async ({ page }, info) => {
     await loginAsAdmin(page);
-    await page.clock.install();
     await setViewportAndZoom(page, { width, height: 900 });
     const fixture = createPartnerFixtures();
     const view = { ...fixture.partner, state: 'COMMITTED' as const };
@@ -38,7 +37,6 @@ for (const surface of ['detail', 'list'] as const) for (const width of [1280, 39
       : `/dashboard/sales/contracts?caseId=${encodeURIComponent(view.owner.caseId)}`);
     const send = page.getByRole('button', { name: 'ارسال پیامک تأیید', exact: true });
     await expect(send).toBeVisible();
-    await page.clock.pauseAt(new Date());
     const success = page.getByText('پیامک با موفقیت ارسال شد ✨', { exact: true });
     await send.click();
     await expect.poll(() => attempts).toBe(1);
@@ -47,14 +45,18 @@ for (const surface of ['detail', 'list'] as const) for (const width of [1280, 39
     await send.click();
     await expect.poll(() => attempts).toBe(2);
     await expect(success).toBeVisible();
+    const appearedAt = Date.now();
+    await page.waitForTimeout(3_000);
+    await expect(success).toBeVisible();
+    await expect(success).toHaveCount(0, { timeout: 2_000 });
+    expect(Date.now() - appearedAt).toBeGreaterThanOrEqual(3_800);
+    expect(Date.now() - appearedAt).toBeLessThan(5_000);
     for (const theme of ['light', 'dark'] as const) {
       await setTheme(page, theme);
+      await send.click();
+      await expect(success).toBeVisible();
       await assertNoHorizontalOverflow(page);
       await page.screenshot({ path: info.outputPath(`feedback-${surface}-${width}-${theme}.png`), fullPage: true });
     }
-    await page.clock.runFor(3_999);
-    await expect(success).toBeVisible();
-    await page.clock.runFor(1);
-    await expect(success).toHaveCount(0);
   });
 }

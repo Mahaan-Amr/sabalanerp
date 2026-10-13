@@ -1,7 +1,7 @@
 import { recordPartnerRecommitment } from './recommitment';
 import { assertContractOperationMinimums } from '../../operationMinimumGuard';
 import { recordPartnerCommercialCorrectionFinality } from './commercialCorrectionFinality';
-import { readCasePricingResponse } from './pricingResponse';
+import { readCasePricingPresentation } from './pricingResponse';
 import { appendPartnerCommercialEvent } from './commercialEvents';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type SalesContract } from '@prisma/client';
@@ -66,12 +66,11 @@ export async function reconcilePartnerCommercialFinality(tx: Tx, caseId: string,
       commercialStartedAt: now, commercialExpiryDays: days, commercialExpiresAt: new Date(now.getTime() + days * 86_400_000),
     } });
   }
-  const state = !partnerDeadlinePassed(current, now) && current.commercialRevision > 1 && current.salesApprovalRevision === null && current.customerAcceptanceRevision === null
-    ? 'NOTE' : partnerCommercialStatus({ salesApproved: current.salesApprovalRevision === current.commercialRevision,
+  const state = partnerCommercialStatus({ salesApproved: current.salesApprovalRevision === current.commercialRevision,
     customerAccepted: current.customerAcceptanceRevision === current.commercialRevision,
-    pricingAccepted,
+    pricingAccepted, edited: current.commercialRevision > 1,
     expired: partnerDeadlinePassed(current, now) });
-  const status = { NOTE: 'DRAFT', DRAFT: 'PENDING_APPROVAL', CUSTOMER_SIGNED: 'APPROVED', FINAL: 'SIGNED', QUOTED: 'PENDING_APPROVAL',
+  const status = { NOTE: 'DRAFT', DRAFT: 'PENDING_APPROVAL', CUSTOMER_SIGNED: 'APPROVED', FINAL: 'SIGNED', QUOTED: 'PENDING_APPROVAL', WAITING: 'PENDING_APPROVAL',
     EXPIRED: 'EXPIRED', CANCELLED: 'CANCELLED' }[state] as SalesContract['status'];
   if (state === 'FINAL' && root.state !== 'COMMITTED') {
     const views = await readCurrentPartnerCaseViews(tx, caseId);
@@ -146,17 +145,21 @@ export async function rejectPartnerCustomer(tx: Tx, caseId: string, actorId: str
   return reconcilePartnerCommercialFinality(tx, caseId, actorId);
 }
 
-export async function resetPartnerCommercialApprovals(tx: Tx, caseId: string, actorId: string, reason?: string) {
+export async function resetPartnerCommercialApprovals(tx: Tx, caseId: string, actorId: string, reason?: string,
+  options: { preserveCustomerAcceptance?: boolean } = {}) {
   const { root, contract } = await lockPartnerCommercialContract(tx, caseId);
+  const retainedAcceptance = options.preserveCustomerAcceptance && contract.customerAcceptanceRevision === contract.commercialRevision;
   const updated = await tx.salesContract.update({ where: { id: contract.id }, data: {
     commercialFlowVersion: 2, commercialRevision: { increment: 1 }, status: 'DRAFT',
-    salesApprovalRevision: null, customerAcceptanceRevision: null, customerAcceptanceMethod: null,
-    approvedBy: null, signedBy: null, signedAt: null, isSigned: false,
-    signedByPhoneNumber: null, verificationCodeId: null,
+    salesApprovalRevision: null, customerAcceptanceRevision: retainedAcceptance ? contract.commercialRevision + 1 : null,
+    approvedBy: null,
+    ...(!retainedAcceptance ? { customerAcceptanceMethod: null, signedBy: null, signedAt: null, isSigned: false,
+      signedByPhoneNumber: null, verificationCodeId: null } : {}),
   } });
   await tx.partnerSaleCase.update({ where: { id: root.id }, data: { commercialFlowVersion: 1,
-    customerConfirmationState: 'RECONFIRMATION_REQUIRED', stateRevision: { increment: 1 } } });
-  await appendPartnerCommercialEvent(tx, root.id, actorId, 'PARTNER_COMMERCIAL_APPROVALS_RESET', { commercialRevision: updated.commercialRevision }, reason);
+    ...(!retainedAcceptance ? { customerConfirmationState: 'RECONFIRMATION_REQUIRED' as const } : {}), stateRevision: { increment: 1 } } });
+  await appendPartnerCommercialEvent(tx, root.id, actorId, 'PARTNER_COMMERCIAL_APPROVALS_RESET', {
+    commercialRevision: updated.commercialRevision, ...(retainedAcceptance ? { retainedCustomerAcceptanceFromRevision: contract.commercialRevision } : {}) }, reason);
   await tx.contractPublicConfirmation.updateMany({ where: { contractId: contract.id, status: 'PENDING' },
     data: { status: 'CANCELLED', cancelledAt: new Date() } });
   await audit(tx, contract.id, actorId, 'PARTNER_COMMERCIAL_EDIT_RESET', contract, updated, reason);
@@ -164,15 +167,19 @@ export async function resetPartnerCommercialApprovals(tx: Tx, caseId: string, ac
 }
 
 export async function readPartnerCommercialState(tx: Tx, caseId: string,
-  response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED'): Promise<PartnerCommercialState | undefined> {
+  response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED',
+  presentation?: { complete: boolean; resubmittedWaiting: boolean }): Promise<PartnerCommercialState | undefined> {
   const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: { customerContract: true, profile: { select: { userId: true } } } });
   const contract = root?.customerContract;
   if (!root || !contract || !isPartnerCommercialFlow(contract)) return undefined;
   if (response === undefined) {
     const recovery = await tx.salesContractEditSession.findFirst({ where: { ownerUserId: root.profile.userId, purpose: 'PARTNER_TECHNICAL',
       OR: [{ contractId: contract.id }, { recovery: { path: ['partnerCaseId'], equals: caseId } }] }, select: { recovery: true } });
-    if (recovery) response = await readCasePricingResponse(tx, { caseId, headRevision: root.headRevision,
-      profileId: root.profileId, actorId: root.profile.userId, recovery: recovery.recovery });
+    if (recovery) {
+      const current = await readCasePricingPresentation(tx, { caseId, headRevision: root.headRevision,
+        profileId: root.profileId, actorId: root.profile.userId, recovery: recovery.recovery });
+      response = current?.state; presentation = current;
+    }
   }
   const final = contract.status === 'SIGNED';
   const validPricing = root.pricingState === 'READY_TO_FINALIZE' && (final || await currentPricingEvidenceIsValid(tx,
@@ -184,8 +191,9 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
   const inquiry = validPricing ? 'ACCEPTED' : response === 'EXPIRED' || response === 'REJECTED'
     || root.pricingState === 'INCOMPLETE' || root.pricingState === 'EXPIRED' ? 'CORRECTION_REQUIRED' : priceRejection ? 'REJECTED' : 'WAITING';
   return { version: 1, revision: contract.commercialRevision,
-    status: ['CANCELLED', 'VOIDED'].includes(root.state) ? 'CANCELLED' : contract.commercialRevision > 1 && !salesApproved && !customerAccepted ? (expired ? 'EXPIRED' : 'NOTE')
-      : partnerCommercialStatus({ salesApproved, customerAccepted, pricingAccepted: validPricing, pricingReceived: response === 'READY',
+    status: partnerCommercialStatus({ salesApproved, customerAccepted, pricingAccepted: validPricing,
+      pricingReceived: presentation?.complete ?? response === 'READY', inquiryWaiting: presentation?.resubmittedWaiting,
+      edited: contract.commercialRevision > 1,
       expired,
       cancelled: ['CANCELLED', 'VOIDED'].includes(root.state) }), salesApproved, customerAccepted, inquiry,
     expiresAt: contract.commercialExpiresAt?.toISOString() ?? null,

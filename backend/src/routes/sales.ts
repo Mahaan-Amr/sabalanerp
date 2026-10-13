@@ -1,5 +1,6 @@
 import { OperationMinimumError } from '../services/operationMinimumGuard';
 import { casePdfContent, readCasePdfConfirmation } from '../services/partnerSales/customerOutput/casePdf';
+import { partnerCustomerPrintDetails, readPartnerPrintCodes } from '../utils/partnerProductPrint';
 import { readPartnerCommercialState } from '../services/partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
 import { reactivateOrdinaryContract, readOrdinaryReactivationActions, OrdinaryContractReactivationError } from '../services/ordinaryContractReactivation';
@@ -1069,9 +1070,7 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
           const graph = parseCanonicalProductGraph(current.row.head.graph);
           const projected = new Map(projectCanonicalProductGraph(graph, 'pdf').products
             .map(row => [row.productRowId, row] as const));
-          const catalogIds = [...new Set(graph.rows.map(row => row.catalogProductId))];
-          const catalog = new Map((await tx.product.findMany({ where: { id: { in: catalogIds } },
-            select: { id: true, code: true } })).map(row => [row.id, row.code] as const));
+          const printCodes = await readPartnerPrintCodes(tx, graph);
           const graphRows = new Map<string, (typeof graph.rows)[number]>(graph.rows
             .map(row => [row.productRowId, row] as const));
           const customerContent = current.row.head.customerContent && typeof current.row.head.customerContent === 'object'
@@ -1079,12 +1078,12 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
           const projectId = typeof customerContent?.projectId === 'string' ? customerContent.projectId : undefined;
           const project = projectId ? await tx.crmPotentialProject.findUnique({ where: { id: projectId },
             select: { title: true, address: true } }) : null;
-          return casePdfContent(CustomerContractOutputSchema.parse({ ...parsed.data,
+          const content = await casePdfContent(CustomerContractOutputSchema.parse({ ...parsed.data,
             products: parsed.data.products.map(row => {
               const facts = projected.get(row.productRowId);
               const graphRow = graphRows.get(row.productRowId);
               return { ...row,
-                ...(!row.productCode && graphRow ? { productCode: catalog.get(graphRow.catalogProductId) } : {}),
+                ...(!row.productCode && graphRow ? { productCode: printCodes.get(row.productRowId) } : {}),
                 ...(!row.productType && facts?.productType ? { productType: facts.productType } : {}),
                 ...(!row.lengthMeters && facts?.lengthMeters ? { lengthMeters: facts.lengthMeters } : {}),
                 ...(!row.widthMeters && facts?.widthMeters ? { widthMeters: facts.widthMeters } : {}),
@@ -1097,14 +1096,15 @@ router.get('/contracts/:id/pdf', protect, requireWorkspaceAccess(WORKSPACES.SALE
             ...(!parsed.data.project && project ? { project: { title: project.title,
               ...(project.address ? { address: project.address } : {}) } } : {}),
           }), 'PREVIEW', await readCasePdfConfirmation(tx, contract.partnerCaseId!, current.row.headRevision));
+          return { content, printDetails: partnerCustomerPrintDetails(content, graph, printCodes) };
         }) : undefined;
     if (contract.partnerKind === 'PARTNER_CUSTOMER' && variant === 'original' && !partnerCustomerOutput) {
       return res.status(409).json({ success: false,
         error: 'اطلاعات نسخه مشتری این قرارداد کامل نیست؛ پرونده را باز کنید و دوباره تلاش کنید.' });
     }
     const pdfPath = partnerCustomerOutput
-      ? await writeValidatedCustomerContractPdfFile(partnerCustomerOutput,
-          `sales_contract_${contract.contractNumber}_${Date.now()}`)
+      ? await writeValidatedCustomerContractPdfFile(partnerCustomerOutput.content,
+          `sales_contract_${contract.contractNumber}_${Date.now()}`, partnerCustomerOutput.printDetails)
       : await generateSalesContractPdf(printableContract, variant);
     const generatedAt = new Date().toISOString();
 

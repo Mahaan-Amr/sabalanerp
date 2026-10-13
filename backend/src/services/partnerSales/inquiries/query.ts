@@ -1,4 +1,5 @@
 import { previewPartnerWholesaleRows } from './wholesalePricing';
+import { inquiryBelongsToCurrentActivation } from '../cases/reactivationPricing';
 import {
   PartnerInquiryViewV2Schema, PartnerQueryV2Schema, ResponderInquiryViewV2Schema, partnerError,
   type PartnerQueryV2Port,
@@ -20,8 +21,8 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
     return dependencies.transaction(async tx => {
       const inquiry = await tx.partnerInquiry.findUnique({ where: { id: inquiryId }, select: {
         id: true, profileId: true, submittedAt: true, pricingReadyAt: true, pricingExpiresAt: true,
-        case: { select: { id: true, caseNumber: true, trackingCode: { select: { number: true } },
-          customer: { select: { firstName: true, lastName: true, companyName: true } }, customerContract: { select: { contractNumber: true } } } },
+        case: { select: { id: true, state: true, caseNumber: true, trackingCode: { select: { number: true } },
+          customer: { select: { firstName: true, lastName: true, companyName: true } }, customerContract: { select: { contractNumber: true, status: true } } } },
         profile: { select: { user: { select: { id: true, firstName: true, lastName: true } } } },
         assignments: { orderBy: { revision: 'desc' }, take: 1, select: { id: true, revision: true, responderId: true } },
         events: { orderBy: { revision: 'asc' }, select: { type: true, reason: true, evidence: true, recordedAt: true } },
@@ -40,6 +41,9 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
       if (!allowed.ok) return allowed as never;
       const rollout = await authorizePartnerTechnicalRollout(tx, inquiry.profileId, 'READ');
       if (!rollout.ok) return rollout as never;
+      const cancelled = Boolean(inquiry.case && (['CANCELLED', 'VOIDED'].includes(inquiry.case.state) ||
+        inquiry.case.customerContract?.status === 'CANCELLED' ||
+        !await inquiryBelongsToCurrentActivation(tx, inquiry.case.id, inquiry.id)));
       const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
       const state = (outcome: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED', expiresAt?: Date,
         superseded = false): 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED' | 'SUPERSEDED' | 'CANCELLED' =>
@@ -76,7 +80,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
           action: 'INQUIRY_RESPOND', purpose: 'RESPONDER',
           reason: 'Partner inquiry response availability projection; a command records the business reason.',
           root: { kind: 'INQUIRY', id: inquiry.id } });
-        const responseAction = responseAuthority.ok
+        const responseAction = cancelled ? null : responseAuthority.ok
           ? { action: 'INQUIRY_RESPOND' as const, enabled: true }
           : responseAuthority.error.status === 404 ? null
             : { action: 'INQUIRY_RESPOND' as const, enabled: false, disabledReason: responseAuthority.error };
@@ -108,7 +112,7 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
               (fact.label === 'تعداد' || fact.label === 'لایه') &&
               !configuration.some(existing => existing.label === fact.label))];
           }
-          const currentState = state(row.outcome, row.approval?.expiresAt, Boolean(row.successor));
+          const currentState = cancelled && row.outcome === 'PENDING' ? 'CANCELLED' : state(row.outcome, row.approval?.expiresAt, Boolean(row.successor));
           const negotiationHistory: Array<{ rowId: string; offeredAt?: string; price?: { amount: string; currency: string }; rejectionReason?: string }> = [];
           let previousId = row.predecessor?.id;
           let rejectionReason = definition.predecessorReason;
@@ -143,13 +147,15 @@ export function createPartnerInquiryQuery(dependencies: PartnerInquiryDependenci
               approvedAt: row.approval.approvedAt.toISOString(),
               expiresAt: row.approval.expiresAt.toISOString(),
               ...(row.approval.note ? { noteOrReason: row.approval.note } : {}) } :
-              reasons.get(row.id) ? { noteOrReason: reasons.get(row.id) } : {}),
+              reasons.get(row.id) ? { noteOrReason: reasons.get(row.id) } : currentState === 'CANCELLED'
+                ? { noteOrReason: 'استعلام به دلیل لغو قرارداد بسته شده است.' } : {}),
             used: Boolean(row.approval?.usages.length), state: currentState,
             actions: currentState === 'PENDING' && responseAction ? [responseAction] : [],
           };
         }));
         if (responseRows.some(row => row === null)) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') } as never;
         const view = ResponderInquiryViewV2Schema.safeParse({ schemaVersion: 2, purpose: 'RESPONDER_INQUIRY', inquiryId: inquiry.id,
+          cancelled,
           ...(inquiry.case ? { caseId: inquiry.case.id, caseNumber: inquiry.case.caseNumber,
             ...(inquiry.case.trackingCode ? { trackingNumber: inquiry.case.trackingCode.number } : {}),
             customerDisplayName: inquiry.case.customer.companyName || `${inquiry.case.customer.firstName} ${inquiry.case.customer.lastName}`.trim() || 'نام مشتری ثبت نشده',

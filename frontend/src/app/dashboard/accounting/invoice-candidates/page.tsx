@@ -219,7 +219,7 @@ export default function AccountingInvoiceCandidatesPage() {
       label: 'حذف پیش‌نویس',
       icon: FaTrashAlt,
       tone: 'danger',
-      disabled: row.sourceKind === 'PARTNER_INTERNAL_RECORD' || row.status !== 'DRAFT' || actionLoading === row.id,
+      disabled: row.status !== 'DRAFT' || actionLoading === row.id,
       onClick: () => setDeleteTarget(row),
     },
     ...(['ISSUED', 'POSTED'].includes(row.status) && row.sourceKind !== 'PARTNER_INTERNAL_RECORD' ? [{

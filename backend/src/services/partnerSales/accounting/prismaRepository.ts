@@ -145,11 +145,7 @@ export function createPrismaPartnerAccountingRepository(input: {
             return row && prepared && typeof commitmentEventId === 'string' ? { queueEvidenceId: row.id,
               commitmentEventId, preparation: prepared } : null;
           },
-          nextQueueEvidenceId: async (caseId, initialId) => {
-            const count = await tx.accountingFinancialRecord.count({ where: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
-              kind: 'INVOICE_CANDIDATE', status: 'VOIDED', metadata: { path: ['partnerCaseId'], equals: caseId } } });
-            return count ? `${initialId}:replacement:${count}` : initialId;
-          },
+          nextQueueEvidenceId: (caseId, initialId) => nextPartnerQueueEvidenceId(tx, caseId, initialId),
           insertQueue: async entry => {
             await tx.accountingFinancialRecord.create({ data: { id: entry.queueEvidenceId, kind: 'INVOICE_CANDIDATE',
               status: 'DRAFT', sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, sourceId: entry.preparation.internalRecordId,
@@ -262,4 +258,15 @@ export function createPrismaPartnerAccountingRepository(input: {
       throw new PartnerAccountingTechnicalError(error);
     }
   } };
+}
+
+/** Retired draft identities remain referenced by audit/correction history. */
+export async function nextPartnerQueueEvidenceId(tx: Prisma.TransactionClient, caseId: string, initialId: string) {
+  const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: caseId }, select: { internalRecordId: true } });
+  const deleted = await tx.accountingAuditLog.count({ where: { action: 'DELETE_DRAFT_ACCOUNTING_RECORD',
+    beforeState: { path: ['sourceId'], equals: root.internalRecordId ?? '' } } });
+  if (deleted) return `${initialId}:replacement:${randomUUID()}`;
+  const count = await tx.accountingFinancialRecord.count({ where: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+    kind: 'INVOICE_CANDIDATE', status: 'VOIDED', metadata: { path: ['partnerCaseId'], equals: caseId } } });
+  return count ? `${initialId}:replacement:${count}` : initialId;
 }

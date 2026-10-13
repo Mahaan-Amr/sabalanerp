@@ -1243,7 +1243,7 @@ test('commercial finality waits for both approvals, creates no automatic financi
     await tx.partnerInquiry.update({ where: { id: ids.inquiryId }, data: { caseId: ids.caseId, caseRevision: 1, pricingReadyAt: now, pricingExpiresAt: new Date(now.getTime() + 48 * 3600000) } });
     const revision = await reviseCommand(ids, { ...input, intent }, 1, created.value.case.owner.integrityHash, 'final-price-accept');
     const pricingIntent = { ...revision.intent, recoveryRevision: 2, deliveries: input.intent.deliveries.map(item => ({ ...item, deliveryId: `${item.deliveryId}-priced` })) };
-    const pricing = { materialAmount: '200', componentAmount: '0', totalAmount: '240',
+    const pricing = { materialAmount: '200', componentAmount: '0', totalAmount: '240', ancillaryCharges: [],
       mandatoryCharges: [{ subjectId: `${ids.caseId}-product-row`, basisAmount: '200', percentage: '20', amount: '40' }] };
     const priced = await service(tx, ids, undefined, undefined, undefined, draft => ({ ...draft,
       rows: draft.rows.map(row => ({ ...row, wholesaleUnitPriceAmount: '120', wholesaleLineTotalAmount: '240', wholesalePricing: pricing })),

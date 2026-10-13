@@ -1901,6 +1901,7 @@ model SalesContract {
   verificationCodes                 ContractVerificationCode[]
   publicConfirmations               ContractPublicConfirmation[]
   confirmationAuditLogs             ContractConfirmationAuditLog[]
+  cancellationNotices               ContractCancellationNotice[]
   logisticsLoadingLines             LogisticsLoadingLine[]
   logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
   wonCrmPotentialProject            CrmPotentialProject?               @relation("CrmPotentialProjectWonContract")
@@ -7829,6 +7830,46 @@ model ContractPublicConfirmation {
   @@index([contractId, status])
   @@index([phoneNumber])
   @@map("contract_public_confirmations")
+}
+
+/// One durable intent per commercial cancellation, never backfilled from status.
+model ContractCancellationNotice {
+  id             String   @id @default(cuid())
+  eventKey       String   @unique
+  contractId     String?
+  sourceContractId String
+  customerId     String
+  contractNumber String
+  status         String   @default("PENDING")
+  selectedPhone  String?
+  attemptCount   Int      @default(0)
+  availableAt    DateTime @default(now())
+  lastAttemptAt  DateTime?
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  contract       SalesContract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  attempts       ContractCancellationNoticeAttempt[]
+
+  @@index([contractId, createdAt])
+  @@index([status, availableAt])
+  @@map("contract_cancellation_notices")
+}
+
+model ContractCancellationNoticeAttempt {
+  id                String   @id @default(cuid())
+  noticeId          String
+  sequence          Int
+  phoneNumber       String
+  status            String
+  providerMessageId String?
+  error             String?
+  createdAt         DateTime @default(now())
+  completedAt       DateTime?
+  notice            ContractCancellationNotice @relation(fields: [noticeId], references: [id], onDelete: Restrict)
+
+  @@unique([noticeId, sequence])
+  @@map("contract_cancellation_notice_attempts")
 }
 
 model ContractConfirmationAuditLog {

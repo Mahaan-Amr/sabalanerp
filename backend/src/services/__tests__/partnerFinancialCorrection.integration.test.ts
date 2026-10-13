@@ -98,6 +98,9 @@ test('real-schema voiding commits cancellation, internal adjustment, audit and n
     await database.$transaction(async tx => {
       const ids = idsFor(`partner-correction-${randomUUID()}`);
       const owner = await seedCommittedCase(tx, ids);
+      await tx.contractPublicConfirmation.create({ data: { contractId: ids.contractId, tokenHash: randomUUID(),
+        phoneNumber: '09120000001', otpCodeHash: 'qa', otpExpiresAt: new Date(), linkExpiresAt: new Date(),
+        commercialRevision: 1, status: 'VERIFIED', verifiedAt: new Date(), lastSentAt: new Date() } });
       const invoice = await tx.accountingFinancialRecord.create({ data: { id: `${ids.caseId}-invoice`,
         kind: 'INVOICE_CANDIDATE', status: 'ISSUED', sourceKind: 'SALES_CONTRACT', sourceId: ids.internalId,
         contractId: ids.contractId, customerId: ids.customerId, amount: '1000', currency: 'IRR',
@@ -161,6 +164,14 @@ test('real-schema voiding commits cancellation, internal adjustment, audit and n
       assert.equal((voidedInvoice.metadata as { externalVoidReference?: string }).externalVoidReference, request.commandId);
       assert.equal(accountingAudit.entityId, invoice.id);
       assert.equal(voidEvent.toState, 'VOIDED');
+      const cancellationSms = await tx.contractCancellationNotice.findFirstOrThrow({ where: { contractId: ids.contractId } });
+      assert.equal(cancellationSms.eventKey, `partner-cancel:${voidEvent.id}`);
+      assert.equal(cancellationSms.status, 'PENDING');
+      assert.equal(cancellationSms.attemptCount, 0, 'Accounting void enqueues but never submits SMS in its transaction');
+      assert.equal((await serviceFor(actors.ACCOUNTING_VERIFY).execute(
+        await gateCommand(actors.ACCOUNTING_VERIFY, owner, request.commandId, 'ACCOUNTING_VERIFY'))).ok, true);
+      assert.equal(await tx.contractCancellationNotice.count({ where: { contractId: ids.contractId } }), 1,
+        'Accounting final-gate replay must not duplicate the cancellation notification');
       assert.match(notice.deduplicationKey, /partner-void-notice/);
       assert.equal((notice.safePayload as { readOnlyLinkEvidenceId?: string }).readOnlyLinkEvidenceId,
         `${request.commandId}-CUSTOMER_CONFIRM-evidence`);

@@ -26,7 +26,7 @@ test('contract, product, and partner action failures are rendered beside their r
   assert.match(contracts, /kind=\{rowError\.kind\}/);
   assert.match(products, /latestProductError\(product\.id\)/);
   assert.match(products, /kind=\{rowError\.kind\}/);
-  assert.match(partnerCases, /latestCaseError\(row\.view\.owner\.caseId\)/);
+  assert.match(partnerCases, /const caseId = row\.view\.owner\.caseId;\s*const error = latestCaseError\(caseId\)/);
   assert.match(partnerCases, /kind=\{error\.kind\}/);
 });
 
@@ -167,7 +167,7 @@ test('concurrent Sale actions retain independent pending state', () => {
   const detail = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
   const products = source('src/app/dashboard/sales/products/page.tsx');
   assert.match(contracts, /pendingActions\.has\(`action:\$\{contract\.id\}:approve`\)/);
-  assert.match(detail, /pendingOperations\.has\('action:approve'\)/);
+  assert.match(detail, /pendingOperations\.has\(['"]action:approve['"]\)/);
   assert.match(products, /pendingRowActions\.has\(`\$\{product\.id\}:toggle`\)/);
 });
 
@@ -188,8 +188,8 @@ test('Sale data retries preserve visible failures until a current request succee
   assert.match(detail, /productRequestSequenceRef/);
   assert.doesNotMatch(detail, /setLoading\(true\);\s*setLoadError\(''\)/);
   assert.doesNotMatch(detail, /setSaving\(true\);\s*setFeedback\(undefined\)/);
-  assert.match(contractDetail, /failedAction: 'دریافت فایل PDF قرارداد'/);
-  assert.match(contractDetail, /action=\{\{ label: 'دریافت دوباره', onClick: \(\) => void loadContract\(\) \}\}/);
+  assert.match(contractDetail, /failedAction: ['"]دریافت فایل PDF قرارداد['"]/);
+  assert.match(contractDetail, /action=\{\{\s*label: ['"]دریافت دوباره['"],\s*onClick: \(\) => void loadContract\(\),?\s*\}\}/);
   assert.match(contractDetail, /if \(loading && !contract\)/);
   assert.match(contractDetail, /آخرین اطلاعات موفق قرارداد نمایش داده می‌شود/);
   assert.match(detail, /if \(loading && !product\)/);
@@ -221,20 +221,20 @@ test('Sale permission and seller loads expose recoverable failures', () => {
 
   assert.match(contractEdit, /assertSuccessfulSalesResponse\(profileResponse\)/);
   assert.match(contractEdit, /retryLoad \? 'تلاش دوباره'/);
-  assert.match(contractDetail, /showOperationalError\('profile'/);
-  assert.match(contractDetail, /showOperationalError\('sellers'/);
+  assert.match(contractDetail, /showOperationalError\(\s*['"]profile['"]/);
+  assert.match(contractDetail, /showOperationalError\(\s*['"]sellers['"]/);
   assert.match(contracts, /else \{\s*const failure = \{ response \};\s*reportOperationError\('profile'/);
   assert.match(products, /setProfileError\(/);
   assert.match(products, /دریافت دسترسی‌ها/);
   assert.match(partnerCases, /assertSuccessfulSalesResult\(result/);
-  assert.match(partnerCases, /onIssue: row\.snapshotId \? \(\) => void previewPdf\(row\.view\.owner\.caseId, row\.snapshotId!, 'FINAL'\)/);
+  assert.match(partnerCases, /onIssue: \(\) => void previewPdf\(caseId, undefined, 'FINAL', row\.view\.owner\)/);
   assert.doesNotMatch(partnerCases, /onIssue:[^\n]+runAction/);
-  assert.match(partnerCases, /await openPartnerPdf\(caseId, snapshotId, mode\);[\s\S]{0,200}if \(mode === 'FINAL'\) await load\(\)/);
+  assert.match(partnerCases, /await openPartnerPdf\(caseId, snapshotId, mode, expected\);[\s\S]{0,500}if \(mode === 'FINAL'\) await load\(\)/);
 });
 
 test('contract detail renders permission and stale failures with their semantic kind', () => {
   const page = source('src/app/dashboard/sales/contracts/[id]/page.tsx');
-  assert.match(page, /if \(loadError\) return \([\s\S]*kind=\{loadError\.kind\}/);
+  assert.match(page, /if \(loadError\)\s*return \([\s\S]*kind=\{loadError\.kind\}/);
   assert.match(page, /kind=\{visibleOperationalError\.kind\}/);
   assert.match(page, /getSalesOperationalErrorKind/);
 });

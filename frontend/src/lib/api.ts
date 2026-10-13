@@ -679,6 +679,8 @@ export const salesAPI = {
   createPayment: (contractId: string, paymentData: any) => api.post(`/sales/contracts/${contractId}/payments`, paymentData),
   
   // Digital confirmation
+  getCancellationNotice: (contractId: string) => api.get(`/sales/contracts/${contractId}/cancellation-notice`),
+  retryCancellationNotice: (contractId: string, phoneNumber?: string) => api.post(`/sales/contracts/${contractId}/cancellation-notice/retry`, { phoneNumber }),
   sendForConfirmation: (contractId: string) =>
     api.post(`/sales/contracts/${contractId}/send-for-confirmation`),
 

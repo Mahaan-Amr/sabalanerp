@@ -1,4 +1,5 @@
 'use client';
+import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 
 import { partnerInquiryLabels } from '@sabalanerp/partner-sales-contracts';
 import { decidePartnerCommercial } from './partnerCaseHttpPort';
@@ -29,6 +30,7 @@ import { partnerUnifiedCaseListPage, partnerCaseListTags, type PartnerCaseIssue,
 type CaseError = { key: string; message: string; kind: 'error' | 'permission' | 'stale'; caseId: string; order: number };
 
 export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDrafts?: PartnerRecoveryListRow[] }) {
+  const smsSuccess = useSmsSuccess();
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedCaseId = searchParams.get('caseId') || undefined;
@@ -190,7 +192,7 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
   }, [beginCaseAction, clearCaseError, isLatestCaseAction, load, reportCaseError]);
 
   useEffect(() => { changeVersionRef.current = undefined; void load(); return () => { loadSequenceRef.current++; }; }, [load]);
-  if (busy) return <ErpLoading />;
+  if (busy) return <>{smsSuccess.feedback}<ErpLoading /></>;
   if (!selectedCaseId) {
     const listing = partnerUnifiedCaseListPage(rows, issues, recoverableDrafts, search, tag, page);
     const columns: ErpColumn<PartnerUnifiedListRow>[] = [
@@ -229,15 +231,17 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
       footer={<ErpPagination currentPage={listing.currentPage} totalPages={listing.totalPages}
         totalItems={listing.totalItems} itemsPerPage={listing.pageSize} onPageChange={setPage} itemLabel="پرونده" />}
       emptyState={<ErpEmptyState icon={FaFileContract} title="پرونده‌ای یافت نشد" />}
-      isLoading={false}>{loadError && <ErpInlineState kind={loadError.kind} title={loadError.message}
+      isLoading={false}>{smsSuccess.feedback}{loadError && <ErpInlineState kind={loadError.kind} title={loadError.message}
         action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
       {automaticRefresh.failed && <ErpInlineState kind="stale" title="دریافت وضعیت تازه انجام نشد."
         action={{ label: 'تلاش دوباره', onClick: automaticRefresh.retry }} />}</ErpListPage>;
   }
   return <ErpWorkspacePage title="پرونده‌های فروش همکار" context="وضعیت پرونده و وصول مشتری">
+    {smsSuccess.feedback}
     {loadError && <ErpInlineState kind={loadError.kind} title={loadError.message} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
     {automaticRefresh.failed && <ErpInlineState kind="stale" title="دریافت وضعیت تازه انجام نشد."
       action={{ label: 'تلاش دوباره', onClick: automaticRefresh.retry }} />}
+
     {!loadError && !rows.length && <ErpEmptyState icon={FaFileContract} title="پرونده‌ای ثبت نشده است" />}
     <div className="space-y-8">{rows.map(row => {
       const caseId = row.view.owner.caseId;
@@ -267,6 +271,8 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
             onFinalize: () => { setFinalizeTarget(row); setLossAccepted(false); },
             onSendConfirmation: () => void runAction(caseId, 'send-confirmation', 'ارسال تأییدیه فروش همکار', async () => {
               const result = await sendPartnerConfirmation(caseId);
+              assertSuccessfulSalesResult(result);
+              smsSuccess.show();
               return result;
             }),
             onRequestCorrection: () => void runAction(caseId, 'request-correction:retail', 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, 'RETAIL_ONLY')),

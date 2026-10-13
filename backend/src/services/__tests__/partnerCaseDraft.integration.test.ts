@@ -1243,7 +1243,7 @@ test('commercial finality waits for both approvals, creates no automatic financi
     await tx.partnerInquiry.update({ where: { id: ids.inquiryId }, data: { caseId: ids.caseId, caseRevision: 1, pricingReadyAt: now, pricingExpiresAt: new Date(now.getTime() + 48 * 3600000) } });
     const revision = await reviseCommand(ids, { ...input, intent }, 1, created.value.case.owner.integrityHash, 'final-price-accept');
     const pricingIntent = { ...revision.intent, recoveryRevision: 2, deliveries: input.intent.deliveries.map(item => ({ ...item, deliveryId: `${item.deliveryId}-priced` })) };
-    const pricing = { materialAmount: '200', componentAmount: '0', totalAmount: '240',
+    const pricing = { materialAmount: '200', componentAmount: '0', totalAmount: '240', ancillaryCharges: [],
       mandatoryCharges: [{ subjectId: `${ids.caseId}-product-row`, basisAmount: '200', percentage: '20', amount: '40' }] };
     const priced = await service(tx, ids, undefined, undefined, undefined, draft => ({ ...draft,
       rows: draft.rows.map(row => ({ ...row, wholesaleUnitPriceAmount: '120', wholesaleLineTotalAmount: '240', wholesalePricing: pricing })),
@@ -1607,11 +1607,16 @@ test('Partner reactivation returns to note, requires manager authority, rejects 
       reason: 'درخواست و تأیید مستقل مدیر', requestKey: randomUUID(), now: new Date() });
     await grant();
     const reason = 'لغو قرارداد برای آزمون فعال‌سازی';
+    await tx.contractPublicConfirmation.create({ data: { contractId: final.root.customerContractId!, tokenHash: randomUUID(),
+      phoneNumber: '09120000001', otpCodeHash: 'qa', otpExpiresAt: new Date(), linkExpiresAt: new Date(),
+      commercialRevision: 1, status: 'VERIFIED', verifiedAt: new Date(), lastSentAt: new Date() } });
     const cancelled = await lifecycle.execute({ schemaVersion: 1, type: 'CASE_CANCEL', commandId: randomUUID(), correlationId: randomUUID(),
       expected: final.owner, expectedState: 'COMMITTED', reason,
       idempotency: { actorId: ids.partnerId, operation: 'CASE_CANCEL', targetId: ids.caseId, key: randomUUID(),
         payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_CANCEL', reason }) } });
     assert.ok(cancelled.ok, JSON.stringify(cancelled));
+    const cancellationNotice = await tx.contractCancellationNotice.findFirstOrThrow({ where: { contractId: final.root.customerContractId! } });
+    assert.equal(cancellationNotice.status, 'PENDING', 'Partner commercial void enqueues a customer SMS');
     const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: final.root.customerContractId! } });
     const input = { caseId: ids.caseId, actorId: ids.partnerId, expected: final.owner, expectedState: 'VOIDED',
       commercialRevision: contract.commercialRevision, commandId: randomUUID(), reason: 'فعال‌سازی با استعلام تازه' };
@@ -1619,6 +1624,11 @@ test('Partner reactivation returns to note, requires manager authority, rejects 
     await grant();
     await reactivatePartnerCase(tx, input);
     await reactivatePartnerCase(tx, input);
+    assert.equal((await tx.contractCancellationNotice.findUniqueOrThrow({ where: { id: cancellationNotice.id } })).status, 'SUPPRESSED');
+    const { enqueueContractCancellationNotice } = await import('../contractCancellationNotice');
+    assert.equal(await enqueueContractCancellationNotice(tx, { contractId: final.root.customerContractId!,
+      eventKey: `qa-old-period:${randomUUID()}`, at: new Date() }), null,
+      'A real Partner reactivation excludes digital acceptance from its previous activation period');
     const previousInquiry = await tx.partnerInquiry.findFirstOrThrow({ where: { caseId: ids.caseId }, include: { rows: true } });
     const oldInquiryPort = createPartnerInquiryService({ actorId: ids.responderId, transaction: work => work(tx),
       authorize: async () => ({ ok: true, value: { evidenceId: 'reactivation-responder' } }),

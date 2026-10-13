@@ -1,4 +1,5 @@
 import { partnerReactivationAt } from './reactivationPricing';
+import { enqueueContractCancellationNotice } from '../../contractCancellationNotice';
 import { cancelPartnerCaseInquiries } from '../inquiries/caseCancellation';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
@@ -441,6 +442,7 @@ Promise<ExecutionResult> {
         owner, correctionId, commitmentEventId: row.commitmentEventId, adjustmentEventIds: [adjustmentId], dependencyEvidenceIds: [permission.id], reason: command.reason });
       await tx.partnerSaleCase.update({ where: { id: caseId }, data: { state: 'VOIDED', stateRevision: { increment: 1 } } });
       await tx.salesContract.update({ where: { id: row.customerContractId }, data: { status: 'CANCELLED', lostAt: new Date(at.instant) } });
+      await enqueueContractCancellationNotice(tx, { contractId: row.customerContractId, eventKey: `partner-cancel:${eventId}`, at: new Date(at.instant) });
       await tx.partnerCaseEvent.create({ data: { id: eventId, caseId, caseRevision: owner.revision, integrityHash: owner.integrityHash,
         sequence: sequence + 1, stateRevision: row.stateRevision + 1, type: voided.type, fromState: row.state, toState: 'VOIDED',
         actorId: dependencies.actorId, commandId: command.commandId, correlationId: command.correlationId,
@@ -465,6 +467,9 @@ Promise<ExecutionResult> {
     if (updated.count !== 1) throw new RollbackLifecycleResult({ ok: false, error: partnerError('ROW_STALE') });
     if (row.customerContractId) await tx.salesContract.update({ where: { id: row.customerContractId },
       data: { status: 'CANCELLED', lostAt: new Date(at.instant) } });
+    if (row.customerContractId) await enqueueContractCancellationNotice(tx, {
+      contractId: row.customerContractId, eventKey: `partner-cancel:${eventId}`, at: new Date(at.instant),
+    });
     await tx.partnerCaseEvent.create({ data: { id: eventId, caseId, caseRevision: row.headRevision,
       integrityHash: row.integrityHash, sequence, stateRevision: row.stateRevision + 1, type: event.type,
       fromState: row.state, toState: 'CANCELLED', actorId: dependencies.actorId, commandId: command.commandId,

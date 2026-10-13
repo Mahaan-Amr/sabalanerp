@@ -18,6 +18,7 @@ for (const width of [1280, 390]) test(`recipient selection, failed-send retry an
     commercialActions: { canRenew: false, canEdit: true, canApproveSales: false, canSendConfirmation: true },
   }));
   await page.route('**/api/sales/reports/sellers*', route => reply(route, []));
+  await page.route(`**/api/sales/contracts/${id}/cancellation-notice`, route => reply(route, null));
   let numbers = ['09120000002', '09120000004'];
   await page.route(`**/api/sales/contracts/${id}/confirmation-recipients`, route => reply(route, {
     availablePhoneNumbers: numbers, defaultPhoneNumber: numbers[0], phoneNumber: '09120000001', sessionStatus: 'PENDING',
@@ -46,6 +47,7 @@ for (const width of [1280, 390]) test(`recipient selection, failed-send retry an
   const submit = dialog.getByRole('button', { name: 'ارسال کد تأیید', exact: true });
   await submit.click();
   await expect(dialog).toContainText('ارسال پیامک تایید انجام نشد');
+  await expect(page.getByText('پیامک با موفقیت ارسال شد ✨', { exact: true })).toHaveCount(0);
   await expect(recipient).toHaveValue('09120000004');
   await submit.click();
   await expect.poll(() => attempts).toBe(2);
@@ -55,7 +57,24 @@ for (const width of [1280, 390]) test(`recipient selection, failed-send retry an
   await expect(dialog).toBeVisible();
   release!();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText('درخواست ارسال کد به 09120000004 با موفقیت ثبت شد.')).toBeVisible();
+  const success = page.getByText('پیامک با موفقیت ارسال شد ✨', { exact: true });
+  await expect(success).toBeVisible();
+  const box = await success.boundingBox();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(900);
+  await page.waitForTimeout(2_000);
+  await expect(success).toBeVisible();
+  await page.getByRole('button', { name: 'ارسال دوباره کد تایید', exact: true }).click();
+  await recipient.selectOption('09120000004');
+  await submit.click();
+  await expect.poll(() => attempts).toBe(3);
+  const renewedAt = Date.now();
+  release!();
+  await expect(dialog).toHaveCount(0);
+  await page.waitForTimeout(Math.max(0, renewedAt + 3_000 - Date.now()));
+  await expect(success).toBeVisible();
+  await expect(success).toHaveCount(0, { timeout: 2_000 });
+  expect(Date.now() - renewedAt).toBeGreaterThanOrEqual(3_800);
+  expect(Date.now() - renewedAt).toBeLessThan(5_000);
   numbers = [];
   await page.getByRole('button', { name: 'ارسال دوباره کد تایید', exact: true }).click();
   await expect(dialog).toContainText('موبایل فعال و معتبر ثبت نشده است');

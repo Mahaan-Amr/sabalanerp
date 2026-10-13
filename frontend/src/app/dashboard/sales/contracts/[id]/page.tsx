@@ -1,5 +1,7 @@
 "use client";
 import { ContractConfirmationResend } from '@/features/sales/ContractConfirmationResend';
+import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
+import { ContractCancellationNotice } from '@/features/sales/ContractCancellationNotice';
 import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCreditPanel';
 import { ContractRenewal } from '@/features/sales/ContractRenewal';
 import { ContractReactivation } from '@/features/sales/ContractReactivation';
@@ -238,6 +240,7 @@ const getCustomerName = (contract: Contract) =>
   );
 
 export default function ContractDetailPage() {
+  const smsSuccess = useSmsSuccess();
   const { hasPermission } = useWorkspace();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -250,7 +253,6 @@ export default function ContractDetailPage() {
 
   const [renewalOpen, setRenewalOpen] = useState(false);
   const [resendOpen, setResendOpen] = useState(false);
-  const [confirmationSentPhone, setConfirmationSentPhone] = useState<string | null>(null);
   const [reactivationOpen, setReactivationOpen] = useState(false);
   const reactivationRouter = useRouter();
   const [contract, setContract] = useState<Contract | null>(null);
@@ -892,6 +894,7 @@ export default function ContractDetailPage() {
         onDownload={() => void handleDownloadPdf()}
         onPrint={() => void handlePrintContract()}
       />
+      <ContractCancellationNotice contractId={contract.id} />
       </>
     );
   }
@@ -977,7 +980,7 @@ export default function ContractDetailPage() {
   if (canResendConfirmation) {
     actions.push({
       label: "ارسال دوباره کد تایید",
-      onClick: () => { setConfirmationSentPhone(null); setResendOpen(true); },
+      onClick: () => { setResendOpen(true); },
       icon: FaRedo,
       tone: "info" as ErpTone,
       disabled: pendingOperations.has("resend-confirmation"),
@@ -1027,7 +1030,7 @@ export default function ContractDetailPage() {
   return (
     <>
       <ContractConfirmationResend contractId={resendOpen ? contract.id : null} onClose={() => setResendOpen(false)}
-        onSent={phone => { setConfirmationSentPhone(phone); clearOperationalError("resend-confirmation"); }} />
+        onSent={() => { smsSuccess.show(); clearOperationalError("resend-confirmation"); }} />
       <ContractRenewal contractId={renewalOpen ? contract.id : null} onClose={() => setRenewalOpen(false)} onRenewed={loadContract} />
       <ContractReactivation target={reactivationOpen && contract.reactivationActions ? { id: contract.id,
         expectedRevision: contract.reactivationActions.expectedRevision } : null}
@@ -1053,7 +1056,8 @@ export default function ContractDetailPage() {
           className="mb-4"
         />
       )}
-      {confirmationSentPhone && <ErpInlineState kind="empty" title={`درخواست ارسال کد به ${confirmationSentPhone} با موفقیت ثبت شد.`} />}
+      {smsSuccess.feedback}
+      <ContractCancellationNotice contractId={contract.id} />
       {loadError && (
         <ErpInlineState
           kind="stale"

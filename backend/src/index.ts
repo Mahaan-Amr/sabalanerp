@@ -101,6 +101,7 @@ import {
 import { startNotificationOutboxDelivery } from "./services/notificationService";
 import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
 import { startDispatchBuyerSmsDelivery } from "./services/dispatchBuyerSmsWorker";
+import { startContractCancellationNoticeDelivery } from "./services/contractCancellationNotice";
 import { startAccountingTaxpayerOutboxDelivery } from "./services/accountingTaxpayerOutboxWorker";
 import { startCrossWorkspaceDutyDeadlineMaintenance } from "./services/crossWorkspaceDutyModule";
 import { registerPartnerNotificationAccess } from "./services/partnerSales/notifications/access";
@@ -376,6 +377,7 @@ initializeSystemRecovery(prisma).then(async () => {
     });
     startSupportTicketMaintenance(prisma);
     startDispatchBuyerSmsDelivery(prisma);
+    startContractCancellationNoticeDelivery(prisma);
     startAccountingTaxpayerOutboxDelivery(prisma);
     startCrossWorkspaceDutyDeadlineMaintenance(prisma);
     startPersonnelPerformanceMaintenance(prisma);

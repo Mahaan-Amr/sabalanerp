@@ -1,4 +1,5 @@
 'use client';
+import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 import { PartnerContractCancellation } from './PartnerContractCancellation';
 import { usePartnerCaseRefresh } from './usePartnerCaseRefresh';
 import { canReviewPartnerInquiry } from './inquiryReview';
@@ -21,6 +22,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
   decisionActions?: ErpAction[];
 }) {
   const router = useRouter();
+  const smsSuccess = useSmsSuccess();
   const [row, setRow] = useState<PartnerCaseRuntimeRow>();
   const [error, setError] = useState<ReturnType<typeof partnerSalesActionFeedback>>();
   const actionFlight = useRef(false);
@@ -62,6 +64,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
   const actions = row?.actions;
   const currentView = row?.view ?? view;
   return <>
+    {smsSuccess.feedback}
     {['CANCELLED', 'VOIDED'].includes(currentView.state) && <PartnerContractCancellation caseId={currentView.owner.caseId} />}
     {error && <ErpInlineState kind={error.kind} title={error.message} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
     {automaticRefresh.failed && <ErpInlineState kind="stale" title="دریافت وضعیت تازه انجام نشد."
@@ -90,6 +93,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
         onSendConfirmation: () => { if (!pending) void run(async () => {
           const result = await sendPartnerConfirmation(currentView.owner.caseId);
           assertSuccessfulSalesResult(result);
+          smsSuccess.show();
           return result;
         }); },
         onContinue: row?.editRecovery ? () => router.push(

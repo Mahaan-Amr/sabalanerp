@@ -67,7 +67,8 @@ CMD ["npm", "run", "dev", "--", "-p", "3000"]
 FROM builder AS production-builder
 
 RUN ./node_modules/.bin/next build
-RUN npm prune --omit=dev
+# Compiler caches are unnecessary at runtime; preserve fetch and image caches.
+RUN npm prune --omit=dev && rm -rf .next-build/cache/webpack .next-build/cache/swc
 
 FROM node:20-alpine AS runner
 

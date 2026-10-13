@@ -67,10 +67,10 @@ for (const width of [1280, 390]) test(`recipient selection, failed-send retry an
   await recipient.selectOption('09120000004');
   await submit.click();
   await expect.poll(() => attempts).toBe(3);
+  const renewedAt = Date.now();
   release!();
   await expect(dialog).toHaveCount(0);
-  const renewedAt = Date.now();
-  await page.waitForTimeout(3_000);
+  await page.waitForTimeout(Math.max(0, renewedAt + 3_000 - Date.now()));
   await expect(success).toBeVisible();
   await expect(success).toHaveCount(0, { timeout: 2_000 });
   expect(Date.now() - renewedAt).toBeGreaterThanOrEqual(3_800);

@@ -23,6 +23,7 @@ for (const surface of ['detail', 'list'] as const) for (const width of [1280, 39
           ? { success: false, error: 'ارسال پیامک تأیید انجام نشد.' }
           : { success: true, data: { messageId: 'qa-provider-accepted' } } });
       }
+      if (path.endsWith('/changes-v2')) return route.fulfill({ json: { success: true, data: { version: `sha256-v1:${'4'.repeat(64)}` } } });
       if (path.endsWith('/query-v2')) {
         if (surface === 'list' && attempts === 2 && !refreshHeld) {
           refreshHeld = true;

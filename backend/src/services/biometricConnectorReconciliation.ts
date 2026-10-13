@@ -1,3 +1,4 @@
+import { purgeExpiredBiometricCaptures } from './biometricStagedCaptureMaintenance';
 import { createHash } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { dispatchRecoveryIntegrityHash } from './dispatchDocumentAuditRecovery';
@@ -8,6 +9,7 @@ export const reconcileBiometricConnectorChallenges = async (prisma: PrismaClient
     const actor = await tx.user.findFirst({ where: { id: input.actorId, role: 'ADMIN', isActive: true, erasedAt: null }, select: { id: true } });
     if (!actor) throw new Error('Biometric connector reconciliation requires an active system administrator');
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('BIOMETRIC_CONNECTOR_RECONCILIATION'))`;
+    await purgeExpiredBiometricCaptures(tx, now);
     const abandonedBefore = new Date(now.getTime() - 5 * 60_000);
     const stale = await tx.biometricConnectorChallenge.findMany({
       where: { OR: [{ status: 'ISSUED', expiresAt: { lt: now } }, { status: 'PROCESSING', processingStartedAt: { lt: abandonedBefore } }] },

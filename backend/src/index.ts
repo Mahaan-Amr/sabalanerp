@@ -1,3 +1,4 @@
+import { startBiometricStagedCaptureMaintenance } from './services/biometricStagedCaptureMaintenance';
 import { disconnectDatabase, prisma } from './lib/prisma';
 import { validateProductionEnvironment } from './services/productionEnvironment';
 import express from "express";
@@ -379,6 +380,7 @@ initializeSystemRecovery(prisma).then(async () => {
     startCrossWorkspaceDutyDeadlineMaintenance(prisma);
     startPersonnelPerformanceMaintenance(prisma);
     startOrdinaryContractExpiry(prisma);
+    stopBiometricStagedCaptureMaintenance = startBiometricStagedCaptureMaintenance(prisma);
     startPartnerInquiryNotificationDelivery(prisma);
   }
   server.listen(PORT, () => {
@@ -390,9 +392,12 @@ initializeSystemRecovery(prisma).then(async () => {
   process.exitCode = 1;
 });
 
+let stopBiometricStagedCaptureMaintenance: (() => void) | undefined;
+
 const shutdown = async (signal: NodeJS.Signals) => {
   if (isShuttingDown) return;
   isShuttingDown = true;
+  stopBiometricStagedCaptureMaintenance?.();
   console.log(`Received ${signal}; draining connections before shutdown.`);
 
   const forcedExit = setTimeout(() => {

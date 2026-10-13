@@ -59,7 +59,7 @@ Production configuration remains fail-closed until all are true:
 
 ## ERP handshake
 
-- HR requests one short-lived `CAPTURE` command per finger; at least two distinct, live, quality-accepted captures must be completed together before enrollment is committed.
+- HR requests one short-lived `CAPTURE` command per finger and submits each result immediately for provisional acceptance. At least two distinct, live, quality-accepted captures from the same enrollment attempt must be committed together within five minutes of first acceptance; accepting or retrying the second finger does not refresh the attempt deadline. See ADR-0127. A provisional result is not an active enrollment.
 - Accounting starts a confirmation session bound to the issued waybill snapshot, requests a `VERIFY` command, and relays the encrypted expected template to the local host.
 - The host performs 1:1 matching and returns only signed quality, liveness, match, device and error evidence.
 - The ERP atomically consumes the persisted challenge before recording the attempt. A success can create one exit authorization; signed device outage evidence can unlock the existing OTP plus independent Guard fallback.

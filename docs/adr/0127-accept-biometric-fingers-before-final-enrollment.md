@@ -1,0 +1,5 @@
+# Accept biometric fingers before final enrollment
+
+HR operators must move between two finger captures, so final enrollment cannot share the first scanner command's thirty-second execution deadline. Accept each authenticated, live, quality-approved capture immediately into an encrypted provisional enrollment attempt, then require both distinct fingers from that same actor, Personnel identity, workstation, and attempt for atomic final enrollment within five minutes; retrying a request must not extend this window.
+
+We keep short-lived signed commands and replay protection rather than lengthening their validity to cover human interaction. Provisional captures create no active enrollment or dispatch authority, survive a recoverable second-finger or final-submission failure, and lose their temporary encrypted material on completion, cancellation, or expiry while their non-material history remains accountable. The owner selected the five-minute completion window on 2026-10-13; this decision does not authorize production activation.

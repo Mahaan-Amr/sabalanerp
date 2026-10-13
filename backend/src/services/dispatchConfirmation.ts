@@ -46,9 +46,9 @@ export class DispatchConfirmationService {
   private now() { return this.dependencies.now?.() || new Date(); }
   private otpDigest(challengeId: string, code: string) { return createHmac('sha256', this.dependencies.otpSecret).update(`${challengeId}:${code}`).digest('hex'); }
 
-  private async assertInternalDriverEligible(driverId: string) {
+  private async assertInternalDriverEligible(driverId: string, db: Prisma.TransactionClient | PrismaClient = this.prisma) {
     const at = this.now();
-    const driver = await this.prisma.internalDriverProfile.findUnique({ where: { id: driverId }, include: { personnel: true,
+    const driver = await db.internalDriverProfile.findUnique({ where: { id: driverId }, include: { personnel: true,
       eligibilityPeriods: { where: { effectiveFrom: { lte: at }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }] }, orderBy: { effectiveFrom: 'desc' }, take: 1 } } });
     if (!driver || driver.status !== 'ACTIVE' || !driver.personnel.isActive || driver.eligibilityPeriods[0]?.status !== 'ELIGIBLE') {
       throw new DispatchConfirmationConflictError('The internal driver is not currently eligible for biometric confirmation.');
@@ -64,7 +64,8 @@ export class DispatchConfirmationService {
     if (active) throw new DispatchConfirmationConflictError('The driver already has an active biometric enrollment.');
   }
 
-  async enrollInternalDriver(input: { personnelId: string; confirmationPhone: string; templates: EnrollmentTemplateInput[]; actorId: string }) {
+  async enrollInternalDriver(input: { personnelId: string; confirmationPhone: string; templates: EnrollmentTemplateInput[]; actorId: string }, transaction?: Prisma.TransactionClient) {
+    const db = transaction || this.prisma;
     const at = this.now();
     if (!Array.isArray(input.templates) || input.templates.length < 2 || new Set(input.templates.map((item) => item.finger)).size < 2) {
       throw new DispatchConfirmationValidationError('At least two distinct fingers are required.');
@@ -87,13 +88,18 @@ export class DispatchConfirmationService {
         throw new DispatchConfirmationValidationError('Raw biometric material cannot be persisted as evidence.');
       }
     }
-    const personnel = await this.prisma.personnel.findUnique({ where: { id: input.personnelId }, include: { internalDriverProfile: true } });
+    const personnel = await db.personnel.findUnique({ where: { id: input.personnelId }, include: { internalDriverProfile: true } });
     if (!personnel?.internalDriverProfile) throw new DispatchConfirmationValidationError('An active internal driver personnel record is required.');
-    await this.assertInternalDriverEligible(personnel.internalDriverProfile.id);
-    const active = await this.prisma.driverBiometricEnrollment.findFirst({ where: { personnelId: input.personnelId, status: 'ACTIVE' } });
+    await this.assertInternalDriverEligible(personnel.internalDriverProfile.id, db);
+    const active = await db.driverBiometricEnrollment.findFirst({ where: { personnelId: input.personnelId, status: 'ACTIVE' } });
     if (active) throw new DispatchConfirmationConflictError('The driver already has an active biometric enrollment.');
     const phone = required(input.confirmationPhone, 'confirmationPhone');
-    return this.prisma.$transaction(async (tx) => {
+    const run = async (tx: Prisma.TransactionClient) => {
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DRIVER_BIOMETRIC:${personnel.internalDriverProfile!.id}`);
+      await this.assertInternalDriverEligible(personnel.internalDriverProfile!.id, tx);
+      if (await tx.driverBiometricEnrollment.findFirst({ where: { personnelId: personnel.id, status: 'ACTIVE' } })) {
+        throw new DispatchConfirmationConflictError('این راننده قبلاً ثبت بیومتریک فعال دارد.');
+      }
       const enrollment = await tx.driverBiometricEnrollment.create({ data: { personnelId: personnel.id,
         confirmationPhone: phone, enrolledBy: required(input.actorId, 'actorId') } });
       for (const template of input.templates) {
@@ -111,6 +117,71 @@ export class DispatchConfirmationService {
       return tx.driverBiometricEnrollment.findUniqueOrThrow({ where: { id: enrollment.id }, select: { id: true, personnelId: true, status: true,
         enrolledAt: true, templates: { select: { finger: true, format: true, templateReference: true, imageMimeType: true,
           imageWidth: true, imageHeight: true, imageByteLength: true, createdAt: true } } } });
+    };
+    return transaction ? run(transaction) : this.prisma.$transaction(run);
+  }
+
+  async enrollStagedInternalDriver(input: { personnelId: string; actorId: string; enrollmentSessionId: string;
+    confirmationPhone: string; captures: { challengeId: string }[] }) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.enrollmentSessionId)
+      || !Array.isArray(input.captures) || input.captures.length !== 2
+      || new Set(input.captures.map((item) => item.challengeId)).size !== 2) {
+      throw new DispatchConfirmationValidationError('برای ثبت نهایی، برداشت پذیرفته‌شده هر دو انگشت لازم است.');
+    }
+    const at = this.now();
+    // Expiry deletion commits independently of a failed finalization.
+    await this.prisma.biometricConnectorChallenge.updateMany({ where: { status: 'STAGED', stagedExpiresAt: { lte: at } },
+      data: { status: 'EXPIRED', protectedCapture: Prisma.DbNull, completedAt: at } });
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `BIOMETRIC_ENROLLMENT_SESSION:${input.enrollmentSessionId}`);
+      const ids = input.captures.map((item) => item.challengeId).sort();
+      // Lock rows also against periodic expiry deletion until the atomic enrollment commits.
+      for (const id of ids) await tx.$queryRaw`SELECT id FROM biometric_connector_challenges WHERE id = ${id} FOR UPDATE`;
+      const captures = await tx.biometricConnectorChallenge.findMany({ where: { id: { in: ids } } });
+      if (captures.length !== 2 || captures.some((item) => item.actorId !== input.actorId || item.subjectId !== input.personnelId
+        || item.enrollmentSessionId !== input.enrollmentSessionId || item.operation !== 'CAPTURE')
+        || new Set(captures.map((item) => item.workstationId)).size !== 1
+        || !['RIGHT_INDEX', 'LEFT_INDEX'].every((finger) => captures.some((item) => item.finger === finger))) {
+        throw new DispatchConfirmationValidationError('برداشت‌ها متعلق به دو انگشت همین راننده و همین نوبت نیستند.');
+      }
+      if (captures.every((item) => item.status === 'CONSUMED' && item.enrollmentId === captures[0].enrollmentId)) {
+        const enrolled = await tx.driverBiometricEnrollment.findUnique({ where: { id: captures[0].enrollmentId! },
+          select: { id: true, personnelId: true, status: true, confirmationPhone: true, enrolledAt: true,
+            templates: { select: { finger: true, format: true, templateReference: true, imageMimeType: true, imageWidth: true, imageHeight: true, imageByteLength: true, createdAt: true } } } });
+        if (!enrolled || enrolled.confirmationPhone !== required(input.confirmationPhone, 'confirmationPhone')) {
+          throw new DispatchConfirmationConflictError('این نوبت قبلاً با شماره تأیید دیگری ثبت شده است.');
+        }
+        const { confirmationPhone: _phone, ...safeEnrollment } = enrolled;
+        return safeEnrollment;
+      }
+      if (captures.some((item) => item.status !== 'STAGED' || !item.protectedCapture || !item.stagedExpiresAt || item.stagedExpiresAt <= this.now())) {
+        throw new DispatchConfirmationConflictError('فرصت پنج دقیقه‌ای ثبت تمام شده یا برداشت لغو شده است. هر دو انگشت را دوباره ثبت کنید.');
+      }
+      const templates: EnrollmentTemplateInput[] = [];
+      try {
+        for (const capture of captures) {
+          const protectedCapture = capture.protectedCapture as unknown as { template: ProtectedTemplateEnvelope; image: ProtectedTemplateEnvelope };
+          const context = { personnelId: input.personnelId, finger: capture.finger!, actorId: input.actorId, workstationId: capture.workstationId,
+            enrollmentSessionId: input.enrollmentSessionId, challengeId: capture.id };
+          const material = this.dependencies.vault.openStagedCapture(protectedCapture.template, { ...context, kind: 'TEMPLATE' });
+          // Register each opened buffer before another decryption can fail.
+          const template: EnrollmentTemplateInput = { finger: capture.finger!, format: 'ISO-19794-2', material, provenance: 'APPROVED_CONNECTOR', deviceEvidence: {} };
+          templates.push(template);
+          const result = capture.resultSummary as unknown as SafeConnectorResult;
+          const imageMaterial = this.dependencies.vault.openStagedCapture(protectedCapture.image, { ...context, kind: 'IMAGE' });
+          template.image = { material: imageMaterial, mimeType: 'image/png', width: result.captureImage!.width, height: result.captureImage!.height };
+          template.deviceEvidence = { commandId: capture.id, deviceModel: result.device.model, deviceSerial: result.device.serial,
+            captureQuality: result.captureQuality, liveness: result.liveness };
+        }
+        const enrollment = await this.enrollInternalDriver({ ...input, templates }, tx);
+        if (captures.some((item) => item.stagedExpiresAt! <= this.now())) {
+          throw new DispatchConfirmationConflictError('فرصت پنج دقیقه‌ای ثبت تمام شده است. ثبت را از ابتدا شروع کنید.');
+        }
+        const consumed = await tx.biometricConnectorChallenge.updateMany({ where: { id: { in: ids }, status: 'STAGED' },
+          data: { status: 'CONSUMED', completedAt: at, enrollmentId: enrollment.id, protectedCapture: Prisma.DbNull } });
+        if (consumed.count !== 2) throw new DispatchConfirmationConflictError('وضعیت برداشت‌ها تغییر کرده است. دوباره تلاش کنید.');
+        return enrollment;
+      } finally { for (const template of templates) { template.material.fill(0); template.image?.material.fill(0); } }
     });
   }
 

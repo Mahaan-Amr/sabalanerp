@@ -10,8 +10,10 @@ test('internal-driver enrollment requires neither consent nor a governance polic
   const templates: Array<Record<string, unknown>> = [];
   const tx = {
     $executeRawUnsafe: async () => undefined,
+    internalDriverProfile: { findUnique: async () => ({ id: 'driver-1', status: 'ACTIVE', personnel: { isActive: true }, eligibilityPeriods: [{ status: 'ELIGIBLE' }] }) },
     dispatchLifecycleAudit: { findFirst: async () => null, create: async () => undefined },
     driverBiometricEnrollment: {
+      findFirst: async () => null,
       create: async () => enrollment,
       findUniqueOrThrow: async () => ({ ...enrollment, templates: templates.map(({ finger, format, templateReference, createdAt }) => ({ finger, format, templateReference, createdAt })) }),
     },

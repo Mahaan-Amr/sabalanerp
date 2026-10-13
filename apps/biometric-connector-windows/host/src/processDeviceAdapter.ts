@@ -45,6 +45,30 @@ type WorkerResult = Record<string, any>;
 const marker = 'SABALAN_RESULT:';
 const templateMarker = Buffer.from('SABALAN_TEMPLATE_RESULT:');
 const maximumWorkerOutputBytes = 1_200_000;
+const workerErrorCategories = new Set([
+  'CAPTURE_TIMEOUT', 'DEVICE_DISCONNECTED', 'RETRYABLE_CONNECTOR_ERROR', 'SDK_LICENSE_INVALID',
+  'LIVENESS_UNAVAILABLE', 'LIVENESS_FAILED', 'POOR_CAPTURE_QUALITY', 'CAPTURE_IMAGE_INVALID', 'CAPTURE_IMAGE_UNAVAILABLE',
+  'MATCHER_ERROR', 'DEVICE_COUNT_INVALID', 'UNSUPPORTED_DEVICE', 'DEVICE_IDENTITY_INVALID',
+  'CONFIGURATION_ERROR', 'INVALID_COMMAND', 'CONNECTOR_ERROR',
+]);
+const workerFailure = (result?: WorkerResult) => {
+  const category = typeof result?.errorCategory === 'string' && workerErrorCategories.has(result.errorCategory)
+    ? result.errorCategory : 'CONNECTOR_ERROR';
+  return new BiometricDeviceError(category, ['DEVICE_DISCONNECTED', 'CAPTURE_TIMEOUT', 'RETRYABLE_CONNECTOR_ERROR'].includes(category), `BioMini worker failed: ${category}`);
+};
+
+// Failed capture-template commands use the ordinary result marker, without biometric material.
+// Keep only the adapter's allowlisted category; never propagate vendor messages or stderr.
+const captureFailure = (bytes: Buffer) => {
+  const markerIndex = bytes.lastIndexOf(marker);
+  if (markerIndex >= 0) {
+    try {
+      const result: WorkerResult = JSON.parse(bytes.subarray(markerIndex + marker.length).toString('utf8').trim());
+      if (result?.availability === 'UNAVAILABLE') return workerFailure(result);
+    } catch { /* Malformed worker output remains a generic, fail-closed failure. */ }
+  }
+  return workerFailure();
+};
 
 export class ProcessBioMiniDevice implements BiometricDevice {
   private activeChild?: ChildProcessWithoutNullStreams;
@@ -76,8 +100,7 @@ export class ProcessBioMiniDevice implements BiometricDevice {
     try { result = JSON.parse(stdout.subarray(markerIndex + marker.length).toString('utf8').trim()); }
     catch { throw new Error('BioMini worker returned an invalid normalized result'); }
     if (output.exitCode !== 0 || result.availability !== 'AVAILABLE') {
-      const category = String(result.errorCategory || 'CONNECTOR_ERROR');
-      throw new BiometricDeviceError(category, ['DEVICE_DISCONNECTED', 'CAPTURE_TIMEOUT', 'RETRYABLE_CONNECTOR_ERROR'].includes(category), `BioMini worker failed: ${category}`);
+      throw workerFailure(result);
     }
     return result;
   }
@@ -93,25 +116,35 @@ export class ProcessBioMiniDevice implements BiometricDevice {
   async capture(): Promise<CaptureResult> {
     const output = await this.invoke('capture-template');
     const bytes = Buffer.isBuffer(output.stdout) ? output.stdout : Buffer.from(output.stdout);
-    const markerIndex = bytes.lastIndexOf(templateMarker);
-    const newline = markerIndex < 0 ? -1 : bytes.indexOf(10, markerIndex + templateMarker.length);
-    if (output.exitCode !== 0 || markerIndex < 0 || newline < 0) { bytes.fill(0); throw new BiometricDeviceError('CONNECTOR_ERROR', false, 'BioMini worker did not return a framed template result'); }
-    let result: WorkerResult;
-    try { result = JSON.parse(bytes.subarray(markerIndex + templateMarker.length, newline).toString('utf8').trim()); }
-    catch { bytes.fill(0); throw new Error('BioMini worker returned invalid template evidence'); }
-    const length = Number(result.templateLength);
-    const imageLength = Number(result.imageLength);
-    const template = Buffer.from(bytes.subarray(newline + 1, newline + 1 + length));
-    const imagePng = Buffer.from(bytes.subarray(newline + 1 + length, newline + 1 + length + imageLength));
-    const exactFrameLength = newline + 1 + length + imageLength;
-    bytes.fill(0);
-    const validImage = result.imageMimeType === 'image/png' && Number.isInteger(imageLength) && imageLength > 0 && imageLength <= 1_048_576
-      && imagePng.length === imageLength && imagePng.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-      && Number.isInteger(result.imageWidth) && result.imageWidth > 0 && result.imageWidth <= 2048
-      && Number.isInteger(result.imageHeight) && result.imageHeight > 0 && result.imageHeight <= 2048;
-    if (result.templateFormat !== 'ISO_19794_2' || !Number.isInteger(length) || length <= 0 || length > 4096 || template.length !== length || !validImage || exactFrameLength !== bytes.length) { template.fill(0); imagePng.fill(0); throw new Error('BioMini worker capture evidence is invalid'); }
-    if (result.captureQuality?.state !== 'ACCEPTED' || result.liveness?.state !== 'LIVE') { template.fill(0); imagePng.fill(0); throw new Error('BioMini capture did not pass quality and liveness checks'); }
-    return { device: this.identity(result), quality: Number(result.captureQuality.score), livenessScore: Number(result.liveness.score), template, imagePng, imageWidth: Number(result.imageWidth), imageHeight: Number(result.imageHeight) };
+    const stderr = Buffer.isBuffer(output.stderr) ? output.stderr : Buffer.from(output.stderr);
+    try {
+      if (bytes.length + stderr.length > maximumWorkerOutputBytes) throw workerFailure();
+      const markerIndex = bytes.lastIndexOf(templateMarker);
+      const newline = markerIndex < 0 ? -1 : bytes.indexOf(10, markerIndex + templateMarker.length);
+      if (output.exitCode !== 0 || markerIndex < 0 || newline < 0) throw captureFailure(bytes);
+      let result: WorkerResult;
+      try { result = JSON.parse(bytes.subarray(markerIndex + templateMarker.length, newline).toString('utf8').trim()); }
+      catch { bytes.fill(0); throw new Error('BioMini worker returned invalid template evidence'); }
+      if (result?.availability !== 'AVAILABLE') throw workerFailure(result);
+      // Validate identity and bounded sizes before allocating separate biometric buffers.
+      const device = this.identity(result);
+      const length = Number(result.templateLength);
+      const imageLength = Number(result.imageLength);
+      if (!Number.isInteger(length) || length <= 0 || length > 4096
+        || !Number.isInteger(imageLength) || imageLength <= 0 || imageLength > 1_048_576
+        || newline + 1 + length + imageLength !== bytes.length) throw new Error('BioMini worker capture evidence is invalid');
+      const template = Buffer.from(bytes.subarray(newline + 1, newline + 1 + length));
+      const imagePng = Buffer.from(bytes.subarray(newline + 1 + length, newline + 1 + length + imageLength));
+      const exactFrameLength = newline + 1 + length + imageLength;
+      bytes.fill(0);
+      const validImage = result.imageMimeType === 'image/png' && Number.isInteger(imageLength) && imageLength > 0 && imageLength <= 1_048_576
+        && imagePng.length === imageLength && imagePng.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+        && Number.isInteger(result.imageWidth) && result.imageWidth > 0 && result.imageWidth <= 2048
+        && Number.isInteger(result.imageHeight) && result.imageHeight > 0 && result.imageHeight <= 2048;
+      if (result.templateFormat !== 'ISO_19794_2' || !Number.isInteger(length) || length <= 0 || length > 4096 || template.length !== length || !validImage || exactFrameLength !== bytes.length) { template.fill(0); imagePng.fill(0); throw new Error('BioMini worker capture evidence is invalid'); }
+      if (result.captureQuality?.state !== 'ACCEPTED' || result.liveness?.state !== 'LIVE') { template.fill(0); imagePng.fill(0); throw new Error('BioMini capture did not pass quality and liveness checks'); }
+      return { device, quality: Number(result.captureQuality.score), livenessScore: Number(result.liveness.score), template, imagePng, imageWidth: Number(result.imageWidth), imageHeight: Number(result.imageHeight) };
+    } finally { bytes.fill(0); stderr.fill(0); }
   }
 
   async verify(expectedTemplate: Buffer): Promise<VerifyResult> {

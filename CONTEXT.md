@@ -5080,6 +5080,10 @@ _Avoid_: logging only successful commands, overwriting audit rows, omitting effe
 The HR-owned act of creating or replacing the encrypted reusable fingerprint template and encrypted Fingerprint Capture Image for an actively eligible Internal Driver Identity; failed or cancelled enrollment leaves the prior valid enrollment unchanged and creates no dispatch fallback authority. Ending eligibility or deactivating the enrollment disables matching without erasing its attached images or accountable transaction history.
 _Avoid_: enrolling an ineligible person, treating an enrollment attempt as waybill confirmation, using driver OTP to bypass enrollment, replacing a valid template after a failed scan, or deleting transaction history when matching is disabled
 
+**Biometric Enrollment Attempt**:
+The limited-time HR operation that collects two distinct accepted fingers for one Internal Driver Identity before creating an Internal Driver Biometric Enrollment. An accepted first finger remains provisional while the second is retried; expiry or abandonment creates no active enrollment or dispatch confirmation authority.
+_Avoid_: calling a provisional finger a saved enrollment, combining fingers from different attempts, or treating a successful scanner response as completed enrollment
+
 **Fingerprint Capture Image**:
 The encrypted PNG captured with one enrolled finger and permanently attached to that finger's Internal Driver Biometric Enrollment under its Personnel identity. Authorized HR enrollment operators may view it through an audited, non-cacheable response; it is not the reusable matching template and never belongs to a login User.
 _Avoid_: calling the image a template, attaching it to a User account, placing image bytes in logs or JSON evidence, or silently deleting it when an enrollment is deactivated

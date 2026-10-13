@@ -30,6 +30,9 @@ import {
 import { biometricConnectorClient } from "@/lib/biometricConnector";
 import {
   captureEnrollmentFingers,
+  captureEvidenceTone,
+  enrollmentSessionExpired,
+  EnrollmentSession,
   EnrollmentCaptureEvidence,
   EnrollmentFinger,
 } from "@/features/biometric/driverEnrollmentWorkflow";
@@ -90,6 +93,21 @@ export default function PersonnelDriverEligibilityPage() {
     resolve: () => void;
   } | null>(null);
   const mutationLock = useRef(false);
+  const captureSession = useRef<EnrollmentSession | null>(null);
+  const workflowGeneration = useRef(0);
+
+  useEffect(() => {
+    captureSession.current = null;
+    setCaptureEvidence([]);
+    return () => {
+      workflowGeneration.current += 1;
+      const abandonedSession = captureSession.current;
+      captureSession.current = null;
+      if (abandonedSession) void dispatchConfirmationAPI.cancelEnrollmentSession(personnelId, abandonedSession.enrollmentSessionId).catch(() => undefined);
+      placementResolver.current?.resolve();
+      placementResolver.current = null;
+    };
+  }, [personnelId]);
 
   const requestFingerPlacement = useCallback(
     (finger: EnrollmentFinger) =>
@@ -260,23 +278,52 @@ export default function PersonnelDriverEligibilityPage() {
   const enrollDriver = async () => {
     if (!confirmationPhone.trim()) return;
     const succeeded = await run(async () => {
-      setCaptureEvidence([]);
+      const generation = workflowGeneration.current;
+      if (!captureSession.current || enrollmentSessionExpired(captureSession.current)) {
+        captureSession.current = { enrollmentSessionId: crypto.randomUUID(), captures: [] };
+        setCaptureEvidence([]);
+      }
+      const session = captureSession.current;
       const captures = await captureEnrollmentFingers({
         personnelId,
+        session,
+        isCancelled: () => generation !== workflowGeneration.current,
+        acceptEnrollmentCapture: dispatchConfirmationAPI.acceptEnrollmentCapture,
         getConnectorStatus: biometricConnectorClient.status,
         createEnrollmentCommand:
           dispatchConfirmationAPI.createEnrollmentCommand,
         executeConnectorCommand: biometricConnectorClient.execute,
         requestFingerPlacement,
         onCaptureComplete: (evidence) =>
-          setCaptureEvidence((current) => [...current, evidence]),
+          setCaptureEvidence((current) => [...current.filter((item) => item.finger !== evidence.finger), evidence]),
       });
       return dispatchConfirmationAPI.enrollInternalDriver(personnelId, {
+        enrollmentSessionId: session.enrollmentSessionId,
         confirmationPhone: confirmationPhone.trim(),
         captures,
       });
     }, "ثبت بیومتریک ذخیره شد.");
-    if (succeeded) setConfirmationPhone("");
+    if (succeeded) {
+      setConfirmationPhone("");
+      captureSession.current = null;
+      setCaptureEvidence([]);
+    }
+  };
+  const cancelCaptureSession = async () => {
+    workflowGeneration.current += 1;
+    const abandonedSession = captureSession.current;
+    captureSession.current = null;
+    setCaptureEvidence([]);
+    setPendingFinger(null);
+    placementResolver.current?.resolve();
+    placementResolver.current = null;
+    if (abandonedSession) {
+      try {
+        await dispatchConfirmationAPI.cancelEnrollmentSession(personnelId, abandonedSession.enrollmentSessionId);
+      } catch (error) {
+        setNotice({ kind: "error", text: userFacingError(error, "لغو ثبت موقت ممکن نشد. اطلاعات موقت با پایان مهلت پاک می‌شود.") });
+      }
+    }
   };
   const deactivateEnrollment = async () => {
     if (!enrollmentId || !biometricDeactivationReason.trim()) return;
@@ -492,7 +539,16 @@ export default function PersonnelDriverEligibilityPage() {
                   onChange={(event) => setConfirmationPhone(event.target.value)}
                 />
               </label>
-              <div className="flex justify-end">
+              <div className="flex flex-wrap justify-end gap-2">
+                {(captureEvidence.length > 0 || pendingFinger) && (
+                  <ErpButton
+                    label="لغو برداشت‌ها و شروع دوباره"
+                    disabled={saving && !pendingFinger}
+                    variant="outline"
+                    tone="warning"
+                    onClick={() => void cancelCaptureSession()}
+                  />
+                )}
                 <ErpButton
                   label="شروع ثبت بیومتریک"
                   icon={FaFingerprint}
@@ -533,12 +589,15 @@ export default function PersonnelDriverEligibilityPage() {
                       <span className="font-medium sds-text-primary">
                         {fingerLabel(evidence.finger)}
                       </span>
-                      <ErpBadge tone="success">
+                      <ErpBadge tone={evidence.accepted ? "info" : "danger"}>
+                        {evidence.accepted ? "پذیرفته‌شده موقت؛ در انتظار ثبت نهایی" : "برداشت ناموفق"}
+                      </ErpBadge>
+                      <ErpBadge tone={captureEvidenceTone(evidence.qualityState, "ACCEPTED")}>
                         کیفیت{" "}
                         {evidence.qualityScore ??
                           operationalStatusLabel(evidence.qualityState)}
                       </ErpBadge>
-                      <ErpBadge tone="success">
+                      <ErpBadge tone={captureEvidenceTone(evidence.livenessState, "LIVE")}>
                         زنده‌بودن{" "}
                         {evidence.livenessState === "LIVE"
                           ? "تأیید شد"

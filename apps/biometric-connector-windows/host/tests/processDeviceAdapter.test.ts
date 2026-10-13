@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ProcessBioMiniDevice, type ProcessInvocation } from '../src/processDeviceAdapter';
+import { BiometricDeviceError } from '../src/deviceAdapter';
 
 const identity = { model: 'BioMini SLIM 2', serial: 'SERIAL-01', connectorVersion: '1.0.0', sdkVersion: '3.11.1.595' };
 
@@ -47,4 +48,48 @@ test('process adapter fails closed on missing marker, nonzero exit and oversized
   await assert.rejects(() => new ProcessBioMiniDevice(async () => ({ exitCode: 0, stdout: 'debug only', stderr: '' })).health(), /normalized result/i);
   await assert.rejects(() => new ProcessBioMiniDevice(async () => ({ exitCode: 2, stdout: 'SABALAN_RESULT:{"availability":"UNAVAILABLE","errorCategory":"DEVICE_DISCONNECTED"}', stderr: '' })).health(), /DEVICE_DISCONNECTED/i);
   await assert.rejects(() => new ProcessBioMiniDevice(async () => ({ exitCode: 0, stdout: 'x'.repeat(1_200_001), stderr: '' })).health(), /output limit/i);
+});
+
+for (const [category, retryable] of [['CAPTURE_TIMEOUT', true], ['DEVICE_DISCONNECTED', true], ['RETRYABLE_CONNECTOR_ERROR', true], ['LIVENESS_FAILED', false], ['POOR_CAPTURE_QUALITY', false], ['SDK_LICENSE_INVALID', false], ['CAPTURE_IMAGE_UNAVAILABLE', false]] as const) {
+  test(`capture preserves the SDK normalized failure category ${category} without exposing worker messages`, async () => {
+    const stdout = Buffer.from(`vendor debug\nSABALAN_RESULT:${JSON.stringify({ availability: 'UNAVAILABLE', errorCategory: category, message: 'private worker details' })}\n`);
+    const stderr = Buffer.from('private SDK stderr');
+    const device = new ProcessBioMiniDevice(async () => ({ exitCode: 2, stdout, stderr }));
+    await assert.rejects(() => device.capture(), (error: unknown) => {
+      assert.ok(error instanceof BiometricDeviceError);
+      assert.equal(error.category, category);
+      assert.equal(error.retryable, retryable);
+      assert.equal(error.message.includes('private'), false);
+      return true;
+    });
+    assert.ok(stdout.every((byte) => byte === 0));
+    assert.ok(stderr.every((byte) => byte === 0));
+  });
+}
+
+test('capture rejects malformed, oversized, successful and unrecognized failure output safely', async () => {
+  for (const stdout of [
+    'SABALAN_RESULT:{broken',
+    'SABALAN_RESULT:{"availability":"AVAILABLE","errorCategory":"CAPTURE_TIMEOUT"}',
+    'SABALAN_RESULT:{"availability":"UNAVAILABLE","errorCategory":"private category"}',
+    'x'.repeat(1_200_001),
+  ]) {
+    await assert.rejects(() => new ProcessBioMiniDevice(async () => ({ exitCode: 2, stdout, stderr: 'private stderr' })).capture(), (error: unknown) => {
+      assert.ok(error instanceof BiometricDeviceError);
+      assert.equal(error.category, 'CONNECTOR_ERROR');
+      assert.equal(error.message.includes('private'), false);
+      return true;
+    });
+  }
+});
+
+test('capture rejects invalid identity and lengths and clears all original output', async () => {
+  for (const invalid of [{ device: { ...identity, serial: '' } }, { templateLength: -1 }, { templateLength: 4097 }, { imageLength: 1_048_577 }]) {
+    const header = Buffer.from(`SABALAN_TEMPLATE_RESULT:${JSON.stringify({ availability: 'AVAILABLE', device: identity, captureQuality: { state: 'ACCEPTED', score: 86 }, liveness: { state: 'LIVE', score: 999 }, templateFormat: 'ISO_19794_2', templateLength: 4, imageMimeType: 'image/png', imageLength: 9, imageWidth: 320, imageHeight: 480, ...invalid })}\n`);
+    const stdout = Buffer.concat([header, Buffer.from('tmpl'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])]);
+    const stderr = Buffer.from('SDK details');
+    await assert.rejects(() => new ProcessBioMiniDevice(async () => ({ exitCode: 0, stdout, stderr })).capture());
+    assert.ok(stdout.every((byte) => byte === 0));
+    assert.ok(stderr.every((byte) => byte === 0));
+  }
 });

@@ -3684,6 +3684,11 @@ model BiometricConnectorChallenge {
   contextId           String
   contextHash         String?
   finger              String?
+  enrollmentSessionId String?
+  acceptedAt          DateTime?
+  stagedExpiresAt     DateTime?
+  protectedCapture    Json?
+  enrollmentId        String?
   commandDigest       String
   nonceHash           String    @unique
   status              String    @default("ISSUED")
@@ -3695,6 +3700,8 @@ model BiometricConnectorChallenge {
   resultSummary       Json?
   createdAt           DateTime  @default(now())
 
+  @@index([enrollmentSessionId, actorId, subjectId])
+  @@index([status, stagedExpiresAt])
   @@index([subjectId, operation, status])
   @@index([expiresAt, status])
   @@index([status, processingStartedAt])

@@ -3,6 +3,7 @@ import { canonicalizeBiometricValue } from './biometricProtocol';
 
 export interface ProtectedTemplateEnvelope { version: 1; keyId: string; algorithm: 'AES-256-GCM'; iv: string; ciphertext: string; authenticationTag: string }
 interface TemplateContext { personnelId: string; finger: string; format: string }
+export interface StagedCaptureContext { personnelId: string; finger: string; actorId: string; workstationId: string; enrollmentSessionId: string; challengeId: string; kind: 'TEMPLATE' | 'IMAGE'; purpose: 'STAGED_ENROLLMENT_CAPTURE' }
 interface ImageContext { personnelId: string; finger: string; mimeType: 'image/png'; purpose: 'CAPTURE_IMAGE' }
 
 export class ProtectedTemplateVault {
@@ -30,7 +31,13 @@ export class ProtectedTemplateVault {
   openImage(envelope: ProtectedTemplateEnvelope, context: Omit<ImageContext, 'purpose'>): Buffer {
     return this.openMaterial(envelope, { ...context, purpose: 'CAPTURE_IMAGE' });
   }
-  private sealMaterial(material: Buffer, context: ImageContext): ProtectedTemplateEnvelope {
+  sealStagedCapture(material: Buffer, context: Omit<StagedCaptureContext, 'purpose'>): ProtectedTemplateEnvelope {
+    return this.sealMaterial(material, { ...context, purpose: 'STAGED_ENROLLMENT_CAPTURE' });
+  }
+  openStagedCapture(envelope: ProtectedTemplateEnvelope, context: Omit<StagedCaptureContext, 'purpose'>): Buffer {
+    return this.openMaterial(envelope, { ...context, purpose: 'STAGED_ENROLLMENT_CAPTURE' });
+  }
+  private sealMaterial(material: Buffer, context: ImageContext | StagedCaptureContext): ProtectedTemplateEnvelope {
     const key = this.keyring.keys[this.keyring.activeKeyId];
     if (!key || key.length !== 32) throw new Error('A 256-bit active biometric key is required');
     const iv = randomBytes(12);
@@ -39,7 +46,7 @@ export class ProtectedTemplateVault {
     const ciphertext = Buffer.concat([cipher.update(material), cipher.final()]);
     return { version: 1, keyId: this.keyring.activeKeyId, algorithm: 'AES-256-GCM', iv: iv.toString('base64'), ciphertext: ciphertext.toString('base64'), authenticationTag: cipher.getAuthTag().toString('base64') };
   }
-  private openMaterial(envelope: ProtectedTemplateEnvelope, context: ImageContext): Buffer {
+  private openMaterial(envelope: ProtectedTemplateEnvelope, context: ImageContext | StagedCaptureContext): Buffer {
     const key = this.keyring.keys[envelope.keyId];
     if (!key) throw new Error('Biometric template key is unavailable');
     const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));

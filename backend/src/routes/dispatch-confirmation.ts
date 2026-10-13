@@ -27,13 +27,16 @@ const unavailableConnector: BiometricConnector = { execute: async (command) => (
   captureQuality: { state: 'NOT_EVALUATED' }, liveness: { state: 'NOT_EVALUATED' }, match: { state: 'NOT_EVALUATED' },
   fallback: { goodQualityLiveNonMatchCount: 0, eligible: false }, errorCategory: 'INVALID_COMMAND', retryable: false }) };
 
-const service = () => {
+const templateVault = () => {
   const encodedKey = process.env.BIOMETRIC_TEMPLATE_KEY_BASE64 || '';
   const key = Buffer.from(encodedKey, 'base64');
   if (key.length !== 32) throw new DispatchConfirmationConflictError('Biometric template protection is not configured.');
+  return new ProtectedTemplateVault({ activeKeyId: 'dispatch-v1', keys: { 'dispatch-v1': key } });
+};
+const service = () => {
   const simulatorAllowed = simulatorEnabled();
   return new DispatchConfirmationService(prisma, { connector: simulatorAllowed ? new DeterministicBiometricSimulator() : unavailableConnector,
-    vault: new ProtectedTemplateVault({ activeKeyId: 'dispatch-v1', keys: { 'dispatch-v1': key } }),
+    vault: templateVault(),
     otpSecret: process.env.DISPATCH_CONFIRMATION_OTP_SECRET || '',
     sendOtp: async ({ phone, code, dispatchNumber }) => {
       const result = await smsService.sendDispatchConfirmationOtp({ phoneNumber: phone, code, dispatchNumber });
@@ -72,14 +75,36 @@ router.post('/internal-drivers/:personnelId/enrollment-commands', hrManage, asyn
     if (simulatorEnabled()) throw new DispatchConfirmationConflictError('Physical enrollment commands are disabled in simulator mode.');
     await service().assertEnrollmentCaptureAllowed(req.params.personnelId);
     const data = await workstationGateway().issueEnrollment({ workstationId: String(req.body.workstationId || ''), actorId: req.user!.id,
-      personnelId: req.params.personnelId, finger: String(req.body.finger || '') });
+      personnelId: req.params.personnelId, finger: String(req.body.finger || ''), enrollmentSessionId: req.body.enrollmentSessionId });
     return res.status(201).json({ success: true, data });
+  } catch (error) { return handle(res, error); }
+});
+router.post('/internal-drivers/:personnelId/enrollment-captures', hrManage, async (req: AuthRequest, res) => {
+  try {
+    if (simulatorEnabled()) throw new DispatchConfirmationConflictError('این مسیر فقط برای حسگر واقعی است.');
+    await service().assertEnrollmentCaptureAllowed(req.params.personnelId);
+    const data = await workstationGateway().stageEnrollmentCapture({ enrollmentSessionId: String(req.body.enrollmentSessionId || ''),
+      personnelId: req.params.personnelId, actorId: req.user!.id, challengeId: String(req.body.challengeId || ''),
+      signedResponse: req.body.signedResponse, transportEnvelope: req.body.transportEnvelope }, templateVault());
+    return res.status(201).json({ success: true, data });
+  } catch (error) { return handle(res, error); }
+});
+router.post('/internal-drivers/:personnelId/enrollment-session/cancel', hrManage, async (req: AuthRequest, res) => {
+  try {
+    await workstationGateway().cancelEnrollmentSession({ enrollmentSessionId: String(req.body.enrollmentSessionId || ''),
+      personnelId: req.params.personnelId, actorId: req.user!.id });
+    return res.json({ success: true });
   } catch (error) { return handle(res, error); }
 });
 router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: AuthRequest, res) => {
   try {
     if (req.body.rawImage || req.body.fingerprintImage || req.body.templates || req.body.protectedTemplateMaterial) throw new DispatchConfirmationValidationError('Raw or caller-supplied biometric material is not accepted.');
     if (!simulatorEnabled()) {
+      if (req.body.enrollmentSessionId) {
+        const data = await service().enrollStagedInternalDriver({ personnelId: req.params.personnelId, actorId: req.user!.id,
+          enrollmentSessionId: req.body.enrollmentSessionId, confirmationPhone: req.body.confirmationPhone, captures: req.body.captures });
+        return res.status(201).json({ success: true, data });
+      }
       if (!Array.isArray(req.body.captures) || req.body.captures.length < 2) throw new DispatchConfirmationValidationError('At least two approved connector captures are required.');
       const gateway = workstationGateway();
       const claimed: Awaited<ReturnType<typeof gateway.claimEnrollmentCapture>>[] = [];

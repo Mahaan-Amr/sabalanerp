@@ -56,7 +56,7 @@ test('enrollment challenge consumes a signed capture once and opens only its bou
   const claimed = await gateway.claimEnrollmentCapture({ challengeId: issued.command.commandId, actorId: 'hr-01', signedResponse, transportEnvelope: envelope });
   assert.deepEqual(claimed.templateMaterial, material);
   assert.deepEqual(claimed.imageMaterial, image);
-  await assert.rejects(() => gateway.claimEnrollmentCapture({ challengeId: issued.command.commandId, actorId: 'hr-01', signedResponse, transportEnvelope: envelope }), /already used/i);
+  await assert.rejects(() => gateway.claimEnrollmentCapture({ challengeId: issued.command.commandId, actorId: 'hr-01', signedResponse, transportEnvelope: envelope }), /فرصت برداشت/);
 });
 
 test('verification challenge is bound to actor, session, driver, waybill and one use', async () => {
@@ -66,7 +66,7 @@ test('verification challenge is bound to actor, session, driver, waybill and one
   assert.equal(issued.command.payload.transportEnvelopeDigest, digestBiometricValue(issued.transportEnvelope));
   const response = { commandId: issued.command.commandId, result: { availability: 'AVAILABLE' as const, device: { model: 'BioMini SLIM 2', serial: 'SERIAL-01', connectorVersion: '1.0.0', sdkVersion: '3.11.1.595' }, captureQuality: { state: 'ACCEPTED' as const, score: 86 }, liveness: { state: 'LIVE' as const, score: 999 }, match: { state: 'MATCH' as const, score: 97 }, errorCategory: 'NONE', retryable: false }, completedAt: now.toISOString() };
   const signedResponse = signBiometricConnectorResponse(response, commandSecret);
-  await assert.rejects(() => gateway.claimVerification({ challengeId: issued.command.commandId, actorId: 'other', signedResponse }), /invalid/i);
+  await assert.rejects(() => gateway.claimVerification({ challengeId: issued.command.commandId, actorId: 'other', signedResponse }), /معتبر نیست/);
   const claimed = await gateway.claimVerification({ challengeId: issued.command.commandId, actorId: 'accountant-01', signedResponse });
   assert.equal(claimed.challenge.contextId, 'session-01');
   await gateway.complete([issued.command.commandId], true);

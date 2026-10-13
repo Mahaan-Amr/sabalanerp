@@ -928,6 +928,7 @@ model CompanyVehicle {
   vehicleType         String
   make                String?
   model               String?
+  manufactureYear     Int?
   vin                 String?                       @unique
   status              CompanyVehicleLifecycleStatus @default(DRAFT)
   statusEffectiveFrom DateTime                      @default(now())

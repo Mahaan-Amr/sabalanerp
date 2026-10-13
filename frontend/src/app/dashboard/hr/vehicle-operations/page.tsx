@@ -22,6 +22,7 @@ import {
   ErpSection,
   ErpSegmentedControl,
   ErpSelect,
+  ErpSearchableSelect,
   ErpSheet,
   ErpWorkspacePage,
 } from "@/components/erp";
@@ -37,14 +38,17 @@ import {
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
 
+import CompanyPlateFields from '@/features/dispatch-master-data/CompanyPlateFields';
+import { emptyCompanyPlate, completeCompanyPlate, formatCompanyPlate, manufactureYears, validManufactureYear } from '@/features/dispatch-master-data/companyVehicleEntry';
+
 const today = () => new Date().toISOString().slice(0, 10);
 const vehicleInitial = {
   fleetCode: "",
   vehicleType: "",
   make: "",
-  model: "",
+  manufactureYear: "",
   vin: "",
-  plate: "",
+  plate: emptyCompanyPlate,
   effectiveFrom: today(),
   reason: "ثبت خودروی ناوگان",
 };
@@ -56,7 +60,7 @@ const assignmentInitial = {
 };
 const plateInitial = {
   vehicleId: "",
-  plate: "",
+  plate: emptyCompanyPlate,
   effectiveFrom: today(),
   reason: "تغییر پلاک خودرو",
 };
@@ -363,10 +367,14 @@ export default function VehicleOperationsPage() {
                           <ErpBadge tone="info">ناوگان شرکت</ErpBadge>
                         </div>
                         <p className="mt-1 text-sm sds-text-muted">
-                          {vehicle.plates[0]?.plate || "بدون پلاک"}
-                          {vehicle.make
-                            ? ` · ${vehicle.make} ${vehicle.model || ""}`
-                            : ""}
+                          {vehicle.plates[0]?.plate ? (
+                            <span dir="ltr" className="inline-flex gap-1" aria-label={vehicle.plates[0].plate}>
+                              {vehicle.plates[0].plate.trim().split(/\s+/).map((part: string, index: number) => <bdi key={index}>{part}</bdi>)}
+                            </span>
+                          ) : "بدون پلاک"}
+                          {vehicle.make ? ` · ${vehicle.make}` : ""}
+                          {vehicle.manufactureYear ? ` · سال ساخت ${Number(vehicle.manufactureYear).toLocaleString('fa-IR', { useGrouping: false })}` : ""}
+                          {vehicle.model ? ` · مدل ثبت‌شده قبلی: ${vehicle.model}` : ""}
                         </p>
                       </div>
                       {(capabilities.canManageCompanyVehicles ||
@@ -695,12 +703,13 @@ export default function VehicleOperationsPage() {
                 saving ||
                 !vehicleForm.fleetCode.trim() ||
                 !vehicleForm.vehicleType.trim() ||
-                !vehicleForm.plate.trim() ||
+                !completeCompanyPlate(vehicleForm.plate) ||
+                !validManufactureYear(vehicleForm.manufactureYear) ||
                 !vehicleForm.reason.trim()
               }
               onClick={async () => {
                 const ok = await run(
-                  () => dispatchMasterDataAPI.createCompanyVehicle(vehicleForm),
+                  () => dispatchMasterDataAPI.createCompanyVehicle({ ...vehicleForm, manufactureYear: Number(vehicleForm.manufactureYear), plate: formatCompanyPlate(vehicleForm.plate) }),
                   "خودروی شرکت ثبت شد.",
                 );
                 if (ok) {
@@ -753,13 +762,12 @@ export default function VehicleOperationsPage() {
               />
             </label>
             <label className={field}>
-              مدل
-              <ErpInput
-                value={vehicleForm.model}
-                onChange={(event) =>
-                  setVehicleForm({ ...vehicleForm, model: event.target.value })
-                }
-              />
+              سال ساخت
+              <ErpSearchableSelect required disabled={saving} value={vehicleForm.manufactureYear}
+                onChange={event => setVehicleForm({ ...vehicleForm, manufactureYear: event.target.value })}>
+                <option value="" disabled>انتخاب سال ساخت</option>
+                {manufactureYears().map(year => <option key={year} value={year}>{year.toLocaleString('fa-IR', { useGrouping: false })}</option>)}
+              </ErpSearchableSelect>
             </label>
             <label className={field}>
               شماره شاسی
@@ -770,16 +778,10 @@ export default function VehicleOperationsPage() {
                 }
               />
             </label>
-            <label className={field}>
-              پلاک
-              <ErpInput
-                required
-                value={vehicleForm.plate}
-                onChange={(event) =>
-                  setVehicleForm({ ...vehicleForm, plate: event.target.value })
-                }
-              />
-            </label>
+            <div className="min-w-0">
+              <CompanyPlateFields label="پلاک" disabled={saving} value={vehicleForm.plate}
+                onChange={plate => setVehicleForm({ ...vehicleForm, plate })} />
+            </div>
             <label className={field}>
               شروع اعتبار پلاک
               <HrPersianCalendar
@@ -829,7 +831,7 @@ export default function VehicleOperationsPage() {
                 dispatchTimelineStale ||
                 saving ||
                 !plateForm.vehicleId ||
-                !plateForm.plate.trim() ||
+                !completeCompanyPlate(plateForm.plate) ||
                 !plateForm.reason.trim()
               }
               onClick={async () => {
@@ -837,7 +839,7 @@ export default function VehicleOperationsPage() {
                   () =>
                     dispatchMasterDataAPI.changeCompanyVehiclePlate(
                       plateForm.vehicleId,
-                      plateForm,
+                      { ...plateForm, plate: formatCompanyPlate(plateForm.plate) },
                     ),
                   "پلاک جدید ثبت شد.",
                 );
@@ -855,16 +857,10 @@ export default function VehicleOperationsPage() {
             <ErpInlineState kind="error" title={`عملیات انجام نشد: ${error}`} />
           )}
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className={field}>
-              پلاک جدید
-              <ErpInput
-                required
-                value={plateForm.plate}
-                onChange={(event) =>
-                  setPlateForm({ ...plateForm, plate: event.target.value })
-                }
-              />
-            </label>
+            <div className="min-w-0">
+              <CompanyPlateFields label="پلاک جدید" disabled={saving} value={plateForm.plate}
+                onChange={plate => setPlateForm({ ...plateForm, plate })} />
+            </div>
             <label className={field}>
               شروع اعتبار
               <HrPersianCalendar

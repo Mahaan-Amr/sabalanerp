@@ -65,6 +65,255 @@ const manualPriceDraft = (family: 'longitudinal' | 'slab' | 'stair' | 'prepared'
 const unpricedTransaction = () => ({ ...ordinarySaleTransaction(), product: { findMany: async () => [unpricedCatalogProduct()] },
   subService: { findMany: async () => [] }, stoneFinishing: { findMany: async () => [] }, layerType: { findMany: async () => [] } });
 
+const operationFixture = () => {
+  const draft = manualPriceDraft('stair');
+  const version = draft.rows[0].catalogSnapshotVersion;
+  const tool = { id: 'polish', namePersian: 'پوساب پالیش پله', updatedAt: new Date(version), isActive: true,
+    calculationBase: 'length', pricePerMeter: new Prisma.Decimal('150000') };
+  const finishing = { id: tool.id, namePersian: tool.namePersian, updatedAt: tool.updatedAt, isActive: true,
+    calculationBase: 'length', unitPrice: new Prisma.Decimal('200000'), pricePerSquareMeter: new Prisma.Decimal('0') };
+  const tx = { ...unpricedTransaction(), subService: { findMany: async () => [tool] },
+    stoneFinishing: { findMany: async () => [finishing] } };
+  const withOperations = (tools: boolean, finishings: boolean) => PartnerTechnicalDraftSchema.parse({ ...draft,
+    rows: [{ ...draft.rows[0], operations: { groups: [{ operationGroupId: 'group', scope: '2' }],
+      tools: tools ? [{ operationGroupId: 'group', toolSelectionId: 'polish-tool', catalogItemId: tool.id,
+        catalogSnapshotVersion: version, edges: ['front'] }] : [],
+      finishings: finishings ? [{ operationGroupId: 'group', finishingSelectionId: 'polish-finish', catalogItemId: finishing.id,
+        catalogSnapshotVersion: version }] : [] } }] });
+  return { draft, tool, finishing, tx, withOperations };
+};
+
+test('adding a same-name tool to a saved finishing loads its own evidence and recompiles the whole Partner graph', async () => {
+  const f = operationFixture();
+  f.tx.subService.findMany = async () => [];
+  const original = f.withOperations(false, true);
+  const resolver = createPartnerTechnicalEvidenceResolver();
+  const first = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: original, previous: null });
+  assert.ok(first.ok);
+  const before = JSON.stringify(first.value);
+  f.tx.subService.findMany = async () => [f.tool];
+  const changed = f.withOperations(true, true);
+  const next = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: changed,
+    previous: { draft: original, ...first.value } as any });
+  assert.ok(next.ok);
+  const compiled = compilePartnerTechnicalGraph(changed, next.value.context);
+  assert.ok(compiled.ok, !compiled.ok ? compiled.error.code : undefined);
+  assert.deepEqual(next.value.context.operations?.map(item => [item.kind, item.rateToman]),
+    [['TOOL', '150000'], ['FINISHING', '200000']]);
+  assert.deepEqual(next.value.identities, first.value.identities);
+  assert.equal(JSON.stringify(first.value), before, 'previous agreement remains immutable');
+});
+
+test('a product edit refreshes every system rate despite unchanged stone identity and catalog rate-version drift', async () => {
+  const f = operationFixture();
+  const original = f.withOperations(true, true);
+  const resolver = createPartnerTechnicalEvidenceResolver();
+  const first = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: original, previous: null });
+  assert.ok(first.ok);
+  f.tool.pricePerMeter = new Prisma.Decimal('170000');
+  f.tool.updatedAt = new Date('2026-10-13T00:00:00Z');
+  f.finishing.unitPrice = new Prisma.Decimal('220000');
+  f.finishing.updatedAt = f.tool.updatedAt;
+  f.tx.cuttingType.findMany = async () => ['LONG', 'CROSS'].map(code => ({ id: `cut-${code}`, code,
+    pricePerMeter: new Prisma.Decimal('30000'), updatedAt: f.tool.updatedAt }));
+  const changed = PartnerTechnicalDraftSchema.parse({ ...original, inputRevision: 2,
+    rows: [{ ...original.rows[0], description: 'تغییر محصول' }] });
+  const next = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: changed,
+    previous: { draft: original, ...first.value } as any });
+  assert.ok(next.ok);
+  assert.deepEqual(next.value.context.operations?.map(item => item.rateToman), ['170000', '220000']);
+  assert.equal(next.value.context.products[0].stair?.longitudinalCutRateToman, '30000');
+  assert.equal(compilePartnerTechnicalGraph(changed, next.value.context).ok, true);
+  assert.deepEqual(next.value.identities, first.value.identities);
+  assert.deepEqual(changed.rows[0].retailUnitPrice, original.rows[0].retailUnitPrice);
+});
+
+test('an unchanged technical save keeps exact historical evidence without touching the current catalog', async () => {
+  const f = operationFixture();
+  const original = f.withOperations(true, true);
+  const resolver = createPartnerTechnicalEvidenceResolver();
+  const first = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: original, previous: null });
+  assert.ok(first.ok);
+  const noReads = new Proxy({}, { get: () => { throw new Error('No product edit: do not reprice'); } });
+  const next = await resolver(noReads as any, { actorId: 'partner', recoveryId: 'case',
+    draft: { ...original, inputRevision: 999 }, previous: { draft: original, ...first.value } as any });
+  assert.ok(next.ok);
+  assert.deepEqual(next.value, first.value);
+  const displayOnly = PartnerTechnicalDraftSchema.parse({ ...original, rows: [{ ...original.rows[0],
+    configuration: { ...original.rows[0].configuration, lengthDisplayUnit: 'cm', crossDimensionDisplayUnit: 'm' } }] });
+  const displayed = await resolver(noReads as any, { actorId: 'partner', recoveryId: 'case',
+    draft: displayOnly, previous: { draft: original, ...first.value } as any });
+  assert.deepEqual(displayed, next, 'changing display units without geometry cannot reprice the agreement');
+});
+
+test('existing and newly selected versions of the same stone and tool coexist with fresh rates', async () => {
+  const f = operationFixture();
+  f.tx.stoneFinishing.findMany = async () => [];
+  const original = f.withOperations(true, false);
+  const resolver = createPartnerTechnicalEvidenceResolver();
+  const first = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: original, previous: null });
+  assert.ok(first.ok);
+  const currentVersion = '2026-10-13T00:00:00.000Z';
+  f.tool.updatedAt = new Date(currentVersion);
+  f.tool.pricePerMeter = new Prisma.Decimal('190000');
+  f.tx.product.findMany = async () => [{ ...unpricedCatalogProduct(), updatedAt: new Date(currentVersion) }];
+  const second = { ...original.rows[0], productRowId: 'second-stair', catalogSnapshotVersion: currentVersion,
+    configuration: { ...original.rows[0].configuration, stairSystemId: 'second-system', sourceBatchId: 'second-stock' },
+    operations: { groups: [{ operationGroupId: 'second-group', scope: '2' }], finishings: [], tools: [{
+      toolSelectionId: 'second-tool', operationGroupId: 'second-group', catalogItemId: f.tool.id,
+      catalogSnapshotVersion: currentVersion, edges: ['front'] }] } };
+  const changed = PartnerTechnicalDraftSchema.parse({ ...original, rows: [...original.rows, second],
+    stairSystems: [...original.stairSystems!, { stairSystemId: 'second-system', quantity: { mode: 'steps', totalSteps: 2 } }] });
+  const next = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: changed,
+    previous: { draft: original, ...first.value } as any });
+  assert.ok(next.ok, !next.ok ? next.error.code : undefined);
+  assert.equal(next.value.context.catalog.products.length, 2);
+  assert.deepEqual(next.value.context.operations?.map(item => item.rateToman), ['190000', '190000']);
+  assert.equal(compilePartnerTechnicalGraph(changed, next.value.context).ok, true);
+});
+
+test('editing any product blocks an inactive previously selected tool and identifies it for correction', async () => {
+  const f = operationFixture();
+  const original = f.withOperations(true, true);
+  const resolver = createPartnerTechnicalEvidenceResolver();
+  const first = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: original, previous: null });
+  assert.ok(first.ok);
+  f.tool.isActive = false;
+  const changed = PartnerTechnicalDraftSchema.parse({ ...original, rows: [{ ...original.rows[0], description: 'ویرایش' }] });
+  const next = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: changed,
+    previous: { draft: original, ...first.value } as any });
+  assert.equal(next.ok, false);
+  if (!next.ok) { assert.equal(next.error.code, 'CATALOG_COMPONENT_UNAVAILABLE'); assert.match(next.error.message, /ابزار.*پوساب پالیش پله/); }
+});
+
+test('missing and negative-rate operations identify the affected kind instead of a generic integrity error', async () => {
+  for (const kind of ['TOOL', 'FINISHING'] as const) {
+    const f = operationFixture();
+    const original = f.withOperations(true, true);
+    const resolver = createPartnerTechnicalEvidenceResolver();
+    const first = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: original, previous: null });
+    assert.ok(first.ok);
+    const changed = PartnerTechnicalDraftSchema.parse({ ...original, rows: [{ ...original.rows[0], description: 'ویرایش' }] });
+    const source = kind === 'TOOL' ? f.tx.subService : f.tx.stoneFinishing;
+    source.findMany = async () => [];
+    const missing = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: changed,
+      previous: { draft: original, ...first.value } as any });
+    assert.ok(!missing.ok);
+    assert.equal(missing.error.component?.kind, kind);
+    assert.equal(missing.error.component?.reason, 'MISSING');
+    if (kind === 'TOOL') { f.tool.pricePerMeter = new Prisma.Decimal('-1'); f.tx.subService.findMany = async () => [f.tool]; }
+    else { f.finishing.unitPrice = new Prisma.Decimal('-1'); f.tx.stoneFinishing.findMany = async () => [f.finishing]; }
+    const invalid = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: changed,
+      previous: { draft: original, ...first.value } as any });
+    assert.ok(!invalid.ok);
+    assert.equal(invalid.error.component?.kind, kind);
+    assert.equal(invalid.error.component?.reason, 'RATE');
+  }
+});
+
+test('an operation unit change blocks the edited agreement with the exact component name', async () => {
+  const f = operationFixture();
+  const original = f.withOperations(true, true);
+  const resolver = createPartnerTechnicalEvidenceResolver();
+  const first = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: original, previous: null });
+  assert.ok(first.ok);
+  const changed = PartnerTechnicalDraftSchema.parse({ ...original, rows: [{ ...original.rows[0], description: 'ویرایش' }] });
+  for (const calculationBase of ['squareMeters', 'unsupported']) {
+    f.tool.calculationBase = calculationBase;
+    const rejected = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: changed,
+      previous: { draft: original, ...first.value } as any });
+    assert.ok(!rejected.ok);
+    assert.equal(rejected.error.component?.reason, 'UNIT');
+    assert.match(rejected.error.message, /ابزار.*پوساب پالیش پله/);
+  }
+});
+
+test('adding operations to paid remainder children loads current evidence without a second material charge', async () => {
+  const f = operationFixture();
+  f.tx.subService.findMany = async () => [];
+  f.tx.stoneFinishing.findMany = async () => [];
+  const draft = manualPriceDraft('longitudinal');
+  const parent = draft.rows[0];
+  const child = { kind: 'remainder', creationOrder: 0, allocationId: 'child-cut', productRowId: 'paid-child',
+    sourceProductRowId: parent.productRowId, selectedRemainingStoneId: 'manual-row:base-remainder:1',
+    catalogItemId: parent.catalogItemId, catalogSnapshotVersion: parent.catalogSnapshotVersion,
+    lengthMeters: '1', widthMeters: '0.05', quantity: 2, lengthDisplayUnit: 'm', widthDisplayUnit: 'cm',
+    sawKerfEnabled: false, calibrationEnabled: false };
+  const original = PartnerTechnicalDraftSchema.parse({ ...draft, dependents: [child] });
+  const resolver = createPartnerTechnicalEvidenceResolver();
+  const first = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: original, previous: null });
+  assert.ok(first.ok);
+  assert.equal(compilePartnerTechnicalGraph(original, first.value.context).ok, true);
+  f.tx.subService.findMany = async () => [f.tool];
+  const changed = PartnerTechnicalDraftSchema.parse({ ...original, dependents: [{ ...child,
+    operations: { groups: [{ operationGroupId: 'child-group', scope: '2' }], finishings: [], tools: [{
+      toolSelectionId: 'child-tool', operationGroupId: 'child-group', catalogItemId: f.tool.id,
+      catalogSnapshotVersion: f.tool.updatedAt.toISOString(), edges: ['front'] }] } }] });
+  const next = await resolver(f.tx as any, { actorId: 'partner', recoveryId: 'case', draft: changed,
+    previous: { draft: original, ...first.value } as any });
+  assert.ok(next.ok);
+  const compiled = compilePartnerTechnicalGraph(changed, next.value.context);
+  assert.ok(compiled.ok, !compiled.ok ? compiled.error.code : undefined);
+  assert.equal(compiled.value.graph.rows.find(row => row.productRowId === 'paid-child')?.commercial.baseAmountToman, '0');
+  assert.equal(compiled.value.graph.toolSelections.length, 1);
+});
+
+test('adding and editing a layer refreshes layer and cutting rates and keeps the material agreement', async () => {
+  const f = operationFixture();
+  f.tx.subService.findMany = async () => [];
+  f.tx.stoneFinishing.findMany = async () => [];
+  const version = f.draft.rows[0].catalogSnapshotVersion;
+  const layer = { id: 'layer', updatedAt: new Date(version), isActive: true, name: 'لایه فارسی',
+    calculationUnit: 'meter', pricePerLayer: new Prisma.Decimal('10000') };
+  const tx = { ...f.tx, layerType: { findMany: async () => [layer] } };
+  tx.layerType.findMany = async () => [];
+  const resolver = createPartnerTechnicalEvidenceResolver();
+  const first = await resolver(tx as any, { actorId: 'partner', recoveryId: 'case', draft: f.draft, previous: null });
+  assert.ok(first.ok);
+  tx.layerType.findMany = async () => [layer];
+  const added = PartnerTechnicalDraftSchema.parse({ ...f.draft, dependents: [{ kind: 'layer', creationOrder: 1,
+    layerConfigurationId: 'layer-configuration', parentProductRowId: 'manual-row', sourceBatchId: 'layer-stock',
+    catalogItemId: layer.id, catalogSnapshotVersion: version, layersPerParentPiece: 1, widthMeters: '0.05',
+    widthDisplayUnit: 'cm', targetSides: ['front'], sawKerfEnabled: false, calibrationEnabled: false,
+    source: { kind: 'new-material', catalogItemId: f.draft.rows[0].catalogItemId, catalogSnapshotVersion: version,
+      retailUnitPrice: { amount: '5000000', currency: 'IRT' },
+      sourceRows: [{ sourceRowId: 'layer-mother', lengthMeters: '2', widthMeters: '0.4', quantity: 1 }] } }] });
+  const next = await resolver(tx as any, { actorId: 'partner', recoveryId: 'case', draft: added,
+    previous: { draft: f.draft, ...first.value } as any });
+  assert.ok(next.ok);
+  assert.equal(compilePartnerTechnicalGraph(added, next.value.context).ok, true);
+  tx.subService.findMany = async () => [f.tool];
+  const withSideTool = PartnerTechnicalDraftSchema.parse({ ...added, dependents: [{ ...added.dependents![0],
+    sideOperations: [{ side: 'front', operationCollectionId: 'layer-side-operations', scopeIntent: 'side',
+      operations: { groups: [{ operationGroupId: 'layer-tool-group', scope: '2' }], finishings: [], tools: [{
+        toolSelectionId: 'layer-tool', operationGroupId: 'layer-tool-group', catalogItemId: f.tool.id,
+        catalogSnapshotVersion: version, edges: ['front'] }] } }] }] });
+  const sideEvidence = await resolver(tx as any, { actorId: 'partner', recoveryId: 'case', draft: withSideTool,
+    previous: { draft: added, ...next.value } as any });
+  assert.ok(sideEvidence.ok);
+  assert.equal(compilePartnerTechnicalGraph(withSideTool, sideEvidence.value.context).ok, true, 'layer-side tools have their own current evidence');
+  tx.subService.findMany = async () => [];
+  layer.updatedAt = new Date('2026-10-13T00:00:00Z');
+  layer.pricePerLayer = new Prisma.Decimal('12000');
+  tx.cuttingType.findMany = async () => ['LONG', 'CROSS'].map(code => ({ id: `cut-${code}`, code,
+    pricePerMeter: new Prisma.Decimal('25000'), updatedAt: layer.updatedAt }));
+  const changed = PartnerTechnicalDraftSchema.parse({ ...added, rows: [{ ...added.rows[0], description: 'ویرایش لایه' }] });
+  const refreshed = await resolver(tx as any, { actorId: 'partner', recoveryId: 'case', draft: changed,
+    previous: { draft: added, ...next.value } as any });
+  assert.ok(refreshed.ok);
+  assert.equal(refreshed.value.context.layers?.[0].layerRateToman, '12000');
+  assert.equal(refreshed.value.context.layers?.[0].longitudinalCutRateToman, '25000');
+  const compiled = compilePartnerTechnicalGraph(changed, refreshed.value.context);
+  assert.ok(compiled.ok);
+  const material = compiled.value.graph.layerConfigurations[0].input.source;
+  assert.equal(material.kind === 'new-material' && material.materialRateToman, '5000000');
+  layer.isActive = false;
+  const rejected = await resolver(tx as any, { actorId: 'partner', recoveryId: 'case', draft: changed,
+    previous: { draft: added, ...next.value } as any });
+  assert.ok(!rejected.ok);
+  assert.equal(rejected.error.component?.kind, 'LAYER');
+});
+
 test('catalog suggestions normalize each currency and expose no private pricing evidence', async () => {
   const first = { ...unpricedCatalogProduct(), basePrice: new Prisma.Decimal('12000000'), currency: 'ریال' };
   const second = { ...first, id: 'toman-stone', basePrice: new Prisma.Decimal('2500000'), currency: 'تومان' };
@@ -275,7 +524,7 @@ test('ordinary Sale rates calculate the Partner payable and remain frozen when a
   assert.equal(compilePartnerTechnicalGraph(slabDraft, squareMeter).ok, false);
   tx.cuttingType.findMany = async () => { throw new Error('A resumed draft must keep its frozen rates'); };
   const resumed = await resolver(tx as any, { actorId: 'partner-1', recoveryId: 'ordinary-draft', draft,
-    previous: { context: first.value.context, identities: first.value.identities } as any });
+    previous: { draft, context: first.value.context, identities: first.value.identities } as any });
   assert.ok(resumed.ok);
   assert.deepEqual(resumed.value.context, first.value.context);
   assert.deepEqual(resumed.value.identities, first.value.identities);

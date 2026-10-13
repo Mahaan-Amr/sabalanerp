@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { Prisma } from '@prisma/client';
 import { contractStatusLabel } from './contractStatusLabel';
 import path from 'path';
 import type { PartnerProductPrintDetails } from './partnerProductPrint';
@@ -218,7 +219,8 @@ interface NormalizedDelivery {
   manager: string;
   receiver: string;
   notes: string;
-  products: Array<{ name: string; quantity: number; amountLabel: string }>;
+  products: Array<{ name: string; quantity: number; amountLabel: string;
+    code?: string; unit?: string; quantityText?: string }>;
 }
 
 interface NormalizedPayment {
@@ -1414,6 +1416,9 @@ const normalizeDeliveries = (
               products.find((candidate) => candidate.id.startsWith(`${deliveryProduct?.productId || ''}-`));
             return {
               name: product?.name || EMPTY,
+              code: product?.code,
+              unit: inferDeliveryUnit(product, deliveryProduct),
+              quantityText: String(deliveryProduct?.amount ?? deliveryProduct?.quantity ?? 0),
               quantity: toNumber(deliveryProduct?.quantity),
               amountLabel: formatDeliveryAmount(deliveryProduct, product, deliveryProduct?.quantity)
             };
@@ -2445,13 +2450,43 @@ const renderProductMainRows = (
   ).join('');
 };
 
-const renderDeliveryRows = (deliveries: NormalizedDelivery[], options: { hideReceiver?: boolean } = {}): string => {
+type CompactDeliveryItem = { name: string; code?: string; unit: string; quantity: string; execution?: boolean };
+
+/** Print-only aggregation within one delivery. Unknown product codes remain separate. */
+const compactDeliveryItems = (items: CompactDeliveryItem[]): CompactDeliveryItem[] => {
+  const groups = new Map<string, CompactDeliveryItem>();
+  items.forEach((item, index) => {
+    const key = item.code && item.code !== EMPTY
+      ? JSON.stringify([item.name, item.code, item.unit, Boolean(item.execution)])
+      : `unidentified:${index}`;
+    const previous = groups.get(key);
+    if (previous) previous.quantity = new Prisma.Decimal(previous.quantity).add(item.quantity).toFixed();
+    else groups.set(key, { ...item });
+  });
+  return [...groups.values()];
+};
+
+const renderDeliveryRows = (deliveries: NormalizedDelivery[], options: { hideReceiver?: boolean; compact?: boolean } = {}): string => {
   const columnCount = options.hideReceiver ? 5 : 6;
   if (!deliveries.length) {
     return `<tr><td colspan="${columnCount}" class="empty-cell">${escapeHtml(EMPTY)}</td></tr>`;
   }
 
   return deliveries.map((delivery) => {
+    if (options.compact && delivery.products.length && delivery.products.every(product => product.quantityText !== undefined && product.unit)) {
+      const groups = compactDeliveryItems(delivery.products.map(product => ({
+        name: product.name, code: product.code, unit: product.unit || 'count',
+        quantity: product.quantityText ?? String(product.quantity),
+      })));
+      return groups.map(product => `<tr class="delivery-row">
+        <td>${toFaNumber(delivery.index)}</td>
+        <td>${escapeHtml(product.name)}${product.code && product.code !== EMPTY ? `<div>کد محصول: ${escapeHtml(product.code)}</div>` : ''}</td>
+        <td>${toFaNumber(Number(product.quantity), product.unit === 'count' ? 0 : 4)} ${escapeHtml(deliveryUnitLabel(product.unit))}</td>
+        <td>${escapeHtml(delivery.date)}</td>
+        ${options.hideReceiver ? '' : `<td>${escapeHtml(delivery.receiver)}</td>`}
+        <td>${escapeHtml(delivery.notes)}</td>
+      </tr>`).join('');
+    }
     const productsLabel = delivery.products.length > 0
       ? delivery.products.map((product) => product.name).join('، ')
       : EMPTY;
@@ -2699,10 +2734,15 @@ function renderCustomerDeliveryRows(output: CustomerContractOutput): string {
   return output.deliveries.flatMap((delivery, index) => {
     const physical = delivery.items.map(item => ({ rowId: item.productRowId, quantity: item.quantity, execution: false }));
     const services = (delivery.serviceItems ?? []).map(item => ({ rowId: item.serviceRowId, quantity: item.quantity, execution: true }));
-    return [...physical, ...services].map(item => `<tr>
+    const grouped = compactDeliveryItems([...physical, ...services].map(item => {
+      const product = products.get(item.rowId);
+      return { name: product?.description || '', code: product?.productCode, unit: product?.unit || 'count',
+        quantity: item.quantity, execution: item.execution };
+    }));
+    return grouped.map(item => `<tr class="delivery-row">
       <td>${escapeHtml(String(index + 1))}</td>
-      <td>${item.execution ? 'اجرای خدمت: ' : ''}${escapeHtml(products.get(item.rowId)?.description || '')}</td>
-      <td>${escapeHtml(item.quantity)} ${escapeHtml(deliveryUnitLabel(products.get(item.rowId)?.unit))}</td>
+      <td>${item.execution ? 'اجرای خدمت: ' : ''}${escapeHtml(item.name)}${item.code ? `<div>کد محصول: ${escapeHtml(item.code)}</div>` : ''}</td>
+      <td>${escapeHtml(item.quantity)} ${escapeHtml(deliveryUnitLabel(item.unit))}</td>
       <td>${escapeHtml(formatDate(delivery.date))}</td><td>${escapeHtml(output.customer.displayName)}</td><td>${escapeHtml(delivery.destination)}</td>
     </tr>`);
   }).join('');
@@ -2724,8 +2764,8 @@ export function renderCustomerContractPrint(output: CustomerContractOutput, prin
     contractNumber: output.contractNumber, status: output.status, createdAt: output.contractDate,
   };
   return {
-    htmlContent: renderContractHtml(contract, { customerOutput: output, customerPrintDetails: printDetails, reservePdfHeaderSpace: true }),
-    headerTemplate: renderContractPdfHeaderTemplate(contract, output),
+    htmlContent: renderContractHtml(contract, { customerOutput: output, customerPrintDetails: printDetails, firstPageHeader: true }),
+    headerTemplate: '<span></span>',
   };
 }
 
@@ -2737,6 +2777,8 @@ type RenderContractHtmlOptions = {
   customerOutput?: CustomerContractOutput;
   customerPrintDetails?: PartnerProductPrintDetails[];
   reservePdfHeaderSpace?: boolean;
+  /** Partner PDFs keep the header in document flow so later pages reclaim its space. */
+  firstPageHeader?: boolean;
   variant?: ContractPrintVariant;
   customPrint?: ContractCustomPrintOptions;
   finishingCodeById?: Record<string, string>;
@@ -2837,7 +2879,8 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const visibleProductColumnDefinitions = productColumnDefinitions.filter((column) => productColumns[column.key]);
 
   return `
-  <div class="sheet ${isWorkshopVariant ? 'workshop-print' : ''} ${output ? 'customer-output' : ''}">
+  <div class="sheet ${isWorkshopVariant ? 'workshop-print' : ''} ${output ? 'customer-output' : ''}${options.firstPageHeader ? ' partner-first-page-header' : ''}">
+    ${options.firstPageHeader ? `<div class="first-page-header">${renderContractPdfHeaderTemplate(contract, output).replace('<span class="pageNumber"></span>', '<span>۱</span>')}</div>` : ''}
     ${renderCompactMetadataSection(contract, { variant, customerName, customerAddress })}
 
     ${showFormalSection ? `<section class="section">
@@ -2912,13 +2955,13 @@ export function renderContractHtml(contract: RenderableContract, options: Render
           </tr>
         </thead>
         <tbody>
-          ${output ? renderCustomerDeliveryRows(output) : renderDeliveryRows(normalizedDeliveries, { hideReceiver: isWorkshopVariant })}
+          ${output ? renderCustomerDeliveryRows(output) : renderDeliveryRows(normalizedDeliveries, { hideReceiver: isWorkshopVariant, compact: options.firstPageHeader })}
         </tbody>
       </table>
       ${output ? '' : `<p class="section-note">${escapeHtml(DELIVERY_NOTE)}</p>`}
     </section>` : ''}
 
-    ${showPaymentSection ? `<section class="section">
+    ${showPaymentSection ? `<section class="section${options.firstPageHeader ? ' print-payment' : ''}">
       <h2>برنامه پرداخت</h2>
       <table>
         <thead>
@@ -2991,7 +3034,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
 
     @page {
       size: A4 portrait;
-      margin: ${options.reservePdfHeaderSpace ? '50mm 5mm 5mm 5mm' : '0'};
+      margin: ${options.firstPageHeader ? '5mm' : options.reservePdfHeaderSpace ? '50mm 5mm 5mm 5mm' : '0'};
     }
 
     * {
@@ -3367,6 +3410,37 @@ export function renderContractHtml(contract: RenderableContract, options: Render
       font-size: 9px;
       color: #6b7280;
     }
+
+    .partner-first-page-header .first-page-header {
+      height: 29mm;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .partner-first-page-header .first-page-header > div {
+      transform: translateY(-3mm);
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+    .partner-first-page-header .main-products-table > .product-group {
+      break-inside: auto;
+      page-break-inside: auto;
+    }
+    .partner-first-page-header .main-products-table tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .partner-first-page-header .section h2 { break-after: avoid; page-break-after: avoid; }
+    .partner-first-page-header .delivery-table tr { break-inside: avoid; page-break-inside: avoid; }
+    .partner-first-page-header .print-payment {
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
+    .partner-first-page-header .print-payment .section-note {
+      margin-top: 2px;
+      line-height: 1.3;
+    }
+    .partner-first-page-header .section:has(+ .footer) { margin-bottom: 0; }
+    .partner-first-page-header .footer { margin-top: 2px; padding-top: 2px; }
 
   </style>
   `;

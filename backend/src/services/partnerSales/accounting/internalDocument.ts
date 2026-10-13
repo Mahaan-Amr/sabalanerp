@@ -157,7 +157,7 @@ export function partnerInternalPrintInput(document: NonNullable<Awaited<ReturnTy
       discount: { amount: Number(totals?.discount || 0), inputMode: 'AMOUNT_TOMAN' },
       deliveries: (document.deliveries || []).map(delivery => ({ deliveryDate: delivery.date,
         deliveryAddress: delivery.destination, receiverName: delivery.receiverName, projectManagerName: delivery.projectManagerName,
-        products: delivery.items.map(line => ({ productRowId: line.productRowId, quantity: Number(line.quantity), amount: Number(line.quantity),
+        products: delivery.items.map(line => ({ productRowId: line.productRowId, quantity: line.quantity, amount: line.quantity,
           unit: document.items.find(item => item.productRowId === line.productRowId)?.unit,
           productName: document.items.find(item => item.productRowId === line.productRowId)?.description })) })),
       payment: { payments: (document.paymentPlan?.installments || []).map(item => ({
@@ -173,7 +173,7 @@ export function renderPartnerInternalDocumentHtml(document: NonNullable<Awaited<
   const variant = options.variant || 'accounting';
   const showMoney = !('amountKnown' in document && document.amountKnown === false) && variant !== 'workshop' && options.customPrint?.showPrices !== false && options.customPrint?.showTotals !== false;
   const unpriced = 'amountKnown' in document && document.amountKnown === false;
-  const html = renderContractHtml(input, { ...options, variant, displayInRials: true, reservePdfHeaderSpace: true,
+  const html = renderContractHtml(input, { ...options, variant, displayInRials: true, firstPageHeader: true,
     ...(unpriced ? { unavailableMoneyLabel: 'در انتظار استعلام' } : {}) });
   const escape = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
   const grouped = (value: Prisma.Decimal) => {

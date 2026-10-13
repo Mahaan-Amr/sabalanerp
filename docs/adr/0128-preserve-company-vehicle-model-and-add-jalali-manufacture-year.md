@@ -1,0 +1,3 @@
+# Preserve company-vehicle model text and add Solar Hijri manufacture year
+
+Company-vehicle registration now requires a separate Solar Hijri manufacture year from 1300 through the current year in Tehran; the previous optional free-text model field retains its original meaning and historical values rather than being reinterpreted or automatically converted. Both company-vehicle plate entry forms use two digits, a permitted Persian plate letter, three digits, and a two-digit Iran code, while prior effective plate periods and frozen operational snapshots remain unchanged. This company-fleet entry boundary does not tighten the shared normalization contract for external or historical plates.

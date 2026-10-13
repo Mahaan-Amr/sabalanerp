@@ -70,3 +70,18 @@ test('genuine evidence conflicts retain their business status', async () => {
   await handler({ body: {} }, response);
   assert.equal(status, 409); assert.equal(body.code, 'INTEGRITY_CONFLICT'); assert.deepEqual(logs, []);
 });
+
+test('technical transport returns only the public named component failure', async () => {
+  let handler: any;
+  const error = partnerError('CATALOG_COMPONENT_UNAVAILABLE', { kind: 'LAYER', title: 'لایه فارسی', reason: 'RATE' });
+  registerPartnerTechnicalRoutes({ post: (path, fn) => { if (path === '/recoveries/save') handler = fn; }, put: () => undefined }, {
+    servicesFor: async () => ({ saved: { save: async () => ({ ok: false, error }) } } as any),
+  });
+  let status = 200; let body: any;
+  const response: TechnicalResponse = { status: value => { status = value; return response; },
+    json: value => { body = value; }, setHeader: () => undefined };
+  await handler({ body: {} }, response);
+  assert.equal(status, 409);
+  assert.deepEqual(body.component, error.component);
+  assert.equal(body.error, error.message);
+});

@@ -755,3 +755,96 @@ test('independent service-only recovery validates real catalog, freezes rates an
     assert.equal(stale.ok,false);if(!stale.ok)assert.equal(stale.error.code,'ROW_STALE');
   });
 });
+
+test('Partner edit saves added operations, refreshes all rates, reopens the successor and preserves prior evidence', async () => {
+  await fixture(async (tx, actorId, access) => {
+    await tx.user.create({ data: { id: actorId, username: actorId, email: `${actorId}@example.invalid`,
+      password: 'not-a-login', firstName: 'Fixture', lastName: 'Technical evidence' } });
+    await tx.partnerProfile.create({ data: { id: actorId, userId: actorId, state: 'ACTIVE',
+      commercialAccount: { create: { id: actorId } } } });
+    await tx.partnerReleaseCohort.create({ data: { id: actorId, name: actorId, activationEnabled: true,
+      enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: {
+      cohortId: actorId, enrollmentPaused: false, operationalPaused: false } });
+    await tx.partnerCohortMembership.create({ data: { id: actorId, profileId: actorId, cohortId: actorId,
+      actorId, eligibilityEvidence: { fixture: true } } });
+    const product = await tx.product.create({ data: { id: actorId, code: actorId, name: actorId, namePersian: 'سنگ تست فنی',
+      cuttingDimensionCode: 'technical', cuttingDimensionName: 'technical', cuttingDimensionNamePersian: 'فنی',
+      stoneTypeCode: 'technical', stoneTypeName: 'technical', stoneTypeNamePersian: 'تراورتن', widthCode: '40',
+      widthValue: '40', widthName: '40', motherLengthValue: '2', thicknessCode: '2', thicknessValue: '2', thicknessName: '2',
+      mineCode: 'technical', mineName: 'technical', mineNamePersian: 'معدن تست', finishCode: 'technical', finishName: 'technical',
+      finishNamePersian: 'سابیده', colorCode: 'technical', colorName: 'technical', colorNamePersian: 'کرم', qualityCode: 'technical',
+      qualityName: 'technical', qualityNamePersian: 'درجه یک', basePrice: '12000000', images: [] } });
+    const terms = { schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_PRICING',
+      calculationPolicy: { calculation: 'calculation-v1', packing: 'packing-v1', pricing: 'pricing-v1', rounding: 'rounding-v2' },
+      mandatoryPercentage: '20', mandatoryEnabled: true, slabCuttingPricingMethod: 'lineBased', sawKerfMeters: '0.005',
+      materialRateScale: '0.1', currency: 'IRT', rates: { longitudinalCutRateToman: '1200', crossCutRateToman: '1400',
+        calibrationCutRateToman: '900', verticalCutRateToman: '1600', squareMeterCutRateToman: '4500' } };
+    const effectiveDate = new Date('2026-08-29T00:00:00.000Z');
+    const integrityHash = await canonicalHash({ accountId: actorId, version: 1, effectiveDate: '2026-08-29', terms,
+      actorId, reason: 'سیاست فنی تست تراکنشی' });
+    await tx.partnerCommercialTerms.create({ data: { id: actorId, accountId: actorId, version: 1, effectiveDate,
+      terms, integrityHash, actorId, reason: 'سیاست فنی تست تراکنشی' } });
+    const dependencies = { actorId, transaction: <T>(run: (database: Prisma.TransactionClient) => Promise<T>) => run(tx),
+      authorize: createPartnerTechnicalRecoveryAuthority({ actorId, correlationId: 'real-technical-evidence' }),
+      resolveEvidence: createPartnerTechnicalEvidenceResolver() };
+
+    const service = createPartnerTechnicalSaveService(dependencies);
+    const tool = await tx.subService.create({ data: { id: `${actorId}-tool`, code: `${actorId}-tool`,
+      namePersian: 'پوساب پالیش پله', pricePerMeter: '150000', calculationBase: 'length' } });
+    const draft = { schemaVersion: 1 as const, inputRevision: 1, rows: [{ productRowId: 'editable-row',
+      catalogItemId: product.id, catalogSnapshotVersion: product.updatedAt.toISOString(), family: 'longitudinal' as const,
+      retailUnitPrice: { amount: '3000000', currency: 'IRT' as const },
+      configuration: { sourceBatchId: 'editable-stock', lengthMeters: '2', widthMeters: '0.3', quantity: 2,
+        lastManualField: 'quantity' as const, lastManualDimension: 'width' as const, lengthDisplayUnit: 'm' as const,
+        widthDisplayUnit: 'cm' as const, sawKerfEnabled: false, calibrationEnabled: false,
+        calibrationSelection: 'manual' as const, mandatoryEnabled: false } }] };
+    const first = await service.save({ ...access, expectedRecoveryRevision: 0, idempotencyKey: 'initial', draft });
+    assert.ok(first.ok, !first.ok ? first.error.code : undefined);
+    const initial = await tx.salesContractEditSession.findUniqueOrThrow({ where: { draftId: actorId } });
+    const predecessor = JSON.stringify((initial.recovery as any).validatedSnapshots[0]);
+    const edited = { ...draft, inputRevision: 2, rows: [{ ...draft.rows[0], operations: {
+      groups: [{ operationGroupId: 'group', scope: '2' }], finishings: [], tools: [{ operationGroupId: 'group',
+        toolSelectionId: 'selected-polish', catalogItemId: tool.id, catalogSnapshotVersion: tool.updatedAt.toISOString(),
+        edges: ['front' as const] }] } }], serviceRows: [{ serviceRowId: 'independent-service', sourceType: 'tool' as const,
+          catalogItemId: tool.id, catalogSnapshotVersion: tool.updatedAt.toISOString(), title: 'خدمت مستقل', unit: 'meter' as const,
+          quantity: '2', retailUnitPrice: { amount: '200000', currency: 'IRT' as const } }] };
+    const checkpoint = await createPartnerTechnicalRecoveryService(dependencies).checkpoint({ ...access,
+      expectedRecoveryRevision: first.value.recoveryRevision, idempotencyKey: 'edited-checkpoint', draft: edited });
+    assert.ok(checkpoint.ok);
+    const saved = await service.save({ ...access, expectedRecoveryRevision: checkpoint.value.recoveryRevision,
+      idempotencyKey: 'edited-save', draft: edited });
+    assert.ok(saved.ok, !saved.ok ? saved.error.message : undefined);
+    assert.equal(saved.value.rows[0].configurationChange, 'UNCHANGED', 'stone quote identity is retained');
+    const reopened = await createPartnerTechnicalRecoveryService(dependencies).read(access);
+    assert.ok(reopened.ok);
+    assert.deepEqual(reopened.value.draft, edited);
+    assert.equal(reopened.value.retainedCatalog?.operations.some(item => item.kind === 'TOOL' && item.catalogItemId === tool.id), true);
+    await tx.subService.update({ where: { id: tool.id }, data: { pricePerMeter: '175000' } });
+    const changed = { ...edited, inputRevision: 3, rows: [{ ...edited.rows[0], description: 'ویرایش دوباره قرارداد' }] };
+    const command = { ...access, expectedRecoveryRevision: saved.value.recoveryRevision, idempotencyKey: 'rate-refresh', draft: changed };
+    const refreshed = await createPartnerTechnicalSaveService(dependencies).save(command);
+    assert.ok(refreshed.ok, !refreshed.ok ? refreshed.error.message : undefined);
+    const stored = await tx.salesContractEditSession.findUniqueOrThrow({ where: { draftId: actorId } });
+    const history = (stored.recovery as any).validatedSnapshots;
+    assert.equal(JSON.stringify(history[0]), predecessor, 'prior snapshots are never rewritten');
+    assert.equal(history.at(-1).payload.context.operations[0].rateToman, '175000');
+    assert.equal(history.at(-1).payload.serviceRows[0].wholesaleUnitPriceAmount, '175000');
+    assert.equal(history.at(-1).payload.graph.rows[0].commercial.baseRateToman, '3000000');
+    assert.equal(history.at(-1).payload.serviceRows[0].retailUnitPrice.amount, '200000');
+    await tx.subService.update({ where: { id: tool.id }, data: { isActive: false } });
+    const replay = await createPartnerTechnicalSaveService(dependencies).save(command);
+    assert.ok(replay.ok);
+    assert.equal(replay.value.recoveryRevision, refreshed.value.recoveryRevision);
+    assert.equal(replay.value.replayed, true);
+    const rejected = await service.save({ ...access, expectedRecoveryRevision: refreshed.value.recoveryRevision,
+      idempotencyKey: 'invalid-component', draft: { ...changed, rows: [{ ...changed.rows[0], description: 'تغییر تازه' }] } });
+    assert.ok(!rejected.ok);
+    assert.equal(rejected.error.component?.kind, 'TOOL');
+    assert.match(rejected.error.message, /پوساب پالیش پله.*غیرفعال/);
+    const retained = await service.readSaved({ ...access, recoveryRevision: refreshed.value.recoveryRevision });
+    assert.ok(retained.ok, 'last valid contract edit is still readable after the failure');
+    const unchanged = await tx.salesContractEditSession.findUniqueOrThrow({ where: { draftId: actorId } });
+    assert.deepEqual(unchanged.recovery, stored.recovery, 'failed save writes no partial snapshot');
+  });
+});

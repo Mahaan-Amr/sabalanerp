@@ -118,7 +118,7 @@ export function registerPartnerTechnicalRoutes(router: TechnicalRouter, dependen
         const result = await action(await dependencies.servicesFor(request), request.body);
         if (result.ok) { response.json({ success: true, data: result.value }); return; }
         response.status(result.error.status).json({ success: false, code: result.error.code,
-          error: result.error.message, supportReference: randomUUID() });
+          error: result.error.message, ...(result.error.component ? { component: result.error.component } : {}), supportReference: randomUUID() });
       } catch (failure) {
         const supportReference = randomUUID();
         const diagnostic = technicalTransportFailure(failure, supportReference);

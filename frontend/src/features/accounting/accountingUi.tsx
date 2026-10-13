@@ -20,7 +20,7 @@ import { ErpBadge, ErpButton, ErpCard, type ErpTone } from '@/components/erp';
 import { formatPrice, toFiniteNumber } from '@/lib/numberFormat';
 import PersianCalendar from '@/lib/persian-calendar';
 import { InlineFieldError } from '@/lib/formErrors';
-import { formatPartnerMoney, readPartnerDecimalInput } from '../partner-sales/presentation';
+import { convertPartnerMoneyAmount, formatPartnerMoney, readPartnerDecimalInput } from '../partner-sales/presentation';
 import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
 
 export type AccountingMetric = {
@@ -363,6 +363,8 @@ export function FinancialInvoiceApprovalForm({
   compact = false,
   onApprove,
 }: FinancialInvoiceApprovalFormProps) {
+  const partnerReplacement = invoice?.metadata?.mode === 'PARTNER_SHARED_CORRECTION_REPLACEMENT';
+  const isPartner = invoice?.sourceKind === 'PARTNER_INTERNAL_RECORD' || partnerReplacement;
   const [systemInvoiceNumber, setSystemInvoiceNumber] = React.useState('');
   const [systemInvoiceDate, setSystemInvoiceDate] = React.useState(PersianCalendar.now());
   const [sepidarAmount, setSepidarAmount] = React.useState(0);
@@ -376,7 +378,8 @@ export function FinancialInvoiceApprovalForm({
     setSystemInvoiceNumber(invoice.systemInvoiceNumber || '');
     setSystemInvoiceDate(invoice.systemInvoiceDate ? PersianCalendar.toPersian(invoice.systemInvoiceDate) : PersianCalendar.now());
     setSepidarAmount(invoice.sepidarAmount != null ? toFiniteNumber(invoice.sepidarAmount) : 0);
-    setPartnerAmount(invoice.sepidarAmount == null ? '' : String(invoice.sepidarAmount));
+    setPartnerAmount(invoice.sepidarAmount == null ? '' :
+      convertPartnerMoneyAmount(String(invoice.sepidarAmount), invoice.currency || 'IRR', 'IRR') ?? '');
     setExternalReference('');
     setDownstreamNote('');
     setErrors({});
@@ -385,10 +388,8 @@ export function FinancialInvoiceApprovalForm({
   if (!invoice) return null;
 
   const expectedAmount = toFiniteNumber(invoice.amount);
-  const partnerReplacement = invoice.metadata?.mode === 'PARTNER_SHARED_CORRECTION_REPLACEMENT';
-  const isPartner = invoice.sourceKind === 'PARTNER_INTERNAL_RECORD' || partnerReplacement;
   const exactAmount = readPartnerDecimalInput(partnerAmount);
-  const exactExpected = readPartnerDecimalInput(String(invoice.amount));
+  const exactExpected = convertPartnerMoneyAmount(String(invoice.amount), invoice.currency || 'IRR', 'IRR');
   const hasMismatch = isPartner ? Boolean(partnerAmount && exactAmount !== exactExpected)
     : sepidarAmount > 0 && Math.round(sepidarAmount) !== Math.round(expectedAmount);
   const locked = isInvoiceLocked(invoice);
@@ -431,7 +432,7 @@ export function FinancialInvoiceApprovalForm({
       invoiceId: invoice.id,
       systemInvoiceNumber: systemInvoiceNumber.trim(),
       systemInvoiceDate: PersianCalendar.toGregorianDateOnly(systemInvoiceDate),
-      sepidarAmount: isPartner ? exactAmount! : sepidarAmount,
+      sepidarAmount: isPartner ? convertPartnerMoneyAmount(exactAmount!, 'IRR', invoice.currency === 'IRT' ? 'IRT' : 'IRR')! : sepidarAmount,
       ...(partnerReplacement ? { externalReference: externalReference.trim(), downstreamNote: downstreamNote.trim() } : {}),
     });
   };
@@ -480,7 +481,7 @@ export function FinancialInvoiceApprovalForm({
           <InlineFieldError message={errors.systemInvoiceDate} className="mt-1 text-xs text-[var(--sds-danger)] dark:text-[var(--sds-danger)]" />
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبلغ سپیدار ({invoice.currency === 'IRT' ? 'تومان' : 'ریال'})</span>
+          <span className="mb-1 block text-xs font-medium text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">مبلغ سپیدار ({!isPartner && invoice.currency === 'IRT' ? 'تومان' : 'ریال'})</span>
           {isPartner ? <ErpInput numberFormat="money" value={partnerAmount} inputMode="decimal" dir="ltr" disabled={busy}
             onChange={event => { clearError('sepidarAmount'); setPartnerAmount(event.target.value); }}
             placeholder="مبلغ سپیدار" className={fieldClass('sepidarAmount')} /> : <FormattedNumberInput

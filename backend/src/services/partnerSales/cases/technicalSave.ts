@@ -102,8 +102,8 @@ export function createPartnerTechnicalSaveService(dependencies: PartnerTechnical
         const previous = snapshots.at(-1) ?? null;
         const evidence = await dependencies.resolveEvidence(tx, { actorId: dependencies.actorId, recoveryId: session.draftId,
           draft: command.draft, previous });
-        if (!evidence.ok) return { ok: false, error: partnerError(evidence.error.code) };
-        const services = await resolvePartnerTechnicalServices(tx, command.draft);
+        if (!evidence.ok) return evidence;
+        const services = await resolvePartnerTechnicalServices(tx, command.draft, previous);
         if (!services.ok) return services;
         const compiled = compileOrReuseTechnicalSavedGraph(command.draft, evidence.value.context, previous);
         if (!compiled.ok) return compiled;

@@ -13,7 +13,7 @@ import { readCasePricingResponse, readCasePricingPresentation } from '../service
 import { readPartnerCaseChangeVersion } from '../services/partnerSales/cases/changeVersion';
 import { z } from 'zod';
 import { createPartnerTechnicalEvidenceResolver } from '../services/partnerSales/cases/technicalEvidence';
-import { compilePartnerTechnicalGraph } from '../services/partnerSales/cases/technicalGraph';
+import { compileOrReuseTechnicalSavedGraph } from '../services/partnerSales/cases/technicalSavedGraph';
 import { partnerCustomerGraphTotal } from '../services/partnerSales/cases/customerGraphTotal';
 import { resolvePartnerTechnicalServices } from '../services/partnerSales/cases/technicalServices';
 import { createHash, randomUUID } from 'node:crypto';
@@ -73,7 +73,7 @@ function respond(response: Response, result: Result<unknown>, supportReference =
   response.setHeader('X-Content-Type-Options', 'nosniff');
   if (result.ok) { response.json({ success: true, data: result.value }); return; }
   response.status(result.error.status).json({ success: false, code: result.error.code,
-    error: result.error.message, supportReference });
+    error: result.error.message, ...(result.error.component ? { component: result.error.component } : {}), supportReference });
 }
 
 export { allocatePartnerLinkedPair } from '../services/partnerSales/cases/linkedPair';
@@ -568,9 +568,9 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const evidence = await createPartnerTechnicalEvidenceResolver()(tx, { actorId: request.user!.id,
           recoveryId: parsed.data.recoveryId, draft: parsed.data.draft, previous: latest ?? null });
         if (!evidence.ok) return evidence;
-        const compiled = compilePartnerTechnicalGraph(parsed.data.draft, evidence.value.context);
+        const compiled = compileOrReuseTechnicalSavedGraph(parsed.data.draft, evidence.value.context, latest ?? null);
         if (!compiled.ok) return compiled;
-        const services = await resolvePartnerTechnicalServices(tx, parsed.data.draft);
+        const services = await resolvePartnerTechnicalServices(tx, parsed.data.draft, latest ?? null);
         if (!services.ok) return services;
         const wizard = partnerContracts.PartnerWizardRecoverySnapshotSchema.safeParse(recovery.wizardDraft);
         if (recovery.wizardDraft !== undefined && (!wizard.success || wizard.data.intent.recoveryId !== parsed.data.recoveryId))

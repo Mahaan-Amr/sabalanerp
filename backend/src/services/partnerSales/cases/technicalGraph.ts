@@ -19,7 +19,8 @@ import { technicalGraphMeasures, type TechnicalGraphMeasure } from './technicalG
  * Never accept this context from a Partner/browser or return it in safe views. */
 export interface PartnerTechnicalGraphContext {
   /** Private frozen owner policy. Persisted only inside the protected recovery
-   * envelope so later saves can preserve the first validated policy. */
+   * envelope. Product/service edits capture current system rates; reads and
+   * saves without changed technical intent retain the recorded policy. */
   technicalPolicy?: {
     policyId: string; version: number; effectiveDate: string; integrityHash: string;
     mandatoryPercentage: string; mandatoryEnabled: boolean;
@@ -43,8 +44,9 @@ export interface PartnerTechnicalGraphContext {
     remainder?: Pick<RemainderChildPolicyInput, 'longitudinalCutRateToman' | 'crossCutRateToman' | 'calibrationCutRateToman'> &
       Pick<LongitudinalProductInput, 'mandatoryPercentage' | 'rememberedMandatoryPercentage'>;
   }[];
-  operations?: readonly { kind: 'TOOL' | 'FINISHING'; catalogItemId: string; catalogSnapshotVersion: string; rateToman: string }[];
-  layers?: readonly ({ catalogItemId: string; catalogSnapshotVersion: string } &
+  operations?: readonly { kind: 'TOOL' | 'FINISHING'; catalogItemId: string; catalogSnapshotVersion: string;
+    rateCatalogSnapshotVersion?: string; rateToman: string }[];
+  layers?: readonly ({ catalogItemId: string; catalogSnapshotVersion: string; rateCatalogSnapshotVersion?: string } &
     Pick<StairLayerConfigurationInput, 'layerRateToman' | 'longitudinalCutRateToman' | 'crossCutRateToman' | 'calibrationCutRateToman'>)[];
 }
 

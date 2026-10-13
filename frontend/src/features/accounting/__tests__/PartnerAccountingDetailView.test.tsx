@@ -5,6 +5,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import { PartnerAccountingDetailView, type PartnerInternalDocument, type PartnerDetailSection } from '../PartnerAccountingDetailView';
 const noop = () => {};
+
+test('Partner financial form uses rial for Sepidar input', () => {
+  const html = render('financial', true);
+  assert.match(html, /مبلغ سپیدار \(ریال\)/);
+  assert.doesNotMatch(html, /مبلغ سپیدار \(تومان\)/);
+});
 const doc: PartnerInternalDocument = {
   id: 'internal-invoice', caseState: 'COMMITTED', status: 'DRAFT', amount: '12000000', currency: 'IRT',
   receivedAmount: '0', remainingAmount: '12000000', systemInvoiceNumber: null,

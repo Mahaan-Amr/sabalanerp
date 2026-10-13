@@ -81,7 +81,10 @@ test('internal Partner PDF uses the Sabalan debtor and amount without leaking re
   assert.match(html, /۲/);
   assert.match(html, /برنامه پرداخت به سبلان هنوز ثبت نشده/);
   assert.match(html, /جمع خرید از سبلان: 120,000,000 ریال \(12,000,000 تومان\)/);
-  assert.match(html, /class="sheet\s*"/);
+  assert.match(html, /class="sheet\s+partner-first-page-header"/);
+  assert.equal((html.match(/class="first-page-header"/g) || []).length, 1);
+  assert.match(html, /<strong>صفحه:<\/strong> <span>۱<\/span>/);
+  assert.doesNotMatch(html, /margin: 50mm/);
   assert.match(html, /<th>نرخ - ریال<\/th>/);
   assert.match(html, /۶۰٬۰۰۰٬۰۰۰ ریال/);
   assert.match(html, /۱۲۰٬۰۰۰٬۰۰۰ ریال/);
@@ -145,5 +148,34 @@ test('Partner delivery retains exact decimal quantities and the contracted unit 
     assert.match(html, /۱۵٫۴ متر مربع/);
     assert.match(html, /۹٫۲۵۷۵ متر مربع/);
     assert.doesNotMatch(html, /۱۵ عدد|۹ عدد/);
+  }
+});
+
+test('Partner delivery compacts only matching names, codes and units within the same delivery', () => {
+  const items = [
+    { productRowId: 'a', productCode: '101', description: 'سنگ مشترک', unit: 'squareMeter', quantity: '0.1' },
+    { productRowId: 'b', productCode: '101', description: 'سنگ مشترک', unit: 'squareMeter', quantity: '0.2' },
+    { productRowId: 'c', productCode: '102', description: 'سنگ مشترک', unit: 'squareMeter', quantity: '2' },
+    { productRowId: 'd', productCode: '101', description: 'سنگ مشترک', unit: 'meter', quantity: '3' },
+    { productRowId: 'e', productCode: '101', description: 'نام متفاوت', unit: 'squareMeter', quantity: '4' },
+  ].map(item => ({ ...item, unitPrice: '1', totalPrice: item.quantity }));
+  const document = { amount: '9.3', currency: 'IRT', createdAt: new Date('2026-10-13'),
+    partnerContext: { customerContractNumber: '100708', internalRecordNumber: 'PI-100708', debtor: { displayName: 'همکار' }, endCustomer: { displayName: 'مشتری' } }, items,
+    deliveries: [{ date: '2026-10-14', receiverName: 'گیرنده اول', items: items.map(item => ({ productRowId: item.productRowId, quantity: item.quantity })) },
+      { date: '2026-10-15', receiverName: 'گیرنده دوم', items: [{ productRowId: 'a', quantity: '0.1' }] }],
+  } as unknown as Parameters<typeof renderPartnerInternalDocumentHtml>[0];
+  for (const variant of ['original', 'accounting', 'custom', 'workshop'] as const) {
+    const html = renderPartnerInternalDocumentHtml(document, { variant });
+    const delivery = html.match(/<table class="delivery-table">([\s\S]*?)<\/table>/)![1];
+    assert.equal((delivery.match(/class="delivery-row"/g) || []).length, 5);
+    assert.match(delivery, /۰٫۳ متر مربع/);
+    assert.match(delivery, /۰٫۱ متر مربع/);
+    assert.match(delivery, /۳ متر طول/);
+    assert.match(delivery, /کد محصول: ۱۰۲/);
+    assert.match(delivery, /نام متفاوت/);
+    if (variant !== 'workshop') {
+      assert.match(delivery, /گیرنده اول/);
+      assert.match(delivery, /گیرنده دوم/);
+    }
   }
 });

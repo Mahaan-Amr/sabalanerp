@@ -5,6 +5,7 @@ import { canonicalHash, InquiryIdentitySchema, partnerError, type InquiryIdentit
 import { catalogMaterialRateToman, projectPartnerTechnicalOperation, projectPartnerTechnicalProduct } from '../crm/technicalCatalog';
 import type { PartnerTechnicalSaveDependencies } from './technicalSave';
 import type { PartnerTechnicalGraphContext } from './technicalGraph';
+import { samePartnerTechnicalIntent, technicalComponentFailure } from './technicalRateRefresh';
 
 type SlabCuttingPricingMethod = 'lineBased' | 'squareMeter';
 
@@ -207,9 +208,9 @@ async function readTechnicalPolicyForAccount(tx: Prisma.TransactionClient, accou
     : { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
 }
 
-/** Approval identity ignores requested quantity and display-only editing
- * preferences. Geometry, sources, technical operations and pricing-affecting
- * overrides remain part of the identity. */
+/** Main-stone approval identity is independent from quantity, geometry,
+ * operations and Customer rates. Their current calculation/evidence is owned
+ * by the technical graph, not by the responder's material unit rate. */
 export async function technicalConfigurationHash(row: PartnerTechnicalDraft['rows'][number]): Promise<string> {
   return canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE', pricingBasis: 'ordinary-sale-v1',
     catalogItemId: row.catalogItemId, family: row.family, unit: identityUnit(row) });
@@ -245,6 +246,10 @@ function operationsFromDraft(draft: PartnerTechnicalDraft) {
   };
 }
 
+function uniqueCatalogReferences<T extends { catalogItemId: string; catalogSnapshotVersion: string }>(values: readonly T[]): T[] {
+  return [...new Map(values.map(value => [`${value.catalogItemId}\0${value.catalogSnapshotVersion}`, value])).values()];
+}
+
 function productReferences(draft: PartnerTechnicalDraft): Array<{ catalogItemId: string; catalogSnapshotVersion: string }> {
   const values = [...draft.rows, ...(draft.dependents ?? []).flatMap(dependent => {
     if (dependent.kind === 'remainder') return [{ catalogItemId: dependent.catalogItemId,
@@ -253,8 +258,7 @@ function productReferences(draft: PartnerTechnicalDraft): Array<{ catalogItemId:
       ? [{ catalogItemId: dependent.source.catalogItemId, catalogSnapshotVersion: dependent.source.catalogSnapshotVersion }]
       : [];
   })];
-  const unique = new Map(values.map(value => [`${value.catalogItemId}\0${value.catalogSnapshotVersion}`, value]));
-  return [...unique.values()];
+  return uniqueCatalogReferences(values);
 }
 
 function identityUnit(row: PartnerTechnicalDraft['rows'][number] | Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'remainder' }>)
@@ -284,39 +288,31 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
     }, { id: priorPolicy.policyId, version: priorPolicy.version,
       effectiveDate: priorPolicy.effectiveDate, integrityHash: priorPolicy.integrityHash });
     const identityRows = [
-      ...input.draft.rows.map(row => ({ productRowId: row.productRowId, catalogItemId: row.catalogItemId,
+      ...input.draft.rows.map(row => ({ productRowId: row.productRowId, catalogItemId: row.catalogItemId, catalogSnapshotVersion: row.catalogSnapshotVersion,
         family: row.family, unit: identityUnit(row), hash: technicalDraftRowConfigurationHash(row, input.draft) })),
       ...(input.draft.dependents ?? []).filter((item): item is Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'remainder' }> => item.kind === 'remainder')
-        .map(row => ({ productRowId: row.productRowId, catalogItemId: row.catalogItemId,
+        .map(row => ({ productRowId: row.productRowId, catalogItemId: row.catalogItemId, catalogSnapshotVersion: row.catalogSnapshotVersion,
           family: 'longitudinal' as const, unit: identityUnit(row), hash: dependentConfigurationHash(row) })),
       ...(input.draft.dependents ?? []).filter((item): item is Extract<NonNullable<PartnerTechnicalDraft['dependents']>[number], { kind: 'layer' }> => {
         if (item.kind !== 'layer' || item.source?.kind !== 'new-material') return false;
         const parent = input.draft.rows.find(row => row.productRowId === item.parentProductRowId);
         return Boolean(parent && parent.catalogItemId !== item.source.catalogItemId);
       }).map(row => ({ productRowId: `layer-material:${row.layerConfigurationId}`,
-        catalogItemId: row.source?.kind === 'new-material' ? row.source.catalogItemId : '', family: 'stair' as const,
+        catalogItemId: row.source?.kind === 'new-material' ? row.source.catalogItemId : '',
+        catalogSnapshotVersion: row.source?.kind === 'new-material' ? row.source.catalogSnapshotVersion : '', family: 'stair' as const,
         unit: 'squareMeter' as const, hash: canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE', pricingBasis: 'ordinary-sale-v1',
           catalogItemId: row.source?.kind === 'new-material' ? row.source.catalogItemId : '', family: 'stair', unit: 'squareMeter' }) })),
     ];
-    if (parsedPriorPolicy && previousContext && input.previous?.identities.length === identityRows.length) {
-      const unchanged = await Promise.all(identityRows.map(async row => {
-        const prior = input.previous!.identities.find(item => item.productRowId === row.productRowId);
-        const configurationHash = await row.hash;
-        return prior?.identity.catalogProductId === row.catalogItemId && prior.identity.family === row.family &&
-          prior.identity.unit === row.unit && prior.identity.configuration.some(item =>
-            item.key === 'pricingSubjectHash' && item.value === configurationHash);
-      }));
-      // A protected, integrity-checked prior snapshot is the owner evidence for
-      // an unchanged technical identity. Do not turn a later catalog edit into
-      // an approval mismatch when only quantity/display intent changed.
-      if (unchanged.every(Boolean)) return { ok: true, value: {
-        context: previousContext as PartnerTechnicalGraphContext,
-        identities: input.previous!.identities,
-      } };
+    // Main-stone inquiry identity intentionally excludes operations. It cannot
+    // authorize reusing the complete technical context after a product edit.
+    if (parsedPriorPolicy && previousContext && input.previous?.draft &&
+        samePartnerTechnicalIntent(input.draft, input.previous.draft)) {
+      return { ok: true, value: { context: previousContext as PartnerTechnicalGraphContext,
+        identities: input.previous.identities } };
     }
     const policy = await readPartnerTechnicalSalesPolicy(tx, input.actorId);
     if (!policy.ok) return policy;
-    const frozenPolicy = parsedPriorPolicy ?? policy.value;
+    const currentPolicy = policy.value;
     const references = productReferences(input.draft);
     const products = await tx.product.findMany({ where: { id: { in: references.map(item => item.catalogItemId) } },
       select: { id: true, code: true, namePersian: true, updatedAt: true, widthValue: true, motherLengthValue: true,
@@ -325,11 +321,23 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
         deletedAt: true, isAvailable: true, availableInLongitudinalContracts: true, availableInStairContracts: true,
         availableInSlabContracts: true, availableInVolumetricContracts: true,
         preparedSalesUnit: true, volumetricSalesUnit: true, basePrice: true, currency: true } });
-    if (products.length !== references.length) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    for (const reference of references) {
+      if (!products.some(source => source.id === reference.catalogItemId)) {
+        const row = input.draft.rows.find(row => row.catalogItemId === reference.catalogItemId);
+        return technicalComponentFailure('PRODUCT', row?.contractualTitle ?? 'سنگ انتخاب‌شده', 'MISSING');
+      }
+    }
+    if (new Set(products.map(item => item.id)).size !== products.length ||
+        products.length !== new Set(references.map(item => item.catalogItemId)).size) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
     const publicProducts: PartnerTechnicalProduct[] = [];
-    for (const source of products) {
-      const reference = references.find(item => item.catalogItemId === source.id);
-      if (!reference || source.updatedAt.toISOString() !== reference.catalogSnapshotVersion) {
+    for (const reference of references) {
+      const source = products.find(item => item.id === reference.catalogItemId)!;
+      const matches = previousContext?.catalog?.products.filter(item => item.catalogItemId === source.id &&
+        item.catalogSnapshotVersion === reference.catalogSnapshotVersion) ?? [];
+      if (matches.length > 1) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+      const retained = matches[0];
+      if (!source.isActive || source.deletedAt) return technicalComponentFailure('PRODUCT', source.namePersian, 'INACTIVE');
+      if (!reference || (source.updatedAt.toISOString() !== reference.catalogSnapshotVersion && !retained)) {
         return { ok: false, error: partnerError('ROW_STALE') };
       }
       // Ordinary Sale accepts the seller's row price even when the imported
@@ -343,7 +351,7 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
       }
       const projected = projectPartnerTechnicalProduct(source);
       if (!projected.ok) return projected;
-      publicProducts.push(projected.value);
+      publicProducts.push(retained ?? projected.value);
     }
     const selections = operationsFromDraft(input.draft);
     const toolIds = [...new Set(selections.tools.map(item => item.catalogItemId))];
@@ -357,51 +365,92 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
       tx.layerType.findMany({ where: { id: { in: layerIds } }, select: { id: true, updatedAt: true, isActive: true,
         name: true, calculationUnit: true, pricePerLayer: true } }),
     ]);
-    if (tools.length !== toolIds.length || finishings.length !== finishingIds.length || layers.length !== layerIds.length) {
-      return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+    for (const [kind, selected, sources] of [
+      ['TOOL', selections.tools, tools], ['FINISHING', selections.finishings, finishings], ['LAYER', selections.layers, layers],
+    ] as const) {
+      for (const item of selected) if (!sources.some(source => source.id === item.catalogItemId)) {
+        const retained = previousContext?.catalog?.operations.find(source => source.kind === kind &&
+          source.catalogItemId === item.catalogItemId && source.catalogSnapshotVersion === item.catalogSnapshotVersion);
+        return technicalComponentFailure(kind, retained?.name ?? 'عملیات انتخاب‌شده', 'MISSING');
+      }
+      if (new Set(sources.map(item => item.id)).size !== sources.length ||
+          sources.length !== new Set(selected.map(item => item.catalogItemId)).size) {
+        return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+      }
     }
+    const publicOperation = (source: PartnerTechnicalOperation, selectedVersion: string): Result<PartnerTechnicalOperation> => {
+      const matches = previousContext?.catalog?.operations.filter(item => item.kind === source.kind &&
+        item.catalogItemId === source.catalogItemId && item.catalogSnapshotVersion === selectedVersion) ?? [];
+      if (matches.length > 1) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
+      const retained = matches[0];
+      if (source.catalogSnapshotVersion !== selectedVersion && !retained) return { ok: false, error: partnerError('ROW_STALE') };
+      if (retained && retained.unit !== source.unit) return technicalComponentFailure(source.kind, retained.name, 'UNIT');
+      return { ok: true, value: retained ?? source };
+    };
     const publicOperations: PartnerTechnicalOperation[] = [];
     const operationEvidence: Array<{ kind: 'TOOL' | 'FINISHING'; catalogItemId: string;
-      catalogSnapshotVersion: string; rateToman: string }> = [];
-    for (const source of tools) {
-      const selected = selections.tools.find(item => item.catalogItemId === source.id);
-      if (!selected || source.updatedAt.toISOString() !== selected.catalogSnapshotVersion) return { ok: false, error: partnerError('ROW_STALE') };
+      catalogSnapshotVersion: string; rateCatalogSnapshotVersion: string; rateToman: string }> = [];
+    for (const selected of uniqueCatalogReferences(selections.tools)) {
+      const source = tools.find(item => item.id === selected.catalogItemId)!;
+      if (!source.isActive) return technicalComponentFailure('TOOL', source.namePersian, 'INACTIVE');
+      if (!source.pricePerMeter || source.pricePerMeter.isNegative()) return technicalComponentFailure('TOOL', source.namePersian, 'RATE');
+      if (!['length', 'squareMeters'].includes(source.calculationBase)) return technicalComponentFailure('TOOL', source.namePersian, 'UNIT');
       const projected = projectPartnerTechnicalOperation({ ...source, kind: 'TOOL' });
       if (!projected.ok) return projected;
-      publicOperations.push(projected.value);
-      operationEvidence.push({ kind: 'TOOL', catalogItemId: source.id, catalogSnapshotVersion: source.updatedAt.toISOString(), rateToman: source.pricePerMeter.toString() });
+      const selectedOperation = publicOperation(projected.value, selected.catalogSnapshotVersion);
+      if (!selectedOperation.ok) return selectedOperation;
+      publicOperations.push(selectedOperation.value);
+      operationEvidence.push({ kind: 'TOOL', catalogItemId: source.id, catalogSnapshotVersion: selected.catalogSnapshotVersion,
+        rateCatalogSnapshotVersion: source.updatedAt.toISOString(), rateToman: source.pricePerMeter.toString() });
     }
-    for (const source of finishings) {
-      const selected = selections.finishings.find(item => item.catalogItemId === source.id);
-      if (!selected || source.updatedAt.toISOString() !== selected.catalogSnapshotVersion) return { ok: false, error: partnerError('ROW_STALE') };
+    for (const selected of uniqueCatalogReferences(selections.finishings)) {
+      const source = finishings.find(item => item.id === selected.catalogItemId)!;
+      if (!source.isActive) return technicalComponentFailure('FINISHING', source.namePersian, 'INACTIVE');
+      const rate = source.unitPrice?.isZero() ? source.pricePerSquareMeter : source.unitPrice;
+      if (!rate || rate.isNegative()) return technicalComponentFailure('FINISHING', source.namePersian, 'RATE');
+      if (!['length', 'squareMeters'].includes(source.calculationBase)) return technicalComponentFailure('FINISHING', source.namePersian, 'UNIT');
       const projected = projectPartnerTechnicalOperation({ ...source, kind: 'FINISHING', incompatibleCatalogItemIds: [] });
       if (!projected.ok) return projected;
-      publicOperations.push(projected.value);
-      operationEvidence.push({ kind: 'FINISHING', catalogItemId: source.id, catalogSnapshotVersion: source.updatedAt.toISOString(),
-        rateToman: (source.unitPrice.isZero() ? source.pricePerSquareMeter : source.unitPrice).toString() });
+      const selectedOperation = publicOperation(projected.value, selected.catalogSnapshotVersion);
+      if (!selectedOperation.ok) return selectedOperation;
+      publicOperations.push(selectedOperation.value);
+      operationEvidence.push({ kind: 'FINISHING', catalogItemId: source.id, catalogSnapshotVersion: selected.catalogSnapshotVersion,
+        rateCatalogSnapshotVersion: source.updatedAt.toISOString(), rateToman: rate.toString() });
     }
-    const layerEvidence: Array<{ catalogItemId: string; catalogSnapshotVersion: string; layerRateToman: string;
+    const layerEvidence: Array<{ catalogItemId: string; catalogSnapshotVersion: string; rateCatalogSnapshotVersion: string; layerRateToman: string;
       longitudinalCutRateToman: string; crossCutRateToman: string; calibrationCutRateToman: string }> = [];
-    for (const source of layers) {
-      const selected = selections.layers.find(item => item.catalogItemId === source.id);
-      if (!selected || source.updatedAt.toISOString() !== selected.catalogSnapshotVersion) return { ok: false, error: partnerError('ROW_STALE') };
+    for (const selected of uniqueCatalogReferences(selections.layers)) {
+      const source = layers.find(item => item.id === selected.catalogItemId)!;
+      if (!source.isActive) return technicalComponentFailure('LAYER', source.name, 'INACTIVE');
+      if (!source.pricePerLayer || source.pricePerLayer.lte(0)) return technicalComponentFailure('LAYER', source.name, 'RATE');
+      if (!['set', 'physicalPiece', 'meter', 'squareMeter'].includes(source.calculationUnit)) return technicalComponentFailure('LAYER', source.name, 'UNIT');
       const projected = projectPartnerTechnicalOperation({ ...source, kind: 'LAYER' });
       if (!projected.ok) return projected;
-      publicOperations.push(projected.value);
-      layerEvidence.push({ catalogItemId: source.id, catalogSnapshotVersion: source.updatedAt.toISOString(),
+      const selectedOperation = publicOperation(projected.value, selected.catalogSnapshotVersion);
+      if (!selectedOperation.ok) return selectedOperation;
+      publicOperations.push(selectedOperation.value);
+      layerEvidence.push({ catalogItemId: source.id, catalogSnapshotVersion: selected.catalogSnapshotVersion,
+        rateCatalogSnapshotVersion: source.updatedAt.toISOString(),
         layerRateToman: source.pricePerLayer.toString(), longitudinalCutRateToman: policy.value.rates.longitudinalCutRateToman,
         crossCutRateToman: policy.value.rates.crossCutRateToman, calibrationCutRateToman: policy.value.rates.calibrationCutRateToman });
     }
-    const context = createContext(frozenPolicy, publicProducts, publicOperations, products, operationEvidence, layerEvidence, input.draft);
-    if (previousContext?.products && Array.isArray(previousContext.products)) context.products = context.products.map(current =>
-      previousContext.products!.find(previous => previous.catalogItemId === current.catalogItemId &&
-        previous.catalogSnapshotVersion === current.catalogSnapshotVersion) ?? current);
-    if (previousContext?.operations && Array.isArray(previousContext.operations)) context.operations = (context.operations ?? []).map(current =>
-      previousContext.operations!.find(previous => previous.kind === current.kind && previous.catalogItemId === current.catalogItemId &&
-        previous.catalogSnapshotVersion === current.catalogSnapshotVersion) ?? current);
-    if (previousContext?.layers && Array.isArray(previousContext.layers)) context.layers = (context.layers ?? []).map(current =>
-      previousContext.layers!.find(previous => previous.catalogItemId === current.catalogItemId &&
-        previous.catalogSnapshotVersion === current.catalogSnapshotVersion) ?? current);
+    // The catalog snapshot still describes the selected physical product. New
+    // system rates carry their own current source version in the private context.
+    const selectedProducts = references.map(reference => ({
+      ...products.find(source => source.id === reference.catalogItemId)!, updatedAt: new Date(reference.catalogSnapshotVersion) }));
+    const context = createContext(currentPolicy, publicProducts, publicOperations, selectedProducts, operationEvidence, layerEvidence, input.draft);
+    context.products = context.products.map(current => {
+      const old = previousContext?.products?.find(item => item.catalogItemId === current.catalogItemId &&
+        item.catalogSnapshotVersion === current.catalogSnapshotVersion);
+      if (!old) return current;
+      // Material agreements are independent from system ancillary rates.
+      return { ...current, layerMaterialRateToman: old.layerMaterialRateToman,
+        preparedRates: current.preparedRates?.map(rate => ({ ...rate, rateToman: old.preparedRates?.find(item =>
+          item.kind === rate.kind && item.unit === rate.unit)?.rateToman ?? rate.rateToman })),
+        longitudinal: current.longitudinal && { ...current.longitudinal, baseRateToman: old.longitudinal?.baseRateToman ?? current.longitudinal.baseRateToman },
+        stair: current.stair && { ...current.stair, baseRateToman: old.stair?.baseRateToman ?? current.stair.baseRateToman },
+        slab: current.slab && { ...current.slab, baseMaterialRateToman: old.slab?.baseMaterialRateToman ?? current.slab.baseMaterialRateToman } };
+    });
     const identities: Array<{ productRowId: string; identity: InquiryIdentity }> = [];
     for (const row of identityRows) {
       const prior = input.previous?.identities.find(item => item.productRowId === row.productRowId);
@@ -412,15 +461,15 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
       }
       const product = products.find(item => item.id === row.catalogItemId)!;
       const privateProductEvidence = context.products.find(item => item.catalogItemId === row.catalogItemId &&
-        item.catalogSnapshotVersion === product.updatedAt.toISOString());
+        item.catalogSnapshotVersion === row.catalogSnapshotVersion);
       if (!privateProductEvidence) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
       const materialRateHash = await canonicalHash({ schemaVersion: 2, pricingSubject: 'MAIN_CATALOG_STONE',
-        productId: product.id, family: row.family, unit: row.unit, currency: frozenPolicy.currency });
+        productId: product.id, family: row.family, unit: row.unit, currency: currentPolicy.currency });
       const identity = InquiryIdentitySchema.safeParse({ schemaVersion: 1, partnerSellerId: input.actorId,
         catalogProductId: row.catalogItemId, family: row.family, unit: row.unit,
         configuration: [{ key: 'pricingSubjectHash', value: configurationHash }],
         materialRateEvidenceId: `catalog-product:${product.id}`, materialRateHash,
-        components: [], currency: frozenPolicy.currency,
+        components: [], currency: currentPolicy.currency,
         calculationPolicyVersion: 'partner-main-stone-rate-v2',
         roundingPolicyVersion: 'partner-main-stone-rate-v2' });
       if (!identity.success) return { ok: false, error: partnerError('INTEGRITY_CONFLICT') };
@@ -432,8 +481,8 @@ export function createPartnerTechnicalEvidenceResolver(): PartnerTechnicalSaveDe
 
 function createContext(policy: PartnerTechnicalSalesPolicy, publicProducts: PartnerTechnicalProduct[],
   publicOperations: PartnerTechnicalOperation[], products: Array<{ id: string; updatedAt: Date; basePrice: Prisma.Decimal | null; currency: string }>,
-  operations: Array<{ kind: 'TOOL' | 'FINISHING'; catalogItemId: string; catalogSnapshotVersion: string; rateToman: string }>,
-  layers: Array<{ catalogItemId: string; catalogSnapshotVersion: string; layerRateToman: string;
+  operations: Array<{ kind: 'TOOL' | 'FINISHING'; catalogItemId: string; catalogSnapshotVersion: string; rateCatalogSnapshotVersion: string; rateToman: string }>,
+  layers: Array<{ catalogItemId: string; catalogSnapshotVersion: string; rateCatalogSnapshotVersion: string; layerRateToman: string;
     longitudinalCutRateToman: string; crossCutRateToman: string; calibrationCutRateToman: string }>, draft: PartnerTechnicalDraft): PartnerTechnicalGraphContext {
   const amount = (value: string) => parseCanonicalDecimal(value);
   // The canonical product graph retains the last positive mandatory percentage

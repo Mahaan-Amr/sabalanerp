@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { requireCompanyPlate, requireManufactureYear } from '../companyVehicleEntry';
+import { normalizeIranianPlate } from '../dispatchMasterDataPolicy';
+assert.equal(requireCompanyPlate('۱۲ ب ۳۴۵ ایران ۱۱'), '12 ب 345 ایران 11');
+assert.equal(requireCompanyPlate('12الف34511'), '12 الف 345 ایران 11');
+assert.equal(normalizeIranianPlate(requireCompanyPlate('۱۲ ب ۳۴۵ ایران ۱۱')), normalizeIranianPlate('12 ب 345 ایران 11'));
+assert.equal(requireManufactureYear('۱۳۰۰'), 1300);
+for (const year of [null, '', 1299, 9999, 1400.5]) assert.throws(() => requireManufactureYear(year));
+for (const plate of ['', '12 ر 345 11', '12 ب 34 11', '12 ب 345 111', '12 ب 345 11 extra']) assert.throws(() => requireCompanyPlate(plate));
+console.log('Company vehicle entry validation passed');

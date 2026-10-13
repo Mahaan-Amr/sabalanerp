@@ -8,6 +8,8 @@ import { assertLifecycleTransition, assertValidEffectivePeriod, canPermanentlyDe
 import { authorizeHrUser } from '../services/hrAuthorizationService';
 import { activeAt, actor, fail, internalInclude, optionalDate, optionalText, parsedDate, prisma, projectDriver, requiredText } from './dispatch-master-data.shared';
 
+import { requireCompanyPlate, requireManufactureYear } from '../services/companyVehicleEntry';
+
 const router = express.Router();
 const view = requireHrFeature(FEATURES.HR_VEHICLE_OPERATIONS_VIEW, 'VIEW');
 const manageProfiles = requireHrFeature(FEATURES.HR_DRIVER_PROFILES_MANAGE, 'EDIT');
@@ -84,11 +86,13 @@ router.get('/company-vehicles', view, async (req: AuthRequest, res) => {
 router.post('/company-vehicles', manageVehicles, async (req: AuthRequest, res) => {
   try {
     const reason = requiredText(req.body.reason, 'reason');
+    const manufactureYear = requireManufactureYear(req.body.manufactureYear);
+    const initialPlate = requireCompanyPlate(req.body.plate);
     const vehicle = await prisma.$transaction(async (tx) => {
-      const created = await tx.companyVehicle.create({ data: { fleetCode: requiredText(req.body.fleetCode, 'fleetCode'), vehicleType: requiredText(req.body.vehicleType, 'vehicleType'), make: optionalText(req.body.make), model: optionalText(req.body.model), vin: optionalText(req.body.vin), notes: optionalText(req.body.notes), statusReason: reason, statusRecordedBy: actor(req), createdBy: actor(req) } });
+      const created = await tx.companyVehicle.create({ data: { fleetCode: requiredText(req.body.fleetCode, 'fleetCode'), vehicleType: requiredText(req.body.vehicleType, 'vehicleType'), make: optionalText(req.body.make), model: optionalText(req.body.model), manufactureYear, vin: optionalText(req.body.vin), notes: optionalText(req.body.notes), statusReason: reason, statusRecordedBy: actor(req), createdBy: actor(req) } });
       if (req.body.plate) {
         const effectiveFrom = parsedDate(req.body.effectiveFrom, 'effectiveFrom');
-        const plate = requiredText(req.body.plate, 'plate');
+        const plate = initialPlate;
         await tx.companyVehiclePlate.create({ data: { vehicleId: created.id, plate, normalizedPlate: normalizeIranianPlate(plate), effectiveFrom, reason, recordedBy: actor(req) } });
       }
       await appendDispatchMasterDataAudit(tx, { ownerScope: 'VEHICLE_OPERATIONS', subjectType: 'COMPANY_VEHICLE', subjectId: created.id, eventType: 'COMPANY_VEHICLE_DRAFT_CREATED', payload: { fleetCode: created.fleetCode, reason }, actorId: actor(req) });
@@ -100,7 +104,7 @@ router.post('/company-vehicles', manageVehicles, async (req: AuthRequest, res) =
 
 router.post('/company-vehicles/:id/plates', managePlates, async (req: AuthRequest, res) => {
   try {
-    const effectiveFrom = parsedDate(req.body.effectiveFrom, 'effectiveFrom'); const plate = requiredText(req.body.plate, 'plate'); const reason = requiredText(req.body.reason, 'reason');
+    const effectiveFrom = parsedDate(req.body.effectiveFrom, 'effectiveFrom'); const plate = requireCompanyPlate(req.body.plate); const reason = requiredText(req.body.reason, 'reason');
     const result = await prisma.$transaction(async (tx) => {
       const vehicle = await tx.companyVehicle.findUnique({ where: { id: req.params.id } });
       if (!vehicle || vehicle.status === 'ARCHIVED') throw new Error('An unarchived company vehicle is required.');

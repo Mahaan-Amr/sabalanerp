@@ -128,6 +128,7 @@ export default function AccountingContractsPage() {
         search: query.search || undefined,
         status: query.status,
         sourceStatus: query.sourceStatus,
+        sourceKind: query.sourceKind,
         dateFrom: query.dateFrom || undefined,
         dateTo: query.dateTo || undefined,
         page: query.page,
@@ -146,7 +147,7 @@ export default function AccountingContractsPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.pageSize, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceStatus, query.status, query.view]);
+  }, [pagination.pageSize, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceKind, query.sourceStatus, query.status, query.view]);
 
   useEffect(() => {
     loadContracts();
@@ -530,6 +531,18 @@ export default function AccountingContractsPage() {
       description="قراردادهای همکار از یادداشت نمایش داده می‌شوند؛ اقدامات مالی آن‌ها پس از قطعی‌شدن فعال است."
       actions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: loadContracts, tone: 'neutral' }]}
       filters={[
+        {
+          id: 'sourceKind',
+          label: 'نوع قرارداد',
+          type: 'select',
+          value: query.sourceKind,
+          onChange: (value) => updateQuery({ sourceKind: value as ContractsQueryState['sourceKind'] }),
+          options: [
+            { label: 'همه', value: 'ALL' },
+            { label: 'داخلی', value: 'SALES_CONTRACT' },
+            { label: 'همکار', value: 'PARTNER_INTERNAL_RECORD' },
+          ],
+        },
         {
           id: 'lifecycleView',
           label: 'نمای قراردادها',

@@ -40,6 +40,33 @@ const output = CustomerContractOutputSchema.parse({
 });
 
 const html = renderCustomerContractPrint(output).htmlContent;
+assert.equal((html.match(/class="first-page-header"/g) || []).length, 1);
+assert.match(html, /<strong>صفحه:<\/strong> <span>۱<\/span>/);
+assert.doesNotMatch(html, /margin: 50mm/);
+assert.equal(renderCustomerContractPrint(output).headerTemplate, '<span></span>');
+
+const compactOutput = { ...output, products: [
+  { ...output.products[0], productRowId: 'a' },
+  { ...output.products[0], productRowId: 'b' },
+  { ...output.products[0], productRowId: 'c', productCode: 'DIFFERENT' },
+  { ...output.products[0], productRowId: 'd', unit: 'meter' },
+  { ...output.products[0], productRowId: 'e', description: 'نام متفاوت' },
+], deliveries: [
+  { ...output.deliveries[0], items: [
+    { productRowId: 'a', quantity: '0.1' }, { productRowId: 'b', quantity: '0.2' },
+    { productRowId: 'c', quantity: '2' }, { productRowId: 'd', quantity: '3' },
+    { productRowId: 'e', quantity: '4' },
+  ] },
+  { ...output.deliveries[0], deliveryId: 'later', date: '2026-10-16', items: [{ productRowId: 'a', quantity: '0.1' }] },
+] };
+const compactHtml = renderCustomerContractPrint(compactOutput).htmlContent;
+const deliveryTable = compactHtml.match(/<table class="delivery-table">([\s\S]*?)<\/table>/)![1];
+assert.equal((deliveryTable.match(/class="delivery-row"/g) || []).length, 5);
+assert.match(deliveryTable, /۰\.۳ متر مربع/);
+assert.match(deliveryTable, /۰\.۱ متر مربع/);
+assert.match(deliveryTable, /۳ متر طول/);
+assert.match(deliveryTable, /کد محصول: DIFFERENT/);
+assert.match(deliveryTable, /نام متفاوت/);
 
 assert.match(html, /۱۰۰۳۲۸/);
 assert.match(html, /۱۰۲۰۹۱۱۰۱۰۱۰۰/);

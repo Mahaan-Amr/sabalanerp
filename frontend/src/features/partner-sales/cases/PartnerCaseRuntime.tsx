@@ -192,7 +192,7 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
   }, [beginCaseAction, clearCaseError, isLatestCaseAction, load, reportCaseError]);
 
   useEffect(() => { changeVersionRef.current = undefined; void load(); return () => { loadSequenceRef.current++; }; }, [load]);
-  if (busy) return <ErpLoading />;
+  if (busy) return <>{smsSuccess.feedback}<ErpLoading /></>;
   if (!selectedCaseId) {
     const listing = partnerUnifiedCaseListPage(rows, issues, recoverableDrafts, search, tag, page);
     const columns: ErpColumn<PartnerUnifiedListRow>[] = [

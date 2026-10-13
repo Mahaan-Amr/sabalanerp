@@ -12,8 +12,10 @@ for (const surface of ['detail', 'list'] as const) for (const width of [1280, 39
       actions: { canContinue: false, canPreview: false, canIssue: false, canFinalize: false,
         canSendConfirmation: true, canRequestCorrection: false, canCancel: false, canRequestVoid: false } };
     let attempts = 0;
+    let refreshHeld = false;
+    let releaseRefresh: (() => void) | undefined;
     // Intercept every Partner command: these browser assertions never submit customer SMS.
-    await page.route('**/api/partner/**', route => {
+    await page.route('**/api/partner/**', async route => {
       const path = new URL(route.request().url()).pathname;
       if (path.endsWith('/confirmation') && route.request().method() === 'POST') {
         attempts++;
@@ -21,7 +23,13 @@ for (const surface of ['detail', 'list'] as const) for (const width of [1280, 39
           ? { success: false, error: 'ارسال پیامک تأیید انجام نشد.' }
           : { success: true, data: { messageId: 'qa-provider-accepted' } } });
       }
-      if (path.endsWith('/query-v2')) return route.fulfill({ json: { success: true, data: { cases: [row] } } });
+      if (path.endsWith('/query-v2')) {
+        if (surface === 'list' && attempts === 2 && !refreshHeld) {
+          refreshHeld = true;
+          await new Promise<void>(resolve => { releaseRefresh = resolve; });
+        }
+        return route.fulfill({ json: { success: true, data: { cases: [row] } } });
+      }
       if (path.endsWith('/creation-context')) return route.fulfill({ json: { success: true, data: {
         schemaVersion: 1, kind: 'PARTNER', actorId: 'qa-partner-actor', profileId: 'qa-partner-profile',
         writable: true, inquiryIds: [], customers: [], projects: [], recoverableDrafts: [],
@@ -45,12 +53,15 @@ for (const surface of ['detail', 'list'] as const) for (const width of [1280, 39
     await send.click();
     await expect.poll(() => attempts).toBe(2);
     await expect(success).toBeVisible();
+    if (surface === 'list') await expect.poll(() => refreshHeld).toBe(true);
     const appearedAt = Date.now();
     await page.waitForTimeout(3_000);
     await expect(success).toBeVisible();
     await expect(success).toHaveCount(0, { timeout: 2_000 });
     expect(Date.now() - appearedAt).toBeGreaterThanOrEqual(3_800);
     expect(Date.now() - appearedAt).toBeLessThan(5_000);
+    releaseRefresh?.();
+    await expect(send).toBeEnabled();
     for (const theme of ['light', 'dark'] as const) {
       await setTheme(page, theme);
       await send.click();

@@ -394,13 +394,14 @@ router.post('/:id/restore', async (req: AuthRequest, res) => {
         });
         setTimeout(() => process.exit(0), 500).unref();
       } catch (error: any) {
-        setRecoveryRuntimeState('NORMAL');
-        releaseRecoveryOperation();
-        await prisma.recoveryOperation.update({
-          where: { id: operation.id },
-          data: { status: 'FAILED', errorCode: error?.code || 'RESTORE_FAILED', errorMessage: error?.message || 'Restore failed.' },
-        }).catch(() => undefined);
-        await audit(operation.id, req.user!.id, 'RECOVERY_RESTORE_FAILED', operation.encryptedSha256, { code: error?.code, message: error?.message }).catch(() => undefined);
+        try {
+          setRecoveryRuntimeState('NORMAL');
+          await prisma.recoveryOperation.update({
+            where: { id: operation.id },
+            data: { status: 'FAILED', errorCode: error?.code || 'RESTORE_FAILED', errorMessage: error?.message || 'Restore failed.' },
+          }).catch(() => undefined);
+          await audit(operation.id, req.user!.id, 'RECOVERY_RESTORE_FAILED', operation.encryptedSha256, { code: error?.code, message: error?.message }).catch(() => undefined);
+        } finally { releaseRecoveryOperation(); }
       }
     });
   } catch (error) {

@@ -1,22 +1,15 @@
-import fs from 'fs';
 import path from 'path';
 import { NextFunction, Request, Response } from 'express';
 import { deploymentMaintenanceActive } from './deploymentMaintenance';
 import { bindRuntimeHttpWriteAdmission, runtimeHttpRequests } from './httpRequestLifecycle';
+import { RecoveryCoordinationState, RecoveryRuntimeState } from './recoveryCoordinationState';
+import { RecoveryOperationAdmission } from './recoveryOperationAdmission';
+import { assertRuntimeControlAdmission } from './runtimeControlOwnership';
 
 export const RECOVERY_ROOT = process.env.RECOVERY_STORAGE_DIR || path.join(process.cwd(), 'storage', 'recovery');
 export const RECOVERY_COORDINATION_DIR = process.env.RECOVERY_COORDINATION_DIR || path.join(RECOVERY_ROOT, 'coordination');
-const STATE_FILE = path.join(RECOVERY_COORDINATION_DIR, 'state.json');
-
-type RecoveryRuntimeState = {
-  mode: 'NORMAL' | 'READ_ONLY' | 'MAINTENANCE';
-  operationId?: string;
-  message?: string;
-  updatedAt: string;
-};
-
-let memoryState: RecoveryRuntimeState = { mode: 'NORMAL', updatedAt: new Date().toISOString() };
-let operationLocked = false;
+const coordinationState = new RecoveryCoordinationState(RECOVERY_COORDINATION_DIR);
+const recoveryOperations = new RecoveryOperationAdmission();
 let activeWrites = 0;
 
 /** Background mutations share the same maintenance admission and drain as HTTP writes.
@@ -24,44 +17,34 @@ let activeWrites = 0;
  * drained system while an admitted background write is still running. */
 export const withRecoveryBackgroundWrite = async <T>(work: () => Promise<T>): Promise<T | undefined> => {
   if (getRecoveryRuntimeState().mode !== 'NORMAL' || deploymentMaintenanceActive(RECOVERY_COORDINATION_DIR)) return undefined;
+  assertRuntimeControlAdmission();
   activeWrites += 1;
   try { return await work(); }
   finally { activeWrites = Math.max(0, activeWrites - 1); }
 };
 
 export const initializeRecoveryRuntime = () => {
-  fs.mkdirSync(RECOVERY_COORDINATION_DIR, { recursive: true });
-  try {
-    memoryState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-  } catch {
-    setRecoveryRuntimeState('NORMAL');
-  }
+  coordinationState.initialize();
 };
 
 export const getRecoveryRuntimeState = () => {
-  try {
-    memoryState = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-  } catch {
-    // Retain the last known in-memory state when the coordination file is transiently unavailable.
-  }
-  return memoryState;
+  return coordinationState.read();
 };
 
 export const setRecoveryRuntimeState = (mode: RecoveryRuntimeState['mode'], operationId?: string, message?: string) => {
-  memoryState = { mode, operationId, message, updatedAt: new Date().toISOString() };
-  fs.mkdirSync(RECOVERY_COORDINATION_DIR, { recursive: true });
-  fs.writeFileSync(STATE_FILE, JSON.stringify(memoryState), { encoding: 'utf8', mode: 0o600 });
+  coordinationState.write(mode, operationId, message);
 };
 
 export const acquireRecoveryOperation = () => {
-  if (operationLocked) return false;
-  operationLocked = true;
-  return true;
+  assertRuntimeControlAdmission();
+  return recoveryOperations.acquire();
 };
 
 export const releaseRecoveryOperation = () => {
-  operationLocked = false;
+  recoveryOperations.release();
 };
+
+export const waitForRecoveryOperationDrain = (timeoutMs = 240_000) => recoveryOperations.drain(timeoutMs);
 
 const allowedDuringMaintenance = (req: Request) =>
   req.originalUrl.startsWith('/api/system-recovery')

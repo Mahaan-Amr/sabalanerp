@@ -1,6 +1,7 @@
 import { startBiometricStagedCaptureMaintenance } from './services/biometricStagedCaptureMaintenance';
 import { stopBackgroundJobs } from './services/backgroundJobLifecycle';
 import { resolveRuntimeRole, startRuntime } from './services/runtimeStartup';
+import { assertRuntimeControlAdmission } from './services/runtimeControlOwnership';
 import { runtimeHttpRequests } from './services/httpRequestLifecycle';
 import { disconnectDatabase, prisma } from './lib/prisma';
 import { validateProductionEnvironment } from './services/productionEnvironment';
@@ -97,6 +98,7 @@ import {
   initializeRecoveryRuntime,
   recoveryWriteGuard,
   waitForActiveWrites,
+  waitForRecoveryOperationDrain,
 } from "./services/recoveryRuntime";
 import {
   initializeSystemRecovery,
@@ -116,7 +118,10 @@ import { startPersonnelPerformanceMaintenance } from "./services/personnelPerfor
 import { startOrdinaryContractExpiry } from './services/ordinaryContractLifecycle';
 
 const runtimeRole = resolveRuntimeRole(process.env.BACKEND_RUNTIME_ROLE);
-if (runtimeRole === 'standalone') initializeRecoveryRuntime();
+if (runtimeRole === 'standalone') {
+  assertRuntimeControlAdmission();
+  initializeRecoveryRuntime();
+}
 registerPartnerNotificationAccess(inquiryNotificationAccess);
 const app = express();
 app.set("trust proxy", 1);
@@ -377,6 +382,7 @@ runtimeHttpRequests.install(app);
 
 // Start only after interrupted recovery has been finalized or safely rolled back.
 startRuntime(runtimeRole, {
+  assertControlOwnership: assertRuntimeControlAdmission,
   initializeRecovery: () => initializeSystemRecovery(prisma),
   verifyCutover: async () => {
     if (hrRedesignCutoverStartup.enabled) {
@@ -428,6 +434,7 @@ const shutdown = async (signal: NodeJS.Signals) => {
     // Stop admission before closing sockets; callbacks already running must finish.
     await Promise.all([
       stopBackgroundJobs(240_000),
+      waitForRecoveryOperationDrain(240_000),
       waitForActiveWrites(240_000),
       runtimeHttpRequests.waitForDrain(240_000),
     ]);

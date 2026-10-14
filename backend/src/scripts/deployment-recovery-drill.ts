@@ -6,9 +6,12 @@ import { disconnectDatabase, prisma } from '../lib/prisma';
 import { readConfiguredFile } from '../services/deploymentCheckpointStorage';
 import { assertIsolatedRecoveryDrill } from '../services/deploymentDrillPolicy';
 import { sha256File } from '../services/recoveryCrypto';
-import { readRestoreJournal, stageAndPromoteRecovery, validateRecoveryPackage } from '../services/systemRecoveryEngine';
+import { readRestoreJournal, stageAndPromoteRecovery, validateRecoveryPackage, verifyPromotedRecoveryFiles, validateLiveStoredFileReferences } from '../services/systemRecoveryEngine';
 import { nativePostgresCliConnection } from '../services/nativePostgresCli';
 import { initializeSystemRecovery } from '../services/systemRecoveryLifecycle';
+import { getRecoveryRuntimeState } from '../services/recoveryRuntime';
+import { assertIndependentRecoveryApplicationKeys, verifyRecoveredApplicationPayloads } from '../services/deploymentDrillApplicationKeys';
+import { assertRecoveryBusinessProof } from '../services/deploymentRecoveryDataProof';
 
 type RemoteMetadata = {
   deploymentId: string;
@@ -23,6 +26,7 @@ const execFileAsync = promisify(execFile);
 
 const main = async () => {
   assertIsolatedRecoveryDrill(process.env);
+  assertIndependentRecoveryApplicationKeys();
   const expectedMarker = String(process.env.DEPLOYMENT_DRILL_DATABASE_MARKER);
   const controlConnection = nativePostgresCliConnection(String(process.env.DATABASE_URL), 'postgres');
   const markerResult = await execFileAsync('psql', [controlConnection.url, '-At', '-v', 'ON_ERROR_STOP=1', '-c',
@@ -45,7 +49,14 @@ const main = async () => {
   }
   const remoteKey = await readConfiguredFile('DEPLOYMENT_REMOTE_RECOVERY_PRIVATE_KEY');
   const startedAt = new Date();
-  const validation = await validateRecoveryPackage({ sourcePath: metadata.remotePath, passphrase: remoteKey, prisma });
+  const validation = await validateRecoveryPackage({ sourcePath: metadata.remotePath, passphrase: remoteKey, prisma,
+    verifyRestore: true, verifyApplicationPayloads: true, verifyBusinessData: true });
+  if (validation.manifest.packageType !== 'COMPLETE' || !validation.compatibility.compatible) {
+    throw Object.assign(new Error('The independent recovery target is incompatible.'), { code: 'DEPLOYMENT_DRILL_INCOMPATIBLE' });
+  }
+  // This standalone owner is about to replace its isolated target database.
+  // Do not carry pre-promotion pooled sessions across the database rename.
+  await disconnectDatabase();
   const operationId = `drill-${metadata.deploymentId}-${Date.now()}`;
   const result = await stageAndPromoteRecovery({
     operationId,
@@ -61,9 +72,15 @@ const main = async () => {
     preservePackage: true,
     onProgress: async (progress) => console.log(JSON.stringify({ event: 'drill-progress', progress })),
   });
-  await initializeSystemRecovery(prisma);
-  if (await readRestoreJournal()) throw Object.assign(new Error('Recovery drill finalization left an unresolved restore journal.'), { code: 'DEPLOYMENT_DRILL_FINALIZE_FAILED' });
+  const initialPromotedFiles = await verifyPromotedRecoveryFiles(validation.manifest);
+  let erasureReplay: { replayed: number; erasedArtifactPaths: string[] } | undefined;
+  await initializeSystemRecovery(prisma, { onVerifiedErasureReplay: evidence => { erasureReplay = evidence; } });
+  if (await readRestoreJournal() || getRecoveryRuntimeState().mode !== 'NORMAL') throw Object.assign(new Error('Recovery drill finalization did not prove a normal runtime.'), { code: 'DEPLOYMENT_DRILL_FINALIZE_FAILED' });
   await prisma.$queryRawUnsafe('SELECT 1');
+  const promotedFiles = await verifyPromotedRecoveryFiles(validation.manifest, erasureReplay?.erasedArtifactPaths);
+  const liveFileReferences = await validateLiveStoredFileReferences(prisma);
+  const applicationPayloads = await verifyRecoveredApplicationPayloads(prisma);
+  const businessData = await assertRecoveryBusinessProof(prisma, validation.businessDataProof ?? []);
   const completedAt = new Date();
   const drill = {
     status: 'HEALTHY',
@@ -73,6 +90,14 @@ const main = async () => {
     durationMs: completedAt.getTime() - startedAt.getTime(),
     compatibility: validation.compatibility,
     promoted: result.promoted,
+    promotedFiles,
+    initialPromotedFiles,
+    verifiedErasureReplay: { operations: erasureReplay?.replayed ?? 0, erasedArtifacts: erasureReplay?.erasedArtifactPaths.length ?? 0 },
+    liveFileReferences,
+    applicationPayloads,
+    businessData,
+    stagedPostgresRestore: true,
+    stagedSqliteIntegrity: true,
   };
   await fs.promises.writeFile(metadataPath, `${JSON.stringify({ ...metadata, lastDrill: drill }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   const reportRoot = process.env.DEPLOYMENT_REPORT_DIR || path.join(process.cwd(), 'reports', 'deploy');

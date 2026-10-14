@@ -71,6 +71,7 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   clamdscan \
   ffmpeg \
   postgresql-client \
+  util-linux \
   sqlite3 \
   tar \
   ca-certificates \
@@ -104,6 +105,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/dist-cutover ./dist-cutover
 COPY backend/public ./public
 COPY backend/scripts ./scripts
+COPY deploy/scripts/with-backend-control-ownership.sh ./scripts/with-backend-control-ownership.sh
 COPY docs/qa/partner-sales/release/release-package.mjs ./partner-release-verifier/release-package.mjs
 COPY backend/src/documents/dispatch/__fixtures__/baselines ./dispatch-document-baselines
 COPY backend/excel ./excel
@@ -119,4 +121,4 @@ LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
 
 EXPOSE 5000
 
-CMD ["sh", "-c", "node dist/scripts/recovery-database-preflight.js && node dist/index.js"]
+CMD ["sh", "scripts/with-backend-control-ownership.sh", "sh", "scripts/start-backend.sh"]

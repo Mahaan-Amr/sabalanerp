@@ -11,6 +11,9 @@ import { RECOVERY_FORMAT_VERSION, recoveryCompatibility, RecoveryPackageType } f
 import { RECOVERY_COORDINATION_DIR, RECOVERY_ROOT } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
 import { decryptPerformanceExportArtifact, encryptPerformanceExportArtifact, performanceExportKeyFromEnvironment, performanceExportStorageDirectory } from './personnelPerformanceDisclosureStore';
+import { verifyRestoredFiles } from './deploymentRestoreEvidence';
+import { verifyRecoveredApplicationPayloads } from './deploymentDrillApplicationKeys';
+import { captureRecoveryBusinessProof, type RecoveryBusinessTableProof } from './deploymentRecoveryDataProof';
 
 const execFileAsync = promisify(execFile);
 const PACKAGES_DIR = path.join(RECOVERY_ROOT, 'packages');
@@ -87,6 +90,11 @@ export type RecoveryManifest = {
   sanitized: boolean;
   components: Array<{ path: string; sha256: string; size: number }>;
 };
+
+export const verifyPromotedRecoveryFiles = (manifest: RecoveryManifest, verifiedErasedPaths: readonly string[] = []) => verifyRestoredFiles(manifest.components, [
+  ...FILE_RECOVERY_MAPPINGS,
+  { payloadPath: 'inquiry', livePath: INQUIRY_SOURCE_DIR },
+], verifiedErasedPaths);
 
 const ensureDirectories = async () => {
   await Promise.all([PACKAGES_DIR, UPLOADS_DIR, WORK_DIR, RECOVERY_COORDINATION_DIR].map((directory) =>
@@ -509,12 +517,15 @@ export const validateRecoveryPackage = async (input: {
   passphrase: string;
   prisma: PrismaClient;
   verifyRestore?: boolean;
+  verifyApplicationPayloads?: boolean;
+  verifyBusinessData?: boolean;
 }) => {
   await ensureDirectories();
   const jobRoot = await fs.promises.mkdtemp(path.join(WORK_DIR, 'validate-'));
   const archivePath = path.join(jobRoot, 'payload.tar.gz');
   const payloadRoot = path.join(jobRoot, 'payload');
   let stagedDatabase: string | null = null;
+  let businessDataProof: RecoveryBusinessTableProof[] | undefined;
   try {
     await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
@@ -555,11 +566,13 @@ export const validateRecoveryPackage = async (input: {
       try {
         await stagedClient.$queryRawUnsafe('SELECT 1');
         await validateStoredFileReferences(stagedClient, payloadRoot);
+        if (input.verifyApplicationPayloads) await verifyRecoveredApplicationPayloads(stagedClient);
+        if (input.verifyBusinessData) businessDataProof = await captureRecoveryBusinessProof(stagedClient);
       } finally {
         await stagedClient.$disconnect();
       }
     }
-    return { manifest, compatibility };
+    return { manifest, compatibility, ...(businessDataProof ? { businessDataProof } : {}) };
   } finally {
     if (stagedDatabase) await dropDatabase(process.env.DATABASE_URL || '', stagedDatabase);
     await fs.promises.rm(jobRoot, { recursive: true, force: true });

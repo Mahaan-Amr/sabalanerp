@@ -12,6 +12,7 @@ test('a candidate can start its probe listener without touching live recovery or
     await fs.writeFile(marker, 'RECOVERY_IN_PROGRESS');
     let listening = false;
     await startRuntime('candidate', {
+      assertControlOwnership: () => { throw new Error('candidate attempted control ownership'); },
       initializeRecovery: async () => { await fs.writeFile(marker, 'RESET'); },
       verifyCutover: async () => { throw new Error('candidate attempted activation'); },
       startWorkers: () => { throw new Error('candidate attempted delivery'); },
@@ -20,4 +21,16 @@ test('a candidate can start its probe listener without touching live recovery or
     assert.equal(listening, true);
     assert.equal(await fs.readFile(marker, 'utf8'), 'RECOVERY_IN_PROGRESS');
   } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('an unfenced owner cannot initialize recovery, activate workers or listen', async () => {
+  const effects: string[] = [];
+  await assert.rejects(startRuntime('standalone', {
+    assertControlOwnership: () => { throw new Error('OWNERSHIP_UNAVAILABLE'); },
+    initializeRecovery: async () => { effects.push('recovery'); },
+    verifyCutover: async () => { effects.push('cutover'); },
+    startWorkers: () => { effects.push('workers'); },
+    listen: () => { effects.push('listen'); },
+  }), /OWNERSHIP_UNAVAILABLE/);
+  assert.deepEqual(effects, []);
 });

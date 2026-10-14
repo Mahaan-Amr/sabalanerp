@@ -7,12 +7,14 @@ export function resolveRuntimeRole(value: string | undefined): BackendRuntimeRol
 }
 
 export async function startRuntime(role: BackendRuntimeRole, operations: {
+  assertControlOwnership: () => void;
   initializeRecovery: () => Promise<void>;
   verifyCutover: () => Promise<void>;
   startWorkers: () => void;
   listen: () => void;
 }) {
   if (role === 'standalone') {
+    operations.assertControlOwnership();
     await operations.initializeRecovery();
     await operations.verifyCutover();
     operations.startWorkers();

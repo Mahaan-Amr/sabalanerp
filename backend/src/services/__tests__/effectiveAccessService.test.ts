@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { getEffectiveUserAccess } from '../effectiveAccessService';
 import { evaluateHrAuthorization } from '../hrAuthorizationPolicy';
-import { loadHrAuthorizationSnapshot } from '../hrAuthorizationService';
+import { activeHrActionPermissionsForUser, loadHrAuthorizationSnapshot } from '../hrAuthorizationService';
 import { HR_QA_ACCESS_MATRIX, HR_REDESIGN_CATALOG } from '../hrRedesignDataContracts';
 
 const at = new Date('2026-08-20T10:00:00.000Z');
@@ -327,6 +327,24 @@ const run = async () => {
     'AUTHORITY_RESPONSIBILITY_ADMINISTRATION', 'USER_ADMINISTRATION',
   ]) assert.equal(hrManagerFeatures.has(forbidden), false, `qa_hr_manager must not receive ${forbidden}`);
 
+  const recoveryAuthority = {
+    ...client,
+    user: { findUnique: async () => ({ id: 'recovery-owner', role: 'USER', isActive: true }) },
+    crossWorkspaceDuty: { findMany: async () => [] },
+    hrWorkspaceAccessGrant: { findMany: async () => [] },
+    roleWorkspacePermission: { findMany: async () => [] },
+    roleFeaturePermission: { findMany: async () => [] },
+    hrFeatureAccessGrant: { findMany: async () => [{ id: 'explicit-retention', featureCode: 'MANAGE_PERFORMANCE_RETENTION',
+      level: 'ADMIN', status: 'ACTIVE', effectiveFrom: new Date(0), effectiveTo: null, reason: 'Independent recovery retention authority' }] },
+  };
+  assert.deepEqual(await activeHrActionPermissionsForUser(recoveryAuthority as never, 'recovery-owner', at),
+    ['MANAGE_PERFORMANCE_RETENTION'], 'an explicitly authorizable historical retention grant remains usable for recovery');
+  for (const override of [{ status: 'REVOKED' }, { level: 'EDIT' }]) {
+    const denied = { ...recoveryAuthority, hrFeatureAccessGrant: { findMany: async () => (
+      (await recoveryAuthority.hrFeatureAccessGrant.findMany()).map(grant => ({ ...grant, ...override }))
+    ) } };
+    assert.deepEqual(await activeHrActionPermissionsForUser(denied as never, 'recovery-owner', at), []);
+  }
   console.log('Effective access service tests passed.');
 };
 

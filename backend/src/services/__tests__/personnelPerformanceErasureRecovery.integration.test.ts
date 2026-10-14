@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
@@ -18,6 +18,11 @@ import {
 } from '../personnelPerformanceErasureStore';
 import { enablePerformanceTestRelease, publishPerformanceTestRetentionPolicy } from './personnelPerformanceTestRelease';
 import { decryptRecoveryArchive, encryptRecoveryArchive, sha256File } from '../recoveryCrypto';
+import { capturePerformanceExportSources, sealPerformanceExportLineage } from '../personnelPerformanceExportLineage';
+import { encryptPerformanceExportArtifact, performanceExportKeyFromEnvironment } from '../personnelPerformanceDisclosureStore';
+import { verifyRestoredFiles } from '../deploymentRestoreEvidence';
+import { verifyRecoveredApplicationPayloads } from '../deploymentDrillApplicationKeys';
+import { captureRecoveryBusinessProof, assertRecoveryBusinessProof } from '../deploymentRecoveryDataProof';
 
 const configuredUrl = process.env.DATABASE_URL!;
 const databaseUrl = (database: string) => {
@@ -54,12 +59,18 @@ const verifyComposeTarget = async () => {
   const output = await runProcess('docker', [...composeArgs, 'ps', '--format', 'json']);
   assert.match(output.toString('utf8'), /sabalanerp-local-backend-1/, 'the recovery rehearsal must target the existing local Compose project');
 };
-const databaseCheckpoint = async (database: string) => runProcess('docker', [...composeArgs, 'exec', '-T', 'backend',
-  'pg_dump', '--format=custom', '--no-owner', '--no-privileges', containerDatabaseUrl(database)]);
-const restoreDatabaseCheckpoint = async (database: string, bytes: Buffer) => runProcess('docker', [...composeArgs, 'exec', '-T', 'backend',
-  'pg_restore', '--no-owner', '--no-privileges', '--exit-on-error', '--dbname', containerDatabaseUrl(database)], bytes);
+const databaseCheckpoint = async (database: string) => {
+  await verifyComposeTarget();
+  return runProcess('docker', [...composeArgs, 'exec', '-T', 'backend',
+    'pg_dump', '--format=custom', '--no-owner', '--no-privileges', containerDatabaseUrl(database)]);
+};
+const restoreDatabaseCheckpoint = async (database: string, bytes: Buffer) => {
+  await verifyComposeTarget();
+  return runProcess('docker', [...composeArgs, 'exec', '-T', 'backend',
+    'pg_restore', '--no-owner', '--no-privileges', '--exit-on-error', '--dbname', containerDatabaseUrl(database)], bytes);
+};
 const runCrashWorker = (url: string, operationId: string) => new Promise<number | null>((resolve, reject) => {
-  const child = spawn(path.join(process.cwd(), 'node_modules', '.bin', 'tsx'), [
+  const child = spawn(process.execPath, [require.resolve('tsx/cli'),
     'src/services/__tests__/personnelPerformanceErasureCrashWorker.ts',
   ], { cwd: process.cwd(), env: { ...process.env, DATABASE_URL: url, PERFORMANCE_ERASURE_CRASH_OPERATION_ID: operationId }, stdio: 'ignore' });
   child.once('error', reject);
@@ -67,6 +78,11 @@ const runCrashWorker = (url: string, operationId: string) => new Promise<number 
 });
 
 const main = async () => {
+// This process creates only its own temporary databases and encrypted fixtures.
+process.env.PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID = 'recovery-integration-vault-v1';
+process.env.PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64 = randomBytes(32).toString('base64');
+process.env.PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID = 'recovery-integration-export-v1';
+process.env.PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64 = randomBytes(32).toString('base64');
 const acceptanceEvidence = process.env.PERFORMANCE_ACCEPTANCE_FAILURE_RECOVERY === '1';
 const rehearsalMode = acceptanceEvidence ? process.env.PERFORMANCE_ACCEPTANCE_RESTORE_REHEARSAL_MODE : 'correctness';
 assert.ok(rehearsalMode === 'correctness' || rehearsalMode === 'timed-dress', 'an explicit recovery rehearsal mode is required');
@@ -88,7 +104,7 @@ let restored: PrismaClient | undefined;
 
 try {
   await prisma.$executeRawUnsafe(`CREATE DATABASE "${safetyDatabase}"`);
-  const migration = spawn('npx', ['prisma', 'migrate', 'deploy'], {
+  const migration = spawn(process.execPath, [require.resolve('prisma'), 'migrate', 'deploy'], {
     cwd: process.cwd(), env: { ...process.env, DATABASE_URL: databaseUrl(safetyDatabase) }, stdio: 'ignore',
   });
   assert.equal(await new Promise<number | null>((resolve, reject) => {
@@ -128,6 +144,27 @@ try {
     eventType: 'EVALUATION_CANCELLED', actorUserId: actor.id, eventHash: canonicalPerformanceHash({ suffix, event: 'cancelled' }),
     occurredAt: new Date('2011-01-01Z') } });
   const firstPolicy = await publishPerformanceTestRetentionPolicy(safety, actor.id);
+  await safety.$executeRawUnsafe('CREATE TABLE accounting_restore_probe (id text PRIMARY KEY, amount numeric(20,2), quantity numeric(20,3))');
+  await safety.$executeRawUnsafe("INSERT INTO accounting_restore_probe VALUES ('acknowledged-row', 1234567.89, 12.345)");
+  const expectedBusinessData = await captureRecoveryBusinessProof(safety);
+  const exportDirectory = path.join(checkpointRoot, 'performance-exports');
+  await mkdir(exportDirectory);
+  const artifactPath = path.join(exportDirectory, 'restored-export.enc');
+  const originalExport = encryptPerformanceExportArtifact(Buffer.from('archived private export'), performanceExportKeyFromEnvironment().key);
+  await writeFile(artifactPath, originalExport);
+  const exportId = randomUUID();
+  await safety.performanceExportReceipt.create({ data: { id: exportId, requestedByUserId: actor.id,
+    exportKind: 'XLSX', scopeHash: 'recovery-export-scope', permissionHash: 'recovery-export-permission',
+    status: 'QUEUED', artifactPath } });
+  await safety.$transaction(async tx => {
+    const sources = await capturePerformanceExportSources(tx, [subject.id], new Date('2009-01-01Z'), new Date('2012-01-01Z'));
+    await sealPerformanceExportLineage(tx, exportId, sources, { kind: 'isolated-recovery-export' }, performanceVaultKeyFromEnvironment());
+  });
+  await safety.performanceExportReceipt.update({ where: { id: exportId }, data: { status: 'RUNNING' } });
+  await safety.performanceExportReceipt.update({ where: { id: exportId }, data: { status: 'READY' } });
+  const restoredComponents = [{ path: 'files/performance-exports/restored-export.enc', size: originalExport.length,
+    sha256: createHash('sha256').update(originalExport).digest('hex') }];
+  const restoredMappings = [{ payloadPath: 'files/performance-exports', livePath: exportDirectory }];
 
   await safety.$disconnect();
   safety = undefined;
@@ -167,8 +204,22 @@ try {
 
   restored = new PrismaClient({ datasources: { db: { url: databaseUrl(restoredDatabase) } } });
   await restored.$connect();
+  await assertRecoveryBusinessProof(restored, expectedBusinessData);
+  await restored.$executeRawUnsafe('UPDATE accounting_restore_probe SET amount = 1234567.88');
+  await assert.rejects(assertRecoveryBusinessProof(restored, expectedBusinessData), { code: 'DEPLOYMENT_DRILL_BUSINESS_DATA_MISMATCH' });
+  await restored.$executeRawUnsafe('UPDATE accounting_restore_probe SET amount = 1234567.89');
+  await assertRecoveryBusinessProof(restored, expectedBusinessData);
+  const decryptedPayloads = await verifyRecoveredApplicationPayloads(restored);
+  assert.ok(decryptedPayloads.payloads > 0);
+  assert.equal(decryptedPayloads.vaultKeyId, 'recovery-integration-vault-v1');
+  // Promotion restores the pre-erasure bytes from the archived checkpoint.
+  await writeFile(artifactPath, originalExport);
+  await verifyRestoredFiles(restoredComponents, restoredMappings);
   const replay = await replayPerformanceErasureAfterRestore(restored, safety, new Date('2026-09-10Z'));
   assert.equal(replay.replayed, 1);
+  assert.deepEqual(replay.erasedArtifactPaths, [artifactPath]);
+  assert.deepEqual(await verifyRestoredFiles(restoredComponents, restoredMappings, replay.erasedArtifactPaths),
+    { files: 0, bytes: 0, erasedFiles: 1 }, 'a verified erasure stays absent after a real checkpoint restore');
   assert.equal(await restored.performanceDraft.count({ where: { id: draftId } }), 0);
   const restoredPolicy = await restored.performancePolicyVersion.findUniqueOrThrow({ where: { id: secondPolicy.id } });
   assert.equal(restoredPolicy.version, 2);

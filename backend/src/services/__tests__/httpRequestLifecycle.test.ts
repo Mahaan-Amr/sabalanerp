@@ -155,6 +155,7 @@ test('READ_ONLY backup drains mutations while a permitted read remains open; ret
   const readRequest = http.request({ host: '127.0.0.1', port, path: '/read' });
   const writeRequest = http.request({ host: '127.0.0.1', port, path: '/write', method: 'POST' });
   readRequest.on('error', () => {}); writeRequest.on('error', () => {});
+  recovery.initializeRecoveryRuntime();
   readRequest.end(); writeRequest.end();
   try {
     await Promise.all([readReady, writeReady]);

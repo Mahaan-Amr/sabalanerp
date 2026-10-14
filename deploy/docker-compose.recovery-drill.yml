@@ -1,0 +1,66 @@
+# Independent backup-host rehearsal only. Local QA uses sabalanerp-local.
+# The operator stages immutable code and an isolated marker before starting this
+# file. No production environment, volume, port or provider credential is used.
+name: sabalanerp-backup-drill
+services:
+  postgres:
+    image: ${DRILL_POSTGRES_IMAGE:?Immutable restored PostgreSQL image required}
+    pull_policy: never
+    environment:
+      POSTGRES_DB: sabalan_independent_drill
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DRILL_DATABASE_PASSWORD:?Private drill password required}
+    command: [postgres, -c, max_connections=25, -c, shared_buffers=64MB]
+    volumes:
+      - ${DRILL_ROOT:?Isolated backup-host directory required}/postgres:/var/lib/postgresql/data
+      - ${DRILL_ROOT}/marker.sql:/docker-entrypoint-initdb.d/20-drill-marker.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres -d sabalan_independent_drill]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    mem_limit: 384m
+    cpus: 0.75
+    networks: [isolated]
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: '2'}
+  restore:
+    image: ${DRILL_BACKEND_IMAGE:?Immutable recovered backend image required}
+    pull_policy: never
+    env_file: ${DRILL_APPLICATION_KEYS_FILE:?Independent application key custody file required}
+    command: [node, dist/scripts/deployment-recovery-drill.js]
+    environment:
+      NODE_ENV: test
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://postgres:${DRILL_DATABASE_PASSWORD}@postgres:5432/sabalan_independent_drill?connection_limit=2&pool_timeout=10
+      PRODUCTION_DATABASE_URL: ${DRILL_PRODUCTION_DATABASE_IDENTITY:?Real production database identity required}
+      DEPLOYMENT_DRILL_ISOLATED: 'true'
+      DEPLOYMENT_DRILL_DATABASE_MARKER: ${DRILL_DATABASE_MARKER:?Independent server marker required}
+      DEPLOYMENT_DRILL_METADATA_PATH: /drill/checkpoint.json
+      DEPLOYMENT_REMOTE_RECOVERY_PRIVATE_KEY_FILE: /run/secrets/recovery-private.pem
+      DEPLOYMENT_REPORT_DIR: /drill/reports
+      RECOVERY_STORAGE_DIR: /app/storage/recovery
+      RECOVERY_COORDINATION_DIR: /app/recovery-coordination
+      INQUIRY_RECOVERY_SOURCE_DIR: /app/recovery-sources/inquiry
+    volumes:
+      - ${DRILL_ROOT}/code/dist:/app/dist:ro
+      - ${DRILL_ROOT}/code/prisma:/app/prisma:ro
+      - ${DRILL_ROOT}/storage:/app/storage
+      - ${DRILL_ROOT}/uploads:/app/uploads
+      - ${DRILL_ROOT}/coordination:/app/recovery-coordination
+      - ${DRILL_ROOT}/inquiry:/app/recovery-sources/inquiry
+      - ${DRILL_ROOT}/evidence:/drill
+      - ${DRILL_CHECKPOINT_ROOT:?Independent checkpoint directory required}:/checkpoints:ro
+      - ${DRILL_PRIVATE_KEY_FILE:?Independent DR key required}:/run/secrets/recovery-private.pem:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+    mem_limit: 768m
+    cpus: 0.75
+    networks: [isolated]
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: '2'}
+networks:
+  isolated:
+    internal: true

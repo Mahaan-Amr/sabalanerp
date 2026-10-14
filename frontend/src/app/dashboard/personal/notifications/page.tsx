@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaBell, FaCheck, FaCheckDouble, FaChevronDown, FaMobileAlt, FaRedo, FaSave, FaSearch, FaShieldAlt, FaTrash } from 'react-icons/fa';
 import { notificationsAPI } from '@/lib/api';
+import { registerApplicationServiceWorker } from '@/lib/serviceWorkerRegistration';
 import { useSocket } from '@/hooks/useSocket';
 import { workspaceLabelFa } from '@/lib/featureLabelsFa';
 import {
@@ -209,7 +210,7 @@ export default function NotificationCenterPage() {
     try {
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') throw new Error('اجازه اعلان برای این مرورگر داده نشد.');
-      const registration = await navigator.serviceWorker.register('/support-notifications-sw.js');
+      const registration = await registerApplicationServiceWorker();
       const existing = await registration.pushManager.getSubscription();
       const subscription = existing || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(preferences.webPushPublicKey) });
       const json = subscription.toJSON();
@@ -230,7 +231,7 @@ export default function NotificationCenterPage() {
     setBusy('devices-all');
     try {
       if ('serviceWorker' in navigator) {
-        const registration = await navigator.serviceWorker.getRegistration('/support-notifications-sw.js');
+        const registration = await navigator.serviceWorker.getRegistration('/');
         await (await registration?.pushManager.getSubscription())?.unsubscribe();
       }
       await notificationsAPI.disableAllDevices();

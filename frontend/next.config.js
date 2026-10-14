@@ -70,7 +70,7 @@ const nextConfig = {
         ],
       },
       {
-        source: '/sw.js',
+        source: '/:worker(sw|support-notifications-sw).js',
         headers: [
           {
             key: 'Content-Type',

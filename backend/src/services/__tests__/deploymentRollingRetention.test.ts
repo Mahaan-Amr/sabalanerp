@@ -87,3 +87,35 @@ test('obsolete local copies are retired only after two independent replacements 
     assert.equal(await fs.readFile(path.join(local, 'backup-2.sabrec'), 'utf8'), 'checkpoint-2');
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
+
+test('retention resumes interrupted deletions and carries remote retirement evidence across pre/post upload passes', async context => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sabalan-retention-resume-'));
+  const originalUnlink = fs.unlink.bind(fs);
+  try {
+    const local = path.join(root, 'local'); const remote = path.join(root, 'remote');
+    await fs.mkdir(local); await fs.mkdir(remote);
+    const create = async (value: number) => {
+      const id = `backup-${value}`; const bytes = Buffer.from(id);
+      const metadata = { id, releaseId: id, createdAt: `2026-10-0${value}T00:00:00Z`, size: bytes.length,
+        checksum: createHash('sha256').update(bytes).digest('hex'), remoteVerified: true, restoreVerified: true,
+        remotePath: path.join(remote, `${id}.sabrec`), archivePath: path.join(local, `${id}.sabrec`) };
+      await fs.writeFile(metadata.archivePath, bytes); await fs.writeFile(metadata.remotePath, bytes);
+      await fs.writeFile(`${metadata.archivePath}.json`, JSON.stringify(metadata));
+      await fs.writeFile(`${metadata.remotePath}.json`, JSON.stringify(metadata));
+    };
+    for (const value of [1, 2, 3]) await create(value);
+    const failures = new Set([path.join(remote, 'backup-1.sabrec.json'), path.join(local, 'backup-1.sabrec.json')]);
+    context.mock.method(fs, 'unlink', async (file: Parameters<typeof fs.unlink>[0]) => {
+      if (failures.delete(String(file))) throw Object.assign(new Error('simulated interruption'), { code: 'EIO' });
+      return originalUnlink(file);
+    });
+    await assert.rejects(enforceFilesystemRemoteRetention(remote, 'backup-4', local), /simulated interruption/);
+    await enforceFilesystemRemoteRetention(remote, 'backup-4', local);
+    await create(4);
+    const postUpload = await enforceFilesystemRemoteRetention(remote, 'backup-4', local);
+    await assert.rejects(enforceLocalCheckpointRetention(local, remote, 'backup-4', postUpload), /simulated interruption/);
+    await enforceLocalCheckpointRetention(local, remote, 'backup-4', postUpload);
+    for (const id of [1, 2]) await assert.rejects(fs.stat(path.join(local, `backup-${id}.sabrec.json`)), { code: 'ENOENT' });
+    for (const id of [3, 4]) assert.equal(await fs.readFile(path.join(local, `backup-${id}.sabrec`), 'utf8'), `backup-${id}`);
+  } finally { context.mock.restoreAll(); await fs.rm(root, { recursive: true, force: true }); }
+});

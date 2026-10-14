@@ -356,6 +356,29 @@ const appendRetentionAudit = async (root: string, entry: Record<string, unknown>
   } finally { await handle.close(); }
 };
 
+const hasRetentionEvent = async (root: string, artifact: Pick<CheckpointObject, 'id' | 'checksum'>, event: string) => {
+  let bytes: string;
+  try { bytes = await fs.promises.readFile(path.join(root, 'retention-audit.jsonl'), 'utf8'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+  return bytes.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line))
+    .some(entry => entry.id === artifact.id && entry.checksum === artifact.checksum && entry.event === event);
+};
+
+const checkpointArchivePresent = async (root: string, file: string, artifact: CheckpointObject) => {
+  if (!path.resolve(file).startsWith(`${root}${path.sep}`)) throw new Error('DEPLOYMENT_RETENTION_PATH_UNSAFE');
+  const parent = await fs.promises.realpath(path.dirname(file));
+  if (parent !== root && !parent.startsWith(`${root}${path.sep}`)) throw new Error('DEPLOYMENT_RETENTION_PATH_UNSAFE');
+  try {
+    const stat = await fs.promises.lstat(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('DEPLOYMENT_RETENTION_PATH_UNSAFE');
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT'
+      || !await hasRetentionEvent(root, artifact, 'RETENTION_INTENT')) throw error;
+    return false;
+  }
+};
+
 export const enforceFilesystemRemoteRetention = async (root: string, activeDeploymentId: string, localRoot?: string) => {
   const localHolds = new Set<string>();
   const localEvidence = new Map<string, string>();
@@ -433,7 +456,8 @@ export const enforceFilesystemRemoteRetention = async (root: string, activeDeplo
     }
     const artifact = inventory.find((candidate) => candidate.id === id);
     if (!artifact) continue;
-    for (const candidate of [artifact.archivePath, artifact.metadataPath]) {
+    const archivePresent = await checkpointArchivePresent(realRoot, artifact.archivePath, artifact);
+    for (const candidate of [artifact.metadataPath]) {
       if (!path.resolve(candidate).startsWith(`${resolvedRoot}${path.sep}`)) {
         throw Object.assign(new Error('Remote retention candidate escaped its configured root.'), { code: 'DEPLOYMENT_REMOTE_RETENTION_PATH_UNSAFE' });
       }
@@ -447,7 +471,7 @@ export const enforceFilesystemRemoteRetention = async (root: string, activeDeplo
       await assertRemoteCheckpointFingerprint(replacement.remotePath, fingerprints.get(replacement.id));
     }
     await appendRetentionAudit(root, { id, checksum: artifact.checksum, event: 'RETENTION_INTENT' });
-    await fs.promises.unlink(artifact.archivePath);
+    if (archivePresent) await fs.promises.unlink(artifact.archivePath);
     await fs.promises.unlink(artifact.metadataPath);
     await appendRetentionAudit(root, { id, checksum: artifact.checksum, event: 'RETENTION_COMPLETED' });
     audit.push({ id, releaseId: artifact.releaseId, checksum: artifact.checksum, size: artifact.size, reason: 'TWO_VERIFIED_COMPLETE_RECOVERY_POINTS', result: 'DELETED' });
@@ -500,7 +524,8 @@ export const enforceLocalCheckpointRetention = async (
   }
   const deletedIds: string[] = [];
   for (const artifact of candidates) {
-    for (const file of [artifact.archivePath, artifact.metadataPath]) {
+    const archivePresent = await checkpointArchivePresent(localRoot, artifact.archivePath, artifact);
+    for (const file of [artifact.metadataPath]) {
       const realFile = await fs.promises.realpath(file);
       const stat = await fs.promises.lstat(file);
       if (!realFile.startsWith(`${localRoot}${path.sep}`) || !stat.isFile() || stat.isSymbolicLink()) {
@@ -511,7 +536,9 @@ export const enforceLocalCheckpointRetention = async (
     if (current.active || current.incidentOpen || current.id !== artifact.id || current.checksum !== artifact.checksum) {
       throw new Error('DEPLOYMENT_LOCAL_RETENTION_EVIDENCE_CHANGED');
     }
-    const remoteEvidence = remoteRetention.protectionEvidence.find(point => point.id === artifact.id);
+    const remoteEvidence = remoteRetention.protectionEvidence.find(point => point.id === artifact.id)
+      || (artifact.remotePath && await hasRetentionEvent(independentRoot, artifact, 'RETENTION_COMPLETED')
+        ? { id: artifact.id, metadataPath: `${artifact.remotePath}.json` } : undefined);
     if (!remoteEvidence) throw new Error('DEPLOYMENT_LOCAL_RETENTION_REMOTE_EVIDENCE_MISSING');
     try {
       const remotePath = await fs.promises.realpath(remoteEvidence.metadataPath);
@@ -527,11 +554,12 @@ export const enforceLocalCheckpointRetention = async (
     } catch (error) {
       // Absence is expected only for an archive actually pruned by this operation.
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT'
-        || !remoteRetention.audit.some(entry => entry.id === artifact.id && entry.result === 'DELETED')) throw error;
+        || (!remoteRetention.audit.some(entry => entry.id === artifact.id && entry.result === 'DELETED')
+          && !await hasRetentionEvent(independentRoot, artifact, 'RETENTION_COMPLETED'))) throw error;
     }
     for (const point of points) await assertRemoteCheckpointFingerprint(point.remotePath, point.fingerprint);
     await appendRetentionAudit(root, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_INTENT' });
-    await fs.promises.unlink(artifact.archivePath);
+    if (archivePresent) await fs.promises.unlink(artifact.archivePath);
     await fs.promises.unlink(artifact.metadataPath);
     await appendRetentionAudit(root, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_COMPLETED' });
     deletedIds.push(artifact.id);

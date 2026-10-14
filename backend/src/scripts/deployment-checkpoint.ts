@@ -81,6 +81,7 @@ const main = async () => {
   });
   const remote = new FilesystemRemoteCheckpointStore(remoteRoot);
   const preUploadRemoteRetention = await enforceFilesystemRemoteRetention(remoteRoot, deploymentId, packagesRoot);
+  const preUploadLocalRetention = await enforceLocalCheckpointRetention(packagesRoot, remoteRoot, deploymentId, preUploadRemoteRetention);
   const remoteCapacity = await remote.assertAvailable(capacity.requiredRemoteBytes);
 
   const result = await createRecoveryPackage({
@@ -154,7 +155,7 @@ const main = async () => {
   } catch (error: any) {
     if (process.env.DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP !== 'true' || error?.code !== 'P2021') throw error;
   }
-  console.log(JSON.stringify({ ok: true, checkpoint: metadata, preUploadRemoteRetention, remoteRetention, localRetention }));
+  console.log(JSON.stringify({ ok: true, checkpoint: metadata, preUploadRemoteRetention, preUploadLocalRetention, remoteRetention, localRetention }));
 };
 
 main()

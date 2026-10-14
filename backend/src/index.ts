@@ -1,6 +1,7 @@
 import { startBiometricStagedCaptureMaintenance } from './services/biometricStagedCaptureMaintenance';
 import { stopBackgroundJobs } from './services/backgroundJobLifecycle';
 import { resolveRuntimeRole, startRuntime } from './services/runtimeStartup';
+import { runtimeHttpRequests } from './services/httpRequestLifecycle';
 import { disconnectDatabase, prisma } from './lib/prisma';
 import { validateProductionEnvironment } from './services/productionEnvironment';
 import express from "express";
@@ -162,6 +163,7 @@ app.use((req, res, next) => {
   }
   next();
 });
+app.use(runtimeHttpRequests.middleware);
 app.use(
   cors({
     origin: resolveCorsOrigin(),
@@ -371,6 +373,7 @@ registerRealtimePublisher((event) => {
 // Error handling middleware
 app.use(notFound);
 app.use(errorHandler);
+runtimeHttpRequests.install(app);
 
 // Start only after interrupted recovery has been finalized or safely rolled back.
 startRuntime(runtimeRole, {

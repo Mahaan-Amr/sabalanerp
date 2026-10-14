@@ -33,7 +33,7 @@ const serviceFor = (request: AuthRequest) => createPartnerAccountingAdapter(crea
 const guarded = (handler: (request: AuthRequest, response: Response) => Promise<void>): RequestHandler =>
   (request, response) => {
     response.setHeader('Cache-Control', 'private, no-store');
-    void handler(request as AuthRequest, response).catch(error => {
+    return handler(request as AuthRequest, response).catch(error => {
       const supportReference = randomUUID();
       const cause = error instanceof PartnerAccountingTechnicalError ? error.diagnostic : error;
       console.error('Partner Accounting request failed', { supportReference,

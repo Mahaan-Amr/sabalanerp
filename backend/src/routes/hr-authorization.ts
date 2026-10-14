@@ -25,7 +25,7 @@ const responsibilityValues = new Set<string>(HR_REDESIGN_CATALOG.responsibilityT
 
 const asyncHandler = (handler: (req: AuthRequest, res: Response, next: NextFunction) => Promise<unknown>) => (
   req: AuthRequest, res: Response, next: NextFunction,
-) => void handler(req, res, next).catch(next);
+) => handler(req, res, next).catch(next);
 const actorId = (req: AuthRequest) => req.user!.id;
 const text = (value: unknown) => String(value ?? '').trim();
 const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode, isOperational: true });

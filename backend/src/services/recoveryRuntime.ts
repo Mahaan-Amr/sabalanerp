@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { NextFunction, Request, Response } from 'express';
 import { deploymentMaintenanceActive } from './deploymentMaintenance';
+import { runtimeHttpRequests } from './httpRequestLifecycle';
 
 export const RECOVERY_ROOT = process.env.RECOVERY_STORAGE_DIR || path.join(process.cwd(), 'storage', 'recovery');
 export const RECOVERY_COORDINATION_DIR = process.env.RECOVERY_COORDINATION_DIR || path.join(RECOVERY_ROOT, 'coordination');
@@ -104,6 +105,7 @@ export const recoveryWriteGuard = (req: Request, res: Response, next: NextFuncti
 
 export const waitForActiveWrites = async (timeoutMs = 30_000) => {
   const deadline = Date.now() + timeoutMs;
+  await runtimeHttpRequests.waitForDrain(timeoutMs);
   while (activeWrites > 0 && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }

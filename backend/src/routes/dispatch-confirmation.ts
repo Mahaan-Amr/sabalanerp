@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { runtimeHttpRequests } from '../services/httpRequestLifecycle';
 import express, { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect, AuthRequest } from '../middleware/auth';
@@ -224,7 +225,7 @@ router.post('/guard/authorizations/:authorizationId/revoke', guardApprove, async
 router.get('/sessions/:sessionId/evidence', (req: AuthRequest, res, next) => {
   res.on('finish', () => {
     if ([401, 403].includes(res.statusCode)) {
-      try { void service().auditControlDenied(req.params.sessionId, req.user?.id || 'ANONYMOUS', `EVIDENCE_HTTP_${res.statusCode}`).catch(() => undefined); }
+      try { void runtimeHttpRequests.trackWork(req, () => service().auditControlDenied(req.params.sessionId, req.user?.id || 'ANONYMOUS', `EVIDENCE_HTTP_${res.statusCode}`)).catch(() => undefined); }
       catch { /* Denial response must not depend on audit configuration availability. */ }
     }
   });

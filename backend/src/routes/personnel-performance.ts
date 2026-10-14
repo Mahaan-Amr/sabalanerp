@@ -1,4 +1,5 @@
 import { assessPerformanceEvaluationRetention } from '../services/personnelPerformanceRetentionStore';
+import { runtimeHttpRequests } from '../services/httpRequestLifecycle';
 import {
   approvePerformanceBulkErasure,
   approvePerformanceErasureImpact,
@@ -154,8 +155,8 @@ router.use((req, res, next) => {
     recorded = true;
     if (!metricKey) return;
     const outcome = performanceRequestObservationOutcome(res.statusCode, completed);
-    void recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
-      ...outcome }).catch(() => console.error('Personnel performance request metric failed closed: PERFORMANCE_METRIC_WRITE_FAILED'));
+    void runtimeHttpRequests.trackWork(req, () => recordPerformanceRequestObservation(prisma, { metricKey, durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+      ...outcome })).catch(() => console.error('Personnel performance request metric failed closed: PERFORMANCE_METRIC_WRITE_FAILED'));
   };
   res.once('finish', () => record(true));
   res.once('close', () => record(false));
@@ -672,10 +673,10 @@ router.get('/exports/:exportId/download', requestExport, async (req: AuthRequest
     let finished = false;
     res.once('finish', () => {
       finished = true;
-      void completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered: true }).catch(next);
+      void runtimeHttpRequests.trackWork(req, () => completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered: true })).catch(next);
     });
     res.once('close', () => {
-      if (!finished) void completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered: false }).catch(next);
+      if (!finished) void runtimeHttpRequests.trackWork(req, () => completePerformanceExportDownload(prisma, { exportId: req.params.exportId, actorUserId: req.user!.id, delivered: false })).catch(next);
     });
     return res.end(artifact.bytes);
   } catch (error) { return next(error); }

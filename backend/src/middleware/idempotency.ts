@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import type { NextFunction, Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import type { AuthRequest } from './auth';
+import { runtimeHttpRequests } from '../services/httpRequestLifecycle';
 
 const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 let lastExpiredRecordCleanupAt = 0;
@@ -43,14 +44,14 @@ export const enforceMutationIdempotency = async (
     const originalJson = res.json.bind(res);
     res.json = ((body: unknown) => {
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        void prisma.apiIdempotencyRecord.update({
+        void runtimeHttpRequests.trackWork(req, () => prisma.apiIdempotencyRecord.update({
           where: { userId_key_scope: { userId: req.user!.id, key, scope } },
           data: {
             status: 'COMPLETED',
             responseStatus: res.statusCode,
             responseBody: JSON.parse(JSON.stringify(body)) as Prisma.InputJsonValue,
           },
-        }).then(() => originalJson(body)).catch(() => {
+        })).then(() => originalJson(body)).catch(() => {
           // The domain mutation already committed. Return its true result and
           // keep the guard PENDING so the same key cannot execute it again.
           originalJson(body);
@@ -61,10 +62,10 @@ export const enforceMutationIdempotency = async (
     }) as Response['json'];
     res.once('finish', () => {
       if (res.statusCode >= 400) {
-        void prisma.apiIdempotencyRecord
+        void runtimeHttpRequests.trackWork(req, () => prisma.apiIdempotencyRecord
           .deleteMany({
             where: { userId: req.user!.id, key, scope, status: 'PENDING' },
-          })
+          }))
           .catch((cleanupError) => {
             console.error('Failed to clean up pending idempotency record', cleanupError);
           });

@@ -628,3 +628,23 @@ test('note saves preserve earlier explicit acceptance but cannot accept a replac
     revision: row.inquiryRow.revision + 1, approvedRowBinding: { ...row.inquiryRow.approvedRowBinding!, revision: row.inquiryRow.revision + 1 } } })) };
   assert.equal(partnerWizardSubmissionIntent(replaced, true, false, now, [], true).rows[0].approvedRowBinding, undefined);
 });
+
+for (const state of ['PENDING', 'APPROVED', 'REJECTED'] as const) {
+  for (const validatedRevision of [2, 3]) test(`replaced inquiry history does not change technical-edit pricing: ${state}, revision ${validatedRevision}`, () => {
+    const { approvedPrice, approvedRowBinding, approvedAt, expiresAt, ...plain } = fixture.inquiry.rows[0];
+    const current = { ...plain, rowId: 'current-inquiry-row', state, configurationRef: { ...plain.configurationRef, recoveryRevision: 2 },
+      ...(state === 'APPROVED' ? { approvedPrice, approvedRowBinding, approvedAt, expiresAt } : {}),
+      ...(state === 'REJECTED' ? { noteOrReason: 'دلیل رد فعلی' } : {}) };
+    const historical = { ...plain, rowId: 'replaced-cancelled-row', revision: 2, state: 'CANCELLED' as const,
+      configurationRef: { ...plain.configurationRef, recoveryRevision: 1 } };
+    const validated = { ...fixture.technicalSaved, recoveryRevision: validatedRevision,
+      rows: fixture.technicalSaved.rows.map(row => ({ ...row, configurationRef: { ...row.configurationRef, recoveryRevision: validatedRevision } })) };
+    const input = { now: Date.parse('2026-08-27T09:00:00Z'), validated,
+      base: { ...draft.intent, recoveryRevision: validatedRevision },
+      retailUnitPrices: new Map([[fixture.configurationDraft.productRowId, { amount: '1000', currency: 'IRR' as const }]]) };
+    const completeHistory = enterPartnerWizard({ ...input, inquiryRows: [current, historical] });
+    const relevantHistory = enterPartnerWizard({ ...input, inquiryRows: [current] });
+    assert.ok(completeHistory && relevantHistory);
+    assert.deepEqual(relevantHistory, completeHistory, 'current price, reason, pending state, acceptance and plans must be identical');
+  });
+}

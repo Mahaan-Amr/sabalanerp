@@ -1,3 +1,7 @@
+import { readPartnerCaseRecovery } from '../services/partnerSales/cases/creationRecoveryMetadata';
+import { readRecoveryForDisplay } from '../services/partnerSales/cases/recoveryDisplayRead';
+import { readPartnerCreationRecoveries } from '../services/partnerSales/cases/creationRecoveryMetadata';
+import { currentPartnerPricingInquiryIds } from '../services/partnerSales/inquiries/currentPricing';
 import { OperationMinimumError } from '../services/operationMinimumGuard';
 import { readWholesaleMandatory } from '../services/partnerSales/cases/canonicalWholesale';
 import { PARTNER_CREATION_TRANSACTION_OPTIONS } from '../services/partnerSales/creationTransactionBudget';
@@ -5,7 +9,7 @@ import { technicalTransportFailure, type TechnicalFailureDiagnostic } from './pa
 import { previewPartnerWholesaleRows } from '../services/partnerSales/inquiries/wholesalePricing';
 import { canManageCommercialSettings } from '../services/ordinaryContractLifecycle';
 import { appendPartnerCommercialEvent } from '../services/partnerSales/cases/commercialEvents';
-import { approvePartnerCommercialSales, readPartnerCommercialState, resetPartnerCommercialApprovals, lockPartnerCommercialContract, assertPartnerCommercialAvailable } from '../services/partnerSales/cases/commercialLifecycle';
+import { approvePartnerCommercialSales, readPartnerCommercialDetails, readPartnerCommercialEditingDetails, readPartnerCommercialState, resetPartnerCommercialApprovals, lockPartnerCommercialContract, assertPartnerCommercialAvailable } from '../services/partnerSales/cases/commercialLifecycle';
 import { casePdfAvailability, resolveCasePdfSnapshot } from '../services/partnerSales/customerOutput/casePdf';
 import { createCustomerOutputSnapshots } from '../services/partnerSales/customerOutput/snapshots';
 import { CustomerOutputError } from '../services/partnerSales/customerOutput/contracts';
@@ -38,7 +42,7 @@ import { PARTNER_TECHNICAL_RECOVERY_KIND } from '../services/contractRecoveryPro
 import { decodeTechnicalRecovery } from '../services/partnerSales/cases/technicalRecoveryRecords';
 import { consumePrismaPartnerTechnicalRecovery, resolvePrismaPartnerCaseDraft } from '../services/partnerSales/cases/prismaComposition';
 import { canRetainCasePricingApproval, resolveApprovalForUse } from '../services/partnerSales/inquiries/approvalUsage';
-import { decodeTechnicalSavedSnapshot } from '../services/partnerSales/cases/technicalSavedRecords';
+import { decodeTechnicalSavedSnapshot, technicalSavedSnapshotAtRevision } from '../services/partnerSales/cases/technicalSavedRecords';
 import { parseInquiryDefinition } from '../services/partnerSales/inquiries/definition';
 import { assertContractEditOwnership, PrismaContractEditSessionStore } from '../services/contractEditSessionService';
 import { assertPartnerCasePrismaClientCompatibility } from '../services/partnerSales/cases/prismaClientCompatibility';
@@ -129,14 +133,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const writable = profile.state === 'ACTIVE' && rollout.ok && permission.ok;
         const blockedCode = !rollout.ok ? rollout.error.code
           : !permission.ok ? permission.error.code : profile.state !== 'ACTIVE' ? 'PARTNER_NOT_ACTIVE' : undefined;
-        const rawDrafts = await tx.salesContractEditSession.findMany({ where: { ownerUserId: request.user!.id,
-          contractId: null,
-          recovery: { path: ['kind'], equals: PARTNER_TECHNICAL_RECOVERY_KIND } },
-          orderBy: { updatedAt: 'desc' }, take: 200, select: { draftId: true, baseRevision: true, recovery: true } });
-        const requestedRecovery = requestedCaseId ? await tx.salesContractEditSession.findFirst({ where: {
-          ownerUserId: request.user!.id, purpose: 'PARTNER_TECHNICAL',
-          recovery: { path: ['partnerCaseId'], equals: requestedCaseId },
-        }, orderBy: { updatedAt: 'desc' }, select: { draftId: true, baseRevision: true, recovery: true } }) : null;
+        const { rawDrafts, requestedRecovery } = await readPartnerCreationRecoveries(tx, request.user!.id, requestedCaseId);
         const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
         const recoverableDraftRows = [...rawDrafts, ...(requestedRecovery && !rawDrafts.some(item =>
           item.draftId === requestedRecovery.draftId) ? [requestedRecovery] : [])].flatMap(item => {
@@ -223,13 +220,18 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             responsibleSellerId: request.user!.id, partnerRevision: { not: null }, isActive: true,
           }, select: { id: true, customerId: true, title: true, address: true } })
           : null;
+        const pricingInquiries = requestedCaseId && request.query.purpose === 'CASE_PRICING'
+          ? await tx.partnerInquiry.findMany({ where: { caseId: requestedCaseId, profileId: profile.id },
+            orderBy: { createdAt: 'desc' }, take: 100,
+            select: { id: true, rows: { select: { id: true, outcome: true } },
+              events: { where: { type: 'INQUIRY_CANCELLED' }, select: { evidence: true } } } }) : null;
         const value = partnerContracts.PartnerCreationContextSchema.safeParse({ schemaVersion: 1, kind: 'PARTNER',
           actorId: request.user!.id,
           actorDisplayName: `${profile.user.firstName} ${profile.user.lastName}`.trim() || profile.user.username,
           profileId: profile.id, writable, ...(blockedCode ? { blockedCode } : {}),
           ...(writable ? { contractNumberPreview: (await getNextContractNumberPreview(request.user!.id, tx)).contractNumber } : {}),
           ...(profile.inquiries[0] ? { latestInquiryId: profile.inquiries[0].id } : {}),
-          inquiryIds: profile.inquiries.map(inquiry => inquiry.id),
+          inquiryIds: pricingInquiries ? currentPartnerPricingInquiryIds(requestedCaseId!, pricingInquiries) : profile.inquiries.map(inquiry => inquiry.id),
           ...(recoverableDraft ? { recoverableDraft: { recoveryId: recoverableDraft.draftId,
             ...(recoverableDraft.caseId ? { caseId: recoverableDraft.caseId, ...displayByCaseId.get(recoverableDraft.caseId) } : {}),
             ...(recoverableDraft.trackingNumber ? { trackingNumber: recoverableDraft.trackingNumber } : {}),
@@ -329,8 +331,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
   router.get('/drafts/:recoveryId/wizard', async (request: AuthRequest, response) => {
     if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
     try {
-      const session = await prisma.salesContractEditSession.findUnique({ where: { draftId: request.params.recoveryId },
-        select: { id: true, ownerUserId: true, purpose: true, recovery: true } });
+      const session = await readRecoveryForDisplay(prisma, request.params.recoveryId, { kind: 'wizard' });
       const recovery = decodeTechnicalRecovery(session?.recovery);
       const wizard = recovery?.wizardDraft === undefined ? undefined
         : partnerContracts.PartnerWizardRecoverySnapshotSchema.safeParse(recovery.wizardDraft);
@@ -442,8 +443,10 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           nextIntent: parsed.data.intent, previousMeaningfulUpdatedAt: recovery.updatedAt,
           now: clock.now.getTime(),
         });
-        await tx.salesContractEditSession.update({ where: { id: session.id }, data: { updatedAt: clock.now,
-          recovery: json({ ...recovery, updatedAt: meaningfulUpdatedAt, wizardDraft: snapshot }) } });
+        await tx.$executeRaw`UPDATE sales_contract_edit_sessions
+          SET "updatedAt" = ${clock.now},
+            recovery = ${JSON.stringify({ ...recovery, updatedAt: meaningfulUpdatedAt, wizardDraft: snapshot })}::jsonb
+          WHERE id = ${session.id}`;
         return { ok: true as const, value: snapshot };
       });
       respond(response, result);
@@ -463,17 +466,14 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           where: { id: parsed.data.caseId, profileId: profile.id }, select: { id: true, headRevision: true },
         }) : undefined;
         if (parsed.data.caseId && !ownedCase) return { ok: false as const, error: partnerError('NOT_FOUND') };
-        const session = await tx.salesContractEditSession.findUnique({ where: { draftId: parsed.data.recoveryId },
-          select: { ownerUserId: true, purpose: true, recovery: true } });
+        const session = await readRecoveryForDisplay(tx, parsed.data.recoveryId,
+          { kind: 'revision', revision: parsed.data.recoveryRevision });
         const recovery = decodeTechnicalRecovery(session?.recovery);
         if (!session || session.ownerUserId !== request.user!.id || session.purpose !== 'PARTNER_TECHNICAL' || !recovery) {
           return { ok: false as const, error: partnerError('NOT_FOUND') };
         }
-        let saved: Awaited<ReturnType<typeof decodeTechnicalSavedSnapshot>> = undefined;
-        for (const record of Array.isArray(recovery.validatedSnapshots) ? recovery.validatedSnapshots : []) {
-          const candidate = await decodeTechnicalSavedSnapshot(record);
-          if (candidate?.view.recoveryRevision === parsed.data.recoveryRevision) saved = candidate;
-        }
+        const saved = await technicalSavedSnapshotAtRevision(
+          Array.isArray(recovery.validatedSnapshots) ? recovery.validatedSnapshots : [], parsed.data.recoveryRevision);
         if (!saved || saved.view.recoveryId !== parsed.data.recoveryId) {
           return { ok: false as const, error: partnerError('NOT_FOUND') };
         }
@@ -532,7 +532,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const view = partnerContracts.PartnerApprovalMatchSetSchema.safeParse({ schemaVersion: 1,
           recoveryId: saved.view.recoveryId, recoveryRevision: saved.view.recoveryRevision,
           rows: await previewPartnerWholesaleRows(tx, { actorId: request.user!.id, profileId: profile.id,
-            caseId: parsed.data.caseId, rows, resolveConfiguration: createSavedTechnicalConfigurationResolver() }), missingPricingSubjectIds });
+            caseId: parsed.data.caseId, rows, resolveConfiguration: createSavedTechnicalConfigurationResolver({ history: 'REFERENCED' }) }), missingPricingSubjectIds });
         return view.success ? { ok: true as const, value: view.data }
           : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
       });
@@ -783,10 +783,10 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       respond(response, result);
     } catch { respond(response, { ok: false, error: partnerError('TEMPORARY_FAILURE') }); }
   });
-  router.post('/query-v2', async (request: AuthRequest, response) => {
+  const readCases = (navigationOnly: boolean) => async (request: AuthRequest, response: Response) => {
     if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
     const query = partnerContracts.PartnerCaseRuntimeQuerySchema.safeParse(request.body);
-    if (!query.success) {
+    if (!query.success || navigationOnly && !query.data.caseId) {
       respond(response, { ok: false, error: partnerError('INVALID_PAYLOAD') }); return;
     }
     const body = query.data;
@@ -853,20 +853,25 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           const correction = await authorized('CORRECTION_REQUEST', casePurpose, 'API');
           const cancel = await authorized('CASE_CANCEL', casePurpose, 'API');
           const voidRequest = await authorized('VOID_REQUEST', casePurpose, 'API');
-          const commercial = row.commercialFlowVersion === 1 ? await readPartnerCommercialState(tx, row.id) : undefined;
-          const correctionRequired = !!row.committedAt || row.state === 'COMMITTED' || commercial?.status === 'FINAL' || !!commercial?.firstFinancialRecordAt;
+          const commercialDetails = !navigationOnly && row.commercialFlowVersion === 1 ? await readPartnerCommercialDetails(tx, row.id) : undefined;
+          const editingDetails = navigationOnly && row.commercialFlowVersion === 1 ? await readPartnerCommercialEditingDetails(tx, row.id) : undefined;
+          const commercial = commercialDetails?.commercial;
+          const reuseOwnerEvidence = commercialDetails?.actorId === request.user!.id;
+          const commercialStatus = editingDetails?.editingStatus ?? commercial?.status;
+          const hasCommercial = Boolean(commercial || editingDetails);
+          const correctionRequired = !!row.committedAt || row.state === 'COMMITTED' || commercialStatus === 'FINAL' || !!(editingDetails?.firstFinancialRecordAt ?? commercial?.firstFinancialRecordAt);
           const correctionDuty = correctionRequired && row.customerContractId ? await (await import('../services/partnerSales/cases/commercialEditPermission')).readPartnerCommercialEditPermission(tx, row.customerContractId, request.user!.id) : null;
-          const commercialWritable = commercial ? commercial.status !== 'EXPIRED' && commercial.status !== 'CANCELLED' && (!correctionRequired || !!correctionDuty) : row.state === 'COMMITTED' && !!correctionDuty;
+          const commercialWritable = hasCommercial ? commercialStatus !== 'EXPIRED' && commercialStatus !== 'CANCELLED' && (!correctionRequired || !!correctionDuty) : row.state === 'COMMITTED' && !!correctionDuty;
           const editSession = edit && (partnerContracts.isPartnerCaseEditableState(row.state) || commercialWritable)
-            ? await tx.salesContractEditSession.findFirst({ where: {
-              ownerUserId: request.user!.id, purpose: 'PARTNER_TECHNICAL',
-              OR: [
-                ...(row.customerContractId ? [{ contractId: row.customerContractId }] : []),
-                { recovery: { path: ['partnerCaseId'], equals: row.id } },
-              ],
-            },
-              select: { draftId: true, baseRevision: true, recovery: true } }) : null;
+            ? reuseOwnerEvidence ? commercialDetails.recovery : await readPartnerCaseRecovery(tx, {
+              ownerUserId: request.user!.id, caseId: row.id, contractId: row.customerContractId, navigationOnly }) : null;
           const editableRecovery = editSession && decodeTechnicalRecovery(editSession.recovery) ? editSession : null;
+          const canContinue = Boolean(editableRecovery) && (!correctionRequired || commercialWritable);
+          if (navigationOnly) return { ok: true as const, value: partnerContracts.PartnerCaseEditorEntrySchema.parse({
+            caseId: row.id, canContinue, ...(editableRecovery ? { editRecovery: {
+              recoveryId: editableRecovery.draftId, baseRevision: editableRecovery.baseRevision } } : {}),
+          }) };
+
           const customerOutput = output
             ? partnerContracts.CustomerContractOutputSchema.safeParse(row.head.customerProjection) : null;
           const accountingCorrectionRequests = row.customerContractId ?
@@ -874,11 +879,11 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
               status: 'OPEN', trackingCode: { startsWith: 'partner-internal-correction:' } },
               select: { id: true, note: true, createdAt: true }, orderBy: { createdAt: 'desc' } }) : [];
           const pricingPresentation = (row.state === 'DRAFT' || !!commercial) && actorProfile && editableRecovery
-            ? await readCasePricingPresentation(tx, { caseId: row.id, headRevision: row.headRevision,
+            ? reuseOwnerEvidence ? commercialDetails.pricingPresentation : await readCasePricingPresentation(tx, { caseId: row.id, headRevision: row.headRevision,
               profileId: actorProfile.id, actorId: request.user!.id, recovery: editableRecovery.recovery }) : undefined;
           const pricingResponseState = pricingPresentation?.state;
           const customerIdentity = partnerContracts.CustomerDisplayPartySchema.safeParse((row.head?.partySnapshots as { customer?: unknown } | null)?.customer);
-          const runtimeRow = { ...(customerIdentity.success ? { customerName: customerIdentity.data.displayName } : {}), ...(commercial ? { commercial: await readPartnerCommercialState(tx, row.id, pricingResponseState, pricingPresentation) } : {}), ...(pricingResponseState ? { pricingResponseState } : {}), inquiryResponseComplete: pricingPresentation?.complete ?? false, view: { ...view.data, ...(row.customerContract ? { customerContractNumber: row.customerContract.contractNumber } : {}), ...(row.commercialFlowVersion === 1 ? { commercialFlowVersion: 1 as const } : {}), ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}), state: row.state,
+          const runtimeRow = { ...(customerIdentity.success ? { customerName: customerIdentity.data.displayName } : {}), ...(commercial ? { commercial: reuseOwnerEvidence ? commercial : await readPartnerCommercialState(tx, row.id, pricingResponseState, pricingPresentation) } : {}), ...(pricingResponseState ? { pricingResponseState } : {}), inquiryResponseComplete: pricingPresentation?.complete ?? false, view: { ...view.data, ...(row.customerContract ? { customerContractNumber: row.customerContract.contractNumber } : {}), ...(row.commercialFlowVersion === 1 ? { commercialFlowVersion: 1 as const } : {}), ...(row.trackingCode ? { trackingNumber: row.trackingCode.number } : {}), state: row.state,
             pricingState: row.pricingState, customerConfirmationState: row.customerConfirmationState },
             ...(edit && correctionDuty ? { reviewedCorrection: { requestId: correctionDuty.sourceId,
               reason: correctionDuty.accountantNote, ...(correctionDuty.dueAt ? { dueAt: correctionDuty.dueAt.toISOString() } : {}) } } : {}),
@@ -892,7 +897,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             ...(row.customerContractId ? { customerContractId: row.customerContractId } : {}),
             ...(editableRecovery ? { editRecovery: { recoveryId: editableRecovery.draftId,
               baseRevision: editableRecovery.baseRevision } } : {}),
-            actions: { canContinue: Boolean(editableRecovery) && (!correctionRequired || commercialWritable),
+            actions: { canContinue,
               canRenew: !!commercial && (commercial.status === 'EXPIRED' || !!commercial.expiresAt && new Date(commercial.expiresAt) <= new Date()) && !commercial.firstFinancialRecordAt && await canManageCommercialSettings(tx, request.user!),
               canApproveSales: commit && commercialWritable && view.data.preparationCompleted !== false && !commercial?.salesApproved,
               canRejectDraft: edit && commercialWritable && commercial?.status !== 'FINAL' && !commercial?.firstFinancialRecordAt && !!commercial?.salesApproved,
@@ -912,6 +917,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           else if (body.caseId) return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
           else reportIssue();
         }
+        if (navigationOnly) return { ok: true as const, value: partnerContracts.PartnerCaseEditorEntrySchema.parse({ caseId: body.caseId, canContinue: false }) };
         const output = partnerContracts.PartnerCaseRuntimeResultSchema.safeParse({ cases, ...(issues.length ? { issues } : {}) });
         return output.success ? { ok: true as const, value: output.data }
           : { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
@@ -924,7 +930,9 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       respond(response, { ok: false, error: partnerError(diagnostic.code === 'TEMPORARY_FAILURE'
         ? 'TEMPORARY_FAILURE' : 'INTEGRITY_CONFLICT') }, supportReference);
     }
-  });
+  };
+  router.post('/query-v2', readCases(false));
+  router.post('/editor-entry', readCases(true));
   router.post('/:caseId/reactivate', async (request: AuthRequest, response) => {
     if (!request.user) { respond(response, { ok: false, error: partnerError('FORBIDDEN') }); return; }
     const parsed = z.object({ expected: partnerContracts.RevisionRefSchema,

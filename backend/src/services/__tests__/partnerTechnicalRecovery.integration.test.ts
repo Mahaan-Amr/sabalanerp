@@ -176,15 +176,12 @@ test('real database policy and private catalog evidence produce a validated safe
     assert.equal(inquiryConfiguration.ok, true);
     let snapshotReads = 0;
     const snapshotTx = () => new Proxy(tx, { get(target, key) {
-      if (key === 'salesContractEditSession') return new Proxy(target.salesContractEditSession, { get(model, method) {
-        if (method === 'findUnique') return (...args: Parameters<typeof model.findUnique>) => {
-          snapshotReads++; return model.findUnique(...args);
-        };
-        return Reflect.get(model, method);
-      } });
+      if (key === '$queryRaw') return (...args: Parameters<typeof target.$queryRaw>) => {
+        snapshotReads++; return target.$queryRaw(...args);
+      };
       return Reflect.get(target, key);
     } });
-    const resolver = createSavedTechnicalConfigurationResolver();
+    const resolver = createSavedTechnicalConfigurationResolver({ history: 'REFERENCED' });
     const firstSnapshot = snapshotTx();
     const reference = result.value.rows[0].configurationRef;
     const repeated = await Promise.all([resolver(firstSnapshot, { actorId, reference }), resolver(firstSnapshot, { actorId, reference })]);

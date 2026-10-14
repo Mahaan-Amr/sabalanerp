@@ -70,3 +70,15 @@ test('display cache expires at sixty seconds, does not extend on reuse and clear
   await otherActor('PRODUCT'); assert.equal(calls, 5, 'another actor never reuses the first actor cache');
   read.clear(); await read('PRODUCT'); assert.equal(calls, 6);
 });
+
+test('saved Case navigation can load all live operation/service guards without enumerating selectable products', async () => {
+  const reads: string[] = [];
+  let published = false;
+  await loadPartnerCreationCatalog(async (kind, source) => {
+    reads.push(`${kind}:${source ?? ''}`);
+    return [{ schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG', kind, items: [] }];
+  }, () => assert.fail('retained products must not be replaced with an empty live catalog'), () => { published = true; },
+  () => true, { products: false });
+  assert.equal(published, true);
+  assert.deepEqual(reads, ['TOOL:', 'FINISHING:', 'LAYER:', 'SERVICE:tool', 'SERVICE:cutting', 'SERVICE:finishing']);
+});

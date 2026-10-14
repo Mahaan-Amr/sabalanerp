@@ -42,6 +42,13 @@ export const PartnerCaseRuntimeRowSchema = z.object({
   actions: PartnerCaseRuntimeActionsSchema,
 }).strict();
 
+/** Fresh navigation decision; full editor hydration still reads the Case. */
+export const PartnerCaseEditorEntrySchema = z.object({
+  caseId: IdSchema, canContinue: z.boolean(),
+  editRecovery: PartnerCaseRuntimeRowSchema.shape.editRecovery,
+}).strict();
+export type PartnerCaseEditorEntry = z.infer<typeof PartnerCaseEditorEntrySchema>;
+
 export const PartnerCaseRuntimeResultSchema = z.object({
   cases: z.array(PartnerCaseRuntimeRowSchema),
   issues: z.array(z.object({

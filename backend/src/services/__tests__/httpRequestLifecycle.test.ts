@@ -101,6 +101,39 @@ test('GET response-completion audit work remains part of the write drain after t
   } finally { complete(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 
+test('future GET response writes reserve admission before recovery closes the boundary', async () => {
+  let admissionOpen = true;
+  const lifecycle = new HttpRequestLifecycle(() => admissionOpen); const app = express();
+  let entered!: () => void; let respond!: () => void; let finishAudit!: () => void;
+  const admitted = new Promise<void>(resolve => { entered = resolve; });
+  const responseGate = new Promise<void>(resolve => { respond = resolve; });
+  const audit = new Promise<void>(resolve => { finishAudit = resolve; });
+  let auditStarted = false;
+  app.use(lifecycle.middleware);
+  app.get('/deferred-write', async (req, res) => {
+    const reservation = lifecycle.reserveWrite(req);
+    res.once('finish', () => { void reservation.run(async () => { auditStarted = true; await audit; }); });
+    entered(); await responseGate; res.end();
+  });
+  app.use((error: Error & { statusCode?: number }, _req: express.Request, res: express.Response, _next: express.NextFunction) => { res.status(error.statusCode || 500).end(); });
+  lifecycle.install(app);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const port = (server.address() as { port: number }).port;
+  try {
+    const first = fetch(`http://127.0.0.1:${port}/deferred-write`);
+    await admitted; admissionOpen = false;
+    await assert.rejects(lifecycle.waitForWriteDrain(30), /HTTP_REQUEST_DRAIN_TIMEOUT/);
+    assert.equal(auditStarted, false);
+    respond(); await (await first).text();
+    assert.equal(auditStarted, true);
+    await assert.rejects(lifecycle.waitForWriteDrain(30), /HTTP_REQUEST_DRAIN_TIMEOUT/);
+    finishAudit(); await lifecycle.waitForWriteDrain(1000);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/deferred-write`)).status, 503);
+    await lifecycle.waitForDrain(1000);
+  } finally { respond(); finishAudit(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
 test('READ_ONLY backup drains mutations while a permitted read remains open; retirement still waits for both', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sabalan-http-readonly-'));
   const previous = process.env.RECOVERY_COORDINATION_DIR;

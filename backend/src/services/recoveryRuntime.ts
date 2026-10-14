@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { NextFunction, Request, Response } from 'express';
 import { deploymentMaintenanceActive } from './deploymentMaintenance';
-import { runtimeHttpRequests } from './httpRequestLifecycle';
+import { bindRuntimeHttpWriteAdmission, runtimeHttpRequests } from './httpRequestLifecycle';
 
 export const RECOVERY_ROOT = process.env.RECOVERY_STORAGE_DIR || path.join(process.cwd(), 'storage', 'recovery');
 export const RECOVERY_COORDINATION_DIR = process.env.RECOVERY_COORDINATION_DIR || path.join(RECOVERY_ROOT, 'coordination');
@@ -113,3 +113,6 @@ export const waitForActiveWrites = async (timeoutMs = 30_000) => {
     throw Object.assign(new Error('Active writes did not drain before the recovery snapshot.'), { code: 'RECOVERY_WRITE_DRAIN_TIMEOUT' });
   }
 };
+
+bindRuntimeHttpWriteAdmission(() => getRecoveryRuntimeState().mode === 'NORMAL'
+  && !deploymentMaintenanceActive(RECOVERY_COORDINATION_DIR));

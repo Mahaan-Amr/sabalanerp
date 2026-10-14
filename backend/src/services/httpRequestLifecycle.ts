@@ -1,6 +1,7 @@
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 
-type RequestWork = { responseDone: boolean; mutation: boolean; writes: number; handlers: Set<symbol>; onFinish: Set<() => void> };
+type RequestWork = { responseDone: boolean; mutation: boolean; writeAdmitted: boolean; writes: number; handlers: Set<symbol>; onFinish: Set<() => void> };
+type WriteReservation = { run<T>(work: () => Promise<T>): Promise<T>; cancel(): void };
 type Layer = { handle: Function; route?: { stack: Layer[] }; };
 type RouterStack = { stack?: Layer[]; _router?: RouterStack };
 
@@ -12,13 +13,14 @@ export class HttpRequestLifecycle {
   private readonly active = new Set<RequestWork>();
   private readonly requests = new WeakMap<Request, RequestWork>();
   private readonly installed = new WeakSet<Layer>();
+  constructor(private readonly canAdmitWrite: () => boolean = () => true) {}
 
   readonly middleware: RequestHandler = (req, res, next) => {
     const pathname = req.originalUrl.split('?')[0];
     if (pathname === '/api/health' || pathname === '/api/ready'
       || pathname === '/api/system-recovery' || pathname.startsWith('/api/system-recovery/')) return next();
     const work: RequestWork = { responseDone: false, mutation: !['GET', 'HEAD', 'OPTIONS'].includes(req.method),
-      writes: 0, handlers: new Set(), onFinish: new Set() };
+      writeAdmitted: this.canAdmitWrite(), writes: 0, handlers: new Set(), onFinish: new Set() };
     this.requests.set(req, work);
     this.active.add(work);
     const done = () => { work.responseDone = true; this.releaseIfDone(work); };
@@ -35,17 +37,33 @@ export class HttpRequestLifecycle {
     if (work.responseDone && work.handlers.size === 0) this.active.delete(work);
   }
 
-  /** Register completion/audit work started by response events before starting it. */
-  async trackWork<T>(req: Request, run: () => Promise<T>): Promise<T> {
+  /** Reserve future response-event writes when registering the event, before
+   * recovery can close admission and observe an apparently drained GET. */
+  reserveWrite(req: Request): WriteReservation {
     const work = this.requests.get(req);
-    if (!work) return run();
+    if (!work) return { run: async execute => execute(), cancel: () => {} };
+    if (!(work.mutation && work.writeAdmitted) && !this.canAdmitWrite()) {
+      throw Object.assign(new Error('سامانه در حال تهیهٔ پشتیبان است؛ کمی بعد دوباره تلاش کنید.'), {
+        code: 'RECOVERY_WRITE_ADMISSION_CLOSED', statusCode: 503, isOperational: true,
+      });
+    }
     const token = Symbol();
     work.handlers.add(token);
     work.writes += 1;
     this.active.add(work);
-    try { return await run(); }
-    finally { work.writes -= 1; work.handlers.delete(token); this.releaseIfDone(work); }
+    let consumed = false;
+    const release = () => { work.writes -= 1; work.handlers.delete(token); this.releaseIfDone(work); };
+    return {
+      run: async execute => {
+        if (consumed) throw new Error('HTTP_WRITE_RESERVATION_CONSUMED');
+        consumed = true;
+        try { return await execute(); } finally { release(); }
+      },
+      cancel: () => { if (!consumed) { consumed = true; release(); } },
+    };
   }
+
+  async trackWork<T>(req: Request, run: () => Promise<T>): Promise<T> { return this.reserveWrite(req).run(run); }
 
   private invoke(handler: Function, receiver: unknown, parameters: unknown[], req: Request, res: Response, next: NextFunction) {
     const work = this.requests.get(req);
@@ -116,4 +134,10 @@ export class HttpRequestLifecycle {
   waitForWriteDrain(timeoutMs: number) { return this.wait(timeoutMs, true); }
 }
 
-export const runtimeHttpRequests = new HttpRequestLifecycle();
+// Bound once by recoveryRuntime; no request or environment flag can replace it.
+let runtimeWriteAdmission: (() => boolean) | undefined;
+export const bindRuntimeHttpWriteAdmission = (admission: () => boolean) => {
+  if (runtimeWriteAdmission) throw new Error('HTTP_WRITE_ADMISSION_ALREADY_BOUND');
+  runtimeWriteAdmission = admission;
+};
+export const runtimeHttpRequests = new HttpRequestLifecycle(() => runtimeWriteAdmission?.() === true);

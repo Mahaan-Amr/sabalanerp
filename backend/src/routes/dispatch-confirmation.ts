@@ -223,12 +223,17 @@ router.post('/guard/authorizations/:authorizationId/revoke', guardApprove, async
   catch (error) { return handle(res, error); }
 });
 router.get('/sessions/:sessionId/evidence', (req: AuthRequest, res, next) => {
+  const auditWrite = runtimeHttpRequests.reserveWrite(req);
+  let settled = false;
   res.on('finish', () => {
+    if (settled) return;
+    settled = true;
     if ([401, 403].includes(res.statusCode)) {
-      try { void runtimeHttpRequests.trackWork(req, () => service().auditControlDenied(req.params.sessionId, req.user?.id || 'ANONYMOUS', `EVIDENCE_HTTP_${res.statusCode}`)).catch(() => undefined); }
+      try { void auditWrite.run(() => service().auditControlDenied(req.params.sessionId, req.user?.id || 'ANONYMOUS', `EVIDENCE_HTTP_${res.statusCode}`)).catch(() => undefined); }
       catch { /* Denial response must not depend on audit configuration availability. */ }
-    }
+    } else auditWrite.cancel();
   });
+  res.once('close', () => { if (!settled) { settled = true; auditWrite.cancel(); } });
   next();
 }, evidenceView, async (req: AuthRequest, res) => {
   try { return res.json({ success: true, data: await service().readProtectedEvidence(req.params.sessionId, req.user!.id) }); }

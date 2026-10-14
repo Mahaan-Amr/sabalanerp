@@ -578,6 +578,10 @@ if [ -f "${CONFIGURATION_STATE}" ]; then
   exit 1
 fi
 
+if [ "${DEPLOYMENT_MODE}" = "configuration" ]; then
+  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0
+fi
+
 if [ "${DEPLOYMENT_MODE}" = "release" ]; then
 echo "Fetching ${DEPLOY_REMOTE}/${DEPLOY_BRANCH} and requiring a fast-forward update..."
 git fetch --prune "${DEPLOY_REMOTE}"
@@ -623,6 +627,10 @@ backend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PR
 frontend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}")"
 inquiry_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}")"
 docker_required_bytes=$((backend_image_size + frontend_image_size + inquiry_image_size + 1073741824))
+
+# A failed cleanup or capacity proof leaves the current release serving users.
+# The helper rechecks recovery/image references and holds the same host lock.
+sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" "${docker_required_bytes}" 0
 docker_root="$(docker info --format '{{.DockerRootDir}}')"
 docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
 docker_available_bytes=$((docker_available_kb * 1024))

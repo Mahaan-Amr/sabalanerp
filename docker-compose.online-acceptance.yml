@@ -1,0 +1,42 @@
+# Extra application slot inside the existing project; no extra database or stack.
+name: sabalanerp-local
+services:
+  backend-candidate:
+    extends:
+      file: ${ONLINE_ACCEPTANCE_BASE_COMPOSE:-docker-compose.local.yml}
+      service: backend
+    profiles: [online-acceptance]
+    image: ${ONLINE_ACCEPTANCE_BACKEND_IMAGE:-sabalanerp-local-backend}
+    command: [node, dist/index.js]
+    ports: !override
+      - "127.0.0.1:5100:5000"
+    environment:
+      BACKEND_RUNTIME_ROLE: candidate
+      DATABASE_URL: postgresql://postgres:${LOCAL_POSTGRES_PASSWORD:-sabalanerp-local-only}@postgres:5432/${LOCAL_POSTGRES_DATABASE:-sabalanerp}?schema=public&connection_limit=2&pool_timeout=10&application_name=sabalanerp-online-candidate
+    volumes:
+      - type: bind
+        source: ${ONLINE_ACCEPTANCE_SOURCE_ROOT:?Set the absolute reviewed source directory}/backend/dist
+        target: /app/dist
+        read_only: true
+      - type: bind
+        source: ${ONLINE_ACCEPTANCE_SOURCE_ROOT}/packages/partner-sales-contracts/dist
+        target: /packages/partner-sales-contracts/dist
+        read_only: true
+      - type: bind
+        source: ${ONLINE_ACCEPTANCE_SOURCE_ROOT}/packages/contract-product-graph/dist
+        target: /packages/contract-product-graph/dist
+        read_only: true
+      - ${LOCAL_BACKEND_STORAGE_CONTRACTS_SOURCE:-backend_storage_contracts}:/app/storage/contracts:ro
+      - ${LOCAL_BACKEND_STORAGE_HR_SOURCE:-backend_storage_hr_hiring}:/app/storage/hr-hiring:ro
+      - ${LOCAL_BACKEND_STORAGE_ACCOUNTING_SOURCE:-backend_storage_accounting_contracts}:/app/storage/accounting-contracts:ro
+      - ${LOCAL_BACKEND_STORAGE_SUPPORT_SOURCE:-backend_storage_support_tickets}:/app/storage/support-tickets:ro
+      - ${LOCAL_BACKEND_UPLOADS_SOURCE:-backend_uploads}:/app/uploads:ro
+      - ${LOCAL_BACKEND_RECOVERY_SOURCE:-backend_recovery}:/app/storage/recovery:ro
+      - ${LOCAL_BACKEND_SEPIDAR_BACKUP_SOURCE:-backend_storage_sepidar_backups}:/app/storage/sepidar-backups:ro
+      - ${LOCAL_RECOVERY_COORDINATION_SOURCE:-recovery_coordination}:/app/recovery-coordination:ro
+      - ${LOCAL_INQUIRY_RECOVERY_SOURCE:-inquiry_data}:/app/recovery-sources/inquiry:ro
+    read_only: true
+    tmpfs: [/tmp]
+    stop_grace_period: 5m
+    mem_limit: 768m
+    cpus: 1

@@ -30,6 +30,8 @@ Integration and concurrency tests may own isolated clients only for their tempor
 
 Production deployment and rollback must follow `docs/operations/zero-data-loss-deployment.md` and ADR-0039. Never add a force, bypass, partial-promotion, mutable-image rollback, unverified-backup, or public-write path inside the maintenance boundary. A change to deployment, migration, backup, restore, retention, storage cleanup, image identity, or release health gates must preserve the documented lease, checkpoint, remote verification, fail-closed rollback, and recovery-drill invariants.
 
+Before every production update, run reference-aware storage preflight on both production and the independent backup host, before image builds, heavy transfers or maintenance. Remove only proven eligible Sabalan artifacts; preserve running services, foreign projects, supported browser builds, rollback/recovery dependencies, active operations and incident holds. Measure capacity again after cleanup. Never blanket-prune images, containers or volumes to make capacity pass. Keep the newest two complete healthy independently verified recovery points, verifying replacements before pruning. ADR-0130 and `docs/operations/online-deployment.md` record the online-deployment contract and status; online mutations and switching remain blocked until the required evidence exists.
+
 ### Sabalan Design System
 
 Every interactive frontend change must use the platform-owned Sabalan Design System. Read `docs/design-system/catalog.md` before changing UI and use `frontend/src/components/erp` plus `frontend/src/styles/design-system-tokens.css`; Guard and Contract Product Selection are references, not sources of domain-specific shared concepts.

@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import { PrismaClient } from '@prisma/client';
 import {
   finalizePromotedRecovery,
@@ -94,10 +95,8 @@ export const initializeSystemRecovery = async (prisma: PrismaClient) => {
 };
 
 export const startSystemRecoveryMaintenance = (prisma: PrismaClient) => {
-  const timer = setInterval(() => {
-    cleanupExpiredPackages(prisma).then(() => notifyStaleBackup(prisma)).catch((error) => {
-      console.error('System recovery maintenance failed:', error);
-    });
-  }, 60 * 60 * 1000);
-  timer.unref();
+  return startBackgroundJob({ name: 'recovery-retention', intervalMs: 60 * 60 * 1000,
+    initialDelayMs: 60 * 60 * 1000,
+    run: async () => { await cleanupExpiredPackages(prisma); await notifyStaleBackup(prisma); },
+  });
 };

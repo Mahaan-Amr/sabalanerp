@@ -1,4 +1,6 @@
 import { startBiometricStagedCaptureMaintenance } from './services/biometricStagedCaptureMaintenance';
+import { stopBackgroundJobs } from './services/backgroundJobLifecycle';
+import { resolveRuntimeRole, startRuntime } from './services/runtimeStartup';
 import { disconnectDatabase, prisma } from './lib/prisma';
 import { validateProductionEnvironment } from './services/productionEnvironment';
 import express from "express";
@@ -93,6 +95,7 @@ import {
   getRecoveryRuntimeState,
   initializeRecoveryRuntime,
   recoveryWriteGuard,
+  waitForActiveWrites,
 } from "./services/recoveryRuntime";
 import {
   initializeSystemRecovery,
@@ -111,7 +114,8 @@ import { resolveHrRedesignCutoverStartup } from "./services/hrRedesignCutoverSta
 import { startPersonnelPerformanceMaintenance } from "./services/personnelPerformanceMaintenance";
 import { startOrdinaryContractExpiry } from './services/ordinaryContractLifecycle';
 
-initializeRecoveryRuntime();
+const runtimeRole = resolveRuntimeRole(process.env.BACKEND_RUNTIME_ROLE);
+if (runtimeRole === 'standalone') initializeRecoveryRuntime();
 registerPartnerNotificationAccess(inquiryNotificationAccess);
 const app = express();
 app.set("trust proxy", 1);
@@ -149,6 +153,15 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(helmet());
+app.use((req, res, next) => {
+  const probe = req.path === '/api/health' || req.path === '/api/ready';
+  if (!probe && (isShuttingDown || runtimeRole === 'candidate')) {
+    res.status(503).json({ success: false, error: isShuttingDown ? 'RUNTIME_DRAINING' : 'CANDIDATE_NOT_ACTIVE',
+      message: 'سامانه در حال آماده‌سازی نسخه است؛ کمی بعد دوباره تلاش کنید.' });
+    return;
+  }
+  next();
+});
 app.use(
   cors({
     origin: resolveCorsOrigin(),
@@ -313,7 +326,7 @@ app.get("/api/ready", async (req, res) => {
   }
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ ready: true });
+    res.json({ ready: true, runtimeRole });
   } catch (error) {
     res.status(503).json({ ready: false });
   }
@@ -321,6 +334,7 @@ app.get("/api/ready", async (req, res) => {
 
 // Socket.io connections use the same authoritative, revocable session cookie as HTTP.
 io.use(async (socket, next) => {
+  if (runtimeRole === 'candidate' || isShuttingDown) return next(new Error('Runtime is not accepting connections'));
   try {
     const token = parseCookies(socket.handshake.headers.cookie)[SESSION_COOKIE];
     if (!token) return next(new Error("Authentication required"));
@@ -359,36 +373,41 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Start only after interrupted recovery has been finalized or safely rolled back.
-initializeSystemRecovery(prisma).then(async () => {
-  if (hrRedesignCutoverStartup.enabled) {
-    const acceptanceAttestation = JSON.parse(await readFile(hrRedesignCutoverStartup.acceptancePath!, "utf8")) as unknown;
-    await verifyHrRedesignCutover(prisma, {
-      acceptanceAttestation,
-      sourceRevision: hrRedesignCutoverStartup.sourceRevision!,
-    });
-  }
-  if (getRecoveryRuntimeState().mode === "NORMAL") {
-    startAuthenticationRetentionCleanup(prisma);
-    startHiringInvitationDeliveryPolling(prisma);
-    startPersonnelErasureRecovery(prisma);
-    startSystemRecoveryMaintenance(prisma);
-    startNotificationOutboxDelivery(prisma, (userId, notification) => {
-      io.to(`user-${userId}`).emit("notification.created", notification);
-    });
-    startSupportTicketMaintenance(prisma);
-    startDispatchBuyerSmsDelivery(prisma);
-    startContractCancellationNoticeDelivery(prisma);
-    startAccountingTaxpayerOutboxDelivery(prisma);
-    startCrossWorkspaceDutyDeadlineMaintenance(prisma);
-    startPersonnelPerformanceMaintenance(prisma);
-    startOrdinaryContractExpiry(prisma);
-    stopBiometricStagedCaptureMaintenance = startBiometricStagedCaptureMaintenance(prisma);
-    startPartnerInquiryNotificationDelivery(prisma);
-  }
-  server.listen(PORT, () => {
+startRuntime(runtimeRole, {
+  initializeRecovery: () => initializeSystemRecovery(prisma),
+  verifyCutover: async () => {
+    if (hrRedesignCutoverStartup.enabled) {
+      const acceptanceAttestation = JSON.parse(await readFile(hrRedesignCutoverStartup.acceptancePath!, "utf8")) as unknown;
+      await verifyHrRedesignCutover(prisma, {
+        acceptanceAttestation,
+        sourceRevision: hrRedesignCutoverStartup.sourceRevision!,
+      });
+    }
+  },
+  startWorkers: () => {
+    if (getRecoveryRuntimeState().mode === "NORMAL") {
+      startAuthenticationRetentionCleanup(prisma);
+      startHiringInvitationDeliveryPolling(prisma);
+      startPersonnelErasureRecovery(prisma);
+      startSystemRecoveryMaintenance(prisma);
+      startNotificationOutboxDelivery(prisma, (userId, notification) => {
+        io.to(`user-${userId}`).emit("notification.created", notification);
+      });
+      startSupportTicketMaintenance(prisma);
+      startDispatchBuyerSmsDelivery(prisma);
+      startContractCancellationNoticeDelivery(prisma);
+      startAccountingTaxpayerOutboxDelivery(prisma);
+      startCrossWorkspaceDutyDeadlineMaintenance(prisma);
+      startPersonnelPerformanceMaintenance(prisma);
+      startOrdinaryContractExpiry(prisma);
+      stopBiometricStagedCaptureMaintenance = startBiometricStagedCaptureMaintenance(prisma);
+      startPartnerInquiryNotificationDelivery(prisma);
+    }
+  },
+  listen: () => server.listen(PORT, () => {
     console.log(`? Server running on port ${PORT}`);
     console.log(`? Health check: http://localhost:${PORT}/api/health`);
-  });
+  }),
 }).catch((error) => {
   console.error("Backend startup blocked:", error);
   process.exitCode = 1;
@@ -402,24 +421,22 @@ const shutdown = async (signal: NodeJS.Signals) => {
   stopBiometricStagedCaptureMaintenance?.();
   console.log(`Received ${signal}; draining connections before shutdown.`);
 
-  const forcedExit = setTimeout(() => {
-    console.error("Graceful shutdown timed out.");
-    process.exit(1);
-  }, 25_000);
-  forcedExit.unref();
-
   try {
+    // Stop admission before closing sockets; callbacks already running must finish.
+    await stopBackgroundJobs(120_000);
+    await waitForActiveWrites(120_000);
     if (server.listening) {
       await new Promise<void>((resolve, reject) => {
         io.close((error) => (error ? reject(error) : resolve()));
       });
     }
     await disconnectDatabase();
-    clearTimeout(forcedExit);
     process.exit(0);
   } catch (error) {
     console.error("Graceful shutdown failed:", error);
-    process.exit(1);
+    // Keep the process and pool alive for unfinished work. Readiness stays false;
+    // the deployment must fail closed rather than claim that this runtime drained.
+    process.exitCode = 1;
   }
 };
 

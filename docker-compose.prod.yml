@@ -62,7 +62,7 @@ services:
         ALL_PROXY: ${ALL_PROXY:-}
         all_proxy: ${all_proxy:-}
     restart: unless-stopped
-    stop_grace_period: 30s
+    stop_grace_period: 5m
     environment:
       NODE_ENV: production
       PORT: 5000

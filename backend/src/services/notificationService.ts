@@ -1,4 +1,5 @@
 import type { Notification, Prisma, PrismaClient } from '@prisma/client';
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import webPush from 'web-push';
 import {
   materializeNotificationEvent,
@@ -434,17 +435,13 @@ export const startNotificationOutboxDelivery = (
       running = false;
     }
   };
-  void run();
-  const timer = setInterval(() => void run(), 1_000);
-  timer.unref?.();
-  const runDigest = () => void deliverDailyWebPushDigests(prisma).catch((error) => {
+  const stopDelivery = startBackgroundJob({ name: 'notification-outbox', intervalMs: 1_000, run });
+  const runDigest = () => deliverDailyWebPushDigests(prisma).catch((error) => {
     console.error('Daily Web Push digest delivery failed:', error);
   });
-  void runDigest();
-  const digestTimer = setInterval(runDigest, 60_000);
-  digestTimer.unref?.();
+  const stopDigest = startBackgroundJob({ name: 'notification-digest', intervalMs: 60_000, run: runDigest });
   return () => {
-    clearInterval(timer);
-    clearInterval(digestTimer);
+    stopDelivery();
+    stopDigest();
   };
 };

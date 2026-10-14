@@ -117,7 +117,7 @@ test('provisioning rejects unsupported fields, injection and overwriting an exis
   } finally { dispose(f); }
 });
 
-for (const failure of ['preflight', 'checkpoint', 'after-mutation', 'success']) test(`configuration release retains gates and recovers failure at ${failure} without source fetch/build`, () => {
+for (const failure of ['storage', 'preflight', 'checkpoint', 'after-mutation', 'success']) test(`configuration release retains gates and recovers failure at ${failure} without source fetch/build`, () => {
   const f = fixture();
   let originalFailure;
   try {
@@ -153,6 +153,7 @@ else{process.exit(99);}`);
     fs.writeFileSync(path.join(bin, 'docker'), `#!/bin/sh\ncase "$*" in *pg_sleep*) exec /usr/bin/sleep 300;; esac\nexec node '${fakeDocker.replaceAll('\\', '/')}' "$@"\n`, { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$TEST_GIT_LOG"\ncase "$1" in diff) exit 0;; rev-parse) printf 'cccccccccccccccccccccccccccccccccccccccc\\n';; *) exit 99;; esac\n`, { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'flock'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'sh'), '#!/bin/sh\ncase "$1" in */storage-preflight.sh) printf \'["storage-preflight"]\\n\' >> "$TEST_LOG"; [ "$TEST_FAILURE" != storage ] || exit 45; exit 0;; *) exec /usr/bin/sh "$@";; esac\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'curl'), '#!/bin/sh\nprintf 503\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'sleep'), '#!/bin/sh\nexec /usr/bin/sleep 0.02\n', { mode: 0o755 });
     const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/sh';
@@ -161,12 +162,13 @@ else{process.exit(99);}`);
       encoding: 'utf8', timeout: 120000,
       env: { ...process.env, TEST_BIN: shellBin, TEST_SCRIPT: path.join(repository, 'deploy/scripts/deploy.sh').replaceAll('\\', '/'), TEST_ENV: f.environment.replaceAll('\\', '/'), DEPLOYMENT_MODE: 'configuration', DEPLOYMENT_REPO_ROOT: f.root.replaceAll('\\', '/'), DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE: f.provisioning.replaceAll('\\', '/'), TEST_LOG: log, TEST_GIT_LOG: path.join(f.root, 'git.log'), TEST_CONTAINERS: recordsFile, TEST_REPORTS: reports, TEST_FAILURE: failure },
     });
-    assert.equal(result.status, { preflight: 42, checkpoint: 43, 'after-mutation': 44, success: 0 }[failure], `${result.stdout}\n${result.stderr}`);
+    assert.equal(result.status, { storage: 45, preflight: 42, checkpoint: 43, 'after-mutation': 44, success: 0 }[failure], `${result.stdout}\n${result.stderr}`);
     const commands = fs.readFileSync(log, 'utf8');
     assert.ok(!commands.includes('"build"'));
-    assert.equal(commands.includes('deployment-checkpoint.js'), failure !== 'preflight');
+    assert.ok(commands.includes('storage-preflight'));
+    assert.equal(commands.includes('deployment-checkpoint.js'), !['storage', 'preflight'].includes(failure));
     assert.equal(commands.includes('db:migrate:deploy'), ['after-mutation', 'success'].includes(failure));
-    assert.equal(commands.includes('maintenance-on'), failure !== 'preflight');
+    assert.equal(commands.includes('maintenance-on'), !['storage', 'preflight'].includes(failure));
     if (failure === 'after-mutation') assert.ok(commands.includes('deployment-rollback.js'));
     assert.ok(!/fetch|pull|checkout/.test(fs.readFileSync(path.join(f.root, 'git.log'), 'utf8')));
     if (failure === 'success') { assert.ok(fs.readFileSync(f.environment, 'utf8').includes('LAPTOP-01')); assert.ok(!commands.includes('deployment-rollback.js')); } else assert.equal(fs.readFileSync(f.environment, 'utf8'), before);

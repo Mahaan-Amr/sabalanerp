@@ -1,3 +1,4 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Prisma, type PrismaClient } from '@prisma/client';
@@ -244,8 +245,5 @@ export const startSupportTicketMaintenance = (prisma: PrismaClient) => {
     catch (error) { console.error('Support ticket maintenance failed:', error); }
     finally { running = false; }
   };
-  void run();
-  const timer = setInterval(() => void run(), 60 * 60 * 1_000);
-  timer.unref?.();
-  return () => clearInterval(timer);
+  return startBackgroundJob({ name: 'startSupportTicketMaintenance', intervalMs: 60 * 60 * 1_000, run });
 };

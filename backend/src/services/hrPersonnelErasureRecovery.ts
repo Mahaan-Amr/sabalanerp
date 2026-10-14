@@ -1,3 +1,4 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import { Prisma, PrismaClient } from '@prisma/client';
 import crypto from 'node:crypto';
 import { restoreStagedHiringFiles } from './hrDeletionFileTransaction';
@@ -92,7 +93,5 @@ export const recoverInterruptedPersonnelErasures = async (prisma: PrismaClient, 
 
 export const startPersonnelErasureRecovery = (prisma: PrismaClient) => {
   const run = () => recoverInterruptedPersonnelErasures(prisma).catch((error) => console.error('Personnel erasure recovery failed:', error));
-  run();
-  const timer = setInterval(run, RECOVERY_INTERVAL_MS);
-  timer.unref();
+  return startBackgroundJob({ name: 'startPersonnelErasureRecovery', intervalMs: RECOVERY_INTERVAL_MS, run });
 };

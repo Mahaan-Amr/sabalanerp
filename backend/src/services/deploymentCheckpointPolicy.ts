@@ -34,29 +34,17 @@ export const planLocalCheckpointCleanup = (input: {
   };
 };
 
-export type RemoteCheckpointArtifact = LocalCheckpointArtifact & { releaseId: string };
+export type RemoteCheckpointArtifact = LocalCheckpointArtifact & { releaseId: string; restoreVerified?: boolean };
 
 export const planRemoteCheckpointRetention = (artifacts: RemoteCheckpointArtifact[]) => {
   const verified = artifacts
-    .filter((artifact) => artifact.remoteVerified)
-    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
-  const keep = new Set<string>();
-  const recentReleases = new Set<string>();
-  for (const artifact of verified) {
-    if (recentReleases.size >= 10 && !recentReleases.has(artifact.releaseId)) continue;
-    recentReleases.add(artifact.releaseId);
-    keep.add(artifact.id);
-  }
-  const months = new Set<string>();
-  for (const artifact of verified) {
-    const month = artifact.createdAt.toISOString().slice(0, 7);
-    if (months.has(month)) continue;
-    if (months.size >= 12) break;
-    months.add(month);
-    keep.add(artifact.id);
-  }
+    .filter((artifact) => artifact.remoteVerified && artifact.restoreVerified === true
+      && Number.isFinite(artifact.createdAt.getTime()))
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime() || right.id.localeCompare(left.id));
+  const keep = new Set(verified.slice(0, 2).map(artifact => artifact.id));
   for (const artifact of artifacts) {
-    if (artifact.active || artifact.incidentOpen || !artifact.remoteVerified) keep.add(artifact.id);
+    if (artifact.active || artifact.incidentOpen || !artifact.remoteVerified || artifact.restoreVerified !== true
+      || !Number.isFinite(artifact.createdAt.getTime()) || verified.length < 2) keep.add(artifact.id);
   }
   return {
     keepIds: [...keep],

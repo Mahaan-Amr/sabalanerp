@@ -1,3 +1,4 @@
+import { startBackgroundJob } from './backgroundJobLifecycle';
 import type { PrismaClient } from '@prisma/client';
 import { CONTRACT_DISPATCH_DUTY_DEFINITIONS, contractDispatchDutyAdapter, syncContractDispatchDutyDefinitions } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import { hrWorkItemDutyAdapter } from './crossWorkspaceDutyAdapters/hrWorkItemDutyAdapter';
@@ -198,10 +199,7 @@ export const startCrossWorkspaceDutyDeadlineMaintenance = (prisma: PrismaClient)
       running = false;
     }
   };
-  void run();
-  const timer = setInterval(() => void run(), 60_000);
-  timer.unref?.();
-  return () => clearInterval(timer);
+  return startBackgroundJob({ name: 'startCrossWorkspaceDutyDeadlineMaintenance', intervalMs: 60_000, run });
 };
 
 export type {

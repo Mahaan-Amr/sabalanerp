@@ -1,3 +1,4 @@
+import { startBackgroundJob } from '../../backgroundJobLifecycle';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import * as PartnerContracts from '@sabalanerp/partner-sales-contracts';
 import { createPrismaPartnerAuthorizationV2 } from '../authorization/prisma';
@@ -168,8 +169,5 @@ export function startPartnerInquiryNotificationDelivery(database: PrismaClient) 
     catch (error) { console.error('Partner inquiry notification delivery failed:', error); }
     finally { running = false; }
   };
-  void run();
-  const timer = setInterval(() => void run(), 1_000);
-  timer.unref?.();
-  return () => clearInterval(timer);
+  return startBackgroundJob({ name: 'startPartnerInquiryNotificationDelivery', intervalMs: 1_000, run });
 }

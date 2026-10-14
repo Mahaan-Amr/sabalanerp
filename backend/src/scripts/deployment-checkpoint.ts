@@ -4,6 +4,7 @@ import { disconnectDatabase, prisma } from '../lib/prisma';
 import {
   directorySize,
   enforceFilesystemRemoteRetention,
+  enforceLocalCheckpointRetention,
   ensureLocalCapacity,
   estimateCheckpointCapacity,
   FilesystemRemoteCheckpointStore,
@@ -79,7 +80,7 @@ const main = async () => {
     auditPath,
   });
   const remote = new FilesystemRemoteCheckpointStore(remoteRoot);
-  const preUploadRemoteRetention = await enforceFilesystemRemoteRetention(remoteRoot, deploymentId);
+  const preUploadRemoteRetention = await enforceFilesystemRemoteRetention(remoteRoot, deploymentId, packagesRoot);
   const remoteCapacity = await remote.assertAvailable(capacity.requiredRemoteBytes);
 
   const result = await createRecoveryPackage({
@@ -93,6 +94,7 @@ const main = async () => {
     onProgress: async (progress) => console.log(JSON.stringify({ event: 'checkpoint-progress', progress })),
   });
   const localValidation = await validateRecoveryPackage({ sourcePath: result.destination, passphrase: localKey, prisma, verifyRestore: true });
+  if (!localValidation.compatibility.compatible) throw new Error('DEPLOYMENT_CHECKPOINT_INCOMPATIBLE');
 
   const objectKey = `${releaseId}/${deploymentId}.sabrec`;
   // The local package has already passed decrypt, manifest, compatibility, and
@@ -116,6 +118,7 @@ const main = async () => {
     size: uploaded.size,
     remoteVerified: true,
     localVerified: true,
+    restoreVerified: true,
     manifestReadable: Boolean(localValidation.manifest),
     compatibility: { local: localValidation.compatibility, remote: localValidation.compatibility },
     capacity: { estimate: capacity, localAvailableBytes: localCapacity.availableBytes, remoteAvailableBytes: remoteCapacity.availableBytes },
@@ -143,14 +146,15 @@ const main = async () => {
       code: 'DEPLOYMENT_REMOTE_MANIFEST_MISMATCH',
     });
   }
-  const remoteRetention = await enforceFilesystemRemoteRetention(remoteRoot, deploymentId);
+  const remoteRetention = await enforceFilesystemRemoteRetention(remoteRoot, deploymentId, packagesRoot);
+  const localRetention = await enforceLocalCheckpointRetention(packagesRoot, remoteRoot, deploymentId, remoteRetention);
   await fs.promises.writeFile(coordinationMetadataPath, `${JSON.stringify({ ...metadata, metadataPath: localMetadataPath }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   try {
     await prisma.deploymentOperation.update({ where: { id: deploymentId }, data: { checkpointJson: metadata as any } });
   } catch (error: any) {
     if (process.env.DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP !== 'true' || error?.code !== 'P2021') throw error;
   }
-  console.log(JSON.stringify({ ok: true, checkpoint: metadata, preUploadRemoteRetention, remoteRetention }));
+  console.log(JSON.stringify({ ok: true, checkpoint: metadata, preUploadRemoteRetention, remoteRetention, localRetention }));
 };
 
 main()

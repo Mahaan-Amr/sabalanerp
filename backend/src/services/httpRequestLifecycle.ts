@@ -1,6 +1,6 @@
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 
-type RequestWork = { responseDone: boolean; handlers: Set<symbol>; onFinish: Set<() => void> };
+type RequestWork = { responseDone: boolean; mutation: boolean; writes: number; handlers: Set<symbol>; onFinish: Set<() => void> };
 type Layer = { handle: Function; route?: { stack: Layer[] }; };
 type RouterStack = { stack?: Layer[]; _router?: RouterStack };
 
@@ -17,7 +17,8 @@ export class HttpRequestLifecycle {
     const pathname = req.originalUrl.split('?')[0];
     if (pathname === '/api/health' || pathname === '/api/ready'
       || pathname === '/api/system-recovery' || pathname.startsWith('/api/system-recovery/')) return next();
-    const work: RequestWork = { responseDone: false, handlers: new Set(), onFinish: new Set() };
+    const work: RequestWork = { responseDone: false, mutation: !['GET', 'HEAD', 'OPTIONS'].includes(req.method),
+      writes: 0, handlers: new Set(), onFinish: new Set() };
     this.requests.set(req, work);
     this.active.add(work);
     const done = () => { work.responseDone = true; this.releaseIfDone(work); };
@@ -40,9 +41,10 @@ export class HttpRequestLifecycle {
     if (!work) return run();
     const token = Symbol();
     work.handlers.add(token);
+    work.writes += 1;
     this.active.add(work);
     try { return await run(); }
-    finally { work.handlers.delete(token); this.releaseIfDone(work); }
+    finally { work.writes -= 1; work.handlers.delete(token); this.releaseIfDone(work); }
   }
 
   private invoke(handler: Function, receiver: unknown, parameters: unknown[], req: Request, res: Response, next: NextFunction) {
@@ -103,11 +105,15 @@ export class HttpRequestLifecycle {
     visit(application as unknown as RouterStack);
   }
 
-  async waitForDrain(timeoutMs: number) {
+  private async wait(timeoutMs: number, writesOnly: boolean) {
     const deadline = Date.now() + timeoutMs;
-    while (this.active.size && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
-    if (this.active.size) throw new Error('HTTP_REQUEST_DRAIN_TIMEOUT');
+    const pending = () => [...this.active].some(work => !writesOnly || work.mutation || work.writes > 0);
+    while (pending() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+    if (pending()) throw new Error('HTTP_REQUEST_DRAIN_TIMEOUT');
   }
+
+  waitForDrain(timeoutMs: number) { return this.wait(timeoutMs, false); }
+  waitForWriteDrain(timeoutMs: number) { return this.wait(timeoutMs, true); }
 }
 
 export const runtimeHttpRequests = new HttpRequestLifecycle();

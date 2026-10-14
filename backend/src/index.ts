@@ -426,8 +426,11 @@ const shutdown = async (signal: NodeJS.Signals) => {
 
   try {
     // Stop admission before closing sockets; callbacks already running must finish.
-    await stopBackgroundJobs(120_000);
-    await waitForActiveWrites(120_000);
+    await Promise.all([
+      stopBackgroundJobs(240_000),
+      waitForActiveWrites(240_000),
+      runtimeHttpRequests.waitForDrain(240_000),
+    ]);
     if (server.listening) {
       await new Promise<void>((resolve, reject) => {
         io.close((error) => (error ? reject(error) : resolve()));

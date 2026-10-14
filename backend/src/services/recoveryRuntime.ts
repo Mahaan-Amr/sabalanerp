@@ -105,7 +105,7 @@ export const recoveryWriteGuard = (req: Request, res: Response, next: NextFuncti
 
 export const waitForActiveWrites = async (timeoutMs = 30_000) => {
   const deadline = Date.now() + timeoutMs;
-  await runtimeHttpRequests.waitForDrain(timeoutMs);
+  await runtimeHttpRequests.waitForWriteDrain(timeoutMs);
   while (activeWrites > 0 && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }

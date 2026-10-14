@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import http from 'node:http';
 import express from 'express';
-import { HttpRequestLifecycle } from '../httpRequestLifecycle';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { HttpRequestLifecycle, runtimeHttpRequests } from '../httpRequestLifecycle';
 
 test('disconnecting a client does not drain its unfinished async business handler', async () => {
   const lifecycle = new HttpRequestLifecycle();
@@ -78,12 +81,12 @@ test('late callback middleware hands off unfinished work without a false drained
   } finally { complete(); request.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 
-test('response-completion audit work remains part of the drain after the handler returns', async () => {
+test('GET response-completion audit work remains part of the write drain after the handler returns', async () => {
   const lifecycle = new HttpRequestLifecycle(); const app = express();
   let complete!: () => void;
   const audit = new Promise<void>(resolve => { complete = resolve; });
   app.use(lifecycle.middleware);
-  app.post('/audit', (req, res) => {
+  app.get('/audit', (req, res) => {
     res.once('finish', () => { void lifecycle.trackWork(req, () => audit); });
     res.json({ ok: true });
   });
@@ -92,8 +95,47 @@ test('response-completion audit work remains part of the drain after the handler
   await new Promise<void>(resolve => server.once('listening', resolve));
   const port = (server.address() as { port: number }).port;
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/audit`, { method: 'POST' }); await response.text();
-    await assert.rejects(lifecycle.waitForDrain(30), /HTTP_REQUEST_DRAIN_TIMEOUT/);
-    complete(); await lifecycle.waitForDrain(1000);
+    const response = await fetch(`http://127.0.0.1:${port}/audit`); await response.text();
+    await assert.rejects(lifecycle.waitForWriteDrain(30), /HTTP_REQUEST_DRAIN_TIMEOUT/);
+    complete(); await lifecycle.waitForWriteDrain(1000);
   } finally { complete(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test('READ_ONLY backup drains mutations while a permitted read remains open; retirement still waits for both', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sabalan-http-readonly-'));
+  const previous = process.env.RECOVERY_COORDINATION_DIR;
+  process.env.RECOVERY_COORDINATION_DIR = root;
+  const recovery = await import('../recoveryRuntime');
+  let readEntered!: () => void; let writeEntered!: () => void; let finishRead!: () => void; let finishWrite!: () => void;
+  const readReady = new Promise<void>(resolve => { readEntered = resolve; });
+  const writeReady = new Promise<void>(resolve => { writeEntered = resolve; });
+  const read = new Promise<void>(resolve => { finishRead = resolve; });
+  const write = new Promise<void>(resolve => { finishWrite = resolve; });
+  const app = express();
+  app.use(runtimeHttpRequests.middleware); app.use(recovery.recoveryWriteGuard);
+  app.get('/read', async (_req, res) => { readEntered(); await read; res.end(); });
+  app.post('/write', async (_req, res) => { writeEntered(); await write; res.end(); });
+  runtimeHttpRequests.install(app);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const port = (server.address() as { port: number }).port;
+  const readRequest = http.request({ host: '127.0.0.1', port, path: '/read' });
+  const writeRequest = http.request({ host: '127.0.0.1', port, path: '/write', method: 'POST' });
+  readRequest.on('error', () => {}); writeRequest.on('error', () => {});
+  readRequest.end(); writeRequest.end();
+  try {
+    await Promise.all([readReady, writeReady]);
+    recovery.setRecoveryRuntimeState('READ_ONLY');
+    await assert.rejects(recovery.waitForActiveWrites(30), /HTTP_REQUEST_DRAIN_TIMEOUT/);
+    finishWrite();
+    await recovery.waitForActiveWrites(1000);
+    await assert.rejects(runtimeHttpRequests.waitForDrain(30), /HTTP_REQUEST_DRAIN_TIMEOUT/);
+    finishRead(); await runtimeHttpRequests.waitForDrain(1000);
+  } finally {
+    finishRead(); finishWrite(); readRequest.destroy(); writeRequest.destroy();
+    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+    recovery.setRecoveryRuntimeState('NORMAL');
+    if (previous === undefined) delete process.env.RECOVERY_COORDINATION_DIR; else process.env.RECOVERY_COORDINATION_DIR = previous;
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

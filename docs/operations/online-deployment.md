@@ -20,6 +20,8 @@ Stage a reviewed root-owned, non-writable operations bundle at `/opt/sabalanerp-
 
 Configure the host, accounts, operations key and pinned known-hosts file from `deploy/.env.prod.template`. Mount SFTP using the separate transfer key; preflight verifies the exact source `sabalan-backup@<host>:/checkpoints`. Independently test authentication, forbidden commands, jail escape prevention, decryption-key separation and full restore before deployment. Having provisioning code in Git does not mean it has run on a server.
 
+On 2026-10-14 the restricted accounts and trusted operations bundle were provisioned on the existing backup host. Real key authentication, SFTP upload/read-back equality and cleanup of the diagnostic file, denied `/root` access, three forbidden operations commands and a successful capacity preflight were observed. Existing Fintech container identities/images remained present. Production transport keys/mount configuration, real checkpoint transfer, independent decryption authority and a full restore are still pending. The production application was not updated.
+
 ## Admission work still required
 
 1. Prove continuous coherent recovery: PostgreSQL base/WAL coverage, immutable file versions/deletion lineage, consistent Inquiry SQLite/coordination, retrievable compatible image bytes, privacy/erasure, encryption and independent restoration. Verify coverage throughout release.

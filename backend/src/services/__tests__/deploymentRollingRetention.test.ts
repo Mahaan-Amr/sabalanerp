@@ -91,6 +91,8 @@ test('obsolete local copies are retired only after two independent replacements 
 test('retention resumes interrupted deletions and carries remote retirement evidence across pre/post upload passes', async context => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sabalan-retention-resume-'));
   const originalUnlink = fs.unlink.bind(fs);
+  const originalOpen = fs.open.bind(fs);
+  let completionFailure = true;
   try {
     const local = path.join(root, 'local'); const remote = path.join(root, 'remote');
     await fs.mkdir(local); await fs.mkdir(remote);
@@ -110,6 +112,21 @@ test('retention resumes interrupted deletions and carries remote retirement evid
       return originalUnlink(file);
     });
     await assert.rejects(enforceFilesystemRemoteRetention(remote, 'backup-4', local), /simulated interruption/);
+    context.mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
+      const handle = await originalOpen(...args);
+      if (String(args[0]) === path.join(remote, 'retention-audit.jsonl')) {
+        const originalWrite = handle.writeFile.bind(handle);
+        handle.writeFile = (async (...writeArgs: Parameters<typeof handle.writeFile>) => {
+          if (String(writeArgs[0]).includes('RETENTION_COMPLETED') && completionFailure) {
+            completionFailure = false;
+            throw new Error('simulated completion interruption');
+          }
+          return originalWrite(...writeArgs);
+        }) as typeof handle.writeFile;
+      }
+      return handle;
+    });
+    await assert.rejects(enforceFilesystemRemoteRetention(remote, 'backup-4', local), /simulated completion interruption/);
     await enforceFilesystemRemoteRetention(remote, 'backup-4', local);
     await create(4);
     const postUpload = await enforceFilesystemRemoteRetention(remote, 'backup-4', local);

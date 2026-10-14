@@ -472,6 +472,9 @@ export const enforceFilesystemRemoteRetention = async (root: string, activeDeplo
     }
     await appendRetentionAudit(root, { id, checksum: artifact.checksum, event: 'RETENTION_INTENT' });
     if (archivePresent) await fs.promises.unlink(artifact.archivePath);
+    // Persist retirement before removing the sidecar that links this remote point
+    // to its local copy. A crash after sidecar removal must remain recoverable.
+    await appendRetentionAudit(root, { id, checksum: artifact.checksum, event: 'RETENTION_ARCHIVE_REMOVED' });
     await fs.promises.unlink(artifact.metadataPath);
     await appendRetentionAudit(root, { id, checksum: artifact.checksum, event: 'RETENTION_COMPLETED' });
     audit.push({ id, releaseId: artifact.releaseId, checksum: artifact.checksum, size: artifact.size, reason: 'TWO_VERIFIED_COMPLETE_RECOVERY_POINTS', result: 'DELETED' });
@@ -537,7 +540,7 @@ export const enforceLocalCheckpointRetention = async (
       throw new Error('DEPLOYMENT_LOCAL_RETENTION_EVIDENCE_CHANGED');
     }
     const remoteEvidence = remoteRetention.protectionEvidence.find(point => point.id === artifact.id)
-      || (artifact.remotePath && await hasRetentionEvent(independentRoot, artifact, 'RETENTION_COMPLETED')
+      || (artifact.remotePath && await hasRetentionEvent(independentRoot, artifact, 'RETENTION_ARCHIVE_REMOVED')
         ? { id: artifact.id, metadataPath: `${artifact.remotePath}.json` } : undefined);
     if (!remoteEvidence) throw new Error('DEPLOYMENT_LOCAL_RETENTION_REMOTE_EVIDENCE_MISSING');
     try {
@@ -555,7 +558,7 @@ export const enforceLocalCheckpointRetention = async (
       // Absence is expected only for an archive actually pruned by this operation.
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT'
         || (!remoteRetention.audit.some(entry => entry.id === artifact.id && entry.result === 'DELETED')
-          && !await hasRetentionEvent(independentRoot, artifact, 'RETENTION_COMPLETED'))) throw error;
+          && !await hasRetentionEvent(independentRoot, artifact, 'RETENTION_ARCHIVE_REMOVED'))) throw error;
     }
     for (const point of points) await assertRemoteCheckpointFingerprint(point.remotePath, point.fingerprint);
     await appendRetentionAudit(root, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_INTENT' });

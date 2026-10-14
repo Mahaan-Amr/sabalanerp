@@ -75,6 +75,12 @@ test('obsolete local copies are retired only after two independent replacements 
     await assert.rejects(enforceFilesystemRemoteRetention(remote, 'backup-3', local));
     assert.equal(await fs.readFile(path.join(remote, 'backup-1.sabrec'), 'utf8'), 'checkpoint-1');
     await fs.writeFile(heldMetadata, JSON.stringify(held));
+    const remoteHeldMetadata = path.join(remote, 'backup-1.sabrec.json');
+    await fs.writeFile(remoteHeldMetadata, JSON.stringify({ ...held, incidentOpen: true }));
+    const remoteHeld = await enforceFilesystemRemoteRetention(remote, 'backup-3', local);
+    await enforceLocalCheckpointRetention(local, remote, 'backup-3', remoteHeld);
+    assert.equal(await fs.readFile(path.join(local, 'backup-1.sabrec'), 'utf8'), 'checkpoint-1');
+    await fs.writeFile(remoteHeldMetadata, JSON.stringify(held));
     const retained = await enforceFilesystemRemoteRetention(remote, 'backup-3', local);
     await enforceLocalCheckpointRetention(local, remote, 'backup-3', retained);
     await assert.rejects(fs.stat(path.join(local, 'backup-1.sabrec')), { code: 'ENOENT' });

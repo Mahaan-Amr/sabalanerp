@@ -6,7 +6,7 @@ import { dockerStorageAdapter, executeStorageCleanup, planStorageCleanup } from 
 
 export async function storagePreflight(args) {
   const values = new Map();
-  const allowed = new Set(['--lock-file', '--lock-fd', '--checkpoint-root', '--project', '--storage-root', '--required-bytes', '--document', '--protected-image', '--audit', '--mode']);
+  const allowed = new Set(['--lock-file', '--lock-fd', '--checkpoint-root', '--journal-root', '--project', '--storage-root', '--required-bytes', '--document', '--protected-image', '--audit', '--mode']);
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index];
     if (!allowed.has(key) || args[index + 1] === undefined) throw new Error('STORAGE_ARGUMENT_INVALID');
@@ -38,6 +38,7 @@ export async function storagePreflight(args) {
   if (!Number.isSafeInteger(requiredBytes) || requiredBytes < 0) throw new Error('STORAGE_CAPACITY_INVALID');
   const adapter = dockerStorageAdapter({
     project, storageRoot, checkpointRoots, documents: values.get('--document') ?? [],
+    journalRoots: values.get('--journal-root') ?? [],
     protectedImages: values.get('--protected-image') ?? [], auditPath: one('--audit'), assertLock,
   });
   const mode = one('--mode');

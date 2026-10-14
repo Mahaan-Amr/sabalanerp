@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
 
 const exec = promisify(execFile);
 const imageId = /^sha256:[a-f0-9]{64}$/;
@@ -84,7 +85,37 @@ export async function readStorageProtection(roots, documents = []) {
   return [...images];
 }
 
-export function dockerStorageAdapter({ project, checkpointRoots, documents, protectedImages, auditPath, storageRoot, assertLock }) {
+export async function readTerminalDeployments(roots) {
+  const terminal = new Set();
+  for (const root of roots) {
+    if ((await fs.lstat(root)).isSymbolicLink()) throw new Error('STORAGE_JOURNAL_INVALID');
+    for (const file of await fs.readdir(root, { withFileTypes: true })) {
+      if (!file.name.endsWith('.journal.jsonl')) continue;
+      if (!file.isFile() || file.isSymbolicLink()) throw new Error('STORAGE_JOURNAL_INVALID');
+      const absolute = path.join(root, file.name);
+      if ((await fs.stat(absolute)).size > 32 * 1024 * 1024) throw new Error('STORAGE_JOURNAL_INVALID');
+      const entries = (await fs.readFile(absolute, 'utf8')).split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+      let previousHash = null;
+      for (const [index, entry] of entries.entries()) {
+        const { hash, ...unsigned } = entry;
+        if (entry.sequence !== index + 1 || entry.previousHash !== previousHash
+          || `${entry.deploymentId}.journal.jsonl` !== file.name
+          || createHash('sha256').update(JSON.stringify(unsigned)).digest('hex') !== hash) {
+          throw new Error('STORAGE_JOURNAL_INVALID');
+        }
+        previousHash = hash;
+      }
+      const last = entries.at(-1);
+      if (last && ['COMPLETED', 'ABORTED', 'ROLLED_BACK', 'COMPLETED_WITH_NOTIFICATION_FAILURE'].includes(last.phase)
+        && ['deployment-finished', 'preflight-cancelled-before-database-lease'].includes(last.event)) {
+        terminal.add(last.deploymentId);
+      }
+    }
+  }
+  return terminal;
+}
+
+export function dockerStorageAdapter({ project, checkpointRoots, documents, journalRoots = [], protectedImages, auditPath, storageRoot, assertLock }) {
   const docker = async args => {
     await assertLock();
     const result = await exec('docker', args, { maxBuffer: 32 * 1024 * 1024, timeout: 60_000 });
@@ -97,6 +128,7 @@ export function dockerStorageAdapter({ project, checkpointRoots, documents, prot
   return {
     async snapshot() {
       const evidence = await readStorageProtection(checkpointRoots, documents);
+      const terminal = await readTerminalDeployments(journalRoots);
       const containers = await inspect(['ps', '-aq']);
       const ids = (await docker(['image', 'ls', '-q', '--no-trunc'])).trim().split(/\s+/).filter(Boolean);
       const images = ids.length ? JSON.parse(await docker(['image', 'inspect', ...new Set(ids)])) : [];
@@ -105,8 +137,9 @@ export function dockerStorageAdapter({ project, checkpointRoots, documents, prot
         containers: containers.map(container => ({
           id: container.Id, image: container.Image, state: container.State.Status,
           project: container.Config.Labels?.['com.docker.compose.project'],
-          // Legacy stopped containers with no durable terminal attribution stay protected.
-          operationTerminal: container.Config.Labels?.['io.sabalan.operation.terminal'] === 'true',
+          // The controller emits the immutable deployment label; only a validated
+          // finalized journal can prove that operation no longer owns this container.
+          operationTerminal: terminal.has(container.Config.Labels?.['io.sabalan.deployment.id']),
         })),
         images: images.map(image => ({ id: image.Id, project: image.Config.Labels?.['com.docker.compose.project'], createdAt: image.Created })),
       };

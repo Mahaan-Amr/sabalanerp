@@ -43,6 +43,7 @@ node "$operations_root/deploy/scripts/storage-preflight.mjs" \
   --mode apply --project "$project" --lock-file "$repo_root/.deploy-state/deployment.lock" --lock-fd 9 \
   --storage-root "$docker_root" --required-bytes "$required_local" \
   --checkpoint-root "$recovery_root/packages" --checkpoint-root "$remote_root" \
+  --journal-root "$report_root" \
   --document "$coordination_root/deployment-checkpoint.json" \
   --document "$coordination_root/pending-restore.json" \
   --document "$report_root/active-deployment-session.json" \

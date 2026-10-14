@@ -456,7 +456,12 @@ export const enforceFilesystemRemoteRetention = async (root: string, activeDeplo
     id: artifact.id, checksum: artifact.checksum, size: artifact.size, createdAt: artifact.createdAt,
     remotePath: artifact.remotePath, fingerprint: fingerprints.get(artifact.id),
   }));
-  return { plan, audit, retainedPoints };
+  return {
+    plan, audit, retainedPoints,
+    protectionEvidence: inventory.map(artifact => ({
+      id: artifact.id, metadataPath: artifact.metadataPath,
+    })),
+  };
 };
 
 export const enforceLocalCheckpointRetention = async (
@@ -473,6 +478,7 @@ export const enforceLocalCheckpointRetention = async (
     try {
       const value = JSON.parse(await fs.promises.readFile(file, 'utf8')) as CheckpointObject;
       if (value.id && value.id !== activeDeploymentId && !value.active && !value.incidentOpen
+        && !remoteRetention.plan.keepIds.includes(value.id)
         && value.remoteVerified && (value.restoreVerified || (value.localVerified && value.manifestReadable && value.compatibility?.local?.compatible))
         && Date.parse(value.createdAt) < cutoff && !points.some(point => point.id === value.id)) {
         candidates.push({ ...value, metadataPath: file });
@@ -504,6 +510,24 @@ export const enforceLocalCheckpointRetention = async (
     const current = JSON.parse(await fs.promises.readFile(artifact.metadataPath, 'utf8'));
     if (current.active || current.incidentOpen || current.id !== artifact.id || current.checksum !== artifact.checksum) {
       throw new Error('DEPLOYMENT_LOCAL_RETENTION_EVIDENCE_CHANGED');
+    }
+    const remoteEvidence = remoteRetention.protectionEvidence.find(point => point.id === artifact.id);
+    if (!remoteEvidence) throw new Error('DEPLOYMENT_LOCAL_RETENTION_REMOTE_EVIDENCE_MISSING');
+    try {
+      const remotePath = await fs.promises.realpath(remoteEvidence.metadataPath);
+      if (!remotePath.startsWith(`${independentRoot}${path.sep}`)
+        || (await fs.promises.lstat(remoteEvidence.metadataPath)).isSymbolicLink()) {
+        throw new Error('DEPLOYMENT_LOCAL_RETENTION_REMOTE_EVIDENCE_UNSAFE');
+      }
+      const remote = JSON.parse(await fs.promises.readFile(remoteEvidence.metadataPath, 'utf8'));
+      if (remote.id !== artifact.id || remote.checksum !== artifact.checksum) {
+        throw new Error('DEPLOYMENT_LOCAL_RETENTION_REMOTE_EVIDENCE_CHANGED');
+      }
+      if (remote.active || remote.incidentOpen) continue;
+    } catch (error) {
+      // Absence is expected only for an archive actually pruned by this operation.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT'
+        || !remoteRetention.audit.some(entry => entry.id === artifact.id && entry.result === 'DELETED')) throw error;
     }
     for (const point of points) await assertRemoteCheckpointFingerprint(point.remotePath, point.fingerprint);
     await appendRetentionAudit(root, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_INTENT' });

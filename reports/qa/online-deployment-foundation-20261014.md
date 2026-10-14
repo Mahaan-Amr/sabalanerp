@@ -3,13 +3,15 @@
 Scope: the first safety foundation for Issue #405. This is **not** acceptance of the complete online deployment program. No production application release, online migration, backfill or traffic switch was performed.
 
 Reviewed source base: `cce0fa8da6b33f9218c8fb48eeca0d60c573d283`.
-Frozen implementation reviewed on both axes: `3db28364c18e462326fa88e2ea0cdcffd37ebb2c` on `codex/online-deployment`.
+Frozen implementation reviewed on both axes: `f4b234a17866416d770b0f9f5404d10fa0784181` on `codex/online-deployment`. Retention review was completed at `3db28364`; subsequent HTTP lifecycle changes were reviewed through this final source revision.
 
 ## Verification
 
 - Backend build (`tsc` and cutover compiler) passed; final retention changes also passed `tsc --noEmit`.
 - `architecture:check`, `test:deployment-control`, `test:system-recovery` and `test:notifications` passed. The control suite covers protected lease/checkpoint/rollback, configuration failures and existing release gates. Existing tests do not prove the unfinished online path.
 - All five real-filesystem retention tests passed, including corrupt replacement bytes, both directions of incident holds, unreadable evidence, pre/post-upload passes, interruption between archive/sidecar deletion, and failure to write final completion after both remote unlinks.
+- Six real HTTP lifecycle tests passed: disconnect before handler completion, early responses, late callback handoff, response-event GET writes, reservation before recovery closure and pure-read behavior during READ_ONLY. The separate real PostgreSQL test committed exactly one marker after HTTP disconnect, using one temporary session table and a harness-owned client in the existing local PostgreSQL service; it dropped the table and disconnected in `finally`.
+- HR duty/authorization routes, biometric/ordinary-contract maintenance gates and the personnel-performance foundation suite passed. A pre-existing authorization test failure was reproduced in the original checkout; its stale fake transaction lacked the two role-grant delegates now used by effective-access calculation. Adding empty role-grant delegates preserved the assertions and restored the test.
 - Nine storage tests passed on Linux in the existing local backend container. Docker itself was faked only at the host CLI boundary; real inherited descriptor/flock, filesystem inventory and audits were exercised. Windows run passed eight and skipped the Linux-only case.
 - Shell syntax checks passed. Commit hooks passed the design-system adoption check and all 25 design-system foundation tests; this foundation changes no interactive frontend.
 
@@ -17,9 +19,9 @@ Frozen implementation reviewed on both axes: `3db28364c18e462326fa88e2ea0cdcffd3
 
 The existing `sabalanerp-local` project retained its original six services. An opt-in candidate used compiled worktree output and one isolated database inside the existing PostgreSQL service; no second Compose project or database container was created.
 
-Candidate readiness returned 200 with role `candidate`; business GET `/api/auth/me` and POST `/api/auth/login` returned 503. The original backend stayed ready. The isolated database retained its single marker table and value, demonstrating no startup migration/seed. Shared recovery coordination `state.json` SHA-256 remained `ccb2581690dc669b11820991f740ff90c3d552532efc48ce48afdb24f6fbc957`. The candidate container and isolated database were removed afterward.
+The diagnostic was repeated with compiled output from frozen source `f4b234a1`. Candidate readiness returned 200 with role `candidate`; business GET `/api/auth/me` and POST `/api/auth/login` returned 503. The original backend stayed ready. The isolated database retained exactly one public marker table and value `17`, demonstrating no startup migration/seed. Shared recovery coordination `state.json` SHA-256 remained `ccb2581690dc669b11820991f740ff90c3d552532efc48ce48afdb24f6fbc957`. The candidate container and exact isolated database were removed afterward.
 
-This diagnostic ran against the earlier working-tree foundation; startup/worker source is unchanged in the frozen reviewed implementation. It used mounted compiled code, not a frozen immutable release image, and is not evidence of browser compatibility, actual traffic handoff or full domain overlap.
+It used mounted compiled code, not a frozen immutable release image, and is not evidence of browser compatibility, actual traffic handoff or full domain overlap.
 
 ## Independent backup host
 
@@ -33,10 +35,10 @@ Production remained on source `cce0fa8da6b33f9218c8fb48eeca0d60c573d283`; all si
 
 ## Standards
 
-The independent read-only review found and verified fixes for remote-only incident holds deleting local copies, lost deletion evidence between pre/post-upload retention calls, and interruption after both remote unlinks but before the final audit record. Its final frozen-source review reported no remaining actionable Standards findings. This is source review, not certification of online production readiness.
+The independent read-only review found and verified fixes for remote-only incident holds deleting local copies, lost deletion evidence between pre/post-upload retention calls, interruption after remote unlink before final audit, pure GET reads blocking READ_ONLY recovery and future GET response writes crossing a snapshot barrier. Early reservation and closed-admission checks resolved the latter. Its final frozen-source review reported no remaining actionable Standards findings in these foundations. This is source review, not certification of online production readiness.
 
 ## Spec
 
-The independent read-only review found and verified fixes for cross-host holds and stopped-container eligibility having no producer. Controller-run containers now receive deployment ID labels, and eligibility requires a validated finalized checksum-chain journal. Its final frozen-source review reported no remaining actionable Spec defect within the foundation. Full Issue #405 acceptance remains incomplete.
+The independent read-only review found and verified fixes for cross-host holds, stopped-container eligibility having no producer and future GET response mutations crossing the recovery boundary. Controller-run containers receive deployment ID labels, eligibility requires a validated finalized checksum-chain journal, and future response writes reserve admission before the barrier. Its final frozen-source review reported no remaining actionable Spec defect within the foundation. Full Issue #405 acceptance remains incomplete.
 
-Remaining admission evidence is enumerated in `docs/operations/online-deployment.md`: continuous coherent independently restored recovery, distributed runtime fencing, actual async HTTP completion, versioned migration compatibility, immutable routing/rollback, 24-hour browser/draft support, Inquiry lifecycle separation and domain/failure-injection acceptance. The issue remains open and the online production path remains disabled.
+Remaining admission evidence is enumerated in `docs/operations/online-deployment.md`: continuous coherent independently restored recovery, distributed runtime fencing, recovery control-task completion and remaining callback/domain drain proof, versioned migration compatibility, immutable routing/rollback, 24-hour browser/draft support, Inquiry lifecycle separation and full domain/failure-injection acceptance. The issue remains open and the online production path remains disabled.

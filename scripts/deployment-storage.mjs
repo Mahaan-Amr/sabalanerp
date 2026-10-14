@@ -55,15 +55,18 @@ export async function executeStorageCleanup(adapter) {
 
 export async function readStorageProtection(roots, documents = []) {
   const images = new Set();
-  const visit = value => {
-    if (typeof value === 'string' && imageId.test(value)) images.add(value);
-    else if (Array.isArray(value)) value.forEach(visit);
-    else if (value && typeof value === 'object') Object.values(value).forEach(visit);
+  const visit = (value, found) => {
+    if (typeof value === 'string' && imageId.test(value)) found.add(value);
+    else if (Array.isArray(value)) value.forEach(item => visit(item, found));
+    else if (value && typeof value === 'object') Object.values(value).forEach(item => visit(item, found));
   };
-  const read = async file => {
+  const read = async (file, checkpoint = false) => {
     const stat = await fs.lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16 * 1024 * 1024) throw new Error('STORAGE_EVIDENCE_INVALID');
-    visit(JSON.parse(await fs.readFile(file, 'utf8')));
+    const found = new Set();
+    visit(JSON.parse(await fs.readFile(file, 'utf8')), found);
+    if (checkpoint && found.size === 0) throw new Error('STORAGE_EVIDENCE_INVALID');
+    for (const id of found) images.add(id);
   };
   const walk = async root => {
     const entries = await fs.readdir(root, { withFileTypes: true });
@@ -71,7 +74,7 @@ export async function readStorageProtection(roots, documents = []) {
       const file = path.join(root, entry.name);
       if (entry.isSymbolicLink()) throw new Error('STORAGE_EVIDENCE_SYMLINK');
       if (entry.isDirectory()) await walk(file);
-      else if (entry.name.endsWith('.sabrec.json')) await read(file);
+      else if (entry.name.endsWith('.sabrec.json')) await read(file, true);
     }
   };
   for (const root of roots) {

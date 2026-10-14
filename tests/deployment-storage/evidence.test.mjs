@@ -11,6 +11,9 @@ test('checkpoint evidence preserves images and refuses corrupt metadata', async 
     const id = `sha256:${'a'.repeat(64)}`;
     await fs.writeFile(path.join(root, 'old.sabrec.json'), JSON.stringify({ rollbackReleaseSet: { backend: id } }));
     assert.deepEqual(await readStorageProtection([root]), [id]);
+    await fs.writeFile(path.join(root, 'unknown.sabrec.json'), '{}');
+    await assert.rejects(readStorageProtection([root]), /EVIDENCE_INVALID/);
+    await fs.unlink(path.join(root, 'unknown.sabrec.json'));
     await fs.writeFile(path.join(root, 'broken.sabrec.json'), '{');
     await assert.rejects(readStorageProtection([root]));
   } finally { await fs.rm(root, { recursive: true, force: true }); }

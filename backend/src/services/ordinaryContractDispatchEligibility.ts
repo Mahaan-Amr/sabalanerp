@@ -25,18 +25,19 @@ export const actualContractReceiptsRials = async (db: Db, contract: any): Promis
           transaction: { kind: 'CUSTOMER_RECEIPT', postedVoucherId: { not: null } } },
       }, include: { allocation: { include: { transaction: true } } } }, invoice: true } });
     const voucherIds = items.flatMap(item => [item.invoice?.ledgerVoucherId,
-      ...item.allocationLines.flatMap(line => [line.allocation.ledgerVoucherId, line.allocation.transaction.postedVoucherId])])
+      ...item.allocationLines.flatMap(line => [line.allocation.ledgerVoucherId, line.allocation.transaction?.postedVoucherId])])
       .filter((id): id is string => Boolean(id));
     const vouchers = await db.accountingLedgerVoucher.findMany({ where: { id: { in: voucherIds }, status: 'POSTED',
       bookId: { in: authoritative.map(run => run.bookId) } }, select: { id: true } });
     const posted = new Set(vouchers.map(voucher => voucher.id));
     const checks = items.flatMap(item => item.allocationLines).filter(line =>
-      line.allocation.transaction.sourceType === 'CHECK_INSTRUMENT').map(line => line.allocation.transaction.sourceId);
+      line.allocation.transaction?.sourceType === 'CHECK_INSTRUMENT').map(line => line.allocation.transaction!.sourceId);
     const cleared = new Set((await db.accountingCheckInstrument.findMany({ where: { id: { in: checks }, status: 'CLEARED' },
       select: { id: true } })).map(check => check.id));
     const obligations = items.filter(item => item.invoice && posted.has(item.invoice.ledgerVoucherId)).map(item => ({
       original: item.originalRials, applied: item.allocationLines.filter(line => {
         const allocation = line.allocation; const receipt = allocation.transaction;
+        if (!receipt) return false;
         return posted.has(allocation.ledgerVoucherId!) && posted.has(receipt.postedVoucherId!)
           && (receipt.sourceType !== 'CHECK_INSTRUMENT' || cleared.has(receipt.sourceId));
       }).reduce((sum, line) => sum.plus(line.amountRials), new Prisma.Decimal(0))

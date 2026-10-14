@@ -499,7 +499,7 @@ export const createAccountingLedgerApplication = (
       return existing;
     }
     if (original.status !== 'POSTED') throw new AccountingLedgerError('VOUCHER_NOT_REVERSIBLE', 'فقط سند قطعی و برگشت‌نخورده قابل برگشت است.', 409);
-    if (['CUSTOMER_ACCOUNT_OPERATION', 'CUSTOMER_ACCOUNT_RECEIPT', 'SETTLEMENT_ALLOCATION', 'SETTLEMENT_ALLOCATION_REVERSAL'].includes(original.source.type)) {
+    if (['CUSTOMER_ACCOUNT_OPERATION', 'CUSTOMER_ACCOUNT_RECEIPT', 'CUSTOMER_RECEIPT_CORRECTION', 'CHECK_INSTRUMENT', 'SETTLEMENT_ALLOCATION', 'SETTLEMENT_ALLOCATION_REVERSAL'].includes(original.source.type)) {
       throw new AccountingLedgerError('CUSTOMER_ACCOUNT_CORRECTION_REQUIRED', 'این سند متعلق به پرونده مالی مشتری است؛ اصلاح را از همان پرونده انجام دهید تا مانده و سوابق تسویه هماهنگ بمانند.', 409);
     }
     const context = await tx.getPostingContext({ bookId: original.bookId, ...target });

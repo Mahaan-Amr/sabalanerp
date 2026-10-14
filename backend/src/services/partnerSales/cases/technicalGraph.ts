@@ -2,7 +2,7 @@ import {
   calculatePricing, executeProductGraphCommand, parseCanonicalDecimal, parseStableIdentity,
   type CalculationPolicySnapshot, type CanonicalProductGraph, type CatalogSnapshot, type AddRowSellerIntent,
   type LongitudinalProductInput, type SlabPolicyInput, type StairPartPolicyInput, type ProductGraphCommand,
-  longitudinalOperationsQuantity, resolveStaircaseQuantity,
+  longitudinalOperationsQuantity, resolveStaircaseQuantity, stairMandatoryDefaults,
   type RemainderChildPolicyInput, type StairLayerConfigurationInput, compareProductDependentOrder,
 } from '@sabalanerp/contract-product-graph';
 import { Prisma } from '@prisma/client';
@@ -150,8 +150,9 @@ export function compilePartnerTechnicalGraph(input: unknown, context: PartnerTec
         const { quantityMode, ...configuration } = row.configuration;
         intent = { ...intent, stairPartPolicyInput: { ...pricing, ...configuration, ...versions,
           ...(enteredRate === undefined ? {} : { baseRateToman: enteredRate }),
-          mandatoryPercentage: decimal(configuration.mandatoryPercentage) ?? pricing.mandatoryPercentage,
-          rememberedMandatoryPercentage: decimal(configuration.mandatoryPercentage) ?? pricing.rememberedMandatoryPercentage,
+          mandatoryEnabled: configuration.mandatoryEnabled ?? stairMandatoryDefaults(configuration.part).enabled,
+          mandatoryPercentage: decimal(configuration.mandatoryPercentage) ?? parseCanonicalDecimal(String(stairMandatoryDefaults(configuration.part).percentage)),
+          rememberedMandatoryPercentage: decimal(configuration.mandatoryPercentage) ?? parseCanonicalDecimal(String(stairMandatoryDefaults(configuration.part).percentage)),
           stairSystemId: parseStableIdentity('stair-system', configuration.stairSystemId),
           sourceBatchId: parseStableIdentity('source-batch', configuration.sourceBatchId),
           motherWidthMeters: snapshot.facts.motherWidthMeters, motherLengthMeters: decimal(configuration.motherLengthMeters),

@@ -322,6 +322,43 @@ function service(tx: Prisma.TransactionClient, ids: Record<string, string>, fail
     consumeRecovery: async () => ({ ok: true, value: undefined }), failpoint });
 }
 
+test('owning Case revision transaction survives work beyond Prisma five-second default and still validates the Case', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const prefix = `partner-budget-${randomUUID()}`;
+  const ids = { partnerId: `${prefix}-actor`, customerId: `${prefix}-customer`, caseId: `${prefix}-missing` };
+  try {
+    const delayed = { $transaction: (work: (tx: Prisma.TransactionClient) => Promise<unknown>, options: { maxWait?: number; timeout?: number }) =>
+      database.$transaction(async tx => {
+        await tx.$executeRaw`SELECT pg_sleep(5.2)`;
+        return work(tx);
+      }, options) } as PrismaClient;
+    const result = await createPrismaPartnerCaseService({ database: delayed, actorId: ids.partnerId,
+      authorize: async () => { throw new Error('Missing Case must not reach authorization'); },
+      authorizeProject: async () => { throw new Error('Missing Case must not reach project authorization'); },
+      resolveDraft: async () => { throw new Error('Missing Case must not resolve a draft'); },
+      consumeRecovery: async () => { throw new Error('Missing Case must not consume recovery'); },
+      recordEvidenceReview: async () => { throw new Error('Timeout must not be recorded as evidence corruption'); },
+    }).execute(await reviseCommand(ids, await command(ids), 1, configurationHash));
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, 'NOT_FOUND');
+  } finally { await database.$disconnect(); }
+});
+
+test('ordinary Partner detail transaction survives work beyond five seconds without admitting an absent Case', async () => {
+  const { readPartnerSalesContractDetail } = await import('../partnerSales/cases/contractDetail');
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const missing = `partner-detail-budget-${randomUUID()}`;
+  try {
+    const delayed = { $transaction: (work: (tx: Prisma.TransactionClient) => Promise<unknown>, options: { maxWait?: number; timeout?: number }) =>
+      database.$transaction(async tx => {
+        await tx.$executeRaw`SELECT pg_sleep(5.2)`;
+        return work(tx);
+      }, options) } as PrismaClient;
+    assert.equal(await readPartnerSalesContractDetail(delayed, { actorId: missing, correlationId: missing,
+      contract: { id: missing, partnerCaseId: missing, partnerRevision: 1, partnerIntegrityHash: configurationHash } }), null);
+  } finally { await database.$disconnect(); }
+});
+
 test('Case-scoped pricing retains one linked numbered note before pricing and commits only after current approvals', async () => {
   await fixture(async (tx, ids) => {
     const priced = await command(ids);

@@ -129,3 +129,5 @@ assert.deepEqual(evaluateNarrowFeatureAccess({ role: 'USER', requiredPermission:
 assert.deepEqual(evaluateNarrowFeatureAccess({ role: 'USER', requiredPermission: 'view', userFeature: null, roleFeature: null, userWorkspace: { isActive: true, expiresAt: null, permissionLevel: 'view' }, roleWorkspace: { isActive: true, expiresAt: null, permissionLevel: 'admin' } }, narrowAt), { allowed: false, permissionLevel: null });
 
 console.log('Dispatch master-data policy tests passed.');
+
+assertLifecycleTransition("COMPANY_VEHICLE", "DRAFT", "ARCHIVED");

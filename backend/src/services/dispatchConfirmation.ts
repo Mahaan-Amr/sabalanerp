@@ -6,6 +6,8 @@ import { BiometricConnector, SimulatorScenario } from './biometricProtocol';
 import { ProtectedTemplateEnvelope, ProtectedTemplateVault } from './biometricTemplateVault';
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
 import { SafeConnectorResult } from './biometricWorkstationProtocol';
+import { isGuardQueueTurnCurrentlyReady } from './guardDriverQueue';
+import { lockHrVehicleOperations } from './hrVehicleOperations';
 
 type Tx = Prisma.TransactionClient;
 export class DispatchConfirmationValidationError extends Error {}
@@ -306,6 +308,12 @@ export class DispatchConfirmationService {
     await assertPartnerCommercialDispatchEligible(tx, sourceLines.map(line => line.partnerCaseId), DispatchConfirmationConflictError);
     if (session.waybill.status !== 'ISSUED' || session.waybill.integrityHash !== session.waybillIntegrityHash) throw new DispatchConfirmationConflictError('The bound waybill snapshot is no longer valid.');
     if (session.driverSource === GuardDriverSource.INTERNAL) {
+      await lockHrVehicleOperations(tx);
+      const revision = await tx.logisticsAllocationRevision.findFirst({
+        where: { candidate: { waybills: { some: { id: session.waybillId } } } },
+        include: { queueTurn: true },
+      });
+      if (!revision || !await isGuardQueueTurnCurrentlyReady(tx, revision.queueTurn, at)) throw new DispatchConfirmationConflictError('شرایط رانندگی یا خودروی این پرونده دیگر معتبر نیست. صلاحیت، گواهینامه و تخصیص جاری را بررسی کنید.');
       await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `DRIVER_BIOMETRIC:${session.driverId}`);
       const driver = await tx.internalDriverProfile.findUnique({ where: { id: session.driverId }, include: { personnel: true,
         eligibilityPeriods: { where: { effectiveFrom: { lte: at }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: at } }] }, orderBy: { effectiveFrom: 'desc' }, take: 1 } } });

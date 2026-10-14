@@ -289,7 +289,13 @@ for (const expireLease of [false, true]) test(expireLease
     } }) }));
   await page.route('**/api/partner/technical/catalog/query', route => route.fulfill({ status: 200,
     contentType: 'application/json', body: JSON.stringify({ success: true, data: {
-      schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG', kind: route.request().postDataJSON().kind, items: route.request().postDataJSON().kind === 'PRODUCT' ? [{
+      schemaVersion: 1, purpose: 'PARTNER_TECHNICAL_CATALOG', kind: route.request().postDataJSON().kind, items: route.request().postDataJSON().kind === 'SERVICE' ? [
+        { catalogItemId: 'return-tool', catalogSnapshotVersion: '2026-09-26T00:00:00.000Z', sourceType: 'tool',
+          name: 'ابزار آزمایشی', unit: 'meter', suggestedRetailUnitPrice: { amount: '1000', currency: 'IRT' } },
+        { catalogItemId: 'return-finishing', catalogSnapshotVersion: '2026-09-26T00:00:00.000Z', sourceType: 'finishing',
+          name: 'پرداخت آزمایشی', unit: 'squareMeter', suggestedRetailUnitPrice: { amount: '2000', currency: 'IRT' } },
+      ].filter(item => item.sourceType === route.request().postDataJSON().sourceType)
+      : route.request().postDataJSON().kind === 'PRODUCT' ? [{
         catalogItemId: 'stair-return', catalogSnapshotVersion: '2026-09-26T00:00:00.000Z', code: '1010610930100', name: 'سنگ پله آزمایشی',
         families: ['stair'], salesUnits: { prepared: 'count', volumetric: 'count' }, dimensions: { motherLengthMeters: '2', motherWidthCentimeters: '35', thicknessCentimeters: '2' },
         attributes: { stoneType: 'مرمریت', mine: 'آباد', finish: 'صیقل', color: 'سفید', quality: '1', cuttingDimension: '30' }, isAvailable: true,
@@ -335,6 +341,25 @@ for (const expireLease of [false, true]) test(expireLease
   await expect(page.getByText(/وضعیت فعلی اجازه این اقدام را نمی‌دهد/)).toHaveCount(0);
   expect(inquiryRequests).toEqual([]);
   await page.getByRole('option', { name: /سنگ پله آزمایشی/ }).click();
+  if (!expireLease) {
+    const mandatory = page.getByRole('switch', { name: 'حکمی', exact: true });
+    const percentage = page.getByRole('textbox', { name: 'درصد حکمی', exact: true });
+    const part = page.getByRole('combobox', { name: 'جزء پله', exact: true });
+    await expect(mandatory).toHaveAttribute('aria-checked', 'false');
+    await expect(percentage).toHaveValue('20');
+    for (const value of ['riser', 'landing']) {
+      await part.selectOption(value);
+      await expect(mandatory).toHaveAttribute('aria-checked', 'true');
+      await expect(percentage).toHaveValue('20');
+    }
+    await mandatory.click();
+    await percentage.fill('10');
+    await part.selectOption('riser');
+    await expect(mandatory).toHaveAttribute('aria-checked', 'false');
+    await expect(percentage).toHaveValue('10');
+    await part.selectOption('tread');
+    await expect(mandatory).toHaveAttribute('aria-checked', 'false');
+  }
   await page.locator('label').filter({ has: page.getByRole('radiogroup', { name: 'واحد طول', exact: true }) }).getByRole('textbox').fill('2');
   const mother = page.getByRole('textbox', { name: 'طول سنگ مادر', exact: true });
   await mother.fill('');

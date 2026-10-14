@@ -435,6 +435,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
         const snapshot = partnerContracts.PartnerWizardRecoverySnapshotSchema.parse({ schemaVersion: 1,
           wizardRevision: currentRevision + 1, step: parsed.data.step, intent: parsed.data.intent,
+          ...(parsed.data.reviewedCorrectionRequestId ? { reviewedCorrectionRequestId: parsed.data.reviewedCorrectionRequestId } : {}),
           updatedAt: clock.now.toISOString() });
         const meaningfulUpdatedAt = meaningfulPartnerWizardUpdatedAt({
           ...(previous.success ? { previousIntent: previous.data.intent } : {}),
@@ -708,7 +709,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         }
         inquiryEventIds = submittedPricing.value.eventIds;
         return savedCase;
-      }, { timeout: 30_000 });
+      }, { ...PARTNER_CREATION_TRANSACTION_OPTIONS, timeout: 30_000 });
       if (inquiryEventIds.length) {
         try { await dispatchPartnerInquiryEvents(prisma, inquiryEventIds, inquiryNotificationAccess); }
         catch { /* durable source events remain retryable */ }
@@ -716,10 +717,10 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
       respond(response, result);
     } catch (error) {
       if (error instanceof OperationMinimumError) { respond(response, { ok: false, error: partnerError('OPERATION_MINIMUM_NOT_MET') }); return; }
-      console.error('Partner Case command failed:', { correlationId, error });
       const result = error && typeof error === 'object' && 'result' in error
         ? (error as { result: Result<unknown> }).result : undefined;
-      respond(response, result ?? { ok: false, error: partnerError('INTEGRITY_CONFLICT') });
+      if (result) { respond(response, result); return; }
+      respondReadFailure(response, error);
     }
   });
   router.post('/lifecycle/commands', async (request: AuthRequest, response) => {

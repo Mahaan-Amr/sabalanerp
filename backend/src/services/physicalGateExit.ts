@@ -2,6 +2,8 @@ import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillm
 import { createHash, randomUUID } from 'node:crypto';
 import { assertOrdinaryContractsDispatchEligible, ordinaryDispatchSourcesEligible } from './ordinaryContractDispatchEligibility';
 import { AccountingDispatchWaybillStatus, DispatchBuyerSmsStatus, GuardDriverQueueTurnStatus, Prisma, PrismaClient } from '@prisma/client';
+import { isGuardQueueTurnCurrentlyReady } from './guardDriverQueue';
+import { lockHrVehicleOperations } from './hrVehicleOperations';
 import { refreshProjectionContracts } from './dispatchAllocation';
 import { appendQueueEvent } from './guardDriverQueue';
 import { shipmentQuantityEvidenceIntegrityHash } from './shipmentQuantityProjectionStore';
@@ -117,6 +119,10 @@ export class PhysicalGateExitService {
       await assertOrdinaryContractsDispatchEligible(tx, revision.lines.map(line => line.sourceContractId), PhysicalGateExitConflictError);
       await assertPartnerCommercialDispatchEligible(tx, [revision.partnerCaseId, ...revision.lines.map(line => line.partnerCaseId)], PhysicalGateExitConflictError);
       const turn = revision.queueTurn;
+      if (turn.driverSource === 'INTERNAL') {
+        await lockHrVehicleOperations(tx);
+        if (!await isGuardQueueTurnCurrentlyReady(tx, turn, at)) throw new PhysicalGateExitConflictError('خروج مجاز نیست؛ شرایط رانندگی یا خودروی پرونده معتبر نیست. صلاحیت، گواهینامه و تخصیص جاری را بررسی کنید.');
+      }
       if (waybill.status !== AccountingDispatchWaybillStatus.ISSUED || waybill.integrityHash !== authorization.waybillIntegrityHash) {
         throw new PhysicalGateExitConflictError('The authorized waybill snapshot is no longer valid.');
       }

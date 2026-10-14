@@ -52,8 +52,9 @@ export function partnerCreationRequestedInquiry(params: Pick<URLSearchParams, 'g
   return params.get('inquiryId') || (params.get('draftId') ? null : latestInquiryId) || null;
 }
 
-export function partnerCaseResultStep(savedStep: PartnerWizardDraft['step'], _openingNumberedResult: boolean, reviewedCorrection = false): PartnerWizardDraft['step'] {
-  return reviewedCorrection ? 'date' : savedStep;
+export function partnerCaseResultStep(savedStep: PartnerWizardDraft['step'], _openingNumberedResult: boolean,
+  reviewedCorrection = false, continuingReviewedCorrection = false): PartnerWizardDraft['step'] {
+  return reviewedCorrection && !continuingReviewedCorrection ? 'date' : savedStep;
 }
 
 export function partnerWizardNeedsRetailQuote(step: PartnerWizardDraft['step']): boolean {

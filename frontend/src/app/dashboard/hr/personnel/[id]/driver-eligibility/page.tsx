@@ -20,8 +20,8 @@ import {
 } from "@/components/erp";
 import { dispatchConfirmationAPI, dispatchMasterDataAPI } from "@/lib/api";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
-import HrPersianCalendar from "@/features/hr/HrPersianCalendar";
-import { fromIsoDate, toIsoDate } from "@/features/hr/hrUi";
+import { hrOperationsError } from "@/features/dispatch-master-data/hrOperationsError";
+
 import {
   biometricEnrollmentPresentation,
   DriverEligibilitySection,
@@ -66,14 +66,10 @@ export default function PersonnelDriverEligibilityPage() {
   const [eligibilityDialogOpen, setEligibilityDialogOpen] = useState(false);
   const [deactivationDialogOpen, setDeactivationDialogOpen] = useState(false);
   const [imagesRequested, setImagesRequested] = useState(false);
-  const [effectiveFrom, setEffectiveFrom] = useState(today());
-  const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
   const [confirmationPhone, setConfirmationPhone] = useState("");
-  const [biometricDeactivationReason, setBiometricDeactivationReason] =
-    useState("");
   const [enrollmentId, setEnrollmentId] = useState<string | null>(null);
   const [pendingFinger, setPendingFinger] = useState<EnrollmentFinger | null>(
     null,
@@ -103,7 +99,13 @@ export default function PersonnelDriverEligibilityPage() {
       workflowGeneration.current += 1;
       const abandonedSession = captureSession.current;
       captureSession.current = null;
-      if (abandonedSession) void dispatchConfirmationAPI.cancelEnrollmentSession(personnelId, abandonedSession.enrollmentSessionId).catch(() => undefined);
+      if (abandonedSession)
+        void dispatchConfirmationAPI
+          .cancelEnrollmentSession(
+            personnelId,
+            abandonedSession.enrollmentSessionId,
+          )
+          .catch(() => undefined);
       placementResolver.current?.resolve();
       placementResolver.current = null;
     };
@@ -142,7 +144,10 @@ export default function PersonnelDriverEligibilityPage() {
     } catch (error: any) {
       setNotice({
         kind: "error",
-        text: userFacingError(error, "دریافت صلاحیت رانندگی ممکن نشد."),
+        text: hrOperationsError(error, {
+          failedAction: "دریافت صلاحیت رانندگی",
+          nextStep: "به‌روزرسانی صفحه و مجوز مشاهده را بررسی کنید",
+        }),
       });
     } finally {
       setLoading(false);
@@ -213,7 +218,12 @@ export default function PersonnelDriverEligibilityPage() {
     } catch (error: any) {
       setNotice({
         kind: "error",
-        text: userFacingError(error, "عملیات انجام نشد."),
+        text: hrOperationsError(error, {
+          failedAction: "ثبت اقدام صلاحیت رانندگی",
+          nextStep: "وضعیت فعلی را بررسی کنید",
+          preserveInput: true,
+          uncertainMutation: true,
+        }),
       });
       return false;
     } finally {
@@ -245,16 +255,12 @@ export default function PersonnelDriverEligibilityPage() {
   const closeEligibilityDialog = () => {
     if (saving) return;
     setEligibilityDialogOpen(false);
-    setReason("");
-    setEffectiveFrom(today());
   };
   const closeDeactivationDialog = () => {
     if (saving) return;
     setDeactivationDialogOpen(false);
-    setBiometricDeactivationReason("");
   };
   const submitEligibility = async () => {
-    if (!reason.trim()) return;
     const succeeded = await run(
       () =>
         driver
@@ -262,14 +268,10 @@ export default function PersonnelDriverEligibilityPage() {
               driver.id,
               {
                 status: eligible ? "SUSPENDED" : "ELIGIBLE",
-                effectiveFrom,
-                reason: reason.trim(),
               },
             )
           : dispatchMasterDataAPI.createInternalDriver({
               personnelId,
-              effectiveFrom,
-              reason: reason.trim(),
             }),
       driver ? "وضعیت صلاحیت ثبت شد." : "راننده داخلی تعریف شد.",
     );
@@ -279,8 +281,14 @@ export default function PersonnelDriverEligibilityPage() {
     if (!confirmationPhone.trim()) return;
     const succeeded = await run(async () => {
       const generation = workflowGeneration.current;
-      if (!captureSession.current || enrollmentSessionExpired(captureSession.current)) {
-        captureSession.current = { enrollmentSessionId: crypto.randomUUID(), captures: [] };
+      if (
+        !captureSession.current ||
+        enrollmentSessionExpired(captureSession.current)
+      ) {
+        captureSession.current = {
+          enrollmentSessionId: crypto.randomUUID(),
+          captures: [],
+        };
         setCaptureEvidence([]);
       }
       const session = captureSession.current;
@@ -288,14 +296,18 @@ export default function PersonnelDriverEligibilityPage() {
         personnelId,
         session,
         isCancelled: () => generation !== workflowGeneration.current,
-        acceptEnrollmentCapture: dispatchConfirmationAPI.acceptEnrollmentCapture,
+        acceptEnrollmentCapture:
+          dispatchConfirmationAPI.acceptEnrollmentCapture,
         getConnectorStatus: biometricConnectorClient.status,
         createEnrollmentCommand:
           dispatchConfirmationAPI.createEnrollmentCommand,
         executeConnectorCommand: biometricConnectorClient.execute,
         requestFingerPlacement,
         onCaptureComplete: (evidence) =>
-          setCaptureEvidence((current) => [...current.filter((item) => item.finger !== evidence.finger), evidence]),
+          setCaptureEvidence((current) => [
+            ...current.filter((item) => item.finger !== evidence.finger),
+            evidence,
+          ]),
       });
       return dispatchConfirmationAPI.enrollInternalDriver(personnelId, {
         enrollmentSessionId: session.enrollmentSessionId,
@@ -319,19 +331,28 @@ export default function PersonnelDriverEligibilityPage() {
     placementResolver.current = null;
     if (abandonedSession) {
       try {
-        await dispatchConfirmationAPI.cancelEnrollmentSession(personnelId, abandonedSession.enrollmentSessionId);
+        await dispatchConfirmationAPI.cancelEnrollmentSession(
+          personnelId,
+          abandonedSession.enrollmentSessionId,
+        );
       } catch (error) {
-        setNotice({ kind: "error", text: userFacingError(error, "لغو ثبت موقت ممکن نشد. اطلاعات موقت با پایان مهلت پاک می‌شود.") });
+        setNotice({
+          kind: "error",
+          text: userFacingError(
+            error,
+            "لغو ثبت موقت ممکن نشد. اطلاعات موقت با پایان مهلت پاک می‌شود.",
+          ),
+        });
       }
     }
   };
   const deactivateEnrollment = async () => {
-    if (!enrollmentId || !biometricDeactivationReason.trim()) return;
+    if (!enrollmentId) return;
     const succeeded = await run(
       () =>
         dispatchConfirmationAPI.deactivateEnrollment(
           enrollmentId,
-          biometricDeactivationReason.trim(),
+          "غیرفعال‌سازی ثبت بیومتریک توسط منابع انسانی",
         ),
       "ثبت بیومتریک غیرفعال شد.",
     );
@@ -345,7 +366,11 @@ export default function PersonnelDriverEligibilityPage() {
       backHref="/dashboard/hr/personnel"
       className="pb-24 lg:pb-4"
     >
-      {notice && <ErpInlineState kind={notice.kind} title={notice.text} />}
+      {notice && (
+        <div id="hr-personnel-notice">
+          <ErpInlineState kind={notice.kind} title={notice.text} />
+        </div>
+      )}
 
       <ErpSegmentedControl
         value={section}
@@ -393,7 +418,7 @@ export default function PersonnelDriverEligibilityPage() {
                 }
               />
               <ErpFieldView
-                label="دلیل"
+                label="شرح اقدام"
                 value={eligibility?.reason || "ثبت نشده"}
               />
             </div>
@@ -512,7 +537,7 @@ export default function PersonnelDriverEligibilityPage() {
                       ) : (
                         <ErpLoading />
                       )}
-                      <p className="text-xs sds-text-muted">
+                      <p className="text-xs sds-text-secondary">
                         {item.imageWidth}×{item.imageHeight} پیکسل
                       </p>
                     </div>
@@ -535,6 +560,9 @@ export default function PersonnelDriverEligibilityPage() {
               <label className={field}>
                 شماره تأیید راننده
                 <ErpInput
+                  aria-describedby={
+                    notice?.kind === "error" ? "hr-personnel-notice" : undefined
+                  }
                   value={confirmationPhone}
                   onChange={(event) => setConfirmationPhone(event.target.value)}
                 />
@@ -590,14 +618,26 @@ export default function PersonnelDriverEligibilityPage() {
                         {fingerLabel(evidence.finger)}
                       </span>
                       <ErpBadge tone={evidence.accepted ? "info" : "danger"}>
-                        {evidence.accepted ? "پذیرفته‌شده موقت؛ در انتظار ثبت نهایی" : "برداشت ناموفق"}
+                        {evidence.accepted
+                          ? "پذیرفته‌شده موقت؛ در انتظار ثبت نهایی"
+                          : "برداشت ناموفق"}
                       </ErpBadge>
-                      <ErpBadge tone={captureEvidenceTone(evidence.qualityState, "ACCEPTED")}>
+                      <ErpBadge
+                        tone={captureEvidenceTone(
+                          evidence.qualityState,
+                          "ACCEPTED",
+                        )}
+                      >
                         کیفیت{" "}
                         {evidence.qualityScore ??
                           operationalStatusLabel(evidence.qualityState)}
                       </ErpBadge>
-                      <ErpBadge tone={captureEvidenceTone(evidence.livenessState, "LIVE")}>
+                      <ErpBadge
+                        tone={captureEvidenceTone(
+                          evidence.livenessState,
+                          "LIVE",
+                        )}
+                      >
                         زنده‌بودن{" "}
                         {evidence.livenessState === "LIVE"
                           ? "تأیید شد"
@@ -650,7 +690,7 @@ export default function PersonnelDriverEligibilityPage() {
               icon={!driver ? FaUserCheck : eligible ? FaPause : FaPlay}
               tone={eligible ? "warning" : "success"}
               variant="solid"
-              disabled={dispatchTimelineStale || saving || !reason.trim()}
+              disabled={dispatchTimelineStale || saving}
               onClick={() => void submitEligibility()}
             />
           </div>
@@ -660,24 +700,10 @@ export default function PersonnelDriverEligibilityPage() {
           {notice?.kind === "error" && (
             <ErpInlineState kind="error" title={notice.text} />
           )}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className={field}>
-              تاریخ اثر
-              <HrPersianCalendar
-                value={fromIsoDate(effectiveFrom)}
-                onChange={(value) => setEffectiveFrom(toIsoDate(value))}
-                disablePastDates
-              />
-            </label>
-            <label className={field}>
-              دلیل
-              <ErpInput
-                required
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-              />
-            </label>
-          </div>
+          <ErpFieldView label="زمان اثر" value="همین حالا" />
+          <p className="text-sm sds-text-secondary">
+            تغییر از لحظه ثبت اعمال می‌شود؛ سوابق و تخصیص خودرو حفظ می‌شوند.
+          </p>
         </div>
       </ErpSheet>
 
@@ -700,11 +726,7 @@ export default function PersonnelDriverEligibilityPage() {
               icon={FaPause}
               tone="danger"
               variant="solid"
-              disabled={
-                dispatchTimelineStale ||
-                saving ||
-                !biometricDeactivationReason.trim()
-              }
+              disabled={dispatchTimelineStale || saving}
               onClick={() => void deactivateEnrollment()}
             />
           </div>
@@ -714,20 +736,10 @@ export default function PersonnelDriverEligibilityPage() {
           {notice?.kind === "error" && (
             <ErpInlineState kind="error" title={notice.text} />
           )}
-          <p className="text-sm leading-7 sds-text-muted">
+          <p className="text-sm leading-7 sds-text-secondary">
             پس از غیرفعال‌سازی، برای تأییدهای بعدی باید ثبت بیومتریک جدید انجام
             شود. سابقه قبلی حذف نمی‌شود.
           </p>
-          <label className={field}>
-            دلیل غیرفعال‌سازی
-            <ErpInput
-              required
-              value={biometricDeactivationReason}
-              onChange={(event) =>
-                setBiometricDeactivationReason(event.target.value)
-              }
-            />
-          </label>
         </div>
       </ErpSheet>
     </ErpWorkspacePage>

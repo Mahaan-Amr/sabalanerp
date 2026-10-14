@@ -4,8 +4,46 @@ import express from 'express';
 import { once } from 'node:events';
 import { createPartnerCaseRouter } from '../partner-cases';
 import { createPartnerTechnicalRequestServices } from '../partner-technical';
+import { canonicalHash, PartnerCommandSchema } from '@sabalanerp/partner-sales-contracts';
+import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
 
 const expired = Object.assign(new Error('transaction expired; private SQL lease-token secret'), { code: 'P2028' });
+
+for (const requestPricing of [false, true]) test(`case revision${requestPricing ? ' with pricing' : ''} has a bounded budget and reports expiry without losing retryability`, async () => {
+  const fixture = createPartnerFixtures();
+  const intent = { ...fixture.draftSubmissionReference, contractDate: '2026-10-14',
+    rows: fixture.partner.products.map(product => ({ productRowId: product.productRowId,
+      retailUnitPrice: { amount: product.retailUnitPrice, currency: 'IRR' } })),
+    customerPaymentPlan: fixture.partner.customerPaymentPlan, deliveries: fixture.partner.deliveries,
+    retailDiscount: { amount: '0', currency: 'IRR' }, belowCostConfirmed: false,
+    ...(requestPricing ? { pricingRequest: { inquiryId: 'budget-pricing', rows: [{ rowId: 'budget-row',
+      configuration: { recoveryId: fixture.draftSubmissionReference.recoveryId, recoveryRevision: 1,
+        productRowId: fixture.partner.products[0].productRowId } }] } } : {}) };
+  const command = PartnerCommandSchema.parse({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE',
+    commandId: 'budget-command', correlationId: 'budget-command', intent,
+    expected: fixture.partner.owner, expectedState: fixture.partner.state,
+    editLease: { recoveryId: intent.recoveryId, browserSessionId: 'budget-browser', leaseToken: 'budget-lease', baseRevision: 0 },
+    idempotency: { actorId: fixture.profile.partnerSellerId, operation: 'CASE_DRAFT_REVISE',
+      targetId: fixture.partner.owner.caseId, key: 'budget-retry-key',
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent }) } });
+  const budgets: unknown[] = [], logs: unknown[] = [];
+  const database = { async $transaction(_work: unknown, options: unknown) { budgets.push(options); throw expired; } };
+  const app = express(); app.use(express.json());
+  app.use(createPartnerCaseRouter({ database: database as never, reportCreationFailure: value => logs.push(value),
+    authenticate: (request, _response, next) => { (request as any).user = { id: fixture.profile.partnerSellerId }; next(); } }));
+  const server = app.listen(0); await once(server, 'listening');
+  try {
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing address');
+    const response = await fetch(`http://127.0.0.1:${address.port}/commands`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command) });
+    const body = await response.json() as { code: string; supportReference: string };
+    assert.equal(response.status, 503, JSON.stringify(body));
+    assert.equal(body.code, 'TEMPORARY_FAILURE');
+    assert.deepEqual(budgets, [requestPricing ? { maxWait: 5_000, timeout: 30_000 } : { maxWait: 5_000, timeout: 15_000 }]);
+    assert.deepEqual(logs, [{ supportReference: body.supportReference, code: 'TEMPORARY_FAILURE', databaseCode: 'P2028' }]);
+    assert.doesNotMatch(JSON.stringify({ body, logs }), /private|secret|lease-token|SQL/);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});
 
 test('case list reports transaction expiry as temporary failure, not stale case evidence', async () => {
   const logs: unknown[] = [];

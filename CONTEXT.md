@@ -2209,6 +2209,9 @@ _Avoid_: استفاده از یک مبلغ مشترک برای حقیقت تول
 
 **بازذخیره قیمت‌گذاری حکمی**:
 Opening an existing contract for editing and saving it again applies the current حکمی pricing rule to the saved product rows.
+
+**پیش‌فرض حکمی اجزای پله در فروش همکار**:
+فروش همکار از پیش‌فرض فروش سبلان پیروی می‌کند: خیز و پاگرد با حکمی روشن و درصد ۲۰، کف‌پله با حکمی خاموش و درصد آمادهٔ ۲۰. این پیش‌فرض وابسته به تنظیم عمومی حکمی نیست. انتخاب دستی روشن/خاموش و درصد ذخیره‌شدهٔ هر ردیف مقدم است؛ بازکردن یا تغییر جزء پله، انتخاب دستی را بازنویسی نمی‌کند. قرارداد تاریخی در اثر صرف خواندن دوباره قیمت‌گذاری نمی‌شود.
 _Avoid_: silently changing old saved contract pricing without an edit-save action, or preserving an old paid برش charge after a mandatory row has been edited and saved
 
 **تخفیف قرارداد**:
@@ -4984,11 +4987,11 @@ The Vehicle Operations driving profile of one HR Personnel identity that is elig
 _Avoid_: duplicating Personnel as a driver, treating eligibility as a vehicle assignment, or allowing Vehicle Operations to redefine HR identity
 
 **Internal Driver Eligibility**:
-The non-overlapping, effective-dated HR authority for an active Personnel identity to drive for Sabalan; suspension or withdrawal closes the current period with a reason, and reinstatement creates a new period.
+The non-overlapping, effective-dated HR authority for an active Personnel identity to drive for Sabalan; suspension or withdrawal closes the current period with automatically recorded action evidence, and reinstatement creates a new period. Suspension prevents driving but does not itself end the driver's vehicle assignment; these HR actions require no manually entered reason.
 _Avoid_: a mutable eligibility flag, overwriting earlier eligibility, granting eligibility through Vehicle Operations, or deleting used periods
 
 **Internal Driver Profile**:
-The single stable Vehicle Operations record for an Internal Driver Identity, holding licence and operational driving details without duplicating Personnel identity. Current readiness is derived from active Personnel, current Internal Driver Eligibility, profile completeness, and licence validity; a used profile remains historical rather than being deleted.
+The single stable Vehicle Operations record for an Internal Driver Identity, established from existing Personnel and holding editable licence and operational driving details without duplicating Personnel identity. Incomplete licence information may be saved as a draft with the missing requirements visible; current readiness is derived from active Personnel and employment, valid HR eligibility, complete and valid licence information, explicit profile activation, and a current assignment to a ready company vehicle, while ending driving activity preserves the Personnel record and all driving history.
 _Avoid_: a second personnel record, a manually asserted ready status, storing HR eligibility on the profile, or deleting a profile referenced by operations
 
 **External Driver Identity**:
@@ -5024,8 +5027,48 @@ The explicit relationship that joins independent driver and vehicle identities f
 _Avoid_: a mutable combined driver-vehicle identity, overwriting assignment history, or inferring a historical pairing from current records
 
 **Internal Driver-Vehicle Assignment**:
-The effective-dated Vehicle Operations association between one Internal Driver Profile and one Company Vehicle Identity. At any instant each driver and each vehicle has at most one active assignment; periods cannot overlap on either side, reassignment closes the prior assignment with a reason, and future non-overlapping periods may be scheduled.
+The effective-dated Vehicle Operations association between one Internal Driver Profile and one Company Vehicle Identity. At any instant each driver and each vehicle has at most one active assignment; periods cannot overlap on either side, reassignment closes the prior assignment with automatically recorded action evidence rather than a manually entered reason, and future non-overlapping periods may be scheduled. Transferring an assigned vehicle makes the affected drivers and vehicles explicit before confirmation; selecting the existing driver–vehicle pairing creates no duplicate assignment history.
 _Avoid_: concurrent active assignments for either identity, mutating an assignment into a different pairing, overwriting substitution history, or rejecting valid future scheduling
+
+**پایان تخصیص خودرو**:
+پایان‌دادن به رابطه تخصیص راننده و خودروی شرکت از زمان اثر مشخص، با حفظ سابقه آن رابطه و هویت مستقل راننده و خودرو؛ این عمل مستقل از تخصیص خودروی جایگزین است و هنگام پایان فعالیت راننده یا بایگانی خودرو نیز با تأیید اثر آن انجام می‌شود.
+_Avoid_: حذف سابقه تخصیص، حذف راننده یا خودرو به‌جای پایان رابطه، یا الزام به انتخاب خودروی جایگزین برای پایان تخصیص
+
+**برنامه تخصیص آینده خودرو**:
+رابطه راننده و خودروی شرکت که زمان شروع آن هنوز نرسیده و پیش از شروع قابل تغییر یا لغو با حفظ سابقه است؛ پس از شروع، تغییر خودرو و پایان تخصیص معنای مستقل دارند. تغییر جاری یا بایگانی، برنامه‌های متعارض آینده را بدون تصمیم صریح کاربر لغو نمی‌کند.
+_Avoid_: حذف سابقه برنامه لغوشده، لغو پنهانی برنامه آینده، یا ویرایش تخصیص شروع‌شده به‌عنوان برنامه آینده
+
+**برنامه تخصیص نیازمند رسیدگی**:
+برنامه‌ای که در موعد شروع یا پایان به‌دلیل عملیات باز یا برقرارنبودن شرایط راننده یا خودرو اجرا نشده است؛ رابطه قبلی خودکار پایان نمی‌یابد و اجرای تغییر پس از رفع مانع، با تأیید کاربر و از لحظه واقعی اقدام انجام می‌شود.
+_Avoid_: انتقال یا پایان خودکار با وجود مانع، اجرای پنهانی برنامه عقب‌افتاده، یا ثبت اجرای دیرهنگام با زمان اثر گذشته
+
+**بازگردانی راننده یا خودروی بایگانی‌شده**:
+بازگشت پرونده موجود به وضعیت پیش‌نویس برای بررسی دوباره شرایط فعال‌سازی، بدون بازکردن خودکار تخصیص‌های پایان‌یافته؛ صلاحیت منابع انسانی و اعتبار گواهینامه راننده مستقل از بازگردانی بررسی می‌شوند.
+_Avoid_: فعال‌سازی خودکار با بازگردانی، ایجاد هویت تکراری، یا احیای خودکار تخصیص قبلی
+
+**اصلاح مشخصات خودروی شرکت**:
+تصحیح مشخصات ثبت‌شده همان خودروی واقعی، از جمله نوع، سازنده، مدل، سال ساخت، کد ناوگان، شماره شاسی و توضیحات، با حفظ سابقه تغییر و بدون الزام ورود دستی دلیل؛ جایگزینی با یک خودروی واقعی دیگر نیازمند هویت جداگانه است و تغییر پلاک معنای مستقلی دارد.
+_Avoid_: تبدیل هویت یک خودروی واقعی به خودروی دیگر، بازنویسی مشخصات ثبت‌شده در ارسال‌های قبلی، یا ادغام اصلاح مشخصات با تغییر پلاک
+
+**پایان فعالیت رانندگی**:
+پایان صلاحیت رانندگی، بایگانی پروفایل راننده و پایان تخصیص جاری او در یک اقدام، همراه لغو صریح برنامه‌های آینده در نتیجه تأییدشده؛ پرونده پرسنل، رابطه استخدامی و همه سوابق باقی می‌مانند و مجوز هر بخش از اقدام مستقل است.
+_Avoid_: حذف پرونده پرسنل، پایان رابطه استخدامی به‌جای نقش رانندگی، بایگانی پروفایل با باقی‌گذاشتن صلاحیت جاری، یا دورزدن مجوز صلاحیت و تخصیص با مجوز بایگانی
+
+**سابقه خودکار اقدامات رانندگی و ناوگان شرکت**:
+سابقه قابل‌پیگیری اقدامات دو بخش رانندگان و خودروهای شرکت و صلاحیت رانندگی پرسنل که اقدام‌کننده، زمان و تغییر انجام‌شده را بدون الزام ورود دستی دلیل نگه می‌دارد.
+_Avoid_: اجبار کاربر به نوشتن دلیل در این دو بخش، حذف سابقه همراه حذف فیلد دلیل، یا تعبیر شرح خودکار اقدام به‌عنوان توضیحی که کاربر ارائه کرده است
+
+**تغییر فوری وضعیت رانندگی و تخصیص**:
+تغییری که از لحظه دقیق ثبت اثر می‌گیرد و امکان چند تغییر مستقل در یک روز را با حفظ ترتیب و سابقه فراهم می‌کند؛ ثبت عادی آن به گذشته برنمی‌گردد و برنامه‌ریزی تخصیص آینده معنای مستقلی دارد.
+_Avoid_: یکسان‌گرفتن روز تقویمی با لحظه تغییر، بازنویسی وضعیت‌های قبلی، یا اعمال تغییر فوری به‌عنوان اصلاح سابقه گذشته
+
+**مانع عملیات باز در تغییر تخصیص**:
+وجود عملیات گارد یا ارسال تعیین‌تکلیف‌نشده برای هر راننده یا خودروی متأثر که تغییر خودرو، پایان تخصیص، پایان فعالیت راننده یا بایگانی خودرو را تا تعیین تکلیف آن متوقف می‌کند؛ این مانع جلوی تعلیق فوری صلاحیت را نمی‌گیرد، ولی پس از تعلیق ادامه مراحل نیازمند صلاحیت مجاز نیست و پرونده خودکار حذف یا لغو نمی‌شود.
+_Avoid_: انتقال خودرو بدون بررسی همه طرف‌های متأثر، تعویق تعلیق صلاحیت به‌دلیل عملیات باز، یا تغییر خودکار سابقه و ترکیب راننده و خودرو در عملیات قبلی
+
+**اصلاح اطلاعات راننده و خودرو در عملیات باز**:
+اصلاح مشخصات معمول خودرو یا اطلاعات گواهینامه در جریان ارسال، با حفظ تصویر ثبت‌شده در عملیات قبلی، مجاز است؛ تغییر پلاک تا تعیین تکلیف عملیات باز متوقف می‌ماند و اصلاح گواهینامه بلافاصله بر آمادگی جاری و امکان ادامه مراحل نیازمند صلاحیت اثر دارد.
+_Avoid_: بازنویسی اطلاعات ارسال قبلی، تغییر پلاک در عملیات باز، یا ادامه مراحل نیازمند صلاحیت پس از مشخص‌شدن نقص یا انقضای گواهینامه
 
 **Guard Driver Queue Turn**:
 One immutable, time-ordered admission of the driver and vehicle physically presented to Guard for loading, retaining their source identities, the applicable internal assignment when relevant, and an admission snapshot. Later identity or assignment edits never rewrite the turn; eligibility is revalidated before loading-area entry and Logistics reservation, and an invalid turn is removed with accountable evidence rather than mutated.
@@ -5289,3 +5332,7 @@ _Avoid_: حد مشترک یا عدد پیش‌فرض مثبت برای همه خ
 **کسری حداقل عملیات قرارداد**:
 فاصله مجموع مقدار اجرای یک قلم ابزار یا پرداخت سنگ تا حداقل تعریف‌شده آن؛ ردیف‌های محصول و انتخاب عملیات در زمان کسری حفظ می‌شوند، ولی تکمیل قرارداد به رفع کسری یا کنارگذاشتن آن عملیات وابسته است.
 _Avoid_: جلوگیری از ذخیره هر ردیف محصول، حذف خودکار انتخاب عملیات پس از کاهش مقدار، یا کسری مقدار سنگ
+
+**ادامه اصلاح تأییدشده قرارداد همکار**:
+بازگشت به آخرین مرحله معتبرِ طی‌شده در همان درخواست اصلاح؛ مرور اولیه درخواست تازه از تاریخ قرارداد آغاز می‌شود و ادامه آن، اطلاعات محصول، تحویل و پرداخت را حفظ می‌کند.
+_Avoid_: شروع دوباره مرور اولیه پس از هر وقفه، تأیید خودکار نسخه تازه، یا معتبر دانستن برنامه ناسازگار تحویل و پرداخت

@@ -568,6 +568,12 @@ test('initial reviewed correction opens at date, while pricing results and subse
   assert.equal(partnerCaseResultStep('products', true), 'products');
 });
 
+test('resuming the same reviewed correction retains the chosen step without waiving initial review of a new request', () => {
+  assert.equal(partnerCaseResultStep('payment', true, true, true), 'payment');
+  assert.equal(partnerCaseResultStep('confirmation', true, true, true), 'confirmation');
+  assert.equal(partnerCaseResultStep('payment', true, true, false), 'date');
+});
+
 
 test('pricing has no duplicated retail input and retains the loss acknowledgment', () => {
   const lossRows = draft.rows.map(row => ({ ...row, wholesaleUnitPrice: { amount: '1500', currency: 'IRR' as const } }));

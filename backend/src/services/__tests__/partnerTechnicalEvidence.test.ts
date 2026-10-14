@@ -722,3 +722,37 @@ for (const family of ['longitudinal', 'stair', 'slab'] as const) test(`${family}
   assert.equal(next.value.measures[0].quantity, material.quantity);
   assert.equal(material.amountToman, new Prisma.Decimal(material.quantity).mul('3000000').toFixed());
 });
+
+for (const part of ['tread', 'riser', 'landing'] as const) {
+  test(`stair ${part}: default and explicit mandatory choices price identically to ordinary Sales`, async () => {
+    const original = manualPriceDraft('stair');
+    const source = original.rows[0];
+    assert.equal(source.family, 'stair');
+    if (source.family !== 'stair') throw new Error('Expected stair fixture');
+    const { mandatoryEnabled: _enabled, mandatoryPercentage: _percentage, ...geometry } = source.configuration;
+    const compile = async (override: { mandatoryEnabled?: boolean; mandatoryPercentage?: string }) => {
+      const draft = PartnerTechnicalDraftSchema.parse({ ...original,
+        rows: [{ ...source, configuration: { ...geometry, part, quantityMode: 'manual', ...override } }] });
+      const resolved = await createPartnerTechnicalEvidenceResolver()(unpricedTransaction() as any,
+        { actorId: 'partner', recoveryId: 'stairs', draft, previous: null });
+      assert.ok(resolved.ok);
+      // Opposite general default must not determine the stair part's default.
+      const context = structuredClone(resolved.value.context);
+      context.products[0].stair = { ...context.products[0].stair!, mandatoryEnabled: part === 'tread',
+        mandatoryPercentage: parseCanonicalDecimal('35'), rememberedMandatoryPercentage: parseCanonicalDecimal('35') };
+      const compiled = compilePartnerTechnicalGraph(draft, context);
+      assert.ok(compiled.ok, !compiled.ok ? compiled.error.code : undefined);
+      return compiled.value.graph.rows[0];
+    };
+    const expectedEnabled = part !== 'tread';
+    const automatic = await compile({});
+    const explicit = await compile({ mandatoryEnabled: expectedEnabled, mandatoryPercentage: '20' });
+    assert.equal(automatic.commercial.totalAmountToman, explicit.commercial.totalAmountToman);
+    assert.equal(automatic.commercial.calculationSnapshot?.mandatoryEnabled, expectedEnabled);
+    assert.equal(automatic.commercial.calculationSnapshot?.mandatoryPercentage, '20');
+    const manual = await compile({ mandatoryEnabled: !expectedEnabled, mandatoryPercentage: '10' });
+    assert.equal(manual.commercial.calculationSnapshot?.mandatoryEnabled, !expectedEnabled);
+    assert.equal(manual.commercial.calculationSnapshot?.mandatoryPercentage, '10');
+    assert.notEqual(manual.commercial.totalAmountToman, automatic.commercial.totalAmountToman);
+  });
+}

@@ -112,6 +112,7 @@ const PartnerWizardRecoveryIntentSchema = CaseDraftIntentSchema.omit({ deliverie
   }).strict()),
 }).strict();
 export const PartnerWizardRecoverySaveSchema = z.object({
+  reviewedCorrectionRequestId: IdSchema.optional(),
   schemaVersion: z.literal(1),
   expectedWizardRevision: z.number().int().nonnegative().safe(),
   editLease: PartnerDraftEditLeaseSchema,
@@ -119,6 +120,7 @@ export const PartnerWizardRecoverySaveSchema = z.object({
   intent: PartnerWizardRecoveryIntentSchema,
 }).strict();
 export const PartnerWizardRecoverySnapshotSchema = z.object({
+  reviewedCorrectionRequestId: IdSchema.optional(),
   schemaVersion: z.literal(1),
   wizardRevision: z.number().int().positive().safe(),
   step: PartnerWizardStepSchema,

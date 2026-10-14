@@ -900,6 +900,7 @@ model InternalDriverProfile {
   personnel          Personnel                         @relation(fields: [personnelId], references: [id], onDelete: Restrict)
   eligibilityPeriods InternalDriverEligibilityPeriod[]
   vehicleAssignments DriverVehicleAssignment[]
+  assignmentPlans    DriverVehicleAssignmentPlan[]
   guardQueueTurns    GuardDriverQueueTurn[]
 
   @@index([status])
@@ -939,6 +940,7 @@ model CompanyVehicle {
   createdBy           String
   plates              CompanyVehiclePlate[]
   assignments         DriverVehicleAssignment[]
+  assignmentPlans     DriverVehicleAssignmentPlan[]
   guardQueueTurns     GuardDriverQueueTurn[]
 
   @@index([status])
@@ -974,10 +976,35 @@ model DriverVehicleAssignment {
   driver          InternalDriverProfile  @relation(fields: [driverId], references: [id], onDelete: Restrict)
   vehicle         CompanyVehicle         @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
   guardQueueTurns GuardDriverQueueTurn[]
+  plans           DriverVehicleAssignmentPlan[]
 
   @@index([driverId, effectiveFrom])
   @@index([vehicleId, effectiveFrom])
   @@map("driver_vehicle_assignments")
+}
+
+model DriverVehicleAssignmentPlan {
+  id            String @id @default(cuid())
+  driverId      String
+  vehicleId     String
+  assignmentId  String?
+  action        String @default("ASSIGN")
+  status        String @default("PLANNED")
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  blockedReason String?
+  expectedAssignmentIds String[] @default([])
+  createdBy     String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  driver        InternalDriverProfile @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  vehicle       CompanyVehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  assignment    DriverVehicleAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@index([status, effectiveFrom])
+  @@index([driverId, status])
+  @@index([vehicleId, status])
+  @@map("driver_vehicle_assignment_plans")
 }
 
 model ExternalDriver {

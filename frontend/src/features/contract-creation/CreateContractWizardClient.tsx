@@ -1,4 +1,6 @@
 'use client';
+
+import { stairMandatoryDefaults } from '@sabalanerp/contract-product-graph';
 import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 
 import { OperationMinimumContext, OperationMinimumSummary, contractOperationMinimumState } from './components/product-modal-system/OperationMinimumContext';
@@ -1771,7 +1773,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     }
 
     const baseMaterialPrice = pricingSquareMeters * pricePerSqm;
-    const defaultMandatoryForPart = part === 'riser' || part === 'landing';
+    const defaultMandatoryForPart = stairMandatoryDefaults(part).enabled;
     const isMandatoryEnabled = draft.useMandatory ?? defaultMandatoryForPart;
     const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
     const mandatoryAmount = isMandatoryEnabled && mandatoryPercentageValue > 0
@@ -6682,7 +6684,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                           .includes(finishingSearchTerm)
                       )
                     : selectableStoneFinishings;
-                  const defaultMandatoryEnabled = stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
+                  const defaultMandatoryEnabled = stairMandatoryDefaults(stairSystemV2.stairActivePart).enabled;
                   const mandatoryEnabled = draft.useMandatory ?? defaultMandatoryEnabled;
                   const supportsMandatory = stairSystemV2.stairActivePart === 'tread' || stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
                   const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
@@ -9609,7 +9611,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
                   const userWidthCm = draft.widthCm || 0;
                   const baseStoneQuantity = totals.baseStoneQuantity;
 
-                  const defaultMandatoryForPart = stairSystemV2.stairActivePart === 'riser' || stairSystemV2.stairActivePart === 'landing';
+                  const defaultMandatoryForPart = stairMandatoryDefaults(stairSystemV2.stairActivePart).enabled;
                   const isDraftMandatory = draft.useMandatory ?? defaultMandatoryForPart;
                   const mandatoryPercentageValue = draft.mandatoryPercentage ?? 20;
                    const pricing = canonicalProductSavePricing({

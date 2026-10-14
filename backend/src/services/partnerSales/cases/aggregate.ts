@@ -1,4 +1,5 @@
 import { assertOperationQuantityMinimums, standaloneMinimumQuantities } from '../../operationMinimumGuard';
+import { PARTNER_CREATION_TRANSACTION_OPTIONS } from '../creationTransactionBudget';
 import { collectCalculatedOperationQuantities } from '@sabalanerp/contract-product-graph';
 import { finishCommercialCorrection } from '../../ordinaryContractLifecycle';
 import { inquiryBelongsToCurrentActivation } from './reactivationPricing';
@@ -503,7 +504,7 @@ export function createPrismaPartnerCaseService(input: Omit<PartnerCaseDependenci
   return createPartnerCaseService({ ...input, transaction: work => input.database.$transaction(async tx => {
     await lockPartnerOperationsControl(tx);
     return work(tx);
-  }) });
+  }, PARTNER_CREATION_TRANSACTION_OPTIONS) });
 }
 
 /** Atomic Case-pair writer. All private graph, approval and policy evidence is

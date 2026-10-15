@@ -27,7 +27,7 @@ export default function PrototypeSwitcher({ variants, current }: { variants: { k
   return <div className="fixed bottom-4 inset-x-3 z-40 mx-auto w-fit max-w-[calc(100%-1.5rem)]" dir="ltr">
     <ErpCard className="flex items-center gap-2 p-2" tone="info">
       <ErpButton label="←" title="طرح قبلی" onClick={() => cycle(-1)} tone="info" />
-      <span className="px-2 text-center text-sm font-semibold" dir="rtl" aria-live="polite">{current} · {variants[index].name}<span className="block text-xs font-normal sds-text-secondary">مقایسه طرح‌ها · کلیدهای ← →</span></span>
+      <span className="px-2 text-center text-sm font-semibold" dir="rtl" aria-live="polite">{current} · {variants[index].name}</span>
       <ErpButton label="→" title="طرح بعدی" onClick={() => cycle(1)} tone="info" />
     </ErpCard>
   </div>;

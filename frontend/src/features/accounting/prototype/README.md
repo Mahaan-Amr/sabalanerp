@@ -5,6 +5,8 @@ Question: which information hierarchy makes a customer account easiest to read a
 Local throwaway branch: `codex/prototype-customer-finance-ux`.
 Decision: awaiting user comparison; no variant has been promoted.
 
+User refinement: prefer direct labels, minimal text and clear feature navigation. The prototype now keeps two primary actions visible, exposes secondary actions through a labeled menu, and separates debts, receipt tracing, statement and analytics. Details and secondary balances open on demand; explanatory banners and repeated summaries were removed. The compact prototype badge still identifies that actions do not post financial data.
+
 Run from the repository root:
 
 ```sh

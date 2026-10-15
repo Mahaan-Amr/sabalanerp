@@ -779,10 +779,76 @@ model DeploymentOperation {
   createdAt               DateTime                            @default(now())
   updatedAt               DateTime                            @updatedAt
   partnerReleaseReadiness PartnerReleaseReadinessPublication?
+  onlineRelease           OnlineRelease?
 
   @@index([phase, leaseExpiresAt])
   @@index([startedAt])
   @@map("deployment_operations")
+}
+
+/// Immutable release identity plus the durable online handoff/recovery record.
+/// Acceptance remains evidence-bound; a phase string is never admission proof.
+model OnlineRelease {
+  id                    String              @id
+  deploymentId          String              @unique
+  manifestSha256        String
+  sourceCommit          String
+  identityJson          Json
+  compatibilityJson     Json
+  recoveryJson          Json
+  acceptanceJson        Json?
+  phase                 String              @default("PREPARING")
+  previousReleaseId     String?
+  servedAt              DateTime?           @db.Timestamptz(3)
+  retiredAt             DateTime?           @db.Timestamptz(3)
+  browserSupportUntil   DateTime?           @db.Timestamptz(3)
+  createdAt             DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime            @updatedAt @db.Timestamptz(3)
+  deployment            DeploymentOperation @relation(fields: [deploymentId], references: [id], onDelete: Restrict)
+  runtimes              OnlineRuntimeSlot[]
+  migrations            OnlineMigrationStep[]
+
+  @@index([phase, browserSupportUntil])
+  @@map("online_releases")
+}
+
+/// Heartbeats are observations, never permission to steal a live kernel owner.
+model OnlineRuntimeSlot {
+  id                    String        @id
+  releaseId             String
+  component             String
+  role                  String
+  phase                 String        @default("PREPARED")
+  nonceSha256           String        @unique
+  imageIdentity         String
+  reportJson            Json?
+  heartbeatAt           DateTime?     @db.Timestamptz(3)
+  stoppedAt             DateTime?     @db.Timestamptz(3)
+  createdAt             DateTime      @default(now()) @db.Timestamptz(3)
+  release               OnlineRelease @relation(fields: [releaseId], references: [id], onDelete: Restrict)
+
+  @@index([releaseId, phase])
+  @@map("online_runtime_slots")
+}
+
+/// Resumable progress is separate from immutable applied Prisma SQL history.
+model OnlineMigrationStep {
+  id                    String        @id
+  releaseId             String
+  stepId                String
+  phase                 String
+  operationSha256       String
+  operationJson         Json
+  sourceMigrationName   String?       @unique
+  state                 String        @default("PENDING")
+  progressJson          Json?
+  completedAt           DateTime?     @db.Timestamptz(3)
+  createdAt             DateTime      @default(now()) @db.Timestamptz(3)
+  release               OnlineRelease @relation(fields: [releaseId], references: [id], onDelete: Restrict)
+
+  @@unique([releaseId, stepId])
+  @@index([state, releaseId])
+  @@map("online_migration_steps")
 }
 
 model PartnerReleaseReadinessPublication {

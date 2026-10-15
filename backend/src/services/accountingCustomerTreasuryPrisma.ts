@@ -1367,7 +1367,13 @@ export const bindTaxOutboxChannelPrisma = async (database: PrismaClient, input: 
     || (channel.effectiveTo != null && message.taxInvoice.issuedAt > channel.effectiveTo)) {
     throw new AccountingCustomerTreasuryError('TAX_CHANNEL_NOT_EFFECTIVE', 'کانال مالیاتی مؤثر برای این صورتحساب پیدا نشد.', 409);
   }
-  return tx.accountingTaxOutboxMessage.update({ where: { id: message.id }, data: { channelId: channel.id, status: 'PENDING' } });
+  if (message.status === 'UNKNOWN') throw new AccountingCustomerTreasuryError('TAX_SUBMISSION_OUTCOME_UNKNOWN',
+    'نتیجه ارسال مالیاتی نامشخص است؛ پیش از ارسال دوباره باید نتیجه از سرویس مالیاتی بررسی شود.', 409);
+  const bound = await tx.accountingTaxOutboxMessage.updateMany({ where: { id: message.id,
+    status: { in: ['PENDING', 'RETRY_PENDING', 'NEEDS_CHANNEL'] } }, data: { channelId: channel.id, status: 'PENDING' } });
+  if (bound.count !== 1) throw new AccountingCustomerTreasuryError('TAX_SUBMISSION_ALREADY_STARTED',
+    'کانال درخواست در حال ارسال یا ارسال‌شده قابل تغییر نیست.', 409);
+  return tx.accountingTaxOutboxMessage.findUniqueOrThrow({ where: { id: message.id } });
 });
 
 export const publishVatInputEvidencePrisma = async (database: PrismaClient, input: { legalEntityId: string; fiscalYearId: string;
@@ -1446,13 +1452,18 @@ export const reconcileVatPeriodPrisma = async (database: PrismaClient, input: { 
 }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
 export const recordTaxSubmissionAttemptPrisma = async (database: PrismaClient, input: { outboxMessageId: string;
-  requestHash: string; status: 'SUCCEEDED' | 'FAILED'; safeResponse?: unknown; receiptNumber?: string; errorCode?: string;
+  requestHash: string; claimStartedAt: Date; status: 'SUCCEEDED' | 'FAILED' | 'UNKNOWN'; safeResponse?: unknown; receiptNumber?: string; errorCode?: string;
   externalUniqueTaxId?: string;
 }) => database.$transaction(async (tx) => {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.outboxMessageId}))`;
   const message = await tx.accountingTaxOutboxMessage.findUnique({ where: { id: input.outboxMessageId }, include: { attempts: true } });
   if (!message) throw new AccountingCustomerTreasuryError('TAX_OUTBOX_NOT_FOUND', 'درخواست ارسال صورتحساب مالیاتی پیدا نشد.', 404);
-  if (message.attempts.some((attempt) => attempt.requestHash === input.requestHash && attempt.status === 'SUCCEEDED')) return message.attempts.find((attempt) => attempt.requestHash === input.requestHash)!;
+  const succeeded = message.attempts.find(attempt => attempt.requestHash === input.requestHash && attempt.status === 'SUCCEEDED');
+  if (succeeded) return succeeded;
+  if (message.status === 'SENT') throw new AccountingCustomerTreasuryError('TAX_OUTBOX_ALREADY_SENT', 'این درخواست مالیاتی قبلاً ارسال شده است.', 409);
+  if (message.status !== 'PROCESSING' || message.claimedAt?.getTime() !== input.claimStartedAt.getTime()) {
+    throw new AccountingCustomerTreasuryError('TAX_SUBMISSION_OWNERSHIP_LOST', 'مالکیت ارسال مالیاتی تغییر کرده است.', 409);
+  }
   if (!message.channelId) throw new AccountingCustomerTreasuryError('TAX_CHANNEL_REQUIRED', 'درخواست مالیاتی هنوز به کانال مؤثر متصل نشده است.', 409);
   if (input.status === 'SUCCEEDED' && !input.externalUniqueTaxId?.trim()) {
     throw new AccountingCustomerTreasuryError('EXTERNAL_TAX_ID_REQUIRED', 'شناسه یکتای مالیاتی برای ارسال موفق الزامی است.', 400);
@@ -1464,6 +1475,7 @@ export const recordTaxSubmissionAttemptPrisma = async (database: PrismaClient, i
     errorCode: input.errorCode, attemptedAt, completedAt: attemptedAt } });
   await tx.accountingTaxOutboxMessage.update({ where: { id: message.id }, data: input.status === 'SUCCEEDED'
     ? { status: 'SENT', claimedAt: null }
+    : input.status === 'UNKNOWN' ? { status: 'UNKNOWN', claimedAt: null }
     : { status: 'RETRY_PENDING', claimedAt: null, availableAt: new Date(attemptedAt.getTime() + 60_000) } });
   if (input.status === 'SUCCEEDED') await tx.accountingTaxInvoice.update({ where: { id: message.taxInvoiceId }, data: {
     status: 'SUBMITTED', externalUniqueTaxId: input.externalUniqueTaxId!.trim(),
@@ -1482,17 +1494,18 @@ export const processNextTaxOutboxMessagePrisma = async (database: PrismaClient, 
   const now = dependencies.now?.() ?? new Date();
   const staleBefore = new Date(now.getTime() - 5 * 60_000);
   const claimed = await database.$transaction(async (tx) => {
+    const stale = await tx.accountingTaxOutboxMessage.findMany({ where: { status: 'PROCESSING',
+      OR: [{ claimedAt: { lt: staleBefore } }, { claimedAt: null }] }, take: 100 });
+    for (const interrupted of stale) {
+      await tx.accountingTaxOutboxMessage.updateMany({ where: { id: interrupted.id, status: 'PROCESSING',
+        claimedAt: interrupted.claimedAt }, data: { status: 'UNKNOWN', claimedAt: null } });
+    }
     const candidate = await tx.accountingTaxOutboxMessage.findFirst({ where: {
-      channelId: { not: null }, OR: [
-        { status: { in: ['PENDING', 'RETRY_PENDING'] }, availableAt: { lte: now } },
-        { status: 'PROCESSING', claimedAt: { lt: staleBefore } },
-      ],
+      channelId: { not: null }, status: { in: ['PENDING', 'RETRY_PENDING'] }, availableAt: { lte: now },
     }, orderBy: { availableAt: 'asc' } });
     if (!candidate) return null;
-    const result = await tx.accountingTaxOutboxMessage.updateMany({ where: { id: candidate.id, OR: [
-      { status: { in: ['PENDING', 'RETRY_PENDING'] }, availableAt: { lte: now } },
-      { status: 'PROCESSING', claimedAt: { lt: staleBefore } },
-    ] }, data: { status: 'PROCESSING', claimedAt: now } });
+    const result = await tx.accountingTaxOutboxMessage.updateMany({ where: { id: candidate.id,
+      status: { in: ['PENDING', 'RETRY_PENDING'] }, availableAt: { lte: now } }, data: { status: 'PROCESSING', claimedAt: now } });
     return result.count === 1 ? candidate : null;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   if (!claimed) return null;
@@ -1512,17 +1525,30 @@ export const processNextTaxOutboxMessagePrisma = async (database: PrismaClient, 
       quantity: line.quantity.toString(), taxRuleId: line.taxRuleId, taxRuleVersion: line.taxRuleVersion,
       rawBaseAmount: line.rawBaseAmount.toString(), roundedTaxRials: line.roundedTaxRials.toString(), exempt: line.exempt })) };
   const requestHash = hashCustomerTreasuryEvidence({ requestIdentity: message.requestIdentity, payload });
+  let providerRequestStarted = false;
   try {
     const credential = await dependencies.resolveSecret(channel.secretReference, channel.safeKeyVersion);
+    // The committed PROCESSING claim pins the immutable invoice/payload,
+    // request identity and channel before the external call. Completed attempt
+    // evidence remains append-only; it is never rewritten to track progress.
+    const current = await database.accountingTaxOutboxMessage.findUniqueOrThrow({ where: { id: message.id } });
+    if (current.status !== 'PROCESSING' || current.claimedAt?.getTime() !== now.getTime()) {
+      throw new AccountingCustomerTreasuryError('TAX_SUBMISSION_OWNERSHIP_LOST', 'مالکیت ارسال مالیاتی تغییر کرده است.', 409);
+    }
+    providerRequestStarted = true;
     const result = await dependencies.submit({ channelKind: channel.kind as 'DIRECT' | 'TRUSTED_COMPANY',
       providerName: channel.providerName ?? undefined, credential, requestIdentity: message.requestIdentity,
       protocolVersion: message.protocolVersion, payload });
-    return recordTaxSubmissionAttemptPrisma(database, { outboxMessageId: message.id, requestHash, status: 'SUCCEEDED',
+    return await recordTaxSubmissionAttemptPrisma(database, { outboxMessageId: message.id, requestHash, claimStartedAt: now, status: 'SUCCEEDED',
       externalUniqueTaxId: result.externalUniqueTaxId, receiptNumber: result.receiptNumber, safeResponse: result.safeResponse });
   } catch (error) {
-    await recordTaxSubmissionAttemptPrisma(database, { outboxMessageId: message.id, requestHash, status: 'FAILED',
-      errorCode: error instanceof Error ? error.name : 'TAX_SUBMISSION_FAILED',
-      safeResponse: { category: 'ADAPTER_FAILURE' } });
+    if (!(error instanceof AccountingCustomerTreasuryError && error.code === 'TAX_SUBMISSION_OWNERSHIP_LOST')) {
+      await recordTaxSubmissionAttemptPrisma(database, { outboxMessageId: message.id, requestHash,
+        claimStartedAt: now,
+        status: providerRequestStarted ? 'UNKNOWN' : 'FAILED',
+        errorCode: providerRequestStarted ? 'TAX_SUBMISSION_OUTCOME_UNKNOWN' : 'TAX_SUBMISSION_NOT_STARTED',
+        safeResponse: { category: providerRequestStarted ? 'PROVIDER_OUTCOME_UNKNOWN' : 'LOCAL_PREPARATION_FAILURE' } });
+    }
     throw error;
   }
 };

@@ -299,16 +299,67 @@ test('customer revenue and treasury tracer bullet persists once and projects onl
       /کانال مالیاتی مؤثر/);
     await database.accountingTaxOutboxMessage.update({ where: { id: outbox.id }, data: {
       status: 'PROCESSING', claimedAt: new Date(Date.now() - 10 * 60_000) } });
+    let ambiguousSubmissions = 0;
+    const interruptedAdapter = { resolveSecret: async () => 'isolated-secret', submit: async () => {
+      ambiguousSubmissions++; throw new Error('Injected connection loss after provider acceptance');
+    } };
+    assert.equal(await processNextTaxOutboxMessagePrisma(database, interruptedAdapter), null);
+    assert.equal((await database.accountingTaxOutboxMessage.findUniqueOrThrow({ where: { id: outbox.id } })).status, 'UNKNOWN');
+    assert.equal(ambiguousSubmissions, 0, 'an interrupted prior owner is not permission to submit again');
+    await assert.rejects(() => bindTaxOutboxChannelPrisma(database, { outboxMessageId: outbox.id, channelId: outbox.channelId! }),
+      /نتیجه.*نامشخص/);
+    // Fixture-only reset starts a distinct ambiguity scenario; production has no reset path.
+    await database.accountingTaxOutboxMessage.update({ where: { id: outbox.id }, data: { status: 'PENDING', claimedAt: null } });
+    await assert.rejects(() => processNextTaxOutboxMessagePrisma(database, interruptedAdapter), /Injected connection loss/);
+    assert.equal((await database.accountingTaxOutboxMessage.findUniqueOrThrow({ where: { id: outbox.id } })).status, 'UNKNOWN');
+    assert.equal(await processNextTaxOutboxMessagePrisma(database, interruptedAdapter), null);
+    assert.equal(ambiguousSubmissions, 1);
+    assert.equal((await database.accountingTaxSubmissionAttempt.findFirstOrThrow({ where: { status: 'UNKNOWN' } })).errorCode, 'TAX_SUBMISSION_OUTCOME_UNKNOWN');
+    await database.accountingTaxOutboxMessage.update({ where: { id: outbox.id }, data: { status: 'PENDING', claimedAt: null } });
+    await database.$executeRawUnsafe(`CREATE FUNCTION qa_reject_tax_success() RETURNS trigger AS $$
+      BEGIN IF NEW.status = 'SUCCEEDED' THEN RAISE EXCEPTION 'injected receipt persistence failure'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`);
+    await database.$executeRawUnsafe(`CREATE TRIGGER qa_reject_tax_success BEFORE INSERT ON accounting_tax_submission_attempts
+      FOR EACH ROW EXECUTE FUNCTION qa_reject_tax_success()`);
+    let acceptedBeforePersistenceFailure = 0;
+    try {
+      await assert.rejects(() => processNextTaxOutboxMessagePrisma(database, {
+        resolveSecret: async () => 'isolated-secret', submit: async () => {
+          acceptedBeforePersistenceFailure++; return { externalUniqueTaxId: 'isolated-provider-accepted' };
+        },
+      }), /injected receipt persistence failure/);
+      assert.equal((await database.accountingTaxOutboxMessage.findUniqueOrThrow({ where: { id: outbox.id } })).status, 'UNKNOWN');
+      assert.equal(await processNextTaxOutboxMessagePrisma(database, interruptedAdapter), null);
+      assert.equal(acceptedBeforePersistenceFailure, 1);
+    } finally {
+      await database.$executeRawUnsafe('DROP TRIGGER qa_reject_tax_success ON accounting_tax_submission_attempts');
+      await database.$executeRawUnsafe('DROP FUNCTION qa_reject_tax_success()');
+    }
+    // The existing success assertions use a separate controlled fixture attempt.
+    await database.accountingTaxOutboxMessage.update({ where: { id: outbox.id }, data: { status: 'PENDING', claimedAt: null } });
     let submittedCredential = '';
-    await processNextTaxOutboxMessagePrisma(database, {
+    let successAcknowledgementLost = false;
+    const lostAcknowledgementDatabase = new Proxy(database, { get(target, property) {
+      if (property !== '$transaction') return Reflect.get(target, property);
+      return async (...args: any[]) => {
+        const result = await (database.$transaction as any)(...args);
+        if (result?.status === 'SUCCEEDED' && !successAcknowledgementLost) {
+          successAcknowledgementLost = true; throw new Error('Injected lost commit acknowledgement');
+        }
+        return result;
+      };
+    } });
+    await assert.rejects(() => processNextTaxOutboxMessagePrisma(lostAcknowledgementDatabase, {
       resolveSecret: async (reference) => { assert.equal(reference, 'vault://tax/channel-1'); return 'resolved-secret'; },
       submit: async ({ credential, requestIdentity, payload }) => { submittedCredential = credential;
         assert.equal(requestIdentity, `tax-request-${sale.taxInvoice!.id}`); assert.ok(payload);
         return { externalUniqueTaxId: `tax-external-${temporary.runId}`, receiptNumber: 'receipt-tax-1',
           safeResponse: { status: 'accepted', accessToken: 'must-not-persist', nested: { apiKey: 'must-not-persist', receipt: 'safe' } } }; },
-    });
+    }), /Injected lost commit acknowledgement/);
     assert.equal(submittedCredential, 'resolved-secret');
-    const attempt = await database.accountingTaxSubmissionAttempt.findFirstOrThrow();
+    assert.equal(await processNextTaxOutboxMessagePrisma(database, interruptedAdapter), null);
+    assert.equal((await database.accountingTaxOutboxMessage.findUniqueOrThrow({ where: { id: outbox.id } })).status, 'SENT');
+    assert.equal(await database.accountingTaxSubmissionAttempt.count({ where: { status: 'SUCCEEDED' } }), 1);
+    const attempt = await database.accountingTaxSubmissionAttempt.findFirstOrThrow({ where: { status: 'SUCCEEDED' } });
     assert.deepEqual(attempt.safeResponse, { status: 'accepted', nested: { receipt: 'safe' } });
     assert.equal((await database.accountingTaxInvoice.findFirstOrThrow()).status, 'SUBMITTED');
     await assert.rejects(() => database.accountingCustomerOpenItem.update({ where: { id: sale.openItem.id }, data: { originalRials: '1' } }), /ACCOUNTING_IMMUTABLE_RECORD/);

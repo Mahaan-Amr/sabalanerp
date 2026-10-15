@@ -37,10 +37,13 @@ export const temporaryDatabaseUrl = (sourceUrl: string, databaseName: string): s
   return url.toString();
 };
 
-const compose = (repositoryRoot: string, command: string) => execFileSync('docker', [
+const compose = (repositoryRoot: string, command: string) => {
+  verifyComposeTarget(repositoryRoot);
+  return execFileSync('docker', [
   'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
   'sh', '-lc', command,
 ], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
+};
 
 const verifyComposeTarget = (repositoryRoot: string) => assertSabalanerpLocalPostgresTarget(execFileSync('docker', [
   'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'ps', '--format', 'json', 'postgres',

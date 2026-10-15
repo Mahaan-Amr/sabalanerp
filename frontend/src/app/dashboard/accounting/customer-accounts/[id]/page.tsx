@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { FaArrowDown, FaBalanceScale, FaEye, FaFileExcel, FaFilePdf, FaMoneyBillWave, FaSync } from 'react-icons/fa';
 import { ErpActionMenu, ErpBadge, ErpButton, ErpCard, ErpDisclosure, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpMetricGrid, ErpPresentationProvider, ErpSection, ErpSegmentedControl, ErpSheet, ErpSummaryGrid, ErpWorkspacePage, type ErpAction } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
@@ -12,6 +12,7 @@ import CustomerPostedItems from '@/features/accounting/CustomerPostedItems';
 import { recordForPostedItem } from '@/features/accounting/customerPostedLinks';
 import CustomerAccountOperationFlow from '@/features/accounting/CustomerAccountOperationFlow';
 import AccountingLedgerEvidence from '@/features/accounting/AccountingLedgerEvidence';
+import CustomerFinancePrototype from '@/features/accounting/prototype/CustomerFinancePrototype';
 
 type Tab = 'overview' | 'contracts' | 'records' | 'receipts' | 'statement';
 function AccountCards<T>({ items, render, empty }: { items: T[]; render: (item: T, index: number) => ReactNode; empty: string }) {
@@ -25,6 +26,7 @@ function AccountCards<T>({ items, render, empty }: { items: T[]; render: (item: 
 }
 export default function CustomerAccountDetailPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const accountId = decodeURIComponent(params.id);
   const [data, setData] = useState<CustomerAccount>();
   const [loading, setLoading] = useState(true);
@@ -74,6 +76,7 @@ export default function CustomerAccountDetailPage() {
     if (row.totalAmount != null) { const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(row.totalAmount); if (match) totals.set(row.currency, (totals.get(row.currency) || BigInt(0)) + BigInt(match[1]) * BigInt(100) + BigInt((match[2] || '').padEnd(2, '0'))); }
     return totals;
   }, new Map<string, bigint>())).map(([currency, value]) => accountMoney(`${value / BigInt(100)}.${(value % BigInt(100)).toString().padStart(2, '0')}`, currency)).join(' + ') : '';
+  if (process.env.NEXT_PUBLIC_ENABLE_PROTOTYPES === '1' && searchParams.has('variant') && data && !loading) return <CustomerFinancePrototype account={data} />;
   return <ErpPresentationProvider scope="workspace"><ErpWorkspacePage title={data?.displayName || 'پرونده مالی مشتری'} backHref="/dashboard/accounting/customer-accounts"
     context={data && <div className="flex flex-wrap items-center gap-2"><ErpBadge tone={data.customer?.trustCategory === 'SPECIAL' ? 'purple' : 'neutral'}>{data.customer?.trustCategory === 'SPECIAL' ? 'مشتری خاص' : data.customer ? 'مشتری عادی' : 'هویت تاریخی'}</ErpBadge>
       {data.customer?.cardDeletedAt && <ErpBadge tone="neutral">پرونده تاریخی</ErpBadge>}<span>{data.customer?.workNumber || data.customer?.homeNumber}</span></div>}

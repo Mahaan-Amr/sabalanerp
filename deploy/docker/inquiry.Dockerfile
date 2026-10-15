@@ -12,6 +12,7 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   openssl \
+  sqlite3 \
   ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
@@ -26,6 +27,8 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY apps/sabalan-inquiry ./
 COPY deploy/scripts/run-inquiry-with-recovery.sh /app/run-inquiry-with-recovery.sh
+COPY deploy/scripts/verify-inquiry-database.cjs /app/verify-inquiry-database.cjs
+COPY backend/src/services/inquiryBaseline.json /app/inquiry-baseline.json
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

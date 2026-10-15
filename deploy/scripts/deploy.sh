@@ -61,6 +61,7 @@ run_backend() {
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
+      -e "DEPLOYMENT_MODE=${DEPLOYMENT_MODE}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
       -e "DEPLOYMENT_LEASE_TOKEN=${DEPLOYMENT_LEASE_TOKEN:-}" \
@@ -94,6 +95,7 @@ run_backend_timed() {
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
+      -e "DEPLOYMENT_MODE=${DEPLOYMENT_MODE}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
       -e "DEPLOYMENT_LEASE_TOKEN=${DEPLOYMENT_LEASE_TOKEN:-}" \
@@ -798,6 +800,14 @@ if [ "${BOOTSTRAP}" -eq 1 ]; then
   BOOTSTRAP=0
 else
   phase MIGRATIONS_APPLIED
+fi
+
+# Inquiry's existing SQLite shape is adopted under the same checkpoint,
+# maintenance boundary, database lease and inherited single-control-owner lock.
+# Normal Inquiry restarts only verify; they never push schema or reset passwords.
+if [ "${DEPLOYMENT_MODE}" = "release" ]; then
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  run_backend_timed "${remaining}" sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-inquiry.js
 fi
 
 shipment_cutover_required="$(env_value SHIPMENT_STATEMENT_CUTOVER_REQUIRED)"

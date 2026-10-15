@@ -72,12 +72,14 @@ const main = async () => {
     preservePackage: true,
     onProgress: async (progress) => console.log(JSON.stringify({ event: 'drill-progress', progress })),
   });
-  const initialPromotedFiles = await verifyPromotedRecoveryFiles(validation.manifest);
+  const inquiryTransformation=result.journal.inquiryTransformation;
+  if(inquiryTransformation&&(inquiryTransformation.operationId!==operationId||inquiryTransformation.archiveSha256!==metadata.checksum))throw new Error('INQUIRY_TRANSFORMATION_JOURNAL_MISMATCH');
+  const initialPromotedFiles = await verifyPromotedRecoveryFiles(validation.manifest,[],inquiryTransformation,validation.inquiryBusinessProof);
   let erasureReplay: { replayed: number; erasedArtifactPaths: string[] } | undefined;
   await initializeSystemRecovery(prisma, { onVerifiedErasureReplay: evidence => { erasureReplay = evidence; } });
   if (await readRestoreJournal() || getRecoveryRuntimeState().mode !== 'NORMAL') throw Object.assign(new Error('Recovery drill finalization did not prove a normal runtime.'), { code: 'DEPLOYMENT_DRILL_FINALIZE_FAILED' });
   await prisma.$queryRawUnsafe('SELECT 1');
-  const promotedFiles = await verifyPromotedRecoveryFiles(validation.manifest, erasureReplay?.erasedArtifactPaths);
+  const promotedFiles = await verifyPromotedRecoveryFiles(validation.manifest, erasureReplay?.erasedArtifactPaths,inquiryTransformation,validation.inquiryBusinessProof);
   const liveFileReferences = await validateLiveStoredFileReferences(prisma);
   const applicationPayloads = await verifyRecoveredApplicationPayloads(prisma);
   const businessData = await assertRecoveryBusinessProof(prisma, validation.businessDataProof ?? []);
@@ -96,6 +98,7 @@ const main = async () => {
     liveFileReferences,
     applicationPayloads,
     businessData,
+    ...(inquiryTransformation?{inquiryTransformation}:{}),
     stagedPostgresRestore: true,
     stagedSqliteIntegrity: true,
   };

@@ -29,7 +29,7 @@ services:
     image: ${DRILL_BACKEND_IMAGE:?Immutable recovered backend image required}
     pull_policy: never
     env_file: ${DRILL_APPLICATION_KEYS_FILE:?Independent application key custody file required}
-    command: [node, dist/scripts/deployment-recovery-drill.js]
+    command: [sh, scripts/with-backend-control-ownership.sh, node, dist/scripts/deployment-recovery-drill.js]
     environment:
       NODE_ENV: test
       NODE_OPTIONS: --max-old-space-size=512

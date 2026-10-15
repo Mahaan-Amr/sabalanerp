@@ -1,0 +1,81 @@
+{
+  "format": "sabalan-inquiry-baseline/v1",
+  "id": "20261015080000_adopt_existing_inquiry",
+  "objects": [
+    {
+      "type": "table",
+      "name": "Admin",
+      "table": "Admin",
+      "sql": "CREATE TABLE \"Admin\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"email\" TEXT NOT NULL, \"passwordHash\" TEXT NOT NULL, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updatedAt\" DATETIME NOT NULL)"
+    },
+    {
+      "type": "table",
+      "name": "Product",
+      "table": "Product",
+      "sql": "CREATE TABLE \"Product\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"rowNumber\" TEXT NOT NULL, \"name\" TEXT NOT NULL, \"description\" TEXT NOT NULL DEFAULT '', \"listPrice\" INTEGER, \"finalPrice\" INTEGER, \"discountAvailability\" TEXT NOT NULL DEFAULT '', \"lastDiscountPercent\" REAL, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updatedAt\" DATETIME NOT NULL)"
+    },
+    {
+      "type": "table",
+      "name": "User",
+      "table": "User",
+      "sql": "CREATE TABLE \"User\" (\"id\" TEXT NOT NULL PRIMARY KEY, \"username\" TEXT NOT NULL, \"passwordHash\" TEXT NOT NULL, \"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, \"updatedAt\" DATETIME NOT NULL)"
+    },
+    {
+      "type": "index",
+      "name": "Admin_email_key",
+      "table": "Admin",
+      "sql": "CREATE UNIQUE INDEX \"Admin_email_key\" ON \"Admin\"(\"email\")"
+    },
+    {
+      "type": "index",
+      "name": "Product_rowNumber_key",
+      "table": "Product",
+      "sql": "CREATE UNIQUE INDEX \"Product_rowNumber_key\" ON \"Product\"(\"rowNumber\")"
+    },
+    {
+      "type": "index",
+      "name": "Product_name_idx",
+      "table": "Product",
+      "sql": "CREATE INDEX \"Product_name_idx\" ON \"Product\"(\"name\")"
+    },
+    {
+      "type": "index",
+      "name": "Product_finalPrice_idx",
+      "table": "Product",
+      "sql": "CREATE INDEX \"Product_finalPrice_idx\" ON \"Product\"(\"finalPrice\")"
+    },
+    {
+      "type": "index",
+      "name": "User_username_key",
+      "table": "User",
+      "sql": "CREATE UNIQUE INDEX \"User_username_key\" ON \"User\"(\"username\")"
+    },
+    {
+      "type": "index",
+      "name": "User_username_idx",
+      "table": "User",
+      "sql": "CREATE INDEX \"User_username_idx\" ON \"User\"(\"username\")"
+    }
+  ],
+  "ledgerObjects": [
+    {
+      "type": "table",
+      "name": "_sabalan_inquiry_migrations",
+      "table": "_sabalan_inquiry_migrations",
+      "sql": "CREATE TABLE \"_sabalan_inquiry_migrations\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY, \"sqlSha256\" TEXT NOT NULL,\n  \"schemaSha256\" TEXT NOT NULL, \"appliedAt\" TEXT NOT NULL) WITHOUT ROWID"
+    },
+    {
+      "type": "trigger",
+      "name": "sabalan_inquiry_history_no_update",
+      "table": "_sabalan_inquiry_migrations",
+      "sql": "CREATE TRIGGER \"sabalan_inquiry_history_no_update\" BEFORE UPDATE ON \"_sabalan_inquiry_migrations\"\nBEGIN SELECT RAISE(ABORT,'INQUIRY_MIGRATION_HISTORY_IMMUTABLE'); END;"
+    },
+    {
+      "type": "trigger",
+      "name": "sabalan_inquiry_history_no_delete",
+      "table": "_sabalan_inquiry_migrations",
+      "sql": "CREATE TRIGGER \"sabalan_inquiry_history_no_delete\" BEFORE DELETE ON \"_sabalan_inquiry_migrations\"\nBEGIN SELECT RAISE(ABORT,'INQUIRY_MIGRATION_HISTORY_IMMUTABLE'); END;"
+    }
+  ],
+  "ledgerSql": "CREATE TABLE \"_sabalan_inquiry_migrations\" (\n  \"id\" TEXT NOT NULL PRIMARY KEY, \"sqlSha256\" TEXT NOT NULL,\n  \"schemaSha256\" TEXT NOT NULL, \"appliedAt\" TEXT NOT NULL) WITHOUT ROWID;\nCREATE TRIGGER \"sabalan_inquiry_history_no_update\" BEFORE UPDATE ON \"_sabalan_inquiry_migrations\"\nBEGIN SELECT RAISE(ABORT,'INQUIRY_MIGRATION_HISTORY_IMMUTABLE'); END;\nCREATE TRIGGER \"sabalan_inquiry_history_no_delete\" BEFORE DELETE ON \"_sabalan_inquiry_migrations\"\nBEGIN SELECT RAISE(ABORT,'INQUIRY_MIGRATION_HISTORY_IMMUTABLE'); END;"
+}

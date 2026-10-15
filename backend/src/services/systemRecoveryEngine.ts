@@ -14,6 +14,8 @@ import { decryptPerformanceExportArtifact, encryptPerformanceExportArtifact, per
 import { verifyRestoredFiles } from './deploymentRestoreEvidence';
 import { verifyRecoveredApplicationPayloads } from './deploymentDrillApplicationKeys';
 import { captureRecoveryBusinessProof, type RecoveryBusinessTableProof } from './deploymentRecoveryDataProof';
+import { adoptRecoveryStagedInquiry, captureInquiryBusinessProof, verifyInquiryTransformation,
+  type InquiryBusinessProof, type InquiryTransformation } from './inquiryMigrationPlan';
 
 const execFileAsync = promisify(execFile);
 const PACKAGES_DIR = path.join(RECOVERY_ROOT, 'packages');
@@ -91,10 +93,17 @@ export type RecoveryManifest = {
   components: Array<{ path: string; sha256: string; size: number }>;
 };
 
-export const verifyPromotedRecoveryFiles = (manifest: RecoveryManifest, verifiedErasedPaths: readonly string[] = []) => verifyRestoredFiles(manifest.components, [
-  ...FILE_RECOVERY_MAPPINGS,
-  { payloadPath: 'inquiry', livePath: INQUIRY_SOURCE_DIR },
-], verifiedErasedPaths);
+export const verifyPromotedRecoveryFiles = async (manifest: RecoveryManifest, verifiedErasedPaths: readonly string[] = [],
+  inquiryTransformation?:InquiryTransformation, independentInquiryBusiness?:InquiryBusinessProof) => {
+  let components=manifest.components;
+  if(inquiryTransformation){
+    const originals=components.filter(component=>component.path==='inquiry/inquiry.db');
+    if(originals.length!==1)throw new Error('INQUIRY_TRANSFORMATION_COMPONENT_UNPROVEN');
+    await verifyInquiryTransformation(path.join(INQUIRY_SOURCE_DIR,'inquiry.db'),inquiryTransformation,originals[0],independentInquiryBusiness);
+    components=components.map(component=>component.path==='inquiry/inquiry.db'?{...component,...inquiryTransformation.target}:component);
+  }
+  return verifyRestoredFiles(components,[...FILE_RECOVERY_MAPPINGS,{payloadPath:'inquiry',livePath:INQUIRY_SOURCE_DIR}],verifiedErasedPaths);
+};
 
 const ensureDirectories = async () => {
   await Promise.all([PACKAGES_DIR, UPLOADS_DIR, WORK_DIR, RECOVERY_COORDINATION_DIR].map((directory) =>
@@ -526,6 +535,7 @@ export const validateRecoveryPackage = async (input: {
   const payloadRoot = path.join(jobRoot, 'payload');
   let stagedDatabase: string | null = null;
   let businessDataProof: RecoveryBusinessTableProof[] | undefined;
+  let inquiryBusinessProof:InquiryBusinessProof|undefined;
   try {
     await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
@@ -559,6 +569,7 @@ export const validateRecoveryPackage = async (input: {
       if (sqlite.stdout.trim() !== 'ok') {
         throw Object.assign(new Error(`Recovery SQLite integrity check failed: ${sqlite.stdout.trim()}`), { code: 'RECOVERY_SQLITE_INTEGRITY_FAILED' });
       }
+      inquiryBusinessProof=await captureInquiryBusinessProof(path.join(payloadRoot,'inquiry','inquiry.db'));
       stagedDatabase = safeDatabaseName('sabalan_checkpoint_verify');
       await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
       await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
@@ -572,7 +583,7 @@ export const validateRecoveryPackage = async (input: {
         await stagedClient.$disconnect();
       }
     }
-    return { manifest, compatibility, ...(businessDataProof ? { businessDataProof } : {}) };
+    return { manifest, compatibility, ...(businessDataProof ? { businessDataProof } : {}),...(inquiryBusinessProof?{inquiryBusinessProof}:{}) };
   } finally {
     if (stagedDatabase) await dropDatabase(process.env.DATABASE_URL || '', stagedDatabase);
     await fs.promises.rm(jobRoot, { recursive: true, force: true });
@@ -598,6 +609,7 @@ type RestoreJournal = {
   bootstrapUsername?: string;
   startedAt: string;
   preservePackage?: boolean;
+  inquiryTransformation?:InquiryTransformation;
 };
 
 export const RESTORE_JOURNAL_PATH = path.join(RECOVERY_COORDINATION_DIR, 'pending-restore.json');
@@ -944,6 +956,19 @@ export const stageAndPromoteRecovery = async (input: {
     } finally {
       await stagedClient.$disconnect();
     }
+    if (input.applyMigrations !== false) {
+      // Source/component verification precedes the owned transformation of a
+      // private SQLite stage. Old-image rollback retains its original schema.
+      if(await sha256File(input.sourcePath)!==input.checksum)throw Object.assign(new Error('Recovery archive changed.'),{code:'RECOVERY_INTEGRITY_FAILED'});
+      const manifest=JSON.parse(await fs.promises.readFile(path.join(payloadRoot,'manifest.json'),'utf8')) as RecoveryManifest;
+      const sqliteComponent=manifest.components.filter(component=>component.path==='inquiry/inquiry.db');
+      const sqliteFile=path.join(payloadRoot,'inquiry','inquiry.db');
+      if(sqliteComponent.length!==1 || (await fs.promises.stat(sqliteFile)).size!==sqliteComponent[0].size
+        || await sha256File(sqliteFile)!==sqliteComponent[0].sha256)throw Object.assign(new Error('Recovery SQLite component changed.'),{code:'RECOVERY_INTEGRITY_FAILED'});
+      const adopted=await adoptRecoveryStagedInquiry({databaseFile:sqliteFile,operationId:input.operationId,checksum:input.checksum,
+        bootstrapPassword:input.packageType==='SANITIZED_TEST'?input.bootstrapPassword:undefined});
+      journal.inquiryTransformation=adopted.transformation;
+    }
     await writeRestoreJournal(journal);
     await input.onProgress(50);
     await pauseInquiryForRecovery(input.operationId);
@@ -1017,6 +1042,10 @@ export const readRestoreJournal = async (): Promise<RestoreJournal | null> => {
 };
 
 export const finalizePromotedRecovery = async (prisma: PrismaClient, journal: RestoreJournal) => {
+  if(journal.inquiryTransformation){
+    if(journal.inquiryTransformation.operationId!==journal.operationId||journal.inquiryTransformation.archiveSha256!==journal.checksum)throw new Error('INQUIRY_TRANSFORMATION_JOURNAL_MISMATCH');
+    await verifyInquiryTransformation(path.join(INQUIRY_SOURCE_DIR,'inquiry.db'),journal.inquiryTransformation);
+  }
   const actorExists = await prisma.user.findUnique({ where: { id: journal.actorId }, select: { id: true } });
   const existing = await prisma.recoveryOperation.findUnique({ where: { id: journal.operationId } });
   if (!existing) {

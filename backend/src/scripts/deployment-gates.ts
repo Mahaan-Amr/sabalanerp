@@ -9,6 +9,7 @@ import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 import { sha256File } from '../services/recoveryCrypto';
 import { validateLiveStoredFileReferences } from '../services/systemRecoveryEngine';
 import { verifyShipmentStatementDeploymentState } from '../services/shipmentStatementOperations';
+import { verifyInquiryBaseline, inspectInquiryBaseline } from '../services/inquiryMigrationPlan';
 
 const execFileAsync = promisify(execFile);
 const deploymentId = String(process.env.DEPLOYMENT_ID || '').trim();
@@ -99,7 +100,15 @@ const main = async () => {
       run: async () => {
         const result = await execFileAsync('sqlite3', [inquiryDatabase, 'PRAGMA integrity_check;'], { timeout: 30_000, windowsHide: true });
         if (result.stdout.trim() !== 'ok') throw new Error(`SQLite integrity check failed: ${result.stdout.trim()}`);
-        return { integrity: 'ok' };
+        let identity;
+        if(releaseMode) {
+          const checkpoint=JSON.parse(await fs.promises.readFile(checkpointPath,'utf8'));
+          const unchangedConfiguration=process.env.DEPLOYMENT_MODE==='configuration' && checkpoint.deploymentId===deploymentId
+            && checkpoint.rollbackReleaseSet?.inquiry===process.env.DEPLOYMENT_INQUIRY_IMAGE
+            && /^sha256:[a-f0-9]{64}$/.test(process.env.DEPLOYMENT_INQUIRY_IMAGE||'');
+          identity=unchangedConfiguration?await inspectInquiryBaseline(inquiryDatabase):await verifyInquiryBaseline(inquiryDatabase);
+        }
+        return { integrity: 'ok', identity };
       },
     },
     { name: 'backend-readiness', run: httpGate('http://backend:5000/api/ready') },

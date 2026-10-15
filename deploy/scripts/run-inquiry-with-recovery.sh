@@ -19,8 +19,7 @@ shutdown_inquiry() {
 trap shutdown_inquiry TERM INT
 
 while true; do
-  npm run db:push || exit 1
-  npm run db:seed || exit 1
+  node /app/verify-inquiry-database.cjs || exit 1
   npm run start -- -p 3001 &
   child_pid=$!
   recovery_restart=0

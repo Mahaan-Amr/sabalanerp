@@ -20,6 +20,8 @@ import { guardPhysicalExitIntegrityHash } from './physicalGateExit';
 import { shipmentQuantityEvidenceIntegrityHash } from './shipmentQuantityProjectionStore';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { collectedCustomerCheckRials, effectiveCustomerReceiptRials } from './accountingCustomerReceiptBalance';
+import { requireNewCustomerSaleAfterOpening } from './accountingCustomerSaleOpeningGuard';
+import { requireCustomerReceiptSourceDate } from './accountingCustomerReceiptSource';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 const customerTransaction = <T>(database: Database, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> =>
@@ -428,6 +430,9 @@ export const recognizeCustomerSalePrisma = async (database: PrismaClient, comman
       evidenceHash: command.evidence.hash ?? hashCustomerTreasuryEvidence(command.evidence) }, update: {} });
     return { kind: 'EXCEPTION' as const, exception };
   }
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${profile.partySourceId}`}))`;
+  await requireNewCustomerSaleAfterOpening(tx, { profileId: profile.id, customerId: profile.partySourceId,
+    contractId: command.contractId, recognizedAt, invoiceNumber: command.commercialInvoiceNumber, financialRecordId: command.financialRecordId });
   const exceptionTerms = persistedPolicy?.recognitionPoint === 'EXPLICIT_EXCEPTION'
     ? persistedPolicy.exceptionTerms as Array<{ productRowId: string; quantity: string; netRials: string; costRials: string }> : null;
   const commandProductRows = command.lines.map((line) => line.productRowId);
@@ -802,7 +807,7 @@ export const allocateCustomerReceiptPrisma = async (database: Database, input: {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.treasuryTransactionId}))`;
   const receipt = await tx.accountingTreasuryTransaction.findUnique({ where: { id: input.treasuryTransactionId }, include: {
     allocations: { where: { reversesId: null, reversedById: null }, include: { lines: true } }, profile: true,
-    adjustments: { include: { ledgerVoucher: true } }, checkInstrument: true,
+    adjustments: { include: { ledgerVoucher: true } }, checkInstrument: true, sourceResolution: true,
   } });
   if (!receipt || receipt.kind !== 'CUSTOMER_RECEIPT' || !receipt.profile) throw new AccountingCustomerTreasuryError('RECEIPT_NOT_FOUND', 'دریافت مشتری پیدا نشد.', 404);
   await lockSettlementContracts(tx, input.allocations.map(item => item.openItemId));
@@ -825,6 +830,7 @@ export const allocateCustomerReceiptPrisma = async (database: Database, input: {
   }
   const requestedTotal = input.allocations.reduce((total, item) => total + item.amountRials, 0n);
   await requireCustomerConsumptionDate(tx, { receiptId: receipt.id }, input.documentDate);
+  await requireCustomerReceiptSourceDate(tx, receipt, input.documentDate);
   await requireSettlementSource(tx, receipt.postedVoucherId, input.bookId, input.documentDate);
   if (receipt.adjustments.some(row => row.occurredAt > input.documentDate)) throw new AccountingCustomerTreasuryError('SETTLEMENT_SOURCE_INVALID', 'تخصیص نباید پیش از اصلاح دریافت ثبت شود.', 409);
   if (new Set(input.allocations.map(item => item.openItemId)).size !== input.allocations.length) {
@@ -833,6 +839,7 @@ export const allocateCustomerReceiptPrisma = async (database: Database, input: {
   const refunded = await tx.accountingTreasuryTransaction.aggregate({ where: { refundOfId: receipt.id, kind: 'CUSTOMER_REFUND' }, _sum: { amountRials: true } });
   const used = receipt.allocations.flatMap((item) => item.lines).reduce((total, item) => total + toBigInt(item.amountRials), 0n);
   if (receipt.sourceType === 'CHECK_INSTRUMENT' && !receipt.checkInstrumentId) throw new AccountingCustomerTreasuryError('CHECK_SOURCE_REVIEW_REQUIRED', 'منشأ و سهم دریافت چکی قدیمی باید پیش از تخصیص تطبیق شوند؛ از حدس سهم ابزار استفاده نمی‌شود.', 409);
+  if (receipt.sourceResolution) throw new AccountingCustomerTreasuryError('RECEIPT_SOURCE_RESOLVED', 'این دریافت تطبیق شده است؛ یکی از ابزارهای تأییدشده آن را انتخاب کنید.', 409);
   if (receipt.componentKind === 'CHECK' && (!receipt.checkInstrument || ['BOUNCED', 'RETURNED', 'CANCELLED', 'REPLACED'].includes(receipt.checkInstrument.status))) throw new AccountingCustomerTreasuryError('CHECK_CREDIT_UNAVAILABLE', 'اعتبار ابزار چکی برای تخصیص معتبر نیست.', 409);
   if (requestedTotal <= 0n || used + requestedTotal + toBigInt(refunded._sum.amountRials ?? 0) > effectiveCustomerReceiptRials(receipt)) throw new AccountingCustomerTreasuryError('RECEIPT_OVER_ALLOCATED', 'جمع تخصیص‌ها از مانده دریافت بیشتر است.', 409);
   const items = await tx.accountingCustomerOpenItem.findMany({ where: { id: { in: input.allocations.map((item) => item.openItemId) } }, include: {
@@ -951,6 +958,8 @@ export const reverseCustomerAllocationPrisma = async (database: Database, input:
 });
 
 export const projectCustomerAccountsPrisma = async (database: Database, input: { profileIds: string[]; asOf: Date }) => {
+  const sourceResolutions = await database.accountingCustomerReceiptResolution.findMany({ where: { receipt: { profileId: { in: input.profileIds } }, createdAt: { lte: input.asOf }, occurredAt: { lte: input.asOf } } });
+  const resolvedIds = new Set(sourceResolutions.map(row => row.receiptId));
   const reviews = await database.accountingCustomerOpeningReview.findMany({ where: { profileId: { in: input.profileIds }, createdAt: { lte: input.asOf } } });
   const attributions = await database.accountingCustomerOpeningAttribution.findMany({ where: { openingReviewId: { in: reviews.map(row => row.id) }, createdAt: { lte: input.asOf } }, orderBy: { sequence: 'desc' } });
   const [profiles, allItems, allReceipts, allRefunds] = await Promise.all([
@@ -978,8 +987,8 @@ export const projectCustomerAccountsPrisma = async (database: Database, input: {
   const accountingDate = (id: string | null | undefined, fallback: Date) => vouchers.find(v => v.id === id)?.documentDate ?? fallback;
   return profiles.map(profile => {
   const items = allItems.filter(row => row.profileId === profile.id);
-  const receipts = allReceipts.filter(row => row.profileId === profile.id);
-  const refunds = allRefunds.filter(row => row.profileId === profile.id);
+  const receipts = allReceipts.filter(row => row.profileId === profile.id && !resolvedIds.has(row.id) && (!row.sourceParentId || resolvedIds.has(row.sourceParentId)));
+  const refunds = allRefunds.filter(row => row.profileId === profile.id && (!row.refundOfId || !resolvedIds.has(row.refundOfId)) && (!row.sourceParentId || resolvedIds.has(row.sourceParentId)));
   const activeAt = <T extends { reversedBy: { createdAt: Date } | null }>(item: T) => !item.reversedBy || item.reversedBy.createdAt > input.asOf;
   const activityItems = items.map((item) => { const allocated = item.allocationLines.filter((line) => activeAt(line.allocation))
     .reduce((total, line) => total + toBigInt(line.amountRials), 0n)
@@ -1005,6 +1014,16 @@ export const projectCustomerAccountsPrisma = async (database: Database, input: {
     debitOpenRials: openItems.filter(item => item.kind === 'RECEIVABLE').reduce((sum, item) => sum + item.remainingRials, 0n),
     standaloneCreditRials: openItems.filter(item => item.kind === 'CREDIT').reduce((sum, item) => sum + item.remainingRials, 0n),
     unallocatedCreditRials, openItems, activityItems,
+    receiptHistory: allReceipts.filter(receipt => receipt.profileId === profile.id && resolvedIds.has(receipt.id)).map(receipt => ({
+      id: receipt.id, sourceParentId: null, contractId: receipt.contractId, amountRials: toBigInt(receipt.amountRials), effectiveAmountRials: effectiveCustomerReceiptRials(receipt, input.asOf),
+      occurredAt: accountingDate(receipt.postedVoucherId, receipt.occurredAt), postedVoucherId: receipt.postedVoucherId,
+      resolutionOccurredAt: sourceResolutions.find(row => row.receiptId === receipt.id)!.occurredAt,
+      adjustments: receipt.adjustments.filter(row => row.ledgerVoucher.status === 'POSTED').map(row => ({ id: row.id, kind: row.kind, deltaRials: toBigInt(row.deltaRials), occurredAt: row.occurredAt,
+        ledgerVoucherId: row.ledgerVoucherId, reason: row.reason, reference: row.reference })),
+      allocations: receipt.allocations.map(allocation => ({ id: allocation.id, occurredAt: accountingDate(allocation.ledgerVoucherId, allocation.createdAt), ledgerVoucherId: allocation.ledgerVoucherId,
+        reversedAt: allocation.reversedBy && allocation.reversedBy.createdAt <= input.asOf ? accountingDate(allocation.reversedBy.ledgerVoucherId, allocation.reversedBy.createdAt) : null,
+        reversalVoucherId: allocation.reversedBy?.ledgerVoucherId ?? null, lines: allocation.lines.map(line => ({ openItemId: line.openItemId, amountRials: toBigInt(line.amountRials) })) })),
+    })),
     creditAllocations: items.flatMap(item => item.sourceSettlements.map(allocation => ({ id: allocation.id, creditItemId: item.id,
       occurredAt: accountingDate(allocation.ledgerVoucherId, allocation.createdAt), ledgerVoucherId: allocation.ledgerVoucherId,
       reversedAt: allocation.reversedBy && allocation.reversedBy.createdAt <= input.asOf ? accountingDate(allocation.reversedBy.ledgerVoucherId, allocation.reversedBy.createdAt) : null,
@@ -1020,7 +1039,8 @@ export const projectCustomerAccountsPrisma = async (database: Database, input: {
       const cashFree = isCheck ? cleared - allocatedRials - refundedReceipt(receipt.id) : remainingRials;
       const refundableRials = cashFree <= 0n || remainingRials <= 0n ? 0n : cashFree < remainingRials ? cashFree : remainingRials;
       return { id: receipt.id, contractId: receipt.contractId, financialAccountId: receipt.financialAccountId,
-      componentKind: receipt.componentKind, receiptGroupId: receipt.receiptGroupId, checkInstrumentId: receipt.checkInstrumentId,
+      componentKind: receipt.componentKind, receiptGroupId: receipt.receiptGroupId, checkInstrumentId: receipt.checkInstrumentId, sourceParentId: receipt.sourceParentId,
+      resolutionOccurredAt: receipt.sourceParentId ? sourceResolutions.find(row => row.receiptId === receipt.sourceParentId)?.occurredAt : undefined,
       amountRials: toBigInt(receipt.amountRials), occurredAt: accountingDate(receipt.postedVoucherId, receipt.occurredAt), postedVoucherId: receipt.postedVoucherId,
       effectiveAmountRials, remainingRials, refundableRials,
       adjustments: receipt.adjustments.filter(row => row.ledgerVoucher.status === 'POSTED').map(row => ({ id: row.id, kind: row.kind,
@@ -1044,16 +1064,17 @@ export const projectCustomerAccountPrisma = async (database: Database, input: { 
 
 /** One chronological projection owns the on-screen and exported customer balance. */
 export const customerStatementMovements = (account: Awaited<ReturnType<typeof projectCustomerAccountPrisma>>) => {
+  const statementReceipts = [...account.receipts, ...account.receiptHistory];
   const labels: Record<string, string> = { OPENING: 'مانده افتتاحیه', DEBIT: 'ثبت بدهکاری', CREDIT: 'ثبت بستانکاری', SET_BALANCE: 'تنظیم مانده' };
-  const rows = [
+  const rows: Array<{ id: string; label: string; at: string; debit: bigint; credit: bigint; voucherId: string | null; contractId: string | null }> = [
     ...account.activityItems.map(item => ({ id: item.id, label: item.sourceKind === 'SALE' ? item.invoiceNumber : `${labels[item.sourceKind] ?? 'ثبت مستقل'} · ${item.description ?? ''}`,
       at: item.occurredAt.toISOString(), debit: item.kind === 'CREDIT' ? 0n : item.originalRials, credit: item.kind === 'CREDIT' ? item.originalRials : 0n, voucherId: item.ledgerVoucherId, contractId: item.contractId })),
-    ...account.receipts.map(row => ({ id: row.id, label: 'دریافت وجه', at: row.occurredAt.toISOString(), debit: 0n, credit: row.amountRials, voucherId: row.postedVoucherId, contractId: row.contractId })),
-    ...account.receipts.flatMap(row => row.adjustments.map(adjustment => ({ id: adjustment.id, label: adjustment.kind === 'CANCEL_RECEIPT' ? 'لغو دریافت' : adjustment.kind === 'CHECK_NONPAYMENT' ? 'عدم پرداخت چک' : 'اصلاح دریافت',
+    ...statementReceipts.map(row => ({ id: row.id, label: row.sourceParentId ? 'تطبیق ابزار دریافت قدیمی' : 'دریافت وجه', at: (row.sourceParentId ? row.resolutionOccurredAt! : row.occurredAt).toISOString(), debit: 0n, credit: row.sourceParentId ? 0n : row.amountRials, voucherId: row.postedVoucherId, contractId: row.contractId })),
+    ...statementReceipts.flatMap(row => row.adjustments.map(adjustment => ({ id: adjustment.id, label: adjustment.kind === 'CANCEL_RECEIPT' ? 'لغو دریافت' : adjustment.kind === 'CHECK_NONPAYMENT' ? 'عدم پرداخت چک' : 'اصلاح دریافت',
       at: adjustment.occurredAt.toISOString(), debit: adjustment.deltaRials < 0n ? -adjustment.deltaRials : 0n,
       credit: adjustment.deltaRials > 0n ? adjustment.deltaRials : 0n, voucherId: adjustment.ledgerVoucherId, contractId: row.contractId }))),
     ...account.refunds.map(row => ({ id: row.id, label: 'استرداد وجه', at: row.occurredAt.toISOString(), debit: row.amountRials, credit: 0n, voucherId: row.postedVoucherId, contractId: row.contractId })),
-    ...[...account.receipts.flatMap(row => row.allocations.map(allocation => ({ ...allocation, contractId: row.contractId, label: 'تخصیص دریافت' }))),
+    ...[...statementReceipts.flatMap(row => row.allocations.map(allocation => ({ ...allocation, contractId: row.contractId, label: 'تخصیص دریافت' }))),
       ...account.creditAllocations.map(allocation => ({ ...allocation, contractId: null, label: 'تخصیص اعتبار مستقل' }))].flatMap(a => {
       const total = a.lines.reduce((sum, line) => sum + line.amountRials, 0n);
       return [{ id: a.id, label: a.label, at: a.occurredAt.toISOString(), debit: total, credit: total, voucherId: a.ledgerVoucherId, contractId: a.contractId },
@@ -1087,7 +1108,7 @@ export const listTreasuryOverviewPrisma = async (database: PrismaClient, input: 
     throw new AccountingCustomerTreasuryError('BANK_PAGE_INVALID', 'شماره صفحه ردیف‌های بانکی معتبر نیست.', 400);
   }
   const [transactions, bankLines, bankLineCount, bankMappings, bankFileImports, bankFileChoices, bankExceptions, checks, cashCounts, pettyCash] = await Promise.all([
-    database.accountingTreasuryTransaction.findMany({ orderBy: { occurredAt: 'desc' }, take: 100,
+    database.accountingTreasuryTransaction.findMany({ where: { sourceResolution: null, legacyRefundId: null }, orderBy: { occurredAt: 'desc' }, take: 100,
       include: { profile: { select: { displayName: true } }, allocations: { include: { lines: true } } } }),
     database.accountingBankStatementLine.findMany({ orderBy: [{ bookedAt: 'desc' }, { id: 'desc' }], take: 100, skip: (bankLinePage - 1) * 100,
       include: { matches: { orderBy: { createdAt: 'desc' } } } }),
@@ -1260,7 +1281,7 @@ export const importBankStatementLinePrisma = async (database: PrismaClient, inpu
 export const proposeBankMatchesPrisma = async (database: PrismaClient, bankStatementLineId: string) => database.$transaction(async (tx) => {
   const line = await tx.accountingBankStatementLine.findUnique({ where: { id: bankStatementLineId } });
   if (!line) throw new AccountingCustomerTreasuryError('BANK_LINE_NOT_FOUND', 'ردیف صورتحساب بانکی پیدا نشد.', 404);
-  const candidates = await tx.accountingTreasuryTransaction.findMany({ where: { financialAccountId: line.financialAccountId,
+  const candidates = await tx.accountingTreasuryTransaction.findMany({ where: { financialAccountId: line.financialAccountId, sourceResolution: null, legacyRefundId: null,
     direction: line.direction, amountRials: line.amountRials,
     occurredAt: { gte: new Date(line.bookedAt.getTime() - 3 * 86_400_000), lte: new Date(line.bookedAt.getTime() + 3 * 86_400_000) } } });
   return Promise.all(candidates.map((candidate) => tx.accountingBankReconciliationMatch.upsert({ where: {
@@ -1320,10 +1341,8 @@ export const transitionReceivableCheckPrisma = async (database: PrismaClient, in
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.checkId}))`;
   const instrument = await tx.accountingCheckInstrument.findUnique({ where: { id: input.checkId }, include: { events: true } });
   if (!instrument) throw new AccountingCustomerTreasuryError('CHECK_NOT_FOUND', 'چک دریافتنی پیدا نشد.', 404);
-  const customerReceipt = await tx.accountingTreasuryTransaction.findFirst({ where: { kind: 'CUSTOMER_RECEIPT', OR: [
-    { checkInstrumentId: instrument.id }, { sourceType: 'CHECK_INSTRUMENT', sourceId: instrument.id },
-  ] } });
-  if (customerReceipt?.checkInstrumentId) throw new AccountingCustomerTreasuryError('CHECK_COORDINATED_COMMAND_REQUIRED', 'ابزار مرتبط با دریافت مشتری باید از فرمان هماهنگ پرونده مالی بررسی شود؛ تغییر مستقل وضعیت مجاز نیست.', 409);
+  const customerReceipt = await tx.accountingTreasuryTransaction.findFirst({ where: { kind: 'CUSTOMER_RECEIPT', checkInstrumentId: instrument.id } });
+  if (customerReceipt) throw new AccountingCustomerTreasuryError('CHECK_COORDINATED_COMMAND_REQUIRED', 'ابزار مرتبط با دریافت مشتری باید از فرمان هماهنگ پرونده مالی بررسی شود؛ تغییر مستقل وضعیت مجاز نیست.', 409);
   const appliedCheck = await tx.accountingSettlementAllocationLine.findMany({ where: { allocation: {
     reversesId: null, reversedById: null, transaction: { sourceType: 'CHECK_INSTRUMENT', sourceId: instrument.id },
   } }, select: { openItemId: true } });

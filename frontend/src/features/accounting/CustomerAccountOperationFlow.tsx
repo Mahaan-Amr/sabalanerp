@@ -40,15 +40,19 @@ export default function CustomerAccountOperationFlow({ accountId, account, kind,
   const [lineKey, setLineKey] = useState('');
   const [contractId, setContractId] = useState('');
   const [recordId, setRecordId] = useState('');
+  const [supplierId, setSupplierId] = useState('');
+  const [refundShares, setRefundShares] = useState<Record<string, Record<string, string>>>({});
   const request = useRef<{ fingerprint: string; key: string }>();
   const inFlight = useRef(false);
-  const isTreasury = ['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION', 'CORRECT_RECEIPT', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'CHECK_SETTLE'].includes(kind);
+  const isResolution = kind === 'RESOLVE_RECEIPT';
+  const isEndorsement = kind === 'CHECK_ENDORSE' || kind === 'CHECK_RECIPIENT_RETURN';
+  const isTreasury = ['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION', 'CORRECT_RECEIPT', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'CHECK_SETTLE', 'RESOLVE_RECEIPT', 'CHECK_ENDORSE', 'CHECK_RECIPIENT_RETURN'].includes(kind);
   const isCheckBank = kind === 'CHECK_DEPOSIT' || kind === 'CHECK_SETTLE';
   const isCorrection = kind === 'CORRECT_RECEIPT' || kind === 'CANCEL_RECEIPT';
   const isCash = kind === 'REFUND' || isCheckBank;
-  const hasAmount = !['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'ATTRIBUTION'].includes(kind);
+  const hasAmount = !['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'ATTRIBUTION', 'RESOLVE_RECEIPT', 'CHECK_ENDORSE', 'CHECK_RECIPIENT_RETURN'].includes(kind);
   const isBalance = kind === 'OPENING' || kind === 'SET_BALANCE';
-  const receiptSources = account.receipts.filter(row => kind === 'REFUND' ? BigInt(row.refundableRials ?? (receiptIsCheck(row) ? '0' : receiptRemainingRials(row))) > BigInt(0) : isCheckBank ? receiptIsCheck(row) : isCorrection ? BigInt(row.effectiveAmountRials ?? row.amountRials) > BigInt(0) : BigInt(receiptRemainingRials(row)) > BigInt(0));
+  const receiptSources = account.receipts.filter(row => kind === 'REFUND' ? BigInt(row.refundableRials ?? (receiptIsCheck(row) ? '0' : receiptRemainingRials(row))) > BigInt(0) : isResolution ? !row.checkInstrumentId && !row.sourceParentId && BigInt(row.effectiveAmountRials ?? row.amountRials) > BigInt(0) : isCheckBank || isEndorsement ? receiptIsCheck(row) : isCorrection ? BigInt(row.effectiveAmountRials ?? row.amountRials) > BigInt(0) : BigInt(receiptRemainingRials(row)) > BigInt(0));
   const creditSources = account.openItems.filter(row => row.kind === 'CREDIT');
   const receipt = account.receipts.find(row => source === `receipt:${row.id}`);
   const check = account.treasuryChecks.find(row => row.id === (receipt?.checkInstrumentId ?? receipt?.source?.id));
@@ -81,23 +85,25 @@ export default function CustomerAccountOperationFlow({ accountId, account, kind,
     }).catch(reason => { if (current) setError(accountingFailureMessage(reason, 'تطبیق افتتاحیه بارگیری نشد.')); });
     return () => { current = false; };
   }, [accountId, kind, date, retry]);
-  useEffect(() => { setConfirmed(false); }, [value, date, periodId, ruleId, counterId, bankId, financialId, source, reason, reference, parts, openingLines, shares, reversals, unpaid, collectionId, identityConfirmed, totalConfirmed, lineKey, contractId, recordId]);
+  useEffect(() => { setConfirmed(false); }, [value, date, periodId, ruleId, counterId, bankId, financialId, source, reason, reference, parts, openingLines, shares, reversals, unpaid, collectionId, identityConfirmed, totalConfirmed, lineKey, contractId, recordId, supplierId, refundShares]);
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (inFlight.current) return;
     setError(undefined);
     let payload;
     try {
-    const componentPayload = kind === 'RECEIPT' ? receiptPartsPayload(parts) : undefined;
+    const componentPayload = kind === 'RECEIPT' || isResolution ? receiptPartsPayload(parts) : undefined;
     const normalized = componentPayload ? componentPayload.reduce((sum, row) => sum + BigInt(row.amountRials), BigInt(0)).toString() : hasAmount ? rialsInput(value, isBalance) : '0';
     payload = { kind, amountRials: normalized, periodId, postingRuleId: ruleId, counterAccountId: counterId || undefined,
       bankLedgerId: bankId || undefined, financialAccountId: financialId || undefined,
       receiptId: source.startsWith('receipt:') ? source.slice(8) : undefined, creditItemId: source.startsWith('credit:') ? source.slice(7) : undefined,
-      allocationId, occurredAt: new Date(date).toISOString(), reason, reference, confirmed, allocations: [],
+      allocationId, occurredAt: new Date(date).toISOString(), reason, reference, confirmed, allocations: kind === 'CHECK_ENDORSE' ? Object.entries(shares.supplier || {}).filter(([, amount]) => amount.trim()).map(([openItemId, amount]) => ({ openItemId, amountRials: rialsInput(amount) })) : [], supplierPartyId: supplierId || undefined,
       expectedBalanceRials: kind === 'SET_BALANCE' ? account.netBalanceRials : undefined, parts: componentPayload,
       sourceAllocations: kind === 'ALLOCATION' ? allocationPlanPayload(shares) : undefined,
-      expectedAmountRials: isCorrection ? receipt?.effectiveAmountRials ?? receipt?.amountRials : undefined,
-      expectedSequence: isCheckBank ? check?.events?.[0]?.sequence : undefined, collectionLedgerId: collectionId || undefined,
+      expectedAmountRials: isCorrection || isResolution ? receipt?.effectiveAmountRials ?? receipt?.amountRials : undefined,
+      expectedSequence: isCheckBank || isEndorsement ? check?.events?.[0]?.sequence : undefined, collectionLedgerId: collectionId || undefined,
+      resolvedShares: isResolution ? parts.map(part => ({ partKey: part.key, allocations: Object.entries(shares[part.key] || {}).filter(([, amount]) => amount.trim()).map(([openItemId, amount]) => ({ openItemId, amountRials: rialsInput(amount) })),
+        refunds: Object.entries(refundShares[part.key] || {}).filter(([, amount]) => amount.trim()).map(([refundId, amount]) => ({ refundId, amountRials: rialsInput(amount) })) })) : undefined,
       unpaidRials: kind === 'CHECK_SETTLE' ? rialsInput(unpaid || '0') : undefined,
       reversals: isCorrection || kind === 'CHECK_SETTLE' ? Object.entries(reversals).map(([allocationId, amounts]) => ({ allocationId, lines: Object.entries(amounts).filter(([, value]) => value.trim()).map(([openItemId, value]) => ({ openItemId, amountRials: rialsInput(value) })) })).filter(row => row.lines.length) : undefined,
       openingReview: kind === 'OPENING' && opening ? { expectedSnapshotHash: opening.openingSnapshotHash, identityConfirmed, totalConfirmed, lines: openingLinesPayload(openingLines, opening, value) } : undefined,
@@ -129,7 +135,7 @@ export default function CustomerAccountOperationFlow({ accountId, account, kind,
           {isCash && <ErpField label={kind === 'REFUND' ? 'حساب پرداخت وجه' : 'حساب دریافت وجه'} required><ErpSearchableSelect value={financialId} onChange={event => setFinancialId(event.target.value)} required aria-label="حساب مالی">
             <option value="">انتخاب حساب</option>{context.financialAccounts.filter(row => row.currency === 'IRR').map(row => <option key={row.id} value={row.id}>{row.titlePersian}</option>)}
           </ErpSearchableSelect></ErpField>}
-          {(kind === 'REFUND' || isCorrection || isCheckBank) && <ErpField label={kind === 'REFUND' ? 'منبع قابل استرداد' : 'دریافت مرتبط'} required><ErpSearchableSelect value={source} onChange={event => { setSource(event.target.value); setReversals({}); }} required aria-label="منبع وجه">
+          {(kind === 'REFUND' || isCorrection || isCheckBank || isResolution || isEndorsement) && <ErpField label={kind === 'REFUND' ? 'منبع قابل استرداد' : 'دریافت مرتبط'} required><ErpSearchableSelect value={source} onChange={event => { setSource(event.target.value); setReversals({}); setShares({}); setRefundShares({}); }} required aria-label="منبع وجه">
             <option value="">انتخاب منبع</option>{receiptSources.map(row => <option key={row.id} value={`receipt:${row.id}`}>{accountStatusLabels[row.componentKind ?? 'BANK'] || 'دریافت'} {dateFa(row.occurredAt)} · {accountMoney(kind === 'REFUND' ? row.refundableRials : row.effectiveAmountRials ?? row.amountRials)}</option>)}
             {kind === 'REFUND' && creditSources.map(row => <option key={row.id} value={`credit:${row.id}`}>{row.invoiceNumber} · {accountMoney(row.remainingRials)}</option>)}
           </ErpSearchableSelect></ErpField>}
@@ -137,7 +143,26 @@ export default function CustomerAccountOperationFlow({ accountId, account, kind,
             <option value="">انتخاب حساب</option>{context.accounts.filter(row => row.financialAccountRequirement !== 'REQUIRED').map(row => <option key={row.id} value={row.id}>{row.code} · {row.titlePersian}</option>)}
           </ErpSearchableSelect></ErpField>}
         </div>
-        {kind === 'RECEIPT' && <CustomerReceiptPartsFields context={context} parts={parts} onChange={setParts} />}
+        {(kind === 'RECEIPT' || isResolution) && <CustomerReceiptPartsFields context={context} parts={parts} onChange={setParts} />}
+        {isResolution && receipt && <>
+          <ErpInlineState kind="stale" title="ابزارها و سهم تمام مصرف‌ها و استردادهای قبلی را با مدرک تطبیق دهید؛ جمع حساب مشتری ثابت می‌ماند." />
+          <ErpSummaryGrid items={[{ label: 'مبلغ مؤثر قدیمی', value: accountMoney(receipt.effectiveAmountRials ?? receipt.amountRials) }, { label: 'مصرف قبلی', value: accountMoney(receipt.allocatedRials) }, { label: 'استرداد قبلی', value: accountMoney(receipt.refundedRials) }]} />
+          {parts.map((part, index) => <ErpDisclosure key={part.key} title={`سهم ابزار ${(index + 1).toLocaleString('fa-IR')}`}><div className="grid gap-3 md:grid-cols-2">
+            {part.kind === 'CHECK' && <ErpField label="چک موجود بدون دریافت مرتبط"><ErpSearchableSelect aria-label={`چک موجود ابزار ${index + 1}`} value={part.existingCheckId || ''} onChange={event => {
+              const existing = account.treasuryChecks.find(row => row.id === event.target.value);
+              setParts(current => current.map(row => row.key === part.key ? { ...row, existingCheckId: event.target.value, existingCheckStatus: existing?.status, existingClearedRials: existing?.clearedRials, collectedLedgerId: '', ledgerId: '',
+                ...(existing ? { serial: existing.serialNumber, sayad: existing.sayadId || '', bank: existing.bankName, due: existing.dueAt.slice(0, 10), amount: existing.amountRials } : {}) } : row));
+            }}><option value="">ثبت ابزار از مدرک</option>{account.treasuryChecks.filter(row => !row.receipt && ['RECEIVED', 'DEPOSITED', 'CLEARED'].includes(row.status)).map(row => <option key={row.id} value={row.id}>{row.serialNumber} · {row.bankName} · {accountStatusLabels[row.status]}</option>)}</ErpSearchableSelect></ErpField>}
+            {Array.from(new Set(receipt.allocations.filter(row => !row.reversedAt).flatMap(row => row.lines.map(line => line.openItemId)))).map(itemId => <ErpField key={itemId} label={account.activityItems.find(row => row.id === itemId)?.invoiceNumber || 'بدهی قبلی'}><ErpInput inputMode="numeric" value={shares[part.key]?.[itemId] || ''} onChange={event => setShares(current => ({ ...current, [part.key]: { ...current[part.key], [itemId]: event.target.value } }))} placeholder="سهم مصرف قبلی به ریال" /></ErpField>)}
+            {account.refunds.filter(row => row.refundOfId === receipt.id).map(refund => <ErpField key={refund.id} label={`استرداد ${dateFa(refund.occurredAt)}`} hint={accountMoney(refund.amountRials)}><ErpInput inputMode="numeric" value={refundShares[part.key]?.[refund.id] || ''} onChange={event => setRefundShares(current => ({ ...current, [part.key]: { ...current[part.key], [refund.id]: event.target.value } }))} placeholder="سهم استرداد قبلی به ریال" /></ErpField>)}
+          </div></ErpDisclosure>)}
+        </>}
+        {kind === 'CHECK_ENDORSE' && <>
+          <ErpField label="گیرنده چک" required><ErpSearchableSelect required aria-label="گیرنده چک" value={supplierId} onChange={event => { setSupplierId(event.target.value); setShares({}); }}><option value="">انتخاب تأمین‌کننده</option>{context.suppliers?.map(row => <option key={row.id} value={row.id}>{row.displayName}</option>)}</ErpSearchableSelect></ErpField>
+          {context.supplierOpenItems?.filter(row => row.supplierPartyId === supplierId).map(row => <ErpField key={row.id} label={`تخصیص به فاکتور ${row.invoiceNumber}`} hint={`مانده ${accountMoney(row.remainingRials)}`}><ErpInput inputMode="numeric" value={shares.supplier?.[row.id] || ''} onChange={event => setShares(current => ({ ...current, supplier: { ...current.supplier, [row.id]: event.target.value } }))} /></ErpField>)}
+          <ErpInlineState kind="empty" title="تمام مبلغ چک به گیرنده واگذار می‌شود؛ بخش تخصیص‌نیافته پیش‌پرداخت همان تأمین‌کننده است. تخصیص‌های مشتری حفظ می‌شوند." />
+        </>}
+        {kind === 'CHECK_RECIPIENT_RETURN' && <ErpInlineState kind="stale" title="بازگشت از گیرنده، حضانت چک و بدهی به گیرنده را برمی‌گرداند؛ عدم پرداخت بانک باید با مدرک مستقل ثبت شود." />}
         {kind === 'OPENING' && (opening ? <>
           <CustomerOpeningFields lines={openingLines} onChange={setOpeningLines} account={opening} />
           {/^-?\d+$/.test(normalizeAccountAmount(value)) && <ErpSummaryGrid items={[{ label: 'مانده کل', value: accountMoney(normalizeAccountAmount(value)) }, { label: 'خالص انتقال جدید', value: accountMoney((BigInt(normalizeAccountAmount(value)) - (opening.openingSources ?? []).reduce((sum, row) => sum + (row.kind === 'CREDIT' ? -BigInt(row.amountRials) : BigInt(row.amountRials)), BigInt(0))).toString()) }]} />}

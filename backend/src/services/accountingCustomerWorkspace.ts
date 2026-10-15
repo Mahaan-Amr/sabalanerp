@@ -3,6 +3,8 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { projectCustomerAccountPrisma, projectCustomerAccountsPrisma, customerStatementMovements, recordCustomerReceiptPrisma, allocateCustomerReceiptPrisma, allocateCustomerCreditPrisma, reverseCustomerAllocationPrisma, requireSettlementSource, requireCustomerConsumptionDate } from './accountingCustomerTreasuryPrisma';
 import { collectedCustomerCheckRials } from './accountingCustomerReceiptBalance';
+import { resolveCustomerReceiptWithin, type CustomerResolvedReceiptShare } from './accountingCustomerReceiptResolution';
+import { requireCustomerReceiptSourceDate } from './accountingCustomerReceiptSource';
 import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING_RULE_V1 } from './accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 import { withAccountingReadScope } from './partnerSales/accounting/readScope';
@@ -12,6 +14,7 @@ import { recordCustomerReceiptPartsWithin, type CustomerReceiptPart } from './ac
 import { correctCustomerReceiptWithin, type CustomerReceiptAllocationReversal } from './accountingCustomerReceiptCorrection';
 import { recordCustomerCheckBankWithin } from './accountingCustomerCheckBank';
 import { customerCompoundCommandWithin } from './accountingCustomerCommand';
+import { recordCustomerCheckEndorsementWithin } from './accountingCustomerCheckEndorsement';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 const fail = (code: string, message: string, status = 409): never => { throw new AccountingCustomerTreasuryError(code, message, status); };
@@ -106,7 +109,7 @@ export async function readCustomerWorkspace(database: PrismaClient, input: { id:
         select: { id: true, contractId: true, originalAmount: true, remainingAmount: true, paidAmount: true, currency: true, dueDate: true, status: true }, orderBy: { dueDate: 'asc' } }),
       tx.accountingPaymentStatus.findMany({ where: scope.payment({ OR: [{ contractId: { in: contractIds } }, { receivable: { customerId: resolved.customerId } }], createdAt: { lte: input.asOf } }),
         select: { id: true, contractId: true, method: true, amount: true, currency: true, status: true, checkStatus: true, checkNumber: true, checkDueDate: true, occurredAt: true }, orderBy: { createdAt: 'desc' } }),
-      resolved.profile ? tx.accountingCheckInstrument.findMany({ where: { profileId: resolved.profile.id, createdAt: { lte: input.asOf } }, select: { id: true, serialNumber: true, bankName: true, amountRials: true, clearedRials: true, unpaidRials: true,
+      resolved.profile ? tx.accountingCheckInstrument.findMany({ where: { profileId: resolved.profile.id, createdAt: { lte: input.asOf } }, select: { id: true, serialNumber: true, sayadId: true, bankName: true, amountRials: true, clearedRials: true, unpaidRials: true, receipt: { select: { id: true } },
         dueAt: true, status: true, direction: true, events: { select: { sequence: true }, orderBy: { sequence: 'desc' }, take: 1 } }, orderBy: { dueAt: 'asc' } }) : Promise.resolve([]),
     ]);
     const receivableRials = projection?.receivableRials ?? 0n;
@@ -122,7 +125,7 @@ export async function readCustomerWorkspace(database: PrismaClient, input: { id:
       refundableRials: (projection?.receipts ?? []).reduce((sum, receipt) => sum + receipt.refundableRials, 0n) + (projection?.standaloneCreditRials ?? 0n),
       netBalanceRials: receivableRials - unallocatedCreditRials, contracts, financialRecords, receivables, payments, treasuryChecks,
       openingReview, openingAttributions, openingSnapshotHash: opening?.snapshotHash, openingSources: opening?.sources ?? [], creditAllocations: projection?.creditAllocations ?? [],
-      openItems: projection?.openItems ?? [], activityItems: projection?.activityItems ?? [], receipts: projection?.receipts ?? [], refunds: projection?.refunds ?? [] };
+      openItems: projection?.openItems ?? [], activityItems: projection?.activityItems ?? [], receipts: projection?.receipts ?? [], receiptHistory: projection?.receiptHistory ?? [], refunds: projection?.refunds ?? [] };
   });
 }
 
@@ -137,26 +140,31 @@ export type CustomerAccountOperation = {
 export async function readCustomerWorkspaceContext(database: PrismaClient, id: string) {
   const { book } = await resolveCustomerWorkspace(database, id);
   if (!book) return { periods: [], rules: [], accounts: [], financialAccounts: [] };
-  const [periods, rules, accounts, financialAccounts] = await Promise.all([
+  const [periods, rules, accounts, financialAccounts, suppliers, supplierItems] = await Promise.all([
     database.accountingPostingPeriod.findMany({ where: { fiscalYear: { bookId: book.id }, status: 'OPEN' }, include: { fiscalYear: { select: { titlePersian: true } } }, orderBy: { startsAt: 'desc' } }),
     database.accountingCustomerPostingRule.findMany({ where: { legalEntityId: book.legalEntityId }, orderBy: { effectiveFrom: 'desc' } }),
     database.accountingLedgerAccount.findMany({ where: { bookId: book.id, level: 'MOIN', retiredAt: null }, select: { id: true, code: true, titlePersian: true, financialAccountRequirement: true, partyRequirement: true, statementRole: true, normalSide: true }, orderBy: { code: 'asc' } }),
     database.accountingFinancialAccount.findMany({ where: { legalEntityId: book.legalEntityId, activeTo: null }, select: { id: true, titlePersian: true, currency: true }, orderBy: { titlePersian: 'asc' } }),
+    database.accountingParty.findMany({ where: { legalEntityId: book.legalEntityId, activeTo: null, roles: { some: { role: 'SUPPLIER', effectiveTo: null } } }, select: { id: true, displayName: true }, orderBy: { displayName: 'asc' } }),
+    database.accountingSupplierOpenItem.findMany({ where: { invoice: { bookId: book.id } }, include: { invoice: { select: { supplierInvoiceNumber: true } }, allocations: { where: { reversalOfId: null, reversal: null } } } }),
   ]);
-  return { periods, rules, accounts, financialAccounts };
+  return { periods, rules, accounts, financialAccounts, suppliers, supplierOpenItems: supplierItems.map(row => ({ id: row.id, supplierPartyId: row.supplierPartyId,
+    invoiceNumber: row.invoice.supplierInvoiceNumber, remainingRials: amount(row.amountRials) - row.allocations.reduce((sum, line) => sum + amount(line.amountRials), 0n) })).filter(row => row.remainingRials > 0n) };
 }
 
 export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id: string, input: {
-  kind: 'RECEIPT' | 'ALLOCATION' | 'REVERSE_ALLOCATION' | 'CORRECT_RECEIPT' | 'CANCEL_RECEIPT' | 'CHECK_DEPOSIT' | 'CHECK_SETTLE'; amountRials: bigint; occurredAt: Date;
+  kind: 'RECEIPT' | 'ALLOCATION' | 'REVERSE_ALLOCATION' | 'CORRECT_RECEIPT' | 'CANCEL_RECEIPT' | 'CHECK_DEPOSIT' | 'CHECK_SETTLE' | 'RESOLVE_RECEIPT' | 'CHECK_ENDORSE' | 'CHECK_RECIPIENT_RETURN'; amountRials: bigint; occurredAt: Date;
   periodId: string; postingRuleId: string; financialAccountId?: string; bankLedgerId?: string; receiptId?: string; creditItemId?: string;
   allocationId?: string; allocations: Array<{ openItemId: string; amountRials: bigint }>;
-  parts?: CustomerReceiptPart[];
+  parts?: Array<CustomerReceiptPart & { existingCheckId?: string }>;
+  resolvedShares?: CustomerResolvedReceiptShare[];
+  supplierPartyId?: string;
   sourceAllocations?: Array<{ receiptId?: string; creditItemId?: string; allocations: Array<{ openItemId: string; amountRials: bigint }> }>;
   expectedAmountRials?: bigint; reversals?: CustomerReceiptAllocationReversal[];
   expectedSequence?: number; collectionLedgerId?: string; unpaidRials?: bigint;
   reason: string; reference: string; confirmed: boolean; idempotencyKey: string; actor: CustomerTreasuryActor;
 }) {
-  if (!['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION', 'CORRECT_RECEIPT', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'CHECK_SETTLE'].includes(input.kind)) return fail('INVALID_OPERATION', 'نوع عملیات خزانه معتبر نیست.', 400);
+  if (!['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION', 'CORRECT_RECEIPT', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'CHECK_SETTLE', 'RESOLVE_RECEIPT', 'CHECK_ENDORSE', 'CHECK_RECIPIENT_RETURN'].includes(input.kind)) return fail('INVALID_OPERATION', 'نوع عملیات خزانه معتبر نیست.', 400);
   if (!input.confirmed || input.reason.trim().length < 8 || !input.reference.trim()) return fail('ACCOUNTING_EVIDENCE_REQUIRED', 'دلیل، مرجع مستندات و تأیید ثبت قطعی الزامی است.', 400);
   if (input.actor.profile === 'VIEWER') return fail('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز ثبت عملیات مالی ندارید.', 403);
   if (!Number.isFinite(input.occurredAt.getTime()) || input.occurredAt > new Date() || input.idempotencyKey.length < 8) return fail('INVALID_OPERATION_DATE', 'تاریخ عملیات و کلید مستقل فرمان معتبر باشند.', 400);
@@ -172,6 +180,18 @@ export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id
       || rule.effectiveFrom > input.occurredAt || (rule.effectiveTo && rule.effectiveTo < input.occurredAt)) return fail('INVALID_ACCOUNTING_CONTEXT', 'دوره یا قاعده حسابداری مشتری معتبر نیست.');
     const context = { bookId: resolved.book!.id, fiscalYearId: period.fiscalYearId, periodId: period.id,
       idempotencyKey: input.idempotencyKey, correlationId: input.idempotencyKey, actor: input.actor };
+    if (input.kind === 'CHECK_ENDORSE' || input.kind === 'CHECK_RECIPIENT_RETURN') {
+      if (!input.receiptId || input.expectedSequence == null || input.amountRials !== 0n) return fail('CHECK_ENDORSEMENT_EVIDENCE_REQUIRED', 'دریافت و نسخه گردش ابزار را انتخاب کنید.');
+      return recordCustomerCheckEndorsementWithin(tx, { ...context, kind: input.kind, profileId: profile.id, receiptId: input.receiptId,
+        expectedSequence: input.expectedSequence, supplierPartyId: input.supplierPartyId, allocations: input.allocations,
+        occurredAt: input.occurredAt, reason: input.reason.trim(), reference: input.reference.trim() });
+    }
+    if (input.kind === 'RESOLVE_RECEIPT') {
+      if (!input.receiptId || input.expectedAmountRials == null || !input.parts || !input.resolvedShares) return fail('RECEIPT_RESOLUTION_REQUIRED', 'دریافت، مبلغ مورد انتظار، ابزارها و سهم‌های قبلی لازم است.');
+      return resolveCustomerReceiptWithin(tx, { ...context, profileId: profile.id, receiptId: input.receiptId, expectedAmountRials: input.expectedAmountRials,
+        parts: input.parts, shares: input.resolvedShares, customerAdvanceLedgerId: rule.customerAdvanceAccountId, receivableLedgerId: rule.receivableAccountId,
+        occurredAt: input.occurredAt, reason: input.reason.trim(), reference: input.reference.trim() });
+    }
     if (input.kind === 'CHECK_DEPOSIT' || input.kind === 'CHECK_SETTLE') {
       if (!input.receiptId || !input.financialAccountId || input.expectedSequence == null) return fail('CHECK_BANK_EVIDENCE_REQUIRED', 'دریافت، نسخه ابزار و حساب بانکی برای عملیات چک لازم است.');
       return recordCustomerCheckBankWithin(tx, { ...context, kind: input.kind, profileId: profile.id, receiptId: input.receiptId,
@@ -340,6 +360,8 @@ export async function recordCustomerAccountOperation(database: PrismaClient, id:
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.receiptId}))`;
         const receipt = projection.receipts.find(row => row.id === input.receiptId);
         if (receipt) {
+          const sourceReceipt = await tx.accountingTreasuryTransaction.findUniqueOrThrow({ where: { id: receipt.id } });
+          await requireCustomerReceiptSourceDate(tx, sourceReceipt, input.occurredAt);
           await requireSettlementSource(tx, receipt.postedVoucherId, resolved.book!.id, input.occurredAt);
           if (receipt.adjustments.some(row => row.occurredAt > input.occurredAt)) return fail('REFUND_DATE_INVALID', 'استرداد نباید پیش از اصلاح منبع ثبت شود.');
         }

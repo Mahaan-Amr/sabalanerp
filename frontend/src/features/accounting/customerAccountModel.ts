@@ -22,22 +22,25 @@ export type CustomerAccount = {
     systemInvoiceDate?: string | null; sepidarAmount?: string | null; createdAt: string; financiallyApprovedAt: string | null }>;
   receivables: Array<{ id: string; contractId: string | null; originalAmount: string; remainingAmount: string; paidAmount: string; currency: string; dueDate: string; status: string }>;
   payments: Array<{ id: string; contractId: string | null; method: string; amount: string; currency: string; status: string; checkStatus: string | null; checkNumber: string | null; checkDueDate: string | null; occurredAt: string | null }>;
-  treasuryChecks: Array<{ id: string; serialNumber: string; bankName: string; amountRials: string; clearedRials?: string; unpaidRials?: string;
+  treasuryChecks: Array<{ id: string; serialNumber: string; sayadId?: string | null; receipt?: { id: string } | null; bankName: string; amountRials: string; clearedRials?: string; unpaidRials?: string;
     dueAt: string; status: string; direction: string; events?: Array<{ sequence: number }> }>;
   openItems: AccountItem[]; activityItems: AccountItem[];
   receipts: Array<{ id: string; amountRials: string; effectiveAmountRials?: string; remainingRials?: string; refundableRials?: string;
-    componentKind?: string; receiptGroupId?: string | null; checkInstrumentId?: string | null; source?: { type: string; id: string };
+    componentKind?: string; receiptGroupId?: string | null; checkInstrumentId?: string | null; sourceParentId?: string | null; source?: { type: string; id: string };
     allocatedRials: string; refundedRials: string; occurredAt: string; postedVoucherId: string;
     adjustments?: Array<{ id: string; kind: string; deltaRials: string; occurredAt: string; ledgerVoucherId: string; reason: string; reference: string }>;
     allocations: Array<{ id: string; createdAt: string; reversedAt: string | null; reversalVoucherId?: string | null; ledgerVoucherId: string; lines: Array<{ openItemId: string; amountRials: string }> }> }>;
-  refunds: Array<{ id: string; amountRials: string; occurredAt: string; postedVoucherId: string }>;
+  refunds: Array<{ id: string; amountRials: string; occurredAt: string; postedVoucherId: string; refundOfId?: string | null }>;
+  receiptHistory?: Array<{ id: string; amountRials: string; effectiveAmountRials: string; occurredAt: string; postedVoucherId: string; resolutionOccurredAt: string;
+    adjustments: Array<{ id: string; reason: string; reference: string; deltaRials: string; occurredAt: string; ledgerVoucherId: string }> }>;
 };
 export type AccountItem = { id: string; kind: string; sourceKind: string; description: string | null; invoiceNumber: string;
   contractId: string | null; originalRials: string; remainingRials: string; dueAt: string; postedAt: string; ledgerVoucherId: string; agingDays: number };
-export type AccountOperationKind = 'RECEIPT' | 'ALLOCATION' | 'REVERSE_ALLOCATION' | 'OPENING' | 'DEBIT' | 'CREDIT' | 'SET_BALANCE' | 'REFUND' | 'CORRECT_RECEIPT' | 'CANCEL_RECEIPT' | 'CHECK_DEPOSIT' | 'CHECK_SETTLE' | 'ATTRIBUTION';
+export type AccountOperationKind = 'RECEIPT' | 'ALLOCATION' | 'REVERSE_ALLOCATION' | 'OPENING' | 'DEBIT' | 'CREDIT' | 'SET_BALANCE' | 'REFUND' | 'CORRECT_RECEIPT' | 'CANCEL_RECEIPT' | 'CHECK_DEPOSIT' | 'CHECK_SETTLE' | 'ATTRIBUTION' | 'RESOLVE_RECEIPT' | 'CHECK_ENDORSE' | 'CHECK_RECIPIENT_RETURN';
 export const accountOperationLabels: Record<AccountOperationKind, string> = { RECEIPT: 'ثبت دریافت', ALLOCATION: 'تخصیص اعتبار', REVERSE_ALLOCATION: 'برگشت تخصیص',
   OPENING: 'مانده افتتاحیه', DEBIT: 'ثبت بدهکاری', CREDIT: 'ثبت بستانکاری', SET_BALANCE: 'تنظیم مانده', REFUND: 'استرداد وجه',
-  CORRECT_RECEIPT: 'اصلاح دریافت', CANCEL_RECEIPT: 'لغو دریافت', CHECK_DEPOSIT: 'واگذاری چک به بانک', CHECK_SETTLE: 'وصول / عدم پرداخت چک', ATTRIBUTION: 'تطبیق انتساب افتتاحیه' };
+  CORRECT_RECEIPT: 'اصلاح دریافت', CANCEL_RECEIPT: 'لغو دریافت', CHECK_DEPOSIT: 'واگذاری چک به بانک', CHECK_SETTLE: 'وصول / عدم پرداخت چک', ATTRIBUTION: 'تطبیق انتساب افتتاحیه',
+  RESOLVE_RECEIPT: 'تطبیق ابزار دریافت قدیمی', CHECK_ENDORSE: 'خرج‌کردن چک مشتری', CHECK_RECIPIENT_RETURN: 'بازگشت چک از گیرنده' };
 export const accountStatusLabels: Record<string, string> = {
   DRAFT: 'پیش‌نویس', READY: 'آماده بررسی', POSTED: 'ثبت قطعی', ISSUED: 'صادرشده', VOIDED: 'باطل‌شده',
   EXPECTED: 'در انتظار دریافت', RECEIVED: 'دریافت‌شده', RECONCILED: 'تطبیق‌شده', CLEARED: 'وصول‌شده',

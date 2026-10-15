@@ -3,6 +3,10 @@ import { normalizeAccountAmount, type CustomerAccount } from './customerAccountM
 export type ReceiptPartDraft = {
   key: string; kind: 'BANK' | 'CASH' | 'CARD' | 'CHECK'; amount: string; financialId: string; ledgerId: string;
   serial: string; bank: string; sayad: string; due: string; fee: string; feeLedgerId: string;
+  existingCheckId?: string;
+  existingCheckStatus?: string;
+  existingClearedRials?: string;
+  collectedLedgerId?: string;
 };
 export const newReceiptPart = (key: string): ReceiptPartDraft => ({ key, kind: 'BANK', amount: '', financialId: '', ledgerId: '', serial: '', bank: '', sayad: '', due: '', fee: '', feeLedgerId: '' });
 export type OpeningLineDraft = { key: string; kind: 'RECEIVABLE' | 'CREDIT'; amount: string; reference: string; existingSourceIds: string[]; financialRecordId: string; contractId: string };
@@ -14,6 +18,8 @@ export const rialsInput = (value: string, signed = false) => {
 };
 export function receiptPartsPayload(parts: ReceiptPartDraft[]) {
   return parts.map(part => ({ key: part.key, kind: part.kind, amountRials: rialsInput(part.amount), financialAccountId: part.financialId, ledgerAccountId: part.ledgerId,
+    existingCheckId: part.existingCheckId || undefined,
+    collectedLedgerAccountId: part.collectedLedgerId || undefined,
     feeRials: rialsInput(part.kind === 'CHECK' ? '0' : part.fee || '0'), feeLedgerAccountId: part.kind === 'CHECK' ? undefined : part.feeLedgerId || undefined,
     check: part.kind === 'CHECK' ? { serialNumber: part.serial, bankName: part.bank, sayadId: part.sayad || undefined, dueAt: new Date(part.due).toISOString() } : undefined }));
 }

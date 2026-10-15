@@ -33,14 +33,26 @@ const findPostingAccount = async (
   return rule.account.id;
 };
 
-export const createSupplyChainLedgerPosting = (prisma: PrismaClient) => async (command: PostingCommand) => {
+export const createSupplyChainLedgerPosting = (prisma: PrismaClient | Prisma.TransactionClient,
+  customerCheckAsset?: { accountId: string; partyId: string }) => async (command: PostingCommand) => {
   const database = currentSupplyChainDatabase(prisma);
-  const accountIds = await Promise.all(command.lines.map((line) => findPostingAccount(database, command, line.accountRole)));
+  const isCustomerCheckAsset = (role: string) => Boolean(customerCheckAsset && ['RECEIVABLE_CHECK', 'RETURNED_RECEIVABLE_CHECK'].includes(role));
+  if (customerCheckAsset) {
+    const asset = await database.accountingLedgerAccount.findUnique({ where: { id: customerCheckAsset.accountId } });
+    const party = await database.accountingParty.findUnique({ where: { id: customerCheckAsset.partyId } });
+    const book = await database.accountingBook.findUnique({ where: { id: command.bookId } });
+    if (!asset || !party || !book || asset.bookId !== book.id || party.legalEntityId !== book.legalEntityId || asset.level !== 'MOIN'
+      || asset.retiredAt || asset.statementRole !== 'ASSET' || asset.normalSide !== 'DEBIT' || asset.partyRequirement !== 'REQUIRED'
+      || asset.financialAccountRequirement !== 'FORBIDDEN') throw new SupplyChainAccountingError('CUSTOMER_CHECK_ASSET_INVALID', 'حساب حضانت ابزار مشتری با دفتر و تفصیلی منطبق نیست.');
+  }
+  const accountIds = await Promise.all(command.lines.map((line) => isCustomerCheckAsset(line.accountRole) ? customerCheckAsset!.accountId : findPostingAccount(database, command, line.accountRole)));
   const ledger = createAccountingLedgerApplication(
-    createAccountingLedgerPrismaRepository(database, database !== prisma),
+    createAccountingLedgerPrismaRepository(database, !('$transaction' in database)),
     { now: () => new Date(), nextReference: () => `عطف-${randomUUID()}` },
   );
   const lines = command.lines.map((line, index) => {
+    const partyId = isCustomerCheckAsset(line.accountRole) ? customerCheckAsset!.partyId : line.partyId;
+    const financialAccountId = isCustomerCheckAsset(line.accountRole) ? undefined : line.financialAccountId;
     const payload = {
       sourceHash: command.source.hash,
       sourceType: command.source.type,
@@ -50,15 +62,15 @@ export const createSupplyChainLedgerPosting = (prisma: PrismaClient) => async (c
       accountRole: line.accountRole,
       debitRials: line.debitRials.toString(),
       creditRials: line.creditRials.toString(),
-      partyId: line.partyId ?? null,
-      financialAccountId: line.financialAccountId ?? null,
+      partyId: partyId ?? null,
+      financialAccountId: financialAccountId ?? null,
       inventoryIdentityId: line.inventoryIdentityId ?? null,
     };
     const postedAmount = line.debitRials > 0n ? line.debitRials : line.creditRials;
     return {
       accountId: accountIds[index],
-      partyId: line.partyId,
-      financialAccountId: line.financialAccountId,
+      partyId,
+      financialAccountId,
       debitRials: line.debitRials,
       creditRials: line.creditRials,
       description: command.description,

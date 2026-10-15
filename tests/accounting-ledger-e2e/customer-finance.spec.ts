@@ -16,6 +16,7 @@ const context = {
     { id: 'bank', code: '111', titlePersian: 'بانک', financialAccountRequirement: 'REQUIRED', partyRequirement: 'FORBIDDEN', statementRole: 'ASSET', normalSide: 'DEBIT' },
     { id: 'custody', code: '112', titlePersian: 'اسناد نزد صندوق', financialAccountRequirement: 'FORBIDDEN', partyRequirement: 'REQUIRED', statementRole: 'ASSET', normalSide: 'DEBIT' },
   ], financialAccounts: [{ id: 'financial', titlePersian: 'حساب شرکت', currency: 'IRR' }],
+  suppliers: [{ id: 'supplier', displayName: 'تأمین‌کننده آزمون' }], supplierOpenItems: [{ id: 'supplier-debt', supplierPartyId: 'supplier', invoiceNumber: 'S-1', remainingRials: '200' }],
 };
 const debt = { id: 'debt', kind: 'RECEIVABLE', sourceKind: 'DEBIT', invoiceNumber: 'بدهی آزمون', contractId: null, originalRials: '150', remainingRials: '150', dueAt: '2026-10-01', postedAt: '2026-10-01', ledgerVoucherId: 'v-debt', agingDays: 0 };
 const fixture = {
@@ -30,11 +31,11 @@ const fixture = {
     { id: 'cheque', amountRials: '200', effectiveAmountRials: '200', remainingRials: '200', refundableRials: '0', componentKind: 'CHECK', receiptGroupId: 'group', checkInstrumentId: 'check', allocatedRials: '0', refundedRials: '0', occurredAt: '2026-10-01', postedVoucherId: 'v-check', allocations: [], adjustments: [] },
   ], refunds: [], movements: [],
 };
-async function installFixture(page: Page) {
+async function installFixture(page: Page, overrides: Record<string, unknown> = {}) {
   const commands: Record<string, unknown>[] = [];
   await page.route('**/api/accounting/ledger/customer-accounts/**', route => {
     if (route.request().method() === 'POST') { commands.push(route.request().postDataJSON()); return route.fulfill({ json: { success: true, data: { id: 'saved' } } }); }
-    return route.fulfill({ json: { success: true, data: new URL(route.request().url()).pathname.endsWith('/context') ? context : fixture } });
+    return route.fulfill({ json: { success: true, data: new URL(route.request().url()).pathname.endsWith('/context') ? context : { ...fixture, ...overrides } } });
   });
   await page.goto('/dashboard/accounting/customer-accounts/profile');
   await expect(page.getByRole('heading', { name: fixture.displayName })).toBeVisible();
@@ -113,4 +114,59 @@ test('mixed receipt form preserves each instrument and protects a pending confir
   await expect.poll(() => commands.length).toBe(1);
   expect(commands[0].amountRials).toBe('300'); expect(commands[0].parts).toMatchObject([{ kind: 'CASH', amountRials: '100' }, { kind: 'CHECK', amountRials: '200', check: { serialNumber: '123' } }]);
   release(); await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('accountant can reconcile an old receipt with explicit source shares and renewed confirmation', async ({ page }) => {
+  await login(page); const commands = await installFixture(page);
+  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click();
+  await page.getByRole('button', { name: 'تطبیق ابزار دریافت قدیمی', exact: true }).click();
+  await page.getByRole('combobox', { name: 'منبع وجه', exact: true }).click(); await page.getByRole('option').filter({ hasText: 'نقدی' }).click();
+  await page.getByRole('textbox', { name: 'مبلغ جزء (ریال)', exact: true }).fill('۱۰۰');
+  await choose(page, 'حساب مالی جزء 1', 'حساب شرکت'); await choose(page, 'معین جزء 1', '111 · بانک');
+  await commonEvidence(page); await page.getByRole('checkbox').check();
+  await page.getByRole('textbox', { name: 'مرجع مستندات', exact: true }).fill('مدرک تطبیق ۲');
+  await expect(page.getByRole('button', { name: 'ثبت قطعی', exact: true })).toBeDisabled();
+  await page.getByRole('checkbox').check(); await assertNoSeriousAxeViolations(page);
+  await page.getByRole('button', { name: 'ثبت قطعی', exact: true }).click();
+  await expect.poll(() => commands.length).toBe(1);
+  expect(commands[0]).toMatchObject({ kind: 'RESOLVE_RECEIPT', receiptId: 'cash', expectedAmountRials: '100', parts: [{ kind: 'BANK', amountRials: '100' }], resolvedShares: [{ partKey: 'first', allocations: [], refunds: [] }] });
+});
+
+test('endorsement selects recipient debt separately from customer allocation', async ({ page }) => {
+  await login(page); const commands = await installFixture(page);
+  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click(); await page.getByRole('button', { name: 'خرج‌کردن چک مشتری', exact: true }).click();
+  await page.getByRole('combobox', { name: 'منبع وجه', exact: true }).click(); await page.getByRole('option').filter({ hasText: 'چک' }).click();
+  await choose(page, 'گیرنده چک', 'تأمین‌کننده آزمون');
+  await page.getByRole('textbox', { name: 'تخصیص به فاکتور S-1' }).fill('۱۵۰');
+  await commonEvidence(page); await page.getByRole('checkbox').check(); await assertNoSeriousAxeViolations(page);
+  await page.getByRole('button', { name: 'ثبت قطعی', exact: true }).click();
+  await expect.poll(() => commands.length).toBe(1);
+  expect(commands[0]).toMatchObject({ kind: 'CHECK_ENDORSE', receiptId: 'cheque', expectedSequence: 1, supplierPartyId: 'supplier', allocations: [{ openItemId: 'supplier-debt', amountRials: '150' }] });
+});
+
+test('resolved receipt history retains the original amount and linked correction evidence', async ({ page }) => {
+  await login(page); await installFixture(page, { receiptHistory: [{ id: 'legacy', amountRials: '320', effectiveAmountRials: '300', occurredAt: '2026-10-01', resolutionOccurredAt: '2026-10-10', postedVoucherId: 'v-original',
+    adjustments: [{ id: 'adjustment', deltaRials: '-20', reason: 'اصلاح مستند قبلی', reference: 'مرجع اصلاح قدیمی', occurredAt: '2026-10-02', ledgerVoucherId: 'v-adjustment' }] }] });
+  await page.getByRole('button', { name: 'دریافت‌ها و چک‌ها', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'سابقه دریافت‌های تطبیق‌شده', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'سند دریافت اولیه', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /اصلاح مستند قبلی/ }).click();
+  await expect(page.getByText(/مرجع اصلاح قدیمی/)).toBeVisible(); await expect(page.getByRole('button', { name: 'سند اصلاح قبلی', exact: true })).toBeVisible();
+});
+
+test('historical partial collection asks for the bank share while retaining the existing instrument identity', async ({ page }) => {
+  await login(page); const commands = await installFixture(page, {
+    receipts: [{ ...fixture.receipts[0], amountRials: '200', effectiveAmountRials: '200', remainingRials: '200' }],
+    treasuryChecks: [{ ...fixture.treasuryChecks[0], id: 'legacy-partial', status: 'DEPOSITED', clearedRials: '60', receipt: null }],
+  });
+  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click(); await page.getByRole('button', { name: 'تطبیق ابزار دریافت قدیمی', exact: true }).click();
+  await page.getByRole('combobox', { name: 'منبع وجه', exact: true }).click(); await page.getByRole('option').filter({ hasText: 'نقدی' }).click();
+  await choose(page, 'ابزار دریافت 1', 'چک');
+  await page.getByRole('button', { name: 'سهم ابزار ۱ نمایش جزئیات', exact: true }).click();
+  await choose(page, 'چک موجود ابزار 1', '123 · بانک آزمون · واگذارشده به بانک');
+  await choose(page, 'حساب مالی جزء 1', 'حساب شرکت'); await choose(page, 'معین جزء 1', '112 · اسناد نزد صندوق');
+  await choose(page, 'معین وصول قبلی جزء 1', '111 · بانک');
+  await commonEvidence(page); await page.getByRole('checkbox').check(); await page.getByRole('button', { name: 'ثبت قطعی', exact: true }).click();
+  await expect.poll(() => commands.length).toBe(1);
+  expect(commands[0]).toMatchObject({ kind: 'RESOLVE_RECEIPT', expectedAmountRials: '200', parts: [{ existingCheckId: 'legacy-partial', amountRials: '200', ledgerAccountId: 'custody', collectedLedgerAccountId: 'bank' }] });
 });

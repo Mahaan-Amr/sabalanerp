@@ -6,6 +6,7 @@ import { reverseReceiptConsumptionWithin, type CustomerReceiptAllocationReversal
 import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING_RULE_V1 } from './accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 import { requireCustomerConsumptionDate } from './accountingCustomerTreasuryPrisma';
+import { requireCustomerReceiptSourceDate } from './accountingCustomerReceiptSource';
 
 export type CustomerCheckBankCommand = {
   kind: 'CHECK_DEPOSIT' | 'CHECK_SETTLE'; profileId: string; receiptId: string; amountRials: bigint; unpaidRials: bigint;
@@ -24,6 +25,7 @@ export async function recordCustomerCheckBankWithin(tx: Prisma.TransactionClient
   if (!receipt || receipt.profileId !== input.profileId || receipt.kind !== 'CUSTOMER_RECEIPT' || receipt.componentKind !== 'CHECK'
     || !receipt.checkInstrument || !receipt.profile || !receipt.postedVoucherId) fail('RECEIPT_CHECK_INVALID', 'دریافت و ابزار چکی متعلق به مشتری و مرتبط باشند.');
   const check = receipt!.checkInstrument!;
+  await requireCustomerReceiptSourceDate(tx, receipt!, input.occurredAt);
   if (prior) {
     if (prior.checkInstrumentId !== check.id || prior.evidenceHash !== hash) fail('IDEMPOTENCY_KEY_REUSED', 'کلید عملیات بانکی برای اطلاعات دیگری استفاده شده است.');
     return prior;
@@ -40,11 +42,11 @@ export async function recordCustomerCheckBankWithin(tx: Prisma.TransactionClient
   if (!financial || financial.legalEntityId !== check.legalEntityId || financial.currency !== 'IRR' || financial.activeFrom > input.occurredAt
     || (financial.activeTo && financial.activeTo < input.occurredAt)) fail('FINANCIAL_ACCOUNT_INVALID', 'حساب بانکی نتیجه ابزار معتبر نیست.');
   if (!original || original.status !== 'POSTED' || original.bookId !== input.bookId || original.documentDate > input.occurredAt) fail('CHECK_POSTING_INVALID', 'سند دریافت ابزار با دفتر و تاریخ عملیات منطبق نیست.');
-  const custody = original!.lines.filter(line => line.account.statementRole === 'ASSET' && line.account.partyRequirement === 'REQUIRED' && BigInt(line.debitRials.toString()) > 0n);
+  const custody = receipt!.sourceAssetLedgerId ? [{ accountId: receipt!.sourceAssetLedgerId }] : original!.lines.filter(line => line.account.statementRole === 'ASSET' && line.account.partyRequirement === 'REQUIRED' && BigInt(line.debitRials.toString()) > 0n);
   if (custody.length !== 1) fail('CHECK_POSTING_INVALID', 'حساب ابزار در سند دریافت قابل تشخیص نیست.');
   const deposit = events.find(event => event.eventType === 'DEPOSITED');
   const depositedEvidence = deposit?.evidence as { assetLedgerId?: string } | undefined;
-  let sourceAsset = check.status === 'DEPOSITED' ? depositedEvidence?.assetLedgerId : custody[0].accountId;
+  let sourceAsset = check.status === 'DEPOSITED' ? depositedEvidence?.assetLedgerId ?? receipt!.sourceAssetLedgerId : custody[0].accountId;
   if (!sourceAsset) fail('CHECK_POSTING_INVALID', 'حساب ابزار در گردش واگذاری قابل تشخیص نیست.');
   const partyId = receipt!.profile!.accountingPartyId;
   const sequence = last.sequence + 1;

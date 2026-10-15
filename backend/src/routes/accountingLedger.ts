@@ -237,11 +237,15 @@ router.post('/customer-accounts/:id/operations', ...customerPostingAccess, (req,
 router.post('/customer-accounts/:id/treasury', ...treasuryCommandAccess, run(req => recordCustomerWorkspaceTreasury(prisma, req.params.id, {
   kind: req.body.kind, amountRials: wholeRials(req.body.amountRials || '0'), occurredAt: validDate(req.body.occurredAt, 'تاریخ عملیات'),
   periodId: String(req.body.periodId || ''), postingRuleId: String(req.body.postingRuleId || ''), financialAccountId: req.body.financialAccountId,
-  bankLedgerId: req.body.bankLedgerId, receiptId: req.body.receiptId, creditItemId: req.body.creditItemId, allocationId: req.body.allocationId,
+  bankLedgerId: req.body.bankLedgerId, receiptId: req.body.receiptId, creditItemId: req.body.creditItemId, allocationId: req.body.allocationId, supplierPartyId: req.body.supplierPartyId,
   allocations: customerCommandArray(req.body.allocations || [], 'ریز تخصیص').map(line => ({ openItemId: String(line.openItemId || ''), amountRials: wholeRials(line.amountRials) })),
   sourceAllocations: req.body.sourceAllocations == null ? undefined : customerCommandArray(req.body.sourceAllocations, 'سهم منابع').map(row => ({
     receiptId: row.receiptId, creditItemId: row.creditItemId,
     allocations: customerCommandArray(row.allocations, 'ریز سهم منبع').map(line => ({ openItemId: String(line.openItemId || ''), amountRials: wholeRials(line.amountRials) })),
+  })),
+  resolvedShares: req.body.resolvedShares == null ? undefined : customerCommandArray(req.body.resolvedShares, 'تطبیق سهم ابزار').map(row => ({
+    partKey: String(row.partKey || ''), allocations: customerCommandArray(row.allocations || [], 'مصرف قبلی ابزار').map(line => ({ openItemId: String(line.openItemId || ''), amountRials: wholeRials(line.amountRials) })),
+    refunds: customerCommandArray(row.refunds || [], 'استرداد قبلی ابزار').map(line => ({ refundId: String(line.refundId || ''), amountRials: wholeRials(line.amountRials) })),
   })),
   reason: String(req.body.reason || ''), reference: String(req.body.reference || ''), confirmed: req.body.confirmed === true,
   idempotencyKey: String(req.body.idempotencyKey || ''), actor: actorOf(req),
@@ -253,7 +257,7 @@ router.post('/customer-accounts/:id/treasury', ...treasuryCommandAccess, run(req
   })),
   parts: req.body.parts == null ? undefined : customerCommandArray(req.body.parts, 'اجزای دریافت').map(part => ({
     key: String(part.key || ''), kind: part.kind, amountRials: wholeRials(part.amountRials), financialAccountId: String(part.financialAccountId || ''),
-    ledgerAccountId: String(part.ledgerAccountId || ''), feeRials: part.feeRials == null ? undefined : wholeRials(part.feeRials), feeLedgerAccountId: part.feeLedgerAccountId,
+    ledgerAccountId: String(part.ledgerAccountId || ''), existingCheckId: part.existingCheckId || undefined, collectedLedgerAccountId: part.collectedLedgerAccountId || undefined, feeRials: part.feeRials == null ? undefined : wholeRials(part.feeRials), feeLedgerAccountId: part.feeLedgerAccountId,
     check: part.check == null ? undefined : { serialNumber: String(part.check.serialNumber || ''), bankName: String(part.check.bankName || ''), sayadId: part.check.sayadId,
       dueAt: validDate(part.check.dueAt, 'سررسید چک') },
   })),

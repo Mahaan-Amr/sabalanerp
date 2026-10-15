@@ -5,6 +5,7 @@ import { allocateCustomerReceiptPrisma, reverseCustomerAllocationPrisma, require
 import { effectiveCustomerReceiptRials } from './accountingCustomerReceiptBalance';
 import { createAccountingLedgerApplication, hashAccountingEvidence, IRR_ROUNDING_RULE_V1 } from './accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
+import { requireCustomerReceiptSourceDate } from './accountingCustomerReceiptSource';
 
 export type CustomerReceiptAllocationReversal = { allocationId: string; lines: Array<{ openItemId: string; amountRials: bigint }> };
 export type CustomerReceiptCorrection = {
@@ -52,11 +53,13 @@ export async function correctCustomerReceiptWithin(tx: Prisma.TransactionClient,
   }
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.receiptId}))`;
   const receipt = await tx.accountingTreasuryTransaction.findUnique({ where: { id: input.receiptId }, include: {
-    profile: true, checkInstrument: true, adjustments: { include: { ledgerVoucher: true } },
+    profile: true, checkInstrument: true, sourceResolution: true, adjustments: { include: { ledgerVoucher: true } },
     allocations: { where: { reversesId: null, reversedById: null }, include: { lines: true } },
   } });
   if (!receipt || receipt.profileId !== input.profileId || receipt.kind !== 'CUSTOMER_RECEIPT' || !receipt.profile || !receipt.postedVoucherId) fail('RECEIPT_NOT_FOUND', 'دریافت متعلق به این مشتری و قطعی باشد.');
   const current = effectiveCustomerReceiptRials(receipt!);
+  await requireCustomerReceiptSourceDate(tx, receipt!, input.occurredAt);
+  if (receipt!.sourceResolution) fail('RECEIPT_SOURCE_RESOLVED', 'دریافت تطبیق‌شده را از طریق ابزارهای مستقل آن اصلاح کنید.');
   await requireCustomerConsumptionDate(tx, { receiptId: input.receiptId }, input.occurredAt);
   if (current !== input.expectedAmountRials) fail('RECEIPT_CHANGED', 'مبلغ مؤثر دریافت تغییر کرده است؛ اطلاعات را دوباره بررسی کنید.');
   const next = input.kind === 'CANCEL_RECEIPT' ? 0n : input.amountRials;
@@ -67,7 +70,9 @@ export async function correctCustomerReceiptWithin(tx: Prisma.TransactionClient,
   const originalVoucher = await tx.accountingLedgerVoucher.findUnique({ where: { id: receipt!.postedVoucherId! }, include: { lines: { include: { account: true } } } });
   if (!originalVoucher || originalVoucher.status !== 'POSTED' || originalVoucher.bookId !== input.bookId || originalVoucher.documentDate > input.occurredAt
     || receipt!.adjustments.some(row => row.occurredAt > input.occurredAt)) fail('CORRECTION_DATE_INVALID', 'سند دریافت و تاریخ اصلاح منطبق نیستند.');
-  const assets = originalVoucher!.lines.filter(line => line.account.statementRole === 'ASSET' && line.accountId !== input.receivableLedgerId && BigInt(line.debitRials.toString()) > 0n);
+  const resolvedAsset = receipt!.sourceAssetLedgerId ? await tx.accountingLedgerAccount.findUniqueOrThrow({ where: { id: receipt!.sourceAssetLedgerId } }) : null;
+  const assets = resolvedAsset ? [{ accountId: resolvedAsset.id, partyId: resolvedAsset.partyRequirement === 'REQUIRED' ? receipt!.profile!.accountingPartyId : null,
+    financialAccountId: resolvedAsset.financialAccountRequirement === 'REQUIRED' ? receipt!.financialAccountId : null }] : originalVoucher!.lines.filter(line => line.account.statementRole === 'ASSET' && line.accountId !== input.receivableLedgerId && BigInt(line.debitRials.toString()) > 0n);
   if (assets.length !== 1) fail('RECEIPT_SOURCE_AMBIGUOUS', 'حساب منشأ دریافت برای اصلاح نیازمند تطبیق است.');
   const refunded = await tx.accountingTreasuryTransaction.aggregate({ where: { refundOfId: input.receiptId, kind: 'CUSTOMER_REFUND' }, _sum: { amountRials: true } });
   if (next < BigInt(refunded._sum.amountRials?.toString() ?? '0')) fail('CORRECTION_REFUND_CONFLICT', 'مبلغ صحیح از استرداد انجام‌شده کمتر است؛ ابتدا پرداخت و مستندات استرداد را تعیین تکلیف کنید.');

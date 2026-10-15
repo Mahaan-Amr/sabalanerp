@@ -6129,6 +6129,9 @@ model AccountingTreasuryTransaction {
   componentKind      String                              @default("BANK")
   receiptGroupId     String?
   checkInstrumentId  String?                             @unique
+  sourceParentId     String?
+  sourceAssetLedgerId String?
+  legacyRefundId     String?
   idempotencyKey     String                              @unique
   sourceType         String
   sourceId           String
@@ -6144,12 +6147,27 @@ model AccountingTreasuryTransaction {
   pettyCashAdvance   AccountingPettyCashAdvance?
   checkInstrument    AccountingCheckInstrument?          @relation(fields: [checkInstrumentId], references: [id], onDelete: Restrict)
   adjustments        AccountingCustomerReceiptAdjustment[]
+  sourceResolution   AccountingCustomerReceiptResolution?
 
   @@unique([sourceType, sourceId, sourceVersion])
   @@index([profileId, occurredAt])
   @@index([financialAccountId, occurredAt])
   @@index([refundOfId])
   @@map("accounting_treasury_transactions")
+}
+
+model AccountingCustomerReceiptResolution {
+  id             String @id @default(cuid())
+  receiptId      String @unique
+  occurredAt     DateTime
+  evidence       Json
+  idempotencyKey String @unique
+  commandHash    String
+  createdBy      String
+  createdAt      DateTime @default(now())
+  receipt        AccountingTreasuryTransaction @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+
+  @@map("accounting_customer_receipt_resolutions")
 }
 
 model AccountingSupplyChainCommand {

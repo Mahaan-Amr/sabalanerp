@@ -28,6 +28,10 @@ export async function customerOpeningSnapshot(database: Database, input: { custo
       include: { allocations: { include: { lines: true, reversedBy: true } }, adjustments: true, checkInstrument: { include: { events: true } } }, orderBy: { id: 'asc' } }) : Promise.resolve([]),
     input.profileId ? database.accountingTreasuryTransaction.findMany({ where: { profileId: input.profileId, kind: 'CUSTOMER_REFUND' }, orderBy: { id: 'asc' } }) : Promise.resolve([]),
   ]);
+  const resolved = await database.accountingCustomerReceiptResolution.findMany({ where: { receipt: { profileId: input.profileId ?? '__no-profile__' }, occurredAt: { lte: input.basisAt } } });
+  const resolvedIds = new Set(resolved.map(row => row.receiptId));
+  const eligibleReceipts = receipts.filter(row => !resolvedIds.has(row.id) && (!row.sourceParentId || resolvedIds.has(row.sourceParentId)));
+  const eligibleRefunds = refunds.filter(row => (!row.refundOfId || !resolvedIds.has(row.refundOfId)) && (!row.sourceParentId || resolvedIds.has(row.sourceParentId)));
   const ids = [...new Set([...items.map(item => item.invoice?.ledgerVoucherId ?? item.ledgerVoucherId), ...receipts.map(row => row.postedVoucherId),
     ...receipts.flatMap(row => row.adjustments.map(adjustment => adjustment.ledgerVoucherId)),
     ...refunds.map(row => row.postedVoucherId), ...items.flatMap(item => item.allocationLines.flatMap(line => [line.allocation.ledgerVoucherId, line.allocation.reversedBy?.ledgerVoucherId]))].filter((id): id is string => Boolean(id)))];
@@ -40,14 +44,14 @@ export async function customerOpeningSnapshot(database: Database, input: { custo
     amountRials: rials(item.originalRials) - item.allocationLines.filter(line => active(line.allocation)).reduce((sum, line) => sum + rials(line.amountRials), 0n)
       - item.sourceSettlements.filter(active).flatMap(allocation => allocation.lines).reduce((sum, line) => sum + rials(line.amountRials), 0n),
     contractId: item.contractId, voucherId: item.invoice?.ledgerVoucherId ?? item.ledgerVoucherId,
-  })).concat(receipts.filter(row => inBasis(row.postedVoucherId)).map(row => ({
+  })).concat(eligibleReceipts.filter(row => inBasis(row.postedVoucherId)).map(row => ({
     id: `receipt:${row.id}`, kind: 'CREDIT' as const, description: 'دریافت تخصیص‌نیافته',
     amountRials: rials(row.amountRials) + row.adjustments.filter(adjustment => inBasis(adjustment.ledgerVoucherId)).reduce((sum, adjustment) => sum + rials(adjustment.deltaRials), 0n)
       - row.allocations.filter(active).flatMap(allocation => allocation.lines).reduce((sum, line) => sum + rials(line.amountRials), 0n)
-      - refunds.filter(refund => refund.refundOfId === row.id && inBasis(refund.postedVoucherId)).reduce((sum, refund) => sum + rials(refund.amountRials), 0n),
+      - eligibleRefunds.filter(refund => refund.refundOfId === row.id && inBasis(refund.postedVoucherId)).reduce((sum, refund) => sum + rials(refund.amountRials), 0n),
     contractId: row.contractId, voucherId: row.postedVoucherId,
   }))).filter(source => source.amountRials > 0n);
-  const snapshotHash = hashAccountingEvidence({ customerId: input.customerId, bookId: input.bookId, basisAt: input.basisAt, contracts, records, items, receipts, refunds, vouchers });
+  const snapshotHash = hashAccountingEvidence({ customerId: input.customerId, bookId: input.bookId, basisAt: input.basisAt, contracts, records, items, receipts, refunds, vouchers, resolved });
   return { snapshotHash, sources, contracts, financialRecords: records, basisAt: input.basisAt };
 }
 

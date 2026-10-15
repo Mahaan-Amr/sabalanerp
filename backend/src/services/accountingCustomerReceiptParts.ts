@@ -10,6 +10,7 @@ export type CustomerReceiptPart = {
   financialAccountId: string; ledgerAccountId: string;
   check?: { serialNumber: string; sayadId?: string; bankName: string; dueAt: Date };
   feeRials?: bigint; feeLedgerAccountId?: string;
+  collectedLedgerAccountId?: string;
 };
 export async function recordCustomerReceiptPartsWithin(tx: Prisma.TransactionClient, input: {
   profileId: string; legalEntityId: string; bookId: string; fiscalYearId: string; periodId: string;

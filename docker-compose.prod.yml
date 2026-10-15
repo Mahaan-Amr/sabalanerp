@@ -196,6 +196,7 @@ services:
       network: host
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        SABALAN_BROWSER_BUILD_ID: ${DEPLOYMENT_BROWSER_BUILD_ID:-}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         http_proxy: ${http_proxy:-}

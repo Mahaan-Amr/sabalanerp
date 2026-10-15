@@ -15,7 +15,7 @@ export const assertInquiryCheckoutMatchesGitlink = ({ recordedCommit, checkoutCo
 export const performanceSourceHash = async () => {
   const files = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--',
     'backend/src', 'backend/prisma', 'frontend/src', 'packages', 'scripts', 'deploy', '.github', 'tests',
-    'backend/tsconfig.json', 'frontend/tsconfig.json', 'playwright*.config.*',
+    'backend/tsconfig.json', 'frontend/tsconfig.json', 'frontend/next.config.js', 'frontend/browser-build-identity.cjs', 'frontend/finalize-browser-build.cjs', 'playwright*.config.*',
     'docs/operations', 'docs/adr', 'AGENTS.md', 'CONTEXT.md', '*package*.json', '*Dockerfile*', 'docker-compose*.yml',
     ':(exclude)**/node_modules',
   ], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }).split('\0').filter(Boolean).sort();

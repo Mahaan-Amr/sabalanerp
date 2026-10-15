@@ -650,6 +650,10 @@ fi
 DEPLOYMENT_BACKEND_IMAGE="${backend_repository}:${DEPLOYMENT_TARGET_COMMIT}"
 DEPLOYMENT_FRONTEND_IMAGE="${frontend_repository}:${DEPLOYMENT_TARGET_COMMIT}"
 DEPLOYMENT_INQUIRY_IMAGE="${inquiry_repository}:${DEPLOYMENT_TARGET_COMMIT}"
+# Each built browser image owns its compiled Next/RSC/asset identity. It must
+# survive later environment changes and never use a cross-tab version cookie.
+DEPLOYMENT_BROWSER_BUILD_ID="erp_$(printf '%s' "${DEPLOYMENT_RELEASE_ID}" | tr '[:upper:]' '[:lower:]')"
+export DEPLOYMENT_BROWSER_BUILD_ID
 DEPLOYMENT_NGINX_IMAGE="nginx:1.27-alpine"
 DEPLOYMENT_POSTGRES_IMAGE="${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"
 DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"

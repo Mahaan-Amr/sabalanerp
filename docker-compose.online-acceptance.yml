@@ -1,6 +1,37 @@
 # Extra application slot inside the existing project; no extra database or stack.
 name: sabalanerp-local
 services:
+  frontend-candidate:
+    extends:
+      file: ${ONLINE_ACCEPTANCE_BASE_COMPOSE:-docker-compose.local.yml}
+      service: frontend
+    profiles: [online-acceptance]
+    image: ${ONLINE_ACCEPTANCE_FRONTEND_IMAGE:?Set the verified existing frontend image identity}
+    command: [node, node_modules/next/dist/bin/next, start, -p, "3000"]
+    ports: !override
+      - "127.0.0.1:3101:3000"
+    environment:
+      NODE_ENV: production
+      NEXT_DIST_DIR: .next-build
+      SABALAN_BROWSER_BUILD_ID: ${ONLINE_ACCEPTANCE_BROWSER_BUILD_ID:?Set the compiled browser identity}
+      BACKEND_API_ORIGIN: http://backend:5000
+    volumes:
+      - type: bind
+        source: ${ONLINE_ACCEPTANCE_FRONTEND_DIST:?Set the absolute reviewed compiled frontend directory}
+        target: /app/.next-build
+        read_only: true
+      - type: bind
+        source: ${ONLINE_ACCEPTANCE_SOURCE_ROOT:?Set the absolute reviewed source directory}/frontend/next.config.js
+        target: /app/next.config.js
+        read_only: true
+      - type: bind
+        source: ${ONLINE_ACCEPTANCE_SOURCE_ROOT}/frontend/browser-build-identity.cjs
+        target: /app/browser-build-identity.cjs
+        read_only: true
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 512m
+    cpus: 1
   backend-candidate:
     extends:
       file: ${ONLINE_ACCEPTANCE_BASE_COMPOSE:-docker-compose.local.yml}

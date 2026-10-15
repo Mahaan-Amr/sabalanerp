@@ -66,7 +66,9 @@ CMD ["npm", "run", "dev", "--", "-p", "3000"]
 
 FROM builder AS production-builder
 
-RUN ./node_modules/.bin/next build
+ARG SABALAN_BROWSER_BUILD_ID=
+ENV SABALAN_BROWSER_BUILD_ID=${SABALAN_BROWSER_BUILD_ID}
+RUN ./node_modules/.bin/next build && node finalize-browser-build.cjs
 # Compiler caches are unnecessary at runtime; preserve fetch and image caches.
 RUN npm prune --omit=dev && rm -rf .next-build/cache/webpack .next-build/cache/swc
 
@@ -76,8 +78,11 @@ WORKDIR /app
 
 ARG PERFORMANCE_SOURCE_COMMIT=unattested
 ARG PERFORMANCE_SOURCE_HASH=unattested
+ARG SABALAN_BROWSER_BUILD_ID=
+ENV SABALAN_BROWSER_BUILD_ID=${SABALAN_BROWSER_BUILD_ID}
 LABEL io.sabalan.performance.source-commit=$PERFORMANCE_SOURCE_COMMIT \
-  io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH
+  io.sabalan.performance.source-hash=$PERFORMANCE_SOURCE_HASH \
+  io.sabalan.browser.build-id=$SABALAN_BROWSER_BUILD_ID
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -90,6 +95,7 @@ COPY --from=production-builder /packages/partner-sales-contracts /packages/partn
 COPY --from=production-builder /app/.next-build ./.next-build
 COPY --from=production-builder /app/public ./public
 COPY --from=production-builder /app/next.config.js ./next.config.js
+COPY --from=production-builder /app/browser-build-identity.cjs ./browser-build-identity.cjs
 
 EXPOSE 3000
 

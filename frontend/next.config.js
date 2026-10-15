@@ -1,14 +1,18 @@
 /** @type {import('next').NextConfig} */
 const path = require('path');
+const { resolveBrowserBuildIdentity } = require('./browser-build-identity.cjs');
+const distDir = process.env.NEXT_DIST_DIR || (process.env.NODE_ENV === 'production' ? '.next-build' : '.next');
 
+module.exports = (phase) => {
+const browserBuildId = resolveBrowserBuildIdentity({ phase, directory: path.resolve(__dirname, distDir) });
 const nextConfig = {
+  ...(browserBuildId ? { deploymentId: browserBuildId, generateBuildId: async () => browserBuildId } : {}),
   skipTrailingSlashRedirect: true,
   // Keep production builds isolated from an active local dev server. Next can
   // corrupt the shared webpack cache when `next build` and `next dev` write to
   // the same directory, which previously made visual QA fail with transient
   // `__webpack_modules__[moduleId] is not a function` errors.
-  distDir: process.env.NEXT_DIST_DIR ||
-    (process.env.NODE_ENV === 'production' ? '.next-build' : '.next'),
+  distDir,
   transpilePackages: ['@sabalanerp/contract-product-graph'],
   webpack(config, { dev } = {}) {
     // The shared package is CommonJS for the backend runtime. Point the
@@ -31,6 +35,7 @@ const nextConfig = {
     return config;
   },
   env: {
+    NEXT_PUBLIC_BROWSER_BUILD_ID: browserBuildId,
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000'),
   },
   experimental: {
@@ -86,4 +91,5 @@ const nextConfig = {
   },
 }
 
-module.exports = nextConfig
+return nextConfig;
+};

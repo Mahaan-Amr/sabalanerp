@@ -1,6 +1,7 @@
 "use client";
 import { accountingCorrectionFields } from "@/features/accounting/accountingCorrectionFields";
 import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCreditPanel';
+import ContractCustomerPostedAccount from '@/features/accounting/ContractCustomerPostedAccount';
 import AccountingCustomerCategoryBadge from '@/features/accounting/AccountingCustomerCategoryBadge';
 import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpInput, ErpSearchableSelect } from "@/components/erp";
@@ -721,6 +722,7 @@ export default function AccountingContractDetailPage(props: {
             )}
           </div>
         )}
+      {contract.customerId && !contract.partnerContext && <ContractCustomerPostedAccount customerId={contract.customerId} contractId={contract.contractId} contractNumber={contract.contractNumber} refreshToken={data} />}
       <ErpSegmentedControl
         value={detailSection}
         onChange={setDetailSection}

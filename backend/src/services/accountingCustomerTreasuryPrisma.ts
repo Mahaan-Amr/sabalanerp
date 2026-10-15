@@ -996,8 +996,10 @@ export const projectCustomerAccountsPrisma = async (database: Database, input: {
     const review = reviews.find(row => row.profileId === item.profileId);
     const link = (review?.evidence as { itemLinks?: Array<{ lineKey: string; itemId: string }> } | undefined)?.itemLinks?.find(row => row.itemId === item.id);
     const attribution = link ? attributions.find(row => row.openingReviewId === review!.id && row.lineKey === link.lineKey) : undefined;
+    const reviewedLine = link ? (review?.evidence as { review?: { lines?: Array<{ key: string; financialRecordId?: string }> } } | undefined)?.review?.lines?.find(row => row.key === link.lineKey) : undefined;
     return { id: item.id, kind: item.kind, sourceKind: item.sourceKind, description: item.description, openingLineKey: link?.lineKey,
-      attribution, postedAt: item.postedAt, occurredAt: accountingDate(item.invoice?.ledgerVoucherId ?? item.ledgerVoucherId, item.postedAt), invoiceId: item.invoiceId, invoiceNumber: item.invoice?.number ?? item.description ?? 'ثبت مستقل', contractId: attribution ? attribution.contractId : item.contractId, dueAt: item.dueAt,
+      attribution, financialRecordId: attribution ? attribution.financialRecordId : reviewedLine?.financialRecordId ?? null,
+      postedAt: item.postedAt, occurredAt: accountingDate(item.invoice?.ledgerVoucherId ?? item.ledgerVoucherId, item.postedAt), invoiceId: item.invoiceId, invoiceNumber: item.invoice?.number ?? item.description ?? 'ثبت مستقل', contractId: attribution ? attribution.contractId : item.contractId, dueAt: item.dueAt,
       originalRials: toBigInt(item.originalRials), remainingRials: toBigInt(item.originalRials) - allocated,
       ledgerVoucherId: item.invoice?.ledgerVoucherId ?? item.ledgerVoucherId, taxInvoiceId: item.invoice?.taxInvoiceId ?? null,
       controlEvidence: { type: item.invoice?.controlEvidenceType ?? item.sourceKind, id: item.invoice?.controlEvidenceId ?? item.id,

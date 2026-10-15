@@ -35,7 +35,7 @@ export type CustomerAccount = {
     adjustments: Array<{ id: string; reason: string; reference: string; deltaRials: string; occurredAt: string; ledgerVoucherId: string }> }>;
 };
 export type AccountItem = { id: string; kind: string; sourceKind: string; description: string | null; invoiceNumber: string;
-  contractId: string | null; originalRials: string; remainingRials: string; dueAt: string; postedAt: string; ledgerVoucherId: string; agingDays: number };
+  contractId: string | null; financialRecordId?: string | null; originalRials: string; remainingRials: string; dueAt: string; postedAt: string; ledgerVoucherId: string; agingDays: number };
 export type AccountOperationKind = 'RECEIPT' | 'ALLOCATION' | 'REVERSE_ALLOCATION' | 'OPENING' | 'DEBIT' | 'CREDIT' | 'SET_BALANCE' | 'REFUND' | 'CORRECT_RECEIPT' | 'CANCEL_RECEIPT' | 'CHECK_DEPOSIT' | 'CHECK_SETTLE' | 'ATTRIBUTION' | 'RESOLVE_RECEIPT' | 'CHECK_ENDORSE' | 'CHECK_RECIPIENT_RETURN';
 export const accountOperationLabels: Record<AccountOperationKind, string> = { RECEIPT: 'ثبت دریافت', ALLOCATION: 'تخصیص اعتبار', REVERSE_ALLOCATION: 'برگشت تخصیص',
   OPENING: 'مانده افتتاحیه', DEBIT: 'ثبت بدهکاری', CREDIT: 'ثبت بستانکاری', SET_BALANCE: 'تنظیم مانده', REFUND: 'استرداد وجه',

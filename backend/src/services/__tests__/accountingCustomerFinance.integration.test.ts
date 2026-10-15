@@ -527,3 +527,29 @@ test('standalone customer credit settles debt without creating a fictitious rece
     assert.equal(reversed.netBalanceRials, -50n);
   } finally { await f.close(); }
 });
+
+test('opening projection retains exact initial and latest invoice attribution without changing financial amounts', { skip: !url, timeout: 240_000 }, async () => {
+  const f = await customerFinanceFixture(url!);
+  try {
+    const id = await f.customer();
+    const customerId = id.slice('customer:'.length);
+    const makeRecord = (number: string) => f.db.accountingFinancialRecord.create({ data: { kind: 'INVOICE_CANDIDATE', sourceKind: 'SALES_CONTRACT', sourceId: randomUUID(), customerId, amount: '100', currency: 'IRR', status: 'ISSUED', createdBy: f.actor.id, systemInvoiceNumber: number, createdAt: new Date('2026-01-02') } });
+    const first = await makeRecord('987'); const second = await makeRecord('988');
+    const before = await readCustomerWorkspace(f.db, { id, asOf: new Date(), userId: f.actor.id, openingBasisAt: f.common.occurredAt });
+    await recordCustomerAccountOperation(f.db, id, { ...f.common, kind: 'OPENING', amountRials: 100n, idempotencyKey: randomUUID(), openingReview: {
+      expectedSnapshotHash: before.openingSnapshotHash!, identityConfirmed: true, totalConfirmed: true,
+      lines: [{ key: 'opening', kind: 'RECEIVABLE', amountRials: 100n, financialRecordId: first.id, existingSourceIds: [], reference: 'قلم تطبیق‌شده آزمون' }],
+    } });
+    let account = await readCustomerWorkspace(f.db, { id, asOf: new Date(), userId: f.actor.id });
+    assert.equal(account.activityItems[0].financialRecordId, first.id);
+    const vouchers = await f.db.accountingLedgerVoucher.count();
+    await attributeCustomerOpening(f.db, id, { lineKey: 'opening', expectedSequence: 0, expectedSnapshotHash: account.openingSnapshotHash!, financialRecordId: second.id, reason: 'اصلاح انتساب فاکتور بدون ثبت مجدد', reference: 'نامه اصلاح', confirmed: true, idempotencyKey: randomUUID(), actor: f.actor });
+    account = await readCustomerWorkspace(f.db, { id, asOf: new Date(), userId: f.actor.id });
+    assert.equal(account.activityItems[0].financialRecordId, second.id);
+    assert.equal(account.netBalanceRials, 100n); assert.equal(account.financialRecords.length, 2);
+    await attributeCustomerOpening(f.db, id, { lineKey: 'opening', expectedSequence: 1, expectedSnapshotHash: account.openingSnapshotHash!, reason: 'حذف انتساب فاکتور برای بررسی مجدد', reference: 'نامه بررسی', confirmed: true, idempotencyKey: randomUUID(), actor: f.actor });
+    account = await readCustomerWorkspace(f.db, { id, asOf: new Date(), userId: f.actor.id });
+    assert.equal(account.activityItems[0].financialRecordId, null);
+    assert.equal(await f.db.accountingLedgerVoucher.count(), vouchers);
+  } finally { await f.close(); }
+});

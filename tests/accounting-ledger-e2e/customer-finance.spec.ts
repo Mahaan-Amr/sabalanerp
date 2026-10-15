@@ -180,3 +180,49 @@ test('missing customer rule points to rule setup while an open period is preserv
   await expect(page.getByRole('link', { name: 'تعریف قاعده مشتری', exact: true })).toHaveAttribute('href', '/dashboard/accounting/ledger/customer-rules');
   await expect(page.getByText('دوره مالی بازی تعریف نشده است.', { exact: true })).toHaveCount(0);
 });
+
+test('money fields group digits while preserving exact signed rials through blur and submission', async ({ page }) => {
+  await login(page); const commands = await installFixture(page);
+  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click();
+  await page.getByRole('button', { name: 'ثبت بستانکاری', exact: true }).click();
+  const money = page.getByRole('textbox', { name: 'مبلغ (ریال)', exact: true });
+  await money.fill('۹۰۰۷۱۹۹۲۵۴۷۴۰۹۹۳'); await money.press('Tab');
+  await expect(money).toHaveValue('9,007,199,254,740,993');
+  await money.fill('۳۰۰٬۰۰۰٬۰۰۰'); await money.press('Tab');
+  await expect(money).toHaveValue('300,000,000');
+  await choose(page, 'حساب مقابل', '401 · درآمد'); await commonEvidence(page);
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'ثبت قطعی', exact: true }).click();
+  await expect.poll(() => commands.length).toBe(1); expect(commands[0].amountRials).toBe('300000000');
+});
+
+test('invoice and contract show exact linked opening, active receipt share and remaining balance without duplicating an invoice', async ({ page }) => {
+  await login(page); await installFixture(page, {
+    contracts: [{ id: 'contract', contractNumber: '100185', titlePersian: 'قرارداد آموزشی', totalAmount: '930884700', currency: 'IRR', status: 'APPROVED', isInactive: false, createdAt: '2026-01-01', customerCreditAmountRials: '0' }],
+    financialRecords: [{ id: 'record', contractId: 'contract', kind: 'INVOICE_CANDIDATE', status: 'ISSUED', amount: '930884700', currency: 'IRR', systemInvoiceNumber: '987', createdAt: '2026-01-01' }],
+    activityItems: [{ ...debt, sourceKind: 'OPENING', contractId: 'contract', financialRecordId: 'record', originalRials: '1000000000', remainingRials: '700000000' }],
+    receipts: [{ ...fixture.receipts[0], amountRials: '300000000', effectiveAmountRials: '300000000', allocatedRials: '300000000', allocations: [{ id: 'allocation', createdAt: '2026-10-01', reversedAt: null, ledgerVoucherId: 'v-alloc', lines: [{ openItemId: 'debt', amountRials: '300000000' }] }] }],
+  });
+  await page.getByRole('button', { name: /رکوردها و دریافتنی‌ها/ }).click();
+  const linked = page.getByRole('region', { name: 'اقلام قطعی فاکتور 987', exact: true });
+  await expect(linked).toBeVisible();
+  await expect(linked.getByText('۷۰۰٬۰۰۰٬۰۰۰ ریال', { exact: true })).toBeVisible();
+  await expect(linked.getByText('۳۰۰٬۰۰۰٬۰۰۰ ریال', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('۹۳۰٬۸۸۴٬۷۰۰ ریال', { exact: true }).last()).toBeVisible();
+  await linked.getByRole('button', { name: /منابع تخصیص فعال/ }).click();
+  await expect(linked.getByText(/سهم این بدهی: ۳۰۰٬۰۰۰٬۰۰۰ ریال/)).toBeVisible();
+  await page.getByRole('button', { name: /قراردادها/ }).filter({ hasText: 'قراردادها' }).click();
+  await expect(page.getByRole('region', { name: 'اقلام قطعی قرارداد 100185', exact: true })).toBeVisible();
+});
+
+test('signed balance input preserves negative and empty text and invalidates confirmation on amount edit', async ({ page }) => {
+  await login(page); const commands = await installFixture(page);
+  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click(); await page.getByRole('button', { name: 'تنظیم مانده', exact: true }).click();
+  const money = page.getByRole('textbox', { name: 'مانده مطلوب (ریال)', exact: true });
+  await money.fill(''); await money.press('Tab'); await expect(money).toHaveValue('');
+  await money.fill('-۳۰۰۰۰۰۰۰۰'); await money.press('Tab'); await expect(money).toHaveValue('-300,000,000');
+  await choose(page, 'حساب مقابل', '401 · درآمد'); await commonEvidence(page); await page.getByRole('checkbox').check();
+  await money.fill('-۲۰۰۰۰۰۰۰۰'); await money.press('Tab'); await expect(page.getByRole('checkbox')).not.toBeChecked();
+  await page.getByRole('checkbox').check(); await page.getByRole('button', { name: 'ثبت قطعی', exact: true }).click();
+  await expect.poll(() => commands.length).toBe(1); expect(commands[0].amountRials).toBe('-200000000');
+});

@@ -1,4 +1,5 @@
 'use client';
+import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { ErpButton, ErpCard, ErpField, ErpInput, ErpPersianDateField, ErpSearchableSelect } from '@/components/erp';
 import { newReceiptPart, type ReceiptPartDraft } from './customerFinanceDraft';
 export type CustomerFinanceContext = {
@@ -17,7 +18,7 @@ export default function CustomerReceiptPartsFields({ parts, onChange, context }:
       <ErpField label="ابزار دریافت" required><ErpSearchableSelect aria-label={`ابزار دریافت ${index + 1}`} value={part.kind} onChange={event => set(part.key, { kind: event.target.value as ReceiptPartDraft['kind'], ledgerId: '', fee: '', feeLedgerId: '', existingCheckId: '', existingCheckStatus: undefined, existingClearedRials: undefined, collectedLedgerId: '' })}>
         <option value="BANK">واریز بانکی</option><option value="CASH">نقد</option><option value="CARD">کارت‌خوان</option><option value="CHECK">چک</option>
       </ErpSearchableSelect></ErpField>
-      <ErpField label="مبلغ جزء (ریال)" required><ErpInput required inputMode="numeric" value={part.amount} onChange={event => set(part.key, { amount: event.target.value })} /></ErpField>
+      <ErpField label="مبلغ جزء (ریال)" required><FormattedNumberInput decimalScale={null} required value={part.amount} onTextChange={next => set(part.key, { amount: next })} /></ErpField>
       <ErpField label={part.kind === 'CHECK' ? 'حساب مالی نگهداری ابزار' : 'حساب دریافت وجه'} required><ErpSearchableSelect required aria-label={`حساب مالی جزء ${index + 1}`} value={part.financialId} onChange={event => set(part.key, { financialId: event.target.value })}>
         <option value="">انتخاب حساب</option>{context.financialAccounts.filter(row => row.currency === 'IRR').map(row => <option key={row.id} value={row.id}>{row.titlePersian}</option>)}
       </ErpSearchableSelect></ErpField>
@@ -31,7 +32,7 @@ export default function CustomerReceiptPartsFields({ parts, onChange, context }:
         <ErpField label="شناسه صیادی"><ErpInput value={part.sayad} onChange={event => set(part.key, { sayad: event.target.value })} /></ErpField>
         <ErpPersianDateField label="سررسید چک" value={part.due} onChange={due => set(part.key, { due })} valueFormat="iso-date" required />
       </> : <>
-        <ErpField label="کارمزد شرکت (ریال)" hint="دریافت مشتری به مبلغ ناخالص ثبت می‌شود؛ کارمزد هزینه جداست."><ErpInput inputMode="numeric" value={part.fee} onChange={event => set(part.key, { fee: event.target.value })} /></ErpField>
+        <ErpField label="کارمزد شرکت (ریال)" hint="دریافت مشتری به مبلغ ناخالص ثبت می‌شود؛ کارمزد هزینه جداست."><FormattedNumberInput decimalScale={null} value={part.fee} onTextChange={next => set(part.key, { fee: next })} /></ErpField>
         {part.fee.trim() && <ErpField label="معین هزینه کارمزد" required><ErpSearchableSelect required aria-label={`معین هزینه جزء ${index + 1}`} value={part.feeLedgerId} onChange={event => set(part.key, { feeLedgerId: event.target.value })}>
           <option value="">انتخاب معین</option>{context.accounts.filter(row => row.statementRole === 'EXPENSE' && row.partyRequirement !== 'REQUIRED' && row.financialAccountRequirement !== 'REQUIRED').map(row => <option key={row.id} value={row.id}>{row.code} · {row.titlePersian}</option>)}
         </ErpSearchableSelect></ErpField>}

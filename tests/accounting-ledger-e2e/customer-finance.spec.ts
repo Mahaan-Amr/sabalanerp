@@ -51,7 +51,7 @@ async function choose(page: Page, label: string, option: string) {
 }
 test('opening uses the confirmed total and matched source; every changed field requires renewed confirmation', async ({ page }) => {
   await login(page); const commands = await installFixture(page);
-  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click();
+  await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click();
   await page.getByRole('button', { name: 'مانده افتتاحیه', exact: true }).click();
   await page.getByRole('textbox', { name: 'مانده کل تأییدشده (ریال)' }).fill('۱۰۰');
   await page.getByRole('textbox', { name: 'مانده باز تأییدشده قلم (ریال)' }).fill('۱۰۰');
@@ -69,7 +69,7 @@ test('opening uses the confirmed total and matched source; every changed field r
 });
 test('accountant confirms the cash and uncleared cheque shares together; refund hides uncollected cheque', async ({ page }) => {
   await login(page); const commands = await installFixture(page);
-  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click(); await page.getByRole('button', { name: 'تخصیص اعتبار', exact: true }).click();
+  await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click(); await page.getByRole('button', { name: 'تخصیص اعتبار', exact: true }).click();
   await page.getByRole('button', { name: /نقدی.*مانده/ }).click();
   await page.getByRole('textbox', { name: 'بدهی آزمون', exact: true }).fill('100');
   await page.getByRole('button', { name: /نقدی.*مانده/ }).click();
@@ -78,7 +78,7 @@ test('accountant confirms the cash and uncleared cheque shares together; refund 
   await commonEvidence(page); await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'ثبت قطعی', exact: true }).click(); await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(commands[0].sourceAllocations).toEqual([{ receiptId: 'cash', allocations: [{ openItemId: 'debt', amountRials: '100' }] }, { receiptId: 'cheque', allocations: [{ openItemId: 'debt', amountRials: '50' }] }]);
-  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click(); await page.getByRole('button', { name: 'استرداد وجه', exact: true }).click();
+  await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click(); await page.getByRole('button', { name: 'استرداد وجه', exact: true }).click();
   await page.getByRole('combobox', { name: 'منبع وجه' }).click();
   await expect(page.getByRole('option').filter({ hasText: 'نقدی' })).toHaveCount(1);
   await expect(page.getByRole('option').filter({ hasText: 'چک' })).toHaveCount(0);
@@ -118,7 +118,7 @@ test('mixed receipt form preserves each instrument and protects a pending confir
 
 test('accountant can reconcile an old receipt with explicit source shares and renewed confirmation', async ({ page }) => {
   await login(page); const commands = await installFixture(page);
-  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click();
+  await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click();
   await page.getByRole('button', { name: 'تطبیق ابزار دریافت قدیمی', exact: true }).click();
   await page.getByRole('combobox', { name: 'منبع وجه', exact: true }).click(); await page.getByRole('option').filter({ hasText: 'نقدی' }).click();
   await page.getByRole('textbox', { name: 'مبلغ جزء (ریال)', exact: true }).fill('۱۰۰');
@@ -134,7 +134,7 @@ test('accountant can reconcile an old receipt with explicit source shares and re
 
 test('endorsement selects recipient debt separately from customer allocation', async ({ page }) => {
   await login(page); const commands = await installFixture(page);
-  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click(); await page.getByRole('button', { name: 'خرج‌کردن چک مشتری', exact: true }).click();
+  await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click(); await page.getByRole('button', { name: 'خرج‌کردن چک مشتری', exact: true }).click();
   await page.getByRole('combobox', { name: 'منبع وجه', exact: true }).click(); await page.getByRole('option').filter({ hasText: 'چک' }).click();
   await choose(page, 'گیرنده چک', 'تأمین‌کننده آزمون');
   await page.getByRole('textbox', { name: 'تخصیص به فاکتور S-1' }).fill('۱۵۰');
@@ -159,7 +159,7 @@ test('historical partial collection asks for the bank share while retaining the 
     receipts: [{ ...fixture.receipts[0], amountRials: '200', effectiveAmountRials: '200', remainingRials: '200' }],
     treasuryChecks: [{ ...fixture.treasuryChecks[0], id: 'legacy-partial', status: 'DEPOSITED', clearedRials: '60', receipt: null }],
   });
-  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click(); await page.getByRole('button', { name: 'تطبیق ابزار دریافت قدیمی', exact: true }).click();
+  await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click(); await page.getByRole('button', { name: 'تطبیق ابزار دریافت قدیمی', exact: true }).click();
   await page.getByRole('combobox', { name: 'منبع وجه', exact: true }).click(); await page.getByRole('option').filter({ hasText: 'نقدی' }).click();
   await choose(page, 'ابزار دریافت 1', 'چک');
   await page.getByRole('button', { name: 'سهم ابزار ۱ نمایش جزئیات', exact: true }).click();
@@ -174,7 +174,7 @@ test('historical partial collection asks for the bank share while retaining the 
 test('missing customer rule points to rule setup while an open period is preserved', async ({ page }) => {
   await login(page); await installFixture(page);
   await page.route('**/api/accounting/ledger/customer-accounts/profile/context', route => route.fulfill({ json: { success: true, data: { ...context, rules: [] } } }));
-  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click();
+  await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click();
   await page.getByRole('button', { name: 'مانده افتتاحیه', exact: true }).click();
   await expect(page.getByText('قاعده ثبت حسابداری مشتری تعریف نشده است.', { exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'تعریف قاعده مشتری', exact: true })).toHaveAttribute('href', '/dashboard/accounting/ledger/customer-rules');
@@ -183,7 +183,7 @@ test('missing customer rule points to rule setup while an open period is preserv
 
 test('money fields group digits while preserving exact signed rials through blur and submission', async ({ page }) => {
   await login(page); const commands = await installFixture(page);
-  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click();
+  await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click();
   await page.getByRole('button', { name: 'ثبت بستانکاری', exact: true }).click();
   const money = page.getByRole('textbox', { name: 'مبلغ (ریال)', exact: true });
   await money.fill('۹۰۰۷۱۹۹۲۵۴۷۴۰۹۹۳'); await money.press('Tab');
@@ -217,7 +217,7 @@ test('invoice and contract show exact linked opening, active receipt share and r
 
 test('signed balance input preserves negative and empty text and invalidates confirmation on amount edit', async ({ page }) => {
   await login(page); const commands = await installFixture(page);
-  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click(); await page.getByRole('button', { name: 'تنظیم مانده', exact: true }).click();
+  await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click(); await page.getByRole('button', { name: 'تنظیم مانده', exact: true }).click();
   const money = page.getByRole('textbox', { name: 'مانده مطلوب (ریال)', exact: true });
   await money.fill(''); await money.press('Tab'); await expect(money).toHaveValue('');
   await money.fill('-۳۰۰۰۰۰۰۰۰'); await money.press('Tab'); await expect(money).toHaveValue('-300,000,000');

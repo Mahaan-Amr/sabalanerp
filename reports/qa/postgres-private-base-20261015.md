@@ -31,12 +31,14 @@ never treated as completion. Signal cancellation is deferred through native
 completion. SIGKILL/host loss still requires inspection of the durable unfinished
 operation; this private helper is not an unattended recovery controller.
 
-Seven actual Linux tests passed in 9.29 seconds. They cover a detached descendant,
+Eight actual Linux tests passed in 9.07 seconds. They cover a detached descendant,
 a signal-ignoring deadline, native exit/status bytes, interruption and real
 kernel-lock retention after injected log-open/journal, log-write and ownership-
 filesystem failures, plus a simulated orchestration plugin that cannot perform
 a late service switch after its parent's deadline. A completed-receipt control case releases ownership after
-a subsequent parsing failure. Docker is mocked only for these process fault
+a subsequent parsing failure. The eighth regression uses the actual host-command
+adapter and a native successful command to verify binary log writing and durable
+receipt handling. Docker is mocked only for these process fault
 tests; the subsequent physical capture and native verification used the actual
 existing isolated PostgreSQL service and immutable image.
 
@@ -51,7 +53,26 @@ all ten stable IDs/start times remained unchanged. No foreign mutation occurred.
 Source reviews by independent Standards and Spec reviewers passed after the
 ownership, cancellation and durability fixes, before the native trial.
 
-Physical decryption/boot/business-data replay is the next acceptance step.
+The fourth physical replay trial completed on the independent backup host at
+2026-10-15T10:49:02Z. Existing v2 recovery encryption, independent RSA decryption,
+authenticated corruption rejection, native `pg_verifybackup`, actual boot of the
+decrypted base in the existing isolated DR PostgreSQL service and three actual
+business fingerprints all passed. Before replay, after replay and after returning
+to the original unchanged DR data, the fingerprint was 199 tables / 16,700 records /
+`553597e5c7fd65fbbd0369fe4ff3dcf3588f2be0e7b01d83db444190b45ff665`.
+All ten stable foreign Fintech service identities/start times remained unchanged.
+See [machine proof](postgres-private-physical-restore-r4-20261015.json).
+
+The physical trial's second encryption recipient is explicitly disposable and
+diagnostic. This does not satisfy production's two independent recovery-authority
+contract or create a production recovery point. The earlier failed attempts are
+retained on the backup host: R2 was rejected before execution by Docker's logging
+configuration; R3 successfully stopped the private DR service, then retained its
+ownership because a host log adapter wrote bytes to a text stream. Exact native
+exit/descendant and kernel-lock evidence was durably recorded before resolving
+those controllers. R3 returned to the original DR data before R4 started. The
+adapter regression fixes that failure without weakening native process ownership.
+
 Continuous WAL capture, coherent immutable file/deletion history, Inquiry
 SQLite/coordination, erasure semantics, independent read-back and integration
 with release ownership remain required. This private base alone proves none

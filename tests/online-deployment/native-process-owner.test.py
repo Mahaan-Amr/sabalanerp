@@ -113,6 +113,26 @@ class NativeProcessOwner(unittest.TestCase):
             with (root / 'owner.lock').open('r+') as probe:
                 fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
+    def test_host_orchestration_adapter_persists_a_successful_receipt(self):
+        fixture = pathlib.Path(__file__).with_name('physical-restore-drill.fixture.py')
+        code = '''import importlib.util,pathlib,shutil,sys
+source,binary,root=sys.argv[1:]
+spec=importlib.util.spec_from_file_location('private_drill',source)
+module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+module.QA=pathlib.Path(root);module.STATUS=module.QA/'status.json'
+shutil.copyfile(binary,module.QA/'native-process-owner');(module.QA/'native-process-owner').chmod(0o700)
+module.mutate_host(['true'],2,'host-command-smoke')
+print('COMPLETE')
+'''
+        with tempfile.TemporaryDirectory(prefix='sabalan-host-command-') as root:
+            result = subprocess.run(['python3', '-c', code, str(fixture), str(self.binary), root], capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(b'COMPLETE', result.stdout)
+            import json
+            outcome = json.loads((pathlib.Path(root) / 'host-command-smoke-outcome.json').read_text())
+            self.assertEqual(outcome['exitStatus'], 0)
+            self.assertTrue(outcome['receiptTail'].endswith(outcome['expectedReceipt']))
+
 
 if __name__ == '__main__':
     unittest.main()

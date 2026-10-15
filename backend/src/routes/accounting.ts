@@ -11,7 +11,7 @@ import { FeatureRequest, FEATURE_PERMISSIONS, FEATURES, requireAnyNarrowFeatureA
 import { generatePdfFromHtml } from '../utils/pdf';
 import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
 import { readPartnerInternalDocument, renderPartnerInternalDocumentHtml,
-  withPartnerInternalAccountingTarget, renderPartnerInternalDocumentHeader } from '../services/partnerSales/accounting/internalDocument';
+  withPartnerInternalAccountingTarget } from '../services/partnerSales/accounting/internalDocument';
 import {
   buildSalesContractPdfDownloadName,
   buildSalesContractPdfFingerprint,
@@ -829,9 +829,8 @@ router.get('/contracts/partner/:caseId/internal-pdf', accountingContractsView, a
     const printOptions = { variant, customPrint: variant === 'custom' ? customPrintOptionsFromQuery(req.query) : undefined };
     const pdfPath = await generatePdfFromHtml({ htmlContent: renderPartnerInternalDocumentHtml(document, printOptions),
       outputDir: ACCOUNTING_PDF_DIR, fileName: `partner_internal_${document.id}_${Date.now()}`,
-      landscape: false, scale: 1, widthMm: 210, heightMm: 297, displayHeaderFooter: true,
-      headerTemplate: renderPartnerInternalDocumentHeader(document), footerTemplate: '<span></span>',
-      margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
+      landscape: false, scale: 1, widthMm: 210, heightMm: 297, displayHeaderFooter: false,
+      margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
     if (String(req.query.download || 'false').toLowerCase() === 'true') {
       return res.download(pdfPath, `partner_internal_${document.partnerContext.internalRecordNumber}.pdf`);
     }

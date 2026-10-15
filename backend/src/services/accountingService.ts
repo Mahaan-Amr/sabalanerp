@@ -169,6 +169,7 @@ type ListContractsQuery = {
   search?: string;
   status?: string;
   sourceStatus?: string;
+  sourceKind?: 'ALL' | 'SALES_CONTRACT' | 'PARTNER_INTERNAL_RECORD';
   taxStatus?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -1256,6 +1257,12 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       }
     }
     items.push(...projected.filter(row => !query.status || query.status === 'ALL' || row.status === query.status));
+  }
+
+  if (query.sourceKind === 'PARTNER_INTERNAL_RECORD') {
+    items = items.filter(item => item.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE);
+  } else if (query.sourceKind === 'SALES_CONTRACT') {
+    items = items.filter(item => item.sourceKind !== PARTNER_INTERNAL_ACCOUNTING_SOURCE);
   }
 
   if (search) {

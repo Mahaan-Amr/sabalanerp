@@ -156,7 +156,10 @@
     "test:accounting-parallel": "tsx --test src/services/__tests__/accountingParallelComparison.test.ts",
     "test:accounting-parallel:db": "tsx --test src/services/__tests__/accountingParallelComparisonPrisma.integration.test.ts",
     "test:operation-minimums": "tsx --test src/services/__tests__/operationMinimumPermission.test.ts",
-    "test:operation-minimums:db": "tsx src/services/__tests__/operationMinimum.integration.test.ts"
+    "test:operation-minimums:db": "tsx src/services/__tests__/operationMinimum.integration.test.ts",
+    "test:hr-vehicle-operations": "tsx --test src/routes/__tests__/hrVehicleOperationsRegression.test.ts src/services/__tests__/dispatchMasterDataPolicy.test.ts src/services/__tests__/companyVehicleEntry.test.ts src/services/__tests__/hrDriverDispatchReadiness.test.ts",
+    "test:hr-vehicle-operations:db": "tsx --test src/services/__tests__/hrVehicleOperations.integration.test.ts",
+    "verify:hr-vehicle-operations": "tsx scripts/verify-hr-vehicle-operations.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.16.1",

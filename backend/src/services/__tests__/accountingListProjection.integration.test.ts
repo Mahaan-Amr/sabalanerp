@@ -37,6 +37,14 @@ async function run() {
     const actual = await listAccountingContracts({ page: 1, pageSize: 100 });
     console.log(JSON.stringify({ elapsedMs: Math.round(performance.now() - start), total: actual.total }));
     assert.equal(actual.total, reference.length);
+    const internal = await listAccountingContracts({ sourceKind: 'SALES_CONTRACT', pageSize: 1 });
+    assert.equal(internal.total, actual.total, 'origin filtering retains the full count before pagination');
+    assert.equal(internal.items.length, 1);
+    assert.deepEqual(internal.totals, actual.totals);
+    const partner = await listAccountingContracts({ sourceKind: 'PARTNER_INTERNAL_RECORD', pageSize: 1 });
+    assert.equal(partner.total, 0, 'Partner filter excludes ordinary contracts and does not bypass actor scope');
+    assert.deepEqual(partner.items, []);
+    assert.deepEqual(partner.totals, { contractAmount: '0', invoicedAmount: '0', receivedAmount: '0', remainingAmount: '0' });
     const allRows = [...actual.items];
     for (let page = 2; (page - 1) * 100 < actual.total; page += 1) {
       allRows.push(...(await listAccountingContracts({ page, pageSize: 100 })).items);

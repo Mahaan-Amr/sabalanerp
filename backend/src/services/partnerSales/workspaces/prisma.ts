@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { partnerCustomerContractLabel, type PartnerManagementWorkspaceViewV2, type ResponderContractSummaryV2, type Result } from '@sabalanerp/partner-sales-contracts';
 import { createPartnerInquiryQuery } from '../inquiries/query';
 import { createSavedTechnicalConfigurationResolver } from '../inquiries/adapters';
@@ -42,9 +42,25 @@ export function createPrismaPartnerWorkspaceQuery(input: {
       }
       const search = (page.search ?? '').replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))
         .replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).trim();
+      // Apply the identical grouping/search scope before materializing private
+      // technical evidence. Global tab counts still include every authorized
+      // inquiry in this scope, independently of pagination and selected status.
+      const groupingScope = Prisma.sql`(${page.contractId ?? ''} = '' OR COALESCE(i."caseId", i.id) = ${page.contractId ?? ''})
+        AND (${search} = '' OR concat_ws(' ', c."caseNumber", sc."contractNumber", tc.number::text,
+          u."firstName", u."lastName", customer."firstName", customer."lastName", customer."companyName") ILIKE '%' || ${search} || '%')`;
+      const scopedIds = page.contractId || search ? await transaction.$queryRaw<Array<{ id: string }>>`
+        SELECT i.id FROM partner_inquiries i
+        JOIN partner_profiles p ON p.id = i."profileId"
+        JOIN users u ON u.id = p."userId"
+        LEFT JOIN partner_sale_cases c ON c.id = i."caseId"
+        LEFT JOIN sales_contracts sc ON sc.id = c."customerContractId"
+        LEFT JOIN partner_case_tracking_codes tc ON tc."caseId" = c.id
+        LEFT JOIN crm_customers customer ON customer.id = c."customerId"
+        WHERE ${groupingScope}` : null;
       // Counts and cursors must obey the same root policy as the selected details.
       // Feature/assignment eligibility alone does not override a central denial.
       const candidates = await transaction.partnerInquiry.findMany({ where: {
+        ...(scopedIds ? { id: { in: scopedIds.map(row => row.id) } } : {}),
         assignments: { some: authority.canManageInquiries ? {} : { responderId: input.actorId } },
       }, select: { id: true, profileId: true, profile: { select: { userId: true } }, rows: { select: { id: true, definition: true } } }, orderBy: { id: 'asc' } });
       const readableIds: string[] = [];
@@ -88,13 +104,12 @@ export function createPrismaPartnerWorkspaceQuery(input: {
           LEFT JOIN sales_contracts sc ON sc.id = c."customerContractId"
           LEFT JOIN partner_case_tracking_codes tc ON tc."caseId" = c.id
           LEFT JOIN crm_customers customer ON customer.id = c."customerId"
-          WHERE i.id = ANY(${readableIds}::text[]) AND (${page.contractId ?? ''} = '' OR COALESCE(i."caseId", i.id) = ${page.contractId ?? ''})
+          WHERE i.id = ANY(${readableIds}::text[]) AND ${groupingScope}
             AND (${authority.canManageInquiries} OR EXISTS (
             SELECT 1 FROM partner_inquiry_assignments a WHERE a."inquiryId" = i.id
               AND a."responderId" = ${input.actorId}
               AND a.revision = (SELECT max(current.revision) FROM partner_inquiry_assignments current WHERE current."inquiryId" = i.id)
-          )) AND (${search} = '' OR concat_ws(' ', c."caseNumber", sc."contractNumber", tc.number::text,
-            u."firstName", u."lastName", customer."firstName", customer."lastName", customer."companyName") ILIKE '%' || ${search} || '%')
+          ))
         ), grouped AS (
           SELECT e."groupId", array_agg(DISTINCT e.id ORDER BY e.id) AS "inquiryIds",
             min(e.customer) AS customer, min(e."partnerDisplayName") AS "partnerDisplayName",

@@ -8,6 +8,7 @@ export const ERROR_CATALOG = {
   NOT_ASSIGNED: [403, 'این استعلام به شما واگذار نشده است؛ استعلام دیگری را از فهرست کارهای خود انتخاب کنید.'],
   RESPONDER_UNAVAILABLE: [409, 'برای حساب شما پاسخ‌دهنده قیمت فعال تعیین نشده است؛ تا تعیین پاسخ‌دهنده، ثبت استعلام را متوقف کنید.'],
   INVALID_PAYLOAD: [400, 'اطلاعات ارسالی معتبر نیست؛ فیلدهای مشخص‌شده را اصلاح و دوباره تلاش کنید.'],
+  CATALOG_COMPONENT_UNAVAILABLE: [409, 'یکی از اجزای انتخاب‌شده نرخ معتبر ندارد؛ آن را اصلاح یا حذف کنید.'],
   OPERATION_MINIMUM_NOT_MET: [409, 'مجموع اجرای یک ابزار یا فرآوری سنگ به حداقل تعیین‌شده نمی‌رسد؛ مقدار عملیات را در تنظیمات محصولات اصلاح کنید یا آن عملیات را حذف کنید و دوباره تلاش کنید.'],
   ROW_STALE: [409, 'اطلاعات تغییر کرده است؛ صفحه را تازه کنید.'],
   INTEGRITY_CONFLICT: [409, 'شواهد پرونده با نسخه فعلی سازگار نیست؛ صفحه را تازه کنید و دوباره اقدام کنید.'],
@@ -26,22 +27,34 @@ export const ERROR_CATALOG = {
   COHORT_NOT_READY: [409, 'امکان شروع فروش هنوز فعال نشده است؛ پس از فعال‌شدن دسترسی فروش، دوباره تلاش کنید.'],
 } as const;
 export type PartnerErrorCode = keyof typeof ERROR_CATALOG;
-export type PartnerError = { code: PartnerErrorCode; status: 400 | 403 | 404 | 409 | 500 | 503; message: string };
-export function partnerError(code: PartnerErrorCode): PartnerError {
+const componentSchema = z.object({ kind: z.enum(['PRODUCT', 'TOOL', 'FINISHING', 'LAYER', 'SERVICE']),
+  title: z.string().trim().min(1).max(160), reason: z.enum(['MISSING', 'INACTIVE', 'RATE', 'UNIT']) }).strict();
+export type PartnerErrorComponent = z.infer<typeof componentSchema>;
+export type PartnerError = { code: PartnerErrorCode; status: 400 | 403 | 404 | 409 | 500 | 503; message: string;
+  component?: PartnerErrorComponent };
+export function partnerError(code: PartnerErrorCode, component?: PartnerErrorComponent): PartnerError {
   const [status, message] = ERROR_CATALOG[code];
+  if (code === 'CATALOG_COMPONENT_UNAVAILABLE' && component) {
+    const safe = componentSchema.parse(component);
+    const kind = { PRODUCT: 'محصول', TOOL: 'ابزار', FINISHING: 'پرداخت سنگ', LAYER: 'نوع لایه', SERVICE: 'خدمت' }[safe.kind];
+    const reason = { MISSING: 'در کاتالوگ موجود نیست', INACTIVE: 'غیرفعال است', RATE: 'نرخ معتبر ندارد', UNIT: 'واحد محاسبه آن تغییر کرده است' }[safe.reason];
+    return { code, status, component: safe, message: `${kind} «${safe.title}» ${reason}؛ آن را جایگزین یا حذف کنید و دوباره ذخیره کنید.` };
+  }
   return { code, status, message };
 }
 // Internal codes may distinguish causes. HTTP adapters must collapse hidden existence.
 export function publicError(error: PartnerError, supportReference: string) {
   const code = Object.prototype.hasOwnProperty.call(ERROR_CATALOG, error.code) ? error.code : 'INVALID_PAYLOAD';
-  const canonical = partnerError(code);
+  const canonical = partnerError(code, error.component);
   const safe = canonical.status === 404 ? partnerError('NOT_FOUND') : canonical;
   return { ...safe, supportReference: IdSchema.parse(supportReference) };
 }
 export const PartnerErrorSchema = z.object({
   code: z.enum(Object.keys(ERROR_CATALOG) as [PartnerErrorCode, ...PartnerErrorCode[]]),
   status: z.union([z.literal(400), z.literal(403), z.literal(404), z.literal(409), z.literal(500), z.literal(503)]), message: z.string(),
-}).strict().refine(error => ERROR_CATALOG[error.code][0] === error.status && ERROR_CATALOG[error.code][1] === error.message);
+  component: componentSchema.optional(),
+}).strict().refine(error => (!error.component || error.code === 'CATALOG_COMPONENT_UNAVAILABLE') &&
+  ERROR_CATALOG[error.code][0] === error.status && partnerError(error.code, error.component).message === error.message);
 export type Result<T> = { ok: true; value: T } | { ok: false; error: PartnerError };
 
 export function checkExpectedRevision(expected: RevisionRef, actual: RevisionRef): PartnerError | null {

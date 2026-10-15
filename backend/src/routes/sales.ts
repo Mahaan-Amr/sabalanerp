@@ -75,6 +75,7 @@ import { resolveWorkspaceRecipientIds } from '../services/domainNotificationReci
 import { ContractPartyIdentityValidationError } from '../services/contractPartyIdentity';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
+import { readPartnerSalesContractDetail } from '../services/partnerSales/cases/contractDetail';
 import { applyPartnerContractListScope, canPartnerReadSalesContract,
   readPartnerProfileId, ownsPartnerCustomerContract } from '../services/partnerSales/contractVisibility';
 import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, knownCustomerCreditFailure, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
@@ -924,21 +925,7 @@ router.get('/contracts/:id', protect, requireSalesDetailRead, async (req: any, r
       const correlationId = typeof req.headers['x-correlation-id'] === 'string'
         && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(req.headers['x-correlation-id'])
         ? req.headers['x-correlation-id'] : randomUUID();
-      const projected = await prisma.$transaction(async tx => {
-        if (!contract.partnerCaseId || !contract.partnerRevision || !contract.partnerIntegrityHash) return null;
-        const current = await readCurrentPartnerCaseViews(tx, contract.partnerCaseId);
-        if (!current || current.row.customerContractId !== contract.id ||
-            current.row.headRevision !== contract.partnerRevision ||
-            current.row.integrityHash !== contract.partnerIntegrityHash) return null;
-        const caseRead = await createAuditedPartnerAuthorization(tx, {
-          actorId: req.user.id, purpose: 'PARTNER', channel: 'DETAIL',
-        }, { correlationId }).authorize('CASE_READ', { kind: 'CASE', id: contract.partnerCaseId });
-        if (caseRead.ok === false) return { ok: false as const, error: caseRead.error };
-        const output = await createAuditedPartnerAuthorization(tx, {
-          actorId: req.user.id, purpose: 'CUSTOMER_OUTPUT', channel: 'API',
-        }, { correlationId }).authorize('CUSTOMER_OUTPUT', { kind: 'CASE', id: contract.partnerCaseId });
-        return { ok: true as const, view: current.partner, output: output.ok };
-      });
+      const projected = await readPartnerSalesContractDetail(prisma, { contract, actorId: req.user.id, correlationId });
       if (!projected || projected.ok === false) {
         const status = projected && 'error' in projected ? projected.error.status : 409;
         return res.status(status).json({ success: false,

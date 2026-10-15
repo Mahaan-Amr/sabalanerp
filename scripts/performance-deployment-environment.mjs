@@ -33,5 +33,7 @@ if (process.argv[2] === 'capture') {
   if (session.rollbackPerformanceEnvironment !== undefined) {
     const environment = validateReleaseEnvironment(session.rollbackPerformanceEnvironment);
     for (const [key, value] of Object.entries(environment)) console.log(`export ${key}='${value}'`);
+    // The application commit must describe the same validated previous release.
+    if (environment.PERFORMANCE_RELEASE_COMMIT) console.log(`export APP_COMMIT='${environment.PERFORMANCE_RELEASE_COMMIT}'`);
   }
 }

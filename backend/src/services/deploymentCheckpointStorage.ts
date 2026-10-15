@@ -108,8 +108,21 @@ export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
     return { availableBytes };
   }
 
+  private async readRemoteDirectory(directory: string) {
+    for (let retry = 0; ; retry += 1) {
+      try {
+        return await fs.promises.readdir(directory, { withFileTypes: true });
+      } catch (error: any) {
+        if (!transientRemoteStorageCodes.has(error?.code) || retry >= 3) throw error;
+        // Restart the complete listing after a transient SSHFS failure. An
+        // unreadable directory must still abort checkpoint preparation.
+        await new Promise(resolve => setTimeout(resolve, Math.min((this.options.retryDelayMs ?? 3_000) * 2 ** retry, 30_000)));
+      }
+    }
+  }
+
   private async removeExpiredIncompleteUploads(directory: string): Promise<void> {
-    const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+    const entries = await this.readRemoteDirectory(directory);
     for (const entry of entries) {
       const absolute = path.join(directory, entry.name);
       if (entry.isDirectory()) await this.removeExpiredIncompleteUploads(absolute);

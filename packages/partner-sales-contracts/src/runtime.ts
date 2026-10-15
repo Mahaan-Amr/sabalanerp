@@ -42,6 +42,13 @@ export const PartnerCaseRuntimeRowSchema = z.object({
   actions: PartnerCaseRuntimeActionsSchema,
 }).strict();
 
+/** Fresh navigation decision; full editor hydration still reads the Case. */
+export const PartnerCaseEditorEntrySchema = z.object({
+  caseId: IdSchema, canContinue: z.boolean(),
+  editRecovery: PartnerCaseRuntimeRowSchema.shape.editRecovery,
+}).strict();
+export type PartnerCaseEditorEntry = z.infer<typeof PartnerCaseEditorEntrySchema>;
+
 export const PartnerCaseRuntimeResultSchema = z.object({
   cases: z.array(PartnerCaseRuntimeRowSchema),
   issues: z.array(z.object({
@@ -112,6 +119,7 @@ const PartnerWizardRecoveryIntentSchema = CaseDraftIntentSchema.omit({ deliverie
   }).strict()),
 }).strict();
 export const PartnerWizardRecoverySaveSchema = z.object({
+  reviewedCorrectionRequestId: IdSchema.optional(),
   schemaVersion: z.literal(1),
   expectedWizardRevision: z.number().int().nonnegative().safe(),
   editLease: PartnerDraftEditLeaseSchema,
@@ -119,6 +127,7 @@ export const PartnerWizardRecoverySaveSchema = z.object({
   intent: PartnerWizardRecoveryIntentSchema,
 }).strict();
 export const PartnerWizardRecoverySnapshotSchema = z.object({
+  reviewedCorrectionRequestId: IdSchema.optional(),
   schemaVersion: z.literal(1),
   wizardRevision: z.number().int().positive().safe(),
   step: PartnerWizardStepSchema,

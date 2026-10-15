@@ -34,6 +34,15 @@ export function formatPartnerMoneyTotal(amount: string | number | null | undefin
     : `${main} (${formatPartnerMoney(amount, currency, displayCurrency === 'IRR' ? 'IRT' : 'IRR')})`;
 }
 
+/** Convert display/input units exactly without changing the persisted agreement currency. */
+export function convertPartnerMoneyAmount(amount: string, currency: string, displayCurrency: 'IRR' | 'IRT'): string | null {
+  const parsed = exactDecimal(amount);
+  if (!parsed || !['IRR', 'IRT'].includes(currency)) return null;
+  return exactText(currency === displayCurrency ? parsed : currency === 'IRT'
+    ? { digits: parsed.digits * BigInt(10), scale: parsed.scale }
+    : { digits: parsed.digits, scale: parsed.scale + 1 });
+}
+
 /** Exact input normalization only; no financial calculation or rounding. */
 export function readPartnerDecimalInput(raw: string): string | null {
   const value = raw.trim().replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit)))

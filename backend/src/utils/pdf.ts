@@ -11,17 +11,17 @@ import type { PartnerProductPrintDetails } from './partnerProductPrint';
 export async function generateCustomerContractPdf(contract: ContractRuntime, input: Output, printDetails: PartnerProductPrintDetails[] = []): Promise<Buffer> {
   const content = await createCustomerOutputSnapshots(contract).content(input);
   const template = renderCustomerContractPrint(content, printDetails);
-  return generatePdfBufferFromHtml({ ...template, displayHeaderFooter: true,
-    footerTemplate: '<span></span>', margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
+  return generatePdfBufferFromHtml({ ...template, displayHeaderFooter: false,
+    footerTemplate: '<span></span>', margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
 }
 
 export async function generateCustomerContractPdfFile(contract: ContractRuntime, input: Output,
   fileName: string): Promise<string> {
   const content = await createCustomerOutputSnapshots(contract).content(input);
   const template = renderCustomerContractPrint(content);
-  return generatePdfFromHtml({ ...template, displayHeaderFooter: true,
+  return generatePdfFromHtml({ ...template, displayHeaderFooter: false,
     footerTemplate: '<span></span>', fileName, landscape: false, scale: 1, widthMm: 210, heightMm: 297,
-    margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
+    margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
 }
 
 /** File adapter for a customer output that was already schema/hash validated by
@@ -29,9 +29,9 @@ export async function generateCustomerContractPdfFile(contract: ContractRuntime,
  * new customer-output snapshot. */
 export async function writeValidatedCustomerContractPdfFile(input: Output, fileName: string, printDetails: PartnerProductPrintDetails[] = []): Promise<string> {
   const template = renderCustomerContractPrint(input, printDetails);
-  return generatePdfFromHtml({ ...template, displayHeaderFooter: true,
+  return generatePdfFromHtml({ ...template, displayHeaderFooter: false,
     footerTemplate: '<span></span>', fileName, landscape: false, scale: 1, widthMm: 210, heightMm: 297,
-    margin: { top: '34mm', right: '5mm', bottom: '8mm', left: '5mm' } });
+    margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
 }
 
 export interface GeneratePdfOptions {

@@ -125,4 +125,6 @@ export interface CrossWorkspaceDutySourceAdapter {
     database: CrossWorkspaceDutyDatabase,
     input: CrossWorkspaceDutySourceProjectionInput,
   ): Promise<CrossWorkspaceDutySourceProjection>;
+  /** Optional evidence reader scoped to one inbox read, never actor authority. */
+  createInboxProjectionReader?(): CrossWorkspaceDutySourceAdapter['loadInboxProjection'];
 }

@@ -12,7 +12,7 @@ import Link from 'next/link';
 import { workspaceBackDestination, WORKSPACE_HISTORY_KEY } from '@/lib/workspaceBackNavigation';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { FaArrowRight, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaTimes } from 'react-icons/fa';
+import { FaArrowRight, FaChevronDown, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaTimes } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { formatNumericInputText, normalizeDigits } from '@/lib/numberFormat';
 
@@ -317,13 +317,16 @@ export function ErpRialInput({
 
 export const ErpSelect = React.forwardRef<
   HTMLSelectElement,
-  React.SelectHTMLAttributes<HTMLSelectElement>
->(function ErpSelect({ className, children, ...props }, ref) {
-  return (
-    <select ref={ref} className={cx(erpFieldClassName, className)} {...props}>
-      {children}
-    </select>
-  );
+  React.SelectHTMLAttributes<HTMLSelectElement> & { insetArrow?: boolean }
+>(function ErpSelect({ className, children, insetArrow = false, ...props }, ref) {
+  const select = <select ref={ref} className={cx(erpFieldClassName, className, insetArrow && 'appearance-none pl-8')} {...props}>
+    {children}
+  </select>;
+  if (!insetArrow) return select;
+  return <span className="relative block min-w-0">
+    {select}
+    <FaChevronDown aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs sds-text-muted" />
+  </span>;
 });
 
 export function ErpCombobox({

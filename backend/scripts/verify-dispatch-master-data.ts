@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { currentManufactureYear } from '../src/services/companyVehicleEntry';
 import { spawn } from 'node:child_process';
 import { PrismaClient } from '@prisma/client';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../src/services/identitySessionService';
@@ -83,10 +84,10 @@ const main = async () => {
     assert.equal(profile.response.status, 200, JSON.stringify(profile.body));
     assert.equal((await master(tokens[fleetUser.id], `/internal-drivers/${ids.driver}/profile-status`, json('POST', { status: 'ACTIVE', reason: 'Profile readiness verified' }))).response.status, 200);
 
-    const vehicle = await master(tokens[fleetUser.id], '/company-vehicles', json('POST', { fleetCode: `FLEET-${suffix}`, vehicleType: 'TRUCK', plate: `77B${suffix.slice(-6)}`, effectiveFrom: '2026-01-01', reason: 'Fleet draft' }));
+    const vehicle = await master(tokens[fleetUser.id], '/company-vehicles', json('POST', { fleetCode: `FLEET-${suffix}`, vehicleType: 'TRUCK', manufactureYear: currentManufactureYear(), plate: `77 ب ${String(Date.now()).slice(-5, -2)} ایران ${String(Date.now()).slice(-2)}`, effectiveFrom: '2026-01-01', reason: 'Fleet draft' }));
     assert.equal(vehicle.response.status, 201, JSON.stringify(vehicle.body)); ids.vehicle = vehicle.body.data.id; assert.equal(vehicle.body.data.status, 'DRAFT');
     assert.equal((await master(tokens[fleetUser.id], `/company-vehicles/${ids.vehicle}/status`, json('POST', { status: 'ACTIVE', effectiveFrom: '2026-01-01', reason: 'Fleet activation' }))).response.status, 200);
-    const disposableVehicle = await master(tokens[fleetUser.id], '/company-vehicles', json('POST', { fleetCode: `TEMP-${suffix}`, vehicleType: 'TRUCK', plate: `66T${suffix.slice(-6)}`, effectiveFrom: '2026-01-01', reason: 'Lifecycle proof draft' }));
+    const disposableVehicle = await master(tokens[fleetUser.id], '/company-vehicles', json('POST', { fleetCode: `TEMP-${suffix}`, vehicleType: 'TRUCK', manufactureYear: currentManufactureYear(), plate: `66 ت ${String(Date.now()).slice(-5, -2)} ایران ${String(Date.now()).slice(-2)}`, effectiveFrom: '2026-01-01', reason: 'Lifecycle proof draft' }));
     assert.equal(disposableVehicle.response.status, 201); ids.disposableVehicle = disposableVehicle.body.data.id;
     assert.equal((await master(tokens[fleetUser.id], `/company-vehicles/${ids.disposableVehicle}/status`, json('POST', { status: 'ACTIVE', effectiveFrom: '2026-01-01', reason: 'Lifecycle proof activation' }))).response.status, 200);
     assert.equal((await master(tokens[fleetUser.id], `/company-vehicles/${ids.disposableVehicle}/status`, json('POST', { status: 'ARCHIVED', effectiveFrom: '2026-08-01', reason: 'Lifecycle proof archive' }))).response.status, 200);

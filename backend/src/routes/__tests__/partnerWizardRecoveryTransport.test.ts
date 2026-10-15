@@ -60,6 +60,7 @@ test('a saved technical draft without a wizard is absent, while a corrupt wizard
   const recovery = { kind: PARTNER_TECHNICAL_RECOVERY_KIND, version: 1, recoveryRevision: 16, updatedAt: Date.now(),
     draft: { ...draft, inputRevision: 16, editingValues: [{ entityId: 'row', field: 'quantity', text: '۳٫' }] },
     validatedSnapshots: [record], wizardDraft: { schemaVersion: 1, wizardRevision: 3, step: 'delivery', intent,
+      reviewedCorrectionRequestId: 'reviewed-request-1',
       updatedAt: '2026-10-11T10:00:00.000Z' } };
   const before = JSON.stringify(recovery);
   const { PartnerWizardRecoverySnapshotSchema } = await import('@sabalanerp/partner-sales-contracts');
@@ -76,7 +77,8 @@ test('a saved technical draft without a wizard is absent, while a corrupt wizard
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing address');
     const url = `http://127.0.0.1:${address.port}/cases/drafts/recovery-test/wizard`;
     const response = await fetch(url); assert.equal(response.status, 200);
-    const body = await response.json() as { data: { validatedDraft: unknown; step: string; intent: unknown } };
+    const body = await response.json() as { data: { validatedDraft: unknown; step: string; intent: unknown; reviewedCorrectionRequestId: string } };
+    assert.equal(body.data.reviewedCorrectionRequestId, 'reviewed-request-1');
     assert.deepEqual(body.data.validatedDraft, draft); assert.deepEqual(body.data.intent, intent);
     assert.equal(body.data.step, 'delivery'); assert.equal(JSON.stringify(recovery), before);
     ownerUserId = 'other-owner'; assert.equal((await fetch(url)).status, 404);

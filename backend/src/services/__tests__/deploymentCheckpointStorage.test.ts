@@ -17,6 +17,52 @@ const run = async () => {
     await fs.promises.writeFile(source, 'verified-checkpoint');
     const store = new FilesystemRemoteCheckpointStore(root);
     await store.assertAvailable(1);
+    const enumerationRoot = path.join(root, 'remote-enumeration');
+    await fs.promises.mkdir(path.join(enumerationRoot, 'empty-historical-directory'), { recursive: true });
+    const protectedArchive = path.join(enumerationRoot, 'protected.sabrec');
+    await fs.promises.writeFile(protectedArchive, 'retained-checkpoint');
+    const originalReaddir = fs.promises.readdir;
+    let enumerationAttempts = 0;
+    try {
+      (fs.promises as any).readdir = async (directory: string, options: any) => {
+        if (directory === enumerationRoot && ++enumerationAttempts === 1) {
+          throw Object.assign(new Error('transient SSHFS directory read'), { code: 'EIO' });
+        }
+        return originalReaddir(directory, options);
+      };
+      await new FilesystemRemoteCheckpointStore(enumerationRoot, { retryDelayMs: 1 }).assertAvailable(1);
+      assert.equal(enumerationAttempts, 2, 'a transient directory error must retry the complete listing');
+      assert.equal(await fs.promises.readFile(protectedArchive, 'utf8'), 'retained-checkpoint');
+      enumerationAttempts = 0;
+      (fs.promises as any).readdir = async (directory: string, options: any) => {
+        if (directory === enumerationRoot) {
+          enumerationAttempts += 1;
+          throw Object.assign(new Error('persistent SSHFS directory failure'), { code: 'EIO' });
+        }
+        return originalReaddir(directory, options);
+      };
+      await assert.rejects(
+        () => new FilesystemRemoteCheckpointStore(enumerationRoot, { retryDelayMs: 1 }).assertAvailable(1),
+        (error: any) => error.code === 'EIO',
+      );
+      assert.equal(enumerationAttempts, 4, 'persistent directory failure must abort after three retries');
+      enumerationAttempts = 0;
+      (fs.promises as any).readdir = async (directory: string, options: any) => {
+        if (directory === enumerationRoot) {
+          enumerationAttempts += 1;
+          throw Object.assign(new Error('directory permission denied'), { code: 'EACCES' });
+        }
+        return originalReaddir(directory, options);
+      };
+      await assert.rejects(
+        () => new FilesystemRemoteCheckpointStore(enumerationRoot, { retryDelayMs: 1 }).assertAvailable(1),
+        (error: any) => error.code === 'EACCES',
+      );
+      assert.equal(enumerationAttempts, 1, 'permission failures must not be hidden by storage retries');
+      assert.equal(await fs.promises.readFile(protectedArchive, 'utf8'), 'retained-checkpoint');
+    } finally {
+      fs.promises.readdir = originalReaddir;
+    }
     const partialPath = path.join(root, 'release-1', 'deployment-1.sabrec.uploading');
     await fs.promises.mkdir(path.dirname(partialPath), { recursive: true });
     await fs.promises.writeFile(partialPath, 'verified');

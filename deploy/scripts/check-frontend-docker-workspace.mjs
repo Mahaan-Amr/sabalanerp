@@ -11,8 +11,11 @@ assert.equal(
   'Frontend must keep using the repository-local canonical graph package.'
 );
 
-const frontendBuild = compose.match(
-  /frontend:\s*\n\s*build:\s*\n([\s\S]*?)\n\s*restart:/
+const frontendSection = compose.match(
+  /^  frontend:[ \t]*\r?\n((?:^ {4}[^\n]*(?:\n|$)|^[ \t]*\r?\n)*)/m
+)?.[1] ?? '';
+const frontendBuild = frontendSection.match(
+  /^    build:[ \t]*\r?\n((?:^ {6}[^\n]*(?:\n|$)|^[ \t]*\r?\n)*)/m
 )?.[1] ?? '';
 assert.match(
   frontendBuild,
@@ -47,8 +50,11 @@ assert.match(
 );
 assert.match(
   dockerfile,
-  /COPY --from=builder \/packages\/contract-product-graph \/packages\/contract-product-graph/,
+  /COPY --from=(?:builder|production-builder) \/packages\/contract-product-graph \/packages\/contract-product-graph/,
   'Runtime image must preserve the target of the frontend package symlink.'
 );
 
+if (/COPY --from=production-builder \/packages\/contract-product-graph/.test(dockerfile)) {
+  assert.match(dockerfile, /^FROM builder AS production-builder\r?$/m, 'Production builder must inherit the compiled canonical graph package.');
+}
 console.log('frontend Docker workspace dependency check passed');

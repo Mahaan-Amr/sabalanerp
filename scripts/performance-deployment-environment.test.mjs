@@ -14,11 +14,12 @@ assert.throws(() => validateReleaseEnvironment({ ...environment, JWT_SECRET: 'ne
 assert.throws(() => validateReleaseEnvironment({ ...environment, PERFORMANCE_RELEASE_COMMIT: "'; touch /tmp/injected; '" }));
 const captured = spawnSync(process.execPath, ['scripts/performance-deployment-environment.mjs', 'capture'], {
   input: JSON.stringify([{ Config: { Env: [...Object.entries(environment).map(([key,value]) => `${key}=${value}`),
-    'PERFORMANCE_PROMOTION_ATTESTATION_KEY_BASE64=private-secret', 'JWT_SECRET=another-secret'] } }]), encoding: 'utf8',
+    'PERFORMANCE_PROMOTION_ATTESTATION_KEY_BASE64=private-secret', 'JWT_SECRET=another-secret', `APP_COMMIT=${'d'.repeat(40)}`] } }]), encoding: 'utf8',
 });
 assert.equal(captured.status, 0, captured.stderr);
 assert.deepEqual(JSON.parse(captured.stdout), environment);
 assert.ok(!captured.stdout.includes('secret'));
+process.env.APP_COMMIT = 'd'.repeat(40);
 const directory = mkdtempSync(path.join(os.tmpdir(), 'sabalan-runtime-rollback-'));
 try {
   const session = path.join(directory, 'session.json');
@@ -26,9 +27,9 @@ try {
   const restored = spawnSync(process.execPath, ['scripts/performance-deployment-environment.mjs', 'restore', session], { encoding: 'utf8' });
   assert.equal(restored.status, 0, restored.stderr);
   const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/sh';
-  const result = spawnSync(bash, ['-c', `${restored.stdout}\nprintf '%s' "$PERFORMANCE_RELEASE_COMMIT:$PERFORMANCE_RELEASE_BACKEND_IMAGE"`], { encoding: 'utf8' });
+  const result = spawnSync(bash, ['-c', `${restored.stdout}\nprintf '%s' "$PERFORMANCE_RELEASE_COMMIT:$PERFORMANCE_RELEASE_BACKEND_IMAGE:$APP_COMMIT"`], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, `${environment.PERFORMANCE_RELEASE_COMMIT}:${environment.PERFORMANCE_RELEASE_BACKEND_IMAGE}`);
+  assert.equal(result.stdout, `${environment.PERFORMANCE_RELEASE_COMMIT}:${environment.PERFORMANCE_RELEASE_BACKEND_IMAGE}:${environment.PERFORMANCE_RELEASE_COMMIT}`);
   writeFileSync(session, JSON.stringify({ rollbackPerformanceEnvironment: { PERFORMANCE_RELEASE_COMMIT: 'invalid' } }));
   const rejected = spawnSync(process.execPath, ['scripts/performance-deployment-environment.mjs', 'restore', session], { encoding: 'utf8' });
   assert.notEqual(rejected.status, 0);

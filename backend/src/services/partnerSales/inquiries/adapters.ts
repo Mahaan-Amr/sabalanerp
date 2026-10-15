@@ -1,3 +1,5 @@
+import { readContractEditSession } from '../../contractEditSessionRead';
+import { readRecoveryForDisplay } from '../cases/recoveryDisplayRead';
 import { describeWholesaleAncillaryCharges } from './ancillaryCharges';
 import { multiply, sum } from '../reporting/money';
 import { calculatePartnerCanonicalWholesale, partnerQuotedQuantity, readWholesaleMandatory } from '../cases/canonicalWholesale';
@@ -173,36 +175,51 @@ export function presentSavedTechnicalConfiguration(input: {
  * private rates, graph context and pricing hashes never leave this adapter. */
 type SavedHistoryCache = {
   histories: Map<string, Promise<unknown[] | undefined>>;
+  submitted: Map<string, Promise<unknown[] | undefined>>;
   revisions: Map<string, Promise<TechnicalSavedSnapshot[] | undefined>>;
 };
-const savedHistoryCache = (): SavedHistoryCache => ({ histories: new Map(), revisions: new Map() });
+const savedHistoryCache = (): SavedHistoryCache => ({ histories: new Map(), submitted: new Map(), revisions: new Map() });
 
 /** Create inside one read operation or transaction, never at module scope. A
  * long-lived Prisma client does not itself delimit an operation or DB snapshot. */
-export function createSavedTechnicalConfigurationResolver(): PartnerInquiryDependencies['resolveConfiguration'] {
+export function createSavedTechnicalConfigurationResolver(options: { history?: 'ALL' | 'REFERENCED' } = {}): PartnerInquiryDependencies['resolveConfiguration'] {
   const transactions = new WeakMap<object, SavedHistoryCache>();
   return (tx, input) => {
     let cache = transactions.get(tx);
     if (!cache) { cache = savedHistoryCache(); transactions.set(tx, cache); }
-    return resolveSavedConfiguration(tx, input, cache);
+    return resolveSavedConfiguration(tx, input, cache, options.history ?? 'ALL');
   };
 }
 export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['resolveConfiguration'] = (tx, input) =>
   resolveSavedConfiguration(tx, input);
 
 async function resolveSavedConfiguration(tx: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[0],
-  input: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[1], cache = savedHistoryCache()):
+  input: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[1], cache = savedHistoryCache(), mode: 'ALL' | 'REFERENCED' = 'ALL'):
   ReturnType<PartnerInquiryDependencies['resolveConfiguration']> {
-  const key = JSON.stringify([input.actorId, input.reference.recoveryId]);
+  const recoveryKey = JSON.stringify([input.actorId, input.reference.recoveryId]);
+  // Workspace queues can span many historical revisions: materialize a journal
+  // once there. A single inquiry reads only its referenced candidates instead.
+  const key = mode === 'ALL' ? recoveryKey
+    : JSON.stringify([input.actorId, input.reference.recoveryId, input.reference.recoveryRevision]);
   let reading = cache.histories.get(key);
   if (!reading) {
     reading = (async () => {
-      const session = await tx.salesContractEditSession.findUnique({ where: { draftId: input.reference.recoveryId },
-        select: { ownerUserId: true, recovery: true } });
+      const session = mode === 'REFERENCED'
+        ? await readRecoveryForDisplay(tx, input.reference.recoveryId,
+          { kind: 'revision', revision: input.reference.recoveryRevision })
+        : await readContractEditSession(tx, input.reference.recoveryId);
       if (session && session.ownerUserId !== input.actorId) return undefined;
-      const history = session?.recovery && typeof session.recovery === 'object' && !Array.isArray(session.recovery)
-        ? (session.recovery as Record<string, unknown>).validatedSnapshots
-        : await readSubmittedTechnicalSnapshots(tx, input.actorId, input.reference.recoveryId);
+      let history: unknown;
+      if (session?.recovery && typeof session.recovery === 'object' && !Array.isArray(session.recovery)) {
+        history = (session.recovery as Record<string, unknown>).validatedSnapshots;
+      } else {
+        let submitted = cache.submitted.get(recoveryKey);
+        if (!submitted) {
+          submitted = readSubmittedTechnicalSnapshots(tx, input.actorId, input.reference.recoveryId);
+          cache.submitted.set(recoveryKey, submitted);
+        }
+        history = await submitted;
+      }
       if (!Array.isArray(history)) return undefined;
       return history;
     })();

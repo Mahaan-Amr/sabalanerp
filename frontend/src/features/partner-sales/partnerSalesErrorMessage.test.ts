@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { partnerError } from '@sabalanerp/partner-sales-contracts';
 import { getSalesOperationalErrorKind, getSalesOperationalErrorMessage } from '../sales/salesOperationalError';
 import { getPartnerSalesErrorMessage, normalizePartnerSalesOperationalError } from './partnerSalesErrorMessage';
+
+test('named component corrections survive the shared operational error presentation', () => {
+  const error = partnerError('CATALOG_COMPONENT_UNAVAILABLE', { kind: 'TOOL', title: 'پوساب پالیش پله', reason: 'RATE' });
+  assert.equal(getPartnerSalesErrorMessage(error), error.message);
+  const normalized = normalizePartnerSalesOperationalError(error);
+  assert.match(JSON.stringify(normalized), /پوساب پالیش پله/);
+});
 
 test('partner sales integrity errors stay actionable without a support deflection', () => {
   const message = getPartnerSalesErrorMessage({ code: 'INTEGRITY_CONFLICT' });

@@ -1,0 +1,150 @@
+import http from 'node:http';
+import {compileBrowserRoutingRegistry,selectBrowserRelease,nativeActionIdentity,browserRoutingIdentity} from './browser-release-routing.mjs';
+
+const excluded = new Set(['connection','proxy-connection','keep-alive','te','trailer','transfer-encoding','upgrade','proxy-authorization','proxy-authenticate']);
+function forwardedHeaders(headers) {
+  const blocked=new Set([...excluded,...String(headers.connection||'').toLowerCase().split(',').map(value=>value.trim())]);
+  return Object.fromEntries(Object.entries(headers).filter(([key])=>!blocked.has(key.toLowerCase())));
+}
+const error=(code,status=503)=>Object.assign(new Error(code),{code,status});
+
+/** Private UI transport primitive. Admission, persistent publication and live
+ * runtime proof belong to the deployment controller, not to client headers or
+ * this selector. There is intentionally no production CLI/listener here. */
+export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicationsByHost,
+  bodyLimit=10*1024*1024,totalBodyLimit=32*1024*1024,timeoutMs=90000}) {
+  if(typeof loadRegistry!=='function' || !Number.isSafeInteger(bodyLimit) || bodyLimit<1
+    || !Number.isSafeInteger(totalBodyLimit) || totalBodyLimit<bodyLimit
+    || !Number.isInteger(timeoutMs) || timeoutMs<1000 || timeoutMs>240000) throw error('BROWSER_PROXY_CONFIGURATION_INVALID');
+  const endpoints=new Map(),hosts=new Map();
+  for(const endpoint of slotEndpoints) {
+    if(!/^[a-z][a-z0-9_-]{7,95}$/.test(endpoint.slotId) || endpoints.has(endpoint.slotId)
+      || !/^(frontend|inquiry)(?:-[a-z0-9]+)*$/.test(endpoint.host)
+      || !Number.isInteger(endpoint.port) || endpoint.port<1024 || endpoint.port>65535
+      || !/^sha256:[a-f0-9]{64}$/.test(endpoint.image)) throw error('BROWSER_PROXY_ENDPOINT_INVALID');
+    endpoints.set(endpoint.slotId,Object.freeze({...endpoint}));
+  }
+  for(const [host,application] of Object.entries(applicationsByHost)) {
+    if(!/^[a-z0-9.-]+(?::[0-9]{1,5})?$/.test(host) || !['erp','inquiry'].includes(application)) throw error('BROWSER_PROXY_HOST_INVALID');
+    hosts.set(host,application);
+  }
+  let accepting=true,bodyBytes=0,generation=0,sequence=0,registryIdentity=null;
+  const active=new Set(),unresolved=new Set();
+  const respond=(response,status,code)=>{
+    if(response.destroyed)return;
+    if(response.headersSent){response.destroy();return;}
+    response.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store, private'});
+    response.end(JSON.stringify({success:false,error:code,message:code==='BROWSER_UPSTREAM_OUTCOME_UNKNOWN'
+      ? 'نتیجهٔ درخواست مشخص نیست؛ پیش از تکرار، وضعیت ثبت آن را بررسی کنید.'
+      : 'این نسخه فعلاً پاسخ‌گو نیست؛ نوشته‌های صفحه را نگه دارید و دوباره تلاش کنید.'}));
+  };
+  const server=http.createServer(async(request,response)=>{
+    const operation=++sequence;active.add(operation);
+    let forwarded=false,upstreamEnded=false,allocated=0;
+    try {
+      if(!accepting)throw error('BROWSER_PROXY_DRAINING');
+      const application=hosts.get(String(request.headers.host||'').toLowerCase());
+      if(!application)throw error('BROWSER_PROXY_HOST_UNAVAILABLE',421);
+      if(!request.url?.startsWith('/') || request.url.startsWith('//') || request.url.split('?')[0].includes('\\'))throw error('BROWSER_PROXY_PATH_INVALID',400);
+      const url=new URL(request.url,'http://browser.invalid');
+      // Next rewrites use case-insensitive route matching. Reject alternate
+      // separator/double-encoding interpretations before selecting a UI slot.
+      if(url.hash || /\\|%(?:2f|5c|25|00)/i.test(url.pathname))throw error('BROWSER_PROXY_PATH_INVALID',400);
+      let normalizedPath;
+      try { normalizedPath=decodeURIComponent(url.pathname); } catch {throw error('BROWSER_PROXY_PATH_INVALID',400);}
+      if(/[\u0000-\u001f\u007f]/.test(normalizedPath))throw error('BROWSER_PROXY_PATH_INVALID',400);
+      if(/^\/(api|socket\.io|files)(?:\/|$)/i.test(normalizedPath))throw error('BROWSER_PROXY_BUSINESS_PATH_FORBIDDEN',404);
+      const declared=request.headers['content-length'];
+      if(declared!==undefined && (typeof declared!=='string' || !/^\d+$/.test(declared)
+        || !Number.isSafeInteger(Number(declared))))throw error('BROWSER_PROXY_BODY_INVALID',400);
+      if(declared!==undefined && Number(declared)>bodyLimit) {
+        request.resume();throw error('BROWSER_PROXY_BODY_CAPACITY',413);
+      }
+      const chunks=[];
+      for await(const chunk of request) {
+        allocated+=chunk.length;bodyBytes+=chunk.length;
+        if(allocated>bodyLimit || bodyBytes>totalBodyLimit)throw error('BROWSER_PROXY_BODY_CAPACITY',413);
+        chunks.push(chunk);
+      }
+      if(request.aborted)throw error('BROWSER_PROXY_CLIENT_DISCONNECTED',400);
+      const body=Buffer.concat(chunks);
+      const method=request.method||'GET';
+      if(['GET','HEAD'].includes(method) && body.length)throw error('BROWSER_PROXY_BODY_INVALID',400);
+      let native={},actionIds=[];
+      const actionHeader=request.headers['next-action'];
+      if(actionHeader!==undefined) {
+        if(typeof actionHeader!=='string' || method!=='POST')throw error('BROWSER_ACTION_INVALID',400);
+        actionIds=[actionHeader];
+      } else if(method==='POST') {
+        if(application!=='inquiry' || request.headers['content-encoding'])throw error('BROWSER_PROXY_POST_UNPROVEN',400);
+        const contentType=request.headers['content-type'];
+        if(typeof contentType!=='string' || !/^(multipart\/form-data|application\/x-www-form-urlencoded)(?:;|$)/i.test(contentType))throw error('BROWSER_NATIVE_FORM_INVALID',400);
+        const form=await new Request('http://browser.invalid',{method:'POST',headers:{'content-type':contentType},body}).formData();
+        native=nativeActionIdentity(form);actionIds=native.actionIds;
+      } else if(!['GET','HEAD','OPTIONS'].includes(method))throw error('BROWSER_PROXY_METHOD_UNPROVEN',405);
+      const input=await loadRegistry();
+      const registry=compileBrowserRoutingRegistry(input);
+      if(registry.generation<generation)throw error('BROWSER_PROXY_GENERATION_REGRESSED');
+      const nextIdentity=browserRoutingIdentity(input);
+      if(registry.generation===generation && nextIdentity!==registryIdentity)throw error('BROWSER_PROXY_GENERATION_REUSED');
+      generation=registry.generation;
+      registryIdentity=nextIdentity;
+      const selection=selectBrowserRelease(registry,{application,
+        deploymentId:request.headers['x-deployment-id'],
+        assetDeploymentId:url.pathname.startsWith('/_next/static/') ? singleQuery(url,'dpl'):null,
+        assetPath:url.pathname.startsWith('/_next/static/') ? normalizedPath:null,
+        isRsc:request.headers.rsc==='1',actionIds,...native});
+      const endpoint=endpoints.get(selection.slotId);
+      if(!endpoint || endpoint.image!==selection.image
+        || !endpoint.host.startsWith(application==='erp' ? 'frontend':'inquiry'))throw error('BROWSER_PROXY_SLOT_IDENTITY_UNAVAILABLE');
+      const headers=forwardedHeaders(request.headers);
+      delete headers['x-forwarded-host'];
+      headers['x-forwarded-host']=request.headers.host;
+      if(body.length || !['GET','HEAD'].includes(method))headers['content-length']=String(body.length);
+      await new Promise((resolve,reject)=>{
+        let incomingResponse;
+        const disconnected=()=>incomingResponse?.resume();
+        const outgoing=http.request({hostname:endpoint.host,port:endpoint.port,path:request.url,method,headers},incoming=>{
+          incomingResponse=incoming;
+          const resultHeaders=forwardedHeaders(incoming.headers);
+          // UI documents/RSC/actions may contain current private data. Exact
+          // immutable static bytes retain their own upstream caching policy.
+          if(!url.pathname.startsWith('/_next/static/'))resultHeaders['cache-control']='no-store, private';
+          if(!response.destroyed)response.writeHead(incoming.statusCode||502,resultHeaders);
+          incoming.on('data',chunk=>{if(!response.destroyed && !response.write(chunk))incoming.pause();});
+          incoming.once('end',()=>{upstreamEnded=true;if(!response.destroyed)response.end();resolve();});
+          incoming.once('aborted',()=>reject(error('BROWSER_UPSTREAM_OUTCOME_UNKNOWN')));
+          incoming.once('error',reject);
+        });
+        response.on('drain',disconnected);
+        response.once('close',disconnected);
+        const deadline=setTimeout(()=>outgoing.destroy(error('BROWSER_UPSTREAM_OUTCOME_UNKNOWN')),timeoutMs);
+        outgoing.once('close',()=>{clearTimeout(deadline);response.off('drain',disconnected);response.off('close',disconnected);});
+        outgoing.once('error',reject);
+        outgoing.setTimeout(timeoutMs,()=>outgoing.destroy(error('BROWSER_UPSTREAM_OUTCOME_UNKNOWN')));
+        // Once forwarded, a disconnected browser cannot cancel ownership of an
+        // action. Consume its response and retain ambiguity if completion is
+        // not observed. Never retry a mutation on another slot.
+        forwarded=true;outgoing.end(body);
+      });
+    } catch(failure) {
+      if(forwarded && !upstreamEnded) {
+        unresolved.add(operation);
+        respond(response,502,'BROWSER_UPSTREAM_OUTCOME_UNKNOWN');
+      } else respond(response,failure.status||503,failure.code||'BROWSER_PROXY_UNAVAILABLE');
+    } finally {bodyBytes-=allocated;active.delete(operation);}
+  });
+  server.requestTimeout=timeoutMs;
+  server.headersTimeout=Math.min(30000,timeoutMs);
+  return Object.freeze({server,
+    beginDrain(){accepting=false;},
+    status(){return {accepting,active:active.size,unresolved:unresolved.size,bodyBytes,generation};},
+    assertDrained(){if(accepting || active.size || unresolved.size)throw error('BROWSER_PROXY_DRAIN_NOT_PROVEN');},
+  });
+}
+
+function singleQuery(url,key) {
+  const values=url.searchParams.getAll(key);
+  if(values.length>1)throw error('BROWSER_PROXY_QUERY_AMBIGUOUS',400);
+  return values[0]??null;
+}

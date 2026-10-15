@@ -17,8 +17,7 @@ export class HttpRequestLifecycle {
 
   readonly middleware: RequestHandler = (req, res, next) => {
     const pathname = req.originalUrl.split('?')[0];
-    if (pathname === '/api/health' || pathname === '/api/ready'
-      || pathname === '/api/system-recovery' || pathname.startsWith('/api/system-recovery/')) return next();
+    if (pathname === '/api/health' || pathname === '/api/ready') return next();
     const work: RequestWork = { responseDone: false, mutation: !['GET', 'HEAD', 'OPTIONS'].includes(req.method),
       writeAdmitted: this.canAdmitWrite(), writes: 0, handlers: new Set(), onFinish: new Set() };
     this.requests.set(req, work);
@@ -44,7 +43,7 @@ export class HttpRequestLifecycle {
     if (!work) return { run: async execute => execute(), cancel: () => {} };
     if (!(work.mutation && work.writeAdmitted) && !this.canAdmitWrite()) {
       throw Object.assign(new Error('سامانه در حال تهیهٔ پشتیبان است؛ کمی بعد دوباره تلاش کنید.'), {
-        code: 'RECOVERY_WRITE_ADMISSION_CLOSED', statusCode: 503, isOperational: true,
+        code: 'RECOVERY_WRITE_ADMISSION_CLOSED', status: 503, statusCode: 503, isOperational: true,
       });
     }
     const token = Symbol();
@@ -67,7 +66,15 @@ export class HttpRequestLifecycle {
 
   private invoke(handler: Function, receiver: unknown, parameters: unknown[], req: Request, res: Response, next: NextFunction) {
     const work = this.requests.get(req);
-    if (!work) return handler.apply(receiver, [...parameters, next]);
+    if (!work) {
+      // Health/readiness probes do not participate in retirement, but their
+      // Express 4 middleware still needs promise rejection forwarding.
+      try {
+        const result = handler.apply(receiver, [...parameters, next]);
+        return result !== null && result !== undefined && typeof result.then === 'function'
+          ? Promise.resolve(result).catch(next) : result;
+      } catch (error) { next(error); return; }
+    }
     const token = Symbol();
     work.handlers.add(token);
     let returned = false; let promise = false; let advanced = false;

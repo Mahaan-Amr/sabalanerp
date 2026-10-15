@@ -33,6 +33,7 @@ import {
   waitForActiveWrites,
 } from '../services/recoveryRuntime';
 import { publishNotificationEvent } from '../services/notificationService';
+import { runtimeHttpRequests } from '../services/httpRequestLifecycle';
 
 const router = express.Router();
 const uploadTemp = path.join(RECOVERY_ROOT, 'upload-temp');
@@ -188,12 +189,34 @@ router.post('/:id/download', async (req: AuthRequest, res) => {
     if (packageExpired(operation.expiresAt)) return res.status(410).json({ success: false, error: 'RECOVERY_PACKAGE_EXPIRED' });
     const filePath = recoveryPackagePath(operation.source, operation.storageName);
     if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, error: 'RECOVERY_PACKAGE_FILE_MISSING' });
-    res.download(filePath, operation.originalName || 'sabalan-recovery.sabrec', async (error) => {
-      if (error) return;
-      const downloadedAt = new Date();
-      await prisma.recoveryOperation.update({ where: { id: operation.id }, data: { downloadedAt } });
-      await audit(operation.id, req.user!.id, 'RECOVERY_BACKUP_DOWNLOADED', operation.encryptedSha256);
-    });
+    const receipt = runtimeHttpRequests.reserveWrite(req);
+    try {
+      res.download(filePath, operation.originalName || 'sabalan-recovery.sabrec', error => {
+        if (error) {
+          receipt.cancel();
+          if (!res.headersSent && !res.destroyed) {
+            res.status(500).json({ success: false, error: 'RECOVERY_DOWNLOAD_FAILED' });
+          }
+          return;
+        }
+        void receipt.run(() => prisma.$transaction(async tx => {
+          await tx.recoveryOperation.update({ where: { id: operation.id }, data: { downloadedAt: new Date() } });
+          await tx.recoveryAuditEvent.create({ data: {
+            operationId: operation.id,
+            actorId: req.user!.id,
+            eventType: 'RECOVERY_BACKUP_DOWNLOADED',
+            packageChecksum: operation.encryptedSha256,
+          } });
+        })).catch(error => {
+          const code = typeof error?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(error.code)
+            ? error.code : 'RECOVERY_DOWNLOAD_RECEIPT_FAILED';
+          console.error(JSON.stringify({ event: 'RECOVERY_DOWNLOAD_RECEIPT_FAILED', code }));
+        });
+      });
+    } catch (error) {
+      receipt.cancel();
+      throw error;
+    }
   } catch (error) {
     respondError(res, error);
   }

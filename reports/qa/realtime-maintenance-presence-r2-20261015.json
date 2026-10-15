@@ -1,0 +1,72 @@
+{
+  "completedAt": "2026-10-15T11:19:33.475138+00:00",
+  "result": {
+    "status": "MAINTENANCE_PRESENCE_VERIFIED",
+    "cases": [
+      "absent",
+      "malformed-file",
+      "directory",
+      "dangling-link",
+      "permission-denied"
+    ],
+    "moduleSha256": "36869e1e65e1bd642999abe5049cab4391b45df8a8cfb58f1bfe6b1447bc6259"
+  },
+  "tools": [
+    {
+      "containerId": "e29c13f3089e86b266bc432e13a896f827405b9fe3488bfccd118c92a4e46f44",
+      "kind": "guard",
+      "image": "sha256:74321462a183ee36bf341c47c63eededd40af936d1f950796f8a0aa5b159316d",
+      "exitCode": 0,
+      "logSha256": "33275e422bb7d75ac0f410b6137b99b0f67702598e1fe39ba272a2eca60fb3b5"
+    }
+  ],
+  "fixtureSha256": "0c38f46e4288c9372f3f9d18546b563eac94bd6dc794cd0fcf2639553c35fd6a",
+  "foreignStableServicesUnchanged": true,
+  "foreignBaseline": {
+    "01621c4a7aba9f62f8b8ccbd5cbe5f4c52c3e971072117a0e22406e2578b2064": {
+      "name": "/fintech-lab-dashboard-1",
+      "startedAt": "2026-10-15T11:07:46.817538072Z"
+    },
+    "298391b5faf52da3d316e44d9742c43d7baa5da95c0b49c8bf40f82850f5dad3": {
+      "name": "/fintech-lab-historical-1",
+      "startedAt": "2026-10-15T11:11:59.87562609Z"
+    },
+    "5aa0c3e4d8c66982ab960dea644c3041631521a49efbd8cc9f5160e82596a4b1": {
+      "name": "/fintech-lab-research-1",
+      "startedAt": "2026-10-15T10:04:50.716298627Z"
+    },
+    "7ff578d8609710eb50a413fc54095f08e4fae8aceea8e7d58517d6621a2cf4c2": {
+      "name": "/fintech-lab-maintenance-1",
+      "startedAt": "2026-10-14T09:54:58.616061597Z"
+    },
+    "307de7f4d2fd1f0664484b606f6a3c218a38f1f2e897e0471f407dbd4a369ad3": {
+      "name": "/fintech-lab-hypotheses-1",
+      "startedAt": "2026-10-07T12:29:26.303030956Z"
+    },
+    "237721bd06c3b2a1c460c7eeda0e946b72c1132e01493f3745358e718dbb15ab": {
+      "name": "/fintech-lab-edge-1",
+      "startedAt": "2026-10-06T06:58:23.656747893Z"
+    },
+    "f4cd79a0c17beb13b60cb2906e0766c4de8cd8f871f283f64c8ee9e0e0738bbc": {
+      "name": "/fintech-lab-profit-1",
+      "startedAt": "2026-10-06T06:15:29.919292259Z"
+    },
+    "d3ebc61179259aff418b8fdee977a8d58b973b400913a1f397c928643dff63c5": {
+      "name": "/fintech-lab-learning-1",
+      "startedAt": "2026-10-05T06:19:47.761673449Z"
+    },
+    "72d3186a209a316fb10f6b79b8db3f4f04d36a0a813034ef6935c99535f3a45e": {
+      "name": "/fintech-lab-multiasset-1",
+      "startedAt": "2026-10-05T06:19:47.642155868Z"
+    },
+    "b27a98607a597784f98f8cdaac5fc95a0c95fe09403bb0b70c3f71ba43bb25b6": {
+      "name": "/fintech-lab-collector-1",
+      "startedAt": "2026-10-05T06:19:47.780546151Z"
+    },
+    "0294f936de55e2a71a2255a58cecf5c06000cc00ad952b332ef08cf0466b9183": {
+      "name": "/fintech-lab-adaptive-1",
+      "startedAt": "2026-10-05T06:24:55.566277419Z"
+    }
+  },
+  "productionChanged": false
+}

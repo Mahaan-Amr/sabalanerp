@@ -3,6 +3,8 @@ import { stopBackgroundJobs } from './services/backgroundJobLifecycle';
 import { resolveRuntimeRole, startRuntime } from './services/runtimeStartup';
 import { assertRuntimeControlAdmission } from './services/runtimeControlOwnership';
 import { runtimeHttpRequests } from './services/httpRequestLifecycle';
+import { RealtimeDeliveryLifecycle } from './services/realtimeDeliveryLifecycle';
+import { deploymentMaintenanceActive } from './services/deploymentMaintenance';
 import { disconnectDatabase, prisma } from './lib/prisma';
 import { validateProductionEnvironment } from './services/productionEnvironment';
 import express from "express";
@@ -13,14 +15,10 @@ import "dotenv/config";
 import path from "path";
 import { readFile } from "fs/promises";
 import { createServer } from "http";
+import { performance } from 'node:perf_hooks';
 import { Server } from "socket.io";
 import { registerRealtimePublisher } from "./services/realtimePublisher";
 import { authorizeHrUser } from "./services/hrAuthorizationService";
-import {
-  parseCookies,
-  resolveAuthoritativeSession,
-  SESSION_COOKIE,
-} from "./services/identitySessionService";
 import { normalizeStructuredNumeralsMiddleware } from './middleware/normalizeStructuredNumerals';
 
 // Import routes
@@ -95,6 +93,8 @@ import { startHiringInvitationDeliveryPolling } from "./services/hrHiringDeliver
 import { startPersonnelErasureRecovery } from "./services/hrPersonnelErasureRecovery";
 import {
   getRecoveryRuntimeState,
+  RECOVERY_COORDINATION_DIR,
+  withRecoveryBackgroundWrite,
   initializeRecoveryRuntime,
   recoveryWriteGuard,
   waitForActiveWrites,
@@ -154,6 +154,17 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
     credentials: true,
   },
+});
+const realtimeDelivery = new RealtimeDeliveryLifecycle(prisma, () => io.sockets.sockets.values(), async userId => {
+  const authorization = await authorizeHrUser(prisma, userId, {
+    workspaceLevel: 'VIEW', feature: { code: 'PERSONNEL', level: 'VIEW' },
+  });
+  return authorization.allowed;
+}, () => runtimeRole === 'standalone' && !isShuttingDown && getRecoveryRuntimeState().mode === 'NORMAL'
+  && !deploymentMaintenanceActive(RECOVERY_COORDINATION_DIR), async work => {
+  const result = await withRecoveryBackgroundWrite(async () => ({ value: await work() }));
+  if (!result) throw new Error('REALTIME_DELIVERY_UNAVAILABLE');
+  return result.value;
 });
 
 const PORT = process.env.PORT || 5000;
@@ -344,11 +355,8 @@ app.get("/api/ready", async (req, res) => {
 io.use(async (socket, next) => {
   if (runtimeRole === 'candidate' || isShuttingDown) return next(new Error('Runtime is not accepting connections'));
   try {
-    const token = parseCookies(socket.handshake.headers.cookie)[SESSION_COOKIE];
-    if (!token) return next(new Error("Authentication required"));
-    const session = await resolveAuthoritativeSession(prisma, token);
-    if (!session) return next(new Error("Authentication required"));
-    socket.data.userId = session.userId;
+    await realtimeDelivery.authenticate(socket);
+    if (isShuttingDown) { socket.disconnect(true); return next(new Error('Runtime is draining')); }
     next();
   } catch {
     next(new Error("Authentication required"));
@@ -366,14 +374,7 @@ io.on("connection", (socket) => {
 });
 
 registerRealtimePublisher((event) => {
-  for (const socket of io.sockets.sockets.values()) {
-    void authorizeHrUser(prisma, socket.data.userId, {
-      workspaceLevel: "VIEW",
-      feature: { code: "PERSONNEL", level: "VIEW" },
-    }).then((authorization) => {
-      if (authorization.allowed) socket.emit(event, {});
-    }).catch(() => undefined);
-  }
+  void realtimeDelivery.invalidate(event).catch(() => console.error('REALTIME_INVALIDATION_FAILED'));
 });
 
 // Error handling middleware
@@ -400,9 +401,7 @@ startRuntime(runtimeRole, {
       startHiringInvitationDeliveryPolling(prisma);
       startPersonnelErasureRecovery(prisma);
       startSystemRecoveryMaintenance(prisma);
-      startNotificationOutboxDelivery(prisma, (userId, notification) => {
-        io.to(`user-${userId}`).emit("notification.created", notification);
-      });
+      startNotificationOutboxDelivery(prisma, (userId, notification) => realtimeDelivery.notify(userId, notification.id));
       startSupportTicketMaintenance(prisma);
       startDispatchBuyerSmsDelivery(prisma);
       stopHrVehicleAssignmentMaintenance = startHrVehicleAssignmentMaintenance(prisma);
@@ -435,6 +434,8 @@ const shutdown = async (signal: NodeJS.Signals) => {
   console.log(`Received ${signal}; draining connections before shutdown.`);
 
   try {
+    const deadline = performance.now() + 240_000;
+    const remaining = () => Math.max(0, deadline - performance.now());
     // Stop admission before closing sockets; callbacks already running must finish.
     await Promise.all([
       stopBackgroundJobs(240_000),
@@ -442,10 +443,16 @@ const shutdown = async (signal: NodeJS.Signals) => {
       waitForActiveWrites(240_000),
       runtimeHttpRequests.waitForDrain(240_000),
     ]);
+    await realtimeDelivery.stop(remaining());
     if (server.listening) {
-      await new Promise<void>((resolve, reject) => {
-        io.close((error) => (error ? reject(error) : resolve()));
-      });
+      let timeout: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([new Promise<void>((resolve, reject) => {
+          io.close((error) => (error ? reject(error) : resolve()));
+        }), new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('RUNTIME_SOCKET_DRAIN_TIMEOUT')), remaining());
+        })]);
+      } finally { if (timeout) clearTimeout(timeout); }
     }
     await disconnectDatabase();
     process.exit(0);

@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import {once} from 'node:events';
 import test from 'node:test';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
 import {createBrowserReleaseProxy} from '../../deploy/scripts/browser-release-proxy.mjs';
+import {BrowserOperationJournal} from '../../deploy/scripts/browser-operation-journal.mjs';
 
 const image=`sha256:${'a'.repeat(64)}`,action='b'.repeat(42);
 const now='2026-10-15T06:00:00.000Z',until='2026-10-16T06:00:00.000Z';
@@ -14,6 +18,11 @@ function registry(){return {format:'sabalan-browser-routing/v1',generation:1,
 const listen=async server=>{server.listen(0,'127.0.0.1');await once(server,'listening');return server.address().port;};
 const close=server=>new Promise((resolve,reject)=>{server.close(error=>error?reject(error):resolve());server.closeAllConnections();});
 const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};};
+const journal=async(directory,instanceId)=>{const journal=new BrowserOperationJournal({directory,instanceId});await journal.initialize();return journal;};
+async function removeFixture(directory){
+  assert.equal(path.dirname(path.resolve(directory)),path.resolve(os.tmpdir()));assert.ok(path.basename(directory).startsWith('sabalan-browser-journal-'));
+  await fs.rm(directory,{recursive:true,force:true});
+}
 const fetchUi=(port,path,options={})=>new Promise((resolve,reject)=>{
   const body=options.body===undefined?null:Buffer.from(options.body);
   const request=http.request({hostname:'127.0.0.1',port,path,method:options.method||'GET',signal:options.signal,
@@ -28,6 +37,7 @@ test('private browser transport preserves old requests, native bound bytes, priv
   const previousAgent=http.globalAgent;
   http.globalAgent=new http.Agent({lookup:(host,options,callback)=>callback(null,options?.all?[{address:'127.0.0.1',family:4}]:'127.0.0.1',4)});
   const servers=[],seen=[];
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'sabalan-browser-journal-'));
   let proxy;
   try {
     let input=registry();const endpoints=[];
@@ -42,6 +52,7 @@ test('private browser transport preserves old requests, native bound bytes, priv
       endpoints.push({slotId:build.slotId,host:build.application==='erp'?'frontend':'inquiry',port,image});
     }
     proxy=createBrowserReleaseProxy({loadRegistry:async()=>structuredClone(input),slotEndpoints:endpoints,
+      operationJournal:await journal(directory,'1'.repeat(64)),
       applicationsByHost:{'erp.test':'erp','inquiry.test':'inquiry'},bodyLimit:2048,totalBodyLimit:4096});
     servers.push(proxy.server);const port=await listen(proxy.server);
     assert.equal(await (await fetchUi(port,'/about')).text(),'erp_current');
@@ -76,14 +87,15 @@ test('private browser transport preserves old requests, native bound bytes, priv
     assert.equal((await fetchUi(port,'/about')).status,503,'an old publication cannot silently roll traffic back');
     proxy.beginDrain();assert.equal((await fetchUi(port,'/about')).status,503);
     assert.deepEqual(proxy.status(),{accepting:false,active:0,unresolved:0,bodyBytes:0,generation:2});
-    proxy.assertDrained();
-  } finally {proxy?.beginDrain();await Promise.all(servers.map(close));http.globalAgent.destroy();http.globalAgent=previousAgent;}
+    await proxy.assertDrained();
+  } finally {proxy?.beginDrain();await Promise.all(servers.map(close));http.globalAgent.destroy();http.globalAgent=previousAgent;await removeFixture(directory);}
 });
 
 test('a disconnected browser cannot retire or cancel an admitted action; upstream ambiguity is never retried or declared drained',{timeout:30000},async()=>{
   const previousAgent=http.globalAgent;
   http.globalAgent=new http.Agent({lookup:(host,options,callback)=>callback(null,options?.all?[{address:'127.0.0.1',family:4}]:'127.0.0.1',4)});
   const started=deferred(),complete=deferred();let effects=0,proxy;
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'sabalan-browser-journal-'));
   const upstream=http.createServer(async(req,res)=>{
     for await(const chunk of req)void chunk;
     started.resolve();await complete.promise;effects++;
@@ -92,21 +104,28 @@ test('a disconnected browser cannot retire or cancel an admitted action; upstrea
   try {
     const upstreamPort=await listen(upstream),input=registry();
     proxy=createBrowserReleaseProxy({loadRegistry:async()=>input,applicationsByHost:{'inquiry.test':'inquiry'},
+      operationJournal:await journal(directory,'1'.repeat(64)),
       slotEndpoints:input.builds.filter(build=>build.application==='inquiry').map(build=>({slotId:build.slotId,host:'inquiry',port:upstreamPort,image}))});
     const port=await listen(proxy.server),abort=new AbortController();
     const pending=fetchUi(port,'/action',{method:'POST',headers:{host:'inquiry.test','next-action':action,'x-deployment-id':'inquiry_current'},body:'one-call',signal:abort.signal}).catch(()=>null);
     await started.promise;abort.abort();await pending;
-    proxy.beginDrain();assert.equal(proxy.status().active,1);assert.throws(()=>proxy.assertDrained(),/DRAIN_NOT_PROVEN/);
+    proxy.beginDrain();assert.equal(proxy.status().active,1);await assert.rejects(()=>proxy.assertDrained(),/DRAIN_NOT_PROVEN/);
     complete.resolve();
     for(let attempts=0;proxy.status().active && attempts<100;attempts++)await new Promise(resolve=>setTimeout(resolve,10));
-    assert.equal(effects,1);proxy.assertDrained();
+    assert.equal(effects,1);await proxy.assertDrained();
     await close(proxy.server);
     const uncertain=createBrowserReleaseProxy({loadRegistry:async()=>input,applicationsByHost:{'inquiry.test':'inquiry'},
+      operationJournal:await journal(directory,'2'.repeat(64)),
       slotEndpoints:input.builds.filter(build=>build.application==='inquiry').map(build=>({slotId:build.slotId,host:'inquiry',port:upstreamPort,image}))});
     proxy=uncertain;const secondPort=await listen(uncertain.server);
     const result=await fetchUi(secondPort,'/ambiguous',{method:'POST',headers:{host:'inquiry.test','next-action':action,'x-deployment-id':'inquiry_current'},body:'one-ambiguous-call'});
     assert.equal(result.status,502);assert.equal((await result.json()).error,'BROWSER_UPSTREAM_OUTCOME_UNKNOWN');
     assert.equal(effects,2,'the ambiguous action is forwarded once');
-    uncertain.beginDrain();assert.equal(uncertain.status().unresolved,1);assert.throws(()=>uncertain.assertDrained(),/DRAIN_NOT_PROVEN/);
-  } finally {complete.resolve();if(proxy)await close(proxy.server);await close(upstream);http.globalAgent.destroy();http.globalAgent=previousAgent;}
+    uncertain.beginDrain();assert.equal(uncertain.status().unresolved,1);await assert.rejects(()=>uncertain.assertDrained(),/DRAIN_NOT_PROVEN/);
+    const restarted=createBrowserReleaseProxy({loadRegistry:async()=>input,applicationsByHost:{'inquiry.test':'inquiry'},
+      operationJournal:await journal(directory,'3'.repeat(64)),
+      slotEndpoints:input.builds.filter(build=>build.application==='inquiry').map(build=>({slotId:build.slotId,host:'inquiry',port:upstreamPort,image}))});
+    restarted.beginDrain();assert.equal(restarted.status().unresolved,0);
+    await assert.rejects(()=>restarted.assertDrained(),/DRAIN_NOT_PROVEN/,'new memory cannot hide the old durable ambiguous intent');
+  } finally {complete.resolve();if(proxy)await close(proxy.server);await close(upstream);http.globalAgent.destroy();http.globalAgent=previousAgent;await removeFixture(directory);}
 });

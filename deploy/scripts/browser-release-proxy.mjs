@@ -12,10 +12,12 @@ const error=(code,status=503)=>Object.assign(new Error(code),{code,status});
  * runtime proof belong to the deployment controller, not to client headers or
  * this selector. There is intentionally no production CLI/listener here. */
 export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicationsByHost,
-  bodyLimit=10*1024*1024,totalBodyLimit=32*1024*1024,timeoutMs=90000}) {
+  operationJournal,bodyLimit=10*1024*1024,totalBodyLimit=32*1024*1024,timeoutMs=90000}) {
   if(typeof loadRegistry!=='function' || !Number.isSafeInteger(bodyLimit) || bodyLimit<1
     || !Number.isSafeInteger(totalBodyLimit) || totalBodyLimit<bodyLimit
-    || !Number.isInteger(timeoutMs) || timeoutMs<1000 || timeoutMs>240000) throw error('BROWSER_PROXY_CONFIGURATION_INVALID');
+    || !Number.isInteger(timeoutMs) || timeoutMs<1000 || timeoutMs>240000
+    || !operationJournal || typeof operationJournal.begin!=='function' || typeof operationJournal.complete!=='function'
+    || typeof operationJournal.pending!=='function') throw error('BROWSER_PROXY_CONFIGURATION_INVALID');
   const endpoints=new Map(),hosts=new Map();
   for(const endpoint of slotEndpoints) {
     if(!/^[a-z][a-z0-9_-]{7,95}$/.test(endpoint.slotId) || endpoints.has(endpoint.slotId)
@@ -40,7 +42,7 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
   };
   const server=http.createServer(async(request,response)=>{
     const operation=++sequence;active.add(operation);
-    let forwarded=false,upstreamEnded=false,allocated=0;
+    let forwarded=false,journalCompleted=false,allocated=0,intentId;
     try {
       if(!accepting)throw error('BROWSER_PROXY_DRAINING');
       const application=hosts.get(String(request.headers.host||'').toLowerCase());
@@ -101,18 +103,27 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
       delete headers['x-forwarded-host'];
       headers['x-forwarded-host']=request.headers.host;
       if(body.length || !['GET','HEAD'].includes(method))headers['content-length']=String(body.length);
+      intentId=await operationJournal.begin({registryIdentity:nextIdentity,generation:registry.generation,
+        buildId:selection.buildId,slotId:selection.slotId,image:selection.image,
+        manifestSha256:registry.builds[selection.buildId].manifestSha256,method});
+      headers['x-sabalan-proxy-operation-id']=intentId;
       await new Promise((resolve,reject)=>{
         let incomingResponse;
         const disconnected=()=>incomingResponse?.resume();
         const outgoing=http.request({hostname:endpoint.host,port:endpoint.port,path:request.url,method,headers},incoming=>{
           incomingResponse=incoming;
           const resultHeaders=forwardedHeaders(incoming.headers);
+          resultHeaders['x-sabalan-proxy-operation-id']=intentId;
           // UI documents/RSC/actions may contain current private data. Exact
           // immutable static bytes retain their own upstream caching policy.
           if(!url.pathname.startsWith('/_next/static/'))resultHeaders['cache-control']='no-store, private';
           if(!response.destroyed)response.writeHead(incoming.statusCode||502,resultHeaders);
           incoming.on('data',chunk=>{if(!response.destroyed && !response.write(chunk))incoming.pause();});
-          incoming.once('end',()=>{upstreamEnded=true;if(!response.destroyed)response.end();resolve();});
+          incoming.once('end',()=>{
+            operationJournal.complete(intentId,'UPSTREAM_ENDED').then(()=>{
+              journalCompleted=true;if(!response.destroyed)response.end();resolve();
+            },reject);
+          });
           incoming.once('aborted',()=>reject(error('BROWSER_UPSTREAM_OUTCOME_UNKNOWN')));
           incoming.once('error',reject);
         });
@@ -128,7 +139,11 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
         forwarded=true;outgoing.end(body);
       });
     } catch(failure) {
-      if(forwarded && !upstreamEnded) {
+      if(intentId && !forwarded) {
+        try {await operationJournal.complete(intentId,'NOT_FORWARDED');journalCompleted=true;}
+        catch {unresolved.add(operation);}
+      }
+      if(forwarded && !journalCompleted) {
         unresolved.add(operation);
         respond(response,502,'BROWSER_UPSTREAM_OUTCOME_UNKNOWN');
       } else respond(response,failure.status||503,failure.code||'BROWSER_PROXY_UNAVAILABLE');
@@ -139,7 +154,10 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
   return Object.freeze({server,
     beginDrain(){accepting=false;},
     status(){return {accepting,active:active.size,unresolved:unresolved.size,bodyBytes,generation};},
-    assertDrained(){if(accepting || active.size || unresolved.size)throw error('BROWSER_PROXY_DRAIN_NOT_PROVEN');},
+    async assertDrained(){
+      if(accepting || active.size || unresolved.size || (await operationJournal.pending()).length
+        || accepting || active.size || unresolved.size)throw error('BROWSER_PROXY_DRAIN_NOT_PROVEN');
+    },
   });
 }
 

@@ -106,6 +106,7 @@ import {
 } from "./services/systemRecoveryLifecycle";
 import { startNotificationOutboxDelivery } from "./services/notificationService";
 import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
+import { startHrVehicleAssignmentMaintenance } from "./services/hrVehicleAssignmentWorker";
 import { startDispatchBuyerSmsDelivery } from "./services/dispatchBuyerSmsWorker";
 import { startContractCancellationNoticeDelivery } from "./services/contractCancellationNotice";
 import { startAccountingTaxpayerOutboxDelivery } from "./services/accountingTaxpayerOutboxWorker";
@@ -404,6 +405,7 @@ startRuntime(runtimeRole, {
       });
       startSupportTicketMaintenance(prisma);
       startDispatchBuyerSmsDelivery(prisma);
+      stopHrVehicleAssignmentMaintenance = startHrVehicleAssignmentMaintenance(prisma);
       startContractCancellationNoticeDelivery(prisma);
       startAccountingTaxpayerOutboxDelivery(prisma);
       startCrossWorkspaceDutyDeadlineMaintenance(prisma);
@@ -422,12 +424,14 @@ startRuntime(runtimeRole, {
   process.exitCode = 1;
 });
 
+let stopHrVehicleAssignmentMaintenance: (() => void) | undefined;
 let stopBiometricStagedCaptureMaintenance: (() => void) | undefined;
 
 const shutdown = async (signal: NodeJS.Signals) => {
   if (isShuttingDown) return;
   isShuttingDown = true;
   stopBiometricStagedCaptureMaintenance?.();
+  stopHrVehicleAssignmentMaintenance?.();
   console.log(`Received ${signal}; draining connections before shutdown.`);
 
   try {

@@ -1,3 +1,4 @@
+import { readContractEditSession } from './contractEditSessionRead';
 import { prisma } from '../lib/prisma';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -588,7 +589,7 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
   }
 
   async load(draftId: string): Promise<ContractEditSessionRecord | null> {
-    const record = await this.prisma.salesContractEditSession.findUnique({ where: { draftId } });
+    const record = await readContractEditSession(this.prisma, draftId);
     return record ? fromPrismaRecord(record) : null;
   }
 
@@ -618,7 +619,29 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
   ): Promise<ContractEditSessionRecord | null> {
     if (expected.draftId !== record.draftId) return null;
     return this.transaction(async tx => {
-      const updated = await tx.salesContractEditSession.updateMany({
+      // A Partner journal grows with immutable validated snapshots. Bind its
+      // JSON as text rather than expanding that document in Prisma's JSON AST.
+      // Keep the complete CAS predicate, including equal-millisecond content.
+      const partner = isProtectedContractRecovery(expected.recovery);
+      const retainedRecovery = partner && record.recovery === expected.recovery;
+      const expectedRecoveryJson = partner ? JSON.stringify(expected.recovery) : null;
+      const recoveryWrite = !partner || retainedRecovery ? Prisma.empty
+        : Prisma.sql`recovery = ${JSON.stringify(record.recovery)}::jsonb,`;
+      const updated = partner ? { count: await tx.$executeRaw`
+        UPDATE sales_contract_edit_sessions SET
+          "contractId" = ${record.contractId}, "ownerUserId" = ${record.ownerUserId},
+          purpose = ${record.purpose}, "browserSessionId" = ${record.browserSessionId},
+          "leaseToken" = ${record.leaseToken}, "schemaVersion" = ${record.schemaVersion},
+          "baseRevision" = ${record.baseRevision}, ${recoveryWrite}
+          "createdAt" = ${record.createdAt}, "updatedAt" = ${record.updatedAt}, "takenOverAt" = ${record.takenOverAt}
+        WHERE "draftId" = ${expected.draftId} AND "leaseToken" = ${expected.leaseToken}
+          AND "ownerUserId" = ${expected.ownerUserId} AND "browserSessionId" = ${expected.browserSessionId}
+          AND "contractId" IS NOT DISTINCT FROM ${expected.contractId} AND purpose = ${expected.purpose}
+          AND "baseRevision" = ${expected.baseRevision} AND "schemaVersion" = ${expected.schemaVersion}
+          AND "createdAt" = ${expected.createdAt} AND "updatedAt" = ${expected.updatedAt}
+          AND "takenOverAt" IS NOT DISTINCT FROM ${expected.takenOverAt}
+          AND recovery = ${expectedRecoveryJson}::jsonb
+      ` } : await tx.salesContractEditSession.updateMany({
         where: snapshotWhere(expected),
         data: {
           contractId: record.contractId,
@@ -637,7 +660,17 @@ export class PrismaContractEditSessionStore implements ContractEditSessionStore 
       if (updated.count !== 1) return null;
       // Read under the write lock so the acknowledgement belongs to this write,
       // not a later checkpoint or takeover that wins between two DB requests.
-      const current = await tx.salesContractEditSession.findUnique({ where: { draftId: record.draftId } });
+      if (retainedRecovery) {
+        // The complete JSON CAS above verified this exact retained document.
+        // Lease changes neither rewrite it nor transfer it back from PostgreSQL.
+        const current = await tx.salesContractEditSession.findUnique({ where: { draftId: record.draftId }, select: {
+          id: true, draftId: true, contractId: true, ownerUserId: true, purpose: true,
+          browserSessionId: true, leaseToken: true, schemaVersion: true, baseRevision: true,
+          createdAt: true, updatedAt: true, takenOverAt: true,
+        } });
+        return current ? fromPrismaRecord({ ...current, recovery: JSON.parse(expectedRecoveryJson!) }) : null;
+      }
+      const current = await readContractEditSession(tx, record.draftId);
       return current ? fromPrismaRecord(current) : null;
     });
   }

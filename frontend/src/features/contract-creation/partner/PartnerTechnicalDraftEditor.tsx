@@ -7,7 +7,7 @@ import {
   PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft,
   type Money, type PartnerTechnicalDraft, type PartnerTechnicalFamily, type PartnerTechnicalOperation, type PartnerTechnicalProduct,
 } from '@sabalanerp/partner-sales-contracts';
-import { parseCanonicalDecimal, parseStableIdentity, resolveStaircaseQuantity, type LongitudinalTechnicalCalculation, type LongitudinalTechnicalInput, type ProductOperationsTechnicalInput, type SlabTechnicalInput } from '@sabalanerp/contract-product-graph';
+import { parseCanonicalDecimal, parseStableIdentity, resolveStaircaseQuantity, stairMandatoryDefaults, type LongitudinalTechnicalCalculation, type LongitudinalTechnicalInput, type ProductOperationsTechnicalInput, type SlabTechnicalInput } from '@sabalanerp/contract-product-graph';
 import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpCombobox, ErpField, ErpInlineState, ErpInput, ErpPressable, ErpRialInput, ErpSelect } from '@/components/erp';
 import { formatDisplayNumber, formatPrice, formatSquareMeters } from '@/lib/numberFormat';
 import { PreparedProductSection } from '../components/product-modal-system/PreparedProductSection';
@@ -708,7 +708,7 @@ function OperationsEditor({ draft, row, calculation, catalog, onChange, intentOv
     }} />;
 }
 
-function StairEditor({ draft, row, product, mandatoryDefaults, onChange }: { draft: PartnerTechnicalDraft;
+function StairEditor({ draft, row, product, onChange }: { draft: PartnerTechnicalDraft;
   row: Extract<PartnerTechnicalDraft['rows'][number], { family: 'stair' }>; product: PartnerTechnicalProduct;
   mandatoryDefaults: { enabled: boolean; percentage: string };
   onChange: (draft: PartnerTechnicalDraft) => void }) {
@@ -735,11 +735,11 @@ function StairEditor({ draft, row, product, mandatoryDefaults, onChange }: { dra
   return <div className="space-y-4">
     <div className="flex flex-wrap items-center gap-4 border-y border-[var(--sds-border-subtle)] py-3">
       <label className="inline-flex items-center gap-2 text-xs font-semibold">
-        <CompactSwitch label="حکمی" checked={configuration.mandatoryEnabled ?? mandatoryDefaults.enabled}
+        <CompactSwitch label="حکمی" checked={configuration.mandatoryEnabled ?? stairMandatoryDefaults(configuration.part).enabled}
           onChange={mandatoryEnabled => updateRow({ mandatoryEnabled })} />حکمی
       </label>
       <ErpField label="درصد حکمی"><ErpInput inputMode="decimal"
-        value={configuration.mandatoryPercentage ?? mandatoryDefaults.percentage}
+        value={configuration.mandatoryPercentage ?? String(stairMandatoryDefaults(configuration.part).percentage)}
         onChange={event => { try { const percentage = parseCanonicalDecimal(event.target.value);
           if (Number(percentage) > 0 && Number(percentage) <= 100) updateRow({ mandatoryPercentage: percentage });
         } catch { /* Keep the last valid committed value. */ } }} /></ErpField>

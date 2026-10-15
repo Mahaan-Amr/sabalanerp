@@ -1,3 +1,5 @@
+import { partnerCommercialEditStatus } from './commercialEditStatus';
+import { readPartnerCaseRecovery } from './creationRecoveryMetadata';
 import { recordPartnerRecommitment } from './recommitment';
 import { assertContractOperationMinimums } from '../../operationMinimumGuard';
 import { recordPartnerCommercialCorrectionFinality } from './commercialCorrectionFinality';
@@ -169,16 +171,37 @@ export async function resetPartnerCommercialApprovals(tx: Tx, caseId: string, ac
 export async function readPartnerCommercialState(tx: Tx, caseId: string,
   response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED',
   presentation?: { complete: boolean; resubmittedWaiting: boolean }): Promise<PartnerCommercialState | undefined> {
+  return (await readPartnerCommercialDetails(tx, caseId, response, presentation))?.commercial;
+}
+
+/** Reuse only inside this authorized read transaction. The public state reader
+ * continues to load current evidence on every independent invocation. */
+export async function readPartnerCommercialDetails(tx: Tx, caseId: string,
+  response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED',
+  presentation?: { complete: boolean; resubmittedWaiting: boolean }) {
+  const value = await readPartnerCommercialDetailsInternal(tx, caseId, response, presentation);
+  return value && 'commercial' in value ? value : undefined;
+}
+
+export async function readPartnerCommercialEditingDetails(tx: Tx, caseId: string) {
+  const value = await readPartnerCommercialDetailsInternal(tx, caseId, undefined, undefined, true);
+  return value && 'editingStatus' in value ? value : undefined;
+}
+
+async function readPartnerCommercialDetailsInternal(tx: Tx, caseId: string,
+  response?: 'READY' | 'PARTIAL' | 'WAITING' | 'REJECTED' | 'EXPIRED',
+  presentation?: { complete: boolean; resubmittedWaiting: boolean }, navigationOnly = false) {
   const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: { customerContract: true, profile: { select: { userId: true } } } });
   const contract = root?.customerContract;
   if (!root || !contract || !isPartnerCommercialFlow(contract)) return undefined;
-  if (response === undefined) {
-    const recovery = await tx.salesContractEditSession.findFirst({ where: { ownerUserId: root.profile.userId, purpose: 'PARTNER_TECHNICAL',
-      OR: [{ contractId: contract.id }, { recovery: { path: ['partnerCaseId'], equals: caseId } }] }, select: { recovery: true } });
+  let recovery: { draftId: string; baseRevision: number; recovery: Prisma.JsonValue } | null = null;
+  let pricingPresentation: Awaited<ReturnType<typeof readCasePricingPresentation>>;
+  if (response === undefined && !navigationOnly) {
+    recovery = await readPartnerCaseRecovery(tx, { ownerUserId: root.profile.userId, contractId: contract.id, caseId });
     if (recovery) {
       const current = await readCasePricingPresentation(tx, { caseId, headRevision: root.headRevision,
         profileId: root.profileId, actorId: root.profile.userId, recovery: recovery.recovery });
-      response = current?.state; presentation = current;
+      response = current?.state; presentation = current; pricingPresentation = current;
     }
   }
   const final = contract.status === 'SIGNED';
@@ -187,10 +210,15 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
   const salesApproved = contract.salesApprovalRevision === contract.commercialRevision;
   const customerAccepted = contract.customerAcceptanceRevision === contract.commercialRevision;
   const expired = contract.status === 'EXPIRED' || partnerDeadlinePassed(contract);
+  if (navigationOnly) return { actorId: root.profile.userId,
+    editingStatus: partnerCommercialEditStatus({ salesApproved, customerAccepted, pricingAccepted: validPricing,
+      edited: contract.commercialRevision > 1, expired, cancelled: ['CANCELLED', 'VOIDED'].includes(root.state) }),
+    expiresAt: contract.commercialExpiresAt?.toISOString() ?? null,
+    firstFinancialRecordAt: contract.firstFinancialRecordAt?.toISOString() ?? null };
   const priceRejection = await tx.partnerCaseEvent.findFirst({ where: { caseId, caseRevision: root.headRevision, type: 'PARTNER_PRICING_REJECTED' }, select: { id: true } });
   const inquiry = validPricing ? 'ACCEPTED' : response === 'EXPIRED' || response === 'REJECTED'
     || root.pricingState === 'INCOMPLETE' || root.pricingState === 'EXPIRED' ? 'CORRECTION_REQUIRED' : priceRejection ? 'REJECTED' : 'WAITING';
-  return { version: 1, revision: contract.commercialRevision,
+  const commercial: PartnerCommercialState = { version: 1, revision: contract.commercialRevision,
     status: partnerCommercialStatus({ salesApproved, customerAccepted, pricingAccepted: validPricing,
       pricingReceived: presentation?.complete ?? response === 'READY', inquiryWaiting: presentation?.resubmittedWaiting,
       edited: contract.commercialRevision > 1,
@@ -198,6 +226,7 @@ export async function readPartnerCommercialState(tx: Tx, caseId: string,
       cancelled: ['CANCELLED', 'VOIDED'].includes(root.state) }), salesApproved, customerAccepted, inquiry,
     expiresAt: contract.commercialExpiresAt?.toISOString() ?? null,
     firstFinancialRecordAt: contract.firstFinancialRecordAt?.toISOString() ?? null };
+  return { commercial, actorId: root.profile.userId, recovery, pricingPresentation };
 }
 
 export async function assertPartnerFinancialFinality(tx: Tx, caseId: string) {

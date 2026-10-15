@@ -1,10 +1,13 @@
 'use client';
+
+import { readPartnerEditorHydration } from './partnerEditorHydration';
 import { assertSuccessfulSalesResult } from '@/features/sales/salesOperationalError';
 
 import { createPartnerVisibleRefresh } from './partnerVisibleRefresh';
 import { partnerWizardPersistenceKey } from './partnerWizardPersistence';
 import { PartnerConfirmationStep } from './PartnerConfirmationStep';
 import { partnerInquiryReadRows } from './partnerInquiryReadResults';
+import { readPartnerCasePricingRows } from './partnerCasePricingRead';
 import { PartnerContractCancellation } from '@/features/partner-sales/cases/PartnerContractCancellation';
 
 import { partnerRetailPresentation, presentPartnerRetailRows } from './partnerRetailPresentation';
@@ -16,7 +19,7 @@ import {
   PartnerApprovalMatchSetSchema, PartnerWholesaleQuoteSchema, PartnerWizardRecoverySnapshotSchema, PartnerWizardStepSchema, PartnerTechnicalSaveReceiptSchema,
   PartnerTechnicalCatalogPageSchema, CustomerPaymentPlanSchema, partnerInputHash as canonicalHash, partnerError, partnerTrackingCode, previewPartnerTechnicalDraft,
   type PartnerCaseView, type PartnerCommand, type PartnerCommandPort, type PartnerApprovalMatchSet, type PartnerWholesaleQuote,
-  type PartnerCreationContext, type PartnerTechnicalSaveReceipt,
+  type PartnerCreationContext, type PartnerTechnicalSaveReceipt, type PartnerTechnicalSavedView, type PartnerWizardRecoverySnapshot,
   type PartnerTechnicalCatalogPage, type PartnerTechnicalDraft, type PartnerTechnicalOperation, type PartnerTechnicalProduct, type PartnerTechnicalServiceCatalogItem,
   type CustomerPaymentPlan,
 } from '@sabalanerp/partner-sales-contracts';
@@ -48,10 +51,11 @@ import { enterPartnerWizard, partnerDeliveryPlanIssue, preservePartnerDeliveries
   isExplicitPartnerCreationEntry, partnerProductEditPath, shouldOfferPartnerDraftChoice,
   shouldStartFreshPartnerCreation, partnerCreationRouteIdentity, partnerCreationRequestedInquiry, partnerSaleReturnStep,
   partnerCaseResultStep, partnerNumberedRecoveryRevision, partnerWizardNeedsRetailQuote, partnerCaseHasIntegrityError, partnerCaseReviewMessage,
-  latestMatchingPartnerInquiryRow, partnerCasePricingInquiryIds, partnerFinalizedContractPath, partnerRequoteInquiryId } from './partnerWizardEntry';
+  latestMatchingPartnerInquiryRow, partnerFinalizedContractPath, partnerRequoteInquiryId } from './partnerWizardEntry';
 import { partnerMoneyText, partnerRetailIntentRows, partnerRetailDraftRows, refreshPartnerInquiryRow,
   partnerRetailDiscountFromPercent, partnerPaymentAllocation, partnerRetailSummary, remainingPartnerAmount, stepPartnerDeliveryAmount, newPartnerPaymentInstallment } from './partnerRetail';
-import { coalescePartnerCatalogReads, loadPartnerCreationCatalog } from './partnerCreationCatalogLoader';
+import { loadPartnerCreationCatalog } from './partnerCreationCatalogLoader';
+import { createPartnerCreationReadScope } from './partnerCreationReadScope';
 import { OperationMinimumContext } from '../components/product-modal-system/OperationMinimumContext';
 import { partnerOperationMinimumState, partnerOperationMinimumFailure } from './partnerOperationMinimum';
 import { PartnerTechnicalDraftEditor } from './PartnerTechnicalDraftEditor';
@@ -212,6 +216,9 @@ const caseCommands: PartnerCommandPort = { async execute(input) {
   }
 } };
 
+const wizardWriteKey = (actorId: string, draft: Pick<PartnerWizardDraft, 'step' | 'intent'>, reviewedId?: string) =>
+    JSON.stringify([actorId, reviewedId ?? null, partnerWizardPersistenceKey(draft)]);
+
 function readStored<T>(key: string): T | null {
   try { const value = window.localStorage.getItem(key); return value ? JSON.parse(value) as T : null; }
   catch { return null; }
@@ -226,12 +233,28 @@ function readSessionEntry(actorId: string, recoveryId: string): EntrySnapshot | 
 
 export function PartnerCreationRuntime({ ordinary, mode = 'sale' }: { ordinary: React.ReactNode; mode?: 'sale' | 'inquiry' }) {
   const searchParams = useSearchParams();
-  return <PartnerCreationRuntimeSession key={partnerCreationRouteIdentity(searchParams, mode)} ordinary={ordinary} mode={mode} />;
+  const routeIdentity = partnerCreationRouteIdentity(searchParams, mode);
+  const session = useRef({ routeIdentity, key: 0 });
+  const readScope = useRef(createPartnerCreationReadScope()).current;
+  const preparedRoute = useRef<string | null>(null);
+  if (session.current.routeIdentity !== routeIdentity) {
+    session.current = { routeIdentity, key: preparedRoute.current === routeIdentity ? session.current.key : session.current.key + 1 };
+    preparedRoute.current = null;
+  }
+  // Only an acknowledged save may retain a prepared wizard across its own
+  // URL update. Explicit edits and navigation to other resources still remount.
+  const retainPreparedCase = (caseId: string) => {
+    preparedRoute.current = partnerCreationRouteIdentity(new URLSearchParams({ caseId }), mode);
+  };
+  return <PartnerCreationRuntimeSession key={session.current.key} ordinary={ordinary} mode={mode}
+    retainPreparedCase={retainPreparedCase} readScope={readScope} />;
 }
 
-function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.ReactNode; mode: 'sale' | 'inquiry' }) {
+function PartnerCreationRuntimeSession({ ordinary, mode, retainPreparedCase, readScope }: { ordinary: React.ReactNode; mode: 'sale' | 'inquiry';
+  retainPreparedCase: (caseId: string) => void; readScope: ReturnType<typeof createPartnerCreationReadScope> }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const entrySearchParams = useRef(searchParams).current;
   const freshInquiryRef = useRef(shouldStartFreshPartnerCreation(searchParams));
   const [context, setContext] = useState<PartnerCreationContext | null>(null);
 
@@ -239,6 +262,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const [cartTotal, setCartTotal] = useState<{ key: string; total?: ReturnType<typeof MoneySchema.parse>; failed?: boolean } | null>(null);
   const [runtime, setRuntime] = useState<PersistedRuntime | null>(null);
   const runtimeRef = useRef<PersistedRuntime | null>(null);
+  const correctionRequestId = useRef<string | undefined>(undefined);
   const finalizationFlight = useRef(false);
   runtimeRef.current = runtime;
   const [catalogState, setCatalogState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -293,13 +317,26 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const [correctionReason, setCorrectionReason] = useState<string | null>(null);
   const [correctionDueAt, setCorrectionDueAt] = useState<string | null>(null);
   const [editingCase, setEditingCase] = useState<PartnerCaseView | null>(null);
-  const readCommercialState = useCallback(async (view: PartnerCaseView) => {
-    const response = await api.post('/partner/cases/query-v2', { caseId: view.owner.caseId });
+  const hydratedCase = useRef<ReturnType<typeof PartnerCaseRuntimeResultSchema.parse>['cases'][number] | null>(null);
+  const customerContractIds = useRef(new Map<string, string>());
+  const readCaseResponse = useCallback(async (caseId: string, expected?: PartnerCaseView['owner']) => {
+    if (!catalogActorId) throw partnerError('FORBIDDEN');
+    const response = await readScope.read(catalogActorId, `case:${caseId}:${expected ? `${expected.revision}:${expected.integrityHash}` : 'current'}`,
+      () => api.post('/partner/cases/query-v2', { caseId }));
     const parsed = PartnerCaseRuntimeResultSchema.parse(response.data?.data);
-    const row = parsed.cases.find(candidate => candidate.view.owner.caseId === view.owner.caseId &&
-      candidate.view.owner.revision === view.owner.revision && candidate.view.owner.integrityHash === view.owner.integrityHash);
-    return row?.commercial;
-  }, []);
+    const row = parsed.cases.find(candidate => candidate.view.owner.caseId === caseId);
+    if (row) { hydratedCase.current = row; if (row.customerContractId) customerContractIds.current.set(caseId, row.customerContractId); }
+    return response;
+  }, [catalogActorId, readScope]);
+  const readCommercialState = useCallback(async (view: PartnerCaseView) => {
+    const retained = hydratedCase.current;
+    if (retained?.view.owner.caseId === view.owner.caseId && retained.view.owner.revision === view.owner.revision &&
+        retained.view.owner.integrityHash === view.owner.integrityHash) return retained.commercial;
+    const response = await readCaseResponse(view.owner.caseId, view.owner);
+    const parsed = PartnerCaseRuntimeResultSchema.parse(response.data?.data);
+    return parsed.cases.find(candidate => candidate.view.owner.caseId === view.owner.caseId &&
+      candidate.view.owner.revision === view.owner.revision && candidate.view.owner.integrityHash === view.owner.integrityHash)?.commercial;
+  }, [readCaseResponse]);
   const [paymentModal, setPaymentModal] = useState<{
     installment: PartnerPaymentInstallment;
     isNew: boolean;
@@ -310,6 +347,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const editingHydrationFlight = useRef(false);
   const runtimeWizardHydrationFlight = useRef(false);
   const wizardServerRevision = useRef(0);
+  const acknowledgedWizardWrite = useRef<string | null>(null);
   const wizardSaveFlight = useRef<Promise<boolean> | null>(null);
   const wizardSavePending = useRef<PartnerWizardDraft | null>(null);
   const autoTitledDrafts = useRef(new Set<string>());
@@ -348,7 +386,10 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   const retailPricesReady = mode === 'inquiry' || (technicalDraft.rows.every(row => Number(row.retailUnitPrice?.amount) > 0)
     && (technicalDraft.dependents ?? []).every(row => row.kind !== 'layer' || row.source?.kind !== 'new-material'
       || Number(row.source.retailUnitPrice?.amount) > 0) && partnerServiceDraftReady(technicalDraft));
-  const technicalActionReady = !recoveryBlocked && catalogState === 'ready' && catalogDependenciesState === 'ready' && retailPricesReady && canSubmitPartnerTechnicalAction({ mode, pending, technicalReady,
+  // A cached catalog may finish before the numbered Case is hydrated. Never
+  // let that interval send an existing-contract edit through the new-sale path.
+  const editingCaseReady = !searchParams.get('caseId') || editingCase?.owner.caseId === searchParams.get('caseId');
+  const technicalActionReady = editingCaseReady && !recoveryBlocked && catalogState === 'ready' && catalogDependenciesState === 'ready' && retailPricesReady && canSubmitPartnerTechnicalAction({ mode, pending, technicalReady,
     contractConfigurationReady, quickDimensionsValid, hasDraftAccess: Boolean(draftAccess) });
 
   const reacquireDraftAccess = useCallback(async (access: Access): Promise<Access | null> => {
@@ -382,9 +423,10 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     technicalPreview.value.dependents.every(row => row.calculation.ok &&
       (!('operations' in row) || !row.operations || row.operations.ok));
   useEffect(() => {
-    if (!cartTotalRecoveryId || !cartTotalComplete || saleStep !== 'products' || wizard) return;
+    if (!cartTotalRecoveryId || !cartTotalComplete || saleStep !== 'products' || wizard || pending || technicalCommitFlight.current) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
+      if (technicalCommitFlight.current) return;
       void (async () => {
         const draftHash = await canonicalHash(technicalDraft);
         const response = await api.post('/partner/cases/customer-total-preview', {
@@ -400,12 +442,13 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     return () => { cancelled = true; window.clearTimeout(timer); };
   // Full draft identity includes dimensions, operations and customer rates; stale results are never displayed.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cartTotalKey, cartTotalComplete, saleStep, Boolean(wizard)]);
+  }, [cartTotalKey, cartTotalComplete, saleStep, Boolean(wizard), pending]);
 
   useEffect(() => {
     if (!wizardRecoveryId || !runtime) return;
     window.localStorage.setItem(wizardDraftKey(runtime.actorId, wizard.intent.recoveryId), JSON.stringify({
       savedAt: Date.now(), serverRevision: wizardServerRevision.current, draft: wizard,
+      reviewedCorrectionRequestId: correctionRequestId.current,
     }));
   }, [runtime, wizard, wizardRecoveryId]);
 
@@ -415,7 +458,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     if (!runtime || next.intent.recoveryId !== runtime.saved.recoveryId) return false;
     wizardSavePending.current = next;
     if (!wizardSaveFlight.current) {
-      wizardSaveFlight.current = (async () => {
+      wizardSaveFlight.current = Promise.resolve().then(async () => {
         try {
           while (wizardSavePending.current) {
             if (finalizationFlight.current) { wizardSavePending.current = null; break; }
@@ -424,6 +467,8 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
             const active = runtimeRef.current;
             if (!active || active.actorId !== runtime.actorId ||
                 active.access.recoveryId !== current.intent.recoveryId) throw new Error('Recovery changed');
+            const writeKey = wizardWriteKey(active.actorId, current, correctionRequestId.current);
+            if (acknowledgedWizardWrite.current === writeKey) continue;
             const refreshed = await reacquireRuntime(active);
             if (!refreshed) throw new Error('Recovery lease unavailable');
             const response = await api.put(`/partner/cases/drafts/${encodeURIComponent(current.intent.recoveryId)}/wizard`, {
@@ -432,10 +477,12 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
                 browserSessionId: refreshed.access.browserSessionId, leaseToken: refreshed.access.leaseToken,
                 baseRevision: refreshed.access.baseRevision },
               step: current.step, intent: current.intent,
+              reviewedCorrectionRequestId: correctionRequestId.current,
             });
             const parsed = PartnerWizardRecoverySnapshotSchema.safeParse((response.data as { data?: unknown })?.data);
             if (!parsed.success) throw new Error('Invalid wizard recovery');
             wizardServerRevision.current = parsed.data.wizardRevision;
+            acknowledgedWizardWrite.current = wizardWriteKey(active.actorId, parsed.data, parsed.data.reviewedCorrectionRequestId);
             const key = wizardDraftKey(runtime.actorId, current.intent.recoveryId);
             const local = readStored<{ savedAt: number; serverRevision?: number; draft: PartnerWizardDraft }>(key);
             if (local?.draft.intent.recoveryId === current.intent.recoveryId) {
@@ -448,7 +495,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           setError('ذخیره خودکار پیش‌نویس قرارداد انجام نشد؛ اطلاعات این صفحه حفظ شده است.');
           return false;
         } finally { wizardSaveFlight.current = null; }
-      })();
+      });
     }
     return wizardSaveFlight.current;
   }, [reacquireRuntime]);
@@ -466,6 +513,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
 
   useEffect(() => {
     let active = true;
+    const searchParams = entrySearchParams;
     const requestedCaseId = searchParams.get('caseId');
     void readPartnerCreationContext(() => api.get(requestedCaseId
       ? `/partner/cases/creation-context?caseId=${encodeURIComponent(requestedCaseId)}`
@@ -587,9 +635,13 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         }
       }
       setContext(parsed.data);
-    }).catch(() => active && setError('تشخیص مسیر ایجاد قرارداد انجام نشد. دوباره تلاش کنید.'));
+    }).catch(error => {
+      if (!active) return;
+      if ([401, 403].includes(error?.response?.status) || error?.code === 'FORBIDDEN') readScope.clear();
+      setError('تشخیص مسیر ایجاد قرارداد انجام نشد. دوباره تلاش کنید.');
+    });
     return () => { active = false; };
-  }, [mode, router, searchParams]);
+  }, [entrySearchParams, mode, router, readScope]);
 
   const openSharedCustomerCreation = (selectedCustomerId?: string) => {
     const params = new URLSearchParams({ returnTo: 'contract', step: '2', partnerContract: '1' });
@@ -643,23 +695,29 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     finally { setPending(false); }
   };
 
-  // Reads must never be shared across authenticated creators, even in StrictMode.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- actor identity scopes the in-flight map
+  // Actor-scoped display cache survives only internal creator-step remounts.
   const previousCatalogActor = useRef<string | null>(null);
-  const catalogReader = useMemo(() => coalescePartnerCatalogReads((kind, source) => {
-    if (!catalogActorId) throw partnerError('FORBIDDEN');
-    return readCatalogPages(kind, source);
-  }, { ttlMs: 60_000, onFresh: setCatalogFreshAt }), [catalogActorId]);
-  useEffect(() => () => catalogReader.clear(), [catalogReader]);
+  const catalogReader = useMemo(() => {
+    if (!catalogActorId) return null;
+    const shared = readScope.catalog(catalogActorId, readCatalogPages);
+    const reader = async (...args: Parameters<typeof shared>) => {
+      const pages = await shared(...args); setCatalogFreshAt(shared.receivedAt()); return pages;
+    };
+    return Object.assign(reader, { clear: () => { readScope.clear(); shared.clear(); } });
+  }, [catalogActorId, readScope]);
+  // Existing Case presentation uses the validated retained products. Enumerate
+  // the selectable live catalog only when entering the product editor.
+  const loadProductCatalog = !searchParams.get('caseId') || searchParams.get('configure') === '1' || catalog.length > 0;
   useEffect(() => {
-    if (!catalogActorId || !catalogWritable) { catalogReader.clear(); setCatalog([]); setOperations([]); setServiceCatalog([]); setCatalogFreshAt(null); return; }
+    if (!catalogActorId || !catalogWritable || !catalogReader) { if (context?.kind) readScope.clear(); setCatalog([]); setOperations([]); setServiceCatalog([]); setCatalogFreshAt(null); return; }
     if (previousCatalogActor.current !== catalogActorId) {
       previousCatalogActor.current = catalogActorId; setCatalog([]); setOperations([]); setServiceCatalog([]); setCatalogFreshAt(null);
     }
+    if (catalogAttempt > 0) catalogReader.clear();
     let active = true;
-    setCatalogState('loading');
+    setCatalogState(loadProductCatalog ? 'loading' : 'ready');
     setCatalogDependenciesState('loading');
-    let productsPublished = false;
+    let productsPublished = !loadProductCatalog;
     // Publish each useful resource as it arrives. Keep profile-locking requests
     // sequential, and do not allow a technical save before dependencies arrive.
     void loadPartnerCreationCatalog(catalogReader, products => {
@@ -670,16 +728,16 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       if (!active) return;
       setOperations(operations); setServiceCatalog(services);
       setCatalogDependenciesState('ready');
-    }, () => active).catch(failure => {
+    }, () => active, { products: loadProductCatalog }).catch(failure => {
       if (!active) return;
-      if (failure?.code === 'FORBIDDEN') { catalogReader.clear(); setCatalog([]); setOperations([]); setServiceCatalog([]);
+      if (failure?.code === 'FORBIDDEN') { catalogReader?.clear(); setCatalog([]); setOperations([]); setServiceCatalog([]);
         setRetainedCatalog(null); setWizard(null); setRuntime(null); setContext(null); setCatalogFreshAt(null); }
 
       if (!productsPublished) setCatalogState('error');
       setCatalogDependenciesState('error');
     });
     return () => { active = false; };
-  }, [catalogActorId, catalogWritable, catalogAttempt, catalogReader]);
+  }, [catalogActorId, catalogWritable, catalogAttempt, catalogReader, readScope, context?.kind, loadProductCatalog]);
 
   const openDraftRecovery = useCallback(async (partner: PartnerContext, takeover: boolean, fresh = false) => {
     if (recoveryStarting.current || (runtime && !fresh)) return;
@@ -874,7 +932,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     }).catch(() => setError('بازیابی استعلام ذخیره‌شده انجام نشد.')).finally(() => { inquiryHydrationFlight.current = false; });
   }, [context, contractDate, customerId, draftAccess, mode, persistRuntime, projectId, recoveryRevision, runtime, searchParams]);
 
-  const readApprovalMatches = useCallback(async (saved: PartnerTechnicalSaveReceipt, caseId?: string) => {
+  const readApprovalMatches = useCallback(async (saved: Pick<PartnerTechnicalSaveReceipt, 'recoveryId' | 'recoveryRevision'>, caseId?: string) => {
     const response = await api.post('/partner/cases/approval-matches', { schemaVersion: 1,
       recoveryId: saved.recoveryId, recoveryRevision: saved.recoveryRevision, ...(caseId ? { caseId } : {}) });
     const parsed = PartnerApprovalMatchSetSchema.safeParse((response.data as { data?: unknown })?.data);
@@ -883,23 +941,23 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     return parsed.data;
   }, []);
 
-  const readCasePricingRows = useCallback(async (saved: PartnerTechnicalSaveReceipt, caseId: string) => {
-    const matches = await readApprovalMatches(saved, caseId);
-    // Case revisions also record payments/deliveries. They are not inquiry IDs.
-    const response = await api.get(`/partner/cases/creation-context?caseId=${encodeURIComponent(caseId)}`);
-    const available = PartnerCreationContextSchema.safeParse((response.data as { data?: unknown })?.data);
-    if (!available.success || available.data.kind !== 'PARTNER') throw partnerError('INTEGRITY_CONFLICT');
-    const inquiryIds = partnerCasePricingInquiryIds(saved.recoveryId, available.data.inquiryIds, matches.rows, true);
-    const inquiries = await Promise.all(inquiryIds.map(inquiryId => inquiryPorts.queries.query({
+  const readCasePricingEvidence = useCallback((saved: Pick<PartnerTechnicalSaveReceipt, 'recoveryId' | 'recoveryRevision'>,
+    caseId: string) => readPartnerCasePricingRows({ saved,
+    matches: () => readApprovalMatches(saved, caseId),
+    publishedIds: async () => {
+      // Case revisions also record payments/deliveries. They are not inquiry IDs.
+      const response = await api.get(`/partner/cases/creation-context?caseId=${encodeURIComponent(caseId)}&purpose=CASE_PRICING`);
+      const available = PartnerCreationContextSchema.safeParse((response.data as { data?: unknown })?.data);
+      if (!available.success || available.data.kind !== 'PARTNER') throw partnerError('INTEGRITY_CONFLICT');
+      return available.data.inquiryIds;
+    },
+    rows: async inquiryIds => partnerInquiryReadRows(await Promise.all(inquiryIds.map(inquiryId => inquiryPorts.queries.query({
       schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId,
-    })));
-    const currentRows = partnerInquiryReadRows(inquiries);
-    const retained = matches.rows.filter(match => !currentRows.some(row =>
-      row.configurationRef.recoveryId === match.configurationRef.recoveryId &&
-      row.configurationRef.recoveryRevision === match.configurationRef.recoveryRevision &&
-      row.configurationRef.productRowId === match.configurationRef.productRowId && !row.successor));
-    return [...currentRows, ...retained];
-  }, [readApprovalMatches]);
+    })))),
+  }), [readApprovalMatches]);
+
+  const readCasePricingRows = useCallback(async (saved: PartnerTechnicalSaveReceipt, caseId: string) =>
+    (await readCasePricingEvidence(saved, caseId)).rows, [readCasePricingEvidence]);
 
   const startInquiry = async (partner: PartnerContext, selectedProductRowIds?: ReadonlySet<string>, skipInquiry = false) => {
     if (mode === 'sale') {
@@ -933,6 +991,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         return;
       }
       setRecoveryRevision(saved.value.recoveryRevision);
+      const { replayed: _replayed, ...savedView } = saved.value;
       const subjects = saved.value.pricingSubjects ?? saved.value.rows.map(row => ({ configurationRef: row.configurationRef,
         role: 'PRIMARY' as const }));
       const matches = mode === 'sale' && !skipInquiry ? await readApprovalMatches(saved.value) : null;
@@ -955,7 +1014,9 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         freshInquiryRef.current = false;
         let prepared: PartnerWizardDraft | undefined;
         await enterWizard({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows: [] }, value,
-          undefined, undefined, draft => { prepared = draft; });
+          undefined, undefined, draft => { prepared = draft; }, false, undefined,
+          { actorId: partner.actorId, caseId: editingCase?.owner.caseId, validated: savedView,
+            deferPresentation: Boolean(editingCase) });
         if (editingCase && prepared && submission) {
           const quoted = applyPartnerRetailQuote(prepared, await requestPartnerRetailQuote(prepared, partner.actorId));
           const pricedSummary = partnerRetailSummary(quoted.rows, quoted.intent.retailDiscount, quoted.serviceRows);
@@ -971,14 +1032,25 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
           if (result.phase !== 'created' || !result.case) { setError(result.message ?? 'ذخیره و استعلام محصولات انجام نشد.'); return; }
           setEditingCase(result.case);
           const rows = await readCasePricingRows(saved.value, result.case.owner.caseId);
+          let acknowledged: PartnerWizardDraft | undefined;
           await enterWizard({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows }, value,
             result.case.owner.caseId, undefined, current => {
               // Send the inquiry first, then repair the preserved commercial plans.
               // Never resize deliveries or installments without the seller's choice.
-              setWizard({ ...current, intent: { ...current.intent, deliveries: nextIntent.deliveries,
+              acknowledged = { ...current, intent: { ...current.intent, deliveries: nextIntent.deliveries,
                 customerPaymentPlan: nextIntent.customerPaymentPlan, preparationCompleted: false },
-                step: current.rows.length || current.materialInquiryRows?.length ? 'pricing' : 'delivery' });
-            });
+                step: current.rows.length || current.materialInquiryRows?.length ? 'pricing' : 'delivery' };
+            }, false, undefined, { actorId: partner.actorId, caseId: result.case.owner.caseId,
+              validated: savedView, inquiryRows: rows, deferPresentation: true });
+          if (!acknowledged) return;
+          // The acknowledged commercial version and its resume checkpoint must
+          // agree before exposing a result that the seller can immediately reload.
+          // A checkpoint failure keeps its operational error and the local draft;
+          // the already-successful Case command is never sent again here.
+          await persistWizardServer(acknowledged);
+          setResumeTechnicalDraft(null);
+          setWizard(acknowledged);
+          retainPreparedCase(result.case.owner.caseId);
           router.replace(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(result.case.owner.caseId)}`);
         }
         return;
@@ -1060,22 +1132,31 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
 
   const enterWizard = async (inquiry: PartnerInquiryView, runtimeOverride?: PersistedRuntime,
     caseIdOverride?: string, caseNumberOverride?: string, onReady?: (draft: PartnerWizardDraft) => void, reviewedCorrection = false,
-    retainedTechnicalDraft?: PartnerTechnicalDraft) => {
+    retainedTechnicalDraft?: PartnerTechnicalDraft, prepared?: {
+      actorId: string; caseId?: string; validated: PartnerTechnicalSavedView;
+      inquiryRows?: readonly PartnerInquiryRow[]; checkpoint?: PartnerWizardRecoverySnapshot | null; deferPresentation?: boolean;
+    }) => {
     const currentRuntime = runtimeOverride ?? runtime;
     if (!currentRuntime || !context || context.kind !== 'PARTNER') return;
+    const caseId = caseIdOverride ?? editingCase?.owner.caseId;
+    if (prepared && (prepared.actorId !== currentRuntime.actorId || prepared.caseId !== caseId ||
+        prepared.validated.recoveryId !== currentRuntime.saved.recoveryId ||
+        prepared.validated.recoveryRevision !== currentRuntime.saved.recoveryRevision ||
+        prepared.validated.graphHash !== currentRuntime.saved.graphHash)) throw partnerError('INTEGRITY_CONFLICT');
     const publishWizard = (next: PartnerWizardDraft) => {
       const opened = next;
+      if (prepared?.deferPresentation) { onReady?.(opened); return; }
       setResumeTechnicalDraft(retainedTechnicalDraft ?? null);
       setWizard(opened); onReady?.(opened);
     };
     setError(null);
-    const refreshed = await reacquireRuntime(currentRuntime);
+    const refreshed = prepared ? currentRuntime : await reacquireRuntime(currentRuntime);
     if (!refreshed) return;
-    const validated = await ports.saved.readSaved({ ...refreshed.access, recoveryRevision: refreshed.saved.recoveryRevision });
+    const validated = prepared ? { ok: true as const, value: prepared.validated }
+      : await ports.saved.readSaved({ ...refreshed.access, recoveryRevision: refreshed.saved.recoveryRevision });
     if (!validated.ok) { setError(validated.error.message); return; }
     let inquiryRows: readonly PartnerInquiryRow[] = inquiry.rows;
-    const caseId = caseIdOverride ?? editingCase?.owner.caseId;
-    try { inquiryRows = caseId ? await readCasePricingRows(refreshed.saved, caseId) : inquiry.rows; }
+    try { inquiryRows = prepared?.inquiryRows ?? (caseId ? await readCasePricingRows(refreshed.saved, caseId) : inquiry.rows); }
     catch (caught) { setError(partnerCaseHasIntegrityError(caught)
       ? partnerCaseReviewMessage(caseNumberOverride ?? editingCase?.caseNumber ?? caseId ?? '')
       : 'نتیجه استعلام این پرونده دریافت نشد؛ صفحه را دوباره باز کنید.'); return; }
@@ -1109,7 +1190,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       } });
     if (!draft) { setError('همه ردیف‌های فنی باید پاسخ معتبر و جاری داشته باشند.'); return; }
     draft.step = openingNumberedResult ? 'pricing' : 'products';
-    const restoreIntent = (intent: typeof draft.intent, step: PartnerWizardStep) => {
+    const restoreIntent = (intent: typeof draft.intent, step: PartnerWizardStep, checkpointCorrectionId?: string) => {
       if (intent.recoveryRevision !== draft.intent.recoveryRevision || intent.graphHash !== draft.intent.graphHash ||
           intent.rows.length !== draft.rows.length || intent.rows.some(row => !draft.rows.some(current => current.productRowId === row.productRowId)) ||
           (intent.serviceRows?.length ?? 0) !== (draft.serviceRows?.length ?? 0) ||
@@ -1120,7 +1201,9 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         retailUnitPrice: intent.rows.find(item => item.productRowId === row.productRowId)!.retailUnitPrice }));
       // Presentation may reflect newer inquiry states. Opening a saved wizard
       // must retain its commercial intent, including historical approval references.
-      publishWizard({ ...draft, step: partnerSaleReturnStep(searchParams) === 'pricing' ? 'pricing' : partnerCaseResultStep(step, openingNumberedResult, reviewedCorrection), rows, intent });
+      const continuingCorrection = Boolean(correctionRequestId.current && checkpointCorrectionId === correctionRequestId.current);
+      publishWizard({ ...draft, step: partnerSaleReturnStep(searchParams) === 'pricing' ? 'pricing'
+        : partnerCaseResultStep(step, openingNumberedResult, reviewedCorrection, continuingCorrection), rows, intent });
       return true;
     };
     const restoreAcrossProductEdit = (intent: typeof draft.intent) => {
@@ -1147,24 +1230,26 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       publishWizard({ ...draft, step: partnerCaseResultStep('products', openingNumberedResult), rows, intent: { ...nextIntent,
         customerPaymentPlan: nextIntent.customerPaymentPlan } });
     };
-    const stored = readStored<{ savedAt: number; serverRevision?: number; draft: PartnerWizardDraft }>(
+    const stored = readStored<{ savedAt: number; serverRevision?: number; draft: PartnerWizardDraft; reviewedCorrectionRequestId?: string }>(
       wizardDraftKey(currentRuntime.actorId, draft.intent.recoveryId));
     const storedIntent = stored && Date.now() - stored.savedAt <= 7 * 24 * 60 * 60 * 1000
       ? CaseDraftIntentSchema.safeParse(stored.draft?.intent) : undefined;
     try {
-      const response = await api.get(`/partner/cases/drafts/${encodeURIComponent(draft.intent.recoveryId)}/wizard`);
-      const savedWizard = PartnerWizardRecoverySnapshotSchema.safeParse((response.data as { data?: unknown })?.data);
+      const checkpoint = prepared?.checkpoint !== undefined ? prepared.checkpoint
+        : (await api.get(`/partner/cases/drafts/${encodeURIComponent(draft.intent.recoveryId)}/wizard`)).data?.data;
+      const savedWizard = PartnerWizardRecoverySnapshotSchema.safeParse(checkpoint);
       if (savedWizard.success) {
         wizardServerRevision.current = savedWizard.data.wizardRevision;
+        acknowledgedWizardWrite.current = wizardWriteKey(currentRuntime.actorId, savedWizard.data, savedWizard.data.reviewedCorrectionRequestId);
         if (stored && storedIntent?.success && shouldPreferLocalPartnerWizard(stored.serverRevision, savedWizard.data.wizardRevision)) {
           const sameLocalRows = stored.draft.rows.length === draft.rows.length &&
             stored.draft.rows.every(row => draft.rows.some(current => current.productRowId === row.productRowId));
           if (sameLocalRows && storedIntent.data.recoveryRevision === draft.intent.recoveryRevision &&
-              storedIntent.data.graphHash === draft.intent.graphHash && restoreIntent(storedIntent.data, stored.draft.step)) return;
+              storedIntent.data.graphHash === draft.intent.graphHash && restoreIntent(storedIntent.data, stored.draft.step, stored.reviewedCorrectionRequestId)) return;
           restoreAcrossProductEdit(storedIntent.data);
           return;
         }
-        if (restoreIntent(savedWizard.data.intent, savedWizard.data.step)) return;
+        if (restoreIntent(savedWizard.data.intent, savedWizard.data.step, savedWizard.data.reviewedCorrectionRequestId)) return;
         restoreAcrossProductEdit(savedWizard.data.intent);
         return;
       }
@@ -1176,7 +1261,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       stored!.draft.rows.every(row => draft.rows.some(current => current.productRowId === row.productRowId));
     if (sameRows && storedIntent?.success && storedIntent.data.recoveryRevision === draft.intent.recoveryRevision &&
         storedIntent.data.graphHash === draft.intent.graphHash) {
-      if (restoreIntent(storedIntent.data, stored!.draft.step)) return;
+      if (restoreIntent(storedIntent.data, stored!.draft.step, stored!.reviewedCorrectionRequestId)) return;
     }
     if (storedIntent?.success) { restoreAcrossProductEdit(storedIntent.data); return; }
     wizardServerRevision.current = 0;
@@ -1189,45 +1274,60 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
   useEffect(() => {
     const caseId = searchParams.get('caseId');
     if (!caseId || context?.kind !== 'PARTNER' || !draftAccess || recoveryRevision < 1 || wizard ||
+        editingCase?.owner.caseId === caseId || technicalCommitFlight.current ||
         editingHydrationFlight.current) return;
     editingHydrationFlight.current = true;
     let caseReference = caseId;
     void (async () => {
       let retainedLocalWizard: PartnerWizardDraft | undefined;
-      const [caseResponse, wizardResponse] = await Promise.all([
-        api.post('/partner/cases/query-v2', { caseId }),
-        api.get(`/partner/cases/drafts/${encodeURIComponent(draftAccess.recoveryId)}/wizard`).catch(caught => {
-          // Older successful initial inquiries can lack only the wizard checkpoint.
-          // Use this actor's retained intent, then verify its immutable technical
-          // revision below. Never fall back on permission or integrity failures.
-          if ((caught as { response?: { status?: number } })?.response?.status !== 404) throw caught;
-          const local = readStored<{ savedAt: number; draft: PartnerWizardDraft }>(
-            wizardDraftKey(context.actorId, draftAccess.recoveryId));
-          if (!local || !Number.isFinite(local.savedAt) || Date.now() - local.savedAt > 7 * 24 * 60 * 60 * 1000) throw caught;
-          retainedLocalWizard = local.draft;
-          return { data: { data: undefined } };
-        }),
-      ]);
+      const { caseResponse, checkpoint: { checkpoint, durableCheckpoint }, evidence: { savedResult, pricing } } = await readPartnerEditorHydration({
+        readCase: () => readCaseResponse(caseId),
+        readCheckpoint: async () => {
+          const wizardResponse = await api.get(`/partner/cases/drafts/${encodeURIComponent(draftAccess.recoveryId)}/wizard`).catch(caught => {
+            // Older successful initial inquiries can lack only the wizard checkpoint.
+            // Use this actor's retained intent, then verify its immutable technical
+            // revision below. Never fall back on permission or integrity failures.
+            if ((caught as { response?: { status?: number } })?.response?.status !== 404) throw caught;
+            const local = readStored<{ savedAt: number; draft: PartnerWizardDraft }>(
+              wizardDraftKey(context.actorId, draftAccess.recoveryId));
+            if (!local || !Number.isFinite(local.savedAt) || Date.now() - local.savedAt > 7 * 24 * 60 * 60 * 1000) throw caught;
+            retainedLocalWizard = local.draft;
+            return { data: { data: undefined } };
+          });
+          const recoveredWizard = PartnerWizardRecoverySnapshotSchema.safeParse((wizardResponse.data as { data?: unknown })?.data);
+          const localIntent = CaseDraftIntentSchema.safeParse(retainedLocalWizard?.intent);
+          const localStep = PartnerWizardStepSchema.safeParse(retainedLocalWizard?.step);
+          const checkpoint = recoveredWizard.success ? recoveredWizard.data
+            : retainedLocalWizard && localIntent.success && localStep.success ? { intent: localIntent.data,
+              step: localStep.data, validatedDraft: undefined } : undefined;
+          if (!checkpoint || checkpoint.intent.recoveryId !== draftAccess.recoveryId) throw partnerError('INTEGRITY_CONFLICT');
+          return { checkpoint, durableCheckpoint: recoveredWizard.success ? recoveredWizard.data : null };
+        },
+        readEvidence: async ({ checkpoint }) => {
+          const validatedRevision = partnerNumberedRecoveryRevision(checkpoint.intent,
+            draftAccess.recoveryId, recoveryRevision);
+          // These fresh authorized reads are independent. Publish nothing until
+          // the owning saved read and every pricing/integrity gate have succeeded.
+          const reference = { recoveryId: draftAccess.recoveryId, recoveryRevision: validatedRevision };
+          const [savedResult, pricing] = await Promise.all([
+            ports.saved.readSaved({ ...draftAccess, recoveryRevision: validatedRevision }),
+            searchParams.get('configure') === '1'
+              ? readApprovalMatches(reference, caseId).then(matches => ({ matches, rows: [] }))
+              : readCasePricingEvidence(reference, caseId),
+          ]);
+          if (!savedResult.ok) throw savedResult.error;
+          if (savedResult.value.graphHash !== checkpoint.intent.graphHash) throw partnerError('INTEGRITY_CONFLICT');
+          return { savedResult, pricing };
+        },
+      });
       const cases = PartnerCaseRuntimeResultSchema.safeParse((caseResponse.data as { data?: unknown })?.data);
-      const recoveredWizard = PartnerWizardRecoverySnapshotSchema.safeParse((wizardResponse.data as { data?: unknown })?.data);
-      const localIntent = CaseDraftIntentSchema.safeParse(retainedLocalWizard?.intent);
-      const localStep = PartnerWizardStepSchema.safeParse(retainedLocalWizard?.step);
-      const checkpoint = recoveredWizard.success ? recoveredWizard.data
-        : retainedLocalWizard && localIntent.success && localStep.success ? { intent: localIntent.data,
-          step: localStep.data, validatedDraft: undefined } : undefined;
       if (cases.success && cases.data.cases.length === 1 && cases.data.cases[0].view.owner.caseId === caseId) {
         caseReference = cases.data.cases[0].view.caseNumber;
       }
-      if (!cases.success || cases.data.cases.length !== 1 || !checkpoint ||
-          cases.data.cases[0].view.owner.caseId !== caseId ||
-          checkpoint.intent.recoveryId !== draftAccess.recoveryId) throw partnerError('INTEGRITY_CONFLICT');
-      const validatedRevision = partnerNumberedRecoveryRevision(checkpoint.intent,
-        draftAccess.recoveryId, recoveryRevision);
-      const savedResult = await ports.saved.readSaved({ ...draftAccess, recoveryRevision: validatedRevision });
-      if (!savedResult.ok) throw savedResult.error;
-      if (savedResult.value.graphHash !== checkpoint.intent.graphHash) throw partnerError('INTEGRITY_CONFLICT');
+      if (!cases.success || cases.data.cases.length !== 1 ||
+          cases.data.cases[0].view.owner.caseId !== caseId) throw partnerError('INTEGRITY_CONFLICT');
       const savedReceipt: PartnerTechnicalSaveReceipt = { ...savedResult.value, replayed: true };
-      const matches = await readApprovalMatches(savedReceipt, caseId);
+      const matches = pricing.matches;
       const inquiryId = matches.rows[0]?.approvedRowBinding?.inquiryId ?? `${draftAccess.recoveryId}-edit`;
       const configuredRows: PartnerConfiguredInquiryRows = (savedResult.value.pricingSubjects ?? savedResult.value.rows.map(row => ({
         configurationRef: row.configurationRef, role: 'PRIMARY' as const,
@@ -1243,6 +1343,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         ...(checkpoint.intent.projectId ? { projectId: checkpoint.intent.projectId } : {}) };
       retainedPaymentPlan.current = retainedPartnerWizardPayments(cases.data.cases[0].view.customerPaymentPlan,
         checkpoint.intent.customerPaymentPlan);
+      correctionRequestId.current = cases.data.cases[0].reviewedCorrection?.requestId;
       setCorrectionReason(cases.data.cases[0].reviewedCorrection?.reason ?? null);
       setCorrectionDueAt(cases.data.cases[0].reviewedCorrection?.dueAt ?? null);
       setEditingCase(cases.data.cases[0].view);
@@ -1251,12 +1352,15 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       setResumeTechnicalDraft(checkpoint.validatedDraft ?? null);
       if (searchParams.get('configure') === '1') setSaleStep('products');
       else await enterWizardRef.current({ schemaVersion: 2, purpose: 'PARTNER_INQUIRY', inquiryId, rows: matches.rows },
-        value, caseId, caseReference, undefined, Boolean(cases.data.cases[0].reviewedCorrection), checkpoint.validatedDraft);
+        value, caseId, caseReference, undefined, Boolean(cases.data.cases[0].reviewedCorrection), checkpoint.validatedDraft,
+        { actorId: context.actorId, caseId, validated: savedResult.value,
+          inquiryRows: pricing.rows,
+          checkpoint: durableCheckpoint });
     })().catch(caught => setError(partnerCaseHasIntegrityError(caught)
       ? partnerCaseReviewMessage(caseReference)
       : 'بازیابی پرونده ذخیره‌شده انجام نشد؛ هیچ تغییری ثبت نشده است.'))
       .finally(() => { editingHydrationFlight.current = false; });
-  }, [context, draftAccess, persistRuntime, readApprovalMatches, recoveryRevision, searchParams, wizard]);
+  }, [context, draftAccess, editingCase?.owner.caseId, persistRuntime, readApprovalMatches, readCasePricingEvidence, readCaseResponse, recoveryRevision, searchParams, wizard]);
 
   useEffect(() => {
     if (mode !== 'sale' || !runtime || wizard || searchParams.get('caseId') || searchParams.get('configure') === '1' || runtimeWizardHydrationFlight.current) return;
@@ -1392,7 +1496,9 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     let cancelled = false;
     const refresh = async () => {
       const activeCaseId = submission?.getSnapshot().case?.owner.caseId;
-      if (!activeCaseId || pricingRefreshFlight.current) return;
+      if (!activeCaseId || pricingRefreshFlight.current || technicalCommitFlight.current || pending ||
+          inactiveCaseCustomer || unvalidatedProductCheckpoint || finalizationFlight.current ||
+          ['submitting', 'uncertain'].includes(submission?.getSnapshot().phase ?? '')) return;
       pricingRefreshFlight.current = true;
       try {
       const rowsFromCase = await readCasePricingRows(runtime.saved, activeCaseId);
@@ -1412,14 +1518,14 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       });
       } finally { pricingRefreshFlight.current = false; }
     };
-    const polling = createPartnerVisibleRefresh({ refresh,
+    const polling = createPartnerVisibleRefresh({ refresh, initialDelayMs: 10_000,
       visible: () => document.visibilityState === 'visible',
       schedule: (callback, delay) => window.setTimeout(callback, delay), cancel: window.clearTimeout,
       onError: failure => {
         if (cancelled) return;
         if ((failure as { code?: string })?.code === 'FORBIDDEN' ||
             (failure as { response?: { status?: number } })?.response?.status === 403) {
-          setWizard(null); setRuntime(null); setRetainedCatalog(null); setContext(null); catalogReader.clear();
+          setWizard(null); setRuntime(null); setRetainedCatalog(null); setContext(null); catalogReader?.clear();
           setError('مجوز مشاهده این پرونده فعال نیست؛ با حساب دارای دسترسی وارد شوید.');
           return;
         }
@@ -1434,7 +1540,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
     return () => { cancelled = true; polling.stop(); if (pricingRefreshControl.current === polling) pricingRefreshControl.current = null; window.removeEventListener('focus', foreground);
       document.removeEventListener('visibilitychange', foreground); };
   }, [readCasePricingRows, runtime, submission, wizardRecoveryId, pricingRefreshStep, catalogReader,
-    inactiveCaseCustomer, unvalidatedProductCheckpoint]);
+    inactiveCaseCustomer, unvalidatedProductCheckpoint, pending]);
 
   const reinquiryCommands = useRef(new Map<string, ReturnType<typeof PartnerCommandSchema.parse>>());
   const reinquireFromWizard = async (requestedRow?: PartnerInquiryRow, reason?: string) => {
@@ -1867,10 +1973,13 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
       const created = submission.getSnapshot().case;
       if (created?.owner.caseId !== caseId) return;
       setEditingCase(created);
+      retainPreparedCase(caseId);
       router.replace(`/dashboard/sales/contracts/create?caseId=${encodeURIComponent(caseId)}`);
     }}
     onOpenCase={async caseId => {
-      const response = await api.post('/partner/cases/query-v2', { caseId });
+      const knownContractId = customerContractIds.current.get(caseId);
+      if (knownContractId) { router.push(`/dashboard/sales/contracts/${encodeURIComponent(knownContractId)}`); return; }
+      const response = await readCaseResponse(caseId);
       const parsed = PartnerCaseRuntimeResultSchema.safeParse(response.data?.data);
       const row = parsed.success ? parsed.data.cases.find(item => item.view.owner.caseId === caseId) : undefined;
       if (!row) throw new Error('Contract identity unavailable');

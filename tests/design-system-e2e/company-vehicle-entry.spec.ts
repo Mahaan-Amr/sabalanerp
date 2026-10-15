@@ -17,6 +17,7 @@ for (const width of [1280, 390]) test(`company vehicle fields preserve plate ord
     }
     return route.fulfill({ json: { success: true, data: [vehicle], capabilities } });
   });
+  await page.route('**/api/dispatch-master-data/driver-vehicle-assignments', route => route.fulfill({ json: { success: true, data: { assignments: [], plans: [] } } }));
   await loginAsAdmin(page);
   await page.goto('/dashboard/hr/vehicle-operations');
   await setViewportAndZoom(page, { width, height: 1000 });
@@ -72,7 +73,7 @@ for (const width of [1280, 390]) test(`company vehicle fields preserve plate ord
   expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   await setViewportAndZoom(page, { width, height: 1000 });
   await dialog.getByRole('button', { name: 'ثبت خودرو', exact: true }).click();
-  await expect(dialog.getByText('عملیات انجام نشد:', { exact: false })).toBeVisible();
+  await expect(dialog.getByText('آزمون حفظ اطلاعات پس از خطا', { exact: false })).toBeVisible();
   expect(createBody.plate).toBe('01 ب 023 ایران 04');
   expect(createBody.manufactureYear).toBe(year());
   expect(createBody.model).toBeUndefined();
@@ -96,7 +97,7 @@ test('real company-vehicle API validates new entries and preserves separate mode
   const digits = String(Date.now()).slice(-7);
   const plate = `${digits.slice(0, 2)} ب ${digits.slice(2, 5)} ایران ${digits.slice(5)}`;
   const base = '/api/dispatch-master-data/company-vehicles';
-  const data = { fleetCode, vehicleType: 'سواری', manufactureYear: year(), model: 'مدل قبلی برای آزمون', plate, effectiveFrom: '2026-01-01', reason: 'آزمون ایزوله فرم خودرو' };
+  const data = { fleetCode, vehicleType: 'سواری', manufactureYear: year(), model: 'مدل قبلی برای آزمون', plate };
   for (const invalid of [{ manufactureYear: null }, { manufactureYear: year() + 1 }, { plate: '12 ر 345 11' }, { plate: '12 ب 34 11' }]) {
     const response = await page.request.post(base, { data: { ...data, ...invalid } });
     expect(response.status()).toBe(400);
@@ -109,12 +110,15 @@ test('real company-vehicle API validates new entries and preserves separate mode
     id = created.id;
     expect(created.manufactureYear).toBe(year());
     expect(created.model).toBe(data.model);
-    const change = await page.request.post(`${base}/${id}/plates`, { data: { plate: plate.replace(' ب ', ' ع '), effectiveFrom: '2026-01-02', reason: 'آزمون سابقه پلاک' } });
+    const change = await page.request.post(`${base}/${id}/plates`, { data: { plate: plate.replace(' ب ', ' ع ') } });
     expect(change.status()).toBe(201);
     const list = await page.request.get(base);
     const vehicle = (await list.json()).data.find((item: any) => item.id === id);
     expect(vehicle.plates).toHaveLength(2);
-    expect(vehicle.plates.find((item: any) => item.plate === plate).effectiveTo).toBe('2026-01-02T00:00:00.000Z');
+    const oldPlate = vehicle.plates.find((item: any) => item.plate === plate);
+    const newPlate = vehicle.plates.find((item: any) => item.plate !== plate);
+    expect(new Date(oldPlate.effectiveTo).getTime()).toBeGreaterThan(new Date(oldPlate.effectiveFrom).getTime());
+    expect(oldPlate.effectiveTo).toBe(newPlate.effectiveFrom);
     expect(vehicle.model).toBe(data.model);
   } finally {
     if (id) expect((await page.request.delete(`${base}/${id}`, { data: { reason: 'پاک‌سازی داده آزمون ایزوله' } })).status()).toBe(200);

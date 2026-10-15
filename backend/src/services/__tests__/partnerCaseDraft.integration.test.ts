@@ -322,6 +322,43 @@ function service(tx: Prisma.TransactionClient, ids: Record<string, string>, fail
     consumeRecovery: async () => ({ ok: true, value: undefined }), failpoint });
 }
 
+test('owning Case revision transaction survives work beyond Prisma five-second default and still validates the Case', async () => {
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const prefix = `partner-budget-${randomUUID()}`;
+  const ids = { partnerId: `${prefix}-actor`, customerId: `${prefix}-customer`, caseId: `${prefix}-missing` };
+  try {
+    const delayed = { $transaction: (work: (tx: Prisma.TransactionClient) => Promise<unknown>, options: { maxWait?: number; timeout?: number }) =>
+      database.$transaction(async tx => {
+        await tx.$executeRaw`SELECT pg_sleep(5.2)`;
+        return work(tx);
+      }, options) } as PrismaClient;
+    const result = await createPrismaPartnerCaseService({ database: delayed, actorId: ids.partnerId,
+      authorize: async () => { throw new Error('Missing Case must not reach authorization'); },
+      authorizeProject: async () => { throw new Error('Missing Case must not reach project authorization'); },
+      resolveDraft: async () => { throw new Error('Missing Case must not resolve a draft'); },
+      consumeRecovery: async () => { throw new Error('Missing Case must not consume recovery'); },
+      recordEvidenceReview: async () => { throw new Error('Timeout must not be recorded as evidence corruption'); },
+    }).execute(await reviseCommand(ids, await command(ids), 1, configurationHash));
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, 'NOT_FOUND');
+  } finally { await database.$disconnect(); }
+});
+
+test('ordinary Partner detail transaction survives work beyond five seconds without admitting an absent Case', async () => {
+  const { readPartnerSalesContractDetail } = await import('../partnerSales/cases/contractDetail');
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const missing = `partner-detail-budget-${randomUUID()}`;
+  try {
+    const delayed = { $transaction: (work: (tx: Prisma.TransactionClient) => Promise<unknown>, options: { maxWait?: number; timeout?: number }) =>
+      database.$transaction(async tx => {
+        await tx.$executeRaw`SELECT pg_sleep(5.2)`;
+        return work(tx);
+      }, options) } as PrismaClient;
+    assert.equal(await readPartnerSalesContractDetail(delayed, { actorId: missing, correlationId: missing,
+      contract: { id: missing, partnerCaseId: missing, partnerRevision: 1, partnerIntegrityHash: configurationHash } }), null);
+  } finally { await database.$disconnect(); }
+});
+
 test('Case-scoped pricing retains one linked numbered note before pricing and commits only after current approvals', async () => {
   await fixture(async (tx, ids) => {
     const priced = await command(ids);
@@ -1839,10 +1876,11 @@ test('responder SQL pages twenty authorized contracts with package grouping, glo
     // Explicit per-fixture read avoids unrelated manager-visible local inquiries.
     await tx.user.update({ where: { id: ids.responderId }, data: { role: 'USER' } });
     await tx.featurePermission.create({ data: { userId: ids.responderId, workspace: 'sales', feature: 'sales_partner_inquiries_view', permissionLevel: 'view' } });
-    const resolveConfiguration = async () => ({ ok: true as const, value: { identity: { schemaVersion: 1 as const, partnerSellerId: ids.partnerId,
+    let technicalReads = 0;
+    const resolveConfiguration = async () => { technicalReads++; return ({ ok: true as const, value: { identity: { schemaVersion: 1 as const, partnerSellerId: ids.partnerId,
       catalogProductId: 'catalog-stone', family: 'prepared' as const, unit: 'count' as const, configuration: [{ key: 'technicalConfigurationHash', value: configurationHash }],
       materialRateEvidenceId: 'fixture-rate', materialRateHash: configurationHash, components: [], currency: 'IRT' as const,
-      calculationPolicyVersion: 'fixture-v1', roundingPolicyVersion: 'fixture-v1' }, description: 'سنگ آماده', configuration: [{ label: 'تعداد', value: '۲' }] } });
+      calculationPolicyVersion: 'fixture-v1', roundingPolicyVersion: 'fixture-v1' }, description: 'سنگ آماده', configuration: [{ label: 'تعداد', value: '۲' }] } }); };
     const query = createPrismaPartnerWorkspaceQuery({ database, actorId: ids.responderId, correlationId: randomUUID(), authorize: allow, resolveConfiguration });
     const first = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending', limit: 50 });
     assert.ok(first.ok, JSON.stringify(first));
@@ -1858,8 +1896,19 @@ test('responder SQL pages twenty authorized contracts with package grouping, glo
     const last = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending', cursor: next.value.nextCursor });
     assert.ok(last.ok && last.value.contracts!.length === 2 && !last.value.nextCursor, JSON.stringify(last));
     const contract = await tx.salesContract.findFirstOrThrow({ where: { partnerCaseId: caseIds[41] } });
+    technicalReads = 0;
     const searched = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending', search: contract.contractNumber });
     assert.ok(searched.ok && searched.value.contracts!.length === 1, JSON.stringify(searched));
+    assert.equal(technicalReads, 1, 'a search must not resolve technical evidence for unrelated contracts');
+    technicalReads = 0;
+    const scoped = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE',
+      contractId: caseIds[41], summaryOnly: true, view: 'all' });
+    assert.ok(scoped.ok && scoped.value.contractCounts?.pending === 1, JSON.stringify(scoped));
+    assert.equal(technicalReads, 1, 'opening a contract inquiry must not traverse other contracts');
+    const persianSearch = contract.contractNumber.replace(/[0-9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
+    const localized = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'pending', search: persianSearch });
+    assert.ok(localized.ok && localized.value.contracts?.[0]?.id === caseIds[41], JSON.stringify(localized));
+
     const blank = await query.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view: 'answered', search: contract.contractNumber });
     assert.ok(blank.ok && blank.value.contracts!.length === 0 && blank.value.contractCounts?.pending === 1, JSON.stringify(blank));
     const denied = createPrismaPartnerWorkspaceQuery({ database, actorId: ids.responderId, correlationId: randomUUID(),
@@ -2229,5 +2278,139 @@ test('Partner draft deletion preserves correction permission and financial histo
     assert.ok(cancelled.ok, JSON.stringify(cancelled));
     assert.equal((await tx.salesContract.findUniqueOrThrow({ where: { id: contract.id } })).status, 'CANCELLED');
     await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+  });
+});
+
+test('Case detail reuses its owner recovery and pricing presentation within one authorized transaction', async () => {
+  const express = (await import('express')).default;
+  const { createPartnerCaseRouter } = await import('../../routes/partner-cases');
+  const { readPartnerCommercialState } = await import('../partnerSales/cases/commercialLifecycle');
+  await fixture(async (tx, ids) => {
+    const created = await service(tx, ids).execute(await command(ids));
+    assert.ok(created.ok, JSON.stringify(created));
+    const root = await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } });
+    assert.equal(root.commercialFlowVersion, 1);
+    assert.ok(root.customerContractId);
+    await tx.salesContractEditSession.create({ data: { draftId: ids.caseId, contractId: root.customerContractId,
+      ownerUserId: ids.partnerId, purpose: 'PARTNER_TECHNICAL', browserSessionId: 'detail-reader',
+      leaseToken: randomUUID(), schemaVersion: 1, baseRevision: 0, recovery: {
+        kind: 'partner-technical-recovery', version: 1, recoveryRevision: 1, updatedAt: Date.now(), partnerCaseId: ids.caseId,
+        draft: { schemaVersion: 1, inputRevision: 1, rows: [] }, validatedSnapshots: [],
+      } } });
+    const expected = await readPartnerCommercialState(tx, ids.caseId);
+    let historyReads = 0, corruptRead = false;
+    const client = new Proxy(tx, { get(target, key) {
+      if (key === '$queryRaw') return async (...args: Parameters<typeof target.$queryRaw>) => {
+        const records = await target.$queryRaw<Array<{ recovery?: Uint8Array }>>(...args);
+        const sql = args.map(part => part && typeof part === 'object' && 'sql' in part ? String(part.sql) : String(part)).join('');
+        if (sql.includes('convert_to(') && sql.includes('recovery::text')) {
+          historyReads++;
+          if (corruptRead) return records.map(record => ({ ...record,
+            recovery: Buffer.from(JSON.stringify({ invalid: true })) }));
+        }
+        return records;
+      };
+      if (key !== 'salesContractEditSession') return Reflect.get(target, key);
+      return new Proxy(target.salesContractEditSession, { get(model, operation) {
+        if (operation !== 'findFirst') return Reflect.get(model, operation);
+        return async (args: Parameters<typeof model.findFirst>[0]) => {
+          if (args?.select?.recovery) historyReads++;
+          const record = await model.findFirst(args);
+          return corruptRead && record ? { ...record, recovery: { invalid: true } } : record;
+        };
+      } });
+    } });
+    const app = express(); app.use(express.json());
+    app.use('/cases', createPartnerCaseRouter({ database: { $transaction: (work: (value: Prisma.TransactionClient) => unknown) => work(client) } as never,
+      authenticate: (req, _res, next) => { (req as { user?: { id: string } }).user = { id: ids.partnerId }; next(); } }));
+    const server = app.listen(0); await new Promise<void>(resolve => server.once('listening', resolve));
+    try {
+      const address = server.address(); assert.ok(address && typeof address !== 'string');
+      const query = async () => {
+        const response = await fetch(`http://127.0.0.1:${address.port}/cases/query-v2`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ caseId: ids.caseId }) });
+        const body = await response.json() as any;
+        assert.equal(response.status, 200, JSON.stringify(body)); return body.data.cases[0];
+      };
+      const row = await query();
+      assert.deepEqual(row.commercial, expected);
+      assert.equal(row.editRecovery.recoveryId, ids.caseId);
+      assert.equal(row.actions.canContinue, true);
+      assert.equal(historyReads, 1, 'commercial status, edit recovery and presentation must share one journal read');
+      historyReads = 0;
+      const entryResponse = await fetch(`http://127.0.0.1:${address.port}/cases/editor-entry`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ caseId: ids.caseId }) });
+      assert.equal(entryResponse.status, 200);
+      const entry = (await entryResponse.json() as any).data;
+      assert.deepEqual(entry, { caseId: ids.caseId, canContinue: row.actions.canContinue, editRecovery: row.editRecovery });
+      assert.equal(historyReads, 0, 'the entry decision must not materialize the historical journal');
+      corruptRead = true; // Fault injection at the private database JSON boundary.
+      historyReads = 0;
+      const invalid = await query();
+      assert.equal(invalid.editRecovery, undefined);
+      assert.equal(invalid.actions.canContinue, false, 'a later query must recheck recovery integrity');
+      assert.equal(historyReads, 1);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+});
+
+
+test('editor entry preserves fresh full-query decisions for finalized, approved correction, expired, cancelled and deactivated actors', async () => {
+  const express = (await import('express')).default;
+  const { createPartnerCaseRouter } = await import('../../routes/partner-cases');
+  await fixture(async (tx, ids) => {
+    const final = await finalCommercialFixture(tx, ids);
+    const contractId = final.root.customerContractId!;
+    await tx.salesContractEditSession.create({ data: { draftId: ids.caseId, contractId,
+      ownerUserId: ids.partnerId, purpose: 'PARTNER_TECHNICAL', browserSessionId: 'entry-parity',
+      leaseToken: randomUUID(), schemaVersion: 1, baseRevision: 0, recovery: {
+        kind: 'partner-technical-recovery', version: 1, recoveryRevision: 1, updatedAt: Date.now(), partnerCaseId: ids.caseId,
+        draft: { schemaVersion: 1, inputRevision: 1, rows: [] }, validatedSnapshots: [],
+      } } });
+    const app = express(); app.use(express.json());
+    app.use('/cases', createPartnerCaseRouter({ database: { $transaction: (work: (value: Prisma.TransactionClient) => unknown) => work(tx) } as never,
+      authenticate: (req, _res, next) => { (req as { user?: { id: string } }).user = { id: ids.partnerId }; next(); } }));
+    const server = app.listen(0); await new Promise<void>(resolve => server.once('listening', resolve));
+    try {
+      const address = server.address(); assert.ok(address && typeof address !== 'string');
+      const post = async (endpoint: string, caseId = ids.caseId) => {
+        const response = await fetch(`http://127.0.0.1:${address.port}/cases/${endpoint}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ caseId }) });
+        assert.match(response.headers.get('cache-control') ?? '', /private, no-store/);
+        return { status: response.status, body: await response.json() as any };
+      };
+      const parity = async (label: string, expected?: boolean, caseId = ids.caseId) => {
+        const full = await post('query-v2', caseId), entry = await post('editor-entry', caseId);
+        assert.equal(entry.status, full.status, label);
+        if (full.status !== 200) { assert.equal(entry.body.code, full.body.code, label); return; }
+        const row = full.body.data.cases[0];
+        assert.deepEqual(entry.body.data, { caseId, canContinue: row?.actions.canContinue ?? false,
+          ...(row?.editRecovery ? { editRecovery: row.editRecovery } : {}) }, label);
+        if (expected !== undefined) assert.equal(entry.body.data.canContinue, expected, label);
+      };
+      await parity('final without correction', false);
+      await approvePartnerEdit(tx, { contractId, actorUserId: ids.responderId,
+        reason: 'بررسی یکسان مجوز ویرایش', requestKey: randomUUID(), now: new Date() });
+      await parity('approved final correction', true);
+      const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: contractId } });
+      await tx.salesContract.update({ where: { id: contractId }, data: { status: 'EXPIRED', commercialExpiresAt: new Date(0) } });
+      await parity('expired final correction', false);
+      await tx.salesContract.update({ where: { id: contractId }, data: { status: contract.status, commercialExpiresAt: contract.commercialExpiresAt } });
+      const lifecycle = createPartnerCaseLifecycleService({ actorId: ids.partnerId, cancellationPurpose: 'PARTNER', transaction: work => work(tx),
+        authorize: async () => ({ ok: true, value: { evidenceId: 'entry-parity-cancel' } }),
+        verifyOutputEvidence: async () => ({ ok: false, error: { code: 'STATE_CONFLICT', status: 409, message: 'unused' } }),
+        cancelConfirmationSessions: async () => ({ ok: true, value: { invalidatedSessionIds: [], preservedSnapshotIds: [] } }),
+        recordEvidenceReview: async () => undefined });
+      const reason = 'لغو برای بررسی یکسان مسیر ورود';
+      const cancelled = await lifecycle.execute({ schemaVersion: 1, type: 'CASE_CANCEL', commandId: randomUUID(), correlationId: randomUUID(),
+        expected: final.owner, expectedState: 'COMMITTED', reason,
+        idempotency: { actorId: ids.partnerId, operation: 'CASE_CANCEL', targetId: ids.caseId, key: randomUUID(),
+          payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_CANCEL', reason }) } });
+      assert.ok(cancelled.ok, JSON.stringify(cancelled));
+      await parity('cancelled correction', false);
+      await parity('missing case', false, randomUUID());
+      await tx.user.update({ where: { id: ids.partnerId }, data: { isActive: false } });
+      await parity('deactivated actor', false);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
   });
 });

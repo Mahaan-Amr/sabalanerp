@@ -144,7 +144,7 @@ router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: A
   } catch (error) { return handle(res, error); }
 });
 router.post('/enrollments/:enrollmentId/deactivate', hrManage, async (req: AuthRequest, res) => {
-  try { return res.json({ success: true, data: await service().deactivateEnrollment({ enrollmentId: req.params.enrollmentId, actorId: req.user!.id, reason: req.body.reason }) }); }
+  try { return res.json({ success: true, data: await service().deactivateEnrollment({ enrollmentId: req.params.enrollmentId, actorId: req.user!.id, reason: 'غیرفعال‌سازی ثبت بیومتریک توسط منابع انسانی' }) }); }
   catch (error) { return handle(res, error); }
 });
 router.get('/enrollments/:enrollmentId/images/:finger', hrManage, async (req: AuthRequest, res) => {

@@ -1,6 +1,6 @@
 # Online deployment implementation and admission
 
-The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaan-Amr/sabalanerp/issues/405) and [ADR-0130](../adr/0130-compatible-online-deployment-and-independent-recovery.md). This record distinguishes implemented foundations from evidence required before online production changes.
+The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaan-Amr/sabalanerp/issues/405) and [ADR-0131](../adr/0131-compatible-online-deployment-and-independent-recovery.md). This record distinguishes implemented foundations from evidence required before online production changes.
 
 ## Current foundation
 

@@ -125,8 +125,8 @@ export const createPartnerPricingDuty = async (database: any, input: {
   return duty;
 };
 
-async function materialPriceRows(database: any, inquiry: any) {
-  const resolveConfiguration = createSavedTechnicalConfigurationResolver();
+async function materialPriceRows(database: any, inquiry: any,
+  resolveConfiguration = createSavedTechnicalConfigurationResolver()) {
   const rows: typeof inquiry.rows = [];
   for (const row of inquiry.rows) {
     const definition = parseInquiryDefinition(row.definition);
@@ -233,37 +233,43 @@ export const reassignPartnerPricingDuty = async (database: any, input: {
   return duty;
 };
 
-const loadInboxProjection: CrossWorkspaceDutySourceAdapter['loadInboxProjection'] = async (database, input) => {
-  const inquiry = await database.partnerInquiry.findUnique({ where: { id: input.sourceId }, include: {
-    case: { select: { caseNumber: true, customer: { select: { firstName: true, lastName: true } }, trackingCode: { select: { number: true } } } },
-    profile: { select: { userId: true } },
-    rows: { where: { successor: null }, select: { id: true, definition: true, outcome: true } },
-  } });
-  if (!inquiry?.caseId || !inquiry.case) throw new Error('DUTY_SOURCE_CHANGED');
-  const customerLabel = `مشتری: ${[inquiry.case.customer.firstName, inquiry.case.customer.lastName].filter(Boolean).join(' ')}`;
-  inquiry.rows = await materialPriceRows(database, inquiry);
-  if (input.sourceActionCode === resultDefinition.sourceActionCode) {
-    const current = await database.partnerInquiry.findFirst({ where: { caseId: inquiry.caseId },
-      orderBy: [{ caseRevision: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }, { id: 'desc' }], select: { id: true } });
-    const approved = inquiry.rows.filter((row: any) => row.outcome === 'APPROVED').length;
-    const rejected = inquiry.rows.filter((row: any) => row.outcome === 'REJECTED').length;
-    return { title: `نتیجه استعلام قیمت پرونده همکار-${inquiry.case.trackingCode?.number.toLocaleString('fa-IR', { useGrouping: false, minimumIntegerDigits: 5 }) ?? '—'}`,
-      description: customerLabel + '\n' + (rejected > 0
-        ? `${rejected.toLocaleString('fa-IR')} ردیف نیازمند اصلاح و ${approved.toLocaleString('fa-IR')} ردیف قیمت‌گذاری‌شده`
-        : `قیمت ${approved.toLocaleString('fa-IR')} ردیف از فروشنده سبلان دریافت شد`),
-      destinationHref: `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(inquiry.caseId)}&returnTo=contract&step=5`,
-      sourceIsCurrent: current?.id === inquiry.id && inquiry.revision === input.sourceVersion && inquiry.rows.every((row: any) => row.outcome !== 'PENDING') };
-  }
-  const pending = inquiry.rows.filter((row: any) => row.outcome === 'PENDING');
-  const rejectionReasons = pending.flatMap(row => {
-    const definition = parseInquiryDefinition(row.definition);
-    return definition?.predecessorReason ? [`${definition.description}: ${definition.predecessorReason}`] : [];
-  });
-  return { title: `بررسی قیمت پرونده همکار-${inquiry.case.trackingCode?.number.toLocaleString('fa-IR', { useGrouping: false, minimumIntegerDigits: 5 }) ?? '—'}`,
-    description: [customerLabel, `${pending.length.toLocaleString('fa-IR')} ردیف فنی در انتظار قیمت سبلان`, ...rejectionReasons].join(' · '),
-    destinationHref: `/dashboard/sales/partner-inquiries?inquiryId=${encodeURIComponent(inquiry.id)}`,
-    sourceIsCurrent: pending.length > 0 };
+const createInboxProjectionReader = (): CrossWorkspaceDutySourceAdapter['loadInboxProjection'] => {
+  const resolveConfiguration = createSavedTechnicalConfigurationResolver();
+  return async (database, input) => {
+    const inquiry = await database.partnerInquiry.findUnique({ where: { id: input.sourceId }, include: {
+      case: { select: { caseNumber: true, customer: { select: { firstName: true, lastName: true } }, trackingCode: { select: { number: true } } } },
+      profile: { select: { userId: true } },
+      rows: { where: { successor: null }, select: { id: true, definition: true, outcome: true } },
+    } });
+    if (!inquiry?.caseId || !inquiry.case) throw new Error('DUTY_SOURCE_CHANGED');
+    const customerLabel = `مشتری: ${[inquiry.case.customer.firstName, inquiry.case.customer.lastName].filter(Boolean).join(' ')}`;
+    inquiry.rows = await materialPriceRows(database, inquiry, resolveConfiguration);
+    if (input.sourceActionCode === resultDefinition.sourceActionCode) {
+      const current = await database.partnerInquiry.findFirst({ where: { caseId: inquiry.caseId },
+        orderBy: [{ caseRevision: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }, { id: 'desc' }], select: { id: true } });
+      const approved = inquiry.rows.filter((row: any) => row.outcome === 'APPROVED').length;
+      const rejected = inquiry.rows.filter((row: any) => row.outcome === 'REJECTED').length;
+      return { title: `نتیجه استعلام قیمت پرونده همکار-${inquiry.case.trackingCode?.number.toLocaleString('fa-IR', { useGrouping: false, minimumIntegerDigits: 5 }) ?? '—'}`,
+        description: customerLabel + '\n' + (rejected > 0
+          ? `${rejected.toLocaleString('fa-IR')} ردیف نیازمند اصلاح و ${approved.toLocaleString('fa-IR')} ردیف قیمت‌گذاری‌شده`
+          : `قیمت ${approved.toLocaleString('fa-IR')} ردیف از فروشنده سبلان دریافت شد`),
+        destinationHref: `/dashboard/sales/contracts/create?caseId=${encodeURIComponent(inquiry.caseId)}&returnTo=contract&step=5`,
+        sourceIsCurrent: current?.id === inquiry.id && inquiry.revision === input.sourceVersion && inquiry.rows.every((row: any) => row.outcome !== 'PENDING') };
+    }
+    const pending = inquiry.rows.filter((row: any) => row.outcome === 'PENDING');
+    const rejectionReasons = pending.flatMap(row => {
+      const definition = parseInquiryDefinition(row.definition);
+      return definition?.predecessorReason ? [`${definition.description}: ${definition.predecessorReason}`] : [];
+    });
+    return { title: `بررسی قیمت پرونده همکار-${inquiry.case.trackingCode?.number.toLocaleString('fa-IR', { useGrouping: false, minimumIntegerDigits: 5 }) ?? '—'}`,
+      description: [customerLabel, `${pending.length.toLocaleString('fa-IR')} ردیف فنی در انتظار قیمت سبلان`, ...rejectionReasons].join(' · '),
+      destinationHref: `/dashboard/sales/partner-inquiries?inquiryId=${encodeURIComponent(inquiry.id)}`,
+      sourceIsCurrent: pending.length > 0 };
+  };
 };
+
+const loadInboxProjection: CrossWorkspaceDutySourceAdapter['loadInboxProjection'] = (database, input) =>
+  createInboxProjectionReader()(database, input);
 
 const synchronize: CrossWorkspaceDutySourceAdapter['synchronize'] = async (database, input) => {
   const inquiry = await database.partnerInquiry.findUniqueOrThrow({ where: { id: input.sourceId }, select: { revision: true } });
@@ -277,5 +283,5 @@ export const partnerPricingDutyAdapter = {
   sourceType: 'PARTNER_PRICING', synchronize, respond: unavailable, claim: unavailable,
   canClaim: alwaysFalse, claimRequiresReason: alwaysFalse, responseRequiresReason: alwaysFalse,
   canAccessSharedDecision: alwaysFalse, canReassign: alwaysFalse, reassign: unavailable,
-  listEligibleAssignees: async () => [], reconcileAssignment: unavailable, loadInboxProjection,
+  listEligibleAssignees: async () => [], reconcileAssignment: unavailable, loadInboxProjection, createInboxProjectionReader,
 } satisfies CrossWorkspaceDutySourceAdapter;

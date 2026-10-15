@@ -1,3 +1,4 @@
+import { lockHrDriverFacts } from './hrVehicleOperations';
 import { createHash } from 'node:crypto';
 import { GuardDriverQueueTurnStatus, GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
 import { projectExternalDriverReadiness, projectExternalVehicleReadiness, projectInternalDriverReadiness } from './dispatchMasterDataPolicy';
@@ -42,6 +43,7 @@ export const isGuardQueueTurnCurrentlyReady = async (
 ) => {
   if (turn.driverSource === GuardDriverSource.INTERNAL) {
     if (!turn.internalDriverId || !turn.companyVehicleId || !turn.assignmentId) return false;
+    if (!('$transaction' in db)) await lockHrDriverFacts(db, turn.internalDriverId, at, turn.companyVehicleId);
     const driver = await db.internalDriverProfile.findUnique({ where: { id: turn.internalDriverId }, include: {
       personnel: { include: { hrEmploymentRelationships: { where: { status: 'ACTIVE', ...activeAt(at) }, take: 1 } } },
       eligibilityPeriods: { where: activeAt(at), orderBy: { effectiveFrom: 'desc' }, take: 1 },
@@ -102,7 +104,9 @@ export const appendQueueEvent = async (tx: Prisma.TransactionClient, input: {
 };
 
 const buildInternalAdmission = async (tx: Prisma.TransactionClient, driverId: string, actorId: string, admittedAt: Date) => {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('HR_VEHICLE_OPERATIONS'))`;
   await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', `GUARD_QUEUE:INTERNAL:${driverId}`);
+  await lockHrDriverFacts(tx, driverId, admittedAt);
   const driver = await tx.internalDriverProfile.findUnique({ where: { id: driverId }, include: {
     personnel: { include: { hrEmploymentRelationships: { where: { status: 'ACTIVE', ...activeAt(admittedAt) }, orderBy: { effectiveFrom: 'desc' }, take: 1 } } },
     eligibilityPeriods: { where: activeAt(admittedAt), orderBy: { effectiveFrom: 'desc' }, take: 1 },
@@ -113,6 +117,7 @@ const buildInternalAdmission = async (tx: Prisma.TransactionClient, driverId: st
   const employment = driver.personnel.hrEmploymentRelationships[0];
   const assignment = driver.vehicleAssignments[0];
   const plate = assignment?.vehicle.plates[0];
+  if (assignment) await lockHrDriverFacts(tx, driverId, admittedAt, assignment.vehicleId);
   const readiness = projectInternalDriverReadiness({
     personnelActive: driver.personnel.isActive && !driver.personnel.archivedAt,
     activeEmployment: Boolean(employment), eligible: eligibility?.status === 'ELIGIBLE', drivingProfileActive: driver.status === 'ACTIVE',
@@ -191,6 +196,7 @@ export const admitGuardDriverQueueTurn = async (prisma: PrismaClient, input: {
   actorId: string;
 }) => prisma.$transaction(async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);
+  if (input.source === GuardDriverSource.INTERNAL) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('HR_VEHICLE_OPERATIONS'))`;
   const admittedAt = new Date();
   const resolved = input.source === GuardDriverSource.INTERNAL
     ? await buildInternalAdmission(tx, input.driverId, input.actorId, admittedAt)

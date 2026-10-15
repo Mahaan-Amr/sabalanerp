@@ -1,7 +1,7 @@
 /** One visible-page request at a time. A failure backs off; a foreground/manual
  * refresh bypasses that wait, but never overlaps an in-flight request. */
-export function createPartnerVisibleRefresh({ refresh, visible, schedule, cancel, onError }: {
-  refresh: () => Promise<void>; visible: () => boolean;
+export function createPartnerVisibleRefresh({ refresh, visible, schedule, cancel, onError, initialDelayMs = 0 }: {
+  initialDelayMs?: number; refresh: () => Promise<void>; visible: () => boolean;
   schedule: (callback: () => void, delay: number) => number;
   cancel: (timer: number) => void; onError?: (error: unknown) => void;
 }) {
@@ -19,5 +19,5 @@ export function createPartnerVisibleRefresh({ refresh, visible, schedule, cancel
       if (!stopped) timer = schedule(() => void run(), Math.min(60_000, 10_000 * 2 ** failures));
     }
   };
-  return { start: () => { void run(); }, refresh: () => { void run(); }, stop: () => { stopped = true; clear(); } };
+  return { start: () => { if (stopped || running || timer !== undefined) return; if (initialDelayMs > 0) timer = schedule(() => void run(), initialDelayMs); else void run(); }, refresh: () => { void run(); }, stop: () => { stopped = true; clear(); } };
 }

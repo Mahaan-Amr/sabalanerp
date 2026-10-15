@@ -1,4 +1,4 @@
-import { PartnerAccountViewSchema, PartnerCaseRuntimeResultSchema, PartnerCaseChangeVersionSchema, partnerInputHash as canonicalHash, partnerError,
+import { PartnerAccountViewSchema, PartnerCaseRuntimeResultSchema, PartnerCaseChangeVersionSchema, PartnerCaseEditorEntrySchema, partnerInputHash as canonicalHash, partnerError,
   type PartnerCaseRuntimeRow, type PartnerCaseView } from '@sabalanerp/partner-sales-contracts';
 import type { RetailCollectionHistory } from '../collections/RetailCollectionsPanel';
 import type { PartnerCorrectionStatus } from './PartnerCorrectionPanel';
@@ -6,6 +6,14 @@ import { assertSuccessfulSalesDownload } from '@/features/sales/salesOperational
 import api from '@/lib/api';
 
 export type { PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
+
+/** Fresh entry authority, without the editor's unused pricing presentation. */
+export async function readPartnerCaseEditorEntry(caseId: string) {
+  const response = await api.post('/partner/cases/editor-entry', { caseId });
+  const parsed = PartnerCaseEditorEntrySchema.safeParse(response.data?.data);
+  if (!parsed.success || parsed.data.caseId !== caseId) throw partnerError('INTEGRITY_CONFLICT');
+  return parsed.data;
+}
 
 export async function readPartnerCases(caseId?: string): Promise<PartnerCaseRuntimeRow[]> {
   return (await readPartnerCaseListing(caseId)).cases;

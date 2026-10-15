@@ -1,0 +1,40 @@
+# Diagnostic Inquiry runtime in the existing local project, with isolated data.
+# This does not admit a production release or replace the canonical Inquiry.
+name: sabalanerp-local
+services:
+  inquiry-candidate:
+    image: ${INQUIRY_ACCEPTANCE_IMAGE:?Set the existing verified Inquiry image identity}
+    build:
+      context: ${INQUIRY_ACCEPTANCE_REPOSITORY:?Set the reviewed repository root}
+      dockerfile: deploy/docker/inquiry.acceptance.Dockerfile
+      args:
+        INQUIRY_ACCEPTANCE_BASE_IMAGE: ${INQUIRY_ACCEPTANCE_BASE_IMAGE:?Set the verified local Linux dependency image}
+    profiles: [inquiry-acceptance]
+    working_dir: /app
+    command: [node, node_modules/next/dist/bin/next, start, -p, "3001"]
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      NEXT_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: file:/data/inquiry.db?connection_limit=2&pool_timeout=5
+      SESSION_SECRET: local-inquiry-http-qa-secret-012345678901234567890
+      RECOVERY_COORDINATION_DIR: /app/recovery-coordination
+    ports:
+      - "127.0.0.1:3102:3001"
+    volumes:
+      - type: bind
+        source: ${INQUIRY_ACCEPTANCE_DATA:?Set the owned isolated fixture root}/data
+        target: /data
+      - type: bind
+        source: ${INQUIRY_ACCEPTANCE_DATA}/coordination
+        target: /app/recovery-coordination
+        read_only: true
+    read_only: true
+    tmpfs: [/tmp, /app/.next/cache]
+    mem_limit: 512m
+    cpus: 1
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3001/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12

@@ -1,0 +1,110 @@
+{
+  "status": "HEALTHY",
+  "checkpointSha256": "747b3ab6a43afd2d4e083806c0b169f2b303837885d9aa9b870f510c7f15f93f",
+  "codeEvidence": {
+    "baseCommit": "03c5cb8624f0fbfa16d3dc98e6797365f0175896",
+    "frozenPatchSha256": "7de4988ddcff62c0fd4a5e57b26cd2e6887133a52d7d1ae4ca07d8072c5a5479",
+    "bundleSha256": "22b0370d144d6e17e3ae1003b2d98dae5d5d6c352bddd85d1c4161a481f0ffb1",
+    "compiledMigrationSha256": "602b4176ae3c8d88eec10d7b8d71e8960cf3fa67eda136cacc12606cb584bb3a",
+    "createdAt": "2026-10-15T07:59:44.220967+00:00"
+  },
+  "drill": {
+    "status": "HEALTHY",
+    "operationId": "drill-deploy-20261014T054528Z-cce0fa8da6b3-release-1792054089683",
+    "startedAt": "2026-10-15T08:37:43.916Z",
+    "completedAt": "2026-10-15T09:01:16.971Z",
+    "durationMs": 1413055,
+    "compatibility": {
+      "compatible": true,
+      "reasons": []
+    },
+    "promoted": true,
+    "promotedFiles": {
+      "files": 1589,
+      "bytes": 948451839
+    },
+    "initialPromotedFiles": {
+      "files": 1589,
+      "bytes": 948451839
+    },
+    "verifiedErasureReplay": {
+      "operations": 0,
+      "erasedArtifacts": 0
+    },
+    "liveFileReferences": {
+      "checkedColumns": 11,
+      "readyPerformanceExports": 0
+    },
+    "applicationPayloads": {
+      "vaultKeyId": "performance-v1-20260906",
+      "exportKeyId": "performance-export-v1-20260906",
+      "payloads": 0
+    },
+    "businessData": {
+      "tables": 199,
+      "records": "16700",
+      "sha256": "553597e5c7fd65fbbd0369fe4ff3dcf3588f2be0e7b01d83db444190b45ff665"
+    },
+    "inquiryTransformation": {
+      "format": "sabalan-inquiry-adoption/v1",
+      "operationId": "drill-deploy-20261014T054528Z-cce0fa8da6b3-release-1792054089683",
+      "archiveSha256": "747b3ab6a43afd2d4e083806c0b169f2b303837885d9aa9b870f510c7f15f93f",
+      "migration": "20261015080000_adopt_existing_inquiry",
+      "sqlSha256": "17192b3decf26de986f516ab1719e2e109adb29b1ed0ef45dfb6ca50fae1c8a9",
+      "schemaSha256": "086539acb1bf47855d37dadd7df29108d678de7c352d3fe0599d7506636fd540",
+      "businessEncoding": "sqlite-types-hex-bytes-ieee754-v1",
+      "sanitized": false,
+      "source": {
+        "size": 180224,
+        "sha256": "3fa8ce22f9230cd08922d41c8be13dccb107cb72fbaa393e3fa311ed18e2e432"
+      },
+      "target": {
+        "size": 184320,
+        "sha256": "3297437cf2b97a580578a328996481ad623a52d55025e9edc9ab3362b9e7813b"
+      },
+      "businessBefore": [
+        {
+          "table": "Admin",
+          "rows": 2,
+          "sha256": "53a3bdb69b6762b48b2ad643d5c25bdaa0f3fe7f33d5e050708588074eddfa1b"
+        },
+        {
+          "table": "Product",
+          "rows": 457,
+          "sha256": "afb4561a11a7d87614e0efcefdbe9057a30c3c3c64c37b430ff119f441fe005b"
+        },
+        {
+          "table": "User",
+          "rows": 7,
+          "sha256": "e00ae938c6a0b16b63e55895e8da894d0f1df6fb4ba578c02814eb0afaa94fee"
+        }
+      ],
+      "businessAfter": [
+        {
+          "table": "Admin",
+          "rows": 2,
+          "sha256": "53a3bdb69b6762b48b2ad643d5c25bdaa0f3fe7f33d5e050708588074eddfa1b"
+        },
+        {
+          "table": "Product",
+          "rows": 457,
+          "sha256": "afb4561a11a7d87614e0efcefdbe9057a30c3c3c64c37b430ff119f441fe005b"
+        },
+        {
+          "table": "User",
+          "rows": 7,
+          "sha256": "e00ae938c6a0b16b63e55895e8da894d0f1df6fb4ba578c02814eb0afaa94fee"
+        }
+      ]
+    },
+    "stagedPostgresRestore": true,
+    "stagedSqliteIntegrity": true
+  },
+  "nativeInquiryStartup": true,
+  "readOnlyStartupMount": true,
+  "foreignServicesUnchanged": true,
+  "foreignRunning": 10,
+  "restoreContainerId": "6a11a371253d36ef8e5a533494b7e4cc8d6a298ff811db29be9851c5c266adbe",
+  "startupContainerId": "22b4f2e81096fd1522715317c5c672fdd9a0860eaa4422334e1ec801e62ff43c",
+  "completedAt": "2026-10-15T09:01:32.944099+00:00"
+}

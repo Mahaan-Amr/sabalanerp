@@ -6,7 +6,8 @@ Frozen source: base `03c5cb8624f0fbfa16d3dc98e6797365f0175896`, patch SHA-256
 `7de4988ddcff62c0fd4a5e57b26cd2e6887133a52d7d1ae4ca07d8072c5a5479`
 (r22/r23 have identical Git-normalized patch bytes). Both independent Standards
 and Spec reviews report no remaining actionable incremental finding. A genuine
-encrypted legacy-point restore is running; its result is not yet claimed here.
+encrypted legacy-point restore completed successfully on the independent host;
+its final result and the earlier controller failure are recorded below.
 
 The protected release runner adopts the already deployed SQLite shape after
 PostgreSQL migrations, with its owned maintenance/checkpoint session, inherited
@@ -84,3 +85,36 @@ operations, and bounded kernel evidence found no OOM event. The log evidence doe
 not establish the complete cause; an async-error survival regression remains
 appropriate before production admission. This report does not claim uninterrupted
 uptime.
+
+## Genuine legacy-point restore
+
+The first r22 restoration itself returned HEALTHY and native Inquiry validation
+passed, but its outer controller failed its foreign-container stability check.
+All ten Fintech services retained their identities/start times; one unrelated
+transient container recorded before the drill had disappeared. Its departure
+could not be attributed from retained events. The FAILED controller record and
+all evidence were preserved; it was not relabeled accepted or used to prune.
+
+After fresh reference-aware cleanup/capacity checks on both hosts, the same
+reviewed immutable code bundle restored the same original encrypted archive
+again as r24. The new controller took over only the previous operation's owned
+hold under both locks and retained its history. The full controller completed
+at 2026-10-15T09:01:33Z: restoration from 08:37:43.916Z to 09:01:16.971Z took
+1,413,055 ms (23 minutes 33 seconds). This is an independent disaster-recovery
+duration, not a production update pause or evidence of the ten-minute budget.
+
+The restored 199 PostgreSQL tables and 16,700 records reproduced business hash
+`553597e5c7fd65fbbd0369fe4ff3dcf3588f2be0e7b01d83db444190b45ff665`.
+Both file comparisons verified 1,589 files / 948,451,839 bytes. SQLite baseline
+adoption preserved all business hashes/counts: two administrators, 457 products
+and seven users. A separate native read-only Inquiry validation container with
+no network returned `INQUIRY_DATABASE_VERIFIED`. All ten baseline foreign
+services retained their IDs/start times. Only the successful operation's own
+drill hold was released; no incident hold or checkpoint archive was deleted.
+
+The [machine-readable proof](inquiry-legacy-restore-r24-20261015.json) binds the
+original archive, reviewed bundle, exact migration module, transformation and
+container identities. Zero encrypted application payloads/ready exports/erasure
+operations existed in this point; this is not a nonzero regression for those
+features. The exercise used reviewed code mounted over the recovered immutable
+backend; it does not attest a newly built production release image.

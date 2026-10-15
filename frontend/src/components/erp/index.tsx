@@ -1190,10 +1190,10 @@ export function ErpDisclosure({ title, children, expanded = false, className, ho
   const panelId = React.useId();
   React.useEffect(() => { if (expanded) setOpen(true); }, [expanded]);
   return <ErpCard className={cx('p-4 sm:p-5', hoverEffect === 'shadow' && 'sds-disclosure-shadow sds-neumorphic-interactive', className)}>
-    <ErpPressable type="button" variant="ghost" className="flex w-full items-center justify-between gap-3 text-right"
+    <ErpPressable type="button" variant="ghost" className="flex w-full items-center justify-between gap-4 px-4 py-3 text-right sm:px-5"
       aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>
-      <span className="font-semibold">{title}</span>
-      <span className="text-xs text-[var(--sds-accent)]">{open ? 'بستن جزئیات' : 'نمایش جزئیات'}</span>
+      <span className="min-w-0 flex-1 break-words font-semibold">{title}</span>
+      <span className="shrink-0 text-xs text-[var(--sds-accent)]">{open ? 'بستن جزئیات' : 'نمایش جزئیات'}</span>
     </ErpPressable>
     <div id={panelId} hidden={!open} className="pt-5" onInvalidCapture={() => setOpen(true)}>{children}</div>
   </ErpCard>;

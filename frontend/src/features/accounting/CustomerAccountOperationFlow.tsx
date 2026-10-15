@@ -126,7 +126,10 @@ export default function CustomerAccountOperationFlow({ accountId, account, kind,
   return <ErpSheet open onClose={onClose} title={accountOperationLabels[kind]} presentation="modal" size="wide" pending={pending}>
     <div className="mb-5"><strong>{account.displayName}</strong><span className="mt-1 block text-sm sds-text-secondary">مانده فعلی: {accountMoney(account.netBalanceRials)}</span></div>
     {contextError ? <ErpInlineState kind="error" title={contextError} action={{ label: 'تلاش دوباره', onClick: () => setRetry(value => value + 1) }} /> : !context ? <ErpInlineState kind="empty" title="در حال آماده‌سازی فرم…" /> : (!context.periods.length || !context.rules.length) && kind !== 'ATTRIBUTION' ?
-      <ErpInlineState kind="permission" title="برای ثبت، دوره باز و قاعده حسابداری مشتری لازم است." action={{ label: 'تنظیمات حسابداری', href: '/dashboard/accounting/settings' }} /> :
+      <div className="space-y-3">
+        {!context.periods.length && <ErpInlineState kind="permission" title="دوره مالی بازی تعریف نشده است." action={{ label: 'بررسی دوره‌های مالی', href: '/dashboard/accounting/ledger?tab=settings' }} />}
+        {!context.rules.length && <ErpInlineState kind="permission" title="قاعده ثبت حسابداری مشتری تعریف نشده است." action={{ label: 'تعریف قاعده مشتری', href: '/dashboard/accounting/ledger/customer-rules' }} />}
+      </div> :
       <form onSubmit={save} className="space-y-5"><fieldset disabled={pending} className="space-y-5">
         <div className="grid gap-4 md:grid-cols-2">
           {hasAmount && <ErpField label={kind === 'OPENING' ? 'مانده کل تأییدشده (ریال)' : kind === 'SET_BALANCE' ? 'مانده مطلوب (ریال)' : kind === 'CORRECT_RECEIPT' ? 'مبلغ صحیح دریافت (ریال)' : kind === 'CHECK_SETTLE' ? 'مبلغ وصول‌شده (ریال)' : 'مبلغ (ریال)'} required hint={isBalance ? 'بدهکار مثبت، بستانکار منفی' : undefined}>

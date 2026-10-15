@@ -182,6 +182,10 @@ router.post('/customer-sales/control-transfer-policies', ...managerAccess, run((
   exceptionOccurredAt: req.body.exceptionOccurredAt ? validDate(req.body.exceptionOccurredAt, 'زمان وقوع استثنای قراردادی') : undefined,
   actor: actorOf(req),
 })));
+router.get('/customer-sales/posting-rules', ...viewAccess, run(async () => {
+  const context = await administration.getContext();
+  return context ? prisma.accountingCustomerPostingRule.findMany({ where: { legalEntityId: context.id }, orderBy: { effectiveFrom: 'desc' } }) : [];
+}));
 router.post('/customer-sales/posting-rules', ...managerAccess, run((req) => createCustomerPostingRulePrisma(prisma, {
   ...req.body, version: Number(req.body.version), effectiveFrom: validDate(req.body.effectiveFrom, 'تاریخ اثر قاعده ثبت مشتری'),
   effectiveTo: req.body.effectiveTo ? validDate(req.body.effectiveTo, 'پایان اثر قاعده ثبت مشتری') : undefined,

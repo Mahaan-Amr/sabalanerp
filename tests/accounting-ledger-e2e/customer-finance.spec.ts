@@ -170,3 +170,13 @@ test('historical partial collection asks for the bank share while retaining the 
   await expect.poll(() => commands.length).toBe(1);
   expect(commands[0]).toMatchObject({ kind: 'RESOLVE_RECEIPT', expectedAmountRials: '200', parts: [{ existingCheckId: 'legacy-partial', amountRials: '200', ledgerAccountId: 'custody', collectedLedgerAccountId: 'bank' }] });
 });
+
+test('missing customer rule points to rule setup while an open period is preserved', async ({ page }) => {
+  await login(page); await installFixture(page);
+  await page.route('**/api/accounting/ledger/customer-accounts/profile/context', route => route.fulfill({ json: { success: true, data: { ...context, rules: [] } } }));
+  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click();
+  await page.getByRole('button', { name: 'مانده افتتاحیه', exact: true }).click();
+  await expect(page.getByText('قاعده ثبت حسابداری مشتری تعریف نشده است.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'تعریف قاعده مشتری', exact: true })).toHaveAttribute('href', '/dashboard/accounting/ledger/customer-rules');
+  await expect(page.getByText('دوره مالی بازی تعریف نشده است.', { exact: true })).toHaveCount(0);
+});

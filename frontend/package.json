@@ -28,6 +28,7 @@
     "test:hr-duty-surfaces": "npx tsx src/features/hr-duties/destinationDutyState.test.ts",
     "test:hr-e2e": "playwright test e2e/hr-role-workflows.spec.ts",
     "test:operation-minimums": "tsx --test src/features/contract-creation/components/product-modal-system/__tests__/operationMinimumPresentation.test.tsx src/features/contract-creation/partner/partnerOperationMinimum.test.ts",
+    "test:external-vehicle-operations": "tsx --test src/features/biometric/dispatchConfirmationPresentation.test.ts",
     "test:hr-vehicle-operations": "tsx --test src/features/dispatch-master-data/vehicleOperationsCalendar.test.ts src/features/dispatch-master-data/companyVehicleEntry.test.ts src/features/dispatch-master-data/vehicleAssignmentOptions.test.ts src/features/hr/driverEligibilityPresentation.test.ts src/features/dispatch-master-data/hrOperationsError.test.ts"
   },
   "dependencies": {

@@ -1007,22 +1007,70 @@ model DriverVehicleAssignmentPlan {
   @@map("driver_vehicle_assignment_plans")
 }
 
+model ExternalDriverVehicleAssignment {
+  id            String                                @id @default(cuid())
+  driverId      String
+  vehicleId     String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  reason        String
+  recordedAt    DateTime                              @default(now())
+  recordedBy    String
+  driver        ExternalDriver                        @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  vehicle       ExternalVehicle                       @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  plans         ExternalDriverVehicleAssignmentPlan[]
+
+  @@index([driverId, effectiveFrom])
+  @@index([vehicleId, effectiveFrom])
+  @@map("external_driver_vehicle_assignments")
+}
+
+model ExternalDriverVehicleAssignmentPlan {
+  id                    String                           @id @default(cuid())
+  driverId              String
+  vehicleId             String
+  assignmentId          String?
+  action                String                           @default("ASSIGN")
+  status                String                           @default("PLANNED")
+  effectiveFrom         DateTime
+  effectiveTo           DateTime?
+  blockedReason         String?
+  expectedAssignmentIds String[]                         @default([])
+  createdBy             String
+  createdAt             DateTime                         @default(now())
+  updatedAt             DateTime                         @updatedAt
+  driver                ExternalDriver                   @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  vehicle               ExternalVehicle                  @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  assignment            ExternalDriverVehicleAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@index([status, effectiveFrom])
+  @@index([driverId, status])
+  @@index([vehicleId, status])
+  @@map("external_driver_vehicle_assignment_plans")
+}
+
 model ExternalDriver {
-  id                  String                                  @id @default(cuid())
-  firstName           String
-  lastName            String
-  nationalCode        String                                  @unique
-  phone               String
-  status              ExternalRegistryLifecycleStatus         @default(DRAFT)
-  statusEffectiveFrom DateTime                                @default(now())
-  statusReason        String?
-  statusRecordedBy    String?
-  notes               String?
-  createdAt           DateTime                                @default(now())
-  createdBy           String
-  externalLinks       ExternalDriverPersonnelContinuityLink[]
-  documents           ExternalDriverDocument[]
-  guardQueueTurns     GuardDriverQueueTurn[]
+  id                   String                                  @id @default(cuid())
+  firstName            String
+  lastName             String
+  nationalCode         String                                  @unique
+  phone                String
+  status               ExternalRegistryLifecycleStatus         @default(DRAFT)
+  statusEffectiveFrom  DateTime                                @default(now())
+  statusReason         String?
+  statusRecordedBy     String?
+  notes                String?
+  createdAt            DateTime                                @default(now())
+  createdBy            String
+  licenceNumber        String?
+  licenceClass         String?
+  licenceExpiresAt     DateTime?
+  assignments          ExternalDriverVehicleAssignment[]
+  assignmentPlans      ExternalDriverVehicleAssignmentPlan[]
+  biometricEnrollments DriverBiometricEnrollment[]
+  externalLinks        ExternalDriverPersonnelContinuityLink[]
+  documents            ExternalDriverDocument[]
+  guardQueueTurns      GuardDriverQueueTurn[]
 
   @@index([status])
   @@map("external_drivers")
@@ -1043,15 +1091,22 @@ model ExternalDriverDocument {
 }
 
 model ExternalVehicle {
-  id                  String                          @id @default(cuid())
+  id                  String                                @id @default(cuid())
   vehicleType         String
-  status              ExternalRegistryLifecycleStatus @default(DRAFT)
-  statusEffectiveFrom DateTime                        @default(now())
+  status              ExternalRegistryLifecycleStatus       @default(DRAFT)
+  statusEffectiveFrom DateTime                              @default(now())
   statusReason        String?
   statusRecordedBy    String?
   notes               String?
-  createdAt           DateTime                        @default(now())
+  createdAt           DateTime                              @default(now())
   createdBy           String
+  fleetCode           String?                               @unique
+  make                String?
+  model               String?
+  manufactureYear     Int?
+  vin                 String?                               @unique
+  assignments         ExternalDriverVehicleAssignment[]
+  assignmentPlans     ExternalDriverVehicleAssignmentPlan[]
   plates              ExternalVehiclePlate[]
   documents           ExternalVehicleDocument[]
   guardQueueTurns     GuardDriverQueueTurn[]
@@ -3613,17 +3668,20 @@ model ShipmentStatementMigrationEvidence {
 
 model DriverBiometricEnrollment {
   id                String                    @id @default(cuid())
-  personnelId       String
+  personnelId       String?
+  externalDriverId  String?
   status            String                    @default("ACTIVE")
   confirmationPhone String
   enrolledAt        DateTime                  @default(now())
   enrolledBy        String
   deactivatedAt     DateTime?
   deactivatedBy     String?
-  personnel         Personnel                 @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  personnel         Personnel?                @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  externalDriver    ExternalDriver?           @relation(fields: [externalDriverId], references: [id], onDelete: Restrict)
   templates         DriverBiometricTemplate[]
 
   @@index([personnelId, status])
+  @@index([externalDriverId, status])
   @@map("driver_biometric_enrollments")
 }
 

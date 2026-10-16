@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma';
 import express from 'express';
+import { HrVehicleError } from '../services/hrVehicleOperations';
 import { GuardDriverSource, PrismaClient } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WorkspaceRequest, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
@@ -37,6 +38,7 @@ const responseTurn = (turn: any, redacted = false) => {
   };
 };
 const fail = (res: any, error: unknown, context: string) => {
+  if (error instanceof HrVehicleError) return res.status(error.statusCode).json({ success: false, error: error.message });
   if (error instanceof PartnerLoadingCommandError) return res.status(error.error.status).json({ success: false,
     code: error.error.code, error: error.error.message });
   if (error instanceof PilotSafetyPauseError || error instanceof GuardQueueConflictError || error instanceof PhysicalGateExitConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });

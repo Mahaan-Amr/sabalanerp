@@ -17,6 +17,7 @@ import { authorizeHrUser } from '../services/hrAuthorizationService';
 import { BiometricWorkstationGateway, readBiometricWorkstationConfig } from '../services/biometricWorkstationGateway';
 
 const router = express.Router();
+const subjectKey = (req: AuthRequest) => req.path.startsWith('/external-drivers/') ? `external:${req.params.personnelId}` : req.params.personnelId;
 const simulatorEnabled = () => process.env.NODE_ENV !== 'production' && process.env.BIOMETRIC_CONNECTOR_MODE === 'simulator';
 const workstationGateway = () => {
   try { return new BiometricWorkstationGateway(prisma, readBiometricWorkstationConfig()); }
@@ -43,11 +44,26 @@ const service = () => {
       if (!result.success) throw new Error(result.error || 'OTP delivery failed');
     } });
 };
+const biometricErrorText = (message: string) => ({
+  'At least two distinct fingers are required.': 'برای ثبت بیومتریک، اثر دو انگشت متفاوت لازم است.',
+  'The driver already has an active biometric enrollment.': 'این راننده قبلاً ثبت بیومتریک فعال دارد.',
+  'Only an active enrollment can be deactivated.': 'ثبت بیومتریک فعال پیدا نشد؛ وضعیت پرونده را به‌روزرسانی کنید.',
+  'Fingerprint capture image was not found.': 'تصویر اثر انگشت برای این ثبت موجود نیست.',
+  'The protected enrollment is unavailable.': 'اثر انگشت فعال در دسترس نیست؛ ثبت بیومتریک راننده را بررسی کنید.',
+  'This session does not accept biometric verification.': 'این نوبت برای بررسی اثر انگشت فعال نیست؛ تأیید هویت را دوباره آغاز کنید.',
+  'A qualifying biometric failure is required.': 'روش جایگزین فقط پس از خطای معتبر حسگر یا سه عدم تطبیق معتبر در همین نوبت مجاز است.',
+  'The confirmation session is not active.': 'این نوبت تأیید هویت فعال نیست؛ وضعیت بارنامه را بررسی و نوبت جدید آغاز کنید.',
+  'The confirmation session expired.': 'مهلت تأیید هویت تمام شده است؛ نوبت جدید آغاز کنید.',
+  'Physical enrollment commands are disabled in simulator mode.': 'محیط محلی در حالت شبیه‌سازی است و فرمان حسگر واقعی صادر نمی‌کند.',
+  'Biometric workstations are not configured.': 'ایستگاه ثبت اثر انگشت تنظیم نشده است؛ تنظیم اتصال حسگر را بررسی کنید.',
+  'Biometric template protection is not configured.': 'تنظیم حفاظت اطلاعات بیومتریک آماده نیست؛ پیکربندی سامانه باید بررسی شود.',
+  'The internal driver is not currently eligible for biometric confirmation.': 'راننده داخلی در حال حاضر مجوز فعال برای ثبت یا تأیید بیومتریک ندارد.',
+} as Record<string, string>)[message] || message;
 const handle = (res: Response, error: unknown) => {
-  if (error instanceof DispatchConfirmationValidationError) return res.status(400).json({ success: false, error: error.message });
-  if (error instanceof DispatchConfirmationConflictError || error instanceof PilotSafetyPauseError) return res.status(409).json({ success: false, error: error.message });
+  if (error instanceof DispatchConfirmationValidationError) return res.status(400).json({ success: false, error: biometricErrorText(error.message) });
+  if (error instanceof DispatchConfirmationConflictError || error instanceof PilotSafetyPauseError) return res.status(409).json({ success: false, error: biometricErrorText(error.message) });
   console.error('Dispatch confirmation error:', error);
-  return res.status(500).json({ success: false, error: 'Dispatch confirmation failed.' });
+  return res.status(500).json({ success: false, error: 'نتیجه تأیید هویت مشخص نشد. وضعیت فعلی را بررسی کنید و اگر ثبت نشده بود دوباره اقدام کنید.' });
 };
 const hrManage = [protect, requireHrFeature(FEATURES.HR_DRIVER_BIOMETRIC_ENROLLMENT_MANAGE, 'EDIT')];
 const accountingManage = [protect, requireNarrowFeatureAccess(FEATURES.ACCOUNTING_DISPATCH_CONFIRMATION_MANAGE, FEATURE_PERMISSIONS.EDIT)];
@@ -70,38 +86,38 @@ router.get('/capabilities', protect, async (req: AuthRequest, res) => {
   } catch (error) { return handle(res, error); }
 });
 
-router.post('/internal-drivers/:personnelId/enrollment-commands', hrManage, async (req: AuthRequest, res) => {
+router.post(['/internal-drivers/:personnelId/enrollment-commands', '/external-drivers/:personnelId/enrollment-commands'], hrManage, async (req: AuthRequest, res) => {
   try {
     if (simulatorEnabled()) throw new DispatchConfirmationConflictError('Physical enrollment commands are disabled in simulator mode.');
-    await service().assertEnrollmentCaptureAllowed(req.params.personnelId);
+    await service().assertEnrollmentCaptureAllowed(subjectKey(req));
     const data = await workstationGateway().issueEnrollment({ workstationId: String(req.body.workstationId || ''), actorId: req.user!.id,
-      personnelId: req.params.personnelId, finger: String(req.body.finger || ''), enrollmentSessionId: req.body.enrollmentSessionId });
+      personnelId: subjectKey(req), finger: String(req.body.finger || ''), enrollmentSessionId: req.body.enrollmentSessionId });
     return res.status(201).json({ success: true, data });
   } catch (error) { return handle(res, error); }
 });
-router.post('/internal-drivers/:personnelId/enrollment-captures', hrManage, async (req: AuthRequest, res) => {
+router.post(['/internal-drivers/:personnelId/enrollment-captures', '/external-drivers/:personnelId/enrollment-captures'], hrManage, async (req: AuthRequest, res) => {
   try {
     if (simulatorEnabled()) throw new DispatchConfirmationConflictError('این مسیر فقط برای حسگر واقعی است.');
-    await service().assertEnrollmentCaptureAllowed(req.params.personnelId);
+    await service().assertEnrollmentCaptureAllowed(subjectKey(req));
     const data = await workstationGateway().stageEnrollmentCapture({ enrollmentSessionId: String(req.body.enrollmentSessionId || ''),
-      personnelId: req.params.personnelId, actorId: req.user!.id, challengeId: String(req.body.challengeId || ''),
+      personnelId: subjectKey(req), actorId: req.user!.id, challengeId: String(req.body.challengeId || ''),
       signedResponse: req.body.signedResponse, transportEnvelope: req.body.transportEnvelope }, templateVault());
     return res.status(201).json({ success: true, data });
   } catch (error) { return handle(res, error); }
 });
-router.post('/internal-drivers/:personnelId/enrollment-session/cancel', hrManage, async (req: AuthRequest, res) => {
+router.post(['/internal-drivers/:personnelId/enrollment-session/cancel', '/external-drivers/:personnelId/enrollment-session/cancel'], hrManage, async (req: AuthRequest, res) => {
   try {
     await workstationGateway().cancelEnrollmentSession({ enrollmentSessionId: String(req.body.enrollmentSessionId || ''),
-      personnelId: req.params.personnelId, actorId: req.user!.id });
+      personnelId: subjectKey(req), actorId: req.user!.id });
     return res.json({ success: true });
   } catch (error) { return handle(res, error); }
 });
-router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: AuthRequest, res) => {
+router.post(['/internal-drivers/:personnelId/enrollment', '/external-drivers/:personnelId/enrollment'], hrManage, async (req: AuthRequest, res) => {
   try {
     if (req.body.rawImage || req.body.fingerprintImage || req.body.templates || req.body.protectedTemplateMaterial) throw new DispatchConfirmationValidationError('Raw or caller-supplied biometric material is not accepted.');
     if (!simulatorEnabled()) {
       if (req.body.enrollmentSessionId) {
-        const data = await service().enrollStagedInternalDriver({ personnelId: req.params.personnelId, actorId: req.user!.id,
+        const data = await service().enrollStagedInternalDriver({ personnelId: subjectKey(req), actorId: req.user!.id,
           enrollmentSessionId: req.body.enrollmentSessionId, confirmationPhone: req.body.confirmationPhone, captures: req.body.captures });
         return res.status(201).json({ success: true, data });
       }
@@ -112,12 +128,12 @@ router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: A
       try {
         for (const capture of req.body.captures) claimed.push(await gateway.claimEnrollmentCapture({ challengeId: String(capture.challengeId || ''), actorId: req.user!.id,
           signedResponse: capture.signedResponse, transportEnvelope: capture.transportEnvelope }));
-        if (claimed.some((item) => item.challenge.subjectId !== req.params.personnelId) || new Set(claimed.map((item) => item.challenge.finger)).size < 2) throw new DispatchConfirmationValidationError('Enrollment captures do not belong to two distinct fingers for this driver.');
+        if (claimed.some((item) => item.challenge.subjectId !== subjectKey(req)) || new Set(claimed.map((item) => item.challenge.finger)).size < 2) throw new DispatchConfirmationValidationError('Enrollment captures do not belong to two distinct fingers for this driver.');
         const templates = claimed.map((item) => ({ finger: item.challenge.finger!, format: 'ISO-19794-2', material: item.templateMaterial,
           image: { material: item.imageMaterial, mimeType: 'image/png' as const, width: item.response.result.captureImage!.width, height: item.response.result.captureImage!.height },
           deviceEvidence: { commandId: item.challenge.id, deviceModel: item.response.result.device.model, deviceSerial: item.response.result.device.serial,
             captureQuality: item.response.result.captureQuality, liveness: item.response.result.liveness }, provenance: 'APPROVED_CONNECTOR' as const }));
-        const data = await service().enrollInternalDriver({ personnelId: req.params.personnelId,
+        const data = await service().enrollInternalDriver({ personnelId: subjectKey(req),
           confirmationPhone: req.body.confirmationPhone, templates, actorId: req.user!.id });
         success = true;
         return res.status(201).json({ success: true, data });
@@ -133,12 +149,12 @@ router.post('/internal-drivers/:personnelId/enrollment', hrManage, async (req: A
       const commandId = randomUUID();
       const result = await capture.execute({ commandId, nonce: randomUUID(), workstationId: String(req.body.workstationId || 'HR-ENROLLMENT'),
         issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(), operation: 'CAPTURE',
-        payload: { challengeId: `enroll:${req.params.personnelId}:${finger}` } });
+        payload: { challengeId: `enroll:${subjectKey(req)}:${finger}` } });
       if (result.captureQuality.state !== 'ACCEPTED' || result.liveness.state !== 'LIVE') throw new DispatchConfirmationConflictError('Enrollment capture did not pass quality and liveness checks.');
-      return { finger, format: 'ISO-19794-2', material: createHmac('sha256', process.env.DISPATCH_CONFIRMATION_OTP_SECRET!).update(`${commandId}:${req.params.personnelId}:${finger}`).digest(),
+      return { finger, format: 'ISO-19794-2', material: createHmac('sha256', process.env.DISPATCH_CONFIRMATION_OTP_SECRET!).update(`${commandId}:${subjectKey(req)}:${finger}`).digest(),
         deviceEvidence: { commandId, deviceModel: result.device.model, deviceSerial: result.device.serial, captureQuality: result.captureQuality, liveness: result.liveness }, provenance: 'APPROVED_CONNECTOR' as const };
     }));
-    return res.status(201).json({ success: true, data: await service().enrollInternalDriver({ personnelId: req.params.personnelId,
+    return res.status(201).json({ success: true, data: await service().enrollInternalDriver({ personnelId: subjectKey(req),
       confirmationPhone: req.body.confirmationPhone, templates, actorId: req.user!.id }) });
   } catch (error) { return handle(res, error); }
 });

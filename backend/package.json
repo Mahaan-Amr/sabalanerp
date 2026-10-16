@@ -157,6 +157,9 @@
     "test:accounting-parallel:db": "tsx --test src/services/__tests__/accountingParallelComparisonPrisma.integration.test.ts",
     "test:operation-minimums": "tsx --test src/services/__tests__/operationMinimumPermission.test.ts",
     "test:operation-minimums:db": "tsx src/services/__tests__/operationMinimum.integration.test.ts",
+    "test:external-vehicle-operations": "tsx --test src/services/__tests__/externalDriverRouteAvailability.test.ts src/services/__tests__/dispatchConfirmationEnrollmentPolicy.test.ts src/services/__tests__/biometricConnector.test.ts src/services/__tests__/biometricWorkstationGateway.test.ts src/services/__tests__/biometricStagedCaptureMaintenance.test.ts src/services/__tests__/biometricEnrollmentProjection.test.ts",
+    "test:external-vehicle-operations:db": "tsx --test --test-concurrency=1 src/services/__tests__/externalVehicleOperations.integration.test.ts src/services/__tests__/hrVehicleOperations.integration.test.ts",
+    "verify:external-vehicle-operations": "tsx scripts/verify-external-vehicle-operations.ts",
     "test:hr-vehicle-operations": "tsx --test src/routes/__tests__/hrVehicleOperationsRegression.test.ts src/services/__tests__/dispatchMasterDataPolicy.test.ts src/services/__tests__/companyVehicleEntry.test.ts src/services/__tests__/hrDriverDispatchReadiness.test.ts",
     "test:hr-vehicle-operations:db": "tsx --test src/services/__tests__/hrVehicleOperations.integration.test.ts",
     "verify:hr-vehicle-operations": "tsx scripts/verify-hr-vehicle-operations.ts"

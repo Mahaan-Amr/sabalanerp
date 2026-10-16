@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { confirmationActionsFor } from './dispatchConfirmationPresentation';
 
-test('external OTP sessions never offer biometric matching actions', () => {
+test('historical OTP-only external sessions do not offer new confirmation actions', () => {
   assert.deepEqual(confirmationActionsFor({
     driverSource: 'EXTERNAL',
     method: 'EXTERNAL_OTP_GUARD',
   }), {
     biometric: false,
     fallback: false,
-    otp: true,
+    otp: false,
   });
 });
 
@@ -34,3 +34,10 @@ test('unknown or inconsistent sessions fail closed', () => {
     otp: false,
   });
 });
+
+for (const source of ['INTERNAL', 'EXTERNAL']) {
+ test(`${source} biometric and fallback sessions expose identical actions`, () => {
+  assert.deepEqual(confirmationActionsFor({driverSource: source, method: `${source}_BIOMETRIC`}), {biometric:true, fallback:true, otp:false});
+  assert.deepEqual(confirmationActionsFor({driverSource: source, method: `${source}_FALLBACK`}), {biometric:false, fallback:false, otp:true});
+ });
+}

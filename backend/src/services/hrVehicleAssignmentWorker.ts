@@ -4,6 +4,7 @@ import {
   withRecoveryBackgroundWrite,
 } from "./recoveryRuntime";
 import {
+  externalAssignmentScope, assignmentPlanStore,
   HrVehicleError,
   auditHrVehicle,
   executeHrAssignmentPlan,
@@ -17,7 +18,9 @@ export const processDueHrAssignmentPlans = async (
   withRecoveryBackgroundWrite(async () => {
     const clock = now ? () => now : () => new Date();
     const dueAt = clock();
-    const due = await prisma.driverVehicleAssignmentPlan.findMany({
+    for (const external of [false, true]) {
+    const scoped = (tx: Prisma.TransactionClient) => external ? externalAssignmentScope(tx) : tx;
+    const due = await assignmentPlanStore(scoped(prisma)).findMany({
       where: { status: "PLANNED", effectiveFrom: { lte: dueAt } },
       orderBy: [
         { effectiveFrom: "asc" },
@@ -30,7 +33,8 @@ export const processDueHrAssignmentPlans = async (
     for (const plan of due) {
       try {
         await prisma.$transaction(
-          async (tx) => {
+          async (rawTx) => {
+            const tx = scoped(rawTx);
             await lockHrVehicleOperations(tx);
             await executeHrAssignmentPlan(
               tx,
@@ -49,9 +53,10 @@ export const processDueHrAssignmentPlans = async (
           console.error("HR assignment plan execution failed", plan.id, error);
           continue;
         }
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (rawTx) => {
+            const tx = scoped(rawTx);
           await lockHrVehicleOperations(tx);
-          const changed = await tx.driverVehicleAssignmentPlan.updateMany({
+          const changed = await assignmentPlanStore(tx).updateMany({
             where: {
               id: plan.id,
               status: "PLANNED",
@@ -79,6 +84,7 @@ export const processDueHrAssignmentPlans = async (
           }
         });
       }
+    }
     }
   });
 export const startHrVehicleAssignmentMaintenance = (prisma: PrismaClient) => {

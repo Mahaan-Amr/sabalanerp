@@ -13,6 +13,7 @@ export const requiredText = (value: unknown, label: string) => {
     throw new HrVehicleError(
       ((
         {
+          firstName: "نام", lastName: "نام خانوادگی", nationalCode: "کد ملی", phone: "شماره همراه", reference: "شماره مدرک",
           fleetCode: "کد ناوگان",
           vehicleType: "نوع خودرو",
           licenceNumber: "شماره گواهینامه",
@@ -79,7 +80,7 @@ export const fail = (res: Response, error: unknown, context: string) => {
         ? "شماره گواهینامه"
         : /vin/.test(target)
           ? "شماره شاسی"
-          : /personnelId/.test(target)
+          : /nationalCode/.test(target) ? "کد ملی" : /personnelId/.test(target)
             ? "پرسنل انتخاب‌شده"
             : /plate/i.test(target)
               ? "پلاک"

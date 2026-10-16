@@ -686,9 +686,10 @@ export default function SecurityVehiclesPage() {
                     <span className={labelClass}>راننده</span>
                     <ErpSelect
                       value={externalDriverId}
-                      onChange={(event) =>
-                        setExternalDriverId(event.target.value)
-                      }
+                      onChange={(event) => {
+                        setExternalDriverId(event.target.value);
+                        setExternalVehicleId(admissionOptions.externalDrivers.find((d: any) => d.id === event.target.value)?.vehicleId || "");
+                      }}
                     >
                       <option value="">انتخاب کنید</option>
                       {admissionOptions.externalDrivers.map((option: any) => (
@@ -702,12 +703,13 @@ export default function SecurityVehiclesPage() {
                     <span className={labelClass}>خودرو</span>
                     <ErpSelect
                       value={externalVehicleId}
+                      disabled
                       onChange={(event) =>
                         setExternalVehicleId(event.target.value)
                       }
                     >
                       <option value="">انتخاب کنید</option>
-                      {admissionOptions.externalVehicles.map((option: any) => (
+                      {admissionOptions.externalVehicles.filter((option: any) => option.id === externalVehicleId).map((option: any) => (
                         <option key={option.id} value={option.id}>
                           {option.vehicleType} · {option.plate}
                         </option>

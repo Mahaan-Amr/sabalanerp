@@ -5,7 +5,8 @@ import vehicleRouter from "../dispatch-master-data.vehicle-operations";
 import { prisma } from "../../lib/prisma";
 
 const invoke = async (router: any, path: string, body: any, tx: any) => {
-  const route = router.stack.find(
+  const stack = router.stack.flatMap((entry: any) => entry.handle?.stack || [entry]);
+  const route = stack.find(
     (entry: any) => entry.route?.path === path && entry.route.methods.post,
   ).route;
   const original = prisma.$transaction;

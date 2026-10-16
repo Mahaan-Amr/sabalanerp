@@ -7,7 +7,19 @@ import {
 import { authorizeHrUser } from "./hrAuthorizationService";
 import { FEATURES } from "../middleware/feature";
 
-type Tx = Prisma.TransactionClient;
+type Tx = Prisma.TransactionClient & { assignmentSource?: "EXTERNAL" };
+/** Explicit transaction scope: both registries use one assignment engine and transaction. */
+export const externalAssignmentScope = (tx: Prisma.TransactionClient): Tx =>
+  Object.assign(Object.create(tx), { assignmentSource: "EXTERNAL" as const });
+// Both stores expose the same scalar command contract; relation includes remain source-specific.
+export const assignmentStore = (tx: Tx): Prisma.TransactionClient["driverVehicleAssignment"] =>
+  (tx.assignmentSource === "EXTERNAL" ? tx.externalDriverVehicleAssignment : tx.driverVehicleAssignment) as Prisma.TransactionClient["driverVehicleAssignment"];
+export const assignmentPlanStore = (tx: Tx): Prisma.TransactionClient["driverVehicleAssignmentPlan"] =>
+  (tx.assignmentSource === "EXTERNAL" ? tx.externalDriverVehicleAssignmentPlan : tx.driverVehicleAssignmentPlan) as Prisma.TransactionClient["driverVehicleAssignmentPlan"];
+export const assignmentInclude = (tx: Tx): Prisma.DriverVehicleAssignmentInclude => ({
+  driver: tx.assignmentSource === "EXTERNAL" ? true : { include: { personnel: true } },
+  vehicle: { include: { plates: true } },
+});
 export class HrVehicleError extends Error {
   constructor(
     message: string,
@@ -68,6 +80,19 @@ export const lockHrDriverFacts = async (
   vehicleId?: string,
 ) => {
   await lockHrVehicleOperations(tx);
+  if (tx.assignmentSource === "EXTERNAL") {
+    await tx.$queryRaw`SELECT id FROM external_drivers WHERE id = ${driverId} FOR SHARE`;
+    await tx.$queryRaw`SELECT id FROM driver_biometric_enrollments WHERE "externalDriverId" = ${driverId} AND status = 'ACTIVE' FOR SHARE`;
+    await tx.$queryRaw`SELECT id FROM external_driver_documents WHERE "driverId" = ${driverId} FOR SHARE`;
+    await tx.$queryRaw`SELECT id FROM external_driver_vehicle_assignments WHERE "driverId" = ${driverId}
+      AND "effectiveFrom" <= ${at} AND ("effectiveTo" IS NULL OR "effectiveTo" > ${at}) FOR SHARE`;
+    if (vehicleId) {
+      await tx.$queryRaw`SELECT id FROM external_vehicles WHERE id = ${vehicleId} FOR SHARE`;
+      await tx.$queryRaw`SELECT id FROM external_vehicle_plates WHERE "vehicleId" = ${vehicleId} FOR SHARE`;
+      await tx.$queryRaw`SELECT id FROM external_vehicle_documents WHERE "vehicleId" = ${vehicleId} FOR SHARE`;
+    }
+    return;
+  }
   await tx.$queryRaw`SELECT "id" FROM "internal_driver_profiles" WHERE "id" = ${driverId} FOR SHARE`;
   await tx.$queryRaw`SELECT "id" FROM "internal_driver_eligibility_periods" WHERE "driverId" = ${driverId}
     AND "effectiveFrom" <= ${at} AND ("effectiveTo" IS NULL OR "effectiveTo" > ${at}) FOR SHARE`;
@@ -111,21 +136,22 @@ export const assertNoOpenHrOperations = async (
     where: {
       status: { in: [...openStates] },
       OR: [
-        { internalDriverId: { in: driverIds } },
-        { companyVehicleId: { in: vehicleIds } },
+        tx.assignmentSource === "EXTERNAL" ? { externalDriverId: { in: driverIds } } : { internalDriverId: { in: driverIds } },
+        tx.assignmentSource === "EXTERNAL" ? { externalVehicleId: { in: vehicleIds } } : { companyVehicleId: { in: vehicleIds } },
       ],
     },
     include: {
       internalDriver: { include: { personnel: true } },
       companyVehicle: { include: { plates: true } },
+      externalDriver: true, externalVehicle: { include: { plates: true } },
     },
     orderBy: { admittedAt: "asc" },
   });
   if (turn) {
-    const person = turn.internalDriver?.personnel;
+    const person = turn.internalDriver?.personnel || turn.externalDriver;
     const name = person ? `${person.firstName} ${person.lastName}` : "راننده";
     const plate =
-      turn.companyVehicle?.plates.find(
+      (turn.companyVehicle || turn.externalVehicle)?.plates.find(
         (item) =>
           item.effectiveFrom <= turn.admittedAt &&
           (!item.effectiveTo || item.effectiveTo > turn.admittedAt),
@@ -144,7 +170,7 @@ export const auditHrVehicle = (
   subjectType:
     | "INTERNAL_DRIVER_PROFILE"
     | "COMPANY_VEHICLE"
-    | "INTERNAL_DRIVER_ELIGIBILITY",
+    | "INTERNAL_DRIVER_ELIGIBILITY" | "EXTERNAL_DRIVER" | "EXTERNAL_VEHICLE",
   subjectId: string,
   eventType: string,
   actorId: string,
@@ -152,14 +178,15 @@ export const auditHrVehicle = (
 ) =>
   appendDispatchMasterDataAudit(tx, {
     ownerScope:
+      tx.assignmentSource === "EXTERNAL" ? "GUARD" :
       subjectType === "INTERNAL_DRIVER_ELIGIBILITY"
         ? "HR"
         : "VEHICLE_OPERATIONS",
-    subjectType,
+    subjectType: tx.assignmentSource === "EXTERNAL" ? (["COMPANY_VEHICLE", "EXTERNAL_VEHICLE"].includes(subjectType) ? "EXTERNAL_VEHICLE" : "EXTERNAL_DRIVER") : subjectType,
     subjectId,
     eventType,
     actorId,
-    payload,
+    payload: { automaticAction: true, ...(payload as Record<string, unknown>) },
   });
 
 export const validateDriverForAssignment = async (
@@ -169,6 +196,10 @@ export const validateDriverForAssignment = async (
   at: Date,
 ) => {
   await lockHrDriverFacts(tx, driverId, at, vehicleId);
+  if (tx.assignmentSource === "EXTERNAL") {
+    const { validateExternalAssignment } = await import("./externalVehicleOperations");
+    return validateExternalAssignment(tx, driverId, vehicleId, at);
+  }
   const [driver, vehicle] = await Promise.all([
     tx.internalDriverProfile.findUnique({
       where: { id: driverId },
@@ -273,19 +304,16 @@ export const previewHrAssignment = async (
     input.vehicleId,
     from,
   );
-  let current = await tx.driverVehicleAssignment.findMany({
+  let current = await assignmentStore(tx).findMany({
     where: {
       AND: [
         activePeriodAt(from),
         { OR: [{ driverId: input.driverId }, { vehicleId: input.vehicleId }] },
       ],
     },
-    include: {
-      driver: { include: { personnel: true } },
-      vehicle: { include: { plates: true } },
-    },
+    include: assignmentInclude(tx),
   });
-  const relevantPlans = await tx.driverVehicleAssignmentPlan.findMany({
+  const relevantPlans = await assignmentPlanStore(tx).findMany({
     where: {
       status: { in: ["PLANNED", "NEEDS_ATTENTION"] },
       id: { not: input.ignorePlanId },
@@ -295,10 +323,7 @@ export const previewHrAssignment = async (
         { expectedAssignmentIds: { hasSome: current.map((item) => item.id) } },
       ],
     },
-    include: {
-      driver: { include: { personnel: true } },
-      vehicle: { include: { plates: true } },
-    },
+    include: assignmentInclude(tx),
   });
   const conflictingPlans = relevantPlans.filter(
     (plan) =>
@@ -365,14 +390,14 @@ export const cancelHrAssignmentPlans = async (
   actorId: string,
 ) => {
   for (const id of ids) {
-    const plan = await tx.driverVehicleAssignmentPlan.findUnique({
+    const plan = await assignmentPlanStore(tx).findUnique({
       where: { id },
     });
     if (!plan || !["PLANNED", "NEEDS_ATTENTION"].includes(plan.status))
       throw new HrVehicleError(
         "وضعیت برنامه تغییر کرده است. فهرست را به‌روزرسانی کنید.",
       );
-    await tx.driverVehicleAssignmentPlan.update({
+    await assignmentPlanStore(tx).update({
       where: { id },
       data: { status: "CANCELLED", blockedReason: null },
     });
@@ -406,7 +431,7 @@ export const closeHrAssignment = async (
   now: Date,
 ) => {
   const at = afterPeriodStart(now, [assignment]);
-  await tx.driverVehicleAssignment.update({
+  await assignmentStore(tx).update({
     where: { id: assignment.id },
     data: { effectiveTo: at },
   });
@@ -445,7 +470,7 @@ export const assignHrVehicle = async (
   assertAssignmentIdentity(input);
   // Repeating the active pairing is intentionally independent of readiness and has no writes.
   const from = ordinaryChangeInstant(input.effectiveFrom, now, true);
-  const existing = await tx.driverVehicleAssignment.findFirst({
+  const existing = await assignmentStore(tx).findFirst({
     where: {
       driverId: input.driverId,
       vehicleId: input.vehicleId,
@@ -460,7 +485,7 @@ export const assignHrVehicle = async (
   ) {
     const deadline = new Date(String(input.effectiveTo));
     if (!Number.isNaN(deadline.getTime()) && deadline > now) {
-      const sameEnd = await tx.driverVehicleAssignmentPlan.findFirst({
+      const sameEnd = await assignmentPlanStore(tx).findFirst({
         where: {
           assignmentId: existing.id,
           action: "END",
@@ -512,7 +537,7 @@ export const assignHrVehicle = async (
     );
   await cancelHrAssignmentPlans(tx, cancelling, actorId);
   if (from <= now && existing && preview.effectiveTo) {
-    const sameEnd = await tx.driverVehicleAssignmentPlan.findFirst({
+    const sameEnd = await assignmentPlanStore(tx).findFirst({
       where: {
         assignmentId: existing.id,
         action: "END",
@@ -526,7 +551,7 @@ export const assignHrVehicle = async (
         unchanged: true,
         message: "موعد پایان این تخصیص از قبل ثبت شده است.",
       };
-    const endPlan = await tx.driverVehicleAssignmentPlan.create({
+    const endPlan = await assignmentPlanStore(tx).create({
       data: {
         driverId: input.driverId,
         vehicleId: input.vehicleId,
@@ -560,7 +585,7 @@ export const assignHrVehicle = async (
     };
   }
   if (preview.effectiveFrom > now) {
-    const plan = await tx.driverVehicleAssignmentPlan.create({
+    const plan = await assignmentPlanStore(tx).create({
       data: {
         driverId: input.driverId,
         vehicleId: input.vehicleId,
@@ -591,7 +616,7 @@ export const assignHrVehicle = async (
   const at = afterPeriodStart(now, preview.current);
   for (const current of preview.current)
     await closeHrAssignment(tx, current, actorId, at);
-  const assignment = await tx.driverVehicleAssignment.create({
+  const assignment = await assignmentStore(tx).create({
     data: {
       driverId: input.driverId,
       vehicleId: input.vehicleId,
@@ -601,7 +626,7 @@ export const assignHrVehicle = async (
     },
   });
   if (preview.effectiveTo)
-    await tx.driverVehicleAssignmentPlan.create({
+    await assignmentPlanStore(tx).create({
       data: {
         driverId: input.driverId,
         vehicleId: input.vehicleId,
@@ -640,14 +665,14 @@ export const endHrAssignment = async (
   confirmedPlanIds?: string[],
   now = new Date(),
 ) => {
-  const current = await tx.driverVehicleAssignment.findUnique({
+  const current = await assignmentStore(tx).findUnique({
     where: { id },
   });
   if (!current)
     throw new HrVehicleError("تخصیص پیدا نشد. فهرست را به‌روزرسانی کنید.", 404);
   if (current.effectiveTo && current.effectiveTo <= now) return current;
   await assertNoOpenHrOperations(tx, [current.driverId], [current.vehicleId]);
-  const endPlans = await tx.driverVehicleAssignmentPlan.findMany({
+  const endPlans = await assignmentPlanStore(tx).findMany({
     where: { assignmentId: id, status: { in: ["PLANNED", "NEEDS_ATTENTION"] } },
   });
   if (
@@ -677,7 +702,7 @@ export const endHrSubjectAssignments = async (
   cancelPlanIds: string[],
   now: Date,
 ) => {
-  const current = await tx.driverVehicleAssignment.findMany({
+  const current = await assignmentStore(tx).findMany({
     where: { ...where, ...activePeriodAt(now) },
   });
   await assertNoOpenHrOperations(
@@ -691,7 +716,7 @@ export const endHrSubjectAssignments = async (
       ...(where.vehicleId ? [where.vehicleId] : []),
     ],
   );
-  const plans = await tx.driverVehicleAssignmentPlan.findMany({
+  const plans = await assignmentPlanStore(tx).findMany({
     where: { ...where, status: { in: ["PLANNED", "NEEDS_ATTENTION"] } },
   });
   if (
@@ -717,7 +742,7 @@ export const executeHrAssignmentPlan = async (
   input: { expectedAssignmentIds?: string[]; cancelPlanIds?: string[] } = {},
   now = new Date(),
 ) => {
-  const plan = await tx.driverVehicleAssignmentPlan.findUnique({
+  const plan = await assignmentPlanStore(tx).findUnique({
     where: { id },
   });
   if (!plan)
@@ -750,7 +775,7 @@ export const executeHrAssignmentPlan = async (
       );
   }
   if (plan.action === "END") {
-    const assignment = await tx.driverVehicleAssignment.findUnique({
+    const assignment = await assignmentStore(tx).findUnique({
       where: { id: plan.assignmentId || "" },
     });
     if (
@@ -784,12 +809,12 @@ export const executeHrAssignmentPlan = async (
       actorId,
       now,
     );
-    await tx.driverVehicleAssignmentPlan.update({
+    await assignmentPlanStore(tx).update({
       where: { id },
       data: { assignmentId: result.data.id },
     });
   }
-  const after = await tx.driverVehicleAssignmentPlan.update({
+  const after = await assignmentPlanStore(tx).update({
     where: { id },
     data: { status: "APPLIED", blockedReason: null },
   });

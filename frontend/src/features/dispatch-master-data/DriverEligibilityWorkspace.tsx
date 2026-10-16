@@ -1,0 +1,748 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
+import Image from "next/image";
+import { FaFingerprint, FaPause, FaPlay, FaUserCheck } from "react-icons/fa";
+import {
+  ErpBadge,
+  ErpButton,
+  ErpCard,
+  ErpEmptyState,
+  ErpFieldView,
+  ErpInlineState,
+  ErpInput,
+  ErpLoading,
+  ErpSection,
+  ErpSegmentedControl,
+  ErpSheet,
+  ErpWorkspacePage,
+} from "@/components/erp";
+import { dispatchConfirmationAPI, dispatchMasterDataAPI } from "@/lib/api";
+import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
+import { hrOperationsError } from "@/features/dispatch-master-data/hrOperationsError";
+
+import {
+  biometricEnrollmentPresentation,
+  DriverEligibilitySection,
+  driverEligibilitySections,
+} from "@/features/hr/driverEligibilityPresentation";
+import { biometricConnectorClient } from "@/lib/biometricConnector";
+import {
+  captureEnrollmentFingers,
+  captureEvidenceTone,
+  enrollmentSessionExpired,
+  EnrollmentSession,
+  EnrollmentCaptureEvidence,
+  EnrollmentFinger,
+} from "@/features/biometric/driverEnrollmentWorkflow";
+import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
+import { userFacingError } from "@/features/dispatch/userFacingError";
+
+const today = () => new Date().toISOString().slice(0, 10);
+const field = "space-y-1.5 text-sm font-medium sds-text-secondary";
+
+const eligibilityLabel = (status?: string | null) => {
+  if (status === "ELIGIBLE") return "مجاز به رانندگی";
+  if (status === "SUSPENDED") return "صلاحیت تعلیق‌شده";
+  return "بدون صلاحیت فعال";
+};
+
+const fingerLabel = (finger: string) =>
+  finger === "RIGHT_INDEX"
+    ? "انگشت اشاره راست"
+    : finger === "LEFT_INDEX"
+      ? "انگشت اشاره چپ"
+      : finger;
+
+export default function DriverEligibilityWorkspace({ external = false, workspace = "hr" }: {external?: boolean; workspace?: "hr" | "security"}) {
+  const id = String(useParams<{ id: string }>().id);
+  const personnelId = external ? `external:${id}` : id;
+  const [record, setRecord] = useState<any>(null);
+  const [capabilities, setCapabilities] = useState({
+    canManageEligibility: false,
+    canManageBiometricEnrollment: false,
+  });
+  const [section, setSection] = useState<DriverEligibilitySection>("status");
+  const [eligibilityDialogOpen, setEligibilityDialogOpen] = useState(false);
+  const [deactivationDialogOpen, setDeactivationDialogOpen] = useState(false);
+  const [imagesRequested, setImagesRequested] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
+  const [confirmationPhone, setConfirmationPhone] = useState("");
+  const [enrollmentId, setEnrollmentId] = useState<string | null>(null);
+  const [pendingFinger, setPendingFinger] = useState<EnrollmentFinger | null>(
+    null,
+  );
+  const [captureEvidence, setCaptureEvidence] = useState<
+    EnrollmentCaptureEvidence[]
+  >([]);
+  const [enrollmentImages, setEnrollmentImages] = useState<
+    Record<string, string>
+  >({});
+  const [notice, setNotice] = useState<{
+    kind: "success" | "error";
+    text: string;
+  } | null>(null);
+  const placementResolver = useRef<{
+    finger: EnrollmentFinger;
+    resolve: () => void;
+  } | null>(null);
+  const mutationLock = useRef(false);
+  const captureSession = useRef<EnrollmentSession | null>(null);
+  const workflowGeneration = useRef(0);
+
+  useEffect(() => {
+    captureSession.current = null;
+    setCaptureEvidence([]);
+    return () => {
+      workflowGeneration.current += 1;
+      const abandonedSession = captureSession.current;
+      captureSession.current = null;
+      if (abandonedSession)
+        void dispatchConfirmationAPI
+          .cancelEnrollmentSession(
+            personnelId,
+            abandonedSession.enrollmentSessionId,
+          )
+          .catch(() => undefined);
+      placementResolver.current?.resolve();
+      placementResolver.current = null;
+    };
+  }, [personnelId, external, id]);
+
+  const requestFingerPlacement = useCallback(
+    (finger: EnrollmentFinger) =>
+      new Promise<void>((resolve) => {
+        placementResolver.current = { finger, resolve };
+        setPendingFinger(finger);
+      }),
+    [],
+  );
+
+  const confirmFingerPlacement = () => {
+    const pending = placementResolver.current;
+    if (!pending) return;
+    placementResolver.current = null;
+    setPendingFinger(null);
+    pending.resolve();
+  };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response =
+        await (external ? dispatchMasterDataAPI.getExternalDriverEligibility(id) : dispatchMasterDataAPI.getPersonnelDriverEligibility(personnelId));
+      setRecord(response.data.data);
+      setCapabilities(
+        response.data.capabilities || {
+          canManageEligibility: false,
+          canManageBiometricEnrollment: false,
+        },
+      );
+      setEnrollmentId(response.data.data.activeBiometricEnrollment?.id || null);
+    } catch (error: any) {
+      setNotice({
+        kind: "error",
+        text: hrOperationsError(error, {
+          failedAction: "دریافت صلاحیت رانندگی",
+          nextStep: "به‌روزرسانی صفحه و مجوز مشاهده را بررسی کنید",
+        }),
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [personnelId, external, id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+  useEffect(() => {
+    setImagesRequested(false);
+    setEnrollmentImages({});
+  }, [enrollmentId]);
+
+  const shouldLoadEnrollmentImages = Boolean(enrollmentId) && imagesRequested;
+  useEffect(() => {
+    const enrollment = record?.activeBiometricEnrollment;
+    const templates = Array.isArray(enrollment?.templates)
+      ? enrollment.templates.filter(
+          (item: any) => item.imageMimeType === "image/png",
+        )
+      : [];
+    let disposed = false;
+    const urls: string[] = [];
+    setEnrollmentImages({});
+    if (shouldLoadEnrollmentImages && enrollment?.id && templates.length) {
+      void Promise.all(
+        templates.map(async (item: any) => {
+          const response = await dispatchConfirmationAPI.getEnrollmentImage(
+            enrollment.id,
+            item.finger,
+          );
+          const url = URL.createObjectURL(response.data);
+          urls.push(url);
+          return [item.finger, url] as const;
+        }),
+      )
+        .then((entries) => {
+          if (!disposed) setEnrollmentImages(Object.fromEntries(entries));
+        })
+        .catch(() => {
+          if (!disposed)
+            setNotice({
+              kind: "error",
+              text: "دریافت تصویر اثر انگشت ممکن نشد.",
+            });
+        });
+    }
+    return () => {
+      disposed = true;
+      urls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [record?.activeBiometricEnrollment, shouldLoadEnrollmentImages]);
+
+  const run = async (
+    action: () => Promise<any>,
+    message: string,
+  ): Promise<boolean> => {
+    if (mutationLock.current) return false;
+    mutationLock.current = true;
+    setSaving(true);
+    setNotice(null);
+    try {
+      await action();
+      setNotice({ kind: "success", text: message });
+      await load();
+      return true;
+    } catch (error: any) {
+      setNotice({
+        kind: "error",
+        text: hrOperationsError(error, {
+          failedAction: "ثبت اقدام صلاحیت رانندگی",
+          nextStep: "وضعیت فعلی را بررسی کنید",
+          preserveInput: true,
+          uncertainMutation: true,
+        }),
+      });
+      return false;
+    } finally {
+      mutationLock.current = false;
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <ErpLoading />;
+  if (!record)
+    return (
+      <ErpInlineState kind="error" title={notice?.text || "راننده پیدا نشد."} />
+    );
+
+  const driver = record.driver;
+  const eligibility = driver?.currentEligibility;
+  const eligible = eligibility?.status === "ELIGIBLE";
+  const enrollment = record.activeBiometricEnrollment;
+  const enrollmentView = biometricEnrollmentPresentation({
+    hasActiveEnrollment: Boolean(enrollmentId),
+    imagesRequested,
+  });
+  const templates = Array.isArray(enrollment?.templates)
+    ? enrollment.templates
+    : [];
+  const imageTemplates = templates.filter(
+    (item: any) => item.imageMimeType === "image/png",
+  );
+  const closeEligibilityDialog = () => {
+    if (saving) return;
+    setEligibilityDialogOpen(false);
+  };
+  const closeDeactivationDialog = () => {
+    if (saving) return;
+    setDeactivationDialogOpen(false);
+  };
+  const submitEligibility = async () => {
+    const succeeded = await run(
+      () =>
+        external ? dispatchMasterDataAPI.transitionExternalDriverStatus(id, { status: eligible ? "RESTRICTED" : "ACTIVE" }) : driver
+          ? dispatchMasterDataAPI.transitionInternalDriverEligibility(
+              driver.id,
+              {
+                status: eligible ? "SUSPENDED" : "ELIGIBLE",
+              },
+            )
+          : dispatchMasterDataAPI.createInternalDriver({
+              personnelId,
+            }),
+      driver ? "وضعیت صلاحیت ثبت شد." : "راننده داخلی تعریف شد.",
+    );
+    if (succeeded) closeEligibilityDialog();
+  };
+  const enrollDriver = async () => {
+    if (!confirmationPhone.trim()) return;
+    const succeeded = await run(async () => {
+      const generation = workflowGeneration.current;
+      if (
+        !captureSession.current ||
+        enrollmentSessionExpired(captureSession.current)
+      ) {
+        captureSession.current = {
+          enrollmentSessionId: crypto.randomUUID(),
+          captures: [],
+        };
+        setCaptureEvidence([]);
+      }
+      const session = captureSession.current;
+      const captures = await captureEnrollmentFingers({
+        personnelId,
+        session,
+        isCancelled: () => generation !== workflowGeneration.current,
+        acceptEnrollmentCapture:
+          dispatchConfirmationAPI.acceptEnrollmentCapture,
+        getConnectorStatus: biometricConnectorClient.status,
+        createEnrollmentCommand:
+          dispatchConfirmationAPI.createEnrollmentCommand,
+        executeConnectorCommand: biometricConnectorClient.execute,
+        requestFingerPlacement,
+        onCaptureComplete: (evidence) =>
+          setCaptureEvidence((current) => [
+            ...current.filter((item) => item.finger !== evidence.finger),
+            evidence,
+          ]),
+      });
+      return dispatchConfirmationAPI.enrollInternalDriver(personnelId, {
+        enrollmentSessionId: session.enrollmentSessionId,
+        confirmationPhone: confirmationPhone.trim(),
+        captures,
+      });
+    }, "ثبت بیومتریک ذخیره شد.");
+    if (succeeded) {
+      setConfirmationPhone("");
+      captureSession.current = null;
+      setCaptureEvidence([]);
+    }
+  };
+  const cancelCaptureSession = async () => {
+    workflowGeneration.current += 1;
+    const abandonedSession = captureSession.current;
+    captureSession.current = null;
+    setCaptureEvidence([]);
+    setPendingFinger(null);
+    placementResolver.current?.resolve();
+    placementResolver.current = null;
+    if (abandonedSession) {
+      try {
+        await dispatchConfirmationAPI.cancelEnrollmentSession(
+          personnelId,
+          abandonedSession.enrollmentSessionId,
+        );
+      } catch (error) {
+        setNotice({
+          kind: "error",
+          text: userFacingError(
+            error,
+            "لغو ثبت موقت ممکن نشد. اطلاعات موقت با پایان مهلت پاک می‌شود.",
+          ),
+        });
+      }
+    }
+  };
+  const deactivateEnrollment = async () => {
+    if (!enrollmentId) return;
+    const succeeded = await run(
+      () =>
+        dispatchConfirmationAPI.deactivateEnrollment(
+          enrollmentId,
+          "غیرفعال‌سازی ثبت بیومتریک توسط منابع انسانی",
+        ),
+      "ثبت بیومتریک غیرفعال شد.",
+    );
+    if (succeeded) closeDeactivationDialog();
+  };
+
+  return (
+    <ErpWorkspacePage
+      title={external ? "پرونده راننده بیرونی" : "صلاحیت رانندگی پرسنل"}
+      context={external ? `${record.identity.firstName} ${record.identity.lastName} · بیرونی` : `${record.personnel.firstName} ${record.personnel.lastName} · ${record.personnel.employeeNumber || "بدون شماره پرسنلی"}`}
+      backHref={external ? (workspace === "security" ? "/dashboard/security/external-registry" : "/dashboard/hr/vehicle-operations") : "/dashboard/hr/personnel"}
+      className="pb-24 lg:pb-4"
+    >
+      {notice && (
+        <div id="hr-personnel-notice">
+          <ErpInlineState kind={notice.kind} title={notice.text} />
+        </div>
+      )}
+
+      <ErpSegmentedControl
+        value={section}
+        onChange={setSection}
+        options={driverEligibilitySections}
+      />
+
+      {section === "status" && (
+        <ErpSection
+          title="وضعیت راننده"
+          actions={
+            capabilities.canManageEligibility
+              ? [
+                  {
+                    label: driver ? "تغییر وضعیت" : "تعریف راننده",
+                    icon: driver ? (eligible ? FaPause : FaPlay) : FaUserCheck,
+                    variant: "outline",
+                    tone: eligible ? "warning" : "success",
+                    onClick: () => setEligibilityDialogOpen(true),
+                  },
+                ]
+              : undefined
+          }
+        >
+          <ErpCard className="p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ErpFieldView
+                label={external ? "راننده بیرونی" : "راننده داخلی"}
+                value={driver ? "تعریف شده" : "تعریف نشده"}
+                tone={driver ? "success" : "warning"}
+              />
+              <ErpFieldView
+                label="صلاحیت جاری"
+                value={eligibilityLabel(eligibility?.status)}
+                tone={eligible ? "success" : "warning"}
+              />
+              <ErpFieldView
+                label="تاریخ اثر"
+                value={
+                  eligibility?.effectiveFrom
+                    ? new Date(eligibility.effectiveFrom).toLocaleDateString(
+                        "fa-IR",
+                      )
+                    : "ثبت نشده"
+                }
+              />
+              <ErpFieldView
+                label="شرح اقدام"
+                value={eligibility?.reason || "ثبت نشده"}
+              />
+            </div>
+          </ErpCard>
+        </ErpSection>
+      )}
+
+      {section === "biometric" && !driver && (
+        <ErpEmptyState
+          icon={FaUserCheck}
+          title={external ? "ابتدا راننده بیرونی را ثبت کنید" : "ابتدا راننده داخلی را تعریف کنید"}
+          description="ثبت بیومتریک به پرونده راننده با مجوز فعال نیاز دارد."
+          action={{
+            label: "رفتن به وضعیت راننده",
+            onClick: () => setSection("status"),
+          }}
+        />
+      )}
+
+      {section === "biometric" &&
+        driver &&
+        !capabilities.canManageBiometricEnrollment && (
+          <ErpInlineState
+            kind="permission"
+            title="اجازه مدیریت ثبت بیومتریک این راننده را ندارید."
+          />
+        )}
+
+      {section === "biometric" &&
+        driver &&
+        capabilities.canManageBiometricEnrollment &&
+        enrollmentView.showActiveSummary && (
+          <ErpSection
+            title="بیومتریک فعال"
+            actions={[
+              ...(imageTemplates.length
+                ? [
+                    {
+                      label: imagesRequested
+                        ? "پنهان‌کردن تصاویر"
+                        : "مشاهده تصاویر",
+                      icon: FaFingerprint,
+                      variant: "outline" as const,
+                      onClick: () => setImagesRequested((value) => !value),
+                    },
+                  ]
+                : []),
+              {
+                label: "غیرفعال‌سازی",
+                icon: FaPause,
+                tone: "danger" as const,
+                variant: "ghost" as const,
+                onClick: () => setDeactivationDialogOpen(true),
+              },
+            ]}
+          >
+            <ErpInlineState
+              kind="success"
+              title="ثبت بیومتریک راننده فعال است."
+            />
+            <div className="grid gap-3 sm:grid-cols-2">
+              {templates.map((item: any) => (
+                <ErpCard key={item.finger} className="p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold sds-text-primary">
+                      {fingerLabel(item.finger)}
+                    </p>
+                    <ErpBadge tone="success">ثبت‌شده</ErpBadge>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {item.captureQuality && (
+                      <ErpBadge
+                        tone={
+                          item.captureQuality.state === "ACCEPTED"
+                            ? "success"
+                            : "warning"
+                        }
+                      >
+                        کیفیت {item.captureQuality.score}
+                      </ErpBadge>
+                    )}
+                    {item.liveness && (
+                      <ErpBadge
+                        tone={
+                          item.liveness.state === "LIVE" ? "success" : "warning"
+                        }
+                      >
+                        زنده‌بودن{" "}
+                        {item.liveness.state === "LIVE"
+                          ? "تأیید شد"
+                          : operationalStatusLabel(item.liveness.state)}
+                      </ErpBadge>
+                    )}
+                  </div>
+                </ErpCard>
+              ))}
+            </div>
+
+            {imagesRequested && imageTemplates.length > 0 && (
+              <ErpCard className="p-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {imageTemplates.map((item: any) => (
+                    <div key={item.finger} className="space-y-2 text-center">
+                      <p className="text-sm font-medium sds-text-secondary">
+                        {fingerLabel(item.finger)}
+                      </p>
+                      {enrollmentImages[item.finger] ? (
+                        <Image
+                          unoptimized
+                          src={enrollmentImages[item.finger]}
+                          alt={`اثر انگشت ${fingerLabel(item.finger)}`}
+                          width={item.imageWidth}
+                          height={item.imageHeight}
+                          className="mx-auto max-h-52 w-auto rounded-lg object-contain"
+                        />
+                      ) : (
+                        <ErpLoading />
+                      )}
+                      <p className="text-xs sds-text-secondary">
+                        {item.imageWidth}×{item.imageHeight} پیکسل
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </ErpCard>
+            )}
+          </ErpSection>
+        )}
+
+      {section === "biometric" &&
+        driver &&
+        capabilities.canManageBiometricEnrollment &&
+        enrollmentView.showEnrollmentForm && (
+          <ErpSection
+            title="ثبت بیومتریک"
+            description="شماره تأیید راننده را وارد کنید؛ سامانه دو انگشت را مرحله‌به‌مرحله ثبت می‌کند."
+          >
+            <div className="max-w-xl space-y-4">
+              <label className={field}>
+                شماره تأیید راننده
+                <ErpInput
+                  aria-describedby={
+                    notice?.kind === "error" ? "hr-personnel-notice" : undefined
+                  }
+                  value={confirmationPhone}
+                  onChange={(event) => setConfirmationPhone(event.target.value)}
+                />
+              </label>
+              <div className="flex flex-wrap justify-end gap-2">
+                {(captureEvidence.length > 0 || pendingFinger) && (
+                  <ErpButton
+                    label="لغو برداشت‌ها و شروع دوباره"
+                    disabled={saving && !pendingFinger}
+                    variant="outline"
+                    tone="warning"
+                    onClick={() => void cancelCaptureSession()}
+                  />
+                )}
+                <ErpButton
+                  label="شروع ثبت بیومتریک"
+                  icon={FaFingerprint}
+                  disabled={
+                    dispatchTimelineStale || saving || !confirmationPhone.trim()
+                  }
+                  onClick={() => void enrollDriver()}
+                />
+              </div>
+              {pendingFinger && (
+                <ErpCard className="space-y-3 p-4">
+                  <ErpInlineState
+                    kind="stale"
+                    title={
+                      pendingFinger === "RIGHT_INDEX"
+                        ? "انگشت اشاره راست را روی حسگر قرار دهید؛ سپس اسکن را شروع کنید."
+                        : "انگشت راست را بردارید و انگشت اشاره چپ را روی حسگر قرار دهید."
+                    }
+                  />
+                  <ErpButton
+                    label={
+                      pendingFinger === "RIGHT_INDEX"
+                        ? "اسکن انگشت راست"
+                        : "اسکن انگشت چپ"
+                    }
+                    icon={FaFingerprint}
+                    onClick={confirmFingerPlacement}
+                  />
+                </ErpCard>
+              )}
+              {captureEvidence.length > 0 && (
+                <ErpCard className="space-y-2 p-4">
+                  {captureEvidence.map((evidence) => (
+                    <div
+                      key={evidence.finger}
+                      className="flex flex-wrap items-center gap-2 text-sm"
+                    >
+                      <span className="font-medium sds-text-primary">
+                        {fingerLabel(evidence.finger)}
+                      </span>
+                      <ErpBadge tone={evidence.accepted ? "info" : "danger"}>
+                        {evidence.accepted
+                          ? "پذیرفته‌شده موقت؛ در انتظار ثبت نهایی"
+                          : "برداشت ناموفق"}
+                      </ErpBadge>
+                      <ErpBadge
+                        tone={captureEvidenceTone(
+                          evidence.qualityState,
+                          "ACCEPTED",
+                        )}
+                      >
+                        کیفیت{" "}
+                        {evidence.qualityScore ??
+                          operationalStatusLabel(evidence.qualityState)}
+                      </ErpBadge>
+                      <ErpBadge
+                        tone={captureEvidenceTone(
+                          evidence.livenessState,
+                          "LIVE",
+                        )}
+                      >
+                        زنده‌بودن{" "}
+                        {evidence.livenessState === "LIVE"
+                          ? "تأیید شد"
+                          : operationalStatusLabel(evidence.livenessState)}
+                      </ErpBadge>
+                    </div>
+                  ))}
+                </ErpCard>
+              )}
+            </div>
+          </ErpSection>
+        )}
+
+      <div hidden={section !== "dispatch"}>
+        <RoleAwareDispatchCases
+          workspace={external ? "vehicle-operations" : "hr"}
+          subjectId={external ? id : personnelId}
+          onStaleChange={setDispatchTimelineStale}
+        />
+      </div>
+
+      <ErpSheet
+        open={eligibilityDialogOpen}
+        onClose={closeEligibilityDialog}
+        title={
+          !driver
+            ? "تعریف راننده داخلی"
+            : eligible
+              ? "تعلیق صلاحیت رانندگی"
+              : "بازگردانی صلاحیت رانندگی"
+        }
+        presentation="modal"
+        pending={saving}
+        footer={
+          <div className="flex justify-end gap-2">
+            <ErpButton
+              label="انصراف"
+              variant="ghost"
+              disabled={saving}
+              onClick={closeEligibilityDialog}
+            />
+            <ErpButton
+              label={
+                !driver
+                  ? "تعریف راننده"
+                  : eligible
+                    ? "ثبت تعلیق"
+                    : "بازگردانی صلاحیت"
+              }
+              icon={!driver ? FaUserCheck : eligible ? FaPause : FaPlay}
+              tone={eligible ? "warning" : "success"}
+              variant="solid"
+              disabled={dispatchTimelineStale || saving}
+              onClick={() => void submitEligibility()}
+            />
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {notice?.kind === "error" && (
+            <ErpInlineState kind="error" title={notice.text} />
+          )}
+          <ErpFieldView label="زمان اثر" value="همین حالا" />
+          <p className="text-sm sds-text-secondary">
+            تغییر از لحظه ثبت اعمال می‌شود؛ سوابق و تخصیص خودرو حفظ می‌شوند.
+          </p>
+        </div>
+      </ErpSheet>
+
+      <ErpSheet
+        open={deactivationDialogOpen}
+        onClose={closeDeactivationDialog}
+        title="غیرفعال‌سازی ثبت بیومتریک"
+        presentation="modal"
+        pending={saving}
+        footer={
+          <div className="flex justify-end gap-2">
+            <ErpButton
+              label="انصراف"
+              variant="ghost"
+              disabled={saving}
+              onClick={closeDeactivationDialog}
+            />
+            <ErpButton
+              label="تأیید غیرفعال‌سازی"
+              icon={FaPause}
+              tone="danger"
+              variant="solid"
+              disabled={dispatchTimelineStale || saving}
+              onClick={() => void deactivateEnrollment()}
+            />
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {notice?.kind === "error" && (
+            <ErpInlineState kind="error" title={notice.text} />
+          )}
+          <p className="text-sm leading-7 sds-text-secondary">
+            پس از غیرفعال‌سازی، برای تأییدهای بعدی باید ثبت بیومتریک جدید انجام
+            شود. سابقه قبلی حذف نمی‌شود.
+          </p>
+        </div>
+      </ErpSheet>
+    </ErpWorkspacePage>
+  );
+}

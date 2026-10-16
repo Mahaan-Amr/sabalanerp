@@ -428,6 +428,17 @@ export const hrAPI = {
   applyHrRedesignBackfill: () => api.post('/hr/migration/redesign-backfill'),
 };
 
+export const externalVehicleAssignmentsAPI = {
+  list: () => api.get('/dispatch-master-data/external/driver-vehicle-assignments'),
+  preview: (data: any) => api.post('/dispatch-master-data/external/driver-vehicle-assignments/preview', data),
+  assign: (data: any) => api.post('/dispatch-master-data/external/driver-vehicle-assignments', data),
+  end: (id: string, data: any) => api.post(`/dispatch-master-data/external/driver-vehicle-assignments/${id}/end`, data),
+  updatePlan: (id: string, data: any) => api.put(`/dispatch-master-data/external/driver-vehicle-assignment-plans/${id}`, data),
+  cancelPlan: (id: string, data: any) => api.post(`/dispatch-master-data/external/driver-vehicle-assignment-plans/${id}/cancel`, data),
+  executePlan: (id: string, data: any) => api.post(`/dispatch-master-data/external/driver-vehicle-assignment-plans/${id}/execute`, data),
+};
+const biometricDriverPath = (key: string) => key.startsWith('external:') ? `external-drivers/${encodeURIComponent(key.slice(9))}` : `internal-drivers/${encodeURIComponent(key)}`;
+
 export const dispatchMasterDataAPI = {
   getInternalDrivers: (params?: { at?: string }) => api.get('/dispatch-master-data/internal-drivers', { params }),
   getPersonnelDriverEligibility: (personnelId: string, params?: { at?: string }) => api.get(`/dispatch-master-data/internal-drivers/personnel/${personnelId}`, { params }),
@@ -451,6 +462,9 @@ export const dispatchMasterDataAPI = {
   cancelVehicleAssignmentPlan: (id: string, data: any) => api.post(`/dispatch-master-data/driver-vehicle-assignment-plans/${id}/cancel`, data),
   executeVehicleAssignmentPlan: (id: string, data: any) => api.post(`/dispatch-master-data/driver-vehicle-assignment-plans/${id}/execute`, data),
   assignCompanyVehicle: (data: any) => api.post('/dispatch-master-data/driver-vehicle-assignments', data),
+  getExternalDriverEligibility: (id: string) => api.get(`/dispatch-master-data/external-drivers/${id}/eligibility`),
+  updateExternalDriver: (id: string, data: any) => api.put(`/dispatch-master-data/external-drivers/${id}`, data),
+  updateExternalVehicle: (id: string, data: any) => api.put(`/dispatch-master-data/external-vehicles/${id}`, data),
   getExternalRegistry: (params?: { archived?: 'exclude' | 'include' | 'only' }) => api.get('/dispatch-master-data/external-registry', { params }),
   createExternalDriver: (data: any) => api.post('/dispatch-master-data/external-drivers', data),
   createExternalVehicle: (data: any) => api.post('/dispatch-master-data/external-vehicles', data),
@@ -1189,10 +1203,10 @@ export const accountingAPI = {
 
 export const dispatchConfirmationAPI = {
   getCapabilities: () => api.get('/dispatch-confirmation/capabilities'),
-  enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment`, data),
-  cancelEnrollmentSession: (personnelId: string, enrollmentSessionId: string) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment-session/cancel`, { enrollmentSessionId }),
-  acceptEnrollmentCapture: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment-captures`, data),
-  createEnrollmentCommand: (personnelId: string, data: { workstationId: string; finger: string; enrollmentSessionId: string }) => api.post(`/dispatch-confirmation/internal-drivers/${personnelId}/enrollment-commands`, data),
+  enrollInternalDriver: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment`, data),
+  cancelEnrollmentSession: (personnelId: string, enrollmentSessionId: string) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-session/cancel`, { enrollmentSessionId }),
+  acceptEnrollmentCapture: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-captures`, data),
+  createEnrollmentCommand: (personnelId: string, data: { workstationId: string; finger: string; enrollmentSessionId: string }) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-commands`, data),
   deactivateEnrollment: (enrollmentId: string, reason: string) => api.post(`/dispatch-confirmation/enrollments/${enrollmentId}/deactivate`, { reason }),
   getEnrollmentImage: (enrollmentId: string, finger: string) => api.get(`/dispatch-confirmation/enrollments/${enrollmentId}/images/${finger}`, { responseType: 'blob' }),
   startSession: (waybillId: string, workstationId: string) => api.post(`/dispatch-confirmation/waybills/${waybillId}/sessions`, { workstationId }),

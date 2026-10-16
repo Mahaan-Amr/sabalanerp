@@ -437,6 +437,7 @@ test("a blocked due plan requires attention and never automatically retries afte
     // Inject the worker into the existing rollback transaction; no second database or persistent fixtures.
     const harness = {
       driverVehicleAssignmentPlan: tx.driverVehicleAssignmentPlan,
+      externalDriverVehicleAssignmentPlan: tx.externalDriverVehicleAssignmentPlan,
       $transaction: (work: any) => work(tx),
     } as unknown as PrismaClient;
     await processDueHrAssignmentPlans(harness, dueAt);

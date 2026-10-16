@@ -105,6 +105,7 @@
     "test:hr-hiring:e2e:down": "docker compose -f docker-compose.e2e.yml down -v",
     "prototype:shipment-statement-reconciliation": "node scripts/prototypes/shipment-statement-reconciliation/tui.mjs",
     "test:dispatch-document-pdfs:docker": "node scripts/run-dispatch-document-pdf-qa.mjs",
+    "test:external-vehicle-operations": "npm --prefix backend run test:external-vehicle-operations && npm --prefix frontend run test:external-vehicle-operations && npm run test:hr-vehicle-operations",
     "test:hr-vehicle-operations": "npm --prefix backend run test:hr-vehicle-operations && npm --prefix frontend run test:hr-vehicle-operations"
   },
   "keywords": [

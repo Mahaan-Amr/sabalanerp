@@ -2111,6 +2111,7 @@ model CrmCustomer {
   updatedBy                String?
   companyName              String?
   customerType             String                          @default("Individual")
+  activityCategory         String?
   industry                 String?
   status                   String                          @default("Active")
   primaryContactId         String?                         @unique

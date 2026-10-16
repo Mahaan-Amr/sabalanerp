@@ -4,7 +4,7 @@ import { createAuthoritativeSession } from '../../../backend/src/services/identi
 import { previewCustomerDeletion, deleteCustomerInTransaction } from '../../../backend/src/services/crmCustomerManagement';
 
 /** Only the existing local Compose database. Auth tokens stay in memory. */
-export async function createPartnerCustomerBrowserFixture() {
+export async function createPartnerCustomerBrowserFixture(options: { customerCreation?: boolean } = {}) {
   const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL || 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp');
   if (!['127.0.0.1', 'localhost'].includes(url.hostname) || url.port !== '55432' || url.pathname !== '/sabalanerp') throw new Error('Existing local Compose database required');
   url.searchParams.set('connection_limit', '2'); url.searchParams.set('pool_timeout', '10');
@@ -16,6 +16,13 @@ export async function createPartnerCustomerBrowserFixture() {
       const admin = await tx.user.findUniqueOrThrow({ where: { username: 'admin' }, select: { id: true } });
       await tx.user.create({ data: { id: owner, username: owner, email: `${owner}@example.invalid`, password: 'not-a-login', firstName: 'آزمون محلی', lastName: 'مالک مشتری', role: 'USER' } });
       await tx.partnerProfile.create({ data: { id: owner, userId: owner, state: 'ACTIVE' } });
+      if (options.customerCreation) {
+        // Model an already directly activated test Partner. Legacy profiles
+        // without conversion evidence correctly remain outside contract entry.
+        await tx.partnerConversionDisposition.create({ data: { profileId: owner,
+          sourceType: 'PARTNER_ACTIVATION', sourceId: owner, disposition: 'DIRECT_V4', actorId: admin.id,
+          evidence: { fixture: 'local-customer-activity-acceptance' } } });
+      }
       await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${owner}, true)`;
       const customer = await tx.crmCustomer.create({ data: { firstName: 'آزمون محلی CRM', lastName: 'مشتری همکار', ownerUserId: owner, partnerOwnerProfileId: owner, partnerRevision: 1,
         phoneNumbers: { create: { number: '09129990001', type: 'mobile', isActive: true, isPrimary: true } } } });

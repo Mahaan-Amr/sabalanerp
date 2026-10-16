@@ -106,11 +106,13 @@ test('real owning Partner creates a Contact and saves the shared full Customer f
     await page.getByRole('link', { name: 'ویرایش', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'ویرایش مشتری', exact: true })).toBeVisible();
     await page.getByRole('textbox', { name: 'نام', exact: true }).fill('نام اصلاح‌شده محلی');
+    await page.getByRole('combobox', { name: 'دسته‌بندی فعالیت مشتری' }).selectOption('ARCHITECT');
     const saved = page.waitForResponse(response => response.url().includes('/full-card') && response.request().method() === 'PUT');
     await page.getByRole('button', { name: 'ذخیره تغییرات', exact: true }).first().click();
     expect((await saved).ok()).toBeTruthy();
     await expect(page).toHaveURL(new RegExp(`/dashboard/sales/partner-customers/${seeded.customerId}$`));
     await expect(page.getByRole('heading', { name: 'نام اصلاح‌شده محلی مشتری همکار', exact: true })).toBeVisible();
+    await expect(page.getByText('معمار', { exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('partner-customer-owner-detail.png'), fullPage: true });
   } finally { await seeded.cleanup(); }
 });

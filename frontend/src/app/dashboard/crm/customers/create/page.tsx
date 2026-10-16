@@ -1,5 +1,6 @@
 'use client';
 import { ErpBadge, ErpButton, ErpCard, ErpField as CustomerWorkflowField, ErpInput, ErpPressable, ErpSegmentedControl, ErpLoading, ErpInlineState, useErpPresentationScope } from '@/components/erp';
+import { CustomerActivityCategoryEditor, type CustomerActivityCategory } from '@/features/crm/customer-workflow/CustomerActivityCategory';
 import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -80,6 +81,7 @@ interface CustomerFormData {
   // Basic Information
   firstName: string;
   lastName: string;
+  activityCategory: CustomerActivityCategory | '';
   customerType: 'Individual' | 'Company' | 'Government' | 'Collaborative';
   status: 'Active' | 'Inactive' | 'Prospect' | 'Lead';
 
@@ -191,6 +193,7 @@ export default function CreateCustomerPage() {
     firstName: '',
     lastName: '',
     customerType: 'Individual',
+    activityCategory: '',
     status: 'Active',
 
     // Contact Information (Step 2)
@@ -246,7 +249,7 @@ export default function CreateCustomerPage() {
   const isCollaborativeCustomer = formData.customerType === 'Collaborative';
   const steps = [
     { key: 'customerType', label: 'نوع مشتری', fields: ['customerType'] },
-    { key: 'basic', label: 'اطلاعات پایه', fields: ['firstName', 'lastName', 'phoneNumber1', 'phoneNumber2', 'nationalCode'] },
+    { key: 'basic', label: 'اطلاعات پایه', fields: ['firstName', 'lastName', 'activityCategory', 'phoneNumber1', 'phoneNumber2', 'nationalCode'] },
     ...(isCollaborativeCustomer ? [] : [{ key: 'project', label: 'اطلاعات پروژه', fields: ['projectName', 'projectAddress', 'projectCity', 'projectType'] }])
   ];
 
@@ -266,9 +269,10 @@ export default function CreateCustomerPage() {
     }
 
     if (currentStep.key === 'basic') {
-      // Only these 3 fields are required in basic step
+      // Require an explicit activity choice, including NONE.
       if (!formData.firstName.trim()) newErrors.firstName = 'نام الزامی است';
       if (!formData.lastName.trim()) newErrors.lastName = 'نام خانوادگی الزامی است';
+      if (!formData.activityCategory) newErrors.activityCategory = 'دسته‌بندی فعالیت مشتری الزامی است';
       const phone1Error = validateRequiredIranianMobile(formData.phoneNumber1);
       if (phone1Error) newErrors.phoneNumber1 = phone1Error;
       const phone2Error = validateOptionalIranianMobile(formData.phoneNumber2);
@@ -554,6 +558,7 @@ export default function CreateCustomerPage() {
           reason: 'ثبت مشتری و پروژه برای قرارداد فروش همکار',
           customer: {
             firstName: formData.firstName.trim(), lastName: formData.lastName.trim(),
+            activityCategory: formData.activityCategory,
             customerType: formData.customerType as 'Individual' | 'Company' | 'Government',
             phoneNumber1, ...(phoneNumber2 ? { phoneNumber2 } : {}),
             ...(optional(formData.nationalCode) ? { nationalCode: optional(formData.nationalCode) } : {}),
@@ -613,6 +618,7 @@ export default function CreateCustomerPage() {
         firstName: formData.firstName.trim(),
         lastName: formData.lastName.trim(),
         customerType: formData.customerType,
+        activityCategory: formData.activityCategory,
         status: formData.status,
 
         // Contact Information
@@ -820,7 +826,7 @@ export default function CreateCustomerPage() {
         return (
           <div className="space-y-6">
             {/* Basic Information Fields */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <CustomerWorkflowField label="نام" error={errors.firstName} required>
                 <ErpInput
                   type="text"
@@ -838,6 +844,9 @@ export default function CreateCustomerPage() {
                   placeholder="نام خانوادگی"
                 />
               </CustomerWorkflowField>
+
+              <CustomerActivityCategoryEditor value={formData.activityCategory}
+                onChange={value => handleInputChange('activityCategory', value)} error={errors.activityCategory} />
 
               <CustomerWorkflowField label="شماره تماس اول" error={errors.phoneNumber1} required>
                 <ErpInput

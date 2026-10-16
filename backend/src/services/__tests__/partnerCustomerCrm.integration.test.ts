@@ -94,14 +94,16 @@ const cardDatabase = (tx: Prisma.TransactionClient) => ({ $transaction: async (r
 test('shared full owner edit preserves Contract snapshots and rejects unchecked child operations atomically', () => fixture(async (tx, { admin, owner, customerId }) => {
   let card = await readPartnerCustomerCrm(tx, owner, customerId);
   const before = await tx.salesContract.findFirstOrThrow({ where: { customerId } });
-  await updateAdminPartnerCustomerCard(cardDatabase(tx), owner, customerId, 'EDIT', { expectedRevision: card.partnerRevision, expectedCardVersion: card.cardVersion,
+  await updateAdminPartnerCustomerCard(cardDatabase(tx), owner, customerId, 'EDIT', { activityCategory: 'BUILDER', expectedRevision: card.partnerRevision, expectedCardVersion: card.cardVersion,
     firstName: 'هویت اصلاح‌شده', customerType: 'Government', nationalCode: '۱۲۳۴۵۶۷۸۹۰۱', industry: 'ساختمان', brandName: 'برند', homeAddress: 'نشانی منزل',
     phones: [{ number: '۰۹۱۲۰۰۰۰۰۰۳', type: 'mobile', isActive: true, isPrimary: true }] }, 'owner');
   card = await readPartnerCustomerCrm(tx, owner, customerId);
+  assert.equal(card.activityCategory, 'BUILDER');
+  assert.deepEqual((await tx.crmTimelineEvent.findFirstOrThrow({ where: { customerId, eventType: 'CUSTOMER_ACTIVITY_CATEGORY_CHANGED' } })).metadata, { before: null, after: 'BUILDER' });
   assert.equal(card.firstName, 'هویت اصلاح‌شده'); assert.equal(card.customerType, 'Government'); assert.equal(card.nationalCode, '12345678901');
   assert.equal(card.ownerUserId, owner); assert.deepEqual(await tx.salesContract.findUnique({ where: { id: before.id } }), before);
   await off(tx, admin, 'crm_contacts_create');
-  await assert.rejects(updateAdminPartnerCustomerCard(cardDatabase(tx), admin, customerId, 'EDIT', { expectedRevision: card.partnerRevision, expectedCardVersion: card.cardVersion,
+  await assert.rejects(updateAdminPartnerCustomerCard(cardDatabase(tx), admin, customerId, 'EDIT', { activityCategory: 'BUILDER', expectedRevision: card.partnerRevision, expectedCardVersion: card.cardVersion,
     contacts: [{ ...data, mobile: '09120000004' }] }), blocked);
   assert.equal(await tx.crmContact.count({ where: { customerId } }), 0);
 }));
@@ -111,4 +113,24 @@ test('CRM finance rejects report revocation and a Case belonging to another Cust
   await assert.rejects(readPartnerCustomerContractFinance(cardDatabase(tx), admin, customerId, customerId), blocked);
   await tx.featurePermission.delete({ where: { userId_workspace_feature: { userId: admin, workspace: 'bi', feature: 'bi_partner_reports_view' } } });
   await assert.rejects(readPartnerCustomerContractFinance(cardDatabase(tx), admin, customerId, 'foreign-case'), error => error instanceof CustomerManagementError && error.status === 404);
+}));
+
+
+test('activity edits use the existing edit permission, reject omission and preserve explicit NONE', () => fixture(async (tx, { admin, owner, customerId }) => {
+  let card = await readPartnerCustomerCrm(tx, owner, customerId);
+  assert.equal(card.activityCategory, null);
+  await assert.rejects(updateAdminPartnerCustomerCard(cardDatabase(tx), owner, customerId, 'EDIT', {
+    expectedRevision: card.partnerRevision, expectedCardVersion: card.cardVersion, firstName: card.firstName,
+  }, 'owner'), error => error instanceof CustomerManagementError && error.status === 400);
+  await updateAdminPartnerCustomerCard(cardDatabase(tx), owner, customerId, 'EDIT', {
+    expectedRevision: card.partnerRevision, expectedCardVersion: card.cardVersion, activityCategory: 'NONE',
+  }, 'owner');
+  card = await readPartnerCustomerCrm(tx, owner, customerId);
+  assert.equal(card.activityCategory, 'NONE');
+  await off(tx, admin, 'crm_customers_edit');
+  await assert.rejects(updateAdminPartnerCustomerCard(cardDatabase(tx), admin, customerId, 'EDIT', {
+    expectedRevision: card.partnerRevision, expectedCardVersion: card.cardVersion, activityCategory: 'ARCHITECT',
+  }), blocked);
+  assert.equal((await tx.crmCustomer.findUniqueOrThrow({ where: { id: customerId } })).activityCategory, 'NONE');
+  assert.equal(await tx.crmTimelineEvent.count({ where: { customerId, eventType: 'CUSTOMER_ACTIVITY_CATEGORY_CHANGED' } }), 1);
 }));

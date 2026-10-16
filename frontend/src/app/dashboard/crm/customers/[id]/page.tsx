@@ -1,4 +1,5 @@
 'use client';
+import { CustomerActivityCategoryBadge } from '@/features/crm/customer-workflow/CustomerActivityCategory';
 import { PartnerCustomerSections, type PartnerCrmCustomer } from '@/features/crm/customer-workflow/PartnerCustomerSections';
 import { DirectCustomerTransfer } from '@/features/partner-sales/customers/DirectCustomerTransfer';
 import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSection, ErpSheet, ErpTextarea, useErpPresentationScope } from '@/components/erp';
@@ -46,6 +47,7 @@ interface CrmCustomer {
   firstName: string;
   lastName: string;
   companyName?: string;
+  activityCategory?: string | null;
   customerType: string;
   industry?: string;
   status: string;
@@ -565,6 +567,7 @@ export default function CustomerDetailPage() {
     </CustomerWorkflowSection>}
     {!customer.partnerOwnerProfileId && <CustomerCreditPanel customerId={customer.id} onChanged={() => void fetchCustomer()} />}
     <CustomerWorkflowSection title="اطلاعات مشتری">
+      <CustomerActivityCategoryBadge value={customer.activityCategory} />
       <ErpInlineState kind="permission" title={customer.canManageCustomerCard ? "مدیریت کارت مشتری همکار" : "نمایش مدیریتی مشتری — دسترسی مشاهده اطلاعات"} />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <ErpFieldView label="مسئول فروش" value={getOwnerLabel(customer.ownerUser)} />
@@ -629,6 +632,7 @@ export default function CustomerDetailPage() {
 
       {/* Status Indicators */}
       <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+        <CustomerActivityCategoryBadge value={customer.activityCategory} />
         <ErpBadge tone={customer.status === 'Active' ? 'success' : customer.status === 'Inactive' ? 'neutral' : customer.status === 'Lead' ? 'warning' : 'info'}>{getStatusLabel(customer.status)}</ErpBadge>
 
         {customer.isBlacklisted && (

@@ -8,6 +8,7 @@ import { createAccountingLedgerAdministration } from '../services/accountingLedg
 import { AccountingLedgerError, accountingAccessProfileFromPermission, createAccountingLedgerApplication, type AccountingAccessProfile } from '../services/accountingLedgerFoundation';
 import { createAccountingLedgerPrismaRepository, listLedgerVouchers, listPostedJournal, listPostedTrialBalance, readLedgerVoucherEvidence, verifyLedgerAuditChain } from '../services/accountingLedgerPrismaRepository';
 import { AccountingCustomerTreasuryError } from '../services/accountingCustomerTreasury';
+import { attributeCustomerOpening } from '../services/accountingCustomerOpeningAttribution';
 import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '../services/accountingBankFileImport';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import { listCustomerWorkspaceAccounts, readCustomerWorkspace, readCustomerWorkspaceContext, recordCustomerAccountOperation, recordCustomerWorkspaceTreasury } from '../services/accountingCustomerWorkspace';
@@ -103,14 +104,21 @@ const normalizeDigits = (value: unknown) => String(value ?? '')
   .replace(/[٠-٩]/g, (digit) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit)));
 
 const wholeRials = (value: unknown) => {
+  if (typeof value === 'number' && !Number.isSafeInteger(value)) throw new AccountingLedgerError('INVALID_RIAL_AMOUNT', 'مبلغ بزرگ را به‌صورت رشته عدد صحیح ارسال کنید.', 400);
   const normalized = normalizeDigits(value).trim();
   if (!/^\d+$/.test(normalized)) throw new AccountingLedgerError('INVALID_RIAL_AMOUNT', 'مبلغ ریال باید عدد صحیح و بدون اعشار باشد.', 400);
   return BigInt(normalized);
 };
 const signedRials = (value: unknown) => {
+  if (typeof value === 'number' && !Number.isSafeInteger(value)) throw new AccountingLedgerError('INVALID_RIAL_AMOUNT', 'مبلغ بزرگ را به‌صورت رشته عدد صحیح ارسال کنید.', 400);
   const normalized = normalizeDigits(value).trim();
   if (!/^-?\d+$/.test(normalized)) throw new AccountingLedgerError('INVALID_RIAL_AMOUNT', 'مبلغ اصلاح ریال باید عدد صحیح باشد.', 400);
   return BigInt(normalized);
+};
+
+const customerCommandArray = (value: unknown, label: string): any[] => {
+  if (!Array.isArray(value) || value.some(item => item == null)) throw new AccountingLedgerError('INVALID_CUSTOMER_COMMAND', `${label} باید فهرست معتبر باشد.`, 400);
+  return value;
 };
 
 const validDate = (value: unknown, label: string) => {
@@ -123,6 +131,10 @@ const run = (handler: (req: WorkspaceRequest) => Promise<unknown>) => async (req
   try {
     res.json({ success: true, data: serialize(await handler(req)) });
   } catch (error) {
+    if ((error as { code?: string })?.code === 'P2034') {
+      res.status(409).json({ success: false, code: 'ACCOUNTING_CONCURRENT_CHANGE', error: 'حساب هم‌زمان تغییر کرده است؛ اطلاعات را به‌روز کنید و فرمان را دوباره بررسی کنید.' });
+      return;
+    }
     if (error instanceof AccountingLedgerError || error instanceof AccountingCustomerTreasuryError) {
       await createAccountingLedgerPrismaRepository(prisma).transaction((tx) => tx.appendAudit({
         action: 'ACCOUNTING_COMMAND_DENIED', result: 'DENIED', actorId: req.user?.id || 'ناشناس',
@@ -170,6 +182,10 @@ router.post('/customer-sales/control-transfer-policies', ...managerAccess, run((
   exceptionOccurredAt: req.body.exceptionOccurredAt ? validDate(req.body.exceptionOccurredAt, 'زمان وقوع استثنای قراردادی') : undefined,
   actor: actorOf(req),
 })));
+router.get('/customer-sales/posting-rules', ...viewAccess, run(async () => {
+  const context = await administration.getContext();
+  return context ? prisma.accountingCustomerPostingRule.findMany({ where: { legalEntityId: context.id }, orderBy: { effectiveFrom: 'desc' } }) : [];
+}));
 router.post('/customer-sales/posting-rules', ...managerAccess, run((req) => createCustomerPostingRulePrisma(prisma, {
   ...req.body, version: Number(req.body.version), effectiveFrom: validDate(req.body.effectiveFrom, 'تاریخ اثر قاعده ثبت مشتری'),
   effectiveTo: req.body.effectiveTo ? validDate(req.body.effectiveTo, 'پایان اثر قاعده ثبت مشتری') : undefined,
@@ -196,7 +212,8 @@ router.get('/customer-accounts', ...viewAccess, run(req => listCustomerWorkspace
 })));
 router.get('/customer-accounts/:id', ...viewAccess, run(async req => {
   const [data, exportCapability, treasuryCapability, postingCapability] = await Promise.all([
-    readCustomerWorkspace(prisma, { id: req.params.id, userId: req.user!.id, asOf: validDate(req.query.asOf || new Date().toISOString(), 'زمان گزارش') }),
+    readCustomerWorkspace(prisma, { id: req.params.id, userId: req.user!.id, asOf: validDate(req.query.asOf || new Date().toISOString(), 'زمان گزارش'),
+      openingBasisAt: req.query.openingBasisAt == null ? undefined : validDate(req.query.openingBasisAt, 'تاریخ مبنای افتتاحیه') }),
     resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role, workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_CUSTOMER_STATEMENTS_EXPORT, requiredPermission: FEATURE_PERMISSIONS.VIEW }),
     resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role, workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_TREASURY_MANAGE, requiredPermission: FEATURE_PERMISSIONS.EDIT }),
     resolveNarrowFeatureAccess(prisma, { userId: req.user!.id, role: req.user!.role, workspace: WORKSPACES.ACCOUNTING, feature: FEATURES.ACCOUNTING_CUSTOMER_POSTING_MANAGE, requiredPermission: FEATURE_PERMISSIONS.EDIT }),
@@ -212,12 +229,47 @@ router.post('/customer-accounts/:id/operations', ...customerPostingAccess, (req,
   financialAccountId: req.body.financialAccountId, bankLedgerId: req.body.bankLedgerId, receiptId: req.body.receiptId, creditItemId: req.body.creditItemId,
   occurredAt: validDate(req.body.occurredAt, 'تاریخ عملیات'), reason: String(req.body.reason || ''), reference: String(req.body.reference || ''),
   confirmed: req.body.confirmed === true, idempotencyKey: String(req.body.idempotencyKey || ''), actor: actorOf(req),
+  openingReview: req.body.openingReview == null ? undefined : {
+    expectedSnapshotHash: String(req.body.openingReview.expectedSnapshotHash || ''), identityConfirmed: req.body.openingReview.identityConfirmed === true,
+    totalConfirmed: req.body.openingReview.totalConfirmed === true, lines: customerCommandArray(req.body.openingReview.lines, 'ریز افتتاحیه').map(line => ({
+      key: String(line.key || ''), kind: line.kind, amountRials: wholeRials(line.amountRials), reference: String(line.reference || ''),
+      financialRecordId: line.financialRecordId, contractId: line.contractId,
+      existingSourceIds: customerCommandArray(line.existingSourceIds, 'منشأ موجود').map(id => String(id)),
+    })),
+  },
 })));
 router.post('/customer-accounts/:id/treasury', ...treasuryCommandAccess, run(req => recordCustomerWorkspaceTreasury(prisma, req.params.id, {
   kind: req.body.kind, amountRials: wholeRials(req.body.amountRials || '0'), occurredAt: validDate(req.body.occurredAt, 'تاریخ عملیات'),
   periodId: String(req.body.periodId || ''), postingRuleId: String(req.body.postingRuleId || ''), financialAccountId: req.body.financialAccountId,
-  bankLedgerId: req.body.bankLedgerId, receiptId: req.body.receiptId, allocationId: req.body.allocationId,
-  allocations: (req.body.allocations || []).map((line: any) => ({ openItemId: String(line.openItemId), amountRials: wholeRials(line.amountRials) })),
+  bankLedgerId: req.body.bankLedgerId, receiptId: req.body.receiptId, creditItemId: req.body.creditItemId, allocationId: req.body.allocationId, supplierPartyId: req.body.supplierPartyId,
+  allocations: customerCommandArray(req.body.allocations || [], 'ریز تخصیص').map(line => ({ openItemId: String(line.openItemId || ''), amountRials: wholeRials(line.amountRials) })),
+  sourceAllocations: req.body.sourceAllocations == null ? undefined : customerCommandArray(req.body.sourceAllocations, 'سهم منابع').map(row => ({
+    receiptId: row.receiptId, creditItemId: row.creditItemId,
+    allocations: customerCommandArray(row.allocations, 'ریز سهم منبع').map(line => ({ openItemId: String(line.openItemId || ''), amountRials: wholeRials(line.amountRials) })),
+  })),
+  resolvedShares: req.body.resolvedShares == null ? undefined : customerCommandArray(req.body.resolvedShares, 'تطبیق سهم ابزار').map(row => ({
+    partKey: String(row.partKey || ''), allocations: customerCommandArray(row.allocations || [], 'مصرف قبلی ابزار').map(line => ({ openItemId: String(line.openItemId || ''), amountRials: wholeRials(line.amountRials) })),
+    refunds: customerCommandArray(row.refunds || [], 'استرداد قبلی ابزار').map(line => ({ refundId: String(line.refundId || ''), amountRials: wholeRials(line.amountRials) })),
+  })),
+  reason: String(req.body.reason || ''), reference: String(req.body.reference || ''), confirmed: req.body.confirmed === true,
+  idempotencyKey: String(req.body.idempotencyKey || ''), actor: actorOf(req),
+  expectedAmountRials: req.body.expectedAmountRials == null ? undefined : wholeRials(req.body.expectedAmountRials),
+  expectedSequence: req.body.expectedSequence == null ? undefined : Number(req.body.expectedSequence),
+  collectionLedgerId: req.body.collectionLedgerId, unpaidRials: req.body.unpaidRials == null ? undefined : wholeRials(req.body.unpaidRials),
+  reversals: req.body.reversals == null ? undefined : customerCommandArray(req.body.reversals, 'برگشت مصرف').map(row => ({
+    allocationId: String(row.allocationId || ''), lines: customerCommandArray(row.lines, 'ریز برگشت').map(line => ({ openItemId: String(line.openItemId || ''), amountRials: wholeRials(line.amountRials) })),
+  })),
+  parts: req.body.parts == null ? undefined : customerCommandArray(req.body.parts, 'اجزای دریافت').map(part => ({
+    key: String(part.key || ''), kind: part.kind, amountRials: wholeRials(part.amountRials), financialAccountId: String(part.financialAccountId || ''),
+    ledgerAccountId: String(part.ledgerAccountId || ''), existingCheckId: part.existingCheckId || undefined, collectedLedgerAccountId: part.collectedLedgerAccountId || undefined, feeRials: part.feeRials == null ? undefined : wholeRials(part.feeRials), feeLedgerAccountId: part.feeLedgerAccountId,
+    check: part.check == null ? undefined : { serialNumber: String(part.check.serialNumber || ''), bankName: String(part.check.bankName || ''), sayadId: part.check.sayadId,
+      dueAt: validDate(part.check.dueAt, 'سررسید چک') },
+  })),
+})));
+
+router.post('/customer-accounts/:id/opening-attribution', ...customerPostingAccess, run(req => attributeCustomerOpening(prisma, req.params.id, {
+  lineKey: String(req.body.lineKey || ''), expectedSequence: Number(req.body.expectedSequence), expectedSnapshotHash: String(req.body.expectedSnapshotHash || ''),
+  contractId: req.body.contractId || undefined, financialRecordId: req.body.financialRecordId || undefined,
   reason: String(req.body.reason || ''), reference: String(req.body.reference || ''), confirmed: req.body.confirmed === true,
   idempotencyKey: String(req.body.idempotencyKey || ''), actor: actorOf(req),
 })));

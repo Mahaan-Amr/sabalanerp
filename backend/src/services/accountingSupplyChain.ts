@@ -226,6 +226,7 @@ export interface AccountingSupplyChainRepository {
   findCheckBySayadId(sayadId: string): Promise<CheckRecord | null>;
   getCheck(id: string): Promise<CheckRecord | null>;
   saveCheck(item: CheckRecord): Promise<void>;
+  requiresCustomerCheckCoordination?(check: Pick<CheckRecord, 'kind' | 'sourceCustomerPaymentId'>): Promise<boolean>;
   listCheckEvents(checkId: string): Promise<ReadonlyArray<CheckEventRecord>>;
   saveCheckEvent(item: CheckEventRecord): Promise<void>;
   getProductionBatch(id: string): Promise<ProductionBatchRecord | null>;
@@ -408,6 +409,7 @@ export const createAccountingSupplyChainApplication = (
     now: () => Date;
     post: (command: PostingCommand) => Promise<{ voucherId: string; statutoryNumber: number }>;
     resolveEvidence: (evidence: ImmutableEvidence, allowedTypes: readonly string[]) => Promise<ImmutableEvidence>;
+    customerCheckCoordination?: boolean;
   },
 ) => {
   const evidenceTypesFor = (commandName: string, path: string): readonly string[] => {
@@ -1299,6 +1301,7 @@ export const createAccountingSupplyChainApplication = (
       endorsementEvidence: ImmutableEvidence; actor: SupplyChainActor;
       allocations: ReadonlyArray<{ openItemId: string; amountRials: bigint }>;
       replacesCheckId?: string;
+      reuseReturnedCheckId?: string;
     }) => {
       requireWrite(command.actor);
       requireEvidence(command.receiptEvidence);
@@ -1307,13 +1310,20 @@ export const createAccountingSupplyChainApplication = (
         throw new SupplyChainAccountingError('INVALID_ASSIGNED_CUSTOMER_CHECK', 'اطلاعات چک مشتری واگذارشده کامل نیست.', 400);
       }
       return repository.transaction(async (tx) => {
+        if (!dependencies.customerCheckCoordination && await tx.requiresCustomerCheckCoordination?.({ kind: 'ASSIGNED_CUSTOMER', sourceCustomerPaymentId: command.sourceCustomerPaymentId })) {
+          throw new SupplyChainAccountingError('CUSTOMER_CHECK_COORDINATION_REQUIRED', 'ابزار مرتبط با دریافت مشتری باید از پرونده مالی مشتری خرج شود.');
+        }
         const duplicate = await tx.findCheckBySayadId(command.sayadId);
-        if (duplicate) {
+        if (duplicate && !command.reuseReturnedCheckId) {
           if (duplicate.kind !== 'ASSIGNED_CUSTOMER' || duplicate.sourceCustomerPaymentId !== command.sourceCustomerPaymentId
               || duplicate.amountRials !== command.amountRials || duplicate.supplierPartyId !== command.supplierPartyId) {
             throw new SupplyChainAccountingError('DUPLICATE_SAYAD_CONFLICT', 'شناسه صیاد قبلاً با مشخصات دیگری ثبت شده است.');
           }
           return { checkId: duplicate.id, status: duplicate.status };
+        }
+        if (command.reuseReturnedCheckId && (!duplicate || duplicate.id !== command.reuseReturnedCheckId || duplicate.status !== 'RETURNED'
+          || duplicate.kind !== 'ASSIGNED_CUSTOMER' || duplicate.sourceCustomerPaymentId !== command.sourceCustomerPaymentId || duplicate.amountRials !== command.amountRials)) {
+          throw new SupplyChainAccountingError('INVALID_CHECK_REASSIGNMENT', 'چک برای واگذاری مجدد باید از گیرنده برگشته و با ابزار اصلی منطبق باشد.');
         }
         const allocationTotal = command.allocations.reduce((sum, item) => sum + item.amountRials, 0n);
         if (allocationTotal > command.amountRials) throw new SupplyChainAccountingError('CHECK_OVER_ALLOCATED', 'جمع تخصیص‌های چک از مبلغ آن بیشتر است.', 400);
@@ -1347,7 +1357,7 @@ export const createAccountingSupplyChainApplication = (
           voucherId: posted.voucherId, evidence: command.endorsementEvidence, kind: 'ASSIGNED_CUSTOMER_CHECK', occurredAt: command.documentDate, actorId: command.actor.id });
         for (const allocation of command.allocations) await tx.saveAllocation({ id: randomUUID(), paymentId: transactionId,
           openItemId: allocation.openItemId, amountRials: allocation.amountRials, reversedById: null, actorId: command.actor.id });
-        const check: CheckRecord = { id: randomUUID(), sayadId: command.sayadId, amountRials: command.amountRials,
+        const check: CheckRecord = { id: command.reuseReturnedCheckId ?? randomUUID(), sayadId: command.sayadId, amountRials: command.amountRials,
           supplierPartyId: command.supplierPartyId, financialAccountId: command.financialAccountId, treasuryTransactionId: transactionId,
           dueDate: command.dueDate, status: 'ENDORSED', kind: 'ASSIGNED_CUSTOMER', sourceCustomerPaymentId: command.sourceCustomerPaymentId };
         await tx.saveCheck(check);
@@ -1377,6 +1387,9 @@ export const createAccountingSupplyChainApplication = (
       return repository.transaction(async (tx) => {
         const check = await tx.getCheck(command.checkId);
         if (!check) throw new SupplyChainAccountingError('CHECK_NOT_FOUND', 'چک یافت نشد.', 404);
+        if (!dependencies.customerCheckCoordination && await tx.requiresCustomerCheckCoordination?.(check)) {
+          throw new SupplyChainAccountingError('CUSTOMER_CHECK_COORDINATION_REQUIRED', 'این ابزار به دریافت مشتری متصل است؛ گردش آن باید از پرونده مالی مشتری هماهنگ ثبت شود.');
+        }
         const existing = (await tx.listCheckEvents(check.id)).find((item) => item.evidence.id === command.evidence.id && item.evidence.version === command.evidence.version);
         if (existing) return existing;
         if (!allowed[check.status].includes(command.to)) throw new SupplyChainAccountingError('INVALID_CHECK_TRANSITION', 'تغییر وضعیت درخواست‌شده با زنجیره حقوقی و حضانت چک سازگار نیست.');

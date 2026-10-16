@@ -167,6 +167,16 @@ export const createAccountingLedgerPrismaRepository = (
   transactional = false,
 ): AccountingLedgerRepository => {
   const repository: AccountingLedgerRepository = {
+    requiresCustomerAccountCorrection: async voucherId => {
+      const references = await Promise.all([
+        database.accountingTreasuryTransaction.findFirst({ where: { postedVoucherId: voucherId, profileId: { not: null } }, select: { id: true } }),
+        database.accountingCustomerOpenItem.findFirst({ where: { OR: [{ ledgerVoucherId: voucherId }, { invoice: { ledgerVoucherId: voucherId } }] }, select: { id: true } }),
+        database.accountingCustomerReceiptAdjustment.findFirst({ where: { ledgerVoucherId: voucherId }, select: { id: true } }),
+        database.accountingSettlementAllocation.findFirst({ where: { ledgerVoucherId: voucherId }, select: { id: true } }),
+        database.accountingCheckInstrumentEvent.findFirst({ where: { ledgerVoucherId: voucherId }, select: { id: true } }),
+      ]);
+      return references.some(Boolean);
+    },
     transaction: async <T>(operation: (tx: AccountingLedgerRepository) => Promise<T>) => {
       if (transactional) return operation(repository);
       for (let attempt = 1; attempt <= 4; attempt += 1) {

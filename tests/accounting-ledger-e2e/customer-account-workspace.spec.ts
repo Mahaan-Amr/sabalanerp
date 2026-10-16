@@ -20,6 +20,45 @@ const fixture = {
   openItems: [{ id: 'debt-1', kind: 'RECEIVABLE', invoiceNumber: 'صورتحساب ۱', contractId: 'contract-1', originalRials: '1000', remainingRials: '1000', dueAt: '2026-01-02', agingDays: 10 }],
   receipts: [{ id: 'receipt-1', amountRials: '200', allocatedRials: '0', refundedRials: '0', occurredAt: '2026-01-03', postedVoucherId: 'voucher-2', allocations: [] }], refunds: [],
 };
+
+test('workspace preserves every operation, historical view and permission while exposing analytics and receipt tracing', async ({ page }) => {
+  await login(page);
+  let financialWrites = 0;
+  let restricted = false;
+  const receipt = {...fixture.receipts[0],allocatedRials:'200',allocations:[{id:'allocation',createdAt:'2026-01-03',reversedAt:null,ledgerVoucherId:'allocation-voucher',lines:[{openItemId:'debt-1',amountRials:'200'}]}]};
+  await page.route('**/api/accounting/ledger/customer-accounts/**', route => {
+    if(route.request().method() !== 'GET') financialWrites++;
+    return route.fulfill({json:{success:true,data:{...fixture,receipts:[receipt],capabilities:restricted ? {canExport:false,canManageTreasury:false,canManageAccount:false,canRefund:false}:fixture.capabilities}}});
+  });
+  await page.goto('/dashboard/accounting/customer-accounts/profile-1');
+  await page.getByRole('button',{name:'سایر عملیات',exact:true}).click();
+  const operations=page.getByRole('dialog',{name:'عملیات حساب',exact:true});
+  for(const label of ['تخصیص اعتبار','اصلاح دریافت','لغو دریافت','تطبیق ابزار دریافت قدیمی','واگذاری چک به بانک','وصول / عدم پرداخت چک','خرج‌کردن چک مشتری','بازگشت چک از گیرنده','ثبت بدهکاری','ثبت بستانکاری','مانده افتتاحیه','تنظیم مانده','استرداد وجه','خروجی PDF','خروجی Excel']) {
+    await expect(operations.getByRole('button',{name:label,exact:true})).toBeVisible();
+  }
+  await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'بدهی و اعتبار',exact:true}).click();
+  await page.getByRole('button',{name:'جزئیات بدهی / اعتبار',exact:true}).click();
+  await expect(page.getByRole('dialog').getByText('مبلغ اصلی قلم قطعی')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'دریافت‌ها و چک‌ها',exact:true}).click();
+  await expect(page.getByRole('button',{name:'سند تخصیص',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:/سابقه تخصیص/}).click();
+  await expect(page.getByRole('button',{name:'برگشت تخصیص',exact:true})).toBeVisible();
+  await expect(page.getByRole('link',{name:'پیگیری در خزانه'})).toBeVisible();
+  await expect(page.getByRole('link',{name:'پیگیری دریافت / چک'})).toBeVisible();
+  await page.getByRole('button',{name:'تحلیل',exact:true}).click();
+  await expect(page.getByRole('img',{name:/درصد تسویه/})).toBeVisible();
+  await page.getByRole('button',{name:'ریزگردش',exact:true}).click();
+  await expect(page.getByRole('button',{name:'مشاهده سند و مستندات',exact:true})).toBeVisible();
+  restricted=true;
+  await page.reload();
+  await expect(page.getByRole('button',{name:'خلاصه',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'ثبت دریافت',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'تخصیص به بدهی',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'سایر عملیات',exact:true})).toHaveCount(0);
+  expect(financialWrites).toBe(0);
+});
 test('eye action opens readable customer workspace and carries the selected customer into a confirmed accounting command', async ({ page }) => {
   await login(page);
   let command: any;
@@ -45,10 +84,10 @@ test('eye action opens readable customer workspace and carries the selected cust
   await page.getByRole('button', { name: 'دریافت‌ها و چک‌ها', exact: true }).click();
   await expect(page.getByText('برگشت‌خورده', { exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'پیگیری در خزانه' })).toHaveAttribute('href', '/dashboard/accounting/treasury?checkId=treasury-check-1');
-  await page.getByRole('button', { name: 'عملیات حساب', exact: true }).click();
+  await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click();
   await expect(page.getByText('انتقال بین مشتری‌ها', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'ثبت بدهکاری', exact: true }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'ثبت بدهکاری', exact: true })).toBeVisible();
   await page.getByRole('textbox', { name: 'مبلغ (ریال)', exact: true }).fill('۵۰۰');
   await page.getByRole('combobox', { name: 'حساب مقابل' }).click();
   await page.getByRole('option', { name: '401 · درآمد' }).click();
@@ -60,7 +99,7 @@ test('eye action opens readable customer workspace and carries the selected cust
   await expect(page.getByText('ثبت بدهکاری با موفقیت ثبت شد.')).toBeVisible();
   expect(command.amountRials).toBe('500'); expect(command.confirmed).toBe(true); expect(command.idempotencyKey).toBeTruthy();
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole('strong').filter({ hasText: fixture.displayName })).toBeVisible();
+  await expect(page.getByRole('heading', { name: fixture.displayName, exact: true })).toBeVisible();
   await page.screenshot({ path: 'test-results/accounting-ledger/customer-account-mobile.png', fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
@@ -71,7 +110,7 @@ test('real local API includes CRM-only customers and loads customer detail witho
   await expect(page.getByRole('heading', { name: 'حساب‌های مالی مشتریان', exact: true })).toBeVisible();
   const action = page.getByRole('link', { name: 'مشاهده حساب مشتری' }).first();
   await expect(action).toBeVisible(); await action.click();
-  await expect(page.getByRole('button', { name: 'نمای کلی', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'خلاصه', exact: true })).toBeVisible();
   await expect(page.getByText('پرونده مالی مشتری بارگیری نشد.', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: 'test-results/accounting-ledger/customer-account-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });

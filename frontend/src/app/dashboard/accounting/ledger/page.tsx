@@ -129,6 +129,7 @@ export default function AccountingLedgerPage() {
   }, []);
 
   useEffect(() => { void loadContext(); }, [loadContext]);
+  useEffect(() => { const initial = new URLSearchParams(window.location.search).get('tab'); if (initial === 'settings' || initial === 'chart') setTab(initial); }, []);
 
   const book = context?.books?.[0];
   const year = book?.fiscalYears?.find((item: any) => item.id === fiscalYearId) || book?.fiscalYears?.[0];
@@ -366,6 +367,7 @@ export default function AccountingLedgerPage() {
       </>}
 
       {tab === 'settings' && <>
+        <ErpSection title="قواعد ثبت مشتری"><ErpButton label="مدیریت قواعد ثبت مشتری" href="/dashboard/accounting/ledger/customer-rules" /></ErpSection>
         <ErpSection title="سلامت زنجیره حسابرسی" description="اثر انگشت همه رویدادهای موفق و ردشده، به‌ترتیب بررسی می‌شود."><div className="flex flex-wrap items-center justify-between gap-3">{auditHealth ? <ErpBadge tone={auditHealth.valid ? 'success' : 'danger'}>{auditHealth.valid ? `سالم · ${Number(auditHealth.checkedEntries).toLocaleString('fa-IR')} رویداد` : `اختلال در ردیف ${digits(auditHealth.failedSequence)}`}</ErpBadge> : <span className="text-sm text-[var(--sds-text-muted)]">هنوز بررسی نشده است.</span>}<ErpButton label="بررسی زنجیره حسابرسی" variant="outline" onClick={async () => { try { const response = await accountingAPI.verifyLedgerAuditChain(); setAuditHealth(response.data.data); } catch (error: any) { setMessage({ kind: 'error', title: error.response?.data?.error || 'بررسی زنجیره حسابرسی ناموفق بود.' }); } }} /></div></ErpSection>
         <ErpSection title="هویت دفتر"><div className="grid gap-3 md:grid-cols-2"><ErpCard className="p-4"><span className="text-xs text-[var(--sds-text-muted)]">واحد گزارشگر</span><strong className="mt-2 block">{context.namePersian}</strong><span className="mt-1 block text-sm">شناسه ملی: {context.nationalId || 'ثبت نشده'}</span></ErpCard><ErpCard className="p-4"><span className="text-xs text-[var(--sds-text-muted)]">دفتر اصلی</span><strong className="mt-2 block">{book.namePersian}</strong><span className="mt-1 block text-sm">ارز پایه: ریال</span></ErpCard></div></ErpSection>
         <ErpSection title="تعریف سال مالی سفارشی" description="دوره‌های عادی باید تمام بازه سال مالی را بدون فاصله و هم‌پوشانی پوشش دهند.">

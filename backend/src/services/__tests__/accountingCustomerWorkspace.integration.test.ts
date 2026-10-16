@@ -38,7 +38,11 @@ test('customer workspace: exact balances, immutable history, refund limits and C
     const list = await listCustomerWorkspaceAccounts(db, { asOf: new Date(), pageSize: 1 });
     assert.equal(list.total, 2); assert.equal(list.items.length, 1);
     const common = { periodId: year.periods[0].id, postingRuleId: rule.id, counterAccountId: counter.id, occurredAt: new Date('2026-10-01'), reason: 'ثبت مالی با مستندات آزمون', reference: 'نامه شماره یک', confirmed: true, actor };
-    const opening = { ...common, kind: 'OPENING' as const, amountRials: 1000n, idempotencyKey: randomUUID() };
+    const openingSnapshot = await readCustomerWorkspace(db, { id, asOf: new Date(), userId: actor.id, openingBasisAt: common.occurredAt });
+    const opening = { ...common, kind: 'OPENING' as const, amountRials: 1000n, idempotencyKey: randomUUID(), openingReview: {
+      expectedSnapshotHash: openingSnapshot.openingSnapshotHash!, identityConfirmed: true, totalConfirmed: true,
+      lines: [{ key: 'opening', kind: 'RECEIVABLE' as const, amountRials: 1000n, reference: 'مانده باز تأییدشده', existingSourceIds: [] }],
+    } };
     const result = await recordCustomerAccountOperation(db, id, opening);
     assert.deepEqual(await recordCustomerAccountOperation(db, id, opening), result);
     const profileId = result.profileId;
@@ -64,6 +68,8 @@ test('customer workspace: exact balances, immutable history, refund limits and C
       await writeFile(path.join(output, 'customer-statement.pdf'), pdf.bytes);
     }
     const item = projected.openItems[0];
+    // Consumption cannot precede the receipt's accounting date.
+    common.occurredAt = new Date('2026-10-02');
     const allocate = { ...common, kind: 'ALLOCATION' as const, amountRials: 0n, receiptId, idempotencyKey: randomUUID(), allocations: [{ openItemId: item.id, amountRials: 300n }] };
     const allocation = await recordCustomerWorkspaceTreasury(db, id, allocate);
     await assert.rejects(recordCustomerWorkspaceTreasury(db, id, { ...allocate, idempotencyKey: randomUUID(), allocations: [allocate.allocations[0], allocate.allocations[0]] }), /یک بار/);

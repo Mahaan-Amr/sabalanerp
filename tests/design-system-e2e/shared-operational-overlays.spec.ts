@@ -83,7 +83,7 @@ test('Catalog Excel Sync is responsive, accessible, and cannot dismiss or repeat
   const receiptDialog = page.getByRole('dialog', { name: 'ثبت دریافت' });
   const method = receiptDialog.getByRole('combobox', { name: 'روش دریافت' });
   await method.click();
-  const search = receiptDialog.getByRole('textbox', { name: 'جستجوی گزینه‌ها' });
+  const search = receiptDialog.getByRole('textbox', { name: 'جستجوی گزینه‌ها', exact: true });
   await expect(search).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(receiptDialog).toContainText('روش دریافت');

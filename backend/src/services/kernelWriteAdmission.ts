@@ -25,8 +25,11 @@ export class KernelWriteAdmission {
       || !Number.isSafeInteger(expected.ownerUid) || expected.ownerUid < 0 || typeof assertOwner !== 'function') {
       throw failure('KERNEL_WRITE_GATE_IDENTITY_REQUIRED');
     }
+    this.expected = Object.freeze({ ...expected });
     this.assertNamed();
   }
+
+  identity(): KernelGateIdentity { return { ...this.expected }; }
 
   private matches(value: fs.BigIntStats) {
     return value.isFile() && value.dev.toString() === this.expected.device && value.ino.toString() === this.expected.inode

@@ -16,7 +16,12 @@ export class RuntimeTaskAdmission {
   private group?: { lease: KernelWriteLease; epoch: number; references: Set<symbol> };
 
   constructor(private readonly gate: KernelWriteAdmission, private readonly journal: RuntimeBoundaryJournal,
-    private readonly assertOwner: () => void) {}
+    private readonly assertOwner: () => void) {
+    const acquired = gate.identity(), declared = journal.gateIdentity();
+    if (acquired.device !== declared.device || acquired.inode !== declared.inode || acquired.ownerUid !== declared.ownerUid) {
+      throw failure('RUNTIME_TASK_GATE_SCOPE_MISMATCH');
+    }
+  }
 
   private enqueue<T>(run: () => Promise<T>): Promise<T> {
     this.pending++;

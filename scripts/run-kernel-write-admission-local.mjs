@@ -63,6 +63,6 @@ const after = identity();
 assert.deepEqual(after, before, 'Canonical backend identity/start time changed during fixture');
 assert.ok(bytes < 4 * 1024 * 1024, 'Fixture evidence bound exceeded');
 assert.equal(result.signal, null); assert.equal(result.code, 0);
-assert.match(output, /# tests 17\b/); assert.match(output, /# fail 0\b/); assert.match(output, /# skipped 0\b/);
+assert.match(output, /# tests 18\b/); assert.match(output, /# fail 0\b/); assert.match(output, /# skipped 0\b/);
 console.log(JSON.stringify({ nativeLinuxGatePassed: true, backendUnchanged: after,
   compiledSha256: Object.fromEntries(Object.entries(files).map(([name, value]) => [name, createHash('sha256').update(value).digest('hex')])) }));

@@ -32,6 +32,18 @@ function exclusive(file) {
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 after(() => { for (const root of roots) fs.rmSync(root, { recursive: true }); });
 
+test('a journal cannot declare a different gate from the acquired kernel boundary', async () => {
+  const first = fixture(), second = fixture(); await first.journal.initialize();
+  assert.throws(() => new RuntimeTaskAdmission(second.gate, first.journal, () => {}), /GATE_SCOPE_MISMATCH/);
+  assert.equal((await first.journal.inspect()).epoch, 0);
+  assert.equal((await first.journal.inspect()).phase, 'QUIESCENT');
+  assert.equal(exclusive(first.file), true); assert.equal(exclusive(second.file), true);
+  const identity = first.gate.identity(); identity.inode = second.scope.gate.inode;
+  assert.equal(first.gate.identity().inode, first.scope.gate.inode);
+  const declared = first.journal.gateIdentity(); declared.inode = second.scope.gate.inode;
+  assert.equal(first.journal.gateIdentity().inode, first.scope.gate.inode);
+});
+
 test('durable busy epochs remain constant-space and bind the actual native incarnation', { timeout: 20000 }, async () => {
   const { journal, directory, scope } = fixture();
   await journal.initialize();

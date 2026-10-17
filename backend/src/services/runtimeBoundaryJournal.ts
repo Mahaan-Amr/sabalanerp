@@ -177,6 +177,7 @@ export class RuntimeBoundaryJournal {
 
   activate() { return this.transition('ACTIVE'); }
   settle(epoch: number) { return this.transition('QUIESCENT', epoch); }
+  gateIdentity(): KernelGateIdentity { return { ...this.scope.gate }; }
 
   /** Read-only inspection can observe a dead incarnation; it cannot complete it. */
   async inspect() {

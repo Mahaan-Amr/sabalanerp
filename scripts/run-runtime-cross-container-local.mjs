@@ -6,6 +6,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import readline from 'node:readline';
 
 const root = path.resolve(import.meta.dirname, '..');
+const backendDist = process.env.ONLINE_ACCEPTANCE_BACKEND_DIST || path.join(root, 'backend/dist');
 const canonical = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || 'D:/sabalanerp';
 const compose = ['compose', '-f', path.join(canonical, 'docker-compose.local.yml')];
 function verify() {
@@ -44,7 +45,7 @@ assert.equal(volumes[0], volumes[1]);
 const operation = 'cross-container-' + randomBytes(16).toString('hex');
 const directory = '/app/online-runtime-acceptance/' + operation;
 const files = Object.fromEntries(['kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission'].map(name =>
-  [name + '.js', fs.readFileSync(path.join(root, 'backend/dist/services', name + '.js'))]));
+  [name + '.js', fs.readFileSync(path.join(backendDist, 'services', name + '.js'))]));
 files['worker.cjs'] = fs.readFileSync(path.join(root, 'tests/online-deployment/runtime-cross-container.worker.cjs'));
 const scopes = slots.map(value => ({ runtimeId: randomBytes(32).toString('hex'), image: value.Image,
   registrySha256: createHash('sha256').update(value.Id).digest('hex'), generation: 1 }));

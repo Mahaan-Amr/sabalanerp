@@ -19,9 +19,23 @@ export class RuntimeWorkBoundary {
   private accepting = true;
   readonly requests: HttpRequestLifecycle;
 
-  constructor(private readonly tasks: RuntimeTaskAdmission, canAdmitWrite: () => boolean,
-    private readonly assertBackgroundOwner: () => void) {
-    this.requests = new HttpRequestLifecycle(canAdmitWrite, () => this.acquire());
+  constructor(private readonly tasks: RuntimeTaskAdmission, admission: (() => boolean) | HttpRequestLifecycle,
+    private readonly assertBackgroundOwner: () => void, private readonly assertHttpOwner: () => void = () => {}) {
+    if (admission instanceof HttpRequestLifecycle) {
+      admission.bindOwnership(() => this.acquireHttp());
+      this.requests = admission;
+    } else {
+      if (typeof admission !== 'function') throw Error('RUNTIME_WORK_HTTP_LIFECYCLE_INVALID');
+      this.requests = new HttpRequestLifecycle(admission, () => this.acquireHttp());
+    }
+  }
+
+  private async acquireHttp() {
+    this.assertHttpOwner();
+    const lease = await this.acquire();
+    try { this.assertHttpOwner(); }
+    catch (error) { await lease.release(); throw error; }
+    return lease;
   }
 
   private async acquire() {

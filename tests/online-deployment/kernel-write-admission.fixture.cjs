@@ -8,7 +8,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { once } = require('node:events');
 const { test, after } = require('node:test');
 const { KernelWriteAdmission } = require('./kernelWriteAdmission');
-const { HttpRequestLifecycle } = require('./httpRequestLifecycle');
+const { HttpRequestLifecycle, runtimeHttpRequests, bindRuntimeHttpWriteAdmission } = require('./httpRequestLifecycle');
 const express = require('/app/node_modules/express');
 
 const roots = [];
@@ -194,4 +194,51 @@ test('durable-completion callback must finish before HTTP retirement and kernel 
     persisted.resolve(); await lifecycle.waitForDrain(2000); await gate.drain(1000);
     assert.equal(exclusive(file), true);
   } finally { persisted.resolve(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+});
+
+
+test('the existing shared HTTP lifecycle binds native ownership once before serving and retains captured callbacks', async () => {
+  const { gate, file } = gateFixture();
+  const capturedByRoute = runtimeHttpRequests;
+  bindRuntimeHttpWriteAdmission(() => true);
+  runtimeHttpRequests.bindOwnership(() => gate.acquire());
+  assert.throws(() => runtimeHttpRequests.bindOwnership(() => gate.acquire()), /ALREADY_BOUND/);
+  const entered = deferred(), pending = deferred(), finished = deferred();
+  const app = express();
+  app.use(runtimeHttpRequests.middleware);
+  app.get('/owned', async (request, response) => {
+    await capturedByRoute.trackWork(request, async () => {
+      response.end('early'); entered.resolve(); await pending.promise;
+    });
+  });
+  runtimeHttpRequests.install(app);
+  const server = http.createServer(app); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const request = http.get({ host: '127.0.0.1', port: server.address().port, path: '/owned' });
+  request.on('error', () => {});
+  request.on('response', response => { response.resume(); response.once('end', finished.resolve); });
+  try {
+    await entered.promise; await finished.promise;
+    assert.equal(exclusive(file), false);
+    await assert.rejects(runtimeHttpRequests.waitForDrain(20), /DRAIN_TIMEOUT/);
+    pending.resolve(); await runtimeHttpRequests.waitForDrain(2000); await gate.drain(1000);
+    assert.equal(exclusive(file), true);
+  } finally { pending.resolve(); request.destroy(); await new Promise(resolve => server.close(resolve)); }
+});
+
+
+test('ownership cannot be attached after an initially unowned runtime has answered a probe', async () => {
+  const lifecycle = new HttpRequestLifecycle(() => true);
+  const app = express(); app.use(lifecycle.middleware);
+  app.get('/api/health', (_request, response) => response.end('healthy'));
+  lifecycle.install(app);
+  const server = http.createServer(app); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  try {
+    await new Promise((resolve, reject) => {
+      const request = http.get({ host: '127.0.0.1', port: server.address().port, path: '/api/health' }, response => {
+        response.on('error', reject); response.resume(); response.once('end', resolve);
+      });
+      request.once('error', reject);
+    });
+    assert.throws(() => lifecycle.bindOwnership(async () => ({ release() {} })), /ALREADY_OBSERVED/);
+  } finally { await new Promise(resolve => server.close(resolve)); }
 });

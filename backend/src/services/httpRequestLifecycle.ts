@@ -13,12 +13,24 @@ type RouterStack = { stack?: Layer[]; _router?: RouterStack };
  * timeout blocks retirement instead of guessing that its work has stopped. */
 export class HttpRequestLifecycle {
   private readonly active = new Set<RequestWork>();
+  private observedRequest = false;
   private readonly requests = new WeakMap<Request, RequestWork>();
   private readonly installed = new WeakSet<Layer>();
   constructor(private readonly canAdmitWrite: () => boolean = () => true,
-    private readonly acquireOwnership?: (request: Request) => Promise<RequestOwnership>) {}
+    private acquireOwnership?: (request: Request) => Promise<RequestOwnership>) {}
+
+  /** Bind the same lifecycle already captured by uploads/audit routes.
+   * Binding is startup-only and cannot replace ownership or promote a runtime
+   * after even a probe has been served. There is no unbind/reset path. */
+  bindOwnership(acquire: (request: Request) => Promise<RequestOwnership>) {
+    if (this.acquireOwnership) throw new Error('HTTP_OWNERSHIP_ALREADY_BOUND');
+    if (this.observedRequest) throw new Error('HTTP_OWNERSHIP_ALREADY_OBSERVED');
+    if (typeof acquire !== 'function') throw new Error('HTTP_OWNERSHIP_BINDING_INVALID');
+    this.acquireOwnership = acquire;
+  }
 
   readonly middleware: RequestHandler = (req, res, next) => {
+    this.observedRequest = true;
     const pathname = req.originalUrl.split('?')[0];
     if (pathname === '/api/health' || pathname === '/api/ready') return next();
     const work: RequestWork = { responseDone: false, mutation: !['GET', 'HEAD', 'OPTIONS'].includes(req.method),

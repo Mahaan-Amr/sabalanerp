@@ -54,6 +54,13 @@ def encoded(value):
     return (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
 
 
+def work_scope(scope):
+    gate = {key: scope['gate'][key] for key in ['device', 'inode', 'ownerUid']}
+    return dict(format='sabalan-runtime-namespace/v1', scope=dict(runtimeId=scope['runtimeId'], image=scope['image'],
+                registrySha256=scope['manifestSha256'], generation=1, gate=gate,
+                postgresApplicationName='sabalan-rt-' + hashlib.sha256(scope['runtimeId'].encode('ascii')).hexdigest()[:48]))
+
+
 def lock(file):
     write(file, b'', 0o600)
     value = file.stat()
@@ -80,6 +87,7 @@ if mode == 'prepare':
         native.mkdir(mode=0o700, parents=True)
         boundary.mkdir(mode=0o700, parents=True)
         lock(native / 'deployment-runtime-control.lock')
+        (coordination / 'diagnostic-uploads' / runtime_id).mkdir(mode=0o700, parents=True)
         scope = dict(format='sabalan-online-runtime-scope/v1', runtimeId=runtime_id,
                      releaseId='native-overlap-diagnostic', manifestSha256='a' * 64, sourceCommit='b' * 40,
                      image='sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505',
@@ -87,6 +95,7 @@ if mode == 'prepare':
                      coordinationDirectory=str(coordination), nativeDirectory=str(native), boundaryDirectory=str(boundary),
                      gate=gate, interlock=interlock, worker=worker if purpose != 'http' else None,
                      database=dict(systemIdentifier=system, name=database))
+        write(Path(scope['boundaryDirectory']) / 'scope.json', encoded(work_scope(scope)), 0o600)
         raw = encoded(scope)
         write(Path('/app/runtime-authority') / (runtime_id + '.json'), raw)
         grants.append(dict(name=name, file='/run/sabalan-online/' + runtime_id + '.json',
@@ -105,6 +114,7 @@ if mode == 'prepare':
         Path(scope[name]).mkdir(mode=0o700, parents=True)
     lock(Path(scope['nativeDirectory']) / 'deployment-runtime-control.lock')
     write(unknown_coordination / 'deployment-online-worker-native.json', b'null\n', 0o600)
+    write(Path(scope['boundaryDirectory']) / 'scope.json', encoded(work_scope(scope)), 0o600)
     raw = encoded(scope)
     write(Path('/app/runtime-authority') / (runtime_id + '.json'), raw)
     grants.append(dict(name='null-worker', file='/run/sabalan-online/' + runtime_id + '.json',
@@ -116,7 +126,8 @@ if mode == 'prepare':
     print(json.dumps(dict(prepared=True, isolatedDatabase=database, grants=len(grants))))
     sys.exit(0)
 
-require(mode == 'exercise')
+require(mode in ['exercise', 'scoped-exercise'])
+scoped = mode == 'scoped-exercise'
 index = json.loads((root / 'index.json').read_bytes())
 database = index['database']
 grants = {value['name']: value for value in index['grants']}
@@ -150,7 +161,8 @@ def ready(child):
     if not raw:
         child.wait(timeout=5)
         diagnostic = child.stderr.read(4096)
-        require(False, 'CAPTURE_NAMESPACE_PROBE_REJECTED' if b'CAPTURE_NAMESPACE_PROBE_REJECTED' in diagnostic else 'WORKER_DID_NOT_START')
+        require(False, 'ONLINE_SCOPED_WORK_NOT_IMPLEMENTED' if b'ONLINE_SCOPED_WORK_NOT_IMPLEMENTED' in diagnostic
+                else 'CAPTURE_NAMESPACE_PROBE_REJECTED' if b'CAPTURE_NAMESPACE_PROBE_REJECTED' in diagnostic else 'WORKER_DID_NOT_START')
     value = json.loads(raw)
     require(value['event'] == 'ready')
     return value
@@ -167,12 +179,29 @@ def finish(name, child):
     require(child.wait(timeout=15) == 0, 'NATIVE_DRAIN_FAILED')
     value = json.loads((directory / 'deployment-runtime-native.json').read_bytes())
     require(value['phase'] == 'QUIESCENT' and value['nativeReaped'] and value['databaseQuiet'])
+    if scoped and grants[name]['scope']['purpose'] != 'capture':
+        state = json.loads((Path(grants[name]['scope']['boundaryDirectory']) / 'state.json').read_bytes())
+        require(state['phase'] == 'QUIESCENT')
+
 
 
 try:
     running = {name: launch(name) for name in ['http-a', 'http-b', 'jobs']}
     observations = {name: ready(child) for name, child in running.items()}
     require(len({value['namespace'] for value in observations.values()}) == 3)
+    if scoped:
+        import http.client
+        for name in ['http-a', 'http-b']:
+            client = http.client.HTTPConnection('127.0.0.1', observations[name]['port'], timeout=5)
+            try:
+                client.request('GET', '/read')
+                response = client.getresponse()
+                require(response.status == 200 and json.loads(response.read()) == dict(namespace=observations[name]['namespace']))
+            finally:
+                client.close()
+        worker_row = json.loads(sql("SELECT json_build_object('amount',amount::text,'quantity',quantity::text) FROM online_native_probe WHERE id='worker'", database))
+        require(worker_row == dict(amount='123456789.12345678', quantity='0.00000001'))
+
     require(not available(coordination / 'deployment-runtime-control.lock'))
     require(not available(coordination / 'deployment-online-worker.lock'))
     for name in ['jobs-duplicate', 'capture']:
@@ -208,6 +237,9 @@ try:
     current = json.loads((Path(grants['lost-runtime']['scope']['nativeDirectory']) / 'deployment-runtime-native.json').read_bytes())
     require(current['phase'] == 'QUIESCENT' and current['nativeStatus'] == -9
             and current['nativeReaped'] and current['databaseQuiet'])
+    if scoped:
+        state = json.loads((Path(grants['lost-runtime']['scope']['boundaryDirectory']) / 'state.json').read_bytes())
+        require(state['phase'] == 'ACTIVE' and state['epoch'] >= 1)
     row = json.loads(sql("SELECT json_build_object('amount',amount::text,'quantity',quantity::text) FROM online_native_probe WHERE id='lost-runtime'", database))
     require(row == dict(amount='123456789.12345678', quantity='0.00000001'))
     # Exercise the guardian directly with a genuine SH holder on the real
@@ -292,7 +324,7 @@ os.execv('/usr/bin/python3',['/usr/bin/python3','-I','-B',sys.argv[3],'node','-e
                           fullRuntimeIdNamespaceSeparation=True, deadWorkerDurableFenceRefused=True,
                           existingNullWorkerRefusedDuringOrphanSql=True,
                           retainedWorkerHoldSha256=hashlib.sha256(worker_raw).hexdigest(),
-                          legacyFleetBypassRefused=True, droppedDatabase=database)))
+                          legacyFleetBypassRefused=True, scopedHttpAndWorkerWork=scoped, droppedDatabase=database)))
 finally:
     if not proven:
         print('ONLINE_NATIVE_ACCEPTANCE_HELD ' + str(root), file=sys.stderr)

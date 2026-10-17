@@ -26,7 +26,10 @@ const before = identity();
 const files = {
   'kernelWriteAdmission.js': fs.readFileSync(path.join(root, 'backend/dist/services/kernelWriteAdmission.js')),
   'httpRequestLifecycle.js': fs.readFileSync(path.join(root, 'backend/dist/services/httpRequestLifecycle.js')),
+  'runtimeBoundaryJournal.js': fs.readFileSync(path.join(root, 'backend/dist/services/runtimeBoundaryJournal.js')),
+  'runtimeTaskAdmission.js': fs.readFileSync(path.join(root, 'backend/dist/services/runtimeTaskAdmission.js')),
   'fixture.cjs': fs.readFileSync(path.join(root, 'tests/online-deployment/kernel-write-admission.fixture.cjs')),
+  'runtime-fixture.cjs': fs.readFileSync(path.join(root, 'tests/online-deployment/runtime-boundary.fixture.cjs')),
 };
 const sources = Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, bytes.toString('base64')]));
 const bootstrap = `const fs=require('fs'),os=require('os'),path=require('path'),cp=require('child_process'),assert=require('assert/strict');
@@ -34,9 +37,9 @@ const bootstrap = `const fs=require('fs'),os=require('os'),path=require('path'),
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'sabalan-kernel-admission-runtime-'));fs.chmodSync(directory,0o700);
   let settled=false;
   try{for(const [name,base64]of Object.entries(files)){
-    assert.ok(['kernelWriteAdmission.js','httpRequestLifecycle.js','fixture.cjs'].includes(name));
+    assert.ok(['kernelWriteAdmission.js','httpRequestLifecycle.js','runtimeBoundaryJournal.js','runtimeTaskAdmission.js','fixture.cjs','runtime-fixture.cjs'].includes(name));
     fs.writeFileSync(path.join(directory,name),Buffer.from(base64,'base64'),{flag:'wx',mode:0o400});}
-    const result=cp.spawnSync(process.execPath,['--test',path.join(directory,'fixture.cjs')],{stdio:'inherit'});
+    const result=cp.spawnSync(process.execPath,['--test',path.join(directory,'fixture.cjs'),path.join(directory,'runtime-fixture.cjs')],{stdio:'inherit'});
     if(result.error)throw result.error;if(result.signal||result.status===null)throw Error('FIXTURE_COMPLETION_UNPROVEN');
     settled=true;process.exitCode=result.status;
   }finally{
@@ -60,6 +63,6 @@ const after = identity();
 assert.deepEqual(after, before, 'Canonical backend identity/start time changed during fixture');
 assert.ok(bytes < 4 * 1024 * 1024, 'Fixture evidence bound exceeded');
 assert.equal(result.signal, null); assert.equal(result.code, 0);
-assert.match(output, /# tests 9\b/); assert.match(output, /# fail 0\b/); assert.match(output, /# skipped 0\b/);
+assert.match(output, /# tests 17\b/); assert.match(output, /# fail 0\b/); assert.match(output, /# skipped 0\b/);
 console.log(JSON.stringify({ nativeLinuxGatePassed: true, backendUnchanged: after,
   compiledSha256: Object.fromEntries(Object.entries(files).map(([name, value]) => [name, createHash('sha256').update(value).digest('hex')])) }));

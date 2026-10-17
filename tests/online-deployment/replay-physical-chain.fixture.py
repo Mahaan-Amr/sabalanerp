@@ -227,7 +227,7 @@ def main(root):
                 primary_conninfo='', primary_slot_name='', archive_mode='off', archive_command='', archive_library='', ssl='off',
                 archive_cleanup_command='', recovery_end_command='',
                 logging_collector='off', log_destination='stderr', autovacuum='off', max_logical_replication_workers='0',
-                restore_command='cp /wal/%f %p', recovery_target_lsn=source['committedLsn'], recovery_target_inclusive='true',
+                restore_command='cp /wal/%f %p && chmod 600 %p', recovery_target_lsn=source['committedLsn'], recovery_target_inclusive='true',
                 recovery_target_action='promote', recovery_target_timeline=str(source['range']['timeline']))
     for key, value in safe.items(): arguments += ['-c', key + '=' + value]
     compose = root / 'compose-native-replay.json'

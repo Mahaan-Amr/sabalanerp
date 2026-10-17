@@ -132,29 +132,31 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
       assert.equal((await page.goto(origin + '/', {waitUntil: 'networkidle'})).status(), 200);
       // A second old tab remains on the actual old Next runtime and performs
       // genuine client navigation while new documents go to the new image.
-      const oldNavigator = await browser.newPage(), nativeAfterSwitch = [];
-      // Drop speculative prefetch only, before loading the old document. The
-      // later user click must contact Next over HTTP after generation 2 exists.
-      await oldNavigator.route('**/*', route => {
-        const headers = route.request().headers();
-        if (headers['next-router-prefetch'] || headers['next-router-segment-prefetch'] || headers.purpose === 'prefetch') return route.abort();
-        return route.continue();
-      });
+      const oldNavigator = await browser.newPage({viewport: {width: 390, height: 150}}), nativeAfterSwitch = [];
+      let aboutBeforeSwitch = 0, navigationRequests = 0;
+      const beforeSwitch = request => {if (new URL(request.url()).pathname === '/about' && request.headers().rsc === '1') aboutBeforeSwitch++;};
+      oldNavigator.on('request', beforeSwitch);
+      oldNavigator.on('request', request => {if (request.isNavigationRequest()) navigationRequests++;});
       assert.equal((await oldNavigator.goto(origin + '/', {waitUntil: 'networkidle'})).status(), 200);
+      // The hero link is below Next's viewport prefetch margin. No router or
+      // request is patched; scrolling to click it later creates a real request.
+      const aboutLink = oldNavigator.locator('a.public-button-secondary[href="/about"]');
+      assert.ok((await aboutLink.boundingBox()).y > 550); assert.equal(aboutBeforeSwitch, 0);
       await page.locator('a[href="/login"]').first().click(); await page.waitForURL('**/login');
       await page.locator('input[name="identifier"]').fill('draft-kept-during-switch');
       await page.locator('input[name="password"]').fill('diagnostic-not-a-real-password');
       const navigationCount = await page.evaluate(() => performance.getEntriesByType('navigation').length);
       assert.equal(control('next').published.generation, 2);
+      oldNavigator.off('request', beforeSwitch);
       oldNavigator.on('request', request => {
         const headers = request.headers();
-        if (headers.rsc === '1' && !headers['next-router-prefetch'] && !headers['next-router-segment-prefetch'] && headers.purpose !== 'prefetch') {
+        if (headers.rsc === '1') {
           nativeAfterSwitch.push({path: new URL(request.url()).pathname, id: headers['x-deployment-id']});
         }
       });
       const nativeResponse = oldNavigator.waitForResponse(response => new URL(response.url()).pathname === '/about'
-        && response.request().headers().rsc === '1' && !response.request().headers()['next-router-prefetch']);
-      await oldNavigator.locator('a[href="/about"]').first().click();
+        && response.request().headers().rsc === '1');
+      await aboutLink.click();
       const actualResponse = await nativeResponse;
       assert.equal(actualResponse.status(), 200); assert.match(actualResponse.headers()['content-type'], /text\/x-component/);
       assert.equal(actualResponse.headers()['cache-control'], 'no-store, private');
@@ -162,6 +164,7 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
       const nativeIntent = JSON.parse(docker(['exec', proxyId, 'cat', privateRoot + '/operations/' + transportOperation + '.intent.json']));
       assert.equal(nativeIntent.generation, 2); assert.equal(nativeIntent.buildId, builds[0].id);
       await oldNavigator.waitForURL('**/about'); await oldNavigator.waitForLoadState('networkidle');
+      assert.equal(navigationRequests, 1, 'The retained Next app must navigate without a new current-build document');
       assert.ok(nativeAfterSwitch.some(request => request.path === '/about' && request.id === builds[0].id));
       assert.ok(nativeAfterSwitch.every(request => request.id === builds[0].id));
       await oldNavigator.close();

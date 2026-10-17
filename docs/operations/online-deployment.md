@@ -4,6 +4,14 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 ## Current foundation
 
+- Private v2 coherent capture now includes a bounded registered-backend census
+  binding actual read-only grants, native locks/claims and QUIESCENT work journals
+  to fresh visible SQL observations. Composed PostgreSQL/file/SQLite capture and
+  exact local restoration passed, alongside the legacy 427-migration/541-relation
+  regression. Host/image registration, Inquiry and independent production recovery
+  remain separate required proofs. See
+  [registered backend capture](../../reports/qa/online-registered-backend-capture-20261017.md).
+
 - Native-owned v2 capture scheduling now queues new HTTP work while prior SQL
   finishes, retains CLOSING after capture-owner death and reopens only after the
   same guardian proves actual native/SQL closure. Exact queued-write, killed

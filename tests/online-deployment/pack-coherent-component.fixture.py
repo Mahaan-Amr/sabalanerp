@@ -66,7 +66,7 @@ def main():
           and closure['nativeStatus'] == 0 and closure['stoppedBySignal'] is False,
           'NATIVE_CLOSURE_REQUIRED')
     active = {key: value for key, value in closure.items()
-              if key not in ['nativeReaped', 'databaseQuiet', 'nativeStatus', 'stoppedBySignal']}
+              if key not in ['nativeReaped', 'databaseQuiet', 'nativeStatus', 'stoppedBySignal', 'activeClaimSha256']}
     active['phase'] = 'ACTIVE'
     active_sha = digest((json.dumps(active, sort_keys=True, separators=(',', ':')) + '\n').encode())
     captured_bytes = read(root / 'captured-component/captured.json', 65536)

@@ -21,6 +21,7 @@ else (async () => {
       filename: (_request, _file, complete) => complete(null, 'proof.bin') }, limits: { fileSize: 8192 },
   }) : undefined;
   bindRuntimeHttpWriteAdmission(() => true);
+  await assert.rejects(createScopedRuntimeWork({ registrySha256: 'c'.repeat(64), generation: 1, canJoin: () => true }), /REGISTRY_MISMATCH/);
   const work = await createScopedRuntimeWork({ registrySha256: input.scope.manifestSha256, generation: 1,
     canJoin: () => true });
   assert.strictEqual(work.requests, runtimeHttpRequests);
@@ -104,7 +105,7 @@ else (async () => {
   } else if (mode === 'lost-worker') {
     await work.runBackground(() => prisma.$executeRawUnsafe("DO $$ BEGIN PERFORM pg_sleep(3); INSERT INTO online_native_probe VALUES ('lost-worker', 123456789.12345678, 0.00000001); END $$"));
   } else {
-    while (!fs.existsSync(input.scope.nativeDirectory + '/diagnostic-finish')) await new Promise(resolve => setTimeout(resolve, 20));
+    while (!fs.existsSync(input.scope.coordinationDirectory + '/diagnostic-finish/' + input.scope.runtimeId)) await new Promise(resolve => setTimeout(resolve, 20));
   }
   await work.stopAndDrain(2000);
   if (server) await new Promise(resolve => server.close(resolve));

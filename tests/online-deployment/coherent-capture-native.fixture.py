@@ -197,7 +197,7 @@ native_record = json.loads((native_control / 'deployment-runtime-native.json').r
 assert native_record['phase'] == 'QUIESCENT' and native_record['nativeReaped'] and native_record['databaseQuiet']
 assert native_record['nativeStatus'] == 0
 active = {key: value for key, value in native_record.items()
-          if key not in ('nativeReaped', 'databaseQuiet', 'nativeStatus', 'stoppedBySignal')}
+          if key not in ('nativeReaped', 'databaseQuiet', 'nativeStatus', 'stoppedBySignal', 'activeClaimSha256')}
 active['phase'] = 'ACTIVE'
 assert hashlib.sha256((json.dumps(active, sort_keys=True, separators=(',', ':')) + '\n').encode()).hexdigest() == captured['nativeClaimSha256']
 assert native_record['captureGate'] == {'file': str(root / 'deployment-write-admission.lock'),

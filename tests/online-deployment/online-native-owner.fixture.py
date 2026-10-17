@@ -77,6 +77,9 @@ if mode in ['prepare', 'prepare-admission']:
     gate = lock(coordination / 'deployment-write-admission.lock')
     interlock = lock(coordination / 'deployment-runtime-control.lock')
     worker = lock(coordination / 'deployment-online-worker.lock')
+    (coordination / 'diagnostic-finish').mkdir(mode=0o700)
+    for name in ['online', 'online/native', 'online/work']:
+        (coordination / name).mkdir(mode=0o700)
     admission = None
     if mode == 'prepare-admission':
         directory = coordination / 'online/admission'
@@ -140,6 +143,9 @@ if mode in ['prepare', 'prepare-admission']:
     if admission:
         paused_coordination = root / 'interrupted-capture-coordination'
         paused_coordination.mkdir(mode=0o700)
+        (paused_coordination / 'diagnostic-finish').mkdir(mode=0o700)
+        for name in ['online', 'online/native', 'online/work']:
+            (paused_coordination / name).mkdir(mode=0o700)
         paused_locks = {key: lock(paused_coordination / name) for key, name in [
             ('gate', 'deployment-write-admission.lock'), ('interlock', 'deployment-runtime-control.lock'),
             ('worker', 'deployment-online-worker.lock')]}
@@ -227,7 +233,7 @@ def available(file):
 
 def finish(name, child):
     directory = Path(grants[name]['scope']['nativeDirectory'])
-    write(directory / 'diagnostic-finish', b'done\n')
+    write(Path(grants[name]['scope']['coordinationDirectory']) / 'diagnostic-finish' / grants[name]['scope']['runtimeId'], b'done\n')
     require(child.wait(timeout=15) == 0, 'NATIVE_DRAIN_FAILED')
     value = json.loads((directory / 'deployment-runtime-native.json').read_bytes())
     require(value['phase'] == 'QUIESCENT' and value['nativeReaped'] and value['databaseQuiet'])
@@ -274,6 +280,7 @@ try:
     wrong_gate = wrong / 'deployment-write-admission.lock'
     lock(wrong_gate)
     capture_finished = False
+    component_evidence = None
     if grants['capture']['scope']['format'] == 'sabalan-online-runtime-scope/v2':
         # Actual in-flight HTTP/SQL finishes under SH10. Capture publishes its
         # native-owned durable pause before waiting for EX10. A later HTTP write
@@ -308,12 +315,18 @@ try:
             pause_raw = pause_file.read_bytes()
             require(json.loads(pause_raw)['phase'] == 'CLOSING')
             after_pause = executor.submit(request, 'http-b', '/pause-queued')
-            require(ready(capture)['purpose'] == 'capture')
+            capture_ready = ready(capture)
+            require(capture_ready['purpose'] == 'capture')
+            component_evidence = capture_ready.get('component')
             require(before_pause.result(timeout=8) == 'committed-before')
             require(not after_pause.done(), 'NEW_HTTP_WORK_BYPASSED_CAPTURE_PAUSE')
             require(sql("SELECT count(*) FROM online_native_probe WHERE id='pause-after'", database) == '0')
             require(not available(coordination / 'deployment-write-admission.lock'))
             finish('capture', capture)
+            require(component_evidence is not None)
+            closed_raw = (Path(grants['capture']['scope']['nativeDirectory']) / 'deployment-runtime-native.json').read_bytes()
+            component_evidence.update(nativeClosedSha256=hashlib.sha256(closed_raw).hexdigest(),
+                                      nativeActiveSha256=json.loads(closed_raw)['activeClaimSha256'], productionRecoveryPoint=False)
             require(after_pause.result(timeout=8) == 'committed-after')
             opened = json.loads((coordination / 'online/admission/00000002.json').read_bytes())
             require(opened['phase'] == 'OPEN' and opened['previousSha256'] == hashlib.sha256(pause_raw).hexdigest())
@@ -349,6 +362,21 @@ try:
     if scoped:
         state = json.loads((Path(grants['lost-runtime']['scope']['boundaryDirectory']) / 'state.json').read_bytes())
         require(state['phase'] == 'ACTIVE' and state['epoch'] >= 1)
+        # The native guard has proved descendant/SQL completion, but it cannot
+        # settle the dead application's unfinished work journal. Exercise the
+        # same read-only claim validator called by the owned capture census.
+        if grants['lost-runtime']['scope']['format'] == 'sabalan-online-runtime-scope/v2':
+            import importlib.util
+            spec = importlib.util.spec_from_file_location('orphan_work_check', root / 'online-backend-boundary.py')
+            fleet = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(fleet)
+            work_directory = Path(grants['lost-runtime']['scope']['boundaryDirectory'])
+            try:
+                fleet.inspect_work_claim(work_directory, grants['lost-runtime']['scope']['runtimeId'],
+                    grants['lost-runtime']['sha256'], current, current['activeClaimSha256'], (work_directory / 'scope.json').read_bytes())
+                require(False, 'ORPHAN_WORK_CLAIM_ACCEPTED')
+            except RuntimeError as error:
+                require(str(error) == 'ONLINE_BACKEND_BOUNDARY_UNPROVEN')
     row = json.loads(sql("SELECT json_build_object('amount',amount::text,'quantity',quantity::text) FROM online_native_probe WHERE id='lost-runtime'", database))
     require(row == dict(amount='123456789.12345678', quantity='0.00000001'))
     # Exercise the guardian directly with a genuine SH holder on the real
@@ -485,6 +513,8 @@ os.execv('/usr/bin/python3',['/usr/bin/python3','-I','-B',sys.argv[3],'node','-e
                           retainedWorkerHoldSha256=hashlib.sha256(worker_raw).hexdigest(),
                           legacyFleetBypassRefused=True, scopedHttpAndWorkerWork=scoped,
                           durableCapturePauseWithQueuedHttp=capture_finished,
+                          registeredBackendCensusAndComponent=component_evidence,
+                          orphanWorkClaimRefused=scoped and capture_finished,
                           interruptedCapturePauseRetained=interrupted_pause_refused, droppedDatabase=database)))
 finally:
     if not proven:

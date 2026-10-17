@@ -109,6 +109,7 @@ COPY deploy/scripts/with-backend-control-ownership.sh ./scripts/with-backend-con
 COPY deploy/scripts/protected-bootstrap-owner.py deploy/scripts/protected-bootstrap-state.py ./scripts/
 COPY deploy/scripts/backend-runtime-owner.py deploy/scripts/online-runtime-scope.py deploy/scripts/online-runtime-owner.py ./scripts/
 COPY deploy/scripts/online-capture-admission.py ./scripts/online-capture-admission.py
+COPY deploy/scripts/online-backend-boundary.py deploy/scripts/recovery-database-freeze.py deploy/scripts/recovery-file-generations.py deploy/scripts/capture-coherent-components.py ./scripts/
 COPY deploy/scripts/online-runtime-scope.py ./dist/services/online-runtime-scope.py
 COPY docs/qa/partner-sales/release/release-package.mjs ./partner-release-verifier/release-package.mjs
 COPY backend/src/documents/dispatch/__fixtures__/baselines ./dispatch-document-baselines

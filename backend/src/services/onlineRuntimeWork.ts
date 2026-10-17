@@ -29,6 +29,7 @@ export async function createScopedRuntimeWork(configuration: WorkInput): Promise
   const { registrySha256, generation, canJoin: additionalCanJoin } = configuration;
   const input = loadOnlineRuntimeScope();
   if (!input || !['http', 'jobs'].includes(input.scope.purpose)) throw failure('ONLINE_RUNTIME_WORK_SCOPE_INVALID');
+  if (registrySha256 !== input.scope.manifestSha256) throw failure('ONLINE_RUNTIME_WORK_REGISTRY_MISMATCH');
   const assertOwner = () => {
     if (loadOnlineRuntimeScope() !== input || !applicationRuntimeDatabaseUrl()) throw failure('ONLINE_RUNTIME_WORK_OWNER_UNPROVEN');
   };

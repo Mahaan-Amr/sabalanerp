@@ -91,6 +91,12 @@ def run():
         files.publish_record(fd, 'intent.json', {'format': 'sabalan-coherent-capture-intent/v1',
             'captureId': scope['captureId'], 'scopeSha256': scope_sha,
             'nativeClaimSha256': os.environ['BACKEND_NATIVE_CLAIM_SHA256'], 'namespace': namespace})
+        backend_boundary = None
+        if any(key in os.environ for key in ['BACKEND_ONLINE_SCOPE_FILE', 'BACKEND_ONLINE_SCOPE_SHA256']):
+            online = load('coherent_runtime_scope', 'online-runtime-scope.py').load_scope(os.environ)
+            if online['scope']['format'] == 'sabalan-online-runtime-scope/v2':
+                backend_boundary = load('coherent_backend_boundary', 'online-backend-boundary.py').inspect_registered_backend_boundary(os.environ['DATABASE_URL'])
+                files.publish_record(fd, 'registered-backend-boundary.json', backend_boundary)
         boundary = postgres.DatabaseFreeze(os.environ['DATABASE_URL'], 10, store.assert_gate, diagnostic)
         database = boundary.acquire(scope['systemIdentifier'], scope['databaseName'])
         print(json.dumps({'phase': 'FROZEN', 'handshake': scope['handshake'], 'relations': database['relations']}), flush=True)
@@ -147,12 +153,15 @@ def run():
         boundary = None
         if read_scope(scope_file)[1] != scope_sha:
             raise RuntimeError('COHERENT_CAPTURE_SCOPE_CHANGED')
-        result = {'format': 'sabalan-coherent-component/v1', 'phase': 'CAPTURED_AWAITING_NATIVE_CLOSURE',
+        result = {'format': 'sabalan-coherent-component/v2' if backend_boundary else 'sabalan-coherent-component/v1',
+                  'phase': 'CAPTURED_AWAITING_NATIVE_CLOSURE',
                   'captureId': scope['captureId'], 'scopeSha256': scope_sha,
                   'nativeClaimSha256': os.environ['BACKEND_NATIVE_CLAIM_SHA256'],
                   'database': database, 'restorePoint': point, 'fileGenerationSha256': generation['sha256'],
                   'logicalDump': dump_evidence, 'captureBoundaryMs': round((time.monotonic() - started) * 1000),
                   'productionRecoveryPoint': False}
+        if backend_boundary:
+            result['registeredBackendBoundarySha256'] = hashlib.sha256(files.encoded(backend_boundary)).hexdigest()
         files.publish_record(fd, 'captured.json', result)
         completed = True
         print(json.dumps({'phase': result['phase'], 'captureId': scope['captureId']}), flush=True)

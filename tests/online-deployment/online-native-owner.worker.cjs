@@ -9,6 +9,7 @@ const { loadOnlineRuntimeScope } = require('./services/onlineRuntimeScope');
 const { assertRuntimeControlOwnership } = require('./services/runtimeControlOwnership');
 
 (async () => {
+  let componentEvidence;
   const input = loadOnlineRuntimeScope();
   assert.ok(input);
   // An online worker's private FD9 and exclusive worker FD12 do not grant
@@ -40,29 +41,41 @@ const { assertRuntimeControlOwnership } = require('./services/runtimeControlOwne
         env: process.env,
         stdio: Array.from({ length: 13 }, (_, fd) => fd === 0 ? 'ignore' : fd < 3 ? 'pipe' : [9, 10, 11, 12].includes(fd) ? fd : 'ignore'),
       });
-      let stdout = '', bytes = 0, error, late = false;
+      let stdout = '', stderr = '', bytes = 0, error, late = false;
       const timer = setTimeout(() => { late = true; }, 10000);
       child.stdout.on('data', chunk => { bytes += chunk.length; if (bytes <= 4096) stdout += chunk.toString(); });
-      child.stderr.on('data', chunk => { bytes += chunk.length; });
+      child.stderr.on('data', chunk => { bytes += chunk.length; if (bytes <= 4096) stderr += chunk.toString(); });
       child.once('error', value => { error = value; });
       // A deadline is failure only after actual close, never permission to
       // kill a native SQL client or declare its server transaction complete.
-      child.once('close', (status, signal) => { clearTimeout(timer); resolve({ status, signal, error, late, bytes, stdout }); });
+      child.once('close', (status, signal) => { clearTimeout(timer); resolve({ status, signal, error, late, bytes, stdout, stderr }); });
     });
-    if (accepted.status !== 0) process.stderr.write('CAPTURE_NAMESPACE_PROBE_REJECTED\n');
+    if (accepted.status !== 0) {
+      fs.writeFileSync(input.scope.coordinationDirectory + '/capture-failure-' + input.scope.runtimeId + '.log', accepted.stderr,
+        { flag: 'wx', mode: 0o600 });
+      process.stderr.write('CAPTURE_NAMESPACE_PROBE_REJECTED\n');
+    }
     assert.equal(accepted.signal, null);
     assert.equal(accepted.error, undefined);
     assert.equal(accepted.late, false);
     assert.ok(accepted.bytes <= 4096);
     assert.equal(accepted.status, 0);
-    assert.deepEqual(JSON.parse(accepted.stdout), { event: 'online-capture-closed', descriptors: 4, relations: 1, namespace: row.name });
+    const { component, ...captureResult } = JSON.parse(accepted.stdout);
+    assert.deepEqual(captureResult, { event: 'online-capture-closed', descriptors: 4, relations: 1, namespace: row.name,
+      ...(input.scope.format === 'sabalan-online-runtime-scope/v2' ? { registeredBackendRuntimes: 7, coherentV2ComponentVerified: true } : {}) });
+    if (input.scope.format === 'sabalan-online-runtime-scope/v2') {
+      assert.match(component.capturedSha256, /^[a-f0-9]{64}$/);
+      assert.ok(component.directory.startsWith(input.scope.coordinationDirectory + '/diagnostic-components/'));
+      componentEvidence = component;
+    }
 
   }
-  console.log(JSON.stringify({ event: 'ready', pid: process.pid, namespace: row.name, purpose: input.scope.purpose }));
+  console.log(JSON.stringify({ event: 'ready', pid: process.pid, namespace: row.name, purpose: input.scope.purpose,
+    ...(componentEvidence ? { component: componentEvidence } : {}) }));
   if (['lost-runtime', 'lost-worker'].includes(process.argv[2])) {
     await prisma.$executeRawUnsafe(`DO $$ BEGIN PERFORM pg_sleep(3); INSERT INTO online_native_probe VALUES ('${process.argv[2]}', 123456789.12345678, 0.00000001); END $$`);
   } else {
-    while (!fs.existsSync(input.scope.nativeDirectory + '/diagnostic-finish')) {
+    while (!fs.existsSync(input.scope.coordinationDirectory + '/diagnostic-finish/' + input.scope.runtimeId)) {
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   }

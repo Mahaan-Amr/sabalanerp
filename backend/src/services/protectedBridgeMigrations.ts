@@ -16,6 +16,7 @@ const known = {
       'sabalan_protect_online_migration_identity', 'sabalan_prevent_online_registry_delete'],
   },
 } as const;
+export const protectedBridgeMigrationNames: readonly string[] = Object.freeze(Object.keys(known));
 function failure(code: string): never { throw Object.assign(new Error(code), { code }); }
 const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 const canonical = (value: any): any => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'

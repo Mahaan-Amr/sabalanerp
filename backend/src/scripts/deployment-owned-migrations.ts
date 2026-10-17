@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { prisma, disconnectDatabase } from '../lib/prisma';
-import { assertProtectedBridgeMigrationAuthority, compileProtectedBridgeMigration, applyProtectedBridgeMigration } from '../services/protectedBridgeMigrations';
+import { assertProtectedBridgeMigrationAuthority, compileProtectedBridgeMigration, applyProtectedBridgeMigration,
+  protectedBridgeMigrationNames } from '../services/protectedBridgeMigrations';
 
 const fail = (code: string): never => { throw Object.assign(new Error(code), { code }); };
 const required = (key: string) => {
@@ -36,6 +37,12 @@ async function main() {
   // cannot cause a partially completed bridge followed by an unsafe fallback.
   const pending = [...files].filter(([name]) => !applied.has(name)).sort(([a], [b]) => a.localeCompare(b));
   for (const [name, bytes] of pending) compileProtectedBridgeMigration(name, bytes);
+  // A retry must validate prior bridge receipts before applying a later step.
+  // Native history without an owned receipt requires inspection, even when no
+  // SQL is pending. Never silently bless an unrelated executor's history.
+  for (const name of protectedBridgeMigrationNames.filter(name => applied.has(name))) {
+    await applyProtectedBridgeMigration(prisma, owner, name, files.get(name)!);
+  }
   for (const [name, bytes] of pending) {
     const result = await applyProtectedBridgeMigration(prisma, owner, name, bytes);
     console.log(JSON.stringify({ migration: name, ...result }));

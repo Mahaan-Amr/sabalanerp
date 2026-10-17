@@ -221,7 +221,12 @@ test('the actual protected bridge requires native ownership and atomically appli
             assert.ok(trigger); assert.equal(trigger.enabled, 'O');
             const quoted = value => '"' + value.replaceAll('"', '""') + '"';
             await observer.query(`ALTER TABLE public.${quoted(table)} DISABLE TRIGGER ${quoted(trigger.name)}`);
-            try { fails({ index }, 'PROTECTED_BRIDGE_SCHEMA_DRIFT'); }
+            try {
+              fails({ index }, 'PROTECTED_BRIDGE_SCHEMA_DRIFT');
+              const refused = invokeCli(); assert.equal(refused.status, 1);
+              assert.equal(refused.messages.at(-1).code, 'PROTECTED_BRIDGE_SCHEMA_DRIFT');
+              await absent(pending[1]);
+            }
             finally { await observer.query(`ALTER TABLE public.${quoted(table)} ENABLE TRIGGER ${quoted(trigger.name)}`); }
             assert.equal(invoke({ index }).value.applied, false);
           }
@@ -235,6 +240,23 @@ test('the actual protected bridge requires native ownership and atomically appli
       const final = await ledger();
       assert.deepEqual(final, [...baseline, ...pending.map(row => ({ name: row.name, checksum: row.sha256 }))]);
       const noop = invokeCli(); assert.equal(noop.status, 0); assert.equal(noop.messages.at(-1).pendingCount, 0);
+      // Deliberate fault injection is confined to this disposable fixture DB.
+      // Preserve and restore the exact receipt bytes; production history is
+      // never repaired or adopted by the migration command.
+      const originalReceipt = (await observer.query('SELECT logs FROM _prisma_migrations WHERE migration_name=$1', [pending[0].name])).rows[0].logs;
+      for (const [logs, code] of [[null, 'PROTECTED_BRIDGE_HISTORY_REQUIRES_INSPECTION'],
+        ['{invalid', 'PROTECTED_BRIDGE_HISTORY_REQUIRES_INSPECTION'],
+        ['{}', 'PROTECTED_BRIDGE_SCHEMA_DRIFT']]) {
+        await observer.query('UPDATE _prisma_migrations SET logs=$2 WHERE migration_name=$1', [pending[0].name, logs]);
+        try {
+          const refused = invokeCli(); assert.equal(refused.status, 1); assert.equal(refused.messages.at(-1).code, code);
+        } finally { await observer.query('UPDATE _prisma_migrations SET logs=$2 WHERE migration_name=$1', [pending[0].name, originalReceipt]); }
+      }
+      await observer.query('ALTER TABLE public.driver_vehicle_assignment_plans ALTER COLUMN "blockedReason" TYPE varchar(128)');
+      try {
+        const refused = invokeCli(); assert.equal(refused.status, 1); assert.equal(refused.messages.at(-1).code, 'PROTECTED_BRIDGE_SCHEMA_DRIFT');
+      } finally { await observer.query('ALTER TABLE public.driver_vehicle_assignment_plans ALTER COLUMN "blockedReason" TYPE text'); }
+      const validatedNoop = invokeCli(); assert.equal(validatedNoop.status, 0); assert.equal(validatedNoop.messages.at(-1).pendingCount, 0);
       await observer.query("UPDATE deployment_operations SET phase='GATES_PASSED' WHERE id=$1", [owner.deploymentId]);
       try {
         const unownedNoop = invokeCli(); assert.equal(unownedNoop.status, 1);
@@ -244,6 +266,8 @@ test('the actual protected bridge requires native ownership and atomically appli
         { cwd: path.join(root, 'backend'), env: environment, encoding: 'utf8' });
       assert.equal(finalStatus.error, undefined); assert.equal(finalStatus.signal, null); assert.equal(finalStatus.status, 0);
       observations.push({ actualDeploymentCliAppliesAndNoops: true, unsupportedLaterMigrationRejectedBeforeAnyDdl: true,
+        appliedBridgeDriftPreventsLaterDdl: true, zeroPendingCatalogDriftRejected: true,
+        zeroPendingMissingMalformedAndInvalidReceiptsRejected: true,
         nativeConfigurationStatusRejectsPending: true, nativeConfigurationStatusAcceptsComplete: true });
       const noWork = await child([prisma, 'migrate', 'deploy', '--schema', path.join(root, 'backend/prisma/schema.prisma')], { cwd: path.join(root, 'backend'), env: environment });
       assert.match(noWork, /No pending migrations to apply/);

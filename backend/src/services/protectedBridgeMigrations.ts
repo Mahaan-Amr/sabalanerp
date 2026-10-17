@@ -113,6 +113,14 @@ async function catalog(tx: Prisma.TransactionClient, input: ReturnType<typeof co
   return sha(JSON.stringify(canonical({ tables, functions })));
 }
 
+/** Also required when discovery finds no pending work. A successful no-op
+ * cannot stand in for ownership of the protected deployment operation. */
+export async function assertProtectedBridgeMigrationAuthority(database: PrismaClient, inputOwner: Owner) {
+  const owner = Object.freeze({ ...inputOwner }), assertBoundary = protectedBoundary(owner);
+  assertBoundary();
+  await database.$transaction(async tx => { await assertLease(tx, owner); assertBoundary(); }, { maxWait: 1000, timeout: 5000 });
+}
+
 /** Protected bridge only; no online/public/CLI entry point. The existing
  * coordinated checkpoint flow must first own the native control lock and have
  * advanced its exact lease through remote verification to MUTATION_STARTED.

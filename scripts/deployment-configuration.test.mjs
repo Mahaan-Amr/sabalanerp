@@ -146,7 +146,7 @@ else if(a.includes('dist/scripts/deployment-performance-identity.js')){fs.writeF
 else if(a.includes('dist/scripts/validate-production-environment.js')){if(process.env.TEST_FAILURE==='preflight')process.exit(42);}
 else if(a.includes('dist/scripts/deployment-control.js')){const c=a[a.indexOf('dist/scripts/deployment-control.js')+1];if(c==='prepare'){fs.writeFileSync(session,JSON.stringify({phase:'PREFLIGHT',leaseToken:'fixture-lease',rollbackPerformanceEnvironment:Object.fromEntries(records[0].Config.Env.filter(v=>v.startsWith('PERFORMANCE_')).map(v=>[v.split('=')[0],v.slice(v.indexOf('=')+1)]))}));}else if(c==='acquire'||c==='transition'){const s=JSON.parse(fs.readFileSync(session));s.phase=c==='acquire'?'LEASE_ACQUIRED':env('DEPLOYMENT_PHASE');fs.writeFileSync(session,JSON.stringify(s));}else if(c==='finish'||c==='cancel-preflight'){fs.rmSync(session,{force:true});}}
 else if(a.includes('dist/scripts/deployment-checkpoint.js')){if(process.env.TEST_FAILURE==='checkpoint')process.exit(43);}
-else if(a.includes('db:migrate:deploy')){if(process.env.TEST_FAILURE==='after-mutation')process.exit(44);}
+else if(a.includes('node_modules/prisma/build/index.js')&&a.includes('status')){if(process.env.TEST_FAILURE==='after-mutation')process.exit(44);}
 else if(a.includes('exec')){const text=a.at(-1);if(text.includes('pg_sleep(21600)')){fs.writeFileSync(path.join(process.env.DEPLOYMENT_REPO_ROOT,'fixture-advisory.pid'),String(process.pid));setInterval(()=>{},1000);}else if(text.includes('pg_locks'))console.log('1');else if(text.includes('pg_stat_activity WHERE client_addr'))console.log('0');else if(text.includes('round(100.0'))console.log('20');else if(text.includes('pg_database_size'))console.log('1000000');else if(text.includes('df -Pk'))console.log('6000000');}
 else if(a.includes('up')||a.includes('stop')||a.includes('dist/scripts/dry-run-contract-product-graph-migration.js')||a.includes('dist/scripts/audit-hr-onboarding-task-retirement.js')||a.includes('dist/scripts/migrate-all-contract-product-graphs.js')||a.includes('dist/scripts/reconcile-contract-financial-evidence.js')||a.includes('dist/scripts/deployment-drill-preflight.js')||a.includes('dist/scripts/deployment-notify.js')||a.includes('dist/scripts/deployment-gates.js')||a.includes('dist/scripts/deployment-rollback.js')||a.includes('dist/scripts/deployment-finalize-recovery.js')){}
 else{process.exit(99);}`);
@@ -167,7 +167,9 @@ else{process.exit(99);}`);
     assert.ok(!commands.includes('"build"'));
     assert.ok(commands.includes('storage-preflight'));
     assert.equal(commands.includes('deployment-checkpoint.js'), !['storage', 'preflight'].includes(failure));
-    assert.equal(commands.includes('db:migrate:deploy'), ['after-mutation', 'success'].includes(failure));
+    assert.equal(commands.includes('node_modules/prisma/build/index.js'), ['after-mutation', 'success'].includes(failure));
+    assert.ok(!commands.includes('db:migrate:deploy'));
+    assert.ok(!commands.includes('deployment-owned-migrations.js'), 'an existing configuration image must not need the new bridge executable');
     assert.equal(commands.includes('maintenance-on'), !['storage', 'preflight'].includes(failure));
     if (failure === 'after-mutation') assert.ok(commands.includes('deployment-rollback.js'));
     assert.ok(!/fetch|pull|checkout/.test(fs.readFileSync(path.join(f.root, 'git.log'), 'utf8')));
@@ -181,6 +183,6 @@ else{process.exit(99);}`);
 test('configuration uses the same lease, checkpoint, migration, rollback and release gates', () => {
   const script = fs.readFileSync(path.join(repository, 'deploy/scripts/deploy.sh'), 'utf8');
   assert.ok(script.indexOf('phase REMOTE_CHECKPOINT_VERIFIED') < script.indexOf('persist "${REPO_ROOT}"\n'));
-  for (const step of ['control prepare', 'control acquire', 'verify_public_maintenance', 'deployment-checkpoint.js', 'npm run db:migrate:deploy', 'deployment-gates.js', 'phase GATES_PASSED', 'control maintenance-off']) assert.ok(script.includes(step));
+  for (const step of ['control prepare', 'control acquire', 'verify_public_maintenance', 'deployment-checkpoint.js', 'migrate status --schema prisma/schema.prisma', 'deployment-gates.js', 'phase GATES_PASSED', 'control maintenance-off']) assert.ok(script.includes(step));
   assert.match(script, /switch_to_previous_images\(\)[\s\S]*persist "\$\{REPO_ROOT\}" previous[\s\S]*DEPLOYMENT_BACKEND_IMAGE=/);
 });

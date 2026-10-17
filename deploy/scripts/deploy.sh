@@ -791,7 +791,19 @@ fi
 
 echo "Applying migrations with a two-connection deployment identity..."
 remaining="$(remaining_mutation_seconds)" || exit 1
-run_backend_timed "${remaining}" npm run db:migrate:deploy
+if [ "${BOOTSTRAP}" -eq 1 ]; then
+  # Existing initial-schema bootstrap remains inside the fully checkpointed
+  # protected lane. It has no pre-existing deployment registry to own yet.
+  run_backend_timed "${remaining}" npm run db:migrate:deploy
+elif [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
+  # Configuration uses the already-serving immutable image, which may predate
+  # the bridge CLI. It must have no pending schema work; do not migrate it.
+  run_backend_timed "${remaining}" node node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma
+else
+  # Reviewed bridge DDL and native Prisma history commit together. Unknown
+  # pending strategies fail closed; there is no native/partial fallback.
+  run_backend_timed "${remaining}" sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-owned-migrations.js
+fi
 if [ "${BOOTSTRAP}" -eq 1 ]; then
   DEPLOYMENT_PHASE=MIGRATIONS_APPLIED
   export DEPLOYMENT_PHASE

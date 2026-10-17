@@ -171,6 +171,20 @@ test('the actual protected bridge requires native ownership and atomically appli
           fails({ index }, 'PROTECTED_BRIDGE_SCHEMA_DRIFT');
           await observer.query('ALTER TABLE public.driver_vehicle_assignment_plans ALTER COLUMN "blockedReason" TYPE text');
           assert.equal(invoke({ index }).value.applied, false);
+          // FK enforcement lives on both the referencing and referenced
+          // tables. Constraint text alone cannot detect a disabled RI trigger.
+          for (const table of ['driver_vehicle_assignment_plans', 'internal_driver_profiles']) {
+            const [trigger] = (await observer.query(`SELECT t.tgname AS name,t.tgenabled AS enabled
+              FROM pg_trigger t JOIN pg_constraint k ON k.oid=t.tgconstraint
+              WHERE k.conrelid='public.driver_vehicle_assignment_plans'::regclass AND k.contype='f'
+                AND t.tgrelid=$1::regclass ORDER BY t.tgname LIMIT 1`, ['public.' + table])).rows;
+            assert.ok(trigger); assert.equal(trigger.enabled, 'O');
+            const quoted = value => '"' + value.replaceAll('"', '""') + '"';
+            await observer.query(`ALTER TABLE public.${quoted(table)} DISABLE TRIGGER ${quoted(trigger.name)}`);
+            try { fails({ index }, 'PROTECTED_BRIDGE_SCHEMA_DRIFT'); }
+            finally { await observer.query(`ALTER TABLE public.${quoted(table)} ENABLE TRIGGER ${quoted(trigger.name)}`); }
+            assert.equal(invoke({ index }).value.applied, false);
+          }
         }
       }
       const namespaces = await observer.query('SELECT count(*)::integer AS count FROM pg_stat_activity WHERE datname=$1 AND application_name=$2', [databaseName, 'sabalan-bridge-' + operation]);

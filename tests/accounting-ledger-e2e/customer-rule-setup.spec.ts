@@ -58,16 +58,46 @@ test('read-only accounting profile cannot define customer rules', async ({ page 
 });
 
 
+test('unconfigured ledger requires setup before showing the customer rule form', async ({ page }) => {
+  await setup(page);
+  await page.route('**/api/accounting/ledger/context', route => route.fulfill({ json: { success: true, data: { configured: false, accessProfile: 'ACCOUNTING_MANAGER' } } }));
+  await page.reload();
+  await expect(page.getByText('ابتدا دفترکل را راه‌اندازی کنید.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'راه‌اندازی دفترکل', exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'کد قاعده', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'ذخیره قاعده مشتری', exact: true })).toHaveCount(0);
+});
+
 test('real local rule setup reads the existing ledger and rules without financial writes', async ({ page }) => {
   await page.goto('/login');
   await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('admin');
   await page.locator('input[type="password"]').fill('admin123');
   await page.getByRole('button', { name: 'ورود', exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
+  const financialWrites: string[] = [];
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.startsWith('/api/accounting/ledger/')
+      && !['GET', 'HEAD', 'OPTIONS'].includes(request.method())) financialWrites.push(request.method());
+  });
   const response = page.waitForResponse(row => row.url().endsWith('/api/accounting/ledger/customer-sales/posting-rules') && row.request().method() === 'GET');
+  const contextResponse = page.waitForResponse(row => row.url().endsWith('/api/accounting/ledger/context') && row.request().method() === 'GET');
   await page.goto('/dashboard/accounting/ledger/customer-rules');
   expect((await response).status()).toBe(200);
-  await expect(page.getByRole('textbox', { name: 'کد قاعده', exact: true })).toBeVisible();
+  const receivedContext = await contextResponse;
+  expect(receivedContext.status()).toBe(200);
+  const context = (await receivedContext.json()).data;
+  expect(typeof context.configured).toBe('boolean');
+  if (!context.configured) {
+    await expect(page.getByText('ابتدا دفترکل را راه‌اندازی کنید.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'راه‌اندازی دفترکل', exact: true })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'کد قاعده', exact: true })).toHaveCount(0);
+  } else if (context.accessProfile === 'ACCOUNTING_MANAGER') {
+    await expect(page.getByRole('textbox', { name: 'کد قاعده', exact: true })).toBeVisible();
+  } else {
+    await expect(page.getByText('تعریف قاعده فقط برای مدیر حسابداری مجاز است.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'ذخیره قاعده مشتری', exact: true })).toHaveCount(0);
+  }
   await expect(page.getByText('قواعد ثبت مشتری بارگیری نشد.', { exact: true })).toHaveCount(0);
+  expect(financialWrites).toEqual([]);
   await page.screenshot({ path: 'test-results/accounting-ledger/customer-rule-setup-desktop.png', fullPage: true });
 });

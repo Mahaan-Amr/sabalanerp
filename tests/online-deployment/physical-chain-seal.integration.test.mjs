@@ -55,6 +55,11 @@ test('native verified base and WAL are copied privately on-host and durably seal
     const receive = `import hashlib,json,os,pathlib,stat,sys,tarfile
 root=pathlib.Path(sys.argv[1]);expected={row['source']:row for row in json.loads(sys.argv[2])};seen=set()
 assert root.resolve(strict=True)==root and root.stat().st_uid==os.getuid() and not root.stat().st_mode&0o077
+total=sum(row['bytes'] for row in expected.values());copied=0
+def capacity():
+ value=os.statvfs(root)
+ assert value.f_bavail*value.f_frsize >= (total-copied)+total+64*1024**2+512*1024**2,'PRIVATE_COPY_CAPACITY_REQUIRED'
+capacity()
 with tarfile.open(fileobj=sys.stdin.buffer,mode='r|') as archive:
  for member in archive:
   assert member.name in expected and member.name not in seen and member.isfile() and not member.issym() and not member.islnk()
@@ -64,7 +69,7 @@ with tarfile.open(fileobj=sys.stdin.buffer,mode='r|') as archive:
   try:
    with archive.extractfile(member) as source:
     while chunk:=source.read(262144):
-     count+=len(chunk);assert count<=row['bytes'];digest.update(chunk);offset=0
+     count+=len(chunk);copied+=len(chunk);assert count<=row['bytes'];capacity();digest.update(chunk);offset=0
      while offset<len(chunk):
       written=os.write(fd,chunk[offset:]);assert written>0;offset+=written
    assert count==row['bytes'] and digest.hexdigest()==row['sha256'];os.fsync(fd)

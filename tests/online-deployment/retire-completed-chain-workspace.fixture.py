@@ -1,5 +1,6 @@
 """Retire completed diagnostic working data, preserving its full encrypted chain."""
 import base64
+import ctypes
 import fcntl
 import hashlib
 import importlib.util
@@ -10,6 +11,7 @@ import shutil
 import signal
 import stat
 import struct
+import tempfile
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -39,6 +41,36 @@ def main():
     fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
     storage = os.open('/run/lock/sabalan-backup-storage.lock', os.O_RDWR | os.O_NOFOLLOW)
     fcntl.flock(storage, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    mount_guard_source = QA / 'retire-private-restore-workspace-20261017.fixture.py'
+    assert sha(mount_guard_source) == 'a607550c21bf13f8d0e11c6f97ce29686a625d93f362e2949c0d16d78f5baf57'
+    mount_guard = load('completed_chain_mount_guard', mount_guard_source)
+    namespace_before = os.readlink('/proc/self/ns/mnt')
+    mount_guard.isolate_mount_namespace()
+    assert os.readlink('/proc/self/ns/mnt') != namespace_before
+    # Actual same-device bind regression, exclusively in this recursively
+    # private namespace. No mount is propagated to the host or Docker daemon.
+    scratch = Path(tempfile.mkdtemp(prefix='mount-guard-', dir=ROOT))
+    source, destination = scratch / 'source', scratch / 'destination'
+    source.mkdir(mode=0o700); destination.mkdir(mode=0o700)
+    sentinel = source / 'retained'; sentinel.write_bytes(b'foreign-bind-sentinel')
+    assert source.stat().st_dev == destination.stat().st_dev
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.mount.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_void_p]
+    libc.mount.restype = ctypes.c_int
+    libc.umount2.argtypes = [ctypes.c_char_p, ctypes.c_int]; libc.umount2.restype = ctypes.c_int
+    assert libc.mount(os.fsencode(source), os.fsencode(destination), None, 1 << 12, None) == 0
+    refused = False
+    try:
+        try:
+            mount_guard.assert_no_nested_mounts(scratch)
+            shutil.rmtree(scratch)
+        except AssertionError as error:
+            assert str(error) == 'HOST_MOUNT_WITHIN_WORKSPACE'; refused = True
+        assert refused and sentinel.read_bytes() == (destination / 'retained').read_bytes() == b'foreign-bind-sentinel'
+    finally:
+        assert libc.umount2(os.fsencode(destination), 0) == 0
+    mount_guard.assert_no_nested_mounts(scratch)
+    sentinel.unlink(); source.rmdir(); destination.rmdir(); scratch.rmdir()
     guard_source = ROOT / 'retire-physical-chain-derived-base.fixture.py'
     assert sha(guard_source) == 'c3b558b93a77dbfe122a55f9095fec6f056616ecc01602bc3eca51e4cac56e61'
     guard = load('completed_chain_private_guard', guard_source)
@@ -65,6 +97,7 @@ def main():
     containers = json.loads(owner.output(['docker', 'inspect', *all_ids]))
     owned = [row for row in containers if row['Id'] in ids]; assert len(owned) == 2
     data = ROOT / 'data'
+    mount_guard.assert_no_nested_mounts(data)
     assert [row['Id'] for row in containers if row['Image'] == IMAGE] == [row['Id'] for row in owned]
     for row in containers:
         for mount in row['Mounts']:
@@ -129,6 +162,7 @@ def main():
     assert all(not any(mount.get('Source') and (Path(mount['Source']) == data or data in Path(mount['Source']).parents
                or Path(mount['Source']) in data.parents) for mount in row['Mounts']) for row in others)
     assert data.resolve(strict=True) == data and (data.stat().st_dev, data.stat().st_ino) == (initial.st_dev, initial.st_ino)
+    mount_guard.assert_no_nested_mounts(data)
     shutil.rmtree(data); guard.sync(ROOT)
     owner.mutate_host(['docker', 'image', 'rm', IMAGE], 60, 'chain-' + proof['operation'] + '-retire-complete-image')
     assert IMAGE not in owner.output(['docker', 'image', 'ls', '--no-trunc', '--quiet']).decode().split()
@@ -139,6 +173,7 @@ def main():
       derivedWorkingDataRetired=str(data), logicalDataBytes=logical, encryptedComponentsReverified=components,
       allEncryptedChunksRetained=len(chunks), exactImageArchiveRetained=True, originalFailureEvidenceRetained=True,
       readonlyWalAndManifestRetained=True, foreignServicesUnchanged=True, availableBeforeBytes=before,
+      privateMountNamespace=True, sameDeviceBindMountDeletionRefused=True,
       availableAfterBytes=shutil.disk_usage(ROOT).free, productionRecoveryPoint=False)
     owner.atomic(ROOT / 'completed-working-retirement-proof.json', result); owner.state('COMPLETE', proof=result)
     print(json.dumps(result))

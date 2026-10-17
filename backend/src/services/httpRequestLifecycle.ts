@@ -1,6 +1,8 @@
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 
-type RequestWork = { responseDone: boolean; mutation: boolean; writeAdmitted: boolean; writes: number; handlers: Set<symbol>; onFinish: Set<() => void> };
+type RequestOwnership = { release(): void | Promise<void> };
+type RequestWork = { responseDone: boolean; mutation: boolean; writeAdmitted: boolean; writes: number; handlers: Set<symbol>; onFinish: Set<() => void>;
+  ownership?: RequestOwnership; releasing?: boolean; ownershipFailed?: boolean };
 type WriteReservation = { run<T>(work: () => Promise<T>): Promise<T>; cancel(): void };
 type Layer = { handle: Function; route?: { stack: Layer[] }; };
 type RouterStack = { stack?: Layer[]; _router?: RouterStack };
@@ -13,7 +15,8 @@ export class HttpRequestLifecycle {
   private readonly active = new Set<RequestWork>();
   private readonly requests = new WeakMap<Request, RequestWork>();
   private readonly installed = new WeakSet<Layer>();
-  constructor(private readonly canAdmitWrite: () => boolean = () => true) {}
+  constructor(private readonly canAdmitWrite: () => boolean = () => true,
+    private readonly acquireOwnership?: (request: Request) => Promise<RequestOwnership>) {}
 
   readonly middleware: RequestHandler = (req, res, next) => {
     const pathname = req.originalUrl.split('?')[0];
@@ -29,11 +32,28 @@ export class HttpRequestLifecycle {
       this.releaseIfDone(work);
     });
     res.once('close', done);
-    next();
+    if (!this.acquireOwnership) return next();
+    const admission = Symbol();
+    work.handlers.add(admission);
+    // Dispatch belongs to this reservation, even when the client disconnects
+    // while the kernel/journal admission is pending. It cannot outlive drain.
+    void Promise.resolve().then(() => this.acquireOwnership!(req)).then(ownership => {
+      work.ownership = ownership;
+      if (!req.aborted && !res.destroyed) next();
+    }, next).then(() => {
+      work.handlers.delete(admission); this.releaseIfDone(work);
+    }, error => {
+      try { next(error); } finally { work.handlers.delete(admission); this.releaseIfDone(work); }
+    });
   };
 
   private releaseIfDone(work: RequestWork) {
-    if (work.responseDone && work.handlers.size === 0) this.active.delete(work);
+    if (!work.responseDone || work.handlers.size !== 0 || work.releasing || work.ownershipFailed) return;
+    if (!work.ownership) { this.active.delete(work); return; }
+    work.releasing = true;
+    void Promise.resolve().then(() => work.ownership!.release()).then(() => {
+      this.active.delete(work);
+    }, () => { work.ownershipFailed = true; });
   }
 
   /** Reserve future response-event writes when registering the event, before

@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { createHash } = require('node:crypto');
-const { spawnSync } = require('node:child_process');
+const { spawnSync, spawn } = require('node:child_process');
 const path = require('node:path');
 const { prisma, disconnectDatabase } = require('./lib/prisma');
 const { loadOnlineRuntimeScope } = require('./services/onlineRuntimeScope');
@@ -32,6 +32,31 @@ const { assertRuntimeControlOwnership } = require('./services/runtimeControlOwne
     assert.equal(result.signal, null);
     assert.equal(result.status, 0);
     assert.equal(result.stdout.trim(), 'SUBSTITUTED_GATE_REFUSED');
+    // Capture has its own native database owner; an application pool must
+    // close before waiting for the whole capture namespace's SQL closure.
+    await disconnectDatabase();
+    const accepted = await new Promise(resolve => {
+      const child = spawn('/usr/bin/python3', ['-I', '-B', path.join(__dirname, 'capture.fixture.py')], {
+        env: process.env,
+        stdio: Array.from({ length: 13 }, (_, fd) => fd === 0 ? 'ignore' : fd < 3 ? 'pipe' : [9, 10, 11, 12].includes(fd) ? fd : 'ignore'),
+      });
+      let stdout = '', bytes = 0, error, late = false;
+      const timer = setTimeout(() => { late = true; }, 10000);
+      child.stdout.on('data', chunk => { bytes += chunk.length; if (bytes <= 4096) stdout += chunk.toString(); });
+      child.stderr.on('data', chunk => { bytes += chunk.length; });
+      child.once('error', value => { error = value; });
+      // A deadline is failure only after actual close, never permission to
+      // kill a native SQL client or declare its server transaction complete.
+      child.once('close', (status, signal) => { clearTimeout(timer); resolve({ status, signal, error, late, bytes, stdout }); });
+    });
+    if (accepted.status !== 0) process.stderr.write('CAPTURE_NAMESPACE_PROBE_REJECTED\n');
+    assert.equal(accepted.signal, null);
+    assert.equal(accepted.error, undefined);
+    assert.equal(accepted.late, false);
+    assert.ok(accepted.bytes <= 4096);
+    assert.equal(accepted.status, 0);
+    assert.deepEqual(JSON.parse(accepted.stdout), { event: 'online-capture-closed', descriptors: 4, relations: 1, namespace: row.name });
+
   }
   console.log(JSON.stringify({ event: 'ready', pid: process.pid, namespace: row.name, purpose: input.scope.purpose }));
   if (['lost-runtime', 'lost-worker'].includes(process.argv[2])) {
@@ -42,4 +67,4 @@ const { assertRuntimeControlOwnership } = require('./services/runtimeControlOwne
     }
   }
   await disconnectDatabase();
-})().catch(() => { console.error('ONLINE_NATIVE_WORKER_FAILED'); process.exitCode = 1; });
+})().catch(async () => { console.error('ONLINE_NATIVE_WORKER_FAILED'); try { await disconnectDatabase(); } finally { process.exitCode = 1; } });

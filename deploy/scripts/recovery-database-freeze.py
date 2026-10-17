@@ -16,6 +16,8 @@ import stat
 import subprocess
 import time
 import uuid
+import importlib.util
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 
@@ -35,7 +37,16 @@ def native_capture_namespace(source_url, gate_fd):
                 or os.environ.get('BACKEND_RUNTIME_ROLE') != 'control'
                 or os.environ.get('BACKEND_CONTROL_LOCK_FD') != '9'):
             fail('RECOVERY_DATABASE_NATIVE_AUTHORITY_UNPROVEN')
-        directory = os.environ['RECOVERY_COORDINATION_DIR']
+        online = None
+        if any(key in os.environ for key in ['BACKEND_ONLINE_SCOPE_FILE', 'BACKEND_ONLINE_SCOPE_SHA256']):
+            helper = Path(__file__).with_name('online-runtime-scope.py')
+            spec = importlib.util.spec_from_file_location('sabalan_capture_online_scope', helper)
+            api = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(api)
+            online = api.load_scope(os.environ)
+            if online is None or online['scope']['purpose'] != 'capture':
+                fail('RECOVERY_DATABASE_NATIVE_AUTHORITY_UNPROVEN')
+        directory = online['scope']['nativeDirectory'] if online else os.environ['RECOVERY_COORDINATION_DIR']
         file = os.path.join(directory, 'deployment-runtime-native.json')
         parent = os.lstat(directory)
         if (os.environ[keys[1]] != file or os.path.realpath(file) != file
@@ -58,6 +69,24 @@ def native_capture_namespace(source_url, gate_fd):
             claim = json.loads(raw)
         finally:
             os.close(fd)
+        if online:
+            instance = hashlib.sha256(online['scope']['runtimeId'].encode('ascii')).hexdigest()[:48]
+            if (claim.get('onlineScope') != online or claim.get('instanceId') != instance
+                    or claim.get('namespace') != 'sabalan-rt-' + instance
+                    or claim.get('clusterIdentifier') != online['scope']['database']['systemIdentifier']
+                    or claim['initialDatabase']['name'] != online['scope']['database']['name']
+                    or any(claim['captureGate'].get(key) != online['scope']['gate'][key]
+                           for key in ['file', 'device', 'inode'])):
+                fail('RECOVERY_DATABASE_NATIVE_AUTHORITY_UNPROVEN')
+            # Reuse the guardian's native descriptor verifier, not a metadata
+            # declaration of worker or shared-global ownership.
+            spec = importlib.util.spec_from_file_location('sabalan_capture_native_owner', Path(__file__).with_name('backend-runtime-owner.py'))
+            owner = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(owner)
+            if claim.get('onlineLocks') != owner.assert_online_locks(online):
+                fail('RECOVERY_DATABASE_NATIVE_AUTHORITY_UNPROVEN')
+        elif 'onlineScope' in claim or 'onlineLocks' in claim:
+            fail('RECOVERY_DATABASE_NATIVE_AUTHORITY_UNPROVEN')
         namespace = os.environ[keys[0]]
         if (claim['format'] != 'sabalan-runtime-native/v1' or claim['phase'] != 'ACTIVE'
                 or claim['role'] != 'control' or claim['namespace'] != namespace
@@ -105,6 +134,14 @@ def native_capture_namespace(source_url, gate_fd):
         fail('RECOVERY_DATABASE_NATIVE_AUTHORITY_UNPROVEN')
 
 
+def native_capture_descriptors(source_url, gate_fd):
+    # Validation precedes native invocation. All ownership descriptions survive
+    # through descendants, including when the Python/Node client disappears.
+    if native_capture_namespace(source_url, gate_fd) is None:
+        return (gate_fd,)
+    return (9, 10, 11, 12) if any(key in os.environ for key in ['BACKEND_ONLINE_SCOPE_FILE', 'BACKEND_ONLINE_SCOPE_SHA256']) else (9, 10)
+
+
 def postgres_environment(source_url, namespace):
     parsed = urlsplit(source_url)
     if (parsed.scheme not in ('postgres', 'postgresql') or not parsed.hostname
@@ -127,6 +164,7 @@ def postgres_environment(source_url, namespace):
 
 class DatabaseFreeze:
     def __init__(self, source_url, gate_fd, assert_gate, diagnostic_fd):
+        self.native_descriptors = native_capture_descriptors(source_url, gate_fd)
         self.namespace = native_capture_namespace(source_url, gate_fd) or ('sabalan-freeze-' + uuid.uuid4().hex + uuid.uuid4().hex[:16])
         self.environment = postgres_environment(source_url, self.namespace)
         self.assert_gate, self.gate_fd = assert_gate, gate_fd
@@ -134,7 +172,7 @@ class DatabaseFreeze:
         self.closed, self.frozen = False, False
         self.process = subprocess.Popen(['psql', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=diagnostic_fd,
-                                        env=self.environment, pass_fds=(gate_fd,), bufsize=0)
+                                        env=self.environment, pass_fds=self.native_descriptors, bufsize=0)
         self.buffer = b''
 
     def command(self, sql, seconds=12):
@@ -331,7 +369,7 @@ DO $$ BEGIN PERFORM pg_advisory_xact_lock(741936426::bigint); END $$;
         while True:
             self.assert_gate()
             observer = subprocess.run(['psql', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-c', query],
-                                      env=environment, pass_fds=(self.gate_fd,),
+                                      env=environment, pass_fds=self.native_descriptors,
                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             if observer.returncode != 0:
                 fail('RECOVERY_DATABASE_CLOSE_OBSERVER_FAILED')

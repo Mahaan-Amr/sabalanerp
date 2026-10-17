@@ -41,11 +41,13 @@ const files = Object.fromEntries([
   ['backend-runtime-owner.py', 'deploy/scripts/backend-runtime-owner.py'],
   ['online-runtime-owner.py', 'deploy/scripts/online-runtime-owner.py'],
   ['online-runtime-scope.py', 'deploy/scripts/online-runtime-scope.py'],
+  ['recovery-database-freeze.py', 'deploy/scripts/recovery-database-freeze.py'],
   ['with-backend-control-ownership.sh', 'deploy/scripts/with-backend-control-ownership.sh'],
   ['protected-bootstrap-state.py', 'deploy/scripts/protected-bootstrap-state.py'],
   ['worker.cjs', 'tests/online-deployment/online-native-owner.worker.cjs'],
   ['fixture.py', 'tests/online-deployment/online-native-owner.fixture.py'],
   ['records.fixture.py', 'tests/online-deployment/native-record-refusal.fixture.py'],
+  ['capture.fixture.py', 'tests/online-deployment/online-native-capture.fixture.py'],
 ].map(([name, source]) => [name, fs.readFileSync(path.join(root, source))]));
 const deploymentSource = fs.readFileSync(path.join(root, 'deploy/scripts/deploy.sh'), 'utf8');
 const closureFunction = deploymentSource.match(/assert_native_runtime_closed\(\) \{[\s\S]+?\n\}\n\ndrain_current_services\(\)/)?.[0]

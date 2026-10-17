@@ -147,7 +147,10 @@ def ready(child):
     import select
     require(select.select([child.stdout], [], [], 12)[0], 'WORKER_READY_DEADLINE')
     raw = child.stdout.readline()
-    require(raw, 'WORKER_DID_NOT_START')
+    if not raw:
+        child.wait(timeout=5)
+        diagnostic = child.stderr.read(4096)
+        require(False, 'CAPTURE_NAMESPACE_PROBE_REJECTED' if b'CAPTURE_NAMESPACE_PROBE_REJECTED' in diagnostic else 'WORKER_DID_NOT_START')
     value = json.loads(raw)
     require(value['event'] == 'ready')
     return value

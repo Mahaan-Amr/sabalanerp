@@ -78,6 +78,7 @@ def run():
     if sorted(os.listdir(work)) != [scope_file.name]:
         raise RuntimeError('COHERENT_CAPTURE_ALREADY_ATTEMPTED')
     namespace = postgres.native_capture_namespace(os.environ['DATABASE_URL'], 10)
+    native_descriptors = postgres.native_capture_descriptors(os.environ['DATABASE_URL'], 10)
     if namespace is None:
         raise RuntimeError('COHERENT_CAPTURE_NATIVE_OWNER_REQUIRED')
     gate = os.fstat(10)
@@ -113,11 +114,11 @@ def run():
         if "'" in str(snapshot_file) or any(ord(char) < 32 for char in str(snapshot_file)):
             raise RuntimeError('COHERENT_CAPTURE_STAGE_PATH_INVALID')
         result = subprocess.run(['sqlite3', '-readonly', inquiry['path'], ".backup '" + str(snapshot_file) + "'"],
-                                pass_fds=(9, 10), stdout=subprocess.PIPE, stderr=diagnostic)
+                                pass_fds=native_descriptors, stdout=subprocess.PIPE, stderr=diagnostic)
         if result.returncode != 0 or source_identity(Path(inquiry['path'])) != {key: inquiry[key] for key in ('device', 'inode')}:
             raise RuntimeError('COHERENT_CAPTURE_INQUIRY_BACKUP_FAILED')
         check = subprocess.run(['sqlite3', '-readonly', str(snapshot_file), 'PRAGMA integrity_check;'],
-                               pass_fds=(9, 10), stdout=subprocess.PIPE, stderr=diagnostic)
+                               pass_fds=native_descriptors, stdout=subprocess.PIPE, stderr=diagnostic)
         if check.returncode != 0 or check.stdout.strip() != b'ok':
             raise RuntimeError('COHERENT_CAPTURE_INQUIRY_INTEGRITY_FAILED')
         sqlite_root_identity = source_identity(snapshot_root)
@@ -130,7 +131,7 @@ def run():
             dump_fd = os.open(work / 'main.dump', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             try:
                 result = subprocess.run(['pg_dump', '-Fc', '--no-owner', '--no-privileges', '--snapshot=' + rows[0]['snapshot']],
-                                        env=boundary.environment, pass_fds=(9, 10), stdout=dump_fd, stderr=diagnostic)
+                                        env=boundary.environment, pass_fds=native_descriptors, stdout=dump_fd, stderr=diagnostic)
                 if result.returncode != 0:
                     raise RuntimeError('COHERENT_CAPTURE_SQL_DUMP_FAILED')
                 os.fsync(dump_fd)

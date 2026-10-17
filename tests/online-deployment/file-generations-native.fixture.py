@@ -37,11 +37,23 @@ def expect_error(code, run):
         raise AssertionError('Expected ' + code)
 
 
-if len(sys.argv) == 4 and sys.argv[2] == 'capture-child':
+if len(sys.argv) == 4 and sys.argv[2] in ('capture-child', 'seal-child'):
     gate = int(sys.argv[3])
     gate_stat = os.fstat(gate)
-    store = module.FileGenerations(str(root / 'crash-store'), gate, gate_stat.st_dev, gate_stat.st_ino)
-    store.capture([source(root / 'crash-source')], 'c' * 64)
+    if sys.argv[2] == 'seal-child':
+        store = module.FileGenerations(str(root / 'seal-store'), gate, gate_stat.st_dev, gate_stat.st_ino)
+        original_sync = os.fsync
+
+        def interrupted_sync(fd):
+            if os.readlink('/proc/self/fd/' + str(fd)).endswith('/manifest.json'):
+                os.kill(os.getpid(), signal.SIGSTOP)
+            return original_sync(fd)
+
+        os.fsync = interrupted_sync
+        store.capture([source(root / 'live')], 'e' * 64)
+    else:
+        store = module.FileGenerations(str(root / 'crash-store'), gate, gate_stat.st_dev, gate_stat.st_ino)
+        store.capture([source(root / 'crash-source')], 'c' * 64)
     raise AssertionError('Capture unexpectedly finished before interruption')
 
 gate_path = root / 'deployment-write-admission.lock'
@@ -111,6 +123,85 @@ corrupt.write_bytes(b'X' * len(b'NEW-PDF-0.00000001'))
 os.chmod(corrupt, 0o400)
 expect_error('FILE_GENERATION_OBJECT_CHANGED', lambda: store.verify(second['sha256']))
 
+# Oversized canonical metadata is refused before any named record is created.
+metadata = root / 'metadata-boundary'
+metadata.mkdir(mode=0o700)
+metadata_fd = os.open(metadata, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    expect_error('FILE_GENERATION_RECORD_TOO_LARGE', lambda: module.publish_record(
+        metadata_fd, 'manifest.json', {'oversized': 'x' * (16 * 1024 * 1024)}))
+    assert not (metadata / 'manifest.json').exists()
+finally:
+    os.close(metadata_fd)
+
+# Stop the actual publisher at the native fsync boundary: full canonical bytes
+# are readable, but its manifest sync has not run. The child is then reaped.
+(root / 'seal-store').mkdir(mode=0o700)
+sealer = subprocess.Popen([sys.executable, __file__, str(root), 'seal-child', str(gate)],
+                          pass_fds=(gate,), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+deadline = time.monotonic() + 10
+while time.monotonic() < deadline and sealer.poll() is None:
+    fields = Path('/proc/' + str(sealer.pid) + '/stat').read_text().rsplit(')', 1)[1].split()
+    if fields[0] == 'T':
+        break
+    time.sleep(0.001)
+else:
+    raise AssertionError('Publisher did not reach the manifest fsync boundary')
+sealer.send_signal(signal.SIGKILL)
+_, error = sealer.communicate(timeout=5)
+assert sealer.returncode == -signal.SIGKILL, error.decode()
+sealed_manifest = list((root / 'seal-store/captures').glob('*/manifest.json'))
+assert len(sealed_manifest) == 1
+sealed_sha = hashlib.sha256(sealed_manifest[0].read_bytes()).hexdigest()
+adopter = module.FileGenerations(str(root / 'seal-store'), gate, gate_stat.st_dev, gate_stat.st_ino)
+original_sync = os.fsync
+
+
+def denied_manifest_sync(fd):
+    if os.readlink('/proc/self/fd/' + str(fd)).endswith('/manifest.json'):
+        raise OSError(5, 'Diagnostic native fsync EIO')
+    return original_sync(fd)
+
+
+os.fsync = denied_manifest_sync
+try:
+    try:
+        adopter.verify(sealed_sha)
+    except OSError as error:
+        assert error.errno == 5
+    else:
+        raise AssertionError('Readable cached manifest was adopted without synchronization')
+finally:
+    os.fsync = original_sync
+assert adopter.verify(sealed_sha)['captureId'] == 'e' * 64
+assert adopter.restore(sealed_sha, str(root / 'restore-adopted'))['files'] == 2
+
+# Seed an independently encoded 10,000-record empty lineage at the public
+# history boundary. Reject the next capture without breaking retained restores.
+capacity_root = root / 'capacity-store'
+capacity_root.mkdir(mode=0o700)
+capacity_store = module.FileGenerations(str(capacity_root), gate, gate_stat.st_dev, gate_stat.st_ino)
+previous = None
+declared = [source(live)]
+canonical = lambda value: (json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(',', ':')) + '\n').encode('ascii')
+for index in range(1, 10001):
+    identifier = format(index, '064x')
+    directory = capacity_root / 'captures' / (str(index).zfill(12) + '-' + identifier)
+    directory.mkdir(mode=0o700)
+    intent = {'format': 'sabalan-file-generation-intent/v1', 'generation': index,
+              'captureId': identifier, 'previousSha256': previous, 'sources': declared}
+    intent_raw = canonical(intent)
+    manifest = dict(intent, format='sabalan-file-generation/v1', entries=[], deleted=[],
+                    intentSha256=hashlib.sha256(intent_raw).hexdigest())
+    raw = canonical(manifest)
+    for name, data in [('intent.json', intent_raw), ('manifest.json', raw)]:
+        (directory / name).write_bytes(data)
+        os.chmod(directory / name, 0o400)
+    previous = hashlib.sha256(raw).hexdigest()
+expect_error('FILE_GENERATION_HISTORY_CAPACITY', lambda: capacity_store.capture(declared, 'f' * 64))
+assert len(list((capacity_root / 'captures').iterdir())) == 10000
+assert capacity_store.restore(previous, str(root / 'restore-at-capacity'))['files'] == 0
+
 (root / 'crash-store').mkdir(mode=0o700)
 (root / 'crash-source').mkdir(mode=0o700)
 with open(root / 'crash-source/large.bin', 'xb') as large:
@@ -142,10 +233,20 @@ assert (root / 'crash-source/large.bin').stat().st_size == 64 * 1024 * 1024
 fcntl.flock(gate, fcntl.LOCK_UN)
 expect_error('FILE_GENERATION_EXCLUSIVE_GATE_REQUIRED', lambda: replacement.verify(first['sha256']))
 os.close(gate)
-print(json.dumps({'format': 'sabalan-file-generations-native/v1', 'pass': True,
+report = {'format': 'sabalan-file-generations-native/v1', 'pass': True,
                   'first': dict(first_result, sha256=first['sha256']),
                   'second': dict(second_result, sha256=second['sha256']),
                   'deletionLineage': second['manifest']['deleted'], 'refusedSources': refusals,
                   'sameSizeTamperRefused': True, 'interruptedNativeChild': observed,
+                  'manifestSizeBoundRefusedBeforeCreation': True,
+                  'cachedManifestSyncFailureRefused': True, 'interruptedManifestDurablyAdopted': True,
+                  'captureCapacity': 10000, 'retainedRestoreAtCapacity': True,
                   'nativeChildSignal': 'SIGKILL', 'partialCaptureRetained': True,
-                  'replacementRefused': True, 'workingRoot': str(root)}))
+                  'replacementRefused': True, 'workingRoot': str(root)}
+with (root / 'native-proof.json').open('x') as proof:
+    os.chmod(root / 'native-proof.json', 0o400)
+    json.dump(report, proof, sort_keys=True)
+    proof.flush()
+    os.fsync(proof.fileno())
+module.sync_directory(str(root))
+print(json.dumps(report))

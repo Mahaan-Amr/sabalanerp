@@ -13,6 +13,10 @@ import re
 import stat
 import uuid
 
+MAX_HISTORY_COUNT = 10000
+MAX_MANIFEST_BYTES = 16 * 1024 * 1024
+MAX_HISTORY_BYTES = 512 * 1024 * 1024
+
 
 def fail(code):
     raise RuntimeError(code)
@@ -48,6 +52,19 @@ def sync_directory(directory):
         os.close(fd)
 
 
+def sync_ancestry(directory):
+    while True:
+        value = os.lstat(directory)
+        if (not stat.S_ISDIR(value.st_mode) or os.path.realpath(directory) != directory
+                or (value.st_mode & 0o022 and not value.st_mode & stat.S_ISVTX)):
+            fail("FILE_GENERATION_ANCESTRY_UNSAFE")
+        sync_directory(directory)
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return
+        directory = parent
+
+
 def private_directory(directory, create=False):
     if not os.path.isabs(directory) or os.path.normpath(directory) != directory:
         fail("FILE_GENERATION_DIRECTORY_INVALID")
@@ -80,13 +97,18 @@ def read_file(directory, name, maximum):
                 fail("FILE_GENERATION_RECORD_TOO_LARGE")
         if stable(before) != stable(os.fstat(fd)):
             fail("FILE_GENERATION_RECORD_CHANGED")
+        # A valid record may have lost its publisher before fsync. Adopt actual
+        # cached bytes durably, never infer persistence from readable JSON.
+        os.fsync(fd)
         return b"".join(chunks)
     finally:
         os.close(fd)
 
 
-def publish_record(directory, name, value):
+def publish_record(directory, name, value, maximum=MAX_MANIFEST_BYTES):
     data = encoded(value)
+    if len(data) > maximum:
+        fail("FILE_GENERATION_RECORD_TOO_LARGE")
     fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                  0o400, dir_fd=directory)
     try:
@@ -106,6 +128,7 @@ class FileGenerations:
         self.gate_identity = (int(gate_device), int(gate_inode))
         self.root_identity = identity(private_directory(root))
         self.assert_gate()
+        sync_ancestry(root)
         for name in ("objects", "captures"):
             target = os.path.join(root, name)
             try:
@@ -143,13 +166,13 @@ class FileGenerations:
             if identity(private_directory(os.path.join(self.root, name))) != expected:
                 fail("FILE_GENERATION_STORE_CHANGED")
 
-    def _history(self):
+    def _history(self, selected_sha=None, *, for_capture=False):
         self.assert_owner()
         directory = os.path.join(self.root, "captures")
         names = sorted(os.listdir(directory))
-        if len(names) > 10000:
+        if len(names) > MAX_HISTORY_COUNT or (for_capture and len(names) >= MAX_HISTORY_COUNT):
             fail("FILE_GENERATION_HISTORY_CAPACITY")
-        result = []
+        last, selected, total_bytes = None, None, 0
         previous = None
         for number, name in enumerate(names, 1):
             if not re.fullmatch(str(number).zfill(12) + r"-[a-f0-9]{64}", name):
@@ -160,7 +183,7 @@ class FileGenerations:
             try:
                 if sorted(os.listdir(fd)) != ["intent.json", "manifest.json"]:
                     fail("FILE_GENERATION_CAPTURE_UNFINISHED")
-                raw = read_file(fd, "manifest.json", 128 * 1024 * 1024)
+                raw = read_file(fd, "manifest.json", MAX_MANIFEST_BYTES)
                 manifest = json.loads(raw)
                 intent_raw = read_file(fd, "intent.json", 262144)
                 intent = json.loads(intent_raw)
@@ -176,16 +199,27 @@ class FileGenerations:
                                       "sources": manifest.get("sources")}):
                     fail("FILE_GENERATION_HISTORY_INVALID")
                 self._validate_entries(manifest)
-                old_keys = {(entry["source"], entry["path"]) for entry in result[-1][0]["entries"]} if result else set()
+                old_keys = {(entry["source"], entry["path"]) for entry in last["entries"]} if last else set()
                 current_keys = {(entry["source"], entry["path"]) for entry in manifest["entries"]}
                 if manifest["deleted"] != [{"source": source, "path": relative}
                                            for source, relative in sorted(old_keys - current_keys)]:
                     fail("FILE_GENERATION_DELETION_LINEAGE_INVALID")
                 previous = hashlib.sha256(raw).hexdigest()
-                result.append((manifest, previous))
+                total_bytes += len(raw)
+                if total_bytes > MAX_HISTORY_BYTES:
+                    fail("FILE_GENERATION_HISTORY_CAPACITY")
+                os.fsync(fd)
+                if previous == selected_sha:
+                    if selected is not None:
+                        fail("FILE_GENERATION_HISTORY_INVALID")
+                    selected = manifest
+                last = manifest
             finally:
                 os.close(fd)
-        return result
+        sync_directory(directory)
+        self.assert_owner()
+        return {"count": len(names), "last": last, "lastSha256": previous,
+                "selected": selected, "bytes": total_bytes}
 
     @staticmethod
     def _validate_entries(manifest):
@@ -315,8 +349,10 @@ class FileGenerations:
         self.assert_owner()
         if not re.fullmatch(r"[a-f0-9]{64}", capture_id):
             fail("FILE_GENERATION_CAPTURE_ID_INVALID")
-        history = self._history()
-        number, previous = len(history) + 1, history[-1][1] if history else None
+        history = self._history(for_capture=True)
+        if history["count"] >= MAX_HISTORY_COUNT:
+            fail("FILE_GENERATION_HISTORY_CAPACITY")
+        number, previous = history["count"] + 1, history["lastSha256"]
         # Source identity is provided by the frozen controller inventory, not
         # discovered from user-controlled request paths or a directory walk.
         if not isinstance(sources, list) or not sources or len(sources) > 32:
@@ -387,7 +423,7 @@ class FileGenerations:
                 finally:
                     os.close(source_fd)
             entries.sort(key=lambda entry: (entry["source"], entry["path"]))
-            old_keys = {(entry["source"], entry["path"]) for entry in history[-1][0]["entries"]} if history else set()
+            old_keys = {(entry["source"], entry["path"]) for entry in history["last"]["entries"]} if history["last"] else set()
             current_keys = {(entry["source"], entry["path"]) for entry in entries}
             manifest = {"format": "sabalan-file-generation/v1", "generation": number,
                         "captureId": capture_id, "previousSha256": previous,
@@ -395,6 +431,8 @@ class FileGenerations:
                         "deleted": [{"source": source, "path": relative}
                                     for source, relative in sorted(old_keys - current_keys)]}
             self._validate_entries(manifest)
+            if history["bytes"] + len(encoded(manifest)) > MAX_HISTORY_BYTES:
+                fail("FILE_GENERATION_HISTORY_CAPACITY")
             self.assert_owner()
             sha = publish_record(fd, "manifest.json", manifest)
             return {"manifest": manifest, "sha256": sha}
@@ -403,18 +441,18 @@ class FileGenerations:
             os.close(fd)
 
     def verify(self, sha256):
-        history = self._history()
-        matches = [manifest for manifest, digest in history if digest == sha256]
-        if len(matches) != 1:
+        history = self._history(sha256)
+        manifest = history["selected"]
+        if manifest is None:
             fail("FILE_GENERATION_MANIFEST_NOT_FOUND")
         fd = os.open(os.path.join(self.root, "objects"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
-            for entry in matches[0]["entries"]:
+            for entry in manifest["entries"]:
                 self.assert_owner()
                 self._object(fd, entry)
         finally:
             os.close(fd)
-        return matches[0]
+        return manifest
 
     def restore(self, sha256, target):
         manifest = self.verify(sha256)

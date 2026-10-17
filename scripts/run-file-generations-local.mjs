@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes, createHash } from 'node:crypto';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -35,6 +35,13 @@ const files = Object.fromEntries([
   ['recovery-file-generations.py', 'deploy/scripts/recovery-file-generations.py'],
   ['fixture.py', 'tests/online-deployment/file-generations-native.fixture.py'],
 ].map(([name, source]) => [name, fs.readFileSync(path.join(root, source))]));
+if (process.env.ONLINE_FILE_GENERATIONS_SOURCE_REF) {
+  const reference = process.env.ONLINE_FILE_GENERATIONS_SOURCE_REF;
+  assert.match(reference, /^[a-f0-9]{40}$/);
+  files['recovery-file-generations.py'] = execFileSync('git', ['show', reference + ':deploy/scripts/recovery-file-generations.py'], {
+    cwd: root, maxBuffer: 1024 * 1024,
+  });
+}
 const bootstrap = `const fs=require('fs'),path=require('path'),input=JSON.parse(fs.readFileSync(0,'utf8'));
   const root=${JSON.stringify(directory)};fs.mkdirSync(root,{mode:0o700});fs.chmodSync(root,0o700);
   for(const [name,encoded] of Object.entries(input)){if(!/^[A-Za-z0-9_.-]+$/.test(name))throw Error('UNSAFE_SOURCE');
@@ -44,9 +51,18 @@ verify(); execFileSync('docker', ['exec', '-i', slot.Id, 'node', '-e', bootstrap
   input: JSON.stringify(Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, bytes.toString('base64')]))), encoding: 'utf8',
 });
 verify();
-const report = JSON.parse(execFileSync('docker', ['exec', slot.Id, 'python3', '-B', directory + '/fixture.py', directory], {
-  encoding: 'utf8', timeout: 60_000,
-}).trim());
+const output = await new Promise((resolve, reject) => {
+  const child = spawn('docker', ['exec', slot.Id, 'python3', '-B', directory + '/fixture.py', directory], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '', stderr = '';
+  child.stdout.on('data', bytes => { stdout += bytes; });
+  child.stderr.on('data', bytes => { stderr += bytes; });
+  child.once('error', reject);
+  child.once('close', (code, signal) => code === 0 && !signal ? resolve(stdout)
+    : reject(Error('FILE_GENERATION_NATIVE_FIXTURE_FAILED ' + JSON.stringify({ code, signal, stderr, directory }))));
+});
+const report = JSON.parse(output.trim());
 assert.equal(report.format, 'sabalan-file-generations-native/v1'); assert.equal(report.pass, true);
 for (const [service, expected] of Object.entries(before)) {
   const value = inspect(service);

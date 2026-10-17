@@ -137,7 +137,7 @@ test('native compressed physical base and concurrently streamed WAL cover a late
       assert.equal((await admin.query('SELECT count(*)::integer AS count FROM pg_stat_activity WHERE application_name LIKE $1', [namespace + '%'])).rows[0].count, 0);
       assert.deepEqual(identities(), before);
       const archiveSha256 = docker(['exec', pgId, 'sha256sum', root + '/base/base.tar.gz']).split(/\s/)[0];
-      const archiveBytes = Number(docker(['exec', pgId, 'stat', '-c', '%s', root + '/base/base.tar.gz]).trim());
+      const archiveBytes = Number(docker(['exec', pgId, 'stat', '-c', '%s', root + '/base/base.tar.gz']).trim());
       const result = { nativeBaseStreamChainPassed: true, operation, namespace, databaseName, root, source: profile, range, segments,
         committedLsn, expected: { id: 'retained', amount: '123456789.12345678', quantity: '0.00000001' }, baseRange,
         archiveSha256, archiveBytes, manifestSha256: sha(Buffer.from(manifestBytes)), binarySha256: sha(binary),

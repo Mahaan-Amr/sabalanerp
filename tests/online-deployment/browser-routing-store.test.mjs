@@ -52,6 +52,11 @@ test('persistent multi-release switching and proxy restart retain every old brow
     const third = retire(second, 'erp_third', '2026-10-17T12:05:00.000Z');
     await store.publish(third, publication2.publicationSha256);
     store = new BrowserRoutingStore({directory});
+    const publication = await store.readPublication();
+    assert.equal(publication.generation, 3);
+    assert.equal(publication.publicationSha256, createHash('sha256').update(await fs.readFile(path.join(directory, 'published-00000003.json'))).digest('hex'));
+    publication.registry.builds[0].id = 'erp_mutated_read';
+    assert.equal((await store.readPublication()).registry.builds[0].id, 'erp_first');
     const registry = compileBrowserRoutingRegistry(await store.read());
     const request = {application: 'erp', isRsc: true, deploymentId: 'erp_first'};
     assert.equal(selectBrowserRelease(registry, {application: 'erp'}).buildId, 'erp_third');

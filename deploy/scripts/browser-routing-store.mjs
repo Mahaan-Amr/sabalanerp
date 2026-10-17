@@ -141,9 +141,14 @@ export class BrowserRoutingStore {
   }
 
   async read() {
+    return (await this.readPublication()).registry;
+  }
+
+  async readPublication() {
     const {head} = await this.#head();
     if (!head) fail('BROWSER_ROUTING_NOT_PUBLISHED');
-    return structuredClone(head.record.registry);
+    return {generation: head.record.generation, publicationSha256: head.sha256,
+      registryIdentity: head.record.registryIdentity, registry: structuredClone(head.record.registry)};
   }
 
   async publish(registry, expectedPublicationSha256) {

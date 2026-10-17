@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ErpButton, ErpInlineState } from '@/components/erp';
+import { ErpButton, ErpCard, ErpInlineState, ErpSheet } from '@/components/erp';
 import { browserSessionContinuation } from '@/lib/api';
 import { readBrowserDraftArchive, readBrowserDraftArchives, type BrowserDraftArchive, type BrowserDraftArchiveCursor } from '@/lib/browserDraftArchive';
 
@@ -19,9 +19,10 @@ export function ContractDraftArchives({ userId, draftId }: { userId: string | nu
   const [failed, setFailed] = useState(false);
   const [next, setNext] = useState<BrowserDraftArchiveCursor | null>(null);
   const [pending, setPending] = useState(false);
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     let cancelled = false; epoch.current++;
-    setArchives([]); setNext(null); setFailed(false); setPending(false); setLoadedScope(null);
+    setArchives([]); setNext(null); setFailed(false); setPending(false); setLoadedScope(null); setOpen(false);
     if (userId && draftId) void (async () => {
       const lease = await browserSessionContinuation.acquire();
       if (lease.userId !== userId) throw Error('AUTH_CONTEXT_CHANGED');
@@ -60,11 +61,22 @@ export function ContractDraftArchives({ userId, draftId }: { userId: string | nu
       window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     } catch { if (currentScope.current === scopeKey && epoch.current === visit) setFailed(true); }
   };
+  const visible = archives.filter(archive => archive.userId === userId && archive.draftId === draftId);
+  const failure = failed && <ErpInlineState kind="error" title="کپی‌های پیش از تازه‌سازی قابل خواندن نیستند؛ صفحه را نبندید و بازیابی را با پشتیبانی بررسی کنید." />;
   return <>
-    {failed && <ErpInlineState kind="error" title="کپی‌های پیش از تازه‌سازی قابل خواندن نیستند؛ صفحه را نبندید و بازیابی را با پشتیبانی بررسی کنید." />}
-    {archives.filter(archive => archive.userId === userId && archive.draftId === draftId).map(archive => <ErpInlineState key={archive.id} kind="stale"
-      title={`نوشتهٔ پیش از تازه‌سازی (${new Date(archive.capturedAt).toLocaleString('fa-IR')}) محفوظ است؛ به‌صورت خودکار جایگزین نسخهٔ فعلی قرارداد نمی‌شود.`}
-      action={{ label: 'دریافت نوشتهٔ محفوظ', onClick: () => void download(archive) }} />)}
-    {next && loadedScope === scopeKey && <ErpButton label="کپی‌های دیگر" variant="outline" disabled={pending} onClick={() => void loadMore()} />}
+    {!open && failure}
+    {visible.length > 0 && <ErpInlineState kind="stale" title="نوشتهٔ پیش از تازه‌سازی محفوظ است."
+      action={{ label: 'مشاهده نوشته‌های محفوظ', onClick: () => setOpen(true) }} />}
+    <ErpSheet open={open && visible.length > 0} onClose={() => setOpen(false)} title="نوشته‌های محفوظ" presentation="modal" pending={pending}>
+      <div className="space-y-4">
+        <p className="sds-text-secondary text-sm">این کپی‌ها به‌صورت خودکار جایگزین نسخهٔ فعلی قرارداد نمی‌شوند.</p>
+        {failure}
+        {visible.map(archive => <ErpCard key={archive.id} className="space-y-3 p-3">
+          <p className="sds-text-primary break-words text-sm">{new Date(archive.capturedAt).toLocaleString('fa-IR')}</p>
+          <ErpButton label="دریافت نوشتهٔ محفوظ" className="w-full" onClick={() => void download(archive)} />
+        </ErpCard>)}
+        {next && loadedScope === scopeKey && <ErpButton label="کپی‌های دیگر" variant="outline" className="w-full" disabled={pending} onClick={() => void loadMore()} />}
+      </div>
+    </ErpSheet>
   </>;
 }

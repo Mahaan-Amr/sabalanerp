@@ -58,6 +58,15 @@ test('revision refresh first preserves the original draft; storage failure keeps
   await day.click();
   const refresh = page.getByRole('button', { name: 'بارگذاری آخرین نسخه', exact: true });
   await expect(refresh).toBeVisible();
+  const before = state.loads;
+  // Native Chromium quota denial: the same production handler must retain the
+  // page when IndexedDB cannot commit, then succeed after capacity returns.
+  const protocol = await page.context().newCDPSession(page);
+  await protocol.send('Storage.overrideQuotaForOrigin', { origin: new URL(page.url()).origin, quotaSize: 1 });
+  await refresh.click();
+  await expect(page.getByText('ذخیرهٔ بازیابی محلی محدود شده است؛ تا برقراری ذخیرهٔ امن سرور این صفحه را نبندید.')).toBeVisible();
+  await expect(refresh).toBeEnabled(); expect(state.loads).toBe(before);
+  await protocol.send('Storage.overrideQuotaForOrigin', { origin: new URL(page.url()).origin });
   const previous = Array.from({ length: 9 }, (_, index) => {
     const value = { format: 'sabalan-browser-draft/v1', id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
       capturedAt: '2026-10-16T00:00:00.000Z', userId: user.id, buildId: 'erp_previous_20261016', workflow: 'sales-contract',
@@ -77,18 +86,10 @@ test('revision refresh first preserves the original draft; storage failure keeps
       for (const value of values) transaction.objectStore('snapshots').add(value);
     }); } finally { database.close(); }
   }, previous);
-  const before = state.loads;
-  // Native Chromium quota denial: the same production handler must retain the
-  // page when IndexedDB cannot commit, then succeed after capacity returns.
-  const protocol = await page.context().newCDPSession(page);
-  await protocol.send('Storage.overrideQuotaForOrigin', { origin: new URL(page.url()).origin, quotaSize: 1 });
-  await refresh.click();
-  await expect(page.getByText('ذخیرهٔ بازیابی محلی محدود شده است؛ تا برقراری ذخیرهٔ امن سرور این صفحه را نبندید.')).toBeVisible();
-  await expect(refresh).toBeEnabled(); expect(state.loads).toBe(before);
-  await protocol.send('Storage.overrideQuotaForOrigin', { origin: new URL(page.url()).origin });
   state.conflict = false;
   await refresh.click();
   await expect.poll(() => state.loads).toBeGreaterThan(before);
+  await page.getByRole('button', { name: 'مشاهده نوشته‌های محفوظ', exact: true }).click();
   const downloads = page.getByRole('button', { name: 'دریافت نوشتهٔ محفوظ', exact: true });
   await expect(downloads).toHaveCount(8);
   await page.getByRole('button', { name: 'کپی‌های دیگر', exact: true }).click();
@@ -107,6 +108,10 @@ test('revision refresh first preserves the original draft; storage failure keeps
   for (const theme of ['light', 'dark'] as const) {
     await setTheme(page, theme); await setViewportAndZoom(page, { width: 390, height: 844 }, 2);
     await assertNoHorizontalOverflow(page); await assertNoSeriousAxeViolations(page);
+    await saved.scrollIntoViewIfNeeded();
+    const bounds = await saved.boundingBox(); expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0); expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(391);
+    const reading = page.waitForEvent('download'); await saved.click(); await reading;
     await page.screenshot({ path: testInfo.outputPath(`draft-archive-${theme}-mobile-200.png`), fullPage: true });
   }
 });

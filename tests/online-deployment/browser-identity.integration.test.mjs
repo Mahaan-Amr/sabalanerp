@@ -133,3 +133,22 @@ test('compiled login and session bootstrap send the same immutable producer iden
       assert.equal(await page.locator('input[name="password"]').inputValue(),'diagnostic-not-a-real-password');
     } finally {await browser.close();}
   });
+
+test('an anonymous compiled private route still requires login after the public-page bootstrap correction',
+  {skip:!enabled,timeout:90000},async()=>{
+    verifyCandidate();
+    const {chromium}=require('@playwright/test');
+    const browser=await chromium.launch({headless:true,channel:process.env.ONLINE_BROWSER_CHANNEL||'msedge'});
+    try {
+      const page=await browser.newPage(),observed=[];
+      await page.route(enabled+'/api/**',route=>{
+        const request=route.request();observed.push({path:new URL(request.url()).pathname,method:request.method(),id:request.headers()['x-deployment-id']});
+        return route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({success:false,error:'برای ادامه وارد حساب شوید.'})});
+      });
+      await page.goto(enabled+'/dashboard',{waitUntil:'domcontentloaded'});
+      await page.waitForURL('**/login');await page.locator('input[name="identifier"]').waitFor();
+      assert.ok(observed.some(request=>request.path==='/api/auth/me'));
+      assert.ok(observed.every(request=>request.id===expected && request.method==='GET'));
+      assert.equal(new URL(page.url()).pathname,'/login');
+    } finally {await browser.close();}
+  });

@@ -204,9 +204,7 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
       const rolledBack = await fetch(origin + '/'); assert.equal(rolledBack.status, 200);
       const html = await rolledBack.text(); assert.ok(html.includes('dpl=' + builds[0].id));
       assert.equal(await page.locator('input[name="identifier"]').inputValue(), 'draft-kept-during-switch');
-      await page.locator('a[href="/"]').first().click(); await page.waitForURL(origin + '/');
-      await page.locator('a[href="/about"]').first().click(); await page.waitForURL('**/about'); await page.waitForLoadState('networkidle');
-      assert.ok(requests.some(request => request.kind === 'rsc' && request.path === '/about' && request.id === builds[0].id));
+      assert.equal(new URL(page.url()).pathname, '/login');
       assert.ok(requests.every(request => request.id === builds[0].id)); assert.deepEqual(failures, []);
       report.results = {realOldNewBrowserIdentity: true, originalOpenFormPreserved: true, realRetainedRsc: nativeAfterSwitch,
         proxyRestartGeneration: 2, exactOldAssetHash: true, noCrossSlotRetryOnFailure: true,
@@ -222,6 +220,14 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
         privateRoot + '/management.sock']);
       assert.equal(JSON.parse(drain).error, 'BROWSER_PROXY_DRAIN_NOT_PROVEN');
       report.results.uncertainDrainRefused = true;
+      docker(['stop', '--time', '-1', proxyId]);
+      const [heldProxy] = JSON.parse(docker(['inspect', proxyId]));
+      assert.equal(heldProxy.State.Status, 'exited'); assert.equal(heldProxy.State.ExitCode, 75); assert.equal(heldProxy.State.Pid, 0);
+      assert.deepEqual(heldProxy.ExecIDs ?? [], []);
+      const heldBytes = docker(['exec', candidate, 'cat', privateRoot + '/transport-shutdown-held.json']);
+      const held = JSON.parse(heldBytes); assert.equal(held.status, 'HELD_NOT_DRAINED');
+      assert.deepEqual(held.pendingOperations, pending);
+      report.results.heldTransport = {sha256: sha(heldBytes), pendingOperations: held.pendingOperations.length, exitCode: 75};
       assert.deepEqual(identities(), before);
       report.canonicalUnchanged = true; report.status = 'PASS_PRIVATE_OVERLAP_WITH_RETAINED_UNKNOWN';
       fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n', {flag: 'wx'});

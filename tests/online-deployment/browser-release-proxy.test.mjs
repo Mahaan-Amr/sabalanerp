@@ -110,6 +110,7 @@ test('a disconnected browser cannot retire or cancel an admitted action; upstrea
     const pending=fetchUi(port,'/action',{method:'POST',headers:{host:'inquiry.test','next-action':action,'x-deployment-id':'inquiry_current'},body:'one-call',signal:abort.signal}).catch(()=>null);
     await started.promise;abort.abort();await pending;
     proxy.beginDrain();assert.equal(proxy.status().active,1);await assert.rejects(()=>proxy.assertDrained(),/DRAIN_NOT_PROVEN/);
+    await assert.rejects(()=>proxy.readStoppedTransport(),/TRANSPORT_NOT_STOPPED/);
     complete.resolve();
     for(let attempts=0;proxy.status().active && attempts<100;attempts++)await new Promise(resolve=>setTimeout(resolve,10));
     assert.equal(effects,1);await proxy.assertDrained();
@@ -122,10 +123,17 @@ test('a disconnected browser cannot retire or cancel an admitted action; upstrea
     assert.equal(result.status,502);assert.equal((await result.json()).error,'BROWSER_UPSTREAM_OUTCOME_UNKNOWN');
     assert.equal(effects,2,'the ambiguous action is forwarded once');
     uncertain.beginDrain();assert.equal(uncertain.status().unresolved,1);await assert.rejects(()=>uncertain.assertDrained(),/DRAIN_NOT_PROVEN/);
+    for(let attempts=0;attempts<100;attempts++) {
+      try {await uncertain.readStoppedTransport();break;} catch {await new Promise(resolve=>setTimeout(resolve,5));}
+    }
+    const stopped=await uncertain.readStoppedTransport();assert.equal(stopped.pendingOperations.length,1);
+    assert.equal(stopped.pendingOperations[0].method,'POST');
+    await assert.rejects(()=>uncertain.assertDrained(),/DRAIN_NOT_PROVEN/,'transport closure cannot settle an unknown application action');
     const restarted=createBrowserReleaseProxy({loadRegistry:async()=>input,applicationsByHost:{'inquiry.test':'inquiry'},
       operationJournal:await journal(directory,'3'.repeat(64)),
       slotEndpoints:input.builds.filter(build=>build.application==='inquiry').map(build=>({slotId:build.slotId,host:'inquiry',port:upstreamPort,image}))});
     restarted.beginDrain();assert.equal(restarted.status().unresolved,0);
     await assert.rejects(()=>restarted.assertDrained(),/DRAIN_NOT_PROVEN/,'new memory cannot hide the old durable ambiguous intent');
+    assert.deepEqual((await restarted.readStoppedTransport()).pendingOperations,stopped.pendingOperations);
   } finally {complete.resolve();if(proxy)await close(proxy.server);await close(upstream);http.globalAgent.destroy();http.globalAgent=previousAgent;await removeFixture(directory);}
 });

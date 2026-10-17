@@ -31,7 +31,7 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
     hosts.set(host,application);
   }
   let accepting=true,bodyBytes=0,generation=0,sequence=0,registryIdentity=null;
-  const active=new Set(),unresolved=new Set();
+  const active=new Set(),unresolved=new Set(),outbound=new Set();
   const respond=(response,status,code)=>{
     if(response.destroyed)return;
     if(response.headersSent){response.destroy();return;}
@@ -127,10 +127,11 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
           incoming.once('aborted',()=>reject(error('BROWSER_UPSTREAM_OUTCOME_UNKNOWN')));
           incoming.once('error',reject);
         });
+        outbound.add(outgoing);
         response.on('drain',disconnected);
         response.once('close',disconnected);
         const deadline=setTimeout(()=>outgoing.destroy(error('BROWSER_UPSTREAM_OUTCOME_UNKNOWN')),timeoutMs);
-        outgoing.once('close',()=>{clearTimeout(deadline);response.off('drain',disconnected);response.off('close',disconnected);});
+        outgoing.once('close',()=>{outbound.delete(outgoing);clearTimeout(deadline);response.off('drain',disconnected);response.off('close',disconnected);});
         outgoing.once('error',reject);
         outgoing.setTimeout(timeoutMs,()=>outgoing.destroy(error('BROWSER_UPSTREAM_OUTCOME_UNKNOWN')));
         // Once forwarded, a disconnected browser cannot cancel ownership of an
@@ -154,9 +155,17 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
   return Object.freeze({server,
     beginDrain(){accepting=false;},
     status(){return {accepting,active:active.size,unresolved:unresolved.size,bodyBytes,generation};},
+    // Transport closure does not settle an action, prove application/SQL
+    // completion, or authorize replacement/recovery. Durable UNKNOWN intents
+    // remain returned to the owned controller and still prevent assertDrained.
+    async readStoppedTransport(){
+      const assertStopped=()=>{if(accepting || active.size || outbound.size || bodyBytes)throw error('BROWSER_PROXY_TRANSPORT_NOT_STOPPED');};
+      assertStopped();const pendingOperations=await operationJournal.pending();assertStopped();
+      return {pendingOperations};
+    },
     async assertDrained(){
-      if(accepting || active.size || unresolved.size || (await operationJournal.pending()).length
-        || accepting || active.size || unresolved.size)throw error('BROWSER_PROXY_DRAIN_NOT_PROVEN');
+      if(accepting || active.size || outbound.size || unresolved.size || (await operationJournal.pending()).length
+        || accepting || active.size || outbound.size || unresolved.size)throw error('BROWSER_PROXY_DRAIN_NOT_PROVEN');
     },
   });
 }

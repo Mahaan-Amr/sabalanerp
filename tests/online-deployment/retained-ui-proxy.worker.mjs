@@ -21,6 +21,9 @@ const configurationBytes = await fs.readFile(path.join(root, 'configuration.json
 assert.equal(createHash('sha256').update(configurationBytes).digest('hex'), process.env.RETAINED_UI_CONFIGURATION_SHA256);
 const configuration = JSON.parse(configurationBytes);
 assert.equal(configuration.format, 'sabalan-private-retained-ui-acceptance/v1');
+const heldFile = path.join(root, 'transport-shutdown-held.json');
+try {await fs.lstat(heldFile); throw Error('FIXTURE_HELD_TRANSPORT_REQUIRES_INSPECTION');}
+catch (failure) {if (failure.code !== 'ENOENT') throw failure;}
 const file = path.join(root, 'publication.lock'), descriptor = openSync(file, 'a+', 0o600);
 assert.equal(spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', '3'], {stdio: ['ignore', 'ignore', 'ignore', descriptor]}).status, 0);
 const lockStat = fstatSync(descriptor, {bigint: true});
@@ -69,7 +72,22 @@ console.log(JSON.stringify({privateDiagnosticProxyReady: true, root, generation:
 async function shutdown() {
   if (closing) return;
   closing = true; proxy.beginDrain();
-  await new Promise(resolve => proxy.server.close(resolve)); await proxy.assertDrained();
+  await new Promise(resolve => proxy.server.close(resolve));
+  let held = false;
+  try {await proxy.assertDrained();}
+  catch (failure) {
+    if (failure.code !== 'BROWSER_PROXY_DRAIN_NOT_PROVEN') throw failure;
+    const stopped = await proxy.readStoppedTransport();
+    assert.ok(stopped.pendingOperations.length > 0);
+    const receipt = {format: 'sabalan-private-ui-transport-held/v1', root,
+      configurationSha256: process.env.RETAINED_UI_CONFIGURATION_SHA256,
+      publication: await store.readPublication(), pendingOperations: stopped.pendingOperations,
+      status: 'HELD_NOT_DRAINED', productionAdmission: false};
+    const handle = await fs.open(heldFile, 'wx', 0o600);
+    try {await handle.writeFile(JSON.stringify(receipt) + '\n'); await handle.sync();} finally {await handle.close();}
+    const directory = await fs.open(root, 'r'); try {await directory.sync();} finally {await directory.close();}
+    held = true;
+  }
   await new Promise(resolve => management.close(resolve));
   try {
     const named = await fs.lstat(managementPath);
@@ -77,9 +95,10 @@ async function shutdown() {
     await fs.unlink(managementPath);
   } catch (failure) {if (failure.code !== 'ENOENT') throw failure;}
   closeSync(descriptor);
+  return held ? 75 : 0;
 }
 for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
-  shutdown().then(() => process.exit(0), failure => {
+  shutdown().then(code => process.exit(code ?? 1), failure => {
     console.error(failure.code || failure.message);
     // Unresolved transport stays retained and requires inspection; no success.
     process.exitCode = 1;

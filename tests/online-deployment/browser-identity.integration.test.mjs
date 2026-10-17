@@ -75,3 +75,29 @@ test('a real browser loads versioned assets and sends its own build identity on 
       assert.deepEqual(errors,[]);
     } finally {await browser.close();}
   });
+
+test('compiled login and session bootstrap send the same immutable producer identity without losing form input on denial',
+  {skip:!enabled,timeout:90000},async()=>{
+    verifyCandidate();
+    const {chromium}=require('@playwright/test');
+    const browser=await chromium.launch({headless:true,channel:process.env.ONLINE_BROWSER_CHANNEL||'msedge'});
+    try {
+      const page=await browser.newPage(),observed=[];
+      await page.route(enabled+'/api/**',async route=>{
+        const request=route.request(),url=new URL(request.url());
+        observed.push({path:url.pathname,method:request.method(),id:request.headers()['x-deployment-id']});
+        await route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({success:false,error:'اطلاعات ورود آزمایشی پذیرفته نشد.'})});
+      });
+      await page.goto(enabled+'/login',{waitUntil:'networkidle'});
+      await page.locator('input[name="identifier"]').fill('diagnostic-identity-user');
+      await page.locator('input[name="password"]').fill('diagnostic-not-a-real-password');
+      await page.locator('button[type="submit"]').click();
+      await page.getByText('اطلاعات ورود آزمایشی پذیرفته نشد.',{exact:true}).waitFor();
+      assert.equal(await page.locator('input[name="identifier"]').inputValue(),'diagnostic-identity-user');
+      assert.equal(await page.locator('input[name="password"]').inputValue(),'diagnostic-not-a-real-password');
+      assert.ok(observed.some(request=>request.path==='/api/auth/me'));
+      assert.ok(observed.some(request=>request.path==='/api/auth/login' && request.method==='POST'));
+      assert.ok(observed.every(request=>request.id===expected));
+      assert.equal(new URL(page.url()).pathname,'/login');
+    } finally {await browser.close();}
+  });

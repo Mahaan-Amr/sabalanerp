@@ -49,3 +49,19 @@ assert.equal(separate.people[0].days[1].netMinutes, 0);
 assert.throws(() => buildPersonnelAttendanceReport(rows, { ...options, personnelIds: ['missing'] }));
 
 console.log('personnel attendance report tests passed');
+
+const uncertain = buildPersonnelAttendanceReport([
+  row('uncertain', 'u', '2026-08-23', [{ ...interval('2026-08-23T08:00:00Z', null), exitUnknown: true, revision: 2, confirmedRevision: 0 }]),
+], options);
+assert.equal(uncertain.people[0].durationUnknown, true, 'Unknown exit is not a final zero-hour day');
+assert.equal(uncertain.people[0].provisional, true, 'Unconfirmed source is marked provisional in reporting');
+
+const mixed = buildPersonnelAttendanceReport([row('mixed', 'm', '2026-08-23', [
+  interval('2026-08-23T05:00:00Z', '2026-08-23T07:00:00Z'),
+  { enteredAt: null, exitedAt: new Date('2026-08-23T14:00:00Z'), status: AttendanceIntervalStatus.ACTIVE },
+])], options);
+assert.equal(mixed.people[0].grossMinutes, 120);
+assert.equal(mixed.people[0].durationUnknown, true);
+assert.equal(mixed.people[0].days[0].intervals.find(i => !i.enteredAt)?.enteredAt, null);
+
+assert.ok(mixed.people[0].days[0].intervals[0].enteredAt, 'Known entry times remain ordered before unplaced unknown entries');

@@ -16,7 +16,7 @@ import {
   FaUserTimes,
   FaUsers,
 } from 'react-icons/fa';
-import { ErpButton, ErpEmptyState, ErpInlineState, ErpInput, ErpPressable, ErpSection, ErpSelect, ErpSheet, ErpSkeleton, ErpStatus, ErpTextarea, ErpWorkspacePage, erpFieldLabelClassName } from '@/components/erp';
+import { ErpButton, ErpCheckbox, ErpEmptyState, ErpInlineState, ErpInput, ErpPressable, ErpSection, ErpSelect, ErpSheet, ErpSkeleton, ErpStatus, ErpTextarea, ErpWorkspacePage, erpFieldLabelClassName } from '@/components/erp';
 import { notifySecurity } from '@/components/SecurityNoticeHost';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -28,6 +28,8 @@ import {
   type DashboardAttendanceCondition,
 } from '../securityDashboardViewModel';
 import { formatAttendanceDelay } from './attendancePresentation';
+import { usePersonnelDeviceReview, personnelDeviceInfo, PersonnelDeviceStatus, PersonnelReviewDialogs, AttendanceReviewToolbar, IntervalReviewSelection } from '@/features/attendance-device/PersonnelDeviceReview';
+import api from '@/lib/api';
 
 interface AttendanceRecord {
   id: string;
@@ -63,11 +65,12 @@ interface AttendanceRecord {
   delayMinutes?: number | null;
   overtimeMinutes?: number | null;
   overtimePending?: boolean;
-  intervals?: Array<{ id: string; enteredAt: string; exitedAt?: string | null; entryRecorder?: { firstName: string; lastName: string }; exitRecorder?: { firstName: string; lastName: string } | null }>;
+  intervals?: Array<{ id: string; enteredAt: string | null; exitedAt?: string | null; exitUnknown?: boolean; entrySource?: string; entryRecorder?: { firstName: string; lastName: string }; exitRecorder?: { firstName: string; lastName: string } | null }>;
   movementTimeline?: Array<{ kind: 'PRESENCE' | 'OUTSIDE' | 'HOURLY_LEAVE'; startsAt: string; endsAt?: string | null }>;
-  physicalPresenceMinutes?: number;
-  outsideMinutes?: number;
+  physicalPresenceMinutes?: number | null;
+  outsideMinutes?: number | null;
   presencePending?: boolean;
+  durationUnknown?: boolean;
   accountedWorkMinutes?: number | null;
   approvedExceptions?: any[];
   approvedLeaves?: any[];
@@ -77,6 +80,7 @@ interface AttendanceRecord {
     namePersian: string;
   } | null;
   openPreviousAttendance?: {
+    intervalId?: string;
     id: string;
     date: string;
     entryTime: string | null;
@@ -172,6 +176,8 @@ interface AttendanceDialogState {
   time: string;
   defaultTime: string;
   reason: string;
+  date: string;
+  entryUnknown: boolean;
 }
 
 interface IntervalDialogState {
@@ -192,6 +198,11 @@ const localDateTimeValue = (value?: string | null) => {
 const persianDateTimeIso = (value: string) => PersianCalendar.toGregorian(value, 'jYYYY/jMM/jDD HH:mm').toISOString();
 
 export default function AttendancePage() {
+  const device = usePersonnelDeviceReview();
+  const [reviewPerson, setReviewPerson] = useState<{ id: string; name: string } | null>(null);
+  const [initialMapping, setInitialMapping] = useState<Parameters<typeof PersonnelReviewDialogs>[0]['initial']>(null);
+  const [pendingOnly, setPendingOnly] = useState(false);
+  const [selectedIntervals, setSelectedIntervals] = useState<Record<string, number>>({});
   const router = useRouter();
   const pathname = usePathname();
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
@@ -265,7 +276,7 @@ export default function AttendancePage() {
 
   useEffect(() => {
     if (!queryInitialized || selectedDate !== PersianCalendar.now()) return undefined;
-    const timer = window.setInterval(() => { void fetchAttendanceData(true); }, 30_000);
+    const timer = window.setInterval(() => { void fetchAttendanceData(true); }, 2000);
     return () => window.clearInterval(timer);
   }, [departmentId, queryInitialized, selectedDate]);
 
@@ -290,18 +301,18 @@ export default function AttendancePage() {
       record.employee.lastName.toLowerCase().includes(search) ||
       (record.employee.username || '').toLowerCase().includes(search);
     const matchesStatus = matchesAttendanceFilter(record, statusFilter, conditionFilter);
-    return matchesSearch && matchesStatus;
-  }), [attendanceRecords, searchTerm, statusFilter, conditionFilter]);
+    return matchesSearch && matchesStatus && (!pendingOnly || personnelDeviceInfo(device.state, record.employee.id).pending > 0);
+  }), [attendanceRecords, searchTerm, statusFilter, conditionFilter, pendingOnly, device.state]);
 
   const openAttendanceDialog = (record: AttendanceRecord, action: AttendanceAction) => {
     const defaultTime = currentTimeValue();
-    setAttendanceDialog({ action, record, time: defaultTime, defaultTime, reason: '' });
+    setAttendanceDialog({ action, record, time: defaultTime, defaultTime, reason: '', date: action === 'close-previous' && record.openPreviousAttendance ? PersianCalendar.toPersian(new Date(record.openPreviousAttendance.date)) : selectedDate, entryUnknown: false });
   };
 
   const submitAttendanceDialog = async () => {
     if (!attendanceDialog) return;
-    const { action, record, time, defaultTime, reason } = attendanceDialog;
-    const requiresReason = action === 'close-previous';
+    const { action, record, time, reason, date, entryUnknown } = attendanceDialog;
+    const requiresReason = action === 'close-previous' || entryUnknown;
     if (requiresReason && !reason.trim()) {
       notifySecurity('برای ثبت خروج روز قبل، دلیل کوتاه الزامی است.', 'error');
       return;
@@ -309,9 +320,9 @@ export default function AttendancePage() {
     setActionLoadingId(`${action}-${record.employee.id}`);
     try {
       const response = action === 'checkin'
-        ? await securityAPI.checkIn(record.employee.id, { date: selectedDateIso(selectedDate), entryTime: time, reason: requiresReason ? reason.trim() : undefined })
+        ? await securityAPI.checkIn(record.employee.id, { date: selectedDateIso(date), entryTime: time, entryUnknown, reason: reason.trim() || undefined })
         : await securityAPI.checkOut(record.employee.id, {
-            date: action === 'close-previous' && record.openPreviousAttendance ? String(record.openPreviousAttendance.date).slice(0, 10) : selectedDateIso(selectedDate),
+            date: selectedDateIso(date),
             attendanceId: action === 'close-previous' ? record.openPreviousAttendance?.id : undefined,
             exitTime: time,
             reason: reason.trim() || undefined,
@@ -373,6 +384,7 @@ export default function AttendancePage() {
 
   return (
     <ErpWorkspacePage className="guard-workspace" title="حضور و غیاب" context={PersianCalendar.formatForDisplay(selectedDate)} secondaryActions={[{ label: 'به‌روزرسانی', icon: FaRedo, onClick: fetchAttendanceData, tone: 'neutral' }]}>
+
       {loading && attendanceRecords.length === 0 ? <ErpSkeleton lines={6} /> : error && attendanceRecords.length === 0 ? <ErpInlineState kind="error" title={error} action={{ label: 'تلاش مجدد', onClick: fetchAttendanceData }} /> : <>
       {error && attendanceRecords.length > 0 && <ErpInlineState kind="stale" title="آخرین به‌روزرسانی ناموفق بود؛ اطلاعات قبلی نمایش داده می‌شود." action={{ label: 'تلاش مجدد', onClick: fetchAttendanceData }} />}
       <div className="sds-neumorphic-card overflow-hidden">
@@ -408,6 +420,10 @@ export default function AttendancePage() {
       </ErpSection>
 
       <ErpSection title="کارکنان" actions={[]}>
+            <AttendanceReviewToolbar state={device.state} selected={selectedIntervals} onSelect={setSelectedIntervals} onSaved={async () => { await device.load(); await fetchAttendanceData(true); }} />
+            {device.error && <ErpInlineState kind="error" title={device.error} />}
+            <ErpCheckbox label="فقط موارد نیازمند رسیدگی" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} />
+
         {filteredRecords.length === 0 && rosterScopeEmpty ? (
           <ErpEmptyState
             icon={FaUsers}
@@ -418,14 +434,14 @@ export default function AttendancePage() {
           <ErpEmptyState icon={FaUsers} title="رکوردی برای نمایش وجود ندارد" description="فیلترها را تغییر دهید یا تاریخ دیگری انتخاب کنید." />
         ) : (
           <>
-            <div className="grid gap-3 lg:hidden">
+            <div className="grid gap-3">
               {filteredRecords.map((record) => {
                 const checkingIn = actionLoadingId === `checkin-${record.employee.id}`;
                 const checkingOut = actionLoadingId === `checkout-${record.employee.id}`;
                 const expanded = expandedRecordId === record.id;
                 const delayLabel = formatAttendanceDelay(record.delayMinutes);
                 return (
-                  <article key={record.id} className="sds-neumorphic-card p-3">
+                  <article key={record.id} className="sds-neumorphic-card p-3 space-y-3" data-personnel-id={record.employee.id}>
                     <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] items-center gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold sds-text-primary">
@@ -433,11 +449,15 @@ export default function AttendancePage() {
                         </p>
                       </div>
                       <p className="truncate text-xs sds-text-muted">{record.employee.department?.namePersian || 'بدون بخش'}</p>
-                      <ErpStatus tone={getStatusTone(record.status)} label={getStatusLabel(record.status)} />
+                      {!record.intervals?.length && !record.openPreviousAttendance && personnelDeviceInfo(device.state, record.employee.id).links.length > 0 && ['ABSENT', 'PENDING'].includes(record.status) ? <ErpStatus label="تردد عملیاتی ثبت نشده" tone="neutral" /> : <ErpStatus tone={getStatusTone(record.status)} label={getStatusLabel(record.status)} />}
                     </div>
 
+                    <PersonnelDeviceStatus state={device.state} personnelId={record.employee.id} today={selectedDate === PersianCalendar.now()} hasMovement={Boolean(record.intervals?.length || record.openPreviousAttendance)} onInitial={setInitialMapping} onReview={() => setReviewPerson({ id: record.employee.id, name: `${record.employee.firstName} ${record.employee.lastName}` })} />
+                    {record.intervals?.length ? <ErpStatus label={record.presencePending ? 'داخل مجموعه' : 'بیرون مجموعه'} tone={record.presencePending ? 'success' : 'neutral'} /> : null}
+                    <IntervalReviewSelection state={device.state} personnelId={record.employee.id} selected={selectedIntervals} onSelect={setSelectedIntervals} />
                     <div className="mt-2 flex flex-wrap gap-2">
                       {record.openPreviousAttendance ? <ErpButton label="ثبت خروج قبلی" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'close-previous')} tone="warning" variant="solid" disabled={Boolean(actionLoadingId)} /> : canCheckOut(record) ? <ErpButton label="خروج" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'checkout')} disabled={Boolean(actionLoadingId)} tone="neutral" variant="soft" /> : canCheckIn(record) ? <ErpButton label="ورود" icon={FaSignInAlt} onClick={() => openAttendanceDialog(record, 'checkin')} disabled={Boolean(actionLoadingId)} variant="soft" /> : null}
+                      <ErpButton label="اصلاح ورود/خروج" onClick={() => { if (record.intervals?.length) openIntervalDialog(record, record.intervals[record.intervals.length - 1], 'correct'); else openAttendanceDialog(record, 'checkin'); }} variant="ghost" />
                       {delayLabel && <ErpStatus label={`تأخیر: ${delayLabel}`} tone="warning" emphasis="strong" />}
                       <ErpButton label={expanded ? 'بستن جزئیات' : 'جزئیات'} onClick={() => setExpandedRecordId(expanded ? null : record.id)} tone="neutral" variant="ghost" />
                     </div>
@@ -445,11 +465,11 @@ export default function AttendancePage() {
                       <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg bg-[var(--sds-surface-subtle)] p-3 text-sm">
                         <div><dt className="text-xs sds-text-muted">ورود</dt><dd className="mt-1 font-semibold">{record.entryTime || '-'}</dd></div>
                         <div><dt className="text-xs sds-text-muted">خروج</dt><dd className="mt-1 font-semibold">{record.exitTime || '-'}</dd></div>
-                        <div><dt className="text-xs sds-text-muted">حضور فیزیکی</dt><dd className="mt-1 font-semibold">{record.presencePending ? 'در حال حضور' : `${(record.physicalPresenceMinutes || 0).toLocaleString('fa-IR')} دقیقه`}</dd></div>
+                        <div><dt className="text-xs sds-text-muted">حضور فیزیکی</dt><dd className="mt-1 font-semibold">{`${(record.physicalPresenceMinutes || 0).toLocaleString('fa-IR')} دقیقه معلوم${record.durationUnknown ? ' · ناقص' : ''}`}</dd></div>
                         <div><dt className="text-xs sds-text-muted">خارج از محل</dt><dd className="mt-1 font-semibold">{(record.outsideMinutes || 0).toLocaleString('fa-IR')} دقیقه</dd></div>
                         <div><dt className="text-xs sds-text-muted">کارکرد محاسبه‌شده</dt><dd className="mt-1 font-semibold">{record.accountedWorkMinutes === null || record.accountedWorkMinutes === undefined ? 'در انتظار تکمیل' : `${record.accountedWorkMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
                         {record.movementTimeline?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">خط زمانی روز</dt><dd className="mt-2 space-y-1">{record.movementTimeline.map((segment, index) => <p key={`${segment.kind}-${segment.startsAt}-${index}`} className="rounded bg-[var(--sds-surface-panel)] px-2 py-1 text-xs"><strong>{segment.kind === 'PRESENCE' ? 'حضور در محل' : segment.kind === 'HOURLY_LEAVE' ? 'مرخصی ساعتی' : 'خارج از محل'}:</strong> {new Date(segment.startsAt).toLocaleString('fa-IR')} تا {segment.endsAt ? new Date(segment.endsAt).toLocaleString('fa-IR') : 'باز'}</p>)}</dd></div> : null}
-                        {record.intervals?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">جزئیات تردد</dt><dd className="mt-2 space-y-1">{record.intervals.map((interval, index) => <div key={interval.id} className="rounded bg-[var(--sds-surface-panel)] px-2 py-2 text-xs"><p>{(index + 1).toLocaleString('fa-IR')}. {new Date(interval.enteredAt).toLocaleString('fa-IR')} تا {interval.exitedAt ? new Date(interval.exitedAt).toLocaleString('fa-IR') : 'باز'} · ثبت‌کننده ورود: {interval.entryRecorder ? `${interval.entryRecorder.firstName} ${interval.entryRecorder.lastName}` : '-'}</p><div className="mt-2 flex gap-2"><ErpPressable className="min-h-11 px-2 font-semibold" tone="primary" onClick={() => openIntervalDialog(record, interval, 'correct')}>اصلاح</ErpPressable><ErpPressable className="min-h-11 px-2 font-semibold" tone="danger" onClick={() => openIntervalDialog(record, interval, 'void')}>ابطال</ErpPressable></div></div>)}</dd></div> : null}
+                        {record.intervals?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">جزئیات تردد</dt><dd className="mt-2 space-y-1">{record.intervals.map((interval, index) => <div key={interval.id} className="rounded bg-[var(--sds-surface-panel)] px-2 py-2 text-xs"><p>{(index + 1).toLocaleString('fa-IR')}. {interval.enteredAt ? new Date(interval.enteredAt).toLocaleString('fa-IR') : 'ورود با ساعت نامعلوم'} تا {interval.exitUnknown ? 'خروج با ساعت نامعلوم' : interval.exitedAt ? new Date(interval.exitedAt).toLocaleString('fa-IR') : 'باز'} · ثبت‌کننده ورود: {interval.entryRecorder ? `${interval.entryRecorder.firstName} ${interval.entryRecorder.lastName}` : '-'}</p><div className="mt-2 flex gap-2"><ErpPressable className="min-h-11 px-2 font-semibold" tone="primary" onClick={() => openIntervalDialog(record, interval, 'correct')}>اصلاح</ErpPressable><ErpPressable className="min-h-11 px-2 font-semibold" tone="danger" onClick={() => openIntervalDialog(record, interval, 'void')}>ابطال</ErpPressable></div></div>)}</dd></div> : null}
                         <div><dt className="text-xs sds-text-muted">ساعت کاری</dt><dd className="mt-1 font-semibold" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</dd></div>
                         <div><dt className="text-xs sds-text-muted">تأخیر</dt><dd className="mt-1 font-semibold">{delayLabel || '-'}</dd></div>
                         <div><dt className="text-xs sds-text-muted">اضافه‌کار</dt><dd className="mt-1 font-semibold">{record.overtimePending ? 'در انتظار ثبت خروج' : record.overtimeMinutes === null || record.overtimeMinutes === undefined ? '-' : `${record.overtimeMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
@@ -465,71 +485,16 @@ export default function AttendancePage() {
               })}
             </div>
 
-            <div className="hidden overflow-x-auto lg:block">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b sds-divider">
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">کارمند</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">بخش</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">وضعیت</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">ورود</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">خروج</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">ساعت کاری</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">تأخیر</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">اضافه‌کار</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">حضور / خارج</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">یادداشت</th>
-                    <th className="px-3 py-3 text-right text-xs font-semibold sds-text-muted">عملیات</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRecords.map((record) => (
-                    <tr key={record.id} className="border-b border-[var(--sds-border-subtle)] transition hover:bg-[var(--sds-surface-subtle)]">
-                      <td className="px-3 py-4">
-                        <div className="font-semibold sds-text-primary">{record.employee.firstName} {record.employee.lastName}</div>
-                        {record.employee.username && <div className="text-xs sds-text-muted">@{record.employee.username}</div>}
-                      </td>
-                      <td className="px-3 py-4 sds-text-secondary">{record.employee.department?.namePersian || '-'}</td>
-                      <td className="px-3 py-4"><ErpStatus tone={getStatusTone(record.status)} label={getStatusLabel(record.status)} /></td>
-                      <td className="px-3 py-4 sds-text-primary">{record.entryTime || '-'}</td>
-                      <td className="px-3 py-4 sds-text-primary">{record.exitTime || '-'}</td>
-                      <td className="px-3 py-4 sds-text-secondary" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</td>
-                      <td className="px-3 py-4 text-[var(--sds-warning)]">{formatAttendanceDelay(record.delayMinutes) || '-'}</td>
-                      <td className="px-3 py-4 text-[var(--sds-accent)]">{record.overtimePending ? 'در انتظار خروج' : record.overtimeMinutes === null || record.overtimeMinutes === undefined ? '-' : `${record.overtimeMinutes.toLocaleString('fa-IR')} دقیقه`}</td>
-                      <td className="px-3 py-4 sds-text-secondary">{record.presencePending ? 'در حال حضور' : `${(record.physicalPresenceMinutes || 0).toLocaleString('fa-IR')} / ${(record.outsideMinutes || 0).toLocaleString('fa-IR')} دقیقه`}</td>
-                      <td className="px-3 py-4 sds-text-secondary">
-                        {record.openPreviousAttendance ? (
-                          <span className="font-semibold text-[var(--sds-warning)]">خروج روز قبل ثبت نشده</span>
-                        ) : record.notes || record.exceptionType || (record.digitalSignature ? 'امضا ثبت شده' : '-')}
-                      </td>
-                      <td className="px-3 py-4">
-                        <div className="flex flex-wrap gap-2">
-                          <ErpButton label="ورود" icon={FaSignInAlt} onClick={() => openAttendanceDialog(record, 'checkin')} disabled={!canCheckIn(record) || Boolean(actionLoadingId) || Boolean(record.openPreviousAttendance)} variant="soft" />
-                          <ErpButton label="خروج" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'checkout')} disabled={!canCheckOut(record) || Boolean(actionLoadingId)} tone="neutral" variant="soft" />
-                          {record.openPreviousAttendance && <ErpButton label="خروج قبلی" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'close-previous')} disabled={Boolean(actionLoadingId)} tone="warning" variant="soft" />}
-                          {record.intervals?.map((interval, index) => (
-                            <div key={interval.id} className="flex gap-1 rounded-md border border-[var(--sds-border-default)] px-2 py-1 text-xs border-[var(--sds-border-default)]">
-                              <span className="sds-text-muted">تردد {(index + 1).toLocaleString('fa-IR')}</span>
-                              <ErpPressable className="min-h-11 px-2 font-semibold" tone="primary" onClick={() => openIntervalDialog(record, interval, 'correct')}>اصلاح</ErpPressable>
-                              <ErpPressable className="min-h-11 px-2 font-semibold" tone="danger" onClick={() => openIntervalDialog(record, interval, 'void')}>ابطال</ErpPressable>
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </>
         )}
       </ErpSection>
       </>}
+      <PersonnelReviewDialogs state={device.state} person={reviewPerson} initial={initialMapping} onClose={() => { setReviewPerson(null); setInitialMapping(null); }} onSaved={async () => { await device.load(); await fetchAttendanceData(true); }} />
       <ErpSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} title="فیلترهای حضور و غیاب" footer={<div className="flex justify-end"><ErpButton label="مشاهده نتایج" onClick={() => setFiltersOpen(false)} variant="solid" /></div>}>
         {filterControls}
       </ErpSheet>
       {attendanceDialog && (
-        <ErpSheet open onClose={() => setAttendanceDialog(null)} title={attendanceDialog.action === 'checkin' ? 'ثبت ورود' : attendanceDialog.action === 'checkout' ? 'ثبت خروج' : 'ثبت خروج قبلی'} footer={<div className="flex flex-wrap justify-end gap-2"><ErpButton label="انصراف" onClick={() => setAttendanceDialog(null)} tone="neutral" variant="ghost" /><ErpButton label="ثبت" onClick={submitAttendanceDialog} variant="solid" disabled={Boolean(actionLoadingId) || (attendanceDialog.action === 'close-previous' && !attendanceDialog.reason.trim())} /></div>}>
+        <ErpSheet presentation="modal" pending={Boolean(actionLoadingId)} open onClose={() => setAttendanceDialog(null)} title={attendanceDialog.action === 'checkin' ? 'ثبت ورود' : attendanceDialog.action === 'checkout' ? 'ثبت خروج' : 'ثبت خروج قبلی'} footer={<div className="flex flex-wrap justify-end gap-2"><ErpButton label="انصراف" onClick={() => setAttendanceDialog(null)} tone="neutral" variant="ghost" /><ErpButton label="ثبت" onClick={submitAttendanceDialog} variant="solid" disabled={Boolean(actionLoadingId) || ((attendanceDialog.action === 'close-previous' || attendanceDialog.entryUnknown) && !attendanceDialog.reason.trim())} /></div>}>
             <p className="mt-1 text-sm sds-text-muted">
               {attendanceDialog.record.employee.firstName} {attendanceDialog.record.employee.lastName}
             </p>
@@ -538,18 +503,21 @@ export default function AttendancePage() {
                 این خروج برای {PersianCalendar.formatForDisplay(attendanceDialog.record.openPreviousAttendance.date)} ثبت می‌شود.
               </p>
             )}
-            <label className="mt-4 block">
+            {attendanceDialog.action === 'close-previous' && attendanceDialog.record.openPreviousAttendance?.intervalId && <ErpButton label="خروج رخ داده؛ ساعت نامعلوم است" tone="warning" disabled={Boolean(actionLoadingId) || !attendanceDialog.reason.trim()} onClick={async () => { setActionLoadingId(attendanceDialog.record.id); try { await api.post(`/attendance-device/intervals/${attendanceDialog.record.openPreviousAttendance!.intervalId}/unknown-exit`, { reason: attendanceDialog.reason }); setAttendanceDialog(null); await fetchAttendanceData(true); } catch (e: any) { setError(e.response?.data?.error || 'ثبت نامعلومی خروج ناموفق بود.'); } finally { setActionLoadingId(''); } }} />}
+            <label className="mt-4 block"><span className={labelClass}>تاریخ تردد</span><PersianCalendarComponent value={attendanceDialog.date} onChange={date => setAttendanceDialog(current => current ? { ...current, date } : current)} /></label>
+            {attendanceDialog.action === 'checkin' && <ErpCheckbox label="داخل است؛ ساعت ورود نامعلوم" checked={attendanceDialog.entryUnknown} onChange={e => setAttendanceDialog(current => current ? { ...current, entryUnknown: e.target.checked } : current)} />}
+            {!attendanceDialog.entryUnknown && <label className="mt-4 block">
               <span className={labelClass}>زمان</span>
               <PersianTimePicker value={attendanceDialog.time} onChange={(time) => setAttendanceDialog((current) => current ? { ...current, time } : current)} />
-            </label>
-            {(attendanceDialog.action === 'close-previous' || attendanceDialog.time !== attendanceDialog.defaultTime) && <label className="mt-4 block">
-              <span className={labelClass}>دلیل {attendanceDialog.action === 'close-previous' ? '(الزامی)' : '(اختیاری)'}</span>
+            </label>}
+            {(attendanceDialog.action === 'close-previous' || attendanceDialog.entryUnknown || attendanceDialog.time !== attendanceDialog.defaultTime) && <label className="mt-4 block">
+              <span className={labelClass}>دلیل {attendanceDialog.action === 'close-previous' || attendanceDialog.entryUnknown ? '(الزامی)' : '(اختیاری)'}</span>
               <ErpTextarea value={attendanceDialog.reason} onChange={(event) => setAttendanceDialog((current) => current ? { ...current, reason: event.target.value } : current)} placeholder="مثلاً فراموشی ثبت در زمان واقعی" />
             </label>}
         </ErpSheet>
       )}
       {intervalDialog && (
-        <ErpSheet open onClose={() => setIntervalDialog(null)} title={intervalDialog.action === 'correct' ? 'اصلاح بازه تردد' : 'ابطال بازه تردد'} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" onClick={() => setIntervalDialog(null)} tone="neutral" variant="ghost" /><ErpButton label={intervalDialog.action === 'correct' ? 'ثبت اصلاح' : 'تأیید ابطال'} onClick={submitIntervalDialog} tone={intervalDialog.action === 'void' ? 'danger' : undefined} variant="solid" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} /></div>}>
+        <ErpSheet presentation="modal" pending={Boolean(actionLoadingId)} open onClose={() => setIntervalDialog(null)} title={intervalDialog.action === 'correct' ? 'اصلاح بازه تردد' : 'ابطال بازه تردد'} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" onClick={() => setIntervalDialog(null)} tone="neutral" variant="ghost" /><ErpButton label={intervalDialog.action === 'correct' ? 'ثبت اصلاح' : 'تأیید ابطال'} onClick={submitIntervalDialog} tone={intervalDialog.action === 'void' ? 'danger' : undefined} variant="solid" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} /></div>}>
             <p className="mt-1 text-sm sds-text-muted">{intervalDialog.record.employee.firstName} {intervalDialog.record.employee.lastName}</p>
             {intervalDialog.action === 'correct' && (
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -558,6 +526,7 @@ export default function AttendancePage() {
               </div>
             )}
             <label className="mt-4 block"><span className={labelClass}>دلیل (الزامی)</span><ErpTextarea value={intervalDialog.reason} onChange={(event) => setIntervalDialog((current) => current ? { ...current, reason: event.target.value } : current)} /></label>
+            {intervalDialog.action === 'correct' && !intervalDialog.interval.exitedAt && !intervalDialog.interval.exitUnknown && <ErpButton label="خروج رخ داده؛ ساعت نامعلوم است" tone="warning" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} onClick={async () => { setActionLoadingId(intervalDialog.interval.id); try { await api.post(`/attendance-device/intervals/${intervalDialog.interval.id}/unknown-exit`, { reason: intervalDialog.reason }); setIntervalDialog(null); await fetchAttendanceData(true); } catch (e: any) { setError(e.response?.data?.error || 'ثبت خروج نامعلوم ناموفق بود.'); } finally { setActionLoadingId(''); } }} />}
             <p className="mt-2 text-xs sds-text-muted">سابقه قبلی حذف نمی‌شود و همراه عامل و دلیل در لاگ ممیزی باقی می‌ماند.</p>
         </ErpSheet>
       )}

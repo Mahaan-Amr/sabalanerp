@@ -9,8 +9,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import PersianCalendar from '@/lib/persian-calendar';
 
 type Period = 'previous' | 'current' | 'custom';
-type ReportDay = { date: string; intervals: Array<{ enteredAt: string; exitedAt: string | null }>; grossMinutes: number; netMinutes: number };
-type ReportPerson = { key: string; name: string; grossMinutes: number; netMinutes: number; daysWithMovement: number; days: ReportDay[] };
+type ReportDay = { date: string; intervals: Array<{ enteredAt: string | null; exitedAt: string | null }>; durationUnknown?: boolean; provisional?: boolean; grossMinutes: number; netMinutes: number };
+type ReportPerson = { key: string; name: string; durationUnknown?: boolean; provisional?: boolean; grossMinutes: number; netMinutes: number; daysWithMovement: number; days: ReportDay[] };
 type ReportPreview = {
   availablePeople: Array<{ id: string; name: string }>;
   people: ReportPerson[];
@@ -140,19 +140,19 @@ export default function PersonnelAttendanceReportPage() {
     {error && <ErpInlineState kind="error" title={error} />}
     <ErpSection title="پیش‌نمایش">
       {loading ? <ErpSkeleton lines={5} /> : preview?.people.length ? <div className="space-y-4">
-        <ErpSummaryGrid columns={3} items={[{ label: 'نفر', value: preview.people.length.toLocaleString('fa-IR') }, { label: 'جمع کارکرد', value: timeLabel(grossTotal) }, { label: 'جمع بدون استراحت', value: timeLabel(netTotal) }]} />
+        <ErpSummaryGrid columns={3} items={[{ label: 'نفر', value: preview.people.length.toLocaleString('fa-IR') }, { label: 'جمع کارکرد', value: preview.people.some(p => p.durationUnknown) ? `${timeLabel(grossTotal)} معلوم · ناقص` : timeLabel(grossTotal) }, { label: 'جمع بدون استراحت', value: preview.people.some(p => p.durationUnknown) ? `${timeLabel(netTotal)} معلوم · ناقص` : timeLabel(netTotal) }]} />
         <p className="text-xs sds-text-muted">{preview.records.toLocaleString('fa-IR')} روز ثبت‌شده · {preview.validIntervals.toLocaleString('fa-IR')} بازه معتبر{preview.openIntervals ? ` · ${preview.openIntervals.toLocaleString('fa-IR')} بازه در انتظار خروج` : ''}</p>
-        <div className="grid gap-3 lg:grid-cols-2">{preview.people.map((person) => <ErpCard key={person.key} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold sds-text-primary">{person.name}</h3><p className="mt-1 text-xs sds-text-muted">{person.daysWithMovement.toLocaleString('fa-IR')} روز دارای تردد</p></div><div className="text-left text-sm"><p className="sds-text-secondary">کارکرد: <strong className="sds-text-primary">{timeLabel(person.grossMinutes)}</strong></p><p className="mt-1 sds-text-secondary">بدون استراحت: <strong className="sds-text-primary">{timeLabel(person.netMinutes)}</strong></p></div></div><div className="mt-3"><ErpButton label="جزئیات روزها" variant="ghost" onClick={() => setDetailKey(person.key)} /></div></ErpCard>)}</div>
+        <div className="grid gap-3 lg:grid-cols-2">{preview.people.map((person) => <ErpCard key={person.key} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold sds-text-primary">{person.name}{person.provisional ? ' · تأییدنشده / موقت' : ''}</h3><p className="mt-1 text-xs sds-text-muted">{person.daysWithMovement.toLocaleString('fa-IR')} روز دارای تردد</p></div><div className="text-left text-sm"><p className="sds-text-secondary">کارکرد: <strong className="sds-text-primary">{(person.durationUnknown ? `${timeLabel(person.grossMinutes)} معلوم · ناقص` : timeLabel(person.grossMinutes))}</strong></p><p className="mt-1 sds-text-secondary">بدون استراحت: <strong className="sds-text-primary">{(person.durationUnknown ? `${timeLabel(person.netMinutes)} معلوم · ناقص` : timeLabel(person.netMinutes))}</strong></p></div></div><div className="mt-3"><ErpButton label="جزئیات روزها" variant="ghost" onClick={() => setDetailKey(person.key)} /></div></ErpCard>)}</div>
       </div> : <ErpEmptyState icon={FaUsers} title="در این بازه رکوردی برای گزارش وجود ندارد" />}
       <div className="mt-4"><ErpButton label={exporting ? 'در حال ساخت PDF…' : `دریافت PDF ${preview?.people.length?.toLocaleString('fa-IR') || ''} نفر`} icon={FaFilePdf} onClick={exportPdf} disabled={exporting || loading || !preview?.people.length} /></div>
     </ErpSection>
     <ErpSheet open={Boolean(detailPerson)} onClose={() => setDetailKey(null)} title={detailPerson ? `روزهای ${detailPerson.name}` : 'روزهای کارکرد'} presentation="modal" size="wide">
       {detailPerson && <div className="space-y-4">
-        <ErpSummaryGrid items={[{ label: 'جمع کارکرد', value: timeLabel(detailPerson.grossMinutes) }, { label: 'بدون استراحت', value: timeLabel(detailPerson.netMinutes) }]} />
+        <ErpSummaryGrid items={[{ label: 'جمع کارکرد', value: (detailPerson.durationUnknown ? `${timeLabel(detailPerson.grossMinutes)} معلوم · ناقص` : timeLabel(detailPerson.grossMinutes)) }, { label: 'بدون استراحت', value: (detailPerson.durationUnknown ? `${timeLabel(detailPerson.netMinutes)} معلوم · ناقص` : timeLabel(detailPerson.netMinutes)) }]} />
         <div className="divide-y divide-[var(--sds-border-subtle)]">{detailPerson.days.map((day) => <div key={day.date} className="grid gap-2 py-3 text-sm sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <strong className="sds-text-primary">{dayLabel(day.date)}</strong>
-          <span className="sds-text-secondary">{day.intervals.length ? day.intervals.map((interval) => `${clockLabel(interval.enteredAt)} تا ${interval.exitedAt ? clockLabel(interval.exitedAt) : 'در انتظار خروج'}`).join(' · ') : 'بدون تردد ثبت‌شده'}</span>
-          <span className="sds-text-secondary">کارکرد {timeLabel(day.grossMinutes)} · بدون استراحت {timeLabel(day.netMinutes)}</span>
+          <span className="sds-text-secondary">{day.intervals.length ? day.intervals.map((interval) => `${interval.enteredAt ? clockLabel(interval.enteredAt) : 'ورود نامعلوم'} تا ${interval.exitedAt ? clockLabel(interval.exitedAt) : 'در انتظار خروج'}`).join(' · ') : 'بدون تردد ثبت‌شده'}</span>
+          <span className="sds-text-secondary">کارکرد {(day.durationUnknown ? `${timeLabel(day.grossMinutes)} معلوم · ناقص` : timeLabel(day.grossMinutes))} · بدون استراحت {(day.durationUnknown ? `${timeLabel(day.netMinutes)} معلوم · ناقص` : timeLabel(day.netMinutes))}</span>
         </div>)}</div>
       </div>}
     </ErpSheet>

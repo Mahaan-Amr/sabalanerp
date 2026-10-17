@@ -28,6 +28,7 @@ import {
 import { WORKSPACES, WORKSPACE_PERMISSIONS, useWorkspace } from '@/contexts/WorkspaceContext';
 import { securityAPI } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
+import { AttendanceDeviceBanner } from '@/features/attendance-device/AttendanceDevicePanel';
 import { buildSecurityQuickAccess, buildTodayStatusItems, getNeedsAttention } from './securityDashboardViewModel';
 
 interface DashboardStats {
@@ -250,6 +251,7 @@ export default function SecurityDashboardPage() {
         />
       )}
 
+      <AttendanceDeviceBanner />
       {permissionsLoading ? <ErpDashboardSkeleton variant="summary" /> : <ErpQuickAccessGrid title="دسترسی سریع" items={quickAccessItems} />}
 
       {shiftAwareness?.authorized && overview?.state === 'ACTIVE' && (

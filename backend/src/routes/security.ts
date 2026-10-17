@@ -27,6 +27,8 @@ import { completeGuardInboundMovement, GuardInboundMovementConflictError, guardI
   GuardInboundMovementNotFoundError, GuardInboundMovementValidationError, presentGuardInboundMovement,
   recordGuardInboundMovement } from '../services/guardInboundMovement';
 import canonicalGuardQueueRoutes from './canonical-guard-queue';
+import { attendanceDeviceManage, attendanceDeviceReview } from '../middleware/attendanceDeviceAccess';
+import { refreshDeviceAttendance, requireReviewHandover } from '../services/attendanceDevice';
 
 const router = express.Router();
 
@@ -65,17 +67,17 @@ const businessInstant = (businessDate: Date, time: string, nextDay = false) => {
 const securityTimeFromInstant = (value: Date) => securityNowTime(value);
 
 const intervalSummary = (intervals: any[]) => {
-  const active = intervals.filter((interval) => interval.status !== AttendanceIntervalStatus.VOIDED).sort((a, b) => new Date(a.enteredAt).getTime() - new Date(b.enteredAt).getTime());
-  const completed = active.filter((interval) => interval.exitedAt);
+  const active = intervals.filter((interval) => interval.status !== AttendanceIntervalStatus.VOIDED).sort((a, b) => new Date(a.enteredAt || a.observedInsideAt).getTime() - new Date(b.enteredAt || b.observedInsideAt).getTime());
+  const completed = active.filter((interval) => interval.enteredAt && interval.exitedAt && !interval.exitUnknown);
   const firstEntry = active[0]?.enteredAt ? securityTimeFromInstant(new Date(active[0].enteredAt)) : null;
   const finalExitInterval = [...active].reverse().find((interval) => interval.exitedAt);
   const finalExit = finalExitInterval?.exitedAt ? securityTimeFromInstant(new Date(finalExitInterval.exitedAt)) : null;
   const presenceMinutes = completed.reduce((sum, interval) => sum + Math.max(0, Math.floor((new Date(interval.exitedAt).getTime() - new Date(interval.enteredAt).getTime()) / 60_000)), 0);
   const outsideMinutes = active.slice(1).reduce((sum, interval, index) => {
     const previousExit = active[index]?.exitedAt;
-    return previousExit ? sum + Math.max(0, Math.floor((new Date(interval.enteredAt).getTime() - new Date(previousExit).getTime()) / 60_000)) : sum;
+    return previousExit && interval.enteredAt ? sum + Math.max(0, Math.floor((new Date(interval.enteredAt).getTime() - new Date(previousExit).getTime()) / 60_000)) : sum;
   }, 0);
-  return { intervals: active, firstEntry, finalExit, presenceMinutes, outsideMinutes, isOpen: active.some((interval) => !interval.exitedAt) };
+  return { intervals: active, firstEntry, finalExit, presenceMinutes, outsideMinutes, isOpen: active.some((interval) => !interval.exitedAt && !interval.exitUnknown), durationUnknown: active.some((interval) => !interval.enteredAt || !interval.exitedAt || interval.exitUnknown) };
 };
 
 const appendManualAttendanceNote = (existingNote: string | null | undefined, actionLabel: string, reason?: unknown) => {
@@ -91,6 +93,10 @@ const intervalAuditSnapshot = (interval: any) => JSON.parse(JSON.stringify({
   status: interval.status,
   entryReason: interval.entryReason,
   exitReason: interval.exitReason,
+  exitUnknown: interval.exitUnknown,
+  observedInsideAt: interval.observedInsideAt,
+  revision: interval.revision,
+  confirmedRevision: interval.confirmedRevision,
   voidReason: interval.voidReason,
   voidedAt: interval.voidedAt,
   voidedBy: interval.voidedBy
@@ -250,7 +256,7 @@ const unionMinutes = (windows: Array<{ startsAt: Date; endsAt: Date }>) => {
 const movementSegments = (intervals: any[], hourlyLeaves: any[]) => {
   const segments: Array<{ kind: 'PRESENCE' | 'OUTSIDE' | 'HOURLY_LEAVE'; startsAt: Date; endsAt: Date | null }> = [];
   intervals.forEach((interval, index) => {
-    segments.push({ kind: 'PRESENCE', startsAt: new Date(interval.enteredAt), endsAt: interval.exitedAt ? new Date(interval.exitedAt) : null });
+    if (interval.enteredAt) segments.push({ kind: 'PRESENCE', startsAt: new Date(interval.enteredAt), endsAt: interval.exitedAt ? new Date(interval.exitedAt) : null });
     const gapStart = interval.exitedAt ? new Date(interval.exitedAt) : null;
     const nextEntry = intervals[index + 1]?.enteredAt ? new Date(intervals[index + 1].enteredAt) : null;
     if (!gapStart || !nextEntry || nextEntry <= gapStart) return;
@@ -322,7 +328,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
     where: {
       personnelId: { in: allPersonnel.map((personnel) => personnel.id) },
       date: { lt: targetDate },
-      intervals: { some: { status: AttendanceIntervalStatus.ACTIVE, exitedAt: null } }
+      intervals: { some: { status: AttendanceIntervalStatus.ACTIVE, exitedAt: null, exitUnknown: false } }
     },
     include: attendanceInclude,
     orderBy: { date: 'desc' }
@@ -332,6 +338,11 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
     if (record.personnelId && !openPreviousByPersonnel.has(record.personnelId)) openPreviousByPersonnel.set(record.personnelId, record);
   });
 
+  const ambiguousDevicePunches = await prisma.attendancePunch.findMany({
+    where: { personnelId: { in: personnelIds }, status: 'REVIEW', occurredAt: { gte: businessInstant(targetDate, '00:00'), lt: businessInstant(nextDay, '00:00') } },
+    select: { personnelId: true }
+  });
+  const ambiguousDevicePeople = new Set(ambiguousDevicePunches.map(p => p.personnelId));
   const attendanceSummary = allPersonnel.map((personnel) => {
     const record = recordsByPersonnel.get(personnel.id);
     const movement = intervalSummary(record?.intervals || []);
@@ -364,11 +375,11 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       : record?.delayMinutes ?? null;
     const derivedStatus = leaveStatus || (!movement.intervals.length && personMissions.length ? AttendanceStatus.MISSION
       : movement.intervals.length ? (adjustedDelay && adjustedDelay > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT)
-        : missingStatus);
+        : ambiguousDevicePeople.has(personnel.id) ? AttendanceStatus.PENDING : missingStatus);
     const dayStart = businessInstant(targetDate, '00:00');
     const dayEnd = businessInstant(nextDay, '00:00');
     const accountedWindows = [
-      ...movement.intervals.filter((interval: any) => interval.exitedAt).map((interval: any) => ({ startsAt: new Date(interval.enteredAt), endsAt: new Date(interval.exitedAt) })),
+      ...movement.intervals.filter((interval: any) => interval.enteredAt && interval.exitedAt && !interval.exitUnknown).map((interval: any) => ({ startsAt: new Date(interval.enteredAt), endsAt: new Date(interval.exitedAt) })),
       ...personMissions.map((mission) => authorityBounds(mission))
     ].map((window) => ({ startsAt: new Date(Math.max(dayStart.getTime(), window.startsAt.getTime())), endsAt: new Date(Math.min(dayEnd.getTime(), window.endsAt.getTime())) }));
     return {
@@ -381,16 +392,18 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       exitTime: movement.finalExit || record?.exitTime || null,
       status: derivedStatus,
       exceptionType: fullDayLeave?.exceptionType || hourlyLeaves[0]?.exceptionType || record?.exceptionType || null,
-      notes: record?.notes || null,
+      notes: [record?.notes, movement.intervals.some((i: any) => i.revision !== i.confirmedRevision) ? 'تأییدنشده / موقت' : null, movement.intervals.some((i: any) => i.exitUnknown) ? 'خروج فراموش‌شده؛ ساعت نامعلوم' : null, ambiguousDevicePeople.has(personnel.id) ? 'تردد دستگاه نیازمند بررسی است؛ وضعیت قطعی نیست' : null].filter(Boolean).join('\n') || null,
       digitalSignature: record?.digitalSignature || null,
       createdAt: record?.createdAt || null,
       shift: null,
       intervals: movement.intervals,
       movementTimeline: movementSegments(movement.intervals, hourlyLeaves),
       physicalPresenceMinutes: movement.presenceMinutes,
-      outsideMinutes: movement.outsideMinutes,
+      durationUnknown: movement.durationUnknown,
+      verificationPending: movement.intervals.some((i: any) => i.revision !== i.confirmedRevision),
+      outsideMinutes: movement.intervals.some((i: any) => i.exitUnknown) ? null : movement.outsideMinutes,
       presencePending: movement.isOpen,
-      accountedWorkMinutes: movement.isOpen ? null : unionMinutes(accountedWindows),
+      accountedWorkMinutes: movement.durationUnknown ? null : unionMinutes(accountedWindows),
       approvedExceptions: personExceptions,
       approvedLeaves: personLeaves,
       approvedMissions: personMissions,
@@ -403,6 +416,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       openPreviousAttendance: openPreviousAttendance ? {
         id: openPreviousAttendance.id,
         date: openPreviousAttendance.date,
+        intervalId: openPreviousAttendance.intervals.find((i: any) => !i.exitedAt && !i.exitUnknown && i.status === 'ACTIVE')?.id,
         entryTime: intervalSummary(openPreviousAttendance.intervals || []).firstEntry || openPreviousAttendance.entryTime,
         shift: null,
         notes: openPreviousAttendance.notes
@@ -1488,7 +1502,7 @@ router.put('/instant-report-types/:id', protect, securityAdmin, [
   }
 });
 
-router.get('/attendance-roster', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
+router.get('/attendance-roster', protect, attendanceDeviceManage, async (req: AuthRequest, res: Response) => {
   try {
     const targetDate = parseDayQuery(req.query.date);
     const personnel = await prisma.personnel.findMany({
@@ -1530,7 +1544,7 @@ router.get('/attendance-roster', protect, securityAdmin, async (req: AuthRequest
   }
 });
 
-router.post('/attendance-roster', protect, securityAdmin, [
+router.post('/attendance-roster', protect, attendanceDeviceManage, [
   body('personnelId').isString().trim().notEmpty(),
   body('effectiveDate').isISO8601()
 ], async (req: AuthRequest, res: Response) => {
@@ -1558,7 +1572,7 @@ router.post('/attendance-roster', protect, securityAdmin, [
   }
 });
 
-router.put('/attendance-roster/:personnelId/remove', protect, securityAdmin, [
+router.put('/attendance-roster/:personnelId/remove', protect, attendanceDeviceManage, [
   body('effectiveDate').isISO8601()
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -1762,6 +1776,7 @@ router.post('/shift-plan-slots/:id/end', protect, securityEdit, [
     const errors = validationResult(req); if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'توضیح پایان شیفت معتبر نیست.', details: errors.array() });
     const personnel = await getSelfPersonnel(req.user!.id); if (!personnel) return res.status(403).json({ success: false, error: 'دسترسی نفرات گارد لازم است.' });
     const result = await prisma.$transaction(async (tx) => {
+      await requireReviewHandover(tx, req.user!.id);
       const slot = await tx.securityShiftPlanSlot.findUnique({ where: { id: req.params.id }, include: { session: true, temporaryCoverage: true } });
       if (!slot?.session || slot.session.status !== SecurityShiftSessionStatus.ACTIVE || slot.session.personnelId !== personnel.id) throw new Error('شیفت فعال متعلق به شما پیدا نشد.');
       const activePatrol = await tx.securityPatrolSession.findFirst({ where: { sessionId: slot.session.id, status: SecurityPatrolStatus.ACTIVE } });
@@ -2129,10 +2144,11 @@ router.post('/shifts/end', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, 
 // @desc    Employee check-in
 // @route   POST /api/security/attendance/checkin
 // @access  Private/Security Workspace
-router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_CHECKIN, FEATURE_PERMISSIONS.EDIT), [
+router.post('/attendance/checkin', protect, attendanceDeviceReview, [
   body('employeeId').optional().isString().withMessage('Employee ID must be a string'),
   body('personnelId').optional().isString().withMessage('Personnel ID must be a string'),
-  body('entryTime').optional().isString().withMessage('Entry time must be a string'),
+  body('entryTime').optional().matches(/^([01]\d|2[0-3]):[0-5]\d$/).withMessage('زمان ورود معتبر نیست.'),
+  body('entryUnknown').optional().isBoolean().withMessage('وضعیت نامعلومی ورود معتبر نیست.'),
   body('date').optional().isISO8601().withMessage('Date must be ISO8601'),
   body('reason').optional().isString().withMessage('Reason must be a string'),
 ], async (req: AuthRequest, res: Response) => {
@@ -2152,14 +2168,10 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
       include: { shift: true }
     });
 
-    if (!securityPersonnel) {
-      return res.status(403).json({
-        success: false,
-        error: 'User is not authorized as security personnel'
-      });
-    }
 
-    const { entryTime, reason } = req.body;
+
+    const { entryTime, reason, entryUnknown } = req.body;
+    if (entryUnknown && !String(reason || '').trim()) return res.status(400).json({ success: false, error: 'دلیل ورود با ساعت نامعلوم الزامی است.' });
     const personnelId = String(req.body.personnelId || req.body.employeeId || '').trim();
     if (!personnelId) return res.status(400).json({ success: false, error: 'پرسنل الزامی است.' });
     const personnel = await prisma.personnel.findUnique({
@@ -2170,7 +2182,9 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
     const currentTime = entryTime || currentAttendanceTime();
     const targetDate = parseDayQuery(req.body.date);
     const nextDay = addDays(targetDate, 1);
-    const enteredAt = businessInstant(targetDate, currentTime);
+    if (entryUnknown && targetDate.getTime() !== parseDayQuery().getTime()) return res.status(400).json({ success: false, error: 'مشاهده حضور با ساعت ورود نامعلوم فقط برای امروز مجاز است؛ سابقه قبلی را اصلاح کنید.' });
+    const observedInsideAt = entryUnknown ? new Date() : null;
+    const enteredAt = entryUnknown ? null : businessInstant(targetDate, currentTime);
     const [rosterPerson] = await loadAttendancePopulation(targetDate, { personnelId: personnel.id });
     if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب گارد برای این تاریخ نیست.' });
     const scheduleMap = await loadApplicableWorkSchedules(prisma, [personnel.id], targetDate);
@@ -2193,7 +2207,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
     const openRecord = await prisma.attendanceRecord.findFirst({
       where: {
         personnelId: personnel.id,
-        intervals: { some: { status: AttendanceIntervalStatus.ACTIVE, exitedAt: null } }
+        intervals: { some: { status: AttendanceIntervalStatus.ACTIVE, exitedAt: null, exitUnknown: false } }
       },
       orderBy: { date: 'desc' },
       include: attendanceInclude
@@ -2222,7 +2236,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
     });
 
     const previousInterval = existingRecord?.intervals.filter((interval) => interval.status !== AttendanceIntervalStatus.VOIDED).at(-1);
-    if (previousInterval?.exitedAt && enteredAt < new Date(previousInterval.exitedAt)) {
+    if (previousInterval?.exitedAt && (enteredAt || observedInsideAt!) < new Date(previousInterval.exitedAt)) {
       return res.status(400).json({ success: false, error: 'زمان ورود جدید نمی‌تواند قبل از خروج قبلی باشد.' });
     }
 
@@ -2231,7 +2245,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
         data: {
           employeeId: personnel.user?.id || null,
           personnelId: personnel.id,
-          securityPersonnelId: securityPersonnel.id,
+          securityPersonnelId: securityPersonnel?.id || null,
           shiftId: null,
           date: targetDate,
           status: attendanceStatus,
@@ -2240,12 +2254,12 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
         }
       });
       await tx.attendanceInterval.create({
-        data: { attendanceRecordId: record.id, enteredAt, entryRecordedBy: req.user!.id, entryReason: String(reason || '').trim() || null }
+        data: { attendanceRecordId: record.id, enteredAt, observedInsideAt, entryRecordedBy: req.user!.id, entryReason: String(reason || '').trim() || null }
       });
       await tx.attendanceRecord.update({
         where: { id: record.id },
         data: {
-          entryTime: existingRecord?.entryTime || currentTime,
+          entryTime: existingRecord?.entryTime || (entryUnknown ? null : currentTime),
           exitTime: null,
           status: existingRecord?.delayMinutes && existingRecord.delayMinutes > 0 ? AttendanceStatus.LATE : existingRecord ? AttendanceStatus.PRESENT : attendanceStatus,
           notes: appendManualAttendanceNote(record.notes, 'ثبت دستی ورود', reason),
@@ -2254,6 +2268,7 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
           ...personnelSnapshot(personnel)
         }
       });
+      await refreshDeviceAttendance(tx, record.id);
       return record.id;
     });
     const attendanceRecord = await prisma.attendanceRecord.findUnique({ where: { id: recordId }, include: attendanceInclude });
@@ -2277,10 +2292,10 @@ router.post('/attendance/checkin', protect, requireWorkspaceAccess(WORKSPACES.SE
 // @desc    Employee check-out
 // @route   POST /api/security/attendance/checkout
 // @access  Private/Security Personnel
-router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT), requireFeatureAccess(FEATURES.SECURITY_ATTENDANCE_CHECKOUT, FEATURE_PERMISSIONS.EDIT), [
+router.post('/attendance/checkout', protect, attendanceDeviceReview, [
   body('employeeId').optional().isString().withMessage('Employee ID must be a string'),
   body('personnelId').optional().isString().withMessage('Personnel ID must be a string'),
-  body('exitTime').optional().isString().withMessage('Exit time must be a string'),
+  body('exitTime').optional().matches(/^([01]\d|2[0-3]):[0-5]\d$/).withMessage('زمان خروج معتبر نیست.'),
   body('date').optional().isISO8601().withMessage('Date must be ISO8601'),
   body('attendanceId').optional().isString().withMessage('Attendance ID must be a string'),
   body('reason').optional().isString().withMessage('Reason must be a string'),
@@ -2301,12 +2316,7 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
       include: { shift: true }
     });
 
-    if (!securityPersonnel) {
-      return res.status(403).json({
-        success: false,
-        error: 'User is not authorized as security personnel'
-      });
-    }
+
 
     const { exitTime, reason } = req.body;
     const personnelId = String(req.body.personnelId || req.body.employeeId || '').trim();
@@ -2335,22 +2345,23 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
       });
     }
 
-    const openInterval = [...attendanceRecord.intervals].reverse().find((interval) => interval.status !== AttendanceIntervalStatus.VOIDED && !interval.exitedAt);
+    const openInterval = [...attendanceRecord.intervals].reverse().find((interval) => interval.status !== AttendanceIntervalStatus.VOIDED && !interval.exitedAt && !interval.exitUnknown);
     if (!openInterval) return res.json({ success: true, message: 'برای این حضور خروج باز وجود ندارد.', data: attendanceRecord });
     const isHistoricalClose = attendanceRecord.date < parseDayQuery();
     if (isHistoricalClose && !String(reason || '').trim()) return res.status(400).json({ success: false, error: 'برای ثبت خروج روز قبل، دلیل الزامی است.' });
-    let exitedAt = businessInstant(attendanceRecord.date, currentTime);
-    if (exitedAt <= new Date(openInterval.enteredAt)) exitedAt = businessInstant(attendanceRecord.date, currentTime, true);
-    if (exitedAt <= new Date(openInterval.enteredAt)) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از زمان ورود باشد.' });
+    let exitedAt = businessInstant(targetDate, currentTime);
+    if (!openInterval.enteredAt && exitedAt <= openInterval.observedInsideAt!) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از مشاهده حضور باشد.' });
+    if (exitedAt <= (openInterval.enteredAt || openInterval.observedInsideAt!)) exitedAt = businessInstant(attendanceRecord.date, currentTime, true);
+    if (exitedAt <= (openInterval.enteredAt || openInterval.observedInsideAt!)) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از زمان ورود باشد.' });
 
     const completedPresenceMinutes = attendanceRecord.intervals.reduce((sum, interval) => {
       if (interval.status === AttendanceIntervalStatus.VOIDED) return sum;
       const intervalExit = interval.id === openInterval.id ? exitedAt : interval.exitedAt ? new Date(interval.exitedAt) : null;
-      return intervalExit ? sum + Math.max(0, Math.floor((intervalExit.getTime() - new Date(interval.enteredAt).getTime()) / 60_000)) : sum;
+      return interval.enteredAt && intervalExit ? sum + Math.max(0, Math.floor((intervalExit.getTime() - new Date(interval.enteredAt).getTime()) / 60_000)) : sum;
     }, 0);
-    await prisma.$transaction([
-      prisma.attendanceInterval.update({ where: { id: openInterval.id }, data: { exitedAt, exitRecordedBy: req.user!.id, exitReason: String(reason || '').trim() || null } }),
-      prisma.attendanceRecord.update({
+    await prisma.$transaction(async (tx) => {
+      await tx.attendanceInterval.update({ where: { id: openInterval.id }, data: { exitedAt, exitSource: "MANUAL", revision: { increment: 1 }, confirmedRevision: openInterval.entrySource === "DEVICE" ? 0 : openInterval.revision + 1, exitRecordedBy: req.user!.id, exitReason: String(reason || '').trim() || null } });
+      await tx.attendanceRecord.update({
         where: { id: attendanceRecord.id },
         data: {
           exitTime: currentTime,
@@ -2362,8 +2373,9 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
           overtimePending: false,
           notes: appendManualAttendanceNote(attendanceRecord.notes, 'ثبت دستی خروج', reason)
         }
-      })
-    ]);
+      });
+      await refreshDeviceAttendance(tx, attendanceRecord.id);
+    });
     const updatedRecord = await prisma.attendanceRecord.findUnique({ where: { id: attendanceRecord.id }, include: attendanceInclude });
 
     res.json({
@@ -2382,40 +2394,10 @@ router.post('/attendance/checkout', protect, requireWorkspaceAccess(WORKSPACES.S
   }
 });
 
-const refreshAttendanceRecordFromIntervals = async (tx: any, recordId: string) => {
-  const record = await tx.attendanceRecord.findUnique({
-    where: { id: recordId },
-    include: { intervals: { where: { status: AttendanceIntervalStatus.ACTIVE }, orderBy: { enteredAt: 'asc' } } }
-  });
-  if (!record) return;
-  const summary = intervalSummary(record.intervals);
-  const firstEntry = summary.firstEntry;
-  const finalExit = summary.isOpen ? null : summary.finalExit;
-  const delayMinutes = firstEntry && record.workScheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && record.scheduledStartTime
-    ? calculateDelayMinutes(firstEntry, record.scheduledStartTime)
-    : record.workScheduleStatus === AttendanceWorkScheduleStatus.NON_WORKING_DAY ? 0 : null;
-  const overtimeMinutes = summary.isOpen
-    ? null
-    : record.workScheduleStatus === AttendanceWorkScheduleStatus.NON_WORKING_DAY
-      ? summary.presenceMinutes
-      : finalExit && record.workScheduleStatus === AttendanceWorkScheduleStatus.WORKDAY && record.scheduledStartTime && record.scheduledEndTime
-        ? calculateScheduledOvertime(finalExit, record.scheduledStartTime, record.scheduledEndTime)
-        : null;
-  await tx.attendanceRecord.update({
-    where: { id: recordId },
-    data: {
-      entryTime: firstEntry,
-      exitTime: finalExit,
-      delayMinutes,
-      overtimeMinutes,
-      overtimePending: summary.isOpen,
-      status: firstEntry ? (delayMinutes && delayMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT) : AttendanceStatus.ABSENT
-    }
-  });
-};
+const refreshAttendanceRecordFromIntervals = refreshDeviceAttendance;
 
 // Correct a saved movement without replacing its audit history.
-router.put('/attendance/intervals/:id', protect, securityView, [
+router.put('/attendance/intervals/:id', protect, attendanceDeviceReview, [
   body('enteredAt').isISO8601().withMessage('زمان ورود معتبر الزامی است.'),
   body('exitedAt').optional({ nullable: true }).isISO8601().withMessage('زمان خروج معتبر نیست.'),
   body('reason').trim().notEmpty().withMessage('دلیل اصلاح الزامی است.')
@@ -2438,7 +2420,7 @@ router.put('/attendance/intervals/:id', protect, securityView, [
         status: AttendanceIntervalStatus.ACTIVE,
         attendanceRecord: { personnelId: interval.attendanceRecord.personnelId },
         enteredAt: { lt: overlapEnd },
-        OR: [{ exitedAt: null }, { exitedAt: { gt: enteredAt } }]
+        OR: [{ exitedAt: null, exitUnknown: false }, { exitedAt: { gt: enteredAt } }]
       }
     });
     if (conflict) return res.status(409).json({ success: false, error: 'بازه اصلاح‌شده با یک تردد فعال دیگر هم‌پوشانی دارد.' });
@@ -2446,7 +2428,7 @@ router.put('/attendance/intervals/:id', protect, securityView, [
     await prisma.$transaction(async (tx) => {
       const updated = await tx.attendanceInterval.update({
         where: { id: interval.id },
-        data: { enteredAt, exitedAt, entryReason: reason, exitReason: exitedAt ? reason : null, entryRecordedBy: req.user!.id, exitRecordedBy: exitedAt ? req.user!.id : null }
+        data: { enteredAt, observedInsideAt: null, exitedAt, exitUnknown: false, revision: { increment: 1 }, confirmedRevision: 0, confirmedAt: null, confirmedBy: null, entryReason: reason, exitReason: exitedAt ? reason : null, entryRecordedBy: req.user!.id, exitRecordedBy: exitedAt ? req.user!.id : null }
       });
       await tx.attendanceIntervalAudit.create({
         data: { intervalId: interval.id, action: 'CORRECTED', reason, beforeData: intervalAuditSnapshot(interval), afterData: intervalAuditSnapshot(updated), actorId: req.user!.id }
@@ -2462,7 +2444,7 @@ router.put('/attendance/intervals/:id', protect, securityView, [
 });
 
 // Void a saved movement; physical history remains available in the audit trail.
-router.post('/attendance/intervals/:id/void', protect, securityView, [
+router.post('/attendance/intervals/:id/void', protect, attendanceDeviceReview, [
   body('reason').trim().notEmpty().withMessage('دلیل ابطال الزامی است.')
 ], async (req: AuthRequest, res: Response) => {
   try {
@@ -2474,11 +2456,12 @@ router.post('/attendance/intervals/:id/void', protect, securityView, [
     await prisma.$transaction(async (tx) => {
       const updated = await tx.attendanceInterval.update({
         where: { id: interval.id },
-        data: { status: AttendanceIntervalStatus.VOIDED, voidReason: reason, voidedAt: new Date(), voidedBy: req.user!.id }
+        data: { status: AttendanceIntervalStatus.VOIDED, revision: { increment: 1 }, confirmedRevision: 0, voidReason: reason, voidedAt: new Date(), voidedBy: req.user!.id }
       });
       await tx.attendanceIntervalAudit.create({
         data: { intervalId: interval.id, action: 'VOIDED', reason, beforeData: intervalAuditSnapshot(interval), afterData: intervalAuditSnapshot(updated), actorId: req.user!.id }
       });
+      await tx.attendancePunch.updateMany({ where: { intervalId: interval.id }, data: { status: 'DISMISSED', reason, reviewedBy: req.user!.id, reviewedAt: new Date() } });
       await refreshAttendanceRecordFromIntervals(tx, interval.attendanceRecordId);
     });
     const record = await prisma.attendanceRecord.findUnique({ where: { id: interval.attendanceRecordId }, include: attendanceInclude });
@@ -3657,7 +3640,7 @@ const loadPersonnelAttendanceReport = async (options: PersonnelAttendanceReportO
       personnelFirstName: true, personnelLastName: true,
       personnel: { select: { firstName: true, lastName: true } },
       employee: { select: { firstName: true, lastName: true, personnelId: true } },
-      intervals: { select: { enteredAt: true, exitedAt: true, status: true }, orderBy: { enteredAt: 'asc' } },
+      intervals: { select: { enteredAt: true, exitedAt: true, status: true, exitUnknown: true, revision: true, confirmedRevision: true }, orderBy: { enteredAt: 'asc' } },
     },
     orderBy: [{ date: 'asc' }, { id: 'asc' }],
   });

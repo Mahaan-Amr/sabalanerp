@@ -91,7 +91,7 @@ test('revision refresh first preserves the original draft; storage failure keeps
   await expect.poll(() => state.loads).toBeGreaterThan(before);
   const downloads = page.getByRole('button', { name: 'دریافت نوشتهٔ محفوظ', exact: true });
   await expect(downloads).toHaveCount(8);
-  await page.getByRole('button', { name: 'کپی‌های قبلی', exact: true }).click();
+  await page.getByRole('button', { name: 'کپی‌های دیگر', exact: true }).click();
   await expect(downloads).toHaveCount(10);
   const saved = downloads.first();
   await expect(saved).toBeVisible();

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
@@ -24,8 +25,40 @@ test('native IndexedDB preserves original draft bytes across refresh, denies ano
     const snapshot = { userId: 'draft_owner_a', buildId: 'erp_retained_20261017', workflow: 'sales-contract',
       draftId: 'contract-private-qa', schemaVersion: 2, baseRevision: 7,
       payloadJson: '{"amount":"125000.25","quantity":"3.50","notes":"نوشتهٔ ثبت‌نشده"}' };
+    const legacy = { ...snapshot, workflow: 'legacy-contract', draftId: 'legacy-draft',
+      format: 'sabalan-browser-draft/v1', id: '00000000-0000-4000-8000-000000000001',
+      capturedAt: '2026-10-16T00:00:00.000Z', sha256: '' };
+    legacy.sha256 = createHash('sha256').update(JSON.stringify([legacy.format, legacy.id, legacy.capturedAt,
+      legacy.userId, legacy.buildId, legacy.workflow, legacy.draftId, legacy.schemaVersion, legacy.baseRevision, legacy.payloadJson])).digest('hex');
+    // Seed precisely the previous v1 layout before the new module opens it.
+    // Keep this old connection open during the new writer's transaction.
+    await page.evaluate(async value => {
+      const database = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('sabalan-browser-draft-archive', 1);
+        request.onupgradeneeded = () => request.result.createObjectStore('snapshots', { keyPath: 'id' })
+          .createIndex('ownerDraft', ['userId', 'workflow', 'draftId']);
+        request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+      });
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction('snapshots', 'readwrite', { durability: 'strict' });
+        transaction.oncomplete = resolve; transaction.onabort = () => reject(transaction.error);
+        transaction.objectStore('snapshots').add(value);
+      }); window.legacyDraftDatabase = database;
+    }, legacy);
     const saved = await page.evaluate(async input => window.draftArchive.archiveBrowserDraft(input, () => {}), snapshot);
     assert.match(saved.sha256, /^[a-f0-9]{64}$/);
+    const compatible = await page.evaluate(async value => {
+      const old = window.legacyDraftDatabase;
+      const original = await window.draftArchive.readBrowserDraftArchive(value.userId, value.id, () => {});
+      const rows = await new Promise((resolve, reject) => {
+        const transaction = old.transaction('snapshots', 'readonly');
+        const request = transaction.objectStore('snapshots').index('ownerDraft').getAll(IDBKeyRange.only([value.userId, value.workflow, value.draftId]));
+        transaction.oncomplete = () => resolve(request.result); transaction.onabort = () => reject(transaction.error);
+      });
+      const version = old.version; old.close();
+      return { original, rows, version };
+    }, legacy);
+    assert.equal(compatible.version, 1); assert.deepEqual(compatible.original, legacy); assert.deepEqual(compatible.rows, [legacy]);
     await page.reload();
     const values = await page.evaluate(async () => window.draftArchive.readBrowserDraftArchives('draft_owner_a', 'sales-contract', 'contract-private-qa', () => {}));
     assert.equal(values.archives.length, 1); assert.deepEqual(values.archives[0], saved); assert.equal(values.archives[0].payloadJson, snapshot.payloadJson);

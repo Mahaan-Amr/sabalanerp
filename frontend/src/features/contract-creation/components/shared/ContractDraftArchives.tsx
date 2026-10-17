@@ -65,6 +65,6 @@ export function ContractDraftArchives({ userId, draftId }: { userId: string | nu
     {archives.filter(archive => archive.userId === userId && archive.draftId === draftId).map(archive => <ErpInlineState key={archive.id} kind="stale"
       title={`نوشتهٔ پیش از تازه‌سازی (${new Date(archive.capturedAt).toLocaleString('fa-IR')}) محفوظ است؛ به‌صورت خودکار جایگزین نسخهٔ فعلی قرارداد نمی‌شود.`}
       action={{ label: 'دریافت نوشتهٔ محفوظ', onClick: () => void download(archive) }} />)}
-    {next && loadedScope === scopeKey && <ErpButton label="کپی‌های قبلی" variant="outline" disabled={pending} onClick={() => void loadMore()} />}
+    {next && loadedScope === scopeKey && <ErpButton label="کپی‌های دیگر" variant="outline" disabled={pending} onClick={() => void loadMore()} />}
   </>;
 }

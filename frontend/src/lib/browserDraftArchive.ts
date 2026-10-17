@@ -10,7 +10,7 @@ export type BrowserDraftSnapshot = {
 export type BrowserDraftArchive = BrowserDraftSnapshot & {
   format: 'sabalan-browser-draft/v1'; id: string; capturedAt: string; sha256: string;
 };
-export type BrowserDraftArchiveCursor = { capturedAt: string; id: string };
+export type BrowserDraftArchiveCursor = { id: string };
 export type BrowserDraftArchivePage = { archives: BrowserDraftArchive[]; next: BrowserDraftArchiveCursor | null };
 const databaseName = 'sabalan-browser-draft-archive';
 const storeName = 'snapshots';
@@ -37,7 +37,7 @@ async function open(): Promise<IDBDatabase> {
     const request = indexedDB.open(databaseName, 1);
     request.onupgradeneeded = () => {
       const store = request.result.createObjectStore(storeName, { keyPath: 'id' });
-      store.createIndex('ownerDraftTime', ['userId', 'workflow', 'draftId', 'capturedAt', 'id']);
+      store.createIndex('ownerDraft', ['userId', 'workflow', 'draftId']);
     };
     request.onerror = () => reject(fail());
     request.onblocked = () => { refused = true; reject(fail()); };
@@ -108,22 +108,30 @@ export async function readBrowserDraftArchives(userId: string, workflow: string,
     const transaction = database.transaction(storeName, 'readonly'), done = completed(transaction);
     const selected: BrowserDraftArchive[] = [];
     let bytes = 0, next: BrowserDraftArchiveCursor | null = null;
-    const prefix = [userId, workflow, draftId];
-    const range = IDBKeyRange.bound([...prefix, '', ''],
-      [...prefix, before?.capturedAt ?? '\uffff', before?.id ?? '\uffff'], false, Boolean(before));
-    const request = transaction.objectStore(storeName).index('ownerDraftTime').openCursor(range, 'prev');
+    const key = [userId, workflow, draftId];
+    // Preserve the original v1 index so retained readers can keep using this
+    // database. Pagination follows the immutable primary key, not timestamps.
+    // continuePrimaryKey seeks without loading every intervening payload.
+    let positioned = !before;
+    const request = transaction.objectStore(storeName).index('ownerDraft').openCursor(IDBKeyRange.only(key), 'prev');
     request.onsuccess = () => {
       const cursor = request.result; if (!cursor) return;
+      if (!positioned && String(cursor.primaryKey) >= before!.id) {
+        if (String(cursor.primaryKey) === before!.id) { positioned = true; cursor.continue(); }
+        else cursor.continuePrimaryKey(key, before!.id);
+        return;
+      }
+      positioned = true;
       const value = cursor.value as BrowserDraftArchive;
       const size = typeof value.payloadJson === 'string' ? new TextEncoder().encode(value.payloadJson).length : 0;
       if (selected.length >= 8 || (selected.length > 0 && bytes + size > 32 * 1024 * 1024)) {
-        const last = selected[selected.length - 1]; next = { capturedAt: last.capturedAt, id: last.id }; return;
+        const last = selected[selected.length - 1]; next = { id: last.id }; return;
       }
       bytes += size;
       selected.push(value); cursor.continue();
     };
     await done; assertOwner();
     const verified = await Promise.all(selected.map(value => verify(value, userId))); assertOwner();
-    return { archives: verified, next };
+    return { archives: verified.sort((left, right) => right.capturedAt.localeCompare(left.capturedAt)), next };
   } finally { database.close(); }
 }

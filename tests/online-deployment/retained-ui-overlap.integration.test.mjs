@@ -46,15 +46,18 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
         'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-release-proxy.mjs',
         'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-operation-journal.mjs',
         'tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/retained-ui-bundle.fixture.mjs',
+        'tests/online-deployment/private-ui-management.fixture.mjs', 'tests/online-deployment/private-ui-management.test.mjs',
         'tests/online-deployment/retained-ui-overlap.integration.test.mjs', 'tests/online-deployment/Dockerfile.retained-ui',
         'docker-compose.retained-ui-acceptance.yml',
       ].map(name => [name, sourceHash(name)]))};
     const reportPath = path.join(repository, 'reports/qa/retained-ui-overlap-' + operation + '.json');
     fs.writeFileSync(reportPath.replace('.json', '-intent.json'), JSON.stringify(report) + '\n', {flag: 'wx'});
-    const prior = docker(['ps', '-aq', '--filter', 'label=com.docker.compose.project=sabalanerp-local', '--filter', 'label=com.docker.compose.service=frontend-online-proxy']).trim();
-    assert.equal(prior, '', 'Inspect a prior owned diagnostic operation before replacing its service');
+    for (const service of services) {
+      const prior = docker(['ps', '-aq', '--filter', 'label=com.docker.compose.project=sabalanerp-local', '--filter', 'label=com.docker.compose.service=' + service]).trim();
+      assert.equal(prior, '', 'Inspect a prior owned diagnostic operation before replacing ' + service);
+    }
     const [base] = JSON.parse(docker(['image', 'inspect', baseImage]));
-    assert.equal(base.Id, baseImage); assert.equal(base.Config.Volumes, null);
+    assert.equal(base.Id, baseImage); assert.deepEqual(Object.keys(base.Config.Volumes ?? {}), []);
     const [helper] = JSON.parse(docker(['inspect', candidate]));
     assert.equal(helper.Image, proxyImage); assert.equal(helper.Config.Env.find(value => value === 'BACKEND_RUNTIME_ROLE=candidate'), 'BACKEND_RUNTIME_ROLE=candidate');
     const frontend = path.join(repository, 'frontend');
@@ -72,7 +75,7 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
       const [image] = JSON.parse(docker(['image', 'inspect', tag]));
       assert.equal(image.Config.Labels['io.sabalan.online-acceptance'], 'retained-ui');
       assert.deepEqual(image.RootFS.Layers.slice(0, base.RootFS.Layers.length), base.RootFS.Layers);
-      assert.equal(image.Config.Volumes, null);
+      assert.deepEqual(Object.keys(image.Config.Volumes ?? {}), []);
       builds.push({...bundle, image: image.Id, slotId: 'slot_erp_' + name, application: 'erp',
         id: bundle.buildId, actionIds: [], retiredAt: null, supportUntil: null});
     }
@@ -87,8 +90,12 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
         host: services[index], port: 3000}))};
     const bytes = Buffer.from(JSON.stringify(configuration) + '\n');
     docker(['exec', candidate, 'node', '-e',
-      "const fs=require('node:fs'),p=process.argv[1];fs.mkdirSync(p,{mode:0o700});for(const n of ['publications','operations'])fs.mkdirSync(p+'/'+n,{mode:0o700});fs.writeFileSync(p+'/configuration.json',Buffer.from(process.argv[2],'base64'),{flag:'wx',mode:0o600});",
-      privateRoot, bytes.toString('base64')]);
+      "const fs=require('node:fs'),p=process.argv[1];fs.mkdirSync(p,{mode:0o700});for(const n of ['publications','operations'])fs.mkdirSync(p+'/'+n,{mode:0o700});", privateRoot]);
+    const configurationPath = path.join(stage, 'configuration.json'); await fsp.writeFile(configurationPath, bytes, {flag: 'wx'});
+    docker(['cp', configurationPath, candidate + ':' + privateRoot + '/configuration.json']);
+    docker(['exec', candidate, 'node', '-e',
+      "const fs=require('node:fs'),c=require('node:crypto'),p=process.argv[1];fs.chmodSync(p,0o600);assert=c.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(assert!==process.argv[2])throw Error('configuration changed');const fd=fs.openSync(p,'r');fs.fsyncSync(fd);fs.closeSync(fd);",
+      privateRoot + '/configuration.json', sha(bytes)]);
     const environment = {...process.env, RETAINED_UI_OLD_IMAGE: builds[0].image, RETAINED_UI_NEW_IMAGE: builds[1].image,
       RETAINED_UI_PROXY_IMAGE: proxyImage, RETAINED_UI_SOURCE_ROOT: repository.replaceAll('\\', '/'),
       RETAINED_UI_FIXTURE_ROOT: privateRoot, RETAINED_UI_CONFIGURATION_SHA256: sha(bytes)};
@@ -123,11 +130,23 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
     });
     try {
       assert.equal((await page.goto(origin + '/', {waitUntil: 'networkidle'})).status(), 200);
+      // A second old tab remains on the actual old Next runtime and performs
+      // genuine client navigation while new documents go to the new image.
+      const oldNavigator = await browser.newPage(), nativeAfterSwitch = [];
+      assert.equal((await oldNavigator.goto(origin + '/', {waitUntil: 'networkidle'})).status(), 200);
+      oldNavigator.on('request', request => {
+        if (request.headers().rsc === '1') nativeAfterSwitch.push({path: new URL(request.url()).pathname, id: request.headers()['x-deployment-id']});
+      });
       await page.locator('a[href="/login"]').first().click(); await page.waitForURL('**/login');
       await page.locator('input[name="identifier"]').fill('draft-kept-during-switch');
       await page.locator('input[name="password"]').fill('diagnostic-not-a-real-password');
       const navigationCount = await page.evaluate(() => performance.getEntriesByType('navigation').length);
       assert.equal(control('next').published.generation, 2);
+      await oldNavigator.locator('a[href="/about"]').first().click();
+      await oldNavigator.waitForURL('**/about'); await oldNavigator.waitForLoadState('networkidle');
+      assert.ok(nativeAfterSwitch.some(request => request.path === '/about' && request.id === builds[0].id));
+      assert.ok(nativeAfterSwitch.every(request => request.id === builds[0].id));
+      await oldNavigator.close();
       const next = await browser.newPage();
       const nextAssets = [];
       next.on('request', request => {const url = new URL(request.url()); if (url.pathname.startsWith('/_next/static/')) nextAssets.push(url.searchParams.get('dpl'));});
@@ -137,12 +156,6 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
       assert.equal(await page.locator('input[name="identifier"]').inputValue(), 'draft-kept-during-switch');
       assert.equal(await page.locator('input[name="password"]').inputValue(), 'diagnostic-not-a-real-password');
       assert.equal(await page.evaluate(() => performance.getEntriesByType('navigation').length), navigationCount);
-      // The identity header is emitted by the real retained Next browser runtime.
-      const rsc = await page.evaluate(async () => {
-        const response = await fetch('/about?_rsc=retained-overlap', {headers: {rsc: '1', 'x-deployment-id': window.next.version ? document.querySelector('script[src*="dpl="]').src.split('dpl=')[1].split('&')[0] : ''}});
-        return {status: response.status, type: response.headers.get('content-type'), cache: response.headers.get('cache-control')};
-      });
-      assert.equal(rsc.status, 200); assert.match(rsc.type, /text\/x-component/); assert.equal(rsc.cache, 'no-store, private');
       // Restart only after exact observed transport completion. The immutable
       // publication survives; no replacement pointer or caller PASS is used.
       assert.equal(control('drain').drained, true);
@@ -174,7 +187,7 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
       await page.locator('a[href="/about"]').first().click(); await page.waitForURL('**/about'); await page.waitForLoadState('networkidle');
       assert.ok(requests.some(request => request.kind === 'rsc' && request.path === '/about' && request.id === builds[0].id));
       assert.ok(requests.every(request => request.id === builds[0].id)); assert.deepEqual(failures, []);
-      report.results = {realOldNewBrowserIdentity: true, originalOpenFormPreserved: true, realRetainedRsc: true,
+      report.results = {realOldNewBrowserIdentity: true, originalOpenFormPreserved: true, realRetainedRsc: nativeAfterSwitch,
         proxyRestartGeneration: 2, exactOldAssetHash: true, noCrossSlotRetryOnFailure: true,
         rollbackGeneration: 3, ambiguityRetained: pending.map(({id, buildId, method}) => ({id, buildId, method})),
         measuredSupportPromises: control('status').publication.registry.builds.map(({id, retiredAt, supportUntil}) => ({id, retiredAt, supportUntil})),
@@ -194,3 +207,4 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
       console.log(JSON.stringify({operation, report: path.basename(reportPath), results: report.results, builds: report.builds}));
     } finally {await browser.close();}
   });
+

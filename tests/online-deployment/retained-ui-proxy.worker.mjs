@@ -6,11 +6,11 @@ import {openSync, closeSync, fstatSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {createHash, randomBytes} from 'node:crypto';
 import path from 'node:path';
-import net from 'node:net';
 import {once} from 'node:events';
 import {BrowserRoutingStore, BrowserRoutingPublicationLock} from '../../deploy/scripts/browser-routing-store.mjs';
 import {BrowserOperationJournal} from '../../deploy/scripts/browser-operation-journal.mjs';
 import {createBrowserReleaseProxy} from '../../deploy/scripts/browser-release-proxy.mjs';
+import {privateUiManagementServer} from './private-ui-management.fixture.mjs';
 
 const root = process.env.RETAINED_UI_FIXTURE_ROOT;
 assert.match(root ?? '', /^\/app\/online-runtime-acceptance\/retained-ui-[a-f0-9]{32}$/);
@@ -44,15 +44,7 @@ const proxy = createBrowserReleaseProxy({loadRegistry: () => store.read(), slotE
 const managementPath = path.join(root, 'management.sock');
 try {await fs.lstat(managementPath); throw Error('FIXTURE_MANAGEMENT_SOCKET_ALREADY_EXISTS');}
 catch (failure) {if (failure.code !== 'ENOENT') throw failure;}
-const management = net.createServer(socket => {
-  let buffer = '', running = false;
-  socket.on('data', bytes => {
-    buffer += bytes.toString('utf8');
-    if (buffer.length > 128 || running) {socket.destroy(); return;}
-    if (!buffer.endsWith('\n')) return;
-    running = true;
-    (async () => {
-      const command = buffer.trim();
+const management = privateUiManagementServer(async command => {
       if (command === 'status') return {publication: await store.readPublication(), proxy: proxy.status(), pending: await journal.pending()};
       if (command === 'drain') {
         proxy.beginDrain(); await proxy.assertDrained(); return {drained: true};
@@ -69,9 +61,6 @@ const management = net.createServer(socket => {
       if (!next) {next = structuredClone(configuration.nextBuild); registry.builds.push(next);}
       next.retiredAt = null; next.supportUntil = null; registry.current.erp = id; registry.generation++;
       return {published: await store.publish(registry, current.publicationSha256)};
-    })().then(value => socket.end(JSON.stringify({ok: true, value}) + '\n'), failure =>
-      socket.end(JSON.stringify({ok: false, error: failure.code || failure.message}) + '\n'));
-  });
 });
 management.listen(managementPath); await once(management, 'listening'); await fs.chmod(managementPath, 0o600);
 const socketIdentity = await fs.lstat(managementPath);

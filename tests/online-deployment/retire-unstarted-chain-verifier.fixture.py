@@ -28,6 +28,12 @@ VOLUME = 'cb826b03378fc05420bd459b96bdb3f5d56250f977659f954b992b8852265d18'
 def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def stable_inspection(value):
+    result = json.loads(json.dumps(value))
+    result['Mounts'] = sorted(result['Mounts'], key=lambda row: row['Destination'])
+    return result
+
+
 def main():
     assert os.getuid() == 0 and ROOT.resolve(strict=True) == ROOT
     assert ROOT.stat().st_uid == 0 and not ROOT.stat().st_mode & 0o077
@@ -102,7 +108,7 @@ def main():
     storage = os.open('/run/lock/sabalan-backup-storage.lock', os.O_RDWR | os.O_NOFOLLOW)
     fcntl.flock(storage, fcntl.LOCK_EX | fcntl.LOCK_NB)
     for number in [signal.SIGTERM, signal.SIGINT, signal.SIGHUP]: signal.signal(number, owner.defer_cancellation)
-    assert json.loads(owner.output(['docker', 'inspect', CONTAINER]))[0] == container
+    assert stable_inspection(json.loads(owner.output(['docker', 'inspect', CONTAINER]))[0]) == stable_inspection(container)
     owner.state('EXACT_UNSTARTED_VERIFIER_RETIREMENT_INTENT', proof=proof)
     owner.mutate_host(['docker', 'rm', CONTAINER], 60, prefix + '-v2-unstarted-container-retire')
     assert not owner.output(['docker', 'ps', '-aq', '--filter', 'volume=' + VOLUME]).strip()

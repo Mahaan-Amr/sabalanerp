@@ -8,6 +8,7 @@ import test from 'node:test';
 
 const { Client } = createRequire(import.meta.url)('pg');
 const root = path.resolve(import.meta.dirname, '../..');
+const backendDist = process.env.ONLINE_ACCEPTANCE_BACKEND_DIST || path.join(root, 'backend/dist');
 const canonical = process.env.SABALAN_LOCAL_REPOSITORY_ROOT;
 const source = process.env.ONLINE_DEPLOYMENT_TEST_DATABASE_URL;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -107,15 +108,15 @@ test('the actual protected bridge requires native ownership and atomically appli
         remoteVerified: true, restoreVerified: true, manifestReadable: true, checksum: 'a'.repeat(64), createdAt: new Date().toISOString() };
       // Private authority-state fixture, never a claim that a real recovery
       // archive or production deployment was verified by these test flags.
-      const files = Object.fromEntries(['protectedBridgeMigrations', 'runtimeControlOwnership'].map(name =>
-        ['dist/services/' + name + '.js', fs.readFileSync(path.join(root, 'backend/dist/services', name + '.js'))]));
-      files['dist/lib/prisma.js'] = fs.readFileSync(path.join(root, 'backend/dist/lib/prisma.js'));
-      files['dist/scripts/deployment-owned-migrations.js'] = fs.readFileSync(path.join(root, 'backend/dist/scripts/deployment-owned-migrations.js'));
+      const files = Object.fromEntries(['protectedBridgeMigrations', 'runtimeControlOwnership', 'runtimeNativeAuthority'].map(name =>
+        ['dist/services/' + name + '.js', fs.readFileSync(path.join(backendDist, 'services', name + '.js'))]));
+      files['dist/lib/prisma.js'] = fs.readFileSync(path.join(backendDist, 'lib/prisma.js'));
+      files['dist/scripts/deployment-owned-migrations.js'] = fs.readFileSync(path.join(backendDist, 'scripts/deployment-owned-migrations.js'));
       // Freeze the actual control command and its complete local module
       // closure; no substitute bootstrap/adoption implementation is tested.
       const collect = relative => {
         if (files[relative]) return;
-        const bytes = fs.readFileSync(path.join(root, 'backend', relative)); files[relative] = bytes;
+        const bytes = fs.readFileSync(path.join(backendDist, relative.slice('dist/'.length))); files[relative] = bytes;
         if (!relative.endsWith('.js')) return;
         for (const match of bytes.toString().matchAll(/require\(["'](\.[^"']+)["']\)/g)) {
           let dependency = path.posix.normalize(path.posix.join(path.posix.dirname(relative), match[1]));
@@ -126,7 +127,7 @@ test('the actual protected bridge requires native ownership and atomically appli
       collect('dist/scripts/deployment-control.js');
       files['prisma/schema.prisma'] = fs.readFileSync(path.join(root, 'backend/prisma/schema.prisma'));
       files['prisma/migrations/migration_lock.toml'] = fs.readFileSync(path.join(directory, 'migration_lock.toml'));
-      for (const name of ['protected-bootstrap-owner.py', 'protected-bootstrap-state.py', 'with-backend-control-ownership.sh']) {
+      for (const name of ['protected-bootstrap-owner.py', 'protected-bootstrap-state.py', 'backend-runtime-owner.py', 'with-backend-control-ownership.sh']) {
         files['scripts/' + name] = fs.readFileSync(path.join(root, 'deploy/scripts', name));
       }
       files['worker.cjs'] = fs.readFileSync(path.join(root, 'tests/online-deployment/protected-bridge.worker.cjs'));

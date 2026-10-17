@@ -25,6 +25,7 @@ SESSION_PREPARED=0
 MAINTENANCE_ACTIVE=0
 FINISHED=0
 DRAINED_EARLY=0
+NATIVE_RUNTIME_CLOSURE_REQUIRED=0
 DB_LEASE_ACQUIRED=0
 PUBLIC_TRAFFIC_OPEN=0
 ROLLBACK_ALREADY_ATTEMPTED=0
@@ -60,6 +61,7 @@ run_backend() {
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
+      -e "BACKEND_RUNTIME_ROLE=control" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_MODE=${DEPLOYMENT_MODE}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
@@ -94,6 +96,7 @@ run_backend_timed() {
     DATABASE_APPLICATION_NAME=sabalanerp-deployment \
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
+      -e "BACKEND_RUNTIME_ROLE=control" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_MODE=${DEPLOYMENT_MODE}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
@@ -201,10 +204,30 @@ verify_public_maintenance() {
   done
 }
 
+assert_native_runtime_closed() {
+  # Stream the frozen operations bundle's read-only checker, so configuration
+  # mode can inspect an older image without requiring a newly built executable.
+  # FD9 excludes every cooperating runtime/control owner during the check.
+  run_backend sh -c '
+    set -eu
+    umask 077
+    coordination="${RECOVERY_COORDINATION_DIR:-/app/recovery-coordination}"
+    case "$coordination" in /*) ;; *) exit 64 ;; esac
+    lock="$coordination/deployment-runtime-control.lock"
+    [ ! -L "$lock" ] && { [ ! -e "$lock" ] || [ -f "$lock" ]; } || exit 64
+    exec 9>>"$lock"
+    flock --nonblock 9 || exit 75
+    export BACKEND_CONTROL_LOCK_FD=9 BACKEND_CONTROL_LOCK_FILE="$lock"
+    exec python3 - --assert-closed
+  ' < "${OPERATIONS_ROOT}/deploy/scripts/backend-runtime-owner.py"
+}
+
 drain_current_services() {
   old_backend_container="$(compose ps -q backend)"
   old_backend_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${old_backend_container}")"
-  compose stop -t 30 frontend backend inquiry
+  NATIVE_RUNTIME_CLOSURE_REQUIRED=1
+  compose stop -t 300 frontend backend inquiry
+  assert_native_runtime_closed || return 1
   remaining_old_sessions="$(compose exec -T postgres sh -c "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM pg_stat_activity WHERE client_addr = '${old_backend_ip}'::inet\"")"
   [ "${remaining_old_sessions}" = "0" ] || { echo "The previous backend retained ${remaining_old_sessions} database sessions after drain." >&2; return 1; }
   utilization="$(compose exec -T postgres sh -c 'psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT round(100.0 * count(*) / current_setting('"'"'max_connections'"'"')::int, 2) FROM pg_stat_activity"')"
@@ -217,7 +240,9 @@ drain_release_for_rollback() {
   if [ -n "${rollback_backend_container}" ]; then
     rollback_backend_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${rollback_backend_container}")"
   fi
-  compose stop -t 30 frontend backend inquiry
+  NATIVE_RUNTIME_CLOSURE_REQUIRED=1
+  compose stop -t 300 frontend backend inquiry
+  assert_native_runtime_closed || return 1
   if [ -n "${rollback_backend_ip}" ]; then
     rollback_sessions="$(compose exec -T postgres sh -c "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM pg_stat_activity WHERE client_addr = '${rollback_backend_ip}'::inet\"")"
     [ "${rollback_sessions}" = "0" ] || { echo "The failed release retained ${rollback_sessions} database sessions; rollback promotion is unsafe." >&2; return 1; }
@@ -374,7 +399,8 @@ recover_failure() {
     control maintenance-on || true
     MAINTENANCE_ACTIVE=1
     switch_to_previous_images
-    if start_release_services 300 \
+    if { [ "${NATIVE_RUNTIME_CLOSURE_REQUIRED}" -eq 0 ] || assert_native_runtime_closed; } \
+      && start_release_services 300 \
       && DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js; then
       control maintenance-off || true
       MAINTENANCE_ACTIVE=0

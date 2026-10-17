@@ -169,6 +169,7 @@ services:
     profiles: ["deployment"]
     restart: "no"
     environment:
+      BACKEND_RUNTIME_ROLE: control
       DEPLOYMENT_LOCAL_ROLLBACK_KEY_FILE: /run/deployment-secrets/local-rollback-key
       DEPLOYMENT_REMOTE_RECOVERY_PUBLIC_KEY_FILE: /run/deployment-secrets/remote-recovery-public.pem
       DEPLOYMENT_REMOTE_MOUNT: /app/deployment-remote

@@ -1,0 +1,49 @@
+TAP version 13
+# TAP version 13
+# \# Subtest: actual PostgreSQL ownership and SQLite adoption preserve existing prices, identities and password hashes
+# ok 1 - actual PostgreSQL ownership and SQLite adoption preserve existing prices, identities and password hashes
+#   ---
+#   duration_ms: 844.698376
+#   type: 'test'
+#   ...
+# \# Subtest: SQLite contention, unknown schema and missing/replaced files fail without schema repair or account bootstrap
+# ok 2 - SQLite contention, unknown schema and missing/replaced files fail without schema repair or account bootstrap
+#   ---
+#   duration_ms: 1491.000983
+#   type: 'test'
+#   ...
+# \# Subtest: complete typed business hashes distinguish text after NUL and close floating-point values
+# ok 3 - complete typed business hashes distinguish text after NUL and close floating-point values
+#   ---
+#   duration_ms: 263.14225
+#   type: 'test'
+#   ...
+# \# Subtest: a fenced restore owner adopts its private pre-adoption stage before the new read-only startup, leaving source data intact
+# ok 4 - a fenced restore owner adopts its private pre-adoption stage before the new read-only startup, leaving source data intact
+#   ---
+#   duration_ms: 2255.118269
+#   type: 'test'
+#   ...
+# 1..4
+# \# tests 4
+# \# suites 0
+# \# pass 4
+# \# fail 0
+# \# cancelled 0
+# \# skipped 0
+# \# todo 0
+# \# duration_ms 5056.099331
+# Subtest: owned Inquiry migration and restart admission on actual existing-project PostgreSQL/SQLite
+ok 1 - owned Inquiry migration and restart admission on actual existing-project PostgreSQL/SQLite
+  ---
+  duration_ms: 53679.6548
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 55120.2298

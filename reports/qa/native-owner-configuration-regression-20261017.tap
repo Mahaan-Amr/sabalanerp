@@ -1,0 +1,75 @@
+TAP version 13
+# Subtest: existing release preserves running code identity and binds all three application images
+ok 1 - existing release preserves running code identity and binds all three application images
+  ---
+  duration_ms: 2.7297
+  ...
+# Subtest: existing release refuses incomplete identity, mutable images and unhealthy supporting services
+ok 2 - existing release refuses incomplete identity, mutable images and unhealthy supporting services
+  ---
+  duration_ms: 1.2886
+  ...
+# Subtest: configuration is checkpoint-owned, changes only workstation registration, and restores exact previous bytes
+ok 3 - configuration is checkpoint-owned, changes only workstation registration, and restores exact previous bytes
+  ---
+  duration_ms: 44.462
+  ...
+# Subtest: recovery fails closed on concurrent environment edits or modified protected snapshot
+ok 4 - recovery fails closed on concurrent environment edits or modified protected snapshot
+  ---
+  duration_ms: 21.2864
+  ...
+# Subtest: interruption recovery binds its session and forbids rollback once traffic may open
+ok 5 - interruption recovery binds its session and forbids rollback once traffic may open
+  ---
+  duration_ms: 26.778
+  ...
+# Subtest: provisioning rejects unsupported fields, injection and overwriting an existing workstation
+ok 6 - provisioning rejects unsupported fields, injection and overwriting an existing workstation
+  ---
+  duration_ms: 4.0728
+  ...
+# Subtest: configuration release retains gates and recovers failure at storage without source fetch/build
+ok 7 - configuration release retains gates and recovers failure at storage without source fetch/build
+  ---
+  duration_ms: 1073.1074
+  ...
+# Subtest: configuration release retains gates and recovers failure at preflight without source fetch/build
+ok 8 - configuration release retains gates and recovers failure at preflight without source fetch/build
+  ---
+  duration_ms: 4659.1389
+  ...
+# Subtest: configuration release retains gates and recovers failure at native-closure without source fetch/build
+ok 9 - configuration release retains gates and recovers failure at native-closure without source fetch/build
+  ---
+  duration_ms: 7349.3076
+  ...
+# Subtest: configuration release retains gates and recovers failure at checkpoint without source fetch/build
+ok 10 - configuration release retains gates and recovers failure at checkpoint without source fetch/build
+  ---
+  duration_ms: 8986.0571
+  ...
+# Subtest: configuration release retains gates and recovers failure at after-mutation without source fetch/build
+ok 11 - configuration release retains gates and recovers failure at after-mutation without source fetch/build
+  ---
+  duration_ms: 9488.4736
+  ...
+# Subtest: configuration release retains gates and recovers failure at success without source fetch/build
+ok 12 - configuration release retains gates and recovers failure at success without source fetch/build
+  ---
+  duration_ms: 10976.1083
+  ...
+# Subtest: configuration uses the same lease, checkpoint, migration, rollback and release gates
+ok 13 - configuration uses the same lease, checkpoint, migration, rollback and release gates
+  ---
+  duration_ms: 0.6428
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 42756.2864

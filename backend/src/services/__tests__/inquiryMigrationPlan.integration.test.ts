@@ -21,7 +21,7 @@ test('owned Inquiry migration and restart admission on actual existing-project P
       sourceDatabaseUrl:process.env.ONLINE_DEPLOYMENT_TEST_DATABASE_URL!,migrateEmptySchema:true});
     try{
       const files:Record<string,string>={};
-      for(const service of ['inquiryMigrationPlan','deploymentMaintenance','runtimeControlOwnership','recoveryCrypto','deploymentRestoreEvidence'])files[`services/${service}.js`]=ts.transpileModule(
+      for(const service of ['inquiryMigrationPlan','deploymentMaintenance','runtimeControlOwnership','runtimeNativeAuthority','recoveryCrypto','deploymentRestoreEvidence'])files[`services/${service}.js`]=ts.transpileModule(
         fs.readFileSync(path.join(root,`backend/src/services/${service}.ts`),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,
           target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText;
       files['services/inquiryBaseline.json']=fs.readFileSync(path.join(root,'backend/src/services/inquiryBaseline.json'),'utf8');
@@ -29,6 +29,7 @@ test('owned Inquiry migration and restart admission on actual existing-project P
       files['verify-inquiry-database.cjs']=fs.readFileSync(path.join(root,'deploy/scripts/verify-inquiry-database.cjs'),'utf8');
       files['with-backend-control-ownership.sh']=fs.readFileSync(path.join(root,'deploy/scripts/with-backend-control-ownership.sh'),'utf8');
       files['protected-bootstrap-state.py']=fs.readFileSync(path.join(root,'deploy/scripts/protected-bootstrap-state.py'),'utf8');
+      files['backend-runtime-owner.py']=fs.readFileSync(path.join(root,'deploy/scripts/backend-runtime-owner.py'),'utf8');
       files['inquiry-migration.fixture.cjs']=fs.readFileSync(path.join(root,'tests/online-deployment/inquiry-migration.fixture.cjs'),'utf8');
       const url=new URL(temporary.databaseUrl);url.hostname='postgres';url.port='5432';
       url.searchParams.set('connection_limit','2');url.searchParams.set('pool_timeout','5');

@@ -117,7 +117,7 @@ test('provisioning rejects unsupported fields, injection and overwriting an exis
   } finally { dispose(f); }
 });
 
-for (const failure of ['storage', 'preflight', 'checkpoint', 'after-mutation', 'success']) test(`configuration release retains gates and recovers failure at ${failure} without source fetch/build`, () => {
+for (const failure of ['storage', 'preflight', 'native-closure', 'checkpoint', 'after-mutation', 'success']) test(`configuration release retains gates and recovers failure at ${failure} without source fetch/build`, () => {
   const f = fixture();
   let originalFailure;
   try {
@@ -146,6 +146,7 @@ else if(a.includes('dist/scripts/deployment-performance-identity.js')){fs.writeF
 else if(a.includes('dist/scripts/validate-production-environment.js')){if(process.env.TEST_FAILURE==='preflight')process.exit(42);}
 else if(a.includes('dist/scripts/deployment-control.js')){const c=a[a.indexOf('dist/scripts/deployment-control.js')+1];if(c==='prepare'){fs.writeFileSync(session,JSON.stringify({phase:'PREFLIGHT',leaseToken:'fixture-lease',rollbackPerformanceEnvironment:Object.fromEntries(records[0].Config.Env.filter(v=>v.startsWith('PERFORMANCE_')).map(v=>[v.split('=')[0],v.slice(v.indexOf('=')+1)]))}));}else if(c==='acquire'||c==='transition'){const s=JSON.parse(fs.readFileSync(session));s.phase=c==='acquire'?'LEASE_ACQUIRED':env('DEPLOYMENT_PHASE');fs.writeFileSync(session,JSON.stringify(s));}else if(c==='finish'||c==='cancel-preflight'){fs.rmSync(session,{force:true});}}
 else if(a.includes('dist/scripts/deployment-checkpoint.js')){if(process.env.TEST_FAILURE==='checkpoint')process.exit(43);}
+else if(a.includes('sh')&&a.includes('-c')&&a.at(-1).includes('exec python3 - --assert-closed')){if(process.env.TEST_FAILURE==='native-closure')process.exit(46);}
 else if(a.includes('node_modules/prisma/build/index.js')&&a.includes('status')){if(process.env.TEST_FAILURE==='after-mutation')process.exit(44);}
 else if(a.includes('exec')){const text=a.at(-1);if(text.includes('pg_sleep(21600)')){fs.writeFileSync(path.join(process.env.DEPLOYMENT_REPO_ROOT,'fixture-advisory.pid'),String(process.pid));setInterval(()=>{},1000);}else if(text.includes('pg_locks'))console.log('1');else if(text.includes('pg_stat_activity WHERE client_addr'))console.log('0');else if(text.includes('round(100.0'))console.log('20');else if(text.includes('pg_database_size'))console.log('1000000');else if(text.includes('df -Pk'))console.log('6000000');}
 else if(a.includes('up')||a.includes('stop')||a.includes('dist/scripts/dry-run-contract-product-graph-migration.js')||a.includes('dist/scripts/audit-hr-onboarding-task-retirement.js')||a.includes('dist/scripts/migrate-all-contract-product-graphs.js')||a.includes('dist/scripts/reconcile-contract-financial-evidence.js')||a.includes('dist/scripts/deployment-drill-preflight.js')||a.includes('dist/scripts/deployment-notify.js')||a.includes('dist/scripts/deployment-gates.js')||a.includes('dist/scripts/deployment-rollback.js')||a.includes('dist/scripts/deployment-finalize-recovery.js')){}
@@ -162,11 +163,11 @@ else{process.exit(99);}`);
       encoding: 'utf8', timeout: 120000,
       env: { ...process.env, TEST_BIN: shellBin, TEST_SCRIPT: path.join(repository, 'deploy/scripts/deploy.sh').replaceAll('\\', '/'), TEST_ENV: f.environment.replaceAll('\\', '/'), DEPLOYMENT_MODE: 'configuration', DEPLOYMENT_REPO_ROOT: f.root.replaceAll('\\', '/'), DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE: f.provisioning.replaceAll('\\', '/'), TEST_LOG: log, TEST_GIT_LOG: path.join(f.root, 'git.log'), TEST_CONTAINERS: recordsFile, TEST_REPORTS: reports, TEST_FAILURE: failure },
     });
-    assert.equal(result.status, { storage: 45, preflight: 42, checkpoint: 43, 'after-mutation': 44, success: 0 }[failure], `${result.stdout}\n${result.stderr}`);
+    assert.equal(result.status, { storage: 45, preflight: 42, 'native-closure': 1, checkpoint: 43, 'after-mutation': 44, success: 0 }[failure], `${result.stdout}\n${result.stderr}`);
     const commands = fs.readFileSync(log, 'utf8');
     assert.ok(!commands.includes('"build"'));
     assert.ok(commands.includes('storage-preflight'));
-    assert.equal(commands.includes('deployment-checkpoint.js'), !['storage', 'preflight'].includes(failure));
+    assert.equal(commands.includes('deployment-checkpoint.js'), !['storage', 'preflight', 'native-closure'].includes(failure));
     assert.equal(commands.includes('node_modules/prisma/build/index.js'), ['after-mutation', 'success'].includes(failure));
     assert.ok(!commands.includes('db:migrate:deploy'));
     assert.ok(!commands.includes('deployment-owned-migrations.js'), 'an existing configuration image must not need the new bridge executable');
@@ -174,7 +175,13 @@ else{process.exit(99);}`);
     if (failure === 'after-mutation') assert.ok(commands.includes('deployment-rollback.js'));
     assert.ok(!/fetch|pull|checkout/.test(fs.readFileSync(path.join(f.root, 'git.log'), 'utf8')));
     if (failure === 'success') { assert.ok(fs.readFileSync(f.environment, 'utf8').includes('LAPTOP-01')); assert.ok(!commands.includes('deployment-rollback.js')); } else assert.equal(fs.readFileSync(f.environment, 'utf8'), before);
-    assert.ok(!fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')));
+    if (failure === 'native-closure') {
+      assert.ok(fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')), 'uncertain native work keeps recovery evidence');
+      assert.ok(!commands.includes('maintenance-off'), 'failure before mutation cannot reopen an orphan runtime');
+      assert.ok(!commands.includes('deployment-rollback.js'), 'uncertain native work cannot restore older data');
+      const rows = commands.trim().split(/\r?\n/).map(line => JSON.parse(line));
+      assert.ok(!rows.some(row => row.includes('up') && row.includes('backend')), 'uncertain native work cannot start the prior application');
+    } else assert.ok(!fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')));
     assert.ok(!`${result.stdout}${result.stderr}`.includes(key));
   } catch (error) { originalFailure = error; throw error; }
   finally { try { dispose(f); } catch (error) { if (!originalFailure) throw error; } }

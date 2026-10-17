@@ -25,4 +25,8 @@ export BACKEND_CONTROL_LOCK_FD=9
 export BACKEND_CONTROL_LOCK_FILE="$lock"
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 python3 "$script_dir/protected-bootstrap-state.py"
-exec "$@"
+if [ "${BACKEND_RUNTIME_ROLE:-standalone}" = control ]; then
+  python3 "$script_dir/backend-runtime-owner.py" --assert-closed
+  exec "$@"
+fi
+exec python3 "$script_dir/backend-runtime-owner.py" "$@"

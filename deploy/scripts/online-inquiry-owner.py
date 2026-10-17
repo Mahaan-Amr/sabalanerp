@@ -12,6 +12,7 @@ import hashlib
 import importlib.util
 import os
 from pathlib import Path
+import re
 import signal
 import stat
 import subprocess
@@ -36,8 +37,13 @@ def helper(name):
 
 def sqlite_identity():
     url = os.environ.get('DATABASE_URL', '')
-    require(url.startswith('file:/') and not any(character in url for character in ['?', '#', '%', '\\', '\x00']))
-    file = url[5:]
+    require(url.startswith('file:/') and not any(character in url for character in ['#', '%', '\\', '\x00']))
+    source, separator, query = url.partition('?')
+    # Preserve the repository's explicit bounded pool configuration; reject
+    # SQLite URI options that change file ownership or writable-file semantics.
+    parameters = re.fullmatch(r'connection_limit=([1-9][0-9]*)&pool_timeout=([1-9][0-9]*)', query)
+    require(separator and parameters and int(parameters[1]) <= 16 and int(parameters[2]) <= 120)
+    file = source[5:]
     require(os.path.normpath(file) == file and os.path.realpath(file) == file)
     parent = os.lstat(str(Path(file).parent))
     require(stat.S_ISDIR(parent.st_mode) and parent.st_uid == os.getuid() and not parent.st_mode & 0o022)
@@ -47,7 +53,8 @@ def sqlite_identity():
         require(stat.S_ISREG(value.st_mode) and value.st_nlink == 1 and value.st_uid == os.getuid()
                 and not value.st_mode & 0o022 and (value.st_dev, value.st_ino) == (named.st_dev, named.st_ino)
                 and os.read(fd, 16) == b'SQLite format 3\x00')
-        return dict(file=file, device=str(value.st_dev), inode=str(value.st_ino), ownerUid=value.st_uid)
+        return dict(file=file, device=str(value.st_dev), inode=str(value.st_ino), ownerUid=value.st_uid,
+                    databaseUrlSha256=hashlib.sha256(url.encode('utf8')).hexdigest())
     finally:
         os.close(fd)
 
@@ -122,7 +129,7 @@ def run():
         birth = dict(pid=os.getpid(), bootId=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
                      pidNamespace=os.readlink('/proc/self/ns/pid'),
                      startTicks=Path('/proc/self/stat').read_text().rsplit(') ', 1)[1].split()[19])
-        record = dict(format='sabalan-inquiry-native/v1', phase='ACTIVE', guardian=birth,
+        record = dict(format='sabalan-inquiry-native/v2', phase='ACTIVE', guardian=birth,
                       onlineScope=loaded, onlineLocks=locks, sqlite=database,
                       lock=dict(device=str(control.st_dev), inode=str(control.st_ino)),
                       commandSha256=hashlib.sha256(common.encode(sys.argv[1:])).hexdigest())

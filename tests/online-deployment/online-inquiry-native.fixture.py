@@ -1,5 +1,6 @@
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -40,7 +41,7 @@ def execute(name):
     environment.update(BACKEND_RUNTIME_ROLE='serving', BACKEND_ONLINE_SCOPE_FILE=scope['file'],
                        BACKEND_ONLINE_SCOPE_SHA256=scope['sha256'],
                        RECOVERY_COORDINATION_DIR=str(root / 'coordination'),
-                       DATABASE_URL='file:' + str(root / 'inquiry.db'))
+                       DATABASE_URL='file:' + str(root / 'inquiry.db') + '?connection_limit=2&pool_timeout=5')
     command = ['/usr/bin/python3', '-I', '-B', str(root / 'online-inquiry-owner.py'),
                '/usr/local/bin/node', str(root / ('prisma-worker.cjs' if name == 'prisma-actions' else 'inquiry-worker.cjs')), str(root), name]
     return subprocess.Popen(command, env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -49,13 +50,39 @@ def execute(name):
 with sqlite3.connect(root / 'inquiry.db') as database:
     database.execute('CREATE TABLE native_probes(id TEXT PRIMARY KEY, amount TEXT NOT NULL, quantity TEXT NOT NULL)')
 os.chmod(root / 'inquiry.db', 0o600)
+spec = importlib.util.spec_from_file_location('inquiry_sqlite_input', root / 'online-inquiry-owner.py')
+owner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(owner)
+original_url = os.environ.get('DATABASE_URL')
+try:
+    valid = 'file:' + str(root / 'inquiry.db') + '?connection_limit=2&pool_timeout=5'
+    os.environ['DATABASE_URL'] = valid
+    identity = owner.sqlite_identity()
+    assert identity['file'] == str(root / 'inquiry.db')
+    assert identity['databaseUrlSha256'] == hashlib.sha256(valid.encode()).hexdigest()
+    for query in ['', '?connection_limit=0&pool_timeout=5', '?connection_limit=17&pool_timeout=5',
+                  '?connection_limit=2&pool_timeout=121', '?connection_limit=02&pool_timeout=5',
+                  '?pool_timeout=5&connection_limit=2', '?connection_limit=2&pool_timeout=5&mode=ro',
+                  '?connection_limit=2&pool_timeout=5&pool_timeout=5', '?connection_limit=2&pool_timeout=5#alias']:
+        os.environ['DATABASE_URL'] = 'file:' + str(root / 'inquiry.db') + query
+        try:
+            owner.sqlite_identity()
+        except RuntimeError as error:
+            assert str(error) == 'INQUIRY_NATIVE_OWNERSHIP_UNPROVEN'
+        else:
+            raise AssertionError('UNPROVEN_SQLITE_URL_ACCEPTED')
+finally:
+    if original_url is None:
+        os.environ.pop('DATABASE_URL', None)
+    else:
+        os.environ['DATABASE_URL'] = original_url
 results = {}
 for name in ['normal', 'lost-node', 'prisma-actions']:
     actor = execute(name)
     wait(lambda: (root / (name + '.body-returned')).exists(), 'action-entered')
     assert actor.poll() is None and not (root / (name + '.action-completed')).exists()
     active = state(name)
-    assert active['format'] == 'sabalan-inquiry-native/v1' and active['phase'] == 'ACTIVE'
+    assert active['format'] == 'sabalan-inquiry-native/v2' and active['phase'] == 'ACTIVE'
     assert 'databaseQuiet' not in active and 'connection' not in active
     private = Path(active['onlineScope']['scope']['nativeDirectory']) / 'deployment-runtime-control.lock'
     assert not available(private) and not available(root / 'coordination/deployment-runtime-control.lock')

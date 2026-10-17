@@ -89,13 +89,15 @@ export async function createScopedInquiryWork(configuration: Readonly<{ registry
       || process.env.BACKEND_CONTROL_LOCK_FILE !== path.join(input.scope.nativeDirectory, 'deployment-runtime-control.lock')) throw failure();
     const value = stableClaim(file), claim = value.claim;
     if ((pinned !== undefined && pinned !== value.identity) || hash(value.bytes) !== process.env.INQUIRY_NATIVE_CLAIM_SHA256
-      || claim.format !== 'sabalan-inquiry-native/v1' || claim.phase !== 'ACTIVE'
+      || claim.format !== 'sabalan-inquiry-native/v2' || claim.phase !== 'ACTIVE'
       || JSON.stringify(claim.onlineScope) !== JSON.stringify(input)) throw failure();
     actualAncestor(claim.guardian);
     inheritedLock(9, process.env.BACKEND_CONTROL_LOCK_FILE!, claim.lock.device, claim.lock.inode, 'WRITE');
     inheritedLock(11, input.scope.interlock.file, input.scope.interlock.device, input.scope.interlock.inode, 'READ');
     const database = claim.sqlite;
-    if (!database || process.env.DATABASE_URL !== 'file:' + database.file || !path.isAbsolute(database.file)
+    if (!database || !/^[a-f0-9]{64}$/.test(database.databaseUrlSha256)
+      || !process.env.DATABASE_URL || hash(Buffer.from(process.env.DATABASE_URL, 'utf8')) !== database.databaseUrlSha256
+      || !process.env.DATABASE_URL.startsWith('file:' + database.file + '?') || !path.isAbsolute(database.file)
       || fs.realpathSync(database.file) !== database.file || database.ownerUid !== process.getuid!()) throw failure();
     const current = fs.lstatSync(database.file, { bigint: true });
     const parent = fs.lstatSync(path.dirname(database.file), { bigint: true });

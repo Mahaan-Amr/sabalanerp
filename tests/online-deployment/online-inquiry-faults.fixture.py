@@ -87,7 +87,7 @@ for name in ['stderr-failure', 'legacy-race']:
                    if not key.startswith(('PG', 'BACKEND_', 'INQUIRY_NATIVE_')) and key != 'DATABASE_URL'}
     environment.update(BACKEND_RUNTIME_ROLE='serving', BACKEND_ONLINE_SCOPE_FILE=scope['file'],
                        BACKEND_ONLINE_SCOPE_SHA256=scope['sha256'], RECOVERY_COORDINATION_DIR=str(root / 'coordination'),
-                       DATABASE_URL='file:' + str(root / 'inquiry.db'))
+                       DATABASE_URL='file:' + str(root / 'inquiry.db') + '?connection_limit=2&pool_timeout=5')
     actor = subprocess.Popen(['/usr/bin/python3', '-I', '-B', str(Path(__file__)), str(root), 'child', name],
                              env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     native = root / 'coordination/online/native' / scope['runtimeId']

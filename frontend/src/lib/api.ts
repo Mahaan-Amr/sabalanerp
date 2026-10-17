@@ -1,7 +1,7 @@
 ﻿import { normalizePartnerInput } from '@sabalanerp/partner-sales-contracts';
 import axios from 'axios';
 
-import type { InternalAxiosRequestConfig } from 'axios';
+import type { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 import { createClientRequestId } from './requestIdentity';
 import { buildLoadingFinalizeRequest } from './loadingFinalizeRequest';
 import { buildAuthorizedPhysicalExitRequest } from './authorizedPhysicalExitRequest';
@@ -73,7 +73,7 @@ export const browserSessionContinuation = new BrowserSessionContinuation(async e
 });
 
 type RetryAwareConfig = InternalAxiosRequestConfig & { supportMutationFingerprint?: string; browserSessionLease?: BrowserSessionLease;
-  browserBootstrapScope?: BrowserLoginAttempt };
+  browserBootstrapScope?: BrowserLoginAttempt; browserLoginAttempt?: BrowserLoginAttempt };
 const retryKeys = new Map<string, { key: string; expiresAt: number }>();
 const retryStorageKey = 'sabalan.mutation-retry-keys.v1';
 const loadRetryKeys = () => {
@@ -208,7 +208,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       if (browserSessionContinuation.expectedUserId()) browserSessionContinuation.invalidate(error.browserSessionAttempt
-        || error.config?.browserSessionLease || error.config?.browserBootstrapScope);
+        || error.config?.browserLoginAttempt || error.config?.browserSessionLease || error.config?.browserBootstrapScope);
       if (
         typeof window !== 'undefined'
         && !window.location.pathname.startsWith('/login')
@@ -238,8 +238,9 @@ api.interceptors.response.use(
 export const authAPI = {
   login: (identifier: string, password: string) => {
     const attempt = browserSessionContinuation.beginLogin();
+    const request: AxiosRequestConfig & { browserLoginAttempt: BrowserLoginAttempt } = { browserLoginAttempt: attempt };
     return api.post('/auth/login', { identifier, email: identifier, password,
-      ...(attempt.userId ? { expectedUserId: attempt.userId } : {}) })
+      ...(attempt.userId ? { expectedUserId: attempt.userId } : {}) }, request)
       .then(response => {
         const identity = { userId: response.data.data?.user?.id, sessionId: response.data.session?.id };
         browserSessionContinuation.completeLogin(identity, attempt);

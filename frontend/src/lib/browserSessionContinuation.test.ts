@@ -51,3 +51,14 @@ test('clearing a tab scope cannot let an older pending probe claim its new owner
   await assert.rejects(pending);
   assert.equal(scope.expectedUserId(), undefined);
 });
+
+test('network and server failures deny only that operation and allow a fresh probe without password reauthentication', async () => {
+  let failure: unknown;
+  const identity = { userId: 'owner_a', sessionId: 'session_a' };
+  const scope = new BrowserSessionContinuation(async () => { if (failure) throw failure; return identity; });
+  await scope.acquire();
+  for (const error of [Object.assign(Error('network'), { code: 'ECONNRESET' }), { response: { status: 503 } }]) {
+    failure = error; await assert.rejects(scope.acquire()); assert.equal(scope.snapshot(), null);
+    failure = undefined; assert.equal((await scope.acquire()).userId, 'owner_a');
+  }
+});

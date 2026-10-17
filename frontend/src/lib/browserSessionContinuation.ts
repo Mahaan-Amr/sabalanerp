@@ -63,7 +63,11 @@ export class BrowserSessionContinuation {
       const identity = await this.probing;
       if (generation !== this.generation || this.blocked) throw changed();
       return { ...identity, generation };
-    } catch (error) { if (generation === this.generation && this.owner) this.invalidate(); throw error; }
+    } catch (error: any) {
+      if (generation === this.generation && this.owner
+        && (error?.code === 'AUTH_CONTEXT_CHANGED' || error?.response?.status === 401)) this.invalidate();
+      throw error;
+    }
   }
 
   assertCurrent(lease: BrowserSessionLease) {

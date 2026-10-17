@@ -7,7 +7,7 @@ test('actual HTTP interceptors bind private clients, preserve the tab, and rejec
   const previousAdapter = axios.defaults.adapter, previousApi = process.env.NEXT_PUBLIC_API_URL;
   const previousFetch = globalThis.fetch;
   let owner = 'owner_a', session = 'session_a', businessWrites = 0, redirects = 0, probes = 0;
-  let finishRead!: () => void, failLate!: () => void;
+  let finishRead!: () => void, failLate!: () => void, failLogin!: () => void;
   const storage = new Map<string, string>();
   const browser = { location: { pathname: '/dashboard/test', origin: 'http://localhost:3101', replace() { redirects++; } },
     localStorage: { getItem: (key: string) => storage.get(key) || null, setItem: (key: string, value: string) => storage.set(key, value),
@@ -31,6 +31,7 @@ test('actual HTTP interceptors bind private clients, preserve the tab, and rejec
     if (config.url === '/auth/login') {
       const body = JSON.parse(config.data);
       assert.equal(body.expectedUserId, 'owner_a');
+      if (body.password === 'delayed-invalid-password') return new Promise((_resolve, reject) => { failLogin = () => reject(deny(config)); });
       if (body.identifier !== 'owner_a') throw deny(config, 409);
       owner = 'owner_a'; session = 'session_recovered';
       return reply(config, { success: true, data: { user: { id: owner } }, session: { id: session } });
@@ -67,6 +68,11 @@ test('actual HTTP interceptors bind private clients, preserve the tab, and rejec
     await authAPI.login('owner_a', 'valid-original-password');
     failLate(); await assert.rejects(oldFailure);
     assert.equal(scope.snapshot(), null, 'an obsolete request cannot invalidate the recovered generation');
+    const oldLogin = authAPI.login('owner_a', 'delayed-invalid-password');
+    while (!failLogin) await new Promise(resolve => setTimeout(resolve, 1));
+    await authAPI.login('owner_a', 'valid-original-password');
+    failLogin(); await assert.rejects(oldLogin);
+    assert.equal(scope.snapshot(), null, 'a late failed login cannot invalidate a newer successful login');
     assert.equal(redirects, 0);
     const { browserScopedFetch } = await import('./browserScopedFetch');
     let nativeCalls = 0, finishBody!: (body: unknown) => void;

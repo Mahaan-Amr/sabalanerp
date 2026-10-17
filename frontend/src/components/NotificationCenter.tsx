@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaBell, FaCheckDouble, FaList } from 'react-icons/fa';
-import { notificationsAPI } from '@/lib/api';
+import { createScopedNotificationsAPI } from '@/lib/api';
 import { useSocket } from '@/hooks/useSocket';
+import { useNotificationCatchup, isNotificationScopeFailure } from '@/hooks/useNotificationCatchup';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   ErpBadge,
   ErpButton,
@@ -63,6 +65,13 @@ function PreviewItem({ item, onOpen }: { item: NotificationItem; onOpen: (item: 
 }
 
 export function NotificationCenter() {
+  const { user } = useAuth();
+  return user ? <ScopedNotificationCenter key={user.id} userId={user.id} /> : null;
+}
+
+function ScopedNotificationCenter({ userId }: { userId: string }) {
+  const notificationsAPI = useMemo(() => createScopedNotificationsAPI(userId), [userId]);
+  const requestSequence = useRef(0);
   const router = useRouter();
   const { socket } = useSocket();
   const [open, setOpen] = useState(false);
@@ -74,12 +83,16 @@ export function NotificationCenter() {
   const [loadedOnce, setLoadedOnce] = useState(false);
   const hasUsableData = loadedOnce;
 
-  const loadCount = useCallback(async () => {
-    const response = await notificationsAPI.getUnreadCount();
-    setUnreadCount(Number(response.data.data?.count || 0));
+  const rejectChangedScope = useCallback((requestError: unknown) => {
+    if (!isNotificationScopeFailure(requestError)) return;
+    // Retire pending previews as well as the currently visible private state.
+    requestSequence.current++;
+    setUnread([]); setRecentRead([]); setUnreadCount(0); setLoadedOnce(false);
+    setLoading(false);
   }, []);
 
   const loadPreview = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     setError('');
     try {
@@ -88,35 +101,20 @@ export function NotificationCenter() {
         notificationsAPI.list({ limit: 3, state: 'READ' }),
         notificationsAPI.getUnreadCount(),
       ]);
+      if (sequence !== requestSequence.current) return;
       setUnread(unreadResponse.data.data || []);
       setRecentRead(readResponse.data.data || []);
       setUnreadCount(Number(countResponse.data.data?.count || 0));
       setLoadedOnce(true);
     } catch (requestError: any) {
+      if (sequence !== requestSequence.current) return;
+      rejectChangedScope(requestError);
       setError(requestError.response?.data?.error || 'تازه‌سازی اعلان‌ها انجام نشد.');
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
-  }, []);
-
-  useEffect(() => {
-    const refresh = () => { void loadCount().catch(() => undefined); };
-    refresh();
-    window.addEventListener('notifications:read-state-changed', refresh);
-    return () => window.removeEventListener('notifications:read-state-changed', refresh);
-  }, [loadCount]);
-
-  useEffect(() => {
-    if (!socket) return;
-    const handleCreated = (notification: NotificationItem) => {
-      if (!notification.readAt) {
-        setUnread((current) => [notification, ...current.filter((item) => item.id !== notification.id)].slice(0, 5));
-        setUnreadCount((current) => current + 1);
-      }
-    };
-    socket.on('notification.created', handleCreated);
-    return () => { socket.off('notification.created', handleCreated); };
-  }, [socket]);
+  }, [notificationsAPI, rejectChangedScope]);
+  useNotificationCatchup(socket, loadPreview);
 
   const openNotification = async (item: NotificationItem) => {
     if (!item.readAt) {
@@ -127,6 +125,7 @@ export function NotificationCenter() {
         setRecentRead((current) => [readItem, ...current.filter((row) => row.id !== item.id)].slice(0, 3));
         setUnreadCount((current) => Math.max(0, current - 1));
       } catch (requestError: any) {
+        rejectChangedScope(requestError);
         setError(requestError.response?.data?.error || 'ثبت وضعیت اعلان انجام نشد.');
         return;
       }
@@ -143,6 +142,7 @@ export function NotificationCenter() {
       await notificationsAPI.markAllRead();
       await loadPreview();
     } catch (requestError: any) {
+      rejectChangedScope(requestError);
       setError(requestError.response?.data?.error || 'خواندن همه اعلان‌ها انجام نشد.');
     }
   };

@@ -1,9 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FaBell, FaCheck, FaCheckDouble, FaChevronDown, FaMobileAlt, FaRedo, FaSave, FaSearch, FaShieldAlt, FaTrash } from 'react-icons/fa';
-import { notificationsAPI } from '@/lib/api';
+import { createScopedNotificationsAPI } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { readNotificationWindow } from '@/lib/notificationWindow';
+import { useNotificationCatchup, isNotificationScopeFailure } from '@/hooks/useNotificationCatchup';
 import { registerApplicationServiceWorker } from '@/lib/serviceWorkerRegistration';
 import { useSocket } from '@/hooks/useSocket';
 import { workspaceLabelFa } from '@/lib/featureLabelsFa';
@@ -67,6 +70,14 @@ const urlBase64ToUint8Array = (base64String: string) => {
 };
 
 export default function NotificationCenterPage() {
+  const { user } = useAuth();
+  return user ? <ScopedNotificationCenterPage key={user.id} userId={user.id} /> : null;
+}
+
+function ScopedNotificationCenterPage({ userId }: { userId: string }) {
+  const notificationsAPI = useMemo(() => createScopedNotificationsAPI(userId), [userId]);
+  const requestSequence = useRef(0);
+  const [scopeBlocked, setScopeBlocked] = useState(false);
   const router = useRouter();
   const { socket } = useSocket();
   const [items, setItems] = useState<NotificationItem[]>([]);
@@ -97,65 +108,74 @@ export default function NotificationCenterPage() {
   }, [search]);
 
   const query = useMemo(() => ({ state, search: appliedSearch || undefined, workspace: workspace || undefined, category: category || undefined, limit: 25 }), [appliedSearch, category, state, workspace]);
+  const currentQuery = useRef(query);
+  const visibleWindow = useRef({ query, pages: 1 });
+  if (visibleWindow.current.query !== query) visibleWindow.current = { query, pages: 1 };
+  currentQuery.current = query;
 
   const loadPreferences = useCallback(async () => {
-    const response = await notificationsAPI.getPreferences();
-    const next = response.data.data;
-    setPreferences(next);
-    setPreferenceForm({
-      webPushEnabled: Boolean(next.preference.webPushEnabled),
-      mutedCategories: next.preference.mutedCategories || [],
-      lowPriorityDelivery: next.preference.lowPriorityDelivery || 'IMMEDIATE',
-    });
-  }, []);
+    try {
+      const response = await notificationsAPI.getPreferences();
+      const next = response.data.data;
+      setPreferences(next);
+      setPreferenceForm({
+        webPushEnabled: Boolean(next.preference.webPushEnabled),
+        mutedCategories: next.preference.mutedCategories || [],
+        lowPriorityDelivery: next.preference.lowPriorityDelivery || 'IMMEDIATE',
+      });
+    } catch (error) { if (isNotificationScopeFailure(error)) setScopeBlocked(true); throw error; }
+  }, [notificationsAPI]);
 
   const load = useCallback(async (retain = true) => {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     setError('');
     try {
-      const [listResponse, metadataResponse] = await Promise.all([
-        notificationsAPI.list(query),
+      const [window, metadataResponse] = await Promise.all([
+        readNotificationWindow<NotificationItem>(visibleWindow.current.pages, async cursor => {
+          const response = await notificationsAPI.list({ ...query, cursor });
+          return { items: response.data.data || [], nextCursor: response.data.pagination?.nextCursor || null,
+            hasMore: Boolean(response.data.pagination?.hasMore) };
+        }),
         notificationsAPI.getMetadata(),
       ]);
-      setItems(listResponse.data.data || []);
-      setNextCursor(listResponse.data.pagination?.nextCursor || null);
-      setHasMore(Boolean(listResponse.data.pagination?.hasMore));
+      if (sequence !== requestSequence.current || currentQuery.current !== query) return;
+      setItems(window.items);
+      setNextCursor(window.nextCursor);
+      setHasMore(window.hasMore);
       setMetadata(metadataResponse.data.data || { workspaces: [], categories: [] });
       setLoadedOnce(true);
+      setScopeBlocked(false);
     } catch (requestError: any) {
+      if (isNotificationScopeFailure(requestError)) setScopeBlocked(true);
+      if (sequence !== requestSequence.current || currentQuery.current !== query) return;
+      if (isNotificationScopeFailure(requestError)) {
+        setScopeBlocked(true); setItems([]); setMetadata({ workspaces: [], categories: [] }); setLoadedOnce(false);
+      }
       if (!retain) setItems([]);
       setError(requestError.response?.data?.error || 'دریافت اعلان‌ها انجام نشد.');
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
-  }, [query]);
+  }, [query, notificationsAPI]);
 
-  useEffect(() => { void load(); }, [load]);
+  useNotificationCatchup(socket, load);
   useEffect(() => { void loadPreferences().catch(() => undefined); }, [loadPreferences]);
-
-  useEffect(() => {
-    if (!socket) return;
-    const handleCreated = (notification: NotificationItem) => {
-      const important = ['HIGH', 'URGENT'].includes(notification.priority);
-      const matches = !appliedSearch && (!workspace || notification.workspace === workspace)
-        && (!category || notification.category === category)
-        && (state === 'ALL' || state === 'UNREAD' || (state === 'IMPORTANT' && important));
-      if (matches) setItems((current) => [notification, ...current.filter((item) => item.id !== notification.id)]);
-    };
-    socket.on('notification.created', handleCreated);
-    return () => { socket.off('notification.created', handleCreated); };
-  }, [appliedSearch, category, socket, state, workspace]);
 
   const loadMore = async () => {
     if (!nextCursor) return;
+    const sequence = requestSequence.current;
     setLoadingMore(true);
     setError('');
     try {
       const response = await notificationsAPI.list({ ...query, cursor: nextCursor });
+      if (sequence !== requestSequence.current || currentQuery.current !== query) return;
+      visibleWindow.current.pages++;
       setItems((current) => [...current, ...(response.data.data || []).filter((row: NotificationItem) => !current.some((item) => item.id === row.id))]);
       setNextCursor(response.data.pagination?.nextCursor || null);
       setHasMore(Boolean(response.data.pagination?.hasMore));
     } catch (requestError: any) {
+      if (isNotificationScopeFailure(requestError)) setScopeBlocked(true);
       setError(requestError.response?.data?.error || 'دریافت اعلان‌های بیشتر انجام نشد.');
     } finally {
       setLoadingMore(false);
@@ -171,6 +191,7 @@ export default function NotificationCenterPage() {
       const destination = item.type === 'NEW_BROWSER_LOGIN' ? securityNotificationUrl(item) : item.actionUrl;
       if (destination) router.push(destination);
     } catch (requestError: any) {
+      if (isNotificationScopeFailure(requestError)) setScopeBlocked(true);
       setError(requestError.response?.data?.error || 'ثبت وضعیت اعلان انجام نشد.');
     }
   };
@@ -182,6 +203,7 @@ export default function NotificationCenterPage() {
       else await notificationsAPI.markRead(item.id);
       setItems((current) => current.map((row) => row.id === item.id ? { ...row, readAt: item.readAt ? null : new Date().toISOString() } : row));
     } catch (requestError: any) {
+      if (isNotificationScopeFailure(requestError)) setScopeBlocked(true);
       setError(requestError.response?.data?.error || 'تغییر وضعیت اعلان انجام نشد.');
     } finally { setBusy(''); }
   };
@@ -189,7 +211,10 @@ export default function NotificationCenterPage() {
   const markAllRead = async () => {
     setBusy('read-all');
     try { await notificationsAPI.markAllRead(); await load(); }
-    catch (requestError: any) { setError(requestError.response?.data?.error || 'خواندن همه اعلان‌ها انجام نشد.'); }
+    catch (requestError: any) {
+      if (isNotificationScopeFailure(requestError)) setScopeBlocked(true);
+      setError(requestError.response?.data?.error || 'خواندن همه اعلان‌ها انجام نشد.');
+    }
     finally { setBusy(''); }
   };
 
@@ -199,7 +224,8 @@ export default function NotificationCenterPage() {
       await notificationsAPI.updatePreferences(preferenceForm);
       setMessage('تغییرات اعلان ذخیره شد.');
       await loadPreferences();
-    } catch (requestError: any) { setError(requestError.response?.data?.error || 'ذخیره تغییرات انجام نشد.'); }
+    } catch (requestError: any) {
+      if (isNotificationScopeFailure(requestError)) setScopeBlocked(true); setError(requestError.response?.data?.error || 'ذخیره تغییرات انجام نشد.'); }
     finally { setBusy(''); }
   };
 
@@ -216,14 +242,18 @@ export default function NotificationCenterPage() {
       const json = subscription.toJSON();
       await notificationsAPI.registerDevice({ endpoint: subscription.endpoint, keys: { p256dh: json.keys?.p256dh || '', auth: json.keys?.auth || '' }, deviceLabel: deviceLabel.trim() || undefined });
       setDeviceLabel(''); setMessage('اعلان این دستگاه فعال شد.'); await loadPreferences();
-    } catch (requestError: any) { setError(requestError.response?.data?.error || requestError.message || 'فعال‌سازی دستگاه انجام نشد.'); }
+    } catch (requestError: any) {
+      if (isNotificationScopeFailure(requestError)) setScopeBlocked(true); setError(requestError.response?.data?.error || requestError.message || 'فعال‌سازی دستگاه انجام نشد.'); }
     finally { setBusy(''); }
   };
 
   const disableDevice = async (id: string) => {
     setBusy(`device:${id}`);
     try { await notificationsAPI.disableDevice(id); await loadPreferences(); }
-    catch (requestError: any) { setError(requestError.response?.data?.error || 'غیرفعال‌سازی دستگاه انجام نشد.'); }
+    catch (requestError: any) {
+      if (isNotificationScopeFailure(requestError)) setScopeBlocked(true);
+      setError(requestError.response?.data?.error || 'غیرفعال‌سازی دستگاه انجام نشد.');
+    }
     finally { setBusy(''); }
   };
 
@@ -236,9 +266,15 @@ export default function NotificationCenterPage() {
       }
       await notificationsAPI.disableAllDevices();
       setConfirmAllDevices(false); setMessage('اعلان همه دستگاه‌ها غیرفعال شد.'); await loadPreferences();
-    } catch (requestError: any) { setError(requestError.response?.data?.error || 'غیرفعال‌سازی دستگاه‌ها انجام نشد.'); }
+    } catch (requestError: any) {
+      if (isNotificationScopeFailure(requestError)) setScopeBlocked(true); setError(requestError.response?.data?.error || 'غیرفعال‌سازی دستگاه‌ها انجام نشد.'); }
     finally { setBusy(''); }
   };
+
+  if (scopeBlocked) return <ErpWorkspacePage title="مرکز اعلان‌ها" backHref="/dashboard/personal">
+    <ErpInlineState kind="error" title="نشست این صفحه تغییر کرده است؛ نوشته‌هایتان را نگه دارید و دوباره وارد شوید."
+      action={{ label: 'تلاش دوباره', onClick: () => void load() }} />
+  </ErpWorkspacePage>;
 
   return (
     <ErpWorkspacePage title="مرکز اعلان‌ها" primaryAction={{ label: 'به‌روزرسانی', icon: FaRedo, onClick: () => void load(), disabled: loading }} backHref="/dashboard/personal">
@@ -275,9 +311,9 @@ export default function NotificationCenterPage() {
           <ErpSection>
             <div className="divide-y divide-[var(--sds-border-subtle)]">
               {items.map((item) => (
-                <article key={item.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+                <article key={item.id} className="flex flex-col items-start gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row">
                   <span className={`mt-2 h-2.5 w-2.5 shrink-0 rounded-full ${item.readAt ? 'bg-[var(--sds-border-strong)]' : 'bg-[var(--sds-accent)]'}`} />
-                  <ErpPressable type="button" onClick={() => void openItem(item)} className="min-h-11 min-w-0 flex-1 rounded-lg text-right outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]">
+                  <ErpPressable type="button" onClick={() => void openItem(item)} className="min-h-11 min-w-0 w-full flex-1 rounded-lg text-right outline-none focus-visible:ring-2 focus-visible:ring-[var(--sds-focus-ring)]">
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="font-black sds-text-primary">{item.title}</h2>
                       <ErpBadge tone={priorityTones[item.priority]}>{priorityLabels[item.priority]}</ErpBadge>
@@ -285,7 +321,7 @@ export default function NotificationCenterPage() {
                       {item.type === 'NEW_BROWSER_LOGIN' && item.readAt && <ErpBadge tone="neutral"><FaShieldAlt className="ml-1 inline" />خوانده‌شده</ErpBadge>}
                     </div>
                     <p className="mt-1 text-sm leading-6 sds-text-muted">{item.message}</p>
-                    <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs sds-text-muted">
+                    <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs sds-text-secondary">
                       <time>{new Date(item.createdAt).toLocaleString('fa-IR')}</time>
                       {item.workspace && <span>{workspaceLabelFa(item.workspace)}</span>}
                       {item.category && <span>{categoryLabels[item.category] || 'سایر اعلان‌ها'}</span>}
@@ -308,14 +344,14 @@ export default function NotificationCenterPage() {
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-3">
                   <h3 className="font-bold sds-text-primary">ترجیحات تحویل</h3>
-                  {optionalCategories.map(([value, label]) => <ErpCheckbox key={value} label={`بی‌صدا کردن ${label}`} checked={preferenceForm.mutedCategories.includes(value)} onChange={() => setPreferenceForm((current) => ({ ...current, mutedCategories: current.mutedCategories.includes(value) ? current.mutedCategories.filter((item) => item !== value) : [...current.mutedCategories, value] }))} />)}
+                  {optionalCategories.map(([value, label]) => <ErpCheckbox key={value} className="w-full min-w-0 [&>span]:min-w-0 [&>span]:break-words" label={`بی‌صدا کردن ${label}`} checked={preferenceForm.mutedCategories.includes(value)} onChange={() => setPreferenceForm((current) => ({ ...current, mutedCategories: current.mutedCategories.includes(value) ? current.mutedCategories.filter((item) => item !== value) : [...current.mutedCategories, value] }))} />)}
                   <label className="block"><span className={erpFieldLabelClassName}>اعلان‌های کم‌اولویت</span><ErpSelect value={preferenceForm.lowPriorityDelivery} onChange={(event) => setPreferenceForm({ ...preferenceForm, lowPriorityDelivery: event.target.value as 'IMMEDIATE' | 'DAILY' })}><option value="IMMEDIATE">بلافاصله</option><option value="DAILY">خلاصه روزانه</option></ErpSelect></label>
                   <ErpButton label="ذخیره تغییرات" icon={FaSave} onClick={() => void savePreferences()} disabled={busy === 'preferences'} />
                 </div>
                 <div className="space-y-3">
                   <h3 className="font-bold sds-text-primary">اعلان دستگاه</h3>
                   <div className="flex flex-col gap-2 sm:flex-row"><ErpInput aria-label="نام دستگاه" value={deviceLabel} onChange={(event) => setDeviceLabel(event.target.value)} placeholder="نام این دستگاه (اختیاری)" /><ErpButton label="فعال‌سازی این دستگاه" icon={FaMobileAlt} onClick={() => void enableThisDevice()} disabled={busy === 'device' || !preferences.supported} /></div>
-                  <div className="space-y-2">{preferences.devices?.length ? preferences.devices.map((device: any) => <ErpCard key={device.id} className="flex items-center justify-between gap-3 p-3"><div><p className="font-bold sds-text-primary">{device.deviceLabel || 'دستگاه بدون نام'}</p><p className="mt-1 text-xs sds-text-muted">{new Date(device.createdAt).toLocaleString('fa-IR')}</p></div>{device.disabledAt ? <ErpBadge tone="neutral">غیرفعال</ErpBadge> : <ErpButton label="غیرفعال‌سازی" tone="danger" variant="ghost" onClick={() => void disableDevice(device.id)} disabled={busy === `device:${device.id}`} />}</ErpCard>) : <ErpEmptyState title="دستگاهی ثبت نشده است" />}</div>
+                  <div className="space-y-2">{preferences.devices?.length ? preferences.devices.map((device: any) => <ErpCard key={device.id} className="flex flex-wrap items-center justify-between gap-3 p-3"><div><p className="font-bold sds-text-primary">{device.deviceLabel || 'دستگاه بدون نام'}</p><p className="mt-1 text-xs sds-text-secondary">{new Date(device.createdAt).toLocaleString('fa-IR')}</p></div>{device.disabledAt ? <ErpBadge tone="neutral">غیرفعال</ErpBadge> : <ErpButton label="غیرفعال‌سازی" tone="danger" variant="ghost" onClick={() => void disableDevice(device.id)} disabled={busy === `device:${device.id}`} />}</ErpCard>) : <ErpEmptyState title="دستگاهی ثبت نشده است" />}</div>
                   <ErpButton label="غیرفعال‌سازی همه دستگاه‌ها" icon={FaTrash} tone="danger" variant="outline" onClick={() => setConfirmAllDevices(true)} disabled={!preferences.devices?.some((device: any) => !device.disabledAt)} />
                 </div>
               </div>

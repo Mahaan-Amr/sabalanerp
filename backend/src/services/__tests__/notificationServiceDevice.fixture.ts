@@ -6,6 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import { Server } from 'socket.io';
+import express from 'express';
 import { createAuthoritativeSession, revokeSessions } from '../identitySessionService';
 
 async function main() {
@@ -95,7 +96,14 @@ async function main() {
     assert.equal(await prisma.notificationDeliveryAttempt.count({ where: {
       notificationId: { in: ids }, status: 'SETTLED', channel: 'WEB_PUSH_DIGEST_V1',
     } }), 2);
-    const server = createServer();
+    const { protect } = await import('../../middleware/auth');
+    const { default: authRoutes } = await import('../../routes/auth');
+    const app = express();
+    app.use(express.json());
+    app.use('/api/auth', authRoutes);
+    let boundMutations = 0;
+    app.post('/api/qa-protected', protect, (_request, response) => { boundMutations++; response.json({ success: true }); });
+    const server = createServer(app);
     const io = new Server(server);
     let releaseAuthorization = () => {};
     let beginAuthorization!: () => void;
@@ -115,16 +123,45 @@ async function main() {
       assert.ok(address && typeof address !== 'string');
       const firstSession = await createAuthoritativeSession(prisma, user.id, {});
       const secondSession = await createAuthoritativeSession(prisma, user.id, {});
+      const otherUser = await prisma.user.create({ data: { username: 'other-device-owner', email: 'other-device-owner@example.invalid',
+        password: 'not-used', firstName: 'دیگر', lastName: 'حساب' } });
+      const otherSession = await createAuthoritativeSession(prisma, otherUser.id, {});
+      const request = (pathname: string, token: string, headers: Record<string, string> = {}, method = 'GET') =>
+        fetch(`http://127.0.0.1:${address.port}${pathname}`, { method, headers: { cookie: `sabalan_session=${token}`, ...headers } });
+      const expected = { 'x-sabalan-expected-user': user.id, 'x-sabalan-expected-session': firstSession.session.id };
+      assert.equal((await request('/api/qa-protected', firstSession.token, {}, 'POST')).status, 200);
+      assert.equal((await request('/api/qa-protected', firstSession.token, expected, 'POST')).status, 200);
+      const wrongOwner = await request('/api/qa-protected', otherSession.token, expected, 'POST');
+      assert.equal(wrongOwner.status, 401);
+      assert.match(wrongOwner.headers.get('cache-control') || '', /no-store/);
+      assert.equal((await request('/api/qa-protected', secondSession.token, expected, 'POST')).status, 401);
+      assert.equal((await request('/api/qa-protected', firstSession.token, { 'x-sabalan-expected-user': user.id }, 'POST')).status, 401);
+      assert.equal(boundMutations, 2, 'cookie switching cannot execute a bound operation as another owner/session');
+      const wrongProbe = await request('/api/auth/me', otherSession.token, { 'x-sabalan-expected-user': user.id });
+      assert.equal(wrongProbe.status, 401);
+      assert.ok(!(await wrongProbe.text()).includes(otherUser.email));
+      const ownProbe = await request('/api/auth/me', firstSession.token, { 'x-sabalan-expected-user': user.id });
+      assert.equal(ownProbe.status, 200);
+      const ownIdentity = await ownProbe.json() as any;
+      assert.equal(ownIdentity.data.id, user.id);
+      assert.equal(ownIdentity.session.id, firstSession.session.id);
       const idleBefore = new Date(Date.now() - 30 * 60_000);
       await prisma.authSession.updateMany({ where: { id: { in: [firstSession.session.id, secondSession.session.id] } }, data: { lastActivityAt: idleBefore } });
-      const open = async (token: string) => {
+      const open = async (token: string, expectedUserId?: string) => {
         const client = connect(`http://127.0.0.1:${address.port}`, { transports: ['websocket'], reconnection: false,
-          extraHeaders: { cookie: `sabalan_session=${token}` } });
+          auth: expectedUserId ? { expectedUserId } : {}, extraHeaders: { cookie: `sabalan_session=${token}` } });
         clients.push(client);
         await new Promise<void>((resolve, reject) => { client.once('connect', resolve); client.once('connect_error', reject); });
         return client;
       };
-      const firstSocket = await open(firstSession.token), secondSocket = await open(secondSession.token);
+      const wrongSocket = connect(`http://127.0.0.1:${address.port}`, { transports: ['websocket'], reconnection: false,
+        auth: { expectedUserId: user.id }, extraHeaders: { cookie: `sabalan_session=${otherSession.token}` } });
+      clients.push(wrongSocket);
+      await new Promise<void>((resolve, reject) => {
+        wrongSocket.once('connect', () => reject(new Error('Cross-account socket connected')));
+        wrongSocket.once('connect_error', () => resolve());
+      });
+      const firstSocket = await open(firstSession.token, user.id), secondSocket = await open(secondSession.token, user.id);
       let revokedMessages = 0;
       firstSocket.on('notification.created', () => { revokedMessages++; });
       await revokeSessions(prisma, { userId: user.id, sessionId: firstSession.session.id, reason: 'QA_REVOCATION' });

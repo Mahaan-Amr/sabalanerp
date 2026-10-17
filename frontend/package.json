@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test:notification-catchup": "tsx --test src/lib/notificationCatchup.test.ts src/lib/notificationWindow.test.ts src/lib/privateClientScope.test.ts",
     "test:duty-count": "tsx --test src/features/cross-workspace-duties/dutyCountRequests.test.ts",
     "dev": "node --max-old-space-size=7168 node_modules/next/dist/bin/next dev",
     "build": "node --max-old-space-size=8192 node_modules/next/dist/bin/next build && node finalize-browser-build.cjs",

@@ -5,6 +5,7 @@ import type { InternalAxiosRequestConfig } from 'axios';
 import { createClientRequestId } from './requestIdentity';
 import { buildLoadingFinalizeRequest } from './loadingFinalizeRequest';
 import { buildAuthorizedPhysicalExitRequest } from './authorizedPhysicalExitRequest';
+import { createPrivateClient } from './privateClientScope';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
@@ -170,6 +171,7 @@ api.interceptors.response.use(
         && !window.location.pathname.startsWith('/login')
         && !isPublicVerificationPath(window.location.pathname)
         && !unauthorizedRedirectStarted
+        && !error.config?.headers?.['x-sabalan-expected-user']
       ) {
         unauthorizedRedirectStarted = true;
         window.location.replace('/login');
@@ -193,7 +195,7 @@ export const authAPI = {
   login: (identifier: string, password: string) =>
     api.post('/auth/login', { identifier, email: identifier, password }),
 
-  getMe: () => api.get('/auth/me'),
+  getMe: (expectedUserId?: string) => api.get('/auth/me', { headers: expectedUserId ? { 'x-sabalan-expected-user': expectedUserId } : undefined }),
   logout: () => api.post('/auth/logout'),
   getSessions: () => api.get('/auth/sessions'),
   revokeSession: (id: string) => api.delete(`/auth/sessions/${id}`),
@@ -208,17 +210,17 @@ const notifyReadStateChanged = <T,>(response: T): T => {
   return response;
 };
 
-export const notificationsAPI = {
+const notificationClient = (headers: Record<string, string> = {}) => ({
   list: (params?: { cursor?: string; limit?: number; state?: 'ALL' | 'UNREAD' | 'READ' | 'IMPORTANT'; search?: string; workspace?: string; category?: string }) =>
-    api.get('/notifications', { params }),
-  getUnreadCount: () => api.get('/notifications/unread-count'),
-  getMetadata: () => api.get('/notifications/metadata'),
-  markRead: (id: string) => api.put(`/notifications/${id}/read`).then(notifyReadStateChanged),
-  markUnread: (id: string) => api.delete(`/notifications/${id}/read`).then(notifyReadStateChanged),
-  markAllRead: () => api.put('/notifications/read-all').then(notifyReadStateChanged),
+    api.get('/notifications', { params, headers }),
+  getUnreadCount: () => api.get('/notifications/unread-count', { headers }),
+  getMetadata: () => api.get('/notifications/metadata', { headers }),
+  markRead: (id: string) => api.put(`/notifications/${id}/read`, undefined, { headers }).then(notifyReadStateChanged),
+  markUnread: (id: string) => api.delete(`/notifications/${id}/read`, { headers }).then(notifyReadStateChanged),
+  markAllRead: () => api.put('/notifications/read-all', undefined, { headers }).then(notifyReadStateChanged),
   resolveSecurityAlert: (id: string, decision: 'MINE' | 'NOT_MINE') =>
-    api.post(`/notifications/${id}/security-resolution`, { decision }).then(notifyReadStateChanged),
-  getPolicies: () => api.get('/notifications/admin/policies'),
+    api.post(`/notifications/${id}/security-resolution`, { decision }, { headers }).then(notifyReadStateChanged),
+  getPolicies: () => api.get('/notifications/admin/policies', { headers }),
   createPolicyVersion: (eventType: string, data: {
     enabled: boolean;
     titleTemplate: string;
@@ -228,15 +230,20 @@ export const notificationsAPI = {
     recipientResolvers: string[];
     batching: 'IMMEDIATE' | 'DAILY';
     changeReason: string;
-  }) => api.post(`/notifications/admin/policies/${eventType}/versions`, data),
-  getPreferences: () => api.get('/notifications/settings/preferences'),
+  }) => api.post(`/notifications/admin/policies/${eventType}/versions`, data, { headers }),
+  getPreferences: () => api.get('/notifications/settings/preferences', { headers }),
   updatePreferences: (data: { webPushEnabled: boolean; mutedCategories: string[]; lowPriorityDelivery: 'IMMEDIATE' | 'DAILY' }) =>
-    api.put('/notifications/settings/preferences', data),
+    api.put('/notifications/settings/preferences', data, { headers }),
   registerDevice: (data: { endpoint: string; keys: { p256dh: string; auth: string }; deviceLabel?: string }) =>
-    api.post('/notifications/settings/devices', data),
-  disableDevice: (deviceId: string) => api.delete(`/notifications/settings/devices/${deviceId}`),
-  disableAllDevices: () => api.delete('/notifications/settings/devices'),
-};
+    api.post('/notifications/settings/devices', data, { headers }),
+  disableDevice: (deviceId: string) => api.delete(`/notifications/settings/devices/${deviceId}`, { headers }),
+  disableAllDevices: () => api.delete('/notifications/settings/devices', { headers }),
+});
+export const notificationsAPI = notificationClient();
+export const createScopedNotificationsAPI = (userId: string) => createPrivateClient(userId, async () => {
+  const response = await authAPI.getMe(userId);
+  return { userId: response.data.data?.id, sessionId: response.data.session?.id };
+}, notificationClient);
 
 export const supportTicketsAPI = {
   getContext: () => api.get('/support-tickets/context'),

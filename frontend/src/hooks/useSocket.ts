@@ -21,7 +21,7 @@ export const useSocket = () => {
       });
 
       // Initialize socket connection
-      const newSocket = io(socketUrl, socketConnectionOptions);
+      const newSocket = io(socketUrl, { ...socketConnectionOptions, auth: { expectedUserId: user.id } });
 
       newSocket.on('connect', () => {
         console.log('Socket connected:', newSocket.id);

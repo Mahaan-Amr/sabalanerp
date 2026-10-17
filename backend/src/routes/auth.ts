@@ -114,7 +114,7 @@ router.post('/login', [
     res.cookie(SESSION_COOKIE, created.token, cookieOptions());
     res.cookie(DEVICE_COOKIE, created.browserProfile.publicId, { ...cookieOptions(), httpOnly: true, maxAge: 365 * 24 * 60 * 60 * 1000 });
     const { password: _password, erasedAt: _erasedAt, ...safeUser } = user;
-    res.json({ success: true, data: { user: safeUser, mustChangePassword: user.mustChangePassword } });
+    res.json({ success: true, data: { user: safeUser, mustChangePassword: user.mustChangePassword }, session: { id: created.session.id } });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ success: false, error: 'Server error during login' });
@@ -128,7 +128,8 @@ router.get('/me', protect, async (req: AuthRequest, res) => {
     personnel: { select: { id: true, firstName: true, lastName: true, isActive: true, department: { select: { id: true, name: true, namePersian: true } } } },
   } });
   if (!user) return res.status(404).json({ success: false, error: 'User not found' });
-  res.json({ success: true, data: user });
+  res.setHeader('Cache-Control', 'no-store, private');
+  res.json({ success: true, data: user, session: { id: req.sessionId } });
 });
 
 router.post('/logout', protect, async (req: AuthRequest, res) => {

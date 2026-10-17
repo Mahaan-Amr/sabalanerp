@@ -8,7 +8,7 @@ const CLOCK_SAFETY_MS = 1000;
 type AuthorityFence = { snapshot: string; now: Date };
 
 export interface RealtimeSocket {
-  handshake: { headers: { cookie?: string } };
+  handshake: { headers: { cookie?: string }; auth?: { expectedUserId?: unknown } };
   data: { userId?: string };
   connected: boolean;
   emit: (event: string, payload: unknown) => unknown;
@@ -55,6 +55,11 @@ export class RealtimeDeliveryLifecycle {
     return this.submit(async () => {
       const session = await this.session(socket);
       if (!session) throw new Error('REALTIME_AUTHENTICATION_REQUIRED');
+      const expectedUser = socket.handshake.auth?.expectedUserId;
+      if (expectedUser !== undefined && expectedUser !== session.userId) {
+        socket.disconnect(true);
+        throw new Error('REALTIME_AUTH_CONTEXT_CHANGED');
+      }
       socket.data.userId = session.userId;
     });
   }

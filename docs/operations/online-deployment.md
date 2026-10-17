@@ -54,6 +54,15 @@ On 2026-10-14 the restricted accounts and trusted operations bundle were provisi
 
 ## Admission work still required
 
+The new coherent **diagnostic** capture also completed independent RSA decryption,
+file/SQLite verification and a native 427-migration PostgreSQL restoration on the
+backup host. PostgreSQL shut down normally; fifteen persistent foreign service
+identities were preserved. A concurrent foreign QA replacement failed the broader
+ambient identity check, so the attempt remains explicitly unaccepted as a whole.
+Exact failed/terminal diagnostic ownership was closed with reviewed native proofs;
+no healthy production recovery point or online authority was published. See
+[independent component observations](../../reports/qa/independent-coherent-component-20261017.md).
+
 1. Prove continuous coherent recovery: PostgreSQL base/WAL coverage, immutable file versions/deletion lineage, consistent Inquiry SQLite/coordination, retrievable compatible image bytes, privacy/erasure, encryption and independent restoration. Verify coverage throughout release.
 2. Add distributed serving/control/worker fencing and complete domain/control-task drain acceptance. The single-runtime HTTP promise adapter does not cover detached unregistered work, independent recovery control tasks or non-cooperating older runtimes. Unresolved callback work must be determined before retirement. Preserve external-provider ambiguous outcomes and prevent duplicate ownership effects.
 3. Admit versioned expand/backfill/activation/contract manifests with old/new semantic compatibility, bounded lock waits, concurrent-write correctness and recoverable partial DDL/ledger state. Preserve financial/quantity evidence and release attestations.

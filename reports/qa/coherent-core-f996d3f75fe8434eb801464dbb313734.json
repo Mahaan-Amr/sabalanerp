@@ -1,0 +1,111 @@
+{
+  "additionalForeignIdentities": {
+    "ae697aa87f8bb483d8ed8986023e45bb72d805723d9e732d13a6afa516093d46": {
+      "image": "sha256:a9896042ca27d7aec7f57d088dc91fd527c636e6b99309332226534edc8fe258",
+      "name": "/jovial_antonelli",
+      "startedAt": "2026-10-17T17:30:18.602136472Z"
+    }
+  },
+  "allBytesAndImageRetained": true,
+  "allForeignAcceptancePassed": false,
+  "amount": "123456789.12345678",
+  "changedForeignQaObservation": {
+    "f3eb8e28847f86275ddde8e56dba6a77b442b848d899836fe5c2ff16bbd64f14": {
+      "image": "sha256:a52dc588873fa9801fb07a6bf8a654849194af4c7bb624f381fb61ed5001f453",
+      "name": "/fintech-price-action-study-qa-20261017",
+      "startedAt": "2026-10-17T17:21:18.905940671Z"
+    }
+  },
+  "containerId": "564e9f80ab578d44b78a5597a4093c3a40c40438456578df96e9ace1921e951e",
+  "controllerExactExitProven": true,
+  "controllerSha256": "20f89e5747cf73df05565e9bbfc11885a90f02003085b49d544118402ec70a85",
+  "format": "sabalan-independent-coherent-core-observation/v1",
+  "fullIndependentApplicationAcceptanceStillRequired": true,
+  "migrationCount": 427,
+  "nativeLogSha256": "e620593f74575842161edcf984db2796d5a386412bcb7ba96ee2fe179d61ad9d",
+  "nativePostgresRestoreVerified": true,
+  "nativePostgresStoppedNaturally": true,
+  "originalKernelLocksReacquired": true,
+  "persistentForeignIdentitiesUnchanged": {
+    "0294f936de55e2a71a2255a58cecf5c06000cc00ad952b332ef08cf0466b9183": {
+      "image": "sha256:b2b38366e104d86cfb9f4b559aa31ffd7de26044b7c38e5b3aec9b3f30262a6d",
+      "name": "/fintech-lab-adaptive-1",
+      "startedAt": "2026-10-05T06:24:55.566277419Z"
+    },
+    "0f2d1c9c4b1b24fadbd89c185dfbb73fc61aafd30d6527eed7724a6ccf09f749": {
+      "image": "sha256:d43341b375211d1a02947f4b312e36de9b04fad6bcd1af9cab1c9d7ec7186740",
+      "name": "/fintech-lab-relearning-feed-1",
+      "startedAt": "2026-10-17T09:01:32.069962858Z"
+    },
+    "237721bd06c3b2a1c460c7eeda0e946b72c1132e01493f3745358e718dbb15ab": {
+      "image": "sha256:8541af3f80ab3827436b9af7f89a5bf053f6b6f9d13691c4a7382aba44824073",
+      "name": "/fintech-lab-edge-1",
+      "startedAt": "2026-10-06T06:58:23.656747893Z"
+    },
+    "5aa0c3e4d8c66982ab960dea644c3041631521a49efbd8cc9f5160e82596a4b1": {
+      "image": "sha256:062beebb5e7dc90cd8846233faabd32dd369068a56a8988a6ee327e2e005f271",
+      "name": "/fintech-lab-research-1",
+      "startedAt": "2026-10-15T10:04:50.716298627Z"
+    },
+    "6afead2b28774fb71175608ca70860ab5ba6ec7fe24f061e3504a5bf634fb92a": {
+      "image": "sha256:22ad0497c28d44867c7e7a7c6342bbb046e9affe8c51981fbf5ab091a6317c54",
+      "name": "/fintech-lab-historical-1",
+      "startedAt": "2026-10-17T06:41:35.172380555Z"
+    },
+    "72d3186a209a316fb10f6b79b8db3f4f04d36a0a813034ef6935c99535f3a45e": {
+      "image": "sha256:b2b38366e104d86cfb9f4b559aa31ffd7de26044b7c38e5b3aec9b3f30262a6d",
+      "name": "/fintech-lab-multiasset-1",
+      "startedAt": "2026-10-05T06:19:47.642155868Z"
+    },
+    "7ff578d8609710eb50a413fc54095f08e4fae8aceea8e7d58517d6621a2cf4c2": {
+      "image": "sha256:dee810ba3e8966952433e1e5804bcb06e77ccdaf6436fd5a3e54621fb9269514",
+      "name": "/fintech-lab-maintenance-1",
+      "startedAt": "2026-10-14T09:54:58.616061597Z"
+    },
+    "b27a98607a597784f98f8cdaac5fc95a0c95fe09403bb0b70c3f71ba43bb25b6": {
+      "image": "sha256:b2b38366e104d86cfb9f4b559aa31ffd7de26044b7c38e5b3aec9b3f30262a6d",
+      "name": "/fintech-lab-collector-1",
+      "startedAt": "2026-10-05T06:19:47.780546151Z"
+    },
+    "b2d7587daa32493b98a22e0c6be8eb0659e7ab76b3b996aba9860a9326202655": {
+      "image": "sha256:a52dc588873fa9801fb07a6bf8a654849194af4c7bb624f381fb61ed5001f453",
+      "name": "/fintech-lab-cost-aware-replay-1",
+      "startedAt": "2026-10-17T14:02:44.352577332Z"
+    },
+    "cb1b281d0b68137f63d6d8f8a5e9216e1eba5f95b4301c8ff1d1d033097c76b7": {
+      "image": "sha256:638188fb82d9487356a7a04f2b08ec90e699b3a5953194838ca25ef2a732b252",
+      "name": "/fintech-lab-dashboard-1",
+      "startedAt": "2026-10-17T10:13:26.771902776Z"
+    },
+    "d3ebc61179259aff418b8fdee977a8d58b973b400913a1f397c928643dff63c5": {
+      "image": "sha256:b2b38366e104d86cfb9f4b559aa31ffd7de26044b7c38e5b3aec9b3f30262a6d",
+      "name": "/fintech-lab-learning-1",
+      "startedAt": "2026-10-05T06:19:47.761673449Z"
+    },
+    "defbe836b4005f1ebc9ec16a4b85a23607b72136278a35c5400be805b7c51cf8": {
+      "image": "sha256:1e539001d2c752228998ae226cdf3b219c86a0a75fa5d8fe246a4632215762c7",
+      "name": "/fintech-lab-hypotheses-1",
+      "startedAt": "2026-10-17T06:41:35.149384189Z"
+    },
+    "eb19a810e859253beabf30e523a212071ace84209f3758edd47f8bce2a99322b": {
+      "image": "sha256:d43341b375211d1a02947f4b312e36de9b04fad6bcd1af9cab1c9d7ec7186740",
+      "name": "/fintech-lab-relearning-trainer-1",
+      "startedAt": "2026-10-17T09:01:32.0992541Z"
+    },
+    "f4cd79a0c17beb13b60cb2906e0766c4de8cd8f871f283f64c8ee9e0e0738bbc": {
+      "image": "sha256:a642e13e14e6d59baf7e2edf03d4b2b95b03598c87e866082d469979a9230ed6",
+      "name": "/fintech-lab-profit-1",
+      "startedAt": "2026-10-06T06:15:29.919292259Z"
+    },
+    "f9953b06702111af37a88ee55fc21ff06b11b3183683be33fcbfa02328dd28e1": {
+      "image": "sha256:917d6551b57f1077bb7d460ae666b5b86c2c0e7c75b06ac0e8e35e3528da2643",
+      "name": "/fintech-lab-historical-replay-1",
+      "startedAt": "2026-10-17T10:02:04.127884195Z"
+    }
+  },
+  "phase": "CLOSED_DIAGNOSTIC_WITH_FOREIGN_OBSERVATION_FAILURE",
+  "productionRecoveryPoint": false,
+  "quantity": "0.00000001",
+  "storageKey": "original.pdf",
+  "terminalContainerRetiredWithoutForce": true
+}

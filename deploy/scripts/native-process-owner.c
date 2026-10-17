@@ -150,6 +150,9 @@ int main(int argc, char **argv) {
         struct timespec pause = {0, 10000000};
         nanosleep(&pause, NULL);
     }
+    /* A short command can finish between polls. Its final bytes/headroom must
+     * still satisfy the same budget before a successful receipt is issued. */
+    if (result == 0 && !storage_ok()) result = 123;
     fprintf(stderr, "\nSABALAN_NATIVE_REAPED %s %d\n", argv[2], result);
     return result;
 }

@@ -30,7 +30,7 @@ const lsnText = value => (value >> 32n).toString(16).toUpperCase() + '/' + (valu
 test('native compressed physical base and concurrently streamed WAL cover a later exact committed transaction',
   { skip: !canonical || !source || !binaryPath, timeout: 1200000 }, async () => {
     const binary = fs.readFileSync(binaryPath);
-    assert.equal(sha(binary), '38345d53af8b03a1ce66b0c10cd21647fd6dcb21bedb63bb654817e263a8148c');
+    assert.equal(sha(binary), 'c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83');
     const before = identities(), operation = randomBytes(16).toString('hex');
     const namespace = 'sabalan-base-chain-' + operation;
     const databaseName = 'sabalanerp_concurrency_' + operation.slice(0, 16);

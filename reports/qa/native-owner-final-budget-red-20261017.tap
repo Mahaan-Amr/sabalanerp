@@ -1,0 +1,14 @@
+ORIGINAL_SHORT_WRITER_BUDGET_REGRESSION_CONFIRMED
+
+======================================================================
+FAIL: test_finished_storage_writer_requires_final_budget (__main__.OldBudget) (bytes=4096)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/sabalan-recovery-private/native-qa/native-owner-storage-final-20261017/tests/online-deployment/native-process-owner.test.py", line 59, in test_finished_storage_writer_requires_final_budget
+    self.assertEqual(result.returncode, expected)
+AssertionError: 0 != 123
+
+----------------------------------------------------------------------
+Ran 1 test in 0.141s
+
+FAILED (failures=1)

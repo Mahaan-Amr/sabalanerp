@@ -48,6 +48,17 @@ class NativeProcessOwner(unittest.TestCase):
             self.assertNotIn(b'SABALAN_NATIVE_REAPED', result.stderr)
             self.assertFalse(marker.exists())
 
+    def test_finished_storage_writer_requires_final_budget(self):
+        for size, expected in [(512, 0), (4096, 123)]:
+            with self.subTest(bytes=size), tempfile.TemporaryDirectory(prefix='sabalan-native-finished-') as directory:
+                environment = dict(os.environ, SABALAN_NATIVE_STORAGE_ROOT=directory,
+                                   SABALAN_NATIVE_STORAGE_MAX_BYTES='1024', SABALAN_NATIVE_STORAGE_RESERVE_BYTES='1048576')
+                code = "import pathlib;pathlib.Path(" + repr(directory + '/done') + ").write_bytes(b'x'*" + str(size) + ")"
+                result = subprocess.run([str(self.binary), '2', 'finished-storage', 'python3', '-c', code],
+                                        env=environment, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, expected)
+                self.assertIn(('SABALAN_NATIVE_REAPED finished-storage ' + str(expected) + '\n').encode(), result.stderr)
+
     def test_deadline_reaps_detached_descendant_before_completion(self):
         marker = pathlib.Path(self.work.name) / 'escaped-write'
         # setsid and a double fork must not escape the subreaper's ownership.

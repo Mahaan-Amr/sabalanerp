@@ -3,17 +3,66 @@
  * guessed PID, shared process group, or unrelated container process. */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <ftw.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
 static volatile sig_atomic_t cancelled;
+static const char *storage_root;
+static unsigned long long storage_limit, storage_reserve, storage_bytes, storage_members;
+static dev_t storage_device;
+static ino_t storage_inode;
+
+static int count_storage(const char *name, const struct stat *value, int type, struct FTW *walk) {
+    (void)name; (void)walk;
+    if (++storage_members > 250000 || (type != FTW_F && type != FTW_D && type != FTW_DP)) return 1;
+    if (type == FTW_F) {
+        if (value->st_size < 0 || (unsigned long long)value->st_size > storage_limit - storage_bytes) return 1;
+        storage_bytes += (unsigned long long)value->st_size;
+    }
+    return 0;
+}
+
+static int storage_ok(void) {
+    if (!storage_root) return 1;
+    struct stat root;
+    struct statvfs capacity;
+    if (lstat(storage_root, &root) || !S_ISDIR(root.st_mode) || root.st_uid != getuid()
+        || (root.st_mode & 077) || root.st_dev != storage_device || root.st_ino != storage_inode
+        || statvfs(storage_root, &capacity) || !capacity.f_frsize
+        || capacity.f_bavail < storage_reserve / capacity.f_frsize + (storage_reserve % capacity.f_frsize != 0)) return 0;
+    storage_bytes = storage_members = 0;
+    return nftw(storage_root, count_storage, 16, FTW_PHYS | FTW_MOUNT) == 0;
+}
+
+static int storage_configuration(void) {
+    storage_root = getenv("SABALAN_NATIVE_STORAGE_ROOT");
+    const char *limit = getenv("SABALAN_NATIVE_STORAGE_MAX_BYTES");
+    const char *reserve = getenv("SABALAN_NATIVE_STORAGE_RESERVE_BYTES");
+    if (!storage_root && !limit && !reserve) return 1;
+    if (!storage_root || !limit || !reserve || storage_root[0] != '/' || !*limit || !*reserve
+        || strspn(limit,"0123456789") != strlen(limit) || strspn(reserve,"0123456789") != strlen(reserve)) return 0;
+    char *end;
+    errno = 0; storage_limit = strtoull(limit, &end, 10);
+    if (errno || *end || storage_limit < 1024) return 0;
+    errno = 0; storage_reserve = strtoull(reserve, &end, 10);
+    if (errno || *end || storage_reserve < 1024 * 1024) return 0;
+    char resolved[PATH_MAX]; struct stat root;
+    if (!realpath(storage_root, resolved) || strcmp(storage_root, resolved) || lstat(storage_root, &root)
+        || !S_ISDIR(root.st_mode) || root.st_uid != getuid() || (root.st_mode & 077)) return 0;
+    storage_device = root.st_dev; storage_inode = root.st_ino;
+    return storage_ok();
+}
 static void cancel(int signal_number) { (void)signal_number; cancelled = 1; }
 static double now(void) {
     struct timespec value;
@@ -52,6 +101,7 @@ int main(int argc, char **argv) {
     long seconds = strtol(argv[1], &end, 10);
     if (*end || seconds < 1 || seconds > 1800 || strlen(argv[2]) > 120
         || strspn(argv[2], "abcdefghijklmnopqrstuvwxyz0123456789-") != strlen(argv[2])) return 126;
+    if (!storage_configuration()) return 126;
     if (prctl(PR_SET_CHILD_SUBREAPER, 1)) return 126;
     struct sigaction action = {0};
     action.sa_handler = cancel;
@@ -68,7 +118,12 @@ int main(int argc, char **argv) {
     }
     double deadline = now() + seconds;
     int result = 125, main_done = 0, stopping = 0;
+    double storage_check = now();
     for (;;) {
+        if (!stopping && now() >= storage_check) {
+            storage_check = now() + 0.2;
+            if (!storage_ok()) { result = 123; stopping = 1; }
+        }
         if (!stopping && (cancelled || now() >= deadline)) {
             result = 124;
             stopping = 1;

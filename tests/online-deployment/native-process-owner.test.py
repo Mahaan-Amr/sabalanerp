@@ -21,6 +21,33 @@ class NativeProcessOwner(unittest.TestCase):
     def tearDownClass(cls):
         cls.work.cleanup()
 
+    def test_storage_growth_reaps_writer_before_completion_receipt(self):
+        with tempfile.TemporaryDirectory(prefix='sabalan-native-storage-') as directory:
+            root = pathlib.Path(directory)
+            environment = dict(os.environ, SABALAN_NATIVE_STORAGE_ROOT=directory,
+                               SABALAN_NATIVE_STORAGE_MAX_BYTES='4096', SABALAN_NATIVE_STORAGE_RESERVE_BYTES='1048576')
+            code = "import pathlib,time;root=pathlib.Path(" + repr(directory) + ");f=(root/'growing').open('wb');" \
+                   + "\nfor n in range(200):\n f.write(b'x'*4096);f.flush();time.sleep(0.02)\n(root/'escaped').write_text('bad')"
+            result = subprocess.run([str(self.binary), '8', 'storage-growth', 'python3', '-c', code],
+                                    env=environment, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 123)
+            self.assertIn(b'SABALAN_NATIVE_REAPED storage-growth 123\n', result.stderr)
+            size = (root / 'growing').stat().st_size
+            time.sleep(0.1)
+            self.assertEqual((root / 'growing').stat().st_size, size)
+            self.assertFalse((root / 'escaped').exists())
+
+    def test_unavailable_storage_reserve_refuses_before_fork(self):
+        with tempfile.TemporaryDirectory(prefix='sabalan-native-reserve-') as directory:
+            marker = pathlib.Path(directory) / 'should-not-run'
+            environment = dict(os.environ, SABALAN_NATIVE_STORAGE_ROOT=directory,
+                               SABALAN_NATIVE_STORAGE_MAX_BYTES='4096', SABALAN_NATIVE_STORAGE_RESERVE_BYTES=str(2**64 - 1))
+            result = subprocess.run([str(self.binary), '2', 'storage-reserve', 'touch', str(marker)],
+                                    env=environment, capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 126)
+            self.assertNotIn(b'SABALAN_NATIVE_REAPED', result.stderr)
+            self.assertFalse(marker.exists())
+
     def test_deadline_reaps_detached_descendant_before_completion(self):
         marker = pathlib.Path(self.work.name) / 'escaped-write'
         # setsid and a double fork must not escape the subreaper's ownership.

@@ -1,0 +1,2 @@
+{"host": "production", "ok": true, "availableBytes": 35048284160, "removed": {"containers": 0, "images": 0}}
+{"host": "independent-backup", "ok": true, "availableBytes": 3877789696, "removed": {"containers": 0, "images": 0}}

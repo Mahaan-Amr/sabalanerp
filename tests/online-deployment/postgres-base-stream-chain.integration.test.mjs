@@ -30,7 +30,7 @@ const lsnText = value => (value >> 32n).toString(16).toUpperCase() + '/' + (valu
 test('native compressed physical base and concurrently streamed WAL cover a later exact committed transaction',
   { skip: !canonical || !source || !binaryPath, timeout: 1200000 }, async () => {
     const binary = fs.readFileSync(binaryPath);
-    assert.equal(sha(binary), 'cd4f193fef97afd5b067ee8e105d010e7da4d7236b2851b28c6245563997faa3');
+    assert.equal(sha(binary), '38345d53af8b03a1ce66b0c10cd21647fd6dcb21bedb63bb654817e263a8148c');
     const before = identities(), operation = randomBytes(16).toString('hex');
     const namespace = 'sabalan-base-chain-' + operation;
     const databaseName = 'sabalanerp_concurrency_' + operation.slice(0, 16);
@@ -46,7 +46,9 @@ test('native compressed physical base and concurrently streamed WAL cover a late
       verify();
       // The shell retains FD9 until the subreaper has issued its exact receipt
       // and the status/logs are persisted. A Docker-client exit is insufficient.
-      const child = spawn('docker', ['exec', '-e', 'PGAPPNAME=' + applicationName, pgId, 'sh', '-c',
+      const child = spawn('docker', ['exec', '-e', 'PGAPPNAME=' + applicationName,
+        '-e', 'SABALAN_NATIVE_STORAGE_ROOT=' + root, '-e', 'SABALAN_NATIVE_STORAGE_MAX_BYTES=' + storageMaximum,
+        '-e', 'SABALAN_NATIVE_STORAGE_RESERVE_BYTES=2147483648', pgId, 'sh', '-c',
         'set -u; root="$1"; name="$2"; token="$3"; shift 3; umask 077; exec 9>>"$root/$name.lock"; flock -n 9 || exit 75; test ! -e "$root/$name.active" || exit 75; printf ACTIVE >"$root/$name.active"; sync; "$root/owner" 900 "$token" "$@" >"$root/$name.stdout" 2>"$root/$name.stderr"; result=$?; printf "%s" "$result" >"$root/$name.status"; sync; exit "$result"',
         'native-chain-command', root, name, operation + '-' + name, ...command], { stdio: ['ignore', 'pipe', 'pipe'] });
       let output = '', errors = '';
@@ -62,7 +64,7 @@ test('native compressed physical base and concurrently streamed WAL cover a late
       assert.ok(proof.startsWith('SABALAN_NATIVE_REAPED ' + operation + '-' + command.name + ' 0\n'), proof);
       return proof;
     };
-    let receiver, receiverResult, base, endLsn, successful = false;
+    let receiver, receiverResult, base, endLsn, storageMaximum, result, successful = false;
     const commands = [];
     try {
       await admin.connect();
@@ -71,6 +73,7 @@ test('native compressed physical base and concurrently streamed WAL cover a late
         (SELECT sum(pg_database_size(oid))::text FROM pg_database) AS "clusterBytes",
         (SELECT count(*)::integer FROM pg_tablespace WHERE spcname NOT IN ('pg_default','pg_global')) AS "externalTablespaces"`)).rows;
       assert.equal(profile.systemIdentifier, '7667464637415309346'); assert.equal(profile.externalTablespaces, 0);
+      storageMaximum = (BigInt(profile.clusterBytes) * 2n + 536870912n).toString();
       const available = BigInt(docker(['exec', pgId, 'sh', '-c', 'df -Pk /tmp | tail -1 | awk \'{print $4}\'']).trim()) * 1024n;
       assert.ok(available > BigInt(profile.clusterBytes) * 4n + 2n * 1024n ** 3n);
       await admin.query(`CREATE DATABASE "${databaseName}"`); await writer.connect();
@@ -138,12 +141,11 @@ test('native compressed physical base and concurrently streamed WAL cover a late
       assert.deepEqual(identities(), before);
       const archiveSha256 = docker(['exec', pgId, 'sha256sum', root + '/base/base.tar.gz']).split(/\s/)[0];
       const archiveBytes = Number(docker(['exec', pgId, 'stat', '-c', '%s', root + '/base/base.tar.gz']).trim());
-      const result = { nativeBaseStreamChainPassed: true, operation, namespace, databaseName, root, source: profile, range, segments,
+      result = { nativeBaseStreamChainPassed: true, operation, namespace, databaseName, root, source: profile, range, segments,
         committedLsn, expected: { id: 'retained', amount: '123456789.12345678', quantity: '0.00000001' }, baseRange,
         archiveSha256, archiveBytes, manifestSha256: sha(Buffer.from(manifestBytes)), binarySha256: sha(binary),
         fixtureSha256: sha(fs.readFileSync(import.meta.filename)), canonicalBeforeAndAfter: before,
         limits: ['local physical component only', 'unencrypted private source retained', 'independent replay and coherent application recovery not yet established'] };
-      fs.writeFileSync(path.join(repository, 'reports/qa/base-stream-chain-' + operation + '.json'), JSON.stringify(result, null, 2) + '\n', { flag: 'wx' });
       successful = true;
     } finally {
       // Never kill an unknown native command or drop its source database.
@@ -172,4 +174,8 @@ test('native compressed physical base and concurrently streamed WAL cover a late
       } finally { await admin.end(); }
       if (failures.length) throw new AggregateError(failures, 'NATIVE_BASE_CHAIN_COMPLETION_UNPROVEN');
     }
+    assert.deepEqual(identities(), before);
+    assert.ok(successful && result);
+    result.temporaryDatabaseDroppedWithoutForce = true;
+    fs.writeFileSync(path.join(repository, 'reports/qa/base-stream-chain-' + operation + '.json'), JSON.stringify(result, null, 2) + '\n', { flag: 'wx' });
   });

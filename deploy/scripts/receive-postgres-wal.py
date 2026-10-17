@@ -32,9 +32,19 @@ def lsn(value):
 
 def digest(file):
     value = hashlib.sha256()
-    with file.open('rb') as source:
-        while chunk := source.read(256 * 1024):
+    fd = os.open(file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        before = os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and before.st_uid == os.getuid()
+                and not before.st_mode & 0o077, 'WAL_STREAM_FILE_UNPROVEN')
+        while chunk := os.read(fd, 256 * 1024):
             value.update(chunk)
+        after, named = os.fstat(fd), os.lstat(file)
+        require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) ==
+                (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                and (named.st_dev, named.st_ino) == (before.st_dev, before.st_ino), 'WAL_STREAM_FILE_CHANGED')
+    finally:
+        os.close(fd)
     return value.hexdigest()
 
 
@@ -49,8 +59,10 @@ def run():
                 and not value.st_mode & 0o022 and 0 < value.st_size <= 32768, 'WAL_STREAM_CONFIGURATION_INVALID')
         encoded = os.read(fd, 32769)
         after = os.fstat(fd)
+        named_configuration = os.lstat(file)
         require((value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns) ==
-                (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns), 'WAL_STREAM_CONFIGURATION_CHANGED')
+                (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                and (named_configuration.st_dev, named_configuration.st_ino) == (value.st_dev, value.st_ino), 'WAL_STREAM_CONFIGURATION_CHANGED')
         configuration = json.loads(encoded)
     finally:
         os.close(fd)
@@ -140,6 +152,9 @@ def run():
     finally:
         os.close(fd)
     directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW); os.fsync(directory_fd)
+    parent_fd = os.open(root.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try: os.fsync(parent_fd)
+    finally: os.close(parent_fd)
     closure_proven = False
     try:
         cancelled = False
@@ -215,7 +230,14 @@ def run():
         with temporary.open('x') as stream:
             os.chmod(temporary, 0o600); json.dump(result, stream, sort_keys=True); stream.flush(); os.fsync(stream.fileno())
         os.replace(temporary, state_file); os.fsync(directory_fd)
-        print(json.dumps(result), flush=True)
+        # A lost Docker/HTTP acknowledgement cannot undo the durably completed
+        # component. Replacement readers recover the exact committed record.
+        try:
+            print(json.dumps(result), flush=True)
+        except OSError:
+            sink = os.open(os.devnull, os.O_WRONLY)
+            try: os.dup2(sink, 1)
+            finally: os.close(sink)
         return 0
     except BaseException:
         if closure_proven:

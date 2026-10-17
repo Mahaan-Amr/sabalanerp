@@ -1,0 +1,37 @@
+TAP version 13
+# 4+0 records in
+# 4+0 records out
+# 4 bytes (4B) copied, 0.001032 seconds, 3.8KB/s
+# Subtest: native PostgreSQL checks actual streamed WAL records and rejects modified CRC bytes
+not ok 1 - native PostgreSQL checks actual streamed WAL records and rejects modified CRC bytes
+  ---
+  duration_ms: 10465.4535
+  location: 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\tests\\online-deployment\\postgres-streamed-wal-native.integration.test.mjs:34:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /incorrect resource manager data checksum/i. Input:
+    
+    'pg_waldump: error: could not find a valid record after C/5A000028\n'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: |-
+    pg_waldump: error: could not find a valid record after C/5A000028
+    
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/tests/online-deployment/postgres-streamed-wal-native.integration.test.mjs:125:50)
+    process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10593.2944

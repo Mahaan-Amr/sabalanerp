@@ -122,7 +122,10 @@ print(json.dumps({'state':state,'files':files}))`, root]));
         verify();
         const rejected = spawnSync('docker', ['exec', pgId, 'pg_waldump', '-q', '-p', target, '-s', firstLsn, '-e', range.endLsn], { encoding: 'utf8', timeout: 30000 });
         assert.equal(rejected.error, undefined); assert.equal(rejected.signal, null);
-        assert.equal(rejected.status, 1); assert.match(rejected.stderr, /incorrect resource manager data checksum/i);
+        // pg_waldump's initial-record discovery may reject the damaged first
+        // header before its normal record loop prints the detailed CRC error.
+        assert.equal(rejected.status, 1);
+        assert.match(rejected.stderr, /incorrect resource manager data checksum|could not find a valid record after/i);
         assert.deepEqual(identities(), before);
         proofs.push({ captureReport: reportPath, captureReportSha256: sha(bytes), namespace: capture.namespace,
           nativeVersion, segments: capture.segments, completeNativeRangeVerified: true, firstRecordLsn: firstLsn,

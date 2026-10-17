@@ -1140,7 +1140,7 @@ export const accountingAPI = {
     api.post(`/accounting/dispatch-waybills/${id}/void`, data),
   replaceDispatchWaybill: (id: string, data: { reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-waybills/${id}/replace`, data),
-  getContracts: (params?: any) => api.get('/accounting/contracts', { params }),
+  getContracts: (params?: any, signal?: AbortSignal) => api.get('/accounting/contracts', { params, signal }),
   getContract: (contractId: string) => api.get(`/accounting/contracts/${contractId}`),
   getContractLifecycle: (contractId: string) => api.get(`/accounting/contracts/${contractId}/lifecycle`),
   getContractLifecycleRequests: (params?: any) => api.get('/accounting/contract-lifecycle-requests', { params }),

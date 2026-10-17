@@ -5,7 +5,7 @@ import { appendAuthorizationDecision, readAuthorizationDecisions } from '../../e
 import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot } from './contracts';
 import { prismaAuthorizationSource } from './prisma';
 import type { PartnerAuthorizationTarget } from './prisma';
-import { resolvePartnerScopedAuthority } from './centralAuthority';
+import { resolvePartnerAccountingScopedAuthority, resolvePartnerScopedAuthority } from './centralAuthority';
 import { createPartnerAuthorizationV2 } from './service';
 import { readActions } from './capabilities';
 
@@ -17,7 +17,8 @@ export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, 
   if (!audit.correlationId.trim() || audit.correlationId.length > 200 || (audit.reason?.length ?? 0) > 2000) {
     throw new Error('Valid authorization audit context required');
   }
-  const source = prismaAuthorizationSource(tx, resolvePartnerScopedAuthority, target);
+  const source = prismaAuthorizationSource(tx, binding.purpose === 'ACCOUNTING'
+    ? resolvePartnerAccountingScopedAuthority : resolvePartnerScopedAuthority, target);
   return { async authorize(action, root) {
     // Malformed transport input is not a resource decision and must never be
     // copied into retained audit data. The transport owns request-error logs.

@@ -16,9 +16,9 @@ test('Partner read snapshots coexist while a writer waits for their shared bound
   let secondEntered = false;
   let writerEntered = false;
 
-  const first = readPartnerSnapshot(prisma, async () => { firstEntered(); await held; });
+  const first = readPartnerSnapshot(prisma, async () => { firstEntered(); await held; }, { multiRootAuthority: false });
   await firstStarted;
-  const second = readPartnerSnapshot(prisma, async () => { secondEntered = true; });
+  const second = readPartnerSnapshot(prisma, async () => { secondEntered = true; }, { multiRootAuthority: false });
   let writer: Promise<void> | null = null;
   try {
     await pause(300);

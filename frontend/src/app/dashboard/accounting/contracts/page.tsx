@@ -2,11 +2,10 @@
 import { accountingCorrectionFields } from '@/features/accounting/accountingCorrectionFields';
 import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpButton, ErpPressable } from '@/components/erp';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   FaCheckCircle,
-  FaClipboardCheck,
   FaExclamationTriangle,
   FaEye,
   FaDownload,
@@ -18,7 +17,6 @@ import {
 } from 'react-icons/fa';
 import {
   ErpBadge,
-  ErpEmptyState,
   ErpListPage,
   ErpPagination,
   ErpSection,
@@ -33,6 +31,8 @@ import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPre
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import AccountingCustomerCategoryBadge from '@/features/accounting/AccountingCustomerCategoryBadge';
 import { financialEvidenceReviewFromConflict } from '@/features/accounting/financialEvidenceReview';
+import { AccountingContractsFeedback, accountingContractsResponse } from '@/features/accounting/AccountingContractsFeedback';
+import { createAccountingContractsLoader } from '@/features/accounting/accountingContractsLoader';
 import {
   canonicalizeContractsQuery,
   patchContractsQuery,
@@ -79,7 +79,10 @@ export default function AccountingContractsPage() {
   const [rows, setRows] = useState<AccountingContractRow[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState(query.search);
+  const searchEdit = useRef(0);
+  const submittedSearches = useRef(new Map<string, number>());
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reviewActionUrl, setReviewActionUrl] = useState<string | null>(null);
@@ -103,11 +106,26 @@ export default function AccountingContractsPage() {
     if (canonicalQuery.params.toString() !== searchParams.toString()) replaceQuery(canonicalQuery);
   }, [canonicalQuery, replaceQuery, searchParams]);
 
-  useEffect(() => setSearchInput(query.search), [query.search]);
+  useEffect(() => {
+    const submittedEdit = submittedSearches.current.get(query.search);
+    if (submittedEdit !== undefined) {
+      submittedSearches.current.forEach((revision, text) => {
+        if (revision <= submittedEdit) submittedSearches.current.delete(text);
+      });
+      // Acknowledging an earlier URL update must not erase newer typing.
+      if (searchEdit.current > submittedEdit) return;
+    } else {
+      submittedSearches.current.clear();
+    }
+    setSearchInput(query.search);
+  }, [query.search]);
 
   useEffect(() => {
     if (searchInput.trim() === query.search) return;
-    const timeout = window.setTimeout(() => updateQuery({ search: searchInput }), 350);
+    const timeout = window.setTimeout(() => {
+      submittedSearches.current.set(searchInput.trim(), searchEdit.current);
+      updateQuery({ search: searchInput });
+    }, 350);
     return () => window.clearTimeout(timeout);
   }, [query.search, searchInput, updateQuery]);
 
@@ -119,10 +137,27 @@ export default function AccountingContractsPage() {
     updateQuery({ [key]: value ? PersianCalendar.toGregorianDateOnly(value) : '' });
   }, [updateQuery]);
 
-  const loadContracts = useCallback(async () => {
-    try {
+  const contractsLoader = useMemo(() => createAccountingContractsLoader({
+    read: async (params: Record<string, unknown>, signal: AbortSignal) => {
+      const response = await accountingAPI.getContracts(params, signal);
+      return accountingContractsResponse(response.data);
+    },
+    start: () => {
       setLoading(true);
-      const response = await accountingAPI.getContracts({
+      setLoadError(null);
+    },
+    success: data => {
+      setRows(data.items);
+      setPagination({ page: data.page, pageSize: data.pageSize, total: data.total });
+    },
+    failure: error => {
+      console.error('Error loading accounting contracts:', error);
+      setLoadError(accountingFailureMessage(error, 'دریافت قراردادهای حسابداری انجام نشد. دوباره تلاش کنید.'));
+    },
+    settled: () => setLoading(false),
+  }), []);
+
+  const loadContracts = useCallback(() => contractsLoader.load({
         view: query.view || undefined,
         lifecycleView: query.lifecycleView,
         search: query.search || undefined,
@@ -133,25 +168,12 @@ export default function AccountingContractsPage() {
         dateTo: query.dateTo || undefined,
         page: query.page,
         pageSize: pagination.pageSize,
-      });
-      if (response.data.success) {
-        setRows(response.data.data.items);
-        setPagination({
-          page: response.data.data.page,
-          pageSize: response.data.data.pageSize,
-          total: response.data.data.total,
-        });
-      }
-    } catch (error) {
-      console.error('Error loading accounting contracts:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [pagination.pageSize, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceKind, query.sourceStatus, query.status, query.view]);
+  }), [contractsLoader, pagination.pageSize, query.dateFrom, query.dateTo, query.lifecycleView, query.page, query.search, query.sourceKind, query.sourceStatus, query.status, query.view]);
 
   useEffect(() => {
-    loadContracts();
-  }, [loadContracts]);
+    void loadContracts();
+    return () => contractsLoader.cancel();
+  }, [contractsLoader, loadContracts]);
 
   const execute = async (contract: AccountingContractRow, action: any) => {
     setActionLoading(`${contract.contractId}:${action.kind}`);
@@ -560,7 +582,7 @@ export default function AccountingContractsPage() {
           label: 'جستجو',
           type: 'search',
           value: searchInput,
-          onChange: setSearchInput,
+          onChange: value => { searchEdit.current += 1; setSearchInput(value); },
           placeholder: 'جستجو در شماره قرارداد، مشتری، کد ملی یا عنوان...',
         },
         {
@@ -580,17 +602,17 @@ export default function AccountingContractsPage() {
           options: sourceStatusOptions,
         },
       ]}
-      rows={rows}
+      rows={loadError ? [] : rows}
       rowKey={(contract) => contract.contractId}
       rowClassName={(contract) => contract.sourceKind === 'PARTNER_INTERNAL_RECORD'
         ? 'border-2 border-[var(--sds-purple-border)]'
         : 'border-2 border-[var(--sds-warning-border)]'}
       columns={columns}
       rowActions={rowActions}
-      isLoading={loading}
-      emptyState={<ErpEmptyState icon={FaClipboardCheck} title="قراردادی یافت نشد" description="فیلترها را تغییر دهید یا بعد از ثبت قرارداد جدید دوباره بررسی کنید." />}
+      isLoading={loading || searchInput.trim() !== query.search}
+      emptyState={<AccountingContractsFeedback error={loadError} onRetry={loadContracts} />}
       footer={
-        <ErpPagination
+        !loadError && <ErpPagination
           currentPage={pagination.page}
           totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)}
           totalItems={pagination.total}

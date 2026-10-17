@@ -1,0 +1,53 @@
+{
+  "operation": "5c01c15b27195ea431768713f45647f2",
+  "privateRoot": "/app/online-runtime-acceptance/retained-ui-5c01c15b27195ea431768713f45647f2",
+  "canonical": [
+    {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  ],
+  "productionAdmission": false,
+  "containers": [
+    {
+      "id": "7fdcbe3ba718f9b6f375bfdec56ccf470567099755bcc9716fb995b00b3f2cda",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "service": "frontend-online-proxy",
+      "startedAt": "2026-10-17T11:24:15.947958527Z",
+      "finishedAt": "2026-10-17T11:28:00.961536949Z",
+      "exitCode": 0
+    },
+    {
+      "id": "c0f5e4936953f7be58b889b1321f654ee9428661d23806e5f63466f3650ceacf",
+      "image": "sha256:b6dd747d31d933d043cd1dfbed95b3e874813b0ce3621159c63f33b7bdb8b58c",
+      "service": "frontend-online-old",
+      "startedAt": "2026-10-17T11:24:15.690272057Z",
+      "finishedAt": "2026-10-17T11:28:02.496626198Z",
+      "exitCode": 0
+    },
+    {
+      "id": "9e09ab8568981c9a8403fade1f3354bc702ec0d948c8b42c9fbd2b0b169c9ea9",
+      "image": "sha256:ba5add7babc6a14ae5d563390eeebda9dfd3d2cafafd8fb5e118eb1c0c438bcf",
+      "service": "frontend-online-new",
+      "startedAt": "2026-10-17T11:24:15.404120717Z",
+      "finishedAt": "2026-10-17T11:28:04.087993816Z",
+      "exitCode": 0
+    }
+  ]
+}

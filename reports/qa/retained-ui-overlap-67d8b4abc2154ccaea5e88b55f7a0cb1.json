@@ -1,0 +1,139 @@
+{
+  "operation": "67d8b4abc2154ccaea5e88b55f7a0cb1",
+  "canonical": [
+    {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  ],
+  "productionAdmission": false,
+  "inquiryActionsExercised": false,
+  "businessApiExercised": false,
+  "privateRoot": "/app/online-runtime-acceptance/retained-ui-67d8b4abc2154ccaea5e88b55f7a0cb1",
+  "sources": {
+    "deploy/scripts/browser-release-routing.mjs": "1e776a013e391e5facd09fdec276ef435ad15ea0d6f04609a3b5a50d65572d71",
+    "deploy/scripts/browser-release-proxy.mjs": "3714c9e9426a22791c2400a59576afadf1fbcc9d61060df7064c5b4ed9b1e665",
+    "deploy/scripts/browser-routing-store.mjs": "fef32b5eb2c90496b4ec60c14eb5141c3eaaf0725106f57371c03c46a8241c23",
+    "deploy/scripts/browser-operation-journal.mjs": "26569b329354c906da32bb43665194f53d54eea0e215fd1acaf0813780ea4164",
+    "tests/online-deployment/retained-ui-proxy.worker.mjs": "1bed6c61788d44b549f0f5b1dad1feb7a11c922c6f37eb3cb71fb01ff699410d",
+    "tests/online-deployment/retained-ui-bundle.fixture.mjs": "3d7c64e3e7e31b2858a288fb6815e23a0ec827b21fb1af0fb24c5862308bfcaa",
+    "tests/online-deployment/private-ui-management.fixture.mjs": "c38508d24bf0ad95861e6685ac81a3f82c4c2d6b061b1abe793d19a82b8825d8",
+    "tests/online-deployment/private-ui-management.test.mjs": "8430414470d7cc1249e53e360e4a00d2f4ca8332f54042fe9fcfb0589c39991d",
+    "tests/online-deployment/private-ui-startup.fixture.mjs": "25c304a211e4b01b945aab8f38e8d41e4e2980bf676ea546b58390296dafd668",
+    "tests/online-deployment/private-ui-startup.test.mjs": "6efb909e90a432de418de32cfe7686f26a0fe822ff381333a9f20c216681e2ac",
+    "tests/online-deployment/retained-ui-overlap.integration.test.mjs": "748abf7558c9028eecff3554bd283a1f09e35106dcc273374c8f096fdd375915",
+    "tests/online-deployment/Dockerfile.retained-ui": "e63bec05aa63d72e512c3e28a8243421d929869c29d0ddf80457737ed5610917",
+    "docker-compose.retained-ui-acceptance.yml": "f06869b4461048556be8f633f3a7225e3591c4d20f180894602cf309047bdce5"
+  },
+  "builds": [
+    {
+      "buildId": "erp_20261015t062600z_2b8094d1_release",
+      "manifestSha256": "6a4f860df24454260a8625faabcbdeec2e3b8ee0d001b3ee4388330ca9a0b40f",
+      "runtimeFiles": 1382,
+      "runtimeBytes": 41198788,
+      "image": "sha256:7962c5edcf434c7f0399844e952d410acbf6f21c43dad5a303f219821de873c6",
+      "slotId": "slot_erp_old",
+      "application": "erp",
+      "id": "erp_20261015t062600z_2b8094d1_release",
+      "actionIds": [],
+      "retiredAt": null,
+      "supportUntil": null,
+      "assets": 273
+    },
+    {
+      "buildId": "erp_draft_handoff_20261017",
+      "manifestSha256": "b664f604be5074afba57939dda259fbb0afb8a97196cdcc0b8d6e0833b7c6b7b",
+      "runtimeFiles": 1377,
+      "runtimeBytes": 41870405,
+      "image": "sha256:263d04b2537b6402ad7663db62fed3f35add5705d7d6435b06e6b08fd1b9f2dc",
+      "slotId": "slot_erp_new",
+      "application": "erp",
+      "id": "erp_draft_handoff_20261017",
+      "actionIds": [],
+      "retiredAt": null,
+      "supportUntil": null,
+      "assets": 272
+    }
+  ],
+  "containers": [
+    {
+      "id": "af95c464e7903f055160e649b69c9374df9d253a7fd45288a78f230676ee4004",
+      "image": "sha256:7962c5edcf434c7f0399844e952d410acbf6f21c43dad5a303f219821de873c6",
+      "startedAt": "2026-10-17T11:47:01.507407043Z"
+    },
+    {
+      "id": "d2fd138168b0dbe5ea15bd934092284dc4128fe6ca560d2d9df87289d34c1e3b",
+      "image": "sha256:263d04b2537b6402ad7663db62fed3f35add5705d7d6435b06e6b08fd1b9f2dc",
+      "startedAt": "2026-10-17T11:47:01.759254538Z"
+    },
+    {
+      "id": "5d0d3f492f09c1e4d1ee31dcdc9f4e32e2b3a46f1da0ae102fe491bd8c961a57",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-17T11:47:02.031914761Z"
+    }
+  ],
+  "results": {
+    "realOldNewBrowserIdentity": true,
+    "originalOpenFormPreserved": true,
+    "realRetainedRsc": [
+      {
+        "path": "/about",
+        "id": "erp_20261015t062600z_2b8094d1_release"
+      }
+    ],
+    "proxyRestartGeneration": 2,
+    "exactOldAssetHash": true,
+    "noCrossSlotRetryOnFailure": true,
+    "rollbackGeneration": 3,
+    "ambiguityRetained": [
+      {
+        "id": "5fd1594da9eea3c5c0fc9fd98648fe3a",
+        "buildId": "erp_draft_handoff_20261017",
+        "method": "GET"
+      }
+    ],
+    "measuredSupportPromises": [
+      {
+        "id": "erp_20261015t062600z_2b8094d1_release",
+        "retiredAt": null,
+        "supportUntil": null
+      },
+      {
+        "id": "inquiry_unexercised_fixture",
+        "retiredAt": null,
+        "supportUntil": null
+      },
+      {
+        "id": "erp_draft_handoff_20261017",
+        "retiredAt": "2026-10-17T11:47:32.734Z",
+        "supportUntil": "2026-10-18T11:47:32.734Z"
+      }
+    ],
+    "elapsed24HoursExercised": false,
+    "draftArchiveExpiryExercised": false,
+    "uncertainDrainRefused": true,
+    "heldTransport": {
+      "sha256": "125fc7e357eebc13193417d7e8b9c60936f46870461a279ff3da38dc8e56bd50",
+      "pendingOperations": 1,
+      "exitCode": 75
+    }
+  },
+  "canonicalUnchanged": true,
+  "status": "PASS_PRIVATE_OVERLAP_WITH_RETAINED_UNKNOWN"
+}

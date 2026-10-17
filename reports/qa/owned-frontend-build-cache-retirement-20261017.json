@@ -1,0 +1,22 @@
+{
+  "freeBefore": 3178082304,
+  "freeAfter": 4855943168,
+  "removed": [
+    {
+      "path": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\frontend\\.next-online-api-identity-20261017\\cache\\webpack",
+      "class": "owned-unused-webpack-build-cache",
+      "removedBytes": 839583500.0,
+      "browserBuildId": "erp_api_identity_20261017",
+      "buildIdSha256": "0ad27ff5172dfae9d344b8635f2c47c912ccdc1658396ab4c74b90e5a288b0d0",
+      "runtimeManifestSha256": "404938caf51e795f58d29a212c6860a0dc9f6cbfd57974ae3b2452c75736685a"
+    },
+    {
+      "path": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\frontend\\.next-online-api-public-bootstrap-20261017\\cache\\webpack",
+      "class": "owned-unused-webpack-build-cache",
+      "removedBytes": 838253349.0,
+      "browserBuildId": "erp_api_public_bootstrap_20261017",
+      "buildIdSha256": "d87175ee7361ae51b374af2713e643f03b1f08fca0097e112341211c513fdfc0",
+      "runtimeManifestSha256": "ea0fea67dbd48a5952147b699261add941e7524fd48ed2b168c3a23450e149b4"
+    }
+  ]
+}

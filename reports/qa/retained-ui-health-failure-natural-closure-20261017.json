@@ -1,0 +1,26 @@
+[
+  {
+    "id": "f1adacd545355c20bd6815bd006ed1c98db182354c67e479b69d3e0d6192d664",
+    "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+    "service": "frontend-online-proxy",
+    "startedAt": "2026-10-17T11:20:36.361036023Z",
+    "finishedAt": "2026-10-17T11:22:58.837725599Z",
+    "exitCode": 0
+  },
+  {
+    "id": "77209846fd0bdf8be4c152156c2319fa8d33c57517bf647d637ad9946c09a098",
+    "image": "sha256:6503cdf60604311fa42da39c588b625aa4d57703d9b48bd005b1fa5e470a303c",
+    "service": "frontend-online-old",
+    "startedAt": "2026-10-17T11:20:36.079225617Z",
+    "finishedAt": "2026-10-17T11:23:00.509594774Z",
+    "exitCode": 0
+  },
+  {
+    "id": "731881b7099f2a82f53c69406939c4e55a953c6da4391361b611a10cf8e35eb5",
+    "image": "sha256:8a0eb9679ebe1d0b9cb2c019365503590a15caeaa18c841d516fe7daf12246f3",
+    "service": "frontend-online-new",
+    "startedAt": "2026-10-17T11:20:35.674816535Z",
+    "finishedAt": "2026-10-17T11:23:02.059609257Z",
+    "exitCode": 0
+  }
+]

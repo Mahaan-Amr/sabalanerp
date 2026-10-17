@@ -1,0 +1,119 @@
+TAP version 13
+# \#0 building with "desktop-linux" instance using docker driver
+# \#1 [internal] load build definition from Dockerfile
+# \#1 transferring dockerfile: 707B 0.0s done
+# \#1 DONE 0.1s
+# \#2 [internal] load metadata for docker.io/library/sabalan-online-diagnostic-base:67d8b4abc2154ccaea5e88b55f7a0cb1
+# \#2 DONE 0.7s
+# \#3 [internal] load .dockerignore
+# \#3 transferring context: 2B done
+# \#3 DONE 0.0s
+# \#4 [internal] load build context
+# \#4 ...
+# \#5 [1/6] FROM docker.io/library/sabalan-online-diagnostic-base:67d8b4abc2154ccaea5e88b55f7a0cb1@sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53
+# \#5 resolve docker.io/library/sabalan-online-diagnostic-base:67d8b4abc2154ccaea5e88b55f7a0cb1@sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53 0.0s done
+# \#5 DONE 0.1s
+# \#4 [internal] load build context
+# \#4 transferring context: 15.72MB 4.9s
+# \#4 transferring context: 27.33MB 10.0s
+# \#4 transferring context: 41.62MB 12.7s done
+# \#4 DONE 12.8s
+# \#6 [3/6] COPY runtime/ /app/.next-online-runtime/
+# \#6 CACHED
+# \#7 [4/6] COPY public/ /app/public/
+# \#7 CACHED
+# \#8 [5/6] COPY next.config.js browser-build-identity.cjs online-runtime-verify.cjs /app/
+# \#8 CACHED
+# \#9 [2/6] RUN rm -rf /app/public
+# \#9 CACHED
+# \#10 [6/6] COPY online-runtime-manifest.json /app/online-runtime-manifest.json
+# \#10 CACHED
+# \#11 exporting to image
+# \#11 exporting layers 0.0s done
+# \#11 exporting manifest sha256:57091c5d00d46759bfcb8c4de4432f5647ec7bfb33c8bd08b8d9d8945f7f869b done
+# \#11 exporting config sha256:952862ff59782adfbb355bd5ba8b1ce3c7cffdf35fba7b02d019c26920895e57 done
+# \#11 exporting attestation manifest sha256:94eba2276f10fa9105b5e521a70761523bc83a8c81b12dfce5df53e6527c6bfb 0.0s done
+# \#11 exporting manifest list sha256:7962c5edcf434c7f0399844e952d410acbf6f21c43dad5a303f219821de873c6
+# \#11 exporting manifest list sha256:7962c5edcf434c7f0399844e952d410acbf6f21c43dad5a303f219821de873c6 0.0s done
+# \#11 naming to docker.io/library/sabalan-online-diagnostic-ui:67d8b4abc2154ccaea5e88b55f7a0cb1-old done
+# \#11 unpacking to docker.io/library/sabalan-online-diagnostic-ui:67d8b4abc2154ccaea5e88b55f7a0cb1-old 0.0s done
+# \#11 DONE 0.2s
+#  [33m1 warning found (use docker --debug to expand):
+# [0m - InvalidDefaultArgInFrom: Default value for ARG ${DIAGNOSTIC_BASE} results in empty or invalid base image name (line 2)
+# View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/4je0nv20dm20j7phdbszt7c4e
+# \#0 building with "desktop-linux" instance using docker driver
+# \#1 [internal] load build definition from Dockerfile
+# \#1 transferring dockerfile: 707B done
+# \#1 WARN: InvalidDefaultArgInFrom: Default value for ARG ${DIAGNOSTIC_BASE} results in empty or invalid base image name (line 2)
+# \#1 DONE 0.0s
+# \#2 [internal] load metadata for docker.io/library/sabalan-online-diagnostic-base:67d8b4abc2154ccaea5e88b55f7a0cb1
+# \#2 DONE 0.0s
+# \#3 [internal] load .dockerignore
+# \#3 transferring context: 2B done
+# \#3 DONE 0.0s
+# \#4 [1/6] FROM docker.io/library/sabalan-online-diagnostic-base:67d8b4abc2154ccaea5e88b55f7a0cb1@sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53
+# \#4 resolve docker.io/library/sabalan-online-diagnostic-base:67d8b4abc2154ccaea5e88b55f7a0cb1@sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53 0.1s done
+# \#4 DONE 0.1s
+# \#5 [internal] load build context
+# \#5 transferring context: 15.09MB 5.0s
+# \#5 transferring context: 24.90MB 10.1s
+# \#5 transferring context: 42.29MB 14.7s done
+# \#5 DONE 14.7s
+# \#6 [4/6] COPY public/ /app/public/
+# \#6 CACHED
+# \#7 [5/6] COPY next.config.js browser-build-identity.cjs online-runtime-verify.cjs /app/
+# \#7 CACHED
+# \#8 [2/6] RUN rm -rf /app/public
+# \#8 CACHED
+# \#9 [3/6] COPY runtime/ /app/.next-online-runtime/
+# \#9 CACHED
+# \#10 [6/6] COPY online-runtime-manifest.json /app/online-runtime-manifest.json
+# \#10 CACHED
+# \#11 exporting to image
+# \#11 exporting layers done
+# \#11 exporting manifest sha256:3f3178616d4321eb24958e5e7fe19e47ccd2dc93c13813e858f2f45abc62a53d done
+# \#11 exporting config sha256:edd31017d312e596acd64f089f273c789ab73f7e074d30b7d7e80511a06782d2
+# \#11 exporting config sha256:edd31017d312e596acd64f089f273c789ab73f7e074d30b7d7e80511a06782d2 done
+# \#11 exporting attestation manifest sha256:05d450cb67b7038e558d09cd5380e5b4d532c9f09f825b1f4d4e29f114476d0d 0.0s done
+# \#11 exporting manifest list sha256:263d04b2537b6402ad7663db62fed3f35add5705d7d6435b06e6b08fd1b9f2dc 0.0s done
+# \#11 naming to docker.io/library/sabalan-online-diagnostic-ui:67d8b4abc2154ccaea5e88b55f7a0cb1-new done
+# \#11 unpacking to docker.io/library/sabalan-online-diagnostic-ui:67d8b4abc2154ccaea5e88b55f7a0cb1-new
+# \#11 unpacking to docker.io/library/sabalan-online-diagnostic-ui:67d8b4abc2154ccaea5e88b55f7a0cb1-new 0.0s done
+# \#11 DONE 0.2s
+#  [33m1 warning found (use docker --debug to expand):
+# [0m - InvalidDefaultArgInFrom: Default value for ARG ${DIAGNOSTIC_BASE} results in empty or invalid base image name (line 2)
+# View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/nre9rs0u96agdjsmwebm5oolc
+# time="2026-10-17T15:17:01+03:30" level=warning msg="Found orphan containers (sabalanerp-local-frontend-candidate-1, sabalanerp-local-backend-candidate-1, sabalanerp-local-backend-retained-1) for this project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+#  Container sabalanerp-local-frontend-online-proxy-1 Creating 
+#  Container sabalanerp-local-frontend-online-old-1 Creating 
+#  Container sabalanerp-local-frontend-online-new-1 Creating 
+#  Container sabalanerp-local-frontend-online-new-1 Created 
+#  Container sabalanerp-local-frontend-online-old-1 Created 
+#  Container sabalanerp-local-frontend-online-proxy-1 Created 
+#  Container sabalanerp-local-frontend-online-old-1 Starting 
+#  Container sabalanerp-local-frontend-online-new-1 Starting 
+#  Container sabalanerp-local-frontend-online-proxy-1 Starting 
+#  Container sabalanerp-local-frontend-online-old-1 Started 
+#  Container sabalanerp-local-frontend-online-new-1 Started 
+#  Container sabalanerp-local-frontend-online-proxy-1 Started 
+#  Container sabalanerp-local-frontend-online-old-1 Waiting 
+#  Container sabalanerp-local-frontend-online-proxy-1 Waiting 
+#  Container sabalanerp-local-frontend-online-new-1 Waiting 
+#  Container sabalanerp-local-frontend-online-old-1 Healthy 
+#  Container sabalanerp-local-frontend-online-new-1 Healthy 
+#  Container sabalanerp-local-frontend-online-proxy-1 Healthy 
+# {"operation":"67d8b4abc2154ccaea5e88b55f7a0cb1","report":"retained-ui-overlap-67d8b4abc2154ccaea5e88b55f7a0cb1.json","results":{"realOldNewBrowserIdentity":true,"originalOpenFormPreserved":true,"realRetainedRsc":[{"path":"/about","id":"erp_20261015t062600z_2b8094d1_release"}],"proxyRestartGeneration":2,"exactOldAssetHash":true,"noCrossSlotRetryOnFailure":true,"rollbackGeneration":3,"ambiguityRetained":[{"id":"5fd1594da9eea3c5c0fc9fd98648fe3a","buildId":"erp_draft_handoff_20261017","method":"GET"}],"measuredSupportPromises":[{"id":"erp_20261015t062600z_2b8094d1_release","retiredAt":null,"supportUntil":null},{"id":"inquiry_unexercised_fixture","retiredAt":null,"supportUntil":null},{"id":"erp_draft_handoff_20261017","retiredAt":"2026-10-17T11:47:32.734Z","supportUntil":"2026-10-18T11:47:32.734Z"}],"elapsed24HoursExercised":false,"draftArchiveExpiryExercised":false,"uncertainDrainRefused":true,"heldTransport":{"sha256":"125fc7e357eebc13193417d7e8b9c60936f46870461a279ff3da38dc8e56bd50","pendingOperations":1,"exitCode":75}},"builds":[{"buildId":"erp_20261015t062600z_2b8094d1_release","manifestSha256":"6a4f860df24454260a8625faabcbdeec2e3b8ee0d001b3ee4388330ca9a0b40f","runtimeFiles":1382,"runtimeBytes":41198788,"image":"sha256:7962c5edcf434c7f0399844e952d410acbf6f21c43dad5a303f219821de873c6","slotId":"slot_erp_old","application":"erp","id":"erp_20261015t062600z_2b8094d1_release","actionIds":[],"retiredAt":null,"supportUntil":null,"assets":273},{"buildId":"erp_draft_handoff_20261017","manifestSha256":"b664f604be5074afba57939dda259fbb0afb8a97196cdcc0b8d6e0833b7c6b7b","runtimeFiles":1377,"runtimeBytes":41870405,"image":"sha256:263d04b2537b6402ad7663db62fed3f35add5705d7d6435b06e6b08fd1b9f2dc","slotId":"slot_erp_new","application":"erp","id":"erp_draft_handoff_20261017","actionIds":[],"retiredAt":null,"supportUntil":null,"assets":272}]}
+# Subtest: immutable real Next builds preserve old tabs across durable switch, proxy restart, failed new slot and current-code rollback
+ok 1 - immutable real Next builds preserve old tabs across durable switch, proxy restart, failed new slot and current-code rollback
+  ---
+  duration_ms: 86523.184
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 86623.464

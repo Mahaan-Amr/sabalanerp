@@ -1,0 +1,30 @@
+TAP version 13
+# Subtest: actual installed Next configuration rejects both runtime deployment-identity overrides
+ok 1 - actual installed Next configuration rejects both runtime deployment-identity overrides
+  ---
+  duration_ms: 2332.7386
+  ...
+# Subtest: a real browser loads versioned assets and sends its own build identity on RSC navigation
+ok 2 - a real browser loads versioned assets and sends its own build identity on RSC navigation
+  ---
+  duration_ms: 2802.7777
+  ...
+# Subtest: compiled login and session bootstrap send the same immutable producer identity without losing form input on denial
+ok 3 - compiled login and session bootstrap send the same immutable producer identity without losing form input on denial
+  ---
+  duration_ms: 2269.9985
+  ...
+# Subtest: an anonymous compiled private route still requires login after the public-page bootstrap correction
+ok 4 - an anonymous compiled private route still requires login after the public-page bootstrap correction
+  ---
+  duration_ms: 2567.0615
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10080.9962

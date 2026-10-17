@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { salesAPI } from '@/lib/api';
+import { salesAPI, browserSessionContinuation } from '@/lib/api';
+import { archiveBrowserDraft } from '@/lib/browserDraftArchive';
 import {
   createCoalescedContractCheckpointState,
   createContractRecoveryEnvelope,
@@ -126,6 +127,8 @@ export const useContractEditRecovery = <Payload>({
   const [ready, setReady] = useState(false);
   const [checkpointError, setCheckpointError] = useState(false);
   const [takeoverPending, setTakeoverPending] = useState(false);
+  const [reloadPending, setReloadPending] = useState(false);
+  const reloading = useRef(false);
   const sequenceRef = useRef(0);
   const checkpointState = useMemo(
     () => ({
@@ -484,10 +487,27 @@ export const useContractEditRecovery = <Payload>({
     }
   }, [clearLocalRecovery, scope]);
 
-  const reloadLatestRevision = useCallback(() => {
-    clearLocalRecovery();
-    window.location.reload();
-  }, [clearLocalRecovery]);
+  const reloadLatestRevision = useCallback(async (payload: Payload | null) => {
+    if (reloading.current || !scope || payload === null) return false;
+    reloading.current = true; setReloadPending(true);
+    try {
+      const payloadJson = JSON.stringify(payload);
+      const lease = await browserSessionContinuation.acquire();
+      if (lease.userId !== scope.userId) throw Error('AUTH_CONTEXT_CHANGED');
+      await archiveBrowserDraft({ userId: scope.userId,
+        buildId: process.env.NEXT_PUBLIC_BROWSER_BUILD_ID || 'local-development',
+        workflow: 'sales-contract', draftId: scope.draftId, schemaVersion: scope.schemaVersion,
+        baseRevision: scope.baseRevision, payloadJson },
+      () => browserSessionContinuation.assertCurrent(lease));
+      browserSessionContinuation.assertCurrent(lease);
+      // Preserve both original-revision recovery and its immutable archive.
+      // Neither may be merged into the newer canonical revision automatically.
+      window.location.reload();
+      return true;
+    } catch {
+      setCheckpointError(true); return false;
+    } finally { reloading.current = false; setReloadPending(false); }
+  }, [scope]);
 
   const reportMutationFailure = useCallback((error: any): string | null => {
     if (error?.response?.data?.code === 'DUTY_SALES_EDIT_EXPIRED') {
@@ -532,6 +552,7 @@ export const useContractEditRecovery = <Payload>({
     blockReason,
     checkpointError,
     takeoverPending,
+    reloadPending,
     browserSessionId,
     leaseToken,
     activate,

@@ -1,3 +1,4 @@
+import { contractNavigationStorage } from '@/features/contract-creation/utils/contractNavigationStorage';
 ﻿// Step 2: Customer Selection Component
 // Customer search and selection
 
@@ -46,7 +47,7 @@ export const Step2CustomerSelection: React.FC<Step2CustomerSelectionProps> = ({
   };
 
   const persistAndCreateCustomer = () => {
-    const persisted = persistContractLocalValue(localStorage, 'contractWizardState', {
+    const persisted = persistContractLocalValue(contractNavigationStorage, 'contractWizardState', {
       currentStep,
       wizardData
     });

@@ -1,5 +1,7 @@
 'use client';
 
+import { contractNavigationStorage, contractAutosaveStorage } from '@/features/contract-creation/utils/contractNavigationStorage';
+
 import { stairMandatoryDefaults } from '@sabalanerp/contract-product-graph';
 import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 
@@ -67,6 +69,7 @@ import { Step8DigitalSignature } from '@/features/contract-creation/components/s
 import type { WizardStep } from '@/features/contract-creation/components/shared/WizardProgressBar';
 import { ContractWizardStage } from '@/features/contract-creation/components/shared/ContractWizardFrame';
 import { ContractCreationDraftPrompt } from '@/features/contract-creation/components/shared/ContractCreationDraftPrompt';
+import { ContractDraftArchives } from '@/features/contract-creation/components/shared/ContractDraftArchives';
 import { consumeContractReturnSelection } from '@/features/contract-creation/utils/contractReturnSelection';
 import { persistContractLocalValue } from '@/features/contract-creation/utils/contractRecoveryJournal';
 
@@ -217,7 +220,6 @@ import {
   resolveLegacyRemainingChildAddOns
 } from '@/features/contract-creation/services/remainingStoneChildAddOnService';
 import {
-  CONTRACT_DRAFT_STORAGE_KEY,
   clampContractDraftStep,
   createContractAutosaveDraft,
   getContractDraftStorageKey,
@@ -2008,8 +2010,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setStateRestored(true);
     setAutosaveHydrated(true);
     if (typeof window !== 'undefined') {
-      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
-      localStorage.removeItem('contractWizardState');
+      contractNavigationStorage.removeItem('contractWizardState');
     }
   }, [isContractEditMode, initialWizardData, contractId, initialContractStatus]);
 
@@ -2684,7 +2685,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     stairSystemV2
   ]);
 
-  const recoveryUserId = currentUser?.id || currentUser?.username || null;
+  const recoveryUserId = currentUser?.id || null;
   const freshEntryRequestedRef = useRef(
     !!replacementWizardData || typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('fresh') === '1'
   );
@@ -2814,9 +2815,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       return;
     }
     if (typeof window !== 'undefined') {
-      localStorage.removeItem(contractDraftStorageKey);
-      localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
-      localStorage.removeItem('contractWizardState');
+      contractAutosaveStorage.removeItem(contractDraftStorageKey);
+      contractNavigationStorage.removeItem('contractWizardState');
     }
     if (recoveryUserId) {
       createFreshContractDraftId(recoveryUserId);
@@ -2863,20 +2863,17 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       setAutosaveHydrated(true);
       return;
     }
-    const scopedRaw = localStorage.getItem(contractDraftStorageKey);
-    const legacyRaw = localStorage.getItem(CONTRACT_DRAFT_STORAGE_KEY);
-    const draft = parseContractAutosaveDraft(scopedRaw || legacyRaw);
+    const scopedRaw = contractAutosaveStorage.getItem(contractDraftStorageKey);
+    const draft = parseContractAutosaveDraft(scopedRaw);
     if (!draft) {
-      localStorage.removeItem(contractDraftStorageKey);
+      if (scopedRaw) {
+        setGeneralErrorKind('error');
+        setErrors({ general: 'پیش‌نویس ذخیره‌شده با این نسخه قابل بازکردن نیست؛ پیش از ادامه، بازیابی آن را با پشتیبانی بررسی کنید.' });
+        return;
+      }
       setAutosaveHydrated(true);
       return;
     }
-    if (!scopedRaw && legacyRaw) {
-      if (persistContractLocalValue(localStorage, contractDraftStorageKey, legacyRaw)) {
-        localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
-      }
-    }
-
     if (contractCreationEntryDecision({
       hasRecoverableDraft: true,
       freshRequested
@@ -2998,24 +2995,26 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
 
   const flushContractAutosaveDraft = useCallback(() => {
     if (typeof window === 'undefined') return;
-    if (isContractEditMode || !autosaveHydrated) return;
+    if (isContractEditMode || !autosaveHydrated || editRecovery.blocked || !recoveryDraftId || !recoveryUserId) return;
     if (recoverableDraftOffer) return;
     if (wizardData.signature?.contractId) {
-      localStorage.removeItem(contractDraftStorageKey);
+      contractAutosaveStorage.removeItem(contractDraftStorageKey);
       return;
     }
 
     const draft = buildContractAutosaveDraft();
     if (!draft) {
-      localStorage.removeItem(contractDraftStorageKey);
       return;
     }
 
-    persistContractLocalValue(localStorage, contractDraftStorageKey, draft);
+    persistContractLocalValue(contractAutosaveStorage, contractDraftStorageKey, draft);
   }, [
     autosaveHydrated,
     buildContractAutosaveDraft,
     contractDraftStorageKey,
+    editRecovery.blocked,
+    recoveryDraftId,
+    recoveryUserId,
     isContractEditMode,
     recoverableDraftOffer,
     wizardData.signature?.contractId
@@ -3088,7 +3087,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     if (returnTo === 'contract' && step && !restorationAttempted.current) {
       // Restore wizard state from localStorage
       (async () => {
-        const savedState = localStorage.getItem('contractWizardState');
+        const savedState = contractNavigationStorage.getItem('contractWizardState');
 
         if (savedState) {
           try {
@@ -3108,7 +3107,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
             restorationAttempted.current = true;
 
             // Clear the saved state after successful restoration
-            localStorage.removeItem('contractWizardState');
+            contractNavigationStorage.removeItem('contractWizardState');
 
             // Refresh data to show newly created entities
             await loadData();
@@ -4394,7 +4393,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   };
 
   const handleCreateProductFromContractFlow = () => {
-    const persisted = persistContractLocalValue(localStorage, 'contractWizardState', {
+    const persisted = persistContractLocalValue(contractNavigationStorage, 'contractWizardState', {
       currentStep,
       wizardData
     });
@@ -6429,6 +6428,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       <ContractReactivation target={reactivationTarget} onClose={() => setReactivationTarget(null)}
         onReactivated={() => window.location.assign(`/dashboard/sales/contracts/${wizardData.signature?.contractId}/edit`)} />
       {smsSuccess.feedback}
+      <ContractDraftArchives userId={recoveryUserId} draftId={recoveryDraftId} />
 
         {editRecoverySuccessMessage && (
           <ErpInlineState
@@ -6456,7 +6456,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               : editRecovery.blockReason === 'revision-conflict'
                 ? {
                     label: 'بارگذاری آخرین نسخه',
-                    onClick: editRecovery.reloadLatestRevision
+                    onClick: () => void editRecovery.reloadLatestRevision(buildContractAutosaveDraft()),
+                    disabled: editRecovery.reloadPending
                   }
                 : {
                     label: editRecovery.takeoverPending

@@ -1,4 +1,6 @@
 'use client';
+
+import { contractNavigationStorage } from '@/features/contract-creation/utils/contractNavigationStorage';
 import { ErpBadge, ErpButton, ErpCard, ErpField as CustomerWorkflowField, ErpInput, ErpPressable, ErpSegmentedControl, ErpLoading, ErpInlineState, useErpPresentationScope } from '@/components/erp';
 import { WizardNavigation } from '@/features/contract-creation/components/shared/WizardNavigation';
 import { useState, useEffect, useRef } from 'react';
@@ -460,7 +462,7 @@ export default function CreateCustomerPage() {
     const urlParams = new URLSearchParams(window.location.search);
     let contractKind = urlParams.get('contractKind');
     try {
-      const savedStateRaw = localStorage.getItem('contractWizardState');
+      const savedStateRaw = contractNavigationStorage.getItem('contractWizardState');
       const savedState = savedStateRaw ? JSON.parse(savedStateRaw) : null;
       contractKind = contractKind || savedState?.wizardData?.contractKind || null;
     } catch {
@@ -495,9 +497,9 @@ export default function CreateCustomerPage() {
     }
 
     try {
-      const savedStateRaw = localStorage.getItem('contractWizardState');
+      const savedStateRaw = contractNavigationStorage.getItem('contractWizardState');
       const savedState = savedStateRaw ? JSON.parse(savedStateRaw) : { currentStep: Number(stepParam), wizardData: {} };
-      localStorage.setItem('contractWizardState', JSON.stringify({
+      contractNavigationStorage.setItem('contractWizardState', JSON.stringify({
         currentStep: Number(stepParam),
         wizardData: {
           ...savedState.wizardData,
@@ -1036,7 +1038,7 @@ export default function CreateCustomerPage() {
       router.push(getContractReturnUrl('2'));
       return;
     }
-    const savedState = localStorage.getItem('contractWizardState');
+    const savedState = contractNavigationStorage.getItem('contractWizardState');
     if (savedState) {
       const { currentStep } = JSON.parse(savedState);
       router.push(getContractReturnUrl(currentStep));

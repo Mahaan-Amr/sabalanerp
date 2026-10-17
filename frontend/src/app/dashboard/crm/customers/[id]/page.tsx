@@ -1,4 +1,6 @@
 'use client';
+
+import { contractNavigationStorage } from '@/features/contract-creation/utils/contractNavigationStorage';
 import { PartnerCustomerSections, type PartnerCrmCustomer } from '@/features/crm/customer-workflow/PartnerCustomerSections';
 import { DirectCustomerTransfer } from '@/features/partner-sales/customers/DirectCustomerTransfer';
 import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpFieldView, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpSegmentedControl, ErpSection, ErpSheet, ErpTextarea, useErpPresentationScope } from '@/components/erp';
@@ -603,7 +605,7 @@ export default function CustomerDetailPage() {
                 <ErpPressable type="button"
                   onClick={() => {
                     // Restore contract wizard state from localStorage
-                    const savedState = localStorage.getItem('contractWizardState');
+                    const savedState = contractNavigationStorage.getItem('contractWizardState');
                     if (savedState) {
                       const { currentStep, wizardData } = JSON.parse(savedState);
                       // Navigate back to contract wizard with restored state

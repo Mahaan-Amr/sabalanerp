@@ -1,4 +1,5 @@
-﻿// useContractSubmission Hook
+import { contractNavigationStorage, contractAutosaveStorage } from '../utils/contractNavigationStorage';
+// useContractSubmission Hook
 // Manages contract creation and submission
 
 import { useState, useCallback } from 'react';
@@ -474,9 +475,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) => 
         const createdContractId = response.data.data.id;
         const savedContractNumber = response.data.data.contractNumber || wizardData.contractNumber;
         if (typeof window !== 'undefined') {
-          localStorage.removeItem(draftStorageKey);
-          localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
-          localStorage.removeItem('contractWizardState');
+          contractAutosaveStorage.removeItem(draftStorageKey);
+          contractNavigationStorage.removeItem('contractWizardState');
         }
         await finalizeSuccessfulContractCommit({
           contractId: createdContractId,

@@ -1,3 +1,5 @@
+import { contractNavigationStorage } from './contractNavigationStorage';
+
 export const CONTRACT_RETURN_SELECTION_STORAGE_KEY = 'contractWizardReturnSelection:v1';
 
 export interface ContractReturnSelection {
@@ -15,7 +17,7 @@ interface StorageLike {
 
 export const writeContractReturnSelection = (
   selection: Omit<ContractReturnSelection, 'version'>,
-  storage: StorageLike = localStorage
+  storage: StorageLike = contractNavigationStorage
 ): boolean => {
   try {
     storage.setItem(CONTRACT_RETURN_SELECTION_STORAGE_KEY, JSON.stringify({ version: 1, ...selection }));
@@ -26,7 +28,7 @@ export const writeContractReturnSelection = (
 };
 
 export const consumeContractReturnSelection = (
-  storage: StorageLike = localStorage
+  storage: StorageLike = contractNavigationStorage
 ): ContractReturnSelection | null => {
   const raw = storage.getItem(CONTRACT_RETURN_SELECTION_STORAGE_KEY);
   if (!raw) return null;

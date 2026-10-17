@@ -408,7 +408,7 @@ export function ErpField({
         'aria-describedby': describedBy,
         'aria-invalid': error ? true : children.props['aria-invalid'],
       })}
-      {hint ? <p id={hintId} className="sds-text-muted text-xs leading-5">{hint}</p> : null}
+      {hint ? <p id={hintId} className="sds-text-secondary text-xs leading-5">{hint}</p> : null}
       {error ? <p id={errorId} className="text-sm text-[var(--sds-danger)]" role="alert">{error}</p> : null}
     </div>
   );

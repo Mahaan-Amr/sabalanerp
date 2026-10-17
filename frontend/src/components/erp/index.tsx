@@ -1568,6 +1568,28 @@ export function useErpOverlayPortalContainer() {
 }
 
 export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet', size = 'default', scope, dismissible = true, pending = false, returnFocusElement = null }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal'; size?: 'default' | 'wide'; scope?: 'default' | 'workspace'; dismissible?: boolean; pending?: boolean; returnFocusElement?: HTMLElement | null }) {
+  const [viewportHeight, setViewportHeight] = React.useState<string>('100dvh');
+  React.useEffect(() => {
+    if (!open) return;
+    const update = () => {
+      // CSS zoom does not reduce dvh. Bound the scrollable dialog to the actual
+      // visible viewport, including browser zoom and an on-screen keyboard.
+      const zoom = [document.documentElement, document.body].reduce((total, element) => {
+        const value = Number.parseFloat(getComputedStyle(element).getPropertyValue('zoom'));
+        return total * (Number.isFinite(value) && value > 0 ? value : 1);
+      }, 1);
+      setViewportHeight(`${Math.min(window.innerHeight, window.visualViewport?.height || window.innerHeight) / zoom}px`);
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('resize', update);
+    const observer = new MutationObserver(update);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] });
+    return () => {
+      window.removeEventListener('resize', update); window.visualViewport?.removeEventListener('resize', update); observer.disconnect();
+    };
+  }, [open]);
   const inheritedScope = useErpPresentationScope();
   const presentationScope = scope ?? inheritedScope;
   const childPresentationScope = inheritedScope === 'workspace' ? presentationScope : 'default';
@@ -1630,6 +1652,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
             aria-modal="true"
             aria-labelledby={titleId}
             aria-busy={pending || undefined}
+            style={{ maxHeight: presentation === 'modal' ? `calc(${viewportHeight} - 1.5rem)` : `calc(${viewportHeight} * 0.92)` }}
             initial={reduceMotion ? false : isModal ? { opacity: 0, scale: 0.96, y: 12 } : { opacity: 0, y: 32 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={isModal ? { opacity: 0, scale: 0.97, y: 8 } : { opacity: 0, y: 24 }}

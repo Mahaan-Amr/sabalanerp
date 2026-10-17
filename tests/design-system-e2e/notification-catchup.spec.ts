@@ -83,7 +83,7 @@ test('session continuation retains unsaved form state and accepts only its origi
   const draft = page.getByRole('textbox', { name: 'نام دستگاه', exact: true });
   await draft.fill('نوشتهٔ من هنگام پایان نشست');
   state.owner = 'notification_owner_b';
-  await page.getByRole('button', { name: 'خواندن همه', exact: true }).first().click();
+  await page.getByRole('button', { name: 'غیرفعال‌سازی', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'ادامهٔ کار با همین حساب' });
   await expect(dialog).toBeVisible();
   await expect(page.getByRole('heading', { name: 'اعلان خصوصی 1', exact: true })).toBeHidden();
@@ -114,7 +114,7 @@ for (const operation of ['read-all', 'disable-device'] as const) test(`changed a
   if (operation === 'disable-device') await page.getByRole('button', { name: 'ترجیحات و دستگاه‌ها' }).click();
   state.owner = 'notification_owner_b';
   await page.getByRole('button', { name: operation === 'read-all' ? 'خواندن همه' : 'غیرفعال‌سازی', exact: true }).click();
-  await expect(page.getByText('نشست این صفحه تغییر کرده است؛ نوشته‌هایتان را نگه دارید و دوباره وارد شوید.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'ادامهٔ کار با همین حساب' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'اعلان خصوصی 1', exact: true })).toHaveCount(0);
   await expect(page.getByText('دستگاه خصوصی', { exact: true })).toHaveCount(0);
   await expect(page).toHaveURL(/\/dashboard\/personal\/notifications$/);
@@ -130,7 +130,7 @@ for (const operation of ['read-all', 'read-one'] as const) test(`changed account
   if (operation === 'read-all') await dialog.getByRole('button', { name: 'خواندن همه', exact: true }).click();
   else await dialog.getByRole('button').filter({ hasText: 'اعلان خصوصی 1' }).click();
   await expect(dialog.getByText('اعلان خصوصی 1', { exact: true })).toHaveCount(0);
-  await expect(dialog.getByText('نشست این صفحه تغییر کرده است', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'ادامهٔ کار با همین حساب' })).toBeVisible();
   await expect(page).toHaveURL(/\/dashboard\/personal\/notifications$/);
   expect(state.mutations).toBe(0); expect(state.probesDenied).toBeGreaterThan(0);
 });

@@ -28,6 +28,9 @@ function privateRead(file, maximum) {
     const bytes = bounded.subarray(0, count);
     requireValue(identity(fs.fstatSync(fd, { bigint: true })) === identity(named)
       && identity(fs.lstatSync(file, { bigint: true })) === identity(named), 'WAL_SEAL_FILE_CHANGED');
+    // In particular, the retained local key's bytes must survive alongside a
+    // durable SEALED receipt. Syncing its containing directory is insufficient.
+    fs.fsyncSync(fd);
     return bytes;
   } finally { fs.closeSync(fd); }
 }

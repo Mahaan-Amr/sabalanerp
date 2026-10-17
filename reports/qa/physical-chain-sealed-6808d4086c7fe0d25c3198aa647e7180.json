@@ -1,0 +1,402 @@
+{
+  "privatePhysicalChainSealed": true,
+  "root": "/app/online-runtime-acceptance/base-stream-chain-6808d4086c7fe0d25c3198aa647e7180",
+  "sealed": {
+    "format": "sabalan-private-physical-chain/v1",
+    "phase": "SEALED",
+    "sourceProofSha256": "7da06e9cc198a2732e1aae8323f8d54d52f802c30351aa9223c6310578e41446",
+    "operation": "6808d4086c7fe0d25c3198aa647e7180",
+    "independentPublicKeySha256": "455e5a7ba5990866ca6992c0fd177fa0df5b22b5d3e985c41ee306e3a779b8af",
+    "localKeyIsTestAuthority": true,
+    "files": [
+      {
+        "name": "source-proof.json",
+        "bytes": 3735,
+        "sha256": "7da06e9cc198a2732e1aae8323f8d54d52f802c30351aa9223c6310578e41446",
+        "chunks": [
+          {
+            "name": "chunk-000000.sabrec",
+            "rawBytes": 3735,
+            "rawSha256": "7da06e9cc198a2732e1aae8323f8d54d52f802c30351aa9223c6310578e41446",
+            "encryptedBytes": 4875,
+            "encryptedSha256": "272997f13162a04c23f22ea79615e43d985c36419f586d1f796365004d81e1a9",
+            "localDecryptVerified": true
+          }
+        ]
+      },
+      {
+        "name": "backup_manifest",
+        "bytes": 17381448,
+        "sha256": "65e1539066f925bbb4017cc296e9e862ecb9ec1d469f20e7e556b2f38e7d9a81",
+        "chunks": [
+          {
+            "name": "chunk-000001.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "4a5e557f15759fc308d2ef7518151cc1d5d38758765801fff7f04f204d374dbe",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "4a9556f9ea49ac4f7acc82ae6929c7b0d53cb905e1f6e33d8cd5681f20cf0489",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000002.sabrec",
+            "rawBytes": 604232,
+            "rawSha256": "e0726518db8d25382bf8b9a4b2df703e6808e38a0eee0b91c9b69f794cd21090",
+            "encryptedBytes": 605372,
+            "encryptedSha256": "acfdcc853022af6d5aa42ad69f10e48b9f8002a15ad1b1e259a2a87e478a1ec9",
+            "localDecryptVerified": true
+          }
+        ]
+      },
+      {
+        "name": "base.tar.gz",
+        "bytes": 440811984,
+        "sha256": "65c134c602bff20e1ab26c20210ec0e36d59fc2cd2d46102db7f1d8aac1927d3",
+        "chunks": [
+          {
+            "name": "chunk-000003.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "4b7dcfaab06bac3a6ff5b5b5b65c256fbbe7092b573836c23c24ef3ad29a93e0",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "e2c5ed0591730dbc04877d9a419268aff72aef2a1a677cb983ec179bfe2c4d21",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000004.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "182f43851c5f7168156705fad7276d1240d8faa2871981d03cda518ad8e32e39",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "cb0c5d5f8336339f90b38bcab2b2b545574e716a1458f7babec4349a66bcd840",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000005.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "6a9fe67439714230f0bb3ade748b800d0d9a72b317ede59d138e4b607e3390d6",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "d3bc1a46c106fb8d064ec9835e4ff2679ba2815445eda220daa14886fa372cfe",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000006.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "f5bb5b091745f7a720844989ada0f1114f218a3157c4c5fd17c34a83857e6ff5",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "c29e2cb8dfbf7581b9492ca767b2ad512ce09915615d7bda9304cef473e9eab9",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000007.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "3518bf7b0ba59001b9b2954cd8434e777fcc4023e4c825bba4253f3bdd4a101c",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "717a6b2eec38f5f34437c6b86e795c298eebaaafdbe9df5114e68ff7386c39b9",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000008.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "d913ff60d0fb8c2c80296845a7ca86d3ca4c01c8fe9d8fd0b6cc0018709225a6",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "37142a85686ca5b53dc7b7e62fc2275d4653d55c3664e8a3c049bdcc43b0bbaa",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000009.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "3e5c6199be786a575e1ccb05962e3d5e3ffaf78aabc1bb984b2379e10427ad98",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "87bda2a6af8c99247e3d256fc619e5591639aa77f24038c508c15debf455233d",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000010.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "73b11459ba046d6b0a3925c31724b0d241224910f629c2af54586cb7c0b2638e",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "d1985a505d56f9706b9181c21faec48b751a965fd1fb7489450d752f5cf2c987",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000011.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "68cacce859e5813ddcf224132a6c7423afd6f131deb06ea1ff6db4560e8068b9",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "a2cc8a8d53640d07fd25491befe7512b4a511beacbf68a998e6e6a3cdd453cc1",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000012.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "8b2d3c03379627ef1725c0ed84a2b0955c3455c24f39c77629e8ad26df3e6157",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "00ec6c631e5434b2a3a51c35ed907618628106121053fcfddfd373bf1b89976f",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000013.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "17f6b1f7379e97c32ce5dc5cd08722ae0908de99772b16ec115c9756fdecf059",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "fb86eb094cf5febe835519a2fc40bb57a21b92033c352fb89c27fd0d609a6ae1",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000014.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "97471e37a62b101c57718e5b602c07f1c3c3746e1e67aec88a80df13dfd2a261",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "9c4e398f3854cc6e6c592b8d4b61abb495a6e66b91059cd40d3f6fc74b3d61b4",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000015.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "fa45f314337ad805653da148647d201401d02229ba5af2b7d7c744309fa91be1",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "06019a55e5f443cdb53482d3f6f6c453403467ddb8116aeb5031947b87f4d6cc",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000016.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "5437f353d6ebe050e8987c17e1784a25529b444bc1bc561fbabe4617f0821abc",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "90ef515d41662aa0980542668a03ab74e9916309c5dd61c07f63b6eeb798caa8",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000017.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "7617753d2568f632d12488eb476262238acf2154f7be791623154657f2c765c5",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "c423e1b65c06f5102a18e23a018b2d376aa0fc23f72825ba3e2a1bfb28d7888f",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000018.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "3ce8a98056052d9f25e038e02cec693ab893b665feec10a01b58f04e7a4f0f68",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "999857cb02c2e6b659bb8571e46c3b4494757bf712cfe36d9ea58d5b63761400",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000019.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "4ea48a63d7a794f351701b4112d3960bdd5b5be0b3095695ab007d5b3660bb8f",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "2b45bac61df58c65accead35ead893c95849dc818472228c01459593e74c5249",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000020.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "eb417a7d0e03151f6f0f0579069d69152b8325d8f3fef271714da8c00c428dea",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "d48c48476c8148c400b5597c48714bf90c8c49d72f7d7405e544b3fa359a0efa",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000021.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "3286cf71044eb5b575f1a7d05a46282ffb62d43a7a0ecf79014437d96375d685",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "bb73984a65fed9fd9c6629e0e099c0be5bf4332c838a99518036e5e147e1a50b",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000022.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "635862cfcdaa277dd87c228f84b9b276652a4dc25a873c1a87115ef9b40dbd69",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "d8c447e3976548b57329d270cfb187e1e4198f4514105a942cbc9bd8eb958a7a",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000023.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "e93cafb9d61d5d42828fdf394b5a8025eea6d0b302bf0e0d9b5469be3ee9b4cf",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "35d415c8f6763a68432043369a38a35d2cdd4cf4a1589f79917a7734cbdbcf84",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000024.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "9ad95ff70bf21be44c456f031e9c77e26ae64688988287a0b6fbed8037e0cb0e",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "9caf68e67203771e99bbe6b4690f4aa8cd2f8c8d5eec24cbe0ba8a79ea7a3a21",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000025.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "f23ea63e2f1fba623767f381fd4b3fa34bd7fab5d0891684c0e01710d682a0ae",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "faaca21b66e76906f9a95cfcf3558bf51757a323d7631ecdef6a3c764e35120f",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000026.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "d26b62b881c6ca89b2a318a3cfdd25fef5d53ac88504cfddd89725ac46168a29",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "fa34609eb4cf1d810d0069a734ed7a210e2b41c716b3e980200686904f19cbcf",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000027.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "b6f3d14802620462a87e150c80b78bc3419dc02790b1ebdc70aae11144d273d3",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "7f26322feb2433e4c87805caf54403bd61a254271bf6d345570d8c891678cf94",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000028.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "df11be44fe445178f4960b09a46f66876104793602dedfc06a865bf0583d745b",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "826d5b3c9e0c391201e1d14c89598af34b25c41514ecd852b219490e00430e21",
+            "localDecryptVerified": true
+          },
+          {
+            "name": "chunk-000029.sabrec",
+            "rawBytes": 4604368,
+            "rawSha256": "2998e9136fbc3ba8d4fd0aba5524c2d761c9ffb15c283f41dd2c730629de563b",
+            "encryptedBytes": 4605508,
+            "encryptedSha256": "074a002696cf05350a92b63e70930137927b0cb5ee84c7d87074eb1649584d53",
+            "localDecryptVerified": true
+          }
+        ]
+      },
+      {
+        "name": "wal/000000010000000C00000060",
+        "bytes": 16777216,
+        "sha256": "e0a27ef140ff6a54a17f612e3fcb9e2cefb70c66f762621c8e5fd92aaab1d2db",
+        "chunks": [
+          {
+            "name": "chunk-000030.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "e0a27ef140ff6a54a17f612e3fcb9e2cefb70c66f762621c8e5fd92aaab1d2db",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "697dad0809c626dd8224bc8f9f2aeafbf740420deeab5df39e3951bfe8f7df6d",
+            "localDecryptVerified": true
+          }
+        ]
+      },
+      {
+        "name": "wal/000000010000000C00000061",
+        "bytes": 16777216,
+        "sha256": "bd0cf4ecebdb9716336208c48d5546d763f0934c94ea3e3d877c8c0b770e7de2",
+        "chunks": [
+          {
+            "name": "chunk-000031.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "bd0cf4ecebdb9716336208c48d5546d763f0934c94ea3e3d877c8c0b770e7de2",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "bff8d05a697c17031f4ce480d54969968793b15fcdc919d43283881a34f9ac82",
+            "localDecryptVerified": true
+          }
+        ]
+      },
+      {
+        "name": "wal/000000010000000C00000062",
+        "bytes": 16777216,
+        "sha256": "b2e84926debc97a13cc1021242dc3576f6f25306656d983a2595071717f77aeb",
+        "chunks": [
+          {
+            "name": "chunk-000032.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "b2e84926debc97a13cc1021242dc3576f6f25306656d983a2595071717f77aeb",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "e95697f5d62f8afd8ac802618fa2a8bbc04fdb67682799a81cc9998b1138e79e",
+            "localDecryptVerified": true
+          }
+        ]
+      },
+      {
+        "name": "wal/000000010000000C00000063",
+        "bytes": 16777216,
+        "sha256": "d7efaab7243e091b4e81ff50b7eedff105dede6a9e898b521be49261d19c6c65",
+        "chunks": [
+          {
+            "name": "chunk-000033.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "d7efaab7243e091b4e81ff50b7eedff105dede6a9e898b521be49261d19c6c65",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "05979eb1d32a3d0be3ee2ab76ffc85701e8e562e465c2fbc9f2cec8fa894c39a",
+            "localDecryptVerified": true
+          }
+        ]
+      },
+      {
+        "name": "wal/000000010000000C00000064",
+        "bytes": 16777216,
+        "sha256": "ff28dc4cbeb196b5a7be2129760c5f63e9603c5ff8d0ebfbfbf793c0b846025c",
+        "chunks": [
+          {
+            "name": "chunk-000034.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "ff28dc4cbeb196b5a7be2129760c5f63e9603c5ff8d0ebfbfbf793c0b846025c",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "f6fcfb14a26fa54443732e548077226e66e90d3137c42551531bd3aa358d9580",
+            "localDecryptVerified": true
+          }
+        ]
+      },
+      {
+        "name": "wal/000000010000000C00000065",
+        "bytes": 16777216,
+        "sha256": "6f45da543c19a134a29001ed4ec1c5052acc9d274b4e602bd6d7db9f3020c7c2",
+        "chunks": [
+          {
+            "name": "chunk-000035.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "6f45da543c19a134a29001ed4ec1c5052acc9d274b4e602bd6d7db9f3020c7c2",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "f9c52f30627f74710a4730405a1a7d2c6bbeaceb9b1543a84105db7ff3d05f77",
+            "localDecryptVerified": true
+          }
+        ]
+      },
+      {
+        "name": "wal/000000010000000C00000066",
+        "bytes": 16777216,
+        "sha256": "02b2c745789c2f2cd05fb96e46fd9704108fcc52ed1986f9905aa9bafaa2fa56",
+        "chunks": [
+          {
+            "name": "chunk-000036.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "02b2c745789c2f2cd05fb96e46fd9704108fcc52ed1986f9905aa9bafaa2fa56",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "1d381a32c68e3f8bac9ed6b48e5dfd050d0d125f192d980ccf2f0f927998c535",
+            "localDecryptVerified": true
+          }
+        ]
+      },
+      {
+        "name": "wal/000000010000000C00000067",
+        "bytes": 16777216,
+        "sha256": "b62b1d7268ed7384f96c02f9b4d42a6e2b977ad4337c45b5610d1296a495eca6",
+        "chunks": [
+          {
+            "name": "chunk-000037.sabrec",
+            "rawBytes": 16777216,
+            "rawSha256": "b62b1d7268ed7384f96c02f9b4d42a6e2b977ad4337c45b5610d1296a495eca6",
+            "encryptedBytes": 16778356,
+            "encryptedSha256": "cc8228b0c0b9e05a224e3537ef8bc42cd9da97ba59f9cbb8e44f7a87579693b3",
+            "localDecryptVerified": true
+          }
+        ]
+      }
+    ],
+    "codecSha256": "7d2fc39cf5ba0568eec80371fb88567185e51915938062c806b09f5d81f7e002"
+  },
+  "fixtureSha256": "842fa0fb20d6737715fde53f038665e248e3a0d170d7e387c4af6b757a985c7e",
+  "helperSha256": "b8fbe7f85e39f019d98829b15a798d8c9949b463193d0bb798fc08ad6e731c32",
+  "limits": [
+    "local test-cluster component with test local key",
+    "independent reassembly, replay and coherent application recovery still required"
+  ]
+}

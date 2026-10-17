@@ -58,16 +58,37 @@ if (alreadyHeld) {
   const report = JSON.parse(fs.readFileSync(path.join(repository, 'reports/qa/retained-ui-overlap-' + operation + '.json')));
   assert.equal(report.operation, operation); assert.equal(report.privateRoot, root); assert.equal(report.productionAdmission, false);
   assert.equal(report.status, 'PASS_PRIVATE_OVERLAP_WITH_RETAINED_UNKNOWN');
-  for (const name of ['tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/private-ui-startup.fixture.mjs']) {
+  assert.equal(report.containers.length, 3); const accepted = new Map(report.containers.map(row => [row.id, row])); assert.equal(accepted.size, 3);
+  for (const current of containers) {
+    const original = accepted.get(current.Id); assert.ok(original); assert.equal(original.image, current.Image);
+    if (current.Id !== proxy.Id) assert.equal(original.startedAt, current.State.StartedAt);
+  }
+  if (report.proxyRestartIncarnation) {
+    assert.deepEqual(report.proxyRestartIncarnation, {id: proxy.Id, image: proxy.Image, startedAt: proxy.State.StartedAt});
+  } else {
+    // The first accepted run recorded initial births but intentionally restarted
+    // this same proxy ID. Preserve that original evidence and explicitly bind
+    // its terminal post-restart incarnation, rather than invent an initial-time
+    // match. No later operation may use this one-off metadata exception.
+    assert.equal(operation, '67d8b4abc2154ccaea5e88b55f7a0cb1');
+    assert.equal(report.results.proxyRestartGeneration, 2);
+    assert.ok(Date.parse(proxy.State.StartedAt) > Date.parse(accepted.get(proxy.Id).startedAt));
+  }
+  for (const name of ['tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/private-ui-startup.fixture.mjs',
+    'tests/online-deployment/private-ui-management.fixture.mjs', 'deploy/scripts/browser-release-proxy.mjs',
+    'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-operation-journal.mjs']) {
     assert.equal(createHash('sha256').update(fs.readFileSync(path.join(repository, name))).digest('hex'), report.sources[name]);
   }
   const heldBytes = docker(['exec', reader, 'cat', root + '/transport-shutdown-held.json']);
   assert.equal(createHash('sha256').update(heldBytes).digest('hex'), report.results.heldTransport.sha256);
   const held = JSON.parse(heldBytes); assert.equal(held.status, 'HELD_NOT_DRAINED'); assert.equal(held.root, root);
+  assert.equal(held.configurationSha256, expectedConfiguration);
   assert.equal(held.productionAdmission, false); assert.equal(held.pendingOperations.length, 1);
   const pending = held.pendingOperations[0]; assert.equal(pending.method, 'GET'); assert.equal(pending.image, containers[2].Image);
   assert.equal(containers[2].State.Status, 'exited'); assert.equal(containers[2].State.ExitCode, 0); assert.equal(containers[2].State.Pid, 0);
   assert.ok(Date.parse(pending.startedAt) > Date.parse(containers[2].State.FinishedAt));
+  assert.ok(Date.parse(proxy.State.StartedAt) < Date.parse(pending.startedAt));
+  assert.ok(Date.parse(proxy.State.FinishedAt) > Date.parse(pending.startedAt));
   assert.equal(pending.id, report.results.ambiguityRetained[0].id);
   docker(['exec', reader, 'node', '-e', "const fs=require('node:fs');if(fs.existsSync(process.argv[1]))throw Error('unknown intent was settled');", root + '/operations/' + pending.id + '.complete.json']);
   // Exercise the actual replacement binary: the held root must refuse startup
@@ -83,7 +104,9 @@ if (alreadyHeld) {
   const logs = docker(['logs', '--tail', '15', proxy.Id], true); assert.match(logs, /FIXTURE_HELD_TRANSPORT_REQUIRES_INSPECTION/);
   assert.equal(docker(['exec', reader, 'cat', root + '/transport-shutdown-held.json']), heldBytes);
   heldProof = {status: 'RETIRED_WITH_HELD_UNKNOWN', heldRecordSha256: report.results.heldTransport.sha256,
-    preservedUnknown: pending.id, originalExitCode: 75, actualRestartRefusedExitCode: 1};
+    preservedUnknown: pending.id, originalExitCode: 75, actualRestartRefusedExitCode: 1,
+    initialProxyStartedAt: accepted.get(proxy.Id).startedAt, postRestartProxyStartedAt: proxy.State.StartedAt,
+    heldProxyFinishedAt: proxy.State.FinishedAt, intentionalRestartGeneration: report.results.proxyRestartGeneration};
 } else {
   const drained = JSON.parse(docker(['exec', proxy.Id, 'node', '-e',
   "const net=require('node:net');let b='';const s=net.connect(process.argv[1]);s.on('connect',()=>s.end('drain\\n'));s.on('data',v=>b+=v);s.on('end',()=>console.log(b));s.on('error',()=>process.exit(1));",

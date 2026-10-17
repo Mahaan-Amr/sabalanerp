@@ -190,6 +190,9 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
         await new Promise(resolve => setTimeout(resolve, 250));
       }
       assert.ok(ready); assert.equal(control('status').publication.generation, 2);
+      const [restartedProxy] = JSON.parse(docker(['inspect', proxyId]));
+      assert.equal(restartedProxy.Id, proxyId); assert.equal(restartedProxy.Image, proxyImage);
+      report.proxyRestartIncarnation = {id: proxyId, image: restartedProxy.Image, startedAt: restartedProxy.State.StartedAt};
       assert.equal(await page.locator('input[name="identifier"]').inputValue(), 'draft-kept-during-switch');
       const asset = builds[0].assets.find(asset => asset.path.endsWith('.js'));
       assert.ok(asset);

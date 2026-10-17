@@ -1,0 +1,106 @@
+{
+  "nativeBaseStreamChainPassed": true,
+  "operation": "6808d4086c7fe0d25c3198aa647e7180",
+  "namespace": "sabalan-base-chain-6808d4086c7fe0d25c3198aa647e7180",
+  "databaseName": "sabalanerp_concurrency_6808d4086c7fe0d2",
+  "root": "/tmp/sabalan-pgchain-6808d4086c7fe0d25c3198aa647e7180",
+  "source": {
+    "systemIdentifier": "7667464637415309346",
+    "timeline": 1,
+    "segmentBytes": 16777216,
+    "clusterBytes": "2067391386",
+    "externalTablespaces": 0
+  },
+  "range": {
+    "startLsn": "C/60000060",
+    "endLsn": "C/68000000",
+    "timeline": 1,
+    "segmentBytes": 16777216
+  },
+  "segments": [
+    {
+      "name": "000000010000000C00000060",
+      "bytes": 16777216,
+      "sha256": "e0a27ef140ff6a54a17f612e3fcb9e2cefb70c66f762621c8e5fd92aaab1d2db"
+    },
+    {
+      "name": "000000010000000C00000061",
+      "bytes": 16777216,
+      "sha256": "bd0cf4ecebdb9716336208c48d5546d763f0934c94ea3e3d877c8c0b770e7de2"
+    },
+    {
+      "name": "000000010000000C00000062",
+      "bytes": 16777216,
+      "sha256": "b2e84926debc97a13cc1021242dc3576f6f25306656d983a2595071717f77aeb"
+    },
+    {
+      "name": "000000010000000C00000063",
+      "bytes": 16777216,
+      "sha256": "d7efaab7243e091b4e81ff50b7eedff105dede6a9e898b521be49261d19c6c65"
+    },
+    {
+      "name": "000000010000000C00000064",
+      "bytes": 16777216,
+      "sha256": "ff28dc4cbeb196b5a7be2129760c5f63e9603c5ff8d0ebfbfbf793c0b846025c"
+    },
+    {
+      "name": "000000010000000C00000065",
+      "bytes": 16777216,
+      "sha256": "6f45da543c19a134a29001ed4ec1c5052acc9d274b4e602bd6d7db9f3020c7c2"
+    },
+    {
+      "name": "000000010000000C00000066",
+      "bytes": 16777216,
+      "sha256": "02b2c745789c2f2cd05fb96e46fd9704108fcc52ed1986f9905aa9bafaa2fa56"
+    },
+    {
+      "name": "000000010000000C00000067",
+      "bytes": 16777216,
+      "sha256": "b62b1d7268ed7384f96c02f9b4d42a6e2b977ad4337c45b5610d1296a495eca6"
+    }
+  ],
+  "committedLsn": "C/62000120",
+  "expected": {
+    "id": "retained",
+    "amount": "123456789.12345678",
+    "quantity": "0.00000001"
+  },
+  "baseRange": {
+    "Timeline": 1,
+    "Start-LSN": "C/61000028",
+    "End-LSN": "C/61008620"
+  },
+  "archiveSha256": "65c134c602bff20e1ab26c20210ec0e36d59fc2cd2d46102db7f1d8aac1927d3",
+  "archiveBytes": 440811984,
+  "manifestSha256": "65e1539066f925bbb4017cc296e9e862ecb9ec1d469f20e7e556b2f38e7d9a81",
+  "binarySha256": "c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83",
+  "fixtureSha256": "fe6c9f6ddfeca26dfa016d8ca69251d2c9d5516b98a0779fe513bf6a50e4fd6b",
+  "canonicalBeforeAndAfter": [
+    {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  ],
+  "limits": [
+    "local physical component only",
+    "unencrypted private source retained",
+    "independent replay and coherent application recovery not yet established"
+  ],
+  "temporaryDatabaseDroppedWithoutForce": true
+}

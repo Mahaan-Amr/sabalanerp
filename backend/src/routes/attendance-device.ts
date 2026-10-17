@@ -5,7 +5,9 @@ import { parseSecurityBusinessDate } from '../utils/securityBusinessDate';
 import { prisma } from '../lib/prisma';
 import { AuthRequest, protect } from '../middleware/auth';
 import { attendanceCapabilities, attendanceDeviceManage, attendanceDeviceReview, attendanceDeviceView } from '../middleware/attendanceDeviceAccess';
-import { AttendanceDeviceError, confirmIntervals, deviceAudit, ingestPunch, lockAttendance, markUnknownExit, newTerminalToken, requireReason, resolvePunch, tokenHash, validatePunch, reviewFingerprint, todayMappingScans, setMappingInitialState, recordDeviceClockSample } from '../services/attendanceDevice';
+import { AttendanceDeviceError, confirmIntervals, deviceAudit, ingestPunch, lockAttendance, newTerminalToken, requireReason, resolvePunch, tokenHash, validatePunch, reviewFingerprint, todayMappingScans, setMappingInitialState, recordDeviceClockSample } from '../services/attendanceDevice';
+
+import { previewAttendanceCorrection, applyAttendanceCorrection } from '../services/attendanceCorrection';
 
 const router = express.Router();
 const run = (handler: (req: AuthRequest, db: Prisma.TransactionClient) => Promise<unknown>) => async (req: AuthRequest, res: Response) => {
@@ -55,7 +57,7 @@ router.get('/state', protect, attendanceDeviceView, async (req: AuthRequest, res
     const [terminals, punches, pending, reviewCount, personnel, assignees, handovers, initialReview, clockSamples] = await Promise.all([
       prisma.attendanceTerminal.findMany({ include: { mappings: { where: { effectiveTo: null } } }, orderBy: { createdAt: 'asc' } }),
       prisma.attendancePunch.findMany({ where: { ...personFilter, ...(req.query.status === 'all' ? {} : { status: { in: ['REVIEW', 'UNMATCHED', 'DUPLICATE', 'APPLIED', 'LINKED', 'SHADOW'] } }) }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 100, ...(req.query.cursor ? { skip: 1, cursor: { id: String(req.query.cursor) } } : {}) }),
-      prisma.attendanceInterval.findMany({ where: { attendanceRecord: personFilter, status: 'ACTIVE', OR: [{ confirmedRevision: 0 }, { exitUnknown: true }, { enteredAt: null }] }, include: { attendanceRecord: { select: { personnelFirstName: true, personnelLastName: true, personnelId: true } } }, orderBy: [{ enteredAt: 'desc' }, { id: 'desc' }], take: 100, ...(req.query.intervalCursor ? { skip: 1, cursor: { id: String(req.query.intervalCursor) } } : {}) }),
+      prisma.attendanceInterval.findMany({ where: { attendanceRecord: personFilter, status: 'ACTIVE', ...(req.query.personnelId && req.query.status === 'all' ? {} : { OR: [{ confirmedRevision: 0 }, { exitUnknown: true }, { enteredAt: null }] }) }, include: { attendanceRecord: { select: { personnelFirstName: true, personnelLastName: true, personnelId: true } } }, orderBy: [{ enteredAt: 'desc' }, { id: 'desc' }], take: 100, ...(req.query.intervalCursor ? { skip: 1, cursor: { id: String(req.query.intervalCursor) } } : {}) }),
       prisma.attendancePunch.count({ where: { status: { in: ['REVIEW', 'DUPLICATE'] } } }),
       capabilities.manage ? prisma.personnel.findMany({ where: { isActive: true }, select: { id: true, firstName: true, lastName: true }, orderBy: { lastName: 'asc' } }) : [],
       prisma.securityPersonnel.findMany({ where: { isActive: true, user: { isActive: true } }, select: { userId: true, user: { select: { firstName: true, lastName: true } } } }),
@@ -120,7 +122,9 @@ router.post('/mappings/:id/end', protect, attendanceDeviceManage, run(async (req
 }));
 router.post('/punches/:id/resolve', protect, attendanceDeviceReview, run((req, db) => resolvePunch(db, req.params.id, req.body, req.user!.id)));
 router.post('/confirm', protect, attendanceDeviceReview, run((req, db) => confirmIntervals(db, req.body.intervals, req.user!.id)));
-router.post('/intervals/:id/unknown-exit', protect, attendanceDeviceReview, run((req, db) => markUnknownExit(db, req.params.id, req.body.reason, req.user!.id)));
+router.post('/intervals/:id/correction-preview', protect, attendanceDeviceReview, run((req, db) => previewAttendanceCorrection(db, req.params.id, req.body, req.user!.id)));
+router.post('/intervals/:id/correction', protect, attendanceDeviceReview, run((req, db) => applyAttendanceCorrection(db, req.params.id, req.body, req.user!.id)));
+router.post('/intervals/:id/unknown-exit', protect, attendanceDeviceReview, run((req, db) => applyAttendanceCorrection(db, req.params.id, { ...req.body, action: 'UNKNOWN_EXIT' }, req.user!.id)));
 router.post('/handover', protect, attendanceDeviceReview, run(async (req, db) => {
   const reason = requireReason(req.body.reason);
   const assigneeId = String(req.body.assigneeId || '');

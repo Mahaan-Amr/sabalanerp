@@ -30,6 +30,7 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
     const call = (path: string, body?: object, credential?: string, browserCookie?: string) => fetch(base + path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(credential ? { Authorization: `Bearer ${credential}` } : {}), ...(browserCookie ? { Cookie: browserCookie } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     assert.equal((await call('/state')).status, 401);
     assert.equal((await call('/terminals', { name: key }, undefined, `${SESSION_COOKIE}=${viewerSession.token}`)).status, 403);
+    assert.equal((await call('/intervals/not-found/correction-preview', { action: 'VOID', reason: 'بدون اختیار' }, undefined, `${SESSION_COOKIE}=${viewerSession.token}`)).status, 403);
     const created = await call('/terminals', { name: key }, undefined, cookie); assert.equal(created.status, 200);
     const terminal = (await created.json() as { data: any }).data; terminals.push(terminal.id);
     assert.match(terminal.token, /^[a-f0-9]{64}$/); assert.equal(terminal.mode, 'SHADOW'); assert.equal(terminal.tokenHash, undefined);
@@ -78,6 +79,31 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
     assert.equal(reported.durationUnknown, true); assert.equal(reported.grossMinutes, 0);
     assert.equal((await securityCall(`/attendance/intervals/${interval.id}`, { enteredAt: new Date(Date.now() - 3600000).toISOString(), exitedAt: closed.exitedAt!.toISOString(), reason: 'ساعت واقعی پس از بررسی مشخص شد' }, cookie, 'PUT')).status, 200);
     assert.equal((await prisma.attendanceInterval.findUniqueOrThrow({ where: { id: interval.id } })).confirmedRevision, 0);
+
+    const cmd = { action: 'UNKNOWN_EXIT', reason: 'خروج تأیید شد؛ زمان قبلی مورد اعتماد نیست' };
+    const previewPath = `/intervals/${interval.id}/correction-preview`;
+    assert.equal((await call(previewPath, cmd)).status, 401);
+    assert.equal((await call(previewPath, cmd, terminal.token)).status, 401, 'reader cannot correct attendance');
+    const savedForReview = await prisma.attendanceInterval.findUniqueOrThrow({ where: { id: interval.id } });
+    await prisma.attendanceInterval.update({ where: { id: interval.id }, data: { confirmedRevision: savedForReview.revision } });
+    const history = await call(`/state?personnelId=${personnelId}&status=all`, undefined, undefined, viewerCookie);
+    assert.ok((await history.json() as { data: any }).data.intervals.some((i: any) => i.id === interval.id), 'person history includes existing intervals for correction');
+    const auditsBefore = await prisma.attendanceIntervalAudit.count({ where: { intervalId: interval.id } });
+    const previewResponse = await call(previewPath, cmd, undefined, viewerCookie);
+    assert.equal(previewResponse.status, 200, 'all active guards may review corrections');
+    const preview = (await previewResponse.json() as { data: any }).data;
+    assert.equal(await prisma.attendanceIntervalAudit.count({ where: { intervalId: interval.id } }), auditsBefore, 'preview remains read-only');
+    assert.equal((await call(`/intervals/${interval.id}/correction`, { ...cmd, ...preview, confirmApply: true }, undefined, viewerCookie)).status, 400);
+    assert.equal((await call(`/intervals/${interval.id}/unknown-exit`, { reason: cmd.reason }, undefined, viewerCookie)).status, 409, 'legacy path cannot bypass preview');
+    assert.equal((await securityCall(`/attendance/intervals/${interval.id}/void`, { reason: cmd.reason }, viewerCookie)).status, 409, 'legacy void cannot bypass preview');
+    const apply = { ...cmd, ...preview, facts: { entryReviewed: true, departureConfirmed: true }, confirmApply: true };
+    const race = await Promise.all([call(`/intervals/${interval.id}/correction`, apply, undefined, viewerCookie), call(`/intervals/${interval.id}/correction`, apply, undefined, viewerCookie)]);
+    assert.deepEqual(race.map(r => r.status).sort(), [200, 409], 'only one concurrent correction commits');
+    assert.equal(await prisma.attendanceIntervalAudit.count({ where: { intervalId: interval.id, action: 'UNKNOWN_EXIT' } }), 1);
+    const unknownAgain = await prisma.attendanceInterval.findUniqueOrThrow({ where: { id: interval.id } });
+    assert.equal(unknownAgain.exitedAt, null); assert.equal(unknownAgain.exitUnknown, true);
+    const incomplete = await securityCall('/reports/personnel-attendance-preview', { startDate: date, endDate: date, personnelIds: [personnelId] });
+    assert.equal((await incomplete.json() as { data: any }).data.people[0].durationUnknown, true);
 
     const before = new Date(Date.now() - 3600000);
     await prisma.attendanceTerminal.update({ where: { id: terminal.id }, data: { mode: 'ACTIVE', activatedAt: before } });

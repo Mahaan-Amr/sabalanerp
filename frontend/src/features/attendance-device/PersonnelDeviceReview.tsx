@@ -6,6 +6,8 @@ import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
 import { estimateScanClock, type ClockSample } from './clockEstimate';
 
+import { AuditedAttendanceCorrection, type CorrectionTarget } from './AuditedAttendanceCorrection';
+
 type Mapping = { id: string; personnelId: string | null; deviceCode: string; ignored: boolean; initialState: string; nameSnapshot: string | null };
 type Terminal = { id: string; name: string; mode: string; activatedAt: string | null; lastSeenAt: string | null; lastReadAt: string | null; mappings: Mapping[] };
 type Interval = { id: string; enteredAt: string | null; exitedAt: string | null; exitUnknown: boolean; revision: number; confirmedRevision: number; attendanceRecord: { personnelId: string | null } };
@@ -54,6 +56,7 @@ export function PersonnelDeviceStatus({ state, personnelId, today, hasMovement, 
 }
 
 export function PersonnelReviewDialogs({ state, person, initial, onClose, onSaved }: { state: State | null; person: { id: string; name: string } | null; initial: Mapping | null; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [correction, setCorrection] = useState<CorrectionTarget | null>(null);
   const [details, setDetails] = useState<State | null>(null);
   const [cursor, setCursor] = useState('');
   const [intervalCursor, setIntervalCursor] = useState('');
@@ -68,13 +71,14 @@ export function PersonnelReviewDialogs({ state, person, initial, onClose, onSave
   useEffect(() => { if (!person) return; let active = true; let timer: ReturnType<typeof setTimeout>; const poll = async () => { try { const r = await api.get('/attendance-device/state', { params: { personnelId: person.id, status: 'all', cursor: cursor || undefined, intervalCursor: intervalCursor || undefined } }); if (active) setDetails(r.data.data); } catch { if (active) setError('دریافت شواهد ناموفق بود.'); } finally { if (active) timer = setTimeout(poll, 1500); } }; void poll(); return () => { active = false; clearTimeout(timer); }; }, [person, cursor, intervalCursor]);
   const mutate = async (path: string, body: object, close = false) => { setBusy(true); setError(''); try { await api.post(`/attendance-device/${path}`, body); await onSaved(); if (close) onClose(); else await load(); } catch (e: any) { setError(e.response?.data?.error || 'ثبت تغییر ناموفق بود.'); } finally { setBusy(false); } };
   return <>
+    <AuditedAttendanceCorrection target={correction} onClose={() => setCorrection(null)} onSaved={async () => { await onSaved(); await load(); }} />
     <ErpSheet presentation="modal" open={Boolean(initial)} pending={busy} onClose={onClose} title={`وضعیت اولیه ${initial?.nameSnapshot || ''}`} footer={<ErpButton label="ثبت وضعیت اولیه" variant="solid" disabled={busy} onClick={() => initial && mutate(`mappings/${initial.id}/initial-state`, { initialState: choice, expectedInitialState: initial.initialState, reason: 'بررسی وضعیت اولیه از کارت پرسنل؛ بدون ایجاد تردد.' }, true)} />}>
       <ErpField label="وضعیت بررسی‌شده اولیه"><ErpSelect value={choice} onChange={e => setChoice(e.target.value)}><option value="UNKNOWN">نامعلوم</option><option value="INSIDE">داخل مجموعه</option><option value="OUTSIDE">بیرون مجموعه</option></ErpSelect></ErpField>{error && <ErpInlineState kind="error" title={error} />}
     </ErpSheet>
     <ErpSheet presentation="modal" open={Boolean(person)} pending={busy} onClose={onClose} title={`بررسی تردد ${person?.name || ''}`}>
       <div className="space-y-4">
         {error && <ErpInlineState kind="error" title={error} />}
-        {details?.intervals.map(i => <div key={i.id} className="border-b sds-divider py-3 space-y-2"><p>{i.enteredAt ? stamp(i.enteredAt) : 'ورود با ساعت نامعلوم'} تا {i.exitUnknown ? 'خروج با ساعت نامعلوم' : i.exitedAt ? stamp(i.exitedAt) : 'حضور باز'}</p>{state?.capabilities.review && <ErpButton label="تأیید این بازه" disabled={busy || i.exitUnknown || !i.enteredAt} onClick={() => mutate('confirm', { intervals: [{ id: i.id, revision: i.revision }] })} />}</div>)}
+        {details?.intervals.map(i => <div key={i.id} className="border-b sds-divider py-3 space-y-2"><p>{i.enteredAt ? stamp(i.enteredAt) : 'ورود با ساعت نامعلوم'} تا {i.exitUnknown ? 'خروج با ساعت نامعلوم' : i.exitedAt ? stamp(i.exitedAt) : 'حضور باز'}</p>{state?.capabilities.review && <ErpButton label="اصلاح حسابرسی‌شده" disabled={busy} onClick={() => setCorrection({ id: i.id, name: person?.name || '' })} />}{state?.capabilities.review && <ErpButton label="تأیید این بازه" disabled={busy || i.exitUnknown || !i.enteredAt || i.confirmedRevision === i.revision} onClick={() => mutate('confirm', { intervals: [{ id: i.id, revision: i.revision }] })} />}</div>)}
         {details && details.intervals.length === 100 && <ErpButton label="بازه‌های قدیمی‌تر" onClick={() => setIntervalCursor(details.intervals.at(-1)!.id)} />}
         {state?.capabilities.review && details?.punches.some(p => ['REVIEW', 'DUPLICATE', 'LINKED'].includes(p.status)) && <><ErpField label="دلیل رسیدگی"><ErpTextarea value={reason} onChange={e => setReason(e.target.value)} /></ErpField><ErpField label="زمان واقعی (در صورت اصلاح ساعت)"><PersianCalendarComponent showTime clearable value={actualTime} onChange={setActualTime} /></ErpField></>}
         {details?.punches.map(p => <div key={p.id} className="space-y-2 border-b sds-divider py-3"><strong>{p.nameSnapshot || person?.name} · کد {p.deviceCode}</strong><div><ErpStatus label={labels[p.status] || p.status} tone={['REVIEW', 'DUPLICATE'].includes(p.status) ? 'warning' : 'info'} /></div><p className="text-sm sds-text-secondary">اسکن: {stamp(p.correctedOccurredAt || p.occurredAt)}{p.correctedOccurredAt ? ' · با جبران ساعت' : ' · ساعت خام دستگاه'}</p>{p.correctedOccurredAt && <p className="text-xs sds-text-muted">خام: {stamp(p.occurredAt)}</p>}<p className="text-xs sds-text-secondary">دریافت: {stamp(p.receivedAt)} · {p.reason}</p>{state?.capabilities.review && ['REVIEW', 'DUPLICATE', 'LINKED'].includes(p.status) && <div className="flex flex-wrap gap-2">{['ENTRY', 'EXIT', 'DISMISS'].map(action => <ErpButton key={action} label={action === 'ENTRY' ? 'ثبت به‌عنوان ورود' : action === 'EXIT' ? 'ثبت به‌عنوان خروج' : 'کنارگذاشتن شاهد'} disabled={busy || !reason.trim() || (action !== 'DISMISS' && !p.correctedOccurredAt && !actualTime)} onClick={() => mutate(`punches/${p.id}/resolve`, { action, reason, ...(actualTime ? { occurredAt: PersianCalendar.toGregorian(actualTime, 'jYYYY/jMM/jDD HH:mm').toISOString() } : {}) })} />)}</div>}</div>)}

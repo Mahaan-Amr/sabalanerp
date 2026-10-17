@@ -29,7 +29,8 @@ import {
 } from '../securityDashboardViewModel';
 import { formatAttendanceDelay } from './attendancePresentation';
 import { usePersonnelDeviceReview, personnelDeviceInfo, PersonnelDeviceStatus, PersonnelReviewDialogs, AttendanceReviewToolbar, IntervalReviewSelection } from '@/features/attendance-device/PersonnelDeviceReview';
-import api from '@/lib/api';
+
+import { AuditedAttendanceCorrection, type CorrectionTarget } from '@/features/attendance-device/AuditedAttendanceCorrection';
 
 interface AttendanceRecord {
   id: string;
@@ -219,6 +220,7 @@ export default function AttendancePage() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [attendanceDialog, setAttendanceDialog] = useState<AttendanceDialogState | null>(null);
+  const [correctionTarget, setCorrectionTarget] = useState<CorrectionTarget | null>(null);
   const [intervalDialog, setIntervalDialog] = useState<IntervalDialogState | null>(null);
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
 
@@ -469,7 +471,7 @@ export default function AttendancePage() {
                         <div><dt className="text-xs sds-text-muted">خارج از محل</dt><dd className="mt-1 font-semibold">{(record.outsideMinutes || 0).toLocaleString('fa-IR')} دقیقه</dd></div>
                         <div><dt className="text-xs sds-text-muted">کارکرد محاسبه‌شده</dt><dd className="mt-1 font-semibold">{record.accountedWorkMinutes === null || record.accountedWorkMinutes === undefined ? 'در انتظار تکمیل' : `${record.accountedWorkMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
                         {record.movementTimeline?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">خط زمانی روز</dt><dd className="mt-2 space-y-1">{record.movementTimeline.map((segment, index) => <p key={`${segment.kind}-${segment.startsAt}-${index}`} className="rounded bg-[var(--sds-surface-panel)] px-2 py-1 text-xs"><strong>{segment.kind === 'PRESENCE' ? 'حضور در محل' : segment.kind === 'HOURLY_LEAVE' ? 'مرخصی ساعتی' : 'خارج از محل'}:</strong> {new Date(segment.startsAt).toLocaleString('fa-IR')} تا {segment.endsAt ? new Date(segment.endsAt).toLocaleString('fa-IR') : 'باز'}</p>)}</dd></div> : null}
-                        {record.intervals?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">جزئیات تردد</dt><dd className="mt-2 space-y-1">{record.intervals.map((interval, index) => <div key={interval.id} className="rounded bg-[var(--sds-surface-panel)] px-2 py-2 text-xs"><p>{(index + 1).toLocaleString('fa-IR')}. {interval.enteredAt ? new Date(interval.enteredAt).toLocaleString('fa-IR') : 'ورود با ساعت نامعلوم'} تا {interval.exitUnknown ? 'خروج با ساعت نامعلوم' : interval.exitedAt ? new Date(interval.exitedAt).toLocaleString('fa-IR') : 'باز'} · ثبت‌کننده ورود: {interval.entryRecorder ? `${interval.entryRecorder.firstName} ${interval.entryRecorder.lastName}` : '-'}</p><div className="mt-2 flex gap-2"><ErpPressable className="min-h-11 px-2 font-semibold" tone="primary" onClick={() => openIntervalDialog(record, interval, 'correct')}>اصلاح</ErpPressable><ErpPressable className="min-h-11 px-2 font-semibold" tone="danger" onClick={() => openIntervalDialog(record, interval, 'void')}>ابطال</ErpPressable></div></div>)}</dd></div> : null}
+                        {record.intervals?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">جزئیات تردد</dt><dd className="mt-2 space-y-1">{record.intervals.map((interval, index) => <div key={interval.id} className="rounded bg-[var(--sds-surface-panel)] px-2 py-2 text-xs"><p>{(index + 1).toLocaleString('fa-IR')}. {interval.enteredAt ? new Date(interval.enteredAt).toLocaleString('fa-IR') : 'ورود با ساعت نامعلوم'} تا {interval.exitUnknown ? 'خروج با ساعت نامعلوم' : interval.exitedAt ? new Date(interval.exitedAt).toLocaleString('fa-IR') : 'باز'} · ثبت‌کننده ورود: {interval.entryRecorder ? `${interval.entryRecorder.firstName} ${interval.entryRecorder.lastName}` : '-'}</p><div className="mt-2 flex gap-2"><ErpPressable className="min-h-11 px-2 font-semibold" tone="primary" onClick={() => openIntervalDialog(record, interval, 'correct')}>اصلاح</ErpPressable><ErpPressable className="min-h-11 px-2 font-semibold" tone="danger" onClick={() => setCorrectionTarget({ id: interval.id, name: `${record.employee.firstName} ${record.employee.lastName}` })}>بررسی اصلاح سابقه</ErpPressable></div></div>)}</dd></div> : null}
                         <div><dt className="text-xs sds-text-muted">ساعت کاری</dt><dd className="mt-1 font-semibold" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</dd></div>
                         <div><dt className="text-xs sds-text-muted">تأخیر</dt><dd className="mt-1 font-semibold">{delayLabel || '-'}</dd></div>
                         <div><dt className="text-xs sds-text-muted">اضافه‌کار</dt><dd className="mt-1 font-semibold">{record.overtimePending ? 'در انتظار ثبت خروج' : record.overtimeMinutes === null || record.overtimeMinutes === undefined ? '-' : `${record.overtimeMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
@@ -503,7 +505,7 @@ export default function AttendancePage() {
                 این خروج برای {PersianCalendar.formatForDisplay(attendanceDialog.record.openPreviousAttendance.date)} ثبت می‌شود.
               </p>
             )}
-            {attendanceDialog.action === 'close-previous' && attendanceDialog.record.openPreviousAttendance?.intervalId && <ErpButton label="خروج رخ داده؛ ساعت نامعلوم است" tone="warning" disabled={Boolean(actionLoadingId) || !attendanceDialog.reason.trim()} onClick={async () => { setActionLoadingId(attendanceDialog.record.id); try { await api.post(`/attendance-device/intervals/${attendanceDialog.record.openPreviousAttendance!.intervalId}/unknown-exit`, { reason: attendanceDialog.reason }); setAttendanceDialog(null); await fetchAttendanceData(true); } catch (e: any) { setError(e.response?.data?.error || 'ثبت نامعلومی خروج ناموفق بود.'); } finally { setActionLoadingId(''); } }} />}
+            {attendanceDialog.action === 'close-previous' && attendanceDialog.record.openPreviousAttendance?.intervalId && <ErpButton label="خروج رخ داده؛ ساعت نامعلوم است" tone="warning" disabled={Boolean(actionLoadingId) || !attendanceDialog.reason.trim()} onClick={() => { setCorrectionTarget({ id: attendanceDialog.record.openPreviousAttendance!.intervalId!, name: `${attendanceDialog.record.employee.firstName} ${attendanceDialog.record.employee.lastName}` }); setAttendanceDialog(null); }} />}
             <label className="mt-4 block"><span className={labelClass}>تاریخ تردد</span><PersianCalendarComponent value={attendanceDialog.date} onChange={date => setAttendanceDialog(current => current ? { ...current, date } : current)} /></label>
             {attendanceDialog.action === 'checkin' && <ErpCheckbox label="داخل است؛ ساعت ورود نامعلوم" checked={attendanceDialog.entryUnknown} onChange={e => setAttendanceDialog(current => current ? { ...current, entryUnknown: e.target.checked } : current)} />}
             {!attendanceDialog.entryUnknown && <label className="mt-4 block">
@@ -516,6 +518,7 @@ export default function AttendancePage() {
             </label>}
         </ErpSheet>
       )}
+      <AuditedAttendanceCorrection target={correctionTarget} onClose={() => setCorrectionTarget(null)} onSaved={async () => { await fetchAttendanceData(true); await device.load(); }} />
       {intervalDialog && (
         <ErpSheet presentation="modal" pending={Boolean(actionLoadingId)} open onClose={() => setIntervalDialog(null)} title={intervalDialog.action === 'correct' ? 'اصلاح بازه تردد' : 'ابطال بازه تردد'} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" onClick={() => setIntervalDialog(null)} tone="neutral" variant="ghost" /><ErpButton label={intervalDialog.action === 'correct' ? 'ثبت اصلاح' : 'تأیید ابطال'} onClick={submitIntervalDialog} tone={intervalDialog.action === 'void' ? 'danger' : undefined} variant="solid" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} /></div>}>
             <p className="mt-1 text-sm sds-text-muted">{intervalDialog.record.employee.firstName} {intervalDialog.record.employee.lastName}</p>
@@ -526,7 +529,7 @@ export default function AttendancePage() {
               </div>
             )}
             <label className="mt-4 block"><span className={labelClass}>دلیل (الزامی)</span><ErpTextarea value={intervalDialog.reason} onChange={(event) => setIntervalDialog((current) => current ? { ...current, reason: event.target.value } : current)} /></label>
-            {intervalDialog.action === 'correct' && !intervalDialog.interval.exitedAt && !intervalDialog.interval.exitUnknown && <ErpButton label="خروج رخ داده؛ ساعت نامعلوم است" tone="warning" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} onClick={async () => { setActionLoadingId(intervalDialog.interval.id); try { await api.post(`/attendance-device/intervals/${intervalDialog.interval.id}/unknown-exit`, { reason: intervalDialog.reason }); setIntervalDialog(null); await fetchAttendanceData(true); } catch (e: any) { setError(e.response?.data?.error || 'ثبت خروج نامعلوم ناموفق بود.'); } finally { setActionLoadingId(''); } }} />}
+            {intervalDialog.action === 'correct' && !intervalDialog.interval.exitedAt && !intervalDialog.interval.exitUnknown && <ErpButton label="خروج رخ داده؛ ساعت نامعلوم است" tone="warning" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} onClick={() => { setCorrectionTarget({ id: intervalDialog.interval.id, name: `${intervalDialog.record.employee.firstName} ${intervalDialog.record.employee.lastName}` }); setIntervalDialog(null); }} />}
             <p className="mt-2 text-xs sds-text-muted">سابقه قبلی حذف نمی‌شود و همراه عامل و دلیل در لاگ ممیزی باقی می‌ماند.</p>
         </ErpSheet>
       )}

@@ -5,7 +5,7 @@ import path from 'path';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { body, validationResult } from 'express-validator';
-import { AttendanceIntervalStatus, AttendanceStatus, AttendanceWorkScheduleStatus, ExceptionStatus, ExceptionType, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
+import { AttendanceIntervalStatus, AttendanceStatus, AttendanceWorkScheduleStatus, ExceptionStatus, ExceptionType, LogisticsDriverRequestStatus, Prisma, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
 import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -28,7 +28,8 @@ import { completeGuardInboundMovement, GuardInboundMovementConflictError, guardI
   recordGuardInboundMovement } from '../services/guardInboundMovement';
 import canonicalGuardQueueRoutes from './canonical-guard-queue';
 import { attendanceDeviceManage, attendanceDeviceReview } from '../middleware/attendanceDeviceAccess';
-import { refreshDeviceAttendance, requireReviewHandover } from '../services/attendanceDevice';
+import { applyAttendanceCorrection } from '../services/attendanceCorrection';
+import { lockAttendance, AttendanceDeviceError, refreshDeviceAttendance, requireReviewHandover } from '../services/attendanceDevice';
 
 const router = express.Router();
 
@@ -2450,25 +2451,14 @@ router.post('/attendance/intervals/:id/void', protect, attendanceDeviceReview, [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
-    const interval = await prisma.attendanceInterval.findUnique({ where: { id: req.params.id } });
-    if (!interval || interval.status === AttendanceIntervalStatus.VOIDED) return res.status(404).json({ success: false, error: 'بازه حضور فعال پیدا نشد.' });
-    const reason = String(req.body.reason).trim();
-    await prisma.$transaction(async (tx) => {
-      const updated = await tx.attendanceInterval.update({
-        where: { id: interval.id },
-        data: { status: AttendanceIntervalStatus.VOIDED, revision: { increment: 1 }, confirmedRevision: 0, voidReason: reason, voidedAt: new Date(), voidedBy: req.user!.id }
-      });
-      await tx.attendanceIntervalAudit.create({
-        data: { intervalId: interval.id, action: 'VOIDED', reason, beforeData: intervalAuditSnapshot(interval), afterData: intervalAuditSnapshot(updated), actorId: req.user!.id }
-      });
-      await tx.attendancePunch.updateMany({ where: { intervalId: interval.id }, data: { status: 'DISMISSED', reason, reviewedBy: req.user!.id, reviewedAt: new Date() } });
-      await refreshAttendanceRecordFromIntervals(tx, interval.attendanceRecordId);
-    });
-    const record = await prisma.attendanceRecord.findUnique({ where: { id: interval.attendanceRecordId }, include: attendanceInclude });
-    return res.json({ success: true, message: 'بازه تردد با حفظ سابقه باطل شد.', data: record });
+    const data = await prisma.$transaction(async tx => {
+      await lockAttendance(tx);
+      return applyAttendanceCorrection(tx, req.params.id, { ...req.body, action: 'VOID' }, req.user!.id);
+    }, { isolationLevel: 'Serializable' });
+    return res.json({ success: true, data });
   } catch (error) {
-    console.error('Void attendance interval error:', error);
-    return res.status(500).json({ success: false, error: 'Server error' });
+    const status = error instanceof AttendanceDeviceError ? error.status : error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034' ? 409 : 400;
+    return res.status(status).json({ success: false, error: error instanceof AttendanceDeviceError ? error.message : 'اطلاعات تغییر کرده یا اصلاح انجام نشد؛ دوباره بررسی کنید.' });
   }
 });
 

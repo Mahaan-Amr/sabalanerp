@@ -1,0 +1,12 @@
+
+> sabalanerp-backend@1.0.0 test:dispatch-documents
+> tsx src/services/__tests__/dispatchArtifactStorageLock.test.ts && tsx src/services/__tests__/dispatchDocuments.test.ts && tsx src/services/__tests__/dispatchDocumentsDelegation.test.ts && tsx src/services/__tests__/dispatchDocumentsPrismaBehavior.test.ts && tsx src/services/__tests__/dispatchDocumentsTemporaryDatabase.test.ts
+
+dispatch artifact storage lock tests passed
+SMS_IR_API_KEY is not set in environment variables
+dispatch documents tests passed
+SMS_IR_API_KEY is not set in environment variables
+dispatch document canonical delegation tests passed
+SMS_IR_API_KEY is not set in environment variables
+dispatch document stale transaction behavior tests passed
+dispatch document temporary database preflight and migration-target tests passed

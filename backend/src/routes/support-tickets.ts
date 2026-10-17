@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import express, { type Response } from 'express';
-import multer from 'multer';
+import { createDurableUpload } from '../services/durableUpload';
 import { body, validationResult } from 'express-validator';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { authorize, protect, type AuthRequest } from '../middleware/auth';
@@ -42,24 +42,24 @@ const ticketTypes = ['TECHNICAL_ERROR', 'INCORRECT_DATA', 'ACCESS_PROBLEM', 'GUI
 const impacts: TicketImpact[] = ['MINOR', 'SINGLE_TASK', 'BLOCKED', 'WIDESPREAD'];
 const ticketStorageDir = path.resolve(process.env.SUPPORT_TICKET_STORAGE_DIR || path.join(process.cwd(), 'storage', 'support-tickets'));
 fs.mkdirSync(ticketStorageDir, { recursive: true });
-const attachmentUpload = multer({
-  storage: multer.diskStorage({
+const attachmentUpload = createDurableUpload({
+  storage: {
     destination: (_req, _file, callback) => callback(null, ticketStorageDir),
     filename: (_req, file, callback) => callback(
       null,
       `${Date.now()}-${crypto.randomBytes(16).toString('hex')}${path.extname(file.originalname).toLowerCase().slice(0, 12)}`,
     ),
-  }),
+  },
   limits: { files: 1, fileSize: 25 * 1024 * 1024 },
 });
-const stagedAttachmentUpload = multer({
-  storage: multer.diskStorage({
+const stagedAttachmentUpload = createDurableUpload({
+  storage: {
     destination: (_req, _file, callback) => callback(null, ticketStorageDir),
     filename: (_req, file, callback) => callback(
       null,
       `staged-${Date.now()}-${crypto.randomBytes(16).toString('hex')}${path.extname(file.originalname).toLowerCase().slice(0, 12)}`,
     ),
-  }),
+  },
   limits: { files: 1, fileSize: 25 * 1024 * 1024 },
 });
 const allowedAttachmentTypes: Record<string, { kind: 'IMAGE' | 'AUDIO' | 'DOCUMENT'; maxSize: number }> = {

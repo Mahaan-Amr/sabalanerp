@@ -6,6 +6,7 @@ import express, { NextFunction, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
+import { createDurableUpload } from '../services/durableUpload';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
 import hrHiringSmsGateway from '../services/hrHiringSmsGateway';
@@ -176,11 +177,11 @@ const assertFormalAssessmentEvidenceComplete = async (applicationId: string, cli
   return state;
 };
 
-const upload = multer({
-  storage: multer.diskStorage({
+const upload = createDurableUpload({
+  storage: {
     destination: (_req, _file, cb) => cb(null, HR_HIRING_STORAGE_DIR),
     filename: (_req, file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(16).toString('hex')}${path.extname(file.originalname).toLowerCase()}`)
-  }),
+  },
   limits: { fileSize: 15 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => cb(null, HR_HIRING_ALLOWED_MIME.has(file.mimetype))
 });

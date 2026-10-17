@@ -1,0 +1,60 @@
+TAP version 13
+# Subtest: repeat export returns the exact frozen bytes and fails closed on missing or altered storage
+ok 1 - repeat export returns the exact frozen bytes and fails closed on missing or altered storage
+  ---
+  duration_ms: 33.327976
+  type: 'test'
+  ...
+# Subtest: a failed replacement stream preserves the complete prior artifact and an existing reader
+ok 2 - a failed replacement stream preserves the complete prior artifact and an existing reader
+  ---
+  duration_ms: 37.836284
+  type: 'test'
+  ...
+# Subtest: concurrent creates never overwrite another complete artifact and render buffers are frozen at admission
+ok 3 - concurrent creates never overwrite another complete artifact and render buffers are frozen at admission
+  ---
+  duration_ms: 7.60776
+  type: 'test'
+  ...
+# Subtest: file and directory symlinks never replace or expose another storage target
+ok 4 - file and directory symlinks never replace or expose another storage target
+  ---
+  duration_ms: 6.723178
+  type: 'test'
+  ...
+# Subtest: multipart rejection removes every owned file before error handoff and never truncates a colliding artifact
+ok 5 - multipart rejection removes every owned file before error handoff and never truncates a colliding artifact
+  ---
+  duration_ms: 167.365623
+  type: 'test'
+  ...
+# Error: FILE_UPLOAD_ABORTED
+#     at aborted (/app/online-runtime-acceptance/file-publication-1ce01d65d34208106d99af0364f7dbbb/services/durableUpload.js:13:37)
+#     at IncomingMessage.onAbort (/app/online-runtime-acceptance/file-publication-1ce01d65d34208106d99af0364f7dbbb/services/durableUpload.js:159:31)
+#     at Object.onceWrapper (node:events:633:28)
+#     at IncomingMessage.emit (node:events:519:28)
+#     at IncomingMessage._destroy (node:_http_incoming:221:10)
+#     at _destroy (node:internal/streams/destroy:122:10)
+#     at IncomingMessage.destroy (node:internal/streams/destroy:84:5)
+#     at abortIncoming (node:_http_server:838:9)
+#     at socketOnClose (node:_http_server:832:3)
+#     at Socket.emit (node:events:531:35) {
+#   code: 'FILE_UPLOAD_ABORTED',
+#   storageErrors: []
+# }
+# Subtest: a disconnected multipart request keeps actual file completion in the request drain
+ok 6 - a disconnected multipart request keeps actual file completion in the request drain
+  ---
+  duration_ms: 41.435117
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 720.439879

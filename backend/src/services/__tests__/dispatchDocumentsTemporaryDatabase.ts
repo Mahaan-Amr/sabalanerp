@@ -14,11 +14,12 @@ const checkedName = (value: string) => {
 };
 
 const compose = (repositoryRoot: string, command: string) => {
-  verifySabalanerpLocalPostgres(repositoryRoot);
+  const runtimeRoot = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || repositoryRoot;
+  verifySabalanerpLocalPostgres(runtimeRoot);
   return execFileSync('docker', [
-    'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
+    'compose', '-f', path.join(runtimeRoot, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
     'sh', '-lc', command,
-  ], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
+  ], { cwd: runtimeRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
 };
 
 export const assertDispatchDocumentsMigrationTarget = (databaseUrl: string, expectedName: string) => {
@@ -48,8 +49,9 @@ export const assertSabalanerpLocalPostgres = (output: string) => {
 };
 
 const verifySabalanerpLocalPostgres = (repositoryRoot: string) => {
-  const output = execFileSync('docker', ['compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'),
-    'ps', '--format', 'json'], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 30_000 });
+  const runtimeRoot = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || repositoryRoot;
+  const output = execFileSync('docker', ['compose', '-f', path.join(runtimeRoot, 'docker-compose.local.yml'),
+    'ps', '--format', 'json'], { cwd: runtimeRoot, stdio: 'pipe', encoding: 'utf8', timeout: 30_000 });
   assertSabalanerpLocalPostgres(output);
 };
 

@@ -1,5 +1,5 @@
-import fs from 'fs';
 import path from 'path';
+import { publishDurableFile } from '../services/durableFilePublication';
 import puppeteer from 'puppeteer';
 import type { ContractRuntime, Output } from '../services/partnerSales/customerOutput/contracts';
 import { createCustomerOutputSnapshots } from '../services/partnerSales/customerOutput/snapshots';
@@ -52,13 +52,6 @@ export interface GeneratePdfOptions {
   headerTemplate?: string;
   footerTemplate?: string;
   assertNoOverflowSelector?: string;
-}
-
-// Ensure a directory exists
-function ensureDirectoryExists(directoryPath: string): void {
-  if (!fs.existsSync(directoryPath)) {
-    fs.mkdirSync(directoryPath, { recursive: true });
-  }
 }
 
 // Generate a PDF from HTML content with RTL support
@@ -135,11 +128,10 @@ export async function generatePdfBufferFromHtml(options: Omit<GeneratePdfOptions
 // Generate a PDF from HTML content with RTL support
 export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<string> {
   const outputDir = options.outputDir || path.join(process.cwd(), 'storage', 'contracts');
-  ensureDirectoryExists(outputDir);
 
   const outputPath = path.join(outputDir, `${options.fileName.replace(/[^\w\-\.]/g, '_')}.pdf`);
   const bytes = await generatePdfBufferFromHtml(options);
-  fs.writeFileSync(outputPath, bytes);
+  await publishDurableFile(path.resolve(outputPath), bytes, { replace: true });
 
   return outputPath;
 }

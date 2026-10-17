@@ -1,6 +1,7 @@
-import { mkdir, open, readFile, unlink } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DispatchArtifactStorage } from './ports';
+import { publishDurableFile, removeDurableFile } from '../durableFilePublication';
 
 const resolveKey = (root: string, storageKey: string) => {
   if (!/^dispatch-documents\/[A-Za-z0-9_-]+\.pdf$/.test(storageKey)) throw new Error('Invalid dispatch artifact storage key.');
@@ -13,21 +14,13 @@ const resolveKey = (root: string, storageKey: string) => {
 export const createFilesystemDispatchArtifactStorage = (root: string): DispatchArtifactStorage => ({
   async stage({ storageKey, bytes }) {
     const target = resolveKey(root, storageKey);
-    await mkdir(path.dirname(target), { recursive: true });
-    const handle = await open(target, 'wx');
-    try {
-      await handle.writeFile(bytes);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+    await publishDurableFile(target, bytes);
   },
   async read(storageKey) {
     try { return new Uint8Array(await readFile(resolveKey(root, storageKey))); }
     catch (error: any) { if (error?.code === 'ENOENT') return null; throw error; }
   },
   async discard(storageKey) {
-    try { await unlink(resolveKey(root, storageKey)); }
-    catch (error: any) { if (error?.code !== 'ENOENT') throw error; }
+    await removeDurableFile(resolveKey(root, storageKey));
   },
 });

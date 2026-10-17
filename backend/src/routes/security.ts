@@ -2,7 +2,7 @@ import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import multer from 'multer';
+import { createDurableUpload } from '../services/durableUpload';
 import * as XLSX from 'xlsx';
 import { body, validationResult } from 'express-validator';
 import { AttendanceIntervalStatus, AttendanceStatus, AttendanceWorkScheduleStatus, ExceptionStatus, ExceptionType, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
@@ -441,16 +441,16 @@ const pairIsComplete = (pair: any) => Boolean(
 const removeStoredFiles = (files: Express.Multer.File[] = []) => files.forEach((file) => {
   try { fs.unlinkSync(file.path); } catch { /* best effort cleanup */ }
 });
-const vehiclePhotoUpload = multer({
-  storage: multer.diskStorage({
+const vehiclePhotoUpload = createDurableUpload({
+  storage: {
     destination: (_req, _file, cb) => { fs.mkdirSync(vehiclePhotoDir, { recursive: true }); cb(null, vehiclePhotoDir); },
     filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`)
-  }),
+  },
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype) && ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(file.originalname).toLowerCase())),
   limits: { fileSize: 10 * 1024 * 1024 }
 });
-const shiftLogPhotoUpload = multer({
-  storage: multer.diskStorage({ destination: (_req, _file, cb) => { fs.mkdirSync(shiftLogPhotoDir, { recursive: true }); cb(null, shiftLogPhotoDir); }, filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`) }),
+const shiftLogPhotoUpload = createDurableUpload({
+  storage: { destination: (_req, _file, cb) => { fs.mkdirSync(shiftLogPhotoDir, { recursive: true }); cb(null, shiftLogPhotoDir); }, filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`) },
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)), limits: { fileSize: 10 * 1024 * 1024, files: 8 }
 });
 const uploadedFiles = (req: any) => (Array.isArray(req.files) ? req.files : Object.values(req.files || {}).flat()) as Express.Multer.File[];

@@ -3,7 +3,7 @@ import { activePerformanceRestrictionIds } from './personnelPerformanceRestricti
 import { readPerformanceRetentionPolicy } from './personnelPerformanceRetentionStore';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import * as XLSX from 'xlsx';
@@ -36,6 +36,7 @@ import {
 import { runPerformanceSerializableTransaction } from './personnelPerformancePolicyStore';
 import { publishNotificationEvent } from './notificationService';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
+import { publishDurableFile, removeDurableFile } from './durableFilePublication';
 
 // Vault snapshots must contain JSON values: dates become ISO strings and absent fields are omitted.
 const reportingSnapshot = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
@@ -53,7 +54,7 @@ export const erasePerformanceExportArtifacts = async (
   const paths = new Set(artifacts.map(({ artifactPath }) => artifactPath));
   for (const receipt of receipts) if (receipt.artifactPath) paths.add(receipt.artifactPath);
   for (const artifactPath of paths) {
-    await unlink(artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+    await removeDurableFile(artifactPath);
   }
   await client.performanceExportReceipt.updateMany({ where: { id: { in: receipts.map(({ id }) => id) } }, data: {
     status: PerformanceExportStatus.DELETED, artifactPath: null, deletedAt: erasedAt,
@@ -871,7 +872,6 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
     if ((receipt.exportKind === 'XLSX' && rows.length > 100_000) || (receipt.exportKind === 'PDF' && rows.length > 12_500)) {
       throw disclosureError('دامنه خروجی از سقف مجاز بیشتر است.', 'PERFORMANCE_EXPORT_SCOPE_TOO_LARGE', 422);
     }
-    await mkdir(exportRoot(), { recursive: true, mode: 0o700 });
     const artifactPath = receipt.artifactPath!;
     const rendered = await withinPerformanceExportDeadline((signal) => renderPerformanceExportArtifact(receipt.exportKind as 'XLSX' | 'PDF', rows, signal));
     const artifactHash = createHash('sha256').update(rendered.bytes).digest('hex');
@@ -891,7 +891,7 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
       if (current.status !== PerformanceExportStatus.RUNNING || current.attemptCount !== receipt.attemptCount
         || !current.expiresAt || current.expiresAt <= new Date()) return 0;
       // Serialize storage publication with cleanup; a delayed renderer must never recreate a deleted file.
-      await writeFile(artifactPath, encryptPerformanceExportArtifact(rendered.bytes, exportKey.key), { mode: 0o600 });
+      await publishDurableFile(path.resolve(artifactPath), encryptPerformanceExportArtifact(rendered.bytes, exportKey.key), { replace: true });
       const updated = await tx.performanceExportReceipt.updateMany({ where: {
         id: receipt.id, status: PerformanceExportStatus.RUNNING, attemptCount: receipt.attemptCount,
       }, data: {
@@ -1159,7 +1159,7 @@ const cleanupPerformanceExport = async (
     const artifactPaths = new Set(artifacts.map((artifact) => artifact.artifactPath));
     if (receipt.artifactPath) artifactPaths.add(receipt.artifactPath);
     for (const artifactPath of artifactPaths) {
-      await unlink(artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+      await removeDurableFile(artifactPath);
     }
     await redactPerformanceExportPayload(tx, receipt, now, actorUserId);
     await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'LIVE_DELETED_PENDING_BACKUP', liveDeletedAt: now, attemptCount: { increment: 1 }, lastFailureCode: null } });

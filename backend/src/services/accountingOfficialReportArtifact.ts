@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { publishDurableFile, syncExistingDurableFile } from './durableFilePublication';
 
 const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
@@ -21,11 +22,11 @@ export async function retainOfficialReportArtifact(input: {
   }
   const bytes = await input.render();
   const hash = digest(bytes);
-  await fs.mkdir(directory, { recursive: true });
   const target = path.join(directory, `${hash}.${input.format}`);
-  try { await fs.writeFile(target, bytes, { flag: 'wx', mode: 0o600 }); }
+  try { await publishDurableFile(target, bytes); }
   catch (error: any) { if (error.code !== 'EEXIST') throw error; }
   if (digest(await fs.readFile(target)) !== hash) throw new Error('ذخیره فایل منجمد تأیید نشد.');
+  await syncExistingDurableFile(target);
   await input.recordHash(hash);
   return { bytes, hash };
 }

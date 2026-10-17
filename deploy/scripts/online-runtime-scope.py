@@ -61,18 +61,26 @@ def beneath(file, directory):
     return file == directory or file.startswith(directory.rstrip('/') + '/')
 
 
+def mount_snapshot():
+    with open('/proc/self/mountinfo', 'rb') as stream:
+        data = stream.read(262145)
+    require(0 < len(data) <= 262144)
+    return data
+
+
 def readonly_mount(file, descriptor, value):
     mounts = []
-    with open('/proc/self/mountinfo', encoding='utf8') as stream:
-        for line in stream:
-            before, separator, _after = line.rstrip('\n').partition(' - ')
-            fields = before.split(' ')
-            require(separator and len(fields) >= 6 and fields[0].isdigit()
-                    and re.fullmatch(r'[0-9]+:[0-9]+', fields[2]))
-            root, target = map(unescape_mount, fields[3:5])
-            require(root.startswith('/') and target.startswith('/'))
-            mounts.append(dict(id=fields[0], device=fields[2], root=root,
-                               target=target, options=set(fields[5].split(','))))
+    snapshot = mount_snapshot()
+    namespace = os.readlink('/proc/self/ns/mnt')
+    for line in snapshot.decode('utf8').splitlines():
+        before, separator, _after = line.partition(' - ')
+        fields = before.split(' ')
+        require(separator and len(fields) >= 6 and fields[0].isdigit()
+                and re.fullmatch(r'[0-9]+:[0-9]+', fields[2]))
+        root, target = map(unescape_mount, fields[3:5])
+        require(root.startswith('/') and target.startswith('/'))
+        mounts.append(dict(id=fields[0], device=fields[2], root=root,
+                           target=target, options=set(fields[5].split(','))))
     covering = [mount for mount in mounts if beneath(file, mount['target'])]
     require(covering)
     selected = max(covering, key=lambda mount: len(mount['target']))
@@ -86,7 +94,8 @@ def readonly_mount(file, descriptor, value):
     with open('/proc/self/fdinfo/' + str(descriptor), encoding='ascii') as stream:
         match = re.search(r'^mnt_id:\s+([0-9]+)\s*$', stream.read(), re.M)
     require(match and match[1] == selected['id'])
-    return selected['id']
+    require(mount_snapshot() == snapshot and os.readlink('/proc/self/ns/mnt') == namespace)
+    return dict(mountId=selected['id'], mountNamespace=namespace, mountInfoSha256=hashlib.sha256(snapshot).hexdigest())
 
 
 def _load(environment):
@@ -105,7 +114,7 @@ def _load(environment):
         require(len(data) == before.st_size and identity(before) == identity(os.fstat(descriptor))
                 and identity(before) == identity(os.lstat(file)))
         require(hashlib.sha256(data).hexdigest() == environment[KEYS[1]])
-        mount_id = readonly_mount(file, descriptor, before)
+        mount = readonly_mount(file, descriptor, before)
         scope = json.loads(data)
         require(exact(scope, ['format', 'runtimeId', 'releaseId', 'manifestSha256', 'sourceCommit', 'image',
                               'nonce', 'purpose', 'role', 'coordinationDirectory', 'nativeDirectory',
@@ -141,9 +150,13 @@ def _load(environment):
                 and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,62}', scope['database']['name']))
         require((json.dumps(scope, sort_keys=True, separators=(',', ':')) + '\n').encode('ascii') == data
                 and identity(before) == identity(os.fstat(descriptor))
-                and identity(before) == identity(os.lstat(file)))
-        return dict(scope=scope, file=file, sha256=environment[KEYS[1]], mountId=mount_id,
-                    device=str(before.st_dev), inode=str(before.st_ino))
+                and identity(before) == identity(os.lstat(file))
+                and hashlib.sha256(mount_snapshot()).hexdigest() == mount['mountInfoSha256']
+                and os.readlink('/proc/self/ns/mnt') == mount['mountNamespace'])
+        helper = Path(__file__)
+        require(helper.resolve(strict=True) == helper and helper.stat().st_size <= 131072)
+        return dict(scope=scope, file=file, sha256=environment[KEYS[1]], **mount,
+                    device=str(before.st_dev), inode=str(before.st_ino), helperSha256=hashlib.sha256(helper.read_bytes()).hexdigest())
     finally:
         os.close(descriptor)
 
@@ -155,3 +168,15 @@ def load_scope(environment):
         return _load(environment)
     except Exception:
         raise RuntimeError('ONLINE_RUNTIME_SCOPE_UNPROVEN') from None
+
+
+if __name__ == '__main__':
+    import sys
+    try:
+        require(len(sys.argv) == 1)
+        loaded = load_scope(os.environ)
+        require(loaded is not None)
+        print(json.dumps(loaded, sort_keys=True, separators=(',', ':')))
+    except Exception:
+        print('ONLINE_RUNTIME_SCOPE_UNPROVEN', file=sys.stderr)
+        sys.exit(75)

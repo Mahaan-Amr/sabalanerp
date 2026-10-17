@@ -1,0 +1,98 @@
+{
+  "workingRoot": "/app/online-runtime-acceptance/online-authority-790eaadca7834d19ba1e2cbf278cd0d1",
+  "bundle": "/app/online-runtime-acceptance/online-authority-node-bundle-790eaadca7834d19ba1e2cbf278cd0d1",
+  "proofs": [
+    {
+      "pass_": true,
+      "mode": "writable-alias",
+      "grants": [],
+      "moduleSha256": "481a878633d60690c600c0742ee79dbad587f96f6cb89f10363fa6772548736a"
+    },
+    {
+      "pass_": true,
+      "mode": "readonly",
+      "grants": [
+        {
+          "purpose": "http",
+          "mountId": "1027",
+          "runtimeId": "31d6c5e3fb5c03ea510ca4781fe815e5a2d2ce3cd041ebc5d7a1082f356b241e"
+        },
+        {
+          "purpose": "jobs",
+          "mountId": "1027",
+          "runtimeId": "6afe28122bdaa866479573f80a612e551e5c7f26cb069d529842832efaccfcf0"
+        },
+        {
+          "purpose": "capture",
+          "mountId": "1027",
+          "runtimeId": "7bfa976532b3c698960fbd81c2dfe99f2fbcd62deffdcc822206867e4fedaa4c"
+        }
+      ],
+      "moduleSha256": "481a878633d60690c600c0742ee79dbad587f96f6cb89f10363fa6772548736a"
+    },
+    {
+      "pass": true,
+      "mode": "writable-alias",
+      "actualWritableAliasesRejected": 3
+    },
+    {
+      "pass": true,
+      "mode": "unconfigured"
+    },
+    {
+      "pass": true,
+      "mode": "readonly",
+      "observed": [
+        {
+          "pass": true,
+          "purpose": "http",
+          "mountId": "1027",
+          "frozen": true
+        },
+        {
+          "pass": true,
+          "purpose": "jobs",
+          "mountId": "1027",
+          "frozen": true
+        },
+        {
+          "pass": true,
+          "purpose": "capture",
+          "mountId": "1027",
+          "frozen": true
+        }
+      ],
+      "invalid": [
+        {
+          "pass": true,
+          "rejected": "unknown-field"
+        },
+        {
+          "pass": true,
+          "rejected": "wrong-purpose"
+        },
+        {
+          "pass": true,
+          "rejected": "native-directory-escape"
+        },
+        {
+          "pass": true,
+          "rejected": "missing-worker"
+        },
+        {
+          "pass": true,
+          "rejected": "changed-gate-inode"
+        },
+        {
+          "pass": true,
+          "rejected": "invalid-database"
+        },
+        {
+          "pass": true,
+          "rejected": "noncanonical"
+        }
+      ],
+      "sourceSha256": "6e3103ce7f4589c5a0063242b459e0e3dc62134ca3e9b112d74fa6da421703fd"
+    }
+  ]
+}

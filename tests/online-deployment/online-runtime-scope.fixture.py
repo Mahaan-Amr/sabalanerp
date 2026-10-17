@@ -102,8 +102,19 @@ def main():
             write(authority / (runtime_id + '.json'), encoded)
             invalid.append(dict(kind=kind, file='/run/sabalan-online/' + runtime_id + '.json',
                                 sha256=hashlib.sha256(encoded).hexdigest(), role=scope['role']))
+        probe = json.loads(json.dumps(grants[0]['scope']))
+        probe['runtimeId'] = secrets.token_hex(32)
+        probe['nativeDirectory'] = str(coordination / 'online/native' / probe['runtimeId'])
+        probe['boundaryDirectory'] = str(coordination / 'online/work' / probe['runtimeId'])
+        for name in ['nativeDirectory', 'boundaryDirectory']:
+            Path(probe[name]).mkdir(mode=0o700)
+        source_lock(Path(probe['nativeDirectory']) / 'deployment-runtime-control.lock')
+        encoded = (json.dumps(probe, sort_keys=True, separators=(',', ':')) + '\n').encode()
+        write(authority / (probe['runtimeId'] + '.json'), encoded)
         index = dict(grants=grants, hardlink='/run/sabalan-online/' + hardlink,
-                     symlink='/run/sabalan-online/' + symlink, invalid=invalid)
+                     symlink='/run/sabalan-online/' + symlink, invalid=invalid,
+                     cacheProbe=dict(file='/run/sabalan-online/' + probe['runtimeId'] + '.json',
+                                     sha256=hashlib.sha256(encoded).hexdigest(), role=probe['role'], scope=probe))
         write(root / 'grant-index.json', json.dumps(index).encode())
         fd = os.open(authority, os.O_RDONLY | os.O_DIRECTORY)
         os.fsync(fd)

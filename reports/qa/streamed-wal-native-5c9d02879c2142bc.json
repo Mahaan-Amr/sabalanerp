@@ -1,0 +1,68 @@
+{
+  "streamedWalNativeValidationPassed": true,
+  "proofs": [
+    {
+      "captureReport": "reports/qa/wal-receiver-48d16b64225fee2ba2f884b33b11c1db.json",
+      "captureReportSha256": "d867f4deb794e9105e17a6e0fbb5c1f921736ac1d25f559fd4a59f09d476def8",
+      "namespace": "sabalan-wal-48d16b64225fee2ba2f884b33b11c1db",
+      "nativeVersion": "pg_waldump (PostgreSQL) 15.18",
+      "segments": [
+        {
+          "bytes": 16777216,
+          "name": "000000010000000C0000005A",
+          "sha256": "26b4625150187bdb669df946a1847d2699f09e1f4f2e49d7eb42a61f94166913"
+        }
+      ],
+      "completeNativeRangeVerified": true,
+      "firstRecordLsn": "C/5A000028",
+      "modifiedRecordCrcRejected": true,
+      "privateRawCopy": "/tmp/sabalan-streamed-wal-pOneCM",
+      "privateCopyRemovedAfterSuccess": true
+    },
+    {
+      "captureReport": "reports/qa/wal-receiver-f7e6da7d707c0e4fe990747263afa2b4.json",
+      "captureReportSha256": "0834823d12f657ec40170affeb5aaec76345fc5c19afcff32087b84f45bc91fc",
+      "namespace": "sabalan-wal-f7e6da7d707c0e4fe990747263afa2b4",
+      "nativeVersion": "pg_waldump (PostgreSQL) 15.18",
+      "segments": [
+        {
+          "bytes": 16777216,
+          "name": "000000010000000C0000005D",
+          "sha256": "3f3c2e6c6aa9a6b76eeff799b765231efd20ec39b545b7e8c871583aba02e1e0"
+        }
+      ],
+      "completeNativeRangeVerified": true,
+      "firstRecordLsn": "C/5D000028",
+      "modifiedRecordCrcRejected": true,
+      "privateRawCopy": "/tmp/sabalan-streamed-wal-LbJkih",
+      "privateCopyRemovedAfterSuccess": true
+    }
+  ],
+  "canonicalBeforeAndAfter": [
+    {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  ],
+  "fixtureSha256": "448358add6e7d66c7a43afe9f0e7f5a2c7c967c62bbef6ee1891f577f402eb0d",
+  "limits": [
+    "native streamed-WAL component only",
+    "no base replay, encryption, independent restore or production admission"
+  ]
+}

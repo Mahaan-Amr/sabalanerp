@@ -1,0 +1,21 @@
+TAP version 13
+# 4+0 records in
+# 4+0 records out
+# 4 bytes (4B) copied, 0.000986 seconds, 4.0KB/s
+# 4+0 records in
+# 4+0 records out
+# 4 bytes (4B) copied, 0.000944 seconds, 4.1KB/s
+# Subtest: native PostgreSQL checks actual streamed WAL records and rejects modified CRC bytes
+ok 1 - native PostgreSQL checks actual streamed WAL records and rejects modified CRC bytes
+  ---
+  duration_ms: 23960.6697
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 24050.0769

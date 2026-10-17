@@ -1,5 +1,10 @@
 # Private PostgreSQL physical-base prerequisite
 
+Current storage note (2026-10-17): the redundant plaintext tar and completed
+application file working copies were retired after verifying retained encrypted
+recovery bytes. The independently decryptable physical component and both full
+application archives remain. See [workspace retirement evidence](private-restore-workspace-retirement-20261017.md).
+
 Issue #405 remains in progress. This component does not admit production online
 updates, publish a healthy application checkpoint or replace the successful
 independent full application restores recorded separately.

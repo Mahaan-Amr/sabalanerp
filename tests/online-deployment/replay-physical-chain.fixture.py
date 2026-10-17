@@ -12,6 +12,7 @@ import stat
 import subprocess
 import tarfile
 import time
+import traceback
 
 QA = Path('/root/sabalan-recovery-private/native-qa')
 PRIVATE = QA.parent
@@ -112,7 +113,12 @@ def main(root):
     spec = importlib.util.spec_from_file_location('chain_native_host_owner', owner_source)
     owner = importlib.util.module_from_spec(spec); spec.loader.exec_module(owner)
     native_owner = owner
-    owner.STATUS = root / 'native-replay-state-v2.json'; assert not owner.STATUS.exists()
+    owner.STATUS = root / 'native-replay-state-v3.json'; assert not owner.STATUS.exists()
+    original_state = owner.state
+    birth = dict(pid=os.getpid(), bootId=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+                 pidNamespace=os.readlink('/proc/self/ns/pid'),
+                 startTicks=Path('/proc/self/stat').read_text().rsplit(') ', 1)[1].split()[19])
+    owner.state = lambda phase, **details: original_state(phase, ownerBirth=birth, **details)
     assert sha(QA / 'native-process-owner') == '2c04343fd5befe7e4085811e73b4e441ac5a67c1b11614b5f8540c54efa933b2'
     lock = os.open(PRIVATE / 'drill-ownership.lock', os.O_RDWR | os.O_NOFOLLOW)
     if lock != 9: os.dup2(lock, 9); os.close(lock)
@@ -131,16 +137,16 @@ def main(root):
     if IMAGE not in owner.output(['docker', 'image', 'ls', '--no-trunc', '--quiet']).decode().split():
         owner.state('PRIVATE_IMMUTABLE_IMAGE_LOAD_INTENT')
         mutation_started = True
-        owner.mutate_host(['docker', 'load', '--input', str(archive)], 180, 'chain-' + operation + '-image-load')
+        owner.mutate_host(['docker', 'load', '--input', str(archive)], 180, 'chain-' + operation + '-v3-image-load')
     [image] = json.loads(owner.output(['docker', 'image', 'inspect', IMAGE]))
     assert image['Id'] == IMAGE and image['RootFS']['Layers'] == config['rootfs']['diff_ids']
     assert owner.foreign() == foreign
-    binary = root / 'native-owner-static'; assert not binary.exists()
+    binary = root / 'native-owner-static-v3'; assert not binary.exists()
     shutil.copyfile(source_owner, binary); os.chmod(binary, 0o555); sync(binary); assert sha(binary) == STATIC_OWNER_SHA
-    runner = root / 'verify.sh'
+    runner = root / 'verify-v3.sh'
     with runner.open('x') as file:
-        os.chmod(runner, 0o444); file.write('#!/bin/sh\nset -eu\npg_verifybackup /data\nexec pg_controldata /data\n'); file.flush(); os.fsync(file.fileno())
-    verifier_name = 'physical-chain-' + operation + '-verify'
+        os.chmod(runner, 0o444); file.write('#!/bin/sh\nset -eu\npg_verifybackup /var/lib/postgresql/data\nexec pg_controldata /var/lib/postgresql/data\n'); file.flush(); os.fsync(file.fileno())
+    verifier_name = 'physical-chain-' + operation + '-verify-v3'
     pg_name = 'sabalanerp-backup-drill-postgres-1'
     for name in [verifier_name, pg_name]:
         assert not owner.output(['docker', 'ps', '-aq', '--filter', 'name=^/' + name + '$']).decode().strip()
@@ -151,14 +157,16 @@ def main(root):
               '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
               '--user', '70:70', '--memory', '256m', '--cpus', '0.5', '--pids-limit', '64', '--log-driver', 'json-file',
               '--log-opt', 'max-size=2m', '--log-opt', 'max-file=2', '--entrypoint', '/native-owner']
-    for file, target in [(binary, '/native-owner'), (runner, '/verify.sh'), (data, '/data')]:
+    # Override the image's declared PGDATA VOLUME itself. Mounting only /data
+    # would silently create an extra writable anonymous PGDATA volume.
+    for file, target in [(binary, '/native-owner'), (runner, '/verify.sh'), (data, '/var/lib/postgresql/data')]:
         create += ['--mount', 'type=bind,src=' + str(file) + ',dst=' + target + ',readonly']
-    token = 'chain-' + operation + '-native-verify'
-    owner.mutate_host(create + [IMAGE, '300', token, '/bin/sh', '/verify.sh'], 60, 'chain-' + operation + '-verify-create')
+    token = 'chain-' + operation + '-v3-native-verify'
+    owner.mutate_host(create + [IMAGE, '300', token, '/bin/sh', '/verify.sh'], 60, 'chain-' + operation + '-v3-verify-create')
     [verifier] = json.loads(owner.output(['docker', 'inspect', verifier_name])); verifier_id = verifier['Id']
     assert verifier['Image'] == IMAGE and verifier['Config']['User'] == '70:70' and verifier['HostConfig']['NetworkMode'] == 'none'
     assert verifier['HostConfig']['ReadonlyRootfs'] and all(not row['RW'] for row in verifier['Mounts'])
-    owner.mutate_host(['docker', 'start', '--attach', verifier_id], 360, 'chain-' + operation + '-verify-start')
+    owner.mutate_host(['docker', 'start', '--attach', verifier_id], 360, 'chain-' + operation + '-v3-verify-start')
     [verified] = json.loads(owner.output(['docker', 'inspect', verifier_id]))
     assert verified['State']['Status'] == 'exited' and verified['State']['Pid'] == 0 and verified['State']['ExitCode'] == 0
     text = owner.output(['docker', 'logs', verifier_id], stderr=subprocess.STDOUT).decode()
@@ -218,7 +226,7 @@ def main(root):
     assert shutil.disk_usage(PRIVATE).free >= 1024 ** 3 and not owner.cancellation_requested
     owner.state('PRIVATE_POSTGRES_REPLAY_START_INTENT')
     owner.mutate_host(['docker', 'compose', '-p', 'sabalanerp-backup-drill', '-f', str(compose), 'up',
-                       '--no-build', '--pull', 'never', '--no-deps', '-d', 'postgres'], 180, 'chain-' + operation + '-pg-start')
+                       '--no-build', '--pull', 'never', '--no-deps', '-d', 'postgres'], 180, 'chain-' + operation + '-v3-pg-start')
     [pg] = json.loads(owner.output(['docker', 'inspect', pg_name])); pg_id = pg['Id']
     assert pg['Image'] == IMAGE and pg['Config']['Labels']['sabalan.drill.operation'] == operation
     assert pg['Config']['Labels']['com.docker.compose.project'] == 'sabalanerp-backup-drill'
@@ -246,7 +254,7 @@ def main(root):
     assert all(not (data / name).exists() for name in hook_markers)
     assert {key: recovered[key] for key in ['id', 'amount', 'quantity']} == source['expected']
     owner.state('PRIVATE_POSTGRES_REPLAY_VERIFIED', containerId=pg_id, recovered=recovered)
-    owner.mutate_host(['docker', 'stop', '--time', '-1', pg_id], 1800, 'chain-' + operation + '-pg-stop')
+    owner.mutate_host(['docker', 'stop', '--time', '-1', pg_id], 1800, 'chain-' + operation + '-v3-pg-stop')
     [stopped] = json.loads(owner.output(['docker', 'inspect', pg_id]))
     assert stopped['State']['Status'] == 'exited' and not stopped['State']['Running'] and stopped['State']['Pid'] == 0
     assert stopped['State']['ExitCode'] == 0 and not stopped['State']['Dead']
@@ -271,6 +279,8 @@ if __name__ == '__main__':
     try: main(Path(sys.argv[1]))
     except BaseException:
         if mutation_started and not native_closure_proven:
+            try: native_owner.atomic(Path(sys.argv[1]) / 'native-replay-failure-v3.json', dict(traceback=traceback.format_exc()))
+            except BaseException: pass
             try: native_owner.state('OWNERSHIP_HELD_UNPROVEN', step='private-chain-replay')
             except BaseException: pass
             while True: time.sleep(1)

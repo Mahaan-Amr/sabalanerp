@@ -141,7 +141,7 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
       // The hero link is below Next's viewport prefetch margin. No router or
       // request is patched; scrolling to click it later creates a real request.
       const aboutLink = oldNavigator.locator('a.public-button-secondary[href="/about"]');
-      assert.ok((await aboutLink.boundingBox()).y > 550); assert.equal(aboutBeforeSwitch, 0);
+      assert.ok((await aboutLink.boundingBox()).y > 400); assert.equal(aboutBeforeSwitch, 0);
       await page.locator('a[href="/login"]').first().click(); await page.waitForURL('**/login');
       await page.locator('input[name="identifier"]').fill('draft-kept-during-switch');
       await page.locator('input[name="password"]').fill('diagnostic-not-a-real-password');

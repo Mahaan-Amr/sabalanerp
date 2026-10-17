@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import webPush from 'web-push';
+import bcrypt from 'bcryptjs';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -126,6 +127,25 @@ async function main() {
       const otherUser = await prisma.user.create({ data: { username: 'other-device-owner', email: 'other-device-owner@example.invalid',
         password: 'not-used', firstName: 'دیگر', lastName: 'حساب' } });
       const otherSession = await createAuthoritativeSession(prisma, otherUser.id, {});
+      const continuationPassword = 'local-continuation-fixture-only';
+      const passwordHash = await bcrypt.hash(continuationPassword, 4);
+      await prisma.user.updateMany({ where: { id: { in: [user.id, otherUser.id] } }, data: { password: passwordHash } });
+      const sessionCountBefore = await prisma.authSession.count();
+      const login = (identifier: string, expectedUserId: unknown, password = continuationPassword) =>
+        fetch(`http://127.0.0.1:${address.port}/api/auth/login`, { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identifier, password, expectedUserId }) });
+      const substitutedLogin = await login(otherUser.username!, user.id);
+      assert.equal(substitutedLogin.status, 409); assert.equal(substitutedLogin.headers.get('set-cookie'), null);
+      assert.equal(await prisma.authSession.count(), sessionCountBefore, 'wrong-account continuation creates no session or cookie');
+      assert.equal((await login(user.username!, user.id, 'incorrect-password')).status, 401);
+      assert.equal((await login(user.username!, ['invalid-owner'])).status, 400);
+      const continuedLogin = await login(user.username!, user.id);
+      assert.equal(continuedLogin.status, 200);
+      const continuedIdentity = await continuedLogin.json() as any;
+      assert.equal(continuedIdentity.data.user.id, user.id);
+      assert.ok(continuedIdentity.session.id);
+      assert.ok(continuedLogin.headers.get('set-cookie')?.includes('sabalan_session='));
+      assert.equal(await prisma.authSession.count(), sessionCountBefore + 1);
       const request = (pathname: string, token: string, headers: Record<string, string> = {}, method = 'GET') =>
         fetch(`http://127.0.0.1:${address.port}${pathname}`, { method, headers: { cookie: `sabalan_session=${token}`, ...headers } });
       const expected = { 'x-sabalan-expected-user': user.id, 'x-sabalan-expected-session': firstSession.session.id };

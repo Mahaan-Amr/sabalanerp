@@ -1,17 +1,18 @@
 import axios from "axios";
+import type { AxiosRequestConfig } from 'axios';
+import api from './api';
 
 const rawBase =
   process.env.NEXT_PUBLIC_API_URL ||
   (process.env.NODE_ENV === "production" ? "/api" : "http://localhost:5000");
 const baseURL = `${rawBase.endsWith("/api") ? rawBase : `${rawBase}/api`}/hr-hiring`;
 
-const internal = axios.create({ baseURL });
-internal.interceptors.request.use((config) => {
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+const internal = {
+  get: <T = any>(url: string, config?: AxiosRequestConfig) => api.get<T>(`/hr-hiring${url}`, config),
+  post: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.post<T>(`/hr-hiring${url}`, data, config),
+  put: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.put<T>(`/hr-hiring${url}`, data, config),
+  patch: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.patch<T>(`/hr-hiring${url}`, data, config),
+};
 
 const applicant = axios.create({ baseURL });
 applicant.interceptors.request.use((config) => {

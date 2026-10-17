@@ -1,18 +1,20 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from '@/contexts/AuthContext';
 import { resolveSocketUrl, socketConnectionOptions } from './socketConnection';
+import { browserSessionContinuation } from '@/lib/api';
 
 export const useSocket = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const { user, isAuthenticated } = useAuth();
   const socketRef = useRef<Socket | null>(null);
+  const blockedOwner = useSyncExternalStore(browserSessionContinuation.subscribe, browserSessionContinuation.snapshot, () => null);
 
   useEffect(() => {
-    if (isAuthenticated && user) {
+    if (isAuthenticated && user && !blockedOwner) {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
       const socketUrl = resolveSocketUrl({
         apiUrl,
@@ -51,7 +53,7 @@ export const useSocket = () => {
         setConnected(false);
       };
     }
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, blockedOwner]);
 
   const emit = (event: string, data?: any) => {
     if (socketRef.current) {

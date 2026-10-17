@@ -39,14 +39,15 @@ export const temporaryDatabaseUrl = (sourceUrl: string, databaseName: string): s
 
 const compose = (repositoryRoot: string, command: string) => {
   verifyComposeTarget(repositoryRoot);
+  const canonical = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || repositoryRoot;
   return execFileSync('docker', [
-  'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
+  'compose', '-f', path.join(canonical, 'docker-compose.local.yml'), 'exec', '-T', 'postgres',
   'sh', '-lc', command,
-], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
+], { cwd: canonical, stdio: 'pipe', encoding: 'utf8', timeout: 120_000 });
 };
 
 const verifyComposeTarget = (repositoryRoot: string) => assertSabalanerpLocalPostgresTarget(execFileSync('docker', [
-  'compose', '-f', path.join(repositoryRoot, 'docker-compose.local.yml'), 'ps', '--format', 'json', 'postgres',
+  'compose', '-f', path.join(process.env.SABALAN_LOCAL_REPOSITORY_ROOT || repositoryRoot, 'docker-compose.local.yml'), 'ps', '--format', 'json', 'postgres',
 ], { cwd: repositoryRoot, stdio: 'pipe', encoding: 'utf8', timeout: 30_000 }));
 
 export type TemporaryConcurrencyDatabase = {

@@ -67,6 +67,7 @@ router.post('/login', [
   body('identifier').optional().isString().trim(),
   body('email').optional().isString().trim(),
   body('password').exists(),
+  body('expectedUserId').optional().isString().matches(/^[a-zA-Z0-9_-]{1,128}$/),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -89,6 +90,11 @@ router.post('/login', [
     if (!(await bcrypt.compare(req.body.password, user.password))) {
       await recordFailedLogin(req, canonicalIdentifier, user.id, 'INVALID_PASSWORD');
       return res.status(401).json({ success: false, error: 'نام کاربری یا رمز عبور نادرست است.' });
+    }
+    if (req.body.expectedUserId && req.body.expectedUserId !== user.id) {
+      await recordFailedLogin(req, canonicalIdentifier, user.id, 'CONTINUATION_ACCOUNT_MISMATCH');
+      return res.status(409).json({ success: false, code: 'AUTH_CONTEXT_CHANGED',
+        error: 'برای ادامهٔ این فرم، با همان حساب قبلی وارد شوید.' });
     }
     const context = requestContext(req);
     const cookies = parseCookies(req.headers.cookie);

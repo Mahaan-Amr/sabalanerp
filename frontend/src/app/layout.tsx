@@ -5,6 +5,7 @@ import './globals.css'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { WorkspaceProvider } from '@/contexts/WorkspaceContext'
 import { AuthProvider } from '@/contexts/AuthContext'
+import { SessionContinuationHost } from '@/components/SessionContinuationHost'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://sabalanerp.com'),
@@ -48,11 +49,13 @@ export default function RootLayout({
       <body className="font-vazir">
         <ThemeProvider>
           <AuthProvider>
+            <SessionContinuationHost>
             <WorkspaceProvider>
               <div className="min-h-screen">
                 {children}
               </div>
             </WorkspaceProvider>
+            </SessionContinuationHost>
           </AuthProvider>
         </ThemeProvider>
       </body>

@@ -3,6 +3,7 @@ import type {
   DispatchDocumentWorkspace,
   MonetaryAmount,
 } from "./dispatchDocumentsViewModel";
+import { browserScopedFetch } from '@/lib/browserScopedFetch';
 
 export type DispatchDocumentDecision = {
   action: "ACCEPT" | "REJECT";
@@ -289,7 +290,7 @@ export function mapDispatchDocumentReadModel(
   };
 }
 
-const parseJsonResponse = async <T>(response: Response): Promise<T> => {
+const parseJsonResponse = async <T>(response: Pick<Response, 'json' | 'status' | 'ok'>): Promise<T> => {
   const body = (await response
     .json()
     .catch(() => null)) as ApiEnvelope<T> | null;
@@ -309,7 +310,7 @@ const parseJsonResponse = async <T>(response: Response): Promise<T> => {
 };
 
 const send = (url: string, init?: RequestInit) =>
-  fetch(url, {
+  browserScopedFetch(url, {
     credentials: "include",
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
@@ -382,7 +383,7 @@ export function createDispatchDocumentsHttpClient(
     return item.bundle;
   };
   const pdf = async (url: string) => {
-    const response = await fetch(url, { credentials: "include" });
+    const response = await browserScopedFetch(url, { credentials: "include" });
     if (response.status === 401 || response.status === 403)
       throw new DispatchDocumentsAuthorizationError(
         "دسترسی به اسناد ارسال مجاز نیست.",

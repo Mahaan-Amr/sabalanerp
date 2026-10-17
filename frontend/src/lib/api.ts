@@ -6,6 +6,7 @@ import { createClientRequestId } from './requestIdentity';
 import { buildLoadingFinalizeRequest } from './loadingFinalizeRequest';
 import { buildAuthorizedPhysicalExitRequest } from './authorizedPhysicalExitRequest';
 import { createPrivateClient } from './privateClientScope';
+import { BrowserSessionContinuation, type BrowserSessionLease, type BrowserLoginAttempt } from './browserSessionContinuation';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
@@ -65,7 +66,14 @@ const api = axios.create({
   },
 });
 
-type RetryAwareConfig = InternalAxiosRequestConfig & { supportMutationFingerprint?: string };
+const sessionProbe = axios.create({ baseURL: API_BASE, withCredentials: true });
+export const browserSessionContinuation = new BrowserSessionContinuation(async expectedUserId => {
+  const response = await sessionProbe.get('/auth/me', { headers: expectedUserId ? { 'x-sabalan-expected-user': expectedUserId } : undefined });
+  return { userId: response.data.data?.id, sessionId: response.data.session?.id };
+});
+
+type RetryAwareConfig = InternalAxiosRequestConfig & { supportMutationFingerprint?: string; browserSessionLease?: BrowserSessionLease;
+  browserBootstrapScope?: BrowserLoginAttempt };
 const retryKeys = new Map<string, { key: string; expiresAt: number }>();
 const retryStorageKey = 'sabalan.mutation-retry-keys.v1';
 const loadRetryKeys = () => {
@@ -133,6 +141,33 @@ const clearRetryKey = (config?: RetryAwareConfig) => {
 };
 
 api.interceptors.request.use(async (config) => {
+  if (typeof window !== 'undefined' && config.url === '/auth/me') {
+    (config as RetryAwareConfig).browserBootstrapScope = browserSessionContinuation.beginLogin();
+    const owner = browserSessionContinuation.expectedUserId();
+    if (owner && !config.headers.has('x-sabalan-expected-user')) config.headers.set('x-sabalan-expected-user', owner);
+  }
+  if (typeof window !== 'undefined' && config.url !== '/auth/login') {
+    if (config.url === '/auth/me') {
+      const owner = browserSessionContinuation.expectedUserId();
+      if (owner && !config.headers.has('x-sabalan-expected-user')) config.headers.set('x-sabalan-expected-user', owner);
+    } else {
+      const attempt = browserSessionContinuation.beginLogin();
+      let lease: BrowserSessionLease;
+      try { lease = await browserSessionContinuation.acquire(); }
+      catch (error) {
+        if (error && typeof error === 'object') Object.assign(error, { browserSessionAttempt: attempt });
+        throw error;
+      }
+      for (const [key, value] of [['x-sabalan-expected-user', lease.userId], ['x-sabalan-expected-session', lease.sessionId]]) {
+        if (config.headers.has(key) && config.headers.get(key) !== value) {
+          browserSessionContinuation.invalidate();
+          throw Object.assign(new Error('نشست این صفحه تغییر کرده است.'), { code: 'AUTH_CONTEXT_CHANGED' });
+        }
+        config.headers.set(key, value);
+      }
+      (config as RetryAwareConfig).browserSessionLease = lease;
+    }
+  }
   if (config.url?.startsWith('/partner/') && config.data && typeof config.data === 'object'
       && !(typeof FormData !== 'undefined' && config.data instanceof FormData)) {
     config.data = normalizePartnerInput(config.data);
@@ -160,17 +195,26 @@ let unauthorizedRedirectStarted = false;
 
 api.interceptors.response.use(
   (response) => {
+    const lease = (response.config as RetryAwareConfig).browserSessionLease;
+    if (lease) browserSessionContinuation.assertCurrent(lease);
+    if (typeof window !== 'undefined' && response.config.url === '/auth/me') {
+      browserSessionContinuation.acceptBootstrap({ userId: response.data.data?.id, sessionId: response.data.session?.id },
+        (response.config as RetryAwareConfig).browserBootstrapScope!);
+    }
     if (response.config.url === '/auth/login') unauthorizedRedirectStarted = false;
     clearRetryKey(response.config as RetryAwareConfig);
     return response;
   },
   (error) => {
     if (error.response?.status === 401) {
+      if (browserSessionContinuation.expectedUserId()) browserSessionContinuation.invalidate(error.browserSessionAttempt
+        || error.config?.browserSessionLease || error.config?.browserBootstrapScope);
       if (
         typeof window !== 'undefined'
         && !window.location.pathname.startsWith('/login')
         && !isPublicVerificationPath(window.location.pathname)
         && !unauthorizedRedirectStarted
+        && !browserSessionContinuation.expectedUserId()
         && !error.config?.headers?.['x-sabalan-expected-user']
       ) {
         unauthorizedRedirectStarted = true;
@@ -192,11 +236,19 @@ api.interceptors.response.use(
 
 // Auth API
 export const authAPI = {
-  login: (identifier: string, password: string) =>
-    api.post('/auth/login', { identifier, email: identifier, password }),
+  login: (identifier: string, password: string) => {
+    const attempt = browserSessionContinuation.beginLogin();
+    return api.post('/auth/login', { identifier, email: identifier, password,
+      ...(attempt.userId ? { expectedUserId: attempt.userId } : {}) })
+      .then(response => {
+        const identity = { userId: response.data.data?.user?.id, sessionId: response.data.session?.id };
+        browserSessionContinuation.completeLogin(identity, attempt);
+        return response;
+      });
+  },
 
   getMe: (expectedUserId?: string) => api.get('/auth/me', { headers: expectedUserId ? { 'x-sabalan-expected-user': expectedUserId } : undefined }),
-  logout: () => api.post('/auth/logout'),
+  logout: () => api.post('/auth/logout').finally(() => browserSessionContinuation.clear()),
   getSessions: () => api.get('/auth/sessions'),
   revokeSession: (id: string) => api.delete(`/auth/sessions/${id}`),
   revokeOtherSessions: () => api.post('/auth/sessions/revoke-others'),

@@ -1,0 +1,214 @@
+TAP version 13
+# Subtest: a Server Action body cannot acknowledge completion while its already started nested query is unfinished
+ok 1 - a Server Action body cannot acknowledge completion while its already started nested query is unfinished
+  ---
+  duration_ms: 140.758336
+  type: 'test'
+  ...
+# Subtest: an admitted action finishes nested queries during capture closure while a new action remains outside the gate
+ok 2 - an admitted action finishes nested queries during capture closure while a new action remains outside the gate
+  ---
+  duration_ms: 78.383382
+  type: 'test'
+  ...
+# Subtest: a handled nested failure preserves the action result, and a failed parent still owns its unfinished child
+ok 3 - a handled nested failure preserves the action result, and a failed parent still owns its unfinished child
+  ---
+  duration_ms: 177.339929
+  type: 'test'
+  ...
+# Subtest: drain refuses an invalid or unbounded timeout without silently retiring the context
+not ok 4 - drain refuses an invalid or unbounded timeout without silently retiring the context
+  ---
+  duration_ms: 29.978575
+  type: 'test'
+  location: '/tmp/sabalan-kernel-admission-runtime-hO3R8R/context-fixture.cjs:101:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    code: 'RUNTIME_WORK_DRAIN_TIMEOUT_INVALID'
+  operator: 'rejects'
+  stack: |-
+    async TestContext.<anonymous> (/tmp/sabalan-kernel-admission-runtime-hO3R8R/context-fixture.cjs:105:7)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: independent processes share admission; the exited flock helper does not release the parent lease
+ok 5 - independent processes share admission; the exited flock helper does not release the parent lease
+  ---
+  duration_ms: 47.096085
+  type: 'test'
+  ...
+# Subtest: a competing exclusive boundary and revoked owner admit no application work
+ok 6 - a competing exclusive boundary and revoked owner admit no application work
+  ---
+  duration_ms: 67.876337
+  type: 'test'
+  ...
+# Subtest: drain never closes a still-owned lease; symlink substitution fails closed
+ok 7 - drain never closes a still-owned lease; symlink substitution fails closed
+  ---
+  duration_ms: 22.332303
+  type: 'test'
+  ...
+# Subtest: replacing an owned inode retains the original lock and forbids retirement or readmission
+ok 8 - replacing an owned inode retains the original lock and forbids retirement or readmission
+  ---
+  duration_ms: 53.734066
+  type: 'test'
+  ...
+# Subtest: native HTTP early response cannot release unfinished handler ownership
+ok 9 - native HTTP early response cannot release unfinished handler ownership
+  ---
+  duration_ms: 58.11621
+  type: 'test'
+  ...
+# Subtest: native HTTP disconnect cannot release unfinished handler ownership
+ok 10 - native HTTP disconnect cannot release unfinished handler ownership
+  ---
+  duration_ms: 46.615
+  type: 'test'
+  ...
+# Subtest: client disconnect during pending admission never dispatches the domain handler
+ok 11 - client disconnect during pending admission never dispatches the domain handler
+  ---
+  duration_ms: 37.884256
+  type: 'test'
+  ...
+# Subtest: GET response-event audit reservation retains the cross-process boundary until its work finishes
+ok 12 - GET response-event audit reservation retains the cross-process boundary until its work finishes
+  ---
+  duration_ms: 72.275508
+  type: 'test'
+  ...
+# Subtest: durable-completion callback must finish before HTTP retirement and kernel release
+ok 13 - durable-completion callback must finish before HTTP retirement and kernel release
+  ---
+  duration_ms: 44.951369
+  type: 'test'
+  ...
+# Subtest: the existing shared HTTP lifecycle binds native ownership once before serving and retains captured callbacks
+ok 14 - the existing shared HTTP lifecycle binds native ownership once before serving and retains captured callbacks
+  ---
+  duration_ms: 44.31989
+  type: 'test'
+  ...
+# Subtest: ownership cannot be attached after an initially unowned runtime has answered a probe
+ok 15 - ownership cannot be attached after an initially unowned runtime has answered a probe
+  ---
+  duration_ms: 8.495313
+  type: 'test'
+  ...
+# Subtest: a journal cannot declare a different gate from the acquired kernel boundary
+ok 16 - a journal cannot declare a different gate from the acquired kernel boundary
+  ---
+  duration_ms: 59.890946
+  type: 'test'
+  ...
+# Subtest: durable busy epochs remain constant-space and bind the actual native incarnation
+ok 17 - durable busy epochs remain constant-space and bind the actual native incarnation
+  ---
+  duration_ms: 871.805495
+  type: 'test'
+  ...
+# Subtest: overlapping tasks share one durable epoch and retirement waits for the final reference
+ok 18 - overlapping tasks share one durable epoch and retirement waits for the final reference
+  ---
+  duration_ms: 105.492545
+  type: 'test'
+  ...
+# Subtest: new work waits for settling publication and starts a fresh durable epoch
+ok 19 - new work waits for settling publication and starts a fresh durable epoch
+  ---
+  duration_ms: 108.566121
+  type: 'test'
+  ...
+# Subtest: a dead ACTIVE incarnation remains inspectable and cannot be reclaimed or settled by restart
+ok 20 - a dead ACTIVE incarnation remains inspectable and cannot be reclaimed or settled by restart
+  ---
+  duration_ms: 87.077448
+  type: 'test'
+  ...
+# Subtest: unexpected, torn, symlinked and altered namespace records fail closed
+ok 21 - unexpected, torn, symlinked and altered namespace records fail closed
+  ---
+  duration_ms: 34.246565
+  type: 'test'
+  ...
+# Subtest: failed state fsync never admits work or releases the shared boundary
+ok 22 - failed state fsync never admits work or releases the shared boundary
+  ---
+  duration_ms: 77.331919
+  type: 'test'
+  ...
+# Subtest: owner loss after ACTIVE publication retires unstarted work without a false orphan
+ok 23 - owner loss after ACTIVE publication retires unstarted work without a false orphan
+  ---
+  duration_ms: 64.974951
+  type: 'test'
+  ...
+# Subtest: stop during kernel admission cancels unstarted work and still proves retirement
+ok 24 - stop during kernel admission cancels unstarted work and still proves retirement
+  ---
+  duration_ms: 41.58578
+  type: 'test'
+  ...
+# Subtest: native SQL identity binds the entire runtime ID and survives durable task admission
+ok 25 - native SQL identity binds the entire runtime ID and survives durable task admission
+  ---
+  duration_ms: 67.087087
+  type: 'test'
+  ...
+# Subtest: a pending capture stops new joins without blocking existing task completion
+ok 26 - a pending capture stops new joins without blocking existing task completion
+  ---
+  duration_ms: 132.712536
+  type: 'test'
+  ...
+# Subtest: retirement cancels paused admissions without starting another epoch
+ok 27 - retirement cancels paused admissions without starting another epoch
+  ---
+  duration_ms: 62.992432
+  type: 'test'
+  ...
+# Subtest: an OPEN publication before native EX gate release queues unstarted work without failing the request
+ok 28 - an OPEN publication before native EX gate release queues unstarted work without failing the request
+  ---
+  duration_ms: 128.005063
+  type: 'test'
+  ...
+# Subtest: native work claims freeze their exact grant and ACTIVE native claim without changing legacy claims
+ok 29 - native work claims freeze their exact grant and ACTIVE native claim without changing legacy claims
+  ---
+  duration_ms: 65.252151
+  type: 'test'
+  ...
+1..29
+# tests 29
+# suites 0
+# pass 28
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3876.624906
+node:internal/modules/run_main:122
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+1 !== 0
+
+    at file:///C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/scripts/run-kernel-write-admission-local.mjs:68:43
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 1,
+  expected: 0,
+  operator: 'strictEqual'
+}
+
+Node.js v22.13.0

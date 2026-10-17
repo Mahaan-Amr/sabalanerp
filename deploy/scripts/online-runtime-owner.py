@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import stat
 import sys
+import time
 
 sys.dont_write_bytecode = True
 
@@ -58,7 +59,39 @@ def run():
         worker = lock(scope['worker']['file'], fcntl.LOCK_EX, scope['worker']) if scope['worker'] else None
         private_file = scope['nativeDirectory'] + '/deployment-runtime-control.lock'
         private = lock(private_file, fcntl.LOCK_EX)
-        capture = lock(scope['gate']['file'], fcntl.LOCK_EX, scope['gate']) if scope['purpose'] == 'capture' else None
+        admission = None
+        descriptors = dict(interlock=interlock, worker=worker, private=private)
+        if scope['format'] == 'sabalan-online-runtime-scope/v2':
+            admission_spec = importlib.util.spec_from_file_location('sabalan_capture_admission', directory / 'online-capture-admission.py')
+            admission_module = importlib.util.module_from_spec(admission_spec)
+            admission_spec.loader.exec_module(admission_module)
+            admission = admission_module.CaptureAdmission(loaded)
+            state, _raw = admission.state()
+            if scope['purpose'] in ['jobs', 'capture']:
+                require(state['phase'] == 'OPEN')
+            if scope['purpose'] == 'capture':
+                # Refuse consumed/unknown native ownership before publishing a
+                # pause. The guardian performs fresh SQL proof before any child.
+                owner_spec = importlib.util.spec_from_file_location('sabalan_capture_prior_owner', directory / 'backend-runtime-owner.py')
+                owner_module = importlib.util.module_from_spec(owner_spec)
+                owner_spec.loader.exec_module(owner_module)
+                owner_module.assert_closed(Path(scope['coordinationDirectory']), 'deployment-online-worker-native.json')
+                require(set(os.listdir(scope['nativeDirectory'])) == {'deployment-runtime-control.lock'})
+                admission.begin(descriptors)
+        capture = None
+        if scope['purpose'] == 'capture':
+            deadline = time.monotonic() + 120
+            while True:
+                try:
+                    capture = lock(scope['gate']['file'], fcntl.LOCK_EX, scope['gate'])
+                    break
+                except BlockingIOError:
+                    # Only a v2 durable CLOSING owner may queue for this gate.
+                    require(admission is not None and time.monotonic() < deadline)
+                    admission.assert_owner(descriptors)
+                    state, _raw = admission.state()
+                    require(state['phase'] == 'CLOSING' and state['capture']['guardian'] == admission_module.birth())
+                    time.sleep(0.01)
         require(module.load_scope(os.environ) == loaded)
         for source, target in [(private, 9), (interlock, 11)] + ([(worker, 12)] if worker else []) + ([(capture, 10)] if capture else []):
             os.dup2(source, target, inheritable=True)

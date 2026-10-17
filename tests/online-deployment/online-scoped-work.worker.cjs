@@ -44,6 +44,15 @@ else (async () => {
       await prisma.$executeRawUnsafe("DO $$ BEGIN PERFORM pg_sleep(3); INSERT INTO online_native_probe VALUES ('lost-runtime', 123456789.12345678, 0.00000001); END $$");
       if (!response.destroyed) response.end('committed');
     });
+    app.post('/pause-write', async (_request, response) => {
+      await prisma.$executeRawUnsafe("DO $$ BEGIN PERFORM pg_sleep(2); INSERT INTO online_native_probe VALUES ('pause-before', 123456789.12345678, 0.00000001); END $$");
+      response.end('committed-before');
+    });
+    app.post('/pause-queued', async (_request, response) => {
+      await prisma.$executeRawUnsafe("INSERT INTO online_native_probe VALUES ('pause-after', 123456789.12345678, 0.00000001)");
+      response.end('committed-after');
+    });
+    app.use((error, _request, response, _next) => response.status(503).json({ code: error.code || error.message }));
     work.requests.install(app);
     server = http.createServer(app); server.listen(0, '127.0.0.1'); await once(server, 'listening');
     const observed = await new Promise((resolve, reject) => {

@@ -67,7 +67,7 @@ def lock(file):
     return dict(file=str(file), device=str(value.st_dev), inode=str(value.st_ino), ownerUid=value.st_uid)
 
 
-if mode == 'prepare':
+if mode in ['prepare', 'prepare-admission']:
     database = 'sabalanerp_concurrency_' + secrets.token_hex(8)
     sql('CREATE DATABASE "' + database + '"')
     sql('CREATE TABLE online_native_probe (id text PRIMARY KEY, amount numeric(24,8), quantity numeric(24,8))', database)
@@ -77,6 +77,18 @@ if mode == 'prepare':
     gate = lock(coordination / 'deployment-write-admission.lock')
     interlock = lock(coordination / 'deployment-runtime-control.lock')
     worker = lock(coordination / 'deployment-online-worker.lock')
+    admission = None
+    if mode == 'prepare-admission':
+        directory = coordination / 'online/admission'
+        directory.mkdir(mode=0o700, parents=True)
+        (directory / 'staging').mkdir(mode=0o700)
+        definition = encoded(dict(format='sabalan-online-admission-scope/v1', gate=gate,
+                                  interlock=interlock, worker=worker,
+                                  database=dict(systemIdentifier=system, name=database)))
+        write(directory / 'scope.json', definition)
+        write(directory / '00000000.json', encoded(dict(format='sabalan-online-capture-admission/v1',
+              generation=0, phase='OPEN', previousSha256=None, capture=None, closureSha256=None)))
+        admission = dict(directory=str(directory), scopeSha256=hashlib.sha256(definition).hexdigest())
     grants = []
     shared_prefix = secrets.token_hex(24)
     for name, purpose in [('http-a', 'http'), ('http-b', 'http'), ('jobs', 'jobs'),
@@ -95,6 +107,8 @@ if mode == 'prepare':
                      coordinationDirectory=str(coordination), nativeDirectory=str(native), boundaryDirectory=str(boundary),
                      gate=gate, interlock=interlock, worker=worker if purpose != 'http' else None,
                      database=dict(systemIdentifier=system, name=database))
+        if admission:
+            scope.update(format='sabalan-online-runtime-scope/v2', admission=admission)
         write(Path(scope['boundaryDirectory']) / 'scope.json', encoded(work_scope(scope)), 0o600)
         raw = encoded(scope)
         write(Path('/app/runtime-authority') / (runtime_id + '.json'), raw)
@@ -110,6 +124,10 @@ if mode == 'prepare':
                  gate=lock(unknown_coordination / 'deployment-write-admission.lock'),
                  interlock=lock(unknown_coordination / 'deployment-runtime-control.lock'),
                  worker=lock(unknown_coordination / 'deployment-online-worker.lock'))
+    # The existing malformed-worker negative case intentionally remains v1;
+    # it must fail on the actual native fence, before any work factory binds.
+    scope['format'] = 'sabalan-online-runtime-scope/v1'
+    scope.pop('admission', None)
     for name in ['nativeDirectory', 'boundaryDirectory']:
         Path(scope[name]).mkdir(mode=0o700, parents=True)
     lock(Path(scope['nativeDirectory']) / 'deployment-runtime-control.lock')
@@ -119,6 +137,40 @@ if mode == 'prepare':
     write(Path('/app/runtime-authority') / (runtime_id + '.json'), raw)
     grants.append(dict(name='null-worker', file='/run/sabalan-online/' + runtime_id + '.json',
                        sha256=hashlib.sha256(raw).hexdigest(), scope=scope))
+    if admission:
+        paused_coordination = root / 'interrupted-capture-coordination'
+        paused_coordination.mkdir(mode=0o700)
+        paused_locks = {key: lock(paused_coordination / name) for key, name in [
+            ('gate', 'deployment-write-admission.lock'), ('interlock', 'deployment-runtime-control.lock'),
+            ('worker', 'deployment-online-worker.lock')]}
+        pause_directory = paused_coordination / 'online/admission'
+        pause_directory.mkdir(mode=0o700, parents=True)
+        (pause_directory / 'staging').mkdir(mode=0o700)
+        definition = encoded(dict(format='sabalan-online-admission-scope/v1', **paused_locks,
+                                  database=dict(systemIdentifier=system, name=database)))
+        write(pause_directory / 'scope.json', definition)
+        write(pause_directory / '00000000.json', encoded(dict(format='sabalan-online-capture-admission/v1',
+              generation=0, phase='OPEN', previousSha256=None, capture=None, closureSha256=None)))
+        for name, purpose in [('pause-http', 'http'), ('pause-jobs', 'jobs'),
+                              ('pause-capture', 'capture'), ('pause-capture-retry', 'capture')]:
+            scope = json.loads(json.dumps(grants[0]['scope']))
+            runtime_id = secrets.token_hex(32)
+            scope.update(runtimeId=runtime_id, nonce=secrets.token_hex(32), purpose=purpose,
+                         role='serving' if purpose == 'http' else 'control', coordinationDirectory=str(paused_coordination),
+                         nativeDirectory=str(paused_coordination / 'online/native' / runtime_id),
+                         boundaryDirectory=str(paused_coordination / 'online/work' / runtime_id),
+                         gate=paused_locks['gate'], interlock=paused_locks['interlock'],
+                         worker=None if purpose == 'http' else paused_locks['worker'],
+                         admission=dict(directory=str(pause_directory), scopeSha256=hashlib.sha256(definition).hexdigest()))
+            for key in ['nativeDirectory', 'boundaryDirectory']:
+                Path(scope[key]).mkdir(mode=0o700, parents=True)
+            lock(Path(scope['nativeDirectory']) / 'deployment-runtime-control.lock')
+            (paused_coordination / 'diagnostic-uploads' / runtime_id).mkdir(mode=0o700, parents=True)
+            write(Path(scope['boundaryDirectory']) / 'scope.json', encoded(work_scope(scope)), 0o600)
+            raw = encoded(scope)
+            write(Path('/app/runtime-authority') / (runtime_id + '.json'), raw)
+            grants.append(dict(name=name, file='/run/sabalan-online/' + runtime_id + '.json',
+                               sha256=hashlib.sha256(raw).hexdigest(), scope=scope))
     write(root / 'index.json', encoded(dict(database=database, grants=grants)))
     fd = os.open('/app/runtime-authority', os.O_RDONLY | os.O_DIRECTORY)
     os.fsync(fd)
@@ -209,6 +261,55 @@ try:
         out, err = child.communicate(timeout=8)
         require(child.returncode == 75 and not out)
         require(not (Path(grants[name]['scope']['nativeDirectory']) / 'deployment-runtime-native.json').exists())
+    wrong = coordination / 'wrong-gate'
+    wrong.mkdir(mode=0o700)
+    wrong_gate = wrong / 'deployment-write-admission.lock'
+    lock(wrong_gate)
+    capture_finished = False
+    if grants['capture']['scope']['format'] == 'sabalan-online-runtime-scope/v2':
+        # Actual in-flight HTTP/SQL finishes under SH10. Capture publishes its
+        # native-owned durable pause before waiting for EX10. A later HTTP write
+        # cannot enter its handler or DB until real capture closure reopens it.
+        from concurrent.futures import ThreadPoolExecutor
+
+        def request(name, route):
+            client = http.client.HTTPConnection('127.0.0.1', observations[name]['port'], timeout=15)
+            try:
+                client.request('POST', route)
+                response = client.getresponse()
+                result = response.read().decode()
+                require(response.status == 200, 'PAUSE_HTTP_REFUSED_' + str(response.status) + '_' + result[:160])
+                return result
+            finally:
+                client.close()
+
+        finish('jobs', running.pop('jobs'))
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            before_pause = executor.submit(request, 'http-a', '/pause-write')
+            deadline = time.monotonic() + 8
+            while sql("SELECT count(*) FROM pg_stat_activity WHERE application_name='" + observations['http-a']['namespace']
+                      + "' AND state='active' AND query LIKE 'DO $$%'") != '1':
+                require(time.monotonic() < deadline, 'PAUSE_WRITE_DID_NOT_START')
+                time.sleep(0.01)
+            capture = launch('capture')
+            pause_file = coordination / 'online/admission/00000001.json'
+            deadline = time.monotonic() + 8
+            while not pause_file.exists():
+                require(time.monotonic() < deadline and capture.poll() is None, 'DURABLE_PAUSE_NOT_PUBLISHED')
+                time.sleep(0.01)
+            pause_raw = pause_file.read_bytes()
+            require(json.loads(pause_raw)['phase'] == 'CLOSING')
+            after_pause = executor.submit(request, 'http-b', '/pause-queued')
+            require(ready(capture)['purpose'] == 'capture')
+            require(before_pause.result(timeout=8) == 'committed-before')
+            require(not after_pause.done(), 'NEW_HTTP_WORK_BYPASSED_CAPTURE_PAUSE')
+            require(sql("SELECT count(*) FROM online_native_probe WHERE id='pause-after'", database) == '0')
+            require(not available(coordination / 'deployment-write-admission.lock'))
+            finish('capture', capture)
+            require(after_pause.result(timeout=8) == 'committed-after')
+            opened = json.loads((coordination / 'online/admission/00000002.json').read_bytes())
+            require(opened['phase'] == 'OPEN' and opened['previousSha256'] == hashlib.sha256(pause_raw).hexdigest())
+            capture_finished = True
     lost = launch('lost-runtime')
     observed = ready(lost)
     namespace = observed['namespace']
@@ -244,10 +345,6 @@ try:
     require(row == dict(amount='123456789.12345678', quantity='0.00000001'))
     # Exercise the guardian directly with a genuine SH holder on the real
     # gate and EX ownership on a different private, correctly named gate.
-    wrong = coordination / 'wrong-gate'
-    wrong.mkdir(mode=0o700)
-    wrong_gate = wrong / 'deployment-write-admission.lock'
-    lock(wrong_gate)
     attack = """import fcntl,os,sys
 from pathlib import Path
 scope=__import__('json').loads(sys.argv[1]); retained=[]
@@ -262,10 +359,11 @@ os.execv('/usr/bin/python3',['/usr/bin/python3','-I','-B',sys.argv[3],'node','-e
                                     str(wrong_gate), str(root / 'backend-runtime-owner.py')],
                                    env=environment(grants['capture']), capture_output=True, timeout=8)
     require(attack_result.returncode == 75 and not attack_result.stdout, 'SUBSTITUTED_CAPTURE_GATE_ACCEPTED')
-    capture = launch('capture')
-    require(ready(capture)['purpose'] == 'capture')
-    require(not available(coordination / 'deployment-write-admission.lock'))
-    finish('capture', capture)
+    if not capture_finished:
+        capture = launch('capture')
+        require(ready(capture)['purpose'] == 'capture')
+        require(not available(coordination / 'deployment-write-admission.lock'))
+        finish('capture', capture)
     # Kill both the worker client and its native guardian during server SQL.
     # Kernel ownership can disappear; the durable global worker ACTIVE fence
     # must still refuse another worker. No automatic reset is introduced.
@@ -312,6 +410,59 @@ os.execv('/usr/bin/python3',['/usr/bin/python3','-I','-B',sys.argv[3],'node','-e
     node_probe = subprocess.run(['node', '-e', "const {assertNativeRuntimeControlBoundary}=require(process.argv[1]);try{assertNativeRuntimeControlBoundary();process.exitCode=1}catch(e){if(e.message!=='RUNTIME_NATIVE_AUTHORITY_UNPROVEN')throw e;console.log('REFUSED')}",
                                 str(root / 'services/runtimeNativeAuthority.js')], env=legacy_env, capture_output=True, timeout=8)
     require(node_probe.returncode == 0 and node_probe.stdout.strip() == b'REFUSED')
+    interrupted_pause_refused = False
+    if capture_finished:
+        pause_http = launch('pause-http')
+        pause_ready = ready(pause_http)
+        pause_coord = Path(grants['pause-http']['scope']['coordinationDirectory'])
+        pause_gate = os.open(pause_coord / 'deployment-write-admission.lock', os.O_RDONLY | os.O_NOFOLLOW)
+        fcntl.flock(pause_gate, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        pause_capture = launch('pause-capture')
+        pause_file = pause_coord / 'online/admission/00000001.json'
+        deadline = time.monotonic() + 8
+        while not pause_file.exists():
+            require(time.monotonic() < deadline and pause_capture.poll() is None)
+            time.sleep(0.01)
+        pause_raw = pause_file.read_bytes()
+        pause_state = json.loads(pause_raw)
+        require(pause_state['phase'] == 'CLOSING' and pause_state['capture']['guardian']['pid'] == pause_capture.pid)
+        require(not (Path(grants['pause-capture']['scope']['nativeDirectory']) / 'deployment-runtime-native.json').exists())
+        require(not available(pause_coord / 'deployment-online-worker.lock'))
+        descriptor = os.pidfd_open(pause_capture.pid)
+        try:
+            fields = Path('/proc/' + str(pause_capture.pid) + '/stat').read_text().rsplit(') ', 1)[1].split()
+            require(fields[19] == pause_state['capture']['guardian']['startTicks'])
+            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+        finally:
+            os.close(descriptor)
+        require(pause_capture.wait(timeout=5) == -9)
+        os.close(pause_gate)
+        require(available(pause_coord / 'deployment-online-worker.lock'))
+        for name in ['pause-jobs', 'pause-capture-retry']:
+            replacement = launch(name)
+            out, err = replacement.communicate(timeout=8)
+            require(replacement.returncode == 75 and not out, 'DEAD_CAPTURE_PAUSE_BYPASSED')
+            require(not (Path(grants[name]['scope']['nativeDirectory']) / 'deployment-runtime-native.json').exists())
+
+        def paused_request():
+            client = http.client.HTTPConnection('127.0.0.1', pause_ready['port'], timeout=8)
+            try:
+                client.request('GET', '/read')
+                response = client.getresponse()
+                response.read()
+                return response.status
+            finally:
+                client.close()
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            waiting = executor.submit(paused_request)
+            time.sleep(0.1)
+            require(not waiting.done(), 'SERVING_REOPENED_AFTER_CAPTURE_OWNER_DEATH')
+            finish('pause-http', pause_http)
+            require(waiting.result(timeout=8) == 503)
+        require(pause_file.read_bytes() == pause_raw
+                and not (pause_coord / 'online/admission/00000002.json').exists())
+        interrupted_pause_refused = True
     require(sql("SELECT count(*) FROM pg_stat_activity WHERE datname='" + database + "'") == '0')
     require(sql("SELECT count(*) FROM pg_prepared_xacts WHERE database='" + database + "'") == '0')
     sql('DROP DATABASE "' + database + '"')  # No force, after actual namespace/pool closure.
@@ -324,7 +475,9 @@ os.execv('/usr/bin/python3',['/usr/bin/python3','-I','-B',sys.argv[3],'node','-e
                           fullRuntimeIdNamespaceSeparation=True, deadWorkerDurableFenceRefused=True,
                           existingNullWorkerRefusedDuringOrphanSql=True,
                           retainedWorkerHoldSha256=hashlib.sha256(worker_raw).hexdigest(),
-                          legacyFleetBypassRefused=True, scopedHttpAndWorkerWork=scoped, droppedDatabase=database)))
+                          legacyFleetBypassRefused=True, scopedHttpAndWorkerWork=scoped,
+                          durableCapturePauseWithQueuedHttp=capture_finished,
+                          interruptedCapturePauseRetained=interrupted_pause_refused, droppedDatabase=database)))
 finally:
     if not proven:
         print('ONLINE_NATIVE_ACCEPTANCE_HELD ' + str(root), file=sys.stderr)

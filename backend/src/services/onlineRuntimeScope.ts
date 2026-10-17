@@ -6,12 +6,13 @@ import { spawnSync } from 'node:child_process';
 type LockInput = Readonly<{ file: string; device: string; inode: string; ownerUid: number }>;
 export type OnlineRuntimeScopeInput = Readonly<{
   scope: Readonly<{
-    format: 'sabalan-online-runtime-scope/v1'; runtimeId: string; releaseId: string;
+    format: 'sabalan-online-runtime-scope/v1' | 'sabalan-online-runtime-scope/v2'; runtimeId: string; releaseId: string;
     manifestSha256: string; sourceCommit: string; image: string; nonce: string;
     purpose: 'http' | 'jobs' | 'capture'; role: 'serving' | 'control';
     coordinationDirectory: string; nativeDirectory: string; boundaryDirectory: string;
     gate: LockInput; interlock: LockInput; worker: LockInput | null;
     database: Readonly<{ systemIdentifier: string; name: string }>;
+    admission?: Readonly<{ directory: string; scopeSha256: string }>;
   }>;
   file: string; sha256: string; device: string; inode: string; mountId: string;
   mountNamespace: string; mountInfoSha256: string; helperSha256: string;

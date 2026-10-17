@@ -52,7 +52,16 @@ export class RuntimeTaskAdmission {
           this.assertOwner();
           if (!this.captureOpen()) return undefined;
           if (!this.group) {
-            const lease = await this.gate.acquire();
+            let lease: KernelWriteLease;
+            try { lease = await this.gate.acquire(); }
+            catch (error) {
+              // The successful capture publishes OPEN while its guardian still
+              // retains EX10. No work/journal was started by a refused SH try;
+              // queue outside this serialization until the actual lock closes.
+              // Unknown owner/helper/inode errors are never retried here.
+              if ((error as { code?: string })?.code === 'KERNEL_WRITE_GATE_BOUNDARY_ACTIVE') return undefined;
+              throw error;
+            }
             const open = this.captureOpen();
             if (this.stopping || !open) {
               try { lease.release(); } catch (error) { this.poisoned = true; throw error; }
@@ -94,6 +103,7 @@ export class RuntimeTaskAdmission {
           }) };
         });
         if (admitted) return admitted;
+        await new Promise(resolve => setTimeout(resolve, 10));
       }
     } finally { this.waiting--; }
   }

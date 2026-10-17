@@ -9,6 +9,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const require = createRequire(path.join(root, 'backend/package.json'));
 const ts = require('typescript');
 const canonical = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || 'D:/sabalanerp';
+const captureAdmission = process.env.ONLINE_ACCEPTANCE_CAPTURE_ADMISSION === '1';
 const compose = ['compose', '-f', path.join(canonical, 'docker-compose.local.yml')];
 function verify() {
   const output = execFileSync('docker', [...compose, 'ps', '--format', 'json'], { encoding: 'utf8' });
@@ -41,6 +42,7 @@ const files = Object.fromEntries([
   ['backend-runtime-owner.py', 'deploy/scripts/backend-runtime-owner.py'],
   ['online-runtime-owner.py', 'deploy/scripts/online-runtime-owner.py'],
   ['online-runtime-scope.py', 'deploy/scripts/online-runtime-scope.py'],
+  ['online-capture-admission.py', 'deploy/scripts/online-capture-admission.py'],
   ['recovery-database-freeze.py', 'deploy/scripts/recovery-database-freeze.py'],
   ['with-backend-control-ownership.sh', 'deploy/scripts/with-backend-control-ownership.sh'],
   ['protected-bootstrap-state.py', 'deploy/scripts/protected-bootstrap-state.py'],
@@ -49,6 +51,8 @@ const files = Object.fromEntries([
   ['fixture.py', 'tests/online-deployment/online-native-owner.fixture.py'],
   ['records.fixture.py', 'tests/online-deployment/native-record-refusal.fixture.py'],
   ['capture.fixture.py', 'tests/online-deployment/online-native-capture.fixture.py'],
+  ['admission.fixture.cjs', 'tests/online-deployment/online-capture-admission.fixture.cjs'],
+  ['capacity.fixture.py', 'tests/online-deployment/online-capture-capacity.fixture.py'],
 ].map(([name, source]) => [name, fs.readFileSync(path.join(root, source))]));
 const deploymentSource = fs.readFileSync(path.join(root, 'deploy/scripts/deploy.sh'), 'utf8');
 const closureFunction = deploymentSource.match(/assert_native_runtime_closed\(\) \{[\s\S]+?\n\}\n\ndrain_current_services\(\)/)?.[0]
@@ -57,7 +61,7 @@ assert.ok(closureFunction, 'actual protected release/rollback boundary function 
 files['streamed-closure.fixture.sh'] = Buffer.from('run_backend() { "$@"; }\n' + closureFunction + '\nassert_native_runtime_closed\n');
 files['deploy/scripts/backend-runtime-owner.py'] = files['backend-runtime-owner.py'];
 for (const [name, source] of [[ 'services/onlineRuntimeWork.js', 'backend/src/services/onlineRuntimeWork.ts'],
-  ...['kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkBoundary', 'httpRequestLifecycle', 'durableUpload', 'durableFilePublication'].map(name => ['services/' + name + '.js', 'backend/src/services/' + name + '.ts']),
+  ...['onlineCaptureAdmission', 'kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkBoundary', 'httpRequestLifecycle', 'durableUpload', 'durableFilePublication'].map(name => ['services/' + name + '.js', 'backend/src/services/' + name + '.ts']),
   ['lib/prisma.js', 'backend/src/lib/prisma.ts'],
   ['services/runtimeControlOwnership.js', 'backend/src/services/runtimeControlOwnership.ts'],
   ['services/onlineRuntimeScope.js', 'backend/src/services/onlineRuntimeScope.ts'],
@@ -85,9 +89,21 @@ const recordOutput = execFileSync('docker', ['exec', retained.Id, 'python3', '-I
 const recordRefusals = JSON.parse(recordOutput);
 assert.equal(recordRefusals.passResult, true);
 verify();
-const prepared = execFileSync('docker', ['exec', slot.Id, 'python3', '-I', '-B', directory + '/fixture.py', directory, 'prepare'],
+const prepared = execFileSync('docker', ['exec', slot.Id, 'python3', '-I', '-B', directory + '/fixture.py', directory, captureAdmission ? 'prepare-admission' : 'prepare'],
   { encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024 });
 assert.equal(JSON.parse(prepared).prepared, true);
+let admissionReaders;
+let admissionCapacity;
+if (captureAdmission) {
+  verify();
+  admissionCapacity = JSON.parse(execFileSync('docker', ['exec', retained.Id, 'python3', '-I', '-B', directory + '/capacity.fixture.py', directory],
+    { encoding: 'utf8', timeout: 60_000, maxBuffer: 1024 * 1024 }));
+  assert.equal(admissionCapacity.passResult, true);
+  verify();
+  admissionReaders = JSON.parse(execFileSync('docker', ['exec', retained.Id, 'node', directory + '/admission.fixture.cjs', directory],
+    { encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024 }));
+  assert.equal(admissionReaders.pass, true);
+}
 verify();
 const output = execFileSync('docker', ['exec', retained.Id, 'python3', '-I', '-B', directory + '/fixture.py', directory, 'scoped-exercise'],
   { encoding: 'utf8', timeout: 90_000, maxBuffer: 1024 * 1024 });
@@ -99,6 +115,8 @@ for (const [service, identity] of Object.entries(before)) {
 }
 report.canonicalServicesUnchanged = before;
 report.unknownRecordRefusals = recordRefusals;
+if (admissionReaders) report.admissionReaders = admissionReaders;
+if (admissionCapacity) report.admissionCapacity = admissionCapacity;
 report.sources = Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')]));
 const reportPath = path.join(root, 'reports/qa', path.basename(directory) + '.json');
 fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });

@@ -116,10 +116,11 @@ def _load(environment):
         require(hashlib.sha256(data).hexdigest() == environment[KEYS[1]])
         mount = readonly_mount(file, descriptor, before)
         scope = json.loads(data)
+        require(isinstance(scope, dict) and scope.get('format') in ['sabalan-online-runtime-scope/v1', 'sabalan-online-runtime-scope/v2'])
+        version_two = scope['format'] == 'sabalan-online-runtime-scope/v2'
         require(exact(scope, ['format', 'runtimeId', 'releaseId', 'manifestSha256', 'sourceCommit', 'image',
                               'nonce', 'purpose', 'role', 'coordinationDirectory', 'nativeDirectory',
-                              'boundaryDirectory', 'gate', 'interlock', 'worker', 'database'])
-                and scope['format'] == 'sabalan-online-runtime-scope/v1'
+                              'boundaryDirectory', 'gate', 'interlock', 'worker', 'database'] + (['admission'] if version_two else []))
                 and isinstance(scope['runtimeId'], str) and re.fullmatch(HASH, scope['runtimeId'])
                 and file == '/run/sabalan-online/' + scope['runtimeId'] + '.json'
                 and isinstance(scope['releaseId'], str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', scope['releaseId'])
@@ -132,6 +133,12 @@ def _load(environment):
                 and environment.get('BACKEND_RUNTIME_ROLE') == scope['role'])
         directory = scope['coordinationDirectory']
         private_directory(directory)
+        if version_two:
+            require(exact(scope['admission'], ['directory', 'scopeSha256'])
+                    and scope['admission']['directory'] == directory + '/online/admission'
+                    and isinstance(scope['admission']['scopeSha256'], str)
+                    and re.fullmatch(HASH, scope['admission']['scopeSha256']))
+            private_directory(scope['admission']['directory'])
         require(environment.get('RECOVERY_COORDINATION_DIR', '/app/recovery-coordination') == directory
                 and scope['nativeDirectory'] == directory + '/online/native/' + scope['runtimeId']
                 and scope['boundaryDirectory'] == directory + '/online/work/' + scope['runtimeId'])

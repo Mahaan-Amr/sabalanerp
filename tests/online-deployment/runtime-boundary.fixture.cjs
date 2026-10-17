@@ -221,3 +221,26 @@ test('retirement cancels paused admissions without starting another epoch', asyn
   assert.equal((await journal.inspect()).epoch, 0);
   assert.equal(exclusive(file), true);
 });
+
+test('an OPEN publication before native EX gate release queues unstarted work without failing the request', async () => {
+  const { journal, gate, file } = fixture();
+  await journal.initialize();
+  let descriptor = fs.openSync(file, 'r');
+  const locked = spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', '3'],
+    { stdio: ['ignore', 'ignore', 'inherit', descriptor] });
+  assert.equal(locked.status, 0);
+  const admission = new RuntimeTaskAdmission(gate, journal, () => {}, () => true);
+  let settled = false, error;
+  const waiting = admission.acquire().then(lease => { settled = true; return lease; }, value => { error = value; settled = true; });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(settled, false, error?.message);
+    assert.equal((await journal.inspect()).epoch, 0);
+  } finally { fs.closeSync(descriptor); }
+  const lease = await waiting;
+  assert.equal(error, undefined);
+  await lease.release();
+  await admission.stopAndDrain(1000);
+  assert.equal((await journal.inspect()).epoch, 1);
+  assert.equal(exclusive(file), true);
+});

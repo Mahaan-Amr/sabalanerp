@@ -8,6 +8,7 @@ import { KernelWriteAdmission } from './kernelWriteAdmission';
 import { RuntimeBoundaryJournal, runtimeNativePostgresApplicationName } from './runtimeBoundaryJournal';
 import { RuntimeTaskAdmission } from './runtimeTaskAdmission';
 import { RuntimeWorkBoundary } from './runtimeWorkBoundary';
+import { OnlineCaptureAdmission } from './onlineCaptureAdmission';
 
 type WorkInput = Readonly<{ registrySha256: string; generation: number; canJoin: () => boolean }>;
 const failure = (code: string) => Object.assign(new Error(code), { code });
@@ -25,7 +26,7 @@ export async function createScopedRuntimeWork(configuration: WorkInput): Promise
     || typeof configuration.canJoin !== 'function') {
     throw failure('ONLINE_RUNTIME_WORK_SCOPE_INVALID');
   }
-  const { registrySha256, generation, canJoin } = configuration;
+  const { registrySha256, generation, canJoin: additionalCanJoin } = configuration;
   const input = loadOnlineRuntimeScope();
   if (!input || !['http', 'jobs'].includes(input.scope.purpose)) throw failure('ONLINE_RUNTIME_WORK_SCOPE_INVALID');
   const assertOwner = () => {
@@ -60,6 +61,9 @@ export async function createScopedRuntimeWork(configuration: WorkInput): Promise
   };
   assertOwner();
   if (input.scope.purpose === 'jobs') assertWorker();
+  const capture = input.scope.format === 'sabalan-online-runtime-scope/v2' ? new OnlineCaptureAdmission(input) : undefined;
+  if (capture && input.scope.purpose === 'jobs' && !capture.isOpen()) throw failure('ONLINE_CAPTURE_ADMISSION_CLOSED');
+  const canJoin = () => (!capture || capture.isOpen()) && additionalCanJoin();
   const gate = { device: input.scope.gate.device, inode: input.scope.gate.inode, ownerUid: input.scope.gate.ownerUid };
   const journal = new RuntimeBoundaryJournal(input.scope.boundaryDirectory, {
     runtimeId: input.scope.runtimeId, image: input.scope.image, registrySha256,

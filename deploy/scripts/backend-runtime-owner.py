@@ -203,10 +203,24 @@ def run():
     role = os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone')
     require(role in (['serving', 'control'] if loaded else ['standalone', 'control']))
     capture_gate = assert_capture_gate()
+    admission = None
+    admission_descriptors = dict(private=9, interlock=11, worker=12, gate=10)
     if loaded:
         require((capture_gate is not None) == (loaded['scope']['purpose'] == 'capture'))
         if capture_gate:
             require(all(capture_gate[key] == loaded['scope']['gate'][key] for key in ['file', 'device', 'inode']))
+        if loaded['scope']['format'] == 'sabalan-online-runtime-scope/v2':
+            helper = Path(__file__).resolve(strict=True).parent / 'online-capture-admission.py'
+            spec = importlib.util.spec_from_file_location('sabalan_capture_admission', helper)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            admission = module.CaptureAdmission(loaded)
+            if loaded['scope']['purpose'] == 'capture':
+                admission.assert_capture(admission_descriptors)
+            elif loaded['scope']['purpose'] == 'jobs':
+                require(admission.state()[0]['phase'] == 'OPEN')
+            else:
+                admission.state()
     file = directory / 'deployment-runtime-native.json'
     previous, previous_raw = assert_closed(directory)
     extra_boundaries = []
@@ -426,6 +440,8 @@ def run():
                 os.fsync(coordination_fd)
             finally:
                 os.close(coordination_fd)
+        if admission and loaded['scope']['purpose'] == 'capture' and root_status == 0 and not cancelled:
+            admission.finish(admission_descriptors, encode(record))
         return root_status if 0 <= root_status <= 125 else 125
     except BaseException:
         try:

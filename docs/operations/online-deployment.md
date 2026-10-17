@@ -4,6 +4,14 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 ## Current foundation
 
+- Native-owned v2 capture scheduling now queues new HTTP work while prior SQL
+  finishes, retains CLOSING after capture-owner death and reopens only after the
+  same guardian proves actual native/SQL closure. Exact queued-write, killed
+  launcher, bounded-history and legacy native regressions passed. An OPEN/EX10
+  release race was corrected. This does not prove fleet closure or continuous
+  recovery, and production startup remains disabled. See
+  [durable capture scheduling](../../reports/qa/online-durable-capture-admission-20261017.md).
+
 - A native-owned private component worker now composes real PostgreSQL SHARE locks/exported snapshots, independent file versions and SQLite backup. Actual 427-migration/541-relation overlap, lost client acknowledgement, queued later writes, isolated logical/file/SQLite restoration and simultaneous worker/client death passed locally. The guardian retains FD10 through native and tagged SQL completion. This does not yet fence the production fleet, establish continuous independently restored application coverage or admit online switching. See [coherent component evidence](../../reports/qa/coherent-component-capture-20261017.md).
 
 - Private independent file generations now retain copied content objects, contiguous immutable capture history and deletion lineage under the actual exclusive Linux gate. Native old/new restores, in-place live changes, same-size corruption and interrupted-process refusal passed in the existing local project. This component is not integrated coherent application capture, privacy finalization or production admission. See [file generation evidence](../../reports/qa/file-generations-20261017.md).

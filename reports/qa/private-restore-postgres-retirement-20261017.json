@@ -1,0 +1,101 @@
+{
+  "sourceSha256": "8e31f8f6db7c4a8c85146fab8cbd8856d6dbee129e49a1f786bbd52367a9fddf",
+  "evidence": {
+    "retire-private-restore-postgres-20261017-proof.json": {
+      "phase": "EXACT_WORKING_POSTGRES_RETIREMENT",
+      "container": {
+        "id": "1330c530d388bafae86368805e1e6af5118da892f00724bc5d361b694ff0ebb6",
+        "image": "sha256:15283455b75304c90f51bf16b42c272a25fb52807945dc24830ec88e63cd896d",
+        "startedAt": "2026-10-15T10:45:34.664746783Z"
+      },
+      "retainedPoints": [
+        {
+          "path": "/srv/sabalanerp-recovery/checkpoints/20261014T054528Z-cce0fa8da6b3-release/deploy-20261014T054528Z-cce0fa8da6b3-release.sabrec",
+          "sha256": "747b3ab6a43afd2d4e083806c0b169f2b303837885d9aa9b870f510c7f15f93f",
+          "metadataSha256": "53f74b8d5ac5e6c64c1e2d1efd95953752ff87ba69be13e584fd8f0d8e2d273d"
+        },
+        {
+          "path": "/srv/sabalanerp-recovery/checkpoints/20261013T071324Z-129b1f970e1a-release/deploy-20261013T071324Z-129b1f970e1a-release.sabrec",
+          "sha256": "c5480bbedc7e82648ba6faed0d68a9b1c2e0e38abea92578ceb3e22bd9be8c5e",
+          "metadataSha256": "7f8b868f8351e77cdad84b3e63643d4fb8b828a9d1d47419d012aa209598ac77"
+        }
+      ],
+      "retainedImageArchive": "/srv/sabalanerp-recovery/checkpoints/images/6db61fe859b1274c0ba8b0253fd5f6c7bc96f6e3f46b3f868fde4fe44289e89f.docker.tar.gz",
+      "retainedEncryptedPhysicalComponent": "/root/sabalan-recovery-private/physical-replay-r4-20261015/base.sabrec",
+      "target": "/srv/sabalanerp-drill/20261014-independent/postgres",
+      "foreignBaseline": {
+        "6afead2b28774fb71175608ca70860ab5ba6ec7fe24f061e3504a5bf634fb92a": {
+          "name": "/fintech-lab-historical-1",
+          "startedAt": "2026-10-17T06:41:35.172380555Z"
+        },
+        "defbe836b4005f1ebc9ec16a4b85a23607b72136278a35c5400be805b7c51cf8": {
+          "name": "/fintech-lab-hypotheses-1",
+          "startedAt": "2026-10-17T06:41:35.149384189Z"
+        },
+        "01621c4a7aba9f62f8b8ccbd5cbe5f4c52c3e971072117a0e22406e2578b2064": {
+          "name": "/fintech-lab-dashboard-1",
+          "startedAt": "2026-10-15T11:07:46.817538072Z"
+        },
+        "5aa0c3e4d8c66982ab960dea644c3041631521a49efbd8cc9f5160e82596a4b1": {
+          "name": "/fintech-lab-research-1",
+          "startedAt": "2026-10-15T10:04:50.716298627Z"
+        },
+        "7ff578d8609710eb50a413fc54095f08e4fae8aceea8e7d58517d6621a2cf4c2": {
+          "name": "/fintech-lab-maintenance-1",
+          "startedAt": "2026-10-14T09:54:58.616061597Z"
+        },
+        "237721bd06c3b2a1c460c7eeda0e946b72c1132e01493f3745358e718dbb15ab": {
+          "name": "/fintech-lab-edge-1",
+          "startedAt": "2026-10-06T06:58:23.656747893Z"
+        },
+        "f4cd79a0c17beb13b60cb2906e0766c4de8cd8f871f283f64c8ee9e0e0738bbc": {
+          "name": "/fintech-lab-profit-1",
+          "startedAt": "2026-10-06T06:15:29.919292259Z"
+        },
+        "d3ebc61179259aff418b8fdee977a8d58b973b400913a1f397c928643dff63c5": {
+          "name": "/fintech-lab-learning-1",
+          "startedAt": "2026-10-05T06:19:47.761673449Z"
+        },
+        "72d3186a209a316fb10f6b79b8db3f4f04d36a0a813034ef6935c99535f3a45e": {
+          "name": "/fintech-lab-multiasset-1",
+          "startedAt": "2026-10-05T06:19:47.642155868Z"
+        },
+        "b27a98607a597784f98f8cdaac5fc95a0c95fe09403bb0b70c3f71ba43bb25b6": {
+          "name": "/fintech-lab-collector-1",
+          "startedAt": "2026-10-05T06:19:47.780546151Z"
+        },
+        "0294f936de55e2a71a2255a58cecf5c06000cc00ad952b332ef08cf0466b9183": {
+          "name": "/fintech-lab-adaptive-1",
+          "startedAt": "2026-10-05T06:24:55.566277419Z"
+        }
+      }
+    },
+    "retire-private-restore-postgres-20261017-status.json": {
+      "at": "2026-10-17T07:54:06.356943+00:00",
+      "phase": "COMPLETE",
+      "removedContainer": "1330c530d388bafae86368805e1e6af5118da892f00724bc5d361b694ff0ebb6",
+      "removedWorkingPostgres": "/srv/sabalanerp-drill/20261014-independent/postgres",
+      "files": 4909,
+      "logicalBytes": 601672373,
+      "availableBeforeBytes": 3242442752,
+      "availableAfterBytes": 3936952320,
+      "healthyCheckpointsRetained": 2,
+      "imageArchiveRetained": true,
+      "encryptedPhysicalComponentRetained": true,
+      "foreignStableServicesUnchanged": true
+    },
+    "retire-private-restore-postgres-20261017-stop-outcome.json": {
+      "exitStatus": 0,
+      "receiptTail": "1330c530d388bafae86368805e1e6af5118da892f00724bc5d361b694ff0ebb6\n\nSABALAN_NATIVE_REAPED retire-private-restore-postgres-20261017-stop 0\n",
+      "expectedReceipt": "\nSABALAN_NATIVE_REAPED retire-private-restore-postgres-20261017-stop 0\n",
+      "logSha256": "4e842c528fcd632fd14bf99fa1d117d9e80edfb8c66049f30361d33658ecc9d7"
+    },
+    "retire-private-restore-postgres-20261017-remove-outcome.json": {
+      "exitStatus": 0,
+      "receiptTail": "1330c530d388bafae86368805e1e6af5118da892f00724bc5d361b694ff0ebb6\n\nSABALAN_NATIVE_REAPED retire-private-restore-postgres-20261017-remove 0\n",
+      "expectedReceipt": "\nSABALAN_NATIVE_REAPED retire-private-restore-postgres-20261017-remove 0\n",
+      "logSha256": "b547d82d5a7f97f4f8d1dd42896f4f6c9be9205c5eeef9e37e5c93624f69a371"
+    }
+  },
+  "freshFreeBytes": 3927035904
+}

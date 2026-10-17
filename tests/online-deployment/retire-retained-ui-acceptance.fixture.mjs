@@ -3,18 +3,23 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 
 const operation = process.argv[2]; assert.match(operation ?? '', /^[a-f0-9]{32}$/);
 const root = '/app/online-runtime-acceptance/retained-ui-' + operation;
 const repository = path.resolve(import.meta.dirname, '../..');
 const services = ['frontend-online-proxy', 'frontend-online-old', 'frontend-online-new'];
-function docker(args) {
+function docker(args, captureBoth = false) {
   const rows = execFileSync('docker', ['compose', '-f', 'D:/sabalanerp/docker-compose.local.yml', 'ps', '--format', 'json'], {encoding: 'utf8'})
     .trim().split(/\r?\n/).flatMap(line => JSON.parse(line));
   for (const service of ['backend', 'frontend', 'inquiry', 'postgres']) assert.ok(rows.some(row => row.Project === 'sabalanerp-local'
     && row.Service === service && row.State === 'running' && row.Health === 'healthy'));
+  if (captureBoth) {
+    const result = spawnSync('docker', args, {encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024});
+    assert.equal(result.status, 0); assert.equal(result.signal, null); assert.equal(result.error, undefined);
+    return result.stdout + '\n' + result.stderr;
+  }
   return execFileSync('docker', args, {encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024});
 }
 function canonical() {
@@ -75,7 +80,7 @@ if (alreadyHeld) {
   }
   assert.equal(stopped.State.Status, 'exited'); assert.equal(stopped.State.ExitCode, 1); assert.equal(stopped.State.Pid, 0);
   assert.deepEqual(stopped.ExecIDs ?? [], []);
-  const logs = docker(['logs', '--tail', '15', proxy.Id]); assert.match(logs, /FIXTURE_HELD_TRANSPORT_REQUIRES_INSPECTION/);
+  const logs = docker(['logs', '--tail', '15', proxy.Id], true); assert.match(logs, /FIXTURE_HELD_TRANSPORT_REQUIRES_INSPECTION/);
   assert.equal(docker(['exec', reader, 'cat', root + '/transport-shutdown-held.json']), heldBytes);
   heldProof = {status: 'RETIRED_WITH_HELD_UNKNOWN', heldRecordSha256: report.results.heldTransport.sha256,
     preservedUnknown: pending.id, originalExitCode: 75, actualRestartRefusedExitCode: 1};

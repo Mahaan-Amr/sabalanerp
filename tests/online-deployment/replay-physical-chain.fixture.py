@@ -133,6 +133,23 @@ def main(root):
         match = re.search(r'^' + label + r' setting:\s+(\d+)\s*$', text, re.MULTILINE)
         assert match and 0 <= int(match[1]) <= 1000; settings[key] = match[1]
     assert (root / 'independent-state.json').read_bytes() == prepared_bytes and owner.foreign() == foreign
+    # Regression setup only, after verifying the untouched native base. These
+    # harmless inherited hooks must remain disabled by command-line precedence.
+    automatic = data / 'postgresql.auto.conf'
+    assert automatic.resolve(strict=True) == automatic and automatic.is_file() and automatic.stat().st_nlink == 1
+    original_automatic = automatic.read_bytes(); assert len(original_automatic) <= 65536
+    original_file = root / 'original-postgresql.auto.conf'
+    with original_file.open('xb') as file:
+        os.chmod(original_file, 0o600); file.write(original_automatic); file.flush(); os.fsync(file.fileno())
+    hook_markers = ['forbidden-archive-cleanup-marker', 'forbidden-recovery-end-marker']
+    assert all(not (data / name).exists() for name in hook_markers)
+    fd = os.open(automatic, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW)
+    try:
+        with os.fdopen(os.dup(fd), 'ab') as file:
+            file.write(b"\narchive_cleanup_command = 'touch /var/lib/postgresql/data/forbidden-archive-cleanup-marker'\n"
+                       b"recovery_end_command = 'touch /var/lib/postgresql/data/forbidden-recovery-end-marker'\n")
+            file.flush(); os.fsync(file.fileno())
+    finally: os.close(fd)
     signal_file = data / 'recovery.signal'
     with signal_file.open('x') as file:
         os.chmod(signal_file, 0o600); os.chown(signal_file, 70, 70); file.flush(); os.fsync(file.fileno())
@@ -146,6 +163,7 @@ def main(root):
     arguments = ['-D', '/var/lib/postgresql/data', '-c', 'config_file=/restore.conf']
     safe = dict(settings, listen_addresses='', shared_preload_libraries='', session_preload_libraries='', local_preload_libraries='',
                 primary_conninfo='', primary_slot_name='', archive_mode='off', archive_command='', archive_library='', ssl='off',
+                archive_cleanup_command='', recovery_end_command='',
                 logging_collector='off', log_destination='stderr', autovacuum='off', max_logical_replication_workers='0',
                 restore_command='cp /wal/%f %p', recovery_target_lsn=source['committedLsn'], recovery_target_inclusive='true',
                 recovery_target_action='promote', recovery_target_timeline=str(source['range']['timeline']))
@@ -173,6 +191,7 @@ def main(root):
     assert all(row['Type'] == 'bind' or row['Type'] == 'tmpfs' and row['Destination'] in ['/tmp', '/var/run/postgresql'] for row in pg['Mounts'])
     deadline = time.monotonic() + 300; recovered = None
     query = "SELECT json_build_object('inRecovery',pg_is_in_recovery(),'systemIdentifier',(pg_control_system()).system_identifier::text," \
+            "'archiveCleanupCommand',current_setting('archive_cleanup_command'),'recoveryEndCommand',current_setting('recovery_end_command')," \
             "'amount',amount::text,'quantity',quantity::text,'id',id) FROM recovery_chain_probe WHERE id='retained'"
     while time.monotonic() < deadline:
         [current] = json.loads(owner.output(['docker', 'inspect', pg_id])); assert current['State']['Running'] and not current['State']['OOMKilled']
@@ -185,12 +204,15 @@ def main(root):
         time.sleep(1)
     assert recovered is not None
     assert recovered['systemIdentifier'] == source['source']['systemIdentifier']
+    assert recovered['archiveCleanupCommand'] == recovered['recoveryEndCommand'] == ''
+    assert all(not (data / name).exists() for name in hook_markers)
     assert {key: recovered[key] for key in ['id', 'amount', 'quantity']} == source['expected']
     owner.state('PRIVATE_POSTGRES_REPLAY_VERIFIED', containerId=pg_id, recovered=recovered)
     owner.mutate_host(['docker', 'stop', '--time', '-1', pg_id], 1800, 'chain-' + operation + '-pg-stop')
     [stopped] = json.loads(owner.output(['docker', 'inspect', pg_id]))
     assert stopped['State']['Status'] == 'exited' and not stopped['State']['Running'] and stopped['State']['Pid'] == 0
     assert stopped['State']['ExitCode'] == 0 and not stopped['State']['Dead']
+    assert all(not (data / name).exists() for name in hook_markers)
     native_closure_proven = True
     assert owner.foreign() == foreign
     assert not owner.cancellation_requested
@@ -199,6 +221,7 @@ def main(root):
                   targetLsn=source['committedLsn'], recovered=recovered, nativeVerifyContainer=verifier_id,
                   stoppedReplayContainer=pg_id, nativePostgresStoppedNaturally=True, image=IMAGE,
                   imageArchiveSha256=IMAGE_ARCHIVE_SHA, foreignServicesUnchanged=True, foreignCount=len(foreign),
+                  inheritedRecoveryHookMarkersNeverExecuted=True,
                   applicationCoherenceRequired=True, productionRecoveryPoint=False)
     owner.atomic(root / 'native-replay-proof.json', result); owner.state('COMPLETE', proof=result); print(json.dumps(result))
 

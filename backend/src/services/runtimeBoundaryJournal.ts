@@ -29,11 +29,18 @@ export function runtimePostgresApplicationName(runtimeId: string) {
   return `sabalan-${runtimeId.slice(0, 48)}`;
 }
 
+/** Native guardian namespace. Hash all 256 identity bits before encoding a
+ * bounded PostgreSQL name; historical journal namespaces remain readable. */
+export function runtimeNativePostgresApplicationName(runtimeId: string) {
+  if (!hashPattern.test(runtimeId)) fail('RUNTIME_BOUNDARY_SCOPE_INVALID');
+  return `sabalan-rt-${createHash('sha256').update(runtimeId, 'ascii').digest('hex').slice(0, 48)}`;
+}
+
 function validateScope(scope: RuntimeBoundaryScope) {
   if (!exact(scope, ['runtimeId', 'image', 'registrySha256', 'generation', 'postgresApplicationName', 'gate'])
     || !hashPattern.test(scope.runtimeId) || !/^sha256:[a-f0-9]{64}$/.test(scope.image)
     || !hashPattern.test(scope.registrySha256) || !Number.isSafeInteger(scope.generation) || scope.generation < 1
-    || scope.postgresApplicationName !== runtimePostgresApplicationName(scope.runtimeId)
+    || ![runtimePostgresApplicationName(scope.runtimeId), runtimeNativePostgresApplicationName(scope.runtimeId)].includes(scope.postgresApplicationName)
     || !exact(scope.gate, ['device', 'inode', 'ownerUid'])
     || !/^[1-9][0-9]{0,24}$/.test(scope.gate.device) || !/^[1-9][0-9]{0,24}$/.test(scope.gate.inode)
     || !Number.isSafeInteger(scope.gate.ownerUid) || scope.gate.ownerUid < 0) fail('RUNTIME_BOUNDARY_SCOPE_INVALID');

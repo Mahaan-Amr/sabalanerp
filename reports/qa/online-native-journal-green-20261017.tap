@@ -1,0 +1,125 @@
+TAP version 13
+# Subtest: independent processes share admission; the exited flock helper does not release the parent lease
+ok 1 - independent processes share admission; the exited flock helper does not release the parent lease
+  ---
+  duration_ms: 75.133396
+  type: 'test'
+  ...
+# Subtest: a competing exclusive boundary and revoked owner admit no application work
+ok 2 - a competing exclusive boundary and revoked owner admit no application work
+  ---
+  duration_ms: 70.658967
+  type: 'test'
+  ...
+# Subtest: drain never closes a still-owned lease; symlink substitution fails closed
+ok 3 - drain never closes a still-owned lease; symlink substitution fails closed
+  ---
+  duration_ms: 24.460183
+  type: 'test'
+  ...
+# Subtest: replacing an owned inode retains the original lock and forbids retirement or readmission
+ok 4 - replacing an owned inode retains the original lock and forbids retirement or readmission
+  ---
+  duration_ms: 79.681562
+  type: 'test'
+  ...
+# Subtest: native HTTP early response cannot release unfinished handler ownership
+ok 5 - native HTTP early response cannot release unfinished handler ownership
+  ---
+  duration_ms: 77.054158
+  type: 'test'
+  ...
+# Subtest: native HTTP disconnect cannot release unfinished handler ownership
+ok 6 - native HTTP disconnect cannot release unfinished handler ownership
+  ---
+  duration_ms: 48.856464
+  type: 'test'
+  ...
+# Subtest: client disconnect during pending admission never dispatches the domain handler
+ok 7 - client disconnect during pending admission never dispatches the domain handler
+  ---
+  duration_ms: 36.893718
+  type: 'test'
+  ...
+# Subtest: GET response-event audit reservation retains the cross-process boundary until its work finishes
+ok 8 - GET response-event audit reservation retains the cross-process boundary until its work finishes
+  ---
+  duration_ms: 101.640282
+  type: 'test'
+  ...
+# Subtest: durable-completion callback must finish before HTTP retirement and kernel release
+ok 9 - durable-completion callback must finish before HTTP retirement and kernel release
+  ---
+  duration_ms: 51.185309
+  type: 'test'
+  ...
+# Subtest: a journal cannot declare a different gate from the acquired kernel boundary
+ok 10 - a journal cannot declare a different gate from the acquired kernel boundary
+  ---
+  duration_ms: 101.464303
+  type: 'test'
+  ...
+# Subtest: durable busy epochs remain constant-space and bind the actual native incarnation
+ok 11 - durable busy epochs remain constant-space and bind the actual native incarnation
+  ---
+  duration_ms: 1262.11346
+  type: 'test'
+  ...
+# Subtest: overlapping tasks share one durable epoch and retirement waits for the final reference
+ok 12 - overlapping tasks share one durable epoch and retirement waits for the final reference
+  ---
+  duration_ms: 146.357507
+  type: 'test'
+  ...
+# Subtest: new work waits for settling publication and starts a fresh durable epoch
+ok 13 - new work waits for settling publication and starts a fresh durable epoch
+  ---
+  duration_ms: 179.3742
+  type: 'test'
+  ...
+# Subtest: a dead ACTIVE incarnation remains inspectable and cannot be reclaimed or settled by restart
+ok 14 - a dead ACTIVE incarnation remains inspectable and cannot be reclaimed or settled by restart
+  ---
+  duration_ms: 166.74165
+  type: 'test'
+  ...
+# Subtest: unexpected, torn, symlinked and altered namespace records fail closed
+ok 15 - unexpected, torn, symlinked and altered namespace records fail closed
+  ---
+  duration_ms: 62.495074
+  type: 'test'
+  ...
+# Subtest: failed state fsync never admits work or releases the shared boundary
+ok 16 - failed state fsync never admits work or releases the shared boundary
+  ---
+  duration_ms: 146.826748
+  type: 'test'
+  ...
+# Subtest: owner loss after ACTIVE publication retires unstarted work without a false orphan
+ok 17 - owner loss after ACTIVE publication retires unstarted work without a false orphan
+  ---
+  duration_ms: 121.47611
+  type: 'test'
+  ...
+# Subtest: stop during kernel admission cancels unstarted work and still proves retirement
+ok 18 - stop during kernel admission cancels unstarted work and still proves retirement
+  ---
+  duration_ms: 71.501139
+  type: 'test'
+  ...
+# Subtest: native SQL identity binds the entire runtime ID and survives durable task admission
+ok 19 - native SQL identity binds the entire runtime ID and survives durable task admission
+  ---
+  duration_ms: 105.527104
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3189.079204
+{"nativeLinuxGatePassed":true,"backendUnchanged":{"id":"a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff","image":"sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505","startedAt":"2026-10-15T09:01:40.016187222Z"},"compiledSha256":{"kernelWriteAdmission.js":"36a26bd2ac91b30ebaf58262969dce8bd1aee22cca2d39eeb69ee193e0048da4","httpRequestLifecycle.js":"3106e1c7cc8ce185f75a71ce7650bf7df1eb907bc6831a57da0e1212a920c5ff","runtimeBoundaryJournal.js":"e9b42bd9d250d2a866d45df266ecf295de895d33fc9e92952d7c566c1476f15f","runtimeTaskAdmission.js":"1b4f1d66189a16ffc7f417f90d63f86b4b0cf4d7cdee5f258a07db8784162f48","fixture.cjs":"e46ad007604b5769375bb32156bc1de73ecd24df0a758c4f748516d3fdeeca75","runtime-fixture.cjs":"dde571f13f3967b84570253067a2bb975328e6b61e4fdc71c17d16e0167ed08b"}}

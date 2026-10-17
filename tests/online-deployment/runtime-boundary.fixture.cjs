@@ -8,7 +8,7 @@ const { randomBytes } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { test, after } = require('node:test');
 const { KernelWriteAdmission } = require('./kernelWriteAdmission');
-const { RuntimeBoundaryJournal, runtimeBoundaryProvisionBytes, runtimePostgresApplicationName } = require('./runtimeBoundaryJournal');
+const { RuntimeBoundaryJournal, runtimeBoundaryProvisionBytes, runtimePostgresApplicationName, runtimeNativePostgresApplicationName } = require('./runtimeBoundaryJournal');
 const { RuntimeTaskAdmission } = require('./runtimeTaskAdmission');
 const roots = [];
 
@@ -161,5 +161,63 @@ test('stop during kernel admission cancels unstarted work and still proves retir
   const stopped = admission.stopAndDrain(1000); pending.resolve();
   await assert.rejects(admitted, /ADMISSION_CLOSED/); await stopped;
   assert.equal((await journal.inspect()).phase, 'QUIESCENT'); assert.equal((await journal.inspect()).epoch, 0);
+  assert.equal(exclusive(file), true);
+});
+
+
+test('native SQL identity binds the entire runtime ID and survives durable task admission', async () => {
+  assert.equal(runtimeNativePostgresApplicationName('a'.repeat(64)), 'sabalan-rt-ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5');
+  assert.equal(runtimeNativePostgresApplicationName('a'.repeat(63) + 'b'), 'sabalan-rt-97aa7c540da474936ff8bedd71acb8a59ff1d41b71fa52c0');
+  const value = fixture();
+  const scope = { ...value.scope, postgresApplicationName: runtimeNativePostgresApplicationName(value.scope.runtimeId) };
+  fs.writeFileSync(path.join(value.directory, 'scope.json'), runtimeBoundaryProvisionBytes(scope));
+  const journal = new RuntimeBoundaryJournal(value.directory, scope);
+  await journal.initialize();
+  const tasks = new RuntimeTaskAdmission(value.gate, journal, () => {});
+  const work = await tasks.acquire();
+  assert.equal((await journal.inspect()).scope.postgresApplicationName, scope.postgresApplicationName);
+  assert.equal(exclusive(value.file), false);
+  await work.release();
+  await tasks.stopAndDrain(1000);
+  assert.equal((await journal.inspect()).phase, 'QUIESCENT');
+  assert.equal(exclusive(value.file), true);
+});
+
+
+test('a pending capture stops new joins without blocking existing task completion', async () => {
+  const { journal, gate, file } = fixture();
+  await journal.initialize();
+  let open = true;
+  const admission = new RuntimeTaskAdmission(gate, journal, () => {}, () => open);
+  const first = await admission.acquire();
+  open = false;
+  let secondLease;
+  const second = admission.acquire().then(lease => { secondLease = lease; return lease; });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  await first.release();
+  try {
+    assert.equal(exclusive(file), true, 'a paused new arrival must not keep the shared epoch alive');
+    assert.equal(secondLease, undefined);
+    assert.equal((await journal.inspect()).phase, 'QUIESCENT');
+  } finally {
+    open = true;
+    const resumed = await second;
+    await resumed.release();
+    await admission.stopAndDrain(1000);
+  }
+  assert.equal((await journal.inspect()).epoch, 2);
+  assert.equal(exclusive(file), true);
+});
+
+
+test('retirement cancels paused admissions without starting another epoch', async () => {
+  const { journal, gate, file } = fixture();
+  await journal.initialize();
+  const admission = new RuntimeTaskAdmission(gate, journal, () => {}, () => false);
+  const waiting = assert.rejects(admission.acquire(), /ADMISSION_CLOSED/);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  await admission.stopAndDrain(1000);
+  await waiting;
+  assert.equal((await journal.inspect()).epoch, 0);
   assert.equal(exclusive(file), true);
 });

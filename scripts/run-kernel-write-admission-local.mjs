@@ -5,6 +5,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 const root = path.resolve(import.meta.dirname, '..');
+const backendDist = process.env.ONLINE_ACCEPTANCE_BACKEND_DIST || path.join(root, 'backend/dist');
 const canonical = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || 'D:/sabalanerp';
 const compose = ['compose', '-f', path.join(canonical, 'docker-compose.local.yml')];
 function verify() {
@@ -24,10 +25,10 @@ function identity() {
 }
 const before = identity();
 const files = {
-  'kernelWriteAdmission.js': fs.readFileSync(path.join(root, 'backend/dist/services/kernelWriteAdmission.js')),
-  'httpRequestLifecycle.js': fs.readFileSync(path.join(root, 'backend/dist/services/httpRequestLifecycle.js')),
-  'runtimeBoundaryJournal.js': fs.readFileSync(path.join(root, 'backend/dist/services/runtimeBoundaryJournal.js')),
-  'runtimeTaskAdmission.js': fs.readFileSync(path.join(root, 'backend/dist/services/runtimeTaskAdmission.js')),
+  'kernelWriteAdmission.js': fs.readFileSync(path.join(backendDist, 'services/kernelWriteAdmission.js')),
+  'httpRequestLifecycle.js': fs.readFileSync(path.join(backendDist, 'services/httpRequestLifecycle.js')),
+  'runtimeBoundaryJournal.js': fs.readFileSync(path.join(backendDist, 'services/runtimeBoundaryJournal.js')),
+  'runtimeTaskAdmission.js': fs.readFileSync(path.join(backendDist, 'services/runtimeTaskAdmission.js')),
   'fixture.cjs': fs.readFileSync(path.join(root, 'tests/online-deployment/kernel-write-admission.fixture.cjs')),
   'runtime-fixture.cjs': fs.readFileSync(path.join(root, 'tests/online-deployment/runtime-boundary.fixture.cjs')),
 };
@@ -63,6 +64,6 @@ const after = identity();
 assert.deepEqual(after, before, 'Canonical backend identity/start time changed during fixture');
 assert.ok(bytes < 4 * 1024 * 1024, 'Fixture evidence bound exceeded');
 assert.equal(result.signal, null); assert.equal(result.code, 0);
-assert.match(output, /# tests 18\b/); assert.match(output, /# fail 0\b/); assert.match(output, /# skipped 0\b/);
+assert.match(output, /# tests 21\b/); assert.match(output, /# fail 0\b/); assert.match(output, /# skipped 0\b/);
 console.log(JSON.stringify({ nativeLinuxGatePassed: true, backendUnchanged: after,
   compiledSha256: Object.fromEntries(Object.entries(files).map(([name, value]) => [name, createHash('sha256').update(value).digest('hex')])) }));

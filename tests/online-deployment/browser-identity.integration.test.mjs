@@ -109,5 +109,27 @@ test('compiled login and session bootstrap send the same immutable producer iden
       assert.ok(observed.some(request=>request.path==='/api/auth/login' && request.method==='POST'));
       assert.ok(observed.every(request=>request.id===expected));
       assert.equal(new URL(page.url()).pathname,'/login');
+      let privateReads=0;
+      await page.route(enabled+'/__qa-cache-privacy',route=>{
+        privateReads++;return route.fulfill({status:401,contentType:'text/plain',body:'PRIVATE_RESOURCE_DENIED'});
+      });
+      await page.evaluate(async()=>{
+        for(const name of ['sabalan-security-v1','sabalan-static-v1','sabalan-dynamic-v1']) {
+          const cache=await caches.open(name);await cache.put('/__qa-cache-privacy',new Response('PRIVATE_CANARY'));
+        }
+        await caches.open('qa-unrelated-retained');
+        await navigator.serviceWorker.register('/sw.js',{scope:'/',updateViaCache:'none'});
+        await navigator.serviceWorker.ready;
+      });
+      await page.waitForFunction(()=>Boolean(navigator.serviceWorker.controller?.scriptURL.endsWith('/sw.js')));
+      const privacy=await page.evaluate(async()=>{
+        const response=await fetch('/__qa-cache-privacy');
+        return {status:response.status,text:await response.text(),cacheNames:await caches.keys()};
+      });
+      assert.equal(privacy.status,401);assert.equal(privacy.text,'PRIVATE_RESOURCE_DENIED');assert.equal(privateReads,1);
+      assert.ok(privacy.cacheNames.includes('qa-unrelated-retained'));
+      assert.ok(!privacy.cacheNames.some(name=>['sabalan-security-v1','sabalan-static-v1','sabalan-dynamic-v1'].includes(name)));
+      assert.equal(await page.locator('input[name="identifier"]').inputValue(),'diagnostic-identity-user');
+      assert.equal(await page.locator('input[name="password"]').inputValue(),'diagnostic-not-a-real-password');
     } finally {await browser.close();}
   });

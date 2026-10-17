@@ -66,8 +66,20 @@ services:
       - ${LOCAL_BACKEND_SEPIDAR_BACKUP_SOURCE:-backend_storage_sepidar_backups}:/app/storage/sepidar-backups:ro
       - ${LOCAL_RECOVERY_COORDINATION_SOURCE:-recovery_coordination}:/app/recovery-coordination:ro
       - ${LOCAL_INQUIRY_RECOVERY_SOURCE:-inquiry_data}:/app/recovery-sources/inquiry:ro
+      - online_runtime_acceptance:/app/online-runtime-acceptance
     read_only: true
     tmpfs: [/tmp]
     stop_grace_period: 5m
     mem_limit: 768m
     cpus: 1
+  backend-retained:
+    extends:
+      service: backend-candidate
+    profiles: [online-acceptance]
+    ports: !override
+      - "127.0.0.1:5101:5000"
+
+volumes:
+  # Linux-native private fixture state shared only by the two diagnostic slots.
+  # This is neither business storage nor a second database/Compose project.
+  online_runtime_acceptance:

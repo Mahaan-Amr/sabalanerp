@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {openSync, closeSync, fstatSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import path from 'node:path';
 import os from 'node:os';
 import test from 'node:test';
@@ -80,6 +81,7 @@ test('compatible rollback is a new immutable publication and retains current and
     const store = new BrowserRoutingStore({directory, publicationLock, assertReleaseOwnership: owner});
     const first = baseline(), one = await store.publish(first, null);
     const second = retire(first, 'erp_second', '2026-10-17T12:00:00.000Z');
+    second.builds[0].supportUntil = '2026-10-19T12:00:00.000Z';
     const two = await store.publish(second, one.publicationSha256);
     const rollback = structuredClone(second); rollback.generation++;
     rollback.current.erp = 'erp_first';
@@ -92,9 +94,12 @@ test('compatible rollback is a new immutable publication and retains current and
     secondRetirement.builds[0].retiredAt = '2026-10-17T12:10:00.000Z';
     secondRetirement.builds[0].supportUntil = '2026-10-18T12:10:00.000Z';
     const currentBytes = await fs.readFile(path.join(directory, 'published-00000003.json'));
-    const {createHash} = await import('node:crypto');
+    await assert.rejects(() => store.publish(secondRetirement, createHash('sha256').update(currentBytes).digest('hex')),
+      /HISTORICAL_SUPPORT_SHORTENED/);
+    assert.deepEqual(await fresh.read(), rollback);
+    secondRetirement.builds[0].supportUntil = '2026-10-19T12:10:00.000Z';
     await store.publish(secondRetirement, createHash('sha256').update(currentBytes).digest('hex'));
-    assert.equal((await store.read()).builds[0].supportUntil, '2026-10-18T12:10:00.000Z');
+    assert.equal((await store.read()).builds[0].supportUntil, '2026-10-19T12:10:00.000Z');
   });
 });
 
@@ -118,7 +123,29 @@ test('wrong predecessor, changed build bytes, shortened support, legacy reassign
     const shortened = structuredClone(second); shortened.generation++;
     shortened.builds[0].retiredAt = '2026-10-17T11:59:00.000Z';
     shortened.builds[0].supportUntil = '2026-10-18T11:59:00.000Z';
-    await assert.rejects(() => store.publish(shortened, two.publicationSha256), /SUPPORT_WINDOW_SHORTENED/);
+    await assert.rejects(() => store.publish(shortened, two.publicationSha256), /SUPPORT_WINDOW_SHORTENED|HISTORICAL_SUPPORT_SHORTENED/);
+  });
+});
+
+test('publication inventory exhaustion refuses before a prepared intent and keeps the existing current registry readable', {timeout: 120000}, async () => {
+  await fixture(async ({directory, publicationLock, owner}) => {
+    const store = new BrowserRoutingStore({directory, publicationLock, assertReleaseOwnership: owner});
+    await store.publish(baseline(), null);
+    const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+    const {browserRoutingIdentity} = await import('../../deploy/scripts/browser-release-routing.mjs');
+    let bytes = await fs.readFile(path.join(directory, 'published-00000001.json'));
+    for (let generation = 2; generation <= 8192; generation++) {
+      const registry = baseline(); registry.generation = generation;
+      bytes = Buffer.from(JSON.stringify(canonical({format: 'sabalan-browser-publication/v1', generation,
+        previousPublicationSha256: createHash('sha256').update(bytes).digest('hex'),
+        registryIdentity: browserRoutingIdentity(registry), registry})) + '\n');
+      await fs.writeFile(path.join(directory, `published-${String(generation).padStart(8, '0')}.json`), bytes, {flag: 'wx', mode: 0o600});
+    }
+    const next = baseline(); next.generation = 8193;
+    await assert.rejects(() => store.publish(next, createHash('sha256').update(bytes).digest('hex')), /INVENTORY_CAPACITY/);
+    assert.equal((await fs.readdir(directory)).length, 8192);
+    assert.equal((await new BrowserRoutingStore({directory}).read()).generation, 8192);
   });
 });
 

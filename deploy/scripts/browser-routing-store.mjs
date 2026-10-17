@@ -123,6 +123,7 @@ export class BrowserRoutingStore {
     const published = entries.filter(name => name.startsWith('published-')).sort();
     if (published.length < this.#maximumObserved) fail('BROWSER_ROUTING_HISTORY_REGRESSED');
     let prior = null, total = 0;
+    const supportPromises = new Map();
     for (let index = 0; index < published.length; index++) {
       if (published[index] !== filename(index + 1)) fail('BROWSER_ROUTING_HISTORY_GAP');
       const current = await this.#read(published[index]); total += current.bytes.length;
@@ -132,11 +133,11 @@ export class BrowserRoutingStore {
         || record.format !== 'sabalan-browser-publication/v1' || record.generation !== index + 1
         || record.registry?.generation !== index + 1 || record.previousPublicationSha256 !== (prior?.sha256 ?? null)
         || record.registryIdentity !== browserRoutingIdentity(record.registry)) fail('BROWSER_ROUTING_HISTORY_INVALID');
-      assertTransition(prior?.record.registry, record.registry);
+      assertTransition(prior?.record.registry, record.registry, supportPromises);
       prior = current;
     }
     this.#maximumObserved = Math.max(this.#maximumObserved, published.length);
-    return {head: prior, total, prepared: entries.filter(name => name.startsWith('.prepared-'))};
+    return {head: prior, total, supportPromises, prepared: entries.filter(name => name.startsWith('.prepared-'))};
   }
 
   async read() {
@@ -153,11 +154,14 @@ export class BrowserRoutingStore {
       // Freeze caller-owned objects before any await.
       registry = structuredClone(registry);
       compileBrowserRoutingRegistry(registry);
-      const {head, total, prepared} = await this.#head();
+      const {head, total, prepared, supportPromises} = await this.#head();
       if (prepared.length) fail('BROWSER_ROUTING_PREPARED_OPERATION_REQUIRES_INSPECTION');
+      // A temporary intent consumes one entry before its atomic rename. Refuse
+      // before creating it so exhausted publication capacity leaves reads live.
+      if ((head?.record.generation ?? 0) >= 8192) fail('BROWSER_ROUTING_INVENTORY_CAPACITY');
       if ((head?.sha256 ?? null) !== expectedPublicationSha256) fail('BROWSER_ROUTING_PREDECESSOR_CHANGED');
       if (registry.generation !== (head?.record.generation ?? 0) + 1) fail('BROWSER_ROUTING_GENERATION_INVALID');
-      assertTransition(head?.record.registry, registry);
+      assertTransition(head?.record.registry, registry, supportPromises);
       const record = {format: 'sabalan-browser-publication/v1', generation: registry.generation,
         previousPublicationSha256: expectedPublicationSha256, registryIdentity: browserRoutingIdentity(registry), registry};
       const bytes = encode(record);
@@ -191,9 +195,17 @@ export class BrowserRoutingStore {
   }
 }
 
-function assertTransition(previous, next) {
+function assertTransition(previous, next, supportPromises) {
   compileBrowserRoutingRegistry(next);
-  if (!previous) return;
+  for (const build of next.builds) {
+    if (build.supportUntil !== null && Date.parse(build.supportUntil) < (supportPromises.get(build.id) ?? -Infinity)) {
+      fail('BROWSER_ROUTING_HISTORICAL_SUPPORT_SHORTENED');
+    }
+  }
+  if (!previous) {
+    for (const build of next.builds) if (build.supportUntil !== null) supportPromises.set(build.id, Date.parse(build.supportUntil));
+    return;
+  }
   const before = new Map(previous.builds.map(build => [build.id, build]));
   const after = new Map(next.builds.map(build => [build.id, build]));
   for (const [id, old] of before) {
@@ -216,4 +228,5 @@ function assertTransition(previous, next) {
     // Uninstrumented pre-bootstrap tabs retain one immutable ambiguity owner.
     if (next.legacy[application] !== previous.legacy[application]) fail('BROWSER_ROUTING_LEGACY_OWNER_CHANGED');
   }
+  for (const build of next.builds) if (build.supportUntil !== null) supportPromises.set(build.id, Date.parse(build.supportUntil));
 }

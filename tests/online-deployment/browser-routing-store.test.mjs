@@ -76,6 +76,24 @@ test('opening the matching inode without its existing exclusive native lock neve
   });
 });
 
+test('an asynchronous lease check cannot let caller mutations replace the proposed routing snapshot', async () => {
+  await fixture(async ({directory, publicationLock, owner}) => {
+    let unblock, entered;
+    const pending = new Promise(resolve => {unblock = resolve;});
+    const checking = new Promise(resolve => {entered = resolve;});
+    let calls = 0;
+    const store = new BrowserRoutingStore({directory, publicationLock, assertReleaseOwnership: async () => {
+      owner(); if (++calls === 1) {entered(); await pending;} owner();
+    }});
+    const original = baseline(), proposal = structuredClone(original);
+    const publication = store.publish(proposal, null);
+    await checking;
+    proposal.current.erp = 'erp_unapproved'; proposal.builds[0].image = `sha256:${'f'.repeat(64)}`;
+    unblock(); await publication;
+    assert.deepEqual(await new BrowserRoutingStore({directory}).read(), original);
+  });
+});
+
 test('compatible rollback is a new immutable publication and retains current and previously retired browser identities', async () => {
   await fixture(async ({directory, publicationLock, owner}) => {
     const store = new BrowserRoutingStore({directory, publicationLock, assertReleaseOwnership: owner});

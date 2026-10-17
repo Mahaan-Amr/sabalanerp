@@ -150,9 +150,9 @@ export class BrowserRoutingStore {
     if (this.#busy) fail('BROWSER_ROUTING_PUBLICATION_BUSY');
     this.#busy = true;
     try {
-      await this.#assertOwner();
       // Freeze caller-owned objects before any await.
       registry = structuredClone(registry);
+      await this.#assertOwner();
       compileBrowserRoutingRegistry(registry);
       const {head, total, prepared, supportPromises} = await this.#head();
       if (prepared.length) fail('BROWSER_ROUTING_PREPARED_OPERATION_REQUIRES_INSPECTION');

@@ -15,7 +15,10 @@ import time
 
 QA = Path('/root/sabalan-recovery-private/native-qa')
 PRIVATE = QA.parent
-IMAGE = 'sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f'
+SOURCE_IMAGE = 'sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f'
+# The source engine reports an OCI multi-platform index. The independent
+# overlay2 engine runs the exact selected config, not the index's digest.
+IMAGE = 'sha256:9b4593c6de443299b46098151fc1ec154c882339b77a56334c7ce612c8a7be6a'
 IMAGE_ARCHIVE_SHA = '4ac986e0e795da2700e014af9fd094f447204dc863856df94689732e15708ac7'
 STATIC_OWNER_SHA = 'c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83'
 mutation_started = False
@@ -36,6 +39,53 @@ def sync(file):
     finally: os.close(fd)
 
 
+def immutable_image(archive):
+    with tarfile.open(archive, 'r:') as package:
+        entries = {}
+        for member in package:
+            name = member.name.rstrip('/')
+            assert name and not name.startswith('/') and '\\' not in name
+            assert all(part not in ['', '.', '..'] for part in name.split('/'))
+            assert name not in entries and len(entries) < 50000 and (member.isfile() or member.isdir())
+            entries[name] = member
+
+        def read_json(name):
+            item = entries[name]; assert item.isfile() and 0 < item.size <= 8 * 1024 ** 2
+            content = package.extractfile(item).read(8 * 1024 ** 2 + 1); assert len(content) == item.size
+            if name.startswith('blobs/sha256/'):
+                assert hashlib.sha256(content).hexdigest() == name.removeprefix('blobs/sha256/')
+            return json.loads(content)
+
+        def descriptor(value):
+            assert re.fullmatch(r'sha256:[a-f0-9]{64}', value['digest'])
+            name = 'blobs/sha256/' + value['digest'][7:]
+            assert entries[name].isfile() and entries[name].size == value['size']
+            return name
+
+        assert read_json('oci-layout') == {'imageLayoutVersion': '1.0.0'}
+        index = read_json('index.json'); assert index['schemaVersion'] == 2 and len(index['manifests']) == 1
+        [root] = index['manifests']; assert root['digest'] == SOURCE_IMAGE
+        source = read_json(descriptor(root)); assert source['schemaVersion'] == 2
+        platform = [row for row in source['manifests'] if row.get('platform') == {'architecture': 'amd64', 'os': 'linux'}]
+        assert len(platform) == 1 and platform[0]['mediaType'] == 'application/vnd.oci.image.manifest.v1+json'
+        selected = read_json(descriptor(platform[0])); assert selected['schemaVersion'] == 2
+        assert selected['config']['digest'] == IMAGE
+        config_name = descriptor(selected['config']); config = read_json(config_name)
+        assert config['os'] == 'linux' and config['architecture'] == 'amd64' and config['rootfs']['type'] == 'layers'
+        assert len(config['rootfs']['diff_ids']) == len(selected['layers']) == 11
+        assert all(re.fullmatch(r'sha256:[a-f0-9]{64}', value) for value in config['rootfs']['diff_ids'])
+        layers = []
+        for layer in selected['layers']:
+            name = descriptor(layer); digest = hashlib.sha256(); count = 0
+            with package.extractfile(entries[name]) as file:
+                while content := file.read(262144): digest.update(content); count += len(content)
+            assert count == layer['size'] and digest.hexdigest() == layer['digest'][7:]
+            layers.append(name)
+        manifest = read_json('manifest.json')
+        assert len(manifest) == 1 and manifest[0]['Config'] == config_name and manifest[0]['Layers'] == layers and not manifest[0]['RepoTags']
+        return config, platform[0]['digest']
+
+
 def main(root):
     global mutation_started, native_closure_proven, native_owner
     assert os.getuid() == 0 and root.parent == QA and root.resolve(strict=True) == root
@@ -54,7 +104,7 @@ def main(root):
     assert source['source']['systemIdentifier'] == '7667464637415309346'
     assert re.fullmatch(r'sabalanerp_concurrency_[a-f0-9]{16}', source['databaseName'])
     assert re.fullmatch(r'[0-9A-F]{1,8}/[0-9A-F]{1,8}', source['committedLsn'])
-    assert source['canonicalBeforeAndAfter'][3]['image'] == IMAGE
+    assert source['canonicalBeforeAndAfter'][3]['image'] == SOURCE_IMAGE
     source_owner = QA / 'native-owner-storage-final-20261017/owner'
     assert source_owner.resolve(strict=True) == source_owner and sha(source_owner) == STATIC_OWNER_SHA
     owner_source = QA / 'physical-restore-r4.fixture.py'
@@ -62,7 +112,7 @@ def main(root):
     spec = importlib.util.spec_from_file_location('chain_native_host_owner', owner_source)
     owner = importlib.util.module_from_spec(spec); spec.loader.exec_module(owner)
     native_owner = owner
-    owner.STATUS = root / 'native-replay-state.json'; assert not owner.STATUS.exists()
+    owner.STATUS = root / 'native-replay-state-v2.json'; assert not owner.STATUS.exists()
     assert sha(QA / 'native-process-owner') == '2c04343fd5befe7e4085811e73b4e441ac5a67c1b11614b5f8540c54efa933b2'
     lock = os.open(PRIVATE / 'drill-ownership.lock', os.O_RDWR | os.O_NOFOLLOW)
     if lock != 9: os.dup2(lock, 9); os.close(lock)
@@ -76,19 +126,7 @@ def main(root):
     assert archive.resolve(strict=True) == archive and stat.S_ISREG(archive.lstat().st_mode) and archive.stat().st_uid == 0
     assert archive.stat().st_nlink == 1 and not archive.stat().st_mode & 0o077 and archive.stat().st_size == 115880960
     assert sha(archive) == IMAGE_ARCHIVE_SHA; sync(archive)
-    seen, manifest, config = set(), None, None
-    with tarfile.open(archive, 'r|') as package:
-        for member in package:
-            assert len(seen) < 50000 and member.name not in seen; seen.add(member.name)
-            if member.name == 'manifest.json' or member.name in [IMAGE[7:] + '.json', 'blobs/sha256/' + IMAGE[7:]]:
-                assert member.isfile() and 0 < member.size <= 8 * 1024 ** 2
-                payload = package.extractfile(member).read(8 * 1024 ** 2 + 1); assert len(payload) == member.size
-                if member.name == 'manifest.json': manifest = json.loads(payload)
-                else:
-                    assert hashlib.sha256(payload).hexdigest() == IMAGE[7:]; config = json.loads(payload)
-    assert manifest and len(manifest) == 1 and config
-    assert manifest[0]['Config'] in [IMAGE[7:] + '.json', 'blobs/sha256/' + IMAGE[7:]] and not manifest[0]['RepoTags']
-    assert all(file in seen for file in manifest[0]['Layers'])
+    config, platform_manifest = immutable_image(archive)
     assert shutil.disk_usage(PRIVATE).free > 1024 ** 3 + 2 * archive.stat().st_size
     if IMAGE not in owner.output(['docker', 'image', 'ls', '--no-trunc', '--quiet']).decode().split():
         owner.state('PRIVATE_IMMUTABLE_IMAGE_LOAD_INTENT')
@@ -220,6 +258,7 @@ def main(root):
                   sealSha256=prepared['sealSha256'], source=source['source'], baseRange=source['baseRange'],
                   targetLsn=source['committedLsn'], recovered=recovered, nativeVerifyContainer=verifier_id,
                   stoppedReplayContainer=pg_id, nativePostgresStoppedNaturally=True, image=IMAGE,
+                  sourceImageIndex=SOURCE_IMAGE, selectedPlatformManifest=platform_manifest,
                   imageArchiveSha256=IMAGE_ARCHIVE_SHA, foreignServicesUnchanged=True, foreignCount=len(foreign),
                   inheritedRecoveryHookMarkersNeverExecuted=True,
                   applicationCoherenceRequired=True, productionRecoveryPoint=False)

@@ -15,6 +15,7 @@ import uuid
 
 MAX_HISTORY_COUNT = 10000
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
+MAX_INTENT_BYTES = 262144
 MAX_HISTORY_BYTES = 512 * 1024 * 1024
 
 
@@ -185,7 +186,7 @@ class FileGenerations:
                     fail("FILE_GENERATION_CAPTURE_UNFINISHED")
                 raw = read_file(fd, "manifest.json", MAX_MANIFEST_BYTES)
                 manifest = json.loads(raw)
-                intent_raw = read_file(fd, "intent.json", 262144)
+                intent_raw = read_file(fd, "intent.json", MAX_INTENT_BYTES)
                 intent = json.loads(intent_raw)
                 if (encoded(manifest) != raw or encoded(intent) != intent_raw
                         or manifest.get("format") != "sabalan-file-generation/v1"
@@ -376,15 +377,17 @@ class FileGenerations:
             declared.append(dict(item))
         if len({item["name"] for item in declared}) != len(declared):
             fail("FILE_GENERATION_SOURCE_INVALID")
+        intent = {"format": "sabalan-file-generation-intent/v1", "generation": number,
+                  "captureId": capture_id, "previousSha256": previous, "sources": declared}
+        if len(encoded(intent)) > MAX_INTENT_BYTES:
+            fail("FILE_GENERATION_RECORD_TOO_LARGE")
         name = str(number).zfill(12) + "-" + capture_id
         directory = os.path.join(self.root, "captures", name)
         private_directory(directory, create=True)
         fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         objects = os.open(os.path.join(self.root, "objects"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
-            intent_sha = publish_record(fd, "intent.json", {
-                "format": "sabalan-file-generation-intent/v1", "generation": number,
-                "captureId": capture_id, "previousSha256": previous, "sources": declared})
+            intent_sha = publish_record(fd, "intent.json", intent, MAX_INTENT_BYTES)
             entries = []
 
             def walk(directory_fd, source, prefix, device, expected_mount):

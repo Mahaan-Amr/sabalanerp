@@ -134,6 +134,25 @@ try:
 finally:
     os.close(metadata_fd)
 
+# Actual Linux source paths can expand substantially under canonical JSON.
+# Thirty-two independent native roots, with control bytes legal in filenames,
+# exceed the intent reader budget while remaining below the manifest budget.
+inventory_store = root / 'inventory-store'
+inventory_store.mkdir(mode=0o700)
+inventory_live = root / 'inventory-live'
+inventory_live.mkdir(mode=0o700)
+for index in range(18):
+    inventory_live = inventory_live / ('\x01' * 195 + str(index))
+    inventory_live.mkdir(mode=0o700)
+inventory = []
+for index in range(32):
+    directory = inventory_live / ('source-' + str(index))
+    directory.mkdir(mode=0o700)
+    inventory.append(source(directory, 'uploads-' + str(index)))
+inventory_owner = module.FileGenerations(str(inventory_store), gate, gate_stat.st_dev, gate_stat.st_ino)
+expect_error('FILE_GENERATION_RECORD_TOO_LARGE', lambda: inventory_owner.capture(inventory, '9' * 64))
+assert list((inventory_store / 'captures').iterdir()) == []
+
 # Stop the actual publisher at the native fsync boundary: full canonical bytes
 # are readable, but its manifest sync has not run. The child is then reaped.
 (root / 'seal-store').mkdir(mode=0o700)
@@ -239,6 +258,7 @@ report = {'format': 'sabalan-file-generations-native/v1', 'pass': True,
                   'deletionLineage': second['manifest']['deleted'], 'refusedSources': refusals,
                   'sameSizeTamperRefused': True, 'interruptedNativeChild': observed,
                   'manifestSizeBoundRefusedBeforeCreation': True,
+                  'oversizedNativeSourceInventoryRefusedBeforeCapture': True,
                   'cachedManifestSyncFailureRefused': True, 'interruptedManifestDurablyAdopted': True,
                   'captureCapacity': 10000, 'retainedRestoreAtCapacity': True,
                   'nativeChildSignal': 'SIGKILL', 'partialCaptureRetained': True,

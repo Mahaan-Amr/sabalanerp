@@ -102,6 +102,30 @@ def assert_control_lock(directory):
     return named
 
 
+def assert_capture_gate():
+    keys = ['BACKEND_CAPTURE_GATE_FD', 'BACKEND_CAPTURE_GATE_FILE',
+            'BACKEND_CAPTURE_GATE_DEVICE', 'BACKEND_CAPTURE_GATE_INODE']
+    if not any(key in os.environ for key in keys):
+        return None
+    require(all(os.environ.get(key) for key in keys)
+            and os.environ.get('BACKEND_RUNTIME_ROLE') == 'control'
+            and os.environ['BACKEND_CAPTURE_GATE_FD'] == '10')
+    file = Path(os.environ['BACKEND_CAPTURE_GATE_FILE'])
+    require(file.is_absolute() and file.name == 'deployment-write-admission.lock'
+            and file.resolve(strict=True) == file)
+    parent, named, inherited = file.parent.lstat(), file.lstat(), os.fstat(10)
+    require(stat.S_ISDIR(parent.st_mode) and parent.st_uid == os.getuid() and not parent.st_mode & 0o022
+            and stat.S_ISREG(named.st_mode) and named.st_uid == os.getuid() and not named.st_mode & 0o022
+            and named.st_nlink == 1 and named.st_size == 0
+            and (named.st_dev, named.st_ino) == (inherited.st_dev, inherited.st_ino)
+            and str(named.st_dev) == os.environ['BACKEND_CAPTURE_GATE_DEVICE']
+            and str(named.st_ino) == os.environ['BACKEND_CAPTURE_GATE_INODE'])
+    require(any(re.fullmatch(r'lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+[0-9a-f]+:[0-9a-f]+:'
+                            + str(named.st_ino) + r'\s+0\s+EOF\s*', line)
+                for line in Path('/proc/self/fdinfo/10').read_text().splitlines()))
+    return dict(file=str(file), device=str(named.st_dev), inode=str(named.st_ino), descriptor=10)
+
+
 def run():
     require(sys.platform == 'linux' and len(sys.argv) > 1)
     directory = Path(os.environ.get('RECOVERY_COORDINATION_DIR', '/app/recovery-coordination'))
@@ -111,6 +135,7 @@ def run():
         return 0
     role = os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone')
     require(role in ['standalone', 'control'])
+    capture_gate = assert_capture_gate()
     file = directory / 'deployment-runtime-native.json'
     previous, previous_raw = assert_closed(directory)
     require(ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) == 0)  # PR_SET_CHILD_SUBREAPER
@@ -209,6 +234,9 @@ def run():
                   lock=dict(device=str(named.st_dev), inode=str(named.st_ino)), previousSha256=previous_sha,
                   commandSha256=hashlib.sha256(encode(sys.argv[1:])).hexdigest())
     active = encode(record)
+    if capture_gate is not None:
+        record['captureGate'] = capture_gate
+        active = encode(record)
     temporary = directory / ('deployment-runtime-native.' + instance_id + '.tmp')
     write_exclusive(temporary, active)
     # From the first attempted ACTIVE publication onward every uncertainty is a
@@ -229,7 +257,7 @@ def run():
         child_env.update(BACKEND_NATIVE_POSTGRES_APPLICATION_NAME=namespace,
                          BACKEND_NATIVE_AUTHORITY_FILE=str(file),
                          BACKEND_NATIVE_CLAIM_SHA256=hashlib.sha256(active).hexdigest())
-        child = subprocess.Popen(sys.argv[1:], env=child_env, pass_fds=(9,))
+        child = subprocess.Popen(sys.argv[1:], env=child_env, pass_fds=(9, 10) if capture_gate else (9,))
         root_pid, root_status, signalled = child.pid, None, set()
         while True:
             try:
@@ -267,6 +295,7 @@ def run():
                 break
             time.sleep(0.05)
         require(read_state(file)[1] == active)
+        require(assert_capture_gate() == capture_gate)
         current_stat = file.lstat()
         require((current_stat.st_dev, current_stat.st_ino) == (active_stat.st_dev, active_stat.st_ino))
         record.update(phase='QUIESCENT', nativeReaped=True, databaseQuiet=True, nativeStatus=root_status,

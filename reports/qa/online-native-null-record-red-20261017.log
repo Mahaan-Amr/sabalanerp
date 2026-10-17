@@ -1,0 +1,45 @@
+Traceback (most recent call last):
+  File "/app/online-runtime-acceptance/online-native-0633bae4e723d2ae12367dfbcf74d63c/records.fixture.py", line 24, in <module>
+    assert legacy.returncode == 75 and not legacy.stdout, 'Existing null fence permitted protected control: ' + selected
+           ^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Existing null fence permitted protected control: deployment-runtime-native.json
+node:internal/errors:983
+  const err = new Error(message);
+              ^
+
+Error: Command failed: docker exec f23b77c6ccf8509eb46d8b7df8bdac29640393efdccdb2eaa9a9ce6d068bef26 python3 -I -B /app/online-runtime-acceptance/online-native-0633bae4e723d2ae12367dfbcf74d63c/records.fixture.py /app/online-runtime-acceptance/online-native-0633bae4e723d2ae12367dfbcf74d63c
+Traceback (most recent call last):
+  File "/app/online-runtime-acceptance/online-native-0633bae4e723d2ae12367dfbcf74d63c/records.fixture.py", line 24, in <module>
+    assert legacy.returncode == 75 and not legacy.stdout, 'Existing null fence permitted protected control: ' + selected
+           ^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Existing null fence permitted protected control: deployment-runtime-native.json
+
+    at genericNodeError (node:internal/errors:983:15)
+    at wrappedFn (node:internal/errors:537:14)
+    at checkExecSyncError (node:child_process:882:11)
+    at execFileSync (node:child_process:918:15)
+    at file:///C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/scripts/run-online-native-owner-local.mjs:78:22
+    at ModuleJob.run (node:internal/modules/esm/module_job:271:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:547:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:116:5) {
+  status: 1,
+  signal: null,
+  output: [
+    null,
+    '',
+    'Traceback (most recent call last):\n' +
+      '  File "/app/online-runtime-acceptance/online-native-0633bae4e723d2ae12367dfbcf74d63c/records.fixture.py", line 24, in <module>\n' +
+      "    assert legacy.returncode == 75 and not legacy.stdout, 'Existing null fence permitted protected control: ' + selected\n" +
+      '           ^^^^^^^^^^^^^^^^^^^^^^^\n' +
+      'AssertionError: Existing null fence permitted protected control: deployment-runtime-native.json\n'
+  ],
+  pid: 41816,
+  stdout: '',
+  stderr: 'Traceback (most recent call last):\n' +
+    '  File "/app/online-runtime-acceptance/online-native-0633bae4e723d2ae12367dfbcf74d63c/records.fixture.py", line 24, in <module>\n' +
+    "    assert legacy.returncode == 75 and not legacy.stdout, 'Existing null fence permitted protected control: ' + selected\n" +
+    '           ^^^^^^^^^^^^^^^^^^^^^^^\n' +
+    'AssertionError: Existing null fence permitted protected control: deployment-runtime-native.json\n'
+}
+
+Node.js v22.13.0

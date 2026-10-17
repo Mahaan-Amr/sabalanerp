@@ -1,0 +1,16 @@
+TAP version 13
+# {"reportPath":"C:\\\\Users\\\\mahan\\\\.codex\\\\worktrees\\\\online-deployment\\\\sabalanerp\\\\reports\\\\qa\\\\protected-bridge-20261017-0dbc22acd2605754.json"}
+# Subtest: the actual protected bridge requires native ownership and atomically applies only its exact SQL and history
+ok 1 - the actual protected bridge requires native ownership and atomically applies only its exact SQL and history
+  ---
+  duration_ms: 161548.2892
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 161755.5282

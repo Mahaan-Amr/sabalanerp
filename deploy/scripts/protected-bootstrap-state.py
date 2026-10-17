@@ -23,7 +23,10 @@ def read_state(directory):
                 (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) \
                 or (named.st_dev, named.st_ino) != (before.st_dev, before.st_ino) or after.st_nlink != 1:
             raise RuntimeError('BOOTSTRAP_NATIVE_STATE_UNPROVEN')
-        return json.loads(data)
+        value = json.loads(data)
+        if not isinstance(value, dict):
+            raise RuntimeError('BOOTSTRAP_NATIVE_STATE_UNPROVEN')
+        return value
     finally:
         os.close(fd)
 

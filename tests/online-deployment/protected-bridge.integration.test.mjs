@@ -108,7 +108,7 @@ test('the actual protected bridge requires native ownership and atomically appli
         remoteVerified: true, restoreVerified: true, manifestReadable: true, checksum: 'a'.repeat(64), createdAt: new Date().toISOString() };
       // Private authority-state fixture, never a claim that a real recovery
       // archive or production deployment was verified by these test flags.
-      const files = Object.fromEntries(['protectedBridgeMigrations', 'runtimeControlOwnership', 'runtimeNativeAuthority'].map(name =>
+      const files = Object.fromEntries(['protectedBridgeMigrations', 'runtimeControlOwnership', 'runtimeNativeAuthority', 'onlineRuntimeScope'].map(name =>
         ['dist/services/' + name + '.js', fs.readFileSync(path.join(backendDist, 'services', name + '.js'))]));
       files['dist/lib/prisma.js'] = fs.readFileSync(path.join(backendDist, 'lib/prisma.js'));
       files['dist/scripts/deployment-owned-migrations.js'] = fs.readFileSync(path.join(backendDist, 'scripts/deployment-owned-migrations.js'));

@@ -7,6 +7,7 @@ construction. A normal code rollback never restores an earlier database here.
 """
 import ctypes
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -46,7 +47,9 @@ def read_state(file):
                 (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) ==
                 (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
                 and (before.st_dev, before.st_ino) == (named.st_dev, named.st_ino))
-        return json.loads(raw), raw
+        value = json.loads(raw)
+        require(isinstance(value, dict))
+        return value, raw
     finally:
         os.close(fd)
 
@@ -64,10 +67,11 @@ def write_exclusive(file, raw):
         os.close(fd)
 
 
-def assert_closed(directory):
-    previous, raw = read_state(directory / 'deployment-runtime-native.json')
-    if previous is None:
+def assert_closed(directory, filename='deployment-runtime-native.json'):
+    previous, raw = read_state(directory / filename)
+    if raw is None:
         return None, None
+    require(isinstance(previous, dict))
     require(previous.get('format') == 'sabalan-runtime-native/v1' and previous.get('phase') == 'QUIESCENT'
             and previous.get('nativeReaped') is True and previous.get('databaseQuiet') is True
             and re.fullmatch(r'[a-f0-9]{48}', previous.get('instanceId', ''))
@@ -84,6 +88,63 @@ def assert_closed(directory):
             fields = None
         require(fields is None or fields[19] != birth['startTicks'] or fields[0] == 'Z')
     return previous, raw
+
+
+def assert_no_online_fleet(directory):
+    # Legacy/protected commands require complete host-controller retirement.
+    # Even QUIESCENT metadata is not fresh SQL/image/grant-revocation proof.
+    require(read_state(directory / 'deployment-online-worker-native.json')[1] is None)
+    online = directory / 'online'
+    try:
+        value = online.lstat()
+    except FileNotFoundError:
+        return
+    require(online.resolve(strict=True) == online and stat.S_ISDIR(value.st_mode)
+            and value.st_uid == os.getuid() and not value.st_mode & 0o022)
+    require(set(os.listdir(online)) <= {'native', 'work'})
+    for name in ['native', 'work']:
+        child = online / name
+        try:
+            value = child.lstat()
+        except FileNotFoundError:
+            continue
+        require(child.resolve(strict=True) == child and stat.S_ISDIR(value.st_mode)
+                and value.st_uid == os.getuid() and not value.st_mode & 0o022)
+        with os.scandir(child) as entries:
+            require(next(entries, None) is None)
+
+
+def online_scope():
+    if not any(key in os.environ for key in ['BACKEND_ONLINE_SCOPE_FILE', 'BACKEND_ONLINE_SCOPE_SHA256']):
+        return None
+    helper = Path(__file__).resolve(strict=True).parent / 'online-runtime-scope.py'
+    spec = importlib.util.spec_from_file_location('sabalan_online_scope', helper)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.load_scope(os.environ)
+
+
+def assert_online_locks(loaded):
+    scope = loaded['scope']
+    require(os.environ.get('BACKEND_ONLINE_INTERLOCK_FD') == '11')
+    facts = {}
+    for name, descriptor, access in [('interlock', 11, 'READ'), ('worker', 12, 'WRITE')]:
+        expected = scope[name]
+        if expected is None:
+            require(name == 'worker' and 'BACKEND_ONLINE_WORKER_FD' not in os.environ)
+            continue
+        if name == 'worker':
+            require(os.environ.get('BACKEND_ONLINE_WORKER_FD') == '12')
+        inherited, named = os.fstat(descriptor), os.lstat(expected['file'])
+        require((inherited.st_dev, inherited.st_ino) == (named.st_dev, named.st_ino)
+                and str(named.st_dev) == expected['device'] and str(named.st_ino) == expected['inode']
+                and named.st_uid == expected['ownerUid'] and stat.S_ISREG(named.st_mode)
+                and named.st_nlink == 1 and named.st_size == 0 and not named.st_mode & 0o022)
+        require(any(re.fullmatch(r'lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+' + access + r'\s+\S+\s+[0-9a-f]+:[0-9a-f]+:'
+                                + str(named.st_ino) + r'\s+0\s+EOF\s*', line)
+                    for line in Path('/proc/self/fdinfo/' + str(descriptor)).read_text().splitlines()))
+        facts[name] = dict(**expected, descriptor=descriptor)
+    return facts
 
 
 def assert_control_lock(directory):
@@ -128,16 +189,44 @@ def assert_capture_gate():
 
 def run():
     require(sys.platform == 'linux' and len(sys.argv) > 1)
-    directory = Path(os.environ.get('RECOVERY_COORDINATION_DIR', '/app/recovery-coordination'))
+    coordination = Path(os.environ.get('RECOVERY_COORDINATION_DIR', '/app/recovery-coordination'))
+    loaded = online_scope()
+    directory = Path(loaded['scope']['nativeDirectory']) if loaded else coordination
     named = assert_control_lock(directory)
+    online_locks = assert_online_locks(loaded) if loaded else None
+    if loaded is None:
+        assert_no_online_fleet(coordination)
     if sys.argv[1:] == ['--assert-closed']:
+        require(loaded is None)
         assert_closed(directory)
         return 0
     role = os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone')
-    require(role in ['standalone', 'control'])
+    require(role in (['serving', 'control'] if loaded else ['standalone', 'control']))
     capture_gate = assert_capture_gate()
+    if loaded:
+        require((capture_gate is not None) == (loaded['scope']['purpose'] == 'capture'))
+        if capture_gate:
+            require(all(capture_gate[key] == loaded['scope']['gate'][key] for key in ['file', 'device', 'inode']))
     file = directory / 'deployment-runtime-native.json'
     previous, previous_raw = assert_closed(directory)
+    extra_boundaries = []
+    worker_file = coordination / 'deployment-online-worker-native.json'
+    if loaded:
+        require(previous is None and set(os.listdir(directory)) == {'deployment-runtime-control.lock'})
+        # A dead legacy owner must not be bypassed by starting an online pool.
+        legacy, legacy_raw = assert_closed(coordination)
+        extra_boundaries.append((coordination / 'deployment-runtime-native.json', legacy, legacy_raw))
+        bootstrap_file = coordination / 'deployment-bootstrap-native.json'
+        bootstrap, bootstrap_raw = read_state(bootstrap_file)
+        # New online adoption requires host-controller retirement of an old
+        # bootstrap boundary, rather than trusting metadata it cannot freshly
+        # observe. Presence is distinct from the JSON value stored in a file.
+        require(bootstrap_raw is None)
+        extra_boundaries.append((bootstrap_file, None, bootstrap_raw))
+        if loaded['scope']['worker']:
+            worker_previous, worker_raw = assert_closed(coordination, worker_file.name)
+            extra_boundaries.append((worker_file, worker_previous, worker_raw))
+
     require(ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) == 0)  # PR_SET_CHILD_SUBREAPER
     source = urlsplit(os.environ['DATABASE_URL'])
     query = parse_qsl(source.query, keep_blank_values=True)
@@ -148,7 +237,7 @@ def run():
         values = [value for name, value in query if name == key]
         require(len(values) == 1 and re.fullmatch(r'[1-9][0-9]*', values[0]) and int(values[0]) <= maximum)
     require(len([value for name, value in query if name == 'application_name']) <= 1)
-    instance_id = secrets.token_hex(24)
+    instance_id = hashlib.sha256(loaded['scope']['runtimeId'].encode('ascii')).hexdigest()[:48] if loaded else secrets.token_hex(24)
     namespace = 'sabalan-rt-' + instance_id  # 59 bytes, below PostgreSQL's 63-byte limit.
     child_env = dict(os.environ)
     # Native recovery tools inherit the same namespace even when constructing
@@ -192,11 +281,16 @@ def run():
     # rename before the application pool opens. The current name may briefly
     # be absent; native ownership and observation remain bound to this cluster.
     require(initial['sessions'] == 0 and initial['prepared'] == 0)
-    if previous is not None:
-        require(previous.get('clusterIdentifier') == initial['system'])
+    if loaded:
+        require(initial['system'] == loaded['scope']['database']['systemIdentifier']
+                and requested_database == loaded['scope']['database']['name'] and initial['sourceOid'] is not None)
+        require(online_scope() == loaded)
+    previous_boundaries = ([previous] if previous is not None else []) + [value for _file, value, _raw in extra_boundaries if value is not None]
+    for prior in previous_boundaries:
+        require(prior.get('clusterIdentifier') == initial['system'])
         # The persisted native closure is necessary, never a substitute for a
         # fresh SQL observation before reusing control after a prior runtime.
-        old_sql = sql.replace(namespace, previous['namespace'])
+        old_sql = sql.replace(namespace, prior['namespace'])
         old = subprocess.run(['psql', '-X', '-q', '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-c', old_sql],
                              env=pg_env, stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
         require(old.returncode == 0 and len(old.stdout) < 16384)
@@ -233,6 +327,9 @@ def run():
                     startTicks=Path('/proc/self/stat').read_text().rsplit(') ', 1)[1].split()[19]),
                   lock=dict(device=str(named.st_dev), inode=str(named.st_ino)), previousSha256=previous_sha,
                   commandSha256=hashlib.sha256(encode(sys.argv[1:])).hexdigest())
+    if loaded:
+        record['onlineScope'] = loaded
+        record['onlineLocks'] = online_locks
     active = encode(record)
     if capture_gate is not None:
         record['captureGate'] = capture_gate
@@ -243,6 +340,17 @@ def run():
     # retained native hold, even if a directory sync or later logging fails.
     try:
         require(read_state(file)[1] == previous_raw)
+        for boundary_file, _value, boundary_raw in extra_boundaries:
+            require(read_state(boundary_file)[1] == boundary_raw)
+        worker_temporary = coordination / ('deployment-online-worker-native.' + instance_id + '.tmp')
+        if loaded and loaded['scope']['worker']:
+            write_exclusive(worker_temporary, active)
+            os.replace(worker_temporary, worker_file)
+            coordination_fd = os.open(coordination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(coordination_fd)
+            finally:
+                os.close(coordination_fd)
         os.replace(temporary, file)
         os.fsync(directory_fd)
         active_stat = file.lstat()
@@ -257,7 +365,8 @@ def run():
         child_env.update(BACKEND_NATIVE_POSTGRES_APPLICATION_NAME=namespace,
                          BACKEND_NATIVE_AUTHORITY_FILE=str(file),
                          BACKEND_NATIVE_CLAIM_SHA256=hashlib.sha256(active).hexdigest())
-        child = subprocess.Popen(sys.argv[1:], env=child_env, pass_fds=(9, 10) if capture_gate else (9,))
+        descriptors = [9] + ([10] if capture_gate else []) + ([11] if loaded else []) + ([12] if loaded and loaded['scope']['worker'] else [])
+        child = subprocess.Popen(sys.argv[1:], env=child_env, pass_fds=tuple(descriptors))
         root_pid, root_status, signalled = child.pid, None, set()
         while True:
             try:
@@ -295,7 +404,13 @@ def run():
                 break
             time.sleep(0.05)
         require(read_state(file)[1] == active)
+        final_control = assert_control_lock(directory)
+        require((final_control.st_dev, final_control.st_ino) == (named.st_dev, named.st_ino))
+        for boundary_file, _value, boundary_raw in extra_boundaries:
+            require(read_state(boundary_file)[1] == (active if boundary_file == worker_file and loaded['scope']['worker'] else boundary_raw))
         require(assert_capture_gate() == capture_gate)
+        if loaded:
+            require(online_scope() == loaded and assert_online_locks(loaded) == online_locks)
         current_stat = file.lstat()
         require((current_stat.st_dev, current_stat.st_ino) == (active_stat.st_dev, active_stat.st_ino))
         record.update(phase='QUIESCENT', nativeReaped=True, databaseQuiet=True, nativeStatus=root_status,
@@ -303,6 +418,14 @@ def run():
         write_exclusive(temporary, encode(record))
         os.replace(temporary, file)
         os.fsync(directory_fd)
+        if loaded and loaded['scope']['worker']:
+            write_exclusive(worker_temporary, encode(record))
+            os.replace(worker_temporary, worker_file)
+            coordination_fd = os.open(coordination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(coordination_fd)
+            finally:
+                os.close(coordination_fd)
         return root_status if 0 <= root_status <= 125 else 125
     except BaseException:
         try:

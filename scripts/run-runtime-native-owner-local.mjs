@@ -36,6 +36,8 @@ assert.ok(slot.Mounts.some(mount => mount.Type === 'volume' && mount.RW
 const directory = '/app/online-runtime-acceptance/native-owner-' + randomBytes(16).toString('hex');
 const files = Object.fromEntries([
   ['backend-runtime-owner.py', 'deploy/scripts/backend-runtime-owner.py'],
+  ['online-runtime-owner.py', 'deploy/scripts/online-runtime-owner.py'],
+  ['online-runtime-scope.py', 'deploy/scripts/online-runtime-scope.py'],
   ['with-backend-control-ownership.sh', 'deploy/scripts/with-backend-control-ownership.sh'],
   ['protected-bootstrap-state.py', 'deploy/scripts/protected-bootstrap-state.py'],
   ['runtime-native-owner.worker.cjs', 'tests/online-deployment/runtime-native-owner.worker.cjs'],
@@ -49,12 +51,14 @@ files['streamed-closure.fixture.sh'] = Buffer.from('run_backend() { "$@"; }\n' +
 files['deploy/scripts/backend-runtime-owner.py'] = files['backend-runtime-owner.py'];
 for (const [name, source] of [['lib/prisma.js', 'backend/src/lib/prisma.ts'],
   ['services/runtimeControlOwnership.js', 'backend/src/services/runtimeControlOwnership.ts'],
+  ['services/onlineRuntimeScope.js', 'backend/src/services/onlineRuntimeScope.ts'],
   ['services/runtimeNativeAuthority.js', 'backend/src/services/runtimeNativeAuthority.ts']]) {
   const output = ts.transpileModule(fs.readFileSync(path.join(root, source), 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
   });
   files[name] = Buffer.from(output.outputText);
 }
+files['services/online-runtime-scope.py'] = files['online-runtime-scope.py'];
 const bootstrap = `const fs=require('fs'),path=require('path');const input=JSON.parse(fs.readFileSync(0,'utf8'));
   const root=${JSON.stringify(directory)};fs.mkdirSync(root,{mode:0o700});fs.chmodSync(root,0o700);
   for(const [name,encoded] of Object.entries(input)){if(!/^[A-Za-z0-9_./-]+$/.test(name)||name.includes('..'))throw Error('UNSAFE_SOURCE');

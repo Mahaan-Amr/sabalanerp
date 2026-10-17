@@ -52,6 +52,16 @@ Configure the host, accounts, operations key and pinned known-hosts file from `d
 
 On 2026-10-14 the restricted accounts and trusted operations bundle were provisioned on the existing backup host. Real key authentication, SFTP upload/read-back equality and cleanup of the diagnostic file, denied `/root` access, three forbidden operations commands and successful capacity preflights were observed. Existing Fintech workload was preserved. Production now has restricted transport/operations credentials and a separately verified enabled systemd mount at `/mnt/sabalanerp-independent-recovery`. Two encrypted checkpoints and a retrievable immutable image archive were transferred directly between hosts with full read-back hashes. Independent recovery and application-key custody were provisioned outside the transfer jail. **Both** checkpoints completed full isolated PostgreSQL/SQLite/file/application/business-data restoration on the backup host. After matching both proofs and mount-visible fingerprints, the active runner's destination environment was atomically adopted under its deployment lock. See [independent recovery evidence](../../reports/qa/independent-recovery-20261014.md). Full online production admission remains incomplete. The production application was not updated.
 
+The native online ownership slice now binds private serving/jobs/capture
+incarnations to actual immutable scope mounts, guardian ancestry, per-runtime
+FD9, global shared FD11 and exclusive worker FD12. Capture additionally proves
+the exact issued FD10. A durable global worker fence prevents replacement after
+client and guardian death even if the kernel lock closes. Two actual Prisma
+pools overlapped with one worker, lost-client decimal commits survived, and
+legacy protected commands refused registered fleets. Main startup, release
+admission and public online switching are still disabled. See
+[native online ownership evidence](../../reports/qa/online-native-ownership-20261017.md).
+
 ## Admission work still required
 
 The new coherent **diagnostic** capture also completed independent RSA decryption,

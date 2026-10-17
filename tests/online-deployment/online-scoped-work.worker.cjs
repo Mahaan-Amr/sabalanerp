@@ -24,6 +24,9 @@ else (async () => {
   const work = await createScopedRuntimeWork({ registrySha256: input.scope.manifestSha256, generation: 1,
     canJoin: () => true });
   assert.strictEqual(work.requests, runtimeHttpRequests);
+  const workClaim = JSON.parse(fs.readFileSync(input.scope.boundaryDirectory + '/claim.json'));
+  assert.equal(workClaim.format, 'sabalan-runtime-claim/v2');
+  assert.deepEqual(workClaim.native, { scopeSha256: input.sha256, claimSha256: process.env.BACKEND_NATIVE_CLAIM_SHA256 });
   const [identity] = await prisma.$queryRawUnsafe("SELECT current_setting('application_name') AS name");
   const mode = process.argv[2];
   let server;

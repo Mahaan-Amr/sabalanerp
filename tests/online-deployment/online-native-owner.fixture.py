@@ -231,9 +231,17 @@ def finish(name, child):
     require(child.wait(timeout=15) == 0, 'NATIVE_DRAIN_FAILED')
     value = json.loads((directory / 'deployment-runtime-native.json').read_bytes())
     require(value['phase'] == 'QUIESCENT' and value['nativeReaped'] and value['databaseQuiet'])
+    active = dict(value)
+    for key in ['activeClaimSha256', 'nativeReaped', 'databaseQuiet', 'nativeStatus', 'stoppedBySignal']:
+        active.pop(key)
+    active['phase'] = 'ACTIVE'
+    require(hashlib.sha256(encoded(active)).hexdigest() == value['activeClaimSha256'], 'NATIVE_CLOSURE_ACTIVE_BINDING_MISMATCH')
     if scoped and grants[name]['scope']['purpose'] != 'capture':
         state = json.loads((Path(grants[name]['scope']['boundaryDirectory']) / 'state.json').read_bytes())
         require(state['phase'] == 'QUIESCENT')
+        claim = json.loads((Path(grants[name]['scope']['boundaryDirectory']) / 'claim.json').read_bytes())
+        require(claim['format'] == 'sabalan-runtime-claim/v2'
+                and claim['native'] == dict(scopeSha256=grants[name]['sha256'], claimSha256=value['activeClaimSha256']))
 
 
 

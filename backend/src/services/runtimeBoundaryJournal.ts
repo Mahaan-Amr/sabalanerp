@@ -9,6 +9,7 @@ export type RuntimeBoundaryScope = {
   postgresApplicationName: string; gate: KernelGateIdentity;
 };
 type Birth = { bootId: string; pidNamespace: string; pid: number; startTicks: string };
+export type RuntimeNativeBinding = Readonly<{ scopeSha256: string; claimSha256: string }>;
 type State = { format: 'sabalan-runtime-boundary/v1'; claimSha256: string; epoch: number;
   phase: 'ACTIVE' | 'QUIESCENT'; previousStateSha256: string | null; updatedAt: string };
 const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -85,13 +86,20 @@ export class RuntimeBoundaryJournal {
   private busy = false;
   private readonly scope: RuntimeBoundaryScope;
   private readonly provision: Buffer;
+  private readonly native?: RuntimeNativeBinding;
 
-  constructor(private readonly directory: string, scope: RuntimeBoundaryScope) {
+  constructor(private readonly directory: string, scope: RuntimeBoundaryScope, native?: RuntimeNativeBinding) {
     validateScope(scope);
     if (process.platform !== 'linux' || !path.isAbsolute(directory) || path.resolve(directory) !== directory
       || path.basename(directory) !== scope.runtimeId) fail('RUNTIME_BOUNDARY_NAMESPACE_INVALID');
     this.provision = runtimeBoundaryProvisionBytes(scope);
     this.scope = JSON.parse(JSON.stringify(scope));
+    if (native !== undefined) {
+      if (!exact(native, ['scopeSha256', 'claimSha256']) || typeof native.scopeSha256 !== 'string'
+        || typeof native.claimSha256 !== 'string' || !hashPattern.test(native.scopeSha256)
+        || !hashPattern.test(native.claimSha256)) fail('RUNTIME_BOUNDARY_NATIVE_BINDING_INVALID');
+      this.native = Object.freeze({ ...native });
+    }
   }
 
   private async assertRoot() {
@@ -147,7 +155,8 @@ export class RuntimeBoundaryJournal {
       for (let directory = this.directory;; directory = path.dirname(directory)) {
         await this.syncDirectory(directory); if (directory === path.dirname(directory)) break;
       }
-      const claim = encode({ format: 'sabalan-runtime-claim/v1', scopeSha256: scope.sha256, birth: await currentBirth() });
+      const claim = encode({ format: this.native ? 'sabalan-runtime-claim/v2' : 'sabalan-runtime-claim/v1',
+        scopeSha256: scope.sha256, birth: await currentBirth(), ...(this.native ? { native: this.native } : {}) });
       await this.writeExclusive('claim.json', claim); this.claimSha256 = digest(claim);
       await this.publish({ format: 'sabalan-runtime-boundary/v1', claimSha256: this.claimSha256,
         epoch: 0, phase: 'QUIESCENT', previousStateSha256: null, updatedAt: new Date().toISOString() });
@@ -193,7 +202,14 @@ export class RuntimeBoundaryJournal {
     if (JSON.stringify(entries) !== JSON.stringify(['claim.json', 'scope.json', 'state.json'])) fail('RUNTIME_BOUNDARY_INVENTORY_UNPROVEN');
     const scope = await this.read('scope.json'), claim = await this.read('claim.json'), state = await this.read('state.json');
     if (!scope.bytes.equals(this.provision)) fail('RUNTIME_BOUNDARY_SCOPE_CHANGED');
-    if (!exact(claim.value, ['format', 'scopeSha256', 'birth']) || claim.value.format !== 'sabalan-runtime-claim/v1'
+    const native = claim.value.native as RuntimeNativeBinding | undefined;
+    const versionTwo = claim.value.format === 'sabalan-runtime-claim/v2';
+    if (!exact(claim.value, ['format', 'scopeSha256', 'birth', ...(versionTwo ? ['native'] : [])])
+      || (!versionTwo && claim.value.format !== 'sabalan-runtime-claim/v1')
+      || (versionTwo && (!exact(native, ['scopeSha256', 'claimSha256']) || typeof native!.scopeSha256 !== 'string'
+        || typeof native!.claimSha256 !== 'string' || !hashPattern.test(native!.scopeSha256)
+        || !hashPattern.test(native!.claimSha256)))
+      || (this.native && (!versionTwo || !encode(this.native).equals(encode(native))))
       || claim.value.scopeSha256 !== scope.sha256 || !validBirth(claim.value.birth)) fail('RUNTIME_BOUNDARY_CLAIM_INVALID');
     const value = state.value;
     if (!exact(value, ['format', 'claimSha256', 'epoch', 'phase', 'previousStateSha256', 'updatedAt'])
@@ -204,6 +220,7 @@ export class RuntimeBoundaryJournal {
     return { scope: JSON.parse(JSON.stringify(this.scope)) as RuntimeBoundaryScope, birth: claim.value.birth as Birth,
       epoch: value.epoch as number, phase: value.phase as State['phase'], scopeSha256: scope.sha256,
       claimSha256: claim.sha256, stateSha256: state.sha256,
+      ...(native ? { nativeBinding: { ...native } } : {}),
       namespaceIdentity: { device: this.root!.device.toString(), inode: this.root!.inode.toString() } };
   }
 }

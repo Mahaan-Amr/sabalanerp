@@ -244,3 +244,26 @@ test('an OPEN publication before native EX gate release queues unstarted work wi
   assert.equal((await journal.inspect()).epoch, 1);
   assert.equal(exclusive(file), true);
 });
+
+test('native work claims freeze their exact grant and ACTIVE native claim without changing legacy claims', async () => {
+  const value = fixture();
+  const binding = { scopeSha256: 'a'.repeat(64), claimSha256: 'b'.repeat(64) };
+  const journal = new RuntimeBoundaryJournal(value.directory, value.scope, binding);
+  binding.claimSha256 = 'c'.repeat(64);
+  await journal.initialize();
+  const snapshot = await journal.inspect();
+  assert.deepEqual(snapshot.nativeBinding, { scopeSha256: 'a'.repeat(64), claimSha256: 'b'.repeat(64) });
+  snapshot.nativeBinding.claimSha256 = 'd'.repeat(64);
+  assert.equal((await journal.inspect()).nativeBinding.claimSha256, 'b'.repeat(64));
+  const inspector = new RuntimeBoundaryJournal(value.directory, value.scope);
+  assert.deepEqual((await inspector.inspect()).nativeBinding, { scopeSha256: 'a'.repeat(64), claimSha256: 'b'.repeat(64) });
+  await assert.rejects(new RuntimeBoundaryJournal(value.directory, value.scope, binding).inspect(), /CLAIM_INVALID/);
+  assert.throws(() => new RuntimeBoundaryJournal(value.directory, value.scope,
+    { scopeSha256: ['a'.repeat(64)], claimSha256: 'b'.repeat(64) }), /BINDING_INVALID/);
+  const legacy = fixture(); await legacy.journal.initialize();
+  assert.equal((await legacy.journal.inspect()).nativeBinding, undefined);
+  const claimFile = path.join(value.directory, 'claim.json');
+  const malformed = JSON.parse(fs.readFileSync(claimFile)); malformed.native.scopeSha256 = ['a'.repeat(64)];
+  fs.writeFileSync(claimFile, JSON.stringify(malformed) + '\n');
+  await assert.rejects(inspector.inspect(), /CLAIM_INVALID/);
+});

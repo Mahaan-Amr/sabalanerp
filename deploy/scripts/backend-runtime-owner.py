@@ -428,7 +428,7 @@ def run():
         current_stat = file.lstat()
         require((current_stat.st_dev, current_stat.st_ino) == (active_stat.st_dev, active_stat.st_ino))
         record.update(phase='QUIESCENT', nativeReaped=True, databaseQuiet=True, nativeStatus=root_status,
-                      stoppedBySignal=cancelled)
+                      stoppedBySignal=cancelled, activeClaimSha256=hashlib.sha256(active).hexdigest())
         write_exclusive(temporary, encode(record))
         os.replace(temporary, file)
         os.fsync(directory_fd)

@@ -68,7 +68,7 @@ export async function createScopedRuntimeWork(configuration: WorkInput): Promise
   const journal = new RuntimeBoundaryJournal(input.scope.boundaryDirectory, {
     runtimeId: input.scope.runtimeId, image: input.scope.image, registrySha256,
     generation, postgresApplicationName: runtimeNativePostgresApplicationName(input.scope.runtimeId), gate,
-  });
+  }, { scopeSha256: input.sha256, claimSha256: process.env.BACKEND_NATIVE_CLAIM_SHA256! });
   const kernel = new KernelWriteAdmission(input.scope.gate.file, gate, assertOwner);
   await journal.initialize();
   assertOwner();

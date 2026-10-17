@@ -20,15 +20,15 @@ digest and diff-ID list, and found every referenced layer entry. This relies on
 the pinned full archive digest and its previously established provenance; it is
 not a new independent layer-payload verification. No extraction/import was done.
 
-Docker reported273,830,989 logical image bytes. Actual free space changed from
-3,809,021,952 to4,099,321,856 bytes during removal; concurrent foreign activity
+Docker reported 273,830,989 logical image bytes. Actual free space changed from
+3,809,021,952 to 4,099,321,856 bytes during removal; concurrent foreign activity
 means this difference is not an exact exclusive reclaim measurement. All fresh
 Fintech service identities/start times were unchanged during this operation.
 The created R2 forensic container and its image remain protected. No recovery
 archive, key, container or volume was removed.
 
 A subsequent real production-to-backup preflight passed on both hosts: primary
-35,058,028,544 free bytes; independent backup4,122,820,608 free bytes against the
+35,058,028,544 free bytes; independent backup 4,122,820,608 free bytes against the
 3,758,096,384-byte full-drill budget. These are point-in-time observations.
 Earlier preflight correctly failed while foreign updates temporarily consumed
 space. Every real build/transfer/update still requires a fresh measured check.

@@ -411,8 +411,8 @@ recover_failure() {
   fi
 
   if [ "${DEPLOYMENT_PHASE:-}" = "ROLLBACK_STARTED" ] \
-    && run_backend node dist/scripts/deployment-rollback.js \
-    && run_backend node dist/scripts/deployment-finalize-recovery.js; then
+    && run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-rollback.js \
+    && run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-finalize-recovery.js; then
     switch_to_previous_images
     if start_release_services 300 \
       && DEPLOYMENT_GATE_MODE=ROLLBACK run_backend node dist/scripts/deployment-gates.js; then

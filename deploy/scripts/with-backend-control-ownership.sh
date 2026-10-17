@@ -23,4 +23,6 @@ exec 9>>"$lock"
 flock --nonblock 9 || { echo RUNTIME_CONTROL_OWNERSHIP_UNAVAILABLE >&2; exit 75; }
 export BACKEND_CONTROL_LOCK_FD=9
 export BACKEND_CONTROL_LOCK_FILE="$lock"
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+python3 "$script_dir/protected-bootstrap-state.py"
 exec "$@"

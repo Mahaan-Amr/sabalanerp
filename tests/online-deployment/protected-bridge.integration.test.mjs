@@ -51,6 +51,7 @@ test('the actual protected bridge requires native ownership and atomically appli
     assert.equal(url.searchParams.get('pool_timeout'), '10'); assert.equal(url.searchParams.has('options'), false);
     const operation = randomBytes(8).toString('hex'), databaseName = 'sabalanerp_concurrency_' + operation;
     const restoredDatabaseName = 'sabalanerp_concurrency_' + randomBytes(8).toString('hex');
+    const faultDatabaseName = 'sabalanerp_concurrency_' + randomBytes(8).toString('hex');
     url.pathname = '/postgres'; url.searchParams.set('application_name', 'sabalan-migration-qa-admin-' + operation);
     const administrator = new Client({ connectionString: url.toString() });
     url.pathname = '/' + databaseName;
@@ -60,10 +61,11 @@ test('the actual protected bridge requires native ownership and atomically appli
     const migrator = connection('sabalan-migration-qa-ddl-' + operation);
     const blocker = connection('sabalan-migration-qa-blocker-' + operation);
     
-    let created = false, restoredCreated = false, successful = false, restoredObserver;
+    let created = false, restoredCreated = false, faultCreated = false, successful = false, restoredObserver;
+    let faultObserver, faultBlocker, faultHeld;
     const observations = [];
     const intentPath = path.join(root, 'reports/qa/protected-bridge-' + operation + '-intent.json');
-    fs.writeFileSync(intentPath, JSON.stringify({ format: 'sabalan-private-fixture-intent/v1', databaseName, restoredDatabaseName,
+    fs.writeFileSync(intentPath, JSON.stringify({ format: 'sabalan-private-fixture-intent/v1', databaseName, restoredDatabaseName, faultDatabaseName,
       fixtureSha256: digest(fs.readFileSync(import.meta.filename)), canonical: before }) + '\n', { flag: 'wx' });
     try {
       const inventory = JSON.parse(fs.readFileSync(path.join(root, 'reports/qa/production-migration-inventory-20261017.json'), 'utf8'));
@@ -124,6 +126,9 @@ test('the actual protected bridge requires native ownership and atomically appli
       collect('dist/scripts/deployment-control.js');
       files['prisma/schema.prisma'] = fs.readFileSync(path.join(root, 'backend/prisma/schema.prisma'));
       files['prisma/migrations/migration_lock.toml'] = fs.readFileSync(path.join(directory, 'migration_lock.toml'));
+      for (const name of ['protected-bootstrap-owner.py', 'protected-bootstrap-state.py']) {
+        files['scripts/' + name] = fs.readFileSync(path.join(root, 'deploy/scripts', name));
+      }
       files['worker.cjs'] = fs.readFileSync(path.join(root, 'tests/online-deployment/protected-bridge.worker.cjs'));
       files['cli-worker.cjs'] = fs.readFileSync(path.join(root, 'tests/online-deployment/protected-bridge-cli.worker.cjs'));
       for (const row of pending) files[row.name + '.sql'] = row.sql;
@@ -160,6 +165,91 @@ test('the actual protected bridge requires native ownership and atomically appli
         const messages = (value.stdout + '\n' + value.stderr).split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line));
         return { status: value.status, messages };
       };
+      // Kill the REAL intermediate Prisma CLI during blocked native DDL. A
+      // second real transaction in that exact namespace deliberately outlives
+      // the reaped engine, proving SQL completion is a separate boundary.
+      await administrator.query(`CREATE DATABASE "${faultDatabaseName}"`); faultCreated = true;
+      const faultUrl = new URL(databaseUrl); faultUrl.pathname = '/' + faultDatabaseName;
+      faultObserver = new Client({ connectionString: faultUrl.toString() });
+      faultBlocker = new Client({ connectionString: faultUrl.toString() });
+      await faultObserver.connect(); await faultBlocker.connect();
+      await faultObserver.query(`CREATE FUNCTION public.qa_block_bootstrap() RETURNS event_trigger AS $$ BEGIN
+        PERFORM pg_advisory_xact_lock(741936499); END; $$ LANGUAGE plpgsql`);
+      await faultObserver.query("CREATE EVENT TRIGGER qa_block_bootstrap ON ddl_command_end WHEN TAG IN ('CREATE TABLE') EXECUTE FUNCTION public.qa_block_bootstrap()");
+      await faultBlocker.query('SELECT pg_advisory_lock(741936499)');
+      const faultDirectory = '/app/online-runtime-acceptance/protected-bridge-' + randomBytes(16).toString('hex');
+      const faultOwner = { deploymentId: 'fault-' + operation, releaseId: 'fault-release-' + operation, leaseToken: randomBytes(32).toString('hex') };
+      verify(); execFileSync('docker', ['exec', '-i', slot.Id, 'node', '-e', provision], { input: JSON.stringify({ root: faultDirectory,
+        files: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, bytes.toString('base64')])),
+        checkpoint: { ...checkpoint, deploymentId: faultOwner.deploymentId, releaseId: faultOwner.releaseId },
+        configuration: { root: faultDirectory, databaseName: faultDatabaseName, owner: faultOwner, migrations: pending.map(row => row.name) } }) });
+      verify();
+      const faultProcess = spawn('docker', ['exec', slot.Id, 'sh', '-c',
+        'set -eu; umask 077; export RECOVERY_COORDINATION_DIR="$1/coordination"; export BACKEND_RUNTIME_ROLE=control; export BACKEND_CONTROL_LOCK_FILE="$1/coordination/deployment-runtime-control.lock"; export BACKEND_CONTROL_LOCK_FD=9; exec 9>>"$BACKEND_CONTROL_LOCK_FILE"; flock --nonblock 9; exec node "$1/cli-worker.cjs" "$1/configuration.json" bootstrap-migrate-baseline',
+        'protected-bootstrap-fault', faultDirectory], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let faultOutput = '';
+      for (const stream of [faultProcess.stdout, faultProcess.stderr]) stream.on('data', bytes => {
+        assert.ok(Buffer.byteLength(faultOutput) + bytes.length < 1024 * 1024); faultOutput += bytes.toString();
+      });
+      const faultClosed = new Promise((resolve, reject) => {
+        faultProcess.once('error', reject); faultProcess.once('close', (code, signal) => resolve({ code, signal }));
+      });
+      const waitFor = async predicate => {
+        const deadline = performance.now() + 30000;
+        while (!await predicate()) {
+          assert.ok(performance.now() < deadline, 'native fault boundary must become observable');
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      };
+      let blockedNative;
+      await waitFor(async () => {
+        [blockedNative] = (await faultObserver.query(`SELECT pid,application_name AS namespace,left(query,256) AS query
+          FROM pg_stat_activity WHERE datname=$1 AND application_name LIKE 'sabalan-bootstrap-%'
+            AND wait_event_type='Lock' AND wait_event='advisory'`, [faultDatabaseName])).rows;
+        return Boolean(blockedNative);
+      });
+      faultUrl.searchParams.set('application_name', blockedNative.namespace);
+      faultHeld = new Client({ connectionString: faultUrl.toString() }); await faultHeld.connect();
+      await faultHeld.query('BEGIN'); await faultHeld.query('SELECT 1');
+      verify();
+      const killed = JSON.parse(execFileSync('docker', ['exec', slot.Id, 'python3', '-c',
+        `import json,os,pathlib,signal,sys
+root=pathlib.Path(sys.argv[1]); state=json.loads((root/'coordination/deployment-bootstrap-native.json').read_text())
+assert state['phase']=='ACTIVE' and state['deploymentId']==sys.argv[2]
+pid=state['pid']; assert pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()==state['bootId']
+assert os.readlink('/proc/'+str(pid)+'/ns/pid')==state['pidNamespace']
+assert pathlib.Path('/proc/'+str(pid)+'/stat').read_text().split(') ',1)[1].split()[19]==state['startTicks']
+children=pathlib.Path('/proc/'+str(pid)+'/task/'+str(pid)+'/children').read_text().split(); assert len(children)==1
+child=int(children[0]); command=pathlib.Path('/proc/'+str(child)+'/cmdline').read_bytes().split(b'\\0')
+assert any(value.endswith(b'/prisma/build/index.js') for value in command)
+os.kill(child,signal.SIGKILL); print(json.dumps({'guardianPid':pid,'killedIntermediateCliPid':child,'namespace':state['namespace']}))`,
+        faultDirectory, faultOwner.deploymentId], { encoding: 'utf8' }));
+      assert.equal(killed.namespace, blockedNative.namespace);
+      await waitFor(async () => {
+        verify();
+        return execFileSync('docker', ['exec', slot.Id, 'python3', '-c',
+          "import pathlib,sys; print(pathlib.Path('/proc/'+sys.argv[1]+'/task/'+sys.argv[1]+'/children').read_text().strip())", String(killed.guardianPid)],
+        { encoding: 'utf8' }).trim() === '';
+      });
+      verify();
+      const competing = spawnSync('docker', ['exec', slot.Id, 'flock', '--nonblock', faultDirectory + '/coordination/deployment-runtime-control.lock', 'true'], { encoding: 'utf8' });
+      assert.equal(competing.status, 1); assert.equal(competing.signal, null); assert.equal(competing.error, undefined);
+      verify();
+      const stillActive = JSON.parse(execFileSync('docker', ['exec', slot.Id, 'cat', faultDirectory + '/coordination/deployment-bootstrap-native.json'], { encoding: 'utf8' }));
+      assert.equal(stillActive.phase, 'ACTIVE'); assert.equal(faultProcess.exitCode, null);
+      await faultHeld.query('ROLLBACK'); await faultHeld.end(); faultHeld = undefined;
+      await faultBlocker.query('SELECT pg_advisory_unlock(741936499)');
+      const terminal = await faultClosed; assert.equal(terminal.code, 1); assert.equal(terminal.signal, null);
+      assert.ok(faultOutput.includes('PROTECTED_BOOTSTRAP_NATIVE_FAILED'));
+      verify();
+      const completed = JSON.parse(execFileSync('docker', ['exec', slot.Id, 'cat', faultDirectory + '/coordination/deployment-bootstrap-native.json'], { encoding: 'utf8' }));
+      assert.equal(completed.phase, 'QUIESCENT'); assert.equal(completed.nativeReaped, true);
+      assert.equal(completed.databaseQuiet, true); assert.equal(completed.failed, true);
+      assert.equal(completed.nativeStatus, -9);
+      observations.push({ intermediateNativeCliKilledDuringActualDdl: { ...killed, blockedNative },
+        guardianReapedDescendantsBeforeSqlCompletion: true, independentTaggedTransactionRetainedOwnership: true,
+        exclusiveTakeoverRefusedUntilSqlQuiet: true, failedNativeTerminalCompletion: completed,
+        faultPrivateEvidenceRetained: faultDirectory, faultDatabaseName });
       const bootstrapped = invokeCli('bootstrap-migrate-baseline'); assert.equal(bootstrapped.status, 0);
       assert.deepEqual(await ledger(), baseline); await absent(pending[0]); await absent(pending[1]);
       const adopted = invokeCli('bootstrap-adopt'); assert.equal(adopted.status, 0);
@@ -315,12 +405,14 @@ test('the actual protected bridge requires native ownership and atomically appli
         restoredOwnedReceiptsValidatedWithoutReapplying: 2, restoredDatabaseName });
       assert.deepEqual(identities(), before); successful = true;
     } finally {
-      await Promise.allSettled([observer.end(), migrator.end(), blocker.end(), restoredObserver?.end()]);
+      await Promise.allSettled([observer.end(), migrator.end(), blocker.end(), restoredObserver?.end(),
+        faultHeld?.end(), faultObserver?.end(), faultBlocker?.end()]);
       try {
         // Failed fixtures retain their database for inspection. No forced drop,
         // SQL termination or synthetic ledger repair can convert failure to PASS.
         if (created && successful) { verify(); await administrator.query(`DROP DATABASE "${databaseName}"`); }
         if (restoredCreated && successful) { verify(); await administrator.query(`DROP DATABASE "${restoredDatabaseName}"`); }
+        if (faultCreated && successful) { verify(); await administrator.query(`DROP DATABASE "${faultDatabaseName}"`); }
       } finally { await administrator.end(); }
     }
     const report = { ownedProtectedBridgePassed: true, baselineAppliedCount: 425, databaseName, temporaryDatabaseDroppedWithoutForce: true,

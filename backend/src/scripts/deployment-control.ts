@@ -18,6 +18,7 @@ import {
 } from '../services/deploymentMaintenance';
 import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 import { assertProtectedBootstrapBoundary, compileProtectedBootstrapSource, runProtectedBootstrapBaseline } from '../services/protectedBootstrapMigrations';
+import { assertBootstrapNativeCompletion } from '../services/protectedBridgeMigrations';
 
 const REPORT_DIR = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
 const SESSION_PATH = path.join(REPORT_DIR, 'active-deployment-session.json');
@@ -177,6 +178,11 @@ const main = async () => {
       await journal(session, 'historical-baseline-applied-before-owned-bridge');
       console.log(JSON.stringify({ ok: true }));
       return;
+    }
+    const completion = assertBootstrapNativeCompletion(RECOVERY_COORDINATION_DIR);
+    if (!completion || completion.deploymentId !== session.deploymentId || completion.releaseId !== session.releaseId
+      || completion.nativeStatus !== 0 || completion.failed !== false) {
+      throw Object.assign(new Error('Bootstrap native completion requires inspection.'), { code: 'BOOTSTRAP_NATIVE_COMPLETION_UNPROVEN' });
     }
     const baseline = compileProtectedBootstrapSource(path.resolve(__dirname, '../../prisma/migrations'));
     const history = await prisma.$queryRaw<Array<{ name: string; checksum: string; finished: Date | null }>>`

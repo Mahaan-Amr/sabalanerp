@@ -61,11 +61,12 @@ export async function runProtectedBootstrapBaseline(owner: Owner) {
     }
     assertProtectedBootstrapBoundary(owner);
     await new Promise<void>((resolve, reject) => {
-      // The real native child inherits the owned open file description; parent
-      // death cannot silently release FD9 while Prisma still runs.
-      const child = spawn(process.execPath, [path.join(path.dirname(require.resolve('prisma/package.json')), 'build/index.js'),
-        'migrate', 'deploy', '--schema', path.join(staging, 'schema.prisma')],
-      { stdio: ['ignore', 'inherit', 'inherit', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', 9] });
+      // A native subreaper retains FD9 through descendant death AND fresh SQL
+      // completion. Its durable ACTIVE record also fences container loss.
+      const child = spawn('python3', [path.resolve(__dirname, '../../scripts/protected-bootstrap-owner.py'), process.execPath,
+        path.join(path.dirname(require.resolve('prisma/package.json')), 'build/index.js'), path.join(staging, 'schema.prisma')],
+      { env: { ...process.env, SABALAN_BOOTSTRAP_OWNER_JSON: JSON.stringify(owner) },
+        stdio: ['ignore', 'inherit', 'inherit', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', 'ignore', 9] });
       child.once('error', reject);
       child.once('close', (code, signal) => code === 0 && signal === null ? resolve()
         : reject(Object.assign(new Error('PROTECTED_BOOTSTRAP_NATIVE_FAILED'), { code: 'PROTECTED_BOOTSTRAP_NATIVE_FAILED' })));

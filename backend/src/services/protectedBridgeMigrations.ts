@@ -23,6 +23,25 @@ const canonical = (value: any): any => Array.isArray(value) ? value.map(canonica
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
 type Owner = { deploymentId: string; leaseToken: string; releaseId: string };
 
+export function assertBootstrapNativeCompletion(directory: string) {
+  const file = path.join(directory, 'deployment-bootstrap-native.json');
+  let fd: number;
+  try { fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); }
+  catch (error: any) { if (error?.code === 'ENOENT') return null; throw error; }
+  try {
+    const before = fs.fstatSync(fd, { bigint: true });
+    if (!before.isFile() || before.nlink !== 1n || before.uid !== BigInt(process.getuid!()) || (before.mode & 0o022n) !== 0n
+      || before.size < 1n || before.size > 16384n || fs.realpathSync(file) !== file) failure('BOOTSTRAP_NATIVE_COMPLETION_UNPROVEN');
+    const state = JSON.parse(fs.readFileSync(fd, 'utf8'));
+    const after = fs.fstatSync(fd, { bigint: true }), named = fs.lstatSync(file, { bigint: true });
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs
+      || before.ctimeNs !== after.ctimeNs || named.dev !== before.dev || named.ino !== before.ino || after.nlink !== 1n
+      || state.format !== 'sabalan-bootstrap-native/v1' || state.phase !== 'QUIESCENT'
+      || state.nativeReaped !== true || state.databaseQuiet !== true) failure('BOOTSTRAP_NATIVE_COMPLETION_UNPROVEN');
+    return state;
+  } finally { fs.closeSync(fd); }
+}
+
 /** Only these two byte-exact, reviewed additive bootstrap files. The splitter
  * is deliberately NOT an arbitrary SQL parser: the complete SHA is checked
  * first, and both exact statement counts are frozen. Dollar-quoted function
@@ -45,6 +64,7 @@ export function protectedBoundary(owner: Owner) {
     typeof value !== 'string' || !value || value.length > 256)) failure('PROTECTED_BRIDGE_OWNER_INVALID');
   return () => {
     assertRuntimeControlOwnership(environment);
+    assertBootstrapNativeCompletion(directory);
     const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     try {
       const before = fs.fstatSync(descriptor, { bigint: true });

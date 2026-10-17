@@ -106,6 +106,7 @@ COPY --from=builder /app/dist-cutover ./dist-cutover
 COPY backend/public ./public
 COPY backend/scripts ./scripts
 COPY deploy/scripts/with-backend-control-ownership.sh ./scripts/with-backend-control-ownership.sh
+COPY deploy/scripts/protected-bootstrap-owner.py deploy/scripts/protected-bootstrap-state.py ./scripts/
 COPY docs/qa/partner-sales/release/release-package.mjs ./partner-release-verifier/release-package.mjs
 COPY backend/src/documents/dispatch/__fixtures__/baselines ./dispatch-document-baselines
 COPY backend/excel ./excel

@@ -28,6 +28,7 @@ test('owned Inquiry migration and restart admission on actual existing-project P
       files['inquiry-baseline.json']=files['services/inquiryBaseline.json'];
       files['verify-inquiry-database.cjs']=fs.readFileSync(path.join(root,'deploy/scripts/verify-inquiry-database.cjs'),'utf8');
       files['with-backend-control-ownership.sh']=fs.readFileSync(path.join(root,'deploy/scripts/with-backend-control-ownership.sh'),'utf8');
+      files['protected-bootstrap-state.py']=fs.readFileSync(path.join(root,'deploy/scripts/protected-bootstrap-state.py'),'utf8');
       files['inquiry-migration.fixture.cjs']=fs.readFileSync(path.join(root,'tests/online-deployment/inquiry-migration.fixture.cjs'),'utf8');
       const url=new URL(temporary.databaseUrl);url.hostname='postgres';url.port='5432';
       url.searchParams.set('connection_limit','2');url.searchParams.set('pool_timeout','5');

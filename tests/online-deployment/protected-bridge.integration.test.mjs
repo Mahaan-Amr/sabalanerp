@@ -51,6 +51,7 @@ test('the actual protected bridge requires native ownership and atomically appli
     assert.equal(url.pathname, '/sabalanerp'); assert.equal(url.searchParams.get('connection_limit'), '2');
     assert.equal(url.searchParams.get('pool_timeout'), '10'); assert.equal(url.searchParams.has('options'), false);
     const operation = randomBytes(8).toString('hex'), databaseName = 'sabalanerp_concurrency_' + operation;
+    const restoredDatabaseName = 'sabalanerp_concurrency_' + randomBytes(8).toString('hex');
     url.pathname = '/postgres'; url.searchParams.set('application_name', 'sabalan-migration-qa-admin-' + operation);
     const administrator = new Client({ connectionString: url.toString() });
     url.pathname = '/' + databaseName;
@@ -61,10 +62,10 @@ test('the actual protected bridge requires native ownership and atomically appli
     const blocker = connection('sabalan-migration-qa-blocker-' + operation);
     
     const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'sabalan-migration-baseline-'));
-    let created = false, successful = false;
+    let created = false, restoredCreated = false, successful = false, restoredObserver;
     const observations = [];
     const intentPath = path.join(root, 'reports/qa/protected-bridge-' + operation + '-intent.json');
-    fs.writeFileSync(intentPath, JSON.stringify({ format: 'sabalan-private-fixture-intent/v1', databaseName,
+    fs.writeFileSync(intentPath, JSON.stringify({ format: 'sabalan-private-fixture-intent/v1', databaseName, restoredDatabaseName,
       fixtureSha256: digest(fs.readFileSync(import.meta.filename)), canonical: before }) + '\n', { flag: 'wx' });
     try {
       const inventory = JSON.parse(fs.readFileSync(path.join(root, 'reports/qa/production-migration-inventory-20261017.json'), 'utf8'));
@@ -129,11 +130,12 @@ test('the actual protected bridge requires native ownership and atomically appli
       verify(); execFileSync('docker', ['exec', '-i', slot.Id, 'node', '-e', provision], { input: JSON.stringify({ root: privateDirectory,
         files: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, bytes.toString('base64')])),
         configuration: { root: privateDirectory, databaseName, owner, migrations: pending.map(row => row.name) } }) });
-      const invoke = command => {
+      const invoke = (command, configurationFile = 'configuration.json') => {
+        assert.ok(['configuration.json', 'configuration-restored.json'].includes(configurationFile));
         verify();
         const output = execFileSync('docker', ['exec', slot.Id, 'sh', '-c',
-          'set -eu; umask 077; export RECOVERY_COORDINATION_DIR="$1/coordination"; export BACKEND_RUNTIME_ROLE=control; export BACKEND_CONTROL_LOCK_FILE="$1/coordination/deployment-runtime-control.lock"; export BACKEND_CONTROL_LOCK_FD=9; exec 9>>"$BACKEND_CONTROL_LOCK_FILE"; flock --nonblock 9; exec node "$1/worker.cjs" "$1/configuration.json" "$2"',
-          'protected-bridge-fixture', privateDirectory, JSON.stringify(command)], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
+          'set -eu; umask 077; export RECOVERY_COORDINATION_DIR="$1/coordination"; export BACKEND_RUNTIME_ROLE=control; export BACKEND_CONTROL_LOCK_FILE="$1/coordination/deployment-runtime-control.lock"; export BACKEND_CONTROL_LOCK_FD=9; exec 9>>"$BACKEND_CONTROL_LOCK_FILE"; flock --nonblock 9; exec node "$1/worker.cjs" "$1/$3" "$2"',
+          'protected-bridge-fixture', privateDirectory, JSON.stringify(command), configurationFile], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
         return JSON.parse(output.trim());
       };
       const fails = (command, code) => { const value = invoke(command); assert.equal(value.ok, false); assert.equal(value.code, code); return value; };
@@ -199,13 +201,40 @@ test('the actual protected bridge requires native ownership and atomically appli
       const hr = await child([path.join(root, 'backend/node_modules/tsx/dist/cli.mjs'), '--test', 'src/services/__tests__/hrVehicleOperations.integration.test.ts'], { cwd: path.join(root, 'backend'), env: environment });
       assert.match(hr, /# fail 0/); assert.match(hr, /# pass 9/);
       observations.push({ nativePrismaRecognizesBoth: true, atomicHistoryAndIdempotentRetry: true, hrVehicleOperations: { passed: 9, failed: 0 } });
+      // Restore into a second isolated DATABASE on the SAME existing service.
+      // Native pg_dump/psql must recreate RI names; there is no second daemon.
+      const triggerNames = client => client.query(`SELECT t.tgname AS name FROM pg_trigger t JOIN pg_constraint k ON k.oid=t.tgconstraint
+        WHERE k.conrelid='public.driver_vehicle_assignment_plans'::regclass AND k.contype='f' ORDER BY t.tgname`);
+      const originalNames = (await triggerNames(observer)).rows;
+      await administrator.query(`CREATE DATABASE "${restoredDatabaseName}"`); restoredCreated = true;
+      verify();
+      execFileSync('docker', ['exec', before[3].id, 'sh', '-c',
+        'set -eu; set -o pipefail; pg_dump --no-owner --no-privileges --username "$POSTGRES_USER" --dbname "$1" | psql -X -q -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$2"',
+        'private-bridge-logical-restore', databaseName, restoredDatabaseName], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
+      const restoreUrl = new URL(databaseUrl); restoreUrl.pathname = '/' + restoredDatabaseName;
+      restoredObserver = new Client({ connectionString: restoreUrl.toString() }); await restoredObserver.connect();
+      const restoredNames = (await triggerNames(restoredObserver)).rows;
+      assert.equal(restoredNames.length, originalNames.length); assert.notDeepEqual(restoredNames, originalNames);
+      verify();
+      execFileSync('docker', ['exec', slot.Id, 'node', '-e',
+        "const fs=require('fs'),path=require('path'),root=process.argv[1],name=process.argv[2];const value=JSON.parse(fs.readFileSync(path.join(root,'configuration.json'),'utf8'));value.databaseName=name;fs.writeFileSync(path.join(root,'configuration-restored.json'),JSON.stringify(value),{flag:'wx',mode:0o400});",
+        privateDirectory, restoredDatabaseName]);
+      for (const index of [0, 1]) {
+        const replay = invoke({ index }, 'configuration-restored.json'); assert.equal(replay.ok, true); assert.equal(replay.value.applied, false);
+      }
+      assert.deepEqual((await restoredObserver.query('SELECT migration_name AS name,checksum FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name')).rows, final);
+      assert.equal((await restoredObserver.query('SELECT count(*)::integer AS count FROM pg_stat_activity WHERE datname=$1 AND application_name=$2',
+        [restoredDatabaseName, 'sabalan-bridge-' + restoredDatabaseName.slice(-16)])).rows[0].count, 0);
+      observations.push({ nativeLogicalRestoreValidated: true, internalTriggerNamesActuallyChanged: true,
+        restoredOwnedReceiptsValidatedWithoutReapplying: 2, restoredDatabaseName });
       assert.deepEqual(identities(), before); successful = true;
     } finally {
-      await Promise.allSettled([observer.end(), migrator.end(), blocker.end()]);
+      await Promise.allSettled([observer.end(), migrator.end(), blocker.end(), restoredObserver?.end()]);
       try {
         // Failed fixtures retain their database for inspection. No forced drop,
         // SQL termination or synthetic ledger repair can convert failure to PASS.
         if (created && successful) { verify(); await administrator.query(`DROP DATABASE "${databaseName}"`); }
+        if (restoredCreated && successful) { verify(); await administrator.query(`DROP DATABASE "${restoredDatabaseName}"`); }
       } finally { await administrator.end(); }
       // Delete only the exact locally-created schema-source staging directory.
       assert.equal(path.dirname(staging), os.tmpdir()); assert.ok(path.basename(staging).startsWith('sabalan-migration-baseline-'));

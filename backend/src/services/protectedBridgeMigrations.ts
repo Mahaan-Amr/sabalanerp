@@ -90,11 +90,17 @@ async function catalog(tx: Prisma.TransactionClient, input: ReturnType<typeof co
         'ready',i.indisready) ORDER BY pg_get_indexdef(i.indexrelid)) FROM pg_index i WHERE i.indrelid=c.oid),
       'triggers',(SELECT jsonb_agg(jsonb_build_object('name',t.tgname,'definition',pg_get_triggerdef(t.oid),'enabled',t.tgenabled)
         ORDER BY t.tgname) FROM pg_trigger t WHERE t.tgrelid=c.oid AND NOT t.tgisinternal),
-      'foreignKeyEnforcement',(SELECT jsonb_agg(jsonb_build_object('name',t.tgname,'table',r.relname,'schema',s.nspname,
-        'definition',pg_get_triggerdef(t.oid),'enabled',t.tgenabled,'deferrable',t.tgdeferrable,'initiallyDeferred',t.tginitdeferred)
-        ORDER BY s.nspname,r.relname,t.tgname) FROM pg_constraint k JOIN pg_trigger t ON t.tgconstraint=k.oid
-        JOIN pg_class r ON r.oid=t.tgrelid JOIN pg_namespace s ON s.oid=r.relnamespace
-        WHERE k.conrelid=c.oid AND k.contype='f'),
+      -- Internal RI trigger names embed OIDs and change on logical restore.
+      -- Preserve each enforcement trigger's complete stable semantics instead.
+      'foreignKeyEnforcement',(SELECT jsonb_agg(e.details ORDER BY e.details::text) FROM (
+        SELECT jsonb_build_object('constraint',k.conname,'table',r.relname,'schema',s.nspname,
+          'function',p.proname,'functionSchema',pn.nspname,'functionArguments',pg_get_function_identity_arguments(p.oid),
+          'type',t.tgtype,'arguments',encode(t.tgargs,'hex'),'columns',t.tgattr::text,'when',pg_get_expr(t.tgqual,t.tgrelid),
+          'internal',t.tgisinternal,'enabled',t.tgenabled,'deferrable',t.tgdeferrable,'initiallyDeferred',t.tginitdeferred,
+          'oldTransition',t.tgoldtable,'newTransition',t.tgnewtable) AS details
+        FROM pg_constraint k JOIN pg_trigger t ON t.tgconstraint=k.oid JOIN pg_class r ON r.oid=t.tgrelid
+          JOIN pg_namespace s ON s.oid=r.relnamespace JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace pn ON pn.oid=p.pronamespace
+        WHERE k.conrelid=c.oid AND k.contype='f') e),
       'policies',(SELECT jsonb_agg(p.polname ORDER BY p.polname) FROM pg_policy p WHERE p.polrelid=c.oid),
       'inheritance',(SELECT count(*) FROM pg_inherits i WHERE i.inhrelid=c.oid OR i.inhparent=c.oid)) AS details
     FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'

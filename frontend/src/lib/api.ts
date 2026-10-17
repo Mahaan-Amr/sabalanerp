@@ -13,8 +13,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'pr
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
 export const API_ORIGIN = API_BASE.endsWith('/api') ? API_BASE.slice(0, -4) : API_BASE;
 
-const isPublicVerificationPath = (pathname: string) => (
-  pathname === '/apply'
+const isPublicBrowserPath = (pathname: string) => (
+  pathname === '/'
+  || pathname === '/about'
+  || pathname === '/contact'
+  || pathname === '/apply'
   || pathname.startsWith('/apply/')
   || pathname === '/contracts/confirm'
   || pathname.startsWith('/contracts/confirm/')
@@ -215,7 +218,7 @@ api.interceptors.response.use(
       if (
         typeof window !== 'undefined'
         && !window.location.pathname.startsWith('/login')
-        && !isPublicVerificationPath(window.location.pathname)
+        && !isPublicBrowserPath(window.location.pathname)
         && !unauthorizedRedirectStarted
         && !browserSessionContinuation.expectedUserId()
         && !error.config?.headers?.['x-sabalan-expected-user']

@@ -9,6 +9,7 @@ test('actual HTTP interceptors bind private clients, preserve the tab, and rejec
   const previousBuild = process.env.NEXT_PUBLIC_BROWSER_BUILD_ID;
   const previousFetch = globalThis.fetch;
   let owner = 'owner_a', session = 'session_a', businessWrites = 0, redirects = 0, probes = 0;
+  let anonymousBootstrap = false;
   let finishRead!: () => void, failLate!: () => void, failLogin!: () => void;
   const storage = new Map<string, string>();
   const browser = { location: { pathname: '/dashboard/test', origin: 'http://localhost:3101', replace() { redirects++; } },
@@ -34,6 +35,7 @@ test('actual HTTP interceptors bind private clients, preserve the tab, and rejec
     }
     if (config.url === '/auth/me') {
       probes++;
+      if (anonymousBootstrap) throw deny(config);
       const expected = config.headers.get('x-sabalan-expected-user');
       if (expected && expected !== owner) throw deny(config);
       return reply(config, { success: true, data: { id: owner }, session: { id: session } });
@@ -57,6 +59,14 @@ test('actual HTTP interceptors bind private clients, preserve the tab, and rejec
   try {
     const { default: api, authAPI, publicContractsAPI, browserSessionContinuation: scope } = await import('./api');
     const { hiringAPI, applicantHiringAPI } = await import('./hiringApi');
+    anonymousBootstrap = true;
+    for (const pathname of ['/', '/about', '/contact']) {
+      browser.location.pathname = pathname; await assert.rejects(authAPI.getMe());
+      assert.equal(redirects, 0, 'An anonymous public document must not be replaced by the login page');
+    }
+    browser.location.pathname = '/dashboard/test'; await assert.rejects(authAPI.getMe());
+    assert.equal(redirects, 1, 'An anonymous private route still requires login');
+    anonymousBootstrap = false; redirects = 0;
     await applicantHiringAPI.get();
     await assert.rejects(api.post('/qa-business', {unsaved: 'preserved'}, {headers: {'x-deployment-id': 'erp_other_request_identity'}}),
       {code: 'BROWSER_BUILD_REQUEST_IDENTITY_CONFLICT'});

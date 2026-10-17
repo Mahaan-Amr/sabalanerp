@@ -1,0 +1,15 @@
+# Native authority acceptance within the existing local Compose project.
+# The passive controller slot can issue fixtures; the other passive slot gets
+# only a read-only grant mount, with no writable alias to its source volume.
+name: sabalanerp-local
+services:
+  backend-candidate:
+    volumes:
+      - online_runtime_authority:/app/runtime-authority
+      - online_runtime_authority:/run/sabalan-online:ro
+  backend-retained:
+    volumes:
+      - online_runtime_authority:/run/sabalan-online:ro
+
+volumes:
+  online_runtime_authority:

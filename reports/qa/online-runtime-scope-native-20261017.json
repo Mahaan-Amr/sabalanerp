@@ -1,0 +1,33 @@
+{
+  "workingRoot": "/app/online-runtime-acceptance/online-authority-63a136c8d641451789bd868894effc64",
+  "proofs": [
+    {
+      "pass_": true,
+      "mode": "writable-alias",
+      "grants": [],
+      "moduleSha256": "896f2e56130f1e5c91e0172d162acd2364dfae2e8d97b525c10bfcdd1024b4cb"
+    },
+    {
+      "pass_": true,
+      "mode": "readonly",
+      "grants": [
+        {
+          "purpose": "http",
+          "mountId": "1027",
+          "runtimeId": "4a6d2539696ddff6066380d6106ea7f13c260964aea5323122ece4c7b3162c85"
+        },
+        {
+          "purpose": "jobs",
+          "mountId": "1027",
+          "runtimeId": "6fafda7463c08de1e269e7dee1fbdf613000ce54b1a28f74ed285e7dcb28c7cb"
+        },
+        {
+          "purpose": "capture",
+          "mountId": "1027",
+          "runtimeId": "3897315907079d8427f54e335b578bbd78772d92ff3c42e93d3ff4df2ee2e567"
+        }
+      ],
+      "moduleSha256": "896f2e56130f1e5c91e0172d162acd2364dfae2e8d97b525c10bfcdd1024b4cb"
+    }
+  ]
+}

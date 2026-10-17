@@ -1,0 +1,85 @@
+{
+  "ownedProtectedBridgePassed": true,
+  "baselineAppliedCount": 425,
+  "databaseName": "sabalanerp_concurrency_1ee7ebeb57c86a57",
+  "temporaryDatabaseDroppedWithoutForce": true,
+  "pending": [
+    {
+      "name": "20261014120000_hr_vehicle_assignment_plans",
+      "sha256": "c0dea142d206b5538fd81c98961aaf86926c999cdd8fb722e0aab3d72ab23289"
+    },
+    {
+      "name": "20261014140000_online_deployment_control",
+      "sha256": "872f0f0858473546cee56b836fa64c95d668997304ae462ac2c18428e69f4cb2"
+    }
+  ],
+  "observations": [
+    {
+      "name": "20261014120000_hr_vehicle_assignment_plans",
+      "blockedParent": "internal_driver_profiles",
+      "nativeProcessAndBoundedFailureMs": 1405.7508000000016
+    },
+    {
+      "name": "20261014140000_online_deployment_control",
+      "blockedParent": "deployment_operations",
+      "nativeProcessAndBoundedFailureMs": 1469.7304999999978
+    },
+    {
+      "compiledSourceSha256": {
+        "protectedBridgeMigrations.js": "3315487f688f587d1bcd8ef577a9d9953c1483d4068119909f436786585e8e15",
+        "runtimeControlOwnership.js": "5255b85000ad139f15dc9f3921ad76f8c89ac6f7a62d37d07e3c17555a5313a9",
+        "worker.cjs": "b41c8cea31fd1d656608963703eb5bbd31a719f42007e296ac09c61eb103539f",
+        "20261014120000_hr_vehicle_assignment_plans.sql": "c0dea142d206b5538fd81c98961aaf86926c999cdd8fb722e0aab3d72ab23289",
+        "20261014140000_online_deployment_control.sql": "872f0f0858473546cee56b836fa64c95d668997304ae462ac2c18428e69f4cb2"
+      },
+      "privateEvidenceRetained": "/app/online-runtime-acceptance/protected-bridge-889654f899e9e4851ef630fe175b2ead",
+      "nativeControlLockRequired": true,
+      "postDdlLeaseLossRolledBack": true,
+      "checkpointLeaseRejections": true,
+      "catalogDriftRejected": true,
+      "completedWorkerSessions": 0
+    },
+    {
+      "nativePrismaRecognizesBoth": true,
+      "atomicHistoryAndIdempotentRetry": true,
+      "hrVehicleOperations": {
+        "passed": 9,
+        "failed": 0
+      }
+    },
+    {
+      "nativeLogicalRestoreValidated": true,
+      "internalTriggerNamesActuallyChanged": true,
+      "restoredOwnedReceiptsValidatedWithoutReapplying": 2,
+      "restoredDatabaseName": "sabalanerp_concurrency_4ac9e2d4870b4134"
+    }
+  ],
+  "canonicalBeforeAndAfter": [
+    {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  ],
+  "fixtureSha256": "7fceef9572e17d20406fc31bf76be0d57f1ac1c6733c23da0e14ea5598d1f623",
+  "limits": [
+    "empty actual schema, not production data",
+    "synthetic private lease/checkpoint metadata, not a production verified checkpoint",
+    "no full financial/old-runtime compatibility proof"
+  ]
+}

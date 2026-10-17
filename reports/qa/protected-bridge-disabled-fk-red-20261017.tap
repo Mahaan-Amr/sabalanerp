@@ -1,0 +1,33 @@
+TAP version 13
+# Subtest: the actual protected bridge requires native ownership and atomically applies only its exact SQL and history
+not ok 1 - the actual protected bridge requires native ownership and atomically applies only its exact SQL and history
+  ---
+  duration_ms: 54596.7836
+  location: 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\tests\\online-deployment\\protected-bridge.integration.test.mjs:44:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    true !== false
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: false
+  actual: true
+  operator: 'strictEqual'
+  stack: |-
+    fails (file:///C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/tests/online-deployment/protected-bridge.integration.test.mjs:139:80)
+    TestContext.<anonymous> (file:///C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/tests/online-deployment/protected-bridge.integration.test.mjs:184:19)
+    process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    async Test.run (node:internal/test_runner/test:932:9)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 54853.6711

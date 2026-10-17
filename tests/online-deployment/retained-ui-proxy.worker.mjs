@@ -11,6 +11,7 @@ import {BrowserRoutingStore, BrowserRoutingPublicationLock} from '../../deploy/s
 import {BrowserOperationJournal} from '../../deploy/scripts/browser-operation-journal.mjs';
 import {createBrowserReleaseProxy} from '../../deploy/scripts/browser-release-proxy.mjs';
 import {privateUiManagementServer} from './private-ui-management.fixture.mjs';
+import {assertPrivateUiStartup} from './private-ui-startup.fixture.mjs';
 
 const root = process.env.RETAINED_UI_FIXTURE_ROOT;
 assert.match(root ?? '', /^\/app\/online-runtime-acceptance\/retained-ui-[a-f0-9]{32}$/);
@@ -22,14 +23,13 @@ assert.equal(createHash('sha256').update(configurationBytes).digest('hex'), proc
 const configuration = JSON.parse(configurationBytes);
 assert.equal(configuration.format, 'sabalan-private-retained-ui-acceptance/v1');
 const heldFile = path.join(root, 'transport-shutdown-held.json');
-try {await fs.lstat(heldFile); throw Error('FIXTURE_HELD_TRANSPORT_REQUIRES_INSPECTION');}
-catch (failure) {if (failure.code !== 'ENOENT') throw failure;}
 const file = path.join(root, 'publication.lock'), descriptor = openSync(file, 'a+', 0o600);
 assert.equal(spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', '3'], {stdio: ['ignore', 'ignore', 'ignore', descriptor]}).status, 0);
 const lockStat = fstatSync(descriptor, {bigint: true});
 const publicationLock = new BrowserRoutingPublicationLock({file, descriptor, identity: {
   device: lockStat.dev.toString(), inode: lockStat.ino.toString(), ownerUid: process.getuid(),
 }});
+await assertPrivateUiStartup(root, publicationLock);
 let closing = false;
 // Diagnostic ownership only. This cannot satisfy a production release lease.
 const store = new BrowserRoutingStore({directory: path.join(root, 'publications'), publicationLock,
@@ -41,6 +41,7 @@ catch (failure) {
 }
 const journal = new BrowserOperationJournal({directory: path.join(root, 'operations'), instanceId: randomBytes(32).toString('hex')});
 await journal.initialize();
+assert.equal((await journal.pending()).length, 0, 'FIXTURE_UNKNOWN_TRANSPORT_REQUIRES_INSPECTION');
 const proxy = createBrowserReleaseProxy({loadRegistry: () => store.read(), slotEndpoints: configuration.slotEndpoints,
   applicationsByHost: {'127.0.0.1:3104': 'erp'}, operationJournal: journal, timeoutMs: 10000});
 

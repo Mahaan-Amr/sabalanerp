@@ -47,6 +47,7 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
         'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-operation-journal.mjs',
         'tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/retained-ui-bundle.fixture.mjs',
         'tests/online-deployment/private-ui-management.fixture.mjs', 'tests/online-deployment/private-ui-management.test.mjs',
+        'tests/online-deployment/private-ui-startup.fixture.mjs', 'tests/online-deployment/private-ui-startup.test.mjs',
         'tests/online-deployment/retained-ui-overlap.integration.test.mjs', 'tests/online-deployment/Dockerfile.retained-ui',
         'docker-compose.retained-ui-acceptance.yml',
       ].map(name => [name, sourceHash(name)]))};

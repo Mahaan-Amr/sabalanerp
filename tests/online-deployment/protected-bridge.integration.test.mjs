@@ -126,7 +126,7 @@ test('the actual protected bridge requires native ownership and atomically appli
       collect('dist/scripts/deployment-control.js');
       files['prisma/schema.prisma'] = fs.readFileSync(path.join(root, 'backend/prisma/schema.prisma'));
       files['prisma/migrations/migration_lock.toml'] = fs.readFileSync(path.join(directory, 'migration_lock.toml'));
-      for (const name of ['protected-bootstrap-owner.py', 'protected-bootstrap-state.py']) {
+      for (const name of ['protected-bootstrap-owner.py', 'protected-bootstrap-state.py', 'with-backend-control-ownership.sh']) {
         files['scripts/' + name] = fs.readFileSync(path.join(root, 'deploy/scripts', name));
       }
       files['worker.cjs'] = fs.readFileSync(path.join(root, 'tests/online-deployment/protected-bridge.worker.cjs'));
@@ -155,12 +155,13 @@ test('the actual protected bridge requires native ownership and atomically appli
           'protected-bridge-fixture', privateDirectory, JSON.stringify(command), configurationFile], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
         return JSON.parse(output.trim());
       };
-      const invokeCli = (command = '') => {
+      const invokeCli = (command = '', targetDirectory = privateDirectory) => {
         assert.ok(['', 'bootstrap-migrate-baseline', 'bootstrap-adopt'].includes(command));
+        assert.match(targetDirectory, /^\/app\/online-runtime-acceptance\/protected-bridge-[a-f0-9]{32}$/);
         verify();
         const value = spawnSync('docker', ['exec', slot.Id, 'sh', '-c',
           'set -eu; umask 077; export RECOVERY_COORDINATION_DIR="$1/coordination"; export BACKEND_RUNTIME_ROLE=control; export BACKEND_CONTROL_LOCK_FILE="$1/coordination/deployment-runtime-control.lock"; export BACKEND_CONTROL_LOCK_FD=9; exec 9>>"$BACKEND_CONTROL_LOCK_FILE"; flock --nonblock 9; if [ -n "$2" ]; then exec node "$1/cli-worker.cjs" "$1/configuration.json" "$2"; else exec node "$1/cli-worker.cjs" "$1/configuration.json"; fi',
-          'protected-bridge-cli-fixture', privateDirectory, command], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
+          'protected-bridge-cli-fixture', targetDirectory, command], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
         assert.equal(value.error, undefined); assert.equal(value.signal, null);
         const messages = (value.stdout + '\n' + value.stderr).split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line));
         return { status: value.status, messages };
@@ -246,9 +247,30 @@ os.kill(child,signal.SIGKILL); print(json.dumps({'guardianPid':pid,'killedInterm
       assert.equal(completed.phase, 'QUIESCENT'); assert.equal(completed.nativeReaped, true);
       assert.equal(completed.databaseQuiet, true); assert.equal(completed.failed, true);
       assert.equal(completed.nativeStatus, -9);
+      const failedAdoption = invokeCli('bootstrap-adopt', faultDirectory);
+      assert.equal(failedAdoption.status, 1);
+      assert.equal(failedAdoption.messages.at(-1).code, 'BOOTSTRAP_NATIVE_COMPLETION_UNPROVEN');
+      const replayDirectory = faultDirectory + '/marker-replay';
+      const markerProbe = state => {
+        verify(); execFileSync('docker', ['exec', '-i', slot.Id, 'node', '-e',
+          "const fs=require('fs'),directory=process.argv[1];if(!fs.existsSync(directory))fs.mkdirSync(directory,{mode:0o700});fs.writeFileSync(directory+'/deployment-bootstrap-native.json',fs.readFileSync(0),{mode:0o600});",
+          replayDirectory], { input: typeof state === 'string' ? state : JSON.stringify(state) });
+        verify();
+        return spawnSync('docker', ['exec', '-e', 'BACKEND_RUNTIME_ROLE=control', '-e', 'RECOVERY_COORDINATION_DIR=' + replayDirectory,
+          slot.Id, 'sh', faultDirectory + '/scripts/with-backend-control-ownership.sh', 'node', '-e', "console.log('INSPECTION_READY')"], { encoding: 'utf8' });
+      };
+      // Replay copied durable evidence in a separate private directory after
+      // the real holder exited. This tests restart refusal, not container kill.
+      for (const record of [stillActive, '{invalid']) {
+        const refused = markerProbe(record); assert.equal(refused.status, 75); assert.equal(refused.error, undefined);
+        assert.ok(!refused.stdout.includes('INSPECTION_READY')); assert.ok(refused.stderr.includes('BOOTSTRAP_NATIVE_COMPLETION_UNPROVEN'));
+      }
+      const inspection = markerProbe(completed); assert.equal(inspection.status, 0); assert.equal(inspection.stdout.trim(), 'INSPECTION_READY');
       observations.push({ intermediateNativeCliKilledDuringActualDdl: { ...killed, blockedNative },
         guardianReapedDescendantsBeforeSqlCompletion: true, independentTaggedTransactionRetainedOwnership: true,
         exclusiveTakeoverRefusedUntilSqlQuiet: true, failedNativeTerminalCompletion: completed,
+        failedBootstrapAdoptionRefused: true, copiedActiveAndCorruptMarkersPreventReplacementWithFreeKernelLock: true,
+        completedFailurePermitsInspectionWithoutAdoption: true,
         faultPrivateEvidenceRetained: faultDirectory, faultDatabaseName });
       const bootstrapped = invokeCli('bootstrap-migrate-baseline'); assert.equal(bootstrapped.status, 0);
       assert.deepEqual(await ledger(), baseline); await absent(pending[0]); await absent(pending[1]);

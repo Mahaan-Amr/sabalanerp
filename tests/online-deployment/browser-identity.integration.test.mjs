@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import test from 'node:test';
+import fs from 'node:fs';
+import {createHash} from 'node:crypto';
 
 const require=createRequire(new URL('../../frontend/package.json',import.meta.url));
 const enabled=process.env.ONLINE_BROWSER_ACCEPTANCE_URL;
@@ -29,6 +31,7 @@ function verifyCandidate() {
   assert.equal(candidate.Config.Labels['com.docker.compose.service'],'frontend-candidate');
   assert.equal(candidate.State.Status,'running');
   assert.ok(candidate.Mounts.some(mount=>mount.Destination==='/app/.next-build' && mount.RW===false));
+  assert.ok(candidate.Mounts.some(mount=>mount.Destination==='/app/public' && mount.RW===false));
 }
 
 test('actual installed Next configuration rejects both runtime deployment-identity overrides',
@@ -65,10 +68,13 @@ test('a real browser loads versioned assets and sends its own build identity on 
         if(url.pathname.startsWith('/_next/static/') && /\.(js|css)$/.test(url.pathname)) assets.push(url.searchParams.get('dpl'));
         if(request.headers().rsc==='1')rsc.push({path:url.pathname,id:request.headers()['x-deployment-id']});
       });
-      const response=await page.goto(enabled+'/',{waitUntil:'networkidle',timeout:60000});
+      // Next can retain an unconsumed speculative 404 prefetch even after its
+      // server response ends. Global network idleness is not UI readiness.
+      const response=await page.goto(enabled+'/',{waitUntil:'domcontentloaded',timeout:60000});
       assert.equal(response.status(),200);
+      await page.waitForFunction(()=>Boolean(window.next?.version));
       await page.locator('a[href="/about"]').first().click();
-      await page.waitForURL('**/about');await page.waitForLoadState('networkidle');
+      await page.waitForURL('**/about');
       assert.ok(assets.length>0);assert.ok(assets.every(id=>id===expected));
       assert.ok(rsc.some(request=>request.path==='/about' && request.id===expected));
       assert.ok(rsc.every(request=>request.id===expected));
@@ -88,7 +94,11 @@ test('compiled login and session bootstrap send the same immutable producer iden
         observed.push({path:url.pathname,method:request.method(),id:request.headers()['x-deployment-id']});
         await route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({success:false,error:'اطلاعات ورود آزمایشی پذیرفته نشد.'})});
       });
-      await page.goto(enabled+'/login',{waitUntil:'networkidle'});
+      const worker=await page.request.get(enabled+'/sw.js');
+      assert.equal(worker.status(),200);
+      const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+      assert.equal(sha(await worker.body()),sha(fs.readFileSync(new URL('../../frontend/public/sw.js',import.meta.url))));
+      await page.goto(enabled+'/login',{waitUntil:'domcontentloaded'});
       await page.locator('input[name="identifier"]').fill('diagnostic-identity-user');
       await page.locator('input[name="password"]').fill('diagnostic-not-a-real-password');
       await page.locator('button[type="submit"]').click();

@@ -1,0 +1,78 @@
+{
+  "format": "sabalan-inquiry-native-diagnostic/v1",
+  "cases": {
+    "normal": {
+      "nativeStatus": 0,
+      "exactCommittedValues": true,
+      "consumedGrantRefused": true,
+      "nativeClosure": true,
+      "unresolvedWorkRetained": false
+    },
+    "lost-node": {
+      "nativeStatus": 137,
+      "exactCommittedValues": true,
+      "consumedGrantRefused": true,
+      "nativeClosure": true,
+      "unresolvedWorkRetained": true
+    }
+  },
+  "refusalFaults": {
+    "stderr-failure": {
+      "heldDespiteUnavailableStderr": true,
+      "noChild": true,
+      "activeFenceRetained": true
+    },
+    "legacy-race": {
+      "refusedUnderAcquiredInterlock": true,
+      "legacyFenceRetained": true
+    }
+  },
+  "actualNextIntegration": false,
+  "publicAdmission": false,
+  "productionRecoveryPoint": false,
+  "directory": "/app/online-runtime-acceptance/inquiry-native-17d8e5b5f883c1fae77caa4e2ba2125e",
+  "sourceCommit": "b19a16ce667e3dbaa8d378e8ef7b26130251a456",
+  "manifestSha256": "dd2b0181766ea8de4433112cd345d8fe63ca6322aa9787b559b002cba9d88db5",
+  "sourceHashes": {
+    "online-inquiry-owner.py": "6976b96e92a2b5c73c51c242541e0a77dcbd2f70b726751702b2c7f8e04c9e62",
+    "online-runtime-scope.py": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+    "backend-runtime-owner.py": "7812ebf703fd3c68f0fa7e3d595034a8b27166e16865718934d284ca626d8865",
+    "online-capture-admission.py": "5f9f5229d7c697c7632e7592ccb90b61273f68cc20a9f15b647b62524ff3365a",
+    "inquiry-worker.cjs": "b861e90e6b43cb668749311fef829d968830d922ba49b1de29ea101dd87732c8",
+    "sqlite-worker.py": "4cefe106b623fce93893442cab1a306ffe61b1cf2a0f5b54726b94c69327eab8",
+    "fixture.py": "d5718c7f74f725a06f8e492f8bf8c44dbd3e58add9365fe290c542748f84e3e5",
+    "faults.fixture.py": "d17f92b5d7a3e40828a561565bf3b0aed4de6774f87eea2dee422a11e72f0c59",
+    "services/online-runtime-scope.py": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+    "services/onlineInquiryWork.js": "7fe48676ed5b5603e0a61ff62c0c944f429ac266dc051160c3fdae268e22f873",
+    "services/onlineRuntimeScope.js": "6e3103ce7f4589c5a0063242b459e0e3dc62134ca3e9b112d74fa6da421703fd",
+    "services/onlineCaptureAdmission.js": "13ca0421fb76ddad38d99c1b83f0d6ac47df80eea12c3ea936c75dadf436ee40",
+    "services/kernelWriteAdmission.js": "b8dd4d6443eb4f525613fd48d10fa838ccbbd81f43d412674464da31af6c710b",
+    "services/runtimeBoundaryJournal.js": "c75bd2c91cfeff77f52e6f245fc23c2b88c54397ab3d9bc89f4b316e7b48d5dc",
+    "services/runtimeTaskAdmission.js": "6b1dc81d6fc3f2f9f84ea22e1eae8451a4094f6fba851d56661f5c1a8b60e393",
+    "services/runtimeWorkContext.js": "93747aa97f64e28ad9a79f3cbb33696c04da2bc7a562cb0fb2b887efa2b9ad7d"
+  },
+  "canonicalUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "actualConsumerImage": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+  "independentRecovery": false
+}

@@ -13,6 +13,8 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
   openssl \
   sqlite3 \
+  python3 \
+  util-linux \
   ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
@@ -29,6 +31,11 @@ COPY apps/sabalan-inquiry ./
 COPY deploy/scripts/run-inquiry-with-recovery.sh /app/run-inquiry-with-recovery.sh
 COPY deploy/scripts/verify-inquiry-database.cjs /app/verify-inquiry-database.cjs
 COPY backend/src/services/inquiryBaseline.json /app/inquiry-baseline.json
+COPY backend/src/services/onlineInquiryWork.ts backend/src/services/onlineRuntimeScope.ts backend/src/services/onlineCaptureAdmission.ts backend/src/services/kernelWriteAdmission.ts backend/src/services/runtimeBoundaryJournal.ts backend/src/services/runtimeTaskAdmission.ts backend/src/services/runtimeWorkContext.ts /tmp/inquiry-runtime-source/
+COPY deploy/scripts/online-runtime-scope.py /tmp/inquiry-runtime-source/online-runtime-scope.py
+COPY scripts/build-inquiry-runtime-bundle.mjs /app/scripts/build-inquiry-runtime-bundle.mjs
+RUN node /app/scripts/build-inquiry-runtime-bundle.mjs /tmp/inquiry-runtime-source /app/online-runtime
+COPY deploy/scripts/online-inquiry-owner.py deploy/scripts/online-runtime-scope.py deploy/scripts/backend-runtime-owner.py deploy/scripts/online-capture-admission.py /app/online-runtime/scripts/
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

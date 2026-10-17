@@ -1,0 +1,46 @@
+{"privateBuildRoot":"/tmp/sabalan-inquiry-build-6845a85e262d24f606a8ee9eca510173","versions":{"next":"16.2.6","react":"19.2.6","typescript":"6.0.3","@prisma/client":"6.19.3"},"pythonAvailable":true}
+warn The configuration property `package.json#prisma` is deprecated and will be removed in Prisma 7. Please migrate to a Prisma config file (e.g., `prisma.config.ts`).
+For more information, see: https://pris.ly/prisma-config
+
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": SQLite database "build-only.db" at "file:/tmp/sabalan-inquiry-build-6845a85e262d24f606a8ee9eca510173/build-only.db"
+
+SQLite database build-only.db created at file:/tmp/sabalan-inquiry-build-6845a85e262d24f606a8ee9eca510173/build-only.db
+
+🚀  Your database is now in sync with your Prisma schema. Done in 389ms
+
+▲ Next.js 16.2.6 (Turbopack)
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 16.0s
+  Running TypeScript ...
+  Finished TypeScript in 7.9s ...
+  Collecting page data using 5 workers ...
+  Generating static pages using 5 workers (0/10) ...
+  Generating static pages using 5 workers (2/10) 
+  Generating static pages using 5 workers (4/10) 
+  Generating static pages using 5 workers (7/10) 
+✓ Generating static pages using 5 workers (10/10) in 494ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ○ /_not-found
+├ ƒ /admin
+├ ƒ /admin/import
+├ ƒ /admin/import/export
+├ ƒ /admin/import/export/xlsx
+├ ƒ /admin/import/template
+├ ƒ /admin/login
+├ ƒ /admin/products/[id]/edit
+├ ƒ /admin/products/new
+├ ƒ /admin/users
+├ ƒ /admin/users/[id]/edit
+├ ƒ /admin/users/new
+└ ƒ /login
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+PRIVATE_INQUIRY_BUILD_PASSED

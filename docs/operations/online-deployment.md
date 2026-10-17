@@ -4,6 +4,14 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 ## Current foundation
 
+- Inquiry's thirteen action bodies and sole Prisma query/transaction owner now
+  compose native SQLite completion ownership without PostgreSQL credentials.
+  Actual early-return, lost-Node committed values, interactive/batch/rollback
+  Prisma behavior, legacy-fence/logging faults, eight Linux guards and a full
+  Linux Next build passed. Ordinary startup still refuses online configuration;
+  actual native Next action overlap and strict coherent Inquiry census remain
+  pending. See [Inquiry completion evidence](../../reports/qa/online-inquiry-completion-20261018.md).
+
 - Private v2 coherent capture now includes a bounded registered-backend census
   binding actual read-only grants, native locks/claims and QUIESCENT work journals
   to fresh visible SQL observations. Composed PostgreSQL/file/SQLite capture and

@@ -31,7 +31,7 @@ test('unknown envelopes and unverified writes cannot authorize leaving the form'
     setItem: (key: string, value: string) => { values.set(key, value); }, removeItem: (key: string) => { values.delete(key); } };
   const storage = createOwnerScopedBrowserStorage(backing, () => 'seller-a', 'contract-navigation');
   storage.setItem('contractWizardState', 'original');
-  const destination = [...values.keys()][0];
+  const destination = Array.from(values.keys())[0];
   values.set(destination, '{"format":"future-unknown","value":"keep"}');
   assert.equal(storage.getItem('contractWizardState'), null);
   assert.throws(() => storage.setItem('contractWizardState', 'replacement'), /BROWSER_DRAFT_EXISTING_VALUE_UNKNOWN/);

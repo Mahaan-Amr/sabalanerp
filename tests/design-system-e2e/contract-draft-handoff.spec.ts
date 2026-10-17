@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { assertNoHorizontalOverflow, assertNoSeriousAxeViolations, setTheme, setViewportAndZoom } from './support/design-system';
 
@@ -57,6 +58,25 @@ test('revision refresh first preserves the original draft; storage failure keeps
   await day.click();
   const refresh = page.getByRole('button', { name: 'بارگذاری آخرین نسخه', exact: true });
   await expect(refresh).toBeVisible();
+  const previous = Array.from({ length: 9 }, (_, index) => {
+    const value = { format: 'sabalan-browser-draft/v1', id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      capturedAt: '2026-10-16T00:00:00.000Z', userId: user.id, buildId: 'erp_previous_20261016', workflow: 'sales-contract',
+      draftId: `contract-${id}`, schemaVersion: 2, baseRevision: 6, payloadJson: JSON.stringify({ originalNote: `کپی قبلی ${index}` }), sha256: '' };
+    value.sha256 = createHash('sha256').update(JSON.stringify([value.format, value.id, value.capturedAt, value.userId,
+      value.buildId, value.workflow, value.draftId, value.schemaVersion, value.baseRevision, value.payloadJson])).digest('hex');
+    return value;
+  });
+  await page.evaluate(async values => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('sabalan-browser-draft-archive', 1);
+      request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    try { await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('snapshots', 'readwrite', { durability: 'strict' });
+      transaction.oncomplete = () => resolve(); transaction.onabort = () => reject(transaction.error);
+      for (const value of values) transaction.objectStore('snapshots').add(value);
+    }); } finally { database.close(); }
+  }, previous);
   const before = state.loads;
   // Native Chromium quota denial: the same production handler must retain the
   // page when IndexedDB cannot commit, then succeed after capacity returns.
@@ -69,7 +89,11 @@ test('revision refresh first preserves the original draft; storage failure keeps
   state.conflict = false;
   await refresh.click();
   await expect.poll(() => state.loads).toBeGreaterThan(before);
-  const saved = page.getByRole('button', { name: 'دریافت نوشتهٔ محفوظ', exact: true });
+  const downloads = page.getByRole('button', { name: 'دریافت نوشتهٔ محفوظ', exact: true });
+  await expect(downloads).toHaveCount(8);
+  await page.getByRole('button', { name: 'کپی‌های قبلی', exact: true }).click();
+  await expect(downloads).toHaveCount(10);
+  const saved = downloads.first();
   await expect(saved).toBeVisible();
   const downloading = page.waitForEvent('download'); await saved.click(); const download = await downloading;
   const archive = JSON.parse(fs.readFileSync((await download.path())!, 'utf8'));

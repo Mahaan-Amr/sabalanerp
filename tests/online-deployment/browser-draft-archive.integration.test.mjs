@@ -28,8 +28,8 @@ test('native IndexedDB preserves original draft bytes across refresh, denies ano
     assert.match(saved.sha256, /^[a-f0-9]{64}$/);
     await page.reload();
     const values = await page.evaluate(async () => window.draftArchive.readBrowserDraftArchives('draft_owner_a', 'sales-contract', 'contract-private-qa', () => {}));
-    assert.equal(values.length, 1); assert.deepEqual(values[0], saved); assert.equal(values[0].payloadJson, snapshot.payloadJson);
-    assert.deepEqual(await page.evaluate(async () => window.draftArchive.readBrowserDraftArchives('draft_owner_b', 'sales-contract', 'contract-private-qa', () => {})), []);
+    assert.equal(values.archives.length, 1); assert.deepEqual(values.archives[0], saved); assert.equal(values.archives[0].payloadJson, snapshot.payloadJson);
+    assert.deepEqual(await page.evaluate(async () => window.draftArchive.readBrowserDraftArchives('draft_owner_b', 'sales-contract', 'contract-private-qa', () => {})), { archives: [], next: null });
     const denied = await page.evaluate(async input => {
       try { await window.draftArchive.archiveBrowserDraft(input, () => { throw Error('OWNER_LOST'); }); return false; }
       catch (error) { return error.message === 'OWNER_LOST'; }
@@ -42,8 +42,26 @@ test('native IndexedDB preserves original draft bytes across refresh, denies ano
     assert.notEqual(concurrent[0].id, concurrent[1].id);
     await page.evaluate(() => { Date.now = () => 2100000000000; });
     const retained = await page.evaluate(async () => window.draftArchive.readBrowserDraftArchives('draft_owner_a', 'sales-contract', 'contract-private-qa', () => {}));
-    assert.equal(retained.length, 3, 'support expiry must not delete a saved original-version draft');
-    assert.ok(retained.some(value => value.payloadJson === snapshot.payloadJson));
+    assert.equal(retained.archives.length, 3, 'support expiry must not delete a saved original-version draft');
+    assert.ok(retained.archives.some(value => value.payloadJson === snapshot.payloadJson));
+    const boundary = await page.evaluate(async input => {
+      let newest;
+      for (let batch = 0; batch < 17; batch++) {
+        const added = await Promise.all(Array.from({ length: 16 }, (_, index) =>
+          window.draftArchive.archiveBrowserDraft({ ...input, payloadJson: JSON.stringify({ batch, index }) }, () => {})));
+        newest = added[added.length - 1];
+      }
+      let cursor, count = 0, pages = 0;
+      do {
+        const result = await window.draftArchive.readBrowserDraftArchives(input.userId, input.workflow, input.draftId, () => {}, cursor);
+        if (result.archives.length > 8) throw Error('UNBOUNDED_PAGE');
+        count += result.archives.length; pages++; cursor = result.next;
+      } while (cursor);
+      const restored = await window.draftArchive.readBrowserDraftArchive(input.userId, newest.id, () => {});
+      return { count, pages, newest: restored.payloadJson };
+    }, snapshot);
+    assert.equal(boundary.count, 275); assert.ok(boundary.pages > 32);
+    assert.equal(boundary.newest, '{"batch":16,"index":15}');
     const corrupted = await page.evaluate(async id => {
       const database = await new Promise((resolve, reject) => { const request = indexedDB.open('sabalan-browser-draft-archive', 1);
         request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
@@ -53,7 +71,7 @@ test('native IndexedDB preserves original draft bytes across refresh, denies ano
         const request = transaction.objectStore('snapshots').get(id);
         request.onsuccess = () => transaction.objectStore('snapshots').put({ ...request.result, payloadJson: '{"amount":"0"}' });
       }); database.close();
-      try { await window.draftArchive.readBrowserDraftArchives('draft_owner_a', 'sales-contract', 'contract-private-qa', () => {}); return false; }
+      try { await window.draftArchive.readBrowserDraftArchive('draft_owner_a', id, () => {}); return false; }
       catch (error) { return error.message === 'BROWSER_DRAFT_ARCHIVE_UNVERIFIED'; }
     }, saved.id);
     assert.equal(corrupted, true);

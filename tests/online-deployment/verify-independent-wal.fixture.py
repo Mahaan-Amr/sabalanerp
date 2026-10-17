@@ -34,6 +34,8 @@ def private_read(file, maximum):
                 (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) ==
                 (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
                 and (named.st_dev, named.st_ino) == (before.st_dev, before.st_ino), 'FILE_CHANGED')
+        # Read-back equality alone is not durable custody after a crash.
+        os.fsync(fd)
         return data
     finally:
         os.close(fd)
@@ -73,6 +75,11 @@ def main():
         json.dump(active, stream); stream.flush(); os.fsync(stream.fileno())
     directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     os.fsync(directory_fd)
+    parent_fd = os.open(root.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(parent_fd)
+    finally:
+        os.close(parent_fd)
     proofs, original_capture, recovered = [], None, {}
     for item in sealed['objects']:
         name = item['name']

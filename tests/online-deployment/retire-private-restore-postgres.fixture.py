@@ -28,8 +28,9 @@ def load(name, file):
 
 
 def main():
-    guard = load('workspace_retirement', QA / 'retire-private-restore-workspace.fixture.py')
-    assert guard.sha(QA / 'retire-private-restore-workspace.fixture.py') == 'a607550c21bf13f8d0e11c6f97ce29686a625d93f362e2949c0d16d78f5baf57'
+    guard_file = QA / 'retire-private-restore-workspace-20261017.fixture.py'
+    guard = load('workspace_retirement', guard_file)
+    assert guard.sha(guard_file) == 'a607550c21bf13f8d0e11c6f97ce29686a625d93f362e2949c0d16d78f5baf57'
     for directory in [QA, PRIVATE, ROOT]:
         guard.assert_plain(directory)
     guard.isolate_mount_namespace()
@@ -51,6 +52,7 @@ def main():
     assert len(foreign) == 11, 'FOREIGN_BASELINE_CHANGED'
     pg = owner.inspect(PG)
     owner.verify_pg(pg, ROOT / 'postgres')
+    assert pg['HostConfig']['PidMode'] != 'host' and not pg['HostConfig']['Privileged']
     assert pg['State']['StartedAt'] == STARTED and pg['State']['Health']['Status'] == 'healthy'
     restore = json.loads((ROOT / 'evidence/inquiry-r24-full-proof.json').read_text())
     status = json.loads((ROOT / 'evidence/inquiry-r24-status.json').read_text())
@@ -76,7 +78,7 @@ def main():
     assert guard.sha(image) == 'ed56c3575e4d9641e8119613e2273b397850fbb9ae4636f33b6eca5e3549d862'
     assert guard.sha(encrypted) == '466824218145462e32b7aa4f574fb0937e2060edb3c3aaecc60d75cf25ef2acd'
     target = ROOT / 'postgres'
-    guard.assert_plain(target, 999)
+    guard.assert_plain(target, 70)
     guard.assert_no_nested_mounts(target)
     before = shutil.disk_usage(PRIVATE).free
     owner.atomic(QA / (OPERATION + '-proof.json'), {'phase': 'EXACT_WORKING_POSTGRES_RETIREMENT', 'container': {'id': PG, 'image': pg['Image'], 'startedAt': STARTED},
@@ -97,7 +99,7 @@ def main():
         for mount in container['Mounts']:
             source = Path(mount['Source'])
             assert target != source and target not in source.parents and source not in target.parents, 'WORKSPACE_STILL_REFERENCED'
-    guard.assert_plain(target, 999)
+    guard.assert_plain(target, 70)
     guard.assert_no_nested_mounts(target)
     files = 0
     logical_bytes = 0

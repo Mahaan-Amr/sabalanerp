@@ -1,0 +1,46 @@
+TAP version 13
+# Subtest: persistent multi-release switching and proxy restart retain every old browser build for its full retirement window
+ok 1 - persistent multi-release switching and proxy restart retain every old browser build for its full retirement window
+  ---
+  duration_ms: 177.192122
+  type: 'test'
+  ...
+# Subtest: opening the matching inode without its existing exclusive native lock never grants publication ownership
+ok 2 - opening the matching inode without its existing exclusive native lock never grants publication ownership
+  ---
+  duration_ms: 9.396678
+  type: 'test'
+  ...
+# Subtest: compatible rollback is a new immutable publication and retains current and previously retired browser identities
+ok 3 - compatible rollback is a new immutable publication and retains current and previously retired browser identities
+  ---
+  duration_ms: 172.540386
+  type: 'test'
+  ...
+# Subtest: wrong predecessor, changed build bytes, shortened support, legacy reassignment and omitted retirement refuse before publication
+ok 4 - wrong predecessor, changed build bytes, shortened support, legacy reassignment and omitted retirement refuse before publication
+  ---
+  duration_ms: 48.509624
+  type: 'test'
+  ...
+# Subtest: lost publication ownership leaves a prepared intent; current traffic survives and a replacement cannot erase or reuse it
+ok 5 - lost publication ownership leaves a prepared intent; current traffic survives and a replacement cannot erase or reuse it
+  ---
+  duration_ms: 47.222952
+  type: 'test'
+  ...
+# Subtest: missing history and modified immutable bytes fail after a new reader starts instead of selecting an older current build
+ok 6 - missing history and modified immutable bytes fail after a new reader starts instead of selecting an older current build
+  ---
+  duration_ms: 24.654342
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 632.992137

@@ -17,6 +17,7 @@ import {
   readDeploymentMaintenance,
 } from '../services/deploymentMaintenance';
 import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
+import { assertProtectedBootstrapBoundary, compileProtectedBootstrapSource, runProtectedBootstrapBaseline } from '../services/protectedBootstrapMigrations';
 
 const REPORT_DIR = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
 const SESSION_PATH = path.join(REPORT_DIR, 'active-deployment-session.json');
@@ -166,12 +167,25 @@ const main = async () => {
     await writeSession(session);
     await journal(session, 'initial-schema-bootstrap-using-host-and-advisory-leases');
     console.log(JSON.stringify({ ok: true, session }));
-  } else if (command === 'bootstrap-adopt') {
-    if (!session.bootstrap || session.phase !== 'MIGRATIONS_APPLIED') {
+  } else if (command === 'bootstrap-migrate-baseline' || command === 'bootstrap-adopt') {
+    if (!session.bootstrap || session.phase !== 'MUTATION_STARTED') {
       throw Object.assign(new Error('Bootstrap journal can only be adopted immediately after the deployment-control migration.'), { code: 'DEPLOYMENT_BOOTSTRAP_DENIED' });
     }
-    const checkpointPath = path.join(RECOVERY_COORDINATION_DIR, 'deployment-checkpoint.json');
-    const checkpointJson = JSON.parse(await fs.promises.readFile(checkpointPath, 'utf8'));
+    const checkpointJson = assertProtectedBootstrapBoundary(session);
+    if (command === 'bootstrap-migrate-baseline') {
+      await runProtectedBootstrapBaseline(session);
+      await journal(session, 'historical-baseline-applied-before-owned-bridge');
+      console.log(JSON.stringify({ ok: true }));
+      return;
+    }
+    const baseline = compileProtectedBootstrapSource(path.resolve(__dirname, '../../prisma/migrations'));
+    const history = await prisma.$queryRaw<Array<{ name: string; checksum: string; finished: Date | null }>>`
+      SELECT migration_name AS name,checksum,finished_at AS finished FROM public._prisma_migrations WHERE rolled_back_at IS NULL`;
+    if (history.length !== baseline.length || new Set(history.map(row => row.name)).size !== baseline.length
+      || history.some(row => !row.finished || !baseline.some(source => source.name === row.name
+        && crypto.createHash('sha256').update(source.bytes).digest('hex') === row.checksum))) {
+      throw Object.assign(new Error('Bootstrap baseline history requires inspection.'), { code: 'DEPLOYMENT_BOOTSTRAP_HISTORY_UNPROVEN' });
+    }
     await prisma.deploymentOperation.create({
       data: {
         id: session.deploymentId,

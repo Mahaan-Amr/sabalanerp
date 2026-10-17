@@ -18,6 +18,12 @@ process.env.DATABASE_URL = source.toString();
 process.env.DEPLOYMENT_ID = owner.deploymentId;
 process.env.DEPLOYMENT_RELEASE_ID = owner.releaseId;
 process.env.DEPLOYMENT_LEASE_TOKEN = owner.leaseToken;
-const script = path.join(root, 'dist/scripts/deployment-owned-migrations.js');
-process.argv = [process.execPath, script];
+const command = process.argv[3];
+assert.ok(command === undefined || ['bootstrap-migrate-baseline', 'bootstrap-adopt'].includes(command));
+if (command) {
+  process.env.DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP = 'true';
+  process.env.DEPLOYMENT_REPORT_DIR = path.join(root, 'reports');
+}
+const script = path.join(root, command ? 'dist/scripts/deployment-control.js' : 'dist/scripts/deployment-owned-migrations.js');
+process.argv = [process.execPath, script, ...(command ? [command] : [])];
 require(script);

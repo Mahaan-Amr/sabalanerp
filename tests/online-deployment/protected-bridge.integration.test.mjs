@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -61,7 +60,6 @@ test('the actual protected bridge requires native ownership and atomically appli
     const migrator = connection('sabalan-migration-qa-ddl-' + operation);
     const blocker = connection('sabalan-migration-qa-blocker-' + operation);
     
-    const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'sabalan-migration-baseline-'));
     let created = false, restoredCreated = false, successful = false, restoredObserver;
     const observations = [];
     const intentPath = path.join(root, 'reports/qa/protected-bridge-' + operation + '-intent.json');
@@ -74,12 +72,8 @@ test('the actual protected bridge requires native ownership and atomically appli
       const directory = path.join(root, 'backend/prisma/migrations');
       const names = fs.readdirSync(directory, { withFileTypes: true }).filter(row => row.isDirectory()).map(row => row.name).sort();
       assert.deepEqual(names.filter(name => !baseline.some(row => row.name === name)), pending.map(row => row.name));
-      fs.mkdirSync(path.join(staging, 'migrations'));
-      fs.copyFileSync(path.join(root, 'backend/prisma/schema.prisma'), path.join(staging, 'schema.prisma'));
-      fs.copyFileSync(path.join(directory, 'migration_lock.toml'), path.join(staging, 'migrations/migration_lock.toml'));
       for (const row of baseline) {
         const bytes = fs.readFileSync(path.join(directory, row.name, 'migration.sql')); assert.equal(digest(bytes), row.checksum);
-        fs.mkdirSync(path.join(staging, 'migrations', row.name)); fs.writeFileSync(path.join(staging, 'migrations', row.name, 'migration.sql'), bytes, { flag: 'wx' });
       }
       for (const row of pending) { row.sql = fs.readFileSync(path.join(directory, row.name, 'migration.sql')); assert.equal(digest(row.sql), row.sha256); }
       await administrator.connect(); await administrator.query(`CREATE DATABASE "${databaseName}"`); created = true;
@@ -88,11 +82,8 @@ test('the actual protected bridge requires native ownership and atomically appli
       // An independent native test process must not inherit node:test's worker
       // context, which otherwise skips the nested --test run entirely.
       delete environment.NODE_TEST_CONTEXT;
-      const migrated = await child([prisma, 'migrate', 'deploy', '--schema', path.join(staging, 'schema.prisma')], { cwd: path.join(root, 'backend'), env: environment });
-      assert.match(migrated, /All migrations have been successfully applied/);
       await Promise.all([observer.connect(), migrator.connect(), blocker.connect()]);
       const ledger = async () => (await observer.query('SELECT migration_name AS name, checksum FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name')).rows;
-      assert.deepEqual(await ledger(), baseline);
       const absent = async row => {
         assert.equal((await observer.query('SELECT count(*)::integer AS count FROM _prisma_migrations WHERE migration_name = $1', [row.name])).rows[0].count, 0);
         const tables = row === pending[0] ? ['driver_vehicle_assignment_plans'] : ['online_releases', 'online_runtime_slots', 'online_migration_steps'];
@@ -111,16 +102,28 @@ test('the actual protected bridge requires native ownership and atomically appli
       const privateDirectory = '/app/online-runtime-acceptance/protected-bridge-' + randomBytes(16).toString('hex');
       const owner = { deploymentId: 'bridge-' + operation, releaseId: 'bridge-release-' + operation, leaseToken: randomBytes(32).toString('hex') };
       const checkpoint = { deploymentId: owner.deploymentId, releaseId: owner.releaseId, localVerified: true,
-        remoteVerified: true, restoreVerified: true, manifestReadable: true, checksum: 'a'.repeat(64) };
+        remoteVerified: true, restoreVerified: true, manifestReadable: true, checksum: 'a'.repeat(64), createdAt: new Date().toISOString() };
       // Private authority-state fixture, never a claim that a real recovery
       // archive or production deployment was verified by these test flags.
-      await observer.query(`INSERT INTO deployment_operations (id,"activeKey","releaseId","targetCommit",owner,phase,"leaseToken","leaseExpiresAt","heartbeatAt","startedAt","updatedAt","checkpointJson")
-        VALUES ($1,'production',$2,$3,'private-bridge-fixture','MUTATION_STARTED',$4,clock_timestamp()+interval '10 minutes',clock_timestamp(),clock_timestamp(),clock_timestamp(),$5)`,
-        [owner.deploymentId, owner.releaseId, 'b'.repeat(40), owner.leaseToken, checkpoint]);
       const files = Object.fromEntries(['protectedBridgeMigrations', 'runtimeControlOwnership'].map(name =>
         ['dist/services/' + name + '.js', fs.readFileSync(path.join(root, 'backend/dist/services', name + '.js'))]));
       files['dist/lib/prisma.js'] = fs.readFileSync(path.join(root, 'backend/dist/lib/prisma.js'));
       files['dist/scripts/deployment-owned-migrations.js'] = fs.readFileSync(path.join(root, 'backend/dist/scripts/deployment-owned-migrations.js'));
+      // Freeze the actual control command and its complete local module
+      // closure; no substitute bootstrap/adoption implementation is tested.
+      const collect = relative => {
+        if (files[relative]) return;
+        const bytes = fs.readFileSync(path.join(root, 'backend', relative)); files[relative] = bytes;
+        if (!relative.endsWith('.js')) return;
+        for (const match of bytes.toString().matchAll(/require\(["'](\.[^"']+)["']\)/g)) {
+          let dependency = path.posix.normalize(path.posix.join(path.posix.dirname(relative), match[1]));
+          if (!dependency.endsWith('.json')) dependency += '.js';
+          assert.ok(dependency.startsWith('dist/')); collect(dependency);
+        }
+      };
+      collect('dist/scripts/deployment-control.js');
+      files['prisma/schema.prisma'] = fs.readFileSync(path.join(root, 'backend/prisma/schema.prisma'));
+      files['prisma/migrations/migration_lock.toml'] = fs.readFileSync(path.join(directory, 'migration_lock.toml'));
       files['worker.cjs'] = fs.readFileSync(path.join(root, 'tests/online-deployment/protected-bridge.worker.cjs'));
       files['cli-worker.cjs'] = fs.readFileSync(path.join(root, 'tests/online-deployment/protected-bridge-cli.worker.cjs'));
       for (const row of pending) files[row.name + '.sql'] = row.sql;
@@ -131,10 +134,14 @@ test('the actual protected bridge requires native ownership and atomically appli
           fs.mkdirSync(path.dirname(path.join(root,name)),{recursive:true,mode:0o700});
           fs.writeFileSync(path.join(root,name),Buffer.from(bytes,'base64'),{flag:'wx',mode:0o400});}
         fs.writeFileSync(path.join(root,'configuration.json'),JSON.stringify(input.configuration),{flag:'wx',mode:0o400});
-        fs.writeFileSync(path.join(root,'coordination/deployment-maintenance.json'),JSON.stringify(input.configuration.owner),{flag:'wx',mode:0o600});`;
+        fs.writeFileSync(path.join(root,'coordination/deployment-maintenance.json'),JSON.stringify(input.configuration.owner),{flag:'wx',mode:0o600});
+        fs.writeFileSync(path.join(root,'coordination/deployment-checkpoint.json'),JSON.stringify(input.checkpoint),{flag:'wx',mode:0o600});
+        fs.mkdirSync(path.join(root,'reports'),{mode:0o700});
+        fs.writeFileSync(path.join(root,'reports/active-deployment-session.json'),JSON.stringify({...input.configuration.owner,
+          bootstrap:true,phase:'MUTATION_STARTED',targetCommit:'b'.repeat(40),owner:'private-bridge-fixture'}),{flag:'wx',mode:0o600});`;
       verify(); execFileSync('docker', ['exec', '-i', slot.Id, 'node', '-e', provision], { input: JSON.stringify({ root: privateDirectory,
         files: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, bytes.toString('base64')])),
-        configuration: { root: privateDirectory, databaseName, owner, migrations: pending.map(row => row.name) } }) });
+        checkpoint, configuration: { root: privateDirectory, databaseName, owner, migrations: pending.map(row => row.name) } }) });
       const invoke = (command, configurationFile = 'configuration.json') => {
         assert.ok(['configuration.json', 'configuration-restored.json'].includes(configurationFile));
         verify();
@@ -143,15 +150,21 @@ test('the actual protected bridge requires native ownership and atomically appli
           'protected-bridge-fixture', privateDirectory, JSON.stringify(command), configurationFile], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
         return JSON.parse(output.trim());
       };
-      const invokeCli = () => {
+      const invokeCli = (command = '') => {
+        assert.ok(['', 'bootstrap-migrate-baseline', 'bootstrap-adopt'].includes(command));
         verify();
         const value = spawnSync('docker', ['exec', slot.Id, 'sh', '-c',
-          'set -eu; umask 077; export RECOVERY_COORDINATION_DIR="$1/coordination"; export BACKEND_RUNTIME_ROLE=control; export BACKEND_CONTROL_LOCK_FILE="$1/coordination/deployment-runtime-control.lock"; export BACKEND_CONTROL_LOCK_FD=9; exec 9>>"$BACKEND_CONTROL_LOCK_FILE"; flock --nonblock 9; exec node "$1/cli-worker.cjs" "$1/configuration.json"',
-          'protected-bridge-cli-fixture', privateDirectory], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
+          'set -eu; umask 077; export RECOVERY_COORDINATION_DIR="$1/coordination"; export BACKEND_RUNTIME_ROLE=control; export BACKEND_CONTROL_LOCK_FILE="$1/coordination/deployment-runtime-control.lock"; export BACKEND_CONTROL_LOCK_FD=9; exec 9>>"$BACKEND_CONTROL_LOCK_FILE"; flock --nonblock 9; if [ -n "$2" ]; then exec node "$1/cli-worker.cjs" "$1/configuration.json" "$2"; else exec node "$1/cli-worker.cjs" "$1/configuration.json"; fi',
+          'protected-bridge-cli-fixture', privateDirectory, command], { encoding: 'utf8', maxBuffer: 1024 * 1024 });
         assert.equal(value.error, undefined); assert.equal(value.signal, null);
         const messages = (value.stdout + '\n' + value.stderr).split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line));
         return { status: value.status, messages };
       };
+      const bootstrapped = invokeCli('bootstrap-migrate-baseline'); assert.equal(bootstrapped.status, 0);
+      assert.deepEqual(await ledger(), baseline); await absent(pending[0]); await absent(pending[1]);
+      const adopted = invokeCli('bootstrap-adopt'); assert.equal(adopted.status, 0);
+      assert.equal((await observer.query('SELECT phase FROM deployment_operations WHERE id=$1', [owner.deploymentId])).rows[0].phase, 'MUTATION_STARTED');
+      observations.push({ actualProtectedBootstrapPrefix: 425, actualControlAdoptsBeforeOwnedBridge: true });
       const artifact = operation => {
         verify(); execFileSync('docker', ['exec', slot.Id, 'node', '-e',
           `const fs=require('fs'),path=require('path'),root=process.argv[1],action=process.argv[2];
@@ -309,9 +322,6 @@ test('the actual protected bridge requires native ownership and atomically appli
         if (created && successful) { verify(); await administrator.query(`DROP DATABASE "${databaseName}"`); }
         if (restoredCreated && successful) { verify(); await administrator.query(`DROP DATABASE "${restoredDatabaseName}"`); }
       } finally { await administrator.end(); }
-      // Delete only the exact locally-created schema-source staging directory.
-      assert.equal(path.dirname(staging), os.tmpdir()); assert.ok(path.basename(staging).startsWith('sabalan-migration-baseline-'));
-      fs.rmSync(staging, { recursive: true });
     }
     const report = { ownedProtectedBridgePassed: true, baselineAppliedCount: 425, databaseName, temporaryDatabaseDroppedWithoutForce: true,
       pending: pending.map(({ name, sha256 }) => ({ name, sha256 })), observations, canonicalBeforeAndAfter: before,

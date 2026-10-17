@@ -37,7 +37,7 @@ export function compileProtectedBridgeMigration(name: string, bytes: Buffer) {
   return { name, sha256: definition.sha256, statements, tables: [...definition.tables], functions: [...definition.functions] };
 }
 
-function protectedBoundary(owner: Owner) {
+export function protectedBoundary(owner: Owner) {
   const environment = { ...process.env };
   const directory = environment.RECOVERY_COORDINATION_DIR || '/app/recovery-coordination';
   const file = path.join(directory, 'deployment-maintenance.json');
@@ -122,7 +122,7 @@ export async function assertProtectedBridgeMigrationAuthority(database: PrismaCl
   await database.$transaction(async tx => { await assertLease(tx, owner); assertBoundary(); }, { maxWait: 1000, timeout: 5000 });
 }
 
-/** Protected bridge only; no online/public/CLI entry point. The existing
+/** Protected bridge only; no online/public entry point. The existing
  * coordinated checkpoint flow must first own the native control lock and have
  * advanced its exact lease through remote verification to MUTATION_STARTED.
  * This checks that authority again inside the atomic DDL/native-history TX.

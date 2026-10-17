@@ -55,12 +55,16 @@ export async function attachAccountingListDates<T extends { id: string }>(
 ): Promise<Array<T & { contractData: Prisma.JsonValue | null }>> {
   if (!contracts.length) return [];
   const dates = await database.$queryRaw<Array<{ id: string; contractData: Prisma.JsonValue }>>(Prisma.sql`
-    SELECT id, jsonb_build_object(
-      'contractDate', "contractData"->'contractDate',
-      'date', "contractData"->'date',
-      'contract', jsonb_build_object('date', "contractData"->'contract'->'date')
+    SELECT source.id, jsonb_build_object(
+      'contractDate', dates."contractDate",
+      'date', dates.date,
+      'contract', jsonb_build_object('date', dates.contract->'date')
     ) AS "contractData"
-    FROM sales_contracts WHERE id IN (${Prisma.join(contracts.map(row => row.id))})
+    FROM sales_contracts source
+    CROSS JOIN LATERAL jsonb_to_record(CASE
+      WHEN jsonb_typeof(source."contractData") = 'object' THEN source."contractData" ELSE '{}'::jsonb END)
+      AS dates("contractDate" jsonb, date jsonb, contract jsonb)
+    WHERE source.id IN (${Prisma.join(contracts.map(row => row.id))})
   `);
   const byId = new Map(dates.map(row => [row.id, row.contractData]));
   return contracts.map(row => ({ ...row, contractData: byId.get(row.id) ?? null }));

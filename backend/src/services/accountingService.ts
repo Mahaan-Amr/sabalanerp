@@ -3,7 +3,8 @@ import { readPartnerInvoiceSource } from './partnerSales/accounting/invoiceSourc
 import { lockPartnerFinancialVoidSource } from './partnerSales/accounting/financialVoidSource';
 import { assertPartnerFinancialFinality } from './partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
-import { listPartnerPreparationDocuments } from './partnerSales/accounting/preFinancialDocument';
+import { listPartnerPreparationDocumentsInScope } from './partnerSales/accounting/preFinancialDocument';
+import { accountingContractSearch } from './accountingContractSearch';
 import { recordFinancialCreditTransition } from './contractDispatchCredit';
 import { isNewOrdinaryCommercialFlow, ordinaryFinancialActionsAllowed, OrdinaryAccountingCommercialError,
   assertOrdinaryAccountingCommercialGate } from './ordinaryAccountingCommercialGate';
@@ -385,13 +386,14 @@ const parseContractDateCandidate = (value: unknown): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const getTehranDateKey = (date: Date) => {
-  const parts = new Intl.DateTimeFormat('en-US', {
+const tehranDateFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Tehran',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
-  }).formatToParts(date);
+  });
+const getTehranDateKey = (date: Date) => {
+  const parts = tehranDateFormatter.formatToParts(date);
   const year = parts.find((part) => part.type === 'year')?.value || '1970';
   const month = parts.find((part) => part.type === 'month')?.value || '01';
   const day = parts.find((part) => part.type === 'day')?.value || '01';
@@ -1141,14 +1143,26 @@ const attachAccountingCollections = async (contracts: any[]) => {
     })
   ]);
 
+  const group = <T extends { contractId: string | null }>(rows: T[]) => {
+    const grouped = new Map<string, T[]>();
+    for (const row of rows) {
+      if (!row.contractId) continue;
+      const items = grouped.get(row.contractId) ?? [];
+      items.push(row);
+      grouped.set(row.contractId, items);
+    }
+    return grouped;
+  };
+  const byContract = { records: group(records), receivables: group(receivables), payments: group(payments),
+    taxes: group(taxRecords), flags: group(flags), corrections: group(corrections) };
   return contracts.map((contract) => ({
     ...contract,
-    accountingRecords: records.filter((record) => record.contractId === contract.id),
-    accountingReceivables: receivables.filter((record) => record.contractId === contract.id),
-    accountingPayments: payments.filter((record) => record.contractId === contract.id),
-    accountingTaxRecords: taxRecords.filter((record) => record.contractId === contract.id),
-    accountingFlags: flags.filter((record) => record.contractId === contract.id),
-    accountingCorrections: corrections.filter((record) => record.contractId === contract.id)
+    accountingRecords: byContract.records.get(contract.id) ?? [],
+    accountingReceivables: byContract.receivables.get(contract.id) ?? [],
+    accountingPayments: byContract.payments.get(contract.id) ?? [],
+    accountingTaxRecords: byContract.taxes.get(contract.id) ?? [],
+    accountingFlags: byContract.flags.get(contract.id) ?? [],
+    accountingCorrections: byContract.corrections.get(contract.id) ?? []
   }));
 };
 
@@ -1204,7 +1218,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
     query.sort === 'oldest' ? { createdAt: 'asc' } :
     { createdAt: 'desc' };
 
-  const [rawContracts, settings, partnerRecords, preparations] = await Promise.all([
+  const [rawContracts, settings, partnerSources] = await Promise.all([
     prisma.salesContract.findMany({
       where,
       select: accountingContractListSelect,
@@ -1225,14 +1239,43 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       const corrections = await scope.database.accountingCorrectionRequest.findMany({ where: scope.correction({
         recordId: { in: contextualized.map(record => record.id) },
         status: { in: activeCorrectionStatuses() } }), select: { recordId: true } });
-      return contextualized.map(record => ({ ...record, partnerFlags: flags.filter(flag =>
+      const partnerRecords = contextualized.map(record => ({ ...record, partnerFlags: flags.filter(flag =>
         flag.sourceFinancialRecordId === record.id), partnerOpenCorrections: corrections.filter(item =>
           item.recordId === record.id).length }));
-    }) : Promise.resolve([]),
-    actor ? listPartnerPreparationDocuments(actor.userId, lifecycleView) : Promise.resolve([]),
+      const preparations = await listPartnerPreparationDocumentsInScope(scope, actor.userId, lifecycleView);
+      return { partnerRecords, preparations };
+    }) : Promise.resolve({ partnerRecords: [], preparations: [] }),
   ]);
+  const { partnerRecords, preparations } = partnerSources;
 
-  const contracts = await attachAccountingCollections(await attachAccountingListDates(prisma, rawContracts));
+  const financialStatuses = ['ELIGIBLE', 'VISIBLE_ONLY', 'NEEDS_CORRECTION', 'HAS_FINANCIAL_RECORDS',
+    'NONE', ...Object.values(AccountingRecordStatus), ...Object.values(ReceivableStatus), ...Object.values(TaxSubmissionStatus)];
+  const financialSearchText = normalizePersianSearchTokens(financialStatuses.join(' ')).join(' ');
+  // Name/title tokens cannot come from an ISO date or an English financial
+  // state. Reject those header mismatches before decompressing technical JSON.
+  const headerTokens = normalizePersianSearchTokens(search).filter(token =>
+    !/^[0-9tz:.+/-]+$/.test(token) && !financialSearchText.includes(token));
+  const headerMatches = accountingContractSearch(headerTokens.join(' '));
+  const headerCandidates = headerTokens.length ? rawContracts.filter(contract => headerMatches([
+    contract.contractNumber, contract.titlePersian || contract.title || 'قرارداد فروش',
+    getCustomerName(contract.customer || {}), contract.customer?.nationalCode,
+    metadataObject(contract.customer?.customFields).economicCode, contract.status,
+  ])) : rawContracts;
+  let datedContracts = await attachAccountingListDates(prisma, headerCandidates);
+  if (search) {
+    const matches = accountingContractSearch(search);
+    // Conservative prefilter: derived financial statuses are not known yet.
+    // Keep every possible status as a candidate; the exact filter below still
+    // decides membership after enrichment. Never discard a status/date search.
+    datedContracts = datedContracts.filter(contract => {
+      const date = getContractDateValue(contract);
+      return matches([contract.contractNumber, contract.titlePersian || contract.title || 'قرارداد فروش',
+        getCustomerName(contract.customer || {}), contract.customer?.nationalCode,
+        metadataObject(contract.customer?.customFields).economicCode, contract.status,
+        ...financialStatuses, ...(date ? [date.toISOString(), getTehranDateKey(date)] : [])]);
+    });
+  }
+  const contracts = await attachAccountingCollections(datedContracts);
   let items: any[] = await Promise.all(contracts.map((contract) => buildContractRow(contract, settings)));
   {
     const projected = (lifecycleView === 'active' ? partnerRecords : []).map(record => partnerAccountingContractRow(record)).filter((row): row is NonNullable<typeof row> => row !== null);
@@ -1259,7 +1302,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
   }
 
   if (search) {
-    const lowered = normalizePersianSearchTokens(search).join(' ');
+    const matches = accountingContractSearch(search);
     items = items.filter((item: any) => {
       const date = item.contractDate ? new Date(item.contractDate) : null;
       const dateParts = date && !Number.isNaN(date.getTime())
@@ -1282,9 +1325,9 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
         item.accounting?.receivableStatus,
         item.accounting?.taxStatus,
         ...dateParts
-      ].filter(Boolean).join(' ');
+      ];
 
-      return normalizePersianSearchTokens(haystack).join(' ').includes(lowered);
+      return matches(haystack);
     });
   }
 

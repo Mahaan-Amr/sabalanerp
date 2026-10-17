@@ -594,11 +594,14 @@ export const createAccountingFinancialTrendResponse = (
 
 router.get('/financial-trend', accountingView, createAccountingFinancialTrendResponse());
 
-router.get('/contracts', accountingContractsView, async (req: AuthRequest, res: Response) => {
+export const createAccountingContractsResponse = (
+  loadContracts: typeof listAccountingContracts = listAccountingContracts,
+  loadCapabilities: typeof getAccountingActionCapabilities = getAccountingActionCapabilities,
+) => async (req: AuthRequest, res: Response) => {
   try {
     const [data, capabilities] = await Promise.all([
-      listAccountingContracts(req.query as any, { userId: req.user!.id }),
-      getAccountingActionCapabilities(req.user!.id, req.user!.role),
+      loadContracts(req.query as any, { userId: req.user!.id }),
+      loadCapabilities(req.user!.id, req.user!.role),
     ]);
     res.json({ success: true, data: {
       ...data,
@@ -606,9 +609,11 @@ router.get('/contracts', accountingContractsView, async (req: AuthRequest, res: 
     } });
   } catch (error) {
     console.error('Accounting contracts error:', error);
-    res.status(500).json({ success: false, error: 'Server error' });
+    accountingReadFailure(res, error);
   }
-});
+};
+
+router.get('/contracts', accountingContractsView, createAccountingContractsResponse());
 
 router.get('/contracts/:contractId', accountingContractsView, async (req: AuthRequest, res: Response) => {
   try {

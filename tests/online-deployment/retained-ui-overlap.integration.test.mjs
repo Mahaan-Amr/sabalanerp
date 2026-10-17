@@ -94,7 +94,7 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
     const configurationPath = path.join(stage, 'configuration.json'); await fsp.writeFile(configurationPath, bytes, {flag: 'wx'});
     docker(['cp', configurationPath, candidate + ':' + privateRoot + '/configuration.json']);
     docker(['exec', candidate, 'node', '-e',
-      "const fs=require('node:fs'),c=require('node:crypto'),p=process.argv[1];fs.chmodSync(p,0o600);assert=c.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(assert!==process.argv[2])throw Error('configuration changed');const fd=fs.openSync(p,'r');fs.fsyncSync(fd);fs.closeSync(fd);",
+      "const fs=require('node:fs'),c=require('node:crypto'),p=process.argv[1];fs.chmodSync(p,0o600);const actual=c.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(actual!==process.argv[2])throw Error('configuration changed');const fd=fs.openSync(p,'r');fs.fsyncSync(fd);fs.closeSync(fd);",
       privateRoot + '/configuration.json', sha(bytes)]);
     const environment = {...process.env, RETAINED_UI_OLD_IMAGE: builds[0].image, RETAINED_UI_NEW_IMAGE: builds[1].image,
       RETAINED_UI_PROXY_IMAGE: proxyImage, RETAINED_UI_SOURCE_ROOT: repository.replaceAll('\\', '/'),
@@ -133,16 +133,34 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
       // A second old tab remains on the actual old Next runtime and performs
       // genuine client navigation while new documents go to the new image.
       const oldNavigator = await browser.newPage(), nativeAfterSwitch = [];
-      assert.equal((await oldNavigator.goto(origin + '/', {waitUntil: 'networkidle'})).status(), 200);
-      oldNavigator.on('request', request => {
-        if (request.headers().rsc === '1') nativeAfterSwitch.push({path: new URL(request.url()).pathname, id: request.headers()['x-deployment-id']});
+      // Drop speculative prefetch only, before loading the old document. The
+      // later user click must contact Next over HTTP after generation 2 exists.
+      await oldNavigator.route('**/*', route => {
+        const headers = route.request().headers();
+        if (headers['next-router-prefetch'] || headers['next-router-segment-prefetch'] || headers.purpose === 'prefetch') return route.abort();
+        return route.continue();
       });
+      assert.equal((await oldNavigator.goto(origin + '/', {waitUntil: 'networkidle'})).status(), 200);
       await page.locator('a[href="/login"]').first().click(); await page.waitForURL('**/login');
       await page.locator('input[name="identifier"]').fill('draft-kept-during-switch');
       await page.locator('input[name="password"]').fill('diagnostic-not-a-real-password');
       const navigationCount = await page.evaluate(() => performance.getEntriesByType('navigation').length);
       assert.equal(control('next').published.generation, 2);
+      oldNavigator.on('request', request => {
+        const headers = request.headers();
+        if (headers.rsc === '1' && !headers['next-router-prefetch'] && !headers['next-router-segment-prefetch'] && headers.purpose !== 'prefetch') {
+          nativeAfterSwitch.push({path: new URL(request.url()).pathname, id: headers['x-deployment-id']});
+        }
+      });
+      const nativeResponse = oldNavigator.waitForResponse(response => new URL(response.url()).pathname === '/about'
+        && response.request().headers().rsc === '1' && !response.request().headers()['next-router-prefetch']);
       await oldNavigator.locator('a[href="/about"]').first().click();
+      const actualResponse = await nativeResponse;
+      assert.equal(actualResponse.status(), 200); assert.match(actualResponse.headers()['content-type'], /text\/x-component/);
+      assert.equal(actualResponse.headers()['cache-control'], 'no-store, private');
+      const transportOperation = actualResponse.headers()['x-sabalan-proxy-operation-id']; assert.match(transportOperation, /^[a-f0-9]{32}$/);
+      const nativeIntent = JSON.parse(docker(['exec', proxyId, 'cat', privateRoot + '/operations/' + transportOperation + '.intent.json']));
+      assert.equal(nativeIntent.generation, 2); assert.equal(nativeIntent.buildId, builds[0].id);
       await oldNavigator.waitForURL('**/about'); await oldNavigator.waitForLoadState('networkidle');
       assert.ok(nativeAfterSwitch.some(request => request.path === '/about' && request.id === builds[0].id));
       assert.ok(nativeAfterSwitch.every(request => request.id === builds[0].id));

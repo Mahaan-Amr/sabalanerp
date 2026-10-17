@@ -264,7 +264,7 @@ DO $$ BEGIN PERFORM pg_advisory_xact_lock(741936426::bigint); END $$;
             fail('RECOVERY_DATABASE_RESTORE_POINT_UNPROVEN')
         point = rows[0]
         details = self.command("SELECT json_build_object('walFile',pg_walfile_name('" + point['lsn']
-                               + "'::pg_lsn),'segmentBytes',pg_size_bytes(current_setting('wal_segment_size'))," 
+                               + "'::pg_lsn),'segmentBytes',pg_size_bytes(current_setting('wal_segment_size')),"
                                "'serverVersion',current_setting('server_version_num'))::text;")
         if (len(details) != 1 or not re.fullmatch(r'[0-9A-F]{24}', details[0]['walFile'])
                 or not isinstance(details[0]['segmentBytes'], int)

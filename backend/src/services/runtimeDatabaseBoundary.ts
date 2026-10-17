@@ -55,7 +55,7 @@ export async function observeRuntimeDatabaseWork(input: {
     const [actual] = await transaction.$queryRaw<Array<RuntimeDatabaseIdentity & { visible: boolean; applicationName: string }>>`
       SELECT current_database() AS "databaseName", d.oid::text AS "databaseOid",
         c.system_identifier::text AS "systemIdentifier", current_setting('application_name') AS "applicationName",
-        (r.rolsuper OR pg_has_role(current_user, 'pg_read_all_stats', 'MEMBER')) AS visible
+        (r.rolsuper OR pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')) AS visible
       FROM pg_database d CROSS JOIN pg_control_system() c CROSS JOIN pg_roles r
       WHERE d.datname = current_database() AND r.rolname = current_user`;
     if (!actual || !actual.visible || actual.databaseName !== identity.databaseName

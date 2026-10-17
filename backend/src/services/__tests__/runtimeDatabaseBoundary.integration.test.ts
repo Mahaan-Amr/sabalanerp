@@ -45,6 +45,9 @@ test('actual PostgreSQL retains exact runtime work after client loss; observatio
     const administrator = new Client({ connectionString: adminUrl.toString() });
     await administrator.connect();
     let created = false;
+    const roleName = 'sabalan_boundary_' + randomBytes(8).toString('hex');
+    let roleCreated = false;
+    let restricted: PrismaClient | undefined;
     const temporary = { databaseUrl };
     const observer = new PrismaClient({ datasources: { db: { url: databaseUrl } } }), runtime = scope(), foreign = scope();
     const worker = new Client({ connectionString: runtimeDatabaseUrl(temporary.databaseUrl, runtime) });
@@ -97,16 +100,29 @@ test('actual PostgreSQL retains exact runtime work after client loss; observatio
       await assert.rejects(observeRuntimeDatabaseWork({ database: observer, identity: { ...identity, systemIdentifier: '1' },
         scopes: [runtime], assertBoundaryOwned() {} }), /OBSERVER_IDENTITY_UNPROVEN/);
       owned = false; await assert.rejects(observe(), /TEST_BOUNDARY_LOST/);
+      // Use a fresh private password only inside this test; never print URLs.
+      const rolePassword = randomBytes(24).toString('hex');
+      await administrator.query(`CREATE ROLE "${roleName}" LOGIN NOINHERIT PASSWORD '${rolePassword}'`);
+      roleCreated = true;
+      await administrator.query(`GRANT pg_read_all_stats TO "${roleName}"`);
+      await observer.$executeRawUnsafe(`GRANT EXECUTE ON FUNCTION pg_control_system() TO "${roleName}"`);
+      const restrictedUrl = new URL(databaseUrl); restrictedUrl.username = roleName; restrictedUrl.password = rolePassword;
+      restricted = new PrismaClient({ datasources: { db: { url: restrictedUrl.toString() } } });
+      const restrictedObserve = () => observeRuntimeDatabaseWork({ database: restricted!, identity, scopes: [foreign], assertBoundaryOwned() {} });
+      await assert.rejects(restrictedObserve(), /OBSERVER_IDENTITY_UNPROVEN/);
+      await administrator.query(`ALTER ROLE "${roleName}" INHERIT`);
+      assert.equal((await restrictedObserve()).sessions[0].state, 'idle in transaction');
       console.log('RUNTIME_DATABASE_LOST_ACK_COMMIT_PRESERVED_AND_FOREIGN_TRANSACTION_UNCHANGED');
     } finally {
       await pending;
-      await Promise.allSettled([worker.end(), unrelated.end(), pool.$disconnect(), observer.$disconnect()]);
+      await Promise.allSettled([worker.end(), unrelated.end(), pool.$disconnect(), observer.$disconnect(), restricted?.$disconnect()]);
       try {
         if (created) {
           verify();
           // No FORCE or guessed termination. Unknown remaining sessions retain the database.
           await administrator.query(`DROP DATABASE "${databaseName}"`);
         }
+        if (roleCreated) await administrator.query(`DROP ROLE "${roleName}"`);
       } finally { await administrator.end(); }
     }
   });

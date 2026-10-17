@@ -85,6 +85,7 @@ def main():
         proof = dict(phase='NO_POSTGRES_EXECUTION_PROVEN', controllerPid=PID, startTicks=START, bootId=BOOT,
                      controllerSha256=CONTROLLER_SHA, nativeDescendantsEmpty=True, nativeToolsReaped=True,
                      containerId=CONTAINER, containerNeverStarted=True, emptyAnonymousVolume=VOLUME,
+                     nativeLockIdentity=dict(device=str(named.st_dev), inode=str(named.st_ino)),
                      productionRecoveryPoint=False)
         owner.atomic(ROOT / 'v2-no-execution-proof.json', proof)
         owner.atomic(ROOT / 'v2-unstarted-private-inspection.json', container)
@@ -96,6 +97,7 @@ def main():
     finally: os.close(pidfd)
     lock = os.open(QA.parent / 'drill-ownership.lock', os.O_RDWR | os.O_NOFOLLOW)
     if lock != 9: os.dup2(lock, 9); os.close(lock)
+    assert (os.fstat(9).st_dev, os.fstat(9).st_ino) == (named.st_dev, named.st_ino)
     fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
     storage = os.open('/run/lock/sabalan-backup-storage.lock', os.O_RDWR | os.O_NOFOLLOW)
     fcntl.flock(storage, fcntl.LOCK_EX | fcntl.LOCK_NB)

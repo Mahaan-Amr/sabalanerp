@@ -125,8 +125,24 @@ def main(root):
     fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
     storage = os.open('/run/lock/sabalan-backup-storage.lock', os.O_RDWR | os.O_NOFOLLOW)
     fcntl.flock(storage, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    # This attempt cannot adopt the previous controller's durable uncertainty
+    # merely because its kernel lock became available after process death.
+    retirement_file = root / 'v2-unstarted-retirement-proof.json'
+    assert retirement_file.resolve(strict=True) == retirement_file
+    retired_stat = retirement_file.lstat()
+    assert stat.S_ISREG(retired_stat.st_mode) and retired_stat.st_uid == 0 and retired_stat.st_nlink == 1
+    assert not retired_stat.st_mode & 0o077 and 0 < retired_stat.st_size <= 16384
+    retired_bytes = retirement_file.read_bytes(); retired = json.loads(retired_bytes)
+    assert retired['phase'] == 'COMPLETE' and retired['productionRecoveryPoint'] is False
+    assert retired['controllerPid'] == 851855 and retired['startTicks'] == '119039930'
+    assert retired['controllerSha256'] == 'bd7088034da450ecf112393e39b6a5ea05277d9d4a838e57a656e9bc0d425460'
+    assert all(retired[key] is True for key in ['nativeDescendantsEmpty', 'nativeToolsReaped', 'containerNeverStarted',
+               'controllerExactExitProven', 'originalKernelLockReacquired', 'containerRetiredWithoutForce', 'emptyOwnedVolumeRetiredWithoutForce'])
+    assert retired['nativeLockIdentity'] == dict(device=str(os.fstat(9).st_dev), inode=str(os.fstat(9).st_ino))
+    assert not owner.output(['docker', 'ps', '-aq', '--filter', 'id=' + retired['containerId']]).strip()
+    assert not owner.output(['docker', 'volume', 'ls', '--quiet', '--filter', 'name=^' + retired['emptyAnonymousVolume'] + '$']).strip()
     for number in [signal.SIGTERM, signal.SIGINT, signal.SIGHUP]: signal.signal(number, owner.defer_cancellation)
-    owner.state('VERIFYING_PRIVATE_IMAGE_AND_REASSEMBLY')
+    owner.state('VERIFYING_PRIVATE_IMAGE_AND_REASSEMBLY', retiredDiagnosticProofSha256=hashlib.sha256(retired_bytes).hexdigest())
     foreign = owner.foreign(); assert len(foreign) >= 11
     archive = root / 'postgres-image.tar'
     assert archive.resolve(strict=True) == archive and stat.S_ISREG(archive.lstat().st_mode) and archive.stat().st_uid == 0

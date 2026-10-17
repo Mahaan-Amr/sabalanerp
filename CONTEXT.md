@@ -3163,6 +3163,34 @@ _Avoid_: deriving company attendance from the A/B/C shift plan or workspace acce
 An empty attendance population means no personnel are members of فهرست حضور و غیاب گارد for the selected date. Attendance pages and metrics show no people and guide managers to configure the roster instead of falling back to A/B/C guards, all active personnel, or access-bearing users.
 _Avoid_: calculating attendance from an unconfigured population, silently loading another population, or treating an empty roster as a missing shift plan
 
+**اتصال فرد به دستگاه حضور و غیاب**:
+رابطه مشخص میان هویت فرد در دستگاه حضور و غیاب و پرونده پرسنلی او در سبلان برای انتساب ترددهای دستگاه به همان فرد؛ این رابطه با عضویت در فهرست حضور و غیاب گارد تفاوت دارد.
+_Avoid_: تطبیق قطعی صرفاً از روی نام، یکی‌دانستن کد دستگاه با شناسه پرونده پرسنلی، یا عضویت خودکار در فهرست گارد
+
+**خارج‌کردن فرد از ثبت خودکار حضور و غیاب**:
+متوقف‌کردن ثبت خودکار ترددهای فرد از دستگاه، با حفظ سابقه و امکان ثبت دستی طبق شرایط و مجوزهای گارد؛ این اقدام عضویت او در فهرست گارد را تغییر نمی‌دهد و حضور باز او را نمی‌بندد.
+_Avoid_: حذف پرسنل یا سوابق، حذف کاربر دستگاه، خروج خودکار از فهرست گارد، یا ساختن خروج فرضی
+
+**وضعیت اولیه بررسی‌شده حضور**:
+اعلام داخل، بیرون یا نامعلوم بودن فرد در زمان بررسی برای آماده‌سازی آغاز ثبت خودکار؛ این اعلام به‌تنهایی وقوع ورود یا خروج، ساعت آن یا مدت حضور را اثبات نمی‌کند.
+_Avoid_: وضعیت زنده حضور، شاهد اسکن دستگاه، ثبت ورود یا خروج، یا محاسبه کارکرد صرفاً از روی وضعیت اولیه
+
+**تردد دستگاه تأییدنشده**:
+ورود یا خروج عادی دریافت‌شده از دستگاه که در وضعیت حضور نمایش داده شده، اما هنوز نگهبان آن را بازبینی و تأیید نکرده است؛ تأییدنشدن آن مانع دریافت تردد بعدی نیست.
+_Avoid_: تردد تأییدشده نگهبان، رویداد با جهت نامعلوم، یا مجوز پرداخت اضافه‌کار
+
+**تردد دستگاه نیازمند بررسی**:
+شاهد اسکن دستگاه که جهت، انتساب یا سازگاری آن با حضور موجود هنوز روشن نیست و برای تعیین اثر بر حضور به رسیدگی نگهبان نیاز دارد.
+_Avoid_: خروج فرضی، غیبت قطعی، حذف اسکن مبهم، یا تأیید گروهی بدون رفع ابهام
+
+**خروج فراموش‌شده با ساعت نامعلوم**:
+وضعیت حضور قبلی که خروج فرد از مجموعه مشخص شده، اما زمان واقعی آن معلوم نیست و این نامعلومی با دلیل ثبت شده است؛ ثبت ورود واقعی بعدی ممکن است، ولی مدت حضور قبلی تا تعیین تکلیف نامشخص می‌ماند.
+_Avoid_: حضور باز واقعی فرد داخل مجموعه، ساعت خروج حدسی از برنامه کاری، مدت حضور صفر، یا مسدودکردن ورود واقعی بعدی صرفاً به دلیل نامعلوم‌بودن ساعت خروج قبلی
+
+**ورود فراموش‌شده با ساعت نامعلوم**:
+حضوری که داخل‌بودن فرد تأیید شده، اما زمان واقعی ورود او معلوم نیست؛ خروج بعدی با زمان واقعی قابل ثبت است و مدت آن بازه تا تعیین زمان ورود نامعلوم می‌ماند.
+_Avoid_: غیبت قطعی، وضعیت اولیه آماده‌سازی، ساخت ساعت ورود از برنامه کاری، یا محاسبه مدت قطعی از یک بازه ناقص
+
 **ثبت ورود تکراری در حضور و غیاب گارد**:
 When گارد records ورود for a person and that same person already has an entry time for the selected attendance date, the operation should behave as a successful idempotent action and return the existing attendance truth to the operator. The visible daily list should then show the existing حاضر record instead of leaving the person as غایب.
 _Avoid_: showing English duplicate errors to operators, treating a successful earlier ورود as a failed action, or displaying غایب for a person whose same-day ورود already exists
@@ -3172,7 +3200,7 @@ _Avoid_: showing English duplicate errors to operators, treating a successful ea
 _Avoid_: forcing a separate manual-entry mode, blocking forgotten attendance correction, or allowing silent backdated times without a reason
 
 **حضور باز روز قبل**:
-If a person has an older attendance record with ورود and no خروج, گارد must close that previous record with an explicit خروج time and reason before registering a new ورود for a later date. The system should surface this open previous attendance state instead of silently creating a new day entry or auto-filling the old exit.
+If a person has an older attendance record with ورود and no خروج, گارد must resolve whether the person is still inside or has an unrecorded exit before registering a new ورود for a later date. A known exit is recorded with its real time and reason; a confirmed departure with genuinely unknown time is explicitly recorded as خروج فراموش‌شده با ساعت نامعلوم, permitting the next real entry while keeping the earlier duration unknown. The system surfaces the unresolved state instead of silently creating a new day entry or auto-filling the old exit.
 _Avoid_: overwriting yesterday's record with today's action, creating automatic خروج without operator confirmation, or allowing overlapping open attendance records for the same person
 
 **ساعت کاری پرسنل**:

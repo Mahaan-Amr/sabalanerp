@@ -1771,7 +1771,9 @@ test('Guard personnel worktime report previews the selected scope and daily rest
   const exportButton = workspace.getByRole('button', { name: 'دریافت PDF ۱ نفر' }).first();
   await expect(exportButton).toBeEnabled();
   await exportButton.click();
-  expect((await download).suggestedFilename()).toMatch(/^personnel-attendance-.*\.pdf$/);
+  const downloadedReport = await download;
+  expect(downloadedReport.suggestedFilename()).toMatch(/^personnel-attendance-.*\.pdf$/);
+  expect(await downloadedReport.path()).not.toBeNull();
 });
 
 test('Guard exception dialog uses canonical dropdown and calendar interactions', async ({ page }) => {

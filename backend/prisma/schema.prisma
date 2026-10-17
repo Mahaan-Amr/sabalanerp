@@ -1702,11 +1702,19 @@ model AttendanceRecord {
 }
 
 model AttendanceInterval {
+  entrySource        String                    @default("MANUAL")
+  exitSource         String?
+  exitUnknown        Boolean                   @default(false)
+  revision           Int                       @default(1)
+  confirmedRevision  Int                       @default(1)
+  confirmedBy        String?
+  confirmedAt        DateTime?
   id                 String                    @id @default(cuid())
   attendanceRecordId String
-  enteredAt          DateTime
+  enteredAt          DateTime?
+  observedInsideAt   DateTime?
   exitedAt           DateTime?
-  entryRecordedBy    String
+  entryRecordedBy    String?
   exitRecordedBy     String?
   entryReason        String?
   exitReason         String?
@@ -1717,7 +1725,7 @@ model AttendanceInterval {
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
   attendanceRecord   AttendanceRecord          @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
-  entryRecorder      User                      @relation("AttendanceIntervalEntryRecorder", fields: [entryRecordedBy], references: [id], onDelete: Restrict)
+  entryRecorder      User?                     @relation("AttendanceIntervalEntryRecorder", fields: [entryRecordedBy], references: [id], onDelete: Restrict)
   exitRecorder       User?                     @relation("AttendanceIntervalExitRecorder", fields: [exitRecordedBy], references: [id], onDelete: Restrict)
   auditEvents        AttendanceIntervalAudit[]
 
@@ -12769,7 +12777,6 @@ model PartnerOperationsIncident {
   @@map("partner_operations_incidents")
 }
 
-
 // Operational membership is physically removed; historical identity is retained.
 model CrmCustomerCard {
   customerId String @id
@@ -12786,4 +12793,108 @@ model CrmCustomerRetainedHistory {
   snapshot Json
   customer CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Restrict)
   @@map("crm_customer_retained_history")
+}
+
+// Machine credentials identify only this terminal, never a human Guard session.
+model AttendanceTerminal {
+  lastReadAt DateTime?
+  id             String                      @id @default(cuid())
+  name           String
+  tokenHash      String
+  mode           String                      @default("SHADOW")
+  activatedAt    DateTime?
+  lastSeenAt     DateTime?
+  lastReceivedAt DateTime?
+  lastError      String?
+  createdBy      String
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  mappings       AttendanceTerminalMapping[]
+  punches        AttendancePunch[]
+  periods        AttendanceTerminalPeriod[]
+
+  @@map("attendance_terminals")
+}
+
+model AttendanceTerminalPeriod {
+  id         String             @id @default(cuid())
+  terminalId String
+  mode       String
+  startsAt   DateTime
+  endsAt     DateTime?
+  terminal   AttendanceTerminal @relation(fields: [terminalId], references: [id], onDelete: Restrict)
+
+  @@index([terminalId, startsAt])
+  @@map("attendance_terminal_periods")
+}
+
+model AttendanceTerminalMapping {
+  id            String             @id @default(cuid())
+  terminalId    String
+  deviceCode    String
+  personnelId   String?
+  nameSnapshot  String?
+  initialState  String             @default("UNKNOWN")
+  ignored       Boolean            @default(false)
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  createdBy     String
+  terminal      AttendanceTerminal @relation(fields: [terminalId], references: [id], onDelete: Restrict)
+
+  @@index([terminalId, deviceCode, effectiveFrom])
+  @@index([personnelId])
+  @@map("attendance_terminal_mappings")
+}
+
+model AttendancePunch {
+  id           String             @id @default(cuid())
+  terminalId   String
+  eventKey     String
+  deviceCode   String
+  occurredAt   DateTime
+  correctedOccurredAt DateTime?
+  clockEvidence Json?
+  receivedAt   DateTime           @default(now())
+  verifyMode   Int
+  inOutRaw     Int
+  personnelId  String?
+  nameSnapshot String?
+  mappingId    String?
+  status       String
+  reason       String?
+  direction    String?
+  intervalId   String?
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  terminal     AttendanceTerminal @relation(fields: [terminalId], references: [id], onDelete: Restrict)
+
+  @@unique([terminalId, eventKey])
+  @@index([personnelId, occurredAt])
+  @@index([terminalId, status, occurredAt])
+  @@map("attendance_punches")
+}
+
+model AttendanceDeviceAudit {
+  id         String   @id @default(cuid())
+  terminalId String
+  actorId    String
+  action     String
+  reason     String
+  evidence   Json
+  createdAt  DateTime @default(now())
+
+  @@index([terminalId, createdAt])
+  @@map("attendance_device_audits")
+}
+
+model AttendanceReviewHandover {
+  evidenceHash String
+  id           String   @id @default(cuid())
+  actorId      String
+  assigneeId   String
+  reason       String
+  pendingCount Int
+  createdAt    DateTime @default(now())
+
+  @@map("attendance_review_handovers")
 }

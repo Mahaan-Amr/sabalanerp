@@ -46,7 +46,8 @@ export const ordinaryChangeInstant = (
     month: "2-digit",
     day: "2-digit",
   }).format(at);
-  if (text === tehranDay || text === at.toISOString().slice(0, 10)) return at;
+  // Date-only commands follow the business day in Tehran, including after midnight.
+  if (text === tehranDay) return at;
   const requested = new Date(
     text.length === 10 ? `${text}T00:00:00+03:30` : text,
   );

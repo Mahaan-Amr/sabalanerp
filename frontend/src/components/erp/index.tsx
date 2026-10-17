@@ -1568,7 +1568,7 @@ export function useErpOverlayPortalContainer() {
 }
 
 export function ErpSheet({ open, onClose, title, children, footer, presentation = 'sheet', size = 'default', scope, dismissible = true, pending = false, returnFocusElement = null }: WithChildren & { open: boolean; onClose: () => void; title: React.ReactNode; footer?: React.ReactNode; presentation?: 'sheet' | 'modal'; size?: 'default' | 'wide'; scope?: 'default' | 'workspace'; dismissible?: boolean; pending?: boolean; returnFocusElement?: HTMLElement | null }) {
-  const [viewportHeight, setViewportHeight] = React.useState<string>('100dvh');
+  const [viewport, setViewport] = React.useState({ height: '100dvh', width: '100vw', top: '0px', left: '0px' });
   React.useEffect(() => {
     if (!open) return;
     const update = () => {
@@ -1578,16 +1578,21 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
         const value = Number.parseFloat(getComputedStyle(element).getPropertyValue('zoom'));
         return total * (Number.isFinite(value) && value > 0 ? value : 1);
       }, 1);
-      setViewportHeight(`${Math.min(window.innerHeight, window.visualViewport?.height || window.innerHeight) / zoom}px`);
+      const visible = window.visualViewport;
+      setViewport({ height: `${Math.min(window.innerHeight, visible?.height || window.innerHeight) / zoom}px`,
+        width: `${Math.min(window.innerWidth, visible?.width || window.innerWidth) / zoom}px`,
+        top: `${(visible?.offsetTop || 0) / zoom}px`, left: `${(visible?.offsetLeft || 0) / zoom}px` });
     };
     update();
     window.addEventListener('resize', update);
     window.visualViewport?.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('scroll', update);
     const observer = new MutationObserver(update);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
     observer.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] });
     return () => {
-      window.removeEventListener('resize', update); window.visualViewport?.removeEventListener('resize', update); observer.disconnect();
+      window.removeEventListener('resize', update); window.visualViewport?.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('scroll', update); observer.disconnect();
     };
   }, [open]);
   const inheritedScope = useErpPresentationScope();
@@ -1644,7 +1649,9 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
     <ErpPresentationProvider scope={childPresentationScope}>
     <AnimatePresence>
       {open && (
-        <div ref={overlayRootRef} data-erp-overlay-root data-erp-sheet-root data-erp-presentation={childPresentationScope} className={`${presentationScope === 'workspace' ? 'sds-neumorphic-scope ' : ''}${presentationScope === 'workspace' && inheritedScope === 'workspace' ? 'sds-neumorphic-workflow-scope ' : ''}${isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"}`} role="presentation">
+        <div ref={overlayRootRef} data-erp-overlay-root data-erp-sheet-root data-erp-presentation={childPresentationScope}
+          style={{ ...viewport, right: 'auto', bottom: 'auto', '--erp-overlay-viewport-height': viewport.height } as React.CSSProperties}
+          className={`${presentationScope === 'workspace' ? 'sds-neumorphic-scope ' : ''}${presentationScope === 'workspace' && inheritedScope === 'workspace' ? 'sds-neumorphic-workflow-scope ' : ''}${isModal ? "fixed inset-0 z-[80] !m-0 flex items-center justify-center p-3 sm:p-4" : "fixed inset-0 z-[80] !m-0 flex items-end justify-center sm:items-stretch sm:justify-start"}`} role="presentation">
           <motion.button type="button" aria-label="بستن" disabled={!effectiveDismissible} onClick={onClose} className="absolute inset-0 bg-[var(--sds-surface-overlay)] backdrop-blur-sm disabled:cursor-wait" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
           <motion.div
             ref={dialogRef}
@@ -1652,14 +1659,14 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
             aria-modal="true"
             aria-labelledby={titleId}
             aria-busy={pending || undefined}
-            style={{ maxHeight: presentation === 'modal' ? `calc(${viewportHeight} - 1.5rem)` : `calc(${viewportHeight} * 0.92)` }}
+            style={isModal ? { maxHeight: 'calc(var(--erp-overlay-viewport-height, 100dvh) - 1.5rem)' } : undefined}
             initial={reduceMotion ? false : isModal ? { opacity: 0, scale: 0.96, y: 12 } : { opacity: 0, y: 32 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={isModal ? { opacity: 0, scale: 0.97, y: 8 } : { opacity: 0, y: 24 }}
             transition={{ duration: reduceMotion ? 0 : 0.24, ease: [0.22, 1, 0.36, 1] }}
             className={isModal
               ? `relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-2xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:max-h-[calc(100dvh-2rem)] ${size === 'wide' ? 'max-w-6xl' : 'max-w-xl'}`
-              : "relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:mr-auto sm:h-full sm:max-h-none sm:max-w-lg sm:rounded-none sm:rounded-r-3xl"}
+              : "relative flex max-h-[calc(var(--erp-overlay-viewport-height,100dvh)*0.92)] w-full flex-col rounded-t-3xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] shadow-2xl dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)] sm:mr-auto sm:h-full sm:max-h-[var(--erp-overlay-viewport-height,100dvh)] sm:max-w-lg sm:rounded-none sm:rounded-r-3xl"}
           >
             <ErpOverlayPortalContext.Provider value={dialogRef}>
             <header className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-[var(--sds-border-default)] px-4 dark:border-[var(--sds-border-strong)]">

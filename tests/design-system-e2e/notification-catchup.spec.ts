@@ -109,6 +109,32 @@ test('session continuation retains unsaved form state and accepts only its origi
   expect(state.mutations).toBe(0); expect(state.logins).toBe(2);
 });
 
+test('the focused password and continuation action remain inside a shortened offset visual viewport', async ({ page }) => {
+  const state = await setup(page);
+  // Controlled visual-viewport geometry in a real browser; this is not an OS
+  // keyboard/device certification. Layout viewport remains 844px high.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => {
+    const viewport = new EventTarget();
+    Object.defineProperties(viewport, { height: { value: 420 }, width: { value: 366 },
+      offsetTop: { value: 30 }, offsetLeft: { value: 12 } });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+  });
+  state.owner = 'notification_owner_b';
+  await page.getByRole('button', { name: 'خواندن همه', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'ادامهٔ کار با همین حساب' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('textbox', { name: 'نام کاربری یا شماره همراه' }).fill('notification-qa');
+  const password = dialog.getByLabel('رمز عبور', { exact: true });
+  await password.fill('valid-original-account-password'); await expect(password).toBeFocused();
+  const action = dialog.getByRole('button', { name: 'ورود و ادامهٔ فرم' });
+  await action.scrollIntoViewIfNeeded();
+  const box = await dialog.boundingBox(), button = await action.boundingBox();
+  expect(box!.y).toBeGreaterThanOrEqual(30); expect(box!.y + box!.height).toBeLessThanOrEqual(450);
+  expect(button!.y).toBeGreaterThanOrEqual(30); expect(button!.y + button!.height).toBeLessThanOrEqual(450);
+  await action.click(); await expect(dialog).toBeHidden(); expect(state.mutations).toBe(0);
+});
+
 for (const operation of ['read-all', 'disable-device'] as const) test(`changed account hides private page on ${operation} without navigation or mutation`, async ({ page }) => {
   const state = await setup(page);
   if (operation === 'disable-device') await page.getByRole('button', { name: 'ترجیحات و دستگاه‌ها' }).click();
@@ -126,6 +152,8 @@ for (const operation of ['read-all', 'read-one'] as const) test(`changed account
   await page.getByRole('button', { name: /^اعلان‌ها/ }).click();
   const dialog = page.getByRole('dialog', { name: 'اعلان‌ها', exact: true });
   await expect(dialog.getByText('اعلان خصوصی 1', { exact: true })).toBeVisible();
+  const desktopSheet = await dialog.boundingBox();
+  expect(Math.abs(desktopSheet!.height - page.viewportSize()!.height)).toBeLessThanOrEqual(2);
   state.owner = 'notification_owner_b';
   if (operation === 'read-all') await dialog.getByRole('button', { name: 'خواندن همه', exact: true }).click();
   else await dialog.getByRole('button').filter({ hasText: 'اعلان خصوصی 1' }).click();

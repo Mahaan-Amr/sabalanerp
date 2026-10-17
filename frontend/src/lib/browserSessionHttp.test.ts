@@ -4,20 +4,30 @@ import axios, { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from
 
 test('actual HTTP interceptors bind private clients, preserve the tab, and reject stale outcomes without replay', async () => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
   const previousAdapter = axios.defaults.adapter, previousApi = process.env.NEXT_PUBLIC_API_URL;
+  const previousBuild = process.env.NEXT_PUBLIC_BROWSER_BUILD_ID;
   const previousFetch = globalThis.fetch;
   let owner = 'owner_a', session = 'session_a', businessWrites = 0, redirects = 0, probes = 0;
   let finishRead!: () => void, failLate!: () => void, failLogin!: () => void;
   const storage = new Map<string, string>();
   const browser = { location: { pathname: '/dashboard/test', origin: 'http://localhost:3101', replace() { redirects++; } },
+    sessionStorage: {getItem: () => 'diagnostic-applicant-session'},
     localStorage: { getItem: (key: string) => storage.get(key) || null, setItem: (key: string, value: string) => storage.set(key, value),
       removeItem: (key: string) => storage.delete(key) } };
   Object.defineProperty(globalThis, 'window', { configurable: true, value: browser });
+  Object.defineProperty(globalThis, 'sessionStorage', {configurable: true, value: browser.sessionStorage});
   process.env.NEXT_PUBLIC_API_URL = '/api';
+  process.env.NEXT_PUBLIC_BROWSER_BUILD_ID = 'erp_request_identity_20261017';
   const reply = (config: InternalAxiosRequestConfig, data: unknown, status = 200) => ({ data, status, statusText: String(status), headers: new AxiosHeaders(), config });
   const deny = (config: InternalAxiosRequestConfig, status = 401) => new AxiosError('denied', 'ERR_BAD_REQUEST', config, undefined,
     reply(config, { code: 'AUTH_CONTEXT_CHANGED', error: 'همان حساب قبلی' }, status));
   axios.defaults.adapter = async config => {
+    assert.equal(config.headers.get('x-deployment-id'), 'erp_request_identity_20261017');
+    if (String(config.baseURL).endsWith('/hr-hiring') && config.url?.startsWith('/public/')) {
+      assert.equal(config.headers.Authorization, 'Bearer diagnostic-applicant-session');
+      return reply(config, {success: true, data: {}});
+    }
     if (String(config.baseURL).endsWith('/public')) {
       assert.equal(config.headers.get('x-sabalan-expected-user'), undefined);
       return reply(config, { success: true, data: {} });
@@ -46,7 +56,11 @@ test('actual HTTP interceptors bind private clients, preserve the tab, and rejec
   };
   try {
     const { default: api, authAPI, publicContractsAPI, browserSessionContinuation: scope } = await import('./api');
-    const { hiringAPI } = await import('./hiringApi');
+    const { hiringAPI, applicantHiringAPI } = await import('./hiringApi');
+    await applicantHiringAPI.get();
+    await assert.rejects(api.post('/qa-business', {unsaved: 'preserved'}, {headers: {'x-deployment-id': 'erp_other_request_identity'}}),
+      {code: 'BROWSER_BUILD_REQUEST_IDENTITY_CONFLICT'});
+    assert.equal(businessWrites, 0);
     await api.post('/qa-business', { unsaved: 'preserved' }); assert.equal(businessWrites, 1);
     await hiringAPI.list(); assert.ok(probes >= 2);
     owner = 'owner_b'; session = 'session_b';
@@ -79,6 +93,7 @@ test('actual HTTP interceptors bind private clients, preserve the tab, and rejec
     globalThis.fetch = (async (_url, init) => {
       nativeCalls++;
       const headers = new Headers(init?.headers);
+      assert.equal(headers.get('x-deployment-id'), 'erp_request_identity_20261017');
       assert.equal(headers.get('x-sabalan-expected-user'), 'owner_a');
       assert.equal(headers.get('x-sabalan-expected-session'), 'session_recovered');
       return { status: 200, ok: true, headers: new Headers(), json: () => new Promise(resolve => { finishBody = resolve; }) } as Response;
@@ -87,11 +102,15 @@ test('actual HTTP interceptors bind private clients, preserve the tab, and rejec
     const body = native.json(); scope.invalidate(); finishBody({ private: 'obsolete document' });
     await assert.rejects(body, { code: 'AUTH_CONTEXT_CHANGED' });
     await assert.rejects(browserScopedFetch('https://foreign.example.invalid/private'), /ORIGIN_INVALID/);
+    await assert.rejects(browserScopedFetch('/api/accounting/private-document', {headers: {'x-deployment-id': 'erp_other_request_identity'}}),
+      {code: 'BROWSER_BUILD_REQUEST_IDENTITY_CONFLICT'});
     assert.equal(nativeCalls, 1); scope.clear();
   } finally {
     globalThis.fetch = previousFetch;
     axios.defaults.adapter = previousAdapter;
     if (previousApi === undefined) delete process.env.NEXT_PUBLIC_API_URL; else process.env.NEXT_PUBLIC_API_URL = previousApi;
+    if (previousBuild === undefined) delete process.env.NEXT_PUBLIC_BROWSER_BUILD_ID; else process.env.NEXT_PUBLIC_BROWSER_BUILD_ID = previousBuild;
     if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow); else Reflect.deleteProperty(globalThis, 'window');
+    if (previousSessionStorage) Object.defineProperty(globalThis, 'sessionStorage', previousSessionStorage); else Reflect.deleteProperty(globalThis, 'sessionStorage');
   }
 });

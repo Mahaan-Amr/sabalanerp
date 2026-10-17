@@ -1,6 +1,7 @@
 import axios from "axios";
 import type { AxiosRequestConfig } from 'axios';
 import api from './api';
+import { bindBrowserBuildRequestIdentity } from './browserBuildRequestIdentity';
 
 const rawBase =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -16,6 +17,7 @@ const internal = {
 
 const applicant = axios.create({ baseURL });
 applicant.interceptors.request.use((config) => {
+  bindBrowserBuildRequestIdentity(config.headers);
   const token =
     typeof window !== "undefined"
       ? sessionStorage.getItem("hrApplicantSession")

@@ -7,6 +7,7 @@ import { buildLoadingFinalizeRequest } from './loadingFinalizeRequest';
 import { buildAuthorizedPhysicalExitRequest } from './authorizedPhysicalExitRequest';
 import { createPrivateClient } from './privateClientScope';
 import { BrowserSessionContinuation, type BrowserSessionLease, type BrowserLoginAttempt } from './browserSessionContinuation';
+import { bindBrowserBuildRequestIdentity } from './browserBuildRequestIdentity';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
@@ -67,6 +68,7 @@ const api = axios.create({
 });
 
 const sessionProbe = axios.create({ baseURL: API_BASE, withCredentials: true });
+sessionProbe.interceptors.request.use(config => {bindBrowserBuildRequestIdentity(config.headers); return config;});
 export const browserSessionContinuation = new BrowserSessionContinuation(async expectedUserId => {
   const response = await sessionProbe.get('/auth/me', { headers: expectedUserId ? { 'x-sabalan-expected-user': expectedUserId } : undefined });
   return { userId: response.data.data?.id, sessionId: response.data.session?.id };
@@ -141,6 +143,7 @@ const clearRetryKey = (config?: RetryAwareConfig) => {
 };
 
 api.interceptors.request.use(async (config) => {
+  bindBrowserBuildRequestIdentity(config.headers);
   if (typeof window !== 'undefined' && config.url === '/auth/me') {
     (config as RetryAwareConfig).browserBootstrapScope = browserSessionContinuation.beginLogin();
     const owner = browserSessionContinuation.expectedUserId();
@@ -1377,6 +1380,7 @@ const publicApi = axios.create({
     'Content-Type': 'application/json'
   }
 });
+publicApi.interceptors.request.use(config => {bindBrowserBuildRequestIdentity(config.headers); return config;});
 
 export const publicContractsAPI = {
   lookupConfirmationContract: (contractNumber: string, phoneNumber: string) =>

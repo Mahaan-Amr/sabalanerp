@@ -1,4 +1,5 @@
 import { API_ORIGIN, browserSessionContinuation } from './api';
+import { bindBrowserBuildRequestIdentity } from './browserBuildRequestIdentity';
 
 /** Native-response adapter for authenticated browser downloads/JSON. Public
  * verification and the localhost hardware connector use their own transports.
@@ -8,8 +9,9 @@ export async function browserScopedFetch(url: string, init: RequestInit = {}): P
   const target = new URL(url, window.location.origin);
   const expectedOrigin = new URL(API_ORIGIN || window.location.origin, window.location.origin).origin;
   if (target.origin !== expectedOrigin || target.username || target.password) throw new Error('PRIVATE_FETCH_ORIGIN_INVALID');
-  const lease = await browserSessionContinuation.acquire();
   const headers = new Headers(init.headers);
+  bindBrowserBuildRequestIdentity(headers);
+  const lease = await browserSessionContinuation.acquire();
   for (const [key, value] of [['x-sabalan-expected-user', lease.userId], ['x-sabalan-expected-session', lease.sessionId]]) {
     if (headers.has(key) && headers.get(key) !== value) throw new Error('PRIVATE_FETCH_SCOPE_CONFLICT');
     headers.set(key, value);

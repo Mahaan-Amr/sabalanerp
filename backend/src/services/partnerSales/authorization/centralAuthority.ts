@@ -3,14 +3,23 @@ import type { Prisma } from '@prisma/client';
 import { PartnerActionV2Schema, PermissionContextSchema, type PartnerActionV2 } from '@sabalanerp/partner-sales-contracts';
 import { readScopedActions, resolveScopedActions } from '../../effectiveAccessService';
 import type { ResolvePartnerAuthority } from './prisma';
-import type { AuthorizationEvidence } from './contracts';
+import type { AuthorizationEvidence, AuthorizationRoot } from './contracts';
 import { resolvePartnerWorkspaceAuthority } from './workspaceAuthority';
 
 /** A vocabulary adapter to central Effective Authorization, not another grant
  * resolver. Domain restrictions and scope-to-current-root checks remain policy. */
-export const resolvePartnerScopedAuthority: ResolvePartnerAuthority<PartnerActionV2> = async (tx, input) => {
+export const resolvePartnerScopedAuthority: ResolvePartnerAuthority<PartnerActionV2> = (tx, input) =>
+  resolvePartnerScopedAuthorityInPurpose(tx, input);
+
+/** Purpose restriction only omits unused workspace bridges. Explicit grants,
+ * denials, current revisions, root locks and per-decision audit remain unchanged. */
+export const resolvePartnerAccountingScopedAuthority: ResolvePartnerAuthority<PartnerActionV2> = (tx, input) =>
+  resolvePartnerScopedAuthorityInPurpose(tx, input, 'ACCOUNTING');
+
+async function resolvePartnerScopedAuthorityInPurpose(tx: Prisma.TransactionClient,
+  input: { actorId: string; root: AuthorizationRoot }, purpose?: 'ACCOUNTING') {
   const current = await resolveScopedActions(tx, input.actorId, 'PARTNER');
-  const workspace = await resolvePartnerWorkspaceAuthority(tx, input.actorId);
+  const workspace = await resolvePartnerWorkspaceAuthority(tx, input.actorId, purpose);
   const explicit = await readExplicitPartnerDecisions(tx, input.actorId);
   const grants: AuthorizationEvidence<PartnerActionV2>['grants'] = [];
   for (const grant of current.grants) {
@@ -39,7 +48,7 @@ export const resolvePartnerScopedAuthority: ResolvePartnerAuthority<PartnerActio
     const feature = partnerOperationFeature(grant.action, grant.purpose);
     return !feature || !workspace.disabledFeatures?.includes(feature);
   }) };
-};
+}
 
 /** Route admission uses the existing responder feature bridge. Other Partner
  * entry points keep their scoped grants; resource assignment checks stay in policy. */

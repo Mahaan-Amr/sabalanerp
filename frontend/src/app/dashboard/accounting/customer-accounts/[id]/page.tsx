@@ -2,16 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
-import { FaArrowDown, FaBalanceScale, FaEye, FaFileExcel, FaFilePdf, FaMoneyBillWave, FaSync } from 'react-icons/fa';
-import { ErpActionMenu, ErpBadge, ErpButton, ErpCard, ErpDisclosure, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpMetricGrid, ErpPresentationProvider, ErpSection, ErpSegmentedControl, ErpSheet, ErpSummaryGrid, ErpWorkspacePage, type ErpAction } from '@/components/erp';
+import { FaEye, FaFileExcel, FaFilePdf, FaMoneyBillWave, FaSync } from 'react-icons/fa';
+import { ErpBadge, ErpButton, ErpCard, ErpDisclosure, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpPresentationProvider, ErpSection, ErpSegmentedControl, ErpSheet, ErpSummaryGrid, ErpWorkspacePage, type ErpAction } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { accountingFailureMessage, dateFa, StatusBadge } from '@/features/accounting/accountingUi';
 import { contractLifecycleLabel } from '@/features/sales/contractLifecyclePresentation';
-import { accountBalanceLabel, accountMoney, accountOperationLabels, accountStatusLabels, type AccountOperationKind, type CustomerAccount } from '@/features/accounting/customerAccountModel';
+import { accountBalanceLabel, accountMoney, accountOperationLabels, accountStatusLabels, receiptRemainingRials, type AccountOperationKind, type CustomerAccount } from '@/features/accounting/customerAccountModel';
+import CustomerPostedItems from '@/features/accounting/CustomerPostedItems';
+import { recordForPostedItem } from '@/features/accounting/customerPostedLinks';
 import CustomerAccountOperationFlow from '@/features/accounting/CustomerAccountOperationFlow';
 import AccountingLedgerEvidence from '@/features/accounting/AccountingLedgerEvidence';
+import CustomerAccountAnalytics from '@/features/accounting/CustomerAccountAnalytics';
+import CustomerReceiptTrace from '@/features/accounting/CustomerReceiptTrace';
+import { customerAccountInsights } from '@/features/accounting/customerAccountInsights';
+import workspaceStyles from '@/features/accounting/customerAccountWorkspace.module.css';
 
-type Tab = 'overview' | 'contracts' | 'records' | 'receipts' | 'statement';
+type Tab = 'overview' | 'items' | 'contracts' | 'records' | 'receipts' | 'statement' | 'analytics';
 function AccountCards<T>({ items, render, empty }: { items: T[]; render: (item: T, index: number) => ReactNode; empty: string }) {
   const [page, setPage] = useState(1);
   if (!items.length) return <ErpEmptyState title={empty} />;
@@ -34,6 +40,10 @@ export default function CustomerAccountDetailPage() {
   const [exporting, setExporting] = useState(false);
   const [evidence, setEvidence] = useState<unknown>();
   const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [operationsOpen, setOperationsOpen] = useState(false);
+  const [itemId, setItemId] = useState<string>();
+  const [itemSearch, setItemSearch] = useState('');
+  const [itemFilter, setItemFilter] = useState<'open' | 'all' | 'overdue' | 'credit'>('open');
   const sequence = useRef(0);
   const load = useCallback(async () => {
     const request = ++sequence.current;
@@ -42,7 +52,7 @@ export default function CustomerAccountDetailPage() {
     catch (reason) { if (request === sequence.current) { setData(undefined); setError(accountingFailureMessage(reason, 'پرونده مالی مشتری بارگیری نشد.')); } }
     finally { if (request === sequence.current) setLoading(false); }
   }, [accountId]);
-  useEffect(() => { setData(undefined); setTab('overview'); setSuccess(undefined); setOperation(undefined); void load(); return () => { sequence.current++; }; }, [load]);
+  useEffect(() => { setData(undefined); setTab('overview'); setSuccess(undefined); setOperation(undefined); setItemId(undefined); setOperationsOpen(false); setEvidence(undefined); setSearch(''); setItemSearch(''); setItemFilter('open'); void load(); return () => { sequence.current++; }; }, [load]);
   const download = async (format: 'pdf' | 'xlsx') => {
     if (!data?.profile || exporting) return;
     setExporting(true); setError(null);
@@ -53,7 +63,7 @@ export default function CustomerAccountDetailPage() {
     } catch (reason) { setError(accountingFailureMessage(reason, 'خروجی صورتحساب ساخته نشد.')); }
     finally { setExporting(false); }
   };
-  const openOperation = (kind: AccountOperationKind, allocationId?: string) => { setSuccess(undefined); setOperation({ kind, allocationId }); };
+  const openOperation = (kind: AccountOperationKind, allocationId?: string) => { setOperationsOpen(false); setSuccess(undefined); setOperation({ kind, allocationId }); };
   const openEvidence = async (voucherId: string) => {
     setEvidenceLoading(true); setError(null);
     try { const response = await accountingAPI.getLedgerVoucherEvidence(voucherId, 'بررسی سند و مستندات از پرونده مالی مشتری'); setEvidence(response.data.data); }
@@ -62,8 +72,8 @@ export default function CustomerAccountDetailPage() {
   };
   const operations: ErpAction[] = data ? [
     ...(data.capabilities.canRefund ? [{ label: accountOperationLabels.REFUND, onClick: () => openOperation('REFUND') }] : []),
-    ...(data.capabilities.canManageTreasury ? (['ALLOCATION'] as AccountOperationKind[]).map(kind => ({ label: accountOperationLabels[kind], onClick: () => openOperation(kind) })) : []),
-    ...(data.capabilities.canManageAccount ? (['DEBIT', 'CREDIT', 'OPENING', 'SET_BALANCE'] as AccountOperationKind[]).map(kind => ({ label: accountOperationLabels[kind], onClick: () => openOperation(kind), disabled: kind === 'OPENING' && data.activityItems.some(row => row.sourceKind === 'OPENING') })) : []),
+    ...(data.capabilities.canManageTreasury ? (['ALLOCATION', 'CORRECT_RECEIPT', 'CANCEL_RECEIPT', 'RESOLVE_RECEIPT', 'CHECK_DEPOSIT', 'CHECK_SETTLE', 'CHECK_ENDORSE', 'CHECK_RECIPIENT_RETURN'] as AccountOperationKind[]).map(kind => ({ label: accountOperationLabels[kind], onClick: () => openOperation(kind) })) : []),
+    ...(data.capabilities.canManageAccount ? (['DEBIT', 'CREDIT', 'OPENING', 'SET_BALANCE', ...(data.openingReview ? ['ATTRIBUTION' as const] : [])] as AccountOperationKind[]).map(kind => ({ label: accountOperationLabels[kind], onClick: () => openOperation(kind), disabled: kind === 'OPENING' && (Boolean(data.openingReview) || data.activityItems.some(row => row.sourceKind === 'OPENING')) })) : []),
   ] : [];
   const contractName = (id: string | null) => data?.contracts.find(row => row.id === id)?.contractNumber || (id ? 'قرارداد تاریخی' : 'مستقل از قرارداد');
   const contractLink = (id: string | null): ErpAction[] => id ? [{ label: 'رسیدگی مالی قرارداد', icon: FaEye, href: `/dashboard/accounting/contracts/${id}` }] : [];
@@ -72,33 +82,56 @@ export default function CustomerAccountDetailPage() {
     if (row.totalAmount != null) { const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(row.totalAmount); if (match) totals.set(row.currency, (totals.get(row.currency) || BigInt(0)) + BigInt(match[1]) * BigInt(100) + BigInt((match[2] || '').padEnd(2, '0'))); }
     return totals;
   }, new Map<string, bigint>())).map(([currency, value]) => accountMoney(`${value / BigInt(100)}.${(value % BigInt(100)).toString().padStart(2, '0')}`, currency)).join(' + ') : '';
+  const insight = data ? customerAccountInsights(data) : undefined;
   return <ErpPresentationProvider scope="workspace"><ErpWorkspacePage title={data?.displayName || 'پرونده مالی مشتری'} backHref="/dashboard/accounting/customer-accounts"
     context={data && <div className="flex flex-wrap items-center gap-2"><ErpBadge tone={data.customer?.trustCategory === 'SPECIAL' ? 'purple' : 'neutral'}>{data.customer?.trustCategory === 'SPECIAL' ? 'مشتری خاص' : data.customer ? 'مشتری عادی' : 'هویت تاریخی'}</ErpBadge>
       {data.customer?.cardDeletedAt && <ErpBadge tone="neutral">پرونده تاریخی</ErpBadge>}<span>{data.customer?.workNumber || data.customer?.homeNumber}</span></div>}
-    primaryAction={data?.capabilities.canManageTreasury ? { label: 'ثبت دریافت', icon: FaMoneyBillWave, onClick: () => openOperation('RECEIPT'), disabled: loading } : undefined}
-    secondaryActions={[{ label: 'به‌روزرسانی', icon: FaSync, onClick: () => void load() }, ...(data?.capabilities.canExport ? [
-      { label: 'خروجی PDF', icon: FaFilePdf, onClick: () => void download('pdf'), disabled: exporting },
-      { label: 'خروجی Excel', icon: FaFileExcel, onClick: () => void download('xlsx'), disabled: exporting },
-    ] : [])]}>
+    >
     {loading && <ErpInlineState kind="empty" title="در حال بارگیری پرونده مالی…" />}
     {error && <ErpInlineState kind="error" title={error} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
     {success && <ErpInlineState kind="success" title={success} />}
     {data && !loading && <>
-      <ErpCard className="p-4 sm:hidden"><span className="text-xs sds-text-secondary">نام مشتری</span><strong className="mt-1 block break-words">{data.displayName}</strong></ErpCard>
-      <ErpMetricGrid items={[
-        { label: `خالص وضعیت مالی · ${accountBalanceLabel(data.netBalanceRials)}`, value: accountMoney(data.netBalanceRials), icon: FaBalanceScale, tone: BigInt(data.netBalanceRials) > BigInt(0) ? 'warning' : BigInt(data.netBalanceRials) < BigInt(0) ? 'success' : 'neutral' },
-        { label: 'مانده دریافتنی قطعی', value: accountMoney(data.receivableRials), hint: 'پس از تخصیص‌ها و بستانکاری‌ها' },
-        { label: 'وجه تخصیص‌نیافته', value: accountMoney(data.unallocatedCreditRials), icon: FaArrowDown },
-        { label: 'مبلغ قراردادهای جاری', value: contractTotals || 'بدون قرارداد جاری', hint: `${data.contracts.length.toLocaleString('fa-IR')} قرارداد در سابقه؛ مبلغ قرارداد، بدهی قطعی نیست` },
+      <div className="flex flex-wrap gap-2">
+        {data.capabilities.canManageTreasury && <><ErpButton label="ثبت دریافت" icon={FaMoneyBillWave} tone="success" variant="solid" onClick={() => openOperation('RECEIPT')} /><ErpButton label="تخصیص به بدهی" onClick={() => openOperation('ALLOCATION')} /></>}
+        {(operations.length > 0 || data.capabilities.canExport) && <ErpButton label="سایر عملیات" tone="neutral" onClick={() => setOperationsOpen(true)} />}
+        <ErpButton label="به‌روزرسانی" icon={FaSync} tone="neutral" onClick={() => void load()} />
+      </div>
+      <ErpCard className={workspaceStyles.summary}>
+        <div className={workspaceStyles.balance}><span className="text-xs sds-text-secondary">مانده · {accountBalanceLabel(data.netBalanceRials)}</span><strong>{accountMoney(data.netBalanceRials)}</strong></div>
+        <div><span className="text-sm sds-text-secondary">بدهی باز قطعی</span><strong>{accountMoney(data.debitOpenRials ?? data.receivableRials)}</strong>{insight && BigInt(insight.overdueRials) > BigInt(0) && <ErpBadge tone="danger">{accountMoney(insight.overdueRials)} معوق</ErpBadge>}</div>
+        <div><span className="text-sm sds-text-secondary">دریافت آماده تخصیص</span><strong className={workspaceStyles.success}>{accountMoney(data.unallocatedCreditRials)}</strong></div>
+      </ErpCard>
+      <ErpSegmentedControl value={tab} onChange={setTab} options={[
+        {value:'overview',label:'خلاصه'}, {value:'items',label:'بدهی و اعتبار'}, {value:'receipts',label:'دریافت‌ها و چک‌ها'},
+        {value:'contracts',label:'قراردادها',count:data.contracts.length,countTone:'neutral'}, {value:'records',label:'رکوردها و دریافتنی‌ها',count:data.financialRecords.length,countTone:'neutral'},
+        {value:'statement',label:'ریزگردش'}, {value:'analytics',label:'تحلیل'},
       ]} />
-      <div className="flex flex-wrap items-center justify-between gap-3"><ErpSegmentedControl value={tab} onChange={setTab} options={[
-        { value: 'overview', label: 'نمای کلی' }, { value: 'contracts', label: 'قراردادها', count: data.contracts.length },
-        { value: 'records', label: 'رکوردها و دریافتنی‌ها', count: data.financialRecords.length }, { value: 'receipts', label: 'دریافت‌ها و چک‌ها' }, { value: 'statement', label: 'ریزگردش' },
-      ]} />{operations.length > 0 && <ErpActionMenu label="عملیات حساب" actions={operations} portal />}</div>
+      {tab === 'analytics' && <CustomerAccountAnalytics account={data} />}
+      {tab === 'items' && <>
+        <ErpField label="جستجوی بدهی و اعتبار"><ErpInput type="search" value={itemSearch} onChange={event => setItemSearch(event.target.value)} placeholder="فاکتور یا قرارداد" /></ErpField>
+        <ErpSegmentedControl value={itemFilter} onChange={setItemFilter} options={[{value:'open',label:'باز'},{value:'all',label:'همه'},{value:'overdue',label:'معوق'},{value:'credit',label:'بستانکاری'}]} />
+        <AccountCards key={itemFilter + itemSearch} items={data.activityItems.filter(item => {
+          const record = recordForPostedItem(data,item);
+          return (itemFilter === 'all' || itemFilter === 'overdue' && item.kind === 'RECEIVABLE' && item.agingDays > 0 && BigInt(item.remainingRials) > BigInt(0) || itemFilter === 'credit' && item.kind === 'CREDIT' || itemFilter === 'open' && BigInt(item.remainingRials) > BigInt(0))
+            && (item.invoiceNumber + ' ' + (item.description || '') + ' ' + contractName(item.contractId) + ' ' + (record?.systemInvoiceNumber || '')).includes(itemSearch);
+        })} empty="قلمی پیدا نشد" render={item => <ErpCard key={item.id} className="space-y-3 p-4" tone={item.kind === 'CREDIT' || BigInt(item.remainingRials) === BigInt(0) ? 'success' : item.agingDays > 0 ? 'danger' : 'neutral'}>
+          <div className="flex flex-wrap justify-between gap-3"><div className="min-w-0"><strong className="break-words">{item.invoiceNumber}</strong><p className="mt-1 text-xs sds-text-secondary">{contractName(item.contractId)} · {item.kind === 'CREDIT' ? 'بستانکاری' : 'دریافتنی'} · {dateFa(item.dueAt)}</p></div><strong>{accountMoney(item.remainingRials)}</strong></div>
+          <ErpButton label="جزئیات بدهی / اعتبار" tone="neutral" onClick={() => setItemId(item.id)} />
+        </ErpCard>} />
+      </>}
       {tab === 'overview' && <>
-        <ErpSection title="بدهی‌ها و بستانکاری‌های باز" actions={[{ label: 'مشاهده همه جزئیات', onClick: () => setTab('statement') }]}>
+        <ErpDisclosure title="اطلاعات حساب"><ErpSummaryGrid columns={3} items={[
+          {label:'بستانکاری مستقل آزاد',value:accountMoney(data.standaloneCreditRials ?? '0')},
+          {label:'قابل استرداد نقدی',value:accountMoney(data.refundableRials ?? '0'),hint:'پس از وصول و کسر مصرف معتبر'},
+          {label:'مبلغ قراردادهای جاری',value:contractTotals || 'بدون قرارداد جاری',hint:'مبلغ قرارداد، بدهی قطعی نیست'},
+        ]} /></ErpDisclosure>
+        {data.openingReview && <ErpDisclosure title="افتتاحیه بررسی‌شده"><ErpSummaryGrid items={[
+          { label: 'تاریخ مبنا', value: dateFa(data.openingReview.basisAt) }, { label: 'مانده کل تأییدشده', value: accountMoney(data.openingReview.totalRials) },
+          { label: 'خالص انتقال', value: accountMoney(data.openingReview.transferRials) }, { label: 'زمان ثبت بررسی', value: dateFa(data.openingReview.createdAt) },
+        ]} />{(data.openingAttributions?.length ?? 0) > 0 && <ErpDisclosure title="سابقه تطبیق انتساب"><div className="space-y-3">{data.openingAttributions?.map(row => <p key={row.id} className="text-sm">{dateFa(row.createdAt)} · {contractName(row.contractId)} · {row.reason} · {row.reference}</p>)}</div></ErpDisclosure>}</ErpDisclosure>}
+        <ErpSection title="بدهی‌ها و بستانکاری‌های باز" actions={[{ label: 'مشاهده همه جزئیات', onClick: () => setTab('items') }]}>
           <AccountCards items={data.openItems.slice(0, 5)} empty="قلم مالی بازی وجود ندارد" render={item => <ErpCard key={item.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><strong>{item.invoiceNumber}</strong><p className="mt-1 text-xs sds-text-secondary">{contractName(item.contractId)} · سررسید {dateFa(item.dueAt)}</p></div><ErpBadge tone={item.kind === 'CREDIT' ? 'success' : item.agingDays ? 'warning' : 'info'}>{item.kind === 'CREDIT' ? 'بستانکاری' : item.agingDays ? `${item.agingDays.toLocaleString('fa-IR')} روز از سررسید` : 'دریافتنی'}</ErpBadge></div>
-            <p className="mt-3 text-lg font-bold">{accountMoney(item.remainingRials)}</p></ErpCard>} />
+            <p className="mt-3 text-lg font-bold">{accountMoney(item.remainingRials)}</p><ErpButton label="جزئیات بدهی / اعتبار" tone="neutral" onClick={() => setItemId(item.id)} /></ErpCard>} />
         </ErpSection>
         {data.credit && data.customer?.trustCategory === 'SPECIAL' && <ErpSection title="اعتبار مشتری خاص"><ErpSummaryGrid columns={3} items={[
           { label: 'سقف اعتبار', value: data.credit.limitRials === null ? 'نامحدود' : accountMoney(data.credit.limitRials) }, { label: 'اعتبار مصرف‌شده', value: accountMoney(data.credit.usedRials) },
@@ -112,20 +145,38 @@ export default function CustomerAccountDetailPage() {
         <div className="mt-4"><AccountCards key={search} items={data.contracts.filter(row => `${row.contractNumber} ${row.titlePersian}`.includes(search))} empty="قراردادی پیدا نشد" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><strong>قرارداد {row.contractNumber}</strong><p className="mt-1 text-sm sds-text-secondary">{row.titlePersian} · {dateFa(row.createdAt)}</p></div><div className="flex flex-wrap gap-2"><StatusBadge status={row.status} label={contractLifecycleLabel(row)} />{row.isInactive && <ErpBadge tone="neutral">غیرفعال</ErpBadge>}</div></div>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><strong>{accountMoney(row.totalAmount, row.currency)}</strong><ErpButton label="مشاهده قرارداد و امور مالی" icon={FaEye} href={`/dashboard/accounting/contracts/${row.id}`} tone="neutral" /></div>
           {BigInt(row.customerCreditAmountRials) > BigInt(0) && <p className="mt-3 text-sm sds-text-secondary">بخش اعتباری: {accountMoney(row.customerCreditAmountRials)} · وعده پرداخت {dateFa(row.customerCreditPromisedDate)}</p>}
+          <CustomerPostedItems account={data} items={data.activityItems.filter(item => item.contractId === row.id)} title={`اقلام قطعی قرارداد ${row.contractNumber}`} onEvidence={id => void openEvidence(id)} evidenceLoading={evidenceLoading} />
         </ErpCard>} /></div></ErpSection>}
       {tab === 'records' && <>
-        <ErpSection title="رکوردهای مالی قراردادها" description="وضعیت عملیاتی این رکوردها جدا از گردش قطعی حساب نمایش داده می‌شود."><AccountCards items={data.financialRecords} empty="رکورد مالی ثبت نشده است" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>{accountStatusLabels[row.kind] || 'رکورد مالی'} {row.systemInvoiceNumber}</strong><StatusBadge status={row.status} label={accountStatusLabels[row.status] || row.status} /></div><ErpSummaryGrid columns={3} items={[{ label: 'مبلغ', value: accountMoney(row.amount, row.currency) }, { label: 'قرارداد', value: contractName(row.contractId) }, { label: 'ثبت', value: dateFa(row.createdAt) }]} /><div className="mt-3 flex gap-2">{contractLink(row.contractId).map(action => <ErpButton key={action.label} {...action} tone="neutral" />)}</div></ErpCard>} /></ErpSection>
-        <ErpSection title="دریافتنی‌های عملیاتی"><AccountCards items={data.receivables} empty="دریافتنی عملیاتی وجود ندارد" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>{contractName(row.contractId)}</strong><StatusBadge status={row.status} label={accountStatusLabels[row.status] || row.status} /></div><ErpSummaryGrid columns={3} items={[{ label: 'مانده', value: accountMoney(row.remainingAmount, row.currency) }, { label: 'دریافت‌شده', value: accountMoney(row.paidAmount, row.currency) }, { label: 'سررسید', value: dateFa(row.dueDate) }]} /><div className="mt-3"><ErpButton label="رسیدگی دریافتنی" href={`/dashboard/accounting/receivables?recordId=${row.id}`} tone="neutral" /></div></ErpCard>} /></ErpSection>
+        <ErpSection title="رکوردهای مالی قراردادها" description="مبلغ و وضعیت اصلی صورتحساب حفظ می‌شود؛ اقلام دفتر مالی و تخصیص‌های مرتبط زیر همان رکورد نمایش داده می‌شوند."><AccountCards items={data.financialRecords} empty="رکورد مالی ثبت نشده است" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>{accountStatusLabels[row.kind] || 'رکورد مالی'} {row.systemInvoiceNumber}</strong><StatusBadge status={row.status} label={accountStatusLabels[row.status] || row.status} /></div><ErpSummaryGrid columns={3} items={[{ label: 'مبلغ', value: accountMoney(row.amount, row.currency) }, { label: 'قرارداد', value: contractName(row.contractId) }, { label: 'ثبت', value: dateFa(row.createdAt) }]} /><div className="mt-3 flex gap-2">{contractLink(row.contractId).map(action => <ErpButton key={action.label} {...action} tone="neutral" />)}</div><CustomerPostedItems account={data} items={data.activityItems.filter(item => recordForPostedItem(data, item)?.id === row.id)} title={`اقلام قطعی فاکتور ${row.systemInvoiceNumber || row.id}`} onEvidence={id => void openEvidence(id)} evidenceLoading={evidenceLoading} /></ErpCard>} /></ErpSection>
+        <CustomerPostedItems account={data} items={data.activityItems.filter(item => !recordForPostedItem(data, item))} title="اقلام قطعی بدون انتساب دقیق به فاکتور" onEvidence={id => void openEvidence(id)} evidenceLoading={evidenceLoading} />
+        <ErpSection title="سوابق دریافتنی عملیاتی" description="این سوابق با اقلام قطعی دفتر مالی بالا جمع نمی‌شوند."><AccountCards items={data.receivables} empty="رکورد عملیاتی جداگانه‌ای ثبت نشده است" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>{contractName(row.contractId)}</strong><StatusBadge status={row.status} label={accountStatusLabels[row.status] || row.status} /></div><ErpSummaryGrid columns={3} items={[{ label: 'مانده', value: accountMoney(row.remainingAmount, row.currency) }, { label: 'دریافت‌شده', value: accountMoney(row.paidAmount, row.currency) }, { label: 'سررسید', value: dateFa(row.dueDate) }]} /><div className="mt-3"><ErpButton label="رسیدگی دریافتنی" href={`/dashboard/accounting/receivables?recordId=${row.id}`} tone="neutral" /></div></ErpCard>} /></ErpSection>
       </>}
       {tab === 'receipts' && <>
-        <ErpSection title="دریافت‌های قطعی"><AccountCards items={data.receipts} empty="دریافت قطعی ثبت نشده است" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>دریافت {dateFa(row.occurredAt)}</strong><strong>{accountMoney(row.amountRials)}</strong></div><div className="mt-3"><ErpSummaryGrid columns={3} items={[{ label: 'تخصیص فعال', value: accountMoney(row.allocatedRials) }, { label: 'استرداد', value: accountMoney(row.refundedRials) }, { label: 'وجه آزاد', value: accountMoney((BigInt(row.amountRials) - BigInt(row.allocatedRials) - BigInt(row.refundedRials)).toString()) }]} /></div>
-          {row.allocations.length > 0 && <div className="mt-3"><ErpDisclosure title="سابقه تخصیص"><div className="space-y-3">{row.allocations.map(allocation => <div key={allocation.id} className="flex flex-wrap items-center justify-between gap-3"><div><span>{dateFa(allocation.createdAt)} · {accountMoney(allocation.lines.reduce((sum, line) => sum + BigInt(line.amountRials), BigInt(0)).toString())}</span><p className="text-xs sds-text-secondary">{allocation.reversedAt ? `برگشت در ${dateFa(allocation.reversedAt)}` : 'تخصیص فعال'}</p></div>{!allocation.reversedAt && data.capabilities.canManageTreasury && <ErpButton label="برگشت تخصیص" tone="warning" onClick={() => openOperation('REVERSE_ALLOCATION', allocation.id)} />}</div>)}</div></ErpDisclosure></div>}
+        <CustomerReceiptTrace account={data} onAllocate={() => openOperation('ALLOCATION')} onItem={setItemId} onEvidence={id => void openEvidence(id)} evidenceLoading={evidenceLoading} />
+        {Boolean(data.receiptHistory?.length) && <ErpSection title="سابقه دریافت‌های تطبیق‌شده"><AccountCards items={data.receiptHistory || []} empty="" render={row => <ErpCard key={row.id} className="space-y-3 p-4">
+          <strong>دریافت {dateFa(row.occurredAt)} · تطبیق {dateFa(row.resolutionOccurredAt)}</strong><ErpSummaryGrid items={[{ label: 'مبلغ اولیه', value: accountMoney(row.amountRials) }, { label: 'مبلغ مؤثر هنگام تطبیق', value: accountMoney(row.effectiveAmountRials) }]} />
+          <ErpButton label="سند دریافت اولیه" tone="neutral" onClick={() => void openEvidence(row.postedVoucherId)} disabled={evidenceLoading} />
+          {row.adjustments.map(adjustment => <ErpDisclosure key={adjustment.id} title={`${adjustment.reason} · ${accountMoney(adjustment.deltaRials)}`}><p>{adjustment.reference} · {dateFa(adjustment.occurredAt)}</p><ErpButton label="سند اصلاح قبلی" tone="neutral" onClick={() => void openEvidence(adjustment.ledgerVoucherId)} disabled={evidenceLoading} /></ErpDisclosure>)}
+        </ErpCard>} /></ErpSection>}
+        <ErpSection title="دریافت‌های قطعی"><AccountCards items={data.receipts} empty="دریافت قطعی ثبت نشده است" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>{accountStatusLabels[row.componentKind ?? 'BANK'] || 'دریافت'} {dateFa(row.occurredAt)}</strong><strong>{accountMoney(row.effectiveAmountRials ?? row.amountRials)}</strong></div><div className="mt-3"><ErpSummaryGrid columns={3} items={[{ label: 'مبلغ اولیه', value: accountMoney(row.amountRials) }, { label: 'مبلغ مؤثر', value: accountMoney(row.effectiveAmountRials ?? row.amountRials) }, { label: 'تخصیص فعال', value: accountMoney(row.allocatedRials) }, { label: 'استرداد', value: accountMoney(row.refundedRials) }, { label: 'اعتبار آزاد', value: accountMoney(receiptRemainingRials(row)) }, { label: 'قابل استرداد نقدی', value: accountMoney(row.refundableRials ?? '0') }]} /></div>
+          {(row.adjustments?.length ?? 0) > 0 && <ErpDisclosure title="سابقه اصلاح و نتیجه ابزار"><div className="space-y-3">{row.adjustments?.map(adjustment => <div key={adjustment.id}><p className="text-sm">{dateFa(adjustment.occurredAt)} · {accountMoney(adjustment.deltaRials)} · {adjustment.reason} · {adjustment.reference}</p><ErpButton label="سند اصلاح" tone="neutral" onClick={() => void openEvidence(adjustment.ledgerVoucherId)} /></div>)}</div></ErpDisclosure>}
+          {row.allocations.length > 0 && <div className="mt-3"><ErpDisclosure title="سابقه تخصیص"><div className="space-y-3">{row.allocations.map(allocation => <div key={allocation.id} className="flex flex-wrap items-center justify-between gap-3"><div><span>{dateFa(allocation.createdAt)} · {accountMoney(allocation.lines.reduce((sum, line) => sum + BigInt(line.amountRials), BigInt(0)).toString())}</span><p className="text-xs sds-text-secondary">{allocation.reversedAt ? `برگشت در ${dateFa(allocation.reversedAt)}` : 'تخصیص فعال'}</p>{allocation.lines.map(line => { const item = data.activityItems.find(item => item.id === line.openItemId); const record = item ? recordForPostedItem(data, item) : undefined; return <p key={line.openItemId} className="mt-2 text-sm">{contractName(item?.contractId || null)} · {record ? `فاکتور ${record.systemInvoiceNumber || 'بدون شماره'}` : item?.invoiceNumber || 'قلم تاریخی'} · سهم {accountMoney(line.amountRials)}</p>; })}</div>{!allocation.reversedAt && data.capabilities.canManageTreasury && <ErpButton label="برگشت تخصیص" tone="warning" onClick={() => openOperation('REVERSE_ALLOCATION', allocation.id)} />}</div>)}</div></ErpDisclosure></div>}
         </ErpCard>} /></ErpSection>
-        <ErpSection title="چک‌های خزانه"><AccountCards items={data.treasuryChecks || []} empty="چکی در خزانه برای این مشتری ثبت نشده است" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>{row.bankName} · {row.serialNumber}</strong><StatusBadge status={row.status} label={accountStatusLabels[row.status] || row.status} /></div><ErpSummaryGrid columns={3} items={[{ label: "مبلغ", value: accountMoney(row.amountRials) }, { label: "سررسید", value: dateFa(row.dueAt) }, { label: "جهت", value: row.direction === "INBOUND" ? "دریافتی" : "پرداختی" }]} /><ErpButton label="پیگیری در خزانه" href={`/dashboard/accounting/treasury?checkId=${row.id}`} tone="neutral" /></ErpCard>} /></ErpSection>
+        <ErpSection title="استردادها"><AccountCards items={data.refunds} empty="استردادی ثبت نشده است" render={row => <ErpCard key={row.id} className="space-y-3 p-4"><strong>{accountMoney(row.amountRials)}</strong><p>{dateFa(row.occurredAt)}</p><ErpButton label="سند استرداد" tone="neutral" onClick={() => void openEvidence(row.postedVoucherId)} disabled={evidenceLoading} /></ErpCard>} /></ErpSection><ErpSection title="تخصیص بستانکاری مستقل"><AccountCards items={data.creditAllocations ?? []} empty="اعتبار مستقلی تخصیص نیافته است" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><p>{dateFa(row.occurredAt)} · {accountMoney(row.lines.reduce((sum, line) => sum + BigInt(line.amountRials), BigInt(0)).toString())} · {row.reversedAt ? 'برگشت‌شده' : 'تخصیص فعال'}</p>{!row.reversedAt && data.capabilities.canManageTreasury && <ErpButton label="برگشت تخصیص اعتبار" tone="warning" onClick={() => openOperation('REVERSE_ALLOCATION', row.id)} />}</div></ErpCard>} /></ErpSection>
+        <ErpSection title="چک‌های خزانه"><AccountCards items={data.treasuryChecks || []} empty="چکی در خزانه برای این مشتری ثبت نشده است" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>{row.bankName} · {row.serialNumber}</strong><StatusBadge status={row.status} label={accountStatusLabels[row.status] || row.status} /></div><ErpSummaryGrid columns={3} items={[{ label: 'مبلغ', value: accountMoney(row.amountRials) }, { label: 'وصول‌شده', value: accountMoney(row.clearedRials ?? '0') }, { label: 'پرداخت‌نشده', value: accountMoney(row.unpaidRials ?? '0') }, { label: 'سررسید', value: dateFa(row.dueAt) }, { label: 'جهت', value: ['INBOUND', 'RECEIVABLE'].includes(row.direction) ? 'دریافتی' : 'پرداختی' }]} /><ErpButton label="پیگیری در خزانه" href={`/dashboard/accounting/treasury?checkId=${row.id}`} tone="neutral" /></ErpCard>} /></ErpSection>
         <ErpSection title="دریافت‌ها و چک‌های قرارداد"><AccountCards items={data.payments} empty="دریافت یا چکی در قراردادها ثبت نشده است" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>{accountStatusLabels[row.method] || 'دریافت'} {row.checkNumber}</strong><StatusBadge status={row.checkStatus || row.status} label={accountStatusLabels[row.checkStatus || row.status] || row.checkStatus || row.status} /></div><ErpSummaryGrid columns={3} items={[{ label: 'مبلغ', value: accountMoney(row.amount, row.currency) }, { label: 'قرارداد', value: contractName(row.contractId) }, { label: row.method === 'CHECK' ? 'سررسید چک' : 'تاریخ دریافت', value: dateFa(row.checkDueDate || row.occurredAt) }]} /><div className="mt-3"><ErpButton label="پیگیری دریافت / چک" href={`/dashboard/accounting/payments?recordId=${row.id}`} tone="neutral" /></div></ErpCard>} /></ErpSection>
       </>}
       {tab === 'statement' && <ErpSection title="ریزگردش قطعی" description="تخصیص وجه خالص مانده را تغییر نمی‌دهد."><AccountCards items={movements} empty="گردش مالی قطعی وجود ندارد" render={row => <ErpCard key={row.id} className="p-4"><div className="flex flex-wrap justify-between gap-3"><strong>{row.label}</strong><span className="text-sm sds-text-secondary">{dateFa(row.at)}</span></div><div className="mt-3"><ErpSummaryGrid columns={3} items={[{ label: 'بدهکار', value: accountMoney(row.debit) }, { label: 'بستانکار', value: accountMoney(row.credit) }, { label: `مانده · ${accountBalanceLabel(row.balance)}`, value: accountMoney(row.balance) }]} /></div><div className="mt-3 flex flex-wrap gap-2">{row.voucherId && <ErpButton label="مشاهده سند و مستندات" onClick={() => void openEvidence(row.voucherId!)} disabled={evidenceLoading} tone="neutral" />}{contractLink(row.contractId).map(action => <ErpButton key={action.label} {...action} tone="neutral" />)}</div></ErpCard>} /></ErpSection>}
     </>}
+    <ErpSheet open={operationsOpen} onClose={() => setOperationsOpen(false)} title="عملیات حساب" presentation="modal" size="wide">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{operations.map(action => <ErpButton key={action.label} {...action} tone="neutral" />)}
+        {data?.capabilities.canExport && <><ErpButton label="خروجی PDF" icon={FaFilePdf} onClick={() => void download('pdf')} disabled={exporting || !data.profile} /><ErpButton label="خروجی Excel" icon={FaFileExcel} onClick={() => void download('xlsx')} disabled={exporting || !data.profile} /></>}
+      </div>
+    </ErpSheet>
+    <ErpSheet open={Boolean(itemId && data)} onClose={() => setItemId(undefined)} title="جزئیات بدهی / اعتبار" presentation="modal" size="wide">
+      {data && itemId && <CustomerPostedItems account={data} items={data.activityItems.filter(item => item.id === itemId)} title="قلم قطعی" onEvidence={id => void openEvidence(id)} evidenceLoading={evidenceLoading} />}
+    </ErpSheet>
     {data && operation && <CustomerAccountOperationFlow key={`${operation.kind}:${operation.allocationId || ''}`} accountId={accountId} account={data} kind={operation.kind} allocationId={operation.allocationId}
       onClose={() => setOperation(undefined)} onSaved={async () => { setSuccess(`${accountOperationLabels[operation.kind]} با موفقیت ثبت شد.`); await load(); }} />}
     <ErpSheet open={Boolean(evidence)} onClose={() => setEvidence(undefined)} title="سند و مستندات" presentation="modal" size="wide">{Boolean(evidence) && <AccountingLedgerEvidence evidence={evidence} />}</ErpSheet>

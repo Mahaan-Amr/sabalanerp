@@ -32,6 +32,16 @@ test('ledger authority cannot fall back to paid legacy receipts after allocation
   assert.equal(await ordinaryContractDispatchEligible(db(paid, true, 0), contract), false);
   assert.equal(await ordinaryContractDispatchEligible(db([], true, 1000), contract), true);
 });
+
+test('a reconciled receipt still requires its actual cheque instrument to clear before dispatch', async () => {
+  const source = db([], true);
+  source.accountingCustomerOpenItem.findMany = async () => [{ originalRials: 1000, invoice: { ledgerVoucherId: 'invoice-voucher' },
+    allocationLines: [{ amountRials: 1000, allocation: { ledgerVoucherId: 'allocation-voucher', transaction: { postedVoucherId: 'receipt-voucher',
+      sourceType: 'CUSTOMER_RECEIPT_RESOLUTION', sourceId: 'review:part', componentKind: 'CHECK', checkInstrumentId: 'real-check' } } }] }];
+  assert.equal(await ordinaryContractDispatchEligible(source, contract), false);
+  source.accountingCheckInstrument.findMany = async ({ where }: any) => { assert.deepEqual(where.id.in, ['real-check']); return [{ id: 'real-check' }]; };
+  assert.equal(await ordinaryContractDispatchEligible(source, contract), true);
+});
 test('one paid obligation cannot conceal another unpaid obligation', () => {
   assert.equal(obligationsFullySettled(1000, [{ original: 500, applied: 1000 }, { original: 500, applied: 0 }]), false);
   assert.equal(obligationsFullySettled(1000, []), false);

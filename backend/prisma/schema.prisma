@@ -1930,6 +1930,7 @@ model RoleFeaturePermission {
 }
 
 model SalesContract {
+  customerOpeningAttributions AccountingCustomerOpeningAttribution[]
   customerCreditCustomerId           String?
   customerCreditCustomer             CrmCustomer? @relation("CustomerCreditContracts", fields: [customerCreditCustomerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   customerCreditAmountRials          Decimal @default(0) @db.Decimal(18, 0)
@@ -4522,6 +4523,7 @@ model ChartOfAccount {
 }
 
 model AccountingFinancialRecord {
+  customerOpeningAttributions AccountingCustomerOpeningAttribution[]
   id                      String                             @id @default(cuid())
   kind                    FinancialRecordKind
   status                  AccountingRecordStatus             @default(DRAFT)
@@ -5128,6 +5130,7 @@ model AccountingLedgerVoucher {
   inventoryEvents                AccountingInventoryEvent[]
   productionBatches              AccountingProductionBatch[]
   inventoryMigrationRuns         AccountingInventoryMigrationRun[]
+  customerReceiptAdjustments     AccountingCustomerReceiptAdjustment[]
 
   @@unique([bookId, fiscalYearId, statutoryNumber])
   @@unique([bookId, sourceType, sourceId, sourceVersion])
@@ -5948,6 +5951,8 @@ model AccountingCustomerProfile {
   invoices             AccountingCommercialCustomerInvoice[]
   openItems            AccountingCustomerOpenItem[]
   treasuryTransactions AccountingTreasuryTransaction[]
+  openingReview        AccountingCustomerOpeningReview?
+  customerCommands     AccountingCustomerCommand[]
 
   @@unique([legalEntityId, partySourceKind, partySourceId])
   @@index([accountingPartyId, activeTo])
@@ -5970,6 +5975,60 @@ model AccountingCustomerRelationship {
   @@unique([sourceType, sourceId, sourceVersion])
   @@index([profileId, cancelledAt])
   @@map("accounting_customer_relationships")
+}
+
+model AccountingCustomerOpeningReview {
+  attributions   AccountingCustomerOpeningAttribution[]
+  id             String                    @id @default(cuid())
+  profileId      String                    @unique
+  basisAt        DateTime
+  totalRials     Decimal                   @db.Decimal(20, 0)
+  transferRials  Decimal                   @db.Decimal(20, 0)
+  snapshotHash   String
+  evidence       Json
+  idempotencyKey String                    @unique
+  commandHash    String
+  createdBy      String
+  createdAt      DateTime                  @default(now())
+  profile        AccountingCustomerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+
+  @@map("accounting_customer_opening_reviews")
+}
+
+model AccountingCustomerCommand {
+  id             String   @id @default(cuid())
+  profileId      String
+  kind           String
+  idempotencyKey String   @unique
+  commandHash    String
+  result         Json
+  createdBy      String
+  createdAt      DateTime @default(now())
+  profile        AccountingCustomerProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+
+  @@index([profileId, createdAt])
+  @@map("accounting_customer_commands")
+}
+
+model AccountingCustomerOpeningAttribution {
+  id                String   @id @default(cuid())
+  openingReviewId   String
+  lineKey           String
+  sequence          Int
+  financialRecordId String?
+  contractId        String?
+  reference         String
+  reason            String
+  idempotencyKey    String   @unique
+  commandHash       String
+  createdBy         String
+  createdAt         DateTime @default(now())
+  openingReview     AccountingCustomerOpeningReview @relation(fields: [openingReviewId], references: [id], onDelete: Restrict)
+  financialRecord   AccountingFinancialRecord? @relation(fields: [financialRecordId], references: [id], onDelete: Restrict)
+  contract          SalesContract? @relation(fields: [contractId], references: [id], onDelete: Restrict)
+
+  @@unique([openingReviewId, lineKey, sequence])
+  @@map("accounting_customer_opening_attributions")
 }
 
 model AccountingExceptionCase {
@@ -6144,6 +6203,7 @@ model AccountingCustomerOpenItem {
   profile         AccountingCustomerProfile            @relation(fields: [profileId], references: [id], onDelete: Restrict)
   invoice         AccountingCommercialCustomerInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
   allocationLines AccountingSettlementAllocationLine[]
+  sourceSettlements AccountingSettlementAllocation[] @relation("CustomerCreditSettlementSource")
 
   @@unique([invoiceId, kind])
   @@index([profileId, dueAt])
@@ -6160,6 +6220,12 @@ model AccountingTreasuryTransaction {
   kind               String
   direction          String
   amountRials        Decimal                             @db.Decimal(20, 0)
+  componentKind      String                              @default("BANK")
+  receiptGroupId     String?
+  checkInstrumentId  String?                             @unique
+  sourceParentId     String?
+  sourceAssetLedgerId String?
+  legacyRefundId     String?
   idempotencyKey     String                              @unique
   sourceType         String
   sourceId           String
@@ -6173,12 +6239,29 @@ model AccountingTreasuryTransaction {
   allocations        AccountingSettlementAllocation[]
   bankMatches        AccountingBankReconciliationMatch[]
   pettyCashAdvance   AccountingPettyCashAdvance?
+  checkInstrument    AccountingCheckInstrument?          @relation(fields: [checkInstrumentId], references: [id], onDelete: Restrict)
+  adjustments        AccountingCustomerReceiptAdjustment[]
+  sourceResolution   AccountingCustomerReceiptResolution?
 
   @@unique([sourceType, sourceId, sourceVersion])
   @@index([profileId, occurredAt])
   @@index([financialAccountId, occurredAt])
   @@index([refundOfId])
   @@map("accounting_treasury_transactions")
+}
+
+model AccountingCustomerReceiptResolution {
+  id             String @id @default(cuid())
+  receiptId      String @unique
+  occurredAt     DateTime
+  evidence       Json
+  idempotencyKey String @unique
+  commandHash    String
+  createdBy      String
+  createdAt      DateTime @default(now())
+  receipt        AccountingTreasuryTransaction @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+
+  @@map("accounting_customer_receipt_resolutions")
 }
 
 model AccountingSupplyChainCommand {
@@ -6190,6 +6273,26 @@ model AccountingSupplyChainCommand {
   createdAt      DateTime                         @default(now())
 
   @@map("accounting_supply_chain_commands")
+}
+
+model AccountingCustomerReceiptAdjustment {
+  id                String                        @id @default(cuid())
+  receiptId         String
+  kind              String
+  deltaRials        Decimal                       @db.Decimal(20, 0)
+  occurredAt        DateTime
+  ledgerVoucherId   String                        @unique
+  idempotencyKey    String                        @unique
+  commandHash       String
+  reason            String
+  reference         String
+  createdBy         String
+  createdAt         DateTime                      @default(now())
+  receipt           AccountingTreasuryTransaction @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  ledgerVoucher     AccountingLedgerVoucher       @relation(fields: [ledgerVoucherId], references: [id], onDelete: Restrict)
+
+  @@index([receiptId, occurredAt])
+  @@map("accounting_customer_receipt_adjustments")
 }
 
 model AccountingSupplyChainCommandAudit {
@@ -6382,7 +6485,8 @@ model AccountingSupplierSettlementTransaction {
 
 model AccountingSettlementAllocation {
   id                    String                               @id @default(cuid())
-  treasuryTransactionId String
+  treasuryTransactionId String?
+  creditItemId          String?
   reversesId            String?                              @unique
   reversedById          String?                              @unique
   reason                String?
@@ -6390,7 +6494,8 @@ model AccountingSettlementAllocation {
   ledgerVoucherId       String?                              @unique
   createdBy             String
   createdAt             DateTime                             @default(now())
-  transaction           AccountingTreasuryTransaction        @relation(fields: [treasuryTransactionId], references: [id], onDelete: Restrict)
+  transaction           AccountingTreasuryTransaction?       @relation(fields: [treasuryTransactionId], references: [id], onDelete: Restrict)
+  creditSource          AccountingCustomerOpenItem?           @relation("CustomerCreditSettlementSource", fields: [creditItemId], references: [id], onDelete: Restrict)
   reverses              AccountingSettlementAllocation?      @relation("AccountingAllocationReversal", fields: [reversesId], references: [id], onDelete: Restrict)
   reversedBy            AccountingSettlementAllocation?      @relation("AccountingAllocationReversal")
   lines                 AccountingSettlementAllocationLine[]
@@ -6657,6 +6762,8 @@ model AccountingCheckInstrument {
   serialNumber  String
   bankName      String
   amountRials   Decimal                          @db.Decimal(20, 0)
+  clearedRials  Decimal                          @default(0) @db.Decimal(20, 0)
+  unpaidRials   Decimal                          @default(0) @db.Decimal(20, 0)
   dueAt         DateTime
   status        String
   custodianId   String?
@@ -6664,6 +6771,7 @@ model AccountingCheckInstrument {
   createdBy     String
   createdAt     DateTime                         @default(now())
   events        AccountingCheckInstrumentEvent[]
+  receipt       AccountingTreasuryTransaction?
 
   @@unique([legalEntityId, sayadId])
   @@index([profileId, dueAt, status])
@@ -6674,6 +6782,7 @@ model AccountingCheckInstrumentEvent {
   id                 String                    @id @default(cuid())
   checkInstrumentId  String
   sequence           Int
+  idempotencyKey     String?                   @unique
   eventType          String
   occurredAt         DateTime
   actorId            String

@@ -81,7 +81,7 @@ type ProvisionCommand = Readonly<{ legalEntityId: string; relationshipId: string
   partySourceId: string; displayName: string; approvedAt: Date; actor: CustomerTreasuryActor }>;
 export type CustomerSaleRecognitionCommand = Readonly<{
   bookId: string; fiscalYearId: string; periodId: string; contractId: string; contractVersion: number; partySourceId: string;
-  partyDisplayName: string; commercialInvoiceNumber: string; transferredAt: Date; dueAt: Date;
+  partyDisplayName: string; commercialInvoiceNumber: string; financialRecordId?: string; transferredAt: Date; dueAt: Date;
   policy: { id: string; version: number; carriage: 'CUSTOMER_APPOINTED' | 'SABALAN_APPOINTED' | 'CONTRACTUAL_EXCEPTION';
     recognitionPoint: 'GUARD_EXIT' | 'DESTINATION_ACCEPTANCE' | 'EXPLICIT_EXCEPTION' };
   evidence: Evidence;

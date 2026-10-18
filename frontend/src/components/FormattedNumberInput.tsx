@@ -17,6 +17,7 @@ interface FormattedNumberInputProps {
   max?: number;
   step?: number;
   disabled?: boolean;
+  required?: boolean;
   id?: string;
   name?: string;
   onFocus?: () => void;
@@ -25,6 +26,7 @@ interface FormattedNumberInputProps {
   decimalScale?: number | null;
   commitOnBlur?: boolean;
   'aria-invalid'?: boolean;
+  'aria-label'?: string;
   'aria-describedby'?: string;
 }
 
@@ -38,6 +40,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   max,
   step = 1,
   disabled = false,
+  required = false,
   id,
   name,
   onFocus,
@@ -46,6 +49,7 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
   decimalScale = 4,
   commitOnBlur = true,
   'aria-invalid': ariaInvalid,
+  'aria-label': ariaLabel,
   'aria-describedby': ariaDescribedBy
 }) => {
   const [displayValue, setDisplayValue] = useState<string>('');
@@ -105,6 +109,13 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
       return;
     }
 
+    if (decimalScale === null) {
+      const formatted = formatNumericInputText(rawValue);
+      setDisplayValue(formatWhileTyping ? formatted.displayText : formatted.canonicalText);
+      if (commitOnBlur) { onTextChange?.(formatted.canonicalText); onChange?.(clamp(parseFormattedNumber(rawValue))); }
+      onBlur?.();
+      return;
+    }
     const roundedValue = roundToScale(clamp(parseFormattedNumber(rawValue)));
     setDisplayValue(formatNumberForScale(roundedValue));
     if (commitOnBlur) onTextChange?.(
@@ -187,12 +198,14 @@ const FormattedNumberInput: React.FC<FormattedNumberInputProps> = ({
       placeholder={placeholder}
       className={className}
       disabled={disabled}
+      required={required}
       id={id}
       name={name}
       min={min}
       max={max}
       step={step}
       aria-invalid={ariaInvalid}
+      aria-label={ariaLabel}
       aria-describedby={ariaDescribedBy}
     />
   );

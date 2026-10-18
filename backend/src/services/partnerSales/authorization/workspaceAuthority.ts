@@ -27,6 +27,7 @@ export type PartnerWorkspaceAuthority = {
 export async function resolvePartnerWorkspaceAuthority(
   tx: Prisma.TransactionClient,
   actorId: string,
+  purpose?: 'ACCOUNTING',
 ): Promise<PartnerWorkspaceAuthority> {
   const actor = await tx.user.findUnique({
     where: { id: actorId },
@@ -81,6 +82,16 @@ export async function resolvePartnerWorkspaceAuthority(
         (action === 'FINANCIAL_PROCESS' || await shared('accounting', null, 'admin'))) {
       add({ action, rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY' });
     }
+  }
+  // Accounting's policy never consumes CRM, responder or fulfillment grants.
+  // Read its complete live authority without constructing those other bridges.
+  // Credit terms are the remaining Accounting-purpose PROFILE action below.
+  if (purpose === 'ACCOUNTING') {
+    if (atLeast(FEATURES.ACCOUNTING_PARTNER_TERMS_MANAGE, 'edit')) {
+      add({ action: 'CREDIT_TERMS_MANAGE', rootKind: 'PROFILE', purpose: 'ACCOUNTING', scope: 'COMPANY' });
+    }
+    return { isSystemAdmin, canViewAssigned, canRespondAssigned, canManageInquiries, grants,
+      disabledFeatures: effective.disabledFeatures };
   }
   if (await shared('logistics', FEATURES.LOGISTICS_LOADINGS_VIEW, 'view') || await shared('security', null, 'view')) {
     add({ action: 'FULFILLMENT_READ', rootKind: 'CASE', purpose: 'FULFILLMENT', scope: 'COMPANY' });

@@ -44,9 +44,7 @@ export function partnerInternalPhysicalFacts(productRowId: string, graph?: unkno
 
 /** Copy only approved Sabalan money and allowlisted physical facts. The graph's
  * commercial amounts and the customer projection are never serialized here. */
-export function projectPartnerInternalContent(sourceSnapshot: unknown, graph?: unknown) {
-  let canonicalGraph: CanonicalProductGraph | undefined;
-  try { if (graph) canonicalGraph = parseCanonicalProductGraph(graph); } catch { /* Historical incomplete geometry cannot prove a monetary breakdown. */ }
+function readPartnerInternalPreparation(sourceSnapshot: unknown) {
   const preparation = object(object(sourceSnapshot).partnerPreparation);
   const parsed = SabalanInternalRecordViewSchema.pick({ products: true, totals: true, sabalanPaymentPlan: true }).safeParse({
     products: array(preparation.products).map(row => ({ productRowId: row.productRowId, description: row.description,
@@ -57,8 +55,23 @@ export function projectPartnerInternalContent(sourceSnapshot: unknown, graph?: u
     totals: preparation.totals, sabalanPaymentPlan: preparation.paymentPlan,
   });
   const owner = RevisionRefSchema.safeParse(preparation.owner);
-  if (!parsed.success || !owner.success) return { items: [], totals: undefined, paymentPlan: undefined };
-  const items = parsed.data.products.map(product => {
+  return parsed.success && owner.success ? parsed.data : undefined;
+}
+
+/** Lists use the same complete monetary schema validation as detail documents,
+ * without reconstructing print geometry that no list row consumes. */
+export function projectPartnerInternalSummary(sourceSnapshot: unknown) {
+  const prepared = readPartnerInternalPreparation(sourceSnapshot);
+  return { totals: prepared?.totals, paymentPlan: prepared?.sabalanPaymentPlan };
+}
+
+export function projectPartnerInternalContent(sourceSnapshot: unknown, graph?: unknown) {
+  const prepared = readPartnerInternalPreparation(sourceSnapshot);
+  if (!prepared) return { items: [], totals: undefined, paymentPlan: undefined };
+  const preparation = object(object(sourceSnapshot).partnerPreparation);
+  let canonicalGraph: CanonicalProductGraph | undefined;
+  try { if (graph) canonicalGraph = parseCanonicalProductGraph(graph); } catch { /* Historical incomplete geometry cannot prove a monetary breakdown. */ }
+  const items = prepared.products.map(product => {
     const physical = partnerInternalPhysicalFacts(product.productRowId, graph);
     const printPhysical = partnerPhysicalPrintDetails(product.productRowId, graph);
     let wholesalePricing = product.wholesalePricing;
@@ -85,5 +98,5 @@ export function projectPartnerInternalContent(sourceSnapshot: unknown, graph?: u
       ...(wholesalePricing ? { wholesalePricing } : {}),
       totalPrice: product.wholesaleLineTotal ?? new ExactDecimal(product.quantity).mul(product.wholesaleUnitPrice).toFixed() };
   });
-  return { items, totals: parsed.data.totals, paymentPlan: parsed.data.sabalanPaymentPlan };
+  return { items, totals: prepared.totals, paymentPlan: prepared.sabalanPaymentPlan };
 }

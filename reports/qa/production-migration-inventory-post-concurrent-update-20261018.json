@@ -1,0 +1,4298 @@
+{
+  "observedAt": "2026-10-18T07:21:42.611665+00:00",
+  "sshExitCode": 0,
+  "stderr": "time=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_INQUIRY_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_POLICY_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_FRONTEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_BACKEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_SCHEMA_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_COMMIT\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"DEPLOYMENT_BACKEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"DEPLOYMENT_INQUIRY_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_SOURCE_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"DEPLOYMENT_FRONTEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_BACKEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"DEPLOYMENT_FRONTEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_FRONTEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_SCHEMA_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_COMMIT\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_POLICY_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"DEPLOYMENT_BACKEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_SOURCE_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"DEPLOYMENT_INQUIRY_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:53Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_INQUIRY_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_FRONTEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_SCHEMA_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"DEPLOYMENT_BACKEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"DEPLOYMENT_INQUIRY_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_COMMIT\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_SOURCE_HASH\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_INQUIRY_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_BACKEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"DEPLOYMENT_FRONTEND_IMAGE\\\" variable is not set. Defaulting to a blank string.\"\ntime=\"2026-10-18T07:21:54Z\" level=warning msg=\"The \\\"PERFORMANCE_RELEASE_POLICY_HASH\\\" variable is not set. Defaulting to a blank string.\"\n",
+  "productionCommit": "a2c75f1027a069e91837ff433e1c91cdc7746798",
+  "migrations": [
+    {
+      "name": "20250917200442_first_migtration",
+      "checksum": "194bbec7e3448b374ab95f12c9877c6d0137e4271cde759599750cf40b674fa6",
+      "finishedAt": "2026-02-22T21:50:57.904963+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20250917211553_second_migration",
+      "checksum": "3533d9401cd2c7d0c4bb1547efc14900c840661ccd45bef767e1d90265e410f0",
+      "finishedAt": "2026-02-22T21:50:58.017621+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20250917221333_enhance_contract_templates",
+      "checksum": "c224ee0b5980f42a7237483cccf5da9f9ecdb45168a9f0b5897735a7796eb0fb",
+      "finishedAt": "2026-02-22T21:50:58.030526+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20250921183825_security_management_system",
+      "checksum": "91ca78c4e9a256c7220c05e37223871a10ac297b613d1d167c662cc17feac564",
+      "finishedAt": "2026-02-22T21:50:58.114487+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20250921194749_exception_handling_system",
+      "checksum": "fe85470f309864c59e6df4be8a4b912cf4cd767fc8cccfe11e77c9da00140e81",
+      "finishedAt": "2026-02-22T21:50:58.17935+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251011111241_workspace_foundation",
+      "checksum": "10e11c2ee7a3df775088c3dea24c6497d4910af8185901483009b1cea7e9e26c",
+      "finishedAt": "2026-02-22T21:50:58.356131+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251011144852_enhance_crm_customer_model",
+      "checksum": "62b59fc14425151b310c58aecd003f6bd1ad6524720a85045f473540f8ba1a97",
+      "finishedAt": "2026-02-22T21:50:58.416905+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251011153735_add_product_catalog_system",
+      "checksum": "4eeccf416b71cfa3cbc20e5c142e362a2b3ac85bc866be17f847cdcee2d03d48",
+      "finishedAt": "2026-02-22T21:50:58.473676+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251011153913_fix_product_codes_to_string",
+      "checksum": "cd635a256f7a997505b4f25cad64360ee9f04431932cad9d4319ddf87bd145a9",
+      "finishedAt": "2026-02-22T21:50:58.519516+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251011163745_add_delivery_payment_models",
+      "checksum": "2da4baffdfb3828a05a9940fb5b42e6d3ea320249ffd29a68545ada7eeb2f8c6",
+      "finishedAt": "2026-02-22T21:50:58.609667+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251028213013_add_project_manager_fields",
+      "checksum": "b214cc19a920d535bfc1b100f740373322248ca817f9a5ac8e183c4c9bd3c478",
+      "finishedAt": "2026-02-22T21:50:58.79158+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251029100149_add_services_and_cutting_types",
+      "checksum": "b74785f7e966267b177c6f8b213c3169677a864afb59f5647e16c70e651ce525",
+      "finishedAt": "2026-02-22T21:50:58.835611+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251101084919_add_price_per_meter_to_cutting_type",
+      "checksum": "b477cc6271f92b36501912334ce7065f49db87a083a1ce34e2239dc505ae68cd",
+      "finishedAt": "2026-02-22T21:50:58.845374+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251102103213_add_sub_service_model",
+      "checksum": "aba8313d9123eb56e2ef975838fe8bc879c011eaf679f84b1cc0e14c65df150f",
+      "finishedAt": "2026-02-22T21:50:58.871767+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251104101111_add_stair_system_fields",
+      "checksum": "831249345e8b4a8a563ec6b053bb779ee75277e1b08a6a75548ed3c3090a27f5",
+      "finishedAt": "2026-02-22T21:50:58.882548+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251117082249_add_stair_standard_lengths",
+      "checksum": "bb97312251d1d30e888b043849f09cd88b3dcb0d104d2b18f96fb480bca7a8be",
+      "finishedAt": "2026-02-22T21:50:58.910002+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251117102538_add_layer_types",
+      "checksum": "ef4d7826769fff546b82d1a943cd053bb536f55f230bfa8871e4a2241388d28b",
+      "finishedAt": "2026-02-22T21:50:58.932463+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251117155243_add_stone_finishing",
+      "checksum": "bdf50e9294543b0e5b1c3cd16d71c809618a76f8c1af4a5784715590ff18ef7c",
+      "finishedAt": "2026-02-22T21:50:58.953824+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251125120000_add_product_contract_visibility",
+      "checksum": "b632088181f2d19fba8d6b6ccc6494d803d591439d18db42a75fe33de9dbd66c",
+      "finishedAt": "2026-02-22T21:50:58.970091+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251221181049_add_credit_payment_method_and_fields",
+      "checksum": "3369ce93cdc4c24a3385a602f90d47e197a4fe26703d3f4e00b43bc3f5d89b52",
+      "finishedAt": "2026-02-22T21:50:58.980942+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251227175650_remove_credit_add_check_number_cash_type",
+      "checksum": "926f66fbff02fbcb62d2ef133e9ea54dd020679072896a41bdb5c3e1434aa73b",
+      "finishedAt": "2026-02-22T21:50:59.017802+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251227182636_change_currency_default_to_toman",
+      "checksum": "4b84c88b6ee6c89670ddc9656e1594c1acf8e893eef76ef47e711e5b989e0ac5",
+      "finishedAt": "2026-02-22T21:50:59.031792+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20251228090815_add_contract_verification_code",
+      "checksum": "945733e127cf26358edfed5c1310df737f701c45fb052e21e79fa8947d0a6a2d",
+      "finishedAt": "2026-02-22T21:50:59.078675+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260201215525_add_payment_check_owner_handover",
+      "checksum": "7b4383b95eca62ddef1a0a0c3d2036008455b1da031264b48205be567f24fc36",
+      "finishedAt": "2026-02-22T21:50:59.089588+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260212161732_add_crm_customer_owner_tracking",
+      "checksum": "d13377233d69cb88132fcad2483b757ffd22092518c6f30d2826b1886ebaad6e",
+      "finishedAt": "2026-02-22T21:50:59.123898+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260215190000_add_contract_public_confirmation",
+      "checksum": "e1ddb5d1e470f7eed5b8134bb87970833688eb8d02bca5819e5f16ea2ae0abf7",
+      "finishedAt": "2026-02-22T21:50:59.206576+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260529120000_add_crm_contact_soft_delete",
+      "checksum": "5a8ac7629dd2a245885190ef61655707748b365161cb1f6cb24181397843cd4d",
+      "finishedAt": "2026-05-29T17:02:04.854915+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260531000100_add_creator_sequence_to_sales_contracts",
+      "checksum": "ae4b8da31e222ad96e75f11512fc853fdf75ba90d73bdc647ad30b3758a7e860",
+      "finishedAt": "2026-05-31T09:51:05.119454+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260604000100_add_accounting_workspace",
+      "checksum": "b1ba99158468b8376cc56111863995ba3d2f29fb185cd853598c7a7fa8fe8fc2",
+      "finishedAt": "2026-06-04T13:29:24.887768+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260606000100_add_system_invoice_approval",
+      "checksum": "bf220d6bf6fa50c42afb413339b3dfa47e9cc3f065cd2a96e4b5d3b79c30baaf",
+      "finishedAt": "2026-06-05T21:19:58.489125+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260606000200_accounting_rial_and_sepidar_amount",
+      "checksum": "5365105c3357dbb3832b11968285f8066aa81319366c40d0d7767317b01e7d40",
+      "finishedAt": "2026-06-06T10:21:29.700936+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260614120000_add_stone_finishing_unit_pricing",
+      "checksum": "360c4ff43086efd7d0e56cdbf593b1b436ea353573e5b966782e3f12009e63c5",
+      "finishedAt": "2026-06-11T16:19:05.209422+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260617120000_add_contract_discount_ranges",
+      "checksum": "ffe430c879bc38e91a9135d51e409201e06d6cfea53568961be5d69f636eae1c",
+      "finishedAt": "2026-06-14T15:39:08.130059+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260621120000_add_catalog_service_images",
+      "checksum": "919ecf30fcfb5ec68fc24fb2595362f1a14f00798f889f38a30a7963783eba15",
+      "finishedAt": "2026-06-18T05:03:16.891126+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260623120000_add_crm_referrer_and_project_marketer",
+      "checksum": "456e341e67c5b4abc04cb41bb12c5b6388b6d064c351a242ef680f653e09ed0f",
+      "finishedAt": "2026-06-20T14:11:49.057324+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260628120000_add_catalog_codes_for_excel_sync",
+      "checksum": "c47fc0c24c525618e19a71bdba445e2f97a4e3cd0236137efdc5f58da5b6f26a",
+      "finishedAt": "2026-06-25T17:27:06.210536+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260629120000_add_logistics_workspace",
+      "checksum": "2c12a5a880dc02f2b651dd39f25caa58d30412ce502e47f8e2fc723410bc2bad",
+      "finishedAt": "2026-06-26T16:11:44.202714+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260704120000_security_vehicle_gate_operations",
+      "checksum": "9227c50411a74a47c4f2a20a5dbf376f79057474904a59c361625a4b71338537",
+      "finishedAt": "2026-07-04T09:27:30.628929+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260704133000_expand_accounting_correction_lifecycle",
+      "checksum": "c94653a447829a8c7904cb0048ccdfda9cede3f6e52a7cdd2142d624edba45f5",
+      "finishedAt": "2026-07-04T13:09:19.166821+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260706120000_allow_replacement_invoice_number_reuse",
+      "checksum": "511a97ed79083461c86873f9ffa9ad2f48c9e71a06b89eea0e5ed27a97f7a5a9",
+      "finishedAt": "2026-07-06T09:14:04.694786+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260707000100_vehicle_registry_and_flag_lifecycle",
+      "checksum": "97bc04f73f4b3180a9fc06d1d2828583e812c532e97c29f7b7f593d2cad5de42",
+      "finishedAt": "2026-07-07T06:22:50.05662+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260707000200_add_security_driver_queue",
+      "checksum": "9ba9883723e67e3d9e7550e6f76ad90c175022a1ad6f135a1846ef6880f67062",
+      "finishedAt": "2026-07-07T12:12:48.168659+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260707000300_add_security_annual_shift_planning",
+      "checksum": "5c86ca8623c5a50a432f9539f75ba77df9aaf595cb9b28d79b85955ffadee741",
+      "finishedAt": "2026-07-07T14:36:29.690102+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260708000100_add_security_shift_probable_no_show",
+      "checksum": "0c4f58ac125b403129bfa771cc73c65eb62f39af5177876b590a33f52ce760d0",
+      "finishedAt": "2026-07-08T05:11:12.271477+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260708000200_add_logistics_driver_requests",
+      "checksum": "f5ed62de4cbd9f880762e507e80d98691feaf44fe0fb1129d28484de3220ceca",
+      "finishedAt": "2026-07-08T12:18:58.516527+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260709000100_loading_driver_pool_and_allocations",
+      "checksum": "7fb1ff5373d55a5d300a246b6b21838949b55a439b5cdc503f2bed8de83ea1c2",
+      "finishedAt": "2026-07-09T06:32:26.249991+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260709000200_security_shift_log_and_sabalan_calendar",
+      "checksum": "4fd51780cce9d0cf95a216e42681e889f2aa282d9f1b81e8cea0700b3b9de7d0",
+      "finishedAt": "2026-07-09T09:28:44.625406+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260711000100_shift_log_participants_and_attachments",
+      "checksum": "e451130c6982cf9a3cdbd3f54430ee2e434b5132db087da50dd9a15477ef4561",
+      "finishedAt": "2026-07-11T10:35:42.959925+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260711000200_organizational_personnel",
+      "checksum": "575bb1d14753687af4b6982d3ec220f608df33a77c978647520d42a6bf457316",
+      "finishedAt": "2026-07-11T12:44:21.303089+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260712000100_crm_pipeline_followups",
+      "checksum": "8a3957ecdb2ef1edf4deec3105dd4db524462ad1800b24cf91f90fa608571b1d",
+      "finishedAt": "2026-07-12T09:09:13.898535+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260712000200_personal_leave_and_personnel_shift_participants",
+      "checksum": "18ee9bc5bedc7478f43c1793dabb853d5b31a38917e764f02a43e50ff2089b2b",
+      "finishedAt": "2026-07-12T13:09:08.462759+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260713000100_security_attendance_roster",
+      "checksum": "d62ca88c853482a28c3f0b851f496e8ddf9e6d0fe9dce2293af455aafaf93df1",
+      "finishedAt": "2026-07-13T08:10:55.056113+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260714000100_security_instant_report_categories",
+      "checksum": "c578f5f338bd9d8157d0a4b1fcf1666ee7ef2e47d6d67300d291c8ce4acb66cc",
+      "finishedAt": "2026-07-14T09:28:07.172043+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260715000100_optional_project_city",
+      "checksum": "b2874de12a1f76e938bc49a99ef23c2bc73fa4abda0b003bbae6191f6f4ef03c",
+      "finishedAt": "2026-07-15T10:13:12.353392+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260715000200_sales_reporting_foundation",
+      "checksum": "de7febe4092b78a5626caa3ab4f0d6c2643b092ba4b4b59687c9f06d62bb69ed",
+      "finishedAt": "2026-07-15T12:05:05.17812+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260718153000_add_personnel_work_schedules",
+      "checksum": "db6452795afc13b5a287339245feb0257ac6a5c17802d50760bf9f268f6f9293",
+      "finishedAt": "2026-07-18T08:58:40.080667+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260719000100_hr_foundation",
+      "checksum": "b16f66ab681cc6df1e3f13391df6ea84ce4da5035da0e317cbe4b0e283132a1b",
+      "finishedAt": "2026-07-19T13:54:29.880626+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260720000100_security_report_attendance_operations",
+      "checksum": "c40418f65f4441f7fce8acfa4a229bc5667da6f9ce598b83fdd0d798f24c89bd",
+      "finishedAt": null,
+      "rolledBackAt": "2026-07-21T05:57:47.750789+00:00"
+    },
+    {
+      "name": "20260720000100_security_report_attendance_operations",
+      "checksum": "ce34021d80ae27545ad3a61977bd176abac40ad4cee211b1d34e03c37cb9b729",
+      "finishedAt": "2026-07-21T05:59:57.75642+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260721000100_hr_hiring_workflow",
+      "checksum": "b78e44a887e09cf4c944cd0582fe07f373589b250035c3f02265e57dfbef162c",
+      "finishedAt": "2026-07-21T11:13:06.992675+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260721000100_identity_session_personnel_management",
+      "checksum": "52be01386f6fb6334b54967dbf95e098ae43382c7a41053a0fef720b0edb95fb",
+      "finishedAt": "2026-07-21T10:03:41.349401+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260721000200_auth_event_approximate_location",
+      "checksum": "b59170367a339cc2e2e30e5e9c847d91854f54099dd177fb2163421d39438fba",
+      "finishedAt": "2026-07-21T10:03:41.364109+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260721000200_hr_exceptional_personnel_audit",
+      "checksum": "442cc7faea833992856df23cac29fa32ce82460473033fb5aa5c1eb3c0321134",
+      "finishedAt": "2026-07-21T12:44:44.100167+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260721000300_browser_profile_per_user_identity",
+      "checksum": "4b97e354481ba3c22d3a0ef83f09f29bbb37b938e4b3cb472622ab24d86ab059",
+      "finishedAt": "2026-07-21T10:03:41.387088+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260721000300_hr_fixed_applicant_entry",
+      "checksum": "78a82c4835f729542153bee13349934f410f3ce9bec3aa30a7bad0f54e7a6d45",
+      "finishedAt": "2026-07-21T14:07:39.650803+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260723000100_hr_candidate_corrections",
+      "checksum": "e28f1589355a91d0aa4ddf6a597d68b15d06f0594a7f42d4d24506350a8df4a3",
+      "finishedAt": "2026-07-26T06:38:42.579429+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260723000200_hr_assessment_completion",
+      "checksum": "1d5ad125a80985fc771cf7c85cf2c14dfc8e34d8a7fb292f97eed44101b365a6",
+      "finishedAt": "2026-07-26T06:38:42.635803+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260723000300_hr_offer_decisions",
+      "checksum": "09d0b17d2dba4c1f5061845ca6ee8b9f780c5b07ee8d8eb9cbc281f350cdcbec",
+      "finishedAt": "2026-07-26T06:38:42.668786+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260724000100_contract_product_graph_state",
+      "checksum": "eadc5c045330f49fec523e745b95e2cef1715132611be003d5320d4be94ead35",
+      "finishedAt": "2026-07-25T03:18:11.435171+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260725000100_contract_edit_sessions",
+      "checksum": "ed848e7e0a5abc8c29a7999801f30be2f94a82aa71017f21bf249eacf3135b2f",
+      "finishedAt": "2026-07-25T12:08:29.745184+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260725000200_stable_contract_product_relations",
+      "checksum": "ba4ce91ae51583cbd3adff5e9198bac40e2dca05becdc6d3d7f5ef05f5d29b99",
+      "finishedAt": "2026-07-25T12:08:29.774922+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260725000300_product_mother_length",
+      "checksum": "5a2844fac5e36e5148fe209a29e565d9bb2ea6baf38dc911345da81fa315cfeb",
+      "finishedAt": "2026-07-25T12:08:29.783022+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260725000400_layer_type_calculation_unit",
+      "checksum": "0a3da61a9c1eed8e8de874b5ed3df59eaa8c24ecb3c3fe0a7bb939191d031abc",
+      "finishedAt": "2026-07-25T12:08:29.795272+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260726000100_hr_offer_otp_delivery",
+      "checksum": "3e2429bab6f6a416c92fa96a17d9a6b413dc8f17a169e2a28db356fae6ff9b3a",
+      "finishedAt": "2026-07-26T06:38:42.679755+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260726000100_security_shift_session_corrections",
+      "checksum": "499880441d7c94c206641349687a4d5852a8ee2055d20251d616b62a0bb1f58a",
+      "finishedAt": "2026-07-26T08:41:06.860154+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260726000200_guard_display_name",
+      "checksum": "c8a2e2bc3c1ff29b866a6053fd165b61279d41ee9965fc202009f775254c4d4b",
+      "finishedAt": "2026-07-26T13:22:01.244227+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260726000200_hr_hiring_governance",
+      "checksum": "059fd83a3183c56991a1752a848b36197f05cfac027a56f105cd464b0f962ba8",
+      "finishedAt": "2026-07-26T16:10:45.58681+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260727000100_hr_role_scoped_contract_review",
+      "checksum": "fc7211def69828a72a5ce6b74129fc64c4cf2ebaea2c99cb147e7a6d64bea34d",
+      "finishedAt": "2026-07-27T10:13:37.203313+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260727000200_hr_insurance_registration_path",
+      "checksum": "88ad0d531af0cccc59d6673c3cdc24617baa77549f65bc2118d8b9e487d0f67d",
+      "finishedAt": "2026-07-27T10:13:37.235287+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260727000300_hr_payroll_participation_review",
+      "checksum": "7865bcec67a09a9a99f92e88b7bbf8f2a88b137e179a397b24da7d7d1e31e134",
+      "finishedAt": "2026-07-27T10:13:37.247476+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260727000400_hr_activation_actor",
+      "checksum": "fe2e0eac249c01934eae639027d5dd81ab7fc991593b374bc120ea563b42b353",
+      "finishedAt": "2026-07-27T10:13:37.261571+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260727000500_hr_work_schedule_governance",
+      "checksum": "5bbebcfb4e88fd02d383f5640f2d40b4e7fb1a475311aa1f6b4c4e82004ec4da",
+      "finishedAt": "2026-07-27T10:13:37.348098+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260727000600_hr_record_archive_erasure",
+      "checksum": "c0b564f24357a5c817d7b9f1d3571419b38d405df1c2452a1926c17f64940883",
+      "finishedAt": "2026-07-28T12:43:49.771162+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260728000100_hr_erasure_operation_lease",
+      "checksum": "f7c46d9b44dde03077305c3408fa4b996e201851f558c5d35613fb339f9a72be",
+      "finishedAt": "2026-07-28T12:43:49.791168+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260728000100_system_recovery",
+      "checksum": "4583a2cc51f18b628794411a12c0bd5ab506a7a146cf6ce99cb5e40ba051be22",
+      "finishedAt": "2026-07-28T08:39:54.720535+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260728000200_hr_identity_evidence_modes",
+      "checksum": "d04280306e332eb901b0379da5dcc34a7d0b5b8f3a87732126c1db22f3b650ea",
+      "finishedAt": "2026-07-29T06:44:48.147391+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260728000300_hr_hiring_authority_revocation",
+      "checksum": "c6b4feaf0657059fac245955b0f1b82abd53d3f02e81d6525b7f612c4d9cf819",
+      "finishedAt": "2026-07-29T06:44:48.162284+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729000100_hr_work_items",
+      "checksum": "87f39902de9bf647bb852d1b202c02c9bc67d7a21597ff7fe4b16b1e8499fb67",
+      "finishedAt": "2026-07-29T15:40:17.022372+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729000100_notification_center_foundation",
+      "checksum": "ffb66d647eb474c258ffbd51bddcad0df8534f4ca9dfdf5a8eb410a96758ce08",
+      "finishedAt": "2026-07-29T14:57:40.147086+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729000200_support_ticket_foundation",
+      "checksum": "7b65c2e7f5692e96aa349d4f30015edb6e0a7f07b75741a89cf232f6a9b22a87",
+      "finishedAt": "2026-07-29T14:57:40.443447+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729000300_support_attachment_redaction",
+      "checksum": "058df7aaad5e93725f42c498028dd71a23fb3cd83e1ae7d75b61d0e06b9dc617",
+      "finishedAt": "2026-07-29T14:57:40.479228+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729000400_web_push_preferences",
+      "checksum": "ec565308e150e49577979c83b364e21fa0a36fbbc57475eb523ea450f36b1bd0",
+      "finishedAt": "2026-07-29T14:57:40.609665+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729000500_support_diagnostic_bundles",
+      "checksum": "2eebc6f5fa99b04ccee72cc410f8247acaa49d5918af7a1bcf42bad6898c3c8a",
+      "finishedAt": "2026-07-29T14:57:40.646683+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729000600_support_sla_policy",
+      "checksum": "8cc5b7f847db4bdc60551fd24f1083e43bfdfa86ef9f7249cb6a35c852e225e8",
+      "finishedAt": "2026-07-29T14:57:40.676726+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729000700_sensitive_snapshot_retention",
+      "checksum": "45facec1a4c43948bfa5abf583f0306c06d909fa055f4b06b8c8b923bfca2d11",
+      "finishedAt": "2026-07-29T14:57:40.688646+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729000800_support_ticket_idempotency",
+      "checksum": "d0a2c45ec791bd7c104025d0c5d276c1eefb7d654f464b2599b0360201be1e2a",
+      "finishedAt": "2026-07-29T14:57:40.710906+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729000900_unique_support_follow_up",
+      "checksum": "2125efcdc52f583a6f3f86325a37025c5f764f81ba6afa751d7e5a92852ef980",
+      "finishedAt": "2026-07-29T14:57:40.729532+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260729001000_api_idempotency",
+      "checksum": "d5b8788ab2e5c9cc2d77c3332dc24e9104014eb3c0d129eff166e58da9b632af",
+      "finishedAt": "2026-07-29T14:57:40.764881+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000100_dispatch_master_data",
+      "checksum": "e28d19f93d46f67eb8c73bb0c115b0215fdd4dffcd526ad436ce30b9505f22ab",
+      "finishedAt": "2026-08-08T10:23:28.173236+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000100_shipment_quantity_projections",
+      "checksum": "a949cffcaf85986c02bcd5b9fb30edc25563ccb9abd5d9aa17beb56caf5e65ec",
+      "finishedAt": "2026-08-08T10:23:28.292487+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000200_external_driver_personnel_continuity_fk",
+      "checksum": "d306040b45711e5d786e17e4e20f4aca577ba4d9f22654f32bf23386dd59bcf5",
+      "finishedAt": "2026-08-08T10:23:28.313433+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000200_shipment_quantity_review_corrections",
+      "checksum": "40c3601ad5dd218276cce5e588662fe4c9ed1218775ed11e14a8dcb6e44f72a4",
+      "finishedAt": "2026-08-08T10:23:28.366012+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000300_dispatch_master_data_lifecycles",
+      "checksum": "a994aad8f237a02da5d240b7b56a3d4dc242f7e88b0416fa519371aa8bd31e78",
+      "finishedAt": "2026-08-08T10:23:28.571112+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000300_shipment_return_evidence_constraints",
+      "checksum": "d3a1d3b6a23146985ec06d869c06f0c0b45554384bf9770cce228386949e9646",
+      "finishedAt": "2026-08-08T10:23:28.609192+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000400_external_registry_document_evidence",
+      "checksum": "e57f6f6a8db665f87ee66bab91127698b5e391ee470a29d231807db69f1d7ddc",
+      "finishedAt": "2026-08-08T10:23:28.675677+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000500_guard_driver_queue",
+      "checksum": "2b2daa96b1d011c2d02d9e9c24d54229aba2824e2f85747ac05a5a507c22815c",
+      "finishedAt": "2026-08-08T10:23:28.862137+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000510_guard_queue_snapshot_immutability",
+      "checksum": "755e49bceb3183855cc285cc81f89ddee15e7fe227a88dade0087c2765b855c6",
+      "finishedAt": "2026-08-08T10:23:28.883923+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000520_guard_queue_events_append_only",
+      "checksum": "69a3923673a2dab6897a6fdb20e1b2a38d348f287f88578c3f4d06bbb4b7d16b",
+      "finishedAt": "2026-08-08T10:23:28.895232+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000530_guard_queue_events_strict_append_only",
+      "checksum": "aa0a50d8f000168069e06484f9862ce003eb55932d4844fd6f733fb834162643",
+      "finishedAt": "2026-08-08T10:23:28.905717+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000600_logistics_allocations_dispatch_waybills",
+      "checksum": "149a859d210b0792601d5efa8e9148eaf4b877c30f6c66a4b63d46995748ac3f",
+      "finishedAt": "2026-08-08T10:23:29.303078+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000610_harden_allocation_revision_sealing",
+      "checksum": "4c960283c022725f25141deb94b7007e2601b8294195b6bd327b1c61de4cbe6b",
+      "finishedAt": "2026-08-08T10:23:29.340472+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000620_dispatch_driver_confirmation",
+      "checksum": "bb756ed3da0a2d61ccbe09948edb6923300d8a7cbf26efe403500783d6b568d3",
+      "finishedAt": "2026-08-08T10:23:29.656392+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000630_dispatch_confirmation_hardening",
+      "checksum": "8fc49d171873e521a494328b26382c73cb8f4d688327a657dc5a2aca64974014",
+      "finishedAt": "2026-08-08T10:23:29.718327+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000700_physical_gate_exit",
+      "checksum": "658a22924a059d5773ffa61a01caf5de01fbd5697f0eec01dd76217f0194774d",
+      "finishedAt": "2026-08-08T10:23:29.873463+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000710_align_physical_exit_lifecycle",
+      "checksum": "73e388cf743d6bc041f3e3329c3b76f8bf05dcf61aff8e6122b5f7b8adfb80f4",
+      "finishedAt": "2026-08-08T10:23:29.887994+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000800_dispatch_corrections_returns_outages",
+      "checksum": "a91b786c2616374807408d42de3d0193927128ec0527fbb24d6719cd529c8fc8",
+      "finishedAt": "2026-08-08T10:23:30.112629+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000810_dispatch_correction_reversal_constraint",
+      "checksum": "8336a994af76cc50d7b22da566b0fdf2cf8ea4f079e312593f72246e73b6da6d",
+      "finishedAt": "2026-08-08T10:23:30.127676+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000820_dispatch_correction_single_reversal",
+      "checksum": "c8ac702fa3453838a7a0f17574d1e07b0bd753ae54acd718ab2b593a4275967c",
+      "finishedAt": "2026-08-08T10:23:30.142008+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000830_dispatch_sms_session_attribution",
+      "checksum": "17e4aa69c1b98c786eebca732984629b9602e52eb5edfc7418cc87d334c4b933",
+      "finishedAt": "2026-08-08T10:23:30.171951+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000840_dispatch_outage_actual_window_and_evidence_immutability",
+      "checksum": "65f52b790764292aaf37ea43f88fe01f22b466935c69564b65627dc7f063a34d",
+      "finishedAt": "2026-08-08T10:23:30.186465+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000850_dispatch_recovery_evidence_identity_immutability",
+      "checksum": "aaa054ec0096051728a2ce4eabfafe1efb31bd582af80a59ed39ef5d3a578bb7",
+      "finishedAt": "2026-08-08T10:23:30.197129+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000860_dispatch_outage_approval_immutability",
+      "checksum": "0f1709c09b059da07db5b64a079ee0c4551e7f78a1b8d4568235fceaa2bae9ee",
+      "finishedAt": "2026-08-08T10:23:30.207168+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260807000870_dispatch_outage_dual_control_constraints",
+      "checksum": "8fd72943de034f7b2c21ff813d3bb27bd113b23be044440e5bddc8dc0f46cfce",
+      "finishedAt": "2026-08-08T10:23:30.220994+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808000000_dispatch_timeline_and_cutover_control",
+      "checksum": "5deca56ec30daccecffea140b2ffaf399d2d161039adf004afeb7b4af4c7c02c",
+      "finishedAt": "2026-08-08T10:23:30.405763+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808010000_dispatch_rehearsal_version",
+      "checksum": "c1d48917e08b3a3d80eb532575026a9b9ac3b52a61fd35f73f6816f50cf1ec03",
+      "finishedAt": "2026-08-08T10:23:30.424435+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808020000_dispatch_pilot_resume_approvals",
+      "checksum": "6ed4689ef2c051693c9f07eb74aa063f771149a8c0209d66a752009a7bfff808",
+      "finishedAt": "2026-08-08T10:23:30.470406+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808030000_legacy_cutover_write_boundary",
+      "checksum": "d5bc2aebcc08333889de2a84b2d4516dc5f76556392bbbff9d13f7571e4e387b",
+      "finishedAt": "2026-08-08T10:23:30.481888+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808040000_legacy_linked_target_delete_guard",
+      "checksum": "1d1ef087229d237bb116eca71a44a4e5f3356eefdd4d38709052d822caa670d7",
+      "finishedAt": "2026-08-08T10:23:30.497387+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808050000_legacy_linked_target_race_guard",
+      "checksum": "5c95e70ef709a76f6d0af5023b88c366cb17afd72e2b70b9d1569ca0a4ef877e",
+      "finishedAt": "2026-08-08T10:23:30.507221+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808060000_legacy_linked_target_status_guard",
+      "checksum": "55600ccc137990ec4cffdc8e84642b686bd556dd4ba0c7712e113bf4f8580304",
+      "finishedAt": "2026-08-08T10:23:30.520187+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808070000_security_personnel_report_export_audit",
+      "checksum": "1b0df8e10f6a8de24aa50a08c68abea1e1fc27774722ed43b8d2a504b67f2891",
+      "finishedAt": "2026-08-08T10:23:30.553587+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808090000_hr_redesign_data_contracts",
+      "checksum": "74d62d6fa0162fbf9b473e925c359a178b2e04611f001aafd0a0b31c2a3226b9",
+      "finishedAt": "2026-08-10T14:30:53.787015+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808090100_bind_formal_assessment_results",
+      "checksum": "20bdf9ec686ecfb428c9eb24002e7477361eba9a41bd22e805c549aed9f67032",
+      "finishedAt": "2026-08-10T14:30:53.906358+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808090200_enforce_formal_assessment_lineage",
+      "checksum": "0f2339c45d91d655a1b3faed05698317af513a5623990019e085d5e0c9b9385d",
+      "finishedAt": "2026-08-10T14:30:53.961402+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808090300_add_access_only_reconciliation_review",
+      "checksum": "839bfda34e22c198f41837773146734c86bc9e4ef7eb76951abbfa3dbcb0baed",
+      "finishedAt": "2026-08-10T14:30:53.972903+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260808133000_hr_authorization_enforcement",
+      "checksum": "67dc935671798d7ef7e2c4477edd1b41dba9aea2619643106220cfbc96852f71",
+      "finishedAt": "2026-08-10T14:30:54.011931+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260809000100_shipment_statement_data_contracts",
+      "checksum": "6d5791bba6ee49b8e1a325f433578eea5caa6746f4503f194752f2f5e75caf13",
+      "finishedAt": "2026-08-10T14:30:54.935721+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260809000110_harden_shipment_statement_data_contracts",
+      "checksum": "5e205ce696aa9093d0f07e46086d2006d6866312027fbdb8a6d6cdc8e46477dc",
+      "finishedAt": "2026-08-10T14:30:54.962236+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260809000120_review_harden_shipment_statement_contracts",
+      "checksum": "390f337cfdf73fb798bc6edc30d04a15c6d5bca20a1d0dfc8f951ab9f41218d6",
+      "finishedAt": "2026-08-10T14:30:55.045328+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260809000130_add_stale_dispatch_candidate_status",
+      "checksum": "f0d668653fe14cda761fc8e568d9d3908e9802cb61a7fadef46eb2f04b9d7ff5",
+      "finishedAt": "2026-08-10T14:30:55.057537+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260809000140_add_evidence_conflict_candidate_status",
+      "checksum": "505d0e41a0b4318470f2a4c3ffeff83dc7bb5576a89ef2af562546530577714c",
+      "finishedAt": "2026-08-10T14:30:55.068401+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260809093000_hr_duty_engine_guards",
+      "checksum": "8d081ddecbf0aebde13adaed3a15fc365234e19370d1d48dcd60aa86669410dc",
+      "finishedAt": "2026-08-10T14:30:55.111265+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260809120000_hr_organization_capacity_management",
+      "checksum": "b03c3340936f04f09e520f498a385da69f03f2a7b943437e18a97600f37a00b7",
+      "finishedAt": "2026-08-10T14:30:55.190622+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260809160000_hr_actionable_reconciliation_states",
+      "checksum": "aa5a3d77e0ffa8ad3132d81464012b16df9d60761dc9392341a16426713ffa66",
+      "finishedAt": "2026-08-10T14:30:55.208402+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260810120000_hr_interview_and_package_assessments",
+      "checksum": "b0482cd299cf97fe44b4d2c524b5e51cead6404edfbb151b3f8712e74be755ae",
+      "finishedAt": "2026-08-10T14:30:55.265629+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260810180000_hr_action_permission_cutover",
+      "checksum": "e6007b55a0f647622b0e7ef466d3b4c65c9203ec761876485e0c43da45f5c951",
+      "finishedAt": "2026-08-11T16:13:21.726395+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260811000000_zero_data_loss_deployment_control",
+      "checksum": "00ab7418c08c1bc6f03ca73dd1f89ae5bcc6c3d4ef8a95e327b21ab23c7112ef",
+      "finishedAt": "2026-08-11T14:01:36.029599+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260811120000_hr_company_evaluation_evidence_integrity",
+      "checksum": "e18ae2fa6fd2a7a45e6fc01bcb166ba01232021d81436ee37ad07da6bbaca1b9",
+      "finishedAt": "2026-08-11T16:13:21.740903+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260811130000_hr_action_permission_cutover_corrections",
+      "checksum": "1f442229463047ba72b9db51241cbd16e95b918d2ff635fda12e9060fbd38f39",
+      "finishedAt": "2026-08-11T16:13:21.761817+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260812120000_contract_lifecycle_governance",
+      "checksum": "761cc00aa89e000e54d3459dfbbee7d37b814e4ce21aaf4c5b0fcb981bea9e49",
+      "finishedAt": "2026-08-12T16:31:35.573477+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260816090000_contract_creation_draft_lifecycle",
+      "checksum": "c0904a099e29bc0e1493f5b6a48fcb90873fbb926903a8c7b4316f64f8b4e945",
+      "finishedAt": "2026-08-17T07:31:32.276298+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260816150000_sales_contract_correction_duty_chain",
+      "checksum": "d22fab3702c7548cf6333410f0037e35e75c3b0606efa3cb632cf1c05333eb51",
+      "finishedAt": "2026-08-17T14:32:31.930718+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260816153000_sales_contract_correction_source_version",
+      "checksum": "5081254a13227671563c2b40b39893a0c82b3e861c3e9e866758ccabcc9071c3",
+      "finishedAt": "2026-08-17T14:32:31.948798+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260819120000_contract_quantity_scale_three",
+      "checksum": "dd473dceb32c094e84731da901c6509352dfefc457f5236382a3d97968c78e8e",
+      "finishedAt": "2026-08-19T18:40:45.922727+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260819121000_financial_evidence_review_case",
+      "checksum": "c72ed03b2925fe82cc910c320d7f2a663988b2a8645bb4d4592f1444f725bc61",
+      "finishedAt": "2026-08-19T18:40:45.948403+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260819122000_approved_pricing_legacy_row_identity",
+      "checksum": "cae7539432465a082ba9c91d9ece16e60149469f80de82a287a4631ee848fe8c",
+      "finishedAt": "2026-08-19T18:40:45.96075+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260819123000_legacy_missing_contract_items",
+      "checksum": "0cd5abe6b06f77df395a44e7d743518ad52d1fed091f815aadc7a97dd19954d0",
+      "finishedAt": "2026-08-19T18:40:46.36004+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260822090000_allow_recovered_approved_pricing_rows",
+      "checksum": "1d5317a9bbd406de5d3f1034aa74c17b7ddeb9b410acb2d2a4856d2bc73e4de5",
+      "finishedAt": "2026-08-22T23:00:19.6842+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260822123000_cross_workspace_duty_history_receipts",
+      "checksum": "b3fcb2376ddfa70e1e2aebc4d29f28091cb744c8fee6eca8516268c643d0be34",
+      "finishedAt": "2026-08-22T23:00:19.726589+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260822123500_cross_workspace_duty_history_receipt_user_fk",
+      "checksum": "3a627aefa42c7b32ed6d4fbd59c7a32d42732224ed79f0cdf2638faebca6aa57",
+      "finishedAt": "2026-08-22T23:00:19.750148+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260823090000_hr_collateral_requirement_lineage",
+      "checksum": "c802b85eb309e7ae5c1ebd1492dd027d7b9c7fcd4529719e323182f90ca093e1",
+      "finishedAt": "2026-08-24T06:03:28.685999+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260823120000_simplify_hiring_compensation_review",
+      "checksum": "b9822f489dca448eef560aec44d905c4877cf2ac0b87fa8ea925d1d5e1781354",
+      "finishedAt": "2026-08-23T00:55:05.641762+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260823160000_version_collateral_original_returns",
+      "checksum": "b30a534dba5e3d2628f629db5ab758b657b8dccf58f3feb44c7b23ef3d6b3f68",
+      "finishedAt": "2026-08-23T00:55:05.689523+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260823170000_persist_pending_hiring_closure",
+      "checksum": "efa829f258fd8451297562def387ba5ae6d53841267cc0dcbd663c633e68e04c",
+      "finishedAt": "2026-08-23T00:55:05.705039+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260823180000_backfill_compensation_verification_deadlines",
+      "checksum": "3ccef8b3c3d55bf44460e2a85e944203dd4ca9f32014fa424d055f790b569391",
+      "finishedAt": "2026-08-23T00:55:05.736117+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260823190000_cross_workspace_duty_available_receipts",
+      "checksum": "11948cce87f7b5fe0511745d097122841a49942de0188c7383c7c1872096d661",
+      "finishedAt": "2026-08-24T06:03:28.721412+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260823200000_candidate_personnel_identity_conflicts",
+      "checksum": "dbc4c3f081c1f2623d1be6e237ae147861b99210d6138f1f2c96ac90b5b0b015",
+      "finishedAt": "2026-08-24T06:03:28.774985+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260823210000_direct_personnel_work_schedule_management",
+      "checksum": "32c5b54e8e6a44bd8fd192aa4efe41d601b8d1b3ec11a207eee59e1e8a288aaf",
+      "finishedAt": "2026-08-24T06:03:28.819072+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260823211000_company_manager_personnel_workspace_access",
+      "checksum": "38199b6a6fa31741b0d3bfbb326a4420be2ee1e4d8ca64c26aba16049c1e9493",
+      "finishedAt": "2026-08-24T06:03:28.833411+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260824120000_hr_hiring_followup_and_start_revision",
+      "checksum": "7446c99f55b15256287894f14c8ae8384264334bba94770c6242b2d50ff19e3d",
+      "finishedAt": "2026-08-25T12:00:27.497392+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260824143000_formal_assessment_view_permission",
+      "checksum": "81a531c0c1595122a6f531c813068641f95e6fdb73f57cb20107fd281d3dfe33",
+      "finishedAt": "2026-08-25T12:00:27.514447+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260824150000_formal_assessment_explanation_and_legacy_score",
+      "checksum": "ff7b22f3fb1cb1169f0a0b06bc87973f92c8289b4f09b7ccb6762e205b63d538",
+      "finishedAt": "2026-08-25T12:00:27.532641+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260826120000_candidate_sms_attempts_and_collateral_lines",
+      "checksum": "e7422cc37d6911c2821b580e865325c6a28bef7fad0f0c2a4549fc0fd5430752",
+      "finishedAt": "2026-08-26T16:32:14.02395+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260826130000_candidate_sms_provider_audit",
+      "checksum": "4cc4a733386f000b0518780260f585f360fdf97c85e730a10ce23c5866cd6de9",
+      "finishedAt": "2026-08-26T16:32:14.036537+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260827120000_hr_foundation_governed_deletion",
+      "checksum": "d09650e1997a5c858c71f62d0d282b6bc00e116a93a7df8982338d85aca2cfb4",
+      "finishedAt": "2026-08-27T23:36:03.28728+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260827120000_partner_profiles_and_cohort",
+      "checksum": "d63209034a0cf335c6f1292186692b728ccdb4ac208e7f1f7ab86db8b20ec138",
+      "finishedAt": "2026-08-27T23:36:03.562513+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260827120100_partner_inquiry_evidence",
+      "checksum": "fd32d8b6fdc2af90882d3f37921f5707d6c188843296d28859d238011683c1fd",
+      "finishedAt": "2026-08-27T23:36:03.774958+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260827120200_partner_case_pair_and_revisions",
+      "checksum": "dc9bc2585fdfd6ea5afadab946af8c7cc14ae09d5c969dcfb1388625caeb5303",
+      "finishedAt": "2026-08-27T23:36:04.081284+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260827120300_partner_pair_commit_constraints",
+      "checksum": "f0049e382e4e248df1ecb284af43173558fd01aa08015a9ec353a163d0788c2f",
+      "finishedAt": "2026-08-27T23:36:04.219403+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260827120400_partner_payments_outputs_and_corrections",
+      "checksum": "d1539e039e29cf0fb723594f24ef7b2c9a4e8e7c5821650ef208d5baca2e0c53",
+      "finishedAt": "2026-08-27T23:36:04.660722+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260827120500_partner_schema_integrity_hardening",
+      "checksum": "666e7a6a26051769146e4515e6d7f3a174c04dd096c4ebbd5574e90f1c918f20",
+      "finishedAt": "2026-08-27T23:36:04.690037+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260827120600_partner_exact_decimal_evidence",
+      "checksum": "4f359ff4070a5190517d9beb184b4a2eddee81a18cc575146624442912789e76",
+      "finishedAt": "2026-08-27T23:36:04.723797+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260827120839_partner_seal_payment_plan_evidence",
+      "checksum": "0368551b4529ff90f9c3485fc31b3639ad3caa49b344f97c4a19e9a472dffd30",
+      "finishedAt": "2026-08-27T23:36:04.734469+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260827123000_hr_foundation_legacy_baselines",
+      "checksum": "8887047dabcbd6ef2d6d13114b86b8b0f93c9c9045fe0e509fba2d8e1fa6511d",
+      "finishedAt": "2026-08-27T23:36:04.794123+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829120000_effective_scoped_action_authority",
+      "checksum": "7ae08b707a9cb78a1e90e1ad3258c6e8f54f87a00125a60ee9a7de72c6263d73",
+      "finishedAt": "2026-09-01T00:52:00.03344+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829121000_effective_authorization_audit",
+      "checksum": "166bbd4ae93b3f7075da1c5352854082ee00a8a373bff3d2d8b0bc21ea91620e",
+      "finishedAt": "2026-09-01T00:52:00.084798+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829122000_partner_profile_responder_assignment",
+      "checksum": "20e6d3b4970dc2f5226273e2a864950c177f23d4980759a28c6e96ad90fd7500",
+      "finishedAt": "2026-09-01T00:52:00.130633+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829124000_partner_inquiry_linear_successor",
+      "checksum": "c0c88864a8fa0f427be163af0f0f657f0545765efb7034c0b89e93973b06f9e6",
+      "finishedAt": "2026-09-01T00:52:00.162991+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829130000_partner_inquiry_notification_delivery",
+      "checksum": "68eb1f58a95fd5e296937fcc75d48cf2d8e3cc4debf405027895b8016e63b527",
+      "finishedAt": "2026-09-01T00:52:00.201807+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829130100_partner_inquiry_notification_legacy_boundary",
+      "checksum": "b2c2a22d3d792465eac60b6189c12fdaa23b82440b54611ed56ead62511cce10",
+      "finishedAt": "2026-09-01T00:52:00.214057+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829140000_partner_persona_exclusivity",
+      "checksum": "64e31c411d07fbba0505068bbed12ce5dc8ffe2987b9b3decacfe04d67bec3a3",
+      "finishedAt": "2026-09-01T00:52:00.240167+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829141000_partner_persona_race_guards",
+      "checksum": "b5c87ffebd1752dc1a176987d31f3414684278da966121d8ea00911d0efa0215",
+      "finishedAt": "2026-09-01T00:52:00.257698+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829142000_partner_edit_session_purpose",
+      "checksum": "77780ccff4f514e6aad03237696839c7bcd0e7040b91fa4fb6b0e1b2b0fcdc88",
+      "finishedAt": "2026-09-01T00:52:00.28109+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829143000_partner_persona_polymorphic_guard",
+      "checksum": "2ac6e521709235a3827a82ec96fd66dd9e45c5073b9cc37bfc2b9795ea95ba49",
+      "finishedAt": "2026-09-01T00:52:00.293963+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829144000_partner_inquiry_polymorphic_guard",
+      "checksum": "41d9372f3d29831f5dff92ec1d62726045ec0114de1f75fb2a97203abe9e0479",
+      "finishedAt": "2026-09-01T00:52:00.30553+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829145000_partner_recovery_purpose_backfill",
+      "checksum": "e535221f2efdec3922903451d72906399cc46df154e37839a94db93e35f80793",
+      "finishedAt": "2026-09-01T00:52:00.358939+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829150000_partner_profile_management_evidence",
+      "checksum": "a71bb2eb45ae8df134db930502af01d722dcefbbecd7667be48637fe6631328f",
+      "finishedAt": "2026-09-01T00:52:00.447444+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829151000_partner_profile_management_evidence_constraints",
+      "checksum": "9e8469c5a8c4b5a7a92937841199ff3410eceb2b1402ca7698d0c3c58ef0e991",
+      "finishedAt": "2026-09-01T00:52:00.468399+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829152000_partner_first_evidence_irreversibility",
+      "checksum": "f208cdc69d6b8940f98bb996e2d3dcf150783217ed3b6a9fef6482f0fb77a325",
+      "finishedAt": "2026-09-01T00:52:00.518611+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829153000_partner_root_profile_immutability",
+      "checksum": "e4678a9ab1c24ed2e206fb7a90df6d77205a512c8ceb18de2d2ac2cea7d26072",
+      "finishedAt": "2026-09-01T00:52:00.528474+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829154000_partner_case_root_guard_order",
+      "checksum": "fa0cb94198916450667e993a648591dfffee1d10241d99c5aaf383c6f037bb3e",
+      "finishedAt": "2026-09-01T00:52:00.540216+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829155000_partner_correction_persona_guard",
+      "checksum": "4d5b657a55699818972471becb989a0f12f71aaf1183b028ce15a05f02dbf8cd",
+      "finishedAt": "2026-09-01T00:52:00.55379+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829156000_partner_correction_persona_preflight",
+      "checksum": "0d7643bb2c0ae5fab948b490ced31a15fefb72f9f86bce3f0051faa8217369a0",
+      "finishedAt": "2026-09-01T00:52:00.57935+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260829160000_partner_crm_transfer",
+      "checksum": "8770e63ca99e5513d6cb76387ccb5174f69dbdb82437c2cdda259b8abbf90fdd",
+      "finishedAt": "2026-09-01T00:52:00.822411+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260830120000_partner_integration_runtime",
+      "checksum": "5755f93c8d990c1259df7a49c4beada5868c0a07b8baba7c2f87dec53f6665bb",
+      "finishedAt": "2026-09-06T12:57:26.104729+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260830160000_partner_integration_hardening",
+      "checksum": "cd3c26627500c57cf2356a20e31bc32a0c1da7137d1ac26e6d6dc5d1d144da7e",
+      "finishedAt": "2026-09-06T12:57:26.220712+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260830170000_partner_fulfillment_exact_owner",
+      "checksum": "3f29082dd99ea74d34c128b1f6cb05a9901f1c960c6de995f81b4f287bae7b56",
+      "finishedAt": "2026-09-06T12:57:26.251192+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831010000_partner_recovery_contract_finalization",
+      "checksum": "7f7c29269ccd89684b574ba210798366c4cb944e818535172df383375c6d565f",
+      "finishedAt": "2026-09-06T12:57:26.265342+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831011000_partner_recovery_bound_constraint",
+      "checksum": "4f71503747f238b555ba3526ac12316b6bd666a23e065fb6f78caa4001e630e5",
+      "finishedAt": "2026-09-06T12:57:26.296639+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831130000_personnel_performance_foundation",
+      "checksum": "95f0ead51d521b8b1f3bed88dc6ea03b74b0923a36d02bd401131013391b9cd7",
+      "finishedAt": "2026-09-06T12:57:27.398164+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831133000_harden_personnel_performance_foundation",
+      "checksum": "f466d8fb24a1cb3ea916b69b6be861dc5d8c232897f7c27acfb6ed8bc2977eb7",
+      "finishedAt": "2026-09-06T12:57:27.767618+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831134500_enforce_performance_legal_hold",
+      "checksum": "a5c39df3c675983680e1f9273b3f870bd3cbce2b9b96ce6721e3d3f912fb31e3",
+      "finishedAt": "2026-09-06T12:57:27.786913+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831140000_complete_performance_version_lineage",
+      "checksum": "fc7209907d1ff51c3d085c36a492690b801c537d8208f6c4d0d9c54d9d64818e",
+      "finishedAt": "2026-09-06T12:57:27.931315+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831143000_close_performance_foundation_invariants",
+      "checksum": "7e3b471b6f48196ce491b83bd2b5170fd9b396e974e372cba2fed4c175d963df",
+      "finishedAt": "2026-09-06T12:57:28.092216+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831144500_separate_performance_deletion_guards",
+      "checksum": "023677dbea4b2295f8b358f42d6092479dd900d8be1d8dd0c7043f404fea26f1",
+      "finishedAt": "2026-09-06T12:57:28.117393+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831150000_finalize_performance_state_integrity",
+      "checksum": "7ad87d0bf00a3701eeb389789870778eb301cd8fb2aae763d613e670b037a41d",
+      "finishedAt": "2026-09-06T12:57:28.256184+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831151000_enforce_performance_hold_scope_trigger",
+      "checksum": "55e8c83ddc13c7b31c9be19e0524940fb4599e225ee3dde48f88122eebad08e3",
+      "finishedAt": "2026-09-06T12:57:28.26836+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831152000_enforce_performance_immutable_state_fields",
+      "checksum": "eb3b70c62193a577d11ea64f5e98625936e6d4ef01000eb5047d7f74e3a3d54f",
+      "finishedAt": "2026-09-06T12:57:28.290135+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831153000_bind_performance_policy_activation_preview",
+      "checksum": "a04a5f31305c1d5d2ac46a7576d4f135ec71042d75d38d86b0aeab7d83e76c59",
+      "finishedAt": "2026-09-06T12:57:28.357342+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831154000_preserve_performance_policy_preview_breakdown",
+      "checksum": "588649fe961b6bff52fc0ca4124aa2816d68d5e8541c036a059fed17231dd06c",
+      "finishedAt": "2026-09-06T12:57:28.397164+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831160000_personnel_performance_policy_engine",
+      "checksum": "faecad38bb09c41357075b63009cdb1de812e478714e8f7392d18c6d88d4ca2a",
+      "finishedAt": "2026-09-06T12:57:28.517233+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831173000_allow_due_performance_activation",
+      "checksum": "f0df846e8b39c436ed803ecb985ea907ae24c993f9b461cbdfef6e547b29fa1b",
+      "finishedAt": "2026-09-06T12:57:28.529413+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831180000_performance_artifact_retirement_time",
+      "checksum": "2f8a5f0cd28582f438ffd46cdb5965ba11e3b4a588d667c8691bcf817ae76bf6",
+      "finishedAt": "2026-09-06T12:57:28.542605+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831200000_performance_policy_reconfirmation",
+      "checksum": "48588fd42ff654dc0f9fd4940399cf6b18c085981fb92246cb2165e4e9cc8d61",
+      "finishedAt": "2026-09-06T12:57:28.564225+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831201000_performance_policy_reconfirmation_guard",
+      "checksum": "2fd13e792e672740252c5f54b7eacc97cd21a418fe982029c9ecda20088769ee",
+      "finishedAt": "2026-09-06T12:57:28.577252+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831202000_performance_policy_overdue_supersession",
+      "checksum": "80636319c6d0b9df703373ddfb1a9ce9afb2380de457bcd04b78296befcebaff",
+      "finishedAt": "2026-09-06T12:57:28.598663+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831203000_restrict_performance_overdue_supersession",
+      "checksum": "201c82612abd38ddeda41c4cfa99d7b9bca912d7e5100f53f3e813c941238609",
+      "finishedAt": "2026-09-06T12:57:28.612973+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831204000_preserve_overdue_policy_lineage",
+      "checksum": "7f52063a65c15c6305b1189302ae90ad751fd20c054c0fb0d338cadd4063020d",
+      "finishedAt": "2026-09-06T12:57:28.623559+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831205000_allow_unpublished_policy_draft_cancellation",
+      "checksum": "94ea4c985a49c9e1b1f224d92a877cabfae2309dfb6c782c2f7d09dd1d55aada",
+      "finishedAt": "2026-09-06T12:57:28.638214+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260831206000_allow_unpublished_policy_draft_supersession",
+      "checksum": "0409c6a85683cb0e6dba49976500d5fa69e0b6efa2144a5a0cdc63a7829c86b0",
+      "finishedAt": "2026-09-06T12:57:28.652305+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901010000_partner_operations_control",
+      "checksum": "fa75c8c5ba530e14e573f8dfb383f75b84dd36bba74b8967438702cba8d1eab7",
+      "finishedAt": "2026-09-06T12:57:28.724389+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901011000_partner_operations_control_cohort_cleanup",
+      "checksum": "aab7c6aa731bfaedad0cb31693702a0ce0ac9bfccc10a24f4c318e0e91f0c9da",
+      "finishedAt": "2026-09-06T12:57:28.745672+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901012000_partner_internal_accounting_source",
+      "checksum": "f4aece78632dc193834bec668dac0fcdc6f421ec3ef0f2d7a0945553c5ca51a1",
+      "finishedAt": "2026-09-06T12:57:28.757058+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901090000_performance_readiness_workflow",
+      "checksum": "9357c2d1999a313346e850c1e7802b4e9623c8f5ec5ec476b411faf09b6f96b4",
+      "finishedAt": "2026-09-06T12:57:28.851168+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901091000_register_performance_cycle_permission",
+      "checksum": "76de34d77dd54b9ad2b3041be9f5ab6d3372607b01eb414ee5a519eb71f58ac5",
+      "finishedAt": "2026-09-06T12:57:28.87532+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901092000_add_performance_assignment_allocation",
+      "checksum": "437bc2a8787dc588c807e22ac3de3ad5f30a96672acdbd2759680a3e307d91c6",
+      "finishedAt": "2026-09-06T12:57:28.894278+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901093000_allow_hr_not_evaluable_resolution",
+      "checksum": "e78a9e4fa0f86a0320cc69210199af39fca36d9c2abd56f6ed8c93c8457ecf2c",
+      "finishedAt": "2026-09-06T12:57:28.907485+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901094000_add_performance_responsibility_history",
+      "checksum": "bd8f1010a6f6377fe65cb3160e25232dcd23327f3416de6e589d8a092553c15c",
+      "finishedAt": "2026-09-06T12:57:28.969411+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901095000_effective_date_performance_allocation",
+      "checksum": "3a3458f8cfb2826b907257a7c9eec74cad216645fd2cd0a954f98ddb7325191c",
+      "finishedAt": "2026-09-06T12:57:28.987736+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901100000_version_performance_responsibility_corrections",
+      "checksum": "c27b5bf2bcee534cf826bc460077ac3a11aa36ab93e68611e158b9c0a77f8628",
+      "finishedAt": "2026-09-06T12:57:29.024219+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901101000_guard_performance_responsibility_evidence",
+      "checksum": "e117bf9e0ab639cc868b68006165da8f8f19c37bf6b7584e9ee975c8f97ea2be",
+      "finishedAt": "2026-09-06T12:57:29.034477+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901113000_performance_disclosure_exports_handoffs",
+      "checksum": "fe1bf0d018bfc14ecad42120ce8abb49192b96e993b53590cdf503ee94350656",
+      "finishedAt": "2026-09-06T12:57:29.19048+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901114000_performance_export_delivery_claim",
+      "checksum": "bd3627a04aa94518796540a067dafe8ae3b62574a8d01013df70691c612ff528",
+      "finishedAt": "2026-09-06T12:57:29.205304+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901115000_performance_export_encryption_recovery",
+      "checksum": "f9805b7ebcbdf36783ced7e4f7f37d52fb13b73b8203d99f7f4ecb88c7c46030",
+      "finishedAt": "2026-09-06T12:57:29.227746+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901120000_performance_consequence_destination_package",
+      "checksum": "03386b878d14dc5a335d221b921e007d7221d94f85709a69c04dbab88ed52c3d",
+      "finishedAt": "2026-09-06T12:57:29.27323+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901121000_performance_consequence_package_integrity",
+      "checksum": "c48dddcbbc96db17eda6e4760cac1e357dfc2d81bb6555eee0fb53bd383110e0",
+      "finishedAt": "2026-09-06T12:57:29.320318+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901122000_performance_export_lifecycle_recovery",
+      "checksum": "8c639e5f34d75311a8daec83d2abb67faa50576c8f83cbbb10c98acf97de6ef3",
+      "finishedAt": "2026-09-06T12:57:29.335578+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901123000_performance_system_deletion_actor",
+      "checksum": "c0205335493a01da4affd87e4775812971ee6f3171d616cf131426826bf9e0ff",
+      "finishedAt": "2026-09-06T12:57:29.348373+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901124000_version_consequence_policy",
+      "checksum": "afa432e4c63ba15e386f28e0673d50197a9a11dbe5f60df7d302764ea5cdf3d3",
+      "finishedAt": "2026-09-06T12:57:29.407989+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901125000_complete_consequence_policy_controls",
+      "checksum": "07abc65ab3cb4a48203f246e55c2b5efa7615339b1bb7428fc07acb3e9bd342e",
+      "finishedAt": "2026-09-06T12:57:29.490122+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260901126000_harden_consequence_legal_authority",
+      "checksum": "28a18e1a5af9e9b72a7100ca17afbf76b2e86f8a2bcb7d431b383cb1286be2d8",
+      "finishedAt": "2026-09-06T12:57:29.520642+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260902160000_biometric_workstation_challenges",
+      "checksum": "d7b091138a9beb8c8785e33e89dba61e4790cb79d5808b6cc08e522954d06ca7",
+      "finishedAt": "2026-09-06T12:57:29.563335+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260902170000_biometric_challenge_processing_lease",
+      "checksum": "55bd3f0ae9e1a4bb32028a27013e01b32154690a38b0085c4eb5007f23bb8bc4",
+      "finishedAt": "2026-09-06T12:57:29.581216+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260903010000_partner_dispatch_source_policy",
+      "checksum": "81591a43bdcee63f394b9dec33aa30a6449c12a9690822916e3ac31695e69974",
+      "finishedAt": "2026-09-06T12:57:29.59895+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260903011000_partner_stable_physical_lineage",
+      "checksum": "79ddda98a4da429febdb55200c49cddb19748e88cef5681d76082637745274a7",
+      "finishedAt": "2026-09-06T12:57:29.616482+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260903012000_partner_shipment_evidence_source",
+      "checksum": "bf4cc9dd1bf0861c0e71034aa66a1a50f09dd7408fa1693164ed01eae9c559c8",
+      "finishedAt": "2026-09-06T12:57:29.704449+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260903013000_partner_accounting_authority_fence",
+      "checksum": "f3709387bf8eff5a955346558fe0a63ce4b5e5dc5724e5a097ccf761f0c67e0f",
+      "finishedAt": "2026-09-06T12:57:29.724281+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260903014000_partner_loading_source",
+      "checksum": "9fd67685ea35837da4b06d982e61dda154516a4dfbba1a7aba771274ab63a0e2",
+      "finishedAt": "2026-09-06T12:57:29.798654+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260903015000_partner_logistics_authority_fence",
+      "checksum": "817bc6bf666db49a12ab7c850243e349078577e8cd8a9b40f721eba8a2e35923",
+      "finishedAt": "2026-09-06T12:57:29.813475+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260903016000_partner_guard_authority_fence",
+      "checksum": "e227f2f186dce31d5f9df436915af56a8124cc565094dfc30d189601d0d8c86c",
+      "finishedAt": "2026-09-06T12:57:29.825483+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260903017000_partner_allocation_draft_source",
+      "checksum": "36df426c45f55eb0657b5480ccc2ec1a5ec21ebae209c755639bc25a76213dd7",
+      "finishedAt": "2026-09-06T12:57:29.874178+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260903018000_partner_allocation_draft_loading_owner",
+      "checksum": "8b223a9a76cda684d670c55f6c411556ffc13d073a5cb87a4815297ee46e78e6",
+      "finishedAt": "2026-09-06T12:57:29.888499+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260903019000_partner_finalized_allocation_source",
+      "checksum": "3cbb11a4c95defc1f42610e3778ca8e4c353ab683fb26473af5a530dc0101df0",
+      "finishedAt": "2026-09-06T12:57:30.071274+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905100000_guard_compensation_effective_intervals",
+      "checksum": "a401973c004ee854970adb8e8a0fab7224468534f843595b248339b7f931c2c9",
+      "finishedAt": "2026-09-06T12:57:30.084259+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905101000_compensation_authority_and_ranges",
+      "checksum": "48b75ca2a17e6e915597ba5e4efe835e67e57d76358f7e90803b6b8ae74d0ceb",
+      "finishedAt": "2026-09-06T12:57:30.101506+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905110000_performance_privacy_cases",
+      "checksum": "e9f6c89b9550d72dbec7687149ba7ae30394c25f7db61ad800b0558c1780b207",
+      "finishedAt": "2026-09-06T12:57:30.293404+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905111000_performance_privacy_permissions",
+      "checksum": "0600706ccc9e328f4586358615b852b4eba2dd1dd8ac51afc87ae233c23ffc13",
+      "finishedAt": "2026-09-06T12:57:30.307432+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905112000_performance_disclosure_fence",
+      "checksum": "f1a781e8c38dfc20ae7c52521eca7de66577bbb02897c8f333813b8f972a31d9",
+      "finishedAt": "2026-09-06T12:57:30.34204+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905113000_performance_first_write_pause_fence",
+      "checksum": "d06a37f3e931bf2eb6574f9d402f311a871f43e6e71335efc9248d0f22920015",
+      "finishedAt": "2026-09-06T12:57:30.403449+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905114000_performance_hold_decisions",
+      "checksum": "3f3a88388174c332430a3604945e59d9603bc2cc7f71049a7cf88b9760cbcbe2",
+      "finishedAt": "2026-09-06T12:57:30.455391+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905115000_performance_privacy_scope_integrity",
+      "checksum": "b3bc3599bd2b67efe1d2f6170ab43c28bdd8955d487bfec4ddcfa61fd34bfd3d",
+      "finishedAt": "2026-09-06T12:57:30.481338+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905120000_performance_export_cleanup_journal",
+      "checksum": "18d0033ebf31abf3fb50a1066e06fe4283a64fcd5879e3591b32fde98983965d",
+      "finishedAt": "2026-09-06T12:57:30.532124+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905120000_shipment_statement_operations_control",
+      "checksum": "aaf05212eb3228190ec926355195e97377c3b823caf6ac562084c685148531b4",
+      "finishedAt": "2026-09-06T12:57:30.599707+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905121000_performance_privacy_correction_link",
+      "checksum": "0c3f7409d9cab749d443ac7d9ad6535b57a6343011874129f7000ea3637e93a2",
+      "finishedAt": "2026-09-06T12:57:30.643513+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905122000_performance_mutation_pause_fence",
+      "checksum": "0974ca0b7a05c372906bad0c99d3527c83b3ccea9b7d0b99ea757eea4315870e",
+      "finishedAt": "2026-09-06T12:57:30.661787+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905130000_performance_export_artifact_inventory",
+      "checksum": "b65ea1c79622eb0466d07c16d668c74ddf06e07c5effe5d955efd7259e28001c",
+      "finishedAt": "2026-09-06T12:57:30.701819+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905131000_performance_identity_disclosure_fence",
+      "checksum": "865bf3efd60c0bc956766b4398c7bd9eb73c4c98bcb1c68f73bed27a1dd5b3ee",
+      "finishedAt": "2026-09-06T12:57:30.713993+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905140000_performance_cohort_membership_freeze",
+      "checksum": "12bd8c367707a6b264de0dad2c4e7e8c31d73ba2cb0168b9c17b4c8c416641fb",
+      "finishedAt": "2026-09-06T12:57:30.724772+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905141000_performance_capability_write_fence",
+      "checksum": "da5d9ffc9a166c92876adf94048b571d00f8afca2e1e16c2e8be856c2ec13c35",
+      "finishedAt": "2026-09-06T12:57:30.753389+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905141500_performance_capability_record_shape",
+      "checksum": "908da7aa29f3d563ce70aa57f8a90e83e8f147a8460f594375b9e8d824371a86",
+      "finishedAt": "2026-09-06T12:57:30.763916+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905142000_performance_cohort_lifecycle_disclosure_fence",
+      "checksum": "4663b48e206655fe83174ea9d1d6ce79bdc0cbc6ca7dc1cc643f629137efcdb2",
+      "finishedAt": "2026-09-06T12:57:30.77304+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905143000_performance_rollout_governance",
+      "checksum": "4f6474df902040b570be52fd821d06b2d6919f5172bf6345943a93e60ab3776b",
+      "finishedAt": "2026-09-06T12:57:30.852435+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905150000_performance_export_source_lineage",
+      "checksum": "ca243d1871035a67e3446f2209fbafafe276780e53e3f097d12f1e20161484a4",
+      "finishedAt": "2026-09-09T08:41:05.601236+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260905151000_performance_export_lineage_seal_guard",
+      "checksum": "f225695e44aa0b49af2460a85f1eb757d7fe03dc22d011b6aede3b2235520cb4",
+      "finishedAt": "2026-09-09T08:41:05.627379+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909070000_index_accounting_private_evidence",
+      "checksum": "4faf3eaa14faa215a4ed5837a481c4643a0eddb94d7ffbc1c0760127f848bcdd",
+      "finishedAt": "2026-09-09T08:41:10.245483+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909090000_performance_operational_monitoring",
+      "checksum": "96005e1eff3ca24e1960a406f74771bdd8734928cc4e00a31f8a27f19271c216",
+      "finishedAt": "2026-09-09T08:41:10.355049+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909090000_performance_promotion_evidence",
+      "checksum": "0ca9c4ac150d12a1b0aa517dabc6e85b8e1fce4bc4013c73679b9cb92698cb1f",
+      "finishedAt": "2026-09-14T11:46:07.960281+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909100000_performance_retention_erasure",
+      "checksum": "4a5565eccb1df056957afadcba9979aa539f838642ba3c6ffc5e2e09418c90ae",
+      "finishedAt": "2026-09-14T11:46:08.109967+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909101000_version_performance_copy_evidence",
+      "checksum": "709901061c10441b51fb38d2c1a3610da0edbec66fbb14f54d8ff6c280957821",
+      "finishedAt": "2026-09-14T11:46:08.129813+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909102000_performance_promotion_order_fence",
+      "checksum": "963fc5877f4cd4df9f85ea68eb7694d3f68153c39410803b39c2e44c5695cd30",
+      "finishedAt": "2026-09-14T11:46:08.141929+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909103000_preserve_performance_copy_evidence",
+      "checksum": "0b6b5cff1d0d23f2593f39375b57f2a1e7f28f867e82c70549dcc1495db01eac",
+      "finishedAt": "2026-09-14T11:46:08.152182+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909104000_allow_versioned_performance_copy_keys",
+      "checksum": "da0b69b0f0a7e1b07981c6133da0b98337d2c79ab012dae6efce0310ca9d0c1d",
+      "finishedAt": "2026-09-14T11:46:08.174684+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909110000_performance_automatic_pause_actor",
+      "checksum": "da3e36589a194d771946e9bc2ee8bbd82fe5b5beb7e4d7324baa9e62bfa4e990",
+      "finishedAt": "2026-09-09T08:41:10.364648+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909111000_performance_shared_operational_pause",
+      "checksum": "0bb8e885845c292c4107956b10715e9bfa0084794e2ae72b6cb64403eb13d6a5",
+      "finishedAt": "2026-09-09T08:41:10.379528+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909112000_performance_automatic_incident_evidence_actor",
+      "checksum": "bec47bf9cb5439f055660bf1462c1be7a0b864154f0afb8ae640f81bd2e3732d",
+      "finishedAt": "2026-09-09T08:41:10.388757+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909113000_strengthen_performance_promotion_fence",
+      "checksum": "fed34d358008c3adf089c5191dbcc78c8376691d08ff4168e4ed0ce56df1a947",
+      "finishedAt": "2026-09-14T11:46:08.189205+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909114000_require_authenticated_performance_promotion_transaction",
+      "checksum": "96870501885c592d584e11d76bfa70d71560810baf20ccb4dadfa63e0edb3324",
+      "finishedAt": "2026-09-14T11:46:08.200114+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260909120000_performance_personal_summary_delivery_permission",
+      "checksum": "ccb2d472f14bcce38cfc0e9e7f564fc7ec781bc965645e5ed1bb05110bc22872",
+      "finishedAt": "2026-09-14T11:46:08.209683+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260912103000_partner_release_readiness_publication",
+      "checksum": "11f823e18d707048f51942833a84b67eee2ca692831a31baa7c7205428ccc0e9",
+      "finishedAt": "2026-09-14T11:46:08.250258+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260912104500_partner_release_signed_receipt",
+      "checksum": "971202acc88e493327bfc68f5406104b48edbc3a7cc87fd353448a9ed6a63d3c",
+      "finishedAt": "2026-09-14T11:46:08.265795+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260912120000_add_applicant_reported_personality_summary",
+      "checksum": "805d7c46e63a4314919014ee635fe7fab9d40f10e50b66b176f5094dfd9dde69",
+      "finishedAt": "2026-09-14T11:46:08.292126+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260912190000_simple_personnel_performance",
+      "checksum": "a8be2f09e1bec6f679f7ef7ec13ec14fcb73edde58270bee267ee179a5056716",
+      "finishedAt": "2026-09-14T11:46:08.486626+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260912191000_simple_performance_permissions",
+      "checksum": "3d07160b0da2b8b9602df9ed3401ae9931b1534e4303b5c680f64c52c188c980",
+      "finishedAt": "2026-09-14T11:46:08.499118+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260912192000_simple_performance_correction_guard",
+      "checksum": "e085523f342199855d144d207527614899855c1e92a774e859f76287945a84b9",
+      "finishedAt": "2026-09-14T11:46:08.513231+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260912193000_retire_legacy_performance_permissions",
+      "checksum": "2637c467ec5ecde6c3c57fd17c0153438a3ca7f6d81bdfb1235a0115755181e0",
+      "finishedAt": "2026-09-14T11:46:08.524355+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260912194000_bind_simple_performance_to_employment",
+      "checksum": "814b4b8dbb48891a2a3baca42d422de863cd6435db5a15576065c5c40bca18f2",
+      "finishedAt": "2026-09-14T11:46:08.649206+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260914120000_personnel_behavior_surveys",
+      "checksum": "1e5d9bf831bd9e226b40a2260ac4d907342bf7de83fbc28ef9c974f8df97d144",
+      "finishedAt": "2026-09-20T11:29:25.569083+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260914123000_simple_performance_evidence_metadata",
+      "checksum": "3b0ae057f3cd47372659caf33a3b59c33937a79612653bb8b95aa791ab738085",
+      "finishedAt": "2026-09-20T11:29:25.596209+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260914130000_seven_level_performance_permissions",
+      "checksum": "478c8becb9cf8792d8da703faf67d0528f6e0633646bc7629a737dd14654f1f2",
+      "finishedAt": "2026-09-20T11:29:25.691445+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260914133000_performance_serious_violation_gate",
+      "checksum": "84f81284cccc9e5d58ca5c9e0842f3c3e250a039072696ee8a50e9479e2276c6",
+      "finishedAt": "2026-09-20T11:29:25.704892+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260914140000_performance_due_process_and_revisions",
+      "checksum": "d7432044c56de72de16eb4b5d827b2275913a54de4a66ea4a5bee348fe4c2f4a",
+      "finishedAt": "2026-09-20T11:29:25.783264+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260914143000_company_manager_performance_targets",
+      "checksum": "b7ad2e90dc5a2474620ecc55c3412f160bfa4dfca9ea5abafddcca4f66aaa401",
+      "finishedAt": "2026-09-20T11:29:25.803179+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260914144000_future_effective_performance_profiles",
+      "checksum": "cd2dace9675cc92c2b4ae05533b3746db31e1646419735eb5f2fc7ceadd3e720",
+      "finishedAt": "2026-09-20T11:29:25.82508+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260914145000_job_scoped_performance_profiles",
+      "checksum": "fec4e213da6f6d961ba38f1ecc571ecb481d1ec931224e519f5a42ac0a9b80a9",
+      "finishedAt": "2026-09-20T11:29:25.874136+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260914150000_retire_unscoped_performance_profiles",
+      "checksum": "09e82fa6acc372866c50d061aad331889563c421568d906cb5d67dddfcc38387",
+      "finishedAt": "2026-09-20T11:29:25.911464+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260914190000_partner_material_inquiry_usage",
+      "checksum": "00c712c248b829b6e8ce08de28c21739e906aa7310b778e0d12d92f2d0314a4a",
+      "finishedAt": "2026-09-20T11:29:25.982205+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260915090000_partner_catalog_sales_units",
+      "checksum": "d6c8f286873d9789a95c9a1807f291bb0935244462863dc357b130bac789c781",
+      "finishedAt": "2026-09-20T11:29:26.008485+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260917100000_partner_unpriced_numbered_case",
+      "checksum": "a430f47fc7c6b20a49fab884e81b4660f95eec4ebdba738b5c218560200c4cac",
+      "finishedAt": "2026-09-20T11:29:26.063222+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260917101000_partner_pricing_legacy_default",
+      "checksum": "a431947ca155dccf8114e693dc4db5c575bd6649747f16b865d7075fe7a8966f",
+      "finishedAt": "2026-09-20T11:29:26.084731+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260917102000_partner_pricing_fail_closed_default",
+      "checksum": "ea46584c0a17996382a08518a750a774a9795dbb61d871b6859ca0151a0011e8",
+      "finishedAt": "2026-09-20T11:29:26.109678+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260917120000_partner_independent_finalization",
+      "checksum": "73e6a7e5762e8e73bb999cc0b44a7f6a6a8e670117ce39e4abb7f57db7b865a0",
+      "finishedAt": "2026-09-20T11:29:26.128285+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260917121000_partner_customer_revision_reconfirmation",
+      "checksum": "e0706fb804e1576a9db82ba5871ff7710ef8816f9177c78e94799ff6707f3923",
+      "finishedAt": "2026-09-20T11:29:26.140476+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260919120000_remove_biometric_policy_requirements",
+      "checksum": "6a33f603b9b568abab13334009f13bb86191e2519bc8c3f53ab2be2438932813",
+      "finishedAt": "2026-09-20T11:29:26.21038+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260919170000_add_accounting_financial_void_cases",
+      "checksum": "037c817b37321ef0fd940b1a1eaf4dc70b6d35c9a18846c2dde40f64e268b873",
+      "finishedAt": "2026-09-20T11:29:26.272832+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260919173000_restore_unique_accounting_invoice_numbers",
+      "checksum": "1825a9dd489b22987748b15188cead7307a08fe721c90e7a7981a6e3c1c1aa4b",
+      "finishedAt": "2026-09-20T11:29:26.332017+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920090000_release_voided_accounting_invoice_number_claims",
+      "checksum": "cbba8ba1be87b895254c67ceaaebd1fce5aaeadaca3dcf6d9a6bdec45607ca70",
+      "finishedAt": "2026-09-20T11:29:26.348066+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920100000_store_biometric_capture_images",
+      "checksum": "2d418e1bb1de49b7628aa9fbe79fb0ca3e22ee7bb8535545dbb4147619c17cdf",
+      "finishedAt": "2026-09-23T09:40:47.331893+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920120000_partner_case_scoped_pricing",
+      "checksum": "f2bd36f0504e8a7701cafa2104c354032b5666019ddc3bbe83441ecfecca577f",
+      "finishedAt": "2026-09-23T09:40:47.385638+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920123000_partner_case_pricing_package_window",
+      "checksum": "05115de75b495613c76e33e81ead442f62abf29aea75759ef696b12a4c5eb937",
+      "finishedAt": "2026-09-23T09:40:47.400896+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920130000_partner_inquiry_case_revision",
+      "checksum": "d65541db0f7d49ea7550df8b0f24cbc84b65a4b17fabbb2a9dc6b2c6c6ddaf87",
+      "finishedAt": "2026-09-23T09:40:47.435127+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920133000_defer_partner_linked_pair",
+      "checksum": "826f47905accdcd1daa25fd481606fd2a167b0010437ae3843f59f2b620a4c67",
+      "finishedAt": "2026-09-23T09:40:47.448454+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920134000_partner_deferred_pair_guards",
+      "checksum": "58adb43ac97bd028e7ba075496d8df70a3726de2464246fe84cd91c3d0011729",
+      "finishedAt": "2026-09-23T09:40:47.481346+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920135000_partner_finalization_projection_guard",
+      "checksum": "7aefcdc77b1db7b497ebc9acc9005d7f1dd482e809b8ab8e6b455474fabec2ba",
+      "finishedAt": "2026-09-23T09:40:47.494288+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920136000_partner_finalized_commitment_shape",
+      "checksum": "c9cc1019ad53044637ed3c7b40e23e0ed6a1b12cb9e607328f68c7fb917f180c",
+      "finishedAt": "2026-09-23T09:40:47.515377+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920137000_partner_finalization_projection_partner_guard",
+      "checksum": "2e6da93dea897254f0bf3fd49d4c669960d9e7775eecd66b58e4c2d7a4ffcf37",
+      "finishedAt": "2026-09-23T09:40:47.527305+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920138000_partner_unlinked_cancellation_guard",
+      "checksum": "b05703a999c0020b618bd5cb656f90d2138fc677912ccd24b212f9628d2f9040",
+      "finishedAt": "2026-09-23T09:40:47.544928+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260920139000_partner_case_single_pricing_package",
+      "checksum": "d1c8fc4b836854f57d6635b2241cb7e4b568260b494c0f698ecf38954b85b656",
+      "finishedAt": "2026-09-23T09:40:47.563168+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921100000_partner_commit_independent_of_customer_state",
+      "checksum": "26ec16ab9161b552655d7e2cd8bde7c30d3baae3ab5be532ba36130925e9ff42",
+      "finishedAt": "2026-09-23T09:40:47.576815+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921120000_accounting_ledger_foundation",
+      "checksum": "0ce8025858905464c811336886e0aab6232f9a75070ed8b7a064ac39ac96b13b",
+      "finishedAt": "2026-09-23T09:40:48.299411+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921123000_accounting_account_immutability",
+      "checksum": "322c0745884db14bbba96a8ba59080e9c176b58d9525705ddaa5b759322eeb60",
+      "finishedAt": "2026-09-23T09:40:48.312105+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921124500_accounting_posted_children_immutable",
+      "checksum": "aef36250472619e2da045fcefc5dd9e40ff27493f227f2d474a5f284a24cd37a",
+      "finishedAt": "2026-09-23T09:40:48.32815+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921130000_accounting_line_evidence_and_rule_immutability",
+      "checksum": "fca7ef4921b58556be4f599f34c2f4593dd2d696ba7ba35fa63c15b585687901",
+      "finishedAt": "2026-09-23T09:40:48.342544+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921131000_accounting_posted_child_concurrency_guard",
+      "checksum": "fa677ef5089f91a8a5011e678088507f2ad949c9105f2895309bcad9448af822",
+      "finishedAt": "2026-09-23T09:40:48.35075+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921132000_accounting_control_account_details",
+      "checksum": "a83e3824bca72e8bf506ab33ea506bd4cb50866842026700ec5922140626c827",
+      "finishedAt": "2026-09-23T09:40:48.380724+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921133000_accounting_dimension_rule_insert_guard",
+      "checksum": "3027214e9468ef024394b01a5232e597f0df3e613db41494d27880b86dddff57",
+      "finishedAt": "2026-09-23T09:40:48.38909+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921134000_accounting_unique_source_delivery",
+      "checksum": "7528ec2f7803286590d34b23c78475bad078a2c54ca2db2adb9ff3b5404c62e6",
+      "finishedAt": "2026-09-23T09:40:48.400992+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921135000_accounting_evidence_payload_integrity",
+      "checksum": "85d7bbdbd4f3a01eb2516c8b7a26b3f61db1e9d7c7ef89b55819fe62c0cdbcee",
+      "finishedAt": "2026-09-23T09:40:48.41436+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921136000_accounting_source_payload_immutability",
+      "checksum": "692e9226aa5ff8657dfd71a857208da6ac46a70cf0449269854670a1809fd5c5",
+      "finishedAt": "2026-09-23T09:40:48.422227+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921140000_accounting_period_end_statutory_close",
+      "checksum": "513e0c63feacd67418c8fd88eebf8adf1e59500e53ba098691d8e7b2f8a055f2",
+      "finishedAt": "2026-09-23T09:40:48.888425+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921140000_accounting_supply_chain_costing",
+      "checksum": "7b639cede79c4fdfa886dc5dba2a66c5dc4c9ffe495d34e0779f453084a2a158",
+      "finishedAt": "2026-09-23T09:40:49.63271+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921141000_accounting_payroll_settlement_attempts",
+      "checksum": "a1f25283c92e9a589d3b84d026f9f208bc9c127fa01d5ed9b01e55649360ae43",
+      "finishedAt": "2026-09-23T09:40:49.660406+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921142000_accounting_period_end_immutability",
+      "checksum": "be98964a20380521222ba98816be7aaef9216039ea2e4c8f3a96508f201ce8e2",
+      "finishedAt": "2026-09-23T09:40:49.676488+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921143000_accounting_close_archive_guards",
+      "checksum": "e299710b9fcfd4e643fece045d193a2594137c236891c089e3f74fdc62574a2d",
+      "finishedAt": "2026-09-23T09:40:49.688012+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921143000_accounting_supply_chain_review_hardening",
+      "checksum": "bdaccd9ca873b99eaa2e46ab16fabf9df321403dc440e97d96464a048809f40f",
+      "finishedAt": "2026-09-23T09:40:49.729491+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921143000_partner_pricing_result_duty_guard",
+      "checksum": "12d6f1187bc92f46679262b270684e52e592d73b958fee919264c357eb95dd94",
+      "finishedAt": "2026-09-23T09:40:49.740718+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921144000_accounting_payroll_settlement_voucher",
+      "checksum": "88e7da12ce1f02d26cb4b010b3e650ad6bdd68d948795a22d5c393d8924cd042",
+      "finishedAt": "2026-09-23T09:40:49.749645+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921144000_accounting_supply_chain_audit_chain",
+      "checksum": "aa4fbe26adb297609fd70f0dc7f959a6a71d39a5aff11e86ce674599ee5d0960",
+      "finishedAt": "2026-09-23T09:40:49.773886+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921150000_accounting_customer_treasury_tax",
+      "checksum": "05c24e55e42d29a16b996c8e7c10d6c34e46d99d8caec041c6ef11876f2b1886",
+      "finishedAt": "2026-09-23T09:40:50.418955+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921151000_accounting_customer_evidence_guards",
+      "checksum": "ce138a1e1bb8147d22cb5bff695ca4a5815c0bff5ae930f62f1acc9244108a47",
+      "finishedAt": "2026-09-23T09:40:50.45011+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921152000_accounting_bank_match_invariant",
+      "checksum": "e6d6fdad797f81b1d87b84e0cfc2b02a4a78d32bf286085db02793e0c8ecf973",
+      "finishedAt": "2026-09-23T09:40:50.464093+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921152000_accounting_operational_reconciliations",
+      "checksum": "c6112fbc18b3ce7464986f46df25562883b6bed9d05da4907c423aa4dac3eb1d",
+      "finishedAt": "2026-09-23T09:40:50.49863+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921153000_accounting_tax_foundation_guards",
+      "checksum": "b00909862ab511c9011a52bb63a26a2d99ae3fd935b9b3f250def2ebe719bdd5",
+      "finishedAt": "2026-09-23T09:40:50.510013+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921153500_accounting_operational_reconciliation_scope_fks",
+      "checksum": "c4343a9c0b64810fb6916ccd5be2f2600eeb152bc732960299d9b38c352ac6b7",
+      "finishedAt": "2026-09-23T09:40:50.53992+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921154000_accounting_petty_cash_settlement",
+      "checksum": "93c7c58a0b80358ed138f2b474f438aa33c23f3485de48f6808199fd2ad92749",
+      "finishedAt": "2026-09-23T09:40:50.59268+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921155000_accounting_customer_returns",
+      "checksum": "b50e506c3c111dc8f7864bbcf87fb5c1902d09e55b58715ece9883780ab8eff6",
+      "finishedAt": "2026-09-23T09:40:50.608005+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921160000_accounting_customer_posting_rules",
+      "checksum": "51c7309fbf1f848c965444c45743857ade1771938445c18359511771291c1667",
+      "finishedAt": "2026-09-23T09:40:50.64275+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921161000_accounting_inventory_cost_evidence",
+      "checksum": "665ff2810ea308b0eb9b75c6d8a51bc4c11ad8627fef5c74aeaf78d606ce6788",
+      "finishedAt": "2026-09-23T09:40:50.677005+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921162000_accounting_contractual_exception_terms",
+      "checksum": "f5b1505bfbbb267133f664f67747a39fe30ee6ce0b16fa7c8f9f85af1c395f70",
+      "finishedAt": "2026-09-23T09:40:50.687102+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921163000_accounting_authoritative_customer_evidence",
+      "checksum": "f314ddf34b5018392d173df6024adc8e3ce74f1feffcef344d5294023abed164",
+      "finishedAt": "2026-09-23T09:40:50.75153+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921164000_accounting_bank_direction",
+      "checksum": "662a13660abbdc166d232eb628fed99f7e1585a5ee22bc4bd5bc47cc8d16fa4b",
+      "finishedAt": "2026-09-23T09:40:50.764157+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921165000_accounting_cash_count_voucher_identity",
+      "checksum": "6a60a4fcd0f0827a53fc5d74e2f3069c51a5e66d0833aca77b19bc46dd424087",
+      "finishedAt": "2026-09-23T09:40:50.782654+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921166000_accounting_customer_statement_exports",
+      "checksum": "b154f53a23e3b6ad70627848087c76ceb5796939f048b9aec2a261b3f4a14788",
+      "finishedAt": "2026-09-23T09:40:50.814534+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921167000_accounting_vat_input_evidence",
+      "checksum": "9866a530771913b6b9b1d076dc96db39533ada1ce5dd3f127949877c433c4e6e",
+      "finishedAt": "2026-09-23T09:40:50.846003+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921168000_accounting_tax_outbox_lease",
+      "checksum": "1e5d78885fd307bbb4018adbb7fbc7a806a314121499bbf4f2e7addbbebd6de8",
+      "finishedAt": "2026-09-23T09:40:50.86037+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921169000_accounting_bank_match_reasons",
+      "checksum": "8185a866eeb9bbcec434fc6035c1fb9288ea384ef53357b135c1b93fb70ce1c7",
+      "finishedAt": "2026-09-23T09:40:50.873078+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921170000_accounting_evidence_integrity",
+      "checksum": "cb36845e07b0953e3b15a5528ea8c8a84cdc03f7ec7e6a1c2e3d44a8fe05290b",
+      "finishedAt": "2026-09-23T09:40:50.938369+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921170000_accounting_replacement_cutover",
+      "checksum": "e5011d1ea06581c006e98ff631b27b38b7f08e9100ebe0e5363fded64dffdf0f",
+      "finishedAt": "2026-09-28T19:15:25.249035+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921171000_accounting_sale_command_hash",
+      "checksum": "9f35fa5154eb1f891fd2832f14954c0e28adfb4d725206de842b4772d5d8dd7f",
+      "finishedAt": "2026-09-23T09:40:50.948174+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921172000_accounting_bank_import_mappings",
+      "checksum": "ba02d5877b1958ee753cdb2f0953034a7d566b190ff305fb0be15f183422f883",
+      "finishedAt": "2026-09-23T09:40:50.985582+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921173000_accounting_vat_revision_integrity",
+      "checksum": "6bbca6e0763ebcbc6079384cc7a514ee9fd9fb638a0413837e0b25843afffa37",
+      "finishedAt": "2026-09-23T09:40:51.024685+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260921174000_inventory_valuation_evidence",
+      "checksum": "d547605cd4695f5b25acd6c01a56f0a6030a8d4b4ba1bfe75c053585c9e75336",
+      "finishedAt": "2026-09-23T09:40:51.069371+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260922100000_partner_customer_transfer_cancellation",
+      "checksum": "4e76c9962fdc5ec452d4919d9d2a3d909f664b6973563e5f65c1ac9926a40297",
+      "finishedAt": "2026-09-23T09:40:51.079943+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260922100500_partner_customer_transfer_cancel_guard",
+      "checksum": "4e4a8823c7f745337e927b68e6c2e287d5703de6ec11ced5d7f2cccf95a3a8e1",
+      "finishedAt": "2026-09-23T09:40:51.089498+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260922101000_partner_customer_transfer_cancel_constraint",
+      "checksum": "ce0f9b18650652a3ebd399a59b102537c7181e68bb12757686c491ef903d5404",
+      "finishedAt": "2026-09-23T09:40:51.10519+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260923140000_sepidar_source_archive",
+      "checksum": "cb99ebe7d8a19bb69d6048a9a5e746f84c036b96c8a0c4fe32887c63d05e76a3",
+      "finishedAt": "2026-09-28T19:15:25.34826+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260924100000_accounting_replacement_archived_status",
+      "checksum": "011aee73db202892b37a92b3131ba7fec5e5785bd3986763b85680b01bc5b702",
+      "finishedAt": "2026-09-28T19:15:25.368752+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260924100000_partner_reconfirmation_draft_cas",
+      "checksum": "41a22fb6a25363d310a3c772840f8b8aee5f177fcff4caed4e04dc4e5e48eca2",
+      "finishedAt": "2026-09-26T12:16:57.553032+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260924110000_sepidar_target_links",
+      "checksum": "a7f6206a784d6c4892b0acbec5a1232fc8e1bcd93aec92c0c433f7b4c5c4c204",
+      "finishedAt": "2026-09-28T19:15:25.417512+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260924120000_sepidar_backup_uploads",
+      "checksum": "aaef74ba4644fd6d9f73565f2651315a06891454c7344f31e44b8202bd5c36af",
+      "finishedAt": "2026-09-28T19:15:25.46099+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260926134000_partner_case_tracking_number",
+      "checksum": "30a019f9e8f32f8cf74ec72e7eeb047e0e3300c94e01c3475775ddd4734109ac",
+      "finishedAt": "2026-09-28T19:15:25.533466+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260927110000_partner_price_package_earliest_expiry",
+      "checksum": "aabda257cde3618a77ff28e691668cb7335e0f13c9fb1750705253c0094f5b2b",
+      "finishedAt": "2026-09-28T19:15:25.554347+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260927120000_accounting_bank_file_import_runs",
+      "checksum": "b5842c98d1ab5bc68453f8e840709cca05d122d4a9f4592f70e01d418d7a556f",
+      "finishedAt": "2026-09-28T19:15:25.588777+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260928120000_preserve_precise_contract_product_graph_total",
+      "checksum": "cdfd8c9099e9ca7ef0885bf28dee0ecb794cc6f71636b2dcb5110c7f417d0ba0",
+      "finishedAt": "2026-09-28T19:15:25.899006+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260928121000_preserve_precise_contract_price_witnesses",
+      "checksum": "b079fde2f3984a153c78182a3fd57612ba55c0f353760e5de6983a12b0672f4d",
+      "finishedAt": "2026-09-28T19:15:26.029309+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20260929150000_separate_partner_pdf_snapshots",
+      "checksum": "d9df581030d50592cbed7efc113486241fb68f0721a194fc8a9c327e2b70f7a3",
+      "finishedAt": "2026-09-29T13:44:46.196497+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261001070000_index_scoped_accounting_private_evidence",
+      "checksum": "d63745f4374d5e07c3a353fbd7aa0d38eb2175766fe2a32aca07beaddb3c55ad",
+      "finishedAt": "2026-10-01T08:50:14.564018+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261001110000_guarded_customer_permanent_deletion",
+      "checksum": "371ebc7859c6f78e6db7b4cbd684675f4fc69a879b89ffb1983cac8ef4ae177a",
+      "finishedAt": "2026-10-01T13:25:15.812968+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261001140000_customer_card_history_retention",
+      "checksum": "c35530c7ae58e48062f1363375fa1d59a4bda611a961731844001a97cbbca6ef",
+      "finishedAt": "2026-10-01T13:25:16.008653+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261001141000_retained_customer_existing_case_contract",
+      "checksum": "0c0a830908d4a59fea049c36b8b5e129e0fe56aff44fcecc33ad2a25c563e85d",
+      "finishedAt": "2026-10-01T13:25:16.018211+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261001142000_freeze_retained_customer_child_reassignment",
+      "checksum": "a12573c681b246b9934c222923745e6bbc1ebe08c2d57f76bda5927e006fe07b",
+      "finishedAt": "2026-10-01T13:25:16.027239+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261002000100_ordinary_commercial_contract_lifecycle",
+      "checksum": "5118626cd213780b0239e845f18846260f44dee1ace1b201b675937a98274bc1",
+      "finishedAt": "2026-10-01T13:25:16.069462+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261003110000_partner_independent_service_pair_guard",
+      "checksum": "7030946495d239f644afbe1e328c662ee83fd2090afffa438c1730f8614d8c82",
+      "finishedAt": "2026-10-04T10:13:36.804514+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261003120000_contract_dispatch_credit",
+      "checksum": "f6f4d0c9adf1f976687f848af3d59d4f44d181cddacbb0b7cb26cc2fdee794a2",
+      "finishedAt": "2026-10-04T10:13:37.006667+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261003130000_partner_bound_technical_persona_guard",
+      "checksum": "402b4638929f6ba4fe6e890a8fa37c5219c446143b27a5e3f9bcbd5c1c63777e",
+      "finishedAt": "2026-10-04T10:13:37.017786+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261003140000_partner_commercial_approvals",
+      "checksum": "ed344c8f994ec42c3ebfeba15354e78e189d3a95e4adc8907a73114a1803a9d0",
+      "finishedAt": "2026-10-04T10:13:37.035044+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261003143000_partner_commercial_signature_reset",
+      "checksum": "0f3570487045d958daa26694b76429395b9792525c1ed22847d09c07c3ff361e",
+      "finishedAt": "2026-10-04T10:13:37.044221+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261003160000_partner_persona_exception_union",
+      "checksum": "8b562f16f0d84ce0a805c63f2abf53c22ce0e255bdba23d5cf550980803cef89",
+      "finishedAt": "2026-10-04T10:13:37.056825+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261003190000_partner_pricing_result_duty_supersession",
+      "checksum": "5b5332c75f8cda25f9b0ffac8a2c96b6e647ea8bda32bbfcaeef9fc3d77658d1",
+      "finishedAt": "2026-10-04T10:13:37.149986+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261004000100_special_customer_credit",
+      "checksum": "f6a5d7e337fc7eeefc8508acbde328b96edeeda499b8ba4f106af24b04406ecc",
+      "finishedAt": "2026-10-04T10:13:37.238841+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261004000200_special_customer_credit_date_decisions",
+      "checksum": "09eb9cbf03582997bd4136308691fd06343da4fb65cd6ed116022150bf31c6ed",
+      "finishedAt": "2026-10-04T10:13:37.257043+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261004120000_partner_price_negotiation_rounds",
+      "checksum": "cd8ae17bd12d5bad1521f8c534075080cc7ec6c66faf40b22d7b9145598d0589",
+      "finishedAt": "2026-10-04T10:13:37.26937+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261004121000_partner_commercial_edit_duty_guard",
+      "checksum": "260fa5e659f5dd8bec67fe0b547fa805699885c69d1e9c222d9800d76828e4f0",
+      "finishedAt": "2026-10-04T10:13:37.281491+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261005000100_partner_reviewed_reactivation",
+      "checksum": "611ef173a58c1bba6bd3f2ad89b373d56c1db71a0ee3011884df2a55b15e4e21",
+      "finishedAt": "2026-10-06T06:47:01.748105+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261005000200_partner_reactivation_enum_witness",
+      "checksum": "646bccf15e5fc98dd22190dfb948a908699fe8c6c193810f06c2775807350430",
+      "finishedAt": "2026-10-06T06:47:01.759825+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261005000300_partner_reactivation_event_state_cast",
+      "checksum": "f39b6986d36a60390a5da7e66b8467490d91469751e0f2779868a0c7225afdd6",
+      "finishedAt": "2026-10-06T06:47:01.771971+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261005000400_partner_reactivation_permission_table",
+      "checksum": "36db574d6cb3cdb8be86c2834f67525b846a908f4823b5879699aa2857876752",
+      "finishedAt": "2026-10-06T06:47:01.783339+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261005120000_customer_account_workspace",
+      "checksum": "a4e504ba5ac90380c2fffc445d2e4c176f98abf794615fbdab03367b252d008a",
+      "finishedAt": "2026-10-06T06:47:01.847801+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261005160000_retire_corrected_contract_items",
+      "checksum": "d2c717d0cb06ac1a56804f5def286811d0d607bc7cf71b8d29bdabd1ac470f19",
+      "finishedAt": "2026-10-06T06:47:01.917841+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261005161000_guard_retired_contract_items",
+      "checksum": "0bc45b3d30fe1ee5749b337c09fb0339bb6ee5577ebed32c6757988e6ab1566d",
+      "finishedAt": "2026-10-06T06:47:01.940916+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261006120000_partner_wholesale_mandatory",
+      "checksum": "2b0a9c5be686f52e32b5d3b92392d1eb0f0d1a6194386ebada3199ba4e3aae28",
+      "finishedAt": "2026-10-08T10:41:26.457923+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261007120000_growth_badge_display_name",
+      "checksum": "41168535268a1ea4bf02bebc1804ad79e7e054fd30ca955965b0bcb76ad9da21",
+      "finishedAt": "2026-10-08T10:41:26.480451+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261011120000_manager_dispatch_explicit_decision",
+      "checksum": "9840443660c8850256c6d15c0d32c54756b12f6e504cdbb1bf088cabbd1f2858",
+      "finishedAt": "2026-10-11T09:13:21.556537+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261012090000_operation_minimum_quantity",
+      "checksum": "cbe5a0b428693ae8bcb279c1a322a73aef20366194607021c06e17d47b10b0bf",
+      "finishedAt": "2026-10-12T11:05:48.690667+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261012160000_contract_cancellation_notices",
+      "checksum": "14445ccce67ebc80803095be2ac4de37416af64767147c5ec25cc41afbceceb1",
+      "finishedAt": "2026-10-13T07:58:23.49256+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261013120000_company_vehicle_manufacture_year",
+      "checksum": "1898012458dd6010eba0ec47be072a962b17d76e860591cde2d4fdcd13628e5f",
+      "finishedAt": "2026-10-14T06:31:33.074404+00:00",
+      "rolledBackAt": null
+    },
+    {
+      "name": "20261013153000_stage_biometric_enrollment_captures",
+      "checksum": "58dcfc3fb8784b4facfcd9522fbfde1abedba70a5a93e0579c161e598bc36a85",
+      "finishedAt": "2026-10-14T06:31:33.123714+00:00",
+      "rolledBackAt": null
+    }
+  ],
+  "sourceMigrations": [
+    {
+      "name": "20250917200442_first_migtration",
+      "sha256": "194bbec7e3448b374ab95f12c9877c6d0137e4271cde759599750cf40b674fa6"
+    },
+    {
+      "name": "20250917211553_second_migration",
+      "sha256": "3533d9401cd2c7d0c4bb1547efc14900c840661ccd45bef767e1d90265e410f0"
+    },
+    {
+      "name": "20250917221333_enhance_contract_templates",
+      "sha256": "c224ee0b5980f42a7237483cccf5da9f9ecdb45168a9f0b5897735a7796eb0fb"
+    },
+    {
+      "name": "20250921183825_security_management_system",
+      "sha256": "91ca78c4e9a256c7220c05e37223871a10ac297b613d1d167c662cc17feac564"
+    },
+    {
+      "name": "20250921194749_exception_handling_system",
+      "sha256": "fe85470f309864c59e6df4be8a4b912cf4cd767fc8cccfe11e77c9da00140e81"
+    },
+    {
+      "name": "20251011111241_workspace_foundation",
+      "sha256": "10e11c2ee7a3df775088c3dea24c6497d4910af8185901483009b1cea7e9e26c"
+    },
+    {
+      "name": "20251011144852_enhance_crm_customer_model",
+      "sha256": "62b59fc14425151b310c58aecd003f6bd1ad6524720a85045f473540f8ba1a97"
+    },
+    {
+      "name": "20251011153735_add_product_catalog_system",
+      "sha256": "4eeccf416b71cfa3cbc20e5c142e362a2b3ac85bc866be17f847cdcee2d03d48"
+    },
+    {
+      "name": "20251011153913_fix_product_codes_to_string",
+      "sha256": "cd635a256f7a997505b4f25cad64360ee9f04431932cad9d4319ddf87bd145a9"
+    },
+    {
+      "name": "20251011163745_add_delivery_payment_models",
+      "sha256": "2da4baffdfb3828a05a9940fb5b42e6d3ea320249ffd29a68545ada7eeb2f8c6"
+    },
+    {
+      "name": "20251028213013_add_project_manager_fields",
+      "sha256": "b214cc19a920d535bfc1b100f740373322248ca817f9a5ac8e183c4c9bd3c478"
+    },
+    {
+      "name": "20251029100149_add_services_and_cutting_types",
+      "sha256": "b74785f7e966267b177c6f8b213c3169677a864afb59f5647e16c70e651ce525"
+    },
+    {
+      "name": "20251101084919_add_price_per_meter_to_cutting_type",
+      "sha256": "b477cc6271f92b36501912334ce7065f49db87a083a1ce34e2239dc505ae68cd"
+    },
+    {
+      "name": "20251102103213_add_sub_service_model",
+      "sha256": "aba8313d9123eb56e2ef975838fe8bc879c011eaf679f84b1cc0e14c65df150f"
+    },
+    {
+      "name": "20251104101111_add_stair_system_fields",
+      "sha256": "831249345e8b4a8a563ec6b053bb779ee75277e1b08a6a75548ed3c3090a27f5"
+    },
+    {
+      "name": "20251117082249_add_stair_standard_lengths",
+      "sha256": "bb97312251d1d30e888b043849f09cd88b3dcb0d104d2b18f96fb480bca7a8be"
+    },
+    {
+      "name": "20251117102538_add_layer_types",
+      "sha256": "ef4d7826769fff546b82d1a943cd053bb536f55f230bfa8871e4a2241388d28b"
+    },
+    {
+      "name": "20251117155243_add_stone_finishing",
+      "sha256": "bdf50e9294543b0e5b1c3cd16d71c809618a76f8c1af4a5784715590ff18ef7c"
+    },
+    {
+      "name": "20251125120000_add_product_contract_visibility",
+      "sha256": "b632088181f2d19fba8d6b6ccc6494d803d591439d18db42a75fe33de9dbd66c"
+    },
+    {
+      "name": "20251221181049_add_credit_payment_method_and_fields",
+      "sha256": "3369ce93cdc4c24a3385a602f90d47e197a4fe26703d3f4e00b43bc3f5d89b52"
+    },
+    {
+      "name": "20251227175650_remove_credit_add_check_number_cash_type",
+      "sha256": "926f66fbff02fbcb62d2ef133e9ea54dd020679072896a41bdb5c3e1434aa73b"
+    },
+    {
+      "name": "20251227182636_change_currency_default_to_toman",
+      "sha256": "4b84c88b6ee6c89670ddc9656e1594c1acf8e893eef76ef47e711e5b989e0ac5"
+    },
+    {
+      "name": "20251228090815_add_contract_verification_code",
+      "sha256": "945733e127cf26358edfed5c1310df737f701c45fb052e21e79fa8947d0a6a2d"
+    },
+    {
+      "name": "20260201215525_add_payment_check_owner_handover",
+      "sha256": "7b4383b95eca62ddef1a0a0c3d2036008455b1da031264b48205be567f24fc36"
+    },
+    {
+      "name": "20260212161732_add_crm_customer_owner_tracking",
+      "sha256": "d13377233d69cb88132fcad2483b757ffd22092518c6f30d2826b1886ebaad6e"
+    },
+    {
+      "name": "20260215190000_add_contract_public_confirmation",
+      "sha256": "e1ddb5d1e470f7eed5b8134bb87970833688eb8d02bca5819e5f16ea2ae0abf7"
+    },
+    {
+      "name": "20260529120000_add_crm_contact_soft_delete",
+      "sha256": "5a8ac7629dd2a245885190ef61655707748b365161cb1f6cb24181397843cd4d"
+    },
+    {
+      "name": "20260531000100_add_creator_sequence_to_sales_contracts",
+      "sha256": "ae4b8da31e222ad96e75f11512fc853fdf75ba90d73bdc647ad30b3758a7e860"
+    },
+    {
+      "name": "20260604000100_add_accounting_workspace",
+      "sha256": "b1ba99158468b8376cc56111863995ba3d2f29fb185cd853598c7a7fa8fe8fc2"
+    },
+    {
+      "name": "20260606000100_add_system_invoice_approval",
+      "sha256": "bf220d6bf6fa50c42afb413339b3dfa47e9cc3f065cd2a96e4b5d3b79c30baaf"
+    },
+    {
+      "name": "20260606000200_accounting_rial_and_sepidar_amount",
+      "sha256": "5365105c3357dbb3832b11968285f8066aa81319366c40d0d7767317b01e7d40"
+    },
+    {
+      "name": "20260614120000_add_stone_finishing_unit_pricing",
+      "sha256": "360c4ff43086efd7d0e56cdbf593b1b436ea353573e5b966782e3f12009e63c5"
+    },
+    {
+      "name": "20260617120000_add_contract_discount_ranges",
+      "sha256": "ffe430c879bc38e91a9135d51e409201e06d6cfea53568961be5d69f636eae1c"
+    },
+    {
+      "name": "20260621120000_add_catalog_service_images",
+      "sha256": "919ecf30fcfb5ec68fc24fb2595362f1a14f00798f889f38a30a7963783eba15"
+    },
+    {
+      "name": "20260623120000_add_crm_referrer_and_project_marketer",
+      "sha256": "456e341e67c5b4abc04cb41bb12c5b6388b6d064c351a242ef680f653e09ed0f"
+    },
+    {
+      "name": "20260628120000_add_catalog_codes_for_excel_sync",
+      "sha256": "c47fc0c24c525618e19a71bdba445e2f97a4e3cd0236137efdc5f58da5b6f26a"
+    },
+    {
+      "name": "20260629120000_add_logistics_workspace",
+      "sha256": "2c12a5a880dc02f2b651dd39f25caa58d30412ce502e47f8e2fc723410bc2bad"
+    },
+    {
+      "name": "20260704120000_security_vehicle_gate_operations",
+      "sha256": "9227c50411a74a47c4f2a20a5dbf376f79057474904a59c361625a4b71338537"
+    },
+    {
+      "name": "20260704133000_expand_accounting_correction_lifecycle",
+      "sha256": "c94653a447829a8c7904cb0048ccdfda9cede3f6e52a7cdd2142d624edba45f5"
+    },
+    {
+      "name": "20260706120000_allow_replacement_invoice_number_reuse",
+      "sha256": "511a97ed79083461c86873f9ffa9ad2f48c9e71a06b89eea0e5ed27a97f7a5a9"
+    },
+    {
+      "name": "20260707000100_vehicle_registry_and_flag_lifecycle",
+      "sha256": "97bc04f73f4b3180a9fc06d1d2828583e812c532e97c29f7b7f593d2cad5de42"
+    },
+    {
+      "name": "20260707000200_add_security_driver_queue",
+      "sha256": "9ba9883723e67e3d9e7550e6f76ad90c175022a1ad6f135a1846ef6880f67062"
+    },
+    {
+      "name": "20260707000300_add_security_annual_shift_planning",
+      "sha256": "5c86ca8623c5a50a432f9539f75ba77df9aaf595cb9b28d79b85955ffadee741"
+    },
+    {
+      "name": "20260708000100_add_security_shift_probable_no_show",
+      "sha256": "0c4f58ac125b403129bfa771cc73c65eb62f39af5177876b590a33f52ce760d0"
+    },
+    {
+      "name": "20260708000200_add_logistics_driver_requests",
+      "sha256": "f5ed62de4cbd9f880762e507e80d98691feaf44fe0fb1129d28484de3220ceca"
+    },
+    {
+      "name": "20260709000100_loading_driver_pool_and_allocations",
+      "sha256": "7fb1ff5373d55a5d300a246b6b21838949b55a439b5cdc503f2bed8de83ea1c2"
+    },
+    {
+      "name": "20260709000200_security_shift_log_and_sabalan_calendar",
+      "sha256": "4fd51780cce9d0cf95a216e42681e889f2aa282d9f1b81e8cea0700b3b9de7d0"
+    },
+    {
+      "name": "20260711000100_shift_log_participants_and_attachments",
+      "sha256": "e451130c6982cf9a3cdbd3f54430ee2e434b5132db087da50dd9a15477ef4561"
+    },
+    {
+      "name": "20260711000200_organizational_personnel",
+      "sha256": "575bb1d14753687af4b6982d3ec220f608df33a77c978647520d42a6bf457316"
+    },
+    {
+      "name": "20260712000100_crm_pipeline_followups",
+      "sha256": "8a3957ecdb2ef1edf4deec3105dd4db524462ad1800b24cf91f90fa608571b1d"
+    },
+    {
+      "name": "20260712000200_personal_leave_and_personnel_shift_participants",
+      "sha256": "18ee9bc5bedc7478f43c1793dabb853d5b31a38917e764f02a43e50ff2089b2b"
+    },
+    {
+      "name": "20260713000100_security_attendance_roster",
+      "sha256": "d62ca88c853482a28c3f0b851f496e8ddf9e6d0fe9dce2293af455aafaf93df1"
+    },
+    {
+      "name": "20260714000100_security_instant_report_categories",
+      "sha256": "c578f5f338bd9d8157d0a4b1fcf1666ee7ef2e47d6d67300d291c8ce4acb66cc"
+    },
+    {
+      "name": "20260715000100_optional_project_city",
+      "sha256": "b2874de12a1f76e938bc49a99ef23c2bc73fa4abda0b003bbae6191f6f4ef03c"
+    },
+    {
+      "name": "20260715000200_sales_reporting_foundation",
+      "sha256": "de7febe4092b78a5626caa3ab4f0d6c2643b092ba4b4b59687c9f06d62bb69ed"
+    },
+    {
+      "name": "20260718153000_add_personnel_work_schedules",
+      "sha256": "db6452795afc13b5a287339245feb0257ac6a5c17802d50760bf9f268f6f9293"
+    },
+    {
+      "name": "20260719000100_hr_foundation",
+      "sha256": "b16f66ab681cc6df1e3f13391df6ea84ce4da5035da0e317cbe4b0e283132a1b"
+    },
+    {
+      "name": "20260720000100_security_report_attendance_operations",
+      "sha256": "ce34021d80ae27545ad3a61977bd176abac40ad4cee211b1d34e03c37cb9b729"
+    },
+    {
+      "name": "20260721000100_hr_hiring_workflow",
+      "sha256": "b78e44a887e09cf4c944cd0582fe07f373589b250035c3f02265e57dfbef162c"
+    },
+    {
+      "name": "20260721000100_identity_session_personnel_management",
+      "sha256": "52be01386f6fb6334b54967dbf95e098ae43382c7a41053a0fef720b0edb95fb"
+    },
+    {
+      "name": "20260721000200_auth_event_approximate_location",
+      "sha256": "b59170367a339cc2e2e30e5e9c847d91854f54099dd177fb2163421d39438fba"
+    },
+    {
+      "name": "20260721000200_hr_exceptional_personnel_audit",
+      "sha256": "442cc7faea833992856df23cac29fa32ce82460473033fb5aa5c1eb3c0321134"
+    },
+    {
+      "name": "20260721000300_browser_profile_per_user_identity",
+      "sha256": "4b97e354481ba3c22d3a0ef83f09f29bbb37b938e4b3cb472622ab24d86ab059"
+    },
+    {
+      "name": "20260721000300_hr_fixed_applicant_entry",
+      "sha256": "78a82c4835f729542153bee13349934f410f3ce9bec3aa30a7bad0f54e7a6d45"
+    },
+    {
+      "name": "20260723000100_hr_candidate_corrections",
+      "sha256": "e28f1589355a91d0aa4ddf6a597d68b15d06f0594a7f42d4d24506350a8df4a3"
+    },
+    {
+      "name": "20260723000200_hr_assessment_completion",
+      "sha256": "1d5ad125a80985fc771cf7c85cf2c14dfc8e34d8a7fb292f97eed44101b365a6"
+    },
+    {
+      "name": "20260723000300_hr_offer_decisions",
+      "sha256": "09d0b17d2dba4c1f5061845ca6ee8b9f780c5b07ee8d8eb9cbc281f350cdcbec"
+    },
+    {
+      "name": "20260724000100_contract_product_graph_state",
+      "sha256": "eadc5c045330f49fec523e745b95e2cef1715132611be003d5320d4be94ead35"
+    },
+    {
+      "name": "20260725000100_contract_edit_sessions",
+      "sha256": "ed848e7e0a5abc8c29a7999801f30be2f94a82aa71017f21bf249eacf3135b2f"
+    },
+    {
+      "name": "20260725000200_stable_contract_product_relations",
+      "sha256": "ba4ce91ae51583cbd3adff5e9198bac40e2dca05becdc6d3d7f5ef05f5d29b99"
+    },
+    {
+      "name": "20260725000300_product_mother_length",
+      "sha256": "5a2844fac5e36e5148fe209a29e565d9bb2ea6baf38dc911345da81fa315cfeb"
+    },
+    {
+      "name": "20260725000400_layer_type_calculation_unit",
+      "sha256": "0a3da61a9c1eed8e8de874b5ed3df59eaa8c24ecb3c3fe0a7bb939191d031abc"
+    },
+    {
+      "name": "20260726000100_hr_offer_otp_delivery",
+      "sha256": "3e2429bab6f6a416c92fa96a17d9a6b413dc8f17a169e2a28db356fae6ff9b3a"
+    },
+    {
+      "name": "20260726000100_security_shift_session_corrections",
+      "sha256": "499880441d7c94c206641349687a4d5852a8ee2055d20251d616b62a0bb1f58a"
+    },
+    {
+      "name": "20260726000200_guard_display_name",
+      "sha256": "c8a2e2bc3c1ff29b866a6053fd165b61279d41ee9965fc202009f775254c4d4b"
+    },
+    {
+      "name": "20260726000200_hr_hiring_governance",
+      "sha256": "059fd83a3183c56991a1752a848b36197f05cfac027a56f105cd464b0f962ba8"
+    },
+    {
+      "name": "20260727000100_hr_role_scoped_contract_review",
+      "sha256": "fc7211def69828a72a5ce6b74129fc64c4cf2ebaea2c99cb147e7a6d64bea34d"
+    },
+    {
+      "name": "20260727000200_hr_insurance_registration_path",
+      "sha256": "88ad0d531af0cccc59d6673c3cdc24617baa77549f65bc2118d8b9e487d0f67d"
+    },
+    {
+      "name": "20260727000300_hr_payroll_participation_review",
+      "sha256": "7865bcec67a09a9a99f92e88b7bbf8f2a88b137e179a397b24da7d7d1e31e134"
+    },
+    {
+      "name": "20260727000400_hr_activation_actor",
+      "sha256": "fe2e0eac249c01934eae639027d5dd81ab7fc991593b374bc120ea563b42b353"
+    },
+    {
+      "name": "20260727000500_hr_work_schedule_governance",
+      "sha256": "5bbebcfb4e88fd02d383f5640f2d40b4e7fb1a475311aa1f6b4c4e82004ec4da"
+    },
+    {
+      "name": "20260727000600_hr_record_archive_erasure",
+      "sha256": "c0b564f24357a5c817d7b9f1d3571419b38d405df1c2452a1926c17f64940883"
+    },
+    {
+      "name": "20260728000100_hr_erasure_operation_lease",
+      "sha256": "f7c46d9b44dde03077305c3408fa4b996e201851f558c5d35613fb339f9a72be"
+    },
+    {
+      "name": "20260728000100_system_recovery",
+      "sha256": "4583a2cc51f18b628794411a12c0bd5ab506a7a146cf6ce99cb5e40ba051be22"
+    },
+    {
+      "name": "20260728000200_hr_identity_evidence_modes",
+      "sha256": "d04280306e332eb901b0379da5dcc34a7d0b5b8f3a87732126c1db22f3b650ea"
+    },
+    {
+      "name": "20260728000300_hr_hiring_authority_revocation",
+      "sha256": "c6b4feaf0657059fac245955b0f1b82abd53d3f02e81d6525b7f612c4d9cf819"
+    },
+    {
+      "name": "20260729000100_hr_work_items",
+      "sha256": "87f39902de9bf647bb852d1b202c02c9bc67d7a21597ff7fe4b16b1e8499fb67"
+    },
+    {
+      "name": "20260729000100_notification_center_foundation",
+      "sha256": "ffb66d647eb474c258ffbd51bddcad0df8534f4ca9dfdf5a8eb410a96758ce08"
+    },
+    {
+      "name": "20260729000200_support_ticket_foundation",
+      "sha256": "7b65c2e7f5692e96aa349d4f30015edb6e0a7f07b75741a89cf232f6a9b22a87"
+    },
+    {
+      "name": "20260729000300_support_attachment_redaction",
+      "sha256": "058df7aaad5e93725f42c498028dd71a23fb3cd83e1ae7d75b61d0e06b9dc617"
+    },
+    {
+      "name": "20260729000400_web_push_preferences",
+      "sha256": "ec565308e150e49577979c83b364e21fa0a36fbbc57475eb523ea450f36b1bd0"
+    },
+    {
+      "name": "20260729000500_support_diagnostic_bundles",
+      "sha256": "2eebc6f5fa99b04ccee72cc410f8247acaa49d5918af7a1bcf42bad6898c3c8a"
+    },
+    {
+      "name": "20260729000600_support_sla_policy",
+      "sha256": "8cc5b7f847db4bdc60551fd24f1083e43bfdfa86ef9f7249cb6a35c852e225e8"
+    },
+    {
+      "name": "20260729000700_sensitive_snapshot_retention",
+      "sha256": "45facec1a4c43948bfa5abf583f0306c06d909fa055f4b06b8c8b923bfca2d11"
+    },
+    {
+      "name": "20260729000800_support_ticket_idempotency",
+      "sha256": "d0a2c45ec791bd7c104025d0c5d276c1eefb7d654f464b2599b0360201be1e2a"
+    },
+    {
+      "name": "20260729000900_unique_support_follow_up",
+      "sha256": "2125efcdc52f583a6f3f86325a37025c5f764f81ba6afa751d7e5a92852ef980"
+    },
+    {
+      "name": "20260729001000_api_idempotency",
+      "sha256": "d5b8788ab2e5c9cc2d77c3332dc24e9104014eb3c0d129eff166e58da9b632af"
+    },
+    {
+      "name": "20260807000100_dispatch_master_data",
+      "sha256": "e28d19f93d46f67eb8c73bb0c115b0215fdd4dffcd526ad436ce30b9505f22ab"
+    },
+    {
+      "name": "20260807000100_shipment_quantity_projections",
+      "sha256": "a949cffcaf85986c02bcd5b9fb30edc25563ccb9abd5d9aa17beb56caf5e65ec"
+    },
+    {
+      "name": "20260807000200_external_driver_personnel_continuity_fk",
+      "sha256": "d306040b45711e5d786e17e4e20f4aca577ba4d9f22654f32bf23386dd59bcf5"
+    },
+    {
+      "name": "20260807000200_shipment_quantity_review_corrections",
+      "sha256": "40c3601ad5dd218276cce5e588662fe4c9ed1218775ed11e14a8dcb6e44f72a4"
+    },
+    {
+      "name": "20260807000300_dispatch_master_data_lifecycles",
+      "sha256": "a994aad8f237a02da5d240b7b56a3d4dc242f7e88b0416fa519371aa8bd31e78"
+    },
+    {
+      "name": "20260807000300_shipment_return_evidence_constraints",
+      "sha256": "d3a1d3b6a23146985ec06d869c06f0c0b45554384bf9770cce228386949e9646"
+    },
+    {
+      "name": "20260807000400_external_registry_document_evidence",
+      "sha256": "e57f6f6a8db665f87ee66bab91127698b5e391ee470a29d231807db69f1d7ddc"
+    },
+    {
+      "name": "20260807000500_guard_driver_queue",
+      "sha256": "2b2daa96b1d011c2d02d9e9c24d54229aba2824e2f85747ac05a5a507c22815c"
+    },
+    {
+      "name": "20260807000510_guard_queue_snapshot_immutability",
+      "sha256": "755e49bceb3183855cc285cc81f89ddee15e7fe227a88dade0087c2765b855c6"
+    },
+    {
+      "name": "20260807000520_guard_queue_events_append_only",
+      "sha256": "69a3923673a2dab6897a6fdb20e1b2a38d348f287f88578c3f4d06bbb4b7d16b"
+    },
+    {
+      "name": "20260807000530_guard_queue_events_strict_append_only",
+      "sha256": "aa0a50d8f000168069e06484f9862ce003eb55932d4844fd6f733fb834162643"
+    },
+    {
+      "name": "20260807000600_logistics_allocations_dispatch_waybills",
+      "sha256": "149a859d210b0792601d5efa8e9148eaf4b877c30f6c66a4b63d46995748ac3f"
+    },
+    {
+      "name": "20260807000610_harden_allocation_revision_sealing",
+      "sha256": "4c960283c022725f25141deb94b7007e2601b8294195b6bd327b1c61de4cbe6b"
+    },
+    {
+      "name": "20260807000620_dispatch_driver_confirmation",
+      "sha256": "bb756ed3da0a2d61ccbe09948edb6923300d8a7cbf26efe403500783d6b568d3"
+    },
+    {
+      "name": "20260807000630_dispatch_confirmation_hardening",
+      "sha256": "8fc49d171873e521a494328b26382c73cb8f4d688327a657dc5a2aca64974014"
+    },
+    {
+      "name": "20260807000700_physical_gate_exit",
+      "sha256": "658a22924a059d5773ffa61a01caf5de01fbd5697f0eec01dd76217f0194774d"
+    },
+    {
+      "name": "20260807000710_align_physical_exit_lifecycle",
+      "sha256": "73e388cf743d6bc041f3e3329c3b76f8bf05dcf61aff8e6122b5f7b8adfb80f4"
+    },
+    {
+      "name": "20260807000800_dispatch_corrections_returns_outages",
+      "sha256": "a91b786c2616374807408d42de3d0193927128ec0527fbb24d6719cd529c8fc8"
+    },
+    {
+      "name": "20260807000810_dispatch_correction_reversal_constraint",
+      "sha256": "8336a994af76cc50d7b22da566b0fdf2cf8ea4f079e312593f72246e73b6da6d"
+    },
+    {
+      "name": "20260807000820_dispatch_correction_single_reversal",
+      "sha256": "c8ac702fa3453838a7a0f17574d1e07b0bd753ae54acd718ab2b593a4275967c"
+    },
+    {
+      "name": "20260807000830_dispatch_sms_session_attribution",
+      "sha256": "17e4aa69c1b98c786eebca732984629b9602e52eb5edfc7418cc87d334c4b933"
+    },
+    {
+      "name": "20260807000840_dispatch_outage_actual_window_and_evidence_immutability",
+      "sha256": "65f52b790764292aaf37ea43f88fe01f22b466935c69564b65627dc7f063a34d"
+    },
+    {
+      "name": "20260807000850_dispatch_recovery_evidence_identity_immutability",
+      "sha256": "aaa054ec0096051728a2ce4eabfafe1efb31bd582af80a59ed39ef5d3a578bb7"
+    },
+    {
+      "name": "20260807000860_dispatch_outage_approval_immutability",
+      "sha256": "0f1709c09b059da07db5b64a079ee0c4551e7f78a1b8d4568235fceaa2bae9ee"
+    },
+    {
+      "name": "20260807000870_dispatch_outage_dual_control_constraints",
+      "sha256": "8fd72943de034f7b2c21ff813d3bb27bd113b23be044440e5bddc8dc0f46cfce"
+    },
+    {
+      "name": "20260808000000_dispatch_timeline_and_cutover_control",
+      "sha256": "5deca56ec30daccecffea140b2ffaf399d2d161039adf004afeb7b4af4c7c02c"
+    },
+    {
+      "name": "20260808010000_dispatch_rehearsal_version",
+      "sha256": "c1d48917e08b3a3d80eb532575026a9b9ac3b52a61fd35f73f6816f50cf1ec03"
+    },
+    {
+      "name": "20260808020000_dispatch_pilot_resume_approvals",
+      "sha256": "6ed4689ef2c051693c9f07eb74aa063f771149a8c0209d66a752009a7bfff808"
+    },
+    {
+      "name": "20260808030000_legacy_cutover_write_boundary",
+      "sha256": "d5bc2aebcc08333889de2a84b2d4516dc5f76556392bbbff9d13f7571e4e387b"
+    },
+    {
+      "name": "20260808040000_legacy_linked_target_delete_guard",
+      "sha256": "1d1ef087229d237bb116eca71a44a4e5f3356eefdd4d38709052d822caa670d7"
+    },
+    {
+      "name": "20260808050000_legacy_linked_target_race_guard",
+      "sha256": "5c95e70ef709a76f6d0af5023b88c366cb17afd72e2b70b9d1569ca0a4ef877e"
+    },
+    {
+      "name": "20260808060000_legacy_linked_target_status_guard",
+      "sha256": "55600ccc137990ec4cffdc8e84642b686bd556dd4ba0c7712e113bf4f8580304"
+    },
+    {
+      "name": "20260808070000_security_personnel_report_export_audit",
+      "sha256": "1b0df8e10f6a8de24aa50a08c68abea1e1fc27774722ed43b8d2a504b67f2891"
+    },
+    {
+      "name": "20260808090000_hr_redesign_data_contracts",
+      "sha256": "74d62d6fa0162fbf9b473e925c359a178b2e04611f001aafd0a0b31c2a3226b9"
+    },
+    {
+      "name": "20260808090100_bind_formal_assessment_results",
+      "sha256": "20bdf9ec686ecfb428c9eb24002e7477361eba9a41bd22e805c549aed9f67032"
+    },
+    {
+      "name": "20260808090200_enforce_formal_assessment_lineage",
+      "sha256": "0f2339c45d91d655a1b3faed05698317af513a5623990019e085d5e0c9b9385d"
+    },
+    {
+      "name": "20260808090300_add_access_only_reconciliation_review",
+      "sha256": "839bfda34e22c198f41837773146734c86bc9e4ef7eb76951abbfa3dbcb0baed"
+    },
+    {
+      "name": "20260808133000_hr_authorization_enforcement",
+      "sha256": "67dc935671798d7ef7e2c4477edd1b41dba9aea2619643106220cfbc96852f71"
+    },
+    {
+      "name": "20260809000100_shipment_statement_data_contracts",
+      "sha256": "6d5791bba6ee49b8e1a325f433578eea5caa6746f4503f194752f2f5e75caf13"
+    },
+    {
+      "name": "20260809000110_harden_shipment_statement_data_contracts",
+      "sha256": "5e205ce696aa9093d0f07e46086d2006d6866312027fbdb8a6d6cdc8e46477dc"
+    },
+    {
+      "name": "20260809000120_review_harden_shipment_statement_contracts",
+      "sha256": "390f337cfdf73fb798bc6edc30d04a15c6d5bca20a1d0dfc8f951ab9f41218d6"
+    },
+    {
+      "name": "20260809000130_add_stale_dispatch_candidate_status",
+      "sha256": "f0d668653fe14cda761fc8e568d9d3908e9802cb61a7fadef46eb2f04b9d7ff5"
+    },
+    {
+      "name": "20260809000140_add_evidence_conflict_candidate_status",
+      "sha256": "505d0e41a0b4318470f2a4c3ffeff83dc7bb5576a89ef2af562546530577714c"
+    },
+    {
+      "name": "20260809093000_hr_duty_engine_guards",
+      "sha256": "8d081ddecbf0aebde13adaed3a15fc365234e19370d1d48dcd60aa86669410dc"
+    },
+    {
+      "name": "20260809120000_hr_organization_capacity_management",
+      "sha256": "b03c3340936f04f09e520f498a385da69f03f2a7b943437e18a97600f37a00b7"
+    },
+    {
+      "name": "20260809160000_hr_actionable_reconciliation_states",
+      "sha256": "aa5a3d77e0ffa8ad3132d81464012b16df9d60761dc9392341a16426713ffa66"
+    },
+    {
+      "name": "20260810120000_hr_interview_and_package_assessments",
+      "sha256": "b0482cd299cf97fe44b4d2c524b5e51cead6404edfbb151b3f8712e74be755ae"
+    },
+    {
+      "name": "20260810180000_hr_action_permission_cutover",
+      "sha256": "e6007b55a0f647622b0e7ef466d3b4c65c9203ec761876485e0c43da45f5c951"
+    },
+    {
+      "name": "20260811000000_zero_data_loss_deployment_control",
+      "sha256": "00ab7418c08c1bc6f03ca73dd1f89ae5bcc6c3d4ef8a95e327b21ab23c7112ef"
+    },
+    {
+      "name": "20260811120000_hr_company_evaluation_evidence_integrity",
+      "sha256": "e18ae2fa6fd2a7a45e6fc01bcb166ba01232021d81436ee37ad07da6bbaca1b9"
+    },
+    {
+      "name": "20260811130000_hr_action_permission_cutover_corrections",
+      "sha256": "1f442229463047ba72b9db51241cbd16e95b918d2ff635fda12e9060fbd38f39"
+    },
+    {
+      "name": "20260812120000_contract_lifecycle_governance",
+      "sha256": "761cc00aa89e000e54d3459dfbbee7d37b814e4ce21aaf4c5b0fcb981bea9e49"
+    },
+    {
+      "name": "20260816090000_contract_creation_draft_lifecycle",
+      "sha256": "c0904a099e29bc0e1493f5b6a48fcb90873fbb926903a8c7b4316f64f8b4e945"
+    },
+    {
+      "name": "20260816150000_sales_contract_correction_duty_chain",
+      "sha256": "d22fab3702c7548cf6333410f0037e35e75c3b0606efa3cb632cf1c05333eb51"
+    },
+    {
+      "name": "20260816153000_sales_contract_correction_source_version",
+      "sha256": "5081254a13227671563c2b40b39893a0c82b3e861c3e9e866758ccabcc9071c3"
+    },
+    {
+      "name": "20260819120000_contract_quantity_scale_three",
+      "sha256": "dd473dceb32c094e84731da901c6509352dfefc457f5236382a3d97968c78e8e"
+    },
+    {
+      "name": "20260819121000_financial_evidence_review_case",
+      "sha256": "c72ed03b2925fe82cc910c320d7f2a663988b2a8645bb4d4592f1444f725bc61"
+    },
+    {
+      "name": "20260819122000_approved_pricing_legacy_row_identity",
+      "sha256": "cae7539432465a082ba9c91d9ece16e60149469f80de82a287a4631ee848fe8c"
+    },
+    {
+      "name": "20260819123000_legacy_missing_contract_items",
+      "sha256": "0cd5abe6b06f77df395a44e7d743518ad52d1fed091f815aadc7a97dd19954d0"
+    },
+    {
+      "name": "20260822090000_allow_recovered_approved_pricing_rows",
+      "sha256": "1d5317a9bbd406de5d3f1034aa74c17b7ddeb9b410acb2d2a4856d2bc73e4de5"
+    },
+    {
+      "name": "20260822123000_cross_workspace_duty_history_receipts",
+      "sha256": "b3fcb2376ddfa70e1e2aebc4d29f28091cb744c8fee6eca8516268c643d0be34"
+    },
+    {
+      "name": "20260822123500_cross_workspace_duty_history_receipt_user_fk",
+      "sha256": "3a627aefa42c7b32ed6d4fbd59c7a32d42732224ed79f0cdf2638faebca6aa57"
+    },
+    {
+      "name": "20260823090000_hr_collateral_requirement_lineage",
+      "sha256": "c802b85eb309e7ae5c1ebd1492dd027d7b9c7fcd4529719e323182f90ca093e1"
+    },
+    {
+      "name": "20260823120000_simplify_hiring_compensation_review",
+      "sha256": "b9822f489dca448eef560aec44d905c4877cf2ac0b87fa8ea925d1d5e1781354"
+    },
+    {
+      "name": "20260823160000_version_collateral_original_returns",
+      "sha256": "b30a534dba5e3d2628f629db5ab758b657b8dccf58f3feb44c7b23ef3d6b3f68"
+    },
+    {
+      "name": "20260823170000_persist_pending_hiring_closure",
+      "sha256": "efa829f258fd8451297562def387ba5ae6d53841267cc0dcbd663c633e68e04c"
+    },
+    {
+      "name": "20260823180000_backfill_compensation_verification_deadlines",
+      "sha256": "3ccef8b3c3d55bf44460e2a85e944203dd4ca9f32014fa424d055f790b569391"
+    },
+    {
+      "name": "20260823190000_cross_workspace_duty_available_receipts",
+      "sha256": "11948cce87f7b5fe0511745d097122841a49942de0188c7383c7c1872096d661"
+    },
+    {
+      "name": "20260823200000_candidate_personnel_identity_conflicts",
+      "sha256": "dbc4c3f081c1f2623d1be6e237ae147861b99210d6138f1f2c96ac90b5b0b015"
+    },
+    {
+      "name": "20260823210000_direct_personnel_work_schedule_management",
+      "sha256": "32c5b54e8e6a44bd8fd192aa4efe41d601b8d1b3ec11a207eee59e1e8a288aaf"
+    },
+    {
+      "name": "20260823211000_company_manager_personnel_workspace_access",
+      "sha256": "38199b6a6fa31741b0d3bfbb326a4420be2ee1e4d8ca64c26aba16049c1e9493"
+    },
+    {
+      "name": "20260824120000_hr_hiring_followup_and_start_revision",
+      "sha256": "7446c99f55b15256287894f14c8ae8384264334bba94770c6242b2d50ff19e3d"
+    },
+    {
+      "name": "20260824143000_formal_assessment_view_permission",
+      "sha256": "81a531c0c1595122a6f531c813068641f95e6fdb73f57cb20107fd281d3dfe33"
+    },
+    {
+      "name": "20260824150000_formal_assessment_explanation_and_legacy_score",
+      "sha256": "ff7b22f3fb1cb1169f0a0b06bc87973f92c8289b4f09b7ccb6762e205b63d538"
+    },
+    {
+      "name": "20260826120000_candidate_sms_attempts_and_collateral_lines",
+      "sha256": "e7422cc37d6911c2821b580e865325c6a28bef7fad0f0c2a4549fc0fd5430752"
+    },
+    {
+      "name": "20260826130000_candidate_sms_provider_audit",
+      "sha256": "4cc4a733386f000b0518780260f585f360fdf97c85e730a10ce23c5866cd6de9"
+    },
+    {
+      "name": "20260827120000_hr_foundation_governed_deletion",
+      "sha256": "d09650e1997a5c858c71f62d0d282b6bc00e116a93a7df8982338d85aca2cfb4"
+    },
+    {
+      "name": "20260827120000_partner_profiles_and_cohort",
+      "sha256": "d63209034a0cf335c6f1292186692b728ccdb4ac208e7f1f7ab86db8b20ec138"
+    },
+    {
+      "name": "20260827120100_partner_inquiry_evidence",
+      "sha256": "fd32d8b6fdc2af90882d3f37921f5707d6c188843296d28859d238011683c1fd"
+    },
+    {
+      "name": "20260827120200_partner_case_pair_and_revisions",
+      "sha256": "dc9bc2585fdfd6ea5afadab946af8c7cc14ae09d5c969dcfb1388625caeb5303"
+    },
+    {
+      "name": "20260827120300_partner_pair_commit_constraints",
+      "sha256": "f0049e382e4e248df1ecb284af43173558fd01aa08015a9ec353a163d0788c2f"
+    },
+    {
+      "name": "20260827120400_partner_payments_outputs_and_corrections",
+      "sha256": "d1539e039e29cf0fb723594f24ef7b2c9a4e8e7c5821650ef208d5baca2e0c53"
+    },
+    {
+      "name": "20260827120500_partner_schema_integrity_hardening",
+      "sha256": "666e7a6a26051769146e4515e6d7f3a174c04dd096c4ebbd5574e90f1c918f20"
+    },
+    {
+      "name": "20260827120600_partner_exact_decimal_evidence",
+      "sha256": "4f359ff4070a5190517d9beb184b4a2eddee81a18cc575146624442912789e76"
+    },
+    {
+      "name": "20260827120839_partner_seal_payment_plan_evidence",
+      "sha256": "0368551b4529ff90f9c3485fc31b3639ad3caa49b344f97c4a19e9a472dffd30"
+    },
+    {
+      "name": "20260827123000_hr_foundation_legacy_baselines",
+      "sha256": "8887047dabcbd6ef2d6d13114b86b8b0f93c9c9045fe0e509fba2d8e1fa6511d"
+    },
+    {
+      "name": "20260829120000_effective_scoped_action_authority",
+      "sha256": "7ae08b707a9cb78a1e90e1ad3258c6e8f54f87a00125a60ee9a7de72c6263d73"
+    },
+    {
+      "name": "20260829121000_effective_authorization_audit",
+      "sha256": "166bbd4ae93b3f7075da1c5352854082ee00a8a373bff3d2d8b0bc21ea91620e"
+    },
+    {
+      "name": "20260829122000_partner_profile_responder_assignment",
+      "sha256": "20e6d3b4970dc2f5226273e2a864950c177f23d4980759a28c6e96ad90fd7500"
+    },
+    {
+      "name": "20260829124000_partner_inquiry_linear_successor",
+      "sha256": "c0c88864a8fa0f427be163af0f0f657f0545765efb7034c0b89e93973b06f9e6"
+    },
+    {
+      "name": "20260829130000_partner_inquiry_notification_delivery",
+      "sha256": "68eb1f58a95fd5e296937fcc75d48cf2d8e3cc4debf405027895b8016e63b527"
+    },
+    {
+      "name": "20260829130100_partner_inquiry_notification_legacy_boundary",
+      "sha256": "b2c2a22d3d792465eac60b6189c12fdaa23b82440b54611ed56ead62511cce10"
+    },
+    {
+      "name": "20260829140000_partner_persona_exclusivity",
+      "sha256": "64e31c411d07fbba0505068bbed12ce5dc8ffe2987b9b3decacfe04d67bec3a3"
+    },
+    {
+      "name": "20260829141000_partner_persona_race_guards",
+      "sha256": "b5c87ffebd1752dc1a176987d31f3414684278da966121d8ea00911d0efa0215"
+    },
+    {
+      "name": "20260829142000_partner_edit_session_purpose",
+      "sha256": "77780ccff4f514e6aad03237696839c7bcd0e7040b91fa4fb6b0e1b2b0fcdc88"
+    },
+    {
+      "name": "20260829143000_partner_persona_polymorphic_guard",
+      "sha256": "2ac6e521709235a3827a82ec96fd66dd9e45c5073b9cc37bfc2b9795ea95ba49"
+    },
+    {
+      "name": "20260829144000_partner_inquiry_polymorphic_guard",
+      "sha256": "41d9372f3d29831f5dff92ec1d62726045ec0114de1f75fb2a97203abe9e0479"
+    },
+    {
+      "name": "20260829145000_partner_recovery_purpose_backfill",
+      "sha256": "e535221f2efdec3922903451d72906399cc46df154e37839a94db93e35f80793"
+    },
+    {
+      "name": "20260829150000_partner_profile_management_evidence",
+      "sha256": "a71bb2eb45ae8df134db930502af01d722dcefbbecd7667be48637fe6631328f"
+    },
+    {
+      "name": "20260829151000_partner_profile_management_evidence_constraints",
+      "sha256": "9e8469c5a8c4b5a7a92937841199ff3410eceb2b1402ca7698d0c3c58ef0e991"
+    },
+    {
+      "name": "20260829152000_partner_first_evidence_irreversibility",
+      "sha256": "f208cdc69d6b8940f98bb996e2d3dcf150783217ed3b6a9fef6482f0fb77a325"
+    },
+    {
+      "name": "20260829153000_partner_root_profile_immutability",
+      "sha256": "e4678a9ab1c24ed2e206fb7a90df6d77205a512c8ceb18de2d2ac2cea7d26072"
+    },
+    {
+      "name": "20260829154000_partner_case_root_guard_order",
+      "sha256": "fa0cb94198916450667e993a648591dfffee1d10241d99c5aaf383c6f037bb3e"
+    },
+    {
+      "name": "20260829155000_partner_correction_persona_guard",
+      "sha256": "4d5b657a55699818972471becb989a0f12f71aaf1183b028ce15a05f02dbf8cd"
+    },
+    {
+      "name": "20260829156000_partner_correction_persona_preflight",
+      "sha256": "0d7643bb2c0ae5fab948b490ced31a15fefb72f9f86bce3f0051faa8217369a0"
+    },
+    {
+      "name": "20260829160000_partner_crm_transfer",
+      "sha256": "8770e63ca99e5513d6cb76387ccb5174f69dbdb82437c2cdda259b8abbf90fdd"
+    },
+    {
+      "name": "20260830120000_partner_integration_runtime",
+      "sha256": "5755f93c8d990c1259df7a49c4beada5868c0a07b8baba7c2f87dec53f6665bb"
+    },
+    {
+      "name": "20260830160000_partner_integration_hardening",
+      "sha256": "cd3c26627500c57cf2356a20e31bc32a0c1da7137d1ac26e6d6dc5d1d144da7e"
+    },
+    {
+      "name": "20260830170000_partner_fulfillment_exact_owner",
+      "sha256": "3f29082dd99ea74d34c128b1f6cb05a9901f1c960c6de995f81b4f287bae7b56"
+    },
+    {
+      "name": "20260831010000_partner_recovery_contract_finalization",
+      "sha256": "7f7c29269ccd89684b574ba210798366c4cb944e818535172df383375c6d565f"
+    },
+    {
+      "name": "20260831011000_partner_recovery_bound_constraint",
+      "sha256": "4f71503747f238b555ba3526ac12316b6bd666a23e065fb6f78caa4001e630e5"
+    },
+    {
+      "name": "20260831130000_personnel_performance_foundation",
+      "sha256": "95f0ead51d521b8b1f3bed88dc6ea03b74b0923a36d02bd401131013391b9cd7"
+    },
+    {
+      "name": "20260831133000_harden_personnel_performance_foundation",
+      "sha256": "f466d8fb24a1cb3ea916b69b6be861dc5d8c232897f7c27acfb6ed8bc2977eb7"
+    },
+    {
+      "name": "20260831134500_enforce_performance_legal_hold",
+      "sha256": "a5c39df3c675983680e1f9273b3f870bd3cbce2b9b96ce6721e3d3f912fb31e3"
+    },
+    {
+      "name": "20260831140000_complete_performance_version_lineage",
+      "sha256": "fc7209907d1ff51c3d085c36a492690b801c537d8208f6c4d0d9c54d9d64818e"
+    },
+    {
+      "name": "20260831143000_close_performance_foundation_invariants",
+      "sha256": "7e3b471b6f48196ce491b83bd2b5170fd9b396e974e372cba2fed4c175d963df"
+    },
+    {
+      "name": "20260831144500_separate_performance_deletion_guards",
+      "sha256": "023677dbea4b2295f8b358f42d6092479dd900d8be1d8dd0c7043f404fea26f1"
+    },
+    {
+      "name": "20260831150000_finalize_performance_state_integrity",
+      "sha256": "7ad87d0bf00a3701eeb389789870778eb301cd8fb2aae763d613e670b037a41d"
+    },
+    {
+      "name": "20260831151000_enforce_performance_hold_scope_trigger",
+      "sha256": "55e8c83ddc13c7b31c9be19e0524940fb4599e225ee3dde48f88122eebad08e3"
+    },
+    {
+      "name": "20260831152000_enforce_performance_immutable_state_fields",
+      "sha256": "eb3b70c62193a577d11ea64f5e98625936e6d4ef01000eb5047d7f74e3a3d54f"
+    },
+    {
+      "name": "20260831153000_bind_performance_policy_activation_preview",
+      "sha256": "a04a5f31305c1d5d2ac46a7576d4f135ec71042d75d38d86b0aeab7d83e76c59"
+    },
+    {
+      "name": "20260831154000_preserve_performance_policy_preview_breakdown",
+      "sha256": "588649fe961b6bff52fc0ca4124aa2816d68d5e8541c036a059fed17231dd06c"
+    },
+    {
+      "name": "20260831160000_personnel_performance_policy_engine",
+      "sha256": "faecad38bb09c41357075b63009cdb1de812e478714e8f7392d18c6d88d4ca2a"
+    },
+    {
+      "name": "20260831173000_allow_due_performance_activation",
+      "sha256": "f0df846e8b39c436ed803ecb985ea907ae24c993f9b461cbdfef6e547b29fa1b"
+    },
+    {
+      "name": "20260831180000_performance_artifact_retirement_time",
+      "sha256": "2f8a5f0cd28582f438ffd46cdb5965ba11e3b4a588d667c8691bcf817ae76bf6"
+    },
+    {
+      "name": "20260831200000_performance_policy_reconfirmation",
+      "sha256": "48588fd42ff654dc0f9fd4940399cf6b18c085981fb92246cb2165e4e9cc8d61"
+    },
+    {
+      "name": "20260831201000_performance_policy_reconfirmation_guard",
+      "sha256": "2fd13e792e672740252c5f54b7eacc97cd21a418fe982029c9ecda20088769ee"
+    },
+    {
+      "name": "20260831202000_performance_policy_overdue_supersession",
+      "sha256": "80636319c6d0b9df703373ddfb1a9ce9afb2380de457bcd04b78296befcebaff"
+    },
+    {
+      "name": "20260831203000_restrict_performance_overdue_supersession",
+      "sha256": "201c82612abd38ddeda41c4cfa99d7b9bca912d7e5100f53f3e813c941238609"
+    },
+    {
+      "name": "20260831204000_preserve_overdue_policy_lineage",
+      "sha256": "7f52063a65c15c6305b1189302ae90ad751fd20c054c0fb0d338cadd4063020d"
+    },
+    {
+      "name": "20260831205000_allow_unpublished_policy_draft_cancellation",
+      "sha256": "94ea4c985a49c9e1b1f224d92a877cabfae2309dfb6c782c2f7d09dd1d55aada"
+    },
+    {
+      "name": "20260831206000_allow_unpublished_policy_draft_supersession",
+      "sha256": "0409c6a85683cb0e6dba49976500d5fa69e0b6efa2144a5a0cdc63a7829c86b0"
+    },
+    {
+      "name": "20260901010000_partner_operations_control",
+      "sha256": "fa75c8c5ba530e14e573f8dfb383f75b84dd36bba74b8967438702cba8d1eab7"
+    },
+    {
+      "name": "20260901011000_partner_operations_control_cohort_cleanup",
+      "sha256": "aab7c6aa731bfaedad0cb31693702a0ce0ac9bfccc10a24f4c318e0e91f0c9da"
+    },
+    {
+      "name": "20260901012000_partner_internal_accounting_source",
+      "sha256": "f4aece78632dc193834bec668dac0fcdc6f421ec3ef0f2d7a0945553c5ca51a1"
+    },
+    {
+      "name": "20260901090000_performance_readiness_workflow",
+      "sha256": "9357c2d1999a313346e850c1e7802b4e9623c8f5ec5ec476b411faf09b6f96b4"
+    },
+    {
+      "name": "20260901091000_register_performance_cycle_permission",
+      "sha256": "76de34d77dd54b9ad2b3041be9f5ab6d3372607b01eb414ee5a519eb71f58ac5"
+    },
+    {
+      "name": "20260901092000_add_performance_assignment_allocation",
+      "sha256": "437bc2a8787dc588c807e22ac3de3ad5f30a96672acdbd2759680a3e307d91c6"
+    },
+    {
+      "name": "20260901093000_allow_hr_not_evaluable_resolution",
+      "sha256": "e78a9e4fa0f86a0320cc69210199af39fca36d9c2abd56f6ed8c93c8457ecf2c"
+    },
+    {
+      "name": "20260901094000_add_performance_responsibility_history",
+      "sha256": "bd8f1010a6f6377fe65cb3160e25232dcd23327f3416de6e589d8a092553c15c"
+    },
+    {
+      "name": "20260901095000_effective_date_performance_allocation",
+      "sha256": "3a3458f8cfb2826b907257a7c9eec74cad216645fd2cd0a954f98ddb7325191c"
+    },
+    {
+      "name": "20260901100000_version_performance_responsibility_corrections",
+      "sha256": "c27b5bf2bcee534cf826bc460077ac3a11aa36ab93e68611e158b9c0a77f8628"
+    },
+    {
+      "name": "20260901101000_guard_performance_responsibility_evidence",
+      "sha256": "e117bf9e0ab639cc868b68006165da8f8f19c37bf6b7584e9ee975c8f97ea2be"
+    },
+    {
+      "name": "20260901113000_performance_disclosure_exports_handoffs",
+      "sha256": "fe1bf0d018bfc14ecad42120ce8abb49192b96e993b53590cdf503ee94350656"
+    },
+    {
+      "name": "20260901114000_performance_export_delivery_claim",
+      "sha256": "bd3627a04aa94518796540a067dafe8ae3b62574a8d01013df70691c612ff528"
+    },
+    {
+      "name": "20260901115000_performance_export_encryption_recovery",
+      "sha256": "f9805b7ebcbdf36783ced7e4f7f37d52fb13b73b8203d99f7f4ecb88c7c46030"
+    },
+    {
+      "name": "20260901120000_performance_consequence_destination_package",
+      "sha256": "03386b878d14dc5a335d221b921e007d7221d94f85709a69c04dbab88ed52c3d"
+    },
+    {
+      "name": "20260901121000_performance_consequence_package_integrity",
+      "sha256": "c48dddcbbc96db17eda6e4760cac1e357dfc2d81bb6555eee0fb53bd383110e0"
+    },
+    {
+      "name": "20260901122000_performance_export_lifecycle_recovery",
+      "sha256": "8c639e5f34d75311a8daec83d2abb67faa50576c8f83cbbb10c98acf97de6ef3"
+    },
+    {
+      "name": "20260901123000_performance_system_deletion_actor",
+      "sha256": "c0205335493a01da4affd87e4775812971ee6f3171d616cf131426826bf9e0ff"
+    },
+    {
+      "name": "20260901124000_version_consequence_policy",
+      "sha256": "afa432e4c63ba15e386f28e0673d50197a9a11dbe5f60df7d302764ea5cdf3d3"
+    },
+    {
+      "name": "20260901125000_complete_consequence_policy_controls",
+      "sha256": "07abc65ab3cb4a48203f246e55c2b5efa7615339b1bb7428fc07acb3e9bd342e"
+    },
+    {
+      "name": "20260901126000_harden_consequence_legal_authority",
+      "sha256": "28a18e1a5af9e9b72a7100ca17afbf76b2e86f8a2bcb7d431b383cb1286be2d8"
+    },
+    {
+      "name": "20260902160000_biometric_workstation_challenges",
+      "sha256": "d7b091138a9beb8c8785e33e89dba61e4790cb79d5808b6cc08e522954d06ca7"
+    },
+    {
+      "name": "20260902170000_biometric_challenge_processing_lease",
+      "sha256": "55bd3f0ae9e1a4bb32028a27013e01b32154690a38b0085c4eb5007f23bb8bc4"
+    },
+    {
+      "name": "20260903010000_partner_dispatch_source_policy",
+      "sha256": "81591a43bdcee63f394b9dec33aa30a6449c12a9690822916e3ac31695e69974"
+    },
+    {
+      "name": "20260903011000_partner_stable_physical_lineage",
+      "sha256": "79ddda98a4da429febdb55200c49cddb19748e88cef5681d76082637745274a7"
+    },
+    {
+      "name": "20260903012000_partner_shipment_evidence_source",
+      "sha256": "bf4cc9dd1bf0861c0e71034aa66a1a50f09dd7408fa1693164ed01eae9c559c8"
+    },
+    {
+      "name": "20260903013000_partner_accounting_authority_fence",
+      "sha256": "f3709387bf8eff5a955346558fe0a63ce4b5e5dc5724e5a097ccf761f0c67e0f"
+    },
+    {
+      "name": "20260903014000_partner_loading_source",
+      "sha256": "9fd67685ea35837da4b06d982e61dda154516a4dfbba1a7aba771274ab63a0e2"
+    },
+    {
+      "name": "20260903015000_partner_logistics_authority_fence",
+      "sha256": "817bc6bf666db49a12ab7c850243e349078577e8cd8a9b40f721eba8a2e35923"
+    },
+    {
+      "name": "20260903016000_partner_guard_authority_fence",
+      "sha256": "e227f2f186dce31d5f9df436915af56a8124cc565094dfc30d189601d0d8c86c"
+    },
+    {
+      "name": "20260903017000_partner_allocation_draft_source",
+      "sha256": "36df426c45f55eb0657b5480ccc2ec1a5ec21ebae209c755639bc25a76213dd7"
+    },
+    {
+      "name": "20260903018000_partner_allocation_draft_loading_owner",
+      "sha256": "8b223a9a76cda684d670c55f6c411556ffc13d073a5cb87a4815297ee46e78e6"
+    },
+    {
+      "name": "20260903019000_partner_finalized_allocation_source",
+      "sha256": "3cbb11a4c95defc1f42610e3778ca8e4c353ab683fb26473af5a530dc0101df0"
+    },
+    {
+      "name": "20260905100000_guard_compensation_effective_intervals",
+      "sha256": "a401973c004ee854970adb8e8a0fab7224468534f843595b248339b7f931c2c9"
+    },
+    {
+      "name": "20260905101000_compensation_authority_and_ranges",
+      "sha256": "48b75ca2a17e6e915597ba5e4efe835e67e57d76358f7e90803b6b8ae74d0ceb"
+    },
+    {
+      "name": "20260905110000_performance_privacy_cases",
+      "sha256": "e9f6c89b9550d72dbec7687149ba7ae30394c25f7db61ad800b0558c1780b207"
+    },
+    {
+      "name": "20260905111000_performance_privacy_permissions",
+      "sha256": "0600706ccc9e328f4586358615b852b4eba2dd1dd8ac51afc87ae233c23ffc13"
+    },
+    {
+      "name": "20260905112000_performance_disclosure_fence",
+      "sha256": "f1a781e8c38dfc20ae7c52521eca7de66577bbb02897c8f333813b8f972a31d9"
+    },
+    {
+      "name": "20260905113000_performance_first_write_pause_fence",
+      "sha256": "d06a37f3e931bf2eb6574f9d402f311a871f43e6e71335efc9248d0f22920015"
+    },
+    {
+      "name": "20260905114000_performance_hold_decisions",
+      "sha256": "3f3a88388174c332430a3604945e59d9603bc2cc7f71049a7cf88b9760cbcbe2"
+    },
+    {
+      "name": "20260905115000_performance_privacy_scope_integrity",
+      "sha256": "b3bc3599bd2b67efe1d2f6170ab43c28bdd8955d487bfec4ddcfa61fd34bfd3d"
+    },
+    {
+      "name": "20260905120000_performance_export_cleanup_journal",
+      "sha256": "18d0033ebf31abf3fb50a1066e06fe4283a64fcd5879e3591b32fde98983965d"
+    },
+    {
+      "name": "20260905120000_shipment_statement_operations_control",
+      "sha256": "aaf05212eb3228190ec926355195e97377c3b823caf6ac562084c685148531b4"
+    },
+    {
+      "name": "20260905121000_performance_privacy_correction_link",
+      "sha256": "0c3f7409d9cab749d443ac7d9ad6535b57a6343011874129f7000ea3637e93a2"
+    },
+    {
+      "name": "20260905122000_performance_mutation_pause_fence",
+      "sha256": "0974ca0b7a05c372906bad0c99d3527c83b3ccea9b7d0b99ea757eea4315870e"
+    },
+    {
+      "name": "20260905130000_performance_export_artifact_inventory",
+      "sha256": "b65ea1c79622eb0466d07c16d668c74ddf06e07c5effe5d955efd7259e28001c"
+    },
+    {
+      "name": "20260905131000_performance_identity_disclosure_fence",
+      "sha256": "865bf3efd60c0bc956766b4398c7bd9eb73c4c98bcb1c68f73bed27a1dd5b3ee"
+    },
+    {
+      "name": "20260905140000_performance_cohort_membership_freeze",
+      "sha256": "12bd8c367707a6b264de0dad2c4e7e8c31d73ba2cb0168b9c17b4c8c416641fb"
+    },
+    {
+      "name": "20260905141000_performance_capability_write_fence",
+      "sha256": "da5d9ffc9a166c92876adf94048b571d00f8afca2e1e16c2e8be856c2ec13c35"
+    },
+    {
+      "name": "20260905141500_performance_capability_record_shape",
+      "sha256": "908da7aa29f3d563ce70aa57f8a90e83e8f147a8460f594375b9e8d824371a86"
+    },
+    {
+      "name": "20260905142000_performance_cohort_lifecycle_disclosure_fence",
+      "sha256": "4663b48e206655fe83174ea9d1d6ce79bdc0cbc6ca7dc1cc643f629137efcdb2"
+    },
+    {
+      "name": "20260905143000_performance_rollout_governance",
+      "sha256": "4f6474df902040b570be52fd821d06b2d6919f5172bf6345943a93e60ab3776b"
+    },
+    {
+      "name": "20260905150000_performance_export_source_lineage",
+      "sha256": "ca243d1871035a67e3446f2209fbafafe276780e53e3f097d12f1e20161484a4"
+    },
+    {
+      "name": "20260905151000_performance_export_lineage_seal_guard",
+      "sha256": "f225695e44aa0b49af2460a85f1eb757d7fe03dc22d011b6aede3b2235520cb4"
+    },
+    {
+      "name": "20260909070000_index_accounting_private_evidence",
+      "sha256": "4faf3eaa14faa215a4ed5837a481c4643a0eddb94d7ffbc1c0760127f848bcdd"
+    },
+    {
+      "name": "20260909090000_performance_operational_monitoring",
+      "sha256": "96005e1eff3ca24e1960a406f74771bdd8734928cc4e00a31f8a27f19271c216"
+    },
+    {
+      "name": "20260909090000_performance_promotion_evidence",
+      "sha256": "0ca9c4ac150d12a1b0aa517dabc6e85b8e1fce4bc4013c73679b9cb92698cb1f"
+    },
+    {
+      "name": "20260909100000_performance_retention_erasure",
+      "sha256": "4a5565eccb1df056957afadcba9979aa539f838642ba3c6ffc5e2e09418c90ae"
+    },
+    {
+      "name": "20260909101000_version_performance_copy_evidence",
+      "sha256": "709901061c10441b51fb38d2c1a3610da0edbec66fbb14f54d8ff6c280957821"
+    },
+    {
+      "name": "20260909102000_performance_promotion_order_fence",
+      "sha256": "963fc5877f4cd4df9f85ea68eb7694d3f68153c39410803b39c2e44c5695cd30"
+    },
+    {
+      "name": "20260909103000_preserve_performance_copy_evidence",
+      "sha256": "0b6b5cff1d0d23f2593f39375b57f2a1e7f28f867e82c70549dcc1495db01eac"
+    },
+    {
+      "name": "20260909104000_allow_versioned_performance_copy_keys",
+      "sha256": "da0b69b0f0a7e1b07981c6133da0b98337d2c79ab012dae6efce0310ca9d0c1d"
+    },
+    {
+      "name": "20260909110000_performance_automatic_pause_actor",
+      "sha256": "da3e36589a194d771946e9bc2ee8bbd82fe5b5beb7e4d7324baa9e62bfa4e990"
+    },
+    {
+      "name": "20260909111000_performance_shared_operational_pause",
+      "sha256": "0bb8e885845c292c4107956b10715e9bfa0084794e2ae72b6cb64403eb13d6a5"
+    },
+    {
+      "name": "20260909112000_performance_automatic_incident_evidence_actor",
+      "sha256": "bec47bf9cb5439f055660bf1462c1be7a0b864154f0afb8ae640f81bd2e3732d"
+    },
+    {
+      "name": "20260909113000_strengthen_performance_promotion_fence",
+      "sha256": "fed34d358008c3adf089c5191dbcc78c8376691d08ff4168e4ed0ce56df1a947"
+    },
+    {
+      "name": "20260909114000_require_authenticated_performance_promotion_transaction",
+      "sha256": "96870501885c592d584e11d76bfa70d71560810baf20ccb4dadfa63e0edb3324"
+    },
+    {
+      "name": "20260909120000_performance_personal_summary_delivery_permission",
+      "sha256": "ccb2d472f14bcce38cfc0e9e7f564fc7ec781bc965645e5ed1bb05110bc22872"
+    },
+    {
+      "name": "20260912103000_partner_release_readiness_publication",
+      "sha256": "11f823e18d707048f51942833a84b67eee2ca692831a31baa7c7205428ccc0e9"
+    },
+    {
+      "name": "20260912104500_partner_release_signed_receipt",
+      "sha256": "971202acc88e493327bfc68f5406104b48edbc3a7cc87fd353448a9ed6a63d3c"
+    },
+    {
+      "name": "20260912120000_add_applicant_reported_personality_summary",
+      "sha256": "805d7c46e63a4314919014ee635fe7fab9d40f10e50b66b176f5094dfd9dde69"
+    },
+    {
+      "name": "20260912190000_simple_personnel_performance",
+      "sha256": "a8be2f09e1bec6f679f7ef7ec13ec14fcb73edde58270bee267ee179a5056716"
+    },
+    {
+      "name": "20260912191000_simple_performance_permissions",
+      "sha256": "3d07160b0da2b8b9602df9ed3401ae9931b1534e4303b5c680f64c52c188c980"
+    },
+    {
+      "name": "20260912192000_simple_performance_correction_guard",
+      "sha256": "e085523f342199855d144d207527614899855c1e92a774e859f76287945a84b9"
+    },
+    {
+      "name": "20260912193000_retire_legacy_performance_permissions",
+      "sha256": "2637c467ec5ecde6c3c57fd17c0153438a3ca7f6d81bdfb1235a0115755181e0"
+    },
+    {
+      "name": "20260912194000_bind_simple_performance_to_employment",
+      "sha256": "814b4b8dbb48891a2a3baca42d422de863cd6435db5a15576065c5c40bca18f2"
+    },
+    {
+      "name": "20260914120000_personnel_behavior_surveys",
+      "sha256": "1e5d9bf831bd9e226b40a2260ac4d907342bf7de83fbc28ef9c974f8df97d144"
+    },
+    {
+      "name": "20260914123000_simple_performance_evidence_metadata",
+      "sha256": "3b0ae057f3cd47372659caf33a3b59c33937a79612653bb8b95aa791ab738085"
+    },
+    {
+      "name": "20260914130000_seven_level_performance_permissions",
+      "sha256": "478c8becb9cf8792d8da703faf67d0528f6e0633646bc7629a737dd14654f1f2"
+    },
+    {
+      "name": "20260914133000_performance_serious_violation_gate",
+      "sha256": "84f81284cccc9e5d58ca5c9e0842f3c3e250a039072696ee8a50e9479e2276c6"
+    },
+    {
+      "name": "20260914140000_performance_due_process_and_revisions",
+      "sha256": "d7432044c56de72de16eb4b5d827b2275913a54de4a66ea4a5bee348fe4c2f4a"
+    },
+    {
+      "name": "20260914143000_company_manager_performance_targets",
+      "sha256": "b7ad2e90dc5a2474620ecc55c3412f160bfa4dfca9ea5abafddcca4f66aaa401"
+    },
+    {
+      "name": "20260914144000_future_effective_performance_profiles",
+      "sha256": "cd2dace9675cc92c2b4ae05533b3746db31e1646419735eb5f2fc7ceadd3e720"
+    },
+    {
+      "name": "20260914145000_job_scoped_performance_profiles",
+      "sha256": "fec4e213da6f6d961ba38f1ecc571ecb481d1ec931224e519f5a42ac0a9b80a9"
+    },
+    {
+      "name": "20260914150000_retire_unscoped_performance_profiles",
+      "sha256": "09e82fa6acc372866c50d061aad331889563c421568d906cb5d67dddfcc38387"
+    },
+    {
+      "name": "20260914190000_partner_material_inquiry_usage",
+      "sha256": "00c712c248b829b6e8ce08de28c21739e906aa7310b778e0d12d92f2d0314a4a"
+    },
+    {
+      "name": "20260915090000_partner_catalog_sales_units",
+      "sha256": "d6c8f286873d9789a95c9a1807f291bb0935244462863dc357b130bac789c781"
+    },
+    {
+      "name": "20260917100000_partner_unpriced_numbered_case",
+      "sha256": "a430f47fc7c6b20a49fab884e81b4660f95eec4ebdba738b5c218560200c4cac"
+    },
+    {
+      "name": "20260917101000_partner_pricing_legacy_default",
+      "sha256": "a431947ca155dccf8114e693dc4db5c575bd6649747f16b865d7075fe7a8966f"
+    },
+    {
+      "name": "20260917102000_partner_pricing_fail_closed_default",
+      "sha256": "ea46584c0a17996382a08518a750a774a9795dbb61d871b6859ca0151a0011e8"
+    },
+    {
+      "name": "20260917120000_partner_independent_finalization",
+      "sha256": "73e6a7e5762e8e73bb999cc0b44a7f6a6a8e670117ce39e4abb7f57db7b865a0"
+    },
+    {
+      "name": "20260917121000_partner_customer_revision_reconfirmation",
+      "sha256": "e0706fb804e1576a9db82ba5871ff7710ef8816f9177c78e94799ff6707f3923"
+    },
+    {
+      "name": "20260919120000_remove_biometric_policy_requirements",
+      "sha256": "6a33f603b9b568abab13334009f13bb86191e2519bc8c3f53ab2be2438932813"
+    },
+    {
+      "name": "20260919170000_add_accounting_financial_void_cases",
+      "sha256": "037c817b37321ef0fd940b1a1eaf4dc70b6d35c9a18846c2dde40f64e268b873"
+    },
+    {
+      "name": "20260919173000_restore_unique_accounting_invoice_numbers",
+      "sha256": "1825a9dd489b22987748b15188cead7307a08fe721c90e7a7981a6e3c1c1aa4b"
+    },
+    {
+      "name": "20260920090000_release_voided_accounting_invoice_number_claims",
+      "sha256": "cbba8ba1be87b895254c67ceaaebd1fce5aaeadaca3dcf6d9a6bdec45607ca70"
+    },
+    {
+      "name": "20260920100000_store_biometric_capture_images",
+      "sha256": "2d418e1bb1de49b7628aa9fbe79fb0ca3e22ee7bb8535545dbb4147619c17cdf"
+    },
+    {
+      "name": "20260920120000_partner_case_scoped_pricing",
+      "sha256": "f2bd36f0504e8a7701cafa2104c354032b5666019ddc3bbe83441ecfecca577f"
+    },
+    {
+      "name": "20260920123000_partner_case_pricing_package_window",
+      "sha256": "05115de75b495613c76e33e81ead442f62abf29aea75759ef696b12a4c5eb937"
+    },
+    {
+      "name": "20260920130000_partner_inquiry_case_revision",
+      "sha256": "d65541db0f7d49ea7550df8b0f24cbc84b65a4b17fabbb2a9dc6b2c6c6ddaf87"
+    },
+    {
+      "name": "20260920133000_defer_partner_linked_pair",
+      "sha256": "826f47905accdcd1daa25fd481606fd2a167b0010437ae3843f59f2b620a4c67"
+    },
+    {
+      "name": "20260920134000_partner_deferred_pair_guards",
+      "sha256": "58adb43ac97bd028e7ba075496d8df70a3726de2464246fe84cd91c3d0011729"
+    },
+    {
+      "name": "20260920135000_partner_finalization_projection_guard",
+      "sha256": "7aefcdc77b1db7b497ebc9acc9005d7f1dd482e809b8ab8e6b455474fabec2ba"
+    },
+    {
+      "name": "20260920136000_partner_finalized_commitment_shape",
+      "sha256": "c9cc1019ad53044637ed3c7b40e23e0ed6a1b12cb9e607328f68c7fb917f180c"
+    },
+    {
+      "name": "20260920137000_partner_finalization_projection_partner_guard",
+      "sha256": "2e6da93dea897254f0bf3fd49d4c669960d9e7775eecd66b58e4c2d7a4ffcf37"
+    },
+    {
+      "name": "20260920138000_partner_unlinked_cancellation_guard",
+      "sha256": "b05703a999c0020b618bd5cb656f90d2138fc677912ccd24b212f9628d2f9040"
+    },
+    {
+      "name": "20260920139000_partner_case_single_pricing_package",
+      "sha256": "d1c8fc4b836854f57d6635b2241cb7e4b568260b494c0f698ecf38954b85b656"
+    },
+    {
+      "name": "20260921100000_partner_commit_independent_of_customer_state",
+      "sha256": "26ec16ab9161b552655d7e2cd8bde7c30d3baae3ab5be532ba36130925e9ff42"
+    },
+    {
+      "name": "20260921120000_accounting_ledger_foundation",
+      "sha256": "0ce8025858905464c811336886e0aab6232f9a75070ed8b7a064ac39ac96b13b"
+    },
+    {
+      "name": "20260921123000_accounting_account_immutability",
+      "sha256": "322c0745884db14bbba96a8ba59080e9c176b58d9525705ddaa5b759322eeb60"
+    },
+    {
+      "name": "20260921124500_accounting_posted_children_immutable",
+      "sha256": "aef36250472619e2da045fcefc5dd9e40ff27493f227f2d474a5f284a24cd37a"
+    },
+    {
+      "name": "20260921130000_accounting_line_evidence_and_rule_immutability",
+      "sha256": "fca7ef4921b58556be4f599f34c2f4593dd2d696ba7ba35fa63c15b585687901"
+    },
+    {
+      "name": "20260921131000_accounting_posted_child_concurrency_guard",
+      "sha256": "fa677ef5089f91a8a5011e678088507f2ad949c9105f2895309bcad9448af822"
+    },
+    {
+      "name": "20260921132000_accounting_control_account_details",
+      "sha256": "a83e3824bca72e8bf506ab33ea506bd4cb50866842026700ec5922140626c827"
+    },
+    {
+      "name": "20260921133000_accounting_dimension_rule_insert_guard",
+      "sha256": "3027214e9468ef024394b01a5232e597f0df3e613db41494d27880b86dddff57"
+    },
+    {
+      "name": "20260921134000_accounting_unique_source_delivery",
+      "sha256": "7528ec2f7803286590d34b23c78475bad078a2c54ca2db2adb9ff3b5404c62e6"
+    },
+    {
+      "name": "20260921135000_accounting_evidence_payload_integrity",
+      "sha256": "85d7bbdbd4f3a01eb2516c8b7a26b3f61db1e9d7c7ef89b55819fe62c0cdbcee"
+    },
+    {
+      "name": "20260921136000_accounting_source_payload_immutability",
+      "sha256": "692e9226aa5ff8657dfd71a857208da6ac46a70cf0449269854670a1809fd5c5"
+    },
+    {
+      "name": "20260921140000_accounting_period_end_statutory_close",
+      "sha256": "513e0c63feacd67418c8fd88eebf8adf1e59500e53ba098691d8e7b2f8a055f2"
+    },
+    {
+      "name": "20260921140000_accounting_supply_chain_costing",
+      "sha256": "7b639cede79c4fdfa886dc5dba2a66c5dc4c9ffe495d34e0779f453084a2a158"
+    },
+    {
+      "name": "20260921141000_accounting_payroll_settlement_attempts",
+      "sha256": "a1f25283c92e9a589d3b84d026f9f208bc9c127fa01d5ed9b01e55649360ae43"
+    },
+    {
+      "name": "20260921142000_accounting_period_end_immutability",
+      "sha256": "be98964a20380521222ba98816be7aaef9216039ea2e4c8f3a96508f201ce8e2"
+    },
+    {
+      "name": "20260921143000_accounting_close_archive_guards",
+      "sha256": "e299710b9fcfd4e643fece045d193a2594137c236891c089e3f74fdc62574a2d"
+    },
+    {
+      "name": "20260921143000_accounting_supply_chain_review_hardening",
+      "sha256": "bdaccd9ca873b99eaa2e46ab16fabf9df321403dc440e97d96464a048809f40f"
+    },
+    {
+      "name": "20260921143000_partner_pricing_result_duty_guard",
+      "sha256": "12d6f1187bc92f46679262b270684e52e592d73b958fee919264c357eb95dd94"
+    },
+    {
+      "name": "20260921144000_accounting_payroll_settlement_voucher",
+      "sha256": "88e7da12ce1f02d26cb4b010b3e650ad6bdd68d948795a22d5c393d8924cd042"
+    },
+    {
+      "name": "20260921144000_accounting_supply_chain_audit_chain",
+      "sha256": "aa4fbe26adb297609fd70f0dc7f959a6a71d39a5aff11e86ce674599ee5d0960"
+    },
+    {
+      "name": "20260921150000_accounting_customer_treasury_tax",
+      "sha256": "05c24e55e42d29a16b996c8e7c10d6c34e46d99d8caec041c6ef11876f2b1886"
+    },
+    {
+      "name": "20260921151000_accounting_customer_evidence_guards",
+      "sha256": "ce138a1e1bb8147d22cb5bff695ca4a5815c0bff5ae930f62f1acc9244108a47"
+    },
+    {
+      "name": "20260921152000_accounting_bank_match_invariant",
+      "sha256": "e6d6fdad797f81b1d87b84e0cfc2b02a4a78d32bf286085db02793e0c8ecf973"
+    },
+    {
+      "name": "20260921152000_accounting_operational_reconciliations",
+      "sha256": "c6112fbc18b3ce7464986f46df25562883b6bed9d05da4907c423aa4dac3eb1d"
+    },
+    {
+      "name": "20260921153000_accounting_tax_foundation_guards",
+      "sha256": "b00909862ab511c9011a52bb63a26a2d99ae3fd935b9b3f250def2ebe719bdd5"
+    },
+    {
+      "name": "20260921153500_accounting_operational_reconciliation_scope_fks",
+      "sha256": "c4343a9c0b64810fb6916ccd5be2f2600eeb152bc732960299d9b38c352ac6b7"
+    },
+    {
+      "name": "20260921154000_accounting_petty_cash_settlement",
+      "sha256": "93c7c58a0b80358ed138f2b474f438aa33c23f3485de48f6808199fd2ad92749"
+    },
+    {
+      "name": "20260921155000_accounting_customer_returns",
+      "sha256": "b50e506c3c111dc8f7864bbcf87fb5c1902d09e55b58715ece9883780ab8eff6"
+    },
+    {
+      "name": "20260921160000_accounting_customer_posting_rules",
+      "sha256": "51c7309fbf1f848c965444c45743857ade1771938445c18359511771291c1667"
+    },
+    {
+      "name": "20260921161000_accounting_inventory_cost_evidence",
+      "sha256": "665ff2810ea308b0eb9b75c6d8a51bc4c11ad8627fef5c74aeaf78d606ce6788"
+    },
+    {
+      "name": "20260921162000_accounting_contractual_exception_terms",
+      "sha256": "f5b1505bfbbb267133f664f67747a39fe30ee6ce0b16fa7c8f9f85af1c395f70"
+    },
+    {
+      "name": "20260921163000_accounting_authoritative_customer_evidence",
+      "sha256": "f314ddf34b5018392d173df6024adc8e3ce74f1feffcef344d5294023abed164"
+    },
+    {
+      "name": "20260921164000_accounting_bank_direction",
+      "sha256": "662a13660abbdc166d232eb628fed99f7e1585a5ee22bc4bd5bc47cc8d16fa4b"
+    },
+    {
+      "name": "20260921165000_accounting_cash_count_voucher_identity",
+      "sha256": "6a60a4fcd0f0827a53fc5d74e2f3069c51a5e66d0833aca77b19bc46dd424087"
+    },
+    {
+      "name": "20260921166000_accounting_customer_statement_exports",
+      "sha256": "b154f53a23e3b6ad70627848087c76ceb5796939f048b9aec2a261b3f4a14788"
+    },
+    {
+      "name": "20260921167000_accounting_vat_input_evidence",
+      "sha256": "9866a530771913b6b9b1d076dc96db39533ada1ce5dd3f127949877c433c4e6e"
+    },
+    {
+      "name": "20260921168000_accounting_tax_outbox_lease",
+      "sha256": "1e5d78885fd307bbb4018adbb7fbc7a806a314121499bbf4f2e7addbbebd6de8"
+    },
+    {
+      "name": "20260921169000_accounting_bank_match_reasons",
+      "sha256": "8185a866eeb9bbcec434fc6035c1fb9288ea384ef53357b135c1b93fb70ce1c7"
+    },
+    {
+      "name": "20260921170000_accounting_evidence_integrity",
+      "sha256": "cb36845e07b0953e3b15a5528ea8c8a84cdc03f7ec7e6a1c2e3d44a8fe05290b"
+    },
+    {
+      "name": "20260921170000_accounting_replacement_cutover",
+      "sha256": "e5011d1ea06581c006e98ff631b27b38b7f08e9100ebe0e5363fded64dffdf0f"
+    },
+    {
+      "name": "20260921171000_accounting_sale_command_hash",
+      "sha256": "9f35fa5154eb1f891fd2832f14954c0e28adfb4d725206de842b4772d5d8dd7f"
+    },
+    {
+      "name": "20260921172000_accounting_bank_import_mappings",
+      "sha256": "ba02d5877b1958ee753cdb2f0953034a7d566b190ff305fb0be15f183422f883"
+    },
+    {
+      "name": "20260921173000_accounting_vat_revision_integrity",
+      "sha256": "6bbca6e0763ebcbc6079384cc7a514ee9fd9fb638a0413837e0b25843afffa37"
+    },
+    {
+      "name": "20260921174000_inventory_valuation_evidence",
+      "sha256": "d547605cd4695f5b25acd6c01a56f0a6030a8d4b4ba1bfe75c053585c9e75336"
+    },
+    {
+      "name": "20260922100000_partner_customer_transfer_cancellation",
+      "sha256": "4e76c9962fdc5ec452d4919d9d2a3d909f664b6973563e5f65c1ac9926a40297"
+    },
+    {
+      "name": "20260922100500_partner_customer_transfer_cancel_guard",
+      "sha256": "4e4a8823c7f745337e927b68e6c2e287d5703de6ec11ced5d7f2cccf95a3a8e1"
+    },
+    {
+      "name": "20260922101000_partner_customer_transfer_cancel_constraint",
+      "sha256": "ce0f9b18650652a3ebd399a59b102537c7181e68bb12757686c491ef903d5404"
+    },
+    {
+      "name": "20260923140000_sepidar_source_archive",
+      "sha256": "cb99ebe7d8a19bb69d6048a9a5e746f84c036b96c8a0c4fe32887c63d05e76a3"
+    },
+    {
+      "name": "20260924100000_accounting_replacement_archived_status",
+      "sha256": "011aee73db202892b37a92b3131ba7fec5e5785bd3986763b85680b01bc5b702"
+    },
+    {
+      "name": "20260924100000_partner_reconfirmation_draft_cas",
+      "sha256": "41a22fb6a25363d310a3c772840f8b8aee5f177fcff4caed4e04dc4e5e48eca2"
+    },
+    {
+      "name": "20260924110000_sepidar_target_links",
+      "sha256": "a7f6206a784d6c4892b0acbec5a1232fc8e1bcd93aec92c0c433f7b4c5c4c204"
+    },
+    {
+      "name": "20260924120000_sepidar_backup_uploads",
+      "sha256": "aaef74ba4644fd6d9f73565f2651315a06891454c7344f31e44b8202bd5c36af"
+    },
+    {
+      "name": "20260926134000_partner_case_tracking_number",
+      "sha256": "30a019f9e8f32f8cf74ec72e7eeb047e0e3300c94e01c3475775ddd4734109ac"
+    },
+    {
+      "name": "20260927110000_partner_price_package_earliest_expiry",
+      "sha256": "aabda257cde3618a77ff28e691668cb7335e0f13c9fb1750705253c0094f5b2b"
+    },
+    {
+      "name": "20260927120000_accounting_bank_file_import_runs",
+      "sha256": "b5842c98d1ab5bc68453f8e840709cca05d122d4a9f4592f70e01d418d7a556f"
+    },
+    {
+      "name": "20260928120000_preserve_precise_contract_product_graph_total",
+      "sha256": "cdfd8c9099e9ca7ef0885bf28dee0ecb794cc6f71636b2dcb5110c7f417d0ba0"
+    },
+    {
+      "name": "20260928121000_preserve_precise_contract_price_witnesses",
+      "sha256": "b079fde2f3984a153c78182a3fd57612ba55c0f353760e5de6983a12b0672f4d"
+    },
+    {
+      "name": "20260929150000_separate_partner_pdf_snapshots",
+      "sha256": "d9df581030d50592cbed7efc113486241fb68f0721a194fc8a9c327e2b70f7a3"
+    },
+    {
+      "name": "20261001070000_index_scoped_accounting_private_evidence",
+      "sha256": "d63745f4374d5e07c3a353fbd7aa0d38eb2175766fe2a32aca07beaddb3c55ad"
+    },
+    {
+      "name": "20261001110000_guarded_customer_permanent_deletion",
+      "sha256": "371ebc7859c6f78e6db7b4cbd684675f4fc69a879b89ffb1983cac8ef4ae177a"
+    },
+    {
+      "name": "20261001140000_customer_card_history_retention",
+      "sha256": "c35530c7ae58e48062f1363375fa1d59a4bda611a961731844001a97cbbca6ef"
+    },
+    {
+      "name": "20261001141000_retained_customer_existing_case_contract",
+      "sha256": "0c0a830908d4a59fea049c36b8b5e129e0fe56aff44fcecc33ad2a25c563e85d"
+    },
+    {
+      "name": "20261001142000_freeze_retained_customer_child_reassignment",
+      "sha256": "a12573c681b246b9934c222923745e6bbc1ebe08c2d57f76bda5927e006fe07b"
+    },
+    {
+      "name": "20261002000100_ordinary_commercial_contract_lifecycle",
+      "sha256": "5118626cd213780b0239e845f18846260f44dee1ace1b201b675937a98274bc1"
+    },
+    {
+      "name": "20261003110000_partner_independent_service_pair_guard",
+      "sha256": "7030946495d239f644afbe1e328c662ee83fd2090afffa438c1730f8614d8c82"
+    },
+    {
+      "name": "20261003120000_contract_dispatch_credit",
+      "sha256": "f6f4d0c9adf1f976687f848af3d59d4f44d181cddacbb0b7cb26cc2fdee794a2"
+    },
+    {
+      "name": "20261003130000_partner_bound_technical_persona_guard",
+      "sha256": "402b4638929f6ba4fe6e890a8fa37c5219c446143b27a5e3f9bcbd5c1c63777e"
+    },
+    {
+      "name": "20261003140000_partner_commercial_approvals",
+      "sha256": "ed344c8f994ec42c3ebfeba15354e78e189d3a95e4adc8907a73114a1803a9d0"
+    },
+    {
+      "name": "20261003143000_partner_commercial_signature_reset",
+      "sha256": "0f3570487045d958daa26694b76429395b9792525c1ed22847d09c07c3ff361e"
+    },
+    {
+      "name": "20261003160000_partner_persona_exception_union",
+      "sha256": "8b562f16f0d84ce0a805c63f2abf53c22ce0e255bdba23d5cf550980803cef89"
+    },
+    {
+      "name": "20261003190000_partner_pricing_result_duty_supersession",
+      "sha256": "5b5332c75f8cda25f9b0ffac8a2c96b6e647ea8bda32bbfcaeef9fc3d77658d1"
+    },
+    {
+      "name": "20261004000100_special_customer_credit",
+      "sha256": "f6a5d7e337fc7eeefc8508acbde328b96edeeda499b8ba4f106af24b04406ecc"
+    },
+    {
+      "name": "20261004000200_special_customer_credit_date_decisions",
+      "sha256": "09eb9cbf03582997bd4136308691fd06343da4fb65cd6ed116022150bf31c6ed"
+    },
+    {
+      "name": "20261004120000_partner_price_negotiation_rounds",
+      "sha256": "cd8ae17bd12d5bad1521f8c534075080cc7ec6c66faf40b22d7b9145598d0589"
+    },
+    {
+      "name": "20261004121000_partner_commercial_edit_duty_guard",
+      "sha256": "260fa5e659f5dd8bec67fe0b547fa805699885c69d1e9c222d9800d76828e4f0"
+    },
+    {
+      "name": "20261005000100_partner_reviewed_reactivation",
+      "sha256": "611ef173a58c1bba6bd3f2ad89b373d56c1db71a0ee3011884df2a55b15e4e21"
+    },
+    {
+      "name": "20261005000200_partner_reactivation_enum_witness",
+      "sha256": "646bccf15e5fc98dd22190dfb948a908699fe8c6c193810f06c2775807350430"
+    },
+    {
+      "name": "20261005000300_partner_reactivation_event_state_cast",
+      "sha256": "f39b6986d36a60390a5da7e66b8467490d91469751e0f2779868a0c7225afdd6"
+    },
+    {
+      "name": "20261005000400_partner_reactivation_permission_table",
+      "sha256": "36db574d6cb3cdb8be86c2834f67525b846a908f4823b5879699aa2857876752"
+    },
+    {
+      "name": "20261005120000_customer_account_workspace",
+      "sha256": "a4e504ba5ac90380c2fffc445d2e4c176f98abf794615fbdab03367b252d008a"
+    },
+    {
+      "name": "20261005160000_retire_corrected_contract_items",
+      "sha256": "d2c717d0cb06ac1a56804f5def286811d0d607bc7cf71b8d29bdabd1ac470f19"
+    },
+    {
+      "name": "20261005161000_guard_retired_contract_items",
+      "sha256": "0bc45b3d30fe1ee5749b337c09fb0339bb6ee5577ebed32c6757988e6ab1566d"
+    },
+    {
+      "name": "20261006120000_partner_wholesale_mandatory",
+      "sha256": "2b0a9c5be686f52e32b5d3b92392d1eb0f0d1a6194386ebada3199ba4e3aae28"
+    },
+    {
+      "name": "20261007120000_growth_badge_display_name",
+      "sha256": "41168535268a1ea4bf02bebc1804ad79e7e054fd30ca955965b0bcb76ad9da21"
+    },
+    {
+      "name": "20261011120000_manager_dispatch_explicit_decision",
+      "sha256": "9840443660c8850256c6d15c0d32c54756b12f6e504cdbb1bf088cabbd1f2858"
+    },
+    {
+      "name": "20261012090000_operation_minimum_quantity",
+      "sha256": "cbe5a0b428693ae8bcb279c1a322a73aef20366194607021c06e17d47b10b0bf"
+    },
+    {
+      "name": "20261012160000_contract_cancellation_notices",
+      "sha256": "14445ccce67ebc80803095be2ac4de37416af64767147c5ec25cc41afbceceb1"
+    },
+    {
+      "name": "20261013120000_company_vehicle_manufacture_year",
+      "sha256": "1898012458dd6010eba0ec47be072a962b17d76e860591cde2d4fdcd13628e5f"
+    },
+    {
+      "name": "20261013153000_stage_biometric_enrollment_captures",
+      "sha256": "58dcfc3fb8784b4facfcd9522fbfde1abedba70a5a93e0579c161e598bc36a85"
+    }
+  ],
+  "services": [
+    {
+      "service": "backend",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "clamav",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "frontend",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "inquiry",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "nginx",
+      "state": "running",
+      "health": "healthy"
+    },
+    {
+      "service": "postgres",
+      "state": "running",
+      "health": "healthy"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ const emptyClient = {
   hrWorkspaceAccessGrant: { findMany: async () => [] },
   hrFeatureAccessGrant: { findMany: async () => [] },
   partnerProfile: { findUnique: async () => null },
+  crossWorkspaceDuty: { findMany: async () => [] },
 };
 
 const run = async () => {

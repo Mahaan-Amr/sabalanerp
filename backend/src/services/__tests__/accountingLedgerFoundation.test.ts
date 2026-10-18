@@ -247,7 +247,7 @@ test('foreign-currency evidence must be supported, positive, reproducible and ro
 });
 
 test('customer settlement vouchers require their coupled domain correction', async () => {
-  for (const type of ['CUSTOMER_ACCOUNT_OPERATION', 'CUSTOMER_ACCOUNT_RECEIPT', 'SETTLEMENT_ALLOCATION', 'SETTLEMENT_ALLOCATION_REVERSAL']) {
+  for (const type of ['CUSTOMER_ACCOUNT_OPERATION', 'CUSTOMER_ACCOUNT_RECEIPT', 'CUSTOMER_RECEIPT_RESOLUTION', 'TREASURY_CUSTOMER_CHECK_ENDORSEMENT', 'TREASURY_CHECK_STATUS', 'SETTLEMENT_ALLOCATION', 'SETTLEMENT_ALLOCATION_REVERSAL']) {
     const repository = createRepository();
     const ledger = createAccountingLedgerApplication(repository, { now: () => now, nextReference: () => 'customer-source' });
     const draft = await ledger.createManualDraft({ ...balancedDraft, source: { ...balancedDraft.source, type } });

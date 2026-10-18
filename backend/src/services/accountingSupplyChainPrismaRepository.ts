@@ -25,7 +25,7 @@ import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrisma
 type DbClient = PrismaClient | Prisma.TransactionClient;
 const activeSupplyChainTransaction = new AsyncLocalStorage<Prisma.TransactionClient>();
 
-export const currentSupplyChainDatabase = (fallback: PrismaClient): DbClient => (
+export const currentSupplyChainDatabase = (fallback: DbClient): DbClient => (
   activeSupplyChainTransaction.getStore() ?? fallback
 );
 
@@ -474,11 +474,21 @@ class PrismaSupplyChainRepository implements AccountingSupplyChainRepository {
   }
 
   async saveCheck(item: CheckRecord) {
+    const prior = await this.db.accountingPayableCheck.findUnique({ where: { id: item.id } });
+    const reassigned = prior?.kind === 'ASSIGNED_CUSTOMER' && prior.status === 'RETURNED' && item.status === 'ENDORSED'
+      && prior.sourceCustomerPaymentId === item.sourceCustomerPaymentId && prior.sayadId === item.sayadId && BigInt(prior.amountRials.toString()) === item.amountRials;
     await this.db.accountingPayableCheck.upsert({
       where: { id: item.id },
-      update: { status: item.status, replacementCheckId: item.replacementCheckId },
+      update: { status: item.status, replacementCheckId: item.replacementCheckId,
+        ...(reassigned ? { supplierPartyId: item.supplierPartyId, financialAccountId: item.financialAccountId, treasuryTransactionId: item.treasuryTransactionId } : {}) },
       create: { id: item.id, sayadId: item.sayadId, amountRials: item.amountRials.toString(), supplierPartyId: item.supplierPartyId, financialAccountId: item.financialAccountId, treasuryTransactionId: item.treasuryTransactionId, dueDate: item.dueDate, status: item.status, replacementCheckId: item.replacementCheckId, kind: item.kind, sourceCustomerPaymentId: item.sourceCustomerPaymentId },
     });
+  }
+
+  async requiresCustomerCheckCoordination(check: Pick<CheckRecord, 'kind' | 'sourceCustomerPaymentId'>) {
+    if (check.kind !== 'ASSIGNED_CUSTOMER' || !check.sourceCustomerPaymentId) return false;
+    const receipt = await this.db.accountingTreasuryTransaction.findUnique({ where: { id: check.sourceCustomerPaymentId }, select: { checkInstrumentId: true, sourceResolution: { select: { id: true } } } });
+    return Boolean(receipt?.checkInstrumentId || receipt?.sourceResolution);
   }
 
   async listCheckEvents(checkId: string): Promise<ReadonlyArray<CheckEventRecord>> {
@@ -553,6 +563,6 @@ class PrismaSupplyChainRepository implements AccountingSupplyChainRepository {
   }
 }
 
-export const createAccountingSupplyChainPrismaRepository = (prisma: PrismaClient): AccountingSupplyChainRepository => (
-  new PrismaSupplyChainRepository(prisma, prisma)
+export const createAccountingSupplyChainPrismaRepository = (prisma: DbClient): AccountingSupplyChainRepository => (
+  new PrismaSupplyChainRepository(prisma, '$transaction' in prisma ? prisma : undefined)
 );

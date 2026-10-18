@@ -4,7 +4,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { RevisionRefSchema } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from '../cases/lifecycle';
-import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource, type PartnerFinancialPreparation } from './source';
+import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource, type PartnerFinancialPreparation, type PartnerAccountingSource } from './source';
 import { subtract } from '../reporting/money';
 import { PartnerAccountingCommandError } from './errors';
 import { PartnerCollectionIntegrityError, readPartnerCollections } from './collections';
@@ -16,7 +16,7 @@ import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
 import { PARTNER_ACCOUNTING_MARKER_JSON_PATH } from './provenance';
 import { assertPartnerAccountingWitnesses as assertWitnesses, readPartnerReceivableEvidence } from './receivableEvidence';
 import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvidence';
-import { withCurrentSabalanPlan } from './sabalanPlan';
+import { resolveCurrentSabalanPlan, resolveInvoiceSabalanPlan } from './sabalanPlanEvidence';
 import { readAuthorizedPartnerAuditWitnesses } from '../../accountingReadProjection';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -134,6 +134,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   ] };
   const contextByInvoice = new Map<string, PartnerAccountingContext>();
   const healthyCases = new Set<string>();
+  const currentAccountingByCase = new Map<string, PartnerAccountingSource['view']>();
   const committedCases = new Set<string>();
   const finalCases = new Set<string>();
   const commercialByCase = new Map<string, string>();
@@ -164,7 +165,8 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
           object(invoice.metadata)?.partnerCaseId !== row.id) throw conflict();
       if (!healthyCases.has(row.id)) {
         const current = await readCurrentPartnerCaseViews(database, row.id);
-        if (!current) throw conflict();
+        if (!current?.accounting) throw conflict();
+        currentAccountingByCase.set(row.id, current.accounting);
         if (current.row.state === 'COMMITTED') committedCases.add(row.id);
         const commercial = await readPartnerCommercialState(database, row.id);
         if (commercial) commercialByCase.set(row.id, commercial.status);
@@ -174,8 +176,20 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
       }
       const views = await readPartnerRevisionProjections(database, owner.data);
       if (!views?.accounting) throw conflict();
-      const accountingView = await withCurrentSabalanPlan(database, views.accounting);
-      const prepared = await preparePartnerFinancialSource({ view: { ...accountingView, state: 'COMMITTED' },
+      // Validate live terms against the current Case, independently of the
+      // invoice's immutable historical revision and financial preparation.
+      const currentAccounting = currentAccountingByCase.get(row.id);
+      if (!currentAccounting) throw conflict();
+      const currentPlan = await resolveCurrentSabalanPlan(database, row.id, currentAccounting.sabalanPaymentPlan);
+      const currentPrepared = await preparePartnerFinancialSource({ view: {
+        ...currentAccounting, sabalanPaymentPlan: currentPlan, state: 'COMMITTED',
+      }, partnerSellerId: row.profile.userId }, currentAccounting.owner);
+      if (!currentPrepared.ok) throw conflict();
+      const invoicePlan = await resolveInvoiceSabalanPlan(database, owner.data,
+        views.accounting.sabalanPaymentPlan, preparation?.paymentPlan);
+      const prepared = await preparePartnerFinancialSource({ view: {
+        ...views.accounting, sabalanPaymentPlan: invoicePlan, state: 'COMMITTED',
+      },
         partnerSellerId: row.profile.userId }, owner.data);
       if (!prepared.ok || !preparation || !matchesFinancialPreparation(prepared.value, preparation) ||
           invoice.currency !== prepared.value.amount.currency || subtract(invoice.amount.toString(), prepared.value.amount.amount) !== '0') throw conflict();

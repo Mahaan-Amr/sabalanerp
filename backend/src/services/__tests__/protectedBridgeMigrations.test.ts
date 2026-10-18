@@ -21,3 +21,19 @@ test('protected bootstrap accepts only the reviewed complete SQL bytes, includin
     assert.throws(() => compileProtectedBridgeMigration(name, Buffer.from('CREATE TABLE arbitrary (id text)')), /MIGRATION_UNSUPPORTED/);
   }
 });
+
+test('the seven new accounting migrations have no implicit protected bridge authority', () => {
+  const names = [
+    '20261014150000_customer_opening_review',
+    '20261014151000_customer_credit_settlement_source',
+    '20261014152000_customer_receipt_components',
+    '20261014153000_customer_receipt_adjustments',
+    '20261014154000_customer_check_bank_outcomes',
+    '20261014155000_customer_command_and_attribution',
+    '20261014160000_customer_legacy_receipt_resolution',
+  ];
+  for (const name of names) {
+    const bytes = fs.readFileSync(path.resolve(__dirname, '../../../prisma/migrations', name, 'migration.sql'));
+    assert.throws(() => compileProtectedBridgeMigration(name, bytes), /MIGRATION_UNSUPPORTED/);
+  }
+});

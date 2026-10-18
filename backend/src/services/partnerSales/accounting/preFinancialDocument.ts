@@ -3,8 +3,8 @@ import { Prisma } from '@prisma/client';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
 import { hasSharedOperationAuthority } from '../authorization/sharedOperationAuthority';
 import { readPartnerCommercialState } from '../cases/commercialLifecycle';
-import { projectPartnerInternalContent, partnerInternalPhysicalFacts } from './internalDocumentContent';
-import { withAccountingReadScope } from './readScope';
+import { projectPartnerInternalContent, projectPartnerInternalSummary, partnerInternalPhysicalFacts } from './internalDocumentContent';
+import { withAccountingReadScope, type AccountingReadScope } from './readScope';
 import { prisma } from '../../../lib/prisma';
 import { fillPartnerPrintCodes, partnerPhysicalPrintDetails, readPartnerPrintCodes } from '../../../utils/partnerProductPrint';
 import { partnerCustomerPrintSelect } from './customerPrintInformation';
@@ -13,7 +13,8 @@ const object = (value: unknown): Record<string, any> => value && typeof value ==
 
 /** A read-only preparation projection, never a persisted financial record.
  * Retail rates, totals and customer payment terms are not returned. */
-export async function readPartnerPreparationDocument(tx: Prisma.TransactionClient, actorId: string, caseId: string) {
+export async function readPartnerPreparationDocument(tx: Prisma.TransactionClient, actorId: string, caseId: string,
+  presentation: 'detail' | 'list' = 'detail') {
   const allowed = await createAuditedPartnerAuthorization(tx, { actorId, purpose: 'ACCOUNTING', channel: 'LIST' },
     { correlationId: randomUUID() }).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
   if (!allowed.ok) return null;
@@ -33,13 +34,16 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
   const projection = object(root.head.internalProjection);
   const accounting = object(projection.accounting), partner = object(projection.partner);
   const parties = object(root.head.partySnapshots), context = object(root.head.customerContent);
-  const content = projectPartnerInternalContent({ partnerPreparation: { owner,
-    products: accounting.products, totals: accounting.totals, paymentPlan: accounting.sabalanPaymentPlan } }, root.head.graph);
+  const snapshot = { partnerPreparation: { owner,
+    products: accounting.products, totals: accounting.totals, paymentPlan: accounting.sabalanPaymentPlan } };
+  const content = presentation === 'list'
+    ? { ...projectPartnerInternalSummary(snapshot), items: [] }
+    : projectPartnerInternalContent(snapshot, root.head.graph);
   const amountKnown = Boolean(content.totals);
-  const codes = await readPartnerPrintCodes(tx, root.head.graph);
+  const codes = presentation === 'list' ? new Map<string, string>() : await readPartnerPrintCodes(tx, root.head.graph);
   content.items = content.items.map(item => ({ ...item, productCode: item.productCode || item.printDetails?.code || codes.get(item.productRowId),
     ...(item.printDetails ? { printDetails: fillPartnerPrintCodes({ ...item.printDetails, code: item.printDetails.code || item.productCode }, codes) } : {}) }));
-  const items = amountKnown ? content.items : (Array.isArray(partner.products) ? partner.products : []).map((row: Record<string, any>) => ({
+  const items = presentation === 'list' ? [] : amountKnown ? content.items : (Array.isArray(partner.products) ? partner.products : []).map((row: Record<string, any>) => ({
       ...partnerInternalPhysicalFacts(String(row.productRowId), root.head.graph),
       printDetails: partnerPhysicalPrintDetails(String(row.productRowId), root.head.graph),
       productCode: typeof row.productCode === 'string' ? row.productCode : codes.get(String(row.productRowId)),
@@ -76,7 +80,13 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
 }
 
 export async function listPartnerPreparationDocuments(actorId: string, lifecycleView: 'active' | 'inactive' | 'pending' = 'active') {
-  return withAccountingReadScope(prisma, { userId: actorId }, async scope => {
+  return withAccountingReadScope(prisma, { userId: actorId }, scope => listPartnerPreparationDocumentsInScope(scope, actorId, lifecycleView));
+}
+
+/** Reuse this request's validated authorization snapshot, never a second root
+ * transaction competing for the global operations lock. List rows need no print geometry. */
+export async function listPartnerPreparationDocumentsInScope(scope: AccountingReadScope, actorId: string,
+  lifecycleView: 'active' | 'inactive' | 'pending' = 'active') {
     const pending = lifecycleView === 'pending' ? await scope.database.contractLifecycleRequest.findMany({
       where: { status: 'PENDING' }, select: { contractId: true } }) : [];
     const roots = await scope.database.partnerSaleCase.findMany({ where: { commercialFlowVersion: 1,
@@ -85,9 +95,8 @@ export async function listPartnerPreparationDocuments(actorId: string, lifecycle
       select: { id: true }, orderBy: { id: 'asc' } });
     const documents: NonNullable<Awaited<ReturnType<typeof readPartnerPreparationDocument>>>[] = [];
     for (const root of roots) {
-      const document = await readPartnerPreparationDocument(scope.database, actorId, root.id);
+      const document = await readPartnerPreparationDocument(scope.database, actorId, root.id, 'list');
       if (document) documents.push(document);
     }
     return documents;
-  });
 }

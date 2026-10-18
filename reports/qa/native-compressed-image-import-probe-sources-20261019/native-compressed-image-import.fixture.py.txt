@@ -1,0 +1,44 @@
+import os,pathlib,json,stat,subprocess,hashlib,tarfile,gzip,io,importlib.util,sys,time
+P=pathlib.Path;specfile,worktext=sys.argv[1:];work=P(worktext);spec=json.loads(P(specfile).read_text());operation=spec['operation']
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def save(p,v):
+ with p.open('x') as f:os.fchmod(f.fileno(),0o400);json.dump(v,f,indent=2);f.flush();os.fsync(f.fileno())
+ sync(p.parent)
+def docker(*args):return subprocess.check_output(['docker',*args],text=True)
+def sha(b):return 'sha256:'+hashlib.sha256(b).hexdigest()
+require(docker('version','--format','{{.Server.Version}}').strip()=='28.3.3','DOCKER_VERSION_CHANGED')
+info=json.loads(docker('info','--format','{{json .}}'));docker_root=P(info['DockerRootDir']);require(docker_root.resolve(strict=True)==docker_root and docker_root.stat().st_dev==work.stat().st_dev,'DOCKER_STORAGE_UNMONITORED')
+module=importlib.util.spec_from_file_location('private_image',work/'materialize.py');image=importlib.util.module_from_spec(module);module.loader.exec_module(image)
+layer=io.BytesIO()
+with tarfile.open(fileobj=layer,mode='w',format=tarfile.USTAR_FORMAT) as out:
+ data=('PRIVATE FIXTURE '+operation).encode();header=tarfile.TarInfo('private-compressed-import-probe.txt');header.size=len(data);header.mode=0o400;out.addfile(header,io.BytesIO(data))
+raw=layer.getvalue();encoded=gzip.compress(raw,mtime=0)
+config=json.dumps({'architecture':'amd64','os':'linux','config':{'Labels':{'sabalan.private.probe':operation}},'rootfs':{'type':'layers','diff_ids':[sha(raw)]},'history':[{'created_by':'private compressed import fixture'}]},sort_keys=True,separators=(',',':')).encode()
+blobs={}
+def add(data,media):
+ key=sha(data);blobs['blobs/sha256/'+key[7:]]=data;return {'digest':key,'size':len(data),'mediaType':media}
+ld=add(encoded,'application/vnd.oci.image.layer.v1.tar+gzip');cd=add(config,'application/vnd.oci.image.config.v1+json')
+pd=add(json.dumps({'schemaVersion':2,'config':cd,'layers':[ld]}).encode(),'application/vnd.oci.image.manifest.v1+json');ix=add(json.dumps({'schemaVersion':2,'manifests':[{**pd,'platform':{'os':'linux','architecture':'amd64'}}]}).encode(),'application/vnd.oci.image.index.v1+json')
+archive=work/'fixture.oci.tar.gz'
+with tarfile.open(archive,'w:gz') as out:
+ for name,data in {**blobs,'unrelated-fixture-only.bin':os.urandom(4096)}.items():
+  header=tarfile.TarInfo(name);header.size=len(data);header.mode=0o400;out.addfile(header,io.BytesIO(data))
+os.chmod(archive,0o400);sync(archive);sync(work)
+classic=work/'fixture.classic.tar'
+with classic.open('xb') as output:
+ os.fchmod(output.fileno(),0o400);proof=image.materialize_to_stream(archive,output,image.sha(archive),ix['digest'],pd['digest'],cd['digest'],preserve_source_encoding=True);output.flush();os.fsync(output.fileno())
+require(image.sha(classic)==proof['archiveSha256'] and classic.stat().st_size==proof['archiveBytes'],'FIXTURE_CLASSIC_READBACK_FAILED');save(work/'fixture-materialization-proof.json',proof)
+require(not subprocess.check_output(['docker','image','ls','--no-trunc','--quiet','--filter','label=sabalan.private.probe='+operation],text=True).strip(),'FIXTURE_IMAGE_ALREADY_EXISTS')
+active=work/'docker-load-active.json';save(active,{'operation':operation,'imageId':cd['digest'],'archiveSha256':proof['archiveSha256'],'phase':'DOCKER_LOAD_UNRESOLVED'})
+# Any exception after this durable marker leaves daemon state explicitly unresolved.
+with (work/'docker-load.log').open('xb') as log:
+ result=subprocess.run(['docker','image','load','--quiet','--input',str(classic)],stdout=log,stderr=subprocess.STDOUT);log.flush();os.fsync(log.fileno())
+require(result.returncode==0,'FIXTURE_DAEMON_COMPLETION_UNPROVEN')
+loaded=json.loads(docker('image','inspect',cd['digest']));require(len(loaded)==1 and loaded[0]['Id']==cd['digest'] and loaded[0]['RootFS']['Layers']==[sha(raw)] and not loaded[0].get('RepoTags') and loaded[0]['Config']['Labels']=={'sabalan.private.probe':operation},'FIXTURE_LOADED_IMAGE_MISMATCH')
+require(not docker('ps','-aq','--filter','ancestor='+cd['digest']).strip(),'FIXTURE_MUST_NOT_START_CONTAINER')
+accepted={'operation':operation,'dockerVersion':'28.3.3','imageId':cd['digest'],'rootfsDiffIds':[sha(raw)],'daemonLoadAcknowledged':True,'exactDaemonImageVerified':True,'sourceEncoding':'gzip','containerStarted':False,'repoTags':loaded[0].get('RepoTags'),'classicReadbackVerified':True,'healthyApplicationPoint':False,'publicOnlineAdmission':False};save(work/'fixture-import-proof.json',accepted);os.rename(active,work/'closed-docker-load-intent.json');sync(work);print(json.dumps(accepted))

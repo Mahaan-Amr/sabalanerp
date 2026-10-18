@@ -1,0 +1,24 @@
+{
+  "head": "d9a31db3244b0a1660cc8d0d15d12d2023c3f093",
+  "sources": {
+    "backend/src/services/versionedFilePublication.ts": "a9a1bcb2b8600afc38d55462962646a60a28e07b70f09e0539e1575a34626550",
+    "backend/src/services/durableUpload.ts": "1f3dc226197e08d994660d91acbdd8f1f0087142ec72d8cbbaa8a2783dd457d3",
+    "tests/online-deployment/versioned-upload.fixture.cjs": "95d3a58edaa734cd018230b5ac277daf65f32978549e156fe3c64e9d86260287",
+    "scripts/run-versioned-upload-local.mjs": "bef497bdee7778b7b6fe0ddaaa8edcb3b0895f9b3a028b969c1dd811e8702737"
+  },
+  "dependencies": {
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeLeasedWorkContext.ts": "2b888eaf836ef5cabf41b96199dc57ee3a5e7fb73b1d3a2f31d42325512ef8be",
+    "backend/src/services/runtimeWorkBoundary.ts": "6d4934fc7a95afb3cb68db4fd2be0ec8ae913ab8f77ba509a04632ba36563f25",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "backend/src/services/durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a",
+    "backend/src/services/httpRequestLifecycle.ts": "1867b8adff3179f75ef408bb1df37867fd7e7d016a0a3408704e4f73aceab899",
+    "deploy/scripts/recovery-versioned-files.py": "2bc671d85b956666018d67b5987b774111c2e5b1b4078ed0cae96605ef04f99f"
+  },
+  "trackedPatchSha256": "9a91aac23a0f8e6650dea8a54671b12b6f6033ef82d9cff9c3a4082a2038a20b",
+  "scope": "Explicit private admitted multipart composition and immutable receipt compare-and-delete. No ordinary route/startup/controller/role activation.",
+  "redMissingApi": "versioned-upload-9a627bd959f2098c57a295ec8e4fdd45.failed.json",
+  "redReceipt": "versioned-upload-05f8a8c933481cd722054dcf88273625.failed.json",
+  "retainedRejectedSource": "versioned-upload-source-pre-receipt.ts.txt",
+  "productionAdmission": false
+}

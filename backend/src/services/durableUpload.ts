@@ -5,8 +5,9 @@ import path from 'node:path';
 import { Transform } from 'node:stream';
 import { publishDurableStream, removeDurableFile } from './durableFilePublication';
 import { runtimeHttpRequests, type HttpRequestLifecycle } from './httpRequestLifecycle';
+import { VersionedFilePublication } from './versionedFilePublication';
 
-type OwnedFile = { path: string; device: bigint; inode: bigint; removal?: Promise<void> };
+type OwnedFile = { path: string; device: bigint; inode: bigint; versionSha256?: string; removal?: Promise<void> };
 type UploadWork = { accepting: boolean; error?: Error; tasks: Set<Promise<unknown>>;
   guards: Set<Transform>; files: Map<string, OwnedFile> };
 type Options = Omit<multer.Options, 'storage' | 'dest'> & { storage: multer.DiskStorageOptions };
@@ -26,6 +27,26 @@ function invoke<T>(execute: (callback: (error: Error | null, value: T) => void) 
  * No business write is replayed and a colliding file is never overwritten. */
 export function createDurableUpload(options: Options,
   requests: Pick<HttpRequestLifecycle, 'trackWork'> = runtimeHttpRequests): multer.Multer {
+  return createUpload(options, requests);
+}
+
+/** Explicit admitted composition only. Ordinary routes retain their existing
+ * storage until the controller proves complete protected-root coverage. */
+export function createVersionedDurableUpload(options: Options, root: string, versions: VersionedFilePublication,
+  requests: Pick<HttpRequestLifecycle, 'trackWork'> = runtimeHttpRequests): multer.Multer {
+  if (!(versions instanceof VersionedFilePublication) || !versions.ownsRoot(root)) throw new Error('FILE_VERSION_STORAGE_ROOT_MISMATCH');
+  return createUpload(options, requests, { root: path.resolve(root), owner: versions });
+}
+
+function createUpload(options: Options, requests: Pick<HttpRequestLifecycle, 'trackWork'>,
+  versions?: { root: string; owner: VersionedFilePublication }): multer.Multer {
+  const key = (target: string) => {
+    const relative = path.relative(versions!.root, target);
+    if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+      throw new Error('FILE_VERSION_STORAGE_ROOT_MISMATCH');
+    }
+    return relative.split(path.sep).join('/');
+  };
   const { storage, ...uploadOptions } = options;
   if ((!storage || !['string', 'function'].includes(typeof storage.destination)) || typeof storage.filename !== 'function') {
     throw new Error('FILE_UPLOAD_STORAGE_CONFIGURATION_REQUIRED');
@@ -50,7 +71,10 @@ export function createDurableUpload(options: Options,
           throw new Error('FILE_UPLOAD_CLEANUP_IDENTITY_UNPROVEN');
         }
       } finally { await handle.close(); }
-      await removeDurableFile(file.path);
+      if (versions) {
+        if (!file.versionSha256) throw new Error('FILE_VERSION_RECEIPT_INVALID');
+        await versions.owner.removeUpload(key(file.path), file.versionSha256);
+      } else await removeDurableFile(file.path);
       state.files.delete(file.path);
     })();
     return file.removal;
@@ -80,8 +104,11 @@ export function createDurableUpload(options: Options,
             || filename === '.' || filename === '..' || path.basename(filename) !== filename) throw new Error('FILE_UPLOAD_STORAGE_NAME_INVALID');
           const directory = path.resolve(destination), target = path.resolve(directory, filename);
           if (path.dirname(target) !== directory) throw new Error('FILE_UPLOAD_STORAGE_NAME_INVALID');
-          const result = await publishDurableStream(target, guard);
-          state.files.set(target, { path: target, device: BigInt(result.identity.device), inode: BigInt(result.identity.inode) });
+          let versionSha256: string | undefined;
+          const result = versions ? await versions.owner.publishUpload(key(target), guard) : await publishDurableStream(target, guard);
+          if ('versionSha256' in result && typeof result.versionSha256 === 'string') versionSha256 = result.versionSha256;
+          state.files.set(target, { path: target, device: BigInt(result.identity.device), inode: BigInt(result.identity.inode),
+            versionSha256 });
           return { destination, filename, path: target, size: result.byteLength };
         } catch (error) { state.error ||= error as Error; throw error; }
         finally {

@@ -1,0 +1,13 @@
+# Private admitted multipart storage
+
+Candidate identity is frozen in `versioned-upload-review-20261018.json`, based on `d9a31db3`. `createVersionedDurableUpload` explicitly binds existing Multer destination, filename, filters, limits and cleanup to an actual admitted `VersionedFilePublication`. There is no ordinary route, environment or startup activation and no fallback when a destination escapes the protected root.
+
+An immutable publication receipt is produced inside the same completion context after actual source destruction. Rejected multipart cleanup compares that exact version inside the persistent per-key intent before publishing a deletion tombstone. It cannot delete a later legitimate version, including one with identical content. Known unstarted version mismatch retires only its own intent; uncertain operations remain held.
+
+Four native tests passed in `versioned-upload-f848243ad82cc84057eca8155390b88d.json`. Actual HTTP/Multer and native admission cover successful bytes, collisions, completed-file cleanup after a domain filter rejection, preserved prior bytes and deletion lineage, independent Python restoration, stale cleanup, mismatched roots and escaping destinations, synchronous input-error observation, and an already-admitted multipart request completing after capture closes fresh admission. The controller must wait for actual HTTP drain before acquiring EX; one earlier fixture incorrectly attempted capture immediately after receiving the response and remains unaccepted.
+
+The missing public composition failed before implementation (`9a627bd959f2098c57a295ec8e4fdd45`). A review regression found the initial receipt wrapper deferred stream observation until asynchronous admission (`05f8a8c933481cd722054dcf88273625`); exact rejected source is retained. Receipt and ordinary stream publication now share the same immediate input owner and actual admitted completion body.
+
+Current-source 11 stream regressions passed (`versioned-file-stream-2e80117787bcca0d97a1a237f06221f7.json`). Current-source seven ordinary file/upload regressions, native disposable worker death and actual Chromium PDF persistence passed (`file-publication-ced07bf9d5a48a10b3c7a0c6e47d3ed2.json` and TAP). Canonical service container/image/start identities remained unchanged. Focused strict TypeScript, architecture and diff checks passed. Independent Standards and Spec source/final evidence reviews passed.
+
+This is explicit private composition, not full production writer/privacy coverage. No global startup adoption, legacy file adoption, privacy erasure, continuous coherent recovery, public migration or switching authority is added. Complete online program acceptance and independent full new-chain application restoration remain required.

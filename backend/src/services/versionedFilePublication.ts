@@ -235,6 +235,11 @@ export class VersionedFilePublication {
    * asynchronous admission; no source bytes are consumed before admission.
    * Admitted cleanup remains inside the same actual completion reference. */
   publishStream(key: string, source: Readable, options: { replace?: boolean } = {}): Promise<string> {
+    return this.publishStreamOwned(key, source, options, async sha256 => sha256);
+  }
+
+  private publishStreamOwned<T>(key: string, source: Readable, options: { replace?: boolean },
+    receipt: (sha256: string) => Promise<T>): Promise<T> {
     if (!(source instanceof Readable)) return Promise.reject(Object.assign(new Error('FILE_VERSION_SOURCE_INVALID'), {
       code: 'FILE_VERSION_SOURCE_INVALID',
     }));
@@ -267,19 +272,37 @@ export class VersionedFilePublication {
     return this.work.run(async () => {
       entered = true;
       try {
-        return await this.change(key, { source, assertReady: () => { if (sourceError) throw sourceError; },
+        const sha256 = await this.change(key, { source, assertReady: () => { if (sourceError) throw sourceError; },
           finish: async () => {
             // EOF alone is not native input completion. A failed/unresolved
             // close must leave the existing intent before any live mutation.
             await closeInput();
           } }, replace);
+        return await receipt(sha256);
       } finally { await dispose(); }
     }).finally(async () => { if (!entered) await dispose(); });
   }
 
+  /** Upload cleanup carries the immutable publication identity, so rejection of
+   * an old multipart request cannot delete a subsequent legitimate version. */
+  publishUpload(key: string, source: Readable) {
+    return this.publishStreamOwned(key, source, {}, async versionSha256 => {
+      const { value } = await this.version(versionSha256);
+      this.work.assertActive();
+      if (!value.live || !value.object || value.operation !== 'PUT' || value.key !== key) return fail('FILE_VERSION_RECEIPT_INVALID');
+      return { versionSha256, byteLength: value.object.bytes,
+        identity: { device: value.live.device, inode: value.live.inode } };
+    });
+  }
+
+  removeUpload(key: string, versionSha256: string) {
+    if (!shaPattern.test(versionSha256)) fail('FILE_VERSION_SELECTION_INVALID');
+    return this.change(key, null, true, versionSha256);
+  }
+
   remove(key: string) { return this.change(key, null, true); }
 
-  private change(key: string, bytes: Buffer | StreamInput | null, replace: boolean): Promise<string> {
+  private change(key: string, bytes: Buffer | StreamInput | null, replace: boolean, expectedVersion?: string): Promise<string> {
     const { id, target } = this.key(key);
     return this.work.run(async () => {
       this.work.assertActive(); await this.assertDirectories();
@@ -302,7 +325,8 @@ export class VersionedFilePublication {
           || !same(identity(await fs.lstat(pending, { bigint: true })), heldIdentity!)) fail('FILE_VERSION_COMPLETION_UNPROVEN');
         await fs.unlink(pending); await syncDirectory(path.dirname(pending));
       };
-      const refusal = previous && previous.value.generation >= 10000 ? 'FILE_VERSION_HISTORY_CAPACITY'
+      const refusal = expectedVersion !== undefined && previous?.sha256 !== expectedVersion ? 'FILE_VERSION_UPLOAD_CHANGED'
+        : previous && previous.value.generation >= 10000 ? 'FILE_VERSION_HISTORY_CAPACITY'
         : actual && bytes !== null && !replace ? 'FILE_VERSION_ALREADY_EXISTS' : null;
       if (refusal) {
         // No object/live mutation was started. Settle only this exact newly

@@ -1,0 +1,56 @@
+{
+  "pass": false,
+  "code": 1,
+  "signal": null,
+  "tap": "TAP version 13\n# Subtest: real multipart upload preserves immutable bytes and failed multipart cleanup records a deletion version\nok 1 - real multipart upload preserves immutable bytes and failed multipart cleanup records a deletion version\n  ---\n  duration_ms: 1152.660756\n  type: 'test'\n  ...\n# Subtest: stale upload cleanup cannot delete a later version and a mismatched root never gets a fallback writer\nok 2 - stale upload cleanup cannot delete a later version and a mismatched root never gets a fallback writer\n  ---\n  duration_ms: 724.278705\n  type: 'test'\n  ...\n# Subtest: upload receipt takes stream ownership synchronously before asynchronous native admission\nnot ok 3 - upload receipt takes stream ownership synchronously before asynchronous native admission\n  ---\n  duration_ms: 387.12054\n  type: 'test'\n  location: '/app/online-runtime-acceptance/versioned-upload-05f8a8c933481cd722054dcf88273625/fixture.cjs:119:1'\n  failureType: 'testCodeFailure'\n  error: 'receipt must observe source errors immediately'\n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: true\n  actual: false\n  operator: '=='\n  stack: |-\n    TestContext.<anonymous> (/app/online-runtime-acceptance/versioned-upload-05f8a8c933481cd722054dcf88273625/fixture.cjs:121:73)\n    async Test.run (node:internal/test_runner/test:1054:7)\n    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)\n  ...\n1..3\n# tests 3\n# suites 0\n# pass 2\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 2385.924858\n",
+  "stderr": "",
+  "workingRoot": "/app/online-runtime-acceptance/versioned-upload-05f8a8c933481cd722054dcf88273625",
+  "sourceHashes": {
+    "recovery-versioned-files.py": "2bc671d85b956666018d67b5987b774111c2e5b1b4078ed0cae96605ef04f99f",
+    "kernelWriteAdmission.ts": "8952c65ddde926fbc5136be933d1c7401ea269191cbcba64dd20ba6d95bdd875",
+    "runtimeBoundaryJournal.ts": "d94912a6fb15d759d8270c067e96c81964f1a5464cc54c26df28636ccbe2e9eb",
+    "runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a",
+    "versionedFilePublication.ts": "94df1f412618e1e3c863b67f4608b253bee6144c9c554a4fc9d3277043bdfbe1",
+    "durableUpload.ts": "747cda8232ce11627d4b81edb880ccc7e46c8ff00add688143fd40a9b4715d41",
+    "httpRequestLifecycle.ts": "1867b8adff3179f75ef408bb1df37867fd7e7d016a0a3408704e4f73aceab899"
+  },
+  "sources": {
+    "fixture.cjs": "f3137527b05134f4e71f3917bc194242a439eef9e5cd10c8ffb31f5321368393",
+    "reader.worker.py": "a1e3ee1f5a9573a86e0a2a712bd87ac6823ae52c073598968139a33bd7edc734",
+    "recovery-versioned-files.py": "2bc671d85b956666018d67b5987b774111c2e5b1b4078ed0cae96605ef04f99f",
+    "kernelWriteAdmission.js": "b8dd4d6443eb4f525613fd48d10fa838ccbbd81f43d412674464da31af6c710b",
+    "runtimeBoundaryJournal.js": "c75bd2c91cfeff77f52e6f245fc23c2b88c54397ab3d9bc89f4b316e7b48d5dc",
+    "runtimeTaskAdmission.js": "9e1a08c587f07b76b67becbe9367c7fbcfc79e061b1147dfee212da953196648",
+    "runtimeWorkContext.js": "ed0a47227bb39a5b0e3ea1aae8be6f753bb2d88e0247832b7108f29d1e10156a",
+    "durableFilePublication.js": "3b9ba70126478bbb1922b01e14bb537d6cc1a4c6528a0bec30e07a7e465d259d",
+    "versionedFilePublication.js": "94aeda3670972ddd53439173a391726ce3c9bed631777a60600cc8ad74dfe2d9",
+    "durableUpload.js": "144e282bed01b566f7dacf4186ac5d74e1c2a49e7d71dfe703786cbe384685c8",
+    "httpRequestLifecycle.js": "10d23213469a42cf56dfe4a8b804b8c50ee7ef377a0ae0e83aa93491e851a995"
+  },
+  "canonicalServicesBefore": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "canonicalVerification": "NOT_ACCEPTED",
+  "productionAdmission": false
+}

@@ -1,0 +1,131 @@
+import pathlib,json,hashlib,base64,uuid,subprocess
+repo=pathlib.Path('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp')
+imported=json.loads(json.loads((repo/'reports/qa/import-pg-dfcb5decb67945d2b379db3fc18345aa.json').read_text())['stdout'])
+assert imported['componentImageImportVerified']
+failed_closed=json.loads(json.loads((repo/'reports/qa/failed-base-closure-8ae28338850c4adf802757bc56055c6a.json').read_text())['stdout'])
+assert failed_closed['locksReacquired'] and not failed_closed['originalPhaseAccepted']
+files={}
+for local,name in [('restore-production-physical-base-20261018.sh','restore.sh'),('restore-production-physical-base-check-20261018.sql','restore-check.sql')]:
+ data=pathlib.Path('D:/sabalanerp-online-qa',local).read_text(encoding='utf-8-sig').replace('\r\n','\n').encode();files[name]={'source':base64.b64encode(data).decode(),'sha256':hashlib.sha256(data).hexdigest()}
+spec={'imported':imported,'failedClosure':failed_closed,'files':files,'operation':'native-production-base-'+uuid.uuid4().hex}
+remote=r'''import pathlib,os,json,hashlib,stat,fcntl,subprocess,time,resource,base64,tarfile,shutil
+spec=json.loads(INPUT);P=pathlib.Path;os.umask(0o077);resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+private=P('/root/sabalan-recovery-private');qa=private/'native-qa';work=P(spec['imported']['root']);op=spec['operation'];active=qa/'production-base-active.json';root=work/op;mutated=False;closed=False
+
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def write(p,data,mode=0o400):
+ with p.open('xb') as f:os.fchmod(f.fileno(),mode);f.write(data);f.flush();os.fsync(f.fileno())
+ sync(p.parent)
+def save(p,v):write(p,json.dumps(v,indent=2).encode(),0o600)
+def regular(p):
+ s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode&0o022,'UNSAFE_FILE');return (s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+def sha(p):
+ before=regular(p);h=hashlib.sha256()
+ with p.open('rb') as f:
+  while b:=f.read(1048576):h.update(b)
+ require(before==regular(p),'FILE_CHANGED');return h.hexdigest()
+def docker(*args):return subprocess.check_output(['docker',*args],text=True,timeout=30)
+def foreign():
+ ids=docker('ps','-q').split();values=json.loads(docker('inspect',*ids)) if ids else []
+ return sorted([{'id':v['Id'],'image':v['Image'],'startedAt':v['State']['StartedAt']} for v in values if (v['Config'].get('Labels') or {}).get('com.docker.compose.project')!='sabalanerp-backup-drill'],key=lambda v:v['id'])
+def mutate(args,token,seconds,allow_failure=False):
+ global mutated
+ save(root/(token+'-intent.json'),{'arguments':args,'phase':'ACTIVE'});mutated=True
+ env=dict(os.environ,SABALAN_NATIVE_STORAGE_ROOT=str(work),SABALAN_NATIVE_STORAGE_MAX_BYTES=str(3*1024**3),SABALAN_NATIVE_STORAGE_RESERVE_BYTES=str(1024**3))
+ p=subprocess.Popen([str(owner),str(seconds),token,*args],env=env,pass_fds=(9,8),stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+ birth=P('/proc/'+str(p.pid)+'/stat').read_text().rsplit(') ',1)[1].split()[19];save(root/(token+'-native-start.json'),{'pid':p.pid,'startTicks':birth,'bootId':intent['bootId']})
+ output=bytearray()
+ with (root/(token+'.log')).open('xb') as f:
+  while chunk:=p.stdout.read(65536):
+   require(len(output)+len(chunk)<=4*1024**2,'NATIVE_OUTPUT_LIMIT');output.extend(chunk);f.write(chunk)
+  status=p.wait();f.flush();os.fsync(f.fileno())
+ save(root/(token+'-native-completion.json'),{'status':status,'outputSha256':hashlib.sha256(output).hexdigest()})
+ require(output.endswith(('\nSABALAN_NATIVE_REAPED '+token+' '+str(status)+'\n').encode()),'NATIVE_COMPLETION_UNPROVEN')
+ require(status==0 or allow_failure,'NATIVE_COMMAND_FAILED_UNRESOLVED')
+ return bytes(output),status
+try:
+ for p,mask in [(private,0o077),(qa,0o022),(work,0o077)]:
+  s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&mask,'UNSAFE_ROOT')
+ require(work.parent==qa,'ROOT_WRONG')
+ lockfds=[]
+ for p,target in [(private/'drill-ownership.lock',9),(P('/run/lock/sabalan-backup-storage.lock'),8)]:
+  before=regular(p);fd=os.open(p,os.O_RDWR|os.O_NOFOLLOW);require((os.fstat(fd).st_dev,os.fstat(fd).st_ino)==before[:2],'LOCK_CHANGED');saved=fcntl.fcntl(fd,fcntl.F_DUPFD_CLOEXEC,20);os.close(fd);lockfds.append((saved,target))
+ for fd,target in lockfds:os.dup2(fd,target,inheritable=True);fcntl.flock(target,fcntl.LOCK_EX|fcntl.LOCK_NB)
+ require(not active.exists() and not (qa/'coherent-component-active.json').exists(),'ACTIVE_DIAGNOSTIC_EXISTS')
+ require(json.loads((work/(spec['imported']['operation']+'-host-proof.json')).read_text())==spec['imported'],'IMPORT_PROOF_CHANGED')
+ drill_ids=docker('ps','-aq','--no-trunc','--filter','label=com.docker.compose.project=sabalanerp-backup-drill').split();old_id='d13aca2fb156db9ce59a28bc82978cc868098bc8cd7ddb0a5e21a107205b6858';require(drill_ids in [[],[old_id]],'UNKNOWN_DRILL_CONTAINER')
+ before=foreign();require(len(before)>=16,'FOREIGN_INVENTORY_INCOMPLETE')
+ owner=qa/'native-owner-storage-final-20261017/owner';require(sha(owner)=='c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83','OWNER_CHANGED')
+ base=work/'base.tar';base_identity=regular(base);require(base.stat().st_size==378808320 and sha(base)=='c4b485ccc756ea48e08a72ea9c8dbdfd00aa9d1a892c63b0788985f699957c09','BASE_CHANGED')
+ decryption=json.loads((work/'independent-decryption-proof.json').read_text());require(decryption['independentRsaDecryptVerified'],'INDEPENDENT_DECRYPTION_REQUIRED')
+ seen=set();total=0
+ with tarfile.open(base,'r|') as source:
+  for item in source:
+   name=item.name.removeprefix('./').rstrip('/');require(name and not name.startswith('/') and '\\' not in name and all(x not in ['', '.', '..'] for x in name.split('/')) and name not in seen and (item.isfile() or item.isdir()),'UNSAFE_BASE_MEMBER');seen.add(name);total+=item.size;require(total<1024**3 and len(seen)<250000,'BASE_BOUND')
+ require({'backup_manifest','global/pg_control','PG_VERSION','backup_label'}.issubset(seen),'BASE_INCOMPLETE')
+ require(regular(base)==base_identity,'BASE_CHANGED')
+ image_id=spec['imported']['imageId'];image=json.loads(docker('image','inspect',image_id));require(len(image)==1 and image[0]['Id']==image_id and image[0]['RootFS']['Layers']==spec['imported']['rootfsDiffIds'],'IMAGE_CHANGED')
+ info=json.loads(docker('info','--format','{{json .}}'));docker_root=P(info['DockerRootDir']);require(docker_root.resolve(strict=True)==docker_root and docker_root.stat().st_dev==work.stat().st_dev,'DOCKER_STORAGE_DEVICE_UNMONITORED')
+ require(shutil.disk_usage(work).free>=2*1024**3,'RESTORE_CAPACITY_INSUFFICIENT')
+ root.mkdir(mode=0o700);sync(work)
+ intent={'operation':op,'root':str(root),'phase':'NATIVE_PRODUCTION_PHYSICAL_COMPONENT_RESTORE','pid':os.getpid(),'startTicks':P('/proc/self/stat').read_text().rsplit(') ',1)[1].split()[19],'bootId':P('/proc/sys/kernel/random/boot_id').read_text().strip(),'imageId':image_id,'sourceBaseSha256':'c4b485ccc756ea48e08a72ea9c8dbdfd00aa9d1a892c63b0788985f699957c09'}
+ save(active,intent)
+ if drill_ids:
+  prior=P(spec['failedClosure']['originalIntent']['root']);require(prior.parent==work and prior.resolve(strict=True)==prior,'PRIOR_ROOT_CHANGED')
+  require(json.loads((prior/(spec['failedClosure']['closureResumptionOperation']+'.json')).read_text())==spec['failedClosure'] and json.loads((prior/'closed-failed-owner-intent.json').read_text())==spec['failedClosure']['originalIntent'],'PRIOR_CLOSURE_CHANGED')
+  require(sha(prior/('run-'+prior.name+'.log'))=='3f3da023b58d348de1238898bb13da2ef03343bc58ef60b547962cde08288d32','PRIOR_NATIVE_PROOF_CHANGED')
+  [old]=json.loads(docker('inspect',old_id));require(old['Id']==old_id and old['Image']==image_id and old['Config']['Labels']['sabalan.drill.operation']==prior.name and old['State']['Status']=='exited' and old['State']['Pid']==0 and old['State']['ExitCode']==2 and not old['State']['OOMKilled'] and not (prior/'pgdata/postmaster.pid').exists(),'PRIOR_CONTAINER_NOT_CLOSED')
+  save(root/'prior-container-retirement-intent.json',{'containerId':old_id,'closedOwnerOperation':spec['failedClosure']['closureResumptionOperation'],'preserveAllBindData':True,'force':False})
+  mutate(['docker','rm',old_id],'retire-'+op,60)
+  require(not docker('ps','-aq','--no-trunc','--filter','label=com.docker.compose.project=sabalanerp-backup-drill').strip(),'PRIOR_CONTAINER_REMAINS')
+  save(root/'prior-container-retired.json',{'containerId':old_id,'removedWithoutForce':True,'allBindDataRetained':True})
+ for name,file in spec['files'].items():
+  data=base64.b64decode(file['source'],validate=True);require(hashlib.sha256(data).hexdigest()==file['sha256'],'PUBLIC_SOURCE_CHANGED');write(root/name,data,0o444)
+ write(root/'native-owner',owner.read_bytes(),0o555)
+ write(root/'restore.conf',b"port=5432\nhot_standby=off\n",0o444);write(root/'restore.hba',b'local all all trust\n',0o444);write(root/'restore.ident',b'',0o444)
+ data=root/'pgdata';data.mkdir(mode=0o700);os.chown(data,70,70);sync(root)
+ copy=root/'restore-input.tar';h=hashlib.sha256()
+ with base.open('rb') as src,copy.open('xb') as dst:
+  while b:=src.read(1048576):h.update(b);dst.write(b)
+  dst.flush();os.fchmod(dst.fileno(),0o400);os.fchown(dst.fileno(),70,70);os.fsync(dst.fileno())
+ require(h.hexdigest()==intent['sourceBaseSha256'] and copy.stat().st_size==378808320 and regular(base)==base_identity,'RESTORE_COPY_CHANGED');sync(root)
+ name='sabalanerp-backup-drill-postgres-1';inner='production-physical-native-restore'
+ args=['docker','create','--name',name,'--label','com.docker.compose.project=sabalanerp-backup-drill','--label','com.docker.compose.service=postgres','--label','sabalan.drill.operation='+op,'--network','none','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--user','70:70','--memory','512m','--cpus','1','--pids-limit','128','--shm-size','64m','--env','SABALAN_NATIVE_STORAGE_ROOT=/var/lib/postgresql/data','--env','SABALAN_NATIVE_STORAGE_MAX_BYTES=1073741824','--env','SABALAN_NATIVE_STORAGE_RESERVE_BYTES=1073741824','--tmpfs','/var/run/postgresql:uid=70,gid=70,mode=0700,size=16m,noexec,nosuid','--tmpfs','/tmp:mode=1777,size=32m,noexec,nosuid','--log-opt','max-size=2m','--log-opt','max-file=2','--entrypoint','/native-owner']
+ mounts=[(data,'/var/lib/postgresql/data',False),*( (root/n,'/'+n,True) for n in ['native-owner','restore.sh','restore-input.tar','restore-check.sql','restore.conf','restore.hba','restore.ident'])]
+ for src,dst,ro in mounts:args+=['--mount','type=bind,src='+str(src)+',dst='+dst+(',readonly' if ro else '')]
+ mutate(args+[image_id,'900',inner,'/bin/sh','/restore.sh'],'create-'+op,90)
+ [container]=json.loads(docker('inspect',name));cid=container['Id']
+ expected=sorted([(str(src),dst,not ro) for src,dst,ro in mounts]);actual=sorted([(v['Source'],v['Destination'],v['RW']) for v in container['Mounts'] if v['Type']=='bind'])
+ require(container['Image']==image_id and container['Config']['User']=='70:70' and container['HostConfig']['NetworkMode']=='none' and container['HostConfig']['ReadonlyRootfs'] and not container['HostConfig']['PortBindings'] and len(container['Mounts'])==len(mounts) and actual==expected,'RESTORE_CONTAINER_CHANGED')
+ save(root/'actual-container.json',{'containerId':cid,'imageId':image_id,'mounts':expected})
+ output,native_status=mutate(['docker','start','--attach',cid],'run-'+op,960,allow_failure=True)
+ [finished]=json.loads(docker('inspect',cid));state=finished['State']
+ require(finished['Id']==cid and state['Status']=='exited' and state['ExitCode']==native_status and state['Pid']==0 and not state['OOMKilled'] and not (data/'postmaster.pid').exists() and ('\nSABALAN_NATIVE_REAPED '+inner+' '+str(native_status)+'\n').encode() in output,'ACTUAL_POSTGRES_CLOSURE_UNPROVEN')
+ lines=output.decode().splitlines();proofs=[json.loads(v.removeprefix('SABALAN_PRODUCTION_BASE_COMPONENT ')) for v in lines if v.startswith('SABALAN_PRODUCTION_BASE_COMPONENT ')]
+ require(len(proofs)==(1 if native_status==0 else 0),'RESTORE_COMPONENT_PROOF_REQUIRED');proof=proofs[0] if proofs else None
+ require(native_status!=0 or (proof['systemIdentifier']=='7609810350852628513' and proof['serverVersionNum']=='150016' and proof['inRecovery']==False and proof['finishedActiveMigrationCount']==425 and proof['unfinishedMigrationCount']==0 and proof['activeMigrationIdentityMd5']=='e47df486d5c205d3bc44cb782dfbf09d' and proof['preparedTransactionCount']==0),'RESTORED_DATABASE_IDENTITY_MISMATCH')
+ require(sha(base)==intent['sourceBaseSha256'],'SOURCE_BASE_CHANGED')
+ # Persist actual native+daemon closure BEFORE observing unrelated service activity.
+ save(root/'native-component-closed.json',{'component':proof,'containerId':cid,'state':{k:state[k] for k in ['Status','ExitCode','Pid','OOMKilled','StartedAt','FinishedAt']},'innerNativeReaped':True,'outerNativeReaped':True,'sourceBaseSha256':intent['sourceBaseSha256']})
+ after=foreign();result={'format':'sabalan-independent-production-physical-component/v1','operation':op,'root':str(root),'component':proof,'imageId':image_id,'containerId':cid,'independentRsaDecryptionVerified':True,'nativePostgresRestoreVerified':native_status==0,'nativeProcessClosureVerified':True,'nativePostgresStoppedNaturally':native_status==0,'nativeExitCode':native_status,'failedAttempt':native_status!=0,'foreignBefore':before,'foreignAfter':after,'allForeignAcceptancePassed':before==after,'healthyApplicationPoint':False,'continuousWalCoverageVerified':False,'fullApplicationRestoreVerified':False,'publicOnlineAdmission':False,'availableBytes':shutil.disk_usage(work).free}
+ save(root/'independent-proof.json',result);require(json.loads(active.read_text())==intent,'ACTIVE_INTENT_CHANGED');archived=root/'closed-owner-intent.json';require(not archived.exists(),'CLOSED_EXISTS');os.rename(active,archived)
+ for p in [archived,root,qa]:sync(p)
+ closed=True;print(json.dumps(result));raise SystemExit(0 if native_status==0 else 1)
+except BaseException:
+ if mutated and not closed:
+  try:save(root/'ownership-held-unproven.json',{'phase':'OWNERSHIP_HELD_UNPROVEN'})
+  except BaseException:pass
+  while True:time.sleep(1)
+ raise
+'''.replace('INPUT',repr(json.dumps(spec)))
+if __name__=='__main__':
+ with (repo/f"reports/qa/{spec['operation']}-intent.json").open('x',encoding='utf-8') as f:json.dump({'operation':spec['operation'],'importOperation':imported['operation'],'sources':{n:v['sha256'] for n,v in files.items()}},f,indent=2)
+ r=subprocess.run(['ssh','-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=15','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3','root@94.182.177.74','python3 -B -'],input=remote,text=True,capture_output=True)
+ result={'sshExitCode':r.returncode,'stdout':r.stdout,'stderr':r.stderr}
+ with (repo/f"reports/qa/{spec['operation']}.json").open('x',encoding='utf-8') as f:json.dump(result,f,indent=2)
+ print(json.dumps({'operation':spec['operation'],'sshExitCode':r.returncode,'stdout':r.stdout,'stderr':r.stderr}));raise SystemExit(r.returncode)

@@ -147,3 +147,11 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   actual native completion before observing foreign workloads. No database
   boot or healthy application point is implied. See
   [exact-image evidence](../../reports/qa/production-base-image-materialization-20261018.md).
+
+- The actual production physical database component now also passed native
+  backup verification and exact-image PostgreSQL 15.16 restoration on the
+  independent backup host. Its full 425-migration identity, restored counts
+  and normal native shutdown were verified. Broader ambient foreign-service
+  comparison remains false, and continuous WAL/coherent application restoration
+  remain pending. No healthy point or online authority was published. See
+  [native production component evidence](../../reports/qa/production-base-native-restore-20261018.md).

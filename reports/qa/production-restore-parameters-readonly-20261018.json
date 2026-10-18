@@ -1,0 +1,1 @@
+{"readOnly": true, "profile": {"role": "sabalanerp", "systemIdentifier": "7609810350852628513", "inRecovery": false, "maxConnections": "100", "maxWorkerProcesses": "8", "maxWalSenders": "10", "maxPreparedTransactions": "0", "maxLocksPerTransaction": "64"}}

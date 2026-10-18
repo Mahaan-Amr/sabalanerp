@@ -1,0 +1,82 @@
+import pathlib,json,subprocess,uuid,hashlib
+repo=pathlib.Path('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp')
+frozen=repo/'reports/qa/production-base-private-orchestrators-20261018/failed-run-native-production-base-restore-20261018.py.txt'
+assert hashlib.sha256(frozen.read_bytes()).hexdigest()=='3c0a351173aebae37d9f1899a1cb12c2597e39e2d9c84fb328af1e7015442ea2'
+operation='failed-base-closure-'+uuid.uuid4().hex
+remote=r'''import pathlib,os,json,stat,fcntl,hashlib,signal,select,subprocess,time,re
+P=pathlib.Path;os.umask(0o077);qa=P('/root/sabalan-recovery-private/native-qa');private=qa.parent;active=qa/'production-base-active.json';op='native-production-base-ebbdac10f1914036827d94e7069d8c01';root=qa/'production-base-restore-dbfc6b6eca9741469ae3076756b165a8'/op;cid='d13aca2fb156db9ce59a28bc82978cc868098bc8cd7ddb0a5e21a107205b6858';closeop=CLOSURE_OPERATION
+
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def save(p,v):
+ with p.open('x') as f:os.fchmod(f.fileno(),0o600);json.dump(v,f,indent=2);f.flush();os.fsync(f.fileno())
+ sync(p.parent)
+def sha(p):
+ s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode&0o022,'UNSAFE_FILE');return hashlib.sha256(p.read_bytes()).hexdigest()
+require(root.resolve(strict=True)==root and root.stat().st_uid==0 and not root.stat().st_mode&0o077,'WRONG_ROOT')
+original=active.read_bytes();intent=json.loads(original);require(intent=={'operation':op,'root':str(root),'phase':'NATIVE_PRODUCTION_PHYSICAL_COMPONENT_RESTORE','pid':1665627,'startTicks':'126833948','bootId':'ee1b3aa2-d239-4849-b926-200549c77829','imageId':'sha256:15283455b75304c90f51bf16b42c272a25fb52807945dc24830ec88e63cd896d','sourceBaseSha256':'c4b485ccc756ea48e08a72ea9c8dbdfd00aa9d1a892c63b0788985f699957c09'},'INTENT_CHANGED')
+require(P('/proc/sys/kernel/random/boot_id').read_text().strip()==intent['bootId'],'HOST_CHANGED')
+require(json.loads((root/'ownership-held-unproven.json').read_text())=={'phase':'OWNERSHIP_HELD_UNPROVEN'},'NOT_IDLE_FAILED_HOLDER')
+require(sha(root/'restore.sh')=='5129b8c5a664db9d7b3f17889a9945004eaeff0b907dd0535bef469e76b17f47','SHELL_CHANGED')
+require(sha(root/'native-owner')=='c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83','OWNER_CHANGED')
+log=root/('run-'+op+'.log');require(sha(log)=='3f3da023b58d348de1238898bb13da2ef03343bc58ef60b547962cde08288d32','LOG_CHANGED');text=log.read_text()
+require(text.endswith('\nSABALAN_NATIVE_REAPED run-'+op+' 2\n') and '\nSABALAN_NATIVE_REAPED production-physical-native-restore 2\n' in text and 'server stopped' in text,'NATIVE_CLOSURE_MISSING')
+require(json.loads((root/('run-'+op+'-native-completion.json')).read_text())=={'status':2,'outputSha256':'3f3da023b58d348de1238898bb13da2ef03343bc58ef60b547962cde08288d32'},'COMPLETION_CHANGED')
+require(json.loads((root/'actual-container.json').read_text())['containerId']==cid,'CONTAINER_BINDING_CHANGED')
+def state():
+ [v]=json.loads(subprocess.check_output(['docker','inspect',cid],text=True,timeout=30));s=v['State']
+ require(v['Id']==cid and v['Image']==intent['imageId'] and v['Config']['Labels']['sabalan.drill.operation']==op and v['Config']['Labels']['com.docker.compose.project']=='sabalanerp-backup-drill' and s['Status']=='exited' and s['Pid']==0 and s['ExitCode']==2 and not s['OOMKilled'] and not (root/'pgdata/postmaster.pid').exists(),'CONTAINER_NOT_EXACTLY_CLOSED')
+ return {k:s[k] for k in ['Status','Pid','ExitCode','OOMKilled','StartedAt','FinishedAt']}
+def birth(pid):
+ try:return P('/proc/'+str(pid)+'/stat').read_text().rsplit(') ',1)[1].split()[19]
+ except FileNotFoundError:return None
+for n in ['create-','run-']:
+ v=json.loads((root/(n+op+'-native-start.json')).read_text());require(birth(v['pid'])!=v['startTicks'],'NATIVE_OWNER_STILL_ALIVE')
+def census(holder):
+ count=0;fds=0
+ for p in P('/proc').iterdir():
+  if not p.name.isdigit() or int(p.name)==os.getpid():continue
+  try:
+   cmd=(p/'cmdline').read_bytes();b=birth(int(p.name));is_holder=holder and int(p.name)==intent['pid'] and b==intent['startTicks']
+   if not is_holder:require(str(root).encode() not in cmd and op.encode() not in cmd,'WORK_ACTOR_EXISTS')
+   for fd in (p/'fd').iterdir():
+    try:target=os.readlink(fd)
+    except FileNotFoundError:continue
+    require(target!=str(root) and not target.startswith(str(root)+'/'),'OPEN_WORKING_FILE_EXISTS');fds+=1
+   count+=1
+  except FileNotFoundError:require(not p.exists(),'UNRESOLVED_PROCESS_RACE')
+ return {'processCount':count,'fdCount':fds}
+state_before=state();scan_before=census(True)
+original_locks=[]
+for path,fd in [(private/'drill-ownership.lock',9),(P('/run/lock/sabalan-backup-storage.lock'),8)]:
+ s=path.lstat();require(path.resolve(strict=True)==path and stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode&0o022,'ORIGINAL_LOCK_UNSAFE')
+ actual=os.stat('/proc/'+str(intent['pid'])+'/fd/'+str(fd));require((actual.st_dev,actual.st_ino)==(s.st_dev,s.st_ino),'HOLDER_LOCK_IDENTITY_CHANGED')
+ info=P('/proc/'+str(intent['pid'])+'/fdinfo/'+str(fd)).read_text();require(re.search(r'^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+[0-9a-f]+:[0-9a-f]+:'+str(s.st_ino)+r'\s+0\s+EOF\s*$',info,re.M),'HOLDER_EXCLUSIVE_LOCK_UNPROVEN')
+ original_locks.append({'path':str(path),'fd':fd,'device':s.st_dev,'inode':s.st_ino})
+for task in P('/proc/'+str(intent['pid'])+'/task').iterdir():require(not (task/'children').read_text().strip(),'CONTROLLER_CHILDREN_EXIST')
+require(birth(intent['pid'])==intent['startTicks'],'CONTROLLER_BIRTH_CHANGED')
+pidfd=os.pidfd_open(intent['pid']);require(birth(intent['pid'])==intent['startTicks'],'PIDFD_BIRTH_CHANGED')
+# This exact failed controller's reviewed exception branch only sleeps.
+# All native descendants and its actual disposable PostgreSQL are already closed.
+permit={'operation':closeop,'originalIntent':intent,'originalWrapperSha256':'3c0a351173aebae37d9f1899a1cb12c2597e39e2d9c84fb328af1e7015442ea2','originalPhaseAccepted':False,'failure':'SQL_ATTEMPT_BEFORE_END_OF_STARTUP_RECOVERY','nativeExitCode':2,'innerAndOuterNativeReaped':True,'state':state_before,'census':scan_before,'signal':'SIGTERM_EXACT_PIDFD_IDLE_CONTROLLER_ONLY','originalLockIdentities':original_locks,'frozenOriginalWrapperVerifiedLocally':True}
+save(root/(closeop+'-permit.json'),permit);require(active.read_bytes()==original,'INTENT_CHANGED')
+signal.pidfd_send_signal(pidfd,signal.SIGTERM);poll=select.poll();poll.register(pidfd,select.POLLIN);require(bool(poll.poll(30000)),'EXACT_CONTROLLER_NOT_TERMINAL');os.close(pidfd)
+lockfds=[]
+for p,target in [(private/'drill-ownership.lock',9),(P('/run/lock/sabalan-backup-storage.lock'),8)]:
+ expected=next(v for v in original_locks if v['path']==str(p));st=p.lstat();require((st.st_dev,st.st_ino)==(expected['device'],expected['inode']),'ORIGINAL_LOCK_REPLACED');require(p.resolve(strict=True)==p and stat.S_ISREG(st.st_mode) and st.st_uid==0 and st.st_nlink==1 and not st.st_mode&0o022,'UNSAFE_LOCK');fd=os.open(p,os.O_RDWR|os.O_NOFOLLOW);s=os.fstat(fd);require((s.st_dev,s.st_ino)==(st.st_dev,st.st_ino),'LOCK_CHANGED');copy=fcntl.fcntl(fd,fcntl.F_DUPFD_CLOEXEC,20);os.close(fd);lockfds.append((copy,target))
+for fd,target in lockfds:os.dup2(fd,target,inheritable=True);fcntl.flock(target,fcntl.LOCK_EX|fcntl.LOCK_NB)
+require(active.read_bytes()==original and birth(intent['pid'])!=intent['startTicks'],'OWNERSHIP_CHANGED')
+last=state();scan_after=census(False);result=dict(permit,controllerTerminated=True,locksReacquired=True,finalState=last,finalCensus=scan_after,healthyApplicationPoint=False,publicOnlineAdmission=False)
+save(root/(closeop+'.json'),result);require(active.read_bytes()==original,'INTENT_CHANGED_AFTER_RECEIPT');archived=root/'closed-failed-owner-intent.json';require(not archived.exists(),'CLOSED_EXISTS');os.rename(active,archived)
+for p in [archived,root,qa]:sync(p)
+print(json.dumps(result))
+'''.replace('CLOSURE_OPERATION',repr(operation))
+if __name__=='__main__':
+ r=subprocess.run(['ssh','-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','root@94.182.177.74','python3 -B -'],input=remote,text=True,capture_output=True)
+ result={'sshExitCode':r.returncode,'stdout':r.stdout,'stderr':r.stderr}
+ with (repo/f'reports/qa/{operation}.json').open('x',encoding='utf-8') as f:json.dump(result,f,indent=2)
+ print(json.dumps(result));raise SystemExit(r.returncode)

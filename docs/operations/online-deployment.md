@@ -4,6 +4,8 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 ## Current foundation
 
+- The exact current frontend config/rootfs also passed actual tagless backup-daemon import and native closure; its independent cipher remains retained after exact scratch retirement. The foreign comparison remains false after an unrelated replacement. Fresh remaining space is insufficient for the prior Inquiry bound, so that import was not attempted. See [frontend evidence](../../reports/qa/actual-frontend-private-image-import-20261019.md).
+
 - The actual backup daemon now also contains the exact current production backend config/rootfs image, imported without tags or container startup after fresh filesystem allocation/inode admission. Its redundant plaintext alone was retired; independent ciphertext remains retained. Native closure and exact daemon identity passed, while the overall foreign comparison remains false after an unrelated container appeared. Frontend/Inquiry import and full coherent application restoration remain pending. See [backend import evidence](../../reports/qa/actual-backend-private-image-import-20261019.md).
 
 - Explicitly closed production-base diagnostics now had only their exact stopped container and four derived copies retired, recovering an observed net 1,530,531,840 bytes. Original backup bytes, imported PostgreSQL image and proof history remain retained. The separate foreign comparison is false and remains recorded. See [scoped retirement evidence](../../reports/qa/closed-base-derived-retirement-20261018.md).

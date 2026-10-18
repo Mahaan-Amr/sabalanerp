@@ -1,0 +1,14 @@
+{
+  "operation": "import-production-frontend-b3e779894985432095419aa97bb83e4a",
+  "custodyOperation": "independent-image-custody-65cb95d50af8415aa569267d7ecd99bf",
+  "sources": {
+    "measure.py": "c956a9e881a38af9be33ffc65e26109219f8b0fe64f464a87553fa4f4bec2ede",
+    "filesystem_measure.py": "3ae8e873a946f9f1a0f66f9d1a5c92fe86fd33f5bba8cf8bb0a4cbc3b0484a8b",
+    "capacity.py": "0b92b45deda6247707d868a16e795281043a7c03cd4f03babb508c6a42b974a3",
+    "materialize.py": "f3566569af10fb8857e911352eb17b58426cf7b4e43984ec63bbf3691aeb2ef2",
+    "retire.py": "ee5e2d28a2aaa128c3804597b040fa5374cf9a77ac2cef2ca02d972a9f452c75",
+    "mount_guard.py": "165101a51ecc00db4b12ff65a5b2fe55f7037b4407ccdde5e799afa7bda54cd7"
+  },
+  "service": "frontend",
+  "scope": "one exact private application image import, independently recoverable scratch retirement before manifest; no container/service/public admission"
+}

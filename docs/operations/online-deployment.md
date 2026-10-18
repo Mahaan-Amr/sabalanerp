@@ -208,5 +208,14 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   publication, malformed evidence and deletion history before business-file
   mutation. Ten native orphan cases, nine root/read cases and 36 domain cases
   passed, with both frozen reviews. Ordinary activation, raw artifact repair,
-  real-schema receipt acceptance and full protected writer coverage remain pending.
+  joined database/native-file acceptance and full protected writer coverage remain pending.
   See [orphan lifecycle evidence](../../reports/qa/versioned-dispatch-orphan-storage-20261019.md).
+
+- Real PostgreSQL audit JSON now round-trips the exact quarantine receipt through
+  cleanup's existing key lock/reader; legacy and malformed receipts remain null.
+  Acceptance uses a schema-only isolated database in the existing local server,
+  preserves immutable triggers, and retires that database after client closure
+  and identity checks. File staging stops at the port, so this is not joined
+  native-file or full application acceptance. The initial failed harness left
+  six explicitly documented canonical-local QA audit rows intact. See
+  [audit JSON evidence](../../reports/qa/dispatch-orphan-audit-json-20261019.md).

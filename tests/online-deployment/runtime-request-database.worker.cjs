@@ -91,6 +91,22 @@ async function run(command) {
       const result = await value.response.promise; assert.equal(result.status, 503); assert.equal(handlers, before);
       return { status: result.status, handlerEntered: false };
     }
+    case 'waiting-http': {
+      // Control commands must remain available while a new HTTP admission
+      // waits outside an actual EX capture. Do not await this response here.
+      const before = handlers, value = item(command.reference, 'early');
+      let answered = false; void value.response.promise.then(() => { answered = true; });
+      value.client = request(value);
+      await new Promise(resolve => setTimeout(resolve, 30));
+      assert.equal(handlers, before); assert.equal(answered, false);
+      return { handlerEntered: false, answered: false, snapshot: await journal.inspect() };
+    }
+    case 'await-http-entry': {
+      const value = work.get(command.reference); assert.ok(value);
+      await Promise.race([value.entered.promise, value.done.promise.then(() => { throw value.error || Error('WORK_ENDED_BEFORE_ENTRY'); })]);
+      assert.equal((await value.response.promise).status, 202);
+      return { entered: true };
+    }
     case 'snapshot': return journal.inspect();
     case 'drain': await boundary.stopAndDrain(command.timeoutMs); return {};
     case 'exclusive': {

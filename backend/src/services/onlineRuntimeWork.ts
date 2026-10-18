@@ -78,5 +78,5 @@ export async function createScopedRuntimeWork(configuration: WorkInput): Promise
     if (input.scope.purpose !== 'http') throw failure('RUNTIME_HTTP_OWNERSHIP_REQUIRED');
     assertOwner();
   };
-  return new RuntimeWorkBoundary(tasks, runtimeHttpRequests, assertWorker, assertHttp);
+  return new RuntimeWorkBoundary(tasks, runtimeHttpRequests, assertWorker, assertHttp, assertOwner);
 }

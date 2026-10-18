@@ -1,0 +1,26 @@
+{
+  "head": "c31c77306b36dc224172bb97fd0e4c3a5157fd2d",
+  "sources": {
+    "backend/src/services/httpRequestLifecycle.ts": "1867b8adff3179f75ef408bb1df37867fd7e7d016a0a3408704e4f73aceab899",
+    "backend/src/services/runtimeWorkBoundary.ts": "6d4934fc7a95afb3cb68db4fd2be0ec8ae913ab8f77ba509a04632ba36563f25",
+    "backend/src/services/onlineRuntimeWork.ts": "2eea5ada7a0f148d41e1cb1ccf7fc1e0cc428c11495606efc4e3104167bbf381",
+    "backend/src/services/runtimeLeasedWorkContext.ts": "2b888eaf836ef5cabf41b96199dc57ee3a5e7fb73b1d3a2f31d42325512ef8be",
+    "scripts/run-online-scoped-work-local.mjs": "e4d12e6fe9ad7056052a2a88bff6a4ad1df5a7e8fdcc07e9cafa704af7fd26fc",
+    "scripts/run-runtime-request-database-local.mjs": "704b7dda1bfa37ac4422ae38f90264aca187afce1e94317d076e4adbb3ef448b",
+    "scripts/run-runtime-shared-file-work-local.mjs": "1432b706a5bf51c1395d9eca487b798b0771511f3954462e87abce9106f47d65",
+    "tests/online-deployment/runtime-shared-file-work.fixture.cjs": "cc93368515f2836512ec0947650688faed5c633c1f033fc03be498ff2340d273",
+    "tests/online-deployment/runtime-request-database.worker.cjs": "97be408e5fa306e2ffef70d43a0bbf6172af3e861a783ed15a2885be06b411b5"
+  },
+  "dependencies": {
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "backend/src/services/kernelWriteAdmission.ts": "8952c65ddde926fbc5136be933d1c7401ea269191cbcba64dd20ba6d95bdd875",
+    "backend/src/services/runtimeBoundaryJournal.ts": "d94912a6fb15d759d8270c067e96c81964f1a5464cc54c26df28636ccbe2e9eb",
+    "backend/src/services/versionedFilePublication.ts": "a1b4a382ef3664d953ba048260aba3b18814fc3840c16fb3ac92f8e071a63480"
+  },
+  "patchSha256": "8f66f8f1eaba723a0ad1dc93dcb5bff99a0aa5b9ffa6bfec5696c5037b1bfac2",
+  "scope": "actual acquired HTTP native lease shared with nested file work and future callback reservations; no production admission",
+  "nativeReport": "runtime-shared-file-work-cab85a29625d3f79c1d6a1fe4971c919.json",
+  "kernelRegression": "http-borrowed-runtime-regression-20261018.json",
+  "remaining": "actual request/database regression and scoped host guard regression pending; existing database fixture expected an obsolete 503 under EX instead of queued admission; first run unaccepted, original owner control stop used, evidence retained"
+}

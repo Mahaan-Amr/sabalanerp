@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import { HttpRequestLifecycle } from './httpRequestLifecycle';
 import { RuntimeTaskAdmission } from './runtimeTaskAdmission';
+import { RuntimeLeasedWorkContext } from './runtimeLeasedWorkContext';
 
 const unavailable = () => Object.assign(new Error('RUNTIME_WORK_ADMISSION_CLOSED'), {
   code: 'RUNTIME_WORK_ADMISSION_CLOSED', status: 503, statusCode: 503, isOperational: true,
@@ -18,9 +19,12 @@ const unavailable = () => Object.assign(new Error('RUNTIME_WORK_ADMISSION_CLOSED
 export class RuntimeWorkBoundary {
   private accepting = true;
   readonly requests: HttpRequestLifecycle;
+  readonly context: RuntimeLeasedWorkContext;
 
   constructor(private readonly tasks: RuntimeTaskAdmission, admission: (() => boolean) | HttpRequestLifecycle,
-    private readonly assertBackgroundOwner: () => void, private readonly assertHttpOwner: () => void = () => {}) {
+    private readonly assertBackgroundOwner: () => void, private readonly assertHttpOwner: () => void = () => {},
+    assertWorkOwner: () => void = assertBackgroundOwner) {
+    this.context = new RuntimeLeasedWorkContext(tasks, assertWorkOwner);
     if (admission instanceof HttpRequestLifecycle) {
       admission.bindOwnership(() => this.acquireHttp());
       this.requests = admission;
@@ -32,16 +36,10 @@ export class RuntimeWorkBoundary {
 
   private async acquireHttp() {
     this.assertHttpOwner();
-    const lease = await this.acquire();
-    try { this.assertHttpOwner(); }
-    catch (error) { await lease.release(); throw error; }
-    return lease;
-  }
-
-  private async acquire() {
     if (!this.accepting) throw unavailable();
-    const lease = await this.tasks.acquire();
-    if (!this.accepting) { await lease.release(); throw unavailable(); }
+    const lease = await this.context.acquireOwned();
+    try { this.assertHttpOwner(); if (!this.accepting) throw unavailable(); }
+    catch (error) { await lease.release(); throw error; }
     return lease;
   }
 
@@ -61,11 +59,10 @@ export class RuntimeWorkBoundary {
    * detached timer/provider promise as an already completed callback here. */
   async runBackground<T>(work: () => Promise<T>): Promise<T> {
     this.assertBackgroundOwner();
-    const lease = await this.acquire();
-    try {
+    return this.context.run(async () => {
       this.assertBackgroundOwner();
       return await work();
-    } finally { await lease.release(); }
+    });
   }
 
   async stopAndDrain(timeoutMs: number) {

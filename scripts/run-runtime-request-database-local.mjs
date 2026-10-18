@@ -47,7 +47,7 @@ const volumes = slots.map(value => {
 assert.equal(volumes[0], volumes[1]);
 const operation = 'request-database-' + randomBytes(16).toString('hex');
 const directory = '/app/online-runtime-acceptance/' + operation;
-const files = Object.fromEntries(['kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'httpRequestLifecycle', 'runtimeWorkBoundary', 'runtimeDatabaseBoundary'].map(name =>
+const files = Object.fromEntries(['kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext', 'runtimeLeasedWorkContext', 'httpRequestLifecycle', 'runtimeWorkBoundary', 'runtimeDatabaseBoundary'].map(name =>
   [name + '.js', fs.readFileSync(path.join(backendDist, 'services', name + '.js'))]));
 files['worker.cjs'] = fs.readFileSync(path.join(root, 'tests/online-deployment/runtime-request-database.worker.cjs'));
 const scopes = slots.map(value => ({ runtimeId: randomBytes(32).toString('hex'), image: value.Image,
@@ -143,9 +143,11 @@ await call(0, 'refused-http', { reference: 'retiring-refused' });
 assert.equal((await rows()).length, 2); assert.equal((await call(1, 'exclusive')).acquired, false);
 await call(0, 'finish', { reference: 'lost-response' }); await call(0, 'drain', { timeoutMs: 1000 });
 assert.equal((await rows()).length, 3); assert.equal((await call(1, 'exclusive')).acquired, true);
-await call(1, 'refused-http', { reference: 'boundary-refused' }); assert.equal((await rows()).length, 3);
+const waiting = await call(1, 'waiting-http', { reference: 'fresh-response' });
+assert.equal(waiting.handlerEntered, false); assert.equal(waiting.answered, false);
+assert.equal(waiting.snapshot.phase, 'QUIESCENT'); assert.equal((await rows()).length, 3);
 await call(1, 'unlock');
-await call(1, 'begin', { reference: 'fresh-response', mode: 'early' }); await call(1, 'finish', { reference: 'fresh-response' });
+await call(1, 'await-http-entry', { reference: 'fresh-response' }); await call(1, 'finish', { reference: 'fresh-response' });
 await call(1, 'drain', { timeoutMs: 1000 });
 const expected = [
   { id: 'background', runtime_id: second.scope.runtimeId, amount: '123456789.12345678', quantity: '0.00000001' },

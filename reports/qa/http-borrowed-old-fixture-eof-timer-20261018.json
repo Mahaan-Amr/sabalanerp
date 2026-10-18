@@ -1,0 +1,29 @@
+{
+  "rows": [
+    {
+      "id": "background",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    },
+    {
+      "id": "early-response",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    },
+    {
+      "id": "lost-response",
+      "amount": "123456789.12345678",
+      "quantity": "0.00000001"
+    }
+  ],
+  "sessions": [],
+  "prepared": [
+    {
+      "count": "0"
+    }
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "stdout": "PROVEN_ORIGINAL_STOP_COMPLETED {\"result\":{\"type\":\"object\",\"value\":{\"pid\":62661,\"gate\":0,\"resources\":[\"PipeWrap\",\"PipeWrap\",\"Timeout\"]}}}\n{\"result\":{\"type\":\"object\",\"value\":{\"onlyPureEofKeepaliveCleared\":true}}}\n",
+  "stderr": ""
+}

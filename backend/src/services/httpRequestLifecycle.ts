@@ -1,6 +1,7 @@
 import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
 
-type RequestOwnership = { release(): void | Promise<void> };
+type OwnedCallback = { run<T>(body: () => T): T; release(): void };
+type RequestOwnership = { release(): void | Promise<void>; run?<T>(body: () => T): T; reserve?(): OwnedCallback };
 type RequestWork = { responseDone: boolean; mutation: boolean; writeAdmitted: boolean; writes: number; handlers: Set<symbol>; onFinish: Set<() => void>;
   ownership?: RequestOwnership; releasing?: boolean; ownershipFailed?: boolean };
 type WriteReservation = { run<T>(work: () => Promise<T>): Promise<T>; cancel(): void };
@@ -51,7 +52,9 @@ export class HttpRequestLifecycle {
     // while the kernel/journal admission is pending. It cannot outlive drain.
     void Promise.resolve().then(() => this.acquireOwnership!(req)).then(ownership => {
       work.ownership = ownership;
-      if (!req.aborted && !res.destroyed) next();
+      if (!req.aborted && !res.destroyed) {
+        if (ownership.run) ownership.run(() => next()); else next();
+      }
     }, next).then(() => {
       work.handlers.delete(admission); this.releaseIfDone(work);
     }, error => {
@@ -78,17 +81,19 @@ export class HttpRequestLifecycle {
         code: 'RECOVERY_WRITE_ADMISSION_CLOSED', status: 503, statusCode: 503, isOperational: true,
       });
     }
+    const ownedCallback = work.ownership?.reserve?.();
     const token = Symbol();
     work.handlers.add(token);
     work.writes += 1;
     this.active.add(work);
     let consumed = false;
-    const release = () => { work.writes -= 1; work.handlers.delete(token); this.releaseIfDone(work); };
+    const release = () => { work.writes -= 1; work.handlers.delete(token); ownedCallback?.release(); this.releaseIfDone(work); };
     return {
       run: async execute => {
         if (consumed) throw new Error('HTTP_WRITE_RESERVATION_CONSUMED');
         consumed = true;
-        try { return await execute(); } finally { release(); }
+        try { return await (ownedCallback ? ownedCallback.run(execute) : work.ownership?.run ? work.ownership.run(execute) : execute()); }
+        finally { release(); }
       },
       cancel: () => { if (!consumed) { consumed = true; release(); } },
     };
@@ -124,7 +129,8 @@ export class HttpRequestLifecycle {
       try { next(error); } finally { if (returned && !promise) release(); }
     };
     try {
-      const result = handler.apply(receiver, [...parameters, proceed]);
+      const execute = () => handler.apply(receiver, [...parameters, proceed]);
+      const result = work.ownership?.run ? work.ownership.run(execute) : execute();
       returned = true;
       promise = result !== null && result !== undefined && typeof result.then === 'function';
       if (promise) {

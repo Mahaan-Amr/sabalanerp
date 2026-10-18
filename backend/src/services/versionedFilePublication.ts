@@ -16,6 +16,7 @@ type FileClaim = { key: string; id: string; target: string; pending: string; hel
 export type VersionedFileRootHead = Readonly<{ versionSha256: string; operation: 'PUT' | 'DELETE'; byteLength: number }>;
 export type VersionedFileRootScope = Readonly<{
   publish(key: string, bytes: Uint8Array, options?: { replace?: boolean }): Promise<string>;
+  publishIfCurrent(key: string, bytes: Uint8Array, expectedVersionSha256: string | null): Promise<string>;
   publishUpload(key: string, source: Readable): ReturnType<VersionedFilePublication['publishUpload']>;
   remove(key: string): Promise<string>;
   removeUpload(key: string, versionSha256: string): Promise<string>;
@@ -178,6 +179,7 @@ export class VersionedFilePublication {
       });
       const scope: VersionedFileRootScope = Object.freeze({
         publish: (value: string, bytes: Uint8Array, options?: { replace?: boolean }) => this.publish(key(value), bytes, options),
+        publishIfCurrent: (value: string, bytes: Uint8Array, expected: string | null) => this.publishIfCurrent(key(value), bytes, expected),
         publishUpload: (value: string, source: Readable) => this.publishUpload(key(value), source),
         remove: (value: string) => this.remove(key(value)),
         removeUpload: (value: string, sha256: string) => this.removeUpload(key(value), sha256),
@@ -319,6 +321,14 @@ export class VersionedFilePublication {
   publish(key: string, bytes: Uint8Array, options: { replace?: boolean } = {}) {
     const frozen = Buffer.from(bytes), replace = options.replace === true;
     return this.change(key, frozen, replace);
+  }
+
+  /** Restore/compensate only the exact observed generation. Null selects a key
+   * with no history; a deletion is an existing generation, never absence. */
+  async publishIfCurrent(key: string, bytes: Uint8Array, expectedVersionSha256: string | null): Promise<string> {
+    if (expectedVersionSha256 !== null && (typeof expectedVersionSha256 !== 'string'
+      || !shaPattern.test(expectedVersionSha256))) fail('FILE_VERSION_SELECTION_INVALID');
+    return this.change(key, Buffer.from(bytes), true, expectedVersionSha256);
   }
 
   /** Takes ownership of this input stream immediately. Observe errors before
@@ -495,7 +505,7 @@ export class VersionedFilePublication {
     });
   }
 
-  private change(key: string, bytes: Buffer | StreamInput | null, replace: boolean, expectedVersion?: string,
+  private change(key: string, bytes: Buffer | StreamInput | null, replace: boolean, expectedVersion?: string | null,
     retainedClaim?: FileClaim): Promise<string> {
     return this.work.run(async () => {
       this.work.assertActive(); await this.assertDirectories();
@@ -509,7 +519,7 @@ export class VersionedFilePublication {
       const retireUnstarted = async () => {
         if (!retainedClaim) await this.releaseClaim(claim);
       };
-      const refusal = expectedVersion !== undefined && previous?.sha256 !== expectedVersion ? 'FILE_VERSION_UPLOAD_CHANGED'
+      const refusal = expectedVersion !== undefined && (previous?.sha256 ?? null) !== expectedVersion ? 'FILE_VERSION_UPLOAD_CHANGED'
         : previous && previous.value.generation >= 10000 ? 'FILE_VERSION_HISTORY_CAPACITY'
         : actual && bytes !== null && !replace ? 'FILE_VERSION_ALREADY_EXISTS' : null;
       if (refusal) {

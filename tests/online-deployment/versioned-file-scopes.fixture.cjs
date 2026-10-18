@@ -129,3 +129,23 @@ test('scoped Dispatch storage publishes and tombstones through its admitted root
   assert.throws(()=>createScopedVersionedFilesystemDispatchArtifactStorage(v.live,a.files),/FILE_VERSION_STORAGE_ROOT_MISMATCH/);
  }finally{await v.close();}
 });
+
+test('conditional restoration cannot overwrite a later write or resurrect a deleted generation accidentally',async()=>{
+ const v=await fixture();try{
+  const a=await scope(v,'artifacts');
+  const original=await a.files.publishIfCurrent('file.pdf',Buffer.from('ORIGINAL'),null);
+  const corrected=await a.files.publishIfCurrent('file.pdf',Buffer.from('CORRECTED'),original);
+  const beforeObjects=fs.readdirSync(path.join(v.store,'objects'));
+  await assert.rejects(a.files.publishIfCurrent('file.pdf',Buffer.from('STALE COMPENSATION'),original),/FILE_VERSION_UPLOAD_CHANGED/);
+  assert.equal((await a.files.read('file.pdf')).toString(),'CORRECTED');
+  assert.deepEqual(fs.readdirSync(path.join(v.store,'objects')),beforeObjects);
+  assert.deepEqual(fs.readdirSync(path.join(v.store,'pending')),[]);
+  const deleted=await a.files.removeUpload('file.pdf',corrected);
+  await assert.rejects(a.files.publishIfCurrent('file.pdf',Buffer.from('ACCIDENTAL RESURRECTION'),null),/FILE_VERSION_UPLOAD_CHANGED/);
+  assert.equal(await a.files.read('file.pdf'),null);
+  await a.files.publishIfCurrent('file.pdf',Buffer.from('EXPLICIT RESTORE'),deleted);
+  assert.equal((await a.files.read('file.pdf')).toString(),'EXPLICIT RESTORE');
+  await assert.rejects(a.files.publishIfCurrent('invalid.pdf',Buffer.from('NO'),'bad'),/FILE_VERSION_SELECTION_INVALID/);
+  assert.deepEqual(fs.readdirSync(path.join(v.store,'pending')),[]);
+ }finally{await v.close();}
+});

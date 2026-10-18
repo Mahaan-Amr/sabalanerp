@@ -20,7 +20,7 @@ def digest(data):
     return 'sha256:' + hashlib.sha256(data).hexdigest()
 
 
-def fixture(root, bad_layer=False, bad_diff=False, bad_platform_size=False, bomb=False, unsafe=False, multi=False, repeat=False):
+def fixture(root, bad_layer=False, bad_diff=False, bad_platform_size=False, bomb=False, unsafe=False, multi=False, repeat=False, reverse=False):
     blobs = {}
 
     def add(data):
@@ -49,7 +49,8 @@ def fixture(root, bad_layer=False, bad_diff=False, bad_platform_size=False, bomb
         blobs['blobs/sha256/' + layers[0]['digest'][7:]] = b'!' * len(encoded[0])
     archive = root / 'retained.tar.gz'
     with tarfile.open(archive, 'w:gz') as output:
-        for name, data in {**blobs, 'unrelated-image.bin': random.Random(42).randbytes(4096)}.items():
+        entries = list({**blobs, 'unrelated-image.bin': random.Random(42).randbytes(4096)}.items())
+        for name, data in reversed(entries) if reverse else entries:
             info = tarfile.TarInfo(name)
             info.size = len(data)
             output.addfile(info, io.BytesIO(data))
@@ -159,6 +160,80 @@ class PrivateImageMaterialization(unittest.TestCase):
                 later = b'b' * 4096 if repeat else b'c' * 4096
                 self.assertNotIn('blobs/sha256/' + digest(gzip.compress(later, mtime=0))[7:], observed)
                 self.assertEqual(list(root.iterdir()), [archive])
+
+    def test_stream_materialization_preserves_exact_config_layer_order_and_source(self):
+        for reverse in [False, True]:
+            with self.subTest(reverse=reverse), tempfile.TemporaryDirectory(prefix='sabalan-image-stream-') as directory:
+                root = Path(directory).resolve()
+                archive, checksum, index, platform, config, raw, config_bytes = fixture(root, reverse=reverse)
+
+                class PartialSink(io.BytesIO):
+                    def write(self, data):
+                        return super().write(data[:137])
+
+                sink = PartialSink()
+                result = image.materialize_to_stream(archive, sink, checksum, index, platform, config)
+                emitted = sink.getvalue()
+                self.assertEqual(hashlib.sha256(emitted).hexdigest(), result['archiveSha256'])
+                self.assertEqual(len(emitted), result['archiveBytes'])
+                self.assertFalse(result['archiveReadbackVerified'])
+                self.assertFalse(result['dockerImportVerified'])
+                self.assertFalse(result['healthyApplicationPoint'])
+                self.assertFalse(result['publicOnlineAdmission'])
+                self.assertEqual(result['tagAssignments'], [])
+                with tarfile.open(fileobj=io.BytesIO(emitted)) as output:
+                    manifest = json.load(output.extractfile('manifest.json'))
+                    self.assertIsNone(manifest[0]['RepoTags'])
+                    self.assertEqual(output.extractfile(manifest[0]['Config']).read(), config_bytes)
+                    self.assertEqual([output.extractfile(name).read() for name in manifest[0]['Layers']], raw)
+                self.assertEqual(image.sha(archive), checksum)
+                self.assertEqual(list(root.iterdir()), [archive])
+
+    def test_stream_refuses_invalid_sources_and_unproven_repeated_layers_before_output(self):
+        for options, expected in [({'bad_diff': True}, 'IMAGE_DIFF_ID_MISMATCH'),
+                                  ({'repeat': True}, 'IMAGE_STREAM_REPEATED_LAYER_UNPROVEN'),
+                                  ({'unsafe': True}, 'IMAGE_ARCHIVE_MEMBER_UNSAFE')]:
+            with self.subTest(options=options), tempfile.TemporaryDirectory(prefix='sabalan-stream-refusal-') as directory:
+                root = Path(directory).resolve()
+                archive, checksum, index, platform, config, *_ = fixture(root, **options)
+                sink = io.BytesIO()
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    image.materialize_to_stream(archive, sink, checksum, index, platform, config)
+                self.assertEqual(sink.getvalue(), b'')
+                self.assertEqual(list(root.iterdir()), [archive])
+                self.assertEqual(image.sha(archive), checksum)
+
+    def test_stream_sink_failure_retains_original_source_without_success_proof(self):
+        with tempfile.TemporaryDirectory(prefix='sabalan-stream-sink-') as directory:
+            root = Path(directory).resolve()
+            archive, checksum, index, platform, config, *_ = fixture(root)
+
+            class BrokenSink:
+                def write(self, data):
+                    return 0
+
+            with self.assertRaisesRegex(RuntimeError, 'IMAGE_STREAM_SINK_SHORT_WRITE'):
+                image.materialize_to_stream(archive, BrokenSink(), checksum, index, platform, config)
+            self.assertEqual(image.sha(archive), checksum)
+            self.assertEqual(list(root.iterdir()), [archive])
+
+    def test_stream_can_retain_source_compression_with_exact_config_and_diff_ids(self):
+        with tempfile.TemporaryDirectory(prefix='sabalan-stream-compressed-') as directory:
+            root = Path(directory).resolve()
+            archive, checksum, index, platform, config, raw, config_bytes = fixture(root, multi=True, reverse=True)
+            sink = io.BytesIO()
+            result = image.materialize_to_stream(archive, sink, checksum, index, platform, config,
+                                                preserve_source_encoding=True)
+            self.assertEqual(result['layerEncoding'], 'source')
+            self.assertEqual(result['rootfsDiffIds'], [digest(v) for v in raw])
+            self.assertLess(result['archiveBytes'], sum(map(len, raw)))
+            with tarfile.open(fileobj=io.BytesIO(sink.getvalue())) as output:
+                manifest = json.load(output.extractfile('manifest.json'))
+                self.assertIsNone(manifest[0]['RepoTags'])
+                self.assertEqual(output.extractfile(manifest[0]['Config']).read(), config_bytes)
+                self.assertEqual([gzip.decompress(output.extractfile(name).read()) for name in manifest[0]['Layers']], raw)
+            self.assertEqual(image.sha(archive), checksum)
+            self.assertEqual(list(root.iterdir()), [archive])
 
     def test_unknown_existing_work_and_wrong_source_checksum_are_preserved(self):
         with tempfile.TemporaryDirectory(prefix='sabalan-image-refusal-') as directory:

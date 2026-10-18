@@ -196,6 +196,20 @@ def materialize(archive, destination, archive_sha, index_id, platform_id, config
     return result
 
 
+class CountedReader:
+    def __init__(self, source):
+        self.source, self.count, self.digest = source, 0, hashlib.sha256()
+
+    def read(self, size=-1):
+        # gzip requests bounded chunks. Refuse accidental unbounded reads.
+        require(0 <= size <= 8 * 1024 ** 2, 'IMAGE_MEASUREMENT_READ_UNBOUNDED')
+        chunk = self.source.read(size)
+        self.count += len(chunk)
+        self.digest.update(chunk)
+        return chunk
+
+
+
 def measure(archive, archive_sha, index_id, platform_id, config_id,
             maximum_layer_bytes=1024 ** 3, maximum_image_bytes=2 * 1024 ** 3):
     """Verify expanded identities and measure staging needs without writing files."""
@@ -208,18 +222,6 @@ def measure(archive, archive_sha, index_id, platform_id, config_id,
         key = immutable_id(layer['digest'])
         multiplicity[key] = multiplicity.get(key, 0) + 1
     logical_expanded = 0
-
-    class CountedReader:
-        def __init__(self, source):
-            self.source, self.count, self.digest = source, 0, hashlib.sha256()
-
-        def read(self, size=-1):
-            # gzip requests bounded chunks. Refuse accidental unbounded reads.
-            require(0 <= size <= 8 * 1024 ** 2, 'IMAGE_MEASUREMENT_READ_UNBOUNDED')
-            chunk = self.source.read(size)
-            self.count += len(chunk)
-            self.digest.update(chunk)
-            return chunk
 
     for member, stream in scan(archive):
         if member.name not in wanted:
@@ -260,6 +262,109 @@ def measure(archive, archive_sha, index_id, platform_id, config_id,
             'layers': results, 'selectedCompressedBytes': sum(v['size'] for v in wanted.values()),
             'expandedLayerBytes': expanded, 'expandedLayerIdentityVerified': True,
             'dockerImportVerified': False, 'healthyApplicationPoint': False, 'publicOnlineAdmission': False}
+
+
+def materialize_to_stream(archive, output, archive_sha, index_id, platform_id, config_id,
+                          maximum_layer_bytes=1024 ** 3, maximum_image_bytes=2 * 1024 ** 3,
+                          preserve_source_encoding=False):
+    """Emit a private classic archive; caller owns its sink and native closure.
+
+    No Docker invocation, temporary layer copies, tags, cleanup or admission.
+    A final manifest is emitted only after all selected layers are verified.
+    """
+    measured = measure(archive, archive_sha, index_id, platform_id, config_id,
+                       maximum_layer_bytes, maximum_image_bytes)
+    archive, before, metadata, names, layers, diff_ids, wanted = read_plan(
+        archive, archive_sha, index_id, platform_id, config_id,
+        maximum_layer_bytes, maximum_image_bytes)
+    require(len(wanted) == len(layers), 'IMAGE_STREAM_REPEATED_LAYER_UNPROVEN')
+    selected = {immutable_id(layer['digest']): (n, layer, measured['layers'][n])
+                for n, layer in enumerate(layers)}
+
+    class HashingWriter:
+        def __init__(self):
+            self.count, self.digest = 0, hashlib.sha256()
+
+        def write(self, data):
+            view = memoryview(data)
+            while view:
+                written = output.write(view)
+                require(type(written) is int and 0 < written <= len(view), 'IMAGE_STREAM_SINK_SHORT_WRITE')
+                self.digest.update(view[:written])
+                self.count += written
+                view = view[written:]
+            return len(data)
+
+        def flush(self):
+            output.flush()
+
+    writer, completed = HashingWriter(), set()
+    with tarfile.open(fileobj=writer, mode='w|', format=tarfile.USTAR_FORMAT) as classic:
+        def add(name, data):
+            info = tarfile.TarInfo(name)
+            info.size, info.mode = len(data), 0o600
+            classic.addfile(info, io.BytesIO(data))
+
+        config_name = config_id[7:] + '.json'
+        add(config_name, metadata[names[config_id]])
+        for member, stream in scan(archive):
+            if member.name not in selected:
+                continue
+            number, layer, expected = selected[member.name]
+            require(member.isfile() and member.size == layer['size'], 'IMAGE_LAYER_SIZE_MISMATCH')
+            value, count = hashlib.sha256(), 0
+            with stream.extractfile(member) as source:
+                counted = CountedReader(source)
+                if preserve_source_encoding:
+                    # The measured diff ID is bound to these exact blob bytes.
+                    # Docker's loader decompresses embedded layers itself.
+                    info = tarfile.TarInfo('layer-' + str(number).zfill(4) + '.tar')
+                    info.size, info.mode = layer['size'], 0o600
+                    classic.addfile(info, counted)
+                    require(not counted.read(1) and counted.count == layer['size']
+                            and counted.digest.hexdigest() == layer['digest'][7:], 'IMAGE_LAYER_HASH_INVALID')
+                    completed.add(member.name)
+                    continue
+                reader = gzip.GzipFile(fileobj=counted) if layer['mediaType'].endswith(('+gzip', '.gzip')) else counted
+
+                class VerifiedReader:
+                    def read(self, size):
+                        nonlocal count
+                        require(0 <= size <= 1024 * 1024, 'IMAGE_STREAM_READ_UNBOUNDED')
+                        chunk = reader.read(size)
+                        count += len(chunk)
+                        require(count <= expected['expandedBytes'], 'IMAGE_EXPANSION_LIMIT')
+                        value.update(chunk)
+                        return chunk
+
+                info = tarfile.TarInfo('layer-' + str(number).zfill(4) + '.tar')
+                info.size, info.mode = expected['expandedBytes'], 0o600
+                try:
+                    classic.addfile(info, VerifiedReader())
+                    require(not reader.read(1), 'IMAGE_EXPANSION_LIMIT')
+                finally:
+                    if reader is not counted:
+                        reader.close()
+                require(count == expected['expandedBytes'] and 'sha256:' + value.hexdigest() == diff_ids[number],
+                        'IMAGE_DIFF_ID_MISMATCH')
+                require(counted.count == layer['size'] and counted.digest.hexdigest() == layer['digest'][7:],
+                        'IMAGE_LAYER_HASH_INVALID')
+            completed.add(member.name)
+        require(completed == set(wanted), 'IMAGE_LAYER_MISSING')
+        after = archive.lstat()
+        identity = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns, s.st_nlink)
+        require(identity(before) == identity(after), 'IMAGE_SOURCE_MUTATED')
+        add('manifest.json', json.dumps([{'Config': config_name, 'RepoTags': None,
+            'Layers': ['layer-' + str(n).zfill(4) + '.tar' for n in range(len(layers))]}],
+            separators=(',', ':')).encode())
+    writer.flush()
+    return {'format': 'sabalan-private-image-stream-materialization/v1', 'sourceArchiveSha256': archive_sha,
+            'sourceIndex': index_id, 'platformManifest': platform_id, 'configImageId': config_id,
+            'rootfsDiffIds': diff_ids, 'expandedLayerBytes': measured['expandedLayerBytes'],
+            'archiveSha256': writer.digest.hexdigest(), 'archiveBytes': writer.count,
+            'layerEncoding': 'source' if preserve_source_encoding else 'expanded',
+            'archiveReadbackVerified': False, 'dockerImportVerified': False,
+            'tagAssignments': [], 'healthyApplicationPoint': False, 'publicOnlineAdmission': False}
 
 
 if __name__ == '__main__':

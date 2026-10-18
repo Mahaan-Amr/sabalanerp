@@ -123,3 +123,10 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
 - Privacy erasure completion now requires resolved evidence for every required copy location. Unknown/missing copies and elapsed backup retention cannot certify deletion; actual PostgreSQL regressions cover withdrawn completion and post-restore erasure replay. This closes false-completion paths, not independent physical cleanup or complete retained-version inventory. See [copy evidence acceptance](../../reports/qa/performance-erasure-copy-20261018.md).
 
 - The existing recovery background-write entry point now composes a one-shot private native jobs owner with actual completion, without replacing ordinary protected-control admission. Native two-pool/one-worker, exact lost-acknowledgement writes, v2 capture/census and interrupted-capture acceptance passed. Real scheduler/provider/control integration and public release admission remain required. See [scoped background evidence](../../reports/qa/scoped-recovery-background-20261018.md).
+
+- Private physical-base capture now holds ownership through successful-client
+  PostgreSQL closure, retains ambiguous failed handshakes and post-reap audit
+  failures, and bounds native extraction/verification storage. Exact Linux fault
+  regressions and real read-only PostgreSQL overlap passed. This admits only a
+  confined component attempt, not a healthy point or release. See
+  [closure and capacity evidence](../../reports/qa/physical-base-closure-budget-20261018.md).

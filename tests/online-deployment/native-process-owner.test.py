@@ -102,7 +102,8 @@ class NativeProcessOwner(unittest.TestCase):
 
     def test_host_filesystem_failures_keep_exclusive_owner_after_spawn(self):
         fixture = pathlib.Path(__file__).with_name('capture-owner-fault.fixture.py')
-        for fault in ['log-open', 'log-write', 'ownership-read']:
+        for fault in ['log-open', 'log-write', 'ownership-read', 'server-closure',
+                      'log-fsync', 'reaped-event', 'failed-handshake']:
             with self.subTest(fault=fault), tempfile.TemporaryDirectory(prefix='sabalan-owner-fault-') as directory:
                 root = pathlib.Path(directory)
                 owner = root / 'owner.lock'
@@ -129,6 +130,12 @@ class NativeProcessOwner(unittest.TestCase):
                     # The real native owner has finished reaping, while the host
                     # conservatively retains FD9 because it lost the receipt.
                     self.assertTrue(not native_status.exists() or 'State:\tZ' in native_status.read_text())
+                    if fault in ['log-fsync', 'reaped-event', 'failed-handshake']:
+                        journal = (root / 'fault-test-operation/capture.jsonl').read_text()
+                        self.assertIn('OWNERSHIP_HELD_UNPROVEN', journal)
+                        self.assertNotIn('POSTGRES_CONNECTION_CLOSED', journal)
+                        if fault == 'failed-handshake':
+                            self.assertIn('failed-postgres-client-', journal)
                 finally:
                     host.kill()  # Only this test-owned host, after native completion.
                     host.communicate(timeout=3)

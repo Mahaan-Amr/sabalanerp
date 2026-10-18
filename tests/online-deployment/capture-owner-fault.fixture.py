@@ -15,6 +15,7 @@ spec = importlib.util.spec_from_file_location('capture', source)
 capture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(capture)
 original_open, original_read, original_popen = Path.open, Path.read_text, subprocess.Popen
+original_fsync = os.fsync
 spawned = False
 image = 'sha256:' + 'a' * 64
 container = {'Id': 'b' * 64, 'Image': image, 'Config': {'Labels': {
@@ -24,8 +25,14 @@ container = {'Id': 'b' * 64, 'Image': image, 'Config': {'Labels': {
 
 def spawn(command, **kwargs):
     global spawned
-    token = command[6]
-    child = original_popen([binary, '1', token, 'sh', '-c', 'sleep .2'], **kwargs)
+    owner_index = next(index for index, value in enumerate(command) if value.endswith('/native-process-owner'))
+    token = command[owner_index + 2]
+    # The first profile client can finish while PostgreSQL closure remains
+    # unknown. An invalid observer result must retain the original EX lock.
+    action = 'exit 2' if fault == 'failed-handshake' and token.endswith('-1') else (
+        'printf not-a-closure-count' if fault == 'server-closure' else (
+            'printf 0' if token.endswith('-2') else 'sleep .2'))
+    child = original_popen([binary, '1', token, 'sh', '-c', action], **kwargs)
     (root / 'native-pid').write_text(str(child.pid))
     spawned = True
     return child
@@ -39,11 +46,26 @@ class BrokenLog:
     def write(self, _value): raise OSError(5, 'injected native log write')
 
 
+class BrokenReapedEvent(BrokenLog):
+    def write(self, value):
+        if 'NATIVE_REAPED' in value:
+            raise OSError(5, 'injected reaped journal write')
+        return self.stream.write(value)
+
+
 def open_file(path, *args, **kwargs):
     if spawned and fault == 'log-open' and path.name in ['native-1.log', 'capture.jsonl']:
         raise OSError(5, 'injected local filesystem failure')
     value = original_open(path, *args, **kwargs)
+    if spawned and fault == 'reaped-event' and path.name == 'capture.jsonl':
+        return BrokenReapedEvent(value)
     return BrokenLog(value) if spawned and fault == 'log-write' and path.name == 'native-1.log' else value
+
+
+def fsync_file(descriptor):
+    if spawned and fault == 'log-fsync' and os.readlink('/proc/self/fd/' + str(descriptor)).endswith('/native-1.log'):
+        raise OSError(5, 'injected native log fsync')
+    return original_fsync(descriptor)
 
 
 def read_file(path, *args, **kwargs):
@@ -54,7 +76,8 @@ def read_file(path, *args, **kwargs):
 
 with patch.object(subprocess, 'check_output', return_value=json.dumps([container]).encode()), \
      patch.object(subprocess, 'run'), patch.object(subprocess, 'Popen', side_effect=spawn), \
-     patch.object(Path, 'open', open_file), patch.object(Path, 'read_text', read_file):
+     patch.object(Path, 'open', open_file), patch.object(Path, 'read_text', read_file), \
+     patch.object(os, 'fsync', fsync_file):
     capture.capture(SimpleNamespace(project='sabalanerp-backup-drill', operation_id='fault-test-operation',
         image=image, system_identifier='123', container='owned-fixture', root=str(root),
         lock_file=str(root / 'owner.lock'), supervisor=binary,

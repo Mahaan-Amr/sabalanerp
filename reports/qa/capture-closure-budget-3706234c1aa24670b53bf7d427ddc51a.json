@@ -1,0 +1,6 @@
+{
+  "reference": "current",
+  "sshExitCode": 0,
+  "stdout": "{\"exitCode\": 0, \"root\": \"/root/sabalan-recovery-private/native-qa/capture-closure-budget-3706234c1aa24670b53bf7d427ddc51a\", \"sourceHashes\": {\"deploy/scripts/capture-postgres-base.py\": \"93a5a1df84896c54b50481b46ce2d67fe1a8520f588564b75c89c2ca3e26e6e1\", \"deploy/scripts/native-process-owner.c\": \"1eb2feeb45f654ad764e33510fa58a4a1bb672291fcbab559d23c663b51f56ba\", \"tests/online-deployment/capture-owner-fault.fixture.py\": \"f3140471dc9c950ece428454f61735abb06958b30cff6824718c45b4d2be3e82\", \"tests/online-deployment/native-process-owner.test.py\": \"ce530531a30c845f3b6021ac0c4cbe3a810ea0af4e8a619417de827a00f370d6\", \"tests/online-deployment/physical-restore-drill.fixture.py\": \"afe588db5306b18aa764d147e5379b7ea6e58204fd795bcf25262854e9ddca56\"}, \"stdout\": \"\", \"stderr\": \"...........\\n----------------------------------------------------------------------\\nRan 11 tests in 12.220s\\n\\nOK\\n\", \"dockerOrPostgresContact\": false}\n",
+  "stderr": ""
+}

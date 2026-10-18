@@ -137,16 +137,26 @@ def capture(options):
     except Exception:
         uncertain('bootstrap')
     command_number = 0
-    def native(arguments, seconds=60, input_file=None, output_file=None, maximum_bytes=1024 ** 2):
+    def native(arguments, seconds=60, input_file=None, output_file=None, maximum_bytes=1024 ** 2,
+               storage_directory=None, storage_maximum=None, server_work=False, closure_observer=False):
         nonlocal command_number
-        require(not cancellation_requested, 'PHYSICAL_BASE_CANCELLED')
+        require(not cancellation_requested or closure_observer, 'PHYSICAL_BASE_CANCELLED')
         source()
         command_number += 1
         token = options.operation_id + '-' + str(command_number)
         event({'phase': 'NATIVE_INTENT', 'token': token, 'seconds': seconds})
-        command = ['docker', 'exec', '-i', container_id, native_owner, str(seconds), token, *arguments]
+        application = 'sabalan-pgbase-' + hashlib.sha256(token.encode()).hexdigest()[:32]
+        command = ['docker', 'exec', '-i', '-e', 'PGAPPNAME=' + application]
+        if storage_directory is not None:
+            require(storage_directory == native_root + '/data' and isinstance(storage_maximum, int)
+                    and storage_maximum >= 1024, 'PHYSICAL_BASE_STORAGE_SCOPE_INVALID')
+            command += ['-e', 'SABALAN_NATIVE_STORAGE_ROOT=' + storage_directory,
+                        '-e', 'SABALAN_NATIVE_STORAGE_MAX_BYTES=' + str(storage_maximum),
+                        '-e', 'SABALAN_NATIVE_STORAGE_RESERVE_BYTES=' + str(1024 ** 3)]
+        command += [container_id, native_owner, str(seconds), token, *arguments]
         process = subprocess.Popen(command, stdin=input_file or subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         proven = False
+        server_closed = not server_work
         try:
             result = bytearray()
             errors_tail = bytearray()
@@ -189,7 +199,7 @@ def capture(options):
                         # Continue draining without storing after a host limit. The
                         # in-container subreaper enforces its own deadline and proves
                         # every descendant has exited before issuing its receipt.
-                        if cancellation_requested:
+                        if cancellation_requested and not closure_observer:
                             failure = 'PHYSICAL_BASE_CANCELLED'
                 status = process.wait()
                 receipt = ('\nSABALAN_NATIVE_REAPED ' + token + ' ' + str(status) + '\n').encode()
@@ -198,13 +208,45 @@ def capture(options):
                 proven = True
                 log.flush()
                 os.fsync(log.fileno())
+            if server_work and status != 0:
+                # A failed handshake may not yet expose application_name. No zero
+                # named-session count can prove that unknown server work is over.
+                uncertain('failed-postgres-client-' + token)
+            event({'phase': 'NATIVE_REAPED', 'token': token, 'status': status})
+            if server_work:
+                # Reaping libpq's client does not close a PostgreSQL backend that
+                # is still completing backup/checkpoint work. Observe the exact
+                # connection identity after a successful native client. Failed
+                # clients retain the uncertain hold above, including handshakes.
+                # The observation runs under this same EX9 ownership; an uncertain
+                # observer also retains that lock rather than certifying closure.
+                closure_deadline = time.monotonic() + 30
+                while True:
+                    import tempfile
+                    with tempfile.TemporaryFile() as sql:
+                        sql.write(("SET statement_timeout='5s';\nSELECT count(*) FROM pg_stat_activity WHERE application_name='"
+                                   + application + "';\n").encode())
+                        sql.seek(0)
+                        try:
+                            outstanding = native(['sh', '-c',
+                                'exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
+                                seconds=10, input_file=sql, closure_observer=True).decode().strip()
+                        except Exception:
+                            uncertain('postgres-closure-' + token)
+                    if outstanding == '0':
+                        server_closed = True
+                        event({'phase': 'POSTGRES_CONNECTION_CLOSED', 'token': token, 'applicationName': application})
+                        break
+                    if not re.fullmatch(r'[0-9]+', outstanding) or time.monotonic() >= closure_deadline:
+                        uncertain('postgres-closure-' + token)
+                    time.sleep(0.1)
+            require(status == 0, 'PHYSICAL_BASE_NATIVE_FAILED')
+            require(not failure, failure)
+            return bytes(result)
+
         finally:
-            if not proven:
+            if not proven or not server_closed:
                 uncertain(token)
-        event({'phase': 'NATIVE_REAPED', 'token': token, 'status': status})
-        require(status == 0, 'PHYSICAL_BASE_NATIVE_FAILED')
-        require(not failure, failure)
-        return bytes(result)
 
     def profile():
         query = """SELECT json_build_object('version',current_setting('server_version_num'),
@@ -218,7 +260,7 @@ def capture(options):
             sql.seek(0)
             result = json.loads(native(['sh', '-c',
                         'exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
-                        seconds=20, input_file=sql))
+                        seconds=20, input_file=sql, server_work=True))
         require(150000 <= int(result['version']) < 160000 and result['systemIdentifier'] == options.system_identifier
                 and result['tablespaces'] == 0 and 1 <= result['timeline'] <= 0xffffffff
                 and isinstance(result['clusterBytes'], int) and result['clusterBytes'] > 0, 'PHYSICAL_BASE_PROFILE_INVALID')
@@ -242,7 +284,7 @@ def capture(options):
         # maintenance boundary is changed. A WAL gap makes this capture fail.
         with archive.open('xb') as output:
             os.chmod(archive, 0o600)
-            native(command, seconds=1800, output_file=output, maximum_bytes=maximum_bytes)
+            native(command, seconds=1800, output_file=output, maximum_bytes=maximum_bytes, server_work=True)
             output.flush()
             os.fsync(output.fileno())
         source()
@@ -278,8 +320,10 @@ def capture(options):
                'archiveSha256': digest(archive), 'nativeRoot': native_root})
         native(['mkdir', '-m', '700', native_root + '/data'])
         with archive.open('rb') as tar_input:
-            native(['tar', '-xf', '-', '-C', native_root + '/data'], seconds=180, input_file=tar_input)
-        verified = native(['pg_verifybackup', native_root + '/data'], seconds=180)
+            native(['tar', '-xf', '-', '-C', native_root + '/data'], seconds=180, input_file=tar_input,
+                   storage_directory=native_root + '/data', storage_maximum=maximum_bytes)
+        verified = native(['pg_verifybackup', native_root + '/data'], seconds=180,
+                          storage_directory=native_root + '/data', storage_maximum=maximum_bytes)
         after = profile()
         require(after['systemIdentifier'] == before['systemIdentifier'] and after['timeline'] == before['timeline'], 'PHYSICAL_BASE_SOURCE_CHANGED')
         # The exact owned prefix and operation identity are fixed above. Failed

@@ -53,6 +53,31 @@ if (process.argv[2] === 'lost-move-owner') {
   })().catch(error => { console.error(error); process.exitCode = 1; });
 } else {
 
+test('private HR staging preserves exact receipts and refuses to certify erasure while retained versions exist', async () => {
+  const v = await fixture();
+  try {
+    const { createVersionedHiringFileTransaction } = require('./hrVersionedFileTransaction');
+    const files = createVersionedHiringFileTransaction(v.live, v.publisher);
+    const original = await v.publisher.publish('applicant.pdf', Buffer.from('PRIVATE HR DOCUMENT'));
+    const stage = await files.stage('applicant.pdf', 'deletion-operation', original);
+    assert.equal(fs.existsSync(path.join(v.live, 'applicant.pdf')), false);
+    const replacement = await v.publisher.publish('applicant.pdf', Buffer.from('NEW HR DOCUMENT'));
+    await assert.rejects(files.restore(stage), /FILE_VERSION_ALREADY_EXISTS/);
+    assert.equal(fs.readFileSync(path.join(v.live, 'applicant.pdf'), 'utf8'), 'NEW HR DOCUMENT');
+    await v.publisher.removeUpload('applicant.pdf', replacement);
+    const restored = await files.restore(stage);
+    const second = await files.stage('applicant.pdf', 'next-deletion-operation', restored.destinationVersionSha256);
+    const deleted = await files.commit(second);
+    assert.equal(deleted.physicalErasure, 'UNPROVEN');
+    assert.equal(deleted.status, 'LIVE_REMOVED_RETAINED_COPIES_PENDING');
+    assert.equal(fs.existsSync(path.join(v.live, '.deletion-trash/next-deletion-operation/applicant.pdf')), false);
+    assert.equal((await v.publisher.readVersion(original)).toString(), 'PRIVATE HR DOCUMENT');
+    assert.equal((await v.publisher.readVersion(second.stagedVersionSha256)).toString(), 'PRIVATE HR DOCUMENT');
+    await assert.rejects(files.commit(second), /FILE_VERSION_UPLOAD_CHANGED/);
+    v.lock(); await v.publisher.seal('c'.repeat(64), v.fd); v.unlock();
+  } finally { await v.close(); }
+});
+
 test('a version-bound move retains both histories and restores without clobbering a new file', async () => {
   const v = await fixture();
   try {
@@ -74,6 +99,28 @@ test('a version-bound move retains both histories and restores without clobberin
     assert.equal(await v.publisher.readVersion(restored.sourceVersionSha256), null);
     v.lock(); const cut = await v.publisher.seal('d'.repeat(64), v.fd); v.unlock();
     assert.equal(cut.manifest.heads.length, 2);
+  } finally { await v.close(); }
+});
+
+test('HR cleanup rejects another root, malformed receipts and stale staged replacements before changing any file', async () => {
+  const v = await fixture();
+  try {
+    const { createVersionedHiringFileTransaction } = require('./hrVersionedFileTransaction');
+    assert.throws(() => createVersionedHiringFileTransaction(v.root, v.publisher), /FILE_VERSION_STORAGE_ROOT_MISMATCH/);
+    const files = createVersionedHiringFileTransaction(v.live, v.publisher);
+    const original = await v.publisher.publish('applicant.pdf', Buffer.from('ORIGINAL HR FILE'));
+    const stage = await files.stage('applicant.pdf', 'operation', original);
+    await assert.rejects(files.restore({ ...stage, operationId: '../escape' }), /HR_FILE_STAGE_RECEIPT_INVALID/);
+    await assert.rejects(files.commit({ ...stage, extra: 'unknown' }), /HR_FILE_STAGE_RECEIPT_INVALID/);
+    await assert.rejects(files.stage('applicant.pdf', 'operation', 'invalid'), /HR_FILE_STAGE_RECEIPT_INVALID/);
+    const key = '.deletion-trash/operation/applicant.pdf';
+    const replacement = await v.publisher.publish(key, Buffer.from('LEGITIMATE STAGED REPLACEMENT'), { replace: true });
+    await assert.rejects(files.commit(stage), /FILE_VERSION_UPLOAD_CHANGED/);
+    await assert.rejects(files.restore(stage), /FILE_VERSION_MOVE_SOURCE_CHANGED/);
+    assert.equal(fs.readFileSync(path.join(v.live, key), 'utf8'), 'LEGITIMATE STAGED REPLACEMENT');
+    assert.equal((await v.publisher.readVersion(replacement)).toString(), 'LEGITIMATE STAGED REPLACEMENT');
+    assert.equal(fs.existsSync(path.join(v.live, 'applicant.pdf')), false);
+    assert.deepEqual(fs.readdirSync(path.join(v.store, 'pending')), []);
   } finally { await v.close(); }
 });
 

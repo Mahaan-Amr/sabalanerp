@@ -4,6 +4,8 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 ## Current foundation
 
+- The private HR document adapter now stages/restores/removes exact versioned files with immutable receipts and explicit retained-copy erasure status. Native stale-receipt/root/restore cases passed; durable domain cleanup-row and real route integration remain pending. See [HR storage evidence](../../reports/qa/hr-versioned-file-transaction-20261018.md).
+
 - Private two-key file relocation now preserves both claims through destination publication, source deletion history and a durable pair receipt. Actual interrupted-owner, capacity contention and stale-restore refusal passed alongside core/stream/upload/legacy regressions. HR routes and physical erasure remain pending. See [move evidence](../../reports/qa/versioned-file-move-20261018.md).
 
 - A private admitted file publisher now retains independent content before live publication/ACK, ordered replacement/deletion history and unresolved interruption holds. Its explicit Dispatch adapter, actual lost-Node refusal, cross-process capacity reservations and ten Linux tests passed, with frozen reviews and file/PDF regressions. Ordinary runtime construction is unchanged. The 10,000-head metadata cut still took 33 seconds when warm; a precomputed index, full writer/legacy/privacy coverage and native controller integration remain required. See [per-write file evidence](../../reports/qa/versioned-file-publication-20261018.md).

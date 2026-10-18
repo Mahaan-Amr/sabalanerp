@@ -98,7 +98,13 @@ export const createTemporaryConcurrencyDatabase = async (input: {
       let lastError: unknown;
       for (let attempt = 1; attempt <= 3; attempt += 1) {
         try {
-          compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${databaseName}' AND pid <> pg_backend_pid()"`);
+          const outstanding = compose(input.repositoryRoot,
+            `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = '${databaseName}') + (SELECT count(*) FROM pg_prepared_xacts WHERE database = '${databaseName}')"`).trim();
+          if (outstanding !== '0') {
+            throw new Error('Temporary database still has sessions or prepared transactions; preserving its data.');
+          }
+          // A new connection racing the census makes the ordinary DROP fail.
+          // Never terminate another client's unfinished work to finish a test.
           compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
           const remaining = compose(input.repositoryRoot,
             `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT count(*) FROM pg_database WHERE datname = '${databaseName}'"`).trim();

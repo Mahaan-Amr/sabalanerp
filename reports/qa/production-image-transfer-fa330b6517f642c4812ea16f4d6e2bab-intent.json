@@ -1,0 +1,17 @@
+{
+  "operation": "production-image-transfer-fa330b6517f642c4812ea16f4d6e2bab",
+  "sources": {
+    "transfer.cjs": "506b60208e7b69afe4d6d1c1bd689b8e28e2224b7bd518dc2c0f38b4c2272cc0",
+    "recoveryCrypto.cjs": "b9cd157fa5ac98a2bbe1c41e651d6de134304c005acafbfa2fff2a7161b5d99b",
+    "native-owner": "c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83"
+  },
+  "scope": "private image transfer through existing narrow SSHFS authority only",
+  "recordedSourceRestarts": [
+    {
+      "service": "backend",
+      "previousStartedAt": "2026-10-18T07:50:44.125797698Z",
+      "currentStartedAt": "2026-10-18T10:33:39.164573086Z"
+    }
+  ],
+  "freshSourceEvidence": "production-runtime-transfer-refusal-readonly-05400fa462b94d66a6d598d433ed0a50.json"
+}

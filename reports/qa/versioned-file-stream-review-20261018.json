@@ -1,0 +1,22 @@
+{
+  "head": "3d4443c2a9f7d6312dcba725930dcdf4016c22eb",
+  "sources": {
+    "backend/src/services/versionedFilePublication.ts": "cbc54d80eef74d6be955280741fb636995b35086e9ac973af4677140cd45ab9c",
+    "tests/online-deployment/versioned-file-stream.fixture.cjs": "829faa900181209dddf4495317a9ab7622d3a262e4f11e8310c16f9b41ecea70",
+    "scripts/run-versioned-file-stream-local.mjs": "2d279bc2f03ee5d982f876ffc5c9f7591bc38fadc52240cd92f76b19b3285faf"
+  },
+  "dependencies": {
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "backend/src/services/durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a",
+    "deploy/scripts/recovery-versioned-files.py": "2bc671d85b956666018d67b5987b774111c2e5b1b4078ed0cae96605ef04f99f",
+    "tests/online-deployment/versioned-file-reader.worker.py": "a1e3ee1f5a9573a86e0a2a712bd87ac6823ae52c073598968139a33bd7edc734"
+  },
+  "patchSha256": "6b175cbf19a8cd49a395cacdfd54b1bcbe1accae24a36ffc405481a9c9a7cdbb",
+  "nativeReport": "versioned-file-stream-b0b5898c9e45c20e9ec8df257dedeaa2.json",
+  "redMissingApi": "versioned-file-stream-a729467a517dfced57009be4579a567a.failed.json",
+  "redCloseFailure": "versioned-file-stream-eb967e79455128259b6e92df1f1e96e9.failed.json",
+  "retainedCloseFailureSource": "versioned-file-stream-source-pre-close.ts.txt",
+  "scope": "admitted per-write stream publication; exact existing version schema, no startup/controller/role/retention changes",
+  "remaining": "ten existing Buffer/capacity native regressions running; HTTP/file/PDF companion regressions and strict typecheck pending"
+}

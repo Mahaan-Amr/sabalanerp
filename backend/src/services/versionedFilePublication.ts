@@ -3,12 +3,14 @@ import * as nativeFs from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { RuntimeWorkContext } from './runtimeWorkContext';
-import { publishDurableFile, removeDurableFile, syncExistingDurableFile } from './durableFilePublication';
+import { publishDurableFile, publishDurableStream, removeDurableFile, syncExistingDurableFile } from './durableFilePublication';
 
 type Identity = { device: string; inode: string; bytes: string; modified: string; changed: string };
 type Version = { format: 'sabalan-file-version/v1'; key: string; generation: number; previousSha256: string | null;
   operation: 'PUT' | 'DELETE'; object: { name: string; sha256: string; bytes: number } | null; live: Identity | null };
+type StreamInput = { source: Readable; assertReady(): void; finish(): Promise<void> };
 const hash = (data: Uint8Array | string) => createHash('sha256').update(data).digest('hex');
 const shaPattern = /^[a-f0-9]{64}$/;
 const fail = (code: string): never => { throw Object.assign(new Error(code), { code }); };
@@ -229,12 +231,59 @@ export class VersionedFilePublication {
     return this.change(key, frozen, replace);
   }
 
+  /** Takes ownership of this input stream immediately. Observe errors before
+   * asynchronous admission; no source bytes are consumed before admission.
+   * Admitted cleanup remains inside the same actual completion reference. */
+  publishStream(key: string, source: Readable, options: { replace?: boolean } = {}): Promise<string> {
+    if (!(source instanceof Readable)) return Promise.reject(Object.assign(new Error('FILE_VERSION_SOURCE_INVALID'), {
+      code: 'FILE_VERSION_SOURCE_INVALID',
+    }));
+    const replace = options.replace === true;
+    let sourceError: unknown = source.errored, entered = false;
+    const observe = (error: unknown) => { sourceError ||= error; };
+    source.on('error', observe); source.pause();
+    const closeInput = async () => {
+      source.destroy();
+      // finished() can resolve on EOF when emitClose=false. Readable.closed
+      // becomes true only after the actual _destroy callback has completed.
+      // Unknown completion keeps admitted work held, without a timeout reset.
+      while (!source.closed) await new Promise(resolve => setTimeout(resolve, 5));
+      // Drain scheduled error/close emissions before detaching our observer,
+      // including a synchronous _destroy callback reached from a microtask.
+      await new Promise<void>(resolve => setImmediate(resolve));
+      if (source.errored) throw source.errored;
+      if (sourceError) throw sourceError;
+    };
+    const dispose = async () => {
+      try {
+        try { await closeInput(); }
+        catch (error) {
+          // Actual destruction is now complete. A known input failure was
+          // already reported before any live publication or intent completion.
+          if (error !== sourceError && error !== source.errored) throw error;
+        }
+      } finally { source.removeListener('error', observe); }
+    };
+    return this.work.run(async () => {
+      entered = true;
+      try {
+        return await this.change(key, { source, assertReady: () => { if (sourceError) throw sourceError; },
+          finish: async () => {
+            // EOF alone is not native input completion. A failed/unresolved
+            // close must leave the existing intent before any live mutation.
+            await closeInput();
+          } }, replace);
+      } finally { await dispose(); }
+    }).finally(async () => { if (!entered) await dispose(); });
+  }
+
   remove(key: string) { return this.change(key, null, true); }
 
-  private change(key: string, bytes: Buffer | null, replace: boolean): Promise<string> {
+  private change(key: string, bytes: Buffer | StreamInput | null, replace: boolean): Promise<string> {
     const { id, target } = this.key(key);
     return this.work.run(async () => {
       this.work.assertActive(); await this.assertDirectories();
+      if (bytes !== null && !Buffer.isBuffer(bytes)) bytes.assertReady();
       // Even an old QUIESCENT journal cannot settle an interrupted file intent.
       const pending = path.join(this.root, 'pending', id + '.json');
       const held = await fs.open(pending, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o400);
@@ -270,14 +319,41 @@ export class VersionedFilePublication {
       this.work.assertActive();
       if (bytes !== null) {
         const name = randomUUID(), objectPath = path.join(this.root, 'objects', name);
-        await publishDurableFile(objectPath, bytes);
-        await fs.chmod(objectPath, 0o400); await syncExistingDurableFile(objectPath);
-        if (!(await readImmutable(objectPath, bytes.length)).equals(bytes)) fail('FILE_VERSION_OBJECT_CHANGED');
-        object = { name, bytes: bytes.length, sha256: hash(bytes) };
-        this.work.assertActive(); await this.assertDirectories();
-        await publishDurableFile(target, bytes, { replace });
+        if (Buffer.isBuffer(bytes)) {
+          await publishDurableFile(objectPath, bytes);
+          await fs.chmod(objectPath, 0o400); await syncExistingDurableFile(objectPath);
+          if (!(await readImmutable(objectPath, bytes.length)).equals(bytes)) fail('FILE_VERSION_OBJECT_CHANGED');
+          object = { name, bytes: bytes.length, sha256: hash(bytes) };
+          this.work.assertActive(); await this.assertDirectories();
+          await publishDurableFile(target, bytes, { replace });
+        } else {
+          const digest = createHash('sha256'), work = this.work, input = bytes;
+          let byteLength = 0;
+          async function* frozenChunks() {
+            for await (const chunk of input.source) {
+              work.assertActive(); input.assertReady();
+              const frozen = Buffer.from(chunk); byteLength += frozen.length;
+              if (!Number.isSafeInteger(byteLength)) fail('FILE_VERSION_OBJECT_TOO_LARGE');
+              digest.update(frozen); yield frozen;
+            }
+            input.assertReady();
+          }
+          const published = await publishDurableStream(objectPath, Readable.from(frozenChunks(), {
+            objectMode: false, highWaterMark: 262144,
+          }));
+          if (published.byteLength !== byteLength) fail('FILE_VERSION_OBJECT_CHANGED');
+          await fs.chmod(objectPath, 0o400); await syncExistingDurableFile(objectPath);
+          await input.finish();
+          object = { name, bytes: published.byteLength, sha256: digest.digest('hex') };
+          this.work.assertActive(); await this.assertDirectories();
+          // Read back the separately persisted object while staging the live
+          // copy. Its full hash/identity must match before atomic publication.
+          await publishDurableStream(target, Readable.from(this.objectChunks(objectPath, object), {
+            objectMode: false, highWaterMark: 262144,
+          }), { replace });
+        }
         live = await this.current(target);
-        if (!live || live.bytes !== String(bytes.length)) fail('FILE_VERSION_LIVE_CHANGED');
+        if (!live || live.bytes !== String(object.bytes)) fail('FILE_VERSION_LIVE_CHANGED');
       } else {
         const removed = await removeDurableFile(target);
         if (removed !== Boolean(actual) || await this.current(target) !== null) fail('FILE_VERSION_LIVE_CHANGED');
@@ -299,6 +375,28 @@ export class VersionedFilePublication {
       await fs.unlink(pending); await syncDirectory(path.dirname(pending));
       return sha256;
     });
+  }
+
+  private async *objectChunks(file: string, object: NonNullable<Version['object']>) {
+    const descriptor = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const before = await descriptor.stat({ bigint: true });
+      if (!before.isFile() || before.nlink !== 1n || before.uid !== BigInt(process.getuid!())
+        || (before.mode & 0o222n) || before.size !== BigInt(object.bytes)) fail('FILE_VERSION_OBJECT_CHANGED');
+      const digest = createHash('sha256'); let count = 0;
+      for (;;) {
+        this.work.assertActive();
+        const chunk = Buffer.alloc(262144), { bytesRead } = await descriptor.read(chunk, 0, chunk.length, null);
+        if (!bytesRead) break;
+        count += bytesRead;
+        if (count > object.bytes) fail('FILE_VERSION_OBJECT_CHANGED');
+        const bytes = chunk.subarray(0, bytesRead); digest.update(bytes); yield bytes;
+      }
+      if (count !== object.bytes || digest.digest('hex') !== object.sha256
+        || !same(identity(before), identity(await descriptor.stat({ bigint: true })))
+        || !same(identity(before), identity(await fs.lstat(file, { bigint: true })))) fail('FILE_VERSION_OBJECT_CHANGED');
+      await descriptor.sync(); await this.assertDirectories();
+    } finally { await descriptor.close(); }
   }
 
   async readVersion(sha256: string): Promise<Buffer | null> {

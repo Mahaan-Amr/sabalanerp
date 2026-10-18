@@ -64,7 +64,11 @@ Evidence:
 - [Final signal-free closure](failed-base-closure-8ae28338850c4adf802757bc56055c6a.json).
 
 Frozen public controllers and both shell revisions are retained in
-`production-base-private-orchestrators-20261018/`. This proves a restored
+`production-base-private-orchestrators-20261018/`. Its
+[exact-byte bundle](production-base-private-orchestrators-20261018/exact-source-bytes.json)
+preserves original source bytes and SHA-256 values independently of Git text
+line-ending normalization. Readable `.txt` copies remain for inspection. These
+are one-use evidence sources, not release authority. This proves a restored
 production **database component**. Continuous WAL after the base, coherent
 business files, Inquiry/coordination/privacy state, the current application
 image set and full application restore remain required. No new healthy

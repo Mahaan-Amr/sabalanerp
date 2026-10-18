@@ -1,0 +1,52 @@
+import pathlib,json,base64,hashlib,uuid,subprocess
+repo=pathlib.Path('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp');op='derived-base-mount-qa-'+uuid.uuid4().hex
+files={}
+for name,source in [('cleanup.py','retire-closed-production-base-derived-files-20261018.py'),('mount_guard.py','closed-base-mount-guard-20261018.py'),('fixture.py','closed-base-mount-guard.fixture.py')]:
+ b=pathlib.Path('D:/sabalanerp-online-qa',source).read_bytes();files[name]={'bytes':base64.b64encode(b).decode(),'sha256':hashlib.sha256(b).hexdigest()}
+spec={'operation':op,'files':files}
+remote=r'''import os,pathlib,fcntl,stat,json,subprocess,hashlib,base64,time
+P=pathlib.Path;spec=json.loads(INPUT);os.umask(0o077);private=P('/root/sabalan-recovery-private');qa=private/'native-qa';root=qa/spec['operation'];control=root/'control';active=qa/'derived-mount-regression-active.json';started=False;closed=False
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def write(p,b):
+ with p.open('xb') as f:os.fchmod(f.fileno(),0o400);f.write(b);f.flush();os.fsync(f.fileno())
+ sync(p.parent)
+def save(p,v):write(p,json.dumps(v,indent=2).encode())
+try:
+ for p in [private,qa]:require(p.resolve(strict=True)==p and p.stat().st_uid==0 and not p.stat().st_mode&0o022,'ROOT_UNSAFE')
+ descriptors=[]
+ for p,target,device,inode in [(private/'drill-ownership.lock',9,64513,13050),(P('/run/lock/sabalan-backup-storage.lock'),8,29,6)]:
+  s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode&0o022 and (s.st_dev,s.st_ino)==(device,inode),'ORIGINAL_LOCK_CHANGED')
+  fd=os.open(p,os.O_RDWR|os.O_NOFOLLOW);require((os.fstat(fd).st_dev,os.fstat(fd).st_ino)==(device,inode),'LOCK_RACE');saved=fcntl.fcntl(fd,fcntl.F_DUPFD_CLOEXEC,20);os.close(fd);descriptors.append((saved,target))
+ for fd,target in descriptors:os.dup2(fd,target,inheritable=True);fcntl.flock(target,fcntl.LOCK_EX|fcntl.LOCK_NB)
+ for parent in [private,qa]:
+  for n in ['production-base-active.json','coherent-component-active.json','derived-base-cleanup-active.json','derived-mount-regression-active.json']:require(not os.path.lexists(parent/n),'ACTIVE_DRILL_EXISTS')
+ owner=qa/'native-owner-storage-final-20261017/owner';require(hashlib.sha256(owner.read_bytes()).hexdigest()=='c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83','OWNER_CHANGED')
+ root.mkdir(mode=0o700);control.mkdir(mode=0o700);sync(root);sync(qa)
+ for n,f in spec['files'].items():
+  b=base64.b64decode(f['bytes'],validate=True);require(hashlib.sha256(b).hexdigest()==f['sha256'],'SOURCE_HASH_CHANGED');write(control/n,b)
+ intent={'operation':spec['operation'],'root':str(root),'pid':os.getpid(),'startTicks':P('/proc/self/stat').read_text().rsplit(') ',1)[1].split()[19],'bootId':P('/proc/sys/kernel/random/boot_id').read_text().strip(),'phase':'ISOLATED_MOUNT_GUARD_FIXTURE','productionDataUsed':False};save(active,intent);started=True
+ env=dict(os.environ,SABALAN_NATIVE_STORAGE_ROOT=str(control),SABALAN_NATIVE_STORAGE_MAX_BYTES=str(64*1024**2),SABALAN_NATIVE_STORAGE_RESERVE_BYTES=str(1024**3))
+ p=subprocess.Popen([str(owner),'300',spec['operation'],'python3','-I','-B',str(control/'fixture.py'),str(control)],env=env,pass_fds=(9,8),stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+ save(control/'native-start.json',{'pid':p.pid,'startTicks':P('/proc/'+str(p.pid)+'/stat').read_text().rsplit(') ',1)[1].split()[19],'bootId':intent['bootId']})
+ output=bytearray()
+ with (control/'native.log').open('xb') as log:
+  while chunk:=p.stdout.read(65536):
+   require(len(output)+len(chunk)<=1024**2,'NATIVE_OUTPUT_BOUND');output.extend(chunk);log.write(chunk)
+  status=p.wait();log.flush();os.fsync(log.fileno())
+ require(output.endswith(('\nSABALAN_NATIVE_REAPED '+spec['operation']+' '+str(status)+'\n').encode()),'NATIVE_CLOSURE_UNPROVEN')
+ result={'operation':spec['operation'],'root':str(root),'nativeExitCode':status,'nativeClosureVerified':True,'output':output.decode(),'sources':{n:f['sha256'] for n,f in spec['files'].items()},'productionDataUsed':False,'publicOnlineAdmission':False};save(control/'native-proof.json',result)
+ require(json.loads(active.read_text())==intent,'INTENT_CHANGED');os.rename(active,control/'closed-owner-intent.json');sync(control);sync(qa);closed=True;print(json.dumps(result));raise SystemExit(status)
+except BaseException:
+ if started and not closed:
+  while True:time.sleep(1)
+ raise
+'''.replace('INPUT',repr(json.dumps(spec)))
+if __name__=='__main__':
+ (repo/('reports/qa/'+op+'-intent.json')).write_text(json.dumps({'operation':op,'sources':{n:f['sha256'] for n,f in files.items()},'scope':'private same-device mount sentinel fixture only'},indent=2)+'\n')
+ r=subprocess.run(['ssh','-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=15','root@94.182.177.74','python3 -B -'],input=remote,text=True,capture_output=True)
+ result={'sshExitCode':r.returncode,'stdout':r.stdout,'stderr':r.stderr};(repo/('reports/qa/'+op+'.json')).write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result));raise SystemExit(r.returncode)

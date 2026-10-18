@@ -73,5 +73,7 @@ production **database component**. Continuous WAL after the base, coherent
 business files, Inquiry/coordination/privacy state, the current application
 image set and full application restore remain required. No new healthy
 production recovery point, online release, DDL admission or traffic switch was
-published. The successful diagnostic container is stopped and retained pending
-its next explicit retirement/recovery step.
+published. The diagnostic container was initially stopped and retained. Its
+subsequent explicit retirement and derived-copy cleanup are documented in
+[the scoped retirement report](closed-base-derived-retirement-20261018.md);
+the original base, encrypted backup and restoration evidence remain retained.

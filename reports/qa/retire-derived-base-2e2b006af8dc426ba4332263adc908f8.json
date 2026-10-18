@@ -1,0 +1,5 @@
+{
+  "sshExitCode": 1,
+  "stdout": "",
+  "stderr": "  File \"<stdin>\", line 69\n    for name in ['pgdata','restore-input.tar']:\n                                               ^\nSyntaxError: invalid syntax. Perhaps you forgot a comma?\n"
+}

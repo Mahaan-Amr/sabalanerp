@@ -1,0 +1,89 @@
+"""Fixed cleanup of four derived test copies; original recovery evidence stays."""
+import json,os,pathlib,stat,shutil,hashlib,subprocess,sys,types
+P=pathlib.Path;root=P(sys.argv[1]);plan=json.loads((root/'cleanup-plan.json').read_text());work=P(plan['work'])
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def stat_identity(p):
+ s=p.lstat();require(p.resolve(strict=True)==p,'TARGET_ALIAS');return [s.st_dev,s.st_ino,s.st_uid,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
+def conflicts(targets):
+ for proc in P('/proc').iterdir():
+  if not proc.name.isdigit():continue
+  try: descriptors=[proc/'fd'/name for name in os.listdir(proc/'fd')]
+  except FileNotFoundError: continue
+  for entry in [proc/'cwd',proc/'root',*descriptors]:
+   try:value=os.readlink(entry).removesuffix(' (deleted)')
+   except FileNotFoundError:continue
+   if any(value==str(t) or value.startswith(str(t)+'/') for t in targets):raise RuntimeError('DERIVED_TARGET_IN_USE')
+ ids=subprocess.check_output(['docker','ps','-aq','--no-trunc'],text=True).split()
+ rows=json.loads(subprocess.check_output(['docker','inspect',*ids],text=True)) if ids else []
+ for row in rows:
+  for mount in row['Mounts']:
+   source=mount.get('Source','')
+   require(not any(source==str(t) or source.startswith(str(t)+'/') or (source and str(t).startswith(source+'/')) for t in targets),'DERIVED_TARGET_CONTAINER_REFERENCE')
+def remove_directory(parent,name,expected):
+ # Python 3.10 has no shutil.rmtree(dir_fd=...). Keep every traversal and
+ # unlink relative to already opened directories with no-follow identities.
+ descriptor=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
+ try:
+  opened=os.fstat(descriptor);require([opened.st_dev,opened.st_ino]==expected[:2],'DIRECTORY_OPEN_IDENTITY_CHANGED')
+  for child in os.listdir(descriptor):
+   value=os.stat(child,dir_fd=descriptor,follow_symlinks=False)
+   require(value.st_dev==opened.st_dev and not value.st_mode&0o022,'DERIVED_ENTRY_UNSAFE')
+   if stat.S_ISDIR(value.st_mode):remove_directory(descriptor,child,[value.st_dev,value.st_ino])
+   else:
+    require(stat.S_ISREG(value.st_mode) and value.st_nlink==1,'DERIVED_FILE_ALIAS')
+    file=os.open(child,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=descriptor)
+    try:
+     actual=os.fstat(file);named=os.stat(child,dir_fd=descriptor,follow_symlinks=False)
+     require(stat.S_ISREG(actual.st_mode) and actual.st_nlink==1 and (actual.st_dev,actual.st_ino)==(value.st_dev,value.st_ino)==(named.st_dev,named.st_ino),'FILE_UNLINK_IDENTITY_CHANGED')
+     os.unlink(child,dir_fd=descriptor);os.fsync(descriptor)
+    finally:os.close(file)
+  os.fsync(descriptor);named=os.stat(name,dir_fd=parent,follow_symlinks=False)
+  require(stat.S_ISDIR(named.st_mode) and (named.st_dev,named.st_ino)==(opened.st_dev,opened.st_ino),'DIRECTORY_UNLINK_IDENTITY_CHANGED')
+  os.rmdir(name,dir_fd=parent);os.fsync(parent)
+ finally:os.close(descriptor)
+require(all(fn in os.supports_dir_fd for fn in [os.open,os.stat,os.unlink,os.rmdir]) and os.listdir in os.supports_fd,'DIRECTORY_FD_OPERATIONS_REQUIRED')
+require(work.resolve(strict=True)==work and root.parent==work and root.resolve(strict=True)==root,'CLEANUP_ROOT_INVALID')
+require(len(plan['targets'])==4,'TARGET_SET_INVALID')
+targets=[P(v['path']) for v in plan['targets']]
+allowed={work/n/f for n in ['native-production-base-ebbdac10f1914036827d94e7069d8c01','native-production-base-98b8b8d122ff42b990376b69eba155f9'] for f in ['pgdata','restore-input.tar']}
+require(set(targets)==allowed,'CLEANUP_TARGETS_NOT_FIXED')
+require(sys.flags.optimize==0,'UNOPTIMIZED_MOUNT_GUARD_REQUIRED')
+guard_bytes=(root/'mount_guard.py').read_bytes()
+require(hashlib.sha256(guard_bytes).hexdigest()=='165101a51ecc00db4b12ff65a5b2fe55f7037b4407ccdde5e799afa7bda54cd7','MOUNT_GUARD_SOURCE_CHANGED')
+guard=types.ModuleType('frozen_cleanup_mount_guard');exec(compile(guard_bytes,str(root/'mount_guard.py'),'exec'),guard.__dict__)
+namespace_before=os.readlink('/proc/self/ns/mnt');guard.isolate_mount_namespace()
+require(os.readlink('/proc/self/ns/mnt')!=namespace_before,'MOUNT_NAMESPACE_NOT_ISOLATED')
+for line in P('/proc/self/mountinfo').read_text().splitlines():
+ fields=line.split(' ');require(not any(field.startswith(('shared:','master:','propagate_from:')) for field in fields[6:fields.index('-')]),'MOUNT_PROPAGATION_NOT_PRIVATE')
+for target,item in zip(targets,plan['targets']):
+ require(stat_identity(target)==item['identity'] and target.parent.parent==work,'TARGET_IDENTITY_CHANGED')
+ guard.assert_no_nested_mounts(target)
+ require(not (target.parent/'pgdata/postmaster.pid').exists(),'POSTGRES_PID_REMAINS')
+ # Inventory aliases, devices and hardlinks before recursive removal. These
+ # are independently restored copies, never a live source or checkpoint.
+ if target.name=='pgdata':
+  require(target.is_dir() and target.stat().st_uid==70,'PGDATA_TYPE_CHANGED')
+  device=target.stat().st_dev;members=0
+  for current,dirs,files in os.walk(target,followlinks=False):
+   for name in dirs+files:
+    members+=1;require(members<=250000,'DERIVED_TREE_BOUND');value=P(current)/name;s=value.lstat();require(s.st_dev==device and (stat.S_ISREG(s.st_mode) or stat.S_ISDIR(s.st_mode)) and (not stat.S_ISREG(s.st_mode) or s.st_nlink==1),'DERIVED_TREE_ALIAS')
+ else:require(target.is_file() and target.stat().st_nlink==1,'INPUT_TYPE_CHANGED')
+conflicts(targets)
+removed=[]
+for target,item in zip(targets,plan['targets']):
+ conflicts([target]);guard.assert_no_nested_mounts(target);require(stat_identity(target)==item['identity'],'TARGET_CHANGED_BEFORE_DELETE')
+ parent=os.open(target.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ try:
+  parent_stat=os.fstat(parent);require(os.path.realpath(target.parent)==str(target.parent) and [parent_stat.st_dev,parent_stat.st_ino]==item['parentIdentity'],'TARGET_PARENT_CHANGED')
+  named=os.stat(target.name,dir_fd=parent,follow_symlinks=False);require([named.st_dev,named.st_ino,named.st_uid,named.st_size,named.st_mtime_ns,named.st_ctime_ns]==item['identity'],'TARGET_CHANGED_AT_UNLINK')
+  if target.name=='pgdata':remove_directory(parent,target.name,item['identity'])
+  else:os.unlink(target.name,dir_fd=parent)
+  os.fsync(parent)
+ finally:os.close(parent)
+ require(not os.path.lexists(target),'TARGET_NOT_REMOVED');removed.append(str(target))
+print(json.dumps({'removedDerivedCopies':removed,'healthyApplicationPoint':False,'publicOnlineAdmission':False}))

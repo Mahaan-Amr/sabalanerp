@@ -1,0 +1,12 @@
+file:///D:/sabalanerp-online-qa/run-private-image-custody-local-20261018.mjs:57
+    : reject(Error('VERSIONED_FILE_PUBLICATION_NATIVE_FIXTURE_FAILED ' + JSON.stringify({ code, signal, stdout, stderr, directory }))));
+             ^
+
+Error: VERSIONED_FILE_PUBLICATION_NATIVE_FIXTURE_FAILED {"code":1,"signal":null,"stdout":"","stderr":"AssertionError [ERR_ASSERTION]: Expected \"actual\" to be strictly unequal to: 0\n    at /app/online-runtime-acceptance/private-image-custody-27ae63d4b4a66b1d795bc1e007f81490/fixture.cjs:19:46 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 0,\n  expected: 0,\n  operator: 'notStrictEqual',\n  diff: 'simple'\n}\n","directory":"/app/online-runtime-acceptance/private-image-custody-27ae63d4b4a66b1d795bc1e007f81490"}
+    at ChildProcess.<anonymous> (file:///D:/sabalanerp-online-qa/run-private-image-custody-local-20261018.mjs:57:14)
+    at Object.onceWrapper (node:events:639:26)
+    at ChildProcess.emit (node:events:524:28)
+    at maybeClose (node:internal/child_process:1101:16)
+    at ChildProcess._handle.onexit (node:internal/child_process:304:5)
+
+Node.js v22.13.0

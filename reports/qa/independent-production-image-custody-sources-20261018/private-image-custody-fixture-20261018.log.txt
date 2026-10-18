@@ -1,0 +1,12 @@
+file:///D:/sabalanerp-online-qa/run-private-image-custody-local-20261018.mjs:57
+    : reject(Error('VERSIONED_FILE_PUBLICATION_NATIVE_FIXTURE_FAILED ' + JSON.stringify({ code, signal, stdout, stderr, directory }))));
+             ^
+
+Error: VERSIONED_FILE_PUBLICATION_NATIVE_FIXTURE_FAILED {"code":1,"signal":null,"stdout":"","stderr":"Error: At least two uniquely identified recovery recipients are required.\n    at Object.encryptRecoveryArchiveForRecipients (/app/online-runtime-acceptance/private-image-custody-2d0dd2835ab65d9a650d2a260a5191b7/recoveryCrypto.cjs:91:29)\n    at setup (/app/online-runtime-acceptance/private-image-custody-2d0dd2835ab65d9a650d2a260a5191b7/fixture.cjs:10:67)\n    at /app/online-runtime-acceptance/private-image-custody-2d0dd2835ab65d9a650d2a260a5191b7/fixture.cjs:15:19\n    at Object.<anonymous> (/app/online-runtime-acceptance/private-image-custody-2d0dd2835ab65d9a650d2a260a5191b7/fixture.cjs:40:3)\n    at Module._compile (node:internal/modules/cjs/loader:1781:14)\n    at Object..js (node:internal/modules/cjs/loader:1913:10)\n    at Module.load (node:internal/modules/cjs/loader:1505:32)\n    at Function._load (node:internal/modules/cjs/loader:1309:12)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5) {\n  code: 'RECOVERY_RECIPIENTS_INVALID'\n}\n","directory":"/app/online-runtime-acceptance/private-image-custody-2d0dd2835ab65d9a650d2a260a5191b7"}
+    at ChildProcess.<anonymous> (file:///D:/sabalanerp-online-qa/run-private-image-custody-local-20261018.mjs:57:14)
+    at Object.onceWrapper (node:events:639:26)
+    at ChildProcess.emit (node:events:524:28)
+    at maybeClose (node:internal/child_process:1101:16)
+    at ChildProcess._handle.onexit (node:internal/child_process:304:5)
+
+Node.js v22.13.0

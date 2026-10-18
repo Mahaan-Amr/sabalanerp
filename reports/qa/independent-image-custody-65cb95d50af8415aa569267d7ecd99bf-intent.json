@@ -1,0 +1,10 @@
+{
+  "operation": "independent-image-custody-65cb95d50af8415aa569267d7ecd99bf",
+  "transferOperation": "production-image-transfer-fa330b6517f642c4812ea16f4d6e2bab",
+  "sources": {
+    "custody.py": "0dfbcfea89308af0ee235a31f21cb14bea0356e9778cc8af139724161854f04b",
+    "decrypt-images.cjs": "79e50b535fe5019d48791225fbda33e6a1503f5594a73970429afba000347c2c",
+    "recoveryCrypto.cjs": "b9cd157fa5ac98a2bbe1c41e651d6de134304c005acafbfa2fff2a7161b5d99b"
+  },
+  "scope": "private independent image custody and RSA decrypt; no deletion, import or admission"
+}

@@ -1,0 +1,40 @@
+import pathlib,tempfile,os,hashlib,json,importlib.util,ctypes
+P=pathlib.Path
+spec=importlib.util.spec_from_file_location('retire',P(__file__).parent/'retire.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+root=P(tempfile.mkdtemp(prefix='fixture-',dir=P(__file__).parent));os.chmod(root,0o700)
+def file(name,data=b'unchanged'):
+ p=root/name;p.write_bytes(data);os.chmod(p,0o400);return p
+def plan(p):
+ s=p.lstat();ps=p.parent.stat();return {'path':str(p),'identity':m.identity(s),'parentIdentity':[ps.st_dev,ps.st_ino],'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
+a,b=file('positive-a'),file('positive-b');assert m.retire_files([plan(a),plan(b)])==[str(a),str(b)] and not a.exists() and not b.exists()
+p=file('held-fd');item=plan(p);fd=os.open(p,os.O_RDONLY)
+try:
+ try:m.retire_files([item]);raise AssertionError('HELD_FD_ACCEPTED')
+ except RuntimeError as e:assert str(e)=='DERIVED_OPEN_REFERENCE'
+finally:os.close(fd)
+assert p.read_bytes()==b'unchanged'
+p=file('mapped',b'x'*4096);fd=os.open(p,os.O_RDWR)
+libc=ctypes.CDLL(None,use_errno=True);libc.mmap.argtypes=[ctypes.c_void_p,ctypes.c_size_t,ctypes.c_int,ctypes.c_int,ctypes.c_int,ctypes.c_long];libc.mmap.restype=ctypes.c_void_p;libc.munmap.argtypes=[ctypes.c_void_p,ctypes.c_size_t];libc.munmap.restype=ctypes.c_int
+mapping=libc.mmap(None,4096,3,1,fd,0);assert mapping!=ctypes.c_void_p(-1).value;os.close(fd);item=plan(p)
+for ref in P('/proc/self/fd').iterdir():
+ try:value=ref.stat()
+ except FileNotFoundError:continue
+ assert (value.st_dev,value.st_ino)!=(p.stat().st_dev,p.stat().st_ino)
+try:
+ try:m.retire_files([item]);raise AssertionError('MAPPED_FILE_ACCEPTED')
+ except RuntimeError as e:assert str(e)=='DERIVED_MAPPED_REFERENCE'
+finally:assert libc.munmap(mapping,4096)==0
+assert p.read_bytes()==b'x'*4096
+p=file('changed-hash');item=plan(p);item['sha256']='0'*64
+try:m.retire_files([item]);raise AssertionError('WRONG_HASH_ACCEPTED')
+except RuntimeError as e:assert str(e)=='DERIVED_BYTES_CHANGED'
+assert p.read_bytes()==b'unchanged'
+original=file('foreign');link=root/'symlink';link.symlink_to(original);item=plan(link)
+try:m.retire_files([item]);raise AssertionError('SYMLINK_ACCEPTED')
+except RuntimeError as e:assert str(e)=='UNSAFE_DERIVED_FILE'
+assert original.read_bytes()==b'unchanged' and link.is_symlink()
+p=file('hardlink');os.link(p,root/'hardlink-alias');item=plan(p)
+try:m.retire_files([item]);raise AssertionError('HARDLINK_ACCEPTED')
+except RuntimeError as e:assert str(e)=='UNSAFE_DERIVED_FILE'
+assert p.read_bytes()==b'unchanged'
+print('DERIVED_RETIREMENT_FIXTURE_PASS: exact positive files; live FD; closed-FD writable mapping; wrong bytes; symlink; hardlink refusals preserve all sentinels.')

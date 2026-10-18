@@ -1,0 +1,111 @@
+"""One-use retirement of fixed redundant private copies, never checkpoint bytes."""
+import os,stat,pathlib,hashlib,json,re,sys,types,subprocess
+P=pathlib.Path
+
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def identity(s):return [s.st_dev,s.st_ino,s.st_uid,s.st_size,s.st_mtime_ns,s.st_ctime_ns,s.st_nlink]
+def regular(p,owners):
+ s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISREG(s.st_mode) and s.st_uid in owners and s.st_nlink==1 and not s.st_mode&0o022,'UNSAFE_DERIVED_FILE');return s
+def sha(p,owners={0}):
+ before=regular(p,owners);h=hashlib.sha256();fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+ try:
+  actual=os.fstat(fd);require(identity(actual)==identity(before),'OPEN_FILE_CHANGED')
+  while b:=os.read(fd,1024*1024):h.update(b)
+  require(identity(os.fstat(fd))==identity(before)==identity(p.lstat()),'HASHED_FILE_CHANGED')
+ finally:os.close(fd)
+ return h.hexdigest()
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def occupied(nodes):
+ procs=list(P('/proc').iterdir());procs.sort(key=lambda p:p.name!=str(os.getpid()))
+ for proc in procs:
+  if not proc.name.isdecimal():continue
+  try:refs=[proc/'cwd',proc/'root',*list((proc/'fd').iterdir())]
+  except FileNotFoundError:continue
+  for ref in refs:
+   try:s=ref.stat()
+   except (FileNotFoundError,ProcessLookupError):continue
+   require((s.st_dev,s.st_ino) not in nodes,'DERIVED_OPEN_REFERENCE')
+  try:
+   with (proc/'maps').open('rb') as f:raw=f.read(16*1024*1024+1)
+  except (FileNotFoundError,ProcessLookupError):continue
+  require(len(raw)<=16*1024*1024,'PROCESS_MAPS_UNBOUNDED')
+  for line in raw.splitlines():
+   parts=line.split(None,5)
+   if len(parts)<5:continue
+   major,minor=parts[3].split(b':');node=(os.makedev(int(major,16),int(minor,16)),int(parts[4]))
+   require(node not in nodes,'DERIVED_MAPPED_REFERENCE')
+def retire_files(items):
+ # All proof/expected hashes must be resolved before this function is called.
+ nodes={(v['identity'][0],v['identity'][1]) for v in items}
+ occupied(nodes)
+ for item in items:
+  p=P(item['path']);require(identity(regular(p,{item['identity'][2]}))==item['identity'],'DERIVED_IDENTITY_CHANGED')
+  require(sha(p,{item['identity'][2]})==item['sha256'],'DERIVED_BYTES_CHANGED')
+  occupied(nodes)
+  parent=os.open(p.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+  fd=None
+  try:
+   ps=os.fstat(parent);require([ps.st_dev,ps.st_ino]==item['parentIdentity'],'DERIVED_PARENT_CHANGED')
+   fd=os.open(p.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+   require(identity(os.fstat(fd))==item['identity']==identity(os.stat(p.name,dir_fd=parent,follow_symlinks=False)),'DERIVED_UNLINK_CHANGED')
+   os.unlink(p.name,dir_fd=parent);os.fsync(parent)
+  finally:
+   if fd is not None:os.close(fd)
+   os.close(parent)
+  require(not os.path.lexists(p),'DERIVED_UNLINK_UNPROVEN')
+ return [v['path'] for v in items]
+def main():
+ specfile,worktext=sys.argv[1:];work=P(worktext);spec=json.loads(P(specfile).read_text());custody=spec['custody'];source=P(custody['root']);pg=spec['pgImport'];pgroot=P(pg['root']);pgdir=pgroot/'materialize-pg-6fc91cd969994015b5bf2eb8d8a29b77';qa=P('/root/sabalan-recovery-private/native-qa')
+ require(source==qa/'independent-image-custody-65cb95d50af8415aa569267d7ecd99bf' and pgroot==qa/'production-base-restore-dbfc6b6eca9741469ae3076756b165a8','FIXED_SOURCE_ROOT_CHANGED')
+ for directory in [source,pgroot,pgdir]:
+  value=directory.lstat();require(directory.resolve(strict=True)==directory and stat.S_ISDIR(value.st_mode) and value.st_uid==0 and not value.st_mode&0o077 and value.st_dev==work.stat().st_dev,'PRIVATE_SOURCE_DIRECTORY_CHANGED')
+ require(json.loads((source/'host-independent-image-proof.json').read_text())==custody and (source/'closed-owner-intent.json').is_file(),'CUSTODY_CLOSURE_CHANGED')
+ require(json.loads((pgroot/(pg['operation']+'-host-proof.json')).read_text())==pg and (pgroot/(pg['operation']+'-closed-owner-intent.json')).is_file(),'PG_IMPORT_CLOSURE_CHANGED')
+ restore=spec['pgRestore'];require(restore['imageId']==pg['imageId'] and restore['nativePostgresRestoreVerified'] and restore['nativeProcessClosureVerified'],'PG_NATIVE_RESTORE_UNPROVEN');require(json.loads((P(restore['root'])/'independent-proof.json').read_text())==restore and (P(restore['root'])/'closed-owner-intent.json').is_file(),'PG_RESTORE_CLOSURE_CHANGED')
+ guardbytes=(work/'mount_guard.py').read_bytes();require(hashlib.sha256(guardbytes).hexdigest()=='165101a51ecc00db4b12ff65a5b2fe55f7037b4407ccdde5e799afa7bda54cd7','MOUNT_GUARD_CHANGED');require(sys.flags.optimize==0,'OPTIMIZED_GUARD_REFUSED');guard=types.ModuleType('private_guard');exec(compile(guardbytes,'mount_guard','exec'),guard.__dict__)
+ old=os.readlink('/proc/self/ns/mnt');guard.isolate_mount_namespace();require(old!=os.readlink('/proc/self/ns/mnt'),'MOUNT_NAMESPACE_UNPROVEN')
+ for line in P('/proc/self/mountinfo').read_text().splitlines():
+  fields=line.split(' ');require(not any(v.startswith(('shared:','master:','propagate_from:')) for v in fields[6:fields.index('-')]),'MOUNT_PROPAGATION_NOT_PRIVATE')
+ targets=[];protected={};upload=source/'unaccepted-upload';expected_images=custody['custody']['images']
+ def add(p,expected,owners):
+  guard.assert_no_nested_mounts(p);s=regular(p,owners);require(sha(p,owners)==expected,'DERIVED_HASH_MISMATCH');parent=p.parent.stat();targets.append({'path':str(p),'identity':identity(s),'parentIdentity':[parent.st_dev,parent.st_ino],'sha256':expected})
+ require(upload.resolve(strict=True)==upload and upload.stat().st_uid==spec['uploadUid'] and not upload.stat().st_mode&0o077,'UPLOAD_DIRECTORY_CHANGED')
+ require({p.name for p in upload.iterdir()}=={'backend.sabrec','frontend.sabrec','inquiry.sabrec','private-component.json'},'UPLOAD_INVENTORY_CHANGED')
+ for service in ['backend','frontend','inquiry']:
+  expected=expected_images[service]['cipherSha256'];accepted=source/'ciphertexts'/(service+'.sabrec');require(sha(accepted)==expected,'ACCEPTED_CIPHER_CHANGED');protected[str(accepted)]=identity(accepted.lstat());add(upload/(service+'.sabrec'),expected,{spec['uploadUid']})
+ metadata=source/'ciphertexts/private-component.json';require(sha(metadata)==custody['custody']['metadataSha256'],'ACCEPTED_METADATA_CHANGED');protected[str(metadata)]=identity(metadata.lstat());add(upload/'private-component.json',custody['custody']['metadataSha256'],{spec['uploadUid']})
+ pgproof=json.loads((pgdir/'private-image-proof.json').read_text());require(pgproof['configImageId']==pg['imageId'] and pgproof['rootfsDiffIds']==pg['rootfsDiffIds'],'PG_MATERIALIZATION_GRAPH_CHANGED')
+ originals=P('/srv/sabalanerp-recovery/checkpoints/images/6db61fe859b1274c0ba8b0253fd5f6c7bc96f6e3f46b3f868fde4fe44289e89f.docker.tar.gz');require(sha(originals,{0,spec['uploadUid']})=='ed56c3575e4d9641e8119613e2273b397850fbb9ae4636f33b6eca5e3549d862','ORIGINAL_IMAGE_ARCHIVE_CHANGED');protected[str(originals)]=identity(originals.lstat())
+ loaded=json.loads(subprocess.check_output(['docker','image','inspect',pg['imageId']],text=True));require(len(loaded)==1 and loaded[0]['Id']==pg['imageId'] and loaded[0]['RootFS']['Layers']==pg['rootfsDiffIds'],'RETAINED_PG_IMAGE_CHANGED')
+ expected_names={'private-image-proof.json','image.tar','blobs',*('layer-'+str(n).zfill(4)+'.tar' for n in range(len(pg['rootfsDiffIds'])))};require({p.name for p in pgdir.iterdir()}==expected_names,'PG_DERIVED_INVENTORY_CHANGED')
+ add(pgdir/'image.tar',pgproof['archiveSha256'],{0})
+ for n,diff in enumerate(pg['rootfsDiffIds']):add(pgdir/('layer-'+str(n).zfill(4)+'.tar'),diff.removeprefix('sha256:'),{0})
+ blobs=list((pgdir/'blobs').iterdir());require(len(blobs)==pgproof['selectedBlobCount'] and all(re.fullmatch('[a-f0-9]{64}',p.name) for p in blobs),'PG_BLOB_INVENTORY_CHANGED')
+ for p in blobs:add(p,p.name,{0})
+ guard.assert_no_nested_mounts(upload);guard.assert_no_nested_mounts(pgdir)
+ directories=[upload,pgdir/'blobs'];directory_identities={str(p):(p.stat().st_dev,p.stat().st_ino) for p in directories};nodes={(v['identity'][0],v['identity'][1]) for v in targets}|{(p.stat().st_dev,p.stat().st_ino) for p in directories};occupied(nodes)
+ # Reject any container bind which could still depend on these private inputs.
+ ids=subprocess.check_output(['docker','ps','-aq'],text=True).split();containers=json.loads(subprocess.check_output(['docker','inspect',*ids],text=True)) if ids else []
+ for container in containers:
+  for mount in container['Mounts']:
+   path=mount.get('Source','');require(not any(path and (path==v['path'] or v['path'].startswith(path+'/') or path.startswith(v['path']+'/')) for v in targets),'DERIVED_CONTAINER_REFERENCE')
+ with (work/'retirement-plan.json').open('x') as f:json.dump({'targets':targets,'protectedIdentities':protected},f,indent=2);f.flush();os.fsync(f.fileno())
+ sync(work);removed=retire_files(targets)
+ for directory in directories:
+  require(not list(directory.iterdir()),'DERIVED_DIRECTORY_NOT_EMPTY');parent=os.open(directory.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+  opened=None
+  try:
+   expected=directory_identities[str(directory)];before=directory.lstat();require((before.st_dev,before.st_ino)==expected,'DIRECTORY_IDENTITY_CHANGED');opened=os.open(directory.name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent);require((os.fstat(opened).st_dev,os.fstat(opened).st_ino)==expected,'DIRECTORY_OPEN_CHANGED');named=os.stat(directory.name,dir_fd=parent,follow_symlinks=False);require((named.st_dev,named.st_ino)==expected,'DIRECTORY_UNLINK_CHANGED');os.rmdir(directory.name,dir_fd=parent);os.fsync(parent)
+  finally:
+   if opened is not None:os.close(opened)
+   os.close(parent)
+ for path,before in protected.items():require(identity(P(path).lstat())==before,'PROTECTED_IDENTITY_CHANGED')
+ for service in ['backend','frontend','inquiry']:require(sha(source/'ciphertexts'/(service+'.sabrec'))==expected_images[service]['cipherSha256'],'ACCEPTED_CIPHER_CHANGED_AFTER_RETIREMENT')
+ proof={'operation':spec['operation'],'removedFiles':removed,'removedEmptyDirectories':[str(p) for p in directories],'acceptedIndependentCiphertextsRetained':True,'originalLegacyImageArchiveRetained':True,'importedPostgresImageRetained':True,'allProofFilesRetained':True,'healthyApplicationPoint':False,'publicOnlineAdmission':False}
+ with (work/'derived-retirement-proof.json').open('x') as f:json.dump(proof,f,indent=2);f.flush();os.fsync(f.fileno())
+ sync(work);print(json.dumps(proof))
+if __name__=='__main__':main()

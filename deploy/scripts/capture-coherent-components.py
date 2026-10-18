@@ -114,6 +114,8 @@ def run():
                 or not stat.S_ISREG(Path(inquiry['path']).lstat().st_mode)
                 or source_identity(Path(inquiry['path'])) != {key: inquiry[key] for key in ('device', 'inode')}):
             raise RuntimeError('COHERENT_CAPTURE_INQUIRY_SOURCE_CHANGED')
+        if backend_boundary and any(runtime.get('engine') == 'sqlite' for runtime in backend_boundary['runtimes']):
+            load('coherent_inquiry_boundary', 'online-inquiry-boundary.py').assert_capture_source(backend_boundary, inquiry)
         snapshot_root = work / 'inquiry'
         files.private_directory(str(snapshot_root), create=True)
         snapshot_file = snapshot_root / 'inquiry.db'

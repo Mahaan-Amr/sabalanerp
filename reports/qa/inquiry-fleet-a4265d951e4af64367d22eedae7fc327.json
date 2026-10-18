@@ -1,0 +1,136 @@
+{
+  "operation": "a4265d951e4af64367d22eedae7fc327",
+  "directory": "/app/online-runtime-acceptance/inquiry-next-28d325e01026e92a50d17214d20cd503/fleet-a4265d951e4af64367d22eedae7fc327",
+  "captureId": "d6ffddc88593825fa88492c497d113320ae82c5bc5a113ce96b881f6102271ac",
+  "actualFleetCensus": true,
+  "boundary": {
+    "captureScopeSha256": "004729b5d564c5e6a415e513805ba7fe0ee36c0a185e055bdcb24a790a52b107",
+    "database": {
+      "busy": 0,
+      "closed": 0,
+      "database": "sabalanerp",
+      "prepared": 0,
+      "system": "7667464637415309346",
+      "visible": true
+    },
+    "format": "sabalan-registered-backend-boundary/v1",
+    "gate": {
+      "device": "2096",
+      "file": "/app/online-runtime-acceptance/inquiry-next-28d325e01026e92a50d17214d20cd503/coordination/deployment-write-admission.lock",
+      "inode": "1267545",
+      "ownerUid": 0
+    },
+    "hostImageAdmission": false,
+    "inquiryBoundary": false,
+    "productionRecoveryPoint": false,
+    "runtimes": [
+      {
+        "activeClaimSha256": "0edd59dcd834826336b19fdc83c8188c1439d6070db42c86ee0af033f6c04056",
+        "nativeSha256": "f5d2f2c35f10447f679e4f055fb6c4d2aa8e0f222fbb4b4c3d549ebaccf9ad65",
+        "phase": "QUIESCENT",
+        "runtimeId": "00aba75a956d9547ab226ebce1087eb0f248f202fc1c06812baf43d107678aaf"
+      },
+      {
+        "activeClaimSha256": "b3bb414de64b7e0f4612b16f0dd53f3c33fe5429f30e9048d0c6220eac49f4df",
+        "engine": "sqlite",
+        "nativeSha256": "f8b8c857b4a126e433572c0d1028f6fb8c39e4f3dd7c0b180a38e251ba131a28",
+        "phase": "QUIESCENT",
+        "runtimeId": "1cdf6a5408c41aa14002936c69d97d7c9c650353cccced859e77a6e567cabf93",
+        "sqlite": {
+          "databaseUrlSha256": "2377c1ac6b8ba81e4b91a689e1ef8384f62f8c49c722a2904034734eb9557545",
+          "device": "2096",
+          "file": "/app/online-runtime-acceptance/inquiry-next-28d325e01026e92a50d17214d20cd503/inquiry.db",
+          "inode": "1267555",
+          "ownerUid": 0
+        }
+      },
+      {
+        "activeClaimSha256": "e54679f7743fa33be65aeb6232e0264824ba041f2d5349a58b63d0b398771458",
+        "nativeSha256": "3a9520e92989307bd310f918e7b46071656291dfb90f9558fe2a80671b9fc9ec",
+        "phase": "QUIESCENT",
+        "runtimeId": "3d9be76376237b5edc15fe4643a5136df695d801f535a822d06c00f645b3bf69"
+      },
+      {
+        "activeClaimSha256": "4770f930ac26882ef8bc1ef467f6f8741f3e9492590b3878545a12cd53648e69",
+        "nativeSha256": "53f70d0c061bd2224f82be66e6fa8b1548e14bb7c584a10ec399888541b323d1",
+        "phase": "QUIESCENT",
+        "runtimeId": "9af803a87b222fd27aedb7b2f046d6b46da51a540c7b491e6bf3be97da78b62a"
+      },
+      {
+        "activeClaimSha256": "5efe7bed437100409a452bc2fae3f578934423d70111239d430ae596e8619d18",
+        "nativeSha256": "42667007461fb4041cd806b3a158291392d4ff595a876c20b0d30ce440e9546f",
+        "phase": "QUIESCENT",
+        "runtimeId": "aeed3c094cc791b5c27782a02b2d0f6ecf42aa9be7ba0e5f6a2249b49014242e"
+      },
+      {
+        "activeClaimSha256": "e363033cc56a2814a7651632c4302463a2966b9571742beebe1074f916b931fe",
+        "nativeSha256": "a6eeb113c9b01018866fc19bf07d09e397c1bd134b2b39c4fcee537d52d89715",
+        "phase": "QUIESCENT",
+        "runtimeId": "bba8dda58e60164fe3e8ec62ae27ee67433b96318d90cdd942506d639042c1ec"
+      },
+      {
+        "activeClaimSha256": "e273bd8c221d8eea9c91bf7505266361cefe4a766b5d904f5db5f00d7de8e275",
+        "nativeSha256": "048b7f7cd27a99d4a6f34c21cdb24f31ea030adb419755cbacdc6ac44d7db9d0",
+        "phase": "QUIESCENT",
+        "runtimeId": "d674425ce453856b4f203c3efe137dce2bf25778b1345219b36ef6cb7093bc3c"
+      },
+      {
+        "nativeSha256": "a5be127e1c71ea83a2919b9ede004cea93f82f816ae7634f96ecf852a4cc0113",
+        "phase": "CAPTURING",
+        "runtimeId": "d6ffddc88593825fa88492c497d113320ae82c5bc5a113ce96b881f6102271ac"
+      },
+      {
+        "activeClaimSha256": "7144288a77cf32a0ac04a4c2ff7ba76bf560e54856bdb16ea0606fd7b897274a",
+        "nativeSha256": "1b60408aacce3ad2c9ca6fff7f570a22bdfad5b52c21f277bed2fc3044d01cd1",
+        "phase": "QUIESCENT",
+        "runtimeId": "ed8ee4682af69800f5c9cd763b9481c2acd575c398b0e7871e9eb780022ef307"
+      }
+    ]
+  },
+  "rejected": [
+    "legacy-format",
+    "backend-closure-substitution",
+    "wrong-url-hash",
+    "wrong-file-inode",
+    "wrong-grant",
+    "wrong-lock-declaration",
+    "wrong-kernel-lock-state",
+    "wrong-snapshot-source",
+    "orphan-active-work"
+  ],
+  "sourceHashes": {
+    "online-runtime-owner.py": "5b6cb0eeda9b173e375c7d936a26e44a9621822ebc15d2b57c28afcce443c4d5",
+    "online-runtime-scope.py": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+    "backend-runtime-owner.py": "7812ebf703fd3c68f0fa7e3d595034a8b27166e16865718934d284ca626d8865",
+    "online-capture-admission.py": "5f9f5229d7c697c7632e7592ccb90b61273f68cc20a9f15b647b62524ff3365a",
+    "online-backend-boundary.py": "6e1cdb9847a1b46aaa6c4226d1d02c57da679c58fc96921c005d24dfd969a8c9",
+    "recovery-database-freeze.py": "d482c2c6e5d50f52249ada95cee5a4b3f8ecca7d44a81684e900317f973b7541",
+    "online-inquiry-boundary.py": "ee609932e44d9c100b181220e8fe579e454d7de1852b03b913c5124e0d6d12e7",
+    "fixture.py": "494fe916fa302b0e4a57a3682c8b173c5677fed2517360d516a2a599c1210308"
+  },
+  "expectedPhase": "QUIESCENT",
+  "canonicalUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  },
+  "coherentApplicationCapture": false,
+  "productionAdmission": false
+}

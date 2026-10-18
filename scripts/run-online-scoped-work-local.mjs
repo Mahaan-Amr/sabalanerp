@@ -44,6 +44,7 @@ const files = Object.fromEntries([
   ['online-runtime-scope.py', 'deploy/scripts/online-runtime-scope.py'],
   ['online-capture-admission.py', 'deploy/scripts/online-capture-admission.py'],
   ['online-backend-boundary.py', 'deploy/scripts/online-backend-boundary.py'],
+  ['online-inquiry-boundary.py', 'deploy/scripts/online-inquiry-boundary.py'],
   ['recovery-file-generations.py', 'deploy/scripts/recovery-file-generations.py'],
   ['capture-coherent-components.py', 'deploy/scripts/capture-coherent-components.py'],
   ['recovery-database-freeze.py', 'deploy/scripts/recovery-database-freeze.py'],

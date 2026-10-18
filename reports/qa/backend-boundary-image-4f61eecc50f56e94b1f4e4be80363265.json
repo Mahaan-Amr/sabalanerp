@@ -1,0 +1,17 @@
+{
+  "operation": "4f61eecc50f56e94b1f4e4be80363265",
+  "directory": "D:\\sabalanerp-online-qa\\backend-boundary-image-4f61eecc50f56e94b1f4e4be80363265",
+  "image": "sha256:df36b710b98384a2f22b617196dc30e69e1d8b87644ca379fb8a74bda6b86705",
+  "base": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+  "actualDockerfileCopyClause": "COPY deploy/scripts/online-backend-boundary.py deploy/scripts/online-inquiry-boundary.py deploy/scripts/recovery-database-freeze.py deploy/scripts/recovery-file-generations.py deploy/scripts/capture-coherent-components.py ./scripts/",
+  "sourceHashes": {
+    "online-backend-boundary.py": "6e1cdb9847a1b46aaa6c4226d1d02c57da679c58fc96921c005d24dfd969a8c9",
+    "online-inquiry-boundary.py": "ee609932e44d9c100b181220e8fe579e454d7de1852b03b913c5124e0d6d12e7",
+    "recovery-database-freeze.py": "d482c2c6e5d50f52249ada95cee5a4b3f8ecca7d44a81684e900317f973b7541",
+    "recovery-file-generations.py": "a3175e4afd4df2872cfef011ec9837178a341ff317217ecf72c9d3a59e882ae0",
+    "capture-coherent-components.py": "04cf337a0402010b165d686e9d806636130d703ecd571964a8c1c5a101b287e6"
+  },
+  "copiedBytesAndPythonSyntaxVerified": true,
+  "fullProductionBuild": false,
+  "productionAdmission": false
+}

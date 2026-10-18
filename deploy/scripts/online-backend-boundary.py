@@ -1,6 +1,6 @@
 """Observe every registered backend under real scoped capture ownership.
 
-This does NOT certify images, host registration, Inquiry, privacy, recovery or a
+This does NOT certify images, host registration, Inquiry snapshots, privacy, recovery or a
 release. The host controller must verify those and freeze scope issuance under
 the worker lock. No orphan work is settled and no native registration is erased.
 """
@@ -155,6 +155,8 @@ def inspect_registered_backend_boundary(source_url):
     owned()
     observations, stable, lock_expectations = [], [], []
     closed_names, active_names = [], []
+    inquiry_api = None
+    inquiry_identities = []
     for runtime_id in native_names:
         native_directory, work_directory = native_root / runtime_id, work_root / runtime_id
         for file in [native_directory, work_directory]:
@@ -190,6 +192,21 @@ def inspect_registered_backend_boundary(source_url):
             continue
         require(native_entries == ['deployment-runtime-control.lock', 'deployment-runtime-native.json'])
         native, native_raw = read(native_directory / 'deployment-runtime-native.json')
+        if native.get('format') == 'sabalan-inquiry-native/v2':
+            if inquiry_api is None:
+                inquiry_api = load('fleet_inquiry_boundary', 'online-inquiry-boundary.py')
+            locked = private_locked(native_directory / 'deployment-runtime-control.lock', native['lock'])
+            native_active_sha, sqlite_identity = inquiry_api.inspect_native(native, native_raw, other, locked, admission_api, encode)
+            stable.append((native_directory / 'deployment-runtime-native.json', native_raw, 0o600))
+            lock_expectations.append((native_directory / 'deployment-runtime-control.lock', native['lock'], locked))
+            inquiry_identities.append((native['sqlite'], sqlite_identity))
+            stable.extend(inspect_work_claim(work_directory, runtime_id, other['sha256'], native, native_active_sha, declaration_raw))
+            # This audit namespace must have ZERO PostgreSQL sessions, even
+            # while the Inquiry guardian is active. It owns SQLite only.
+            closed_names.append(declared['postgresApplicationName'])
+            observations.append(dict(runtimeId=runtime_id, phase=native['phase'], engine='sqlite',
+                nativeSha256=digest(native_raw), activeClaimSha256=native_active_sha, sqlite=native['sqlite']))
+            continue
         require(native.get('format') == 'sabalan-runtime-native/v1' and native.get('phase') in ['ACTIVE', 'QUIESCENT']
                 and native.get('role') == issued['role']
                 and native.get('instanceId') == digest(runtime_id.encode('ascii'))[:48]
@@ -254,6 +271,7 @@ def inspect_registered_backend_boundary(source_url):
     owned()
     require(all(read(file, mode)[1] == raw for file, raw, mode in stable))
     require(all(private_locked(file, expected) == locked for file, expected, locked in lock_expectations))
+    require(all(inquiry_api.sqlite_identity(database) == identity for database, identity in inquiry_identities))
     return dict(format='sabalan-registered-backend-boundary/v1', captureScopeSha256=loaded['sha256'],
                 gate=scope['gate'], runtimes=observations, database=sql,
                 hostImageAdmission=False, inquiryBoundary=False, productionRecoveryPoint=False)

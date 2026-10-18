@@ -1,0 +1,20 @@
+{
+  "head": "0626c53ee1b238d8b0b24419cd4a3e0dc79d540c",
+  "sources": {
+    "deploy/scripts/recovery-versioned-files.py": "29ebb2a5adb4def5f183921494c59eec90834421053884bbfcf42002b1fc53ab",
+    "tests/online-deployment/versioned-file-reader.worker.py": "a1e3ee1f5a9573a86e0a2a712bd87ac6823ae52c073598968139a33bd7edc734",
+    "tests/online-deployment/versioned-file-reader.fixture.cjs": "0f7bf19543c973920ee77a3d6d9722031844fe997dca5d3c56ecdda789ba1390",
+    "scripts/run-versioned-file-reader-local.mjs": "8fff94b5f6f542088464759fe494cf4439e2760f3505030c90bb4277a6a5db94"
+  },
+  "dependencies": {
+    "backend/src/services/versionedFilePublication.ts": "a1b4a382ef3664d953ba048260aba3b18814fc3840c16fb3ac92f8e071a63480",
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa"
+  },
+  "patchSha256": "43adb06b4c997e4c8fd17bb5fc8c0a4bdb8f0dd8c8b5e2700a72724a4ed78641",
+  "priorReport": "versioned-file-reader-712b84de28b78c8c5e2983a9f72d8052.json",
+  "nativeStatus": "r1 RED review regressions running against retained original source; r2 GREEN pending",
+  "scope": "independent private immutable Node file-cut materializer, no healthy-point/role/capture/delete authority",
+  "reviewRepairs": "reject overlap with declared normalized live source before target filesystem access; stream each bounded predecessor chain without aggregate byte cutoff or accumulated historical object map; selected-key/object sets at most 10000, records <=16384 bytes each; full restore admission time/capacity remains required",
+  "newRegressions": "actual Nodewriter ack/seal after 9 independently encoded real 9998-generation histories totaling >512MiB; exact source overlap refusal before mkdir"
+}

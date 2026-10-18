@@ -1,0 +1,15 @@
+{
+  "freeze": "reports/qa/versioned-file-reader-review-r3-20261018.json",
+  "freezeSha256": "4b14d93326b9598326c594327cbac3cdab573f32e28330e22dc2a808cccd89b7",
+  "reports": {
+    "versioned-file-reader-f4671b324280815a0bebab8854d4d388.json": "38452a038f3e1810951b96549e0eff113c82623129fba54646d994cefcc31cca",
+    "versioned-file-reader-red-20261018.json": "0c35c9787bcc266e39a9be62148a8c6ca81f73af684eeb1a20c75c399d87e1f9",
+    "versioned-file-reader-native-closure-20261018.json": "80636910d2ac10f85948aa8a6ecbe9b407991a2ebe49f311345b31b9df9bb481"
+  },
+  "standardsReview": "PASS",
+  "specReview": "PASS",
+  "productionAdmission": false,
+  "wholeProgramComplete": false,
+  "architectureCheck": "PASS",
+  "syntaxCheck": "PASS"
+}

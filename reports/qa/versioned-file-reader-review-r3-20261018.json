@@ -1,0 +1,21 @@
+{
+  "head": "0626c53ee1b238d8b0b24419cd4a3e0dc79d540c",
+  "sources": {
+    "deploy/scripts/recovery-versioned-files.py": "2bc671d85b956666018d67b5987b774111c2e5b1b4078ed0cae96605ef04f99f",
+    "tests/online-deployment/versioned-file-reader.worker.py": "a1e3ee1f5a9573a86e0a2a712bd87ac6823ae52c073598968139a33bd7edc734",
+    "tests/online-deployment/versioned-file-reader.fixture.cjs": "a86072c34fbdb0f8b6d547d3afb29b55aaa1da8dff5de881f48b8965b6187607",
+    "scripts/run-versioned-file-reader-local.mjs": "8fff94b5f6f542088464759fe494cf4439e2760f3505030c90bb4277a6a5db94"
+  },
+  "dependencies": {
+    "backend/src/services/versionedFilePublication.ts": "a1b4a382ef3664d953ba048260aba3b18814fc3840c16fb3ac92f8e071a63480",
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa"
+  },
+  "patchSha256": "488ea955594d6a1f2268265bd1932b7b3b2630841dd25bd1da3e4eee93fc0d54",
+  "priorReport": "versioned-file-reader-712b84de28b78c8c5e2983a9f72d8052.json",
+  "nativeStatus": "r1 RED actual >512MiB history regression still running; r3 GREEN pending",
+  "scope": "independent private immutable Node file-cut materializer, no healthy-point/role/capture/delete authority",
+  "reviewRepairs": "reject overlap with declared normalized live source before target filesystem access; stream each bounded predecessor chain without aggregate byte cutoff or accumulated historical object map; selected-key/object sets at most 10000, records <=16384 bytes each; full restore admission time/capacity remains required",
+  "newRegressions": "actual Nodewriter ack/seal after 9 independently encoded real 9998-generation histories totaling >512MiB; exact source overlap refusal before mkdir",
+  "changesSinceR2": "four bounded concurrent predecessor chains, settle all started futures even on failure before return; constant record memory; exact verified count/byte receipt; no relaxed fsync/hash/identity/limit checks"
+}

@@ -1,0 +1,158 @@
+[
+  {
+    "root": "/app/online-runtime-acceptance/versioned-file-reader-8d9583bf43a0dce8c0df29210102655e",
+    "readerSha256": "318fcb20c1ebd6d6344b8d7153b1e6cef7c07b1941abca2e8d5f1b1429f37cf9",
+    "fixtureSha256": "0f7bf19543c973920ee77a3d6d9722031844fe997dca5d3c56ecdda789ba1390",
+    "nativeHelpersAbsent": true,
+    "fixtures": [
+      {
+        "name": "9743b20b9293b3c255e0fe4f4a74aa77",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "74095672ed7d92ec192e0b1b626e758a",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "39f621406f82473d14f904ac58126163",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "41cbfa360a363bcaacb47fa17889949c",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "2d40401dfd074df3f2d30766d3d153b7",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "949593b76aaa5e44d2a41f2b774e987b",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "ddef733667ea971e3d04ecb238298455",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "0ce8619f3beac5f88a78a099c09f51ce",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "5ca080a1bb40b82aad57fe869946487d",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "856309f7e1cd2ec2e141c6b750385c0e",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      }
+    ]
+  },
+  {
+    "root": "/app/online-runtime-acceptance/versioned-file-reader-f4671b324280815a0bebab8854d4d388",
+    "readerSha256": "2bc671d85b956666018d67b5987b774111c2e5b1b4078ed0cae96605ef04f99f",
+    "fixtureSha256": "a86072c34fbdb0f8b6d547d3afb29b55aaa1da8dff5de881f48b8965b6187607",
+    "nativeHelpersAbsent": true,
+    "fixtures": [
+      {
+        "name": "bdc863e0c1b244a2fecdb8d6f8fee3fb",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "fac4c75ab8a37c77edba05e2e3dbd1ea",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "f5480e3335255fadc3038eef07ce7eef",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "ce64a7eecee913e25bc64a0fa2844efe",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "d937ba324fd86d5433f7915603957edc",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "a1272f1ed1ad0bfdb714912407cd874a",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "363722236ece7f56dec7cc93d7661eeb",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "43a095187262808d45d222caf7df9bbc",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "83f821897faf1a0f10b6e5c7dcf09290",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      },
+      {
+        "name": "21d1a7a924209b0d5140423985f2f440",
+        "actualGateFree": true,
+        "phases": [
+          "QUIESCENT"
+        ]
+      }
+    ]
+  }
+]

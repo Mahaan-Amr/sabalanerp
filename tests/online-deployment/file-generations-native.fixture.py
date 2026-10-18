@@ -37,6 +37,31 @@ def expect_error(code, run):
         raise AssertionError('Expected ' + code)
 
 
+if len(sys.argv) == 4 and sys.argv[2] == 'materialize-child':
+    # No gate descriptor is inherited. Stop during an actual native output
+    # write, so the parent can exercise a later cut while copying is unfinished.
+    assert not any('deployment-write-admission.lock' in os.readlink('/proc/self/fd/' + name)
+                   for name in os.listdir('/proc/self/fd') if name.isdigit()
+                   and os.path.exists('/proc/self/fd/' + name))
+    original_write = os.write
+    paused = False
+
+    def paused_write(fd, data):
+        global paused
+        written = original_write(fd, data)
+        if not paused and os.readlink('/proc/self/fd/' + str(fd)).endswith('/invoice.pdf'):
+            paused = True
+            os.kill(os.getpid(), signal.SIGSTOP)
+        return written
+
+    os.write = paused_write
+    result = module.SealedFileGeneration(str(root / 'store'), sys.argv[3]).restore(
+        str(root / 'restore-concurrent-materializer'))
+    assert paused
+    print(json.dumps(result), flush=True)
+    sys.exit(0)
+
+
 if len(sys.argv) == 4 and sys.argv[2] in ('capture-child', 'seal-child'):
     gate = int(sys.argv[3])
     gate_stat = os.fstat(gate)
@@ -116,12 +141,66 @@ for case in ('symlink', 'unfinished', 'fifo'):
     expect_error('FILE_GENERATION_CAPTURE_UNFINISHED', lambda: candidate.capture([source(target_source)], 'b' * 64))
     refusals.append(case)
 
+# A sealed generation materializes from independent objects after the write
+# pause has ended. The reader owns no gate, cannot capture and never reopens a
+# mutable source pathname, even while a serving writer owns the shared gate.
+fcntl.flock(gate, fcntl.LOCK_SH)
+reader = module.SealedFileGeneration(str(store_root), first['sha256'])
+assert not hasattr(reader, 'capture') and not hasattr(reader, 'assert_gate')
+assert reader.verify()['captureId'] == '1' * 64
+outside_pause = reader.restore(str(root / 'restore-with-serving-writer'))
+assert outside_pause['files'] == 2
+assert (root / 'restore-with-serving-writer/uploads/invoice.pdf').read_bytes() == b'ORIGINAL-PDF-123456789.12345678'
+assert (root / 'restore-with-serving-writer/uploads/deleted.txt').read_bytes() == b'OLD-DELETED-ATTACHMENT'
+fcntl.flock(gate, fcntl.LOCK_EX)
+
+# A real separate process is paused halfway through old-version output. A new
+# exclusive cut and mutable source changes proceed, then the reader finishes
+# the original bytes without inheriting or extending the original write pause.
+fcntl.flock(gate, fcntl.LOCK_UN)
+materializer = subprocess.Popen([sys.executable, '-B', __file__, str(root), 'materialize-child', first['sha256']],
+                               close_fds=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+deadline = time.monotonic() + 10
+while time.monotonic() < deadline and materializer.poll() is None:
+    fields = Path('/proc/' + str(materializer.pid) + '/stat').read_text().rsplit(')', 1)[1].split()
+    if fields[0] == 'T':
+        break
+    time.sleep(0.001)
+else:
+    raise AssertionError('Materializer did not reach actual incomplete output')
+try:
+    fcntl.flock(gate, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    (live / 'invoice.pdf').write_bytes(b'LIVE-THIRD-VERSION-123')
+    third = store.capture([source(live)], '3' * 64)
+    assert third['manifest']['generation'] == 3
+    fcntl.flock(gate, fcntl.LOCK_UN)
+finally:
+    materializer.send_signal(signal.SIGCONT)
+copied, copy_error = materializer.communicate(timeout=10)
+assert materializer.returncode == 0, copy_error.decode()
+concurrent_result = json.loads(copied)
+assert (root / 'restore-concurrent-materializer/uploads/invoice.pdf').read_bytes() == b'ORIGINAL-PDF-123456789.12345678'
+assert module.SealedFileGeneration(str(store_root), first['sha256']).verify()['generation'] == 1
+expect_error('FILE_GENERATION_SELECTION_CHANGED', lambda: reader.verify(second['sha256']))
+fcntl.flock(gate, fcntl.LOCK_EX)
+
 # A same-size tamper must fail native verification, even with intact metadata.
 corrupt = store_root / 'objects' / hashlib.sha256(b'NEW-PDF-0.00000001').hexdigest()
 os.chmod(corrupt, 0o600)
 corrupt.write_bytes(b'X' * len(b'NEW-PDF-0.00000001'))
 os.chmod(corrupt, 0o400)
 expect_error('FILE_GENERATION_OBJECT_CHANGED', lambda: store.verify(second['sha256']))
+expect_error('FILE_GENERATION_OBJECT_CHANGED', lambda: module.SealedFileGeneration(str(store_root), second['sha256']).verify())
+expect_error('FILE_GENERATION_SELECTION_INVALID', lambda: module.SealedFileGeneration(str(store_root), '../live'))
+expect_error('FILE_GENERATION_MANIFEST_NOT_FOUND', lambda: module.SealedFileGeneration(str(store_root), '0' * 64).verify())
+
+# An incomplete future capture cannot invalidate a completed selected prefix;
+# it still blocks the controller's next capture through the original writer.
+incomplete = store_root / 'captures' / ('000000000004-' + '4' * 64)
+incomplete.mkdir(mode=0o700)
+assert reader.verify()['generation'] == 1
+expect_error('FILE_GENERATION_CAPTURE_UNFINISHED', lambda: store.capture([source(live)], '5' * 64))
+expect_error('FILE_GENERATION_CAPTURE_UNFINISHED', lambda: module.SealedFileGeneration(str(store_root), '0' * 64).verify())
 
 # Oversized canonical metadata is refused before any named record is created.
 metadata = root / 'metadata-boundary'
@@ -263,6 +342,9 @@ report = {'format': 'sabalan-file-generations-native/v1', 'pass': True,
                   'captureCapacity': 10000, 'retainedRestoreAtCapacity': True,
                   'nativeChildSignal': 'SIGKILL', 'partialCaptureRetained': True,
                   'replacementRefused': True, 'workingRoot': str(root)}
+report['sealedRestoreOutsideWritePause'] = outside_pause
+report['concurrentMaterializer'] = dict(concurrent_result, laterCutWhileCopyIncomplete=True,
+    originalSourcePathNotReopened=True, futureIncompleteCaptureRetained=True)
 with (root / 'native-proof.json').open('x') as proof:
     os.chmod(root / 'native-proof.json', 0o400)
     json.dump(report, proof, sort_keys=True)

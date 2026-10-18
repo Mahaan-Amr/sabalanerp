@@ -1,0 +1,10 @@
+{
+  "head": "6a3f2aaf55c6836ea05615fb8e3d63ba2407209f",
+  "sources": {
+    "deploy/scripts/recovery-file-generations.py": "1a4875994c4876ad653b8df01f09e889f158428ed6a2e6552feee6051eb3e6e8",
+    "tests/online-deployment/file-generations-native.fixture.py": "f9161ebee61988e688db8c52a0ca5e923972b86f4c989400acbf610cbde1fc67"
+  },
+  "patchSha256": "578f088ee2d7edbfd955d385644f0013bf8e47284e163c832134f0f9176d2ba5",
+  "scope": "read-only sealed generation materialization outside write pause; no production admission",
+  "fullNativeRegressionPending": true
+}

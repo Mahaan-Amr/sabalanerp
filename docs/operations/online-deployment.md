@@ -4,6 +4,8 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 ## Current foundation
 
+- A hash-pinned sealed-file reader now materializes independent immutable objects outside the write pause. An actual reader process stopped mid-copy while a later exclusive cut changed live files; it then restored the original bytes. Corruption/selection refusal and the complete 10,000-generation/interruption regression passed, with both frozen reviews. Capture still copies live files under EX10; per-write versions and a bounded coherent cut remain required. See [sealed materialization evidence](../../reports/qa/sealed-file-generation-20261018.md).
+
 - The owned global census now validates registered Inquiry v2 incarnations separately from backend PostgreSQL ownership. It requires actual private lock state, a QUIESCENT work claim and pinned SQLite identity, rechecks all claims/identities, refuses orphan work and requires zero PostgreSQL sessions for Inquiry's audit namespace. Component capture also rejects a substituted Inquiry source. Actual serving and retired Next runtime checks, nine negative cases, backend v2 component regression and diagnostic image packaging passed; host/image admission and coherent Inquiry snapshot proof remain pending. See [Inquiry census evidence](../../reports/qa/online-inquiry-fleet-census-20261018.md).
 
 - Inquiry's thirteen action bodies and sole Prisma query/transaction owner now

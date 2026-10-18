@@ -1,0 +1,11 @@
+{
+  "head": "6a3f2aaf55c6836ea05615fb8e3d63ba2407209f",
+  "freezeSha256": "c939a45e9137627734513089c6ed6ac9146682134260d11e56685d27098f58ed",
+  "proof": "file-generations-3941b184477b4fed7cce3b0ce5fc910f.json",
+  "proofSha256": "ff2881daf182fbdd1387b573d99424d3ca4a56393d19506fc74427f1765b9e75",
+  "standardsReview": "PASS",
+  "specReview": "PASS",
+  "architectureCheck": "PASS",
+  "productionAdmission": false,
+  "wholeProgramComplete": false
+}

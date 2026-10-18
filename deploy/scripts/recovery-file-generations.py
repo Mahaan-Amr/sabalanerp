@@ -123,43 +123,18 @@ def publish_record(directory, name, value, maximum=MAX_MANIFEST_BYTES):
     return hashlib.sha256(data).hexdigest()
 
 
-class FileGenerations:
-    def __init__(self, root, gate_fd, gate_device, gate_inode):
-        self.root, self.gate_fd = root, gate_fd
-        self.gate_identity = (int(gate_device), int(gate_inode))
-        self.root_identity = identity(private_directory(root))
-        self.assert_gate()
-        sync_ancestry(root)
-        for name in ("objects", "captures"):
-            target = os.path.join(root, name)
-            try:
-                private_directory(target, create=True)
-            except FileExistsError:
-                private_directory(target)
-        self.objects_identity = identity(os.lstat(os.path.join(root, "objects")))
-        self.captures_identity = identity(os.lstat(os.path.join(root, "captures")))
+class _FileGenerationReader:
+    selected_sha = None
 
-    def assert_gate(self):
-        value = os.fstat(self.gate_fd)
-        named = os.readlink("/proc/self/fd/" + str(self.gate_fd))
-        parent = os.lstat(os.path.dirname(named))
-        if (identity(value) != self.gate_identity or not stat.S_ISREG(value.st_mode)
-                or value.st_nlink != 1 or value.st_size != 0
-                or value.st_uid != os.geteuid() or value.st_mode & 0o022
-                or os.path.basename(named) != "deployment-write-admission.lock"
-                or os.path.realpath(named) != named or identity(os.lstat(named)) != identity(value)
-                or not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.geteuid()
-                or parent.st_mode & 0o022):
-            fail("FILE_GENERATION_GATE_CHANGED")
-        with open("/proc/self/fdinfo/" + str(self.gate_fd), encoding="ascii") as source:
-            details = source.read()
-        if not re.search(r"^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+"
-                         r"[0-9a-f]+:[0-9a-f]+:" + str(value.st_ino)
-                         + r"\s+0\s+EOF\s*$", details, re.M):
-            fail("FILE_GENERATION_EXCLUSIVE_GATE_REQUIRED")
+    def __init__(self, root):
+        self.root = root
+        self.root_identity = identity(private_directory(root))
+        self.objects_identity = identity(private_directory(os.path.join(root, "objects")))
+        self.captures_identity = identity(private_directory(os.path.join(root, "captures")))
+        sync_ancestry(root)
+        self.assert_owner()
 
     def assert_owner(self):
-        self.assert_gate()
         if identity(private_directory(self.root)) != self.root_identity:
             fail("FILE_GENERATION_STORE_CHANGED")
         for name, expected in (("objects", self.objects_identity),
@@ -169,6 +144,8 @@ class FileGenerations:
 
     def _history(self, selected_sha=None, *, for_capture=False):
         self.assert_owner()
+        if self.selected_sha is not None and (for_capture or selected_sha != self.selected_sha):
+            fail("FILE_GENERATION_SELECTION_CHANGED")
         directory = os.path.join(self.root, "captures")
         names = sorted(os.listdir(directory))
         if len(names) > MAX_HISTORY_COUNT or (for_capture and len(names) >= MAX_HISTORY_COUNT):
@@ -215,6 +192,10 @@ class FileGenerations:
                         fail("FILE_GENERATION_HISTORY_INVALID")
                     selected = manifest
                 last = manifest
+                # Later captures may be in progress. A reader pins one complete
+                # immutable prefix, never adopts or waits for a future suffix.
+                if self.selected_sha is not None and previous == self.selected_sha:
+                    break
             finally:
                 os.close(fd)
         sync_directory(directory)
@@ -293,6 +274,127 @@ class FileGenerations:
                 fail("FILE_GENERATION_OBJECT_CHANGED")
         finally:
             os.close(fd)
+
+    def verify(self, sha256):
+        history = self._history(sha256)
+        manifest = history["selected"]
+        if manifest is None:
+            fail("FILE_GENERATION_MANIFEST_NOT_FOUND")
+        fd = os.open(os.path.join(self.root, "objects"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            for entry in manifest["entries"]:
+                self.assert_owner()
+                self._object(fd, entry)
+        finally:
+            os.close(fd)
+        return manifest
+
+    def restore(self, sha256, target):
+        manifest = self.verify(sha256)
+        # Always a new private stage. Never merge into or roll back live data.
+        if (not os.path.isabs(target) or os.path.normpath(target) != target
+                or os.path.realpath(os.path.dirname(target)) != os.path.dirname(target)):
+            fail("FILE_GENERATION_RESTORE_TARGET_INVALID")
+        for protected in [self.root] + [source["path"] for source in manifest["sources"]]:
+            if os.path.commonpath([target, protected]) in (target, protected):
+                fail("FILE_GENERATION_RESTORE_TARGET_INVALID")
+        private_directory(target, create=True)
+        objects = os.open(os.path.join(self.root, "objects"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            for entry in manifest["entries"]:
+                self.assert_owner()
+                destination = os.path.join(target, entry["source"], *entry["path"].split("/"))
+                parent = os.path.dirname(destination)
+                os.makedirs(parent, mode=0o700, exist_ok=True)
+                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+                try:
+                    self._object(objects, entry, fd)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+                # Persist every newly created ancestor, including empty sources.
+                current = parent
+                while current != target:
+                    sync_directory(current)
+                    current = os.path.dirname(current)
+            for source in manifest["sources"]:
+                directory = os.path.join(target, source["name"])
+                os.makedirs(directory, mode=0o700, exist_ok=True)
+                sync_directory(directory)
+            sync_directory(target)
+            self.assert_owner()
+            return {"manifestSha256": sha256, "files": len(manifest["entries"]),
+                    "bytes": sum(entry["bytes"] for entry in manifest["entries"])}
+        finally:
+            os.close(objects)
+
+
+class SealedFileGeneration(_FileGenerationReader):
+    """Materialize one hash-pinned immutable prefix outside the write pause.
+
+    No source file is opened, no gate is acquired/inherited and no capture,
+    prune, traffic or recovery-point publication operation is exposed. The
+    controller still owns native completion, privacy/dependency retention and
+    coherent PostgreSQL/SQLite selection; this reader grants none of those.
+    """
+    def __init__(self, root, sha256):
+        if not isinstance(sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            fail("FILE_GENERATION_SELECTION_INVALID")
+        self.selected_sha = sha256
+        super().__init__(root)
+
+    def verify(self, sha256=None):
+        if sha256 is not None and sha256 != self.selected_sha:
+            fail("FILE_GENERATION_SELECTION_CHANGED")
+        return super().verify(self.selected_sha)
+
+    def restore(self, target):
+        return super().restore(self.selected_sha, target)
+
+
+class FileGenerations(_FileGenerationReader):
+    def __init__(self, root, gate_fd, gate_device, gate_inode):
+        self.root, self.gate_fd = root, gate_fd
+        self.gate_identity = (int(gate_device), int(gate_inode))
+        self.root_identity = identity(private_directory(root))
+        self.assert_gate()
+        sync_ancestry(root)
+        for name in ("objects", "captures"):
+            target = os.path.join(root, name)
+            try:
+                private_directory(target, create=True)
+            except FileExistsError:
+                private_directory(target)
+        self.objects_identity = identity(os.lstat(os.path.join(root, "objects")))
+        self.captures_identity = identity(os.lstat(os.path.join(root, "captures")))
+
+    def assert_gate(self):
+        value = os.fstat(self.gate_fd)
+        named = os.readlink("/proc/self/fd/" + str(self.gate_fd))
+        parent = os.lstat(os.path.dirname(named))
+        if (identity(value) != self.gate_identity or not stat.S_ISREG(value.st_mode)
+                or value.st_nlink != 1 or value.st_size != 0
+                or value.st_uid != os.geteuid() or value.st_mode & 0o022
+                or os.path.basename(named) != "deployment-write-admission.lock"
+                or os.path.realpath(named) != named or identity(os.lstat(named)) != identity(value)
+                or not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.geteuid()
+                or parent.st_mode & 0o022):
+            fail("FILE_GENERATION_GATE_CHANGED")
+        with open("/proc/self/fdinfo/" + str(self.gate_fd), encoding="ascii") as source:
+            details = source.read()
+        if not re.search(r"^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+"
+                         r"[0-9a-f]+:[0-9a-f]+:" + str(value.st_ino)
+                         + r"\s+0\s+EOF\s*$", details, re.M):
+            fail("FILE_GENERATION_EXCLUSIVE_GATE_REQUIRED")
+
+    def assert_owner(self):
+        self.assert_gate()
+        if identity(private_directory(self.root)) != self.root_identity:
+            fail("FILE_GENERATION_STORE_CHANGED")
+        for name, expected in (("objects", self.objects_identity),
+                               ("captures", self.captures_identity)):
+            if identity(private_directory(os.path.join(self.root, name))) != expected:
+                fail("FILE_GENERATION_STORE_CHANGED")
 
     def _copy(self, source_fd, name, objects_fd, source, relative):
         opened = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
@@ -442,56 +544,3 @@ class FileGenerations:
         finally:
             os.close(objects)
             os.close(fd)
-
-    def verify(self, sha256):
-        history = self._history(sha256)
-        manifest = history["selected"]
-        if manifest is None:
-            fail("FILE_GENERATION_MANIFEST_NOT_FOUND")
-        fd = os.open(os.path.join(self.root, "objects"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
-            for entry in manifest["entries"]:
-                self.assert_owner()
-                self._object(fd, entry)
-        finally:
-            os.close(fd)
-        return manifest
-
-    def restore(self, sha256, target):
-        manifest = self.verify(sha256)
-        # Always a new private stage. Never merge into or roll back live data.
-        if (not os.path.isabs(target) or os.path.normpath(target) != target
-                or os.path.realpath(os.path.dirname(target)) != os.path.dirname(target)):
-            fail("FILE_GENERATION_RESTORE_TARGET_INVALID")
-        for protected in [self.root] + [source["path"] for source in manifest["sources"]]:
-            if os.path.commonpath([target, protected]) in (target, protected):
-                fail("FILE_GENERATION_RESTORE_TARGET_INVALID")
-        private_directory(target, create=True)
-        objects = os.open(os.path.join(self.root, "objects"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        try:
-            for entry in manifest["entries"]:
-                self.assert_owner()
-                destination = os.path.join(target, entry["source"], *entry["path"].split("/"))
-                parent = os.path.dirname(destination)
-                os.makedirs(parent, mode=0o700, exist_ok=True)
-                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
-                try:
-                    self._object(objects, entry, fd)
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-                # Persist every newly created ancestor, including empty sources.
-                current = parent
-                while current != target:
-                    sync_directory(current)
-                    current = os.path.dirname(current)
-            for source in manifest["sources"]:
-                directory = os.path.join(target, source["name"])
-                os.makedirs(directory, mode=0o700, exist_ok=True)
-                sync_directory(directory)
-            sync_directory(target)
-            self.assert_owner()
-            return {"manifestSha256": sha256, "files": len(manifest["entries"]),
-                    "bytes": sum(entry["bytes"] for entry in manifest["entries"])}
-        finally:
-            os.close(objects)

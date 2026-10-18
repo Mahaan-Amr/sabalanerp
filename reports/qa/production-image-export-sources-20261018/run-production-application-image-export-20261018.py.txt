@@ -1,0 +1,79 @@
+import pathlib,json,hashlib,base64,uuid,subprocess
+repo=pathlib.Path('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp')
+observed=json.loads((repo/'reports/qa/production-image-capacity-readonly-779499a1ded446258513240d00ace266.json').read_text())
+prior=json.loads(observed['stdout']);assert observed['exitCode']==0 and len(prior['services'])==6
+operation='production-image-export-'+uuid.uuid4().hex
+files={}
+for name,p in [('export.py',pathlib.Path('D:/sabalanerp-online-qa/export-production-application-images-20261018.py')),('inspect.mjs',repo/'scripts/lib/private-docker-image-archive.mjs'),('native-owner',pathlib.Path('D:/sabalanerp-online-qa/native-process-owner-storage-c2b09689'))]:
+ b=p.read_bytes();files[name]={'bytes':base64.b64encode(b).decode(),'sha256':hashlib.sha256(b).hexdigest()}
+assert files['native-owner']['sha256']=='c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83'
+spec={'operation':operation,'prior':prior,'files':files,'preflight':json.loads((repo/'reports/qa/both-host-storage-preflight-stage-20261018.json').read_text())}
+remote=r'''import os,stat,fcntl,pathlib,subprocess,json,hashlib,base64,time,shutil
+P=pathlib.Path;spec=json.loads(INPUT);os.umask(0o077);os.chdir('/opt/sabalanerp')
+private=P('/root/sabalan-recovery-private');active=private/'production-images-active.json';root=private/spec['operation'];mutated=False;closed=False;native_closed=False
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def write(p,b,mode=0o400):
+ with p.open('xb') as f:os.fchmod(f.fileno(),mode);f.write(b);f.flush();os.fsync(f.fileno())
+ sync(p.parent)
+def save(p,v):write(p,json.dumps(v,indent=2).encode())
+def ident(p):
+ s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode&0o022,'UNSAFE_FILE');return (s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+def read_services():
+ ids=subprocess.check_output(['docker','ps','-aq','--no-trunc','--filter','label=com.docker.compose.project=sabalanerp'],text=True).split()
+ values=json.loads(subprocess.check_output(['docker','inspect',*ids],text=True));result=[]
+ for v in values:
+  service=(v['Config'].get('Labels') or {}).get('com.docker.compose.service')
+  if service not in ['backend','frontend','inquiry','nginx','postgres','clamav']:continue
+  require(v['State']['Running'] and v['State'].get('Health',{}).get('Status')=='healthy','SOURCE_SERVICE_UNHEALTHY')
+  result.append({'service':service,'containerId':v['Id'],'imageId':v['Image'],'startedAt':v['State']['StartedAt']})
+ require(len(result)==6 and len({v['service'] for v in result})==6,'SOURCE_SERVICE_INVENTORY_UNPROVEN');return sorted(result,key=lambda v:v['service'])
+try:
+ lock=P('/opt/sabalanerp/.deploy-state/deployment.lock');before_lock=ident(lock);fd=os.open(lock,os.O_RDWR|os.O_NOFOLLOW)
+ require((os.fstat(fd).st_dev,os.fstat(fd).st_ino)==before_lock[:2],'LOCK_CHANGED');saved=fcntl.fcntl(fd,fcntl.F_DUPFD_CLOEXEC,20);os.close(fd);os.dup2(saved,9,inheritable=True);fcntl.flock(9,fcntl.LOCK_EX|fcntl.LOCK_NB)
+ require(subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==spec['prior']['productionCommit'],'SOURCE_COMMIT_CHANGED')
+ before=read_services();expected=sorted([{k:v[k] for k in ['service','containerId','imageId','startedAt']} for v in spec['prior']['services']],key=lambda v:v['service']);require(before==expected,'SOURCE_RUNTIME_CHANGED')
+ pre=spec['preflight']
+ for n,h in pre['sourceHashes'].items():require(hashlib.sha256(P(pre['directory'],n).read_bytes()).hexdigest()==h,'PREFLIGHT_SOURCE_CHANGED')
+ subprocess.run(['sh',pre['directory']+'/deploy/scripts/storage-preflight.sh','deploy/.env.prod','/opt/sabalanerp',pre['directory'],'0','0'],check=True,pass_fds=(9,),stdout=subprocess.DEVNULL)
+ st=private.lstat();require(private.resolve(strict=True)==private and stat.S_ISDIR(st.st_mode) and st.st_uid==0 and not st.st_mode&0o077,'UNSAFE_PRIVATE_ROOT');require(not active.exists(),'ACTIVE_IMAGE_CAPTURE_EXISTS')
+ require(shutil.disk_usage(private).free>=6*1024**3,'EXPORT_CAPACITY_INSUFFICIENT');root.mkdir(mode=0o700);sync(private)
+ for n,f in spec['files'].items():
+  b=base64.b64decode(f['bytes'],validate=True);require(hashlib.sha256(b).hexdigest()==f['sha256'],'SOURCE_HASH_INVALID');write(root/n,b,0o500 if n=='native-owner' else 0o400)
+ selection={}
+ for v in before:
+  if v['service'] not in ['backend','frontend','inquiry']:continue
+  i=json.loads(subprocess.check_output(['docker','image','inspect',v['imageId']],text=True))[0];require(i['Id']==v['imageId'] and i['Size']<=1024**3,'IMAGE_SIZE_OR_ID_CHANGED');selection[v['service']]={'imageId':i['Id'],'rootfsDiffIds':i['RootFS']['Layers']}
+ save(root/'selection.json',{'services':selection})
+ intent={'operation':spec['operation'],'root':str(root),'pid':os.getpid(),'startTicks':P('/proc/self/stat').read_text().rsplit(') ',1)[1].split()[19],'bootId':P('/proc/sys/kernel/random/boot_id').read_text().strip(),'sourceCommit':spec['prior']['productionCommit'],'phase':'PRIVATE_IMMUTABLE_IMAGE_EXPORT','healthyApplicationPoint':False,'publicOnlineAdmission':False}
+ save(active,intent);mutated=True
+ env=dict(os.environ,SABALAN_NATIVE_STORAGE_ROOT=str(root),SABALAN_NATIVE_STORAGE_MAX_BYTES=str(4*1024**3),SABALAN_NATIVE_STORAGE_RESERVE_BYTES=str(2*1024**3))
+ token='export-'+spec['operation'];p=subprocess.Popen([str(root/'native-owner'),'900',token,'python3','-I','-B',str(root/'export.py'),str(root)],env=env,pass_fds=(9,),stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+ birth=P('/proc/'+str(p.pid)+'/stat').read_text().rsplit(') ',1)[1].split()[19];save(root/'native-start.json',{'pid':p.pid,'startTicks':birth,'bootId':intent['bootId']})
+ output=bytearray()
+ with (root/'native.log').open('xb') as log:
+  while chunk:=p.stdout.read(65536):
+   require(len(output)+len(chunk)<=2*1024**2,'NATIVE_OUTPUT_LIMIT');output.extend(chunk);log.write(chunk)
+  status=p.wait();log.flush();os.fsync(log.fileno())
+ require(output.endswith(('\nSABALAN_NATIVE_REAPED '+token+' '+str(status)+'\n').encode()),'NATIVE_COMPLETION_UNPROVEN');save(root/'native-completion.json',{'status':status,'outputSha256':hashlib.sha256(output).hexdigest()});native_closed=True
+ source_after=read_services();same=source_after==before and subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==intent['sourceCommit']
+ component=json.loads((root/'image-set-component-proof.json').read_text()) if status==0 else None
+ result={'operation':spec['operation'],'root':str(root),'nativeExitCode':status,'nativeClosureVerified':True,'component':component,'sourceServicesBefore':before,'sourceServicesAfter':source_after,'sourceUnchanged':same,'healthyApplicationPoint':False,'publicOnlineAdmission':False,'availableBytes':shutil.disk_usage(private).free}
+ save(root/'host-component-proof.json',result);require(json.loads(active.read_text())==intent,'INTENT_CHANGED');os.rename(active,root/'closed-image-owner-intent.json');sync(root);sync(private);closed=True
+ print(json.dumps(result));raise SystemExit(0 if status==0 and same else 1)
+except BaseException:
+ if mutated and not closed:
+  try:save(root/'ownership-held-unproven.json',{'nativeClosed':native_closed,'phase':'OWNERSHIP_HELD_UNPROVEN'})
+  except BaseException:pass
+  while True:time.sleep(1)
+ raise
+'''.replace('INPUT',repr(json.dumps(spec)))
+if __name__=='__main__':
+ (repo/('reports/qa/'+operation+'-intent.json')).write_text(json.dumps({'operation':operation,'sources':{n:f['sha256'] for n,f in files.items()},'scope':'private current application image component only'},indent=2)+'\n')
+ r=subprocess.run(['ssh','-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=15','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3','root@94.182.85.254','python3 -B -'],input=remote,text=True,capture_output=True)
+ report={'sshExitCode':r.returncode,'stdout':r.stdout,'stderr':r.stderr}
+ (repo/('reports/qa/'+operation+'.json')).write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report));raise SystemExit(r.returncode)

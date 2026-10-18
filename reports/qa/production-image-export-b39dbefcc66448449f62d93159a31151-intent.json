@@ -1,0 +1,9 @@
+{
+  "operation": "production-image-export-b39dbefcc66448449f62d93159a31151",
+  "sources": {
+    "export.py": "d0055d9a66eba74d70aa3c30aad64738f2d237df233f8f346c707085e5f6306c",
+    "inspect.mjs": "eb46c61e52f3d90b5a480fedb30cedcd8a6bad38b2e060dab4bff42f46ac3788",
+    "native-owner": "c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83"
+  },
+  "scope": "private current application image component only"
+}

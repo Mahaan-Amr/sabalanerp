@@ -4,6 +4,8 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 ## Current foundation
 
+- The current production backend/frontend/Inquiry immutable image bytes now have native-owned private exports with verified archive graphs and full local gzip round trips. Six healthy serving identities were preserved. Independent custody, expanded diff-ID/materialization evidence and application restoration remain pending. See [actual image export evidence](../../reports/qa/production-application-image-export-20261018.md).
+
 - The private HR document adapter now stages/restores/removes exact versioned files with immutable receipts and explicit retained-copy erasure status. Native stale-receipt/root/restore cases passed; durable domain cleanup-row and real route integration remain pending. See [HR storage evidence](../../reports/qa/hr-versioned-file-transaction-20261018.md).
 
 - Private two-key file relocation now preserves both claims through destination publication, source deletion history and a durable pair receipt. Actual interrupted-owner, capacity contention and stale-restore refusal passed alongside core/stream/upload/legacy regressions. HR routes and physical erasure remain pending. See [move evidence](../../reports/qa/versioned-file-move-20261018.md).

@@ -401,7 +401,7 @@ export class VersionedFilePublication {
     });
   }
 
-  private async *objectChunks(file: string, object: NonNullable<Version['object']>) {
+  private async *objectChunks(file: string, object: NonNullable<Version['object']>, assertOwned = () => this.work.assertActive()) {
     const descriptor = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const before = await descriptor.stat({ bigint: true });
@@ -409,7 +409,7 @@ export class VersionedFilePublication {
         || (before.mode & 0o222n) || before.size !== BigInt(object.bytes)) fail('FILE_VERSION_OBJECT_CHANGED');
       const digest = createHash('sha256'); let count = 0;
       for (;;) {
-        this.work.assertActive();
+        assertOwned();
         const chunk = Buffer.alloc(262144), { bytesRead } = await descriptor.read(chunk, 0, chunk.length, null);
         if (!bytesRead) break;
         count += bytesRead;
@@ -439,11 +439,7 @@ export class VersionedFilePublication {
     await this.assertDirectories(); return bytes;
   }
 
-  /** Metadata-only private component cut. The caller must additionally prove
-   * native fleet/SQL closure, coherent database/SQLite/privacy coverage and
-   * dependency retention. This never publishes a healthy application point. */
-  async seal(captureId: string, exclusiveGateFd: number) {
-    if (typeof captureId !== 'string' || !shaPattern.test(captureId)) fail('FILE_VERSION_SELECTION_INVALID');
+  private exclusiveGate(exclusiveGateFd: number) {
     const expected = this.work.gateIdentity();
     const assertGate = () => {
       const value = nativeFs.fstatSync(exclusiveGateFd, { bigint: true });
@@ -458,6 +454,148 @@ export class VersionedFilePublication {
       if (!new RegExp('^lock:\\s+\\d+:\\s+FLOCK\\s+ADVISORY\\s+WRITE\\s+\\S+\\s+[0-9a-f]+:[0-9a-f]+:'
         + expected.inode + '\\s+0\\s+EOF\\s*$', 'm').test(details)) fail('FILE_VERSION_EXCLUSIVE_GATE_REQUIRED');
     };
+    assertGate(); return assertGate;
+  }
+
+  /** One initial baseline under the real exclusive gate, without rewriting any
+   * live inode. The controller must first retire unregistered/legacy writers;
+   * this method cannot fence a noncooperating process or certify application
+   * coherence. Every post-intent failure leaves adoption unresolved. There is
+   * deliberately no resume, overwrite or timeout-based ownership reset. */
+  async adoptLegacy(captureId: string, exclusiveGateFd: number) {
+    if (typeof captureId !== 'string' || !shaPattern.test(captureId)) fail('FILE_VERSION_SELECTION_INVALID');
+    const assertGate = this.exclusiveGate(exclusiveGateFd);
+    await this.assertDirectories();
+    const parts = ['objects', 'versions', 'heads', 'pending', 'seals', 'reservations'];
+    if (!same((await fs.readdir(this.root)).sort(), [...parts].sort())) fail('FILE_VERSION_ADOPTION_REQUIRES_EMPTY_STORE');
+    for (const part of parts) {
+      if ((await fs.readdir(path.join(this.root, part))).length) fail('FILE_VERSION_ADOPTION_REQUIRES_EMPTY_STORE');
+    }
+    const assertMounts = async () => {
+      const mounts = (await fs.readFile('/proc/self/mountinfo', 'utf8')).trim().split('\n').map(line =>
+        line.split(' ')[4].replace(/\\([0-7]{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8))));
+      if (mounts.some(mount => [this.root, this.liveRoot].some(root => mount.startsWith(root + '/')))) fail('FILE_VERSION_NESTED_MOUNT');
+    };
+    const inventory = async () => {
+      await assertMounts();
+      const files: Array<{ key: string; live: Identity }> = [], directories: string[] = [];
+      let totalBytes = 0, metadataBytes = encoded(this.cutManifest(captureId, [])).length;
+      const device = this.directories.get(this.liveRoot)!.device;
+      const walk = async (directory: string, prefix: string) => {
+        assertGate(); const before = await fs.lstat(directory, { bigint: true });
+        if (!before.isDirectory() || before.uid !== BigInt(process.getuid!()) || (before.mode & 0o022n)
+          || String(before.dev) !== device || await fs.realpath(directory) !== directory) fail('FILE_VERSION_LEGACY_INVENTORY_UNSAFE');
+        directories.push(directory);
+        if (directories.length > 10000) fail('FILE_VERSION_INVENTORY_CAPACITY');
+        const children = (await fs.readdir(directory)).sort();
+        // Future reservations count every parent prefix of retained keys.
+        // An empty legacy directory has no such key and cannot be silently
+        // omitted from that budget. Its explicit preparation belongs to the
+        // controller; adoption never removes an existing directory.
+        if (directory !== this.liveRoot && !children.length) fail('FILE_VERSION_LEGACY_EMPTY_DIRECTORY_UNSUPPORTED');
+        for (const child of children) {
+          const key = prefix + child, target = path.join(directory, child), value = await fs.lstat(target, { bigint: true });
+          this.key(key);
+          if (value.isDirectory()) await walk(target, key + '/');
+          else {
+            if (!value.isFile() || value.nlink !== 1n || value.uid !== BigInt(process.getuid!()) || (value.mode & 0o022n)
+              || String(value.dev) !== device) fail('FILE_VERSION_LEGACY_INVENTORY_UNSAFE');
+            if (value.size > 2n * 1024n ** 3n) fail('FILE_VERSION_INVENTORY_CAPACITY');
+            totalBytes += Number(value.size); metadataBytes += encoded({ key, sha256: '0'.repeat(64) }).length;
+            files.push({ key, live: identity(value) });
+            if (files.length > 10000 || totalBytes > 32 * 1024 ** 3 || metadataBytes > 16 * 1024 * 1024) {
+              fail('FILE_VERSION_INVENTORY_CAPACITY');
+            }
+          }
+        }
+        if (!same(identity(before), identity(await fs.lstat(directory, { bigint: true })))) fail('FILE_VERSION_LEGACY_SOURCE_CHANGED');
+      };
+      await walk(this.liveRoot, ''); await assertMounts();
+      files.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+      return { files, directories, totalBytes };
+    };
+    const original = await inventory(), inventorySha256 = hash(encoded(original));
+    const capacity = await fs.statfs(this.root, { bigint: true });
+    if (capacity.bsize <= 0n || capacity.bsize > 1024n ** 2n) fail('FILE_VERSION_ADOPTION_CAPACITY_REQUIRED');
+    const blocks = (bytes: bigint) => (bytes + capacity.bsize - 1n) / capacity.bsize * capacity.bsize;
+    const metadataBudget = BigInt(original.files.length) * (2n * blocks(16384n) + blocks(8192n) + 4n * capacity.bsize)
+      + 64n * 1024n ** 2n;
+    if (capacity.ffree < BigInt(original.files.length) * 4n + 64n
+      || capacity.bavail * capacity.bsize < BigInt(original.totalBytes) + metadataBudget + 1024n ** 3n) {
+      fail('FILE_VERSION_ADOPTION_CAPACITY_REQUIRED');
+    }
+    assertGate(); await this.assertDirectories();
+    const pending = path.join(this.root, 'pending', 'legacy-adoption.json');
+    const held = await fs.open(pending, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o400);
+    let heldIdentity: Identity;
+    try {
+      await held.writeFile(encoded({ format: 'sabalan-file-legacy-adoption-intent/v1', captureId, inventorySha256,
+        source: this.cutManifest(captureId, []).source, gate: this.work.gateIdentity() }));
+      await held.sync(); heldIdentity = identity(await held.stat({ bigint: true })); await syncDirectory(path.dirname(pending));
+    } finally { await held.close(); }
+    // The whole inventory was bounded once under EX. Do not rescan N existing
+    // reservations for each of N legacy files while ordinary writers are fenced.
+    for (const selected of original.files) {
+      assertGate(); await this.assertDirectories();
+      const { id, target } = this.key(selected.key), name = randomUUID(), objectPath = path.join(this.root, 'objects', name);
+      const descriptor = await fs.open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const digest = createHash('sha256'); let bytes = 0;
+      try {
+        if (!same(identity(await descriptor.stat({ bigint: true })), selected.live)) fail('FILE_VERSION_LEGACY_SOURCE_CHANGED');
+        async function* chunks() {
+          for (;;) {
+            assertGate(); const buffer = Buffer.alloc(262144), { bytesRead } = await descriptor.read(buffer, 0, buffer.length, null);
+            if (!bytesRead) break;
+            bytes += bytesRead;
+            if (bytes > Number(selected.live.bytes)) fail('FILE_VERSION_LEGACY_SOURCE_CHANGED');
+            const chunk = buffer.subarray(0, bytesRead); digest.update(chunk); yield chunk;
+          }
+        }
+        const copied = await publishDurableStream(objectPath, Readable.from(chunks(), { objectMode: false, highWaterMark: 262144 }));
+        assertGate();
+        if (copied.byteLength !== bytes || bytes !== Number(selected.live.bytes)
+          || !same(identity(await descriptor.stat({ bigint: true })), selected.live)
+          || !same(await this.current(target), selected.live)) fail('FILE_VERSION_LEGACY_SOURCE_CHANGED');
+        await descriptor.sync();
+      } finally { await descriptor.close(); }
+      await fs.chmod(objectPath, 0o400); await syncExistingDurableFile(objectPath);
+      const object = { name, bytes, sha256: digest.digest('hex') };
+      for await (const _chunk of this.objectChunks(objectPath, object, assertGate)) { /* bounded independent read-back */ }
+      const version: Version = { format: 'sabalan-file-version/v1', key: selected.key, generation: 1,
+        previousSha256: null, operation: 'PUT', object, live: selected.live };
+      const raw = encoded(version), sha256 = hash(raw); this.decode(raw);
+      for (const [targetPath, content] of [
+        [path.join(this.root, 'reservations', id + '.json'), encoded({ format: 'sabalan-file-key-reservation/v1', key: selected.key })],
+        [path.join(this.root, 'versions', sha256 + '.json'), raw], [path.join(this.root, 'heads', id + '.json'), raw],
+      ] as const) {
+        assertGate(); await this.assertDirectories();
+        await publishDurableFile(targetPath, content); await fs.chmod(targetPath, 0o400); await syncExistingDurableFile(targetPath);
+        if (!(await readImmutable(targetPath, 16384)).equals(content)) fail('FILE_VERSION_RECORD_CHANGED');
+      }
+    }
+    if (!same(original, await inventory())) fail('FILE_VERSION_LEGACY_SOURCE_CHANGED');
+    for (const directory of original.directories) { assertGate(); await syncDirectory(directory); }
+    await syncAncestors(this.liveRoot);
+    const proof = encoded({ format: 'sabalan-file-legacy-adoption/v1', captureId, inventorySha256,
+      files: original.files.length, bytes: original.totalBytes, source: this.cutManifest(captureId, []).source,
+      gate: this.work.gateIdentity(), publicOnlineAdmission: false });
+    const proofPath = path.join(this.root, 'legacy-adoption-' + captureId + '.json');
+    assertGate(); await this.assertDirectories();
+    await publishDurableFile(proofPath, proof); await fs.chmod(proofPath, 0o400); await syncExistingDurableFile(proofPath);
+    if (!(await readImmutable(proofPath, 16384)).equals(proof)
+      || !same(identity(await fs.lstat(pending, { bigint: true })), heldIdentity!)
+      || !same(await fs.readdir(path.dirname(pending)), ['legacy-adoption.json'])) fail('FILE_VERSION_COMPLETION_UNPROVEN');
+    assertGate(); await this.assertDirectories();
+    await fs.unlink(pending); await syncDirectory(path.dirname(pending));
+    return { sha256: hash(proof), files: original.files.length, bytes: original.totalBytes, publicOnlineAdmission: false };
+  }
+
+  /** Metadata-only private component cut. The caller must additionally prove
+   * native fleet/SQL closure, coherent database/SQLite/privacy coverage and
+   * dependency retention. This never publishes a healthy application point. */
+  async seal(captureId: string, exclusiveGateFd: number) {
+    if (typeof captureId !== 'string' || !shaPattern.test(captureId)) fail('FILE_VERSION_SELECTION_INVALID');
+    const assertGate = this.exclusiveGate(exclusiveGateFd);
     assertGate(); await this.assertDirectories();
     if ((await fs.readdir(path.join(this.root, 'pending'))).length) fail('FILE_VERSION_PENDING_OPERATION');
     // Device equality alone does not detect same-device bind aliases.

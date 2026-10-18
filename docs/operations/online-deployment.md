@@ -94,6 +94,12 @@ admission and public online switching are still disabled. See
 
 ## Admission work still required
 
+Private legacy-file baseline adoption now has seven native acceptance cases,
+including actual interrupted-owner death. It does not activate ordinary writers
+or certify privacy/controller coverage. See [baseline evidence](../../reports/qa/versioned-file-legacy-20261018.md).
+Current 434-migration financial and concurrent migration tests also passed;
+actual production-425 overlap remains unproven. See [financial evidence](../../reports/qa/current-accounting-and-migration-20261018.md).
+
 The new coherent **diagnostic** capture also completed independent RSA decryption,
 file/SQLite verification and a native 427-migration PostgreSQL restoration on the
 backup host. PostgreSQL shut down normally; fifteen persistent foreign service

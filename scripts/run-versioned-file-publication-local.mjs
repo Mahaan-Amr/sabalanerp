@@ -32,9 +32,11 @@ assert.ok(slot.Config.Env.includes('BACKEND_RUNTIME_ROLE=candidate'));
 assert.equal(slot.Image, before.backend.image);
 assert.ok(slot.Mounts.some(mount => mount.Type === 'volume' && mount.RW
   && mount.Name === 'sabalanerp-local_online_runtime_acceptance' && mount.Destination === '/app/online-runtime-acceptance'));
-const directory = '/app/online-runtime-acceptance/versioned-file-publication-' + randomBytes(16).toString('hex');
+const suite = process.env.ONLINE_VERSIONED_FILES_SUITE || 'publication';
+assert.ok(['publication', 'legacy'].includes(suite));
+const directory = '/app/online-runtime-acceptance/versioned-file-' + suite + '-' + randomBytes(16).toString('hex');
 const ts = require('../backend/node_modules/typescript');
-const files = { 'fixture.cjs': fs.readFileSync(path.join(root, 'tests/online-deployment/versioned-file-publication.fixture.cjs')) };
+const files = { 'fixture.cjs': fs.readFileSync(path.join(root, 'tests/online-deployment/versioned-file-' + suite + '.fixture.cjs')) };
 const sourceHashes = {};
 for (const name of ['kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext',
   'durableFilePublication', 'versionedFilePublication', 'dispatchDocuments/filesystemStorage']) {
@@ -67,7 +69,7 @@ const output = await new Promise((resolve, reject) => {
   child.once('close', (code, signal) => code === 0 && !signal ? resolve(stdout)
     : reject(Error('VERSIONED_FILE_PUBLICATION_NATIVE_FIXTURE_FAILED ' + JSON.stringify({ code, signal, stdout, stderr, directory }))));
 });
-assert.match(output, /# fail 0\r?\n/); const report = { format: 'sabalan-versioned-file-publication-native/v1', pass: true, tap: output, workingRoot: directory };
+assert.match(output, /# fail 0\r?\n/); const report = { format: 'sabalan-versioned-file-publication-native/v1', suite, pass: true, tap: output, workingRoot: directory };
 const reportPath = path.join(root, 'reports/qa', path.basename(directory) + '.json');
 const sources = Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')]));
 // Preserve closed test output before observing shared services. An unrelated

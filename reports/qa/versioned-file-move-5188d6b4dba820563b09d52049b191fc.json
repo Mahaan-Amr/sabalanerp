@@ -1,0 +1,49 @@
+{
+  "format": "sabalan-versioned-file-publication-native/v1",
+  "suite": "move",
+  "pass": true,
+  "tap": "TAP version 13\n# Subtest: a version-bound move retains both histories and restores without clobbering a new file\nok 1 - a version-bound move retains both histories and restores without clobbering a new file\n  ---\n  duration_ms: 1576.973008\n  type: 'test'\n  ...\n# Subtest: both move keys remain owned through the actual destination head and stale source receipts never move newer bytes\nok 2 - both move keys remain owned through the actual destination head and stale source receipts never move newer bytes\n  ---\n  duration_ms: 1182.301368\n  type: 'test'\n  ...\n# Subtest: a busy second key retires only the untouched first claim and preserves the other owner\nok 3 - a busy second key retires only the untouched first claim and preserves the other owner\n  ---\n  duration_ms: 404.915581\n  type: 'test'\n  ...\n# Subtest: real concurrent reservation refusal retires only the unstarted move pair\nok 4 - real concurrent reservation refusal retires only the unstarted move pair\n  ---\n  duration_ms: 870.357589\n  type: 'test'\n  ...\n# Subtest: full reservation inventory refuses the move without stranding unchanged source and destination\nok 5 - full reservation inventory refuses the move without stranding unchanged source and destination\n  ---\n  duration_ms: 2830.741172\n  type: 'test'\n  ...\n# Subtest: actual process death between destination publication and source deletion preserves both claims and all original bytes\nok 6 - actual process death between destination publication and source deletion preserves both claims and all original bytes\n  ---\n  duration_ms: 800.519633\n  type: 'test'\n  ...\n1..6\n# tests 6\n# suites 0\n# pass 6\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 7719.025015\n",
+  "workingRoot": "/app/online-runtime-acceptance/versioned-file-move-5188d6b4dba820563b09d52049b191fc",
+  "canonicalServicesUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "sourceHashes": {
+    "kernelWriteAdmission.ts": "8952c65ddde926fbc5136be933d1c7401ea269191cbcba64dd20ba6d95bdd875",
+    "runtimeBoundaryJournal.ts": "d94912a6fb15d759d8270c067e96c81964f1a5464cc54c26df28636ccbe2e9eb",
+    "runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a",
+    "versionedFilePublication.ts": "cbc82e980372af9f7a57a2c8600ab7a3b2ba4d6981c5f9b7797f21e03d1c95cb",
+    "dispatchDocuments/filesystemStorage.ts": "fdf6fbb74562b030c03208c629ec5fe0d89084e00833a18d92815a00b7f283e7"
+  },
+  "sources": {
+    "fixture.cjs": "aabc142bbec600fee5a09c43435a805d750b561ec7a319c72d87681194704957",
+    "kernelWriteAdmission.js": "b8dd4d6443eb4f525613fd48d10fa838ccbbd81f43d412674464da31af6c710b",
+    "runtimeBoundaryJournal.js": "c75bd2c91cfeff77f52e6f245fc23c2b88c54397ab3d9bc89f4b316e7b48d5dc",
+    "runtimeTaskAdmission.js": "9e1a08c587f07b76b67becbe9367c7fbcfc79e061b1147dfee212da953196648",
+    "runtimeWorkContext.js": "ed0a47227bb39a5b0e3ea1aae8be6f753bb2d88e0247832b7108f29d1e10156a",
+    "durableFilePublication.js": "3b9ba70126478bbb1922b01e14bb537d6cc1a4c6528a0bec30e07a7e465d259d",
+    "versionedFilePublication.js": "616f70da8b112afbdafdc90794d20a391ebc5f110a07a4feb74576bed0d84d0f",
+    "dispatchDocuments/filesystemStorage.js": "0a36a4ef7ef6a0fc5f5ef3acac3383b2f1f9b0923e64e729ea6da8aa9b725198"
+  },
+  "productionAdmission": false
+}

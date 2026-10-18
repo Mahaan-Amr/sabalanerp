@@ -4,6 +4,8 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 ## Current foundation
 
+- Private two-key file relocation now preserves both claims through destination publication, source deletion history and a durable pair receipt. Actual interrupted-owner, capacity contention and stale-restore refusal passed alongside core/stream/upload/legacy regressions. HR routes and physical erasure remain pending. See [move evidence](../../reports/qa/versioned-file-move-20261018.md).
+
 - A private admitted file publisher now retains independent content before live publication/ACK, ordered replacement/deletion history and unresolved interruption holds. Its explicit Dispatch adapter, actual lost-Node refusal, cross-process capacity reservations and ten Linux tests passed, with frozen reviews and file/PDF regressions. Ordinary runtime construction is unchanged. The 10,000-head metadata cut still took 33 seconds when warm; a precomputed index, full writer/legacy/privacy coverage and native controller integration remain required. See [per-write file evidence](../../reports/qa/versioned-file-publication-20261018.md).
 
 - A hash-pinned sealed-file reader now materializes independent immutable objects outside the write pause. An actual reader process stopped mid-copy while a later exclusive cut changed live files; it then restored the original bytes. Corruption/selection refusal and the complete 10,000-generation/interruption regression passed, with both frozen reviews. Capture still copies live files under EX10; per-write versions and a bounded coherent cut remain required. See [sealed materialization evidence](../../reports/qa/sealed-file-generation-20261018.md).
@@ -99,6 +101,11 @@ including actual interrupted-owner death. It does not activate ordinary writers
 or certify privacy/controller coverage. See [baseline evidence](../../reports/qa/versioned-file-legacy-20261018.md).
 Current 434-migration financial and concurrent migration tests also passed;
 actual production-425 overlap remains unproven. See [financial evidence](../../reports/qa/current-accounting-and-migration-20261018.md).
+An exact old production schema model regenerated for a local diagnostic now
+demonstrably fails to read a real new credit-funded allocation. Retirement and a
+reader-compatible rollback predecessor are therefore required before enabling
+that representation. This is not an actual production-image overlap test. See
+[old-reader diagnostic](../../reports/qa/production-old-reader-credit-overlap-20261018.md).
 
 The new coherent **diagnostic** capture also completed independent RSA decryption,
 file/SQLite verification and a native 427-migration PostgreSQL restoration on the

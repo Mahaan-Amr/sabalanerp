@@ -11,6 +11,8 @@ type Identity = { device: string; inode: string; bytes: string; modified: string
 type Version = { format: 'sabalan-file-version/v1'; key: string; generation: number; previousSha256: string | null;
   operation: 'PUT' | 'DELETE'; object: { name: string; sha256: string; bytes: number } | null; live: Identity | null };
 type StreamInput = { source: Readable; assertReady(): void; finish(): Promise<void> };
+type FileClaim = { key: string; id: string; target: string; pending: string; heldIdentity: Identity;
+  previous: { sha256: string; value: Version } | null; actual: Identity | null };
 const hash = (data: Uint8Array | string) => createHash('sha256').update(data).digest('hex');
 const shaPattern = /^[a-f0-9]{64}$/;
 const fail = (code: string): never => { throw Object.assign(new Error(code), { code }); };
@@ -302,28 +304,122 @@ export class VersionedFilePublication {
 
   remove(key: string) { return this.change(key, null, true); }
 
-  private change(key: string, bytes: Buffer | StreamInput | null, replace: boolean, expectedVersion?: string): Promise<string> {
+  private async claim(key: string, operation: 'PUT' | 'DELETE' | 'MOVE', move?: {
+    operationId: string; sourceKey: string; destinationKey: string; expectedSourceSha256: string;
+  }): Promise<FileClaim> {
     const { id, target } = this.key(key);
+    this.work.assertActive(); await this.assertDirectories();
+    const pending = path.join(this.root, 'pending', id + '.json');
+    const held = await fs.open(pending, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o400);
+    let heldIdentity: Identity;
+    try {
+      await held.writeFile(encoded({ key, operationId: move?.operationId ?? randomUUID(), operation, ...(move ? { move } : {}) }));
+      await held.sync(); heldIdentity = identity(await held.stat({ bigint: true })); await syncDirectory(path.dirname(pending));
+    } finally { await held.close(); }
+    const previous = await this.head(key), actual = await this.current(target);
+    if (!same(actual, previous?.value.live ?? null)) fail('FILE_VERSION_UNTRACKED_LIVE_CHANGE');
+    return { key, id, target, pending, heldIdentity: heldIdentity!, previous, actual };
+  }
+
+  private async assertClaim(claim: FileClaim, sha256 = claim.previous?.sha256, live = claim.actual) {
+    this.work.assertActive(); await this.assertDirectories();
+    if ((await this.head(claim.key))?.sha256 !== sha256 || !same(await this.current(claim.target), live)
+      || !same(identity(await fs.lstat(claim.pending, { bigint: true })), claim.heldIdentity)) fail('FILE_VERSION_COMPLETION_UNPROVEN');
+  }
+
+  private async releaseClaim(claim: FileClaim, sha256 = claim.previous?.sha256, live = claim.actual) {
+    await this.assertClaim(claim, sha256, live);
+    await fs.unlink(claim.pending); await syncDirectory(path.dirname(claim.pending));
+  }
+
+  /** A private two-key relocation. Both durable intents remain held until the
+   * destination and source deletion histories plus the pair receipt are durable.
+   * An interrupted pair is never retried or rolled back implicitly. Expected
+   * source identity and no-clobber destination also protect stale HR restores. */
+  move(sourceKey: string, destinationKey: string, expectedSourceSha256: string) {
+    this.key(sourceKey); this.key(destinationKey);
+    if (sourceKey === destinationKey || !shaPattern.test(expectedSourceSha256)) fail('FILE_VERSION_SELECTION_INVALID');
+    return this.work.run(async () => {
+      const move = { operationId: randomUUID(), sourceKey, destinationKey, expectedSourceSha256 };
+      const claims: FileClaim[] = [];
+      for (const key of [sourceKey, destinationKey].sort()) {
+        try { claims.push(await this.claim(key, 'MOVE', move)); }
+        catch (error: any) {
+          // O_EXCL collision did not create a second claim. Only the known
+          // untouched first claim may be retired; never clear another owner.
+          if (error?.code === 'EEXIST') for (const claimed of claims) await this.releaseClaim(claimed);
+          throw error;
+        }
+      }
+      const source = claims.find(claim => claim.key === sourceKey)!;
+      const destination = claims.find(claim => claim.key === destinationKey)!;
+      const refusal = source.previous?.sha256 !== expectedSourceSha256 ? 'FILE_VERSION_MOVE_SOURCE_CHANGED'
+        : !source.actual || !source.previous?.value.object ? 'FILE_VERSION_MOVE_SOURCE_MISSING'
+        : destination.actual ? 'FILE_VERSION_ALREADY_EXISTS'
+        : claims.some(claim => (claim.previous?.value.generation ?? 0) >= 10000) ? 'FILE_VERSION_HISTORY_CAPACITY' : null;
+      if (refusal) {
+        for (const claim of claims) await this.assertClaim(claim);
+        for (const claim of claims) await this.releaseClaim(claim);
+        fail(refusal);
+      }
+      const object = source.previous!.value.object!;
+      const input = Readable.from(this.objectChunks(path.join(this.root, 'objects', object.name), object), {
+        objectMode: false, highWaterMark: 262144,
+      });
+      // Own the internal iterator through its actual destruction, including
+      // refusal before consumption. No arbitrary external stream is accepted.
+      let inputError: unknown;
+      const observe = (error: unknown) => { inputError ||= error; }; input.on('error', observe);
+      const closeInput = async () => {
+        input.destroy();
+        while (!input.closed) await new Promise(resolve => setTimeout(resolve, 5));
+        await new Promise<void>(resolve => setImmediate(resolve));
+      };
+      try {
+        let destinationVersionSha256: string;
+        try {
+          destinationVersionSha256 = await this.change(destinationKey, { source: input,
+            assertReady: () => { if (inputError) throw inputError; },
+            finish: async () => { await closeInput(); if (inputError) throw inputError; } }, false, undefined, destination);
+        } catch (error: any) {
+          // These two reserve refusals precede object/live mutation. The pair
+          // owner may settle only its exact unchanged claims, after disposing
+          // its unconsumed iterator. Other failures preserve both intents.
+          if (['FILE_VERSION_CAPACITY_BUSY', 'FILE_VERSION_INVENTORY_CAPACITY'].includes(error?.code)) {
+            await closeInput();
+            for (const claim of claims) await this.assertClaim(claim);
+            for (const claim of claims) await this.releaseClaim(claim);
+          }
+          throw error;
+        }
+        const sourceVersionSha256 = await this.change(sourceKey, null, true, expectedSourceSha256, source);
+        const destinationHead = await this.head(destinationKey);
+        await this.assertClaim(source, sourceVersionSha256, null);
+        await this.assertClaim(destination, destinationVersionSha256, destinationHead!.value.live);
+        const receipt = encoded({ format: 'sabalan-file-move/v1', ...move, sourceVersionSha256, destinationVersionSha256 });
+        const receiptPath = path.join(this.root, 'move-' + move.operationId + '.json');
+        await publishDurableFile(receiptPath, receipt); await fs.chmod(receiptPath, 0o400); await syncExistingDurableFile(receiptPath);
+        if (!(await readImmutable(receiptPath, 16384)).equals(receipt)) fail('FILE_VERSION_RECORD_CHANGED');
+        await this.releaseClaim(source, sourceVersionSha256, null);
+        await this.releaseClaim(destination, destinationVersionSha256, destinationHead!.value.live);
+        return { sourceVersionSha256, destinationVersionSha256, receiptSha256: hash(receipt) };
+      } finally { await closeInput(); input.removeListener('error', observe); }
+    });
+  }
+
+  private change(key: string, bytes: Buffer | StreamInput | null, replace: boolean, expectedVersion?: string,
+    retainedClaim?: FileClaim): Promise<string> {
     return this.work.run(async () => {
       this.work.assertActive(); await this.assertDirectories();
       if (bytes !== null && !Buffer.isBuffer(bytes)) bytes.assertReady();
       // Even an old QUIESCENT journal cannot settle an interrupted file intent.
-      const pending = path.join(this.root, 'pending', id + '.json');
-      const held = await fs.open(pending, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o400);
-      let heldIdentity: Identity;
-      try {
-        await held.writeFile(encoded({ key, operationId: randomUUID(), operation: bytes === null ? 'DELETE' : 'PUT' }));
-        await held.sync(); heldIdentity = identity(await held.stat({ bigint: true }));
-        await syncDirectory(path.dirname(pending));
-      } finally { await held.close(); }
+      const claim = retainedClaim ?? await this.claim(key, bytes === null ? 'DELETE' : 'PUT');
+      if (claim.key !== key) fail('FILE_VERSION_SELECTION_INVALID');
+      await this.assertClaim(claim);
+      const { id, target, pending, heldIdentity, previous, actual } = claim;
       // Every exception from this point preserves the actual pending record.
-      const previous = await this.head(key), actual = await this.current(target);
-      if (!same(actual, previous?.value.live ?? null)) fail('FILE_VERSION_UNTRACKED_LIVE_CHANGE');
       const retireUnstarted = async () => {
-        this.work.assertActive(); await this.assertDirectories();
-        if ((await this.head(key))?.sha256 !== previous?.sha256 || !same(await this.current(target), actual)
-          || !same(identity(await fs.lstat(pending, { bigint: true })), heldIdentity!)) fail('FILE_VERSION_COMPLETION_UNPROVEN');
-        await fs.unlink(pending); await syncDirectory(path.dirname(pending));
+        if (!retainedClaim) await this.releaseClaim(claim);
       };
       const refusal = expectedVersion !== undefined && previous?.sha256 !== expectedVersion ? 'FILE_VERSION_UPLOAD_CHANGED'
         : previous && previous.value.generation >= 10000 ? 'FILE_VERSION_HISTORY_CAPACITY'
@@ -396,7 +492,7 @@ export class VersionedFilePublication {
       if (!same(await this.current(target), live) || !same(identity(await fs.lstat(pending, { bigint: true })), heldIdentity!)) {
         fail('FILE_VERSION_COMPLETION_UNPROVEN');
       }
-      await fs.unlink(pending); await syncDirectory(path.dirname(pending));
+      if (!retainedClaim) { await fs.unlink(pending); await syncDirectory(path.dirname(pending)); }
       return sha256;
     });
   }

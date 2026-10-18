@@ -1,0 +1,36 @@
+{
+  "format": "sabalan-old-reader-credit-overlap-diagnostic/v1",
+  "pass": true,
+  "oldSourceCommit": "a2c75f1027a069e91837ff433e1c91cdc7746798",
+  "oldSchemaSha256": "28c06abece82c71d2cfa1ffd28ede8b08a90303c4fdbcaec4dbad78b5a8f18ad",
+  "oldClientVersion": "5.22.0",
+  "currentMigrationCount": 434,
+  "actualOldReaderCompatible": false,
+  "actualError": {
+    "code": "P2032",
+    "meta": {
+      "modelName": "AccountingSettlementAllocation",
+      "field": "treasuryTransactionId",
+      "expected_type": "String",
+      "found": "null"
+    }
+  },
+  "actualOldIdOnlyReadPassed": true,
+  "currentReadPassed": true,
+  "exactAllocationRials": "100",
+  "currentCustomerBalanceRials": "0",
+  "productionAdmission": false,
+  "scope": "Exact old production Prisma model regenerated with the installed client against real current-domain writes in an isolated existing-local-service database; not the production image/runtime or a populated 425-to-434 migration",
+  "probeSourceSha256": "72a5c1b28f8ae6b2bb53ff3eb3410ba09b21faad747940f744f1a6cf4bb6b338",
+  "currentFinancialSourceCommit": "f0894d00",
+  "oldSchemaReconstruction": {
+    "command": [
+      "git",
+      "show",
+      "a2c75f1027a069e91837ff433e1c91cdc7746798:backend/prisma/schema.prisma"
+    ],
+    "generatorOnlyChanges": "private output directory and native Windows binary target; all production model declarations unchanged",
+    "clientVersion": "5.22.0"
+  },
+  "failedPriorDiagnostic": "The first probe used amountRials on the allocation header instead of its allocation line. It failed in the assertion before the old-reader observation; both isolated clients were disconnected and the isolated database cleaned. Corrected probe independently reran from a new database."
+}

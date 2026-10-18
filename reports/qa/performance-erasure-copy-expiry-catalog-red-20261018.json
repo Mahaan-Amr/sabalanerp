@@ -1,0 +1,9 @@
+{
+  "exitCode": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "SMS_IR_API_KEY is not set in environment variables\nAssertionError [ERR_ASSERTION]: elapsed retention is not evidence that retained backup bytes were removed\n+ actual - expected\n\n+ 'COMPLETED'\n- 'LIVE_ERASED_BACKUP_PENDING'\n\n    at main (C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\backend\\src\\services\\__tests__\\personnelPerformanceErasure.integration.test.ts:125:14) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: 'COMPLETED',\n  expected: 'LIVE_ERASED_BACKUP_PENDING',\n  operator: 'strictEqual'\n}\n",
+  "storeSha256": "4d754270b7b61f2c8f258c13f782c64a2337eb1329943dd6cdf6d64a575b2020",
+  "fixtureSha256": "51e1bd71259e6ac0d8a1d63113838283fbc27fe6197bf5087f7fd7c70497b587",
+  "productionMutation": false
+}

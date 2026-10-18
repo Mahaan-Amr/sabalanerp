@@ -1,0 +1,21 @@
+{
+  "freeze": "reports/qa/performance-erasure-copy-review-20261018.json",
+  "freezeSha256": "6d39acbc40e8fda65df5f14d6ba0435b3293f123f2775136224ef03505ba59f6",
+  "reports": {
+    "performance-erasure-copy-5d23fd0bab0dbf39cc046222aeffb850.json": "709dc8258c2147add953bdc1e5075020e2d64e1c0876848bd908b78f38e68e99",
+    "performance-erasure-copy-5d23fd0bab0dbf39cc046222aeffb850.core.json": "b52800a16c3d2b2db331b2d2993d04daa0ade46b3d0f572080b6122ddb4a402f",
+    "performance-erasure-copy-unknown-red-20261018.json": "10d1bad029f7b96c3a9dd023dd0a86a6e4a8b1733bb1eed1e2f0c97626695cca",
+    "performance-erasure-copy-missing-red-20261018.json": "992de9908501e96c4b47888acbddd77220e92abea151fcc2d48ed8ea524cc978",
+    "performance-erasure-copy-expiry-catalog-red-20261018.json": "c54c43d0dd86a7b5ae6b16aa67c71f636ad6b6946e11048c2e564b9e12587450",
+    "performance-erasure-copy-expiry-red-20261018.json": "7d14c443e7b529343f5afacc62dbf15c029b31231adf505af3e1adb41c61d453",
+    "performance-erasure-copy-expiry-isolated-red-20261018.json": "c5c316a460951a06b019c7d6812e50d71cd003770ccf94db2e0adddea439c380",
+    "performance-erasure-copy-policy-pre-fix.ts.txt": "9b7da6a61c7e3d16381001316445b0ed9639b1b08ecf3dc999d31419240a8861",
+    "performance-erasure-copy-store-pre-fix.ts.txt": "4d754270b7b61f2c8f258c13f782c64a2337eb1329943dd6cdf6d64a575b2020"
+  },
+  "standardsReview": "PASS",
+  "specReview": "PASS",
+  "architectureCheck": "PASS",
+  "typecheck": "PASS with repository resolveJsonModule and noImplicitAny:false",
+  "productionMutation": false,
+  "wholeProgramComplete": false
+}

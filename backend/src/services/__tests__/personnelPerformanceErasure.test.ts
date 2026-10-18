@@ -44,6 +44,11 @@ assert.equal(decidePerformanceErasureProgress({ ...base, copies: base.copies.map
 assert.equal(decidePerformanceErasureProgress({ ...base, copies: base.copies.map((copy) => copy.location === 'INDEPENDENT_BACKUP'
   ? { ...copy, status: 'RECOVERABLE' as const } : copy), liveErased: true }), 'LIVE_ERASED_BACKUP_PENDING');
 assert.equal(decidePerformanceErasureProgress({ ...base, copies: base.copies.map((copy) => ({ ...copy, status: 'ERASED' as const })), liveErased: true }), 'COMPLETED');
+assert.equal(decidePerformanceErasureProgress({ ...base, liveErased: true,
+  copies: base.copies.map(copy => ({ ...copy, status: copy.location === 'INDEPENDENT_BACKUP' ? 'UNKNOWN' as const : 'ERASED' as const })) }),
+  'LIVE_ERASED_BACKUP_PENDING', 'unknown retained copies cannot certify complete erasure after live deletion');
+assert.equal(decidePerformanceErasureProgress({ ...base, liveErased: true, copies: [] }), 'LIVE_ERASED_BACKUP_PENDING',
+  'an absent copy inventory cannot certify complete erasure');
 assert.equal(decidePerformanceErasureProgress({ ...base, partialFailure: true }), 'PARTIAL_RESTRICTED');
 
 console.log('Performance erasure policy tests passed.');

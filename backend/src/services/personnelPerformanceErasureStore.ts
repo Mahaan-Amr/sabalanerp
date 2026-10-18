@@ -104,15 +104,9 @@ const activePerformanceErasureHold = async (tx: Client, operation: { encryptedSc
 const refreshOperationStatus = async (tx: Client, operationId: string, now = new Date()) => {
   const operation = await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operationId } });
   const activeHold = operation.liveErasedAt ? await activePerformanceErasureHold(tx, operation) : null;
-  const expired = activeHold ? [] : await tx.performanceRecoverableCopy.findMany({ where: { operationId, location: 'INDEPENDENT_BACKUP',
-    status: 'RECOVERABLE', recoverableUntil: { lte: now } }, orderBy: { version: 'desc' } });
-  if (expired[0]) {
-    const latestBackup = await tx.performanceRecoverableCopy.findFirst({ where: { operationId, location: 'INDEPENDENT_BACKUP' }, orderBy: { version: 'desc' } });
-    if (latestBackup?.id === expired[0].id) await tx.performanceRecoverableCopy.create({ data: { operationId, location: 'INDEPENDENT_BACKUP',
-      copyKeyHash: sha256(`expired:${expired[0].id}`), status: 'ERASED', version: latestBackup.version + 1, checkedAt: now,
-      evidenceHash: canonicalPerformanceHash({ operationId, sourceCopyId: expired[0].id, recoverableUntil: expired[0].recoverableUntil?.toISOString(),
-        source: 'INDEPENDENT_BACKUP_RETENTION_EXPIRY' }) } });
-  }
+  // Retention time schedules inspection; it cannot prove that bytes and all
+  // dependent base/WAL/file versions were actually removed. Only a subsequent
+  // explicit copy observation can change the append-only evidence inventory.
   const [impact, approvals, rows] = await Promise.all([
     tx.performanceErasureImpactApproval.findUnique({ where: { policyVersionId: operation.policyVersionId } }),
     tx.performanceErasureApproval.findMany({ where: { operationId }, select: { actorUserId: true } }),

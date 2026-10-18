@@ -1,0 +1,41 @@
+{
+  "base": "29f9a83730cd947067e7254bb402b7044b356785",
+  "reviewedSourceManifest": "reports/qa/inquiry-native-browser-review-r2-20261018.json",
+  "reviewedSourceManifestSha256": "412181dae827a8850033859e50bc972e1ba961629aa66925ff358279689d2839",
+  "inputs": {
+    "positive": {
+      "file": "reports/qa/inquiry-native-pause-903b768998c1a1682640ae32287d508c-5adfe3f8ed053590.json",
+      "sha256": "e5d27eb4bb3938cf38b3251b7697c584dedbcf38f30f33fb333bd9b3ed300cf0"
+    },
+    "negative": {
+      "file": "reports/qa/inquiry-native-pause-b568279fefba796920fa2062022239a3-308e5a4485911f88.json",
+      "sha256": "02e0b002ebb0d49a88ab19c364913bc2da746061214ee8d1ff91aa80f2176009"
+    },
+    "positiveStartup": {
+      "file": "reports/qa/inquiry-next-903b768998c1a1682640ae32287d508c.json",
+      "sha256": "40c42974c8e49b4db23990a65f4e7764d82ddaa72a8ca119c555abda281ee0ac"
+    },
+    "negativeStartup": {
+      "file": "reports/qa/inquiry-next-b568279fefba796920fa2062022239a3.json",
+      "sha256": "a32e11e67a6ab8622d53b84c77acf6c709526a2f21efb8e6bd66eb2213f83b54"
+    },
+    "positiveRetirement": {
+      "file": "reports/qa/inquiry-retired-577d091a5aed614d60597291c0554888.json",
+      "sha256": "0d390698650bc27ea89f141b02b53e85770c6f1f365bdd9c450a04bc4506acee"
+    },
+    "negativeRetirement": {
+      "file": "reports/qa/inquiry-negative-retirement-b568279fefba796920fa2062022239a3.json",
+      "sha256": "6dd36ab42e5913e37e0ae7d4b669c43602f29285e437ff1b1b58b189833b51cd"
+    }
+  },
+  "sameImmutableImage": "sha256:0a3fa6cb6312ecc01765308bc95ff7eb6fddac22e44630c945d587836c63d6c1",
+  "positivePassed": true,
+  "negativeGuardDetectionPassed": true,
+  "standardsReview": "PASS",
+  "specReview": "PASS",
+  "bothNativeGuardiansClosed": true,
+  "originalNegativeClosingRetained": true,
+  "productionAdmission": false,
+  "coherentApplicationCapture": false,
+  "immutableImagesOverlap": false
+}

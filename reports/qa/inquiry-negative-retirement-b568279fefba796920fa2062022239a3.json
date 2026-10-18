@@ -1,0 +1,113 @@
+{
+  "candidate": "d630ed035938018e262bd5036390175f0de690efc9a4114e9c832f1d7d67bf68",
+  "operation": "b568279fefba796920fa2062022239a3",
+  "native": {
+    "activeClaimSha256": "806909f183d1b3ee7cf35657766c024c96dccffd4805b1b2d7073a7e63243844",
+    "commandSha256": "c5e4940544256c5228f204c598c9093f8ed1e4b5138c85a890e9dd31d7a30579",
+    "format": "sabalan-inquiry-native/v2",
+    "guardian": {
+      "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+      "pid": 1,
+      "pidNamespace": "pid:[4026533070]",
+      "startTicks": "27510162"
+    },
+    "lock": {
+      "device": "2096",
+      "inode": "472499"
+    },
+    "nativeReaped": true,
+    "nativeStatus": 143,
+    "onlineLocks": {
+      "interlock": {
+        "descriptor": 11,
+        "device": "2096",
+        "file": "/app/online-runtime-acceptance/inquiry-next-b568279fefba796920fa2062022239a3/coordination/deployment-runtime-control.lock",
+        "inode": "471382",
+        "ownerUid": 0
+      }
+    },
+    "onlineScope": {
+      "device": "2096",
+      "file": "/run/sabalan-online/8f6921cd7df39998f46e32895a15c2df83c6e2a2b6d31f9dbd819528a9e161d4.json",
+      "helperSha256": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+      "inode": "472502",
+      "mountId": "1133",
+      "mountInfoSha256": "ffe3aac33ba4c7bbc850a180b72c5f2e8d14016845293aa974c07f72f81d53c2",
+      "mountNamespace": "mnt:[4026532450]",
+      "scope": {
+        "admission": {
+          "directory": "/app/online-runtime-acceptance/inquiry-next-b568279fefba796920fa2062022239a3/coordination/online/admission",
+          "scopeSha256": "2c344d416f0bb6c7089992b468ad486a4d907b24eb2ff4adcad87e70fdab0c94"
+        },
+        "boundaryDirectory": "/app/online-runtime-acceptance/inquiry-next-b568279fefba796920fa2062022239a3/coordination/online/work/8f6921cd7df39998f46e32895a15c2df83c6e2a2b6d31f9dbd819528a9e161d4",
+        "coordinationDirectory": "/app/online-runtime-acceptance/inquiry-next-b568279fefba796920fa2062022239a3/coordination",
+        "database": {
+          "name": "sabalanerp",
+          "systemIdentifier": "7667464637415309346"
+        },
+        "format": "sabalan-online-runtime-scope/v2",
+        "gate": {
+          "device": "2096",
+          "file": "/app/online-runtime-acceptance/inquiry-next-b568279fefba796920fa2062022239a3/coordination/deployment-write-admission.lock",
+          "inode": "471381",
+          "ownerUid": 0
+        },
+        "image": "sha256:0a3fa6cb6312ecc01765308bc95ff7eb6fddac22e44630c945d587836c63d6c1",
+        "interlock": {
+          "device": "2096",
+          "file": "/app/online-runtime-acceptance/inquiry-next-b568279fefba796920fa2062022239a3/coordination/deployment-runtime-control.lock",
+          "inode": "471382",
+          "ownerUid": 0
+        },
+        "manifestSha256": "767357ce1d76faaf5a53c58af1c9e25239a4b389a18803477af6730917c40d29",
+        "nativeDirectory": "/app/online-runtime-acceptance/inquiry-next-b568279fefba796920fa2062022239a3/coordination/online/native/8f6921cd7df39998f46e32895a15c2df83c6e2a2b6d31f9dbd819528a9e161d4",
+        "nonce": "0e4d58d3e914c304ed09a5914f1a894e1d13821bbae9a8065d80f5869dd14b83",
+        "purpose": "http",
+        "releaseId": "private-native-inquiry-next",
+        "role": "serving",
+        "runtimeId": "8f6921cd7df39998f46e32895a15c2df83c6e2a2b6d31f9dbd819528a9e161d4",
+        "sourceCommit": "29f9a83730cd947067e7254bb402b7044b356785",
+        "worker": null
+      },
+      "sha256": "fa4be6fff7e0917d09b32f63b89648f3f32a70b80fc19920bd3c0262b11638eb"
+    },
+    "phase": "QUIESCENT",
+    "sqlite": {
+      "databaseUrlSha256": "7352e35493a012463132cbf1fd3f37d0b1951a47264a2cbeed013c1b6e03728b",
+      "device": "2096",
+      "file": "/app/online-runtime-acceptance/inquiry-next-b568279fefba796920fa2062022239a3/inquiry.db",
+      "inode": "472501",
+      "ownerUid": 0
+    },
+    "sqliteNativeClosed": true,
+    "stoppedBySignal": true
+  },
+  "work": {
+    "claimSha256": "db6296651d3b90e25b588aaa237bff64b803a60b259f46a8219336f694c98cfe",
+    "epoch": 15,
+    "format": "sabalan-runtime-boundary/v1",
+    "phase": "QUIESCENT",
+    "previousStateSha256": "5bff55cd8b02bee75b8496e6a5e7ffbaa8dcf2c51a99d380d435b440ae99d157",
+    "updatedAt": "2026-10-18T04:09:19.413Z"
+  },
+  "admission": {
+    "capture": {
+      "guardian": {
+        "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+        "pid": 59589,
+        "pidNamespace": "pid:[4026532996]",
+        "startTicks": "27525306"
+      },
+      "runtimeId": "3b4180a027239265c7609eed9ce8e2b324b910b72d75a6c8996adee50ee65b4a",
+      "scopeSha256": "421b4c195d39cc361637dcfe5908a77de25346e3196a1deb927a93d150826aa9"
+    },
+    "closureSha256": null,
+    "format": "sabalan-online-capture-admission/v1",
+    "generation": 1,
+    "phase": "CLOSING",
+    "previousSha256": "09cd7880ad321f952ae1ab0defb74410b888b5f67124739f59776767faebfd68"
+  },
+  "originalClosingRetained": true,
+  "automaticForceKill": false,
+  "productionAdmission": false
+}

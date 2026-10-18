@@ -1,0 +1,39 @@
+# Reuse the existing opt-in Inquiry diagnostic service inside sabalanerp-local.
+# No canonical service, business volume or production listener is replaced.
+name: sabalanerp-local
+services:
+  inquiry-candidate:
+    pull_policy: never
+    command:
+      - /usr/bin/python3
+      - -I
+      - -B
+      - /app/online-runtime/scripts/online-inquiry-owner.py
+      - /usr/local/bin/node
+      - --require
+      - /app/online-runtime/native-http-observer.cjs
+      - /app/node_modules/next/dist/bin/next
+      - start
+      - -p
+      - "3001"
+    environment:
+      BACKEND_RUNTIME_ROLE: serving
+      BACKEND_ONLINE_SCOPE_FILE: ${INQUIRY_NATIVE_SCOPE_FILE:?Set the preprovisioned diagnostic grant}
+      BACKEND_ONLINE_SCOPE_SHA256: ${INQUIRY_NATIVE_SCOPE_SHA256:?Set its verified SHA256}
+      INQUIRY_RUNTIME_GENERATION: "1"
+      DATABASE_URL: ${INQUIRY_NATIVE_DATABASE_URL:?Set the owned isolated SQLite URL with explicit pool parameters}
+      RECOVERY_COORDINATION_DIR: ${INQUIRY_NATIVE_COORDINATION_DIR:?Set the preprovisioned native coordination root}
+      INQUIRY_QA_ARRIVAL_ROOT: ${INQUIRY_NATIVE_ARRIVAL_ROOT:?Set the isolated diagnostic observation directory}
+    volumes: !override
+      - online_runtime_acceptance:/app/online-runtime-acceptance
+      - online_runtime_authority:/run/sabalan-online:ro
+    labels:
+      io.sabalan.online-qa.operation: ${INQUIRY_NATIVE_OPERATION:?Set the diagnostic operation identity}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 4m
+    healthcheck:
+      test: [CMD, node, -e, "require('http').get('http://127.0.0.1:3001/admin/login',r=>{r.resume();r.on('end',()=>process.exit(r.statusCode===200?0:1))}).on('error',()=>process.exit(1))"]
+volumes:
+  online_runtime_acceptance:
+  online_runtime_authority:

@@ -1,0 +1,121 @@
+{
+  "candidate": "ed0eae3445504b38c335a40c9c3cc4cc239d5d6ddcaf2e3780a0e523dd865bd7",
+  "operation": "903b768998c1a1682640ae32287d508c",
+  "image": "sha256:0a3fa6cb6312ecc01765308bc95ff7eb6fddac22e44630c945d587836c63d6c1",
+  "guardianCompletedNaturally": true,
+  "automaticForceKill": false,
+  "retainedContainerAndScope": true,
+  "native": {
+    "activeClaimSha256": "ff90e293debc561f1442adcc1a24dc327ac38a5e6f909ff5b90fbc894095155b",
+    "commandSha256": "c5e4940544256c5228f204c598c9093f8ed1e4b5138c85a890e9dd31d7a30579",
+    "format": "sabalan-inquiry-native/v2",
+    "guardian": {
+      "bootId": "f413b3a9-8cd1-4993-9eea-956bc0a511f3",
+      "pid": 1,
+      "pidNamespace": "pid:[4026533070]",
+      "startTicks": "27432995"
+    },
+    "lock": {
+      "device": "2096",
+      "inode": "470260"
+    },
+    "nativeReaped": true,
+    "nativeStatus": 143,
+    "onlineLocks": {
+      "interlock": {
+        "descriptor": 11,
+        "device": "2096",
+        "file": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/coordination/deployment-runtime-control.lock",
+        "inode": "254852",
+        "ownerUid": 0
+      }
+    },
+    "onlineScope": {
+      "device": "2096",
+      "file": "/run/sabalan-online/4b53200841dc02a1bad06ec18747ab55d0a45589a4c782a088d1a26328c87b64.json",
+      "helperSha256": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+      "inode": "470263",
+      "mountId": "1133",
+      "mountInfoSha256": "185b0714258fa332aef3f5b6cd3a0de2ecd4a160d5bc954b1b2c979f1cbe8243",
+      "mountNamespace": "mnt:[4026532450]",
+      "scope": {
+        "admission": {
+          "directory": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/coordination/online/admission",
+          "scopeSha256": "e896c2a5ad663c0c9400f74d94c458d9109febed969d5da9e669dcb656b55b6b"
+        },
+        "boundaryDirectory": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/coordination/online/work/4b53200841dc02a1bad06ec18747ab55d0a45589a4c782a088d1a26328c87b64",
+        "coordinationDirectory": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/coordination",
+        "database": {
+          "name": "sabalanerp",
+          "systemIdentifier": "7667464637415309346"
+        },
+        "format": "sabalan-online-runtime-scope/v2",
+        "gate": {
+          "device": "2096",
+          "file": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/coordination/deployment-write-admission.lock",
+          "inode": "254841",
+          "ownerUid": 0
+        },
+        "image": "sha256:0a3fa6cb6312ecc01765308bc95ff7eb6fddac22e44630c945d587836c63d6c1",
+        "interlock": {
+          "device": "2096",
+          "file": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/coordination/deployment-runtime-control.lock",
+          "inode": "254852",
+          "ownerUid": 0
+        },
+        "manifestSha256": "46b0c3c19c5cd19500a814ac14e571c4e875e5793b09fcd09c8874ae2c40f9db",
+        "nativeDirectory": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/coordination/online/native/4b53200841dc02a1bad06ec18747ab55d0a45589a4c782a088d1a26328c87b64",
+        "nonce": "e264cb029f228950b3a7353804d31ba951f5c1afcad2a416f175f3b041bfc506",
+        "purpose": "http",
+        "releaseId": "private-native-inquiry-next",
+        "role": "serving",
+        "runtimeId": "4b53200841dc02a1bad06ec18747ab55d0a45589a4c782a088d1a26328c87b64",
+        "sourceCommit": "29f9a83730cd947067e7254bb402b7044b356785",
+        "worker": null
+      },
+      "sha256": "bf44923abee8da01c2dc7d9a7ffbd8b6fd19e023c0789617469d779ad4a37216"
+    },
+    "phase": "QUIESCENT",
+    "sqlite": {
+      "databaseUrlSha256": "605638c2d6c73dc4b9e8153627e146d71ae3db85fd256b591bcb6f64f314a87b",
+      "device": "2096",
+      "file": "/app/online-runtime-acceptance/inquiry-next-903b768998c1a1682640ae32287d508c/inquiry.db",
+      "inode": "470262",
+      "ownerUid": 0
+    },
+    "sqliteNativeClosed": true,
+    "stoppedBySignal": true
+  },
+  "work": {
+    "claimSha256": "9fac4b85fae38a6d54f265121010cc6519b79f11ee8b62cc3119de891b3fe2a4",
+    "epoch": 16,
+    "format": "sabalan-runtime-boundary/v1",
+    "phase": "QUIESCENT",
+    "previousStateSha256": "9abb0259b1c31556053e796811915d9cb1c3e1c7258932648a2c8d690aec1e1c",
+    "updatedAt": "2026-10-18T03:55:40.221Z"
+  },
+  "canonicalUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-15T10:11:30.825468888Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "independentCensusStillRequired": true,
+  "productionAdmission": false
+}

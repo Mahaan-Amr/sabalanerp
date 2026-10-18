@@ -9,6 +9,17 @@ export class RuntimeWorkContext {
 
   constructor(private readonly tasks: RuntimeTaskAdmission, private readonly assertOwner: () => void) {}
 
+  gateIdentity() { return this.tasks.gateIdentity(); }
+
+  /** Used by a nested storage owner before durable side effects. An ambient
+   * context whose actual root lease ended cannot authorize a detached writer. */
+  assertActive() {
+    if (!this.storage.getStore()?.active) throw Object.assign(new Error('RUNTIME_WORK_CONTEXT_NOT_ACTIVE'), {
+      code: 'RUNTIME_WORK_CONTEXT_NOT_ACTIVE',
+    });
+    this.assertOwner();
+  }
+
   run<T>(body: () => Promise<T>): Promise<T> {
     const parent = this.storage.getStore();
     if (parent?.active) {

@@ -16,6 +16,8 @@ export class RuntimeTaskAdmission {
   private poisoned = false;
   private group?: { lease: KernelWriteLease; epoch: number; references: Set<symbol> };
 
+  gateIdentity() { return this.gate.identity(); }
+
   constructor(private readonly gate: KernelWriteAdmission, private readonly journal: RuntimeBoundaryJournal,
     private readonly assertOwner: () => void, private readonly canJoin: () => boolean = () => true) {
     const acquired = gate.identity(), declared = journal.gateIdentity();

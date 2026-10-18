@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { DispatchArtifactStorage } from './ports';
 import { publishDurableFile, removeDurableFile } from '../durableFilePublication';
+import { VersionedFilePublication } from '../versionedFilePublication';
 
 const resolveKey = (root: string, storageKey: string) => {
   if (!/^dispatch-documents\/[A-Za-z0-9_-]+\.pdf$/.test(storageKey)) throw new Error('Invalid dispatch artifact storage key.');
@@ -24,3 +25,22 @@ export const createFilesystemDispatchArtifactStorage = (root: string): DispatchA
     await removeDurableFile(resolveKey(root, storageKey));
   },
 });
+
+/** Explicit private composition for an already admitted storage owner. Ordinary
+ * runtime construction remains unchanged until complete release admission. */
+export const createVersionedFilesystemDispatchArtifactStorage = (
+  root: string, versions: VersionedFilePublication,
+): DispatchArtifactStorage => {
+  if (!(versions instanceof VersionedFilePublication) || !versions.ownsRoot(root)) throw new Error('FILE_VERSION_STORAGE_ROOT_MISMATCH');
+  return {
+    ...createFilesystemDispatchArtifactStorage(root),
+    async stage({ storageKey, bytes }) {
+      resolveKey(root, storageKey);
+      await versions.publish(storageKey, bytes);
+    },
+    async discard(storageKey) {
+      resolveKey(root, storageKey);
+      await versions.remove(storageKey);
+    },
+  };
+};

@@ -1,0 +1,21 @@
+{
+  "head": "c31c77306b36dc224172bb97fd0e4c3a5157fd2d",
+  "sources": {
+    "backend/src/services/versionedFilePublication.ts": "a1b4a382ef3664d953ba048260aba3b18814fc3840c16fb3ac92f8e071a63480",
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "backend/src/services/dispatchDocuments/filesystemStorage.ts": "fdf6fbb74562b030c03208c629ec5fe0d89084e00833a18d92815a00b7f283e7",
+    "scripts/run-versioned-file-publication-local.mjs": "fbc5e0bcd772beda7bb85e6c4779d27731ce1578073dfd583e8c829e1880caf6",
+    "tests/online-deployment/versioned-file-publication.fixture.cjs": "965fd6c390f2f4f17179e63d10b03506a8998de1a9c4206b153d4e1ffa91f130",
+    "backend/src/services/kernelWriteAdmission.ts": "8952c65ddde926fbc5136be933d1c7401ea269191cbcba64dd20ba6d95bdd875",
+    "backend/src/services/runtimeBoundaryJournal.ts": "d94912a6fb15d759d8270c067e96c81964f1a5464cc54c26df28636ccbe2e9eb",
+    "backend/src/services/durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a",
+    "scripts/run-file-publication-local.mjs": "e9a1e28fa8d1d82d639925812c77a7d872080c4abed28f9212c914c05fdadd25"
+  },
+  "patchSha256": "4ccfc1c39a0a358e5807f34466672f96a742bf055c6bc4df0304bade32e386e3",
+  "scope": "private admitted per-write versions, explicit Dispatch adapter and metadata-only actual-EX file component cut; no production activation",
+  "changesSinceR2": "test fixtures now seed real immutable deletion records and heads, not only reservations; original publication runner stages new required pure modules",
+  "writerUnchangedSinceR2": true,
+  "strongerNativeRegressionPending": true,
+  "pdfRegressionPending": "7 file/upload regressions pass; Chromium startup hit30sec; no OOM observed, no surviving Chromium process observed; retry after heavy fixture completes"
+}

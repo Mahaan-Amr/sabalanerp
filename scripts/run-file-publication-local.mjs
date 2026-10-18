@@ -39,7 +39,7 @@ const pdfBundle = await require('esbuild').build({
 files['pdf-publication.bundle.cjs'] = Buffer.from(pdfBundle.outputFiles[0].contents);
 const pdfSourceHashes = Object.fromEntries(Object.keys(pdfBundle.metafile.inputs).map(relative =>
   [relative, createHash('sha256').update(fs.readFileSync(path.resolve(root, relative))).digest('hex')]));
-for (const relative of ['services/durableFilePublication', 'services/accountingOfficialReportArtifact',
+for (const relative of ['services/durableFilePublication', 'services/versionedFilePublication', 'services/runtimeWorkContext', 'services/accountingOfficialReportArtifact',
   'services/durableUpload', 'services/httpRequestLifecycle', 'middleware/errorHandler', 'services/__tests__/durableUpload.test',
   'services/dispatchDocuments/filesystemStorage', 'services/__tests__/durableFilePublication.test',
   'services/__tests__/accountingOfficialReportArtifact.test']) {

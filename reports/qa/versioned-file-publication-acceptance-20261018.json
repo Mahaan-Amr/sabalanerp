@@ -1,0 +1,15 @@
+{
+  "head": "c31c77306b36dc224172bb97fd0e4c3a5157fd2d",
+  "freeze": "versioned-file-publication-review-r4-20261018.json",
+  "freezeSha256": "acc2765d6061d7ec1fe082fb679100ef0db343bfba27366db9e9e26369c3f1fe",
+  "nativeReport": "versioned-file-publication-2809468cacf3b60bdad8ea627d113127.json",
+  "nativeReportSha256": "769db60876c07e02a012e3ffc97b243197eff3bb8b2b2299a50bead0fdc0e6ad",
+  "pdfReport": "file-publication-8614040e4cf5e09de15b46e63278d917.json",
+  "pdfReportSha256": "31452b2f10071305968322ddebc6585190f1c5d1da1ede5e1d7456b64bb25a83",
+  "standardsReview": "PASS",
+  "specReview": "PASS",
+  "typecheck": "PASS with repository compiler options",
+  "architectureCheck": "PASS",
+  "productionAdmission": false,
+  "wholeProgramComplete": false
+}

@@ -1,0 +1,22 @@
+{
+  "head": "c31c77306b36dc224172bb97fd0e4c3a5157fd2d",
+  "sources": {
+    "backend/src/services/versionedFilePublication.ts": "a1b4a382ef3664d953ba048260aba3b18814fc3840c16fb3ac92f8e071a63480",
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "backend/src/services/dispatchDocuments/filesystemStorage.ts": "fdf6fbb74562b030c03208c629ec5fe0d89084e00833a18d92815a00b7f283e7",
+    "scripts/run-versioned-file-publication-local.mjs": "0938095f05f8ef67bfb70b3c1c97febc37b901d5fb097b53ae2f83576df1bb9c",
+    "tests/online-deployment/versioned-file-publication.fixture.cjs": "0529127b7f7d13180b325e2091837e765393da6e9f626d4cf8adc03b7862bda4",
+    "backend/src/services/kernelWriteAdmission.ts": "8952c65ddde926fbc5136be933d1c7401ea269191cbcba64dd20ba6d95bdd875",
+    "backend/src/services/runtimeBoundaryJournal.ts": "d94912a6fb15d759d8270c067e96c81964f1a5464cc54c26df28636ccbe2e9eb",
+    "backend/src/services/durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a",
+    "scripts/run-file-publication-local.mjs": "e9a1e28fa8d1d82d639925812c77a7d872080c4abed28f9212c914c05fdadd25"
+  },
+  "patchSha256": "3d4474b9c04f1389cfc4989bf9da3c21001273a62b2ce4a56b41d017eb8b12f2",
+  "scope": "private admitted per-write versions, explicit Dispatch adapter and metadata-only actual-EX file component cut; no production activation",
+  "changesSinceR3": "preserve closed core TAP before ambient verification; observe cold/warm cut times without a production budget claim",
+  "writerUnchangedSinceR2": true,
+  "nativeReport": "versioned-file-publication-2809468cacf3b60bdad8ea627d113127.json",
+  "pdfReport": "file-publication-8614040e4cf5e09de15b46e63278d917.json",
+  "otherWorkInProgress": "HTTP borrowed completion context is a separate unstaged slice, not part of this source freeze"
+}

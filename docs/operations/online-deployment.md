@@ -130,3 +130,11 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   regressions and real read-only PostgreSQL overlap passed. This admits only a
   confined component attempt, not a healthy point or release. See
   [closure and capacity evidence](../../reports/qa/physical-base-closure-budget-20261018.md).
+
+- The current production PostgreSQL physical component now passed native backup
+  verification, dual-recipient encryption/local round-trip, full off-host cipher
+  readback, backup-host durability and independent RSA decryption. All six source
+  services and sixteen backup-host foreign services retained their identities
+  during the respective accepted operations. Exact-image native boot, continuous
+  WAL and coherent full application recovery remain pending. See
+  [production physical component](../../reports/qa/production-physical-base-20261018.md).

@@ -1,0 +1,64 @@
+import pathlib,hashlib,json,base64,uuid,subprocess
+repo=pathlib.Path('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp')
+capture=json.loads(json.loads((repo/'reports/qa/production-base-prod-base-47065f6d83fd4a63b6f3171256016c47.json').read_text())['stdout'])
+assert capture['exitCode']==0 and capture['serviceIdentitiesUnchanged'] and capture['healthyApplicationPoint']==False
+operation='encrypt-'+uuid.uuid4().hex
+files={name:{'bytes':base64.b64encode(pathlib.Path('D:/sabalanerp-online-qa',name).read_bytes()).decode(),
+ 'sha256':hashlib.sha256(pathlib.Path('D:/sabalanerp-online-qa',name).read_bytes()).hexdigest()}
+ for name in ['encrypt-production-component-20261018.cjs','recoveryCrypto.cjs']}
+spec={'capture':capture,'operation':operation,'files':files,'preflight':json.loads((repo/'reports/qa/both-host-storage-preflight-stage-20261018.json').read_text())}
+remote=r'''import os,pathlib,json,base64,hashlib,stat,fcntl,subprocess,time,resource
+spec=json.loads(INPUT)
+os.chdir('/opt/sabalanerp');os.umask(0o077);resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+capture=spec['capture']
+lock=pathlib.Path('/opt/sabalanerp/.deploy-state/deployment.lock')
+fd=os.open(lock,os.O_RDWR|os.O_NOFOLLOW);s=os.fstat(fd);n=lock.lstat()
+assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode&0o022 and (s.st_dev,s.st_ino)==(n.st_dev,n.st_ino)
+os.dup2(fd,9,inheritable=True);fcntl.flock(9,fcntl.LOCK_EX|fcntl.LOCK_NB)
+assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==capture['productionCommit']
+root=pathlib.Path(capture['root']);assert root.resolve(strict=True)==root
+assert root.stat().st_uid==0 and not root.stat().st_mode&0o077
+point=root/capture['operationId']/'component.json'
+assert json.loads(point.read_text())==capture['component']
+owner=root/'native-process-owner';assert hashlib.sha256(owner.read_bytes()).hexdigest()==capture['supervisorSha256']
+pre=spec['preflight']
+for name,sha in pre['sourceHashes'].items():assert hashlib.sha256(pathlib.Path(pre['directory'],name).read_bytes()).hexdigest()==sha
+subprocess.run(['sh',pre['directory']+'/deploy/scripts/storage-preflight.sh','deploy/.env.prod','/opt/sabalanerp',pre['directory'],'0','0'],check=True,pass_fds=(9,),stdout=subprocess.DEVNULL)
+values={}
+for line in pathlib.Path('deploy/.env.prod').read_text().splitlines():
+ if '=' in line and not line.lstrip().startswith('#'):
+  k,v=line.split('=',1);values[k]=v
+secret=pathlib.Path(os.path.abspath(values['DEPLOYMENT_SECRET_DIR']))
+assert secret.is_absolute() and secret.resolve(strict=True)==secret
+work=root/spec['operation'];work.mkdir(mode=0o700)
+for name,v in spec['files'].items():
+ data=base64.b64decode(v['bytes'],validate=True);assert hashlib.sha256(data).hexdigest()==v['sha256']
+ with (work/name).open('xb') as f:os.chmod(f.name,0o400);f.write(data);f.flush();os.fsync(f.fileno())
+for p in [work,root]:
+ d=os.open(p,os.O_RDONLY|os.O_DIRECTORY)
+ try:os.fsync(d)
+ finally:os.close(d)
+env=dict(os.environ,SABALAN_NATIVE_STORAGE_ROOT=str(work),SABALAN_NATIVE_STORAGE_MAX_BYTES=str(capture['component']['archiveBytes']*3+16*1024**2),SABALAN_NATIVE_STORAGE_RESERVE_BYTES=str(1024**3))
+command=[str(owner),'300',spec['operation'],'node',str(work/'encrypt-production-component-20261018.cjs'),str(point),str(secret),str(work)]
+r=subprocess.Popen(command,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,pass_fds=(9,))
+proven=False
+try:
+ out,err=r.communicate()
+ receipt=('\nSABALAN_NATIVE_REAPED '+spec['operation']+' '+str(r.returncode)+'\n').encode()
+ assert err.endswith(receipt),'NATIVE_COMPLETION_UNPROVEN'
+ proven=True
+finally:
+ if not proven:
+  while True:time.sleep(1)
+proof={'exitCode':r.returncode,'root':str(work),'sourceHashes':{n:v['sha256'] for n,v in spec['files'].items()},
+ 'nativeReceipt':err.decode(),'healthyApplicationPoint':False,'sourceCaptureOperation':capture['operationId']}
+if r.returncode==0:proof['encryption']=json.loads(out)
+else:proof['stdout']=out.decode()
+with (work/'host-encryption-observation.json').open('x') as f:json.dump(proof,f,indent=2);f.flush();os.fsync(f.fileno())
+print(json.dumps(proof));raise SystemExit(r.returncode)
+'''.replace('INPUT',repr(json.dumps(spec)))
+with (repo/f'reports/qa/production-base-{operation}-intent.json').open('x',encoding='utf-8') as f:json.dump({'operation':operation,'captureOperation':capture['operationId'],'sourceHashes':{n:v['sha256'] for n,v in files.items()}},f,indent=2)
+r=subprocess.run(['ssh','-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=15','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3','root@94.182.85.254','python3 -B -'],input=remote,text=True,capture_output=True)
+proof={'sshExitCode':r.returncode,'stdout':r.stdout,'stderr':r.stderr}
+with (repo/f'reports/qa/production-base-{operation}.json').open('x',encoding='utf-8') as f:json.dump(proof,f,indent=2)
+print(json.dumps(proof));raise SystemExit(r.returncode)

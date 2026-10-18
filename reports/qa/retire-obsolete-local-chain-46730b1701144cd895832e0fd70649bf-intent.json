@@ -1,0 +1,10 @@
+{
+  "operation": "retire-obsolete-local-chain-46730b1701144cd895832e0fd70649bf",
+  "custodyOperation": "independent-image-custody-65cb95d50af8415aa569267d7ecd99bf",
+  "sources": {
+    "measure.py": "4bd436ae10668d3115e659b2a8018d274c2d58b78dbaf4070474b65c0092dd4b",
+    "retire.py": "ee5e2d28a2aaa128c3804597b040fa5374cf9a77ac2cef2ca02d972a9f452c75",
+    "mount_guard.py": "165101a51ecc00db4b12ff65a5b2fe55f7037b4407ccdde5e799afa7bda54cd7"
+  },
+  "scope": "retire exact completed local synthetic test chunks and derived WAL/manifest; retain shared image, all evidence and every production recovery object"
+}

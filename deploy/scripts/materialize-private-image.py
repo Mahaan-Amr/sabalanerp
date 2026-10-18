@@ -60,9 +60,9 @@ def scan(archive):
             yield member, stream
 
 
-def materialize(archive, destination, archive_sha, index_id, platform_id, config_id,
-                maximum_layer_bytes=1024 ** 3, maximum_image_bytes=2 * 1024 ** 3):
-    archive, destination = Path(archive), Path(destination)
+def read_plan(archive, archive_sha, index_id, platform_id, config_id,
+              maximum_layer_bytes=1024 ** 3, maximum_image_bytes=2 * 1024 ** 3):
+    archive = Path(archive)
     require(re.fullmatch(r'[a-f0-9]{64}', archive_sha), 'IMAGE_ARCHIVE_HASH_INVALID')
     names = {value: immutable_id(value) for value in [index_id, platform_id, config_id]}
     require(archive.is_absolute() and archive.resolve(strict=True) == archive, 'IMAGE_ARCHIVE_ALIAS')
@@ -100,6 +100,15 @@ def materialize(archive, destination, archive_sha, index_id, platform_id, config
             require(wanted[name] == layer, 'IMAGE_LAYER_DESCRIPTOR_CONFLICT')
         wanted[name] = layer
     require(sum(row['size'] for row in wanted.values()) <= maximum_image_bytes, 'IMAGE_SELECTED_BYTES_TOO_LARGE')
+    return archive, before, metadata, names, layers, diff_ids, wanted
+
+
+def materialize(archive, destination, archive_sha, index_id, platform_id, config_id,
+                maximum_layer_bytes=1024 ** 3, maximum_image_bytes=2 * 1024 ** 3):
+    archive, before, metadata, names, layers, diff_ids, wanted = read_plan(
+        archive, archive_sha, index_id, platform_id, config_id,
+        maximum_layer_bytes, maximum_image_bytes)
+    destination = Path(destination)
     require(destination.is_absolute() and destination.parent.resolve(strict=True) == destination.parent,
             'IMAGE_DESTINATION_ALIAS')
     destination.mkdir(mode=0o700)  # Never reuse partial or foreign work.
@@ -185,6 +194,72 @@ def materialize(archive, destination, archive_sha, index_id, platform_id, config
     for directory in [blobs, destination, destination.parent]:
         sync(directory)
     return result
+
+
+def measure(archive, archive_sha, index_id, platform_id, config_id,
+            maximum_layer_bytes=1024 ** 3, maximum_image_bytes=2 * 1024 ** 3):
+    """Verify expanded identities and measure staging needs without writing files."""
+    archive, before, metadata, names, layers, diff_ids, wanted = read_plan(
+        archive, archive_sha, index_id, platform_id, config_id,
+        maximum_layer_bytes, maximum_image_bytes)
+    observations = {}
+    multiplicity = {}
+    for layer in layers:
+        key = immutable_id(layer['digest'])
+        multiplicity[key] = multiplicity.get(key, 0) + 1
+    logical_expanded = 0
+
+    class CountedReader:
+        def __init__(self, source):
+            self.source, self.count, self.digest = source, 0, hashlib.sha256()
+
+        def read(self, size=-1):
+            # gzip requests bounded chunks. Refuse accidental unbounded reads.
+            require(0 <= size <= 8 * 1024 ** 2, 'IMAGE_MEASUREMENT_READ_UNBOUNDED')
+            chunk = self.source.read(size)
+            self.count += len(chunk)
+            self.digest.update(chunk)
+            return chunk
+
+    for member, stream in scan(archive):
+        if member.name not in wanted:
+            continue
+        expected = wanted[member.name]
+        require(member.isfile() and member.size == expected['size'], 'IMAGE_LAYER_SIZE_MISMATCH')
+        value, count = hashlib.sha256(), 0
+        with stream.extractfile(member) as source:
+            counted = CountedReader(source)
+            reader = gzip.GzipFile(fileobj=counted) if expected['mediaType'].endswith(('+gzip', '.gzip')) else counted
+            try:
+                while chunk := reader.read(1024 * 1024):
+                    count += len(chunk)
+                    logical_expanded += len(chunk) * multiplicity[member.name]
+                    require(count <= maximum_layer_bytes and logical_expanded <= maximum_image_bytes,
+                            'IMAGE_EXPANSION_LIMIT')
+                    value.update(chunk)
+            finally:
+                if reader is not counted:
+                    reader.close()
+            require(counted.count == expected['size'] and counted.digest.hexdigest() == expected['digest'][7:],
+                    'IMAGE_LAYER_HASH_INVALID')
+        observations[member.name] = {'expandedBytes': count, 'diffId': 'sha256:' + value.hexdigest()}
+    require(set(observations) == set(wanted), 'IMAGE_LAYER_MISSING')
+    expanded, results = 0, []
+    for layer, diff_id in zip(layers, diff_ids):
+        immutable_id(diff_id)
+        measured = observations[immutable_id(layer['digest'])]
+        require(measured['diffId'] == diff_id, 'IMAGE_DIFF_ID_MISMATCH')
+        expanded += measured['expandedBytes']
+        require(expanded <= maximum_image_bytes, 'IMAGE_EXPANSION_LIMIT')
+        results.append({'blobDigest': layer['digest'], 'blobBytes': layer['size'], **measured})
+    after = archive.lstat()
+    identity = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns, s.st_nlink)
+    require(identity(before) == identity(after), 'IMAGE_SOURCE_MUTATED')
+    return {'format': 'sabalan-private-image-measurement/v1', 'sourceArchiveSha256': archive_sha,
+            'sourceIndex': index_id, 'platformManifest': platform_id, 'configImageId': config_id,
+            'layers': results, 'selectedCompressedBytes': sum(v['size'] for v in wanted.values()),
+            'expandedLayerBytes': expanded, 'expandedLayerIdentityVerified': True,
+            'dockerImportVerified': False, 'healthyApplicationPoint': False, 'publicOnlineAdmission': False}
 
 
 if __name__ == '__main__':

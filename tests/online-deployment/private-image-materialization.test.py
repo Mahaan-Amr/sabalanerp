@@ -8,6 +8,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 source = Path(__file__).resolve().parents[2] / 'deploy/scripts/materialize-private-image.py'
 spec = importlib.util.spec_from_file_location('private_image', source)
@@ -19,7 +20,7 @@ def digest(data):
     return 'sha256:' + hashlib.sha256(data).hexdigest()
 
 
-def fixture(root, bad_layer=False, bad_diff=False, bad_platform_size=False, bomb=False, unsafe=False):
+def fixture(root, bad_layer=False, bad_diff=False, bad_platform_size=False, bomb=False, unsafe=False, multi=False, repeat=False):
     blobs = {}
 
     def add(data):
@@ -28,9 +29,14 @@ def fixture(root, bad_layer=False, bad_diff=False, bad_platform_size=False, bomb
         return {'digest': name, 'size': len(data)}
 
     raw = [b'x' * 8192, b'plain layer'] if bomb else [b'compressed layer', b'plain layer']
-    encoded = [gzip.compress(raw[0], mtime=0), raw[1]]
-    layers = [dict(add(data), mediaType='application/vnd.oci.image.layer.v1.tar' + ('+gzip' if n == 0 else ''))
+    if multi:
+        raw = [b'a' * 4096, b'b' * 4096, b'c' * 4096]
+    encoded = [gzip.compress(data, mtime=0) if multi or n == 0 else data for n, data in enumerate(raw)]
+    layers = [dict(add(data), mediaType='application/vnd.oci.image.layer.v1.tar' + ('+gzip' if multi or n == 0 else ''))
               for n, data in enumerate(encoded)]
+    if repeat:
+        layers = [layers[0], *layers]
+        raw = [raw[0], *raw]
     config_bytes = json.dumps({'os': 'linux', 'architecture': 'amd64', 'rootfs': {'type': 'layers',
         'diff_ids': [digest(b'wrong') if bad_diff and n == 0 else digest(data) for n, data in enumerate(raw)]}}).encode()
     config = add(config_bytes)
@@ -103,6 +109,56 @@ class PrivateImageMaterialization(unittest.TestCase):
                                   maximum_layer_bytes=2048, maximum_image_bytes=16384)
             self.assertFalse((root / 'selected/image.tar').exists())
             self.assertFalse((root / 'selected/private-image-proof.json').exists())
+
+    def test_measurement_verifies_expanded_identity_without_creating_artifacts(self):
+        with tempfile.TemporaryDirectory(prefix='sabalan-image-measure-') as directory:
+            root = Path(directory).resolve()
+            archive, checksum, index, platform, config, raw, _ = fixture(root)
+            before = {p.name: p.read_bytes() for p in root.iterdir()}
+            result = image.measure(archive, checksum, index, platform, config)
+            self.assertEqual(result['expandedLayerBytes'], sum(map(len, raw)))
+            self.assertEqual([v['diffId'] for v in result['layers']], [digest(v) for v in raw])
+            self.assertTrue(result['expandedLayerIdentityVerified'])
+            self.assertFalse(result['dockerImportVerified'])
+            self.assertFalse(result['healthyApplicationPoint'])
+            self.assertFalse(result['publicOnlineAdmission'])
+            self.assertEqual({p.name: p.read_bytes() for p in root.iterdir()}, before)
+
+    def test_measurement_refuses_false_diff_ids_and_expansion_before_any_output(self):
+        for options, expected in [({'bad_diff': True}, 'IMAGE_DIFF_ID_MISMATCH'),
+                                  ({'bomb': True}, 'IMAGE_EXPANSION_LIMIT'),
+                                  ({'bad_platform_size': True}, 'IMAGE_GRAPH_IDENTITY_MISMATCH'),
+                                  ({'unsafe': True}, 'IMAGE_ARCHIVE_MEMBER_UNSAFE')]:
+            with self.subTest(options=options), tempfile.TemporaryDirectory(prefix='sabalan-measure-refusal-') as directory:
+                root = Path(directory).resolve()
+                archive, checksum, index, platform, config, *_ = fixture(root, **options)
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    image.measure(archive, checksum, index, platform, config,
+                                  maximum_layer_bytes=2048, maximum_image_bytes=16384)
+                self.assertEqual(list(root.iterdir()), [archive])
+                self.assertEqual(image.sha(archive), checksum)
+
+    def test_measurement_stops_at_aggregate_budget_before_later_layers(self):
+        for repeat in [False, True]:
+            with self.subTest(repeat=repeat), tempfile.TemporaryDirectory(prefix='sabalan-measure-total-') as directory:
+                root = Path(directory).resolve()
+                archive, checksum, index, platform, config, *_ = fixture(root, multi=True, repeat=repeat)
+                original_scan, calls, observed = image.scan, [], []
+
+                def watched(file):
+                    calls.append(True)
+                    measurement_pass = len(calls) == 2
+                    for member, stream in original_scan(file):
+                        if measurement_pass:
+                            observed.append(member.name)
+                        yield member, stream
+
+                with patch.object(image, 'scan', watched), self.assertRaisesRegex(RuntimeError, 'IMAGE_EXPANSION_LIMIT'):
+                    image.measure(archive, checksum, index, platform, config,
+                                  maximum_layer_bytes=8192, maximum_image_bytes=6000)
+                later = b'b' * 4096 if repeat else b'c' * 4096
+                self.assertNotIn('blobs/sha256/' + digest(gzip.compress(later, mtime=0))[7:], observed)
+                self.assertEqual(list(root.iterdir()), [archive])
 
     def test_unknown_existing_work_and_wrong_source_checksum_are_preserved(self):
         with tempfile.TemporaryDirectory(prefix='sabalan-image-refusal-') as directory:

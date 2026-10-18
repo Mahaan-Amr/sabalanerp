@@ -1,0 +1,37 @@
+{
+  "format": "sabalan-private-image-measure-fixture/v1",
+  "pass": true,
+  "tap": "..........\n----------------------------------------------------------------------\nRan 10 tests in 0.030s\n\nOK\n",
+  "workingRoot": "/app/online-runtime-acceptance/private-image-measure-5ed8e531bec3697d95fbb176117364ab",
+  "canonicalServicesUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "sourceHashes": {
+    "deploy/scripts/materialize-private-image.py": "72c03205b4b1d4b535690ef977a63a13e6a8fe2d4a3ffbceda3a3cdc58eacf75",
+    "tests/online-deployment/private-image-materialization.test.py": "200df23fc5fd4389efe68517ccfc4a92e262ee3fe1d8ab62265613ed8f13eb59"
+  },
+  "sources": {
+    "deploy/scripts/materialize-private-image.py": "72c03205b4b1d4b535690ef977a63a13e6a8fe2d4a3ffbceda3a3cdc58eacf75",
+    "tests/online-deployment/private-image-materialization.test.py": "200df23fc5fd4389efe68517ccfc4a92e262ee3fe1d8ab62265613ed8f13eb59"
+  },
+  "productionAdmission": false
+}

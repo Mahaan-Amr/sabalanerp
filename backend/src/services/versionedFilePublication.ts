@@ -13,6 +13,23 @@ type Version = { format: 'sabalan-file-version/v1'; key: string; generation: num
 type StreamInput = { source: Readable; assertReady(): void; finish(): Promise<void> };
 type FileClaim = { key: string; id: string; target: string; pending: string; heldIdentity: Identity;
   previous: { sha256: string; value: Version } | null; actual: Identity | null };
+export type VersionedFileRootHead = Readonly<{ versionSha256: string; operation: 'PUT' | 'DELETE'; byteLength: number }>;
+export type VersionedFileRootScope = Readonly<{
+  publish(key: string, bytes: Uint8Array, options?: { replace?: boolean }): Promise<string>;
+  publishUpload(key: string, source: Readable): ReturnType<VersionedFilePublication['publishUpload']>;
+  remove(key: string): Promise<string>;
+  removeUpload(key: string, versionSha256: string): Promise<string>;
+  inspect(key: string): Promise<VersionedFileRootHead | null>;
+  read(key: string): Promise<Buffer | null>;
+  readVersion(key: string, versionSha256: string): Promise<Buffer | null>;
+  moveTo(destination: VersionedFileRootScope, sourceKey: string, destinationKey: string, expectedSourceSha256: string): ReturnType<VersionedFilePublication['move']>;
+}>;
+const rootScopes = new WeakMap<VersionedFileRootScope, { owner: VersionedFilePublication; root: string; prefix: string }>();
+export function assertVersionedFileRootScope(scope: VersionedFileRootScope, root: string) {
+  if (!rootScopes.has(scope) || rootScopes.get(scope)!.root !== path.resolve(root)) {
+    fail('FILE_VERSION_STORAGE_ROOT_MISMATCH');
+  }
+}
 const hash = (data: Uint8Array | string) => createHash('sha256').update(data).digest('hex');
 const shaPattern = /^[a-f0-9]{64}$/;
 const fail = (code: string): never => { throw Object.assign(new Error(code), { code }); };
@@ -110,6 +127,77 @@ export class VersionedFilePublication {
   }
 
   ownsRoot(root: string) { return path.resolve(root) === this.liveRoot; }
+
+  /** Bind existing private subdirectories to the same completion, capacity and
+   * version owner. This grants a confined port, never release/root coverage.
+   * No directories are created, no baseline is adopted and no caller can use
+   * another scope's version receipt or move between independent owners. */
+  bindRoot(root: string): Promise<VersionedFileRootScope> {
+    return this.work.run(async () => {
+      this.work.assertActive(); await this.assertDirectories();
+      if (typeof root !== 'string' || !path.isAbsolute(root) || path.resolve(root) !== root) fail('FILE_VERSION_STORAGE_ROOT_MISMATCH');
+      const relative = path.relative(this.liveRoot, root);
+      if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) fail('FILE_VERSION_STORAGE_ROOT_MISMATCH');
+      const additions: Array<[string, Identity]> = [];
+      let current = this.liveRoot;
+      for (const part of relative ? relative.split(path.sep) : []) {
+        current = path.join(current, part); additions.push([current, await privateDirectory(current)]);
+      }
+      await this.assertDirectories();
+      for (const [directory, expected] of additions) {
+        const actual = await privateDirectory(directory);
+        if (actual.device !== expected.device || actual.inode !== expected.inode) fail('FILE_VERSION_DIRECTORY_CHANGED');
+      }
+      // A concurrent binding may have pinned an incarnation while the final
+      // filesystem observations awaited. Validate the whole batch, then commit
+      // synchronously so no published pin can be overwritten or partly added.
+      for (const [directory, expected] of additions) {
+        const pinned = this.directories.get(directory);
+        if (pinned && (pinned.device !== expected.device || pinned.inode !== expected.inode)) {
+          fail('FILE_VERSION_DIRECTORY_CHANGED');
+        }
+      }
+      for (const [directory, expected] of additions) this.directories.set(directory, expected);
+      const prefix = relative.split(path.sep).join('/');
+      // Preserve malformed keys until the writer validates them, so an upload
+      // still transfers stream ownership and completes actual destruction.
+      const key = (value: string) => typeof value === 'string' && prefix ? prefix + '/' + value : value;
+      const inspect = (value: string) => this.work.run(async (): Promise<VersionedFileRootHead | null> => {
+        this.work.assertActive(); await this.assertDirectories();
+        const full = key(value), target = this.key(full).target;
+        const head = await this.head(full), actual = await this.current(target);
+        if (!same(actual, head?.value.live ?? null)) fail('FILE_VERSION_UNTRACKED_LIVE_CHANGE');
+        return head ? Object.freeze({ versionSha256: head.sha256, operation: head.value.operation,
+          byteLength: head.value.object?.bytes ?? 0 }) : null;
+      });
+      const readVersion = (value: string, sha256: string) => this.work.run(async () => {
+        this.work.assertActive(); await this.assertDirectories();
+        const full = key(value); this.key(full);
+        if ((await this.version(sha256)).value.key !== full) fail('FILE_VERSION_SELECTION_INVALID');
+        return this.readVersion(sha256);
+      });
+      const scope: VersionedFileRootScope = Object.freeze({
+        publish: (value: string, bytes: Uint8Array, options?: { replace?: boolean }) => this.publish(key(value), bytes, options),
+        publishUpload: (value: string, source: Readable) => this.publishUpload(key(value), source),
+        remove: (value: string) => this.remove(key(value)),
+        removeUpload: (value: string, sha256: string) => this.removeUpload(key(value), sha256),
+        inspect, readVersion,
+        read: (value: string) => this.work.run(async () => {
+          const head = await inspect(value);
+          return head ? readVersion(value, head.versionSha256) : null;
+        }),
+        moveTo: async (destination: VersionedFileRootScope, sourceKey: string, destinationKey: string, expected: string) => {
+          const binding = rootScopes.get(destination);
+          if (!binding || binding.owner !== this) return fail('FILE_VERSION_STORAGE_ROOT_MISMATCH');
+          const destinationFull = typeof destinationKey === 'string' && binding.prefix
+            ? binding.prefix + '/' + destinationKey : destinationKey;
+          return this.move(key(sourceKey), destinationFull, expected);
+        },
+      });
+      rootScopes.set(scope, { owner: this, root, prefix });
+      return scope;
+    });
+  }
 
   private async reservation(key: string) {
     const file = path.join(this.root, 'reservations', this.key(key).id + '.json');

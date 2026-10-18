@@ -65,7 +65,7 @@ assert.ok(closureFunction, 'actual protected release/rollback boundary function 
 files['streamed-closure.fixture.sh'] = Buffer.from('run_backend() { "$@"; }\n' + closureFunction + '\nassert_native_runtime_closed\n');
 files['deploy/scripts/backend-runtime-owner.py'] = files['backend-runtime-owner.py'];
 for (const [name, source] of [[ 'services/onlineRuntimeWork.js', 'backend/src/services/onlineRuntimeWork.ts'],
-  ...['onlineCaptureAdmission', 'kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext', 'runtimeLeasedWorkContext', 'runtimeWorkBoundary', 'httpRequestLifecycle', 'durableUpload', 'durableFilePublication'].map(name => ['services/' + name + '.js', 'backend/src/services/' + name + '.ts']),
+  ...['onlineCaptureAdmission', 'kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext', 'runtimeLeasedWorkContext', 'runtimeWorkBoundary', 'httpRequestLifecycle', 'durableUpload', 'durableFilePublication', 'versionedFilePublication', 'recoveryRuntime', 'recoveryCoordinationState', 'recoveryOperationAdmission', 'deploymentMaintenance'].map(name => ['services/' + name + '.js', 'backend/src/services/' + name + '.ts']),
   ['lib/prisma.js', 'backend/src/lib/prisma.ts'],
   ['services/runtimeControlOwnership.js', 'backend/src/services/runtimeControlOwnership.ts'],
   ['services/onlineRuntimeScope.js', 'backend/src/services/onlineRuntimeScope.ts'],

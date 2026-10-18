@@ -9,8 +9,10 @@ const express = require('/app/node_modules/express');
 const { prisma, disconnectDatabase } = require('./lib/prisma');
 const { loadOnlineRuntimeScope } = require('./services/onlineRuntimeScope');
 const { createScopedRuntimeWork } = require('./services/onlineRuntimeWork');
-const { runtimeHttpRequests, bindRuntimeHttpWriteAdmission } = require('./services/httpRequestLifecycle');
+const { runtimeHttpRequests } = require('./services/httpRequestLifecycle');
+const { withRecoveryBackgroundWrite } = require('./services/recoveryRuntime');
 const input = loadOnlineRuntimeScope();
+let runtimeWork, server;
 
 if (input.scope.purpose === 'capture') require('./native-worker.cjs');
 else (async () => {
@@ -20,17 +22,16 @@ else (async () => {
     storage: { destination: input.scope.coordinationDirectory + '/diagnostic-uploads/' + input.scope.runtimeId,
       filename: (_request, _file, complete) => complete(null, 'proof.bin') }, limits: { fileSize: 8192 },
   }) : undefined;
-  bindRuntimeHttpWriteAdmission(() => true);
   await assert.rejects(createScopedRuntimeWork({ registrySha256: 'c'.repeat(64), generation: 1, canJoin: () => true }), /REGISTRY_MISMATCH/);
   const work = await createScopedRuntimeWork({ registrySha256: input.scope.manifestSha256, generation: 1,
     canJoin: () => true });
+  runtimeWork = work;
   assert.strictEqual(work.requests, runtimeHttpRequests);
   const workClaim = JSON.parse(fs.readFileSync(input.scope.boundaryDirectory + '/claim.json'));
   assert.equal(workClaim.format, 'sabalan-runtime-claim/v2');
   assert.deepEqual(workClaim.native, { scopeSha256: input.sha256, claimSha256: process.env.BACKEND_NATIVE_CLAIM_SHA256 });
   const [identity] = await prisma.$queryRawUnsafe("SELECT current_setting('application_name') AS name");
   const mode = process.argv[2];
-  let server;
   if (input.scope.purpose === 'http') {
     let incorrectlyAdmitted = false;
     await assert.rejects(work.runBackground(async () => { incorrectlyAdmitted = true; }), /WORKER_OWNERSHIP/);
@@ -92,7 +93,7 @@ else (async () => {
       }); request.once('error', reject);
     });
     assert.equal(status, 503); assert.equal(dispatched, false);
-    if (mode === 'jobs') await work.runBackground(() => prisma.$executeRawUnsafe("INSERT INTO online_native_probe VALUES ('worker', 123456789.12345678, 0.00000001)"));
+    if (mode === 'jobs') assert.equal(await withRecoveryBackgroundWrite(() => prisma.$executeRawUnsafe("INSERT INTO online_native_probe VALUES ('worker', 123456789.12345678, 0.00000001)")), 1);
   }
   console.log(JSON.stringify({ event: 'ready', pid: process.pid, namespace: identity.name,
     purpose: input.scope.purpose, ...(server ? { port: server.address().port } : {}) }));
@@ -103,7 +104,7 @@ else (async () => {
       request.once('error', reject); request.end();
     });
   } else if (mode === 'lost-worker') {
-    await work.runBackground(() => prisma.$executeRawUnsafe("DO $$ BEGIN PERFORM pg_sleep(3); INSERT INTO online_native_probe VALUES ('lost-worker', 123456789.12345678, 0.00000001); END $$"));
+    await withRecoveryBackgroundWrite(() => prisma.$executeRawUnsafe("DO $$ BEGIN PERFORM pg_sleep(3); INSERT INTO online_native_probe VALUES ('lost-worker', 123456789.12345678, 0.00000001); END $$"));
   } else {
     while (!fs.existsSync(input.scope.coordinationDirectory + '/diagnostic-finish/' + input.scope.runtimeId)) await new Promise(resolve => setTimeout(resolve, 20));
   }
@@ -112,5 +113,10 @@ else (async () => {
   await disconnectDatabase();
 })().catch(async error => {
   console.error(error?.message === 'ONLINE_SCOPED_WORK_NOT_IMPLEMENTED' ? error.message : 'ONLINE_SCOPED_WORK_FAILED');
-  try { await disconnectDatabase(); } finally { process.exitCode = 1; }
+  try {
+    if (runtimeWork) await runtimeWork.stopAndDrain(2000);
+    if (server) await new Promise(resolve => server.close(resolve));
+    await disconnectDatabase();
+  } catch { console.error('ONLINE_SCOPED_WORK_FAILURE_DRAIN_UNPROVEN'); }
+  finally { process.exitCode = 1; }
 });

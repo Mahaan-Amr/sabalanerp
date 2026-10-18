@@ -1,0 +1,20 @@
+{
+  "freeze": "reports/qa/scoped-recovery-background-review-20261018.json",
+  "freezeSha256": "cc2b695c8bf61c32987af73339edec66696a494f039510eebf0163a1285c0ee8",
+  "reports": {
+    "online-native-7dd995c54f712eb130525bf38d1b6f27.json": "1e7d75e64a964310b885a7e6ba1d34f4d55ee724960fe437b25bbd81057fc27d",
+    "online-native-e5a1365ace94555ce35e75cb32ff3e3f.json": "79da4681e25b8e9ac75942c1e25ce6dd90fa7b4262076ac11f1f4008ccede560",
+    "scoped-background-kernel-regressions-20261018.json": "1f2aa20a4a32a6275b44e470b5ea7a04bb5723eca3f01a93145e28875115dae9",
+    "scoped-recovery-background-unit-observation-20261018.json": "c92df6890b8a8f03183da55dbda8d81340891cb141004c5c485317b9f68d7e67",
+    "scoped-recovery-background-red-20261018.json": "9fce5b7d3522541221f00b7419f9aadd9c96bcf13c6ccf443918f299586ab357",
+    "scoped-recovery-background-startup-refusal-closure-20261018.json": "2dd0d05ca7acaad16f641fc8af6666edc11821194c1ae7c529e7be819224bf4e",
+    "scoped-recovery-background-startup-reference-closure-20261018.json": "d3f1cc554d3c3b6bd9dd8ad46d9bc6add8eae9cc25d69d70d4186b64a0fb5df8",
+    "scoped-recovery-background-failed-fixture-native-closure-20261018.json": "e50738214a6bf695be1a3c20e292ab10b4d88186f24a4d3829f4302c4c9615b9"
+  },
+  "standardsReview": "PASS",
+  "specReview": "PASS",
+  "strictTypecheck": "PASS",
+  "architectureCheck": "PASS",
+  "productionMutation": false,
+  "wholeProgramComplete": false
+}

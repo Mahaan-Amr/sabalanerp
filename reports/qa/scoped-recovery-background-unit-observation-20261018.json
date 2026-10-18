@@ -1,0 +1,15 @@
+{
+  "command": "node backend/node_modules/tsx/dist/cli.mjs --test backend/src/services/__tests__/scopedRecoveryBackground.test.ts backend/src/services/__tests__/backgroundJobLifecycle.test.ts backend/src/services/__tests__/hrVehicleWorkerRetirement.test.ts backend/src/services/__tests__/biometricStagedCaptureMaintenance.test.ts backend/src/services/__tests__/runtimeStartup.test.ts",
+  "evidence": "Completed tool execution 29ee60; captured console TAP six tests, six pass, zero fail/skipped",
+  "passed": 6,
+  "failed": 0,
+  "skipped": 0,
+  "sources": {
+    "backend/src/services/__tests__/scopedRecoveryBackground.test.ts": "286599823186f1377bccc616322cd06e189f5369bc477dc9e2bedb99fca8e8a8",
+    "backend/src/services/__tests__/backgroundJobLifecycle.test.ts": "ce3e308474e5afaa1d2cca98647d9413324cf98d15cce0cb8ee5580882a73109",
+    "backend/src/services/__tests__/hrVehicleWorkerRetirement.test.ts": "a4c2a475de5f847b0b61a942fd51e03131586521c9a6ff8b0dacd1f92e0885ff",
+    "backend/src/services/__tests__/biometricStagedCaptureMaintenance.test.ts": "48cbc9217fa8e70cee1f2e764da8199512c7761f93d8eaef7db5fd14eb7b703c",
+    "backend/src/services/__tests__/runtimeStartup.test.ts": "92298bae538a291c69f0e05302086c4ec67fbd0ce5590a0dfa13a49765d7c2da"
+  },
+  "productionMutation": false
+}

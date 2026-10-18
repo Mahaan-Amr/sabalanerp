@@ -9,6 +9,7 @@ import { RuntimeBoundaryJournal, runtimeNativePostgresApplicationName } from './
 import { RuntimeTaskAdmission } from './runtimeTaskAdmission';
 import { RuntimeWorkBoundary } from './runtimeWorkBoundary';
 import { OnlineCaptureAdmission } from './onlineCaptureAdmission';
+import { bindScopedRecoveryBackgroundOwner } from './recoveryRuntime';
 
 type WorkInput = Readonly<{ registrySha256: string; generation: number; canJoin: () => boolean }>;
 const failure = (code: string) => Object.assign(new Error(code), { code });
@@ -78,5 +79,7 @@ export async function createScopedRuntimeWork(configuration: WorkInput): Promise
     if (input.scope.purpose !== 'http') throw failure('RUNTIME_HTTP_OWNERSHIP_REQUIRED');
     assertOwner();
   };
-  return new RuntimeWorkBoundary(tasks, runtimeHttpRequests, assertWorker, assertHttp, assertOwner);
+  const boundary = new RuntimeWorkBoundary(tasks, runtimeHttpRequests, assertWorker, assertHttp, assertOwner);
+  if (input.scope.purpose === 'jobs') bindScopedRecoveryBackgroundOwner(boundary);
+  return boundary;
 }

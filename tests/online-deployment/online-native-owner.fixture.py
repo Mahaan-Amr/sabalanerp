@@ -74,6 +74,7 @@ if mode in ['prepare', 'prepare-admission']:
     system = sql('SELECT system_identifier FROM pg_control_system()')
     coordination = root / 'coordination'
     coordination.mkdir(mode=0o700)
+    write(coordination / 'state.json', encoded(dict(mode='NORMAL', updatedAt=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))), 0o600)
     gate = lock(coordination / 'deployment-write-admission.lock')
     interlock = lock(coordination / 'deployment-runtime-control.lock')
     worker = lock(coordination / 'deployment-online-worker.lock')
@@ -143,6 +144,7 @@ if mode in ['prepare', 'prepare-admission']:
     if admission:
         paused_coordination = root / 'interrupted-capture-coordination'
         paused_coordination.mkdir(mode=0o700)
+        write(paused_coordination / 'state.json', encoded(dict(mode='NORMAL', updatedAt=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))), 0o600)
         (paused_coordination / 'diagnostic-finish').mkdir(mode=0o700)
         for name in ['online', 'online/native', 'online/work']:
             (paused_coordination / name).mkdir(mode=0o700)
@@ -219,6 +221,7 @@ def ready(child):
     if not raw:
         child.wait(timeout=5)
         diagnostic = child.stderr.read(4096)
+        write(root / ('startup-diagnostic-' + str(child.pid) + '.stderr'), diagnostic or b'NO_STDERR\n', 0o600)
         require(False, 'ONLINE_SCOPED_WORK_NOT_IMPLEMENTED' if b'ONLINE_SCOPED_WORK_NOT_IMPLEMENTED' in diagnostic
                 else 'CAPTURE_NAMESPACE_PROBE_REJECTED' if b'CAPTURE_NAMESPACE_PROBE_REJECTED' in diagnostic else 'WORKER_DID_NOT_START')
     value = json.loads(raw)

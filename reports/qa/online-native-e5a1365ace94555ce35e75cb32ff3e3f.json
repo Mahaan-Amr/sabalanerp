@@ -1,0 +1,112 @@
+{
+  "format": "sabalan-online-native-acceptance/v1",
+  "passResult": true,
+  "simultaneousServingPools": 2,
+  "singleWorker": true,
+  "captureCannotStealWorker": true,
+  "servingContinuedDuringWorkerOwnership": true,
+  "disconnectedCommit": {
+    "amount": "123456789.12345678",
+    "quantity": "0.00000001"
+  },
+  "globalInterlockHeldUntilSqlCompletion": true,
+  "grantReuseRefused": true,
+  "substitutedCaptureGateRefused": true,
+  "actualCaptureGateExclusive": true,
+  "fullRuntimeIdNamespaceSeparation": true,
+  "deadWorkerDurableFenceRefused": true,
+  "existingNullWorkerRefusedDuringOrphanSql": true,
+  "retainedWorkerHoldSha256": "05e465b3cd7d39a8a475262204e07d8986ab8b0ef4e296878c68055572285fac",
+  "legacyFleetBypassRefused": true,
+  "scopedHttpAndWorkerWork": true,
+  "durableCapturePauseWithQueuedHttp": false,
+  "registeredBackendCensusAndComponent": null,
+  "orphanWorkClaimRefused": false,
+  "interruptedCapturePauseRetained": false,
+  "droppedDatabase": "sabalanerp_concurrency_9b06ec8750ba45d2",
+  "canonicalServicesUnchanged": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    }
+  },
+  "unknownRecordRefusals": {
+    "passResult": true,
+    "cases": [
+      {
+        "file": "deployment-runtime-native.json",
+        "existingNullRefused": true,
+        "originalBytesRetained": true
+      },
+      {
+        "file": "deployment-online-worker-native.json",
+        "existingNullRefused": true,
+        "originalBytesRetained": true
+      },
+      {
+        "file": "deployment-bootstrap-native.json",
+        "existingNullRefused": true,
+        "originalBytesRetained": true
+      }
+    ]
+  },
+  "sources": {
+    "backend-runtime-owner.py": "7812ebf703fd3c68f0fa7e3d595034a8b27166e16865718934d284ca626d8865",
+    "online-runtime-owner.py": "5b6cb0eeda9b173e375c7d936a26e44a9621822ebc15d2b57c28afcce443c4d5",
+    "online-runtime-scope.py": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85",
+    "online-capture-admission.py": "5f9f5229d7c697c7632e7592ccb90b61273f68cc20a9f15b647b62524ff3365a",
+    "online-backend-boundary.py": "6e1cdb9847a1b46aaa6c4226d1d02c57da679c58fc96921c005d24dfd969a8c9",
+    "online-inquiry-boundary.py": "ee609932e44d9c100b181220e8fe579e454d7de1852b03b913c5124e0d6d12e7",
+    "recovery-file-generations.py": "1a4875994c4876ad653b8df01f09e889f158428ed6a2e6552feee6051eb3e6e8",
+    "capture-coherent-components.py": "04cf337a0402010b165d686e9d806636130d703ecd571964a8c1c5a101b287e6",
+    "recovery-database-freeze.py": "d482c2c6e5d50f52249ada95cee5a4b3f8ecca7d44a81684e900317f973b7541",
+    "with-backend-control-ownership.sh": "86ed167417895c184d67893a8e7fab81cca02a7ac12df7d764cea3b8703f476a",
+    "protected-bootstrap-state.py": "dc1e39138182d70382e365115e2ef08d453ceac00200c99b0bf65dfa3ae1d83e",
+    "worker.cjs": "6e94ac93cc2a84a8cb11aff8b212f2840ae9f64a472227c3ba9dfac24300a092",
+    "native-worker.cjs": "9582f19ee2685701a4759df4d2e0824061c6206404db56fe9637831d9f956f7f",
+    "fixture.py": "6b653eb1840f36767812a500b0872b7ce35120aa6b459bb4e91d6bf07dc50be6",
+    "records.fixture.py": "a1c58710ae3e79233337dfabe9608bb334b6c49a47486346c66d84176952361a",
+    "capture.fixture.py": "270702a08c66f568e55525982750b5dac91ccc75815e324f7b2f239e2cd549b3",
+    "admission.fixture.cjs": "4107f57a3f8a7973d690de513fdc54f9f2ebf4149a16b1cef752108d8f27170c",
+    "capacity.fixture.py": "8cfd68d67496ceaaf74f79fbdab4888babd5f66e5aa46315e92d1e8fbf8fb352",
+    "streamed-closure.fixture.sh": "4dcc28a0b6affb5d8a7c02cfce2227319aaefcffc08d031a2b4cc2546ba0ba34",
+    "deploy/scripts/backend-runtime-owner.py": "7812ebf703fd3c68f0fa7e3d595034a8b27166e16865718934d284ca626d8865",
+    "services/onlineRuntimeWork.js": "6f30766cefad10ce008f81659e5d6115820fc58abcc723fbb920cdd628b3b4e5",
+    "services/onlineCaptureAdmission.js": "13ca0421fb76ddad38d99c1b83f0d6ac47df80eea12c3ea936c75dadf436ee40",
+    "services/kernelWriteAdmission.js": "b8dd4d6443eb4f525613fd48d10fa838ccbbd81f43d412674464da31af6c710b",
+    "services/runtimeBoundaryJournal.js": "c75bd2c91cfeff77f52e6f245fc23c2b88c54397ab3d9bc89f4b316e7b48d5dc",
+    "services/runtimeTaskAdmission.js": "9e1a08c587f07b76b67becbe9367c7fbcfc79e061b1147dfee212da953196648",
+    "services/runtimeWorkContext.js": "ed0a47227bb39a5b0e3ea1aae8be6f753bb2d88e0247832b7108f29d1e10156a",
+    "services/runtimeLeasedWorkContext.js": "78afa60b0de3a3b580b56b47ba298ec304d97923b1bfcc9235e982b5f8f7d0a0",
+    "services/runtimeWorkBoundary.js": "c2ee71646ec3dd47a68b048e2c42edbb0cfbe0b069b66ba033a4ae587b262998",
+    "services/httpRequestLifecycle.js": "10d23213469a42cf56dfe4a8b804b8c50ee7ef377a0ae0e83aa93491e851a995",
+    "services/durableUpload.js": "31f28d442c2a38c509f42c048261012b62eb783c454fba9ad65d785fcc1066ee",
+    "services/durableFilePublication.js": "3b9ba70126478bbb1922b01e14bb537d6cc1a4c6528a0bec30e07a7e465d259d",
+    "services/versionedFilePublication.js": "d26bacb8c8d86161c5fc35d4f49aceccb0ce184a2cb488f18b20d3a4a6e24d8a",
+    "services/recoveryRuntime.js": "8f262ed9809e91018ffd7c449f15c6a665b35801fbc627db54f9234d210363f5",
+    "services/recoveryCoordinationState.js": "9de3aaae038b3ee5c769550c5be1db86db212d8566bc5fcf8287457faf356958",
+    "services/recoveryOperationAdmission.js": "35729e68c80359de83d2ea3e218d5d4598d60116af102f653353237cb965138d",
+    "services/deploymentMaintenance.js": "97233a2115a1eb8a9bea19aed846059a6577f6f2c3585141c529082bd6e187fa",
+    "lib/prisma.js": "91c8fbff960236036678f26c42d99f9050316aae784b10d2ff937695bd8453df",
+    "services/runtimeControlOwnership.js": "81c65350ad02963c6c3815a82cc0959458228f511fc12df6bad9af4ef167198c",
+    "services/onlineRuntimeScope.js": "6e3103ce7f4589c5a0063242b459e0e3dc62134ca3e9b112d74fa6da421703fd",
+    "services/runtimeNativeAuthority.js": "3e8456d91203c767d1bdaae9e4e8a71704c941db554a22c298e8487f14753c3d",
+    "services/online-runtime-scope.py": "79dae60c026833dfdd737be60bfa1ea2ba605332d5a6fbfec85f0c7cfe611d85"
+  }
+}

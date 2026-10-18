@@ -65,16 +65,37 @@ test('private HR staging preserves exact receipts and refuses to certify erasure
     await assert.rejects(files.restore(stage), /FILE_VERSION_ALREADY_EXISTS/);
     assert.equal(fs.readFileSync(path.join(v.live, 'applicant.pdf'), 'utf8'), 'NEW HR DOCUMENT');
     await v.publisher.removeUpload('applicant.pdf', replacement);
-    const restored = await files.restore(stage);
-    const second = await files.stage('applicant.pdf', 'next-deletion-operation', restored.destinationVersionSha256);
+    await assert.rejects(files.restore(stage), /FILE_VERSION_MOVE_DESTINATION_CHANGED/);
+    assert.equal(fs.existsSync(path.join(v.live, 'applicant.pdf')), false);
+    const current = await v.publisher.publish('applicant.pdf', Buffer.from('CURRENT HR DOCUMENT'));
+    const second = await files.stage('applicant.pdf', 'next-deletion-operation', current);
     const deleted = await files.commit(second);
     assert.equal(deleted.physicalErasure, 'UNPROVEN');
     assert.equal(deleted.status, 'LIVE_REMOVED_RETAINED_COPIES_PENDING');
     assert.equal(fs.existsSync(path.join(v.live, '.deletion-trash/next-deletion-operation/applicant.pdf')), false);
     assert.equal((await v.publisher.readVersion(original)).toString(), 'PRIVATE HR DOCUMENT');
-    assert.equal((await v.publisher.readVersion(second.stagedVersionSha256)).toString(), 'PRIVATE HR DOCUMENT');
+    assert.equal((await v.publisher.readVersion(second.stagedVersionSha256)).toString(), 'CURRENT HR DOCUMENT');
     await assert.rejects(files.commit(second), /FILE_VERSION_UPLOAD_CHANGED/);
     v.lock(); await v.publisher.seal('c'.repeat(64), v.fd); v.unlock();
+  } finally { await v.close(); }
+});
+
+test('conditional relocation binds a deleted destination generation and refuses reused staging history', async () => {
+  const v = await fixture();
+  try {
+    const original = await v.publisher.publish('source.pdf', Buffer.from('ORIGINAL'));
+    const staged = await v.publisher.move('source.pdf', 'stage.pdf', original, null);
+    const newer = await v.publisher.publish('source.pdf', Buffer.from('NEW USER FILE'));
+    const deleted = await v.publisher.removeUpload('source.pdf', newer);
+    await assert.rejects(v.publisher.move('stage.pdf', 'source.pdf', staged.destinationVersionSha256,
+      staged.sourceVersionSha256), /FILE_VERSION_MOVE_DESTINATION_CHANGED/);
+    assert.equal(fs.existsSync(path.join(v.live, 'source.pdf')), false);
+    assert.equal(fs.readFileSync(path.join(v.live, 'stage.pdf'), 'utf8'), 'ORIGINAL');
+    const restored = await v.publisher.move('stage.pdf', 'source.pdf', staged.destinationVersionSha256, deleted);
+    await assert.rejects(v.publisher.move('source.pdf', 'stage.pdf', restored.destinationVersionSha256, null),
+      /FILE_VERSION_MOVE_DESTINATION_CHANGED/);
+    assert.deepEqual(fs.readdirSync(path.join(v.store, 'pending')), []);
+    assert.equal(fs.readFileSync(path.join(v.live, 'source.pdf'), 'utf8'), 'ORIGINAL');
   } finally { await v.close(); }
 });
 

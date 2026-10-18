@@ -23,7 +23,8 @@ export type VersionedFileRootScope = Readonly<{
   inspect(key: string): Promise<VersionedFileRootHead | null>;
   read(key: string): Promise<Buffer | null>;
   readVersion(key: string, versionSha256: string): Promise<Buffer | null>;
-  moveTo(destination: VersionedFileRootScope, sourceKey: string, destinationKey: string, expectedSourceSha256: string): ReturnType<VersionedFilePublication['move']>;
+  moveTo(destination: VersionedFileRootScope, sourceKey: string, destinationKey: string, expectedSourceSha256: string,
+    expectedDestinationSha256?: string | null): ReturnType<VersionedFilePublication['move']>;
 }>;
 const rootScopes = new WeakMap<VersionedFileRootScope, { owner: VersionedFilePublication; root: string; prefix: string }>();
 export function assertVersionedFileRootScope(scope: VersionedFileRootScope, root: string) {
@@ -188,12 +189,13 @@ export class VersionedFilePublication {
           const head = await inspect(value);
           return head ? readVersion(value, head.versionSha256) : null;
         }),
-        moveTo: async (destination: VersionedFileRootScope, sourceKey: string, destinationKey: string, expected: string) => {
+        moveTo: async (destination: VersionedFileRootScope, sourceKey: string, destinationKey: string, expected: string,
+          expectedDestination?: string | null) => {
           const binding = rootScopes.get(destination);
           if (!binding || binding.owner !== this) return fail('FILE_VERSION_STORAGE_ROOT_MISMATCH');
           const destinationFull = typeof destinationKey === 'string' && binding.prefix
             ? binding.prefix + '/' + destinationKey : destinationKey;
-          return this.move(key(sourceKey), destinationFull, expected);
+          return this.move(key(sourceKey), destinationFull, expected, expectedDestination);
         },
       });
       rootScopes.set(scope, { owner: this, root, prefix });
@@ -404,6 +406,7 @@ export class VersionedFilePublication {
 
   private async claim(key: string, operation: 'PUT' | 'DELETE' | 'MOVE', move?: {
     operationId: string; sourceKey: string; destinationKey: string; expectedSourceSha256: string;
+    expectedDestinationSha256?: string | null;
   }): Promise<FileClaim> {
     const { id, target } = this.key(key);
     this.work.assertActive(); await this.assertDirectories();
@@ -434,11 +437,14 @@ export class VersionedFilePublication {
    * destination and source deletion histories plus the pair receipt are durable.
    * An interrupted pair is never retried or rolled back implicitly. Expected
    * source identity and no-clobber destination also protect stale HR restores. */
-  move(sourceKey: string, destinationKey: string, expectedSourceSha256: string) {
+  move(sourceKey: string, destinationKey: string, expectedSourceSha256: string, expectedDestinationSha256?: string | null) {
     this.key(sourceKey); this.key(destinationKey);
-    if (sourceKey === destinationKey || !shaPattern.test(expectedSourceSha256)) fail('FILE_VERSION_SELECTION_INVALID');
+    if (sourceKey === destinationKey || !shaPattern.test(expectedSourceSha256)
+      || (expectedDestinationSha256 !== undefined && expectedDestinationSha256 !== null
+        && (typeof expectedDestinationSha256 !== 'string' || !shaPattern.test(expectedDestinationSha256)))) fail('FILE_VERSION_SELECTION_INVALID');
     return this.work.run(async () => {
-      const move = { operationId: randomUUID(), sourceKey, destinationKey, expectedSourceSha256 };
+      const move = { operationId: randomUUID(), sourceKey, destinationKey, expectedSourceSha256,
+        ...(expectedDestinationSha256 !== undefined ? { expectedDestinationSha256 } : {}) };
       const claims: FileClaim[] = [];
       for (const key of [sourceKey, destinationKey].sort()) {
         try { claims.push(await this.claim(key, 'MOVE', move)); }
@@ -454,6 +460,8 @@ export class VersionedFilePublication {
       const refusal = source.previous?.sha256 !== expectedSourceSha256 ? 'FILE_VERSION_MOVE_SOURCE_CHANGED'
         : !source.actual || !source.previous?.value.object ? 'FILE_VERSION_MOVE_SOURCE_MISSING'
         : destination.actual ? 'FILE_VERSION_ALREADY_EXISTS'
+        : expectedDestinationSha256 !== undefined && (destination.previous?.sha256 ?? null) !== expectedDestinationSha256
+          ? 'FILE_VERSION_MOVE_DESTINATION_CHANGED'
         : claims.some(claim => (claim.previous?.value.generation ?? 0) >= 10000) ? 'FILE_VERSION_HISTORY_CAPACITY' : null;
       if (refusal) {
         for (const claim of claims) await this.assertClaim(claim);

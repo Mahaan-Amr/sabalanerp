@@ -37,14 +37,15 @@ export function createVersionedHiringFileTransaction(root: string, publication: 
     async stage(storageName: string, operationId: string, originalVersionSha256: string): Promise<VersionedStagedHiringFile> {
       segment(storageName); segment(operationId);
       if (!sha256(originalVersionSha256)) fail();
-      const result = await publication.move(storageName, stagedKey(storageName, operationId), originalVersionSha256);
+      const result = await publication.move(storageName, stagedKey(storageName, operationId), originalVersionSha256, null);
       return Object.freeze({ format: 'sabalan-hr-file-stage/v1', storageName, operationId, originalVersionSha256,
         stagedVersionSha256: result.destinationVersionSha256, sourceDeletedVersionSha256: result.sourceVersionSha256,
         moveReceiptSha256: result.receiptSha256 });
     },
     async restore(receipt: VersionedStagedHiringFile) {
       assertReceipt(receipt);
-      return publication.move(stagedKey(receipt.storageName, receipt.operationId), receipt.storageName, receipt.stagedVersionSha256);
+      return publication.move(stagedKey(receipt.storageName, receipt.operationId), receipt.storageName,
+        receipt.stagedVersionSha256, receipt.sourceDeletedVersionSha256);
     },
     async commit(receipt: VersionedStagedHiringFile) {
       assertReceipt(receipt);

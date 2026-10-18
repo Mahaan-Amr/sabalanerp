@@ -3069,6 +3069,10 @@ _Avoid_: rewriting the visible meaning of historical attendance, dropping old us
 A login identity for accessing Sabalan ERP. Every system user should be linked to an organizational personnel record, while many personnel records may have no system user.
 _Avoid_: using user accounts as the workforce roster, creating login access just to record operational attendance, or keeping user-only people outside the personnel roster
 
+**نام جاری فرد سازمانی**:
+نام و نام خانوادگی فعلی فرد در پرونده پرسنلی و حساب سامانه متصل او؛ اصلاح نام از هر یک از این دو حوزه به همان فرد مربوط است و نام ثبت‌شده در اسناد تاریخی را جایگزین نمی‌کند.
+_Avoid_: نام مستقل و ناسازگار برای حساب و پرسنل متصل، یکی‌دانستن نام با شناسه ورود، یا تشخیص هویت صرفاً بر اساس تشابه نام
+
 **اتصال کاربر به پرسنل**:
 Creating a system user should default to creating or linking the corresponding organizational personnel from the user's name and department, while also allowing admins to attach the user to an existing personnel record. One personnel record may be linked to at most one system user.
 _Avoid_: creating duplicate personnel when a matching same-department person already exists, forcing a login account for existing non-user personnel, or allowing multiple users to represent the same personnel record

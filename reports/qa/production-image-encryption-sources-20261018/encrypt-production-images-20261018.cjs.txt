@@ -1,0 +1,51 @@
+const fs=require('node:fs');
+const path=require('node:path');
+const nodeCrypto=require('node:crypto');
+const crypto=require('./recoveryCrypto.cjs');
+const fail=code=>{throw Object.assign(new Error(code),{code});};
+const identity=s=>[s.dev,s.ino,s.size,s.mtimeNs,s.ctimeNs].map(String).join(':');
+function safeFile(file,max,privateBytes=true){
+ if(!path.isAbsolute(file)||fs.realpathSync(file)!==file)fail('IMAGE_CIPHER_FILE_ALIAS');
+ const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+ try{const s=fs.fstatSync(fd,{bigint:true});if(!s.isFile()||s.nlink!==1n||s.uid!==0n||(s.mode&(privateBytes?0o077n:0o022n))||s.size<1n||s.size>BigInt(max))fail('IMAGE_CIPHER_FILE_UNSAFE');return s;}finally{fs.closeSync(fd);}
+}
+async function syncFile(file){const f=await fs.promises.open(file,'r');try{await f.sync();}finally{await f.close();}}
+async function syncDirectory(file){const f=await fs.promises.open(file,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);try{await f.sync();}finally{await f.close();}}
+async function save(file,value){await fs.promises.writeFile(file,JSON.stringify(value,null,2)+'\n',{flag:'wx',mode:0o600});await syncFile(file);await syncDirectory(path.dirname(file));}
+async function main(){
+ const [componentFile,secretRoot,work]=process.argv.slice(2);safeFile(componentFile,1024*1024);
+ const component=JSON.parse(fs.readFileSync(componentFile,'utf8'));
+ if(component.format!=='sabalan-production-image-component/v1'||component.healthyApplicationPoint!==false||component.publicOnlineAdmission!==false
+  ||Object.keys(component.images).sort().join(',')!=='backend,frontend,inquiry')fail('IMAGE_COMPONENT_UNPROVEN');
+ for(const directory of [path.dirname(componentFile),secretRoot,work]){const s=fs.lstatSync(directory);if(fs.realpathSync(directory)!==directory||!s.isDirectory()||s.uid!==0||(s.mode&0o077))fail('IMAGE_CIPHER_DIRECTORY_UNSAFE');}
+ const local=path.join(secretRoot,'local-rollback-key'),remote=path.join(secretRoot,'remote-recovery-public.pem');safeFile(local,16384);safeFile(remote,16384,false);
+ const passphrase=fs.readFileSync(local,'utf8').trim(),publicKeyPem=fs.readFileSync(remote,'utf8');
+ if(passphrase.length<32||/REPLACE|CHANGE_ME|UNCONFIGURED/.test(passphrase)||!publicKeyPem.includes('BEGIN PUBLIC KEY'))fail('IMAGE_CIPHER_RECIPIENT_INVALID');
+ const publicKeySha256=nodeCrypto.createHash('sha256').update(nodeCrypto.createPublicKey(publicKeyPem).export({type:'spki',format:'der'})).digest('hex');
+ const images={};
+ for(const service of ['backend','frontend','inquiry']){
+  const selected=component.images[service],source=path.join(path.dirname(componentFile),service+'.docker.tar.gz');
+  if(selected.archive!==source||selected.service!==service||selected.fullLocalRoundtripVerified!==true||!/^[a-f0-9]{64}$/.test(selected.compressedSha256))fail('IMAGE_CIPHER_SELECTION_INVALID');
+  const before=safeFile(source,2**31);
+  if(Number(before.size)!==selected.compressedBytes||await crypto.sha256File(source)!==selected.compressedSha256)fail('IMAGE_CIPHER_SOURCE_CHANGED');
+  const cipher=path.join(work,service+'.sabrec'),roundtrip=path.join(work,service+'.validated.docker.tar.gz');
+  if(fs.existsSync(cipher)||fs.existsSync(roundtrip))fail('IMAGE_CIPHER_OUTPUT_EXISTS');
+  await crypto.encryptRecoveryArchiveForRecipients(source,cipher,[{keyId:'local-rollback',passphrase},{keyId:'independent-recovery',publicKeyPem}]);
+  await syncFile(cipher);await syncDirectory(work);
+  await crypto.decryptRecoveryArchive(cipher,roundtrip,passphrase);await syncFile(roundtrip);await syncDirectory(work);
+  const verifiedRoundtrip=safeFile(roundtrip,2**31);
+  if(Number(verifiedRoundtrip.size)!==selected.compressedBytes||await crypto.sha256File(roundtrip)!==selected.compressedSha256
+   ||identity(before)!==identity(safeFile(source,2**31)))fail('IMAGE_CIPHER_ROUNDTRIP_FAILED');
+  const result={service,sourceImageId:selected.sourceImageId,sourceSha256:selected.compressedSha256,sourceBytes:selected.compressedBytes,
+   cipherSha256:await crypto.sha256File(cipher),cipherBytes:fs.statSync(cipher).size,localDecryptVerified:true,independentDecryptVerified:false,
+   verifiedRawArchive:selected.verifiedRawArchive,independentPublicKeySha256:publicKeySha256,healthyApplicationPoint:false,publicOnlineAdmission:false};
+  await save(path.join(work,service+'-encryption-proof.json'),result);images[service]=result;
+  // This exact scratch output has a verified source and durable dual-recipient
+  // ciphertext. Remove only this owned duplicate after its readback and proof.
+  if(identity(safeFile(roundtrip,2**31))!==identity(verifiedRoundtrip))fail('IMAGE_ROUNDTRIP_IDENTITY_CHANGED');
+  await fs.promises.unlink(roundtrip);await syncDirectory(work);
+ }
+ const proof={format:'sabalan-private-image-cipher-set/v1',images,healthyApplicationPoint:false,publicOnlineAdmission:false};
+ await save(path.join(work,'encryption-set-proof.json'),proof);console.log(JSON.stringify(proof));
+}
+main().catch(error=>{console.error(JSON.stringify({ok:false,failureClass:error.code||error.name}));process.exitCode=1;});

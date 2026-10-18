@@ -4,6 +4,8 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 ## Current foundation
 
+- Those current production image exports now also passed actual dual-recipient encryption and complete local decryption, with native closure and all six source services preserved. A disposable-key native fixture additionally verified independent RSA readback and corruption/retry refusal. Actual remote image custody/decryption remains pending. See [image cipher evidence](../../reports/qa/production-application-image-encryption-20261018.md).
+
 - The current production backend/frontend/Inquiry immutable image bytes now have native-owned private exports with verified archive graphs and full local gzip round trips. Six healthy serving identities were preserved. Independent custody, expanded diff-ID/materialization evidence and application restoration remain pending. See [actual image export evidence](../../reports/qa/production-application-image-export-20261018.md).
 
 - The private HR document adapter now stages/restores/removes exact versioned files with immutable receipts and explicit retained-copy erasure status. Native stale-receipt/root/restore cases passed; durable domain cleanup-row and real route integration remain pending. See [HR storage evidence](../../reports/qa/hr-versioned-file-transaction-20261018.md).

@@ -235,6 +235,83 @@ class PrivateImageMaterialization(unittest.TestCase):
             self.assertEqual(image.sha(archive), checksum)
             self.assertEqual(list(root.iterdir()), [archive])
 
+    def test_verified_callback_precedes_manifest_and_may_retire_owned_source(self):
+        with tempfile.TemporaryDirectory(prefix='sabalan-stream-finalize-') as directory:
+            root = Path(directory).resolve()
+            archive, checksum, index, platform, config, raw, _ = fixture(root)
+            sink, events = io.BytesIO(), []
+            original_add = tarfile.TarFile.addfile
+
+            def watched(target, info, fileobj=None):
+                if target.fileobj.__class__.__name__ == '_Stream':
+                    events.append(info.name)
+                return original_add(target, info, fileobj)
+
+            def finalized():
+                events.append('VERIFIED_CALLBACK')
+                self.assertEqual(image.sha(archive), checksum)
+                archive.unlink()  # Disposable input; no production callback authority is inferred.
+
+            with patch.object(tarfile.TarFile, 'addfile', watched):
+                result = image.materialize_to_stream(archive, sink, checksum, index, platform, config,
+                                                    before_manifest=finalized)
+            self.assertEqual(events[-2:], ['VERIFIED_CALLBACK', 'manifest.json'])
+            self.assertEqual(events.count('VERIFIED_CALLBACK'), 1)
+            with tarfile.open(fileobj=io.BytesIO(sink.getvalue())) as output:
+                manifest = json.load(output.extractfile('manifest.json'))
+                self.assertEqual([output.extractfile(name).read() for name in manifest[0]['Layers']], raw)
+            self.assertFalse(result['dockerImportVerified'])
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_callback_failure_or_invalid_source_never_emits_manifest(self):
+        for invalid_source in [False, True]:
+            with self.subTest(invalid_source=invalid_source), tempfile.TemporaryDirectory(prefix='sabalan-stream-callback-') as directory:
+                root = Path(directory).resolve()
+                archive, checksum, index, platform, config, *_ = fixture(root, bad_diff=invalid_source)
+                sink, calls = io.BytesIO(), []
+
+                def failed():
+                    calls.append(True)
+                    raise RuntimeError('FINALIZATION_REFUSED')
+
+                expected = 'IMAGE_DIFF_ID_MISMATCH' if invalid_source else 'FINALIZATION_REFUSED'
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    image.materialize_to_stream(archive, sink, checksum, index, platform, config,
+                                                before_manifest=failed)
+                self.assertEqual(len(calls), 0 if invalid_source else 1)
+                self.assertNotIn(b'manifest.json', sink.getvalue())
+                self.assertEqual(image.sha(archive), checksum)
+                self.assertEqual(list(root.iterdir()), [archive])
+
+    def test_lazy_finalizers_cannot_silently_publish_a_manifest(self):
+        calls = []
+
+        async def asynchronous():
+            calls.append('async')
+
+        def generator():
+            calls.append('generator')
+            yield None
+
+        def returns_iterator():
+            return iter([None])
+
+        class AsyncCallable:
+            async def __call__(self):
+                calls.append('async-object')
+
+        for callback in [asynchronous, generator, returns_iterator, AsyncCallable()]:
+            with self.subTest(callback=type(callback).__name__), tempfile.TemporaryDirectory(prefix='sabalan-stream-lazy-') as directory:
+                root = Path(directory).resolve()
+                archive, checksum, index, platform, config, *_ = fixture(root)
+                sink = io.BytesIO()
+                with self.assertRaisesRegex(RuntimeError, 'IMAGE_STREAM_CALLBACK_'):
+                    image.materialize_to_stream(archive, sink, checksum, index, platform, config,
+                                                before_manifest=callback)
+                self.assertNotIn(b'manifest.json', sink.getvalue())
+                self.assertEqual(image.sha(archive), checksum)
+        self.assertEqual(calls, [])
+
     def test_unknown_existing_work_and_wrong_source_checksum_are_preserved(self):
         with tempfile.TemporaryDirectory(prefix='sabalan-image-refusal-') as directory:
             root = Path(directory).resolve()

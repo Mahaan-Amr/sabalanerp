@@ -9,6 +9,8 @@ import argparse
 import gzip
 import hashlib
 import io
+import inspect
+import types
 import json
 import os
 from pathlib import Path
@@ -266,12 +268,17 @@ def measure(archive, archive_sha, index_id, platform_id, config_id,
 
 def materialize_to_stream(archive, output, archive_sha, index_id, platform_id, config_id,
                           maximum_layer_bytes=1024 ** 3, maximum_image_bytes=2 * 1024 ** 3,
-                          preserve_source_encoding=False):
+                          preserve_source_encoding=False, before_manifest=None):
     """Emit a private classic archive; caller owns its sink and native closure.
 
     No Docker invocation, temporary layer copies, tags, cleanup or admission.
     A final manifest is emitted only after all selected layers are verified.
     """
+    require(before_manifest is None or callable(before_manifest), 'IMAGE_STREAM_CALLBACK_INVALID')
+    if before_manifest is not None:
+        for callback in [before_manifest, getattr(before_manifest, '__call__', None)]:
+            require(not (inspect.iscoroutinefunction(callback) or inspect.isgeneratorfunction(callback)
+                         or inspect.isasyncgenfunction(callback)), 'IMAGE_STREAM_CALLBACK_MUST_BE_SYNCHRONOUS')
     measured = measure(archive, archive_sha, index_id, platform_id, config_id,
                        maximum_layer_bytes, maximum_image_bytes)
     archive, before, metadata, names, layers, diff_ids, wanted = read_plan(
@@ -354,6 +361,12 @@ def materialize_to_stream(archive, output, archive_sha, index_id, platform_id, c
         after = archive.lstat()
         identity = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns, s.st_nlink)
         require(identity(before) == identity(after), 'IMAGE_SOURCE_MUTATED')
+        if before_manifest is not None:
+            finalization_result = before_manifest()  # Caller owns source/staging finalization.
+            # A returned lazy object is not proof that finalization executed.
+            if isinstance(finalization_result, (types.CoroutineType, types.GeneratorType)):
+                finalization_result.close()
+            require(finalization_result is None, 'IMAGE_STREAM_CALLBACK_COMPLETION_UNPROVEN')
         add('manifest.json', json.dumps([{'Config': config_name, 'RepoTags': None,
             'Layers': ['layer-' + str(n).zfill(4) + '.tar' for n in range(len(layers))]}],
             separators=(',', ':')).encode())

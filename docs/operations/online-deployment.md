@@ -219,3 +219,12 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   native-file or full application acceptance. The initial failed harness left
   six explicitly documented canonical-local QA audit rows intact. See
   [audit JSON evidence](../../reports/qa/dispatch-orphan-audit-json-20261019.md).
+
+- Joined native acceptance now exercises the actual reconciliation/quarantine/
+  audit-generation/cleanup path with real PostgreSQL and Linux file versions,
+  preserving the original immutable bytes after live removal. The private pool,
+  admitted work, actual SQL census and exact isolated database retirement passed,
+  with source bytes bound directly to compilation and both frozen reviews. This
+  is normal-path component acceptance; crash recovery, raw repair and production
+  admission remain pending. An earlier failed diagnostic database remains held.
+  See [joined native evidence](../../reports/qa/dispatch-orphan-joined-native-20261019.md).

@@ -1,0 +1,5 @@
+{
+  "operation": "materialize-pg-6fc91cd969994015b5bf2eb8d8a29b77",
+  "decryptionRoot": "/root/sabalan-recovery-private/native-qa/production-base-restore-dbfc6b6eca9741469ae3076756b165a8",
+  "sourceSha256": "5914d19a481c7fb15c78f6874e069140c859ec4656c7200b5b544248b36f77da"
+}

@@ -138,3 +138,12 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   during the respective accepted operations. Exact-image native boot, continuous
   WAL and coherent full application recovery remain pending. See
   [production physical component](../../reports/qa/production-physical-base-20261018.md).
+
+- The exact production PostgreSQL image was independently materialized from its
+  protected multi-image archive and imported without tags. The original
+  materialization attempt remains unaccepted after a foreign-service comparison
+  failure; separate reviewed file-only closure and component verification do
+  not manufacture its missing native completion receipt. The import persisted
+  actual native completion before observing foreign workloads. No database
+  boot or healthy application point is implied. See
+  [exact-image evidence](../../reports/qa/production-base-image-materialization-20261018.md).

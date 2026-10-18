@@ -1,0 +1,5 @@
+{
+  "sshExitCode": 0,
+  "stdout": "{\"exitCode\": 0, \"root\": \"/root/sabalan-recovery-private/native-qa/image-materialize-tests-12e814107ee945b0855f4bad47aa2acc\", \"sourceHashes\": {\"deploy/scripts/materialize-private-image.py\": \"5914d19a481c7fb15c78f6874e069140c859ec4656c7200b5b544248b36f77da\", \"tests/online-deployment/private-image-materialization.test.py\": \"942ea3b4787dcfa7b697160acfd537af94f583145ea476a4dc3c4885e865f42f\"}, \"stdout\": \"\", \"stderr\": \".......\\n----------------------------------------------------------------------\\nRan 7 tests in 0.259s\\n\\nOK\\n\", \"dockerOrPostgresContact\": false}\n",
+  "stderr": ""
+}

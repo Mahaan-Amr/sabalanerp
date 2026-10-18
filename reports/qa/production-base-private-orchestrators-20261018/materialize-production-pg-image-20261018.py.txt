@@ -1,0 +1,67 @@
+import pathlib,json,hashlib,base64,uuid,subprocess
+repo=pathlib.Path('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp')
+decrypted=json.loads(json.loads((repo/'reports/qa/production-base-restore-dbfc6b6eca9741469ae3076756b165a8.json').read_text())['stdout'])
+assert decrypted['exitCode']==0 and decrypted['decryption']['independentRsaDecryptVerified']
+operation='materialize-pg-'+uuid.uuid4().hex
+data=(repo/'deploy/scripts/materialize-private-image.py').read_bytes()
+spec={'decrypted':decrypted,'operation':operation,'source':base64.b64encode(data).decode(),'sourceSha256':hashlib.sha256(data).hexdigest()}
+remote=r'''import os,pathlib,json,base64,hashlib,stat,fcntl,subprocess,time,resource
+spec=json.loads(INPUT)
+os.umask(0o077);resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+private=pathlib.Path('/root/sabalan-recovery-private');qa=private/'native-qa'
+assert private.resolve(strict=True)==private and private.stat().st_uid==0 and not private.stat().st_mode&0o077
+assert qa.resolve(strict=True)==qa and qa.stat().st_uid==0 and not qa.stat().st_mode&0o022
+for p,target in [(private/'drill-ownership.lock',9),(pathlib.Path('/run/lock/sabalan-backup-storage.lock'),8)]:
+ fd=os.open(p,os.O_RDWR|os.O_NOFOLLOW);s=os.fstat(fd);n=p.lstat()
+ assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode&0o022 and (s.st_dev,s.st_ino)==(n.st_dev,n.st_ino)
+ os.dup2(fd,target,inheritable=True);fcntl.flock(target,fcntl.LOCK_EX|fcntl.LOCK_NB)
+assert not (qa/'coherent-component-active.json').exists() and not (qa/'production-base-active.json').exists()
+work=pathlib.Path(spec['decrypted']['root']);assert work.resolve(strict=True)==work and work.parent==qa and work.stat().st_uid==0 and not work.stat().st_mode&0o077
+assert json.loads((work/'independent-decryption-proof.json').read_text())==spec['decrypted']['decryption']
+assert (work/'closed-decryption-owner-intent.json').is_file()
+def foreign():
+ ids=subprocess.check_output(['docker','ps','-q'],text=True).split();values=json.loads(subprocess.check_output(['docker','inspect',*ids],text=True)) if ids else []
+ return sorted([{'id':v['Id'],'image':v['Image'],'startedAt':v['State']['StartedAt']} for v in values],key=lambda x:x['id'])
+before=foreign();assert len(before)>=16
+assert not subprocess.check_output(['docker','ps','-aq','--filter','label=com.docker.compose.project=sabalanerp-backup-drill'],text=True).strip()
+owner=qa/'native-owner-storage-final-20261017/owner';assert hashlib.sha256(owner.read_bytes()).hexdigest()=='c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83'
+code=work/(spec['operation']+'.py');data=base64.b64decode(spec['source'],validate=True);assert hashlib.sha256(data).hexdigest()==spec['sourceSha256']
+with code.open('xb') as f:os.chmod(f.name,0o400);f.write(data);f.flush();os.fsync(f.fileno())
+active=qa/'production-base-active.json'
+intent={'operation':spec['operation'],'root':str(work),'phase':'IMMUTABLE_IMAGE_MATERIALIZATION','pid':os.getpid(),'startTicks':pathlib.Path('/proc/self/stat').read_text().rsplit(') ',1)[1].split()[19],'bootId':pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()}
+with active.open('x') as f:json.dump(intent,f);f.flush();os.fsync(f.fileno())
+for p in [work,qa]:
+ d=os.open(p,os.O_RDONLY|os.O_DIRECTORY)
+ try:os.fsync(d)
+ finally:os.close(d)
+destination=work/spec['operation']
+archive='/srv/sabalanerp-recovery/checkpoints/images/6db61fe859b1274c0ba8b0253fd5f6c7bc96f6e3f46b3f868fde4fe44289e89f.docker.tar.gz'
+args=['python3','-B',str(code),'--archive',archive,'--destination',str(destination),'--archive-sha256','ed56c3575e4d9641e8119613e2273b397850fbb9ae4636f33b6eca5e3549d862',
+ '--index','sha256:5fe8ca7fc662071188c30271cb870d1ce9a6ec4578c934b064697ae77a9241e1',
+ '--platform','sha256:f93ddcbeeaf7cd05cc2d764f6d29a3501fe820c6abe1997e31ce967f277ed984',
+ '--config','sha256:15283455b75304c90f51bf16b42c272a25fb52807945dc24830ec88e63cd896d']
+env=dict(os.environ,SABALAN_NATIVE_STORAGE_ROOT=str(work),SABALAN_NATIVE_STORAGE_MAX_BYTES=str(3*1024**3),SABALAN_NATIVE_STORAGE_RESERVE_BYTES=str(1024**3))
+r=subprocess.Popen([str(owner),'1800',spec['operation'],*args],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,pass_fds=(9,8));proven=False
+try:
+ out,err=r.communicate();receipt=('\nSABALAN_NATIVE_REAPED '+spec['operation']+' '+str(r.returncode)+'\n').encode()
+ assert err.endswith(receipt),'NATIVE_COMPLETION_UNPROVEN';proven=True
+finally:
+ if not proven:
+  while True:time.sleep(1)
+after=foreign();assert before==after,'FOREIGN_SERVICES_CHANGED'
+result={'exitCode':r.returncode,'root':str(work),'imageDirectory':str(destination),'sourceSha256':spec['sourceSha256'],'nativeReceipt':err.decode(),'foreignBefore':before,'foreignAfter':after,'healthyApplicationPoint':False}
+if r.returncode==0:result['image']=json.loads(out)
+else:result['stdout']=out.decode()
+with (work/(spec['operation']+'-host-proof.json')).open('x') as f:json.dump(result,f,indent=2);f.flush();os.fsync(f.fileno())
+os.rename(active,work/(spec['operation']+'-closed-owner-intent.json'))
+for p in [work,qa]:
+ d=os.open(p,os.O_RDONLY|os.O_DIRECTORY)
+ try:os.fsync(d)
+ finally:os.close(d)
+print(json.dumps(result));raise SystemExit(r.returncode)
+'''.replace('INPUT',repr(json.dumps(spec)))
+with (repo/f'reports/qa/{operation}-intent.json').open('x',encoding='utf-8') as f:json.dump({'operation':operation,'decryptionRoot':decrypted['root'],'sourceSha256':spec['sourceSha256']},f,indent=2)
+r=subprocess.run(['ssh','-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=15','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3','root@94.182.177.74','python3 -B -'],input=remote,text=True,capture_output=True)
+result={'sshExitCode':r.returncode,'stdout':r.stdout,'stderr':r.stderr}
+with (repo/f'reports/qa/{operation}.json').open('x',encoding='utf-8') as f:json.dump(result,f,indent=2)
+print(json.dumps(result));raise SystemExit(r.returncode)

@@ -1,0 +1,93 @@
+import pathlib,json,hashlib,subprocess,uuid
+repo=pathlib.Path('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp')
+op='materialize-pg-6fc91cd969994015b5bf2eb8d8a29b77'
+wrapper=pathlib.Path('D:/sabalanerp-online-qa/materialize-production-pg-image-20261018.py')
+assert hashlib.sha256(wrapper.read_bytes()).hexdigest()=='74112956b591a567b24579bdc84d4ab1ff6b9138ff587f23f946f91956056d42'
+audit=json.loads((repo/f'reports/qa/{op}-readonly-audit.json').read_text())
+failed=json.loads((repo/f'reports/qa/{op}.json').read_text())
+assert failed['sshExitCode']==1 and 'FOREIGN_SERVICES_CHANGED' in failed['stderr']
+spec={'intent':audit['activeIntent'],'proof':audit['candidateProof'],'originalWrapperSha256':hashlib.sha256(wrapper.read_bytes()).hexdigest(),'failureReceiptSha256':hashlib.sha256((repo/f'reports/qa/{op}.json').read_bytes()).hexdigest(),'closureOperation':'file-only-closure-'+uuid.uuid4().hex}
+remote=r'''import os,pathlib,json,hashlib,stat,fcntl,tarfile,errno,time,resource
+spec=json.loads(INPUT)
+os.umask(0o077);resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+P=pathlib.Path;private=P('/root/sabalan-recovery-private');qa=private/'native-qa';work=P(spec['intent']['root']);active=qa/'production-base-active.json'
+def require(v,c):
+ if not v:raise RuntimeError(c)
+def sync(p):
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+def identity(s):return (s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns,s.st_nlink)
+def regular(p):
+ s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1 and not s.st_mode&0o022,'UNSAFE_FILE');return identity(s)
+def digest(p):
+ before=regular(p);h=hashlib.sha256()
+ with p.open('rb') as f:
+  while b:=f.read(1048576):h.update(b)
+ require(before==regular(p),'FILE_CHANGED');return h.hexdigest()
+for p,mask in [(private,0o077),(qa,0o022),(work,0o077)]:
+ s=p.lstat();require(p.resolve(strict=True)==p and stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&mask,'UNSAFE_ROOT')
+require(work.parent==qa,'WRONG_WORK_ROOT')
+locks=[]
+for p,target in [(private/'drill-ownership.lock',9),(P('/run/lock/sabalan-backup-storage.lock'),8)]:
+ before=regular(p);fd=os.open(p,os.O_RDWR|os.O_NOFOLLOW);require(identity(os.fstat(fd))==before,'LOCK_CHANGED');os.dup2(fd,target,inheritable=True);fcntl.flock(target,fcntl.LOCK_EX|fcntl.LOCK_NB);locks.append({'path':str(p),'device':before[0],'inode':before[1]})
+original=active.read_bytes();original_hash=hashlib.sha256(original).hexdigest();regular(active)
+require(json.loads(original)==spec['intent'],'INTENT_CHANGED')
+require(P('/proc/sys/kernel/random/boot_id').read_text().strip()==spec['intent']['bootId'],'HOST_BOOT_CHANGED')
+require(digest(work/(spec['intent']['operation']+'.py'))=='5914d19a481c7fb15c78f6874e069140c859ec4656c7200b5b544248b36f77da','HELPER_CHANGED')
+require(digest(qa/'native-owner-storage-final-20261017/owner')=='c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83','OWNER_CHANGED')
+def census():
+ result={'processCount':0,'fdCount':0,'vanishedProcesses':0,'vanishedFds':0,'matches':[]}
+ for proc in P('/proc').iterdir():
+  if not proc.name.isdigit() or int(proc.name)==os.getpid():continue
+  try:
+   birth=proc.joinpath('stat').read_text().rsplit(') ',1)[1].split()[19];cmd=proc.joinpath('cmdline').read_bytes()
+   if int(proc.name)==spec['intent']['pid'] and birth==spec['intent']['startTicks']:raise RuntimeError('ORIGINAL_CONTROLLER_ALIVE')
+   if str(work).encode() in cmd or spec['intent']['operation'].encode() in cmd:result['matches'].append({'pid':int(proc.name),'kind':'argv'})
+   result['processCount']+=1
+   for fd in proc.joinpath('fd').iterdir():
+    try:target=os.readlink(fd)
+    except FileNotFoundError:result['vanishedFds']+=1;continue
+    result['fdCount']+=1
+    if target==str(work) or target.startswith(str(work)+'/'):result['matches'].append({'pid':int(proc.name),'kind':'fd'})
+  except FileNotFoundError:
+   require(not proc.exists(),'UNRESOLVED_PROCESS_RACE');result['vanishedProcesses']+=1
+ require(not result['matches'],'WORK_ACTOR_OR_OPEN_FILE_EXISTS')
+ return result
+first=census();second=census()
+image_dir=work/spec['intent']['operation'];archive=image_dir/'image.tar';proof_path=image_dir/'private-image-proof.json'
+require(image_dir.resolve(strict=True)==image_dir and image_dir.stat().st_uid==0 and not image_dir.stat().st_mode&0o077,'UNSAFE_IMAGE_DIRECTORY')
+proof=json.loads(proof_path.read_text());require(proof==spec['proof'],'CANDIDATE_PROOF_CHANGED')
+require(archive.stat().st_size==276633600 and digest(archive)=='ca0614a5cb49a59866598402e15689c3dccf2ee04f9d893e88263dc9bdc45d3d','ARCHIVE_MISMATCH')
+config_id='15283455b75304c90f51bf16b42c272a25fb52807945dc24830ec88e63cd896d';config_name=config_id+'.json';layers=['layer-'+str(n).zfill(4)+'.tar' for n in range(11)]
+expected=[config_name,*layers,'manifest.json'];seen=[];diff_ids=[];config=None
+before=regular(archive)
+with tarfile.open(archive,'r|') as stream:
+ for member in stream:
+  require(member.isfile() and member.name in expected and member.name not in seen and member.size<=1024**3,'ARCHIVE_MEMBER_INVALID');seen.append(member.name);f=stream.extractfile(member)
+  if member.name==config_name:
+   require(member.size<=1024*1024,'CONFIG_OVERSIZE');data=f.read();require(hashlib.sha256(data).hexdigest()==config_id,'CONFIG_MISMATCH');config=json.loads(data)
+  elif member.name=='manifest.json':
+   require(member.size<=1024*1024,'MANIFEST_OVERSIZE');manifest=json.loads(f.read());require(manifest==[{'Config':config_name,'RepoTags':None,'Layers':layers}],'MANIFEST_MISMATCH')
+  else:
+   h=hashlib.sha256()
+   while b:=f.read(1048576):h.update(b)
+   diff_ids.append('sha256:'+h.hexdigest())
+require(seen==expected and config['rootfs']['type']=='layers' and config['rootfs']['diff_ids']==diff_ids==proof['rootfsDiffIds'],'LAYER_ORDER_OR_DIFF_ID_MISMATCH')
+require(before==regular(archive),'ARCHIVE_CHANGED')
+for p in [archive,proof_path,image_dir,work,qa]:sync(p)
+final=census();require(active.read_bytes()==original,'INTENT_CHANGED_BEFORE_CLOSE')
+result={'format':'sabalan-file-only-diagnostic-closure/v1','operation':spec['closureOperation'],'originalIntent':spec['intent'],'originalIntentSha256':original_hash,'originalWrapperSha256':spec['originalWrapperSha256'],'originalFailureReceiptSha256':spec['failureReceiptSha256'],'originalPhaseAccepted':False,'originalFailure':'FOREIGN_SERVICES_CHANGED','originalNativeExitCode':None,'originalNativeReceiptAvailable':False,'fileOnlySourcesReviewed':True,'nativeSourceSha256':'1eb2feeb45f654ad764e33510fa58a4a1bb672291fcbab559d23c663b51f56ba','locks':locks,'processCensus':[first,second,final],'independentArtifactVerified':True,'archiveSha256':proof['archiveSha256'],'archiveBytes':proof['archiveBytes'],'configImageId':'sha256:'+config_id,'orderedLayerDiffIds':diff_ids,'dockerImportVerified':False,'nativePostgresRestoreVerified':False,'healthyApplicationPoint':False,'publicOnlineAdmission':False,'completedAt':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
+receipt=work/(spec['closureOperation']+'.json')
+with receipt.open('x') as f:json.dump(result,f,indent=2);f.flush();os.fsync(f.fileno())
+sync(work);require(active.read_bytes()==original,'INTENT_CHANGED_AFTER_RECEIPT')
+closed=work/(spec['intent']['operation']+'-closed-unaccepted-file-only-intent.json');require(not closed.exists(),'CLOSED_INTENT_EXISTS')
+os.rename(active,closed)
+for p in [closed,work,qa]:sync(p)
+print(json.dumps(result))
+'''.replace('INPUT',repr(json.dumps(spec)))
+if __name__=='__main__':
+ r=subprocess.run(['ssh','-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','ConnectTimeout=15','root@94.182.177.74','python3 -B -'],input=remote,text=True,capture_output=True)
+ result={'sshExitCode':r.returncode,'stdout':r.stdout,'stderr':r.stderr}
+ with (repo/f"reports/qa/{spec['closureOperation']}.json").open('x',encoding='utf-8') as f:json.dump(result,f,indent=2)
+ print(json.dumps(result));raise SystemExit(r.returncode)

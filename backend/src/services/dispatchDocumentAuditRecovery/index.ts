@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { parseDispatchQuarantineFileReceipt, type DispatchQuarantineFileReceipt } from '../dispatchQuarantineFileReceipt';
 
 const canonicalize = (value: unknown): unknown => {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
@@ -505,7 +506,7 @@ export const quarantineDispatchDocumentOrphan = async (input: {
   idempotencyKey: string;
   authority: DispatchRecoveryAuthority;
   repository: { isReferenced(storageKey: string): Promise<boolean>; readPersistedOrphanEvidence(storageKey: string): Promise<{ reportHash: string; observedAt: string; observedByteLength: number; observedSha256: string } | null> };
-  storage: { read(storageKey: string): Promise<Buffer | null>; quarantine(storageKey: string): Promise<void>; restoreQuarantined(storageKey: string): Promise<void> };
+  storage: { read(storageKey: string): Promise<Buffer | null>; quarantine(storageKey: string): Promise<void | DispatchQuarantineFileReceipt>; restoreQuarantined(storageKey: string): Promise<void> };
   audit: AuditPort;
   now?: Date;
 }) => {
@@ -523,11 +524,14 @@ export const quarantineDispatchDocumentOrphan = async (input: {
   await input.audit.append({ action: 'QUARANTINE_INTENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
     authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, storageKey: input.storageKey, reason: input.reason,
     detail: { reconciliationReportHash: orphanEvidence.reportHash, observedAt: orphanEvidence.observedAt } });
-  await input.storage.quarantine(input.storageKey);
+  const publishedReceipt = await input.storage.quarantine(input.storageKey);
+  const fileReceipt = parseDispatchQuarantineFileReceipt(publishedReceipt);
+  if (publishedReceipt !== undefined && !fileReceipt) throw new Error('Quarantine file generation receipt is invalid.');
   try {
     await input.audit.append({ action: 'QUARANTINE_COMPLETED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, storageKey: input.storageKey, reason: input.reason,
-      detail: { quarantinedAt: occurredAt, reconciliationReportHash: orphanEvidence.reportHash, observedAt: orphanEvidence.observedAt } });
+      detail: { quarantinedAt: occurredAt, reconciliationReportHash: orphanEvidence.reportHash, observedAt: orphanEvidence.observedAt,
+        ...(fileReceipt ? { fileReceipt } : {}) } });
   } catch (error) {
     let compensationError: string | null = null;
     try { await input.storage.restoreQuarantined(input.storageKey); } catch (compensation) { compensationError = compensation instanceof Error ? compensation.message : 'Quarantine compensation failed.'; }
@@ -549,8 +553,8 @@ export const cleanupQuarantinedDispatchDocumentOrphan = async (input: {
   idempotencyKey: string;
   now: Date;
   authority: DispatchRecoveryAuthority;
-  repository: { isReferenced(storageKey: string): Promise<boolean>; readQuarantineEvidence(storageKey: string): Promise<{ quarantinedAt: string; reconciliationReportHash: string } | null> };
-  storage: { stageCleanup(storageKey: string): Promise<void>; restoreStagedCleanup(storageKey: string): Promise<void>; finalizeCleanup(storageKey: string): Promise<void> };
+  repository: { isReferenced(storageKey: string): Promise<boolean>; readQuarantineEvidence(storageKey: string): Promise<{ quarantinedAt: string; reconciliationReportHash: string; fileReceipt?: DispatchQuarantineFileReceipt | null } | null> };
+  storage: { stageCleanup(storageKey: string, evidence?: DispatchQuarantineFileReceipt | null): Promise<void>; restoreStagedCleanup(storageKey: string): Promise<void>; finalizeCleanup(storageKey: string): Promise<void> };
   audit: AuditPort;
 }) => {
   const occurredAt = input.now.toISOString();
@@ -576,12 +580,14 @@ export const cleanupQuarantinedDispatchDocumentOrphan = async (input: {
   }
   await input.audit.append({ action: 'CLEANUP_INTENT_RECORDED', actorId: input.actorId, correlationId: input.correlationId,
     authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, storageKey: input.storageKey, reason: input.reason,
-    detail: { quarantinedAt: quarantineEvidence.quarantinedAt, reconciliationReportHash: quarantineEvidence.reconciliationReportHash, safetyWindowMs: DISPATCH_ORPHAN_MIN_SAFETY_WINDOW_MS } });
-  await input.storage.stageCleanup(input.storageKey);
+    detail: { quarantinedAt: quarantineEvidence.quarantinedAt, reconciliationReportHash: quarantineEvidence.reconciliationReportHash,
+      safetyWindowMs: DISPATCH_ORPHAN_MIN_SAFETY_WINDOW_MS, ...(quarantineEvidence.fileReceipt ? { fileReceipt: quarantineEvidence.fileReceipt } : {}) } });
+  await input.storage.stageCleanup(input.storageKey, quarantineEvidence.fileReceipt);
   try {
     await input.audit.append({ action: 'CLEANUP_COMPLETED', actorId: input.actorId, correlationId: input.correlationId,
       authority: input.authority, idempotencyKey: input.idempotencyKey, occurredAt, storageKey: input.storageKey, reason: input.reason,
-      detail: { quarantinedAt: quarantineEvidence.quarantinedAt, reconciliationReportHash: quarantineEvidence.reconciliationReportHash, safetyWindowMs: DISPATCH_ORPHAN_MIN_SAFETY_WINDOW_MS } });
+      detail: { quarantinedAt: quarantineEvidence.quarantinedAt, reconciliationReportHash: quarantineEvidence.reconciliationReportHash,
+        safetyWindowMs: DISPATCH_ORPHAN_MIN_SAFETY_WINDOW_MS, ...(quarantineEvidence.fileReceipt ? { fileReceipt: quarantineEvidence.fileReceipt } : {}) } });
   } catch (error) {
     let compensationError: string | null = null;
     try { await input.storage.restoreStagedCleanup(input.storageKey); } catch (compensation) { compensationError = compensation instanceof Error ? compensation.message : 'Cleanup compensation failed.'; }

@@ -182,3 +182,31 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   comparison remains false, and continuous WAL/coherent application restoration
   remain pending. No healthy point or online authority was published. See
   [native production component evidence](../../reports/qa/production-base-native-restore-20261018.md).
+
+- The three current production application images have now each been independently
+  authenticated, translated from their OCI identities and imported by exact
+  config/rootfs identity on the backup host without starting application containers.
+  Backend and frontend native component imports passed but their broader ambient
+  comparisons remained false after unrelated foreign workload changes; Inquiry
+  also passed the broader comparison. These do not establish a healthy application
+  recovery point. See [backend](../../reports/qa/actual-backend-private-image-import-20261019.md),
+  [frontend](../../reports/qa/actual-frontend-private-image-import-20261019.md) and
+  [Inquiry](../../reports/qa/actual-inquiry-private-image-import-20261019.md).
+
+- Private file owners now provide branded root-confined ports, generation-bound
+  publication and destination-bound relocation. Native acceptance covers concurrent
+  root incarnation replacement, stale compensation and refusal to resurrect bytes
+  after a later PUT/DELETE. Dispatch runtime accepts an explicit storage port;
+  ordinary startup remains unchanged. Full orphan/repair integration, all protected
+  writers and privacy accounting are still required. See
+  [root scopes](../../reports/qa/versioned-file-root-scopes-20261019.md),
+  [conditional publication](../../reports/qa/versioned-file-conditional-publication-20261019.md)
+  and [destination generation](../../reports/qa/versioned-file-destination-generation-20261019.md).
+
+- Explicit Dispatch orphan composition now binds reconciliation and cleanup to
+  audited file generations. Durable settled-state reads refuse unresolved native
+  publication, malformed evidence and deletion history before business-file
+  mutation. Ten native orphan cases, nine root/read cases and 36 domain cases
+  passed, with both frozen reviews. Ordinary activation, raw artifact repair,
+  real-schema receipt acceptance and full protected writer coverage remain pending.
+  See [orphan lifecycle evidence](../../reports/qa/versioned-dispatch-orphan-storage-20261019.md).

@@ -149,3 +149,37 @@ test('conditional restoration cannot overwrite a later write or resurrect a dele
   assert.deepEqual(fs.readdirSync(path.join(v.store,'pending')),[]);
  }finally{await v.close();}
 });
+
+test('settled reads exclude unresolved actual publishers before and after head publication',async()=>{
+ const v=await fixture(),durable=require('./durableFilePublication'),publish=durable.publishDurableFile;
+ try{
+  const a=await scope(v,'state'),good=await a.files.publish('stable.json',Buffer.from('{"ok":true}'));
+  const stable=await a.files.readSettled('stable.json',8192);assert.equal(stable.head.versionSha256,good);assert.equal(stable.bytes.toString(),'{"ok":true}');
+  assert.deepEqual(await a.files.readSettled('absent.json',8192),{head:null,bytes:null});
+  await assert.rejects(a.files.readSettled('stable.json',1),/FILE_VERSION_READ_LIMIT/);
+  assert.deepEqual(fs.readdirSync(path.join(v.store,'pending')),[]);
+  const object=JSON.parse(fs.readFileSync(path.join(v.store,'versions',good+'.json'))).object.name;
+  const open=fs.promises.open;let release,observed;const held=new Promise(r=>{release=r;}),seen=new Promise(r=>{observed=r;});let reading;
+  try{
+   fs.promises.open=async function(file,...args){if(file===path.join(v.store,'objects',object)){observed();await held;}return open.call(this,file,...args);};
+   reading=a.files.readSettled('stable.json',8192);await seen;
+   await assert.rejects(a.files.publish('stable.json',Buffer.from('RACING WRITE'),{replace:true}),{code:'EEXIST'});
+   await a.files.publish('unrelated.json',Buffer.from('OTHER USER CONTINUES'));
+   release();assert.equal((await reading).head.versionSha256,good);
+  }finally{release?.();await reading?.catch(()=>{});fs.promises.open=open;}
+  for(const phase of ['before-head','after-head']){
+   const key=phase+'.json',full='state/'+key,id=require('node:crypto').createHash('sha256').update(full).digest('hex');
+   durable.publishDurableFile=async(...args)=>{
+    const result=await publish(...args);
+    if((phase==='after-head'&&args[0]===path.join(v.store,'heads',id+'.json'))
+      ||(phase==='before-head'&&args[0].startsWith(path.join(v.store,'objects')+'/')))throw Error('UNSETTLED_REAL_PUBLICATION');
+    return result;
+   };
+   await assert.rejects(a.files.publish(key,Buffer.from('{"uncertain":true}')),/UNSETTLED_REAL_PUBLICATION/);durable.publishDurableFile=publish;
+   const pending=path.join(v.store,'pending',id+'.json'),before=fs.readFileSync(pending),identity=fs.statSync(pending,{bigint:true});
+   await assert.rejects(async()=>a.files.readSettled(key,8192),/FILE_VERSION_KEY_UNSETTLED/);
+   assert.deepEqual(fs.readFileSync(pending),before);assert.equal(fs.statSync(pending,{bigint:true}).ino,identity.ino);
+   assert.equal(fs.existsSync(path.join(v.store,'heads',id+'.json')),phase==='after-head');
+  }
+ }finally{durable.publishDurableFile=publish;await v.close();}
+});

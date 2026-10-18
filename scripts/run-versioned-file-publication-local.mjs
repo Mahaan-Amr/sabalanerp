@@ -33,13 +33,14 @@ assert.equal(slot.Image, before.backend.image);
 assert.ok(slot.Mounts.some(mount => mount.Type === 'volume' && mount.RW
   && mount.Name === 'sabalanerp-local_online_runtime_acceptance' && mount.Destination === '/app/online-runtime-acceptance'));
 const suite = process.env.ONLINE_VERSIONED_FILES_SUITE || 'publication';
-assert.ok(['publication', 'legacy', 'move', 'scopes'].includes(suite));
+assert.ok(['publication', 'legacy', 'move', 'scopes', 'orphan'].includes(suite));
 const directory = '/app/online-runtime-acceptance/versioned-file-' + suite + '-' + randomBytes(16).toString('hex');
 const ts = require('../backend/node_modules/typescript');
 const files = { 'fixture.cjs': fs.readFileSync(path.join(root, 'tests/online-deployment/versioned-file-' + suite + '.fixture.cjs')) };
 const sourceHashes = {};
 for (const name of ['kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext',
-  'durableFilePublication', 'versionedFilePublication', 'hrVersionedFileTransaction', 'dispatchDocuments/filesystemStorage']) {
+  'durableFilePublication', 'versionedFilePublication', 'hrVersionedFileTransaction', 'dispatchDocuments/filesystemStorage',
+  ...(suite === 'orphan' ? ['dispatchVersionedOrphanStorage', 'dispatchQuarantineFileReceipt'] : [])]) {
   const source = name === 'versionedFilePublication' && process.env.ONLINE_VERSIONED_FILES_SOURCE
     ? process.env.ONLINE_VERSIONED_FILES_SOURCE : path.join(root, 'backend/src/services', name + '.ts');
   assert.ok(path.isAbsolute(source));

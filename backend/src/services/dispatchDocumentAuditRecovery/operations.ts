@@ -33,6 +33,8 @@ import { readBoundPricedAllocation } from '../allocationPricingReadModel';
 import { approvedPricingLifecycleAuditHash } from '../approvedPricing/prismaRepository';
 import { dispatchAllocationLifecycleAuditHash } from '../dispatchAllocation';
 import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
+import type { createVersionedDispatchOrphanStorage } from '../dispatchVersionedOrphanStorage';
+import { parseDispatchQuarantineFileReceipt } from '../dispatchQuarantineFileReceipt';
 
 const execFileAsync = promisify(execFile);
 
@@ -1066,8 +1068,15 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     reportHash: dispatchRecoveryIntegrityHash({ waybillId, expectedAggregates, auditHashes: replayAudits.map(item => item.eventHash), issues }) };
 };
 
-export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, filesystem: ReturnType<typeof createDispatchDocumentFilesystem>, truthVerifier: DispatchReplayTruthVerifier) => {
+export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, filesystem: ReturnType<typeof createDispatchDocumentFilesystem>, truthVerifier: DispatchReplayTruthVerifier,
+  input: { orphanStorage?: (scope: { operationId: string }) => Promise<Awaited<ReturnType<typeof createVersionedDispatchOrphanStorage>>> } = {}) => {
   const audit = createDurableDispatchRecoveryAuditPort(prisma);
+  const orphanStorage = (phase: 'quarantine' | 'cleanup', command: {
+    storageKey: string; actorId: string; reason: string; idempotencyKey: string; authority: DispatchRecoveryAuthority;
+  }) => input.orphanStorage ? input.orphanStorage({ operationId: dispatchRecoveryIntegrityHash({
+    phase, storageKey: command.storageKey, actorId: command.actorId, reason: command.reason,
+    idempotencyKey: command.idempotencyKey, authority: command.authority,
+  }) }) : Promise.resolve(filesystem);
   const repository = {
     isReferenced: async (storageKey: string) => Boolean(await prisma.dispatchDocumentArtifact.findUnique({ where: { storageKey }, select: { id: true } })),
     readQuarantineEvidence: async (storageKey: string) => {
@@ -1079,7 +1088,8 @@ export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, f
       const payload = row?.payload as Record<string, any> | undefined;
       const detail = payload?.detail as Record<string, unknown> | undefined;
       return typeof detail?.quarantinedAt === 'string' && typeof detail?.reconciliationReportHash === 'string'
-        ? { quarantinedAt: detail.quarantinedAt, reconciliationReportHash: detail.reconciliationReportHash } : null;
+        ? { quarantinedAt: detail.quarantinedAt, reconciliationReportHash: detail.reconciliationReportHash,
+          fileReceipt: parseDispatchQuarantineFileReceipt(detail.fileReceipt) } : null;
     },
     readPersistedOrphanEvidence: async (storageKey: string) => {
       const rows = await prisma.dispatchLifecycleAudit.findMany({ where: { aggregateType: 'DISPATCH_DOCUMENT_RECOVERY', eventType: 'RECONCILIATION_COMPLETED' }, orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }], take: 100 });
@@ -1123,7 +1133,8 @@ export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, f
           }
           return null;
         } };
-        return quarantineDispatchDocumentOrphan({ ...command, repository: lockedRepository, storage: filesystem, audit });
+        return quarantineDispatchDocumentOrphan({ ...command, repository: lockedRepository,
+          storage: await orphanStorage('quarantine', command), audit });
       }),
     cleanup: (command: { storageKey: string; actorId: string; reason: string; correlationId: string; idempotencyKey: string; authority: DispatchRecoveryAuthority; now: Date }) =>
       prisma.$transaction(async tx => {
@@ -1136,10 +1147,12 @@ export const createDispatchDocumentRecoveryOperations = (prisma: PrismaClient, f
               eventType: 'QUARANTINE_COMPLETED' }, orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }], select: { payload: true } });
             const detail = ((row?.payload as Record<string, any> | undefined)?.detail ?? {}) as Record<string, unknown>;
             return typeof detail.quarantinedAt === 'string' && typeof detail.reconciliationReportHash === 'string'
-              ? { quarantinedAt: detail.quarantinedAt, reconciliationReportHash: detail.reconciliationReportHash } : null;
+              ? { quarantinedAt: detail.quarantinedAt, reconciliationReportHash: detail.reconciliationReportHash,
+                fileReceipt: parseDispatchQuarantineFileReceipt(detail.fileReceipt) } : null;
           },
         };
-        return cleanupQuarantinedDispatchDocumentOrphan({ ...command, repository: lockedRepository, storage: filesystem, audit });
+        return cleanupQuarantinedDispatchDocumentOrphan({ ...command, repository: lockedRepository,
+          storage: await orphanStorage('cleanup', command), audit });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 120_000 }),
   };
 };

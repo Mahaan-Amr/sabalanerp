@@ -17,6 +17,7 @@ import {
   type DispatchEvidenceAudit,
   type DispatchRecoveryAuthority,
   createDispatchDocumentFilesystem,
+  createDispatchDocumentRecoveryOperations,
   validateDispatchLifecycleConservation,
   parsePersistedOrphanEvidence,
   verifyProductionDispatchAuditChains,
@@ -58,7 +59,50 @@ const authority: DispatchRecoveryAuthority = {
   beforeHash: 'a'.repeat(64), afterHash: 'b'.repeat(64),
 };
 const orphanBytes = Buffer.from('orphan');
+
+test('configured orphan owner refusal cannot fall back to legacy writes and command retries retain their scope', async () => {
+  const scopes: string[] = []; let locks = 0; let legacyWrites = 0;
+  const rejected = new Error('OWNER_NOT_ADMITTED');
+  const transaction = { $executeRawUnsafe: async () => { locks += 1; }, $queryRaw: async () => [] };
+  const database = { $transaction: (body: (tx: unknown) => unknown) => body(transaction) };
+  const filesystem = { quarantine: async () => { legacyWrites += 1; }, stageCleanup: async () => { legacyWrites += 1; } };
+  const operations = createDispatchDocumentRecoveryOperations(database as never, filesystem as never, {} as never, {
+    orphanStorage: async ({ operationId }) => { scopes.push(operationId); throw rejected; },
+  });
+  const command = { storageKey: 'issued/orphan.pdf', actorId: 'admin', reason: 'confirmed orphan', correlationId: 'request-a',
+    idempotencyKey: 'stable-command', authority, now: new Date('2026-10-19T00:00:00Z') };
+  await assert.rejects(operations.quarantine(command), rejected);
+  await assert.rejects(operations.quarantine({ ...command, correlationId: 'request-b', now: new Date('2026-10-20T00:00:00Z') }), rejected);
+  await assert.rejects(operations.cleanup(command), rejected);
+  assert.equal(locks, 3); assert.equal(legacyWrites, 0);
+  assert.match(scopes[0]!, /^[a-f0-9]{64}$/); assert.equal(scopes[0], scopes[1]); assert.notEqual(scopes[0], scopes[2]);
+});
 const orphanEvidence = { reportHash: 'c'.repeat(64), observedAt: '2026-08-09T00:00:00.000Z', observedByteLength: orphanBytes.length, observedSha256: createHash('sha256').update(orphanBytes).digest('hex') };
+
+test('quarantine generation authorization survives audit persistence and is forwarded unchanged to cleanup', async () => {
+  const events: DispatchArtifactAuditEvent[] = [];
+  const fileReceipt = { format: 'sabalan-dispatch-quarantine/v1' as const, operationId: '1'.repeat(64),
+    versionSha256: '2'.repeat(64), moveReceiptSha256: '3'.repeat(64) };
+  const common = { actorId: 'admin', reason: 'confirmed orphan', correlationId: 'request', idempotencyKey: 'quarantine',
+    storageKey: 'issued/orphan.pdf', authority };
+  const audit = { append: async (event: DispatchArtifactAuditEvent) => { events.push(event); } };
+  await quarantineDispatchDocumentOrphan({ ...common, now: new Date('2026-10-01T00:00:00Z'), audit,
+    repository: { isReferenced: async () => false, readPersistedOrphanEvidence: async () => orphanEvidence },
+    storage: { read: async () => orphanBytes, quarantine: async () => fileReceipt, restoreQuarantined: async () => {} } });
+  const completed = events.find(event => event.action === 'QUARANTINE_COMPLETED')!;
+  assert.deepEqual(completed.detail.fileReceipt, fileReceipt);
+  let staged = false;
+  await cleanupQuarantinedDispatchDocumentOrphan({ ...common, idempotencyKey: 'cleanup', now: new Date('2026-10-19T00:00:00Z'), audit,
+    repository: { isReferenced: async () => false, readQuarantineEvidence: async () => ({
+      quarantinedAt: completed.detail.quarantinedAt as string,
+      reconciliationReportHash: completed.detail.reconciliationReportHash as string,
+      fileReceipt: completed.detail.fileReceipt as typeof fileReceipt,
+    }) }, storage: { stageCleanup: async (key, authorized) => {
+      assert.equal(key, common.storageKey); assert.deepEqual(authorized, fileReceipt); staged = true;
+    }, restoreStagedCleanup: async () => {}, finalizeCleanup: async () => {} } });
+  assert.equal(staged, true);
+  assert.deepEqual(events.find(event => event.action === 'CLEANUP_COMPLETED')!.detail.fileReceipt, fileReceipt);
+});
 
 const node = (kind: DispatchEvidenceNode['kind'], id: string, parents: string[] = []): DispatchEvidenceNode => {
   const evidence = { kind, id, parents };
@@ -820,6 +864,7 @@ test('system recovery rejects an incomplete backup until every referenced origin
   const original = Buffer.from('original-pdf');
   const database = {
     $queryRawUnsafe: async () => [],
+    performanceExportReceipt: { findMany: async () => [] },
     dispatchDocumentArtifact: { findMany: async () => [{ id: 'artifact-1', storageKey: 'issued/original.pdf', byteLength: BigInt(original.length), sha256: createHash('sha256').update(original).digest('hex') }] },
   };
   try {
@@ -845,7 +890,7 @@ test('sanitized dispatch backup validates only against placeholder metadata in t
   const payloadRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dispatch-sanitized-coverage-'));
   const storageKey = 'issued/statement.pdf'; const placeholder = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
   const placeholderMetadata = sanitizedDispatchArtifactMetadata(storageKey);
-  const database = { $queryRawUnsafe: async () => [], dispatchDocumentArtifact: { findMany: async () => [{ id: 'artifact-1', storageKey,
+  const database = { $queryRawUnsafe: async () => [], performanceExportReceipt: { findMany: async () => [] }, dispatchDocumentArtifact: { findMany: async () => [{ id: 'artifact-1', storageKey,
     byteLength: BigInt(placeholderMetadata.byteLength), sha256: placeholderMetadata.sha256 }] } };
   try {
     const target = recoveryEngineInternals.dispatchArtifactBackupPath(payloadRoot, storageKey); await fs.promises.mkdir(path.dirname(target), { recursive: true }); await fs.promises.writeFile(target, placeholder);

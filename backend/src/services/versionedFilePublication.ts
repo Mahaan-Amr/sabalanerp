@@ -14,6 +14,7 @@ type StreamInput = { source: Readable; assertReady(): void; finish(): Promise<vo
 type FileClaim = { key: string; id: string; target: string; pending: string; heldIdentity: Identity;
   previous: { sha256: string; value: Version } | null; actual: Identity | null };
 export type VersionedFileRootHead = Readonly<{ versionSha256: string; operation: 'PUT' | 'DELETE'; byteLength: number }>;
+export type VersionedFileSettledRead = Readonly<{ head: VersionedFileRootHead | null; bytes: Buffer | null }>;
 export type VersionedFileRootScope = Readonly<{
   publish(key: string, bytes: Uint8Array, options?: { replace?: boolean }): Promise<string>;
   publishIfCurrent(key: string, bytes: Uint8Array, expectedVersionSha256: string | null): Promise<string>;
@@ -22,6 +23,7 @@ export type VersionedFileRootScope = Readonly<{
   removeUpload(key: string, versionSha256: string): Promise<string>;
   inspect(key: string): Promise<VersionedFileRootHead | null>;
   read(key: string): Promise<Buffer | null>;
+  readSettled(key: string, maximumBytes: number): Promise<VersionedFileSettledRead>;
   readVersion(key: string, versionSha256: string): Promise<Buffer | null>;
   moveTo(destination: VersionedFileRootScope, sourceKey: string, destinationKey: string, expectedSourceSha256: string,
     expectedDestinationSha256?: string | null): ReturnType<VersionedFilePublication['move']>;
@@ -185,6 +187,7 @@ export class VersionedFilePublication {
         remove: (value: string) => this.remove(key(value)),
         removeUpload: (value: string, sha256: string) => this.removeUpload(key(value), sha256),
         inspect, readVersion,
+        readSettled: (value: string, maximum: number) => this.readSettled(key(value), maximum),
         read: (value: string) => this.work.run(async () => {
           const head = await inspect(value);
           return head ? readVersion(value, head.versionSha256) : null;
@@ -404,7 +407,30 @@ export class VersionedFilePublication {
 
   remove(key: string) { return this.change(key, null, true); }
 
-  private async claim(key: string, operation: 'PUT' | 'DELETE' | 'MOVE', move?: {
+  /** Coordination evidence requires actual settled publication, including the
+   * absent-head case. A durable read claim excludes concurrent/unresolved key
+   * owners atomically. Read failures retain that claim; no foreign intent is
+   * cleared and independent historical reads remain available. */
+  readSettled(key: string, maximumBytes: number): Promise<VersionedFileSettledRead> {
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 0 || maximumBytes > 16 * 1024 * 1024) fail('FILE_VERSION_READ_LIMIT');
+    return this.work.run(async () => {
+      this.work.assertActive(); await this.assertDirectories();
+      let claim: FileClaim;
+      try { claim = await this.claim(key, 'READ'); }
+      catch (error: any) { if (error?.code === 'EEXIST') return fail('FILE_VERSION_KEY_UNSETTLED'); throw error; }
+      const previous = claim.previous;
+      if ((previous?.value.object?.bytes ?? 0) > maximumBytes) {
+        await this.releaseClaim(claim); return fail('FILE_VERSION_READ_LIMIT');
+      }
+      const bytes = previous ? await this.readVersion(previous.sha256) : null;
+      const head = previous ? Object.freeze({ versionSha256: previous.sha256, operation: previous.value.operation,
+        byteLength: previous.value.object?.bytes ?? 0 }) : null;
+      await this.releaseClaim(claim);
+      return Object.freeze({ head, bytes });
+    });
+  }
+
+  private async claim(key: string, operation: 'PUT' | 'DELETE' | 'MOVE' | 'READ', move?: {
     operationId: string; sourceKey: string; destinationKey: string; expectedSourceSha256: string;
     expectedDestinationSha256?: string | null;
   }): Promise<FileClaim> {

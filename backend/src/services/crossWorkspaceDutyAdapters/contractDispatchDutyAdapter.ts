@@ -65,7 +65,7 @@ export const closeContractDispatchDuty = async (db: CrossWorkspaceDutyDatabase, 
   const completed = ['APPROVE','DECLINE'].includes(action);
   const authority = await db.contractDispatchAuthority.findUniqueOrThrow({ where: { id: requestId } });
   await db.crossWorkspaceDuty.update({ where: { id: duty.id }, data: { status: completed ? 'COMPLETED' : 'CANCELLED',
-    respondedAt: new Date(), respondedByUserId: actorId, structuredResultJson: json({ actionCode: action, reason: reason ?? null,
+    respondedAt: completed ? new Date() : null, respondedByUserId: completed ? actorId : null, structuredResultJson: json({ actionCode: action, reason: reason ?? null,
       ...(authority.kind === 'MANAGER' && action === 'APPROVE' ? { promisedDate: authority.promisedDate } : {}) }) } });
   await db.crossWorkspaceDutyAssignmentHistory.updateMany({ where: { dutyId: duty.id, endedAt: null },
     data: { endedAt: new Date(), changedByUserId: actorId, endReason: completed ? 'COMPLETED' : 'CANCELLED' } });

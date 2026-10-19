@@ -238,3 +238,14 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   compatible rollback custody and a separately evidenced activation remain
   required; generic migration admission is unchanged. See
   [closed financial evidence](../../reports/qa/customer-semantic-barrier-20261019.md).
+
+- A private populated financial rehearsal now installs the frozen 425 historical
+  prefix plus two infrastructure migrations, commits real legacy financial
+  commands, and executes all eight financial/barrier files and history records
+  atomically. A final-history failure preserves the complete legacy snapshots;
+  successful installation preserves both readers and an additional retried
+  legacy receipt. This is rebuilt historical source/model acceptance, with a
+  private-database-only compiler and no production executor or activation
+  authority. The genuine protected expansion owner, actual image/fleet overlap,
+  full financial strata and recovery/browser gates remain pending. See
+  [populated rehearsal evidence](../../reports/qa/closed-customer-expansion-20261019.md).

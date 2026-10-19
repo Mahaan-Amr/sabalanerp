@@ -22,6 +22,7 @@ import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { collectedCustomerCheckRials, effectiveCustomerReceiptRials } from './accountingCustomerReceiptBalance';
 import { requireNewCustomerSaleAfterOpening } from './accountingCustomerSaleOpeningGuard';
 import { requireCustomerReceiptSourceDate } from './accountingCustomerReceiptSource';
+import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 const customerTransaction = <T>(database: Database, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> =>
@@ -700,6 +701,8 @@ export const recordCustomerReceiptPrisma = async (database: Database, input: {
   actor: CustomerTreasuryActor;
   componentKind?: 'BANK' | 'CASH' | 'CARD' | 'CHECK'; receiptGroupId?: string; checkInstrumentId?: string;
 }) => customerTransaction(database, async (tx) => {
+  if ((input.componentKind !== undefined && input.componentKind !== 'BANK')
+    || input.receiptGroupId !== undefined || input.checkInstrumentId !== undefined) await requireCustomerSourceSharesWithin(tx);
   if (input.amountRials <= 0n) throw new AccountingCustomerTreasuryError('INVALID_RECEIPT_AMOUNT', 'مبلغ دریافت باید بیشتر از صفر باشد.', 400);
   const prior = await tx.accountingTreasuryTransaction.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { profile: true } });
   const sourceHash = hashCustomerTreasuryEvidence(input.source.payload);
@@ -875,6 +878,7 @@ export const allocateCustomerCreditPrisma = async (database: Database, input: {
   bookId: string; fiscalYearId: string; periodId: string; receivableLedgerId: string;
   documentDate: Date; reason: string; reference: string; idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
 }) => customerTransaction(database, async tx => {
+  await requireCustomerSourceSharesWithin(tx);
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.creditItemId}))`;
   const credit = await tx.accountingCustomerOpenItem.findUnique({ where: { id: input.creditItemId }, include: {
     invoice: true,
@@ -932,6 +936,7 @@ export const reverseCustomerAllocationPrisma = async (database: Database, input:
   const original = await tx.accountingSettlementAllocation.findUnique({ where: { id: input.allocationId }, include: {
     lines: true, transaction: { include: { profile: true } }, creditSource: { include: { profile: true } }, reversedBy: true,
   } });
+  if (original && (original.creditItemId !== null || original.treasuryTransactionId === null)) await requireCustomerSourceSharesWithin(tx);
   const profile = original?.transaction?.profile ?? original?.creditSource?.profile;
   if (!original || original.reversesId || !profile) throw new AccountingCustomerTreasuryError('ALLOCATION_NOT_FOUND', 'تخصیص پیدا نشد.', 404);
   if (original.transaction && original.transaction.kind !== 'CUSTOMER_RECEIPT') throw new AccountingCustomerTreasuryError('REFUND_REVERSAL_REQUIRES_CORRECTION', 'اصلاح استرداد باید همراه با برگشت سند پرداخت انجام شود.', 409);

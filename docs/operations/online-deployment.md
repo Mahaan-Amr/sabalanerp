@@ -6,15 +6,15 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 - All three current production application images now exist as independently imported config/rootfs identities on the backup host, with no tags or application startup. Inquiry passed native closure and unchanged foreign comparison; earlier backend/frontend ambient failures remain preserved. Accepted private ciphertexts remain retained after exact redundant-plaintext retirement. Fresh bounded old-test payload retirement supplied space without removing the shared diagnostic image or production recovery objects. See [Inquiry/current image-set evidence](../../reports/qa/actual-inquiry-private-image-import-20261019.md) and [exact test-payload retirement](../../reports/qa/obsolete-local-test-payload-retirement-20261019.md). Full coherent application restoration remains pending.
 
-- The exact current frontend config/rootfs also passed actual tagless backup-daemon import and native closure; its independent cipher remains retained after exact scratch retirement. The foreign comparison remains false after an unrelated replacement. Fresh remaining space is insufficient for the prior Inquiry bound, so that import was not attempted. See [frontend evidence](../../reports/qa/actual-frontend-private-image-import-20261019.md).
+- The exact current frontend config/rootfs also passed actual tagless backup-daemon import and native closure; its independent cipher remains retained after exact scratch retirement. The foreign comparison remains false after an unrelated replacement. Its earlier capacity refusal remains historical; later scoped cleanup supplied space for the Inquiry import described above. See [frontend evidence](../../reports/qa/actual-frontend-private-image-import-20261019.md).
 
-- The actual backup daemon now also contains the exact current production backend config/rootfs image, imported without tags or container startup after fresh filesystem allocation/inode admission. Its redundant plaintext alone was retired; independent ciphertext remains retained. Native closure and exact daemon identity passed, while the overall foreign comparison remains false after an unrelated container appeared. Frontend/Inquiry import and full coherent application restoration remain pending. See [backend import evidence](../../reports/qa/actual-backend-private-image-import-20261019.md).
+- The actual backup daemon now also contains the exact current production backend config/rootfs image, imported without tags or container startup after fresh filesystem allocation/inode admission. Its redundant plaintext alone was retired; independent ciphertext remains retained. Native closure and exact daemon identity passed, while the overall foreign comparison remains false after an unrelated container appeared. Frontend/Inquiry native imports subsequently passed their scoped checks; full coherent application restoration remains pending. See [backend import evidence](../../reports/qa/actual-backend-private-image-import-20261019.md).
 
 - Explicitly closed production-base diagnostics now had only their exact stopped container and four derived copies retired, recovering an observed net 1,530,531,840 bytes. Original backup bytes, imported PostgreSQL image and proof history remain retained. The separate foreign comparison is false and remains recorded. See [scoped retirement evidence](../../reports/qa/closed-base-derived-retirement-20261018.md).
 
 - Those current production image exports now also passed actual dual-recipient encryption and complete local decryption, with native closure and all six source services preserved. A disposable-key native fixture additionally verified independent RSA readback and corruption/retry refusal. Actual restricted transfer and independent fresh-inode custody/RSA decryption have subsequently passed scoped component checks; the custody host comparison remains false. See [independent custody evidence](../../reports/qa/independent-production-application-image-custody-20261018.md) and [image cipher evidence](../../reports/qa/production-application-image-encryption-20261018.md).
 
-- The current production backend/frontend/Inquiry immutable image bytes now have native-owned private exports with verified archive graphs and full local gzip round trips. Six healthy serving identities were preserved. Independent custody and actual expanded diff-ID verification have subsequently passed; import and full application restoration remain pending. The measurement observed unchanged foreign services and retains the prior custody limitation. See [expanded graph evidence](../../reports/qa/independent-production-application-image-measurement-20261018.md) and [actual image export evidence](../../reports/qa/production-application-image-export-20261018.md).
+- The current production backend/frontend/Inquiry immutable image bytes now have native-owned private exports with verified archive graphs and full local gzip round trips. Six healthy serving identities were preserved. Independent custody, actual expanded diff-ID verification and tagless native imports subsequently passed their scoped component checks; full application restoration remains pending. The earlier measurement observed unchanged foreign services and retains its prior custody limitation. See [expanded graph evidence](../../reports/qa/independent-production-application-image-measurement-20261018.md) and [actual image export evidence](../../reports/qa/production-application-image-export-20261018.md).
 
 - The private HR document adapter now stages/restores/removes exact versioned files with immutable receipts and explicit retained-copy erasure status. Native stale-receipt/root/restore cases passed; durable domain cleanup-row and real route integration remain pending. See [HR storage evidence](../../reports/qa/hr-versioned-file-transaction-20261018.md).
 
@@ -113,7 +113,7 @@ admission and public online switching are still disabled. See
 Private legacy-file baseline adoption now has seven native acceptance cases,
 including actual interrupted-owner death. It does not activate ordinary writers
 or certify privacy/controller coverage. See [baseline evidence](../../reports/qa/versioned-file-legacy-20261018.md).
-Current 434-migration financial and concurrent migration tests also passed;
+Earlier 434-migration financial and concurrent migration tests also passed;
 actual production-425 overlap remains unproven. See [financial evidence](../../reports/qa/current-accounting-and-migration-20261018.md).
 An exact old production schema model regenerated for a local diagnostic now
 demonstrably fails to read a real new credit-funded allocation. Retirement and a
@@ -228,3 +228,13 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   is normal-path component acceptance; crash recovery, raw repair and production
   admission remain pending. An earlier failed diagnostic database remains held.
   See [joined native evidence](../../reports/qa/dispatch-orphan-joined-native-20261019.md).
+
+- A deny-only financial predecessor now rejects new source-share semantics
+  inside application transactions and at database write/TRUNCATE boundaries.
+  Private PostgreSQL acceptance covers bounded lock refusal, late-DDL atomic
+  rollback, legacy bank/refund/reversal commands and full reads with the
+  regenerated production-425 Prisma model. No OPEN state or activation path is
+  provided. Populated expansion, actual old-image overlap, fleet retirement,
+  compatible rollback custody and a separately evidenced activation remain
+  required; generic migration admission is unchanged. See
+  [closed financial evidence](../../reports/qa/customer-semantic-barrier-20261019.md).

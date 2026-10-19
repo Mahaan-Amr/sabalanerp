@@ -851,6 +851,15 @@ model OnlineMigrationStep {
   @@map("online_migration_steps")
 }
 
+/// Deny-only predecessor staging. No OPEN state or application activation API.
+model OnlineFinancialCompatibilityBarrier {
+  capability String   @id
+  state      String
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@map("online_financial_compatibility_barriers")
+}
+
 model PartnerReleaseReadinessPublication {
   id                       String              @id
   deploymentId             String              @unique

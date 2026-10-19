@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { projectCustomerAccountPrisma, projectCustomerAccountsPrisma, customerStatementMovements, recordCustomerReceiptPrisma, allocateCustomerReceiptPrisma, allocateCustomerCreditPrisma, reverseCustomerAllocationPrisma, requireSettlementSource, requireCustomerConsumptionDate } from './accountingCustomerTreasuryPrisma';
 import { collectedCustomerCheckRials } from './accountingCustomerReceiptBalance';
@@ -169,6 +170,9 @@ export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id
   if (input.actor.profile === 'VIEWER') return fail('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز ثبت عملیات مالی ندارید.', 403);
   if (!Number.isFinite(input.occurredAt.getTime()) || input.occurredAt > new Date() || input.idempotencyKey.length < 8) return fail('INVALID_OPERATION_DATE', 'تاریخ عملیات و کلید مستقل فرمان معتبر باشند.', 400);
   return database.$transaction(async tx => {
+    if (!['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION'].includes(input.kind)
+      || input.parts !== undefined || input.sourceAllocations !== undefined
+      || (input.kind === 'ALLOCATION' && input.creditItemId !== undefined)) await requireCustomerSourceSharesWithin(tx);
     const resolved = await resolveCustomerWorkspace(tx, id);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${resolved.customerId}`}))`;
     const profile = await ensureCustomerWorkspaceProfile(tx, id, input.actor, input.occurredAt);
@@ -274,6 +278,7 @@ export async function recordCustomerAccountOperation(database: PrismaClient, id:
   if (!input.confirmed || input.reason.trim().length < 8 || !input.reference.trim() || input.idempotencyKey.length < 8) return fail('ACCOUNTING_EVIDENCE_REQUIRED', 'دلیل، مرجع مستندات و تأیید ثبت قطعی الزامی است.', 400);
   if (!Number.isFinite(input.occurredAt.getTime()) || input.occurredAt > new Date()) return fail('INVALID_OPERATION_DATE', 'تاریخ عملیات باید معتبر و تا امروز باشد.', 400);
   return database.$transaction(async tx => {
+    if (input.kind === 'OPENING' && input.openingReview) await requireCustomerSourceSharesWithin(tx);
     const resolved = await resolveCustomerWorkspace(tx, id);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${resolved.customerId}`}))`;
     const profile = await ensureCustomerWorkspaceProfile(tx, id, input.actor, input.occurredAt);

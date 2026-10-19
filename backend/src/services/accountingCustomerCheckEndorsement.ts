@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { createAccountingSupplyChainApplication, hashSupplyChainEvidence, type ImmutableEvidence } from './accountingSupplyChain';
 import { createAccountingSupplyChainPrismaRepository } from './accountingSupplyChainPrismaRepository';
@@ -13,6 +14,7 @@ export async function recordCustomerCheckEndorsementWithin(tx: Prisma.Transactio
   supplierPartyId?: string; allocations: Array<{ openItemId: string; amountRials: bigint }>;
   bookId: string; fiscalYearId: string; periodId: string; occurredAt: Date; reason: string; reference: string; idempotencyKey: string; actor: CustomerTreasuryActor;
 }) {
+  await requireCustomerSourceSharesWithin(tx);
   const fail = (message: string): never => { throw new AccountingCustomerTreasuryError('CHECK_ENDORSEMENT_INVALID', message, 409); };
   const hash = hashAccountingEvidence({ ...input, actor: undefined });
   const prior = await tx.accountingCheckInstrumentEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey } });

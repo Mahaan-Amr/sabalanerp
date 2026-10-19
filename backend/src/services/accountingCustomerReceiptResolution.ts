@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { createReceivableCheckPrisma, allocateCustomerReceiptPrisma, reverseCustomerAllocationPrisma, requireCustomerConsumptionDate, requireSettlementSource } from './accountingCustomerTreasuryPrisma';
 import { effectiveCustomerReceiptRials, collectedCustomerCheckRials } from './accountingCustomerReceiptBalance';
@@ -16,6 +17,7 @@ export async function resolveCustomerReceiptWithin(tx: Prisma.TransactionClient,
   shares: CustomerResolvedReceiptShare[]; bookId: string; fiscalYearId: string; periodId: string; occurredAt: Date;
   customerAdvanceLedgerId: string; receivableLedgerId: string; reason: string; reference: string; idempotencyKey: string; actor: CustomerTreasuryActor;
 }) {
+  await requireCustomerSourceSharesWithin(tx);
   const fail = (message: string): never => { throw new AccountingCustomerTreasuryError('RECEIPT_RESOLUTION_INVALID', message, 409); };
   const commandHash = hashAccountingEvidence({ ...input, actor: undefined });
   const prior = await tx.accountingCustomerReceiptResolution.findUnique({ where: { idempotencyKey: input.idempotencyKey } });

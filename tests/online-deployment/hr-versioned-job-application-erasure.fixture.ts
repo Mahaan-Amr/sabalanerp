@@ -7,6 +7,7 @@ import type { RuntimeWorkContext } from '../../backend/src/services/runtimeWorkC
 import type { VersionedFilePublication } from '../../backend/src/services/versionedFilePublication';
 import { stableDeletionFingerprint } from '../../backend/src/services/hrRecordRetentionPolicy';
 import { eraseVersionedJobApplication } from '../../backend/src/services/hrVersionedJobApplicationErasure';
+import { retryDeletionReceiptFiles } from '../../backend/src/services/hrDeletionFileCleanup';
 
 export async function exerciseVersionedJobApplicationErasure(database: PrismaClient,
   publication: VersionedFilePublication, work: RuntimeWorkContext, root: string) {
@@ -34,7 +35,7 @@ export async function exerciseVersionedJobApplicationErasure(database: PrismaCli
   const receipt = await database.hrDeletionReceipt.findUniqueOrThrow({ where: { id: result.receiptId } });
   assert.equal(receipt.targetType, 'JOB_APPLICATION'); assert.equal(receipt.targetId, application.id);
   assert.equal(receipt.operationToken, null); assert.equal(receipt.leaseExpiresAt, null);
-  assert.deepEqual(receipt.recordCounts, impact.counts);
+  assert.deepEqual(receipt.recordCounts, { fileProtocol: 'sabalan-versioned-hr-erasure/v1', counts: impact.counts });
   // The native candidate deliberately uses its actual older generated client;
   // read the additive journal column through its public SQL representation.
   const rows = await database.$queryRaw<{ status: string; stagedPath: string; versionedFileState: any }[]>`
@@ -44,6 +45,19 @@ export async function exerciseVersionedJobApplicationErasure(database: PrismaCli
   assert.equal(fs.existsSync(path.join(root, name)), false);
   assert.equal(fs.existsSync(rows[0].stagedPath), false);
   assert.deepEqual(await publication.readVersion(version), bytes);
+  const emptyApplication = await database.hrJobApplication.create({ data: { candidateId: candidate.id, createdBy: actorUserId } });
+  const emptyImpact = await database.$transaction(tx => readImpact(tx, emptyApplication.id)); assert.ok(emptyImpact);
+  assert.equal(emptyImpact.files.length, 0);
+  const emptyResult = await eraseVersionedJobApplication({ database, publication, work, root,
+    applicationId: emptyApplication.id, actorUserId, reason: 'Private empty-file erasure acceptance',
+    expectedFingerprint: emptyImpact.fingerprint, readImpact });
+  const emptyReceipt = await database.hrDeletionReceipt.findUniqueOrThrow({ where: { id: emptyResult.receiptId } });
+  assert.equal(emptyReceipt.status, 'FILE_CLEANUP_PENDING');
+  assert.deepEqual(emptyReceipt.recordCounts, { fileProtocol: 'sabalan-versioned-hr-erasure/v1', counts: emptyImpact.counts });
+  assert.equal(await database.hrDeletionFileCleanup.count({ where: { receiptId: emptyResult.receiptId } }), 0);
+  await assert.rejects(retryDeletionReceiptFiles(database, emptyResult.receiptId), { code: 'HR_FILE_CLEANUP_PROTOCOL_OWNER_REQUIRED' });
+  assert.deepEqual(await database.hrDeletionReceipt.findUnique({ where: { id: emptyResult.receiptId } }), emptyReceipt);
+  assert.equal(await database.hrJobApplication.count({ where: { id: emptyApplication.id } }), 0);
   const changedApplication = await database.hrJobApplication.create({ data: { candidateId: candidate.id, createdBy: actorUserId } });
   const changedName = randomUUID() + '.pdf';
   await publication.publish(changedName, bytes);

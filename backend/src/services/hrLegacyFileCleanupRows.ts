@@ -3,6 +3,13 @@ import { Prisma } from '@prisma/client';
 type LegacyCleanupRow = { id: string; storageName: string; originalPath: string; stagedPath: string;
   status: string; legacyFileState: boolean };
 
+/** Reserved parent declaration survives empty plan sets and retained-copy work.
+ * Its presence excludes legacy ownership, including unknown protocol values. */
+export function hasDeclaredHrFileProtocol(value: Prisma.JsonValue | undefined) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    && Object.prototype.hasOwnProperty.call(value, 'fileProtocol');
+}
+
 /** Call only while holding the parent deletion-receipt lock. ACCESS SHARE
  * keeps the catalog decision stable through this transaction without blocking
  * ordinary row writes. Only actual SQL NULL is legacy; JSONB null, arrays,

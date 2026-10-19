@@ -37,6 +37,18 @@ async function main() {
   const { prisma: db, disconnectDatabase } = await import('../../backend/src/lib/prisma');
   try {
     const publication = await VersionedFilePublication.open(store, live, work);
+    // Even an empty-file operation owns its parent before any child exists.
+    // The legacy expiry worker must not infer raw-path authority from [] alone.
+    const emptyVersionedReceipt = randomUUID(), emptyVersionedToken = randomUUID();
+    await db.hrDeletionReceipt.create({ data: {
+      id: emptyVersionedReceipt, targetType: 'PERSONNEL', targetId: randomUUID(), actorUserId: 'isolated-native-qa',
+      reason: 'Isolated empty versioned owner acceptance', previewFingerprint: runtimeId,
+      status: 'PREPARING', operationToken: emptyVersionedToken, leaseExpiresAt: new Date(0),
+      recordCounts: { fileProtocol: 'sabalan-versioned-hr-erasure/v1', counts: {} }, fileCounts: {},
+    } });
+    assert.equal(await recoverInterruptedPersonnelErasures(db), 0);
+    const emptyVersionedOwner = await db.hrDeletionReceipt.findUniqueOrThrow({ where: { id: emptyVersionedReceipt } });
+    assert.equal(emptyVersionedOwner.status, 'PREPARING'); assert.equal(emptyVersionedOwner.operationToken, emptyVersionedToken);
     const receiptId = randomUUID(), operationToken = randomUUID();
     await db.hrDeletionReceipt.create({ data: {
       id: receiptId, targetType: 'PERSONNEL', targetId: 'isolated-native-qa', actorUserId: 'isolated-native-qa',

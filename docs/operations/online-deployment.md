@@ -110,6 +110,13 @@ admission and public online switching are still disabled. See
 
 ## Admission work still required
 
+Private HR parents now declare their versioned file protocol before any child
+plan exists. The legacy expiry worker and actual administrator cleanup route
+refuse declared or unknown protocol parents even with no cleanup children.
+Actual empty-file Job Application deletion, HTTP authorization, native recovery,
+legacy and pre-column regressions passed. This does not activate Personnel or
+production routes. See [empty-plan ownership evidence](../../reports/qa/hr-empty-file-protocol-ownership-20261019.md).
+
 Private legacy-file baseline adoption now has seven native acceptance cases,
 including actual interrupted-owner death. It does not activate ordinary writers
 or certify privacy/controller coverage. See [baseline evidence](../../reports/qa/versioned-file-legacy-20261018.md).

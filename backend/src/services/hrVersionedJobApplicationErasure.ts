@@ -47,7 +47,8 @@ export async function eraseVersionedJobApplication(input: {
       if (!impact || impact.fingerprint !== expectedFingerprint) throw failure('HR_APPLICATION_PREVIEW_CHANGED', 409);
       await tx.hrDeletionReceipt.create({ data: { id: receiptId, targetType: 'JOB_APPLICATION', targetId: applicationId,
         actorUserId, reason, previewFingerprint: expectedFingerprint, status: 'PREPARING', operationToken,
-        leaseExpiresAt: new Date(Date.now() + 300_000), recordCounts: impact.counts, fileCounts: impact.fileCounts } });
+        leaseExpiresAt: new Date(Date.now() + 300_000),
+        recordCounts: { fileProtocol: 'sabalan-versioned-hr-erasure/v1', counts: impact.counts }, fileCounts: impact.fileCounts } });
       return impact;
     }, 'ReadCommitted'); // Re-read active owners after the target lock settles.
     const files = await createDurableVersionedHiringFileTransaction({ database, root, publication, work,
@@ -68,7 +69,9 @@ export async function eraseVersionedJobApplication(input: {
       if (!current || current.fingerprint !== expectedFingerprint) throw failure('HR_APPLICATION_PREVIEW_CHANGED', 409);
       await eraseJobApplicationRecords(tx, applicationId, current.employmentRelationshipId);
       await tx.hrDeletionReceipt.update({ where: { id: receiptId }, data: { status: 'FILE_CLEANUP_PENDING',
-        operationToken: null, leaseExpiresAt: null, recordCounts: current.counts, fileCounts: current.fileCounts, deletedAt: new Date() } });
+        operationToken: null, leaseExpiresAt: null,
+        recordCounts: { fileProtocol: 'sabalan-versioned-hr-erasure/v1', counts: current.counts },
+        fileCounts: current.fileCounts, deletedAt: new Date() } });
     }); } catch (error) {
       // Observe the original parent only after acquiring its real row lock in
       // a fresh READ COMMITTED transaction. A still-running graph transaction
@@ -100,7 +103,7 @@ export async function eraseVersionedJobApplication(input: {
           await transaction(async tx => {
             const changed = await tx.hrDeletionReceipt.updateMany({ where: { id: receiptId, targetType: 'JOB_APPLICATION',
               status: 'COMPENSATING', operationToken }, data: { status: 'ABORTED', operationToken: null, leaseExpiresAt: null,
-              recordCounts: { aborted: true }, fileCounts: { restored: plans.length } } });
+              recordCounts: { fileProtocol: 'sabalan-versioned-hr-erasure/v1', aborted: true }, fileCounts: { restored: plans.length } } });
             if (changed.count !== 1) throw failure('HR_VERSIONED_APPLICATION_RESOLUTION_UNPROVEN');
           }, 'ReadCommitted');
         } catch (restoreError) {

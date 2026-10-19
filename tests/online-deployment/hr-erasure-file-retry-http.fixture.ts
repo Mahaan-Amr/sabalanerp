@@ -37,6 +37,20 @@ export async function exerciseHrDeletionFileRetryHttp(db: PrismaClient, root: st
       });
       return { status: response.status, body: await response.json() as any };
     };
+    for (const fileProtocol of ['sabalan-versioned-hr-erasure/v1', 'unknown-future-file-protocol']) {
+      const id = randomUUID();
+      const empty = await db.hrDeletionReceipt.create({ data: {
+        id, targetType: 'PERSONNEL', targetId: randomUUID(), actorUserId: admin.id,
+        reason: 'Isolated empty protocol owner acceptance', previewFingerprint: run,
+        status: 'FILE_CLEANUP_PENDING', operationToken: null, leaseExpiresAt: null,
+        recordCounts: { fileProtocol, counts: {} }, fileCounts: {},
+      } });
+      const refused = await request(id, adminSession.token);
+      assert.equal(refused.status, 409);
+      assert.equal(refused.body.success, false);
+      assert.deepEqual(await db.hrDeletionReceipt.findUnique({ where: { id } }), empty);
+      assert.equal(await db.hrDeletionFileCleanup.count({ where: { receiptId: id } }), 0);
+    }
     for (const kind of ['preparing', 'versioned', 'legacy'] as const) {
       const id = randomUUID(), name = `${id}.pdf`, trash = path.join(root, '.deletion-trash', id);
       fs.mkdirSync(trash, { recursive: true }); const stagedPath = path.join(trash, name);

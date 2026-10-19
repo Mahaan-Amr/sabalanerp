@@ -2,7 +2,7 @@ import { startBackgroundJob } from './backgroundJobLifecycle';
 import { Prisma, PrismaClient } from '@prisma/client';
 import crypto from 'node:crypto';
 import { restoreStagedHiringFiles } from './hrDeletionFileTransaction';
-import { readHrLegacyFileCleanupRows } from './hrLegacyFileCleanupRows';
+import { hasDeclaredHrFileProtocol, readHrLegacyFileCleanupRows } from './hrLegacyFileCleanupRows';
 
 const RECOVERY_INTERVAL_MS = 60_000;
 export const PERSONNEL_ERASURE_LEASE_MS = 5 * 60_000;
@@ -43,10 +43,15 @@ export const recoverInterruptedPersonnelErasures = async (prisma: PrismaClient, 
       // Both versioned plan insertion and claim transitions lock this parent.
       // Inspect cleanup rows in a fresh READ COMMITTED statement AFTER the
       // lock: a pre-lock snapshot can miss a just-committed versioned plan.
-      const locked = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM public.hr_deletion_receipts
+      const locked = await tx.$queryRaw<Array<{ id: string; recordCounts: Prisma.JsonValue }>>`SELECT id,"recordCounts" FROM public.hr_deletion_receipts
         WHERE id=${receipt.id} AND status=${receipt.status} AND "operationToken" IS NOT DISTINCT FROM ${receipt.operationToken}
           AND "leaseExpiresAt"<${now} FOR UPDATE`;
       if (locked.length !== 1) return null;
+      // A declared file protocol belongs to its original native owner even
+      // before its first child plan exists. Empty cleanup rows are not proof
+      // that this legacy compensator owns the parent. Unknown protocols stay
+      // unresolved too; never adopt them merely because their lease expired.
+      if (hasDeclaredHrFileProtocol(locked[0].recordCounts)) return null;
       const planned = await readHrLegacyFileCleanupRows(tx, receipt.id);
       // This compensator owns only ADR-0033's legacy raw-rename format.
       // Unknown/versioned work retains original ownership and receipts.

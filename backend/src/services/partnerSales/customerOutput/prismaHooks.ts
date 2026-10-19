@@ -89,7 +89,7 @@ async function caseOutput(tx: Prisma.TransactionClient, contractId: string) {
   await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${contractId} FOR UPDATE`;
   const row = await tx.salesContract.findUnique({ where: { id: contractId }, select: {
     id: true, partnerKind: true, commercialFlowVersion: true, commercialRevision: true, salesApprovalRevision: true,
-    customerAcceptanceRevision: true, firstFinancialRecordAt: true, commercialExpiresAt: true, status: true, isInactive: true, partnerCaseId: true, contractNumber: true, customerId: true,
+    customerAcceptanceRevision: true, firstFinancialRecordAt: true, commercialExpiresAt: true, dispatchExpiryExempt: true, status: true, isInactive: true, partnerCaseId: true, contractNumber: true, customerId: true,
     partnerCase: { select: { id: true, state: true, customerConfirmationState: true,
       headRevision: true, integrityHash: true,
       committedRevision: true,

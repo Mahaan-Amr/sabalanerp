@@ -1,3 +1,5 @@
+import { lockDispatchContract, dispatchAccountingHref } from './contractDispatchTarget';
+import { partnerOutstandingRials } from './partnerSales/fulfillment/commercialSettlement';
 import type { PrismaClient } from '@prisma/client';
 import { actualContractReceiptsRials } from './ordinaryContractDispatchEligibility';
 import { dispatchCreditAccess, rials, tehranDay } from './contractDispatchCredit';
@@ -41,12 +43,13 @@ export const processContractCreditReminders = async (database: PrismaClient, now
     const day = row.promisedDate.toISOString().slice(0, 10);
     if (row.notifiedFor === day || row.revision !== row.contract.commercialRevision) continue;
     await database.$transaction(async tx => {
-      await tx.$queryRaw`SELECT "id" FROM "sales_contracts" WHERE "id"=${row.contractId} FOR UPDATE`;
+      await lockDispatchContract(tx, row.contractId);
       const current = await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: row.id }, include: { contract: true } });
       if (current.status !== 'APPROVED' || current.notifiedFor === day || current.promisedDate?.getTime() !== row.promisedDate!.getTime()
         || current.revision !== current.contract.commercialRevision || current.contract.isInactive
         || ['CANCELLED','EXPIRED'].includes(current.contract.status)) return;
-      const outstanding = rials(current.contract.totalAmount ?? 0, current.contract.currency).minus(await actualContractReceiptsRials(tx, current.contract));
+      const outstanding = current.contract.partnerCaseId ? await partnerOutstandingRials(tx, current.contract.partnerCaseId)
+        : rials(current.contract.totalAmount ?? 0, current.contract.currency).minus(await actualContractReceiptsRials(tx, current.contract));
       if (outstanding.gt(0)) {
         for (const user of users) {
           const access = await dispatchCreditAccess(tx, current.contract, user.id);
@@ -55,8 +58,8 @@ export const processContractCreditReminders = async (database: PrismaClient, now
             await publishNotificationEvent(tx, { type: 'CONTRACT_PAYMENT_PROMISE_DUE',
               deduplicationKey: `contract-payment-promise:${current.contractId}:${day}:${user.id}`,
               recipientIds: [user.id], resourceType: 'CONTRACT_DISPATCH', resourceId: current.contractId,
-              actionUrl: access.manage || access.request || (current.kind === 'MANAGER' && access.managerDecision)
-                ? `/dashboard/accounting/contracts/${current.contractId}` : `/dashboard/sales/contracts/${current.contractId}`,
+              actionUrl: current.contract.partnerCaseId || access.manage || access.request || (current.kind === 'MANAGER' && access.managerDecision)
+                ? dispatchAccountingHref(current.contract) : `/dashboard/sales/contracts/${current.contractId}`,
               payload: { contractNumber: current.contract.contractNumber, promisedDate: row.promisedDate!.toLocaleDateString('fa-IR', { timeZone: 'UTC' }) } });
           }
         }

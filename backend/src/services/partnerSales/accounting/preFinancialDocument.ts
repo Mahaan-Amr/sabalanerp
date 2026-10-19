@@ -1,3 +1,4 @@
+import { readPartnerCustomerSignature } from './customerSignature';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
@@ -46,7 +47,7 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
       productRowId: String(row.productRowId), description: String(row.description), quantity: String(row.quantity),
       unit: String(row.unit), unitPrice: '0', totalPrice: '0',
     }));
-  return { id: root.internalRecord.id, preparationOnly: true, amountKnown, commercial, canRegister: write,
+  return { customerSignature: await readPartnerCustomerSignature(tx, caseId, actorId), id: root.internalRecord.id, preparationOnly: true, amountKnown, commercial, canRegister: write,
     caseState: root.state, isInactive: root.customerContract.isInactive, owner, status: 'DRAFT', amount: content.totals?.payable ?? '0',
     receivedAmount: '0', remainingAmount: content.totals?.payable ?? '0', currency: 'IRT', createdAt: root.createdAt,
     systemInvoiceNumber: null, systemInvoiceDate: null, sepidarAmount: null, metadata: undefined,

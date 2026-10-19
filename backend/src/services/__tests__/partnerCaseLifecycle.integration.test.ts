@@ -1828,3 +1828,82 @@ test('unified case query retains healthy and damaged authorized identities while
     assert.ok(!JSON.stringify(body).includes(foreign.caseId));
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); await database.$disconnect(); await temporary.cleanup(); }
 });
+
+test('Partner Accounting paper acceptance and shared managerial dispatch use the current commercial revision', () => fixture(async (tx, ids) => {
+  const { acceptPartnerCustomer, approvePartnerCommercialSales } = await import('../partnerSales/cases/commercialLifecycle');
+  const { createDispatchRequest, decideDispatchRequest } = await import('../contractDispatchCredit');
+  const { partnerCommercialDispatchEligible } = await import('../partnerSales/fulfillment/commercialSettlement');
+  const { createContractDispatchDuty } = await import('../crossWorkspaceDutyAdapters/contractDispatchDutyAdapter');
+  const { respondToCrossWorkspaceDuty } = await import('../crossWorkspaceDutyModule');
+  const { resetPartnerCommercialApprovals } = await import('../partnerSales/cases/commercialLifecycle');
+  const managerId = `${ids.caseId}-manager`;
+  await tx.user.create({ data: { id: managerId, username: managerId, email: `${managerId}@example.invalid`,
+    password: 'not-a-login', firstName: 'Manager', lastName: 'Parity', role: 'ADMIN' } });
+  const accountantId = `${ids.caseId}-accountant`;
+  await tx.user.create({ data: { id: accountantId, username: accountantId, email: `${accountantId}@example.invalid`, password: 'not-a-login', firstName: 'Accountant', lastName: 'Parity' } });
+  await tx.workspacePermission.create({ data: { userId: accountantId, workspace: 'accounting', permissionLevel: 'edit' } });
+  for (const [feature, permissionLevel] of [['accounting_contracts_view', 'view'], ['accounting_actions_manage', 'edit']] as const)
+    await tx.featurePermission.create({ data: { userId: accountantId, workspace: 'accounting', feature, permissionLevel } });
+  await tx.partnerSaleCase.update({ where: { id: ids.caseId }, data: { commercialFlowVersion: 1, stateRevision: { increment: 1 } } });
+  await tx.salesContract.update({ where: { id: ids.contractId }, data: { commercialFlowVersion: 2,
+    commercialRevision: 1, salesApprovalRevision: null, customerAcceptanceRevision: null, status: 'DRAFT' } });
+  const { readPartnerCustomerSignature } = await import('../partnerSales/accounting/customerSignature');
+  assert.equal((await readPartnerCustomerSignature(tx, ids.caseId, accountantId))?.canRecordPaperSignature, true, 'paper acceptance is available before commercial finality');
+  const paper = await acceptPartnerCustomer(tx, { caseId: ids.caseId, revision: 1, actorId: accountantId, method: 'PAPER' });
+  assert.equal(paper.customerAcceptanceMethod, 'PAPER');
+  assert.equal(paper.isSigned, false, 'paper acceptance never implies phone verification');
+  await approvePartnerCommercialSales(tx, { caseId: ids.caseId, revision: 1, actorId: ids.partnerId });
+  const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } });
+  assert.equal(contract.status, 'SIGNED');
+  assert.equal(await partnerCommercialDispatchEligible(tx, ids.caseId), false);
+  const request = await createDispatchRequest(tx, contract, accountantId, { kind: 'MANAGER' });
+  assert.equal(request.promisedDate, null);
+  const duty = await createContractDispatchDuty(tx, request.id);
+  const notification = await tx.notification.findFirstOrThrow({ where: { referenceId: request.id, userId: managerId } });
+  assert.equal(notification.actionUrl, `/dashboard/accounting/contracts/partner/${ids.caseId}`);
+
+  await assert.rejects(decideDispatchRequest(tx, request.id, accountantId, 'APPROVE', undefined, '2099-01-01'));
+  await assert.rejects(decideDispatchRequest(tx, request.id, managerId, 'APPROVE'), /تاریخ وعده پرداخت/);
+  await respondToCrossWorkspaceDuty(tx, { dutyId: duty.id, actorUserId: managerId, actionCode: 'APPROVE', expectedSourceVersion: 1,
+    expectedEnvelopeVersion: 1, reason: null, policyVersion: 1, promisedDate: '2099-01-01' });
+  assert.equal(await partnerCommercialDispatchEligible(tx, ids.caseId), true);
+  await resetPartnerCommercialApprovals(tx, ids.caseId, accountantId, 'Parity commercial revision');
+  assert.equal((await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: request.id } })).status, 'SUPERSEDED');
+  await approvePartnerCommercialSales(tx, { caseId: ids.caseId, revision: 2, actorId: ids.partnerId });
+  await acceptPartnerCustomer(tx, { caseId: ids.caseId, revision: 2, actorId: accountantId, method: 'PAPER' });
+  assert.equal(await partnerCommercialDispatchEligible(tx, ids.caseId), false, 'previous revision approval cannot authorize new shipments');
+  const next = await tx.salesContract.findUniqueOrThrow({ where: { id: contract.id } });
+  assert.equal((await createDispatchRequest(tx, next, accountantId, { kind: 'MANAGER' })).status, 'PENDING');
+}));
+
+
+test('Partner commercial actions reuse ordinary Accounting permissions for Admin, company Manager, Accounting manager and processor', () => fixture(async (tx, ids) => {
+  const { readPartnerCustomerSignature } = await import('../partnerSales/accounting/customerSignature');
+  const { dispatchCreditAccess } = await import('../contractDispatchCredit');
+  const { partnerDispatchAccess } = await import('../contractDispatchTarget');
+  await tx.salesContract.update({ where: { id: ids.contractId }, data: { commercialFlowVersion: 2 } });
+  const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: ids.contractId } });
+  for (const [name, role, workspace] of [['Admin', 'ADMIN', 'admin'], ['CompanyManager', 'MANAGER', 'edit'],
+    ['AccountingManager', 'USER', 'admin'], ['Processor', 'USER', 'edit']] as const) {
+    const id = `${ids.caseId}-${name}`;
+    await tx.user.create({ data: { id, username: id, email: `${id}@example.invalid`, password: 'not-a-login', firstName: name, lastName: 'Parity', role } });
+    await tx.workspacePermission.create({ data: { userId: id, workspace: 'accounting', permissionLevel: workspace } });
+    for (const [feature, permissionLevel] of [['accounting_contracts_view', 'view'], ['accounting_actions_manage', 'edit']] as const) {
+      await tx.featurePermission.create({ data: { userId: id, workspace: 'accounting', feature, permissionLevel } });
+    }
+    const signature = await readPartnerCustomerSignature(tx, ids.caseId, id);
+    assert.equal(signature?.showActions, true, name);
+    assert.equal(signature?.canRecordPaperSignature, true, name);
+    const access = await dispatchCreditAccess(tx, contract, id);
+    assert.equal(access.read, true, name);
+    assert.equal(access.request, true, name);
+    assert.equal(access.managerDecision, ['ADMIN', 'MANAGER'].includes(role), name);
+    // A direct Case denial remains authoritative even for a workspace manager.
+    if (name === 'AccountingManager') {
+      await tx.effectiveActionGrant.create({ data: { id: `${id}-deny`, principalKind: 'USER', principalId: id, subjectUserId: id,
+        domain: 'PARTNER', action: 'ACCOUNTING_READ', rootKind: 'CASE', purpose: 'ACCOUNTING', scope: 'COMPANY',
+        effect: 'DENY', grantedBy: id, reason: 'Parity denial fixture', correlationId: id } });
+      assert.equal(await partnerDispatchAccess(tx, contract, id), false);
+    }
+  }
+}));

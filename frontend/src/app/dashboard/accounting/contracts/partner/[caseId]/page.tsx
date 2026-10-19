@@ -3,7 +3,10 @@
 import { formatPartnerMoneyTotal } from '@/features/partner-sales/presentation';
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ErpButton, ErpInlineState, ErpLoading, ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
+import { ErpButton, ErpInlineState, ErpLoading, ErpSection, ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
+import { FaCheckCircle } from 'react-icons/fa';
+import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCreditPanel';
+import { userFacingError } from '@/features/dispatch/userFacingError';
 import api, { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
 import { defaultCustomPrintSettings, type SalesPdfVariant, type CustomPrintSettings, type CustomPrintPreset } from '@/features/accounting/AccountingCustomPrintSettings';
@@ -90,6 +93,16 @@ export default function PartnerInternalAccountingContractPage() {
     } catch { setError('سند داخلی این پرونده در دسترس نیست.'); }
   }, [caseId]);
   useEffect(() => { void load(); }, [load]);
+  const recordPaperSignature = async () => {
+    if (pending || !document?.customerSignature?.canRecordPaperSignature) return;
+    setPending(true); setError(undefined);
+    try {
+      const response = await api.post(`/partner/accounting/${encodeURIComponent(caseId)}/customer-paper-signature`, { revision: document.customerSignature.revision });
+      if (!response.data.success) throw new Error(response.data.error);
+      await load();
+    } catch (failure) { setError(userFacingError(failure, 'ثبت امضای کاغذی مشتری انجام نشد؛ اطلاعات قرارداد را تازه‌سازی کنید.')); }
+    finally { setPending(false); }
+  };
   const pdf = async (print: boolean) => {
     if (!document || pending) return;
     setPending(true); setError(undefined);
@@ -126,7 +139,11 @@ export default function PartnerInternalAccountingContractPage() {
   if (!document) return <ErpInlineState kind="error" title={error!}
     action={{ label: 'تلاش دوباره', onClick: () => void load() }} />;
   return <>
-    <PartnerAccountingDetailView lifecyclePanel={<PartnerContractLifecyclePanel caseId={caseId} onChanged={load} />} financialVoidPanel={<PartnerFinancialVoidPanel document={document} pending={pending} refresh={load} />} document={document} section={section} onSection={setSection}
+    <PartnerAccountingDetailView signaturePanel={document.customerSignature?.showActions && <ErpSection title="امضای مشتری و مجوز ارسال">
+      <ContractDispatchCreditPanel contractId={document.customerSignature.contractId} refreshKey={document.customerSignature.updatedAt} onChanged={() => void load()}>
+        {document.customerSignature.canRecordPaperSignature && <ErpButton label="ثبت امضای کاغذی مشتری" icon={FaCheckCircle} tone="success" disabled={pending || !document.customerSignature.canRecordPaperSignature} onClick={() => void recordPaperSignature()} />}
+      </ContractDispatchCreditPanel>
+    </ErpSection>} lifecyclePanel={<PartnerContractLifecyclePanel caseId={caseId} onChanged={load} />} financialVoidPanel={<PartnerFinancialVoidPanel document={document} pending={pending} refresh={load} />} document={document} section={section} onSection={setSection}
       invoiceOpen={invoiceOpen} onOpenInvoice={openInvoice} onApproveInvoice={approveInvoice}
       onCreateReceivable={() => { setError(undefined); setReceivableOpen(true); }}
       printVariant={printVariant} onPrintVariant={setPrintVariant} customPrintSettings={customPrintSettings}

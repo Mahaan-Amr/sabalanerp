@@ -110,6 +110,15 @@ admission and public online switching are still disabled. See
 
 ## Admission work still required
 
+Private versioned Personnel erasure now stages explicitly enrolled roots,
+commits access preparation separately from graph deletion, resolves original
+parent outcomes before compensation and refuses to overwrite later access
+changes. Actual PostgreSQL/file/session tests passed. Qualification also fixed
+the graph's unsupported assumption that every model has an id column, preserving
+complete primary/foreign-key tuples and existing immutable guards. Full domain
+strata, public composition and online admission remain pending. See
+[Personnel erasure evidence](../../reports/qa/hr-versioned-personnel-erasure-20261019.md).
+
 Private HR parents now declare their versioned file protocol before any child
 plan exists. The legacy expiry worker and actual administrator cleanup route
 refuse declared or unknown protocol parents even with no cleanup children.

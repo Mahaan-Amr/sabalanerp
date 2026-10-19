@@ -112,6 +112,8 @@ async function main() {
     await work.run(() => exerciseVersionedJobApplicationErasure(db, publication, work, live));
     const { exerciseVersionedJobApplicationConcurrency } = await import('./hr-versioned-job-application-concurrency.fixture');
     await work.run(() => exerciseVersionedJobApplicationConcurrency(db, publication, work, live));
+    const { exerciseVersionedPersonnelErasure } = await import('./hr-versioned-personnel-erasure.fixture');
+    await work.run(() => exerciseVersionedPersonnelErasure(db, publication, work, live));
     console.log(JSON.stringify({ nativeDatabaseAndFilesPassed: true, root }));
   } finally {
     try { await disconnectDatabase(); } finally { await work.stopAndDrain(1000); }

@@ -99,7 +99,7 @@ try {
       const d=fs.openSync(p,'r');try{fs.fsyncSync(d);}finally{fs.closeSync(d);}`;
     verify(); execFileSync('docker', ['exec', '-i', candidate.Id, 'node', '-e', setup], { input: bundle });
     const target = new URL(url.href); target.hostname = 'postgres'; target.port = '5432'; nativeUrl = target.href;
-    const bootstrap = `process.chdir(require('path').dirname(process.argv[1]));
+    const bootstrap = `process.umask(0o077);process.chdir(require('path').dirname(process.argv[1]));
       const input=JSON.parse(require('fs').readFileSync(0,'utf8'));process.env.DATABASE_URL=input.databaseUrl;
       Object.defineProperty(globalThis,'__sabalanHrErasureNativeInput',{value:Object.freeze(input),writable:false,configurable:false});require(process.argv[1]);`;
     verify(); result = spawnSync('docker', ['exec', '-i', '-e', 'NODE_PATH=/app/node_modules', candidate.Id,
@@ -135,6 +135,7 @@ if (suite === 'native') {
   assert.match(report.stdout, /"versionedJobApplicationErasurePassed":true/);
   assert.match(report.stdout, /"versionedJobApplicationConcurrencyPassed":true/);
   assert.match(report.stdout, /"versionedJobApplicationObserverClosed":true/);
+  assert.match(report.stdout, /"versionedPersonnelErasurePassed":true/);
 }
 else { assert.match(report.stdout, /# fail 0\r?\n/); assert.match(report.stdout, /# skipped 0\r?\n/); }
 for (const [name, hash] of Object.entries(sources)) assert.equal(sha(fs.readFileSync(path.join(root, name))), hash);

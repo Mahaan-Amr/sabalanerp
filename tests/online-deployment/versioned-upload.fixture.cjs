@@ -49,6 +49,69 @@ const express = require('express');
 const {createVersionedDurableUpload} = require('./durableUpload');
 const {HttpRequestLifecycle} = require('./httpRequestLifecycle');
 
+test('a business rejection discards only its own unreferenced upload after asynchronous validation', async () => {
+ const value=await fixture(), lifecycle=value.boundary.requests, app=express();
+ const upload=createVersionedDurableUpload({storage:{destination:value.live,
+  filename:(_req,file,done)=>done(null,file.originalname)}},value.live,value.publisher,lifecycle);
+ app.use(value.boundary.middleware);
+ app.post('/reject',upload.single('file'),async(req,res)=>{
+  await new Promise(done=>setImmediate(done));
+  const disposition=await upload.discardUnreferenced(req,req.file);
+  res.status(422).json({disposition});
+ });
+ app.use((error,_req,res,_next)=>res.status(500).json({code:error.code||error.message}));lifecycle.install(app);
+ const server=app.listen(0,'127.0.0.1');await new Promise(done=>server.once('listening',done));
+ try {
+  const form=new FormData();form.append('file',new Blob(['REJECTED BEFORE DATABASE WRITE']),'rejected.pdf');
+  const response=await fetch('http://127.0.0.1:'+server.address().port+'/reject',{method:'POST',body:form});
+  assert.equal(response.status,422);assert.deepEqual(await response.json(),{disposition:'REMOVED'});
+  await lifecycle.waitForDrain(2000);assert.equal(fs.existsSync(path.join(value.live,'rejected.pdf')),false);
+  const cut=await seal(value),head=cut.manifest.heads.find(item=>item.key==='rejected.pdf');
+  assert.ok(head);assert.equal(await value.publisher.readVersion(head.sha256),null);
+  const tombstone=JSON.parse(fs.readFileSync(path.join(value.store,'versions',head.sha256+'.json')));
+  assert.equal((await value.publisher.readVersion(tombstone.previousSha256)).toString(),'REJECTED BEFORE DATABASE WRITE');
+ } finally {server.closeAllConnections();await new Promise(done=>server.close(done));await value.boundary.stopAndDrain(2000);}
+});
+
+test('business cleanup preserves possible SQL references, refuses foreign ownership and cannot remove a later version', async () => {
+ const value=await fixture(), lifecycle=value.boundary.requests, app=express();let answeredRequest,answeredFile;
+ const upload=createVersionedDurableUpload({storage:{destination:value.live,
+  filename:(_req,file,done)=>done(null,file.originalname)}},value.live,value.publisher,lifecycle);
+ app.use(value.boundary.middleware);
+ app.post('/retain',upload.single('file'),async(req,res)=>{
+  upload.retain(req,req.file);
+  assert.equal(await upload.discardUnreferenced(req,req.file),'RETAINED');
+  await assert.rejects(upload.discardUnreferenced({},req.file),{code:'FILE_UPLOAD_OWNERSHIP_REQUIRED'});
+  await assert.rejects(upload.discardUnreferenced(req,{path:path.join(value.live,'unowned.pdf')}),{code:'FILE_UPLOAD_OWNERSHIP_REQUIRED'});
+  answeredRequest=req;answeredFile=req.file;res.sendStatus(201);
+ });
+ app.post('/replace',upload.single('file'),async(req,res)=>{
+  await value.publisher.publishStream(req.file.filename,Readable.from([Buffer.from('LATER USER VERSION')]),{replace:true});
+  await assert.rejects(upload.discardUnreferenced(req,req.file),/FILE_UPLOAD_CLEANUP_IDENTITY_UNPROVEN|FILE_VERSION_UPLOAD_CHANGED/);
+  res.sendStatus(409);
+ });
+ app.post('/queued-retain',upload.single('file'),async(req,res)=>{
+  const cleanup=upload.discardUnreferenced(req,req.file);upload.retain(req,req.file);
+  await assert.rejects(cleanup,{code:'FILE_UPLOAD_MAY_BE_REFERENCED'});res.sendStatus(201);
+ });
+ app.use((error,_req,res,_next)=>res.status(500).json({code:error.code||error.message}));lifecycle.install(app);
+ const server=app.listen(0,'127.0.0.1');await new Promise(done=>server.once('listening',done));
+ const send=async(route,name)=>{const form=new FormData();form.append('file',new Blob(['ORIGINAL UPLOAD']),name);
+  return fetch('http://127.0.0.1:'+server.address().port+route,{method:'POST',body:form});};
+ try {
+  const retained=await send('/retain','retained.pdf');assert.equal(retained.status,201);await retained.arrayBuffer();
+  const replaced=await send('/replace','changed.pdf');assert.equal(replaced.status,409);await replaced.arrayBuffer();
+  const queued=await send('/queued-retain','queued.pdf');assert.equal(queued.status,201);await queued.arrayBuffer();
+  await lifecycle.waitForDrain(2000);
+  await assert.rejects(upload.discardUnreferenced(answeredRequest,answeredFile),{code:'RUNTIME_LEASED_WORK_NOT_ACTIVE'});
+  assert.equal(fs.readFileSync(path.join(value.live,'retained.pdf'),'utf8'),'ORIGINAL UPLOAD');
+  assert.equal(fs.readFileSync(path.join(value.live,'changed.pdf'),'utf8'),'LATER USER VERSION');
+  assert.equal(fs.readFileSync(path.join(value.live,'queued.pdf'),'utf8'),'ORIGINAL UPLOAD');
+  const cut=await seal(value);assert.equal(cut.manifest.heads.length,3);
+  assert.deepEqual(fs.readdirSync(path.join(value.store,'pending')),[]);
+ } finally {server.closeAllConnections();await new Promise(done=>server.close(done));await value.boundary.stopAndDrain(2000);}
+});
+
 test('real multipart upload preserves immutable bytes and failed multipart cleanup records a deletion version', async () => {
   const value=await fixture(), lifecycle=value.boundary.requests, app=express();
   let admitted=0;

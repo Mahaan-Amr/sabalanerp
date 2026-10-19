@@ -250,6 +250,14 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   full financial strata and recovery/browser gates remain pending. See
   [populated rehearsal evidence](../../reports/qa/closed-customer-expansion-20261019.md).
 
+HR multipart consumers now retain each upload before submitting its reference
+to SQL, preserve committed/uncertain files through later errors, and await only
+their original unreferenced upload's cleanup. Real-router native acceptance
+reproduced and repaired post-commit deletion, partial-batch deletion and rejected
+upload leakage. Versioned mode, complete metadata/reference census and initial
+erasure integration remain pending. See
+[upload reference safety](../../reports/qa/hr-upload-reference-safety-20261019.md).
+
 The private actual-image rehearsal additionally distinguishes successful native
 migrations from retained historical attempts: the measured source has 425
 successful rows and one rolled-back row. Its separate compiler requires that

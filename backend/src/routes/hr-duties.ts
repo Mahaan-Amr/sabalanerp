@@ -23,7 +23,7 @@ import {
   markCrossWorkspaceDutyAvailableSeen,
 } from '../services/crossWorkspaceDutyInbox';
 import {
-  HR_HIRING_ALLOWED_MIME, HR_HIRING_STORAGE_DIR, removeHiringFile, scanHiringFile,
+  HR_HIRING_ALLOWED_MIME, HR_HIRING_STORAGE_DIR, scanHiringFile,
   safeHiringStoragePath, sha256File, validateHiringFileSignature,
 } from '../services/hrHiringFileStorage';
 import {
@@ -255,6 +255,7 @@ router.post('/:id/hiring-finance/original-return', enforceMutationIdempotency, h
     const returnedTo = String(req.body.returnedTo || '').trim();
     const evidenceNote = String(req.body.evidenceNote || '').trim();
     if (!returnedTo || !evidenceNote) throw new Error('COLLATERAL_RETURN_FIELDS_REQUIRED');
+    hiringFinanceUpload.retain(req, req.file);
     const result = await prisma.$transaction((tx) => recordHrHiringCollateralOriginalReturn(tx, {
       dutyId: req.params.id, actorUserId: req.user!.id, returnedTo, evidenceNote,
       evidence: {
@@ -263,7 +264,7 @@ router.post('/:id/hiring-finance/original-return', enforceMutationIdempotency, h
       },
     }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.status(201).json({ success: true, data: result });
-  } catch (error) { removeHiringFile(req.file?.path); throw error; }
+  } catch (error) { await hiringFinanceUpload.discardUnreferenced(req, req.file); throw error; }
 }));
 
 router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFinanceUpload.single('file'), asyncHandler(async (req, res) => {
@@ -275,6 +276,7 @@ router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFin
     const receivedAt = parseCollateralReceiptDate(req.body.receivedAt);
     const custodyLocation = String(req.body.custodyLocation || '').trim();
     if (!custodyLocation) throw new Error('COLLATERAL_RECEIPT_FIELDS_REQUIRED');
+    hiringFinanceUpload.retain(req, req.file);
     const result = await prisma.$transaction((tx) => recordHrHiringCollateralReceipt(tx, {
       dutyId: req.params.id, actorUserId: req.user!.id,
       amountRials: req.body.amountRials ? normalizeHiringRial(req.body.amountRials) : null,
@@ -288,7 +290,7 @@ router.post('/:id/hiring-finance/receipt', enforceMutationIdempotency, hiringFin
     }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.status(201).json({ success: true, data: result });
   } catch (error) {
-    removeHiringFile(req.file?.path);
+    await hiringFinanceUpload.discardUnreferenced(req, req.file);
     throw error;
   }
 }));

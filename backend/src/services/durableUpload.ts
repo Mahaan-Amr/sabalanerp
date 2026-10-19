@@ -7,10 +7,18 @@ import { publishDurableStream, removeDurableFile } from './durableFilePublicatio
 import { runtimeHttpRequests, type HttpRequestLifecycle } from './httpRequestLifecycle';
 import { VersionedFilePublication } from './versionedFilePublication';
 
-type OwnedFile = { path: string; device: bigint; inode: bigint; versionSha256?: string; removal?: Promise<void> };
+type OwnedFile = { path: string; device: bigint; inode: bigint; versionSha256?: string; removal?: Promise<void>; mayBeReferenced?: boolean };
 type UploadWork = { accepting: boolean; error?: Error; tasks: Set<Promise<unknown>>;
   guards: Set<Transform>; files: Map<string, OwnedFile> };
 type Options = Omit<multer.Options, 'storage' | 'dest'> & { storage: multer.DiskStorageOptions };
+type UploadedFile = Pick<Express.Multer.File, 'path'>;
+export type DurableUpload = multer.Multer & {
+  /** Irreversible in this request: call before submitting a file reference to
+   * SQL. A failed acknowledgement does not prove that SQL rolled back. */
+  retain(request: Request, file?: UploadedFile): void;
+  /** No path-only fallback. Only this request's original upload is eligible. */
+  discardUnreferenced(request: Request, file?: UploadedFile): Promise<'ABSENT' | 'RETAINED' | 'REMOVED'>;
+};
 const aborted = () => Object.assign(new Error('FILE_UPLOAD_ABORTED'), { code: 'FILE_UPLOAD_ABORTED' });
 
 function invoke<T>(execute: (callback: (error: Error | null, value: T) => void) => void): Promise<T> {
@@ -26,20 +34,20 @@ function invoke<T>(execute: (callback: (error: Error | null, value: T) => void) 
  * limits, field names and storage names remain owned by the calling route.
  * No business write is replayed and a colliding file is never overwritten. */
 export function createDurableUpload(options: Options,
-  requests: Pick<HttpRequestLifecycle, 'trackWork'> = runtimeHttpRequests): multer.Multer {
+  requests: Pick<HttpRequestLifecycle, 'trackWork'> = runtimeHttpRequests): DurableUpload {
   return createUpload(options, requests);
 }
 
 /** Explicit admitted composition only. Ordinary routes retain their existing
  * storage until the controller proves complete protected-root coverage. */
 export function createVersionedDurableUpload(options: Options, root: string, versions: VersionedFilePublication,
-  requests: Pick<HttpRequestLifecycle, 'trackWork'> = runtimeHttpRequests): multer.Multer {
+  requests: Pick<HttpRequestLifecycle, 'trackWork'> = runtimeHttpRequests): DurableUpload {
   if (!(versions instanceof VersionedFilePublication) || !versions.ownsRoot(root)) throw new Error('FILE_VERSION_STORAGE_ROOT_MISMATCH');
   return createUpload(options, requests, { root: path.resolve(root), owner: versions });
 }
 
 function createUpload(options: Options, requests: Pick<HttpRequestLifecycle, 'trackWork'>,
-  versions?: { root: string; owner: VersionedFilePublication }): multer.Multer {
+  versions?: { root: string; owner: VersionedFilePublication }): DurableUpload {
   const key = (target: string) => {
     const relative = path.relative(versions!.root, target);
     if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
@@ -58,6 +66,7 @@ function createUpload(options: Options, requests: Pick<HttpRequestLifecycle, 'tr
     return task;
   };
   const discard = (state: UploadWork, file: OwnedFile) => {
+    if (file.mayBeReferenced) throw Object.assign(new Error('FILE_UPLOAD_MAY_BE_REFERENCED'), { code: 'FILE_UPLOAD_MAY_BE_REFERENCED' });
     if (!file.removal) file.removal = (async () => {
       const named = await fs.lstat(file.path, { bigint: true });
       if (!named.isFile()) throw new Error('FILE_UPLOAD_CLEANUP_IDENTITY_UNPROVEN');
@@ -125,7 +134,25 @@ function createUpload(options: Options, requests: Pick<HttpRequestLifecycle, 'tr
         .catch(error => request.destroy(error));
     },
   };
-  const upload = multer({ ...uploadOptions, storage: engine });
+  const upload = multer({ ...uploadOptions, storage: engine }) as DurableUpload;
+  const ownedFile = (request: Request, file: UploadedFile) => {
+    const state = states.get(request), owned = state?.files.get(file.path);
+    if (!state || !owned) throw Object.assign(new Error('FILE_UPLOAD_OWNERSHIP_REQUIRED'), { code: 'FILE_UPLOAD_OWNERSHIP_REQUIRED' });
+    return { state, owned };
+  };
+  upload.retain = (request, file) => {
+    if (!file) return;
+    const { owned } = ownedFile(request, file);
+    if (owned.removal) throw Object.assign(new Error('FILE_UPLOAD_CLEANUP_ALREADY_STARTED'), { code: 'FILE_UPLOAD_CLEANUP_ALREADY_STARTED' });
+    owned.mayBeReferenced = true;
+  };
+  upload.discardUnreferenced = (request, file) => requests.trackWork(request, async () => {
+    if (!file) return 'ABSENT';
+    const { state, owned } = ownedFile(request, file);
+    if (owned.mayBeReferenced) return 'RETAINED';
+    await own(state, () => discard(state, owned));
+    return 'REMOVED';
+  });
   const wrap = (middleware: RequestHandler): RequestHandler => (request, response, next) => {
     if (states.has(request)) return next(new Error('FILE_UPLOAD_SCOPE_ALREADY_ACTIVE'));
     const state: UploadWork = { accepting: true, tasks: new Set(), guards: new Set(), files: new Map() };
@@ -172,7 +199,10 @@ function createUpload(options: Options, requests: Pick<HttpRequestLifecycle, 'tr
       console.error('Upload completion callback failed', { code: 'FILE_UPLOAD_CALLBACK_FAILED' });
       request.destroy();
     }).finally(() => {
-      request.removeListener('aborted', onAbort); states.delete(request);
+      // Business handlers execute asynchronously after Multer calls next().
+      // Keep original ownership for that request; the WeakMap does not extend
+      // request lifetime and a later request never inherits this authority.
+      request.removeListener('aborted', onAbort);
     });
   };
   for (const method of ['single', 'array', 'fields', 'any', 'none'] as const) {

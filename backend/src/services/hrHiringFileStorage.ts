@@ -68,8 +68,3 @@ export const scanHiringFile = async (filePath: string): Promise<string> => {
     throw new Error(`Document rejected by antivirus scanner: ${message.slice(0, 240)}`);
   }
 };
-
-export const removeHiringFile = (filePath?: string) => {
-  if (!filePath) return;
-  try { fs.unlinkSync(filePath); } catch { /* best-effort cleanup */ }
-};

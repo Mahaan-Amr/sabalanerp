@@ -28,6 +28,7 @@ const before = Object.fromEntries(['backend', 'frontend', 'postgres', 'inquiry']
   const value = inspect(service); return [service, { id: value.Id, image: value.Image, startedAt: value.State.StartedAt }];
 }));
 const slot = inspect('backend-candidate');
+const candidateBefore = { id: slot.Id, image: slot.Image, startedAt: slot.State.StartedAt };
 assert.ok(slot.Config.Env.includes('BACKEND_RUNTIME_ROLE=candidate'));
 assert.equal(slot.Image, before.backend.image);
 assert.ok(slot.Mounts.some(mount => mount.Type === 'volume' && mount.RW
@@ -89,6 +90,10 @@ for (const [service, expected] of Object.entries(before)) {
   assert.deepEqual({ id: value.Id, image: value.Image, startedAt: value.State.StartedAt }, expected);
 }
 report.canonicalServicesUnchanged = before;
+const candidateAfter = inspect('backend-candidate');
+assert.deepEqual({ id: candidateAfter.Id, image: candidateAfter.Image, startedAt: candidateAfter.State.StartedAt }, candidateBefore);
+report.candidateBefore = candidateBefore;
+report.candidateAfter = { id: candidateAfter.Id, image: candidateAfter.Image, startedAt: candidateAfter.State.StartedAt };
 report.sourceHashes = sourceHashes;
 report.sources = sources;
 report.productionAdmission = false;

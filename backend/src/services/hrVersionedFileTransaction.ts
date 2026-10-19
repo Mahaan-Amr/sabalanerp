@@ -23,6 +23,12 @@ const assertReceipt = (value: VersionedStagedHiringFile) => {
   segment(value.storageName); segment(value.operationId);
 };
 
+/** Parse persisted receipts without accepting legacy paths or extra fields. */
+export function parseVersionedStagedHiringFile(value: unknown): VersionedStagedHiringFile {
+  assertReceipt(value as VersionedStagedHiringFile);
+  return Object.freeze({ ...value as VersionedStagedHiringFile });
+}
+
 /** Explicit private HR storage adapter. The domain/controller must persist its
  * planned operation before stage, await every actual outcome, retain uncertain
  * receipts and prove actor/native closure before recovery. There is no batch

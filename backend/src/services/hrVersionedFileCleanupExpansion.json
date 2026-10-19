@@ -1,0 +1,5 @@
+{
+  "format": "sabalan-online-expansion/v1",
+  "migrationName": "20261019020000_hr_versioned_file_cleanup",
+  "operations": [{ "kind": "add-nullable-column", "table": "hr_deletion_file_cleanups", "column": "versionedFileState", "type": "jsonb" }]
+}

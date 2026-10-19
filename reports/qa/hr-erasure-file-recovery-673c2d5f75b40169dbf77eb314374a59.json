@@ -1,0 +1,68 @@
+{
+  "format": "sabalan-hr-erasure-file-recovery-local/v1",
+  "suite": "native",
+  "pass": false,
+  "productionAdmission": false,
+  "nativeDirectory": "/app/online-runtime-acceptance/hr-erasure-673c2d5f75b40169dbf77eb314374a59",
+  "sources": {
+    "scripts/run-hr-erasure-file-recovery-local.mjs": "4558d2c90ef7445a954774cc247ee86752d6bbd8a85f2ebbb911192c3ad802c1",
+    "backend/prisma/migrations/20261019020000_hr_versioned_file_cleanup/migration.sql": "cb25c720d02d37ad036c95583ef9ba1ba7856bcd483a62ef1c8e03930947b9a9",
+    "backend/src/services/hrVersionedFileCleanupExpansion.json": "0bed9ca608af543b5af27ff3bab52410a90d7cb2909cc889a99a860fa4ddde94",
+    "tests/online-deployment/hr-erasure-file-journal.fixture.ts": "5bb4a5b190aea66941e3140d0ef070a2e2863bb605d5618a06ad7b757c40d153",
+    "backend/src/lib/prisma.ts": "c962577a5ea32f7ba056440971d9d1083ac257185ec585959743cd5a320df817",
+    "backend/src/services/versionedFilePublication.ts": "e12a8b988d8a90d45ef9ee66860c4053c11d204efdb8aaa26cd0ffcaff82ef83",
+    "backend/src/services/hrVersionedDeletionFileJournal.ts": "b50fcd880efa03b4888d92997e13e3f9e39d4d8006487cb84aed20ec88f63357",
+    "backend/src/services/runtimeWorkContext.ts": "9fcbc84ad7393eecc75ffe9bc8df73ebc051a4ba2050f2f31d6f00f7280c795d",
+    "backend/src/services/hrPersonnelErasureRecovery.ts": "0768ca3fc61ab65d875ee40d549ad841274accabe66dcc66984a2ec56f5167ec",
+    "backend/src/services/runtimeTaskAdmission.ts": "c45592ec5a5693c0aacbe794b481bd4198638dcf460e00240c4cae0e6ac7e9fa",
+    "backend/src/services/kernelWriteAdmission.ts": "8952c65ddde926fbc5136be933d1c7401ea269191cbcba64dd20ba6d95bdd875",
+    "backend/src/services/runtimeBoundaryJournal.ts": "d94912a6fb15d759d8270c067e96c81964f1a5464cc54c26df28636ccbe2e9eb",
+    "backend/src/services/runtimeNativeAuthority.ts": "20310a85d21c74ba15485b59ea37e5adebc194144b588c5029ba55329b960df1",
+    "backend/src/services/onlineRuntimeScope.ts": "6e8d5b7850edf2ef5b1db0821ed5f3dec7c3bacce165666afe180464bf074fce",
+    "backend/src/services/hrDeletionFileTransaction.ts": "50e2cf049f40f06297beabbceeb3bc8de9f8532243507983e8bc642fe5c30e81",
+    "backend/src/services/backgroundJobLifecycle.ts": "86e47577060ee5c5106136d98e9ff9adef5ebf920c753dadf18ab2959e4fe248",
+    "backend/src/services/hrVersionedFileTransaction.ts": "84025421b7ad4e529651e76bb9f9d39d47d7a597091fada3d01cbcb1dcf53e71",
+    "backend/src/services/durableFilePublication.ts": "5c1ecdf41aeae4259daf6ebef0f1556fc39135e9c07b80da1ff831bf64a1095a",
+    "backend/src/services/hrHiringFileStorage.ts": "371d13833470e02874a2010065739f34eb5df418015770c4ce52c7686190f56f",
+    "backend/src/services/recoveryRuntime.ts": "062e055599bd28aabde08880f0a80209ceb6776439e452bff1ee395cb298b7b6",
+    "backend/src/services/deploymentMaintenance.ts": "c1c8eb44b40dac48dac046507924af1f881f6b3c8fc2d949b07e20b89e2689fa",
+    "backend/src/services/runtimeWorkBoundary.ts": "6d4934fc7a95afb3cb68db4fd2be0ec8ae913ab8f77ba509a04632ba36563f25",
+    "backend/src/services/recoveryCoordinationState.ts": "d82ba189a66ecc42c27496c03e351da9e6f1c6d179296908a7db8b94564cf7b9",
+    "backend/src/services/recoveryOperationAdmission.ts": "9b9f4b9b00c1ab71f1c38d97379e4e5d9e08af0eebdcd9c4d089c9611f04b612",
+    "backend/src/services/httpRequestLifecycle.ts": "1867b8adff3179f75ef408bb1df37867fd7e7d016a0a3408704e4f73aceab899",
+    "backend/src/services/runtimeControlOwnership.ts": "504179c7e9b570b9d234ba5a2a39f96985efb592bbf84c45452fd44b0b900dfe",
+    "backend/src/services/runtimeLeasedWorkContext.ts": "2b888eaf836ef5cabf41b96199dc57ee3a5e7fb73b1d3a2f31d42325512ef8be"
+  },
+  "bundleSha256": "2ac0aba1ad8753f07667676b87b6655c42be8beefb9dd9af1bea6cd533f287d1",
+  "schemaSha256": "011850b27f6cb56b714050a0190da6d9e34af0a97ba3b4037d6e2cd271b5ba82",
+  "database": "qa_hr_erasure_673c2d5f75b40169dbf77eb314374a59",
+  "databaseOid": "20599467",
+  "status": 1,
+  "signal": null,
+  "stdout": "{\"nativeWorkAndDatabaseClosed\":true}\n",
+  "stderr": "Missing expected rejection.\n",
+  "failure": "",
+  "canonicalBefore": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  },
+  "isolatedDatabaseRetired": true
+}

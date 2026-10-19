@@ -9371,6 +9371,7 @@ model HrDeletionFileCleanup {
   stagedPath   String
   status       String   @default("PENDING")
   lastError    String?
+  versionedFileState Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

@@ -12,11 +12,17 @@ const staged = stagePlannedHiringFiles(planHiringFilesForDeletion(['evidence.pdf
 const actions: string[] = [];
 
 const tx = {
+  $executeRaw: async () => 0,
+  $queryRaw: async (sql: TemplateStringsArray | { strings: string[] }) => {
+    const query = (Array.isArray(sql) ? sql : (sql as { strings: string[] }).strings).join('');
+    return query.includes('FOR UPDATE') ? [{ id: 'receipt-1' }]
+      : query.includes('FROM public.hr_deletion_file_cleanups') ? staged.map(row => ({ ...row, status: 'PREPARING', legacyFileState: true })) : [];
+  },
   authSession: { updateMany: async () => { actions.push('sessions'); } },
   user: { updateMany: async () => { actions.push('user'); } },
   hrDeletionFileCleanup: { deleteMany: async () => { actions.push('cleanup'); } },
   hrDeletionReceipt: { updateMany: async ({ data }: { data: { status?: string } }) => {
-    actions.push(data.status ? `receipt:${data.status}` : 'renew');
+    actions.push(data.status === 'RECOVERING' ? 'claim' : data.status ? `receipt:${data.status}` : 'renew');
     return { count: 1 };
   } },
 };
@@ -32,7 +38,7 @@ const fakePrisma = {
     },
     update: async () => undefined,
   },
-  hrDeletionFileCleanup: { findMany: async () => staged },
+  hrDeletionFileCleanup: { findMany: async () => staged.map(row => ({ ...row, status: 'PREPARING' })) },
   $transaction: async (callback: (client: typeof tx) => Promise<void>) => callback(tx),
 } as unknown as PrismaClient;
 

@@ -132,6 +132,9 @@ export class VersionedFilePublication {
 
   ownsRoot(root: string) { return path.resolve(root) === this.liveRoot; }
 
+  /** Domain journals must retain this same admission through SQL and files. */
+  ownsWork(work: RuntimeWorkContext) { return work === this.work; }
+
   /** Bind existing private subdirectories to the same completion, capacity and
    * version owner. This grants a confined port, never release/root coverage.
    * No directories are created, no baseline is adopted and no caller can use

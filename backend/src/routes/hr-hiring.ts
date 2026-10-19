@@ -86,6 +86,7 @@ import {
   projectRecordRetentionCapabilities
 } from '../services/hrRecordRetentionPolicy';
 import { commitStagedHiringFiles, restoreStagedHiringFiles, stageHiringFilesForDeletion } from '../services/hrDeletionFileTransaction';
+import { retryDeletionReceiptFiles } from '../services/hrDeletionFileCleanup';
 import { latestDecisionsByKind } from '../services/hrApplicationDecisionVersions';
 import { normalizeHiringDocumentTitle } from '../services/hrHiringDocumentEvidence';
 import { assertHiringAuthorityMutationAllowed } from '../services/hrHiringAuthorityPolicy';
@@ -2344,18 +2345,11 @@ router.post('/applications/:id/permanent-delete', requireSystemAdmin, asyncHandl
 }));
 
 router.post('/deletion-receipts/:id/retry-files', requireSystemAdmin, asyncHandler(async (req: AuthRequest, res: Response) => {
-  const cleanupRows = await prisma.hrDeletionFileCleanup.findMany({ where: { receiptId: req.params.id }, orderBy: { createdAt: 'asc' } });
-  const failures: string[] = [];
-  for (const row of cleanupRows) {
-    const failed = commitStagedHiringFiles([{ storageName: row.storageName, originalPath: row.originalPath, stagedPath: row.stagedPath }]);
-    if (failed.length) {
-      failures.push(row.storageName);
-      await prisma.hrDeletionFileCleanup.update({ where: { id: row.id }, data: { status: 'FAILED', lastError: 'FILE_UNLINK_FAILED' } });
-    } else await prisma.hrDeletionFileCleanup.delete({ where: { id: row.id } });
-  }
-  const remaining = await prisma.hrDeletionFileCleanup.count({ where: { receiptId: req.params.id } });
-  const receipt = await prisma.hrDeletionReceipt.update({ where: { id: req.params.id }, data: { status: remaining ? 'FILE_CLEANUP_PENDING' : 'COMPLETED' } });
-  res.status(remaining ? 202 : 200).json({ success: !remaining, data: { receiptId: receipt.id, status: receipt.status, remaining }, error: failures.length ? 'پاک‌سازی برخی فایل‌ها دوباره ناموفق بود.' : undefined });
+  const result = await retryDeletionReceiptFiles(prisma, req.params.id);
+  res.status(result.remaining ? 202 : 200).json({ success: !result.remaining,
+    data: { receiptId: result.receiptId, status: result.status, remaining: result.remaining },
+    error: result.blocked ? 'پاک‌سازی این فایل‌ها نیازمند بررسی وضعیت عملیات و نسخه‌های نگهداری‌شده است.'
+      : result.failed ? 'پاک‌سازی برخی فایل‌ها دوباره ناموفق بود.' : undefined });
 }));
 
 router.post('/applications', requireActionPermission('MANAGE_RECRUITMENT_CASE'), asyncHandler(async (req: AuthRequest, res: Response) => {

@@ -1,0 +1,50 @@
+{
+  "format": "sabalan-hr-erasure-file-recovery-local/v1",
+  "suite": "predecessor",
+  "pass": false,
+  "productionAdmission": false,
+  "candidateBefore": null,
+  "sources": {
+    "scripts/run-hr-erasure-file-recovery-local.mjs": "b53e65688855d9d83687407b8f1879713ee6449bfb65c9d9cc5445af8fcf358b",
+    "backend/prisma/schema.prisma": "9518aeafe0e923d6f0945e82607133de9fab54a6c1a6c3ae5349047d63890827",
+    "backend/node_modules/.prisma/client/schema.prisma": "4152b763b7885d62abc0a447f5d8fab2f911ecfcfb9e35c6c947628a53e2a17a",
+    "backend/prisma/migrations/20261019020000_hr_versioned_file_cleanup/migration.sql": "cb25c720d02d37ad036c95583ef9ba1ba7856bcd483a62ef1c8e03930947b9a9",
+    "backend/src/services/hrVersionedFileCleanupExpansion.json": "0bed9ca608af543b5af27ff3bab52410a90d7cb2909cc889a99a860fa4ddde94",
+    "backend/src/services/__tests__/hrDeletionFileCleanupPredecessor.integration.test.ts": "5933e4b8ed52e543aeb61ae0c455c26ed62e44554ec7a0656d43ddb1fdc38837",
+    "backend/src/services/hrDeletionFileCleanup.ts": "b5b33faead984d6d627f4fe3c2dba52d829daccbfe440fe649260b4a8e1d3f97",
+    "backend/src/services/hrDeletionFileTransaction.ts": "50e2cf049f40f06297beabbceeb3bc8de9f8532243507983e8bc642fe5c30e81",
+    "backend/src/services/hrHiringFileStorage.ts": "371d13833470e02874a2010065739f34eb5df418015770c4ce52c7686190f56f"
+  },
+  "bundleSha256": "1789fadb2ecd3ea543341b3400d58869a97c8807d3258e206de203d888e8cab3",
+  "schemaSha256": "c43d7291d8863062939591d6dda562db43230c3568ee7728cb41649eafaa9413",
+  "database": "qa_hr_erasure_0d7faef84f2afe352c9e4aa2f5508918",
+  "databaseOid": "20682717",
+  "status": 1,
+  "signal": null,
+  "stdout": "TAP version 13\n# HR_ERASURE_TEST_DATABASE_CLIENT_CLOSED\n# Subtest: current generated client completes successful and failed raw cleanup on the real pre-column schema\nnot ok 1 - current generated client completes successful and failed raw cleanup on the real pre-column schema\n  ---\n  duration_ms: 191.9095\n  location: 'D:\\\\sabalanerp-online-qa\\\\hr-erasure-0d7faef84f2afe352c9e4aa2f5508918\\\\fixture.cjs:104:30'\n  failureType: 'testCodeFailure'\n  error: |-\n    \n    Invalid `tx.hrDeletionFileCleanup.delete()` invocation in\n    D:\\sabalanerp-online-qa\\hr-erasure-0d7faef84f2afe352c9e4aa2f5508918\\fixture.cjs:95:51\n    \n      92 if (failed.length) {\n      93   failures += 1;\n      94   await tx.hrDeletionFileCleanup.update({ where: { id: row.id }, data: { status: \"FAILED\", lastError: \"FILE_UNLINK_FAILED\" } });\n    → 95 } else await tx.hrDeletionFileCleanup.delete(\n    The column `hr_deletion_file_cleanups.versionedFileState` does not exist in the current database.\n  code: 'ERR_TEST_FAILURE'\n  stack: |-\n    $n.handleRequestError (C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\backend\\node_modules\\@prisma\\client\\runtime\\library.js:121:7315)\n    $n.handleAndLogRequestError (C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\backend\\node_modules\\@prisma\\client\\runtime\\library.js:121:6623)\n    $n.request (C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\backend\\node_modules\\@prisma\\client\\runtime\\library.js:121:6307)\n    async l (C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\backend\\node_modules\\@prisma\\client\\runtime\\library.js:130:9633)\n    async prisma.$transaction.isolationLevel (D:\\sabalanerp-online-qa\\hr-erasure-0d7faef84f2afe352c9e4aa2f5508918\\fixture.cjs:95:14)\n    async Proxy._transactionWithCallback (C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\backend\\node_modules\\@prisma\\client\\runtime\\library.js:130:8000)\n    async TestContext.<anonymous> (D:\\sabalanerp-online-qa\\hr-erasure-0d7faef84f2afe352c9e4aa2f5508918\\fixture.cjs:137:39)\n    async Test.run (node:internal/test_runner/test:932:9)\n    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)\n  ...\n1..1\n# tests 1\n# suites 0\n# pass 0\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 379.1665\n",
+  "stderr": "",
+  "failure": "",
+  "canonicalBefore": {
+    "backend": {
+      "id": "a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff",
+      "image": "sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c210ecf6f505",
+      "startedAt": "2026-10-15T09:01:40.016187222Z"
+    },
+    "frontend": {
+      "id": "ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21",
+      "image": "sha256:f0a8954596279ccb01c029de7316022daa109b711a297f716cc9367d4bc9ec53",
+      "startedAt": "2026-10-18T05:09:40.68305388Z"
+    },
+    "inquiry": {
+      "id": "6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8",
+      "image": "sha256:81eacc768f3c4b82bd0f0a01bef5600ae1321e87cb117bad49ca47dfba79a213",
+      "startedAt": "2026-10-12T15:17:49.463791361Z"
+    },
+    "postgres": {
+      "id": "e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528",
+      "image": "sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f",
+      "startedAt": "2026-10-12T15:17:49.481269377Z"
+    }
+  },
+  "isolatedDatabaseRetired": true
+}

@@ -107,7 +107,11 @@
     "prototype:shipment-statement-reconciliation": "node scripts/prototypes/shipment-statement-reconciliation/tui.mjs",
     "test:dispatch-document-pdfs:docker": "node scripts/run-dispatch-document-pdf-qa.mjs",
     "test:external-vehicle-operations": "npm --prefix backend run test:external-vehicle-operations && npm --prefix frontend run test:external-vehicle-operations && npm run test:hr-vehicle-operations",
-    "test:hr-vehicle-operations": "npm --prefix backend run test:hr-vehicle-operations && npm --prefix frontend run test:hr-vehicle-operations"
+    "test:hr-vehicle-operations": "npm --prefix backend run test:hr-vehicle-operations && npm --prefix frontend run test:hr-vehicle-operations",
+    "test:clamav-repair": "node --test tests/clamav-repair/health.test.mjs tests/clamav-repair/checkpoint.test.mjs tests/clamav-repair/readiness.test.mjs tests/clamav-repair/controller.test.mjs",
+    "test:clamav-repair:docker": "node --test tests/clamav-repair/updater-linux.test.mjs",
+    "test:clamav-repair:lifecycle:docker": "node --test tests/clamav-repair/lifecycle-linux.test.mjs",
+    "test:clamav-repair:restore:docker": "node --test tests/clamav-repair/restore-linux.test.mjs"
   },
   "keywords": [
     "erp",

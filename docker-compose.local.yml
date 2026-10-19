@@ -45,18 +45,22 @@ services:
     restart: unless-stopped
 
   clamav:
-    image: clamav/clamav:1.4
+    image: sabalanerp-clamav:repair-local
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: deploy/clamav/Dockerfile
     environment:
-      FRESHCLAM_CHECKS: "12"
+      CLAMAV_UPDATE_INTERVAL_SECONDS: "7200"
     volumes:
       - clamav_database:/var/lib/clamav
     healthcheck:
-      test: ["CMD-SHELL", "clamdscan --ping=1"]
+      test: ["CMD", "/usr/local/bin/sabalan-clamav-health"]
       interval: 15s
       timeout: 10s
-      retries: 40
+      retries: 3
       start_period: 5m
-    mem_limit: 2g
+    mem_limit: 3g
     cpus: 1
     logging: *local-logging
     restart: unless-stopped

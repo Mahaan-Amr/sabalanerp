@@ -12,3 +12,7 @@
 # Native operation receipts are hashed as received; retain their exact bytes.
 reports/qa/actual-image-customer-*.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 reports/qa/production-package-*-readonly-20261019.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/production-ledger-shape-readonly-20261019.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/both-host-storage-preflight-before-independent-decryption-728894fe64bf4364ab6837968eec46ae.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/both-host-storage-preflight-before-independent-decryption-07e93f9da0294af88f6312eb01537aca.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/both-host-storage-preflight-before-independent-decryption-feda6d2b6d17476f87d68fe149a59b0c.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

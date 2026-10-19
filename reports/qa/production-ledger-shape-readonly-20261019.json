@@ -1,0 +1,65 @@
+{
+  "readOnly": true,
+  "containerUnchanged": {
+    "id": "a0af8c1a830cc837401c085ea36d510eb1339fb97e5d977bef3b80c49700fb45",
+    "image": "sha256:5fe8ca7fc662071188c30271cb870d1ce9a6ec4578c934b064697ae77a9241e1",
+    "startedAt": "2026-09-29T10:40:34.784851921Z"
+  },
+  "configuration": {
+    "entities": 1,
+    "books": [
+      {
+        "id": "cmutt56460712yntysnwk3sl1",
+        "legalEntityId": "cmutt56450711ynty5tto4r61",
+        "isPrimary": true,
+        "baseCurrency": "IRR"
+      }
+    ],
+    "schemes": [
+      {
+        "bookId": "cmutt56460712yntysnwk3sl1",
+        "version": 1,
+        "groupLength": 2,
+        "kolLength": 2,
+        "moinLength": 2,
+        "retiredAt": null
+      }
+    ],
+    "groups": [
+      {
+        "bookId": "cmutt56460712yntysnwk3sl1",
+        "code": "11"
+      },
+      {
+        "bookId": "cmutt56460712yntysnwk3sl1",
+        "code": "21"
+      },
+      {
+        "bookId": "cmutt56460712yntysnwk3sl1",
+        "code": "41"
+      },
+      {
+        "bookId": "cmutt56460712yntysnwk3sl1",
+        "code": "51"
+      }
+    ],
+    "years": [
+      {
+        "bookId": "cmutt56460712yntysnwk3sl1",
+        "id": "cmuttj89g09olyntybzbckhx2",
+        "code": "05",
+        "startsAt": "2026-03-21T00:00:00",
+        "endsAt": "2027-03-20T23:59:59.999"
+      }
+    ],
+    "periods": [
+      {
+        "yearId": "cmuttj89g09olyntybzbckhx2",
+        "status": "OPEN",
+        "startsAt": "2026-03-21T00:00:00",
+        "endsAt": "2027-03-20T23:59:59.999"
+      }
+    ],
+    "rules": 1
+  }
+}

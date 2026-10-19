@@ -1,0 +1,12 @@
+{
+  "format": "sabalan-actual-image-closed-failed-validation/v1",
+  "operation": "actual-image-customer-d5b4216c094dd4a3805c5f41552e0e2c",
+  "originalReceiptSha256": "0d61065f3514549685e401ece0ec2bdef7c1759bd88a2bec78d7f4ece7bc3222",
+  "inputManifestSha256": "e2bc952b0c333f3bb8ec3750aedf6caff36d5ffff38c4e680e5cc5d27dedb8f9",
+  "closedAndDerivedRetired": true,
+  "financialScenarioPassed": true,
+  "componentPassed": false,
+  "allForeignIdentitiesUnchanged": false,
+  "productionAdmission": false,
+  "fullApplicationRestore": false
+}

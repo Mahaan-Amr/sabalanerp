@@ -52,7 +52,19 @@ async function main() {
     const sourceBefore = await sourceBusiness();
     assert.equal(sourceBefore[0].users, 30); assert.equal(sourceBefore[0].contracts, 761);
     assert.equal(await db.accountingLedgerVoucher.count(), 0);
-    const f = await fixture.customerFinanceData(db), id = await f.customer();
+    const configurationModels = ['accountingLegalEntity', 'accountingBook', 'accountingCodeScheme',
+      'accountingFiscalYear', 'accountingPostingPeriod', 'accountingLedgerAccount',
+      'accountingCustomerPostingRule', 'accountingFinancialAccount'];
+    const originalConfiguration = Object.fromEntries(await Promise.all(configurationModels.map(async model =>
+      [model, await db[model].findMany({ orderBy: { id: 'asc' } })])));
+    assert.equal(originalConfiguration.accountingLegalEntity.length, 1);
+    const verifyOriginalConfiguration = async () => {
+      for (const model of configurationModels) assert.deepEqual(await db[model].findMany({
+        where: { id: { in: originalConfiguration[model].map(row => row.id) } }, orderBy: { id: 'asc' },
+      }), originalConfiguration[model], `Original configured ledger changed: ${model}`);
+    };
+    const f = await fixture.customerFinanceData(db, { reuseConfiguredLedger: true }), id = await f.customer();
+    await verifyOriginalConfiguration();
     await workspace.recordCustomerAccountOperation(db, id, { ...f.common, kind: 'DEBIT', amountRials: 200n, idempotencyKey: randomUUID() });
     await workspace.recordCustomerAccountOperation(db, id, { ...f.common, kind: 'CREDIT', amountRials: 80n, idempotencyKey: randomUUID() });
     const read = () => workspace.readCustomerWorkspace(db, { id, asOf: new Date(), userId: f.actor.id });
@@ -100,6 +112,7 @@ async function main() {
     assert.equal((await read()).netBalanceRials, 10n);
     await assert.rejects(db.$queryRawUnsafe('SELECT public.sabalan_require_customer_source_shares()'), /CUSTOMER_SOURCE_SHARES_CLOSED/);
     assert.deepEqual(await sourceBusiness(), sourceBefore);
+    await verifyOriginalConfiguration();
     const modules = Object.fromEntries(Object.keys(require.cache).filter(file => file.startsWith('/app/dist/'))
       .sort().map(file => [file, sha(fs.readFileSync(file))]));
     assert.ok(Object.hasOwn(modules, '/app/dist/services/accountingCustomerWorkspace.js'));
@@ -112,7 +125,8 @@ async function main() {
       generatedSchemaSha256: sha(schema), oldSchemaTokensSha256: sha(tokens(schema)), prismaVersion: Prisma.prismaVersion,
       predecessorMigrations: 427, finalMigrations: 435, predecessorHistoryRows: 428, finalHistoryRows: 436,
       retainedHistorySha256, retainedHistoryPreserved: true, financialSnapshotsPreserved: true, legacyReceiptRetryPreserved: true,
-      originalUsersAndContractsPreserved: true, fullApplicationRestore: false, productionAdmission: false }));
+      originalUsersAndContractsPreserved: true, originalLedgerConfigurationPreserved: true,
+      fullApplicationRestore: false, productionAdmission: false }));
   } finally {
     try { await db?.$disconnect(); } finally {
       if (fixture) await fixture.disconnectDatabase();

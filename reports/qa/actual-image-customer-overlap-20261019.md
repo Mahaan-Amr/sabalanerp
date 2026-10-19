@@ -193,6 +193,42 @@ user-only credential file removed in `finally`; no secret enters these artifacts
 
 ## Remaining acceptance
 
+Fresh attempt `d5b4216c094dd4a3805c5f41552e0e2c` also passed the same financial
+scenario and original configuration checks, native/SQL closure and exact derived
+retirement. Its ambient comparison changed 17 to 18, adding another object with
+the same foreign QA image. Overall acceptance remains **failed**, with the raw
+receipt and closed-failed validation retained. No further identical rerun is
+justified while unrelated QA changes the ambient fleet; independent local
+implementation can proceed without altering that workload or comparison gate.
+
+Replacement `31c1b5e481f4ecef93594cb1db91c91a` completed the actual-image
+financial scenario with backend exit zero, all eight original configuration
+models preserved, native/SQL closure and exact derived retirement. Whole
+component acceptance remains **failed**: foreign running identities changed
+18 to 17. A read-only Docker event query identifies the missing object as
+`fintech-qa`'s `fintech-lab:kraken-candidate` test container, which exited zero
+and was destroyed at Unix time 1792384598. This diagnosis does not waive the
+original ambient gate or authorize changing the foreign project. A fresh
+attempt must independently pass the unchanged gate.
+
+Attempt `e75c41429d29f628e3c5dc93a105b968` executed the original native image,
+but its fixture incorrectly tried to configure an already configured restored
+ledger (`LEDGER_ALREADY_CONFIGURED`). It failed; original native/SQL closure and
+exact derived retirement succeeded. The foreign identity comparison also failed
+and remains a separate failed gate. No acceptance or healthy point was issued.
+
+The replacement fixture opts into configured-ledger reuse only for an isolated
+`qa_customer_expansion_<32hex>` database. It discovers the original IRR primary
+book, active code scheme and single open period containing the test date. It
+allocates unused synthetic group codes using that scheme's actual lengths;
+unsupported configuration fails without reconfiguration. Existing rows across
+legal entities, books, code schemes, years, periods, ledger accounts, posting
+rules and financial accounts must remain byte-value equivalent both after
+fixture creation and after financial operations and migrations. The verifier
+requires `originalLedgerConfigurationPreserved` explicitly. A configured 2/2/2
+predecessor locally reproduced the old setup failure, then passed the repaired
+financial expansion scenario; the stricter all-configuration check is rerun.
+
 This does not start the whole application, authenticate browser forms, qualify
 every financial stratum, grant a production expansion executor, retire old writers,
 activate new semantics, establish continuous WAL/files/SQLite/privacy coverage,

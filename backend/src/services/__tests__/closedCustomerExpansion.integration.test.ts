@@ -7,6 +7,7 @@ import test from 'node:test';
 import { PrismaClient } from '@prisma/client';
 import { compileClosedCustomerExpansion, compileActualImageClosedCustomerExpansion } from '../closedCustomerExpansion';
 import { customerFinanceData } from './customerFinanceFixture';
+import { createAccountingLedgerAdministration } from '../accountingLedgerAdministration';
 import { disconnectDatabase } from '../../lib/prisma';
 import { readCustomerWorkspace, recordCustomerWorkspaceTreasury } from '../accountingCustomerWorkspace';
 
@@ -61,7 +62,32 @@ test('populated predecessor keeps acknowledged financial writes when late expans
       }), /CUSTOMER_EXPANSION_HISTORY_UNPROVEN/);
       assert.deepEqual(await retainedSnapshot(), originalRetained);
     }
-    const f = await customerFinanceData(old), id = await f.customer();
+    const administration = createAccountingLedgerAdministration(old);
+    const configured = await administration.setup({ legalEntity: { code: 'configured-predecessor', namePersian: 'پیکربندی موجود',
+      activeFrom: new Date('2026-03-21') }, book: { code: 'primary', namePersian: 'دفتر موجود' },
+      scheme: { groupLength: 2, kolLength: 2, moinLength: 2 }, actorId: 'configured-fixture' });
+    const configuredBook = configured.books[0];
+    await administration.createFiscalYear({ bookId: configuredBook.id, code: '05', titlePersian: 'سال موجود', actorId: 'configured-fixture',
+      startsAt: new Date('2026-03-21'), endsAt: new Date('2027-03-20T23:59:59.999Z'),
+      periods: [{ code: '1', titlePersian: 'دوره موجود', sequence: 1, isAdjustment: false,
+        startsAt: new Date('2026-03-21'), endsAt: new Date('2027-03-20T23:59:59.999Z') }] });
+    for (const code of ['11', '21', '41', '51']) await administration.createAccount({ bookId: configuredBook.id,
+      codeSchemeId: configuredBook.codeSchemes[0].id, code, titlePersian: 'گروه موجود', normalSide: 'DEBIT', statementRole: 'ASSET',
+      currencyBehavior: 'BASE_ONLY', effectiveFrom: new Date('2026-03-21'), actorId: 'configured-fixture', level: 'GROUP' });
+    const configurationModels = ['accountingLegalEntity', 'accountingBook', 'accountingCodeScheme',
+      'accountingFiscalYear', 'accountingPostingPeriod', 'accountingLedgerAccount',
+      'accountingCustomerPostingRule', 'accountingFinancialAccount'];
+    const originalConfiguration = Object.fromEntries(await Promise.all(configurationModels.map(async model =>
+      [model, await old[model].findMany({ orderBy: { id: 'asc' } })])));
+    const verifyOriginalConfiguration = async () => {
+      for (const model of configurationModels) assert.deepEqual(await old[model].findMany({
+        where: { id: { in: originalConfiguration[model].map((row: any) => row.id) } }, orderBy: { id: 'asc' },
+      }), originalConfiguration[model], `Original configured ledger changed: ${model}`);
+    };
+    const f = await customerFinanceData(old, { reuseConfiguredLedger: true }), id = await f.customer();
+    assert.equal(f.book.id, configuredBook.id);
+    assert.equal(f.book.codeSchemes[0].id, configuredBook.codeSchemes[0].id);
+    await verifyOriginalConfiguration();
     await previous.recordCustomerAccountOperation(old, id, { ...f.common, kind: 'DEBIT', amountRials: 200n, idempotencyKey: randomUUID() });
     await previous.recordCustomerAccountOperation(old, id, { ...f.common, kind: 'CREDIT', amountRials: 80n, idempotencyKey: randomUUID() });
     const read = () => previous.readCustomerWorkspace(old, { id, asOf: new Date(), userId: f.actor.id });
@@ -125,6 +151,7 @@ test('populated predecessor keeps acknowledged financial writes when late expans
     const saved = await previous.recordCustomerWorkspaceTreasury(old, id, additional);
     assert.equal((await previous.recordCustomerWorkspaceTreasury(old, id, additional)).id, saved.id);
     assert.equal((await read()).netBalanceRials, 10n);
+    await verifyOriginalConfiguration();
     console.log(JSON.stringify({ populatedClosedExpansionPassed: true, predecessorMigrations: 427, finalMigrations: 435,
       predecessorHistoryRows: retainedFile ? 428 : 427, finalHistoryRows: retainedFile ? 436 : 435,
       retainedHistoryPreserved: !!retainedFile, actualImageInfrastructureQualified: !!process.env.CLOSED_CUSTOMER_INFRASTRUCTURE_SQL,

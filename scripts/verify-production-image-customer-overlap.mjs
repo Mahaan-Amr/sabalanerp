@@ -44,7 +44,7 @@ assert.equal(actual.predecessorMigrations, 427); assert.equal(actual.finalMigrat
 assert.equal(actual.predecessorHistoryRows, 428); assert.equal(actual.finalHistoryRows, 436);
 assert.equal(actual.retainedHistorySha256, '7e095386a618dda9ac3d2491772f5c473e91dc97fe4f12eb19a1b0004addefe2');
 assert.equal(actual.retainedHistoryPreserved, true);
-for (const key of ['financialSnapshotsPreserved', 'legacyReceiptRetryPreserved', 'originalUsersAndContractsPreserved']) assert.equal(actual[key], true);
+for (const key of ['financialSnapshotsPreserved', 'legacyReceiptRetryPreserved', 'originalUsersAndContractsPreserved', 'originalLedgerConfigurationPreserved']) assert.equal(actual[key], true);
 assert.equal(actual.productionAdmission, false); assert.equal(actual.fullApplicationRestore, false);
 assert.ok(Object.hasOwn(actual.modules, '/app/dist/services/accountingCustomerWorkspace.js'));
 for (const [name, hash] of Object.entries(actual.modules)) {

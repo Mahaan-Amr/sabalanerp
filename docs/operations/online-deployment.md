@@ -120,8 +120,13 @@ production routes. See [empty-plan ownership evidence](../../reports/qa/hr-empty
 Private legacy-file baseline adoption now has seven native acceptance cases,
 including actual interrupted-owner death. It does not activate ordinary writers
 or certify privacy/controller coverage. See [baseline evidence](../../reports/qa/versioned-file-legacy-20261018.md).
-Earlier 434-migration financial and concurrent migration tests also passed;
-actual production-425 overlap remains unproven. See [financial evidence](../../reports/qa/current-accounting-and-migration-20261018.md).
+Earlier 434-migration financial and concurrent migration tests also passed.
+Two private restored-copy attempts now passed the financial scenario using the
+actual immutable production image and its original client, preserving original
+configured-ledger rows and retained history. Both attempts failed their separate
+ambient fleet comparison, so whole-component acceptance and production admission
+remain closed. See [actual-image evidence](../../reports/qa/actual-image-customer-overlap-20261019.md)
+and [earlier financial evidence](../../reports/qa/current-accounting-and-migration-20261018.md).
 An exact old production schema model regenerated for a local diagnostic now
 demonstrably fails to read a real new credit-funded allocation. Retirement and a
 reader-compatible rollback predecessor are therefore required before enabling

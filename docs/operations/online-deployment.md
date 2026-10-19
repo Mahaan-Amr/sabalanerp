@@ -249,3 +249,11 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   authority. The genuine protected expansion owner, actual image/fleet overlap,
   full financial strata and recovery/browser gates remain pending. See
   [populated rehearsal evidence](../../reports/qa/closed-customer-expansion-20261019.md).
+
+The private actual-image rehearsal additionally distinguishes successful native
+migrations from retained historical attempts: the measured source has 425
+successful rows and one rolled-back row. Its separate compiler requires that
+exact complete retained-row hash and the exact successful prefix, preserving
+all history through 427/428 to 435/436 (successful/total). This is no production
+history adoption, and does not widen bootstrap, bridge or online admission.
+See [actual-image qualification](../../reports/qa/actual-image-customer-overlap-20261019.md).

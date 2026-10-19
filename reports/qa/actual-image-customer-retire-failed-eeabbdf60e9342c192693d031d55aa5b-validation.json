@@ -1,0 +1,12 @@
+{
+  "format": "sabalan-closed-failed-retirement-validation/v1",
+  "cleanupPassed": true,
+  "originalComponentPassed": false,
+  "operation": "actual-image-customer-retire-failed-eeabbdf60e9342c192693d031d55aa5b",
+  "reviewManifestSha256": "53f7255a3e0763c2825029d1ae86aaa6ee2e409975f0651361f5e4e92bf589df",
+  "receiptSha256": "0e34d15393a6b49e3b767d55e1a2b32db7a7c16e792447c66beb397e8fe7aa47",
+  "remoteEnvelopeSha256": "64fbcc625b11622ef685beed6128cd2b920ed74c3ccc1e1e2060cea30f9b6c41",
+  "logicalBytesRetired": 772656485,
+  "productionAdmission": false,
+  "healthyRecoveryPoint": false
+}

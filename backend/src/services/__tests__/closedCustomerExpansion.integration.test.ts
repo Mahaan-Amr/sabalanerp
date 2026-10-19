@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { PrismaClient } from '@prisma/client';
-import { compileClosedCustomerExpansion } from '../closedCustomerExpansion';
+import { compileClosedCustomerExpansion, compileActualImageClosedCustomerExpansion } from '../closedCustomerExpansion';
 import { customerFinanceData } from './customerFinanceFixture';
 import { disconnectDatabase } from '../../lib/prisma';
 import { readCustomerWorkspace, recordCustomerWorkspaceTreasury } from '../accountingCustomerWorkspace';
@@ -21,10 +21,46 @@ test('populated predecessor keeps acknowledged financial writes when late expans
     const previous = require(process.env.CLOSED_CUSTOMER_OLD_WORKSPACE_BUNDLE!);
     const files: Array<{ name: string; bytes: Buffer }> = JSON.parse(fs.readFileSync(process.env.CLOSED_CUSTOMER_EXPANSION_INPUT!, 'utf8'))
       .map((row: { name: string; file: string }) => ({ name: row.name, bytes: fs.readFileSync(row.file) }));
-    const program = compileClosedCustomerExpansion(files);
+    const retainedFile = process.env.CLOSED_CUSTOMER_RETAINED_HISTORY_FILE;
+    const program = retainedFile ? compileActualImageClosedCustomerExpansion(files) : compileClosedCustomerExpansion(files);
     old = new oldModule.PrismaClient({ datasources: { db: { url: url.href } } });
     db = new PrismaClient();
-    assert.equal(await old.$queryRawUnsafe('SELECT count(*)::integer AS count FROM public._prisma_migrations').then((rows: any) => rows[0].count), 427);
+    if (retainedFile) {
+      const measured = JSON.parse(fs.readFileSync(retainedFile, 'utf8')).rows[0];
+      assert.equal(measured.rowSha256, '7e095386a618dda9ac3d2491772f5c473e91dc97fe4f12eb19a1b0004addefe2');
+      await old.$executeRawUnsafe(`INSERT INTO public._prisma_migrations SELECT * FROM jsonb_populate_record(NULL::public._prisma_migrations,$1::jsonb)`, JSON.stringify(measured.privateRow));
+    }
+    if (process.env.CLOSED_CUSTOMER_INFRASTRUCTURE_SQL) {
+      const sql = fs.readFileSync(process.env.CLOSED_CUSTOMER_INFRASTRUCTURE_SQL, 'utf8');
+      await assert.rejects(old.$transaction(async (tx: any) => {
+        await tx.$executeRawUnsafe(`UPDATE public._prisma_migrations SET logs=coalesce(logs,'')||'tampered' WHERE rolled_back_at IS NOT NULL`);
+        await tx.$executeRawUnsafe(sql);
+      }), /ACTUAL_IMAGE_PRIVATE_PREDECESSOR_UNPROVEN/);
+      await assert.rejects(old.$transaction(async (tx: any) => {
+        await tx.$executeRawUnsafe(`INSERT INTO public._prisma_migrations SELECT 'qa-unknown-retired-row',checksum,finished_at,migration_name,logs,rolled_back_at,started_at,applied_steps_count
+          FROM public._prisma_migrations WHERE rolled_back_at IS NOT NULL`);
+        await tx.$executeRawUnsafe(sql);
+      }), /ACTUAL_IMAGE_PRIVATE_PREDECESSOR_UNPROVEN/);
+      await old.$executeRawUnsafe(sql);
+    }
+    const history = () => old.$queryRawUnsafe(`SELECT count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL)::integer AS active,
+      count(*)::integer AS total FROM public._prisma_migrations`);
+    const retainedSnapshot = () => old.$queryRawUnsafe(`SELECT to_jsonb(m)::text AS row FROM public._prisma_migrations m WHERE rolled_back_at IS NOT NULL ORDER BY id`);
+    const originalRetained = await retainedSnapshot();
+    assert.deepEqual(await history(), [{ active: 427, total: retainedFile ? 428 : 427 }]);
+    if (retainedFile) {
+      await assert.rejects(old.$executeRawUnsafe(compileClosedCustomerExpansion(files).sql), /CUSTOMER_EXPANSION_HISTORY_UNPROVEN/);
+      await assert.rejects(old.$transaction(async (tx: any) => {
+        await tx.$executeRawUnsafe(`UPDATE public._prisma_migrations SET logs=coalesce(logs,'')||'tampered' WHERE rolled_back_at IS NOT NULL`);
+        await tx.$executeRawUnsafe(program.sql);
+      }), /CUSTOMER_EXPANSION_HISTORY_UNPROVEN/);
+      await assert.rejects(old.$transaction(async (tx: any) => {
+        await tx.$executeRawUnsafe(`INSERT INTO public._prisma_migrations SELECT 'qa-unknown-incomplete-row',checksum,NULL,migration_name,NULL,NULL,started_at,0
+          FROM public._prisma_migrations WHERE rolled_back_at IS NOT NULL`);
+        await tx.$executeRawUnsafe(program.sql);
+      }), /CUSTOMER_EXPANSION_HISTORY_UNPROVEN/);
+      assert.deepEqual(await retainedSnapshot(), originalRetained);
+    }
     const f = await customerFinanceData(old), id = await f.customer();
     await previous.recordCustomerAccountOperation(old, id, { ...f.common, kind: 'DEBIT', amountRials: 200n, idempotencyKey: randomUUID() });
     await previous.recordCustomerAccountOperation(old, id, { ...f.common, kind: 'CREDIT', amountRials: 80n, idempotencyKey: randomUUID() });
@@ -78,7 +114,8 @@ test('populated predecessor keeps acknowledged financial writes when late expans
     assert.equal(await snapshot(), acknowledged);
     assert.equal((await read()).netBalanceRials, 20n);
     assert.equal((await readCustomerWorkspace(db!, { id, asOf: new Date(), userId: f.actor.id })).netBalanceRials, 20n);
-    assert.equal(await old.$queryRawUnsafe('SELECT count(*)::integer AS count FROM public._prisma_migrations').then((rows: any) => rows[0].count), 435);
+    assert.deepEqual(await history(), [{ active: 435, total: retainedFile ? 436 : 435 }]);
+    assert.deepEqual(await retainedSnapshot(), originalRetained);
     await assert.rejects(old.$executeRawUnsafe(program.sql), /CUSTOMER_EXPANSION_HISTORY_UNPROVEN/);
     await assert.rejects(recordCustomerWorkspaceTreasury(db!, id, { ...f.common, kind: 'ALLOCATION', amountRials: 0n,
       creditItemId: credit.id, allocations: [{ openItemId: debt.id, amountRials: 1n }], idempotencyKey: randomUUID() }),
@@ -89,6 +126,8 @@ test('populated predecessor keeps acknowledged financial writes when late expans
     assert.equal((await previous.recordCustomerWorkspaceTreasury(old, id, additional)).id, saved.id);
     assert.equal((await read()).netBalanceRials, 10n);
     console.log(JSON.stringify({ populatedClosedExpansionPassed: true, predecessorMigrations: 427, finalMigrations: 435,
+      predecessorHistoryRows: retainedFile ? 428 : 427, finalHistoryRows: retainedFile ? 436 : 435,
+      retainedHistoryPreserved: !!retainedFile, actualImageInfrastructureQualified: !!process.env.CLOSED_CUSTOMER_INFRASTRUCTURE_SQL,
       actualProductionImage: false, productionAdmission: false }));
   } finally {
     try { await old?.$disconnect(); } finally { try { await db?.$disconnect(); } finally { await disconnectDatabase(); } }

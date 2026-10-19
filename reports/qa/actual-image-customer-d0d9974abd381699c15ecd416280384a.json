@@ -1,0 +1,6 @@
+{
+  "sshExitCode": 1,
+  "remoteEnvelopeSha256": "357bcaf042853d945fdee84086ee48801f8d88acb6a4f2fdb38b07cbca97e4e7",
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 223, in <module>\n  File \"<stdin>\", line 48, in require\nRuntimeError: RESTORE_MEMORY_INSUFFICIENT\n"
+}

@@ -1,0 +1,18 @@
+{
+  "format": "sabalan-retained-native-history-identity/v1",
+  "rows": [
+    {
+      "id": "aa08a506-74bf-40e1-90b8-e56e150c57dd",
+      "name": "20260720000100_security_report_attendance_operations",
+      "steps": 0,
+      "checksum": "c40418f65f4441f7fce8acfa4a229bc5667da6f9ce598b83fdd0d798f24c89bd",
+      "rowSha256": "7e095386a618dda9ac3d2491772f5c473e91dc97fe4f12eb19a1b0004addefe2",
+      "startedAt": "2026-07-20T12:33:59.555184+00:00",
+      "finishedAt": null,
+      "rolledBackAt": "2026-07-21T05:57:47.750789+00:00"
+    }
+  ],
+  "readOnly": true,
+  "sourceHost": "primary",
+  "productionAdmission": false
+}

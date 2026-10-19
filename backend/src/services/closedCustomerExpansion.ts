@@ -23,6 +23,10 @@ const fail = (): never => { throw new Error('CUSTOMER_EXPANSION_SOURCE_UNPROVEN'
  * All eight files and their test-only history receipts commit as one statement.
  */
 export function compileClosedCustomerExpansion(files: readonly { name: string; bytes: Buffer }[]) {
+  return compile(files, false);
+}
+
+function compile(files: readonly { name: string; bytes: Buffer }[], actualImage: boolean) {
   if (!Array.isArray(files) || files.length !== definitions.length || baseline.migrations.length !== 425) fail();
   const bodies = files.map((file, index) => {
     const expected = definitions[index];
@@ -60,9 +64,15 @@ BEGIN
     RAISE EXCEPTION 'CUSTOMER_EXPANSION_ALREADY_RUNNING' USING ERRCODE='55000';
   END IF;
   LOCK TABLE public._prisma_migrations IN SHARE ROW EXCLUSIVE MODE;
-  IF (SELECT count(*) FROM public._prisma_migrations) <> 427 OR EXISTS (
+  ${actualImage ? `PERFORM set_config('TimeZone','UTC',true);
+  PERFORM set_config('DateStyle','ISO, YMD',true);
+  IF (SELECT count(*) FROM public._prisma_migrations m WHERE finished_at IS NULL AND rolled_back_at IS NOT NULL
+    AND encode(sha256(convert_to(to_jsonb(m)::text,'UTF8')),'hex')='7e095386a618dda9ac3d2491772f5c473e91dc97fe4f12eb19a1b0004addefe2') <> 1 THEN
+    RAISE EXCEPTION 'CUSTOMER_EXPANSION_HISTORY_UNPROVEN' USING ERRCODE='55000';
+  END IF;` : ''}
+  IF (SELECT count(*) FROM public._prisma_migrations) <> ${actualImage ? 428 : 427} OR EXISTS (
     SELECT 1 FROM (VALUES ${expectedHistory}) AS expected(name,checksum)
-    FULL JOIN public._prisma_migrations AS actual ON actual.migration_name=expected.name
+    FULL JOIN (SELECT * FROM public._prisma_migrations ${actualImage ? 'WHERE rolled_back_at IS NULL' : ''}) AS actual ON actual.migration_name=expected.name
     WHERE actual.id IS NULL OR expected.name IS NULL OR actual.checksum<>expected.checksum
       OR actual.finished_at IS NULL OR actual.rolled_back_at IS NOT NULL
   ) THEN
@@ -81,4 +91,9 @@ BEGIN
 END
 $closed_customer_expansion$;`;
   return Object.freeze({ sql, migrations: definitions, productionAdmission: false as const });
+}
+
+/** Actual-image private rehearsal; preserves the measured native retired row. */
+export function compileActualImageClosedCustomerExpansion(files: readonly { name: string; bytes: Buffer }[]) {
+  return compile(files, true);
 }

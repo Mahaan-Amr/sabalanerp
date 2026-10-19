@@ -1,0 +1,12 @@
+{
+  "format": "sabalan-actual-image-closed-failed-validation/v1",
+  "closurePassed": true,
+  "actualImageQualificationPassed": false,
+  "foreignComparisonPassed": false,
+  "operation": "actual-image-customer-f33854f2d68ee1a1f709d1759bac9db8",
+  "reviewManifestSha256": "4c7ff8fa96df249c4ca411e6a23eefc23b75e8cfa8115cb3a759fd78fc8ef9e0",
+  "receiptSha256": "449957187a038ac97a5b97db25f232e9aec2f3b7f2b59fd8d77e8ae4649c4c7e",
+  "remoteEnvelopeSha256": "dc04cadd6ea118215117d40afcb50c248b6bf584d3bf63a74f0008d0d48a8c98",
+  "productionAdmission": false,
+  "healthyRecoveryPoint": false
+}

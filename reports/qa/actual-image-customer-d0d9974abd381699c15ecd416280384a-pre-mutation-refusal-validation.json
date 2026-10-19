@@ -1,0 +1,12 @@
+{
+  "format": "sabalan-actual-image-pre-mutation-refusal/v1",
+  "operation": "actual-image-customer-d0d9974abd381699c15ecd416280384a",
+  "refusal": "RESTORE_MEMORY_INSUFFICIENT",
+  "privateMutationAdmitted": false,
+  "actualImageQualificationPassed": false,
+  "reviewManifestSha256": "47dcc1df045e4617aa398e691e3e9fc60338e302f1d7d6062143ed2c409eade9",
+  "receiptSha256": "4aecab2c3d0d10700105f49634a2709a213f66d0f7281200b54b78479bbb72f4",
+  "remoteEnvelopeSha256": "357bcaf042853d945fdee84086ee48801f8d88acb6a4f2fdb38b07cbca97e4e7",
+  "productionAdmission": false,
+  "healthyRecoveryPoint": false
+}

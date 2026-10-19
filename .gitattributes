@@ -8,3 +8,7 @@
 *.md text working-tree-encoding=UTF-8
 *.css text working-tree-encoding=UTF-8
 *.sh text eol=lf working-tree-encoding=UTF-8
+
+# Native operation receipts are hashed as received; retain their exact bytes.
+reports/qa/actual-image-customer-*.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/production-package-*-readonly-20261019.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

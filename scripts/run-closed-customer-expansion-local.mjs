@@ -18,12 +18,24 @@ assert.equal(baseline.migrations.length, 425);
 capture('scripts/run-closed-customer-expansion-local.mjs');
 const staging = path.join('D:/sabalanerp-online-qa', 'closed-customer-expansion-' + randomBytes(16).toString('hex'));
 fs.mkdirSync(staging, { mode: 0o700 }); fs.mkdirSync(path.join(staging, 'migrations'));
+let actualImageManifestSha256, infrastructureSql;
+if (process.env.CLOSED_CUSTOMER_ACTUAL_IMAGE_MANIFEST) {
+  assert.ok(process.env.CLOSED_CUSTOMER_RETAINED_HISTORY_FILE);
+  const bytes = fs.readFileSync(process.env.CLOSED_CUSTOMER_ACTUAL_IMAGE_MANIFEST), manifest = JSON.parse(bytes);
+  assert.equal(manifest.format, 'sabalan-actual-image-customer-input/v1');
+  for (const [name, hash] of Object.entries(manifest.sources)) assert.equal(sha(fs.readFileSync(path.join(root, name))), hash);
+  const sql = fs.readFileSync(path.join(manifest.destination, 'qa-infrastructure.sql'));
+  assert.equal(sha(sql), manifest.files['qa-infrastructure.sql'].sha256);
+  actualImageManifestSha256 = sha(bytes); infrastructureSql = path.join(staging, 'qa-infrastructure.sql');
+  fs.writeFileSync(infrastructureSql, sql, { flag: 'wx' });
+}
 const prior = [...baseline.migrations,
   { name: '20261014120000_hr_vehicle_assignment_plans', sha256: 'c0dea142d206b5538fd81c98961aaf86926c999cdd8fb722e0aab3d72ab23289' },
   { name: '20261014140000_online_deployment_control', sha256: '872f0f0858473546cee56b836fa64c95d668997304ae462ac2c18428e69f4cb2' }];
 for (const row of prior) {
   const bytes = capture(`backend/prisma/migrations/${row.name}/migration.sql`);
   assert.equal(sha(bytes), row.sha256);
+  if (infrastructureSql && prior.indexOf(row) >= 425) continue;
   fs.mkdirSync(path.join(staging, 'migrations', row.name));
   fs.writeFileSync(path.join(staging, 'migrations', row.name, 'migration.sql'), bytes, { flag: 'wx' });
 }
@@ -117,6 +129,7 @@ url.searchParams.set('application_name', 'closed-expansion-' + randomBytes(8).to
 const childEnv = { ...process.env, NODE_ENV: 'test', DATABASE_URL: url.href,
   NODE_PATH: [path.join(root, 'backend/node_modules'), path.join(root, 'packages/contract-product-graph/node_modules')].join(path.delimiter),
   CLOSED_CUSTOMER_EXPANSION_LOCAL_ACCEPTANCE: '1', CLOSED_CUSTOMER_EXPANSION_INPUT: input,
+  ...(infrastructureSql ? { CLOSED_CUSTOMER_INFRASTRUCTURE_SQL: infrastructureSql } : {}),
   CUSTOMER_SEMANTIC_OLD_CLIENT_DIRECTORY: oldClient, CLOSED_CUSTOMER_OLD_WORKSPACE_BUNDLE: oldBundle.file };
 const migrated = spawnSync(process.execPath, [path.join(root, 'backend/node_modules/prisma/build/index.js'), 'migrate', 'deploy', '--schema', path.join(staging, 'schema.prisma')],
   { cwd: root, env: childEnv, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
@@ -128,6 +141,7 @@ const redact = value => [url.href, env.POSTGRES_PASSWORD, url.password, encodeUR
 const receipt = process => process ? { status: process.status, signal: process.signal, stdout: redact(process.stdout), stderr: redact(process.stderr) } : null;
 const report = { format: 'sabalan-closed-customer-expansion-local/v1', pass: false, productionAdmission: false,
   actualProductionImage: false, oldSourceCommit: commit, sources, historicalSources, oldBundle, fixture,
+  actualImageManifestSha256,
   database, databaseOid, canonicalBefore: before, migration: receipt(migrated), acceptance: receipt(tested), isolatedDatabaseRetired: false };
 const reportPath = path.join(root, 'reports/qa/closed-customer-expansion-' + randomBytes(16).toString('hex') + '.json');
 const save = () => fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n'); save();

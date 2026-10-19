@@ -1,7 +1,7 @@
 import express, { type NextFunction, type Response } from 'express';
 import crypto from 'crypto';
 import path from 'path';
-import { createDurableUpload } from '../services/durableUpload';
+import { createHrHiringUpload } from '../services/hrFileRuntime';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { protect, type AuthRequest } from '../middleware/auth';
@@ -35,7 +35,7 @@ import { parseCollateralReceiptDate } from '../services/hrCollateralReceiptDate'
 import { ensureCandidatePersonnelIdentityConsistent } from '../services/hrCandidatePersonnelIdentityConflict';
 
 const router = express.Router();
-const hiringFinanceUpload = createDurableUpload({
+const hiringFinanceUpload = createHrHiringUpload({
   storage: {
     destination: (_req, _file, callback) => callback(null, HR_HIRING_STORAGE_DIR),
     filename: (_req, file, callback) => callback(null, `${Date.now()}-${crypto.randomBytes(16).toString('hex')}${path.extname(file.originalname).toLowerCase()}`),

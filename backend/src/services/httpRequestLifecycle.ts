@@ -20,12 +20,16 @@ export class HttpRequestLifecycle {
   constructor(private readonly canAdmitWrite: () => boolean = () => true,
     private acquireOwnership?: (request: Request) => Promise<RequestOwnership>) {}
 
+  assertBeforeFirstRequest() {
+    if (this.observedRequest) throw new Error('HTTP_OWNERSHIP_ALREADY_OBSERVED');
+  }
+
   /** Bind the same lifecycle already captured by uploads/audit routes.
    * Binding is startup-only and cannot replace ownership or promote a runtime
    * after even a probe has been served. There is no unbind/reset path. */
   bindOwnership(acquire: (request: Request) => Promise<RequestOwnership>) {
     if (this.acquireOwnership) throw new Error('HTTP_OWNERSHIP_ALREADY_BOUND');
-    if (this.observedRequest) throw new Error('HTTP_OWNERSHIP_ALREADY_OBSERVED');
+    this.assertBeforeFirstRequest();
     if (typeof acquire !== 'function') throw new Error('HTTP_OWNERSHIP_BINDING_INVALID');
     this.acquireOwnership = acquire;
   }

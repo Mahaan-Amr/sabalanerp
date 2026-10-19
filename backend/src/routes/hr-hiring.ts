@@ -6,7 +6,8 @@ import express, { NextFunction, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import multer from 'multer';
-import { createDurableUpload } from '../services/durableUpload';
+import { createHrHiringUpload, versionedHrFileRuntime } from '../services/hrFileRuntime';
+import { eraseVersionedJobApplication } from '../services/hrVersionedJobApplicationErasure';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
 import hrHiringSmsGateway from '../services/hrHiringSmsGateway';
@@ -177,7 +178,7 @@ const assertFormalAssessmentEvidenceComplete = async (applicationId: string, cli
   return state;
 };
 
-const upload = createDurableUpload({
+const upload = createHrHiringUpload({
   storage: {
     destination: (_req, _file, cb) => cb(null, HR_HIRING_STORAGE_DIR),
     filename: (_req, file, cb) => cb(null, `${Date.now()}-${crypto.randomBytes(16).toString('hex')}${path.extname(file.originalname).toLowerCase()}`)
@@ -2302,6 +2303,19 @@ router.post('/applications/:id/permanent-delete', requireSystemAdmin, asyncHandl
     reason: req.body.reason,
     confirmed: req.body.confirmed
   });
+  const fileRuntime = versionedHrFileRuntime();
+  if (fileRuntime) {
+    const result = await eraseVersionedJobApplication({ database: prisma, work: fileRuntime.boundary.context,
+      publication: fileRuntime.hiring, root: HR_HIRING_STORAGE_DIR, applicationId: req.params.id,
+      actorUserId: actorId(req), reason: req.body.reason, expectedFingerprint: impact.data.fingerprint,
+      readImpact: async (tx, id) => {
+        const current = await applicationDeletionImpact(id, tx);
+        return current ? { fingerprint: current.data.fingerprint, files: current.data.files,
+          counts: current.data.counts as Prisma.InputJsonValue, fileCounts: current.data.fileCounts,
+          employmentRelationshipId: current.application.employmentRelationship?.id } : null;
+      } });
+    return res.status(202).json({ success: true, data: result });
+  }
   const receiptId = crypto.randomUUID();
   const staged = stageHiringFilesForDeletion(impact.data.files, receiptId);
   try {

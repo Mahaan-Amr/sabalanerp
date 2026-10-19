@@ -122,6 +122,10 @@ const jsonFileFields: Record<string, { fields: string[]; storageRoot: string; ca
   SecuritySupervisorReport: { fields: ['attachments'], storageRoot: UPLOAD_IMAGES_DIR, category: 'SECURITY_REPORT_ATTACHMENT' },
 };
 
+export const HR_PERSONNEL_ERASURE_STORAGE_ROOTS: readonly string[] = Object.freeze(
+  [...new Set([...Object.values(fileFields), ...Object.values(jsonFileFields)].map(value => value.storageRoot))].sort(),
+);
+
 export const localUploadStorageName = (value: unknown) => {
   const normalized = String(value || '').split(/[?#]/, 1)[0].replace(/\\/g, '/');
   if (!normalized.includes('/files/uploads/images/') && !normalized.includes('/uploads/images/')) return null;

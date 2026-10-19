@@ -6,8 +6,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const root = path.resolve(import.meta.dirname, '..'), sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const suite = process.env.HR_ERASURE_FILE_SUITE || 'legacy'; assert.ok(['legacy', 'native', 'predecessor'].includes(suite));
-const test = suite === 'native' ? 'tests/online-deployment/hr-erasure-file-journal.fixture.ts'
+const suite = process.env.HR_ERASURE_FILE_SUITE || 'legacy'; assert.ok(['legacy', 'native', 'predecessor', 'profile'].includes(suite));
+const native = suite === 'native' || suite === 'profile';
+const test = suite === 'profile' ? 'tests/online-deployment/hr-file-runtime-profile.fixture.ts'
+  : suite === 'native' ? 'tests/online-deployment/hr-erasure-file-journal.fixture.ts'
   : suite === 'predecessor' ? 'backend/src/services/__tests__/hrDeletionFileCleanupPredecessor.integration.test.ts'
   : 'backend/src/services/__tests__/hrErasureFileRecovery.integration.test.ts';
 const sources = {}, capture = name => {
@@ -44,7 +46,7 @@ function verify() {
   let rows;
   try { const parsed = JSON.parse(output); rows = Array.isArray(parsed) ? parsed : [parsed]; }
   catch { rows = output.trim().split(/\r?\n/).map(line => JSON.parse(line)); }
-  return Object.fromEntries(['backend', 'frontend', 'inquiry', 'postgres', ...(suite === 'native' ? ['backend-candidate'] : [])].map(service => {
+  return Object.fromEntries(['backend', 'frontend', 'inquiry', 'postgres', ...(native ? ['backend-candidate'] : [])].map(service => {
     const row = rows.find(item => item.Service === service && item.Project === 'sabalanerp-local');
     assert.ok(row && row.State === 'running' && row.Health === 'healthy');
     return [service, { name: row.Name, id: row.ID }];
@@ -59,7 +61,7 @@ const observed = Object.fromEntries(['backend', 'frontend', 'inquiry', 'postgres
 const identities = values => Object.fromEntries(Object.entries(values).map(([name, value]) => [name,
   { id: value.Id, image: value.Image, startedAt: value.State.StartedAt }]));
 const before = identities(observed), pg = observed.postgres;
-const candidate = suite === 'native' ? inspect('backend-candidate') : null;
+const candidate = native ? inspect('backend-candidate') : null;
 if (candidate) {
   assert.ok(candidate.Config.Env.includes('BACKEND_RUNTIME_ROLE=candidate'));
   assert.ok(candidate.Mounts.some(mount => mount.Type === 'volume' && mount.RW
@@ -118,7 +120,7 @@ const report = { format: 'sabalan-hr-erasure-file-recovery-local/v1', suite, pas
   failure: redact(failure?.message), canonicalBefore: before, isolatedDatabaseRetired: false };
 const reportPath = path.join(root, 'reports/qa', 'hr-erasure-file-recovery-' + run + '.json');
 const save = () => fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n'); save();
-assert.match(report.stdout, suite === 'native' ? /"nativeWorkAndDatabaseClosed":true/ : /HR_ERASURE_TEST_DATABASE_CLIENT_CLOSED/,
+assert.match(report.stdout, native ? /"nativeWorkAndDatabaseClosed":true/ : /HR_ERASURE_TEST_DATABASE_CLIENT_CLOSED/,
   'Retain isolated database until original test client closure is proven: ' + reportPath);
 assert.equal(result.signal, null);
 assert.equal(postgres(['psql', '-U', 'postgres', '-d', 'postgres', '-At', '-c',
@@ -137,6 +139,7 @@ if (suite === 'native') {
   assert.match(report.stdout, /"versionedJobApplicationObserverClosed":true/);
   assert.match(report.stdout, /"versionedPersonnelErasurePassed":true/);
 }
+else if (suite === 'profile') assert.match(report.stdout, /"actualHrVersionedProfilePassed":true/);
 else { assert.match(report.stdout, /# fail 0\r?\n/); assert.match(report.stdout, /# skipped 0\r?\n/); }
 for (const [name, hash] of Object.entries(sources)) assert.equal(sha(fs.readFileSync(path.join(root, name))), hash);
 const after = identities(Object.fromEntries(['backend', 'frontend', 'inquiry', 'postgres'].map(name => [name, inspect(name)])));

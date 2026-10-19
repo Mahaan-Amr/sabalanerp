@@ -13,6 +13,8 @@ import { assertArchiveReason, assertArchivedRecordMutable, assertPermanentDeleti
 import { buildPersonnelErasurePlan, executePersonnelErasureGraph } from '../services/hrPersonnelErasureGraph';
 import { commitStagedHiringFiles, planHiringFilesForDeletion, restoreStagedHiringFiles, stagePlannedHiringFiles, type StagedHiringFile } from '../services/hrDeletionFileTransaction';
 import { PERSONNEL_ERASURE_LEASE_MS } from '../services/hrPersonnelErasureRecovery';
+import { versionedHrFileRuntime } from '../services/hrFileRuntime';
+import { eraseVersionedPersonnel } from '../services/hrVersionedPersonnelErasure';
 import {
   HR_REDESIGN_CATALOG,
   canReadLegacyAssessmentCompatibility,
@@ -1629,6 +1631,13 @@ router.post('/personnel/:id/permanent-delete', viewAccess, requireSystemAdmin, a
     if (!impact) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
     if (!actor || !(await bcrypt.compare(String(req.body.adminPassword || ''), actor.password))) return res.status(403).json({ success: false, error: 'رمز عبور مدیر سامانه صحیح نیست.' });
     assertPermanentDeletionConfirmation({ expectedFingerprint: impact.plan.fingerprint, suppliedFingerprint: req.body.fingerprint, expectedFullName: impact.data.displayName, suppliedFullName: req.body.fullName, reason: req.body.reason, confirmed: req.body.confirmed });
+    const fileRuntime = versionedHrFileRuntime();
+    if (fileRuntime) {
+      const result = await eraseVersionedPersonnel({ database: prisma, work: fileRuntime.boundary.context,
+        roots: fileRuntime.roots, personnelId: req.params.id, actorUserId: actorId(req),
+        reason: req.body.reason, expectedFingerprint: impact.plan.fingerprint });
+      return res.status(202).json({ success: true, data: result });
+    }
     const receiptId = crypto.randomUUID();
     const operationToken = crypto.randomUUID();
     const leaseExpiry = () => new Date(Date.now() + PERSONNEL_ERASURE_LEASE_MS);

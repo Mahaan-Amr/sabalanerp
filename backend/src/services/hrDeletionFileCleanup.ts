@@ -1,11 +1,15 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { commitStagedHiringFiles } from './hrDeletionFileTransaction';
 import { hasDeclaredHrFileProtocol, readHrLegacyFileCleanupRows } from './hrLegacyFileCleanupRows';
+import { versionedHrFileRuntime } from './hrFileRuntime';
 
 /** Legacy cleanup after committed erasure only. Versioned/unknown plans keep
  * their own original-actor closure and retained-copy obligations; the raw retry
  * route must neither unlink their files nor certify them as completed. */
 export async function retryDeletionReceiptFiles(prisma: PrismaClient, receiptId: string) {
+  if (versionedHrFileRuntime()) throw Object.assign(
+    new Error('پاک‌سازی فایل باید از مسیر مالک نسخه‌های نگهداری‌شده انجام شود؛ وضعیت عملیات را بررسی کنید.'),
+    { code: 'HR_FILE_CLEANUP_RUNTIME_OWNER_REQUIRED', statusCode: 409 });
   return prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT set_config('lock_timeout','1000ms',true),set_config('statement_timeout','10000ms',true)`;
     const ready = await tx.$queryRaw<Array<{ id: string; recordCounts: Prisma.JsonValue }>>`SELECT id,"recordCounts" FROM public.hr_deletion_receipts

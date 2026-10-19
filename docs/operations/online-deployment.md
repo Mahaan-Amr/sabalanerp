@@ -16,9 +16,9 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
 
 - The current production backend/frontend/Inquiry immutable image bytes now have native-owned private exports with verified archive graphs and full local gzip round trips. Six healthy serving identities were preserved. Independent custody, actual expanded diff-ID verification and tagless native imports subsequently passed their scoped component checks; full application restoration remains pending. The earlier measurement observed unchanged foreign services and retains its prior custody limitation. See [expanded graph evidence](../../reports/qa/independent-production-application-image-measurement-20261018.md) and [actual image export evidence](../../reports/qa/production-application-image-export-20261018.md).
 
-- A private HR domain journal now persists planned/in-flight file work and exact immutable version receipts with cleanup rows; reopened actors cannot resume it by lease expiry. Real PostgreSQL recovery-race, JSON-null, current-client/pre-column cleanup and administrator-retry regressions passed, alongside native stage/restore/removal and actual authorized HTTP cases. The existing retry route is fenced against versioned/unknown records. Initial erasure/upload route integration, physical erasure and runtime activation remain pending. See [domain journal evidence](../../reports/qa/hr-erasure-file-journal-20261019.md) and [underlying storage evidence](../../reports/qa/hr-versioned-file-transaction-20261018.md).
+- A private HR domain journal now persists planned/in-flight file work and exact immutable version receipts with cleanup rows; reopened actors cannot resume it by lease expiry. Real PostgreSQL recovery-race, JSON-null, current-client/pre-column cleanup and administrator-retry regressions passed, alongside native stage/restore/removal and actual authorized HTTP cases. Private actual upload/initial-erasure route composition subsequently passed; both legacy cleanup services refuse raw work in that bound runtime. Complete writer/reference coverage, physical erasure and ordinary runtime activation remain pending. See [route composition evidence](../../reports/qa/hr-file-runtime-profile-20261019.md), [domain journal evidence](../../reports/qa/hr-erasure-file-journal-20261019.md) and [underlying storage evidence](../../reports/qa/hr-versioned-file-transaction-20261018.md).
 
-- Private two-key file relocation now preserves both claims through destination publication, source deletion history and a durable pair receipt. Actual interrupted-owner, capacity contention and stale-restore refusal passed alongside core/stream/upload/legacy regressions. HR routes and physical erasure remain pending. See [move evidence](../../reports/qa/versioned-file-move-20261018.md).
+- Private two-key file relocation now preserves both claims through destination publication, source deletion history and a durable pair receipt. Actual interrupted-owner, capacity contention and stale-restore refusal passed alongside core/stream/upload/legacy regressions. Private HR route composition subsequently passed; complete runtime/reference coverage and physical erasure remain pending. See [move evidence](../../reports/qa/versioned-file-move-20261018.md).
 
 - A private admitted file publisher now retains independent content before live publication/ACK, ordered replacement/deletion history and unresolved interruption holds. Its explicit Dispatch adapter, actual lost-Node refusal, cross-process capacity reservations and ten Linux tests passed, with frozen reviews and file/PDF regressions. Ordinary runtime construction is unchanged. The 10,000-head metadata cut still took 33 seconds when warm; a precomputed index, full writer/legacy/privacy coverage and native controller integration remain required. See [per-write file evidence](../../reports/qa/versioned-file-publication-20261018.md).
 
@@ -109,6 +109,14 @@ admission and public online switching are still disabled. See
 [native online ownership evidence](../../reports/qa/online-native-ownership-20261017.md).
 
 ## Admission work still required
+
+Private HR runtime composition now exercises actual upload and initial Job
+Application/Personnel erasure routes with one native completion owner and
+explicitly enrolled publications. Real administrator HTTP/session, committed
+upload audit failure, validation cleanup, late graph rollback and legacy
+cleanup/recovery refusal passed. No ordinary startup selector was added; full
+shared-file reference/privacy coverage and production admission remain pending.
+See [HR route composition evidence](../../reports/qa/hr-file-runtime-profile-20261019.md).
 
 Private versioned Personnel erasure now stages explicitly enrolled roots,
 commits access preparation separately from graph deletion, resolves original

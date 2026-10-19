@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import crypto from 'node:crypto';
 import { restoreStagedHiringFiles } from './hrDeletionFileTransaction';
 import { hasDeclaredHrFileProtocol, readHrLegacyFileCleanupRows } from './hrLegacyFileCleanupRows';
+import { versionedHrFileRuntime } from './hrFileRuntime';
 
 const RECOVERY_INTERVAL_MS = 60_000;
 export const PERSONNEL_ERASURE_LEASE_MS = 5 * 60_000;
@@ -28,6 +29,9 @@ const accessSnapshot = (value: Prisma.JsonValue): AccessRecoverySnapshot | null 
 };
 
 export const recoverInterruptedPersonnelErasures = async (prisma: PrismaClient, now = new Date()) => {
+  // A bound versioned runtime never adopts raw legacy file work, including
+  // receipts created before this process selected its publication ownership.
+  if (versionedHrFileRuntime()) return 0;
   const receipts = await prisma.hrDeletionReceipt.findMany({
     where: {
       targetType: 'PERSONNEL',

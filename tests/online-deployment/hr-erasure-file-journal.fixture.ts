@@ -96,6 +96,10 @@ async function main() {
     assert.equal((await db.hrDeletionReceipt.findUniqueOrThrow({ where: { id: receiptId } })).status, 'FILE_CLEANUP_PENDING');
     const { exerciseHrDeletionFileRetryHttp } = await import('./hr-erasure-file-retry-http.fixture');
     await work.run(() => exerciseHrDeletionFileRetryHttp(db, root));
+    const { exerciseVersionedJobApplicationErasure } = await import('./hr-versioned-job-application-erasure.fixture');
+    await work.run(() => exerciseVersionedJobApplicationErasure(db, publication, work, live));
+    const { exerciseVersionedJobApplicationConcurrency } = await import('./hr-versioned-job-application-concurrency.fixture');
+    await work.run(() => exerciseVersionedJobApplicationConcurrency(db, publication, work, live));
     console.log(JSON.stringify({ nativeDatabaseAndFilesPassed: true, root }));
   } finally {
     try { await disconnectDatabase(); } finally { await work.stopAndDrain(1000); }

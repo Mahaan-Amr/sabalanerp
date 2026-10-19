@@ -29,11 +29,13 @@ const segment = (value: string) => {
 export async function createDurableVersionedHiringFileTransaction(input: {
   database: PrismaClient; root: string; publication: VersionedFilePublication; work: RuntimeWorkContext;
   receiptId: string; operationToken: string;
+  targetType?: 'PERSONNEL' | 'JOB_APPLICATION';
 }) {
   const { database, root, publication, work, receiptId, operationToken } = input;
+  const targetType = input.targetType ?? 'PERSONNEL';
   if (!(work instanceof RuntimeWorkContext) || !(publication instanceof VersionedFilePublication)
     || !publication.ownsRoot(root) || !publication.ownsWork(work) || !path.isAbsolute(root) || path.resolve(root) !== root
-    || !receiptId || !operationToken) fail('HR_VERSIONED_FILE_JOURNAL_SCOPE_INVALID');
+    || !receiptId || !operationToken || !['PERSONNEL', 'JOB_APPLICATION'].includes(targetType)) fail('HR_VERSIONED_FILE_JOURNAL_SCOPE_INVALID');
   const files = createVersionedHiringFileTransaction(root, publication), live = await publication.bindRoot(root);
   const ownPlans = new Set<string>();
   const ownedQuery = <T>(query: (tx: Prisma.TransactionClient) => Promise<T>) => database.$transaction(async tx => {
@@ -88,7 +90,7 @@ export async function createDurableVersionedHiringFileTransaction(input: {
         originalVersionSha256: head.versionSha256, phase: 'PLANNED', stageReceipt: null };
       const id = randomUUID(), originalPath = path.join(root, storageName), stagedPath = path.join(root, '.deletion-trash', operationId, storageName);
       const rows = await ownedQuery(tx => tx.$queryRaw<Row[]>`WITH owner AS (
-          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND "targetType"='PERSONNEL'
+          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND "targetType"=${targetType}
             AND status='PREPARING' AND "operationToken"=${operationToken} AND "leaseExpiresAt">clock_timestamp() FOR UPDATE
         ) INSERT INTO public.hr_deletion_file_cleanups
           (id,"receiptId","storageName","originalPath","stagedPath",status,"versionedFileState","createdAt","updatedAt")
@@ -104,7 +106,7 @@ export async function createDurableVersionedHiringFileTransaction(input: {
       if (before.state.phase !== 'PLANNED') return fail();
       const staging: State = { ...before.state, phase: 'STAGING' };
       const claimed = await ownedQuery(tx => tx.$queryRaw<Row[]>`WITH owner AS (
-          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND status='PREPARING'
+          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND "targetType"=${targetType} AND status='PREPARING'
             AND "operationToken"=${operationToken} AND "leaseExpiresAt">clock_timestamp() FOR UPDATE
         ) UPDATE public.hr_deletion_file_cleanups SET status='VERSIONED_STAGING',"versionedFileState"=${JSON.stringify(staging)}::jsonb,
           "updatedAt"=clock_timestamp() WHERE id=${id} AND "receiptId"=${receiptId} AND status='VERSIONED_PLANNED'
@@ -117,7 +119,7 @@ export async function createDurableVersionedHiringFileTransaction(input: {
       // Completion recording must survive an elapsed business lease. The same
       // actor/token must still own PREPARING; expiry never grants a successor.
       const saved = await ownedQuery(tx => tx.$queryRaw<Row[]>`WITH owner AS (
-          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND status='PREPARING' AND "operationToken"=${operationToken} FOR UPDATE
+          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND "targetType"=${targetType} AND status='PREPARING' AND "operationToken"=${operationToken} FOR UPDATE
         ) UPDATE public.hr_deletion_file_cleanups SET status='VERSIONED_STAGED',"versionedFileState"=${JSON.stringify(staged)}::jsonb,
           "updatedAt"=clock_timestamp() WHERE id=${id} AND "receiptId"=${receiptId} AND status='VERSIONED_STAGING'
           AND "versionedFileState"=${JSON.stringify(staging)}::jsonb AND EXISTS(SELECT 1 FROM owner)
@@ -131,7 +133,7 @@ export async function createDurableVersionedHiringFileTransaction(input: {
       if (before.state.phase !== 'STAGED' || !before.state.stageReceipt) return fail();
       const restoring: State = { ...before.state, phase: 'RESTORING' };
       const claimed = await ownedQuery(tx => tx.$queryRaw<Row[]>`WITH owner AS (
-          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND status IN ('PREPARING','ACCESS_PREPARED')
+          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND "targetType"=${targetType} AND status IN ('PREPARING','ACCESS_PREPARED','COMPENSATING')
             AND "operationToken"=${operationToken} FOR UPDATE
         ) UPDATE public.hr_deletion_file_cleanups SET status='VERSIONED_RESTORING',"versionedFileState"=${JSON.stringify(restoring)}::jsonb,
           "updatedAt"=clock_timestamp() WHERE id=${id} AND "receiptId"=${receiptId} AND status='VERSIONED_STAGED'
@@ -142,7 +144,7 @@ export async function createDurableVersionedHiringFileTransaction(input: {
       const restoreReceipt = await files.restore(before.state.stageReceipt);
       const restored: State = { ...restoring, phase: 'RESTORED', restoreReceipt };
       const saved = await ownedQuery(tx => tx.$queryRaw<Row[]>`WITH owner AS (
-          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND status IN ('PREPARING','ACCESS_PREPARED')
+          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND "targetType"=${targetType} AND status IN ('PREPARING','ACCESS_PREPARED','COMPENSATING')
             AND "operationToken"=${operationToken} FOR UPDATE
         ) UPDATE public.hr_deletion_file_cleanups SET status='VERSIONED_RESTORED',"versionedFileState"=${JSON.stringify(restored)}::jsonb,
           "updatedAt"=clock_timestamp() WHERE id=${id} AND "receiptId"=${receiptId} AND status='VERSIONED_RESTORING'
@@ -157,7 +159,7 @@ export async function createDurableVersionedHiringFileTransaction(input: {
       if (before.state.phase !== 'STAGED' || !before.state.stageReceipt) return fail();
       const removing: State = { ...before.state, phase: 'REMOVING' };
       const claimed = await ownedQuery(tx => tx.$queryRaw<Row[]>`WITH owner AS (
-          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND status='FILE_CLEANUP_PENDING'
+          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND "targetType"=${targetType} AND status='FILE_CLEANUP_PENDING'
             AND "operationToken" IS NULL AND "leaseExpiresAt" IS NULL FOR UPDATE
         ) UPDATE public.hr_deletion_file_cleanups SET status='VERSIONED_REMOVING',"versionedFileState"=${JSON.stringify(removing)}::jsonb,
           "updatedAt"=clock_timestamp() WHERE id=${id} AND "receiptId"=${receiptId} AND status='VERSIONED_STAGED'
@@ -168,7 +170,7 @@ export async function createDurableVersionedHiringFileTransaction(input: {
       const removalReceipt = await files.commit(before.state.stageReceipt);
       const removed: State = { ...removing, phase: 'LIVE_REMOVED_RETAINED_COPIES_PENDING', removalReceipt };
       const saved = await ownedQuery(tx => tx.$queryRaw<Row[]>`WITH owner AS (
-          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND status='FILE_CLEANUP_PENDING'
+          SELECT id FROM public.hr_deletion_receipts WHERE id=${receiptId} AND "targetType"=${targetType} AND status='FILE_CLEANUP_PENDING'
             AND "operationToken" IS NULL AND "leaseExpiresAt" IS NULL FOR UPDATE
         ) UPDATE public.hr_deletion_file_cleanups SET status='VERSIONED_LIVE_REMOVED_RETAINED_COPIES_PENDING',"versionedFileState"=${JSON.stringify(removed)}::jsonb,
           "updatedAt"=clock_timestamp() WHERE id=${id} AND "receiptId"=${receiptId} AND status='VERSIONED_REMOVING'

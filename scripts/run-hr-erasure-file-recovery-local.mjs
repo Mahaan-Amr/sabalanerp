@@ -132,6 +132,9 @@ if (suite === 'native') {
   assert.match(report.stdout, /"nativeDatabaseAndFilesPassed":true/);
   assert.match(report.stdout, /"actualHrRetryRouterPassed":true/); assert.match(report.stdout, /"actualHrRetryHttpClosed":true/);
   assert.match(report.stdout, /"actualHrUploadSafetyPassed":true/);
+  assert.match(report.stdout, /"versionedJobApplicationErasurePassed":true/);
+  assert.match(report.stdout, /"versionedJobApplicationConcurrencyPassed":true/);
+  assert.match(report.stdout, /"versionedJobApplicationObserverClosed":true/);
 }
 else { assert.match(report.stdout, /# fail 0\r?\n/); assert.match(report.stdout, /# skipped 0\r?\n/); }
 for (const [name, hash] of Object.entries(sources)) assert.equal(sha(fs.readFileSync(path.join(root, name))), hash);

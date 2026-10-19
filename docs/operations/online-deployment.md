@@ -250,6 +250,14 @@ Require architecture checks, affected builds/tests, domain/browser acceptance, a
   full financial strata and recovery/browser gates remain pending. See
   [populated rehearsal evidence](../../reports/qa/closed-customer-expansion-20261019.md).
 
+A private versioned Job Application command now persists every file plan before
+staging, locks the original parent before graph writes, and fences failed graph
+transactions before exact-version compensation. Actual native cases cover normal
+erasure, concurrent domain changes, late SQL failure, fresh retry and two competing
+requests. Public route/Personnel composition, unknown-native recovery and physical
+erasure remain pending. See
+[private command evidence](../../reports/qa/hr-versioned-job-application-erasure-20261019.md).
+
 HR multipart consumers now retain each upload before submitting its reference
 to SQL, preserve committed/uncertain files through later errors, and await only
 their original unreferenced upload's cleanup. Real-router native acceptance

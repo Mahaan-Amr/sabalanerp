@@ -23,6 +23,15 @@ def require(value):
     if not value: raise RuntimeError('ONLINE_ORIGINAL_INQUIRY_UNPROVEN')
 
 
+def runtime_build_environment(binding,compiled,environment):
+    require(set(binding)=={'deploymentId','manifestSha256','environment'})
+    selected=compiled.get('deploymentId')
+    require(isinstance(selected,str)and re.fullmatch(r'[a-z][a-z0-9_-]{7,95}',selected)and selected==binding['deploymentId']and compiled.get('env',{}).get('NEXT_PUBLIC_INQUIRY_BUILD_ID')==selected)
+    keys={'SABALAN_INQUIRY_BUILD_ID','NEXT_PUBLIC_INQUIRY_BUILD_ID','NEXT_DEPLOYMENT_ID'};require(set(binding['environment'])==keys and re.fullmatch(r'[a-f0-9]{64}',binding['manifestSha256']))
+    for key in keys:require(binding['environment'][key]==selected and (key not in environment or environment[key]==selected))
+    return dict(binding['environment'])
+
+
 def encode(value): return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
 def sha(raw): return hashlib.sha256(raw).hexdigest()
 def identity(s): return (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns, s.st_uid, s.st_mode, s.st_nlink)
@@ -84,13 +93,15 @@ class InquiryOwner:
     def work(self): return Path(self.scope['boundaryDirectory']) / 'state.json'
 
     def start(self, request):
-        require(self.actor is None and set(request) == {'host', 'port', 'runtimeBundleSha256', 'generation', 'sqlite'})
+        require(self.actor is None and set(request) == {'host', 'port', 'runtimeBundleSha256', 'generation', 'sqlite', 'runtimeBuildIdentity'})
         require(request['port'] == 3001 and isinstance(request['generation'], int) and request['generation'] >= 1
                 and re.fullmatch(r'[0-9.]+', request['host']) and request['runtimeBundleSha256'] == self.scope['manifestSha256'])
         require(sha(read('/app/online-runtime/entry.cjs', 16 * 1024 * 1024)) == request['runtimeBundleSha256'])
         environment = dict(os.environ, BACKEND_RUNTIME_ROLE='serving', BACKEND_ONLINE_SCOPE_FILE=self.file,
                            BACKEND_ONLINE_SCOPE_SHA256=self.sha, RECOVERY_COORDINATION_DIR=self.scope['coordinationDirectory'],
                            INQUIRY_RUNTIME_GENERATION=str(request['generation']))
+        compiled=json.loads(Path('/app/.next/required-server-files.json').read_bytes())['config']
+        environment.update(runtime_build_environment(request['runtimeBuildIdentity'],compiled,environment))
         require(not self.native().exists())
         self.actor = self.original(['/usr/bin/python3', '-I', '-B', '/app/online-runtime/scripts/online-inquiry-owner.py',
             '/usr/local/bin/node', '/app/node_modules/next/dist/bin/next', 'start', '--hostname', request['host'], '--port', '3001'],

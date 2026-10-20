@@ -24,6 +24,9 @@ import threading
 import time
 if sys.platform=='linux': import fcntl
 os.umask(0o077)
+_IMAGE_BUSINESS_SOURCE=Path('/app/online-runtime/legacy-business-source.json')
+_ISSUER_AUTHORITY=Path('/app/runtime-authority')
+_ACTOR_AUTHORITY=Path('/run/sabalan-online')
 
 def check(value,code='INQUIRY_PAIR_UNPROVEN'):
     if not value:raise RuntimeError(code)
@@ -40,6 +43,25 @@ def read(file,maximum=8*1024*1024):
         key=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
         check(key(before)==key(os.fstat(fd))==key(file.lstat()))
         return raw
+    finally:os.close(fd)
+
+def read_image_business_source(file,expected_bytes,expected_sha256):
+    # Public metadata is an immutable image input, not a private scope/key file.
+    file=Path(file);check(file==_IMAGE_BUSINESS_SOURCE,'IMAGE_METADATA_PATH')
+    check(file.resolve(strict=True)==file and type(expected_bytes)is int and 0<expected_bytes<=65536 and re.fullmatch(r'[a-f0-9]{64}',expected_sha256),'IMAGE_METADATA_EXPECTATION')
+    fd=os.open(file,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    try:
+        before=os.fstat(fd);check(stat.S_ISREG(before.st_mode)and before.st_uid==0 and before.st_nlink==1 and not before.st_mode&0o022 and before.st_size==expected_bytes,'IMAGE_METADATA_CUSTODY')
+        raw=b''
+        while chunk:=os.read(fd,65537):
+            raw+=chunk;check(len(raw)<=65536,'IMAGE_METADATA_BOUND')
+        check(len(raw)==expected_bytes and digest(raw)==expected_sha256,'IMAGE_METADATA_BYTES')
+        os.lseek(fd,0,os.SEEK_SET);repeated=b''
+        while chunk:=os.read(fd,65537):
+            repeated+=chunk;check(len(repeated)<=65536,'IMAGE_METADATA_BOUND')
+        check(repeated==raw,'IMAGE_METADATA_CHANGED')
+        key=lambda s:(s.st_dev,s.st_ino,s.st_uid,s.st_mode,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+        check(key(before)==key(os.fstat(fd))==key(file.lstat()),'IMAGE_METADATA_CHANGED');return raw
     finally:os.close(fd)
 def save(file,raw,mode=0o400):
     fd=os.open(file,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,mode)
@@ -81,15 +103,15 @@ def prisma_tokens(raw):
 def channel(public_key,session):
     source=Path(__file__).with_name('original-host-controller-channel.fixture.py')
     spec=importlib.util.spec_from_file_location('retained_inquiry_channel',source);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-    module.COMMANDS=frozenset({'PREPARE_INQUIRY_SCHEMA','PREPARE_INQUIRY_PAIR','START_INQUIRY','RUN_INQUIRY_BROWSER','REFUSE_INQUIRY_BROWSER_CAPACITY','ACQUIRE_INQUIRY_DRAIN','STOP_INQUIRY','FINISH_INQUIRY_PAIR'})
-    module.EVENTS=frozenset({'HELLO','INQUIRY_SCHEMA_PREPARED','INQUIRY_PAIR_PREPARED','ACTOR_STARTED','INQUIRY_READY','INQUIRY_BROWSER_DONE','INQUIRY_DRAIN_HELD','INQUIRY_CLOSED','INQUIRY_PAIR_CLOSED','HELD'})
+    module.COMMANDS=frozenset({'PREPARE_INQUIRY_SCHEMA','PREPARE_INQUIRY_PAIR','START_INQUIRY','RUN_INQUIRY_BROWSER','REFUSE_INQUIRY_BROWSER_CAPACITY','ABORT_INQUIRY_PREACTOR','ACQUIRE_INQUIRY_DRAIN','STOP_INQUIRY','FINISH_INQUIRY_PAIR'})
+    module.EVENTS=frozenset({'HELLO','INQUIRY_SCHEMA_PREPARED','INQUIRY_PAIR_PREPARED','ACTOR_STARTED','INQUIRY_READY','INQUIRY_BROWSER_DONE','INQUIRY_DRAIN_HELD','INQUIRY_CLOSED','INQUIRY_PAIR_CLOSED','INQUIRY_PREACTOR_FAILED','INQUIRY_PAIR_ABORTED','HELD'})
     return module.OriginalHostChannel(public_key,session,'candidate')
 
 class Controller:
     def __init__(self,mode,root,public_key,session):
         self.mode=mode;self.root=Path(root);private(self.root)
         check(re.fullmatch(r'/app/online-runtime-acceptance/retained-browser-[a-f0-9]{32}',root))
-        self.channel=channel(public_key,session);self.children=[];self.gate=None;self.native=None;self.ready=None
+        self.channel=channel(public_key,session);self.children=[];self.gate=None;self.native=None;self.ready=None;self.actor_start_attempted=False;self.negative_aborted=False
         self.directory=self.root/('controller-'+mode);self.directory.mkdir(mode=0o700)
         check(ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0)==0)
     def child(self,name,argv,env=None,cwd=None,descriptors=()):
@@ -116,6 +138,37 @@ class Controller:
     def lock(self,file):
         save(file,b'',0o600);value=Path(file).stat()
         return dict(file=str(file),device=str(value.st_dev),inode=str(value.st_ino),ownerUid=os.getuid())
+    def initial_pair_state(self):
+        # A local preactor refusal is finite only while BOTH counterparts are
+        # still at their exact issued initial scopes. Any unknown byte holds.
+        try:
+            check(not self.actor_start_attempted and self.native is None and self.ready is None and self.gate is None)
+            check(all(row['closed']and row['process'].poll()is not None for row in self.children))
+            private(self.root);config=json.loads(read(self.root/'pair.json'));check(config['root']==str(self.root)and config['format']=='sabalan-retained-inquiry-pair/v1')
+            check(set(config['scopes'])=={'old','current'})
+            def lock_identity(value):
+                file=Path(value['file']);check(file.resolve(strict=True)==file);st=file.lstat()
+                check(stat.S_ISREG(st.st_mode)and st.st_uid==value['ownerUid']==0 and st.st_nlink==1 and st.st_size==0 and not st.st_mode&0o077)
+                check(str(st.st_dev)==value['device']and str(st.st_ino)==value['inode'])
+            for mode,grant in config['scopes'].items():
+                scope=grant['scope'];runtime=scope['runtimeId'];check(re.fullmatch(r'[a-f0-9]{64}',runtime))
+                native=self.root/'coordination/online/native'/runtime;work=self.root/'coordination/online/work'/runtime
+                check(scope['nativeDirectory']==str(native)and scope['boundaryDirectory']==str(work));private(native);private(work)
+                check(set(p.name for p in native.iterdir())=={'deployment-runtime-control.lock'}and set(p.name for p in work.iterdir())=={'scope.json'})
+                check(grant['nativeControl']['file']==str(native/'deployment-runtime-control.lock'));lock_identity(grant['nativeControl'])
+                for name,file in [('gate','deployment-write-admission.lock'),('interlock','deployment-runtime-control.lock')]:
+                    check(scope[name]['file']==str(self.root/'coordination'/file));lock_identity(scope[name])
+                check(digest(read(work/'scope.json'))==grant['workScopeSha256'])
+                authority=_ISSUER_AUTHORITY if self.mode=='issuer'else _ACTOR_AUTHORITY
+                raw=read(authority/(runtime+'.json'));check(raw==encoded(scope)and digest(raw)==grant['sha256'])
+            return config
+        except BaseException:return None
+    def abort_pre_actor(self,body):
+        check(self.mode=='issuer'and self.initial_pair_state()is not None,'PREACTOR_ABORT_NOT_INITIAL')
+        check(body.get('format')=='sabalan-original-inquiry-preactor-failure/v1'and body.get('mode')=='old'and body.get('nativeStartAttempted')is False and body.get('childrenClosed')is True and body.get('bothScopesInitial')is True,'PREACTOR_ABORT_PROOF')
+        check(body['runtimeId']==self.configuration['scopes']['old']['scope']['runtimeId'])
+        self.negative_aborted=True
+        return dict(format='sabalan-original-inquiry-preactor-abort/v1',qualificationSuccess=False,originalChildrenClosed=True,bothScopesInitial=True)
     def prepare_schema(self,body):
         check(self.mode=='schema'and set(body)=={'canonicalSchemaSha256'})
         original=read(self.root/'inquiry-schema.prisma');check(digest(original)==body['canonicalSchemaSha256'])
@@ -132,7 +185,10 @@ class Controller:
         finally:connection.close()
         return dict(canonicalSchemaSha256=digest(original),installedSchemaSha256=digest(raw),actualImagePrismaDbPush=True,originalCliClosed=True)
     def prepare(self,body):
-        check(self.mode=='issuer'and set(body)=={'actors','database'})
+        check(self.mode=='issuer'and set(body)=={'actors','database','proxy'})
+        proxy=body['proxy'];check(set(proxy)=={'hostname','address','containerId','image','startedAt','networkId','networkName'}and proxy['hostname']=='inquiry-qualification.localhost'and proxy['networkName']=='sabalanerp-local_default')
+        address=ipaddress.ip_address(proxy['address']);check(address.version==4 and address.is_private and not address.is_loopback and not address.is_unspecified)
+        check(re.fullmatch(r'[a-f0-9]{64}',proxy['containerId'])and re.fullmatch(r'sha256:[a-f0-9]{64}',proxy['image'])and re.fullmatch(r'[a-f0-9]{64}',proxy['networkId'])and isinstance(proxy['startedAt'],str)and 0<len(proxy['startedAt'])<=64)
         validate_pair(body['actors']);database=body['database'];check(set(database)=={'name','systemIdentifier','oid'}and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,62}',database['name'])and re.fullmatch(r'[1-9][0-9]{0,24}',database['systemIdentifier'])and type(database['oid'])is int and database['oid']>0)
         coordination=self.root/'coordination';coordination.mkdir(mode=0o700)
         for name in ('online','online/native','online/work','online/admission','online/admission/staging'):(coordination/name).mkdir(mode=0o700)
@@ -157,13 +213,14 @@ class Controller:
         scopes={}
         for name,actor in body['actors'].items():
             runtime=secrets.token_hex(32);native=coordination/'online/native'/runtime;work=coordination/'online/work'/runtime;native.mkdir(mode=0o700);work.mkdir(mode=0o700)
-            self.lock(native/'deployment-runtime-control.lock')
+            native_control=self.lock(native/'deployment-runtime-control.lock')
             scope=dict(format='sabalan-online-runtime-scope/v2',runtimeId=runtime,releaseId='retained-inquiry-'+self.root.name[-32:],manifestSha256=actor['runtimeBundleSha256'],sourceCommit=actor['sourceCommit'],image=actor['image'],nonce=secrets.token_hex(32),purpose='http',role='serving',coordinationDirectory=str(coordination),nativeDirectory=str(native),boundaryDirectory=str(work),gate=gate,interlock=interlock,worker=None,admission=dict(directory=str(coordination/'online/admission'),scopeSha256=digest(definition)),database=common_database)
             namespace='sabalan-rt-'+digest(runtime.encode())[:48]
-            save(work/'scope.json',encoded(dict(format='sabalan-runtime-namespace/v1',scope=dict(runtimeId=runtime,image=actor['image'],registrySha256=actor['runtimeBundleSha256'],generation=1,gate={key:gate[key]for key in ('device','inode','ownerUid')},postgresApplicationName=namespace))),0o600)
+            work_scope=encoded(dict(format='sabalan-runtime-namespace/v1',scope=dict(runtimeId=runtime,image=actor['image'],registrySha256=actor['runtimeBundleSha256'],generation=1,gate={key:gate[key]for key in ('device','inode','ownerUid')},postgresApplicationName=namespace)))
+            save(work/'scope.json',work_scope,0o600)
             raw=encoded(scope);authority=Path('/app/runtime-authority');private(authority);save(authority/(runtime+'.json'),raw)
-            scopes[name]=dict(scope=scope,file='/run/sabalan-online/'+runtime+'.json',sha256=digest(raw))
-        configuration=dict(format='sabalan-retained-inquiry-pair/v1',root=str(self.root),actors=body['actors'],database=database,scopes=scopes,sqlite=dict(path=str(sql),device=str(sql.stat().st_dev),inode=str(sql.stat().st_ino)))
+            scopes[name]=dict(scope=scope,file='/run/sabalan-online/'+runtime+'.json',sha256=digest(raw),nativeControl=native_control,workScopeSha256=digest(work_scope))
+        configuration=dict(format='sabalan-retained-inquiry-pair/v1',root=str(self.root),actors=body['actors'],database=database,proxy=proxy,scopes=scopes,sqlite=dict(path=str(sql),device=str(sql.stat().st_dev),inode=str(sql.stat().st_ino)))
         raw=encoded(configuration);save(self.root/'pair.json',raw);self.configuration=configuration
         return dict(configurationFile=str(self.root/'pair.json'),configurationSha256=digest(raw),scopes=scopes,sqlite=configuration['sqlite'])
     def start(self,body):
@@ -178,13 +235,17 @@ class Controller:
         command=['/app/node_modules/next/dist/bin/next','start']
         if actor.get('entryPath') is not None:
             check(actor['entryPath']=='/app/online-runtime/inquiry-legacy-entry.cjs' and actor['legacyBusinessSource']['kind']=='COMPILED_IMAGE'
-                  and actor['legacyBusinessSource']==json.loads(read(Path('/app/online-runtime/legacy-business-source.json')))
+                  and actor['legacyBusinessSource']==json.loads(read_image_business_source(_IMAGE_BUSINESS_SOURCE,actor['ownedLegacyBusinessSourceBytes'],actor['ownedLegacyBusinessSourceSha256']))
                   and (actor['legacyBusinessSource']['image']=='sha256:ab6e2933e2d0d397f0b1a514dba69206e21856fa7d4275ab33383020bf9dd66e'
                        or (actor['legacyBusinessSource'].get('sourceSnapshot',{}).get('format')=='sabalan-measured-inquiry-source/v1'
                            and actor['legacyBusinessSource']['image']==actor['legacyBusinessSource']['sourceSnapshot'].get('engineImage')))
                   and actor['legacyBusinessSource']['sourceCommit'] is None,'LEGACY_COMPILED_PROVENANCE_REQUIRED')
             check(digest(Path(actor['entryPath']).read_bytes())==actor['ownedLegacyEntrySha256'],'LEGACY_OWNED_ENTRY_CHANGED')
             command=[actor['entryPath']]
+        identity=self.child('runtime-build-identity',['/usr/local/bin/node',str(self.root/'inquiry-compiled-browser.cjs'),'--runtime-environment','/app']);self.closed(identity)
+        measured=json.loads(read(self.directory/'runtime-build-identity.stdout'));check(measured['id']==actor['browserBuildId']and measured['manifestSha256']==actor['browserManifestSha256']and measured['deploymentId']==actor['browserDeploymentId'],'INQUIRY_RUNTIME_COMPILED_ID_CHANGED')
+        environment.update(measured['environment'])
+        self.actor_start_attempted=True
         self.native=self.child('native',['/usr/bin/python3','-I','-B','/app/online-runtime/scripts/online-inquiry-owner.py','/usr/local/bin/node',*command,'--hostname',actor['host'],'--port','3001'],environment,'/app')
         self.channel.emit('ACTOR_STARTED',dict(runtimeId=scope['runtimeId'],birth=self.native['birth']))
         def ready():
@@ -193,7 +254,7 @@ class Controller:
             check(value['phase']=='ACTIVE'and value['onlineScope']['sha256']==grant['sha256']and value['guardian']==self.native['birth'])
             if state['phase']!='QUIESCENT':return None
             try:
-                with socket.create_connection((actor['host'],3001),timeout=1)as stream:stream.sendall(b'GET /admin/login HTTP/1.1\r\nHost: localhost:3199\r\nConnection: close\r\n\r\n');response=stream.recv(256)
+                with socket.create_connection((actor['host'],3001),timeout=1)as stream:stream.sendall(('GET /admin/login HTTP/1.1\r\nHost: '+config['proxy']['hostname']+':3199\r\nConnection: close\r\n\r\n').encode());response=stream.recv(256)
                 if not response.startswith(b'HTTP/1.1 200'):return None
             except OSError:return None
             return dict(runtimeId=scope['runtimeId'],host=actor['host'],port=3001,image=actor['image'],nativeActiveRawBase64=base64.b64encode(read(native)).decode(),workRawBase64=base64.b64encode(read(work)).decode(),scopeSha256=grant['sha256'])
@@ -226,7 +287,7 @@ class Controller:
         check(self.mode=='issuer'and body=={}and not hasattr(self,'browser_closed'))
         profile=Path('/tmp')/('iq-'+secrets.token_hex(8));profile.mkdir(mode=0o700)
         environment=dict(os.environ,HOME=str(profile),XDG_CONFIG_HOME=str(profile),XDG_CACHE_HOME=str(profile),TMPDIR=str(profile))
-        chrome=self.child('chrome',['/usr/bin/chromium','--headless=new','--no-sandbox','--disable-setuid-sandbox','--remote-debugging-address=127.0.0.1','--remote-debugging-port=0','--user-data-dir='+str(profile),'about:blank'],environment)
+        chrome=self.child('chrome',['/usr/bin/chromium','--headless=new','--no-sandbox','--disable-setuid-sandbox','--host-resolver-rules=MAP '+self.configuration['proxy']['hostname']+' '+self.configuration['proxy']['address'],'--remote-debugging-address=127.0.0.1','--remote-debugging-port=0','--user-data-dir='+str(profile),'about:blank'],environment)
         portfile=profile/'DevToolsActivePort';wait(lambda:portfile.exists(),'ORIGINAL_CHROME_NOT_READY',chrome['process']);lines=portfile.read_text().splitlines();check(len(lines)==2 and lines[0].isdigit()and re.fullmatch(r'/devtools/browser/[a-f0-9-]+',lines[1]))
         lock=os.open(self.root/'routing-publication.lock',os.O_RDWR|os.O_CREAT|os.O_EXCL,0o600);fcntl.flock(lock,fcntl.LOCK_EX);os.dup2(lock,20,inheritable=True)
         if lock!=20:os.close(lock)
@@ -288,7 +349,9 @@ class Controller:
             self.channel.emit('INQUIRY_SCHEMA_PREPARED',self.prepare_schema(self.channel.receive('PREPARE_INQUIRY_SCHEMA').body))
         elif self.mode=='issuer':
             body=self.channel.receive('PREPARE_INQUIRY_PAIR').body;self.channel.emit('INQUIRY_PAIR_PREPARED',self.prepare(body))
-            request=self.channel.receive({'RUN_INQUIRY_BROWSER','REFUSE_INQUIRY_BROWSER_CAPACITY'})
+            request=self.channel.receive({'RUN_INQUIRY_BROWSER','REFUSE_INQUIRY_BROWSER_CAPACITY','ABORT_INQUIRY_PREACTOR'})
+            if request.command=='ABORT_INQUIRY_PREACTOR':
+                self.channel.emit('INQUIRY_PAIR_ABORTED',self.abort_pre_actor(request.body));self.channel.assert_observers_closed();return
             if request.command=='REFUSE_INQUIRY_BROWSER_CAPACITY':
                 check(request.body=={});self.browser_closed=True;self.browser_result=dict(format='sabalan-original-installed-inquiry-browser-negative/v1',reason='ORIGINAL_RESOURCE_ADMISSION_REFUSED',qualificationSuccess=False)
                 self.channel.emit('INQUIRY_BROWSER_DONE',self.browser_result)
@@ -306,7 +369,10 @@ def main():
     mode,root,key,session=sys.argv[1:];check(mode in ('issuer','schema','old','current'))
     owner=Controller(mode,root,key,session)
     try:owner.run()
-    except BaseException:
+    except BaseException as error:
+        if mode in ('old','current')and owner.initial_pair_state()is not None:
+            config=json.loads(read(owner.root/'pair.json'));reason=str(error)if re.fullmatch(r'[A-Z0-9_]{1,160}',str(error))else type(error).__name__
+            owner.channel.assert_observers_closed();owner.channel.emit('INQUIRY_PREACTOR_FAILED',dict(format='sabalan-original-inquiry-preactor-failure/v1',mode=mode,runtimeId=config['scopes'][mode]['scope']['runtimeId'],originalController=birth(os.getpid()),nativeStartAttempted=False,childrenClosed=True,bothScopesInitial=True,reason=reason));raise SystemExit(1)
         if mode=='schema'and all(child['closed']for child in owner.children):
             # This mode cannot launch a serving/native actor. A known failed
             # image-owned schema CLI can close negatively without stranding
@@ -318,4 +384,5 @@ def main():
         except BaseException:pass
         # Unknown child/signal/native/SQLite outcomes retain THIS controller.
         while True:time.sleep(1)
+    if owner.negative_aborted:raise SystemExit(1)
 if __name__=='__main__':main()

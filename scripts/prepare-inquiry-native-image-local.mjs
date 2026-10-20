@@ -37,6 +37,7 @@ const materialSources=Object.fromEntries([
   'scripts/prepare-inquiry-native-image-local.mjs','scripts/build-inquiry-runtime-bundle.mjs',
   'scripts/lib/inquiry-dependency-identity.cjs','scripts/lib/private-docker-image-archive.mjs',
   'deploy/docker/inquiry-native.acceptance.Dockerfile','tests/online-deployment/inquiry-http-observer.fixture.cjs',
+  'deploy/scripts/inquiry-compiled-browser.cjs','deploy/scripts/run-inquiry-with-recovery.sh',
   ...['online-inquiry-owner.py','online-runtime-scope.py','backend-runtime-owner.py','online-capture-admission.py'].map(name=>'deploy/scripts/'+name),
   ...['onlineInquiryWork','onlineRuntimeScope','onlineCaptureAdmission','kernelWriteAdmission','runtimeBoundaryJournal','runtimeTaskAdmission','runtimeWorkContext'].map(name=>'backend/src/services/'+name+'.ts'),
 ].map(name=>[name,sha(fs.readFileSync(path.join(root,name)))]));
@@ -56,6 +57,7 @@ const directory = path.join(parent, 'inquiry-native-image-' + randomBytes(16).to
 fs.mkdirSync(directory);
 fs.writeFileSync(path.join(directory, '.dockerignore'), 'base-image.docker.tar\nruntime-source\nbuild.log\nimage.json\n', { flag: 'wx' });
 fs.copyFileSync(path.join(root, 'deploy/docker/inquiry-native.acceptance.Dockerfile'), path.join(directory, 'Dockerfile'));
+for(const name of ['inquiry-compiled-browser.cjs','run-inquiry-with-recovery.sh'])fs.copyFileSync(path.join(root,'deploy/scripts',name),path.join(directory,name));
 const dependencyVerifier=fs.readFileSync(path.join(root,'scripts/lib/inquiry-dependency-identity.cjs'));
 fs.writeFileSync(path.join(directory,'inquiry-dependency-identity.cjs'),dependencyVerifier,{flag:'wx'});
 verify();

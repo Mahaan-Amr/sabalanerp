@@ -11,6 +11,9 @@ if [ "${BACKEND_ONLINE_SCOPE_FILE+x}" = x ] || [ "${BACKEND_ONLINE_SCOPE_SHA256+
   exit 75
 fi
 
+runtime_build_environment="$(node /app/inquiry-compiled-browser.cjs --runtime-exports /app)" || exit 1
+eval "$runtime_build_environment"
+
 coordination_dir="${RECOVERY_COORDINATION_DIR:-/app/recovery-coordination}"
 restart_marker="$coordination_dir/restart-inquiry"
 stopped_marker="$coordination_dir/inquiry-stopped"

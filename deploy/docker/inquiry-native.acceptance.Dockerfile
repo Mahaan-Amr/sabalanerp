@@ -14,3 +14,7 @@ ADD inquiry-build.tar.gz /app/
 COPY online-runtime /app/online-runtime/
 COPY native-http-observer.cjs /app/online-runtime/native-http-observer.cjs
 LABEL io.sabalan.online-qa="inquiry-native-actions"
+
+COPY --chmod=0644 inquiry-compiled-browser.cjs /app/inquiry-compiled-browser.cjs
+COPY --chmod=0755 run-inquiry-with-recovery.sh /app/run-inquiry-with-recovery.sh
+CMD ["/app/run-inquiry-with-recovery.sh"]

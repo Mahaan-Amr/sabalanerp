@@ -1,3 +1,4 @@
+import inquiryCompiledBrowser from './inquiry-compiled-browser.cjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -72,7 +73,10 @@ export async function provisionOriginalInquiryCarrier(controller,input){
   const compiled=JSON.parse(await docker(controller,['exec',id,'node','-e',helper+'\nconsole.log(JSON.stringify(readInquiryCompiledBrowser()));']));
   assert.equal(compiled.id,sourceBuild.id);assert.equal(compiled.manifestSha256,sourceBuild.manifestSha256);same(compiled.assets,sourceBuild.assets);same(compiled.actionIds,sourceBuild.actionIds);
   assert.equal(compiled.deploymentId,input.buildId,'INQUIRY_CURRENT_DEPLOYMENT_ID_REQUIRED');
-  const token=Object.freeze({});carriers.set(token,{controller,plan,facts,sqlite,binding,scope:clone(scope),scopeFile:input.scopeFile,scopeSha256:input.scopeSha256,compiled:{frameworkBuildId:compiled.frameworkBuildId,manifestSha256:compiled.manifestSha256},configurationSha256:sha(raw),helperSha256:sha(Buffer.from(helper))});
+  const imageEnvironment={};for(const entry of image.Config.Env||[]){const offset=entry.indexOf('=');const key=entry.slice(0,offset);if(['SABALAN_INQUIRY_BUILD_ID','NEXT_PUBLIC_INQUIRY_BUILD_ID','NEXT_DEPLOYMENT_ID'].includes(key)){assert.ok(offset>0&&!Object.hasOwn(imageEnvironment,key),'INQUIRY_IMAGE_BUILD_ID_DUPLICATE');imageEnvironment[key]=entry.slice(offset+1);}}
+  const runtimeEnvironment=inquiryCompiledBrowser.inquiryRuntimeBuildEnvironment(compiled,imageEnvironment);inquiryCompiledBrowser.inquiryRuntimeBuildEnvironment(compiled,plan.environment);
+  const runtimeBuildIdentity={deploymentId:compiled.deploymentId,manifestSha256:compiled.manifestSha256,environment:runtimeEnvironment};
+  const token=Object.freeze({});carriers.set(token,{controller,plan,facts,sqlite,binding,runtimeBuildIdentity,scope:clone(scope),scopeFile:input.scopeFile,scopeSha256:input.scopeSha256,compiled:{frameworkBuildId:compiled.frameworkBuildId,manifestSha256:compiled.manifestSha256},configurationSha256:sha(raw),helperSha256:sha(Buffer.from(helper))});
   return token;
  }catch(error){
   const token=Object.freeze({});failures.set(token,{controller,facts:{format:'sabalan-original-inquiry-carrier-failure/v1',releaseId:input.releaseId,creation,outcomeUnproven:true,cleanupPerformed:false}});
@@ -85,7 +89,7 @@ export async function readProvisionedInquiryCarrier(controller,token){
  const sqlite=JSON.parse(await docker(controller,['exec',facts.containerId,'/usr/bin/python3','-I','-B','-c',sqliteSource]));same(sqlite,row.sqlite);
  same(JSON.parse(privateScope(row.scopeFile,row.scopeSha256)),row.scope);
  return {...facts,sqlite,scope:clone(row.scope),scopeFile:row.scopeFile,scopeSha256:row.scopeSha256,
-  databaseUrl:row.plan.environment.DATABASE_URL,build:clone(row.binding.build),sourceBuild:clone(row.binding.sourceBuild),imageGraph:clone(row.binding.imageGraph),compiled:clone(row.compiled),compiledBytesVerified:true,configurationSha256:row.configurationSha256};
+  runtimeBuildIdentity:clone(row.runtimeBuildIdentity),databaseUrl:row.plan.environment.DATABASE_URL,build:clone(row.binding.build),sourceBuild:clone(row.binding.sourceBuild),imageGraph:clone(row.binding.imageGraph),compiled:clone(row.compiled),compiledBytesVerified:true,configurationSha256:row.configurationSha256};
 }
 export async function readOriginalInquiryCarrier(controller,token){
  const facts=await readProvisionedInquiryCarrier(controller,token);

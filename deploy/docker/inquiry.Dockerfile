@@ -29,6 +29,7 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY apps/sabalan-inquiry ./
 COPY deploy/scripts/run-inquiry-with-recovery.sh /app/run-inquiry-with-recovery.sh
+COPY deploy/scripts/inquiry-compiled-browser.cjs /app/inquiry-compiled-browser.cjs
 COPY deploy/scripts/verify-inquiry-database.cjs /app/verify-inquiry-database.cjs
 COPY backend/src/services/inquiryBaseline.json /app/inquiry-baseline.json
 COPY backend/src/services/onlineInquiryWork.ts backend/src/services/onlineRuntimeScope.ts backend/src/services/onlineCaptureAdmission.ts backend/src/services/kernelWriteAdmission.ts backend/src/services/runtimeBoundaryJournal.ts backend/src/services/runtimeTaskAdmission.ts backend/src/services/runtimeWorkContext.ts /tmp/inquiry-runtime-source/

@@ -15,6 +15,17 @@ if sys.platform=='linux':spec.loader.exec_module(module)
 
 @unittest.skipUnless(sys.platform=='linux','Linux file ownership and actual fixed Node verifier required')
 class OriginalInquiryInnerTests(unittest.TestCase):
+    def test_native_start_binds_actual_compiled_selector_and_rejects_conflicting_runtime_inputs(self):
+        selected='inquiry_online_12345678';keys=['SABALAN_INQUIRY_BUILD_ID','NEXT_PUBLIC_INQUIRY_BUILD_ID','NEXT_DEPLOYMENT_ID']
+        expected={key:selected for key in keys};compiled=dict(deploymentId=selected,env=dict(NEXT_PUBLIC_INQUIRY_BUILD_ID=selected));binding=dict(deploymentId=selected,manifestSha256='a'*64,environment=expected)
+        self.assertEqual(module.runtime_build_environment(binding,compiled,{}),expected)
+        self.assertEqual(module.runtime_build_environment(binding,compiled,expected),expected)
+        for key in keys:
+            with self.assertRaises(RuntimeError):module.runtime_build_environment(binding,compiled,{key:'inquiry_other_12345678'})
+            with self.assertRaises(RuntimeError):module.runtime_build_environment(dict(binding,environment=dict(expected,**{key:'inquiry_other_12345678'})),compiled,{})
+        for wrong in [dict(compiled,deploymentId=None),dict(compiled,deploymentId='inquiry_other_12345678'),dict(compiled,env={})]:
+            with self.assertRaises(RuntimeError):module.runtime_build_environment(binding,wrong,{})
+
     def test_source_bytes_are_private_original_regular_files_and_aliases_refuse(self):
         with tempfile.TemporaryDirectory() as directory:
             file=Path(directory)/'source';file.write_bytes(b'actual source');file.chmod(0o400)

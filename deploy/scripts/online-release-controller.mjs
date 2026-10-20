@@ -567,7 +567,7 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
     try{const event=JSON.parse(line);state.events.push(event);if(event.event==='ACTOR_STARTED')state.started=event;if(event.event==='HELD')this.#held='ONLINE_ORIGINAL_INQUIRY_INNER_HELD';}catch{this.#held='ONLINE_ORIGINAL_INQUIRY_FRAME_INVALID';}}});
   child.stderr.on('data',chunk=>{state.outputBytes+=chunk.length;if(state.outputBytes>8388608)this.#held='ONLINE_ORIGINAL_INQUIRY_OUTPUT_BOUND';});
   child.once('close',(code,signal)=>{state.closed=true;state.code=code;state.signal=signal;if(state.pending)this.#held='ONLINE_ORIGINAL_INQUIRY_TRAILING_BYTES';});
-  await this.#send(state,'START',{host:facts.privateAddress,port:3001,runtimeBundleSha256:enrolled.scope.manifestSha256,generation:enrolled.generation,sqlite:facts.sqlite});
+  await this.#send(state,'START',{host:facts.privateAddress,port:3001,runtimeBundleSha256:enrolled.scope.manifestSha256,generation:enrolled.generation,sqlite:facts.sqlite,runtimeBuildIdentity:facts.runtimeBuildIdentity});
   while(!state.started||!state.events.some(row=>row.event==='READY')){assert(!this.#held&&!state.closed,'ONLINE_ORIGINAL_INQUIRY_NOT_READY');await new Promise(resolve=>setTimeout(resolve,25));}
   const ready=state.events.find(row=>row.event==='READY'),active=JSON.parse(Buffer.from(ready.nativeRawBase64,'base64'));
   assert(state.started.originalPid===state.started.guardian.pid&&sha(bytes(active))===sha(bytes(state.started.native))

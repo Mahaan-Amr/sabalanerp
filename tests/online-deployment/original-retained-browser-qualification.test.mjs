@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {validateRetainedBrowserPlan,readOriginalRetainedBrowserQualificationCompletion,assertRetainedControllerEof,validateRetainedBrowserCapacity,buildRetainedInquiryRotation} from '../../scripts/lib/original-retained-browser-qualification.mjs';
+import {validateRetainedInquiryStartupRefresh,validateRetainedInquiryProxy,assertRetainedPreActorClosure,validateRetainedBrowserPlan,readOriginalRetainedBrowserQualificationCompletion,assertRetainedControllerEof,validateRetainedBrowserCapacity,buildRetainedInquiryRotation} from '../../scripts/lib/original-retained-browser-qualification.mjs';
 test('saved JSON cannot substitute an original retained-browser completion',()=>{
  for(const value of [{},{pass:true,allOriginalChildrenClosed:true},Object.freeze({})])assert.throws(()=>readOriginalRetainedBrowserQualificationCompletion(value),/ORIGINAL_RETAINED_BROWSER_COMPLETION_UNPROVEN/);
 });
@@ -16,10 +16,19 @@ test('retained browser plan cannot supply arbitrary images, commands or controll
  const plan={format:'sabalan-original-retained-browser-plan/v1',preflightFile:'D:/sabalanerp-online-qa/fresh-preflight.json'};
  assert.deepEqual(validateRetainedBrowserPlan(plan),plan);
  const actualLegacy={...plan,legacyAugmentationReceipt:'D:/sabalanerp-online-qa/original-augmentation/image.json',legacyAugmentationSha256:'a'.repeat(64)};assert.deepEqual(validateRetainedBrowserPlan(actualLegacy),actualLegacy);assert.throws(()=>validateRetainedBrowserPlan({...actualLegacy,legacyAugmentationSha256:'caller-pass'}));
+ const refresh={...actualLegacy,startupRefreshReceipt:'D:/sabalanerp-online-qa/startup/image.json',startupRefreshSha256:'b'.repeat(64)};assert.equal(validateRetainedBrowserPlan(refresh),refresh);for(const changed of [{startupRefreshSha256:undefined},{startupRefreshReceipt:undefined},{startupRefreshSha256:'pass'}])assert.throws(()=>validateRetainedBrowserPlan({...refresh,...changed}));
  for(const field of ['image','argv','controllerFile','existingReport','sourceCommit'])assert.throws(()=>validateRetainedBrowserPlan({...plan,[field]:'caller-selected'}));
 });
+
+test('startup refresh preserves complete C1 provenance and only two frozen startup files',()=>{
+ const digest=n=>n.repeat(64),sourceCommit='a'.repeat(40),baseImage='sha256:c1ef9462f192f03f62a781b35ad13ae3de4aa780670b7638bb53a713a4d256b4',image='sha256:'+digest('b'),base={format:'sabalan-native-inquiry-image/v1',image:baseImage,sourceCommit:'c'.repeat(40),inquirySourceCommit:'d'.repeat(40),browserDeploymentId:'inquiry_actual_compiled',runtimeSourceHashes:{native:digest('c')},materialSources:{business:digest('e')}},baseArchive={rootfsDiffIds:Array.from({length:23},(_,n)=>'sha256:'+n.toString(16).padStart(64,'0'))},canonicalBefore=Object.fromEntries(Array.from({length:10},(_,n)=>['service'+n,{id:digest('f')}]));
+ const archive={index:image,platform:'sha256:'+digest('c'),config:'sha256:'+digest('d'),archiveSha256:digest('e'),archiveBytes:123456,rootfsDiffIds:[...baseArchive.rootfsDiffIds,'sha256:'+digest('a'),'sha256:'+digest('b')]},copyFiles=[['deploy/scripts/inquiry-compiled-browser.cjs','app/inquiry-compiled-browser.cjs','0644'],['deploy/scripts/run-inquiry-with-recovery.sh','app/run-inquiry-with-recovery.sh','0755']].map(([relative,target,imageMode],n)=>({relative,target:'/'+target,imageMode,bytes:100+n,sha256:digest(n?'2':'1'),workingSha256:digest(n?'4':'3')})),sourceFiles=Object.fromEntries(copyFiles.map(row=>[row.relative,{workingSha256:row.workingSha256,sha256:row.sha256,bytes:row.bytes}])),addedFileDeltas=Object.fromEntries(copyFiles.map((row,n)=>[row.target.slice(1),{sha256:row.sha256,bytes:row.bytes,mode:row.imageMode,layer:23+n}]));
+ const recipe={finalApplicationSourceCommit:sourceCommit,baseImage,baseImageReceiptSha256:'2d4259e7f3ca39c00a3d19a6e21d0dc8001a09794f4b5b4f6e0836206dcd8752',compiledBusinessRebuilt:false,cmd:['/app/run-inquiry-with-recovery.sh'],entrypointInheritedUnchanged:true,labelsInheritedNoRelabel:true,copyFiles},proof={...archive,format:'sabalan-inquiry-exact-startup-overlay-verification/v1',pass:true,productionAdmission:false,noBusinessOrCompiledRuntimeContentChanges:true,allLayersExpandedAndFullDiffIdsVerified:true,baseCompletePrefixLayers:23,addedFileDeltas},receipt={...base,image,sourceCommit,archiveSha256:archive.archiveSha256,archiveBytes:archive.archiveBytes,materialSources:{...base.materialSources,...Object.fromEntries(copyFiles.map(row=>[row.relative,row.workingSha256]))},startupRefresh:{format:'sabalan-inquiry-startup-refresh-provenance/v1',baseImage,baseImageReceiptSha256:recipe.baseImageReceiptSha256,preservedBusinessSourceCommit:base.sourceCommit,preservedCompiledGitlinkCommit:base.inquirySourceCommit,finalStartupSourceCommit:sourceCommit,compiledBusinessRebuilt:false,allBaseMaterialProvenanceInherited:true,currentMaterialSourcesOnlyOverridesTwoStartupFiles:true,canonicalBefore,canonicalAfter:structuredClone(canonicalBefore),fullBasePrefixLayers:23,helperDeltas:addedFileDeltas}},closure={format:'sabalan-original-inquiry-startup-refresh-native-closure/v1',testOnly:false,pass:true,originalClosure:{allOriginalChildrenClosed:true,interrupted:false,childCount:2},canonicalBefore,canonicalAfter:structuredClone(canonicalBefore),graph:archive,commands:[{result:{code:0,signal:null,naturalChildClosure:true,originalPid:123,outputBoundExceeded:false}}]},input={receipt,base,baseArchive,archive,recipe,proof,closure,sourceCommit,sourceFiles};
+ assert.equal(validateRetainedInquiryStartupRefresh(input),image);
+ for(const mutate of [v=>v.receipt.testOnly=true,v=>v.receipt.runtimeSourceHashes.native=digest('0'),v=>v.receipt.browserDeploymentId='guessed',v=>v.receipt.sourceCommit='f'.repeat(40),v=>v.archive.rootfsDiffIds[5]='sha256:'+digest('9'),v=>v.proof.addedFileDeltas['app/inquiry-compiled-browser.cjs'].sha256=digest('9'),v=>v.recipe.copyFiles.push({...v.recipe.copyFiles[0]}),v=>v.sourceFiles['deploy/scripts/run-inquiry-with-recovery.sh'].workingSha256=digest('8'),v=>v.closure.originalClosure.allOriginalChildrenClosed=false,v=>v.closure.commands[0].result.code=1,v=>v.closure.commands[0].result.spawnError='ENOENT',v=>v.closure.commands[0].result.streamError='EPIPE',v=>v.closure.commands[0].result.naturalChildClosure=false,v=>v.receipt.startupRefresh.canonicalAfter.service0.id=digest('9')]){const changed=JSON.parse(JSON.stringify(input));mutate(changed);assert.throws(()=>validateRetainedInquiryStartupRefresh(changed));}
+});
 test('measured working reserves refuse cap drift, OOM and insufficient VM memory',()=>{
- const M=1024*1024,valid={hostFree:1800*M,linuxMemAvailable:1700*M,cgroups:{'backend-candidate':{current:200*M,maximum:768*M,events:{oom:0,oom_kill:0}},'frontend-retained':{current:180*M,maximum:512*M,events:{oom:0,oom_kill:0}},'frontend-candidate':{current:180*M,maximum:512*M,events:{oom:0,oom_kill:0}}}};validateRetainedBrowserCapacity(valid);
+ const M=1024*1024,valid={stage:'BEFORE_SLOT_MUTATION',hostFree:1800*M,linuxMemAvailable:1700*M,cgroups:{'backend-candidate':{current:200*M,maximum:768*M,events:{oom:0,oom_kill:0}},'frontend-retained':{current:180*M,maximum:512*M,events:{oom:0,oom_kill:0}},'frontend-candidate':{current:180*M,maximum:512*M,events:{oom:0,oom_kill:0}}}};validateRetainedBrowserCapacity(valid);
  for(const mutate of [v=>v.linuxMemAvailable=1500*M,v=>v.cgroups['backend-candidate'].maximum=1024*M,v=>v.cgroups['frontend-retained'].current=300*M,v=>v.cgroups['frontend-candidate'].events.oom_kill=1]){const value=structuredClone(valid);mutate(value);assert.throws(()=>validateRetainedBrowserCapacity(value));}
 });
 
@@ -27,7 +36,7 @@ test('real Compose inherits one /tmp during Inquiry rotation and leaves other se
  skip:process.env.SABALAN_COMPOSE_CONFIG_TEST!=='1'?'Set SABALAN_COMPOSE_CONFIG_TEST=1 for existing-project Compose validation':false,
 },()=>{
  const root=path.resolve(import.meta.dirname,'../..'),base=path.join(root,'docker-compose.local.yml'),browser=path.join(root,'docker-compose.application-browser-acceptance.yml');
- const images={old:'sha256:'+'a'.repeat(64),current:'sha256:'+'b'.repeat(64)};
+ const images={old:'sha256:'+'a'.repeat(64),current:'sha256:'+'b'.repeat(64)},proxy={hostname:'inquiry-qualification.localhost',address:'172.18.0.3',containerId:'c'.repeat(64),image:'sha256:'+'d'.repeat(64),startedAt:'2026-10-20T00:00:00Z',networkId:'e'.repeat(64),networkName:'sabalanerp-local_default'};
  const env={...process.env,ONLINE_BROWSER_OLD_IMAGE:images.old,ONLINE_BROWSER_NEW_IMAGE:images.current,ONLINE_BROWSER_OLD_BUILD_ID:'erp_retained_compose_regression',ONLINE_BROWSER_NEW_BUILD_ID:'erp_current_compose_regression'};
  const parse=raw=>{try{const value=JSON.parse(raw);return Array.isArray(value)?value:[value];}catch{return raw.trim().split(/\r?\n/).map(JSON.parse);}};
  function verifyProject(){
@@ -41,7 +50,7 @@ test('real Compose inherits one /tmp during Inquiry rotation and leaves other se
  }
  const before=identities(),directory=fs.mkdtempSync(path.join(os.tmpdir(),'sabalan-inquiry-compose-'));
  try{
-  const rotation=buildRetainedInquiryRotation(images,'sabalan-acceptance-config-test','sabalan-authority-config-test');
+  const rotation=buildRetainedInquiryRotation(images,'sabalan-acceptance-config-test','sabalan-authority-config-test',proxy);
   const overlay=path.join(directory,'rotation.json');fs.writeFileSync(overlay,JSON.stringify(rotation));
   const compose=['compose','-f',base,'-f',browser,'--profile','application-browser-acceptance'];
   const baseline=docker([...compose,'config','--format','json']);assert.equal(baseline.status,0,baseline.stderr);
@@ -53,11 +62,38 @@ test('real Compose inherits one /tmp during Inquiry rotation and leaves other se
   for(const name of targets){
    const service=actual.services[name];assert.equal(service.image,images[name==='frontend-retained'?'old':'current']);
    assert.deepEqual(service.tmpfs,['/tmp','/app/.next/cache:rw,nosuid,nodev,mode=0700']);
-   assert.equal(service.read_only,true);assert.deepEqual(service.ports??[],[]);assert.equal(service.build,undefined);assert.equal(service.healthcheck.disable,true);
+   assert.deepEqual(service.extra_hosts,['inquiry-qualification.localhost=172.18.0.3']);assert.equal(service.mem_limit,String(768*1024*1024));assert.equal(service.read_only,true);assert.deepEqual(service.ports??[],[]);assert.equal(service.build,undefined);assert.equal(service.healthcheck.disable,true);
    assert.deepEqual(service.cap_drop,['ALL']);assert.deepEqual(service.security_opt,['no-new-privileges:true']);
    assert.deepEqual(service.volumes.map(row=>({target:row.target,readOnly:row.read_only??false})).sort((a,b)=>a.target.localeCompare(b.target)),[{target:'/app/online-runtime-acceptance',readOnly:false},{target:'/run/sabalan-online',readOnly:true}]);
   }
   for(const name of Object.keys(original.services).filter(name=>!targets.includes(name)))assert.deepEqual(actual.services[name],original.services[name]);
   assert.deepEqual(identities(),before,'CONFIG_ONLY_MUST_PRESERVE_ALL_TEN_CONTAINER_IDENTITIES');
  }finally{fs.rmSync(directory,{recursive:true,force:true});}
+});
+
+// A deliberate negative event may reject the pending positive waiter, but any
+// unrelated protocol error before OR after it must keep the original held.
+test('known preactor failure cannot conceal malformed frames or open streams',()=>{
+ const result={code:1,signal:null,stdoutEof:true,stderrEof:true,trailingBytes:0},owner={protocolFailure:null,events:[],actorStarted:false};
+ assertRetainedPreActorClosure(result,owner);
+ for(const changed of [{protocolFailure:Error('earlier malformed frame')},{protocolFailure:Error('later sequence mismatch')},{events:[{event:'unexpected'}]},{actorStarted:true}])assert.throws(()=>assertRetainedPreActorClosure(result,{...owner,...changed}));
+ for(const changed of [{code:0},{signal:'SIGTERM'},{stdoutEof:false},{trailingBytes:1}])assert.throws(()=>assertRetainedPreActorClosure({...result,...changed},owner));
+});
+
+test('fixed Inquiry QA memory caps follow lifecycle stages while actual reserves remain enforced',()=>{
+ const M=1048576;
+ for(const [stage,cap]of Object.entries({BEFORE_SLOT_MUTATION:512,OWNED_KEEPERS_CREATED:768,BOTH_NATIVE_READY_BEFORE_CHROME:768,ORIGINALS_CLOSED_AND_ERP_SLOTS_RESTORED:512})){
+  const value={stage,hostFree:1800*M,linuxMemAvailable:1800*M,cgroups:{'backend-candidate':{current:200*M,maximum:768*M,events:{}},'frontend-retained':{current:278*M,maximum:cap*M,events:{}},'frontend-candidate':{current:278*M,maximum:cap*M,events:{}}}};
+  if(cap===768)validateRetainedBrowserCapacity(value);else assert.throws(()=>validateRetainedBrowserCapacity(value),/INQUIRY_CGROUP_HEADROOM_REFUSED/);
+  value.cgroups['frontend-retained'].current=value.cgroups['frontend-candidate'].current=200*M;validateRetainedBrowserCapacity(value);
+  for(const wrong of [512,768,1024].filter(n=>n!==cap)){const drift=structuredClone(value);drift.cgroups['frontend-candidate'].maximum=wrong*M;assert.throws(()=>validateRetainedBrowserCapacity(drift),/INQUIRY_CGROUP_CAP_DRIFT/);}
+  for(const change of [v=>v.hostFree=1535*M,v=>v.linuxMemAvailable=1535*M,v=>v.cgroups['backend-candidate'].current=385*M,v=>v.cgroups['frontend-candidate'].current=(cap-255)*M,v=>v.cgroups['frontend-candidate'].events.oom_kill=1]){const bad=structuredClone(value);change(bad);assert.throws(()=>validateRetainedBrowserCapacity(bad));}
+  assert.throws(()=>validateRetainedBrowserCapacity({...value,stage:'caller-selected'}),/INQUIRY_CAPACITY_STAGE_UNPROVEN/);
+ }
+});
+
+test('QA proxy binds a fixed reserved hostname to measured private backend identity',()=>{
+ const proxy={hostname:'inquiry-qualification.localhost',address:'172.18.0.3',containerId:'a'.repeat(64),image:'sha256:'+'b'.repeat(64),startedAt:'2026-10-20T00:00:00Z',networkId:'c'.repeat(64),networkName:'sabalanerp-local_default'};
+ assert.equal(validateRetainedInquiryProxy(proxy),proxy);
+ for(const changed of [{hostname:'external.example'},{address:'127.0.0.1'},{address:'0.0.0.0'},{address:'8.8.8.8'},{containerId:'unknown'},{networkId:'unknown'},{networkName:'other-project'},{image:'mutable:latest'},{port:443}])assert.throws(()=>validateRetainedInquiryProxy({...proxy,...changed}));
 });

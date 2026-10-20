@@ -46,7 +46,7 @@ const snapshotName = (snapshot: unknown) => {
 const workspaceWhere = (workspace: string, filters: { subjectId?: string; loadingId?: string }): Prisma.GuardDriverQueueTurnWhereInput => {
   const where: Prisma.GuardDriverQueueTurnWhereInput = {};
   if (filters.loadingId) where.loadingId = filters.loadingId;
-  if (filters.subjectId) where.OR = [{ internalDriver: { personnelId: filters.subjectId } }, { internalDriverId: filters.subjectId }];
+  if (filters.subjectId) where.OR = [{ internalDriver: { personnelId: filters.subjectId } }, { internalDriverId: filters.subjectId }, { externalDriverId: filters.subjectId }];
   if (workspace === 'logistics' && !filters.loadingId) where.OR = [{ loadingId: { not: null } }, { allocationRevisions: { some: {} } }];
   if (workspace === 'accounting') where.allocationRevisions = { some: { candidate: { isNot: null } } };
   return where;

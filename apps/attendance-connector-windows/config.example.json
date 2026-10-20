@@ -1,0 +1,11 @@
+{
+  "ErpUrl": "http://127.0.0.1:5000",
+  "TerminalId": "configure-locally",
+  "Token": "configure-locally",
+  "DeviceAddress": "configure-locally",
+  "DevicePort": 4370,
+  "MachineNumber": 1,
+  "CommunicationKey": 0,
+  "SdkDirectory": "C:\\SabalanAttendanceTest\\Standalone SDK-6.3.1.52\\SDK\\x86",
+  "StateDirectory": "C:\\SabalanAttendance\\queue"
+}

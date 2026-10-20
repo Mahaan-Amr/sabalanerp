@@ -5,7 +5,8 @@ import vehicleRouter from "../dispatch-master-data.vehicle-operations";
 import { prisma } from "../../lib/prisma";
 
 const invoke = async (router: any, path: string, body: any, tx: any) => {
-  const route = router.stack.find(
+  const stack = router.stack.flatMap((entry: any) => entry.handle?.stack || [entry]);
+  const route = stack.find(
     (entry: any) => entry.route?.path === path && entry.route.methods.post,
   ).route;
   const original = prisma.$transaction;
@@ -40,7 +41,10 @@ const audit = {
 };
 
 test("the ordinary same-day suspension uses the actual instant instead of colliding with designation midnight", async () => {
-  const from = new Date(new Date().toISOString().slice(0, 10));
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const from = new Date(`${today}T00:00:00+03:30`);
   const driver = {
     id: "driver",
     status: "ACTIVE",
@@ -76,7 +80,7 @@ test("the ordinary same-day suspension uses the actual instant instead of collid
     "/internal-drivers/:id/eligibility",
     {
       status: "SUSPENDED",
-      effectiveFrom: from.toISOString().slice(0, 10),
+      effectiveFrom: today,
       reason: "legacy client",
     },
     tx,

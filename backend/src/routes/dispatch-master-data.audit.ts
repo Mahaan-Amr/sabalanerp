@@ -16,7 +16,7 @@ router.get('/audit/vehicle-operations/:subjectType/:subjectId', requireHrFeature
   if (!['INTERNAL_DRIVER_PROFILE', 'COMPANY_VEHICLE'].includes(req.params.subjectType)) return res.status(404).json({ success: false, error: 'Evidence subject was not found.' });
   return read('VEHICLE_OPERATIONS', req.params.subjectType, req.params.subjectId, res);
 });
-router.get('/audit/guard/:subjectType/:subjectId', requireNarrowFeatureAccess(FEATURES.SECURITY_DISPATCH_EVIDENCE_VIEW, FEATURE_PERMISSIONS.VIEW), (req, res) => {
+router.get('/audit/guard/:subjectType/:subjectId', requireHrFeature(FEATURES.HR_VEHICLE_OPERATIONS_AUDIT_VIEW, 'VIEW'), (req, res) => {
   if (!['EXTERNAL_DRIVER', 'EXTERNAL_VEHICLE'].includes(req.params.subjectType)) return res.status(404).json({ success: false, error: 'Evidence subject was not found.' });
   return read('GUARD', req.params.subjectType, req.params.subjectId, res);
 });

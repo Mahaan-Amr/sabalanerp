@@ -1,4 +1,5 @@
-import { lockHrDriverFacts } from './hrVehicleOperations';
+import { externalDriverBlockers, externalVehicleBlockers, externalOperationalReadiness } from './externalVehicleOperations';
+import { HrVehicleError, externalAssignmentScope, lockHrDriverFacts } from './hrVehicleOperations';
 import { createHash } from 'node:crypto';
 import { GuardDriverQueueTurnStatus, GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
 import { projectExternalDriverReadiness, projectExternalVehicleReadiness, projectInternalDriverReadiness } from './dispatchMasterDataPolicy';
@@ -61,20 +62,12 @@ export const isGuardQueueTurnCurrentlyReady = async (
     return readiness?.status === 'READY';
   }
   if (!turn.externalDriverId || !turn.externalVehicleId) return false;
-  const [driver, vehicle] = await Promise.all([
-    db.externalDriver.findUnique({ where: { id: turn.externalDriverId }, include: {
-      documents: true,
-      externalLinks: { include: { personnel: { include: { hrEmploymentRelationships: true, internalDriverProfile: { include: { eligibilityPeriods: true } } } } } },
-    } }),
-    db.externalVehicle.findUnique({ where: { id: turn.externalVehicleId }, include: { documents: true, plates: { where: activeAt(at), take: 1 } } }),
-  ]);
-  if (!driver || !vehicle) return false;
-  const continuity = driver.externalLinks.some(({ personnel }) => personnel.isActive && !personnel.archivedAt && (
-    personnel.hrEmploymentRelationships.some((item) => item.status === 'ACTIVE' && item.effectiveFrom <= at && (!item.effectiveTo || item.effectiveTo > at))
-    || Boolean(personnel.internalDriverProfile?.eligibilityPeriods.some((item) => item.status === 'ELIGIBLE' && item.effectiveFrom <= at && (!item.effectiveTo || item.effectiveTo > at)))
-  ));
-  return projectExternalDriverReadiness({ lifecycleStatus: driver.status, documents: driver.documents, continuityLinkedToActiveInternalIdentity: continuity }, at).status === 'READY'
-    && projectExternalVehicleReadiness({ lifecycleStatus: vehicle.status, documents: vehicle.documents, hasCurrentPlate: Boolean(vehicle.plates[0]) }, at).status === 'READY';
+  try {
+    if (!('$transaction' in db)) await lockHrDriverFacts(externalAssignmentScope(db), turn.externalDriverId, at, turn.externalVehicleId);
+    await externalOperationalReadiness(db, turn.externalDriverId, turn.externalVehicleId, at);
+    return true;
+  } catch (error) { if (error instanceof HrVehicleError) return false; throw error; }
+
 };
 
 export const appendQueueEvent = async (tx: Prisma.TransactionClient, input: {
@@ -149,29 +142,9 @@ const buildInternalAdmission = async (tx: Prisma.TransactionClient, driverId: st
 const buildExternalAdmission = async (tx: Prisma.TransactionClient, driverId: string, vehicleId: string, actorId: string, admittedAt: Date) => {
   const lockKeys = [`GUARD_QUEUE:EXTERNAL_DRIVER:${driverId}`, `GUARD_QUEUE:EXTERNAL_VEHICLE:${vehicleId}`].sort();
   for (const key of lockKeys) await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', key);
-  const [driver, vehicle] = await Promise.all([
-    tx.externalDriver.findUnique({ where: { id: driverId }, include: {
-      documents: { orderBy: { recordedAt: 'desc' } },
-      externalLinks: { include: { personnel: { include: { hrEmploymentRelationships: true, internalDriverProfile: { include: { eligibilityPeriods: true } } } } } },
-    } }),
-    tx.externalVehicle.findUnique({ where: { id: vehicleId }, include: {
-      plates: { where: activeAt(admittedAt), orderBy: { effectiveFrom: 'desc' }, take: 1 }, documents: { orderBy: { recordedAt: 'desc' } },
-    } }),
-  ]);
-  if (!driver) throw new GuardQueueValidationError('External driver was not found.');
-  if (!vehicle) throw new GuardQueueValidationError('External vehicle was not found.');
-  const continuityLinkedToActiveInternalIdentity = driver.externalLinks.some((link) => {
-    const personnel = link.personnel;
-    const employment = personnel.hrEmploymentRelationships.some((item) => item.status === 'ACTIVE' && item.effectiveFrom <= admittedAt && (!item.effectiveTo || item.effectiveTo > admittedAt));
-    const eligibility = personnel.internalDriverProfile?.eligibilityPeriods.some((item) => item.status === 'ELIGIBLE' && item.effectiveFrom <= admittedAt && (!item.effectiveTo || item.effectiveTo > admittedAt));
-    return personnel.isActive && !personnel.archivedAt && (employment || eligibility);
-  });
-  const driverReadiness = projectExternalDriverReadiness({ lifecycleStatus: driver.status, documents: driver.documents, continuityLinkedToActiveInternalIdentity }, admittedAt);
-  const vehicleReadiness = projectExternalVehicleReadiness({ lifecycleStatus: vehicle.status, hasCurrentPlate: Boolean(vehicle.plates[0]), documents: vehicle.documents }, admittedAt);
-  const plate = vehicle.plates[0];
-  if (driverReadiness.status !== 'READY' || vehicleReadiness.status !== 'READY' || !plate) {
-    throw new GuardQueueValidationError(`External driver-vehicle combination is not currently ready for admission: ${[...driverReadiness.blockers, ...vehicleReadiness.blockers].join(', ')}`);
-  }
+  await lockHrDriverFacts(externalAssignmentScope(tx), driverId, admittedAt, vehicleId || undefined);
+  const { driver, vehicle, assignment } = await externalOperationalReadiness(tx, driverId, vehicleId || undefined, admittedAt);
+  const plate = vehicle.plates.find(p => p.effectiveFrom <= admittedAt && (!p.effectiveTo || p.effectiveTo > admittedAt))!;
   const driverDocument = driver.documents.find((document) => document.documentType === 'DRIVING_LICENCE' && (!document.expiresAt || document.expiresAt > admittedAt))!;
   const vehicleDocument = vehicle.documents.find((document) => document.documentType === 'VEHICLE_REGISTRATION' && (!document.expiresAt || document.expiresAt > admittedAt))!;
   const documents = [
@@ -183,7 +156,7 @@ const buildExternalAdmission = async (tx: Prisma.TransactionClient, driverId: st
     driver: { source: 'GUARD_EXTERNAL', id: driver.id, firstName: driver.firstName, lastName: driver.lastName, nationalCode: driver.nationalCode, phone: driver.phone },
     vehicle: { source: 'GUARD_EXTERNAL', id: vehicle.id, vehicleType: vehicle.vehicleType },
     plate,
-    readiness: { status: 'READY', checkedAt: admittedAt, driver: driverReadiness, vehicle: vehicleReadiness },
+    readiness: { status: 'READY', checkedAt: admittedAt, assignmentId: assignment.id, biometricRequired: true },
     documents,
   });
   return { driver, vehicle, snapshot };
@@ -196,7 +169,7 @@ export const admitGuardDriverQueueTurn = async (prisma: PrismaClient, input: {
   actorId: string;
 }) => prisma.$transaction(async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);
-  if (input.source === GuardDriverSource.INTERNAL) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('HR_VEHICLE_OPERATIONS'))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('HR_VEHICLE_OPERATIONS'))`;
   const admittedAt = new Date();
   const resolved = input.source === GuardDriverSource.INTERNAL
     ? await buildInternalAdmission(tx, input.driverId, input.actorId, admittedAt)
@@ -443,6 +416,7 @@ export const listGuardQueueAdmissionOptions = async (prisma: PrismaClient, at = 
       vehicleAssignments: { orderBy: { effectiveFrom: 'desc' }, include: { vehicle: { include: { plates: { orderBy: { effectiveFrom: 'desc' } } } } } },
     }, orderBy: { createdAt: 'asc' } }),
     prisma.externalDriver.findMany({ where: { id: { notIn: usedExternalDrivers } }, include: {
+      assignments: { where: activeAt(at) }, biometricEnrollments: { where: { status: "ACTIVE" }, select: { id: true } },
       documents: { orderBy: { recordedAt: 'desc' } },
       externalLinks: { include: { personnel: { include: { hrEmploymentRelationships: true, internalDriverProfile: { include: { eligibilityPeriods: true } } } } } },
     }, orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }] }),
@@ -468,20 +442,14 @@ export const listGuardQueueAdmissionOptions = async (prisma: PrismaClient, at = 
       fleetCode: assignment.vehicle.fleetCode, plate: plate.plate,
     }];
   });
-  const readyExternalDrivers = externalDrivers.filter((driver) => {
-    const continuity = driver.externalLinks.some((link) => {
-      const personnel = link.personnel;
-      return personnel.isActive && !personnel.archivedAt && (
-        personnel.hrEmploymentRelationships.some((item) => item.status === 'ACTIVE' && item.effectiveFrom <= at && (!item.effectiveTo || item.effectiveTo > at))
-        || Boolean(personnel.internalDriverProfile?.eligibilityPeriods.some((item) => item.status === 'ELIGIBLE' && item.effectiveFrom <= at && (!item.effectiveTo || item.effectiveTo > at)))
-      );
-    });
-    return projectExternalDriverReadiness({ lifecycleStatus: driver.status, documents: driver.documents, continuityLinkedToActiveInternalIdentity: continuity }, at).status === 'READY';
-  }).map((driver) => ({ id: driver.id, firstName: driver.firstName, lastName: driver.lastName, nationalCode: driver.nationalCode, phone: driver.phone }));
-  const readyExternalVehicles = externalVehicles.flatMap((vehicle) => {
-    const plate = vehicle.plates.find((item) => item.effectiveFrom <= at && (!item.effectiveTo || item.effectiveTo > at));
-    const readiness = projectExternalVehicleReadiness({ lifecycleStatus: vehicle.status, hasCurrentPlate: Boolean(plate), documents: vehicle.documents }, at);
-    return readiness.status === 'READY' && plate ? [{ id: vehicle.id, vehicleType: vehicle.vehicleType, plate: plate.plate }] : [];
+  const readyExternalVehicles = externalVehicles.flatMap(vehicle => {
+    const plate = vehicle.plates.find(p => p.effectiveFrom <= at && (!p.effectiveTo || p.effectiveTo > at));
+    return !externalVehicleBlockers(vehicle, at).length && plate ? [{ id: vehicle.id, vehicleType: vehicle.vehicleType, plate: plate.plate }] : [];
+  });
+  const readyExternalDrivers = externalDrivers.flatMap(driver => {
+    const assignment = driver.assignments[0];
+    if (externalDriverBlockers(driver, at).length || !driver.biometricEnrollments.length || !assignment || !readyExternalVehicles.some(v => v.id === assignment.vehicleId)) return [];
+    return [{ id: driver.id, firstName: driver.firstName, lastName: driver.lastName, vehicleId: assignment.vehicleId, assignmentId: assignment.id }];
   });
   return { internalAssignments, externalDrivers: readyExternalDrivers, externalVehicles: readyExternalVehicles };
 };

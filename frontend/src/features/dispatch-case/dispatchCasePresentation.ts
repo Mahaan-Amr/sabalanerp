@@ -117,6 +117,8 @@ const valueLabel = (value: unknown): string => {
   if (typeof value === "number") return persianDigits(value);
   if (typeof value === "string") {
     const methodLabels: Record<string, string> = {
+      EXTERNAL_BIOMETRIC: "اثر انگشت راننده بیرونی",
+      EXTERNAL_FALLBACK: "روش جایگزین راننده بیرونی",
       INTERNAL_BIOMETRIC: "اثر انگشت راننده داخلی",
       EXTERNAL_OTP_GUARD: "رمز یک‌بارمصرف با تأیید گارد",
       INTERNAL_FALLBACK: "روش جایگزین راننده داخلی",

@@ -9,6 +9,8 @@ test('internal-driver enrollment requires neither consent nor a governance polic
   const enrollment = { id: 'enrollment-1', personnelId: 'personnel-1', status: 'ACTIVE', enrolledAt: new Date('2026-09-19T08:00:00Z') };
   const templates: Array<Record<string, unknown>> = [];
   const tx = {
+    personnel: { findUnique: async () => ({ id: 'personnel-1', internalDriverProfile: { id: 'driver-1' } }) },
+    $executeRaw: async () => undefined,
     $executeRawUnsafe: async () => undefined,
     internalDriverProfile: { findUnique: async () => ({ id: 'driver-1', status: 'ACTIVE', personnel: { isActive: true }, eligibilityPeriods: [{ status: 'ELIGIBLE' }] }) },
     dispatchLifecycleAudit: { findFirst: async () => null, create: async () => undefined },

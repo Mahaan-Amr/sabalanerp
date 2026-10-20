@@ -19,12 +19,14 @@ export type PersonnelAttendanceSourceRow = {
   personnelLastName: string | null;
   personnel?: { firstName: string; lastName: string } | null;
   employee?: { firstName: string; lastName: string; personnelId: string | null } | null;
-  intervals: Array<{ enteredAt: Date; exitedAt: Date | null; status: AttendanceIntervalStatus | string }>;
+  intervals: Array<{ enteredAt: Date | null; exitedAt: Date | null; status: AttendanceIntervalStatus | string; exitUnknown?: boolean; revision?: number; confirmedRevision?: number }>;
 };
 
 export type PersonnelAttendanceDay = {
   date: string;
-  intervals: Array<{ enteredAt: string; exitedAt: string | null }>;
+  intervals: Array<{ enteredAt: string | null; exitedAt: string | null }>;
+  durationUnknown?: boolean;
+  provisional?: boolean;
   grossMinutes: number;
   netMinutes: number;
 };
@@ -34,6 +36,8 @@ export type PersonnelAttendancePerson = {
   name: string;
   personnelIds: string[];
   days: PersonnelAttendanceDay[];
+  durationUnknown?: boolean;
+  provisional?: boolean;
   grossMinutes: number;
   netMinutes: number;
   daysWithMovement: number;
@@ -113,8 +117,10 @@ export function buildPersonnelAttendanceReport(rows: PersonnelAttendanceSourceRo
     if (!group.days.has(date)) group.days.set(date, { date, intervals: [], grossMinutes: 0, netMinutes: 0 });
     const day = group.days.get(date)!;
     for (const interval of valid) {
-      day.intervals.push({ enteredAt: interval.enteredAt.toISOString(), exitedAt: interval.exitedAt?.toISOString() || null });
-      if (!interval.exitedAt) { openIntervals++; continue; }
+      if (!interval.enteredAt || !interval.exitedAt || interval.exitUnknown) day.durationUnknown = true;
+      if (interval.revision !== undefined && interval.revision !== interval.confirmedRevision) day.provisional = true;
+      day.intervals.push({ enteredAt: interval.enteredAt?.toISOString() || null, exitedAt: interval.exitedAt?.toISOString() || null });
+      if (!interval.enteredAt || !interval.exitedAt || interval.exitUnknown) { openIntervals++; continue; }
       const minutes = Math.floor((interval.exitedAt.getTime() - interval.enteredAt.getTime()) / 60_000);
       if (minutes < 0) throw new Error('بازه تردد با زمان خروج پیش از ورود یافت شد.');
       day.grossMinutes += minutes;
@@ -123,11 +129,12 @@ export function buildPersonnelAttendanceReport(rows: PersonnelAttendanceSourceRo
   const reportPeople: PersonnelAttendancePerson[] = [...groups].map(([key, group]) => {
     const days = [...group.days.values()].sort((a, b) => a.date.localeCompare(b.date));
     for (const day of days) {
-      day.intervals.sort((a, b) => a.enteredAt.localeCompare(b.enteredAt));
+      day.intervals.sort((a, b) => a.enteredAt && b.enteredAt ? a.enteredAt.localeCompare(b.enteredAt) : a.enteredAt ? -1 : b.enteredAt ? 1 : 0);
       day.netMinutes = Math.max(0, day.grossMinutes - options.restMinutes);
     }
     return {
       key, name: group.name, personnelIds: [...group.ids], days,
+      durationUnknown: days.some(d => d.durationUnknown), provisional: days.some(d => d.provisional),
       grossMinutes: days.reduce((sum, day) => sum + day.grossMinutes, 0),
       netMinutes: days.reduce((sum, day) => sum + day.netMinutes, 0),
       daysWithMovement: days.filter((day) => day.intervals.length > 0).length,

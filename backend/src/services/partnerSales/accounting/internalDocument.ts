@@ -1,3 +1,4 @@
+import { readPartnerCustomerSignature } from './customerSignature';
 import { FinancialRecordKind, Prisma } from '@prisma/client';
 import { renderContractHtml, renderContractPdfHeaderTemplate, type ContractCustomPrintOptions, type ContractPrintVariant } from '../../../utils/printTemplate';
 import { randomUUID } from 'node:crypto';
@@ -66,6 +67,7 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
     return {
       financialRecords: caseRecords.map(item => ({ id: item.id, status: item.status, amount: item.amount.toString(),
         currency: item.currency, systemInvoiceNumber: item.systemInvoiceNumber })), voidWorkflows,
+      customerSignature: await readPartnerCustomerSignature(scope.database, caseId, actorUserId),
       commercial: await readPartnerCommercialState(scope.database, caseId), caseState: sale?.state, receivedAmount: received.toFixed(), remainingAmount: remaining.toFixed(),
       id: record.id, owner: sale ? { caseId, revision: sale.headRevision, integrityHash: sale.integrityHash } : undefined, status: record.status, amount: record.amount.toString(),
       currency: record.currency, createdAt: record.createdAt,

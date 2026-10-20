@@ -119,7 +119,7 @@ export class PhysicalGateExitService {
       await assertOrdinaryContractsDispatchEligible(tx, revision.lines.map(line => line.sourceContractId), PhysicalGateExitConflictError);
       await assertPartnerCommercialDispatchEligible(tx, [revision.partnerCaseId, ...revision.lines.map(line => line.partnerCaseId)], PhysicalGateExitConflictError);
       const turn = revision.queueTurn;
-      if (turn.driverSource === 'INTERNAL') {
+      {
         await lockHrVehicleOperations(tx);
         if (!await isGuardQueueTurnCurrentlyReady(tx, turn, at)) throw new PhysicalGateExitConflictError('خروج مجاز نیست؛ شرایط رانندگی یا خودروی پرونده معتبر نیست. صلاحیت، گواهینامه و تخصیص جاری را بررسی کنید.');
       }

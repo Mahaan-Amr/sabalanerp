@@ -41,6 +41,7 @@ import personnelRoutes from "./routes/personnel";
 import dashboardRoutes from "./routes/dashboard";
 import personalRoutes from "./routes/personal";
 import securityRoutes from "./routes/security";
+import attendanceDeviceRoutes from "./routes/attendance-device";
 import sabalanCalendarRoutes from "./routes/sabalan-calendar";
 
 // Import workspace routes
@@ -284,7 +285,8 @@ function createHttpApplication({ runtimeRole, isShuttingDown, assertAdmission,re
   app.use("/api/sabalan-calendar", sabalanCalendarRoutes);
 
   // Workspace-specific routes
-  app.use("/api/security", securityRoutes);
+  app.use("/api/attendance-device", attendanceDeviceRoutes);
+app.use("/api/security", securityRoutes);
 
   // Workspace-specific routes
   if (!isProduction) console.log("? Registering workspace routes...");

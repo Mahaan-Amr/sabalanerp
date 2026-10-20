@@ -40,7 +40,7 @@ services:
     volumes:
       - clamav_database:/var/lib/clamav
     healthcheck:
-      test: ["CMD-SHELL", "clamdscan --ping=1"]
+      test: ["CMD-SHELL", "if command -v sabalan-clamav-health >/dev/null; then sabalan-clamav-health; else clamdscan --ping=1; fi"]
       interval: 15s
       timeout: 10s
       retries: 40
@@ -183,6 +183,7 @@ services:
       SHIPMENT_STATEMENT_INCIDENT_CONTACTS: ${SHIPMENT_STATEMENT_INCIDENT_CONTACTS:-}
       SHIPMENT_STATEMENT_MONITORING_CHECKS: ${SHIPMENT_STATEMENT_MONITORING_CHECKS:-}
     volumes:
+      - clamav_database:/app/recovery-sources/clamav
       - ${DEPLOYMENT_SECRET_DIR:-./deploy/secrets}:/run/deployment-secrets:ro
       - ${DEPLOYMENT_REMOTE_MOUNT_HOST:-./backups/remote-checkpoints}:/app/deployment-remote
       - ${DEPLOYMENT_REPORT_DIR_HOST:-./reports/deploy}:/app/deployment-reports

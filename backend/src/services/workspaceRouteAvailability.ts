@@ -34,6 +34,8 @@ const rules: Rule[] = [
   { pattern: /^\/dashboard\/hr\/users/, workspace: 'hr', features: ['USER_ADMINISTRATION'] },
   { pattern: /^\/dashboard\/hr\/migration/, workspace: 'hr', features: ['DATA_MIGRATION_RECONCILIATION'] },
   { pattern: /^\/dashboard\/hr\/(?:tasks|duties)/, workspace: 'hr', features: ['HR_WORK_MANAGEMENT'] },
+  { pattern: /^\/dashboard\/hr\/external-drivers/, workspace: 'hr', features: ['hr_vehicle_operations_view'] },
+  { pattern: /^\/dashboard\/security\/(?:external-registry|external-drivers)/, workspace: 'hr', features: ['hr_vehicle_operations_view'] },
   { pattern: /^\/dashboard\/hr\/vehicle-operations/, workspace: 'hr', features: ['hr_internal_drivers_view', 'hr_vehicle_operations_view', 'hr_driver_biometric_audit_view'] },
   { pattern: /^\/dashboard\/hr\/personnel\/performance(?:\/|$)/, workspace: 'hr', features: [...PERFORMANCE_ACTION_PERMISSION_CODES] },
   { pattern: /^\/dashboard\/hr\/personnel/, workspace: 'hr', features: ['PERSONNEL'] },
@@ -73,7 +75,7 @@ const rules: Rule[] = [
   { pattern: /^\/dashboard\/security\/shifts/, workspace: 'security', features: ['security_shifts_view'] },
   { pattern: /^\/dashboard\/security\/attendance/, workspace: 'security', features: ['security_attendance_daily_view'] },
   { pattern: /^\/dashboard\/security\/exceptions/, workspace: 'security', features: ['security_exceptions_view'] },
-  { pattern: /^\/dashboard\/security\/(?:external-registry|vehicles)/, workspace: 'security', features: ['security_external_drivers_view'] },
+  { pattern: /^\/dashboard\/security\/vehicles/, workspace: 'security', features: ['security_external_drivers_view'] },
   { pattern: /^\/dashboard\/security\/(?:personnel|reports|supervisor-reports|settings)/, workspace: 'security', features: ['security_personnel_view'] },
   { pattern: /^\/dashboard\/bi\//, workspace: 'bi', features: ['bi_dashboard_view'] },
 ];

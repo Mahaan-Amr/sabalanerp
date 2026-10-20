@@ -1,3 +1,4 @@
+import { readPartnerCustomerSignature } from '../services/partnerSales/accounting/customerSignature';
 import { readPartnerCommercialState, acceptPartnerCustomer } from '../services/partnerSales/cases/commercialLifecycle';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { hasSharedOperationAuthority } from '../services/partnerSales/authorization/sharedOperationAuthority';
@@ -66,7 +67,7 @@ router.get('/commercial-candidates', guarded(async (request, response) => {
         owner: { caseId: root.id, revision: root.headRevision, integrityHash: root.integrityHash }, commercial,
         canRegister: write.ok && commercial.status === 'FINAL' &&
           await hasSharedOperationAuthority(tx, request.user!.id, 'accounting', 'accounting_invoice_candidates_manage'),
-        canPaper: write.ok && capabilities.paper && commercial.status === 'FINAL' && !commercial.customerAccepted });
+        canPaper: (await readPartnerCustomerSignature(tx, root.id, request.user!.id))?.canRecordPaperSignature === true });
     }
     return { ok: true as const, value: rows };
   });
@@ -79,7 +80,7 @@ router.post('/:caseId/customer-paper-signature', guarded(async (request, respons
     const result = await prisma.$transaction(async tx => {
       const allowed = await createAuditedPartnerAuthorization(tx, { actorId: request.user!.id, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: correlation(request), reason: 'بررسی مجوز اقدام حسابداری پرونده همکار' }).authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: request.params.caseId });
       if (!allowed.ok) return allowed;
-      if ((await readPartnerCommercialState(tx, request.params.caseId))?.status !== 'FINAL') return { ok: false as const, error: partnerError('STATE_CONFLICT') };
+      if (!(await readPartnerCustomerSignature(tx, request.params.caseId, request.user!.id))?.canRecordPaperSignature) return { ok: false as const, error: partnerError('STATE_CONFLICT') };
       if (!(await readPartnerCommercialAccountingCapabilities(tx, request.user!.id)).paper) return { ok: false as const, error: partnerError('FORBIDDEN') };
       const contract = await acceptPartnerCustomer(tx, { caseId: request.params.caseId, revision, actorId: request.user!.id, method: 'PAPER' });
       return { ok: true as const, value: { revision: contract.commercialRevision } };

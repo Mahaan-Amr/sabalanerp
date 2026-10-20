@@ -851,12 +851,13 @@ test('Partner CRM commands use CAS and idempotency while list/count/detail remai
         authorize: authorize(partnerId, partnerId, 'PARTNER'), notifyTransfer: async () => undefined });
 
       const createBase = { schemaVersion: 1 as const, commandId: `create-${suffix}`, correlationId: `corr-${suffix}`,
-        firstName: 'مشتری', lastName: 'اختصاصی', customerType: 'Individual' as const, city: 'تهران',
+        firstName: 'مشتری', lastName: 'اختصاصی', activityCategory: 'BUILDER', customerType: 'Individual' as const, city: 'تهران',
         phone: '09123334455', reason: 'ثبت مشتری توسط مالک جاری', idempotencyKey: `create-key-${suffix}` };
       const createCommand = { ...createBase, payloadHash: await intentHash(createBase) };
       const created = await service.createCustomer(createCommand);
       assert.equal(created.ok, true);
       if (!created.ok) throw new Error('customer create expected');
+      assert.equal((created.value.customer as PartnerCustomerSummary).activityCategory, 'BUILDER');
       const replay = await service.createCustomer(createCommand);
       assert.equal(replay.ok, true);
       assert.equal(await tx.crmCustomer.count({ where: { partnerOwnerProfileId: partnerId } }), 1);
@@ -949,7 +950,7 @@ test('Partner contract Customer creation atomically creates one canonical Custom
         correlationId: `contract-customer-correlation-${suffix}`,
         idempotencyKey: `contract-customer-key-${suffix}`,
         reason: 'ثبت اتمیک مشتری و پروژه قرارداد فروش همکار',
-        customer: { firstName: 'مشتری', lastName: 'قراردادی', customerType: 'Individual' as const,
+        customer: { firstName: 'مشتری', lastName: 'قراردادی', activityCategory: 'ARCHITECT', customerType: 'Individual' as const,
           phoneNumber1: '09124445566', nationalCode: '0012345678' },
         project: { projectName: 'پروژه مشتری', address: 'تهران، نشانی پروژه', city: 'تهران',
           projectManagerName: 'مدیر پروژه', marketerFirstName: 'بازاریاب' },
@@ -958,6 +959,7 @@ test('Partner contract Customer creation atomically creates one canonical Custom
       const created = await service.createContractCustomer(command);
       assert.equal(created.ok, true);
       if (!created.ok) throw new Error('contract Customer creation expected');
+      assert.equal((created.value.customer as PartnerCustomerSummary).activityCategory, 'ARCHITECT');
       const replay = await service.createContractCustomer(command);
       assert.equal(replay.ok, true);
       assert.equal(await tx.crmCustomer.count({ where: { partnerOwnerProfileId: partnerId } }), 1);

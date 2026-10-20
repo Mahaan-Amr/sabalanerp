@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { recordCustomerActivityCategory } from '../../customerActivityCategory';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { DuplicateCustomerMatchSchema, PartnerCommandSchema, canonicalHash, partnerError,
   type DuplicateCustomerMatch, type PartnerActionV2, type PermissionContext, type Result } from '@sabalanerp/partner-sales-contracts';
@@ -41,7 +42,7 @@ async function useProfile(tx: Prisma.TransactionClient, profileId: string) {
 }
 
 function customerSummary(row: { id: string; partnerRevision: number | null; firstName: string; lastName: string;
-  companyName: string | null; customerType: string; status: string; isBlacklisted: boolean; isLocked: boolean;
+  companyName: string | null; activityCategory: string | null; customerType: string; status: string; isBlacklisted: boolean; isLocked: boolean;
   nationalCode: string | null; city: string | null; address: string | null;
   ownerUser?: { id: string; firstName: string; lastName: string } | null;
   phoneNumbers: { number: string; isPrimary: boolean }[]; _count: { potentialProjects: number } }): PartnerCustomerSummary | undefined {
@@ -53,7 +54,7 @@ function customerSummary(row: { id: string; partnerRevision: number | null; firs
     ...(row.companyName ? { companyName: row.companyName } : {}),
     customerType: row.customerType === 'Government' || row.customerType === 'دولتی'
       ? 'Government' : personType(row.customerType) === 'LEGAL' ? 'Company' : 'Individual',
-    personType: personType(row.customerType), status: row.status, isBlacklisted: row.isBlacklisted,
+    activityCategory: row.activityCategory, personType: personType(row.customerType), status: row.status, isBlacklisted: row.isBlacklisted,
     isLocked: row.isLocked, ...(row.nationalCode ? { nationalCode: row.nationalCode } : {}),
     ...(row.city ? { city: row.city } : {}), ...(row.address ? { address: row.address } : {}),
     ...(row.ownerUser ? { responsibleSeller: { id: row.ownerUser.id,
@@ -98,7 +99,7 @@ function nextActionView(row: { id: string; potentialProjectId: string | null; pa
 }
 
 const customerSelect = { id: true, isActive: true, partnerRevision: true, firstName: true, lastName: true, companyName: true,
-  customerType: true, status: true, isBlacklisted: true, isLocked: true, nationalCode: true,
+  customerType: true, activityCategory: true, status: true, isBlacklisted: true, isLocked: true, nationalCode: true,
   city: true, address: true, ownerUserId: true, partnerOwnerProfileId: true,
   ownerUser: { select: { id: true, firstName: true, lastName: true } },
   _count: { select: { potentialProjects: { where: { isActive: true } } } },
@@ -294,11 +295,12 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
         if (duplicate) return { ok: false as const, error: partnerError('STATE_CONFLICT') };
         await useProfile(tx, profile.id);
         const created = await tx.crmCustomer.create({ data: { id: randomUUID(), firstName: command.firstName,
-          lastName: command.lastName, companyName: command.companyName, customerType: command.customerType,
+          lastName: command.lastName, companyName: command.companyName, customerType: command.customerType, activityCategory: command.activityCategory,
           city: command.city, address: command.address, nationalCode, ownerUserId: profile.userId,
           partnerOwnerProfileId: profile.id, partnerRevision: 1, createdBy: dependencies.actorId,
           phoneNumbers: { create: { id: randomUUID(), number: phone, type: 'mobile', isPrimary: true } } },
           select: customerSelect });
+        await recordCustomerActivityCategory(tx, created.id, dependencies.actorId, null, command.activityCategory);
         const summary = customerSummary(created); if (!summary) return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
         const outcome = { commandId: command.commandId, customer: summary };
         await tx.partnerCommandOutcome.create({ data: { id: randomUUID(), actorId: dependencies.actorId, operation,
@@ -348,6 +350,7 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
           lastName: command.customer.lastName,
           companyName: command.customer.companyName,
           customerType: command.customer.customerType,
+          activityCategory: command.customer.activityCategory,
           nationalCode,
           brandName: command.customer.brandName,
           homeAddress: command.customer.homeAddress,
@@ -389,6 +392,7 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
               ? digits(command.project.marketerPhoneNumber) : undefined,
           } },
         }, select: customerSelect });
+        await recordCustomerActivityCategory(tx, created.id, dependencies.actorId, null, command.customer.activityCategory);
         const customer = customerSummary(created);
         if (!customer) return { ok: false as const, error: partnerError('INTEGRITY_CONFLICT') };
         const outcome = { commandId: command.commandId, customer,
@@ -470,6 +474,7 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
         const profile = await currentProfile(tx, dependencies.actorId, true);
         if (!profile || profile.id !== (await tx.crmCustomer.findUnique({ where: { id: command.customerId },
           select: { partnerOwnerProfileId: true } }))?.partnerOwnerProfileId) return { ok: false as const, error: partnerError('NOT_FOUND') };
+        const before = await tx.crmCustomer.findUniqueOrThrow({ where: { id: command.customerId }, select: { activityCategory: true } });
         const phone = digits(command.phone), nationalCode = command.nationalCode ? digits(command.nationalCode) : undefined;
         const duplicate = await tx.crmCustomer.findFirst({ where: { id: { not: command.customerId }, isActive: true, OR: [
           { phoneNumbers: { some: { number: phone, isActive: true } } }, ...(nationalCode ? [{ nationalCode }] : []),
@@ -478,12 +483,13 @@ export function createPartnerCrmService(dependencies: { database: PrismaClient; 
         await useProfile(tx, profile.id);
         const written = await tx.crmCustomer.updateMany({ where: { id: command.customerId, partnerRevision: command.expectedRevision,
           partnerOwnerProfileId: profile.id, ownerUserId: profile.userId }, data: { firstName: command.firstName,
-          lastName: command.lastName, companyName: command.companyName, customerType: command.customerType,
+          lastName: command.lastName, companyName: command.companyName, customerType: command.customerType, activityCategory: command.activityCategory,
           city: command.city, address: command.address, nationalCode,
           ...(command.isBlacklisted === undefined ? {} : { isBlacklisted: command.isBlacklisted }),
           ...(command.isLocked === undefined ? {} : { isLocked: command.isLocked }),
           partnerRevision: { increment: 1 }, updatedBy: dependencies.actorId } });
         if (written.count !== 1) return { ok: false as const, error: partnerError('ROW_STALE') };
+        await recordCustomerActivityCategory(tx, command.customerId, dependencies.actorId, before.activityCategory, command.activityCategory);
         const primary = await tx.phoneNumber.findFirst({ where: { customerId: command.customerId, isPrimary: true, isActive: true },
           orderBy: { id: 'asc' } });
         if (primary) await tx.phoneNumber.update({ where: { id: primary.id }, data: { number: phone } });

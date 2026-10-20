@@ -3069,6 +3069,10 @@ _Avoid_: rewriting the visible meaning of historical attendance, dropping old us
 A login identity for accessing Sabalan ERP. Every system user should be linked to an organizational personnel record, while many personnel records may have no system user.
 _Avoid_: using user accounts as the workforce roster, creating login access just to record operational attendance, or keeping user-only people outside the personnel roster
 
+**نام جاری فرد سازمانی**:
+نام و نام خانوادگی فعلی فرد در پرونده پرسنلی و حساب سامانه متصل او؛ اصلاح نام از هر یک از این دو حوزه به همان فرد مربوط است و نام ثبت‌شده در اسناد تاریخی را جایگزین نمی‌کند.
+_Avoid_: نام مستقل و ناسازگار برای حساب و پرسنل متصل، یکی‌دانستن نام با شناسه ورود، یا تشخیص هویت صرفاً بر اساس تشابه نام
+
 **اتصال کاربر به پرسنل**:
 Creating a system user should default to creating or linking the corresponding organizational personnel from the user's name and department, while also allowing admins to attach the user to an existing personnel record. One personnel record may be linked to at most one system user.
 _Avoid_: creating duplicate personnel when a matching same-department person already exists, forcing a login account for existing non-user personnel, or allowing multiple users to represent the same personnel record
@@ -3163,6 +3167,34 @@ _Avoid_: deriving company attendance from the A/B/C shift plan or workspace acce
 An empty attendance population means no personnel are members of فهرست حضور و غیاب گارد for the selected date. Attendance pages and metrics show no people and guide managers to configure the roster instead of falling back to A/B/C guards, all active personnel, or access-bearing users.
 _Avoid_: calculating attendance from an unconfigured population, silently loading another population, or treating an empty roster as a missing shift plan
 
+**اتصال فرد به دستگاه حضور و غیاب**:
+رابطه مشخص میان هویت فرد در دستگاه حضور و غیاب و پرونده پرسنلی او در سبلان برای انتساب ترددهای دستگاه به همان فرد؛ این رابطه با عضویت در فهرست حضور و غیاب گارد تفاوت دارد.
+_Avoid_: تطبیق قطعی صرفاً از روی نام، یکی‌دانستن کد دستگاه با شناسه پرونده پرسنلی، یا عضویت خودکار در فهرست گارد
+
+**خارج‌کردن فرد از ثبت خودکار حضور و غیاب**:
+متوقف‌کردن ثبت خودکار ترددهای فرد از دستگاه، با حفظ سابقه و امکان ثبت دستی طبق شرایط و مجوزهای گارد؛ این اقدام عضویت او در فهرست گارد را تغییر نمی‌دهد و حضور باز او را نمی‌بندد.
+_Avoid_: حذف پرسنل یا سوابق، حذف کاربر دستگاه، خروج خودکار از فهرست گارد، یا ساختن خروج فرضی
+
+**وضعیت اولیه بررسی‌شده حضور**:
+اعلام داخل، بیرون یا نامعلوم بودن فرد در زمان بررسی برای آماده‌سازی آغاز ثبت خودکار؛ این اعلام به‌تنهایی وقوع ورود یا خروج، ساعت آن یا مدت حضور را اثبات نمی‌کند.
+_Avoid_: وضعیت زنده حضور، شاهد اسکن دستگاه، ثبت ورود یا خروج، یا محاسبه کارکرد صرفاً از روی وضعیت اولیه
+
+**تردد دستگاه تأییدنشده**:
+ورود یا خروج عادی دریافت‌شده از دستگاه که در وضعیت حضور نمایش داده شده، اما هنوز نگهبان آن را بازبینی و تأیید نکرده است؛ تأییدنشدن آن مانع دریافت تردد بعدی نیست.
+_Avoid_: تردد تأییدشده نگهبان، رویداد با جهت نامعلوم، یا مجوز پرداخت اضافه‌کار
+
+**تردد دستگاه نیازمند بررسی**:
+شاهد اسکن دستگاه که جهت، انتساب یا سازگاری آن با حضور موجود هنوز روشن نیست و برای تعیین اثر بر حضور به رسیدگی نگهبان نیاز دارد.
+_Avoid_: خروج فرضی، غیبت قطعی، حذف اسکن مبهم، یا تأیید گروهی بدون رفع ابهام
+
+**خروج فراموش‌شده با ساعت نامعلوم**:
+وضعیت حضور قبلی که خروج فرد از مجموعه مشخص شده، اما زمان واقعی آن معلوم نیست و این نامعلومی با دلیل ثبت شده است؛ ثبت ورود واقعی بعدی ممکن است، ولی مدت حضور قبلی تا تعیین تکلیف نامشخص می‌ماند.
+_Avoid_: حضور باز واقعی فرد داخل مجموعه، ساعت خروج حدسی از برنامه کاری، مدت حضور صفر، یا مسدودکردن ورود واقعی بعدی صرفاً به دلیل نامعلوم‌بودن ساعت خروج قبلی
+
+**ورود فراموش‌شده با ساعت نامعلوم**:
+حضوری که داخل‌بودن فرد تأیید شده، اما زمان واقعی ورود او معلوم نیست؛ خروج بعدی با زمان واقعی قابل ثبت است و مدت آن بازه تا تعیین زمان ورود نامعلوم می‌ماند.
+_Avoid_: غیبت قطعی، وضعیت اولیه آماده‌سازی، ساخت ساعت ورود از برنامه کاری، یا محاسبه مدت قطعی از یک بازه ناقص
+
 **ثبت ورود تکراری در حضور و غیاب گارد**:
 When گارد records ورود for a person and that same person already has an entry time for the selected attendance date, the operation should behave as a successful idempotent action and return the existing attendance truth to the operator. The visible daily list should then show the existing حاضر record instead of leaving the person as غایب.
 _Avoid_: showing English duplicate errors to operators, treating a successful earlier ورود as a failed action, or displaying غایب for a person whose same-day ورود already exists
@@ -3172,7 +3204,7 @@ _Avoid_: showing English duplicate errors to operators, treating a successful ea
 _Avoid_: forcing a separate manual-entry mode, blocking forgotten attendance correction, or allowing silent backdated times without a reason
 
 **حضور باز روز قبل**:
-If a person has an older attendance record with ورود and no خروج, گارد must close that previous record with an explicit خروج time and reason before registering a new ورود for a later date. The system should surface this open previous attendance state instead of silently creating a new day entry or auto-filling the old exit.
+If a person has an older attendance record with ورود and no خروج, گارد must resolve whether the person is still inside or has an unrecorded exit before registering a new ورود for a later date. A known exit is recorded with its real time and reason; a confirmed departure with genuinely unknown time is explicitly recorded as خروج فراموش‌شده با ساعت نامعلوم, permitting the next real entry while keeping the earlier duration unknown. The system surfaces the unresolved state instead of silently creating a new day entry or auto-filling the old exit.
 _Avoid_: overwriting yesterday's record with today's action, creating automatic خروج without operator confirmation, or allowing overlapping open attendance records for the same person
 
 **ساعت کاری پرسنل**:
@@ -4995,7 +5027,7 @@ The single stable Vehicle Operations record for an Internal Driver Identity, est
 _Avoid_: a second personnel record, a manually asserted ready status, storing HR eligibility on the profile, or deleting a profile referenced by operations
 
 **External Driver Identity**:
-The reusable Guard-managed identity of a non-personnel driver, independent of any vehicle used on a particular visit.
+The reusable identity of a non-personnel driver, independent of any vehicle, shared by Human Resources Vehicle Operations and Guard under the same operation-specific permissions as internal drivers, without an additional external-driver access level.
 _Avoid_: embedding the external driver inside a permanent driver-vehicle pair, creating a new identity for every arrival, or treating an external driver as HR Personnel
 
 **Driver Source Continuity**:
@@ -5011,11 +5043,11 @@ A company vehicle progresses from `DRAFT` to `ACTIVE`, may temporarily become `O
 _Avoid_: queueing incomplete or unavailable vehicles, ending an assignment solely for temporary repair, hard-deleting operational history, or showing archived vehicles in ordinary active lists
 
 **External Vehicle Identity**:
-The reusable Guard-managed identity of a non-company vehicle, independent of the external driver using it on a particular visit.
+The reusable identity of a non-company vehicle, independent of its driver, shared by Human Resources Vehicle Operations and Guard under the same operation-specific permissions as company vehicles, without an additional external-vehicle access level.
 _Avoid_: embedding the external vehicle inside a permanent driver-vehicle pair, creating a duplicate for each driver, or treating it as a company vehicle
 
 **External Driver and Vehicle Lifecycle**:
-A Guard-managed external driver or vehicle progresses from incomplete `DRAFT` to `ACTIVE`, may be temporarily `RESTRICTED` with accountable effective-dated evidence, and may be removed from ordinary use as restorable `ARCHIVED`; only an unused, dependency-free `DRAFT` may be permanently deleted. Queue readiness additionally requires complete, current identity and documents, so expiry makes readiness false without silently changing lifecycle state.
+An external driver or vehicle progresses from incomplete `DRAFT` to `ACTIVE`, may be temporarily `RESTRICTED`, and may be removed from ordinary use as restorable `ARCHIVED`, with automatically recorded actor, time, and change evidence and no manually entered reason; only an unused, dependency-free `DRAFT` may be permanently deleted. Queue readiness additionally requires complete, current identity and documents, so expiry makes readiness false without silently changing lifecycle state.
 _Avoid_: using one active flag for different meanings, hiding restrictions, mutating lifecycle on document expiry, queueing an unready record, or deleting operationally used identities
 
 **Vehicle Plate Registration**:
@@ -5029,6 +5061,14 @@ _Avoid_: a mutable combined driver-vehicle identity, overwriting assignment hist
 **Internal Driver-Vehicle Assignment**:
 The effective-dated Vehicle Operations association between one Internal Driver Profile and one Company Vehicle Identity. At any instant each driver and each vehicle has at most one active assignment; periods cannot overlap on either side, reassignment closes the prior assignment with automatically recorded action evidence rather than a manually entered reason, and future non-overlapping periods may be scheduled. Transferring an assigned vehicle makes the affected drivers and vehicles explicit before confirmation; selecting the existing driver–vehicle pairing creates no duplicate assignment history.
 _Avoid_: concurrent active assignments for either identity, mutating an assignment into a different pairing, overwriting substitution history, or rejecting valid future scheduling
+
+**External Driver-Vehicle Assignment**:
+The effective-dated association between one External Driver Identity and one External Vehicle Identity, with at most one active assignment on either side and the same transfer, ending, future scheduling, and open-dispatch continuity rules as internal assignments. Admission uses the driver's currently assigned external vehicle; internal-to-external and external-to-company assignments are excluded, and changes preserve automatically recorded action history without a manually entered reason.
+_Avoid_: selecting an unrelated vehicle at admission, overlapping assignments, mixed-source assignments, or replacing independent driver and vehicle identities with a combined record
+
+**External Driver Driving Authorization**:
+The shared operational authority of a non-personnel driver, managed by authorized external-driver managers in Human Resources Vehicle Operations or Guard and shown with licence and biometric evidence in the driver's independent dossier. Suspension immediately blocks subsequent dispatch steps that require driving authorization without creating Personnel or erasing prior operational evidence.
+_Avoid_: requiring a Personnel identity for an external driver, separate conflicting authorization states per workspace, or continuing authorization-dependent dispatch after suspension
 
 **پایان تخصیص خودرو**:
 پایان‌دادن به رابطه تخصیص راننده و خودروی شرکت از زمان اثر مشخص، با حفظ سابقه آن رابطه و هویت مستقل راننده و خودرو؛ این عمل مستقل از تخصیص خودروی جایگزین است و هنگام پایان فعالیت راننده یا بایگانی خودرو نیز با تأیید اثر آن انجام می‌شود.
@@ -5079,7 +5119,7 @@ The cross-workspace correlation identity anchored to one Guard Driver Queue Turn
 _Avoid_: creating a second cross-workspace source-of-truth record, using a replaceable waybill number as the journey identity, merging repeat visits, or losing superseded evidence from the case timeline
 
 **Supported Driver-Vehicle Admission Classes**:
-Guard admits either an Internal Driver Identity with the Company Vehicle Identity from its current active assignment, or an External Driver Identity with an External Vehicle Identity combined for that visit. Mixed-source pairings require a separately designed temporary-authorization model and are outside the current dispatch flow.
+Guard admits either an Internal Driver Identity with the Company Vehicle Identity from its current active assignment, or an External Driver Identity with the External Vehicle Identity from its current effective assignment. Mixed-source pairings require a separately designed temporary-authorization model and are outside the current dispatch flow.
 _Avoid_: internal drivers with external vehicles, external drivers with company vehicles, bypassing an active internal assignment, or inventing an implicit mixed-source exception
 
 **Dispatch Evidence Snapshot Chain**:
@@ -5135,12 +5175,16 @@ _Avoid_: logging only successful commands, overwriting audit rows, omitting effe
 The HR-owned act of creating or replacing the encrypted reusable fingerprint template and encrypted Fingerprint Capture Image for an actively eligible Internal Driver Identity; failed or cancelled enrollment leaves the prior valid enrollment unchanged and creates no dispatch fallback authority. Ending eligibility or deactivating the enrollment disables matching without erasing its attached images or accountable transaction history.
 _Avoid_: enrolling an ineligible person, treating an enrollment attempt as waybill confirmation, using driver OTP to bypass enrollment, replacing a valid template after a failed scan, or deleting transaction history when matching is disabled
 
+**External Driver Biometric Enrollment**:
+The protected two-finger enrollment of one independently identified non-personnel driver with active driving authorization and valid licence facts, using the same capture, matching, image-access, and controlled failure workflow as internal drivers under the same operation permissions. Suspension or deactivation disables matching while retaining protected images and accountable history.
+_Avoid_: creating Personnel for a scanner, a separate external-biometric access level, OTP-only ordinary confirmation, or relabelling internal enrollment evidence
+
 **Biometric Enrollment Attempt**:
-The limited-time HR operation that collects two distinct accepted fingers for one Internal Driver Identity before creating an Internal Driver Biometric Enrollment. An accepted first finger remains provisional while the second is retried; expiry or abandonment creates no active enrollment or dispatch confirmation authority.
+The limited-time authorized operation that collects two distinct accepted fingers for one internal or external driver identity before creating its biometric enrollment. An accepted first finger remains provisional while the second is retried; expiry or abandonment creates no active enrollment or dispatch confirmation authority.
 _Avoid_: calling a provisional finger a saved enrollment, combining fingers from different attempts, or treating a successful scanner response as completed enrollment
 
 **Fingerprint Capture Image**:
-The encrypted PNG captured with one enrolled finger and permanently attached to that finger's Internal Driver Biometric Enrollment under its Personnel identity. Authorized HR enrollment operators may view it through an audited, non-cacheable response; it is not the reusable matching template and never belongs to a login User.
+The encrypted PNG captured with one enrolled finger and permanently attached to that driver's biometric enrollment under its Personnel-linked internal identity or independent external identity. Authorized enrollment operators may view it through an audited, non-cacheable response; it is not the reusable matching template and never belongs to a login User.
 _Avoid_: calling the image a template, attaching it to a User account, placing image bytes in logs or JSON evidence, or silently deleting it when an enrollment is deactivated
 
 **Internal Driver Biometric Fallback**:
@@ -5164,8 +5208,8 @@ The three-level authority model in which workspace `view` exposes ordinary redac
 _Avoid_: treating workspace access as unrestricted evidence access, requiring workspace administration for every routine command, or using a feature grant to bypass transaction invariants
 
 **External Driver Waybill Confirmation**:
-The confirmation of one exact Accounting Dispatch Waybill through driver OTP plus a fresh Guard identity approval bound to the same confirmation session. Guard may approve remotely from its workspace, but admission-time identity evidence alone is insufficient and no authorization exists until both factors succeed in the live session.
-_Avoid_: reusing Guard admission as confirmation, accepting OTP alone, requiring Guard's physical presence in Accounting, or combining evidence from different sessions
+The confirmation of one exact Accounting Dispatch Waybill by an External Driver Identity through the same live biometric workflow as an internal driver, using an independent non-personnel biometric enrollment. A qualifying biometric failure permits the same controlled OTP and separate Guard approval fallback, with its mandatory exception reason; admission-time evidence alone grants no confirmation authority.
+_Avoid_: reusing Guard admission as confirmation, accepting OTP without qualifying biometric failure and separate Guard approval, creating Personnel for biometric enrollment, or combining evidence from different sessions
 
 **Dispatch Exit Authorization**:
 The single-use authority created by a successful driver confirmation for one Accounting Dispatch Waybill, valid for 12 hours by default, with lifecycle `ACTIVE` to terminal `CONSUMED`, `EXPIRED`, or `REVOKED`; every reconfirmation creates a new authorization. Accounting or Guard may revoke it for a recorded operational or identity concern without changing a correct waybill, while incorrect waybill facts require voiding and replacement.
@@ -5360,3 +5404,25 @@ _Avoid_: دریافت تازه فرضی، بازنویسی رسید قطعی، �
 **بازگشت چک مشتری از گیرنده**:
 رویداد هماهنگ بازگشت حضانتِ چک خرج‌شده و بازگشایی بدهی یا پیش‌پرداخت همان گیرنده نزد مالک پرداختنی؛ اعتبار و تخصیص‌های مشتری اولیه پابرجا می‌مانند تا عدم پرداخت بانک جداگانه مستند شود.
 _Avoid_: واخواست بانکی، ساخت دوباره بدهی مشتری، دریافت دوباره چک یا حذف سابقه واگذاری قبلی
+
+**ادامه اصلاح تأییدشده قرارداد همکار**:
+بازگشت به آخرین مرحله معتبرِ طی‌شده در همان درخواست اصلاح؛ مرور اولیه درخواست تازه از تاریخ قرارداد آغاز می‌شود و ادامه آن، اطلاعات محصول، تحویل و پرداخت را حفظ می‌کند.
+_Avoid_: شروع دوباره مرور اولیه پس از هر وقفه، تأیید خودکار نسخه تازه، یا معتبر دانستن برنامه ناسازگار تحویل و پرداخت
+
+### دسته‌بندی فعالیت مشتری
+
+**دسته‌بندی فعالیت مشتری**:
+مشخصه‌ای مستقل از نوع حقیقی، حقوقی، دولتی یا همکاری و مستقل از اعتماد اعتباری عادی یا خاص، برای معرفی مشتری به‌عنوان سازنده معتبر، معمار یا هیچ‌کدام در فروش سبلان و فروش همکار؛ هر مشتری تازه دقیقاً یکی از این گزینه‌ها را با انتخاب صریح دارد. این مشخصه صرفاً برای معرفی و نمایش است و اعتبار، قیمت یا دسترسی ایجاد نمی‌کند.
+_Avoid_: نوع شخصیت مشتری، اعتماد اعتباری مشتری، یا انتخاب پیش‌فرض به‌جای اعلام کاربر
+
+**سازنده معتبر در دسته‌بندی فعالیت مشتری**:
+مشتری‌ای که کاربر مجاز او را در دسته سازنده معتبر قرار داده و با برچسب «سازنده» معرفی می‌شود؛ این انتخاب نیازمند تأیید جداگانه مدیر نیست و به معنای اعطای اعتبار مالی نیست.
+_Avoid_: مشتری خاص اعتباری، تضمین پرداخت، یا تأیید مدیریتی ضمنی
+
+**دسته‌بندی فعالیت تعیین‌نشده مشتری**:
+وضعیت مشتری قبلی که هنوز هیچ‌یک از گزینه‌های دسته‌بندی فعالیت برای او انتخاب نشده است؛ تعیین یکی از گزینه‌ها هنگام ویرایش مشخصات او الزامی است.
+_Avoid_: هیچ‌کدام، عادی اعتباری، یا انتساب خودکار دسته بر اساس نبود اطلاعات
+
+**هیچ‌کدام در دسته‌بندی فعالیت مشتری**:
+انتخاب صریح برای مشتری‌ای که در گروه سازنده معتبر یا معمار قرار ندارد، از جمله مالک مصرف‌کننده، فروشگاه یا واسطه؛ این انتخاب معتبر، بدون برچسب فعالیت در فهرست و صفحه مشتری نمایش داده می‌شود.
+_Avoid_: دسته‌بندی تعیین‌نشده، مشتری عادی اعتباری، یا محدودکردن این گروه به مصرف‌کننده نهایی

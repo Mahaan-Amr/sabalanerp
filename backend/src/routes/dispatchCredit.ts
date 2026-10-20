@@ -1,3 +1,5 @@
+import { lockDispatchContract, dispatchCommerciallyFinal } from '../services/contractDispatchTarget';
+import { partnerCommercialDispatchEligible } from '../services/partnerSales/fulfillment/commercialSettlement';
 import express from 'express';
 import { prisma } from '../lib/prisma';
 import { protect } from '../middleware/auth';
@@ -7,7 +9,6 @@ import { activeCreditForContract, activeManagerApproval, auditDispatchCredit, ca
 import { getEffectiveUserAccess } from '../services/effectiveAccessService';
 import { createContractDispatchDuty, closeContractDispatchDuty } from '../services/crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
 import { ordinaryContractDispatchEligible } from '../services/ordinaryContractDispatchEligibility';
-import { isCommerciallyFinal } from '../services/ordinaryContractLifecycle';
 import { hasSpecialCustomerCreditAuthorization } from '../services/specialCustomerCreditPolicy';
 import { consumedCustomerCredit, canManageCustomerCredit } from '../services/specialCustomerCredit';
 
@@ -22,13 +23,13 @@ const accessibleContract = async (db: Prisma.TransactionClient | typeof prisma, 
   const contract = await db.salesContract.findUniqueOrThrow({ where: { id } });
   const access = await dispatchCreditAccess(db, contract, actorId);
   if (!access.read) throw new Error('دسترسی به این قرارداد ندارید.');
-  if (contract.partnerKind || contract.partnerCaseId) throw new Error('این قابلیت مخصوص فروش عادی است.');
   return { contract, access };
 };
 const refreshExemption = async (db: Prisma.TransactionClient, id: string) => {
   const contract = await db.salesContract.findUniqueOrThrow({ where: { id } });
-  const exempt = await ordinaryContractDispatchEligible(db, contract);
-  const expired = !exempt && !contract.firstFinancialRecordAt && contract.commercialFlowVersion === 1
+  const exempt = contract.partnerCaseId ? !!await activeManagerApproval(db, contract)
+    : await ordinaryContractDispatchEligible(db, contract);
+  const expired = !exempt && !contract.firstFinancialRecordAt && [1, 2].includes(contract.commercialFlowVersion)
     && !!contract.commercialExpiresAt && contract.commercialExpiresAt <= new Date() && !contract.isInactive
     && !['CANCELLED','EXPIRED'].includes(contract.status);
   await db.salesContract.update({ where: { id }, data: { dispatchExpiryExempt: exempt, ...(expired ? { status: 'EXPIRED' } : {}) } });
@@ -56,6 +57,7 @@ router.get('/balance', handle(async req => {
   }
   if (req.query.contractId) {
     const { contract } = await accessibleContract(prisma, String(req.query.contractId), req.user.id);
+    if (contract.partnerCaseId || contract.partnerKind) throw new Error('اعتبار فروشنده فقط برای قرارداد فروش عادی مجاز است.');
     sellerId = contract.responsibleSellerId;
     const credit = await prisma.contractDispatchAuthority.findFirst({ where: { contractId: contract.id, kind: 'CREDIT', status: 'APPROVED', sellerId } });
     if (credit) contractReservedRials = (await activeCreditForContract(prisma, contract)).toString();
@@ -76,13 +78,15 @@ router.get('/contracts/:id', handle(async req => {
       consumedRials: (await consumedCustomerCredit(prisma, contract)).toString(), promisedDate: contract.customerCreditPromisedDate,
       active: hasSpecialCustomerCreditAuthorization(contract) } : null,
     canManageCustomerDate: await canManageCustomerCredit(prisma, req.user.id),
-    actorId: req.user.id, canRequestManager: isCommerciallyFinal(contract) && !['CANCELLED','EXPIRED'].includes(contract.status) && !contract.isInactive,
+    actorId: req.user.id, canRequestManager: dispatchCommerciallyFinal(contract) && !['CANCELLED','EXPIRED'].includes(contract.status) && !contract.isInactive,
     responsibleSeller: { id: contract.responsibleSellerId, displayName: names.get(contract.responsibleSellerId) ?? 'فروشنده مسئول' },
-    access, eligible: await ordinaryContractDispatchEligible(prisma, contract), balance: await creditBalance(prisma, contract.responsibleSellerId),
+    access, eligible: contract.partnerCaseId ? await prisma.$transaction(tx => partnerCommercialDispatchEligible(tx, contract.partnerCaseId!)) : await ordinaryContractDispatchEligible(prisma, contract),
+    balance: contract.partnerCaseId ? null : await creditBalance(prisma, contract.responsibleSellerId),
     activeManagerId: (await activeManagerApproval(prisma, contract))?.id ?? null };
 }));
 router.post('/contracts/:id/requests', handle(req => prisma.$transaction(async tx => {
-  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id"=${req.params.id} FOR UPDATE`);
+  await accessibleContract(tx, req.params.id, req.user.id);
+  await lockDispatchContract(tx, req.params.id);
   const { contract, access } = await accessibleContract(tx, req.params.id, req.user.id);
   const kind = req.body.kind;
   if (!['MANAGER','DATE','TRANSFER','CUSTOMER_DATE'].includes(kind) || !(access.manage || (kind === 'CUSTOMER_DATE' && await canManageCustomerCredit(tx, req.user.id)) || (kind === 'MANAGER' ? access.request || access.managerDecision : ['DATE','CUSTOMER_DATE'].includes(kind) && (access.request || access.seller)))) throw new Error('مجوز ثبت این درخواست ندارید.');
@@ -97,7 +101,8 @@ router.post('/contracts/:id/requests', handle(req => prisma.$transaction(async t
 })));
 router.post('/authorities/:id/actions', handle(req => prisma.$transaction(async tx => {
   const candidate = await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: req.params.id } });
-  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id"=${candidate.contractId} FOR UPDATE`);
+  await accessibleContract(tx, candidate.contractId, req.user.id);
+  await lockDispatchContract(tx, candidate.contractId);
   const { contract, access } = await accessibleContract(tx, candidate.contractId, req.user.id);
   const current = await tx.contractDispatchAuthority.findUniqueOrThrow({ where: { id: candidate.id } });
   const { action, reason } = req.body;

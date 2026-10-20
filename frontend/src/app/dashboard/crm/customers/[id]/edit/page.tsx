@@ -1,6 +1,7 @@
 'use client';
 import { ErpCard, ErpCheckbox, ErpField as CustomerWorkflowField, ErpInlineState, ErpInput, ErpLoading, ErpPressable, ErpTextarea, useErpPresentationScope } from '@/components/erp';
 import { useEffect, useMemo, useState } from 'react';
+import { CustomerActivityCategoryEditor, type CustomerActivityCategory } from '@/features/crm/customer-workflow/CustomerActivityCategory';
 import { CustomerRemovalConfirmation } from '@/features/crm/customer-workflow/CustomerRemovalConfirmation';
 import { useParams, useRouter, useSearchParams, usePathname } from 'next/navigation';
 import Link from 'next/link';
@@ -72,6 +73,7 @@ interface EditableContact {
 interface CustomerFormData {
   firstName: string;
   lastName: string;
+  activityCategory: CustomerActivityCategory | '';
   customerType: CustomerType;
   status: CustomerStatus;
   nationalCode: string;
@@ -140,6 +142,7 @@ export default function EditCustomerPage() {
   const [formData, setFormData] = useState<CustomerFormData>({
     firstName: '',
     lastName: '',
+    activityCategory: '',
     customerType: 'Individual',
     status: 'Active',
     nationalCode: '',
@@ -212,6 +215,7 @@ export default function EditCustomerPage() {
         setFormData({
           firstName: customer.firstName || '',
           lastName: customer.lastName || '',
+          activityCategory: customer.activityCategory || '',
           customerType: customer.customerType || 'Individual',
           status: customer.status || 'Active',
           nationalCode: customer.nationalCode || '',
@@ -355,6 +359,7 @@ export default function EditCustomerPage() {
     const nextErrors: Record<string, string> = {};
     if (!formData.firstName.trim()) nextErrors.firstName = 'نام الزامی است';
     if (!formData.lastName.trim()) nextErrors.lastName = 'نام خانوادگی الزامی است';
+    if (!formData.activityCategory) nextErrors.activityCategory = 'دسته‌بندی فعالیت مشتری الزامی است';
     if (formData.nationalCode && formData.nationalCode.length !== (partnerCard && formData.customerType !== 'Individual' ? 11 : 10)) {
       nextErrors.nationalCode = partnerCard && formData.customerType !== 'Individual' ? 'شناسه حقوقی باید ۱۱ رقم باشد' : 'کد ملی باید ۱۰ رقم باشد';
     }
@@ -406,6 +411,7 @@ export default function EditCustomerPage() {
         firstName: formData.firstName.trim(),
         lastName: formData.lastName.trim(),
         customerType: formData.customerType,
+        activityCategory: formData.activityCategory,
         status: formData.status,
         nationalCode: normalizePhoneDigits(formData.nationalCode) || null,
         companyName: formData.companyName.trim() || null,
@@ -534,6 +540,7 @@ export default function EditCustomerPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <CustomerWorkflowField label="نام" error={errors.firstName} required><ErpInput value={formData.firstName} onChange={(e) => updateField('firstName', e.target.value)} /></CustomerWorkflowField>
           <CustomerWorkflowField label="نام خانوادگی" error={errors.lastName} required><ErpInput value={formData.lastName} onChange={(e) => updateField('lastName', e.target.value)} /></CustomerWorkflowField>
+          <CustomerActivityCategoryEditor value={formData.activityCategory} onChange={value => updateField('activityCategory', value)} error={errors.activityCategory} />
           <div>
             <EnhancedDropdown
               label="نوع مشتری"

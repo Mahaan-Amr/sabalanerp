@@ -1,3 +1,5 @@
+import { assertPersonnelIdentityVersion, correctPersonnelIdentity, personnelIdentityVersion, PersonnelIdentityError } from '../services/hrPersonnelIdentity';
+import { publishRealtime } from '../services/realtimePublisher';
 import { prisma } from '../lib/prisma';
 import express, { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
@@ -52,6 +54,7 @@ const normalizePhone = (value?: string | null) => {
 
 const personnelSelect = {
   id: true,
+  updatedAt: true,
   firstName: true,
   lastName: true,
   isActive: true,
@@ -582,7 +585,7 @@ router.get('/:id', protect, async (req: AuthRequest, res: Response) => {
 
     res.json({
       success: true,
-      data: user
+      data: { ...user, identityVersion: personnelIdentityVersion(user.personnel, user) }
     });
   } catch (error) {
     console.error('Get user error:', error);
@@ -597,8 +600,8 @@ router.get('/:id', protect, async (req: AuthRequest, res: Response) => {
 // @route   PUT /api/users/:id
 // @access  Private
 router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
-  body('firstName').optional().trim().escape(),
-  body('lastName').optional().trim().escape(),
+  body('firstName').optional().isString().trim().isLength({ min: 1, max: 100 }),
+  body('lastName').optional().isString().trim().isLength({ min: 1, max: 100 }),
   body('email').optional().isEmail().normalizeEmail(),
   body('username').optional().isLength({ min: 3 }).trim().escape(),
   body('phone').optional({ values: 'falsy' }).isString().trim(),
@@ -735,7 +738,16 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
     const normalizedPhone = phone !== undefined ? normalizePhone(phone) : undefined;
 
     const updatedUser = await prisma.$transaction(async (tx) => {
-      const removesActiveAdministrator = existingUser.role === 'ADMIN' && existingUser.isActive
+      const current = await tx.user.findUniqueOrThrow({ where: { id: existingUser.id }, include: { personnel: true } });
+      const hasNames = firstName !== undefined || lastName !== undefined;
+      if (hasNames) assertPersonnelIdentityVersion(req.body.expectedIdentityVersion, current.personnel, current);
+      const nameChanged = (firstName !== undefined && firstName !== current.firstName) || (lastName !== undefined && lastName !== current.lastName);
+      if (hasNames && ((!String(firstName ?? current.firstName).trim()) || (!String(lastName ?? current.lastName).trim()))) throw new PersonnelIdentityError(400, 'INVALID_PERSONNEL_NAME', 'نام و نام خانوادگی الزامی است.');
+      if (nameChanged && personnelMode === 'existing' && personnelId !== current.personnelId) throw new PersonnelIdentityError(409, 'PERSONNEL_RELINK_CONFLICT', 'ابتدا اتصال پرسنلی را ذخیره کنید؛ سپس نام فرد را ویرایش کنید.');
+      if (nameChanged && current.personnelId) {
+        await correctPersonnelIdentity(tx, { personnelId: current.personnelId, actorUserId: req.user!.id, source: 'USER', expectedVersion: req.body.expectedIdentityVersion, fields: { firstName: firstName ?? current.firstName, lastName: lastName ?? current.lastName } });
+      }
+      const removesActiveAdministrator = current.role === 'ADMIN' && current.isActive
         && ((role && role !== 'ADMIN') || isActive === false);
       if (removesActiveAdministrator) {
         const activeAdmins = await tx.user.count({ where: { role: 'ADMIN', isActive: true, erasedAt: null } });
@@ -744,7 +756,7 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       const shouldRelink = personnelMode === 'existing' && personnelId;
       const linkedPersonnelId = shouldRelink
         ? await resolveExistingPersonnelLink(tx, { personnelId, currentUserId: existingUser.id })
-        : existingUser.personnelId;
+        : current.personnelId;
 
       const updated = await tx.user.update({
         where: { id: req.params.id },
@@ -793,11 +805,14 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
       return updated;
     }, { isolationLevel: 'Serializable' });
 
+    if (firstName !== undefined || lastName !== undefined) publishRealtime('hr.personnel.changed', {});
     res.json({
       success: true,
       data: updatedUser
     });
   } catch (error: any) {
+    if (error instanceof PersonnelIdentityError) return res.status(error.status).json({ success: false, code: error.code, error: error.message });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') return res.status(409).json({ success: false, code: 'PERSONNEL_IDENTITY_CONFLICT', error: 'اطلاعات هم‌زمان تغییر کرده است؛ صفحه را به‌روزرسانی کنید.' });
     console.error('Update user error:', error);
     const conflict = error.message?.includes('پرسنل') || error.message?.includes('last active administrator');
     res.status(conflict ? 409 : 500).json({

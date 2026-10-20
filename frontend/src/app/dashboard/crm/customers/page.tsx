@@ -1,4 +1,5 @@
 'use client';
+import { CustomerActivityCategoryBadge } from '@/features/crm/customer-workflow/CustomerActivityCategory';
 import { useEffect, useState } from 'react';
 import { FaBan, FaBuilding, FaCheckCircle, FaEdit, FaEnvelope, FaExclamationTriangle, FaEye, FaLock, FaMapMarkerAlt, FaPhone, FaPlus, FaTrash, FaUser, FaUsers } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpEmptyState, ErpFieldView, ErpListPage, ErpInlineState, type ErpColumn, type ErpMetric, type ErpTone } from '@/components/erp';
@@ -12,6 +13,7 @@ interface CrmCustomer {
   firstName: string;
   lastName: string;
   companyName?: string;
+  activityCategory?: string | null;
   customerType: string;
   status: string;
   nationalCode?: string;
@@ -285,6 +287,7 @@ export default function CustomersPage() {
         <div className="flex flex-wrap gap-1.5">
           <ErpBadge tone={statusTone[customer.status] || 'neutral'}>{getStatusLabel(customer.status)}</ErpBadge>
           <ErpBadge tone="neutral">{getCustomerTypeLabel(customer.customerType)}</ErpBadge>
+          <CustomerActivityCategoryBadge value={customer.activityCategory} />
         </div>
       ),
     },

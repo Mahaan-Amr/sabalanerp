@@ -74,7 +74,10 @@ export const knownContractUpdateBusinessFailure = (message: unknown): {
     ? { status: 403, body: { success: false, code: 'SALES_CONTRACT_CANCELLATION_DENIED', error: message } }
     : message === CONTRACT_DISCOUNT_REENTRY_REQUIRED
       ? { status: 400, body: { success: false, code: 'SALES_CONTRACT_DISCOUNT_REENTRY_REQUIRED', error: message } }
-      : null;
+      : message === 'تاریخ وعده پرداخت باید امروز یا آینده باشد.'
+        ? { status: 400, body: { success: false, code: 'SALES_CONTRACT_CREDIT_PROMISE_DATE_INVALID',
+            error: 'تاریخ وعده پرداخت اعتباری باید امروز یا آینده باشد؛ تاریخ ردیف پرداخت اعتباری را اصلاح و دوباره ذخیره کنید.' } }
+        : null;
 
 export const ensureSalesErrorTracking = (
   payload: unknown,

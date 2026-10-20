@@ -12,3 +12,13 @@ test('new observation binds unchanged original IDs/images while keeping new birt
 import {validateReobservedCandidateBaselineReceipt} from '../../scripts/lib/application-native-candidate-artifacts.mjs';
 function reobservedReceipt(){const observed=current(),baseline=validateReobservedCandidateSlots(historical,observed);return{replacementEntry:'scripts/replace-qualified-application-native-candidate-local.mjs',previous:baseline.identities,reobservedBaseline:{...baseline,installedBytesVerified:true,nativeAndSqlQuietVerified:true},reobservedInstalled:structuredClone(historical.installed),reobservedNativeQuiet:structuredClone(historical.postMutationNativeQuiet),reobservedSqlQuiet:structuredClone(historical.postMutationSqlQuiet),sqlQuiet:structuredClone(historical.sqlQuiet)};}
 test('collector refuses missing fresh original readback, inferred closure, unknown process or SQL ownership',()=>{validateReobservedCandidateBaselineReceipt(reobservedReceipt(),historical);for(const mutate of [v=>v.reobservedBaseline.originalNativeClosureInferred=true,v=>v.reobservedBaseline.installedBytesVerified=false,v=>v.reobservedInstalled['backend-candidate'].code=1,v=>v.reobservedNativeQuiet['backend-retained'].originalNativeProcesses=1,v=>v.reobservedSqlQuiet.sessions=1,v=>v.previous['backend-candidate'].id='f'.repeat(64)]){const value=reobservedReceipt();mutate(value);assert.throws(()=>validateReobservedCandidateBaselineReceipt(value,historical));}});
+
+import {validateCandidatePreflight} from '../../scripts/replace-qualified-application-native-candidate-local.mjs';
+test('candidate admission accepts canonical retention inspection only alongside both original successful host cleanup proofs',()=>{
+ const marker={format:'sabalan-host-backup-retention-prerequisites/v1',inspected:true,sshStarted:false,mutation:false};
+ const clean=[{project:'sabalanerp',ok:true},{project:'sabalanerp-backup',ok:true}];
+ const observedAt='2026-10-20T16:00:00Z',now=Date.parse(observedAt);
+ const receipt=rows=>({observedAt,sshExitCode:0,stdout:JSON.stringify({exitCode:0,lockHeldThroughBothHostPreflight:true,productionCommitBefore:'a'.repeat(40),productionCommitAfter:'a'.repeat(40),stdout:rows.map(JSON.stringify).join('\n')})});
+ validateCandidatePreflight(receipt(clean),now);validateCandidatePreflight(receipt([marker,...clean]),now);
+ for(const rows of [[marker,marker,...clean],[{...marker,mutation:true},...clean],[{format:'unknown'},...clean],[marker,clean[0]],[marker,...clean.map(row=>({...row,ok:false}))]])assert.throws(()=>validateCandidatePreflight(receipt(rows),now));
+});

@@ -9,7 +9,10 @@ export function validateCandidatePreflight(value,now=Date.now()){
  assert.equal(value.sshExitCode,0);const age=now-Date.parse(value.observedAt);assert.ok(Number.isFinite(age)&&age>=0&&age<=600000,'BOTH_HOST_PREFLIGHT_STALE');
  const remote=JSON.parse(value.stdout);assert.equal(remote.exitCode,0);assert.equal(remote.lockHeldThroughBothHostPreflight,true);
  assert.equal(remote.productionCommitBefore,remote.productionCommitAfter);assert.match(remote.productionCommitBefore,/^[a-f0-9]{40}$/);
- const clean=remote.stdout.trim().split(/\r?\n/).map(line=>JSON.parse(line));assert.equal(clean.length,2);
+ const rows=remote.stdout.trim().split(/\r?\n/).map(line=>JSON.parse(line));
+ const prerequisites=rows.filter(row=>row.format==='sabalan-host-backup-retention-prerequisites/v1');assert.ok(prerequisites.length<=1);
+ for(const row of prerequisites)assert.deepEqual(row,{format:'sabalan-host-backup-retention-prerequisites/v1',inspected:true,sshStarted:false,mutation:false});
+ const clean=rows.filter(row=>row.format!=='sabalan-host-backup-retention-prerequisites/v1');assert.equal(clean.length,2);
  assert.deepEqual(clean.map(row=>row.project).sort(),['sabalanerp','sabalanerp-backup']);for(const row of clean)assert.equal(row.ok,true);
 }
 export const candidateReplacementServices=Object.freeze(['backend','frontend','postgres','inquiry','redis','clamav','frontend-candidate','frontend-retained','backend-candidate','backend-retained']);

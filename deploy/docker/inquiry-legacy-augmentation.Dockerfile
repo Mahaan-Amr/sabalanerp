@@ -1,5 +1,6 @@
 ARG INQUIRY_LEGACY_COMPILED_IMAGE
 FROM ${INQUIRY_LEGACY_COMPILED_IMAGE}
+ARG INQUIRY_LEGACY_BUSINESS_IMAGE
 WORKDIR /app
 # Runtime ownership is added around the exact installed legacy application.
 # Never overlay .next/public/config/Prisma/node_modules or rebuild its actions.
@@ -9,7 +10,7 @@ RUN node -e "const f=require('node:fs');for(const p of ['/usr/bin/python3','/app
  && /usr/bin/python3 -I -B -c "import ssl,sqlite3,fcntl,ctypes,hashlib; assert ssl.OPENSSL_VERSION; assert sqlite3.sqlite_version; assert ctypes.CDLL(None)"
 RUN node /app/online-runtime/inquiry-legacy-compiled-identity.cjs /app/online-runtime/legacy-compiled-source.json
 LABEL io.sabalan.inquiry.legacy-business-source="COMPILED_IMAGE" \
-      io.sabalan.inquiry.legacy-business-image="sha256:ab6e2933e2d0d397f0b1a514dba69206e21856fa7d4275ab33383020bf9dd66e"
+      io.sabalan.inquiry.legacy-business-image="${INQUIRY_LEGACY_BUSINESS_IMAGE}"
 # The original guardian, scope and SQLite ownership are supplied by the fixed
 # original controller. An idle carrier itself grants no serving authority.
 ENTRYPOINT ["/usr/local/bin/node","-e","setInterval(()=>{},2147483647)"]

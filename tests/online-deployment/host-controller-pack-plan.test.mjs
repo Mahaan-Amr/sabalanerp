@@ -3,6 +3,7 @@ import test from 'node:test';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import fs from 'node:fs';
 const repository=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const run=args=>spawnSync(process.execPath,['scripts/build-online-controller-host-pack.mjs',...args],{cwd:repository,encoding:'utf8'});
 
@@ -30,4 +31,16 @@ test('host pack refuses shared-checkout output or relative authority paths befor
  assert.notEqual(forbidden.status,0);assert.match(forbidden.stderr,/Never package into the shared checkout/);
  const relative=run(['--build','--output','relative-output','--linux-generation-receipt','relative.json','--native-owner-elf-receipt','relative-elf.json']);
  assert.notEqual(relative.status,0);assert.match(relative.stderr,/Absolute private paths required/);
+});
+
+test('incident reconciliation packages its subprocess verifier, pure kernel and generated-client dependency together',()=>{
+ const result=run(['--inspect']);assert.equal(result.status,0,result.stderr);const plan=JSON.parse(result.stdout);
+ const owner='deploy/scripts/reconcile-premutation-capture.mjs',verifier='deploy/scripts/verify-premutation-configuration-repair.mjs',kernel='deploy/scripts/canonical-previous-release-configuration.mjs';
+ for(const file of [owner,verifier,kernel,'deploy/scripts/capture-only-release.mjs','deploy/scripts/legacy-backend-signal.py'])assert.ok(plan.hostFiles.includes(file),'Missing incident/legacy runtime module: '+file);
+ const ownerSource=fs.readFileSync(path.join(repository,owner),'utf8'),verifierSource=fs.readFileSync(path.join(repository,verifier),'utf8');
+ assert.ok(ownerSource.includes("'verify-premutation-configuration-repair.mjs'"),'Subprocess sibling must be explicitly packaged');
+ assert.ok(ownerSource.includes("require('./online-release-host-dependencies/node_modules/@prisma/client')"));
+ assert.ok(verifierSource.includes("from './canonical-previous-release-configuration.mjs'"));
+ for(const source of [ownerSource,verifierSource])for(const match of source.matchAll(/\bfrom\s*['"]([^'"]+)['"]/g))if(match[1].startsWith('.')){const file=path.posix.normalize(path.posix.join('deploy/scripts',match[1]));assert.ok(plan.hostFiles.includes(file),'Incident import absent from pack: '+file);assert.ok(fs.statSync(path.join(repository,file)).isFile());}
+ assert.equal(plan.productionAdmission,false,'Packaging grants no incident execution authority');
 });

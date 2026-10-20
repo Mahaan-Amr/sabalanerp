@@ -5,6 +5,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="${DEPLOYMENT_REPO_ROOT:-$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
 CAPTURE_ONLY=0
+unset DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS
 PREBUILT_RELEASE=0
 PREBUILT_RELEASE_PLAN=""
 PREBUILT_RELEASE_SHA256=""
@@ -57,6 +58,7 @@ MAINTENANCE_ACTIVE=0
 FINISHED=0
 DRAINED_EARLY=0
 NATIVE_RUNTIME_CLOSURE_REQUIRED=0
+LEGACY_BACKEND_SIGNAL_PENDING=0
 DB_LEASE_ACQUIRED=0
 PUBLIC_TRAFFIC_OPEN=0
 ROLLBACK_ALREADY_ATTEMPTED=0
@@ -121,8 +123,25 @@ online_bootstrap_boundary() {
   wait "${online_boundary_pid}"
 }
 
+capture_remaining_seconds() {
+  [ "${CAPTURE_ONLY}" -eq 1 ] && [ -n "${capture_pause_started:-}" ] || return 1
+  node -e 'const elapsed=process.hrtime.bigint()-BigInt(process.argv[1]);if(elapsed<0n)process.exit(1);const left=(600000000000n-elapsed)/1000000000n;const requested=BigInt(process.argv[2]);if(left<=0n||requested<=0n)process.exit(1);process.stdout.write((left<requested?left:requested).toString())' "${capture_pause_started}" "$1"
+}
+
 start_release_services() {
   wait_seconds="$1"
+  if [ "${CAPTURE_ONLY}" -eq 1 ]; then
+    [ "${MUTATION_STARTED}" -eq 0 ] && [ "${MAINTENANCE_ACTIVE}" -eq 1 ] && [ -n "${CAPTURE_ONLY_SNAPSHOT:-}" ] && [ -n "${capture_pause_started:-}" ] || return 1
+    capture_wait_seconds="$(capture_remaining_seconds "${wait_seconds}")" || return 1
+    if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then
+      run_original_owned_with_heartbeat node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" start-original \
+        "${CAPTURE_ONLY_SNAPSHOT}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" "${capture_wait_seconds}" "${capture_pause_started}" "${SESSION_HOST_PATH}"
+    else
+      node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" start-original \
+        "${CAPTURE_ONLY_SNAPSHOT}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" "${capture_wait_seconds}" "${capture_pause_started}" "${SESSION_HOST_PATH}"
+    fi
+    return $?
+  fi
   if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ] && [ "${DEPLOYMENT_PHASE:-}" = ROLLBACK_STARTED ]; then
     echo 'Original incident state was restored; its known-unhealthy scanner cannot authorize reopening. Maintenance is retained.' >&2
     return 1
@@ -346,6 +365,10 @@ verify_public_maintenance() {
 }
 
 assert_native_runtime_closed() {
+  # An interrupted legacy signal is a durable hold, never inferred closure.
+  python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --assert-resolved \
+    "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE:-}" \
+    "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json" || return 1
   # Stream the frozen operations bundle's read-only checker, so configuration
   # mode can inspect an older image without requiring a newly built executable.
   # FD9 excludes every cooperating runtime/control owner during the check.
@@ -367,6 +390,16 @@ drain_current_services() {
   old_backend_container="$(compose ps -q backend)"
   old_backend_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${old_backend_container}")"
   NATIVE_RUNTIME_CLOSURE_REQUIRED=1
+  if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then
+    [ "${MAINTENANCE_ACTIVE}" -eq 1 ] && [ "${DEPLOYMENT_PHASE}" = TRAFFIC_BLOCKED ] || return 1
+    verify_public_maintenance || return 1
+    control heartbeat || return 1
+    LEGACY_BACKEND_SIGNAL_PENDING=1
+    run_original_owned_with_heartbeat python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --forward \
+      "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
+      "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json" "${SESSION_HOST_PATH}" || return 1
+    LEGACY_BACKEND_SIGNAL_PENDING=0
+  fi
   compose stop -t 300 frontend backend inquiry
   assert_native_runtime_closed || return 1
   remaining_old_sessions="$(compose exec -T postgres sh -c "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM pg_stat_activity WHERE client_addr = '${old_backend_ip}'::inet\"")"
@@ -590,9 +623,12 @@ complete_capture_only() {
   switch_to_previous_images || return 1
   start_release_services 300 || return 1
   verify_capture_only_configuration || return 1
+  capture_remaining_seconds 600 >/dev/null || return 1
   DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js || return 1
+  capture_remaining_seconds 600 >/dev/null || return 1
   control maintenance-off || return 1
   MAINTENANCE_ACTIVE=0
+  PUBLIC_TRAFFIC_OPEN=1
   capture_pause_seconds="$(node -e 'const n=process.hrtime.bigint()-BigInt(process.argv[1]);if(n<0n)process.exit(1);process.stdout.write(((n+999999999n)/1000000000n).toString())' "${capture_pause_started}")"
   finish_with_notification_result ABORTED || return 1
   capture_qualification_code=0
@@ -628,6 +664,18 @@ recover_failure() {
     run_backend node dist/scripts/deployment-notify.js || true
     cleanup_locks
     echo "The proven release is retained with all writes; maintenance remains active pending journal recovery." >&2
+    exit "${exit_code}"
+  fi
+
+  if [ "${LEGACY_BACKEND_SIGNAL_PENDING}" -eq 1 ]; then
+    control maintenance-on || true
+    MAINTENANCE_ACTIVE=1
+    DEPLOYMENT_PHASE=RECOVERY_REQUIRED
+    DEPLOYMENT_RESULT=RECOVERY_REQUIRED
+    export DEPLOYMENT_PHASE DEPLOYMENT_RESULT
+    control finish || true
+    cleanup_locks
+    echo 'Legacy shutdown was not proven; no automatic reopen or rollback is permitted.' >&2
     exit "${exit_code}"
   fi
 
@@ -678,8 +726,21 @@ recover_failure() {
     if { [ "${NATIVE_RUNTIME_CLOSURE_REQUIRED}" -eq 0 ] || assert_native_runtime_closed; } \
       && start_release_services 300 \
       && verify_capture_only_configuration \
-      && DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js; then
-      control maintenance-off || true
+      && { [ "${CAPTURE_ONLY}" -eq 0 ] || capture_remaining_seconds 600 >/dev/null; } \
+      && DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js \
+      && { [ "${CAPTURE_ONLY}" -eq 0 ] || capture_remaining_seconds 600 >/dev/null; }; then
+      if [ "${CAPTURE_ONLY}" -eq 1 ]; then
+        if ! control maintenance-off; then
+          DEPLOYMENT_PHASE=RECOVERY_REQUIRED; DEPLOYMENT_RESULT=RECOVERY_REQUIRED
+          export DEPLOYMENT_PHASE DEPLOYMENT_RESULT
+          if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then control finish || true; fi
+          cleanup_locks
+          exit "${exit_code}"
+        fi
+        PUBLIC_TRAFFIC_OPEN=1
+      else
+        control maintenance-off || true
+      fi
       MAINTENANCE_ACTIVE=0
       if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then
         finish_with_notification_result ABORTED || true
@@ -759,7 +820,7 @@ recover_failure() {
 trap 'recover_failure $?' EXIT
 trap 'exit 130' INT TERM
 
-for command in git docker awk curl df flock grep mkdir node timeout; do require_command "${command}"; done
+for command in git docker awk curl df flock grep mkdir node python3 timeout; do require_command "${command}"; done
 
 if [ ! -f "${ENV_FILE}" ]; then
   echo "Missing env file: ${ENV_FILE}" >&2
@@ -1104,6 +1165,9 @@ refresh_performance_database_identity
 
 run_backend node dist/scripts/validate-production-environment.js
 run_backend node dist/scripts/deployment-drill-preflight.js
+python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --preflight \
+  "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
+  "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json"
 
 if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
   node "${OPERATIONS_ROOT}/scripts/clamav-incident-recovery.mjs" verify "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}"
@@ -1111,7 +1175,13 @@ if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
   [ "${incident_snapshot_digest}" = "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256}" ] || { echo 'Incident snapshot changed during preparation.' >&2; exit 1; }
 fi
 
-compose up -d postgres
+if [ "${CAPTURE_ONLY}" -eq 1 ]; then
+  # The already healthy original PostgreSQL is a capture prerequisite. Compose
+  # up could apply this operation's environment and replace its configuration.
+  verify_capture_only_configuration
+else
+  compose up -d postgres
+fi
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   prebuilt_exports="$(verify_prebuilt_release)" || exit 1
   eval "${prebuilt_exports}"
@@ -1121,7 +1191,7 @@ SESSION_PREPARED=1
 
 if ! try_acquire_advisory; then
   echo "Database connections are saturated; entering journaled maintenance to drain the previous backend automatically." >&2
-  if [ "${CAPTURE_ONLY}" -eq 1 ]; then capture_pause_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"; fi
+  if [ "${CAPTURE_ONLY}" -eq 1 ]; then capture_pause_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"; DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS="${capture_pause_started}"; export DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS; fi
   enter_maintenance
   drain_current_services
   DRAINED_EARLY=1
@@ -1151,7 +1221,7 @@ export DEPLOYMENT_LEASE_TOKEN
 
 phase MAINTENANCE_REQUESTED
 if [ "${DRAINED_EARLY}" -eq 0 ]; then
-  if [ "${CAPTURE_ONLY}" -eq 1 ]; then capture_pause_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"; fi
+  if [ "${CAPTURE_ONLY}" -eq 1 ]; then capture_pause_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"; DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS="${capture_pause_started}"; export DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS; fi
   enter_maintenance
 fi
 phase TRAFFIC_BLOCKED

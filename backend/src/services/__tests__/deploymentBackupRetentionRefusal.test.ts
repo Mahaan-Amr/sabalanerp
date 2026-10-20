@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {canonicalRetentionBytes,retentionSha256,verifyHostBackupRetentionReceipt,assertOriginalBackupStorageLock} from '../deploymentBackupRetention';
+import {canonicalRetentionBytes,retentionSha256,verifyHostBackupRetentionReceipt,assertOriginalBackupStorageLock,assertBackupStorageLockFileIdentity} from '../deploymentBackupRetention';
 import {enforceFilesystemRemoteRetention,readLocalCheckpointRetentionHolds} from '../deploymentCheckpointStorage';
 import {withHealthyDrill} from './deploymentCheckpointDrill.fixture';
 
@@ -16,6 +16,16 @@ function receipt(){
  return {format:'sabalan-original-host-backup-retention/v1',deploymentId:request.deploymentId,stage:'BEFORE_CHECKPOINT',request,originalSsh:{pid:22,code:0,signal:null},originalHostOwner:{pid:23,code:0,signal:null},originalPipesClosed:true,responseRawBase64:raw.toString('base64'),responseSha256:retentionSha256(raw)};
 }
 const verify=(value:any,stage:'BEFORE_CHECKPOINT'|'AFTER_CHECKPOINT'='BEFORE_CHECKPOINT')=>{const raw=canonicalRetentionBytes(value);return verifyHostBackupRetentionReceipt(raw,{sha256:retentionSha256(raw),deploymentId:'deploy-immutable',stage});};
+
+test('existing root-owned readable mutex stays valid without chmod; write access, aliases and identity drift refuse',()=>{
+ const original=()=>({dev:29n,ino:6n,uid:0n,gid:0n,mode:0o100644n,nlink:1n,size:0n,mtimeNs:10n,ctimeNs:20n,isFile:()=>true});
+ for(const mode of [0o100600n,0o100644n])assert.doesNotThrow(()=>assertBackupStorageLockFileIdentity({...original(),mode},{...original(),mode}));
+ for(const change of [{mode:0o100664n},{mode:0o100646n},{uid:997n},{nlink:2n},{isFile:()=>false}]){
+  assert.throws(()=>assertBackupStorageLockFileIdentity({...original(),...change},original()));
+  assert.throws(()=>assertBackupStorageLockFileIdentity(original(),{...original(),...change}));
+ }
+ for(const change of [{dev:30n},{ino:7n},{gid:997n},{mode:0o100600n},{size:1n},{mtimeNs:11n},{ctimeNs:21n}])assert.throws(()=>assertBackupStorageLockFileIdentity(original(),{...original(),...change}));
+});
 
 test('closed guardian and exact protected-ID request cannot be replaced by cross-stage or partial SSH custody',()=>{
  const original=receipt();assert.equal(verify(original).request.protectedCheckpointIds[0],'point-1');

@@ -30,3 +30,5 @@ test('RUN_LOCAL forwards the measured frontend packet alongside the current sche
  assert.equal(result.invoked[0].frontendSnapshot.sha256,frontendSnapshot.sha256);
  assert.equal(result.invoked[0].prismaQualificationReceipt,'fresh-current.json');
 });
+
+test('RUN_LOCAL forwards explicit current full catalog selection through strict parser',async()=>{const selection={preparationReceipt:{file:'D:/prepared.json',sha256:'a'.repeat(64)},listReceipt:{file:'D:/listed.json',sha256:'b'.repeat(64)}};const result=await exercise({fullCatalogSelection:selection});assert.equal(result.invoked.length,1);assert.equal(JSON.stringify(result.invoked[0].fullCatalogSelection),JSON.stringify(selection));});

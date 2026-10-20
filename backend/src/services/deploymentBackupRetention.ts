@@ -13,12 +13,25 @@ export function parseBackupRetentionRequest(raw:Buffer):BackupRetentionRequest{
  assert.match(value.deploymentId,/^[a-zA-Z0-9_-]{8,160}$/);assert.match(value.requestId,/^[a-f0-9]{64}$/);assert.ok(Array.isArray(value.protectedCheckpointIds)&&value.protectedCheckpointIds.length<=4096);
  assert.ok(value.protectedCheckpointIds.every((id:unknown)=>typeof id==='string'&&/^[a-zA-Z0-9_-]{1,160}$/.test(id)));assert.equal(new Set(value.protectedCheckpointIds).size,value.protectedCheckpointIds.length);return value;
 }
+type BackupStorageLockFile = Pick<fs.BigIntStats,'dev'|'ino'|'uid'|'gid'|'mode'|'nlink'|'size'|'mtimeNs'|'ctimeNs'|'isFile'>;
+/** Metadata validation alone grants no lock authority. The runtime caller must
+ * additionally prove root execution, the canonical name and actual FD9 flock.
+ * This empty mutex is not secret material: existing restore/preflight owners
+ * permit root-owned 0644 while forbidding group/other writes. Preserve the
+ * original inode rather than changing permissions on a live shared mutex. */
+export function assertBackupStorageLockFileIdentity(named:BackupStorageLockFile,owned:BackupStorageLockFile){
+ for(const value of [named,owned])assert.ok(value.isFile()&&value.uid===0n&&value.nlink===1n&&(value.mode&0o022n)===0n,'BACKUP_STORAGE_LOCK_CUSTODY');
+ for(const key of ['dev','ino','uid','gid','mode','nlink','size','mtimeNs','ctimeNs'] as const)assert.equal(named[key],owned[key],'BACKUP_STORAGE_LOCK_IDENTITY_CHANGED');
+}
 /** The SAME inherited backup owner OFD excludes restore, promotion and retention. */
 export function assertOriginalBackupStorageLock(){
  assert.equal(process.platform,'linux');assert.equal(process.getuid?.(),0);assert.equal(fs.realpathSync(BACKUP_STORAGE_LOCK),BACKUP_STORAGE_LOCK);
  const named=fs.lstatSync(BACKUP_STORAGE_LOCK,{bigint:true}),owned=fs.fstatSync(9,{bigint:true});
- assert.ok(named.isFile()&&owned.isFile()&&named.dev===owned.dev&&named.ino===owned.ino&&owned.uid===0n&&owned.nlink===1n&&(owned.mode&0o077n)===0n);
+ assertBackupStorageLockFileIdentity(named,owned);
  const locks=[...fs.readFileSync('/proc/self/fdinfo/9','utf8').matchAll(/^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+[0-9a-f]+:[0-9a-f]+:(\d+)\s+0\s+EOF\s*$/gm)];assert.ok(locks.some(row=>row[1]===String(owned.ino)));
+ assert.equal(fs.realpathSync(BACKUP_STORAGE_LOCK),BACKUP_STORAGE_LOCK);
+ assertBackupStorageLockFileIdentity(named,fs.lstatSync(BACKUP_STORAGE_LOCK,{bigint:true}));
+ assertBackupStorageLockFileIdentity(owned,fs.fstatSync(9,{bigint:true}));
  return {device:String(owned.dev),inode:String(owned.ino),ownerUid:0,descriptor:9};
 }
 export function verifyHostBackupRetentionReceipt(raw:Buffer,expected:{sha256:string;deploymentId:string;stage:'BEFORE_CHECKPOINT'|'AFTER_CHECKPOINT'}){

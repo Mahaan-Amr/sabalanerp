@@ -5,7 +5,7 @@ import { createAuthoritativeSession } from '../../backend/src/services/identityS
 import { tokenHash } from '../../backend/src/services/attendanceDevice';
 import AxeBuilder from '@axe-core/playwright';
 
-const db = new PrismaClient({ datasources: { db: { url: 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?connection_limit=2&pool_timeout=10' } } });
+const db = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_URL ?? 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?connection_limit=2&pool_timeout=10' } } });
 const key = randomUUID();
 const personName = `آزمون تردد ${key.slice(0, 6)}`;
 let actorId: string;

@@ -13,7 +13,7 @@ import {createOriginalRoleCoordinator} from './lib/application-native-role-coord
 import {collectApplicationFullCatalogArtifacts,stageOriginalFullCatalog} from './lib/application-native-full-catalog-artifacts.mjs';
 import {runOriginalRetainedBrowserQualificationRounds,readOriginalRetainedBrowserQualificationCompletion} from './lib/original-retained-browser-qualification.mjs';
 
-export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,nativeOwnerElfReceipt,prismaQualificationReceipt,frontendSnapshot}){
+export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,nativeOwnerElfReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection}){
 if(frontendSnapshot){
  assert.deepEqual(Object.keys(frontendSnapshot).sort(),['file','sha256']);
  const {readMeasuredFrontendSnapshot}=await import('../deploy/scripts/production-frontend-snapshot.mjs');
@@ -168,7 +168,7 @@ const installedLegacyBrowser=await esbuild.build({absWorkingDir:root,entryPoints
   return{contents:capture(name),loader:loaderFor(name),resolveDir:path.dirname(args.path)};
  });}}]});
 files['installed-legacy-paired-browser.mjs']=Buffer.from(installedLegacyBrowser.outputFiles[0].contents);
-const fullCatalog=collectApplicationFullCatalogArtifacts({root,capture});
+const fullCatalog=collectApplicationFullCatalogArtifacts({root,capture,selection:fullCatalogSelection,prismaQualificationReceipt});
 Object.assign(files,fullCatalog.files);
 capture('scripts/lib/application-native-private-qualification.mjs');
 for(const [name,bytes]of Object.entries(collectInquiryArtifacts({repositoryRoot:root,captureSource:capture}))){

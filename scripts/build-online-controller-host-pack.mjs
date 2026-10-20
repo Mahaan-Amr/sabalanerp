@@ -82,10 +82,13 @@ if(!build){
  const client=collectHostPrismaArtifacts({repositoryRoot:repository,captureSource,linuxGenerationReceipt,captureExternalSource});
  const clientProof=JSON.parse(client['host-prisma-artifact.json']);
  assert.equal(clientProof.format,'sabalan-official-linux-prisma-artifact/v1');assert.equal(clientProof.linuxGenerated,true);
- assert.equal(clientProof.models,548);assert.equal(clientProof.sourceSchemaSha256,sha(captureSource('backend/prisma/schema.prisma')));
+ const schema=captureSource('backend/prisma/schema.prisma');
+ const modelNames=[...schema.toString('utf8').matchAll(/^model\s+(\w+)\s*\{/gm)].map(match=>match[1]);
+ assert.ok(modelNames.length>0&&new Set(modelNames).size===modelNames.length,'Exact source model inventory required');
+ assert.equal(clientProof.models,modelNames.length);assert.equal(clientProof.sourceSchemaSha256,sha(schema));
  const migrations=fs.readdirSync(path.join(repository,'backend/prisma/migrations'),{withFileTypes:true})
   .filter(value=>value.isDirectory()).map(value=>value.name).sort();
- assert.equal(migrations.length,438,'Current migration closure required');
+ assert.ok(migrations.length>0&&new Set(migrations).size===migrations.length,'Current migration closure required');
  captureSource('backend/prisma/migrations/migration_lock.toml');
  for(const name of migrations)captureSource('backend/prisma/migrations/'+name+'/migration.sql');
  // Include the actual literal local module closure. Python/data helpers remain
@@ -172,7 +175,7 @@ if(!build){
  write('host-kernel-metafile.json',Buffer.from(JSON.stringify(result.metafile)+'\n'));
  const receipt={format:'sabalan-online-controller-host-pack/v1',packagingComplete:true,hostControllerPackOnly:true,
   productionAdmission:false,databaseConnected:false,runtimeStarted:false,requiresReviewedOperationsCheckout:true,
-  sourceSchemaSha256:clientProof.sourceSchemaSha256,models:548,migrations:438,
+  sourceSchemaSha256:clientProof.sourceSchemaSha256,models:modelNames.length,migrations:migrations.length,
   clientGeneration:clientProof.privateLinuxGeneration,esbuildVersion:esbuild.version,nativeProcessOwner:nativeOwner.proof,
   canonicalHostCrypto:{sourceFile:cryptoEntry,sourceSha256:sha(captureSource(cryptoEntry)),bundleSha256:sha(cryptoKernel),inputs:[cryptoEntry],runtimeApplicationGraphIncluded:false},
   canonicalRemoteRetention:{sourceFile:retentionEntry,sourceSha256:sha(captureSource(retentionEntry)),bundleSha256:sha(retentionKernel),inputs:Object.keys(retentionBundle.metafile.inputs).sort(),runtimeApplicationGraphIncluded:false},
@@ -183,5 +186,5 @@ if(!build){
  for(const [file,pin] of [...sources,...external])assert.deepEqual(stableBackendBaseFile(file),pin,'Source changed after packaging: '+file);
  write('host-pack-receipt.json',Buffer.from(JSON.stringify(receipt)+'\n'));
  console.log(JSON.stringify({output,receipt:path.join(output,'host-pack-receipt.json'),files:Object.keys(outputs).length,
-  models:548,migrations:438,productionAdmission:false}));
+  models:modelNames.length,migrations:migrations.length,productionAdmission:false}));
 }

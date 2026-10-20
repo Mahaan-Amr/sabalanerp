@@ -4,6 +4,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {backendBaseIdentity,stableBackendBaseFile} from './production-backend-base-artifacts.mjs';
 import {schemaTokens,schemaTokenDigest} from './prisma-schema-tokens.mjs';
+import {readCurrentLocalLinuxPrismaGeneration} from './current-linux-prisma-receipt.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 export const privateLinuxPrismaIdentity=Object.freeze({operation:'private-linux-prisma-generation-e380da106b5e41789f02b9e986f83d37',
@@ -93,7 +94,10 @@ export function assertPrivateLinuxPrismaController(controller,source){
 }
 
 export function readPrivateLinuxPrismaGeneration({repositoryRoot,extractionReceiptFile,captureExternalSource}){
- assert.equal(typeof captureExternalSource,'function');const expected=privateLinuxPrismaIdentity;
+ assert.equal(typeof captureExternalSource,'function');
+ const selected=JSON.parse(captureExternalSource(path.resolve(extractionReceiptFile)));
+ if(selected.format==='sabalan-private-local-linux-prisma-extraction/v1')return readCurrentLocalLinuxPrismaGeneration({repositoryRoot,extractionReceiptFile,captureExternalSource});
+ const expected=privateLinuxPrismaIdentity;
  const root=path.resolve('D:/sabalanerp-online-qa',expected.operation),output=path.join(root,'client');
  const read=file=>captureExternalSource(path.resolve(file));
  const extractionBytes=read(extractionReceiptFile),extraction=JSON.parse(extractionBytes);

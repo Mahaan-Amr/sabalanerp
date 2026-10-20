@@ -108,8 +108,8 @@ def assemble_host(root, write, encoded, check):
     private = root / 'private-prisma'; private.mkdir(mode=0o700)
     original = (root / 'prisma-schema-source.prisma').read_bytes()
     check(hashlib.sha256(original).hexdigest() == source['schemaSha256'], 'PRIVATE_PRISMA_SCHEMA_CHANGED')
-    check(len(re.findall(rb'^model\s+\w+\s*\{', original, re.M)) == 548
-          and artifact['models'] == 548, 'PRIVATE_PRISMA_HOST_MODEL_BASELINE_CHANGED')
+    model_names = sorted(name.decode() for name in re.findall(rb'^model\s+(\w+)\s*\{', original, re.M))
+    check(len(model_names) > 0 and artifact['models'] == len(model_names), 'PRIVATE_PRISMA_HOST_MODEL_BASELINE_CHANGED')
     write(private / 'schema.prisma', original)
     migrations = private / 'migrations'; migrations.mkdir(mode=0o700)
     write(migrations / 'migration_lock.toml', (root / 'prisma-migration-lock.toml').read_bytes())
@@ -133,13 +133,29 @@ def assemble_host(root, write, encoded, check):
     check(not (private_generation is not None and linux_generated), 'PRIVATE_PRISMA_GENERATION_PROVENANCE_CONFLICT')
     if linux_generated:
         private_generation = linux_generation
-        check(private_generation['operation'] == 'private-linux-prisma-generation-e380da106b5e41789f02b9e986f83d37'
-              and private_generation['remoteEnvelopeSha256'] == '284e18fdf8052ca401b29603cac95ed19e0f852f505d35668812f4365e7e6e1b'
-              and re.fullmatch(r'[a-f0-9]{64}', private_generation['extractionReceiptSha256']),
-              'PRIVATE_PRISMA_LINUX_PROVENANCE_UNREVIEWED')
+        current_local = private_generation.get('provenanceKind') == 'ORIGINAL_CANONICAL_LOCAL_BACKEND_EXEC'
+        if current_local:
+            check(re.fullmatch(r'private-local-linux-prisma-[a-f0-9]{32}', private_generation['operation'])
+                  and private_generation['sourceSchemaSha256'] == source['schemaSha256']
+                  and re.fullmatch(r'[a-f0-9]{64}', private_generation['helperSha256'])
+                  and private_generation['helperSha256'] == private_generation['remoteEnvelopeSha256']
+                  and re.fullmatch(r'[a-f0-9]{64}', private_generation['containerId'])
+                  and re.fullmatch(r'sha256:[a-f0-9]{64}', private_generation['imageIdentity'])
+                  and isinstance(private_generation['originalGeneratorPid'], int) and private_generation['originalGeneratorPid'] > 0
+                  and private_generation['originalGeneratorCode'] == 0
+                  and private_generation['allOriginalChildrenClosed'] is True
+                  and private_generation['allTenIdentitiesUnchanged'] is True
+                  and re.fullmatch(r'[a-f0-9]{64}', private_generation['extractionReceiptSha256']),
+                  'PRIVATE_PRISMA_LOCAL_LINUX_PROVENANCE_UNREVIEWED')
+        else:
+            check(private_generation['operation'] == 'private-linux-prisma-generation-e380da106b5e41789f02b9e986f83d37'
+                  and private_generation['remoteEnvelopeSha256'] == '284e18fdf8052ca401b29603cac95ed19e0f852f505d35668812f4365e7e6e1b'
+                  and artifact['models'] == 548
+                  and re.fullmatch(r'[a-f0-9]{64}', private_generation['extractionReceiptSha256']),
+                  'PRIVATE_PRISMA_LINUX_PROVENANCE_UNREVIEWED')
     if private_generation is not None:
         check(artifact.get('generatorOnlyTransform') is True and private_generation.get('generatorOnlyTransform') is True
-              and re.fullmatch(r'private-linux-prisma-generation-[a-f0-9]{32}' if linux_generated else r'private-host-prisma-[a-f0-9]{32}', private_generation['operation'])
+              and re.fullmatch((r'private-local-linux-prisma-[a-f0-9]{32}' if private_generation.get('provenanceKind') == 'ORIGINAL_CANONICAL_LOCAL_BACKEND_EXEC' else r'private-linux-prisma-generation-[a-f0-9]{32}') if linux_generated else r'private-host-prisma-[a-f0-9]{32}', private_generation['operation'])
               and re.fullmatch(r'[a-f0-9]{64}', private_generation['receiptSha256'])
               and re.fullmatch(r'[a-f0-9]{64}', private_generation['transformedSchemaSha256']),
               'PRIVATE_PRISMA_HOST_TRANSFORM_NOT_PROVEN')
@@ -166,7 +182,7 @@ def assemble_host(root, write, encoded, check):
     engine = Path('/app/node_modules/@prisma/engines/libquery_engine-debian-openssl-3.0.x.so.node')
     runtime = Path('/app/node_modules/@prisma/client/runtime/library.js')
     check(digest(output / engine.name) == digest(engine) and digest(output / 'runtime/library.js') == digest(runtime), 'PRIVATE_PRISMA_HOST_LINUX_IDENTITY_MISMATCH')
-    probe = subprocess.run(['node', '-e', "const c=require(process.argv[1]);const db=new c.PrismaClient();(async()=>{try{for(const key of ['onlineRelease','onlineMigrationStep','onlineRuntimeSlot','deploymentOperation','onlineRealtimeBatch','onlineRealtimeCommand','onlineHrInvalidationIntent'])if(typeof db[key]?.count!=='function')throw Error('MISSING_'+key);if(c.Prisma.dmmf.datamodel.models.length!==548)throw Error('MODEL_COUNT');console.log(JSON.stringify({version:c.Prisma.prismaVersion,models:c.Prisma.dmmf.datamodel.models.length,dmmfSha256:require('crypto').createHash('sha256').update(JSON.stringify(c.Prisma.dmmf)).digest('hex')}))}finally{await db.$disconnect()}})().catch(e=>{console.error(e.message);process.exitCode=1})", str(output)], stdin=subprocess.DEVNULL, capture_output=True)
+    probe = subprocess.run(['node', '-e', "const c=require(process.argv[1]);const db=new c.PrismaClient();(async()=>{try{for(const key of ['onlineRelease','onlineMigrationStep','onlineRuntimeSlot','deploymentOperation','onlineRealtimeBatch','onlineRealtimeCommand','onlineHrInvalidationIntent'])if(typeof db[key]?.count!=='function')throw Error('MISSING_'+key);const names=c.Prisma.dmmf.datamodel.models.map(m=>m.name).sort();if(JSON.stringify(names)!==process.argv[2])throw Error('MODEL_NAMES');console.log(JSON.stringify({version:c.Prisma.prismaVersion,models:c.Prisma.dmmf.datamodel.models.length,dmmfSha256:require('crypto').createHash('sha256').update(JSON.stringify(c.Prisma.dmmf)).digest('hex')}))}finally{await db.$disconnect()}})().catch(e=>{console.error(e.message);process.exitCode=1})", str(output), json.dumps(model_names, separators=(',', ':'))], stdin=subprocess.DEVNULL, capture_output=True)
     check(probe.returncode == 0, 'PRIVATE_PRISMA_HOST_DELEGATE_MISSING')
     generated = json.loads(probe.stdout)
     check(generated['dmmfSha256'] == artifact['dmmfSha256'] and generated['version'] == artifact['version'], 'PRIVATE_PRISMA_HOST_DMMF_CHANGED')

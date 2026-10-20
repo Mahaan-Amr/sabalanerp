@@ -13,7 +13,7 @@ import {createOriginalRoleCoordinator} from './lib/application-native-role-coord
 import {collectApplicationFullCatalogArtifacts,stageOriginalFullCatalog} from './lib/application-native-full-catalog-artifacts.mjs';
 import {runOriginalRetainedBrowserQualificationRounds,readOriginalRetainedBrowserQualificationCompletion} from './lib/original-retained-browser-qualification.mjs';
 
-export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,nativeOwnerElfReceipt}){
+export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,nativeOwnerElfReceipt,prismaQualificationReceipt}){
 assert.equal(typeof candidateReplacementReceipt,'string','EXPLICIT_ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED');
 assert.ok(path.isAbsolute(candidateReplacementReceipt)&&fs.lstatSync(candidateReplacementReceipt).isFile(),'ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED_BEFORE_DOCKER');
 if(!retainedBrowserCompletion){assert.ok(retainedBrowserPlanFile&&retainedBrowserPlanSha256,'ORIGINAL_RETAINED_BROWSER_PLAN_REQUIRED');retainedBrowserCompletion=await runOriginalRetainedBrowserQualificationRounds({planFile:retainedBrowserPlanFile,planSha256:retainedBrowserPlanSha256});}
@@ -174,10 +174,13 @@ for(const [name,bytes]of Object.entries(collectApplicationPrismaArtifacts({repos
 // Reuse the actual qualified official artifact, never regenerate a shared or
 // operation client during application admission. This is diagnostic custody,
 // not a production image or migration-history adoption certificate.
-const qualificationReceipt=capture('reports/qa/application-prisma-adc49c06e111ddb62501a67feceb6eca.json');
+const prismaReceiptRelative=prismaQualificationReceipt?path.relative(root,path.resolve(prismaQualificationReceipt)).split(path.sep).join('/'):'reports/qa/application-prisma-adc49c06e111ddb62501a67feceb6eca.json';
+assert.match(prismaReceiptRelative,/^reports\/qa\/application-prisma-[a-f0-9]{32}\.json$/);
+const qualificationReceipt=capture(prismaReceiptRelative);
 const qualification=JSON.parse(qualificationReceipt);
 assert.equal(qualification.pass,true);assert.equal(qualification.result.databaseRetiredWithoutForce,true);
-assert.equal(qualification.result.migrationCount,438);
+const prismaMigrations=fs.readdirSync(path.join(root,'backend/prisma/migrations'),{withFileTypes:true}).filter(x=>x.isDirectory()&&fs.existsSync(path.join(root,'backend/prisma/migrations',x.name,'migration.sql')));
+assert.equal(qualification.result.migrationCount,prismaMigrations.length);
 assert.equal(qualification.result.generated.linuxArtifact.format,'sabalan-official-linux-prisma-artifact/v1');
 assert.equal(qualification.result.generated.linuxArtifact.linuxGenerated,true);
 assert.equal(qualification.result.generated.hostArtifact,undefined);

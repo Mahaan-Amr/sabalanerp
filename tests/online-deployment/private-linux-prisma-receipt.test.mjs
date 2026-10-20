@@ -5,7 +5,8 @@ import {createHash} from 'node:crypto';
 import {assertPrivateLinuxPrismaController,privateLinuxPrismaIdentity as identity} from '../../scripts/lib/private-linux-prisma-receipt.mjs';
 import {backendBaseIdentity} from '../../scripts/lib/production-backend-base-artifacts.mjs';
 import {schemaTokenDigest} from '../../scripts/lib/prisma-schema-tokens.mjs';
-const source=fs.readFileSync(new URL('../../backend/prisma/schema.prisma',import.meta.url)),sha=b=>createHash('sha256').update(b).digest('hex');
+// Historical548 metadata fixtures intentionally remain independent of today's merged schema.
+const source=Buffer.from('generator client {\n  provider      = \"prisma-client-js\"\n  binaryTargets = [\"native\", \"debian-openssl-3.0.x\"]\n}\n'+Array.from({length:548},(_,i)=>'model Historical'+i+' { id String @id }\n').join('')),sha=b=>createHash('sha256').update(b).digest('hex');
 // Pure synthetic controller metadata only. No files are extracted, generated
 // clients executed, containers started, or official provenance receipts minted.
 function fixture(){

@@ -1,7 +1,8 @@
+import {snapshotArguments} from './lib/production-inquiry-snapshot.mjs';
 /** Fixed read-only public-code inventory. Never read SQLite, .env or secrets. */
 import assert from'node:assert/strict';import fs from'node:fs';import path from'node:path';import{createHash,randomBytes}from'node:crypto';import{originalBackendBaseCommands}from'./lib/production-backend-base-process.mjs';
 const repository=path.resolve(import.meta.dirname,'..'),sha=raw=>createHash('sha256').update(raw).digest('hex');
-assert.deepEqual(process.argv.slice(2),['--observe']);
+const args=process.argv.slice(2);assert.equal(args[0],'--observe');const snapshot=snapshotArguments(args,1);
 const nodeSource=String.raw`const f=require('fs'),p=require('path'),c=require('crypto'),a=require('assert/strict');const sha=x=>c.createHash('sha256').update(x).digest('hex');
 const root='/app',identity=s=>[s.dev,s.ino,s.size,s.mtimeNs,s.ctimeNs,s.mode,s.nlink].map(String).join(':');
 function file(relative,max=268435456){const name=root+'/'+relative,b=f.lstatSync(name,{bigint:true});a.ok(b.isFile()&&b.nlink===1n&&b.size<=BigInt(max));const fd=f.openSync(name,f.constants.O_RDONLY|f.constants.O_NOFOLLOW|f.constants.O_NONBLOCK);const h=c.createHash('sha256'),buffer=Buffer.alloc(262144);let count=0;try{a.equal(identity(f.fstatSync(fd,{bigint:true})),identity(b));for(;;){const n=f.readSync(fd,buffer,0,buffer.length,null);if(!n)break;h.update(buffer.subarray(0,n));count+=n;}a.equal(identity(f.fstatSync(fd,{bigint:true})),identity(b));a.equal(identity(f.lstatSync(name,{bigint:true})),identity(b));}finally{f.closeSync(fd);}return{path:relative,bytes:count,sha256:h.digest('hex'),executable:Number(b.mode&73n)};}
@@ -17,7 +18,7 @@ process.stdout.write(JSON.stringify({format:'sabalan-production-inquiry-legacy-c
 const operation=randomBytes(16).toString('hex');
 const controller=String.raw`import json,subprocess,hashlib,base64,selectors,os,sys,signal
 SOURCE=base64.b64decode('__SOURCE__');EXPECTED='__SHA__';assert hashlib.sha256(SOURCE).hexdigest()==EXPECTED
-children=[];history=[];interrupted=False
+BASELINE=json.loads(base64.b64decode('__BASELINE__'));children=[];history=[];interrupted=False
 def cancelled(*_):
  global interrupted
  interrupted=True
@@ -43,16 +44,21 @@ def inspect():
  rows=ps();return sorted([json.loads(row)for row in run(['docker','inspect','--format',template,*[x['Name']for x in rows]]).decode().splitlines()],key=lambda x:x['service'])
 report=dict(format='sabalan-production-inquiry-legacy-code-observation/v1',readOnly=True,passResult=False,productionAdmission=False)
 try:
- before=inspect();report['before']=before;target=next(x for x in before if x['service']=='inquiry');assert target['image']=='sha256:ab6e2933e2d0d397f0b1a514dba69206e21856fa7d4275ab33383020bf9dd66e'
+ before=inspect();report['before']=before;target=next(x for x in before if x['service']=='inquiry');assert target['image']==(BASELINE['services']['inquiry']['image']if BASELINE else 'sha256:ab6e2933e2d0d397f0b1a514dba69206e21856fa7d4275ab33383020bf9dd66e')
+ if BASELINE:
+  assert run(['git','-C','/opt/sabalanerp','rev-parse','HEAD']).decode().strip()==BASELINE['deployedHead']
+  for row in before:
+   expected=BASELINE['services'][row['service']];assert(row['id'],row['image'],row['birth'])==(expected['id'],expected['image'],expected['startedAt'])
  ps();image=json.loads(run(['docker','image','inspect','--format','{"id":{{json .Id}},"rootfs":{{json .RootFS.Layers}}}',target['image']]))
- ps();value=json.loads(run(['docker','exec','-i',target['id'],'node','-'],SOURCE));assert value['frameworkBuildId']=='KQravWuGMIUURyrEIN-mE'
+ ps();value=json.loads(run(['docker','exec','-i',target['id'],'node','-'],SOURCE));assert BASELINE or value['frameworkBuildId']=='KQravWuGMIUURyrEIN-mE'
+ if BASELINE:value['sourceSnapshot']=dict(format='sabalan-measured-inquiry-source/v1',baselineSha256=BASELINE['sha256'],deployedHead=BASELINE['deployedHead'],engineImage=target['image'],containerId=target['id'],startedAt=target['birth'])
  after=inspect();assert before==after and all(c.poll()is not None for c in children)
- report.update(passResult=True,inquiry=target,image=image,value=value,after=after,allSixIdentitiesUnchanged=True,allOriginalChildrenClosed=True,originalCommands=history)
+ report.update(snapshotBaseline=BASELINE,passResult=True,inquiry=target,image=image,value=value,after=after,allSixIdentitiesUnchanged=True,allOriginalChildrenClosed=True,originalCommands=history)
 except BaseException as error:
  for c in children:c.wait()
  report.update(error=type(error).__name__+': '+str(error),allOriginalChildrenClosed=all(c.poll()is not None for c in children),originalCommands=history)
 print(json.dumps(report));sys.exit(0 if report['passResult']else 1)
-`.replace('__SOURCE__',Buffer.from(nodeSource).toString('base64')).replace('__SHA__',sha(Buffer.from(nodeSource)));
+`.replace('__BASELINE__',Buffer.from(JSON.stringify(snapshot)).toString('base64')).replace('__SOURCE__',Buffer.from(nodeSource).toString('base64')).replace('__SHA__',sha(Buffer.from(nodeSource)));
 const file=path.join('D:/sabalanerp-online-qa','production-inquiry-legacy-code-'+operation+'-remote.py');fs.writeFileSync(file,controller,{flag:'wx',mode:0o600});
 const owner=originalBackendBaseCommands();const child=await owner.run('ssh',['-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','root@94.182.85.254','python3 -I -B -'],{input:controller,maximum:16*1024*1024});
 const closure=await owner.close();const output=path.join(repository,'reports/qa','production-inquiry-legacy-code-'+operation+'.json');fs.writeFileSync(output,JSON.stringify({format:'sabalan-production-inquiry-legacy-code-ssh/v1',remoteSourceFile:file,remoteSourceSha256:sha(Buffer.from(controller)),nodeSourceSha256:sha(Buffer.from(nodeSource)),originalSsh:child,originalClosure:closure},null,2)+'\n',{flag:'wx',mode:0o600});

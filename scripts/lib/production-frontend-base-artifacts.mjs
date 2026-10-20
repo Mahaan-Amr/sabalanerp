@@ -1,3 +1,5 @@
+import {readMeasuredFrontendSnapshot} from '../../deploy/scripts/production-frontend-snapshot.mjs';
+import {inspectPrivateDockerArchive} from './private-docker-image-archive.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,7 +27,9 @@ export function stableFrontendBaseFile(file, limit = 1024 * 1024 ** 2) {
   } finally { fs.closeSync(fd); }
 }
 
-export function qualifiedProductionFrontendArchive(repository) {
+export function qualifiedProductionFrontendArchive(repository, snapshotSelection=null) {
+  if(snapshotSelection){assert.deepEqual(Object.keys(snapshotSelection).sort(),['file','sha256']);const measured=readMeasuredFrontendSnapshot(fs.realpathSync(snapshotSelection.file),snapshotSelection.sha256),source=measured.source,archive=fs.realpathSync(source.archive),proof=inspectPrivateDockerArchive(archive,source.sourceIndex);assert.deepEqual(proof,measured.packet.archive.proof);const archiveFile=stableFrontendBaseFile(archive);assert.equal(archiveFile.sha256,proof.archiveSha256);return{archive,archiveFile,configIdentity:source.configIdentity,sourceIndex:source.sourceIndex,sourcePlatform:source.sourcePlatform,layers:source.layers,snapshotSelection:{file:fs.realpathSync(snapshotSelection.file),sha256:snapshotSelection.sha256},sourceSnapshot:measured.browser.sourceSnapshot};}
+
   const transferPath = path.join(repository,'reports/qa',transferName), exportPath = path.join(repository,'reports/qa',exportName);
   const transferFile = stableFrontendBaseFile(transferPath,4*1024**2), exportFile = stableFrontendBaseFile(exportPath,4*1024**2);
   const transfer = JSON.parse(fs.readFileSync(transferPath)), exported = JSON.parse(fs.readFileSync(exportPath));

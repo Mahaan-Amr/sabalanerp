@@ -1,3 +1,4 @@
+import {validateMeasuredFrontendBrowserDescriptor} from '../../deploy/scripts/production-frontend-snapshot.mjs';
 import assert from 'node:assert/strict';
 import {randomBytes,createHash} from 'node:crypto';
 import puppeteer from 'puppeteer';
@@ -17,7 +18,7 @@ export async function qualifyInstalledLegacySupportForm({chromeEnvelope,seed,leg
 }
 async function qualifyOriginalLegacySupportForm({original,seed,legacy,publishNew,readApiIntent}){
  assert.equal(original.browserOrigin,'http://localhost:3199');
- assert.equal(legacy.nativeBuildId,'B3FQSLBH439Vaf6knWbsb');assert.equal(legacy.handoffPolicy,'MANUAL_SAVE_REQUIRED');
+ if(legacy.sourceSnapshot)validateMeasuredFrontendBrowserDescriptor(legacy);else{assert.equal(legacy.nativeBuildId,'B3FQSLBH439Vaf6knWbsb');assert.equal(legacy.image,'sha256:348ceb11008abf840a878bd28c32c2910fd52649af6d04d0f1961870f57b3004');}assert.equal(legacy.handoffPolicy,'MANUAL_SAVE_REQUIRED');
  assert.equal(legacy.id,'erp_legacy_'+createHash('sha256').update(legacy.nativeBuildId).digest('hex'));
  assert.equal(legacy.image,'sha256:348ceb11008abf840a878bd28c32c2910fd52649af6d04d0f1961870f57b3004');
  assert.equal(typeof publishNew,'function');assert.equal(typeof readApiIntent,'function');

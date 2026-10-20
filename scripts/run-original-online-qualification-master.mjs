@@ -28,12 +28,12 @@ function pinnedConfiguration(file,digest){
 }
 /** This function never accepts a ChildProcess or an already-finished report as
  * ownership. The two original factories below create their own children. */
-export async function runOriginalOnlineQualificationMaster({candidateReplacementReceipt,prismaQualificationReceipt,retainedBrowserPlanFile,retainedBrowserPlanSha256,deferLocal=false,input=process.stdin,output=process.stdout}){
+export async function runOriginalOnlineQualificationMaster({candidateReplacementReceipt,prismaQualificationReceipt,frontendSnapshot,retainedBrowserPlanFile,retainedBrowserPlanSha256,deferLocal=false,input=process.stdin,output=process.stdout}){
  assert.equal(process.platform,'win32','ORIGINAL_QUALIFICATION_MASTER_WINDOWS_REQUIRED');
  assert.equal(deferLocal,true,'ORIGINAL_MASTER_REQUIRES_PRELOAD_THEN_RUN_LOCAL');
  let local=null,retainedBrowser=null;
  if(retainedBrowserPlanFile){assert.ok(retainedBrowserPlanSha256);retainedBrowser=await runOriginalRetainedBrowserQualificationRounds({planFile:retainedBrowserPlanFile,planSha256:retainedBrowserPlanSha256});}
- if(!deferLocal){assert.ok(candidateReplacementReceipt);local=await runOriginalApplicationNativeQualification({candidateReplacementReceipt,prismaQualificationReceipt,retainedBrowserCompletion:retainedBrowser});}
+ if(!deferLocal){assert.ok(candidateReplacementReceipt);local=await runOriginalApplicationNativeQualification({candidateReplacementReceipt,prismaQualificationReceipt,frontendSnapshot,retainedBrowserCompletion:retainedBrowser});}
  let independent=null,independentOptions=null,independentGuardian=null,protectedInstall=null,protectedRequest=null,sequence=0,held=false;
  let physical=null,promotion=null,metadata=null,certification=null,physicalCertificate=null,repositoryCertificate=null;
  let physicalGuardianReady=null;
@@ -61,9 +61,9 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
      keys(request,['command','sequence','configurationFile','configurationSha256','password']);assert.ok(!local&&!independentOptions&&!held,'ORIGINAL_INDEPENDENT_CONFIGURATION_ALREADY_BOUND');
      assert.equal(typeof request.password,'string');independentOptions={...pinnedConfiguration(request.configurationFile,request.configurationSha256),password:request.password};state('INDEPENDENT_CONFIGURATION_BOUND_NO_RUNTIME');
     }else if(request.command==='RUN_LOCAL'){
-     keys(request,['command','sequence','candidateReplacementReceipt',...(Object.hasOwn(request,'prismaQualificationReceipt')?['prismaQualificationReceipt']:[])]);assert.ok(!local&&!held,'ORIGINAL_LOCAL_ALREADY_CREATED');
+     keys(request,['command','sequence','candidateReplacementReceipt',...['prismaQualificationReceipt','frontendSnapshot'].filter(key=>Object.hasOwn(request,key))]);assert.ok(!local&&!held,'ORIGINAL_LOCAL_ALREADY_CREATED');
      assert.ok(independentOptions&&localRuntime,'ORIGINAL_INDEPENDENT_AND_LOCAL_RUNTIME_CONFIGURATION_REQUIRED_BEFORE_LOCAL');
-     local=await runOriginalApplicationNativeQualification({candidateReplacementReceipt:request.candidateReplacementReceipt,prismaQualificationReceipt:request.prismaQualificationReceipt??prismaQualificationReceipt,retainedBrowserCompletion:retainedBrowser,independentOptions,...localRuntime});
+     local=await runOriginalApplicationNativeQualification({candidateReplacementReceipt:request.candidateReplacementReceipt,prismaQualificationReceipt:request.prismaQualificationReceipt??prismaQualificationReceipt,frontendSnapshot:request.frontendSnapshot??frontendSnapshot,retainedBrowserCompletion:retainedBrowser,independentOptions,...localRuntime});
      state('LOCAL_QUALIFICATION_CLOSED_RETAINED');
     }else if(request.command==='RUN_INDEPENDENT'){
      keys(request,['command','sequence','configurationFile','configurationSha256','password']);

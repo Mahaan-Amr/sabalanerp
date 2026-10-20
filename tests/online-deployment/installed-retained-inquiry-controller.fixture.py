@@ -178,7 +178,10 @@ class Controller:
         command=['/app/node_modules/next/dist/bin/next','start']
         if actor.get('entryPath') is not None:
             check(actor['entryPath']=='/app/online-runtime/inquiry-legacy-entry.cjs' and actor['legacyBusinessSource']['kind']=='COMPILED_IMAGE'
-                  and actor['legacyBusinessSource']['image']=='sha256:ab6e2933e2d0d397f0b1a514dba69206e21856fa7d4275ab33383020bf9dd66e'
+                  and actor['legacyBusinessSource']==json.loads(read(Path('/app/online-runtime/legacy-business-source.json')))
+                  and (actor['legacyBusinessSource']['image']=='sha256:ab6e2933e2d0d397f0b1a514dba69206e21856fa7d4275ab33383020bf9dd66e'
+                       or (actor['legacyBusinessSource'].get('sourceSnapshot',{}).get('format')=='sabalan-measured-inquiry-source/v1'
+                           and actor['legacyBusinessSource']['image']==actor['legacyBusinessSource']['sourceSnapshot'].get('engineImage')))
                   and actor['legacyBusinessSource']['sourceCommit'] is None,'LEGACY_COMPILED_PROVENANCE_REQUIRED')
             check(digest(Path(actor['entryPath']).read_bytes())==actor['ownedLegacyEntrySha256'],'LEGACY_OWNED_ENTRY_CHANGED')
             command=[actor['entryPath']]

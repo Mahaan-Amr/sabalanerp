@@ -765,7 +765,7 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
   const receipt=await registerAcceptedOnlineRelease(this.#database,this.#owner,input);
   this.#accepted={input:structuredClone(input),receipt};this.#releases.set(receipt.releaseId,this.#accepted);return receipt;
  }
- async prepareProtectedBootstrap({registration,paths,httpRuntimes}){
+ async prepareProtectedBootstrap({registration,paths,httpRuntimes,frontendSnapshot}){
   await this.assertOwned(['MIGRATIONS_APPLIED','RELEASE_STARTED']);
   assert(!this.#accepted&&!this.#bootstrap&&Array.isArray(httpRuntimes)&&httpRuntimes.length>0,'ONLINE_BOOTSTRAP_ORIGINAL_REQUIRED');
   this.#requireOriginalQualification(registration);
@@ -776,7 +776,7 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
   this.#releases.set(this.#owner.releaseId,this.#accepted);
   // Acquire and create the legacy UI carrier BEFORE deploy recreates its old
   // canonical frontend. No legacy backend or jobs process is started/adopted.
-  this.#bootstrapLegacy={source:await acquireOriginalBootstrapLegacyBrowserSource(this)};
+  this.#bootstrapLegacy={source:await acquireOriginalBootstrapLegacyBrowserSource(this,frontendSnapshot)};
   const descriptor=await issueOriginalLegacyBrowserDescriptor(this);
   const legacyCarrier=await provisionOriginalBootstrapLegacyFrontend(this,{releaseId:this.#owner.releaseId,descriptor});
   const legacy=await readOriginalOnlineCarrier(this,legacyCarrier);

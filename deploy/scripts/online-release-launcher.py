@@ -362,7 +362,12 @@ try:
    bootstrap=call('BUILD_BOOTSTRAP_MATERIAL',input=dict(evidenceDirectory=str(evidence),manifestSha256=response['manifestSha256'],acceptanceSha256=response['acceptanceSha256']))['bootstrapMaterial']
    bootstrap['applicationsByHost']=config['applicationsByHost']
    require(bootstrap['registration']['previousReleaseId'] is None)
-   call(command,input={key:bootstrap[key] for key in ('registration','paths','httpRuntimes')})
+   bootstrap_input={key:bootstrap[key] for key in ('registration','paths','httpRuntimes')}
+   if 'frontendSnapshot' in config:
+    selection=config['frontendSnapshot']
+    require(isinstance(selection,dict) and set(selection)=={'file','sha256'} and isinstance(selection['file'],str) and pathlib.Path(selection['file']).is_absolute() and re.fullmatch('[a-f0-9]{64}',selection['sha256']))
+    bootstrap_input['frontendSnapshot']=selection
+   call(command,input=bootstrap_input)
   elif command=='BOOTSTRAP_GATES':
    call('RUN_PRODUCTION_GATES',input=dict(releaseId=message['releaseId']))
   elif command=='BOOTSTRAP_PUBLISH':

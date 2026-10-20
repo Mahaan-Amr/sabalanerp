@@ -13,7 +13,12 @@ import {createOriginalRoleCoordinator} from './lib/application-native-role-coord
 import {collectApplicationFullCatalogArtifacts,stageOriginalFullCatalog} from './lib/application-native-full-catalog-artifacts.mjs';
 import {runOriginalRetainedBrowserQualificationRounds,readOriginalRetainedBrowserQualificationCompletion} from './lib/original-retained-browser-qualification.mjs';
 
-export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,nativeOwnerElfReceipt,prismaQualificationReceipt}){
+export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,nativeOwnerElfReceipt,prismaQualificationReceipt,frontendSnapshot}){
+if(frontendSnapshot){
+ assert.deepEqual(Object.keys(frontendSnapshot).sort(),['file','sha256']);
+ const {readMeasuredFrontendSnapshot}=await import('../deploy/scripts/production-frontend-snapshot.mjs');
+ readMeasuredFrontendSnapshot(frontendSnapshot.file,frontendSnapshot.sha256);
+}
 assert.equal(typeof candidateReplacementReceipt,'string','EXPLICIT_ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED');
 assert.ok(path.isAbsolute(candidateReplacementReceipt)&&fs.lstatSync(candidateReplacementReceipt).isFile(),'ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED_BEFORE_DOCKER');
 if(!retainedBrowserCompletion){assert.ok(retainedBrowserPlanFile&&retainedBrowserPlanSha256,'ORIGINAL_RETAINED_BROWSER_PLAN_REQUIRED');retainedBrowserCompletion=await runOriginalRetainedBrowserQualificationRounds({planFile:retainedBrowserPlanFile,planSha256:retainedBrowserPlanSha256});}
@@ -57,7 +62,8 @@ const sources={},capture=name=>{const bytes=fs.readFileSync(path.join(root,name)
 capture('scripts/run-application-native-local.mjs');
 capture('scripts/lib/application-native-role-coordinator.mjs');
 for(const source of ['scripts/lib/original-private-legacy-ui-carrier.mjs',
- 'scripts/lib/production-legacy-browser-artifacts.mjs','scripts/lib/production-frontend-base-artifacts.mjs'])capture(source);
+ 'scripts/lib/production-legacy-browser-artifacts.mjs','scripts/lib/production-frontend-base-artifacts.mjs',
+ 'scripts/lib/private-docker-image-archive.mjs','deploy/scripts/production-frontend-snapshot.mjs'])capture(source);
 capture('docker-compose.application-native-role-isolation.yml');
 const {collectNativeCandidateArtifacts,candidateReplacementReceiptArgument}=await import('./lib/application-native-candidate-artifacts.mjs');
 const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
@@ -224,7 +230,7 @@ assert.match(files['hr-file-expansion.sql'].toString(),/^-- Generated bounded on
 files['original-retained-browser-result.json']=fs.readFileSync(retainedBrowserFacts.reportFile);
 assert.equal(sha(files['original-retained-browser-result.json']),retainedBrowserFacts.reportSha256);
 const fileHashes=Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,sha(bytes)]));
-const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,nativeOwnerElfReceipt,
+const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,
   onHeld:value=>{fs.writeFileSync(path.join(root,'reports/qa',path.basename(directory)+'-role-held.json'),JSON.stringify(value,null,2)+'\n');}});
 files['config.json']=Buffer.from(JSON.stringify({sourceCommit,
   retainedBrowserReport:{file:'original-retained-browser-result.json',sha256:retainedBrowserFacts.reportSha256},

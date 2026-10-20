@@ -83,7 +83,7 @@ function validateOriginalMainHttpOwner(entry,grant,index,status){
 
 /** Diagnostic only. The private key and both original Docker-exec handles never
  * leave this closure. There is deliberately no public arbitrary signer. */
-export function createOriginalRoleCoordinator({directory,topology,fileHashes,retainedBrowserCompletion,originalServiceIdentities,independentOptions,nativeOwnerElfReceipt,onHeld=()=>{}}){
+export function createOriginalRoleCoordinator({directory,topology,fileHashes,retainedBrowserCompletion,originalServiceIdentities,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,onHeld=()=>{}}){
   assert.match(directory,/^\/app\/online-runtime-acceptance\/application-native-[a-f0-9]{32}$/);
   const retained=retainedBrowserCompletion?readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion):null;
   for(const role of ['main','candidate']){
@@ -495,7 +495,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
         same(body.input,{});assertLegacyReady();
         if(body.command==='ROTATE_PRIVATE_LEGACY_UI'){
           assert.ok(!legacyCarrier&&completedPhases.has('PRIVATE_CHROME_CLOSED'));
-          void beginOriginalPrivateLegacyUiCarrier(originalController).then(token=>{legacyCarrier=token;send('main','PRIVATE_LEGACY_UI_ROTATED',{requestId:body.requestId,root:directory,roundId:legacyRoundId,carrier:readOriginalPrivateLegacyUiCarrier(token)});}).catch(hold);
+          void beginOriginalPrivateLegacyUiCarrier(originalController,frontendSnapshot).then(token=>{legacyCarrier=token;send('main','PRIVATE_LEGACY_UI_ROTATED',{requestId:body.requestId,root:directory,roundId:legacyRoundId,carrier:readOriginalPrivateLegacyUiCarrier(token)});}).catch(hold);
         }else{
           assert.ok(legacyCarrier&&!legacyRestoration);
           void restoreOriginalPrivateLegacyUiCarrier(originalController,legacyCarrier).then(token=>{legacyRestoration=token;send('main','PRIVATE_LEGACY_UI_RESTORED',{requestId:body.requestId,root:directory,roundId:legacyRoundId,restoration:readOriginalPrivateLegacyUiRestoration(token)});}).catch(hold);

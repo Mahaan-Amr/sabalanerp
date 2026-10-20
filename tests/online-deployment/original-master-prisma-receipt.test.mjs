@@ -22,3 +22,11 @@ async function exercise(extra={},upfront){
 test('RUN_LOCAL forwards explicit fresh Prisma receipt through the actual strict parser',async()=>{const result=await exercise({prismaQualificationReceipt:'new-current-capsule.json'},'old-upfront.json');assert.equal(result.invoked.length,1);assert.equal(result.invoked[0].prismaQualificationReceipt,'new-current-capsule.json');assert.equal(result.invoked[0].candidateReplacementReceipt,'test-candidate.json');assert.equal(result.invoked[0].nativeOwnerElfReceipt,'test-elf.json');assert.equal(result.events.at(-1).event,'ORIGINAL_MASTER_INPUT_CLOSED_RETAINED');});
 test('RUN_LOCAL preserves upfront receipt fallback and historical omitted-field shape',async()=>{for(const value of ['upfront-capsule.json',undefined]){const result=await exercise({},value);assert.equal(result.invoked.length,1);assert.equal(result.invoked[0].prismaQualificationReceipt,value);}});
 test('RUN_LOCAL refuses foreign approval fields before original local factory invocation',async()=>{for(const extra of [{prismaQualificationReceipt:'fresh.json',approved:true},{prismaQualificationReceipt:'fresh.json',databaseConnected:false}]){const result=await exercise(extra);assert.equal(result.invoked.length,0);assert.equal(result.events.at(-1).event,'ORIGINAL_MASTER_REQUEST_FAILED_RETAINED');}});
+test('RUN_LOCAL forwards the measured frontend packet alongside the current schema receipt',async()=>{
+ const frontendSnapshot={file:'D:/qa/measured-frontend.json',sha256:'b'.repeat(64)};
+ const result=await exercise({prismaQualificationReceipt:'fresh-current.json',frontendSnapshot});
+ assert.equal(result.invoked.length,1);
+ assert.equal(result.invoked[0].frontendSnapshot.file,frontendSnapshot.file);
+ assert.equal(result.invoked[0].frontendSnapshot.sha256,frontendSnapshot.sha256);
+ assert.equal(result.invoked[0].prismaQualificationReceipt,'fresh-current.json');
+});

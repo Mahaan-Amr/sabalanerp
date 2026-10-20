@@ -1,3 +1,4 @@
+import {readMeasuredFrontendSnapshot} from '../../deploy/scripts/production-frontend-snapshot.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,7 +29,9 @@ export function validateProductionLegacyBrowserObservation(envelope){
 /** Binds the actual original exported image/archive to the fixed real production
  * bytes. This is source evidence for original protected bootstrap, NOT a token
  * that authorizes a carrier, SQL writes, or an unowned legacy backend. */
-export function collectProductionLegacyBrowserArtifacts(repository){
+export function collectProductionLegacyBrowserArtifacts(repository,snapshotSelection=null){
+ if(snapshotSelection){const measured=readMeasuredFrontendSnapshot(fs.realpathSync(snapshotSelection.file),snapshotSelection.sha256),source=qualifiedProductionFrontendArchive(repository,snapshotSelection);assert.equal(source.sourceIndex,measured.manifest.image);return{source,originalFrontend:measured.originalFrontend,observation:{receipt:path.basename(snapshotSelection.file),file:stableFrontendBaseFile(snapshotSelection.file,32*1024**2),frontend:measured.originalFrontend},manifest:measured.manifest,manifestSha256:measured.manifestSha256,browser:measured.browser,instrumentation:'legacy-uninstrumented',automaticReloadSupported:false,retentionStartsAt:'actual-retirement-database-clock',productionAdmission:false};}
+
  const observationPath=path.join(repository,'reports/qa',observationName),observationFile=stableFrontendBaseFile(observationPath,4*1024**2);
  const observed=validateProductionLegacyBrowserObservation(JSON.parse(fs.readFileSync(observationPath)));
  const source=qualifiedProductionFrontendArchive(repository);assert.equal(source.sourceIndex,observed.frontend.image);assert.deepEqual(observed.originalImageLayers,source.layers);

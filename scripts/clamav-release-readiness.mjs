@@ -7,8 +7,10 @@ import { promisify } from 'node:util';
 import { resolveTxt } from 'node:dns/promises';
 import { pathToFileURL } from 'node:url';
 import { immutableImage } from '../backend/scripts/clamav-checkpoint.mjs';
+import {mirrorOrigin, validateSourceMigration} from './clamav-source-migration.mjs';
 const exec=promisify(execFile);
 const managedVerifier='managed-1.4.6-v1', nativeVerifier='native-1.4-daemon-v1';
+const updateRefusal=line=>!/^(WARNING: )?Cool-down expired, ok to try again\.$/.test(line) && /cool.?down|rate.?limit|blocked|ERROR:|HTTP[^0-9]*(429|403)/i.test(line);
 export function validateNativeUpdater(sample,config,logs,versions,clamdConfig='') {
  const fail=()=>{throw new Error('Native rollback updater evidence is incomplete, stale or unsafe');};
  const options=text=>{
@@ -60,7 +62,7 @@ export function validateNativeUpdater(sample,config,logs,versions,clamdConfig=''
   if(cycle)cycle.lines.push({at,text:match[2]});
  }
  if(!cycle || cycle.at<started-2 || cycle.at>sample.now+2 || sample.now-cycle.at>intervalSeconds*2
-  || cycle.lines.some(line=>line.at<cycle.at || line.at>sample.now+2 || /cool.?down|rate.?limit|blocked|ERROR:|HTTP[^0-9]*(429|403)/i.test(line.text)))fail();
+  || cycle.lines.some(line=>line.at<cycle.at || line.at>sample.now+2 || updateRefusal(line.text)))fail();
  const headerTime=Date.parse(cycle.lines[0].text.slice('ClamAV update process started at '.length)+' '+sample.zoneOffset)/1000;
  if(!Number.isFinite(headerTime) || Math.abs(headerTime-cycle.at)>2)fail();
  // Correlate stdout with FreshClam's own regular-file log. Scanner file names
@@ -71,7 +73,7 @@ export function validateNativeUpdater(sample,config,logs,versions,clamdConfig=''
   if(/^ClamAV update process started at /.test(line))dedicated=[];
   if(dedicated)dedicated.push(line);
  }
- if(!dedicated || dedicated[0]!==cycle.lines[0].text || dedicated.some(line=>/cool.?down|rate.?limit|blocked|ERROR:|HTTP[^0-9]*(429|403)/i.test(line)))fail();
+ if(!dedicated || dedicated[0]!==cycle.lines[0].text || dedicated.some(updateRefusal))fail();
  for(const name of ['main','daily','bytecode']) {
   const successes=cycle.lines.map(line=>line.text.match(new RegExp('(^|\\s)'+name+'[.](cvd|cld) (database is up-to-date|updated) \\(version: (\\d+)[,)]'))).filter(Boolean);
   if(!successes.length || successes.some(match=>Number(match[4])!==versions[name]) || !dedicated.some(line=>cycle.lines.some(observed=>observed.text===line && new RegExp('^'+name+'[.](cvd|cld) ').test(line))))fail();
@@ -88,13 +90,13 @@ export async function publishedVersions(resolve=resolveTxt) {
  return versions;
 }
 export function validateRepairPaths(files) {
- const allowed=new Set(['backend/Dockerfile','backend/package.json','package.json','docker-compose.prod.yml','docker-compose.local.yml','deploy/scripts/deploy.sh','backend/src/scripts/deployment-checkpoint.ts','backend/src/scripts/deployment-rollback.ts','backend/scripts/clamav-checkpoint.mjs','backend/scripts/clamav-checkpoint.d.mts','scripts/clamav-release-readiness.mjs','docs/operations/clamav-repair.md']);
+ const allowed=new Set(['backend/Dockerfile','backend/package.json','package.json','docker-compose.prod.yml','docker-compose.local.yml','deploy/scripts/deploy.sh','backend/src/scripts/deployment-checkpoint.ts','backend/src/scripts/deployment-rollback.ts','backend/src/scripts/deployment-control.ts','backend/scripts/clamav-checkpoint.mjs','backend/scripts/clamav-checkpoint.d.mts','backend/scripts/clamav-incident-policy.mjs','scripts/clamav-release-readiness.mjs','scripts/clamav-incident-recovery.mjs','scripts/clamav-source-migration.mjs','docs/operations/clamav-repair.md']);
  for(const file of files) if(!allowed.has(file) && !/^deploy\/clamav\/[a-zA-Z0-9_.-]+$/.test(file) && !/^tests\/clamav-repair\/[a-zA-Z0-9_.-]+$/.test(file)) throw new Error('ClamAV maintenance release contains unrelated source or migrations');
 }
 export function validateRepairPackage(previousValue,targetValue,file) {
  const previous=structuredClone(previousValue), target=structuredClone(targetValue);
  const commands={
-  'test:clamav-repair':'node --test tests/clamav-repair/health.test.mjs tests/clamav-repair/checkpoint.test.mjs tests/clamav-repair/readiness.test.mjs tests/clamav-repair/controller.test.mjs',
+  'test:clamav-repair':'node --test tests/clamav-repair/health.test.mjs tests/clamav-repair/checkpoint.test.mjs tests/clamav-repair/readiness.test.mjs tests/clamav-repair/controller.test.mjs tests/clamav-repair/incident-recovery.test.mjs',
   'test:clamav-repair:docker':'node --test tests/clamav-repair/updater-linux.test.mjs',
   'test:clamav-repair:lifecycle:docker':'node --test tests/clamav-repair/lifecycle-linux.test.mjs',
   'test:clamav-repair:restore:docker':'node --test tests/clamav-repair/restore-linux.test.mjs',
@@ -131,7 +133,25 @@ export function validateReceipt(value,image,versions,now=Date.now()) {
   || value.loadedDaily!==versions.daily
   || !Number.isFinite(Date.parse(value.checkedAt)) || now-Date.parse(value.checkedAt)<0 || now-Date.parse(value.checkedAt)>24*3600000
   || ['main','daily','bytecode'].some(name=>value.versions?.[name]!==versions[name])) throw new Error('ClamAV readiness is missing, stale or does not match the image and published signatures');
+ if(value.acquisitionOrigin!==undefined && !['https://database.clamav.net',mirrorOrigin].includes(value.acquisitionOrigin))throw new Error('Unreviewed acquisition origin');
+ if(value.acquisitionOrigin===mirrorOrigin){validateSourceMigration(value.sourceMigration);}
+ else if(value.sourceMigration!==undefined)throw new Error('Acquisition evidence does not match its origin');
  return value;
+}
+
+export function validateAcquisitionConfiguration(config) {
+ const settings=new Map();
+ for(const raw of config.split(/\r?\n/)){
+  const line=raw.trim();if(!line||line.startsWith('#'))continue;
+  const match=line.match(/^(\S+)\s+(.+)$/);if(!match)throw new Error('Invalid acquisition configuration');
+  const key=match[1].toLowerCase();if(settings.has(key))throw new Error('Ambiguous acquisition configuration');settings.set(key,match[2]);
+ }
+ const source=settings.get('databasemirror');
+ if(!['database.clamav.net','https://database.clamav.net',mirrorOrigin].includes(source)
+  ||['include','privatemirror','databasecustomurl','httpproxyserver'].some(key=>settings.has(key))
+  ||settings.get('testdatabases')!=='yes'||settings.get('dnsdatabaseinfo')!=='current.cvd.clamav.net'
+  ||settings.get('databasedirectory')!=='/var/lib/clamav')throw new Error('ClamAV readiness: acquisition source or verification policy differs from the reviewed image');
+ return source===mirrorOrigin?mirrorOrigin:'https://database.clamav.net';
 }
 export function validateRollbackProof(value,image,versions,now=Date.now()) {
  immutableImage(image);
@@ -174,9 +194,21 @@ export async function inspectCandidate(container,execute=exec,resolve=resolveTxt
  const run=async(args)=> (await execute('docker',args,{maxBuffer:4*1024*1024})).stdout.trim();
  const inspect=JSON.parse(await run(['inspect',container]))[0];
  if(!inspect.State.Running)throw new Error('Candidate is not running');
+ const acquisitionOrigin=validateAcquisitionConfiguration(await run(['exec',container,'cat','/etc/clamav/freshclam.conf']));
+ let sourceMigration;
+ if(acquisitionOrigin===mirrorOrigin){
+  sourceMigration=validateSourceMigration(JSON.parse(await run(['exec',container,'cat','/var/lib/clamav/.source-state/migration.json'])));
+  for(const [name,record]of Object.entries(sourceMigration.originalStateFiles)){
+   const digest=(await run(['exec',container,'sha256sum','/var/lib/clamav/.source-state/vendor-cdn/'+name])).split(/\s/)[0];
+   if(digest!==record.sha256)throw new Error('Archived vendor refusal state changed during source migration');
+  }
+ }
  await run(['exec',container,'/usr/local/bin/sabalan-clamav-health']);
  const value=await inspectBank(container,inspect,run,execute);
- return validateReceipt(value,value.image,await publishedVersions(resolve));
+ await run(['exec',container,'/usr/local/bin/sabalan-clamav-health']);
+ const after=JSON.parse(await run(['inspect',container]))[0];
+ if(after.Id!==inspect.Id||after.Image!==inspect.Image||after.State.StartedAt!==inspect.State.StartedAt||!after.State.Running)throw new Error('Candidate restarted during inspection');
+ return validateReceipt({...value,acquisitionOrigin,...(sourceMigration?{sourceMigration}:{})},value.image,await publishedVersions(resolve));
 }
 export function parseNativeProbe(text) {
  const lines=text.trim().split('\n').map(line=>line.split('\t'));

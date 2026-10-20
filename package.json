@@ -105,7 +105,7 @@
     "test:hr-hiring:e2e:down": "docker compose -f docker-compose.e2e.yml down -v",
     "prototype:shipment-statement-reconciliation": "node scripts/prototypes/shipment-statement-reconciliation/tui.mjs",
     "test:dispatch-document-pdfs:docker": "node scripts/run-dispatch-document-pdf-qa.mjs",
-    "test:clamav-repair": "node --test tests/clamav-repair/health.test.mjs tests/clamav-repair/checkpoint.test.mjs tests/clamav-repair/readiness.test.mjs tests/clamav-repair/controller.test.mjs",
+    "test:clamav-repair": "node --test tests/clamav-repair/health.test.mjs tests/clamav-repair/checkpoint.test.mjs tests/clamav-repair/readiness.test.mjs tests/clamav-repair/controller.test.mjs tests/clamav-repair/incident-recovery.test.mjs",
     "test:clamav-repair:docker": "node --test tests/clamav-repair/updater-linux.test.mjs",
     "test:clamav-repair:lifecycle:docker": "node --test tests/clamav-repair/lifecycle-linux.test.mjs",
     "test:clamav-repair:restore:docker": "node --test tests/clamav-repair/restore-linux.test.mjs"

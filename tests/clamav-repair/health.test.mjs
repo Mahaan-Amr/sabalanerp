@@ -22,6 +22,11 @@ test('scanner availability alone cannot hide a stopped updater or a failed updat
     assert.equal(check().status, 1, 'an exit code of zero without update evidence must fail');
     writeFileSync(path.join(root, 'db/.sabalan-freshclam-result'), ['main','daily','bytecode'].map(name=>`${name}.cvd database is up-to-date (version: 1)`).join('\n'));
     assert.equal(check().status, 0, 'a live updater with a recent successful cycle must pass');
+    const successes=['main','daily','bytecode'].map(name=>`${name}.cvd database is up-to-date (version: 1)`).join('\n');
+    writeFileSync(path.join(root, 'db/.sabalan-freshclam-result'), 'WARNING: Cool-down expired, ok to try again.\n'+successes);
+    assert.equal(check().status, 0, 'a real complete success after naturally expired cooldown is not an active refusal');
+    writeFileSync(path.join(root, 'db/.sabalan-freshclam-result'), 'WARNING: Cool-down expired, ok to try again.\nWARNING: You are still on cool-down until after: tomorrow\n'+successes);
+    assert.equal(check().status, 1, 'expiry text must never mask a subsequent refusal');
     writeFileSync(path.join(root, 'db/.sabalan-updater-state'), `${now} ${now - 7200} 17 ${now + 7200}\n`);
     assert.equal(check().status, 1, 'a CDN refusal must not reuse an older successful result');
   } finally { child.kill(); rmSync(root, { recursive: true, force: true }); }

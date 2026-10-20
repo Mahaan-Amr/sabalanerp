@@ -44,7 +44,12 @@ const main = async () => {
     const liveMaintenance = JSON.parse(await fs.promises.readFile(path.join(RECOVERY_COORDINATION_DIR, 'deployment-maintenance.json'), 'utf8'));
     const liveActive = await prisma.deploymentOperation.findUnique({ where: { activeKey: 'production' } });
     requireBoundary({ session: liveSession, active: liveActive, maintenance: liveMaintenance, id: metadata.deploymentId, token: process.env.DEPLOYMENT_LEASE_TOKEN || '', phase: 'ROLLBACK_STARTED' });
-    await restoreUnit({ bank: '/app/recovery-sources/clamav', unit: clamavUnit, id: metadata.deploymentId, checkpoint: { ...metadata, manifest: validated.manifest } });
+    await restoreUnit({ bank: '/app/recovery-sources/clamav', unit: clamavUnit, id: metadata.deploymentId, checkpoint: { ...metadata, manifest: validated.manifest }, beforeMutation: async () => {
+      const currentSession = JSON.parse(await fs.promises.readFile(path.join(process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports', 'active-deployment-session.json'), 'utf8'));
+      const currentMaintenance = JSON.parse(await fs.promises.readFile(path.join(RECOVERY_COORDINATION_DIR, 'deployment-maintenance.json'), 'utf8'));
+      const currentActive = await prisma.deploymentOperation.findUnique({ where: { activeKey: 'production' } });
+      requireBoundary({ session: currentSession, active: currentActive, maintenance: currentMaintenance, id: metadata.deploymentId, token: process.env.DEPLOYMENT_LEASE_TOKEN || '', phase: 'ROLLBACK_STARTED' });
+    } });
   }
   setRecoveryRuntimeState('MAINTENANCE', metadata.deploymentId, 'Automatic deployment rollback is in progress.');
   const result = await stageAndPromoteRecovery({

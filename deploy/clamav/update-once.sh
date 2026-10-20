@@ -32,7 +32,7 @@ cat "$log"
 # FreshClam 1.4.6 can return zero while honoring a previous CDN cooldown.
 # Require explicit success for every official database, not just its exit status.
 if [ "$result" -eq 0 ]; then
-  if grep -Eiq 'cool.down|rate.limit|blocked|ERROR:|HTTP[^0-9]*(429|403)' "$log"; then result=17; fi
+  if grep -Ev '^(WARNING: )?Cool-down expired, ok to try again\.$' "$log" | grep -Eiq 'cool.down|rate.limit|blocked|ERROR:|HTTP[^0-9]*(429|403)'; then result=17; fi
   for name in main daily bytecode; do
     if ! grep -Eq "(^|[[:space:]])$name[.](cvd|cld) (database is up-to-date|updated)" "$log"; then result=17; fi
   done

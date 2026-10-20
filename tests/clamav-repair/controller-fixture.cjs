@@ -26,6 +26,13 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   return;
  }
  if(kind==='node'){
+  if(a[0]?.endsWith('/clamav-incident-recovery.mjs')){
+   const {validateIncidentSnapshot}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-incident-policy.mjs')));
+   const evidence=JSON.parse(fs.readFileSync(a[3]));validateIncidentSnapshot(evidence,image('clamav'));
+   for(const [file,digest]of Object.entries(evidence.bankFiles))if(hash(fs.readFileSync(path.join(bank,file)))!==digest)throw Error('Original incident bank changed');
+   if(read('runtime.json').clamav!==evidence.image)throw Error('Original incident image changed');
+   console.log('{}');return;
+  }
   if(a[0]?.endsWith('/clamav-release-readiness.mjs')){
    const [script,command,input,expected]=a;
    const policy=await import(require('node:url').pathToFileURL(path.join(repository,'scripts/clamav-release-readiness.mjs')));
@@ -82,12 +89,19 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  if(a.includes('dist/scripts/deployment-control.js')){
   const command=a[a.indexOf('dist/scripts/deployment-control.js')+1],session='reports/active-deployment-session.json';
-  if(command==='prepare')save(session,{deploymentId:env('DEPLOYMENT_ID'),leaseToken:'fixture-lease',phase:'PREFLIGHT',rollbackPerformanceEnvironment:rollbackEnvironment});
-  else if(command==='maintenance-on')save('maintenance.json',{deploymentId:env('DEPLOYMENT_ID')});
+  if(command==='prepare')save(session,{deploymentId:env('DEPLOYMENT_ID'),leaseToken:'fixture-lease',phase:'PREFLIGHT',rollbackPerformanceEnvironment:rollbackEnvironment,clamavOperation:env('DEPLOYMENT_CLAMAV_OPERATION'),clamavIncidentSnapshotSha256:env('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256')});
+  else if(command==='maintenance-on'){
+   save('maintenance.json',{deploymentId:env('DEPLOYMENT_ID')});
+   if(failure==='marker-interrupted')process.exit(25);
+  }
   else if(command==='maintenance-off'){
    if(failure==='after-open' && phase()==='TRAFFIC_OPENED')process.exit(46);
    fs.rmSync(path.join(root,'maintenance.json'),{force:true});
+  } else if(command==='incident-boundary-state'){
+   const s=read(session);console.log(fs.existsSync(path.join(root,'maintenance.json'))||!['PREFLIGHT','LEASE_ACQUIRED','MAINTENANCE_REQUESTED'].includes(s.phase)?'PROTECTED':'PRE_MAINTENANCE');
   } else if(command==='acquire'||command==='transition'||command==='local-transition'){
+   if(command==='acquire'&&failure==='acquire-failure')process.exit(23);
+   if(command==='transition'&&env('DEPLOYMENT_PHASE')==='MAINTENANCE_REQUESTED'&&failure==='after-acquire')process.exit(24);
    const s=read(session);s.phase=command==='acquire'?'LEASE_ACQUIRED':env('DEPLOYMENT_PHASE');save(session,s);
    save('active.json',{id:s.deploymentId,leaseToken:s.leaseToken,phase:s.phase,leaseExpiresAt:new Date(Date.now()+1200000).toISOString()});
   } else if(command==='finish'||command==='cancel-preflight'){
@@ -104,14 +118,20 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   const command=a[a.indexOf('scripts/clamav-checkpoint.mjs')+1];
   requireBoundary({session:read('reports/active-deployment-session.json'),active:read('active.json'),maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:command==='capture'?'SERVICES_DRAINED':'MUTATION_STARTED'});
   if(command==='capture'){
-   if(hash(fs.readFileSync(path.join(unit,'rollback-proof.json')))!==env('DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256'))throw Error('Rollback proof changed');
+   const incident=env('DEPLOYMENT_CLAMAV_OPERATION')==='incident-recovery';
+   if(incident){const {requireIncidentSession}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-incident-policy.mjs')));requireIncidentSession(read('reports/active-deployment-session.json'),'incident-recovery',env('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256'));}
+   if(hash(fs.readFileSync(path.join(unit,incident?'incident-snapshot.json':'rollback-proof.json')))!==env(incident?'DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256':'DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256'))throw Error('Original evidence changed');
    await captureUnit({bank,unit,id,image:image('clamav')});
   }
   else {
    const checkpoint=read('checkpoint.json');await verifyUnit({unit,id,checkpoint});
    const receipt=JSON.parse(fs.readFileSync(path.join(unit,'target.json')));
    if(receipt.image!==env('DEPLOYMENT_CLAMAV_TARGET_IMAGE')||receipt.bankSha256!==hash(fs.readFileSync(path.join(unit,'target-bank.tar'))))throw Error('Activation binding mismatch');
-   await restoreUnit({bank,unit,id,checkpoint,archive:'target-bank.tar'});
+   await restoreUnit({bank,unit,id,checkpoint,archive:'target-bank.tar',beforeMutation:async()=>{
+    if(failure==='install-interrupted')throw Error('Injected interrupted installation');
+    const active=read('active.json');if(failure==='lease-expired')active.leaseExpiresAt=new Date(0).toISOString();
+    requireBoundary({session:read('reports/active-deployment-session.json'),active,maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:'MUTATION_STARTED'});
+   }});
   }
   return;
  }
@@ -154,6 +174,7 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   return;
  }
  const allowed=['validate-production-environment','deployment-drill-preflight','deployment-notify','deployment-gates','deployment-finalize-recovery','dry-run-contract-product-graph-migration','audit-hr-onboarding-task-retirement','migrate-all-contract-product-graphs','reconcile-contract-financial-evidence'];
+ if(a.includes('dist/scripts/deployment-notify.js')&&a.includes('retry-blocker')&&failure==='before-maintenance')process.exit(22);
  if(allowed.some(script=>a.includes('dist/scripts/'+script+'.js')))return;
  throw Error('Unexpected fixture CLI operation: '+JSON.stringify(a));
 })().catch(error=>{console.error(error.message);process.exitCode=90;});

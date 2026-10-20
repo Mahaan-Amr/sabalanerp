@@ -31,7 +31,7 @@ case "$(cat "$TEST_ROOT/result")" in
  cooldown) echo 'WARNING: You are still on cool-down until after: tomorrow'; exit 0;;
  denied) echo 'ERROR: HTTP 403'; exit 17;;
  network) echo 'ERROR: DNS unavailable'; exit 52;;
- *) for name in main daily bytecode; do echo "$name.cvd database is up-to-date (version: 1)"; done;;
+ *) echo 'WARNING: Cool-down expired, ok to try again.'; for name in main daily bytecode; do echo "$name.cvd database is up-to-date (version: 1)"; done;;
 esac
 FRESH_SOURCE
 chmod +x "$root/bin/"*

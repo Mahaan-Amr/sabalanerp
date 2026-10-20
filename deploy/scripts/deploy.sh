@@ -19,6 +19,12 @@ if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] && [ "${DEPLOYMENT_MODE}" != release
   echo "ClamAV repair requires the complete protected release path." >&2; exit 1
 fi
 export DEPLOYMENT_CLAMAV_REPAIR DEPLOYMENT_CLAMAV_TARGET_IMAGE
+DEPLOYMENT_CLAMAV_OPERATION="${DEPLOYMENT_CLAMAV_OPERATION:-repair}"
+case "${DEPLOYMENT_CLAMAV_OPERATION}" in repair|incident-recovery) ;; *) echo 'Unknown ClamAV operation.' >&2; exit 1;; esac
+if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" != true ]; then
+  echo 'Incident recovery requires a qualified immutable ClamAV target.' >&2; exit 1
+fi
+export DEPLOYMENT_CLAMAV_OPERATION
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 COMPOSE_FILE="docker-compose.prod.yml"
@@ -56,6 +62,10 @@ compose() {
 
 start_release_services() {
   wait_seconds="$1"
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ] && [ "${DEPLOYMENT_PHASE:-}" = ROLLBACK_STARTED ]; then
+    echo 'Original incident state was restored; its known-unhealthy scanner cannot authorize reopening. Maintenance is retained.' >&2
+    return 1
+  fi
   if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] && [ "${MUTATION_STARTED}" -eq 0 ]; then
     # A failed preflight/checkpoint must restart the exact old container, never apply target config.
     compose start clamav
@@ -74,6 +84,8 @@ run_backend() {
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
       -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
+      -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
+      -e "DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256=${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_TARGET_IMAGE=${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
@@ -109,6 +121,8 @@ run_backend_timed() {
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
       -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
+      -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
+      -e "DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256=${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_TARGET_IMAGE=${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
@@ -178,6 +192,21 @@ wait_for_cutover_approval() {
 
 control() {
   run_backend node dist/scripts/deployment-control.js "$@"
+}
+
+enter_maintenance() {
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    # Make the durable boundary own every subsequent runtime change. A crash
+    # before the shell flag is set is detected through the marker and journal.
+    control maintenance-on
+    MAINTENANCE_ACTIVE=1
+    compose up -d --no-deps --force-recreate nginx
+  else
+    compose up -d --no-deps --force-recreate nginx
+    control maintenance-on
+    MAINTENANCE_ACTIVE=1
+  fi
+  verify_public_maintenance
 }
 
 phase() {
@@ -324,7 +353,11 @@ capture_clamav_checkpoint() {
   clamav_unit="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)"
   mkdir -m 700 "${clamav_unit}"
   docker cp "${clamav_container}:/etc/clamav/." - >"${clamav_unit}/config.tar"
-  cp "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" "${clamav_unit}/rollback-proof.json"
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    cp "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}" "${clamav_unit}/incident-snapshot.json"
+  else
+    cp "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" "${clamav_unit}/rollback-proof.json"
+  fi
   cp "${DEPLOYMENT_CLAMAV_READY_FILE}" "${clamav_unit}/target.json"
   cp "$(dirname "${DEPLOYMENT_CLAMAV_READY_FILE}")/target-bank.tar" "${clamav_unit}/target-bank.tar"
   docker cp "${clamav_unit}" "$(compose ps -aq backend):/app/recovery-coordination/"
@@ -337,9 +370,11 @@ restore_clamav_configuration() {
   # Never start the old scanner with the target bank or target configuration.
   clamav_config="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)-restore.tar"
   docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/config.tar" "${clamav_config}"
-  DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)-rollback-proof.json"
-  docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/rollback-proof.json" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}"
-  export DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" != incident-recovery ]; then
+    DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)-rollback-proof.json"
+    docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/rollback-proof.json" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}"
+    export DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE
+  fi
   compose create --no-deps clamav
   docker cp -a - "$(compose ps -aq clamav):/etc/clamav/" <"${clamav_config}"
 }
@@ -431,6 +466,34 @@ recover_failure() {
   fi
 
   if [ "${MUTATION_STARTED}" -eq 0 ]; then
+    if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+      incident_boundary="$(control incident-boundary-state)" || { cleanup_locks; exit "${exit_code}"; }
+      if [ "${incident_boundary}" = PRE_MAINTENANCE ]; then
+        # Cancel only this operation. Do not recreate nginx, start the scanner,
+        # drain services or turn maintenance on to recover an untouched release.
+        if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then
+          DEPLOYMENT_PHASE=ABORTED DEPLOYMENT_RESULT=ABORTED control finish || true
+        else
+          control cancel-preflight || true
+        fi
+        cleanup_locks
+        echo 'Incident preparation failed before maintenance; the running original was left untouched.' >&2
+        exit "${exit_code}"
+      fi
+      [ "${incident_boundary}" = PROTECTED ] || { cleanup_locks; exit "${exit_code}"; }
+      control maintenance-on || true
+      MAINTENANCE_ACTIVE=1
+      # No original data is changed, but a known-degraded release cannot be
+      # claimed healthy merely because the remote checkpoint failed.
+      DEPLOYMENT_PHASE=RECOVERY_REQUIRED
+      DEPLOYMENT_RESULT=RECOVERY_REQUIRED
+      export DEPLOYMENT_PHASE DEPLOYMENT_RESULT
+      if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then control finish || true; fi
+      run_backend node dist/scripts/deployment-notify.js || true
+      cleanup_locks
+      echo 'Incident preparation failed within maintenance; original data is retained and recovery remains required.' >&2
+      exit "${exit_code}"
+    fi
     control maintenance-on || true
     MAINTENANCE_ACTIVE=1
     switch_to_previous_images
@@ -576,6 +639,13 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   DEPLOYMENT_OWNER="$(session_value owner)"
   DEPLOYMENT_PHASE="$(session_value phase)"
   DEPLOYMENT_TARGET_BACKEND_IMAGE="$(session_value controlImage)"
+  incident_operation="$(session_value clamavOperation)"
+  if [ "${incident_operation}" = incident-recovery ]; then
+    DEPLOYMENT_CLAMAV_OPERATION=incident-recovery
+    DEPLOYMENT_CLAMAV_REPAIR=true
+    DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256="$(session_value clamavIncidentSnapshotSha256)"
+    export DEPLOYMENT_CLAMAV_OPERATION DEPLOYMENT_CLAMAV_REPAIR DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256
+  fi
   DEPLOYMENT_PREVIOUS_BACKEND_IMAGE="$(session_value rollbackReleaseSet.backend)"
   DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE="$(session_value rollbackReleaseSet.frontend)"
   DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE="$(session_value rollbackReleaseSet.inquiry)"
@@ -603,6 +673,15 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   fi
   SESSION_PREPARED=1
   [ "${DEPLOYMENT_PHASE}" = "PREFLIGHT" ] || DB_LEASE_ACQUIRED=1
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    # Establish the durable boundary before any ordinary resume path can
+    # recreate/start the known-degraded release or acquire a new public state.
+    case "${DEPLOYMENT_PHASE}" in
+      PREFLIGHT|LEASE_ACQUIRED|MAINTENANCE_REQUESTED|TRAFFIC_BLOCKED|SERVICES_DRAINED|LOCAL_CHECKPOINT_VERIFIED|REMOTE_CHECKPOINT_VERIFIED)
+        recover_failure 1
+        ;;
+    esac
+  fi
   switch_to_previous_images
   compose up -d postgres
   try_acquire_advisory || { echo "Interrupted deployment recovery cannot acquire its PostgreSQL advisory lease." >&2; exit 1; }
@@ -688,12 +767,20 @@ DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
 APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
 export DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_ID DEPLOYMENT_OWNER APP_COMMIT
 if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
+  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+    [ -f "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE:-}" ] || { echo 'A fresh degraded-instance snapshot is required before incident maintenance.' >&2; exit 1; }
+    [ -z "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:-}" ] || { echo 'Incident evidence must never be presented as a healthy rollback proof.' >&2; exit 1; }
+    node "${OPERATIONS_ROOT}/scripts/clamav-incident-recovery.mjs" verify "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}"
+    DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256="$(node --input-type=module -e 'import {fileDigest} from "./scripts/clamav-release-readiness.mjs"; console.log(await fileDigest(process.argv[1]));' "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}")"
+    export DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256
+  else
   [ -f "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:-}" ] || { echo "A separately reviewed current rollback rehearsal proof is required before maintenance." >&2; exit 1; }
   mkdir -p "${DEPLOYMENT_REPORT_DIR_HOST}"
   node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" rollback-proof "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" "${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
   timeout 120 node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" inspect-rollback "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-rollback-preflight-${DEPLOYMENT_ID}.json"
   DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256="$(node --input-type=module -e 'import {fileDigest} from "./scripts/clamav-release-readiness.mjs"; console.log(await fileDigest(process.argv[1]));' "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}")"
   export DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256
+  fi
   node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" scope "${DEPLOYMENT_CLAMAV_BASE_COMMIT:-}"
   [ -f "${DEPLOYMENT_CLAMAV_READY_FILE:-}" ] || { echo "A reviewed, current ClamAV staging receipt is required before maintenance." >&2; exit 1; }
   node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" verify "${DEPLOYMENT_CLAMAV_READY_FILE}" "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
@@ -785,16 +872,19 @@ refresh_performance_database_identity
 run_backend node dist/scripts/validate-production-environment.js
 run_backend node dist/scripts/deployment-drill-preflight.js
 
+if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+  node "${OPERATIONS_ROOT}/scripts/clamav-incident-recovery.mjs" verify "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}"
+  incident_snapshot_digest="$(node --input-type=module -e 'import {fileDigest} from "./scripts/clamav-release-readiness.mjs"; console.log(await fileDigest(process.argv[1]));' "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}")"
+  [ "${incident_snapshot_digest}" = "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256}" ] || { echo 'Incident snapshot changed during preparation.' >&2; exit 1; }
+fi
+
 compose up -d postgres
 control prepare
 SESSION_PREPARED=1
 
 if ! try_acquire_advisory; then
   echo "Database connections are saturated; entering journaled maintenance to drain the previous backend automatically." >&2
-  compose up -d --no-deps --force-recreate nginx
-  control maintenance-on
-  MAINTENANCE_ACTIVE=1
-  verify_public_maintenance
+  enter_maintenance
   drain_current_services
   DRAINED_EARLY=1
   try_acquire_advisory || { echo "PostgreSQL advisory lease is still unavailable after the old backend drained." >&2; exit 1; }
@@ -822,10 +912,7 @@ export DEPLOYMENT_LEASE_TOKEN
 
 phase MAINTENANCE_REQUESTED
 if [ "${DRAINED_EARLY}" -eq 0 ]; then
-  compose up -d --no-deps --force-recreate nginx
-  control maintenance-on
-  MAINTENANCE_ACTIVE=1
-  verify_public_maintenance
+  enter_maintenance
 fi
 phase TRAFFIC_BLOCKED
 if [ "${DRAINED_EARLY}" -eq 0 ]; then drain_current_services; fi

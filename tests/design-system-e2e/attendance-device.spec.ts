@@ -5,7 +5,7 @@ import { createAuthoritativeSession } from '../../backend/src/services/identityS
 import { tokenHash } from '../../backend/src/services/attendanceDevice';
 import AxeBuilder from '@axe-core/playwright';
 
-const db = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_URL ?? 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?connection_limit=2&pool_timeout=10' } } });
+let db: PrismaClient;
 const key = randomUUID();
 const personName = `آزمون تردد ${key.slice(0, 6)}`;
 let actorId: string;
@@ -15,6 +15,7 @@ let sessionToken: string;
 const terminalSecret = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
 
 test.beforeAll(async () => {
+  db = new PrismaClient({ datasources: { db: { url: process.env.DATABASE_URL ?? 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?connection_limit=2&pool_timeout=10' } } });
   const fixture = await db.$transaction(async tx => {
     const actor = await tx.user.create({ data: { username: `qa-attendance-${key}`, email: `qa-attendance-${key}@example.invalid`, password: 'not-a-login', firstName: 'آزمون', lastName: 'مدیر تردد', role: 'ADMIN' } });
     actorId = actor.id;
@@ -29,6 +30,7 @@ test.beforeAll(async () => {
   sessionToken = fixture.token;
 });
 test.afterAll(async () => {
+  if (!db) return;
   try {
     if (terminalId) {
       await db.attendancePunch.deleteMany({ where: { terminalId } });

@@ -87,15 +87,27 @@ export class OriginalOnlineReleaseController {
   await this.#assertAdvisory();this.#advisoryPulse=setInterval(()=>{void this.#assertAdvisory().catch(()=>{this.#held='ONLINE_ORIGINAL_ADVISORY_LOST';void this.hold();});},15000);return {sameOriginalController:true,originalApplicationHandlesRetained:true};
  }
  async acquireNextCycle(input){
-  assert(this.#advisory&&!this.#held,'ONLINE_ORIGINAL_FOLLOWING_CONTROLLER_REQUIRED');await this.#assertAdvisory();
+  assert(this.#advisory&&!this.#held,'ONLINE_ORIGINAL_FOLLOWING_CONTROLLER_REQUIRED');this.#lock.assertOwned();
+  assert(process.ppid===this.#parentBirth.pid&&fs.readFileSync(`/proc/${process.ppid}/stat`,'utf8').split(') ').slice(1).join(') ').split(' ')[19]===this.#parentBirth.stat,'ONLINE_ORIGINAL_LAUNCHER_CHANGED');
+  assert(readPrivate(PRIVATE_KEY,4096,0o600).pin===this.#keyPin,'ONLINE_PERSISTENT_KEY_CHANGED');await this.#assertAdvisory();
   const {PrismaDeploymentStore,acquireDeploymentLease,transitionDeployment,heartbeatDeployment}=require('./online-release-host-kernel.cjs');
   assert(/^[a-zA-Z0-9_-]{8,128}$/.test(input.deploymentId)&&/^[a-zA-Z0-9_-]{8,128}$/.test(input.releaseId)
    &&/^[a-f0-9]{40}$/.test(input.targetCommit),'ONLINE_NEXT_RELEASE_IDENTITY_REQUIRED');
+  assert(Object.keys(input).every(key=>['deploymentId','releaseId','targetCommit','prebuiltReleasePlan'].includes(key)),'ONLINE_NEXT_RELEASE_INPUT_INVALID');
+  let selectedPlan=Object.hasOwn(input,'prebuiltReleasePlan')?input.prebuiltReleasePlan:this.#prebuiltReleasePlan;
+  if(selectedPlan){
+   assert(Object.keys(selectedPlan).sort().join(',')==='file,sha256'&&path.isAbsolute(selectedPlan.file)&&/^[a-f0-9]{64}$/.test(selectedPlan.sha256),'ONLINE_EXECUTION_PLAN_REFERENCE_REQUIRED');
+   selectedPlan=Object.freeze({...selectedPlan});
+   // This SAME original owner observes installed bytes before obtaining the
+   // next lease. Neither a replacement owner nor a mutable plan is admitted.
+   await this.#observeProductionExecutionBindings(input.targetCommit,selectedPlan,input.releaseId);
+  }else assert(!Object.hasOwn(input,'prebuiltReleasePlan'),'ONLINE_EXECUTION_PLAN_REFERENCE_REQUIRED');
   const store=new PrismaDeploymentStore(this.#database);
-  const lease=await acquireDeploymentLease(store,{...input,owner:'original-online-controller',leaseToken:randomBytes(32).toString('hex'),now:new Date(),leaseMs:120000});
+  const lease=await acquireDeploymentLease(store,{deploymentId:input.deploymentId,releaseId:input.releaseId,targetCommit:input.targetCommit,owner:'original-online-controller',leaseToken:randomBytes(32).toString('hex'),now:new Date(),leaseMs:120000});
   assert(lease.acquired,'ONLINE_NEXT_LEASE_BUSY');
   const owner={deploymentId:lease.deployment.deploymentId,releaseId:lease.deployment.releaseId,leaseToken:lease.deployment.leaseToken};
   await this.beginNextOwnedLease(owner);
+  if(selectedPlan)this.#prebuiltReleasePlan=Object.freeze({...selectedPlan});
   await transitionDeployment(store,{...owner,nextPhase:'ONLINE_CHECKPOINTING',now:new Date()});
   this.#heartbeat=setInterval(()=>{void (async()=>{try{await this.#assertAdvisory();await heartbeatDeployment(store,{...this.#owner,now:new Date(),leaseMs:120000});}
    catch{this.#held='ONLINE_ORIGINAL_HEARTBEAT_UNPROVEN';void this.hold();}})();},15000);
@@ -257,10 +269,10 @@ export class OriginalOnlineReleaseController {
   assert(rows.length===1&&sha(bytes(rows[0].checkpointJson))===pending.metadataSha256,'ONLINE_CHECKPOINT_DATABASE_READBACK_CHANGED');
   pending.committed=true;return {runtimeId:input.runtimeId,checkpointSha256:pending.metadataSha256,checkpointCommitted:true,continuousIntervalCompleted:false,releaseAdmissionGranted:false};
  }
- async #observeProductionExecutionBindings(targetCommit){
-  if(!this.#prebuiltReleasePlan)return undefined;
-  const raw=readPrivate(this.#prebuiltReleasePlan.file,8*1024**2,0o400).data;
-  assert(sha(raw)===this.#prebuiltReleasePlan.sha256,'ONLINE_EXECUTION_PLAN_BYTES_CHANGED');const plan=JSON.parse(raw);
+ async #observeProductionExecutionBindings(targetCommit,selection=this.#prebuiltReleasePlan,releaseId=this.#owner.releaseId){
+  if(!selection)return undefined;
+  const raw=readPrivate(selection.file,8*1024**2,0o400).data;
+  assert(sha(raw)===selection.sha256,'ONLINE_EXECUTION_PLAN_BYTES_CHANGED');const plan=JSON.parse(raw);
   assert(plan.format==='sabalan-prebuilt-protected-release-plan/v1'&&plan.applicationCommit===targetCommit,'ONLINE_EXECUTION_PLAN_SOURCE_CHANGED');
   const store=productionImageStore(JSON.parse(await this.#docker(['info','--format','{{json .}}'])));
   assert((plan.imageStore??'classic')===store,'ONLINE_EXECUTION_PLAN_STORE_CHANGED');
@@ -271,12 +283,12 @@ export class OriginalOnlineReleaseController {
    const selected=plan.images[role],graph=structuredClone(selected.archiveGraph);
    const rows=JSON.parse(await this.#docker(['image','inspect',selected.image]));assert(rows.length===1,'ONLINE_EXECUTION_NATIVE_IMAGE_REQUIRED');
    const nativeInspection=sanitizeProductionImageInspection(rows[0]);
-   bindings[role]={format:'sabalan-production-image-execution-binding/v1',role,releaseId:this.#owner.releaseId,
+   bindings[role]={format:'sabalan-production-image-execution-binding/v1',role,releaseId,
     sourceMachineUuidSha256:sourceHost.machineUuidSha256,sourceKernelBootIdSha256:sourceHost.kernelBootIdSha256,store,
     executionImageId:selected.image,graph,nativeInspection,inspectionSha256:productionInspectionSha256(nativeInspection)};
    imageGraphs[role]=graph;deploymentTargetImages[role]=graph.config;
   }
-  require('./online-release-host-kernel.cjs').validateProductionExecutionBindings(bindings,{releaseId:this.#owner.releaseId,imageGraphs,deploymentTargetImages,sourceHost});
+  require('./online-release-host-kernel.cjs').validateProductionExecutionBindings(bindings,{releaseId,imageGraphs,deploymentTargetImages,sourceHost});
   return bindings;
  }
  async observeProtectedBootstrapQualificationRequest(){

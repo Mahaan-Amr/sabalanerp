@@ -43,7 +43,7 @@ set -- $measured
 required_local="$1"
 required_remote="$2"
 # A prebuilt release has installed targets before cleanup. Protect those exact
-# helper-validated CONFIGs through the existing owned-cleanup protection port.
+# helper-validated execution IDs through the existing owned-cleanup protection port.
 set --
 if [ -n "${DEPLOYMENT_PREBUILT_BACKEND_EXECUTION_IMAGE:-}${DEPLOYMENT_PREBUILT_FRONTEND_EXECUTION_IMAGE:-}${DEPLOYMENT_PREBUILT_INQUIRY_EXECUTION_IMAGE:-}" ]; then
   for protected_image in "${DEPLOYMENT_PREBUILT_BACKEND_EXECUTION_IMAGE:-}" "${DEPLOYMENT_PREBUILT_FRONTEND_EXECUTION_IMAGE:-}" "${DEPLOYMENT_PREBUILT_INQUIRY_EXECUTION_IMAGE:-}"; do

@@ -954,7 +954,7 @@ export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE DEPL
 DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT="$(docker inspect "$(compose ps -q backend)" | node scripts/performance-deployment-environment.mjs capture)"
 export DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT
 
-if [ "${DEPLOYMENT_MODE}" = "configuration" ]; then
+if [ "${DEPLOYMENT_MODE}" = "configuration" ] || [ "${CAPTURE_ONLY}" -eq 1 ]; then
   existing_exports="$(docker inspect "$(compose ps -q backend)" "$(compose ps -q frontend)" "$(compose ps -q inquiry)" "$(compose ps -q nginx)" "$(compose ps -q postgres)" "$(compose ps -q clamav)" | node "${OPERATIONS_ROOT}/scripts/deployment-existing-release.mjs")"
   eval "${existing_exports}"
 fi

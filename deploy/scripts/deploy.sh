@@ -971,12 +971,6 @@ sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REP
 docker_root="$(docker info --format '{{.DockerRootDir}}')"
 docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
 docker_available_bytes=$((docker_available_kb * 1024))
-if [ "${docker_available_bytes}" -lt "${docker_required_bytes}" ]; then
-  echo "Build capacity is low; pruning only unreferenced builder cache older than seven days."
-  docker builder prune --force --filter until=168h >"${REPO_ROOT}/.deploy-state/builder-prune.log"
-  docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
-  docker_available_bytes=$((docker_available_kb * 1024))
-fi
 [ "${docker_available_bytes}" -ge "${docker_required_bytes}" ] || {
   echo "Immutable image build needs ${docker_required_bytes} bytes but only ${docker_available_bytes} are safely available." >&2
   exit 1
@@ -997,28 +991,24 @@ export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMA
 compose config --quiet
 echo "Building immutable release ${DEPLOYMENT_RELEASE_ID} before maintenance..."
 # Keep compiler heaps from competing with the live release on the production host.
-# Export each image completely before reclaiming its unused builder records.
-# Accumulating all compiler caches can exhaust the disk during the next export,
-# before the post-build capacity check can run. Tagged release images, running
-# containers, volumes, and checkpoint archives are not builder cache.
+# Unknown builder cache can belong to other projects or pending candidates.
+# Only the owned storage preflight may retire artifacts; never globally prune.
 for release_service in backend frontend inquiry; do
   compose build "${release_service}"
-  docker builder prune --all --force >"${REPO_ROOT}/.deploy-state/build-${release_service}-cache-prune.log"
 done
 DEPLOYMENT_BACKEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_BACKEND_IMAGE}")"
 DEPLOYMENT_FRONTEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_FRONTEND_IMAGE}")"
 DEPLOYMENT_INQUIRY_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_INQUIRY_IMAGE}")"
 DEPLOYMENT_NGINX_IMAGE="$(docker image inspect --format '{{.Id}}' nginx:1.27-alpine)"
 export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE
-# Reclaim disposable build records only after every image export has finished.
-# Otherwise a low-space checkpoint may spend its maintenance window verifying
-# old remote archives for retention even though build cache can supply the space.
+# Re-measure actual capacity after every image export has finished.
+# Insufficient space aborts while the current release still serves users.
 docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
 docker_available_bytes=$((docker_available_kb * 1024))
-if [ "${docker_available_bytes}" -lt "${docker_required_bytes}" ]; then
-  echo "Reclaiming unused build cache before maintenance; release images and checkpoints remain protected."
-  docker builder prune --all --force >"${REPO_ROOT}/.deploy-state/post-build-cache-prune.log"
-fi
+[ "${docker_available_bytes}" -ge "${docker_required_bytes}" ] || {
+  echo "Post-build capacity needs ${docker_required_bytes} bytes but only ${docker_available_bytes} are safely available; current release remains active." >&2
+  exit 1
+}
 DEPLOYMENT_TARGET_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
 export DEPLOYMENT_TARGET_BACKEND_IMAGE
 PERFORMANCE_RELEASE_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"

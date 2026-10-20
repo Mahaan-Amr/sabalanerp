@@ -67,14 +67,14 @@ Before mutation, the deployment locally decrypt-validates and restore-validates 
 
 Capacity decisions use measured component sizes and worst-case staging needs rather than a rigid free-space percentage. Preflight estimates checkpoint, restore staging, rollback safety, PostgreSQL working space, Docker working space, and operational headroom.
 
-Immutable application images are built sequentially before maintenance. After each successful image export, unused builder cache is reclaimed and its result retained in a per-service deployment log. This prevents compiler caches from accumulating until the next image export exhausts the disk. Cleanup failure aborts before maintenance; release images, containers, business volumes, and checkpoint archives remain protected. The complete release and all checkpoint gates are still required before promotion.
+Immutable application images are built sequentially before maintenance. The canonical storage preflight performs only its verified, owned cleanup before building. Unknown builder cache remains protected: deployment never runs a global Docker prune. Actual free space is measured again after all image exports; a build failure or insufficient capacity aborts before maintenance while the current release continues serving users. The complete release and all checkpoint gates are still required before promotion.
 
 Before blocking a deployment, cleanup proceeds in this order:
 
 1. Remove expired incomplete artifacts whose lease is proven stale.
 2. Prune eligible checkpoints under the retention policy.
 3. Remove older local checkpoints only after their remote objects and checksums are verified.
-4. Remove safe build caches that are not referenced by the active or rollback release sets.
+4. Remove only owned images and containers proven eligible by the canonical storage preflight; retain unknown builder cache.
 5. Recalculate required and available capacity.
 
 The active checkpoint, last known-good local checkpoint, any checkpoint without a verified remote copy, and evidence for an open incident are protected. At least the two most recent successful local checkpoints are retained when capacity permits; at least one verified local rollback checkpoint is mandatory. ADR-0131 supersedes the former ten-release/twelve-month remote count: keep the two newest complete healthy restore-verified independently read-back recovery points. Verify the replacement before pruning the oldest, and preserve incident holds and all required restore dependencies. See `online-deployment.md` for implementation status. Every prune records artifact identity, size, checksum, retention reason, and result. Insufficient capacity after eligible cleanup aborts the deployment; protected recovery evidence is never deleted to force progress.

@@ -1,5 +1,6 @@
 /** Git's blob bytes, not a checkout's platform line endings, are build inputs. */
 import assert from'node:assert/strict';import fs from'node:fs';import path from'node:path';import{createHash}from'node:crypto';import{execFileSync}from'node:child_process';
+import{createRequire}from'node:module';
 const pin=raw=>({bytes:raw.length,sha256:createHash('sha256').update(raw).digest('hex')});
 export function compareCommittedRecipeBytes(working,committed){
  assert.ok(Buffer.isBuffer(working)&&Buffer.isBuffer(committed));let transform='IDENTICAL';
@@ -16,4 +17,9 @@ export function readCommittedRecipeInput({repository,commit,file}){
  assert.match(commit,/^[a-f0-9]{40}$/);assert.ok(typeof file==='string'&&!path.isAbsolute(file)&&!file.includes('\\')&&file.split('/').every(part=>part&&part!=='.'&&part!=='..'));
  const working=fs.readFileSync(path.join(repository,file)),committed=execFileSync('git',['cat-file','blob',commit+':'+file],{cwd:repository,maxBuffer:4*1024**2});
  const proof=compareCommittedRecipeBytes(working,committed);return{...proof,bytes:committed};
+}
+export function readRecipeCompilerInputs(repository){
+ const compiler=fs.realpathSync(createRequire(path.join(repository,'apps/sabalan-inquiry/package.json')).resolve('typescript'));
+ const packageFile=fs.realpathSync(path.join(path.dirname(compiler),'../package.json')),metadata=JSON.parse(fs.readFileSync(packageFile));assert.equal(metadata.name,'typescript');
+ const files=[fs.realpathSync(process.execPath),compiler,packageFile];return{format:'sabalan-original-recipe-compiler-inputs/v1',typescriptVersion:metadata.version,files:Object.fromEntries(files.map(file=>[file,pin(fs.readFileSync(file))]))};
 }

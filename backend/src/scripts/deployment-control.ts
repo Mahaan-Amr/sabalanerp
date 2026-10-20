@@ -32,6 +32,8 @@ type Session = {
   phase: DeploymentPhase;
   bootstrap: boolean;
   controlImage: string;
+  clamavOperation?: 'repair' | 'incident-recovery';
+  clamavIncidentSnapshotSha256?: string;
   rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres' | 'clamav', string>;
   rollbackPerformanceEnvironment?: Record<string, string>;
 };
@@ -69,6 +71,12 @@ const journal = async (session: Session, event: string, details?: Record<string,
   });
 
 const prepare = async () => {
+  const clamavOperation = process.env.DEPLOYMENT_CLAMAV_OPERATION || 'repair';
+  if (!['repair', 'incident-recovery'].includes(clamavOperation)) throw new Error('Unknown ClamAV operation.');
+  const incidentSha = process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256;
+  if (clamavOperation === 'incident-recovery' && (process.env.DEPLOYMENT_CLAMAV_REPAIR !== 'true' || !/^[a-f0-9]{64}$/.test(incidentSha || ''))) {
+    throw new Error('Incident recovery requires an explicitly bound degraded-instance snapshot.');
+  }
   const rollbackPerformanceEnvironment = JSON.parse(process.env.DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT || '{}');
   const identityKey = /^PERFORMANCE_(RELEASE_(COMMIT|SOURCE_HASH|SCHEMA_HASH|POLICY_HASH|INFRASTRUCTURE_HASH|BACKEND_IMAGE|FRONTEND_IMAGE|INQUIRY_IMAGE)|RUNTIME_INFRASTRUCTURE_HASH)$/;
   if (!rollbackPerformanceEnvironment || typeof rollbackPerformanceEnvironment !== 'object' || Array.isArray(rollbackPerformanceEnvironment)
@@ -85,6 +93,8 @@ const prepare = async () => {
     phase: 'PREFLIGHT',
     bootstrap: false,
     controlImage: required('DEPLOYMENT_CONTROL_IMAGE'),
+    clamavOperation: clamavOperation as 'repair' | 'incident-recovery',
+    ...(clamavOperation === 'incident-recovery' ? { clamavIncidentSnapshotSha256: incidentSha } : {}),
     rollbackPerformanceEnvironment,
     rollbackReleaseSet: {
       backend: required('DEPLOYMENT_PREVIOUS_BACKEND_IMAGE'),
@@ -97,7 +107,10 @@ const prepare = async () => {
   };
   await writeSession(session, true);
   await fs.promises.rm(JOURNAL_PATH, { force: true });
-  await journal(session, 'deployment-prepared');
+  await journal(session, 'deployment-prepared', {
+    clamavOperation: session.clamavOperation,
+    ...(session.clamavIncidentSnapshotSha256 ? { clamavIncidentSnapshotSha256: session.clamavIncidentSnapshotSha256 } : {}),
+  });
   return session;
 };
 
@@ -130,7 +143,21 @@ const main = async () => {
   }
 
   const session = await readSession();
-  if (command === 'cancel-preflight') {
+  if (command === 'incident-boundary-state') {
+    if (session.clamavOperation !== 'incident-recovery' || session.deploymentId !== required('DEPLOYMENT_ID')
+      || session.clamavIncidentSnapshotSha256 !== required('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256')) {
+      throw new Error('Incident boundary inspection requires its exact prepared operation.');
+    }
+    const maintenance = await readDeploymentMaintenance(RECOVERY_COORDINATION_DIR);
+    if (maintenance && maintenance.deploymentId !== session.deploymentId) throw new Error('A different operation owns maintenance.');
+    const entries = await validateDeploymentHostJournal(JOURNAL_PATH);
+    if (!entries.length || entries[0].event !== 'deployment-prepared' || entries.some(entry => entry.deploymentId !== session.deploymentId)) {
+      throw new Error('Incident boundary history is missing or belongs to another operation.');
+    }
+    const protectedBoundary = Boolean(maintenance) || !['PREFLIGHT', 'LEASE_ACQUIRED', 'MAINTENANCE_REQUESTED'].includes(session.phase)
+      || entries.some(entry => entry.event === 'maintenance-activated');
+    console.log(protectedBoundary ? 'PROTECTED' : 'PRE_MAINTENANCE');
+  } else if (command === 'cancel-preflight') {
     if (session.phase !== 'PREFLIGHT') {
       throw Object.assign(new Error('Only an owned pre-lease session may be cancelled locally.'), { code: 'DEPLOYMENT_PREFLIGHT_CANCEL_DENIED' });
     }

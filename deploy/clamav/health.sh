@@ -25,7 +25,7 @@ now="$(date +%s)"
 [ "$now" -ge "$succeeded" ] && [ "$((now - succeeded))" -le "$((interval * 2))" ] || fail 'successful update evidence is stale'
 log="$db_dir/.sabalan-freshclam-result"
 [ -f "$log" ] || fail 'no successful FreshClam result evidence'
-if grep -Eiq 'cool.down|rate.limit|blocked|ERROR:|HTTP[^0-9]*(429|403)' "$log"; then fail 'FreshClam reports cooldown or error'; fi
+if grep -Ev '^(WARNING: )?Cool-down expired, ok to try again\.$' "$log" | grep -Eiq 'cool.down|rate.limit|blocked|ERROR:|HTTP[^0-9]*(429|403)'; then fail 'FreshClam reports cooldown or error'; fi
 for name in main daily bytecode; do
   grep -Eq "(^|[[:space:]])$name[.](cvd|cld) (database is up-to-date|updated)" "$log" || fail "$name has no successful update evidence"
 done

@@ -12,6 +12,13 @@ case "${DEPLOYMENT_MODE}" in
 esac
 CONFIGURATION_STATE="${REPO_ROOT}/.deploy-state/biometric-configuration.json"
 CONFIGURATION_ACTIVE=0
+DEPLOYMENT_CLAMAV_TARGET_IMAGE="${DEPLOYMENT_CLAMAV_TARGET_IMAGE:-}"
+DEPLOYMENT_CLAMAV_REPAIR=false
+[ -z "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" ] || DEPLOYMENT_CLAMAV_REPAIR=true
+if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] && [ "${DEPLOYMENT_MODE}" != release ]; then
+  echo "ClamAV repair requires the complete protected release path." >&2; exit 1
+fi
+export DEPLOYMENT_CLAMAV_REPAIR DEPLOYMENT_CLAMAV_TARGET_IMAGE
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 COMPOSE_FILE="docker-compose.prod.yml"
@@ -49,7 +56,13 @@ compose() {
 
 start_release_services() {
   wait_seconds="$1"
-  compose up -d --no-build --wait --wait-timeout "${wait_seconds}" postgres clamav backend frontend inquiry nginx
+  if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] && [ "${MUTATION_STARTED}" -eq 0 ]; then
+    # A failed preflight/checkpoint must restart the exact old container, never apply target config.
+    compose start clamav
+    compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx
+  else
+    compose up -d --no-build --wait --wait-timeout "${wait_seconds}" postgres clamav backend frontend inquiry nginx
+  fi
   # Nginx resolves Compose service names when its workers start. Recreate it
   # after application containers have their final addresses so rollout and
   # rollback cannot reopen traffic through stale upstream IPs.
@@ -59,6 +72,9 @@ start_release_services() {
 run_backend() {
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
+      -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
+      -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
+      -e "DEPLOYMENT_CLAMAV_TARGET_IMAGE=${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
@@ -91,11 +107,15 @@ run_backend_timed() {
     BACKEND_DB_CONNECTION_LIMIT=2 \
     DATABASE_APPLICATION_NAME=sabalanerp-deployment \
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
+      -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
+      -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
+      -e "DEPLOYMENT_CLAMAV_TARGET_IMAGE=${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
       -e "DEPLOYMENT_LEASE_TOKEN=${DEPLOYMENT_LEASE_TOKEN:-}" \
       -e "DEPLOYMENT_OWNER=${DEPLOYMENT_OWNER}" \
+      -e "DEPLOYMENT_PHASE=${DEPLOYMENT_PHASE:-}" \
       -e "DEPLOYMENT_LEASE_MS=1200000" \
       -e "DEPLOYMENT_CONTROL_IMAGE=${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
       -e "DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP=${DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP:-false}" \
@@ -214,6 +234,7 @@ drain_release_for_rollback() {
     rollback_backend_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${rollback_backend_container}")"
   fi
   compose stop -t 30 frontend backend inquiry
+  if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then compose stop -t 60 clamav; fi
   if [ -n "${rollback_backend_ip}" ]; then
     rollback_sessions="$(compose exec -T postgres sh -c "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM pg_stat_activity WHERE client_addr = '${rollback_backend_ip}'::inet\"")"
     [ "${rollback_sessions}" = "0" ] || { echo "The failed release retained ${rollback_sessions} database sessions; rollback promotion is unsafe." >&2; return 1; }
@@ -291,6 +312,49 @@ switch_to_previous_images() {
   # Values are journaled before mutation and emitted only after strict hash/digest validation.
   rollback_runtime_exports="$(node scripts/performance-deployment-environment.mjs restore "${SESSION_HOST_PATH}")" || return 1
   eval "${rollback_runtime_exports}"
+}
+
+clamav_unit_name() { printf 'clamav-checkpoint-%s' "${DEPLOYMENT_ID}"; }
+
+capture_clamav_checkpoint() {
+  [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || return 0
+  compose stop -t 60 clamav
+  clamav_container="$(compose ps -aq clamav)"
+  [ "$(docker inspect --format '{{.State.Running}}' "${clamav_container}")" = false ] || return 1
+  clamav_unit="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)"
+  mkdir -m 700 "${clamav_unit}"
+  docker cp "${clamav_container}:/etc/clamav/." - >"${clamav_unit}/config.tar"
+  cp "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" "${clamav_unit}/rollback-proof.json"
+  cp "${DEPLOYMENT_CLAMAV_READY_FILE}" "${clamav_unit}/target.json"
+  cp "$(dirname "${DEPLOYMENT_CLAMAV_READY_FILE}")/target-bank.tar" "${clamav_unit}/target-bank.tar"
+  docker cp "${clamav_unit}" "$(compose ps -aq backend):/app/recovery-coordination/"
+  run_backend node scripts/clamav-checkpoint.mjs capture
+}
+
+restore_clamav_configuration() {
+  [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || return 0
+  # deployment-rollback has already authenticated this unit against the decrypted checkpoint.
+  # Never start the old scanner with the target bank or target configuration.
+  clamav_config="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)-restore.tar"
+  docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/config.tar" "${clamav_config}"
+  DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)-rollback-proof.json"
+  docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/rollback-proof.json" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}"
+  export DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE
+  compose create --no-deps clamav
+  docker cp -a - "$(compose ps -aq clamav):/etc/clamav/" <"${clamav_config}"
+}
+
+verify_clamav_repair_runtime() {
+  [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || return 0
+  clamav_runtime_timeout=120
+  if [ "${MUTATION_STARTED}" -eq 1 ] && [ "${DEPLOYMENT_PHASE:-}" != ROLLBACK_STARTED ]; then
+    clamav_runtime_timeout="$(remaining_mutation_seconds)" || return 1
+  fi
+  if [ "${DEPLOYMENT_PHASE:-}" = ROLLBACK_STARTED ]; then
+    timeout "${clamav_runtime_timeout}" node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" inspect-rollback "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-runtime-${DEPLOYMENT_ID}.json"
+  else
+    timeout "${clamav_runtime_timeout}" node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" inspect "$(compose ps -q clamav)" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-runtime-${DEPLOYMENT_ID}.json"
+  fi
 }
 
 refresh_performance_database_identity() {
@@ -410,7 +474,9 @@ recover_failure() {
     && run_backend node dist/scripts/deployment-rollback.js \
     && run_backend node dist/scripts/deployment-finalize-recovery.js; then
     switch_to_previous_images
+    restore_clamav_configuration || exit 1
     if start_release_services 300 \
+      && verify_clamav_repair_runtime \
       && DEPLOYMENT_GATE_MODE=ROLLBACK run_backend node dist/scripts/deployment-gates.js; then
       referral_ready=1
       if [ "${FINANCIAL_EVIDENCE_REFERRAL_REQUIRED}" -eq 1 ]; then
@@ -531,10 +597,14 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
       recover_failure 1
     fi
   fi
+  if [ -d "${REPO_ROOT}/.deploy-state/$(clamav_unit_name)" ] || docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/unit.json" "${REPO_ROOT}/.deploy-state/clamav-resume-unit.json" 2>/dev/null; then
+    DEPLOYMENT_CLAMAV_REPAIR=true
+    export DEPLOYMENT_CLAMAV_REPAIR
+  fi
   SESSION_PREPARED=1
   [ "${DEPLOYMENT_PHASE}" = "PREFLIGHT" ] || DB_LEASE_ACQUIRED=1
   switch_to_previous_images
-  compose up -d postgres clamav
+  compose up -d postgres
   try_acquire_advisory || { echo "Interrupted deployment recovery cannot acquire its PostgreSQL advisory lease." >&2; exit 1; }
   control maintenance-on
   MAINTENANCE_ACTIVE=1
@@ -617,6 +687,20 @@ DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TA
 DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
 APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
 export DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_ID DEPLOYMENT_OWNER APP_COMMIT
+if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
+  [ -f "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:-}" ] || { echo "A separately reviewed current rollback rehearsal proof is required before maintenance." >&2; exit 1; }
+  mkdir -p "${DEPLOYMENT_REPORT_DIR_HOST}"
+  node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" rollback-proof "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" "${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
+  timeout 120 node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" inspect-rollback "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-rollback-preflight-${DEPLOYMENT_ID}.json"
+  DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256="$(node --input-type=module -e 'import {fileDigest} from "./scripts/clamav-release-readiness.mjs"; console.log(await fileDigest(process.argv[1]));' "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}")"
+  export DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256
+  node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" scope "${DEPLOYMENT_CLAMAV_BASE_COMMIT:-}"
+  [ -f "${DEPLOYMENT_CLAMAV_READY_FILE:-}" ] || { echo "A reviewed, current ClamAV staging receipt is required before maintenance." >&2; exit 1; }
+  node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" verify "${DEPLOYMENT_CLAMAV_READY_FILE}" "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
+  [ "$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}")" = "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" ] || {
+    echo "The ClamAV target must be the locally available immutable image id from staging." >&2; exit 1;
+  }
+fi
 
 if [ "${DEPLOYMENT_MODE}" = "release" ]; then
 backend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}")"
@@ -692,12 +776,16 @@ else
   compose config --quiet
   echo "Applying workstation configuration to the existing immutable release ${DEPLOYMENT_TARGET_COMMIT}; no source fetch or image build."
 fi
+if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
+  DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
+  export DEPLOYMENT_CLAMAV_IMAGE
+fi
 refresh_performance_database_identity
 
 run_backend node dist/scripts/validate-production-environment.js
 run_backend node dist/scripts/deployment-drill-preflight.js
 
-compose up -d postgres clamav
+compose up -d postgres
 control prepare
 SESSION_PREPARED=1
 
@@ -742,6 +830,7 @@ fi
 phase TRAFFIC_BLOCKED
 if [ "${DRAINED_EARLY}" -eq 0 ]; then drain_current_services; fi
 phase SERVICES_DRAINED
+capture_clamav_checkpoint
 
 postgres_available_kb="$(compose exec -T postgres sh -c 'df -Pk "$PGDATA" | awk "NR==2 {print \$4}"')"
 postgres_database_bytes="$(compose exec -T postgres sh -c 'psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_database_size(current_database())"')"
@@ -769,6 +858,12 @@ phase REMOTE_CHECKPOINT_VERIFIED
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"
+if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  run_backend_timed "${remaining}" node scripts/clamav-checkpoint.mjs activate
+  DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
+  export DEPLOYMENT_CLAMAV_IMAGE
+fi
 if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
   node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" persist "${REPO_ROOT}"
 fi
@@ -904,6 +999,8 @@ timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FIL
   "${HR_HIRING_ANTIVIRUS_COMMAND}" "${test_file}"
   rm -f "${test_file}"
 '
+remaining_mutation_seconds >/dev/null
+verify_clamav_repair_runtime
 remaining_mutation_seconds >/dev/null
 phase GATES_PASSED
 

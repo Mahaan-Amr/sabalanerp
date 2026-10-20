@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
 import {spawn,spawnSync} from 'node:child_process';
-import {validateCandidatePreflight} from './replace-application-native-candidate-local.mjs';
+import {validateCandidatePreflight} from './replace-qualified-application-native-candidate-local.mjs';
 import {stableFrontendBaseFile} from './lib/production-frontend-base-artifacts.mjs';
 
 const root=path.resolve(import.meta.dirname,'..');const mode=process.argv[2]??'--inspect';assert.ok(['--inspect','--replace'].includes(mode));const preflightFile=mode==='--replace'?fs.realpathSync(process.argv[4]):null;if(mode==='--replace'){assert.equal(process.argv.length,5);assert.equal(process.argv[3],'--preflight');validateCandidatePreflight(JSON.parse(fs.readFileSync(preflightFile)));}else assert.ok(process.argv.length<=3);
@@ -42,7 +42,7 @@ function summary(row){return{id:row.Id,image:row.Image,startedAt:row.State.Start
   mounts:row.Mounts.map(m=>({type:m.Type,source:m.Source,destination:m.Destination,rw:m.RW})),ports:row.HostConfig.PortBindings??{}};}
 function protectedIdentities(){return Object.fromEntries(protectedServices.map(service=>[service,summary(inspectContainer(service))]));}
 const preflightRaw=fs.readFileSync(preflightFile),preflightPin=stableFrontendBaseFile(preflightFile);
-const inputs={preflight:{file:preflightFile,pin:preflightPin},baseFile:stableFrontendBaseFile(base),overlayFile:stableFrontendBaseFile(overlay),helperFile:stableFrontendBaseFile(import.meta.filename)};
+const inputs={preflight:{file:preflightFile,pin:preflightPin},baseFile:stableFrontendBaseFile(base),overlayFile:stableFrontendBaseFile(overlay),helperFile:stableFrontendBaseFile(import.meta.filename),preflightHelperFile:stableFrontendBaseFile(path.join(root,'scripts/replace-qualified-application-native-candidate-local.mjs'))};
 const measured=slots.map(slot=>{const file=path.join(root,'reports/qa',slot.receipt),materialFile=path.join(root,'reports/qa',slot.material);
   const receiptFile=stableFrontendBaseFile(file),materialReceiptFile=stableFrontendBaseFile(materialFile);
   assert.equal(receiptFile.sha256,approvedReceiptSha256);assert.equal(materialReceiptFile.sha256,approvedMaterialSha256);
@@ -71,6 +71,7 @@ const publish=(suffix,value)=>{const fd=fs.openSync(evidence+suffix+'.json','wx'
 publish('-intent',report);let failure;
 try{
   assert.deepEqual(stableFrontendBaseFile(base),inputs.baseFile);assert.deepEqual(stableFrontendBaseFile(overlay),inputs.overlayFile);
+  assert.deepEqual(stableFrontendBaseFile(path.join(root,'scripts/replace-qualified-application-native-candidate-local.mjs')),inputs.preflightHelperFile);
   const stdoutPath=path.join(scratch,'up.stdout'),stderrPath=path.join(scratch,'up.stderr');
   const out=fs.openSync(stdoutPath,'wx',0o600),err=fs.openSync(stderrPath,'wx',0o600);let up;
   try{validateCandidatePreflight(JSON.parse(fs.readFileSync(preflightFile)));assert.deepEqual(stableFrontendBaseFile(preflightFile),preflightPin);status();up=await new Promise(resolve=>{const child=spawn('docker',[...compose,'up','-d','--no-deps','--no-build','--pull','never','--wait','--wait-timeout','120',...slots.map(v=>v.service)],{env,stdio:['ignore',out,err]});
@@ -93,6 +94,7 @@ try{
   }
   assert.deepEqual(protectedIdentities(),report.protectedBefore);
   assert.deepEqual(stableFrontendBaseFile(import.meta.filename),inputs.helperFile);
+  assert.deepEqual(stableFrontendBaseFile(path.join(root,'scripts/replace-qualified-application-native-candidate-local.mjs')),inputs.preflightHelperFile);
   Object.assign(report,{phase:'COMPLETE',pass:true,protectedNineUnchanged:true});
 }catch(error){failure=error;Object.assign(report,{phase:'FAILED_HELD',pass:false,error:error instanceof Error?error.message:'SLOT_REPLACEMENT_FAILED'});}
 publish('',report);console.log(JSON.stringify({phase:report.phase,pass:report.pass,evidence:evidence+'.json',productionAdmission:false}));if(failure)throw failure;

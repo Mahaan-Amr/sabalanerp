@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+const repositoryRoot=fileURLToPath(new URL('../../',import.meta.url));
 const source=fs.readFileSync(new URL('../../deploy/clamav/update-once.sh',import.meta.url),'utf8');
 test('real flock, cooldown-as-zero, persisted retry slots, process death and concurrent writers (existing local Compose)',()=>{
- const inventory=spawnSync('docker',['compose','-f','docker-compose.local.yml','ps','--format','json','clamav'],{encoding:'utf8',cwd:new URL('../../',import.meta.url).pathname});
+ const inventory=spawnSync('docker',['compose','-f','docker-compose.local.yml','ps','--format','json','clamav'],{encoding:'utf8',cwd:repositoryRoot});
  assert.equal(inventory.status,0,inventory.stderr);
  assert.ok(inventory.stdout.includes('sabalanerp-local-clamav-1'),'requires the existing local project');
  const script=`set -eu
@@ -70,6 +72,62 @@ echo UPDATER_LINUX_OK
  const result=spawnSync('docker',['exec','-i','sabalanerp-local-clamav-1','sh','-s'],{input:script,encoding:'utf8',timeout:20000});
  assert.equal(result.status,0,JSON.stringify({stdout:result.stdout,stderr:result.stderr,error:result.error?.message}));
  assert.match(result.stdout,/UPDATER_LINUX_OK/);
+});
+
+test('startup retains native cooldown bytes and makes them writable by the managed updater; symlinks fail closed',()=>{
+ const inventory=spawnSync('docker',['compose','-f','docker-compose.local.yml','ps','--format','json','clamav'],{encoding:'utf8',cwd:repositoryRoot});
+ assert.equal(inventory.status,0,inventory.stderr);
+ assert.match(inventory.stdout,/sabalanerp-local-clamav-1/);
+ const entrypoint=fs.readFileSync(new URL('../../deploy/clamav/entrypoint.sh',import.meta.url),'utf8');
+ // Only redirect the log directory; scanner/updater commands are isolated fixtures.
+ const script=`set -eu
+root="$(mktemp -d /tmp/sabalan-cooldown-owner.XXXXXX)"
+supervisor=''
+cleanup() {
+  if [ -n "$supervisor" ]; then kill -TERM "$supervisor" 2>/dev/null || true; wait "$supervisor" 2>/dev/null || true; fi
+  rm -rf "$root"
+}
+trap cleanup EXIT
+mkdir "$root/bin" "$root/db" "$root/log"
+chmod 755 "$root"
+cat > "$root/entrypoint.sh" <<'ENTRYPOINT_SOURCE'
+${entrypoint.replaceAll('/var/log/clamav','"$TEST_ROOT/log"')}
+ENTRYPOINT_SOURCE
+cat > "$root/bin/clamd" <<'SCANNER'
+#!/bin/sh
+exec sleep 60
+SCANNER
+cat > "$root/bin/clamdscan" <<'PING'
+#!/bin/sh
+exit 0
+PING
+cat > "$root/bin/su" <<'WORKER'
+#!/bin/sh
+exec /bin/su -s /bin/sh clamav -c 'test -w "$CLAMAV_DATABASE_DIRECTORY/freshclam.dat" && printf ready > "$CLAMAV_DATABASE_DIRECTORY/.ownership-probe" && exec sleep 60'
+WORKER
+chmod 755 "$root/bin/"*
+export TEST_ROOT="$root" CLAMAV_DATABASE_DIRECTORY="$root/db" CLAMAV_RUN_DIRECTORY="$root/run" PATH="$root/bin:$PATH"
+printf 'retained native cooldown bytes' > "$root/db/freshclam.dat"
+chmod 600 "$root/db/freshclam.dat"
+chown 0:0 "$root/db/freshclam.dat"
+before="$(sha256sum "$root/db/freshclam.dat")"
+sh "$root/entrypoint.sh" > "$root/startup.log" 2>&1 & supervisor=$!
+for i in $(seq 1 60); do [ ! -f "$root/db/.ownership-probe" ] || break; sleep 0.1; done
+if [ ! -f "$root/db/.ownership-probe" ]; then cat "$root/startup.log"; exit 1; fi
+[ "$(stat -c %u "$root/db/freshclam.dat")" = "$(id -u clamav)" ]
+[ "$(stat -c %a "$root/db/freshclam.dat")" = 600 ]
+[ "$(sha256sum "$root/db/freshclam.dat")" = "$before" ]
+kill -TERM "$supervisor"; wait "$supervisor" || true; supervisor=''
+mv "$root/db/freshclam.dat" "$root/outside-cooldown"
+ln -s "$root/outside-cooldown" "$root/db/freshclam.dat"
+status=0; sh "$root/entrypoint.sh" > "$root/refusal.log" 2>&1 || status=$?
+[ "$status" -ne 0 ]
+grep -q 'Unsafe updater state symlink' "$root/refusal.log"
+echo COOLDOWN_OWNERSHIP_OK
+`;
+ const result=spawnSync('docker',['exec','-i','sabalanerp-local-clamav-1','sh','-s'],{input:script,encoding:'utf8',timeout:20000,cwd:repositoryRoot});
+ assert.equal(result.status,0,JSON.stringify({stdout:result.stdout,stderr:result.stderr,error:result.error?.message}));
+ assert.match(result.stdout,/COOLDOWN_OWNERSHIP_OK/);
 });
 
 test('real process evidence and streamed EICAR inspection create no scanner fixture files',async()=>{

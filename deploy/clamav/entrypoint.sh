@@ -5,7 +5,7 @@ db_dir="${CLAMAV_DATABASE_DIRECTORY:-/var/lib/clamav}"
 mkdir -p "$run_dir" "$db_dir" /var/log/clamav
 chown clamav:clamav "$db_dir" /var/log/clamav
 # State files are deliberately persistent across container recreation.
-for name in .sabalan-updater-state .sabalan-updater-state.next .sabalan-updater.lock .sabalan-freshclam-result .sabalan-freshclam-result.next; do
+for name in freshclam.dat .sabalan-updater-state .sabalan-updater-state.next .sabalan-updater.lock .sabalan-freshclam-result .sabalan-freshclam-result.next; do
   [ ! -L "$db_dir/$name" ] || { echo 'Unsafe updater state symlink.' >&2; exit 1; }
   [ ! -e "$db_dir/$name" ] || chown clamav:clamav "$db_dir/$name"
 done

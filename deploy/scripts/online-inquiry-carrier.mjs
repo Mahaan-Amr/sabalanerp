@@ -4,6 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {OriginalOnlineReleaseController} from './online-release-controller.mjs';
 import {compileOnlineCarrierPlan,verifyInspection,assertBindSources,assertAliasUnique,bindTargetBrowserImage} from './online-release-carriers.mjs';
+import {assertProductionImageInspection} from './production-image-execution-binding.mjs';
 const commands=new WeakMap(),carriers=new WeakMap(),failures=new WeakMap(),attempts=new WeakMap();
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const phases=['MIGRATIONS_APPLIED','RELEASE_STARTED','ONLINE_CHECKPOINTING','ONLINE_EXPANDING','ONLINE_ACCEPTING','ONLINE_READY','ONLINE_PUBLISHING','ONLINE_SERVING'];
@@ -38,7 +39,7 @@ export async function provisionOriginalInquiryCarrier(controller,input){
  const evidence=await OriginalOnlineReleaseController.prototype.readInquiryReleaseEvidence.call(controller,input.releaseId);
  const candidates=evidence.browserRegistries.flatMap(value=>value.builds).filter(value=>value.application==='inquiry'&&value.id===input.buildId);
  assert.ok(candidates.length>0);const sourceBuild=candidates[0];for(const value of candidates)same({...value,slotId:null,retiredAt:null,supportUntil:null},{...sourceBuild,slotId:null,retiredAt:null,supportUntil:null});
- const binding=bindTargetBrowserImage(sourceBuild,'inquiry',evidence.component.imageGraph,evidence.component.image);
+ const binding=bindTargetBrowserImage(sourceBuild,'inquiry',evidence.component.imageGraph,evidence.component.image,evidence.component.executionBinding);
  const scope=input.scope;assert.equal(scope.format,'sabalan-online-runtime-scope/v2');assert.equal(scope.purpose,'http');assert.equal(scope.role,'serving');assert.equal(scope.worker,null);
  assert.equal(scope.releaseId,input.releaseId);assert.equal(scope.image,binding.build.image);assert.equal(scope.sourceCommit,evidence.component.sourceCommit);
  const enrolled=evidence.scopes.filter(value=>value.scope.runtimeId===scope.runtimeId);assert.equal(enrolled.length,1);same(enrolled[0].scope,scope);assert.equal(enrolled[0].sha256,input.scopeSha256);
@@ -54,6 +55,7 @@ export async function provisionOriginalInquiryCarrier(controller,input){
  const plan=compileOnlineCarrierPlan({configuration,serviceName:'inquiry',project:target.project,kind:'inquiry',runtimeId:scope.runtimeId,image:binding.build.image,releaseId:input.releaseId,network,volumeNames,build:binding.build});
  assertBindSources([plan]);
  const image=single(await docker(controller,['image','inspect',plan.image]));assert.equal(image.Id,plan.image);same(image.RootFS.Layers,binding.imageGraph.rootfsDiffIds);assert.ok(!image.Config?.Volumes||Object.keys(image.Config.Volumes).length===0);
+ if(evidence.component.executionBinding)assertProductionImageInspection(evidence.component.executionBinding,image,binding.imageGraph);
  assert.ok(!(image.Config?.Env||[]).some(value=>/^(?:PG|BACKEND_)/.test(value)),'INQUIRY_IMAGE_POSTGRES_AUTHORITY_REFUSED');
  await assertAliasUnique(controller,plan);
  const creation={runtimeId:scope.runtimeId,image:plan.image,containerId:null,createAttempted:true,started:false};

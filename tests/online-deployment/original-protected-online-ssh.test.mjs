@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {verifyProtectedQualificationRequest,readOriginalProtectedQualificationRequest,sendOriginalProtectedQualificationPackage,verifyOriginalPhysicalPointTransfer,readOriginalProtectedPhysicalPointSource,verifyOriginalTerminalWalRequest,readOriginalProtectedTerminalWalSource,verifyOriginalOnlineQualificationRequest,readOriginalOnlineQualificationRequest} from '../../scripts/lib/original-protected-online-ssh.mjs';
+import {syntheticProductionExecution} from './production-execution-binding.fixture.mjs';
 const digest=raw=>createHash('sha256').update(raw).digest('hex'),raw=value=>Buffer.from(JSON.stringify(value));
 
 function dataOnlyRequest(){return{format:'sabalan-original-protected-qualification-request/v1',sequence:1,
@@ -19,6 +20,9 @@ test('ONLINE request preserves distinct physical point/live stage and cannot min
   checkpoint:{...old.checkpoint,captureMethod:'ONLINE_COHERENT_WAL',independentRestoreVerified:true,continuousWalQualified:false,continuousWalCoveragePhase:'LIVE_ORIGINAL_OWNER',repositoryDirectory:{captureId:'1'.repeat(64)}},
   liveCoverage:{format:'sabalan-original-live-wal-coverage/v1',phase:'LIVE_ORIGINAL_OWNER',finalIntervalCompletion:false,captureId:'1'.repeat(64),sourceDatabase:old.database}};
  assert.deepEqual(verifyOriginalOnlineQualificationRequest(body),body);assert.throws(()=>readOriginalOnlineQualificationRequest(body),/ORIGINAL_ONLINE_REQUEST_REQUIRED/);
+ const bound={...body,productionExecutionBindings:syntheticProductionExecution(body).bindings};
+ assert.equal(verifyOriginalOnlineQualificationRequest(bound),bound);assert.throws(()=>readOriginalOnlineQualificationRequest(bound),/ORIGINAL_ONLINE_REQUEST_REQUIRED/);
+ const wrong=structuredClone(bound);wrong.productionExecutionBindings.inquiry.releaseId='other_release';assert.throws(()=>verifyOriginalOnlineQualificationRequest(wrong));
  for(const change of [{generation:1},{checkpoint:{...body.checkpoint,captureMethod:'PROTECTED_MAINTENANCE_COMPLETE'}},{liveCoverage:{...body.liveCoverage,captureId:'2'.repeat(64)}},{liveCoverage:{...body.liveCoverage,finalIntervalCompletion:true}}])assert.throws(()=>verifyOriginalOnlineQualificationRequest({...body,...change}));
 });
 
@@ -26,6 +30,17 @@ test('data-only validation never mints an original protected request',()=>{
  const request=verifyProtectedQualificationRequest(dataOnlyRequest());
  assert.throws(()=>readOriginalProtectedQualificationRequest(request),/ORIGINAL_PROTECTED_REQUEST_REQUIRED/);
  assert.throws(()=>readOriginalProtectedQualificationRequest({}),/ORIGINAL_PROTECTED_REQUEST_REQUIRED/);
+});
+
+test('original request parser binds execution observation to exact host/release without minting custody',()=>{
+ for(const store of ['containerd','classic']){
+  const body=dataOnlyRequest();body.productionExecutionBindings=syntheticProductionExecution(body,store).bindings;
+  assert.equal(verifyProtectedQualificationRequest(body),body);assert.throws(()=>readOriginalProtectedQualificationRequest(body),/ORIGINAL_PROTECTED_REQUEST_REQUIRED/);
+  for(const mutate of [v=>{v.productionExecutionBindings.backend.releaseId='other_release';},v=>{v.productionExecutionBindings.backend.sourceMachineUuidSha256='f'.repeat(64);},
+   v=>{v.productionExecutionBindings.backend.sourceKernelBootIdSha256='0'.repeat(64);},v=>{v.productionExecutionBindings.backend.nativeInspection.Id='sha256:'+'f'.repeat(64);},
+   v=>{v.productionExecutionBindings.backend.inspectionSha256='f'.repeat(64);},v=>{v.productionExecutionBindings.backend.graph.rootfsDiffIds=['sha256:'+'f'.repeat(64)];}
+  ]){const value=structuredClone(body);mutate(value);assert.throws(()=>verifyProtectedQualificationRequest(value));}
+ }
 });
 test('different checkpoint domain, root aliases and extra commands refuse',()=>{
  for(const change of [row=>{row.checkpoint.captureMethod='ONLINE_COHERENT_WAL';},

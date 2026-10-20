@@ -45,8 +45,8 @@ required_remote="$2"
 # A prebuilt release has installed targets before cleanup. Protect those exact
 # helper-validated CONFIGs through the existing owned-cleanup protection port.
 set --
-if [ -n "${DEPLOYMENT_PREBUILT_BACKEND_CONFIG:-}${DEPLOYMENT_PREBUILT_FRONTEND_CONFIG:-}${DEPLOYMENT_PREBUILT_INQUIRY_CONFIG:-}" ]; then
-  for protected_image in "${DEPLOYMENT_PREBUILT_BACKEND_CONFIG:-}" "${DEPLOYMENT_PREBUILT_FRONTEND_CONFIG:-}" "${DEPLOYMENT_PREBUILT_INQUIRY_CONFIG:-}"; do
+if [ -n "${DEPLOYMENT_PREBUILT_BACKEND_EXECUTION_IMAGE:-}${DEPLOYMENT_PREBUILT_FRONTEND_EXECUTION_IMAGE:-}${DEPLOYMENT_PREBUILT_INQUIRY_EXECUTION_IMAGE:-}" ]; then
+  for protected_image in "${DEPLOYMENT_PREBUILT_BACKEND_EXECUTION_IMAGE:-}" "${DEPLOYMENT_PREBUILT_FRONTEND_EXECUTION_IMAGE:-}" "${DEPLOYMENT_PREBUILT_INQUIRY_EXECUTION_IMAGE:-}"; do
     [ "${#protected_image}" -eq 71 ] || { echo 'STORAGE_PREBUILT_IMAGE_INVALID' >&2; exit 1; }
     case "$protected_image" in sha256:*) ;; *) echo 'STORAGE_PREBUILT_IMAGE_INVALID' >&2; exit 1;; esac
     protected_digest="${protected_image#sha256:}"

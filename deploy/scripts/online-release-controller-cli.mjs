@@ -17,7 +17,7 @@ try{
  const {PrismaClient}=require('./online-release-host-dependencies/node_modules/@prisma/client');
  database=new PrismaClient({datasources:{db:{url:url.href}}});
  controller=new OriginalOnlineReleaseController({database,owner:config.owner,publicationDirectory:config.publicationDirectory,
-  composeFile:config.composeFile,project:config.project,runtimeDatabaseUrl:config.runtimeDatabaseUrl,
+  composeFile:config.composeFile,project:config.project,runtimeDatabaseUrl:config.runtimeDatabaseUrl,prebuiltReleasePlan:config.prebuiltReleasePlan,
   publicationLock:new BrowserRoutingPublicationLock(config.publicationLock)});
  // A separate original FIFO pair lets the SAME controller answer read-only
  // continuity observations while its main command awaits a native child.

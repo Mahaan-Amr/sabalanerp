@@ -44,6 +44,15 @@ function actor(closure){const scope=json(closure.nativeRawBase64).onlineScope.sc
  return {runtimeId:scope.runtimeId,releaseId:scope.releaseId,sourceCommit:scope.sourceCommit,image:scope.image,runtimeBundleSha256:scope.manifestSha256,purpose:scope.purpose};}
 function database(closure){const native=json(closure.nativeRawBase64);return {name:native.initialDatabase.name,oid:String(native.initialDatabase.oid),systemIdentifier:native.clusterIdentifier};}
 
+/** Pure content binding only; this result is never an original-owner token. */
+export function deriveOriginalExecutionSelection(request,independent){
+ const sourceHost={machineUuidSha256:request.checkpoint.sourceMachineUuidSha256,kernelBootIdSha256:request.checkpoint.sourceKernelBootIdSha256};
+ const bindings=request.productionExecutionBindings;
+ const executionImages=originalOnlineEvidenceReader().validateProductionExecutionBindings(bindings,{releaseId:request.releaseId,
+  imageGraphs:independent.imageGraphs,deploymentTargetImages:independent.images,sourceHost});
+ return {releaseId:request.releaseId,sourceHost,bindings:bindings?structuredClone(bindings):null,executionImages};
+}
+
 function derivePhysicalComponents(independent,report,request){
  const manifest=ownedJson(independent,'plaintextManifest',32*1024**2).value;
  const capture=ownedJson(independent,'captured',32*1024**2).value;
@@ -124,6 +133,7 @@ export function assembleOriginalOnlineEvidence({localCompletion,independentCompl
 }
 
 function assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical,revalidateRequest}){
+ const originalProductionExecution=deriveOriginalExecutionSelection(request,independent);
  assert.ok(local.originalControllers.every(row=>row.code===0&&row.signal===null)&&independent.originalControllers.every(row=>row.code===0&&row.signal===null));
  const main=ownedJson(local,'original-main-result.json').value;
  same(main.format,'sabalan-application-native/v1');same(main.passResult,true);same(main.productionAdmission,false);
@@ -153,7 +163,7 @@ function assembleOriginalEvidence({local,independent,request,evidenceDirectory,p
   const observed=sql.namespaces.filter(row=>row.namespace===namespace);same(observed.length,1);same(observed[0].sessions,0);
   return naturalClosure({...value,claimNative:claim.native,freshSql:{visible:sql.visible,systemIdentifier:sql.database.systemIdentifier,databaseOid:sql.database.oid,namespace,namespaceSessions:observed[0].sessions,prepared:sql.prepared}},independent);
  });
- const manifest={format:'sabalan-online-release-manifest/v1',releaseId:request.releaseId,sourceCommit:request.targetCommit,image:independent.images.backend,runtimeBundleSha256:candidateActor.runtimeBundleSha256,generation:physical?request.generation:1,
+ const manifest={format:'sabalan-online-release-manifest/v1',releaseId:request.releaseId,sourceCommit:request.targetCommit,image:originalProductionExecution.executionImages.backend,runtimeBundleSha256:candidateActor.runtimeBundleSha256,generation:physical?request.generation:1,
   database:{name:request.database.name,systemIdentifier:request.database.systemIdentifier},roots:request.roots,ephemeralRoots:request.ephemeralRoots};
  const manifestRaw=bytes(manifest),manifestSha256=sha(manifestRaw);
  const proofDatabases={'compatible-migrations':sourceDatabase,'coherent-independent-restore':independent.proofDatabase,'browser-24-hours':sourceDatabase,'single-worker-and-completion':pairDatabase,'current-domain':pairDatabase};
@@ -166,6 +176,7 @@ function assembleOriginalEvidence({local,independent,request,evidenceDirectory,p
   archiveReceiptFiles[file]=original.raw;imageArchiveReceipts[role]={file,bytes:original.raw.length,sha256:original.descriptor.sha256};}
  const qualification={schemaSha256:main.schemaSha256,sourceDatabase,proofDatabases,recoveryMode:physical?'ONLINE_COHERENT_WAL':'PROTECTED_MAINTENANCE_COMPLETE',deploymentTargetDatabase:request.database,captureId:physical?report.layout.captureId:main.sameReleaseCoherentRestore.captureId,
   images:independent.sourceImages,checkpointArchiveChecksum:request.checkpoint.checksum,componentSourceCommits,runtimeCohorts:Object.fromEntries(scopes.map(scope=>[scope,cohorts[scope].map(actor)])),deploymentTargetImages:independent.images,imageGraphs:independent.imageGraphs,imageArchiveReceipts,
+  ...(request.productionExecutionBindings?{productionExecutionBindings:structuredClone(request.productionExecutionBindings)}:{}),
   ...(!physical?{qualificationCheckpoint:{metadataSha256:checkpoint.sha256,metadata:checkpoint.metadata}}:{})};
  const binding={...qualification,manifestSha256,checkpointSha256:metadataSha(request.checkpoint),releaseId:request.releaseId,sourceCommit:request.targetCommit,runtimeBundleSha256:candidateActor.runtimeBundleSha256};
  const common=scope=>({...binding,productionAdmission:true,passResult:true,proofDatabase:proofDatabases[scope],originalNativeClosures:cohorts[scope],executionKind:['compatible-migrations','browser-24-hours'].includes(scope)?'DIAGNOSTIC_SUPPORT':'INSTALLED_RUNTIME'});
@@ -204,6 +215,7 @@ function assembleOriginalEvidence({local,independent,request,evidenceDirectory,p
  for(const closure of accepted.nativeClosures)assert.ok([...local.nativeClosures,...independent.nativeClosures].some(row=>row.runtimeId===closure.runtimeId&&row.nativeSha256===closure.nativeSha256&&row.workSha256===closure.workSha256&&row.activeClaimSha256===closure.activeClaimSha256),'ORIGINAL_ASSEMBLY_NATIVE_UNION_CHANGED');
  revalidateRequest();
  const token=Object.freeze({});completed.set(token,freeze({format:'sabalan-original-online-evidence-assembly/v1',evidenceDirectory,manifestSha256,acceptanceSha256,files:Object.fromEntries(Object.entries(files).map(([file,raw])=>[file,owned(raw)])),
+  originalProductionExecution,originalProductionExecutionSha256:metadataSha(originalProductionExecution),
   canonicalParser:{bundleSha256:kernel.bundleSha256,sourceHashes:kernel.sourceHashes},
   originalLocalCompletionSha256:metadataSha(local),originalIndependentCompletionSha256:metadataSha(independent),...(physical?{originalOnlineRequestSha256:metadataSha(request)}:{originalProtectedRequestSha256:metadataSha(request)}),productionAdmission:false}));return token;
 }

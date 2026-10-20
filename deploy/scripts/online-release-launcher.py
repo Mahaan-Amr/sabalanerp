@@ -330,6 +330,7 @@ try:
    session=private(config['sessionFile'])
    require(session['deploymentId']==message['deploymentId'] and session['releaseId']==message['releaseId'] and session['targetCommit']==message['targetCommit'])
    host_config=dict(config['controllerConfig'],owner=dict(deploymentId=session['deploymentId'],releaseId=session['releaseId'],leaseToken=session['leaseToken']))
+   if 'prebuiltReleasePlan' in config:host_config['prebuiltReleasePlan']=config['prebuiltReleasePlan']
    context_read,continuous_request_fd=os.pipe();continuous_response_fd,context_write=os.pipe()
    host_config['continuousContext']=dict(requestFd=context_read,responseFd=context_write)
    host_config['publicationLock']=dict(file=str(lock_file),descriptor=publication_fd,identity=dict(device=str(lock_stat.st_dev),inode=str(lock_stat.st_ino),ownerUid=0))

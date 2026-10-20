@@ -3,6 +3,7 @@ import test from 'node:test';
 import {createHash} from 'node:crypto';
 import { assertOnlineQualificationProof, type OnlineQualificationBinding, type OnlineQualificationScope } from '../../backend/src/services/onlineQualificationEvidence';
 import { syntheticQualificationProof, syntheticCheckpointMetadata, syntheticQualificationIdentities,syntheticQualificationImageGraphs } from './online-qualification-evidence.fixture';
+import {productionImageInspectionSha256,type ProductionImageExecutionBindings} from '../../backend/src/services/onlineImageExecutionBinding';
 const fixtureBase = { manifestSha256: '1'.repeat(64), checkpointSha256: '2'.repeat(64), checkpointArchiveChecksum: 'f'.repeat(64),
   releaseId: 'unit_release', sourceCommit: '3'.repeat(40), runtimeBundleSha256: '4'.repeat(64), schemaSha256: '5'.repeat(64),
   captureId: '6'.repeat(64), sourceDatabase: { name: 'unit_source', systemIdentifier: '123', oid: '42' },
@@ -13,6 +14,28 @@ const binding:OnlineQualificationBinding={...fixtureBase,imageGraphs:syntheticQu
 const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 binding.checkpointSha256=createHash('sha256').update(JSON.stringify(canonical(syntheticCheckpointMetadata(binding)))).digest('hex');
 assert.notEqual(binding.checkpointSha256,binding.checkpointArchiveChecksum);
+
+test('production INDEX execution preserves exact independently restored CONFIG health and raw closure identities',()=>{
+ const current=structuredClone(binding),execution={} as ProductionImageExecutionBindings;
+ for(const role of ['backend','frontend','inquiry'] as const){
+  const graph=current.imageGraphs[role],nativeInspection={Id:graph.index,Descriptor:{mediaType:'application/vnd.oci.image.index.v1+json',digest:graph.index,size:123},
+   RootFS:{Type:'layers' as const,Layers:[...graph.rootfsDiffIds]},Os:'linux' as const,Architecture:'amd64' as const,Config:{Labels:null}};
+  execution[role]={format:'sabalan-production-image-execution-binding/v1',role,releaseId:current.releaseId,sourceMachineUuidSha256:'1'.repeat(64),sourceKernelBootIdSha256:'2'.repeat(64),
+   store:'containerd',executionImageId:graph.index,graph:structuredClone(graph),nativeInspection,inspectionSha256:productionImageInspectionSha256(nativeInspection)};
+ }
+ current.productionExecutionBindings=execution;
+ const proof=syntheticQualificationProof('coherent-independent-restore',current);
+ proof.productionExecutionBindings=structuredClone(execution);
+ const originalNative=proof.originalNativeClosures.map((row:any)=>row.nativeRawBase64);
+ assert.doesNotThrow(()=>assertOnlineQualificationProof('coherent-independent-restore',proof,current));
+ assert.deepEqual(proof.originalNativeClosures.map((row:any)=>row.nativeRawBase64),originalNative);
+ const wrongHealth=structuredClone(proof);wrongHealth.applicationHealth.backend.image=execution.backend.executionImageId;
+ assert.throws(()=>assertOnlineQualificationProof('coherent-independent-restore',wrongHealth,current));
+ const absent=structuredClone(proof);delete absent.productionExecutionBindings;assert.throws(()=>assertOnlineQualificationProof('coherent-independent-restore',absent,current));
+ const wrongHost=structuredClone(current);for(const role of ['backend','frontend','inquiry'] as const)wrongHost.productionExecutionBindings![role].sourceMachineUuidSha256='f'.repeat(64);
+ const hostProof=structuredClone(proof);hostProof.productionExecutionBindings=wrongHost.productionExecutionBindings;
+ assert.throws(()=>assertOnlineQualificationProof('coherent-independent-restore',hostProof,wrongHost));
+});
 
 test('protected bootstrap independently restored point retains its own release and checksum instead of adopting the future activation point',()=>{
  const protectedBinding=structuredClone(binding);protectedBinding.recoveryMode='PROTECTED_MAINTENANCE_COMPLETE';

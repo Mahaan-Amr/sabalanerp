@@ -60,6 +60,16 @@ export async function issueOriginalQualificationOrigin({localCompletion,independ
   &&independent.checkpoint.checksum===(qualifiedPoint?.metadata.checksum??accepted.acceptance.qualification.checkpointArchiveChecksum)
   &&independent.checkpoint.releaseId===(qualifiedPoint?.metadata.releaseId??accepted.manifest.releaseId),'QUALIFICATION_ORIGINAL_CHECKPOINT_CHANGED');
  assert(JSON.stringify(canonical(independent.images))===JSON.stringify(canonical(accepted.acceptance.qualification.deploymentTargetImages)),'QUALIFICATION_ORIGINAL_IMAGES_CHANGED');
+ const execution=assembly.originalProductionExecution;
+ assert(execution&&sha(Buffer.from(JSON.stringify(canonical(execution))))===assembly.originalProductionExecutionSha256,
+  'QUALIFICATION_ORIGINAL_EXECUTION_SELECTION_CHANGED');
+ assert(execution.releaseId===accepted.manifest.releaseId
+  &&JSON.stringify(canonical(execution.bindings??null))===JSON.stringify(canonical(accepted.acceptance.qualification.productionExecutionBindings??null)),
+  'QUALIFICATION_ORIGINAL_EXECUTION_BINDINGS_CHANGED');
+ const executionImages=kernel.validateProductionExecutionBindings(execution.bindings??undefined,{releaseId:execution.releaseId,
+  imageGraphs:independent.imageGraphs,deploymentTargetImages:independent.images,sourceHost:execution.sourceHost});
+ assert(JSON.stringify(canonical(executionImages))===JSON.stringify(canonical(execution.executionImages))
+  &&accepted.manifest.image===executionImages.backend,'QUALIFICATION_ORIGINAL_EXECUTION_IMAGE_CHANGED');
  const originals=[...local.nativeClosures,...independent.nativeClosures];
  for(const closure of accepted.nativeClosures)assert(originals.some(row=>row.runtimeId===closure.runtimeId&&row.nativeSha256===closure.nativeSha256
   &&row.workSha256===closure.workSha256&&row.activeClaimSha256===closure.activeClaimSha256),'QUALIFICATION_ORIGINAL_NATIVE_BYTES_NOT_OWNED');

@@ -36,8 +36,10 @@ function fixture(){
  let phase='MIGRATIONS_APPLIED',releases=0,epochs=0,writes=0,semanticReads=0;
  const build={id:'erp_actual_build',application:'erp',slotId:'frontend_actual',image:'sha256:'+'9'.repeat(64),manifestSha256:'8'.repeat(64),assets:[],actionIds:[]};
  const graph={index:'sha256:'+'7'.repeat(64),config:build.image};acceptance.qualification.imageGraphs={frontend:graph};
+ acceptance.qualification.deploymentTargetImages={backend:scope.image,frontend:build.image,inquiry:'sha256:'+'6'.repeat(64)};
  const validated={manifest,acceptance,slots:[],compatibilityJson:{},recoveryJson:{},identityJson:{},accepted:{acceptance,browserRegistries:[{builds:[{...build,image:graph.index}]}],revalidate(){semanticReads++;}}};
  const module=load('onlineReleaseBootstrap.ts',{'./onlineBootstrapCheckpointLineage':load('onlineBootstrapCheckpointLineage.ts',{}),
+  './onlineImageExecutionBinding':load('onlineImageExecutionBinding.ts',{}),
   './onlineReleaseRegistration':{prepareValidatedOnlineRegistration(){return validated;}},
   './deploymentMaintenance':{DEPLOYMENT_MAINTENANCE_FILE:'deployment-maintenance.json'}});
  const tx={onlineRelease:{create:async()=>{releases++;writes++;}},onlineRuntimeSlot:{createMany:async()=>{writes++;}},

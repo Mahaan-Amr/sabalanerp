@@ -7,6 +7,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {createHash,randomBytes} from 'node:crypto';
 import {readOriginalQualificationPackage} from '../../deploy/scripts/online-qualification-origin-issuer.mjs';
+import {originalOnlineEvidenceReader} from './original-online-evidence-reader.mjs';
 
 const PROFILE='D:/sabalanerp-online-qa/fixed-production-openssh-profile-20261020.json';
 const PROFILE_SHA='71c591618aff78625652a341d3798bc231e9617f0c626c55c12c9a93a453e298';
@@ -15,6 +16,15 @@ const sessions=new WeakMap(),requests=new WeakMap(),walSources=new WeakMap(),ter
 const onlineRequests=new WeakMap();
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const exact=(value,names)=>assert.deepEqual(Object.keys(value).sort(),[...names].sort());
+function validateRequestProductionExecution(body){
+ if(!Object.hasOwn(body,'productionExecutionBindings'))return;
+ const bindings=body.productionExecutionBindings,roles=['backend','frontend','inquiry'];
+ exact(bindings,roles);
+ originalOnlineEvidenceReader().validateProductionExecutionBindings(bindings,{releaseId:body.releaseId,
+  imageGraphs:Object.fromEntries(roles.map(role=>[role,bindings[role].graph])),
+  deploymentTargetImages:Object.fromEntries(roles.map(role=>[role,bindings[role].graph.config])),
+  sourceHost:{machineUuidSha256:body.checkpoint.sourceMachineUuidSha256,kernelBootIdSha256:body.checkpoint.sourceKernelBootIdSha256}});
+}
 function fixedFile(file,expected,maximum){
  assert.equal(path.resolve(file),path.resolve(fs.realpathSync(file)));
  const before=fs.lstatSync(file,{bigint:true});assert.ok(before.isFile()&&!before.isSymbolicLink()&&before.nlink===1n&&before.size>0n&&before.size<=BigInt(maximum));
@@ -27,7 +37,7 @@ export function readOriginalProtectedQualificationRequest(token){
 }
 export function readOriginalOnlineQualificationRequest(token){const record=onlineRequests.get(token);assert.ok(record&&!record.session.held&&!record.session.closed&&!record.replied,'ORIGINAL_ONLINE_REQUEST_REQUIRED');return structuredClone(record.body);}
 export function verifyOriginalOnlineQualificationRequest(body){
- exact(body,['format','sequence','deploymentId','releaseId','targetCommit','generation','database','checkpoint','roots','ephemeralRoots','liveCoverage']);
+ exact(body,['format','sequence','deploymentId','releaseId','targetCommit','generation','database','checkpoint','roots','ephemeralRoots','liveCoverage',...(Object.hasOwn(body,'productionExecutionBindings')?['productionExecutionBindings']:[])]);
  assert.equal(body.format,'sabalan-original-online-qualification-request/v1');assert.equal(body.sequence,1);
  for(const field of ['deploymentId','releaseId'])assert.match(body[field],/^[A-Za-z0-9_-]{8,128}$/);assert.match(body.targetCommit,/^[a-f0-9]{40}$/);
  assert.ok(Number.isSafeInteger(body.generation)&&body.generation>=2);
@@ -40,11 +50,11 @@ export function verifyOriginalOnlineQualificationRequest(body){
  assert.equal(live.captureId,point.repositoryDirectory.captureId);assert.deepEqual(live.sourceDatabase,body.database);
  assert.equal(body.roots.length,9);assert.equal(new Set(body.roots.map(row=>row.live)).size,9);assert.equal(new Set(body.roots.map(row=>row.store)).size,9);
  for(const row of body.roots){exact(row,['live','store','liveDevice','liveInode','storeDevice','storeInode','baselineSha256']);for(const key of ['live','store'])assert.ok(row[key].startsWith('/app/')&&path.posix.normalize(row[key])===row[key]);for(const key of ['liveDevice','liveInode','storeDevice','storeInode'])assert.match(row[key],/^[1-9][0-9]*$/);assert.match(row.baselineSha256,/^[a-f0-9]{64}$/);}
- assert.deepEqual([...body.ephemeralRoots].sort(),['/app/storage/reports','/app/storage/sales-reports','/app/storage/bi-reports'].sort());return body;
+ assert.deepEqual([...body.ephemeralRoots].sort(),['/app/storage/reports','/app/storage/sales-reports','/app/storage/bi-reports'].sort());validateRequestProductionExecution(body);return body;
 }
 /** Pure frame validation is not an ownership minting API. */
 export function verifyProtectedQualificationRequest(body){
- exact(body,['format','sequence','deploymentId','releaseId','targetCommit','database','checkpoint','roots','ephemeralRoots','adoptionSha256']);
+ exact(body,['format','sequence','deploymentId','releaseId','targetCommit','database','checkpoint','roots','ephemeralRoots','adoptionSha256',...(Object.hasOwn(body,'productionExecutionBindings')?['productionExecutionBindings']:[])]);
  assert.equal(body.format,'sabalan-original-protected-qualification-request/v1');assert.equal(body.sequence,1);
  assert.match(body.deploymentId,/^[A-Za-z0-9_-]{8,128}$/);assert.match(body.releaseId,/^[A-Za-z0-9_-]{8,128}$/);assert.match(body.targetCommit,/^[a-f0-9]{40}$/);
  exact(body.database,['name','systemIdentifier','oid']);assert.match(body.database.name,/^[A-Za-z0-9_]{1,63}$/);
@@ -65,7 +75,7 @@ export function verifyProtectedQualificationRequest(body){
   for(const key of ['liveDevice','liveInode','storeDevice','storeInode'])assert.match(row[key],/^[1-9][0-9]*$/);assert.match(row.baselineSha256,/^[a-f0-9]{64}$/);
  }
  assert.deepEqual([...body.ephemeralRoots].sort(),['/app/storage/reports','/app/storage/sales-reports','/app/storage/bi-reports'].sort());
- return body;
+ validateRequestProductionExecution(body);return body;
 }
 export function verifyOriginalWalWindowRequest(r){
  exact(r,['format','sequence','challenge','deploymentId','releaseId','windowSha256','sourceIdentity','objects']);

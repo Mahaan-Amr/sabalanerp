@@ -1,10 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {deriveProtectedDirectoryComponents,originalOnlineProducerGaps,assembleOriginalProtectedOnlineEvidence,assembleOriginalOnlineEvidence,readOriginalOnlineEvidenceAssembly} from '../../scripts/lib/original-online-evidence-assembler.mjs';
+import {deriveProtectedDirectoryComponents,deriveOriginalExecutionSelection,originalOnlineProducerGaps,assembleOriginalProtectedOnlineEvidence,assembleOriginalOnlineEvidence,readOriginalOnlineEvidenceAssembly} from '../../scripts/lib/original-online-evidence-assembler.mjs';
+import {syntheticProductionExecution} from './production-execution-binding.fixture.mjs';
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 const raw=value=>Buffer.from(JSON.stringify(value));
+test('original execution derivation preserves canonical CONFIGs and raw source facts with strict graph/host binding',()=>{
+ const request={releaseId:'original_release',checkpoint:{sourceMachineUuidSha256:'a'.repeat(64),sourceKernelBootIdSha256:'b'.repeat(64)}};
+ for(const store of ['containerd','classic']){
+  const {bindings,independent}=syntheticProductionExecution(request,store),body={...request,productionExecutionBindings:bindings};
+  const before=structuredClone({body,independent}),selection=deriveOriginalExecutionSelection(body,independent);
+  assert.equal(selection.executionImages.backend,store==='containerd'?independent.imageGraphs.backend.index:independent.images.backend);
+  assert.deepEqual({body,independent},before);assert.throws(()=>readOriginalOnlineEvidenceAssembly(selection),/ORIGINAL_ONLINE_ASSEMBLY_TOKEN_REQUIRED/);
+  const changed=structuredClone(independent);changed.imageGraphs.backend.platform='sha256:'+'f'.repeat(64);assert.throws(()=>deriveOriginalExecutionSelection(body,changed));
+  const wrong=structuredClone(body);wrong.checkpoint.sourceKernelBootIdSha256='f'.repeat(64);assert.throws(()=>deriveOriginalExecutionSelection(wrong,independent));
+  assert.deepEqual(deriveOriginalExecutionSelection(request,independent).executionImages,independent.images);
+ }
+});
 function sample(){
  const roots=['storage/contracts','storage/hr-hiring','storage/accounting-contracts','storage/dispatch-documents','storage/support-tickets','storage/performance-exports','uploads/images','uploads/security-shift-log','uploads/security-vehicle-pairs'];
  const canonicalRestoreRaw=raw({ok:true,drill:{healthy:true}});

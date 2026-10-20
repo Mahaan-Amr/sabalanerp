@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { completeProtectedPrivateQualificationPrerequisite,completeOnlinePrivateQualificationPrerequisite } from './deploymentGates';
 import { assertOnlineQualificationProof, type OnlineQualificationBinding } from './onlineQualificationEvidence';
+import {validateProductionExecutionBindings} from './onlineImageExecutionBinding';
 export { assertOnlineQualificationProof } from './onlineQualificationEvidence';
 
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -90,6 +91,7 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
     || !exact(acceptance.reports, [...scopes])) fail();
   const qualification = acceptance.qualification;
   const qualificationKeys=['schemaSha256', 'sourceDatabase', 'proofDatabases', 'recoveryMode', 'deploymentTargetDatabase', 'captureId', 'images', 'checkpointArchiveChecksum','componentSourceCommits','runtimeCohorts','deploymentTargetImages','imageGraphs','imageArchiveReceipts'];
+  if(Object.prototype.hasOwnProperty.call(qualification??{},'productionExecutionBindings'))qualificationKeys.push('productionExecutionBindings');
   if(qualification?.recoveryMode==='PROTECTED_MAINTENANCE_COMPLETE')qualificationKeys.push('qualificationCheckpoint');
   if (!exact(qualification, qualificationKeys)
     || !digest(qualification.schemaSha256) || !digest(qualification.captureId) || !digest(qualification.checkpointArchiveChecksum)
@@ -108,8 +110,9 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
     || Object.values(qualification.images).some(value => typeof value !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(value))
     || !exact(qualification.deploymentTargetImages,['backend','frontend','inquiry'])
     || !exact(qualification.imageGraphs,['backend','frontend','inquiry'])
-    || !exact(qualification.imageArchiveReceipts,['backend','frontend','inquiry'])
-    || qualification.deploymentTargetImages.backend !== manifest.image) fail();
+    || !exact(qualification.imageArchiveReceipts,['backend','frontend','inquiry'])) fail();
+  const executionImages=validateProductionExecutionBindings(qualification.productionExecutionBindings,{...qualification,releaseId:manifest.releaseId});
+  if(manifest.image!==executionImages.backend)fail();
   for(const role of ['backend','frontend','inquiry'] as const){
     const descriptor=qualification.imageArchiveReceipts[role];
     if(!exact(descriptor,['file','bytes','sha256'])||!Number.isSafeInteger(descriptor.bytes)||descriptor.bytes<1||descriptor.bytes>1048576)fail();
@@ -123,6 +126,7 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
     sourceDatabase: qualification.sourceDatabase,proofDatabases:qualification.proofDatabases,recoveryMode:qualification.recoveryMode, deploymentTargetDatabase: qualification.deploymentTargetDatabase, images: qualification.images,
     ...(qualification.qualificationCheckpoint?{qualificationCheckpoint:qualification.qualificationCheckpoint}:{}),
     deploymentTargetImages:qualification.deploymentTargetImages,imageGraphs:qualification.imageGraphs,
+    ...(qualification.productionExecutionBindings?{productionExecutionBindings:qualification.productionExecutionBindings}:{}),
     componentSourceCommits:qualification.componentSourceCommits,runtimeCohorts:qualification.runtimeCohorts };
   for (const scope of scopes) {
     const descriptor: Descriptor = acceptance.reports[scope];

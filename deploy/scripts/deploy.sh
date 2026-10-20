@@ -1045,18 +1045,12 @@ PERFORMANCE_RELEASE_FRONTEND_IMAGE="${DEPLOYMENT_FRONTEND_IMAGE}"
 PERFORMANCE_RELEASE_INQUIRY_IMAGE="${DEPLOYMENT_INQUIRY_IMAGE}"
 export PERFORMANCE_RELEASE_COMMIT PERFORMANCE_RELEASE_SOURCE_HASH PERFORMANCE_RELEASE_BACKEND_IMAGE PERFORMANCE_RELEASE_FRONTEND_IMAGE PERFORMANCE_RELEASE_INQUIRY_IMAGE
 else
-  # Keep the same owned cleanup and measured reserve with already-built images.
-  backend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}")"
-  frontend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}")"
-  inquiry_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}")"
-  docker_required_bytes=$((backend_image_size + frontend_image_size + inquiry_image_size + 1073741824))
+  # All three immutable images are already imported and verified. Their bytes
+  # are allocated before df measures availability; there is no build/import
+  # workspace in this lane. The canonical data/checkpoint/restore reserve and
+  # its 1 GiB margin remain fully enforced on both hosts by storage-preflight.
+  docker_required_bytes=0
   sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" "${docker_required_bytes}" 0
-  docker_root="$(docker info --format '{{.DockerRootDir}}')"
-  docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
-  docker_available_bytes=$((docker_available_kb * 1024))
-  [ "${docker_available_bytes}" -ge "${docker_required_bytes}" ] || {
-    echo 'Prebuilt release capacity is insufficient; current release remains active.' >&2; exit 1;
-  }
   # No fetch, tag, build or derived browser BUILD_ID can replace qualified bytes.
   prebuilt_exports="$(verify_prebuilt_release)" || exit 1
   eval "${prebuilt_exports}"

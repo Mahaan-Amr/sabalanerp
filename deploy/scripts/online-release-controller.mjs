@@ -2,6 +2,7 @@ import {consumeOriginalCarrierDockerCommand,consumeOriginalCarrierFailure,provis
 import {consumeOriginalInquiryCarrierDockerCommand,consumeOriginalInquiryCarrierFailure,provisionOriginalInquiryCarrier,readProvisionedInquiryCarrier,readOriginalInquiryCarrier} from './online-inquiry-carrier.mjs';
 import {verifyOriginalPhysicalCheckpointCertificate,verifyOriginalPhysicalCheckpointPublication,verifyOriginalPhysicalRepositoryPromotion,verifyOriginalTerminalCheckpointCoverage,readMountedOriginalCheckpointFile,verifyMountedOriginalCheckpointRepository,originalPhysicalCheckpointMetadata,checkpointCanonicalBytes,checkpointSha} from './online-checkpoint-finalization.mjs';
 import {issueOriginalLegacyBrowserDescriptor} from './online-legacy-browser-descriptor.mjs';
+import {productionImageStore,sanitizeProductionImageInspection,productionInspectionSha256} from './production-image-execution-binding.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -16,7 +17,7 @@ const bytes=v=>Buffer.from(JSON.stringify(canonical(v)));
 const sha=b=>createHash('sha256').update(b).digest('hex');
 function qualifiedBrowserBuilds(evidence){return evidence.browserRegistries.flatMap(row=>row.builds).map(build=>{
  const component=build.application==='erp'?'frontend':'inquiry',graph=evidence.imageGraphs?.[component];
- return graph&&build.image===graph.index?bindTargetBrowserImage(build,component,graph,evidence.deploymentTargetImages[component]).build:build;
+ return graph&&build.image===graph.index?bindTargetBrowserImage(build,component,graph,evidence.executionImages?.[component]??evidence.deploymentTargetImages[component],evidence.productionExecutionBindings?.[component]).build:build;
 });}
 const assert=(v,code)=>{if(!v)throw Error(code);};
 const pin=s=>[s.dev,s.ino,s.size,s.mtimeNs,s.ctimeNs,s.uid,s.mode,s.nlink].map(String).join(':');
@@ -42,8 +43,9 @@ export class OriginalOnlineReleaseController {
  #bootstrapObservation=null;
  #bootstrapLegacy=null;
  #productionGates=new Map();#gateControls=new Map();#checkpointJobsDraining=new Set();
+ #prebuiltReleasePlan=null;
  #edge=null;#carriers=new Map();#publicationDirectory;#database;#owner;#lock;#store;#key;#keyPin;#bootstrap=null;#advisory=null;#heartbeat=null;#advisoryPulse=null;#currentServingReleaseId=null;#lastPublicationSha=null;#parentBirth;#composeFile;#project;#databaseUrl;#observers=[];#carrierFailures=[];#accepted;#origins=new Map();#preparedInputs=new Map();#releases=new Map();#children=new Map();#held=null;
- constructor({database,owner,publicationDirectory,publicationLock,composeFile,project,runtimeDatabaseUrl}){
+ constructor({database,owner,publicationDirectory,publicationLock,composeFile,project,runtimeDatabaseUrl,prebuiltReleasePlan}){
   assert(process.platform==='linux'&&process.getuid()===0&&publicationLock instanceof BrowserRoutingPublicationLock,'ONLINE_ORIGINAL_HOST_REQUIRED');
   this.#parentBirth={pid:process.ppid,stat:fs.readFileSync(`/proc/${process.ppid}/stat`,'utf8').split(') ').slice(1).join(') ').split(' ')[19]};
   publicationLock.assertOwned();
@@ -53,6 +55,7 @@ export class OriginalOnlineReleaseController {
   assert(this.#key.asymmetricKeyType==='ed25519','ONLINE_HOST_ED25519_REQUIRED');
   for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{this.#held='ORIGINAL_HOST_INTERRUPTED';void this.hold();});
   this.#database=database;this.#owner=Object.freeze({...owner});this.#lock=publicationLock;
+  if(prebuiltReleasePlan){assert(path.isAbsolute(prebuiltReleasePlan.file)&&/^[a-f0-9]{64}$/.test(prebuiltReleasePlan.sha256),'ONLINE_EXECUTION_PLAN_REFERENCE_REQUIRED');this.#prebuiltReleasePlan=Object.freeze({...prebuiltReleasePlan});}
   this.#store=new BrowserRoutingStore({directory:publicationDirectory,publicationLock,
    assertReleaseOwnership:()=>this.assertOwned()});
  }
@@ -254,6 +257,28 @@ export class OriginalOnlineReleaseController {
   assert(rows.length===1&&sha(bytes(rows[0].checkpointJson))===pending.metadataSha256,'ONLINE_CHECKPOINT_DATABASE_READBACK_CHANGED');
   pending.committed=true;return {runtimeId:input.runtimeId,checkpointSha256:pending.metadataSha256,checkpointCommitted:true,continuousIntervalCompleted:false,releaseAdmissionGranted:false};
  }
+ async #observeProductionExecutionBindings(targetCommit){
+  if(!this.#prebuiltReleasePlan)return undefined;
+  const raw=readPrivate(this.#prebuiltReleasePlan.file,8*1024**2,0o400).data;
+  assert(sha(raw)===this.#prebuiltReleasePlan.sha256,'ONLINE_EXECUTION_PLAN_BYTES_CHANGED');const plan=JSON.parse(raw);
+  assert(plan.format==='sabalan-prebuilt-protected-release-plan/v1'&&plan.applicationCommit===targetCommit,'ONLINE_EXECUTION_PLAN_SOURCE_CHANGED');
+  const store=productionImageStore(JSON.parse(await this.#docker(['info','--format','{{json .}}'])));
+  assert((plan.imageStore??'classic')===store,'ONLINE_EXECUTION_PLAN_STORE_CHANGED');
+  const identity=file=>{const value=fs.readFileSync(file,'utf8').trim().toLowerCase();assert(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value),'ONLINE_EXECUTION_HOST_IDENTITY_REQUIRED');return sha(Buffer.from(value));};
+  const sourceHost={machineUuidSha256:identity('/sys/class/dmi/id/product_uuid'),kernelBootIdSha256:identity('/proc/sys/kernel/random/boot_id')};
+  const bindings={},imageGraphs={},deploymentTargetImages={};
+  for(const role of ['backend','frontend','inquiry']){
+   const selected=plan.images[role],graph=structuredClone(selected.archiveGraph);
+   const rows=JSON.parse(await this.#docker(['image','inspect',selected.image]));assert(rows.length===1,'ONLINE_EXECUTION_NATIVE_IMAGE_REQUIRED');
+   const nativeInspection=sanitizeProductionImageInspection(rows[0]);
+   bindings[role]={format:'sabalan-production-image-execution-binding/v1',role,releaseId:this.#owner.releaseId,
+    sourceMachineUuidSha256:sourceHost.machineUuidSha256,sourceKernelBootIdSha256:sourceHost.kernelBootIdSha256,store,
+    executionImageId:selected.image,graph,nativeInspection,inspectionSha256:productionInspectionSha256(nativeInspection)};
+   imageGraphs[role]=graph;deploymentTargetImages[role]=graph.config;
+  }
+  require('./online-release-host-kernel.cjs').validateProductionExecutionBindings(bindings,{releaseId:this.#owner.releaseId,imageGraphs,deploymentTargetImages,sourceHost});
+  return bindings;
+ }
  async observeProtectedBootstrapQualificationRequest(){
   await this.assertOwned(['MIGRATIONS_APPLIED','RELEASE_STARTED']);
   assert(!this.#accepted&&!this.#bootstrap,'ONLINE_BOOTSTRAP_REQUEST_BEFORE_ADMISSION_REQUIRED');
@@ -292,6 +317,7 @@ export class OriginalOnlineReleaseController {
   const result={format:'sabalan-original-protected-qualification-request/v1',sequence:1,...{deploymentId:this.#owner.deploymentId,releaseId:this.#owner.releaseId},
    targetCommit:rows[0].targetCommit,database:identities[0],checkpoint,roots:baseline.roots,
    ephemeralRoots:['/app/storage/reports','/app/storage/sales-reports','/app/storage/bi-reports'],adoptionSha256:sha(raw)};
+  const executionBindings=await this.#observeProductionExecutionBindings(rows[0].targetCommit);if(executionBindings)result.productionExecutionBindings=executionBindings;
   this.#bootstrapObservation={request:structuredClone(result),coordinationHost:mount.Source,sourceId:before.Id,baselineSha256:sha(raw)};
   return result;
  }
@@ -312,6 +338,7 @@ export class OriginalOnlineReleaseController {
    releaseId:this.#owner.releaseId,targetCommit:operation.targetCommit,generation:epoch.generation+1,database:capture.plan.database,
    checkpoint:operation.checkpointJson,roots:structuredClone(evidence.manifest.roots),ephemeralRoots:structuredClone(evidence.manifest.ephemeralRoots),
    liveCoverage:structuredClone(liveCoverage)};
+  const executionBindings=await this.#observeProductionExecutionBindings(operation.targetCommit);if(executionBindings)request.productionExecutionBindings=executionBindings;
   capture.qualificationRequest=structuredClone(request);return request;
  }
  async prepareOriginalBootstrapMaterial({evidenceDirectory,manifestSha256,acceptanceSha256}){
@@ -442,7 +469,10 @@ export class OriginalOnlineReleaseController {
   const input=this.#releases.get(releaseId)?.input??this.#preparedInputs.get(releaseId);
   assert(input,'ONLINE_ORIGINAL_RELEASE_EVIDENCE_NOT_REGISTERED');
   const accepted=require('./online-release-host-kernel.cjs').readOnlineReleaseEvidence(input.evidenceDirectory,input);
-  accepted.revalidate();return Object.freeze({manifest:accepted.manifest,browserRegistries:accepted.browserRegistries,
+  accepted.revalidate();const qualification=accepted.acceptance.qualification;
+  const executionImages=qualification.productionExecutionBindings?require('./online-release-host-kernel.cjs').validateProductionExecutionBindings(qualification.productionExecutionBindings,{releaseId,imageGraphs:qualification.imageGraphs,deploymentTargetImages:qualification.deploymentTargetImages}):qualification.deploymentTargetImages;
+  return Object.freeze({manifest:accepted.manifest,browserRegistries:accepted.browserRegistries,
+   ...(qualification.productionExecutionBindings?{productionExecutionBindings:structuredClone(qualification.productionExecutionBindings),executionImages}:{}),
    deploymentTargetImages:structuredClone(accepted.acceptance.qualification.deploymentTargetImages),
    imageGraphs:structuredClone(accepted.acceptance.qualification.imageGraphs),
    componentSourceCommits:structuredClone(accepted.acceptance.qualification.componentSourceCommits),
@@ -450,15 +480,15 @@ export class OriginalOnlineReleaseController {
  }
  readInquiryReleaseEvidence(releaseId){
   const evidence=OriginalOnlineReleaseController.prototype.readCarrierReleaseEvidence.call(this,releaseId);
-  const image=evidence.deploymentTargetImages?.inquiry,imageGraph=evidence.imageGraphs?.inquiry,sourceCommit=evidence.componentSourceCommits?.inquiry;
-  assert(/^sha256:[a-f0-9]{64}$/.test(image)&&/^[a-f0-9]{40}$/.test(sourceCommit)&&imageGraph?.config===image,'ONLINE_ORIGINAL_INQUIRY_COMPONENT_UNPROVEN');
+  const canonicalImage=evidence.deploymentTargetImages?.inquiry,image=evidence.executionImages?.inquiry??canonicalImage,imageGraph=evidence.imageGraphs?.inquiry,sourceCommit=evidence.componentSourceCommits?.inquiry;
+  assert(/^sha256:[a-f0-9]{64}$/.test(image)&&/^[a-f0-9]{40}$/.test(sourceCommit)&&imageGraph?.config===canonicalImage,'ONLINE_ORIGINAL_INQUIRY_COMPONENT_UNPROVEN');
   const target=this.#releases.get(releaseId)?.input??this.#preparedInputs.get(releaseId),accepted=require('./online-release-host-kernel.cjs').readOnlineReleaseEvidence(target.evidenceDirectory,target);
   const descriptor=accepted.evidenceInventory.find(row=>row.file==='coherent-independent-restore-source.json');assert(descriptor,'ONLINE_INQUIRY_ORIGINAL_RESTORE_SOURCE_REQUIRED');
   const raw=readPrivate(path.join(target.evidenceDirectory,descriptor.file),8*1024*1024,0o400).data;assert(raw.length===descriptor.bytes&&sha(raw)===descriptor.sha256,'ONLINE_INQUIRY_RESTORE_SOURCE_CHANGED');
   const closure=JSON.parse(raw).inquiryNativeClosure,native=closure?.closure?.nativeRawBase64&&JSON.parse(Buffer.from(closure.closure.nativeRawBase64,'base64'));
   assert(closure?.closure?.originalReturncode===128&&native?.phase==='QUIESCENT'&&native.nativeStatus===143&&native.sqliteNativeClosed===true&&native.nativeReaped===true
-   &&native.onlineScope.scope.image===image&&native.onlineScope.scope.sourceCommit===sourceCommit&&/^[a-f0-9]{64}$/.test(native.onlineScope.scope.manifestSha256),'ONLINE_INQUIRY_ORIGINAL_IMAGE_RUNTIME_UNPROVEN');
-  accepted.revalidate();return Object.freeze({manifest:evidence.manifest,scopes:[...(this.#inquiryScopes.get(releaseId)||[])].map(row=>({file:row.file,sha256:row.sha256,scope:structuredClone(row.scope)})),component:Object.freeze({image,sourceCommit,imageGraph,runtimeBundleSha256:native.onlineScope.scope.manifestSha256}),browserRegistries:evidence.browserRegistries});
+   &&native.onlineScope.scope.image===canonicalImage&&native.onlineScope.scope.sourceCommit===sourceCommit&&/^[a-f0-9]{64}$/.test(native.onlineScope.scope.manifestSha256),'ONLINE_INQUIRY_ORIGINAL_IMAGE_RUNTIME_UNPROVEN');
+  accepted.revalidate();return Object.freeze({manifest:evidence.manifest,scopes:[...(this.#inquiryScopes.get(releaseId)||[])].map(row=>({file:row.file,sha256:row.sha256,scope:structuredClone(row.scope)})),component:Object.freeze({image,canonicalImage,sourceCommit,imageGraph,...(evidence.productionExecutionBindings?{executionBinding:evidence.productionExecutionBindings.inquiry}:{}),runtimeBundleSha256:native.onlineScope.scope.manifestSha256}),browserRegistries:evidence.browserRegistries});
  }
  async executeOriginalInquiryCarrierDockerCommand(command){
   await this.assertOwned(['ONLINE_CHECKPOINTING','ONLINE_EXPANDING','ONLINE_ACCEPTING','ONLINE_READY','ONLINE_PUBLISHING','ONLINE_SERVING']);
@@ -1158,7 +1188,9 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
   const prior=await this.#store.readPublication();
   assert(prior.publicationSha256===expectedPublicationSha256,'ONLINE_PUBLICATION_PREDECESSOR_CHANGED');
   const current=registry.builds.find(build=>build.id===registry.current?.erp);
-  const qualified=qualifiedBrowserBuilds({browserRegistries:accepted.browserRegistries,imageGraphs:accepted.acceptance.qualification.imageGraphs,deploymentTargetImages:accepted.acceptance.qualification.deploymentTargetImages});
+  const qualification=accepted.acceptance.qualification;
+  const executionImages=qualification.productionExecutionBindings?require('./online-release-host-kernel.cjs').validateProductionExecutionBindings(qualification.productionExecutionBindings,{releaseId,imageGraphs:qualification.imageGraphs,deploymentTargetImages:qualification.deploymentTargetImages}):qualification.deploymentTargetImages;
+  const qualified=qualifiedBrowserBuilds({browserRegistries:accepted.browserRegistries,imageGraphs:qualification.imageGraphs,deploymentTargetImages:qualification.deploymentTargetImages,productionExecutionBindings:qualification.productionExecutionBindings,executionImages});
   const semantic=build=>({id:build.id,application:build.application,image:build.image,
     manifestSha256:build.manifestSha256,assets:build.assets,actionIds:build.actionIds});
   const stable=build=>({id:build.id,application:build.application,slotId:build.slotId,image:build.image,

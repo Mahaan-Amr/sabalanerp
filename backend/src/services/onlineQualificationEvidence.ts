@@ -6,6 +6,7 @@ import {canonicalRealtimeTargets,realtimeCommandId} from './onlineRealtimeBridge
 import { runtimeNativePostgresApplicationName } from './runtimeBoundaryJournal';
 import {assertOriginalIndependentPhysicalPoint} from './onlinePhysicalCheckpointEvidence';
 import {readCanonicalCheckpointMetadata} from './deploymentCheckpointMetadataIdentity';
+import {validateProductionExecutionBindings,type ProductionImageExecutionBindings} from './onlineImageExecutionBinding';
 
 export type OnlineQualificationScope = 'compatible-migrations' | 'coherent-independent-restore'
   | 'browser-24-hours' | 'single-worker-and-completion' | 'current-domain';
@@ -21,6 +22,7 @@ export type OnlineQualificationBinding = {
   deploymentTargetDatabase: { name: string; systemIdentifier: string; oid: string };
   images: { backend: string; frontend: string; inquiry: string };
   deploymentTargetImages: {backend:string;frontend:string;inquiry:string};
+  productionExecutionBindings?:ProductionImageExecutionBindings;
   imageGraphs: Record<'backend'|'frontend'|'inquiry',{index:string;platform:string;config:string;rootfsDiffIds:string[];archiveSha256:string;archiveBytes:number}>;
   componentSourceCommits: {backend:string;frontend:string;inquiry:string};
   runtimeCohorts: Record<OnlineQualificationScope, OnlineQualificationRuntimeIdentity[]>;
@@ -247,6 +249,7 @@ function installedBrowserRouting(source:any,expected:OnlineQualificationBinding)
  * runtime admission is exposed. Existing diagnostic receipts remain diagnostic;
  * none currently supplies all the production evidence required here. */
 export function assertOnlineQualificationProof(scope: OnlineQualificationScope, source: any, expected: OnlineQualificationBinding) {
+  validateProductionExecutionBindings(expected.productionExecutionBindings,expected);
   if (![expected.manifestSha256, expected.checkpointSha256, expected.checkpointArchiveChecksum, expected.runtimeBundleSha256, expected.schemaSha256, expected.captureId].every(digest)
     || !/^[a-f0-9]{40}$/.test(expected.sourceCommit) || !/^[A-Za-z0-9_-]{8,128}$/.test(expected.releaseId)
     || !validDatabase(expected.sourceDatabase, true) || !validDatabase(expected.deploymentTargetDatabase, true)
@@ -291,7 +294,8 @@ export function assertOnlineQualificationProof(scope: OnlineQualificationScope, 
     ||source.recoveryMode!==expected.recoveryMode
     || !same(source.proofDatabase,expected.proofDatabases[scope])
     || !same(source.deploymentTargetDatabase, expected.deploymentTargetDatabase) || !same(source.images, expected.images)
-    || !same(source.deploymentTargetImages,expected.deploymentTargetImages)||!same(source.imageGraphs,expected.imageGraphs)) fail();
+    || !same(source.deploymentTargetImages,expected.deploymentTargetImages)||!same(source.imageGraphs,expected.imageGraphs)
+    || !same(source.productionExecutionBindings,expected.productionExecutionBindings)) fail();
   let purposes: ReturnType<typeof originalClosures>;
   if (scope === 'coherent-independent-restore') {
     const restored = source.restoredDatabase;
@@ -343,9 +347,11 @@ export function assertOnlineQualificationProof(scope: OnlineQualificationScope, 
         || source.checkpointMetadata.sourceMachineUuidSha256 !== source.checkpoint.sourceMachineUuidSha256
         || source.checkpointMetadata.sourceKernelBootIdSha256 !== source.checkpoint.sourceKernelBootIdSha256
         || source.checkpoint.remoteVerified !== true || source.checkpoint.restoreVerified !== true) fail();
+      let recoveryMachineUuidSha256:string|undefined;
       if(expected.recoveryMode==='PROTECTED_MAINTENANCE_COMPLETE')protectedDirectoryRestore(source,checkpointSha256);
       else{
-      assertOriginalIndependentPhysicalPoint(source,expected);
+      const physicalReport=assertOriginalIndependentPhysicalPoint(source,expected);
+      recoveryMachineUuidSha256=physicalReport.recoveryMachineUuidSha256;
       const components = source.components;
       if (!components || !same(Object.keys(components).sort(), ['coordination', 'files', 'postgres', 'sqlite'])) fail();
       for (const component of Object.values(components) as any[]) if (component.captureId !== expected.captureId
@@ -355,6 +361,11 @@ export function assertOnlineQualificationProof(scope: OnlineQualificationScope, 
         || source.independentlyVerifiedFileCuts.length !== 9
         || new Set(source.independentlyVerifiedFileCuts.map((cut: any) => cut.name)).size !== 9) fail();
       }
+      if(expected.recoveryMode==='PROTECTED_MAINTENANCE_COMPLETE')recoveryMachineUuidSha256=source.checkpoint.lastDrill?.recoveryMachineUuidSha256;
+      if(expected.productionExecutionBindings&&!digest(recoveryMachineUuidSha256))fail();
+      validateProductionExecutionBindings(expected.productionExecutionBindings,{...expected,sourceHost:{
+        machineUuidSha256:source.checkpointMetadata.sourceMachineUuidSha256,
+        kernelBootIdSha256:source.checkpointMetadata.sourceKernelBootIdSha256},recoveryMachineUuidSha256});
       for (const name of ['backend', 'frontend', 'inquiry'] as const) {
         const health = source.applicationHealth?.[name];
         if (health?.image !== expected.deploymentTargetImages[name] || health.sourceCommit !== expected.componentSourceCommits[name]

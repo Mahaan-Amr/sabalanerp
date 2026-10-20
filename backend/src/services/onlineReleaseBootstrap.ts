@@ -9,6 +9,7 @@ import type {PrismaClient,Prisma} from '@prisma/client';
 import {prepareValidatedOnlineRegistration,type PreparedRegistration,type OnlineRegistrationOwner} from './onlineReleaseRegistration';
 import {DEPLOYMENT_MAINTENANCE_FILE} from './deploymentMaintenance';
 import {assertProtectedBootstrapCheckpointLineage} from './onlineBootstrapCheckpointLineage';
+import {validateProductionExecutionBindings} from './onlineImageExecutionBinding';
 
 const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'
  ?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
@@ -138,9 +139,11 @@ export async function finalizeProtectedOnlineBootstrap(capability:ProtectedOnlin
  const stable=(build:any)=>({id:build.id,application:build.application,image:build.image,
   manifestSha256:build.manifestSha256,assets:build.assets,actionIds:build.actionIds});
  const graph=state.validated.accepted.acceptance.qualification.imageGraphs.frontend;
+ const qualification=state.validated.accepted.acceptance.qualification;
+ const execution=validateProductionExecutionBindings(qualification.productionExecutionBindings,{...qualification,releaseId:state.owner.releaseId});
  // The accepted archive index and the runtime CONFIG are separate identities.
  // readOnlineReleaseEvidence already authenticated this exact full graph.
- const qualifiedStable=(build:any)=>stable({...build,image:build.image===graph.index?graph.config:build.image});
+ const qualifiedStable=(build:any)=>stable({...build,image:build.image===graph.index?execution.frontend:build.image});
  requireProof(current&&state.validated.accepted.browserRegistries.some(registry=>registry.builds.some((build:any)=>hash(qualifiedStable(build))===hash(stable(current)))),
   'ONLINE_BOOTSTRAP_UI_NOT_QUALIFIED');
  const binding=record.registry.apiBindings?.find((value:any)=>value.buildId===current.id);

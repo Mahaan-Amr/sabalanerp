@@ -6,6 +6,7 @@ import {setTimeout as pause} from 'node:timers/promises';
 import {OriginalOnlineReleaseController} from './online-release-controller.mjs';
 import {readOriginalLegacyBrowserDescriptor} from './online-legacy-browser-descriptor.mjs';
 import {assertOnlineCarrierRootCoverage,onlineCarrierRootIdentitySource} from './online-carrier-root-coverage.mjs';
+import {assertExecutionBindingSelection,assertProductionImageInspection} from './production-image-execution-binding.mjs';
 
 const commands=new WeakMap(),carriers=new WeakMap(),operations=new WeakMap(),failures=new WeakMap();
 const phases=['ONLINE_CHECKPOINTING','ONLINE_EXPANDING','ONLINE_ACCEPTING','ONLINE_READY','ONLINE_PUBLISHING','ONLINE_SERVING'];
@@ -19,11 +20,12 @@ const freeze=value=>{if(value&&typeof value==='object'){Object.values(value).for
 
 /** Translate domains only through the signed full archive graph. The original
  * source descriptor remains available; a mutable tag/version never suffices. */
-export function bindTargetBrowserImage(sourceBuild,component,graph,targetImage){
+export function bindTargetBrowserImage(sourceBuild,component,graph,targetImage,executionBinding){
  assert(['frontend','inquiry'].includes(component)&&imageId.test(targetImage),'ONLINE_BROWSER_TARGET_INVALID');
- assert(graph&&sourceBuild.image===graph.index&&graph.config===targetImage
+ assert(graph&&sourceBuild.image===graph.index&&(executionBinding?executionBinding.executionImageId===targetImage:graph.config===targetImage)
   &&imageId.test(graph.index)&&imageId.test(graph.platform)&&Array.isArray(graph.rootfsDiffIds)
   &&graph.rootfsDiffIds.length>0&&graph.rootfsDiffIds.every(value=>imageId.test(value)),'ONLINE_BROWSER_IMAGE_GRAPH_REQUIRED');
+ if(executionBinding){assert(executionBinding.role===component,'ONLINE_BROWSER_EXECUTION_ROLE_CHANGED');assertExecutionBindingSelection(executionBinding,graph,targetImage);}
  return freeze({sourceBuild:clone(sourceBuild),build:{...clone(sourceBuild),image:targetImage},imageGraph:clone(graph)});
 }
 
@@ -167,7 +169,7 @@ export async function provisionOriginalOnlineReleaseCarriers(controller,input){
  assert(evidence.manifest.releaseId===input.releaseId&&imageId.test(evidence.manifest.image),'ONLINE_CARRIER_RELEASE_NOT_QUALIFIED');
  const builds=evidence.browserRegistries.flatMap(registry=>registry.builds).filter(build=>build.id===input.buildId&&build.application==='erp');
  assert(builds.length>0&&builds.every(build=>same({...build,slotId:null,retiredAt:null,supportUntil:null},{...builds[0],slotId:null,retiredAt:null,supportUntil:null})),'ONLINE_CARRIER_UI_NOT_QUALIFIED');
- const browserBinding=bindTargetBrowserImage(builds[0],'frontend',evidence.imageGraphs?.frontend,evidence.deploymentTargetImages?.frontend),build=browserBinding.build;
+ const browserBinding=bindTargetBrowserImage(builds[0],'frontend',evidence.imageGraphs?.frontend,evidence.executionImages?.frontend??evidence.deploymentTargetImages?.frontend,evidence.productionExecutionBindings?.frontend),build=browserBinding.build;
  const scopes=input.backendRuntimeIds.map(id=>{assert(digest.test(id),'ONLINE_CARRIER_RUNTIME_INVALID');const matches=evidence.scopes?.filter(entry=>entry.scope.runtimeId===id);assert(matches?.length===1&&matches[0].scope.releaseId===input.releaseId&&matches[0].scope.image===evidence.manifest.image,'ONLINE_CARRIER_RUNTIME_NOT_ENROLLED');return matches[0].scope;});
  const previous=operations.get(controller)||new Set();const keys=[...input.backendRuntimeIds,`frontend:${input.buildId}`];assert(keys.every(key=>!previous.has(key)),'ONLINE_CARRIER_ORIGINAL_CREATION_ALREADY_ATTEMPTED');keys.forEach(key=>previous.add(key));operations.set(controller,previous);
  assert(typeof target.storageOverlayFile==='string','ONLINE_CARRIER_STORAGE_PROFILE_REQUIRED');
@@ -182,7 +184,10 @@ export async function provisionOriginalOnlineReleaseCarriers(controller,input){
  // build, pruning, or touching an existing service/container is available here.
  for(const plan of plans){const image=single(await docker(controller,['image','inspect',plan.image]));assert(image.Id===plan.image&&(!image.Config?.Volumes||Object.keys(image.Config.Volumes).length===0),'ONLINE_CARRIER_IMAGE_OR_ANONYMOUS_VOLUME_INVALID');
   const graph=plan.kind==='frontend'?browserBinding.imageGraph:evidence.imageGraphs?.backend;
-  assert(graph?.config===plan.image&&same(image.RootFS?.Layers,graph.rootfsDiffIds),'ONLINE_CARRIER_ORDERED_LAYERS_CHANGED');}
+  const binding=evidence.productionExecutionBindings?.[plan.kind];
+  if(binding)assertProductionImageInspection(binding,image,graph);
+  else assert(graph?.config===plan.image,'ONLINE_CARRIER_EXECUTION_BINDING_REQUIRED');
+  assert(same(image.RootFS?.Layers,graph.rootfsDiffIds),'ONLINE_CARRIER_ORDERED_LAYERS_CHANGED');}
  const result={backends:[],frontend:null},originalCreations=[];
  try{
  for(const plan of plans){

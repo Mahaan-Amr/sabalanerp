@@ -23,7 +23,14 @@ function fixture(){
 test('content selection keeps CONFIG/index, component commits and Git/build-byte namespaces separate without admission',()=>{
  const {plan,actual}=fixture(),result=validatePrebuiltReleasePlan(plan,actual);assert.equal(result.releaseAdmission,false);assert.equal(result.images.backend,plan.images.backend.archiveGraph.config);assert.notEqual(result.images.backend,plan.images.backend.archiveGraph.index);assert.notEqual(actual.linuxCheckoutByteHash,plan.applicationSourceHash);
  assert.notEqual(plan.images.frontend.sourceCommit,plan.applicationCommit);assert.notEqual(plan.images.inquiry.browser.id,plan.images.inquiry.browser.nativeBuildId);
- const exports=prebuiltReleaseExports(result);assert.match(exports,/DEPLOYMENT_BROWSER_BUILD_ID='erp_online_committed_actual123'/);assert.match(exports,/DEPLOYMENT_PREBUILT_FRONTEND_CONFIG='sha256:6{64}'/);assert.doesNotMatch(exports,/force|sign|admission/i);
+ const exports=prebuiltReleaseExports(result);assert.match(exports,/DEPLOYMENT_BROWSER_BUILD_ID='erp_online_committed_actual123'/);assert.match(exports,/DEPLOYMENT_PREBUILT_FRONTEND_EXECUTION_IMAGE='sha256:6{64}'/);assert.doesNotMatch(exports,/force|sign|admission/i);
+});
+test('containerd selects the single observed INDEX execution identity and preserves canonical CONFIG content',()=>{
+ const {plan,actual}=fixture();plan.imageStore=actual.imageStore='containerd';
+ for(const role of ['backend','frontend','inquiry']){const graph=plan.images[role].archiveGraph;plan.images[role].image=actual.images[role].Id=graph.index;actual.images[role].Descriptor={mediaType:'application/vnd.oci.image.index.v1+json',digest:graph.index,size:856};}
+ const selected=validatePrebuiltReleasePlan(plan,actual);assert.equal(selected.images.backend,plan.images.backend.archiveGraph.index);assert.notEqual(selected.images.backend,plan.images.backend.archiveGraph.config);
+ const wrongConfig=structuredClone(actual);wrongConfig.images.backend.Id=plan.images.backend.archiveGraph.config;assert.throws(()=>validatePrebuiltReleasePlan(plan,wrongConfig));
+ actual.images.backend.Descriptor.digest=image('f');assert.throws(()=>validatePrebuiltReleasePlan(plan,actual));
 });
 test('changed source, dirty gitlink, images, graph, build bytes, operations and browser identity refuse',()=>{
  for(const mutate of [
@@ -46,7 +53,7 @@ DEPLOYMENT_PREVIOUS_BACKEND_IMAGE=oldbackend; DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE
 DEPLOYMENT_PREVIOUS_NGINX_IMAGE=oldnginx; DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE=oldpostgres; DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE=oldclamav
 DEPLOYMENT_BROWSER_BUILD_ID=erp_original_actual123
 : > events
-sh(){ echo CLEANUP >> events; }
+sh(){ [ "$5" = 0 ] && [ "$6" = 0 ] || exit 96; echo CLEANUP >> events; echo MEASURE >> events; [ ${capacity} -ge 1024 ]; }
 df(){ echo MEASURE >> events; printf 'Filesystem Blocks Used Available Capacity Mounted\\nmock 0 0 ${capacity} 0 /\\n'; }
 docker(){ case "$*" in 'image inspect --format {{.Size}} '*) echo 1;; 'info --format {{.DockerRootDir}}') echo /mock;; *) exit 99;; esac; }
 compose(){ [ "$*" = 'config --quiet' ] || exit 98; echo CONFIG >> events; }
@@ -61,8 +68,8 @@ echo READY >> events
 test('real mutation boundary revalidates before MUTATION_STARTED and protected targets reach owned cleanup',()=>{
  const index=script.indexOf('\nphase MUTATION_STARTED\n'),start=script.lastIndexOf('if [ "${PREBUILT_RELEASE}" -eq 1 ]; then',index),block=script.slice(start,index)+'\nphase MUTATION_STARTED\n';assert.ok(start>script.indexOf('phase REMOTE_CHECKPOINT_VERIFIED'));
  const result=spawnSync(bash,['-c',`set -eu; PREBUILT_RELEASE=1; verify_prebuilt_release(){ return 17; }; phase(){ echo MUTATION; }; ${block}`],{encoding:'utf8'});assert.equal(result.status,1);assert.doesNotMatch(result.stdout,/MUTATION/);
- const storage=fs.readFileSync(new URL('../../deploy/scripts/storage-preflight.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),from=storage.indexOf('set --\nif [ -n "${DEPLOYMENT_PREBUILT_BACKEND_CONFIG:'),to=storage.indexOf('# Both hosts must finish',from);assert.ok(from>0&&to>from);
- const selected=['a','b','c'].map(image),env={...process.env,DEPLOYMENT_PREBUILT_BACKEND_CONFIG:selected[0],DEPLOYMENT_PREBUILT_FRONTEND_CONFIG:selected[1],DEPLOYMENT_PREBUILT_INQUIRY_CONFIG:selected[2]};
+ const storage=fs.readFileSync(new URL('../../deploy/scripts/storage-preflight.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),from=storage.indexOf('set --\nif [ -n "${DEPLOYMENT_PREBUILT_BACKEND_EXECUTION_IMAGE:'),to=storage.indexOf('# Both hosts must finish',from);assert.ok(from>0&&to>from);
+ const selected=['a','b','c'].map(image),env={...process.env,DEPLOYMENT_PREBUILT_BACKEND_EXECUTION_IMAGE:selected[0],DEPLOYMENT_PREBUILT_FRONTEND_EXECUTION_IMAGE:selected[1],DEPLOYMENT_PREBUILT_INQUIRY_EXECUTION_IMAGE:selected[2]};
  const protectedResult=spawnSync(bash,['-c',`set -eu\n${storage.slice(from,to)}\nprintf '%s\\n' "$@"`],{encoding:'utf8',env});assert.equal(protectedResult.status,0,protectedResult.stderr);assert.deepEqual(protectedResult.stdout.trim().split('\n'),selected.flatMap(value=>['--protected-image',value]));
- const invalid=spawnSync(bash,['-c',`set -eu\n${storage.slice(from,to)}\necho READY`],{encoding:'utf8',env:{...env,DEPLOYMENT_PREBUILT_INQUIRY_CONFIG:'mutable:tag'}});assert.equal(invalid.status,1);assert.doesNotMatch(invalid.stdout,/READY/);
+ const invalid=spawnSync(bash,['-c',`set -eu\n${storage.slice(from,to)}\necho READY`],{encoding:'utf8',env:{...env,DEPLOYMENT_PREBUILT_INQUIRY_EXECUTION_IMAGE:'mutable:tag'}});assert.equal(invalid.status,1);assert.doesNotMatch(invalid.stdout,/READY/);
 });

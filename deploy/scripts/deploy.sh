@@ -5,6 +5,15 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="${DEPLOYMENT_REPO_ROOT:-$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
 CAPTURE_ONLY=0
+PREBUILT_RELEASE=0
+PREBUILT_RELEASE_PLAN=""
+PREBUILT_RELEASE_SHA256=""
+if [ "${1:-}" = "--prebuilt-release" ]; then
+  PREBUILT_RELEASE=1; shift
+  [ "$#" -eq 3 ] || { echo 'Usage: deploy.sh --prebuilt-release <env> <private-plan> <sha256>' >&2; exit 1; }
+  PREBUILT_RELEASE_PLAN="$2"
+  PREBUILT_RELEASE_SHA256="$3"
+fi
 if [ "${1:-}" = "--capture-only" ]; then CAPTURE_ONLY=1; shift; fi
 ENV_FILE="${1:-deploy/.env.prod}"
 CAPTURE_ONLY_PLAN="${2:-}"
@@ -64,6 +73,12 @@ if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}${DEPLOYMENT_ONLINE_BOOTSTRA
   # Compose files/flags for a protected initial installation.
   COMPOSE_ONLINE_FLAGS="-f docker-compose.online.yml"
 fi
+if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
+  [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${DEPLOYMENT_MODE}" = release ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] \
+    && [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ] && [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD:-}" ] || {
+    echo 'Prebuilt release requires the same original protected release pipes; configuration, capture and scanner repair cannot substitute.' >&2; exit 1;
+  }
+fi
 
 cd "${REPO_ROOT}"
 
@@ -78,6 +93,11 @@ require_command() {
 
 compose() {
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} "$@"
+}
+
+verify_prebuilt_release() {
+  DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" node "${OPERATIONS_ROOT}/deploy/scripts/prebuilt-release-plan.mjs" \
+    "${PREBUILT_RELEASE_PLAN}" "${PREBUILT_RELEASE_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
 }
 
 online_bootstrap_boundary() {
@@ -751,6 +771,12 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Working tree has local changes. Deployment stopped before any state change." >&2
   exit 1
 fi
+if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
+  # Select only the already-installed CONFIGs before taking the host/DB lease.
+  # A plan selects content; it never grants original qualification authority.
+  prebuilt_exports="$(verify_prebuilt_release)" || exit 1
+  eval "${prebuilt_exports}"
+fi
 
 DEPLOYMENT_SECRET_DIR="$(env_value DEPLOYMENT_SECRET_DIR)"
 DEPLOYMENT_REMOTE_MOUNT_HOST="$(env_value DEPLOYMENT_REMOTE_MOUNT_HOST)"
@@ -897,7 +923,7 @@ if [ "${DEPLOYMENT_MODE}" = "configuration" ]; then
   sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0
 fi
 
-if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then
+if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ]; then
 echo "Fetching ${DEPLOY_REMOTE}/${DEPLOY_BRANCH} and requiring a fast-forward update..."
 git fetch --prune "${DEPLOY_REMOTE}"
 git checkout "${DEPLOY_BRANCH}"
@@ -907,7 +933,7 @@ fi
 
 DEPLOYMENT_TARGET_COMMIT="$(git rev-parse HEAD)"
 
-if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then
+if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ]; then
 backend_repository="$(env_value DEPLOYMENT_BACKEND_IMAGE_REPOSITORY)"
 frontend_repository="$(env_value DEPLOYMENT_FRONTEND_IMAGE_REPOSITORY)"
 inquiry_repository="$(env_value DEPLOYMENT_INQUIRY_IMAGE_REPOSITORY)"
@@ -960,6 +986,7 @@ if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
 fi
 
 if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then
+if [ "${PREBUILT_RELEASE}" -eq 0 ]; then
 backend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}")"
 frontend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}")"
 inquiry_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}")"
@@ -1017,6 +1044,28 @@ PERFORMANCE_RELEASE_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
 PERFORMANCE_RELEASE_FRONTEND_IMAGE="${DEPLOYMENT_FRONTEND_IMAGE}"
 PERFORMANCE_RELEASE_INQUIRY_IMAGE="${DEPLOYMENT_INQUIRY_IMAGE}"
 export PERFORMANCE_RELEASE_COMMIT PERFORMANCE_RELEASE_SOURCE_HASH PERFORMANCE_RELEASE_BACKEND_IMAGE PERFORMANCE_RELEASE_FRONTEND_IMAGE PERFORMANCE_RELEASE_INQUIRY_IMAGE
+else
+  # Keep the same owned cleanup and measured reserve with already-built images.
+  backend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}")"
+  frontend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}")"
+  inquiry_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}")"
+  docker_required_bytes=$((backend_image_size + frontend_image_size + inquiry_image_size + 1073741824))
+  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" "${docker_required_bytes}" 0
+  docker_root="$(docker info --format '{{.DockerRootDir}}')"
+  docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
+  docker_available_bytes=$((docker_available_kb * 1024))
+  [ "${docker_available_bytes}" -ge "${docker_required_bytes}" ] || {
+    echo 'Prebuilt release capacity is insufficient; current release remains active.' >&2; exit 1;
+  }
+  # No fetch, tag, build or derived browser BUILD_ID can replace qualified bytes.
+  prebuilt_exports="$(verify_prebuilt_release)" || exit 1
+  eval "${prebuilt_exports}"
+  DEPLOYMENT_NGINX_IMAGE="${DEPLOYMENT_PREVIOUS_NGINX_IMAGE}"
+  DEPLOYMENT_POSTGRES_IMAGE="${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"
+  DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
+  export DEPLOYMENT_NGINX_IMAGE DEPLOYMENT_POSTGRES_IMAGE DEPLOYMENT_CLAMAV_IMAGE
+  compose config --quiet
+fi
 elif [ "${CAPTURE_ONLY}" -eq 1 ]; then
   # Existing source checkout/app selections stay fixed. Only the separately
   # prebuilt, content-attested control image executes the canonical backup CLI.
@@ -1067,6 +1116,10 @@ if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
 fi
 
 compose up -d postgres
+if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
+  prebuilt_exports="$(verify_prebuilt_release)" || exit 1
+  eval "${prebuilt_exports}"
+fi
 control prepare
 SESSION_PREPARED=1
 
@@ -1160,6 +1213,10 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   exit 0
 fi
 
+if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
+  prebuilt_exports="$(verify_prebuilt_release)" || exit 1
+  eval "${prebuilt_exports}"
+fi
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"

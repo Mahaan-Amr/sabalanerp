@@ -54,6 +54,14 @@ def private(file):
   require(not os.read(fd,1) and identity(before)==identity(os.fstat(fd))==identity(os.lstat(file)))
   return json.loads(data)
  finally:os.close(fd)
+
+def prebuilt_release_arguments(selection):
+ # This is content selection only. The original controller pipes, checkpoint,
+ # independent restore and signed issuer still own every admission decision.
+ require(isinstance(selection,dict) and set(selection)=={'file','sha256'})
+ file=pathlib.Path(selection['file']);require(file.is_absolute() and file.resolve()==file and re.fullmatch('[a-f0-9]{64}',selection['sha256']))
+ raw=immutable(file);value=file.lstat();require(value.st_mode&0o777==0o400 and hashlib.sha256(raw).hexdigest()==selection['sha256'])
+ return ['--prebuilt-release',str(file),selection['sha256']]
 def write(fd,data):
  offset=0
  while offset<len(data):
@@ -302,7 +310,12 @@ try:
  fcntl.flock(publication_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
  request_read,request_write=os.pipe();response_read,response_write=os.pipe()
  environment=dict(os.environ,DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD=str(request_write),DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD=str(response_read),DEPLOYMENT_REPO_ROOT=str(repository))
- deploy=child(['/bin/sh',str(ROOT/'deploy/scripts/deploy.sh'),config['environmentFile']],cwd=repository,env=environment,
+ deploy_arguments=['/bin/sh',str(ROOT/'deploy/scripts/deploy.sh')]
+ if 'prebuiltReleasePlan' in config:
+  selected=prebuilt_release_arguments(config['prebuiltReleasePlan'])
+  deploy_arguments.extend([selected[0],config['environmentFile'],*selected[1:]])
+ else:deploy_arguments.append(config['environmentFile'])
+ deploy=child(deploy_arguments,cwd=repository,env=environment,
   stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,pass_fds=(request_write,response_read))
  os.close(request_write);os.close(response_read)
  log(deploy.stdout,work/'deploy.stdout');log(deploy.stderr,work/'deploy.stderr')

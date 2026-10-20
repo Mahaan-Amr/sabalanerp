@@ -42,6 +42,18 @@ set -- $measured
 [ "$#" -eq 2 ] || { echo 'STORAGE_CAPACITY_MEASUREMENT_FAILED' >&2; exit 1; }
 required_local="$1"
 required_remote="$2"
+# A prebuilt release has installed targets before cleanup. Protect those exact
+# helper-validated CONFIGs through the existing owned-cleanup protection port.
+set --
+if [ -n "${DEPLOYMENT_PREBUILT_BACKEND_CONFIG:-}${DEPLOYMENT_PREBUILT_FRONTEND_CONFIG:-}${DEPLOYMENT_PREBUILT_INQUIRY_CONFIG:-}" ]; then
+  for protected_image in "${DEPLOYMENT_PREBUILT_BACKEND_CONFIG:-}" "${DEPLOYMENT_PREBUILT_FRONTEND_CONFIG:-}" "${DEPLOYMENT_PREBUILT_INQUIRY_CONFIG:-}"; do
+    [ "${#protected_image}" -eq 71 ] || { echo 'STORAGE_PREBUILT_IMAGE_INVALID' >&2; exit 1; }
+    case "$protected_image" in sha256:*) ;; *) echo 'STORAGE_PREBUILT_IMAGE_INVALID' >&2; exit 1;; esac
+    protected_digest="${protected_image#sha256:}"
+    case "$protected_digest" in *[!a-f0-9]*) echo 'STORAGE_PREBUILT_IMAGE_INVALID' >&2; exit 1;; esac
+    set -- "$@" --protected-image "$protected_image"
+  done
+fi
 # Both hosts must finish this phase before building images or blocking users.
 node "$operations_root/deploy/scripts/storage-preflight.mjs" \
   --mode apply --project "$project" --lock-file "$repo_root/.deploy-state/deployment.lock" --lock-fd 9 \
@@ -51,7 +63,7 @@ node "$operations_root/deploy/scripts/storage-preflight.mjs" \
   --document "$coordination_root/deployment-checkpoint.json" \
   --document "$coordination_root/pending-restore.json" \
   --document "$report_root/active-deployment-session.json" \
-  --audit "$report_root/storage-cleanup-local.jsonl"
+  --audit "$report_root/storage-cleanup-local.jsonl" "$@"
 ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
   -o "UserKnownHostsFile=$backup_known_hosts" -i "$operations_key" "$operations_user@$backup_host" \
   "preflight $required_remote"

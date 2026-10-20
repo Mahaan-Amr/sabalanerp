@@ -37,6 +37,12 @@ const hostFiles=['deploy/scripts/online-release-controller.mjs','deploy/scripts/
  'deploy/scripts/protected-dispatch-root-prepare.py','deploy/scripts/protected-file-adoption-owner.py','deploy/scripts/protected-file-adoption-state.py',
  'docker-compose.online.yml','docker-compose.online-storage.yml','deploy/nginx/online-app.conf.template','deploy/trust/online-qualification-public-key.pem'];
 const sha=value=>createHash('sha256').update(value).digest('hex');
+export function projectHostShellSource(relative,bytes){
+ if(!relative.endsWith('.sh'))return bytes;
+ const text=bytes.toString('utf8');assert.ok(Buffer.from(text).equals(bytes),'Host shell must be UTF-8');
+ const projected=Buffer.from(text.replaceAll('\r\n','\n'));
+ assert.ok(!projected.includes(13),'Bare CR in host shell source');return projected;
+}
 const args=process.argv.slice(2),build=args[0]==='--build';
 if(!build){
  assert.ok(args.length===0||(args.length===1&&args[0]==='--inspect'),'Unsupported inspect arguments');
@@ -165,7 +171,12 @@ if(!build){
   fs.chmodSync(file,mode);
   const observed=stableBackendBaseFile(file);assert.equal(observed.bytes,bytes.length);assert.equal(observed.sha256,sha(bytes));outputs[relative]=observed;
  }
- for(const [file,bytes] of originals)write(file,bytes);
+ const shellSourceProjections={};
+ for(const [file,bytes] of originals){
+  const projected=projectHostShellSource(file,bytes);
+  if(file.endsWith('.sh'))shellSourceProjections[file]={sourceSha256:sha(bytes),outputSha256:sha(projected),sourceBytes:bytes.length,outputBytes:projected.length,transform:projected.equals(bytes)?'NONE':'SHELL_CRLF_TO_LF'};
+  write(file,projected);
+ }
  write('deploy/scripts/online-release-host-kernel.cjs',Buffer.from(kernel));
  write('deploy/scripts/online-release-host-crypto.cjs',cryptoKernel);
  write('host-crypto-metafile.json',Buffer.from(JSON.stringify(cryptoBundle.metafile)+'\n'));
@@ -188,7 +199,7 @@ if(!build){
   canonicalRemoteRetention:{sourceFile:retentionEntry,sourceSha256:sha(captureSource(retentionEntry)),bundleSha256:sha(retentionKernel),inputs:Object.keys(retentionBundle.metafile.inputs).sort(),runtimeApplicationGraphIncluded:false},
   requiredLinuxModes:{'deploy/scripts/native-process-owner':'0500'},
   sources:Object.fromEntries([...sources].map(([file,pin])=>[path.relative(repository,file).replaceAll('\\','/'),pin])),
-  externalInputs:Object.fromEntries(external),outputs};
+  externalInputs:Object.fromEntries(external),shellSourceProjections,outputs};
  nativeOwner.revalidate();
  for(const [file,pin] of [...sources,...external])assert.deepEqual(stableBackendBaseFile(file),pin,'Source changed after packaging: '+file);
  write('host-pack-receipt.json',Buffer.from(JSON.stringify(receipt)+'\n'));

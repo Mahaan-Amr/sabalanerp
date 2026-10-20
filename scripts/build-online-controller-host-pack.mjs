@@ -106,7 +106,13 @@ if(!build){
    const resolved=path.posix.normalize(path.posix.join(path.posix.dirname(file),reference));
    assert.ok(!resolved.startsWith('../')&&!path.posix.isAbsolute(resolved),'Host module escapes reviewed checkout');
    if(['deploy/scripts/online-release-host-kernel.cjs','deploy/scripts/online-release-host-crypto.cjs'].includes(resolved))continue;
-   assert.ok(/\.(?:mjs|cjs|js|json)$/.test(resolved),'Explicit host module extension required');
+   if(resolved==='deploy/scripts/online-release-host-dependencies/node_modules/@prisma/client'){
+    // This exact directory is materialized below from the independently
+    // verified current-schema client, rather than read from the checkout.
+    for(const name of ['index.js','package.json'])assert.ok(clientProof.entries.some(item=>item.target===name),'Qualified generated host client missing '+name);
+    continue;
+   }
+   assert.ok(/\.(?:mjs|cjs|js|json)$/.test(resolved),'Explicit host module extension required: '+file+' -> '+reference);
    if(!originals.has(resolved))pending.push(resolved);
   }
  }

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import fs from 'fs';
+import { Readable } from 'stream';
 
 const MAGIC = Buffer.from('SABREC01');
 const TAG_BYTES = 16;
@@ -155,7 +156,9 @@ export const decryptRecoveryArchive = async (sourcePath: string, destinationPath
     await descriptor.read(tag, 0, TAG_BYTES, stat.size - TAG_BYTES);
     const ciphertextStart = prefix.length + headerLength;
     const ciphertextEnd = stat.size - TAG_BYTES - 1;
-    if (ciphertextEnd < ciphertextStart) throw Object.assign(new Error('Recovery package is truncated.'), { code: 'INVALID_RECOVERY_PACKAGE' });
+    // A zero-byte file still carries an authenticated GCM tag. Only a negative
+    // ciphertext length is truncated; the exact empty range must authenticate.
+    if (ciphertextEnd < ciphertextStart - 1) throw Object.assign(new Error('Recovery package is truncated.'), { code: 'INVALID_RECOVERY_PACKAGE' });
     let key: Buffer;
     if (header.version === 1) {
       key = await deriveKey(passphrase, Buffer.from(header.salt, 'base64'));
@@ -188,7 +191,10 @@ export const decryptRecoveryArchive = async (sourcePath: string, destinationPath
     decipher.setAAD(encodedHeader);
     decipher.setAuthTag(tag);
     try {
-      await pipeline(fs.createReadStream(sourcePath, { start: ciphertextStart, end: ciphertextEnd }), decipher, fs.createWriteStream(destinationPath, { flags: 'wx' }));
+      const ciphertext = ciphertextEnd === ciphertextStart - 1
+        ? Readable.from([])
+        : fs.createReadStream(sourcePath, { start: ciphertextStart, end: ciphertextEnd });
+      await pipeline(ciphertext, decipher, fs.createWriteStream(destinationPath, { flags: 'wx' }));
     } catch {
       await fs.promises.rm(destinationPath, { force: true });
       throw Object.assign(new Error('Backup passphrase is incorrect or the package was modified.'), { code: 'RECOVERY_DECRYPTION_FAILED' });

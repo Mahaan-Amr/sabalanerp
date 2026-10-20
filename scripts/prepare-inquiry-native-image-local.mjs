@@ -13,12 +13,14 @@ assert.equal(build.format, 'sabalan-private-inquiry-build/v1');
 assert.deepEqual(build.result, { code: 0, signal: null });
 assert.match(build.directory, /^\/tmp\/sabalan-inquiry-build-[a-f0-9]{32}$/);
 const canonical = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || 'D:/sabalanerp';
+const protectedServices = ['backend','frontend','postgres','inquiry','redis','clamav','backend-candidate','backend-retained','frontend-candidate','frontend-retained'];
 function verify() {
   const output = execFileSync('docker', ['compose', '-f', path.join(canonical, 'docker-compose.local.yml'), 'ps', '--format', 'json'], { encoding: 'utf8' });
   let rows;
   try { const value = JSON.parse(output); rows = Array.isArray(value) ? value : [value]; }
   catch { rows = output.trim().split(/\r?\n/).map(line => JSON.parse(line)); }
-  for (const service of ['backend', 'frontend', 'postgres', 'inquiry']) assert.ok(rows.some(row => row.Project === 'sabalanerp-local'
+  assert.equal(rows.length,protectedServices.length);
+  for (const service of protectedServices) assert.ok(rows.some(row => row.Project === 'sabalanerp-local'
     && row.Service === service && row.State === 'running' && row.Health === 'healthy'));
   return rows;
 }
@@ -27,8 +29,21 @@ function inspect(service) {
   return JSON.parse(execFileSync('docker', ['inspect', name], { encoding: 'utf8' }))[0];
 }
 const backend = inspect('backend'), inquiry = inspect('inquiry');
+const before = Object.fromEntries(protectedServices.map(service=>{const value=inspect(service);return[service,{id:value.Id,image:value.Image,startedAt:value.State.StartedAt}];}));
+assert.deepEqual(before,build.canonicalUnchanged);
 for (const [service, value] of [['backend', backend], ['inquiry', inquiry]]) assert.deepEqual({ id: value.Id, image: value.Image, startedAt: value.State.StartedAt }, build.canonicalUnchanged[service]);
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+const materialSources=Object.fromEntries([
+  'scripts/prepare-inquiry-native-image-local.mjs','scripts/build-inquiry-runtime-bundle.mjs',
+  'scripts/lib/inquiry-dependency-identity.cjs','scripts/lib/private-docker-image-archive.mjs',
+  'deploy/docker/inquiry-native.acceptance.Dockerfile','tests/online-deployment/inquiry-http-observer.fixture.cjs',
+  ...['online-inquiry-owner.py','online-runtime-scope.py','backend-runtime-owner.py','online-capture-admission.py'].map(name=>'deploy/scripts/'+name),
+  ...['onlineInquiryWork','onlineRuntimeScope','onlineCaptureAdmission','kernelWriteAdmission','runtimeBoundaryJournal','runtimeTaskAdmission','runtimeWorkContext'].map(name=>'backend/src/services/'+name+'.ts'),
+].map(name=>[name,sha(fs.readFileSync(path.join(root,name)))]));
+const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
+const inquiryCommit=execFileSync('git',['-C','apps/sabalan-inquiry','rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
+assert.equal(execFileSync('git',['rev-parse','HEAD:apps/sabalan-inquiry'],{cwd:root,encoding:'utf8'}).trim(),inquiryCommit);
+assert.equal(execFileSync('git',['-C','apps/sabalan-inquiry','status','--porcelain'],{cwd:root,encoding:'utf8'}).trim(),'');
 for (const [file, hash] of Object.entries(build.sourceHashes)) assert.equal(sha(fs.readFileSync(path.join(root, 'apps/sabalan-inquiry', file))), hash, 'Source differs from the successful native build: ' + file);
 const parent = 'D:/sabalanerp-online-qa'; fs.mkdirSync(parent, { recursive: true });
 assert.equal(fs.realpathSync(parent).replaceAll('\\', '/').toLowerCase(), parent.toLowerCase());
@@ -41,6 +56,11 @@ const directory = path.join(parent, 'inquiry-native-image-' + randomBytes(16).to
 fs.mkdirSync(directory);
 fs.writeFileSync(path.join(directory, '.dockerignore'), 'base-image.docker.tar\nruntime-source\nbuild.log\nimage.json\n', { flag: 'wx' });
 fs.copyFileSync(path.join(root, 'deploy/docker/inquiry-native.acceptance.Dockerfile'), path.join(directory, 'Dockerfile'));
+const dependencyVerifier=fs.readFileSync(path.join(root,'scripts/lib/inquiry-dependency-identity.cjs'));
+fs.writeFileSync(path.join(directory,'inquiry-dependency-identity.cjs'),dependencyVerifier,{flag:'wx'});
+verify();
+const dependencyIdentity=JSON.parse(execFileSync('docker',['exec',backend.Id,'node','-e',dependencyVerifier.toString('utf8')+'\nconsole.log(JSON.stringify(inquiryDependencyIdentity(process.argv[1])));',build.directory+'/node_modules'],{encoding:'utf8',timeout:120000,maxBuffer:16384}));
+fs.writeFileSync(path.join(directory,'inquiry-dependency-identity.json'),JSON.stringify(dependencyIdentity),{flag:'wx'});
 fs.copyFileSync(path.join(root, 'tests/online-deployment/inquiry-http-observer.fixture.cjs'), path.join(directory, 'native-http-observer.cjs'));
 const source = path.join(directory, 'runtime-source'); fs.mkdirSync(source);
 for (const name of ['onlineInquiryWork', 'onlineRuntimeScope', 'onlineCaptureAdmission', 'kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext']) fs.copyFileSync(path.join(root, 'backend/src/services', name + '.ts'), path.join(source, name + '.ts'));
@@ -94,10 +114,12 @@ const image = JSON.parse(execFileSync('docker', ['image', 'inspect', tag], { enc
 assert.equal(image.Config.Labels['io.sabalan.online-qa.archive-sha256'], archiveSha256);
 assert.equal(image.Config.Labels['io.sabalan.online-qa'], 'inquiry-native-actions');
 const receipt = { format: 'sabalan-inquiry-native-image-diagnostic/v1', directory, tag, image: image.Id,
+  sourceCommit,inquirySourceCommit:inquiryCommit,browserDeploymentId:build.browserBuildId,
+  dependencyIdentity,dependencyVerifierSha256:sha(dependencyVerifier),materialSources,
   diagnosticObserverSha256: sha(fs.readFileSync(path.join(directory, 'native-http-observer.cjs'))),
   runtimeSourceHashes: JSON.parse(fs.readFileSync(path.join(directory, 'online-runtime/source-hashes.json'), 'utf8')),
   sourceBuildDependencyImage: inquiry.Image, baseReference, baseIndexId: base.Id, baseConfigId, baseArchive, baseArchiveSha256,
-  baseEquivalentToSourceBuildDependencies: false,
+  baseEquivalentToSourceBuildDependencies: true,
   buildReport: reportFile, buildReportSha256: sha(fs.readFileSync(reportFile)), archiveSha256,
   archiveBytes: bytes, productionReleaseAdmission: false, actualNativeActionAcceptance: false };
 fs.writeFileSync(path.join(directory, 'image.json'), JSON.stringify(receipt, null, 2) + '\n', { flag: 'wx' });
@@ -111,4 +133,9 @@ fs.writeFileSync(path.join(directory, 'native-image-archive.json'), JSON.stringi
   format: 'sabalan-native-inquiry-image-archive/v1', imageReceipt, imageReceiptSha256: sha(fs.readFileSync(imageReceipt)),
   archive: nativeArchive, ...verified, blobsVerified: verified.blobs, productionAdmission: false, nativeActionAcceptance: false,
 }, null, 2) + '\n', { flag: 'wx' });
+const after=Object.fromEntries(protectedServices.map(service=>{const value=inspect(service);return[service,{id:value.Id,image:value.Image,startedAt:value.State.StartedAt}];}));
+assert.deepEqual(after,before);
+for(const[name,hash]of Object.entries(build.sourceHashes))assert.equal(sha(fs.readFileSync(path.join(root,'apps/sabalan-inquiry',name))),hash);
+for(const[name,hash]of Object.entries(materialSources))assert.equal(sha(fs.readFileSync(path.join(root,name))),hash,'INQUIRY_MATERIAL_SOURCE_CHANGED: '+name);
+assert.equal(execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),sourceCommit);
 console.log(JSON.stringify(receipt));

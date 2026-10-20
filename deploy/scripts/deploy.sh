@@ -4,17 +4,23 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="${DEPLOYMENT_REPO_ROOT:-$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
+CAPTURE_ONLY=0
+if [ "${1:-}" = "--capture-only" ]; then CAPTURE_ONLY=1; shift; fi
 ENV_FILE="${1:-deploy/.env.prod}"
+CAPTURE_ONLY_PLAN="${2:-}"
+if [ "${CAPTURE_ONLY}" -eq 1 ]; then [ "$#" -eq 2 ] && [ -n "${CAPTURE_ONLY_PLAN}" ] || { echo "Usage: deploy.sh --capture-only <env> <private-prebuilt-control-plan>" >&2; exit 1; }; fi
 DEPLOYMENT_MODE="${DEPLOYMENT_MODE:-release}"
 case "${DEPLOYMENT_MODE}" in
   release|configuration) ;;
   *) echo "DEPLOYMENT_MODE must be release or configuration." >&2; exit 1 ;;
 esac
+[ "${CAPTURE_ONLY}" -eq 0 ] || [ "${DEPLOYMENT_MODE}" = "release" ] || { echo "Capture-only cannot change configuration." >&2; exit 1; }
 CONFIGURATION_STATE="${REPO_ROOT}/.deploy-state/biometric-configuration.json"
 CONFIGURATION_ACTIVE=0
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 COMPOSE_FILE="docker-compose.prod.yml"
+COMPOSE_ONLINE_FLAGS=""
 ADVISORY_LOCK_KEY="741936425"
 LOCK_FILE="${REPO_ROOT}/.deploy-state/deployment.lock"
 ADVISORY_PID=""
@@ -32,6 +38,16 @@ ROLLBACK_ALREADY_ATTEMPTED=0
 FINANCIAL_EVIDENCE_REFERRAL_REQUIRED=0
 FINANCIAL_EVIDENCE_DRY_RUN_REPORT=""
 FINANCIAL_EVIDENCE_REFERRAL_REPORT=""
+ONLINE_BOOTSTRAP_SEQUENCE=0
+if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}${DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD:-}" ]; then
+  [ "${DEPLOYMENT_MODE}" = "release" ] && [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ] && [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD:-}" ] || {
+    echo "Initial online installation requires both original controller pipes and a protected code release." >&2; exit 1;
+  }
+  [ "${CAPTURE_ONLY}" -eq 0 ] || { echo "Capture-only cannot join a bootstrap publication." >&2; exit 1; }
+  # Fixed words only, deliberately split below; never accept caller-supplied
+  # Compose files/flags for a protected initial installation.
+  COMPOSE_ONLINE_FLAGS="-f docker-compose.online.yml"
+fi
 
 cd "${REPO_ROOT}"
 
@@ -45,7 +61,28 @@ require_command() {
 }
 
 compose() {
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} "$@"
+}
+
+online_bootstrap_boundary() {
+  ONLINE_BOOTSTRAP_SEQUENCE=$((ONLINE_BOOTSTRAP_SEQUENCE + 1))
+  DEPLOYMENT_ONLINE_BOOTSTRAP_SEQUENCE="${ONLINE_BOOTSTRAP_SEQUENCE}" \
+    DEPLOYMENT_ID="${DEPLOYMENT_ID}" DEPLOYMENT_RELEASE_ID="${DEPLOYMENT_RELEASE_ID}" \
+    DEPLOYMENT_TARGET_COMMIT="${DEPLOYMENT_TARGET_COMMIT}" \
+    node "${OPERATIONS_ROOT}/deploy/scripts/online-bootstrap-boundary.mjs" "$1" &
+  online_boundary_pid=$!
+  online_boundary_heartbeat_elapsed=0
+  # The same deploy process renews its lease while the ORIGINAL controller
+  # retains unknown work. No timeout kills/adopts its native children.
+  while kill -0 "${online_boundary_pid}" 2>/dev/null; do
+    sleep 5
+    online_boundary_heartbeat_elapsed=$((online_boundary_heartbeat_elapsed + 5))
+    if [ "${online_boundary_heartbeat_elapsed}" -ge 60 ] && kill -0 "${online_boundary_pid}" 2>/dev/null; then
+      control heartbeat || { echo "Original bootstrap remains held; deployment lease renewal failed." >&2; }
+      online_boundary_heartbeat_elapsed=0
+    fi
+  done
+  wait "${online_boundary_pid}"
 }
 
 start_release_services() {
@@ -59,7 +96,7 @@ start_release_services() {
 
 run_backend() {
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
@@ -83,6 +120,8 @@ run_backend() {
       -e "DEPLOYMENT_PREVIOUS_NGINX_IMAGE=${DEPLOYMENT_PREVIOUS_NGINX_IMAGE}" \
       -e "DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE=${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}" \
       -e "DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE=${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}" \
+      -e "DEPLOYMENT_REMOTE_RETENTION_RECEIPT=${DEPLOYMENT_REMOTE_RETENTION_RECEIPT:-}" \
+      -e "DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256=${DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256:-}" \
       -e "INQUIRY_ALREADY_DRAINED=true" \
       deployment "$@"
 }
@@ -94,7 +133,7 @@ run_backend_timed() {
     DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
     BACKEND_DB_CONNECTION_LIMIT=2 \
     DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
@@ -113,6 +152,8 @@ run_backend_timed() {
       -e "DEPLOYMENT_PREVIOUS_NGINX_IMAGE=${DEPLOYMENT_PREVIOUS_NGINX_IMAGE}" \
       -e "DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE=${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}" \
       -e "DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE=${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}" \
+      -e "DEPLOYMENT_REMOTE_RETENTION_RECEIPT=${DEPLOYMENT_REMOTE_RETENTION_RECEIPT:-}" \
+      -e "DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256=${DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256:-}" \
       -e "INQUIRY_ALREADY_DRAINED=true" \
       deployment "$@"
 }
@@ -141,6 +182,32 @@ run_backend_timed_with_heartbeat() {
   timed_status=$?
   set -e
   return "${timed_status}"
+}
+
+# A protected file guardian may own unresolved native work. Lease loss never
+# kills/disowns this original child or turns a timeout into completion.
+run_original_owned_with_heartbeat() {
+  "$@" </dev/null &
+  owned_pid=$!
+  owned_heartbeat_elapsed=0
+  owned_heartbeat_failed=0
+  while kill -0 "${owned_pid}" 2>/dev/null; do
+    sleep 5
+    owned_heartbeat_elapsed=$((owned_heartbeat_elapsed + 5))
+    if [ "${owned_heartbeat_elapsed}" -ge 60 ] && kill -0 "${owned_pid}" 2>/dev/null; then
+      if ! control heartbeat; then
+        owned_heartbeat_failed=1
+        echo "Protected original child remains owned; lease renewal failed." >&2
+      fi
+      owned_heartbeat_elapsed=0
+    fi
+  done
+  set +e
+  wait "${owned_pid}"
+  owned_status=$?
+  set -e
+  [ "${owned_heartbeat_failed}" -eq 0 ] || return 1
+  return "${owned_status}"
 }
 
 wait_for_cutover_approval() {
@@ -253,7 +320,7 @@ try_acquire_advisory() {
   lock_token="SABALAN_DEPLOYMENT_LOCK_${DEPLOYMENT_ID}"
   ADVISORY_APPLICATION_NAME="sabalan-lock-${DEPLOYMENT_ID}"
   rm -f "${REPO_ROOT}/.deploy-state/advisory-lock.log"
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T \
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} exec -T \
     -e "PGAPPNAME=${ADVISORY_APPLICATION_NAME}" postgres sh -c \
     "psql -At -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT pg_advisory_lock(741936425); SELECT '${lock_token}'; SELECT pg_sleep(21600);\"" \
     >"${REPO_ROOT}/.deploy-state/advisory-lock.log" 2>&1 &
@@ -305,6 +372,9 @@ cleanup_configuration_snapshot() {
 }
 
 switch_to_previous_images() {
+  # Initial bootstrap's predecessor is the verified ordinary release. Its
+  # rollback must retain that release's entrypoint, never the new hold script.
+  COMPOSE_ONLINE_FLAGS=""
   if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
     node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" persist "${REPO_ROOT}" previous || return 1
     configuration_exports="$(node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" exports "${REPO_ROOT}" previous)" || return 1
@@ -355,6 +425,60 @@ finish_with_notification_result() {
   FINISHED=1
 }
 
+host_backup_retention() {
+  retention_stage="$1"
+  case "${retention_stage}" in BEFORE_CHECKPOINT|AFTER_CHECKPOINT) ;; *) return 1;; esac
+  run_backend node dist/scripts/deployment-retention-local.js export-holds "${retention_stage}" || return 1
+  case "${DEPLOYMENT_REPORT_DIR_HOST}" in /*) retention_host_root="${DEPLOYMENT_REPORT_DIR_HOST}";; *) retention_host_root="${REPO_ROOT}/${DEPLOYMENT_REPORT_DIR_HOST#./}";; esac
+  retention_name="remote-retention-${DEPLOYMENT_ID}-${retention_stage}.json"
+  node "${OPERATIONS_ROOT}/deploy/scripts/backup-retention-host.mjs" "${ENV_FILE}" "${DEPLOYMENT_ID}" "${retention_stage}" "${retention_host_root}/${retention_name}" "${retention_host_root}/retention-holds-${DEPLOYMENT_ID}-${retention_stage}.json"
+}
+
+bind_host_backup_retention_receipt() {
+  retention_stage="$1"
+  case "${retention_stage}" in BEFORE_CHECKPOINT|AFTER_CHECKPOINT) ;; *) return 1;; esac
+  case "${DEPLOYMENT_REPORT_DIR_HOST}" in /*) retention_host_root="${DEPLOYMENT_REPORT_DIR_HOST}";; *) retention_host_root="${REPO_ROOT}/${DEPLOYMENT_REPORT_DIR_HOST#./}";; esac
+  retention_name="remote-retention-${DEPLOYMENT_ID}-${retention_stage}.json"
+  DEPLOYMENT_REMOTE_RETENTION_RECEIPT="/app/deployment-reports/${retention_name}"
+  DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256="$(node -e 'const fs=require("fs"),c=require("crypto"),p=process.argv[1];const a=fs.lstatSync(p,{bigint:true});if(!a.isFile()||a.uid!==0n||a.nlink!==1n||(a.mode&511n)!==256n||a.size>8388608n||fs.realpathSync(p)!==p)process.exit(1);const raw=fs.readFileSync(p),b=fs.lstatSync(p,{bigint:true});for(const k of ["dev","ino","size","mtimeNs","ctimeNs"])if(a[k]!==b[k])process.exit(1);process.stdout.write(c.createHash("sha256").update(raw).digest("hex"))' "${retention_host_root}/${retention_name}")" || return 1
+  export DEPLOYMENT_REMOTE_RETENTION_RECEIPT DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256
+}
+
+capture_only_services() {
+  ids=""
+  for service in backend frontend inquiry nginx postgres clamav; do
+    id="$(compose ps -a -q "${service}")"; [ -n "${id}" ] || return 1
+    ids="${ids} ${id}"
+  done
+  docker inspect ${ids}
+}
+
+verify_capture_only_configuration() {
+  [ "${CAPTURE_ONLY}" -eq 1 ] || return 0
+  observed_control="$(docker image inspect "${DEPLOYMENT_TARGET_BACKEND_IMAGE}" | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" plan "${CAPTURE_ONLY_PLAN}" "${OPERATIONS_ROOT}")" || return 1
+  [ "${observed_control}" = "${DEPLOYMENT_TARGET_BACKEND_IMAGE}" ] || return 1
+  capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" verify "${CAPTURE_ONLY_SNAPSHOT}" "${ENV_FILE}"
+}
+
+complete_capture_only() {
+  [ "${CAPTURE_ONLY}" -eq 1 ] && [ "${MUTATION_STARTED}" -eq 0 ] && [ "${BOOTSTRAP}" -eq 0 ] && [ "${DB_LEASE_ACQUIRED}" -eq 1 ] || return 1
+  assert_native_runtime_closed || return 1
+  switch_to_previous_images || return 1
+  start_release_services 300 || return 1
+  verify_capture_only_configuration || return 1
+  DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js || return 1
+  control maintenance-off || return 1
+  MAINTENANCE_ACTIVE=0
+  capture_pause_seconds="$(node -e 'const n=process.hrtime.bigint()-BigInt(process.argv[1]);if(n<0n)process.exit(1);process.stdout.write(((n+999999999n)/1000000000n).toString())' "${capture_pause_started}")"
+  finish_with_notification_result ABORTED || return 1
+  capture_qualification_code=0
+  node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" complete "${CAPTURE_ONLY_SNAPSHOT}" "${CAPTURE_ONLY_OUTPUT}" "${capture_pause_seconds}" || capture_qualification_code=$?
+  cleanup_locks
+  trap - EXIT INT TERM
+  echo "Fresh COMPLETE checkpoint captured; unchanged release reopened. Pause ${capture_pause_seconds}s. No deployment mutation or publication occurred."
+  return "${capture_qualification_code}"
+}
+
 recover_failure() {
   exit_code="$1"
   trap - EXIT INT TERM
@@ -401,6 +525,7 @@ recover_failure() {
     switch_to_previous_images
     if { [ "${NATIVE_RUNTIME_CLOSURE_REQUIRED}" -eq 0 ] || assert_native_runtime_closed; } \
       && start_release_services 300 \
+      && verify_capture_only_configuration \
       && DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js; then
       control maintenance-off || true
       MAINTENANCE_ACTIVE=0
@@ -526,6 +651,10 @@ if ! flock -n 9; then
   echo "Another host deployment owns ${LOCK_FILE}; no state was changed." >&2
   exit 1
 fi
+if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
+  # Reuse THIS inherited deployment lock; no launcher pre-lock or key rotation.
+  node "${OPERATIONS_ROOT}/deploy/scripts/install-online-controller-trust.mjs" --install
+fi
 
 case "${DEPLOYMENT_REPORT_DIR_HOST}" in
   /*) SESSION_HOST_PATH="${DEPLOYMENT_REPORT_DIR_HOST}/active-deployment-session.json" ;;
@@ -608,11 +737,15 @@ if [ -f "${CONFIGURATION_STATE}" ]; then
   exit 1
 fi
 
+# Refuse missing/reused operations credentials before fetching or building.
+# Interrupted releases above retain their existing recovery path.
+node "${OPERATIONS_ROOT}/deploy/scripts/backup-retention-host.mjs" --inspect "${ENV_FILE}"
+
 if [ "${DEPLOYMENT_MODE}" = "configuration" ]; then
   sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0
 fi
 
-if [ "${DEPLOYMENT_MODE}" = "release" ]; then
+if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then
 echo "Fetching ${DEPLOY_REMOTE}/${DEPLOY_BRANCH} and requiring a fast-forward update..."
 git fetch --prune "${DEPLOY_REMOTE}"
 git checkout "${DEPLOY_BRANCH}"
@@ -622,7 +755,7 @@ fi
 
 DEPLOYMENT_TARGET_COMMIT="$(git rev-parse HEAD)"
 
-if [ "${DEPLOYMENT_MODE}" = "release" ]; then
+if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then
 backend_repository="$(env_value DEPLOYMENT_BACKEND_IMAGE_REPOSITORY)"
 frontend_repository="$(env_value DEPLOYMENT_FRONTEND_IMAGE_REPOSITORY)"
 inquiry_repository="$(env_value DEPLOYMENT_INQUIRY_IMAGE_REPOSITORY)"
@@ -652,7 +785,7 @@ DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
 APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
 export DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_ID DEPLOYMENT_OWNER APP_COMMIT
 
-if [ "${DEPLOYMENT_MODE}" = "release" ]; then
+if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then
 backend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}")"
 frontend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}")"
 inquiry_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}")"
@@ -720,6 +853,19 @@ PERFORMANCE_RELEASE_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
 PERFORMANCE_RELEASE_FRONTEND_IMAGE="${DEPLOYMENT_FRONTEND_IMAGE}"
 PERFORMANCE_RELEASE_INQUIRY_IMAGE="${DEPLOYMENT_INQUIRY_IMAGE}"
 export PERFORMANCE_RELEASE_COMMIT PERFORMANCE_RELEASE_SOURCE_HASH PERFORMANCE_RELEASE_BACKEND_IMAGE PERFORMANCE_RELEASE_FRONTEND_IMAGE PERFORMANCE_RELEASE_INQUIRY_IMAGE
+elif [ "${CAPTURE_ONLY}" -eq 1 ]; then
+  # Existing source checkout/app selections stay fixed. Only the separately
+  # prebuilt, content-attested control image executes the canonical backup CLI.
+  control_image="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));if(!/^sha256:[a-f0-9]{64}$/.test(v.controlImage))process.exit(1);process.stdout.write(v.controlImage)' "${CAPTURE_ONLY_PLAN}")"
+  DEPLOYMENT_TARGET_BACKEND_IMAGE="$(docker image inspect "${control_image}" | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" plan "${CAPTURE_ONLY_PLAN}" "${OPERATIONS_ROOT}")"
+  export DEPLOYMENT_TARGET_BACKEND_IMAGE
+  DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}"
+  DEPLOYMENT_FRONTEND_IMAGE="${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}"
+  DEPLOYMENT_INQUIRY_IMAGE="${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}"
+  DEPLOYMENT_NGINX_IMAGE="${DEPLOYMENT_PREVIOUS_NGINX_IMAGE}"
+  DEPLOYMENT_POSTGRES_IMAGE="${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"
+  DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
+  export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE DEPLOYMENT_POSTGRES_IMAGE DEPLOYMENT_CLAMAV_IMAGE
 else
   [ -n "${DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE:-}" ] && [ -f "${DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE}" ] || {
     echo "Configuration release requires a private biometric workstation provisioning file." >&2
@@ -734,6 +880,13 @@ else
   compose config --quiet
   echo "Applying workstation configuration to the existing immutable release ${DEPLOYMENT_TARGET_COMMIT}; no source fetch or image build."
 fi
+if [ "${CAPTURE_ONLY}" -eq 1 ]; then
+  [ "${DEPLOYMENT_MODE}" = "release" ] || { echo "Capture-only requires the canonical release control image." >&2; exit 1; }
+  CAPTURE_ONLY_SNAPSHOT="${REPO_ROOT}/.deploy-state/capture-only-${DEPLOYMENT_ID}.json"
+  CAPTURE_ONLY_OUTPUT="${REPO_ROOT}/.deploy-state/capture-only-${DEPLOYMENT_ID}.checkpoint.jsonl"
+  capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" snapshot "${CAPTURE_ONLY_SNAPSHOT}" "${ENV_FILE}"
+fi
+node "${OPERATIONS_ROOT}/deploy/scripts/backup-retention-host.mjs" --inspect "${ENV_FILE}"
 refresh_performance_database_identity
 
 run_backend node dist/scripts/validate-production-environment.js
@@ -745,6 +898,7 @@ SESSION_PREPARED=1
 
 if ! try_acquire_advisory; then
   echo "Database connections are saturated; entering journaled maintenance to drain the previous backend automatically." >&2
+  if [ "${CAPTURE_ONLY}" -eq 1 ]; then capture_pause_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"; fi
   compose up -d --no-deps --force-recreate nginx
   control maintenance-on
   MAINTENANCE_ACTIVE=1
@@ -763,6 +917,7 @@ control acquire
 acquire_code=$?
 set -e
 if [ "${acquire_code}" -eq 4 ]; then
+  [ "${CAPTURE_ONLY}" -eq 0 ] || { echo "Capture-only requires an existing canonical DB lease schema; no bootstrap mutation is permitted." >&2; exit 1; }
   BOOTSTRAP=1
   DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP=true
   export DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP
@@ -776,6 +931,7 @@ export DEPLOYMENT_LEASE_TOKEN
 
 phase MAINTENANCE_REQUESTED
 if [ "${DRAINED_EARLY}" -eq 0 ]; then
+  if [ "${CAPTURE_ONLY}" -eq 1 ]; then capture_pause_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"; fi
   compose up -d --no-deps --force-recreate nginx
   control maintenance-on
   MAINTENANCE_ACTIVE=1
@@ -784,6 +940,16 @@ fi
 phase TRAFFIC_BLOCKED
 if [ "${DRAINED_EARLY}" -eq 0 ]; then drain_current_services; fi
 phase SERVICES_DRAINED
+if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
+  # The stopped legacy overlay is inspected/copied under the actual original
+  # host mutex + both coordination EX gates BEFORE any new Dispatch mount.
+  control heartbeat
+  run_original_owned_with_heartbeat python3 "${OPERATIONS_ROOT}/deploy/scripts/protected-dispatch-root-prepare.py" \
+    "${REPO_ROOT}/${COMPOSE_FILE}" "$(realpath "${ENV_FILE}")" \
+    "${old_backend_container}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}"
+  control heartbeat
+  COMPOSE_ONLINE_FLAGS="-f docker-compose.online.yml -f docker-compose.online-storage.yml"
+fi
 
 postgres_available_kb="$(compose exec -T postgres sh -c 'df -Pk "$PGDATA" | awk "NR==2 {print \$4}"')"
 postgres_database_bytes="$(compose exec -T postgres sh -c 'psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_database_size(current_database())"')"
@@ -794,6 +960,8 @@ postgres_available_bytes=$((postgres_available_kb * 1024))
   exit 1
 }
 
+run_original_owned_with_heartbeat host_backup_retention BEFORE_CHECKPOINT
+bind_host_backup_retention_receipt BEFORE_CHECKPOINT
 echo "Creating, decrypt-validating, uploading, and reading back the coordinated checkpoint..."
 checkpoint_timeout="$(env_value DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS)"
 checkpoint_timeout="${checkpoint_timeout:-3600}"
@@ -804,9 +972,24 @@ esac
   echo "DEPLOYMENT_CHECKPOINT_TIMEOUT_SECONDS must be between 600 and 14400 seconds." >&2
   exit 1
 }
-run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js
+if [ "${CAPTURE_ONLY}" -eq 1 ]; then
+  # Retain the original checkpoint owner; exceeding the qualification budget
+  # never kills/adopts a live backup. Its actual pause is measured on reopen.
+  (umask 077; set -C; : > "${CAPTURE_ONLY_OUTPUT}")
+  run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-checkpoint.js > "${CAPTURE_ONLY_OUTPUT}"
+  chmod 400 "${CAPTURE_ONLY_OUTPUT}"
+else
+  run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js
+fi
 phase LOCAL_CHECKPOINT_VERIFIED
 phase REMOTE_CHECKPOINT_VERIFIED
+run_original_owned_with_heartbeat host_backup_retention AFTER_CHECKPOINT
+bind_host_backup_retention_receipt AFTER_CHECKPOINT
+run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-retention-local.js apply AFTER_CHECKPOINT
+if [ "${CAPTURE_ONLY}" -eq 1 ]; then
+  complete_capture_only || exit 1
+  exit 0
+fi
 
 phase MUTATION_STARTED
 MUTATION_STARTED=1
@@ -835,6 +1018,12 @@ else
   run_backend_timed "${remaining}" sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-owned-migrations.js
 fi
 phase MIGRATIONS_APPLIED
+if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
+  # No SH application context is fabricated under EX. The fixed original
+  # guardian owns FD9/10 and its one Node/SQL namespace through actual closure.
+  run_original_owned_with_heartbeat run_backend sh scripts/with-backend-control-ownership.sh \
+    python3 scripts/protected-file-adoption-owner.py
+fi
 
 # Inquiry's existing SQLite shape is adopted under the same checkpoint,
 # maintenance boundary, database lease and inherited single-control-owner lock.
@@ -948,12 +1137,30 @@ run_backend_timed "${remaining}" node dist/scripts/reconcile-contract-financial-
 phase RELEASE_STARTED
 refresh_performance_database_identity
 remaining="$(remaining_mutation_seconds)" || exit 1
-start_release_services "${remaining}"
+if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
+  # The fixed online overlay creates the NEW immutable backend in control-only
+  # mode; the original host owns its real native HTTP actor. Never also start
+  # the ordinary standalone backend entry or adopt the old image as accepted.
+  compose up -d --no-build --wait --wait-timeout "${remaining}" postgres clamav
+  run_original_owned_with_heartbeat run_backend sh scripts/with-backend-control-ownership.sh \
+    python3 scripts/retire-protected-online-legacy-records.py
+  compose up -d --no-deps --no-build backend release-edge
+  online_bootstrap_boundary BOOTSTRAP_PREPARE
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  compose up -d --no-build --wait --wait-timeout "${remaining}" frontend inquiry
+  compose up -d --no-deps --force-recreate --wait --wait-timeout "${remaining}" nginx
+else
+  start_release_services "${remaining}"
+fi
 
 remaining="$(remaining_mutation_seconds)" || exit 1
-run_backend_timed "${remaining}" node dist/scripts/deployment-gates.js
+if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
+  online_bootstrap_boundary BOOTSTRAP_GATES
+else
+  run_backend_timed "${remaining}" node dist/scripts/deployment-gates.js
+fi
 remaining="$(remaining_mutation_seconds)" || exit 1
-timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T backend sh -c '
+timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} exec -T backend sh -c '
   set -eu
   test "${HR_HIRING_ANTIVIRUS_COMMAND:-}" = "/app/scripts/hr-clamdscan.sh"
   command -v clamdscan >/dev/null
@@ -964,6 +1171,12 @@ timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FIL
 '
 remaining_mutation_seconds >/dev/null
 phase GATES_PASSED
+if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
+  online_bootstrap_boundary BOOTSTRAP_PUBLISH
+  online_bootstrap_boundary BOOTSTRAP_ACTIVATE
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  run_backend_timed "${remaining}" node dist/scripts/deployment-online-bootstrap-gate.js
+fi
 
 if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
   node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" mark-open "${REPO_ROOT}"
@@ -972,6 +1185,12 @@ phase TRAFFIC_OPENED
 PUBLIC_TRAFFIC_OPEN=1
 control maintenance-off
 MAINTENANCE_ACTIVE=0
+if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
+  # Jobs start only AFTER real public maintenance removal. The original host
+  # must observe genuine native jobs READY while this SAME lease is still live.
+  # A failure here follows the existing post-open no-data-rewind recovery path.
+  online_bootstrap_boundary BOOTSTRAP_OPENED
+fi
 finish_with_notification_result COMPLETED
 cleanup_configuration_snapshot
 

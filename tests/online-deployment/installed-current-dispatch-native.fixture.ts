@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import {randomUUID,createHash} from 'node:crypto';
+import type {PrismaClient} from '@prisma/client';
+export type DispatchPrerequisites={format:'sabalan-dispatch-native-prerequisites/v1';contractId:string;commercialRevision:number;loadingId:string;queueId:string;itemId:string;fixturePreparationOnly:boolean};
+type JsonCommand=(route:string,method?:string,body?:unknown,expected?:number)=>Promise<any>;
+/** Current production PRE_CUTOVER profile: no flag, cutover, approvals or pricing
+ * records are forged. Business state is changed exclusively through installed HTTP. */
+export async function qualifyInstalledCurrentDispatch({db,json,base,headers,prerequisites:q}:{db:PrismaClient;json:JsonCommand;base:string;headers:Record<string,string>;prerequisites:DispatchPrerequisites}){
+ assert.equal(q.format,'sabalan-dispatch-native-prerequisites/v1');assert.equal(q.fixturePreparationOnly,true);
+ const readControls=async()=>({dispatch:await db.dispatchCutoverControl.findUniqueOrThrow({where:{id:'dispatch'}}),statements:await db.shipmentStatementCutover.findUniqueOrThrow({where:{id:'customer-shipment-statements'}}),operations:await db.shipmentStatementOperationsControl.findUniqueOrThrow({where:{id:'customer-shipment-statements'}})});
+ const controls=await readControls();assert.equal(controls.dispatch.phase,'PRE_CUTOVER');assert.equal(controls.dispatch.legacyWritesEnabled,true);assert.equal(controls.dispatch.cutoverAt,null);assert.equal(controls.statements.enabled,false);assert.equal(controls.statements.cutoverAt,null);assert.equal(controls.operations.paused,true);
+ await json('/api/sales/contracts/'+q.contractId+'/approve','PUT',{commercialRevision:q.commercialRevision,note:'Actual installed private Dispatch approval'});
+ await json('/api/accounting/contracts/'+q.contractId+'/customer-paper-signature','POST',{revision:q.commercialRevision});
+ const contract=await db.salesContract.findUniqueOrThrow({where:{id:q.contractId}});assert.equal(contract.commercialFlowVersion,1);assert.equal(contract.status,'SIGNED');assert.equal(contract.salesApprovalRevision,q.commercialRevision);assert.equal(contract.customerAcceptanceRevision,q.commercialRevision);
+ const created=await json('/api/accounting/actions','POST',{kind:'CREATE_INVOICE',contractId:q.contractId,mode:'FROM_CONTRACT_TOTAL',idempotencyKey:randomUUID()});const invoiceId=created.affected.financialRecordIds[0];assert.equal(typeof invoiceId,'string');
+ const invoice=await db.accountingFinancialRecord.findUniqueOrThrow({where:{id:invoiceId}});
+ await json('/api/accounting/actions','POST',{kind:'APPROVE_FINANCIAL_INVOICE',invoiceId,systemInvoiceNumber:'PRIVATE-'+randomUUID(),systemInvoiceDate:new Date().toISOString(),sepidarAmount:invoice.amount.toString(),idempotencyKey:randomUUID()});
+ const approved=await db.accountingFinancialRecord.findUniqueOrThrow({where:{id:invoiceId}});assert.ok(approved.financiallyApprovedAt);assert.ok(approved.sepidarAmount?.equals(approved.amount));
+ const finalizeKey=randomUUID(),batch=await json('/api/logistics/loadings/'+q.loadingId+'/finalize','POST',{idempotencyKey:finalizeKey});assert.equal(batch.revisions.length,1);const revision=batch.revisions[0];assert.equal(revision.queueTurnId,q.queueId);assert.ok(revision.candidate.id);
+ const retryBatch=await json('/api/logistics/loadings/'+q.loadingId+'/finalize','POST',{idempotencyKey:finalizeKey});assert.equal(retryBatch.id,batch.id);
+ const candidateId=revision.candidate.id,decisionKey=randomUUID(),decision=await json('/api/accounting/dispatch-candidates/'+candidateId+'/decision','POST',{action:'ACCEPT',idempotencyKey:decisionKey});assert.equal(decision.status,'ACCEPTED');assert.equal(decision.waybill.status,'ISSUED');
+ const retry=await json('/api/accounting/dispatch-candidates/'+candidateId+'/decision','POST',{action:'ACCEPT',idempotencyKey:decisionKey});assert.deepEqual(retry,decision);
+ const waybill=await db.accountingDispatchWaybill.findUniqueOrThrow({where:{id:decision.waybill.id}});assert.equal(waybill.candidateId,candidateId);assert.equal(waybill.number.toString(),decision.waybill.number);assert.match(waybill.integrityHash,/^[a-f0-9]{64}$/);
+ assert.equal(await db.accountingDispatchCommand.count({where:{candidateId,idempotencyKey:decisionKey}}),1);assert.equal(await db.accountingDispatchWaybill.count({where:{candidateId}}),1);assert.equal((await db.accountingDispatchWorkItem.findUniqueOrThrow({where:{candidateId}})).status,'COMPLETED');
+ assert.equal(await db.dispatchDocumentArtifact.count({where:{waybillId:waybill.id}}),0);
+ // No atomic document exists for this legacy-only production profile. The real
+ // unavailable read must refuse, retain its failed-read audit, and mint no PDF.
+ const absent=await fetch(base+'/api/accounting/dispatch-waybills/'+waybill.id+'/artifacts/'+randomUUID(),{headers,redirect:'error'});assert.equal(absent.status,404);await absent.arrayBuffer();assert.equal(await db.dispatchDocumentArtifact.count({where:{waybillId:waybill.id}}),0);assert.equal(await db.accountingDispatchWaybill.count({where:{candidateId}}),1);
+ assert.deepEqual(await readControls(),controls,'Workflow must not enable or rewrite production business cutover controls');
+ return{format:'sabalan-installed-current-dispatch/v1',contractId:q.contractId,commercialRevision:q.commercialRevision,invoiceId,loadingId:q.loadingId,batchId:batch.id,allocationRevisionId:revision.id,candidateId,waybillId:waybill.id,waybillNumber:waybill.number.toString(),waybillIntegrityHash:waybill.integrityHash,decisionKey,finalizeKey,profile:'PRE_CUTOVER_LEGACY_WAYBILL_ONLY',atomicStatementFeatureEnabled:false,atomicBundleIssuanceQualified:false,missingArtifactRefused404:true,controlsSha256:createHash('sha256').update(JSON.stringify(controls)).digest('hex')};
+}
+export async function verifyRestoredInstalledCurrentDispatch(db:PrismaClient,q:Awaited<ReturnType<typeof qualifyInstalledCurrentDispatch>>){
+ const waybill=await db.accountingDispatchWaybill.findUniqueOrThrow({where:{id:q.waybillId}});assert.equal(waybill.candidateId,q.candidateId);assert.equal(waybill.number.toString(),q.waybillNumber);assert.equal(waybill.integrityHash,q.waybillIntegrityHash);assert.equal(waybill.status,'ISSUED');assert.equal(await db.accountingDispatchCommand.count({where:{candidateId:q.candidateId,idempotencyKey:q.decisionKey}}),1);assert.equal(await db.logisticsAllocationBatch.count({where:{id:q.batchId,idempotencyKey:q.finalizeKey}}),1);assert.equal(await db.dispatchDocumentArtifact.count({where:{waybillId:q.waybillId}}),0);assert.ok((await db.accountingFinancialRecord.findUniqueOrThrow({where:{id:q.invoiceId}})).financiallyApprovedAt);return{format:'sabalan-restored-installed-current-dispatch/v1',waybillId:waybill.id,unchangedOriginalWaybill:true,atomicBundleIssuanceQualified:false};
+}

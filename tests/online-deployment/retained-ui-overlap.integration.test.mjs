@@ -6,6 +6,7 @@ import os from 'node:os';
 import {createHash, randomBytes} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {execFileSync} from 'node:child_process';
+import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import {prepareRetainedUiBundle} from './retained-ui-bundle.fixture.mjs';
 
@@ -19,6 +20,12 @@ const proxyImage = 'sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c
 const candidate = '7f4d8f79c29c6d80045ea490e8ddcab156416c072c286467cac1c6ce298ba5e2';
 const services = ['frontend-online-old', 'frontend-online-new', 'frontend-online-proxy'];
 const names = services.map(service => 'sabalanerp-local-' + service + '-1');
+const proxyRuntimeSources = [
+  'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-release-proxy.mjs', 'deploy/scripts/api-release-routing.mjs',
+  'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-operation-journal.mjs',
+  'tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/private-ui-management.fixture.mjs',
+  'tests/online-deployment/private-ui-startup.fixture.mjs',
+];
 
 function verify() {
   const output = execFileSync('docker', ['compose', '-f', path.join(canonical, 'docker-compose.local.yml'), 'ps', '--format', 'json'], {encoding: 'utf8'});
@@ -35,6 +42,25 @@ function identities() {
 }
 const sourceHash = name => sha(fs.readFileSync(path.join(repository, name)));
 
+test('copied retained proxy dependency graph resolves its complete captured runtime', async () => {
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'sabalan-retained-dependency-'));
+  const expected = Object.fromEntries(proxyRuntimeSources.map(name => [name, sourceHash(name)]));
+  try {
+    for (const name of proxyRuntimeSources) {
+      const target = path.join(directory, name); await fsp.mkdir(path.dirname(target), {recursive: true});
+      await fsp.copyFile(path.join(repository, name), target);
+      assert.equal(sha(await fsp.readFile(target)), expected[name]);
+    }
+    const imported = await import(pathToFileURL(path.join(directory, 'deploy/scripts/browser-release-proxy.mjs')).href);
+    assert.equal(typeof imported.createBrowserReleaseProxy, 'function'); assert.equal(typeof imported.createApiReleaseProxy, 'function');
+    for (const name of proxyRuntimeSources) assert.equal(sourceHash(name), expected[name]);
+  } finally {
+    assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(directory).startsWith('sabalan-retained-dependency-'));
+    await fsp.rm(directory, {recursive: true});
+  }
+});
+
 test('immutable real Next builds preserve old tabs across durable switch, proxy restart, failed new slot and current-code rollback',
   {skip: !enabled || !canonical, timeout: 900000}, async () => {
     assert.equal(path.resolve(canonical).toLowerCase(), path.resolve('D:/sabalanerp').toLowerCase());
@@ -43,11 +69,8 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy 
     const stage = path.join(os.tmpdir(), 'sabalan-retained-ui-' + operation);
     const report = {operation, canonical: before, productionAdmission: false, inquiryActionsExercised: false,
       businessApiExercised: false, privateRoot, sources: Object.fromEntries([
-        'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-release-proxy.mjs',
-        'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-operation-journal.mjs',
-        'tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/retained-ui-bundle.fixture.mjs',
-        'tests/online-deployment/private-ui-management.fixture.mjs', 'tests/online-deployment/private-ui-management.test.mjs',
-        'tests/online-deployment/private-ui-startup.fixture.mjs', 'tests/online-deployment/private-ui-startup.test.mjs',
+        ...proxyRuntimeSources, 'tests/online-deployment/retained-ui-bundle.fixture.mjs',
+        'tests/online-deployment/private-ui-management.test.mjs', 'tests/online-deployment/private-ui-startup.test.mjs',
         'tests/online-deployment/retained-ui-overlap.integration.test.mjs', 'tests/online-deployment/Dockerfile.retained-ui',
         'docker-compose.retained-ui-acceptance.yml',
       ].map(name => [name, sourceHash(name)]))};

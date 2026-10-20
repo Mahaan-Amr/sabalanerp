@@ -1,5 +1,5 @@
 import path from 'path';
-import { publishDurableFile } from '../services/durableFilePublication';
+import { publishDocumentPdfFile } from '../services/documentPdfFileRuntime';
 import puppeteer from 'puppeteer';
 import type { ContractRuntime, Output } from '../services/partnerSales/customerOutput/contracts';
 import { createCustomerOutputSnapshots } from '../services/partnerSales/customerOutput/snapshots';
@@ -130,8 +130,7 @@ export async function generatePdfFromHtml(options: GeneratePdfOptions): Promise<
   const outputDir = options.outputDir || path.join(process.cwd(), 'storage', 'contracts');
 
   const outputPath = path.join(outputDir, `${options.fileName.replace(/[^\w\-\.]/g, '_')}.pdf`);
-  const bytes = await generatePdfBufferFromHtml(options);
-  await publishDurableFile(path.resolve(outputPath), bytes, { replace: true });
-
-  return outputPath;
+  const absolute = path.resolve(outputPath);
+  const published = await publishDocumentPdfFile(absolute, () => generatePdfBufferFromHtml(options));
+  return published === absolute ? outputPath : published;
 }

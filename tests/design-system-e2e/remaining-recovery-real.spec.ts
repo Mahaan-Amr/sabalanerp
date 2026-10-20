@@ -4,6 +4,7 @@ import { expect, test } from '@playwright/test';
 import { PrismaClient } from '../../backend/node_modules/@prisma/client';
 import { parseCanonicalProductGraph, projectCanonicalProductGraph } from '../../packages/contract-product-graph/src';
 import { loginAsAdmin, setTheme, assertNoHorizontalOverflow } from './support/design-system';
+import {sdsDatabaseScope,assertSdsDatabaseIdentity} from './support/sds-database-scope';
 
 const fixture = JSON.parse(readFileSync('packages/contract-product-graph/src/__tests__/fixtures/remaining-child-chain.json', 'utf8'));
 
@@ -12,9 +13,8 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
   expect(new URL(baseURL!).hostname).toMatch(/^(localhost|127\.0\.0\.1)$/);
   const databaseUrl = process.env.REMAINING_RECOVERY_QA_DATABASE_URL ||
     'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?schema=public&connection_limit=2&pool_timeout=10';
-  expect(new URL(databaseUrl).hostname).toMatch(/^(localhost|127\.0\.0\.1)$/);
-  expect(new URL(databaseUrl).port).toBe('55432');
-  const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  const databaseScope=sdsDatabaseScope(databaseUrl);
+  const db = new PrismaClient({ datasources: { db: { url: databaseScope.url.toString() } } });
   const key = `qa-remaining-ui-${randomUUID()}`;
   const productIds: string[] = [];
   const draftIds = new Set<string>();
@@ -30,7 +30,8 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
     }
   });
   try {
-    const admin = await db.user.findUniqueOrThrow({ where: { username: process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin' } });
+    await assertSdsDatabaseIdentity(db,databaseScope);
+    const admin = await db.user.findUniqueOrThrow({ where: { username: databaseScope.adminUsername } });
     const customer = await db.crmCustomer.create({ data: { firstName: 'آزمون', lastName: key,
       ownerUserId: admin.id, createdBy: admin.id } });
     customerId = customer.id;

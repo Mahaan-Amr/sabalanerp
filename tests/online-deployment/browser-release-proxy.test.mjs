@@ -9,7 +9,9 @@ import {createBrowserReleaseProxy} from '../../deploy/scripts/browser-release-pr
 import {BrowserOperationJournal} from '../../deploy/scripts/browser-operation-journal.mjs';
 
 const image=`sha256:${'a'.repeat(64)}`,action='b'.repeat(42);
-const now='2026-10-15T06:00:00.000Z',until='2026-10-16T06:00:00.000Z';
+// This fixture exercises the supported retained window; expiration refusal is
+// covered separately with actual past deadlines in expired-build-fence tests.
+const now=new Date(Date.now()-86400000).toISOString(),until=new Date(Date.now()+86400000).toISOString();
 function registry(){return {format:'sabalan-browser-routing/v1',generation:1,
   current:{erp:'erp_current',inquiry:'inquiry_current'},legacy:{erp:'erp_legacy',inquiry:'inquiry_legacy'},
   builds:['erp_legacy','erp_current','inquiry_legacy','inquiry_current'].map(id=>({id,application:id.startsWith('erp_')?'erp':'inquiry',

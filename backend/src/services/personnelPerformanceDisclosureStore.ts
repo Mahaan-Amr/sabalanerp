@@ -36,7 +36,10 @@ import {
 import { runPerformanceSerializableTransaction } from './personnelPerformancePolicyStore';
 import { publishNotificationEvent } from './notificationService';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
-import { publishDurableFile, removeDurableFile } from './durableFilePublication';
+import { performanceExportStorageDirectory, runOwnedPerformanceExport, runOwnedPerformanceMaintenance, versionedPerformanceDeletionFiles, performanceExportFileKey, publishPerformanceExportFile, removePerformanceExportFile, assertPerformanceExportGraphErasureSupported } from './performanceFileRuntime';
+import { performanceCleanupFileSource, removePinnedPerformanceFile, type PerformanceFileSource } from './performanceExportFileDeletion';
+import { performanceInventoryArtifactPath, resolvePerformanceExportArtifactPath } from './performanceExportArtifactPath';
+export { performanceExportStorageDirectory } from './performanceFileRuntime';
 
 // Vault snapshots must contain JSON values: dates become ISO strings and absent fields are omitted.
 const reportingSnapshot = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
@@ -47,6 +50,7 @@ export const erasePerformanceExportArtifacts = async (
   client: PrismaClient | Prisma.TransactionClient, exportIds: readonly string[], erasedAt = new Date(),
 ) => {
   if (!exportIds.length) return { erased: 0 };
+  assertPerformanceExportGraphErasureSupported();
   const [receipts, artifacts] = await Promise.all([
     client.performanceExportReceipt.findMany({ where: { id: { in: [...exportIds] } }, select: { id: true, artifactPath: true } }),
     client.performanceExportArtifact.findMany({ where: { exportId: { in: [...exportIds] } }, select: { artifactPath: true } }),
@@ -54,7 +58,7 @@ export const erasePerformanceExportArtifacts = async (
   const paths = new Set(artifacts.map(({ artifactPath }) => artifactPath));
   for (const receipt of receipts) if (receipt.artifactPath) paths.add(receipt.artifactPath);
   for (const artifactPath of paths) {
-    await removeDurableFile(artifactPath);
+    await removePerformanceExportFile(artifactPath);
   }
   await client.performanceExportReceipt.updateMany({ where: { id: { in: receipts.map(({ id }) => id) } }, data: {
     status: PerformanceExportStatus.DELETED, artifactPath: null, deletedAt: erasedAt,
@@ -85,7 +89,6 @@ const consequenceRule = (policy: ConsequencePolicyContent, consequenceType: stri
   }
   return rule;
 };
-export const performanceExportStorageDirectory = () => path.resolve(process.env.PERSONNEL_PERFORMANCE_EXPORT_DIR || path.join(process.cwd(), 'storage', 'performance-exports'));
 const exportRoot = performanceExportStorageDirectory;
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
 const DEVELOPMENT_EXPORT_KEY = createHash('sha256').update('sabalan-local-performance-export-key').digest();
@@ -129,13 +132,17 @@ export const decryptPerformanceExportArtifact = (envelope: Buffer, key: Buffer) 
 export const withinPerformanceExportDeadline = async <T>(work: (signal: AbortSignal) => Promise<T>, milliseconds = 5 * 60_000) => {
   let timer: NodeJS.Timeout | undefined;
   const controller = new AbortController();
+  const rendering = Promise.resolve().then(() => work(controller.signal));
   try {
     return await Promise.race([
-      work(controller.signal),
+      rendering,
       new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); reject(disclosureError('زمان تولید خروجی از سقف مجاز گذشت.', 'PERFORMANCE_EXPORT_GENERATION_TIMEOUT', 504)); }, milliseconds); }),
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    // An abort request is not proof that the renderer/subprocess stopped.
+    // Keep the actual owner's completion reference until it settles.
+    await rendering.catch(() => undefined);
   }
 };
 
@@ -843,7 +850,7 @@ export const performancePdfPageCount = async (bytes: Buffer) => {
   }
 };
 
-export const processPerformanceExport = async (client: PrismaClient, exportId: string, keyring = performanceVaultKeyFromEnvironment()) => {
+export const processPerformanceExport = (client: PrismaClient, exportId: string, keyring = performanceVaultKeyFromEnvironment()) => runOwnedPerformanceExport(async () => {
   const receipt = await runPerformanceSerializableTransaction(client, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'performance-export-queue'}, 0))`;
     const queued = await tx.performanceExportReceipt.findUnique({ where: { id: exportId } });
@@ -891,7 +898,7 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
       if (current.status !== PerformanceExportStatus.RUNNING || current.attemptCount !== receipt.attemptCount
         || !current.expiresAt || current.expiresAt <= new Date()) return 0;
       // Serialize storage publication with cleanup; a delayed renderer must never recreate a deleted file.
-      await publishDurableFile(path.resolve(artifactPath), encryptPerformanceExportArtifact(rendered.bytes, exportKey.key), { replace: true });
+      await publishPerformanceExportFile(path.resolve(artifactPath), encryptPerformanceExportArtifact(rendered.bytes, exportKey.key));
       const updated = await tx.performanceExportReceipt.updateMany({ where: {
         id: receipt.id, status: PerformanceExportStatus.RUNNING, attemptCount: receipt.attemptCount,
       }, data: {
@@ -927,7 +934,7 @@ export const processPerformanceExport = async (client: PrismaClient, exportId: s
     });
     return null;
   }
-};
+});
 
 const evidenceRevision = async (client: PrismaClient | Prisma.TransactionClient, lock = false) => {
   const rows = lock
@@ -984,13 +991,13 @@ export const requestPerformanceExport = async (client: PrismaClient, input: {
       actorUserId: input.actorUserId, authorityCodes: currentPermissions, evidenceHash: lineage.contentHash, encryptedPayloadId: lineage.id });
     return created;
   });
-  queueMicrotask(() => { void processPerformanceExport(client, receipt.id, keyring).catch(() => {
+  void processPerformanceExport(client, receipt.id, keyring).catch(() => {
     console.error('Performance export dispatch failed closed; queued work remains available for recovery.');
-  }); });
+  });
   return { receipt, downloadToken: token };
 };
 
-export const processQueuedPerformanceExports = async (client: PrismaClient, keyring = performanceVaultKeyFromEnvironment()) => {
+export const processQueuedPerformanceExports = (client: PrismaClient, keyring = performanceVaultKeyFromEnvironment()) => runOwnedPerformanceMaintenance(async () => {
   const staleBefore = new Date(Date.now() - 6 * 60_000);
   const stale = await client.performanceExportReceipt.findMany({ where: { status: PerformanceExportStatus.RUNNING, startedAt: { lte: staleBefore } } });
   for (const receipt of stale) {
@@ -1008,7 +1015,7 @@ export const processQueuedPerformanceExports = async (client: PrismaClient, keyr
   });
   await Promise.all(queued.map(({ id }) => processPerformanceExport(client, id, keyring)));
   return queued.length;
-};
+});
 
 export const getPerformanceExport = async (client: PrismaClient, input: { exportId: string; actorUserId: string }) => {
   const receipt = await client.performanceExportReceipt.findUnique({ where: { id: input.exportId } });
@@ -1045,7 +1052,7 @@ export const claimPerformanceExportDownload = async (client: PrismaClient | Pris
   }
   const exportKey = performanceExportKeyFromEnvironment();
   if (receipt.artifactKeyId !== exportKey.keyId) throw disclosureError('کلید فایل خروجی در دسترس نیست.', 'PERFORMANCE_EXPORT_KEY_UNAVAILABLE', 410);
-  const bytes = decryptPerformanceExportArtifact(await readFile(receipt.artifactPath), exportKey.key);
+  const bytes = decryptPerformanceExportArtifact(await readFile(await resolvePerformanceExportArtifactPath(tx, receipt)), exportKey.key);
   if (createHash('sha256').update(bytes).digest('hex') !== receipt.artifactHash) throw disclosureError('تمامیت فایل خروجی تأیید نشد.', 'PERFORMANCE_EXPORT_INTEGRITY_FAILED', 500);
   const claimed = await tx.performanceExportReceipt.updateMany({
     where: { id: receipt.id, status: PerformanceExportStatus.READY, downloadedAt: null },
@@ -1095,7 +1102,8 @@ const redactPerformanceExportPayload = async (client: PrismaClient | Prisma.Tran
         aggregateType: payload.aggregateType, aggregateIdHash: createHash('sha256').update(payload.aggregateId).digest('hex'),
         scopeHash: receipt.scopeHash, policyVersionId: retentionPolicy.id, reasonCode: 'PERFORMANCE_EXPORT_TTL_CLEANUP',
         reason: 'پاک‌سازی محتوای کامل خروجی پس از تحویل یا پایان مهلت عملیاتی', recordCount: 1,
-        dependencyEffectHash: canonicalPerformanceHash({ exportId: receipt.id, payloadId: payload.id, artifactDeleted: true }),
+        dependencyEffectHash: canonicalPerformanceHash({ exportId: receipt.id, payloadId: payload.id,
+          liveArtifactRemoval: 'PENDING_ORIGINAL_ACTOR', physicalErasure: 'UNPROVEN_RETAINED_COPIES_PENDING' }),
         actorUserId, authorityHash: canonicalPerformanceHash(actorUserId ? ['REQUEST_PERFORMANCE_EXPORT'] : ['SYSTEM_EXPORT_RETENTION']),
       } });
       await tx.performanceEncryptedPayload.delete({ where: { id: payload.id } });
@@ -1106,90 +1114,203 @@ const redactPerformanceExportPayload = async (client: PrismaClient | Prisma.Tran
 };
 
 
+type PerformanceCleanupPlan = { format: 'sabalan-performance-cleanup/v1'; operationNonce: string; exportId: string;
+  attemptId: string; policyVersionId: string; scopeHash: string; artifactHash: string | null; deletedAt: string;
+  scopes: Array<{ aggregateType: string; aggregateIdHash: string }>;
+  dependencies: Array<{ aggregateType: string; aggregateIdHash: string }>;
+  inventory: Array<{ attemptCount: number; artifactPath: string }>; sources: PerformanceFileSource[] };
 const cleanupPerformanceExport = async (
   client: PrismaClient | Prisma.TransactionClient, exportId: string, now: Date, actorUserId: string | null,
 ) => {
+  // An outer transaction cannot establish its own COMMIT before irreversible
+  // file removal. Refuse BEFORE creating/updating attempts, audits or receipts.
+  if (!('$transaction' in client)) throw disclosureError('پاک‌سازی خروجی باید در تراکنش مستقل نگهداری انجام شود.', 'PERFORMANCE_CLEANUP_TRANSACTION_REQUIRED', 409);
   const candidate = await client.performanceExportReceipt.findUnique({ where: { id: exportId } });
   if (!candidate || candidate.status === PerformanceExportStatus.DELETED
     || (!candidate.downloadedAt && (!candidate.expiresAt || candidate.expiresAt > now))) return false;
+  const files = versionedPerformanceDeletionFiles();
   const { policy } = await readPerformanceRetentionPolicy(client, now);
-  // With the runtime PrismaClient this intent commits before any filesystem mutation. A failed cleanup retains the same retry id.
   const attempt = await client.performanceExportCleanupAttempt.upsert({ where: { exportId }, update: {}, create: {
     exportId, policyVersionId: policy.id, artifactHash: candidate.artifactHash, scopeHash: candidate.scopeHash,
   } });
-  if (attempt.status === 'LIVE_DELETED_PENDING_BACKUP') return false;
-  const work = async (tx: Prisma.TransactionClient) => {
-    // The hold is re-read after the scope lock. An older repeatable snapshot cannot authorize filesystem deletion.
-    const isolation = await tx.$queryRaw<Array<{ transaction_isolation: string }>>`SHOW transaction_isolation`;
-    if (isolation[0]?.transaction_isolation !== 'read committed') {
-      throw disclosureError('پاک‌سازی خروجی باید در تراکنش مستقل نگهداری انجام شود.', 'PERFORMANCE_CLEANUP_TRANSACTION_REQUIRED', 409);
-    }
+  if (attempt.status === 'LIVE_DELETED_PENDING_BACKUP'
+    || (attempt.status === 'RETRY_REQUIRED' && attempt.lastFailureCode === 'PERFORMANCE_CLEANUP_LOGICAL_REMOVAL_FILES_PENDING')) return false;
+  const operationNonce = randomUUID(), keyring = performanceVaultKeyFromEnvironment();
+  const authorityCodes = actorUserId ? ['REQUEST_PERFORMANCE_EXPORT'] : ['SYSTEM_EXPORT_RETENTION'];
+  const scopeHash = createHash('sha256').update(exportId).digest('hex');
+  const fail = (): never => { throw disclosureError('نتیجه پاک‌سازی خروجی نیاز به بررسی دارد؛ شواهد حفظ شده است.', 'PERFORMANCE_CLEANUP_OUTCOME_UNRESOLVED', 503); };
+  const same = (a: unknown, b: unknown) => canonicalPerformanceHash(a) === canonicalPerformanceHash(b);
+  const lockRoot = async (tx: Prisma.TransactionClient) => {
     await evidenceRevision(tx, true);
-    const scopeHash = createHash('sha256').update(exportId).digest('hex');
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'PERFORMANCE_EXPORT:' + scopeHash}, 0))`;
-    const receipt = await tx.performanceExportReceipt.findUnique({ where: { id: exportId } });
-    if (!receipt || receipt.status === PerformanceExportStatus.DELETED) return false;
-    if (!receipt.downloadedAt && (!receipt.expiresAt || receipt.expiresAt > now)) return false;
-    const payload = receipt.encryptedPayloadId
-      ? await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: receipt.encryptedPayloadId } }) : null;
-    let dependencies;
-    try {
-      dependencies = await resolvePerformanceExportDependencies(tx, exportId);
-    } catch (error) {
-      if (!isPerformanceLineageEvidenceUnavailable(error)) throw error;
-      await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'HELD', attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED' } });
-      return false;
-    }
-    const scopes = [{ aggregateType: 'PERFORMANCE_EXPORT', aggregateIdHash: scopeHash }, ...dependencies];
-    for (const scope of [...dependencies].sort((a, b) => `${a.aggregateType}:${a.aggregateIdHash}`.localeCompare(`${b.aggregateType}:${b.aggregateIdHash}`))) {
+  };
+  const lockScopes = async (tx: Prisma.TransactionClient, scopes: PerformanceCleanupPlan['scopes']) => {
+    for (const scope of [...scopes].sort((a, b) => `${a.aggregateType}:${a.aggregateIdHash}`.localeCompare(`${b.aggregateType}:${b.aggregateIdHash}`))) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${scope.aggregateType}:${scope.aggregateIdHash}`}, 0))`;
     }
-    if (payload) {
-      const aggregateIdHash = createHash('sha256').update(payload.aggregateId).digest('hex');
-      const lockKey = `${payload.aggregateType}:${aggregateIdHash}`;
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
-      scopes.push({ aggregateType: payload.aggregateType, aggregateIdHash });
-    }
-    if (await findPerformanceExportLegalHold(tx, exportId, scopes)) {
-      await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'HELD', attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_LEGAL_HOLD_ACTIVE' } });
-      return false;
-    }
-    await readPerformanceRetentionPolicy(tx, now);
-    const artifacts = await tx.performanceExportArtifact.findMany({ where: { exportId }, select: { artifactPath: true } });
-    const artifactPaths = new Set(artifacts.map((artifact) => artifact.artifactPath));
-    if (receipt.artifactPath) artifactPaths.add(receipt.artifactPath);
-    for (const artifactPath of artifactPaths) {
-      await removeDurableFile(artifactPath);
-    }
-    await redactPerformanceExportPayload(tx, receipt, now, actorUserId);
-    await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'LIVE_DELETED_PENDING_BACKUP', liveDeletedAt: now, attemptCount: { increment: 1 }, lastFailureCode: null } });
-    await auditDisclosure(tx, {
-      aggregateType: 'PERFORMANCE_EXPORT', aggregateId: receipt.id, eventType: 'PERFORMANCE_EXPORT_CLEANED_UP',
-      actorUserId, authorityCodes: actorUserId ? ['REQUEST_PERFORMANCE_EXPORT'] : ['SYSTEM_EXPORT_RETENTION'],
-      evidenceHash: receipt.artifactHash ?? undefined,
-    });
-    return true;
   };
+  const transaction = <T>(work: (tx: Prisma.TransactionClient) => Promise<T>) => client.$transaction(async tx => {
+    await tx.$executeRaw`SELECT set_config('lock_timeout','1000ms',true),set_config('statement_timeout','10000ms',true)`;
+    await lockRoot(tx); return work(tx);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000, maxWait: 1000 });
+  let prepared: { plan: PerformanceCleanupPlan; payloadId: string; auditId: string } | undefined;
+  let preparationError: unknown;
   try {
-    return '$transaction' in client
-      ? await client.$transaction(work, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }) : await work(client);
-  } catch (error) {
-    if ('$transaction' in client) {
-      const persisted = await client.performanceExportCleanupAttempt.findUnique({ where: { id: attempt.id } }).catch(() => null);
-      if (persisted?.status === 'LIVE_DELETED_PENDING_BACKUP') return true;
+    await transaction(async tx => {
+      const receipt = await tx.performanceExportReceipt.findUnique({ where: { id: exportId } });
+      if (!receipt || receipt.status === PerformanceExportStatus.DELETED
+        || (!receipt.downloadedAt && (!receipt.expiresAt || receipt.expiresAt > now))) return;
+      const payload = receipt.encryptedPayloadId
+        ? await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: receipt.encryptedPayloadId } }) : null;
+      let dependencies;
+      try { dependencies = (await resolvePerformanceExportDependencies(tx, exportId))
+        .sort((a, b) => `${a.aggregateType}:${a.aggregateIdHash}`.localeCompare(`${b.aggregateType}:${b.aggregateIdHash}`)); }
+      catch (error) {
+        if (!isPerformanceLineageEvidenceUnavailable(error)) throw error;
+        await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: {
+          status: 'HELD', attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_EXPORT_LINEAGE_UNVERIFIED',
+        } }); return;
+      }
+      const scopes = [...dependencies];
+      if (payload) scopes.push({ aggregateType: payload.aggregateType,
+        aggregateIdHash: createHash('sha256').update(payload.aggregateId).digest('hex') });
+      await lockScopes(tx, scopes);
+      if (await findPerformanceExportLegalHold(tx, exportId, [{ aggregateType: 'PERFORMANCE_EXPORT', aggregateIdHash: scopeHash }, ...scopes])) {
+        await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: {
+          status: 'HELD', attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_LEGAL_HOLD_ACTIVE',
+        } }); return;
+      }
+      const currentPolicy = await readPerformanceRetentionPolicy(tx, now);
+      if (currentPolicy.policy.id !== attempt.policyVersionId) {
+        await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: { status: 'HELD',
+          attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_CLEANUP_POLICY_CHANGED' } }); return;
+      }
+      const artifacts = await tx.performanceExportArtifact.findMany({ where: { exportId }, select: { artifactPath: true, attemptCount: true }, orderBy: { attemptCount: 'asc' } });
+      const paths = new Set(artifacts.map(artifact => performanceInventoryArtifactPath(receipt, artifact)));
+      if (receipt.artifactPath) paths.add(await resolvePerformanceExportArtifactPath(tx, receipt));
+      const sources: PerformanceFileSource[] = [];
+      for (const target of [...paths].sort()) sources.push(await performanceCleanupFileSource(target, files));
+      const plan: PerformanceCleanupPlan = { format: 'sabalan-performance-cleanup/v1', operationNonce, exportId,
+        attemptId: attempt.id, policyVersionId: currentPolicy.policy.id, scopeHash: receipt.scopeHash,
+        artifactHash: receipt.artifactHash, deletedAt: now.toISOString(), scopes, dependencies, inventory: artifacts, sources };
+      const encrypted = await persistPerformancePayload(tx, { aggregateType: 'PERFORMANCE_EXPORT_CLEANUP', aggregateId: attempt.id,
+        payloadKind: 'FILE_REMOVAL_PLAN', schemaVersion: 1, payload: plan, keyring });
+      const audit = await auditDisclosure(tx, { aggregateType: 'PERFORMANCE_EXPORT', aggregateId: exportId,
+        eventType: 'PERFORMANCE_EXPORT_REMOVAL_PLANNED', actorUserId, authorityCodes,
+        encryptedPayloadId: encrypted.id, evidenceHash: encrypted.contentHash });
+      // Keep immutable source and original owner evidence before detachment.
+      // A failure/rollback here has made NO filesystem change.
+      await redactPerformanceExportPayload(tx, receipt, now, actorUserId);
+      await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: {
+        status: 'RETRY_REQUIRED', attemptCount: { increment: 1 },
+        lastFailureCode: 'PERFORMANCE_CLEANUP_LOGICAL_REMOVAL_FILES_PENDING',
+      } });
+      prepared = { plan, payloadId: encrypted.id, auditId: audit.id };
+    });
+  } catch (error) { preparationError = error; }
+  if (!prepared) {
+    if (preparationError) {
+      // The callback never completed its logical removal plan, so no final
+      // file mutation was attempted. Preserve existing operational retry data.
       await client.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: {
         status: 'RETRY_REQUIRED', attemptCount: { increment: 1 }, lastFailureCode: 'PERFORMANCE_CLEANUP_STORAGE_OR_DATABASE_FAILURE',
       } }).catch(() => undefined);
+      throw preparationError;
     }
-    throw error;
+    return false;
+  }
+  const owned = prepared;
+  const verify = async (tx: Prisma.TransactionClient) => {
+    await lockScopes(tx, owned.plan.scopes);
+    const audit = await tx.performanceAuditEvent.findUnique({ where: { id: owned.auditId } });
+    if (!audit) return false;
+    if (audit.aggregateType !== 'PERFORMANCE_EXPORT' || audit.aggregateId !== exportId
+      || audit.eventType !== 'PERFORMANCE_EXPORT_REMOVAL_PLANNED' || audit.encryptedPayloadId !== owned.payloadId) return fail();
+    const payload = await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: owned.payloadId } });
+    if (payload.aggregateType !== 'PERFORMANCE_EXPORT_CLEANUP' || payload.aggregateId !== attempt.id
+      || payload.payloadKind !== 'FILE_REMOVAL_PLAN' || payload.schemaVersion !== 1
+      || !same(await readPerformancePayload(tx, owned.payloadId, keyring), owned.plan)) return fail();
+    const row = await tx.performanceExportReceipt.findUnique({ where: { id: exportId } });
+    if (!row || row.status !== PerformanceExportStatus.DELETED || row.artifactPath !== null || row.encryptedPayloadId !== null
+      || row.deletedAt?.toISOString() !== owned.plan.deletedAt || row.scopeHash !== owned.plan.scopeHash
+      || row.artifactHash !== owned.plan.artifactHash) return fail();
+    const dependencies = (await resolvePerformanceExportDependencies(tx, exportId))
+      .sort((a, b) => `${a.aggregateType}:${a.aggregateIdHash}`.localeCompare(`${b.aggregateType}:${b.aggregateIdHash}`));
+    if (!same(dependencies, owned.plan.dependencies)) return fail();
+    const inventory = await tx.performanceExportArtifact.findMany({ where: { exportId }, select: { artifactPath: true, attemptCount: true }, orderBy: { attemptCount: 'asc' } });
+    if (!same(inventory, owned.plan.inventory)) return fail();
+    return true;
+  };
+  type Completion = { format: 'sabalan-performance-cleanup-completion/v1'; operationNonce: string; planPayloadId: string;
+    planHash: string; files: Array<{ source: PerformanceFileSource; deletionVersionSha256: string | null }>;
+    liveDeletedAt: string; physicalErasure: 'UNPROVEN_RETAINED_COPIES_PENDING' };
+  let finished: { payloadId: string; auditId: string; completion: Completion } | undefined;
+  try {
+    // The same locks establish the ORIGINAL transaction's actual end, even if
+    // its COMMIT acknowledgment was lost. New workers never receive this plan.
+    return await transaction(async tx => {
+      if (!await verify(tx)) { if (preparationError) throw preparationError; return fail(); }
+      if (await findPerformanceExportLegalHold(tx, exportId,
+        [{ aggregateType: 'PERFORMANCE_EXPORT', aggregateIdHash: scopeHash }, ...owned.plan.scopes])) return false;
+      // A committed policy publication or time-based activation can occur
+      // between A and B. Re-evaluate at the actual database clock under the
+      // reacquired locks, never delete under a different immutable basis.
+      const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+      const currentPolicy = await readPerformanceRetentionPolicy(tx, clock.now);
+      if (currentPolicy.policy.id !== owned.plan.policyVersionId || currentPolicy.policy.id !== attempt.policyVersionId) return false;
+      const paths = [...new Set([...owned.plan.inventory.map(artifact => artifact.artifactPath), ...owned.plan.sources.map(source => source.path)])];
+      if (await tx.performanceExportReceipt.count({ where: { artifactPath: { in: paths } } })
+        || await tx.performanceExportArtifact.count({ where: { exportId: { not: exportId }, artifactPath: { in: paths } } })) return false;
+      const completion: Completion = { format: 'sabalan-performance-cleanup-completion/v1', operationNonce,
+        planPayloadId: owned.payloadId, planHash: canonicalPerformanceHash(owned.plan), files: [], liveDeletedAt: '', physicalErasure: 'UNPROVEN_RETAINED_COPIES_PENDING' };
+      for (const source of owned.plan.sources) completion.files.push({ source, deletionVersionSha256: await removePinnedPerformanceFile(source, files) });
+      completion.liveDeletedAt = new Date().toISOString();
+      const encrypted = await persistPerformancePayload(tx, { aggregateType: 'PERFORMANCE_EXPORT_CLEANUP', aggregateId: attempt.id,
+        payloadKind: 'FILE_REMOVAL_COMPLETION', schemaVersion: 1, payload: completion, keyring });
+      const audit = await auditDisclosure(tx, { aggregateType: 'PERFORMANCE_EXPORT', aggregateId: exportId,
+        eventType: 'PERFORMANCE_EXPORT_CLEANED_UP', actorUserId, authorityCodes, encryptedPayloadId: encrypted.id, evidenceHash: encrypted.contentHash });
+      await tx.performanceExportCleanupAttempt.update({ where: { id: attempt.id }, data: {
+        status: 'LIVE_DELETED_PENDING_BACKUP', liveDeletedAt: new Date(completion.liveDeletedAt), lastFailureCode: null,
+      } });
+      finished = { payloadId: encrypted.id, auditId: audit.id, completion };
+      return true;
+    });
+  } catch (error) {
+    if (!finished) throw error;
+    const completed = finished;
+    const confirmed = await transaction(async tx => {
+      if (!await verify(tx)) return false;
+      const audit = await tx.performanceAuditEvent.findUnique({ where: { id: completed.auditId } });
+      if (!audit || audit.aggregateType !== 'PERFORMANCE_EXPORT' || audit.aggregateId !== exportId
+        || audit.eventType !== 'PERFORMANCE_EXPORT_CLEANED_UP' || audit.encryptedPayloadId !== completed.payloadId) return false;
+      const payload = await tx.performanceEncryptedPayload.findUniqueOrThrow({ where: { id: completed.payloadId } });
+      if (payload.aggregateType !== 'PERFORMANCE_EXPORT_CLEANUP' || payload.aggregateId !== attempt.id
+        || payload.payloadKind !== 'FILE_REMOVAL_COMPLETION' || payload.schemaVersion !== 1
+        || !same(await readPerformancePayload(tx, completed.payloadId, keyring), completed.completion)) return fail();
+      const persisted = await tx.performanceExportCleanupAttempt.findUniqueOrThrow({ where: { id: attempt.id } });
+      if (persisted.status !== 'LIVE_DELETED_PENDING_BACKUP' || persisted.liveDeletedAt?.toISOString() !== completed.completion.liveDeletedAt) return false;
+      for (const entry of completed.completion.files) {
+        if (files && entry.source.operation === 'PUT') {
+          const read = await files.readSettled(performanceExportFileKey(entry.source.path), 0);
+          if (read.head?.operation !== 'DELETE' || read.head.versionSha256 !== entry.deletionVersionSha256 || read.bytes !== null) return fail();
+        } else if (entry.source.operation === 'PUT') {
+          if ((await performanceCleanupFileSource(entry.source.path, files)).operation !== 'ABSENT') return fail();
+        } else if (!same(await performanceCleanupFileSource(entry.source.path, files), entry.source)) return fail();
+      }
+      return true;
+    });
+    if (confirmed) return true;
+    return fail();
   }
 };
+
 
 const deleteDownloadedPerformanceExport = async (client: PrismaClient, exportId: string, actorUserId: string | null) => {
   await cleanupPerformanceExport(client, exportId, new Date(), actorUserId);
 };
 
-export const cleanupExpiredPerformanceExports = async (client: PrismaClient | Prisma.TransactionClient, now = new Date()) => {
+export const cleanupExpiredPerformanceExports = (client: PrismaClient | Prisma.TransactionClient, now = new Date()) => runOwnedPerformanceMaintenance(async () => {
+  if (!('$transaction' in client)) throw disclosureError('پاک‌سازی خروجی باید در تراکنش مستقل نگهداری انجام شود.', 'PERFORMANCE_CLEANUP_TRANSACTION_REQUIRED', 409);
   let count = 0;
   let failed = 0;
   let cursor: string | undefined;
@@ -1204,9 +1325,10 @@ export const cleanupExpiredPerformanceExports = async (client: PrismaClient | Pr
     }
     cursor = expired[expired.length - 1].id;
   }
+  failed += await client.performanceExportCleanupAttempt.count({ where: { status: 'RETRY_REQUIRED', lastFailureCode: 'PERFORMANCE_CLEANUP_LOGICAL_REMOVAL_FILES_PENDING' } });
   if (failed) throw disclosureError('بخشی از پاک‌سازی تکمیل نشد و برای تلاش دوباره حفظ شد.', 'PERFORMANCE_CLEANUP_RETRY_REQUIRED', 503);
   return count;
-};
+});
 
 export const createPerformanceConsequenceHandoff = async (client: PrismaClient, input: {
   actorUserId: string;

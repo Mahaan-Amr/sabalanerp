@@ -7,12 +7,16 @@ repo_root="$2"
 operations_root="$3"
 required_local="$4"
 required_remote="$5"
+# Validate the actual distinct operations identity before any cleanup request.
+# Inspection only reads local prerequisites under this inherited host lock.
+node "$operations_root/deploy/scripts/backup-retention-host.mjs" --inspect "$env_file"
 case "$required_local:$required_remote" in *[!0-9:]*) echo 'STORAGE_CAPACITY_INVALID' >&2; exit 1;; esac
 env_value() { awk -F= -v key="$1" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$env_file"; }
 backup_host="$(env_value DEPLOYMENT_BACKUP_HOST)"
 backup_user="$(env_value DEPLOYMENT_BACKUP_USER)"
 operations_user="$(env_value DEPLOYMENT_BACKUP_OPERATIONS_USER)"
 backup_key="$(env_value DEPLOYMENT_BACKUP_SSH_KEY_FILE)"
+operations_key="$(env_value DEPLOYMENT_BACKUP_OPERATIONS_SSH_KEY_FILE)"
 backup_known_hosts="$(env_value DEPLOYMENT_BACKUP_KNOWN_HOSTS_FILE)"
 remote_root="$(env_value DEPLOYMENT_REMOTE_MOUNT_HOST)"
 report_root="$(env_value DEPLOYMENT_REPORT_DIR_HOST)"
@@ -22,7 +26,7 @@ for value in "$backup_host" "$backup_user" "$operations_user"; do
   case "$value" in ''|-*|*[!a-zA-Z0-9._:-]*) echo 'STORAGE_BACKUP_HOST_INVALID' >&2; exit 1;; esac
 done
 [ "$backup_user" = sabalan-backup ] && [ "$operations_user" = sabalan-backup-ops ] || { echo 'STORAGE_BACKUP_ACCOUNT_INVALID' >&2; exit 1; }
-[ -r "$backup_key" ] && [ -r "$backup_known_hosts" ] || { echo 'STORAGE_BACKUP_KEY_MISSING' >&2; exit 1; }
+[ -r "$backup_key" ] && [ -r "$operations_key" ] && [ -r "$backup_known_hosts" ] || { echo 'STORAGE_BACKUP_KEY_MISSING' >&2; exit 1; }
 recovery_root="$(docker volume inspect "${project}_backend_recovery" --format '{{.Mountpoint}}')"
 coordination_root="$(docker volume inspect "${project}_recovery_coordination" --format '{{.Mountpoint}}')"
 docker_root="$(docker info --format '{{.DockerRootDir}}')"
@@ -48,6 +52,6 @@ node "$operations_root/deploy/scripts/storage-preflight.mjs" \
   --document "$coordination_root/pending-restore.json" \
   --document "$report_root/active-deployment-session.json" \
   --audit "$report_root/storage-cleanup-local.jsonl"
-ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-  -o "UserKnownHostsFile=$backup_known_hosts" -i "$backup_key" "$operations_user@$backup_host" \
+ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+  -o "UserKnownHostsFile=$backup_known_hosts" -i "$operations_key" "$operations_user@$backup_host" \
   "preflight $required_remote"

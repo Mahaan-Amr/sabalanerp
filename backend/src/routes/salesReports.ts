@@ -1,12 +1,12 @@
 import express, { Response } from 'express';
 import path from 'path';
-import fs from 'fs';
 import { Prisma } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES, WorkspaceRequest } from '../middleware/workspace';
 import { buildSalesReport, getSalesReportSellers, SalesReportAccess } from '../services/salesReportingService';
 import { generatePdfFromHtml } from '../utils/pdf';
+import { downloadAndRemoveDocumentPdf } from '../services/documentPdfDownload';
 import { renderReportPdfHeaderTemplate, renderYekanFontFaces } from '../utils/printTemplate';
 import { formatMoney, roundMoneyFields } from '../utils/money';
 
@@ -210,7 +210,8 @@ router.post('/export.pdf', ...reportAccess, async (req: WorkspaceRequest, res: R
       headerTemplate: renderReportPdfHeaderTemplate({ title: config.title, reportRange: report.period.label, scopeLabel: report.scope.label, generatedAt: report.generatedAtLabel }),
       margin: { top: '34mm', right: '5mm', bottom: '7mm', left: '5mm' }
     });
-    res.download(file, `sales-report-${Date.now()}.pdf`, () => fs.unlink(file, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, file, `sales-report-${Date.now()}.pdf`);
+    return;
   } catch (error: any) { res.status(400).json({ success: false, error: error.message }); }
 });
 

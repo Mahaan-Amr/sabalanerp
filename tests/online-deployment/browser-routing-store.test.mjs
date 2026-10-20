@@ -8,6 +8,7 @@ import os from 'node:os';
 import test from 'node:test';
 import {BrowserRoutingStore, BrowserRoutingPublicationLock} from '../../deploy/scripts/browser-routing-store.mjs';
 import {selectBrowserRelease, compileBrowserRoutingRegistry} from '../../deploy/scripts/browser-release-routing.mjs';
+import {apiRoutingSnapshot,compileApiRoutingRegistry,selectApiRelease} from '../../deploy/scripts/api-release-routing.mjs';
 
 const image = `sha256:${'a'.repeat(64)}`;
 const baseline = () => ({format: 'sabalan-browser-routing/v1', generation: 1,
@@ -21,6 +22,34 @@ const retire = (input, name, time) => {
   const next = {...old, id: name, slotId: 'slot_' + name, retiredAt: null, supportUntil: null};
   result.builds.push(next); result.current.erp = name; return result;
 };
+
+test('one durable publication switches browser and API bindings together and preserves every retained backend identity',async()=>{
+  await fixture(async({directory,publicationLock,owner})=>{
+    const store=new BrowserRoutingStore({directory,publicationLock,assertReleaseOwnership:owner});
+    const initial=baseline();initial.format='sabalan-browser-routing/v2';
+    initial.apiBindings=[{buildId:'erp_first',browserManifestSha256:'b'.repeat(64),slotId:'backend_first',image,manifestSha256:'c'.repeat(64)}];
+    const first=await store.publish(initial,null);
+    const next=retire(initial,'erp_second','2026-10-19T00:00:00.000Z');
+    next.apiBindings.push({buildId:'erp_second',browserManifestSha256:'b'.repeat(64),slotId:'backend_second',image,manifestSha256:'d'.repeat(64)});
+    const second=await store.publish(next,first.publicationSha256);
+    const published=await store.readPublication(),snapshot=apiRoutingSnapshot(published.registry);
+    assert.equal(published.publicationSha256,second.publicationSha256);
+    assert.equal(snapshot.browser.current.erp,'erp_second');assert.equal(snapshot.api.generation,2);
+    const api=compileApiRoutingRegistry(snapshot.browser,snapshot.api);
+    assert.equal(selectApiRelease(api,'erp_first',0).slotId,'backend_first');
+    assert.equal(selectApiRelease(api,'erp_second',0).slotId,'backend_second');
+    assert.equal(selectApiRelease(api,null,0).slotId,'backend_first');
+    const changed=structuredClone(next);changed.generation++;
+    changed.apiBindings[0].image='sha256:'+'e'.repeat(64);
+    await assert.rejects(store.publish(changed,second.publicationSha256),/BROWSER_ROUTING_API_IDENTITY_CHANGED/);
+    const downgraded=structuredClone(next);downgraded.generation++;downgraded.format='sabalan-browser-routing/v1';delete downgraded.apiBindings;
+    await assert.rejects(store.publish(downgraded,second.publicationSha256),/BROWSER_ROUTING_API_REMOVED/);
+    const partial=structuredClone(next);partial.generation++;partial.apiBindings.pop();
+    await assert.rejects(store.publish(partial,second.publicationSha256),/BROWSER_API_BINDINGS_INCOMPLETE/);
+    assert.equal((await store.readPublication()).publicationSha256,second.publicationSha256);
+    assert.deepEqual((await fs.readdir(directory)).sort(),['published-00000001.json','published-00000002.json']);
+  });
+});
 
 async function fixture(run) {
   assert.equal(process.platform, 'linux', 'native publication acceptance requires Linux');

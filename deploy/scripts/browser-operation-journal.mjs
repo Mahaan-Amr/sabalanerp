@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import {constants} from 'node:fs';
 import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
 
@@ -75,7 +76,7 @@ export class BrowserOperationJournal {
       || !digest.test(record.instanceId) || !digest.test(record.registryIdentity) || !digest.test(record.manifestSha256)
       || !Number.isSafeInteger(record.generation) || record.generation<1
       || !name.test(record.buildId) || !name.test(record.slotId) || !/^sha256:[a-f0-9]{64}$/.test(record.image)
-      || !['GET','HEAD','POST','OPTIONS'].includes(record.method) || !timestamp(record.startedAt)) fail('BROWSER_JOURNAL_INTENT_INVALID');
+      || !['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(record.method) || !timestamp(record.startedAt)) fail('BROWSER_JOURNAL_INTENT_INVALID');
   }
 
   async begin({registryIdentity,generation,buildId,slotId,image,manifestSha256,method}) {
@@ -101,7 +102,28 @@ export class BrowserOperationJournal {
       const existing=await this.#readStrict(file);
       this.#validateCompletion(existing.value,intent,id);
       if(existing.value.outcome!==outcome)fail('BROWSER_JOURNAL_COMPLETION_CONFLICT');
+      // A prior attempt can have created this exact file but failed before its
+      // directory fsync. EEXIST proves visibility, not durable completion.
+      await this.#persistExistingCompletion(file,existing.hash);
     }
+  }
+
+  async #persistExistingCompletion(file,expectedHash) {
+    await this.#assertRoot();
+    const handle=await fs.open(file,(process.platform==='win32'?constants.O_RDWR:constants.O_RDONLY)
+      | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const identity=value=>[value.dev,value.ino,value.size,value.mtimeNs,value.ctimeNs,value.mode,value.uid,value.nlink].map(String).join(':');
+    try {
+      const before=await handle.stat({bigint:true});
+      if(!before.isFile() || before.nlink!==1n || before.size>4096n
+        || (process.platform!=='win32' && ((before.mode&0o077n)!==0n || before.uid!==BigInt(process.getuid()))))fail('BROWSER_JOURNAL_RECORD_UNSAFE');
+      if(sha256(await handle.readFile())!==expectedHash)fail('BROWSER_JOURNAL_COMPLETION_CONFLICT');
+      await handle.sync();
+      if(identity(before)!==identity(await handle.stat({bigint:true}))
+        || identity(before)!==identity(await fs.lstat(file,{bigint:true})))fail('BROWSER_JOURNAL_COMPLETION_CONFLICT');
+      await this.#syncDirectory();await this.#assertRoot();
+      if(identity(before)!==identity(await fs.lstat(file,{bigint:true})))fail('BROWSER_JOURNAL_COMPLETION_CONFLICT');
+    } finally {await handle.close();}
   }
 
   #validateCompletion(record,intent,id) {
@@ -129,6 +151,21 @@ export class BrowserOperationJournal {
       this.#validateCompletion(record.value,intent,id);
     }
     return [...intents].filter(([id])=>!completions.has(id)).map(([,record])=>({...record.value}));
+  }
+
+  /** Original-instance read-only custody for controller reconciliation. These
+   * are the exact durable intent bytes, not a reserialized semantic hash.
+   * An old instance's UNKNOWN cannot be adopted by constructing a new journal. */
+  async originalPendingEvidence() {
+    const values=await this.pending(),result=[];
+    for(const value of values) {
+      if(value.instanceId!==this.#instanceId)fail('BROWSER_JOURNAL_NOT_OWNED');
+      const record=await this.#readStrict(path.join(this.#directory,`${value.id}.intent.json`));
+      this.#validateIntent(record.value,value.id);
+      if(record.value.instanceId!==this.#instanceId || JSON.stringify(record.value)!==JSON.stringify(value))fail('BROWSER_JOURNAL_INTENT_CHANGED');
+      result.push(Object.freeze({intent:Object.freeze({...record.value}),intentSha256:record.hash}));
+    }
+    return Object.freeze(result);
   }
 
   async #syncDirectory() {

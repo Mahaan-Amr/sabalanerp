@@ -2,18 +2,19 @@ import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '../../../backend/node_modules/@prisma/client';
 import { createAuthoritativeSession } from '../../../backend/src/services/identitySessionService';
 import { previewCustomerDeletion, deleteCustomerInTransaction } from '../../../backend/src/services/crmCustomerManagement';
+import {sdsDatabaseScope,assertSdsDatabaseIdentity} from './sds-database-scope';
 
 /** Only the existing local Compose database. Auth tokens stay in memory. */
 export async function createPartnerCustomerBrowserFixture() {
-  const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL || 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp');
-  if (!['127.0.0.1', 'localhost'].includes(url.hostname) || url.port !== '55432' || url.pathname !== '/sabalanerp') throw new Error('Existing local Compose database required');
-  url.searchParams.set('connection_limit', '2'); url.searchParams.set('pool_timeout', '10');
+  const scope=sdsDatabaseScope(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL || 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp');
+  const {url}=scope;
   const db = new PrismaClient({ datasources: { db: { url: url.toString() } } });
   const owner = `qa-crm-owner-${randomUUID()}`;
   let customerId: string | undefined;
   try {
+    await assertSdsDatabaseIdentity(db,scope);
     const seeded = await db.$transaction(async tx => {
-      const admin = await tx.user.findUniqueOrThrow({ where: { username: 'admin' }, select: { id: true } });
+      const admin = await tx.user.findUniqueOrThrow({ where: { username: scope.adminUsername }, select: { id: true } });
       await tx.user.create({ data: { id: owner, username: owner, email: `${owner}@example.invalid`, password: 'not-a-login', firstName: 'آزمون محلی', lastName: 'مالک مشتری', role: 'USER' } });
       await tx.partnerProfile.create({ data: { id: owner, userId: owner, state: 'ACTIVE' } });
       await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${owner}, true)`;
@@ -38,7 +39,14 @@ export async function createPartnerCustomerBrowserFixture() {
     return { ...seeded, cleanup };
   } catch (error) {
     // Keep any partially committed history identifiable; never remove audit evidence.
-    if (customerId) await db.user.update({ where: { id: owner }, data: { isActive: false } });
-    await db.$disconnect(); throw error;
+    const failures:unknown[]=[error];
+    try {
+      if (customerId) await db.user.update({ where: { id: owner }, data: { isActive: false } });
+    } catch(cleanupError) { failures.push(cleanupError); }
+    finally {
+      try { await db.$disconnect(); } catch(disconnectError) { failures.push(disconnectError); }
+    }
+    if(failures.length>1)throw new AggregateError(failures,'Partner fixture failed; original and cleanup errors retained');
+    throw error;
   }
 }

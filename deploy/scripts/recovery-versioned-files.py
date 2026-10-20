@@ -96,11 +96,30 @@ def key(value):
     return value
 
 
-class SealedVersionedFiles:
-    def __init__(self, root, capture_id, sha256):
-        if not isinstance(capture_id, str) or not SHA.fullmatch(capture_id) or not isinstance(sha256, str) or not SHA.fullmatch(sha256):
-            fail('VERSIONED_RESTORE_SELECTION_INVALID')
-        self.root, self.capture_id, self.sha256 = root, capture_id, sha256
+def sealed_directories(value):
+    """V2 explicit immutable directories; never infer them for a V1 seal."""
+    if value.get('format') == 'sabalan-file-version-cut/v1':
+        return []
+    rows = value.get('directories')
+    if not isinstance(rows, list) or len(rows) >= MAX_KEYS:
+        fail('VERSIONED_RESTORE_DIRECTORIES_INVALID')
+    seen, previous = set(), None
+    for item in rows:
+        name = key(item)
+        order = name.encode('utf-16-be')
+        if name in seen or previous is not None and order <= previous:
+            fail('VERSIONED_RESTORE_DIRECTORIES_INVALID')
+        parts = name.split('/')
+        if any('/'.join(parts[:number]) not in seen for number in range(1, len(parts))):
+            fail('VERSIONED_RESTORE_DIRECTORIES_INVALID')
+        seen.add(name)
+        previous = order
+    return rows
+
+
+class _ImmutableVersionedStore:
+    def __init__(self, root):
+        self.root = root
         self.identities = {path: directory(path) for path in [root, *[os.path.join(root, part)
                            for part in ('objects', 'versions', 'seals')]]}
         descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -109,12 +128,17 @@ class SealedVersionedFiles:
         finally:
             os.close(descriptor)
         sync_ancestors(root)
+
+    def cut_metadata(self, capture_id, sha256):
+        if not isinstance(capture_id, str) or not SHA.fullmatch(capture_id) or not isinstance(sha256, str) or not SHA.fullmatch(sha256):
+            fail('VERSIONED_RESTORE_SELECTION_INVALID')
         raw = self.read('seals', capture_id + '.json', MAX_MANIFEST)
         if digest(raw) != sha256:
             fail('VERSIONED_RESTORE_SEAL_CHANGED')
         value = self.decode(raw)
-        if (not exact(value, ['format', 'captureId', 'gate', 'source', 'heads'])
-                or value['format'] != 'sabalan-file-version-cut/v1' or value['captureId'] != capture_id
+        version_two = value.get('format') == 'sabalan-file-version-cut/v2'
+        if (not exact(value, ['format', 'captureId', 'gate', 'source', 'heads'] + (['directories'] if version_two else []))
+                or value['format'] not in ['sabalan-file-version-cut/v1', 'sabalan-file-version-cut/v2'] or value['captureId'] != capture_id
                 or not exact(value['gate'], ['device', 'inode', 'ownerUid'])
                 or not all(isinstance(value['gate'][field], str) and re.fullmatch(r'[0-9]{1,30}', value['gate'][field])
                            for field in ('device', 'inode'))
@@ -126,71 +150,8 @@ class SealedVersionedFiles:
                            for field in ('device', 'inode'))
                 or not isinstance(value['heads'], list) or len(value['heads']) > MAX_KEYS):
             fail('VERSIONED_RESTORE_SEAL_INVALID')
-        self.live_source = value['source']['path']
-        self.entries, seen, directories, selected_objects, chains = [], set(), {''}, set(), []
-        previous_key = None
-        for head in value['heads']:
-            if not exact(head, ['key', 'sha256']) or not isinstance(head['sha256'], str) or not SHA.fullmatch(head['sha256']):
-                fail('VERSIONED_RESTORE_HEAD_INVALID')
-            name = key(head['key'])
-            # JavaScript compares UTF-16 code units, including astral characters.
-            order = name.encode('utf-16-be')
-            if name in seen or previous_key is not None and order <= previous_key:
-                fail('VERSIONED_RESTORE_HEAD_ORDER_INVALID')
-            seen.add(name)
-            previous_key = order
-            selected, selected_bytes = self.version(head['sha256'])
-            if selected['key'] != name:
-                fail('VERSIONED_RESTORE_LINEAGE_INVALID')
-            if selected['operation'] == 'PUT':
-                object_name = selected['object']['name']
-                if object_name in selected_objects:
-                    fail('VERSIONED_RESTORE_SHARED_OBJECT_REFUSED')
-                selected_objects.add(object_name)
-            chains.append((selected, selected_bytes))
-            self.entries.append(selected)
-            for number in range(1, len(name.split('/'))):
-                directories.add('/'.join(name.split('/')[:number]))
-                if len(directories) > MAX_KEYS:
-                    fail('VERSIONED_RESTORE_DIRECTORY_CAPACITY')
-        live = {entry['key'] for entry in self.entries if entry['operation'] == 'PUT'}
-        live_directories = {'/'.join(name.split('/')[:number]) for name in live
-                            for number in range(1, len(name.split('/')))}
-        if live.intersection(live_directories):
-            fail('VERSIONED_RESTORE_PATH_CONFLICT')
-        # At most four in-flight records/chains, including on failure. Settle
-        # every started future before returning; never leave a reader running
-        # after a failed verification or accumulate historical records.
-        self.history_records, self.history_bytes = 0, 0
-        with ThreadPoolExecutor(max_workers=4) as workers:
-            for offset in range(0, len(chains), 4):
-                futures = [workers.submit(self.lineage, entry) for entry in chains[offset:offset + 4]]
-                failure = None
-                for future in futures:
-                    try:
-                        count, size = future.result()
-                        self.history_records += count
-                        self.history_bytes += size
-                    except Exception as error:
-                        if failure is None:
-                            failure = error
-                if failure is not None:
-                    raise failure
-        self.assert_owner()
-
-    def lineage(self, entry):
-        selected, size = entry
-        current, count = selected, 1
-        while current['previousSha256'] is not None:
-            count += 1
-            if count > MAX_KEYS:
-                fail('VERSIONED_RESTORE_HISTORY_CAPACITY')
-            ancestor, record_bytes = self.version(current['previousSha256'])
-            if ancestor['key'] != selected['key'] or ancestor['generation'] != current['generation'] - 1:
-                fail('VERSIONED_RESTORE_LINEAGE_INVALID')
-            current = ancestor
-            size += record_bytes
-        return count, size
+        sealed_directories(value)
+        return value
 
     def assert_owner(self):
         if any(directory(path) != expected for path, expected in self.identities.items()):
@@ -241,6 +202,92 @@ class SealedVersionedFiles:
         if encoded(value) != raw:
             fail('VERSIONED_RESTORE_RECORD_INVALID')
         return value
+
+def read_sealed_cut_metadata(root, capture_id, sha256):
+    """Read only immutable bounded seal metadata; grants no restore validation.
+
+    Full SealedVersionedFiles construction still verifies every predecessor and
+    selected object before restoration. Capture must validate its own EX gate.
+    """
+    if not isinstance(capture_id, str) or not SHA.fullmatch(capture_id) or not isinstance(sha256, str) or not SHA.fullmatch(sha256):
+        fail('VERSIONED_RESTORE_SELECTION_INVALID')
+    return _ImmutableVersionedStore(root).cut_metadata(capture_id, sha256)
+
+
+class SealedVersionedFiles(_ImmutableVersionedStore):
+    def __init__(self, root, capture_id, sha256):
+        if not isinstance(capture_id, str) or not SHA.fullmatch(capture_id) or not isinstance(sha256, str) or not SHA.fullmatch(sha256):
+            fail('VERSIONED_RESTORE_SELECTION_INVALID')
+        self.capture_id, self.sha256 = capture_id, sha256
+        super().__init__(root)
+        value = self.cut_metadata(capture_id, sha256)
+        self.live_source = value['source']['path']
+        self.cut_format = value['format']
+        self.preserved_directories = sealed_directories(value)
+        self.entries, seen, directories, selected_objects, chains = [], set(), {''} | set(self.preserved_directories), set(), []
+        previous_key = None
+        for head in value['heads']:
+            if not exact(head, ['key', 'sha256']) or not isinstance(head['sha256'], str) or not SHA.fullmatch(head['sha256']):
+                fail('VERSIONED_RESTORE_HEAD_INVALID')
+            name = key(head['key'])
+            # JavaScript compares UTF-16 code units, including astral characters.
+            order = name.encode('utf-16-be')
+            if name in seen or previous_key is not None and order <= previous_key:
+                fail('VERSIONED_RESTORE_HEAD_ORDER_INVALID')
+            seen.add(name)
+            previous_key = order
+            selected, selected_bytes = self.version(head['sha256'])
+            if selected['key'] != name:
+                fail('VERSIONED_RESTORE_LINEAGE_INVALID')
+            if selected['operation'] == 'PUT':
+                object_name = selected['object']['name']
+                if object_name in selected_objects:
+                    fail('VERSIONED_RESTORE_SHARED_OBJECT_REFUSED')
+                selected_objects.add(object_name)
+            chains.append((selected, selected_bytes))
+            self.entries.append(selected)
+            for number in range(1, len(name.split('/'))):
+                directories.add('/'.join(name.split('/')[:number]))
+                if len(directories) > MAX_KEYS:
+                    fail('VERSIONED_RESTORE_DIRECTORY_CAPACITY')
+        live = {entry['key'] for entry in self.entries if entry['operation'] == 'PUT'}
+        live_directories = {'/'.join(name.split('/')[:number]) for name in live
+                            for number in range(1, len(name.split('/')))}
+        if live.intersection(live_directories | set(self.preserved_directories)):
+            fail('VERSIONED_RESTORE_PATH_CONFLICT')
+        # At most four in-flight records/chains, including on failure. Settle
+        # every started future before returning; never leave a reader running
+        # after a failed verification or accumulate historical records.
+        self.history_records, self.history_bytes = 0, 0
+        with ThreadPoolExecutor(max_workers=4) as workers:
+            for offset in range(0, len(chains), 4):
+                futures = [workers.submit(self.lineage, entry) for entry in chains[offset:offset + 4]]
+                failure = None
+                for future in futures:
+                    try:
+                        count, size = future.result()
+                        self.history_records += count
+                        self.history_bytes += size
+                    except Exception as error:
+                        if failure is None:
+                            failure = error
+                if failure is not None:
+                    raise failure
+        self.assert_owner()
+
+    def lineage(self, entry):
+        selected, size = entry
+        current, count = selected, 1
+        while current['previousSha256'] is not None:
+            count += 1
+            if count > MAX_KEYS:
+                fail('VERSIONED_RESTORE_HISTORY_CAPACITY')
+            ancestor, record_bytes = self.version(current['previousSha256'])
+            if ancestor['key'] != selected['key'] or ancestor['generation'] != current['generation'] - 1:
+                fail('VERSIONED_RESTORE_LINEAGE_INVALID')
+            current = ancestor
+            size += record_bytes
+        return count, size
 
     def version(self, sha256):
         raw = self.read('versions', sha256 + '.json', 16384)
@@ -299,6 +346,32 @@ class SealedVersionedFiles:
         destination = os.path.join(target, 'files')
         os.mkdir(destination, 0o700)
         created = {destination: directory(destination)}
+        root_fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            target_mount = mount(root_fd)
+        finally:
+            os.close(root_fd)
+
+        def checked_directory(path):
+            identity = directory(path)
+            descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                if mount(descriptor) != target_mount:
+                    fail('VERSIONED_RESTORE_TARGET_MOUNT_CHANGED')
+            finally:
+                os.close(descriptor)
+            return identity
+
+        # Prefix closure/order was checked from immutable bytes before creating
+        # the target. Retain empty directories before restoring business files.
+        for name in self.preserved_directories:
+            path = os.path.join(destination, *name.split('/'))
+            if (directory(target) != target_identity
+                    or any(checked_directory(item) != expected for item, expected in created.items())):
+                fail('VERSIONED_RESTORE_TARGET_CHANGED')
+            os.mkdir(path, 0o700)
+            created[path] = checked_directory(path)
+            sync_path(os.path.dirname(path))
         observed = []
         for entry in self.entries:
             if entry['operation'] == 'DELETE':
@@ -308,9 +381,9 @@ class SealedVersionedFiles:
                 path = os.path.join(destination, *components[:number])
                 if path not in created:
                     os.mkdir(path, 0o700)
-                    created[path] = directory(path)
+                    created[path] = checked_directory(path)
                     sync_path(os.path.dirname(path))
-            if directory(target) != target_identity or any(directory(path) != expected for path, expected in created.items()):
+            if directory(target) != target_identity or any(checked_directory(path) != expected for path, expected in created.items()):
                 fail('VERSIONED_RESTORE_TARGET_CHANGED')
             name, size = entry['object']['name'], entry['object']['bytes']
             source, before = self.open('objects', name, size)
@@ -360,12 +433,15 @@ class SealedVersionedFiles:
                 os.close(check)
             sync_path(os.path.dirname(path))
             observed.append({'key': entry['key'], 'sha256': entry['object']['sha256'], 'bytes': size})
-        if directory(target) != target_identity or any(directory(path) != expected for path, expected in created.items()):
+        if directory(target) != target_identity or any(checked_directory(path) != expected for path, expected in created.items()):
             fail('VERSIONED_RESTORE_TARGET_CHANGED')
         self.assert_owner()
         sync_path(destination)
         result = {'format': 'sabalan-versioned-file-restore/v1', 'sealSha256': self.sha256,
                   'files': observed, 'tombstones': sum(entry['operation'] == 'DELETE' for entry in self.entries),
                   'historyRecordsVerified': self.history_records, 'historyBytesVerified': self.history_bytes}
+        if self.cut_format == 'sabalan-file-version-cut/v2':
+            result['format'] = 'sabalan-versioned-file-restore/v2'
+            result['directories'] = list(self.preserved_directories)
         record('complete.json', result)
         return result

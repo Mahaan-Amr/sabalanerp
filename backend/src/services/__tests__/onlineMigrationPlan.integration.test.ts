@@ -63,7 +63,30 @@ test('real-schema bounded expansion, atomic history, concurrent old/new writers 
       assert.equal(await database.onlineMigrationStep.count({ where: { state: 'PENDING' } }), 1);
       assert.deepEqual(await database.$queryRawUnsafe(`SELECT column_name FROM information_schema.columns WHERE table_name='online_migration_probe' AND column_name='amount_v2'`), []);
       unblock.resolve(); await holding; holding = undefined;
-      assert.equal((await applyOnlineExpansion(database, owner, plan, sql)).applied, true);
+      const originalHistory = await database.$queryRawUnsafe('SELECT to_jsonb(m) AS row FROM "_prisma_migrations" m ORDER BY migration_name,id');
+      await database.$executeRawUnsafe('CREATE TABLE qa_online_ddl_observations (phase text NOT NULL, observed_at timestamptz NOT NULL)');
+      await database.$executeRawUnsafe(`CREATE FUNCTION qa_online_observe_ddl() RETURNS event_trigger LANGUAGE plpgsql AS $$ BEGIN
+        INSERT INTO qa_online_ddl_observations VALUES (TG_EVENT,clock_timestamp()); END $$`);
+      for (const phase of ['ddl_command_start', 'ddl_command_end']) await database.$executeRawUnsafe(
+        `CREATE EVENT TRIGGER qa_online_observe_${phase} ON ${phase} WHEN TAG IN ('ALTER TABLE','CREATE FUNCTION','CREATE TRIGGER') EXECUTE FUNCTION qa_online_observe_ddl()`);
+      try {
+        assert.equal((await applyOnlineExpansion(database, owner, plan, sql)).applied, true);
+        const chronology = await database.$queryRaw<Array<{ starts: number; finishes: number; startedBeforeDdl: boolean; finishedAfterDdl: boolean; ordered: boolean }>>`
+          SELECT (SELECT count(*)::int FROM qa_online_ddl_observations WHERE phase='ddl_command_start') AS starts,
+            (SELECT count(*)::int FROM qa_online_ddl_observations WHERE phase='ddl_command_end') AS finishes,
+            m.started_at <= (SELECT min(observed_at) FROM qa_online_ddl_observations WHERE phase='ddl_command_start') AS "startedBeforeDdl",
+            m.finished_at >= (SELECT max(observed_at) FROM qa_online_ddl_observations WHERE phase='ddl_command_end') AS "finishedAfterDdl",
+            m.finished_at >= m.started_at AS ordered
+          FROM "_prisma_migrations" m WHERE migration_name=${plan.migrationName}`;
+        assert.equal(chronology.length, 1);
+        assert.deepEqual(chronology[0], { starts: compiled.statements.length, finishes: compiled.statements.length,
+          startedBeforeDdl: true, finishedAfterDdl: true, ordered: true }, 'native history must bracket actual first/last DDL, at PostgreSQL precision');
+        assert.deepEqual(await database.$queryRaw`SELECT to_jsonb(m) AS row FROM "_prisma_migrations" m WHERE migration_name<>${plan.migrationName} ORDER BY migration_name,id`, originalHistory,
+          'expansion appends exactly its own native row without changing any original history values');
+      } finally {
+        for (const phase of ['ddl_command_start', 'ddl_command_end']) await database.$executeRawUnsafe(`DROP EVENT TRIGGER qa_online_observe_${phase}`);
+        await database.$executeRawUnsafe('DROP FUNCTION qa_online_observe_ddl()');
+      }
       assert.equal((await applyOnlineExpansion(database, owner, plan, sql)).applied, false);
       await assert.rejects(() => newWriter.$executeRawUnsafe("UPDATE online_migration_probe SET amount_v2=NULL WHERE id='seed-00001'"), /ONLINE_MIRROR_NULL_UNSUPPORTED/);
       assert.deepEqual(await database.$queryRawUnsafe("SELECT amount::text,amount_v2 FROM online_migration_probe WHERE id='seed-00001'"), [{ amount:'10.25000000', amount_v2:null }]);
@@ -126,7 +149,14 @@ test('real-schema bounded expansion, atomic history, concurrent old/new writers 
         PERFORM pg_advisory_xact_lock(741936427::bigint); END; $$ LANGUAGE plpgsql`);
       await database.$executeRawUnsafe(`CREATE EVENT TRIGGER qa_wait_online_ddl ON ddl_command_end WHEN TAG IN ('ALTER TABLE')
         EXECUTE FUNCTION qa_wait_online_ddl()`);
+      // Establish independent observer/canceller pools before the bounded DDL
+      // starts. Opening a cold client must not consume its one-second lock wait.
+      await oldWriter.$queryRaw`SELECT 1 AS ready`;
+      await newWriter.$queryRaw`SELECT 1 AS ready`;
       const applying=applyOnlineExpansion(database,owner,interruptedPlan,Buffer.from(interrupted.sql));
+      // The real DDL can reject while the independent lock observer awaits.
+      // Observe immediately; the original promise is still awaited below.
+      void applying.catch(() => {});
       try {
         let waiting=false;
         for(let attempt=0;attempt<100;attempt++) {

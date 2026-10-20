@@ -1,33 +1,55 @@
 import { PrismaClient } from '@prisma/client';
-import { createDispatchDocumentFilesystem, createDispatchDocumentRecoveryOperations, createPrismaDispatchReplayTruthVerifier, type DispatchRecoveryAuthority } from '../src/services/dispatchDocumentAuditRecovery';
+import type { DispatchRecoveryAuthority } from '../src/services/dispatchDocumentAuditRecovery';
+import { assertRuntimeControlOwnership } from '../src/services/runtimeControlOwnership';
+import { assertProtectedBridgeMigrationAuthority } from '../src/services/protectedBridgeMigrations';
 
-const args = new Map<string, string>();
-for (let index = 2; index < process.argv.length; index += 2) {
-  const key = process.argv[index]; const value = process.argv[index + 1];
-  if (!key?.startsWith('--') || !value) throw new Error('Recovery arguments must be explicit --key value pairs.');
-  args.set(key.slice(2), value);
+async function main() {
+  const args = new Map<string, string>();
+  for (let index = 2; index < process.argv.length; index += 2) {
+    const key = process.argv[index]; const value = process.argv[index + 1];
+    if (!key?.startsWith('--') || !value) throw new Error('Recovery arguments must be explicit --key value pairs.');
+    args.set(key.slice(2), value);
+  }
+  const required = (key: string) => { const value = args.get(key)?.trim(); if (!value) throw new Error(`--${key} is required.`); return value; };
+  const command = required('command');
+  const actorId = required('actor-id');
+  const authority: DispatchRecoveryAuthority = {
+    effectiveAuthority: 'SYSTEM_RECOVERY_ADMIN', workspace: 'SYSTEM_RECOVERY', feature: 'accounting_audit_view', permission: 'ADMIN',
+    subjectType: 'DISPATCH_DOCUMENT', subjectId: required('subject-id'), sessionId: required('session-id'), deviceId: required('device-id'),
+    beforeHash: required('before-hash'), afterHash: required('after-hash'),
+  };
+  const common = { actorId, authority, correlationId: required('correlation-id'), idempotencyKey: required('idempotency-key') };
+  // Every command, including replay/reconciliation, appends durable audit.
+  // Preserve the existing protected lane until the whole recovery writer is
+  // enrolled. An online registration cannot be mistaken for a stopped fleet.
+  assertRuntimeControlOwnership();
+  const owner = {
+    deploymentId: String(process.env.DEPLOYMENT_ID || ''),
+    releaseId: String(process.env.DEPLOYMENT_RELEASE_ID || ''),
+    leaseToken: String(process.env.DEPLOYMENT_LEASE_TOKEN || ''),
+  };
+  const prisma = new PrismaClient();
+
+  try {
+    await assertProtectedBridgeMigrationAuthority(prisma, owner);
+    const { createDispatchDocumentFilesystem, createDispatchDocumentRecoveryOperations, createPrismaDispatchReplayTruthVerifier }
+      = await import('../src/services/dispatchDocumentAuditRecovery');
+    const actor = await prisma.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
+    if (!actor?.isActive || actor.role !== 'ADMIN') throw new Error('An active ADMIN operator is required for dispatch-document recovery mutation.');
+    if (command === 'restore' && !process.env.DISPATCH_RECOVERY_PASSPHRASE) throw new Error('DISPATCH_RECOVERY_PASSPHRASE is required and must not be passed on the command line.');
+    const operations = createDispatchDocumentRecoveryOperations(prisma, createDispatchDocumentFilesystem(), createPrismaDispatchReplayTruthVerifier(prisma));
+    await assertProtectedBridgeMigrationAuthority(prisma, owner);
+    const result = command === 'replay' ? await operations.replay({ ...common, waybillId: required('waybill-id') })
+      : command === 'reconcile' ? await operations.reconcile(common)
+        : command === 'quarantine' ? await operations.quarantine({ ...common, storageKey: required('storage-key'), reason: required('reason') })
+          : command === 'cleanup' ? await operations.cleanup({ ...common, storageKey: required('storage-key'), reason: required('reason'), now: new Date() })
+            : command === 'restore' ? await operations.restoreFromRecoveryPackage({ ...common, artifactId: required('artifact-id'), reason: required('reason'), recoveryPackagePath: required('package-path'), passphrase: process.env.DISPATCH_RECOVERY_PASSPHRASE || '' })
+              : (() => { throw new Error('Unknown --command. Use replay, reconcile, restore, quarantine, or cleanup.'); })();
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+  } finally { await prisma.$disconnect(); }
 }
-const required = (key: string) => { const value = args.get(key)?.trim(); if (!value) throw new Error(`--${key} is required.`); return value; };
-const command = required('command');
-const actorId = required('actor-id');
-const authority: DispatchRecoveryAuthority = {
-  effectiveAuthority: 'SYSTEM_RECOVERY_ADMIN', workspace: 'SYSTEM_RECOVERY', feature: 'accounting_audit_view', permission: 'ADMIN',
-  subjectType: 'DISPATCH_DOCUMENT', subjectId: required('subject-id'), sessionId: required('session-id'), deviceId: required('device-id'),
-  beforeHash: required('before-hash'), afterHash: required('after-hash'),
-};
-const common = { actorId, authority, correlationId: required('correlation-id'), idempotencyKey: required('idempotency-key') };
-const prisma = new PrismaClient();
 
-try {
-  const actor = await prisma.user.findUnique({ where: { id: actorId }, select: { role: true, isActive: true } });
-  if (!actor?.isActive || actor.role !== 'ADMIN') throw new Error('An active ADMIN operator is required for dispatch-document recovery mutation.');
-  if (command === 'restore' && !process.env.DISPATCH_RECOVERY_PASSPHRASE) throw new Error('DISPATCH_RECOVERY_PASSPHRASE is required and must not be passed on the command line.');
-  const operations = createDispatchDocumentRecoveryOperations(prisma, createDispatchDocumentFilesystem(), createPrismaDispatchReplayTruthVerifier(prisma));
-  const result = command === 'replay' ? await operations.replay({ ...common, waybillId: required('waybill-id') })
-    : command === 'reconcile' ? await operations.reconcile(common)
-      : command === 'quarantine' ? await operations.quarantine({ ...common, storageKey: required('storage-key'), reason: required('reason') })
-        : command === 'cleanup' ? await operations.cleanup({ ...common, storageKey: required('storage-key'), reason: required('reason'), now: new Date() })
-          : command === 'restore' ? await operations.restoreFromRecoveryPackage({ ...common, artifactId: required('artifact-id'), reason: required('reason'), recoveryPackagePath: required('package-path'), passphrase: process.env.DISPATCH_RECOVERY_PASSPHRASE || '' })
-            : (() => { throw new Error('Unknown --command. Use replay, reconcile, restore, quarantine, or cleanup.'); })();
-  process.stdout.write(`${JSON.stringify(result)}\n`);
-} finally { await prisma.$disconnect(); }
+void main().catch(error => {
+  console.error(error instanceof Error ? error.message : 'DISPATCH_RECOVERY_FAILED');
+  process.exitCode = 1;
+});

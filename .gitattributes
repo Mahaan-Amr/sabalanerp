@@ -16,3 +16,14 @@ reports/qa/production-ledger-shape-readonly-20261019.json -text -working-tree-en
 reports/qa/both-host-storage-preflight-before-independent-decryption-728894fe64bf4364ab6837968eec46ae.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 reports/qa/both-host-storage-preflight-before-independent-decryption-07e93f9da0294af88f6312eb01537aca.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 reports/qa/both-host-storage-preflight-before-independent-decryption-feda6d2b6d17476f87d68fe149a59b0c.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
+# Hashed build/browser diagnostics retain native console/configuration bytes.
+reports/qa/browser-build-handoff-*.txt -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/browser-local-recovery-lease-*.txt -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/frontend-final-build-*.txt -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/hiring-build-request-identity-*.txt -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/retained-ui-source-closure-*.txt -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/api-v2-published-owner-*.txt -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/native-file-capture-port-*.txt -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/application-native-coherent-source-freeze-r2-20261019.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/application-native-coherent-source-freeze-r3-20261019.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

@@ -136,6 +136,17 @@ for (const failure of ['storage', 'preflight', 'native-closure', 'checkpoint', '
     const recordsFile = path.join(f.root, 'containers.json'); fs.writeFileSync(recordsFile, JSON.stringify(f.containers));
     const bin = path.join(f.root, 'bin'); fs.mkdirSync(bin);
     const log = path.join(f.root, 'commands.log');
+    // This command harness substitutes only the fixed external backup-host
+    // port. Production still executes the real SSH/FD9 owner; these fixtures
+    // exercise shell ordering and receipt handoff, not backup-host authority.
+    const fakeBackupHost=path.join(f.root,'fixture-backup-host.cjs');
+    fs.writeFileSync(fakeBackupHost, `const fs=require('fs'),assert=require('assert/strict'),crypto=require('crypto');const a=process.argv.slice(2);fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(['host-backup-retention',...a])+'\\n');if(a[0]==='--inspect'){assert.equal(a.length,2);console.log(JSON.stringify({inspected:true,sshStarted:false}));}else{assert.equal(a.length,5);const [environment,id,stage,receipt,holds]=a;assert.ok(['BEFORE_CHECKPOINT','AFTER_CHECKPOINT'].includes(stage));if(process.platform!=='win32')assert.equal(fs.statSync(holds).mode&511,256);assert.deepEqual(JSON.parse(fs.readFileSync(holds)),[]);const raw=Buffer.from(JSON.stringify({format:'fixture-only-host-retention',deploymentId:id,stage})+'\\n');fs.writeFileSync(receipt,raw,{flag:'wx',mode:256});console.log(JSON.stringify({file:receipt,sha256:crypto.createHash('sha256').update(raw).digest('hex')}));}`);
+    const nodeBinary=process.execPath.replaceAll('\\','/');
+    const binderLine=fs.readFileSync(path.join(repository,'deploy/scripts/deploy.sh'),'utf8').split('\n').find(line=>line.includes('DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256="$(node -e '));
+    const binderSource=binderLine?.match(/node -e '([^']+)'/)?.[1];assert.ok(binderSource,'fixed receipt binder source is required');
+    const fakeNodeEval=path.join(f.root,'fixture-node-eval.cjs');
+    fs.writeFileSync(fakeNodeEval,`const fs=require('fs'),assert=require('assert/strict'),crypto=require('crypto'),path=require('path'),cp=require('child_process');const a=process.argv.slice(2);if(a[0]==='-e'&&a[1]===${JSON.stringify(binderSource)}){const file=a[2];assert.equal(path.resolve(path.dirname(file)),path.resolve(process.env.TEST_REPORTS));assert.match(path.basename(file),/^remote-retention-deploy-.+-(BEFORE_CHECKPOINT|AFTER_CHECKPOINT)\\.json$/);const raw=fs.readFileSync(file),r=JSON.parse(raw);assert.equal(r.format,'fixture-only-host-retention');assert.ok(path.basename(file).includes(r.deploymentId+'-'+r.stage));process.stdout.write(crypto.createHash('sha256').update(raw).digest('hex'));}else{const result=cp.spawnSync(process.execPath,a,{stdio:'inherit'});if(result.error)throw result.error;process.exitCode=result.status??1;}`);
+    fs.writeFileSync(path.join(bin,'node'), `#!/bin/sh\ncase "$1" in */backup-retention-host.mjs) shift; exec '${nodeBinary}' '${fakeBackupHost.replaceAll('\\','/')}' "$@";; -e) exec '${nodeBinary}' '${fakeNodeEval.replaceAll('\\','/')}' "$@";; *) exec '${nodeBinary}' "$@";; esac\n`,{mode:0o755});
     const fakeDocker = path.join(f.root, 'fake-docker.cjs');
     fs.writeFileSync(fakeDocker, `const fs=require('fs');const path=require('path');const a=process.argv.slice(2);fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(a)+'\\n');const records=JSON.parse(fs.readFileSync(process.env.TEST_CONTAINERS));const env=k=>(a.find(v=>v.startsWith(k+'='))||'').slice(k.length+1);const session=path.join(process.env.TEST_REPORTS,'active-deployment-session.json');
 if(a[0]==='inspect' && a.includes('--format')){console.log(a.includes('{{.Image}}')?records.find(r=>r.Id===a.at(-1)).Image:'10.0.0.2');}
@@ -145,6 +156,7 @@ else if(a.includes('config')){console.log('services: {}');}
 else if(a.includes('dist/scripts/deployment-performance-identity.js')){fs.writeFileSync(require('path').join(process.env.TEST_REPORTS,'performance-database-'+a.find(v=>v.startsWith('DEPLOYMENT_ID=')).slice(14)+'.json'),JSON.stringify({schemaHash:'b'.repeat(64),policyHash:'b'.repeat(64)}));}
 else if(a.includes('dist/scripts/validate-production-environment.js')){if(process.env.TEST_FAILURE==='preflight')process.exit(42);}
 else if(a.includes('dist/scripts/deployment-control.js')){const c=a[a.indexOf('dist/scripts/deployment-control.js')+1];if(c==='prepare'){fs.writeFileSync(session,JSON.stringify({phase:'PREFLIGHT',leaseToken:'fixture-lease',rollbackPerformanceEnvironment:Object.fromEntries(records[0].Config.Env.filter(v=>v.startsWith('PERFORMANCE_')).map(v=>[v.split('=')[0],v.slice(v.indexOf('=')+1)]))}));}else if(c==='acquire'||c==='transition'){const s=JSON.parse(fs.readFileSync(session));s.phase=c==='acquire'?'LEASE_ACQUIRED':env('DEPLOYMENT_PHASE');fs.writeFileSync(session,JSON.stringify(s));}else if(c==='finish'||c==='cancel-preflight'){fs.rmSync(session,{force:true});}}
+else if(a.includes('dist/scripts/deployment-retention-local.js')){const i=a.indexOf('dist/scripts/deployment-retention-local.js'),command=a[i+1],stage=a[i+2],id=env('DEPLOYMENT_ID');if(!['BEFORE_CHECKPOINT','AFTER_CHECKPOINT'].includes(stage))process.exit(98);if(command==='export-holds'){fs.writeFileSync(path.join(process.env.TEST_REPORTS,'retention-holds-'+id+'-'+stage+'.json'),'[]\\n',{flag:'wx',mode:256});}else if(command==='apply'){const name='remote-retention-'+id+'-'+stage+'.json',file=path.join(process.env.TEST_REPORTS,name),raw=fs.readFileSync(file),value=JSON.parse(raw);if(value.stage!==stage||value.deploymentId!==id||!env('DEPLOYMENT_REMOTE_RETENTION_RECEIPT').replaceAll(String.fromCharCode(92),'/').endsWith('/app/deployment-reports/'+name)||env('DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256')!==require('crypto').createHash('sha256').update(raw).digest('hex'))process.exit(98);}else process.exit(98);}
 else if(a.includes('dist/scripts/deployment-checkpoint.js')){if(process.env.TEST_FAILURE==='checkpoint')process.exit(43);}
 else if(a.includes('sh')&&a.includes('-c')&&a.at(-1).includes('exec python3 - --assert-closed')){if(process.env.TEST_FAILURE==='native-closure')process.exit(46);}
 else if(a.includes('node_modules/prisma/build/index.js')&&a.includes('status')){if(process.env.TEST_FAILURE==='after-mutation')process.exit(44);}
@@ -168,6 +180,13 @@ else{process.exit(99);}`);
     assert.ok(!commands.includes('"build"'));
     assert.ok(commands.includes('storage-preflight'));
     assert.equal(commands.includes('deployment-checkpoint.js'), !['storage', 'preflight', 'native-closure'].includes(failure));
+    const rows=commands.trim().split(/\r?\n/).map(line=>JSON.parse(line));
+    const hostStage=stage=>rows.findIndex(row=>row[0]==='host-backup-retention'&&row.includes(stage));
+    const checkpoint=rows.findIndex(row=>row.includes('dist/scripts/deployment-checkpoint.js'));
+    assert.equal(hostStage('BEFORE_CHECKPOINT')>=0,!['storage','preflight','native-closure'].includes(failure));
+    assert.equal(hostStage('AFTER_CHECKPOINT')>=0,['after-mutation','success'].includes(failure));
+    if(checkpoint>=0)assert.ok(hostStage('BEFORE_CHECKPOINT')<checkpoint,'fixed backup owner must finish before canonical capture');
+    if(hostStage('AFTER_CHECKPOINT')>=0){assert.ok(hostStage('AFTER_CHECKPOINT')>checkpoint);assert.ok(rows.findIndex(row=>row.includes('dist/scripts/deployment-retention-local.js')&&row.includes('apply'))>hostStage('AFTER_CHECKPOINT'),'local deletion uses the AFTER receipt');}
     assert.equal(commands.includes('node_modules/prisma/build/index.js'), ['after-mutation', 'success'].includes(failure));
     assert.ok(!commands.includes('db:migrate:deploy'));
     assert.ok(!commands.includes('deployment-owned-migrations.js'), 'an existing configuration image must not need the new bridge executable');
@@ -188,7 +207,7 @@ else{process.exit(99);}`);
 });
 
 test('configuration uses the same lease, checkpoint, migration, rollback and release gates', () => {
-  const script = fs.readFileSync(path.join(repository, 'deploy/scripts/deploy.sh'), 'utf8');
+  const script = fs.readFileSync(path.join(repository, 'deploy/scripts/deploy.sh'), 'utf8').replaceAll('\r\n','\n');
   assert.ok(script.indexOf('phase REMOTE_CHECKPOINT_VERIFIED') < script.indexOf('persist "${REPO_ROOT}"\n'));
   for (const step of ['control prepare', 'control acquire', 'verify_public_maintenance', 'deployment-checkpoint.js', 'migrate status --schema prisma/schema.prisma', 'deployment-gates.js', 'phase GATES_PASSED', 'control maintenance-off']) assert.ok(script.includes(step));
   assert.match(script, /switch_to_previous_images\(\)[\s\S]*persist "\$\{REPO_ROOT\}" previous[\s\S]*DEPLOYMENT_BACKEND_IMAGE=/);

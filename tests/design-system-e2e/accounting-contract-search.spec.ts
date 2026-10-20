@@ -3,8 +3,8 @@ import { test, expect, type Page } from '@playwright/test';
 async function login(page: Page) {
   await page.route('**/trustseal.enamad.ir/**', route => route.fulfill({ status: 204 }));
   await page.goto('/login');
-  await page.locator('input[name="identifier"]').fill('admin');
-  await page.locator('input[name="password"]').fill('admin123');
+  await page.locator('input[name="identifier"]').fill(process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin');
+  await page.locator('input[name="password"]').fill(process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123');
   await page.locator('form').getByRole('button', { name: 'ورود' }).click();
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
 }

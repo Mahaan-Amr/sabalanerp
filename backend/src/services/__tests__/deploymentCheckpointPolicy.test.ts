@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { withHealthyDrill } from './deploymentCheckpointDrill.fixture';
 import { planLocalCheckpointCleanup, planRemoteCheckpointRetention } from '../deploymentCheckpointPolicy';
 
 const artifacts = [
@@ -19,7 +20,7 @@ assert.equal(
   false,
 );
 
-const remoteArtifacts = Array.from({ length: 14 }, (_, index) => ({
+const remoteArtifacts = Array.from({ length: 14 }, (_, index) => withHealthyDrill({
   id: `remote-${index}`,
   releaseId: `release-${index}`,
   createdAt: new Date(Date.UTC(2026, 7 - index, 1)),

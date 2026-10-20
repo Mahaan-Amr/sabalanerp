@@ -36,6 +36,12 @@ root = qa / operation
 active = qa / 'actual-image-customer-active.json'
 mutated = closed = False
 RESERVE = 1024**3
+MIB = 1024**2
+# This drill runs SQL-only historical modules, not Chromium or production
+# startup. Account for BOTH enforced cgroup maxima, control processes and an
+# independent host reserve before admitting either owned container.
+MEMORY_BUDGET = {'postgresBytes': 384 * MIB, 'backendBytes': 256 * MIB,
+                 'controllerBytes': 128 * MIB, 'hostReserveBytes': 512 * MIB}
 PG = 'sha256:15283455b75304c90f51bf16b42c272a25fb52807945dc24830ec88e63cd896d'
 BACKEND = 'sha256:13c89b392eb1903f55c1160f4f5f72a85d0ec57cd39476edff7928453516dde6'
 OWNER_SHA = 'c2b096894f7bdf920881c668deca48b1b7afedc4267956ed31e1743ed3687d83'
@@ -155,6 +161,9 @@ def create(service, image, arguments, mounts):
             and row['Config']['User'] == ('70:70' if service == 'postgres' else '0:0')
             and all(item['Type'] in ['bind', 'tmpfs'] for item in row['Mounts'])
             and not row['HostConfig']['PortBindings'] and actual == expected and row['State']['Status'] == 'created', 'CREATED_CONTAINER_UNPROVEN')
+    memory_limit = MEMORY_BUDGET['postgresBytes' if service == 'postgres' else 'backendBytes']
+    require(row['HostConfig']['Memory'] == memory_limit and row['HostConfig']['MemorySwap'] == memory_limit,
+            'ENFORCED_DRILL_MEMORY_BUDGET_UNPROVEN')
     save(root / (service + '-container.json'), {'id': identifier, 'image': image, 'mounts': expected})
     acknowledge(command)
     return identifier
@@ -165,6 +174,111 @@ def execute_postgres(arguments, token, allow_failure=False):
     require(inspect(pg)['State']['Running'], 'POSTGRES_DAEMON_NOT_RUNNING')
     acknowledge(command)
     return output.decode(), status
+
+
+def observe_backend_memory_admission(identifier):
+    """Charge remaining PG growth; never infer usage from its configured cap.
+
+    This is bounded admission headroom, not an OS reservation against unrelated
+    future host allocations. A missing/changed cgroup or counter fails closed.
+    """
+    row = inspect(identifier)
+    require(row['Image'] == PG and row['State']['Running'] and row['State']['Pid'] > 1
+            and row['HostConfig']['Memory'] == MEMORY_BUDGET['postgresBytes']
+            and row['HostConfig']['MemorySwap'] == MEMORY_BUDGET['postgresBytes'],
+            'MEMORY_OBSERVER_ORIGINAL_POSTGRES_UNPROVEN')
+    pid = row['State']['Pid']
+    process = Path('/proc') / str(pid)
+    birth = (process / 'stat').read_text().rsplit(') ', 1)[1].split()[19]
+    membership = (process / 'cgroup').read_text()
+    lines = membership.splitlines()
+    require(len(lines) == 1 and lines[0].startswith('0::/'), 'UNIFIED_MEMORY_CGROUP_REQUIRED')
+    relative = lines[0][3:].lstrip('/')
+    require(relative and all(part not in ['', '.', '..'] for part in relative.split('/'))
+            and relative.split('/')[-1] in [identifier, 'docker-' + identifier + '.scope'],
+            'ORIGINAL_POSTGRES_CGROUP_PATH_UNPROVEN')
+    directory = Path('/sys/fs/cgroup') / relative
+    require(directory.resolve(strict=True) == directory, 'MEMORY_CGROUP_ALIAS')
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        initial = os.fstat(fd)
+        require(initial.st_uid == 0 and stat.S_ISDIR(initial.st_mode), 'MEMORY_CGROUP_OWNER_UNPROVEN')
+
+        def counter_file(name):
+            descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+            try:
+                value = os.fstat(descriptor)
+                require(stat.S_ISREG(value.st_mode) and value.st_dev == initial.st_dev
+                        and value.st_uid == 0 and not value.st_mode & 0o022, 'MEMORY_COUNTER_UNSAFE')
+                raw = os.read(descriptor, 65537)
+                require(len(raw) <= 65536 and not os.read(descriptor, 1),
+                        'MEMORY_COUNTER_UNPROVEN')
+                named = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                require((named.st_dev, named.st_ino) == (value.st_dev, value.st_ino), 'MEMORY_COUNTER_CHANGED')
+                return raw
+            finally:
+                os.close(descriptor)
+
+        def counter(name):
+            raw = counter_file(name)
+            require(raw.strip().isdigit(), 'MEMORY_NUMERIC_COUNTER_REQUIRED')
+            return int(raw.strip())
+
+        def usage():
+            total = counter('memory.current')
+            pairs = [line.split() for line in counter_file('memory.stat').decode('ascii').splitlines()]
+            require(all(len(pair) == 2 and pair[1].isdigit() for pair in pairs)
+                    and len({pair[0] for pair in pairs}) == len(pairs), 'MEMORY_STAT_UNPROVEN')
+            values = {name: int(value) for name, value in pairs}
+            require('anon' in values and 'shmem' in values, 'MEMORY_STAT_REQUIRED_FIELDS_MISSING')
+            # memory.current includes reclaimable file cache also counted by
+            # host MemAvailable. Credit only anon+shmem with swap disabled;
+            # never double-credit ordinary file cache as reserved headroom.
+            # https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html
+            credited = values['anon'] + values['shmem']
+            require(0 <= credited <= total <= MEMORY_BUDGET['postgresBytes'], 'MEMORY_STAT_CHANGED')
+            return total, credited
+
+        def available():
+            values = dict(line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines())
+            return int(values['MemAvailable'].strip().split()[0]) * 1024
+
+        available_before = available()
+        require(counter('memory.max') == MEMORY_BUDGET['postgresBytes'] and counter('memory.swap.max') == 0,
+                'POSTGRES_MEMORY_LIMIT_CHANGED')
+        usage_before, credited_before = usage()
+        available_middle = available()
+        usage_after, credited_after = usage()
+        available_after = available()
+        require(counter('memory.max') == MEMORY_BUDGET['postgresBytes'] and counter('memory.swap.max') == 0
+                and 0 <= usage_before <= MEMORY_BUDGET['postgresBytes']
+                and 0 <= usage_after <= MEMORY_BUDGET['postgresBytes'], 'POSTGRES_MEMORY_COUNTER_CHANGED')
+        current = os.fstat(fd)
+        named = directory.lstat()
+        require((current.st_dev, current.st_ino, current.st_uid) == (initial.st_dev, initial.st_ino, initial.st_uid)
+                == (named.st_dev, named.st_ino, named.st_uid)
+                and (process / 'cgroup').read_text() == membership
+                and (process / 'stat').read_text().rsplit(') ', 1)[1].split()[19] == birth,
+                'POSTGRES_MEMORY_IDENTITY_CHANGED')
+        actual = inspect(identifier)
+        require(actual['Image'] == PG and actual['State']['Running'] and actual['State']['Pid'] == pid
+                and actual['State']['StartedAt'] == row['State']['StartedAt']
+                and actual['HostConfig']['Memory'] == MEMORY_BUDGET['postgresBytes']
+                and actual['HostConfig']['MemorySwap'] == MEMORY_BUDGET['postgresBytes'],
+                'POSTGRES_MEMORY_DAEMON_IDENTITY_CHANGED')
+        growth = MEMORY_BUDGET['postgresBytes'] - min(credited_before, credited_after)
+        required = sum(value for key, value in MEMORY_BUDGET.items() if key != 'postgresBytes') + growth
+        free = min(available_before, available_middle, available_after)
+        return {'originalContainerId': identifier, 'hostPid': pid, 'startTicks': birth,
+                'cgroupDevice': initial.st_dev, 'cgroupInode': initial.st_ino,
+                'usageBeforeBytes': usage_before, 'usageAfterBytes': usage_after,
+                'creditedAnonAndShmemBeforeBytes': credited_before,
+                'creditedAnonAndShmemAfterBytes': credited_after,
+                'ordinaryFileCacheCredited': False,
+                'remainingPostgresGrowthBytes': growth, 'requiredAvailableBytes': required,
+                'observedMinimumAvailableBytes': free, 'admitted': free >= required}
+    finally:
+        os.close(fd)
 
 
 try:
@@ -205,7 +319,9 @@ try:
     base = qa / 'production-base-restore-dbfc6b6eca9741469ae3076756b165a8/base.tar'
     require(regular(base)[2] == 378808320 and digest(base) == BASE_SHA, 'SOURCE_BASE_CHANGED')
     require(json.loads((base.parent / 'independent-decryption-proof.json').read_text())['independentRsaDecryptVerified'], 'INDEPENDENT_DECRYPTION_UNPROVEN')
-    docker_root = Path(json.loads(docker('info', '--format', '{{json .}}'))['DockerRootDir'])
+    daemon_info = json.loads(docker('info', '--format', '{{json .}}'))
+    require(str(daemon_info['CgroupVersion']) == '2', 'UNIFIED_MEMORY_CGROUP_REQUIRED')
+    docker_root = Path(daemon_info['DockerRootDir'])
     require(docker_root.resolve(strict=True) == docker_root and docker_root.stat().st_dev == qa.stat().st_dev, 'DAEMON_FILESYSTEM_UNMONITORED')
     expanded = 0
     with tarfile.open(base, 'r|') as archive:
@@ -218,8 +334,10 @@ try:
             expanded += entry.size
             require(expanded < 1024**3 and len(seen) < 250000, 'SOURCE_BASE_BOUND')
     require(shutil.disk_usage(qa).free >= RESERVE + 378808320 + expanded + 160 * 1024**2, 'DERIVED_RESTORE_CAPACITY_INSUFFICIENT')
+    source_member_count = len(seen)
     memory = dict(line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines())
-    require(int(memory['MemAvailable'].strip().split()[0]) * 1024 >= 2 * 1024**3, 'RESTORE_MEMORY_INSUFFICIENT')
+    memory_before = int(memory['MemAvailable'].strip().split()[0]) * 1024
+    require(memory_before >= sum(MEMORY_BUDGET.values()), 'RESTORE_MEMORY_INSUFFICIENT')
     for image in [PG, BACKEND]:
         require(inspect(image)['Id'] == image, 'IMMUTABLE_IMAGE_MISSING')
     before = foreign()
@@ -276,7 +394,13 @@ try:
     pg_mounts = [(root / 'pgdata', '/var/lib/postgresql/data', False), (root / 'pg-control', '/qa-pg-control', False),
                  (root / 'socket', '/qa-pg-socket', False),
                  (copied, '/restore-input.tar', True), *[(root / name, '/' + name, True) for name in ['native-owner', 'restore.sh', 'restore.conf', 'restore.hba', 'restore.ident', 'qa-infrastructure.sql']]]
-    pg = create('postgres', PG, ['--user', '70:70', '--memory', '512m', '--shm-size', '64m',
+    memory = dict(line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines())
+    require(int(memory['MemAvailable'].strip().split()[0]) * 1024 >= sum(MEMORY_BUDGET.values()),
+            'RESTORE_MEMORY_CHANGED_BEFORE_CONTAINER_START')
+    require(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024 <= MEMORY_BUDGET['controllerBytes'],
+            'RESTORE_CONTROLLER_MEMORY_BUDGET_EXCEEDED')
+    pg = create('postgres', PG, ['--user', '70:70', '--memory', str(MEMORY_BUDGET['postgresBytes']),
+                '--memory-swap', str(MEMORY_BUDGET['postgresBytes']), '--shm-size', '64m',
                 '--tmpfs', '/tmp:uid=70,gid=70,mode=0700,size=32m,noexec,nosuid', '--entrypoint', '/native-owner',
                 # Monitor the stable control root on the SAME filesystem. A
                 # recursive scan racing normal PostgreSQL rollback/unlink would
@@ -306,15 +430,19 @@ try:
     url = 'postgresql://sabalanerp@localhost/' + database + '?host=%2Fqa-pg-socket&connection_limit=2&pool_timeout=5&application_name=' + application_name
     backend_mounts = [(root / 'socket', '/qa-pg-socket', False), (root / 'backend-control', '/qa-native-control', False),
                       *[(root / name, '/' + name, True) for name in ['native-owner', 'qa-fixture.cjs', 'qa-overlap.cjs', 'qa-financial.sql']]]
-    memory = dict(line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines())
-    require(int(memory['MemAvailable'].strip().split()[0]) * 1024 >= 1280 * 1024**2, 'BACKEND_MEMORY_INSUFFICIENT')
+    backend_memory_observation = observe_backend_memory_admission(pg)
+    save(root / 'backend-memory-admission.json', backend_memory_observation)
+    memory_before_backend = backend_memory_observation['observedMinimumAvailableBytes']
+    require(backend_memory_observation['admitted'], 'BACKEND_MEMORY_INSUFFICIENT')
     # Match the actual historical runtime UID. Its graph package manifest is
     # root-owned0600; UID1000 is not a qualification of that unchanged image.
     # Networknone, readonly root, ALL capabilities dropped and no-new-privileges
     # remain required; no image permissions or production files are changed.
-    backend = create('backend', BACKEND, ['--user', '0:0', '--group-add', '70', '--memory', '768m',
+    backend = create('backend', BACKEND, ['--user', '0:0', '--group-add', '70',
+                     '--memory', str(MEMORY_BUDGET['backendBytes']), '--memory-swap', str(MEMORY_BUDGET['backendBytes']),
                      '--tmpfs', '/tmp:uid=0,gid=0,mode=0700,size=64m,noexec,nosuid', '--entrypoint', '/native-owner',
-                     '--env', 'NODE_ENV=test', '--env', 'NODE_PATH=/app/node_modules:/packages/contract-product-graph/node_modules',
+                     '--env', 'NODE_ENV=test', '--env', 'NODE_OPTIONS=--max-old-space-size=128',
+                     '--env', 'NODE_PATH=/app/node_modules:/packages/contract-product-graph/node_modules',
                      '--env', 'DATABASE_URL=' + url, '--env', 'SABALAN_PRODUCTION_IMAGE_CUSTOMER_OVERLAP=1',
                      '--env', 'SABALAN_NATIVE_STORAGE_ROOT=/qa-native-control', '--env', 'SABALAN_NATIVE_STORAGE_MAX_BYTES=16777216',
                      '--env', 'SABALAN_NATIVE_STORAGE_RESERVE_BYTES=1073741824'], backend_mounts)
@@ -380,6 +508,13 @@ try:
               'controllerSha256': SPEC['controller']['sha256'],
               'inputManifestSha256': SPEC['inputManifest']['sha256'], 'preflightSha256': SPEC['preflight']['sha256'],
               'foreignBefore': before, 'foreignAfter': after, 'allForeignIdentitiesUnchanged': before == after,
+              'memoryAdmissionBudget': MEMORY_BUDGET, 'containerMemoryAndSwapLimitsVerified': True,
+              'memAvailableBeforeBytes': memory_before,
+              'memAvailableBeforeBackendBytes': memory_before_backend,
+              'backendMemoryObservation': backend_memory_observation,
+              'sourceBaseMemberCount': source_member_count,
+              'controllerObservedMaxRssBytes': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,
+              'hostReserveIsAdmissionHeadroomNotReservation': True,
               'fullApplicationRestore': False, 'healthyRecoveryPoint': False, 'productionAdmission': False,
               'freeBytesAfter': shutil.disk_usage(qa).free}
     save(root / 'host-actual-image-customer-proof.json', result)

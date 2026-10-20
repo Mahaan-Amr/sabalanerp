@@ -186,16 +186,11 @@ def run():
                         or shutil.disk_usage(root).free < 256 * 1024 ** 2:
                     failed = True
                     if stopping is None: stopping = time.monotonic()
-                    for raw in Path('/proc/self/task/' + str(os.getpid()) + '/children').read_text().split():
-                        owned = int(raw); seen, status = os.waitpid(owned, os.WNOHANG)
-                        if seen:
-                            if seen == root_pid:
-                                root_status = os.waitstatus_to_exitcode(status); process.returncode = root_status
-                        else:
-                            try:
-                                os.kill(owned, signal.SIGTERM if time.monotonic() - stopping < 10 else signal.SIGKILL)
-                            except ProcessLookupError:
-                                pass
+                    # A deadline invalidates qualification; it cannot terminate
+                    # native ownership. Keep THIS original Popen/subreaper and
+                    # FD9 until every original child actually exits. The owned
+                    # controller may finish the fixed WAL range normally; a
+                    # later native0 still preserves failed=True.
                 time.sleep(0.02)
             require(root_status is not None, 'WAL_STREAM_NATIVE_COMPLETION_UNPROVEN')
             log.flush(); os.fsync(log.fileno())

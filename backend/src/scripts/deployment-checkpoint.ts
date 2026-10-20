@@ -3,7 +3,6 @@ import path from 'node:path';
 import { disconnectDatabase, prisma } from '../lib/prisma';
 import {
   directorySize,
-  enforceFilesystemRemoteRetention,
   enforceLocalCheckpointRetention,
   ensureLocalCapacity,
   estimateCheckpointCapacity,
@@ -14,6 +13,9 @@ import {
 } from '../services/deploymentCheckpointStorage';
 import { createRecoveryPackage, validateRecoveryPackage } from '../services/systemRecoveryEngine';
 import { RECOVERY_COORDINATION_DIR, RECOVERY_ROOT } from '../services/recoveryRuntime';
+import { readRecoveryHostIdentity } from '../services/deploymentRecoveryHostIdentity';
+import {inspectOriginalHostRemoteRetention} from '../services/deploymentRemoteRetention';
+import {checkpointMetadataTransport} from '../services/deploymentCheckpointMetadataIdentity';
 
 const required = (name: string) => {
   const value = String(process.env[name] || '').trim();
@@ -62,6 +64,7 @@ const main = async () => {
     directorySize(path.join(process.cwd(), 'storage', 'contracts')),
     directorySize(path.join(process.cwd(), 'storage', 'hr-hiring')),
     directorySize(path.join(process.cwd(), 'storage', 'accounting-contracts')),
+    directorySize(path.join(process.cwd(), 'storage', 'dispatch-documents')),
     directorySize(path.join(process.cwd(), 'storage', 'support-tickets')),
     directorySize(path.join(process.cwd(), 'storage', 'performance-exports')),
     directorySize(path.join(process.cwd(), 'uploads')),
@@ -70,6 +73,12 @@ const main = async () => {
   ]).then((sizes) => sizes.reduce((total, size) => total + size, 0));
   const databaseSizeRows = await prisma.$queryRawUnsafe<Array<{ bytes: bigint }>>('SELECT pg_database_size(current_database()) AS bytes');
   const databaseBytes = Number(databaseSizeRows[0]?.bytes || 0);
+  const databaseIdentities = await prisma.$queryRawUnsafe<Array<{name:string;oid:string;systemIdentifier:string}>>(
+    `SELECT current_database() AS name, (SELECT oid::text FROM pg_database WHERE datname=current_database()) AS oid,
+       (SELECT system_identifier::text FROM pg_control_system()) AS "systemIdentifier"`);
+  const sourceDatabase = databaseIdentities[0];
+  if (databaseIdentities.length !== 1 || !sourceDatabase || !/^[1-9][0-9]*$/.test(sourceDatabase.oid)
+    || !/^[1-9][0-9]*$/.test(sourceDatabase.systemIdentifier)) throw new Error('DEPLOYMENT_CHECKPOINT_DATABASE_IDENTITY_UNPROVEN');
   const capacity = estimateCheckpointCapacity({ databaseBytes, protectedFilesBytes });
   const auditPath = path.join(RECOVERY_ROOT, 'audit', 'deployment-retention.jsonl');
   const localCapacity = await ensureLocalCapacity({
@@ -80,7 +89,7 @@ const main = async () => {
     auditPath,
   });
   const remote = new FilesystemRemoteCheckpointStore(remoteRoot);
-  const preUploadRemoteRetention = await enforceFilesystemRemoteRetention(remoteRoot, deploymentId, packagesRoot);
+  const preUploadRemoteRetention = await inspectOriginalHostRemoteRetention(remoteRoot, deploymentId, packagesRoot, 'BEFORE_CHECKPOINT');
   const preUploadLocalRetention = await enforceLocalCheckpointRetention(packagesRoot, remoteRoot, deploymentId, preUploadRemoteRetention);
   const remoteCapacity = await remote.assertAvailable(capacity.requiredRemoteBytes);
 
@@ -105,11 +114,17 @@ const main = async () => {
   // off-server transfer without proving a different safety property.
   const uploaded = await remote.uploadVerified(result.destination, objectKey, result.sha256);
 
+  // Missing host metadata never blocks the protected local checkpoint, but it
+  // cannot qualify this point as an independent retention replacement.
+  let sourceHost: ReturnType<typeof readRecoveryHostIdentity> | undefined;
+  try { sourceHost = readRecoveryHostIdentity(); } catch { /* Explicitly unqualified below. */ }
   const metadata = {
+    captureMethod:'PROTECTED_MAINTENANCE_COMPLETE',
     id: deploymentId,
     deploymentId,
     releaseId,
     targetCommit,
+    sourceDatabase,
     createdAt: new Date().toISOString(),
     archivePath: result.destination,
     localPath: result.destination,
@@ -119,7 +134,14 @@ const main = async () => {
     size: uploaded.size,
     remoteVerified: true,
     localVerified: true,
+    localRestoreVerified: true,
+    // Legacy protected-maintenance field means local restore validation only.
+    // Retention requires the independent drill, never this scalar.
     restoreVerified: true,
+    independentRestoreVerified: false,
+    sourceHostIdentityObservation: sourceHost ? 'OBSERVED' : 'UNAVAILABLE',
+    ...(sourceHost ? { sourceMachineUuidSha256: sourceHost.machineUuidSha256,
+      sourceKernelBootIdSha256: sourceHost.kernelBootIdSha256 } : {}),
     manifestReadable: Boolean(localValidation.manifest),
     compatibility: { local: localValidation.compatibility, remote: localValidation.compatibility },
     capacity: { estimate: capacity, localAvailableBytes: localCapacity.availableBytes, remoteAvailableBytes: remoteCapacity.availableBytes },
@@ -134,22 +156,23 @@ const main = async () => {
     },
   };
 
+  const transportMetadata=checkpointMetadataTransport(metadata);
   const localMetadataPath = `${result.destination}.json`;
   const coordinationMetadataPath = path.join(RECOVERY_COORDINATION_DIR, 'deployment-checkpoint.json');
   const remoteMetadataKey = `${objectKey}.json`;
   const remoteMetadataPath = path.join(remoteRoot, remoteMetadataKey);
-  await fs.promises.writeFile(localMetadataPath, `${JSON.stringify({ ...metadata, metadataPath: localMetadataPath }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await fs.promises.writeFile(localMetadataPath, `${JSON.stringify({ ...transportMetadata, metadataPath: localMetadataPath }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   await fs.promises.mkdir(path.dirname(remoteMetadataPath), { recursive: true });
-  await fs.promises.writeFile(remoteMetadataPath, `${JSON.stringify({ ...metadata, localPath: undefined, archivePath: undefined }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await fs.promises.writeFile(remoteMetadataPath, `${JSON.stringify({ ...transportMetadata, localPath: undefined, archivePath: undefined }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   const readBackMetadata = await remote.readMetadata(remoteMetadataKey);
   if (readBackMetadata.checksum !== uploaded.checksum || readBackMetadata.deploymentId !== deploymentId) {
     throw Object.assign(new Error('Remote checkpoint manifest read-back did not match the uploaded checkpoint.'), {
       code: 'DEPLOYMENT_REMOTE_MANIFEST_MISMATCH',
     });
   }
-  const remoteRetention = await enforceFilesystemRemoteRetention(remoteRoot, deploymentId, packagesRoot);
+  const remoteRetention = await inspectOriginalHostRemoteRetention(remoteRoot, deploymentId, packagesRoot, 'BEFORE_CHECKPOINT');
   const localRetention = await enforceLocalCheckpointRetention(packagesRoot, remoteRoot, deploymentId, remoteRetention);
-  await fs.promises.writeFile(coordinationMetadataPath, `${JSON.stringify({ ...metadata, metadataPath: localMetadataPath }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await fs.promises.writeFile(coordinationMetadataPath, `${JSON.stringify({ ...transportMetadata, metadataPath: localMetadataPath }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   try {
     await prisma.deploymentOperation.update({ where: { id: deploymentId }, data: { checkpointJson: metadata as any } });
   } catch (error: any) {

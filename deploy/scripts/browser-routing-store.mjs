@@ -202,6 +202,13 @@ export class BrowserRoutingStore {
 
 function assertTransition(previous, next, supportPromises) {
   compileBrowserRoutingRegistry(next);
+  if(previous?.format==='sabalan-browser-routing/v2') {
+    if(next.format!=='sabalan-browser-routing/v2')fail('BROWSER_ROUTING_API_REMOVED');
+    const bindings=new Map(next.apiBindings.map(binding=>[binding.buildId,binding]));
+    for(const binding of previous.apiBindings) {
+      if(!bindings.has(binding.buildId) || !encode(bindings.get(binding.buildId)).equals(encode(binding)))fail('BROWSER_ROUTING_API_IDENTITY_CHANGED');
+    }
+  }
   for (const build of next.builds) {
     if (build.supportUntil !== null && Date.parse(build.supportUntil) < (supportPromises.get(build.id) ?? -Infinity)) {
       fail('BROWSER_ROUTING_HISTORICAL_SUPPORT_SHORTENED');

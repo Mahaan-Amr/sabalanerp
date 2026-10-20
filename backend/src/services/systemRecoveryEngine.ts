@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import {assertNoUnclosedContinuousWalOwners} from './continuousOnlineWalState';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -540,6 +541,9 @@ export const validateRecoveryPackage = async (input: {
     await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
     await extractRecoveryArchive(archivePath, payloadRoot);
+    // Only this job's fully extracted intermediate is retired. The encrypted
+    // source remains available for checksum verification, retries and recovery.
+    await fs.promises.unlink(archivePath);
     const manifest = JSON.parse(await fs.promises.readFile(path.join(payloadRoot, 'manifest.json'), 'utf8')) as RecoveryManifest;
     if (manifest.format !== 'sabalan-recovery') throw Object.assign(new Error('Invalid recovery manifest.'), { code: 'INVALID_RECOVERY_MANIFEST' });
     if (!['COMPLETE', 'SANITIZED_TEST'].includes(manifest.packageType) || !Array.isArray(manifest.components)) {
@@ -657,6 +661,7 @@ const replaceDirectoryContents = async (source: string, destination: string, saf
 };
 
 export const restoreDirectoryFromSafety = async (safety: string, destination: string) => {
+  assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
   if (!fs.existsSync(safety)) return;
   await fs.promises.mkdir(destination, { recursive: true });
   for (const name of await fs.promises.readdir(destination)) {
@@ -900,6 +905,7 @@ export const stageAndPromoteRecovery = async (input: {
   preservePackage?: boolean;
   onProgress: (progress: number) => Promise<void>;
 }) => {
+  assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
   await ensureDirectories();
   const jobRoot = await fs.promises.mkdtemp(path.join(WORK_DIR, `restore-${input.operationId}-`));
   const archivePath = path.join(jobRoot, 'payload.tar.gz');
@@ -933,6 +939,7 @@ export const stageAndPromoteRecovery = async (input: {
     await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
     await extractRecoveryArchive(archivePath, payloadRoot);
+    await fs.promises.unlink(archivePath);
     await input.onProgress(20);
     await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
     await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
@@ -1042,6 +1049,7 @@ export const readRestoreJournal = async (): Promise<RestoreJournal | null> => {
 };
 
 export const finalizePromotedRecovery = async (prisma: PrismaClient, journal: RestoreJournal) => {
+  assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
   if(journal.inquiryTransformation){
     if(journal.inquiryTransformation.operationId!==journal.operationId||journal.inquiryTransformation.archiveSha256!==journal.checksum)throw new Error('INQUIRY_TRANSFORMATION_JOURNAL_MISMATCH');
     await verifyInquiryTransformation(path.join(INQUIRY_SOURCE_DIR,'inquiry.db'),journal.inquiryTransformation);
@@ -1122,6 +1130,7 @@ export const finalizePromotedRecovery = async (prisma: PrismaClient, journal: Re
 export const isSanitizedRecoveryEnvironment = () => fs.existsSync(SANITIZED_MARKER_PATH);
 
 export const rollbackInterruptedRecovery = async (journal: RestoreJournal) => {
+  assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
   const mappings = [
     ...FILE_RECOVERY_MAPPINGS.map(({ safetyName, livePath }) => [safetyName, livePath] as const),
     ['inquiry', INQUIRY_SOURCE_DIR],
@@ -1135,6 +1144,7 @@ export const rollbackInterruptedRecovery = async (journal: RestoreJournal) => {
 };
 
 export const removeRecoveryPackage = async (source: string, storageName?: string | null) => {
+  assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
   if (!storageName) return;
   await fs.promises.rm(recoveryPackagePath(source, storageName), { force: true });
 };

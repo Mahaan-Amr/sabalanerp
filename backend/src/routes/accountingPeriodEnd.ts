@@ -22,6 +22,7 @@ import { recordOperationalReconciliation } from '../services/accountingOperation
 import { buildOfficialReportExportRows, officialReportPeriodLabels, officialReportPdfPageSize } from '../services/accountingOfficialReportExport';
 import { parseOfficialReportDate } from '../services/accountingOfficialReportDates';
 import { retainOfficialReportArtifact } from '../services/accountingOfficialReportArtifact';
+import { ACCOUNTING_OFFICIAL_REPORT_ROOT, versionedAccountingReportFiles } from '../services/accountingFileRuntime';
 
 const router = express.Router();
 const viewAccess = [protect, requireWorkspaceAccessWithClient(prisma, WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.VIEW)];
@@ -88,7 +89,7 @@ const frozenExport = (snapshotId: string, format: 'pdf' | 'xlsx', render: () => 
   const stored = await tx.accountingOfficialReportSnapshot.findUniqueOrThrow({ where: { id: snapshotId } });
   const field = format === 'pdf' ? 'pdfHash' : 'excelHash';
   return retainOfficialReportArtifact({ snapshotId, format, existingHash: stored[field],
-    root: path.join(process.cwd(), 'storage', 'accounting-contracts', '.official-reports'), render,
+    root: ACCOUNTING_OFFICIAL_REPORT_ROOT, files: versionedAccountingReportFiles(), render,
     recordHash: async (hash) => { await tx.accountingOfficialReportSnapshot.update({ where: { id: snapshotId }, data: { [field]: hash } }); },
   });
 }, { timeout: 180_000, maxWait: 180_000 });

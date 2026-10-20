@@ -7,6 +7,9 @@ WORKDIR /app
 RUN apt-get -o Acquire::ForceIPv4=true update \
   && apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends python3 util-linux \
   && rm -rf /var/lib/apt/lists/*
+COPY inquiry-dependency-identity.cjs inquiry-dependency-identity.json /tmp/
+RUN node -e "const a=require('node:assert/strict'),f=require('node:fs'),v=require('/tmp/inquiry-dependency-identity.cjs');a.deepEqual(v.inquiryDependencyIdentity('/app/node_modules'),JSON.parse(f.readFileSync('/tmp/inquiry-dependency-identity.json','utf8')));" \
+  && rm /tmp/inquiry-dependency-identity.cjs /tmp/inquiry-dependency-identity.json
 ADD inquiry-build.tar.gz /app/
 COPY online-runtime /app/online-runtime/
 COPY native-http-observer.cjs /app/online-runtime/native-http-observer.cjs

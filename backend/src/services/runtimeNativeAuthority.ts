@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { loadOnlineRuntimeScope } from './onlineRuntimeScope';
+import {assertProtectedFileAdoptionState} from './protectedFileAdoptionState';
 
 const failure = () => new Error('RUNTIME_NATIVE_AUTHORITY_UNPROVEN');
 const authorityKeys = ['BACKEND_NATIVE_POSTGRES_APPLICATION_NAME', 'BACKEND_NATIVE_AUTHORITY_FILE', 'BACKEND_NATIVE_CLAIM_SHA256'];
@@ -14,6 +15,7 @@ export function assertNativeRuntimeControlBoundary(environment: NodeJS.ProcessEn
   // fleet retirement. The host controller must prove SQL closure, revoke the
   // immutable grant and retire every slot before clearing these inventories.
   const coordination = environment.RECOVERY_COORDINATION_DIR || '/app/recovery-coordination';
+  assertProtectedFileAdoptionState(coordination);
   try {
     try {
       fs.lstatSync(path.join(coordination, 'deployment-online-worker-native.json'));

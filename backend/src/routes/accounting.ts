@@ -66,6 +66,7 @@ import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { configureDispatchDocumentsRuntime, createAccountingDispatchDocumentRouter,
   DispatchDocumentAuthorizationError, dispatchDocumentHttpStatus } from '../services/dispatchDocuments';
 import { renderDispatchDocumentPdf } from '../documents/dispatch/dispatchDocumentPdf';
+import { versionedDispatchDocumentFiles } from '../services/dispatchFileRuntime';
 import { getStatementAdjustmentArtifactPreparer } from '../services/statementAdjustmentRuntime';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import { ContractLifecycleRequestKind } from '@prisma/client';
@@ -254,6 +255,7 @@ const accountingDispatchEdit = [
 
 const dispatchDocuments = configureDispatchDocumentsRuntime({
   prisma,
+  filePublication: versionedDispatchDocumentFiles(),
   templateVersion: 'dispatch-documents-v1',
   generatorVersion: 'chromium-pdf-v1',
   publisher: { async publish(input) {

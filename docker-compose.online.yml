@@ -1,0 +1,88 @@
+# Applied only by the original owned online controller/protected bootstrap.
+# The persistent host private key is outside every application mount.
+services:
+  backend:
+    entrypoint: ["node", "/app/dist/scripts/online-runtime-hold.js"]
+    command: []
+    environment:
+      BACKEND_RUNTIME_ROLE: control
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 256
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+      - /app/storage/reports:rw,nosuid,nodev,uid=0,gid=0,mode=0700,size=256m
+      - /app/storage/sales-reports:rw,nosuid,nodev,uid=0,gid=0,mode=0700,size=256m
+      - /app/storage/bi-reports:rw,nosuid,nodev,uid=0,gid=0,mode=0700,size=256m
+    volumes:
+      - ./.deploy-state/online-trust:/run/sabalan-online:ro
+      # Match the Inquiry native SQLite path inside the capture namespace.
+      - inquiry_data:/data:ro
+      # The protected legacy-root guard must run before this volume is admitted.
+    healthcheck:
+      test: ["CMD", "node", "/app/dist/scripts/online-runtime-health.js"]
+      interval: 15s
+      timeout: 8s
+      retries: 8
+  frontend:
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    cpus: 0.75
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m
+      - /app/runtime/cache:rw,nosuid,nodev,size=128m
+  inquiry:
+    entrypoint: ["node", "-e", "setInterval(()=>{},1000)"]
+    command: []
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    cpus: 0.75
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m
+      - /app/.next/cache:rw,nosuid,nodev,size=128m
+    volumes:
+      - ./.deploy-state/online-trust:/run/sabalan-online:ro
+    healthcheck:
+      # Keeper liveness; the original controller separately proves native HTTP.
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 15s
+      timeout: 8s
+      retries: 8
+  release-edge:
+    image: ${DEPLOYMENT_BACKEND_IMAGE:?immutable backend image required}
+    entrypoint: ["node", "/app/dist/scripts/online-runtime-hold.js"]
+    command: []
+    restart: unless-stopped
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    cpus: 0.75
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    volumes:
+      - ./.deploy-state/online-trust:/run/sabalan-online:ro
+      - ./.deploy-state/online-publications:/run/sabalan-publications:ro
+      - ./.deploy-state/online-edge-journals:/app/online-edge
+    networks:
+      - app_network
+  nginx:
+    volumes:
+      - ./deploy/nginx/online-app.conf.template:/etc/nginx/conf.d/app.conf.template:ro
+  deployment:
+    # Control scripts retain their explicit command; never inherit the keeper.
+    entrypoint: []
+    volumes:
+      - ./.deploy-state/online-trust:/run/sabalan-online:ro
+      - inquiry_data:/data:ro
+      - /etc/sabalan/online/qualification-public-key.pem:/etc/sabalan/online/qualification-public-key.pem:ro

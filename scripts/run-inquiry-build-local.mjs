@@ -6,12 +6,17 @@ import { createHash, randomBytes } from 'node:crypto';
 
 const root = path.resolve(import.meta.dirname, '..'), inquiryRoot = path.join(root, 'apps/sabalan-inquiry');
 const canonical = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || 'D:/sabalanerp';
+const browserBuildId = process.env.SABALAN_INQUIRY_BUILD_ID;
+assert.match(browserBuildId || '', /^inquiry_online_[a-f0-9]{32}$/, 'EXPLICIT_IMMUTABLE_INQUIRY_BUILD_ID_REQUIRED');
+const protectedServices = ['backend', 'frontend', 'postgres', 'inquiry', 'redis', 'clamav',
+  'backend-candidate', 'backend-retained', 'frontend-candidate', 'frontend-retained'];
 function verify() {
   const output = execFileSync('docker', ['compose', '-f', path.join(canonical, 'docker-compose.local.yml'), 'ps', '--format', 'json'], { encoding: 'utf8' });
   let rows;
   try { const parsed = JSON.parse(output); rows = Array.isArray(parsed) ? parsed : [parsed]; }
   catch { rows = output.trim().split(/\r?\n/).map(line => JSON.parse(line)); }
-  for (const service of ['backend', 'frontend', 'postgres', 'inquiry']) assert.ok(rows.some(row =>
+  assert.equal(rows.length, protectedServices.length, 'CANONICAL_TEN_SERVICE_SET_REQUIRED');
+  for (const service of protectedServices) assert.ok(rows.some(row =>
     row.Project === 'sabalanerp-local' && row.Service === service && row.State === 'running' && row.Health === 'healthy'));
   return rows;
 }
@@ -20,7 +25,7 @@ function identity(service) {
   const [value] = JSON.parse(execFileSync('docker', ['inspect', name], { encoding: 'utf8' }));
   return { id: value.Id, image: value.Image, startedAt: value.State.StartedAt };
 }
-const before = { inquiry: identity('inquiry'), backend: identity('backend') };
+const before = Object.fromEntries(protectedServices.map(service => [service, identity(service)]));
 verify();
 const dependencyInventory = JSON.parse(execFileSync('docker', ['exec', before.inquiry.id, 'node', '-e', `
 const fs=require('fs'),path=require('path');const root='/app/node_modules';let count=0,bytes=0;
@@ -43,6 +48,7 @@ for (const name of [...new Set(sourceNames)]) {
 }
 const total = Object.values(files).reduce((sum, bytes) => sum + bytes.length, 0);
 assert.ok(total > 1000 && total < 32 * 1024 * 1024);
+const sourceHashes = Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')]));
 const directory = '/tmp/sabalan-inquiry-build-' + randomBytes(16).toString('hex');
 const bootstrap = `const fs=require('fs'),path=require('path'),cp=require('child_process');
 const input=JSON.parse(fs.readFileSync(0,'utf8')),root=input.directory;
@@ -74,6 +80,7 @@ assert.ok(dependencyBytes > 1024 && dependencyBytes < 512 * 1024 * 1024);
 const dependencyArchiveSha256 = dependencyHash.digest('hex');
 const build = `const fs=require('fs'),cp=require('child_process');const root=${JSON.stringify(directory)};
 const env={...process.env,NODE_ENV:'production',NODE_OPTIONS:'--max-old-space-size=768',RAYON_NUM_THREADS:'2',DATABASE_URL:'file:'+root+'/build-only.db',SESSION_SECRET:'private-build-fixture-secret-minimum-32-characters',NEXT_TELEMETRY_DISABLED:'1'};
+env.SABALAN_INQUIRY_BUILD_ID=${JSON.stringify(browserBuildId)};
 for(const key of Object.keys(env))if(key.startsWith('PG')||key.startsWith('BACKEND_')||key.startsWith('INQUIRY_NATIVE_')||key==='INQUIRY_RUNTIME_GENERATION')delete env[key];
 const versions=Object.fromEntries(['next','react','typescript','@prisma/client'].map(name=>[name,require(root+'/node_modules/'+name+'/package.json').version]));
 console.log(JSON.stringify({privateBuildRoot:root,versions,pythonAvailable:fs.existsSync('/usr/bin/python3')}));
@@ -81,6 +88,13 @@ for(const args of [
  [root+'/node_modules/prisma/build/index.js','db','push','--skip-generate','--schema',root+'/prisma/schema.prisma'],
  [root+'/node_modules/next/dist/bin/next','build'],
 ]){const result=cp.spawnSync(process.execPath,args,{cwd:root,env,stdio:'inherit'});if(result.error||result.signal||result.status!==0){console.log(JSON.stringify({failedCommand:args[0],status:result.status,signal:result.signal}));throw Error('PRIVATE_INQUIRY_BUILD_FAILED');}}
+// Next 16 uses an internal constant BUILD_ID when native deploymentId skew
+// protection is enabled. The browser selector is deploymentId, not that ID.
+const frameworkBuildId=fs.readFileSync(root+'/.next/BUILD_ID','utf8').trim();
+if(!/^[A-Za-z0-9_-]{8,128}$/.test(frameworkBuildId))throw Error('PRIVATE_INQUIRY_FRAMEWORK_BUILD_ID_INVALID');
+const required=JSON.parse(fs.readFileSync(root+'/.next/required-server-files.json','utf8'));
+if(required.config.deploymentId!==env.SABALAN_INQUIRY_BUILD_ID||required.config.env.NEXT_PUBLIC_INQUIRY_BUILD_ID!==env.SABALAN_INQUIRY_BUILD_ID)throw Error('PRIVATE_INQUIRY_DEPLOYMENT_ID_MISMATCH');
+console.log(JSON.stringify({frameworkBuildId,browserDeploymentId:env.SABALAN_INQUIRY_BUILD_ID}));
 console.log('PRIVATE_INQUIRY_BUILD_PASSED');`;
 verify();
 const child = spawn('docker', ['exec', before.backend.id, 'node', '-e', build], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -90,10 +104,10 @@ for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => {
   if (count < 2 * 1024 * 1024) { output += bytes.toString(); process.stdout.write(bytes); }
 });
 const result = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', (code, signal) => resolve({ code, signal })); });
-const after = { inquiry: identity('inquiry'), backend: identity('backend') }; assert.deepEqual(after, before);
+const after = Object.fromEntries(protectedServices.map(service => [service, identity(service)])); assert.deepEqual(after, before);
+for (const [name, fingerprint] of Object.entries(sourceHashes)) assert.equal(createHash('sha256').update(fs.readFileSync(path.join(inquiryRoot, name))).digest('hex'), fingerprint, 'INQUIRY_BUILD_SOURCE_CHANGED: ' + name);
 const report = { format: 'sabalan-private-inquiry-build/v1', directory, canonicalUnchanged: after, result,
-  dependencyInventory, dependencyBytes, dependencyArchiveSha256,
-  sourceHashes: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')])),
+  dependencyInventory, dependencyBytes, dependencyArchiveSha256, browserBuildId, sourceHashes,
   actualImmutableImageBuild: false, nativeActionOverlap: false, publicAdmission: false };
 const basename = path.basename(directory);
 fs.writeFileSync(path.join(root, 'reports/qa', basename + '.log'), output, { flag: 'wx' });

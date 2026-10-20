@@ -6,9 +6,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const root = path.resolve(import.meta.dirname, '..'), sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const suite = process.env.HR_ERASURE_FILE_SUITE || 'legacy'; assert.ok(['legacy', 'native', 'predecessor', 'profile'].includes(suite));
-const native = suite === 'native' || suite === 'profile';
-const test = suite === 'profile' ? 'tests/online-deployment/hr-file-runtime-profile.fixture.ts'
+const suite = process.env.HR_ERASURE_FILE_SUITE || 'legacy'; assert.ok(['legacy', 'native', 'predecessor', 'profile', 'application'].includes(suite));
+const native = suite === 'native' || suite === 'profile' || suite === 'application';
+const test = suite === 'application' ? 'tests/online-deployment/application-runtime-profile.fixture.ts'
+  : suite === 'profile' ? 'tests/online-deployment/hr-file-runtime-profile.fixture.ts'
   : suite === 'native' ? 'tests/online-deployment/hr-erasure-file-journal.fixture.ts'
   : suite === 'predecessor' ? 'backend/src/services/__tests__/hrDeletionFileCleanupPredecessor.integration.test.ts'
   : 'backend/src/services/__tests__/hrErasureFileRecovery.integration.test.ts';
@@ -31,7 +32,7 @@ const built = await esbuild.build({ absWorkingDir: root,
     build.onLoad({ filter: /.*/, namespace: 'file' }, args => {
       const name = path.relative(root, args.path).split(path.sep).join('/');
       assert.ok(name && !name.startsWith('../') && !path.isAbsolute(name));
-      const loader = { '.ts': 'ts', '.js': 'js', '.json': 'json' }[path.extname(args.path)]; assert.ok(loader);
+      const loader = { '.ts': 'ts', '.js': 'js', '.mjs': 'js', '.json': 'json' }[path.extname(args.path)]; assert.ok(loader);
       return { contents: capture(name), loader, resolveDir: path.dirname(args.path) };
     });
   } }],
@@ -103,10 +104,11 @@ try {
     const target = new URL(url.href); target.hostname = 'postgres'; target.port = '5432'; nativeUrl = target.href;
     const bootstrap = `process.umask(0o077);process.chdir(require('path').dirname(process.argv[1]));
       const input=JSON.parse(require('fs').readFileSync(0,'utf8'));process.env.DATABASE_URL=input.databaseUrl;
+      ${suite === 'application' ? `process.env.NODE_ENV='test';process.env.RECOVERY_STORAGE_DIR=process.cwd()+'/private-recovery';process.env.RECOVERY_COORDINATION_DIR=process.cwd()+'/private-recovery/coordination';process.env.SUPPORT_TICKET_STORAGE_DIR=process.cwd()+'/storage/support-tickets';` : ''}
       Object.defineProperty(globalThis,'__sabalanHrErasureNativeInput',{value:Object.freeze(input),writable:false,configurable:false});require(process.argv[1]);`;
     verify(); result = spawnSync('docker', ['exec', '-i', '-e', 'NODE_PATH=/app/node_modules', candidate.Id,
       'node', '-e', bootstrap, nativeDirectory + '/fixture.cjs'], {
-      input: JSON.stringify({ databaseUrl: nativeUrl, migrationSql: migration.toString('utf8') }), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
+      input: JSON.stringify({ databaseUrl: nativeUrl, migrationSql: migration.toString('utf8'), ...(suite === 'application' ? { diagnosticBaseImage: candidate.Image, diagnosticBundleSha256: sha(bundle) } : {}) }), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
     });
   } else result = spawnSync(process.execPath, ['--test', entry], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
     env: { ...process.env, NODE_PATH: path.join(root, 'backend/node_modules'), DATABASE_URL: url.href, HR_ERASURE_FILE_LOCAL_ACCEPTANCE: '1' } });
@@ -138,6 +140,10 @@ if (suite === 'native') {
   assert.match(report.stdout, /"versionedJobApplicationConcurrencyPassed":true/);
   assert.match(report.stdout, /"versionedJobApplicationObserverClosed":true/);
   assert.match(report.stdout, /"versionedPersonnelErasurePassed":true/);
+}
+else if (suite === 'application') {
+  assert.match(report.stdout, /"actualCanonicalApplicationProfilePassed":true/);
+  assert.match(report.stdout, /"actualCanonicalApplicationClosed":true/);
 }
 else if (suite === 'profile') assert.match(report.stdout, /"actualHrVersionedProfilePassed":true/);
 else { assert.match(report.stdout, /# fail 0\r?\n/); assert.match(report.stdout, /# skipped 0\r?\n/); }

@@ -69,7 +69,7 @@
     "test:personnel-performance-disclosure": "tsx src/services/__tests__/personnelPerformanceDisclosure.test.ts && tsx src/services/__tests__/personnelPerformanceLineageFailures.test.ts && tsx src/routes/__tests__/personnelPerformanceRoutes.test.ts",
     "test:personnel-performance-disclosure:db": "tsx src/services/__tests__/personnelPerformanceDisclosure.integration.test.ts && tsx src/services/__tests__/personnelPerformanceExportLineage.integration.test.ts",
     "test:user-deletion-policy": "tsx src/services/__tests__/userDeletionPolicy.test.ts",
-    "test:system-recovery": "tsx src/services/__tests__/systemRecoveryPolicy.test.ts && tsx src/services/__tests__/systemRecoveryFileReferences.test.ts && tsx src/services/__tests__/recoveryCrypto.test.ts && tsx --test src/services/__tests__/deploymentRestoreEvidence.test.ts",
+    "test:system-recovery": "tsx src/services/__tests__/systemRecoveryPolicy.test.ts && tsx src/services/__tests__/systemRecoveryFileReferences.test.ts && tsx src/services/__tests__/recoveryCrypto.test.ts && tsx --test src/services/__tests__/recoveryCryptoEmpty.test.ts src/services/__tests__/deploymentRestoreEvidence.test.ts",
     "test:http-runtime:db": "tsx --test src/services/__tests__/httpAsyncFailure.integration.test.ts",
     "test:online-delivery": "tsx --test src/services/__tests__/realtimeDeliveryLifecycle.test.ts src/services/__tests__/requestSessionBinding.test.ts",
     "test:online-delivery:db": "tsx --test src/services/__tests__/notificationDeviceDelivery.integration.test.ts",

@@ -9,10 +9,39 @@ import { RuntimeBoundaryJournal, runtimeNativePostgresApplicationName } from './
 import { RuntimeTaskAdmission } from './runtimeTaskAdmission';
 import { RuntimeWorkBoundary } from './runtimeWorkBoundary';
 import { OnlineCaptureAdmission } from './onlineCaptureAdmission';
-import { bindScopedRecoveryBackgroundOwner } from './recoveryRuntime';
+import { bindScopedRecoveryBackgroundOwner, withRecoveryBackgroundWrite, getRecoveryRuntimeState, RECOVERY_COORDINATION_DIR } from './recoveryRuntime';
+import { deploymentMaintenanceActive } from './deploymentMaintenance';
 
 type WorkInput = Readonly<{ registrySha256: string; generation: number; canJoin: () => boolean }>;
 const failure = (code: string) => Object.assign(new Error(code), { code });
+let realtimeObserved = false;
+let realtimeOwner: { boundary: RuntimeWorkBoundary; input: NonNullable<ReturnType<typeof loadOnlineRuntimeScope>>;
+  assertOwner: () => void } | undefined;
+
+/** Actual realtime callbacks share HTTP-purpose native work admission. An idle
+ * socket owns no application lease. Only this module's genuine constructor may
+ * install the owner; a caller cannot register an arbitrary context or worker.
+ * Existing unscoped runtime behavior remains the recovery background wrapper. */
+export async function executeRealtimeCallback<T>(work: () => Promise<T>): Promise<T> {
+  realtimeObserved = true;
+  const input = loadOnlineRuntimeScope();
+  if (input) {
+    const owner = realtimeOwner;
+    if (input.scope.purpose !== 'http' || !owner || owner.input !== input) throw failure('ONLINE_REALTIME_OWNER_UNPROVEN');
+    owner.assertOwner();
+    return owner.boundary.context.run(async () => {
+      owner.assertOwner();
+      if (getRecoveryRuntimeState().mode !== 'NORMAL' || deploymentMaintenanceActive(RECOVERY_COORDINATION_DIR)) {
+        throw failure('REALTIME_DELIVERY_UNAVAILABLE');
+      }
+      return await work();
+    });
+  }
+  if (realtimeOwner) throw failure('ONLINE_REALTIME_OWNER_LOST');
+  const result = await withRecoveryBackgroundWrite(async () => ({ value: await work() }));
+  if (!result) throw failure('REALTIME_DELIVERY_UNAVAILABLE');
+  return result.value;
+}
 const identity = (value: fs.BigIntStats) => [value.dev, value.ino, value.size, value.mtimeNs, value.ctimeNs,
   value.uid, value.mode, value.nlink].map(String).join(':');
 
@@ -80,6 +109,11 @@ export async function createScopedRuntimeWork(configuration: WorkInput): Promise
     assertOwner();
   };
   const boundary = new RuntimeWorkBoundary(tasks, runtimeHttpRequests, assertWorker, assertHttp, assertOwner);
+  if (input.scope.purpose === 'http') {
+    runtimeHttpRequests.assertBeforeFirstRequest();
+    if (realtimeObserved || realtimeOwner) throw failure('ONLINE_REALTIME_OWNER_ALREADY_OBSERVED');
+    realtimeOwner = { boundary, input, assertOwner };
+  }
   if (input.scope.purpose === 'jobs') bindScopedRecoveryBackgroundOwner(boundary);
   return boundary;
 }

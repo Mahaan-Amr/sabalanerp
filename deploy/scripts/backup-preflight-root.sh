@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 [ "$#" -eq 1 ] || exit 64

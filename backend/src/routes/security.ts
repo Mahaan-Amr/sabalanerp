@@ -2,7 +2,7 @@ import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { createDurableUpload } from '../services/durableUpload';
+import { createSharedDurableUpload } from '../services/sharedUploadFileRuntime';
 import * as XLSX from 'xlsx';
 import { body, validationResult } from 'express-validator';
 import { AttendanceIntervalStatus, AttendanceStatus, AttendanceWorkScheduleStatus, ExceptionStatus, ExceptionType, LogisticsDriverRequestStatus, PrismaClient, SecurityDriverQueueTurnStatus, SecurityPatrolStatus, SecurityShiftCoverageStatus, SecurityShiftLogStatus, SecurityShiftPlanStatus, SecurityShiftSessionStatus, SecurityVehiclePairPhotoCategory, SecurityVehiclePlateKind } from '@prisma/client';
@@ -10,6 +10,7 @@ import { protect, authorize, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { generatePdfFromHtml } from '../utils/pdf';
+import { downloadAndRemoveDocumentPdf } from '../services/documentPdfDownload';
 import { buildPersonnelAttendanceReport, parsePersonnelAttendanceReportOptions, PersonnelAttendanceReportInputError, PersonnelAttendanceReportOptions } from '../services/personnelAttendanceReport';
 import { renderPersonnelAttendanceReportPdf } from '../services/personnelAttendanceReportPdf';
 import { renderSecurityAttendanceReportHtml, securityAttendanceStatusLabel, SecurityAttendanceReportRow } from '../utils/securityAttendanceReport';
@@ -438,10 +439,15 @@ const pairIsComplete = (pair: any) => Boolean(
   pair.homeAddress?.trim() && pair.relativePhone?.trim() &&
   ['DRIVER_LICENSE', 'VEHICLE_CARD', 'DRIVER_PHOTO'].every((category) => pair.photos?.some((photo: any) => photo.category === category))
 );
-const removeStoredFiles = (files: Express.Multer.File[] = []) => files.forEach((file) => {
-  try { fs.unlinkSync(file.path); } catch { /* best effort cleanup */ }
-});
-const vehiclePhotoUpload = createDurableUpload({
+// Only this request's original unreferenced publication can be discarded.
+// Submission to SQL makes uncertain acknowledgement retain the original bytes.
+const removeStoredFiles = async (request: AuthRequest, files: Express.Multer.File[] = []) => {
+  for (const file of files) {
+    const upload = path.dirname(file.path) === vehiclePhotoDir ? vehiclePhotoUpload : shiftLogPhotoUpload;
+    await upload.discardUnreferenced(request, file);
+  }
+};
+const vehiclePhotoUpload = createSharedDurableUpload(vehiclePhotoDir, {
   storage: {
     destination: (_req, _file, cb) => { fs.mkdirSync(vehiclePhotoDir, { recursive: true }); cb(null, vehiclePhotoDir); },
     filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`)
@@ -449,7 +455,7 @@ const vehiclePhotoUpload = createDurableUpload({
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype) && ['.jpg', '.jpeg', '.png', '.webp'].includes(path.extname(file.originalname).toLowerCase())),
   limits: { fileSize: 10 * 1024 * 1024 }
 });
-const shiftLogPhotoUpload = createDurableUpload({
+const shiftLogPhotoUpload = createSharedDurableUpload(shiftLogPhotoDir, {
   storage: { destination: (_req, _file, cb) => { fs.mkdirSync(shiftLogPhotoDir, { recursive: true }); cb(null, shiftLogPhotoDir); }, filename: (_req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname).toLowerCase()}`) },
   fileFilter: (_req, file, cb) => cb(null, ['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)), limits: { fileSize: 10 * 1024 * 1024, files: 8 }
 });
@@ -540,14 +546,15 @@ router.post('/vehicle-pairs', protect, securityAdmin, vehiclePhotoUpload.any(), 
     const photos = photoCreateData(req);
     const files = uploadedFiles(req);
     if (inputError || files.some((file) => !categoryByField[file.fieldname]) || !Object.values(SecurityVehiclePairPhotoCategory).every((category) => photos.some((photo) => photo.category === category))) {
-      removeStoredFiles(uploadedFiles(req));
+      await removeStoredFiles(req, uploadedFiles(req));
       return res.status(400).json({ success: false, error: inputError || 'حداقل یک تصویر در هر دسته الزامی است.' });
     }
     const duplicate = await prisma.securityVehiclePair.findFirst({ where: { nationalCode: data.nationalCode, vehiclePlate: data.vehiclePlate } });
     if (duplicate) {
-      removeStoredFiles(uploadedFiles(req));
+      await removeStoredFiles(req, uploadedFiles(req));
       return res.status(409).json({ success: false, error: duplicate.isActive ? 'این راننده و خودرو قبلاً ثبت شده است.' : 'این زوج غیرفعال است؛ آن را ویرایش یا فعال کنید.' });
     }
+    for (const file of files) vehiclePhotoUpload.retain(req, file);
     const pair = await prisma.securityVehiclePair.create({
       data: {
         ...data, createdBy: req.user!.id, informationGraceEndsAt: null,
@@ -557,7 +564,7 @@ router.post('/vehicle-pairs', protect, securityAdmin, vehiclePhotoUpload.any(), 
     });
     res.status(201).json({ success: true, data: pair });
   } catch (error) {
-    removeStoredFiles(uploadedFiles(req));
+    await removeStoredFiles(req, uploadedFiles(req));
     console.error('Create security vehicle pair error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
   }
@@ -606,14 +613,15 @@ router.post('/vehicle-pairs/:id/photos', protect, securityAdmin, vehiclePhotoUpl
   const files = uploadedFiles(req);
   try {
     if (!files.length) return res.status(400).json({ success: false, error: 'حداقل یک تصویر انتخاب کنید.' });
-    if (files.some((file) => !categoryByField[file.fieldname])) { removeStoredFiles(files); return res.status(400).json({ success: false, error: 'دسته تصویر نامعتبر است.' }); }
+    if (files.some((file) => !categoryByField[file.fieldname])) { await removeStoredFiles(req, files); return res.status(400).json({ success: false, error: 'دسته تصویر نامعتبر است.' }); }
     const pair = await prisma.securityVehiclePair.findUnique({ where: { id: req.params.id } });
-    if (!pair) { removeStoredFiles(files); return res.status(404).json({ success: false, error: 'رکورد پیدا نشد.' }); }
+    if (!pair) { await removeStoredFiles(req, files); return res.status(404).json({ success: false, error: 'رکورد پیدا نشد.' }); }
+    for (const file of files) vehiclePhotoUpload.retain(req, file);
     await prisma.securityVehiclePairPhoto.createMany({ data: photoCreateData(req).map((photo) => ({ ...photo, vehiclePairId: pair.id })) });
     const updated = await prisma.securityVehiclePair.findUnique({ where: { id: pair.id }, include: { photos: true } });
     res.status(201).json({ success: true, data: updated });
   } catch (error) {
-    removeStoredFiles(files);
+    await removeStoredFiles(req, files);
     res.status(500).json({ success: false, error: 'بارگذاری تصویر ناموفق بود.' });
   }
 });
@@ -1627,21 +1635,22 @@ router.get('/shift-log/attachments/:id', protect, securityView, async (req: Auth
 router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.array('images', 8), [body('categoryId').isString().trim().notEmpty(), body('reportTypeId').optional({ values: 'falsy' }).isString(), body('description').optional({ values: 'falsy' }).isString()], async (req: AuthRequest, res: Response) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'دسته‌بندی گزارش الزامی است.', details: errors.array() }); }
+    if (!errors.isEmpty()) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'دسته‌بندی گزارش الزامی است.', details: errors.array() }); }
     const { session } = await getActiveShiftSessionForUser(req.user!.id);
-    if (!session) { removeStoredFiles(uploadedFiles(req)); return res.status(409).json({ success: false, error: 'شیفت فعال برای ثبت گزارش پیدا نشد.' }); }
+    if (!session) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(409).json({ success: false, error: 'شیفت فعال برای ثبت گزارش پیدا نشد.' }); }
     const category = await prisma.securityInstantReportCategory.findFirst({ where: { id: req.body.categoryId, isActive: true } });
-    if (!category) { removeStoredFiles(uploadedFiles(req)); return res.status(404).json({ success: false, error: 'دسته‌بندی گزارش فعال پیدا نشد.' }); }
+    if (!category) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(404).json({ success: false, error: 'دسته‌بندی گزارش فعال پیدا نشد.' }); }
     const type = req.body.reportTypeId ? await prisma.securityInstantReportType.findFirst({ where: { id: req.body.reportTypeId, categoryId: category.id, isActive: true } }) : null;
-    if (category.useReportTypes && !type) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'برای این دسته‌بندی انتخاب نوع گزارش الزامی است.' }); }
-    if (!category.useReportTypes && req.body.reportTypeId) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'این دسته‌بندی از نوع گزارش استفاده نمی‌کند.' }); }
+    if (category.useReportTypes && !type) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'برای این دسته‌بندی انتخاب نوع گزارش الزامی است.' }); }
+    if (!category.useReportTypes && req.body.reportTypeId) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'این دسته‌بندی از نوع گزارش استفاده نمی‌کند.' }); }
     const participantIds = [...new Set(JSON.parse(String(req.body.participantIds || '[]')))].filter((id: any) => typeof id === 'string');
     const validParticipants = participantIds.length ? await prisma.personnel.count({ where: { id: { in: participantIds }, isActive: true } }) : 0;
-    if (validParticipants !== participantIds.length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'یکی از پرسنل انتخاب‌شده معتبر نیست.' }); }
+    if (validParticipants !== participantIds.length) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'یکی از پرسنل انتخاب‌شده معتبر نیست.' }); }
     const useRelatedPersonnel = category.useReportTypes ? Boolean(type?.useRelatedPersonnel) : category.useRelatedPersonnel;
-    if (!useRelatedPersonnel && participantIds.length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'برای این طبقه‌بندی افراد مرتبط نمایش داده نمی‌شود.' }); }
+    if (!useRelatedPersonnel && participantIds.length) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'برای این طبقه‌بندی افراد مرتبط نمایش داده نمی‌شود.' }); }
     const description = String(req.body.description || '').trim();
-    if (!description && !participantIds.length && !uploadedFiles(req).length) { removeStoredFiles(uploadedFiles(req)); return res.status(400).json({ success: false, error: 'حداقل توضیح، تصویر یا فرد مرتبط برای ثبت گزارش لازم است.' }); }
+    if (!description && !participantIds.length && !uploadedFiles(req).length) { await removeStoredFiles(req, uploadedFiles(req)); return res.status(400).json({ success: false, error: 'حداقل توضیح، تصویر یا فرد مرتبط برای ثبت گزارش لازم است.' }); }
+    for (const file of uploadedFiles(req)) shiftLogPhotoUpload.retain(req, file);
     const entry = await prisma.$transaction(async (tx) => {
       const last = await tx.securityShiftLogEntry.findFirst({ where: { sessionId: session.id }, orderBy: { rowNumber: 'desc' } });
       return tx.securityShiftLogEntry.create({
@@ -1661,7 +1670,7 @@ router.post('/shift-log/entries', protect, securityEdit, shiftLogPhotoUpload.arr
       });
     }, { isolationLevel: 'Serializable' });
     res.status(201).json({ success: true, data: entry });
-  } catch (error: any) { removeStoredFiles(uploadedFiles(req));
+  } catch (error: any) { await removeStoredFiles(req, uploadedFiles(req));
     console.error('Create shift log entry error:', error);
     res.status(500).json({ success: false, error: error.message || 'ثبت گزارش لحظه‌ای ناموفق بود.' });
   }
@@ -3587,7 +3596,8 @@ router.post('/reports/personnel-history/:personnelId.pdf', protect, securityAdmi
     const html = `${securityPdfStyles()}${renderSecurityPersonnelReportHistoryPdfHtml({ personnel: result.personnel, exporterName, generatedAt, filters: result.query as any, reports, includeImages })}`;
     const pdfPath = await generatePdfFromHtml({ fileName: `security-personnel-report-history-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">سوابق گزارش‌های گارد پرسنل · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
     await prisma.securityPersonnelReportExportAudit.create({ data: { actorId: req.user!.id, actorNameSnapshot: exporterName, personnelId: result.personnel.id, personnelNameSnapshot: securityName(result.personnel), filters: result.query as any, includeImages, reportCount: result.entries.length, generatedAt } });
-    return res.download(pdfPath, `security-personnel-reports-${result.personnel.employeeNumber || result.personnel.id}.pdf`, () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, `security-personnel-reports-${result.personnel.employeeNumber || result.personnel.id}.pdf`);
+    return;
   } catch (error: any) { console.error('Export personnel report history error:', error); return res.status(500).json({ success: false, error: error.message || 'ساخت PDF سوابق گزارش پرسنل ناموفق بود.' }); }
 });
 
@@ -3645,7 +3655,8 @@ router.post('/reports/completed-shifts.pdf', protect, securityAdmin, async (req:
       ),
     });
     const pdfPath = await generatePdfFromHtml({ fileName: `security-shifts-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">گزارش شیفت‌ها · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
-    return res.download(pdfPath, 'security-shifts.pdf', () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, 'security-shifts.pdf');
+    return;
   } catch (error: any) { console.error('Export selected security shifts error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش شیفت‌ها ناموفق بود.' }); }
 });
 
@@ -3720,7 +3731,8 @@ router.post('/reports/attendance.pdf', protect, securityAdmin, async (req: AuthR
     const rows = result.rows.map((row) => `<tr><td>${securityEscapeHtml(row.personnelName)}</td><td>${securityEscapeHtml(row.shiftTitle)}</td><td>${formatSecurityDateTime(row.shiftStartsAt)} تا ${formatSecurityDateTime(row.shiftEndsAt)}</td><td>${stateLabel[row.state]}</td><td>${formatSecurityDateTime(row.arrivedAt)}</td><td>${row.delayMinutes ? `${row.delayMinutes.toLocaleString('fa-IR')} دقیقه` : '—'}</td></tr>`).join('');
     const html = `${securityPdfStyles()}<div class="sheet"><header class="header"><div><h1>گزارش حضور و غیاب گارد</h1><div class="meta">${slots.length.toLocaleString('fa-IR')} شیفت · ${result.selectedPersonnelIds.length.toLocaleString('fa-IR')} نفر · زمان تولید: ${formatSecurityDateTime(new Date())}</div></div></header><table><thead><tr><th>نیرو</th><th>شیفت</th><th>بازه</th><th>وضعیت</th><th>حضور</th><th>تأخیر</th></tr></thead><tbody>${rows || '<tr><td colspan="6">داده‌ای در دامنه انتخاب‌شده وجود ندارد.</td></tr>'}</tbody></table></div>`;
     const pdfPath = await generatePdfFromHtml({ fileName: `security-attendance-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '14mm', left: '5mm' }, displayHeaderFooter: true, headerTemplate: '<span></span>', footerTemplate: '<div style="width:100%;font-size:8px;color:#64748b;text-align:center;direction:rtl">گزارش حضور و غیاب گارد · صفحه <span class="pageNumber"></span> از <span class="totalPages"></span></div>' });
-    return res.download(pdfPath, 'security-attendance.pdf', () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, 'security-attendance.pdf');
+    return;
   } catch (error: any) { console.error('Export selected security attendance error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش حضور و غیاب گارد ناموفق بود.' }); }
 });
 
@@ -3737,7 +3749,7 @@ router.get('/reports/latest-completed-shift', protect, securityAdmin, async (_re
   }
 });
 
-router.get('/reports/latest-completed-shift.pdf', protect, securityAdmin, async (_req: AuthRequest, res: Response) => {
+router.get('/reports/latest-completed-shift.pdf', protect, securityAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const slot = await latestCompletedSecurityShift(true) as any;
     if (!slot) return res.status(404).json({ success: false, error: 'هنوز شیفت پایان‌یافته‌ای برای دریافت گزارش وجود ندارد' });
@@ -3752,7 +3764,8 @@ router.get('/reports/latest-completed-shift.pdf', protect, securityAdmin, async 
       </div>
     `;
     const pdfPath = await generatePdfFromHtml({ fileName: `security-latest-completed-shift-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
-    return res.download(pdfPath, 'security-latest-completed-shift.pdf', () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, 'security-latest-completed-shift.pdf');
+    return;
   } catch (error) {
     console.error('Export latest completed security shift PDF error:', error);
     return res.status(500).json({ success: false, error: 'ساخت PDF شیفت قبل ناموفق بود.' });
@@ -3817,7 +3830,8 @@ router.get('/reports/security-personnel-performance.pdf', protect, securityAdmin
       </div>
     `;
     const pdfPath = await generatePdfFromHtml({ fileName: `security-personnel-performance-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent: html, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
-    res.download(pdfPath, 'security-personnel-performance.pdf', () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, 'security-personnel-performance.pdf');
+    return;
   } catch (error) {
     console.error('Export security personnel performance PDF error:', error);
     res.status(500).json({ success: false, error: 'ساخت PDF عملکرد نیروهای گارد ناموفق بود.' });
@@ -3916,7 +3930,8 @@ router.get('/reports/export', protect, securityEdit, async (req: AuthRequest, re
       showDateColumn: days > 1
     });
     const pdfPath = await generatePdfFromHtml({ fileName: `security-report-${Date.now()}`, outputDir: path.join(process.cwd(), 'storage', 'reports'), landscape: true, htmlContent, margin: { top: '5mm', right: '5mm', bottom: '5mm', left: '5mm' } });
-    res.download(pdfPath, 'security-report.pdf', () => fs.unlink(pdfPath, () => undefined));
+    await downloadAndRemoveDocumentPdf(req, res, pdfPath, 'security-report.pdf');
+    return;
   } catch (error) {
     console.error('Export security report error:', error);
     res.status(500).json({ success: false, error: 'ساخت خروجی گزارش ناموفق بود.' });

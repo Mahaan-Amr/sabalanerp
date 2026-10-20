@@ -163,11 +163,17 @@ async function applyOwnedExpansion(tx: Prisma.TransactionClient, owner: OnlineMi
     if (columns.length !== 1 || columns[0].generated !== '' || columns[0].identity !== '' || columns[0].hasdefault
       || !columns[0].notnull || columns[0].type !== operation.type) fail('ONLINE_MIGRATION_SOURCE_TYPE_MISMATCH');
   }
+  // Keep PostgreSQL's full timestamp precision; a JavaScript Date would round
+  // the actual first-DDL boundary down to milliseconds.
+  const [started] = await tx.$queryRaw<Array<{ value: string }>>`SELECT clock_timestamp()::text AS value`;
   for (const statement of compiled.statements) await tx.$executeRawUnsafe(statement);
   await assertExpansionSchema(tx, compiled);
   await assertOwner(tx, owner, 'EXPANDING');
-  await tx.$executeRaw`INSERT INTO "_prisma_migrations" (id, checksum, finished_at, migration_name, started_at, applied_steps_count)
-    VALUES (${randomUUID()}, ${compiled.sqlSha256}, clock_timestamp(), ${input.migrationName}, clock_timestamp(), 1)`;
+  const appended = await tx.$executeRaw`WITH finished AS MATERIALIZED (SELECT clock_timestamp() AS value)
+    INSERT INTO "_prisma_migrations" (id, checksum, finished_at, migration_name, started_at, applied_steps_count)
+    SELECT ${randomUUID()}, ${compiled.sqlSha256}, finished.value, ${input.migrationName}, ${started.value}::timestamptz, 1
+    FROM finished WHERE finished.value >= ${started.value}::timestamptz`;
+  if (appended !== 1) fail('ONLINE_MIGRATION_CLOCK_REQUIRES_RECOVERY');
   await tx.onlineMigrationStep.update({ where: { id: step.id }, data: { state: 'COMPLETE', completedAt: new Date(),
     progressJson: { sqlSha256: compiled.sqlSha256 } } });
   return { applied: true, checksum: compiled.sqlSha256 };
@@ -176,6 +182,27 @@ async function applyOwnedExpansion(tx: Prisma.TransactionClient, owner: OnlineMi
 export async function backfillMirroredColumn(database: PrismaClient, owner: OnlineMigrationOwner,
   stepId: string, plan: MirroredBackfillPlan, batchSize = 200) {
   return database.$transaction(tx => backfillOwnedMirror(tx, owner, stepId, plan, batchSize), { timeout: 5000, maxWait: 1000 });
+}
+
+/** Read-only verification after expansion and on every backfill resume. It
+ * cannot replay DDL or turn an unfinished/unknown ledger into completed work. */
+export async function verifyAppliedOnlineExpansion(database:PrismaClient,owner:OnlineMigrationOwner,input:OnlineExpansionPlan){
+ const compiled=compileOnlineExpansion(input);
+ return database.$transaction(async tx=>{
+  await tx.$queryRaw`SELECT set_config('lock_timeout','1000ms',true),set_config('statement_timeout','2000ms',true)`;
+  await assertOwner(tx,owner,'BACKFILLING');
+  const step=await tx.onlineMigrationStep.findUnique({where:{releaseId_stepId:{releaseId:owner.releaseId,stepId:input.migrationName}}});
+  if(!step||step.phase!=='expand'||step.state!=='COMPLETE'||step.sourceMigrationName!==input.migrationName
+   ||step.operationSha256!==compiled.operationSha256
+   ||compileOnlineExpansion(step.operationJson as unknown as OnlineExpansionPlan).operationSha256!==compiled.operationSha256){
+   fail('ONLINE_MIGRATION_STEP_IDENTITY_MISMATCH');
+  }
+  const history=await tx.$queryRaw<Array<{checksum:string}>>`SELECT checksum FROM "_prisma_migrations"
+   WHERE migration_name=${input.migrationName} AND finished_at IS NOT NULL AND rolled_back_at IS NULL`;
+  if(history.length!==1||history[0].checksum!==compiled.sqlSha256)fail('ONLINE_MIGRATION_LEDGER_REQUIRES_RECOVERY');
+  await assertExpansionSchema(tx,compiled);await assertOwner(tx,owner,'BACKFILLING');
+  return{migrationName:input.migrationName,checksum:compiled.sqlSha256,readOnlyVerification:true};
+ },{timeout:5000,maxWait:1000});
 }
 
 async function backfillOwnedMirror(tx: Prisma.TransactionClient, owner: OnlineMigrationOwner,

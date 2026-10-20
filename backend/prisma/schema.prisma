@@ -761,6 +761,7 @@ model RecoveryAuditEvent {
 }
 
 model DeploymentOperation {
+  servingEpochs OnlineServingEpoch[]
   id                      String                              @id
   activeKey               String?                             @unique
   releaseId               String
@@ -789,6 +790,7 @@ model DeploymentOperation {
 /// Immutable release identity plus the durable online handoff/recovery record.
 /// Acceptance remains evidence-bound; a phase string is never admission proof.
 model OnlineRelease {
+  servingEpochs OnlineServingEpoch[]
   id                    String              @id
   deploymentId          String              @unique
   manifestSha256        String
@@ -12803,4 +12805,67 @@ model CrmCustomerRetainedHistory {
   snapshot Json
   customer CrmCustomer @relation(fields: [customerId], references: [id], onDelete: Restrict)
   @@map("crm_customer_retained_history")
+}
+
+model OnlineRealtimeBatch {
+  id String @id
+  kind String
+  sourceId String
+  notificationId String?
+  userId String?
+  producerRuntimeId String
+  producerNonceSha256 String
+  targetsSha256 String
+  targetsJson Json
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  commands OnlineRealtimeCommand[]
+  @@unique([kind,sourceId,notificationId,userId])
+  @@map("online_realtime_batches")
+}
+model OnlineRealtimeCommand {
+  id String @id
+  batchId String
+  runtimeId String
+  nonceSha256 String
+  releaseId String
+  imageIdentity String
+  status String @default("PENDING")
+  claimToken String?
+  startedAt DateTime? @db.Timestamptz(3)
+  settledAt DateTime? @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  batch OnlineRealtimeBatch @relation(fields:[batchId],references:[id],onDelete:Restrict)
+  @@unique([batchId,runtimeId,nonceSha256])
+  @@index([runtimeId,nonceSha256,status,createdAt],map:"online_realtime_commands_owner")
+  @@map("online_realtime_commands")
+}
+model OnlineHrInvalidationIntent {
+  id String @id
+  event String
+  originRuntimeId String
+  originNonceSha256 String
+  sourceOutcome String @default("PREPARED")
+  deliveryStatus String @default("PENDING")
+  sourceSettledAt DateTime? @db.Timestamptz(3)
+  deliverySettledAt DateTime? @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@index([sourceOutcome,deliveryStatus,createdAt,id],map:"online_hr_invalidations_ready")
+  @@map("online_hr_invalidation_intents")
+}
+
+/// Append-only routing epochs preserve support after every current-data rollback.
+model OnlineServingEpoch {
+  id                 String @id
+  releaseId          String
+  deploymentId       String
+  generation         Int @unique
+  publicationSha256  String @unique
+  servedAt           DateTime @default(now()) @db.Timestamptz(3)
+  retiredAt          DateTime? @db.Timestamptz(3)
+  supportUntil       DateTime? @db.Timestamptz(3)
+  release            OnlineRelease @relation(fields: [releaseId], references: [id], onDelete: Restrict)
+  deployment         DeploymentOperation @relation(fields: [deploymentId], references: [id], onDelete: Restrict)
+
+  @@index([releaseId, generation(sort: Desc)], map: "online_serving_release_history")
+  @@map("online_serving_epochs")
 }

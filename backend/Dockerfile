@@ -107,9 +107,18 @@ COPY backend/public ./public
 COPY backend/scripts ./scripts
 COPY deploy/scripts/with-backend-control-ownership.sh ./scripts/with-backend-control-ownership.sh
 COPY deploy/scripts/protected-bootstrap-owner.py deploy/scripts/protected-bootstrap-state.py ./scripts/
+COPY deploy/scripts/protected-file-adoption-owner.py deploy/scripts/protected-file-adoption-state.py ./scripts/
 COPY deploy/scripts/backend-runtime-owner.py deploy/scripts/online-runtime-scope.py deploy/scripts/online-runtime-owner.py ./scripts/
 COPY deploy/scripts/online-capture-admission.py ./scripts/online-capture-admission.py
+COPY deploy/scripts/online-release-runtime.mjs deploy/scripts/online-release-inner-controller.py ./scripts/
+COPY deploy/scripts/online-common-release-edge.mjs deploy/scripts/common-release-edge.mjs deploy/scripts/api-release-routing.mjs deploy/scripts/browser-operation-journal.mjs deploy/scripts/browser-release-proxy.mjs deploy/scripts/browser-release-routing.mjs deploy/scripts/browser-routing-store.mjs deploy/scripts/release-endpoint-catalog.mjs deploy/scripts/release-forwarding.mjs deploy/scripts/socket-release-proxy.mjs ./scripts/
 COPY deploy/scripts/online-backend-boundary.py deploy/scripts/online-inquiry-boundary.py deploy/scripts/recovery-database-freeze.py deploy/scripts/recovery-file-generations.py deploy/scripts/capture-coherent-components.py ./scripts/
+COPY deploy/scripts/coherent-versioned-file-cuts.py deploy/scripts/native-versioned-file-sealer.py deploy/scripts/recovery-versioned-files.py ./scripts/
+COPY deploy/scripts/receive-postgres-wal.py deploy/scripts/seal-online-checkpoint.cjs ./scripts/
+COPY deploy/scripts/online-checkpoint-inventory.py ./scripts/online-checkpoint-inventory.py
+COPY deploy/scripts/capture-coordination-history.py ./scripts/capture-coordination-history.py
+COPY deploy/scripts/retire-protected-online-legacy-records.py ./scripts/retire-protected-online-legacy-records.py
+COPY deploy/scripts/continuous-online-wal-state.py ./scripts/continuous-online-wal-state.py
 COPY deploy/scripts/online-runtime-scope.py ./dist/services/online-runtime-scope.py
 COPY docs/qa/partner-sales/release/release-package.mjs ./partner-release-verifier/release-package.mjs
 COPY backend/src/documents/dispatch/__fixtures__/baselines ./dispatch-document-baselines

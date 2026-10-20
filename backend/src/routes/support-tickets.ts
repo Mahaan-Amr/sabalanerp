@@ -5,7 +5,8 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import express, { type Response } from 'express';
-import { createDurableUpload } from '../services/durableUpload';
+import { createSupportDurableUpload, prepareSupportTicketStorage, assertSupportStoredArtifact } from '../services/supportFileRuntime';
+import { lockSupportTicket, lockSupportStoredFile } from '../services/supportTicketStorage';
 import { body, validationResult } from 'express-validator';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { authorize, protect, type AuthRequest } from '../middleware/auth';
@@ -40,9 +41,8 @@ const router = express.Router();
 const execFileAsync = promisify(execFile);
 const ticketTypes = ['TECHNICAL_ERROR', 'INCORRECT_DATA', 'ACCESS_PROBLEM', 'GUIDANCE', 'IMPROVEMENT', 'SECURITY_PRIVACY', 'OTHER'];
 const impacts: TicketImpact[] = ['MINOR', 'SINGLE_TASK', 'BLOCKED', 'WIDESPREAD'];
-const ticketStorageDir = path.resolve(process.env.SUPPORT_TICKET_STORAGE_DIR || path.join(process.cwd(), 'storage', 'support-tickets'));
-fs.mkdirSync(ticketStorageDir, { recursive: true });
-const attachmentUpload = createDurableUpload({
+const ticketStorageDir = prepareSupportTicketStorage();
+const attachmentUpload = createSupportDurableUpload({
   storage: {
     destination: (_req, _file, callback) => callback(null, ticketStorageDir),
     filename: (_req, file, callback) => callback(
@@ -52,7 +52,7 @@ const attachmentUpload = createDurableUpload({
   },
   limits: { files: 1, fileSize: 25 * 1024 * 1024 },
 });
-const stagedAttachmentUpload = createDurableUpload({
+const stagedAttachmentUpload = createSupportDurableUpload({
   storage: {
     destination: (_req, _file, callback) => callback(null, ticketStorageDir),
     filename: (_req, file, callback) => callback(
@@ -108,10 +108,6 @@ const audioDurationSeconds = async (filePath: string) => {
   return Number.isFinite(duration) ? Math.ceil(duration) : 0;
 };
 
-const removeUploadedFile = (filePath?: string) => {
-  if (!filePath) return;
-  try { fs.unlinkSync(filePath); } catch {}
-};
 
 type StagedAttachment = {
   userId: string;
@@ -458,23 +454,23 @@ router.get('/', async (req: AuthRequest, res) => {
 router.post('/attachments/stage', stagedAttachmentUpload.single('file'), async (req: AuthRequest, res) => {
   try {
     if (!consumeSupportRate(`stage:${req.user!.id}`, 30, 10 * 60 * 1_000)) {
-      removeUploadedFile(req.file?.path);
+      await stagedAttachmentUpload.discardUnreferenced(req, req.file);
       return res.status(429).json({ success: false, error: 'تعداد بارگذاری‌ها بیش از حد مجاز است؛ کمی بعد دوباره تلاش کنید.' });
     }
     if (!req.file) return res.status(400).json({ success: false, error: 'فایل انتخاب نشده است.' });
     const policy = allowedAttachmentTypes[req.file.mimetype];
     if (!policy || req.file.size > policy.maxSize || !hasSafeFileSignature(req.file.path, req.file.mimetype)) {
-      removeUploadedFile(req.file.path);
+      await stagedAttachmentUpload.discardUnreferenced(req, req.file);
       return res.status(400).json({ success: false, error: 'نوع، اندازه یا محتوای فایل مجاز نیست.' });
     }
     const durationSeconds = policy.kind === 'AUDIO' ? await audioDurationSeconds(req.file.path) : null;
     const sensitive = policy.kind === 'AUDIO' || String(req.body.sensitive) === 'true';
     if (sensitive && String(req.body.sensitiveEvidenceConsent) !== 'true') {
-      removeUploadedFile(req.file.path);
+      await stagedAttachmentUpload.discardUnreferenced(req, req.file);
       return res.status(409).json({ success: false, error: 'برای بارگذاری شاهد حساس باید رضایت مربوطه فعال باشد.' });
     }
     if (policy.kind === 'AUDIO' && (!Number.isFinite(durationSeconds) || durationSeconds! <= 0 || durationSeconds! > 600)) {
-      removeUploadedFile(req.file.path);
+      await stagedAttachmentUpload.discardUnreferenced(req, req.file);
       return res.status(400).json({ success: false, error: 'مدت پیام صوتی باید حداکثر ۱۰ دقیقه باشد.' });
     }
     const staged: StagedAttachment = {
@@ -491,9 +487,10 @@ router.post('/attachments/stage', stagedAttachmentUpload.single('file'), async (
       malwareScanStatus: await scanHiringFile(req.file.path),
       expiresAt: Date.now() + 30 * 60 * 1_000,
     };
+    stagedAttachmentUpload.retain(req, req.file);
     res.status(201).json({ success: true, data: { token: signStagedAttachment(staged) } });
   } catch (error) {
-    removeUploadedFile(req.file?.path);
+    await stagedAttachmentUpload.discardUnreferenced(req, req.file);
     throw error;
   }
 });
@@ -530,8 +527,8 @@ router.post(
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'اطلاعات تیکت معتبر نیست.', details: errors.array() });
     const description = String(req.body.description || '').trim();
-    const stagedAttachments = (Array.isArray(req.body.stagedAttachmentTokens) ? req.body.stagedAttachmentTokens : [])
-      .map((token: string) => verifyStagedAttachment(token, req.user!.id));
+    const stagedTokens: unknown[] = Array.isArray(req.body.stagedAttachmentTokens) ? req.body.stagedAttachmentTokens : [];
+    const stagedAttachments = stagedTokens.map(token => typeof token === 'string' ? verifyStagedAttachment(token, req.user!.id) : null);
     if (stagedAttachments.some((attachment) => !attachment)) {
       return res.status(400).json({ success: false, error: 'یکی از پیوست‌های موقت معتبر نیست یا منقضی شده است.' });
     }
@@ -569,6 +566,14 @@ router.post(
     });
     const referenceCode = `SUP-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     const ticket = await prisma.$transaction(async (tx) => {
+      // The janitor uses these same locks and re-reads SQL references afterward.
+      for (const storageName of [...new Set(validStagedAttachments.map(item => item.storageName))].sort()) {
+        await lockSupportStoredFile(tx, storageName);
+      }
+      for (const attachment of validStagedAttachments) {
+        if (attachment.expiresAt < Date.now()) throw Error('SUPPORT_STAGED_ARTIFACT_EXPIRED');
+        await assertSupportStoredArtifact(attachment.storageName, attachment.sha256, attachment.size);
+      }
       const created = await tx.supportTicket.create({
         data: {
           referenceCode,
@@ -1088,45 +1093,50 @@ router.post('/:id/reopen', [body('reason').isString().trim().isLength({ min: 3, 
 router.post('/:id/attachments', attachmentUpload.single('file'), async (req: AuthRequest, res) => {
   try {
     if (!consumeSupportRate(`attachment:${req.user!.id}`, 30, 10 * 60 * 1_000)) {
-      removeUploadedFile(req.file?.path);
+      await attachmentUpload.discardUnreferenced(req, req.file);
       return res.status(429).json({ success: false, error: 'تعداد پیوست‌ها بیش از حد مجاز است؛ کمی بعد دوباره تلاش کنید.' });
     }
     const ticket = await loadTicketForMutation(req, res);
     if (!ticket) {
-      removeUploadedFile(req.file?.path);
+      await attachmentUpload.discardUnreferenced(req, req.file);
       return;
     }
     const handler = await handlerContext(req, ticket);
     const isReporter = ticket.reporterId === req.user!.id;
     if ((!isReporter && !handler.canMutate) || handler.participantRole === 'WATCHER') {
-      removeUploadedFile(req.file?.path);
+      await attachmentUpload.discardUnreferenced(req, req.file);
       return res.status(403).json({ success: false, error: 'اجازه افزودن پیوست را ندارید.' });
     }
     if (!req.file) return res.status(400).json({ success: false, error: 'فایل انتخاب نشده است.' });
     const attachmentCount = await prisma.supportTicketAttachment.count({ where: { ticketId: ticket.id, deletedAt: null } });
     if (attachmentCount >= 20) {
-      removeUploadedFile(req.file.path);
+      await attachmentUpload.discardUnreferenced(req, req.file);
       return res.status(409).json({ success: false, error: 'حداکثر ۲۰ پیوست برای هر تیکت مجاز است.' });
     }
     const policy = allowedAttachmentTypes[req.file.mimetype];
     if (!policy || req.file.size > policy.maxSize || !hasSafeFileSignature(req.file.path, req.file.mimetype)) {
-      removeUploadedFile(req.file.path);
+      await attachmentUpload.discardUnreferenced(req, req.file);
       return res.status(400).json({ success: false, error: 'نوع، اندازه یا محتوای فایل مجاز نیست.' });
     }
     const durationSeconds = policy.kind === 'AUDIO' ? await audioDurationSeconds(req.file.path) : null;
     if (policy.kind === 'AUDIO' && (!Number.isFinite(durationSeconds) || durationSeconds! <= 0 || durationSeconds! > 600)) {
-      removeUploadedFile(req.file.path);
+      await attachmentUpload.discardUnreferenced(req, req.file);
       return res.status(400).json({ success: false, error: 'مدت پیام صوتی باید حداکثر ۱۰ دقیقه باشد.' });
     }
     const sensitive = policy.kind === 'AUDIO' || String(req.body.sensitive) === 'true';
     if (sensitive && !ticket.sensitiveEvidenceConsent) {
-      removeUploadedFile(req.file.path);
+      await attachmentUpload.discardUnreferenced(req, req.file);
       return res.status(409).json({ success: false, error: 'برای افزودن شاهد حساس، رضایت مربوطه باید هنگام ثبت تیکت فعال باشد.' });
     }
     const sha256 = crypto.createHash('sha256').update(fs.readFileSync(req.file.path)).digest('hex');
     const malwareScanStatus = await scanHiringFile(req.file.path);
     const transcript = policy.kind === 'AUDIO' ? String(req.body.transcript || '').trim().slice(0, 10_000) : '';
+    // SQL submission may commit even when its acknowledgment is lost.
+    attachmentUpload.retain(req, req.file);
     const attachment = await prisma.$transaction(async (tx) => {
+      await lockSupportTicket(tx, ticket.id);
+      await lockSupportStoredFile(tx, path.basename(req.file!.path));
+      await assertSupportStoredArtifact(path.basename(req.file!.path), sha256, req.file!.size);
       const entry = await tx.supportTicketEntry.create({
         data: {
           ticketId: ticket.id,
@@ -1168,7 +1178,7 @@ router.post('/:id/attachments', attachmentUpload.single('file'), async (req: Aut
     });
     res.status(201).json({ success: true, data: attachment });
   } catch (error) {
-    removeUploadedFile(req.file?.path);
+    await attachmentUpload.discardUnreferenced(req, req.file);
     throw error;
   }
 });
@@ -1504,6 +1514,7 @@ router.post(
     const ticket = await loadTicketForMutation(req, res);
     if (!ticket) return;
     const hold = await prisma.$transaction(async (tx) => {
+      await lockSupportTicket(tx, ticket.id);
       const created = await tx.supportTicketLegalHold.create({
         data: { ticketId: ticket.id, actorId: req.user!.id, reason: req.body.reason.trim() },
       });
@@ -1525,14 +1536,17 @@ router.post(
     if (req.user!.role !== 'ADMIN') return res.status(403).json({ success: false, error: 'فقط ADMIN می‌تواند توقف قانونی را آزاد کند.' });
     const ticket = await loadTicketForMutation(req, res);
     if (!ticket) return;
-    const hold = await prisma.supportTicketLegalHold.findFirst({ where: { id: req.params.holdId, ticketId: ticket.id, releasedAt: null } });
-    if (!hold) return res.status(404).json({ success: false, error: 'توقف قانونی فعال پیدا نشد.' });
-    await prisma.$transaction([
-      prisma.supportTicketLegalHold.update({ where: { id: hold.id }, data: { releasedAt: new Date() } }),
-      prisma.supportTicketAuditEvent.create({
+    const released = await prisma.$transaction(async (tx) => {
+      await lockSupportTicket(tx, ticket.id);
+      const hold = await tx.supportTicketLegalHold.findFirst({ where: { id: req.params.holdId, ticketId: ticket.id, releasedAt: null } });
+      if (!hold) return false;
+      await tx.supportTicketLegalHold.update({ where: { id: hold.id }, data: { releasedAt: new Date() } });
+      await tx.supportTicketAuditEvent.create({
         data: { ticketId: ticket.id, actorId: req.user!.id, action: 'LEGAL_HOLD_RELEASED', reason: req.body.reason.trim(), afterData: { holdId: hold.id } },
-      }),
-    ]);
+      });
+      return true;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    if (!released) return res.status(404).json({ success: false, error: 'توقف قانونی فعال پیدا نشد.' });
     res.json({ success: true });
   },
 );

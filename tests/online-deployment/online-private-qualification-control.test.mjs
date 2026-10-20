@@ -1,0 +1,12 @@
+import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {generateKeyPairSync,sign} from 'node:crypto';
+const require=createRequire(new URL('../../backend/package.json',import.meta.url));const ts=require('typescript');
+const file=new URL('./online-private-qualification-control.fixture.ts',import.meta.url),module={exports:{}};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,{module,exports:module.exports,require,Buffer});
+const {verifyPrivateQualificationControl:verify,PRIVATE_QUALIFICATION_CONTROL_FORMAT:format}=module.exports;
+const {privateKey,publicKey}=generateKeyPairSync('ed25519'),der=publicKey.export({format:'der',type:'spki'}),expected={session:'1'.repeat(64),actorId:'2'.repeat(64),scopeSha256:'3'.repeat(64),sequence:1};
+const encode=(values={})=>{const v={format,...expected,command:'PRIVATE_PREPARE_DRAIN',...values};return Buffer.from(JSON.stringify({...v,signature:sign(null,Buffer.from([v.format,v.session,v.actorId,v.scopeSha256,String(v.sequence),v.command].join('\0')),privateKey).toString('base64')}));};
+assert.equal(verify(encode(),der,expected).command,'PRIVATE_PREPARE_DRAIN');
+for(const values of [{format:'sabalan-original-host-controller/v1'},{session:'4'.repeat(64)},{actorId:'5'.repeat(64)},{scopeSha256:'6'.repeat(64)},{sequence:2},{command:'PRIVATE_FORCE_CLOSE'},{payload:{force:true}}])assert.throws(()=>verify(encode(values),der,expected));
+const other=generateKeyPairSync('ed25519').publicKey.export({format:'der',type:'spki'});assert.throws(()=>verify(encode(),other,expected));
+const altered=JSON.parse(encode());altered.command='PRIVATE_SHUTDOWN';assert.throws(()=>verify(Buffer.from(JSON.stringify(altered)),der,expected));
+console.log(JSON.stringify({scope:'real Ed25519 control data verification; grants no native/runtime authority',cases:10,pass:true}));

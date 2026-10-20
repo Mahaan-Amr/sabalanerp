@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { randomBytes } = require('node:crypto');
+const { randomBytes,createHash } = require('node:crypto');
 const { spawn, spawnSync } = require('node:child_process');
 const { test } = require('node:test');
 const { KernelWriteAdmission } = require('./kernelWriteAdmission');
@@ -97,7 +97,7 @@ test('legacy aliases and hardlinks cannot become an admitted baseline', async ()
   }
 });
 
-test('an empty-directory legacy tree cannot escape future reservation capacity through a successful baseline', async () => {
+test('preserved empty-directory baseline counts against future reservation capacity', async () => {
   const v = await fixture();
   try {
     // 10,000 actual directories including the root. If these empty prefixes
@@ -105,11 +105,60 @@ test('an empty-directory legacy tree cannot escape future reservation capacity t
     // first capture exceed its directory bound.
     for (let i = 0; i < 9999; i++) fs.mkdirSync(path.join(v.live, 'empty-' + String(i).padStart(5, '0')), { mode: 0o700 });
     v.lock();
-    await assert.rejects(v.publisher.adoptLegacy('b'.repeat(64), v.fd), /FILE_VERSION_LEGACY_EMPTY_DIRECTORY_UNSUPPORTED/);
+    const adopted=await v.publisher.adoptLegacy('b'.repeat(64), v.fd);assert.equal(adopted.files,0);
     assert.deepEqual(fs.readdirSync(path.join(v.store, 'pending')), []);
     assert.deepEqual(fs.readdirSync(path.join(v.store, 'heads')), []);
     assert.equal(fs.readdirSync(v.live).length, 9999, 'unknown existing directories remain intact');
+    const cut=await v.publisher.seal('1'.repeat(64),v.fd);assert.equal(cut.manifest.format,'sabalan-file-version-cut/v2');assert.equal(cut.manifest.directories.length,9999);v.unlock();
+    await assert.rejects(v.publisher.publish('newdir/new.pdf',Buffer.from('MUST NOT ACK EXCESS DIRECTORY')),/FILE_VERSION_INVENTORY_CAPACITY/);
+    assert.equal(fs.existsSync(path.join(v.live,'newdir')),false);assert.deepEqual(fs.readdirSync(path.join(v.store,'pending')),[]);
   } finally { await v.close(); }
+});
+
+test('the real19 HR trash empty-directory layout is durably preserved without replacing any live inode',async()=>{
+ const v=await fixture();try{
+  fs.mkdirSync(path.join(v.live,'.deletion-trash'),{mode:0o700});
+  for(let i=0;i<19;i++)fs.mkdirSync(path.join(v.live,'.deletion-trash',`00000000-0000-4000-8000-${String(i).padStart(12,'0')}`),{mode:0o700});
+  const directories=['.deletion-trash',...fs.readdirSync(path.join(v.live,'.deletion-trash')).map(name=>'.deletion-trash/'+name)].sort();
+  const before=directories.map(name=>fs.statSync(path.join(v.live,name),{bigint:true}).ino);
+  v.lock();await v.publisher.adoptLegacy('d'.repeat(64),v.fd);
+  const record=JSON.parse(fs.readFileSync(path.join(v.store,'legacy-directories.json')));assert.deepEqual(record.directories,directories);assert.equal(fs.statSync(path.join(v.store,'legacy-directories.json')).mode&0o777,0o400);
+  const cut=await v.publisher.seal('e'.repeat(64),v.fd);assert.deepEqual(cut.manifest.directories,directories);assert.equal(cut.manifest.format,'sabalan-file-version-cut/v2');
+  assert.deepEqual(directories.map(name=>fs.statSync(path.join(v.live,name),{bigint:true}).ino),before);v.unlock();
+  await v.publisher.publish('acknowledged.pdf',Buffer.from('NEW FILE ALONGSIDE PRESERVED DIRECTORIES'));v.lock();
+  assert.deepEqual((await v.publisher.seal('f'.repeat(64),v.fd)).manifest.directories,directories);
+ }finally{await v.close();}
+});
+
+test('ordinary reopening refuses a replaced or removed legacy directory record against the immutable baseline proof',async()=>{
+ for(const mutation of ['omit-directory','change-capture','remove']){
+  const v=await fixture();try{
+   fs.mkdirSync(path.join(v.live,'preserved'),{mode:0o700});fs.mkdirSync(path.join(v.live,'second'),{mode:0o700});
+   v.lock();const result=await v.publisher.adoptLegacy('9'.repeat(64),v.fd);v.unlock();
+   const file=path.join(v.store,'legacy-directories.json'),proofFile=path.join(v.store,'legacy-adoption-'+('9'.repeat(64))+'.json');
+   const raw=fs.readFileSync(file),proofRaw=fs.readFileSync(proofFile),proof=JSON.parse(proofRaw);
+   assert.equal(createHash('sha256').update(proofRaw).digest('hex'),result.sha256);
+   assert.equal(proof.directoryMetadataSha256,createHash('sha256').update(raw).digest('hex'));
+   assert.equal(proof.preservedDirectories,2);
+   const record=JSON.parse(raw);fs.unlinkSync(file);
+   if(mutation!=='remove'){
+    if(mutation==='omit-directory')record.directories=['preserved'];else record.captureId='8'.repeat(64);
+    fs.writeFileSync(file,JSON.stringify(record)+'\n',{flag:'wx',mode:0o400});
+   }
+   await assert.rejects(VersionedFilePublication.open(v.store,v.live,v.work),/FILE_VERSION_LEGACY_DIRECTORIES_PROOF_MISMATCH|ENOENT/);
+   assert.ok(fs.statSync(path.join(v.live,'preserved')).isDirectory());assert.ok(fs.statSync(path.join(v.live,'second')).isDirectory());
+  }finally{await v.close();}
+ }
+});
+
+test('directory replacement during immutable metadata publication cannot acknowledge a baseline',async()=>{
+ const v=await fixture(),publication=require('./durableFilePublication'),original=publication.publishDurableFile;
+ try{
+  fs.mkdirSync(path.join(v.live,'empty'),{mode:0o700});
+  publication.publishDurableFile=async(...args)=>{const result=await original(...args);if(args[0]===path.join(v.store,'legacy-directories.json')){fs.renameSync(path.join(v.live,'empty'),path.join(v.root,'original-empty'));fs.mkdirSync(path.join(v.live,'empty'),{mode:0o700});}return result;};
+  v.lock();await assert.rejects(v.publisher.adoptLegacy('0'.repeat(64),v.fd),/FILE_VERSION_LEGACY_SOURCE_CHANGED/);
+  assert.deepEqual(fs.readdirSync(path.join(v.store,'pending')),['legacy-adoption.json']);assert.ok(fs.existsSync(path.join(v.root,'original-empty')));
+ }finally{publication.publishDurableFile=original;await v.close();}
 });
 
 test('a noncooperating live mutation during the actual copy retains an unresolved baseline and refuses capture', async () => {

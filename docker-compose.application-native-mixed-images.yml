@@ -1,0 +1,9 @@
+# Same existing local project; each native role executes its own immutable image.
+name: sabalanerp-local
+services:
+  backend-candidate:
+    image: ${ONLINE_ACCEPTANCE_BACKEND_IMAGE:?immutable candidate image required}
+    pull_policy: never
+  backend-retained:
+    image: ${ONLINE_ACCEPTANCE_RETAINED_BACKEND_IMAGE:?immutable retained image required}
+    pull_policy: never

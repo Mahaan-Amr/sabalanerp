@@ -67,13 +67,13 @@ def capture(options):
         signal.signal(number, defer_cancellation)
 
     ownership()
-    initial = json.loads(subprocess.check_output(['docker', 'inspect', options.container], timeout=20))[0]
+    initial = json.loads(subprocess.check_output(['docker', 'inspect', options.container], timeout=20, pass_fds=(9,)))[0]
     container_id = initial['Id']
     require(re.fullmatch(r'[a-f0-9]{64}', container_id), 'PHYSICAL_BASE_CONTAINER_INVALID')
 
     def source():
         ownership()
-        current = json.loads(subprocess.check_output(['docker', 'inspect', container_id], timeout=20))[0]
+        current = json.loads(subprocess.check_output(['docker', 'inspect', container_id], timeout=20, pass_fds=(9,)))[0]
         labels = current['Config'].get('Labels') or {}
         require(current['Id'] == initial['Id'] and current['Image'] == options.image
                 and labels.get('com.docker.compose.project') == options.project
@@ -132,8 +132,8 @@ def capture(options):
     # Bootstrap is limited to an exclusive empty directory and a small pinned
     # binary. An ambiguous bootstrap also retains the host lock.
     try:
-        subprocess.run(['docker', 'exec', container_id, 'mkdir', '-m', '700', native_root], check=True, timeout=20)
-        subprocess.run(['docker', 'cp', str(supervisor), container_id + ':' + native_owner], check=True, timeout=20)
+        subprocess.run(['docker', 'exec', container_id, 'mkdir', '-m', '700', native_root], check=True, timeout=20, pass_fds=(9,))
+        subprocess.run(['docker', 'cp', str(supervisor), container_id + ':' + native_owner], check=True, timeout=20, pass_fds=(9,))
     except Exception:
         uncertain('bootstrap')
     command_number = 0
@@ -154,7 +154,7 @@ def capture(options):
                         '-e', 'SABALAN_NATIVE_STORAGE_MAX_BYTES=' + str(storage_maximum),
                         '-e', 'SABALAN_NATIVE_STORAGE_RESERVE_BYTES=' + str(1024 ** 3)]
         command += [container_id, native_owner, str(seconds), token, *arguments]
-        process = subprocess.Popen(command, stdin=input_file or subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        process = subprocess.Popen(command, stdin=input_file or subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(9,))
         proven = False
         server_closed = not server_work
         try:
@@ -270,7 +270,7 @@ def capture(options):
     maximum_bytes = int(before['clusterBytes'] * 5 // 4) + 256 * 1024 ** 2
     available = os.statvfs(root).f_bavail * os.statvfs(root).f_frsize
     require(available >= maximum_bytes * 3 + 1024 ** 3, 'PHYSICAL_BASE_CAPACITY_REQUIRED')
-    docker_root = Path(subprocess.check_output(['docker', 'info', '--format', '{{.DockerRootDir}}'], timeout=20).decode().strip())
+    docker_root = Path(subprocess.check_output(['docker', 'info', '--format', '{{.DockerRootDir}}'], timeout=20, pass_fds=(9,)).decode().strip())
     require(docker_root.is_absolute() and docker_root.resolve(strict=True) == docker_root, 'PHYSICAL_BASE_DOCKER_STORAGE_INVALID')
     docker_available = os.statvfs(docker_root).f_bavail * os.statvfs(docker_root).f_frsize
     require(docker_available >= maximum_bytes * 3 + 1024 ** 3, 'PHYSICAL_BASE_DOCKER_CAPACITY_REQUIRED')

@@ -1,5 +1,5 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { FEATURES, FEATURE_WORKSPACE_MAP, type Feature } from '../middleware/feature';
+import { FEATURES, FEATURE_WORKSPACE_MAP, type Feature } from '../middleware/featureCatalog';
 import { HR_REDESIGN_CATALOG } from './hrRedesignDataContracts';
 import { AUTHORIZABLE_HR_ACTION_PERMISSIONS } from './hrActionPermissionCatalog';
 // Explicit resource-scoped actions use the same central access entry point.

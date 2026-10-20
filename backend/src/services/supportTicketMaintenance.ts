@@ -5,24 +5,15 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { publishNotificationEvent } from './notificationService';
 import { elapsedSupportMinutes, parseSupportCalendar } from './supportSlaPolicy';
 import { resolveWorkspaceRecipientIds } from './domainNotificationRecipients';
+import { supportTicketStorageDirectory, removeSupportStoredFile, runOwnedSupportFileWork } from './supportFileRuntime';
+import { lockSupportTicket, lockSupportStoredFile } from './supportTicketStorage';
+import { removeExpiredSupportAttachment, supportRetentionPlanProtectsStagedFile } from './supportRetentionFileJournal';
 
-const storageDir = path.resolve(process.env.SUPPORT_TICKET_STORAGE_DIR || path.join(process.cwd(), 'storage', 'support-tickets'));
 const closedStatuses = ['RESOLVED', 'CLOSED'];
 const day = 86_400_000;
 
-const safeDeleteStoredFile = (storageName: string | null) => {
-  if (!storageName || path.basename(storageName) !== storageName) return false;
-  const target = path.resolve(storageDir, storageName);
-  if (!target.startsWith(`${storageDir}${path.sep}`)) return false;
-  try {
-    fs.unlinkSync(target);
-    return true;
-  } catch (error: any) {
-    return error?.code === 'ENOENT';
-  }
-};
-
-export const runSupportTicketMaintenance = async (prisma: PrismaClient, now = new Date()) => {
+export const runSupportTicketMaintenance = (prisma: PrismaClient, now = new Date()) => runOwnedSupportFileWork(async () => {
+  const storageDir = supportTicketStorageDirectory();
   const tickets = await prisma.supportTicket.findMany({
     where: { status: { notIn: ['CLOSED'] } },
     include: {
@@ -162,32 +153,7 @@ export const runSupportTicketMaintenance = async (prisma: PrismaClient, now = ne
   });
   let filesDeleted = 0;
   for (const attachment of attachments) {
-    const retentionDays = attachment.retentionClass === 'SENSITIVE_90_DAYS' ? 90 : 365;
-    if (!attachment.ticket.closedAt || now.getTime() - attachment.ticket.closedAt.getTime() < retentionDays * day) continue;
-    if (!safeDeleteStoredFile(attachment.storageName)) continue;
-    await prisma.$transaction([
-      prisma.supportTicketAttachment.update({
-        where: { id: attachment.id },
-        data: {
-          storageName: null,
-          deletedAt: now,
-          deletionPolicy: `${attachment.retentionClass}:${retentionDays}_DAYS_AFTER_CLOSURE`,
-        },
-      }),
-      prisma.supportTicketAuditEvent.create({
-        data: {
-          ticketId: attachment.ticket.id,
-          action: 'RETENTION_FILE_DELETED_BY_SYSTEM',
-          afterData: {
-            attachmentId: attachment.id,
-            sha256: attachment.sha256,
-            deletedAt: now,
-            policy: attachment.retentionClass,
-          },
-        },
-      }),
-    ]);
-    filesDeleted += 1;
+    if (await removeExpiredSupportAttachment(prisma, attachment.id, now)) filesDeleted += 1;
   }
   const snapshotTickets = await prisma.supportTicket.findMany({
     where: {
@@ -198,43 +164,44 @@ export const runSupportTicketMaintenance = async (prisma: PrismaClient, now = ne
     },
     select: { id: true, closedAt: true, restrictedIncident: true },
   });
-  for (const ticket of snapshotTickets) {
-    const retentionDays = ticket.restrictedIncident ? 365 : 90;
-    if (!ticket.closedAt || now.getTime() - ticket.closedAt.getTime() < retentionDays * day) continue;
-    await prisma.$transaction([
-      prisma.supportTicket.update({
-        where: { id: ticket.id },
-        data: { sensitiveEvidenceSnapshot: Prisma.DbNull, sensitiveEvidenceDeletedAt: now },
-      }),
-      prisma.supportTicketAuditEvent.create({
-        data: {
-          ticketId: ticket.id,
-          action: 'SENSITIVE_SNAPSHOT_DELETED_BY_SYSTEM',
-          afterData: { deletedAt: now.toISOString(), retentionDays },
-        },
-      }),
-    ]);
+  for (const candidate of snapshotTickets) {
+    await prisma.$transaction(async tx => {
+      await lockSupportTicket(tx, candidate.id);
+      const ticket = await tx.supportTicket.findUnique({ where: { id: candidate.id },
+        include: { legalHolds: { where: { releasedAt: null } } } });
+      if (!ticket || ticket.sensitiveEvidenceDeletedAt || !ticket.closedAt || ticket.legalHolds.length) return;
+      const retentionDays = ticket.restrictedIncident ? 365 : 90;
+      if (now.getTime() - ticket.closedAt.getTime() < retentionDays * day) return;
+      await tx.supportTicket.update({ where: { id: ticket.id }, data: { sensitiveEvidenceSnapshot: Prisma.DbNull, sensitiveEvidenceDeletedAt: now } });
+      await tx.supportTicketAuditEvent.create({ data: {
+        ticketId: ticket.id, action: 'SENSITIVE_SNAPSHOT_DELETED_BY_SYSTEM',
+        afterData: { deletedAt: now.toISOString(), retentionDays },
+      } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
-  const referencedStagedFiles = new Set(
-    (
-      await prisma.supportTicketAttachment.findMany({
-        where: { storageName: { startsWith: 'staged-' }, deletedAt: null },
-        select: { storageName: true },
-      })
-    ).map((attachment) => attachment.storageName).filter(Boolean),
-  );
-  for (const name of await fs.promises.readdir(storageDir).catch(() => [] as string[])) {
-    if (!name.startsWith('staged-') || referencedStagedFiles.has(name)) continue;
-    const target = path.join(storageDir, name);
-    const stat = await fs.promises.stat(target).catch(() => null);
-    if (stat && now.getTime() - stat.mtimeMs >= 60 * 60 * 1_000) {
-      await fs.promises.unlink(target).catch(() => undefined);
-      filesDeleted += 1;
-    }
+  for (const name of await fs.promises.readdir(storageDir).catch(error => {
+    if (error?.code === 'ENOENT') return [] as string[];
+    throw error;
+  })) {
+    if (!name.startsWith('staged-') || path.basename(name) !== name) continue;
+    const removed = await prisma.$transaction(async tx => {
+      await lockSupportStoredFile(tx, name);
+      if (await tx.supportTicketAttachment.count({ where: { storageName: name, deletedAt: null } })) return false;
+      if (await supportRetentionPlanProtectsStagedFile(tx, name)) return false;
+      const target = path.join(storageDir, name);
+      const stat = await fs.promises.lstat(target).catch(error => {
+        if (error?.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (!stat?.isFile() || now.getTime() - stat.mtimeMs < 60 * 60 * 1_000) return false;
+      await removeSupportStoredFile(name);
+      return true;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    if (removed) filesDeleted += 1;
   }
   // Backup copies expire only through the independent backup lifecycle; this job never claims to rewrite old backups.
   return { ticketsChecked: tickets.length, filesDeleted };
-};
+});
 
 export const startSupportTicketMaintenance = (prisma: PrismaClient) => {
   let running = false;

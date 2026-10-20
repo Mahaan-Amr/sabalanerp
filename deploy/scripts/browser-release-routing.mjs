@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 export const BROWSER_SUPPORT_MS = 24 * 60 * 60 * 1000;
 const identity = /^[a-z][a-z0-9_-]{7,95}$/;
+const nativeIdentity = /^[A-Za-z0-9_-]{1,128}$/;
 const digest = /^[a-f0-9]{64}$/;
 const image = /^sha256:[a-f0-9]{64}$/;
 const action = /^(?:[a-f0-9]{40}|[a-f0-9]{42})$/;
@@ -12,10 +13,11 @@ const fail = code => { throw Object.assign(new Error(code), { code }); };
  * It deliberately returns a required build even after its support deadline:
  * expiration must preserve a draft before the client agrees to change builds. */
 export function compileBrowserRoutingRegistry(input) {
-  if (!input || input.format !== 'sabalan-browser-routing/v1'
+  if (!input || !['sabalan-browser-routing/v1','sabalan-browser-routing/v2'].includes(input.format)
     || !Number.isSafeInteger(input.generation) || input.generation < 1
     || !Array.isArray(input.builds) || !input.builds.length || input.builds.length > 256) fail('BROWSER_REGISTRY_INVALID');
   const builds = new Map();
+  const nativeBuilds = new Set();
   for (const build of input.builds) {
     if (!build || !identity.test(build.id) || builds.has(build.id)
       || !['erp','inquiry'].includes(build.application) || !image.test(build.image)
@@ -24,6 +26,13 @@ export function compileBrowserRoutingRegistry(input) {
       || new Set(build.actionIds).size !== build.actionIds.length
       || !Array.isArray(build.assets) || build.assets.some(asset => !validAsset(asset))) fail('BROWSER_BUILD_INVALID');
     if (build.application === 'erp' && build.actionIds.length) fail('BROWSER_ERP_ACTIONS_UNPROVEN');
+    if (build.handoffPolicy !== undefined || build.nativeBuildId !== undefined) {
+      if (build.handoffPolicy !== 'MANUAL_SAVE_REQUIRED' || build.application !== 'erp'
+        || typeof build.nativeBuildId !== 'string' || !nativeIdentity.test(build.nativeBuildId)
+        || build.id !== 'erp_legacy_' + createHash('sha256').update(build.nativeBuildId).digest('hex')
+        || nativeBuilds.has(build.nativeBuildId)) fail('BROWSER_LEGACY_HANDOFF_INVALID');
+      nativeBuilds.add(build.nativeBuildId);
+    }
     const retiredAt = build.retiredAt === null ? null : timestamp(build.retiredAt);
     const supportUntil = build.supportUntil === null ? null : timestamp(build.supportUntil);
     if (retiredAt === null ? supportUntil !== null : supportUntil === null || supportUntil - retiredAt < BROWSER_SUPPORT_MS) {
@@ -32,6 +41,7 @@ export function compileBrowserRoutingRegistry(input) {
     builds.set(build.id, Object.freeze({ ...build, retiredAt, supportUntil,
       actionIds: Object.freeze([...build.actionIds]), assets: Object.freeze(build.assets.map(asset=>Object.freeze({...asset}))) }));
   }
+  if ([...nativeBuilds].some(value=>builds.has(value))) fail('BROWSER_LEGACY_HANDOFF_INVALID');
   for (const application of ['erp','inquiry']) {
     const current = builds.get(input.current?.[application]);
     if (!current || current.application !== application || current.retiredAt !== null) fail('BROWSER_CURRENT_BUILD_INVALID');
@@ -45,8 +55,32 @@ export function compileBrowserRoutingRegistry(input) {
     if (previous && previous.sha256 !== asset.sha256) fail('BROWSER_ASSET_PATH_COLLISION');
     assets.set(key, asset);
   }
+  const apiBindings=input.format==='sabalan-browser-routing/v2'
+    ? Object.freeze(Object.values(compileBrowserApiBindings(Object.fromEntries(builds),input.apiBindings))) : undefined;
+  if(input.format==='sabalan-browser-routing/v1' && Object.hasOwn(input,'apiBindings'))fail('BROWSER_API_PAIRED_FORMAT_REQUIRED');
   return Object.freeze({ generation:input.generation, builds:Object.freeze(Object.fromEntries(builds)),
-    current:Object.freeze({...input.current}), legacy:Object.freeze({...input.legacy}) });
+    current:Object.freeze({...input.current}), legacy:Object.freeze({...input.legacy}),
+    ...(apiBindings?{apiBindings}:{}) });
+}
+
+/** Exact backend owners for every retained ERP producer. Neither this
+ * structural check nor a paired routing publication grants release admission. */
+export function compileBrowserApiBindings(builds,input) {
+  if(!Array.isArray(input) || input.length>256)fail('BROWSER_API_BINDINGS_INVALID');
+  const bindings={};
+  for(const binding of input){
+    const keys=['buildId','browserManifestSha256','slotId','image','manifestSha256'];
+    if(!binding || Array.isArray(binding) || Object.keys(binding).length!==keys.length
+      || keys.some(key=>!Object.hasOwn(binding,key)) || !identity.test(binding.buildId)
+      || Object.hasOwn(bindings,binding.buildId) || !identity.test(binding.slotId)
+      || !/^backend_[a-z0-9_-]+$/.test(binding.slotId) || !image.test(binding.image)
+      || !digest.test(binding.manifestSha256))fail('BROWSER_API_BINDING_INVALID');
+    const build=Object.hasOwn(builds,binding.buildId)?builds[binding.buildId]:null;
+    if(!build || build.application!=='erp' || build.manifestSha256!==binding.browserManifestSha256)fail('BROWSER_API_BINDING_BUILD_MISMATCH');
+    bindings[binding.buildId]=Object.freeze({...binding});
+  }
+  if(Object.values(builds).some(build=>build.application==='erp' && !Object.hasOwn(bindings,build.id)))fail('BROWSER_API_BINDINGS_INCOMPLETE');
+  return Object.freeze(bindings);
 }
 
 function timestamp(value) {
@@ -66,6 +100,15 @@ const single = (value, code) => {
   if (typeof value !== 'string' || !identity.test(value)) fail(code);
   return value;
 };
+const selectedIdentity = (registry, value, code) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !nativeIdentity.test(value)) fail(code);
+  if (Object.hasOwn(registry.builds,value)) return value;
+  const aliases=Object.values(registry.builds).filter(build=>build.nativeBuildId===value);
+  if (aliases.length===1) return aliases[0].id;
+  if (!identity.test(value)) fail(code);
+  return value;
+};
 
 /** Browser identity lives in a request/header or native form, never a shared
  * cookie. No selection executes an action, decodes its bound arguments or
@@ -73,9 +116,9 @@ const single = (value, code) => {
 export function selectBrowserRelease(registry, request, now=Date.now()) {
   if (!request || !['erp','inquiry'].includes(request.application) || !Number.isFinite(now)) fail('BROWSER_REQUEST_INVALID');
   const {application} = request;
-  const header = single(request.deploymentId,'BROWSER_HEADER_ID_INVALID');
-  const query = single(request.assetDeploymentId,'BROWSER_ASSET_ID_INVALID');
-  const native = single(request.nativeBuildId,'BROWSER_FORM_ID_INVALID');
+  const header = selectedIdentity(registry,request.deploymentId,'BROWSER_HEADER_ID_INVALID');
+  const query = selectedIdentity(registry,request.assetDeploymentId,'BROWSER_ASSET_ID_INVALID');
+  const native = selectedIdentity(registry,request.nativeBuildId,'BROWSER_FORM_ID_INVALID');
   const requested = [header,query,native].filter(Boolean);
   if (new Set(requested).size>1) fail('BROWSER_IDENTITY_CONFLICT');
   const actionIds = request.actionIds ?? [];
@@ -99,6 +142,7 @@ export function selectBrowserRelease(registry, request, now=Date.now()) {
   if (request.assetPath && !build.assets.some(asset=>asset.path===request.assetPath)) fail('BROWSER_ASSET_UNAVAILABLE');
   return Object.freeze({ buildId:build.id, slotId:build.slotId, image:build.image,
     requiresDraftHandoff:build.supportUntil!==null && now>=build.supportUntil,
+    ...(build.handoffPolicy==='MANUAL_SAVE_REQUIRED'?{manualSaveRequired:build.supportUntil!==null && now>=build.supportUntil}:{}),
     supportUntil:build.supportUntil===null ? null : new Date(build.supportUntil).toISOString() });
 }
 
@@ -137,6 +181,7 @@ export function browserRoutingIdentity(input) {
   const normalized={format:input.format,generation:input.generation,current:input.current,legacy:input.legacy,
     builds:input.builds.map(build=>({...build,actionIds:[...build.actionIds].sort(),assets:[...build.assets].sort((a,b)=>a.path.localeCompare(b.path))}))
       .sort((a,b)=>a.id.localeCompare(b.id))};
+  if(input.format==='sabalan-browser-routing/v2')normalized.apiBindings=input.apiBindings.map(binding=>({...binding})).sort((a,b)=>a.buildId.localeCompare(b.buildId));
   const canonical=value=>Array.isArray(value) ? value.map(canonical) : value && typeof value==='object'
     ? Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])) : value;
   return createHash('sha256').update(JSON.stringify(canonical(normalized))).digest('hex');

@@ -1,3 +1,4 @@
+import { withHealthyDrill } from './deploymentCheckpointDrill.fixture';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -164,7 +165,7 @@ const run = async () => {
     await fs.promises.mkdir(localRoot);
     await fs.promises.mkdir(remoteRoot);
     const artifacts: CheckpointObject[] = [];
-    for (const [index, validRemote] of [false, true, true, true].entries()) {
+    for (const [index, validRemote] of [false, true, true, true, true, true].entries()) {
       const id = `deployment-${index}`;
       const archivePath = path.join(localRoot, `${id}.sabrec`);
       const metadataPath = `${archivePath}.json`;
@@ -173,8 +174,12 @@ const run = async () => {
       await fs.promises.writeFile(metadataPath, '{}');
       await fs.promises.writeFile(remotePath, `remote-${id}`);
       const checksum = await (await import('../recoveryCrypto')).sha256File(remotePath);
-      await fs.promises.writeFile(`${remotePath}.json`, JSON.stringify({ id, deploymentId: id, checksum: validRemote ? checksum : 'stale', remoteVerified: true }));
-      artifacts.push({ id, archivePath, metadataPath, remotePath, checksum, size: 4096, createdAt: new Date(2026, 0, index + 1).toISOString(), remoteVerified: true });
+      const point = { id, releaseId: id, deploymentId: id, archivePath, metadataPath, remotePath, checksum,
+        size: (await fs.promises.stat(remotePath)).size, createdAt: new Date(2026, 0, index + 1).toISOString(), remoteVerified: true };
+      const remote = index <= 3 ? withHealthyDrill(point) : { ...point, localVerified: true, restoreVerified: true,
+        manifestReadable: true, compatibility: { local: { compatible: true } } };
+      await fs.promises.writeFile(`${remotePath}.json`, JSON.stringify({ ...remote, checksum: validRemote ? checksum : 'stale' }));
+      artifacts.push(point);
     }
     const localStats = await fs.promises.statfs(localRoot);
     await ensureLocalCapacity({
@@ -187,7 +192,9 @@ const run = async () => {
       assert.equal(error.code, 'DEPLOYMENT_LOCAL_CAPACITY_INSUFFICIENT');
     });
     assert.equal(fs.existsSync(artifacts[0].archivePath), true, 'stale remote proof must protect the local checkpoint');
-    assert.equal(fs.existsSync(artifacts[1].archivePath), false, 'a freshly reverified remote checkpoint may be pruned');
+    assert.equal(fs.existsSync(artifacts[1].archivePath), false, 'an older independently healthy checkpoint may be pruned after two healthy replacements');
+    for (const index of [2, 3, 4, 5]) assert.equal(fs.existsSync(artifacts[index].archivePath), true,
+      'keep two healthy points and protect newly uploaded points without independent restore');
   } finally {
     await fs.promises.rm(root, { recursive: true, force: true });
   }

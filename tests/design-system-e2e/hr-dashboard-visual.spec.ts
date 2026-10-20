@@ -16,8 +16,8 @@ const screenshotDirectory = path.resolve(
 
 const login = async (page: Page) => {
   await page.goto('/login');
-  await page.locator('input[name="identifier"]').fill('admin');
-  await page.locator('input[name="password"]').fill('admin123');
+  await page.locator('input[name="identifier"]').fill(process.env.DESIGN_SYSTEM_E2E_ADMIN_USERNAME || 'admin');
+  await page.locator('input[name="password"]').fill(process.env.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD || 'admin123');
   await page.locator('form').getByRole('button', { name: 'ورود' }).click();
   await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
 };

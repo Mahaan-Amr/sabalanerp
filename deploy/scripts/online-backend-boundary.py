@@ -41,6 +41,15 @@ def exact(value, keys):
     return isinstance(value, dict) and set(value) == set(keys)
 
 
+def namespace_predicate(names):
+    """An empty owned set never means unrelated unnamed pool connections."""
+    require(isinstance(names, list) and len(names) <= 128
+            and all(isinstance(name, str) and re.fullmatch(r'sabalan-rt-[a-f0-9]{48}', name) for name in names))
+    if not names:
+        return 'FALSE'
+    return "application_name = ANY(ARRAY[" + ','.join("'" + name + "'" for name in names) + ']::text[])'
+
+
 def private_directory(file):
     value = file.lstat()
     require(file.resolve(strict=True) == file and stat.S_ISDIR(value.st_mode)
@@ -247,14 +256,14 @@ def inspect_registered_backend_boundary(source_url):
     source = urlsplit(source_url)
     names = active_names + closed_names
     require(all(re.fullmatch(r'sabalan-rt-[a-f0-9]{48}', name) for name in names))
-    literal_names = ','.join("'" + name + "'" for name in names) or "''"
-    literal_closed = ','.join("'" + name + "'" for name in closed_names) or "''"
+    owned_names = namespace_predicate(names)
+    owned_closed = namespace_predicate(closed_names)
     query = """SELECT json_build_object('system',c.system_identifier::text,
  'visible',r.rolsuper OR pg_has_role(current_user,'pg_read_all_stats','USAGE'),
  'database',current_database(),'prepared',(SELECT count(*) FROM pg_prepared_xacts),
- 'busy',(SELECT count(*) FROM pg_stat_activity WHERE application_name IN (""" + literal_names + """)
+ 'busy',(SELECT count(*) FROM pg_stat_activity WHERE """ + owned_names + """
  AND (datname IS DISTINCT FROM current_database() OR state IS DISTINCT FROM 'idle' OR xact_start IS NOT NULL)),
- 'closed',(SELECT count(*) FROM pg_stat_activity WHERE application_name IN (""" + literal_closed + """)))
+ 'closed',(SELECT count(*) FROM pg_stat_activity WHERE """ + owned_closed + """))
  FROM pg_control_system() c CROSS JOIN pg_roles r WHERE r.rolname=current_user"""
     environment = {key: value for key, value in os.environ.items() if not key.startswith('PG')}
     environment.update(PGHOST=source.hostname, PGPORT=str(source.port or 5432), PGDATABASE=scope['database']['name'],

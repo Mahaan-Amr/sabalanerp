@@ -74,9 +74,18 @@ if (alreadyHeld) {
     assert.equal(report.results.proxyRestartGeneration, 2);
     assert.ok(Date.parse(proxy.State.StartedAt) > Date.parse(accepted.get(proxy.Id).startedAt));
   }
-  for (const name of ['tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/private-ui-startup.fixture.mjs',
+  const protectedSources = ['tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/private-ui-startup.fixture.mjs',
     'tests/online-deployment/private-ui-management.fixture.mjs', 'deploy/scripts/browser-release-proxy.mjs',
-    'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-operation-journal.mjs']) {
+    'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-operation-journal.mjs'];
+  const apiDependency = 'deploy/scripts/api-release-routing.mjs';
+  if (Object.hasOwn(report.sources, apiDependency)) protectedSources.push(apiDependency);
+  else {
+    // An older receipt did not qualify this later dependency. Preserve its
+    // original observation; never backfill/adopt current bytes into a held run.
+    const proxySource = fs.readFileSync(path.join(repository, 'deploy/scripts/browser-release-proxy.mjs'), 'utf8');
+    assert.doesNotMatch(proxySource, /\bfrom\s*['"]\.\/api-release-routing\.mjs['"]/, 'HISTORICAL_PROXY_DEPENDENCY_UNQUALIFIED');
+  }
+  for (const name of protectedSources) {
     assert.equal(createHash('sha256').update(fs.readFileSync(path.join(repository, name))).digest('hex'), report.sources[name]);
   }
   const heldBytes = docker(['exec', reader, 'cat', root + '/transport-shutdown-held.json']);

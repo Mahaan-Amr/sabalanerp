@@ -1,4 +1,5 @@
 'use client';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 
 import React, { useMemo, useState } from 'react';
 import { PartnerTechnicalDraftSchema, previewPartnerTechnicalDraft, type PartnerTechnicalDraft,
@@ -81,6 +82,7 @@ export function PartnerRemainderConfigurationFlow({ draft, selection: requestedS
   const [kerf, setKerf] = useState(existing?.sawKerfEnabled ?? false);
   const [intents, setIntents] = useState<Record<string, PartnerRemainderIntent['operations']>>(() => existing ? { [existing.productRowId]: existing.operations } : {});
   const [error, setError] = useState<string>();
+  useUnarchivedDraftGuard('partner-remainder-buffer',true);
   const [config, setConfig] = useState<Partial<ContractProduct>>({ stoneName: product?.name ?? '' });
   if (!stock || !selection || !product) return <CentralProductModalShell open title="ساخت از باقی‌مانده" view="main"
     onClose={onClose} primaryLabel="بستن" pending={false} onPrimary={onClose}>

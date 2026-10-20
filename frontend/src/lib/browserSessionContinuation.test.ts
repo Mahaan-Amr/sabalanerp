@@ -2,6 +2,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BrowserSessionContinuation } from './browserSessionContinuation';
 
+test('last proven lease is available only for local recovery and is cleared by identity boundaries', async () => {
+  let probes = 0;
+  const scope = new BrowserSessionContinuation(async () => { probes++; return { userId: 'owner_a', sessionId: 'session_a' }; });
+  assert.equal(scope.localRecoveryLease(), undefined);
+  const first = await scope.acquire(); assert.deepEqual(scope.localRecoveryLease(), first);
+  assert.equal(probes, 1, 'reading local recovery identity must not probe an expired backend');
+  const copy = scope.localRecoveryLease()!; copy.userId = 'foreign'; assert.deepEqual(scope.localRecoveryLease(), first);
+  scope.invalidate(); assert.equal(scope.localRecoveryLease(), undefined);
+  scope.completeLogin({ userId: 'owner_a', sessionId: 'session_new' }, scope.beginLogin());
+  assert.equal(scope.localRecoveryLease(), undefined, 'a login alone is not the prior acquired lease');
+  await scope.acquire(); assert.ok(scope.localRecoveryLease()); scope.clear(); assert.equal(scope.localRecoveryLease(), undefined);
+});
+
 test('fresh account-bound probes coalesce only while pending and block account substitution', async () => {
   let userId = 'owner_a', sessionId = 'session_a', probes = 0;
   const scope = new BrowserSessionContinuation(async expected => {

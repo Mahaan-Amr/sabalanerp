@@ -1,4 +1,5 @@
 'use client';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 
 import React from 'react';
 import { FaLock } from 'react-icons/fa';
@@ -203,6 +204,7 @@ export function OperationCollectionsSection<Input extends OperationsInput>({
     scope: string;
     error?: string;
   } | null>(null);
+  useUnarchivedDraftGuard('contract-operation-buffer',splitDraft!==null||overrideEditing!==null);
   const toolCatalog = useCachedProductModalSection(
     toolCacheKey,
     loadTools,

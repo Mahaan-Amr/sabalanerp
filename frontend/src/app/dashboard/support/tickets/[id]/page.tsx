@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { FaComments, FaCogs, FaEyeSlash, FaGavel, FaPaperPlane, FaPaperclip, FaShieldAlt, FaUserPlus } from 'react-icons/fa';
-import { API_ORIGIN, authAPI, supportTicketsAPI, usersAPI } from '@/lib/api';
+import { API_ORIGIN, authAPI, supportTicketsAPI, usersAPI, resolveBackendAssetUrl } from '@/lib/api';
 import { featureLabelFa, workspaceLabelFa } from '@/lib/featureLabelsFa';
 import {
   ErpBadge,
@@ -165,7 +165,7 @@ export default function SupportTicketDetailPage() {
   if (!ticket) return <ErpEmptyState icon={FaComments} title={error || 'تیکت پیدا نشد'} action={{ label: 'بازگشت به تاریخچه', href: '/dashboard/support/history' }} />;
   const priority = ticket.confirmedPriority || ticket.suggestedPriority;
   const attachmentUrl = (id: string, inline = false) =>
-    `${API_ORIGIN}/api/support-tickets/attachments/${id}/download${inline ? '?inline=true' : ''}`;
+    resolveBackendAssetUrl(`${API_ORIGIN}/api/support-tickets/attachments/${id}/download${inline ? '?inline=true' : ''}`);
 
   return (
     <ErpWorkspacePage

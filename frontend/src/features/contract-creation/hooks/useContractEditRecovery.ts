@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { salesAPI, browserSessionContinuation } from '@/lib/api';
-import { archiveBrowserDraft } from '@/lib/browserDraftArchive';
+import { browserBuildHandoff } from '@/lib/browserBuildHandoff';
 import {
   createCoalescedContractCheckpointState,
   createContractRecoveryEnvelope,
@@ -24,6 +24,7 @@ const BROWSER_SESSION_STORAGE_KEY = 'sabalan-contract-browser-session-id';
 const CHECKPOINT_DELAY_MS = 250;
 const HEARTBEAT_INTERVAL_MS = 25_000;
 const ACTIVE_DOCUMENT_BROWSER_SESSION_KEY = '__sabalanContractBrowserSessionId';
+const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 const createStableClientId = (prefix: string): string => {
   const randomId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -107,6 +108,7 @@ interface UseContractEditRecoveryInput<Payload> {
   onRecoveryAvailable?: (payload: Payload) => void;
   onRestore: (payload: Payload) => void;
   correctionExpiresAt?: string | null;
+  captureDraft?: (capturedAt: number) => Payload | null;
 }
 
 export const useContractEditRecovery = <Payload>({
@@ -119,6 +121,7 @@ export const useContractEditRecovery = <Payload>({
   onRecoveryAvailable,
   onRestore,
   correctionExpiresAt,
+  captureDraft,
 }: UseContractEditRecoveryInput<Payload>) => {
   const scopeKey = scope ? getContractRecoveryStorageKey(scope) : null;
   const [browserSessionId] = useState(getOrCreateContractBrowserSessionId);
@@ -145,6 +148,22 @@ export const useContractEditRecovery = <Payload>({
   const onCreationDraftUnavailableRef = useRef(onCreationDraftUnavailable);
   const deactivatedRef = useRef(false);
   const blocked = blockReason !== null;
+  const committedCapture = useRef(captureDraft);
+  const committedScopeKey=useRef(scopeKey);
+  // Capture current committed domain state on demand, not the delayed
+  // queueRecovery effect's last payload. Layout runs before event/network work
+  // can observe a newly committed editor render.
+  useBrowserLayoutEffect(() => { committedCapture.current = captureDraft;committedScopeKey.current=scopeKey; }, [captureDraft,scopeKey]);
+  useBrowserLayoutEffect(() => {
+    if (!scope || !captureDraft) return;
+    return browserBuildHandoff.register({ userId: scope.userId, workflow: 'sales-contract', draftId: scope.draftId,
+      schemaVersion: scope.schemaVersion, baseRevision: scope.baseRevision, capturePayloadJson: (capturedAt) => {
+        if (deactivatedRef.current) throw Error('CONTRACT_DRAFT_OWNER_INACTIVE');
+        const payload = committedCapture.current?.(capturedAt);
+        if (payload === null || payload === undefined) throw Error('CONTRACT_DRAFT_CAPTURE_UNAVAILABLE');
+        return JSON.stringify(payload);
+      } });
+  }, [scopeKey, Boolean(captureDraft)]);
 
   useEffect(() => {
     onRestoreRef.current = onRestore;
@@ -491,23 +510,25 @@ export const useContractEditRecovery = <Payload>({
     if (reloading.current || !scope || payload === null) return false;
     reloading.current = true; setReloadPending(true);
     try {
-      const payloadJson = JSON.stringify(payload);
-      const lease = await browserSessionContinuation.acquire();
-      if (lease.userId !== scope.userId) throw Error('AUTH_CONTEXT_CHANGED');
-      await archiveBrowserDraft({ userId: scope.userId,
-        buildId: process.env.NEXT_PUBLIC_BROWSER_BUILD_ID || 'local-development',
-        workflow: 'sales-contract', draftId: scope.draftId, schemaVersion: scope.schemaVersion,
-        baseRevision: scope.baseRevision, payloadJson },
-      () => browserSessionContinuation.assertCurrent(lease));
-      browserSessionContinuation.assertCurrent(lease);
-      // Preserve both original-revision recovery and its immutable archive.
-      // Neither may be merged into the newer canonical revision automatically.
+      const capturedAt=Date.now(),original=committedCapture.current?.(capturedAt);
+      if(original===null||original===undefined)throw Error('CONTRACT_DRAFT_CAPTURE_UNAVAILABLE');
+      const payloadJson=JSON.stringify(original);
+      const lease=await browserSessionContinuation.acquire();
+      const assertCurrent=()=>{
+        browserSessionContinuation.assertCurrent(lease);
+        if(lease.userId!==scope.userId||committedScopeKey.current!==scopeKey||deactivatedRef.current)throw Error('AUTH_CONTEXT_CHANGED');
+      };
+      assertCurrent();
+      const result=await browserBuildHandoff.preserve(lease,assertCurrent);assertCurrent();
+      if(result.status!=='PRESERVED'||JSON.stringify(committedCapture.current?.(capturedAt))!==payloadJson)throw Error('CONTRACT_DRAFT_REFRESH_UNPROVEN');
+      // Every active registered child/sibling has qualified preservation.
+      // Neither archive nor source recovery is merged into a newer revision.
       window.location.reload();
       return true;
     } catch {
       setCheckpointError(true); return false;
     } finally { reloading.current = false; setReloadPending(false); }
-  }, [scope]);
+  }, [scope,scopeKey]);
 
   const reportMutationFailure = useCallback((error: any): string | null => {
     if (error?.response?.data?.code === 'DUTY_SALES_EDIT_EXPIRED') {

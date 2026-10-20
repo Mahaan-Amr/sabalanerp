@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useState, useEffect, useRef } from "react";
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import { createPortal } from "react-dom";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -30,7 +31,9 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import { WorkspaceNavigation } from "@/components/WorkspaceNavigation";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
-import { authAPI, dashboardAPI, systemRecoveryAPI } from "@/lib/api";
+import { authAPI, dashboardAPI, systemRecoveryAPI,browserSessionContinuation } from "@/lib/api";
+import {ownedSupportOrigin,supportOriginKey} from '@/features/support/supportOriginOwnership';
+import type {BrowserSessionLease} from '@/lib/browserSessionContinuation';
 import { SecurityNoticeHost } from "@/components/SecurityNoticeHost";
 import {
   ErpButton,
@@ -41,9 +44,9 @@ import {
   ErpPressable,
   ErpPresentationProvider,
   ErpSheet,
+  ErpInlineState,
 } from '@/components/erp';
 import { NotificationCenter } from "@/components/NotificationCenter";
-import { readContractSubmissionDiagnostic } from "@/features/contract-creation/utils/contractSubmissionDiagnostics";
 import { hasHrFeature, type HrBaseFeature } from '@/features/hr/hrAccessNavigation';
 import { PersonalPerformanceBadge } from '@/features/hr/performance-badge/PerformanceBadge';
 import { deniesDashboardWorkspaceRoute } from './dashboardRouteGuard';
@@ -85,32 +88,13 @@ interface DashboardLayoutProps {
 }
 
 const captureSupportOrigin = () => {
-  const contractSubmission = readContractSubmissionDiagnostic();
-  const recordIdentifiers = contractSubmission
-    ? Object.fromEntries(
-        Object.entries({
-          httpStatus: contractSubmission.httpStatus?.toString(),
-          errorCode: contractSubmission.errorCode,
-          causeCode: contractSubmission.causeCode,
-          errorPath: contractSubmission.errorPath,
-          productRowId: contractSubmission.productRowId,
-          trackingId: contractSubmission.trackingId
-        }).filter((entry): entry is [string, string] =>
-          typeof entry[1] === 'string' && entry[1].length > 0
-        )
-      )
-    : undefined;
+  // Legacy Contract diagnostics do not prove their original owner/session.
+  // Omit them from this new envelope; the original domain journal is untouched.
   return {
     route: `${window.location.pathname}${window.location.search}`,
     pageTitle: document.title,
     viewport: { width: window.innerWidth, height: window.innerHeight },
     buildCommit: process.env.NEXT_PUBLIC_BUILD_COMMIT || 'local',
-    ...(recordIdentifiers && Object.keys(recordIdentifiers).length > 0
-      ? {
-          errors: ['شکست ثبت قرارداد'],
-          recordIdentifiers
-        }
-      : {})
   };
 };
 
@@ -157,6 +141,7 @@ const captureSensitiveCandidateItems = (): SensitiveCandidateItem[] => {
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [user, setUser] = useState<User | null>(null);
+  const renderUser=useRef(user);renderUser.current=user;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
@@ -174,6 +159,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [sensitiveCaptureConsent, setSensitiveCaptureConsent] = useState(false);
   const [sensitiveCandidateItems, setSensitiveCandidateItems] = useState<SensitiveCandidateItem[]>([]);
   const [selectedSensitiveItemIds, setSelectedSensitiveItemIds] = useState<string[]>([]);
+  const [supportCapturePending,setSupportCapturePending]=useState(false),[supportCaptureError,setSupportCaptureError]=useState('');
+  useUnarchivedDraftGuard('support-capture-buffer',supportCaptureOpen||supportCapturePending);
+  const sensitiveCaptureLease=useRef<BrowserSessionLease>();
+  useEffect(()=>browserSessionContinuation.subscribe(()=>{
+    setSupportCaptureOpen(false);setSensitiveCaptureConsent(false);setSensitiveCandidateItems([]);setSelectedSensitiveItemIds([]);sensitiveCaptureLease.current=undefined;
+  }),[]);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -310,9 +301,17 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     },
   ];
 
-  const continueToSupportTicket = (includeSensitive = false) => {
+  const continueToSupportTicket = async(includeSensitive = false) => {
+    if(supportCapturePending)return;
+    const originalUser=renderUser.current?.id;if(!originalUser)return;
+    setSupportCapturePending(true);setSupportCaptureError('');
+    try{
+    const lease=await browserSessionContinuation.acquire();
+    const assertOwner=()=>{browserSessionContinuation.assertCurrent(lease);if(lease.userId!==originalUser||renderUser.current?.id!==originalUser)throw Error('SUPPORT_ORIGIN_OWNER_CHANGED');};
+    assertOwner();
     const origin = captureSupportOrigin() as ReturnType<typeof captureSupportOrigin> & { sensitiveCandidate?: Record<string, unknown> };
     if (includeSensitive && sensitiveCaptureConsent) {
+      if(sensitiveCaptureLease.current?.sessionId!==lease.sessionId||sensitiveCaptureLease.current.userId!==lease.userId)throw Error('SUPPORT_ORIGIN_OWNER_CHANGED');
       const selected = sensitiveCandidateItems.filter((item) => selectedSensitiveItemIds.includes(item.id));
       origin.sensitiveCandidate = {
         pageText: selected.find((item) => item.kind === 'PAGE_TEXT')?.value || '',
@@ -322,10 +321,27 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         uploadedFileMetadata: selected.filter((item) => item.kind === 'FILE_METADATA').map((item) => item.metadata),
       };
     }
-    sessionStorage.setItem('support-ticket-origin', JSON.stringify(origin));
+    assertOwner();
+    const owner={userId:lease.userId,sessionId:lease.sessionId},key=supportOriginKey(owner),raw=ownedSupportOrigin(owner,origin);
+    sessionStorage.setItem(key,raw);if(sessionStorage.getItem(key)!==raw)throw Error('SUPPORT_ORIGIN_UNVERIFIED');assertOwner();
     setSupportCaptureOpen(false);
     setProfileDropdownOpen(false);
     router.push('/dashboard/support/new');
+    }catch{setSupportCaptureError('مالک اطلاعات همراه تأیید نشد؛ با حساب فعلی دوباره آن‌ها را انتخاب کنید.');}
+    finally{setSupportCapturePending(false);}
+  };
+  const selectSensitiveCapture=async(checked:boolean)=>{
+    setSensitiveCaptureConsent(false);setSensitiveCandidateItems([]);setSelectedSensitiveItemIds([]);sensitiveCaptureLease.current=undefined;
+    if(!checked)return;
+    const originalUser=renderUser.current?.id;if(!originalUser)return;
+    setSupportCapturePending(true);setSupportCaptureError('');
+    try{
+      const lease=await browserSessionContinuation.acquire();browserSessionContinuation.assertCurrent(lease);
+      if(lease.userId!==originalUser||renderUser.current?.id!==originalUser)throw Error('SUPPORT_ORIGIN_OWNER_CHANGED');
+      const items=captureSensitiveCandidateItems();browserSessionContinuation.assertCurrent(lease);
+      if(renderUser.current?.id!==originalUser)throw Error('SUPPORT_ORIGIN_OWNER_CHANGED');
+      sensitiveCaptureLease.current=lease;setSensitiveCandidateItems(items);setSelectedSensitiveItemIds(items.map(item=>item.id));setSensitiveCaptureConsent(true);
+    }catch{setSupportCaptureError('مالک اطلاعات همراه تأیید نشد؛ اطلاعات خام جمع‌آوری نشد.');}finally{setSupportCapturePending(false);}
   };
 
   useEffect(() => {
@@ -830,31 +846,23 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         onClose={() => setSupportCaptureOpen(false)}
         title="اطلاعات همراه تیکت"
         presentation="modal"
+        pending={supportCapturePending}
         footer={(
           <div className="flex flex-wrap justify-end gap-2">
             <ErpButton label="انصراف" onClick={() => setSupportCaptureOpen(false)} tone="neutral" variant="outline" />
-            <ErpButton label="ادامه به ثبت درخواست" onClick={() => continueToSupportTicket(true)} tone="primary" />
+            <ErpButton label="ادامه به ثبت درخواست" disabled={supportCapturePending} onClick={() => void continueToSupportTicket(true)} tone="primary" />
           </div>
         )}
       >
         <div className="space-y-4" dir="rtl">
+          {supportCaptureError&&<ErpInlineState kind="error" title={supportCaptureError} />}
           <p className="text-sm leading-7 text-[var(--sds-text-secondary)]">
             مسیر، نسخه و اطلاعات فنی امن همیشه ثبت می‌شوند. اطلاعات خام فقط پس از اجازهٔ شما جمع‌آوری می‌شوند و پیش از ادامه قابل حذف‌اند.
           </p>
           <ErpCheckbox
             checked={sensitiveCaptureConsent}
-            onChange={(event) => {
-              const checked = event.target.checked;
-              setSensitiveCaptureConsent(checked);
-              if (checked) {
-                const items = captureSensitiveCandidateItems();
-                setSensitiveCandidateItems(items);
-                setSelectedSensitiveItemIds(items.map((item) => item.id));
-              } else {
-                setSensitiveCandidateItems([]);
-                setSelectedSensitiveItemIds([]);
-              }
-            }}
+            disabled={supportCapturePending}
+            onChange={event=>void selectSensitiveCapture(event.target.checked)}
             label="اطلاعات خام این صفحه را برای انتخاب و پیش‌نمایش جمع‌آوری کن"
           />
           {sensitiveCaptureConsent && (

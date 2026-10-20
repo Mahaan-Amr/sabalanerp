@@ -14,7 +14,7 @@ import {
   ErpStatus,
   ErpWorkspacePage,
 } from '@/components/erp';
-import { securityAPI } from '@/lib/api';
+import { securityAPI, resolveBackendAssetUrl } from '@/lib/api';
 import PersianCalendar from '@/lib/persian-calendar';
 
 const dateTime = (value?: string | null) => value ? PersianCalendar.formatForDisplay(value, true) : '—';
@@ -141,7 +141,7 @@ export default function SecurityShiftReportDetailPage() {
               entries={report.timeline || []}
               formatTimestamp={dateTime}
               showAttachmentImages
-              attachmentHref={(attachmentId) => `/api/security/shift-log/attachments/${attachmentId}`}
+              attachmentHref={(attachmentId) => resolveBackendAssetUrl(`/api/security/shift-log/attachments/${attachmentId}`)}
               onAttachmentOpen={openAttachmentPreview}
             />
           </ErpSection>
@@ -170,7 +170,7 @@ export default function SecurityShiftReportDetailPage() {
             {previewAttachment && (
               <div className="flex min-h-[55dvh] items-center justify-center overflow-auto rounded-xl bg-[var(--sds-surface-canvas)] p-2 sm:min-h-[65dvh]">
                 <img
-                  src={`/api/security/shift-log/attachments/${previewAttachment.id}`}
+                  src={resolveBackendAssetUrl(`/api/security/shift-log/attachments/${previewAttachment.id}`)}
                   alt={previewAttachment.name || 'تصویر گزارش شیفت'}
                   className="max-h-[65dvh] max-w-full object-contain transition-transform duration-200 motion-reduce:transition-none"
                   style={{ transform: `scale(${zoom})` }}

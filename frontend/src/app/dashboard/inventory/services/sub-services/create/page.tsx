@@ -8,6 +8,7 @@ import { InventoryMasterDataForm, InventoryMasterDataPage } from '@/features/inv
 const CreateSubServicePage: React.FC = () => {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [submissionUncertain,setSubmissionUncertain]=useState(false);
   const [formData, setFormData] = useState({
     code: '',
     name: '',
@@ -23,6 +24,7 @@ const CreateSubServicePage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if(submissionUncertain)return;
     setLoading(true);
     setErrors({});
 
@@ -36,6 +38,7 @@ const CreateSubServicePage: React.FC = () => {
         setErrors({ general: 'خطا در ایجاد ابزار' });
       }
     } catch (error: any) {
+      if(!error?.response||Number(error.response.status)>=500)setSubmissionUncertain(true);
       console.error('Error creating sub-service:', error);
 
       if (error.response?.data?.details) {
@@ -63,6 +66,8 @@ const CreateSubServicePage: React.FC = () => {
         values={formData}
         errors={errors}
         pending={loading}
+        submissionUncertain={submissionUncertain}
+        draftScope={{route:'/dashboard/inventory/services/sub-services/create',record:'new',baseVersion:'new'}}
         submitLabel="ایجاد ابزار"
         onChange={(patch) => setFormData((previous) => ({ ...previous, ...patch }))}
         onSubmit={handleSubmit}

@@ -2,6 +2,7 @@
 
 import { ErpButton, ErpField, ErpPressable, ErpSegmentedControl, ErpSelect, ErpSheet } from '@/components/erp';
 import { useEffect, useRef, useState } from 'react';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import { FaChevronDown, FaClock } from 'react-icons/fa';
 import {
   formatTime12,
@@ -16,6 +17,7 @@ export { formatTime12 } from './persianTimeState';
 
 export default function PersianTimePicker({ value, onChange, placeholder = 'انتخاب ساعت', disabled = false, className = '', ariaLabel, presentation = 'modal', precision = 'minute' }: PersianTimePickerProps) {
   const [open, setOpen] = useState(false);
+  useUnarchivedDraftGuard('time-selection-buffer',open);
   const [selection, setSelection] = useState(() => parseTimeSelection(value));
   const [second, setSecond] = useState(() => /^([01]\d|2[0-3]):[0-5]\d:([0-5]\d)$/.test(value || '') ? Number(value!.slice(6, 8)) : 0);
   const anchorRef = useRef<HTMLButtonElement>(null);

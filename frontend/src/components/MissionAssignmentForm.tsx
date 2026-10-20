@@ -2,6 +2,7 @@
 
 import { ErpInput, ErpPressable, ErpTextarea } from '@/components/erp';
 import { useState, useEffect } from 'react';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import { FaMapMarkerAlt, FaUser, FaCalendarAlt, FaClock, FaFileAlt } from 'react-icons/fa';
 import PersianCalendarComponent from './PersianCalendar';
 import EnhancedDropdown from './EnhancedDropdown';
@@ -35,6 +36,7 @@ export default function MissionAssignmentForm({ onSubmit, onCancel, loading = fa
 
   const [employees, setEmployees] = useState<any[]>([]);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  useUnarchivedDraftGuard('mission-assignment-editor',true);
 
   useEffect(() => {
     fetchEmployees();

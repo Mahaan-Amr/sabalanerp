@@ -2,6 +2,7 @@
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 
 import { useEffect, useRef, useState } from 'react';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import { ErpButton, ErpCheckbox, ErpDisclosure, ErpField, ErpInlineState, ErpInput, ErpPersianDateField, ErpSearchableSelect, ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { accountingFailureMessage, dateFa } from './accountingUi';
@@ -45,6 +46,7 @@ export default function CustomerAccountOperationFlow({ accountId, account, kind,
   const [refundShares, setRefundShares] = useState<Record<string, Record<string, string>>>({});
   const request = useRef<{ fingerprint: string; key: string }>();
   const inFlight = useRef(false);
+  useUnarchivedDraftGuard('customer-account-operation',true);
   const isResolution = kind === 'RESOLVE_RECEIPT';
   const isEndorsement = kind === 'CHECK_ENDORSE' || kind === 'CHECK_RECIPIENT_RETURN';
   const isTreasury = ['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION', 'CORRECT_RECEIPT', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'CHECK_SETTLE', 'RESOLVE_RECEIPT', 'CHECK_ENDORSE', 'CHECK_RECIPIENT_RETURN'].includes(kind);

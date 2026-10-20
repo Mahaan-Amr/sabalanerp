@@ -1,12 +1,15 @@
 'use client';
 import { ErpInput, ErpTextarea } from '@/components/erp';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FaSave } from 'react-icons/fa';
 import { ErpButton, ErpEmptyState, ErpLoading, ErpPage, ErpSection, useErpPresentationScope } from '@/components/erp';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import { crmAPI } from '@/lib/api';
+import {useModelDraftRecovery} from '@/lib/useModelDraftRecovery';
+import {ModelDraftRecovery} from '@/components/ModelDraftRecovery';
+import {parseFollowUpDraft} from '@/features/crm/followUpDraft';
 import {
   crmPersonName,
   CRM_COMMUNICATION_TYPES,
@@ -26,8 +29,9 @@ export default function CreateFollowUpPage() {
   const [projects, setProjects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [submissionUncertain,setSubmissionUncertain]=useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<ReturnType<typeof parseFollowUpDraft>>({
     customerId: searchParams.get('customerId') || '',
     potentialProjectId: searchParams.get('projectId') || '',
     communicationType: CRM_COMMUNICATION_TYPES[0],
@@ -43,6 +47,11 @@ export default function CreateFollowUpPage() {
     nextInstructions: '',
   });
 
+  const initialDraft=useRef(JSON.stringify(form));
+  const draftEmpty=JSON.stringify(form)===initialDraft.current;
+  const draftRecovery=useModelDraftRecovery({workflow:'crm-follow-up-create',route:'/dashboard/crm/follow-ups/create',
+    baseVersion:'new',record:JSON.stringify([searchParams.get('customerId')||'',searchParams.get('projectId')||'']),
+    model:form,empty:draftEmpty,active:true,busy:saving,submissionUncertain,parse:parseFollowUpDraft,restore:setForm});
   useEffect(() => {
     loadOptions();
   }, []);
@@ -67,6 +76,7 @@ export default function CreateFollowUpPage() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if(submissionUncertain)return;
     setSaving(true);
     setError(null);
     try {
@@ -93,6 +103,7 @@ export default function CreateFollowUpPage() {
         router.push(projectId ? `/dashboard/crm/potential-projects/${projectId}` : '/dashboard/crm/follow-ups');
       }
     } catch (err: any) {
+      if(!err?.response||err.response.status>=500)setSubmissionUncertain(true);
       setError(err.response?.data?.error || 'ثبت گزارش پیگیری ناموفق بود.');
     } finally {
       setSaving(false);
@@ -110,9 +121,11 @@ export default function CreateFollowUpPage() {
       eyebrow="ارتباط با مشتری"
       description="گزارش اتفاق فعلی و اقدام بعدی لازم برای ادامه پیگیری."
       backHref="/dashboard/crm/follow-ups"
-      actions={presentationScope === 'workspace' ? [] : [{ label: saving ? 'در حال ذخیره...' : 'ذخیره', icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving, onClick: () => document.getElementById('followup-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }]}
+      actions={presentationScope === 'workspace' ? [] : [{ label: saving ? 'در حال ذخیره...' : 'ذخیره', icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving||submissionUncertain, onClick: () => document.getElementById('followup-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }]}
     >
 
+      {submissionUncertain&&<ErpEmptyState title="نتیجهٔ ثبت نامشخص است" description="پیش از ارسال دوباره، نتیجه را در فهرست گزارش‌ها بررسی کنید. متن قابل حفظ و دریافت است؛ تازه‌سازی خودکار انجام نمی‌شود."/>}
+      <ModelDraftRecovery recovery={draftRecovery} empty={draftEmpty}/>
       {error && <ErpEmptyState title="خطا" description={error} />}
       <form id="followup-form" onSubmit={submit} className={presentationScope === 'workspace' ? "mx-auto max-w-[850px] space-y-5" : "space-y-5"}>
         <ErpSection title="گزارش پیگیری" description="ثبت کنید چه ارتباطی برقرار شد و نتیجه چه بود.">
@@ -196,7 +209,7 @@ export default function CreateFollowUpPage() {
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <ErpButton label="انصراف" href="/dashboard/crm/follow-ups" variant="ghost" disabled={saving} />
-          <ErpButton label={saving ? 'در حال ذخیره...' : 'ذخیره گزارش'} icon={FaSave} tone="primary" variant="solid" disabled={saving} onClick={() => document.getElementById('followup-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))} />
+          <ErpButton label={saving ? 'در حال ذخیره...' : 'ذخیره گزارش'} icon={FaSave} tone="primary" variant="solid" disabled={saving||submissionUncertain} onClick={() => document.getElementById('followup-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))} />
         </div>
       </form>
     </ErpPage>

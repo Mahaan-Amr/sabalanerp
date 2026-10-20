@@ -1,5 +1,5 @@
 'use client';
-import { ErpInput, ErpTextarea } from '@/components/erp';
+import { ErpInput, ErpTextarea,ErpInlineState } from '@/components/erp';
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FaSave } from 'react-icons/fa';
@@ -9,6 +9,9 @@ import PersianCalendarComponent from '@/components/PersianCalendar';
 import { CustomerWorkflowSection } from '@/features/crm/customer-workflow/CustomerWorkflowUi';
 import { crmAPI } from '@/lib/api';
 import { crmPersonName, CRM_WORK_TYPES, persianDateToApiDate, POTENTIAL_PROJECT_STATUSES } from '@/lib/crmPipeline';
+import {ModelDraftRecovery} from '@/components/ModelDraftRecovery';
+import {useModelDraftRecovery} from '@/lib/useModelDraftRecovery';
+import {parsePotentialProjectDraft,emptyPotentialProjectDraft} from '@/features/crm/potentialProjectDraft';
 
 type Customer = { id: string; firstName?: string; lastName?: string; companyName?: string; phoneNumbers?: Array<{ number: string }> };
 type Seller = { id: string; firstName?: string; lastName?: string; username?: string };
@@ -24,8 +27,9 @@ export default function CreatePotentialProjectPage() {
   const [sellers, setSellers] = useState<Seller[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [submissionUncertain,setSubmissionUncertain]=useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<ReturnType<typeof parsePotentialProjectDraft>>({
     customerId: searchParams.get('customerId') || '',
     title: '',
     responsibleSellerId: '',
@@ -38,6 +42,9 @@ export default function CreatePotentialProjectPage() {
     description: '',
     source: '',
   });
+  const draftEmpty=emptyPotentialProjectDraft(form,{customerId:searchParams.get('customerId')||'',responsibleSellerId:sellers[0]?.id||'',workType:CRM_WORK_TYPES[0]});
+  const draftRecovery=useModelDraftRecovery({workflow:'crm-potential-project',route:'/dashboard/crm/potential-projects/create',record:'new',baseVersion:'new',
+    model:form,empty:draftEmpty,active:!loading,busy:saving||loading,submissionUncertain,parse:parsePotentialProjectDraft,restore:setForm});
 
   useEffect(() => {
     loadOptions();
@@ -66,6 +73,7 @@ export default function CreatePotentialProjectPage() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if(submissionUncertain)return;
     setSaving(true);
     setError(null);
     try {
@@ -77,6 +85,7 @@ export default function CreatePotentialProjectPage() {
       });
       if (response.data.success) router.push(`/dashboard/crm/potential-projects/${response.data.data.id}`);
     } catch (err: any) {
+      if(!err?.response||Number(err.response.status)>=500)setSubmissionUncertain(true);
       setError(err.response?.data?.error || 'ثبت پروژه احتمالی ناموفق بود.');
     } finally {
       setSaving(false);
@@ -92,10 +101,12 @@ export default function CreatePotentialProjectPage() {
       eyebrow="ارتباط با مشتری"
       description="پروژه یا فرصتی که هنوز به قرارداد فروش تبدیل نشده است."
       backHref="/dashboard/crm/potential-projects"
-      actions={presentationScope === 'workspace' ? [] : [{ label: saving ? 'در حال ذخیره...' : 'ذخیره', onClick: () => document.getElementById('potential-project-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })), icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving }]}
+      actions={presentationScope === 'workspace' ? [] : [{ label: saving ? 'در حال ذخیره...' : 'ذخیره', onClick: () => document.getElementById('potential-project-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })), icon: FaSave, tone: 'primary', variant: 'solid', disabled: saving||submissionUncertain }]}
     >
 
       {error && <ErpEmptyState title="خطا" description={error} />}
+      {submissionUncertain&&<ErpInlineState kind="stale" title="نتیجهٔ ثبت مشخص نیست؛ پیش از تکرار، وضعیت ثبت را بررسی کنید. این فرم را نبندید."/>}
+      <ModelDraftRecovery recovery={draftRecovery} empty={draftEmpty}/>
       <form id="potential-project-form" onSubmit={submit} className={presentationScope === 'workspace' ? "mx-auto max-w-[850px] space-y-5" : "space-y-5"}>
         <ErpSection title="اطلاعات اصلی" description="این فیلدها برای ایجاد پروژه احتمالی الزامی هستند." className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -167,7 +178,7 @@ export default function CreatePotentialProjectPage() {
             icon={FaSave}
             tone="primary"
             variant="solid"
-            disabled={saving}
+            disabled={saving||submissionUncertain}
             onClick={() => document.getElementById('potential-project-form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))}
           />
         </div>

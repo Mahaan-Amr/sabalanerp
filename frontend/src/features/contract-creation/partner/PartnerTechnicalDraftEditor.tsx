@@ -1,4 +1,5 @@
 'use client';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 
 import { OperationMinimumContext, OperationMinimumSummary } from '../components/product-modal-system/OperationMinimumContext';
 import { partnerOperationMinimumState } from './partnerOperationMinimum';
@@ -172,6 +173,7 @@ export function PartnerTechnicalDraftEditor({ draft, products, currentProducts =
   const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [remainderSelection, setRemainderSelection] = useState<PartnerRemainderSelection | null>(null);
   const [editingDependentId, setEditingDependentId] = useState<string | null>(null);
+  useUnarchivedDraftGuard('partner-technical-buffer',modal!==null||remainderSelection!==null||editingDependentId!==null);
   const focused = useRef<string | undefined>(undefined);
   const available = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('fa-IR');

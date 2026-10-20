@@ -9,13 +9,15 @@ interface CatalogImagePickerProps {
   label?: string;
   error?: string;
   onChange: (images: string[]) => void;
+  onUploadPendingChange?: (pending:boolean)=>void;
 }
 
 const CatalogImagePicker: React.FC<CatalogImagePickerProps> = ({
   images = [],
   label = 'تصاویر',
   error,
-  onChange
+  onChange,
+  onUploadPendingChange,
 }) => {
   const errorId = React.useId();
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -23,11 +25,12 @@ const CatalogImagePicker: React.FC<CatalogImagePickerProps> = ({
     event.target.value = '';
     if (!file) return;
 
-    const response = await salesAPI.uploadImage(file);
-    const url = response.data?.data?.url;
-    if (url) {
-      onChange([...images, url]);
-    }
+    onUploadPendingChange?.(true);
+    try {
+      const response = await salesAPI.uploadImage(file);
+      const url = response.data?.data?.url;
+      if (url) onChange([...images, url]);
+    } finally { onUploadPendingChange?.(false); }
   };
 
   const visibleImages = images.slice(0, 3);

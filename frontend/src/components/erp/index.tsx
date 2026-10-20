@@ -15,6 +15,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FaArrowRight, FaChevronDown, FaCheck, FaEllipsisV, FaExclamationTriangle, FaInfoCircle, FaRedo, FaSearch, FaTimes } from 'react-icons/fa';
 import EnhancedDropdown from '@/components/EnhancedDropdown';
 import { formatNumericInputText, normalizeDigits } from '@/lib/numberFormat';
+import { useUnarchivedDraftRefGuard } from '@/lib/useUnarchivedDraftGuard';
 
 type IconType = React.ComponentType<{ className?: string }>;
 
@@ -237,10 +238,18 @@ export function ErpIconButton({ label, icon: Icon, href, onClick, tone = 'neutra
 export const ErpInput = React.forwardRef<
   HTMLInputElement,
   React.InputHTMLAttributes<HTMLInputElement> & { numberFormat?: 'money' }
->(function ErpInput({ className, type, inputMode, onChange, numberFormat, value, ...props }, ref) {
+>(function ErpInput({ className, type, inputMode, onChange, onInput, numberFormat, value, ...props }, ref) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   React.useImperativeHandle(ref, () => inputRef.current!, []);
   const money = numberFormat === 'money';
+  const badInput = React.useRef(false);
+  useUnarchivedDraftRefGuard('native-number-buffer', badInput);
+  const observeValidity = (input: HTMLInputElement) => {
+    badInput.current = !money && type === 'number' && input.validity.badInput;
+  };
+  React.useLayoutEffect(() => {
+    if (inputRef.current) observeValidity(inputRef.current);
+  });
   const controlClassName =
     type === 'checkbox'
       ? 'h-5 w-5 shrink-0 rounded border-[var(--sds-border-default)] accent-[var(--sds-accent)]'
@@ -255,7 +264,12 @@ export const ErpInput = React.forwardRef<
             : erpFieldClassName;
   return <input ref={inputRef} type={money ? 'text' : type} inputMode={money ? 'decimal' : inputMode} className={cx(controlClassName, className)} {...props}
     value={money && value != null ? formatNumericInputText(String(value)).displayText : value}
+    onInput={event => {
+      observeValidity(event.currentTarget);
+      onInput?.(event);
+    }}
     onChange={event => {
+      observeValidity(event.currentTarget);
       if (money) {
         const formatted = formatNumericInputText(event.currentTarget.value, event.currentTarget.selectionStart ?? event.currentTarget.value.length);
         event.currentTarget.value = formatted.canonicalText;
@@ -270,7 +284,9 @@ export const ErpInput = React.forwardRef<
       }
       if (inputMode === 'numeric' || inputMode === 'decimal' || inputMode === 'tel' ||
           type === 'number' || type === 'tel' || type === 'date' || type === 'datetime-local') {
-        event.currentTarget.value = normalizeDigits(event.currentTarget.value);
+        // Assigning even an empty string destroys the browser's pending numeric
+        // text (for example "1e"). Keep that buffer mounted until valid input.
+        if (!badInput.current) event.currentTarget.value = normalizeDigits(event.currentTarget.value);
       }
       onChange?.(event);
     }} />;

@@ -12,6 +12,7 @@ export type BrowserDraftArchive = BrowserDraftSnapshot & {
 };
 export type BrowserDraftArchiveCursor = { id: string };
 export type BrowserDraftArchivePage = { archives: BrowserDraftArchive[]; next: BrowserDraftArchiveCursor | null };
+export type BrowserWorkflowDraftCursor = { key: [string, string, string]; id: string };
 const databaseName = 'sabalan-browser-draft-archive';
 const storeName = 'snapshots';
 const fail = () => Error('BROWSER_DRAFT_ARCHIVE_UNVERIFIED');
@@ -134,4 +135,37 @@ export async function readBrowserDraftArchives(userId: string, workflow: string,
     const verified = await Promise.all(selected.map(value => verify(value, userId))); assertOwner();
     return { archives: verified.sort((left, right) => right.capturedAt.localeCompare(left.capturedAt)), next };
   } finally { database.close(); }
+}
+
+/** Bounded cross-tab discovery through the ORIGINAL compound index. This
+ * returns evidence only; domain restore still checks route/record/base/owner. */
+export async function readBrowserWorkflowDraftArchives(userId:string,workflow:string,assertOwner:()=>void,
+ before?:BrowserWorkflowDraftCursor):Promise<{archives:BrowserDraftArchive[];next:BrowserWorkflowDraftCursor|null}>{
+ assertOwner();
+ if(!/^[a-zA-Z0-9_-]{1,128}$/.test(userId)||!/^[a-z][a-z0-9-]{1,63}$/.test(workflow))throw fail();
+ if(before&&(!Array.isArray(before.key)||before.key.length!==3||before.key[0]!==userId||before.key[1]!==workflow
+  ||typeof before.key[2]!=='string'||!before.key[2]||before.key[2].length>256||typeof before.id!=='string'||!/^[a-f0-9-]{36}$/.test(before.id)))throw fail();
+ const database=await open();
+ try{
+  const transaction=database.transaction(storeName,'readonly'),done=completed(transaction);
+  const selected:BrowserDraftArchive[]=[];let bytes=0,next:BrowserWorkflowDraftCursor|null=null,positioned=!before;
+  // Every stored third key is a string. The array sentinel sorts AFTER all
+  // strings, covering this exact owner/workflow without changing schema v1.
+  const range=IDBKeyRange.bound([userId,workflow],[userId,workflow,[]]);
+  const request=transaction.objectStore(storeName).index('ownerDraft').openCursor(range,'prev');
+  request.onsuccess=()=>{
+   const cursor=request.result;if(!cursor)return;
+   if(!positioned){const order=indexedDB.cmp(cursor.key,before!.key);
+    if(order>0||(order===0&&String(cursor.primaryKey)>before!.id)){cursor.continuePrimaryKey(before!.key,before!.id);return;}
+    if(order===0&&String(cursor.primaryKey)===before!.id){positioned=true;cursor.continue();return;}positioned=true;
+   }
+   const value=cursor.value as BrowserDraftArchive,size=typeof value.payloadJson==='string'?new TextEncoder().encode(value.payloadJson).length:0;
+   if(selected.length>=8||(selected.length>0&&bytes+size>32*1024*1024)){
+    const last=selected[selected.length-1];next={key:[userId,workflow,last.draftId],id:last.id};return;
+   }
+   selected.push(value);bytes+=size;cursor.continue();
+  };
+  await done;assertOwner();const archives=await Promise.all(selected.map(value=>verify(value,userId)));assertOwner();
+  if(archives.some(value=>value.workflow!==workflow))throw fail();return {archives,next};
+ }finally{database.close();}
 }

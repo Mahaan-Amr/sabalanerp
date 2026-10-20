@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import { ErpBadge, ErpButton, ErpCard, ErpField, ErpInlineState, ErpLoading, ErpRialInput, ErpSelect, ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
 import { crmAPI } from '@/lib/api';
 import { userFacingError } from '@/features/dispatch/userFacingError';
@@ -10,6 +11,7 @@ export type CustomerCreditView = { customerId: string; trustCategory: 'NORMAL' |
 export default function CustomerCreditPanel({ customerId, onChanged }: { customerId: string; onChanged?: () => void }) {
   const [view, setView] = useState<CustomerCreditView | null>(null);
   const [open, setOpen] = useState(false);
+  useUnarchivedDraftGuard('customer-credit-editor',open);
   const [category, setCategory] = useState<'NORMAL' | 'SPECIAL'>('NORMAL');
   const [unlimited, setUnlimited] = useState(true);
   const [limit, setLimit] = useState('');

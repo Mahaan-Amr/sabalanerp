@@ -26,7 +26,7 @@ import {
   ErpSkeleton,
   ErpStatus,
 } from "@/components/erp";
-import { securityAPI } from "@/lib/api";
+import { securityAPI, resolveBackendAssetUrl } from "@/lib/api";
 import PersianCalendar from "@/lib/persian-calendar";
 
 type Report = any;
@@ -185,7 +185,7 @@ export default function PersonnelReportHistoryPage(
   const reportTitle = (report: Report) =>
     `${report.categoryNameSnapshot}${report.reportTypeNameSnapshot ? ` / ${report.reportTypeNameSnapshot}` : ""}`;
   const attachmentUrl = (attachmentId: string) =>
-    `/api/security/reports/personnel-history/${personnelId}/attachments/${attachmentId}`;
+    resolveBackendAssetUrl(`/api/security/reports/personnel-history/${personnelId}/attachments/${attachmentId}`);
   const activeAttachments = selected?.attachments || [];
   const preview = previewIndex == null ? null : activeAttachments[previewIndex];
   const exportPdf = async () => {

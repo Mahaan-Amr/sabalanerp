@@ -1,4 +1,5 @@
 'use client';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 
 import React from 'react';
 import { useProductPricingVisibility } from './productPricingVisibility';
@@ -67,6 +68,7 @@ function SlabField({
 }) {
   const [draft, setDraft] = React.useState(value);
   const [entryError, setEntryError] = React.useState<string>();
+  useUnarchivedDraftGuard('contract-slab-raw',draft!==value);
   const editingRef = React.useRef(false);
   React.useEffect(() => {
     if (!editingRef.current) setDraft(value);

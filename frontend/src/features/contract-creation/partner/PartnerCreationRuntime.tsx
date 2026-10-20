@@ -1,4 +1,5 @@
 'use client';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 
 import { readPartnerEditorHydration } from './partnerEditorHydration';
 import { assertSuccessfulSalesResult } from '@/features/sales/salesOperationalError';
@@ -343,6 +344,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode, retainPreparedCase, rea
     isFirst: boolean;
   } | null>(null);
   const [paymentForm, setPaymentForm] = useState<Partial<PaymentEntry>>({});
+  useUnarchivedDraftGuard('partner-payment-buffer',paymentModal!==null);
   const [paymentModalErrors, setPaymentModalErrors] = useState<PartnerPaymentModalErrors>({});
   const editingHydrationFlight = useRef(false);
   const runtimeWizardHydrationFlight = useRef(false);
@@ -353,6 +355,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode, retainPreparedCase, rea
   const autoTitledDrafts = useRef(new Set<string>());
   const [pending, setPending] = useState(false);
   const [initialInquiryOpen, setInitialInquiryOpen] = useState(false);
+  useUnarchivedDraftGuard('partner-initial-inquiry-buffer',initialInquiryOpen);
   const [initialInquiryMatches, setInitialInquiryMatches] = useState<PartnerApprovalMatchSet | null>(null);
   const [initialInquirySubjects, setInitialInquirySubjects] = useState<PartnerInquirySubjectOption[]>([]);
   const [initialInquirySelection, setInitialInquirySelection] = useState<Set<string>>(() => new Set());

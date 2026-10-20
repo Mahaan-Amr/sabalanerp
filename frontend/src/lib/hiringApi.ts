@@ -15,6 +15,14 @@ const internal = {
   patch: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.patch<T>(`/hr-hiring${url}`, data, config),
 };
 
+// Invitation verification precedes the applicant session. Bind only the
+// immutable producer identity; never inherit applicant/staff authentication.
+const invitationVerification = axios.create({ baseURL });
+invitationVerification.interceptors.request.use((config) => {
+  bindBrowserBuildRequestIdentity(config.headers);
+  return config;
+});
+
 const applicant = axios.create({ baseURL });
 applicant.interceptors.request.use((config) => {
   bindBrowserBuildRequestIdentity(config.headers);
@@ -255,7 +263,7 @@ export const hiringAPI = {
 
 export const applicantHiringAPI = {
   verify: (mobile: string, otp: string) =>
-    axios.post(`${baseURL}/public/invitations/verify`, { mobile, otp }),
+    invitationVerification.post('/public/invitations/verify', { mobile, otp }),
   get: () => applicant.get("/public/application"),
   getClosedState: () => applicant.get("/public/application/closed-state"),
   saveDraft: (data: any) => applicant.put("/public/application/draft", data),

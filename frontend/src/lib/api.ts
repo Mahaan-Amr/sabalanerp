@@ -7,7 +7,8 @@ import { buildLoadingFinalizeRequest } from './loadingFinalizeRequest';
 import { buildAuthorizedPhysicalExitRequest } from './authorizedPhysicalExitRequest';
 import { createPrivateClient } from './privateClientScope';
 import { BrowserSessionContinuation, type BrowserSessionLease, type BrowserLoginAttempt } from './browserSessionContinuation';
-import { bindBrowserBuildRequestIdentity } from './browserBuildRequestIdentity';
+import { bindBrowserBuildRequestIdentity, bindBrowserBuildResourceUrl } from './browserBuildRequestIdentity';
+import { browserBuildHandoff } from './browserBuildHandoff';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
 const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
@@ -57,8 +58,8 @@ export const normalizeOperationalErrorPayload = (
 
 export const resolveBackendAssetUrl = (url?: string | null) => {
   if (!url) return '';
-  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
-  return url.startsWith('/') ? url : `/${url}`;
+  const value = /^https?:\/\//i.test(url) || /^(?:data|blob):/i.test(url) || url.startsWith('/') ? url : `/${url}`;
+  return bindBrowserBuildResourceUrl(value, API_ORIGIN);
 };
 
 // Create axios instance
@@ -211,7 +212,22 @@ api.interceptors.response.use(
     clearRetryKey(response.config as RetryAwareConfig);
     return response;
   },
-  (error) => {
+  async (error) => {
+    if (error.response?.status === 409
+      && [error.response.data?.code, error.response.data?.error].includes('API_BUILD_REFRESH_REQUIRED')) {
+      // Expiry can reject the fresh /auth/me probe before a business request
+      // acquires its lease. A prior tab lease may preserve local bytes only;
+      // it never bypasses that denied request or authorizes a retry.
+      const lease = (error.config as RetryAwareConfig | undefined)?.browserSessionLease
+        || browserSessionContinuation.localRecoveryLease();
+      const handoff = lease ? await browserBuildHandoff.preserve(lease, () => browserSessionContinuation.assertCurrent(lease))
+        : { status: 'BLOCKED', code: 'BROWSER_BUILD_HANDOFF_OWNER_UNPROVEN', archives: [] };
+      error.browserBuildHandoff = handoff;
+      error.response.data = { ...error.response.data, code: 'API_BUILD_REFRESH_REQUIRED', buildHandoff: handoff,
+        message: handoff.status === 'PRESERVED'
+          ? 'پیش‌نویس‌های ثبت‌شده محفوظ شدند؛ برای ادامه صفحه را تازه کنید.'
+          : 'ذخیرهٔ مطمئن نوشته‌های این صفحه تأیید نشد؛ صفحه را نبندید یا تازه نکنید.' };
+    }
     if (error.response?.status === 401) {
       if (browserSessionContinuation.expectedUserId()) browserSessionContinuation.invalidate(error.browserSessionAttempt
         || error.config?.browserLoginAttempt || error.config?.browserSessionLease || error.config?.browserBootstrapScope);

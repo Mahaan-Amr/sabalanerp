@@ -4,6 +4,9 @@ import React from 'react';
 import { ErpButton, ErpCheckbox, ErpField, ErpInlineState, ErpInput, ErpPage, ErpSection, ErpSelect, ErpTextarea, type ErpAction } from '@/components/erp';
 import CatalogImagePicker from '@/components/CatalogImagePicker';
 import { servicesAPI } from '@/lib/api';
+import {ModelDraftRecovery} from '@/components/ModelDraftRecovery';
+import {useModelDraftRecovery} from '@/lib/useModelDraftRecovery';
+import {emptyInventoryMasterDataDraft,parseInventoryMasterDataDraft} from './inventoryMasterDataDraft';
 
 export type InventoryMasterDataKind = 'service' | 'cuttingType' | 'stoneFinishing' | 'subService';
 
@@ -76,6 +79,8 @@ export function InventoryMasterDataForm({
   onSubmit,
   onCancel,
   deleteAction,
+  draftScope,
+  submissionUncertain=false,
 }: {
   kind: InventoryMasterDataKind;
   values: InventoryMasterDataValues;
@@ -86,11 +91,14 @@ export function InventoryMasterDataForm({
   onSubmit: (event: React.FormEvent) => void;
   onCancel: () => void;
   deleteAction?: { label: string; onClick: () => void };
+  draftScope?:{route:string;record:string;baseVersion:string};
+  submissionUncertain?:boolean;
 }) {
   const copy = configurations[kind];
   const supportsMinimum = kind === 'subService' || kind === 'stoneFinishing';
   const [minimumAccess, setMinimumAccess] = React.useState(false);
   const [minimumAccessError, setMinimumAccessError] = React.useState('');
+  const [uploadsPending,setUploadsPending]=React.useState(0);
   React.useEffect(() => {
     if (!supportsMinimum) return;
     let active = true;
@@ -147,11 +155,26 @@ export function InventoryMasterDataForm({
         </ErpField>
       )}
       </div>
-      <CatalogImagePicker images={values.images} onChange={(images) => onChange({ images })} />
+      {draftScope&&<InventoryMasterDataDraftControls kind={kind} values={values} onChange={onChange}
+        scope={draftScope} pending={pending||uploadsPending>0} submissionUncertain={submissionUncertain}/>}
+      <CatalogImagePicker images={values.images} onChange={(images) => onChange({ images })}
+        onUploadPendingChange={value=>setUploadsPending(count=>Math.max(0,count+(value?1:-1)))}/>
       <ErpCheckbox label="فعال" checked={values.isActive} onChange={(event) => onChange({ isActive: event.target.checked })} />
-      <InventoryMasterDataActions pending={pending} submitLabel={submitLabel} onCancel={onCancel} deleteAction={deleteAction} />
+      <InventoryMasterDataActions pending={pending||submissionUncertain||uploadsPending>0} submitLabel={submitLabel} onCancel={onCancel} deleteAction={deleteAction} />
     </form>
   );
+}
+
+function InventoryMasterDataDraftControls({kind,values,onChange,scope,pending,submissionUncertain}:{
+  kind:InventoryMasterDataKind;values:InventoryMasterDataValues;onChange:(patch:Partial<InventoryMasterDataValues>)=>void;
+  scope:{route:string;record:string;baseVersion:string};pending:boolean;submissionUncertain:boolean;
+}){
+  const empty=emptyInventoryMasterDataDraft(kind,values);
+  const recovery=useModelDraftRecovery({workflow:'inventory-'+kind.toLowerCase(),...scope,model:values,empty,active:true,busy:pending,
+    submissionUncertain,parse:value=>parseInventoryMasterDataDraft(kind,value),restore:onChange});
+  return <>{submissionUncertain&&<ErpInlineState kind="stale" title="نتیجهٔ ثبت مشخص نیست؛ پیش از تکرار، وضعیت ثبت را بررسی کنید. این فرم را نبندید."/>}
+    {values.images.length>0&&<ErpInlineState kind="stale" title="حفظ و تازه‌سازی این فرم همراه تصویر هنوز تأیید نشده است؛ این صفحه را نبندید."/>}
+    <ModelDraftRecovery recovery={recovery} empty={empty}/></>;
 }
 
 export function InventoryMasterDataActions({ pending, submitLabel, onCancel, deleteAction }: {

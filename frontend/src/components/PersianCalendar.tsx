@@ -2,6 +2,7 @@
 
 import { ErpButton, ErpPressable, ErpSelect, useErpOverlayPortalContainer, useErpPresentationScope } from '@/components/erp';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { FaCalendarAlt, FaCheck, FaChevronLeft, FaChevronRight, FaTimes } from 'react-icons/fa';
@@ -71,6 +72,7 @@ export default function PersianCalendarComponent({
     ? { date: normalizeYearOnlyValue(value, minYear, maxYear), time: '' }
     : splitDateTime(pickerValue);
   const [open, setOpen] = useState(false);
+  useUnarchivedDraftGuard('calendar-selection-buffer',open);
   const [draftDate, setDraftDate] = useState(initial.date);
   const [draftTime, setDraftTime] = useState(initial.time);
   const [currentMonth, setCurrentMonth] = useState(yearOnly

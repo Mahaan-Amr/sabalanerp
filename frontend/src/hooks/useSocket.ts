@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from '@/contexts/AuthContext';
-import { resolveSocketUrl, socketConnectionOptions } from './socketConnection';
+import { resolveSocketUrl, socketConnectionOptionsForProducer } from './socketConnection';
 import { browserSessionContinuation } from '@/lib/api';
 
 export const useSocket = () => {
@@ -23,7 +23,8 @@ export const useSocket = () => {
       });
 
       // Initialize socket connection
-      const newSocket = io(socketUrl, { ...socketConnectionOptions, auth: { expectedUserId: user.id } });
+      const newSocket = io(socketUrl, { ...socketConnectionOptionsForProducer(process.env.NEXT_PUBLIC_BROWSER_BUILD_ID || null),
+        auth: { expectedUserId: user.id } });
 
       newSocket.on('connect', () => {
         console.log('Socket connected:', newSocket.id);

@@ -1,4 +1,5 @@
 'use client';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
 
 import { useState } from 'react';
 import type { PartnerTechnicalDraft, PartnerTechnicalFamily, PartnerTechnicalProduct } from '@sabalanerp/partner-sales-contracts';
@@ -29,6 +30,7 @@ export function PartnerQuickInquiryEditor({ draft, products, dimensions, onDimen
 }) {
   const [family, setFamily] = useState<PartnerTechnicalFamily>('longitudinal');
   const [productId, setProductId] = useState('');
+  useUnarchivedDraftGuard('partner-quick-inquiry-buffer',Boolean(productId)||family!=='longitudinal');
   const available = products.filter(product => product.isAvailable && product.families.includes(family));
   const selectedId = available.some(product => product.catalogItemId === productId) ? productId : available[0]?.catalogItemId ?? '';
   const add = () => {

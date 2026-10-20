@@ -39,6 +39,10 @@ import {
   parseHiringQueueContext,
   type HiringQueueFilters,
 } from "@/features/hr-hiring/hiringQueueViewModel";
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
+import {useModelDraftRecovery} from '@/lib/useModelDraftRecovery';
+import {ModelDraftRecovery} from '@/components/ModelDraftRecovery';
+import {parseHiringCreateDraft} from '@/features/hr-hiring/hiringCreateDraft';
 import { HR_HIRING_METRIC_VIEWS } from "@/features/hr-hiring/hrHiringMetricViews";
 
 type HiringCreateForm = {
@@ -100,6 +104,7 @@ export default function HiringCasesPage() {
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [createUncertain,setCreateUncertain]=useState(false);
   const [error, setError] = useState("");
   const [referenceIssue, setReferenceIssue] = useState("");
   const [createOutcome, setCreateOutcome] = useState<CreateOutcome>(null);
@@ -116,6 +121,7 @@ export default function HiringCasesPage() {
   const [inviteTarget, setInviteTarget] = useState<any>(null);
   const [evaluationSettingsOpen, setEvaluationSettingsOpen] = useState(false);
   const [evaluationSettings, setEvaluationSettings] = useState<{ positions: any[]; selected: Record<string, string[]> }>({ positions: [], selected: {} });
+  useUnarchivedDraftGuard('hr-evaluator-settings',evaluationSettingsOpen);
   const requestSequence = useRef(0);
   const foundationLoaded = useRef(false);
   const programmaticHref = useRef("");
@@ -123,7 +129,10 @@ export default function HiringCasesPage() {
   const canManageRecruitmentCases = actionPermissions.includes("MANAGE_RECRUITMENT_CASE");
   const canViewInterviewCriteria = actionPermissions.includes("VIEW_INITIAL_INTERVIEW_CRITERIA");
   const canManageEvaluatorSettings = actionPermissions.includes("MANAGE_RECRUITMENT_EVALUATOR_SETTINGS");
-  const createDirty = Boolean(form.firstName || form.lastName || form.mobile || form.nationalCode || form.positionId || assessmentDecision || assessmentKinds.length);
+  const createDirty = Boolean(form.firstName || form.lastName || form.mobile || form.nationalCode || form.positionId || assessmentDecision || assessmentKinds.length || assessmentExecutionMethod !== "APPLICANT");
+  const draftRecovery=useModelDraftRecovery({workflow:'hr-hiring-create',route:'/dashboard/hr/hiring',record:'new-applicant',baseVersion:'new',
+    model:{form,assessmentDecision,assessmentExecutionMethod,assessmentKinds},empty:!createDirty,active:createOpen||createDirty,busy,submissionUncertain:createUncertain,
+    parse:parseHiringCreateDraft,restore:value=>{setForm(value.form);setAssessmentDecision(value.assessmentDecision);setAssessmentKinds(value.assessmentKinds);setAssessmentExecutionMethod(value.assessmentExecutionMethod);setCreateOpen(true);}});
   const openEvaluationSettings = async () => {
     try {
       setBusy(true); setError("");
@@ -243,6 +252,7 @@ export default function HiringCasesPage() {
   const rememberQueuePosition = () => sessionStorage.setItem("hrHiringQueueScroll", String(window.scrollY));
 
   const create = async () => {
+    if(createUncertain)return;
     try {
       setBusy(true);
       setError("");
@@ -277,6 +287,7 @@ export default function HiringCasesPage() {
       setCreateOpen(false);
       await load();
     } catch (cause) {
+      const failure=cause as {response?:{status?:number}};if(!failure?.response||(failure.response.status??0)>=500)setCreateUncertain(true);
       setCreateError(hiringError(cause));
     } finally {
       setBusy(false);
@@ -366,6 +377,8 @@ export default function HiringCasesPage() {
         dismissible={!busy}
       >
         <ErpCard className="grid gap-3 p-4 sm:grid-cols-2">
+          <div className="sm:col-span-2"><ModelDraftRecovery recovery={draftRecovery} empty={!createDirty}/></div>
+          {createUncertain&&<div className="sm:col-span-2"><ErpInlineState kind="stale" title="نتیجهٔ ایجاد نامشخص است؛ پیش از ارسال دوباره فهرست متقاضیان را بررسی کنید. نوشته‌ها قابل حفظ و دریافت هستند."/></div>}
           {createError && <div className="sm:col-span-2"><ErpInlineState kind="error" title={createError} /></div>}
           <ErpInput
             className={field}
@@ -468,6 +481,7 @@ export default function HiringCasesPage() {
               icon={FaPlus}
               disabled={
                 busy ||
+                createUncertain ||
                 !form.firstName ||
                 !form.lastName ||
                 !form.mobile ||

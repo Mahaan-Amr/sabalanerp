@@ -8,6 +8,8 @@ import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 import { OperationMinimumContext, OperationMinimumSummary, contractOperationMinimumState } from './components/product-modal-system/OperationMinimumContext';
 import { evaluateOperationMinimums, operationMinimumMessage } from '@sabalanerp/contract-product-graph';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import {useUnarchivedDraftGuard} from '@/lib/useUnarchivedDraftGuard';
+import {recoverContractModalIdentity} from './utils/contractModalRecoveryIdentity';
 import { flushSync } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { ContractReactivation, type ContractReactivationTarget } from '@/features/sales/ContractReactivation';
@@ -955,6 +957,7 @@ export default function CreateContractWizard({
         inputBaseSubtotal: discountInputBaseSubtotal, baseSubtotal: discountBaseSubtotal,
         maxPercent: maxDiscountPercent, hasRange: Boolean(matchingDiscountRange) })
     : contractDiscountSnapshotError(wizardData.discount, discountBaseSubtotal);
+  useUnarchivedDraftGuard('contract-discount-buffer',discountTouched&&Boolean(discountError));
   const deliverableProductEntries = useMemo(
     () => getDeliverableProductEntries(wizardData.products),
     [wizardData.products]
@@ -2548,6 +2551,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   }, [productModal, productCalculations, errors, setErrors]);
 
   const applyContractAutosaveDraft = useCallback((draft: ReturnType<typeof createContractAutosaveDraft>) => {
+    const modalIdentity=recoverContractModalIdentity(draft.productModal||{},draft.wizardData.payment.payments,draft.wizardData.products);
     setCurrentStep(clampContractDraftStep(draft.currentStep, WIZARD_STEPS.length));
     const normalizedWizardData = normalizeWizardFinishingProducts(draft.wizardData);
     setDiscountAmountInput(Math.round(toFiniteNumber(normalizedWizardData.discount?.amount)));
@@ -2593,6 +2597,9 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     stairSystemV2.setStoneSearchTerm(draft.searches?.stairStoneSearchTerm || '');
 
     const savedProductModal = draft.productModal || {};
+    setIsEditMode(modalIdentity.isEditMode);
+    setEditingProductIndex(modalIdentity.editingProductIndex);
+    paymentHandlers.setEditingPaymentEntryId(modalIdentity.editingPaymentEntryId);
     if (savedProductModal.selectedProduct !== undefined) setSelectedProduct(savedProductModal.selectedProduct as Product | null);
     if (savedProductModal.productConfig) setProductConfig(savedProductModal.productConfig as Partial<ContractProduct>);
     if (savedProductModal.lengthUnit === 'cm' || savedProductModal.lengthUnit === 'm') setLengthUnit(savedProductModal.lengthUnit);
@@ -2662,6 +2669,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     restorationAttempted.current = true;
   }, [
     paymentHandlers,
+    setIsEditMode,setEditingProductIndex,
     remainingStoneModal,
     restorationAttempted,
     setCurrentStep,
@@ -2742,6 +2750,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     setDiscoveredRecoveryDraftId(freshDraftId);
   }, [recoveryUserId]);
   const editRecovery = useContractEditRecovery({
+    captureDraft: (capturedAt) => buildContractAutosaveDraft(capturedAt),
     correctionExpiresAt,
     scope: recoveryScope,
     contractId: isContractEditMode ? contractId : null,
@@ -2890,7 +2899,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     replacementWizardData
   ]);
 
-  const buildContractAutosaveDraft = useCallback(() => {
+  const buildContractAutosaveDraft = useCallback((capturedAt = Date.now()) => {
     if (!isContractEditMode && !hasMeaningfulDraftProgress) {
       return null;
     }
@@ -2918,6 +2927,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         quantityType,
         stairSystemConfig,
         showProductModal,
+        isEditMode,editingProductIndex,editingProductRowId:isEditMode&&editingProductIndex!==null?wizardData.products[editingProductIndex]?.rowId??null:null,
+        editingPaymentEntryId:paymentHandlers.editingPaymentEntryId,
         paymentEntryForm: paymentHandlers.paymentEntryForm,
         showPaymentEntryModal: paymentHandlers.showPaymentEntryModal,
         remainingStone: {
@@ -2946,7 +2957,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         quantityDraft: stairQuantityDraft,
         quantityManuallyEdited: stairQuantityManuallyEdited
       }
-    });
+    }, capturedAt);
   }, [
     currentStep,
     contractDateChanged,
@@ -2968,6 +2979,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     hasQuantityBeenInteracted,
     quantityType,
     stairSystemConfig,
+    isEditMode,editingProductIndex,paymentHandlers.editingPaymentEntryId,
     paymentHandlers.paymentEntryForm,
     paymentHandlers.showPaymentEntryModal,
     remainingStoneModal.partitions,

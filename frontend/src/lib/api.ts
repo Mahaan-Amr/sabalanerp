@@ -409,6 +409,7 @@ export const hrAPI = {
   getPersonnelDeletionPreview: (id: string) => api.get(`/hr/personnel/${id}/deletion-preview`),
   permanentlyDeletePersonnel: (id: string, data: any) => api.post(`/hr/personnel/${id}/permanent-delete`, data),
   createExceptionalPersonnel: (data: any) => api.post('/hr/personnel/exceptional', data),
+  getPersonnelIdentity: (id: string) => api.get(`/hr/personnel/${id}/identity`),
   updatePersonnel: (id: string, data: any) => api.put(`/hr/personnel/${id}`, data),
   updatePersonnelWorkSchedule: (id: string, data: any) => api.put(`/hr/personnel/${id}/work-schedule`, data),
   createRelationship: (personnelId: string, data: any) => api.post(`/hr/personnel/${personnelId}/relationships`, data),

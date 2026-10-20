@@ -6,7 +6,7 @@ export type DispatchAuthority = { id: string; kind: 'MANAGER' | 'CREDIT' | 'DATE
 export type DispatchCreditView = { authorities: DispatchAuthority[]; access: { read: boolean; request: boolean; manage: boolean; managerDecision: boolean; seller: boolean };
   customerCredit: { amountRials: string; consumedRials: string; promisedDate: string; active: boolean } | null;
   canManageCustomerDate: boolean;
-  eligible: boolean; balance: SellerCreditBalance; activeManagerId: string | null; actorId: string; canRequestManager: boolean;
+  eligible: boolean; balance: SellerCreditBalance | null; activeManagerId: string | null; actorId: string; canRequestManager: boolean;
   responsibleSeller: { id: string; displayName: string } };
 const data = <T>(response: { data: { success: boolean; data: T; error?: string } }) => {
   if (!response.data.success) throw new Error(response.data.error || 'عملیات ثبت نشد.');

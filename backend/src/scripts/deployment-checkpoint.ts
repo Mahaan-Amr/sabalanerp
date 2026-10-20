@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { verifyUnit } from '../../scripts/clamav-checkpoint.mjs';
 import path from 'node:path';
 import { disconnectDatabase, prisma } from '../lib/prisma';
 import {
@@ -52,6 +53,8 @@ const main = async () => {
   const releaseId = required('DEPLOYMENT_RELEASE_ID');
   const targetCommit = required('DEPLOYMENT_TARGET_COMMIT');
   const remoteRoot = required('DEPLOYMENT_REMOTE_MOUNT');
+  const clamavUnit = path.join(RECOVERY_COORDINATION_DIR, `clamav-checkpoint-${deploymentId}`);
+  if (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true') await verifyUnit({ unit: clamavUnit, id: deploymentId });
   const localKey = await readSecret('DEPLOYMENT_LOCAL_ROLLBACK_KEY');
   const remotePublicKey = await readConfiguredFile('DEPLOYMENT_REMOTE_RECOVERY_PUBLIC_KEY');
   const packagesRoot = path.join(RECOVERY_ROOT, 'packages');
@@ -129,6 +132,10 @@ const main = async () => {
       clamav: required('DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE'),
     },
   };
+
+  if (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true') {
+    await verifyUnit({ unit: clamavUnit, id: deploymentId, checkpoint: { ...metadata, manifest: localValidation.manifest } });
+  }
 
   const localMetadataPath = `${result.destination}.json`;
   const coordinationMetadataPath = path.join(RECOVERY_COORDINATION_DIR, 'deployment-checkpoint.json');

@@ -17,8 +17,8 @@ type Tx = Prisma.TransactionClient;
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 export const isPartnerCommercialFlow = (contract: Pick<SalesContract, 'partnerKind' | 'commercialFlowVersion'>) =>
   contract.partnerKind === 'PARTNER_CUSTOMER' && contract.commercialFlowVersion === 2;
-export const partnerDeadlinePassed = (contract: Pick<SalesContract, 'firstFinancialRecordAt' | 'commercialExpiresAt'>, now = new Date()) =>
-  !contract.firstFinancialRecordAt && !!contract.commercialExpiresAt && contract.commercialExpiresAt <= now;
+export const partnerDeadlinePassed = (contract: Pick<SalesContract, 'firstFinancialRecordAt' | 'commercialExpiresAt' | 'dispatchExpiryExempt'>, now = new Date()) =>
+  !contract.firstFinancialRecordAt && !contract.dispatchExpiryExempt && !!contract.commercialExpiresAt && contract.commercialExpiresAt <= now;
 
 export async function lockPartnerCommercialContract(tx: Tx, caseId: string) {
   await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
@@ -26,6 +26,14 @@ export async function lockPartnerCommercialContract(tx: Tx, caseId: string) {
   if (!root?.customerContractId) throw new Error('قرارداد مشتری هنوز آماده نشده است.');
   await tx.$queryRaw`SELECT id FROM sales_contracts WHERE id = ${root.customerContractId} FOR UPDATE`;
   const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: root.customerContractId } });
+  if (isPartnerCommercialFlow(contract)) {
+    const exempt = !!await tx.contractDispatchAuthority.findFirst({ where: { contractId: contract.id, kind: 'MANAGER',
+      status: 'APPROVED', revision: contract.commercialRevision } });
+    if (contract.dispatchExpiryExempt !== exempt) {
+      await tx.salesContract.update({ where: { id: contract.id }, data: { dispatchExpiryExempt: exempt } });
+      contract.dispatchExpiryExempt = exempt;
+    }
+  }
   return { root, contract };
 }
 
@@ -124,6 +132,7 @@ export async function acceptPartnerCustomer(tx: Tx, input: { caseId: string; rev
   assertPartnerCommercialAvailable(contract);
   await assertPartnerPreparationComplete(tx, root);
   if (contract.commercialRevision !== input.revision) throw new Error('این نسخه قرارداد تغییر کرده است.');
+  if (contract.customerAcceptanceRevision === input.revision) return contract;
   const updated = await tx.salesContract.update({ where: { id: contract.id }, data: {
     customerAcceptanceRevision: input.revision, customerAcceptanceMethod: input.method, signedAt: new Date(),
     ...(input.method === 'DIGITAL' ? { isSigned: true } : {}),
@@ -152,12 +161,19 @@ export async function resetPartnerCommercialApprovals(tx: Tx, caseId: string, ac
   const { root, contract } = await lockPartnerCommercialContract(tx, caseId);
   const retainedAcceptance = options.preserveCustomerAcceptance && contract.customerAcceptanceRevision === contract.commercialRevision;
   const updated = await tx.salesContract.update({ where: { id: contract.id }, data: {
-    commercialFlowVersion: 2, commercialRevision: { increment: 1 }, status: 'DRAFT',
+    commercialFlowVersion: 2, commercialRevision: { increment: 1 }, status: 'DRAFT', dispatchExpiryExempt: false,
     salesApprovalRevision: null, customerAcceptanceRevision: retainedAcceptance ? contract.commercialRevision + 1 : null,
     approvedBy: null,
     ...(!retainedAcceptance ? { customerAcceptanceMethod: null, signedBy: null, signedAt: null, isSigned: false,
       signedByPhoneNumber: null, verificationCodeId: null } : {}),
   } });
+  const { closeContractDispatchDuty } = await import('../../crossWorkspaceDutyAdapters/contractDispatchDutyAdapter');
+  const authorities = await tx.contractDispatchAuthority.findMany({ where: { contractId: contract.id,
+    kind: { in: ['MANAGER', 'DATE'] }, status: { in: ['PENDING', 'APPROVED'] } } });
+  for (const authority of authorities) {
+    await tx.contractDispatchAuthority.update({ where: { id: authority.id }, data: { status: 'SUPERSEDED' } });
+    await closeContractDispatchDuty(tx, authority.id, actorId, 'SUPERSEDED', reason);
+  }
   await tx.partnerSaleCase.update({ where: { id: root.id }, data: { commercialFlowVersion: 1,
     ...(!retainedAcceptance ? { customerConfirmationState: 'RECONFIRMATION_REQUIRED' as const } : {}), stateRevision: { increment: 1 } } });
   await appendPartnerCommercialEvent(tx, root.id, actorId, 'PARTNER_COMMERCIAL_APPROVALS_RESET', {

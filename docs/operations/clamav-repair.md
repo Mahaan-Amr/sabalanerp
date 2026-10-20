@@ -1,0 +1,80 @@
+# Protected ClamAV repair
+
+This is a maintenance-only repair, independent of attendance R3. No schema, attendance, correction, PDF or shared-duty behavior is changed. Cloud execution, deployment and automatic attendance require separate authorization. Local test success does not prove cloud readiness.
+
+## Local runtime
+
+Use only `sabalanerp-local` and `docker-compose.local.yml`. Check its inventory before any Docker action. The ClamAV service builds `deploy/clamav/Dockerfile` from the pinned official **amd64 1.4.6** manifest. Do not use this local mutable tag as a production release identity.
+
+The supervisor watches both clamd and the scheduler, rejects zombies and terminates on child death. The updater runs as `clamav`, serializes the entire invocation with a persistent `flock`, reserves and syncs its next slot before FreshClam, and retains `freshclam.dat`. The default interval is 7,200 seconds; values below one hour are rejected. Recreate must preserve the volume and schedule. Never delete cooldown state or force an update to obtain a green check.
+
+FreshClam 1.4.6 can exit **zero during CDN cooldown without checking any database**. Success therefore requires explicit successful/up-to-date results for main, daily and bytecode, no refusal/error, a recent persisted successful cycle, both live processes, and scanner responsiveness. A failed or incomplete attempt remains unhealthy. Health does not replace release freshness verification against DNS. No TLS, signature, or TestDatabases bypass exists. `ConcurrentDatabaseReload no` reduces double-bank memory during scanner reload; scans may temporarily block, never become assumed CLEAN. FreshClam's separate load test still needs measured memory headroom.
+
+## Tests
+
+- `npm run test:clamav-repair`: boundary, manifest/tamper, numeric ownership, rollback, readiness and controller wiring.
+- `npm run test:clamav-repair:lifecycle:docker`: deliberate updater termination and scanner outage/recovery in the existing local container; run separately when brief local scan downtime is acceptable. It checks the unprivileged worker, restart, unchanged cooldown/schedule, and application refusal of unscanned files.
+- `npm run test:clamav-repair:docker`: isolated temporary files/processes inside the existing local ClamAV container; real Linux flock, concurrent writers, crash/recreate scheduling, network errors and zero-exit cooldown. No external FreshClam request is made by these fixtures.
+- `npm run test:clamav-repair:restore:docker`: real signed-bank snapshot, authenticated encryption/decryption, reconstruction after losing the coordination copy, isolated bank restoration with numeric ownership, and an offline CLEAN/EICAR scan inside the existing containers. It preserves the live bank, cooldown and updater schedule. This is a component rehearsal, not a complete protected release or remote-store rehearsal.
+- `npm --prefix backend run test:deployment-control`: includes portable ClamAV tests. Unix controller fixtures need Linux tools; run in the existing backend container with isolated QA source when the workstation lacks them.
+- `npm --prefix backend run test:system-recovery`, `npm run architecture:check`, backend build, `npm run docker:verify`, `npm run docker:local:verify-antivirus`.
+
+Record blocked checks as blocked. A successful CLEAN/EICAR check with an old signed bank is not current-signature readiness.
+
+## Candidate preparation, only after authorization
+
+Refresh the deployed source identity and migration ledger read-only first. Apply only this maintenance patch to that deployed source, and commit/review that independent candidate. Do not deploy the current feature branch to repair ClamAV. `DEPLOYMENT_CLAMAV_BASE_COMMIT` must equal the running release's recorded source identity. The scope gate rejects unrelated paths, migrations, dependency changes and unrelated package commands.
+
+Prepare an inactive candidate on the authorized deployment network with the official engine, persistent cooldown state and one writer. Network failures or 403/429 stop preparation. Use FreshClam; do not download CVD files with curl/wget or an untrusted mirror. The staging host must have capacity for the live scanner plus the candidate's database load test; local CPU emulation and a startup measurement are not production peak-memory evidence.
+
+Inspect the inactive candidate with `node scripts/clamav-release-readiness.mjs inspect <container>`. After it has a real successful update cycle, `export <container> <private-new-directory>` writes `target.json` and `target-bank.tar`. The export holds the updater's lock while snapshotting the bank, checks signed database versions, proves a real scanner load plus streamed EICAR rejection and binds the archive checksum to the immutable image ID. Target receipts must include `eicarRejected: true` from the real probe; regenerate older receipts rather than editing their flags. It never updates the candidate or live bank. A DNS/version mismatch fails closed; do not force another download to hide a concurrent upstream publication.
+
+Before a separately approved execution set:
+
+- `DEPLOYMENT_MODE=release` (the workstation configuration mode is prohibited).
+- `DEPLOYMENT_CLAMAV_BASE_COMMIT`: freshly proven deployed source SHA.
+- `DEPLOYMENT_CLAMAV_TARGET_IMAGE`: exact locally available `sha256:...` image ID from the staging receipt.
+- `DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE`: private reviewed rehearsal evidence for the previous immutable image and its current bank/configuration; required before maintenance.
+- `DEPLOYMENT_CLAMAV_READY_FILE`: absolute private path to `target.json`, adjacent to its protected `target-bank.tar`.
+
+Rollback proof is an operator-reviewed result of the complete protected rehearsal, not a success receipt generated from assumptions. It contains `image`, compatible `engine` (managed 1.4.6, or explicitly qualified native 1.4.5/1.4.6), `checkedAt` (within 24 hours), current DNS `versions`, `restoreRehearsalPassed`, `fullReleaseRehearsalPassed`, `updaterHealthy`, `scannerClean`, `eicarRejected`, `configArchiveSha256` (the exact Docker-captured effective config archive), and `bankFiles` (exactly main/daily/bytecode cvd-or-cld filenames mapped to SHA-256). All five result flags must be true. The proof's checksum is bound at preflight and rechecked after drain; the actually captured bank and configuration must match it before checkpoint can become eligible. A stale original bank or missing rehearsal proof stops preparation. No fake proof is supplied by this patch. For a native previous image, the proof must explicitly set `runtimeVerifier: "native-1.4-daemon-v1"` and include `main.cvd`, so the legacy entrypoint cannot take its initial-download branch with database testing disabled. The native verifier is permitted only for the previous immutable release; target promotion remains managed 1.4.6. A stale bank or defunct native updater still cannot qualify. Do not fabricate a proof, relabel an image, change a bank outside maintenance, or weaken health gates.
+
+These inputs do not bypass any normal lease, independent checkpoint, complete release, health, recovery-drill, backup or reopening gate. No command to deploy is authorized by this document.
+
+## Checkpoint and rollback unit
+
+Before checkpoint, no target ClamAV image/configuration is started. The old container stops after services drain. Its effective `/etc/clamav` archive, complete signature bank, numeric ownership/modes, FreshClam cooldown and scheduler state are captured as `recovery-coordination/clamav-checkpoint-<deployment-id>`. The staged target bank and receipt are included in the same unit. Only the deployment job mounts the bank for protected capture/restore; the application backend gains no writable bank mount.
+
+The existing COMPLETE recovery package encrypts this unit, restore-validates the package, uploads it and verifies independent full readback. Additional manifest checks require every unit component, including unit metadata, to be present and hash-identical. A missing/unverified/tampered unit aborts before mutation.
+
+Only the owned live lease, matching maintenance owner and journaled `MUTATION_STARTED` permit activation. The protected target bank is installed while the scanner remains stopped; the complete release then starts with the immutable target image. DNS freshness and real update health are mandatory before reopening. The normal 15-minute mutation deadline remains in effect.
+
+On pre-reopen failure, drain/stop ClamAV, reconstruct the saved unit directly from the authenticated encrypted checkpoint and validate every component against its decrypted recovery manifest, restore the exact old bank including cooldown/ownership, restore the effective old configuration and previous immutable image, and run every rollback gate. Reconstructing the unit does not depend on an intact extra coordination copy. Paths from the enclosing archive are never extracted into the live coordination directory: selected file content is streamed to private regular files, hashes are checked, and the complete verified unit replaces the coordination copy. The live lease and maintenance owner are checked again after archive IO and before bank mutation. Bank extraction is offline under the owned maintenance lease; an interrupted/failed extraction retains maintenance and the protected archives, rather than starting a partial bank. No old checkpoint is restored after public writes may have resumed. Such a failure is a new incident requiring a new protected boundary.
+
+A rollback to the formerly stale bank is not a successful freshness repair. If the old release cannot pass the additional updater/freshness gate, maintenance remains active. Prove a compatible, acceptable rollback set and rehearse the complete protected deployment before authorizing cloud execution. An earlier healthy-looking PONG is insufficient.
+
+First successful/up-to-date cycle is necessary for release readiness. A naturally scheduled subsequent cycle (about two hours later), with a named operator and authorization, is necessary to close the updater incident. Do not hold the mutation window open for two hours, force the schedule, or create an unrequested automation.
+
+## Local result: 19 October 2026
+
+The implementation is tested locally; it is not approved for cloud execution. The local official bank remains daily 28150 (11 October). Existing FreshClam state reports CDN cooldown through **20 October 2026 05:59:39 UTC / 09:29:39 Tehran**. No cooldown reset, network change or forced download was made. Zero-exit cooldown was reproduced and is now rejected by health/readiness. Record the actual next authorized update outcome; do not mark current signatures or a recurring real update cycle proven yet.
+
+Official DNS field mapping is main=1, daily=2 and bytecode=7 (zero-based), as specified by [Cisco-Talos cvdupdate](https://github.com/Cisco-Talos/cvdupdate/blob/main/cvdupdate/cvdupdate.py). A recorded eight-field response is covered by a regression test.
+
+## Local blocker follow-up: 19 October 2026
+
+The remaining local recovery dependency was corrected: a lost or corrupted coordination copy can be reconstructed from the authenticated encrypted checkpoint, with manifest validation before replacement and a renewed lease check before bank mutation. Failed extraction, missing/duplicate components, tampering, or an unverified checkpoint cannot replace the existing unit or change the bank. The readiness receipt now requires literal boolean verification results; maintenance package validation preserves every existing deployment test and allows only the reviewed ClamAV commands. The rollback proof must match the supported runtime verifier; incompatible legacy-engine evidence is refused before maintenance.
+
+Run memory-heavy tests and Docker builds **sequentially** on the local Docker VM. It currently has about 5.3 GiB total memory. An initial concurrent offline-bank-load/build run caused a real OOM and local scanner restart; this failed evidence is retained. The measured 2 GiB limit had under 20% anonymous-memory reserve. The local-only ClamAV limit is now 3 GiB; the rehearsal requires at least 20% reserve for its tested bank. Production memory is not changed or attested by this local setting. A successful serial component rehearsal must show no new OOM/kill events and a responsive live scanner, and report peak cgroup and anonymous memory. File-cache reclaim at `memory.max` is reported separately. This does not establish headroom for a newer bank or the real FreshClam `TestDatabases` cycle. Never disable `TestDatabases` or accept missing scanner results.
+
+External closure still requires a legitimate successful FreshClam update after CDN cooldown, a natural later scheduled success, and a separately approved complete protected release/rollback rehearsal with current target and previous image/bank/configuration. Legacy previous-image acceptance and freshly verified cloud identity/capacity/remote backup gates remain unproven by local component tests. No cloud execution, attendance activation or Git push is implied.
+
+## Native rollback qualification and controller fault rehearsal
+
+The earlier engine-only restriction has been replaced by an explicit read-only native verifier. [The official 1.4 entrypoint](https://github.com/Cisco-Talos/clamav-docker/blob/main/clamav/1.4/alpine/scripts/docker-entrypoint.sh) starts a foreground FreshClam daemon separately and can leave its tail process alive when a child dies. The checker therefore examines actual `/proc` identities rather than relying on PONG or container liveness. It requires exactly one non-root, non-defunct `freshclam` daemon with the standard arguments and 12–24 checks per day, plus a live non-root `clamd`. A complete latest update cycle for all three official databases must postdate that daemon process and be within two intervals; errors, cooldown, partial cycles, unsigned or mismatched versions, unknown arguments/configuration includes and alternate mirrors/directories fail. Configuration retains database testing, notification and the official mirror.
+
+Native cycle evidence is correlated with the regular FreshClam log and its timestamp in the container timezone, so replayed log headers or scanner-file names in shared stdout cannot supply update evidence. The latest cycle is checked again after scanning. Both native and managed rollback inspection require signed current banks, a loaded daemon matching daily, CLEAN and streamed EICAR detection, exact reviewed bank-file hashes and effective-config archive hash. Container/process identity and the latest updater result are checked again after inspection. `inspect-rollback <container> <proof>` runs before maintenance and after rollback, using the authenticated proof recovered with the bank. The probe makes no FreshClam update request, creates no files in the inspected container and changes no settings. Normal scanner log events may be generated by the test scans.
+
+The real release controller is also exercised against test-only CLI adapters for qualification rejection, remote-copy tampering, failure after mutation, rollback-verifier failure, post-open failure and success. The fixture calls the real boundary, capture, verification, encryption/decryption, authenticated unit reconstruction and bank restore functions. It proves control order, single rollback, maintenance retention and the prohibition on restoring old data after traffic opens. Docker/Git/database control and remote transport are private fixtures: this is not a deployment, a production proof, an independent remote-store attestation or a real legacy-image rehearsal.
+
+Remaining operational qualification is explicit: wait for the recorded CDN cooldown without deleting its state, obtain legitimate current signatures and a natural subsequent successful cycle, then perform separately authorized real previous-image/target-image and remote-checkpoint qualification. A currently defunct/stale cloud installation may need a protected bootstrap decision; this patch does not modify it or grant a health exception.

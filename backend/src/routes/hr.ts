@@ -1,3 +1,4 @@
+import { correctPersonnelIdentity, identityUserSelect, personnelIdentityVersion, PersonnelIdentityError } from '../services/hrPersonnelIdentity';
 import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -183,6 +184,7 @@ const actorId = (req: WorkspaceRequest) => req.user!.id;
 const badRequest = (res: Response, error: unknown) => res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'اطلاعات واردشده معتبر نیست.' });
 const handleError = (res: Response, error: unknown, context: string) => {
   console.error(context, error);
+  if (error instanceof PersonnelIdentityError) return res.status(error.status).json({ success: false, code: error.code, error: error.message });
   if (error instanceof FoundationVersionConflictError) {
     return res.status(409).json({ success: false, error: error.code, message: error.message });
   }
@@ -1871,10 +1873,26 @@ router.post('/personnel/exceptional', editAccess, requireHrManagerAuthority, req
   } catch (error) { handleError(res, error, 'Create exceptional HR personnel'); }
 });
 
+router.get('/personnel/:id/identity', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const person = await prisma.personnel.findUnique({ where: { id: req.params.id }, include: { user: { select: identityUserSelect } } });
+    if (!person) return res.status(404).json({ success: false, error: 'پرسنل پیدا نشد.' });
+    const history = await prisma.hrPersonnelAudit.findMany({ where: { personnelId: person.id, eventType: 'IDENTITY_CORRECTED' }, orderBy: { createdAt: 'desc' }, take: 100 });
+    const actors = await prisma.user.findMany({ where: { id: { in: [...new Set(history.map(row => row.actorUserId))] } }, select: { id: true, firstName: true, lastName: true, erasedAt: true, erasedDisplayName: true } });
+    res.json({ success: true, data: {
+      id: person.id, firstName: person.firstName, lastName: person.lastName, nationalCode: person.nationalCode, employeeNumber: person.employeeNumber,
+      archivedAt: person.archivedAt, hasUser: Boolean(person.user), identityVersion: personnelIdentityVersion(person, person.user),
+      history: history.map(row => { const actor = actors.find(item => item.id === row.actorUserId); return { id: row.id, createdAt: row.createdAt, source: row.sourceCategory, changes: row.payloadJson, actorName: actor ? actor.erasedAt ? actor.erasedDisplayName || 'کاربر حذف‌شده' : `${actor.firstName} ${actor.lastName}` : 'کاربر پیشین' }; }),
+    } });
+  } catch (error) { handleError(res, error, 'Read HR personnel identity'); }
+});
+
 router.put('/personnel/:id', editAccess, async (req: WorkspaceRequest, res) => {
   try {
-    const nationalCode = nullableText(normalizeApplicantDigits(req.body.nationalCode)); if (nationalCode && !isValidIranianNationalCode(nationalCode)) throw new Error('کد ملی معتبر نیست.');
-    const record = await prisma.personnel.update({ where: { id: req.params.id }, data: { firstName: textValue(req.body.firstName), lastName: textValue(req.body.lastName), nationalCode, employeeNumber: nullableText(normalizeApplicantDigits(req.body.employeeNumber)) }, include: personnelInclude });
+    const record = await prisma.$transaction(async tx => {
+      await correctPersonnelIdentity(tx, { personnelId: req.params.id, actorUserId: actorId(req), source: 'PERSONNEL', expectedVersion: req.body.expectedIdentityVersion, fields: req.body });
+      return tx.personnel.findUniqueOrThrow({ where: { id: req.params.id }, include: personnelInclude });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Update HR personnel'); }
 });

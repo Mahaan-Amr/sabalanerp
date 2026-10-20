@@ -10,6 +10,7 @@ import AccountingCustomPrintSettings, { defaultCustomPrintSettings, salesPdfVari
 import AccountingContractPrintActions, { accountingContractTabs } from './AccountingContractPrintActions';
 
 export type PartnerInternalDocument = {
+  customerSignature?: { showActions: boolean; contractId: string; revision: number; updatedAt: string; canRecordPaperSignature: boolean };
   owner?: { caseId: string; revision: number; integrityHash: string };
   preparationOnly?: boolean; amountKnown?: boolean; commercial?: { status: keyof typeof partnerCommercialLabels } | null;
   id: string; caseState?: string; status: string; amount: string; receivedAmount: string; remainingAmount: string;
@@ -33,7 +34,8 @@ export type PartnerInternalDocument = {
 export type PartnerDetailSection = typeof accountingContractTabs[number]['value'];
 export const partnerQuantityLabel = (unit: string) => ({ meter: 'متر طول', count: 'عدد', squareMeter: 'متر مربع', ton: 'تن' } as Record<string, string>)[unit] || unit;
 
-export function PartnerAccountingDetailView({ lifecyclePanel, financialVoidPanel, document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
+export function PartnerAccountingDetailView({ signaturePanel, lifecyclePanel, financialVoidPanel, document: doc, section, onSection, pending, error, onRefresh, onPdf, onFlag, onCorrection, onResolve, invoiceOpen = false, onOpenInvoice, onApproveInvoice, onCreateReceivable, printVariant = 'accounting', onPrintVariant, customPrintSettings = defaultCustomPrintSettings, setCustomPrintSettings, applyCustomPreset }: {
+  signaturePanel?: React.ReactNode;
   lifecyclePanel?: React.ReactNode;
   financialVoidPanel?: React.ReactNode;
   onCreateReceivable?: () => void;
@@ -81,6 +83,7 @@ export function PartnerAccountingDetailView({ lifecyclePanel, financialVoidPanel
     {error && <ErpInlineState kind="error" title={error} />}
     <ErpSegmentedControl value={section} onChange={onSection} options={[...accountingContractTabs]} />
     {section === 'summary' && <>
+      {signaturePanel}
       {lifecyclePanel}
       {doc.flags.filter(flag => flag.status === 'OPEN').map(flag => <ErpInlineState key={flag.id} kind="stale" title={flag.title} className="mt-3" />)}
       <ErpSection title="خروجی چاپ قرارداد"><AccountingContractPrintActions value={printVariant} options={Object.entries(salesPdfVariantLabels).map(([value, label]) => ({ value, label }))}

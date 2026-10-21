@@ -349,6 +349,9 @@ def hint_prepared_declarations(root, check):
                         major, minor = fields[3].split(':')
                         active |= (os.makedev(int(major, 16), int(minor, 16)), int(fields[4])) == (before.st_dev, before.st_ino)
             except (FileNotFoundError, ProcessLookupError): continue
+            except PermissionError:
+                # Unknown process references forbid advice for this file.
+                return True
         return active
     for directory, pins in roots:
         check(directory.resolve() == directory, 'PRIVATE_DECLARATION_ROOT_ALIAS')

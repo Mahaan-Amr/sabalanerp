@@ -36,15 +36,23 @@ class CacheTests(unittest.TestCase):
         advised, held, opened_paths = [], set(), {}
         target = shared/'engine.so.node'
         target_stat = target.stat()
-        state = dict(target_hashed=False)
+        state = dict(target_hashed=False, current_inode=None, denied=0)
 
         class Descriptor:
             def stat(self):
+                if active in ('denied_first', 'denied_second'):
+                    target_open = state['current_inode'] == target_stat.st_ino
+                    denied_phase = (active == 'denied_first' and not state['target_hashed']) or (active == 'denied_second' and state['target_hashed'])
+                    if target_open and denied_phase:
+                        state['denied'] += 1
+                        raise PermissionError('fixture descriptor inaccessible')
+                    return types.SimpleNamespace(st_dev=target_stat.st_dev, st_ino=0)
                 return target.stat()
 
         class Fds:
             def iterdir(self):
-                return [Descriptor()] if active == 'fd' or (active == 'late_fd' and state['target_hashed']) else []
+                if active == 'unreadable': raise PermissionError('fixture process fd list inaccessible')
+                return [Descriptor()] if active in ('fd', 'denied_first', 'denied_second') or (active == 'late_fd' and state['target_hashed']) else []
 
         class Maps:
             def read_text(self):
@@ -61,7 +69,6 @@ class CacheTests(unittest.TestCase):
 
         class Proc:
             def iterdir(self):
-                if active == 'unreadable': raise PermissionError('fixture census inaccessible')
                 return [Process()]
 
         class Api:
@@ -96,6 +103,7 @@ class CacheTests(unittest.TestCase):
                 fd = os.open(file, flags)
                 held.add(fd)
                 opened_paths[fd] = file
+                state['current_inode'] = os.fstat(fd).st_ino
                 return fd
             @staticmethod
             def close(fd):
@@ -136,7 +144,9 @@ class CacheTests(unittest.TestCase):
         (root/'index.json').write_text(json.dumps(dict(sharedClientInventory=capsule)))
         before = {str(f): (f.read_bytes(), f.stat().st_ino, f.stat().st_size,
                            f.stat().st_mtime_ns, f.stat().st_mode) for d in roots for f in d.iterdir()}
-        return namespace['hint_prepared_declarations'], root, roots, advised, held, before
+        function = namespace['hint_prepared_declarations']
+        function.fixture_state = state
+        return function, root, roots, advised, held, before
 
     def test_all_exact_three_capsules_include_inactive_js_and_engine(self):
         fn, root, roots, advised, held, before = self.fixture()
@@ -176,12 +186,63 @@ class CacheTests(unittest.TestCase):
         self.assertNotIn((roots[2]/'engine.so.node').stat().st_ino, advised)
         self.assertFalse(held)
 
-    def test_inaccessible_process_census_refuses_without_assuming_absence(self):
+    def test_inaccessible_census_skips_all_hints_without_memory_credit(self):
         fn, root, roots, advised, held, before = self.fixture(active='unreadable')
-        with self.assertRaises(PermissionError):
-            fn(root, check)
+        result = fn(root, check)
+        self.assertFalse(result['files'])
+        self.assertFalse(result['cacheCreditUsed'])
+        self.assertFalse(result['productionAdmission'])
         self.assertFalse(advised)
         self.assertFalse(held)
+
+    def test_descriptor_denied_before_hash_skips_unknown_inode_and_closes(self):
+        fn, root, roots, advised, held, before = self.fixture(active='denied_first')
+        result = fn(root, check)
+        self.assertEqual(fn.fixture_state['denied'], 1)
+        self.assertEqual(len(result['files']), 8)
+        self.assertNotIn((roots[2]/'engine.so.node').stat().st_ino, advised)
+        self.assertFalse(held)
+
+    def test_descriptor_denied_after_hash_skips_unknown_inode_and_closes(self):
+        fn, root, roots, advised, held, before = self.fixture(active='denied_second')
+        result = fn(root, check)
+        self.assertEqual(fn.fixture_state['denied'], 1)
+        self.assertEqual(len(result['files']), 8)
+        self.assertNotIn((roots[2]/'engine.so.node').stat().st_ino, advised)
+        self.assertFalse(held)
+
+    def test_permissions_outside_process_census_remain_fatal(self):
+        for boundary in ('receipt', 'inventory', 'hash', 'metadata'):
+            with self.subTest(boundary=boundary):
+                fn, root, roots, advised, held, before = self.fixture()
+                def denied(*args, **kwargs):
+                    raise PermissionError('fixture non-census ' + boundary)
+                if boundary == 'receipt':
+                    original_root = root
+                    class DeniedFile:
+                        read_bytes = staticmethod(denied)
+                    class Root:
+                        def __truediv__(self, key):
+                            return DeniedFile() if key == 'qualified-prisma-capsule.json' else original_root/key
+                    root = Root()
+                elif boundary == 'inventory':
+                    fn.__globals__['inventory'] = denied
+                elif boundary == 'hash':
+                    fn.__globals__['os'].read = staticmethod(denied)
+                else:
+                    api = fn.__globals__['os']
+                    original = api.fstat
+                    count = [0]
+                    def metadata(fd):
+                        count[0] += 1
+                        if count[0] > 1:
+                            return denied()
+                        return original(fd)
+                    api.fstat = staticmethod(metadata)
+                with self.assertRaises(PermissionError):
+                    fn(root, check)
+                self.assertFalse(advised)
+                self.assertFalse(held)
 
     def test_nonquiescent_original_native_refuses_before_advice(self):
         fn, root, roots, advised, held, before = self.fixture(native_closed=False)

@@ -14,6 +14,11 @@ const listReceipt='reports/qa/full-catalog-list-inventory-e27cf134619ad7bbb550ab
 const statKeys=['dev','ino','size','mtimeNs','ctimeNs','nlink','mode'];
 const regular=file=>{assert.equal(fs.realpathSync(file),path.resolve(file));const value=fs.lstatSync(file,{bigint:true});assert.ok(value.isFile()&&!value.isSymbolicLink()&&value.nlink===1n);return value;};
 const same=(a,b)=>{for(const key of statKeys)assert.equal(a[key],b[key]);};
+// Node/Windows named-path dev is zero; descriptor dev is the volume serial.
+// Every other cross-domain field and both complete same-domain pins remain strict.
+export function assertCatalogDescriptorMatchesNamed(opened,named,platform=process.platform){
+ for(const key of statKeys)if(platform!=='win32'||key!=='dev')assert.equal(opened[key],named[key]);
+}
 
 /** Discover actual relative backend runtime imports from every current catalog
  * source. Types are excluded; esbuild subsequently verifies the complete graph
@@ -90,9 +95,9 @@ export async function stageOriginalFullCatalog({prepared,directory,containerId,b
    if(failure)throw failure;
    const fd=fs.openSync(entry.file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW),hash=createHash('sha256');
    try{
-    same(fs.fstatSync(fd,{bigint:true}),entry.identity);let remaining=entry.bytes;
+    const opened=fs.fstatSync(fd,{bigint:true});assertCatalogDescriptorMatchesNamed(opened,entry.identity);same(regular(entry.file),entry.identity);let remaining=entry.bytes;
     while(remaining){const data=Buffer.allocUnsafe(Math.min(262144,remaining));const count=fs.readSync(fd,data,0,data.length,null);assert.ok(count>0);const bytes=data.subarray(0,count);hash.update(bytes);remaining-=count;if(!child.stdin.write(bytes))await Promise.race([once(child.stdin,'drain'),closed.then(()=>{throw Error('CATALOG_STAGE_CLOSED_DURING_INPUT');})]);if(failure)throw failure;}
-    assert.equal(hash.digest('hex'),entry.sha256);same(fs.fstatSync(fd,{bigint:true}),entry.identity);same(regular(entry.file),entry.identity);
+    assert.equal(hash.digest('hex'),entry.sha256);same(fs.fstatSync(fd,{bigint:true}),opened);same(regular(entry.file),entry.identity);assertCatalogDescriptorMatchesNamed(fs.fstatSync(fd,{bigint:true}),entry.identity);
    }finally{fs.closeSync(fd);}
   }
  }catch(error){failure??=error;}finally{child.stdin.end();}

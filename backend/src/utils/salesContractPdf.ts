@@ -155,7 +155,7 @@ export const buildSalesContractPdfFingerprint = (
 ): string => {
   const printableContract = {
     templateVersion: contract?.partnerKind === 'PARTNER_CUSTOMER'
-      ? `${SALES_CONTRACT_PDF_TEMPLATE_VERSION}:partner-product-details-v1` : SALES_CONTRACT_PDF_TEMPLATE_VERSION,
+      ? `${SALES_CONTRACT_PDF_TEMPLATE_VERSION}:partner-product-details-v2-slab-cutting` : SALES_CONTRACT_PDF_TEMPLATE_VERSION,
     variant,
     customPrint: variant === 'custom' ? customPrint : undefined,
     id: contract?.id,

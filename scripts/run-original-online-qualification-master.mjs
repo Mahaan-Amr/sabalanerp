@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
+import {writeOriginalMasterFailureDiagnostic} from './lib/original-master-failure-diagnostic.mjs';
 import {runOriginalRetainedBrowserQualificationRounds} from './lib/original-retained-browser-qualification.mjs';
 import {inspectOriginalLocalOnlineCheckpointInputs} from './lib/original-local-online-checkpoint.mjs';
 import {runOriginalApplicationNativeQualification} from './run-application-native-local.mjs';
@@ -150,8 +151,8 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
    }
   }
   held=true;state('ORIGINAL_MASTER_INPUT_CLOSED_RETAINED');
- }catch{
-  held=true;state('ORIGINAL_MASTER_REQUEST_FAILED_RETAINED');
+ }catch(error){
+  held=true;writeOriginalMasterFailureDiagnostic(error,sequence);state('ORIGINAL_MASTER_REQUEST_FAILED_RETAINED');
  }
  // No successful process exit discards the only authority-bearing tokens.
  await new Promise(()=>{void keeper;void local;void independent;void protectedInstall;void protectedRequest;void retainedBrowser;});

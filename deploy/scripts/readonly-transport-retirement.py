@@ -72,7 +72,7 @@ def load(name, file):
 # trusted esbuild onLoad collector binds these exact bytes to the native scope's
 # immutable application bundle. Production images have no authority here.
 APPROVED_PROTOCOL_SOURCES = {
-    'backend/src/application.ts': '84d2282e3161e40f0464ffd59ee689d09153b734633b90a1da0bdb27f798850f',
+    'backend/src/application.ts': '998f00f36558bb448ed997608a7c316230cb2efee2e30d49336f1638b0fc3363',
     'backend/src/services/realtimeDeliveryLifecycle.ts': 'c3470316b7c87df5a48e2c8f597ba4801e0b26f46754def3c83d5859b128d933',
     'backend/src/services/identitySessionService.ts': '744e9dcd6b944057f8cdf0514b38d55b1d5e96ea709d67919a084ffc8e8a34ec',
     'backend/src/services/onlineRuntimeWork.ts': 'c78d2af67a70c21d3ad76890c43e75e2785b7203eaeb990f1c0e0bf0c8b05350',

@@ -13,6 +13,25 @@ def check(value, code):
         raise RuntimeError(code)
 
 
+def hint_staged_file(target, original):
+    """Hint only this freshly written, verified inode; no cache credit."""
+    identity = lambda value: (value.st_dev, value.st_ino, value.st_uid, value.st_gid,
+                              value.st_mode, value.st_nlink, value.st_size,
+                              value.st_mtime_ns, value.st_ctime_ns)
+    fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(fd)
+        check(stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid()
+              and before.st_nlink == 1 and before.st_mode & 0o777 == 0o400
+              and identity(before) == identity(original) == identity(target.lstat()),
+              'CATALOG_STAGE_CACHE_IDENTITY')
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        check(identity(os.fstat(fd)) == identity(before) == identity(target.lstat()),
+              'CATALOG_STAGE_CACHE_METADATA_CHANGED')
+    finally:
+        os.close(fd)
+
+
 root = Path(sys.argv[1])
 check(len(sys.argv) == 3 and re.fullmatch(r'/app/online-runtime-acceptance/application-native-[a-f0-9]{32}', str(root)), 'CATALOG_STAGE_ROOT')
 expected_sha = sys.argv[2]
@@ -70,6 +89,7 @@ for entry in entries:
         os.fsync(fd)
         actual = os.fstat(fd)
         check(actual.st_nlink == 1 and actual.st_size == entry['bytes'] and actual.st_mode & 0o777 == 0o400, 'CATALOG_STAGE_OUTPUT')
+        hint_staged_file(target, actual)
     finally:
         os.close(fd)
 check(stream.read(1) == b'', 'CATALOG_STAGE_INPUT_TRAILING')
@@ -78,6 +98,7 @@ with (app / 'source-manifest.json').open('xb') as stream:
     stream.write(raw)
     stream.flush()
     os.fsync(stream.fileno())
+    hint_staged_file(app / 'source-manifest.json', os.fstat(stream.fileno()))
 fd = os.open(app, os.O_RDONLY | os.O_DIRECTORY)
 try:
     os.fsync(fd)
@@ -85,4 +106,7 @@ finally:
     os.close(fd)
 print(json.dumps(dict(format='sabalan-original-full-catalog-stage/v1', operation=manifest['operation'],
     manifestSha256=expected_sha, files=len(entries), bytes=total, nativeRuntimeAuthority=False,
-    databaseExecuted=False, directory=str(app))))
+    databaseExecuted=False, directory=str(app), cacheHint=dict(
+        method='READONLY_POSIX_FADV_DONTNEED', hintedFiles=len(entries) + 1,
+        hintedBytes=total + len(raw), cacheCreditUsed=False,
+        bytesChanged=False, filesDeleted=False))))

@@ -312,7 +312,7 @@ console.log(JSON.stringify({event:'private-prisma-models-qualified',identity,cou
     return proof
 
 def hint_prepared_declarations(root, check):
-    """Read-only DONTNEED after verified inventory; no cache credit/admission."""
+    """Hint verified inactive capsule files; no cache credit/admission."""
     accepted = json.loads((root / 'qualified-prisma-capsule.json').read_bytes())
     receipt_raw = (root / 'qualified-prisma-receipt.json').read_bytes()
     check(hashlib.sha256(receipt_raw).hexdigest() == accepted['receiptSha256'], 'PRIVATE_DECLARATION_RECEIPT_CHANGED')
@@ -331,15 +331,30 @@ def hint_prepared_declarations(root, check):
     profiles = [name for name in ('linuxArtifact', 'hostArtifact') if name in generated]
     check(len(profiles) == 1, 'PRIVATE_DECLARATION_ARTIFACT_PROFILE_AMBIGUOUS')
     entries = generated[profiles[0]]['entries']
-    expected = {row['target']: row['sha256'] for row in entries if row['target'].endswith('.d.ts')}
-    roots = [(source / 'node_modules/@prisma/client', expected), (root / 'node_modules/@prisma/client', expected), (shared, None)]
+    expected = {row['target']: row['sha256'] for row in entries}
+    roots = [(source / 'node_modules/@prisma/client', expected), (root / 'node_modules/@prisma/client', expected), (shared, expected)]
     rows = []
+    def file_is_active(before):
+        active = False
+        for process in Path('/proc').iterdir():
+            if not process.name.isdecimal() or int(process.name) == os.getpid(): continue
+            try:
+                for descriptor in (process / 'fd').iterdir():
+                    try: observed = descriptor.stat()
+                    except (FileNotFoundError, ProcessLookupError): continue
+                    active |= (observed.st_dev, observed.st_ino) == (before.st_dev, before.st_ino)
+                for line in (process / 'maps').read_text().splitlines():
+                    fields = line.split(maxsplit=5)
+                    if len(fields) >= 5:
+                        major, minor = fields[3].split(':')
+                        active |= (os.makedev(int(major, 16), int(minor, 16)), int(fields[4])) == (before.st_dev, before.st_ino)
+            except (FileNotFoundError, ProcessLookupError): continue
+        return active
     for directory, pins in roots:
         check(directory.resolve() == directory, 'PRIVATE_DECLARATION_ROOT_ALIAS')
         for parent, directories, names in os.walk(directory, followlinks=False):
             directories[:] = [name for name in directories if not (Path(parent) / name).is_symlink()]
             for name in names:
-                if not name.endswith('.d.ts'): continue
                 file = Path(parent) / name
                 if file.is_symlink(): continue
                 fd = os.open(file, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
@@ -348,33 +363,22 @@ def hint_prepared_declarations(root, check):
                     if before.st_nlink != 1: continue
                     check(stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid() and before.st_size <= 128 * 1024**2,
                           'PRIVATE_DECLARATION_FILE_UNSAFE')
-                    identity = lambda v: (v.st_dev, v.st_ino, v.st_size, v.st_mode, v.st_mtime_ns, v.st_ctime_ns)
-                    # Declarations are unused by these runtime actors. Skip any
-                    # currently mapped/held declaration in this namespace.
-                    active = False
-                    for process in Path('/proc').iterdir():
-                        if not process.name.isdecimal() or int(process.name) == os.getpid(): continue
-                        try:
-                            for descriptor in (process / 'fd').iterdir():
-                                try: observed = descriptor.stat()
-                                except (FileNotFoundError, ProcessLookupError): continue
-                                active |= (observed.st_dev, observed.st_ino) == (before.st_dev, before.st_ino)
-                            for line in (process / 'maps').read_text().splitlines():
-                                fields = line.split(maxsplit=5)
-                                if len(fields) >= 5:
-                                    major, minor = fields[3].split(':')
-                                    active |= (os.makedev(int(major, 16), int(minor, 16)), int(fields[4])) == (before.st_dev, before.st_ino)
-                        except (FileNotFoundError, ProcessLookupError): continue
-                    if active: continue
+                    identity = lambda v: (v.st_dev, v.st_ino, v.st_uid, v.st_gid, v.st_nlink, v.st_size, v.st_mode, v.st_mtime_ns, v.st_ctime_ns)
+                    # Hint only verified files not currently held or mapped by
+                    # any other process in this namespace.
+                    if file_is_active(before): continue
                     digest = hashlib.sha256()
                     while chunk := os.read(fd, 65536): digest.update(chunk)
                     value = digest.hexdigest()
                     if pins is not None: check(pins.get(str(file.relative_to(directory))) == value, 'PRIVATE_DECLARATION_HASH_CHANGED')
+                    if file_is_active(before): continue
+                    check(identity(os.fstat(fd)) == identity(before) == identity(file.lstat()), 'PRIVATE_DECLARATION_PREHINT_METADATA_CHANGED')
                     os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
                     check(identity(os.fstat(fd)) == identity(before) == identity(file.lstat()), 'PRIVATE_DECLARATION_METADATA_CHANGED')
                     rows.append(dict(file=str(file), sha256=value, bytes=before.st_size, metadataUnchanged=True))
                 finally: os.close(fd)
     cgroup = Path('/sys/fs/cgroup')
     return dict(format='sabalan-prepared-declaration-cache-hint/v1', productionAdmission=False, cacheCreditUsed=False,
-                bytesChanged=False, filesDeleted=False, files=rows, memoryCurrent=int((cgroup / 'memory.current').read_text()),
+                bytesChanged=False, filesDeleted=False, hintedScope='VERIFIED_INACTIVE_PRISMA_CAPSULE_FILES',
+                files=rows, memoryCurrent=int((cgroup / 'memory.current').read_text()),
                 memoryMaximum=int((cgroup / 'memory.max').read_text()), memoryEvents=(cgroup / 'memory.events').read_text())

@@ -11,6 +11,7 @@ import {collectApplicationReadonlyTransportArtifacts} from './lib/application-na
 import {collectApplicationUiArtifacts} from './lib/application-native-ui-artifacts.mjs';
 import {createOriginalRoleCoordinator} from './lib/application-native-role-coordinator.mjs';
 import {collectApplicationFullCatalogArtifacts,stageOriginalFullCatalog} from './lib/application-native-full-catalog-artifacts.mjs';
+import {observeOriginalPreparedMemory} from './lib/application-native-prepared-memory.mjs';
 import {runOriginalRetainedBrowserQualificationRounds,readOriginalRetainedBrowserQualificationCompletion} from './lib/original-retained-browser-qualification.mjs';
 
 export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,nativeOwnerElfReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection}){
@@ -61,6 +62,7 @@ const sources={},capture=name=>{const bytes=fs.readFileSync(path.join(root,name)
   if(sources[name])assert.equal(sources[name],hash);sources[name]=hash;return bytes;};
 capture('scripts/run-application-native-local.mjs');
 capture('scripts/lib/application-native-role-coordinator.mjs');
+capture('scripts/lib/application-native-prepared-memory.mjs');
 for(const source of ['scripts/lib/original-private-legacy-ui-carrier.mjs',
  'scripts/lib/production-legacy-browser-artifacts.mjs','scripts/lib/production-frontend-base-artifacts.mjs',
  'scripts/lib/private-docker-image-archive.mjs','deploy/scripts/production-frontend-snapshot.mjs'])capture(source);
@@ -267,7 +269,9 @@ assert.equal(JSON.parse(report.prepare.stdout).prepared,true);
 report.prepareCache=await run(candidate,'prepare-cache');save();assert.equal(report.prepareCache.code,0);
 assert.equal(report.prepareCache.signal,null);const cachePreparation=JSON.parse(report.prepareCache.stdout);
 assert.equal(cachePreparation.cacheCreditUsed,false);
-assert.ok(cachePreparation.memoryMaximum-cachePreparation.memoryCurrent>=384*1024**2,'NATIVE_PREPARED_ACTUAL_MEMORY_FLOOR_REFUSED');
+// The closed Python preparation statistics remain diagnostic; sample fresh now.
+report.preparedMemory=await observeOriginalPreparedMemory({containerId:candidate.Id,beforeDocker:status,
+  onObservation:value=>{report.preparedMemoryObservation=value;save();}});save();
 report.roleAuthorityIssue=await run(retained,'issue-role-authorities');save();assert.equal(report.roleAuthorityIssue.code,0);
 assert.equal(report.roleAuthorityIssue.signal,null);assert.equal(JSON.parse(report.roleAuthorityIssue.stdout).issued,true);
 status();const roleIndex=JSON.parse(execFileSync('docker',['exec',candidate.Id,'cat',directory+'/index.json'],{encoding:'utf8'}));

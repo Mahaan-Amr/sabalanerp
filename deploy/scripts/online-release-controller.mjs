@@ -1,5 +1,6 @@
 import {consumeOriginalCarrierDockerCommand,consumeOriginalCarrierFailure,provisionOriginalOnlineReleaseCarriers,provisionOriginalRetainedWorkerCarrier,readOriginalOnlineCarrier,acquireOriginalBootstrapLegacyBrowserSource,readOriginalBootstrapLegacyBrowserSource,provisionOriginalBootstrapLegacyFrontend,bindTargetBrowserImage} from './online-release-carriers.mjs';
 import {selectOriginalInquiryForRelease} from './online-inquiry-original-selection.mjs';
+import {selectOriginalErpForRelease} from './online-erp-original-selection.mjs';
 import {consumeOriginalInquiryCarrierDockerCommand,consumeOriginalInquiryCarrierFailure,provisionOriginalInquiryCarrier,readProvisionedInquiryCarrier,readOriginalInquiryCarrier} from './online-inquiry-carrier.mjs';
 import {verifyOriginalPhysicalCheckpointCertificate,verifyOriginalPhysicalCheckpointPublication,verifyOriginalPhysicalRepositoryPromotion,verifyOriginalTerminalCheckpointCoverage,readMountedOriginalCheckpointFile,verifyMountedOriginalCheckpointRepository,originalPhysicalCheckpointMetadata,checkpointCanonicalBytes,checkpointSha} from './online-checkpoint-finalization.mjs';
 import {issueOriginalLegacyBrowserDescriptor} from './online-legacy-browser-descriptor.mjs';
@@ -652,9 +653,28 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
   const previous=this.#originalCarrierCensusTail;let release;this.#originalCarrierCensusTail=new Promise(resolve=>{release=resolve;});await previous;
   try{return await action();}finally{release();}
  }
+ async readOriginalErpCarrierTarget(releaseId=this.#owner.releaseId){
+  await this.assertOwned();const evidence=this.readCarrierReleaseEvidence(releaseId),buildId=evidence.browserRegistries.at(-1)?.current?.erp;
+  const graph=evidence.imageGraphs.frontend,targetImage=evidence.executionImages?.frontend??evidence.deploymentTargetImages.frontend;
+  const candidates=evidence.browserRegistries.flatMap(registry=>registry.builds).filter(build=>build.application==='erp'&&build.id===buildId);
+  assert(candidates.length>0,'ONLINE_ERP_QUALIFIED_CURRENT_REQUIRED');
+  const translated=candidates.map(build=>bindTargetBrowserImage(build,'frontend',graph,targetImage,evidence.productionExecutionBindings?.frontend).build);
+  const semantic=build=>({...build,slotId:null,retiredAt:null,supportUntil:null});
+  assert(translated.every(build=>sha(bytes(semantic(build)))===sha(bytes(semantic(translated[0])))),'ONLINE_ERP_QUALIFIED_BUILD_AMBIGUOUS');
+  const originals=[],tokens=new Map();
+  for(const token of this.#carriers.values()){
+   const facts=await readOriginalOnlineCarrier(this,token);if(facts.kind!=='frontend'||facts.build?.id!==buildId)continue;
+   const original=this.readCarrierReleaseEvidence(facts.releaseId),oldGraph=original.imageGraphs.frontend;
+   assert(sha(bytes(oldGraph))===sha(bytes(graph)),'ONLINE_ERP_REUSE_GRAPH_CHANGED');
+   originals.push({facts,sourceCommit:original.componentSourceCommits.frontend});tokens.set(facts.slotId,token);
+  }
+  const selection=selectOriginalErpForRelease({releaseId,sourceCommit:evidence.componentSourceCommits.frontend,qualifiedBuild:translated[0],originals});
+  return {selection,carrier:selection.kind==='REUSE_ORIGINAL'?tokens.get(selection.slotId):null};
+ }
  async provisionCarriers(input){
   const result=await provisionOriginalOnlineReleaseCarriers(this,input);
   for(const token of [...result.backends,result.frontend]){const facts=await readOriginalOnlineCarrier(this,token);
+   if(result.frontendReused&&token===result.frontend){assert(facts.kind==='frontend'&&this.#carriers.get(facts.slotId)===token,'ONLINE_ERP_REUSE_TOKEN_CHANGED');continue;}
    assert(!this.#carriers.has(facts.slotId),'ONLINE_ORIGINAL_CARRIER_ALREADY_ENROLLED');this.#carriers.set(facts.slotId,token);this.#carrierSnapshots.set(facts.slotId,structuredClone(facts));}
   if(this.#edge)await this.appendOriginalCarrierEndpoints();return result;
  }
@@ -926,8 +946,9 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
   const evidence=this.readCarrierReleaseEvidence(releaseId),qualified=evidence.browserRegistries.at(-1);
   assert(qualified?.current?.erp&&qualified.current.inquiry,'ONLINE_ORIGINAL_PAIRED_BUILD_IDS_REQUIRED');
   let prior=null;try{prior=await this.#store.readPublication();}catch(error){assert(this.#bootstrap&&!this.#bootstrap.finalized&&error.code==='BROWSER_ROUTING_NOT_PUBLISHED','ONLINE_ORIGINAL_PUBLICATION_HEAD_UNPROVEN');}
-  const frontend=[];
-  for(const token of this.#carriers.values()){const facts=await readOriginalOnlineCarrier(this,token);if(facts.kind==='frontend'&&facts.releaseId===releaseId&&facts.build?.id===qualified.current.erp)frontend.push(facts);}
+  const frontend=[],erpTarget=await this.readOriginalErpCarrierTarget(releaseId);
+  assert(erpTarget.selection.kind==='REUSE_ORIGINAL','ONLINE_ORIGINAL_CURRENT_ERP_NOT_STARTED');
+  for(const token of this.#carriers.values()){if(token!==erpTarget.carrier)continue;const facts=await readOriginalOnlineCarrier(this,token);if(facts.kind==='frontend'&&facts.slotId===erpTarget.selection.slotId&&facts.build?.id===qualified.current.erp)frontend.push(facts);}
   assert(frontend.length===1,'ONLINE_ORIGINAL_CURRENT_FRONTEND_AMBIGUOUS');
   const inquiry=[],selection=await this.readOriginalInquirySelection(releaseId);
   assert(selection.kind==='REUSE_ORIGINAL','ONLINE_ORIGINAL_CURRENT_INQUIRY_NOT_STARTED');

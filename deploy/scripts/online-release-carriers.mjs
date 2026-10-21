@@ -170,18 +170,26 @@ export async function provisionOriginalOnlineReleaseCarriers(controller,input){
  const builds=evidence.browserRegistries.flatMap(registry=>registry.builds).filter(build=>build.id===input.buildId&&build.application==='erp');
  assert(builds.length>0&&builds.every(build=>same({...build,slotId:null,retiredAt:null,supportUntil:null},{...builds[0],slotId:null,retiredAt:null,supportUntil:null})),'ONLINE_CARRIER_UI_NOT_QUALIFIED');
  const browserBinding=bindTargetBrowserImage(builds[0],'frontend',evidence.imageGraphs?.frontend,evidence.executionImages?.frontend??evidence.deploymentTargetImages?.frontend,evidence.productionExecutionBindings?.frontend),build=browserBinding.build;
+ const erp=await OriginalOnlineReleaseController.prototype.readOriginalErpCarrierTarget.call(controller,input.releaseId);
+ assert(erp?.selection?.buildId===input.buildId&&erp.selection.image===build.image&&erp.selection.manifestSha256===build.manifestSha256,'ONLINE_ERP_CARRIER_SELECTION_CHANGED');
+ const reuse=erp.selection.kind==='REUSE_ORIGINAL';assert(reuse||erp.selection.kind==='PREPARE_NEW','ONLINE_ERP_CARRIER_SELECTION_INVALID');
+ const existing=reuse?carriers.get(erp.carrier):null;
+ if(reuse){assert(existing?.controller===controller&&existing.plan.kind==='frontend'&&existing.plan.slotId===erp.selection.slotId&&same({...existing.plan.build,slotId:null,retiredAt:null,supportUntil:null},{...build,slotId:null,retiredAt:null,supportUntil:null}),'ONLINE_ERP_REUSE_ORIGINAL_TOKEN_REQUIRED');await readOriginalOnlineCarrier(controller,erp.carrier);}
+ else assert(erp.carrier===null,'ONLINE_ERP_NEW_CARRIER_TOKEN_REFUSED');
  const scopes=input.backendRuntimeIds.map(id=>{assert(digest.test(id),'ONLINE_CARRIER_RUNTIME_INVALID');const matches=evidence.scopes?.filter(entry=>entry.scope.runtimeId===id);assert(matches?.length===1&&matches[0].scope.releaseId===input.releaseId&&matches[0].scope.image===evidence.manifest.image,'ONLINE_CARRIER_RUNTIME_NOT_ENROLLED');return matches[0].scope;});
- const previous=operations.get(controller)||new Set();const keys=[...input.backendRuntimeIds,`frontend:${input.buildId}`];assert(keys.every(key=>!previous.has(key)),'ONLINE_CARRIER_ORIGINAL_CREATION_ALREADY_ATTEMPTED');keys.forEach(key=>previous.add(key));operations.set(controller,previous);
+ const previous=operations.get(controller)||new Set();if(reuse)assert(previous.has(`frontend:${input.buildId}`),'ONLINE_ERP_REUSE_CREATION_HISTORY_REQUIRED');const keys=[...input.backendRuntimeIds,...(reuse?[]:[`frontend:${input.buildId}`])];assert(keys.every(key=>!previous.has(key)),'ONLINE_CARRIER_ORIGINAL_CREATION_ALREADY_ATTEMPTED');keys.forEach(key=>previous.add(key));operations.set(controller,previous);
  assert(typeof target.storageOverlayFile==='string','ONLINE_CARRIER_STORAGE_PROFILE_REQUIRED');
  const raw=await docker(controller,['compose','-p',target.project,'-f',target.composeFile,'-f',target.onlineOverlayFile,'-f',target.storageOverlayFile,'config','--format','json']);const configuration=JSON.parse(raw),configSha256=sha(raw);
  const networkName=configuration.networks?.app_network?.name;assert(safe(networkName),'ONLINE_CARRIER_NETWORK_MISSING');
  const network=single(await docker(controller,['network','inspect',networkName]));
  const volumeNames=[];for(const name of [...new Set(['backend','frontend'].flatMap(kind=>(configuration.services[kind]?.volumes||[]).filter(value=>value.type==='volume').map(value=>configuration.volumes?.[value.source]?.name)))]){assert(safe(name),'ONLINE_CARRIER_VOLUME_INVALID');const volume=single(await docker(controller,['volume','inspect',name]));assert(volume.Name===name&&volume.Driver==='local'&&(!volume.Options||Object.keys(volume.Options).length===0)&&volume.Labels?.['com.docker.compose.project']===target.project,'ONLINE_CARRIER_VOLUME_NOT_OWNED');volumeNames.push(name);}
- const plans=[...scopes.map(scope=>compileOnlineCarrierPlan({configuration,serviceName:'backend',project:target.project,kind:'backend',runtimeId:scope.runtimeId,image:evidence.manifest.image,releaseId:input.releaseId,network,volumeNames})),compileOnlineCarrierPlan({configuration,serviceName:'frontend',project:target.project,kind:'frontend',runtimeId:randomBytes(32).toString('hex'),image:build.image,releaseId:input.releaseId,network,volumeNames,build})];
+ const plans=[...scopes.map(scope=>compileOnlineCarrierPlan({configuration,serviceName:'backend',project:target.project,kind:'backend',runtimeId:scope.runtimeId,image:evidence.manifest.image,releaseId:input.releaseId,network,volumeNames})),...(reuse?[]:[compileOnlineCarrierPlan({configuration,serviceName:'frontend',project:target.project,kind:'frontend',runtimeId:randomBytes(32).toString('hex'),image:build.image,releaseId:input.releaseId,network,volumeNames,build})])];
  for(const plan of plans.filter(value=>value.kind==='backend'))assertOnlineCarrierRootCoverage(plan,evidence.manifest);
  assertBindSources(plans);
- await verifyOriginalCarrierPlans(controller,plans,evidence,browserBinding);
- return createOriginalCarrierPlans(controller,plans,evidence,configSha256,input.releaseId);
+ await verifyOriginalCarrierPlans(controller,[...plans,...(reuse?[existing.plan]:[])],evidence,browserBinding);
+ if(reuse){const verified=JSON.parse(await docker(controller,['exec',existing.containerId,'node','-e',verifyUiSource,JSON.stringify(build)]));assert(verified.buildId===build.id&&verified.manifestSha256===build.manifestSha256&&verified.assets===build.assets.length,'ONLINE_ERP_REUSE_BYTES_CHANGED');await readOriginalOnlineCarrier(controller,erp.carrier);}
+ const result=await createOriginalCarrierPlans(controller,plans,evidence,configSha256,input.releaseId);
+ return reuse?Object.freeze({backends:result.backends,frontend:erp.carrier,frontendReused:true}):result;
 }
 
 async function verifyOriginalCarrierPlans(controller,plans,evidence,browserBinding){

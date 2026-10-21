@@ -595,8 +595,17 @@ class CandidateOwner:
             and records[0]['scopeSha256']==grant['sha256'] and records[0]['database']==data['database']
             and records[0]['runtimeBundleSha256']==material['distTreeSha256']
             and records[0]['observerDisconnected'] is True,'CANDIDATE_PRISTINE_RESULT_UNPROVEN')
+        check(self.actors.get('pristine-performance') is value and value['closed'] is True
+              and value['actor'].returncode == 0 and all(not pump.is_alive() for pump in value['pumps'])
+              and closure['originalPopenPid'] == value['actor'].pid and closure['originalReturncode'] == 0
+              and closure['scopeSha256'] == grant['sha256'] and not value.get('pumpFailures'),
+              'CANDIDATE_PRISTINE_CACHE_ORIGINAL_CLOSURE_UNPROVEN')
+        spec = importlib.util.spec_from_file_location('candidate_closed_pristine_cache', self.artifact('application-native-prisma.fixture.py'))
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        cache_hint = module.hint_prepared_declarations(self.root, check, material['distTreeSha256'])
+        check(cache_hint['cacheCreditUsed'] is False, 'CANDIDATE_PRISTINE_CACHE_CREDIT_REFUSED')
         self.completed.add('pristine-performance')
-        self.channel.emit('PRISTINE_PERFORMANCE_DONE',dict(requestId=self.request_id(body),actorId=value['id'],result=records[0],closure=closure))
+        self.channel.emit('PRISTINE_PERFORMANCE_DONE',dict(requestId=self.request_id(body),actorId=value['id'],result=records[0],closure=closure,cacheHint=cache_hint))
 
     def private_domain_baseline(self,body):
         check(self.completed >= {'private-domain','private-http2','private-jobs'},'CANDIDATE_DOMAIN_RESTORE_ORDER_INVALID')

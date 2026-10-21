@@ -311,7 +311,7 @@ console.log(JSON.stringify({event:'private-prisma-models-qualified',identity,cou
         schemaSha256=proof['schemaSha256'], productionAdmission=False)))
     return proof
 
-def hint_prepared_declarations(root, check):
+def hint_prepared_declarations(root, check, accepted_dist_sha256=None):
     """Hint verified inactive capsule files; no cache credit/admission."""
     accepted = json.loads((root / 'qualified-prisma-capsule.json').read_bytes())
     receipt_raw = (root / 'qualified-prisma-receipt.json').read_bytes()
@@ -333,7 +333,52 @@ def hint_prepared_declarations(root, check):
     entries = generated[profiles[0]]['entries']
     expected = {row['target']: row['sha256'] for row in entries}
     roots = [(source / 'node_modules/@prisma/client', expected), (root / 'node_modules/@prisma/client', expected), (shared, expected)]
+    if accepted_dist_sha256 is not None:
+        check(isinstance(accepted_dist_sha256, str) and len(accepted_dist_sha256) == 64,
+              'PRIVATE_CLOSED_DIST_IDENTITY_INVALID')
+        directory = Path('/app/dist')
+        check(directory.resolve(strict=True) == directory, 'PRIVATE_CLOSED_DIST_ROOT_ALIAS')
+        dist_rows = []
+        dist_bytes = 0
+        directory_count = 0
+        for parent, directories, names in os.walk(directory, followlinks=False):
+            directory_count += 1
+            check(directory_count <= 32768, 'PRIVATE_CLOSED_DIST_DIRECTORY_LIMIT')
+            for name in directories:
+                child = Path(parent) / name
+                check(not child.is_symlink() and child.is_dir(), 'PRIVATE_CLOSED_DIST_DIRECTORY_UNSAFE')
+            for name in names:
+                file = Path(parent) / name
+                fd = os.open(file, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+                try:
+                    before = os.fstat(fd)
+                    identity = lambda v: (v.st_dev, v.st_ino, v.st_uid, v.st_gid, v.st_nlink, v.st_size, v.st_mode, v.st_mtime_ns, v.st_ctime_ns)
+                    check(stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid() and before.st_nlink == 1
+                          and before.st_size <= 128 * 1024**2, 'PRIVATE_CLOSED_DIST_FILE_UNSAFE')
+                    checksum = hashlib.sha256()
+                    size = 0
+                    while chunk := os.read(fd, 65536):
+                        size += len(chunk)
+                        check(size <= before.st_size, 'PRIVATE_CLOSED_DIST_FILE_GREW')
+                        checksum.update(chunk)
+                    check(size == before.st_size and identity(before) == identity(os.fstat(fd)) == identity(file.lstat()),
+                          'PRIVATE_CLOSED_DIST_FILE_CHANGED')
+                    relative = file.relative_to(directory).as_posix()
+                    check(relative.isascii(), 'PRIVATE_CLOSED_DIST_NONASCII_PATH')
+                    dist_rows.append(dict(bytes=size, path=relative, sha256=checksum.hexdigest()))
+                    dist_bytes += size
+                    check(len(dist_rows) <= 32768 and dist_bytes <= 128 * 1024**2, 'PRIVATE_CLOSED_DIST_BOUND_EXCEEDED')
+                finally:
+                    os.close(fd)
+        dist_rows.sort(key=lambda row: row['path'])
+        aggregate = hashlib.sha256(json.dumps(dist_rows, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
+        check(dist_rows and aggregate == accepted_dist_sha256, 'PRIVATE_CLOSED_DIST_AGGREGATE_CHANGED')
+        roots.append((directory, {str(Path(row['path'])): row['sha256'] for row in dist_rows}))
     rows = []
+    hinted_count = 0
+    hinted_logical_bytes = 0
+    hinted_digest = hashlib.sha256()
+    skipped_count = 0
     def file_is_active(before):
         active = False
         for process in Path('/proc').iterdir():
@@ -369,17 +414,33 @@ def hint_prepared_declarations(root, check):
                     identity = lambda v: (v.st_dev, v.st_ino, v.st_uid, v.st_gid, v.st_nlink, v.st_size, v.st_mode, v.st_mtime_ns, v.st_ctime_ns)
                     # Hint only verified files not currently held or mapped by
                     # any other process in this namespace.
-                    if file_is_active(before): continue
+                    if file_is_active(before):
+                        skipped_count += 1
+                        continue
                     digest = hashlib.sha256()
                     while chunk := os.read(fd, 65536): digest.update(chunk)
                     value = digest.hexdigest()
                     if pins is not None: check(pins.get(str(file.relative_to(directory))) == value, 'PRIVATE_DECLARATION_HASH_CHANGED')
-                    if file_is_active(before): continue
+                    if file_is_active(before):
+                        skipped_count += 1
+                        continue
                     check(identity(os.fstat(fd)) == identity(before) == identity(file.lstat()), 'PRIVATE_DECLARATION_PREHINT_METADATA_CHANGED')
                     os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
                     check(identity(os.fstat(fd)) == identity(before) == identity(file.lstat()), 'PRIVATE_DECLARATION_METADATA_CHANGED')
-                    rows.append(dict(file=str(file), sha256=value, bytes=before.st_size, metadataUnchanged=True))
+                    row = dict(file=str(file), sha256=value, bytes=before.st_size, metadataUnchanged=True)
+                    if accepted_dist_sha256 is None:
+                        rows.append(row)
+                    else:
+                        hinted_count += 1
+                        hinted_logical_bytes += before.st_size
+                        hinted_digest.update(json.dumps(row, sort_keys=True, separators=(',', ':')).encode() + b'\n')
                 finally: os.close(fd)
+    if accepted_dist_sha256 is not None:
+        return dict(format='sabalan-closed-pristine-cache-hint/v1', productionAdmission=False, cacheCreditUsed=False,
+                    bytesChanged=False, filesDeleted=False, hintedScope='VERIFIED_INACTIVE_PRISMA_AND_INSTALLED_DIST',
+                    acceptedDistTreeSha256=accepted_dist_sha256, verifiedDistFileCount=len(dist_rows),
+                    hintedFileCount=hinted_count, hintedLogicalBytes=hinted_logical_bytes, skippedActiveOrUnprovenFileCount=skipped_count,
+                    hintedRecordsSha256=hinted_digest.hexdigest())
     cgroup = Path('/sys/fs/cgroup')
     return dict(format='sabalan-prepared-declaration-cache-hint/v1', productionAdmission=False, cacheCreditUsed=False,
                 bytesChanged=False, filesDeleted=False, hintedScope='VERIFIED_INACTIVE_PRISMA_CAPSULE_FILES',

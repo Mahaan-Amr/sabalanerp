@@ -1,3 +1,4 @@
+import { confirmFactualAbsence, unresolvedAbsenceDays } from '../services/attendanceAbsenceDecision';
 import express, { Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { timingSafeEqual } from 'node:crypto';
@@ -44,7 +45,7 @@ router.get('/summary', protect, attendanceDeviceView, async (_req, res) => {
     const [terminals, review, pending] = await Promise.all([
       prisma.attendanceTerminal.findMany({ select: { lastSeenAt: true, lastReadAt: true } }),
       prisma.attendancePunch.count({ where: { status: { in: ['REVIEW', 'DUPLICATE'] } } }),
-      prisma.$queryRaw<{ count: bigint }[]>`SELECT count(*) AS count FROM attendance_intervals WHERE status = 'ACTIVE' AND (revision <> "confirmedRevision" OR "enteredAt" IS NULL OR "exitUnknown")`,
+      prisma.$queryRaw<{ count: bigint }[]>`SELECT count(*) AS count FROM attendance_intervals WHERE status = 'ACTIVE' AND ("enteredAt" IS NULL OR "exitUnknown")`,
     ]);
     res.json({ success: true, data: { pending: review + Number(pending[0].count), disconnected: terminals.some(t => !t.lastSeenAt || !t.lastReadAt || Date.now() - Math.min(t.lastSeenAt.getTime(), t.lastReadAt.getTime()) >= 10000) } });
   } catch { res.status(500).json({ success: false, error: 'دریافت خلاصه ناموفق بود.' }); }
@@ -57,7 +58,7 @@ router.get('/state', protect, attendanceDeviceView, async (req: AuthRequest, res
     const [terminals, punches, pending, reviewCount, personnel, assignees, handovers, initialReview, clockSamples] = await Promise.all([
       prisma.attendanceTerminal.findMany({ include: { mappings: { where: { effectiveTo: null } } }, orderBy: { createdAt: 'asc' } }),
       prisma.attendancePunch.findMany({ where: { ...personFilter, ...(req.query.status === 'all' ? {} : { status: { in: ['REVIEW', 'UNMATCHED', 'DUPLICATE', 'APPLIED', 'LINKED', 'SHADOW'] } }) }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 100, ...(req.query.cursor ? { skip: 1, cursor: { id: String(req.query.cursor) } } : {}) }),
-      prisma.attendanceInterval.findMany({ where: { attendanceRecord: personFilter, status: 'ACTIVE', ...(req.query.personnelId && req.query.status === 'all' ? {} : { OR: [{ confirmedRevision: 0 }, { exitUnknown: true }, { enteredAt: null }] }) }, include: { attendanceRecord: { select: { personnelFirstName: true, personnelLastName: true, personnelId: true } } }, orderBy: [{ enteredAt: 'desc' }, { id: 'desc' }], take: 100, ...(req.query.intervalCursor ? { skip: 1, cursor: { id: String(req.query.intervalCursor) } } : {}) }),
+      prisma.attendanceInterval.findMany({ where: { attendanceRecord: personFilter, status: 'ACTIVE', ...(req.query.personnelId && req.query.status === 'all' ? {} : { OR: [{ exitUnknown: true }, { enteredAt: null }] }) }, include: { attendanceRecord: { select: { personnelFirstName: true, personnelLastName: true, personnelId: true } } }, orderBy: [{ enteredAt: 'desc' }, { id: 'desc' }], take: 100, ...(req.query.intervalCursor ? { skip: 1, cursor: { id: String(req.query.intervalCursor) } } : {}) }),
       prisma.attendancePunch.count({ where: { status: { in: ['REVIEW', 'DUPLICATE'] } } }),
       capabilities.manage ? prisma.personnel.findMany({ where: { isActive: true }, select: { id: true, firstName: true, lastName: true }, orderBy: { lastName: 'asc' } }) : [],
       prisma.securityPersonnel.findMany({ where: { isActive: true, user: { isActive: true } }, select: { userId: true, user: { select: { firstName: true, lastName: true } } } }),
@@ -65,13 +66,18 @@ router.get('/state', protect, attendanceDeviceView, async (req: AuthRequest, res
       todayMappingScans(prisma),
       prisma.attendanceDeviceAudit.findMany({ where: { action: 'CLOCK_MEASURED', createdAt: { gte: new Date(Date.now() - 120000) } }, distinct: ['terminalId'], orderBy: { createdAt: 'desc' }, select: { terminalId: true, evidence: true } }),
     ]);
-    const personPending = await prisma.$queryRaw<{ personnelId: string; count: number }[]>`SELECT "personnelId", sum(n)::int AS count FROM (SELECT p."personnelId", count(*) AS n FROM attendance_punches p WHERE p.status IN ('REVIEW','DUPLICATE') GROUP BY p."personnelId" UNION ALL SELECT r."personnelId", count(*) AS n FROM attendance_intervals i JOIN attendance_records r ON r.id = i."attendanceRecordId" WHERE i.status = 'ACTIVE' AND (i.revision <> i."confirmedRevision" OR i."exitUnknown" OR i."enteredAt" IS NULL) GROUP BY r."personnelId") pending WHERE "personnelId" IS NOT NULL GROUP BY "personnelId"`;
-    const pendingIntervalsCount = await prisma.attendanceInterval.count({ where: { status: 'ACTIVE', confirmedRevision: 0 } });
+    const personPending = await prisma.$queryRaw<{ personnelId: string; count: number }[]>`SELECT "personnelId", sum(n)::int AS count FROM (SELECT p."personnelId", count(*) AS n FROM attendance_punches p WHERE p.status IN ('REVIEW','DUPLICATE') GROUP BY p."personnelId" UNION ALL SELECT r."personnelId", count(*) AS n FROM attendance_intervals i JOIN attendance_records r ON r.id = i."attendanceRecordId" WHERE i.status = 'ACTIVE' AND (i."exitUnknown" OR i."enteredAt" IS NULL) GROUP BY r."personnelId") pending WHERE "personnelId" IS NOT NULL GROUP BY "personnelId"`;
+    const pendingIntervalsCount = await prisma.attendanceInterval.count({ where: { status: 'ACTIVE', OR: [{ exitUnknown: true }, { enteredAt: null }] } });
     const rosterDate = parseSecurityBusinessDate();
     const roster = capabilities.manage ? await prisma.securityAttendanceRosterMembership.findMany({ where: { effectiveFrom: { lte: rosterDate }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: rosterDate } }] }, select: { personnelId: true } }) : [];
     res.json({ success: true, data: { personPending, clockSamples, initialReview, pendingIntervalsCount, rosterIds: roster.map(r => r.personnelId), capabilities, terminals: terminals.map(safeTerminal), punches, intervals: pending, reviewCount, personnel, assignees, handovers } });
   } catch { res.status(500).json({ success: false, error: 'دریافت وضعیت دستگاه ناموفق بود.' }); }
 });
+router.get('/absence-cases', protect, attendanceDeviceReview, async (_req, res) => {
+  try { res.setHeader('Cache-Control', 'no-store'); res.json({ success: true, data: await prisma.$transaction(db => unresolvedAbsenceDays(db), { isolationLevel: 'RepeatableRead', timeout: 30000 }) }); }
+  catch { res.status(400).json({ success: false, error: 'دریافت موارد عدم حضور ناموفق بود.' }); }
+});
+router.post('/absence-decisions', protect, attendanceDeviceReview, run((req, db) => confirmFactualAbsence(db, req.body, req.user!.id)));
 router.post('/terminals', protect, attendanceDeviceManage, run(async (req, db) => {
   const name = String(req.body.name || '').trim();
   if (!name || name.length > 100) throw new AttendanceDeviceError('نام دستگاه الزامی است.');

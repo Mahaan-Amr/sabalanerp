@@ -859,14 +859,22 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
           const reuseOwnerEvidence = commercialDetails?.actorId === request.user!.id;
           const commercialStatus = editingDetails?.editingStatus ?? commercial?.status;
           const hasCommercial = Boolean(commercial || editingDetails);
-          const correctionRequired = !!row.committedAt || row.state === 'COMMITTED' || commercialStatus === 'FINAL' || !!(editingDetails?.firstFinancialRecordAt ?? commercial?.firstFinancialRecordAt);
-          const correctionDuty = correctionRequired && row.customerContractId ? await (await import('../services/partnerSales/cases/commercialEditPermission')).readPartnerCommercialEditPermission(tx, row.customerContractId, request.user!.id) : null;
-          const commercialWritable = hasCommercial ? commercialStatus !== 'EXPIRED' && commercialStatus !== 'CANCELLED' && (!correctionRequired || !!correctionDuty) : row.state === 'COMMITTED' && !!correctionDuty;
+          const { readPartnerFinancialEditBoundary, readPartnerCommercialEditPermission } = await import('../services/partnerSales/cases/commercialEditPermission');
+          const financialBoundary = row.customerContractId ? await readPartnerFinancialEditBoundary(tx, row.customerContractId)
+            : { requiresCorrection: false, hasActiveRecord: false };
+          const correctionRequired = financialBoundary.requiresCorrection;
+          const correctionDuty = (correctionRequired || !!row.committedAt || row.state === 'COMMITTED') && row.customerContractId
+            ? await readPartnerCommercialEditPermission(tx, row.customerContractId, request.user!.id) : null;
+          const commercialWritable = !financialBoundary.hasActiveRecord && (hasCommercial
+            ? commercialStatus !== 'EXPIRED' && commercialStatus !== 'CANCELLED' && (!correctionRequired || !!correctionDuty)
+            : row.state === 'COMMITTED' && !!correctionDuty);
+          const cancellationWritable = hasCommercial && commercialStatus !== 'EXPIRED' && commercialStatus !== 'CANCELLED' &&
+            (!(row.committedAt || row.state === 'COMMITTED' || commercialStatus === 'FINAL' || correctionRequired) || !!correctionDuty);
           const editSession = edit && (partnerContracts.isPartnerCaseEditableState(row.state) || commercialWritable)
             ? reuseOwnerEvidence ? commercialDetails.recovery : await readPartnerCaseRecovery(tx, {
               ownerUserId: request.user!.id, caseId: row.id, contractId: row.customerContractId, navigationOnly }) : null;
           const editableRecovery = editSession && decodeTechnicalRecovery(editSession.recovery) ? editSession : null;
-          const canContinue = Boolean(editableRecovery) && (!correctionRequired || commercialWritable);
+          const canContinue = Boolean(editableRecovery) && !financialBoundary.hasActiveRecord && (!correctionRequired || commercialWritable);
           if (navigationOnly) return { ok: true as const, value: partnerContracts.PartnerCaseEditorEntrySchema.parse({
             caseId: row.id, canContinue, ...(editableRecovery ? { editRecovery: {
               recoveryId: editableRecovery.draftId, baseRevision: editableRecovery.baseRevision } } : {}),
@@ -910,7 +918,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
               canRequestCorrection: false,
               canReactivate: cancel && ['CANCELLED', 'VOIDED'].includes(row.state) &&
                 (!row.committedAt || !!correctionDuty) && (!commercial?.expiresAt || !!commercial.firstFinancialRecordAt || new Date(commercial.expiresAt) > new Date()),
-              canCancel: cancel && (commercial ? commercialWritable : partnerContracts.isPartnerCaseEditableState(row.state) || row.state === 'COMMITTED' && !!correctionDuty),
+              canCancel: cancel && (commercial ? cancellationWritable : partnerContracts.isPartnerCaseEditableState(row.state) || row.state === 'COMMITTED' && !!correctionDuty),
               canRequestVoid: false } };
           const parsedRow = partnerContracts.PartnerCaseRuntimeRowSchema.safeParse(runtimeRow);
           if (parsedRow.success) cases.push(parsedRow.data);

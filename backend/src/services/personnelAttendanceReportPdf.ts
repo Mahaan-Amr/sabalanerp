@@ -44,26 +44,35 @@ const labelForRange = (report: Report) => {
 
 function cover(report: Report, totalPages: number) {
   return `<section class="report-sheet cover"><div class="cover-inner"><div class="dash"></div><h1>گزارش حضور و غیاب پرسنل</h1><div class="cover-range">${labelForRange(report)}</div>
-  <div class="cards"><div class="card"><strong>${faDigits(report.people.length)}</strong><span>نام پرسنلی</span></div><div class="card"><strong>${faDigits(report.records)}</strong><span>روز ثبت‌شده</span></div><div class="card"><strong>${faDigits(report.validIntervals)}</strong><span>بازه معتبر تردد</span></div></div>
+  <div class="cards"><div class="card"><strong>${faDigits(report.people.length)}</strong><span>نام پرسنلی</span></div><div class="card"><strong>${faDigits(report.records)}</strong><span>نفرـروز در گزارش</span></div><div class="card"><strong>${faDigits(report.validIntervals)}</strong><span>بازه معتبر تردد</span></div></div>
   <p class="range">بازه گزارش: ${labelForRange(report)}<br>معادل: ${faDigits(report.startDate.replace(/-/g, '/'))} تا ${faDigits(report.endDate.replace(/-/g, '/'))}</p>
-  <div class="notes"><p>زمان‌های ورود و خروج از رکوردهای ثبت‌شده سامانه استخراج شده‌اند.</p><p>کارکرد بدون زمان استراحت برای هر روز برابر کارکرد آن روز منهای ${faDigits(report.restMinutes)} دقیقه است؛ نتیجه کمتر از صفر، صفر نمایش داده می‌شود.</p><p>${faDigits(report.voidedIntervals)} بازه باطل‌شده در محاسبه وارد نشده‌اند.${report.openIntervals ? ` ${faDigits(report.openIntervals)} بازه با زمان نامعلوم هنوز در کارکرد محاسبه نشده‌اند.` : ''}</p><p>تأخیر و اضافه‌کاری در این گزارش محاسبه نشده است.</p>${report.people.some(p => p.provisional) ? '<p>گزارش شامل تردد تأییدنشده / موقت است و کارکرد آن قطعی نیست.</p>' : ''}${report.mergeMatchingNames ? '<p>شناسه‌های دارای نام یکسان زیر یک نام تجمیع شده‌اند.</p>' : ''}</div></div>${footer(1, totalPages)}</section>`;
+  <div class="notes"><p>زمان‌های ورود و خروج از رکوردهای ثبت‌شده سامانه استخراج شده‌اند.</p>${report.hasWindowPolicy ? '<p>کارکرد عادی بر پایه برنامه کاری، استراحت تخصیص‌یافته و مجوزهای معتبر هر روز محاسبه می‌شود؛ کسری با حضور خارج برنامه تهاتر نمی‌شود.</p>' : ''}${report.hasLegacyPolicy ? `<p>روزهای روش قدیم با کسر ثابت استراحت محاسبه می‌شوند؛ ${report.people.some(p => p.days.some(d => d.method === 'LEGACY' && d.legacyRestKnown === false)) ? 'مقدار استراحت گزارش پیشین تعیین نشده؛ نتیجه خالص قطعی نیست.' : `مقدار انتخاب‌شده برای این خروجی ${faDigits(report.restMinutes)} دقیقه است و بازتولید دقیق PDF پیشین را ثابت نمی‌کند.`}</p>` : ''}<p>${faDigits(report.voidedIntervals)} بازه باطل‌شده در محاسبه وارد نشده‌اند.${report.openIntervals ? ` ${faDigits(report.openIntervals)} بازه با زمان نامعلوم هنوز در کارکرد محاسبه نشده‌اند.` : ''}</p><p>این گزارش تصمیم پرداخت اضافه‌کار یا کسر حقوق نیست؛ زمان نامعلوم و روز پایان‌نیافته نتیجه نهایی ندارند.</p>${report.people.some(p => p.provisional) ? '<p>گزارش شامل روزهای ناقص یا غیرنهایی است؛ بخش‌های معلوم حفظ شده‌اند.</p>' : ''}${report.mergeMatchingNames ? '<p>شناسه‌های دارای نام یکسان زیر یک نام تجمیع شده‌اند.</p>' : ''}</div></div>${footer(1, totalPages)}</section>`;
 }
 
 function detailRows(days: PersonnelAttendanceDay[]) {
   return days.map((day) => {
     const date = new Date(`${day.date}T12:00:00.000Z`);
     const times = (kind: 'enteredAt' | 'exitedAt') => day.intervals.length
-      ? day.intervals.map((interval) => `<span class="clock">${interval[kind] ? clock(interval[kind]!) : '—'}</span>`).join('')
+      ? day.intervals.map((interval) => `<span class="clock">${interval[kind] ? clock(interval[kind]!) : kind === 'exitedAt' && interval.exitUnknown ? 'نامعلوم' : '—'}</span>`).join('')
       : kind === 'enteredAt' ? '<span class="absent">بدون تردد</span>' : '<span class="muted">—</span>';
-    return `<tr><td>${jalali(day.date)}</td><td>${weekdayFormatter.format(date)}</td><td>${times('enteredAt')}</td><td>${times('exitedAt')}</td><td class="work"><span class="clock">${(day.durationUnknown ? `${minutesLabel(day.grossMinutes)} معلوم · ناقص` : minutesLabel(day.grossMinutes))}</span></td><td class="work"><span class="clock">${(day.durationUnknown ? `${minutesLabel(day.netMinutes)} معلوم · ناقص` : minutesLabel(day.netMinutes))}</span></td></tr>`;
+    return `<tr><td>${jalali(day.date)}</td><td>${weekdayFormatter.format(date)}</td><td>${times('enteredAt')}</td><td>${times('exitedAt')}</td><td class="work"><span class="clock">${(day.physicalDurationUnknown ? `${minutesLabel(day.grossMinutes)} معلوم · ناقص` : minutesLabel(day.grossMinutes))}</span></td><td class="work"><span class="clock">${day.accounting?.workMinutes === null || day.legacyRestKnown === false ? 'نامشخص' : (day.durationUnknown ? `${minutesLabel(day.netMinutes)} معلوم · ناقص` : minutesLabel(day.netMinutes))}</span>${day.accounting ? `<span class="muted">${day.accounting.restAssigned === null ? 'استراحت نامعلوم' : day.accounting.restWindow ? `استراحت: ${faDigits(day.accounting.restWindow)}` : 'بدون استراحت'}</span><span class="clock">موظفی: ${day.accounting.requiredMinutes == null ? 'نامشخص' : minutesLabel(day.accounting.requiredMinutes)}</span><span class="clock">کسری: ${day.accounting.shortageMinutes == null ? 'نامشخص' : minutesLabel(day.accounting.shortageMinutes)}</span>` : `<span class="muted">روش قدیم${day.legacyRestKnown === false ? ' · استراحت نامعلوم' : ''}</span>`}</td></tr>`;
   }).join('');
+}
+
+function pagePolicyContext(days: PersonnelAttendanceDay[]) {
+  const contexts = [...new Set(days.filter(d => d.accounting).map(d => {
+    const a = d.accounting!;
+    return `${a.restAssigned === null ? 'تخصیص استراحت نامعلوم' : a.restWindow ? `استراحت: ${faDigits(a.restWindow)}` : 'بدون استراحت'}${a.scheduleWindow ? ` · برنامه: ${faDigits(a.scheduleWindow)}` : ''}${a.assignmentEffectiveFrom ? ` · تخصیص از ${jalali(a.assignmentEffectiveFrom)}` : ''}${a.restWindow && a.policyEffectiveFrom && a.policyEffectiveFrom !== a.assignmentEffectiveFrom ? ` · بازه از ${jalali(a.policyEffectiveFrom)}` : ''}`;
+  }))];
+  // Bound supplemental header height; each day's entitlement remains in the table.
+  return contexts.length <= 2 ? contexts.map(escapeHtml).join('<br>') : 'برنامه یا تخصیص استراحت در روزهای این صفحه متفاوت است.';
 }
 
 function personPage(report: Report, person: PersonnelAttendancePerson, days: PersonnelAttendanceDay[], part: number, parts: number, page: number, totalPages: number) {
   const noMovement = person.days.length - person.daysWithMovement;
-  return `<section class="report-sheet"><div class="person-header"><div class="person-title"><div class="eyebrow">گزارش حضور و غیاب · ${labelForRange(report)}${parts > 1 ? ` · بخش ${faDigits(part)} از ${faDigits(parts)}` : ''}</div><h2>${escapeHtml(person.name)}${person.provisional ? ' · تأییدنشده / موقت' : ''}</h2></div><div class="totals"><div class="total"><span>جمع کارکرد</span><strong class="clock">${(person.durationUnknown ? `${minutesLabel(person.grossMinutes)} معلوم · ناقص` : minutesLabel(person.grossMinutes))}</strong></div><div class="total"><span>جمع کارکرد بدون زمان استراحت</span><strong class="clock">${(person.durationUnknown ? `${minutesLabel(person.netMinutes)} معلوم · ناقص` : minutesLabel(person.netMinutes))}</strong></div></div></div>
-  <div class="stats">${faDigits(person.daysWithMovement)} روز دارای تردد${noMovement ? `<span class="dot">•</span>${faDigits(noMovement)} روز بدون تردد ثبت‌شده` : ''}<span class="dot">•</span>${faDigits(person.intervalCount)} بازه ورود و خروج</div>
-  <table><colgroup><col class="date"><col class="day"><col class="entry"><col class="exit"><col class="gross"><col class="net"></colgroup><thead><tr><th>تاریخ</th><th>روز</th><th>ورود</th><th>خروج</th><th>کارکرد</th><th>کارکرد بدون زمان استراحت</th></tr></thead><tbody>${detailRows(days)}</tbody></table>${footer(page, totalPages)}</section>`;
+  return `<section class="report-sheet"><div class="person-header"><div class="person-title"><div class="eyebrow">گزارش حضور و غیاب · ${labelForRange(report)}${parts > 1 ? ` · بخش ${faDigits(part)} از ${faDigits(parts)}` : ''}</div><h2>${escapeHtml(person.name)}${person.provisional ? ' · غیرنهایی' : ''}</h2></div><div class="totals"><div class="total"><span>جمع حضور فیزیکی</span><strong class="clock">${(person.physicalDurationUnknown ? `${minutesLabel(person.grossMinutes)} معلوم · ناقص` : minutesLabel(person.grossMinutes))}</strong></div><div class="total"><span>جمع کارکرد عادی / خالص</span><strong class="clock">${(person.netCalculationUnknown ? 'نامشخص' : person.durationUnknown ? `${minutesLabel(person.netMinutes)} معلوم · ناقص` : minutesLabel(person.netMinutes))}</strong></div></div></div>
+  <div class="stats">${faDigits(person.daysWithMovement)} روز دارای تردد${noMovement ? `<span class="dot">•</span>${faDigits(noMovement)} روز بدون تردد ثبت‌شده` : ''}<span class="dot">•</span>${faDigits(person.intervalCount)} بازه ورود و خروج${person.days.some(d => d.accounting) ? `<br>${pagePolicyContext(days)}<br>مأموریت: ${person.missionMinutes == null ? 'نامشخص' : minutesLabel(person.missionMinutes)} · مرخصی مؤثر: ${person.leaveMinutes == null ? 'نامشخص' : minutesLabel(person.leaveMinutes)} · کسری: ${person.shortageMinutes == null ? 'نامشخص' : minutesLabel(person.shortageMinutes)} · خارج برنامه: ${person.outsideScheduleMinutes == null ? 'نامشخص' : minutesLabel(person.outsideScheduleMinutes)}` : ''}</div>
+  <table><colgroup><col class="date"><col class="day"><col class="entry"><col class="exit"><col class="gross"><col class="net"></colgroup><thead><tr><th>تاریخ</th><th>روز</th><th>ورود</th><th>خروج</th><th>حضور</th><th>کارکرد عادی / خالص</th></tr></thead><tbody>${detailRows(days)}</tbody></table>${footer(page, totalPages)}</section>`;
 }
 
 export async function renderPersonnelAttendanceReportPdf(report: Report): Promise<Buffer> {
@@ -72,7 +81,7 @@ export async function renderPersonnelAttendanceReportPdf(report: Report): Promis
     let current: PersonnelAttendanceDay[] = [];
     let rowUnits = 0;
     for (const day of person.days) {
-      const units = Math.max(1, day.intervals.length);
+      const units = Math.max(day.accounting || day.legacyRestKnown === false ? 2 : 1, day.intervals.length);
       if (current.length && rowUnits + units > 27) { pages.push(current); current = []; rowUnits = 0; }
       current.push(day);
       rowUnits += units;

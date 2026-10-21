@@ -152,12 +152,15 @@ test('no roster membership never becomes automatic attendance', () => fixture(as
 
 test('guard handover records a specific pending snapshot; new evidence requires renewed handover', () => fixture(async (db, f) => {
   const { requireReviewHandover, reviewFingerprint } = await import('../attendanceDevice');
-  await f.punch('08:00');
+  const first = await f.punch('08:00');
+  await requireReviewHandover(db, f.actor.id); // Ordinary system acceptance needs no separate signature.
+  await db.attendancePunch.update({ where: { id: first.id }, data: { status: 'REVIEW', reason: 'ابهام آزمایشی' } });
   await assert.rejects(requireReviewHandover(db, f.actor.id), /پیش از تحویل/);
   const pending = await reviewFingerprint(db);
   await db.attendanceReviewHandover.create({ data: { actorId: f.actor.id, assigneeId: 'isolated-next-guard', reason: 'تحویل برای پیگیری', pendingCount: pending.count, evidenceHash: pending.hash } });
   await requireReviewHandover(db, f.actor.id);
-  await f.punch('17:00');
+  const next = await f.punch('17:00');
+  await db.attendancePunch.update({ where: { id: next.id }, data: { status: 'REVIEW', reason: 'ابهام تازه' } });
   await assert.rejects(requireReviewHandover(db, f.actor.id), /پیش از تحویل/);
 }));
 

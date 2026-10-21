@@ -823,6 +823,8 @@ model Personnel {
   archiveEffectiveDate                DateTime?
   attendanceRecords                   AttendanceRecord[]
   workSchedules                       PersonnelWorkSchedule[]
+  attendanceRestAssignments            AttendanceRestAssignment[]
+  attendanceAbsenceDecisions           AttendanceAbsenceDecision[]
   workScheduleChanges                 HrWorkScheduleChange[]
   securityAttendanceRosterMemberships SecurityAttendanceRosterMembership[]
   instantReportParticipants           SecurityShiftLogParticipant[]
@@ -1291,6 +1293,48 @@ model PersonnelWorkScheduleDay {
   @@unique([scheduleId, weekday])
   @@index([weekday])
   @@map("personnel_work_schedule_days")
+}
+
+model AttendanceRestPolicy {
+  id            String   @id @default(cuid())
+  effectiveFrom DateTime @unique
+  startTime     String
+  endTime       String
+  createdBy     String
+  reason        String
+  createdAt     DateTime @default(now())
+
+  @@map("attendance_rest_policies")
+}
+
+model AttendanceRestAssignment {
+  id            String    @id @default(cuid())
+  personnelId   String
+  effectiveFrom DateTime
+  hasRest       Boolean
+  createdBy     String
+  reason        String
+  createdAt     DateTime  @default(now())
+  personnel     Personnel @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+
+  @@unique([personnelId, effectiveFrom])
+  @@map("attendance_rest_assignments")
+}
+
+model AttendanceAbsenceDecision {
+  id           String    @id @default(cuid())
+  personnelId  String
+  date         DateTime
+  evidenceHash String
+  createdBy    String
+  reason       String
+  evidence     Json
+  createdAt    DateTime  @default(now())
+  personnel    Personnel @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+
+  @@unique([personnelId, date, evidenceHash])
+  @@index([date])
+  @@map("attendance_absence_decisions")
 }
 
 enum HrWorkScheduleChangeStatus {

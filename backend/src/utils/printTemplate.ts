@@ -41,6 +41,7 @@ interface NormalizedCut {
   type: string;
   code?: string;
   meters: number;
+  squareMeters?: number;
   rate: number;
   cost: number;
 }
@@ -1135,6 +1136,35 @@ const normalizeProducts = (
             }))
           : []);
 
+      // Physical packing cuts remain in the snapshot for production. They are
+      // not the billing lines when the seller selected square-meter cutting.
+      const squareMeterSlab = product?.productType === 'slab' && (
+        product?.slabCuttingMode === 'perSquareMeter' ||
+        (product?.slabCuttingMode == null && product?.slabPolicyInput?.cuttingPricingMethod === 'squareMeter')
+      );
+      let cuts = [...cutsFromBreakdown, ...cutsFromDetails];
+      if (squareMeterSlab) {
+        const verticalCuts = (Array.isArray(product?.cutDetails) ? product.cutDetails : [])
+          .filter((cut: any) => cut?.type === 'vertical')
+          .map((cut: any): NormalizedCut => ({
+            type: cutTypeLabel(cut),
+            code: firstText(cut?.code, cut?.sourceCode),
+            meters: toNumber(cut?.meters ?? cut?.length),
+            rate: toNumber(cut?.rate ?? cut?.cuttingCostPerMeter),
+            cost: toNumber(cut?.cost ?? cut?.cuttingCost)
+          }));
+        const verticalCost = toNumber(product?.slabVerticalCutCost ??
+          verticalCuts.reduce((sum: number, cut: NormalizedCut) => sum + cut.cost, 0));
+        cuts = [{
+          type: 'برش اسلب بر اساس مساحت',
+          meters: 0,
+          squareMeters: toNumber(product?.squareMeters),
+          rate: toNumber(product?.slabCuttingPricePerSquareMeter ?? product?.slabPolicyInput?.squareMeterCutRateToman),
+          // Preserve the saved charge; printing must not reprice the contract.
+          cost: toNumber(product?.cuttingCost) - verticalCost
+        }, ...verticalCuts];
+      }
+
       const services: NormalizedService[] = [];
       (product?.appliedSubServices || []).forEach((service: any) => {
         const amount = toNumber(service?.meter);
@@ -1303,7 +1333,7 @@ const normalizeProducts = (
         mandatoryPercentage: toNumber(product?.mandatoryPercentage),
         totalPrice: toNumber(product?.totalPrice || relationItem?.totalPrice),
         description,
-        cuts: [...cutsFromBreakdown, ...cutsFromDetails],
+        cuts,
         services,
         tools: dedupedTools,
         layerSummary: product?.layerTypeName
@@ -1593,7 +1623,7 @@ const normalizeFinancials = (
 };
 
 const isMeaningfulCut = (cut: NormalizedCut): boolean =>
-  cut.meters > 0 || cut.rate > 0 || cut.cost > 0;
+  cut.meters > 0 || toNumber(cut.squareMeters) > 0 || cut.rate > 0 || cut.cost > 0;
 
 const isMeaningfulService = (service: NormalizedService): boolean =>
   hasTextValue(service.name) || service.amount > 0 || service.rate > 0 || service.cost > 0;
@@ -1892,8 +1922,8 @@ const buildFlatProductRows = (
           code: cut.code,
           category: 'برش',
           description: cut.type,
-          amount: cut.meters,
-          unitLabel: 'متر طول',
+          amount: cut.squareMeters ?? cut.meters,
+          unitLabel: cut.squareMeters === undefined ? 'متر طول' : 'متر مربع',
           rate: cut.rate,
           total: cut.cost,
           groupByRate: true
@@ -2020,10 +2050,11 @@ const buildFlatProductRows = (
 
       const aggregatedCuts = new Map<string, NormalizedCut>();
       product.cuts.filter(isMeaningfulCut).forEach(cut => {
-        const key = `${cut.code || ''}|${cut.type}|${cut.rate}`;
+        const key = `${cut.code || ''}|${cut.type}|${cut.rate}|${cut.squareMeters === undefined ? 'meter' : 'squareMeter'}`;
         const existing = aggregatedCuts.get(key);
         if (existing) {
           existing.meters += cut.meters;
+          if (cut.squareMeters !== undefined) existing.squareMeters = toNumber(existing.squareMeters) + cut.squareMeters;
           existing.cost += cut.cost;
         } else {
           aggregatedCuts.set(key, { ...cut });
@@ -2037,8 +2068,8 @@ const buildFlatProductRows = (
         category: 'برش',
         length: '',
         width: '',
-        linearMeasurement: toFaNumber(cut.meters, 4),
-        squareMeasurement: '',
+        linearMeasurement: cut.squareMeters === undefined ? toFaNumber(cut.meters, 4) : '',
+        squareMeasurement: cut.squareMeters === undefined ? '' : toFaNumber(cut.squareMeters, 4),
         count: '',
         rate: formatPrintMoneyCell(cut.rate, currency, options),
         total: formatPrintMoneyCell(cut.cost, currency, options)
@@ -2210,8 +2241,8 @@ const buildFlatProductRows = (
         category: 'برش',
         length: '',
         width: '',
-        linearMeasurement: toFaNumber(cut.meters, 4),
-        squareMeasurement: '',
+        linearMeasurement: cut.squareMeters === undefined ? toFaNumber(cut.meters, 4) : '',
+        squareMeasurement: cut.squareMeters === undefined ? '' : toFaNumber(cut.squareMeters, 4),
         count: '',
         rate: formatPrintMoneyCell(cut.rate, currency, options),
         total: formatPrintMoneyCell(cut.cost, currency, options)

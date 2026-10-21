@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../../lib/prisma';
 import router from '../../routes/attendance-device';
 import securityRouter from '../../routes/security';
+import hrRouter from '../../routes/hr';
 import { securityDateKeyFromInstant, securityNowTime } from '../../utils/securityBusinessDate';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
 
@@ -16,7 +17,7 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
   const terminals: string[] = [];
   let shiftId: string | undefined;
   let personnelId: string | undefined;
-  const app = express(); app.use(express.json()); app.use('/api/attendance-device', router); app.use('/api/security', securityRouter);
+  const app = express(); app.use(express.json()); app.use('/api/attendance-device', router); app.use('/api/security', securityRouter); app.use('/api/hr', hrRouter);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('No local listener');
@@ -60,6 +61,14 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
     assert.equal((await call('/mappings/nonexistent/initial-state', { initialState: 'INSIDE', expectedInitialState: 'UNKNOWN', reason: 'بدون مجوز مدیریت' }, undefined, viewerCookie)).status, 403, 'ordinary guard cannot change the management-owned initial baseline');
     const securityCall = (path: string, body: object, authCookie = cookie, method = 'POST') => fetch(base.replace('/attendance-device', '/security') + path, { method, headers: { 'Content-Type': 'application/json', Cookie: authCookie }, body: JSON.stringify(body) });
     assert.equal((await securityCall('/reports/personnel-attendance-preview', {}, viewerCookie)).status, 403, 'guard report authority unchanged');
+    const restCall = (path: string, body: object, authCookie = viewerCookie) => fetch(base.replace('/attendance-device', '/hr/personnel-attendance-rest') + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: authCookie }, body: JSON.stringify(body) });
+    assert.equal((await restCall('/policies', { effectiveDate: '2098-01-01', startTime: '13:00', endTime: '14:00', reason: 'آزمون بدون مجوز' })).status, 403, 'guard attendance authority grants no rest-policy management');
+    assert.equal((await restCall('/assignments', { effectiveDate: '2098-01-01', personnelIds: [], hasRest: true, reason: 'آزمون بدون مجوز' })).status, 403);
+    const restState = await fetch(base.replace('/attendance-device', '/hr/personnel-attendance-rest'), { headers: { Cookie: cookie } });
+    assert.equal(restState.status, 200); assert.equal((await restState.json() as { data: { canEdit: boolean } }).data.canEdit, true, 'configuration UI and actual admin action authority agree');
+    assert.equal((await restCall('/policies', { effectiveDate: '2026-02-30', startTime: '13:00', endTime: '14:00', reason: 'آزمون تاریخ نامعتبر' }, cookie)).status, 400, 'admin validation rejects invalid/backdated cutover without changing policy');
+    assert.equal((await call('/absence-decisions', { confirmedAbsent: true }, undefined, viewerCookie)).status, 400, 'guard factual review requires exact source evidence and reason');
+
     const person = await prisma.personnel.create({ data: { firstName: 'ورود نامعلوم', lastName: key } }); personnelId = person.id;
     const date = securityDateKeyFromInstant(new Date());
     await prisma.securityAttendanceRosterMembership.create({ data: { personnelId, effectiveFrom: new Date(`${date}T00:00:00Z`), createdBy: admin.id } });

@@ -1198,6 +1198,7 @@ const correctionRequestFailure = (message: string) => ({
   DUTY_IDEMPOTENCY_KEY_REQUIRED: { status: 400, message: 'ثبت امن درخواست آماده نشد؛ صفحه را تازه‌سازی و دوباره تلاش کنید.' },
   DUTY_IDEMPOTENCY_CONFLICT: { status: 409, message: 'این شناسه ثبت قبلاً برای درخواست دیگری استفاده شده است؛ صفحه را تازه‌سازی کنید.' },
   DUTY_ACTIVE_CHAIN_CONFLICT: { status: 409, message: 'برای این قرارداد یک زنجیره اصلاح فعال وجود دارد؛ ابتدا همان درخواست را تکمیل کنید.' },
+  PARTNER_CORRECTION_REQUIRES_FINANCIAL_VOID: { status: 409, message: 'پیش از بازکردن اصلاحیه قرارداد همکار، ابتدا رکورد مالی فعال را باطل کنید.' },
   CONTRACT_NOT_FOUND: { status: 404, message: 'قرارداد موردنظر پیدا نشد.' },
   CONTRACT_INACTIVE: { status: 409, message: 'قرارداد غیرفعال است؛ ابتدا آن را از مسیر رسمی فعال‌سازی مجدد بازگردانید.' },
   RESPONSIBLE_SELLER_REQUIRED: { status: 409, message: 'فروشنده مسئول قرارداد مشخص نیست؛ مدیر فروش باید ابتدا مسئول قرارداد را تعیین کند.' },

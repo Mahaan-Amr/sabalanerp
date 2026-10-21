@@ -98,6 +98,22 @@ const verifyPartnerUsesOrdinaryCorrectionWorkflow = async () => {
     category: 'PAYMENT_PLAN', priority: 'URGENT', reason: 'اصلاح برنامه پرداخت همکار', idempotencyKey: 'partner-request-key' });
 };
 
-void Promise.all([verifyLegacyAccountingWriterIsGone(), verifyAccountingOriginatedWriterIsLive(), verifyPartnerUsesOrdinaryCorrectionWorkflow()])
+const verifyPartnerFinancialRecordRejectionIsActionable = async () => {
+  const handler = createAccountingCorrectionRequestHandler(async () => {
+    throw new Error('PARTNER_CORRECTION_REQUIRES_FINANCIAL_VOID');
+  }, async () => 'partner-customer-contract');
+  let statusCode = 200;
+  let payload: any;
+  await handler({ params: { caseId: 'partner-case' },
+    body: { reason: 'اصلاح آدرس تحویل قرارداد همکار' },
+    user: { id: 'accountant', role: 'ADMIN' }, get: () => 'partner-request-key',
+  } as any, { status(code: number) { statusCode = code; return this; },
+    json(body: any) { payload = body; return this; } } as any);
+  assert.equal(statusCode, 409);
+  assert.deepEqual(payload, { success: false,
+    message: 'پیش از بازکردن اصلاحیه قرارداد همکار، ابتدا رکورد مالی فعال را باطل کنید.' });
+};
+
+void Promise.all([verifyLegacyAccountingWriterIsGone(), verifyAccountingOriginatedWriterIsLive(), verifyPartnerUsesOrdinaryCorrectionWorkflow(), verifyPartnerFinancialRecordRejectionIsActionable()])
   .then(() => console.log('Sales Contract correction route tests passed.'))
   .catch((error) => { console.error(error); process.exitCode = 1; });

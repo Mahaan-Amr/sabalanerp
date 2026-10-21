@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import api from '@/lib/api';
+import AttendanceAbsenceCases from './AttendanceAbsenceCases';
 import { ErpButton, ErpCheckbox, ErpField, ErpInlineState, ErpSelect, ErpSheet, ErpStatus, ErpTextarea } from '@/components/erp';
 import PersianCalendarComponent from '@/components/PersianCalendar';
 import PersianCalendar from '@/lib/persian-calendar';
@@ -14,7 +15,7 @@ type Interval = { id: string; enteredAt: string | null; exitedAt: string | null;
 type Punch = { id: string; personnelId: string | null; occurredAt: string; correctedOccurredAt: string | null; receivedAt: string; status: string; reason: string | null; deviceCode: string; nameSnapshot: string | null };
 type State = { capabilities: { manage: boolean; review: boolean; report: boolean }; terminals: Terminal[]; personPending: { personnelId: string; count: number }[]; initialReview: { dateKey: string; rows: { mappingId: string; latestScanAt: string | null; latestCorrectedScanAt?: string | null }[] }; clockSamples: ClockSample[]; intervals: Interval[]; punches: Punch[]; reviewCount: number; assignees: { userId: string; user: { firstName: string; lastName: string } }[]; handovers: { id: string; assigneeId: string; reason: string }[] };
 const stamp = (v?: string | null) => v ? new Date(v).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' }) : 'اسکنی دریافت نشده';
-const labels: Record<string, string> = { SHADOW: 'دریافت مقایسه‌ای', REVIEW: 'نیازمند بررسی', DUPLICATE: 'تکرار احتمالی', UNMATCHED: 'نیازمند تطبیق', APPLIED: 'تأییدنشده / موقت', LINKED: 'شاهد ثبت دستی', CONFIRMED: 'تأییدشده', IGNORED: 'کنارگذاشته‌شده', BEFORE_START: 'پیش از شروع', DISMISSED: 'رسیدگی‌شده' };
+const labels: Record<string, string> = { SHADOW: 'دریافت مقایسه‌ای', REVIEW: 'نیازمند بررسی', DUPLICATE: 'تکرار احتمالی', UNMATCHED: 'نیازمند تطبیق', APPLIED: 'ثبت سیستمی', LINKED: 'شاهد ثبت دستی', CONFIRMED: 'تأییدشده', IGNORED: 'کنارگذاشته‌شده', BEFORE_START: 'پیش از شروع', DISMISSED: 'رسیدگی‌شده' };
 
 export function usePersonnelDeviceReview() {
   const [state, setState] = useState<State | null>(null);
@@ -50,7 +51,7 @@ export function PersonnelDeviceStatus({ state, personnelId, today, hasMovement, 
         {today && !hasMovement && state?.capabilities.manage && m.initialState === 'UNKNOWN' && t.mode === 'SHADOW' && !t.activatedAt && <ErpButton label="تعیین وضعیت اولیه" onClick={() => onInitial(m)} />}
       </div>;
     })}
-    {pending > 0 && <ErpStatus label={`نیازمند تأیید · ${pending.toLocaleString('fa-IR')} مورد`} tone="warning" />}
+    {pending > 0 && <ErpStatus label={`نیازمند رسیدگی · ${pending.toLocaleString('fa-IR')} مورد`} tone="warning" />}
     {(links.length > 0 || pending > 0) && <ErpButton label="بررسی تردد" onClick={onReview} tone={pending ? 'warning' : 'neutral'} variant="ghost" />}
   </div>;
 }
@@ -78,7 +79,7 @@ export function PersonnelReviewDialogs({ state, person, initial, onClose, onSave
     <ErpSheet presentation="modal" open={Boolean(person)} pending={busy} onClose={onClose} title={`بررسی تردد ${person?.name || ''}`}>
       <div className="space-y-4">
         {error && <ErpInlineState kind="error" title={error} />}
-        {details?.intervals.map(i => <div key={i.id} className="border-b sds-divider py-3 space-y-2"><p>{i.enteredAt ? stamp(i.enteredAt) : 'ورود با ساعت نامعلوم'} تا {i.exitUnknown ? 'خروج با ساعت نامعلوم' : i.exitedAt ? stamp(i.exitedAt) : 'حضور باز'}</p>{state?.capabilities.review && <ErpButton label="اصلاح حسابرسی‌شده" disabled={busy} onClick={() => setCorrection({ id: i.id, name: person?.name || '' })} />}{state?.capabilities.review && <ErpButton label="تأیید این بازه" disabled={busy || i.exitUnknown || !i.enteredAt || i.confirmedRevision === i.revision} onClick={() => mutate('confirm', { intervals: [{ id: i.id, revision: i.revision }] })} />}</div>)}
+        {details?.intervals.map(i => <div key={i.id} className="border-b sds-divider py-3 space-y-2"><p>{i.enteredAt ? stamp(i.enteredAt) : 'ورود با ساعت نامعلوم'} تا {i.exitUnknown ? 'خروج با ساعت نامعلوم' : i.exitedAt ? stamp(i.exitedAt) : 'حضور باز'}</p>{state?.capabilities.review && <ErpButton label="اصلاح حسابرسی‌شده" disabled={busy} onClick={() => setCorrection({ id: i.id, name: person?.name || '' })} />}</div>)}
         {details && details.intervals.length === 100 && <ErpButton label="بازه‌های قدیمی‌تر" onClick={() => setIntervalCursor(details.intervals.at(-1)!.id)} />}
         {state?.capabilities.review && details?.punches.some(p => ['REVIEW', 'DUPLICATE', 'LINKED'].includes(p.status)) && <><ErpField label="دلیل رسیدگی"><ErpTextarea value={reason} onChange={e => setReason(e.target.value)} /></ErpField><ErpField label="زمان واقعی (در صورت اصلاح ساعت)"><PersianCalendarComponent showTime clearable value={actualTime} onChange={setActualTime} /></ErpField></>}
         {details?.punches.map(p => <div key={p.id} className="space-y-2 border-b sds-divider py-3"><strong>{p.nameSnapshot || person?.name} · کد {p.deviceCode}</strong><div><ErpStatus label={labels[p.status] || p.status} tone={['REVIEW', 'DUPLICATE'].includes(p.status) ? 'warning' : 'info'} /></div><p className="text-sm sds-text-secondary">اسکن: {stamp(p.correctedOccurredAt || p.occurredAt)}{p.correctedOccurredAt ? ' · با جبران ساعت' : ' · ساعت خام دستگاه'}</p>{p.correctedOccurredAt && <p className="text-xs sds-text-muted">خام: {stamp(p.occurredAt)}</p>}<p className="text-xs sds-text-secondary">دریافت: {stamp(p.receivedAt)} · {p.reason}</p>{state?.capabilities.review && ['REVIEW', 'DUPLICATE', 'LINKED'].includes(p.status) && <div className="flex flex-wrap gap-2">{['ENTRY', 'EXIT', 'DISMISS'].map(action => <ErpButton key={action} label={action === 'ENTRY' ? 'ثبت به‌عنوان ورود' : action === 'EXIT' ? 'ثبت به‌عنوان خروج' : 'کنارگذاشتن شاهد'} disabled={busy || !reason.trim() || (action !== 'DISMISS' && !p.correctedOccurredAt && !actualTime)} onClick={() => mutate(`punches/${p.id}/resolve`, { action, reason, ...(actualTime ? { occurredAt: PersianCalendar.toGregorian(actualTime, 'jYYYY/jMM/jDD HH:mm').toISOString() } : {}) })} />)}</div>}</div>)}
@@ -95,17 +96,17 @@ export function AttendanceReviewToolbar({ state, selected, onSelect, onSaved }: 
   if (!state) return null;
   const pending = state.personPending.reduce((n, p) => n + p.count, 0);
   return <div className="space-y-3" id="device-attendance">
+    {state.capabilities.review && <AttendanceAbsenceCases onChange={() => { void onSaved(); }} />}
     {state.reviewCount > 0 && <ErpStatus tone="warning" label={`${state.reviewCount.toLocaleString('fa-IR')} شاهد دستگاه نیازمند رسیدگی`} />}
-    {pending > 0 && <ErpInlineState kind="stale" title={`تأیید حضور‌وغیاب تا پایان شیفت ضروری است · ${pending.toLocaleString('fa-IR')} مورد نیازمند رسیدگی`} />}
-    <div className="flex flex-wrap gap-2">{state.capabilities.review && (pending > 0 || state.reviewCount > 0 || Object.keys(selected).length > 0) && <><ErpButton label={`تأیید ${Object.keys(selected).length.toLocaleString('fa-IR')} بازه انتخاب‌شده`} disabled={busy || !Object.keys(selected).length} onClick={() => mutate('confirm', { intervals: Object.entries(selected).map(([id, revision]) => ({ id, revision })) })} /><ErpButton label="تحویل موارد به شیفت بعد" onClick={() => setHandover(true)} /></>}{state.capabilities.manage && <ErpButton label="مدیریت دستگاه‌ها" href="/dashboard/hr/attendance-devices" variant="ghost" />}{state.capabilities.report && <ErpButton label="گزارش کارکرد پرسنل" href="/dashboard/security/reports/personnel-attendance" variant="ghost" />}</div>
+    {pending > 0 && <ErpInlineState kind="stale" title={`رسیدگی یا تحویل موارد حل‌نشده تا پایان شیفت ضروری است · ${pending.toLocaleString('fa-IR')} مورد نیازمند رسیدگی`} />}
+    <div className="flex flex-wrap gap-2">{state.capabilities.review && <><ErpButton label="تحویل موارد به شیفت بعد" onClick={() => setHandover(true)} /></>}{state.capabilities.manage && <ErpButton label="مدیریت دستگاه‌ها" href="/dashboard/hr/attendance-devices" variant="ghost" />}{state.capabilities.report && <ErpButton label="گزارش کارکرد پرسنل" href="/dashboard/security/reports/personnel-attendance" variant="ghost" />}</div>
     {state.handovers[0] && <p className="text-xs sds-text-secondary">آخرین تحویل به {state.assignees.find(a => a.userId === state.handovers[0].assigneeId)?.user.firstName || 'مسئول پیگیری'}: {state.handovers[0].reason}</p>}
     {error && <ErpInlineState kind="error" title={error} />}
     <ErpSheet presentation="modal" open={handover} pending={busy} onClose={() => setHandover(false)} title="تحویل موارد به شیفت بعد" footer={<ErpButton label="ثبت تحویل" disabled={busy || !reason.trim() || !assignee} onClick={() => mutate('handover', { reason, assigneeId: assignee })} />}><ErpField label="دلیل"><ErpTextarea value={reason} onChange={e => setReason(e.target.value)} /></ErpField><ErpField label="مسئول پیگیری"><ErpSelect value={assignee} onChange={e => setAssignee(e.target.value)}><option value="">انتخاب کنید</option>{state.assignees.map(a => <option key={a.userId} value={a.userId}>{a.user.firstName} {a.user.lastName}</option>)}</ErpSelect></ErpField></ErpSheet>
   </div>;
 }
 
-export function IntervalReviewSelection({ state, personnelId, selected, onSelect }: { state: State | null; personnelId: string; selected: Record<string, number>; onSelect: (v: Record<string, number>) => void }) {
-  if (!state?.capabilities.review) return null;
-  const ambiguous = state.personPending.some(p => p.personnelId === personnelId && p.count > state.intervals.filter(i => i.attendanceRecord.personnelId === personnelId).length);
-  return <>{state.intervals.filter(i => i.attendanceRecord.personnelId === personnelId && i.enteredAt && !i.exitUnknown && i.revision !== i.confirmedRevision).map(i => <ErpCheckbox key={i.id} label={`انتخاب بازه ${stamp(i.enteredAt)} برای تأیید`} checked={selected[i.id] === i.revision} disabled={ambiguous} onChange={e => { const next = { ...selected }; if (e.target.checked) next[i.id] = i.revision; else delete next[i.id]; onSelect(next); }} />)}</>;
+// Ordinary valid movements do not require a separate Guard signature.
+export function IntervalReviewSelection(_props: { state: State | null; personnelId: string; selected: Record<string, number>; onSelect: (v: Record<string, number>) => void }) {
+  return null;
 }

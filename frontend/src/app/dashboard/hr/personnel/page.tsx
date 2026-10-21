@@ -1,4 +1,5 @@
 "use client";
+import AttendanceRestManager from "@/features/attendance-device/AttendanceRestManager";
 import PersonnelIdentityPanel from "@/features/hr/PersonnelIdentityPanel";
 import { ErpInlineState } from "@/components/erp";
 import {
@@ -606,6 +607,7 @@ export default function HrPersonnelPage() {
         { label: "جایگاه فعال", value: foundation.positions.filter((item: any) => item.isActive).length.toLocaleString("fa-IR"), tone: "neutral" },
       ]}
       actions={[
+        { label: "استراحت پرسنل", href: "/dashboard/hr/personnel/attendance-rest", tone: "neutral" },
         {
           label: "بازگشت",
           href: originHref,
@@ -1317,6 +1319,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange, userId }:
           title={<><span className="block font-semibold">نمایش برنامه کاری</span><span className="mt-1 block text-xs font-normal">برای تغییر برنامه کاری، مجوز مدیریت برنامه کار پرسنل لازم است.</span></>}
         />
         <WorkScheduleEditor value={workScheduleFromApi(schedule)} onChange={() => undefined} readOnly />
+        <AttendanceRestManager personnelId={person.id} />
       </div>
     );
   }
@@ -1330,6 +1333,7 @@ function PersonnelScheduleEditor({ person, saving, run, onDirtyChange, userId }:
         />
       )}
       <WorkScheduleEditor value={value} onChange={setValue} />
+      <AttendanceRestManager personnelId={person.id} />
       <div className="flex justify-end">
         <ErpButton
           label="ذخیره برنامه کاری"

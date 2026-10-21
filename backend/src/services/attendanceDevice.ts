@@ -1,3 +1,4 @@
+import { unresolvedAbsenceDays } from './attendanceAbsenceDecision';
 import { createHash, randomBytes } from 'node:crypto';
 import { AttendanceIntervalStatus, AttendanceWorkScheduleStatus, Prisma } from '@prisma/client';
 import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay } from '../utils/personnelWorkSchedule';
@@ -65,8 +66,7 @@ export async function refreshDeviceAttendance(db: DB, recordId: string) {
   const delay = first?.enteredAt && record.scheduledStartTime && record.workScheduleStatus === 'WORKDAY' ? calculateDelayMinutes(time(first.enteredAt), record.scheduledStartTime) : record.workScheduleStatus === 'NON_WORKING_DAY' ? 0 : null;
   const duration = rows.reduce((n, i) => n + (i.enteredAt && i.exitedAt ? Math.floor((i.exitedAt.getTime() - i.enteredAt.getTime()) / 60000) : 0), 0);
   const overtime = pending ? null : record.workScheduleStatus === 'NON_WORKING_DAY' ? duration : last?.exitedAt && record.scheduledStartTime && record.scheduledEndTime ? calculateScheduledOvertime(time(last.exitedAt), record.scheduledStartTime, record.scheduledEndTime) : null;
-  const provisional = rows.some(i => i.confirmedRevision !== i.revision);
-  const marker = pending ? 'زمان حضور در انتظار تکمیل' : provisional ? 'تردد دستگاه تأییدنشده / موقت' : 'تردد بررسی‌شده';
+  const marker = pending ? 'زمان حضور در انتظار تکمیل' : 'تردد معتبر دستگاه؛ ثبت سیستمی';
   await db.attendanceRecord.update({ where: { id: recordId }, data: {
     entryTime: first?.enteredAt ? time(first.enteredAt) : null, exitTime: last?.exitedAt ? time(last.exitedAt) : null,
     delayMinutes: delay, overtimeMinutes: overtime, overtimePending: pending,
@@ -219,8 +219,9 @@ export async function reviewFingerprint(db: DB) {
     db.attendancePunch.findMany({ where: { status: { in: ['REVIEW', 'DUPLICATE'] } }, select: { id: true }, orderBy: { id: 'asc' } }),
     db.attendanceInterval.findMany({ where: { status: 'ACTIVE' }, select: { id: true, revision: true, confirmedRevision: true, enteredAt: true, exitUnknown: true }, orderBy: { id: 'asc' } }),
   ]);
-  const pending = intervals.filter(i => i.revision !== i.confirmedRevision || !i.enteredAt || i.exitUnknown);
-  return { hash: tokenHash(JSON.stringify([punches, pending])), count: punches.length + pending.length };
+  const pending = intervals.filter(i => !i.enteredAt || i.exitUnknown);
+  const missing = await unresolvedAbsenceDays(db);
+  return { hash: tokenHash(JSON.stringify([punches, pending, missing])), count: punches.length + pending.length + missing.length };
 }
 export async function requireReviewHandover(db: DB, actorId: string) {
   const pending = await reviewFingerprint(db);

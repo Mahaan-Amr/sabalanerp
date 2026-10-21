@@ -35,7 +35,7 @@ test('host pack refuses shared-checkout output or relative authority paths befor
 
 test('host pack explicitly carries the original server owner and its fixed service unit without starting either',()=>{
  const result=run(['--inspect']);assert.equal(result.status,0,result.stderr);const plan=JSON.parse(result.stdout);
- for(const file of ['deploy/scripts/online-owner-service.py','deploy/systemd/sabalan-online-owner.service','deploy/scripts/online-production-gates.mjs','deploy/scripts/online-client-terminal-observation.py','deploy/scripts/online-owner-install-guard.mjs']){
+ for(const file of ['deploy/scripts/online-owner-service.py','deploy/systemd/sabalan-online-owner.service','deploy/scripts/online-production-gates.mjs','deploy/scripts/online-client-terminal-observation.py','deploy/scripts/online-owner-install-guard.mjs','deploy/scripts/online-inquiry-original-selection.mjs']){
   assert.equal(plan.hostFiles.filter(value=>value===file).length,1,'Exact server-owner package entry required: '+file);
   assert.ok(fs.statSync(path.join(repository,file)).isFile(),'Missing original-owner source: '+file);
  }

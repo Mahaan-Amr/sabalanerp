@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {createHash} from 'node:crypto';
+import {createHash,generateKeyPairSync,sign} from 'node:crypto';
+import {verifyOriginalTerminalCheckpointCoverage} from '../../deploy/scripts/online-checkpoint-finalization.mjs';
 import {createRequire} from 'node:module';
 const ts=createRequire(new URL('../../backend/package.json',import.meta.url))('typescript');
 
@@ -40,7 +41,7 @@ function fixture(mode='BOOTSTRAP'){
  const edge={...actor(104,'edge','edge'),image:'image',startedAt:'start104',sequence:0};
  const front={kind:'frontend',containerId:'front',startedAt:'startfront',image:'image',build:{id:'build01'}};
  const publication={generation:1,publicationSha256:digest,registry:{builds:[{application:'erp',id:'build01',slotId:'frontslot',image:'image',manifestSha256:digest},{application:'inquiry',id:'inquiry01',slotId:'inquiry_runtime03',image:'image'}],apiBindings:[{buildId:'build01',slotId:'backend_runtime01',image:'image',manifestSha256:digest,browserManifestSha256:digest}]}};
- const context={Object,Map,Set,Buffer,URL,fs,structuredClone,Date,clearInterval:()=>{},process:{pid:10,ppid:20},assert:(value,code)=>assert.ok(value,code),bytes,sha,PRIVATE_KEY:'key',readPrivate:()=>({pin:'keypin'}),originalProcessBirth:pid=>'birth'+pid};
+ const context={Object,Map,Set,Buffer,URL,fs,structuredClone,Date,clearInterval:()=>{},process:{pid:10,ppid:20},assert:(value,code)=>assert.ok(value,code),bytes,sha,PRIVATE_KEY:'key',readPrivate:()=>({pin:'keypin',data:Buffer.from('fixture-public-key')}),originalProcessBirth:pid=>'birth'+pid};
  vm.runInNewContext(gateSource,context);const names=vm.runInNewContext('[...ORIGINAL_ONLINE_PRODUCTION_GATE_NAMES]',context);
  const checkpoint={remoteVerified:true},report={deploymentId:'deploy001',releaseId:'release01',checkpointSha256:sha(bytes(checkpoint)),gates:names.map(name=>({name,passed:true}))};
  const operation={id:'deploy001',releaseId:'release01',targetCommit:commit,phase:'COMPLETED',activeKey:null,checkpointJson:checkpoint,reportJson:report};
@@ -48,7 +49,14 @@ function fixture(mode='BOOTSTRAP'){
  const f={mode,owner:{deploymentId:'deploy001',releaseId:'release01',leaseToken:'private'},children:[['runtime01',http],['runtime02',jobs]],inquiry:[['token',inquiry]],edge,front,gates,operation,publication,lockChecks:0,observers:[],active:[],epoch:{id:'epoch01',releaseId:'release01',publicationSha256:digest,generation:1},terminal:{repository:{},audit:{publicationSha256:digest},certificate:{signature:'actual-finish-fixture'},terminalEnvelopeSha256:sha(bytes({signature:'actual-finish-fixture'}))},readPublication:()=>publication};
  f.queries=[];f.database={$queryRaw:async strings=>{const sql=strings.join('?');f.queries.push(sql);if(sql.includes('pg_advisory_unlock'))return [{owned:true}];if(sql.includes('pg_backend_pid()'))return [{pid:99,birth:'dbBirth',owned:!f.lostAdvisory}];if(sql.includes('online_serving_epochs'))return [f.epoch];if(sql.includes('SELECT id FROM')&&!sql.includes('WHERE id='))return f.active;if(sql.includes('SELECT "reportJson"'))return [{reportJson:operation.reportJson,checkpointJson:operation.checkpointJson}];return f.operationMissing?[]:[operation];}};
  context.fixtureDocker=async args=>args[0]==='exec'?JSON.stringify(f.terminalObservation??{format:'sabalan-original-client-terminal-observation/v1',maintenanceAbsent:true,readOnly:true,endpoints:['backend','frontend','inquiry','nginx'].map(name=>({name,status:200,bodySha256:digest}))}):JSON.stringify([{Id:args[1],Image:'image',State:{Running:true,StartedAt:'start'+(args[1]==='front'?'front':args[1].replace('container','')),Health:{Status:'healthy'}}}]);
- context.readMountedOriginalCheckpointFile=async()=>JSON.stringify({format:'sabalan-accepted-online-terminal-coverage/v1',envelope:f.mountedEnvelope??f.terminal.certificate});
+ const keys=generateKeyPairSync('ed25519'),publicKey=keys.publicKey.export({type:'spki',format:'pem'});
+ context.readPrivate=()=>({pin:'keypin',data:publicKey});
+ Object.assign(f.terminal,{phase:'COMPLETED',servingReleaseId:'release01',previousReleaseId:'previous01',metadata:{sourceDatabase:{name:'fixture',oid:'1',systemIdentifier:'1'}},pointIndexSha256:sha(Buffer.from('fixture-point')),publicKeySha256:sha(publicKey)});
+ Object.assign(f.terminal.audit,{captureId:'original-capture',windows:[],terminalReleaseId:'release01',terminalEpochSha256:sha(bytes(f.epoch)),terminalPhase:'ONLINE_SERVING'});
+ const decision={format:'sabalan-original-online-terminal-coverage/v1',captureId:f.terminal.audit.captureId,pointIndexSha256:f.terminal.pointIndexSha256,canonicalMetadataSha256:sha(bytes(f.terminal.metadata)),terminalResultSha256:sha(bytes(f.terminal.audit)),terminalEpochSha256:f.terminal.audit.terminalEpochSha256,publicationSha256:digest,sourceDatabase:f.terminal.metadata.sourceDatabase,windows:[],issuedAt:new Date(Date.now()-1000).toISOString(),expiresAt:new Date(Date.now()+300000).toISOString()};
+ f.terminal.certificate={format:'sabalan-signed-online-terminal-coverage/v1',decision,signature:sign(null,Buffer.concat([Buffer.from('sabalan-original-online-terminal-coverage/v1\n'),bytes(decision)]),keys.privateKey).toString('base64')};f.terminal.terminalEnvelopeSha256=sha(bytes(f.terminal.certificate));
+ context.readMountedOriginalCheckpointFile=async(repository,name)=>name==='point.json'?Buffer.from(f.pointRaw??'fixture-point'):JSON.stringify({format:'sabalan-accepted-online-terminal-coverage/v1',envelope:f.mountedEnvelope??f.terminal.certificate});
+ context.verifyOriginalTerminalCheckpointCoverage=(...args)=>{f.certificateVerifications=(f.certificateVerifications??0)+1;return verifyOriginalTerminalCheckpointCoverage(...args.map(value=>typeof value==='object'?JSON.parse(JSON.stringify(value)):value));};
  const Controller=vm.runInNewContext('(()=>{'+gateSource+';'+text+';return OriginalOnlineReleaseController;})()',context);
  return {f,controller:new Controller(f),http,jobs,inquiry,edge,context};
 }
@@ -86,6 +94,19 @@ test('actual terminal barrier refuses incomplete lease, gates, publication, acto
 });
 test('terminal observation refuses caller pass bits and wrong lifecycle mode',async()=>{
  const {controller}=fixture();await assert.rejects(controller.readClientDetachBarrier({mode:'BOOTSTRAP',passed:true}));await assert.rejects(controller.readClientDetachBarrier({mode:'FOLLOWING'}));
+});
+test('rollback keeps attempted identity while proving the original predecessor epoch, checkpoint and mounted certificate',async()=>{
+ const prepare=()=>{const state=fixture('FOLLOWING'),{f}=state;f.owner.releaseId='attempt02';f.operation.releaseId='attempt02';f.operation.phase='ROLLED_BACK';Object.assign(f.terminal,{phase:'ROLLED_BACK',previousReleaseId:'release01'});return state;};
+ const {f,controller}=prepare(),proof=await controller.readClientDetachBarrier({mode:'FOLLOWING'});
+ assert.equal(proof.phase,'ROLLED_BACK');assert.equal(proof.releaseId,'attempt02');assert.equal(proof.servingReleaseId,'release01');assert.equal(f.certificateVerifications,1);assert.equal(proof.terminalWal.epoch.releaseId,'release01');
+ for(const change of [s=>s.f.operation.phase='COMPLETED',s=>s.f.terminal.previousReleaseId='unrelated',s=>s.f.terminal.audit.terminalReleaseId='attempt02',s=>s.f.terminal.audit.terminalEpochSha256=digest,s=>s.f.terminal.audit.terminalPhase='RECOVERY_REQUIRED',s=>s.f.pointRaw='changed-point',s=>s.f.terminal.metadata.checkpoint='changed']){const state=prepare();change(state);await assert.rejects(state.controller.readClientDetachBarrier({mode:'FOLLOWING'}));}
+});
+test('publication plan uses the original registry producer and rechecks the exact predecessor under the correct active phase',async()=>{
+ const method=declaration.members.find(row=>row.name?.getText(tree)==='readOriginalPublicationPlan').getText(tree);
+ const Factory=vm.runInNewContext(`(class{#owner;#store;#lastPublicationSha;#currentServingReleaseId;constructor(f){this.f=f;this.#owner={releaseId:'attempt02'};this.#store={readPublication:async()=>f.head};this.#lastPublicationSha='${digest}';this.#currentServingReleaseId=f.serving;}async assertOwned(phases){assert(phases.includes(this.f.phase),'WRONG_PHASE');}async prepareOriginalPublicationRegistry(input){this.f.requested=input;return this.f.registry;}${method}})`,{assert:(value,code)=>assert.ok(value,code)});
+ for(const rollback of [false,true]){const f={head:{generation:2,publicationSha256:digest},registry:{generation:3},serving:rollback?'attempt02':'previous01',phase:rollback?'ONLINE_ROLLBACK_PUBLISHING':'ONLINE_READY'},controller=new Factory(f),releaseId=rollback?'previous01':'attempt02';const plan=await controller.readOriginalPublicationPlan({releaseId});assert.equal(plan.rollback,rollback);assert.equal(plan.previousReleaseId,f.serving);assert.equal(plan.registry,f.registry);assert.equal(plan.expectedPublicationSha256,digest);assert.equal(f.requested.releaseId,releaseId);
+  f.head={generation:3,publicationSha256:digest};await assert.rejects(controller.readOriginalPublicationPlan({releaseId}));f.head={generation:2,publicationSha256:'c'.repeat(64)};await assert.rejects(controller.readOriginalPublicationPlan({releaseId}));f.head={generation:2,publicationSha256:digest};f.phase='ONLINE_SERVING';await assert.rejects(controller.readOriginalPublicationPlan({releaseId}));
+ }
 });
 test('service exit requires actual actor closure, a separate prepared close and terminal database before advisory release',async()=>{
  const {f,controller,http,jobs,inquiry,edge}=fixture('FOLLOWING');

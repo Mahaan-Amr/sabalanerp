@@ -7,6 +7,19 @@ import {BrowserRoutingPublicationLock} from './browser-routing-store.mjs';
 const require=createRequire(import.meta.url);
 let database,controller;
 const assert=(value,code)=>{if(!value)throw Error(code);};
+function publicationPlanResult(value){
+ assert(value&&Object.keys(value).sort().join(',')==='expectedPublicationSha256,previousReleaseId,registry,releaseId,rollback','ONLINE_PUBLICATION_PLAN_WIRE_INVALID');
+ assert(value.registry?.format==='sabalan-browser-routing/v2'&&Object.keys(value.registry).sort().join(',')==='apiBindings,builds,current,format,generation,legacy','ONLINE_PUBLICATION_REGISTRY_WIRE_INVALID');
+ assert(value.expectedPublicationSha256===null||typeof value.expectedPublicationSha256==='string'&&/^[a-f0-9]{64}$/.test(value.expectedPublicationSha256),'ONLINE_PUBLICATION_PREDECESSOR_WIRE_INVALID');
+ assert(typeof value.releaseId==='string'&&/^[a-zA-Z0-9_-]{8,128}$/.test(value.releaseId)
+  &&(value.previousReleaseId===null||typeof value.previousReleaseId==='string'&&/^[a-zA-Z0-9_-]{8,128}$/.test(value.previousReleaseId))&&typeof value.rollback==='boolean','ONLINE_PUBLICATION_RELEASE_WIRE_INVALID');
+ return {registry:value.registry,expectedPublicationSha256:value.expectedPublicationSha256,releaseId:value.releaseId,previousReleaseId:value.previousReleaseId,rollback:value.rollback};
+}
+function rollbackPlanResult(value){
+ assert(value&&Object.keys(value).sort().join(',')==='jobsRuntimeIds,releaseId'&&typeof value.releaseId==='string'&&/^[a-zA-Z0-9_-]{8,128}$/.test(value.releaseId)
+  &&Array.isArray(value.jobsRuntimeIds)&&value.jobsRuntimeIds.length===1&&typeof value.jobsRuntimeIds[0]==='string'&&/^[a-f0-9]{64}$/.test(value.jobsRuntimeIds[0]),'ONLINE_RETAINED_ROLLBACK_PLAN_WIRE_INVALID');
+ return {releaseId:value.releaseId,jobsRuntimeIds:[value.jobsRuntimeIds[0]]};
+}
 try{
  assert(process.platform==='linux'&&process.getuid()===0&&process.argv.length===3&&fs.fstatSync(0).isFIFO(),'ONLINE_ORIGINAL_CLI_REQUIRED');
  const file=process.argv[2];assert(fs.realpathSync(file)===file,'ONLINE_CONFIG_ALIAS');
@@ -57,7 +70,8 @@ try{
    case 'COMMIT_CHECKPOINT_PUBLICATION':result=await controller.commitOriginalCheckpointPublication(request.input);break;
    case 'PREPARE_CHECKPOINT_CAPTURE':result=await controller.prepareOriginalCheckpointCapture();break;
    case 'PREPARE_INQUIRY':result=await controller.prepareInquiryRuntime(request.input);break;
-   case 'BUILD_PUBLICATION_REGISTRY':result=await controller.prepareOriginalPublicationRegistry(request.input);break;
+   case 'BUILD_PUBLICATION_REGISTRY':result=publicationPlanResult(await controller.readOriginalPublicationPlan(request.input));break;
+   case 'PREPARE_RETAINED_ROLLBACK':result=rollbackPlanResult(await controller.prepareOriginalRetainedRollback(request.input));break;
    case 'START_INQUIRY':result=await controller.startInquiryRuntime(request.input);break;
    case 'STOP_INQUIRY':result=await controller.stopInquiryRuntime(request.runtimeId);break;
    case 'OBSERVE_BOOTSTRAP_REQUEST':result=await controller.observeProtectedBootstrapQualificationRequest();break;
@@ -99,6 +113,8 @@ try{
    ...(request.command==='BUILD_BOOTSTRAP_MATERIAL'?{bootstrapMaterial:result}:{}),
    ...(request.command==='BUILD_ONLINE_MATERIAL'?{onlineMaterial:result}:{}),
    ...(request.command==='READ_CYCLE_PLAN'?{cyclePlan:result}:{}),
+   ...(request.command==='BUILD_PUBLICATION_REGISTRY'?{publicationPlan:result}:{}),
+   ...(request.command==='PREPARE_RETAINED_ROLLBACK'?{rollbackPlan:result}:{}),
    ...(request.command==='READ_CLIENT_DETACH_BARRIER'?result:{}),
    ...(request.command==='RETIRE_EXPIRED_BUILDS'?{retirement:result}:{})})+'\n');
   if(finished)break;

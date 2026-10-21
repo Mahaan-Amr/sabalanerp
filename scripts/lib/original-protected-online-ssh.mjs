@@ -26,8 +26,8 @@ function validateClientBinding(value,format){
  return value;
 }
 function validateClientBarrier(state,value){
- exact(value,['format','mode','deploymentId','releaseId','phase','activeKey','targetCommit','publicationSha256','generation','gateReportSha256','requiredGateNames','checkpointSha256','terminalWal','originalController','originalLauncher','liveOriginals','closedOriginals','closedObservers','terminalObservation','releaseAdmissionGranted']);
- assert.equal(value.format,'sabalan-original-client-terminal-barrier/v1');assert.equal(value.mode,state.finishing);assert.equal(value.phase,'COMPLETED');assert.equal(value.activeKey,null);assert.equal(value.releaseAdmissionGranted,false);
+ exact(value,['format','mode','deploymentId','releaseId','servingReleaseId','phase','activeKey','targetCommit','publicationSha256','generation','gateReportSha256','requiredGateNames','checkpointSha256','terminalWal','originalController','originalLauncher','liveOriginals','closedOriginals','closedObservers','terminalObservation','releaseAdmissionGranted']);
+ assert.equal(value.format,'sabalan-original-client-terminal-barrier/v1');assert.equal(value.mode,state.finishing);assert.match(value.servingReleaseId,/^[A-Za-z0-9_-]{8,128}$/);assert.equal(value.phase,value.servingReleaseId===value.releaseId?'COMPLETED':'ROLLED_BACK');assert.equal(value.activeKey,null);assert.equal(value.releaseAdmissionGranted,false);
  for(const key of ['publicationSha256','gateReportSha256','checkpointSha256'])assert.match(value[key],/^[a-f0-9]{64}$/);assert.match(value.targetCommit,/^[a-f0-9]{40}$/);assert.ok(Number.isSafeInteger(value.generation)&&value.generation>=0);
  assert.equal(JSON.stringify(value.requiredGateNames),JSON.stringify(ORIGINAL_ONLINE_PRODUCTION_GATE_NAMES));
  assert.ok(Array.isArray(value.liveOriginals)&&value.liveOriginals.length>0&&Array.isArray(value.closedOriginals)&&Array.isArray(value.closedObservers));
@@ -35,7 +35,8 @@ function validateClientBarrier(state,value){
  exact(value.originalLauncher,['pid','stat']);assert.equal(value.originalLauncher.pid,state.bound.launcherPid);assert.equal(value.originalLauncher.stat,state.bound.launcherBirth);
  const request=value.mode==='BOOTSTRAP'?requests.get(state.request)?.body:onlineRequests.get(state.onlineRequest)?.body;assert.ok(request,'ORIGINAL_CLIENT_TERMINAL_REQUEST_REQUIRED');
  for(const key of ['deploymentId','releaseId','targetCommit'])assert.equal(value[key],request[key]);
- assert.equal(value.generation,value.mode==='BOOTSTRAP'?1:request.generation);
+ if(value.mode==='BOOTSTRAP')assert.equal(value.servingReleaseId,value.releaseId);
+ assert.equal(value.generation,value.mode==='BOOTSTRAP'?1:request.generation+(value.phase==='ROLLED_BACK'?1:0));
  assert.equal(value.checkpointSha256,sha(Buffer.from(JSON.stringify(sort(request.checkpoint)))));
  for(const row of value.closedOriginals){exact(row,['runtimeId','originalPid','code','signal']);assert.match(row.runtimeId,/^[a-f0-9]{64}$/);assert.ok(Number.isSafeInteger(row.originalPid)&&row.originalPid>1);assert.equal(row.code,0);assert.equal(row.signal,null);}
  for(const row of value.closedObservers){exact(row,['pid','code','signal']);assert.ok(Number.isSafeInteger(row.pid)&&row.pid>1);assert.equal(row.code,0);assert.equal(row.signal,null);}
@@ -47,13 +48,23 @@ function validateClientBarrier(state,value){
  }
  for(const kind of ['http','inquiry','frontend'])assert.ok(value.liveOriginals.some(row=>row.kind===kind));
  assert.equal(value.liveOriginals.filter(row=>row.kind==='edge').length,1);
- const jobs=value.liveOriginals.filter(row=>row.kind==='jobs');assert.equal(jobs.length,1);assert.equal(jobs[0].releaseId,value.releaseId);
+ const jobs=value.liveOriginals.filter(row=>row.kind==='jobs');assert.equal(jobs.length,1);assert.equal(jobs[0].releaseId,value.servingReleaseId);
  exact(value.terminalObservation,['format','maintenanceAbsent','readOnly','endpoints']);assert.equal(value.terminalObservation.format,'sabalan-original-client-terminal-observation/v1');assert.equal(value.terminalObservation.maintenanceAbsent,true);assert.equal(value.terminalObservation.readOnly,true);
  assert.ok(Array.isArray(value.terminalObservation.endpoints));assert.equal(value.terminalObservation.endpoints.length,4);
  assert.equal(JSON.stringify(value.terminalObservation.endpoints.map(row=>row.name).sort()),JSON.stringify(['backend','frontend','inquiry','nginx']));
  for(const row of value.terminalObservation.endpoints){exact(row,['name','status','bodySha256']);assert.match(row.bodySha256,/^[a-f0-9]{64}$/);assert.ok(row.status===200||['frontend','inquiry'].includes(row.name)&&[301,302,303,307,308].includes(row.status));}
  if(value.mode==='BOOTSTRAP')assert.equal(value.terminalWal,null);
- else{exact(value.terminalWal,['auditSha256','certificateSha256','publicationSha256']);for(const digest of Object.values(value.terminalWal))assert.match(digest,/^[a-f0-9]{64}$/);assert.equal(value.terminalWal.publicationSha256,value.publicationSha256);assert.ok(state.terminal&&terminalSources.get(state.terminal)?.replied);}
+ else{
+  exact(value.terminalWal,['auditSha256','certificateSha256','publicationSha256','epoch']);for(const key of ['auditSha256','certificateSha256','publicationSha256'])assert.match(value.terminalWal[key],/^[a-f0-9]{64}$/);
+  assert.equal(value.terminalWal.publicationSha256,value.publicationSha256);const source=state.terminal&&terminalSources.get(state.terminal);assert.ok(source?.replied&&source.certificate);
+  const raw=Buffer.from(source.request.terminalRawBase64,'base64'),audit=JSON.parse(raw),certificate=source.certificate;
+  assert.equal(sha(raw),source.request.terminalResultSha256);assert.equal(sha(Buffer.from(JSON.stringify(sort(audit)))),value.terminalWal.auditSha256);
+  assert.equal(sha(Buffer.from(JSON.stringify(sort(certificate)))),value.terminalWal.certificateSha256);
+  assert.equal(certificate.decision.terminalResultSha256,source.request.terminalResultSha256);assert.equal(certificate.decision.pointIndexSha256,source.request.pointIndexSha256);assert.equal(certificate.decision.canonicalMetadataSha256,source.request.canonicalMetadataSha256);
+  exact(value.terminalWal.epoch,['id','releaseId','publicationSha256','generation']);assert.equal(value.terminalWal.epoch.releaseId,value.servingReleaseId);assert.equal(value.terminalWal.epoch.publicationSha256,value.publicationSha256);assert.equal(value.terminalWal.epoch.generation,value.generation);
+  assert.equal(audit.terminalReleaseId,value.servingReleaseId);assert.ok(['ONLINE_SERVING','ONLINE_ROLLBACK_PUBLISHING'].includes(audit.terminalPhase));assert.equal(audit.publicationSha256,value.publicationSha256);
+  const epochSha=sha(Buffer.from(JSON.stringify(sort(value.terminalWal.epoch))));assert.equal(audit.terminalEpochSha256,epochSha);assert.equal(certificate.decision.terminalEpochSha256,epochSha);assert.equal(certificate.decision.publicationSha256,value.publicationSha256);
+ }
  return value;
 }
 function trackClientCallback(state,callback,token,failure){
@@ -218,7 +229,7 @@ export async function sendOriginalProtectedTerminalWalCertificate(sessionToken,s
  const state=sessions.get(sessionToken),source=terminalSources.get(sourceToken);assert.ok(state&&source?.session===state&&!state.held&&!state.closed&&!source.replied,'ORIGINAL_TERMINAL_REPLY_REQUIRED');
  const {readOriginalTerminalWalCoverageCertificate}=await import('../../deploy/scripts/online-qualification-origin-issuer.mjs');const certificate=readOriginalTerminalWalCoverageCertificate(certificateToken);
  assert.equal(certificate.decision.terminalResultSha256,source.request.terminalResultSha256);assert.equal(certificate.decision.challenge,source.request.challenge);
- source.replied=true;await new Promise((resolve,reject)=>state.child.stdin.write(JSON.stringify(certificate)+'\n',error=>error?reject(error):resolve()));
+ source.certificate=structuredClone(certificate);source.replied=true;await new Promise((resolve,reject)=>state.child.stdin.write(JSON.stringify(certificate)+'\n',error=>error?reject(error):resolve()));
 }
 export function readOriginalProtectedWalWindowSource(token){
  const row=walSources.get(token);assert.ok(row&&!row.session.held&&!row.session.closed&&!row.replied&&row.complete,'ORIGINAL_WAL_SOURCE_REQUIRED');
@@ -301,7 +312,7 @@ os.execv('/usr/bin/python3',args)
     continue;
    }
    const index=state.buffer.indexOf(10);if(index<0){assert.ok(state.buffer.length<=8*1024*1024);break;}
-   const line=state.buffer.subarray(0,index).toString();state.buffer=state.buffer.subarray(index+1);state.bytes+=index+1;assert.ok(state.bytes<=16*1024*1024);
+   assert.ok(index+1<=8*1024*1024);const line=state.buffer.subarray(0,index).toString();state.buffer=state.buffer.subarray(index+1);state.bytes+=index+1;assert.ok(state.bytes<=16*1024*1024);
    if(line.startsWith('SABALAN_ORIGINAL_CLIENT_BOUND ')){
     assert.ok(!state.bound&&!state.request&&!state.stream&&!state.finishing);const value=validateClientBinding(JSON.parse(line.slice('SABALAN_ORIGINAL_CLIENT_BOUND '.length)),'sabalan-original-client-bound/v1');assert.equal(value.configurationSha256,launchPlan.configurationSha256);
     if(serviceReference)for(const key of Object.keys(serviceReference))assert.equal(value[key],serviceReference[key]);state.bound=Object.freeze(value);resolveBound(structuredClone(value));continue;
@@ -369,11 +380,17 @@ os.execv('/usr/bin/python3',args)
  const token=Object.freeze({});sessions.set(token,state);
  return Object.freeze({session:token,binding:state.binding,qualificationRequest:request,status:()=>({originalPid:child.pid,sshClosed:state.closed,held:state.held,qualificationSubmitted:state.submitted,productionAdmission:false})});
 }
-const clientControls=new Set(['ACQUIRE_NEXT','DRAIN_CURRENT_JOBS','READ_CYCLE_PLAN','RETIRE_EXPIRED_BUILDS','CREATE_CHECKPOINT','QUALIFY_NEXT','PREPARE_EXPANSION','RUN_EXPANSION','REGISTER','REGISTER_RETAINED','PROVISION_CARRIERS','START_EDGE','APPEND_EDGE_ENDPOINTS','STOP_EDGE','START_RUNTIME','WAIT_READY','PREPARE_DRAIN','WAIT_PREPARED','SHUTDOWN','WAIT_CLOSED','TRANSITION','PUBLISH','RUN_PRODUCTION_GATES','FINISH_CYCLE','PREPARE_INQUIRY','START_INQUIRY','STOP_INQUIRY']);
+const clientControls=new Set(['ACQUIRE_NEXT','DRAIN_CURRENT_JOBS','READ_CYCLE_PLAN','BUILD_PUBLICATION_REGISTRY','PREPARE_RETAINED_ROLLBACK','RETIRE_EXPIRED_BUILDS','CREATE_CHECKPOINT','QUALIFY_NEXT','PREPARE_EXPANSION','RUN_EXPANSION','REGISTER','REGISTER_RETAINED','PROVISION_CARRIERS','START_EDGE','APPEND_EDGE_ENDPOINTS','STOP_EDGE','START_RUNTIME','WAIT_READY','PREPARE_DRAIN','WAIT_PREPARED','SHUTDOWN','WAIT_CLOSED','TRANSITION','PUBLISH','RUN_PRODUCTION_GATES','FINISH_CYCLE','PREPARE_INQUIRY','START_INQUIRY','STOP_INQUIRY']);
+export function assertOriginalFollowingClient(token){
+ const state=sessions.get(token);assert.ok(state&&state.following&&state.bound&&!state.held&&!state.closed&&!state.finishing&&!state.control&&!state.stream&&state.tasks.size===0,'ORIGINAL_FOLLOWING_CLIENT_REQUIRED');
+ for(const row of [state.pendingWal,state.pendingPoint,state.metadata])assert.ok(!row||row.replied,'ORIGINAL_CLIENT_REPLY_PENDING');
+ if(state.terminal)assert.ok(terminalSources.get(state.terminal)?.replied,'ORIGINAL_CLIENT_TERMINAL_PENDING');
+ if(state.onlineRequest)assert.ok(onlineRequests.get(state.onlineRequest)?.replied,'ORIGINAL_CLIENT_ONLINE_REPLY_PENDING');
+}
 export async function sendOriginalProtectedClientControl(token,{command,input}){
  const state=sessions.get(token);assert.ok(state&&!state.held&&!state.closed&&!state.finishing&&!state.control,'ORIGINAL_CLIENT_CONTROL_UNAVAILABLE');await state.binding;
  assert.ok(!state.held&&!state.closed&&!state.finishing&&!state.control,'ORIGINAL_CLIENT_CONTROL_UNAVAILABLE');
- assert.ok(clientControls.has(command)&&input&&typeof input==='object'&&!Array.isArray(input));assert.ok(!Object.hasOwn(input,'sequence')&&!Object.hasOwn(input,'command'));
+ assert.ok(clientControls.has(command)&&input&&typeof input==='object'&&!Array.isArray(input));assert.ok(!Object.hasOwn(input,'sequence')&&!Object.hasOwn(input,'command')&&!Object.hasOwn(input,'clientSequence'));
  const sequence=++state.controlSequence;let resolve;const completed=new Promise(done=>{resolve=done;});state.control={sequence,command,resolve};
  const raw=Buffer.from(JSON.stringify({format:'sabalan-original-client-control/v1',sequence,command,input})+'\n');assert.ok(raw.length<=8*1024*1024);
  await new Promise((done,reject)=>state.child.stdin.write(raw,error=>error?reject(error):done()));return completed;

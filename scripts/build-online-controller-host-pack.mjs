@@ -23,7 +23,7 @@ const hostFiles=['deploy/scripts/online-release-controller.mjs','deploy/scripts/
  'deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-capacity.mjs',
  'deploy/scripts/backup-preflight-client.sh','deploy/scripts/backup-preflight-root.sh','deploy/scripts/backup-retention-root.sh','deploy/scripts/backup-retention-host.mjs','deploy/scripts/backup-retention-ssh-owner.mjs','deploy/scripts/provision-backup-host.sh',
  'deploy/scripts/online-release-carriers.mjs','deploy/scripts/online-carrier-root-coverage.mjs','deploy/scripts/online-legacy-browser-descriptor.mjs',
- 'deploy/scripts/online-inquiry-carrier.mjs','deploy/scripts/inquiry-compiled-browser.cjs','deploy/scripts/online-inquiry-owner.py',
+ 'deploy/scripts/online-inquiry-carrier.mjs','deploy/scripts/online-inquiry-original-selection.mjs','deploy/scripts/inquiry-compiled-browser.cjs','deploy/scripts/online-inquiry-owner.py',
  'deploy/scripts/online-inquiry-inner-controller.py',
  'deploy/scripts/online-checkpoint-finalization.mjs','deploy/scripts/online-checkpoint-producer.py',
  'deploy/scripts/continuous-online-wal-owner.py','deploy/scripts/continuous-online-wal-state.py',

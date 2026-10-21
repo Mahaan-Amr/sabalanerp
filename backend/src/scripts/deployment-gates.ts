@@ -66,11 +66,17 @@ const main = async () => {
   if (!deploymentId) throw Object.assign(new Error('DEPLOYMENT_ID is required.'), { code: 'DEPLOYMENT_CONFIGURATION_MISSING' });
   const onlineContextFile=process.env.DEPLOYMENT_ONLINE_GATE_CONTEXT;
   const online=onlineContextFile?readOnlineDeploymentGateContext(onlineContextFile,{deploymentId,releaseId:String(process.env.DEPLOYMENT_RELEASE_ID||'')}):null;
+  const assertControlLedger=async()=>{
+    if(!online?.decision.controlRunner)return;
+    const rows=await prisma.$queryRaw<Array<{value:string}>>`SELECT coalesce(json_agg(t ORDER BY migration_name,id),'[]'::json)::text AS value FROM public._prisma_migrations t`;
+    if(rows.length!==1||createHash('sha256').update(rows[0].value).digest('hex')!==online.decision.controlRunner.migrationLedgerSha256)throw Error('ONLINE_GATE_CONTROL_MIGRATION_LEDGER_CHANGED');
+  };
   if(online){
     if(!releaseMode)throw Error('ONLINE_RELEASE_GATES_MODE_REQUIRED');
     const rows=await prisma.$queryRawUnsafe<Array<{phase:string}>>('SELECT phase FROM deployment_operations WHERE id=$1 AND "activeKey"=\'production\' AND "leaseExpiresAt">clock_timestamp()',deploymentId);
     if(rows.length!==1||!['ONLINE_READY','ONLINE_PUBLISHING','ONLINE_ROLLBACK_PUBLISHING','GATES_PASSED','RELEASE_STARTED'].includes(rows[0].phase))throw Error('ONLINE_GATE_OWNED_LEASE_REQUIRED');
   }
+  await assertControlLedger();
   const health=(role:'backend'|'frontend'|'inquiry'|'nginx',fallback:string)=>online?.decision.targets[role].url||fallback;
   const inquiryDatabase = process.env.INQUIRY_RECOVERY_SOURCE_DIR
     ? path.join(process.env.INQUIRY_RECOVERY_SOURCE_DIR, 'inquiry.db')
@@ -186,6 +192,7 @@ const main = async () => {
     },
   ]);
 
+  await assertControlLedger();
   const report = {
     format: 'sabalan-deployment-report',
     version: 1,
@@ -194,7 +201,8 @@ const main = async () => {
     releaseId: process.env.DEPLOYMENT_RELEASE_ID,
     targetCommit: process.env.DEPLOYMENT_TARGET_COMMIT,
     createdAt: new Date().toISOString(),
-    ...(online?{manifestSha256:online.decision.manifestSha256,checkpointSha256:online.decision.checkpointSha256,originalGateContextSha256:online.sha256,originalTargets:online.decision.targets}:{}),
+    ...(online?{manifestSha256:online.decision.manifestSha256,checkpointSha256:online.decision.checkpointSha256,originalGateContextSha256:online.sha256,originalTargets:online.decision.targets,
+      ...(online.decision.controlRunner?{originalControlRunner:online.decision.controlRunner}:{})}:{}),
     gates,
   };
   await fs.promises.mkdir(reportRoot, { recursive: true });

@@ -1,6 +1,7 @@
 /** Fixed host-only kernel bundle; no application is constructed on import. */
 export {assertOwnedOnlineLease,recordOwnedOnlinePublication,registerRetainedOnlineIncarnations} from '../services/onlineReleaseEpochs';
 export {registerAcceptedOnlineRelease} from '../services/onlineReleaseRegistration';
+export {registerRetainedOnlineWorker} from '../services/onlineRetainedWorkerRegistration';
 export {readOnlineReleaseEvidence} from '../services/onlineReleaseEvidence';
 export {validateProductionExecutionBindings,productionImageInspectionSha256} from '../services/onlineImageExecutionBinding';
 export {verifyOnlineStartupDecision} from '../services/onlineReleaseControllerAuthority';

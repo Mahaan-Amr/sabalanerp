@@ -32,7 +32,7 @@ CONTROL = frozenset(['ACQUIRE_NEXT','DRAIN_CURRENT_JOBS','READ_CYCLE_PLAN','RETI
  'CREATE_CHECKPOINT','QUALIFY_NEXT','PREPARE_EXPANSION','RUN_EXPANSION','REGISTER','REGISTER_RETAINED',
  'PROVISION_CARRIERS','START_EDGE','APPEND_EDGE_ENDPOINTS','STOP_EDGE','START_RUNTIME','WAIT_READY',
  'PREPARE_DRAIN','WAIT_PREPARED','SHUTDOWN','WAIT_CLOSED','TRANSITION','PUBLISH','RUN_PRODUCTION_GATES',
- 'FINISH_CYCLE','PREPARE_INQUIRY','START_INQUIRY','STOP_INQUIRY','QUIESCENT_SERVICE_EXIT'])
+ 'FINISH_CYCLE','PREPARE_INQUIRY','START_INQUIRY','STOP_INQUIRY','PREPARE_RETAINED_ROLLBACK','BUILD_PUBLICATION_REGISTRY','QUIESCENT_SERVICE_EXIT'])
 CANCELLED = []
 NATIVE_AUDIT_ROOT = None
 INSTALL_LOCK = None
@@ -112,9 +112,9 @@ def birth(pid):
     return raw[raw.rfind(')')+2:].split()[19]
 
 
-def frame(stream):
-    raw = stream.readline(MAX+1)
-    require(raw and raw.endswith(b'\n') and len(raw) <= MAX)
+def frame(stream,maximum=MAX):
+    raw = stream.readline(maximum+1)
+    require(raw and raw.endswith(b'\n') and len(raw) <= maximum)
     return json.loads(raw)
 
 
@@ -424,6 +424,7 @@ class Owner:
 
     def control(self, command, fields, client_sequence=None):
         self.guard()
+        require(isinstance(fields,dict) and not {'sequence','command','clientSequence'}.intersection(fields))
         self.control_sequence += 1
         work = P(self.config['operationDirectory'])
         request = dict(sequence=self.control_sequence,command=command,**fields)
@@ -439,11 +440,14 @@ class Owner:
                 require(identity(st) == identity(file.lstat()))
                 if flags == os.O_WRONLY:
                     with os.fdopen(os.dup(fd),'wb') as stream:
-                        stream.write(encode(request))
+                        wire=encode(request)
+                        require(len(wire)<=8*1024*1024)
+                        stream.write(wire)
                         stream.flush()
                 else:
                     with os.fdopen(os.dup(fd),'rb') as stream:
-                        result = frame(stream)
+                        result = frame(stream,8*1024*1024)
+                        require(len(encode(result))<=8*1024*1024)
             finally:
                 os.close(fd)
         require(result['sequence'] == self.control_sequence and result['command'] == command and result['status'] == 'COMPLETED')

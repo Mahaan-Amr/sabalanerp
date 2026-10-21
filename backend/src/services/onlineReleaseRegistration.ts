@@ -29,11 +29,21 @@ function required(value:unknown,code:string):asserts value{if(!value)throw Error
  * through ADR-0039's MAINTENANCE/SERVICES_DRAINED transitions.
  */
 export function prepareValidatedOnlineRegistration(owner:OnlineRegistrationOwner,input:PreparedRegistration){
+ return prepareRegistration(owner,input,'release');
+}
+/** Only the retained-worker entry uses this layout. Ordinary release admission
+ * still requires HTTP scopes and exactly one jobs scope. This validates files;
+ * it never registers a row or grants startup authority. */
+export function prepareValidatedRetainedWorkerRegistration(owner:OnlineRegistrationOwner,input:PreparedRegistration){
+ return prepareRegistration(owner,input,'retained-worker');
+}
+function prepareRegistration(owner:OnlineRegistrationOwner,input:PreparedRegistration,layout:'release'|'retained-worker'){
  const accepted=readOnlineReleaseEvidence(input.evidenceDirectory,{
   manifestSha256:input.manifestSha256,acceptanceSha256:input.acceptanceSha256});
  const {manifest,acceptance}=accepted;
  required(manifest.releaseId===owner.releaseId&&acceptance.deploymentId===owner.deploymentId,'ONLINE_REGISTRATION_OWNER_CHANGED');
- required(input.scopes.length>=2&&input.scopes.length<=1024,'ONLINE_REGISTRATION_SCOPES_UNPROVEN');
+ required(layout==='release'?input.scopes.length>=2&&input.scopes.length<=1024:
+  input.scopes.length===1&&input.scopes[0].scope.purpose==='jobs'&&input.scopes[0].scope.role==='control','ONLINE_REGISTRATION_SCOPES_UNPROVEN');
  const slots=input.scopes.map(({scope,sha256,file})=>{
   required(path.isAbsolute(file)&&fs.realpathSync(file)===file,'ONLINE_REGISTRATION_SCOPE_FILE_UNPROVEN');
   const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
@@ -54,7 +64,7 @@ export function prepareValidatedOnlineRegistration(owner:OnlineRegistrationOwner
  });
  required(new Set(slots.map(slot=>slot.id)).size===slots.length&&new Set(slots.map(slot=>slot.nonceSha256)).size===slots.length
   &&input.scopes.filter(item=>item.scope.purpose==='jobs').length===1
-  &&input.scopes.some(item=>item.scope.purpose==='http'),'ONLINE_REGISTRATION_DUPLICATE_SCOPE');
+  &&(layout==='retained-worker'||input.scopes.some(item=>item.scope.purpose==='http')),'ONLINE_REGISTRATION_DUPLICATE_SCOPE');
  const compatibilityJson={format:'sabalan-online-compatibility-index/v1',
   reports:Object.fromEntries(Object.entries(acceptance.reports as Record<string,Descriptor>)
    .filter(([scope])=>['compatible-migrations','browser-24-hours','single-worker-and-completion','current-domain'].includes(scope)))};

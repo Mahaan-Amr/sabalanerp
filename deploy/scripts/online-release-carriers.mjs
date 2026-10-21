@@ -9,7 +9,7 @@ import {assertOnlineCarrierRootCoverage,onlineCarrierRootIdentitySource} from '.
 import {assertExecutionBindingSelection,assertProductionImageInspection} from './production-image-execution-binding.mjs';
 
 const commands=new WeakMap(),carriers=new WeakMap(),operations=new WeakMap(),failures=new WeakMap();
-const phases=['ONLINE_CHECKPOINTING','ONLINE_EXPANDING','ONLINE_ACCEPTING','ONLINE_READY','ONLINE_PUBLISHING','ONLINE_SERVING'];
+const phases=['ONLINE_CHECKPOINTING','ONLINE_EXPANDING','ONLINE_ACCEPTING','ONLINE_READY','ONLINE_PUBLISHING','ONLINE_SERVING','ONLINE_ROLLBACK_PUBLISHING'];
 const digest=/^[a-f0-9]{64}$/,imageId=/^sha256:[a-f0-9]{64}$/;
 const assert=(value,code)=>{if(!value)throw Error(code);};
 const clone=value=>JSON.parse(JSON.stringify(value));
@@ -180,6 +180,11 @@ export async function provisionOriginalOnlineReleaseCarriers(controller,input){
  const plans=[...scopes.map(scope=>compileOnlineCarrierPlan({configuration,serviceName:'backend',project:target.project,kind:'backend',runtimeId:scope.runtimeId,image:evidence.manifest.image,releaseId:input.releaseId,network,volumeNames})),compileOnlineCarrierPlan({configuration,serviceName:'frontend',project:target.project,kind:'frontend',runtimeId:randomBytes(32).toString('hex'),image:build.image,releaseId:input.releaseId,network,volumeNames,build})];
  for(const plan of plans.filter(value=>value.kind==='backend'))assertOnlineCarrierRootCoverage(plan,evidence.manifest);
  assertBindSources(plans);
+ await verifyOriginalCarrierPlans(controller,plans,evidence,browserBinding);
+ return createOriginalCarrierPlans(controller,plans,evidence,configSha256,input.releaseId);
+}
+
+async function verifyOriginalCarrierPlans(controller,plans,evidence,browserBinding){
  // Plan every carrier and inspect EVERY image before first mutation. No pull,
  // build, pruning, or touching an existing service/container is available here.
  for(const plan of plans){const image=single(await docker(controller,['image','inspect',plan.image]));assert(image.Id===plan.image&&(!image.Config?.Volumes||Object.keys(image.Config.Volumes).length===0),'ONLINE_CARRIER_IMAGE_OR_ANONYMOUS_VOLUME_INVALID');
@@ -188,6 +193,9 @@ export async function provisionOriginalOnlineReleaseCarriers(controller,input){
   if(binding)assertProductionImageInspection(binding,image,graph);
   else assert(graph?.config===plan.image,'ONLINE_CARRIER_EXECUTION_BINDING_REQUIRED');
   assert(same(image.RootFS?.Layers,graph.rootfsDiffIds),'ONLINE_CARRIER_ORDERED_LAYERS_CHANGED');}
+}
+
+async function createOriginalCarrierPlans(controller,plans,evidence,configSha256,releaseId){
  const result={backends:[],frontend:null},originalCreations=[];
  try{
  for(const plan of plans){
@@ -211,10 +219,40 @@ export async function provisionOriginalOnlineReleaseCarriers(controller,input){
  }
  return Object.freeze({backends:Object.freeze(result.backends),frontend:result.frontend});
  }catch(error){
-  const token=Object.freeze({});failures.set(token,{controller,facts:freeze({format:'sabalan-original-carrier-failure/v1',releaseId:input.releaseId,originalCreations:clone(originalCreations),outcomeUnproven:true,cleanupPerformed:false})});
+  const token=Object.freeze({});failures.set(token,{controller,facts:freeze({format:'sabalan-original-carrier-failure/v1',releaseId,originalCreations:clone(originalCreations),outcomeUnproven:true,cleanupPerformed:false})});
   await OriginalOnlineReleaseController.prototype.retainOriginalCarrierFailure.call(controller,token);
   throw error;
  }
+}
+
+
+/** Backend-only keeper for the exact fresh retained jobs scope already
+ * registered by this controller. It cannot create/recreate a frontend. */
+export async function provisionOriginalRetainedWorkerCarrier(controller,input){
+ await owned(controller);
+ assert(input&&Object.keys(input).sort().join(',')==='releaseId,runtimeId'&&/^[A-Za-z0-9_-]{8,128}$/.test(input.releaseId)&&digest.test(input.runtimeId),'ONLINE_RETAINED_WORKER_CARRIER_INPUT_INVALID');
+ const registered=await OriginalOnlineReleaseController.prototype.readOriginalRetainedWorkerCarrierTarget.call(controller);
+ assert(registered&&Object.keys(registered).sort().join(',')==='releaseId,runtimeId,scope'&&registered.releaseId===input.releaseId&&registered.runtimeId===input.runtimeId,'ONLINE_RETAINED_WORKER_CARRIER_NOT_ORIGINAL');
+ const evidence=await OriginalOnlineReleaseController.prototype.readCarrierReleaseEvidence.call(controller,input.releaseId);
+ const entries=evidence.scopes?.filter(row=>row.scope.runtimeId===input.runtimeId);
+ assert(entries?.length===1&&same(entries[0].scope,registered.scope),'ONLINE_RETAINED_WORKER_CARRIER_SCOPE_CHANGED');
+ const scope=registered.scope;
+ assert(scope.releaseId===input.releaseId&&scope.runtimeId===input.runtimeId&&scope.purpose==='jobs'&&scope.role==='control'&&scope.worker&&scope.image===evidence.manifest.image,'ONLINE_RETAINED_WORKER_CARRIER_SCOPE_INVALID');
+ const target=await OriginalOnlineReleaseController.prototype.readCarrierProvisioningTarget.call(controller);
+ assert(target.backendService==='backend'&&target.frontendService==='frontend'&&typeof target.storageOverlayFile==='string','ONLINE_CARRIER_TARGET_INVALID');
+ const previous=operations.get(controller)||new Set();assert(!previous.has(input.runtimeId),'ONLINE_CARRIER_ORIGINAL_CREATION_ALREADY_ATTEMPTED');previous.add(input.runtimeId);operations.set(controller,previous);
+ const raw=await docker(controller,['compose','-p',target.project,'-f',target.composeFile,'-f',target.onlineOverlayFile,'-f',target.storageOverlayFile,'config','--format','json']),configuration=JSON.parse(raw),configSha256=sha(raw);
+ const networkName=configuration.networks?.app_network?.name;assert(safe(networkName),'ONLINE_CARRIER_NETWORK_MISSING');
+ const network=single(await docker(controller,['network','inspect',networkName])),volumeNames=[];
+ for(const name of [...new Set((configuration.services.backend?.volumes||[]).filter(value=>value.type==='volume').map(value=>configuration.volumes?.[value.source]?.name))]){
+  assert(safe(name),'ONLINE_CARRIER_VOLUME_INVALID');const volume=single(await docker(controller,['volume','inspect',name]));assert(volume.Name===name&&volume.Driver==='local'&&(!volume.Options||Object.keys(volume.Options).length===0)&&volume.Labels?.['com.docker.compose.project']===target.project,'ONLINE_CARRIER_VOLUME_NOT_OWNED');volumeNames.push(name);
+ }
+ const plan=compileOnlineCarrierPlan({configuration,serviceName:'backend',project:target.project,kind:'backend',runtimeId:scope.runtimeId,image:scope.image,releaseId:input.releaseId,network,volumeNames});
+ assertOnlineCarrierRootCoverage(plan,evidence.manifest);assertBindSources([plan]);
+ await verifyOriginalCarrierPlans(controller,[plan],evidence,null);
+ const result=await createOriginalCarrierPlans(controller,[plan],evidence,configSha256,input.releaseId);
+ assert(result.backends.length===1&&result.frontend===null,'ONLINE_RETAINED_WORKER_CARRIER_RESULT_INVALID');
+ return result.backends[0];
 }
 
 /** Revalidates the SAME daemon-created ID/birth; never recovers or adopts an

@@ -88,6 +88,47 @@ def frame(fd,maximum=16384):
    raise OriginalInputEOF()
   data.extend(chunk)
 
+def project_original_control_result(sequence,command,result):
+ require(type(sequence)is int and sequence>0 and isinstance(result,dict))
+ value=dict(sequence=sequence,status='COMPLETED',command=command,releaseAcceptanceGranted=False)
+ if command=='READ_CYCLE_PLAN':value['cyclePlan']=result['cyclePlan']
+ elif command=='RETIRE_EXPIRED_BUILDS':value['retirement']=result['retirement']
+ elif command=='READ_CLIENT_DETACH_BARRIER':
+  value.update(clientDetachBarrier=result['clientDetachBarrier'],launcherCustody=result['launcherCustody'])
+ elif command=='BUILD_PUBLICATION_REGISTRY':
+  plan=result['publicationPlan']
+  require(isinstance(plan,dict) and set(plan)=={'registry','expectedPublicationSha256','releaseId','previousReleaseId','rollback'})
+  require(isinstance(plan['registry'],dict) and plan['registry'].get('format')=='sabalan-browser-routing/v2')
+  require(plan['expectedPublicationSha256'] is None or isinstance(plan['expectedPublicationSha256'],str) and re.fullmatch('[a-f0-9]{64}',plan['expectedPublicationSha256']))
+  require(isinstance(plan['releaseId'],str) and re.fullmatch('[a-zA-Z0-9_-]{8,128}',plan['releaseId']))
+  require(plan['previousReleaseId'] is None or isinstance(plan['previousReleaseId'],str) and re.fullmatch('[a-zA-Z0-9_-]{8,128}',plan['previousReleaseId']))
+  require(type(plan['rollback'])is bool)
+  value['publicationPlan']=plan
+ elif command=='PREPARE_RETAINED_ROLLBACK':
+  plan=result['rollbackPlan']
+  require(isinstance(plan,dict) and set(plan)=={'releaseId','jobsRuntimeIds'})
+  require(isinstance(plan['releaseId'],str) and re.fullmatch('[a-zA-Z0-9_-]{8,128}',plan['releaseId']))
+  require(isinstance(plan['jobsRuntimeIds'],list) and len(plan['jobsRuntimeIds'])==1 and isinstance(plan['jobsRuntimeIds'][0],str) and re.fullmatch('[a-f0-9]{64}',plan['jobsRuntimeIds'][0]))
+  value['rollbackPlan']=dict(releaseId=plan['releaseId'],jobsRuntimeIds=[plan['jobsRuntimeIds'][0]])
+ elif command=='CREATE_CHECKPOINT':
+  require(result.get('checkpointCommitted') is True)
+  value['checkpointCommitted']=result['checkpointCommitted']
+ elif command=='QUALIFY_NEXT':
+  require(result.get('originalOnlineQualificationBound') is True)
+  value['originalOnlineQualificationBound']=result['originalOnlineQualificationBound']
+ runtime_commands={'PREPARE_INQUIRY','START_INQUIRY','STOP_INQUIRY','START_RUNTIME','WAIT_READY','PREPARE_DRAIN','WAIT_PREPARED','SHUTDOWN','WAIT_CLOSED'}
+ if command in runtime_commands and result.get('runtimeId') is not None:
+  require(isinstance(result['runtimeId'],str) and re.fullmatch('[a-f0-9]{64}',result['runtimeId']))
+  value['runtimeId']=result['runtimeId']
+ if command=='PREPARE_INQUIRY':require('runtimeId'in value)
+ return value
+
+def original_controller_response(fd,command):
+ large={'OBSERVE_BOOTSTRAP_REQUEST','OBSERVE_ONLINE_REQUEST','BUILD_BOOTSTRAP_MATERIAL','BUILD_ONLINE_MATERIAL',
+  'PREPARE_CHECKPOINT_CAPTURE','PREPARE_CHECKPOINT_PUBLICATION','READ_CONTINUOUS_CONTEXT','PREPARE_FINISH_CONTEXT',
+  'READ_CYCLE_PLAN','RETIRE_EXPIRED_BUILDS','READ_CLIENT_DETACH_BARRIER','BUILD_PUBLICATION_REGISTRY'}
+ return frame(fd,8388608 if command in large else 16384)
+
 def verify_original_wal_window(request,sealed_host_directory):
  # Only the SAME original in-memory receiver manager calls this fixed port.
  # Keep every opened source inode until the original Windows response arrives.
@@ -387,7 +428,7 @@ try:
   def call(name,**fields):
    global controller_sequence
    controller_sequence+=1;write(controller.stdin.fileno(),encoded(dict(sequence=controller_sequence,command=name,**fields)))
-   result=frame(controller.stdout.fileno())
+   result=original_controller_response(controller.stdout.fileno(),name)
    require(result.get('sequence')==controller_sequence and result.get('event')==('CLOSED' if name=='CLOSE' else 'COMMAND_COMPLETED')
     and (controller.poll() in (None,0) if name=='CLOSE' else controller.poll() is None))
    return result
@@ -463,7 +504,7 @@ try:
  write(lifecycle_fd,encoded(dict(format='sabalan-original-operation-ready/v1',launcherPid=os.getpid(),launcherBirth=own_birth,
   configurationSha256=launcher_configuration_sha256,deployOriginalCode=0)))
  admin_sequence=0
- allowed={'ACQUIRE_NEXT','DRAIN_CURRENT_JOBS','READ_CYCLE_PLAN','RETIRE_EXPIRED_BUILDS','CREATE_CHECKPOINT','QUALIFY_NEXT','PREPARE_EXPANSION','RUN_EXPANSION','REGISTER','REGISTER_RETAINED','PROVISION_CARRIERS','START_EDGE','APPEND_EDGE_ENDPOINTS','STOP_EDGE','START_RUNTIME','WAIT_READY','PREPARE_DRAIN','WAIT_PREPARED','SHUTDOWN','WAIT_CLOSED','TRANSITION','PUBLISH','RUN_PRODUCTION_GATES','FINISH_CYCLE','PREPARE_INQUIRY','START_INQUIRY','STOP_INQUIRY','READ_CLIENT_DETACH_BARRIER','QUIESCENT_SERVICE_EXIT'}
+ allowed={'ACQUIRE_NEXT','DRAIN_CURRENT_JOBS','READ_CYCLE_PLAN','RETIRE_EXPIRED_BUILDS','CREATE_CHECKPOINT','QUALIFY_NEXT','PREPARE_EXPANSION','RUN_EXPANSION','REGISTER','REGISTER_RETAINED','PROVISION_CARRIERS','START_EDGE','APPEND_EDGE_ENDPOINTS','STOP_EDGE','START_RUNTIME','WAIT_READY','PREPARE_DRAIN','WAIT_PREPARED','SHUTDOWN','WAIT_CLOSED','TRANSITION','PUBLISH','RUN_PRODUCTION_GATES','FINISH_CYCLE','PREPARE_INQUIRY','START_INQUIRY','STOP_INQUIRY','PREPARE_RETAINED_ROLLBACK','BUILD_PUBLICATION_REGISTRY','READ_CLIENT_DETACH_BARRIER','QUIESCENT_SERVICE_EXIT'}
  while True:
   request_fd=os.open(request_path,os.O_RDONLY|os.O_NOFOLLOW)
   try:
@@ -513,10 +554,12 @@ try:
    original_master_port.thread.join()
    require(original_master_port.closed and original_master_port.error is None)
   else:result=call(command['command'],**fields)
-  admin_result=dict(sequence=admin_sequence,status='COMPLETED',command=command['command'],releaseAcceptanceGranted=False,**(dict(cyclePlan=result['cyclePlan']) if command['command']=='READ_CYCLE_PLAN' else dict(retirement=result['retirement']) if command['command']=='RETIRE_EXPIRED_BUILDS' else dict(clientDetachBarrier=result['clientDetachBarrier'],launcherCustody=result['launcherCustody']) if command['command']=='READ_CLIENT_DETACH_BARRIER' else {}))
+  admin_result=project_original_control_result(admin_sequence,command['command'],result)
   if client_sequence is not None:
    with original_master_port.writer_lock:
-    write(1,b'SABALAN_ORIGINAL_CLIENT_CONTROL_COMPLETED '+encoded(dict(sequence=client_sequence,command=command['command'],result=admin_result)))
+    control_wire=b'SABALAN_ORIGINAL_CLIENT_CONTROL_COMPLETED '+encoded(dict(sequence=client_sequence,command=command['command'],result=admin_result))
+    require(len(control_wire)<=8388608)
+    write(1,control_wire)
   response_fd=os.open(response_path,os.O_WRONLY|os.O_NOFOLLOW)
   try:write(response_fd,encoded(admin_result))
   finally:os.close(response_fd)

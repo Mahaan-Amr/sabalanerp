@@ -8,7 +8,7 @@ import {compileOnlineCarrierPlan,verifyInspection,assertBindSources,assertAliasU
 import {assertProductionImageInspection} from './production-image-execution-binding.mjs';
 const commands=new WeakMap(),carriers=new WeakMap(),failures=new WeakMap(),attempts=new WeakMap();
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
-const phases=['MIGRATIONS_APPLIED','RELEASE_STARTED','ONLINE_CHECKPOINTING','ONLINE_EXPANDING','ONLINE_ACCEPTING','ONLINE_READY','ONLINE_PUBLISHING','ONLINE_SERVING'];
+const phases=['MIGRATIONS_APPLIED','RELEASE_STARTED','ONLINE_CHECKPOINTING','ONLINE_EXPANDING','ONLINE_ACCEPTING','ONLINE_READY','ONLINE_PUBLISHING','ONLINE_SERVING','ONLINE_ROLLBACK_PUBLISHING'];
 const same=(a,b)=>assert.deepEqual(a,b);
 const clone=value=>structuredClone(value);
 async function owned(controller){await OriginalOnlineReleaseController.prototype.assertOwned.call(controller,phases);}

@@ -82,6 +82,9 @@ services:
   deployment:
     # Control scripts retain their explicit command; never inherit the keeper.
     entrypoint: []
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
     volumes:
       - ./.deploy-state/online-trust:/run/sabalan-online:ro
       - inquiry_data:/data:ro

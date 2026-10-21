@@ -15,6 +15,7 @@ import {runOriginalIndependentRestoreOverSsh,waitOriginalIndependentGuardianClos
 import {issueOriginalQualificationOrigin,issueOriginalWalWindowVerification,readOriginalWalWindowCertificate,issueOriginalPhysicalCheckpointVerification,issueOriginalPhysicalRepositoryPromotion,issueOriginalPhysicalCheckpointPublication,issueOriginalTerminalWalCoverage} from '../deploy/scripts/online-qualification-origin-issuer.mjs';
 import {startOriginalProtectedOnlineInstall,readOriginalProtectedQualificationRequest,sendOriginalProtectedQualificationPackage,sendOriginalProtectedWalWindowCertificate,sendOriginalProtectedPhysicalPointVerification,readOriginalProtectedCheckpointMetadataSource,sendOriginalProtectedCheckpointMetadataCertificate,sendOriginalProtectedTerminalWalCertificate,readOriginalOnlineQualificationRequest,sendOriginalOnlineQualificationPackage,retainOriginalProtectedWalWindowAcknowledgement,sendOriginalProtectedClientControl,finishOriginalProtectedClient,waitOriginalProtectedClientCallbacks} from './lib/original-protected-online-ssh.mjs';
 import {assembleOriginalProtectedOnlineEvidence,assembleOriginalOnlineEvidence,readOriginalOnlineEvidenceAssembly} from './lib/original-online-evidence-assembler.mjs';
+import {runOriginalFollowingPromotion} from './lib/original-following-update-workflow.mjs';
 
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const keys=(value,names)=>assert.deepEqual(Object.keys(value).sort(),[...names].sort());
@@ -54,11 +55,13 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
  let pending=Buffer.alloc(0);
  try{
   for await(const chunk of input){
-   pending=Buffer.concat([pending,Buffer.from(chunk)]);assert.ok(pending.length<=65536,'ORIGINAL_MASTER_INPUT_BOUND');
+   pending=Buffer.concat([pending,Buffer.from(chunk)]);assert.ok(pending.length<=8*1024*1024,'ORIGINAL_MASTER_INPUT_BOUND');
    let newline;
    while((newline=pending.indexOf(10))>=0){
     const raw=pending.subarray(0,newline);pending=pending.subarray(newline+1);
-    const request=JSON.parse(raw.toString());assert.equal(request.sequence,sequence+1);sequence++;
+    const request=JSON.parse(raw.toString());
+    assert.ok(raw.length<=65536||(request.command==='FOLLOWING_CONTROL'&&request.control==='PUBLISH'),'ORIGINAL_MASTER_LARGE_INPUT_COMMAND_REFUSED');
+    assert.equal(request.sequence,sequence+1);sequence++;
     if(request.command==='PREPARE_LOCAL_RUNTIME'){
      keys(request,['command','sequence','nativeOwnerElfReceipt']);assert.ok(!local&&!localRuntime&&!held);assert.equal(typeof request.nativeOwnerElfReceipt,'string');inspectOriginalLocalOnlineCheckpointInputs({nativeOwnerElfReceipt:request.nativeOwnerElfReceipt});localRuntime={nativeOwnerElfReceipt:request.nativeOwnerElfReceipt};state('LOCAL_RUNTIME_CONTENT_BOUND_NO_RUNTIME');
     }else if(request.command==='PREPARE_INDEPENDENT'){
@@ -132,8 +135,15 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
      if(!following){protectedRequest=await protectedInstall.qualificationRequest;
       const target=readOriginalProtectedQualificationRequest(protectedRequest);
       output.write(JSON.stringify({format:'sabalan-original-master-protected-request/v1',sequence,request:target,productionAdmission:false})+'\n');}
+    }else if(['RUN_FOLLOWING_PROMOTION','RUN_FOLLOWING_CURRENT_DATA_ROLLBACK'].includes(request.command)){
+     keys(request,['command','sequence','nextCycle']);assert.ok(protectedInstall&&local&&independent&&!held&&controlTasks.size===0,'ORIGINAL_FOLLOWING_WORKFLOW_NOT_READY');
+     const workflowSequence=sequence;
+     const task=runOriginalFollowingPromotion(protectedInstall.session,{nextCycle:request.nextCycle,completeWith:request.command==='RUN_FOLLOWING_PROMOTION'?'PROMOTION':'CURRENT_DATA_ROLLBACK',
+      onProgress:progress=>output.write(JSON.stringify({format:'sabalan-original-master-workflow-progress/v1',sequence:workflowSequence,...progress,productionAdmission:false})+'\n')
+     }).then(result=>{assert.ok(!held,'ORIGINAL_MASTER_WORKFLOW_HELD');output.write(JSON.stringify({format:'sabalan-original-master-workflow-completed/v1',sequence:workflowSequence,result,productionAdmission:false})+'\n');});
+     controlTasks.add(task);task.then(()=>controlTasks.delete(task),error=>{controlTasks.delete(task);held=true;writeOriginalMasterFailureDiagnostic(error,workflowSequence);state('ORIGINAL_MASTER_WORKFLOW_FAILED_RETAINED');});
     }else if(request.command==='FOLLOWING_CONTROL'){
-     keys(request,['command','sequence','control','input']);assert.ok(protectedInstall&&!held,'ORIGINAL_CLIENT_REQUIRED');
+     keys(request,['command','sequence','control','input']);assert.ok(protectedInstall&&!held&&controlTasks.size===0,'ORIGINAL_CLIENT_REQUIRED');
      // QUALIFY_NEXT/FINISH_CYCLE can wait for a genuine callback response;
      // keep reading ISSUE_ONLINE_ORIGIN while this same original control waits.
      const controlSequence=sequence;

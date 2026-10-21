@@ -2,6 +2,7 @@ import {consumeOriginalCarrierDockerCommand,consumeOriginalCarrierFailure,provis
 import {consumeOriginalInquiryCarrierDockerCommand,consumeOriginalInquiryCarrierFailure,provisionOriginalInquiryCarrier,readProvisionedInquiryCarrier,readOriginalInquiryCarrier} from './online-inquiry-carrier.mjs';
 import {verifyOriginalPhysicalCheckpointCertificate,verifyOriginalPhysicalCheckpointPublication,verifyOriginalPhysicalRepositoryPromotion,verifyOriginalTerminalCheckpointCoverage,readMountedOriginalCheckpointFile,verifyMountedOriginalCheckpointRepository,originalPhysicalCheckpointMetadata,checkpointCanonicalBytes,checkpointSha} from './online-checkpoint-finalization.mjs';
 import {issueOriginalLegacyBrowserDescriptor} from './online-legacy-browser-descriptor.mjs';
+import {ORIGINAL_ONLINE_PRODUCTION_GATE_NAMES} from './online-production-gates.mjs';
 import {productionImageStore,sanitizeProductionImageInspection,productionInspectionSha256} from './production-image-execution-binding.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,6 +22,7 @@ function qualifiedBrowserBuilds(evidence){return evidence.browserRegistries.flat
 });}
 const assert=(v,code)=>{if(!v)throw Error(code);};
 const pin=s=>[s.dev,s.ino,s.size,s.mtimeNs,s.ctimeNs,s.uid,s.mode,s.nlink].map(String).join(':');
+const originalProcessBirth=pid=>fs.readFileSync(`/proc/${pid}/stat`,'utf8').split(') ').slice(1).join(') ').split(' ')[19];
 function readPrivate(file,maximum,mode){
  assert(fs.realpathSync(file)===file,'ONLINE_HOST_PATH_ALIAS');
  const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
@@ -36,6 +38,7 @@ function readPrivate(file,maximum,mode){
  * this object from a status file after a controller failure. */
 export class OriginalOnlineReleaseController {
  #checkpointCaptures=new Map();
+ #terminalCycles=new Map();#carrierSnapshots=new Map();#controllerClosePrepared=false;#advisoryChecks=new Set();
  #inquiryActors=new Map();#expiredBuildFences=new Map();#retiredCarriers=new Map();
  #originalCreatedCarrierIds=new Set();#originalCarrierCreates=new Set();
  #originalCarrierCensusTail=Promise.resolve();
@@ -84,7 +87,10 @@ export class OriginalOnlineReleaseController {
   const [lock]=await this.#database.$queryRaw`SELECT pg_try_advisory_lock(741936425) AS owned,pg_backend_pid() AS pid,
    (SELECT backend_start::text FROM pg_stat_activity WHERE pid=pg_backend_pid()) AS birth`;
   assert(lock?.owned,'ONLINE_FOLLOWING_ADVISORY_BUSY');this.#advisory={pid:lock.pid,birth:lock.birth};
-  await this.#assertAdvisory();this.#advisoryPulse=setInterval(()=>{void this.#assertAdvisory().catch(()=>{this.#held='ONLINE_ORIGINAL_ADVISORY_LOST';void this.hold();});},15000);return {sameOriginalController:true,originalApplicationHandlesRetained:true};
+  await this.#assertAdvisory();this.#advisoryPulse=setInterval(()=>{
+   const check=this.#assertAdvisory().catch(()=>{this.#held='ONLINE_ORIGINAL_ADVISORY_LOST';void this.hold();});
+   this.#advisoryChecks.add(check);void check.finally(()=>this.#advisoryChecks.delete(check));
+  },15000);return {sameOriginalController:true,originalApplicationHandlesRetained:true};
  }
  async acquireNextCycle(input){
   assert(this.#advisory&&!this.#held,'ONLINE_ORIGINAL_FOLLOWING_CONTROLLER_REQUIRED');this.#lock.assertOwned();
@@ -466,6 +472,7 @@ export class OriginalOnlineReleaseController {
   const phase=this.#currentServingReleaseId===this.#owner.releaseId?'COMPLETED':'ROLLED_BACK';
   await finishDeployment(new PrismaDeploymentStore(this.#database),{...this.#owner,phase,now:new Date()});
   clearInterval(this.#heartbeat);this.#heartbeat=null;
+  this.#terminalCycles.set(this.#owner.deploymentId,{runtimeId:input.runtimeId,audit:structuredClone(audit),certificate:structuredClone(input.terminalCertificate),repository,terminalEnvelopeSha256:sha(bytes(mountedTerminal.envelope))});
   return {deploymentId:this.#owner.deploymentId,phase,originalApplicationHandlesRetained:true,terminalWalAuditSha256:sha(bytes(audit))};
  }
  readCarrierProvisioningTarget(){
@@ -567,6 +574,7 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
     try{const event=JSON.parse(line);state.events.push(event);if(event.event==='ACTOR_STARTED')state.started=event;if(event.event==='HELD')this.#held='ONLINE_ORIGINAL_INQUIRY_INNER_HELD';}catch{this.#held='ONLINE_ORIGINAL_INQUIRY_FRAME_INVALID';}}});
   child.stderr.on('data',chunk=>{state.outputBytes+=chunk.length;if(state.outputBytes>8388608)this.#held='ONLINE_ORIGINAL_INQUIRY_OUTPUT_BOUND';});
   child.once('close',(code,signal)=>{state.closed=true;state.code=code;state.signal=signal;if(state.pending)this.#held='ONLINE_ORIGINAL_INQUIRY_TRAILING_BYTES';});
+  this.#retainOriginalHostBirth(state);
   await this.#send(state,'START',{host:facts.privateAddress,port:3001,runtimeBundleSha256:enrolled.scope.manifestSha256,generation:enrolled.generation,sqlite:facts.sqlite,runtimeBuildIdentity:facts.runtimeBuildIdentity});
   while(!state.started||!state.events.some(row=>row.event==='READY')){assert(!this.#held&&!state.closed,'ONLINE_ORIGINAL_INQUIRY_NOT_READY');await new Promise(resolve=>setTimeout(resolve,25));}
   const ready=state.events.find(row=>row.event==='READY'),active=JSON.parse(Buffer.from(ready.nativeRawBase64,'base64'));
@@ -623,7 +631,7 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
  async provisionCarriers(input){
   const result=await provisionOriginalOnlineReleaseCarriers(this,input);
   for(const token of [...result.backends,result.frontend]){const facts=await readOriginalOnlineCarrier(this,token);
-   assert(!this.#carriers.has(facts.slotId),'ONLINE_ORIGINAL_CARRIER_ALREADY_ENROLLED');this.#carriers.set(facts.slotId,token);}
+   assert(!this.#carriers.has(facts.slotId),'ONLINE_ORIGINAL_CARRIER_ALREADY_ENROLLED');this.#carriers.set(facts.slotId,token);this.#carrierSnapshots.set(facts.slotId,structuredClone(facts));}
   if(this.#edge)await this.appendOriginalCarrierEndpoints();return result;
  }
  async appendOriginalCarrierEndpoints(){
@@ -670,6 +678,7 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
    state.pending+=data.toString();for(let split;(split=state.pending.indexOf('\n'))>=0;){const raw=state.pending.slice(0,split);state.pending=state.pending.slice(split+1);try{const event=JSON.parse(raw);state.events.push(event);if(event.event==='HELD')this.#held='ORIGINAL_EDGE_HELD';}catch{this.#held='ORIGINAL_EDGE_FRAME_INVALID';}}});
   child.stderr.on('data',data=>{state.outputBytes+=data.length;if(state.outputBytes>8388608)this.#held='ORIGINAL_EDGE_OUTPUT_BOUND';});
   child.once('close',(code,signal)=>{state.closed=true;state.code=code;state.signal=signal;});
+  this.#retainOriginalHostBirth(state);
   await this.#send(state,'START',{instanceId,host:network.IPAddress,port:3199,publicationDirectory:'/run/sabalan-publications',journalRoot:'/app/online-edge/'+instanceId,
    applicationsByHost,endpoints:{ui:[],backend:[]},trustedProxyIPs:[ingress.IPAddress]});
   await this.#awaitEdge('LISTENING');await this.appendOriginalCarrierEndpoints();
@@ -773,7 +782,10 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
   return {retired:true,fenceId:fence.fenceId,buildIds,removed,images,imageCleanup,audit,immutableRoutingHistoryPreserved:true};
  }
  async verifyCommonEdgePublication(publicationSha256){
-  await this.assertOwned();assert(this.#edge&&!this.#edge.closed,'ONLINE_ORIGINAL_EDGE_REQUIRED');
+  await this.assertOwned();return this.#verifyOriginalEdgePublication(publicationSha256);
+ }
+ async #verifyOriginalEdgePublication(publicationSha256){
+  assert(this.#edge&&!this.#edge.closed,'ONLINE_ORIGINAL_EDGE_REQUIRED');
   const [actual]=JSON.parse(await this.#docker(['inspect',this.#edge.containerId]));
   assert(actual.State.Running&&actual.State.StartedAt===this.#edge.startedAt&&actual.Image===this.#edge.image,'ONLINE_ORIGINAL_EDGE_REPLACED');
   const sequence=this.#edge.sequence+1;await this.#send(this.#edge,'VERIFY_PUBLICATION',{publicationSha256});
@@ -823,7 +835,7 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
   const legacyCarrier=await provisionOriginalBootstrapLegacyFrontend(this,{releaseId:this.#owner.releaseId,descriptor});
   const legacy=await readOriginalOnlineCarrier(this,legacyCarrier);
   assert(legacy.legacyFrontendOnly===true&&legacy.compiledBytesVerified===true,'ONLINE_ORIGINAL_LEGACY_UI_REQUIRED');
-  this.#bootstrapLegacy.carrier=legacyCarrier;this.#carriers.set(legacy.slotId,legacyCarrier);
+  this.#bootstrapLegacy.carrier=legacyCarrier;this.#carriers.set(legacy.slotId,legacyCarrier);this.#carrierSnapshots.set(legacy.slotId,structuredClone(legacy));
   const qualified=this.readCarrierReleaseEvidence(this.#owner.releaseId),registry=qualified.browserRegistries.at(-1);
   assert(registry?.current?.erp,'ONLINE_BOOTSTRAP_QUALIFIED_UI_REQUIRED');
   await this.provisionCarriers({releaseId:this.#owner.releaseId,backendRuntimeIds:registration.scopes.map(row=>row.scope.runtimeId),buildId:registry.current.erp});
@@ -1018,6 +1030,7 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
     if(line.startsWith('SABALAN_ONLINE_RUNTIME ')){try{state.events.push(JSON.parse(line.slice(23)));}catch{this.#held='RUNTIME_FRAME_INVALID';}}}
   });
   child.once('close',(code,signal)=>{state.closed=true;state.code=code;state.signal=signal;});
+  this.#retainOriginalHostBirth(state);
   let protectedBootstrap=null;
   if(this.#bootstrap&&!this.#bootstrap.finalized&&scope.purpose==='http'){
    const {assertProtectedOnlineBootstrap}=require('./online-release-host-kernel.cjs');
@@ -1036,6 +1049,10 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
   accepted.revalidate();await this.#send(state,'START',{databaseUrl:this.#databaseUrl,startupDecision:envelope,protectedBootstrap,evidenceFiles});
   return Object.freeze({runtimeId,originalDockerCliPid:child.pid,startupAuthorityIssued:true,publicTrafficPublished:false});
  }
+ #retainOriginalHostBirth(state){
+  try{state.originalHostBirth=originalProcessBirth(state.child.pid);assert(/^[0-9]+$/.test(state.originalHostBirth),'ONLINE_ORIGINAL_HOST_BIRTH_INVALID');}
+  catch(error){this.#held='ONLINE_ORIGINAL_HOST_BIRTH_UNPROVEN';throw error;}
+ }
  async #observe(args,input=null,environment=null){
   const child=spawn('docker',args,{stdio:[input===null?'ignore':'pipe','pipe','pipe'],shell:false,...(environment?{env:{...process.env,...environment}}:{})});
   const state={child,closed:false,stdout:[],stderr:[],bytes:0,overflow:false};this.#observers.push(state);
@@ -1043,7 +1060,7 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
   child.stderr.on('data',chunk=>{state.bytes+=chunk.length;if(state.bytes<=8388608)state.stderr.push(chunk);else state.overflow=true;});
   if(input!==null){child.stdin.on('error',()=>{this.#held='OBSERVER_INPUT_CLOSURE_UNKNOWN';});child.stdin.end(input);}
   const result=await new Promise(resolve=>{child.once('error',()=>{this.#held='OBSERVER_SPAWN_UNKNOWN';});
-   child.once('close',(code,signal)=>{state.closed=true;resolve({code,signal});});});
+   child.once('close',(code,signal)=>{state.closed=true;state.result={code,signal};resolve(state.result);});});
   assert(result.code===0&&result.signal===null&&!state.overflow,'ONLINE_ORIGINAL_DOCKER_OBSERVER_FAILED');
   return Buffer.concat(state.stdout).toString();
  }
@@ -1165,7 +1182,7 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
    DEPLOYMENT_TARGET_COMMIT:accepted.manifest.sourceCommit,DEPLOYMENT_GATE_MODE:'RELEASE',RECOVERY_COORDINATION_DIR:actor.scope.coordinationDirectory,
    DEPLOYMENT_REMOTE_MOUNT:service.environment.DEPLOYMENT_REMOTE_MOUNT,INQUIRY_RECOVERY_SOURCE_DIR:'/data'}})));
   const response=JSON.parse(output.trim().split('\n').at(-1)),report=response.report;
-  const required=['postgres-query-and-isolated-write','migration-history','shipment-statement-runtime-state','contract-financial-evidence','inquiry-sqlite-integrity','backend-readiness','frontend-health','inquiry-health','nginx-health','contracts-storage','hr-storage','accounting-storage','support-storage','performance-export-storage','uploads-storage','database-file-references','checkpoint-manifest','database-connection-capacity'];
+  const required=ORIGINAL_ONLINE_PRODUCTION_GATE_NAMES;
   assert(response.ok===true&&report?.format==='sabalan-deployment-report'&&report.mode==='RELEASE'&&report.deploymentId===this.#owner.deploymentId
    &&report.releaseId===releaseId&&report.manifestSha256===target.input.manifestSha256&&report.checkpointSha256===checkpointSha256
    &&report.originalGateContextSha256===sha(Buffer.from(JSON.stringify(envelope)))&&sha(bytes(report.originalTargets))===sha(bytes(targets))
@@ -1238,6 +1255,112 @@ p=Path(sys.argv[1]);v=json.loads(p.read_bytes());g=v['guardian'];assert v['phase
     generation:result.generation,publicationSha256:result.publicationSha256});
    this.#currentServingReleaseId=releaseId;this.#lastPublicationSha=result.publicationSha256;return receipt;
   }catch(error){this.#held='PUBLICATION_OUTCOME_REQUIRES_SAME_ORIGINAL_OWNER';throw error;}
+ }
+ /** Read-only terminal observation. It neither reacquires an expired lease nor
+  * closes serving originals. Only this same controller can describe its own
+  * live handles; a saved receipt cannot enroll or replace one. */
+ async readClientDetachBarrier(input){
+  assert(input&&Object.keys(input).join(',')==='mode'&&['BOOTSTRAP','FOLLOWING'].includes(input.mode),'ONLINE_CLIENT_TERMINAL_MODE_REQUIRED');
+  assert(!this.#held&&this.#advisory&&!this.#heartbeat&&this.#currentServingReleaseId===this.#owner.releaseId&&this.#lastPublicationSha,'ONLINE_CLIENT_TERMINAL_STATE_REQUIRED');
+  assert(input.mode==='BOOTSTRAP'?this.#bootstrap?.finalized===true:!this.#bootstrap&&this.#terminalCycles.has(this.#owner.deploymentId),'ONLINE_CLIENT_TERMINAL_CYCLE_REQUIRED');
+  const own=async()=>{
+   this.#lock.assertOwned();
+   assert(!this.#held&&process.ppid===this.#parentBirth.pid&&originalProcessBirth(process.ppid)===this.#parentBirth.stat,'ONLINE_CLIENT_ORIGINAL_LAUNCHER_CHANGED');
+   assert(readPrivate(PRIVATE_KEY,4096,0o600).pin===this.#keyPin,'ONLINE_PERSISTENT_KEY_CHANGED');await this.#assertAdvisory();
+   const rows=await this.#database.$queryRaw`SELECT id,"releaseId","targetCommit",phase,"activeKey","reportJson","checkpointJson" FROM deployment_operations
+    WHERE id=${this.#owner.deploymentId} AND "leaseToken"=${this.#owner.leaseToken} AND phase='COMPLETED' AND "activeKey" IS NULL`;
+   const active=await this.#database.$queryRaw`SELECT id FROM deployment_operations WHERE "activeKey"='production'`;
+   assert(rows.length===1&&rows[0].releaseId===this.#owner.releaseId&&/^[a-f0-9]{40}$/.test(rows[0].targetCommit)&&active.length===0,'ONLINE_CLIENT_DATABASE_NOT_TERMINAL');
+   return rows[0];
+  };
+  const operation=await own(),gates=this.#productionGates.get(this.#currentServingReleaseId);
+  assert(gates&&gates.report.deploymentId===this.#owner.deploymentId&&gates.report.releaseId===this.#currentServingReleaseId
+   &&gates.report.gates?.length===ORIGINAL_ONLINE_PRODUCTION_GATE_NAMES.length
+   &&new Set(gates.report.gates.map(row=>row.name)).size===ORIGINAL_ONLINE_PRODUCTION_GATE_NAMES.length
+   &&ORIGINAL_ONLINE_PRODUCTION_GATE_NAMES.every(name=>gates.report.gates.some(row=>row.name===name&&row.passed===true)),'ONLINE_CLIENT_PRODUCTION_GATES_REQUIRED');
+  await this.#assertOriginalProductionGates(this.#currentServingReleaseId);
+  assert(sha(bytes(operation.reportJson))===gates.sha256&&operation.checkpointJson&&sha(bytes(operation.checkpointJson))===gates.report.checkpointSha256,'ONLINE_CLIENT_CHECKPOINT_READBACK_CHANGED');
+  assert([...this.#gateControls.values()].every(row=>row.closed)&&this.#carrierFailures.length===0&&this.#originalCarrierCreates.size===0,'ONLINE_CLIENT_EPHEMERAL_CUSTODY_UNRESOLVED');
+  assert([...this.#checkpointJobsDraining].every(id=>{const row=this.#children.get(id);return row?.closed&&row.nativeClosureVerified;}),'ONLINE_CLIENT_CHECKPOINT_JOBS_NOT_CLOSED');
+  const head=await this.#store.readPublication();
+  assert(head.publicationSha256===this.#lastPublicationSha,'ONLINE_CLIENT_PUBLICATION_CHANGED');
+  const epochs=await this.#database.$queryRaw`SELECT id,"releaseId","publicationSha256",generation FROM online_serving_epochs
+   WHERE "releaseId"=${this.#currentServingReleaseId} AND "publicationSha256"=${this.#lastPublicationSha} AND "retiredAt" IS NULL`;
+  assert(epochs.length===1&&epochs[0].generation===head.generation,'ONLINE_CLIENT_SERVING_EPOCH_CHANGED');
+  const live=[],closed=[],seen=new Set();
+  const observeActor=(row,kind)=>{
+   assert(row&&!row.closed&&row.child.exitCode===null&&row.child.signalCode===null&&!row.pending&&!row.runtimePending
+    &&row.originalHostBirth&&originalProcessBirth(row.child.pid)===row.originalHostBirth,'ONLINE_CLIENT_NATIVE_OWNER_CHANGED');
+   if(kind!=='edge')assert(row.events.some(event=>event.event==='READY')&&row.events.some(event=>event.event==='ACTOR_STARTED'),'ONLINE_CLIENT_NATIVE_NOT_READY');
+   live.push({kind,runtimeId:row.scope?.runtimeId??null,releaseId:row.scope?.releaseId??null,originalPid:row.child.pid,originalBirth:row.originalHostBirth,containerId:row.containerId});
+  };
+  for(const row of [...this.#children.values(),...this.#inquiryActors.values()]){
+   if(row.closed){assert(row.nativeClosureVerified&&row.code===0&&row.signal===null,'ONLINE_CLIENT_NATIVE_CLOSURE_UNPROVEN');closed.push({runtimeId:row.scope.runtimeId,originalPid:row.child.pid,code:row.code,signal:row.signal});}
+   else observeActor(row,row.scope.purpose==='jobs'?'jobs':row.ready?'inquiry':'http');
+  }
+  const jobs=[...this.#children.values()].filter(row=>row.scope.purpose==='jobs'&&!row.closed);
+  assert(jobs.length===1&&jobs[0].scope.releaseId===this.#currentServingReleaseId,'ONLINE_CLIENT_JOBS_HANDOFF_UNPROVEN');
+  for(const build of head.registry.builds){
+   if(build.application==='erp'){
+    const carrier=this.#carrierSnapshots.get(build.slotId);
+    assert(this.#carriers.has(build.slotId)&&carrier?.kind==='frontend'&&carrier.build?.id===build.id&&carrier.image===build.image,'ONLINE_CLIENT_RETAINED_FRONTEND_UNPROVEN');
+    const [actual]=JSON.parse(await this.#docker(['inspect',carrier.containerId]));
+    assert(actual.Id===carrier.containerId&&actual.Image===carrier.image&&actual.State.Running&&actual.State.StartedAt===carrier.startedAt&&actual.State.Health?.Status==='healthy','ONLINE_CLIENT_RETAINED_FRONTEND_CHANGED');
+    const binding=head.registry.apiBindings.find(row=>row.buildId===build.id),actor=binding&&this.#children.get(binding.slotId.slice('backend_'.length));
+    assert(actor&&!actor.closed&&actor.scope.image===binding.image&&actor.scope.manifestSha256===binding.manifestSha256&&binding.browserManifestSha256===build.manifestSha256,'ONLINE_CLIENT_RETAINED_BACKEND_UNPROVEN');
+    if(!seen.has(carrier.containerId)){seen.add(carrier.containerId);live.push({kind:'frontend',buildId:build.id,containerId:carrier.containerId,image:carrier.image,startedAt:carrier.startedAt});}
+   }else{
+    const actor=[...this.#inquiryActors.values()].find(row=>'inquiry_'+row.scope.runtimeId===build.slotId&&!row.closed&&row.ready);
+    assert(actor&&actor.image===build.image,'ONLINE_CLIENT_RETAINED_INQUIRY_UNPROVEN');
+    const [actual]=JSON.parse(await this.#docker(['inspect',actor.containerId]));
+    assert(actual.Id===actor.containerId&&actual.Image===actor.image&&actual.State.Running&&actual.State.StartedAt===actor.startedAt,'ONLINE_CLIENT_RETAINED_INQUIRY_CHANGED');
+   }
+  }
+  observeActor(this.#edge,'edge');await this.#verifyOriginalEdgePublication(this.#lastPublicationSha);
+  const currentHttp=this.#children.get(gates.runtimeId);
+  const observationSource=fs.readFileSync(new URL('./online-client-terminal-observation.py',import.meta.url),'utf8');
+  const terminalObservation=JSON.parse(await this.#docker(['exec','-i',currentHttp.containerId,'/usr/bin/python3','-I','-B','-c',observationSource],
+   bytes({coordinationDirectory:currentHttp.scope.coordinationDirectory,targets:Object.fromEntries(Object.entries(gates.targets).map(([name,row])=>[name,row.url]))})));
+  assert(terminalObservation.format==='sabalan-original-client-terminal-observation/v1'&&terminalObservation.maintenanceAbsent===true&&terminalObservation.readOnly===true
+   &&terminalObservation.endpoints?.length===4&&['backend','frontend','inquiry','nginx'].every(name=>terminalObservation.endpoints.filter(row=>row.name===name).length===1),'ONLINE_CLIENT_LIVE_ENDPOINTS_UNPROVEN');
+  let terminalWal=null;
+  if(input.mode==='FOLLOWING'){
+   const terminal=this.#terminalCycles.get(this.#owner.deploymentId),mounted=JSON.parse(await readMountedOriginalCheckpointFile(terminal.repository,'terminal-coverage.json'));
+   assert(mounted.format==='sabalan-accepted-online-terminal-coverage/v1'&&sha(bytes(mounted.envelope))===terminal.terminalEnvelopeSha256,'ONLINE_CLIENT_TERMINAL_WAL_READBACK_CHANGED');
+   terminalWal={auditSha256:sha(bytes(terminal.audit)),certificateSha256:sha(bytes(terminal.certificate)),publicationSha256:terminal.audit.publicationSha256};
+   assert(terminalWal.publicationSha256===head.publicationSha256,'ONLINE_CLIENT_TERMINAL_WAL_PUBLICATION_CHANGED');
+  }
+  assert(this.#observers.every(row=>row.closed&&!row.overflow&&row.result?.code===0&&row.result.signal===null),'ONLINE_CLIENT_OBSERVERS_NOT_CLOSED');
+  const final=await own();assert(sha(bytes(final))===sha(bytes(operation)),'ONLINE_CLIENT_TERMINAL_ROW_CHANGED');
+  const finalHead=await this.#store.readPublication();assert(finalHead.publicationSha256===head.publicationSha256,'ONLINE_CLIENT_PUBLICATION_CHANGED');
+  return {format:'sabalan-original-client-terminal-barrier/v1',mode:input.mode,deploymentId:this.#owner.deploymentId,releaseId:this.#owner.releaseId,
+   phase:operation.phase,activeKey:operation.activeKey,targetCommit:operation.targetCommit,publicationSha256:head.publicationSha256,generation:head.generation,
+   gateReportSha256:gates.sha256,requiredGateNames:[...ORIGINAL_ONLINE_PRODUCTION_GATE_NAMES],checkpointSha256:gates.report.checkpointSha256,terminalWal,
+   originalController:{pid:process.pid,birth:originalProcessBirth(process.pid)},originalLauncher:{...this.#parentBirth},liveOriginals:live,closedOriginals:closed,
+   closedObservers:this.#observers.map(row=>({pid:row.child.pid,...row.result})),terminalObservation,releaseAdmissionGranted:false};
+ }
+ async prepareOriginalControllerClose(){
+  assert(!this.#held&&this.#advisory&&!this.#heartbeat,'ONLINE_CONTROLLER_TERMINAL_CLOSE_REQUIRED');
+  this.#lock.assertOwned();await this.#assertAdvisory();
+  assert(process.ppid===this.#parentBirth.pid&&originalProcessBirth(process.ppid)===this.#parentBirth.stat,'ONLINE_ORIGINAL_LAUNCHER_CHANGED');
+  this.assertAllOriginalChildrenClosed();
+  assert(this.#originalCarrierCreates.size===0&&this.#observers.every(row=>row.closed&&!row.overflow&&row.result?.code===0&&row.result.signal===null),'ONLINE_CONTROLLER_EPHEMERAL_CLOSE_REQUIRED');
+  const rows=await this.#database.$queryRaw`SELECT id FROM deployment_operations WHERE id=${this.#owner.deploymentId}
+   AND "leaseToken"=${this.#owner.leaseToken} AND "activeKey" IS NULL AND phase IN ('COMPLETED','ROLLED_BACK')`;
+  const active=await this.#database.$queryRaw`SELECT id FROM deployment_operations WHERE "activeKey"='production'`;
+  assert(rows.length===1&&active.length===0,'ONLINE_CONTROLLER_DATABASE_NOT_TERMINAL');
+  assert([...this.#checkpointCaptures.values()].every(row=>this.#terminalCycles.has(row.owner.deploymentId)),'ONLINE_CONTROLLER_CHECKPOINT_NOT_TERMINAL');
+  this.#controllerClosePrepared=true;return {originalControllerClosePrepared:true,servingOriginalsClosed:true};
+ }
+ async closeOriginalController(){
+  assert(this.#controllerClosePrepared,'ONLINE_CONTROLLER_CLOSE_NOT_PREPARED');
+  clearInterval(this.#advisoryPulse);this.#advisoryPulse=null;
+  await Promise.all([...this.#advisoryChecks]);
+  await this.prepareOriginalControllerClose();
+  const [unlocked]=await this.#database.$queryRaw`SELECT pg_advisory_unlock(741936425) AS owned`;
+  assert(unlocked?.owned===true,'ONLINE_CONTROLLER_ADVISORY_RELEASE_UNPROVEN');
+  this.#advisory=null;
+  return {...this.assertAllOriginalChildrenClosed(),originalControllerClosed:true};
  }
  assertAllOriginalChildrenClosed(){
   assert([...this.#gateControls.values()].every(row=>row.closed),'ONLINE_ORIGINAL_GATE_CONTROL_CUSTODY_UNRESOLVED');

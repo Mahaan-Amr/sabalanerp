@@ -14,7 +14,9 @@ import {collectNativeProcessOwnerElfArtifacts} from './lib/native-process-owner-
 const repository=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const entry='backend/src/scripts/online-release-host-kernel.ts';
 const hostFiles=['deploy/scripts/online-release-controller.mjs','deploy/scripts/online-release-controller-cli.mjs',
- 'deploy/scripts/online-release-launcher.py','deploy/scripts/browser-routing-store.mjs','deploy/scripts/browser-release-routing.mjs',
+ 'deploy/scripts/online-release-launcher.py','deploy/scripts/online-owner-service.py','deploy/systemd/sabalan-online-owner.service',
+ 'deploy/scripts/online-production-gates.mjs','deploy/scripts/online-client-terminal-observation.py','deploy/scripts/online-owner-install-guard.mjs',
+ 'deploy/scripts/browser-routing-store.mjs','deploy/scripts/browser-release-routing.mjs',
  'deploy/scripts/online-bootstrap-boundary.mjs','deploy/scripts/install-online-controller-trust.mjs','deploy/scripts/deploy.sh','deploy/scripts/capture-only-release.mjs','deploy/scripts/prebuilt-release-plan.mjs',
  'deploy/scripts/legacy-backend-signal.py',
  'deploy/scripts/canonical-previous-release-configuration.mjs','deploy/scripts/verify-premutation-configuration-repair.mjs','deploy/scripts/reconcile-premutation-capture.mjs',

@@ -33,6 +33,15 @@ test('host pack refuses shared-checkout output or relative authority paths befor
  assert.notEqual(relative.status,0);assert.match(relative.stderr,/Absolute private paths required/);
 });
 
+test('host pack explicitly carries the original server owner and its fixed service unit without starting either',()=>{
+ const result=run(['--inspect']);assert.equal(result.status,0,result.stderr);const plan=JSON.parse(result.stdout);
+ for(const file of ['deploy/scripts/online-owner-service.py','deploy/systemd/sabalan-online-owner.service','deploy/scripts/online-production-gates.mjs','deploy/scripts/online-client-terminal-observation.py','deploy/scripts/online-owner-install-guard.mjs']){
+  assert.equal(plan.hostFiles.filter(value=>value===file).length,1,'Exact server-owner package entry required: '+file);
+  assert.ok(fs.statSync(path.join(repository,file)).isFile(),'Missing original-owner source: '+file);
+ }
+ assert.equal(plan.mutated,false);assert.equal(plan.productionAdmission,false);assert.equal(plan.requiresReviewedOperationsCheckout,true);
+});
+
 test('incident reconciliation packages its subprocess verifier, pure kernel and generated-client dependency together',()=>{
  const result=run(['--inspect']);assert.equal(result.status,0,result.stderr);const plan=JSON.parse(result.stdout);
  const owner='deploy/scripts/reconcile-premutation-capture.mjs',verifier='deploy/scripts/verify-premutation-configuration-repair.mjs',kernel='deploy/scripts/canonical-previous-release-configuration.mjs';

@@ -10,10 +10,12 @@ continuous_context_lock=threading.Lock();continuous_context_sequence=0
 wal_transport_lock=threading.Lock()
 continuous_request_fd=None;continuous_response_fd=None
 original_master_port=None;checkpoint_producer=None;continuous_owner=None
+class OriginalInputEOF(Exception):pass
+class OriginalPredeployAborted(Exception):pass
 
 class OriginalMasterPort:
  def __init__(self):
-  self.writer_lock=threading.Lock();self.lock=threading.Lock();self.pending={};self.error=None
+  self.writer_lock=threading.Lock();self.lock=threading.Lock();self.pending={};self.error=None;self.terminalClosing=False;self.closed=False
   self.thread=threading.Thread(target=self.read,name='original-master-response',daemon=False);self.thread.start()
  def expect(self,key):
   with self.lock:
@@ -33,6 +35,12 @@ class OriginalMasterPort:
     with self.lock:
      require(key in self.pending);target=self.pending.pop(key)
     target.put(value)
+  except OriginalInputEOF as error:
+   with self.lock:
+    if self.terminalClosing and not self.pending:self.closed=True;return
+    self.error=error
+    for target in self.pending.values():target.put(error)
+    self.pending.clear()
   except BaseException as error:
    with self.lock:
     self.error=error
@@ -74,7 +82,11 @@ def frame(fd,maximum=16384):
   if newline>=0:
    require(newline<maximum);frame_buffers[fd]=data[newline+1:];return json.loads(data[:newline])
   require(len(data)<maximum)
-  chunk=os.read(fd,min(65536,maximum-len(data)));require(chunk);data.extend(chunk)
+  chunk=os.read(fd,min(65536,maximum-len(data)))
+  if not chunk:
+   require(not data)
+   raise OriginalInputEOF()
+  data.extend(chunk)
 
 def verify_original_wal_window(request,sealed_host_directory):
  # Only the SAME original in-memory receiver manager calls this fixed port.
@@ -287,8 +299,21 @@ def log(stream,file):
  thread=threading.Thread(target=pump,daemon=False);logs.append(thread);thread.start()
 
 failures=[]; controller=None; deploy=None; controller_sequence=0
+launcher_configuration_sha256=None
+
+def launcher_client_custody(mode):
+ require(mode in ('BOOTSTRAP','FOLLOWING') and deploy is not None and deploy.poll()==0)
+ require(controller is not None and controller.poll() is None and not failures)
+ require(checkpoint_producer is None and continuous_owner is None and checkpoint_state is None and checkpoint_ports is None and online_material is None)
+ require(original_master_port is not None)
+ with original_master_port.lock:
+  require(original_master_port.error is None and not original_master_port.pending)
+ require(all(owner.children.closed() and continuous.terminal for owner,continuous,_,_ in closed_checkpoint_owners))
+ own_pid=os.getpid();raw=pathlib.Path('/proc/'+str(own_pid)+'/stat').read_text();own_birth=raw[raw.rfind(')')+2:].split()[19]
+ return dict(deployOriginalCode=0,pendingMasterReplies=0,checkpointProducerAbsent=True,continuousOwnerAbsent=True,
+  checkpointContextAbsent=True,launcherPid=own_pid,launcherBirth=own_birth,configurationSha256=launcher_configuration_sha256)
 try:
- require(sys.platform=='linux' and os.getuid()==0 and len(sys.argv)==2)
+ require(sys.platform=='linux' and os.getuid()==0 and len(sys.argv)==3 and sys.argv[2]=='--owner-service' and stat.S_ISFIFO(os.fstat(0).st_mode))
  # Reserve our OWN descriptor before any original pipe/Popen can allocate it.
  # /dev/null is a placeholder only, never tested or represented as a lease.
  try:os.fstat(9)
@@ -300,6 +325,24 @@ try:
  placeholder_identity=os.fstat(9)
  require(not any(key.startswith(('LD_','PYTHON','NODE_PRELOAD')) for key in os.environ))
  config=private(sys.argv[1]);require(config['format']=='sabalan-online-original-launcher/v1')
+ launcher_configuration_sha256=hashlib.sha256(immutable(pathlib.Path(sys.argv[1]))).hexdigest()
+ lifecycle_fd=int(os.environ['SABALAN_ORIGINAL_OWNER_READY_FD']);require(lifecycle_fd>2 and stat.S_ISFIFO(os.fstat(lifecycle_fd).st_mode))
+ raw=pathlib.Path('/proc/'+str(os.getpid())+'/stat').read_text();own_birth=raw[raw.rfind(')')+2:].split()[19]
+ # Mandatory inert phase: no deploy, controller, lease or maintenance mutation
+ # exists until the original permanent service binds an actual update client.
+ write(1,encoded(dict(format='sabalan-original-predeploy-ready/v1',launcherPid=os.getpid(),launcherBirth=own_birth,
+  configurationSha256=launcher_configuration_sha256)))
+ begin=frame(0)
+ if begin.get('format')=='sabalan-original-abort-predeploy/v1':
+  require(set(begin)=={'format','configurationSha256','instanceId'} and begin['configurationSha256']==launcher_configuration_sha256
+   and re.fullmatch('[a-f0-9]{64}',begin['instanceId']) and deploy is None and controller is None and not originals and not logs)
+  write(lifecycle_fd,encoded(dict(format='sabalan-original-predeploy-aborted/v1',launcherPid=os.getpid(),launcherBirth=own_birth,
+   configurationSha256=launcher_configuration_sha256)))
+  os.close(lifecycle_fd)
+  raise OriginalPredeployAborted()
+ require(set(begin)=={'format','configurationSha256','instanceId','clientNonce'} and begin['format']=='sabalan-original-begin-deploy/v1'
+  and begin['configurationSha256']==launcher_configuration_sha256
+  and re.fullmatch('[a-f0-9]{64}',begin['instanceId']) and re.fullmatch('[a-f0-9]{64}',begin['clientNonce']))
  repository=pathlib.Path(config['repositoryRoot']);require(repository.is_absolute() and repository.resolve()==repository and repository.is_dir()
   and pathlib.Path(config['controllerConfig']['composeFile']).parent==repository)
  node=pathlib.Path(config['nodeExecutable']);require(str(node) in ('/usr/bin/node','/usr/local/bin/node') and node.resolve().stat().st_uid==0)
@@ -345,7 +388,8 @@ try:
    global controller_sequence
    controller_sequence+=1;write(controller.stdin.fileno(),encoded(dict(sequence=controller_sequence,command=name,**fields)))
    result=frame(controller.stdout.fileno())
-   require(result.get('sequence')==controller_sequence and result.get('event') in ('COMMAND_COMPLETED','CLOSED') and controller.poll() is None)
+   require(result.get('sequence')==controller_sequence and result.get('event')==('CLOSED' if name=='CLOSE' else 'COMMAND_COMPLETED')
+    and (controller.poll() in (None,0) if name=='CLOSE' else controller.poll() is None))
    return result
   if command=='BOOTSTRAP_PREPARE':
    target=call('OBSERVE_BOOTSTRAP_REQUEST')['qualificationRequest']
@@ -416,8 +460,10 @@ try:
  # channel to the STILL-LIVE original controller, not a saved ownership record.
  request_path=work/'control-request.fifo';response_path=work/'control-response.fifo'
  os.mkfifo(request_path,0o600);os.mkfifo(response_path,0o600)
+ write(lifecycle_fd,encoded(dict(format='sabalan-original-operation-ready/v1',launcherPid=os.getpid(),launcherBirth=own_birth,
+  configurationSha256=launcher_configuration_sha256,deployOriginalCode=0)))
  admin_sequence=0
- allowed={'ACQUIRE_NEXT','DRAIN_CURRENT_JOBS','READ_CYCLE_PLAN','RETIRE_EXPIRED_BUILDS','CREATE_CHECKPOINT','QUALIFY_NEXT','PREPARE_EXPANSION','RUN_EXPANSION','REGISTER','REGISTER_RETAINED','PROVISION_CARRIERS','START_EDGE','APPEND_EDGE_ENDPOINTS','STOP_EDGE','START_RUNTIME','WAIT_READY','PREPARE_DRAIN','WAIT_PREPARED','SHUTDOWN','WAIT_CLOSED','TRANSITION','PUBLISH','RUN_PRODUCTION_GATES','FINISH_CYCLE','PREPARE_INQUIRY','START_INQUIRY','STOP_INQUIRY'}
+ allowed={'ACQUIRE_NEXT','DRAIN_CURRENT_JOBS','READ_CYCLE_PLAN','RETIRE_EXPIRED_BUILDS','CREATE_CHECKPOINT','QUALIFY_NEXT','PREPARE_EXPANSION','RUN_EXPANSION','REGISTER','REGISTER_RETAINED','PROVISION_CARRIERS','START_EDGE','APPEND_EDGE_ENDPOINTS','STOP_EDGE','START_RUNTIME','WAIT_READY','PREPARE_DRAIN','WAIT_PREPARED','SHUTDOWN','WAIT_CLOSED','TRANSITION','PUBLISH','RUN_PRODUCTION_GATES','FINISH_CYCLE','PREPARE_INQUIRY','START_INQUIRY','STOP_INQUIRY','READ_CLIENT_DETACH_BARRIER','QUIESCENT_SERVICE_EXIT'}
  while True:
   request_fd=os.open(request_path,os.O_RDONLY|os.O_NOFOLLOW)
   try:
@@ -426,7 +472,9 @@ try:
   finally:os.close(request_fd)
   require(command.get('sequence')==admin_sequence+1 and command.get('command') in allowed and original_master_port.error is None)
   admin_sequence+=1
-  fields={key:value for key,value in command.items() if key not in ('sequence','command')}
+  client_sequence=command.get('clientSequence')
+  require(client_sequence is None or type(client_sequence)is int and client_sequence>0)
+  fields={key:value for key,value in command.items() if key not in ('sequence','command','clientSequence')}
   if command['command']=='CREATE_CHECKPOINT':
    require(not fields and checkpoint_state is None and continuous_owner is None)
    call('DRAIN_CURRENT_JOBS')
@@ -443,10 +491,41 @@ try:
    require(continuous_owner.terminal and checkpoint_producer.children.closed())
    closed_checkpoint_owners.append((checkpoint_producer,continuous_owner,checkpoint_state,checkpoint_ports))
    checkpoint_producer=None;continuous_owner=None;checkpoint_state=None;checkpoint_ports=None;online_material=None
+  elif command['command']=='READ_CLIENT_DETACH_BARRIER':
+   require(set(fields)=={'input'} and set(fields['input'])=={'mode'})
+   custody=launcher_client_custody(fields['input']['mode'])
+   result=call(command['command'],**fields)
+   result['launcherCustody']=custody
+  elif command['command']=='QUIESCENT_SERVICE_EXIT':
+   require(set(fields)=={'input'} and set(fields['input'])=={'mode'})
+   launcher_client_custody(fields['input']['mode'])
+   call('PREPARE_CONTROLLER_CLOSE')
+   os.close(continuous_request_fd);continuous_request_fd=None
+   result=call('CLOSE')
+   controller.stdin.close();controller.wait()
+   require(controller.returncode==0 and not controller.stdout.read(1))
+   require(all(process.poll() is not None for process in originals))
+   with original_master_port.lock:
+    require(original_master_port.error is None and not original_master_port.pending)
+    original_master_port.terminalClosing=True
+   write(lifecycle_fd,encoded(dict(format='sabalan-original-input-close-request/v1',launcherPid=os.getpid(),launcherBirth=own_birth,
+    configurationSha256=launcher_configuration_sha256)))
+   original_master_port.thread.join()
+   require(original_master_port.closed and original_master_port.error is None)
   else:result=call(command['command'],**fields)
+  admin_result=dict(sequence=admin_sequence,status='COMPLETED',command=command['command'],releaseAcceptanceGranted=False,**(dict(cyclePlan=result['cyclePlan']) if command['command']=='READ_CYCLE_PLAN' else dict(retirement=result['retirement']) if command['command']=='RETIRE_EXPIRED_BUILDS' else dict(clientDetachBarrier=result['clientDetachBarrier'],launcherCustody=result['launcherCustody']) if command['command']=='READ_CLIENT_DETACH_BARRIER' else {}))
+  if client_sequence is not None:
+   with original_master_port.writer_lock:
+    write(1,b'SABALAN_ORIGINAL_CLIENT_CONTROL_COMPLETED '+encoded(dict(sequence=client_sequence,command=command['command'],result=admin_result)))
   response_fd=os.open(response_path,os.O_WRONLY|os.O_NOFOLLOW)
-  try:write(response_fd,encoded(dict(sequence=admin_sequence,status='COMPLETED',command=command['command'],releaseAcceptanceGranted=False,**(dict(cyclePlan=result['cyclePlan']) if command['command']=='READ_CYCLE_PLAN' else dict(retirement=result['retirement']) if command['command']=='RETIRE_EXPIRED_BUILDS' else {}))))
+  try:write(response_fd,encoded(admin_result))
   finally:os.close(response_fd)
+  if command['command']=='QUIESCENT_SERVICE_EXIT':
+   for thread in logs:thread.join()
+   break
+except OriginalPredeployAborted:
+ require(deploy is None and controller is None and not originals and not logs)
+ sys.exit(0)
 except BaseException:
  # Never terminate, adopt or lose an original on deadline, pipe or signature
  # ambiguity. The original deploy boundary keeps renewing its own lease.

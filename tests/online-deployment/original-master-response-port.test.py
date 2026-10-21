@@ -12,13 +12,13 @@ class OriginalMasterResponsePortTest(unittest.TestCase):
     def namespace(self, descriptor):
         source = Path(__file__).parents[2] / 'deploy/scripts/online-release-launcher.py'
         tree = ast.parse(source.read_text())
-        names = {'require', 'OriginalMasterPort'}
+        names = {'require', 'OriginalInputEOF', 'OriginalMasterPort'}
         selected = ast.Module(body=[node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in names], type_ignores=[])
         stream = os.fdopen(descriptor, 'rb', buffering=0)
         def frame(_descriptor, maximum):
             raw = stream.readline(maximum)
             if not raw or not raw.endswith(b'\n'):
-                raise RuntimeError('ORIGINAL_TEST_PIPE_CLOSED')
+                raise values['OriginalInputEOF']('ORIGINAL_TEST_PIPE_CLOSED')
             return json.loads(raw)
         values = dict(threading=threading, queue=queue, frame=frame)
         exec(compile(selected, str(source), 'exec'), values)

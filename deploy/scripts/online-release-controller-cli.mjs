@@ -23,22 +23,25 @@ try{
  // continuity observations while its main command awaits a native child.
  const context=config.continuousContext;
  assert(context&&[context.requestFd,context.responseFd].every(fd=>Number.isInteger(fd)&&fd>2&&fs.fstatSync(fd).isFIFO()),'ONLINE_ORIGINAL_CONTEXT_FIFOS_REQUIRED');
+ let contextClosing=false,contextClosed=false;
  const contextTask=(async()=>{
   let sequence=0;
   for await(const raw of createInterface({input:fs.createReadStream(null,{fd:context.requestFd,autoClose:false}),crlfDelay:Infinity})){
-   assert(raw.length<=65536,'ONLINE_CONTEXT_FRAME_BOUND');const r=JSON.parse(raw);
+   assert(!contextClosing&&raw.length<=65536,'ONLINE_CONTEXT_FRAME_BOUND');const r=JSON.parse(raw);
    assert(r.sequence===++sequence&&['READ_CONTINUOUS_CONTEXT','PREPARE_FINISH_CONTEXT'].includes(r.command)&&Object.keys(r).sort().join(',')==='command,runtimeId,sequence','ONLINE_CONTEXT_FIXED_REQUEST_REQUIRED');
    const result=r.command==='READ_CONTINUOUS_CONTEXT'?await controller.readOriginalContinuousCheckpointContext(r.runtimeId):await controller.prepareOriginalFinishContext(r.runtimeId);
    const data=Buffer.from(JSON.stringify({sequence,event:'CONTEXT_OBSERVED',result})+'\n');let offset=0;
    while(offset<data.length)offset+=fs.writeSync(context.responseFd,data,offset,data.length-offset);
   }
-  throw Error('ONLINE_ORIGINAL_CONTEXT_EOF');
+  assert(contextClosing,'ONLINE_ORIGINAL_CONTEXT_EOF');
+  fs.closeSync(context.requestFd);fs.closeSync(context.responseFd);contextClosed=true;
  })();
  contextTask.catch(()=>controller.retainOriginalContextFailure());
  let sequence=0,finished=false;
  for await(const raw of createInterface({input:process.stdin,crlfDelay:Infinity})){
   assert(raw.length<8388608,'ONLINE_CONTROLLER_FRAME_BOUND');const request=JSON.parse(raw);
   assert(request.sequence===++sequence&&typeof request.command==='string','ONLINE_CONTROLLER_SEQUENCE');
+  assert(!contextClosing||request.command==='CLOSE','ONLINE_CONTROLLER_CLOSE_SEQUENCE_REQUIRED');
   let result;
   switch(request.command){
    case 'BOOTSTRAP_PREPARE':result=await controller.prepareProtectedBootstrap(request.input);break;
@@ -63,6 +66,7 @@ try{
    case 'BUILD_ONLINE_MATERIAL':result=await controller.prepareOriginalOnlineMaterial(request.input);break;
    case 'PREPARE_FINISH_CONTEXT':result=await controller.prepareOriginalFinishContext(request.runtimeId);break;
    case 'FINISH_CYCLE':result=await controller.finishCycle(request.input);break;
+   case 'READ_CLIENT_DETACH_BARRIER':result={clientDetachBarrier:await controller.readClientDetachBarrier(request.input)};break;
    case 'PREPARE_EXPANSION':result=await controller.prepareExpansion(request.input);break;
    case 'RUN_EXPANSION':result=await controller.runExpansion(request.input);break;
    case 'REGISTER':result=await controller.register(request.input);break;
@@ -80,7 +84,8 @@ try{
    case 'WAIT_CLOSED':result=await controller.awaitRuntimeClosed(request.runtimeId);break;
    case 'TRANSITION':result=await controller.transition(request.nextPhase);break;
    case 'PUBLISH':result=await controller.publish(request.input);break;
-   case 'CLOSE':result=controller.assertAllOriginalChildrenClosed();finished=true;break;
+   case 'PREPARE_CONTROLLER_CLOSE':result=await controller.prepareOriginalControllerClose();contextClosing=true;break;
+   case 'CLOSE':assert(contextClosing,'ONLINE_CONTROLLER_CLOSE_NOT_PREPARED');await contextTask;assert(contextClosed,'ONLINE_CONTROLLER_CONTEXT_NOT_CLOSED');result=await controller.closeOriginalController();finished=true;break;
    default:throw Error('ONLINE_CONTROLLER_FIXED_COMMAND_REQUIRED');
   }
   // No lease token, scope nonce, database credentials or signing material is logged.
@@ -94,6 +99,7 @@ try{
    ...(request.command==='BUILD_BOOTSTRAP_MATERIAL'?{bootstrapMaterial:result}:{}),
    ...(request.command==='BUILD_ONLINE_MATERIAL'?{onlineMaterial:result}:{}),
    ...(request.command==='READ_CYCLE_PLAN'?{cyclePlan:result}:{}),
+   ...(request.command==='READ_CLIENT_DETACH_BARRIER'?result:{}),
    ...(request.command==='RETIRE_EXPIRED_BUILDS'?{retirement:result}:{})})+'\n');
   if(finished)break;
  }

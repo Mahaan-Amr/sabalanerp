@@ -4,7 +4,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {nativeMaterialIdentity,validateInstalledNativeRole} from '../replace-application-native-candidate-local.mjs';
 import {stableFrontendBaseFile} from './production-frontend-base-artifacts.mjs';
-import {authorityCohortSources,validateAuthorityCohortReceipt,validateAuthorityCohortSlots} from './application-native-authority-cohort.mjs';
+import {authorityCohortSources,validateAuthorityCohortReceipt,validateAuthorityCohortSlots,precisionFailedAuthorityCohortSha256,validateReconciledPrecisionFailedBaseline} from './application-native-authority-cohort.mjs';
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 export function candidateReplacementReceiptArgument(argv){
  assert.equal(argv.length,2,'EXPLICIT_ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED');assert.equal(argv[0],'--candidate-replacement-receipt');
@@ -41,6 +41,16 @@ export function collectNativeCandidateArtifacts({root,capture,containers,sourceC
  if(value.previousReplacement){
   assert.equal(replacementEntry,'scripts/replace-qualified-application-native-candidate-local.mjs');assert.deepEqual(Object.keys(value.previousReplacement).sort(),['file','sha256']);assert.match(value.previousReplacement.sha256,/^[a-f0-9]{64}$/);const priorRaw=readExternal(value.previousReplacement.file);assert.equal(sha(priorRaw),value.previousReplacement.sha256);assert.equal(value.inputs[path.resolve(value.previousReplacement.file)],value.previousReplacement.sha256);const prior=JSON.parse(priorRaw);validateReobservedCandidateBaselineReceipt(value,prior);
   for(const[role,service]of [['main','backend-retained'],['candidate','backend-candidate']]){const point=prior.roleEvidence[role],imageRaw=readExternal(point.imageReceiptFile),materialRaw=readExternal(point.materialReceiptFile);assert.equal(sha(imageRaw),point.imageReceiptSha256);assert.equal(sha(materialRaw),point.materialReceiptSha256);const image=JSON.parse(imageRaw),material=JSON.parse(materialRaw);assert.equal(image.pass,true);assert.equal(image.image.id,prior.actual[service].image);assert.equal(image.materialReceiptSha256,sha(materialRaw));validateInstalledNativeRole(value.reobservedInstalled[service].result,nativeMaterialIdentity(material));}
+ }
+ if(value.failedAuthorityCohort){
+  assert.equal(value.failedAuthorityCohort.sha256,precisionFailedAuthorityCohortSha256);const failedRaw=readExternal(value.failedAuthorityCohort.file);assert.equal(sha(failedRaw),precisionFailedAuthorityCohortSha256);assert.equal(value.inputs[path.resolve(value.failedAuthorityCohort.file)],precisionFailedAuthorityCohortSha256);
+  validateReconciledPrecisionFailedBaseline(value,JSON.parse(failedRaw));
+  for(const[role,service]of [['main','backend-retained'],['candidate','backend-candidate']]){
+   const point=role==='candidate'?value.reconciledFailedAuthorityBaseline.candidateEvidence:value.roleEvidence.main;
+   const imageRaw=readExternal(point.imageReceiptFile),materialRaw=readExternal(point.materialReceiptFile);assert.equal(sha(imageRaw),point.imageReceiptSha256);assert.equal(sha(materialRaw),point.materialReceiptSha256);
+   const image=JSON.parse(imageRaw),material=JSON.parse(materialRaw);assert.equal(image.pass,true);assert.equal(image.originalChildren.allOriginalChildrenClosed,true);assert.equal(image.image.id,value.previous[service].image);assert.equal(image.materialReceiptSha256,sha(materialRaw));assert.equal(material.materialized,true);
+   validateInstalledNativeRole(value.reobservedInstalled[service].result,nativeMaterialIdentity(material));
+  }
  }
 
  const evidence={};

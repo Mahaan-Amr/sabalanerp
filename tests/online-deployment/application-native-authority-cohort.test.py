@@ -54,7 +54,7 @@ class Cases(unittest.TestCase):
   self.assertEqual(self.fs.root.children,{})
  def test_existing_root_read_permissions_are_preserved_and_child_is_private(self):
   self.fs.root.mode=stat.S_IFDIR|0o755;created=m.create_namespace(self.root,'e'*32)
-  self.assertEqual(stat.S_IMODE(self.fs.root.mode),0o755);self.assertEqual(stat.S_IMODE(created['st_mode']),0o700)
+  self.assertEqual(stat.S_IMODE(self.fs.root.mode),0o755);self.assertEqual(stat.S_IMODE(int(created['st_mode'])),0o700)
  def test_unsafe_nonce_refused_before_mutation(self):
   for value in ['../escape','a/b','cohort-'+'a'*32,'']:
    with self.assertRaises(AssertionError):m.create_namespace(self.root,value)
@@ -67,6 +67,10 @@ class Cases(unittest.TestCase):
  def test_namespace_populated_between_prepare_and_mount_is_refused(self):
   expected=m.create_namespace(self.root,'a'*32);target=MemoryPath(self.fs,self.fs.root.children['cohort-'+'a'*32]);target.node.children['foreign-key']=Node(90,stat.S_IFREG|0o444,data=b'foreign')
   with self.assertRaisesRegex(AssertionError,'NAMESPACE_CHANGED'):m.verify_namespace(self.root,'a'*32,expected,target)
+ def test_identity_json_preserves_nanoseconds_and_large_inodes_exactly(self):
+  import json
+  value=self.fs.root.stat();value.st_mtime_ns=1792657655942494549;value.st_ctime_ns=1792657656550534770;value.st_ino=9007199254740993
+  pin=json.loads(json.dumps(m.identity(value)));self.assertTrue(all(isinstance(v,str)for v in pin.values()));self.assertEqual(pin['st_mtime_ns'],'1792657655942494549');self.assertEqual(pin['st_ctime_ns'],'1792657656550534770');self.assertEqual(pin['st_ino'],'9007199254740993')
 
 class ActualKeyProvisioning(unittest.TestCase):
  def test_actual_fixed_key_function_accepts_second_fresh_store_and_preserves_first(self):

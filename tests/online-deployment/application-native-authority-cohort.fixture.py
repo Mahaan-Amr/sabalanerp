@@ -9,7 +9,9 @@ def nonce_path(nonce):
  return 'cohort-'+nonce
 
 def identity(value):
- return {k:getattr(value,k)for k in ['st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns']}
+ # This proof crosses a JSON/JavaScript boundary. Nanoseconds and inode numbers
+ # may exceed Number.MAX_SAFE_INTEGER; decimal strings preserve every bit.
+ return {k:str(getattr(value,k))for k in ['st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns']}
 
 def secure_directory(value):
  assert stat.S_ISDIR(value.st_mode)and value.st_uid==0 and stat.S_IMODE(value.st_mode)==0o700,'AUTHORITY_DIRECTORY_OWNER_OR_MODE_UNSAFE'

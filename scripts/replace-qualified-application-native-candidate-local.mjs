@@ -4,7 +4,7 @@ import path from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
 import {execFileSync,spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
-import {authorityCohortSources,authorityMounts,authoritySubpath,authorityWriterRoot,validateAuthorityCohortConfiguration,validateAuthorityCohortSlots,validateAuthorityCohortReceipt} from './lib/application-native-authority-cohort.mjs';
+import {authorityCohortSources,authorityMounts,authoritySubpath,authorityWriterRoot,validateAuthorityCohortConfiguration,validateAuthorityCohortSlots,validateAuthorityCohortReceipt,precisionFailedAuthorityCohortSha256,precisionFailedAuthorityNamespaces,validatePrecisionFailedAuthoritySlots,validateReconciledPrecisionFailedBaseline} from './lib/application-native-authority-cohort.mjs';
 
 export function validateCandidatePreflight(value,now=Date.now()){
  assert.equal(value.sshExitCode,0);const age=now-Date.parse(value.observedAt);assert.ok(Number.isFinite(age)&&age>=0&&age<=600000,'BOTH_HOST_PREFLIGHT_STALE');
@@ -41,7 +41,7 @@ export function parseCandidateReplacementArguments(argv){
  assert.ok(argv.length===7||argv.length===11,'EXACT_REPLACEMENT_ARGUMENTS_REQUIRED');assert.ok(['--inspect','--replace'].includes(argv[0]));
  for(const[i,key]of ['--image-receipt','--material-receipt','--preflight'].entries())assert.equal(argv[1+i*2],key);
  const result={inspectOnly:argv[0]==='--inspect',imageReceiptFile:path.resolve(argv[2]),materialReceiptFile:path.resolve(argv[4]),preflightFile:path.resolve(argv[6]),...(isolateAuthorityCohort?{isolateAuthorityCohort:true}:{})};
- if(argv.length===11){assert.equal(argv[7],'--previous-replacement-receipt');assert.equal(argv[9],'--previous-replacement-sha256');assert.ok(path.isAbsolute(argv[8]));assert.match(argv[8].replaceAll('\\','/'),/\/reports\/qa\/application-native-candidate-[a-f0-9]{32}\.json$/);assert.match(argv[10],/^[a-f0-9]{64}$/);result.previousReplacement={file:path.resolve(argv[8]),sha256:argv[10]};}return result;
+ if(argv.length===11){const failed=argv[7]==='--failed-authority-cohort-receipt';assert.equal(argv[7],failed?'--failed-authority-cohort-receipt':'--previous-replacement-receipt');assert.equal(argv[9],failed?'--failed-authority-cohort-sha256':'--previous-replacement-sha256');assert.ok(path.isAbsolute(argv[8]));assert.match(argv[8].replaceAll('\\','/'),/\/reports\/qa\/application-native-candidate-[a-f0-9]{32}\.json$/);assert.match(argv[10],/^[a-f0-9]{64}$/);if(failed){assert.equal(isolateAuthorityCohort,true,'FAILED_COHORT_REQUIRES_FRESH_ROTATION');assert.equal(argv[10],precisionFailedAuthorityCohortSha256);result.failedAuthorityCohort={file:path.resolve(argv[8]),sha256:argv[10]};}else result.previousReplacement={file:path.resolve(argv[8]),sha256:argv[10]};}return result;
 }
 export function validatePreviousCandidateReplacement(value){
  if(Object.hasOwn(value,'replacementEntry'))assert.equal(value.replacementEntry,'scripts/replace-qualified-application-native-candidate-local.mjs');
@@ -59,7 +59,7 @@ export function validateReobservedCandidateSlots(previous,current){
 }
 async function main(){
 const root=path.resolve(import.meta.dirname,'..'),base='D:/sabalanerp/docker-compose.local.yml';
-const {inspectOnly,imageReceiptFile,materialReceiptFile,preflightFile,previousReplacement,isolateAuthorityCohort=false}=parseCandidateReplacementArguments(process.argv.slice(2));
+const {inspectOnly,imageReceiptFile,materialReceiptFile,preflightFile,previousReplacement,failedAuthorityCohort,isolateAuthorityCohort=false}=parseCandidateReplacementArguments(process.argv.slice(2));
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const imageReceiptRaw=fs.readFileSync(imageReceiptFile),imageReceipt=JSON.parse(imageReceiptRaw),materialReceiptRaw=fs.readFileSync(materialReceiptFile),materialReceipt=JSON.parse(materialReceiptRaw);
 const preflight=()=>validateCandidatePreflight(JSON.parse(fs.readFileSync(preflightFile)));preflight();
@@ -69,7 +69,7 @@ const retainedImageRaw=fs.readFileSync(retainedImageReceiptFile),retainedMateria
 assert.equal(historical.pass,true);assert.equal(historical.phase,'COMPLETE');assert.equal(historical.up.code,0);assert.equal(historical.up.signal,null);
 assert.equal(digest(retainedImageRaw),historical.imageReceiptSha256);assert.equal(digest(retainedMaterialRaw),historical.materialReceiptSha256);
 const oldImage='sha256:89dd62e901f2077f70c800bd9b705251730fa23531f7c3cc42fdaee1d9c71186';assert.equal(retainedReceipt.image.id,oldImage);assert.equal(historical.immutableImage,oldImage);
-let predecessor=null,predecessorMaterial=null,predecessorImage=null;const predecessorInputs=[];
+let predecessor=null,predecessorMaterial=null,predecessorImage=null,failedAuthority=null,failedNamespaces=null,failedCandidateEvidence=null;const predecessorInputs=[];
 if(previousReplacement){
  const raw=fs.readFileSync(previousReplacement.file);assert.equal(digest(raw),previousReplacement.sha256,'PREVIOUS_REPLACEMENT_BYTES_CHANGED');predecessor=validatePreviousCandidateReplacement(JSON.parse(raw));predecessorInputs.push(previousReplacement.file);
  const point=predecessor.roleEvidence.candidate,imageRaw=fs.readFileSync(point.imageReceiptFile),materialRaw=fs.readFileSync(point.materialReceiptFile);assert.equal(digest(imageRaw),point.imageReceiptSha256);assert.equal(digest(materialRaw),point.materialReceiptSha256);predecessorInputs.push(point.imageReceiptFile,point.materialReceiptFile);predecessorImage=JSON.parse(imageRaw);predecessorMaterial=JSON.parse(materialRaw);
@@ -77,6 +77,14 @@ if(previousReplacement){
  assert.equal(predecessor.roleEvidence.main.imageReceiptSha256,digest(retainedImageRaw));assert.equal(predecessor.roleEvidence.main.materialReceiptSha256,digest(retainedMaterialRaw));assert.deepEqual(predecessor.privateQualificationRuntimes.main,nativeMaterialIdentity(retainedMaterial).runtime);validateInstalledNativeRole(predecessor.installed['backend-retained'].result,nativeMaterialIdentity(retainedMaterial));
 }
 
+if(failedAuthorityCohort){
+ const failedRaw=fs.readFileSync(failedAuthorityCohort.file);assert.equal(digest(failedRaw),precisionFailedAuthorityCohortSha256);assert.equal(failedAuthorityCohort.sha256,precisionFailedAuthorityCohortSha256);failedAuthority=JSON.parse(failedRaw);failedNamespaces=precisionFailedAuthorityNamespaces(failedAuthority);predecessorInputs.push(failedAuthorityCohort.file);
+ const matching=expected=>{const found=Object.keys(failedAuthority.inputs).filter(file=>file.endsWith('.json')&&fs.existsSync(file)&&hashBytes(file)===expected);assert.equal(found.length,1,'EXACT_FAILED_COHORT_IMAGE_MATERIAL_REQUIRED');return found[0];};
+ function hashBytes(file){return digest(fs.readFileSync(file));}
+ const imageFile=matching(failedAuthority.imageReceiptSha256),materialFile=matching(failedAuthority.materialReceiptSha256);predecessorInputs.push(imageFile,materialFile);predecessorImage=JSON.parse(fs.readFileSync(imageFile));predecessorMaterial=JSON.parse(fs.readFileSync(materialFile));
+ assert.equal(predecessorImage.format,'sabalan-current-backend-image/v1');assert.equal(predecessorImage.pass,true);assert.equal(predecessorImage.sourceUnchanged,true);assert.equal(predecessorImage.protectedServicesUnchanged,true);assert.equal(predecessorImage.originalChildren.allOriginalChildrenClosed,true);assert.equal(predecessorImage.originalChildren.interrupted,false);assert.equal(predecessorImage.image.id,failedAuthority.immutableImage);assert.equal(predecessorImage.materialReceiptSha256,failedAuthority.materialReceiptSha256);assert.equal(predecessorMaterial.materialized,true);
+ failedCandidateEvidence={image:predecessorImage.image.id,imageReceiptFile:imageFile,imageReceiptSha256:hashBytes(imageFile),materialReceiptFile:materialFile,materialReceiptSha256:hashBytes(materialFile)};
+}
 for(const [receipt,material,raw]of [[imageReceipt,materialReceipt,materialReceiptRaw],[retainedReceipt,retainedMaterial,retainedMaterialRaw]]){
  assert.equal(receipt.format,'sabalan-current-backend-image/v1');assert.equal(receipt.pass,true);assert.equal(receipt.sourceUnchanged,true);assert.equal(receipt.protectedServicesUnchanged,true);
  assert.equal(receipt.originalChildren.allOriginalChildrenClosed,true);assert.equal(receipt.originalChildren.interrupted,false);assert.equal(receipt.materialReceiptSha256,digest(raw));assert.equal(material.materialized,true);assert.match(receipt.sourceCommit,/^[a-f0-9]{40}$/);
@@ -103,7 +111,7 @@ const previous=Object.fromEntries(slots.map(service=>[service,inspect(service)])
 const sourceDist=previous['backend-candidate'].Mounts.find(value=>value.Destination==='/app/dist');assert.ok(!sourceDist||!sourceDist.RW);
 const sourceRoot=sourceDist?path.dirname(path.dirname(sourceDist.Source)):root;
 let reobservedBaseline=null;
-if(predecessor)reobservedBaseline=validateReobservedCandidateSlots(predecessor,previous);
+if(failedAuthority){reobservedBaseline=validatePrecisionFailedAuthoritySlots(failedAuthority,previous,protectedBefore);reobservedBaseline.candidateEvidence=failedCandidateEvidence;}else if(predecessor)reobservedBaseline=validateReobservedCandidateSlots(predecessor,previous);
 else{assert.equal(previous['backend-retained'].Image,oldImage);assert.equal(previous['backend-candidate'].Image,oldImage);assert.deepEqual(identity(previous['backend-retained']),Object.fromEntries(['id','image','startedAt'].map(key=>[key,historical.actual['backend-retained'][key]])));}
 if(predecessorImage){const [observedPredecessor]=JSON.parse(docker(['image','inspect',predecessorImage.image.id]));assert.equal(observedPredecessor.Id,predecessorImage.image.id);assert.deepEqual(observedPredecessor.RootFS.Layers,predecessorImage.image.layers);}
 const [installedImage]=JSON.parse(docker(['image','inspect',image]));
@@ -189,22 +197,23 @@ const inputs=Object.fromEntries([base,...overlays,import.meta.filename,imageRece
 const report={format:'sabalan-application-native-candidate/v1',replacementEntry:'scripts/replace-qualified-application-native-candidate-local.mjs',operation,pass:false,phase:'INTENT',productionAdmission:false,
   onlyCandidateReplaced:!isolateAuthorityCohort,retainedOriginalPreserved:!isolateAuthorityCohort,...(isolateAuthorityCohort?{onlyQualificationSlotsRecreated:true,authorityCohort:{format:'sabalan-native-authority-cohort/v1',nonce:cohortNonce,prepared:{},verified:{}}}:{}),originalLimitsUnchanged:true,protectedBefore,previous:Object.fromEntries(slots.map(service=>[service,identity(previous[service])])),inputs,
   immutableImage:image,materialReceiptSha256:digest(materialReceiptRaw),imageReceiptSha256:digest(imageReceiptRaw),removedCodeTargets,
-  ...(predecessor?{previousReplacement:{...previousReplacement},reobservedBaseline}:{}),nativeQuiet:processQuiet(),sqlQuiet:sqlQuiet()};
+  ...(predecessor?{previousReplacement:{...previousReplacement},reobservedBaseline}:{}),...(failedAuthority?{failedAuthorityCohort:{...failedAuthorityCohort},reconciledFailedAuthorityBaseline:reobservedBaseline,failedAuthorityBaselineVerified:{}}:{}),nativeQuiet:processQuiet(),sqlQuiet:sqlQuiet()};
 const save=()=>{fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');};save();
 const children=[];let interrupted=false;for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{interrupted=true;});
 async function originalInstalledReadback(service,expected){
  status();const result=await new Promise(resolve=>{const child=spawn('docker',['exec','-i',previous[service].Id,'node','--input-type=module'],{stdio:['pipe','pipe','pipe']});children.push(child);let stdout='',stderr='',failure;child.stdout.on('data',bytes=>{if(Buffer.byteLength(stdout)+bytes.length<=8*1024**2)stdout+=bytes;else failure??='BASELINE_PROBE_STDOUT_BOUND';});child.stderr.on('data',bytes=>{if(Buffer.byteLength(stderr)+bytes.length<=65536)stderr+=bytes;else failure??='BASELINE_PROBE_STDERR_BOUND';});child.stdin.on('error',error=>{failure??=error.code;});child.on('error',error=>{failure??=error.code;});child.on('close',(code,signal)=>resolve({originalPid:child.pid,code,signal,stdout,stderr,failure}));child.stdin.end(installedProbe);});
  assert.equal(result.code,0);assert.equal(result.signal,null);assert.equal(result.failure,undefined);assert.equal(interrupted,false);const value=JSON.parse(result.stdout);validateInstalledNativeRole(value,expected);return{originalPid:result.originalPid,code:0,signal:null,stderr:result.stderr,result:value};
 }
-async function originalAuthorityDirectory(service,mode,observed,expected=null,peerExpected=null){
+async function originalAuthorityDirectory(service,mode,observed,expected=null,peerExpected=null,nonce=cohortNonce,logField=null){
  const owner=authorityWriterRoot(observed[service],service),fixture=fs.readFileSync(path.join(root,authorityCohortSources[1]));
- const spec={mode,kind:owner.kind,nonce:cohortNonce,root:owner.target,expected,peerExpected};
+ const spec={mode,kind:owner.kind,nonce,root:owner.target,expected,peerExpected};
  const bootstrap="import sys,json,base64,hashlib,io;p=json.load(sys.stdin);s=base64.b64decode(p['source'],validate=True);assert hashlib.sha256(s).hexdigest()=="+JSON.stringify(digest(fixture))+";sys.stdin=io.StringIO(json.dumps(p['spec']));exec(compile(s,'original-authority-cohort','exec'),globals())";
  status();const result=await new Promise(resolve=>{const child=spawn('docker',['exec','-i',observed[service].Id,'/usr/bin/python3','-I','-B','-c',bootstrap],{stdio:['pipe','pipe','pipe']});children.push(child);let stdout='',stderr='',failure;child.stdout.on('data',bytes=>{if(Buffer.byteLength(stdout)+bytes.length<=65536)stdout+=bytes;else failure??='AUTHORITY_COHORT_STDOUT_BOUND';});child.stderr.on('data',bytes=>{if(Buffer.byteLength(stderr)+bytes.length<=65536)stderr+=bytes;else failure??='AUTHORITY_COHORT_STDERR_BOUND';});child.stdin.on('error',error=>{failure??=error.code;});child.on('error',error=>{failure??=error.code;});child.on('close',(code,signal)=>resolve({originalPid:child.pid,code,signal,stdout,stderr,failure}));child.stdin.end(JSON.stringify({source:fixture.toString('base64'),spec}));});
+ const stage=mode==='create'?'prepared':'verified';(logField?report[logField]:report.authorityCohort[stage])[service]={...result};save();
  assert.equal(result.code,0);assert.equal(result.signal,null);assert.equal(result.failure,undefined);assert.equal(interrupted,false);return {...result,result:JSON.parse(result.stdout)};
 }
 try{
- if(predecessor){report.reobservedInstalled={};for(const service of slots){report.reobservedInstalled[service]=await originalInstalledReadback(service,nativeMaterialIdentity(service==='backend-candidate'?predecessorMaterial:retainedMaterial));save();}report.reobservedNativeQuiet=processQuiet();report.reobservedSqlQuiet=sqlQuiet();for(const service of slots)assert.deepEqual(identity(inspect(service)),identity(previous[service]));report.reobservedBaseline.installedBytesVerified=true;report.reobservedBaseline.nativeAndSqlQuietVerified=true;save();}
+ if(predecessor||failedAuthority){report.reobservedInstalled={};for(const service of slots){report.reobservedInstalled[service]=await originalInstalledReadback(service,nativeMaterialIdentity(service==='backend-candidate'?predecessorMaterial:retainedMaterial));save();}report.reobservedNativeQuiet=processQuiet();report.reobservedSqlQuiet=sqlQuiet();for(const service of slots)assert.deepEqual(identity(inspect(service)),identity(previous[service]));const baseline=report.reconciledFailedAuthorityBaseline??report.reobservedBaseline;baseline.installedBytesVerified=true;baseline.nativeAndSqlQuietVerified=true;save();if(failedAuthority){for(const service of slots){const peer=service==='backend-candidate'?'backend-retained':'backend-candidate';report.failedAuthorityBaselineVerified[service]=await originalAuthorityDirectory(service,'verify',previous,failedNamespaces[service],failedNamespaces[peer],failedAuthority.authorityCohort.nonce,'failedAuthorityBaselineVerified');save();}baseline.currentEmptyNamespacesVerified=true;save();}}
  if(inspectOnly){report.phase='INSPECTION_COMPLETE';report.inspectionOnly=true;report.originalChildren={allOriginalChildrenClosed:true,interrupted:false};assert.equal(interrupted,false);save();console.log(JSON.stringify({inspectionOnly:true,reportPath}));return;}
 
   for(const [file,digest]of Object.entries(inputs))assert.equal(hash(file),digest);
@@ -248,7 +257,7 @@ try{
   report.finalProtected=Object.fromEntries(protectedServices.map(service=>[service,identity(inspect(service))]));assert.deepEqual(report.finalProtected,protectedBefore);
   for(const [file,digest]of Object.entries(inputs))assert.equal(hash(file),digest);
   assert.equal(interrupted,false);assert.ok(children.every(child=>child.exitCode!==null||child.signalCode!==null));report.originalChildren={allOriginalChildrenClosed:true,interrupted:false};
-  if(isolateAuthorityCohort)validateAuthorityCohortReceipt(report);report.pass=true;report.phase='COMPLETE';save();
+  if(isolateAuthorityCohort)validateAuthorityCohortReceipt(report);if(failedAuthority)validateReconciledPrecisionFailedBaseline(report,failedAuthority);report.pass=true;report.phase='COMPLETE';save();
 }catch(error){report.failure={name:error.name,message:error.message};report.phase='FAILED_CLOSED';save();
   if(children.some(child=>child.exitCode===null&&child.signalCode===null)){await new Promise(()=>{setInterval(()=>{void children;},30000);});}
   throw error;

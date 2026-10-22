@@ -18,6 +18,61 @@ export const authorityMounts=Object.freeze({
   ],
 });
 export function authoritySubpath(nonce){assert.match(nonce,/^[a-f0-9]{32}$/,'FRESH_AUTHORITY_COHORT_NONCE_REQUIRED');return 'cohort-'+nonce;}
+export function validateAuthorityNamespaceIdentity(value){
+  const fields=['st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns'];
+  assert.deepEqual(Object.keys(value).sort(),fields.sort());
+  for(const field of fields)assert.match(value[field],/^(?:0|[1-9][0-9]{0,19})$/,'LOSSLESS_AUTHORITY_NAMESPACE_IDENTITY_REQUIRED');
+  assert.equal(value.st_uid,'0');assert.equal(value.st_mode,String(0o40700));return value;
+}
+export const precisionFailedAuthorityCohortSha256='f071286164f1758088cb8cc1ed055dad7e039864e192171233726b28ddc17a92';
+export function precisionFailedAuthorityNamespaces(value){
+  // This is the one preserved, independently reproduced precision failure.
+  // It is never upgraded to a successful replacement receipt.
+  assert.equal(value.operation,'70ef926d515138b606e47ce11e32d011');assert.equal(value.pass,false);assert.equal(value.phase,'FAILED_CLOSED');assert.equal(value.productionAdmission,false);
+  assert.equal(value.authorityCohort?.nonce,'cbd70d62f0ce9abafb348acff4f86f56');assert.deepEqual(value.authorityCohort.verified,{});
+  assert.equal(value.up.code,0);assert.equal(value.up.signal,null);assert.equal(value.up.failure,undefined);
+  assert.deepEqual(value.protectedBefore,value.protectedAfter);assert.equal(Object.keys(value.protectedBefore).length,8);
+  assert.equal(value.failure.name,'AssertionError');assert.ok(value.failure.message.includes('1 !== 0'));
+  const result={};
+  for(const service of Object.keys(authorityMounts)){
+    const prepared=value.authorityCohort.prepared[service];assert.equal(prepared.code,0);assert.equal(prepared.signal,null);assert.equal(prepared.failure,undefined);assert.ok(Number.isSafeInteger(prepared.originalPid)&&prepared.originalPid>0);
+    assert.ok(Buffer.byteLength(prepared.stdout)<=65536);let fields=0;
+    const lossless=prepared.stdout.replace(/"(st_dev|st_ino|st_uid|st_gid|st_mode|st_nlink|st_size|st_mtime_ns|st_ctime_ns)"\s*:\s*([0-9]+)/g,(_,key,integer)=>{fields++;return JSON.stringify(key)+':'+JSON.stringify(integer);});
+    assert.equal(fields,9,'EXACT_ORIGINAL_RAW_NAMESPACE_REQUIRED');const parsed=JSON.parse(lossless);
+    assert.equal(parsed.format,'sabalan-authority-cohort-directory/v1');assert.equal(parsed.mode,'create');assert.equal(parsed.nonce,value.authorityCohort.nonce);assert.equal(parsed.empty,true);assert.equal(parsed.exclusivelyCreated,true);assert.equal(parsed.productionAdmission,false);
+    result[service]=validateAuthorityNamespaceIdentity(parsed.namespace);
+  }
+  return result;
+}
+export function validatePrecisionFailedAuthoritySlots(failed,containers,protectedNow){
+  precisionFailedAuthorityNamespaces(failed);assert.deepEqual(protectedNow,failed.protectedAfter);validateAuthorityCohortSlots(containers,failed.authorityCohort.nonce);
+  const identities={};
+  for(const service of Object.keys(authorityMounts)){
+    const current=containers[service];assert.notEqual(current.Id,failed.previous[service].id);assert.notEqual(current.State.StartedAt,failed.previous[service].startedAt);
+    assert.equal(current.Image,service==='backend-candidate'?failed.immutableImage:failed.previous[service].image);assert.equal(current.State.Running,true);assert.equal(current.State.Health.Status,'healthy');
+    identities[service]={id:current.Id,image:current.Image,startedAt:current.State.StartedAt};
+  }
+  return {format:'sabalan-reobserved-precision-failed-authority-cohort/v1',failedOperation:failed.operation,failedReportRemainsFailed:true,adoptsOriginalPopen:false,originalNativeClosureInferred:false,identities,installedBytesVerified:false,nativeAndSqlQuietVerified:false,currentEmptyNamespacesVerified:false};
+}
+export function validateReconciledPrecisionFailedBaseline(value,failed){
+  assert.equal(value.failedAuthorityCohort.sha256,precisionFailedAuthorityCohortSha256);assert.ok(value.authorityCohort,'FAILED_BASELINE_ONLY_PERMITS_NEW_COHORT_ROTATION');
+  const expected=precisionFailedAuthorityNamespaces(failed),baseline=value.reconciledFailedAuthorityBaseline;
+  assert.equal(baseline.format,'sabalan-reobserved-precision-failed-authority-cohort/v1');assert.equal(baseline.failedOperation,failed.operation);assert.equal(baseline.failedReportRemainsFailed,true);
+  for(const key of ['adoptsOriginalPopen','originalNativeClosureInferred'])assert.equal(baseline[key],false);
+  for(const key of ['installedBytesVerified','nativeAndSqlQuietVerified','currentEmptyNamespacesVerified'])assert.equal(baseline[key],true);
+  assert.deepEqual(baseline.identities,value.previous);assert.notEqual(value.authorityCohort.nonce,failed.authorityCohort.nonce);
+  assert.equal(baseline.candidateEvidence.image,failed.immutableImage);
+  for(const service of Object.keys(authorityMounts)){
+    const row=value.failedAuthorityBaselineVerified[service],readback=value.reobservedInstalled[service];
+    for(const child of [row,readback]){assert.ok(Number.isSafeInteger(child.originalPid)&&child.originalPid>0);assert.equal(child.code,0);assert.equal(child.signal,null);assert.equal(child.failure,undefined);}
+    const peer=service==='backend-candidate'?'backend-retained':'backend-candidate';
+    assert.equal(row.result.mode,'verify');assert.equal(row.result.nonce,failed.authorityCohort.nonce);assert.equal(row.result.empty,true);
+    assert.deepEqual(row.result.namespace,expected[service]);assert.deepEqual(row.result.consumerNamespace,expected[peer]);
+    assert.equal(value.reobservedNativeQuiet[service].originalNativeProcesses,0);assert.equal(value.reobservedNativeQuiet[service].adoptsOriginalPopen,false);
+  }
+  assert.equal(value.reobservedSqlQuiet.visible,true);assert.equal(value.reobservedSqlQuiet.sessions,0);assert.equal(value.reobservedSqlQuiet.prepared,0);assert.equal(value.reobservedSqlQuiet.system,value.sqlQuiet.system);
+  return true;
+}
 const configuredMount=(value,target)=>{const found=value.volumes.filter(m=>m.target===target);assert.equal(found.length,1);return found[0];};
 export function validateAuthorityCohortConfiguration(configuration,nonce){
   const subpath=authoritySubpath(nonce);assert.equal(configuration.name,'sabalanerp-local');
@@ -75,6 +130,7 @@ export function validateAuthorityCohortReceipt(value){
     for(const row of [prepared,verified]){assert.ok(Number.isSafeInteger(row.originalPid)&&row.originalPid>0);assert.equal(row.code,0);assert.equal(row.signal,null);assert.equal(row.failure,undefined);}
     assert.equal(prepared.result.format,'sabalan-authority-cohort-directory/v1');assert.equal(prepared.result.mode,'create');assert.equal(prepared.result.nonce,cohort.nonce);assert.equal(prepared.result.exclusivelyCreated,true);assert.equal(prepared.result.empty,true);
     assert.equal(verified.result.format,'sabalan-authority-cohort-directory/v1');assert.equal(verified.result.mode,'verify');assert.equal(verified.result.nonce,cohort.nonce);assert.equal(verified.result.empty,true);
+    validateAuthorityNamespaceIdentity(prepared.result.namespace);validateAuthorityNamespaceIdentity(verified.result.namespace);validateAuthorityNamespaceIdentity(verified.result.consumerNamespace);
     assert.deepEqual(verified.result.namespace,prepared.result.namespace);
     const peer=service==='backend-candidate'?'backend-retained':'backend-candidate';
     assert.deepEqual(verified.result.consumerNamespace,cohort.prepared[peer].result.namespace);

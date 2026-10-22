@@ -4,6 +4,7 @@ import {constants} from 'node:fs';
 import path from 'node:path';
 import {createHash,randomBytes} from 'node:crypto';
 import puppeteer from 'puppeteer';
+import {observeNativeNavigation,prepareNativeBrowserForm,persistNativeBrowserFailure,waitForNativeSubmitEnabled} from './application-native-browser-readiness.fixture.mjs';
 import WebSocket from 'ws';
 import {assertNativePrivateInterface} from './native-private-network.fixture.mjs';
 import {readOriginalRemoteBrowserConnection} from '../../deploy/scripts/original-remote-browser-capability.mjs';
@@ -52,7 +53,7 @@ export async function runNativeBrowserAcceptance({edge,root,seed,actors,uiArtifa
     uiArtifacts,operations:[],tickets:[],sockets:[],screenshots:[],pageErrors:[],externalRequests:[],
     actualCompiledPages:true,actualCanonicalAuthorization:true,fullSalesContractIssuanceQualified:false,
     realElapsed24HoursQualified:false,productionAdmission:false};
-  let browser,networkClient;const pending=new Set(),failures=[];
+  let browser,networkClient,primaryFailure;const tabs=[];const pending=new Set(),failures=[];
   const closeNetworkClient=async abrupt=>{
     if(!networkClient||networkClient.readyState===WebSocket.CLOSED)return;
     const closed=new Promise(resolve=>networkClient.once('close',resolve));
@@ -69,7 +70,7 @@ export async function runNativeBrowserAcceptance({edge,root,seed,actors,uiArtifa
       buildId:record.value.buildId,slotId:record.value.slotId,method:record.value.method});return record.value;
   }
   async function pageFor(artifact,actor) {
-    const page=await browser.newPage();await page.setViewport({width:1280,height:900,deviceScaleFactor:1});
+    const page=await browser.newPage(),readiness=observeNativeNavigation(page);await page.setViewport({width:1280,height:900,deviceScaleFactor:1});
     await page.setCookie({name:'sabalan_session',value:seed.sessionToken,url:origin,httpOnly:true,sameSite:'Lax'});
     page.on('pageerror',error=>evidence.pageErrors.push(error.message));
     page.on('request',request=>{const url=new URL(request.url());if(['http:','https:','ws:','wss:'].includes(url.protocol)&&url.origin.replace(/^ws/,'http')!==origin)
@@ -108,12 +109,14 @@ export async function runNativeBrowserAcceptance({edge,root,seed,actors,uiArtifa
       if(response.opcode===1&&response.payloadData.startsWith('40'))socket.authenticated=true;
       if(response.opcode===1&&response.payloadData.startsWith('44'))failures.push(Error('CANONICAL_BROWSER_SOCKET_AUTHENTICATION_REFUSED'));
     });
-    return {page,socketRequests,artifact,actor};
+    const tab={page,socketRequests,artifact,actor,readiness};tabs.push(tab);return tab;
   }
   const inputSelector='form input[maxlength="180"]',descriptionSelector='form textarea[maxlength="10000"]';
   async function fill(tab,label) {
-    const response=await tab.page.goto(origin+'/dashboard/support/new',{waitUntil:'networkidle0',timeout:60000});
-    assert.equal(response.status(),200);await tab.page.waitForSelector(inputSelector,{visible:true,timeout:30000});
+    await prepareNativeBrowserForm(tab.page,origin,tab.readiness,()=>until(()=>{
+      if(failures.length)throw failures[0];
+      return [...tab.socketRequests.values()].some(value=>value.authenticated&&!value.closed);
+    }));
     const title='Private browser '+label+' '+operation,description='Actual unsaved original form '+label+' '+operation;
     await tab.page.type(inputSelector,title);await tab.page.type(descriptionSelector,description);
     const screenshot=path.join(directory,label+'.png');await tab.page.screenshot({path:screenshot,type:'png'});
@@ -126,6 +129,7 @@ export async function runNativeBrowserAcceptance({edge,root,seed,actors,uiArtifa
   async function submit(tab,draft) {
     assert.equal(await tab.page.$eval(inputSelector,node=>node.value),draft.title);
     assert.equal(await tab.page.$eval(descriptionSelector,node=>node.value),draft.description);
+    await waitForNativeSubmitEnabled(tab.page);
     const created=tab.page.waitForResponse(response=>new URL(response.url()).pathname==='/api/support-tickets'&&response.request().method()==='POST',{timeout:60000});
     await tab.page.click('form button[type="submit"]');const response=await created,body=await response.json();
     assert.equal(response.status(),201,JSON.stringify(body));assert.equal(body.data.title,draft.title);
@@ -205,10 +209,16 @@ export async function runNativeBrowserAcceptance({edge,root,seed,actors,uiArtifa
     evidence.actualNetworkLoss={operationId:networkOperationId,authenticated:true,termination:'original-client-network-loss',
       originalOperationOutcome:'UNKNOWN',compiledBrowserSessionsClosedNormally:true};
     return evidence;
+  } catch(error) {
+    primaryFailure=error;
+    try{await persistNativeBrowserFailure(directory,tabs,error);}catch{/* Diagnostic failure cannot replace the original qualification failure. */}
+    throw error;
   } finally {
-    if(browser)await browser.close();
-    await closeNetworkClient(false);
+    let cleanupFailure;
+    try{if(browser)await browser.close();}catch(error){cleanupFailure=error;}
+    try{await closeNetworkClient(false);}catch(error){cleanupFailure??=error;}
     await Promise.allSettled([...pending]);
+    if(!primaryFailure&&cleanupFailure)throw cleanupFailure;
     // Caller owns actual transport/journal/native drain after this original
     // browser's awaited normal close; no controller or lease is released here.
   }

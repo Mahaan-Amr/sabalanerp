@@ -69,6 +69,18 @@ def profile(file,digest,verify_executables=True):
  return p
 def birth(pid):
  return int(pathlib.Path('/proc/'+str(pid)+'/stat').read_text().rsplit(') ',1)[1].split()[19])
+class CommandFailure(RuntimeError):
+ def __init__(self,program,exitcode,stderr):
+  self.exitcode=exitcode;self.stderrSha256=sha(stderr);self.stderrBytes=len(stderr)
+  super().__init__('COMMAND_FAILED:'+program+':'+str(exitcode))
+
+def periodic_dns_refresh(query,deadline,previous):
+ try:updated=query('dns')
+ except CommandFailure:
+  # Only the previously qualified DNS set remains usable until its ORIGINAL expiry.
+  deadline.check();query('ipv6',previous['ipv6']);deadline.check();return None
+ query('ipv6',updated['ipv6']);deadline.check();return updated
+
 def command(argv,fd=None,data=None,timeout=15):
  environment=dict(os.environ)
  for k in list(environment):
@@ -81,7 +93,7 @@ def command(argv,fd=None,data=None,timeout=15):
   except subprocess.TimeoutExpired:p.kill();p.communicate()
   raise RuntimeError('OWNED_QUERY_TIMEOUT:'+pathlib.Path(argv[0]).name)
  require(len(out)+len(err)<=1024*1024,'COMMAND_OUTPUT_BOUND')
- require(p.returncode==0,'COMMAND_FAILED:'+pathlib.Path(argv[0]).name+':'+str(p.returncode))
+ if p.returncode!=0:raise CommandFailure(pathlib.Path(argv[0]).name,p.returncode,err)
  return out
 def observe(p):
  value=json.loads(command([EXECUTABLES['docker'],'--host','unix:///var/run/docker.sock','inspect',p['containerId']]))
@@ -359,7 +371,9 @@ def monitor(p,file,digest,mode):
   def child_query(mode,addresses=None):
    if deadline is not None:deadline.check()
    extra=[]if addresses is None else['--addresses-json',json.dumps(addresses)]
-   value=json.loads(command(inside(fd,EXECUTABLES['python'],'-I','-B',str(pathlib.Path(__file__).resolve()),mode,'--profile',file,'--sha256',digest,*extra),fd))
+   try:value=json.loads(command(inside(fd,EXECUTABLES['python'],'-I','-B',str(pathlib.Path(__file__).resolve()),mode,'--profile',file,'--sha256',digest,*extra),fd))
+   except CommandFailure as error:
+    print(json.dumps({'event':'child-query-failed','query':mode,'reason':'NONZERO_EXIT','exitCode':error.exitcode,'stderrSha256':error.stderrSha256,'stderrBytes':error.stderrBytes}),flush=True);raise
    if deadline is not None:deadline.check()
    return value
   dns=child_query('dns')
@@ -399,7 +413,8 @@ def monitor(p,file,digest,mode):
    named=lockfile.lstat();held=os.fstat(lockfd);require((named.st_dev,named.st_ino)==lockidentity==(held.st_dev,held.st_ino),'ORIGINAL_OWNERSHIP_LOCK_CHANGED')
    child_query('ipv6',dns['ipv6'])
    if time.monotonic()>=refresh:
-    updated=child_query('dns');child_query('ipv6',updated['ipv6']);deadline.check()
+    updated=periodic_dns_refresh(child_query,deadline,dns)
+    if updated is None:continue
     if mode=='route'and updated['ipv4']!=dns['ipv4']:owner.change(updated['ipv4'],'update',deadline)
     deadline.replace(updated['expiresMonotonic']);dns=updated;refresh=time.monotonic()+(dns['expiresMonotonic']-time.monotonic())/2
   require(not deadline.failed.is_set(),'DNS_EXPIRY_IS_NOT_SUCCESSFUL_SHUTDOWN')

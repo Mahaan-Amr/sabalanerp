@@ -151,6 +151,24 @@ let negativeRetirement=null;
 if(negativeRetirementArgument){const raw=fs.readFileSync(negativeRetirementArgument.file);assert.equal(createHash('sha256').update(raw).digest('hex'),negativeRetirementArgument.sha256);negativeRetirement=validateA29RetirementCertificate(JSON.parse(raw),loadA29Evidence());}
 const processProbe=String.raw`import os,json,stat,hashlib
 from pathlib import Path
+def assert_negative_original_guardian_not_live(guardian):
+ boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip();namespace=os.readlink('/proc/self/ns/pid')
+ if boot!=guardian['bootId'] or namespace!=guardian['pidNamespace']:return
+ process=Path('/proc')/str(guardian['pid'])
+ def birth_from_stat(raw):
+  assert len(raw)<=16384 and ') ' in raw and raw.split(' ',1)[0]==str(guardian['pid']),'A29_GUARDIAN_STAT_UNKNOWN'
+  fields=raw.rsplit(') ',1)[1].split();assert len(fields)>=20 and fields[19].isdigit(),'A29_GUARDIAN_STAT_UNKNOWN';return fields[19]
+ try:first=(process/'stat').read_text()
+ except FileNotFoundError:
+  # A missing stat alone must not hide permissions, malformed procfs, or a still-present directory.
+  try:process.stat()
+  except FileNotFoundError:pass
+  else:raise AssertionError('A29_GUARDIAN_OBSERVATION_UNKNOWN')
+ else:
+  observedNamespace=os.readlink(process/'ns/pid');second=(process/'stat').read_text()
+  assert observedNamespace==os.readlink(process/'ns/pid')==namespace and birth_from_stat(first)==birth_from_stat(second),'A29_GUARDIAN_OBSERVATION_CHANGED'
+  assert birth_from_stat(second)!=str(guardian['startTicks']),'A29_ORIGINAL_GUARDIAN_STILL_PRESENT'
+ assert Path('/proc/sys/kernel/random/boot_id').read_text().strip()==boot and os.readlink('/proc/self/ns/pid')==namespace,'A29_OBSERVATION_NAMESPACE_CHANGED'
 found=[]
 for p in Path('/proc').iterdir():
  if not p.name.isdigit() or int(p.name)==os.getpid(): continue
@@ -196,8 +214,7 @@ for operation in Path('/app/online-runtime-acceptance').glob('application-native
    assert str(Path(scope['boundaryDirectory'])/'state.json')==retired['workFile'] and str(Path(scope['boundaryDirectory'])/'claim.json')==retired['claimFile'],'A29_SCOPE_CHANGED'
    work=read(Path(retired['workFile']));claim=read(Path(retired['claimFile']))
    assert readHashes[retired['workFile']]==retired['workSha256'] and work['phase']=='QUIESCENT' and readHashes[retired['claimFile']]==retired['claimSha256'] and claim['native']['claimSha256']==retired['nativeSha256'],'A29_WORK_OR_CLAIM_CHANGED'
-   currentBoot=Path('/proc/sys/kernel/random/boot_id').read_text().strip();currentNamespace=os.readlink('/proc/self/ns/pid')
-   assert currentBoot!=retired['guardian']['bootId'] or currentNamespace not in ['pid:[4026532608]','pid:[4026532758]'],'A29_ORIGINAL_NAMESPACE_STILL_PRESENT'
+   assert_negative_original_guardian_not_live(retired['guardian'])
    negativeCancelled+=1;continue
   assert native['phase']=='QUIESCENT' and native['nativeReaped'] is True,'APPLICATION_ROLE_DURABLE_OWNER_UNKNOWN'
   assert native.get('databaseQuiet') is True or native.get('sqliteNativeClosed') is True,'APPLICATION_ROLE_DURABLE_SQL_UNKNOWN'

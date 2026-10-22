@@ -4,6 +4,7 @@ import path from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
 import {execFileSync,spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
+import {validateA29RetirementCertificate,loadA29Evidence,a29EvidenceFiles} from './lib/a29-known-negative-retirement.mjs';
 import {authorityCohortSources,authorityMounts,authoritySubpath,authorityWriterRoot,validateAuthorityCohortConfiguration,validateAuthorityCohortSlots,validateAuthorityCohortReceipt,precisionFailedAuthorityCohortSha256,precisionFailedAuthorityNamespaces,validatePrecisionFailedAuthoritySlots,validateReconciledPrecisionFailedBaseline} from './lib/application-native-authority-cohort.mjs';
 
 export function validateCandidatePreflight(value,now=Date.now()){
@@ -37,10 +38,12 @@ export function validateInstalledNativeRole(result,expected){
  assert.equal(result.entryExportPresent,true);assert.equal(result.applicationStarted,false);assert.equal(result.databaseConnected,false);assert.equal(result.productionAdmission,false);
 }
 export function parseCandidateReplacementArguments(argv){
+ let negativeRetirement=null;if(argv.at(-4)==='--a29-negative-retirement-file'){assert.equal(argv.at(-2),'--a29-negative-retirement-sha256');assert.ok(path.isAbsolute(argv.at(-3)));assert.match(argv.at(-1),/^[a-f0-9]{64}$/);negativeRetirement={file:path.resolve(argv.at(-3)),sha256:argv.at(-1)};argv=argv.slice(0,-4);}
  const isolateAuthorityCohort=argv.at(-1)==='--isolate-authority-cohort';if(isolateAuthorityCohort)argv=argv.slice(0,-1);
  assert.ok(argv.length===7||argv.length===11,'EXACT_REPLACEMENT_ARGUMENTS_REQUIRED');assert.ok(['--inspect','--replace'].includes(argv[0]));
  for(const[i,key]of ['--image-receipt','--material-receipt','--preflight'].entries())assert.equal(argv[1+i*2],key);
- const result={inspectOnly:argv[0]==='--inspect',imageReceiptFile:path.resolve(argv[2]),materialReceiptFile:path.resolve(argv[4]),preflightFile:path.resolve(argv[6]),...(isolateAuthorityCohort?{isolateAuthorityCohort:true}:{})};
+ if(negativeRetirement)assert.equal(isolateAuthorityCohort,true,'A29_NEGATIVE_RETIREMENT_REQUIRES_FRESH_COHORT');
+ const result={...(negativeRetirement?{negativeRetirement}:{}),inspectOnly:argv[0]==='--inspect',imageReceiptFile:path.resolve(argv[2]),materialReceiptFile:path.resolve(argv[4]),preflightFile:path.resolve(argv[6]),...(isolateAuthorityCohort?{isolateAuthorityCohort:true}:{})};
  if(argv.length===11){const failed=argv[7]==='--failed-authority-cohort-receipt';assert.equal(argv[7],failed?'--failed-authority-cohort-receipt':'--previous-replacement-receipt');assert.equal(argv[9],failed?'--failed-authority-cohort-sha256':'--previous-replacement-sha256');assert.ok(path.isAbsolute(argv[8]));assert.match(argv[8].replaceAll('\\','/'),/\/reports\/qa\/application-native-candidate-[a-f0-9]{32}\.json$/);assert.match(argv[10],/^[a-f0-9]{64}$/);if(failed){assert.equal(isolateAuthorityCohort,true,'FAILED_COHORT_REQUIRES_FRESH_ROTATION');assert.equal(argv[10],precisionFailedAuthorityCohortSha256);result.failedAuthorityCohort={file:path.resolve(argv[8]),sha256:argv[10]};}else result.previousReplacement={file:path.resolve(argv[8]),sha256:argv[10]};}return result;
 }
 export function validatePreviousCandidateReplacement(value){
@@ -59,7 +62,7 @@ export function validateReobservedCandidateSlots(previous,current){
 }
 async function main(){
 const root=path.resolve(import.meta.dirname,'..'),base='D:/sabalanerp/docker-compose.local.yml';
-const {inspectOnly,imageReceiptFile,materialReceiptFile,preflightFile,previousReplacement,failedAuthorityCohort,isolateAuthorityCohort=false}=parseCandidateReplacementArguments(process.argv.slice(2));
+const {inspectOnly,imageReceiptFile,materialReceiptFile,preflightFile,previousReplacement,failedAuthorityCohort,isolateAuthorityCohort=false,negativeRetirement:negativeRetirementArgument}=parseCandidateReplacementArguments(process.argv.slice(2));
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const imageReceiptRaw=fs.readFileSync(imageReceiptFile),imageReceipt=JSON.parse(imageReceiptRaw),materialReceiptRaw=fs.readFileSync(materialReceiptFile),materialReceipt=JSON.parse(materialReceiptRaw);
 const preflight=()=>validateCandidatePreflight(JSON.parse(fs.readFileSync(preflightFile)));preflight();
@@ -144,7 +147,9 @@ for(const service of slots){const wanted=configuration.services[service],old=pre
   const remainingOld=old.Mounts.filter(value=>!removedCodeTargets.includes(value.Destination));const newRoots=isolateAuthorityCohort?authorityMounts[service].filter(m=>!m.subpath&&!oldMounts.has(m.target)).map(m=>m.target):[];assert.equal(wanted.volumes.length,remainingOld.length+newRoots.length);
   assert.deepEqual(wanted.volumes.map(value=>value.target).sort(),[...remainingOld.map(value=>value.Destination),...newRoots].sort());
 }
-const processProbe=String.raw`import os,json,stat
+let negativeRetirement=null;
+if(negativeRetirementArgument){const raw=fs.readFileSync(negativeRetirementArgument.file);assert.equal(createHash('sha256').update(raw).digest('hex'),negativeRetirementArgument.sha256);negativeRetirement=validateA29RetirementCertificate(JSON.parse(raw),loadA29Evidence());}
+const processProbe=String.raw`import os,json,stat,hashlib
 from pathlib import Path
 found=[]
 for p in Path('/proc').iterdir():
@@ -154,7 +159,10 @@ for p in Path('/proc').iterdir():
   if any(Path(a.decode(errors='strict')).name in ['online-runtime-owner.py','online-inquiry-owner.py','fixture.py','application-native-candidate-controller.py','run-full-catalog-controller.py','chromium','chrome','chrome_crashpad_handler'] for a in argv if a): found.append(int(p.name))
  except FileNotFoundError: pass
 assert not found, 'APPLICATION_ROLE_ORIGINAL_OWNER_STILL_PRESENT'
-closed=0; unused=0
+closed=0; unused=0; negativeCancelled=0
+negative=${JSON.stringify(JSON.stringify(negativeRetirement))}
+negative=json.loads(negative)
+readHashes={}
 def read(file):
  fd=os.open(file,os.O_RDONLY|os.O_NOFOLLOW)
  try:
@@ -162,7 +170,7 @@ def read(file):
   data=os.read(fd,before.st_size+1);after=os.fstat(fd);named=os.lstat(file)
   identity=lambda value:(value.st_dev,value.st_ino,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
   assert len(data)==before.st_size and identity(before)==identity(after)==identity(named)
-  return json.loads(data)
+  readHashes[str(file)]=hashlib.sha256(data).hexdigest();return json.loads(data)
  finally:os.close(fd)
 def grants(value):
  if isinstance(value,dict):
@@ -181,20 +189,31 @@ for operation in Path('/app/online-runtime-acceptance').glob('application-native
   seen.add(str(file))
   if not file.exists():unused+=1;continue
   native=read(file)
+  retired=next((row for row in (negative['records'] if negative else []) if row['nativeFile']==str(file)),None)
+  if retired:
+   assert str(operation)==negative['operationRoot'] and readHashes[str(index)]==negative['indexSha256'],'A29_INDEX_CHANGED'
+   assert readHashes[str(file)]==retired['nativeSha256'] and native['phase']=='ACTIVE' and native['guardian']==retired['guardian'],'A29_NATIVE_CHANGED'
+   assert str(Path(scope['boundaryDirectory'])/'state.json')==retired['workFile'] and str(Path(scope['boundaryDirectory'])/'claim.json')==retired['claimFile'],'A29_SCOPE_CHANGED'
+   work=read(Path(retired['workFile']));claim=read(Path(retired['claimFile']))
+   assert readHashes[retired['workFile']]==retired['workSha256'] and work['phase']=='QUIESCENT' and readHashes[retired['claimFile']]==retired['claimSha256'] and claim['native']['claimSha256']==retired['nativeSha256'],'A29_WORK_OR_CLAIM_CHANGED'
+   currentBoot=Path('/proc/sys/kernel/random/boot_id').read_text().strip();currentNamespace=os.readlink('/proc/self/ns/pid')
+   assert currentBoot!=retired['guardian']['bootId'] or currentNamespace not in ['pid:[4026532608]','pid:[4026532758]'],'A29_ORIGINAL_NAMESPACE_STILL_PRESENT'
+   negativeCancelled+=1;continue
   assert native['phase']=='QUIESCENT' and native['nativeReaped'] is True,'APPLICATION_ROLE_DURABLE_OWNER_UNKNOWN'
   assert native.get('databaseQuiet') is True or native.get('sqliteNativeClosed') is True,'APPLICATION_ROLE_DURABLE_SQL_UNKNOWN'
   work=Path(scope['boundaryDirectory'])/'state.json'
   if work.exists():assert read(work)['phase']=='QUIESCENT','APPLICATION_ROLE_DURABLE_WORK_UNKNOWN'
   closed+=1
-print(json.dumps(dict(originalNativeProcesses=0,denyUnknownGrantRecordsChecked=closed,unusedGrantRecords=unused,adoptsOriginalPopen=False)))`;
+if negative:assert negativeCancelled==2,'A29_EXACT_TWO_NEGATIVE_RECORDS_REQUIRED'
+print(json.dumps(dict(originalNativeProcesses=0,denyUnknownGrantRecordsChecked=closed,unusedGrantRecords=unused,negativelyCancelledGrantRecords=negativeCancelled,adoptsOriginalPopen=False)))`;
 const processQuiet=(observed=previous)=>Object.fromEntries(slots.map(service=>[service,JSON.parse(docker(['exec',observed[service].Id,'/usr/bin/python3','-I','-B','-c',processProbe]))]));
 const sqlQuiet=()=>{const value=JSON.parse(docker(['exec',inspect('postgres').Id,'psql','-X','-qAt','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1','-c',
   "SELECT json_build_object('visible',(SELECT rolsuper OR pg_has_role(current_user,'pg_read_all_stats','member') FROM pg_roles WHERE rolname=current_user),'sessions',(SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'sabalan-rt-%'),'prepared',(SELECT count(*) FROM pg_prepared_xacts WHERE database LIKE 'qa_application_%'),'system',(SELECT system_identifier::text FROM pg_control_system()))"]));
   assert.equal(value.visible,true);assert.equal(value.sessions,0);assert.equal(value.prepared,0);return value;};
 const operation=randomBytes(16).toString('hex'),reportPath=path.join(root,'reports/qa/application-native-candidate-'+operation+'.json');
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const inputs=Object.fromEntries([base,...overlays,import.meta.filename,imageReceiptFile,materialReceiptFile,installedProbeFile,preflightFile,historicalFile,retainedImageReceiptFile,retainedMaterialReceiptFile,path.join(root,'scripts/replace-application-native-candidate-local.mjs'),...predecessorInputs,...(isolateAuthorityCohort?authorityCohortSources.map(file=>path.join(root,file)):[])].map(file=>[file,hash(file)]));
-const report={format:'sabalan-application-native-candidate/v1',replacementEntry:'scripts/replace-qualified-application-native-candidate-local.mjs',operation,pass:false,phase:'INTENT',productionAdmission:false,
+const inputs=Object.fromEntries([base,...overlays,import.meta.filename,path.join(root,'scripts/lib/a29-known-negative-retirement.mjs'),...(negativeRetirementArgument?[negativeRetirementArgument.file,...a29EvidenceFiles]:[]),imageReceiptFile,materialReceiptFile,installedProbeFile,preflightFile,historicalFile,retainedImageReceiptFile,retainedMaterialReceiptFile,path.join(root,'scripts/replace-application-native-candidate-local.mjs'),...predecessorInputs,...(isolateAuthorityCohort?authorityCohortSources.map(file=>path.join(root,file)):[])].map(file=>[file,hash(file)]));
+const report={...(negativeRetirementArgument?{knownNegativeCancellationRetirement:{...negativeRetirementArgument,classification:'KNOWN_NEGATIVE_CANCELLED',successfulNativeClosure:false}}:{}),format:'sabalan-application-native-candidate/v1',replacementEntry:'scripts/replace-qualified-application-native-candidate-local.mjs',operation,pass:false,phase:'INTENT',productionAdmission:false,
   onlyCandidateReplaced:!isolateAuthorityCohort,retainedOriginalPreserved:!isolateAuthorityCohort,...(isolateAuthorityCohort?{onlyQualificationSlotsRecreated:true,authorityCohort:{format:'sabalan-native-authority-cohort/v1',nonce:cohortNonce,prepared:{},verified:{}}}:{}),originalLimitsUnchanged:true,protectedBefore,previous:Object.fromEntries(slots.map(service=>[service,identity(previous[service])])),inputs,
   immutableImage:image,materialReceiptSha256:digest(materialReceiptRaw),imageReceiptSha256:digest(imageReceiptRaw),removedCodeTargets,
   ...(predecessor?{previousReplacement:{...previousReplacement},reobservedBaseline}:{}),...(failedAuthority?{failedAuthorityCohort:{...failedAuthorityCohort},reconciledFailedAuthorityBaseline:reobservedBaseline,failedAuthorityBaselineVerified:{}}:{}),nativeQuiet:processQuiet(),sqlQuiet:sqlQuiet()};

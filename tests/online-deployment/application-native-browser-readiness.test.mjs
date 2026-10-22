@@ -60,11 +60,11 @@ test('all other original business assertions retained in controlled fixture delt
 });
 
 function actualSubmitClickPrefix(page,draft){
- const start=fixture.indexOf('  async function submit('),end=fixture.indexOf('const response=await created',start);
+ const start=fixture.indexOf('  async function submit('),end=fixture.indexOf('const body=await response.json()',start);
  assert.ok(start>0&&end>start);
  const prefix=fixture.slice(start,end);
  const context={assert,inputSelector:NATIVE_FORM_CONTROLS.title,descriptionSelector:NATIVE_FORM_CONTROLS.description,waitForNativeSubmitEnabled,URL};
- const submit=vm.runInNewContext('('+prefix.trim().replace('async function submit','async function')+'return await created;})',context);
+ const submit=vm.runInNewContext('('+prefix.trim().replace('async function submit','async function')+'return response;})',context);
  return submit({page},draft);
 }
 test('actual fill permits initially disabled submit; actual submit gates enabled only after valid fields',async()=>{
@@ -82,4 +82,37 @@ test('actual submit does not click when later locked or inherited-disabled',asyn
 });
 test('closed authenticated compiled Socket refuses before typing/upload',async()=>{
  const {page,calls}=pageFixture();await assert.rejects(actualFill(page,calls,true,true));assert.ok(!calls.some(c=>['type','upload'].includes(c[0])));
+});
+
+const submitStart=fixture.indexOf('  async function submit(tab,draft) {'),submitEnd=fixture.indexOf('\n  try {',submitStart);
+assert.ok(submitStart>=0&&submitEnd>submitStart);
+const submitBody=fixture.slice(submitStart,submitEnd);
+const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
+function harness({response,click}){
+ const calls=[],evidence={tickets:[]},fixture={title:'title',description:'description',sha256:'sha'};
+ const page={$eval:async(selector)=>selector==='title'?'title':selector==='description'?'description':'http://localhost:3199/api/support-tickets/attachments/x',waitForResponse:(predicate,options)=>{calls.push('response');assert.equal(options.timeout,60000);assert.equal(predicate({url:()=> 'http://localhost:3199/api/support-tickets',request:()=>({method:()=> 'POST'})}),true);return response;},click:selector=>{calls.push('click');assert.equal(selector,'form button[type="submit"]');return click();},waitForFunction:async()=>{},waitForSelector:async()=>{},evaluate:async()=>({sha256:'sha',bytes:3})};
+ const tab={page,artifact:{buildId:'old'},actor:{slotId:'slot'}};
+ const context={assert,URL,Promise,inputSelector:'title',descriptionSelector:'description',waitForNativeSubmitEnabled:async()=>calls.push('enabled'),origin:'http://localhost:3199',uiArtifacts:{new:{}},evidence};
+ const submit=vm.runInNewContext('('+submitBody.trim()+')',context);return{run:()=>submit(tab,fixture),calls,evidence};
+}
+const goodResponse=()=>({status:()=>201,json:async()=>({data:{id:'id',title:'title'}})});
+test('response rejection is owned immediately while actual click remains pending',async()=>{
+ const response=deferred(),click=deferred(),error=Error('response timeout'),h=harness({response:response.promise,click:()=>click.promise});
+ const run=h.run();const observed=assert.rejects(run,e=>e===error);await new Promise(setImmediate);response.reject(error);
+ await Promise.race([observed,new Promise((_,reject)=>setTimeout(()=>reject(Error('submit waited for blocked click')),100))]);
+ click.resolve();assert.deepEqual(h.calls,['enabled','response','click']);assert.equal(h.evidence.tickets.length,0);
+});
+test('click rejection joins response before a later response rejection',async()=>{
+ const response=deferred(),error=Error('click failed'),h=harness({response:response.promise,click:()=>Promise.reject(error)});
+ await assert.rejects(h.run(),e=>e===error);response.reject(Error('late response timeout'));await new Promise(setImmediate);assert.equal(h.evidence.tickets.length,0);
+});
+test('synchronous click failure still owns the response promise',async()=>{
+ const response=deferred(),error=Error('sync click failed'),h=harness({response:response.promise,click:()=>{throw error;}});
+ await assert.rejects(h.run(),e=>e===error);response.reject(Error('late response timeout'));await new Promise(setImmediate);
+});
+test('successful actual submit retains201/title/attachment/build/slot evidence',async()=>{
+ const h=harness({response:Promise.resolve(goodResponse()),click:async()=>{}});await h.run();assert.equal(h.evidence.tickets.length,1);assert.equal(h.evidence.tickets[0].backendSlotId,'slot');assert.equal(h.evidence.tickets[0].screenshotSha256,'sha');
+});
+test('non201 actual business response remains rejected',async()=>{
+ const bad=goodResponse();bad.status=()=>500;const h=harness({response:Promise.resolve(bad),click:async()=>{}});await assert.rejects(h.run());assert.equal(h.evidence.tickets.length,0);
 });

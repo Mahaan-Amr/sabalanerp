@@ -1,0 +1,37 @@
+[Unit]
+Description=Exact legacy ClamAV namespace FEUP transport
+Requires=docker.service sabalan-clamav-host-egress.service
+After=network-online.target docker.service sabalan-clamav-host-egress.service
+PartOf=docker.service sabalan-clamav-host-egress.service
+
+[Service]
+Type=simple
+# SOURCE TEMPLATE: fill the independently reviewed profile SHA before installation.
+# First qualify with serve. Changing to route requires review of actual TLS proof.
+ExecStart=/usr/bin/python3 -I -B /usr/local/libexec/sabalan-clamav-feup-tunnel.py serve --profile /etc/sabalan-clamav-feup-tunnel/profile.json --sha256 REPLACE_WITH_REVIEWED_PROFILE_SHA256
+Restart=no
+TimeoutStopSec=120
+KillMode=control-group
+UMask=0077
+MemoryMax=128M
+MemorySwapMax=0
+TasksMax=24
+CPUQuota=20%
+LimitNOFILE=128
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SETUID CAP_SETGID CAP_DAC_READ_SEARCH CAP_KILL CAP_SYS_PTRACE
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RuntimeDirectory=sabalan-clamav-feup-tunnel
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+# Exact pre-existing root-owned lock must be independently pinned before start.
+ReadWritePaths=/run/xtables.lock /run/sabalan-clamav-feup-tunnel
+
+[Install]
+WantedBy=multi-user.target

@@ -130,8 +130,11 @@ export async function runNativeBrowserAcceptance({edge,root,seed,actors,uiArtifa
     assert.equal(await tab.page.$eval(inputSelector,node=>node.value),draft.title);
     assert.equal(await tab.page.$eval(descriptionSelector,node=>node.value),draft.description);
     await waitForNativeSubmitEnabled(tab.page);
-    const created=tab.page.waitForResponse(response=>new URL(response.url()).pathname==='/api/support-tickets'&&response.request().method()==='POST',{timeout:60000});
-    await tab.page.click('form button[type="submit"]');const response=await created,body=await response.json();
+    const [response]=await Promise.all([
+      tab.page.waitForResponse(response=>new URL(response.url()).pathname==='/api/support-tickets'&&response.request().method()==='POST',{timeout:60000}),
+      Promise.resolve().then(()=>tab.page.click('form button[type="submit"]')),
+    ]);
+    const body=await response.json();
     assert.equal(response.status(),201,JSON.stringify(body));assert.equal(body.data.title,draft.title);
     await tab.page.waitForFunction(()=>/\/dashboard\/support\/tickets\/[^/]+$/.test(location.pathname),{timeout:30000});
     await tab.page.waitForSelector('img[src*="/api/support-tickets/attachments/"]',{visible:true,timeout:30000});

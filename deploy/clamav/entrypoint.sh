@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+/usr/local/bin/sabalan-clamav-acquisition-transport
 run_dir="${CLAMAV_RUN_DIRECTORY:-/run/sabalan-clamav}"
 db_dir="${CLAMAV_DATABASE_DIRECTORY:-/var/lib/clamav}"
 mkdir -p "$run_dir" "$db_dir" /var/log/clamav

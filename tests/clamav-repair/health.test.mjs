@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -11,10 +11,27 @@ test('scanner availability alone cannot hide a stopped updater or a failed updat
   try {
     mkdirSync(path.join(root, 'bin')); mkdirSync(path.join(root, 'run')); mkdirSync(path.join(root, 'db'));
     writeFileSync(path.join(root, 'bin/clamdscan'), '#!/bin/sh\nprintf "PONG\\n"\n', { mode: 0o755 });
+    // This unit isolates updater/scanner health. Transport policy has its own
+    // behavioral tests; the production helper remains mandatory and absolute.
+    const transport=path.join(root,'bin/transport');
+    writeFileSync(transport,'#!/bin/sh\nexit 0\n',{mode:0o755});
+    const health=path.join(root,'health.sh');
+    // The existing QA container intentionally mounts /tmp noexec. Interpret
+    // this test-only stub explicitly; production still executes its mandatory
+    // image-owned /usr/local/bin helper directly.
+    const transportCommand="sh '"+transport.replaceAll("'","'\\''")+"'";
+    const scannerCommand="sh '"+path.join(root,'bin/clamdscan').replaceAll("'","'\\''")+"'";
+    writeFileSync(health,readFileSync(command,'utf8')
+      .replace('/usr/local/bin/sabalan-clamav-acquisition-transport',transportCommand)
+      .replace('clamdscan --ping=1',scannerCommand+' --ping=1'),{mode:0o755});
     writeFileSync(path.join(root, 'run/clamd.pid'), String(child.pid));
     const env = { ...process.env, PATH: path.join(root, 'bin') + ':' + process.env.PATH,
       CLAMAV_RUN_DIRECTORY: path.join(root, 'run'), CLAMAV_DATABASE_DIRECTORY: path.join(root, 'db') };
-    const check = () => spawnSync('sh', [command], { env, encoding: 'utf8' });
+    const check = () => {
+      const result=spawnSync('sh', [health], { env, encoding: 'utf8' });
+      assert.notEqual(result.status,126,'Fixture execution was denied: '+result.stderr);
+      return result;
+    };
     assert.equal(check().status, 1, 'missing updater must fail despite PONG');
     writeFileSync(path.join(root, 'run/updater.pid'), String(child.pid));
     const now = Math.floor(Date.now() / 1000);

@@ -85,6 +85,65 @@ FreshClam 1.4.6 can exit **zero during CDN cooldown without checking any databas
 
 Record blocked checks as blocked. A successful CLEAN/EICAR check with an old signed bank is not current-signature readiness.
 
+## Offline source delivery for the complete incident release
+
+`deploy.sh --offline-clamav-incident <env> <private-source-manifest> <manifest-sha256>`
+selects a verified local Git bundle instead of fetching source from a network
+remote. **Offline means source delivery only.** The unchanged canonical backend,
+frontend and Inquiry builds may use their existing network/cache; all three
+complete before maintenance. Missing build inputs or a failed build abort while
+users are still served. This mode does not accept prebuilt application images,
+change release health gates, or substitute a capture-only operation.
+
+Use it only with `DEPLOYMENT_MODE=release`,
+`DEPLOYMENT_CLAMAV_OPERATION=incident-recovery` and the normal reviewed immutable
+target, fresh incident snapshot, base commit and readiness inputs. The manifest
+has exactly this structure (replace all illustrative values with measured ones):
+
+```json
+{
+  "format": "sabalan-offline-clamav-incident-source/v1",
+  "baseCommit": "<proven running B58 source commit>",
+  "targetCommit": "<reviewed maintenance-only candidate commit>",
+  "targetTree": "<candidate Git tree>",
+  "inquiryCommit": "<unchanged Inquiry gitlink>",
+  "bundle": {
+    "file": "/private/incident-source.bundle",
+    "sha256": "<complete bundle checksum>",
+    "bytes": 123,
+    "ref": "refs/heads/incident-offline"
+  }
+}
+```
+
+Deliver the operations runner as a separate clean Git checkout at that exact
+reviewed target. `DEPLOYMENT_REPO_ROOT` continues to select the production
+checkout. Keep the manifest mode `0600`, the bundle private to root, and their
+canonical ancestors root-owned and not writable by others. The manifest checksum
+is supplied independently with the reviewed execution command. Include the exact
+advertised ref in a full v2 bundle; extra refs and incremental prerequisites are
+rejected. No Git push is required.
+
+Only after inheriting the existing locked deployment descriptor does the runner
+validate the bundle, exact source/tree, AV-only difference and unchanged package
+semantics. The production checkout must be clean at the declared base, and Inquiry
+must already be initialized and clean at its unchanged gitlink. Import permits only
+local Git file transport, disables Git hooks, changes no remote configuration and
+fast-forwards to the reviewed target. It never performs submodule network access.
+A repeated import or changed base fails; inspect the previous attempt instead of
+resetting the checkout. Source and bundle are revalidated after the builds and
+immediately before protected release preparation. Changed source fails closed.
+
+The complete fresh checkpoint, independent encrypted readback, host/database
+leases, incident snapshot, scanner capture/activation, mutation deadline, full
+release gates and fail-closed recovery remain mandatory. This mode does not prove
+the ten-minute availability goal or establish target updater health. A later
+natural successful update cycle is still needed to close the incident.
+
+Run `node --test tests/clamav-repair/offline-source.test.mjs` for actual temporary
+Git bundle import and rejection tests. These tests have no deployment authority
+and create no Docker services.
+
 ## Candidate preparation, only after authorization
 
 Refresh the deployed source identity and migration ledger read-only first. Apply only this maintenance patch to that deployed source, and commit/review that independent candidate. Do not deploy the current feature branch to repair ClamAV. `DEPLOYMENT_CLAMAV_BASE_COMMIT` must equal the running release's recorded source identity. The scope gate rejects unrelated paths, migrations, dependency changes and unrelated package commands.

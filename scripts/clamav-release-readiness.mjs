@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import {createReadStream} from 'node:fs';
@@ -308,10 +309,121 @@ export async function inspectRollback(container,proof,execute=exec,resolve=resol
  }
  return {...value,runtimeVerifier:verifier,configAndBankMatched:true,...(native?{nativeUpdater:native}:{}),...(firstTransport?.transport?{acquisitionTransport:firstTransport.transport}:{})};
 }
+
+// This selects source bytes only. It grants no checkpoint, lease or promotion authority.
+export async function offlineIncidentSource(manifest, repository, operationsRoot, phase, execute=exec) {
+ const keys=(value,expected)=>assert.deepEqual(Object.keys(value).sort(),expected.slice().sort());
+ const commit=/^[a-f0-9]{40}$/, digest=/^[a-f0-9]{64}$/;
+ keys(manifest,['format','baseCommit','targetCommit','targetTree','inquiryCommit','bundle']);
+ assert.equal(manifest.format,'sabalan-offline-clamav-incident-source/v1');
+ for(const name of ['baseCommit','targetCommit','targetTree','inquiryCommit'])assert.match(manifest[name],commit);
+ assert.notEqual(manifest.baseCommit,manifest.targetCommit);
+ keys(manifest.bundle,['file','sha256','bytes','ref']);
+ assert.ok(path.isAbsolute(manifest.bundle.file));assert.match(manifest.bundle.sha256,digest);
+ assert.ok(Number.isSafeInteger(manifest.bundle.bytes)&&manifest.bundle.bytes>0);
+ assert.match(manifest.bundle.ref,/^refs\/heads\/[a-zA-Z0-9][a-zA-Z0-9_/-]*$/);
+ assert.ok(!manifest.bundle.ref.includes('..')&&!manifest.bundle.ref.endsWith('/'));
+ assert.ok(['import','verify'].includes(phase));
+ for(const directory of [repository,operationsRoot])assert.ok(path.isAbsolute(directory)&&await fs.realpath(directory)===directory,'Canonical source directories required');
+ const env={...process.env};
+ for(const key of Object.keys(env))if(key.startsWith('GIT_'))delete env[key];
+ Object.assign(env,{GIT_ALLOW_PROTOCOL:'file',GIT_TERMINAL_PROMPT:'0',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'});
+ const git=async(cwd,...args)=>(await execute('git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','maintenance.auto=false','-c','gc.auto=0','-c','submodule.recurse=false','-c','fetch.recurseSubmodules=false',...args],{cwd,env,maxBuffer:16*1024*1024})).stdout.trim();
+ const clean=async cwd=>{
+  assert.equal(await fs.realpath(await git(cwd,'rev-parse','--show-toplevel')),await fs.realpath(cwd),'Git checkout is redirected');
+  assert.equal(await git(cwd,'status','--porcelain','--untracked-files=all'),'','Offline incident checkout is not clean');
+ };
+ const inquiry=async cwd=>{
+  assert.equal(await git(cwd,'rev-parse','HEAD:apps/sabalan-inquiry'),manifest.inquiryCommit,'Inquiry gitlink changed');
+  const sub=path.join(cwd,'apps/sabalan-inquiry');
+  assert.equal(await git(sub,'rev-parse','HEAD'),manifest.inquiryCommit,'Inquiry must already be initialized at its exact gitlink');
+  await clean(sub);
+ };
+ const target=async cwd=>{
+  assert.equal(await git(cwd,'rev-parse','HEAD'),manifest.targetCommit,'Offline incident target changed');
+  assert.equal(await git(cwd,'rev-parse','HEAD^{tree}'),manifest.targetTree,'Offline incident tree changed');
+  await clean(cwd);await inquiry(cwd);
+ };
+ // The independently delivered runner checkout must itself be the exact reviewed target.
+ await target(operationsRoot);
+ assert.equal(await git(operationsRoot,'rev-parse',manifest.baseCommit+'^{commit}'),manifest.baseCommit);
+ await git(operationsRoot,'merge-base','--is-ancestor',manifest.baseCommit,manifest.targetCommit);
+ const changed=(await git(operationsRoot,'diff','--name-only',manifest.baseCommit,manifest.targetCommit)).split('\n').filter(Boolean);
+ assert.ok(changed.length>0);validateRepairPaths(changed);
+ for(const file of changed) {
+  const entry=await git(operationsRoot,'ls-tree',manifest.targetCommit,'--',file);
+  // Removed optional tests/docs are scope-checked; executable source may never be a symlink/gitlink.
+  if(entry)assert.match(entry,/^100(?:644|755) blob [a-f0-9]{40}\t/,'Offline source contains a non-regular entry');
+ }
+ for(const file of ['package.json','backend/package.json']) {
+  const before=JSON.parse(await git(operationsRoot,'show',manifest.baseCommit+':'+file));
+  const after=JSON.parse(await git(operationsRoot,'show',manifest.targetCommit+':'+file));
+  validateRepairPackage(before,after,file);
+ }
+ assert.equal(await git(operationsRoot,'rev-parse',manifest.baseCommit+':apps/sabalan-inquiry'),manifest.inquiryCommit);
+ assert.equal(await fs.realpath(manifest.bundle.file),manifest.bundle.file,'Bundle path must be canonical');
+ const before=await fs.lstat(manifest.bundle.file,{bigint:true});
+ assert.ok(before.isFile()&&!before.isSymbolicLink()&&before.nlink===1n&&before.size===BigInt(manifest.bundle.bytes));
+ const identity=value=>['dev','ino','size','mtimeNs','ctimeNs','mode','uid','nlink'].map(key=>String(value[key]));
+ assert.equal(await fileDigest(manifest.bundle.file),manifest.bundle.sha256,'Offline bundle checksum changed');
+ const descriptor=await fs.open(manifest.bundle.file,'r');
+ try {
+  const header=Buffer.alloc(65536);const {bytesRead}=await descriptor.read(header,0,header.length,0);
+  const end=header.subarray(0,bytesRead).indexOf('\n\n');assert.ok(end>0,'Offline bundle header is missing or oversized');
+  assert.equal(header.subarray(0,end).toString('utf8'),'# v2 git bundle\n'+manifest.targetCommit+' '+manifest.bundle.ref,'A full v2 bundle with exactly one advertised ref and no prerequisites is required');
+ } finally {await descriptor.close();}
+
+ await git(operationsRoot,'bundle','verify',manifest.bundle.file);
+ assert.equal(await git(operationsRoot,'bundle','list-heads',manifest.bundle.file),manifest.targetCommit+' '+manifest.bundle.ref,'Offline bundle advertises unexpected refs');
+ await clean(repository);await inquiry(repository);
+ if(phase==='import') {
+  assert.equal(await git(repository,'rev-parse','HEAD'),manifest.baseCommit,'Offline incident base changed');
+  await git(repository,'fetch','--no-tags','--no-write-fetch-head',manifest.bundle.file,manifest.bundle.ref);
+  // Fetch writes objects only; merge selects the already authenticated exact target.
+  assert.equal(await git(repository,'rev-parse',manifest.targetCommit+'^{tree}'),manifest.targetTree);
+  await git(repository,'merge-base','--is-ancestor',manifest.baseCommit,manifest.targetCommit);
+  assert.deepEqual(identity(await fs.lstat(manifest.bundle.file,{bigint:true})),identity(before),'Offline bundle changed while importing');
+  assert.equal(await fileDigest(manifest.bundle.file),manifest.bundle.sha256);
+  await git(repository,'merge','--ff-only',manifest.targetCommit);
+ }
+ await target(repository);
+ assert.deepEqual(identity(await fs.lstat(manifest.bundle.file,{bigint:true})),identity(before));
+ assert.equal(await fileDigest(manifest.bundle.file),manifest.bundle.sha256);
+ return {format:'sabalan-offline-clamav-incident-source-result/v1',phase,baseCommit:manifest.baseCommit,targetCommit:manifest.targetCommit,targetTree:manifest.targetTree,bundleSha256:manifest.bundle.sha256,sourceVerified:true,releaseAdmission:false};
+}
+async function privateOfflineManifest(file,expected) {
+ const parents=async file=>{
+  for(let directory=path.dirname(file);;directory=path.dirname(directory)) {
+   assert.equal(await fs.realpath(directory),directory);const value=await fs.lstat(directory,{bigint:true});
+   assert.ok(value.isDirectory()&&value.uid===0n&&!(value.mode&0o022n),'Offline delivery ancestors must be root-owned and not writable by others');
+   if(directory===path.dirname(directory))break;
+  }
+ };
+ assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);
+ assert.match(expected,/^[a-f0-9]{64}$/);assert.ok(path.isAbsolute(file));assert.equal(await fs.realpath(file),file);
+ await parents(file);
+ const before=await fs.lstat(file,{bigint:true});assert.ok(before.isFile()&&before.uid===0n&&before.nlink===1n&&(before.mode&0o777n)===0o600n&&before.size>0n&&before.size<1048576n);
+ const raw=await fs.readFile(file);assert.equal(crypto.createHash('sha256').update(raw).digest('hex'),expected);
+ const after=await fs.lstat(file,{bigint:true});for(const key of ['dev','ino','size','mtimeNs','ctimeNs','mode','uid','nlink'])assert.equal(after[key],before[key]);
+ const lock=await fs.stat('/proc/self/fd/9',{bigint:true});const canonical=await fs.lstat(path.join(process.cwd(),'.deploy-state/deployment.lock'),{bigint:true});
+ assert.ok(lock.isFile()&&lock.uid===0n&&lock.nlink===1n&&!(lock.mode&0o022n));assert.equal(lock.dev,canonical.dev);assert.equal(lock.ino,canonical.ino);
+ assert.match(await fs.readFile('/proc/self/fdinfo/9','utf8'),/lock:\s+\d+: FLOCK\s+ADVISORY\s+WRITE\b/,'Canonical inherited deployment lock must already be held');
+ const value=JSON.parse(raw);assert.ok(path.isAbsolute(value.bundle.file));await parents(value.bundle.file);const bundle=await fs.lstat(value.bundle.file,{bigint:true});assert.ok(bundle.uid===0n&&!(bundle.mode&0o077n));
+ return value;
+}
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
  const [command,input,image]=process.argv.slice(2);
  try {
-  if(command==='scope') await verifyRepairScope(input);
+  if(command==='offline-source-import'||command==='offline-source-verify') {
+   assert.equal(process.argv.length,7);
+   const [repository,operationsRoot]=process.argv.slice(5);
+   assert.equal(process.env.DEPLOYMENT_MODE || 'release','release');assert.equal(process.env.DEPLOYMENT_CLAMAV_OPERATION,'incident-recovery');
+   assert.ok(process.env.DEPLOYMENT_CLAMAV_TARGET_IMAGE);
+   const manifest=await privateOfflineManifest(input,image);
+   assert.equal(manifest.baseCommit,process.env.DEPLOYMENT_CLAMAV_BASE_COMMIT);
+   process.stdout.write(JSON.stringify(await offlineIncidentSource(manifest,repository,operationsRoot,command.endsWith('import')?'import':'verify'))+'\n');
+  }
+  else if(command==='scope') await verifyRepairScope(input);
   else if(command==='inspect') process.stdout.write(JSON.stringify(await inspectCandidate(input),null,2)+'\n');
   else if(command==='inspect-rollback') process.stdout.write(JSON.stringify(await inspectRollback(input,JSON.parse(await fs.readFile(image,'utf8'))),null,2)+'\n');
   else if(command==='export') {

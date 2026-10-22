@@ -5,6 +5,17 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="${DEPLOYMENT_REPO_ROOT:-$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${1:-deploy/.env.prod}"
+OFFLINE_CLAMAV_INCIDENT=0
+OFFLINE_CLAMAV_MANIFEST=""
+OFFLINE_CLAMAV_MANIFEST_SHA256=""
+if [ "${1:-}" = "--offline-clamav-incident" ]; then
+  shift
+  [ "$#" -eq 3 ] || { echo 'Usage: deploy.sh --offline-clamav-incident <env> <private-source-manifest> <sha256>' >&2; exit 1; }
+  ENV_FILE="$1"
+  OFFLINE_CLAMAV_INCIDENT=1
+  OFFLINE_CLAMAV_MANIFEST="$2"
+  OFFLINE_CLAMAV_MANIFEST_SHA256="$3"
+fi
 DEPLOYMENT_MODE="${DEPLOYMENT_MODE:-release}"
 case "${DEPLOYMENT_MODE}" in
   release|configuration) ;;
@@ -25,6 +36,11 @@ if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ] && [ "${DEPLOYMENT_C
   echo 'Incident recovery requires a qualified immutable ClamAV target.' >&2; exit 1
 fi
 export DEPLOYMENT_CLAMAV_OPERATION
+if [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 1 ]; then
+  [ "${DEPLOYMENT_MODE}" = release ] && [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || {
+    echo 'Offline source delivery requires the complete ClamAV incident release.' >&2; exit 1;
+  }
+fi
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 COMPOSE_FILE="docker-compose.prod.yml"
@@ -728,11 +744,15 @@ if [ -f "${CONFIGURATION_STATE}" ]; then
 fi
 
 if [ "${DEPLOYMENT_MODE}" = "release" ]; then
+if [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 1 ]; then
+  node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" offline-source-import "${OFFLINE_CLAMAV_MANIFEST}" "${OFFLINE_CLAMAV_MANIFEST_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
+else
 echo "Fetching ${DEPLOY_REMOTE}/${DEPLOY_BRANCH} and requiring a fast-forward update..."
 git fetch --prune "${DEPLOY_REMOTE}"
 git checkout "${DEPLOY_BRANCH}"
 git pull --ff-only "${DEPLOY_REMOTE}" "${DEPLOY_BRANCH}"
 git submodule update --init --recursive
+fi
 fi
 
 DEPLOYMENT_TARGET_COMMIT="$(git rev-parse HEAD)"
@@ -878,6 +898,9 @@ if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
   [ "${incident_snapshot_digest}" = "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256}" ] || { echo 'Incident snapshot changed during preparation.' >&2; exit 1; }
 fi
 
+if [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 1 ]; then
+  node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" offline-source-verify "${OFFLINE_CLAMAV_MANIFEST}" "${OFFLINE_CLAMAV_MANIFEST_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
+fi
 compose up -d postgres
 control prepare
 SESSION_PREPARED=1

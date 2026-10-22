@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 const hashBytes=raw=>createHash('sha256').update(raw).digest('hex');
 import {validateSelectedImageReceipt} from '../../scripts/run-independent-full-restore-controller.mjs';
-import {validateRetainedInquiryStartupRefresh,validateRetainedInquiryProxy,assertRetainedPreActorClosure,validateRetainedBrowserPlan,readOriginalRetainedBrowserQualificationCompletion,assertRetainedControllerEof,validateRetainedBrowserCapacity,buildRetainedInquiryRotation,readRetainedInquiryAuthorityMount} from '../../scripts/lib/original-retained-browser-qualification.mjs';
+import {validateRetainedInquiryStartupRefresh,validateRetainedInquiryProxy,assertRetainedPreActorClosure,validateRetainedBrowserPlan,readOriginalRetainedBrowserQualificationCompletion,assertRetainedControllerEof,validateRetainedBrowserCapacity,buildRetainedInquiryRotation,readRetainedInquiryAuthorityMount,retainedBrowserContainerInspectArguments} from '../../scripts/lib/original-retained-browser-qualification.mjs';
 test('saved JSON cannot substitute an original retained-browser completion',()=>{
  for(const value of [{},{pass:true,allOriginalChildrenClosed:true},Object.freeze({})])assert.throws(()=>readOriginalRetainedBrowserQualificationCompletion(value),/ORIGINAL_RETAINED_BROWSER_COMPLETION_UNPROVEN/);
 });
@@ -121,4 +121,37 @@ test('QA proxy binds a fixed reserved hostname to measured private backend ident
  const proxy={hostname:'inquiry-qualification.localhost',address:'172.18.0.3',containerId:'a'.repeat(64),image:'sha256:'+'b'.repeat(64),startedAt:'2026-10-20T00:00:00Z',networkId:'c'.repeat(64),networkName:'sabalanerp-local_default'};
  assert.equal(validateRetainedInquiryProxy(proxy),proxy);
  for(const changed of [{hostname:'external.example'},{address:'127.0.0.1'},{address:'0.0.0.0'},{address:'8.8.8.8'},{containerId:'unknown'},{networkId:'unknown'},{networkName:'other-project'},{image:'mutable:latest'},{port:443}])assert.throws(()=>validateRetainedInquiryProxy({...proxy,...changed}));
+});
+
+
+test('actual retained inspector handles all ten canonical legacy and cohort containers without changing them',{
+ skip:process.env.SABALAN_RETAINED_INSPECT_TEST!=='1'?'Set SABALAN_RETAINED_INSPECT_TEST=1 for existing-project read-only inspector validation':false,
+},()=>{
+ const root=path.resolve(import.meta.dirname,'../..'),base='D:/sabalanerp/docker-compose.local.yml';
+ const expected=['backend','backend-candidate','backend-retained','clamav','frontend','frontend-candidate','frontend-retained','inquiry','postgres','redis'].sort();
+ const parse=raw=>{try{const value=JSON.parse(raw);return Array.isArray(value)?value:[value];}catch{return raw.trim().split(/\r?\n/).map(line=>JSON.parse(line));}};
+ function canonicalPs(){
+  const value=spawnSync('docker',['compose','-f',base,'ps','--all','--no-trunc','--format','json'],{cwd:root,encoding:'utf8',maxBuffer:4*1024**2});
+  assert.equal(value.status,0,value.stderr);const entries=parse(value.stdout);assert.equal(entries.length,10);assert.deepEqual(entries.map(row=>row.Service).sort(),expected);
+  assert.ok(entries.every(row=>row.Project==='sabalanerp-local'&&row.State==='running'&&row.Health==='healthy'));return entries;
+ }
+ function docker(args){const rows=canonicalPs();return{rows,result:spawnSync('docker',args,{cwd:root,encoding:'utf8',maxBuffer:4*1024**2})};}
+ const ids=canonicalPs().map(row=>row.ID),argv=retainedBrowserContainerInspectArguments(ids);
+ // Execute the previous faulty projection on those same real containers: this
+ // must fail for optional fields missing from legacy Engine maps, not a mock.
+ const prior=[...argv];prior[2]=prior[2].replace('{{json (index .HostConfig "Mounts")}}','{{json .HostConfig.Mounts}}');assert.notEqual(prior[2],argv[2]);
+ const red=docker(prior).result;assert.notEqual(red.status,0);assert.match(red.stderr,/map has no entry for key "Mounts"/);
+ const first=docker(argv);assert.equal(first.result.status,0,first.result.stderr);const observed=parse(first.result.stdout);assert.equal(observed.length,10);
+ const labels=value=>value.Config.Labels;assert.deepEqual(observed.map(value=>labels(value)['com.docker.compose.service']).sort(),expected);
+ for(const value of observed){assert.equal(labels(value)['com.docker.compose.project'],'sabalanerp-local');assert.equal(value.State.Running,true);assert.equal(value.State.Health.Status,'healthy');assert.ok(Array.isArray(value.HostConfig.Binds)||value.HostConfig.Binds===null);}
+ const legacy=observed.filter(value=>value.HostConfig.Mounts===null),cohort=observed.filter(value=>Array.isArray(value.HostConfig.Mounts)&&value.HostConfig.Mounts.length>0);
+ assert.equal(legacy.length,8,'ACTUAL_EIGHT_LEGACY_BIND_PROJECTIONS_REQUIRED');assert.equal(cohort.length,2,'ACTUAL_TWO_AUTHORITY_COHORT_PROJECTIONS_REQUIRED');
+ for(const value of cohort){const service=labels(value)['com.docker.compose.service'];assert.ok(['backend-candidate','backend-retained'].includes(service));
+  const own=readRetainedInquiryAuthorityMount(value,service==='backend-candidate'?'/app/runtime-authority':'/app/jobs-authority',false),peer=readRetainedInquiryAuthorityMount(value,'/run/sabalan-online',true);
+  assert.match(own.subpath,/^cohort-[a-f0-9]{32}$/);assert.equal(peer.subpath,own.subpath);assert.notEqual(own.name,peer.name);
+ }
+ const final=docker(retainedBrowserContainerInspectArguments(canonicalPs().map(row=>row.ID)));assert.equal(final.result.status,0,final.result.stderr);
+ const identity=values=>values.map(value=>({id:value.Id,image:value.Image,startedAt:value.State.StartedAt})).sort((a,b)=>a.id.localeCompare(b.id));
+ assert.deepEqual(identity(parse(final.result.stdout)),identity(observed),'READ_ONLY_INSPECT_MUST_PRESERVE_ALL_TEN_IDENTITIES');
+ assert.deepEqual(final.rows.map(row=>({id:row.ID,service:row.Service})).sort((a,b)=>a.service.localeCompare(b.service)),first.rows.map(row=>({id:row.ID,service:row.Service})).sort((a,b)=>a.service.localeCompare(b.service)));
 });

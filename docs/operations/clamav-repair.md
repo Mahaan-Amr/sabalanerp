@@ -16,6 +16,58 @@ This is a maintenance-only repair, independent of attendance R3. No schema, atte
 
 ## Local runtime
 
+### Explicit private acquisition transport
+
+The default immutable image uses `CLAMAV_ACQUISITION_TRANSPORT=direct`. An
+explicit `backup-host-http-v1` build may instead bake exactly
+`HTTPProxyServer sabalan-clamav-egress` and `HTTPProxyPort 10808` into its
+FreshClam configuration. Compose must supply exactly
+`sabalan-clamav-egress:host-gateway`; the current qualified gateway is
+`172.17.0.1`. The image and container mode must agree. Runtime checks compare
+the entire configuration with the image-owned template plus these two lines,
+and reject a missing, duplicate or different gateway address. No runtime
+environment override can enable this mode on a direct image. Readiness checks
+the actual immutable image environment, container environment, host alias and
+effective configuration before accepting the explicit transport provenance.
+
+Only the network path changes. The FEUP HTTPS origin, certificate verification,
+official freshness DNS, signed CVD/CDIFF files, `TestDatabases yes`, cooldown and
+normal update schedule remain unchanged. No arbitrary proxy or URL is accepted.
+Real naturally scheduled FreshClam successes remain mandatory; a working tunnel
+or separately downloaded signed file does not manufacture updater health.
+An already-current seeded bank can produce a successful FreshClam cycle using
+freshness DNS without downloading HTTP content. Separately qualify a bounded
+HTTPS HEAD of the fixed FEUP `daily.cvd` URL through
+`http://sabalan-clamav-egress:10808` from the actual scanner namespace, with TLS
+certificate verification enabled, no redirect to another origin and no response
+body. Record actual HTTP/TLS results and host tunnel provenance. This operator
+qualification is not a forced FreshClam invocation and must not become a
+15-second health-check download or a request to the refusing vendor CDN.
+
+Production's dedicated restricted host SSH service forwards only the private
+Docker gateway address on port 10808 to the backup host's existing loopback HTTP
+proxy. Its key, pinned host key and service belong to host network infrastructure,
+outside application containers and images. Restrict access to the qualified
+Sabalan Docker bridge, publish no public proxy port, restrict the remote SSH
+account to this one forwarding destination, and preserve existing administrative
+SSH access. Qualify host reboot/reconnection, actual firewall/access restrictions
+and tunnel failure before relying on it. The backup server's independently
+qualified VPN/proxy supplies the same gateway endpoint during a full application
+restore; it does not need the production SSH key.
+
+These are explicit network prerequisites, like DNS and the existing backup VPN.
+An application COMPLETE checkpoint restores the immutable nonsecret image
+configuration; it does not claim to reconstruct host SSH/VPN infrastructure on
+a blank machine. Future ordinary container recreation preserves the baked
+configuration without secret mounts or writable-layer installation. Missing
+network prerequisites cause real updates to fail and health/readiness to remain
+closed; do not substitute healthy-looking evidence.
+
+Activate only through the existing exact-source incident-recovery boundary with
+the complete independently verified checkpoint and all lease, deadline and
+rollback rules. Source tests do not establish production reachability, host
+firewall safety, genuine update cycles, or independent full restore success.
+
 Use only `sabalanerp-local` and `docker-compose.local.yml`. Check its inventory before any Docker action. The ClamAV service builds `deploy/clamav/Dockerfile` from the pinned official **amd64 1.4.6** manifest. Do not use this local mutable tag as a production release identity.
 
 The supervisor watches both clamd and the scheduler, rejects zombies and terminates on child death. The updater runs as `clamav`, serializes the entire invocation with a persistent `flock`, reserves and syncs its next slot before FreshClam, and retains `freshclam.dat`. The default interval is 7,200 seconds; values below one hour are rejected. Recreate must preserve the volume and schedule. Never delete cooldown state or force an update to obtain a green check.

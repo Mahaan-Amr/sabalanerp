@@ -35,6 +35,8 @@ services:
   clamav:
     image: ${DEPLOYMENT_CLAMAV_IMAGE:-clamav/clamav:1.4}
     restart: unless-stopped
+    extra_hosts:
+      - "sabalan-clamav-egress:host-gateway"
     environment:
       FRESHCLAM_CHECKS: "12"
     volumes:

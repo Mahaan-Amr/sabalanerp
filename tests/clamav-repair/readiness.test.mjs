@@ -1,6 +1,66 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {publishedVersions,validateReceipt} from '../../scripts/clamav-release-readiness.mjs';
+
+test('explicit private transport requires immutable image mode, identical container mode and the one fixed gateway alias',async()=>{
+ const {validateTransportIdentity,validateAcquisitionConfiguration}=await import('../../scripts/clamav-release-readiness.mjs');
+ const {readFile}=await import('node:fs/promises');
+ const config=await readFile(new URL('../../deploy/clamav/freshclam.conf',import.meta.url),'utf8');
+ const mode='CLAMAV_ACQUISITION_TRANSPORT=backup-host-http-v1';
+ const container={Image:'sha256:'+'a'.repeat(64),Config:{Env:[mode]},HostConfig:{ExtraHosts:['sabalan-clamav-egress:host-gateway']}};
+ const image={Id:container.Image,Config:{Env:[mode]}};
+ const transport=validateTransportIdentity(container,image);
+ const proxy=config+'HTTPProxyServer sabalan-clamav-egress\nHTTPProxyPort 10808\n';
+ assert.equal(validateAcquisitionConfiguration(config),'https://mirrors.fe.up.pt/pub/clamav');
+ assert.equal(validateAcquisitionConfiguration(proxy,transport),'https://mirrors.fe.up.pt/pub/clamav');
+ assert.throws(()=>validateAcquisitionConfiguration(proxy));
+ assert.throws(()=>validateAcquisitionConfiguration(config,transport));
+ for(const bad of [proxy.replace('10808','10809'),proxy.replace('sabalan-clamav-egress','public.test'),proxy+'HTTPProxyUsername x\n',proxy+'HTTPProxyPort 10808\n',proxy.replace('TestDatabases yes','TestDatabases no'),proxy.replace('current.cvd.clamav.net','elsewhere.test')])assert.throws(()=>validateAcquisitionConfiguration(bad,transport));
+ for(const bad of [{...image,Id:'other'},{...image,Config:{Env:[]}},{...image,Config:{Env:[mode,mode]}}])assert.throws(()=>validateTransportIdentity(container,bad));
+ for(const bad of [{...container,Config:{Env:[]}},{...container,Config:{Env:[mode,mode]}},{...container,HostConfig:{ExtraHosts:[]}},{...container,HostConfig:{ExtraHosts:['sabalan-clamav-egress:172.17.0.1']}},{...container,HostConfig:{ExtraHosts:['sabalan-clamav-egress:host-gateway','sabalan-clamav-egress:host-gateway']}}])assert.throws(()=>validateTransportIdentity(bad,image));
+});
+
+test('actual private candidate inspection refuses container-only mode injection before all scanner evidence',async()=>{
+ const {inspectCandidate}=await import('../../scripts/clamav-release-readiness.mjs');
+ const {readFile}=await import('node:fs/promises');
+ const config=await readFile(new URL('../../deploy/clamav/freshclam.conf',import.meta.url),'utf8');
+ let count=0;
+ const execute=async(_program,args)=>{
+  count++;
+  if(args[0]==='inspect')return {stdout:JSON.stringify([{Id:'candidate',Image:'sha256:'+'a'.repeat(64),State:{Running:true},Config:{Env:['CLAMAV_ACQUISITION_TRANSPORT=backup-host-http-v1']},HostConfig:{ExtraHosts:['sabalan-clamav-egress:host-gateway']}}])};
+  if(args[0]==='exec')return {stdout:config+'HTTPProxyServer sabalan-clamav-egress\nHTTPProxyPort 10808\n'};
+  if(args[0]==='image')return {stdout:JSON.stringify([{Id:'sha256:'+'a'.repeat(64),Config:{Env:['CLAMAV_ACQUISITION_TRANSPORT=direct']}}])};
+  throw Error('Unexpected subsequent probe');
+ };
+ await assert.rejects(()=>inspectCandidate('candidate',execute),/immutable image/);
+ assert.equal(count,3);
+});
+
+test('Linux actual transport helper rejects altered config, runtime mode and wrong or duplicate gateway addresses',
+ {skip:process.platform!=='linux'},async()=>{
+ const fs=await import('node:fs/promises'),os=await import('node:os'),path=await import('node:path');
+ const {spawnSync}=await import('node:child_process');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'clamav-transport-unit-'));
+ try {
+  const original=await fs.readFile(new URL('../../deploy/clamav/acquisition-transport.sh',import.meta.url),'utf8');
+  const canonical=await fs.readFile(new URL('../../deploy/clamav/freshclam.conf',import.meta.url),'utf8');
+  const file=name=>path.join(root,name);
+  const source=original.replaceAll('/usr/local/share/sabalan-clamav-transport',file('mode'))
+   .replaceAll('/usr/local/share/sabalan-clamav-freshclam.conf',file('canonical'))
+   .replaceAll('/etc/clamav/freshclam.conf',file('config')).replaceAll('/etc/hosts',file('hosts'));
+  await fs.writeFile(file('helper.sh'),source);await fs.writeFile(file('canonical'),canonical);
+  const check=mode=>spawnSync('sh',[file('helper.sh')],{env:{...process.env,CLAMAV_ACQUISITION_TRANSPORT:mode},encoding:'utf8'}).status;
+  await fs.writeFile(file('mode'),'direct\n');await fs.writeFile(file('config'),canonical);
+  assert.equal(check('direct'),0);assert.notEqual(check('backup-host-http-v1'),0);
+  const proxy=canonical+'HTTPProxyServer sabalan-clamav-egress\nHTTPProxyPort 10808\n';
+  await fs.writeFile(file('mode'),'backup-host-http-v1\n');await fs.writeFile(file('config'),proxy);await fs.writeFile(file('hosts'),'172.17.0.1 sabalan-clamav-egress\n');
+  assert.equal(check('backup-host-http-v1'),0);
+  for(const hosts of ['0.0.0.0 sabalan-clamav-egress\n','172.17.0.1 wrong\n','172.17.0.1 sabalan-clamav-egress\n172.17.0.1 sabalan-clamav-egress\n']){await fs.writeFile(file('hosts'),hosts);assert.notEqual(check('backup-host-http-v1'),0);}
+  await fs.writeFile(file('hosts'),'172.17.0.1 sabalan-clamav-egress\n');
+  for(const config of [proxy.replace('TestDatabases yes','TestDatabases no'),proxy.replace('https://mirrors.fe.up.pt','http://mirrors.fe.up.pt'),proxy+'HTTPProxyPassword x\n']){await fs.writeFile(file('config'),config);assert.notEqual(check('backup-host-http-v1'),0);}
+  await fs.writeFile(file('config'),proxy);assert.equal(check('backup-host-http-v1'),0);
+ } finally {await fs.rm(root,{recursive:true,force:true});}
+});
 test('a bundled bank, old evidence or a mismatched target cannot authorize maintenance',async()=>{
  const versions=await publishedVersions(async()=>[['1.4.6:62:100:1:1:1:99999:339']]);
  assert.deepEqual(versions,{main:62,daily:100,bytecode:339});
@@ -113,5 +173,38 @@ test('rollback inspection refuses dead workers, cooldown, altered bindings, scan
   else if(kind==='image')f.mode.image='sha256:'+'e'.repeat(64);
   else f.mode[kind]=true;
   await assert.rejects(()=>inspectRollback('fixture',f.proof,f.execute,f.resolve),kind);
+ }
+});
+
+test('actual managed private rollback checks image mode and gateway alias before and after scanner qualification',async()=>{
+ const {inspectRollback}=await import('../../scripts/clamav-release-readiness.mjs');
+ const {readFile}=await import('node:fs/promises');const {createHash}=await import('node:crypto');
+ const config=await readFile(new URL('../../deploy/clamav/freshclam.conf',import.meta.url),'utf8');
+ for(const kind of ['healthy','missingAlias','wrongAlias','wrongImageMode','wrongContainerMode','lateMissingAlias','lateWrongContainerMode']) {
+  const f=nativeFixture();
+  f.proof.engine='1.4.6';f.proof.runtimeVerifier='managed-1.4.6-v1';
+  f.proof.configArchiveSha256=createHash('sha256').update(f.configArchive).digest('hex');
+  const env=['CLAMAV_ACQUISITION_TRANSPORT=backup-host-http-v1'];let inspected=0;
+  const execute=async(program,args,options)=>{
+   const result=stdout=>({stdout,stderr:''});
+   if(args[0]==='inspect'){
+    inspected++;
+    let hosts=['sabalan-clamav-egress:host-gateway'];let containerEnv=env;
+    if(kind==='missingAlias'||(kind==='lateMissingAlias'&&inspected>1))hosts=[];
+    if(kind==='wrongAlias')hosts=['sabalan-clamav-egress:127.0.0.1'];
+    if(kind==='wrongContainerMode'||(kind==='lateWrongContainerMode'&&inspected>1))containerEnv=['CLAMAV_ACQUISITION_TRANSPORT=direct'];
+    return result(JSON.stringify([{Id:'fixture-container',Image:f.proof.image,State:{Running:true,StartedAt:'stable'},Config:{Env:containerEnv},HostConfig:{ExtraHosts:hosts}}]));
+   }
+   if(args[0]==='image')return result(JSON.stringify([{Id:f.proof.image,Config:{Env:kind==='wrongImageMode'?['CLAMAV_ACQUISITION_TRANSPORT=direct']:env}}]));
+   if(args[0]==='exec'){
+    if(args[2]==='cat'&&args[3].endsWith('freshclam.conf'))return result(config+'HTTPProxyServer sabalan-clamav-egress\nHTTPProxyPort 10808\n');
+    if(args[2]==='/usr/local/bin/sabalan-clamav-acquisition-transport')return result('');
+    if(args[2]==='freshclam'||(args[2]==='clamdscan'&&args.includes('--version')))return result('ClamAV 1.4.6/28157/date');
+   }
+   return f.execute(program,args,options);
+  };
+  if(kind==='healthy')assert.equal((await inspectRollback('fixture',f.proof,execute,f.resolve)).acquisitionTransport,'backup-host-http-v1');
+  else await assert.rejects(()=>inspectRollback('fixture',f.proof,execute,f.resolve),/immutable image|gateway alias/,kind);
+  assert.equal(f.calls.some(args=>args.includes('freshclam')&&!args.includes('--version')),false,'rollback inspection never forces an update');
  }
 });

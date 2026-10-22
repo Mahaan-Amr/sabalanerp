@@ -47,6 +47,8 @@ services:
   clamav:
     image: sabalanerp-clamav:repair-local
     platform: linux/amd64
+    extra_hosts:
+      - "sabalan-clamav-egress:host-gateway"
     build:
       context: .
       dockerfile: deploy/clamav/Dockerfile

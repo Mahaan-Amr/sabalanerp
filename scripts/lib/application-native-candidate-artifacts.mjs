@@ -4,6 +4,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {nativeMaterialIdentity,validateInstalledNativeRole} from '../replace-application-native-candidate-local.mjs';
 import {stableFrontendBaseFile} from './production-frontend-base-artifacts.mjs';
+import {authorityCohortSources,validateAuthorityCohortReceipt,validateAuthorityCohortSlots} from './application-native-authority-cohort.mjs';
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 export function candidateReplacementReceiptArgument(argv){
  assert.equal(argv.length,2,'EXPLICIT_ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED');assert.equal(argv[0],'--candidate-replacement-receipt');
@@ -12,9 +13,9 @@ export function candidateReplacementReceiptArgument(argv){
 export function validateNativeCandidateReplacementReceipt(value){
  if(Object.hasOwn(value,'replacementEntry'))assert.equal(value.replacementEntry,'scripts/replace-qualified-application-native-candidate-local.mjs','REPLACEMENT_ENTRY_UNREVIEWED');
  assert.equal(value.format,'sabalan-application-native-candidate/v1');assert.equal(value.pass,true);assert.equal(value.phase,'COMPLETE');assert.equal(value.productionAdmission,false);
- assert.equal(value.onlyCandidateReplaced,true);assert.equal(value.retainedOriginalPreserved,true);assert.equal(value.up.code,0);assert.equal(value.up.signal,null);assert.equal(value.up.failure,undefined);
+ if(value.authorityCohort)validateAuthorityCohortReceipt(value);else{assert.equal(value.onlyCandidateReplaced,true);assert.equal(value.retainedOriginalPreserved,true);}assert.equal(value.up.code,0);assert.equal(value.up.signal,null);assert.equal(value.up.failure,undefined);
  assert.equal(value.originalChildren.allOriginalChildrenClosed,true);assert.equal(value.originalChildren.interrupted,false);
- const services=['backend','frontend','postgres','inquiry','redis','clamav','frontend-candidate','frontend-retained','backend-retained'].sort();
+ const services=['backend','frontend','postgres','inquiry','redis','clamav','frontend-candidate','frontend-retained',...(value.authorityCohort?[]:['backend-retained'])].sort();
  assert.deepEqual(Object.keys(value.protectedBefore).sort(),services);assert.deepEqual(value.protectedBefore,value.protectedAfter);assert.deepEqual(value.protectedBefore,value.finalProtected);
  for(const stage of ['nativeQuiet','preMutationNativeQuiet','postMutationNativeQuiet'])for(const service of ['backend-candidate','backend-retained'])assert.equal(value[stage][service].originalNativeProcesses,0);
  for(const stage of ['sqlQuiet','preMutationSqlQuiet','postMutationSqlQuiet']){assert.equal(value[stage].visible,true);assert.equal(value[stage].sessions,0);assert.equal(value[stage].prepared,0);assert.equal(value[stage].system,value.sqlQuiet.system);}
@@ -35,6 +36,7 @@ export function collectNativeCandidateArtifacts({root,capture,containers,sourceC
  captureFile('scripts/lib/application-native-candidate-artifacts.mjs');captureFile('scripts/lib/production-frontend-base-artifacts.mjs');
  const helper='scripts/replace-application-native-candidate-local.mjs',probe='tests/online-deployment/installed-native-image-probe.fixture.mjs';captureFile(helper);captureFile(probe);
  const bytes=captureFile(relative),value=JSON.parse(bytes);validateNativeCandidateReplacementReceipt(value);
+ if(value.authorityCohort)validateAuthorityCohortSlots(containers,value.authorityCohort.nonce);
  const replacementEntry=value.replacementEntry??helper;if(replacementEntry!==helper)captureFile(replacementEntry);
  if(value.previousReplacement){
   assert.equal(replacementEntry,'scripts/replace-qualified-application-native-candidate-local.mjs');assert.deepEqual(Object.keys(value.previousReplacement).sort(),['file','sha256']);assert.match(value.previousReplacement.sha256,/^[a-f0-9]{64}$/);const priorRaw=readExternal(value.previousReplacement.file);assert.equal(sha(priorRaw),value.previousReplacement.sha256);assert.equal(value.inputs[path.resolve(value.previousReplacement.file)],value.previousReplacement.sha256);const prior=JSON.parse(priorRaw);validateReobservedCandidateBaselineReceipt(value,prior);
@@ -57,8 +59,8 @@ export function collectNativeCandidateArtifacts({root,capture,containers,sourceC
  }
  assert.equal(evidence.main.image,'sha256:89dd62e901f2077f70c800bd9b705251730fa23531f7c3cc42fdaee1d9c71186');assert.notEqual(evidence.candidate.image,evidence.main.image);
  const historical=JSON.parse(captureFile('reports/qa/application-native-role-slots-aeca1063d2275dde6b8fbda710d1de34.json'));assert.equal(historical.pass,true);assert.deepEqual(evidence.main.runtime,historical.privateQualificationRuntime);assert.equal(evidence.main.imageReceiptSha256,historical.imageReceiptSha256);assert.equal(evidence.main.materialReceiptSha256,historical.materialReceiptSha256);
- assert.deepEqual(value.actual['backend-retained']&&Object.fromEntries(['id','image','startedAt'].map(key=>[key,value.actual['backend-retained'][key]])),value.protectedBefore['backend-retained']);
- for(const file of ['docker-compose.online-acceptance.yml','docker-compose.online-runtime-authority-acceptance.yml','docker-compose.application-native-role-isolation.yml','docker-compose.application-native-mixed-images.yml',helper,probe,...(replacementEntry===helper?[]:[replacementEntry])]){
+ if(!value.authorityCohort)assert.deepEqual(value.actual['backend-retained']&&Object.fromEntries(['id','image','startedAt'].map(key=>[key,value.actual['backend-retained'][key]])),value.protectedBefore['backend-retained']);
+ for(const file of ['docker-compose.online-acceptance.yml','docker-compose.online-runtime-authority-acceptance.yml','docker-compose.application-native-role-isolation.yml','docker-compose.application-native-mixed-images.yml',helper,probe,...(replacementEntry===helper?[]:[replacementEntry]),...(value.authorityCohort?['docker-compose.application-native-authority-cohort.yml',...authorityCohortSources]:[])]){
   const raw=captureFile(file);assert.equal(value.inputs[path.join(root,file)],sha(raw),'REPLACEMENT_SOURCE_PIN_CHANGED: '+file);
  }
  const revalidate=()=>{for(const [file,pin]of external)assert.deepEqual(stableFrontendBaseFile(file,16*1024**2),pin,'EXTERNAL_ROLE_RECEIPT_CHANGED');for(const [file,digest]of captured)assert.equal(sha(fs.readFileSync(path.join(root,file))),digest,'ROLE_CAPTURE_CHANGED');return{roleEvidence:evidence,externalInputs:Object.fromEntries(external)};};

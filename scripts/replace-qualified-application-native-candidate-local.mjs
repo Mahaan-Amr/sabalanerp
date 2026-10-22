@@ -4,6 +4,7 @@ import path from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
 import {execFileSync,spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
+import {authorityCohortSources,authorityMounts,authoritySubpath,authorityWriterRoot,validateAuthorityCohortConfiguration,validateAuthorityCohortSlots,validateAuthorityCohortReceipt} from './lib/application-native-authority-cohort.mjs';
 
 export function validateCandidatePreflight(value,now=Date.now()){
  assert.equal(value.sshExitCode,0);const age=now-Date.parse(value.observedAt);assert.ok(Number.isFinite(age)&&age>=0&&age<=600000,'BOTH_HOST_PREFLIGHT_STALE');
@@ -36,16 +37,17 @@ export function validateInstalledNativeRole(result,expected){
  assert.equal(result.entryExportPresent,true);assert.equal(result.applicationStarted,false);assert.equal(result.databaseConnected,false);assert.equal(result.productionAdmission,false);
 }
 export function parseCandidateReplacementArguments(argv){
+ const isolateAuthorityCohort=argv.at(-1)==='--isolate-authority-cohort';if(isolateAuthorityCohort)argv=argv.slice(0,-1);
  assert.ok(argv.length===7||argv.length===11,'EXACT_REPLACEMENT_ARGUMENTS_REQUIRED');assert.ok(['--inspect','--replace'].includes(argv[0]));
  for(const[i,key]of ['--image-receipt','--material-receipt','--preflight'].entries())assert.equal(argv[1+i*2],key);
- const result={inspectOnly:argv[0]==='--inspect',imageReceiptFile:path.resolve(argv[2]),materialReceiptFile:path.resolve(argv[4]),preflightFile:path.resolve(argv[6])};
+ const result={inspectOnly:argv[0]==='--inspect',imageReceiptFile:path.resolve(argv[2]),materialReceiptFile:path.resolve(argv[4]),preflightFile:path.resolve(argv[6]),...(isolateAuthorityCohort?{isolateAuthorityCohort:true}:{})};
  if(argv.length===11){assert.equal(argv[7],'--previous-replacement-receipt');assert.equal(argv[9],'--previous-replacement-sha256');assert.ok(path.isAbsolute(argv[8]));assert.match(argv[8].replaceAll('\\','/'),/\/reports\/qa\/application-native-candidate-[a-f0-9]{32}\.json$/);assert.match(argv[10],/^[a-f0-9]{64}$/);result.previousReplacement={file:path.resolve(argv[8]),sha256:argv[10]};}return result;
 }
 export function validatePreviousCandidateReplacement(value){
  if(Object.hasOwn(value,'replacementEntry'))assert.equal(value.replacementEntry,'scripts/replace-qualified-application-native-candidate-local.mjs');
  assert.equal(value.format,'sabalan-application-native-candidate/v1');assert.equal(value.pass,true);assert.equal(value.phase,'COMPLETE');assert.equal(value.productionAdmission,false);
- for(const key of ['onlyCandidateReplaced','retainedOriginalPreserved','originalLimitsUnchanged'])assert.equal(value[key],true);assert.equal(value.up.code,0);assert.equal(value.up.signal,null);assert.equal(value.up.failure,undefined);assert.ok(Number.isSafeInteger(value.up.originalPid)&&value.up.originalPid>0);
- assert.deepEqual(value.originalChildren,{allOriginalChildrenClosed:true,interrupted:false});const protectedNames=candidateReplacementServices.filter(name=>name!=='backend-candidate').sort();assert.deepEqual(Object.keys(value.protectedBefore).sort(),protectedNames);assert.deepEqual(value.protectedAfter,value.protectedBefore);assert.deepEqual(value.finalProtected,value.protectedBefore);
+ if(value.authorityCohort)validateAuthorityCohortReceipt(value);else for(const key of ['onlyCandidateReplaced','retainedOriginalPreserved'])assert.equal(value[key],true);assert.equal(value.originalLimitsUnchanged,true);assert.equal(value.up.code,0);assert.equal(value.up.signal,null);assert.equal(value.up.failure,undefined);assert.ok(Number.isSafeInteger(value.up.originalPid)&&value.up.originalPid>0);
+ assert.deepEqual(value.originalChildren,{allOriginalChildrenClosed:true,interrupted:false});const protectedNames=candidateReplacementServices.filter(name=>name!=='backend-candidate'&&(!value.authorityCohort||name!=='backend-retained')).sort();assert.deepEqual(Object.keys(value.protectedBefore).sort(),protectedNames);assert.deepEqual(value.protectedAfter,value.protectedBefore);assert.deepEqual(value.finalProtected,value.protectedBefore);
  for(const stage of ['nativeQuiet','preMutationNativeQuiet','postMutationNativeQuiet'])for(const service of ['backend-candidate','backend-retained']){assert.equal(value[stage][service].originalNativeProcesses,0);assert.equal(value[stage][service].adoptsOriginalPopen,false);}
  for(const stage of ['sqlQuiet','preMutationSqlQuiet','postMutationSqlQuiet']){assert.equal(value[stage].visible,true);assert.equal(value[stage].sessions,0);assert.equal(value[stage].prepared,0);assert.equal(value[stage].system,value.sqlQuiet.system);}
  for(const[role,service]of [['main','backend-retained'],['candidate','backend-candidate']]){const actual=value.actual[service],evidence=value.roleEvidence[role];assert.match(actual.id,/^[a-f0-9]{64}$/);assert.match(actual.image,/^sha256:[a-f0-9]{64}$/);assert.ok(Number.isFinite(Date.parse(actual.startedAt)));assert.equal(evidence.image,actual.image);for(const key of ['imageReceiptSha256','materialReceiptSha256'])assert.match(evidence[key],/^[a-f0-9]{64}$/);assert.equal(value.installed[service].code,0);assert.equal(value.installed[service].signal,null);}
@@ -57,7 +59,7 @@ export function validateReobservedCandidateSlots(previous,current){
 }
 async function main(){
 const root=path.resolve(import.meta.dirname,'..'),base='D:/sabalanerp/docker-compose.local.yml';
-const {inspectOnly,imageReceiptFile,materialReceiptFile,preflightFile,previousReplacement}=parseCandidateReplacementArguments(process.argv.slice(2));
+const {inspectOnly,imageReceiptFile,materialReceiptFile,preflightFile,previousReplacement,isolateAuthorityCohort=false}=parseCandidateReplacementArguments(process.argv.slice(2));
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const imageReceiptRaw=fs.readFileSync(imageReceiptFile),imageReceipt=JSON.parse(imageReceiptRaw),materialReceiptRaw=fs.readFileSync(materialReceiptFile),materialReceipt=JSON.parse(materialReceiptRaw);
 const preflight=()=>validateCandidatePreflight(JSON.parse(fs.readFileSync(preflightFile)));preflight();
@@ -86,7 +88,7 @@ assert.deepEqual(perRole.main.runtime,historical.privateQualificationRuntime);
 const removedCodeTargets=['/app/dist','/packages/partner-sales-contracts/dist','/packages/contract-product-graph/dist'];
 const installedProbeFile=path.join(root,'tests/online-deployment/installed-native-image-probe.fixture.mjs');
 const installedProbe=fs.readFileSync(installedProbeFile);
-const protectedServices=['backend','frontend','postgres','inquiry','redis','clamav','frontend-candidate','frontend-retained','backend-retained'];
+const protectedServices=['backend','frontend','postgres','inquiry','redis','clamav','frontend-candidate','frontend-retained',...(isolateAuthorityCohort?[]:['backend-retained'])];
 const slots=['backend-candidate','backend-retained'];
 const rows=raw=>{try{const value=JSON.parse(raw);return Array.isArray(value)?value:[value];}
   catch{return raw.trim().split(/\r?\n/).map(line=>JSON.parse(line));}};
@@ -107,13 +109,14 @@ if(predecessorImage){const [observedPredecessor]=JSON.parse(docker(['image','ins
 const [installedImage]=JSON.parse(docker(['image','inspect',image]));
 assert.equal(installedImage.Id,image);assert.deepEqual(installedImage.RootFS.Layers,imageReceipt.image.layers);
 const overlays=['docker-compose.online-acceptance.yml','docker-compose.online-runtime-authority-acceptance.yml',
-  'docker-compose.application-native-role-isolation.yml','docker-compose.application-native-mixed-images.yml'].map(name=>path.join(root,name));
+  'docker-compose.application-native-role-isolation.yml','docker-compose.application-native-mixed-images.yml',...(isolateAuthorityCohort?['docker-compose.application-native-authority-cohort.yml']:[])].map(name=>path.join(root,name));
+const cohortNonce=isolateAuthorityCohort?randomBytes(16).toString('hex'):null;
 const env={...process.env,ONLINE_ACCEPTANCE_BASE_COMPOSE:base,ONLINE_ACCEPTANCE_SOURCE_ROOT:sourceRoot,
   ONLINE_ACCEPTANCE_BACKEND_IMAGE:image,ONLINE_ACCEPTANCE_RETAINED_BACKEND_IMAGE:oldImage,ONLINE_ACCEPTANCE_FRONTEND_IMAGE:inspect('frontend-candidate').Image,
-  ONLINE_ACCEPTANCE_FRONTEND_DIST:path.join(sourceRoot,'frontend'),ONLINE_ACCEPTANCE_BROWSER_BUILD_ID:'configuration_only_not_deployed'};
+  ONLINE_ACCEPTANCE_FRONTEND_DIST:path.join(sourceRoot,'frontend'),ONLINE_ACCEPTANCE_BROWSER_BUILD_ID:'configuration_only_not_deployed',...(isolateAuthorityCohort?{ONLINE_ACCEPTANCE_AUTHORITY_SUBPATH:authoritySubpath(cohortNonce)}:{})};
 const compose=['compose','-f',base,...overlays.flatMap(file=>['-f',file]),'--profile','online-acceptance'];
 status();const configuration=JSON.parse(execFileSync('docker',[...compose,'config','--format','json'],{env,encoding:'utf8',maxBuffer:8*1024**2}));
-assert.equal(configuration.name,'sabalanerp-local');
+assert.equal(configuration.name,'sabalanerp-local');if(isolateAuthorityCohort)validateAuthorityCohortConfiguration(configuration,cohortNonce);
 for(const service of slots){const wanted=configuration.services[service],old=previous[service];
   assert.equal(wanted.image,service==='backend-candidate'?image:oldImage);assert.deepEqual(wanted.command,old.Config.Cmd);assert.equal(Number(wanted.mem_limit),old.HostConfig.Memory);
   assert.equal(wanted.read_only,old.HostConfig.ReadonlyRootfs);assert.deepEqual(wanted.cap_drop??[],old.HostConfig.CapDrop??[]);
@@ -126,12 +129,12 @@ for(const service of slots){const wanted=configuration.services[service],old=pre
   const oldMounts=new Map(old.Mounts.map(value=>[value.Destination,value]));
   for(const target of removedCodeTargets)assert.ok(!wanted.volumes.some(volume=>volume.target===target));
   for(const volume of wanted.volumes){const existing=oldMounts.get(volume.target);
-    assert.ok(existing,'unexpected mount '+volume.target);assert.equal(!volume.read_only,existing.RW);
+    if(!existing){const rootMount=isolateAuthorityCohort&&authorityMounts[service].find(m=>!m.subpath&&m.target===volume.target);assert.ok(rootMount,'unexpected mount '+volume.target);assert.equal(volume.type,'volume');assert.equal(volume.read_only??false,false);continue;}assert.equal(!volume.read_only,existing.RW);
     if(volume.type==='bind')assert.equal(path.resolve(volume.source).toLowerCase(),path.resolve(existing.Source).toLowerCase());
     else assert.equal(configuration.volumes[volume.source].name,existing.Name);
   }
-  const remainingOld=old.Mounts.filter(value=>!removedCodeTargets.includes(value.Destination));assert.equal(wanted.volumes.length,remainingOld.length);
-  assert.deepEqual(wanted.volumes.map(value=>value.target).sort(),remainingOld.map(value=>value.Destination).sort());
+  const remainingOld=old.Mounts.filter(value=>!removedCodeTargets.includes(value.Destination));const newRoots=isolateAuthorityCohort?authorityMounts[service].filter(m=>!m.subpath&&!oldMounts.has(m.target)).map(m=>m.target):[];assert.equal(wanted.volumes.length,remainingOld.length+newRoots.length);
+  assert.deepEqual(wanted.volumes.map(value=>value.target).sort(),[...remainingOld.map(value=>value.Destination),...newRoots].sort());
 }
 const processProbe=String.raw`import os,json,stat
 from pathlib import Path
@@ -182,9 +185,9 @@ const sqlQuiet=()=>{const value=JSON.parse(docker(['exec',inspect('postgres').Id
   assert.equal(value.visible,true);assert.equal(value.sessions,0);assert.equal(value.prepared,0);return value;};
 const operation=randomBytes(16).toString('hex'),reportPath=path.join(root,'reports/qa/application-native-candidate-'+operation+'.json');
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const inputs=Object.fromEntries([base,...overlays,import.meta.filename,imageReceiptFile,materialReceiptFile,installedProbeFile,preflightFile,historicalFile,retainedImageReceiptFile,retainedMaterialReceiptFile,path.join(root,'scripts/replace-application-native-candidate-local.mjs'),...predecessorInputs].map(file=>[file,hash(file)]));
+const inputs=Object.fromEntries([base,...overlays,import.meta.filename,imageReceiptFile,materialReceiptFile,installedProbeFile,preflightFile,historicalFile,retainedImageReceiptFile,retainedMaterialReceiptFile,path.join(root,'scripts/replace-application-native-candidate-local.mjs'),...predecessorInputs,...(isolateAuthorityCohort?authorityCohortSources.map(file=>path.join(root,file)):[])].map(file=>[file,hash(file)]));
 const report={format:'sabalan-application-native-candidate/v1',replacementEntry:'scripts/replace-qualified-application-native-candidate-local.mjs',operation,pass:false,phase:'INTENT',productionAdmission:false,
-  onlyCandidateReplaced:true,retainedOriginalPreserved:true,originalLimitsUnchanged:true,protectedBefore,previous:Object.fromEntries(slots.map(service=>[service,identity(previous[service])])),inputs,
+  onlyCandidateReplaced:!isolateAuthorityCohort,retainedOriginalPreserved:!isolateAuthorityCohort,...(isolateAuthorityCohort?{onlyQualificationSlotsRecreated:true,authorityCohort:{format:'sabalan-native-authority-cohort/v1',nonce:cohortNonce,prepared:{},verified:{}}}:{}),originalLimitsUnchanged:true,protectedBefore,previous:Object.fromEntries(slots.map(service=>[service,identity(previous[service])])),inputs,
   immutableImage:image,materialReceiptSha256:digest(materialReceiptRaw),imageReceiptSha256:digest(imageReceiptRaw),removedCodeTargets,
   ...(predecessor?{previousReplacement:{...previousReplacement},reobservedBaseline}:{}),nativeQuiet:processQuiet(),sqlQuiet:sqlQuiet()};
 const save=()=>{fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');};save();
@@ -193,13 +196,21 @@ async function originalInstalledReadback(service,expected){
  status();const result=await new Promise(resolve=>{const child=spawn('docker',['exec','-i',previous[service].Id,'node','--input-type=module'],{stdio:['pipe','pipe','pipe']});children.push(child);let stdout='',stderr='',failure;child.stdout.on('data',bytes=>{if(Buffer.byteLength(stdout)+bytes.length<=8*1024**2)stdout+=bytes;else failure??='BASELINE_PROBE_STDOUT_BOUND';});child.stderr.on('data',bytes=>{if(Buffer.byteLength(stderr)+bytes.length<=65536)stderr+=bytes;else failure??='BASELINE_PROBE_STDERR_BOUND';});child.stdin.on('error',error=>{failure??=error.code;});child.on('error',error=>{failure??=error.code;});child.on('close',(code,signal)=>resolve({originalPid:child.pid,code,signal,stdout,stderr,failure}));child.stdin.end(installedProbe);});
  assert.equal(result.code,0);assert.equal(result.signal,null);assert.equal(result.failure,undefined);assert.equal(interrupted,false);const value=JSON.parse(result.stdout);validateInstalledNativeRole(value,expected);return{originalPid:result.originalPid,code:0,signal:null,stderr:result.stderr,result:value};
 }
+async function originalAuthorityDirectory(service,mode,observed,expected=null,peerExpected=null){
+ const owner=authorityWriterRoot(observed[service],service),fixture=fs.readFileSync(path.join(root,authorityCohortSources[1]));
+ const spec={mode,kind:owner.kind,nonce:cohortNonce,root:owner.target,expected,peerExpected};
+ const bootstrap="import sys,json,base64,hashlib,io;p=json.load(sys.stdin);s=base64.b64decode(p['source'],validate=True);assert hashlib.sha256(s).hexdigest()=="+JSON.stringify(digest(fixture))+";sys.stdin=io.StringIO(json.dumps(p['spec']));exec(compile(s,'original-authority-cohort','exec'),globals())";
+ status();const result=await new Promise(resolve=>{const child=spawn('docker',['exec','-i',observed[service].Id,'/usr/bin/python3','-I','-B','-c',bootstrap],{stdio:['pipe','pipe','pipe']});children.push(child);let stdout='',stderr='',failure;child.stdout.on('data',bytes=>{if(Buffer.byteLength(stdout)+bytes.length<=65536)stdout+=bytes;else failure??='AUTHORITY_COHORT_STDOUT_BOUND';});child.stderr.on('data',bytes=>{if(Buffer.byteLength(stderr)+bytes.length<=65536)stderr+=bytes;else failure??='AUTHORITY_COHORT_STDERR_BOUND';});child.stdin.on('error',error=>{failure??=error.code;});child.on('error',error=>{failure??=error.code;});child.on('close',(code,signal)=>resolve({originalPid:child.pid,code,signal,stdout,stderr,failure}));child.stdin.end(JSON.stringify({source:fixture.toString('base64'),spec}));});
+ assert.equal(result.code,0);assert.equal(result.signal,null);assert.equal(result.failure,undefined);assert.equal(interrupted,false);return {...result,result:JSON.parse(result.stdout)};
+}
 try{
  if(predecessor){report.reobservedInstalled={};for(const service of slots){report.reobservedInstalled[service]=await originalInstalledReadback(service,nativeMaterialIdentity(service==='backend-candidate'?predecessorMaterial:retainedMaterial));save();}report.reobservedNativeQuiet=processQuiet();report.reobservedSqlQuiet=sqlQuiet();for(const service of slots)assert.deepEqual(identity(inspect(service)),identity(previous[service]));report.reobservedBaseline.installedBytesVerified=true;report.reobservedBaseline.nativeAndSqlQuietVerified=true;save();}
  if(inspectOnly){report.phase='INSPECTION_COMPLETE';report.inspectionOnly=true;report.originalChildren={allOriginalChildrenClosed:true,interrupted:false};assert.equal(interrupted,false);save();console.log(JSON.stringify({inspectionOnly:true,reportPath}));return;}
 
   for(const [file,digest]of Object.entries(inputs))assert.equal(hash(file),digest);
   report.preMutationNativeQuiet=processQuiet();report.preMutationSqlQuiet=sqlQuiet();preflight();save();
-  status();report.up=await new Promise(resolve=>{const child=spawn('docker',[...compose,'up','-d','--no-deps','--no-build','--pull','never','--wait','--wait-timeout','120','backend-candidate'],{env,stdio:['ignore','pipe','pipe']});
+  if(isolateAuthorityCohort){for(const service of slots){report.authorityCohort.prepared[service]=await originalAuthorityDirectory(service,'create',previous);save();}report.preMutationNativeQuiet=processQuiet();report.preMutationSqlQuiet=sqlQuiet();preflight();}
+  status();report.up=await new Promise(resolve=>{const child=spawn('docker',[...compose,'up','-d','--no-deps','--no-build','--pull','never','--wait','--wait-timeout','120','backend-candidate',...(isolateAuthorityCohort?['backend-retained']:[])],{env,stdio:['ignore','pipe','pipe']});
     children.push(child);let stdout='',stderr='',failure;child.stdout.on('data',bytes=>{if(Buffer.byteLength(stdout)+bytes.length<=8*1024**2)stdout+=bytes;else failure??='COMPOSE_STDOUT_BOUND';});child.stderr.on('data',bytes=>{if(Buffer.byteLength(stderr)+bytes.length<=65536)stderr+=bytes;else failure??='COMPOSE_STDERR_BOUND';});
     child.on('error',error=>{report.spawnError=error.code;save();});child.on('close',(code,signal)=>resolve({originalPid:child.pid,code,signal,stdout,stderr,failure}));});
   save();assert.equal(interrupted,false);assert.equal(report.up.failure,undefined);assert.equal(report.up.code,0);assert.equal(report.up.signal,null);assert.equal(report.spawnError,undefined);
@@ -208,6 +219,7 @@ try{
   for(const service of slots){const value=actual[service];assert.equal(value.Image,service==='backend-candidate'?image:oldImage);
     assert.equal(value.HostConfig.Memory,previous[service].HostConfig.Memory);assert.deepEqual(value.Config.Cmd,previous[service].Config.Cmd);}
   for(const service of slots)assert.ok(!actual[service].Mounts.some(value=>removedCodeTargets.includes(value.Destination)));
+  if(isolateAuthorityCohort){validateAuthorityCohortSlots(actual,cohortNonce);for(const service of slots){assert.notEqual(actual[service].Id,previous[service].Id);const peer=service==='backend-candidate'?'backend-retained':'backend-candidate';report.authorityCohort.verified[service]=await originalAuthorityDirectory(service,'verify',actual,report.authorityCohort.prepared[service].result.namespace,report.authorityCohort.prepared[peer].result.namespace);save();}}
   const candidate=actual['backend-candidate'],retained=actual['backend-retained'];
   const mount=(value,target)=>{const found=value.Mounts.find(entry=>entry.Destination===target);assert.ok(found);return found;};
   const http=mount(retained,'/run/sabalan-online'),httpWriter=mount(candidate,'/app/runtime-authority');
@@ -236,7 +248,7 @@ try{
   report.finalProtected=Object.fromEntries(protectedServices.map(service=>[service,identity(inspect(service))]));assert.deepEqual(report.finalProtected,protectedBefore);
   for(const [file,digest]of Object.entries(inputs))assert.equal(hash(file),digest);
   assert.equal(interrupted,false);assert.ok(children.every(child=>child.exitCode!==null||child.signalCode!==null));report.originalChildren={allOriginalChildrenClosed:true,interrupted:false};
-  report.pass=true;report.phase='COMPLETE';save();
+  if(isolateAuthorityCohort)validateAuthorityCohortReceipt(report);report.pass=true;report.phase='COMPLETE';save();
 }catch(error){report.failure={name:error.name,message:error.message};report.phase='FAILED_CLOSED';save();
   if(children.some(child=>child.exitCode===null&&child.signalCode===null)){await new Promise(()=>{setInterval(()=>{void children;},30000);});}
   throw error;

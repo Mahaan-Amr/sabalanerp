@@ -134,12 +134,21 @@ export function validateReceipt(value,image,versions,now=Date.now()) {
   || !Number.isFinite(Date.parse(value.checkedAt)) || now-Date.parse(value.checkedAt)<0 || now-Date.parse(value.checkedAt)>24*3600000
   || ['main','daily','bytecode'].some(name=>value.versions?.[name]!==versions[name])) throw new Error('ClamAV readiness is missing, stale or does not match the image and published signatures');
  if(value.acquisitionOrigin!==undefined && !['https://database.clamav.net',mirrorOrigin].includes(value.acquisitionOrigin))throw new Error('Unreviewed acquisition origin');
+ if(value.acquisitionTransport!==undefined && (value.acquisitionTransport!=='backup-host-http-v1' || value.acquisitionOrigin!==mirrorOrigin))throw new Error('Unreviewed acquisition transport');
  if(value.acquisitionOrigin===mirrorOrigin){validateSourceMigration(value.sourceMigration);}
  else if(value.sourceMigration!==undefined)throw new Error('Acquisition evidence does not match its origin');
  return value;
 }
 
-export function validateAcquisitionConfiguration(config) {
+export function validateTransportIdentity(container,image) {
+ const mode='CLAMAV_ACQUISITION_TRANSPORT=backup-host-http-v1';
+ const exact=values=>Array.isArray(values) && values.filter(value=>value.startsWith('CLAMAV_ACQUISITION_TRANSPORT=')).length===1 && values.includes(mode);
+ const aliases=container?.HostConfig?.ExtraHosts?.filter(value=>value.split(':')[0]==='sabalan-clamav-egress') || [];
+ if(image?.Id!==container?.Image || !exact(image?.Config?.Env) || !exact(container?.Config?.Env)
+   ||aliases.length!==1 || aliases[0]!=='sabalan-clamav-egress:host-gateway')throw new Error('Private transport must match the immutable image, container and exact host gateway alias');
+ return 'backup-host-http-v1';
+}
+export function validateAcquisitionConfiguration(config,transport) {
  const settings=new Map();
  for(const raw of config.split(/\r?\n/)){
   const line=raw.trim();if(!line||line.startsWith('#'))continue;
@@ -147,8 +156,12 @@ export function validateAcquisitionConfiguration(config) {
   const key=match[1].toLowerCase();if(settings.has(key))throw new Error('Ambiguous acquisition configuration');settings.set(key,match[2]);
  }
  const source=settings.get('databasemirror');
+ const proxies=[...settings.keys()].filter(key=>key.startsWith('httpproxy'));
+ const privateProxy=transport==='backup-host-http-v1' && source===mirrorOrigin
+  && proxies.length===2 && settings.get('httpproxyserver')==='sabalan-clamav-egress' && settings.get('httpproxyport')==='10808';
  if(!['database.clamav.net','https://database.clamav.net',mirrorOrigin].includes(source)
-  ||['include','privatemirror','databasecustomurl','httpproxyserver'].some(key=>settings.has(key))
+  ||['include','privatemirror','databasecustomurl'].some(key=>settings.has(key))
+  ||(proxies.length>0 && !privateProxy) || (transport && !privateProxy)
   ||settings.get('testdatabases')!=='yes'||settings.get('dnsdatabaseinfo')!=='current.cvd.clamav.net'
   ||settings.get('databasedirectory')!=='/var/lib/clamav')throw new Error('ClamAV readiness: acquisition source or verification policy differs from the reviewed image');
  return source===mirrorOrigin?mirrorOrigin:'https://database.clamav.net';
@@ -194,7 +207,14 @@ export async function inspectCandidate(container,execute=exec,resolve=resolveTxt
  const run=async(args)=> (await execute('docker',args,{maxBuffer:4*1024*1024})).stdout.trim();
  const inspect=JSON.parse(await run(['inspect',container]))[0];
  if(!inspect.State.Running)throw new Error('Candidate is not running');
- const acquisitionOrigin=validateAcquisitionConfiguration(await run(['exec',container,'cat','/etc/clamav/freshclam.conf']));
+ const configuration=await run(['exec',container,'cat','/etc/clamav/freshclam.conf']);
+ let acquisitionTransport;
+ if(/^\s*HTTPProxy/im.test(configuration)) {
+  const image=JSON.parse(await run(['image','inspect',inspect.Image]))[0];
+  acquisitionTransport=validateTransportIdentity(inspect,image);
+  await run(['exec',container,'/usr/local/bin/sabalan-clamav-acquisition-transport']);
+ }
+ const acquisitionOrigin=validateAcquisitionConfiguration(configuration,acquisitionTransport);
  let sourceMigration;
  if(acquisitionOrigin===mirrorOrigin){
   sourceMigration=validateSourceMigration(JSON.parse(await run(['exec',container,'cat','/var/lib/clamav/.source-state/migration.json'])));
@@ -208,7 +228,11 @@ export async function inspectCandidate(container,execute=exec,resolve=resolveTxt
  await run(['exec',container,'/usr/local/bin/sabalan-clamav-health']);
  const after=JSON.parse(await run(['inspect',container]))[0];
  if(after.Id!==inspect.Id||after.Image!==inspect.Image||after.State.StartedAt!==inspect.State.StartedAt||!after.State.Running)throw new Error('Candidate restarted during inspection');
- return validateReceipt({...value,acquisitionOrigin,...(sourceMigration?{sourceMigration}:{})},value.image,await publishedVersions(resolve));
+ if(acquisitionTransport){
+  const image=JSON.parse(await run(['image','inspect',after.Image]))[0];
+  if(validateTransportIdentity(after,image)!==acquisitionTransport || await run(['exec',container,'cat','/etc/clamav/freshclam.conf'])!==configuration)throw new Error('Private transport changed during inspection');
+ }
+ return validateReceipt({...value,acquisitionOrigin,...(acquisitionTransport?{acquisitionTransport}:{}),...(sourceMigration?{sourceMigration}:{})},value.image,await publishedVersions(resolve));
 }
 export function parseNativeProbe(text) {
  const lines=text.trim().split('\n').map(line=>line.split('\t'));
@@ -241,10 +265,24 @@ export async function inspectRollback(container,proof,execute=exec,resolve=resol
   const logs=(String(result.stdout)+'\n'+String(result.stderr || '')).split('\n').filter(Boolean).sort((a,b)=>Date.parse(a.split(' ')[0])-Date.parse(b.split(' ')[0])).join('\n');
   return {sample,evidence:validateNativeUpdater(sample,config,logs,published,daemonConfig)};
  };
- let native, first;
+ const managedTransport=async inspection=>{
+  const configuration=await run(['exec',container,'cat','/etc/clamav/freshclam.conf']);
+  let transport;
+  if(/^\s*HTTPProxy/im.test(configuration)) {
+   const image=JSON.parse(await run(['image','inspect',inspection.Image]))[0];
+   transport=validateTransportIdentity(inspection,image);
+   await run(['exec',container,'/usr/local/bin/sabalan-clamav-acquisition-transport']);
+  }
+  validateAcquisitionConfiguration(configuration,transport);
+  return {configuration,transport};
+ };
+ let native, first, firstTransport;
  if(verifier===nativeVerifier) {
   const result=await nativeEvidence(); first=result.sample; native=result.evidence;
- } else await run(['exec',container,'/usr/local/bin/sabalan-clamav-health']);
+ } else {
+  firstTransport=await managedTransport(before);
+  await run(['exec',container,'/usr/local/bin/sabalan-clamav-health']);
+ }
  const fingerprints=async()=>{
   const hashes={};
   for(const file of Object.keys(proof.bankFiles))hashes[file]=(await run(['exec',container,'sha256sum','/var/lib/clamav/'+file])).split(/\s/)[0];
@@ -263,8 +301,12 @@ export async function inspectRollback(container,proof,execute=exec,resolve=resol
   const signature=p=>p.processes.map(({name,pid,uid,startTicks,args})=>({name,pid,uid,startTicks,args})).sort((a,b)=>a.pid-b.pid);
   if(last.processes.some(p=>!/^[RSDI]$/.test(p.state)) || JSON.stringify(signature(first))!==JSON.stringify(signature(last)))throw new Error('Native daemon changed during qualification');
   native=result.evidence;
- } else await run(['exec',container,'/usr/local/bin/sabalan-clamav-health']);
- return {...value,runtimeVerifier:verifier,configAndBankMatched:true,...(native?{nativeUpdater:native}:{})};
+ } else {
+  await run(['exec',container,'/usr/local/bin/sabalan-clamav-health']);
+  const lastTransport=await managedTransport(after);
+  if(JSON.stringify(firstTransport)!==JSON.stringify(lastTransport))throw new Error('Managed rollback transport changed during qualification');
+ }
+ return {...value,runtimeVerifier:verifier,configAndBankMatched:true,...(native?{nativeUpdater:native}:{}),...(firstTransport?.transport?{acquisitionTransport:firstTransport.transport}:{})};
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
  const [command,input,image]=process.argv.slice(2);

@@ -7,9 +7,30 @@ import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 const hashBytes=raw=>createHash('sha256').update(raw).digest('hex');
 import {validateSelectedImageReceipt} from '../../scripts/run-independent-full-restore-controller.mjs';
-import {validateRetainedInquiryStartupRefresh,validateRetainedInquiryProxy,assertRetainedPreActorClosure,validateRetainedBrowserPlan,readOriginalRetainedBrowserQualificationCompletion,assertRetainedControllerEof,validateRetainedBrowserCapacity,buildRetainedInquiryRotation} from '../../scripts/lib/original-retained-browser-qualification.mjs';
+import {validateRetainedInquiryStartupRefresh,validateRetainedInquiryProxy,assertRetainedPreActorClosure,validateRetainedBrowserPlan,readOriginalRetainedBrowserQualificationCompletion,assertRetainedControllerEof,validateRetainedBrowserCapacity,buildRetainedInquiryRotation,readRetainedInquiryAuthorityMount} from '../../scripts/lib/original-retained-browser-qualification.mjs';
 test('saved JSON cannot substitute an original retained-browser completion',()=>{
  for(const value of [{},{pass:true,allOriginalChildrenClosed:true},Object.freeze({})])assert.throws(()=>readOriginalRetainedBrowserQualificationCompletion(value),/ORIGINAL_RETAINED_BROWSER_COMPLETION_UNPROVEN/);
+});
+test('Inquiry rotation preserves the measured authority cohort instead of mounting its parent volume',()=>{
+ const proxy={hostname:'inquiry-qualification.localhost',address:'172.18.0.3',containerId:'a'.repeat(64),image:'sha256:'+'b'.repeat(64),startedAt:'2026-10-22T00:00:00Z',networkId:'c'.repeat(64),networkName:'sabalanerp-local_default'};
+ const authority={name:'sabalanerp-local_online_runtime_authority',subpath:'cohort-'+'e'.repeat(32)};
+ const rotation=buildRetainedInquiryRotation({old:'sha256:'+'1'.repeat(64),current:'sha256:'+'2'.repeat(64)},'acceptance',authority,proxy);
+ assert.equal(rotation.volumes.inquiry_pair_authority.name,authority.name);
+ for(const service of Object.values(rotation.services)){
+  const mount=service.volumes.find(row=>row.target==='/run/sabalan-online');
+  assert.equal(mount.read_only,true);assert.deepEqual(mount.volume,{nocopy:true,subpath:authority.subpath});
+ }
+});
+test('authority views require actual engine subpath or an unambiguous legacy whole-volume bind',()=>{
+ const name='sabalanerp-local_online_runtime_authority',target='/app/runtime-authority',subpath='cohort-'+'a'.repeat(32);
+ const container={Mounts:[{Type:'volume',Name:name,Destination:target,RW:true,Source:'/var/lib/docker/volumes/'+name+'/_data/'+subpath}],HostConfig:{Mounts:[{Type:'volume',Source:name,Target:target,ReadOnly:false,VolumeOptions:{NoCopy:true,Subpath:subpath}}],Binds:[]}};
+ assert.deepEqual(readRetainedInquiryAuthorityMount(container,target,false),{name,subpath});
+ for(const mutate of [v=>v.HostConfig.Mounts=[],v=>v.HostConfig.Mounts[0].VolumeOptions.NoCopy=false,v=>v.HostConfig.Mounts[0].VolumeOptions.Subpath='../parent',v=>v.HostConfig.Mounts[0].Source='foreign',v=>v.HostConfig.Mounts[0].ReadOnly=true,v=>v.Mounts[0].RW=false]){const changed=structuredClone(container);mutate(changed);assert.throws(()=>readRetainedInquiryAuthorityMount(changed,target,false));}
+ const legacy=structuredClone(container);legacy.HostConfig={Mounts:[],Binds:[name+':'+target+':rw']};legacy.Mounts[0].Source='/var/lib/docker/volumes/'+name+'/_data';
+ assert.deepEqual(readRetainedInquiryAuthorityMount(legacy,target,false),{name,subpath:''});
+ legacy.Mounts[0].Source+='/'+subpath;assert.throws(()=>readRetainedInquiryAuthorityMount(legacy,target,false),/INQUIRY_AUTHORITY_WHOLE_VOLUME_UNPROVEN/);
+ const actor=structuredClone(container);actor.Mounts[0].Destination='/run/sabalan-online';actor.Mounts[0].RW=false;actor.HostConfig.Mounts[0].Target='/run/sabalan-online';actor.HostConfig.Mounts[0].ReadOnly=true;
+ assert.deepEqual(readRetainedInquiryAuthorityMount(actor,'/run/sabalan-online',true),{name,subpath});
 });
 test('a final JSON frame never hides truncated trailing bytes or an unclosed stream',()=>{
  assertRetainedControllerEof({stdoutEof:true,stderrEof:true,trailingBytes:0});
@@ -53,7 +74,7 @@ test('real Compose inherits one /tmp during Inquiry rotation and leaves other se
  }
  const before=identities(),directory=fs.mkdtempSync(path.join(os.tmpdir(),'sabalan-inquiry-compose-'));
  try{
-  const rotation=buildRetainedInquiryRotation(images,'sabalan-acceptance-config-test','sabalan-authority-config-test',proxy);
+  const rotation=buildRetainedInquiryRotation(images,'sabalan-acceptance-config-test',{name:'sabalan-authority-config-test',subpath:'cohort-'+'a'.repeat(32)},proxy);
   const overlay=path.join(directory,'rotation.json');fs.writeFileSync(overlay,JSON.stringify(rotation));
   const compose=['compose','-f',base,'-f',browser,'--profile','application-browser-acceptance'];
   const baseline=docker([...compose,'config','--format','json']);assert.equal(baseline.status,0,baseline.stderr);
@@ -67,6 +88,7 @@ test('real Compose inherits one /tmp during Inquiry rotation and leaves other se
    assert.deepEqual(service.tmpfs,['/tmp','/app/.next/cache:rw,nosuid,nodev,mode=0700']);
    assert.deepEqual(service.extra_hosts,['inquiry-qualification.localhost=172.18.0.3']);assert.equal(service.mem_limit,String(768*1024*1024));assert.equal(service.read_only,true);assert.deepEqual(service.ports??[],[]);assert.equal(service.build,undefined);assert.equal(service.healthcheck.disable,true);
    assert.deepEqual(service.cap_drop,['ALL']);assert.deepEqual(service.security_opt,['no-new-privileges:true']);
+   assert.deepEqual(service.volumes.find(row=>row.target==='/run/sabalan-online').volume,{nocopy:true,subpath:'cohort-'+'a'.repeat(32)});
    assert.deepEqual(service.volumes.map(row=>({target:row.target,readOnly:row.read_only??false})).sort((a,b)=>a.target.localeCompare(b.target)),[{target:'/app/online-runtime-acceptance',readOnly:false},{target:'/run/sabalan-online',readOnly:true}]);
   }
   for(const name of Object.keys(original.services).filter(name=>!targets.includes(name)))assert.deepEqual(actual.services[name],original.services[name]);

@@ -127,6 +127,7 @@ export async function runNativeBrowserAcceptance({edge,root,seed,actors,uiArtifa
     return {title,description,screenshot,sha256:sha(bytes)};
   }
   async function submit(tab,draft) {
+    await tab.page.bringToFront();
     assert.equal(await tab.page.$eval(inputSelector,node=>node.value),draft.title);
     assert.equal(await tab.page.$eval(descriptionSelector,node=>node.value),draft.description);
     await waitForNativeSubmitEnabled(tab.page);

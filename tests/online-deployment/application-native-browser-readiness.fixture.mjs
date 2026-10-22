@@ -7,7 +7,7 @@ const safePath=value=>{try{return new URL(value).pathname.slice(0,256);}catch{re
 export function observeNativeNavigation(page){
  const pending=new Map(),events=[];let omitted=0;
  const lifecycle={domcontentloaded:false,load:false};const controls=Object.fromEntries(Object.keys(NATIVE_FORM_CONTROLS).map(k=>[k,null]));
- const record=row=>{if(events.length<128)events.push(row);else omitted++;};
+ const record=row=>{if(events.length===128){events.shift();omitted++;}events.push(row);};
  page.on('domcontentloaded',()=>{lifecycle.domcontentloaded=true;});page.on('load',()=>{lifecycle.load=true;});
  page.on('request',request=>{const row={path:safePath(request.url()),method:['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(request.method())?request.method():'OTHER'};if(pending.size<128)pending.set(request,row);else omitted++;record({event:'request',...row});});
  page.on('response',response=>{const status=response.status();record({event:'response',path:safePath(response.url()),status:Number.isInteger(status)&&status>=100&&status<=599?status:null});});

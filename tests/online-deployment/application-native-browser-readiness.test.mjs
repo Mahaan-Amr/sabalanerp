@@ -10,6 +10,7 @@ import {observeNativeNavigation,prepareNativeBrowserForm,persistNativeBrowserFai
 const fixture=await fs.readFile(new URL('./application-native-browser.fixture.mjs',import.meta.url),'utf8').then(text=>text.replaceAll('\r\n','\n'));
 function pageFixture({status=200,disabled=false,inheritedDisabled=false,missingSelector=null,submitLocked=false}={}){
  const page=new EventEmitter(),calls=[],values=new Map();
+ page.bringToFront=async()=>calls.push(['focus']);
  const isDisabled=selector=>disabled||inheritedDisabled||(selector===NATIVE_FORM_CONTROLS.submit&&(submitLocked||!values.get(NATIVE_FORM_CONTROLS.title)||!values.get(NATIVE_FORM_CONTROLS.description)));
  const node=selector=>({disabled:disabled||(selector===NATIVE_FORM_CONTROLS.submit&&isDisabled(selector)),matches:expression=>{assert.equal(expression,':disabled');return isDisabled(selector);},value:values.get(selector)});
  page.goto=async(url,options)=>{calls.push(['goto',url,options]);page.emit('domcontentloaded');return{status:()=>status};};
@@ -88,9 +89,9 @@ const submitStart=fixture.indexOf('  async function submit(tab,draft) {'),submit
 assert.ok(submitStart>=0&&submitEnd>submitStart);
 const submitBody=fixture.slice(submitStart,submitEnd);
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
-function harness({response,click}){
+function harness({response,click,focus=async()=>{}}){
  const calls=[],evidence={tickets:[]},fixture={title:'title',description:'description',sha256:'sha'};
- const page={$eval:async(selector)=>selector==='title'?'title':selector==='description'?'description':'http://localhost:3199/api/support-tickets/attachments/x',waitForResponse:(predicate,options)=>{calls.push('response');assert.equal(options.timeout,60000);assert.equal(predicate({url:()=> 'http://localhost:3199/api/support-tickets',request:()=>({method:()=> 'POST'})}),true);return response;},click:selector=>{calls.push('click');assert.equal(selector,'form button[type="submit"]');return click();},waitForFunction:async()=>{},waitForSelector:async()=>{},evaluate:async()=>({sha256:'sha',bytes:3})};
+ const page={bringToFront:async()=>{calls.push('focus');await focus();},$eval:async(selector)=>selector==='title'?'title':selector==='description'?'description':'http://localhost:3199/api/support-tickets/attachments/x',waitForResponse:(predicate,options)=>{calls.push('response');assert.equal(options.timeout,60000);assert.equal(predicate({url:()=> 'http://localhost:3199/api/support-tickets',request:()=>({method:()=> 'POST'})}),true);return response;},click:selector=>{calls.push('click');assert.equal(selector,'form button[type="submit"]');return click();},waitForFunction:async()=>{},waitForSelector:async()=>{},evaluate:async()=>({sha256:'sha',bytes:3})};
  const tab={page,artifact:{buildId:'old'},actor:{slotId:'slot'}};
  const context={assert,URL,Promise,inputSelector:'title',descriptionSelector:'description',waitForNativeSubmitEnabled:async()=>calls.push('enabled'),origin:'http://localhost:3199',uiArtifacts:{new:{}},evidence};
  const submit=vm.runInNewContext('('+submitBody.trim()+')',context);return{run:()=>submit(tab,fixture),calls,evidence};
@@ -100,7 +101,7 @@ test('response rejection is owned immediately while actual click remains pending
  const response=deferred(),click=deferred(),error=Error('response timeout'),h=harness({response:response.promise,click:()=>click.promise});
  const run=h.run();const observed=assert.rejects(run,e=>e===error);await new Promise(setImmediate);response.reject(error);
  await Promise.race([observed,new Promise((_,reject)=>setTimeout(()=>reject(Error('submit waited for blocked click')),100))]);
- click.resolve();assert.deepEqual(h.calls,['enabled','response','click']);assert.equal(h.evidence.tickets.length,0);
+ click.resolve();assert.deepEqual(h.calls,['focus','enabled','response','click']);assert.equal(h.evidence.tickets.length,0);
 });
 test('click rejection joins response before a later response rejection',async()=>{
  const response=deferred(),error=Error('click failed'),h=harness({response:response.promise,click:()=>Promise.reject(error)});
@@ -115,4 +116,26 @@ test('successful actual submit retains201/title/attachment/build/slot evidence',
 });
 test('non201 actual business response remains rejected',async()=>{
  const bad=goodResponse();bad.status=()=>500;const h=harness({response:Promise.resolve(bad),click:async()=>{}});await assert.rejects(h.run());assert.equal(h.evidence.tickets.length,0);
+});
+
+
+test('actual retained submit selects its tab before reading form and starting response/click producers',async()=>{
+ const {page,calls}=pageFixture();const draft=await actualFill(page,calls,true);calls.length=0;const read=page.$eval;page.$eval=async(...args)=>{calls.push(['read']);return read(...args);};
+ assert.equal(await actualSubmitClickPrefix(page,draft),'CREATED_RESPONSE');
+ assert.equal(calls[0][0],'focus');assert.ok(calls.findIndex(c=>c[0]==='read')>0);assert.ok(calls.findIndex(c=>c[0]==='response-wait')>calls.findIndex(c=>c[0]==='read'));assert.ok(calls.findIndex(c=>c[0]==='click')>calls.findIndex(c=>c[0]==='response-wait'));
+});
+test('focus failure refuses before DOM reads and before response/click producers',async()=>{
+ const {page,calls}=pageFixture();const error=Error('FOCUS_REFUSED');page.bringToFront=async()=>{calls.push(['focus']);throw error;};page.$eval=async()=>{calls.push(['read']);throw Error('READ_MUST_NOT_START');};
+ await assert.rejects(actualSubmitClickPrefix(page,{title:'title',description:'description'}),e=>e===error);assert.deepEqual(calls,[['focus']]);
+});
+
+
+test('bounded navigation ring preserves latest auth and support responses after initial asset burst',()=>{
+ const page=new EventEmitter(),observation=observeNativeNavigation(page);
+ for(let index=0;index<200;index++)page.emit('response',{url:()=>`http://localhost:3199/initial-${index}.js?token=SECRET`,status:()=>200});
+ page.emit('response',{url:()=> 'http://localhost:3199/api/auth/me?token=SECRET',status:()=>401});
+ page.emit('response',{url:()=> 'http://localhost:3199/api/support-tickets?token=SECRET',status:()=>503});
+ const snapshot=observation.snapshot();assert.equal(snapshot.events.length,128);assert.equal(snapshot.omitted,74);assert.equal(snapshot.events[0].path,'/initial-74.js');
+ assert.deepEqual(snapshot.events.slice(-2),[{event:'response',path:'/api/auth/me',status:401},{event:'response',path:'/api/support-tickets',status:503}]);
+ assert.ok(!JSON.stringify(snapshot).includes('SECRET'));assert.ok(!snapshot.events.some(event=>event.path==='/initial-0.js'));
 });

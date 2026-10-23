@@ -227,3 +227,38 @@ A full supervised rehearsal runs quarterly and measures the zero-loss recovery p
 ## Acceptance evidence
 
 Implementation is not complete until tests prove concurrent deployment exclusion, pre-mutation abort, interruption recovery at every phase, full-source checkpoint integrity, remote corruption detection, storage-pressure cleanup without protected-artifact deletion, immutable-image rollback, migration failure rollback, gate failure rollback, rollback failure fail-closed behavior, secret redaction, notification failure blocking, and repeated restore reproducibility.
+
+### Retaining the same qualification master across update cycles
+
+After `START_PROTECTED_INSTALL` and `ISSUE_ORIGIN`, send `FINISH_CLIENT` with
+`mode: "BOOTSTRAP_RETAIN"` to that same original master. It internally performs
+the existing `BOOTSTRAP` detach and waits for the actual terminal barrier and
+normal original SSH exit with both pipes closed. The
+`sabalan-original-master-bootstrap-retained/v1` event contains the validated
+closure and its four-field `serviceReference`. Local and independent completion
+tokens, guardian handles, stdin, the keeper, signal handlers and sequence remain
+in that master; this event does not finish the master or grant admission.
+
+Send `START_FOLLOWING_CLIENT` with the pinned launch-plan file/SHA and that exact
+reference. The master compares it with its retained in-memory binding once and
+checks the actual rebound service boot and launcher identity. Saved references
+are lookup data, never a replacement for the original completion tokens. Run
+`RUN_FOLLOWING_PROMOTION`, then `RUN_FOLLOWING_CURRENT_DATA_ROLLBACK`, each with
+fresh deployment/release identities and its authenticated `prebuiltReleasePlan`.
+Answer each actual online qualification request with `ISSUE_ONLINE_ORIGIN`;
+wait for each workflow to complete before beginning the next. Finally send
+`FINISH_CLIENT` with `mode: "FOLLOWING"` for the actual terminal client detach,
+independent guardian closures and master completion. Ordinary terminal
+`BOOTSTRAP` and `FOLLOWING` finish semantics are unchanged.
+
+WAL sequence numbers belong to the actual acknowledged update cycle. The
+transport arms a following cycle only after its matching original `ACQUIRE_NEXT`
+completion. The previous cycle must have its certified point, metadata, terminal
+coverage, original producer closure and matching `FINISH_CYCLE` completion. The
+first WAL window can precede physical-point transfer: its runtime/capture pair
+comes from the original launcher's checkpoint plan and must join the later
+physical request exactly. Each cycle starts at sequence one, preserves prior
+point records, and rejects reused runtime or capture identities. Caller JSON,
+reconnects, timeouts, raw sequence one or an isolated terminal certificate cannot
+reset a cycle. These controls still require the complete production and restore
+evidence; this protocol description makes no claim that a real cycle passed.

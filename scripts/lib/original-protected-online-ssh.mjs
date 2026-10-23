@@ -147,6 +147,62 @@ export function verifyProtectedQualificationRequest(body){
  assert.deepEqual([...body.ephemeralRoots].sort(),['/app/storage/reports','/app/storage/sales-reports','/app/storage/bi-reports'].sort());
  validateRequestProductionExecution(body);return body;
 }
+// This state is private to one original SSH session. Only matching original
+// control replies advance cycles; request JSON and sequence=1 never reset one.
+function assertOriginalWalCycleCanAcquire(state){
+ assert.ok(state.following&&!state.stream&&state.tasks.size===0,'ORIGINAL_WAL_NEXT_CYCLE_NOT_QUIET');
+ if(state.walCycle)assert.ok(state.walCycle.finished,'ORIGINAL_WAL_PREVIOUS_CYCLE_UNFINISHED');
+ for(const row of [state.pendingWal,state.pendingPoint,state.metadata])assert.ok(!row||row.replied,'ORIGINAL_WAL_PREVIOUS_REPLY_PENDING');
+ if(state.terminal)assert.ok(terminalSources.get(state.terminal)?.replied,'ORIGINAL_WAL_PREVIOUS_TERMINAL_PENDING');
+}
+function observeOriginalWalCycleControl(state,control,result){
+ if(!['ACQUIRE_NEXT','FINISH_CYCLE'].includes(control.command))return;
+ assert.equal(result.releaseAcceptanceGranted,false);
+ if(control.command==='ACQUIRE_NEXT'){
+  assertOriginalWalCycleCanAcquire(state);
+  const next=control.input.input;exact(control.input,['input']);exact(next,['deploymentId','releaseId','targetCommit','prebuiltReleasePlan']);
+  for(const key of ['deploymentId','releaseId'])assert.match(next[key],/^[A-Za-z0-9_-]{8,128}$/);
+  assert.match(next.targetCommit,/^[a-f0-9]{40}$/);
+  assert.ok(!state.walCycles.some(row=>row.deploymentId===next.deploymentId||row.releaseId===next.releaseId),'ORIGINAL_WAL_CYCLE_ID_REPLAY');
+  state.walCycle={deploymentId:next.deploymentId,releaseId:next.releaseId,targetCommit:next.targetCommit,
+   point:null,pointObserved:false,sequence:0,windows:[],finished:false};state.walCycles.push(state.walCycle);
+ }else{
+  const cycle=state.walCycle,point=state.pendingPoint,metadata=state.metadata,terminal=terminalSources.get(state.terminal);
+  assert.ok(cycle&&!cycle.finished&&cycle.pointObserved&&point?.replied&&metadata?.replied&&terminal?.replied&&terminal.certificate,'ORIGINAL_WAL_TERMINAL_CYCLE_UNPROVEN');
+  assert.equal(point.request.runtimeId,cycle.point.runtimeId);assert.equal(point.request.captureId,cycle.point.captureId);
+  assert.equal(metadata.request.runtimeId,cycle.point.runtimeId);assert.equal(terminal.request.runtimeId,cycle.point.runtimeId);
+  assert.equal(terminal.request.canonicalMetadataSha256,metadata.request.canonicalMetadataSha256);
+  const audit=JSON.parse(Buffer.from(terminal.request.terminalRawBase64,'base64'));
+  assert.equal(audit.captureId,cycle.point.captureId);assert.equal(audit.allOriginalChildrenClosed,true);assert.equal(audit.finalIntervalCompletion,true);
+  assert.equal(audit.windows.length,cycle.windows.length);assert.ok(cycle.windows.length>0);
+  for(const source of cycle.windows){assert.ok(source.complete&&source.replied&&source.certificate,'ORIGINAL_WAL_WINDOW_ACK_PENDING');
+   assert.ok(audit.windows.some(row=>row.requestSha256===source.requestSha256&&row.windowSha256===source.request.windowSha256),'ORIGINAL_WAL_TERMINAL_WINDOW_CHANGED');}
+  // Retain the completed point's actual source/certificate objects. Nothing
+  // here adopts a new owner, clears historical evidence or claims admission.
+  cycle.pointSource=point;cycle.metadataSource=metadata;cycle.terminalSource=terminal;cycle.finished=true;
+ }
+}
+function bindOriginalWalWindowCycle(state,header,request){
+ if(!state.walCycle&&!state.following){
+  const original=state.submitted&&requests.get(state.request)?.body;
+  assert.ok(original,'ORIGINAL_BOOTSTRAP_WAL_REQUEST_REQUIRED');
+  state.walCycle={deploymentId:original.deploymentId,releaseId:original.releaseId,targetCommit:original.targetCommit,
+   point:null,pointObserved:false,sequence:0,windows:[],finished:false,bootstrap:true};state.walCycles.push(state.walCycle);
+ }
+ const cycle=state.walCycle;assert.ok(cycle&&!cycle.finished,'ORIGINAL_WAL_ACTIVE_CYCLE_REQUIRED');
+ assert.equal(request.deploymentId,cycle.deploymentId);assert.equal(request.releaseId,cycle.releaseId);
+ assert.match(header.sourceRuntimeId,/^[a-f0-9]{64}$/);assert.match(header.captureId,/^[a-f0-9]{64}$/);
+ if(!cycle.point){
+  assert.ok(!state.walCycles.some(row=>row!==cycle&&row.point&&(row.point.runtimeId===header.sourceRuntimeId||row.point.captureId===header.captureId)),'ORIGINAL_WAL_POINT_REPLAY');
+  cycle.point=Object.freeze({runtimeId:header.sourceRuntimeId,captureId:header.captureId});
+ }
+ assert.equal(header.sourceRuntimeId,cycle.point.runtimeId);assert.equal(header.captureId,cycle.point.captureId);
+ assert.equal(request.sequence,cycle.sequence+1,'ORIGINAL_WAL_CYCLE_SEQUENCE_CHANGED');cycle.sequence++;
+}
+function bindOriginalPhysicalPointCycle(state,request){
+ const cycle=state.walCycle;assert.ok(cycle&&!cycle.finished&&!cycle.pointObserved&&cycle.point,'ORIGINAL_WAL_POINT_SOURCE_REQUIRED');
+ assert.equal(request.runtimeId,cycle.point.runtimeId);assert.equal(request.captureId,cycle.point.captureId);cycle.pointObserved=true;
+}
 export function verifyOriginalWalWindowRequest(r){
  exact(r,['format','sequence','challenge','deploymentId','releaseId','windowSha256','sourceIdentity','objects']);
  assert.equal(r.format,'sabalan-original-wal-window-verification-request/v1');assert.ok(Number.isSafeInteger(r.sequence)&&r.sequence>0);
@@ -247,7 +303,7 @@ export async function sendOriginalProtectedWalWindowCertificate(sessionToken,sou
  const {readOriginalWalWindowCertificate}=await import('../../deploy/scripts/online-qualification-origin-issuer.mjs');
  const certificate=readOriginalWalWindowCertificate(certificateToken);
  assert.equal(certificate.decision.requestSha256,source.requestSha256);assert.equal(certificate.decision.challenge,source.request.challenge);
- source.replied=true;await new Promise((resolve,reject)=>session.child.stdin.write(JSON.stringify(certificate)+'\n',error=>error?reject(error):resolve()));
+ source.certificate=structuredClone(certificate);source.replied=true;await new Promise((resolve,reject)=>session.child.stdin.write(JSON.stringify(certificate)+'\n',error=>error?reject(error):resolve()));
 }
 /** Starts ONLY the pinned original protected launcher. Calling this performs a
  * real protected install; preparation/import of this module performs no I/O. */
@@ -294,7 +350,7 @@ os.execv('/usr/bin/python3',args)
  const child=spawn(profile.sshExecutable,['-T','-p','22','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o','IdentitiesOnly=yes','-o','IdentityAgent=none','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','HostKeyAlgorithms=ssh-ed25519','-o','UserKnownHostsFile='+profile.knownHostsPath,'-i',profile.privateKeyPath,'root@94.182.85.254',command],
   {shell:false,windowsHide:true,stdio:['pipe','pipe','pipe'],env:{...process.env,SSH_AUTH_SOCK:''}});
  let resolveRequest;const request=new Promise(resolve=>{resolveRequest=resolve;});
- const state={child,held:null,closed:false,buffer:Buffer.alloc(0),bytes:0,request:null,submitted:false,walSequence:0,stream:null,pendingWal:null,onlineRequest:null,windowAcknowledgements:[],tasks:new Set(),following:serviceReference!==undefined,bound:null,finishing:null,detached:null,control:null,controlSequence:0};
+ const state={child,held:null,closed:false,buffer:Buffer.alloc(0),bytes:0,request:null,submitted:false,walCycle:null,walCycles:[],stream:null,pendingWal:null,onlineRequest:null,windowAcknowledgements:[],tasks:new Set(),following:serviceReference!==undefined,bound:null,finishing:null,detached:null,control:null,controlSequence:0};
  let resolveBound;state.binding=new Promise(resolve=>{resolveBound=resolve;});
  state.closure=new Promise(resolve=>{state.resolveClosure=resolve;});
  state.keeper=setInterval(()=>{},1000);
@@ -327,16 +383,16 @@ os.execv('/usr/bin/python3',args)
    }
    assert.ok(state.bound&&!state.detached,'ORIGINAL_CLIENT_BINDING_REQUIRED');
    if(line.startsWith('SABALAN_ORIGINAL_CLIENT_CONTROL_COMPLETED ')){
-    const value=JSON.parse(line.slice('SABALAN_ORIGINAL_CLIENT_CONTROL_COMPLETED '.length));exact(value,['sequence','command','result']);assert.ok(state.control);assert.equal(value.sequence,state.control.sequence);assert.equal(value.command,state.control.command);assert.equal(value.result.status,'COMPLETED');assert.equal(value.result.command,value.command);const control=state.control;state.control=null;control.resolve(structuredClone(value.result));continue;
+    const value=JSON.parse(line.slice('SABALAN_ORIGINAL_CLIENT_CONTROL_COMPLETED '.length));exact(value,['sequence','command','result']);assert.ok(state.control);assert.equal(value.sequence,state.control.sequence);assert.equal(value.command,state.control.command);assert.equal(value.result.status,'COMPLETED');assert.equal(value.result.command,value.command);const control=state.control;observeOriginalWalCycleControl(state,control,value.result);state.control=null;control.resolve(structuredClone(value.result));continue;
    }
    if(state.stream){
     const stream=state.stream,prefix=stream.kind==='physical-point'?'SABALAN_ORIGINAL_PHYSICAL_POINT_END ':'SABALAN_ORIGINAL_WAL_WINDOW_END ';assert.ok(line.startsWith(prefix));const end=JSON.parse(line.slice(prefix.length));
     assert.equal(end.challenge,stream.request.challenge);assert.equal(end.requestSha256,stream.requestSha256);
     stream.complete=true;const token=Object.freeze({});state.stream=null;
     if(stream.kind==='physical-point'){pointSources.set(token,stream);state.pendingPoint=stream;assert.equal(typeof onPhysicalPointRequest,'function');trackClientCallback(state,onPhysicalPointRequest,token,'ORIGINAL_PHYSICAL_POINT_UNPROVEN');}
-    else{walSources.set(token,stream);state.pendingWal=stream;assert.equal(typeof onWalWindowRequest,'function');trackClientCallback(state,onWalWindowRequest,token,'ORIGINAL_WAL_VERIFICATION_UNPROVEN');}
+    else{walSources.set(token,stream);state.pendingWal=stream;assert.ok(state.walCycle);state.walCycle.windows.push(stream);assert.equal(typeof onWalWindowRequest,'function');trackClientCallback(state,onWalWindowRequest,token,'ORIGINAL_WAL_VERIFICATION_UNPROVEN');}
    }else if(line.startsWith('SABALAN_ORIGINAL_PHYSICAL_POINT_REQUEST ')){
-    assert.ok((state.submitted||state.following)&&(!state.pendingPoint||state.pendingPoint.replied));const point=verifyOriginalPhysicalPointTransfer(JSON.parse(line.slice('SABALAN_ORIGINAL_PHYSICAL_POINT_REQUEST '.length)));
+    assert.ok((state.submitted||state.following)&&(!state.pendingPoint||state.pendingPoint.replied));const point=verifyOriginalPhysicalPointTransfer(JSON.parse(line.slice('SABALAN_ORIGINAL_PHYSICAL_POINT_REQUEST '.length)));bindOriginalPhysicalPointCycle(state,point.request);
     const root='D:/sabalanerp-online-qa/original-point-source-'+randomBytes(16).toString('hex');const available=fs.statfsSync('D:/sabalanerp-online-qa',{bigint:true});assert.ok(available.bavail*available.bsize>=BigInt(point.objects.reduce((sum,row)=>sum+row.bytes,0))+1024n**3n);fs.mkdirSync(root,{mode:0o700});
     state.stream={...point,request:{...point.request,objects:point.objects},session:state,kind:'physical-point',requestSha256:sha(Buffer.from(JSON.stringify(sort(point.request)))),root,index:0,fd:null,files:[],complete:false};
    }else if(line.startsWith('SABALAN_ORIGINAL_CHECKPOINT_METADATA_REQUEST ')){
@@ -353,11 +409,11 @@ os.execv('/usr/bin/python3',args)
     terminalSources.set(token,{session:state,request:body,replied:false});state.terminal=token;
     assert.equal(typeof onTerminalWalRequest,'function');trackClientCallback(state,onTerminalWalRequest,token,'ORIGINAL_TERMINAL_WAL_PUBLICATION_UNPROVEN');
    }else if(line.startsWith('SABALAN_ORIGINAL_WAL_WINDOW_REQUEST ')){
-    assert.ok((state.submitted||state.following)&&(!state.pendingWal||state.pendingWal.replied));const header=JSON.parse(line.slice(36));exact(header,['request','sourceRuntimeId','sealRawBase64','closureRawBase64']);assert.match(header.sourceRuntimeId,/^[a-f0-9]{64}$/);const r=verifyOriginalWalWindowRequest(header.request);
+    assert.ok((state.submitted||state.following)&&(!state.pendingWal||state.pendingWal.replied));const header=JSON.parse(line.slice(36));exact(header,['request','sourceRuntimeId','captureId','sealRawBase64','closureRawBase64']);assert.match(header.sourceRuntimeId,/^[a-f0-9]{64}$/);const r=verifyOriginalWalWindowRequest(header.request);
     const outputs={};for(const name of ['seal','closure']){const value=header[name+'RawBase64'];assert.equal(typeof value,'string');const raw=Buffer.from(value,'base64');assert.ok(raw.length>0&&raw.length<=1024*1024);assert.equal(raw.toString('base64'),value);outputs[name]={rawBase64:value,bytes:raw.length,sha256:sha(raw)};}
     const seal=JSON.parse(Buffer.from(outputs.seal.rawBase64,'base64'));assert.equal(outputs.seal.sha256,r.windowSha256);assert.equal(seal.captureSha256,outputs.closure.sha256);
     assert.deepEqual(seal.objects.map(o=>({name:o.name,bytes:o.encryptedBytes,sha256:o.encryptedSha256})),r.objects);
-    assert.equal(r.sequence,++state.walSequence);const root='D:/sabalanerp-online-qa/original-wal-source-'+randomBytes(16).toString('hex');fs.mkdirSync(root,{mode:0o700});
+    bindOriginalWalWindowCycle(state,header,r);const root='D:/sabalanerp-online-qa/original-wal-source-'+randomBytes(16).toString('hex');fs.mkdirSync(root,{mode:0o700});
     state.stream={session:state,request:r,sourceRuntimeId:header.sourceRuntimeId,requestSha256:sha(Buffer.from(JSON.stringify(sort(r)))),root,index:0,fd:null,files:[],ownedOutputs:outputs,complete:false,replied:false};
    }else{
     if(line.startsWith('SABALAN_ORIGINAL_ONLINE_QUALIFICATION_REQUEST ')){
@@ -391,7 +447,8 @@ export async function sendOriginalProtectedClientControl(token,{command,input}){
  const state=sessions.get(token);assert.ok(state&&!state.held&&!state.closed&&!state.finishing&&!state.control,'ORIGINAL_CLIENT_CONTROL_UNAVAILABLE');await state.binding;
  assert.ok(!state.held&&!state.closed&&!state.finishing&&!state.control,'ORIGINAL_CLIENT_CONTROL_UNAVAILABLE');
  assert.ok(clientControls.has(command)&&input&&typeof input==='object'&&!Array.isArray(input));assert.ok(!Object.hasOwn(input,'sequence')&&!Object.hasOwn(input,'command')&&!Object.hasOwn(input,'clientSequence'));
- const sequence=++state.controlSequence;let resolve;const completed=new Promise(done=>{resolve=done;});state.control={sequence,command,resolve};
+ if(command==='ACQUIRE_NEXT')assertOriginalWalCycleCanAcquire(state);
+ const sequence=++state.controlSequence;let resolve;const completed=new Promise(done=>{resolve=done;});state.control={sequence,command,input:structuredClone(input),resolve};
  const raw=Buffer.from(JSON.stringify({format:'sabalan-original-client-control/v1',sequence,command,input})+'\n');assert.ok(raw.length<=8*1024*1024);
  await new Promise((done,reject)=>state.child.stdin.write(raw,error=>error?reject(error):done()));return completed;
 }

@@ -40,6 +40,7 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
  if(!deferLocal){assert.ok(candidateReplacementReceipt);local=await runOriginalApplicationNativeQualification({candidateReplacementReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection,retainedBrowserCompletion:retainedBrowser});}
  let independent=null,independentOptions=null,independentGuardian=null,protectedInstall=null,protectedRequest=null,sequence=0;
  let physical=null,promotion=null,metadata=null,certification=null,physicalCertificate=null,repositoryCertificate=null;
+ let bootstrapClientStarted=false,bootstrapHandoff=null;
  let physicalGuardianReady=null;
  let onlineRequest=null;
  let localRuntime=null;
@@ -86,6 +87,13 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
      const following=request.command==='START_FOLLOWING_CLIENT';
      keys(request,['command','sequence','launchPlanFile','launchPlanSha256',...(following?['serviceReference']:[])]);
      assert.ok(independent&&!held&&!protectedInstall,'ORIGINAL_INDEPENDENT_COMPLETION_REQUIRED');
+     if(following&&bootstrapClientStarted){
+      assert.ok(bootstrapHandoff&&!bootstrapHandoff.consumed,'ORIGINAL_RETAINED_BOOTSTRAP_HANDOFF_REQUIRED');
+      assert.deepEqual(request.serviceReference,bootstrapHandoff.serviceReference,'ORIGINAL_RETAINED_BOOTSTRAP_REFERENCE_CHANGED');
+      bootstrapHandoff.consumed=true;
+     }else if(!following){
+      assert.ok(!bootstrapClientStarted&&!bootstrapHandoff,'ORIGINAL_BOOTSTRAP_CLIENT_ALREADY_CREATED');bootstrapClientStarted=true;
+     }
      const launchPlan=pinnedConfiguration(request.launchPlanFile,request.launchPlanSha256);
      protectedInstall=startOriginalProtectedOnlineInstall({launchPlan,...(following?{serviceReference:request.serviceReference}:{}),onOnlineQualificationRequest:async token=>{
       assert.ok(physical&&metadata&&certification&&!onlineRequest&&!held,'ORIGINAL_ONLINE_CERTIFIED_POINT_REQUIRED');onlineRequest=token;
@@ -131,6 +139,7 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
      }});
      state('ORIGINAL_PROTECTED_INSTALL_STARTED');
      const binding=await protectedInstall.binding;
+     if(following&&bootstrapHandoff)for(const key of ['serviceBootIdSha256','launcherPid','launcherBirth'])assert.equal(binding[key],bootstrapHandoff[key],'ORIGINAL_RETAINED_SERVICE_BINDING_CHANGED');
      output.write(JSON.stringify({format:'sabalan-original-master-client-binding/v1',sequence,binding,productionAdmission:false})+'\n');
      if(!following){protectedRequest=await protectedInstall.qualificationRequest;
       const target=readOriginalProtectedQualificationRequest(protectedRequest);
@@ -152,6 +161,27 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
      });controlTasks.add(task);task.then(()=>controlTasks.delete(task),error=>{controlTasks.delete(task);held=true;writeOriginalMasterFailureDiagnostic(error,controlSequence);state('ORIGINAL_MASTER_CONTROL_FAILED_RETAINED');});
     }else if(request.command==='FINISH_CLIENT'){
      keys(request,['command','sequence','mode']);assert.ok(protectedInstall&&local&&independent&&!held,'ORIGINAL_CLIENT_COMPLETION_REQUIRED');
+     if(request.mode==='BOOTSTRAP_RETAIN'){
+      assert.ok(bootstrapClientStarted&&!bootstrapHandoff&&protectedRequest&&controlTasks.size===0,'ORIGINAL_BOOTSTRAP_RETAIN_UNAVAILABLE');
+      await waitOriginalProtectedClientCallbacks(protectedInstall.session);
+      assert.ok(!held&&controlTasks.size===0&&!physical&&!promotion&&!metadata&&!certification&&!onlineRequest&&!physicalGuardianReady
+       &&acknowledgedWindows.length===0&&closedReleasePoints.length===0,'ORIGINAL_BOOTSTRAP_RETAIN_PENDING_WORK');
+      const closure=await finishOriginalProtectedClient(protectedInstall.session,{mode:'BOOTSTRAP'});
+      assert.ok(!held,'ORIGINAL_BOOTSTRAP_RETAIN_HELD');
+      // The transport already verified the actual terminal barrier, launcher
+      // custody and original SSH EOF. Never mint this handoff from caller JSON.
+      const detached=closure.detached;
+      assert.equal(detached.mode,'BOOTSTRAP');assert.equal(closure.exit.code,0);assert.equal(closure.exit.signal,null);
+      assert.equal(closure.stdoutEof,true);assert.equal(closure.stderrEof,true);
+      const serviceReference=Object.freeze(Object.fromEntries(['instanceId','servicePid','serviceBirth','configurationSha256'].map(key=>[key,detached[key]])));
+      bootstrapHandoff={serviceReference,serviceBootIdSha256:detached.serviceBootIdSha256,launcherPid:detached.launcherPid,launcherBirth:detached.launcherBirth,consumed:false};
+      protectedInstall=null;protectedRequest=null;
+      output.write(JSON.stringify({format:'sabalan-original-master-bootstrap-retained/v1',sequence,closure,serviceReference,
+       independentGuardiansRetained:guardians.size,productionAdmission:false})+'\n');
+      // Keep this SAME master, local/independent tokens, guardian handles,
+      // original stdin, keeper and signal listeners for the following client.
+      continue;
+     }
      await Promise.allSettled([...controlTasks]);assert.ok(!held&&controlTasks.size===0,'ORIGINAL_CLIENT_CONTROL_PENDING');
      await waitOriginalProtectedClientCallbacks(protectedInstall.session);
      assert.ok(!physical&&!promotion&&!metadata&&!certification&&!onlineRequest&&!physicalGuardianReady,'ORIGINAL_CLIENT_PHYSICAL_WORK_PENDING');

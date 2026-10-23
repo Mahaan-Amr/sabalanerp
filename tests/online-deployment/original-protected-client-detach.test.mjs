@@ -7,10 +7,10 @@ import {PassThrough,Writable} from 'node:stream';
 import {createHash} from 'node:crypto';
 import {createRequire} from 'node:module';
 import {ORIGINAL_ONLINE_PRODUCTION_GATE_NAMES} from '../../deploy/scripts/online-production-gates.mjs';
-const require=createRequire(import.meta.url),ts=require('../../backend/node_modules/typescript');
+const require=createRequire(path.resolve('backend/package.json')),ts=require('typescript');
 const source=fs.readFileSync(new URL('../../scripts/lib/original-protected-online-ssh.mjs',import.meta.url),'utf8');
 const tree=ts.createSourceFile('client.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
-const functions=['validateClientBinding','validateClientBarrier','trackClientCallback','assertClientRepliesClosed','assertOriginalFollowingClient','startOriginalProtectedOnlineInstall','waitOriginalProtectedClientCallbacks','finishOriginalProtectedClient','sendOriginalProtectedClientControl','sort'];
+const functions=['validateClientBinding','validateClientBarrier','trackClientCallback','assertOriginalWalCycleCanAcquire','observeOriginalWalCycleControl','bindOriginalWalWindowCycle','bindOriginalPhysicalPointCycle','assertClientRepliesClosed','assertOriginalFollowingClient','startOriginalProtectedOnlineInstall','waitOriginalProtectedClientCallbacks','finishOriginalProtectedClient','sendOriginalProtectedClientControl','sort'];
 const declarations=functions.map(name=>tree.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text===name).getText(tree).replace(/^export\s+/,''));
 const vars=['bindingKeys','clientControls'].map(name=>tree.statements.find(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>d.name.getText(tree)===name)).getText(tree));
 const digest=value=>createHash('sha256').update(value).digest('hex'),hex='a'.repeat(64);
@@ -47,8 +47,8 @@ test('unanswered source reply refuses before detach write; failed callbacks rema
 });
 test('following factory selects only original service client path and control completes on exact live frame',async()=>{
  const f=fixture({serviceReference:{instanceId:hex,servicePid:12,serviceBirth:'100',configurationSha256:hex}});
- const result=f.api.sendOriginalProtectedClientControl(f.owner.session,{command:'ACQUIRE_NEXT',input:{deploymentId:'next'}});await new Promise(done=>setImmediate(done));assert.equal(f.written[0].format,'sabalan-original-client-control/v1');
- f.emit('SABALAN_ORIGINAL_CLIENT_CONTROL_COMPLETED',{sequence:1,command:'ACQUIRE_NEXT',result:{status:'COMPLETED',command:'ACQUIRE_NEXT'}});assert.equal((await result).command,'ACQUIRE_NEXT');
+ const result=f.api.sendOriginalProtectedClientControl(f.owner.session,{command:'ACQUIRE_NEXT',input:{input:{deploymentId:'next0001',releaseId:'nextrel1',targetCommit:'c'.repeat(40),prebuiltReleasePlan:{file:'/private/plan.json',sha256:hex}}}});await new Promise(done=>setImmediate(done));assert.equal(f.written[0].format,'sabalan-original-client-control/v1');
+ f.emit('SABALAN_ORIGINAL_CLIENT_CONTROL_COMPLETED',{sequence:1,command:'ACQUIRE_NEXT',result:{status:'COMPLETED',command:'ACQUIRE_NEXT',releaseAcceptanceGranted:false}});assert.equal((await result).command,'ACQUIRE_NEXT');
  const command=f.spawned[0][1].at(-1),encoded=command.match(/base64\.b64decode\('([^']+)'\)/)[1],bootstrap=Buffer.from(encoded,'base64').toString();assert.match(bootstrap,/--client/);assert.match(bootstrap,/online-owner-service\.py/);assert.doesNotMatch(bootstrap,/execv\([^\n]+p\['launcherPath'\]/);
  await assert.rejects(f.api.sendOriginalProtectedClientControl(f.owner.session,{command:'CLOSE',input:{}}));
 });

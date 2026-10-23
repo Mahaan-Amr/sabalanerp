@@ -129,10 +129,11 @@ def original_controller_response(fd,command):
   'READ_CYCLE_PLAN','RETIRE_EXPIRED_BUILDS','READ_CLIENT_DETACH_BARRIER','BUILD_PUBLICATION_REGISTRY'}
  return frame(fd,8388608 if command in large else 16384)
 
-def verify_original_wal_window(request,sealed_host_directory):
+def verify_original_wal_window(request,sealed_host_directory,capture_id):
  # Only the SAME original in-memory receiver manager calls this fixed port.
  # Keep every opened source inode until the original Windows response arrives.
  with wal_transport_lock:
+  require(re.fullmatch(r'[a-f0-9]{64}',capture_id))
   directory=pathlib.Path(sealed_host_directory)
   require(directory.is_absolute() and directory.resolve()==directory and directory.is_dir())
   st=directory.stat();require(st.st_uid==0 and not st.st_mode&0o077)
@@ -152,7 +153,7 @@ def verify_original_wal_window(request,sealed_host_directory):
   require([dict(name=row['name'],bytes=row['encryptedBytes'],sha256=row['encryptedSha256']) for row in seal['objects']]==request['objects'])
   require(original_master_port is not None);reply=original_master_port.expect(('wal',request['challenge']))
   original_master_port.writer_lock.acquire()
-  write(1,b'SABALAN_ORIGINAL_WAL_WINDOW_REQUEST '+encoded(dict(request=request,sourceRuntimeId=checkpoint_producer.config['capture']['runtimeId'],sealRawBase64=base64.b64encode(seal_raw).decode(),closureRawBase64=base64.b64encode(closure_raw).decode())))
+  write(1,b'SABALAN_ORIGINAL_WAL_WINDOW_REQUEST '+encoded(dict(request=request,sourceRuntimeId=checkpoint_producer.config['capture']['runtimeId'],captureId=capture_id,sealRawBase64=base64.b64encode(seal_raw).decode(),closureRawBase64=base64.b64encode(closure_raw).decode())))
   sources=[]
   for row in request['objects']:
    require(re.fullmatch(r'[A-Za-z0-9_.-]{1,160}',row['name']) and row['name'] not in ('.','..'))
@@ -208,7 +209,7 @@ class OriginalWalPorts:
  def __init__(self,plan,helper_root,producer):self.plan=plan;self.helper_root=helper_root;self.producer=producer
  def read_original_continuous_context(self,runtime_id):return read_original_continuous_context(runtime_id)
  def read_original_terminal_wal_context(self,runtime_id):return read_original_continuous_context(runtime_id,True)
- def verify_original_wal_window(self,request,directory):return verify_original_wal_window(request,directory)
+ def verify_original_wal_window(self,request,directory):return verify_original_wal_window(request,directory,self.plan['captureId'])
  def read_original_qualification_public_key_path(self):return '/etc/sabalan/online/qualification-public-key.pem'
  def crypto(self,kind,values):
   input=dict(format='sabalan-original-host-checkpoint-crypto/v1',kind=kind,mapping=dict(host=self.plan['coordinationHost'],runtime=self.plan['coordinationRuntime']),

@@ -1,5 +1,5 @@
 """Pure validators and actual guarded-call branches; no Docker/native qualification."""
-import ast,base64,copy,hashlib,importlib.util,json,pathlib,types,unittest
+import ast,base64,copy,hashlib,importlib.util,json,pathlib,types,unittest,subprocess,shutil
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 def load(name,file):
  spec=importlib.util.spec_from_file_location(name,ROOT/file);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
@@ -20,6 +20,11 @@ def mutate_receipt(cfg,change):
  v=json.loads(base64.b64decode(cfg['localDevSuspension']['receiptRawBase64']));change(v);raw=json.dumps(v).encode();s=cfg['localDevSuspension'];s['receiptRawBase64']=base64.b64encode(raw).decode();s['receiptSha256']=s['selection']['sha256']=m.sha(raw)
 
 class Rules(unittest.TestCase):
+ def test_actual_js_validator_accepts_independent_python_exact_query_digest_and_refuses_typo(self):
+  expected=hashlib.md5(b'SELECT 1').hexdigest();self.assertEqual(expected,'b1698e52a0f16203489454196a0c6307')
+  module=(ROOT/'scripts/lib/local-dev-frontend-suspension.mjs').as_uri();script="import {validateLocalDevRestoreSql as check} from "+json.dumps(module)+";const slots=[{host:'172.20.0.2',database:'sabalanerp'}];check({prepared:0,sessions:[{client:slots[0].host,database:slots[0].database,application:'sabalanerp-online-candidate',state:'idle',xact:false,queryMd5:process.argv[1]}]},slots);"
+  for digest,success in [(expected,True),('b1698e52a0f16203489454196a0c630a7',False)]:
+   child=subprocess.Popen([shutil.which('node'),'--input-type=module','-e',script,digest],stdout=subprocess.PIPE,stderr=subprocess.PIPE);out,err=child.communicate(timeout=15);self.assertEqual(child.returncode==0,success);self.assertTrue(child.stdout.closed and child.stderr.closed)
  def test_actual_backslash_publisher_path_maps_safely(self):
   self.assertEqual(str(m.native_file(r'D:\qa\stopped.json')).replace('\\','/'),'/mnt/host/d/qa/stopped.json')
   for path in ['D:/qa/../file','D:relative','//other/share','D:/qa//file']:

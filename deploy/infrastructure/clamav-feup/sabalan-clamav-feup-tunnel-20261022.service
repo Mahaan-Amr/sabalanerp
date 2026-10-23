@@ -3,13 +3,16 @@ Description=Exact legacy ClamAV namespace FEUP transport
 Requires=docker.service sabalan-clamav-host-egress.service
 After=network-online.target docker.service sabalan-clamav-host-egress.service
 PartOf=docker.service sabalan-clamav-host-egress.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 # SOURCE TEMPLATE: fill the independently reviewed profile SHA before installation.
 # First qualify with serve. Changing to route requires review of actual TLS proof.
 ExecStart=/usr/bin/python3 -I -B /usr/local/libexec/sabalan-clamav-feup-tunnel.py serve --profile /etc/sabalan-clamav-feup-tunnel/profile.json --sha256 REPLACE_WITH_REVIEWED_PROFILE_SHA256
-Restart=no
+Restart=on-failure
+RestartSec=60
 TimeoutStopSec=120
 KillMode=control-group
 UMask=0077

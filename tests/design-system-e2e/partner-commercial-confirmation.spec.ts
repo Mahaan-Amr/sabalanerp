@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { createPartnerFixtures } from '../../packages/partner-sales-contracts/dist/testing';
 import { loginAsAdmin } from './support/design-system';
 
-for (const width of [1280, 390]) test(`Partner Sales contract detail shows the actual local confirmation response ${width}px`, async ({ page }) => {
+for (const width of [1280, 390]) test(`Partner Sales contract detail shows the actual local confirmation response ${width}px`, async ({ page, baseURL }) => {
   await loginAsAdmin(page);
   await page.setViewportSize({ width, height: 900 });
   const fixture = createPartnerFixtures();
@@ -23,7 +23,7 @@ for (const width of [1280, 390]) test(`Partner Sales contract detail shows the a
       actions: { canSendConfirmation: true, canContinue: false, canPreview: false, canIssue: false,
         canFinalize: false, canRequestCorrection: false, canCancel: false, canRequestVoid: false } }] }
       : { ...(++sends < 3 ? { debugOtp: sends === 1 ? '654321' : '765432' } : {}),
-        publicLink: 'http://127.0.0.1:3000/contracts/confirm/local-detail-test', otpExpiresAt: new Date(Date.now() + 600000).toISOString() };
+        publicLink: new URL('/contracts/confirm/local-detail-test', baseURL).href, otpExpiresAt: new Date(Date.now() + 600000).toISOString() };
     await route.fulfill({ json: { success: true, data } });
   });
   await page.goto('/dashboard/sales/contracts/local-preview-test');

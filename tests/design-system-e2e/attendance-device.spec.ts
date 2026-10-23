@@ -56,7 +56,7 @@ test('shadow initial review shows latest scan and saves inside or unknown withou
   await db.attendanceTerminal.update({ where: { id: terminalId }, data: { mode: 'SHADOW', activatedAt: null } });
   await db.attendanceTerminalMapping.updateMany({ where: { terminalId }, data: { initialState: 'UNKNOWN' } });
   await page.context().addCookies([{ name: 'sabalan_session', value: sessionToken, url: 'http://localhost:3000', httpOnly: true, sameSite: 'Lax' }]);
-  const response = await page.request.post(`http://127.0.0.1:5000/api/attendance-device/connector/${terminalId}/punches`, { headers: { Authorization: `Bearer ${terminalSecret}` }, data: { punches: [{ deviceCode: '1', occurredAt: new Date(Date.now() - 35000).toISOString(), verifyMode: 1, inOutRaw: 255 }], readOk: true, clockSample: { offsetMs: 35000, uncertaintyMs: 1050, measuredAt: new Date().toISOString() } } });
+  const response = await page.request.post(`/api/attendance-device/connector/${terminalId}/punches`, { headers: { Authorization: `Bearer ${terminalSecret}` }, data: { punches: [{ deviceCode: '1', occurredAt: new Date(Date.now() - 35000).toISOString(), verifyMode: 1, inOutRaw: 255 }], readOk: true, clockSample: { offsetMs: 35000, uncertaintyMs: 1050, measuredAt: new Date().toISOString() } } });
   expect(response.ok()).toBeTruthy();
   await page.goto('/dashboard/security/attendance');
   const card = page.locator(`[data-personnel-id="${personId}"]`);
@@ -102,7 +102,7 @@ test('local machine delivery appears automatically, is confirmed by Guard and st
   await expect(card).toBeVisible();
   const at = new Date(Date.now() - 1000).toISOString();
   const payload = { punches: [{ deviceCode: '1', occurredAt: at, verifyMode: 1, inOutRaw: 255 }], readOk: true, clockSample: { offsetMs: 0, uncertaintyMs: 1000, measuredAt: new Date().toISOString() } };
-  const response = await page.request.post(`http://127.0.0.1:5000/api/attendance-device/connector/${terminalId}/punches`, { headers: { Authorization: `Bearer ${terminalSecret}` }, data: payload });
+  const response = await page.request.post(`/api/attendance-device/connector/${terminalId}/punches`, { headers: { Authorization: `Bearer ${terminalSecret}` }, data: payload });
   expect(response.ok()).toBeTruthy();
   const checkbox = card.getByRole('checkbox', { name: /انتخاب بازه/ });
   await expect(checkbox).toBeVisible({ timeout: 5000 });
@@ -115,7 +115,7 @@ test('local machine delivery appears automatically, is confirmed by Guard and st
   const interval = await db.attendanceInterval.findFirstOrThrow({ where: { attendanceRecord: { personnelId: personId } } });
   expect(interval.confirmedRevision).toBe(interval.revision);
   expect(interval.entryRecordedBy).toBeNull();
-  const replay = await page.request.post(`http://127.0.0.1:5000/api/attendance-device/connector/${terminalId}/punches`, { headers: { Authorization: `Bearer ${terminalSecret}` }, data: payload });
+  const replay = await page.request.post(`/api/attendance-device/connector/${terminalId}/punches`, { headers: { Authorization: `Bearer ${terminalSecret}` }, data: payload });
   expect(replay.ok()).toBeTruthy();
   expect(await db.attendancePunch.count({ where: { terminalId } })).toBe(1);
   await card.getByRole('button', { name: 'بررسی تردد', exact: true }).click();

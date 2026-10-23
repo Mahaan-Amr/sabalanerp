@@ -34,7 +34,9 @@ class OriginalLocalCheckpointOwner:
   except BaseException:pass
   while True:time.sleep(1)
  def census(self):
-  self.assert_owned();args=[*self.runtime['docker'],'compose','-f',self.base['composeFile'],'-p','sabalanerp-local','ps','--all','--no-trunc','--format','json'];child=self.children.start('census-'+os.urandom(8).hex(),args);raw=self.children.finish(child);rows=json.loads(raw)if raw.lstrip().startswith(b'[')else[json.loads(x)for x in raw.splitlines()if x];self.p.validate_census(rows,self.base['expectedContainerIds'],'sabalanerp-local');return rows
+  self.assert_owned();args=[*self.runtime['docker'],'compose','-f',self.base['composeFile'],'-p','sabalanerp-local','ps','--all','--no-trunc','--format','json'];child=self.children.start('census-'+os.urandom(8).hex(),args);raw=self.children.finish(child);rows=json.loads(raw)if raw.lstrip().startswith(b'[')else[json.loads(x)for x in raw.splitlines()if x];self.p.validate_census(rows,self.base['expectedContainerIds'],'sabalanerp-local',local_context=self.base if 'localDevSuspension'in self.base else None)
+  if 'localDevSuspension'in self.base:self.p.inspect_local_dev_suspension(self.base,lambda args:self.children.finish(self.children.start('local-dev-inspect-'+os.urandom(8).hex(),[*self.runtime['docker'],*args])))
+  return rows
  def docker(self,args):
   self.census();child=self.children.start('docker-'+os.urandom(8).hex(),[*self.runtime['docker'],*args]);return self.children.finish(child)
  def receive(self):

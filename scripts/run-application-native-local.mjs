@@ -1,3 +1,4 @@
+import {assertLocalDevSuspensionCurrent,assertLocalDevCensus} from './lib/local-dev-frontend-suspension.mjs';
 import {readExplicitQaMemoryProfile,readQaMemoryProfile} from './lib/application-native-qa-profile.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -24,16 +25,17 @@ if(frontendSnapshot){
 assert.equal(typeof candidateReplacementReceipt,'string','EXPLICIT_ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED');
 assert.ok(path.isAbsolute(candidateReplacementReceipt)&&fs.lstatSync(candidateReplacementReceipt).isFile(),'ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED_BEFORE_DOCKER');
 if(!retainedBrowserCompletion){assert.ok(retainedBrowserPlanFile&&retainedBrowserPlanSha256,'ORIGINAL_RETAINED_BROWSER_PLAN_REQUIRED');retainedBrowserCompletion=await runOriginalRetainedBrowserQualificationRounds({planFile:retainedBrowserPlanFile,planSha256:retainedBrowserPlanSha256});}
-const retainedBrowserFacts=readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);
+const retainedBrowserFacts=readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);const localDevSuspension=retainedBrowserFacts.report.localDevSuspension;assertLocalDevSuspensionCurrent(localDevSuspension);
 const root=path.resolve(import.meta.dirname,'..'),require=createRequire(import.meta.url),esbuild=require('../backend/node_modules/esbuild');
 const loaderFor=name=>{const loader={'.ts':'ts','.js':'js','.mjs':'js','.json':'json'}[path.extname(name)];assert.ok(loader,'unsupported captured module extension');return loader;};
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),compose=['compose','-f','D:/sabalanerp/docker-compose.local.yml'];
 const services=['backend','frontend','postgres','inquiry','redis','clamav','backend-candidate','backend-retained','frontend-candidate','frontend-retained'];
 function status(){
-  const raw=execFileSync('docker',[...compose,'ps','--format','json'],{encoding:'utf8'});
+  const scope=assertLocalDevSuspensionCurrent(localDevSuspension);
+  const raw=execFileSync('docker',[...compose,'ps','--all','--no-trunc','--format','json'],{encoding:'utf8'});
   let rows;try{const value=JSON.parse(raw);rows=Array.isArray(value)?value:[value];}
   catch{rows=raw.trim().split(/\r?\n/).map(line=>JSON.parse(line));}
-  for(const service of services)assert.ok(rows.some(row=>row.Project==='sabalanerp-local' && row.Service===service && row.State==='running' && row.Health==='healthy'));
+  assertLocalDevCensus(rows,scope);
   return rows;
 }
 function inspect(){const rows=status(),names=services.map(service=>rows.find(row=>row.Service===service).Name);
@@ -67,7 +69,7 @@ capture('scripts/lib/application-native-prepared-memory.mjs');
 for(const source of ['scripts/lib/original-private-legacy-ui-carrier.mjs',
  'scripts/lib/application-native-qa-profile.mjs','scripts/lib/production-legacy-browser-artifacts.mjs','scripts/lib/production-frontend-base-artifacts.mjs',
  'scripts/lib/private-docker-image-archive.mjs','deploy/scripts/production-frontend-snapshot.mjs'])capture(source);
-capture('docker-compose.application-native-role-isolation.yml');
+capture('scripts/lib/local-dev-frontend-suspension.mjs');capture('scripts/run-local-dev-frontend-suspension.mjs');capture('docker-compose.application-native-role-isolation.yml');
 const {collectNativeCandidateArtifacts,candidateReplacementReceiptArgument}=await import('./lib/application-native-candidate-artifacts.mjs');
 const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
 const candidateArtifacts=collectNativeCandidateArtifacts({root,capture,containers:initial,sourceCommit,
@@ -234,7 +236,7 @@ assert.match(files['hr-file-expansion.sql'].toString(),/^-- Generated bounded on
 files['original-retained-browser-result.json']=fs.readFileSync(retainedBrowserFacts.reportFile);
 assert.equal(sha(files['original-retained-browser-result.json']),retainedBrowserFacts.reportSha256);
 const fileHashes=Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,sha(bytes)]));
-const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile,
+const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile,localDevSuspension,
   onHeld:value=>{const reportPath=path.join(root,'reports/qa',path.basename(directory)+'-role-held.json');fs.writeFileSync(reportPath,JSON.stringify(value,null,2)+'\n');console.log(JSON.stringify({format:'sabalan-original-inner-controller-held/v1',event:'ORIGINAL_INNER_CONTROLLER_HELD',status:'ROLEHELD',reportPath,reason:'ORIGINAL_CONTROLLER_HELD'}));}});
 files['config.json']=Buffer.from(JSON.stringify({sourceCommit,...(qaMemoryProfile?{qaMemoryProfile:{...readQaMemoryProfile(qaMemoryProfile),receiptFile:'qa-memory-replacement-receipt.json'}}:{}),
   retainedBrowserReport:{file:'original-retained-browser-result.json',sha256:retainedBrowserFacts.reportSha256},

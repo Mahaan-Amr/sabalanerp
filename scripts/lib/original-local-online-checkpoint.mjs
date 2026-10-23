@@ -1,3 +1,4 @@
+import {assertLocalDevSuspensionCurrent} from './local-dev-frontend-suspension.mjs';
 /** One original Windows owner for the fixed native-host point qualification.
  * Parsed frames and files never mint completion outside this process table. */
 import assert from 'node:assert/strict';
@@ -19,7 +20,7 @@ const qualificationFile='D:/sabalanerp-online-qa/cpython-host-sysroot-998cce91d3
 const qualificationSha='234265c34dfb5514f2cc8357f4c770d91576e6da387997eec91854f800feb918';
 const publicKeyFile='C:/Users/mahan/.ssh/CodexOnlineQualification/public.pem';
 const publicKeySha='e61a06dfe5562a2375cb3051178ad9760857a7a01ea8b88f094a6e6123fdbc48';
-const sourceNames=['local-online-checkpoint-entry.py','local-online-checkpoint-driver.py','local-online-checkpoint-owner.py','online-local-host-runtime.py',
+const sourceNames=['local-dev-frontend-suspension.py','local-online-checkpoint-entry.py','local-online-checkpoint-driver.py','local-online-checkpoint-owner.py','online-local-host-runtime.py',
  'online-checkpoint-producer.py','continuous-online-wal-owner.py','capture-postgres-base.py','receive-postgres-wal.py','online-runtime-owner.py',
  'capture-coherent-components.py','online-checkpoint-coverage.py','recovery-versioned-files.py','online-checkpoint-inventory.py','coherent-versioned-file-cuts.py',
  'capture-coordination-history.py','native-versioned-file-sealer.py','recovery-file-generations.py','recovery-database-freeze.py','online-backend-boundary.py','online-inquiry-boundary.py','online-runtime-scope.py'];
@@ -60,7 +61,7 @@ function runtimeInputs(q){
 }
 /** Content inspection only, before the expensive local qualification starts. */
 export function inspectOriginalLocalOnlineCheckpointInputs({nativeOwnerElfReceipt}){
- const sourcePins={};for(const relative of [...sourceNames.map(name=>'deploy/scripts/'+name),'tests/online-deployment/local-online-checkpoint-controller.worker.cjs'])sourcePins[relative]=sha(content(path.join(repo,relative)));
+ const sourcePins={};for(const relative of [...sourceNames.map(name=>'deploy/scripts/'+name),'tests/online-deployment/local-online-checkpoint-controller.worker.cjs','scripts/lib/local-dev-frontend-suspension.mjs','scripts/run-local-dev-frontend-suspension.mjs'])sourcePins[relative]=sha(content(path.join(repo,relative)));
  const elf=collectNativeProcessOwnerElfArtifacts({receiptFile:nativeOwnerElfReceipt,captureSource:relative=>content(path.join(repo,relative))});
  const qRaw=content(qualificationFile);assert.equal(sha(qRaw),qualificationSha);runtimeInputs(JSON.parse(qRaw));assert.equal(sha(content(publicKeyFile,4096)),publicKeySha);elf.revalidate();
  return {format:'sabalan-local-online-checkpoint-content-inspection/v1',sourcePins,nativeOwner:elf.proof,qualificationSha256:qualificationSha,productionAdmission:false};
@@ -77,7 +78,8 @@ export async function createOriginalLocalOnlineCheckpoint({capturePlan,coordinat
  const qRaw=content(qualificationFile);assert.equal(sha(qRaw),qualificationSha);const q=JSON.parse(qRaw);
  const {runtimeRevalidate}=runtimeInputs(q);
  const publicRaw=content(publicKeyFile,4096);assert.equal(sha(publicRaw),publicKeySha);
- const commands=originalBackendBaseCommands(),guard=backendBaseLocalGuards(commands);
+ assertLocalDevSuspensionCurrent(plan.localDevSuspension);for(const relative of ['scripts/lib/local-dev-frontend-suspension.mjs','scripts/run-local-dev-frontend-suspension.mjs'])captureSource(relative);
+ const commands=originalBackendBaseCommands(),guard=backendBaseLocalGuards(commands,{localDevSuspension:plan.localDevSuspension});
  assert.deepEqual(await guard.protectedIdentities(),plan.originalServiceIdentities);
  const windowsProbe=await commands.run('C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',['-NoProfile','-NonInteractive','-Command',"$ErrorActionPreference='Stop'; ([string](Get-CimInstance -ClassName Win32_ComputerSystemProduct).UUID).Trim().ToLowerInvariant()"],{maximum:4096});commands.assertSuccessful(windowsProbe);
  const uuid=windowsProbe.stdout.trim().toLowerCase();assert.match(uuid,/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/);assert.ok(!/^[0-]*$/.test(uuid)&&!/^[f-]*$/.test(uuid));
@@ -92,7 +94,7 @@ export async function createOriginalLocalOnlineCheckpoint({capturePlan,coordinat
  const ready=new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;}),closed=new Promise(resolve=>{closedResolve=resolve;});
  const fail=error=>{state.held=error;readyReject(error);for(const wait of state.pending.values())wait.reject(error);state.pending.clear();};
  const send=value=>new Promise((resolve,reject)=>child.stdin.write(JSON.stringify(value)+'\n',error=>error?reject(error):resolve()));
- const checked=()=>{assert.equal(state.held,null);assert.ok(!state.closed);for(const [relative,digest]of Object.entries(sourcePins))assert.equal(sha(content(path.join(repo,relative))),digest);elf.revalidate();};
+ const checked=()=>{assertLocalDevSuspensionCurrent(plan.localDevSuspension);assert.equal(state.held,null);assert.ok(!state.closed);for(const [relative,digest]of Object.entries(sourcePins))assert.equal(sha(content(path.join(repo,relative))),digest);elf.revalidate();};
  let rpcTail=Promise.resolve();
  async function rpc(frame){
   checked();assert.match(frame.rpcId,/^[a-f0-9]{32}$/);assert.ok(!state.rpc.has(frame.rpcId));state.rpc.add(frame.rpcId);let result;

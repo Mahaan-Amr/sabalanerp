@@ -65,6 +65,82 @@ export function validateReobservedCandidateSlots(previous,current){
  validatePreviousCandidateReplacement(previous);const identities={};for(const service of ['backend-candidate','backend-retained']){const wanted=previous.actual[service],actual=current[service];assert.equal(actual.Id,wanted.id,'PREVIOUS_OWNED_CONTAINER_ID_CHANGED');assert.equal(actual.Image,wanted.image,'PREVIOUS_OWNED_IMAGE_CHANGED');assert.equal(actual.Config.Labels['com.docker.compose.project'],'sabalanerp-local');assert.equal(actual.Config.Labels['com.docker.compose.service'],service);assert.equal(actual.State.Running,true);assert.equal(actual.State.Health.Status,'healthy');assert.ok(Number.isFinite(Date.parse(actual.State.StartedAt)));identities[service]={id:actual.Id,image:actual.Image,startedAt:actual.State.StartedAt};}
  return{format:'sabalan-reobserved-quiescent-installed-slots/v1',identities,previousIdentities:Object.fromEntries(['backend-candidate','backend-retained'].map(service=>[service,Object.fromEntries(['id','image','startedAt'].map(key=>[key,previous.actual[service][key]]))])),adoptsOriginalPopen:false,originalNativeClosureInferred:false,birthReasonClaimed:false,productionAdmission:false};
 }
+export function qualifiedCandidateNativeQuietProbe(negativeRetirement){return String.raw`import os,json,stat,hashlib
+from pathlib import Path
+def assert_negative_original_guardian_not_live(guardian):
+ boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip();namespace=os.readlink('/proc/self/ns/pid')
+ if boot!=guardian['bootId'] or namespace!=guardian['pidNamespace']:return
+ process=Path('/proc')/str(guardian['pid'])
+ def birth_from_stat(raw):
+  assert len(raw)<=16384 and ') ' in raw and raw.split(' ',1)[0]==str(guardian['pid']),'A29_GUARDIAN_STAT_UNKNOWN'
+  fields=raw.rsplit(') ',1)[1].split();assert len(fields)>=20 and fields[19].isdigit(),'A29_GUARDIAN_STAT_UNKNOWN';return fields[19]
+ try:first=(process/'stat').read_text()
+ except FileNotFoundError:
+  # A missing stat alone must not hide permissions, malformed procfs, or a still-present directory.
+  try:process.stat()
+  except FileNotFoundError:pass
+  else:raise AssertionError('A29_GUARDIAN_OBSERVATION_UNKNOWN')
+ else:
+  observedNamespace=os.readlink(process/'ns/pid');second=(process/'stat').read_text()
+  assert observedNamespace==os.readlink(process/'ns/pid')==namespace and birth_from_stat(first)==birth_from_stat(second),'A29_GUARDIAN_OBSERVATION_CHANGED'
+  assert birth_from_stat(second)!=str(guardian['startTicks']),'A29_ORIGINAL_GUARDIAN_STILL_PRESENT'
+ assert Path('/proc/sys/kernel/random/boot_id').read_text().strip()==boot and os.readlink('/proc/self/ns/pid')==namespace,'A29_OBSERVATION_NAMESPACE_CHANGED'
+found=[]
+for p in Path('/proc').iterdir():
+ if not p.name.isdigit() or int(p.name)==os.getpid(): continue
+ try:
+  argv=(p/'cmdline').read_bytes().split(b'\0');environment=(p/'environ').read_bytes().split(b'\0')
+  if any(item.startswith(key)and item[len(key):]for item in environment for key in [b'BACKEND_ONLINE_SCOPE_FILE=',b'BACKEND_ONLINE_RUNTIME_ID=']):found.append(int(p.name))
+  if any(Path(a.decode(errors='strict')).name in ['online-runtime-owner.py','backend-runtime-owner.py','online-inquiry-owner.py','fixture.py','application-native-candidate-controller.py','run-full-catalog-controller.py','chromium','chrome','chrome_crashpad_handler'] for a in argv if a): found.append(int(p.name))
+ except FileNotFoundError: pass
+assert not found, 'APPLICATION_ROLE_ORIGINAL_OWNER_STILL_PRESENT'
+closed=0; unused=0; negativeCancelled=0
+negative=${JSON.stringify(JSON.stringify(negativeRetirement))}
+negative=json.loads(negative)
+readHashes={}
+def read(file):
+ fd=os.open(file,os.O_RDONLY|os.O_NOFOLLOW)
+ try:
+  before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_nlink==1 and before.st_size<=4*1024**2
+  data=os.read(fd,before.st_size+1);after=os.fstat(fd);named=os.lstat(file)
+  identity=lambda value:(value.st_dev,value.st_ino,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
+  assert len(data)==before.st_size and identity(before)==identity(after)==identity(named)
+  readHashes[str(file)]=hashlib.sha256(data).hexdigest();return json.loads(data)
+ finally:os.close(fd)
+def grants(value):
+ if isinstance(value,dict):
+  if isinstance(value.get('scope'),dict) and 'nativeDirectory' in value['scope']:yield value['scope']
+  else:
+   for child in value.values():yield from grants(child)
+ elif isinstance(value,list):
+  for child in value:yield from grants(child)
+seen=set()
+for operation in Path('/app/online-runtime-acceptance').glob('application-native-*'):
+ index=operation/'index.json'
+ if not index.exists():continue
+ for scope in grants(read(index)):
+  directory=Path(scope['nativeDirectory']);file=directory/'deployment-runtime-native.json'
+  if str(file) in seen:continue
+  seen.add(str(file))
+  if not file.exists():unused+=1;continue
+  native=read(file)
+  retired=next((row for row in (negative['records'] if negative else []) if row['nativeFile']==str(file)),None)
+  if retired:
+   assert str(operation)==negative['operationRoot'] and readHashes[str(index)]==negative['indexSha256'],'A29_INDEX_CHANGED'
+   assert readHashes[str(file)]==retired['nativeSha256'] and native['phase']=='ACTIVE' and native['guardian']==retired['guardian'],'A29_NATIVE_CHANGED'
+   assert str(Path(scope['boundaryDirectory'])/'state.json')==retired['workFile'] and str(Path(scope['boundaryDirectory'])/'claim.json')==retired['claimFile'],'A29_SCOPE_CHANGED'
+   work=read(Path(retired['workFile']));claim=read(Path(retired['claimFile']))
+   assert readHashes[retired['workFile']]==retired['workSha256'] and work['phase']=='QUIESCENT' and readHashes[retired['claimFile']]==retired['claimSha256'] and claim['native']['claimSha256']==retired['nativeSha256'],'A29_WORK_OR_CLAIM_CHANGED'
+   assert_negative_original_guardian_not_live(retired['guardian'])
+   negativeCancelled+=1;continue
+  assert native['phase']=='QUIESCENT' and native['nativeReaped'] is True,'APPLICATION_ROLE_DURABLE_OWNER_UNKNOWN'
+  assert native.get('databaseQuiet') is True or native.get('sqliteNativeClosed') is True,'APPLICATION_ROLE_DURABLE_SQL_UNKNOWN'
+  work=Path(scope['boundaryDirectory'])/'state.json'
+  if work.exists():assert read(work)['phase']=='QUIESCENT','APPLICATION_ROLE_DURABLE_WORK_UNKNOWN'
+  closed+=1
+if negative:assert negativeCancelled==2,'A29_EXACT_TWO_NEGATIVE_RECORDS_REQUIRED'
+print(json.dumps(dict(originalNativeProcesses=0,denyUnknownGrantRecordsChecked=closed,unusedGrantRecords=unused,negativelyCancelledGrantRecords=negativeCancelled,adoptsOriginalPopen=False)))`;
+}
 async function main(){
 const root=path.resolve(import.meta.dirname,'..'),base='D:/sabalanerp/docker-compose.local.yml';
 const {inspectOnly,imageReceiptFile,materialReceiptFile,preflightFile,previousReplacement,failedAuthorityCohort,isolateAuthorityCohort=false,negativeRetirement:negativeRetirementArgument,candidateQaMemoryTransition=false}=parseCandidateReplacementArguments(process.argv.slice(2));
@@ -158,80 +234,7 @@ for(const service of slots){const wanted=configuration.services[service],old=pre
 }
 let negativeRetirement=null;
 if(negativeRetirementArgument){const raw=fs.readFileSync(negativeRetirementArgument.file);assert.equal(createHash('sha256').update(raw).digest('hex'),negativeRetirementArgument.sha256);negativeRetirement=validateA29RetirementCertificate(JSON.parse(raw),loadA29Evidence());}
-const processProbe=String.raw`import os,json,stat,hashlib
-from pathlib import Path
-def assert_negative_original_guardian_not_live(guardian):
- boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip();namespace=os.readlink('/proc/self/ns/pid')
- if boot!=guardian['bootId'] or namespace!=guardian['pidNamespace']:return
- process=Path('/proc')/str(guardian['pid'])
- def birth_from_stat(raw):
-  assert len(raw)<=16384 and ') ' in raw and raw.split(' ',1)[0]==str(guardian['pid']),'A29_GUARDIAN_STAT_UNKNOWN'
-  fields=raw.rsplit(') ',1)[1].split();assert len(fields)>=20 and fields[19].isdigit(),'A29_GUARDIAN_STAT_UNKNOWN';return fields[19]
- try:first=(process/'stat').read_text()
- except FileNotFoundError:
-  # A missing stat alone must not hide permissions, malformed procfs, or a still-present directory.
-  try:process.stat()
-  except FileNotFoundError:pass
-  else:raise AssertionError('A29_GUARDIAN_OBSERVATION_UNKNOWN')
- else:
-  observedNamespace=os.readlink(process/'ns/pid');second=(process/'stat').read_text()
-  assert observedNamespace==os.readlink(process/'ns/pid')==namespace and birth_from_stat(first)==birth_from_stat(second),'A29_GUARDIAN_OBSERVATION_CHANGED'
-  assert birth_from_stat(second)!=str(guardian['startTicks']),'A29_ORIGINAL_GUARDIAN_STILL_PRESENT'
- assert Path('/proc/sys/kernel/random/boot_id').read_text().strip()==boot and os.readlink('/proc/self/ns/pid')==namespace,'A29_OBSERVATION_NAMESPACE_CHANGED'
-found=[]
-for p in Path('/proc').iterdir():
- if not p.name.isdigit() or int(p.name)==os.getpid(): continue
- try:
-  argv=(p/'cmdline').read_bytes().split(b'\0')
-  if any(Path(a.decode(errors='strict')).name in ['online-runtime-owner.py','online-inquiry-owner.py','fixture.py','application-native-candidate-controller.py','run-full-catalog-controller.py','chromium','chrome','chrome_crashpad_handler'] for a in argv if a): found.append(int(p.name))
- except FileNotFoundError: pass
-assert not found, 'APPLICATION_ROLE_ORIGINAL_OWNER_STILL_PRESENT'
-closed=0; unused=0; negativeCancelled=0
-negative=${JSON.stringify(JSON.stringify(negativeRetirement))}
-negative=json.loads(negative)
-readHashes={}
-def read(file):
- fd=os.open(file,os.O_RDONLY|os.O_NOFOLLOW)
- try:
-  before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_nlink==1 and before.st_size<=4*1024**2
-  data=os.read(fd,before.st_size+1);after=os.fstat(fd);named=os.lstat(file)
-  identity=lambda value:(value.st_dev,value.st_ino,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
-  assert len(data)==before.st_size and identity(before)==identity(after)==identity(named)
-  readHashes[str(file)]=hashlib.sha256(data).hexdigest();return json.loads(data)
- finally:os.close(fd)
-def grants(value):
- if isinstance(value,dict):
-  if isinstance(value.get('scope'),dict) and 'nativeDirectory' in value['scope']:yield value['scope']
-  else:
-   for child in value.values():yield from grants(child)
- elif isinstance(value,list):
-  for child in value:yield from grants(child)
-seen=set()
-for operation in Path('/app/online-runtime-acceptance').glob('application-native-*'):
- index=operation/'index.json'
- if not index.exists():continue
- for scope in grants(read(index)):
-  directory=Path(scope['nativeDirectory']);file=directory/'deployment-runtime-native.json'
-  if str(file) in seen:continue
-  seen.add(str(file))
-  if not file.exists():unused+=1;continue
-  native=read(file)
-  retired=next((row for row in (negative['records'] if negative else []) if row['nativeFile']==str(file)),None)
-  if retired:
-   assert str(operation)==negative['operationRoot'] and readHashes[str(index)]==negative['indexSha256'],'A29_INDEX_CHANGED'
-   assert readHashes[str(file)]==retired['nativeSha256'] and native['phase']=='ACTIVE' and native['guardian']==retired['guardian'],'A29_NATIVE_CHANGED'
-   assert str(Path(scope['boundaryDirectory'])/'state.json')==retired['workFile'] and str(Path(scope['boundaryDirectory'])/'claim.json')==retired['claimFile'],'A29_SCOPE_CHANGED'
-   work=read(Path(retired['workFile']));claim=read(Path(retired['claimFile']))
-   assert readHashes[retired['workFile']]==retired['workSha256'] and work['phase']=='QUIESCENT' and readHashes[retired['claimFile']]==retired['claimSha256'] and claim['native']['claimSha256']==retired['nativeSha256'],'A29_WORK_OR_CLAIM_CHANGED'
-   assert_negative_original_guardian_not_live(retired['guardian'])
-   negativeCancelled+=1;continue
-  assert native['phase']=='QUIESCENT' and native['nativeReaped'] is True,'APPLICATION_ROLE_DURABLE_OWNER_UNKNOWN'
-  assert native.get('databaseQuiet') is True or native.get('sqliteNativeClosed') is True,'APPLICATION_ROLE_DURABLE_SQL_UNKNOWN'
-  work=Path(scope['boundaryDirectory'])/'state.json'
-  if work.exists():assert read(work)['phase']=='QUIESCENT','APPLICATION_ROLE_DURABLE_WORK_UNKNOWN'
-  closed+=1
-if negative:assert negativeCancelled==2,'A29_EXACT_TWO_NEGATIVE_RECORDS_REQUIRED'
-print(json.dumps(dict(originalNativeProcesses=0,denyUnknownGrantRecordsChecked=closed,unusedGrantRecords=unused,negativelyCancelledGrantRecords=negativeCancelled,adoptsOriginalPopen=False)))`;
+const processProbe=qualifiedCandidateNativeQuietProbe(negativeRetirement);
 const processQuiet=(observed=previous)=>Object.fromEntries(slots.map(service=>[service,JSON.parse(docker(['exec',observed[service].Id,'/usr/bin/python3','-I','-B','-c',processProbe]))]));
 const sqlQuiet=()=>{const value=JSON.parse(docker(['exec',inspect('postgres').Id,'psql','-X','-qAt','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1','-c',
   "SELECT json_build_object('visible',(SELECT rolsuper OR pg_has_role(current_user,'pg_read_all_stats','member') FROM pg_roles WHERE rolname=current_user),'sessions',(SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'sabalan-rt-%'),'prepared',(SELECT count(*) FROM pg_prepared_xacts WHERE database LIKE 'qa_application_%'),'system',(SELECT system_identifier::text FROM pg_control_system()))"]));

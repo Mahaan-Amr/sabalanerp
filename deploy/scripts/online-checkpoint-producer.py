@@ -205,7 +205,8 @@ class Producer:
             '-p',self.config['project'],'ps','--all','--no-trunc','--format','json'])
         raw = self.children.finish(census)
         rows = json.loads(raw) if raw.lstrip().startswith(b'[') else [json.loads(line) for line in raw.splitlines() if line]
-        validate_census(rows,self.config['expectedContainerIds'],self.config['project'])
+        validate_census(rows,self.config['expectedContainerIds'],self.config['project'],local_context=self.config if 'localDevSuspension'in self.config else None)
+        inspect_local_dev_suspension(self.config,lambda args:self.children.finish(self.command('local-dev-inspect',[*host_runtime(self.config)['docker'],*args])))
         return self.command('docker', [*host_runtime(self.config)['docker'],*arguments], interactive=interactive, environment=environment)
 
     def complete(self, child, stdin=None):
@@ -655,9 +656,27 @@ def lease_assertion(lease):
         "AND l.objsubid=1 AND l.granted AND l.mode='ExclusiveLock') THEN RAISE EXCEPTION 'ORIGINAL_CHECKPOINT_LEASE_LOST'; END IF; END $owned$;\n")
 
 
-def validate_census(rows, expected, project='sabalanerp',configuration_only=False):
+def local_dev_validator(config):
+    require(config.get('project')=='sabalanerp-local' and 'localDevSuspension' in config,'LOCAL_DEV_EXPLICIT_LOCAL_SCOPE_REQUIRED')
+    pin=config['helpers']['localDevSuspension'];file=Path(pin['file'])
+    require(source_sha(file)==pin['sha256'],'LOCAL_DEV_VALIDATOR_SOURCE_CHANGED')
+    spec=importlib.util.spec_from_file_location('sabalan_fixed_local_dev_suspension',file);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    module.validate_scope(config);return module
+
+
+def inspect_local_dev_suspension(config,run):
+    if 'localDevSuspension' not in config:return
+    module=local_dev_validator(config);receipt=module.validate_scope(config)
+    actual=json.loads(run(['inspect',receipt['frontend']['id']]))
+    require(isinstance(actual,list)and len(actual)==1,'LOCAL_DEV_EXACT_INSPECT_REQUIRED');module.validate_inspected(actual[0],config)
+
+
+def validate_census(rows, expected, project='sabalanerp',configuration_only=False,local_context=None):
     require(project in ('sabalanerp','sabalanerp-local'),'CENSUS_CHANGED')
-    if project=='sabalanerp-local' and not configuration_only:
+    if local_context is not None:
+        require(project=='sabalanerp-local'and not configuration_only and local_context['project']==project,'LOCAL_DEV_PRODUCTION_OR_CONFIG_WAIVER_REFUSED')
+        local_dev_validator(local_context).validate_rows(rows,local_context)
+    elif project=='sabalanerp-local' and not configuration_only:
         require(len(rows)==10 and all(row.get('State')=='running'and row.get('Health')=='healthy'for row in rows),'LOCAL_CANONICAL_SERVICES_UNHEALTHY')
     require(isinstance(expected,list) and expected and len(expected)==len(set(expected))
         and all(isinstance(item,str)and re.fullmatch(r'[a-f0-9]{64}',item)for item in expected),'CENSUS_CHANGED')
@@ -714,7 +733,8 @@ def docker_guard(arguments):
     census=owner.start('compose-ps',[*runtime['docker'],'compose','-f',value['composeFile'],'-p',value['project'],'ps','--all','--no-trunc','--format','json'])
     output=owner.finish(census)
     rows=json.loads(output)if output.lstrip().startswith(b'[')else[json.loads(line)for line in output.splitlines()if line]
-    validate_census(rows,value['expectedContainerIds'],value['project'])
+    validate_census(rows,value['expectedContainerIds'],value['project'],local_context=value if 'localDevSuspension'in value else None)
+    inspect_local_dev_suspension(value,lambda args:owner.finish(owner.start('local-dev-inspect',[*runtime['docker'],*args])))
     require(owner.closed(),'DOCKER_GUARD_CENSUS_NOT_CLOSED')
     os.execv(str(binary),[*runtime['docker'],*command])
 
@@ -722,6 +742,8 @@ def docker_guard(arguments):
 def validate_configuration(value):
     require(value.get('format') == 'sabalan-original-online-checkpoint-producer/v1', 'CONFIGURATION_INVALID')
     require(value.get('project')in ('sabalanerp','sabalanerp-local'), 'FIXED_PROJECT_REQUIRED')
+    if 'localDevSuspension'in value:
+        require(value['project']=='sabalanerp-local','LOCAL_DEV_PRODUCTION_SCOPE_REFUSED');local_dev_validator(value)
     if value['project']=='sabalanerp-local':
         require(Path(value['composeFile']).name=='docker-compose.local.yml'
             and re.fullmatch(r'qa_application_(?:native|restored)_[a-f0-9]{32}',value['database']['name']), 'LOCAL_ISOLATED_DATABASE_REQUIRED')

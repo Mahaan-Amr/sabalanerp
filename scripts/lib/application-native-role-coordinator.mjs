@@ -1,3 +1,4 @@
+import {assertLocalDevSuspensionCurrent,localDevCaptureScope} from './local-dev-frontend-suspension.mjs';
 import {expectedQaCandidateMemory} from './application-native-qa-profile.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -84,9 +85,9 @@ function validateOriginalMainHttpOwner(entry,grant,index,status){
 
 /** Diagnostic only. The private key and both original Docker-exec handles never
  * leave this closure. There is deliberately no public arbitrary signer. */
-export function createOriginalRoleCoordinator({directory,topology,fileHashes,retainedBrowserCompletion,originalServiceIdentities,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile=null,onHeld=()=>{}}){
+export function createOriginalRoleCoordinator({directory,topology,fileHashes,retainedBrowserCompletion,originalServiceIdentities,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile=null,localDevSuspension,onHeld=()=>{}}){
   assert.match(directory,/^\/app\/online-runtime-acceptance\/application-native-[a-f0-9]{32}$/);
-  const retained=retainedBrowserCompletion?readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion):null;
+  const retained=retainedBrowserCompletion?readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion):null;assert.deepEqual(localDevSuspension??null,retained?.report.localDevSuspension??null,'ORIGINAL_RETAINED_SUSPENSION_SELECTION_REQUIRED');
   for(const role of ['main','candidate']){
     assert.ok(hex(topology[role].containerId));assert.match(topology[role].image,/^sha256:[a-f0-9]{64}$/);
     assert.match(topology[role].host,/^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/);
@@ -513,7 +514,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
         assert.ok(completedPhases.has('PRIVATE_LEGACY_BROWSER_TICKETS_VERIFIED'));
         pending={requestId:body.requestId,expected:'ORIGINAL_ONLINE_CHECKPOINT_DONE',kind:'local-online-checkpoint'};
         void (async()=>{
-          if(!localCrypto)localCrypto=await createOriginalLocalCheckpointCrypto({directory,topology,scratch:'D:/sabalanerp-online-qa/original-crypto-'+randomBytes(16).toString('hex')});
+          if(!localCrypto)localCrypto=await createOriginalLocalCheckpointCrypto({localDevSuspension,directory,topology,scratch:'D:/sabalanerp-online-qa/original-crypto-'+randomBytes(16).toString('hex')});
           const capturePlan=originalController.prepareOriginalLocalOnlineCapturePlan();
           localOnlineOwner=await createOriginalLocalOnlineCheckpoint({capturePlan,coordinator:originalController,cryptoExecutor:localCrypto,independentOptions,nativeOwnerElfReceipt});
           const point=await localOnlineOwner.point();await localOnlineOwner.tick();localOnlineCompletion=await localOnlineOwner.finishPointOnlyQualification();
@@ -528,7 +529,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
       if(['SEAL_LOCAL_CHECKPOINT_COMPONENTS','SEAL_LOCAL_WAL_WINDOW'].includes(body.command)){
         assert.ok(legacyRestoration&&!held,'ORIGINAL_POST_UI_CRYPTO_CONTEXT_REQUIRED');
         void (async()=>{
-          if(!localCrypto)localCrypto=await createOriginalLocalCheckpointCrypto({directory,topology,scratch:'D:/sabalanerp-online-qa/original-crypto-'+randomBytes(16).toString('hex')});
+          if(!localCrypto)localCrypto=await createOriginalLocalCheckpointCrypto({localDevSuspension,directory,topology,scratch:'D:/sabalanerp-online-qa/original-crypto-'+randomBytes(16).toString('hex')});
           const point=body.command==='SEAL_LOCAL_CHECKPOINT_COMPONENTS';
           same(Object.keys(body.input).sort(),point?['componentManifestFile','componentManifestSha256']:['captureSha256','configurationSha256','root']);
           const token=await (point?localCrypto.seal(body.input):localCrypto.sealWal(body.input));localCryptoCompletions.push(token);
@@ -650,7 +651,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
       const facts=qualificationState.issued.facts,token=Object.freeze({});
       assert.ok(originalOnlineInquiry&&!actors.get(originalOnlineInquiry.actorId)?.closed);const inquiry=originalOnlineInquiry.result;
       const birth=originalServiceIdentities['backend-candidate'];assert.ok(birth?.startedAt);same(birth.id,topology.candidate.containerId);same(birth.image,topology.candidate.image);
-      const plan={format:'sabalan-original-local-online-capture-plan/v1',database:{...grant.scope.database,oid:String(mainIndex.restoredOid)},
+      const suspensionScope=assertLocalDevSuspensionCurrent(localDevSuspension);const plan={...(localDevSuspension?{localDevSuspension,localDevCaptureScope:localDevCaptureScope(suspensionScope,{runtimeId:grant.scope.runtimeId,scopeSha256:grant.sha256})}:{}),format:'sabalan-original-local-online-capture-plan/v1',database:{...grant.scope.database,oid:String(mainIndex.restoredOid)},
         backend:{...structuredClone(topology.candidate),startedAt:birth.startedAt},grant:structuredClone(grant),qualificationRoot:mainIndex.privateQualification.qualificationRoot,
         roots:structuredClone(facts.roots),ephemeralRoots:structuredClone(facts.ephemeralRoots),originalServiceIdentities:{...structuredClone(originalServiceIdentities),'frontend-retained':structuredClone(readOriginalPrivateLegacyUiRestoration(legacyRestoration).restored)},
         inquiry:{path:inquiry.sqlite.file,device:inquiry.sqlite.device,inode:inquiry.sqlite.inode},inquiryRuntimeIds:[inquiry.runtimeId],
@@ -658,7 +659,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
         sourceRuntimeId:mainIndex.privateQualification.httpGrants[1].scope.runtimeId,sourceControllerPid:roles.get('main').child.pid};
       originalOnlineCapturePlans.set(token,{plan,assertLive:()=>{assertLegacyReady();assert.ok(!held&&roles.get('main')&&!roles.get('main').closed);}});return token;
     },
-    readOriginalPrivateLegacyUiTarget:()=>{assertLegacyReady();assert.ok(originalServiceIdentities);return Object.freeze({root:path.resolve(import.meta.dirname,'../..'),project:'sabalanerp-local',composeFile:'D:/sabalanerp/docker-compose.local.yml',browserOverlayFile:path.resolve(import.meta.dirname,'../../docker-compose.application-browser-acceptance.yml'),originalRetained:structuredClone(originalServiceIdentities['frontend-retained']),originalCurrent:structuredClone(originalServiceIdentities['frontend-candidate']),roundId:legacyRoundId});},
+    readOriginalPrivateLegacyUiTarget:()=>{assertLegacyReady();assert.ok(originalServiceIdentities);return Object.freeze({...(localDevSuspension?{localDevSuspension}:{}),root:path.resolve(import.meta.dirname,'../..'),project:'sabalanerp-local',composeFile:'D:/sabalanerp/docker-compose.local.yml',browserOverlayFile:path.resolve(import.meta.dirname,'../../docker-compose.application-browser-acceptance.yml'),originalRetained:structuredClone(originalServiceIdentities['frontend-retained']),originalCurrent:structuredClone(originalServiceIdentities['frontend-candidate']),roundId:legacyRoundId});},
     executeOriginalPrivateLegacyUiDockerCommand:async token=>{const value=consumeOriginalPrivateLegacyUiCommand(originalController,token);return legacyDocker(value.args,value.input,value.maximum);},
     assertOriginalPrivateLegacyBrowserClosed:()=>{const legacyActors=[...actors.values()].filter(row=>row.kind==='legacy-private-chrome');assert.ok(completedPhases.has('PRIVATE_LEGACY_CHROME_CLOSED')||(legacyActors.length===0&&phaseRefusals.some(row=>row.kind==='legacy-private-chrome'&&row.noWorkStarted)));assert.ok(legacyDockerChildren.every(row=>row.closed&&!row.unknown&&row.code===0&&row.signal===null));},
     readOriginalPrivateLegacyRestoration:()=>{if(!legacyRestoration)return null;const value=readOriginalPrivateLegacyUiRestoration(legacyRestoration);return Object.freeze({...value.receipt,receiptFile:value.receiptFile,receiptSha256:value.receiptSha256});},

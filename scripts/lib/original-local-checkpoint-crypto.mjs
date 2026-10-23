@@ -1,3 +1,4 @@
+import {assertLocalDevSuspensionCurrent,assertLocalDevCensus} from './local-dev-frontend-suspension.mjs';
 /** Original local content-sealing executor. Keys never cross into Docker.
  * A sealed object is not independent verification, retention or admission. */
 import assert from 'node:assert/strict';
@@ -39,12 +40,12 @@ export async function readOriginalLocalCheckpointCryptoCompletion(token){const v
 /** Enrollment occurs in the original runner with its actual inspected topology.
  * The executor independently re-inspects all ten services and the exact volume;
  * it never accepts a callback, executable, reported completion or arbitrary key. */
-export async function createOriginalLocalCheckpointCrypto({directory,topology,scratch}){
+export async function createOriginalLocalCheckpointCrypto({directory,topology,scratch,localDevSuspension}){
  assert.equal(process.platform,'win32');assert.match(directory,/^\/app\/online-runtime-acceptance\/application-native-[a-f0-9]{32}$/);
  assert.equal(path.resolve(scratch),scratch);assert.ok(scratch.startsWith('D:\\sabalanerp-online-qa\\')||scratch.startsWith('D:/sabalanerp-online-qa/'));
  const owner=originalBackendBaseCommands();let baseline,closed=false,active=false;
- async function census(){const result=await owner.run('docker',['compose','-f',base,'ps','--all','--format','json']);owner.assertSuccessful(result);const rows=parse(result.stdout);assert.equal(rows.length,10);assert.deepEqual(rows.map(row=>row.Service).sort(),services);for(const row of rows)assert.equal(row.Project,project);return rows;}
- async function inspect(){const rows=await census();const result=await owner.run('docker',['inspect','--format',format,...rows.map(row=>row.ID??row.Name)]);owner.assertSuccessful(result);const actual=parse(result.stdout);assert.equal(actual.length,10);return Object.fromEntries(actual.map(row=>{assert.equal(row.Labels['com.docker.compose.project'],project);assert.equal(row.Running,true);assert.equal(row.Health,'healthy');return[row.Labels['com.docker.compose.service'],row];}));}
+ async function census(){const suspension=assertLocalDevSuspensionCurrent(localDevSuspension);const result=await owner.run('docker',['compose','-f',base,'ps','--all','--no-trunc','--format','json']);owner.assertSuccessful(result);const rows=parse(result.stdout);assert.equal(rows.length,10);assert.deepEqual(rows.map(row=>row.Service).sort(),services);for(const row of rows)assert.equal(row.Project,project);assertLocalDevCensus(rows,suspension);return rows;}
+ async function inspect(){const rows=await census();const result=await owner.run('docker',['inspect','--format',format,...rows.map(row=>row.ID??row.Name)]);owner.assertSuccessful(result);const actual=parse(result.stdout);assert.equal(actual.length,10);return Object.fromEntries(actual.map(row=>{assert.equal(row.Labels['com.docker.compose.project'],project);if(row.Labels['com.docker.compose.service']==='frontend'&&localDevSuspension)assert.equal(row.Running,false);else{assert.equal(row.Running,true);assert.equal(row.Health,'healthy');}return[row.Labels['com.docker.compose.service'],row];}));}
  baseline=await inspect();
  for(const [role,service]of [['main','backend-retained'],['candidate','backend-candidate']]){assert.equal(baseline[service].Id,topology[role].containerId);assert.equal(baseline[service].Image,topology[role].image);}
  const backend=baseline['backend-retained'];const mount=backend.Mounts.find(row=>row.Destination==='/app/online-runtime-acceptance');

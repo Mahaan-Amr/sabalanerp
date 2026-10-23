@@ -1,3 +1,4 @@
+import {assertLocalDevSuspensionCurrent,assertLocalDevCensus} from './local-dev-frontend-suspension.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -8,10 +9,10 @@ const compose=['compose','-f','D:/sabalanerp/docker-compose.local.yml'];
 const rows=text=>{try{const value=JSON.parse(text);return Array.isArray(value)?value:[value];}
   catch{return text.trim().split(/\r?\n/).map(line=>JSON.parse(line));}};
 
-export function backendBaseLocalGuards(commands){
+export function backendBaseLocalGuards(commands,{localDevSuspension}={}){
   async function status(){
-    const result=await commands.run('docker',[...compose,'ps','--format','json']);commands.assertSuccessful(result);
-    const actual=assertBackendBaseProtectedStatus(result.stdout);
+    const scope=assertLocalDevSuspensionCurrent(localDevSuspension);const result=await commands.run('docker',[...compose,'ps','--all','--no-trunc','--format','json']);commands.assertSuccessful(result);
+    const actual=assertBackendBaseProtectedStatus(result.stdout,scope);
     return actual;
   }
   async function docker(args){await status();const result=await commands.run('docker',args);commands.assertSuccessful(result);return result.stdout;}
@@ -21,7 +22,7 @@ export function backendBaseLocalGuards(commands){
     const result={};
     for(const row of inspected){const labels=row.Config?.Labels;assert.equal(labels?.['com.docker.compose.project'],'sabalanerp-local');
       const service=labels['com.docker.compose.service'];assert.ok(services.includes(service)&&!result[service]);
-      assert.equal(row.State.Running,true);assert.equal(row.State.Health.Status,'healthy');
+      if(service!=='frontend'||!localDevSuspension){assert.equal(row.State.Running,true);assert.equal(row.State.Health.Status,'healthy');}else assert.equal(row.State.Running,false);
       result[service]={id:row.Id,image:row.Image,startedAt:row.State.StartedAt};}
     return result;
   }
@@ -35,9 +36,9 @@ export function backendBaseLocalGuards(commands){
   return Object.freeze({status,docker,protectedIdentities,aliases});
 }
 
-export function assertBackendBaseProtectedStatus(stdout){
+export function assertBackendBaseProtectedStatus(stdout,localDevSuspension=null){
   const actual=rows(stdout);assert.equal(actual.length,services.length);
-  for(const service of services)assert.equal(actual.filter(row=>row.Project==='sabalanerp-local'&&row.Service===service&&row.State==='running'&&row.Health==='healthy').length,1);
+  assertLocalDevCensus(actual,localDevSuspension);
   return actual;
 }
 

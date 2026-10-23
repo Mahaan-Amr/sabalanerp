@@ -75,8 +75,15 @@ def main():
         nonlocal counter
         counter+=1;child=children.start('preflight-'+str(counter),arguments,maximum=maximum);return children.finish(child,maximum)
     compose='/mnt/host/d/sabalanerp/docker-compose.local.yml'
+    local_context=None
+    if 'localDevSuspension'in plan:
+        require('localDevCaptureScope'in plan and plan['localDevCaptureScope']['selection']==plan['localDevSuspension'],'LOCAL_DEV_PLAN_SCOPE_REQUIRED')
+        local_context=dict(project='sabalanerp-local',database=plan['database'],capture=dict(runtimeId=plan['grant']['scope']['runtimeId'],scopeSha256=plan['grant']['sha256']),composeSha256=p.source_sha(compose),localDevSuspension=plan['localDevCaptureScope'],helpers=dict(localDevSuspension=dict(file=str(stage/'local-dev-frontend-suspension.py'),sha256=header['sourcePins']['deploy/scripts/local-dev-frontend-suspension.py']),suspensionOwner=dict(file=str(stage/'run-local-dev-frontend-suspension.mjs'),sha256=header['sourcePins']['scripts/run-local-dev-frontend-suspension.mjs']),suspensionVerifier=dict(file=str(stage/'local-dev-frontend-suspension.mjs'),sha256=header['sourcePins']['scripts/lib/local-dev-frontend-suspension.mjs'])))
+        p.local_dev_validator(local_context)
+    else:require('localDevCaptureScope'not in plan,'LOCAL_DEV_UNSELECTED_SCOPE_REFUSED')
     def census():
-        body=run([*runtime['docker'],'compose','-f',compose,'-p','sabalanerp-local','ps','--all','--no-trunc','--format','json']);rows=json.loads(body)if body.lstrip().startswith(b'[')else[json.loads(x)for x in body.splitlines()if x];p.validate_census(rows,expected,'sabalanerp-local')
+        body=run([*runtime['docker'],'compose','-f',compose,'-p','sabalanerp-local','ps','--all','--no-trunc','--format','json']);rows=json.loads(body)if body.lstrip().startswith(b'[')else[json.loads(x)for x in body.splitlines()if x];p.validate_census(rows,expected,'sabalanerp-local',local_context=local_context)
+        if local_context is not None:p.inspect_local_dev_suspension(local_context,lambda args:run([*runtime['docker'],*args]))
     def docker(arguments):census();return run([*runtime['docker'],*arguments])
     try:
         inspected=json.loads(docker(['inspect',*expected]));candidate=next(x for x in inspected if x['Config']['Labels']['com.docker.compose.service']=='backend-candidate');pg=next(x for x in inspected if x['Config']['Labels']['com.docker.compose.service']=='postgres')
@@ -102,6 +109,8 @@ def main():
         sources=[dict(name='retained-'+str(i).zfill(2),path=row['live'],device=row['liveDevice'],inode=row['liveInode'],storeRoot=row['store'])for i,row in enumerate(plan['roots'])];require(len(sources)==9,'NINE_ACTUAL_ROOTS')
         stores=[dict(name=source['name'],device=str(row['storeDevice']),inode=str(row['storeInode']))for source,row in zip(sources,plan['roots'])]
         config=dict(format='sabalan-original-online-checkpoint-producer/v1',project='sabalanerp-local',root=str(root),runtimeRoot=runtime_root,captureId=Path(runtime_root).name,operationId='online-'+header['operation'],targetCommit=scope['sourceCommit'],database=plan['database'],databaseUrl=database_url,backend=dict(containerId=candidate['Id'],image=candidate['Image'],startedAt=candidate['State']['StartedAt'],privateAddress=networks[0]),postgres=dict(containerId=pg['Id'],image=pg['Image'],startedAt=pg['State']['StartedAt'],user=user),expectedContainerIds=expected,composeFile=compose,composeSha256=p.source_sha(compose),dockerSha256=p.source_sha(runtime['docker'][0]),lockFile=str(lock),helpers=helpers,localHostRuntime=header['runtimeQualification']['descriptor'],capture=dict(runtimeId=scope['runtimeId'],scope=scope,scopeFile=str(grant_file),runtimeScopeFile=grant['file'],scopeSha256=grant['sha256'],nativeDirectoryHost=str(mapped(scope['nativeDirectory'])),boundaryDirectoryHost=str(mapped(scope['boundaryDirectory']))),sources=sources,inquiry=plan['inquiry'],inquiryRuntimeIds=plan['inquiryRuntimeIds'],sealer=dict(entrySha256=entry_sha,stores=stores),qualificationPublicKeySha256=sha((stage/'qualification-public-key.pem').read_bytes()))
+        if local_context is not None:
+            config['localDevSuspension']=local_context['localDevSuspension'];config['helpers'].update(local_context['helpers'])
         configuration=controller_root/'original-input.json';p.publish(configuration,config);owner_root=controller_root/'owner';owner_root.mkdir(mode=0o700);module=load(stage/'local-online-checkpoint-owner.py','local_original_owner');owned=module.create_original_local_checkpoint_owner(producer_module=p,configuration_file=str(configuration),configuration_sha256=sha(raw(config)),controller_source=str(stage/'local-online-checkpoint-controller.worker.cjs'),controller_sha256=sha((stage/'local-online-checkpoint-controller.worker.cjs').read_bytes()),owner_directory=str(owner_root))
         class Ports:
             def read_original_continuous_context(self,runtime_id):return owned.read_original_continuous_context(runtime_id)

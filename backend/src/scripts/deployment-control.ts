@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {validateBinding,canonical,type PreservedClamavBinding} from '../../scripts/preserved-clamav-policy.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { disconnectDatabase, prisma } from '../lib/prisma';
@@ -34,6 +35,7 @@ type Session = {
   phase: DeploymentPhase;
   bootstrap: boolean;
   controlImage: string;
+  preservedClamav?: PreservedClamavBinding;
   clamavOperation?: 'repair' | 'incident-recovery';
   clamavIncidentSnapshotSha256?: string;
   rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres' | 'clamav', string>;
@@ -46,7 +48,32 @@ const required = (name: string) => {
   return value;
 };
 
-const readSession = async (): Promise<Session> => JSON.parse(await fs.promises.readFile(SESSION_PATH, 'utf8')) as Session;
+const preservationMetadataName = (deploymentId: string) => {
+  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(deploymentId)) throw new Error('Invalid scanner preservation deployment identity.');
+  return `preserved-clamav-${deploymentId}.json`;
+};
+const environmentPreservation = (): PreservedClamavBinding | undefined => {
+  const hex = process.env.DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX;
+  if (!hex) return undefined;
+  if (!/^(?:[a-f0-9]{2}){1,16384}$/.test(hex)) throw new Error('Invalid scanner preservation metadata.');
+  return validateBinding(JSON.parse(Buffer.from(hex, 'hex').toString('utf8')));
+};
+const readSession = async (): Promise<Session> => {
+  const session = JSON.parse(await fs.promises.readFile(SESSION_PATH, 'utf8')) as Session;
+  const binding = environmentPreservation();
+  if (session.preservedClamav || binding) {
+    if (!session.preservedClamav || !binding || canonical(validateBinding(session.preservedClamav)) !== canonical(binding)) throw new Error('Scanner preservation session binding changed.');
+    const name = preservationMetadataName(session.deploymentId);
+    for (const directory of [REPORT_DIR, RECOVERY_COORDINATION_DIR]) {
+      const file = path.join(directory, name);
+      const st = await fs.promises.lstat(file);
+      if (!st.isFile() || st.isSymbolicLink() || st.uid !== 0 || st.nlink !== 1 || (st.mode & 0o077)) throw new Error('Invalid scanner preservation recovery metadata.');
+      const metadata = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+      if (canonical(validateBinding(metadata)) !== canonical(binding)) throw new Error('Scanner preservation recovery metadata changed.');
+    }
+  }
+  return session;
+};
 const writeSession = async (session: Session, createOnly = false) => {
   await fs.promises.mkdir(REPORT_DIR, { recursive: true });
   const temporary = `${SESSION_PATH}.${process.pid}.tmp`;
@@ -86,6 +113,8 @@ const prepare = async () => {
       || typeof value !== 'string' || (value !== '' && !/^(sha256:)?[a-f0-9]{40,64}$/.test(value)))) {
     throw new Error('Invalid previous performance runtime identity.');
   }
+  const preservedClamav = environmentPreservation();
+  if (preservedClamav && (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true' || clamavOperation === 'incident-recovery')) throw new Error('Scanner preservation cannot perform repair.');
   const session: Session = {
     deploymentId: process.env.DEPLOYMENT_ID || `deploy-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
     leaseToken: crypto.randomBytes(32).toString('hex'),
@@ -98,6 +127,7 @@ const prepare = async () => {
     clamavOperation: clamavOperation as 'repair' | 'incident-recovery',
     ...(clamavOperation === 'incident-recovery' ? { clamavIncidentSnapshotSha256: incidentSha } : {}),
     rollbackPerformanceEnvironment,
+    ...(preservedClamav ? {preservedClamav} : {}),
     rollbackReleaseSet: {
       backend: required('DEPLOYMENT_PREVIOUS_BACKEND_IMAGE'),
       frontend: required('DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE'),
@@ -107,10 +137,21 @@ const prepare = async () => {
       clamav: required('DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE'),
     },
   };
+  if (preservedClamav) {
+    const name = preservationMetadataName(session.deploymentId);
+    for (const directory of [REPORT_DIR, RECOVERY_COORDINATION_DIR]) {
+      await fs.promises.mkdir(directory, {recursive: true});
+      const handle = await fs.promises.open(path.join(directory, name), 'wx', 0o600);
+      try { await handle.writeFile(canonical(preservedClamav)); await handle.sync(); } finally { await handle.close(); }
+      const parent = await fs.promises.open(directory, 'r');
+      try { await parent.sync(); } finally { await parent.close(); }
+    }
+  }
   await writeSession(session, true);
   await fs.promises.rm(JOURNAL_PATH, { force: true });
   await journal(session, 'deployment-prepared', {
     clamavOperation: session.clamavOperation,
+    ...(preservedClamav ? {preservedClamav} : {}),
     ...(session.clamavIncidentSnapshotSha256 ? { clamavIncidentSnapshotSha256: session.clamavIncidentSnapshotSha256 } : {}),
   });
   return session;

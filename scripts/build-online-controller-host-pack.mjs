@@ -13,7 +13,7 @@ import {collectNativeProcessOwnerElfArtifacts} from './lib/native-process-owner-
 
 const repository=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const entry='backend/src/scripts/online-release-host-kernel.ts';
-const hostFiles=['deploy/scripts/online-release-controller.mjs','deploy/scripts/online-release-controller-cli.mjs',
+const hostFiles=['deploy/scripts/preserved-clamav.mjs','backend/scripts/preserved-clamav-policy.mjs','scripts/clamav-release-readiness.mjs','scripts/clamav-source-migration.mjs','backend/scripts/clamav-checkpoint.mjs','backend/scripts/clamav-incident-policy.mjs','deploy/scripts/online-release-controller.mjs','deploy/scripts/online-release-controller-cli.mjs',
  'deploy/scripts/online-release-launcher.py','deploy/scripts/online-owner-service.py','deploy/systemd/sabalan-online-owner.service',
  'deploy/scripts/online-production-gates.mjs','deploy/scripts/online-client-terminal-observation.py','deploy/scripts/online-owner-install-guard.mjs',
  'deploy/scripts/browser-routing-store.mjs','deploy/scripts/browser-release-routing.mjs',

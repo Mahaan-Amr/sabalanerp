@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {validatePrebuiltReleasePlan,prebuiltReleaseExports} from '../../deploy/scripts/prebuilt-release-plan.mjs';
+import {validatePrebuiltReleasePlan,prebuiltReleaseExports,requirePrebuiltScannerSelection} from '../../deploy/scripts/prebuilt-release-plan.mjs';
 
 const hash=character=>character.repeat(64),image=character=>'sha256:'+hash(character);
 function fixture(){
@@ -72,4 +72,8 @@ test('real mutation boundary revalidates before MUTATION_STARTED and protected t
  const selected=['a','b','c'].map(image),env={...process.env,DEPLOYMENT_PREBUILT_BACKEND_EXECUTION_IMAGE:selected[0],DEPLOYMENT_PREBUILT_FRONTEND_EXECUTION_IMAGE:selected[1],DEPLOYMENT_PREBUILT_INQUIRY_EXECUTION_IMAGE:selected[2]};
  const protectedResult=spawnSync(bash,['-c',`set -eu\n${storage.slice(from,to)}\nprintf '%s\\n' "$@"`],{encoding:'utf8',env});assert.equal(protectedResult.status,0,protectedResult.stderr);assert.deepEqual(protectedResult.stdout.trim().split('\n'),selected.flatMap(value=>['--protected-image',value]));
  const invalid=spawnSync(bash,['-c',`set -eu\n${storage.slice(from,to)}\necho READY`],{encoding:'utf8',env:{...env,DEPLOYMENT_PREBUILT_INQUIRY_EXECUTION_IMAGE:'mutable:tag'}});assert.equal(invalid.status,1);assert.doesNotMatch(invalid.stdout,/READY/);
+});
+
+test('production prebuilt entry refuses missing scanner selection instead of applying incidental Compose drift',()=>{
+ const {plan}=fixture();assert.throws(()=>requirePrebuiltScannerSelection(plan),/PREBUILT_SCANNER_PRESERVATION_SELECTION_REQUIRED/);
 });

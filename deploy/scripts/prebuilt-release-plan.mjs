@@ -5,15 +5,18 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {validateSelection,selectionBinding,canonical,preservationSources} from './preserved-clamav.mjs';
 import {productionImageStore} from './production-image-execution-binding.mjs';
 
 const roles=['backend','frontend','inquiry'],digest=/^[a-f0-9]{64}$/,commit=/^[a-f0-9]{40}$/,image=/^sha256:[a-f0-9]{64}$/;
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const keys=(value,expected)=>assert.deepEqual(Object.keys(value).sort(),expected.slice().sort());
 const graphKeys=['index','platform','config','rootfsDiffIds','archiveSha256','archiveBytes'];
+export function requirePrebuiltScannerSelection(plan){assert.ok(plan.preservedClamav,'PREBUILT_SCANNER_PRESERVATION_SELECTION_REQUIRED');return validateSelection(plan.preservedClamav);}
 export function validatePrebuiltReleasePlan(plan,actual){
- keys(plan,['format','applicationCommit','applicationTree','applicationSourceHash','inquirySourceCommit','images','operations',...(Object.hasOwn(plan,'imageStore')?['imageStore']:[])]);
+ keys(plan,['format','applicationCommit','applicationTree','applicationSourceHash','inquirySourceCommit','images','operations',...(Object.hasOwn(plan,'imageStore')?['imageStore']:[]),...(Object.hasOwn(plan,'preservedClamav')?['preservedClamav']:[])]);
  assert.equal(plan.format,'sabalan-prebuilt-protected-release-plan/v1');
+ if(plan.preservedClamav){validateSelection(plan.preservedClamav);for(const name of preservationSources)assert.match(plan.operations.files[name],digest);}
  const store=plan.imageStore??'classic';assert.ok(['classic','containerd'].includes(store));assert.equal(actual.imageStore??'classic',store,'PREBUILT_NATIVE_IMAGE_STORE_CHANGED');
  for(const key of ['applicationCommit','applicationTree','inquirySourceCommit'])assert.match(plan[key],commit);
  assert.match(plan.applicationSourceHash,digest);keys(plan.images,roles);keys(plan.operations,['receiptSha256','files']);assert.match(plan.operations.receiptSha256,digest);
@@ -54,7 +57,7 @@ export function validatePrebuiltReleasePlan(plan,actual){
   }
  }
  assert.equal(new Set(roles.map(role=>plan.images[role].image)).size,3);
- return Object.freeze({applicationCommit:plan.applicationCommit,applicationSourceHash:plan.applicationSourceHash,images:Object.fromEntries(roles.map(role=>[role,plan.images[role].image])),frontendBuildId:plan.images.frontend.browser.id,releaseAdmission:false});
+ return Object.freeze({applicationCommit:plan.applicationCommit,applicationSourceHash:plan.applicationSourceHash,images:Object.fromEntries(roles.map(role=>[role,plan.images[role].image])),frontendBuildId:plan.images.frontend.browser.id,...(plan.preservedClamav?{preservedClamav:plan.preservedClamav}:{}),releaseAdmission:false});
 }
 
 function read(file,expected,{privatePlan=false,maximum=128*1024**2}={}){
@@ -70,6 +73,7 @@ function originalPipes(){
 }
 export function prebuiltReleaseExports(value){
  const entries={DEPLOYMENT_TARGET_COMMIT:value.applicationCommit,DEPLOYMENT_TARGET_BACKEND_IMAGE:value.images.backend,DEPLOYMENT_BACKEND_IMAGE:value.images.backend,DEPLOYMENT_FRONTEND_IMAGE:value.images.frontend,DEPLOYMENT_INQUIRY_IMAGE:value.images.inquiry,DEPLOYMENT_PREBUILT_BACKEND_EXECUTION_IMAGE:value.images.backend,DEPLOYMENT_PREBUILT_FRONTEND_EXECUTION_IMAGE:value.images.frontend,DEPLOYMENT_PREBUILT_INQUIRY_EXECUTION_IMAGE:value.images.inquiry,DEPLOYMENT_BROWSER_BUILD_ID:value.frontendBuildId,PERFORMANCE_RELEASE_COMMIT:value.applicationCommit,PERFORMANCE_RELEASE_SOURCE_HASH:value.applicationSourceHash,PERFORMANCE_RELEASE_BACKEND_IMAGE:value.images.backend,PERFORMANCE_RELEASE_FRONTEND_IMAGE:value.images.frontend,PERFORMANCE_RELEASE_INQUIRY_IMAGE:value.images.inquiry};
+ if(value.preservedClamav)entries.DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX=Buffer.from(canonical(selectionBinding(value.preservedClamav,value.planSha256))).toString('hex');
  for(const value of Object.values(entries))assert.match(value,/^[a-zA-Z0-9_:-]+$/);
  return Object.entries(entries).map(([key,value])=>`export ${key}='${value}'`).join('\n')+'\n';
 }
@@ -77,7 +81,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);assert.equal(process.argv.length,6);originalPipes();
  const [planFile,expected,repository,operationsRoot]=process.argv.slice(2);assert.equal(fs.realpathSync(repository),repository);assert.equal(fs.realpathSync(operationsRoot),operationsRoot);
  const plan=JSON.parse(read(planFile,expected,{privatePlan:true,maximum:8*1024**2})),actual={};
- assert.equal(plan.format,'sabalan-prebuilt-protected-release-plan/v1');keys(plan.images,roles);assert.ok(plan.operations?.files);
+ assert.equal(plan.format,'sabalan-prebuilt-protected-release-plan/v1');requirePrebuiltScannerSelection(plan);keys(plan.images,roles);assert.ok(plan.operations?.files);
  for(const role of roles){assert.match(plan.images[role].image,image);assert.equal(plan.images[role].image,(plan.imageStore==='containerd'?plan.images[role].archiveGraph.index:plan.images[role].archiveGraph.config));}
  const git=(...args)=>command('git',args,repository).trim();actual.head=git('rev-parse','HEAD');actual.tree=git('rev-parse','HEAD^{tree}');actual.status=git('status','--porcelain','--untracked-files=all');actual.inquiryGitlink=git('rev-parse','HEAD:apps/sabalan-inquiry');actual.inquiryHead=git('-C','apps/sabalan-inquiry','rev-parse','HEAD');actual.inquiryStatus=git('-C','apps/sabalan-inquiry','status','--porcelain','--untracked-files=all');
  // Git tree identity and build-input byte identity are separate namespaces:
@@ -90,5 +94,5 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   command('docker',['compose','--env-file',process.env.DEPLOYMENT_PREBUILT_ENV_FILE,'-f',path.join(repository,'docker-compose.prod.yml'),'-p','sabalanerp','ps','--format','json'],repository);
   const rows=JSON.parse(command('docker',['image','inspect',selected.image],repository));assert.equal(rows.length,1);actual.images[role]=rows[0];
  }
- process.stdout.write(prebuiltReleaseExports(validatePrebuiltReleasePlan(plan,actual)));
+ process.stdout.write(prebuiltReleaseExports({...validatePrebuiltReleasePlan(plan,actual),planSha256:expected}));
 }

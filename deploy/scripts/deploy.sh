@@ -7,6 +7,7 @@ OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
 CAPTURE_ONLY=0
 unset DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS
 PREBUILT_RELEASE=0
+unset DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX
 PREBUILT_RELEASE_PLAN=""
 PREBUILT_RELEASE_SHA256=""
 if [ "${1:-}" = "--prebuilt-release" ]; then
@@ -99,6 +100,8 @@ if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
 fi
 
 cd "${REPO_ROOT}"
+DEPLOYMENT_PRESERVED_CLAMAV_EVIDENCE_DIR="${REPO_ROOT}/.deploy-state"
+export DEPLOYMENT_PRESERVED_CLAMAV_EVIDENCE_DIR
 
 env_value() {
   key="$1"
@@ -109,7 +112,22 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || { echo "Required command is missing: $1" >&2; exit 1; }
 }
 
+preserved_clamav_guard() {
+  [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ] || return 0
+  [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] || { echo 'Scanner preservation cannot repair or replace the scanner.' >&2; return 1; }
+  if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then
+    # Keep the original child owned and renew the existing lease even if its
+    # inspector deadline has refused qualification but descendants remain open.
+    run_original_owned_with_heartbeat node "${OPERATIONS_ROOT}/deploy/scripts/preserved-clamav.mjs" "$@"
+  else
+    node "${OPERATIONS_ROOT}/deploy/scripts/preserved-clamav.mjs" "$@"
+  fi
+}
+
 compose() {
+  if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
+    preserved_clamav_guard compose "$@" || return 1
+  fi
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} "$@"
 }
 
@@ -162,7 +180,10 @@ start_release_services() {
     echo 'Original incident state was restored; its known-unhealthy scanner cannot authorize reopening. Maintenance is retained.' >&2
     return 1
   fi
-  if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] && [ "${MUTATION_STARTED}" -eq 0 ]; then
+  if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
+    preserved_clamav_guard health || return 1
+    compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx
+  elif [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] && [ "${MUTATION_STARTED}" -eq 0 ]; then
     # A failed preflight/checkpoint must restart the exact old container, never apply target config.
     compose start clamav
     compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx
@@ -180,6 +201,7 @@ run_backend() {
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
+      -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
       -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
       -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
@@ -223,6 +245,7 @@ run_backend_timed() {
     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
+      -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
       -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
       -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
       -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
@@ -289,7 +312,7 @@ run_original_owned_with_heartbeat() {
     sleep 5
     owned_heartbeat_elapsed=$((owned_heartbeat_elapsed + 5))
     if [ "${owned_heartbeat_elapsed}" -ge 60 ] && kill -0 "${owned_pid}" 2>/dev/null; then
-      if ! control heartbeat; then
+      if ! control heartbeat >&2; then
         owned_heartbeat_failed=1
         echo "Protected original child remains owned; lease renewal failed." >&2
       fi
@@ -325,6 +348,7 @@ wait_for_cutover_approval() {
 }
 
 control() {
+  case "${1:-}" in prepare|maintenance-on) preserved_clamav_guard identity || return 1;; maintenance-off) preserved_clamav_guard health || return 1;; esac
   run_backend node dist/scripts/deployment-control.js "$@"
 }
 
@@ -578,6 +602,9 @@ refresh_performance_database_identity() {
   PERFORMANCE_RELEASE_POLICY_HASH="$(node -e 'const v=require("fs").readFileSync(process.argv[1],"utf8");const h=JSON.parse(v).policyHash;if(!/^[a-f0-9]{64}$/.test(h))process.exit(1);process.stdout.write(h)' "${identity_path}")"
   export PERFORMANCE_RELEASE_SCHEMA_HASH PERFORMANCE_RELEASE_POLICY_HASH
   PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH="$(compose config | grep -v -e 'PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH:' -e 'PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH:' | node -e "const c=require('node:crypto');let b='';process.stdin.on('data',d=>b+=d);process.stdin.on('end',()=>process.stdout.write(c.createHash('sha256').update(b).digest('hex')))")"
+  if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
+    PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH="$(preserved_clamav_guard infrastructure "${PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH}")" || return 1
+  fi
   PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH="${PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH}"
   export PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH
 }
@@ -855,6 +882,7 @@ if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   # A plan selects content; it never grants original qualification authority.
   prebuilt_exports="$(verify_prebuilt_release)" || exit 1
   eval "${prebuilt_exports}"
+  preserved_clamav_guard health || exit 1
 fi
 
 DEPLOYMENT_SECRET_DIR="$(env_value DEPLOYMENT_SECRET_DIR)"
@@ -899,6 +927,9 @@ case "${DEPLOYMENT_REPORT_DIR_HOST}" in
 esac
 
 if [ -f "${SESSION_HOST_PATH}" ]; then
+  preservation_resume="$(node "${OPERATIONS_ROOT}/deploy/scripts/preserved-clamav.mjs" resume "${SESSION_HOST_PATH}")" || exit 1
+  eval "${preservation_resume}"
+  preserved_clamav_guard identity || exit 1
   echo "An interrupted deployment journal was found; automatic recovery runs before any new deployment." >&2
   DEPLOYMENT_ID="$(session_value deploymentId)"
   DEPLOYMENT_RELEASE_ID="$(session_value releaseId)"
@@ -950,7 +981,7 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
     esac
   fi
   switch_to_previous_images
-  compose up -d postgres
+  compose up -d --no-deps postgres
   try_acquire_advisory || { echo "Interrupted deployment recovery cannot acquire its PostgreSQL advisory lease." >&2; exit 1; }
   control maintenance-on
   MAINTENANCE_ACTIVE=1
@@ -1203,7 +1234,7 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   # up could apply this operation's environment and replace its configuration.
   verify_capture_only_configuration
 else
-  compose up -d postgres
+  compose up -d --no-deps postgres
 fi
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   prebuilt_exports="$(verify_prebuilt_release)" || exit 1
@@ -1250,6 +1281,7 @@ fi
 phase TRAFFIC_BLOCKED
 if [ "${DRAINED_EARLY}" -eq 0 ]; then drain_current_services; fi
 phase SERVICES_DRAINED
+preserved_clamav_guard identity || exit 1
 capture_clamav_checkpoint
 if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
   # The stopped legacy overlay is inspected/copied under the actual original
@@ -1306,6 +1338,7 @@ if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   prebuilt_exports="$(verify_prebuilt_release)" || exit 1
   eval "${prebuilt_exports}"
 fi
+preserved_clamav_guard identity || exit 1
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"
@@ -1462,13 +1495,18 @@ if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
   # The fixed online overlay creates the NEW immutable backend in control-only
   # mode; the original host owns its real native HTTP actor. Never also start
   # the ordinary standalone backend entry or adopt the old image as accepted.
-  compose up -d --no-build --wait --wait-timeout "${remaining}" postgres clamav
+  if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
+    preserved_clamav_guard health || exit 1
+    compose up -d --no-deps --no-build --wait --wait-timeout "${remaining}" postgres
+  else
+    compose up -d --no-build --wait --wait-timeout "${remaining}" postgres clamav
+  fi
   run_original_owned_with_heartbeat run_backend sh scripts/with-backend-control-ownership.sh \
     python3 scripts/retire-protected-online-legacy-records.py
   compose up -d --no-deps --no-build backend release-edge
   online_bootstrap_boundary BOOTSTRAP_PREPARE
   remaining="$(remaining_mutation_seconds)" || exit 1
-  compose up -d --no-build --wait --wait-timeout "${remaining}" frontend inquiry
+  compose up -d --no-deps --no-build --wait --wait-timeout "${remaining}" frontend inquiry
   compose up -d --no-deps --force-recreate --wait --wait-timeout "${remaining}" nginx
 else
   start_release_services "${remaining}"

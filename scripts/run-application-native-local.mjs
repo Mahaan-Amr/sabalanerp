@@ -73,7 +73,7 @@ const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'u
 const candidateArtifacts=collectNativeCandidateArtifacts({root,capture,containers:initial,sourceCommit,
  receiptArgument:candidateReplacementReceiptArgument(['--candidate-replacement-receipt',candidateReplacementReceipt])});
 const {roleQualificationFile,roleQualificationBytes,roleQualification,privateQualificationRuntime}=candidateArtifacts;
-const qaMemoryProfile=(roleQualification.candidateQaMemoryTransition?.format==='sabalan-explicit-local-qa-candidate-memory-transition/v3'||roleQualification.candidateQaMemoryProfile)?readExplicitQaMemoryProfile({file:candidateReplacementReceipt,sha256:sha(roleQualificationBytes)}):null;assert.deepEqual(retainedBrowserFacts.report.qaMemoryProfile??null,readQaMemoryProfile(qaMemoryProfile));
+const qaMemoryProfile=(roleQualification.candidateQaMemoryTransition?.format==='sabalan-explicit-local-qa-candidate-memory-transition/v3'||roleQualification.candidateQaMemoryProfile||roleQualification.candidateQaMemoryRecovery)?readExplicitQaMemoryProfile({file:candidateReplacementReceipt,sha256:sha(roleQualificationBytes)}):null;assert.deepEqual(retainedBrowserFacts.report.qaMemoryProfile??null,readQaMemoryProfile(qaMemoryProfile));
 const built=await esbuild.build({absWorkingDir:root,entryPoints:['tests/online-deployment/application-native.worker.ts'],
   bundle:true,platform:'node',packages:'external',format:'cjs',target:'node22',write:false,logLevel:'silent',
   plugins:[{name:'capture-application-native-sources',setup(build){build.onLoad({filter:/.*/,namespace:'file'},args=>{

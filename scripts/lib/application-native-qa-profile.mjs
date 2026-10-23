@@ -1,5 +1,6 @@
 /** Optional local resource evidence; never release/native admission. */
 import assert from 'node:assert/strict';
+import {hostMemoryFailedAuthorityCohortSha256,hostMemoryFailedAncestorSha256,hostMemoryFailedSnapshot,hostMemoryFailedOwnerObservation,validateHostMemoryFailedObservation,hostMemoryFailedAuthorityNamespaces,validateReconciledPrecisionFailedBaseline} from './application-native-authority-cohort.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -15,15 +16,20 @@ export function validateExpandedQaMemoryEvidence(receipt,predecessor){validateQa
 const sameRef=(a,b)=>{assert.equal(path.resolve(a.file),path.resolve(b.file));assert.equal(a.sha256,b.sha256);};
 export function validatePreservedQaMemoryEvidence(receipt,predecessor,transition){
  validateQaMemoryTransitionReceipt(receipt);completed(receipt);completed(predecessor);const p=receipt.candidateQaMemoryProfile;assert.equal(p.format,'sabalan-preserved-local-qa-candidate-memory-profile/v1');sameRef(p.transition,transition);predecessorIdentity(receipt,predecessor,true);
- if(predecessor.candidateQaMemoryTransition?.format==='sabalan-explicit-local-qa-candidate-memory-transition/v3')sameRef(p.predecessor,transition);
+ if(predecessor.candidateQaMemoryTransition?.format==='sabalan-explicit-local-qa-candidate-memory-transition/v3'||predecessor.candidateQaMemoryRecovery?.format==='sabalan-recovered-local-qa-candidate-memory-profile/v1')sameRef(p.predecessor,transition);
  else{validateQaMemoryTransitionReceipt(predecessor);assert.equal(predecessor.candidateQaMemoryProfile.format,p.format);sameRef(predecessor.candidateQaMemoryProfile.transition,transition);}
+ return receipt;
+}
+export function validateRecoveredQaMemoryEvidence(receipt,negative,ancestor){
+ validateQaMemoryTransitionReceipt(receipt);completed(receipt);completed(ancestor);hostMemoryFailedAuthorityNamespaces(negative);const p=receipt.candidateQaMemoryRecovery;assert.equal(p.format,'sabalan-recovered-local-qa-candidate-memory-profile/v1');assert.equal(p.failed.sha256,hostMemoryFailedAuthorityCohortSha256);assert.equal(p.predecessor.sha256,hostMemoryFailedAncestorSha256);sameRef(p.failed,receipt.failedAuthorityCohort);sameRef(p.predecessor,negative.candidateQaMemoryTransition.predecessor);validateReconciledPrecisionFailedBaseline(receipt,negative);
+ for(const service of ['backend-candidate','backend-retained']){assert.deepEqual(negative.previous[service],Object.fromEntries(['id','image','startedAt'].map(k=>[k,ancestor.actual[service][k]])));assert.equal(ancestor.actual[service].memoryBytes,service==='backend-candidate'?candidateQaMemoryBytes:retainedQaMemoryBytes);assert.deepEqual(receipt.reobservedBaseline.identities[service],receipt.previous[service]);assert.deepEqual(receipt.reobservedBaseline.previousIdentities[service],receipt.previous[service]);}
  return receipt;
 }
 export function readExplicitQaMemoryProfile(selection){
  if(selection===undefined||selection===null)return null;
  const inputs=new Map();const read=ref=>{assert.deepEqual(Object.keys(ref).sort(),['file','sha256']);assert.match(ref.sha256,/^[a-f0-9]{64}$/);const raw=stable(ref.file);assert.equal(sha(raw),ref.sha256);const file=path.resolve(ref.file);if(inputs.has(file))assert.deepEqual(inputs.get(file).raw,raw);inputs.set(file,{raw,sha256:ref.sha256});return JSON.parse(raw);};
  const receipt=read(selection),preserved=receipt.candidateQaMemoryProfile,transition=preserved?.transition??selection;
- const anchor=read(transition),anchorPrior=anchor.candidateQaMemoryTransition?.predecessor;assert.ok(anchorPrior);assert.equal(anchor.inputs[anchorPrior.file],anchorPrior.sha256);validateExpandedQaMemoryEvidence(anchor,read(anchorPrior));
+ const anchor=read(transition),anchorPrior=anchor.candidateQaMemoryTransition?.predecessor??anchor.candidateQaMemoryRecovery?.predecessor;assert.ok(anchorPrior);assert.equal(anchor.inputs[anchorPrior.file],anchorPrior.sha256);if(anchor.candidateQaMemoryRecovery){const failed=anchor.candidateQaMemoryRecovery.failed;assert.equal(anchor.inputs[failed.file],failed.sha256);sameRef(anchor.candidateQaMemoryRecovery.currentInspection,hostMemoryFailedSnapshot);sameRef(anchor.candidateQaMemoryRecovery.negativeOwnerObservation,hostMemoryFailedOwnerObservation);for(const ref of [hostMemoryFailedSnapshot,hostMemoryFailedOwnerObservation])assert.equal(anchor.inputs[ref.file],ref.sha256);const snapshot=read(hostMemoryFailedSnapshot);validateHostMemoryFailedObservation(snapshot,read(hostMemoryFailedOwnerObservation));for(const service of ['backend-candidate','backend-retained']){const row=snapshot.containers.find(row=>row.Labels['com.docker.compose.service']===service);assert.deepEqual(anchor.previous[service],{id:row.Id,image:row.Image,startedAt:row.StartedAt});}validateRecoveredQaMemoryEvidence(anchor,read(failed),read(anchorPrior));}else validateExpandedQaMemoryEvidence(anchor,read(anchorPrior));
  if(preserved){assert.equal(receipt.inputs[preserved.predecessor.file],preserved.predecessor.sha256);assert.equal(receipt.inputs[transition.file],transition.sha256);validatePreservedQaMemoryEvidence(receipt,read(preserved.predecessor),transition);}
  else sameRef(selection,transition);
  const descriptor=Object.freeze({format:'sabalan-explicit-local-qa-memory-profile/v1',candidateBytes:expandedCandidateQaMemoryBytes,candidateSwapBytes:expandedCandidateQaMemoryBytes,replacementReceiptSha256:selection.sha256});const token=Object.freeze({});profiles.set(token,{inputs,transition:structuredClone(transition),descriptor});return token;

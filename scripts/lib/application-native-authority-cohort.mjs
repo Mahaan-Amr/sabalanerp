@@ -25,7 +25,20 @@ export function validateAuthorityNamespaceIdentity(value){
   assert.equal(value.st_uid,'0');assert.equal(value.st_mode,String(0o40700));return value;
 }
 export const precisionFailedAuthorityCohortSha256='f071286164f1758088cb8cc1ed055dad7e039864e192171233726b28ddc17a92';
+export const hostMemoryFailedAuthorityCohortSha256='1cccc94373dd98846b5aa8082fa9d76d3edc7a2a3e14e467e8e3e57677dc568d';
+export const hostMemoryFailedAncestorSha256='5c6ffedf131d47d280651f55130ffa25f5798cbbe462ae185f66c577b56229fd';
+export function hostMemoryFailedAuthorityNamespaces(value){
+ assert.equal(value.operation,'0d4865c14f99d0bcf9e807db5b895dc8');assert.equal(value.pass,false);assert.equal(value.phase,'FAILED_CLOSED');assert.equal(value.productionAdmission,false);assert.deepEqual(value.failure,{name:'AssertionError',message:'LOCAL_QA_HOST_MEMORY_FLOOR_REFUSED'});
+ assert.equal(value.actual,undefined);assert.equal(value.originalChildren,undefined);assert.equal(value.authorityCohort.nonce,'cec7a68d24be238f0a8834a5c44bdf44');assert.deepEqual(value.protectedAfter,value.protectedBefore);assert.equal(Object.keys(value.protectedBefore).length,8);assert.equal(value.up.code,0);assert.equal(value.up.signal,null);assert.equal(value.up.failure,undefined);assert.ok(value.up.originalPid>0);
+ const t=value.candidateQaMemoryTransition;assert.equal(t.format,'sabalan-explicit-local-qa-candidate-memory-transition/v3');assert.equal(t.predecessor.sha256,hostMemoryFailedAncestorSha256);assert.equal(value.inputs[t.predecessor.file],hostMemoryFailedAncestorSha256);assert.equal(t.afterUp,undefined);assert.equal(t.runtimeLimitsAfter,undefined);assert.equal(t.before['backend-candidate'],1536*1024**2);assert.equal(t.after['backend-candidate'],2048*1024**2);
+ const result={};for(const service of Object.keys(authorityMounts)){
+  const prepared=value.authorityCohort.prepared[service],verified=value.authorityCohort.verified[service];
+  for(const [row,mode]of [[prepared,'create'],[verified,'verify']]){assert.ok(Number.isSafeInteger(row.originalPid)&&row.originalPid>0);assert.equal(row.code,0);assert.equal(row.signal,null);assert.equal(row.failure,undefined);assert.ok(Buffer.byteLength(row.stdout)<65536);assert.deepEqual(JSON.parse(row.stdout),row.result);assert.equal(row.result.mode,mode);assert.equal(row.result.nonce,value.authorityCohort.nonce);assert.equal(row.result.empty,true);assert.equal(row.result.productionAdmission,false);validateAuthorityNamespaceIdentity(row.result.namespace);}
+  assert.equal(prepared.result.exclusivelyCreated,true);assert.deepEqual(prepared.result.namespace,verified.result.namespace);const peer=service==='backend-candidate'?'backend-retained':'backend-candidate';assert.deepEqual(verified.result.consumerNamespace,value.authorityCohort.prepared[peer].result.namespace);result[service]=verified.result.namespace;
+ }return result;
+}
 export function precisionFailedAuthorityNamespaces(value){
+  if(value.operation==='0d4865c14f99d0bcf9e807db5b895dc8')return hostMemoryFailedAuthorityNamespaces(value);
   // This is the one preserved, independently reproduced precision failure.
   // It is never upgraded to a successful replacement receipt.
   assert.equal(value.operation,'70ef926d515138b606e47ce11e32d011');assert.equal(value.pass,false);assert.equal(value.phase,'FAILED_CLOSED');assert.equal(value.productionAdmission,false);
@@ -55,7 +68,7 @@ export function validatePrecisionFailedAuthoritySlots(failed,containers,protecte
   return {format:'sabalan-reobserved-precision-failed-authority-cohort/v1',failedOperation:failed.operation,failedReportRemainsFailed:true,adoptsOriginalPopen:false,originalNativeClosureInferred:false,identities,installedBytesVerified:false,nativeAndSqlQuietVerified:false,currentEmptyNamespacesVerified:false};
 }
 export function validateReconciledPrecisionFailedBaseline(value,failed){
-  assert.equal(value.failedAuthorityCohort.sha256,precisionFailedAuthorityCohortSha256);assert.ok(value.authorityCohort,'FAILED_BASELINE_ONLY_PERMITS_NEW_COHORT_ROTATION');
+  assert.equal(value.failedAuthorityCohort.sha256,failed.operation==='0d4865c14f99d0bcf9e807db5b895dc8'?hostMemoryFailedAuthorityCohortSha256:precisionFailedAuthorityCohortSha256);assert.ok(value.authorityCohort,'FAILED_BASELINE_ONLY_PERMITS_NEW_COHORT_ROTATION');
   const expected=precisionFailedAuthorityNamespaces(failed),baseline=value.reconciledFailedAuthorityBaseline;
   assert.equal(baseline.format,'sabalan-reobserved-precision-failed-authority-cohort/v1');assert.equal(baseline.failedOperation,failed.operation);assert.equal(baseline.failedReportRemainsFailed,true);
   for(const key of ['adoptsOriginalPopen','originalNativeClosureInferred'])assert.equal(baseline[key],false);
@@ -137,4 +150,14 @@ export function validateAuthorityCohortReceipt(value){
   }
   assert.equal(value.actual['backend-retained'].image,value.previous['backend-retained'].image);
   return true;
+}
+
+export const hostMemoryFailedSnapshot={file:'D:/sabalanerp-online-qa/C13-failed-transition-actual-current-slots-20261023.json',sha256:'8fafb7b06c860936e8b36b0179cd5bcd3d48422a91df7e5dc5a857b80b1896dd'};
+export const hostMemoryFailedOwnerObservation={file:'D:/sabalanerp-online-qa/C13-negative-preparation-tool-owner-observation-20261023.json',sha256:'c5984447fb9598ea280de909879f655175cc3fe1f7ae4b104d41e88694a2f241'};
+export function validateHostMemoryFailedObservation(snapshot,owner){
+ assert.equal(snapshot.format,'sabalan-failed-local-transition-readonly-current-inspection/v1');assert.equal(snapshot.negativeReportSha256,hostMemoryFailedAuthorityCohortSha256);assert.equal(snapshot.canonicalProject,'sabalanerp-local');assert.equal(snapshot.readOnly,true);assert.equal(snapshot.qualified,false);assert.equal(snapshot.containers.length,10);
+ assert.equal(owner.format,'sabalan-negative-preparation-tool-owner-observation/v1');assert.equal(owner.toolSessionId,57622);assert.equal(owner.actualFinalToolChunkId,'6313ec');assert.equal(owner.toolReturnedExitCode,1);assert.equal(owner.toolReturnedFinalOutput,true);assert.equal(owner.negativeReport.sha256,hostMemoryFailedAuthorityCohortSha256);assert.equal(owner.observedError.message,'LOCAL_QA_HOST_MEMORY_FLOOR_REFUSED');for(const key of ['qualificationSucceeded','productionAdmission','originalNativeClosureClaimed','missingHistoricalFieldsReconstructed','originalPopenAdopted'])assert.equal(owner[key],false);
+}
+export function validateHostMemoryFailedCurrentSlots(snapshot,current){
+ for(const service of Object.keys(authorityMounts)){const rows=snapshot.containers.filter(row=>row.Labels['com.docker.compose.service']===service);assert.equal(rows.length,1);const old=rows[0],actual=current[service];assert.equal(actual.Id,old.Id);assert.equal(actual.Image,old.Image);assert.equal(actual.State.StartedAt,old.StartedAt);assert.equal(actual.State.Running,true);assert.equal(actual.State.Health.Status,'healthy');assert.deepEqual(actual.Config.Labels,old.Labels);assert.deepEqual(actual.Mounts,old.Mounts);assert.deepEqual(Object.fromEntries(Object.keys(old.HostConfig).map(key=>[key,actual.HostConfig[key]])),old.HostConfig);}
 }

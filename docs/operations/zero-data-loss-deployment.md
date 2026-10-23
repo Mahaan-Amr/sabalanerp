@@ -303,3 +303,6 @@ observations still require 2048 MiB. Current container IDs, images and births mu
 match their authenticated predecessor; missing or changed ancestors refuse the
 update. The transition flag itself remains an exact 1536-to-2048 operation and
 refuses an already-2048 predecessor. Unselected/default installations remain1536.
+
+
+A pinned failed local 2048 MiB transition remains FAILED_CLOSED. Its literal negative report, original tool-owner observation (not native completion), completed 1536 MiB ancestor, and independent current-slot inspection may select only a full fresh 2048-to-2048 authority-cohort replacement. Fresh installed-byte, namespace, native/SQL quietness, exact identity/resource and protected-service checks remain mandatory. The resulting recovery profile explicitly records `originalTransitionQualified: false`; later ordinary replacements retain this authenticated recovery anchor. After UP, host memory may be observed passively for at most 60 seconds, with every actual sample persisted before validation and two consecutive fresh samples at the unchanged 2048 MiB floor required. A deadline or interruption remains fail-closed; no cache credit or production limit changes apply.

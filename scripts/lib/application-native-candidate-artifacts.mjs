@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
+import {readExplicitQaMemoryProfile,readQaMemoryProfile,qaMemoryProfileInputs} from './application-native-qa-profile.mjs';
 import {validateQaMemoryTransitionReceipt,candidateQaBudget,retainedQaMemoryBytes,qaSwapBytes} from './application-native-qa-memory.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {nativeMaterialIdentity,validateInstalledNativeRole} from '../replace-application-native-candidate-local.mjs';
 import {stableFrontendBaseFile} from './production-frontend-base-artifacts.mjs';
-import {authorityCohortSources,validateAuthorityCohortReceipt,validateAuthorityCohortSlots,precisionFailedAuthorityCohortSha256,validateReconciledPrecisionFailedBaseline} from './application-native-authority-cohort.mjs';
+import {authorityCohortSources,validateAuthorityCohortReceipt,validateAuthorityCohortSlots,precisionFailedAuthorityCohortSha256,hostMemoryFailedAuthorityCohortSha256,validateReconciledPrecisionFailedBaseline} from './application-native-authority-cohort.mjs';
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 export function candidateReplacementReceiptArgument(argv){
  assert.equal(argv.length,2,'EXPLICIT_ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED');assert.equal(argv[0],'--candidate-replacement-receipt');
@@ -46,7 +47,9 @@ export function collectNativeCandidateArtifacts({root,capture,containers,sourceC
   for(const[role,service]of [['main','backend-retained'],['candidate','backend-candidate']]){const point=prior.roleEvidence[role],imageRaw=readExternal(point.imageReceiptFile),materialRaw=readExternal(point.materialReceiptFile);assert.equal(sha(imageRaw),point.imageReceiptSha256);assert.equal(sha(materialRaw),point.materialReceiptSha256);const image=JSON.parse(imageRaw),material=JSON.parse(materialRaw);assert.equal(image.pass,true);assert.equal(image.image.id,prior.actual[service].image);assert.equal(image.materialReceiptSha256,sha(materialRaw));validateInstalledNativeRole(value.reobservedInstalled[service].result,nativeMaterialIdentity(material));}
  }
  if(value.failedAuthorityCohort){
-  assert.equal(value.failedAuthorityCohort.sha256,precisionFailedAuthorityCohortSha256);const failedRaw=readExternal(value.failedAuthorityCohort.file);assert.equal(sha(failedRaw),precisionFailedAuthorityCohortSha256);assert.equal(value.inputs[path.resolve(value.failedAuthorityCohort.file)],precisionFailedAuthorityCohortSha256);
+  const failedSha=value.failedAuthorityCohort.sha256;assert.ok([precisionFailedAuthorityCohortSha256,hostMemoryFailedAuthorityCohortSha256].includes(failedSha),'UNKNOWN_FAILED_AUTHORITY_COHORT');
+  if(failedSha===hostMemoryFailedAuthorityCohortSha256){assert.equal(value.candidateQaMemoryRecovery?.format,'sabalan-recovered-local-qa-candidate-memory-profile/v1','EXACT_RECOVERY_PROFILE_REQUIRED');captureFile('scripts/lib/application-native-qa-profile.mjs');assert.equal(value.inputs[path.join(root,'scripts/lib/application-native-qa-profile.mjs')],sha(fs.readFileSync(path.join(root,'scripts/lib/application-native-qa-profile.mjs'))));const profile=readExplicitQaMemoryProfile({file:requested,sha256:sha(bytes)});readQaMemoryProfile(profile);for(const[file,digest]of Object.entries(qaMemoryProfileInputs(profile)))assert.equal(sha(readExternal(file)),digest);}
+  const failedRaw=readExternal(value.failedAuthorityCohort.file);assert.equal(sha(failedRaw),failedSha);assert.equal(value.inputs[path.resolve(value.failedAuthorityCohort.file)],failedSha);
   validateReconciledPrecisionFailedBaseline(value,JSON.parse(failedRaw));
   for(const[role,service]of [['main','backend-retained'],['candidate','backend-candidate']]){
    const point=role==='candidate'?value.reconciledFailedAuthorityBaseline.candidateEvidence:value.roleEvidence.main;

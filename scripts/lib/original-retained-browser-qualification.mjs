@@ -1,6 +1,7 @@
 import {readProductionInquirySnapshot,assertSnapshotInquiryJoin} from './production-inquiry-snapshot.mjs';
 /** Original local Inquiry pair creator. No saved report can recreate completion. */
 import assert from 'node:assert/strict';
+import {candidateQaMemoryBytes} from './application-native-qa-memory.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -62,7 +63,7 @@ export function buildRetainedInquiryRotation(images,acceptanceVolume,authority,p
  return rotation;
 }
 export function assertRetainedControllerEof(value){assert.equal(value.stdoutEof,true,'ORIGINAL_STDOUT_EOF_REQUIRED');assert.equal(value.stderrEof,true,'ORIGINAL_STDERR_EOF_REQUIRED');assert.equal(value.trailingBytes,0,'ORIGINAL_TRAILING_FRAME_BYTES');}
-export function validateRetainedBrowserCapacity(value){const MiB=1024*1024;const inquiryCaps={BEFORE_SLOT_MUTATION:512,OWNED_KEEPERS_CREATED:768,BOTH_NATIVE_READY_BEFORE_CHROME:768,ORIGINALS_CLOSED_AND_ERP_SLOTS_RESTORED:512};assert.ok(Object.hasOwn(inquiryCaps,value.stage),'INQUIRY_CAPACITY_STAGE_UNPROVEN');assert.deepEqual(Object.keys(value.cgroups).sort(),['backend-candidate','frontend-candidate','frontend-retained']);assert.ok(value.hostFree>=1536*MiB,'INQUIRY_HOST_MEMORY_REFUSED');assert.ok(value.linuxMemAvailable>=1536*MiB,'INQUIRY_LINUX_MEMORY_REFUSED');for(const[name,row]of Object.entries(value.cgroups)){assert.equal(row.maximum,(name==='backend-candidate'?768:inquiryCaps[value.stage])*MiB,'INQUIRY_CGROUP_CAP_DRIFT');assert.ok(row.maximum-row.current>=(name==='backend-candidate'?384:256)*MiB,'INQUIRY_CGROUP_HEADROOM_REFUSED');for(const key of ['oom','oom_kill','oom_group_kill'])assert.equal(row.events[key]??0,0,'INQUIRY_OOM_HISTORY_PRESENT');}}
+export function validateRetainedBrowserCapacity(value){const MiB=1024*1024;const inquiryCaps={BEFORE_SLOT_MUTATION:512,OWNED_KEEPERS_CREATED:768,BOTH_NATIVE_READY_BEFORE_CHROME:768,ORIGINALS_CLOSED_AND_ERP_SLOTS_RESTORED:512};assert.ok(Object.hasOwn(inquiryCaps,value.stage),'INQUIRY_CAPACITY_STAGE_UNPROVEN');assert.deepEqual(Object.keys(value.cgroups).sort(),['backend-candidate','frontend-candidate','frontend-retained']);assert.ok(value.hostFree>=1536*MiB,'INQUIRY_HOST_MEMORY_REFUSED');assert.ok(value.linuxMemAvailable>=1536*MiB,'INQUIRY_LINUX_MEMORY_REFUSED');for(const[name,row]of Object.entries(value.cgroups)){assert.equal(row.maximum,name==='backend-candidate'?candidateQaMemoryBytes:inquiryCaps[value.stage]*MiB,'INQUIRY_CGROUP_CAP_DRIFT');assert.ok(row.maximum-row.current>=(name==='backend-candidate'?384:256)*MiB,'INQUIRY_CGROUP_HEADROOM_REFUSED');for(const key of ['oom','oom_kill','oom_group_kill'])assert.equal(row.events[key]??0,0,'INQUIRY_OOM_HISTORY_PRESENT');}}
 function rows(raw){try{const value=JSON.parse(raw);return Array.isArray(value)?value:[value];}catch{return raw.trim().split(/\r?\n/).map(JSON.parse);}}
 function summary(value){return{id:value.Id,image:value.Image,startedAt:value.State.StartedAt,service:value.Config.Labels['com.docker.compose.service'],running:value.State.Running,health:value.State.Health?.Status??null};}
 

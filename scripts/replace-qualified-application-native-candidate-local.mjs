@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import {validateQaMemoryConfiguration,validateQaSwapConfiguration,qaUnchangedResourceLimits,validateQaHostMemoryObservation,validateQaMemoryTransitionReceipt,nativeActorFloorBytes} from './lib/application-native-qa-memory.mjs';
 import {randomBytes,createHash} from 'node:crypto';
 import {execFileSync,spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
@@ -38,18 +40,20 @@ export function validateInstalledNativeRole(result,expected){
  assert.equal(result.entryExportPresent,true);assert.equal(result.applicationStarted,false);assert.equal(result.databaseConnected,false);assert.equal(result.productionAdmission,false);
 }
 export function parseCandidateReplacementArguments(argv){
+ const candidateQaMemoryTransition=argv.at(-1)==='--candidate-qa-memory-1280';if(candidateQaMemoryTransition)argv=argv.slice(0,-1);
  let negativeRetirement=null;if(argv.at(-4)==='--a29-negative-retirement-file'){assert.equal(argv.at(-2),'--a29-negative-retirement-sha256');assert.ok(path.isAbsolute(argv.at(-3)));assert.match(argv.at(-1),/^[a-f0-9]{64}$/);negativeRetirement={file:path.resolve(argv.at(-3)),sha256:argv.at(-1)};argv=argv.slice(0,-4);}
  const isolateAuthorityCohort=argv.at(-1)==='--isolate-authority-cohort';if(isolateAuthorityCohort)argv=argv.slice(0,-1);
  assert.ok(argv.length===7||argv.length===11,'EXACT_REPLACEMENT_ARGUMENTS_REQUIRED');assert.ok(['--inspect','--replace'].includes(argv[0]));
  for(const[i,key]of ['--image-receipt','--material-receipt','--preflight'].entries())assert.equal(argv[1+i*2],key);
+ if(candidateQaMemoryTransition){assert.equal(isolateAuthorityCohort,true,'QA_MEMORY_TRANSITION_REQUIRES_FRESH_COHORT');assert.equal(argv.length,11,'QA_MEMORY_TRANSITION_REQUIRES_PREVIOUS_RECEIPT');assert.equal(argv[7],'--previous-replacement-receipt');}
  if(negativeRetirement)assert.equal(isolateAuthorityCohort,true,'A29_NEGATIVE_RETIREMENT_REQUIRES_FRESH_COHORT');
- const result={...(negativeRetirement?{negativeRetirement}:{}),inspectOnly:argv[0]==='--inspect',imageReceiptFile:path.resolve(argv[2]),materialReceiptFile:path.resolve(argv[4]),preflightFile:path.resolve(argv[6]),...(isolateAuthorityCohort?{isolateAuthorityCohort:true}:{})};
+ const result={...(candidateQaMemoryTransition?{candidateQaMemoryTransition:true}:{}),...(negativeRetirement?{negativeRetirement}:{}),inspectOnly:argv[0]==='--inspect',imageReceiptFile:path.resolve(argv[2]),materialReceiptFile:path.resolve(argv[4]),preflightFile:path.resolve(argv[6]),...(isolateAuthorityCohort?{isolateAuthorityCohort:true}:{})};
  if(argv.length===11){const failed=argv[7]==='--failed-authority-cohort-receipt';assert.equal(argv[7],failed?'--failed-authority-cohort-receipt':'--previous-replacement-receipt');assert.equal(argv[9],failed?'--failed-authority-cohort-sha256':'--previous-replacement-sha256');assert.ok(path.isAbsolute(argv[8]));assert.match(argv[8].replaceAll('\\','/'),/\/reports\/qa\/application-native-candidate-[a-f0-9]{32}\.json$/);assert.match(argv[10],/^[a-f0-9]{64}$/);if(failed){assert.equal(isolateAuthorityCohort,true,'FAILED_COHORT_REQUIRES_FRESH_ROTATION');assert.equal(argv[10],precisionFailedAuthorityCohortSha256);result.failedAuthorityCohort={file:path.resolve(argv[8]),sha256:argv[10]};}else result.previousReplacement={file:path.resolve(argv[8]),sha256:argv[10]};}return result;
 }
 export function validatePreviousCandidateReplacement(value){
  if(Object.hasOwn(value,'replacementEntry'))assert.equal(value.replacementEntry,'scripts/replace-qualified-application-native-candidate-local.mjs');
  assert.equal(value.format,'sabalan-application-native-candidate/v1');assert.equal(value.pass,true);assert.equal(value.phase,'COMPLETE');assert.equal(value.productionAdmission,false);
- if(value.authorityCohort)validateAuthorityCohortReceipt(value);else for(const key of ['onlyCandidateReplaced','retainedOriginalPreserved'])assert.equal(value[key],true);assert.equal(value.originalLimitsUnchanged,true);assert.equal(value.up.code,0);assert.equal(value.up.signal,null);assert.equal(value.up.failure,undefined);assert.ok(Number.isSafeInteger(value.up.originalPid)&&value.up.originalPid>0);
+ if(value.authorityCohort)validateAuthorityCohortReceipt(value);else for(const key of ['onlyCandidateReplaced','retainedOriginalPreserved'])assert.equal(value[key],true);validateQaMemoryTransitionReceipt(value);assert.equal(value.up.code,0);assert.equal(value.up.signal,null);assert.equal(value.up.failure,undefined);assert.ok(Number.isSafeInteger(value.up.originalPid)&&value.up.originalPid>0);
  assert.deepEqual(value.originalChildren,{allOriginalChildrenClosed:true,interrupted:false});const protectedNames=candidateReplacementServices.filter(name=>name!=='backend-candidate'&&(!value.authorityCohort||name!=='backend-retained')).sort();assert.deepEqual(Object.keys(value.protectedBefore).sort(),protectedNames);assert.deepEqual(value.protectedAfter,value.protectedBefore);assert.deepEqual(value.finalProtected,value.protectedBefore);
  for(const stage of ['nativeQuiet','preMutationNativeQuiet','postMutationNativeQuiet'])for(const service of ['backend-candidate','backend-retained']){assert.equal(value[stage][service].originalNativeProcesses,0);assert.equal(value[stage][service].adoptsOriginalPopen,false);}
  for(const stage of ['sqlQuiet','preMutationSqlQuiet','postMutationSqlQuiet']){assert.equal(value[stage].visible,true);assert.equal(value[stage].sessions,0);assert.equal(value[stage].prepared,0);assert.equal(value[stage].system,value.sqlQuiet.system);}
@@ -62,7 +66,8 @@ export function validateReobservedCandidateSlots(previous,current){
 }
 async function main(){
 const root=path.resolve(import.meta.dirname,'..'),base='D:/sabalanerp/docker-compose.local.yml';
-const {inspectOnly,imageReceiptFile,materialReceiptFile,preflightFile,previousReplacement,failedAuthorityCohort,isolateAuthorityCohort=false,negativeRetirement:negativeRetirementArgument}=parseCandidateReplacementArguments(process.argv.slice(2));
+const {inspectOnly,imageReceiptFile,materialReceiptFile,preflightFile,previousReplacement,failedAuthorityCohort,isolateAuthorityCohort=false,negativeRetirement:negativeRetirementArgument,candidateQaMemoryTransition=false}=parseCandidateReplacementArguments(process.argv.slice(2));
+const hostMemory=transition=>validateQaHostMemoryObservation({platform:process.platform,availableBytes:os.freemem(),observedAt:new Date().toISOString()},transition);
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const imageReceiptRaw=fs.readFileSync(imageReceiptFile),imageReceipt=JSON.parse(imageReceiptRaw),materialReceiptRaw=fs.readFileSync(materialReceiptFile),materialReceipt=JSON.parse(materialReceiptRaw);
 const preflight=()=>validateCandidatePreflight(JSON.parse(fs.readFileSync(preflightFile)));preflight();
@@ -129,7 +134,7 @@ const compose=['compose','-f',base,...overlays.flatMap(file=>['-f',file]),'--pro
 status();const configuration=JSON.parse(execFileSync('docker',[...compose,'config','--format','json'],{env,encoding:'utf8',maxBuffer:8*1024**2}));
 assert.equal(configuration.name,'sabalanerp-local');if(isolateAuthorityCohort)validateAuthorityCohortConfiguration(configuration,cohortNonce);
 for(const service of slots){const wanted=configuration.services[service],old=previous[service];
-  assert.equal(wanted.image,service==='backend-candidate'?image:oldImage);assert.deepEqual(wanted.command,old.Config.Cmd);assert.equal(Number(wanted.mem_limit),old.HostConfig.Memory);
+  assert.equal(wanted.image,service==='backend-candidate'?image:oldImage);assert.deepEqual(wanted.command,old.Config.Cmd);validateQaMemoryConfiguration(service,old.HostConfig.Memory,Number(wanted.mem_limit),candidateQaMemoryTransition);validateQaSwapConfiguration(old.HostConfig.MemorySwap,Number(wanted.memswap_limit));
   assert.equal(wanted.read_only,old.HostConfig.ReadonlyRootfs);assert.deepEqual(wanted.cap_drop??[],old.HostConfig.CapDrop??[]);
   assert.deepEqual(wanted.security_opt??[],old.HostConfig.SecurityOpt??[]);
   assert.equal(Math.round(Number(wanted.cpus)*1e9),old.HostConfig.NanoCpus);
@@ -229,9 +234,9 @@ const sqlQuiet=()=>{const value=JSON.parse(docker(['exec',inspect('postgres').Id
   assert.equal(value.visible,true);assert.equal(value.sessions,0);assert.equal(value.prepared,0);return value;};
 const operation=randomBytes(16).toString('hex'),reportPath=path.join(root,'reports/qa/application-native-candidate-'+operation+'.json');
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const inputs=Object.fromEntries([base,...overlays,import.meta.filename,path.join(root,'scripts/lib/a29-known-negative-retirement.mjs'),...(negativeRetirementArgument?[negativeRetirementArgument.file,...a29EvidenceFiles]:[]),imageReceiptFile,materialReceiptFile,installedProbeFile,preflightFile,historicalFile,retainedImageReceiptFile,retainedMaterialReceiptFile,path.join(root,'scripts/replace-application-native-candidate-local.mjs'),...predecessorInputs,...(isolateAuthorityCohort?authorityCohortSources.map(file=>path.join(root,file)):[])].map(file=>[file,hash(file)]));
+const inputs=Object.fromEntries([base,...overlays,import.meta.filename,path.join(root,'scripts/lib/application-native-qa-memory.mjs'),path.join(root,'scripts/lib/a29-known-negative-retirement.mjs'),...(negativeRetirementArgument?[negativeRetirementArgument.file,...a29EvidenceFiles]:[]),imageReceiptFile,materialReceiptFile,installedProbeFile,preflightFile,historicalFile,retainedImageReceiptFile,retainedMaterialReceiptFile,path.join(root,'scripts/replace-application-native-candidate-local.mjs'),...predecessorInputs,...(isolateAuthorityCohort?authorityCohortSources.map(file=>path.join(root,file)):[])].map(file=>[file,hash(file)]));
 const report={...(negativeRetirementArgument?{knownNegativeCancellationRetirement:{...negativeRetirementArgument,classification:'KNOWN_NEGATIVE_CANCELLED',successfulNativeClosure:false}}:{}),format:'sabalan-application-native-candidate/v1',replacementEntry:'scripts/replace-qualified-application-native-candidate-local.mjs',operation,pass:false,phase:'INTENT',productionAdmission:false,
-  onlyCandidateReplaced:!isolateAuthorityCohort,retainedOriginalPreserved:!isolateAuthorityCohort,...(isolateAuthorityCohort?{onlyQualificationSlotsRecreated:true,authorityCohort:{format:'sabalan-native-authority-cohort/v1',nonce:cohortNonce,prepared:{},verified:{}}}:{}),originalLimitsUnchanged:true,protectedBefore,previous:Object.fromEntries(slots.map(service=>[service,identity(previous[service])])),inputs,
+  onlyCandidateReplaced:!isolateAuthorityCohort,retainedOriginalPreserved:!isolateAuthorityCohort,...(isolateAuthorityCohort?{onlyQualificationSlotsRecreated:true,authorityCohort:{format:'sabalan-native-authority-cohort/v1',nonce:cohortNonce,prepared:{},verified:{}}}:{}),originalLimitsUnchanged:!candidateQaMemoryTransition,...(candidateQaMemoryTransition?{candidateQaMemoryTransition:{format:'sabalan-explicit-local-qa-candidate-memory-transition/v1',before:Object.fromEntries(slots.map(service=>[service,previous[service].HostConfig.Memory])),after:Object.fromEntries(slots.map(service=>[service,Number(configuration.services[service].mem_limit)])),nativeActorFloorBytes,cacheCreditUsed:false,runtimeLimitsBefore:Object.fromEntries(slots.map(service=>[service,qaUnchangedResourceLimits(previous[service].HostConfig)]))}}:{}),protectedBefore,previous:Object.fromEntries(slots.map(service=>[service,identity(previous[service])])),inputs,
   immutableImage:image,materialReceiptSha256:digest(materialReceiptRaw),imageReceiptSha256:digest(imageReceiptRaw),removedCodeTargets,
   ...(predecessor?{previousReplacement:{...previousReplacement},reobservedBaseline}:{}),...(failedAuthority?{failedAuthorityCohort:{...failedAuthorityCohort},reconciledFailedAuthorityBaseline:reobservedBaseline,failedAuthorityBaselineVerified:{}}:{}),nativeQuiet:processQuiet(),sqlQuiet:sqlQuiet()};
 const save=()=>{fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');};save();
@@ -250,21 +255,24 @@ async function originalAuthorityDirectory(service,mode,observed,expected=null,pe
 }
 try{
  if(predecessor||failedAuthority){report.reobservedInstalled={};for(const service of slots){report.reobservedInstalled[service]=await originalInstalledReadback(service,nativeMaterialIdentity(service==='backend-candidate'?predecessorMaterial:retainedMaterial));save();}report.reobservedNativeQuiet=processQuiet();report.reobservedSqlQuiet=sqlQuiet();for(const service of slots)assert.deepEqual(identity(inspect(service)),identity(previous[service]));const baseline=report.reconciledFailedAuthorityBaseline??report.reobservedBaseline;baseline.installedBytesVerified=true;baseline.nativeAndSqlQuietVerified=true;save();if(failedAuthority){for(const service of slots){const peer=service==='backend-candidate'?'backend-retained':'backend-candidate';report.failedAuthorityBaselineVerified[service]=await originalAuthorityDirectory(service,'verify',previous,failedNamespaces[service],failedNamespaces[peer],failedAuthority.authorityCohort.nonce,'failedAuthorityBaselineVerified');save();}baseline.currentEmptyNamespacesVerified=true;save();}}
+ report.localHostMemory=hostMemory(candidateQaMemoryTransition);save();
  if(inspectOnly){report.phase='INSPECTION_COMPLETE';report.inspectionOnly=true;report.originalChildren={allOriginalChildrenClosed:true,interrupted:false};assert.equal(interrupted,false);save();console.log(JSON.stringify({inspectionOnly:true,reportPath}));return;}
 
   for(const [file,digest]of Object.entries(inputs))assert.equal(hash(file),digest);
   report.preMutationNativeQuiet=processQuiet();report.preMutationSqlQuiet=sqlQuiet();preflight();save();
   if(isolateAuthorityCohort){for(const service of slots){report.authorityCohort.prepared[service]=await originalAuthorityDirectory(service,'create',previous);save();}report.preMutationNativeQuiet=processQuiet();report.preMutationSqlQuiet=sqlQuiet();preflight();}
-  status();report.up=await new Promise(resolve=>{const child=spawn('docker',[...compose,'up','-d','--no-deps','--no-build','--pull','never','--wait','--wait-timeout','120','backend-candidate',...(isolateAuthorityCohort?['backend-retained']:[])],{env,stdio:['ignore','pipe','pipe']});
+  status();const beforeUpMemory=hostMemory(candidateQaMemoryTransition);if(candidateQaMemoryTransition)report.candidateQaMemoryTransition.beforeUp=beforeUpMemory;save();
+  validateQaHostMemoryObservation(beforeUpMemory,candidateQaMemoryTransition);report.up=await new Promise(resolve=>{const child=spawn('docker',[...compose,'up','-d','--no-deps','--no-build','--pull','never','--wait','--wait-timeout','120','backend-candidate',...(isolateAuthorityCohort?['backend-retained']:[])],{env,stdio:['ignore','pipe','pipe']});
     children.push(child);let stdout='',stderr='',failure;child.stdout.on('data',bytes=>{if(Buffer.byteLength(stdout)+bytes.length<=8*1024**2)stdout+=bytes;else failure??='COMPOSE_STDOUT_BOUND';});child.stderr.on('data',bytes=>{if(Buffer.byteLength(stderr)+bytes.length<=65536)stderr+=bytes;else failure??='COMPOSE_STDERR_BOUND';});
     child.on('error',error=>{report.spawnError=error.code;save();});child.on('close',(code,signal)=>resolve({originalPid:child.pid,code,signal,stdout,stderr,failure}));});
   save();assert.equal(interrupted,false);assert.equal(report.up.failure,undefined);assert.equal(report.up.code,0);assert.equal(report.up.signal,null);assert.equal(report.spawnError,undefined);
   report.protectedAfter=Object.fromEntries(protectedServices.map(service=>[service,identity(inspect(service))]));assert.deepEqual(report.protectedAfter,protectedBefore);
   const actual=Object.fromEntries(slots.map(service=>[service,inspect(service)]));
   for(const service of slots){const value=actual[service];assert.equal(value.Image,service==='backend-candidate'?image:oldImage);
-    assert.equal(value.HostConfig.Memory,previous[service].HostConfig.Memory);assert.deepEqual(value.Config.Cmd,previous[service].Config.Cmd);}
+    assert.equal(value.HostConfig.Memory,Number(configuration.services[service].mem_limit));assert.deepEqual(qaUnchangedResourceLimits(value.HostConfig),qaUnchangedResourceLimits(previous[service].HostConfig));assert.deepEqual(value.Config.Cmd,previous[service].Config.Cmd);}
   for(const service of slots)assert.ok(!actual[service].Mounts.some(value=>removedCodeTargets.includes(value.Destination)));
   if(isolateAuthorityCohort){validateAuthorityCohortSlots(actual,cohortNonce);for(const service of slots){assert.notEqual(actual[service].Id,previous[service].Id);const peer=service==='backend-candidate'?'backend-retained':'backend-candidate';report.authorityCohort.verified[service]=await originalAuthorityDirectory(service,'verify',actual,report.authorityCohort.prepared[service].result.namespace,report.authorityCohort.prepared[peer].result.namespace);save();}}
+  if(candidateQaMemoryTransition){report.candidateQaMemoryTransition.afterUp=hostMemory(false);report.candidateQaMemoryTransition.runtimeLimitsAfter=Object.fromEntries(slots.map(service=>[service,qaUnchangedResourceLimits(actual[service].HostConfig)]));}
   const candidate=actual['backend-candidate'],retained=actual['backend-retained'];
   const mount=(value,target)=>{const found=value.Mounts.find(entry=>entry.Destination===target);assert.ok(found);return found;};
   const http=mount(retained,'/run/sabalan-online'),httpWriter=mount(candidate,'/app/runtime-authority');
@@ -272,7 +280,7 @@ try{
   assert.equal(http.RW,false);assert.equal(jobs.RW,false);assert.equal(httpWriter.RW,true);assert.equal(jobsWriter.RW,true);
   assert.equal(http.Source,httpWriter.Source);assert.equal(jobs.Source,jobsWriter.Source);assert.notEqual(http.Source,jobs.Source);
   assert.ok(!retained.Mounts.some(value=>value.Source===http.Source&&value.RW));assert.ok(!candidate.Mounts.some(value=>value.Source===jobs.Source&&value.RW));
-  report.actual=Object.fromEntries(slots.map(service=>[service,{...identity(actual[service]),host:actual[service].NetworkSettings.Networks['sabalanerp-local_default'].IPAddress,
+  report.actual=Object.fromEntries(slots.map(service=>[service,{...identity(actual[service]),memoryBytes:actual[service].HostConfig.Memory,memorySwapBytes:actual[service].HostConfig.MemorySwap,host:actual[service].NetworkSettings.Networks['sabalanerp-local_default'].IPAddress,
     mounts:actual[service].Mounts.map(value=>({source:value.Source,target:value.Destination,rw:value.RW}))}]));
   report.installed={};
   for(const service of slots){status();const observation=await new Promise(resolve=>{
@@ -293,7 +301,7 @@ try{
   report.finalProtected=Object.fromEntries(protectedServices.map(service=>[service,identity(inspect(service))]));assert.deepEqual(report.finalProtected,protectedBefore);
   for(const [file,digest]of Object.entries(inputs))assert.equal(hash(file),digest);
   assert.equal(interrupted,false);assert.ok(children.every(child=>child.exitCode!==null||child.signalCode!==null));report.originalChildren={allOriginalChildrenClosed:true,interrupted:false};
-  if(isolateAuthorityCohort)validateAuthorityCohortReceipt(report);if(failedAuthority)validateReconciledPrecisionFailedBaseline(report,failedAuthority);report.pass=true;report.phase='COMPLETE';save();
+  validateQaMemoryTransitionReceipt(report);if(isolateAuthorityCohort)validateAuthorityCohortReceipt(report);if(failedAuthority)validateReconciledPrecisionFailedBaseline(report,failedAuthority);report.pass=true;report.phase='COMPLETE';save();
 }catch(error){report.failure={name:error.name,message:error.message};report.phase='FAILED_CLOSED';save();
   if(children.some(child=>child.exitCode===null&&child.signalCode===null)){await new Promise(()=>{setInterval(()=>{void children;},30000);});}
   throw error;

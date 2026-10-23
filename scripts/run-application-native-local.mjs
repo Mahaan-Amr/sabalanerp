@@ -233,7 +233,7 @@ files['original-retained-browser-result.json']=fs.readFileSync(retainedBrowserFa
 assert.equal(sha(files['original-retained-browser-result.json']),retainedBrowserFacts.reportSha256);
 const fileHashes=Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,sha(bytes)]));
 const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,
-  onHeld:value=>{fs.writeFileSync(path.join(root,'reports/qa',path.basename(directory)+'-role-held.json'),JSON.stringify(value,null,2)+'\n');}});
+  onHeld:value=>{const reportPath=path.join(root,'reports/qa',path.basename(directory)+'-role-held.json');fs.writeFileSync(reportPath,JSON.stringify(value,null,2)+'\n');console.log(JSON.stringify({format:'sabalan-original-inner-controller-held/v1',event:'ORIGINAL_INNER_CONTROLLER_HELD',status:'ROLEHELD',reportPath,reason:'ORIGINAL_CONTROLLER_HELD'}));}});
 files['config.json']=Buffer.from(JSON.stringify({sourceCommit,
   retainedBrowserReport:{file:'original-retained-browser-result.json',sha256:retainedBrowserFacts.reportSha256},
   image:retained.Image,bundleSha256,roleTopology,roleQualification:{file:roleQualificationFile,sha256:sha(roleQualificationBytes)},

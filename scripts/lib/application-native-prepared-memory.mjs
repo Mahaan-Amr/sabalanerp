@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 
-const maximumBytes=768*1024**2,minimumFreeBytes=384*1024**2;
+const maximumBytes=1280*1024**2,minimumFreeBytes=384*1024**2;
 const commandFor=id=>['exec',id,'/bin/cat','/sys/fs/cgroup/memory.current','/sys/fs/cgroup/memory.max'];
 
 export function validateOriginalPreparedMemoryObservation(value){

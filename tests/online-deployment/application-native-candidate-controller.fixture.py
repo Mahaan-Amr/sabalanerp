@@ -112,7 +112,7 @@ def birth(pid):
 def resource():
     root = Path('/sys/fs/cgroup')
     maximum = (root / 'memory.max').read_text().strip()
-    check(maximum.isdecimal() and int(maximum) == 768 * MIB, 'CANDIDATE_ENFORCED_MEMORY_CAP_CHANGED')
+    check(maximum.isdecimal() and int(maximum) == 1280 * MIB, 'CANDIDATE_ENFORCED_MEMORY_CAP_CHANGED')
     current = int((root / 'memory.current').read_text())
     events = {key: int(value) for key, value in (line.split() for line in (root / 'memory.events').read_text().splitlines())}
     return dict(memoryMaximum=int(maximum), memoryCurrent=current, memoryAvailable=int(maximum) - current,
@@ -751,6 +751,7 @@ class CandidateOwner:
               and all(key in ['connection_limit','pool_timeout','application_name','schema'] and (key != 'schema' or value == 'public') for key,value in query)
               and target.hostname == self.source.hostname and target.port == self.source.port and target.username == self.source.username
               and target.password == self.source.password and target.path == '/' + self.index['database'], 'CANDIDATE_CATALOG_DATABASE_TARGET_CHANGED')
+        self.capacity('full-catalog')  # Refuse before SQL observers or diagnostic input creation; new_process rechecks.
         check(self.sql('SELECT system_identifier FROM pg_control_system()') == input['systemIdentifier']
               and self.sql("SELECT oid FROM pg_database WHERE datname='" + input['databaseName'] + "'") == str(self.index['oid']), 'CANDIDATE_CATALOG_DATABASE_IDENTITY_CHANGED')
         app = self.catalog_sources()
@@ -1159,10 +1160,27 @@ class CandidateOwner:
         if type(error) is not _OriginalCapacityRefusal or command not in phases:return False
         kind,expected=phases[command]
         if error.kind!=kind or kind in self.actors:return False
-        for original,current in zip(registry_snapshot,[self.actors,self.helpers,self.probes]):
+        for original,current in zip(registry_snapshot[:2],[self.actors,self.helpers]):
             if original.keys()!=current.keys() or any(current[key] is not value for key,value in original.items()):return False
+        prior_probes=registry_snapshot[2]
+        if any(key not in self.probes or self.probes[key] is not value for key,value in prior_probes.items()):return False
+        added=[value for key,value in self.probes.items() if key not in prior_probes]
+        if added:
+            if command!='RUN_FULL_CATALOG' or len(added)!=2:return False
+            expected_queries={'SELECT system_identifier FROM pg_control_system()',
+                "SELECT oid FROM pg_database WHERE datname='"+self.index['database']+"'"}
+            actual_queries=set()
+            for probe in added:
+                actor=probe.get('actor');args=getattr(actor,'args',None)
+                if (probe.get('label')!='psql' or not probe.get('closed') or probe.get('originalReturncode')!=0
+                    or actor is None or probe.get('originalPid')!=actor.pid or actor.poll()!=0
+                    or not actor.stdout.closed or not actor.stderr.closed
+                    or not isinstance(args,list) or len(args)!=8
+                    or args[:7]!=['/usr/bin/psql','-X','-A','-t','-v','ON_ERROR_STOP=1','-c']):return False
+                actual_queries.add(args[7])
+            if actual_queries!=expected_queries:return False
         if any(not probe['closed'] for probe in self.probes.values()):return False
-        if (error.observed['memoryMaximum']!=768*MIB or error.required!=CAPACITY[kind]
+        if (error.observed['memoryMaximum']!=1280*MIB or error.required!=CAPACITY[kind]
             or error.observed['memoryAvailable']>=error.required):return False
         grant=None if kind in ['chrome','private-chrome','legacy-private-chrome','legacy-private-browser-verify','full-catalog','private-domain','private-domain-verify','private-browser-verify'] else self.grant(kind)
         if grant:

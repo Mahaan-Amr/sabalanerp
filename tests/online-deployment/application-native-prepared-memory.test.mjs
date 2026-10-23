@@ -8,13 +8,13 @@ import {PassThrough} from 'node:stream';
 import {createRequire} from 'node:module';
 import {validateOriginalPreparedMemoryObservation} from '../../scripts/lib/application-native-prepared-memory.mjs';
 
-const id='a'.repeat(64),maximum=768*1024**2,floor=384*1024**2;
+const id='a'.repeat(64),maximum=1280*1024**2,floor=384*1024**2;
 function closed(changes={}){return{containerId:id,argv:['exec',id,'/bin/cat','/sys/fs/cgroup/memory.current','/sys/fs/cgroup/memory.max'],originalPid:123,code:0,signal:null,naturalChildClosure:true,stdoutEof:true,stderrEof:true,spawnError:null,streamErrors:[],outputBoundExceeded:false,stdout:`${maximum-floor}\n${maximum}\n`,stderr:'',...changes};}
 
-test('fresh post-child exact768/384 boundary passes without credit',()=>{
+test('fresh post-child exact1280/384 boundary passes without credit',()=>{
  const result=validateOriginalPreparedMemoryObservation(closed());assert.equal(result.memoryMaximum,maximum);assert.equal(result.actualFreeBytes,floor);assert.equal(result.cacheCreditUsed,false);assert.equal(result.observerMemoryIncluded,true);
 });
-test('different memory cap cannot replace the768 policy',()=>{assert.throws(()=>validateOriginalPreparedMemoryObservation(closed({stdout:`1\n${maximum+1}\n`})),/NATIVE_PREPARED_MEMORY_CAP_CHANGED/);});
+test('different memory cap cannot replace the1280 policy',()=>{assert.throws(()=>validateOriginalPreparedMemoryObservation(closed({stdout:`1\n${maximum+1}\n`})),/NATIVE_PREPARED_MEMORY_CAP_CHANGED/);});
 test('requires exactly two bounded safe integer lines',()=>{
  for(const stdout of ['1\n','1\nmax\n','1\n2\n3\n','-1\n805306368\n','1.5\n805306368\n','9007199254740993\n805306368\n','1\r\n805306368\r\n'])assert.throws(()=>validateOriginalPreparedMemoryObservation(closed({stdout})));
 });

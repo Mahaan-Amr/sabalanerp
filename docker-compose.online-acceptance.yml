@@ -74,9 +74,12 @@ services:
     read_only: true
     tmpfs: [/tmp]
     stop_grace_period: 5m
-    mem_limit: 768m
+    mem_limit: 1280m
+    memswap_limit: 1536m
     cpus: 1
   backend-retained:
+    mem_limit: 768m
+    memswap_limit: 1536m
     extends:
       service: backend-candidate
     profiles: [online-acceptance]

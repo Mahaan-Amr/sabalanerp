@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {validateQaMemoryTransitionReceipt,candidateQaMemoryBytes,retainedQaMemoryBytes,qaSwapBytes} from './application-native-qa-memory.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
@@ -11,6 +12,7 @@ export function candidateReplacementReceiptArgument(argv){
  assert.match(argv[1].replaceAll('\\','/'),/(?:^|\/)reports\/qa\/application-native-candidate-[a-f0-9]{32}\.json$/);return argv[1];
 }
 export function validateNativeCandidateReplacementReceipt(value){
+ validateQaMemoryTransitionReceipt(value);
  if(Object.hasOwn(value,'replacementEntry'))assert.equal(value.replacementEntry,'scripts/replace-qualified-application-native-candidate-local.mjs','REPLACEMENT_ENTRY_UNREVIEWED');
  assert.equal(value.format,'sabalan-application-native-candidate/v1');assert.equal(value.pass,true);assert.equal(value.phase,'COMPLETE');assert.equal(value.productionAdmission,false);
  if(value.authorityCohort)validateAuthorityCohortReceipt(value);else{assert.equal(value.onlyCandidateReplaced,true);assert.equal(value.retainedOriginalPreserved,true);}assert.equal(value.up.code,0);assert.equal(value.up.signal,null);assert.equal(value.up.failure,undefined);
@@ -33,10 +35,11 @@ export function collectNativeCandidateArtifacts({root,capture,containers,sourceC
  const captureFile=relative=>{const raw=capture(relative);captured.set(relative,sha(raw));return raw;};
  const readExternal=file=>{file=path.resolve(file);const stable=stableFrontendBaseFile(file,16*1024**2),raw=fs.readFileSync(file);assert.equal(raw.length,stable.bytes);assert.equal(sha(raw),stable.sha256);external.set(file,stable);return raw;};
  const requested=path.resolve(root,receiptArgument),relative=path.relative(root,requested).split(path.sep).join('/');assert.match(relative,/^reports\/qa\/application-native-candidate-[a-f0-9]{32}\.json$/);
- captureFile('scripts/lib/application-native-candidate-artifacts.mjs');captureFile('scripts/lib/production-frontend-base-artifacts.mjs');
+ captureFile('scripts/lib/application-native-qa-memory.mjs');captureFile('scripts/lib/application-native-candidate-artifacts.mjs');captureFile('scripts/lib/production-frontend-base-artifacts.mjs');
  const helper='scripts/replace-application-native-candidate-local.mjs',probe='tests/online-deployment/installed-native-image-probe.fixture.mjs';captureFile(helper);captureFile(probe);
  const bytes=captureFile(relative),value=JSON.parse(bytes);validateNativeCandidateReplacementReceipt(value);
  if(value.authorityCohort)validateAuthorityCohortSlots(containers,value.authorityCohort.nonce);
+ assert.equal(containers['backend-candidate'].HostConfig.Memory,candidateQaMemoryBytes);assert.equal(containers['backend-retained'].HostConfig.Memory,retainedQaMemoryBytes);for(const service of ['backend-candidate','backend-retained'])assert.equal(containers[service].HostConfig.MemorySwap,qaSwapBytes);
  const replacementEntry=value.replacementEntry??helper;if(replacementEntry!==helper)captureFile(replacementEntry);
  if(value.previousReplacement){
   assert.equal(replacementEntry,'scripts/replace-qualified-application-native-candidate-local.mjs');assert.deepEqual(Object.keys(value.previousReplacement).sort(),['file','sha256']);assert.match(value.previousReplacement.sha256,/^[a-f0-9]{64}$/);const priorRaw=readExternal(value.previousReplacement.file);assert.equal(sha(priorRaw),value.previousReplacement.sha256);assert.equal(value.inputs[path.resolve(value.previousReplacement.file)],value.previousReplacement.sha256);const prior=JSON.parse(priorRaw);validateReobservedCandidateBaselineReceipt(value,prior);
@@ -70,7 +73,7 @@ export function collectNativeCandidateArtifacts({root,capture,containers,sourceC
  assert.equal(evidence.main.image,'sha256:89dd62e901f2077f70c800bd9b705251730fa23531f7c3cc42fdaee1d9c71186');assert.notEqual(evidence.candidate.image,evidence.main.image);
  const historical=JSON.parse(captureFile('reports/qa/application-native-role-slots-aeca1063d2275dde6b8fbda710d1de34.json'));assert.equal(historical.pass,true);assert.deepEqual(evidence.main.runtime,historical.privateQualificationRuntime);assert.equal(evidence.main.imageReceiptSha256,historical.imageReceiptSha256);assert.equal(evidence.main.materialReceiptSha256,historical.materialReceiptSha256);
  if(!value.authorityCohort)assert.deepEqual(value.actual['backend-retained']&&Object.fromEntries(['id','image','startedAt'].map(key=>[key,value.actual['backend-retained'][key]])),value.protectedBefore['backend-retained']);
- for(const file of ['docker-compose.online-acceptance.yml','docker-compose.online-runtime-authority-acceptance.yml','docker-compose.application-native-role-isolation.yml','docker-compose.application-native-mixed-images.yml',helper,probe,...(replacementEntry===helper?[]:[replacementEntry]),...(value.authorityCohort?['docker-compose.application-native-authority-cohort.yml',...authorityCohortSources]:[])]){
+ for(const file of ['docker-compose.online-acceptance.yml','scripts/lib/application-native-qa-memory.mjs','docker-compose.online-runtime-authority-acceptance.yml','docker-compose.application-native-role-isolation.yml','docker-compose.application-native-mixed-images.yml',helper,probe,...(replacementEntry===helper?[]:[replacementEntry]),...(value.authorityCohort?['docker-compose.application-native-authority-cohort.yml',...authorityCohortSources]:[])]){
   const raw=captureFile(file);assert.equal(value.inputs[path.join(root,file)],sha(raw),'REPLACEMENT_SOURCE_PIN_CHANGED: '+file);
  }
  const revalidate=()=>{for(const [file,pin]of external)assert.deepEqual(stableFrontendBaseFile(file,16*1024**2),pin,'EXTERNAL_ROLE_RECEIPT_CHANGED');for(const [file,digest]of captured)assert.equal(sha(fs.readFileSync(path.join(root,file))),digest,'ROLE_CAPTURE_CHANGED');return{roleEvidence:evidence,externalInputs:Object.fromEntries(external)};};

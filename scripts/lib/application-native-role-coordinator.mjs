@@ -123,7 +123,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
   const enrollment=Object.freeze({format:FORMAT,publicKey:publicSPKI,session,roleTopology:topology});
   function hold(error){if(!held){held=error;
     heldKeeper=setInterval(()=>{void privateKey;void roles;},30000);
-    try{onHeld({format:FORMAT,productionAdmission:false,state:'HELD',reason:error.message,
+    try{onHeld({format:FORMAT,productionAdmission:false,state:'HELD',reason:error.message,...(error.innerHeld?{innerHeld:error.innerHeld}:{}),
       originalControllers:[...roles].map(([role,v])=>({role,pid:v.child.pid,closed:v.closed})),history:[...history]});}
     catch(failure){evidenceFailure=failure.message;}}}
   function send(role,command,body){
@@ -438,7 +438,13 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
     const body=JSON.parse(raw);
     record('receive',role,value.sequence,value.event,body,raw);
     if(value.event==='HELLO'){assert.equal(owner.hello,false);owner.hello=true;owner.readyResolve(body);return;}
-    if(value.event==='HELD')throw Error('ORIGINAL_INNER_CONTROLLER_HELD');
+    if(value.event==='HELD'){
+      const reason=typeof body.reason==='string'&&/^[A-Za-z_][A-Za-z0-9_]*:[A-Za-z0-9_-]{1,192}$/.test(body.reason)?body.reason:null;
+      const error=Error('ORIGINAL_INNER_CONTROLLER_HELD');
+      error.innerHeld=Object.freeze({role,sequence:value.sequence,event:value.event,reason,
+        payloadSha256:sha(raw),payloadBytes:raw.length,reasonRedacted:reason===null});
+      throw error;
+    }
     if(role==='main'){
       if(['PRIVATE_OLD_JOBS_STARTED','PRIVATE_OLD_JOBS_READY','PRIVATE_OLD_JOBS_PREPARED','PRIVATE_OLD_JOBS_CLOSED'].includes(value.event)){privateOldJobsEvent(value.event,body);return;}
       if(['PRIVATE_HTTP_STARTED','PRIVATE_HTTP_READY','PRIVATE_HTTP_PREPARED','PRIVATE_HTTP_CLOSED'].includes(value.event)){
@@ -579,7 +585,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
       assert.ok(pending&&!pending.actor);same(body.requestId,pending.requestId);same(body.failedEvent,pending.expected);
       same(body.kind,pending.kind);same(body.actorId,null);same(body.noWorkStarted,true);same(body.decision,'NATIVE_ACTOR_NOT_STARTED');
       assert.ok(![...actors.values()].some(actor=>actor.kind===pending.kind));
-      same(body.resources.memoryMaximum,768*1024*1024);assert.ok(Number.isSafeInteger(body.resources.memoryCurrent));
+      same(body.resources.memoryMaximum,1280*1024*1024);assert.ok(Number.isSafeInteger(body.resources.memoryCurrent));
       assert.ok(body.resources.memoryCurrent>=0&&body.resources.memoryCurrent<=body.resources.memoryMaximum);
       same(body.resources.memoryAvailable,body.resources.memoryMaximum-body.resources.memoryCurrent);
       same(body.requiredBytes,requiredMemory[pending.kind]);assert.ok(body.resources.memoryAvailable<body.requiredBytes);

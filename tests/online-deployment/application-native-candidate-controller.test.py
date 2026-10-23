@@ -14,6 +14,7 @@ import tempfile
 import types
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 spec = importlib.util.spec_from_file_location('candidate_owner', Path(__file__).with_name('application-native-candidate-controller.fixture.py'))
 owner_module = importlib.util.module_from_spec(spec); spec.loader.exec_module(owner_module)
@@ -49,7 +50,7 @@ class CandidateControllerTests(unittest.TestCase):
         owner=self.bare();events=[]
         owner.channel=types.SimpleNamespace(emit=lambda event,body:events.append((event,body)),assert_observers_closed=lambda:None)
         snapshot=[dict(owner.actors),dict(owner.helpers),dict(owner.probes)]
-        observed={'memoryMaximum':768*owner_module.MIB,'memoryAvailable':1,'memoryCurrent':768*owner_module.MIB-1,'events':{}}
+        observed={'memoryMaximum':1280*owner_module.MIB,'memoryAvailable':1,'memoryCurrent':1280*owner_module.MIB-1,'events':{}}
         with patch.object(owner_module,'resource',return_value=observed):
             with self.assertRaises(owner_module._OriginalCapacityRefusal) as refusal:owner.capacity('chrome')
         body={'requestId':'b'*64}
@@ -94,6 +95,71 @@ class CandidateControllerTests(unittest.TestCase):
         owner.channel = types.SimpleNamespace(emit=lambda *args: (_ for _ in ()).throw(BrokenPipeError()))
         owner.held(RuntimeError('original remains owned'))
         self.assertEqual(owner.sticky_failures, ['RuntimeError:original remains owned'])
+
+    def catalog_owner(self, directory):
+        owner = self.bare()
+        birth = {'original': True}
+        def actor(pid):
+            return types.SimpleNamespace(pid=pid, poll=lambda: None)
+        owner.actors['chrome'] = {'actor': actor(101), 'birth': birth, 'closed': False}
+        owner.helpers['browser-ingress'] = {'actor': actor(102), 'birth': birth, 'closed': False}
+        owner.completed = {'migration'}
+        owner.source = urlsplit('postgresql://fixture:fixture@postgres:5432/base')
+        owner.pg = {}
+        owner.topology = {'main': {'host': 'backend-retained'}}
+        owner.index = {'catalog': {'operation': 'a' * 32}, 'database': 'qa_test', 'oid': 123}
+        owner.directory = directory
+        owner.catalog_sources = lambda: directory
+        events = []
+        owner.channel = types.SimpleNamespace(emit=lambda *value: events.append(value), assert_observers_closed=lambda: None)
+        def probe(label, argv, environment):
+            child = types.SimpleNamespace(pid=200 + len(owner.probes), args=argv,
+                poll=lambda: 0, stdout=types.SimpleNamespace(closed=True), stderr=types.SimpleNamespace(closed=True))
+            owner.probes[str(child.pid)] = {'actor': child, 'originalPid': child.pid,
+                'label': label, 'closed': True, 'originalReturncode': 0}
+            return 0, (b'456\n' if 'system_identifier' in argv[-1] else b'123\n'), b''
+        owner.probe = probe
+        body = {'requestId': 'd' * 64, 'input': {'format': 'sabalan-native-full-catalog-controller/v1',
+            'mainHost': 'backend-retained', 'operation': 'a' * 32,
+            'databaseUrl': 'postgresql://fixture:fixture@postgres:5432/qa_test?connection_limit=2&pool_timeout=10',
+            'databaseName': 'qa_test', 'databaseOid': '123', 'systemIdentifier': '456',
+            'adminUsername': 'native-app-12345678-1234-1234-1234-123456789012', 'adminPassword': 'fixture-only'}}
+        return owner, body, birth, events
+
+    def test_catalog_early_capacity_refusal_starts_no_probe_and_writes_no_input(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            owner, body, birth, events = self.catalog_owner(directory)
+            snapshot = [dict(owner.actors), dict(owner.helpers), dict(owner.probes)]
+            low = {'memoryMaximum': 1280 * owner_module.MIB, 'memoryAvailable': 1}
+            with patch.object(owner_module, 'birth', return_value=birth), patch.object(owner_module, 'resource', return_value=low):
+                with self.assertRaises(owner_module._OriginalCapacityRefusal) as failure:
+                    owner.full_catalog(body)
+            self.assertTrue(owner.refuse_before_start('RUN_FULL_CATALOG', body, failure.exception, snapshot))
+            self.assertEqual(owner.probes, {})
+            self.assertEqual(list(directory.iterdir()), [])
+            self.assertEqual([value[0] for value in events], ['PHASE_REFUSED'])
+
+    def test_catalog_late_refusal_accounts_for_only_two_closed_original_sql_probes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            owner, body, birth, events = self.catalog_owner(directory)
+            snapshot = [dict(owner.actors), dict(owner.helpers), dict(owner.probes)]
+            high = {'memoryMaximum': 1280 * owner_module.MIB, 'memoryAvailable': 768 * owner_module.MIB}
+            low = {'memoryMaximum': 1280 * owner_module.MIB, 'memoryAvailable': 1}
+            disk = types.SimpleNamespace(f_bavail=1024**3, f_frsize=1)
+            # POSIX durable publication is covered by the Linux joined run;
+            # this host test exercises the actual admission/probe ordering.
+            with patch.object(owner_module, 'birth', return_value=birth), patch.object(owner_module, 'resource', side_effect=[high, low]), patch.object(owner_module.os, 'statvfs', return_value=disk, create=True), patch.object(owner_module, 'write', side_effect=lambda file, data, mode: file.write_bytes(data)):
+                with self.assertRaises(owner_module._OriginalCapacityRefusal) as failure:
+                    owner.full_catalog(body)
+            self.assertEqual(len(owner.probes), 2)
+            self.assertTrue((directory / 'full-catalog-input.json').is_file())
+            self.assertNotIn('full-catalog', owner.actors)
+            self.assertTrue(owner.refuse_before_start('RUN_FULL_CATALOG', body, failure.exception, snapshot))
+            self.assertEqual([value[0] for value in events], ['PHASE_REFUSED'])
+            next(iter(owner.probes.values()))['actor'].stdout.closed = False
+            self.assertFalse(owner.refuse_before_start('RUN_FULL_CATALOG', body, failure.exception, snapshot))
 
     def test_prepared_inquiry_compiled_bytes_must_match_enrolled_archive(self):
         owner = self.bare()

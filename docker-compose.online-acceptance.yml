@@ -74,7 +74,7 @@ services:
     read_only: true
     tmpfs: [/tmp]
     stop_grace_period: 5m
-    mem_limit: 1280m
+    mem_limit: 1536m
     memswap_limit: 1536m
     cpus: 1
   backend-retained:

@@ -12,6 +12,8 @@ from urllib.parse import urlsplit,unquote
 import importlib.util
 import json
 import os
+import re
+import stat
 from pathlib import Path
 import time
 
@@ -52,11 +54,49 @@ class OriginalReadonlyTransportFixture:
             remote_browser=remote_browser)
         return self.edge
 
+    def _original_private_publication_pending(self, filename):
+        """Retry only our original edge's exact transient second hard link."""
+        require(filename in {'browser-business-ready.json', 'readonly-transport-stopped.json'})
+        file = self.root / filename
+        try:
+            before = file.lstat()
+        except FileNotFoundError:
+            # Do not enter strict read after observing absence: publication may
+            # link the final inode before that read, while its temp link remains.
+            return True
+        if before.st_nlink != 2:
+            return False
+        prefix = file.name + '.publishing-' + str(self.edge.pid) + '-'
+        candidates = [item for item in self.root.iterdir()
+                      if item.name.startswith(prefix) and re.fullmatch(r'[a-f0-9]{32}', item.name[len(prefix):])]
+        if len(candidates) != 1:
+            return False
+        try:
+            temporary = candidates[0].lstat()
+            after = file.lstat()
+        except FileNotFoundError:
+            return False
+        identity = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns,
+                                  value.st_ctime_ns, value.st_mode, value.st_uid, value.st_nlink)
+        return (identity(before) == identity(temporary) == identity(after)
+                and stat.S_ISREG(after.st_mode) and after.st_uid == os.getuid()
+                and after.st_mode & 0o777 == 0o600 and 0 < after.st_size <= 8*1024*1024)
+
+    def observe_business_ready_for_negative_abort(self, seconds=5):
+        """Read only this owner's completed stage; never claim capture success."""
+        require(self.edge is not None and self.edge.poll() is None)
+        if self.business_ready_raw is None:
+            self.wait_business_ready(seconds=seconds)
+        return self.business_ready_raw
+
     def wait_business_ready(self, seconds=180):
         require(self.edge is not None and self.business_ready is None)
         deadline = time.monotonic() + seconds
         while True:
             require(self.edge.poll() is None and time.monotonic() < deadline)
+            if self._original_private_publication_pending('browser-business-ready.json'):
+                time.sleep(0.02)
+                continue
             try:
                 value, raw = self.api.read(self.root / 'browser-business-ready.json', maximum=8*1024*1024)
                 break
@@ -183,6 +223,9 @@ class OriginalReadonlyTransportFixture:
         deadline = time.monotonic() + seconds
         while True:
             require(self.edge.poll() is None and time.monotonic() < deadline)
+            if self._original_private_publication_pending('readonly-transport-stopped.json'):
+                time.sleep(0.02)
+                continue
             try:
                 value, raw = self.api.read(self.root / 'readonly-transport-stopped.json', maximum=8*1024*1024)
                 break

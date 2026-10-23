@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
+import {createHash,randomBytes} from 'node:crypto';
 import {openInheritedReadonlyTransportRetirementChannel,consumeReadonlyTransportRetirement,
   readReadonlyTransportRetirementCertificate,readOriginalReadonlyTransportChannelIdentity,
   readOriginalCaptureAbortControl} from '../../deploy/scripts/readonly-transport-retirement.mjs';
@@ -13,10 +13,20 @@ const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 async function writeExclusive(file,value){
   const text=JSON.stringify(canonical(value)).replace(/[^\x00-\x7f]/g,char=>'\\u'+char.charCodeAt(0).toString(16).padStart(4,'0'));
   const raw=Buffer.from(text+'\n');assert.ok(raw.length<=8*1024*1024);
-  const handle=await fs.open(file,'wx',0o600);
-  try{await handle.writeFile(raw);await handle.sync();}finally{await handle.close();}
-  const directory=await fs.open(path.dirname(file),'r');
-  try{await directory.sync();}finally{await directory.close();}return sha(raw);
+  // Publish a complete durable inode without ever replacing an existing name.
+  const temporary=file+'.publishing-'+process.pid+'-'+randomBytes(16).toString('hex');
+  const handle=await fs.open(temporary,'wx',0o600);
+  let open=true;
+  try{
+    await handle.writeFile(raw);await handle.sync();await handle.close();open=false;
+    await fs.link(temporary,file);
+  }finally{
+    if(open)await handle.close();
+    await fs.unlink(temporary);
+    const directory=await fs.open(path.dirname(file),'r');
+    try{await directory.sync();}finally{await directory.close();}
+  }
+  return sha(raw);
 }
 /** Called at ORIGINAL edge startup, before the factory receives requests. */
 export const enrollOriginalReadonlyTransportChannel=()=>openInheritedReadonlyTransportRetirementChannel();

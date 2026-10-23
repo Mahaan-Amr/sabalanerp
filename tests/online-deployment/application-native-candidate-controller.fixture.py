@@ -112,7 +112,7 @@ def birth(pid):
 def resource():
     root = Path('/sys/fs/cgroup')
     maximum = (root / 'memory.max').read_text().strip()
-    check(maximum.isdecimal() and int(maximum) == 1280 * MIB, 'CANDIDATE_ENFORCED_MEMORY_CAP_CHANGED')
+    check(maximum.isdecimal() and int(maximum) == 1536 * MIB, 'CANDIDATE_ENFORCED_MEMORY_CAP_CHANGED')
     current = int((root / 'memory.current').read_text())
     events = {key: int(value) for key, value in (line.split() for line in (root / 'memory.events').read_text().splitlines())}
     return dict(memoryMaximum=int(maximum), memoryCurrent=current, memoryAvailable=int(maximum) - current,
@@ -1180,7 +1180,7 @@ class CandidateOwner:
                 actual_queries.add(args[7])
             if actual_queries!=expected_queries:return False
         if any(not probe['closed'] for probe in self.probes.values()):return False
-        if (error.observed['memoryMaximum']!=1280*MIB or error.required!=CAPACITY[kind]
+        if (error.observed['memoryMaximum']!=1536*MIB or error.required!=CAPACITY[kind]
             or error.observed['memoryAvailable']>=error.required):return False
         grant=None if kind in ['chrome','private-chrome','legacy-private-chrome','legacy-private-browser-verify','full-catalog','private-domain','private-domain-verify','private-browser-verify'] else self.grant(kind)
         if grant:

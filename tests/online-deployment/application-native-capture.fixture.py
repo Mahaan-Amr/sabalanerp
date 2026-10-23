@@ -21,6 +21,7 @@ _original_capture = None
 _original_arrival = None
 _original_sql = None
 _original_root = None
+_original_parent_pid = None
 _abort_proofs = weakref.WeakSet()
 
 
@@ -30,7 +31,20 @@ class OriginalCaptureFailureProof:
             raise RuntimeError('APPLICATION_CAPTURE_FAILURE_PROOF_UNPROVEN')
 
 
+def initialize_original_capture_context(root, sql):
+    """Bind this original process before its edge starts; never adopt a capture."""
+    global _original_sql, _original_root, _original_parent_pid
+    root = Path(root)
+    if (_original_parent_pid is not None or root.resolve(strict=True) != root
+            or not callable(sql) or _original_inquiry is not None
+            or _original_capture is not None or _original_arrival is not None):
+        raise RuntimeError('APPLICATION_CAPTURE_INITIAL_CONTEXT_UNPROVEN')
+    _original_sql, _original_root, _original_parent_pid = sql, root, os.getpid()
+
+
 def original_capture_failure_proof():
+    if _original_parent_pid != os.getpid():
+        raise RuntimeError('APPLICATION_CAPTURE_ORIGINAL_PROCESS_CHANGED')
     if _original_sql is None or not original_capture_custody_closed(_original_sql):
         raise RuntimeError('APPLICATION_CAPTURE_ORIGINAL_OWNER_STILL_UNKNOWN')
     if _original_inquiry is not None:
@@ -111,8 +125,9 @@ def close_original_inquiry_if_quiet(root, write, encoded):
 
 
 def run(root, index, observations, routing, source, environment, sql, history, write, encoded, check, *, role_client):
-    global _original_inquiry, _original_capture, _original_arrival, _original_sql, _original_root
-    _original_sql, _original_root = sql, root
+    global _original_inquiry, _original_capture, _original_arrival
+    if _original_parent_pid != os.getpid() or _original_root != root or _original_sql is not sql:
+        raise RuntimeError('APPLICATION_CAPTURE_INITIAL_CONTEXT_UNPROVEN')
     grant = next(value for value in index['grants'] if value['scope']['purpose'] == 'capture')
     sources = observations[0]['sources']
     check(len(sources) == 9 and sources == observations[1]['sources'], 'APPLICATION_CAPTURE_ROOT_ENROLLMENT_CHANGED')

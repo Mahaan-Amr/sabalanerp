@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 import time
+import traceback
 from urllib.parse import urlsplit, urlunsplit, unquote, quote
 
 os.umask(0o077)
@@ -538,6 +539,11 @@ publication_fd = None
 transport_spec = importlib.util.spec_from_file_location('application_original_readonly_transport', root / 'readonly-transport-retirement-native.fixture.py')
 transport_module = importlib.util.module_from_spec(transport_spec); transport_spec.loader.exec_module(transport_module)
 transport = transport_module.OriginalReadonlyTransportFixture(root)
+capture_spec = importlib.util.spec_from_file_location('application_native_coherent_join', root / 'application-native-capture.fixture.py')
+capture_module = importlib.util.module_from_spec(capture_spec)
+sys.modules[capture_spec.name] = capture_module
+capture_spec.loader.exec_module(capture_module)
+capture_module.initialize_original_capture_context(root, sql)
 proven = False
 try:
     seed_sha = None
@@ -695,10 +701,6 @@ try:
     for uploaded in routing['uploads']:
         check(any(row == dict(id=uploaded['id'], sha256=uploaded['sha256'], storageName=uploaded['storageName'], size=uploaded['bytes'])
                   for row in documents), 'APPLICATION_NATIVE_ROUTED_SQL_BYTES_CHANGED')
-    capture_spec = importlib.util.spec_from_file_location('application_native_coherent_join', root / 'application-native-capture.fixture.py')
-    capture_module = importlib.util.module_from_spec(capture_spec)
-    sys.modules[capture_spec.name] = capture_module
-    capture_spec.loader.exec_module(capture_module)
     coherent = capture_module.run(root, index, observations, routing, source, environment, sql, history, write, encoded, check,
                                   role_client=role_client)
     transport.signal_capture_finished()
@@ -803,16 +805,33 @@ try:
                           originalDatabaseRetiredWithoutForce=True, workingRoot=str(root))))
 finally:
     if not proven:
+        original_failure = sys.exc_info()
+        original_failure_diagnostic = dict(type=type(original_failure[1]).__name__,
+            frames=[dict(file=Path(frame.filename).name, line=frame.lineno, function=frame.name)
+                    for frame in traceback.extract_tb(original_failure[2])])
         failed_capture_cleanup = False
         try:
+            write(root / 'failure-original-entry.json', encoded(dict(
+                originalPass=False, productionAdmission=False, failure=original_failure_diagnostic,
+                originalControllerPid=os.getpid(), edgePid=transport.edge.pid if transport.edge is not None else None)))
             capture_closed = capture_module is None or capture_module.original_capture_custody_closed(sql)
             proof = None
             if capture_closed and capture_module is not None:
                 capture_module.close_original_inquiry_if_quiet(root, write, encoded)
                 proof = capture_module.original_capture_failure_proof()
             if capture_closed and transport.edge is not None:
-                if transport.edge.poll() is None and transport.business_ready_raw is not None and proof is not None:
+                if transport.edge.poll() is None and proof is not None:
+                    # A prior partial read may have failed before the complete stage
+                    # was observed. Revalidate only THIS original edge/enrollment.
+                    transport.observe_business_ready_for_negative_abort(seconds=5)
                     transport.signal_capture_aborted(proof)
+                # Persist a nonsecret negative diagnostic BEFORE a potentially held wait.
+                write(root / 'failure-original-before-edge-wait.json', encoded(dict(
+                    originalPass=False, productionAdmission=False, failure=original_failure_diagnostic,
+                    originalControllerPid=os.getpid(), edgePid=transport.edge.pid,
+                    edgeReturncode=transport.edge.poll(),
+                    readyObserved=transport.business_ready_raw is not None,
+                    captureAbortProofAvailable=proof is not None)))
                 # Preserve this exact Popen even through an observer interrupt.
                 while transport.edge.poll() is None:
                     try:

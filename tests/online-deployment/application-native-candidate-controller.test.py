@@ -50,7 +50,7 @@ class CandidateControllerTests(unittest.TestCase):
         owner=self.bare();events=[]
         owner.channel=types.SimpleNamespace(emit=lambda event,body:events.append((event,body)),assert_observers_closed=lambda:None)
         snapshot=[dict(owner.actors),dict(owner.helpers),dict(owner.probes)]
-        observed={'memoryMaximum':1280*owner_module.MIB,'memoryAvailable':1,'memoryCurrent':1280*owner_module.MIB-1,'events':{}}
+        observed={'memoryMaximum':1536*owner_module.MIB,'memoryAvailable':1,'memoryCurrent':1536*owner_module.MIB-1,'events':{}}
         with patch.object(owner_module,'resource',return_value=observed):
             with self.assertRaises(owner_module._OriginalCapacityRefusal) as refusal:owner.capacity('chrome')
         body={'requestId':'b'*64}
@@ -131,7 +131,7 @@ class CandidateControllerTests(unittest.TestCase):
             directory = Path(temporary)
             owner, body, birth, events = self.catalog_owner(directory)
             snapshot = [dict(owner.actors), dict(owner.helpers), dict(owner.probes)]
-            low = {'memoryMaximum': 1280 * owner_module.MIB, 'memoryAvailable': 1}
+            low = {'memoryMaximum': 1536 * owner_module.MIB, 'memoryAvailable': 1}
             with patch.object(owner_module, 'birth', return_value=birth), patch.object(owner_module, 'resource', return_value=low):
                 with self.assertRaises(owner_module._OriginalCapacityRefusal) as failure:
                     owner.full_catalog(body)
@@ -145,8 +145,8 @@ class CandidateControllerTests(unittest.TestCase):
             directory = Path(temporary)
             owner, body, birth, events = self.catalog_owner(directory)
             snapshot = [dict(owner.actors), dict(owner.helpers), dict(owner.probes)]
-            high = {'memoryMaximum': 1280 * owner_module.MIB, 'memoryAvailable': 768 * owner_module.MIB}
-            low = {'memoryMaximum': 1280 * owner_module.MIB, 'memoryAvailable': 1}
+            high = {'memoryMaximum': 1536 * owner_module.MIB, 'memoryAvailable': 768 * owner_module.MIB}
+            low = {'memoryMaximum': 1536 * owner_module.MIB, 'memoryAvailable': 1}
             disk = types.SimpleNamespace(f_bavail=1024**3, f_frsize=1)
             # POSIX durable publication is covered by the Linux joined run;
             # this host test exercises the actual admission/probe ordering.

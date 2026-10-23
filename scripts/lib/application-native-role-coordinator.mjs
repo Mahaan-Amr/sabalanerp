@@ -585,7 +585,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
       assert.ok(pending&&!pending.actor);same(body.requestId,pending.requestId);same(body.failedEvent,pending.expected);
       same(body.kind,pending.kind);same(body.actorId,null);same(body.noWorkStarted,true);same(body.decision,'NATIVE_ACTOR_NOT_STARTED');
       assert.ok(![...actors.values()].some(actor=>actor.kind===pending.kind));
-      same(body.resources.memoryMaximum,1280*1024*1024);assert.ok(Number.isSafeInteger(body.resources.memoryCurrent));
+      same(body.resources.memoryMaximum,1536*1024*1024);assert.ok(Number.isSafeInteger(body.resources.memoryCurrent));
       assert.ok(body.resources.memoryCurrent>=0&&body.resources.memoryCurrent<=body.resources.memoryMaximum);
       same(body.resources.memoryAvailable,body.resources.memoryMaximum-body.resources.memoryCurrent);
       same(body.requiredBytes,requiredMemory[pending.kind]);assert.ok(body.resources.memoryAvailable<body.requiredBytes);

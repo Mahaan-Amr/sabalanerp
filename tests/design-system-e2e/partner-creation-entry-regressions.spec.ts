@@ -392,13 +392,13 @@ test('Partner independent services use catalog defaults, editable rates and dist
 });
 
 for (const returnMode of ['logout/login', 'browser reopen'] as const) {
-  test(`stale runtime is ignored after ${returnMode} and a different customer starts clean`, async ({ page, context, browser }) => {
+  test(`stale runtime is ignored after ${returnMode} and a different customer starts clean`, async ({ page, context, browser, baseURL }) => {
     await loginAsAdmin(page);
     await seedStale(page);
     let target = page;
     let reopened: Awaited<ReturnType<typeof browser.newContext>> | undefined;
     if (returnMode === 'browser reopen') {
-      reopened = await browser.newContext({ baseURL: 'http://localhost:3000', storageState: await context.storageState() });
+      reopened = await browser.newContext({ baseURL, storageState: await context.storageState() });
       target = await reopened.newPage();
       await loginAsAdmin(target);
     } else {
@@ -408,7 +408,7 @@ for (const returnMode of ['logout/login', 'browser reopen'] as const) {
     }
     try {
       const state = await mockPartner(target);
-      await target.goto('http://localhost:3000/dashboard/sales/contracts/create');
+      await target.goto('/dashboard/sales/contracts/create');
       await expect(workflow(target).getByRole('button', { name: 'تاریخ قرارداد', exact: true }).last()).toBeVisible();
       expect(state.acquisitions).not.toContain(oldRecoveryId);
       await next(target).click();

@@ -262,3 +262,44 @@ point records, and rejects reused runtime or capture identities. Caller JSON,
 reconnects, timeouts, raw sequence one or an isolated terminal certificate cannot
 reset a cycle. These controls still require the complete production and restore
 evidence; this protocol description makes no claim that a real cycle passed.
+
+### Explicit larger local QA candidate profile
+
+The default local candidate remains 1536 MiB with a 1536 MiB Docker memory-plus-swap
+limit. When that exact original cohort refuses the full catalog before starting an
+actor, the reviewed replacement CLI can explicitly select
+`--candidate-qa-memory-2048` with its actual completed 1536 MiB predecessor receipt
+and a fresh authority cohort. This is a local QA resource transition only: candidate
+memory and memory-plus-swap both become 2048 MiB; retained memory stays 768 MiB with
+its existing 1536 MiB memory-plus-swap limit. CPU, reservation, PID, OOM policy and
+all other service limits stay fixed. The new V3 receipt records both exact limits
+and the immutable predecessor reference. Existing V1/V2 receipts retain their
+original 1280/1536 MiB meanings. No default or production limit changes.
+
+Both genuine Windows host observations immediately before and after V3 replacement
+must show at least 2048 MiB available. Master admission remains at least 1536 MiB;
+every original native actor still needs its existing actual headroom, including
+384 MiB before the full catalog, without cache credit. Raising the limit does not
+qualify a refused actor or any previous run.
+
+After the new candidate replacement actually closes successfully, add
+`candidateMemoryReceipt: {file, sha256}` to the pinned retained-browser plan, using
+that exact completed V3 replacement receipt. The retained qualifier authenticates
+its actual 1536 MiB predecessor and independently checks the live cgroup maximum.
+`RUN_LOCAL` derives the same profile from its actual candidate receipt and requires
+the retained report to match. The original prepared observer and candidate controller
+revalidate that profile; missing or forged profile data keeps the strict 1536 MiB
+default and cannot admit a 2048 MiB cgroup. No stopped service, alternate stack,
+listener, browser lifecycle, native closure, database, backup or production health
+exception is introduced.
+
+A later ordinary candidate replacement supplies its actual completed 2048 MiB
+predecessor receipt and the existing fresh authority cohort option, without
+repeating the memory transition flag. The same canonical CLI authenticates the
+initial V3 transition and its 1536 MiB predecessor, preserves the installed
+2048 MiB candidate/swap limits, and writes a distinct preserved-profile receipt
+with its immediate predecessor and initial transition pins. Both new host
+observations still require 2048 MiB. Current container IDs, images and births must
+match their authenticated predecessor; missing or changed ancestors refuse the
+update. The transition flag itself remains an exact 1536-to-2048 operation and
+refuses an already-2048 predecessor. Unselected/default installations remain1536.

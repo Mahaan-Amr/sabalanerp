@@ -1,10 +1,11 @@
+import {expectedQaCandidateMemory} from './application-native-qa-profile.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 
-const maximumBytes=1536*1024**2,minimumFreeBytes=384*1024**2;
+const minimumFreeBytes=384*1024**2;
 const commandFor=id=>['exec',id,'/bin/cat','/sys/fs/cgroup/memory.current','/sys/fs/cgroup/memory.max'];
 
-export function validateOriginalPreparedMemoryObservation(value){
+export function validateOriginalPreparedMemoryObservation(value,qaMemoryProfile=null){
  assert.match(value.containerId,/^[a-f0-9]{64}$/);
  assert.deepEqual(value.argv,commandFor(value.containerId));
  assert.ok(Number.isSafeInteger(value.originalPid)&&value.originalPid>0,'PREPARED_MEMORY_ORIGINAL_CHILD_REQUIRED');
@@ -23,7 +24,7 @@ export function validateOriginalPreparedMemoryObservation(value){
  const [memoryCurrent,memoryMaximum]=value.stdout.trimEnd().split('\n').map(Number);
  assert.ok(Number.isSafeInteger(memoryCurrent)&&memoryCurrent>0,'PREPARED_MEMORY_CURRENT_INVALID');
  assert.ok(Number.isSafeInteger(memoryMaximum),'PREPARED_MEMORY_MAXIMUM_INVALID');
- assert.equal(memoryMaximum,maximumBytes,'NATIVE_PREPARED_MEMORY_CAP_CHANGED');
+ assert.equal(memoryMaximum,expectedQaCandidateMemory(qaMemoryProfile),'NATIVE_PREPARED_MEMORY_CAP_CHANGED');
  const actualFreeBytes=memoryMaximum-memoryCurrent;
  assert.ok(actualFreeBytes>=minimumFreeBytes,'NATIVE_PREPARED_ACTUAL_MEMORY_FLOOR_REFUSED');
  return{...value,format:'sabalan-original-prepared-memory-observation/v1',memoryCurrent,memoryMaximum,
@@ -32,7 +33,7 @@ export function validateOriginalPreparedMemoryObservation(value){
 }
 
 /** One fresh original cat after the preparation child is already closed. */
-export async function observeOriginalPreparedMemory({containerId,beforeDocker,onObservation=()=>{}}){
+export async function observeOriginalPreparedMemory({containerId,beforeDocker,qaMemoryProfile=null,onObservation=()=>{}}){
  assert.match(containerId,/^[a-f0-9]{64}$/);assert.equal(typeof beforeDocker,'function');
  const argv=commandFor(containerId);beforeDocker();
  const value=await new Promise(resolve=>{
@@ -52,5 +53,5 @@ export async function observeOriginalPreparedMemory({containerId,beforeDocker,on
    stderr:Buffer.concat(chunks.stderr).toString('utf8'),stdoutBytes:counts.stdout,stderrBytes:counts.stderr}));
  });
  onObservation(value);
- return validateOriginalPreparedMemoryObservation(value);
+ return validateOriginalPreparedMemoryObservation(value,qaMemoryProfile);
 }

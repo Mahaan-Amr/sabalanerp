@@ -23,14 +23,14 @@ test('truthful receipt requires freshslotIDs and actualreadback; cannotclaimunch
  receipt({originalLimitsUnchanged:true});
 });
 test('Compose budget candidate1536 and explicitretained768; guardskeep384floor',()=>{
- const source=fs.readFileSync(new URL('../../docker-compose.online-acceptance.yml',import.meta.url),'utf8');assert.match(source,/mem_limit: 1536m/);assert.match(source,/backend-retained:\n    mem_limit: 768m/);
- const controller=fs.readFileSync(new URL('./application-native-candidate-controller.fixture.py',import.meta.url),'utf8');assert.match(controller,/'full-catalog': 384 \* MIB/);assert.match(controller,/== 1536 \* MIB/);assert.ok(controller.indexOf("self.capacity('full-catalog')")<controller.indexOf("check(self.sql('SELECT system_identifier"));
+ const source=fs.readFileSync(new URL('../../docker-compose.online-acceptance.yml',import.meta.url),'utf8');assert.match(source,/mem_limit: \$\{ONLINE_ACCEPTANCE_CANDIDATE_MEMORY:-1536m\}/);assert.match(source,/backend-retained:\n    mem_limit: 768m/);
+ const controller=fs.readFileSync(new URL('./application-native-candidate-controller.fixture.py',import.meta.url),'utf8');assert.match(controller,/'full-catalog': 384 \* MIB/);assert.match(controller,/EXPECTED_CANDIDATE_MEMORY_BYTES=1536\*MIB/);assert.ok(controller.indexOf("self.capacity('full-catalog')")<controller.indexOf("check(self.sql('SELECT system_identifier"));
 });
 
 test('swap1536 and CPU/pids resource facts remain exact, hostsample follows mandatoryDockerstatus',()=>{
  validateQaSwapConfiguration(1536*1024**2,1536*1024**2);assert.throws(()=>validateQaSwapConfiguration(1536*1024**2,2560*1024**2));const limits={MemorySwap:1536*1024**2,MemoryReservation:0,NanoCpus:1000000000,CpuQuota:0,CpuPeriod:0,PidsLimit:null,OomKillDisable:null};assert.deepEqual(qaUnchangedResourceLimits(limits),limits);assert.throws(()=>qaUnchangedResourceLimits({MemorySwap:1}));
  const source=fs.readFileSync(new URL('../../scripts/replace-qualified-application-native-candidate-local.mjs',import.meta.url),'utf8');assert.match(source,/status\(\);const beforeUpMemory=hostMemory/);assert.ok(!source.slice(source.indexOf('const beforeUpMemory'),source.indexOf('report.up=await')).includes('status()'));
- const compose=fs.readFileSync(new URL('../../docker-compose.online-acceptance.yml',import.meta.url),'utf8');assert.equal((compose.match(/memswap_limit: 1536m/g)||[]).length,2);
+ const compose=fs.readFileSync(new URL('../../docker-compose.online-acceptance.yml',import.meta.url),'utf8');assert.equal((compose.match(/memswap_limit: 1536m/g)||[]).length,1);
 });
 
 test('historical V1 768-to1280 receipt stays authentic and cannot be relabelled V2',()=>{
@@ -43,7 +43,7 @@ test('both explicit versions retain actual2GiB-before and1.5GiB-after, no reduce
 });
 test('unknown cap, unsupportedtransition, nonQAservice, swapdrift and CPUdrift refuse',()=>{
  for(const cap of [768,1024,1280,1792,2048])assert.throws(()=>config('backend-candidate',historical,cap*1024**2,'v2'));
- assert.throws(()=>config('backend',historical,candidate,'v2'));assert.throws(()=>config('backend-candidate',historical,candidate,'v3'));assert.throws(()=>host(obs(3*1024**3),'v3',now));
+ assert.throws(()=>config('backend',historical,candidate,'v2'));assert.throws(()=>config('backend-candidate',historical,candidate,'v3'));assert.throws(()=>host(obs(3*1024**3),'v4',now));
  for(const mutate of [v=>v.candidateQaMemoryTransition.format='unknown',v=>v.candidateQaMemoryTransition.runtimeLimitsAfter['backend-candidate'].MemorySwap++,v=>v.candidateQaMemoryTransition.runtimeLimitsBefore['backend-candidate'].MemorySwap++,v=>v.candidateQaMemoryTransition.runtimeLimitsAfter['backend-retained'].NanoCpus++,v=>v.candidateQaMemoryTransition.before['backend-candidate']=retained]){const v=value();mutate(v);assert.throws(()=>receipt(v));}
 });
 test('old explicit flag remains V1, new V2 requires all original predecessor/cohort controls',()=>{

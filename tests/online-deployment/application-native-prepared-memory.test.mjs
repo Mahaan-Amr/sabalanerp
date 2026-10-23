@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import {createRequire} from 'node:module';
+import {expectedQaCandidateMemory} from '../../scripts/lib/application-native-qa-profile.mjs';
 import {validateOriginalPreparedMemoryObservation} from '../../scripts/lib/application-native-prepared-memory.mjs';
 
 const id='a'.repeat(64),maximum=1536*1024**2,floor=384*1024**2;
@@ -33,7 +34,7 @@ function originalChildFixture(){
  const ts=createRequire(path.resolve('backend/package.json'))('typescript');
  const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const child=new EventEmitter();child.pid=321;child.stdout=new PassThrough();child.stderr=new PassThrough();let before=0,spawned=0,observation;
- const exports={};vm.runInNewContext(compiled,{exports,Buffer,require(name){if(name==='node:assert/strict')return{default:assert};if(name==='node:child_process')return{spawn(executable,argv,options){assert.equal(before,1);assert.equal(executable,'docker');assert.deepEqual(JSON.parse(JSON.stringify(argv)),closed().argv);assert.deepEqual(JSON.parse(JSON.stringify(options)),{stdio:['ignore','pipe','pipe']});spawned++;return child;}};throw Error('Unexpected module');}});
+ const exports={};vm.runInNewContext(compiled,{exports,Buffer,require(name){if(name==='./application-native-qa-profile.mjs')return{expectedQaCandidateMemory};if(name==='node:assert/strict')return{default:assert};if(name==='node:child_process')return{spawn(executable,argv,options){assert.equal(before,1);assert.equal(executable,'docker');assert.deepEqual(JSON.parse(JSON.stringify(argv)),closed().argv);assert.deepEqual(JSON.parse(JSON.stringify(options)),{stdio:['ignore','pipe','pipe']});spawned++;return child;}};throw Error('Unexpected module');}});
  const promise=exports.observeOriginalPreparedMemory({containerId:id,beforeDocker(){before++;},onObservation(value){observation=value;}});return{child,promise,get observation(){return observation;},get spawned(){return spawned;}};
 }
 test('actual helper waits bothEOF and originalclose before fresh proof',async()=>{

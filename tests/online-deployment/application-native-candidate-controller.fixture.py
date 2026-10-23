@@ -109,10 +109,34 @@ def birth(pid):
                 pidNamespace=os.readlink('/proc/' + str(pid) + '/ns/pid'))
 
 
+EXPECTED_CANDIDATE_MEMORY_BYTES=1536*MIB
+
+def configure_qa_memory_profile(configuration,receipt_raw):
+    global EXPECTED_CANDIDATE_MEMORY_BYTES
+    profile=configuration.get('qaMemoryProfile')
+    if profile is None:
+        EXPECTED_CANDIDATE_MEMORY_BYTES=1536*MIB;return
+    check(isinstance(profile,dict)and set(profile)=={'format','candidateBytes','candidateSwapBytes','replacementReceiptSha256','receiptFile'}and profile['format']=='sabalan-explicit-local-qa-memory-profile/v1'and profile['receiptFile']=='qa-memory-replacement-receipt.json','CANDIDATE_QA_PROFILE_INVALID')
+    check(profile['candidateBytes']==profile['candidateSwapBytes']==2048*MIB and digest(receipt_raw)==profile['replacementReceiptSha256']==configuration['roleQualification']['sha256'],'CANDIDATE_QA_PROFILE_RECEIPT_CHANGED')
+    receipt=json.loads(receipt_raw);transition=receipt.get('candidateQaMemoryTransition');preserved=receipt.get('candidateQaMemoryProfile');check((transition is None)!=(preserved is None),'CANDIDATE_QA_PROFILE_AMBIGUOUS');t=transition if transition is not None else preserved;old_candidate=(1536 if transition is not None else 2048)*MIB
+    check(receipt['pass']is True and receipt['phase']=='COMPLETE'and receipt['productionAdmission']is False and receipt['up']['code']==0 and receipt['up']['signal']is None and receipt['originalChildren']==dict(allOriginalChildrenClosed=True,interrupted=False),'CANDIDATE_QA_PROFILE_REPLACEMENT_UNPROVEN')
+    check(t['format']==('sabalan-explicit-local-qa-candidate-memory-transition/v3'if transition is not None else 'sabalan-preserved-local-qa-candidate-memory-profile/v1')and receipt['originalLimitsUnchanged']==(transition is None)and t['before']=={'backend-candidate':old_candidate,'backend-retained':768*MIB}and t['after']=={'backend-candidate':2048*MIB,'backend-retained':768*MIB}and t['nativeActorFloorBytes']==384*MIB and t['cacheCreditUsed']is False,'CANDIDATE_QA_PROFILE_TRANSITION_CHANGED')
+    check(t['runtimeLimitsBefore']['backend-candidate']['MemorySwap']==old_candidate and t['runtimeLimitsAfter']['backend-candidate']['MemorySwap']==2048*MIB and receipt['actual']['backend-candidate']['memoryBytes']==receipt['actual']['backend-candidate']['memorySwapBytes']==2048*MIB,'CANDIDATE_QA_PROFILE_SWAP_CHANGED')
+    for name in ['beforeUp','afterUp']:check(t[name]['platform']=='win32'and type(t[name]['availableBytes'])is int and t[name]['availableBytes']>=2048*MIB,'CANDIDATE_QA_PROFILE_HOST_FLOOR')
+    for service in ['backend-candidate','backend-retained']:
+        before=t['runtimeLimitsBefore'][service];after=t['runtimeLimitsAfter'][service]
+        check({k:v for k,v in before.items()if k!='MemorySwap'}=={k:v for k,v in after.items()if k!='MemorySwap'},'CANDIDATE_QA_PROFILE_UNRELATED_LIMIT_CHANGED')
+        if service=='backend-retained':check(before==after and after['MemorySwap']==1536*MIB and receipt['actual'][service]['memoryBytes']==768*MIB and receipt['actual'][service]['memorySwapBytes']==1536*MIB,'CANDIDATE_QA_PROFILE_RETAINED_CHANGED')
+        old=receipt['previous'][service];check(re.fullmatch('[a-f0-9]{64}',old['id'])and old['id']!=receipt['actual'][service]['id']and receipt['reobservedBaseline']['identities'][service]==old and receipt['reobservedBaseline']['previousIdentities'][service]==old,'CANDIDATE_QA_PROFILE_PREDECESSOR_CHANGED')
+    check(set(t['predecessor'])=={'file','sha256'}and re.fullmatch('[a-f0-9]{64}',t['predecessor']['sha256'])and receipt['inputs'][t['predecessor']['file']]==t['predecessor']['sha256'],'CANDIDATE_QA_PROFILE_PREDECESSOR_PIN')
+    if preserved is not None:check(set(t['transition'])=={'file','sha256'}and re.fullmatch('[a-f0-9]{64}',t['transition']['sha256'])and receipt['inputs'][t['transition']['file']]==t['transition']['sha256'],'CANDIDATE_QA_PROFILE_TRANSITION_PIN')
+    EXPECTED_CANDIDATE_MEMORY_BYTES=2048*MIB
+
+
 def resource():
     root = Path('/sys/fs/cgroup')
     maximum = (root / 'memory.max').read_text().strip()
-    check(maximum.isdecimal() and int(maximum) == 1536 * MIB, 'CANDIDATE_ENFORCED_MEMORY_CAP_CHANGED')
+    check(maximum.isdecimal() and int(maximum) == EXPECTED_CANDIDATE_MEMORY_BYTES, 'CANDIDATE_ENFORCED_MEMORY_CAP_CHANGED')
     current = int((root / 'memory.current').read_text())
     events = {key: int(value) for key, value in (line.split() for line in (root / 'memory.events').read_text().splitlines())}
     return dict(memoryMaximum=int(maximum), memoryCurrent=current, memoryAvailable=int(maximum) - current,
@@ -145,6 +169,7 @@ class CandidateOwner:
         spec = importlib.util.spec_from_file_location('candidate_original_host_channel', self.root / 'original-host-controller-channel.py')
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         self.channel = module.OriginalHostChannel(public_key, session, 'candidate')
+        configuration=json.loads(private_read(self.root/'config.json',8*MIB));profile_receipt=private_read(self.root/'qa-memory-replacement-receipt.json',16*MIB)if configuration.get('qaMemoryProfile')is not None else b'';configure_qa_memory_profile(configuration,profile_receipt)
         self.controller_id, self.original_birth = secrets.token_hex(32), birth(os.getpid())
         self.actors, self.helpers, self.probes = {}, {}, {}
         self.sticky_failures, self.completed = [], set()
@@ -1180,7 +1205,7 @@ class CandidateOwner:
                 actual_queries.add(args[7])
             if actual_queries!=expected_queries:return False
         if any(not probe['closed'] for probe in self.probes.values()):return False
-        if (error.observed['memoryMaximum']!=1536*MIB or error.required!=CAPACITY[kind]
+        if (error.observed['memoryMaximum']!=EXPECTED_CANDIDATE_MEMORY_BYTES or error.required!=CAPACITY[kind]
             or error.observed['memoryAvailable']>=error.required):return False
         grant=None if kind in ['chrome','private-chrome','legacy-private-chrome','legacy-private-browser-verify','full-catalog','private-domain','private-domain-verify','private-browser-verify'] else self.grant(kind)
         if grant:

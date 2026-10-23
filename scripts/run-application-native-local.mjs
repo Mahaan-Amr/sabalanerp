@@ -1,3 +1,4 @@
+import {readExplicitQaMemoryProfile,readQaMemoryProfile} from './lib/application-native-qa-profile.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -64,7 +65,7 @@ capture('scripts/run-application-native-local.mjs');
 capture('scripts/lib/application-native-role-coordinator.mjs');
 capture('scripts/lib/application-native-prepared-memory.mjs');
 for(const source of ['scripts/lib/original-private-legacy-ui-carrier.mjs',
- 'scripts/lib/production-legacy-browser-artifacts.mjs','scripts/lib/production-frontend-base-artifacts.mjs',
+ 'scripts/lib/application-native-qa-profile.mjs','scripts/lib/production-legacy-browser-artifacts.mjs','scripts/lib/production-frontend-base-artifacts.mjs',
  'scripts/lib/private-docker-image-archive.mjs','deploy/scripts/production-frontend-snapshot.mjs'])capture(source);
 capture('docker-compose.application-native-role-isolation.yml');
 const {collectNativeCandidateArtifacts,candidateReplacementReceiptArgument}=await import('./lib/application-native-candidate-artifacts.mjs');
@@ -72,6 +73,7 @@ const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'u
 const candidateArtifacts=collectNativeCandidateArtifacts({root,capture,containers:initial,sourceCommit,
  receiptArgument:candidateReplacementReceiptArgument(['--candidate-replacement-receipt',candidateReplacementReceipt])});
 const {roleQualificationFile,roleQualificationBytes,roleQualification,privateQualificationRuntime}=candidateArtifacts;
+const qaMemoryProfile=(roleQualification.candidateQaMemoryTransition?.format==='sabalan-explicit-local-qa-candidate-memory-transition/v3'||roleQualification.candidateQaMemoryProfile)?readExplicitQaMemoryProfile({file:candidateReplacementReceipt,sha256:sha(roleQualificationBytes)}):null;assert.deepEqual(retainedBrowserFacts.report.qaMemoryProfile??null,readQaMemoryProfile(qaMemoryProfile));
 const built=await esbuild.build({absWorkingDir:root,entryPoints:['tests/online-deployment/application-native.worker.ts'],
   bundle:true,platform:'node',packages:'external',format:'cjs',target:'node22',write:false,logLevel:'silent',
   plugins:[{name:'capture-application-native-sources',setup(build){build.onLoad({filter:/.*/,namespace:'file'},args=>{
@@ -80,7 +82,7 @@ const built=await esbuild.build({absWorkingDir:root,entryPoints:['tests/online-d
     return {contents:capture(name),loader,resolveDir:path.dirname(args.path)};
   });}}]});
 const bundle=Buffer.from(built.outputFiles[0].contents),bundleSha256=sha(bundle);
-const files={'application-worker.cjs':bundle};
+const files={'application-worker.cjs':bundle};if(qaMemoryProfile)files['qa-memory-replacement-receipt.json']=roleQualificationBytes;
 const readonlyTransport=collectApplicationReadonlyTransportArtifacts({capture,sources,bundle,bundleSha256});
 Object.assign(files,readonlyTransport.files);
 const ui=collectApplicationUiArtifacts({root,capture,containers:initial,inspectImage:image=>{
@@ -232,9 +234,9 @@ assert.match(files['hr-file-expansion.sql'].toString(),/^-- Generated bounded on
 files['original-retained-browser-result.json']=fs.readFileSync(retainedBrowserFacts.reportFile);
 assert.equal(sha(files['original-retained-browser-result.json']),retainedBrowserFacts.reportSha256);
 const fileHashes=Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,sha(bytes)]));
-const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,
+const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile,
   onHeld:value=>{const reportPath=path.join(root,'reports/qa',path.basename(directory)+'-role-held.json');fs.writeFileSync(reportPath,JSON.stringify(value,null,2)+'\n');console.log(JSON.stringify({format:'sabalan-original-inner-controller-held/v1',event:'ORIGINAL_INNER_CONTROLLER_HELD',status:'ROLEHELD',reportPath,reason:'ORIGINAL_CONTROLLER_HELD'}));}});
-files['config.json']=Buffer.from(JSON.stringify({sourceCommit,
+files['config.json']=Buffer.from(JSON.stringify({sourceCommit,...(qaMemoryProfile?{qaMemoryProfile:{...readQaMemoryProfile(qaMemoryProfile),receiptFile:'qa-memory-replacement-receipt.json'}}:{}),
   retainedBrowserReport:{file:'original-retained-browser-result.json',sha256:retainedBrowserFacts.reportSha256},
   image:retained.Image,bundleSha256,roleTopology,roleQualification:{file:roleQualificationFile,sha256:sha(roleQualificationBytes)},
   privateQualificationRuntime,
@@ -270,7 +272,7 @@ report.prepareCache=await run(candidate,'prepare-cache');save();assert.equal(rep
 assert.equal(report.prepareCache.signal,null);const cachePreparation=JSON.parse(report.prepareCache.stdout);
 assert.equal(cachePreparation.cacheCreditUsed,false);
 // The closed Python preparation statistics remain diagnostic; sample fresh now.
-report.preparedMemory=await observeOriginalPreparedMemory({containerId:candidate.Id,beforeDocker:status,
+report.preparedMemory=await observeOriginalPreparedMemory({containerId:candidate.Id,beforeDocker:status,qaMemoryProfile,
   onObservation:value=>{report.preparedMemoryObservation=value;save();}});save();
 report.roleAuthorityIssue=await run(retained,'issue-role-authorities');save();assert.equal(report.roleAuthorityIssue.code,0);
 assert.equal(report.roleAuthorityIssue.signal,null);assert.equal(JSON.parse(report.roleAuthorityIssue.stdout).issued,true);

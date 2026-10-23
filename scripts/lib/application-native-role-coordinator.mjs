@@ -1,3 +1,4 @@
+import {expectedQaCandidateMemory} from './application-native-qa-profile.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -83,7 +84,7 @@ function validateOriginalMainHttpOwner(entry,grant,index,status){
 
 /** Diagnostic only. The private key and both original Docker-exec handles never
  * leave this closure. There is deliberately no public arbitrary signer. */
-export function createOriginalRoleCoordinator({directory,topology,fileHashes,retainedBrowserCompletion,originalServiceIdentities,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,onHeld=()=>{}}){
+export function createOriginalRoleCoordinator({directory,topology,fileHashes,retainedBrowserCompletion,originalServiceIdentities,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile=null,onHeld=()=>{}}){
   assert.match(directory,/^\/app\/online-runtime-acceptance\/application-native-[a-f0-9]{32}$/);
   const retained=retainedBrowserCompletion?readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion):null;
   for(const role of ['main','candidate']){
@@ -585,7 +586,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
       assert.ok(pending&&!pending.actor);same(body.requestId,pending.requestId);same(body.failedEvent,pending.expected);
       same(body.kind,pending.kind);same(body.actorId,null);same(body.noWorkStarted,true);same(body.decision,'NATIVE_ACTOR_NOT_STARTED');
       assert.ok(![...actors.values()].some(actor=>actor.kind===pending.kind));
-      same(body.resources.memoryMaximum,1536*1024*1024);assert.ok(Number.isSafeInteger(body.resources.memoryCurrent));
+      same(body.resources.memoryMaximum,expectedQaCandidateMemory(qaMemoryProfile));assert.ok(Number.isSafeInteger(body.resources.memoryCurrent));
       assert.ok(body.resources.memoryCurrent>=0&&body.resources.memoryCurrent<=body.resources.memoryMaximum);
       same(body.resources.memoryAvailable,body.resources.memoryMaximum-body.resources.memoryCurrent);
       same(body.requiredBytes,requiredMemory[pending.kind]);assert.ok(body.resources.memoryAvailable<body.requiredBytes);

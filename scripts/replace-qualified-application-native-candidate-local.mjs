@@ -1,3 +1,4 @@
+import {historicalCapsuleTargets,historicalCapsuleInputFiles,historicalCapsulePreflightSpec,validateHistoricalCapsuleConfiguration,validateHistoricalCapsulePair,validatePreviousHistoricalCapsulePair} from './lib/application-native-historical-capsules.mjs';
 import {readPostUpMemoryBaseline,postUpMemoryDescriptor,postUpMemoryInputs,validatePostUpCurrentSlots,postUpAcceptanceExpectation} from './lib/application-native-post-up-memory-baseline.mjs';
 import {readNegativeRecoveryHandoff,negativeRecoveryDescriptor,negativeRecoveryInputs,negativeRecoveryStreamingInputs,negativeRecoveryAcceptance,validateNegativeRecoveryPhysicalReadback} from './lib/application-native-negative-baseline.mjs';
 import {validateNegativeAcceptanceConfiguration,validateNegativeAcceptanceSlots} from './lib/application-native-negative-acceptance.mjs';
@@ -209,6 +210,7 @@ const previous=Object.fromEntries(slots.map(service=>[service,inspect(service)])
 let acceptanceOrigin=null,acceptanceDescriptor=null,acceptanceToken=negativeToken;
 if(postUpToken){acceptanceOrigin=postUpDescriptor.acceptanceOrigin;acceptanceDescriptor=postUpDescriptor.acceptance;}else if(negativeToken){acceptanceOrigin=negativeRecoveryHandoff;acceptanceDescriptor=negativeRecoveryAcceptance(negativeToken);}else if(predecessor?.acceptanceCohort){assert.equal(predecessor.acceptanceCohort.format,'sabalan-preserved-negative-acceptance-view/v1');assert.equal(negativeRetirementArgument,undefined,'NEGATIVE_ACCEPTANCE_VIEW_CANNOT_INHERIT_A29');acceptanceOrigin=predecessor.acceptanceCohort.origin;if(predecessor.candidateQaMemoryPostUpRecovery){const origin=readPostUpMemoryBaseline(predecessor.candidateQaMemoryPostUpRecovery.baseline);const facts=postUpMemoryDescriptor(origin);assert.deepEqual(facts.acceptanceOrigin,acceptanceOrigin);acceptanceDescriptor=facts.acceptance;predecessorInputs.push(...Object.keys(postUpMemoryInputs(origin)));}else{acceptanceToken=readNegativeRecoveryHandoff(acceptanceOrigin);acceptanceDescriptor=negativeRecoveryAcceptance(acceptanceToken);}assert.deepEqual(predecessor.acceptanceCohort.descriptor,acceptanceDescriptor);if(acceptanceToken)predecessorInputs.push(...Object.keys(negativeRecoveryInputs(acceptanceToken)));}
 if(acceptanceDescriptor)validateNegativeAcceptanceSlots(previous,acceptanceDescriptor);
+validatePreviousHistoricalCapsulePair(previous['backend-candidate'],previous['backend-retained']);
 const sourceDist=previous['backend-candidate'].Mounts.find(value=>value.Destination==='/app/dist');assert.ok(!sourceDist||!sourceDist.RW);
 const sourceRoot=sourceDist?path.dirname(path.dirname(sourceDist.Source)):root;
 let reobservedBaseline=null;
@@ -218,7 +220,7 @@ if(predecessorImage){const [observedPredecessor]=JSON.parse(docker(['image','ins
 const [installedImage]=JSON.parse(docker(['image','inspect',image]));
 assert.equal(installedImage.Id,image);assert.deepEqual(installedImage.RootFS.Layers,imageReceipt.image.layers);
 const overlays=['docker-compose.online-acceptance.yml','docker-compose.online-runtime-authority-acceptance.yml',
-  'docker-compose.application-native-role-isolation.yml','docker-compose.application-native-mixed-images.yml',...(isolateAuthorityCohort?['docker-compose.application-native-authority-cohort.yml']:[]),...(acceptanceDescriptor?['docker-compose.application-native-negative-acceptance-cohort.yml']:[])].map(name=>path.join(root,name));
+  'docker-compose.application-native-role-isolation.yml','docker-compose.application-native-mixed-images.yml','docker-compose.application-native-historical-capsules.yml',...(isolateAuthorityCohort?['docker-compose.application-native-authority-cohort.yml']:[]),...(acceptanceDescriptor?['docker-compose.application-native-negative-acceptance-cohort.yml']:[])].map(name=>path.join(root,name));
 const cohortNonce=isolateAuthorityCohort?randomBytes(16).toString('hex'):null;
 const env={...process.env,ONLINE_ACCEPTANCE_BASE_COMPOSE:base,ONLINE_ACCEPTANCE_SOURCE_ROOT:sourceRoot,
   ONLINE_ACCEPTANCE_CANDIDATE_MEMORY:['v3','preserve-v3','recovery-v3'].includes(candidateQaMemoryMode)?'2048m':'1536m',ONLINE_ACCEPTANCE_CANDIDATE_SWAP:['v3','preserve-v3','recovery-v3'].includes(candidateQaMemoryMode)?'2048m':'1536m',ONLINE_ACCEPTANCE_BACKEND_IMAGE:image,ONLINE_ACCEPTANCE_RETAINED_BACKEND_IMAGE:oldImage,ONLINE_ACCEPTANCE_FRONTEND_IMAGE:inspect('frontend-candidate').Image,
@@ -237,13 +239,15 @@ for(const service of slots){const wanted=configuration.services[service],old=pre
   assert.deepEqual(wantedPorts,oldPorts);
   const oldMounts=new Map(old.Mounts.map(value=>[value.Destination,value]));
   for(const target of removedCodeTargets)assert.ok(!wanted.volumes.some(volume=>volume.target===target));
+  validateHistoricalCapsuleConfiguration(wanted,configuration.volumes);
   for(const volume of wanted.volumes){const existing=oldMounts.get(volume.target);
+    if(!existing&&historicalCapsuleTargets.includes(volume.target))continue;
     if(!existing){const rootMount=isolateAuthorityCohort&&authorityMounts[service].find(m=>!m.subpath&&m.target===volume.target);assert.ok(rootMount,'unexpected mount '+volume.target);assert.equal(volume.type,'volume');assert.equal(volume.read_only??false,false);continue;}assert.equal(!volume.read_only,existing.RW);
     if(volume.type==='bind')assert.equal(path.resolve(volume.source).toLowerCase(),path.resolve(existing.Source).toLowerCase());
     else assert.equal(configuration.volumes[volume.source].name,existing.Name);
   }
-  const remainingOld=old.Mounts.filter(value=>!removedCodeTargets.includes(value.Destination));const newRoots=isolateAuthorityCohort?authorityMounts[service].filter(m=>!m.subpath&&!oldMounts.has(m.target)).map(m=>m.target):[];assert.equal(wanted.volumes.length,remainingOld.length+newRoots.length);
-  assert.deepEqual(wanted.volumes.map(value=>value.target).sort(),[...remainingOld.map(value=>value.Destination),...newRoots].sort());
+  const remainingOld=old.Mounts.filter(value=>!removedCodeTargets.includes(value.Destination));const newRoots=isolateAuthorityCohort?authorityMounts[service].filter(m=>!m.subpath&&!oldMounts.has(m.target)).map(m=>m.target):[];const newCapsules=historicalCapsuleTargets.filter(target=>!oldMounts.has(target));assert.equal(wanted.volumes.length,remainingOld.length+newRoots.length+newCapsules.length);
+  assert.deepEqual(wanted.volumes.map(value=>value.target).sort(),[...remainingOld.map(value=>value.Destination),...newRoots,...newCapsules].sort());
 }
 let negativeRetirement=null;
 if(negativeRetirementArgument){const raw=fs.readFileSync(negativeRetirementArgument.file);assert.equal(createHash('sha256').update(raw).digest('hex'),negativeRetirementArgument.sha256);negativeRetirement=validateA29RetirementCertificate(JSON.parse(raw),loadA29Evidence());}
@@ -255,7 +259,11 @@ const sqlQuiet=()=>{const value=JSON.parse(docker(['exec',inspect('postgres').Id
 const operation=randomBytes(16).toString('hex'),reportPath=path.join(root,'reports/qa/application-native-candidate-'+operation+'.json');
 const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const negativeSources=acceptanceDescriptor?['scripts/lib/application-native-negative-baseline.mjs','scripts/lib/application-native-negative-evidence.mjs','scripts/lib/application-native-negative-acceptance.mjs','scripts/lib/application-native-negative-baseline.policy.py','tests/online-deployment/application-native-negative-acceptance.fixture.py'].map(file=>path.join(root,file)):[];
-const inputs=Object.fromEntries([base,...overlays,import.meta.filename,path.join(root,'scripts/lib/application-native-post-up-memory-baseline.mjs'),...negativeSources,path.join(root,'scripts/lib/application-native-qa-memory.mjs'),path.join(root,'scripts/lib/application-native-qa-profile.mjs'),path.join(root,'scripts/lib/a29-known-negative-retirement.mjs'),...(negativeRetirementArgument?[negativeRetirementArgument.file,...a29EvidenceFiles]:[]),imageReceiptFile,materialReceiptFile,installedProbeFile,preflightFile,historicalFile,retainedImageReceiptFile,retainedMaterialReceiptFile,path.join(root,'scripts/replace-application-native-candidate-local.mjs'),...predecessorInputs,...(isolateAuthorityCohort?authorityCohortSources.map(file=>path.join(root,file)):[])].map(file=>[file,hash(file)]));
+const capsuleProbeFile=path.join(root,'tests/online-deployment/historical-capsule-preflight.fixture.py');
+const capsuleProbe=fs.readFileSync(capsuleProbeFile);
+const capsuleSpec=historicalCapsulePreflightSpec(root);
+const inputs=Object.fromEntries([base,...overlays,import.meta.filename,path.join(root,'scripts/lib/application-native-historical-capsules.mjs'),capsuleProbeFile,...historicalCapsuleInputFiles(root),path.join(root,'scripts/lib/application-native-post-up-memory-baseline.mjs'),...negativeSources,path.join(root,'scripts/lib/application-native-qa-memory.mjs'),path.join(root,'scripts/lib/application-native-qa-profile.mjs'),path.join(root,'scripts/lib/a29-known-negative-retirement.mjs'),...(negativeRetirementArgument?[negativeRetirementArgument.file,...a29EvidenceFiles]:[]),imageReceiptFile,materialReceiptFile,installedProbeFile,preflightFile,historicalFile,retainedImageReceiptFile,retainedMaterialReceiptFile,path.join(root,'scripts/replace-application-native-candidate-local.mjs'),...predecessorInputs,...(isolateAuthorityCohort?authorityCohortSources.map(file=>path.join(root,file)):[])].map(file=>[file,hash(file)]));
+assert.equal(digest(capsuleProbe),inputs[capsuleProbeFile],'HISTORICAL_CAPSULE_PROBE_CHANGED');
 const report={...(postUpToken?{postUpMemoryBaseline:structuredClone(postUpMemoryBaseline),candidateQaMemoryPostUpRecovery:{format:'sabalan-post-up-negative-baseline-local-qa-memory-profile/v1',baseline:structuredClone(postUpMemoryBaseline),failedReportRemainsFailed:true,originalUpAdopted:false,before:Object.fromEntries(slots.map(service=>[service,previous[service].HostConfig.Memory])),after:Object.fromEntries(slots.map(service=>[service,Number(configuration.services[service].mem_limit)])),nativeActorFloorBytes,cacheCreditUsed:false,runtimeLimitsBefore:Object.fromEntries(slots.map(service=>[service,qaUnchangedResourceLimits(previous[service].HostConfig)]))},reobservedBaseline,postUpBaselineAuthorityVerified:{},postUpBaselineAcceptanceVerified:{}}:{}),...(acceptanceDescriptor?{acceptanceCohort:{format:'sabalan-preserved-negative-acceptance-view/v1',origin:structuredClone(acceptanceOrigin),descriptor:structuredClone(acceptanceDescriptor)}}:{}),...(negativeToken?{negativeRecoveryHandoff:structuredClone(negativeRecoveryHandoff),candidateQaMemoryNegativeRecovery:{format:'sabalan-negative-baseline-local-qa-memory-profile/v1',handoff:structuredClone(negativeRecoveryHandoff),history:structuredClone(predecessorSelection),transition:qaMemoryProfileTransition(inheritedQaMemoryProfile),historicalPhysicalIdentityClaimed:false,resourceProfileHistoryOnly:true,before:Object.fromEntries(slots.map(service=>[service,previous[service].HostConfig.Memory])),after:Object.fromEntries(slots.map(service=>[service,Number(configuration.services[service].mem_limit)])),nativeActorFloorBytes,cacheCreditUsed:false,runtimeLimitsBefore:Object.fromEntries(slots.map(service=>[service,qaUnchangedResourceLimits(previous[service].HostConfig)]))},negativeBaselineAuthorityVerified:{},negativeBaselineAcceptanceVerified:{}}:{}),...(inheritedQaMemoryProfile&&!negativeToken?{candidateQaMemoryProfile:{format:'sabalan-preserved-local-qa-candidate-memory-profile/v1',predecessor:{...previousReplacement},transition:qaMemoryProfileTransition(inheritedQaMemoryProfile),before:Object.fromEntries(slots.map(service=>[service,previous[service].HostConfig.Memory])),after:Object.fromEntries(slots.map(service=>[service,Number(configuration.services[service].mem_limit)])),nativeActorFloorBytes,cacheCreditUsed:false,runtimeLimitsBefore:Object.fromEntries(slots.map(service=>[service,qaUnchangedResourceLimits(previous[service].HostConfig)]))}}:{}),...(negativeRetirementArgument?{knownNegativeCancellationRetirement:{...negativeRetirementArgument,classification:'KNOWN_NEGATIVE_CANCELLED',successfulNativeClosure:false}}:{}),format:'sabalan-application-native-candidate/v1',replacementEntry:'scripts/replace-qualified-application-native-candidate-local.mjs',operation,pass:false,phase:'INTENT',productionAdmission:false,
   onlyCandidateReplaced:!isolateAuthorityCohort,retainedOriginalPreserved:!isolateAuthorityCohort,...(isolateAuthorityCohort?{onlyQualificationSlotsRecreated:true,authorityCohort:{format:'sabalan-native-authority-cohort/v1',nonce:cohortNonce,prepared:{},verified:{}}}:{}),originalLimitsUnchanged:!candidateQaMemoryTransition,...(candidateQaMemoryTransition?{candidateQaMemoryTransition:{format:'sabalan-explicit-local-qa-candidate-memory-transition/'+candidateQaMemoryTransition,...(candidateQaMemoryTransition==='v3'?{predecessor:{...previousReplacement}}:{}),before:Object.fromEntries(slots.map(service=>[service,previous[service].HostConfig.Memory])),after:Object.fromEntries(slots.map(service=>[service,Number(configuration.services[service].mem_limit)])),nativeActorFloorBytes,cacheCreditUsed:false,runtimeLimitsBefore:Object.fromEntries(slots.map(service=>[service,qaUnchangedResourceLimits(previous[service].HostConfig)]))}}:{}),protectedBefore,previous:Object.fromEntries(slots.map(service=>[service,identity(previous[service])])),inputs,
   immutableImage:image,materialReceiptSha256:digest(materialReceiptRaw),imageReceiptSha256:digest(imageReceiptRaw),removedCodeTargets,
@@ -324,6 +332,28 @@ try{
    const result=JSON.parse(observation.stdout);validateInstalledNativeRole(result,perRole[service==='backend-retained'?'main':'candidate']);
    report.installed[service]={originalPid:observation.originalPid,code:0,signal:null,stderr:observation.stderr,result};save();
   }
+  report.historicalCapsuleViews=validateHistoricalCapsulePair(actual['backend-candidate'],actual['backend-retained']);
+  report.historicalCapsulePreflight={};
+  for(const service of slots){
+    status();
+    const observed=await new Promise(resolve=>{
+      const child=spawn('docker',['exec','-i',actual[service].Id,'/usr/bin/python3','-I','-B','-c',capsuleProbe.toString('utf8')],{stdio:['pipe','pipe','pipe']});
+      children.push(child);let stdout='',stderr='',failure;
+      child.stdout.on('data',bytes=>{if(Buffer.byteLength(stdout)+bytes.length<=65536)stdout+=bytes;else failure??='CAPSULE_PREFLIGHT_STDOUT_BOUND';});
+      child.stderr.on('data',bytes=>{if(Buffer.byteLength(stderr)+bytes.length<=65536)stderr+=bytes;else failure??='CAPSULE_PREFLIGHT_STDERR_BOUND';});
+      child.stdin.on('error',error=>{failure??=error.code;});child.once('error',error=>{failure??=error.code;});
+      child.once('close',(code,signal)=>resolve({originalPid:child.pid,code,signal,stdout,stderr,failure,stdoutEof:child.stdout.readableEnded,stderrEof:child.stderr.readableEnded,interrupted}));
+      child.stdin.end(JSON.stringify(capsuleSpec));
+    });
+    report.historicalCapsulePreflight[service]=observed;save();
+    assert.equal(observed.code,0);assert.equal(observed.signal,null);assert.equal(observed.failure,undefined);
+    assert.equal(observed.stdoutEof,true);assert.equal(observed.stderrEof,true);assert.equal(observed.interrupted,false);
+    const result=JSON.parse(observed.stdout);assert.equal(result.readOnly,true);assert.equal(result.capsulesVerified,2);
+    assert.equal(result.databaseExecuted,false);assert.equal(result.nativeActorStarted,false);assert.equal(result.productionAdmission,false);
+    assert.equal(result.inventoryChild.code,0);assert.equal(result.inventoryChild.stdoutEof,true);assert.equal(result.inventoryChild.stderrEof,true);
+    report.historicalCapsulePreflight[service].result=result;save();
+  }
+  assert.deepEqual(report.historicalCapsulePreflight['backend-candidate'].result.directoryIdentities,report.historicalCapsulePreflight['backend-retained'].result.directoryIdentities);
   report.postMutationNativeQuiet=processQuiet(actual);report.postMutationSqlQuiet=sqlQuiet();
   report.privateQualificationRuntimes={main:perRole.main.runtime,candidate:perRole.candidate.runtime};
   report.privateQualificationSourceCommits={main:retainedReceipt.sourceCommit,candidate:imageReceipt.sourceCommit};

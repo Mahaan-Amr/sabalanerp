@@ -103,7 +103,7 @@ test('known failed-cohort recovery is explicit, SHA-pinned and permits only fres
 });
 test('actual directory child failure is saved with stdout/stderr/code before assertion',async()=>{
  const source=fs.readFileSync(new URL('../../scripts/replace-qualified-application-native-candidate-local.mjs',import.meta.url),'utf8');
- const start=source.indexOf('async function originalAuthorityDirectory('),end=source.indexOf('\ntry{\n if(predecessor',start);assert.ok(start>0&&end>start);
+ const start=source.indexOf('async function originalAuthorityDirectory('),end=source.indexOf('\nasync function originalNegativeAcceptanceVerify(',start);assert.ok(start>0&&end>start);
  const report={authorityCohort:{prepared:{},verified:{}}},saved=[],children=[];
  const spawn=()=>{const child=new EventEmitter();child.pid=4321;child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.stdin=new EventEmitter();child.stdin.end=()=>queueMicrotask(()=>{child.stdout.emit('data',Buffer.from('original output'));child.stderr.emit('data',Buffer.from('original failure'));child.emit('close',1,null);});return child;};
  const context={authorityWriterRoot:()=>({kind:'runtime',target:'/app/qualification-authority-root'}),fs:{readFileSync:()=>Buffer.from('fixture')},path,root:'/repo',authorityCohortSources:['module','fixture'],cohortNonce:nonce,digest:()=> 'a'.repeat(64),status:()=>{},spawn,children,Buffer,assert,interrupted:false,report,save:()=>saved.push(clone(report))};

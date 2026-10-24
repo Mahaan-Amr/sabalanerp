@@ -1,0 +1,34 @@
+# Exact read-only inactive content, never the unscoped acceptance-volume root.
+services:
+  backend-candidate:
+    volumes:
+      - type: volume
+        source: online_runtime_acceptance
+        target: /app/online-runtime-acceptance/application-prisma-ebcfd40fff0a28e39d983c6616893b50
+        read_only: true
+        volume:
+          nocopy: true
+          subpath: application-prisma-ebcfd40fff0a28e39d983c6616893b50
+      - type: volume
+        source: online_runtime_acceptance
+        target: /app/online-runtime-acceptance/inquiry-coherent-7878c93646acd9ac37cef95e27a4029d
+        read_only: true
+        volume:
+          nocopy: true
+          subpath: inquiry-coherent-7878c93646acd9ac37cef95e27a4029d
+  backend-retained:
+    volumes:
+      - type: volume
+        source: online_runtime_acceptance
+        target: /app/online-runtime-acceptance/application-prisma-ebcfd40fff0a28e39d983c6616893b50
+        read_only: true
+        volume:
+          nocopy: true
+          subpath: application-prisma-ebcfd40fff0a28e39d983c6616893b50
+      - type: volume
+        source: online_runtime_acceptance
+        target: /app/online-runtime-acceptance/inquiry-coherent-7878c93646acd9ac37cef95e27a4029d
+        read_only: true
+        volume:
+          nocopy: true
+          subpath: inquiry-coherent-7878c93646acd9ac37cef95e27a4029d

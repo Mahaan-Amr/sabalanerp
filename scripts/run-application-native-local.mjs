@@ -73,7 +73,7 @@ capture('scripts/run-application-native-local.mjs');
 capture('scripts/lib/application-native-role-coordinator.mjs');
 capture('scripts/lib/application-native-prepared-memory.mjs');
 for(const source of ['scripts/lib/original-private-legacy-ui-carrier.mjs',
- 'scripts/lib/application-native-qa-profile.mjs','scripts/lib/production-legacy-browser-artifacts.mjs','scripts/lib/production-frontend-base-artifacts.mjs',
+ 'scripts/lib/application-native-qa-profile.mjs','scripts/lib/application-native-post-up-memory-baseline.mjs','scripts/lib/production-legacy-browser-artifacts.mjs','scripts/lib/production-frontend-base-artifacts.mjs',
  'scripts/lib/private-docker-image-archive.mjs','deploy/scripts/production-frontend-snapshot.mjs'])capture(source);
 capture('scripts/lib/local-dev-frontend-suspension.mjs');capture('scripts/run-local-dev-frontend-suspension.mjs');capture('docker-compose.application-native-role-isolation.yml');
 const {collectNativeCandidateArtifacts,candidateReplacementReceiptArgument}=await import('./lib/application-native-candidate-artifacts.mjs');
@@ -81,7 +81,7 @@ const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'u
 const candidateArtifacts=collectNativeCandidateArtifacts({root,capture,containers:initial,sourceCommit,
  receiptArgument:candidateReplacementReceiptArgument(['--candidate-replacement-receipt',candidateReplacementReceipt])});
 const {roleQualificationFile,roleQualificationBytes,roleQualification,privateQualificationRuntime}=candidateArtifacts;
-const qaMemoryProfile=(roleQualification.candidateQaMemoryTransition?.format==='sabalan-explicit-local-qa-candidate-memory-transition/v3'||roleQualification.candidateQaMemoryProfile||roleQualification.candidateQaMemoryRecovery)?readExplicitQaMemoryProfile({file:candidateReplacementReceipt,sha256:sha(roleQualificationBytes)}):null;assert.deepEqual(retainedBrowserFacts.report.qaMemoryProfile??null,readQaMemoryProfile(qaMemoryProfile));
+const qaMemoryProfile=(roleQualification.candidateQaMemoryTransition?.format==='sabalan-explicit-local-qa-candidate-memory-transition/v3'||roleQualification.candidateQaMemoryProfile||roleQualification.candidateQaMemoryRecovery||roleQualification.candidateQaMemoryPostUpRecovery)?readExplicitQaMemoryProfile({file:candidateReplacementReceipt,sha256:sha(roleQualificationBytes)}):null;assert.deepEqual(retainedBrowserFacts.report.qaMemoryProfile??null,readQaMemoryProfile(qaMemoryProfile));
 const built=await esbuild.build({absWorkingDir:root,entryPoints:['tests/online-deployment/application-native.worker.ts'],
   bundle:true,platform:'node',packages:'external',format:'cjs',target:'node22',write:false,logLevel:'silent',
   plugins:[{name:'capture-application-native-sources',setup(build){build.onLoad({filter:/.*/,namespace:'file'},args=>{

@@ -53,7 +53,7 @@ test('failed right capture stops before left and shows failure evidence', async 
   await page.getByRole('button', { name: 'اسکن انگشت راست', exact: true }).click();
   await expect(page.getByText('برداشت ناموفق', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'اسکن انگشت چپ', exact: true })).toHaveCount(0);
-  expect(h.events).toEqual(['command:RIGHT_INDEX', 'failure:RIGHT_INDEX']);
+  await expect.poll(() => [...h.events]).toEqual(['command:RIGHT_INDEX', 'failure:RIGHT_INDEX']);
   await expect(page.getByText(/کیفیت/).last()).not.toHaveClass(/success/);
 });
 

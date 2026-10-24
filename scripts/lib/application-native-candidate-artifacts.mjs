@@ -1,3 +1,5 @@
+import {readNegativeRecoveryHandoff,negativeRecoveryDescriptor,negativeRecoveryInputs,negativeRecoveryStreamingInputs,negativeRecoveryAcceptance,validateNegativeRecoveryCreatedReceipt} from './application-native-negative-baseline.mjs';
+import {validateNegativeAcceptanceSlots} from './application-native-negative-acceptance.mjs';
 import assert from 'node:assert/strict';
 import {readExplicitQaMemoryProfile,readQaMemoryProfile,qaMemoryProfileInputs} from './application-native-qa-profile.mjs';
 import {validateQaMemoryTransitionReceipt,candidateQaBudget,retainedQaMemoryBytes,qaSwapBytes} from './application-native-qa-memory.mjs';
@@ -32,7 +34,7 @@ export function validateReobservedCandidateBaselineReceipt(value,prior){
 /** Reads only an ACTUAL completed candidate replacement; missing future receipts
  * fail. Repository captures and external D receipt identities remain distinct. */
 export function collectNativeCandidateArtifacts({root,capture,containers,sourceCommit,receiptArgument}){
- const external=new Map(),captured=new Map();
+ const external=new Map(),captured=new Map();let negativeOriginToken=null,negativeProfileToken=null;
  const captureFile=relative=>{const raw=capture(relative);captured.set(relative,sha(raw));return raw;};
  const readExternal=file=>{file=path.resolve(file);const stable=stableFrontendBaseFile(file,16*1024**2),raw=fs.readFileSync(file);assert.equal(raw.length,stable.bytes);assert.equal(sha(raw),stable.sha256);external.set(file,stable);return raw;};
  const requested=path.resolve(root,receiptArgument),relative=path.relative(root,requested).split(path.sep).join('/');assert.match(relative,/^reports\/qa\/application-native-candidate-[a-f0-9]{32}\.json$/);
@@ -42,6 +44,14 @@ export function collectNativeCandidateArtifacts({root,capture,containers,sourceC
  if(value.authorityCohort)validateAuthorityCohortSlots(containers,value.authorityCohort.nonce);
  const qaBudget=candidateQaBudget(value);assert.equal(containers['backend-candidate'].HostConfig.Memory,qaBudget.memoryBytes);assert.equal(containers['backend-retained'].HostConfig.Memory,retainedQaMemoryBytes);for(const service of ['backend-candidate','backend-retained'])assert.equal(containers[service].HostConfig.MemorySwap,service==='backend-candidate'?qaBudget.swapBytes:qaSwapBytes);
  const replacementEntry=value.replacementEntry??helper;if(replacementEntry!==helper)captureFile(replacementEntry);
+ assert.ok(!value.candidateQaMemoryNegativeRecovery||value.acceptanceCohort,'NEGATIVE_RESOURCE_ORIGIN_REQUIRES_ACCEPTANCE_VIEW');
+ if(value.acceptanceCohort){
+  assert.equal(value.acceptanceCohort.format,'sabalan-preserved-negative-acceptance-view/v1');assert.equal(value.knownNegativeCancellationRetirement,undefined,'NO_A29_CLAIM_IN_FRESH_ACCEPTANCE_VIEW');negativeOriginToken=readNegativeRecoveryHandoff(value.acceptanceCohort.origin);assert.deepEqual(value.acceptanceCohort.descriptor,negativeRecoveryAcceptance(negativeOriginToken));validateNegativeAcceptanceSlots(containers,value.acceptanceCohort.descriptor);
+  for(const relative of ['scripts/lib/application-native-negative-baseline.mjs','scripts/lib/application-native-negative-evidence.mjs','scripts/lib/application-native-negative-acceptance.mjs','scripts/lib/application-native-negative-baseline.policy.py','scripts/lib/application-native-qa-profile.mjs','docker-compose.application-native-negative-acceptance-cohort.yml','tests/online-deployment/application-native-negative-acceptance.fixture.py']){const raw=captureFile(relative);assert.equal(value.inputs[path.join(root,relative)],sha(raw),'NEGATIVE_SOURCE_PIN_CHANGED:'+relative);}
+  for(const[file,digest]of Object.entries(negativeRecoveryInputs(negativeOriginToken)))assert.equal(sha(readExternal(file)),digest);negativeRecoveryStreamingInputs(negativeOriginToken);
+  negativeProfileToken=readExplicitQaMemoryProfile({file:requested,sha256:sha(bytes)});readQaMemoryProfile(negativeProfileToken);for(const[file,digest]of Object.entries(qaMemoryProfileInputs(negativeProfileToken)))assert.equal(sha(readExternal(file)),digest);
+  if(value.candidateQaMemoryNegativeRecovery){validateNegativeRecoveryCreatedReceipt(negativeOriginToken,value);assert.deepEqual(value.negativeStreamingInputs,negativeRecoveryStreamingInputs(negativeOriginToken));}
+ }
  if(value.previousReplacement){
   assert.equal(replacementEntry,'scripts/replace-qualified-application-native-candidate-local.mjs');assert.deepEqual(Object.keys(value.previousReplacement).sort(),['file','sha256']);assert.match(value.previousReplacement.sha256,/^[a-f0-9]{64}$/);const priorRaw=readExternal(value.previousReplacement.file);assert.equal(sha(priorRaw),value.previousReplacement.sha256);assert.equal(value.inputs[path.resolve(value.previousReplacement.file)],value.previousReplacement.sha256);const prior=JSON.parse(priorRaw);validateReobservedCandidateBaselineReceipt(value,prior);
   for(const[role,service]of [['main','backend-retained'],['candidate','backend-candidate']]){const point=prior.roleEvidence[role],imageRaw=readExternal(point.imageReceiptFile),materialRaw=readExternal(point.materialReceiptFile);assert.equal(sha(imageRaw),point.imageReceiptSha256);assert.equal(sha(materialRaw),point.materialReceiptSha256);const image=JSON.parse(imageRaw),material=JSON.parse(materialRaw);assert.equal(image.pass,true);assert.equal(image.image.id,prior.actual[service].image);assert.equal(image.materialReceiptSha256,sha(materialRaw));validateInstalledNativeRole(value.reobservedInstalled[service].result,nativeMaterialIdentity(material));}
@@ -79,6 +89,6 @@ export function collectNativeCandidateArtifacts({root,capture,containers,sourceC
  for(const file of ['docker-compose.online-acceptance.yml','scripts/lib/application-native-qa-memory.mjs','docker-compose.online-runtime-authority-acceptance.yml','docker-compose.application-native-role-isolation.yml','docker-compose.application-native-mixed-images.yml',helper,probe,...(replacementEntry===helper?[]:[replacementEntry]),...(value.authorityCohort?['docker-compose.application-native-authority-cohort.yml',...authorityCohortSources]:[])]){
   const raw=captureFile(file);assert.equal(value.inputs[path.join(root,file)],sha(raw),'REPLACEMENT_SOURCE_PIN_CHANGED: '+file);
  }
- const revalidate=()=>{for(const [file,pin]of external)assert.deepEqual(stableFrontendBaseFile(file,16*1024**2),pin,'EXTERNAL_ROLE_RECEIPT_CHANGED');for(const [file,digest]of captured)assert.equal(sha(fs.readFileSync(path.join(root,file))),digest,'ROLE_CAPTURE_CHANGED');return{roleEvidence:evidence,externalInputs:Object.fromEntries(external)};};
+ const revalidate=()=>{if(negativeOriginToken)negativeRecoveryDescriptor(negativeOriginToken);if(negativeProfileToken)readQaMemoryProfile(negativeProfileToken);for(const [file,pin]of external)assert.deepEqual(stableFrontendBaseFile(file,16*1024**2),pin,'EXTERNAL_ROLE_RECEIPT_CHANGED');for(const [file,digest]of captured)assert.equal(sha(fs.readFileSync(path.join(root,file))),digest,'ROLE_CAPTURE_CHANGED');return{roleEvidence:evidence,externalInputs:Object.fromEntries(external),...(negativeOriginToken?{negativeStreamingInputs:negativeRecoveryStreamingInputs(negativeOriginToken)}:{})};};
  revalidate();return{qaBudget,roleQualificationFile:relative,roleQualificationBytes:bytes,roleQualification:value,privateQualificationRuntime:structuredClone(value.privateQualificationRuntimes.main),revalidate};
 }

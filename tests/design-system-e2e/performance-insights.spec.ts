@@ -41,6 +41,15 @@ const mockInsightsApi = async (page: Page, capabilities: Record<string, boolean>
 
 test('live performance insights are RTL, responsive, accessible, and disclose no score', async ({ page }) => {
   await loginAsAdmin(page);
+  // This test's personal badge belongs to an explicitly linked fixture person.
+  // Keep the authenticated account and every real permission unchanged.
+  await page.route('**/api/auth/me', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    expect(response.status()).toBe(200);
+    expect(body.data.id).toBeTruthy();
+    await route.fulfill({ response, json: { ...body, data: { ...body.data, personnelId: 'performance-insights-qa' } } });
+  });
   await mockInsightsApi(page, { VIEW_PERFORMANCE_ANALYTICS: true, VIEW_NAMED_PERFORMANCE_RANKING: true });
   await page.goto('/dashboard/hr/personnel/performance/insights');
   await expect(page.getByRole('heading', { name: 'تحلیل، رتبه‌بندی و خروجی عملکرد' })).toBeVisible();

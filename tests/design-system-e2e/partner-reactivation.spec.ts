@@ -1,3 +1,4 @@
+import { partnerCaseReadFixtureData } from './support/partner-case-read-fixture';
 import { expect, test } from '@playwright/test';
 import { createPartnerFixtures } from '../../packages/partner-sales-contracts/dist/testing';
 import { assertNoHorizontalOverflow, loginAsAdmin, setTheme } from './support/design-system';
@@ -20,14 +21,14 @@ for (const width of [1280, 390]) test(`cancelled Partner requires fresh authorit
       submitted = route.request().postDataJSON(); activated = true;
       await route.fulfill({ json: { success: true, data: { status: 'NOTE', commercialRevision: 3 } } }); return;
     }
-    await route.fulfill({ json: { success: true, data: { cases: [{
+    await route.fulfill({ json: { success: true, data: await partnerCaseReadFixtureData(path, { cases: [{
       view: { ...fixture.partner, state: activated ? 'COMMITTED' : 'VOIDED' },
       commercial: { version: 1, revision: activated ? 3 : 2, status: activated ? 'NOTE' : 'CANCELLED',
         salesApproved: false, customerAccepted: false, inquiry: 'WAITING', expiresAt: null, firstFinancialRecordAt: null },
       history: [], snapshotId: null, actions: { canContinue: false, canPreview: false, canIssue: false,
         canFinalize: false, canSendConfirmation: false, canRequestCorrection: false, canCancel: false,
         canRequestVoid: false, canReactivate: authorized && !activated },
-    }] } } });
+    }] }) } });
   });
   await page.goto('/dashboard/sales/contracts/reactivation-ui-case');
   await expect(page.getByRole('button', { name: 'فعال‌سازی قرارداد', exact: true })).toBeDisabled();

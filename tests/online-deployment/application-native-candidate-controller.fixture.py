@@ -303,8 +303,9 @@ class CandidateOwner:
         free = disk.f_bavail * disk.f_frsize
         # A diagnostic actor's two logs are bounded to 3 MiB. Keep an explicit
         # extra 64 MiB for already-owned actors/closure evidence; no cache credit.
-        check(free >= 67 * MIB, 'CANDIDATE_DIAGNOSTIC_LOG_CAPACITY_REFUSED')
-        return dict(observed, requiredBytes=CAPACITY[kind], diskFreeBytes=free, diskRequiredBytes=67 * MIB, kind=kind)
+        required_disk = 1024 * MIB if kind == 'full-catalog' else 67 * MIB
+        check(free >= required_disk, 'CANDIDATE_DIAGNOSTIC_LOG_CAPACITY_REFUSED')
+        return dict(observed, requiredBytes=CAPACITY[kind], diskFreeBytes=free, diskRequiredBytes=required_disk, kind=kind)
 
     def grant(self, kind):
         if kind == 'pristine-performance': grant=self.index['pristinePerformanceGrant']
@@ -786,7 +787,7 @@ class CandidateOwner:
         write(app / 'full-catalog-input.json',encoded(input),0o600)
         env = dict(os.environ); env.pop('NODE_OPTIONS',None)
         value = self.new_process('full-catalog',['/usr/bin/python3','-I','-B',str(app / 'run-full-catalog-controller.py')],env,self.request_id(body),cwd=str(app))
-        self.wait_original(value,600); after = resource()
+        self.wait_original(value,7320); after = resource()
         check(value['actor'].returncode == 0 and not value['deadlineExceeded'] and no_oom(value['before'],after), 'CANDIDATE_CATALOG_ORIGINAL_FAILED')
         result,closure = self.catalog_closed(value,True)
         self.completed.add('full-catalog')
@@ -808,6 +809,10 @@ class CandidateOwner:
               and result['catalogApplicationName'] == 'qa-catalog-' + input['operation'] and result['browserLaunches']
               and all(row.get('originalCliDescendant') and row.get('identity') and (row.get('originalPidfdExitObserved') or row.get('originalExitObserved'))
                   and isinstance(row.get('exitCode'),str) and isinstance(row.get('exitSignal'),str) for row in result['browserLaunches']), 'CANDIDATE_CATALOG_CHILD_CLOSURE_UNPROVEN')
+        if require_success:
+            expected = self.index['catalog']['caseInventory']
+            check(result.get('executedCaseInventory') == expected and result.get('completedCaseCount') == len(expected)
+                  and digest(json.dumps(expected,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()) == self.index['catalog']['caseInventorySha256'], 'CANDIDATE_CATALOG_CASE_INVENTORY_CHANGED')
         self.catalog_sources()
         namespace = result['catalogApplicationName']
         system = self.sql('SELECT system_identifier FROM pg_control_system()')
@@ -1135,7 +1140,7 @@ class CandidateOwner:
             value=self.actors.get('full-catalog')
             if not value or value['actor'].poll() is None:return False
             try:
-                self.wait_original(value,600);result,closure=self.catalog_closed(value,False)
+                self.wait_original(value,7320);result,closure=self.catalog_closed(value,False)
             except BaseException:return False
             code=type(error).__name__ + ':' + str(error)
             self.sticky_failures.append(code);self.completed.discard('full-catalog')

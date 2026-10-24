@@ -89,7 +89,7 @@ test('master-data navigation selects the requested category and a pending edit c
   await expect(dialog.getByRole('button', { name: 'در حال ذخیره…' })).toBeDisabled();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeVisible();
-  expect(submitted).toMatchObject({ code: sample.code, namePersian: 'نمونه thicknesses', isActive: true, value: 40, unit: 'cm' });
+  await expect.poll(() => submitted).toMatchObject({ code: sample.code, namePersian: 'نمونه thicknesses', isActive: true, value: 40, unit: 'cm' });
   release();
   await expect(dialog).toBeHidden();
 });

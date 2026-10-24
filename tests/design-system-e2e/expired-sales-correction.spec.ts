@@ -81,7 +81,7 @@ for (const width of [1280, 390]) test(`expired correction Accounting decision an
   await page.screenshot({ path: testInfo.outputPath(`accounting-review-${width}.png`), fullPage: true });
   await page.getByRole('button', { name: 'ثبت تصمیم', exact: true }).click();
   await expect(page.getByRole('button', { name: 'بستن درخواست', exact: true })).toHaveCount(0);
-  expect(responses).toHaveLength(2);
+  await expect.poll(() => responses.length).toBe(2);
   expect(responses[1]).toMatchObject({ actionCode: 'VERIFY', reason: 'رسیدگی مالی بررسی شد؛ بستن با حفظ سوابق',
     expectedSourceVersion: 4, expectedEnvelopeVersion: 1 });
 });

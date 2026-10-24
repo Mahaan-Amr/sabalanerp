@@ -75,7 +75,7 @@ export function collectApplicationFullCatalogArtifacts({root,capture,selection=n
   return {...entry,file,identity:before};
  });
  assert.ok(total<=256*1024**2);
- return {files:{'full-catalog-source-manifest.json':raw},catalog:{operation:manifest.operation,sourceManifestSha256:selectedManifestSha256},
+ return {files:{'full-catalog-source-manifest.json':raw},catalog:{operation:manifest.operation,sourceManifestSha256:selectedManifestSha256,caseInventory:listed.caseInventory,caseInventorySha256:listed.caseInventorySha256},
   proof:{format:'sabalan-original-full-catalog-source/v1',sourceRoot:selectedSourceRoot,operation:manifest.operation,manifestSha256:selectedManifestSha256,files:entries.length,bytes:total,schemaSha256:manifest.schemaSha256,nativeQualificationReceiptSha256:manifest.nativeQualificationReceiptSha256},entries:prepared};
 }
 

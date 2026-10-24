@@ -1,3 +1,4 @@
+import { partnerCaseReadFixtureData } from './support/partner-case-read-fixture';
 import { test, expect } from '@playwright/test';
 import { createPartnerFixtures } from '../../packages/partner-sales-contracts/dist/testing';
 import { loginAsAdmin, setTheme, setViewportAndZoom, assertNoSeriousAxeViolations } from './support/design-system';
@@ -9,7 +10,7 @@ for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const)
     await loginAsAdmin(page);
     await page.route('**/api/partner/**', async route => {
       const path = new URL(route.request().url()).pathname;
-      const data = path.endsWith('/query-v2') ? { cases: [{
+      const data = ['/api/partner/cases/query-v2', '/api/partner/cases/changes-v2'].includes(path) ? { cases: [{
         view: { ...fixture.partner, state: 'DRAFT', commercialFlowVersion: 1, pricingState: 'AWAITING_INQUIRY',
           customerConfirmationState: 'NOT_SENT', products: fixture.partner.products.map(({ wholesaleUnitPrice, ...row }) => row),
           sabalanTotals: undefined, sabalanPaymentPlan: undefined, resaleDifference: undefined },
@@ -19,7 +20,7 @@ for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const)
           canFinalize: false, canSendConfirmation: true, canRequestCorrection: false, canCancel: false,
           canRequestVoid: false, canRejectDraft: true, canApproveSales: false },
       }] } : null;
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data }) });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: await partnerCaseReadFixtureData(path, data) }) });
     });
     await page.goto(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(fixture.partner.owner.caseId)}`);
     await expect(page.getByRole('button', { name: 'ارسال پیامک تأیید', exact: true })).toBeVisible();
@@ -135,12 +136,13 @@ for (const width of [1280, 390]) test(`All commercial and inquiry statuses remai
   const fixture = createPartnerFixtures(); let inquiry = 'WAITING'; let status = 'DRAFT';
   await loginAsAdmin(page);
   await page.route('**/api/partner/**', async route => {
-    const data = new URL(route.request().url()).pathname.endsWith('/query-v2') ? { cases: [{
+    const path = new URL(route.request().url()).pathname;
+    const data = ['/api/partner/cases/query-v2', '/api/partner/cases/changes-v2'].includes(path) ? { cases: [{
       view: { ...fixture.partner, state: 'DRAFT', commercialFlowVersion: 1 },
       commercial: { version: 1, revision: 1, status, salesApproved: status !== 'NOTE', customerAccepted: ['CUSTOMER_SIGNED', 'FINAL'].includes(status), inquiry, expiresAt: null, firstFinancialRecordAt: null },
       history: [], snapshotId: null, actions: { canContinue: false, canPreview: false, canIssue: false, canFinalize: false, canSendConfirmation: true, canRequestCorrection: false, canCancel: false, canRequestVoid: false, canRejectDraft: true, canApproveSales: false },
     }] } : null;
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data }) });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: await partnerCaseReadFixtureData(path, data) }) });
   });
   const url = `/dashboard/sales/partner-cases?caseId=${encodeURIComponent(fixture.partner.owner.caseId)}`;
   for (const [value, label] of [['WAITING', 'در حال انتظار'], ['ACCEPTED', 'تأیید استعلام'], ['REJECTED', 'رد استعلام'], ['CORRECTION_REQUIRED', 'نیازمند اصلاح']]) {

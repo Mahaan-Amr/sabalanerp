@@ -681,6 +681,10 @@ test('Product Selection restores into the shared interface without changing pers
   });
 
   await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4');
+  const resumeDraft = page.getByRole('button', { name: 'ادامه پیش‌نویس قبلی', exact: true });
+  await expect(resumeDraft).toBeVisible();
+  await resumeDraft.click();
+  await expect(resumeDraft).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'کاتالوگ محصولات' })).toBeVisible();
   await expect(page.locator('main.sds-workspace')).toHaveCount(1);
   await expect(page.getByRole('region', { name: 'کاتالوگ محصولات' }).locator('.sds-card')).toBeVisible();

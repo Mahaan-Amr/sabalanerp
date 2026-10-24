@@ -44,13 +44,13 @@ test('Admin sees edit blacklist and lock actions on a Partner customer', async (
     permissions: { canViewAllCustomers: true, canDeleteCustomers: true }, pagination: { page: 1, total: 1, pages: 1 } } }));
   await page.goto('/dashboard/crm/customers');
   await expect(page.getByRole('link', { name: 'ویرایش', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'افزودن به بلک‌لیست', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'افزودن به لیست سیاه', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'قفل کردن', exact: true })).toBeVisible();
 });
 
 for (const width of [1280, 390]) test(`Admin manages Partner card through detail and atomic editor at ${width}px`, async ({ page }) => {
   page.setDefaultTimeout(15000); await page.setViewportSize({ width, height: 900 }); await loginAsAdmin(page);
-  let record = { ...customer, canManageCustomerCard: true, partnerRevision: 1, cardVersion: 'version-one',
+  let record = { ...customer, activityCategory: 'NONE', canManageCustomerCard: true, partnerRevision: 1, cardVersion: 'version-one',
     phoneNumbers: [{ id: 'phone-one', number: '09120009991', type: 'mobile', isPrimary: true, isActive: true }],
     projectAddresses: [{ id: 'project-one', address: 'نشانی پیشین', isActive: true }] };
   await page.route('**/api/crm/customers/managed-customer', route => route.fulfill({ json: { success: true, data: record } }));
@@ -70,8 +70,8 @@ for (const width of [1280, 390]) test(`Admin manages Partner card through detail
     return route.fulfill({ json: { success: true, data: record } });
   });
   await page.goto('/dashboard/crm/customers/managed-customer');
-  await page.getByRole('button', { name: 'افزودن به بلک‌لیست', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'حذف از بلک‌لیست', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'افزودن به لیست سیاه', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'حذف از لیست سیاه', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'قفل کردن', exact: true }).click();
   await expect(page.getByRole('button', { name: 'باز کردن قفل', exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'ویرایش', exact: true }).click();
@@ -100,6 +100,6 @@ for (const width of [1280, 390]) test(`permanent card deletion explicitly retain
   await expect(dialog.getByText('قرارداد فروش: ۲', { exact: true })).toBeVisible();
   await expect(dialog.getByText('پرونده فروش همکار: ۴', { exact: true })).toBeVisible();
   await dialog.getByRole('textbox', { name: 'دلیل حذف', exact: true }).fill('حذف کارت و حفظ سابقه');
-  await dialog.getByRole('button', { name: 'تأیید و حذف دائمی', exact: true }).click(); expect(deleted).toBe(true);
+  await dialog.getByRole('button', { name: 'تأیید و حذف دائمی', exact: true }).click(); await expect.poll(() => deleted).toBe(true);
   await expect(page.getByText('مشتری حذف شد. رسید حذف: retention-receipt')).toBeVisible();
 });

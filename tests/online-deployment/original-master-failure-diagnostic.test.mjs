@@ -23,6 +23,7 @@ test('untrusted names, codes and non-existing source paths never escape; frames 
 test('failed diagnostic sink cannot release the original hold or throw new authority',()=>{
  assert.doesNotThrow(()=>writeOriginalMasterFailureDiagnostic(new Error('private'),3,{write(){throw Error('closed');}}));
  const text=fs.readFileSync(source,'utf8').replace(/\r\n/g,'\n');
- assert.ok(text.includes("}catch(error){\n  held=true;writeOriginalMasterFailureDiagnostic(error,sequence);state('ORIGINAL_MASTER_REQUEST_FAILED_RETAINED');\n }"));
+ assert.ok(text.includes("held=true;writeOriginalMasterFailureDiagnostic(error,sequence);state('ORIGINAL_MASTER_REQUEST_FAILED_RETAINED');"));
+ assert.ok(text.includes("negative&&activeCommand==='RUN_LOCAL'"));
  assert.ok(text.includes('await new Promise(()=>{void keeper;void local;void independent;void protectedInstall;void protectedRequest;void retainedBrowser;});'));
 });

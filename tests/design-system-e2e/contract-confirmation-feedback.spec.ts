@@ -51,16 +51,25 @@ for (const surface of ['detail', 'list'] as const) for (const width of [1280, 39
     await expect.poll(() => attempts).toBe(1);
     await expect(send).toBeEnabled();
     await expect(success).toHaveCount(0);
+    // Keep the authenticated browser's current epoch. Fix time while the
+    // install/pause commands cross IPC, then restore advancing Date semantics
+    // while paused so only explicit runFor calls consume the success lifetime.
+    const confirmationClockStart = await page.evaluate(() => Date.now());
+    await page.clock.install({ time: confirmationClockStart });
+    await page.clock.setFixedTime(confirmationClockStart);
+    await page.clock.pauseAt(confirmationClockStart);
+    await page.clock.setSystemTime(confirmationClockStart);
     await send.click();
     await expect.poll(() => attempts).toBe(2);
     await expect(success).toBeVisible();
     if (surface === 'list') await expect.poll(() => refreshHeld).toBe(true);
-    const appearedAt = Date.now();
-    await page.waitForTimeout(3_000);
+    // Start the paused browser clock before the successful response, so UI polling
+    // and the held refresh cannot subtract time from the four-second contract.
+    await page.clock.runFor(3_999);
     await expect(success).toBeVisible();
-    await expect(success).toHaveCount(0, { timeout: 2_000 });
-    expect(Date.now() - appearedAt).toBeGreaterThanOrEqual(3_800);
-    expect(Date.now() - appearedAt).toBeLessThan(5_000);
+    await page.clock.runFor(1);
+    await expect(success).toHaveCount(0);
+    await page.clock.resume();
     releaseRefresh?.();
     await expect(send).toBeEnabled();
     for (const theme of ['light', 'dark'] as const) {

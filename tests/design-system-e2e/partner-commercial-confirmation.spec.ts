@@ -2,11 +2,13 @@ import { expect, test } from '@playwright/test';
 import { createPartnerFixtures } from '../../packages/partner-sales-contracts/dist/testing';
 import { loginAsAdmin } from './support/design-system';
 
-for (const width of [1280, 390]) test(`Partner Sales contract detail shows the actual local confirmation response ${width}px`, async ({ page, baseURL }) => {
+for (const width of [1280, 390]) test(`Partner Sales contract detail confirms repeated sends without exposing private response secrets ${width}px`, async ({ page, baseURL }, testInfo) => {
   await loginAsAdmin(page);
   await page.setViewportSize({ width, height: 900 });
   const fixture = createPartnerFixtures();
   let sends = 0;
+  const sendRequests: { path: string; method: string; body: string | null }[] = [];
+  const publicLink = new URL('/contracts/confirm/local-detail-test', baseURL).href;
   const view = { ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY', customerConfirmationState: 'SENT',
     products: fixture.partner.products.map(({ wholesaleUnitPrice, ...row }) => row),
     sabalanTotals: undefined, sabalanPaymentPlan: undefined, resaleDifference: undefined };
@@ -17,34 +19,42 @@ for (const width of [1280, 390]) test(`Partner Sales contract detail shows the a
   } } }));
   await page.route('**/api/partner/**', async route => {
     const path = new URL(route.request().url()).pathname;
-    const data = path.endsWith('/query-v2') ? { cases: [{ view,
+    if (path.endsWith('/changes-v2')) return route.fulfill({ json: { success: true, data: { version: `sha256-v1:${'4'.repeat(64)}` } } });
+    if (path.endsWith('/query-v2')) return route.fulfill({ json: { success: true, data: { cases: [{ view,
       commercial: { version: 1, revision: 1, status: 'DRAFT', salesApproved: true, customerAccepted: false,
         inquiry: 'WAITING', expiresAt: null, firstFinancialRecordAt: null }, history: [], snapshotId: null,
       actions: { canSendConfirmation: true, canContinue: false, canPreview: false, canIssue: false,
         canFinalize: false, canRequestCorrection: false, canCancel: false, canRequestVoid: false } }] }
-      : { ...(++sends < 3 ? { debugOtp: sends === 1 ? '654321' : '765432' } : {}),
-        publicLink: new URL('/contracts/confirm/local-detail-test', baseURL).href, otpExpiresAt: new Date(Date.now() + 600000).toISOString() };
-    await route.fulfill({ json: { success: true, data } });
+      } });
+    if (path === `/api/partner/cases/${encodeURIComponent(view.owner.caseId)}/confirmation` && route.request().method() === 'POST') {
+      sendRequests.push({ path, method: route.request().method(), body: route.request().postData() });
+      const data = { ...(++sends < 3 ? { debugOtp: sends === 1 ? '654321' : '765432' } : {}),
+        publicLink, otpExpiresAt: new Date(Date.now() + 600000).toISOString() };
+      return route.fulfill({ json: { success: true, data } });
+    }
+    return route.fulfill({ status: 404, json: { success: false, code: 'NOT_FOUND' } });
   });
   await page.goto('/dashboard/sales/contracts/local-preview-test');
-  await page.getByRole('button', { name: 'ارسال پیامک تأیید', exact: true }).click();
-  await expect(page.getByText('654321', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'مشاهده قرارداد مشتری', exact: true })).toBeVisible();
-  const popupPromise = page.waitForEvent('popup');
-  await page.getByRole('button', { name: 'مشاهده قرارداد مشتری', exact: true }).click();
-  const popup = await popupPromise;
-  await expect(popup).toHaveURL(/\/contracts\/confirm\/local-detail-test$/);
-  await popup.close();
-  await page.screenshot({ path: `tmp/qa/partner-visual-2026-10-03/detail-code-${width}.png`, fullPage: true });
-  await page.getByRole('button', { name: 'ارسال پیامک تأیید', exact: true }).click();
-  await expect(page.getByText('765432', { exact: true })).toBeVisible();
-  await expect(page.getByText('654321', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'ارسال پیامک تأیید', exact: true }).click();
-  await expect(page.getByText('765432', { exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'مشاهده قرارداد مشتری', exact: true })).toHaveCount(0);
+  const send = page.getByRole('button', { name: 'ارسال پیامک تأیید', exact: true });
+  for (const attempt of [1, 2, 3]) {
+    await send.click();
+    await expect.poll(() => sends).toBe(attempt);
+    await expect(page.getByText('پیامک با موفقیت ارسال شد ✨', { exact: true })).toBeVisible();
+    await expect(send).toBeEnabled();
+    await expect(page.getByText('654321', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('765432', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'مشاهده قرارداد مشتری', exact: true })).toHaveCount(0);
+    await expect(page.locator(`a[href="${publicLink}"]`)).toHaveCount(0);
+    await expect(page.getByText(publicLink, { exact: true })).toHaveCount(0);
+  }
+  await page.screenshot({ path: testInfo.outputPath(`confirmation-private-response-${width}.png`), fullPage: true });
+  expect(sendRequests).toEqual(Array.from({ length: 3 }, () => ({
+    path: `/api/partner/cases/${encodeURIComponent(view.owner.caseId)}/confirmation`, method: 'POST', body: null,
+  })));
+
 });
 
-for (const width of [1280, 390]) test(`Partner local sent-code preview stays beside its contract and disappears when approvals reset at ${width}px`, async ({ page }) => {
+for (const width of [1280, 390]) test(`Partner confirmation keeps private response secrets hidden before and after approvals reset at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 });
   const fixture = createPartnerFixtures();
   let revision = 1;
@@ -52,6 +62,7 @@ for (const width of [1280, 390]) test(`Partner local sent-code preview stays bes
   await loginAsAdmin(page);
   await page.route('**/api/partner/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/changes-v2')) return route.fulfill({ json: { success: true, data: { version: `sha256-v1:${String(revision).padStart(64, '0')}` } } });
     let data: unknown;
     if (path.endsWith('/query-v2')) data = { cases: [{
       view: { ...fixture.partner, state: 'DRAFT', commercialFlowVersion: 1, pricingState: 'AWAITING_INQUIRY', customerConfirmationState: 'NOT_SENT', products: fixture.partner.products.map(({ wholesaleUnitPrice, ...row }) => row), sabalanTotals: undefined, sabalanPaymentPlan: undefined, resaleDifference: undefined },
@@ -69,8 +80,9 @@ for (const width of [1280, 390]) test(`Partner local sent-code preview stays bes
   });
   await page.goto(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(fixture.partner.owner.caseId)}`);
   await page.getByRole('button', { name: 'ارسال پیامک تأیید', exact: true }).click();
-  await expect(page.getByText('654321', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'مشاهده قرارداد مشتری' })).toBeVisible();
+  await expect(page.getByText('پیامک با موفقیت ارسال شد ✨', { exact: true })).toBeVisible();
+  await expect(page.getByText('654321', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'مشاهده قرارداد مشتری' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'بازگشت به یادداشت', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'ویرایش', exact: true })).toHaveCount(1);
   await page.getByRole('button', { name: 'ویرایش', exact: true }).click();
@@ -90,6 +102,7 @@ for (const width of [1280, 390]) test(`Partner approval creates draft and reject
   await page.route('**/api/partner/**', async route => {
     const path = new URL(route.request().url()).pathname;
     const input = route.request().postData() ? route.request().postDataJSON() : {};
+    if (path.endsWith('/changes-v2')) return route.fulfill({ json: { success: true, data: { version: `sha256-v1:${'4'.repeat(64)}` } } });
     let data: unknown = null;
     if (path.endsWith('/query-v2')) data = { cases: [{
       view: { ...fixture.partner, state: cancelled ? 'CANCELLED' : 'DRAFT', commercialFlowVersion: 1,

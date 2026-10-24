@@ -8,9 +8,9 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {writeOriginalMasterFailureDiagnostic} from './lib/original-master-failure-diagnostic.mjs';
-import {runOriginalRetainedBrowserQualificationRounds} from './lib/original-retained-browser-qualification.mjs';
+import {runOriginalRetainedBrowserQualificationRounds,readOriginalRetainedBrowserQualificationCompletion} from './lib/original-retained-browser-qualification.mjs';
 import {inspectOriginalLocalOnlineCheckpointInputs} from './lib/original-local-online-checkpoint.mjs';
-import {runOriginalApplicationNativeQualification} from './run-application-native-local.mjs';
+import {runOriginalApplicationNativeQualification,readOriginalKnownFailedLocalClosure} from './run-application-native-local.mjs';
 import {runOriginalIndependentRestoreOverSsh,waitOriginalIndependentGuardianClosure} from './lib/independent-full-restore-ssh.mjs';
 import {issueOriginalQualificationOrigin,issueOriginalWalWindowVerification,readOriginalWalWindowCertificate,issueOriginalPhysicalCheckpointVerification,issueOriginalPhysicalRepositoryPromotion,issueOriginalPhysicalCheckpointPublication,issueOriginalTerminalWalCoverage} from '../deploy/scripts/online-qualification-origin-issuer.mjs';
 import {startOriginalProtectedOnlineInstall,readOriginalProtectedQualificationRequest,sendOriginalProtectedQualificationPackage,sendOriginalProtectedWalWindowCertificate,sendOriginalProtectedPhysicalPointVerification,readOriginalProtectedCheckpointMetadataSource,sendOriginalProtectedCheckpointMetadataCertificate,sendOriginalProtectedTerminalWalCertificate,readOriginalOnlineQualificationRequest,sendOriginalOnlineQualificationPackage,retainOriginalProtectedWalWindowAcknowledgement,sendOriginalProtectedClientControl,finishOriginalProtectedClient,waitOriginalProtectedClientCallbacks} from './lib/original-protected-online-ssh.mjs';
@@ -53,7 +53,7 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
   sequence,retainedBrowserOriginalClosed:retainedBrowser!==null,localOriginalClosed:local!==null,independentOriginalClosed:independent!==null,localReportPath:local?.reportPath??null,
   productionAdmission:false})+'\n');
  state(local?'LOCAL_QUALIFICATION_CLOSED_RETAINED':retainedBrowser?'RETAINED_BROWSER_CLOSED_RETAINED':'ORIGINAL_MASTER_READY_FOR_LOCAL');
- let pending=Buffer.alloc(0);
+ let pending=Buffer.alloc(0),activeCommand=null;
  try{
   for await(const chunk of input){
    pending=Buffer.concat([pending,Buffer.from(chunk)]);assert.ok(pending.length<=8*1024*1024,'ORIGINAL_MASTER_INPUT_BOUND');
@@ -62,7 +62,7 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
     const raw=pending.subarray(0,newline);pending=pending.subarray(newline+1);
     const request=JSON.parse(raw.toString());
     assert.ok(raw.length<=65536||(request.command==='FOLLOWING_CONTROL'&&request.control==='PUBLISH'),'ORIGINAL_MASTER_LARGE_INPUT_COMMAND_REFUSED');
-    assert.equal(request.sequence,sequence+1);sequence++;
+    assert.equal(request.sequence,sequence+1);sequence++;activeCommand=request.command;
     if(request.command==='PREPARE_LOCAL_RUNTIME'){
      keys(request,['command','sequence','nativeOwnerElfReceipt']);assert.ok(!local&&!localRuntime&&!held);assert.equal(typeof request.nativeOwnerElfReceipt,'string');inspectOriginalLocalOnlineCheckpointInputs({nativeOwnerElfReceipt:request.nativeOwnerElfReceipt});localRuntime={nativeOwnerElfReceipt:request.nativeOwnerElfReceipt};state('LOCAL_RUNTIME_CONTENT_BOUND_NO_RUNTIME');
     }else if(request.command==='PREPARE_INDEPENDENT'){
@@ -217,6 +217,19 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
   }
   held=true;state('ORIGINAL_MASTER_INPUT_CLOSED_RETAINED');
  }catch(error){
+  let negative=null;try{negative=readOriginalKnownFailedLocalClosure(error);}catch{/* Unknown or changed original custody stays held. */}
+  if(negative&&activeCommand==='RUN_LOCAL'&&!held&&!local&&retainedBrowser&&!independent&&!independentGuardian&&!protectedInstall&&!protectedRequest
+   &&!physical&&!promotion&&!metadata&&!certification&&!physicalCertificate&&!repositoryCertificate&&!physicalGuardianReady&&!onlineRequest
+   &&!bootstrapClientStarted&&!bootstrapHandoff&&guardians.size===0&&controlTasks.size===0&&acknowledgedWindows.length===0&&closedReleasePoints.length===0&&pending.length===0){
+   try{
+    assert.equal(negative.format,'sabalan-same-process-known-failed-local-closure/v1');
+    assert.equal(negative.allOriginalControllersClosed,true);assert.equal(negative.allOriginalActorsClosed,true);assert.equal(negative.originalCryptoClosed,true);
+    assert.equal(negative.qualificationSucceeded,false);assert.equal(negative.productionAdmission,false);
+    const retained=readOriginalRetainedBrowserQualificationCompletion(retainedBrowser);assert.equal(retained.reportSha256,negative.retainedReportSha256);
+    output.write(JSON.stringify({format:'sabalan-original-master-known-negative-closed/v1',sequence,localReportPath:negative.reportPath,localReportSha256:negative.reportSha256,qualificationSucceeded:false,allLocalOriginalsClosed:true,productionAdmission:false})+'\n');
+    clearInterval(keeper);for(const[name,listener]of signalListeners)process.off?.(name,listener);process.exitCode=1;return;
+   }catch{/* A failed terminal guard must never discard an unknown owner. */}
+  }
   held=true;writeOriginalMasterFailureDiagnostic(error,sequence);state('ORIGINAL_MASTER_REQUEST_FAILED_RETAINED');
  }
  // No successful process exit discards the only authority-bearing tokens.

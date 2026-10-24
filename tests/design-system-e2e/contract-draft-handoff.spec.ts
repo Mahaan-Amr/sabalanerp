@@ -11,11 +11,16 @@ test('revision refresh first preserves the original draft; storage failure keeps
     customerId: '', projectId: '', products: [], serviceRows: [], deliveries: [],
     discount: { enabled: false, amount: 0, percent: 0, currency: 'تومان' },
     payment: { payments: [], currency: 'تومان', totalContractAmount: 0 }, signature: null };
+  // Keep this dated draft fixture valid without freezing recovery timers.
+  await page.clock.setFixedTime(new Date('2026-10-17T08:00:00Z'));
+  const browserBuildIds = new Set<string>();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/socket.io/**', route => route.abort());
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
+    const browserBuildId = request.headers()['x-deployment-id'];
+    if (browserBuildId) browserBuildIds.add(browserBuildId);
     const send = (data: unknown, extra = {}) => route.fulfill({ json: { success: true, data, ...extra } });
     if (path === '/api/auth/me') return send(user, { session: { id: 'draft_session_qa' } });
     if (path === '/api/dashboard/profile') return send(user);
@@ -52,9 +57,11 @@ test('revision refresh first preserves the original draft; storage failure keeps
   await expect.poll(() => state.checkpoints).toBeGreaterThan(0);
   state.conflict = true;
   await calendar.click();
-  const day = page.locator('[data-date]:not([disabled])').last();
-  const changedDate = await day.getAttribute('data-date');
-  expect(changedDate).toBeTruthy(); expect(changedDate).not.toBe(contractData.contractDate);
+  const changedDate = '1405/07/26';
+  const day = page.getByRole('dialog', { name: 'انتخاب تاریخ شمسی', exact: true })
+    .getByRole('gridcell', { name: 'یک‌شنبه 1405/07/26', exact: true });
+  await expect(day).toBeEnabled();
+  expect(changedDate).not.toBe(contractData.contractDate);
   await day.click();
   const refresh = page.getByRole('button', { name: 'بارگذاری آخرین نسخه', exact: true });
   await expect(refresh).toBeVisible();
@@ -100,7 +107,11 @@ test('revision refresh first preserves the original draft; storage failure keeps
   const archive = JSON.parse(fs.readFileSync((await download.path())!, 'utf8'));
   expect(archive.userId).toBe(user.id); expect(archive.draftId).toBe(`contract-${id}`);
   expect(archive.baseRevision).toBe(7); expect(archive.schemaVersion).toBe(2);
-  expect(archive.buildId).toBe('erp_draft_handoff_20261017');
+  // The immutable browser artifact binds its own producer identity to requests.
+  expect(browserBuildIds.size).toBe(1);
+  const [browserBuildId] = [...browserBuildIds];
+  expect(browserBuildId).toMatch(/^erp_[a-z0-9_-]{8,90}$/);
+  expect(archive.buildId).toBe(browserBuildId);
   expect(JSON.parse(archive.payloadJson).wizardData.contractDate).toBe(changedDate);
   const preserved = await page.evaluate(() => Object.keys(localStorage).some(key => key === 'contract-recovery:v2:draft_owner_qa:contract-qa-draft-handoff:7'));
   expect(preserved).toBe(true);

@@ -37,7 +37,7 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
 
   test('CRM customer detail and edit preserve status meaning, dirty state, and pending save', async ({ page }) => {
     const customer = {
-      id: 'customer-e2e', firstName: 'مینا', lastName: 'آزمایشی', customerType: 'Individual', status: 'Lead',
+      id: 'customer-e2e', firstName: 'مینا', lastName: 'آزمایشی', customerType: 'Individual', status: 'Lead', activityCategory: 'NONE',
       isBlacklisted: false, isLocked: false,
       phoneNumbers: [{ id: 'phone-e2e', number: '09121234567', type: 'Mobile', isPrimary: true, isActive: true }],
       contacts: [], projectAddresses: [], contracts: [], leads: [],
@@ -70,7 +70,7 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
     const save = page.getByRole('button', { name: /ذخیره تغییرات|در حال ذخیره/ }).first();
     await save.click();
     await expect(save).toBeDisabled();
-    expect(releaseSave).toBeDefined();
+    await expect.poll(() => Boolean(releaseSave)).toBe(true);
     releaseSave?.();
     await expect(page).toHaveURL('/dashboard/crm/customers/customer-e2e');
   });
@@ -108,7 +108,7 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
       await expect(submit).toHaveText(journey.submit);
       await submit.click();
       await expect(submit).toBeDisabled();
-      expect(releaseCreate).toBeDefined();
+      await expect.poll(() => Boolean(releaseCreate)).toBe(true);
 
       await setViewportAndZoom(page, { width: 390, height: 844 });
       await setTheme(page, index % 2 === 0 ? 'light' : 'dark');
@@ -184,7 +184,7 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
     const save = page.getByRole('button', { name: /ذخیره تغییرات|در حال ذخیره/ });
     await save.click();
     await expect(save).toBeDisabled();
-    expect(releaseSave).toBeDefined();
+    await expect.poll(() => Boolean(releaseSave)).toBe(true);
     releaseSave?.();
     await expect(page.getByRole('status').filter({ hasText: 'محصول با موفقیت به‌روزرسانی شد' })).toBeVisible();
     await setViewportAndZoom(page, { width: 390, height: 844 });
@@ -267,8 +267,8 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
     const submit = page.getByRole('button', { name: /ایجاد محصول|در حال ایجاد/ });
     await submit.click();
     await expect(submit).toBeDisabled();
-    expect(submittedProduct?.cuttingDimensionCode).toBe('CUT-TYPES');
-    expect(releaseCreate).toBeDefined();
+    await expect.poll(() => submittedProduct?.cuttingDimensionCode).toBe('CUT-TYPES');
+    await expect.poll(() => Boolean(releaseCreate)).toBe(true);
     releaseCreate?.();
     await expect(page.getByRole('dialog').filter({ hasText: 'محصول ایجاد شد' })).toBeVisible();
   });
@@ -304,7 +304,7 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
     const submit = page.locator('form button[type="submit"]');
     await submit.click();
     await expect(submit).toBeDisabled();
-    expect(releaseTemplate).toBeDefined();
+    await expect.poll(() => Boolean(releaseTemplate)).toBe(true);
     releaseTemplate?.();
     await expect(page).toHaveURL(/\/dashboard\/contract-templates$/);
   });

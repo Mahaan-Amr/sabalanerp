@@ -114,11 +114,14 @@ class CandidateInterfaces(unittest.TestCase):
     def test_catalog_original_cli_identity_and_known_failed_closure(self):
         owner=subject.CandidateOwner.__new__(subject.CandidateOwner)
         owner.root=Path('D:/source-interface-only')
-        owner.index={'oid':'111'}
+        inventory=[dict(file='example.spec.ts',line=1,title=['example'],projects=['desktop-chromium'])]
+        inventory_sha=hashlib.sha256(json.dumps(inventory,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
+        owner.index={'oid':'111','catalog':dict(caseInventory=inventory,caseInventorySha256=inventory_sha)}
         owner.catalog_input=dict(operation='1'*32,databaseName='qa_source',databaseOid='111',systemIdentifier='222',adminUsername='qa-admin')
         actor=Actor();actor.returncode=0
         value=dict(actor=actor,birth={'original':'interface-only'},before={'events':{}},deadlineExceeded=False,pumps=[],closed=False)
         result=dict(format='sabalan-native-full-catalog-original-controller/v1',operation='1'*32,passResult=True,
+            executedCaseInventory=inventory,completedCaseCount=len(inventory),
             cliOriginal=dict(pid=23456,state='S',parentPid=actor.pid,startTicks='123'),cliCode=0,
             allObservedOriginalBrowsersClosed=True,sourceFilesUnchanged=True,borrowsOriginalNativeIngress=True,databaseQuietVerifiedByChild=False,
             nativeDatabase={name:owner.catalog_input[name] for name in ['databaseName','databaseOid','systemIdentifier','adminUsername']},
@@ -128,6 +131,12 @@ class CandidateInterfaces(unittest.TestCase):
         with patch.object(subject,'private_read',lambda *args:json.dumps(result).encode()),patch.object(subject,'resource',lambda:{'events':{}}):
             returned,closure=owner.catalog_closed(value,True)
             self.assertEqual(closure['originalReturncode'],0);self.assertIsNone(closure['nativeRawBase64'])
+            result['executedCaseInventory']=[]
+            with self.assertRaisesRegex(RuntimeError,'CASE_INVENTORY_CHANGED'):owner.catalog_closed(value,True)
+            result['executedCaseInventory']=inventory
+            result['completedCaseCount']=0
+            with self.assertRaisesRegex(RuntimeError,'CASE_INVENTORY_CHANGED'):owner.catalog_closed(value,True)
+            result['completedCaseCount']=len(inventory)
             result['cliOriginal']=True
             with self.assertRaisesRegex(RuntimeError,'CLI_IDENTITY_UNPROVEN'):owner.catalog_closed(value,False)
             result['cliOriginal']=dict(pid=23456,state='S',parentPid=actor.pid+1,startTicks='123')

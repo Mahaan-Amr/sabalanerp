@@ -22,6 +22,32 @@ export function readOriginalRoleQualificationCompletion(token){
  const value=originalQualificationCompletions.get(token);assert.ok(value,'ORIGINAL_ROLE_COMPLETION_TOKEN_REQUIRED');return structuredClone(value);
 }
 
+
+/** Validates original closure only; a failed phase never becomes qualification. */
+export function validateOriginalFullCatalogClosure(body,actor,index,failed){
+ const same=(a,b)=>assert.deepEqual(a,b);same(actor.kind,'full-catalog');
+ const closure=body.closure;const result=failed?body.result.childOutcome:body.result;
+ if(failed){same(body.result.qualified,false);same(body.result.originalKnownClosed,true);assert.ok([0,1].includes(closure.originalReturncode));}
+ else{same(closure.originalReturncode,0);same(result.passResult,true);same(result.cliCode,0);}
+ same(closure.originalPopenPid,actor.originalPopenPid);same(closure.birth,actor.birth);
+ same(closure.scopeSha256,null);same(closure.nativeRawBase64,null);same(closure.workRawBase64,null);
+ same(closure.namespace,'qa-catalog-'+index.catalog.operation);same(closure.sql.visible,true);same(closure.sql.sessions,0);same(closure.sql.prepared,0);
+ same(closure.sql.oid,String(index.oid));same(closure.sql.system,index.grants[0].scope.database.systemIdentifier);
+ same(result.format,'sabalan-native-full-catalog-original-controller/v1');same(result.allObservedOriginalBrowsersClosed,true);
+ same(result.sourceFilesUnchanged,true);same(result.borrowsOriginalNativeIngress,true);same(result.operation,index.catalog.operation);
+ same(result.catalogApplicationName,closure.namespace);same(result.nativeDatabase.databaseName,index.database);
+ same(result.nativeDatabase.databaseOid,String(index.oid));same(result.nativeDatabase.systemIdentifier,index.grants[0].scope.database.systemIdentifier);
+ same(result.databaseQuietVerifiedByChild,false);assert.ok([0,1].includes(result.cliCode));
+ assert.ok(result.cliOriginal&&['R','S','D','I'].includes(result.cliOriginal.state)&&result.cliOriginal.parentPid===actor.originalPopenPid&&Number.isSafeInteger(result.cliOriginal.pid)&&result.cliOriginal.pid>0&&/^[1-9][0-9]*$/.test(result.cliOriginal.startTicks));
+ assert.ok(Array.isArray(result.browserLaunches)&&result.browserLaunches.length>0);
+ for(const browser of result.browserLaunches){same(browser.originalCliDescendant,true);assert.ok(browser.identity&&Number.isSafeInteger(browser.identity.pid)&&browser.identity.pid>0&&/^[1-9][0-9]*$/.test(browser.identity.startTicks));
+  assert.ok(browser.originalPidfdExitObserved===true||browser.originalExitObserved===true);
+  if(!failed){same(String(browser.exitCode),'0');same(String(browser.exitSignal),'null');}
+  else{const code=String(browser.exitCode),signal=String(browser.exitSignal);assert.match(code,/^(?:null|[0-9]{1,3})$/);assert.ok(code==='null'||Number(code)<=255);assert.ok(['null','SIGABRT','SIGKILL','SIGTERM','SIGSEGV','SIGINT','SIGHUP','SIGBUS','SIGILL','SIGFPE','SIGTRAP','SIGPIPE','SIGQUIT'].includes(signal));assert.ok(code!=='null'||signal!=='null');}
+ }
+ return result;
+}
+
 const PREFIX='SABALAN_ORIGINAL_CONTROL ',FORMAT='sabalan-original-host-controller/v1';
 const MAX=8*1024*1024,FRAME=12*1024*1024;
 const requiredMemory=Object.freeze({'online-point-inquiry':192*1024**2,'pristine-performance':256*1024**2,migration:384*1024**2,chrome:256*1024**2,
@@ -340,25 +366,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
         else{same(body.result.qualification.runtimeId,mainIndex.privateQualification.httpGrants[1].scope.runtimeId);same(body.result.qualification.image,topology.candidate.image);}
       }else same(body.result.originalKnownClosed,true);
     }else if(completedEvent==='FULL_CATALOG_DONE'){
-      same(failed,false);same(actor.kind,'full-catalog');
-      same(body.closure.originalPopenPid,actor.originalPopenPid);same(body.closure.birth,actor.birth);
-      same(body.closure.originalReturncode,0);same(body.closure.scopeSha256,null);
-      same(body.closure.nativeRawBase64,null);same(body.closure.workRawBase64,null);
-      same(body.closure.namespace,'qa-catalog-'+mainIndex.catalog.operation);
-      same(body.closure.sql.visible,true);same(body.closure.sql.sessions,0);same(body.closure.sql.prepared,0);
-      same(body.closure.sql.oid,String(mainIndex.oid));
-      same(body.result.passResult,true);same(body.result.allObservedOriginalBrowsersClosed,true);
-      same(body.result.sourceFilesUnchanged,true);same(body.result.borrowsOriginalNativeIngress,true);
-      same(body.result.operation,mainIndex.catalog.operation);same(body.result.cliCode,0);
-      same(body.result.catalogApplicationName,body.closure.namespace);
-      same(body.result.nativeDatabase.databaseName,mainIndex.database);
-      same(body.result.nativeDatabase.databaseOid,String(mainIndex.oid));
-      same(body.result.nativeDatabase.systemIdentifier,mainIndex.grants[0].scope.database.systemIdentifier);
-      same(body.result.databaseQuietVerifiedByChild,false);
-      assert.ok(Array.isArray(body.result.browserLaunches)&&body.result.browserLaunches.length>0);
-      for(const browser of body.result.browserLaunches){same(browser.originalCliDescendant,true);
-        assert.ok(browser.originalPidfdExitObserved===true||browser.originalExitObserved===true);
-        same(String(browser.exitCode),'0');same(String(browser.exitSignal),'null');}
+      validateOriginalFullCatalogClosure(body,actor,mainIndex,failed);
     }else if(completedEvent==='ONLINE_POINT_INQUIRY_READY'){
       same(failed,false);same(actor.kind,'online-point-inquiry');const value=body.result,grant=mainIndex.onlinePointInquiryGrant;
       same(value.format,'sabalan-original-online-point-inquiry-ready/v1');same(value.runtimeId,grant.scope.runtimeId);same(value.scopeSha256,grant.sha256);
@@ -724,13 +732,26 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
       assert.ok(qualificationState.http?.closed&&qualificationState.fence?.phase==='CLOSED');
       void (async()=>{if(localCrypto){await localCrypto.close();localCryptoClosed=true;}
         owner.closeMode='QUALIFIED';owner.closeRequested=randomBytes(32).toString('hex');send('candidate','CLOSE',{requestId:owner.closeRequested});})().catch(hold);},
-    closeKnownFailedCandidate:()=>{assert.equal(held,null);assert.ok(['PHASE_FAILED','CAPTURE_ABORT_CLOSED','EARLY_MAIN_FAILED_CLOSED','MAIN_AND_PHASE_FAILED_CLOSED','PRIVATE_PAIR_FAILED_CLOSED'].includes(phase));
+    closeKnownFailedCandidate:async()=>{assert.equal(held,null);assert.ok(['PHASE_FAILED','CAPTURE_ABORT_CLOSED','EARLY_MAIN_FAILED_CLOSED','MAIN_AND_PHASE_FAILED_CLOSED','PRIVATE_PAIR_FAILED_CLOSED'].includes(phase));
       assert.ok(roles.get('main')?.closed&&roles.get('main').failedClosed);const owner=roles.get('candidate');
-      assert.ok(owner&&!owner.closed);owner.closeMode='FAILED_CLOSED';owner.closeRequested=randomBytes(32).toString('hex');send('candidate','CLOSE_CLOSED',{requestId:owner.closeRequested});},
+      assert.ok(owner&&!owner.closed);assert.ok([...actors.values()].every(actor=>actor.closed));
+      if(localCrypto){await localCrypto.close();localCryptoClosed=true;}
+      owner.closeMode='FAILED_CLOSED';owner.closeRequested=randomBytes(32).toString('hex');send('candidate','CLOSE_CLOSED',{requestId:owner.closeRequested});},
     knownFailureCanClose:()=>held===null&&['PHASE_FAILED','CAPTURE_ABORT_CLOSED','EARLY_MAIN_FAILED_CLOSED','MAIN_AND_PHASE_FAILED_CLOSED','PRIVATE_PAIR_FAILED_CLOSED'].includes(phase)&&!!roles.get('main')?.failedClosed&&roles.get('main').closed,
     waitKnownFailedCandidate:async()=>{
       if(held===null&&roles.get('main')?.failedClosed&&roles.get('main').awaitingCandidateClosure&&pending)
         await failedCandidateReady;
+    },
+    closeKnownFailedResources:async()=>{
+      same(held,null);same(pending,null);same(roles.size,2);
+      assert.ok(['PHASE_FAILED','CAPTURE_ABORT_CLOSED','EARLY_MAIN_FAILED_CLOSED','MAIN_AND_PHASE_FAILED_CLOSED','PRIVATE_PAIR_FAILED_CLOSED'].includes(phase));
+      assert.ok([...roles.values()].every(owner=>owner.closed)&&roles.get('main').failedClosed);
+      const candidate=roles.get('candidate');same(candidate.closeMode,'FAILED_CLOSED');same(candidate.closedReceipt?.qualificationSucceeded,false);
+      assert.ok([...actors.values()].every(actor=>actor.closed));
+      assert.ok(legacyDockerChildren.every(row=>row.closed&&!row.unknown&&row.code===0&&row.signal===null));
+      assert.ok(originalProofObservers.every(observer=>observer.closed&&observer.code===0&&observer.signal===null));
+      assert.ok(!localCrypto||localCryptoClosed);
+      return Object.freeze({allOriginalControllersClosed:true,allOriginalActorsClosed:true,originalCryptoClosed:true,qualificationSucceeded:false,productionAdmission:false});
     },
     allControllersClosed:()=>held===null&&legacyDockerChildren.every(row=>row.closed&&!row.unknown)&&roles.size===2&&[...roles.values()].every(owner=>owner.closed)
       &&!!roles.get('candidate').closedReceipt,

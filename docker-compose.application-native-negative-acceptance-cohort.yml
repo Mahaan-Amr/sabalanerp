@@ -1,0 +1,20 @@
+# Explicit negative-recovery view of the SAME existing acceptance volume.
+# The original failed operations remain outside this view and are never deleted.
+name: sabalanerp-local
+services:
+  backend-candidate:
+    volumes:
+      - type: volume
+        source: online_runtime_acceptance
+        target: /app/online-runtime-acceptance
+        volume:
+          nocopy: true
+          subpath: ${ONLINE_ACCEPTANCE_RECOVERY_SUBPATH:?Authenticated negative-recovery acceptance subpath required}
+  backend-retained:
+    volumes:
+      - type: volume
+        source: online_runtime_acceptance
+        target: /app/online-runtime-acceptance
+        volume:
+          nocopy: true
+          subpath: ${ONLINE_ACCEPTANCE_RECOVERY_SUBPATH:?Authenticated negative-recovery acceptance subpath required}

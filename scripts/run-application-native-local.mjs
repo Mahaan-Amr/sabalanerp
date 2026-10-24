@@ -16,6 +16,12 @@ import {collectApplicationFullCatalogArtifacts,stageOriginalFullCatalog} from '.
 import {observeOriginalPreparedMemory} from './lib/application-native-prepared-memory.mjs';
 import {runOriginalRetainedBrowserQualificationRounds,readOriginalRetainedBrowserQualificationCompletion} from './lib/original-retained-browser-qualification.mjs';
 
+const originalKnownFailedLocalClosures=new WeakMap();
+/** Only this original local execution can populate this map; report JSON cannot. */
+export function readOriginalKnownFailedLocalClosure(error){
+ const value=originalKnownFailedLocalClosures.get(error);if(!value)return null;value.revalidate();return structuredClone(value.facts);
+}
+
 export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,nativeOwnerElfReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection}){
 if(frontendSnapshot){
  assert.deepEqual(Object.keys(frontendSnapshot).sort(),['file','sha256']);
@@ -305,13 +311,29 @@ report.protectedServiceIdentitiesVerified=true;report.sourcesUnchanged=true;repo
     report.pass=false;report.roleCoordinator=coordinator.status();report.failure={name:error.name,message:error.message};save();
     await coordinator.waitKnownFailedCandidate();
     if(coordinator.knownFailureCanClose()){
-      coordinator.closeKnownFailedCandidate();report.failedCandidateClosure=await candidateController.closed;
+      await coordinator.closeKnownFailedCandidate();report.failedCandidateClosure=await candidateController.closed;
       report.roleCoordinator=coordinator.status();report.knownFailedOriginalClosure=coordinator.allControllersClosed();save();
     }
   }catch(cleanupError){
     await coordinator.retainOnFailure(cleanupError);
   }
-  if(coordinator.allControllersClosed())throw error;
+  if(coordinator.allControllersClosed()){
+    try{
+      const resources=await coordinator.closeKnownFailedResources();
+      const revalidate=()=>{
+        assert.ok(coordinator.allControllersClosed(),'ORIGINAL_FAILED_LOCAL_CONTROLLERS_CHANGED');
+        readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);candidateArtifacts.revalidate();
+        const after=inspect(),legacyRestoration=coordinator.readOriginalPrivateLegacyRestoration();
+        for(const service of services){const expected=service==='frontend-retained'&&legacyRestoration?legacyRestoration.restored:before[service];assert.deepEqual(identity(after[service]),expected);}
+        for(const[name,hash]of Object.entries(sources))assert.equal(sha(fs.readFileSync(path.join(root,name))),hash,'Captured source changed: '+name);
+      };
+      revalidate();const retained=readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);
+      report.pass=false;report.knownFailedOriginalClosure=true;report.negativeResourcesClosed=resources;save();
+      const reportSha256=sha(fs.readFileSync(reportPath)),negative=new Error('ORIGINAL_LOCAL_KNOWN_FAILED_CLOSED',{cause:error});
+      originalKnownFailedLocalClosures.set(negative,{revalidate:()=>{revalidate();assert.equal(sha(fs.readFileSync(reportPath)),reportSha256);},facts:Object.freeze({format:'sabalan-same-process-known-failed-local-closure/v1',reportPath,reportSha256,retainedReportSha256:retained.reportSha256,...resources})});
+      throw negative;
+    }catch(closureError){if(originalKnownFailedLocalClosures.has(closureError))throw closureError;await coordinator.retainOnFailure(closureError);}
+  }
   await coordinator.retainOnFailure(error);
 }
 readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);

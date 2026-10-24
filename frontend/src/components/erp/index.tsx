@@ -2,6 +2,7 @@
 export { default as ErpSearchableSelect } from './ErpSearchableSelect';
 
 import React from 'react';
+import { restoreErpSheetWorkflowFocus } from './sheetWorkflowFocus';
 import ErpFloatingActionMenu from './ErpFloatingActionMenu';
 import { ErpPresentationProvider, useErpPresentationScope } from './ErpPresentation';
 import { ErpNeumorphicMetricGrid } from './NeumorphicPrimitives';
@@ -1633,6 +1634,8 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
   React.useEffect(() => {
     if (!open) return;
     restoreFocusRef.current = returnFocusElementRef.current || document.activeElement as HTMLElement;
+    const restoreWorkflowForm = restoreFocusRef.current?.closest('form') ?? null;
+    const closingOverlay = overlayRootRef.current;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     window.setTimeout(() => {
@@ -1658,7 +1661,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', onKeyDown);
-      restoreFocusRef.current?.focus();
+      restoreErpSheetWorkflowFocus(restoreFocusRef.current, restoreWorkflowForm, closingOverlay);
     };
   }, [open]);
   const sheet = (

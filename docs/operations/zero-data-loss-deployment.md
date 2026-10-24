@@ -312,11 +312,20 @@ The separately typed local capsule-preflight recovery baseline applies only to
 the pinned failed `4d9e5e57a12e985025bc06d59f08e050` replacement after successful
 UP. Its original tool exit is authenticated as an owner observation, with no
 reconstructed native closure or adoption. Fresh owner absence, exact physical
-slots and historical read-only mounts, installed bytes, empty namespaces,
+slots and historical read-only mounts, installed bytes, empty authority namespaces,
 native/SQL quietness and unchanged resource limits precede a new ordinary
 authority-cohort replacement. The failed receipt remains negative; only the new
 replacement's complete gates, including both full capsule probes, can qualify it.
 This local recovery gives no production admission or rollback exception.
+
+The acceptance view is explicitly nonempty: its two historical capsule mounts
+and two exact retained-browser history directories remain protected. A separate
+source-pinned proof authenticates their original closed provenance, complete
+stable inventories, native terminal records and lock identities, and retains
+the original parent device/inode/owner/mode lineage while recording its current
+metadata. Unknown entries or changed evidence refuse recovery. Neither this
+proof nor the new receipt claims that the physical acceptance directory is empty;
+the legacy empty-directory verifier remains unchanged.
 
 ### Optional suspended local development frontend
 

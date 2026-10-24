@@ -318,14 +318,27 @@ authority-cohort replacement. The failed receipt remains negative; only the new
 replacement's complete gates, including both full capsule probes, can qualify it.
 This local recovery gives no production admission or rollback exception.
 
+The same format has a separate literal context for the failed
+`0fa0284f2e393d124c9fc9e0d14c8e9c` replacement. It authenticates the original
+creator's exit 1 and both EOFs separately from successful UP, then requires the
+same complete read-only physical, installed-byte, capsule, namespace, native/SQL
+and memory checks before a distinct replacement. The failed memory deadline
+remains negative; this context does not admit another failed receipt.
+
 The acceptance view is explicitly nonempty: its two historical capsule mounts
-and two exact retained-browser history directories remain protected. A separate
-source-pinned proof authenticates their original closed provenance, complete
-stable inventories, native terminal records and lock identities, and retains
+and four exact inert histories remain protected: three retained-browser
+directories and the cancelled, unstarted catalog preparation. A separate
+source-pinned proof authenticates their complete stable inventories and lock
+identities. Successful browser histories require their genuine native terminal
+records; the cancelled preparation requires its original master exit 125,
+post-cancellation proof, full archived inventory and seventeen unused grants,
+without claiming successful native qualification. The proof retains
 the original parent device/inode/owner/mode lineage while recording its current
 metadata. Unknown entries or changed evidence refuse recovery. Neither this
 proof nor the new receipt claims that the physical acceptance directory is empty;
-the legacy empty-directory verifier remains unchanged.
+the legacy empty-directory verifier remains unchanged. Only the two exact large
+Prisma declaration files in that archived preparation may exceed the normal
+file-size bound; their literal paths, sizes and digests remain mandatory.
 
 ### Optional suspended local development frontend
 

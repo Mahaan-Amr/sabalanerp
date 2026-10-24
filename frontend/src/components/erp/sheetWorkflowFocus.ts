@@ -10,7 +10,7 @@ export function restoreErpSheetWorkflowFocus(trigger: HTMLElement | null, form: 
   if (eligible(trigger) && focus(trigger)) return;
   if (!form?.isConnected || closingOverlay?.contains(form)) return;
   const controls = form.querySelectorAll<HTMLElement>('button,a[href],input,select,textarea,[tabindex]');
-  for (const control of controls) {
+  for (const control of Array.from(controls)) {
     if (control.closest('form') === form && Number.isInteger(control.tabIndex) && control.tabIndex >= 0 && eligible(control) && focus(control)) return;
   }
 }

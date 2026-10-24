@@ -10,9 +10,9 @@ const points={
   old:{slotId:'frontend_retained',service:'frontend-retained',imageReceipt:'reports/qa/current-frontend-image-f1d2f35620e97112f093e3f2e8815027.json',
     bundleReceipt:'reports/qa/current-frontend-bundle-fa93e6481b00ee2bb70b1034030bce2d.json',
     image:'sha256:9df9eec8db41a96b86492a04f9d2e18767e9845e861329e6c8036c4e5b77cdb3'},
-  new:{slotId:'frontend_candidate',service:'frontend-candidate',imageReceipt:'reports/qa/current-frontend-image-d754592e7d002635b0acc08189408e9b.json',
-    bundleReceipt:'reports/qa/current-frontend-bundle-df8c728df7c54fc821da77d5d0de863b.json',
-    image:'sha256:923340ff3fd7950f38c4188f9209e1006e4fc3105c49b325c4e1d00a5f4075ae'},
+  new:{slotId:'frontend_candidate',service:'frontend-candidate',imageReceipt:'reports/qa/current-frontend-image-792da52dca314b79ba0f2cde7d38c36d.json',
+    bundleReceipt:'reports/qa/current-frontend-bundle-cb97dee63c3d8b1c1243100530c33fb7.json',
+    image:'sha256:948a939c55cb17a11ebcd7232ce5dc6ec31b80f71bcf0748f084f2a5236de4d6'},
 };
 /** Verify complete immutable build receipts, every materialized byte and the
  * actual Docker config ID/layers. Mutable labels and tags grant no identity. */

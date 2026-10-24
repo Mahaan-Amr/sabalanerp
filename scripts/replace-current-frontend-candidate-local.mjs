@@ -10,19 +10,19 @@ const root=path.resolve(import.meta.dirname,'..');const mode=process.argv[2]??'-
 const protectedServices=['backend','frontend','postgres','inquiry','redis','clamav','backend-candidate','backend-retained','frontend-retained'];
 const base='D:/sabalanerp/docker-compose.local.yml',overlay=path.join(root,'docker-compose.application-browser-acceptance.yml');
 const slots=[
- {service:'frontend-candidate',receipt:'current-frontend-image-d754592e7d002635b0acc08189408e9b.json',material:'current-frontend-bundle-df8c728df7c54fc821da77d5d0de863b.json',
- image:'sha256:923340ff3fd7950f38c4188f9209e1006e4fc3105c49b325c4e1d00a5f4075ae',
- oldImage:'sha256:16aaddcd64b28852ad2920f3fbad455941c7dc389b03e61601752c28d1968e24',
- buildId:'erp_online_committed_0c3c2fd8e569bfa9'}
+ {service:'frontend-candidate',receipt:'current-frontend-image-792da52dca314b79ba0f2cde7d38c36d.json',material:'current-frontend-bundle-cb97dee63c3d8b1c1243100530c33fb7.json',
+ image:'sha256:948a939c55cb17a11ebcd7232ce5dc6ec31b80f71bcf0748f084f2a5236de4d6',
+ oldImage:'sha256:923340ff3fd7950f38c4188f9209e1006e4fc3105c49b325c4e1d00a5f4075ae',
+ buildId:'erp_online_committed_33bd7e000cc2f1e3'}
 ];
 const retainedImage='sha256:9df9eec8db41a96b86492a04f9d2e18767e9845e861329e6c8036c4e5b77cdb3';
 const retainedBuildId='erp_online_final_20261019_5b4cc688a771e5a9';
-const approvedReceiptSha256='e503c0a45022a8e3d41ff2e377fff80bf5192d2b215cc53ab4a69ae05d28b732';
-const approvedMaterialSha256='99bbca848409598ba44ffb1d0a8711986be2325d18236277adb774da4d200ea9';
+const approvedReceiptSha256='4a4f2cd82ca4e78feccde5c3d22f7022e1dad672c2576deaffda774ec19c966d';
+const approvedMaterialSha256='54a4e1d5311ba9843a6c9fdef7c35b1c3a300ede97ad57d243257fb40a765541';
 if(mode==='--inspect'){
  console.log(JSON.stringify({mode,executesDocker:false,productionAdmission:false,target:slots[0],protectedServices,
  retained:{image:retainedImage,buildId:retainedBuildId},requirements:['root heavy token after native original closure','fresh storage cleanup/capacity preflight'],
- action:'ONLY the measured frontend-candidate to committed b16 build; no retained-slot replacement, image deletion or rollback'},null,2));process.exit(0);
+ action:'ONLY the measured frontend-candidate to the verified committed UI build; no retained-slot replacement, image deletion or rollback'},null,2));process.exit(0);
 }
 const env={...process.env,ONLINE_BROWSER_OLD_IMAGE:retainedImage,ONLINE_BROWSER_NEW_IMAGE:slots[0].image,
  ONLINE_BROWSER_OLD_BUILD_ID:retainedBuildId,ONLINE_BROWSER_NEW_BUILD_ID:slots[0].buildId};

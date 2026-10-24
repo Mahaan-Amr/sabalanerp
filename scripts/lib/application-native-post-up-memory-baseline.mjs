@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { validateAuthorityCohortSlots, authorityWriterRoot } from './application-native-authority-cohort.mjs';
 import { validateNegativeAcceptanceSlots } from './application-native-negative-acceptance.mjs';
+import {validateHistoricalCapsulePair} from './application-native-historical-capsules.mjs';
 export const postUpObserverSha256 = '855b385ce9a03f2199d0f81c8f063da21f36db428f29baacac28e6355015cb20';
 export const postUpBaselineFormat = 'sabalan-post-up-memory-negative-baseline/v1';
 function deepFreeze(value) { if (value && typeof value === 'object') {
@@ -13,6 +14,28 @@ function deepFreeze(value) { if (value && typeof value === 'object') {
     Object.freeze(value);
 } return value; }
 export const postUpFailureContext = deepFreeze({ "failed": { "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\application-native-candidate-97148774bad27bef1d5b464a69a8bdcb.json", "sha256": "eb26a1ff706faa493019527ce6d82c89fdd61387a3345ced36bba6ea6aab5ab2" }, "closure": { "file": "D:\\sabalanerp-online-qa\\C22-positive-candidate-second-original-replace-20261024\\closure.json", "sha256": "d2eabd6a4012100545adfeb80984ed33f41447d794a4e52662edcbdb420a2a93" }, "stderr": { "file": "D:\\sabalanerp-online-qa\\C22-positive-candidate-second-original-replace-20261024\\stderr.raw", "sha256": "dd882326301df9fa560d576ba7ca9dc9aa3b4032a76db803f428e58cd55cb480" }, "originalSource": { "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\scripts\\replace-qualified-application-native-candidate-local.mjs", "sha256": "5bc6b6beaffbaf15cd96caf43f930b7108c9fc5ba29a4a1da54009da389eab2b" }, "originalSourceSnapshot": { "file": "D:\\sabalanerp-online-qa\\C23-post-up-memory-baseline-source-20261024\\immutable-original-c22-creator.mjs", "sha256": "5bc6b6beaffbaf15cd96caf43f930b7108c9fc5ba29a4a1da54009da389eab2b" }, "nativeQuietProbeSha256": "c9eec40ebffcaeb5eeea829c3beba3971f3a3e34e2362d9d5ef00979df446774", "image": { "file": "D:\\sabalanerp-online-qa\\current-backend-image-43a617b0d2a142236ada68cc1c53fcfd\\image-receipt.json", "sha256": "4d65545001775f521ec3eddc6e9a6edd769bca874ce9ce97dcb9c53d21932405" }, "material": { "file": "D:\\sabalanerp-online-qa\\current-backend-material-c22ea5ec5702414981a5c659d6b95551\\material-receipt.json", "sha256": "4d69ec47c644d27b71ac340aec1f12c270fac6b5da9305e7136af4b02e289492" }, "retainedImage": { "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-backend-image-41f7dd679cc93ae31d18380c1c13786c.json", "sha256": "431b6ab3b673a1dfe226b28f5a5e845628e3f91b78f667e4d946f67fe9d8e775" }, "retainedMaterial": { "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-backend-material-d320bded734e4af6b7aede2f0c1fa7a9.json", "sha256": "8f9fb4f08af5027181232596b6f82fcb5c88b5d34556e629653ef5f3e7d5dc1d" }, "acceptanceHistory": { "file": "D:\\sabalanerp-online-qa\\C16-finite-negative-recovery-resume-actual-r4-20261024\\baseline.json", "sha256": "8da9bcc8ffb2be0c37ddef1fc7e0f55cc2e1c8079fb1d4603c69bcb445eff22c" }, "installedProbe": { "originalPath": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\tests\\online-deployment\\installed-native-image-probe.fixture.mjs", "sha256": "599c0cee1021356d6fd9503aabf929b6347d9665304452f6cd292f6a90f360b4" }, "authorityProbe": { "originalPath": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\tests\\online-deployment\\application-native-authority-cohort.fixture.py", "sha256": "8691520a151c444de207959bbfe0c45da2387d963477a4c72ed471638dfc1215" }, "acceptanceProbe": { "originalPath": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\tests\\online-deployment\\application-native-negative-acceptance.fixture.py", "sha256": "2ab67a15c8c87ea3ba6a3403754cc8ab57ccbded8e388f2f91d141c72bd1630a" } });
+export const capsulePostUpBaselineFormat = 'sabalan-post-up-capsule-negative-baseline/v1';
+export const capsulePostUpObserverSha256 = 'e518dc0b15b73174a270fe313dc158021b292765ab8dcaca7d4fe5964826e4c8';
+export const capsulePostUpFailureContext = deepFreeze({"failed":{"file":"C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\application-native-candidate-4d9e5e57a12e985025bc06d59f08e050.json","sha256":"b563205d2a02815573b0aed677f5481e6ee717c9163f54f8509be8bfa1e17620"},"originalSource":{"file":"C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\scripts\\replace-qualified-application-native-candidate-local.mjs","sha256":"6c626a81b0211f1d0fae5d9257dfef865d7ec6c6a60533b1d9c105d719c81ce0"},"originalSourceSnapshot":{"file":"D:\\sabalanerp-online-qa\\C26-capsule-post-up-recovery-source-20261024\\immutable-original-c25-creator.mjs","sha256":"6c626a81b0211f1d0fae5d9257dfef865d7ec6c6a60533b1d9c105d719c81ce0"},"nativeQuietProbeSha256":"c9eec40ebffcaeb5eeea829c3beba3971f3a3e34e2362d9d5ef00979df446774","image":{"file":"D:/sabalanerp-online-qa/current-backend-image-5e520f17b230d7bb14c0bea02bbc6c27/image-receipt.json","sha256":"d70287059e191ccf968ef16b22efee51961e1f51ae25881cc908b7926177e95f"},"material":{"file":"D:/sabalanerp-online-qa/current-backend-material-7bdc4431f5234af5b6c422718a1368b0/material-receipt.json","sha256":"3aa158405505ce36f4de1b4510bcf83b6255d82dc6be3901319be888cf788896"},"retainedImage":{"file":"C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-backend-image-41f7dd679cc93ae31d18380c1c13786c.json","sha256":"431b6ab3b673a1dfe226b28f5a5e845628e3f91b78f667e4d946f67fe9d8e775"},"retainedMaterial":{"file":"C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-backend-material-d320bded734e4af6b7aede2f0c1fa7a9.json","sha256":"8f9fb4f08af5027181232596b6f82fcb5c88b5d34556e629653ef5f3e7d5dc1d"},"acceptanceHistory":{"file":"D:\\sabalanerp-online-qa\\C16-finite-negative-recovery-resume-actual-r4-20261024\\baseline.json","sha256":"8da9bcc8ffb2be0c37ddef1fc7e0f55cc2e1c8079fb1d4603c69bcb445eff22c"},"installedProbe":{"originalPath":"C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\tests\\online-deployment\\installed-native-image-probe.fixture.mjs","sha256":"599c0cee1021356d6fd9503aabf929b6347d9665304452f6cd292f6a90f360b4"},"authorityProbe":{"originalPath":"C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\tests\\online-deployment\\application-native-authority-cohort.fixture.py","sha256":"8691520a151c444de207959bbfe0c45da2387d963477a4c72ed471638dfc1215"},"acceptanceProbe":{"originalPath":"C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\tests\\online-deployment\\application-native-negative-acceptance.fixture.py","sha256":"2ab67a15c8c87ea3ba6a3403754cc8ab57ccbded8e388f2f91d141c72bd1630a"},"ownerObservation":{"file":"D:\\sabalanerp-online-qa\\C26-capsule-post-up-recovery-source-20261024\\original-tool-owner-observation.json","sha256":"93721ee418e9ad645efaf23ac01c7c97644545c4a953e81f03e6b374ff564391"}});
+function contextForFailure(failed) { if (failed?.operation === '4d9e5e57a12e985025bc06d59f08e050') return capsulePostUpFailureContext; return postUpFailureContext; }
+export function postUpContextForBaseline(value) { if (value?.format === capsulePostUpBaselineFormat) { assert.deepEqual(value.failed, capsulePostUpFailureContext.failed); return capsulePostUpFailureContext; } assert.equal(value?.format, postUpBaselineFormat); return postUpFailureContext; }
+export const capsuleOwnerAbsenceScript = "$ErrorActionPreference='Stop';$rows=@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.Name -match '^node(?:\\.exe)?$' -and $_.CommandLine -like '*replace-qualified-application-native-candidate-local.mjs*' -and $_.CommandLine -like '*--replace*' } | ForEach-Object { [pscustomobject]@{pid=[int]$_.ProcessId;birth=$_.CreationDate.ToUniversalTime().ToString('o')} });[pscustomobject]@{format='sabalan-capsule-failed-owner-current-absence/v1';observedAt=[DateTime]::UtcNow.ToString('o');matches=@($rows);nativeClosureClaimed=$false;productionAdmission=$false}|ConvertTo-Json -Compress -Depth 5";
+export const capsuleOwnerAbsenceArgv = () => ['powershell.exe','-NoLogo','-NoProfile','-NonInteractive','-Command',capsuleOwnerAbsenceScript];
+export function validateCapsuleOwnerAbsence(value) { assert.deepEqual(Object.keys(value).sort(), ['format','observedAt','matches','nativeClosureClaimed','productionAdmission'].sort()); assert.equal(value.format,'sabalan-capsule-failed-owner-current-absence/v1'); assert.ok(Number.isFinite(Date.parse(value.observedAt))); assert.deepEqual(value.matches,[]); assert.equal(value.nativeClosureClaimed,false); assert.equal(value.productionAdmission,false); }
+function readCapsuleFailure(inputs) {
+ const c=capsulePostUpFailureContext,f=JSON.parse(postUpReadReference(c.failed,inputs)),owner=JSON.parse(postUpReadReference(c.ownerObservation,inputs));
+ assert.equal(owner.format,'sabalan-negative-preparation-tool-owner-observation/v1');assert.equal(owner.toolSessionId,59672);assert.equal(owner.actualFinalToolChunkId,'24ff5e');assert.equal(owner.toolReturnedExitCode,1);assert.equal(owner.toolReturnedFinalOutput,true);assert.deepEqual(owner.negativeReport,c.failed);assert.deepEqual(owner.originalSource,c.originalSourceSnapshot);
+ for(const k of ['qualificationSucceeded','productionAdmission','originalNativeClosureClaimed','missingHistoricalFieldsReconstructed','originalPopenAdopted'])assert.equal(owner[k],false);
+ const records=Object.fromEntries(Object.entries(owner.transcriptRecords).map(([k,ref])=>[k,JSON.parse(postUpReadReference(ref,inputs))]));assert.deepEqual(Object.keys(records).sort(),['146894','146896','146926','146930']);
+ const launch=records['146894'].payload,wait=records['146926'].payload,start=records['146896'].payload,end=records['146930'].payload;
+ assert.equal(launch.call_id,start.call_id);assert.equal(wait.call_id,end.call_id);assert.ok(launch.input.includes(c.originalSource.file.replaceAll('\\','/')));assert.ok(wait.input.includes('session_id:59672'));
+ const decode=record=>record.output.filter(x=>x.type==='input_text').map(x=>{try{return JSON.parse(x.text);}catch{return null;}}).filter(Boolean);
+ assert.equal(decode(start)[0].session_id,59672);assert.equal(decode(end)[0].chunk_id,'24ff5e');assert.equal(decode(end)[0].exit_code,1);assert.ok(decode(end)[0].output.includes('replace-qualified-application-native-candidate-local.mjs:349:12'));assert.ok(decode(end)[0].output.includes('1 !== 0'));
+ postUpReadReference(c.originalSourceSnapshot,inputs);assert.equal(f.inputs[c.originalSource.file],c.originalSource.sha256);assert.equal(f.phase,'FAILED_CLOSED');assert.equal(f.pass,false);assert.equal(f.productionAdmission,false);assert.equal(f.operation,'4d9e5e57a12e985025bc06d59f08e050');assert.equal(f.replacementEntry,'scripts/replace-qualified-application-native-candidate-local.mjs');assert.equal(f.up.code,0);assert.equal(f.up.signal,null);assert.equal(f.originalChildren,undefined);assert.deepEqual(f.protectedAfter,f.protectedBefore);assert.equal(f.immutableImage,'sha256:c31b6f0b5ecd6f28777d65311e3933081c2dfe40a155a3a8b13d5f64c9e93d04');
+ assert.deepEqual(f.failure,{name:'AssertionError',message:'Expected values to be strictly equal:\n\n1 !== 0\n'});assert.deepEqual(Object.keys(f.historicalCapsulePreflight),['backend-candidate']);const probe=f.historicalCapsulePreflight['backend-candidate'];assert.equal(probe.code,1);assert.equal(probe.signal,null);assert.equal(probe.stdout,'');assert.equal(probe.stdoutEof,true);assert.equal(probe.stderrEof,true);assert.equal(probe.interrupted,false);assert.ok(probe.stderr.endsWith("NameError: name 'json' is not defined\n"));
+ for(const service of postUpSlots){const v=f.authorityCohort.verified[service];assert.equal(v.code,0);assert.equal(v.signal,null);assert.deepEqual(JSON.parse(v.stdout),v.result);assert.deepEqual(v.result.namespace,f.authorityCohort.prepared[service].result.namespace);assert.equal(f.actual[service].memoryBytes,service==='backend-candidate'?2147483648:805306368);}
+ return f;
+}
 export const postUpSql = "SELECT json_build_object('visible',(SELECT rolsuper OR pg_has_role(current_user,'pg_read_all_stats','member') FROM pg_roles WHERE rolname=current_user),'sessions',(SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'sabalan-rt-%'),'prepared',(SELECT count(*) FROM pg_prepared_xacts WHERE database LIKE 'qa_application_%'),'system',(SELECT system_identifier::text FROM pg_control_system()))";
 export const postUpServices = Object.freeze(['backend', 'frontend', 'postgres', 'inquiry', 'redis', 'clamav', 'frontend-candidate', 'frontend-retained', 'backend-candidate', 'backend-retained']);
 export const postUpSlots = Object.freeze(['backend-candidate', 'backend-retained']);
@@ -22,7 +45,8 @@ function raw(file) { assert.ok(path.isAbsolute(file)); file = path.resolve(file)
     assert.equal(a[k], z[k]); return b; }
 export function postUpReadReference(ref, inputs) { assert.deepEqual(Object.keys(ref).sort(), ['file', 'sha256']); assert.match(ref.sha256, /^[a-f0-9]{64}$/); const b = raw(ref.file); assert.equal(sha(b), ref.sha256); if (inputs)
     inputs.set(path.resolve(ref.file), { raw: b, sha256: ref.sha256 }); return b; }
-export function readPostUpFailure(inputs) {
+export function readPostUpFailure(inputs, context = postUpFailureContext) {
+    if(context === capsulePostUpFailureContext)return readCapsuleFailure(inputs);
     const c = postUpFailureContext, f = JSON.parse(postUpReadReference(c.failed, inputs)), closed = JSON.parse(postUpReadReference(c.closure, inputs));
     postUpReadReference(c.originalSourceSnapshot, inputs);
     const stderr = postUpReadReference(c.stderr, inputs);
@@ -102,8 +126,10 @@ export function validatePostUpContainers(containers, failed) {
     assert.deepEqual(protectedNow, failed.protectedAfter);
     validateAuthorityCohortSlots(containers, failed.authorityCohort.nonce);
     validateNegativeAcceptanceSlots(containers, failed.acceptanceCohort.descriptor);
+    if(contextForFailure(failed)===capsulePostUpFailureContext)validateHistoricalCapsulePair(containers['backend-candidate'],containers['backend-retained']);
     for (const service of postUpSlots) {
         const c = containers[service];
+        if(contextForFailure(failed) === capsulePostUpFailureContext) assert.deepEqual(postUpIdentity(c),Object.fromEntries(['id','image','startedAt'].map(k=>[k,failed.actual[service][k]])));
         assert.notEqual(c.Id, failed.previous[service].id);
         assert.equal(c.Image, service === 'backend-candidate' ? failed.immutableImage : 'sha256:89dd62e901f2077f70c800bd9b705251730fa23531f7c3cc42fdaee1d9c71186');
         assert.equal(c.HostConfig.Memory, service === 'backend-candidate' ? 2 * 1024 ** 3 : 768 * 1024 ** 2);
@@ -125,12 +151,12 @@ export function validatePostUpMemorySamples(samples) { assert.ok(Array.isArray(s
         assert.ok(Date.parse(s.observedAt) > Date.parse(final[i - 1].observedAt));
 } assert.ok(Date.parse(final.at(-1).observedAt) - Date.parse(final[0].observedAt) >= 30000); return final.at(-1); }
 export function readPostUpMemoryBaseline(selection) {
-    const inputs = new Map(), value = JSON.parse(postUpReadReference(selection, inputs)), failed = readPostUpFailure(inputs);
-    assert.deepEqual(Object.keys(value).sort(), ['format','classification','failed','originalFailureClosure','qualificationSucceeded','productionAdmission','adoptsOriginalPopen','nativeCompletionClaimed','rotationPerformed','failedReportRemainsFailed','sourceCommit','observedAt','memorySamples','identities','protectedEight','components','observations','originalInventory','originalChildren','sourcePins'].sort());
-    assert.equal(value.format, postUpBaselineFormat);
-    assert.equal(value.classification, 'POST_UP_MEMORY_FAILURE_REOBSERVED');
-    assert.deepEqual(value.failed, postUpFailureContext.failed);
-    assert.deepEqual(value.originalFailureClosure, postUpFailureContext.closure);
+    const inputs = new Map(), value = JSON.parse(postUpReadReference(selection, inputs)), context=postUpContextForBaseline(value), capsule=context===capsulePostUpFailureContext, failed = readPostUpFailure(inputs,context);
+    assert.deepEqual(Object.keys(value).sort(), ['format','classification','failed',capsule?'originalFailureOwnerObservation':'originalFailureClosure','qualificationSucceeded','productionAdmission','adoptsOriginalPopen','nativeCompletionClaimed','rotationPerformed','failedReportRemainsFailed','sourceCommit','observedAt','memorySamples','identities','protectedEight','components','observations','originalInventory','originalChildren','sourcePins'].sort());
+    assert.equal(value.format, capsule?capsulePostUpBaselineFormat:postUpBaselineFormat);
+    assert.equal(value.classification, capsule?'POST_UP_CAPSULE_FAILURE_REOBSERVED':'POST_UP_MEMORY_FAILURE_REOBSERVED');
+    assert.deepEqual(value.failed, context.failed);
+    assert.deepEqual(capsule?value.originalFailureOwnerObservation:value.originalFailureClosure, capsule?context.ownerObservation:context.closure);
     for (const k of ['qualificationSucceeded', 'productionAdmission', 'adoptsOriginalPopen', 'nativeCompletionClaimed', 'rotationPerformed'])
         assert.equal(value[k], false);
     assert.equal(value.failedReportRemainsFailed, true);
@@ -159,7 +185,7 @@ export function readPostUpMemoryBaseline(selection) {
     assert.deepEqual(value.protectedEight, facts.protectedEight);
     const materials = {};
     for (const role of ['candidate', 'retained']) {
-        assert.deepEqual(value.components[role], { image: postUpFailureContext[role === 'candidate' ? 'image' : 'retainedImage'], material: postUpFailureContext[role === 'candidate' ? 'material' : 'retainedMaterial'] });
+        assert.deepEqual(value.components[role], { image: context[role === 'candidate' ? 'image' : 'retainedImage'], material: context[role === 'candidate' ? 'material' : 'retainedMaterial'] });
         const im = JSON.parse(postUpReadReference(value.components[role].image, inputs));
         const material = JSON.parse(postUpReadReference(value.components[role].material, inputs));
         assert.equal(im.pass, true);
@@ -176,7 +202,7 @@ export function readPostUpMemoryBaseline(selection) {
     }
     assert.deepEqual(Object.keys(value.sourcePins).sort(), ['acceptanceProbe', 'authorityProbe', 'installedProbe', 'observer', 'reader']);
     for (const k of ['installedProbe', 'authorityProbe', 'acceptanceProbe'])
-        assert.equal(value.sourcePins[k].sha256, postUpFailureContext[k].sha256);
+        assert.equal(value.sourcePins[k].sha256, context[k].sha256);
     const acceptanceExpected = postUpAcceptanceExpectation(inputs);
     const namespace = {};
     for (const role of ['candidate', 'retained']) {
@@ -185,7 +211,7 @@ export function readPostUpMemoryBaseline(selection) {
         assert.deepEqual(quiet.record.argv.slice(0, 6), ['docker', 'exec', cid, '/usr/bin/python3', '-I', '-B']);
         assert.equal(quiet.record.argv.length, 8);
         assert.equal(quiet.record.argv[6], '-c');
-        assert.equal(sha(Buffer.from(quiet.record.argv[7])), postUpFailureContext.nativeQuietProbeSha256);
+        assert.equal(sha(Buffer.from(quiet.record.argv[7])), context.nativeQuietProbeSha256);
         const n = quiet.value();
         assert.equal(n.originalNativeProcesses, 0);
         assert.equal(n.adoptsOriginalPopen, false);
@@ -196,7 +222,7 @@ export function readPostUpMemoryBaseline(selection) {
         const a = read('authority-' + role);
         assert.deepEqual(a.record.argv, ['docker', 'exec', '-i', cid, '/usr/bin/python3', '-I', '-B', '-c', postUpAuthorityBootstrap()]);
         const payload = JSON.parse(Buffer.from(a.record.inputBase64, 'base64'));
-        assert.equal(sha(Buffer.from(payload.source, 'base64')), postUpFailureContext.authorityProbe.sha256);
+        assert.equal(sha(Buffer.from(payload.source, 'base64')), context.authorityProbe.sha256);
         const writer = authorityWriterRoot(before[service], service);
         assert.deepEqual(payload.spec, { mode: 'verify', kind: writer.kind, nonce: failed.authorityCohort.nonce, root: writer.target, expected: failed.authorityCohort.verified[service].result.namespace, peerExpected: failed.authorityCohort.verified['backend-' + (role === 'candidate' ? 'retained' : 'candidate')].result.namespace });
         const av = a.value();
@@ -207,7 +233,7 @@ export function readPostUpMemoryBaseline(selection) {
         const accRow = read('acceptance-' + role);
         assert.deepEqual(accRow.record.argv, ['docker', 'exec', '-i', cid, '/usr/bin/python3', '-I', '-B', '-c', postUpAcceptanceBootstrap()]);
         const accPayload = JSON.parse(Buffer.from(accRow.record.inputBase64, 'base64'));
-        assert.equal(sha(Buffer.from(accPayload.source, 'base64')), postUpFailureContext.acceptanceProbe.sha256);
+        assert.equal(sha(Buffer.from(accPayload.source, 'base64')), context.acceptanceProbe.sha256);
         assert.deepEqual(accPayload.spec, { nonce: acceptanceExpected.nonce, expected: acceptanceExpected.namespace });
         const acc = accRow.value();
         assert.deepEqual(acc,{format:'sabalan-c16-empty-acceptance-namespace/v1',mode:'verify',nonce:acceptanceExpected.nonce,namespace:acceptanceExpected.namespace,empty:true,exclusivelyCreated:false,productionAdmission:false});
@@ -225,7 +251,7 @@ export function readPostUpMemoryBaseline(selection) {
         assert.equal(sql.prepared, 0);
         assert.equal(sql.system, failed.sqlQuiet.system);
     }
-    const required = ['inspectBefore', 'inspectAfter', 'image-candidate', 'image-retained', 'installed-candidate', 'installed-retained', 'quiet-candidate', 'quiet-retained', 'authority-candidate', 'authority-retained', 'acceptance-candidate', 'acceptance-retained', 'sqlBefore', 'sqlAfter'];
+    const required = [...(capsule?['owner-absence-before','owner-absence-after']:[]), 'inspectBefore', 'inspectAfter', 'image-candidate', 'image-retained', 'installed-candidate', 'installed-retained', 'quiet-candidate', 'quiet-retained', 'authority-candidate', 'authority-retained', 'acceptance-candidate', 'acceptance-retained', 'sqlBefore', 'sqlAfter'];
     assert.deepEqual(Object.keys(value.observations).sort(), required.sort());
     assert.equal(records.length, required.length * 2+2);assert.equal(records[0].key,'source-head');assert.equal(records.at(-1).key,'source-head-after');for(const r of [records[0],records.at(-1)]){assert.deepEqual(r.record.argv,['git','rev-parse','HEAD']);assert.equal(r.out.toString().trim(),value.sourceCommit);assert.equal(r.record.inputBase64,null);}
     for (let i = 1; i < records.length-1; i += 2) {
@@ -233,7 +259,7 @@ export function readPostUpMemoryBaseline(selection) {
         assert.ok(required.includes(records[i + 1].key));
     }
     for (const record of records) {
-        const a = record.record.argv;if(['source-head','source-head-after'].includes(record.key))continue;
+        const a = record.record.argv;if(capsule&&record.key.startsWith('owner-absence-')){assert.deepEqual(a,capsuleOwnerAbsenceArgv());validateCapsuleOwnerAbsence(record.value());continue;}if(['source-head','source-head-after'].includes(record.key))continue;
         assert.equal(a[0], 'docker');
         assert.ok(record.key.startsWith('ps-') || Object.hasOwn(value.observations, record.key));
         if (record.key.startsWith('ps-')) {
@@ -251,16 +277,16 @@ export function readPostUpMemoryBaseline(selection) {
     for (const pin of Object.values(value.sourcePins))
         postUpReadReference(pin, inputs);
     assert.equal(value.sourcePins.reader.sha256, sha(raw(import.meta.filename)));postUpReadReference({file:import.meta.filename,sha256:value.sourcePins.reader.sha256},inputs);
-    assert.equal(value.sourcePins.observer.sha256, postUpObserverSha256);
-    const descriptor = { format: postUpBaselineFormat, selection: structuredClone(selection), identities: facts.identities, protectedEight: facts.protectedEight, components: value.components, authorityCohort: { nonce: failed.authorityCohort.nonce, namespaces: namespace }, acceptance: failed.acceptanceCohort.descriptor, acceptanceOrigin: failed.acceptanceCohort.origin, failed: postUpFailureContext.failed, memorySamples: value.memorySamples, qualificationSucceeded: false };
+    assert.equal(value.sourcePins.observer.sha256, capsule?capsulePostUpObserverSha256:postUpObserverSha256);
+    const descriptor = { format: value.format, selection: structuredClone(selection), identities: facts.identities, protectedEight: facts.protectedEight, components: value.components, authorityCohort: { nonce: failed.authorityCohort.nonce, namespaces: namespace }, acceptance: failed.acceptanceCohort.descriptor, acceptanceOrigin: failed.acceptanceCohort.origin, failed: context.failed, memorySamples: value.memorySamples, qualificationSucceeded: false };
     const token = Object.freeze({});
-    tokens.set(token, { inputs, value, descriptor });
+    tokens.set(token, { inputs, value, descriptor,context });
     return token;
 }
 export function postUpMemoryDescriptor(token) { const r = tokens.get(token); assert.ok(r, 'PRIVATE_POST_UP_BASELINE_REQUIRED'); for (const [file, pin] of r.inputs)
-    assert.deepEqual(raw(file), pin.raw); postUpReadReference(postUpFailureContext.failed); postUpReadReference(postUpFailureContext.closure); return structuredClone(r.descriptor); }
+    assert.deepEqual(raw(file), pin.raw); postUpReadReference(r.context.failed); postUpReadReference(r.context.ownerObservation??r.context.closure); return structuredClone(r.descriptor); }
 export function postUpMemoryInputs(token) { postUpMemoryDescriptor(token); return Object.fromEntries([...tokens.get(token).inputs].map(([f, p]) => [f, p.sha256])); }
-export function validatePostUpCurrentSlots(token, containers, now = Date.now()) { const d = postUpMemoryDescriptor(token), v = tokens.get(token).value; assert.ok(now - Date.parse(v.observedAt) >= 0 && now - Date.parse(v.observedAt) <= 600000, 'POST_UP_BASELINE_STALE'); const facts = validatePostUpContainers(containers, readPostUpFailure()); assert.deepEqual(facts.identities, d.identities); assert.deepEqual(facts.protectedEight, d.protectedEight); return { format: 'sabalan-reobserved-post-up-negative-slots/v1', identities: facts.identities, previousIdentities: facts.identities, qualificationSucceeded: false, installedBytesVerified: false, nativeAndSqlQuietVerified: false, currentEmptyNamespacesVerified: false }; }
+export function validatePostUpCurrentSlots(token, containers, now = Date.now()) { const d = postUpMemoryDescriptor(token), v = tokens.get(token).value; assert.ok(now - Date.parse(v.observedAt) >= 0 && now - Date.parse(v.observedAt) <= 600000, 'POST_UP_BASELINE_STALE'); const facts = validatePostUpContainers(containers, readPostUpFailure(undefined,tokens.get(token).context)); assert.deepEqual(facts.identities, d.identities); assert.deepEqual(facts.protectedEight, d.protectedEight); return { format: 'sabalan-reobserved-post-up-negative-slots/v1', identities: facts.identities, previousIdentities: facts.identities, qualificationSucceeded: false, installedBytesVerified: false, nativeAndSqlQuietVerified: false, currentEmptyNamespacesVerified: false }; }
 export function postUpAuthorityBootstrap() { return "import sys,json,base64,hashlib,io;p=json.load(sys.stdin);s=base64.b64decode(p['source'],validate=True);assert hashlib.sha256(s).hexdigest()==" + JSON.stringify(postUpFailureContext.authorityProbe.sha256) + ";sys.stdin=io.StringIO(json.dumps(p['spec']));exec(compile(s,'original-authority-cohort','exec'),globals())"; }
 export function postUpAcceptanceBootstrap() { return "import base64,hashlib,io,json,sys;p=json.load(sys.stdin);s=base64.b64decode(p['source'],validate=True);assert hashlib.sha256(s).hexdigest()==" + JSON.stringify(postUpFailureContext.acceptanceProbe.sha256) + ";sys.stdin=io.StringIO(json.dumps(p['spec']));exec(compile(s,'source-owned-negative-acceptance','exec'),{'__name__':'__main__'})"; }
 /** This validates the NEW ordinary COMPLETE rotation, never promotes the failed owner. */
@@ -307,11 +333,11 @@ export function validatePostUpCreatedReceipt(token, receipt) {
         assert.equal(v.failure, undefined);
         assert.equal(v.result.empty, true);
         assert.equal(v.result.productionAdmission, false);
-        assert.deepEqual(p.runtimeLimitsBefore[service], readPostUpFailure().candidateQaMemoryProfile.runtimeLimitsBefore[service]);
+        assert.deepEqual(p.runtimeLimitsBefore[service], readPostUpFailure(undefined,tokens.get(token).context).candidateQaMemoryProfile.runtimeLimitsBefore[service]);
     }
     assert.equal(receipt.reobservedSqlQuiet.visible, true);
     assert.equal(receipt.reobservedSqlQuiet.sessions, 0);
     assert.equal(receipt.reobservedSqlQuiet.prepared, 0);
-    assert.equal(receipt.reobservedSqlQuiet.system, readPostUpFailure().sqlQuiet.system);
+    assert.equal(receipt.reobservedSqlQuiet.system, readPostUpFailure(undefined,tokens.get(token).context).sqlQuiet.system);
     return receipt;
 }

@@ -52,6 +52,15 @@ def native(file, expected, capture=False):
     return raw
 
 
+def original_inventory(prisma_source):
+    tree = ast.parse(prisma_source)
+    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ['digest', 'inventory']]
+    check(len(functions) == 2, 'CAPSULE_PRISMA_HELPER_SHAPE')
+    module = {'hashlib': hashlib, 'json': json, 'os': os, 'Path': Path}
+    exec(compile(ast.Module(body=functions, type_ignores=[]), 'original-prisma-inventory', 'exec'), module)
+    return module['inventory']
+
+
 def main():
     raw = sys.stdin.buffer.read(4 * 1024**2 + 1)
     check(0 < len(raw) <= 4 * 1024**2, 'CAPSULE_SPEC_BOUND')
@@ -70,12 +79,7 @@ def main():
     prisma_source = base64.b64decode(spec['prismaSource'], validate=True)
     check(digest(prisma_source) == '7af630e015aaf87872823b3f4e41bdfccd23214c356432604a7c149dcb347a79',
           'CAPSULE_PRISMA_HELPER_CHANGED')
-    tree = ast.parse(prisma_source)
-    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ['digest', 'inventory']]
-    check(len(functions) == 2, 'CAPSULE_PRISMA_HELPER_SHAPE')
-    module = {'hashlib': hashlib, 'os': os, 'Path': Path}
-    exec(compile(ast.Module(body=functions, type_ignores=[]), 'original-prisma-inventory', 'exec'), module)
-    observed = module['inventory'](PRISMA / 'node_modules/@prisma/client', check)
+    observed = original_inventory(prisma_source)(PRISMA / 'node_modules/@prisma/client', check)
     check(observed == spec['prisma']['capsule'], 'CAPSULE_PRISMA_CLIENT_CHANGED')
     prepared_raw = read(INQUIRY / 'prepared.json')
     prepared = json.loads(prepared_raw)

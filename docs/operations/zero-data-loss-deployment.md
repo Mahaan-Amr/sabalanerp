@@ -308,6 +308,16 @@ refuses an already-2048 predecessor. Unselected/default installations remain1536
 A pinned failed local 2048 MiB transition remains FAILED_CLOSED. Its literal negative report, original tool-owner observation (not native completion), completed 1536 MiB ancestor, and independent current-slot inspection may select only a full fresh 2048-to-2048 authority-cohort replacement. Fresh installed-byte, namespace, native/SQL quietness, exact identity/resource and protected-service checks remain mandatory. The resulting recovery profile explicitly records `originalTransitionQualified: false`; later ordinary replacements retain this authenticated recovery anchor. After UP, host memory may be observed passively for at most 60 seconds, with every actual sample persisted before validation and two consecutive fresh samples at the unchanged 2048 MiB floor required. A deadline or interruption remains fail-closed; no cache credit or production limit changes apply.
 
 
+The separately typed local capsule-preflight recovery baseline applies only to
+the pinned failed `4d9e5e57a12e985025bc06d59f08e050` replacement after successful
+UP. Its original tool exit is authenticated as an owner observation, with no
+reconstructed native closure or adoption. Fresh owner absence, exact physical
+slots and historical read-only mounts, installed bytes, empty namespaces,
+native/SQL quietness and unchanged resource limits precede a new ordinary
+authority-cohort replacement. The failed receipt remains negative; only the new
+replacement's complete gates, including both full capsule probes, can qualify it.
+This local recovery gives no production admission or rollback exception.
+
 ### Optional suspended local development frontend
 
 Build and qualify the current candidate while all ten local services are healthy. Only explicit operator authorization permits `scripts/run-local-dev-frontend-suspension.mjs --suspend --candidate-replacement-receipt <file> --candidate-replacement-sha256 <sha>` afterward. This owner stops only the inspected frontend container ID, records its original child close and both EOFs, and creates a durable restoration obligation. It changes no QA UI coverage, native memory floor, production gate, or deployment authority.

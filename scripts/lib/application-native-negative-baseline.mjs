@@ -55,7 +55,7 @@ export function validateNegativeRecoveryCreatedReceipt(token,receipt){
 }
 
 function readCompilerRestoredNegative(selection,selected){
- assert.deepEqual(selection,compilerResourceEnvelope,'EXACT_RESOURCE_HANDOFF_REQUIRED');assert.deepEqual(selected,{format:"sabalan-fixed-resource-restored-negative-handoff/v1",binding:compilerResourceBinding,qualificationSucceeded:false,productionAdmission:false});
+ assert.equal(path.resolve(selection.file),path.resolve(compilerResourceEnvelope.file),'EXACT_RESOURCE_HANDOFF_REQUIRED');assert.equal(selection.sha256,compilerResourceEnvelope.sha256,'EXACT_RESOURCE_HANDOFF_REQUIRED');assert.deepEqual(selected,{format:"sabalan-fixed-resource-restored-negative-handoff/v1",binding:compilerResourceBinding,qualificationSucceeded:false,productionAdmission:false});
  assert.equal(sha(fs.readFileSync(compilerResourcePolicy.file)),compilerResourcePolicy.sha256);
  const base=readNegativeRecoveryHandoff({file:'D:/sabalanerp-online-qa/C27-negative-prehello-context-actual-20261024/C29-post-up-negative-resume-actual-r1-20261024/handoff.json',sha256:'6543f4851d2076af49aaf20ee4238a2935cb615fa143e45bc7a0593ae3f12edd'}),original=tokens.get(base),resource=readCompilerResourceRestoration(compilerResourceBinding);
  const value=applyResourceFrontend(original.value,resource.frontend),firstValue=structuredClone(value),resourceInputs={...resource.inputs,[compilerResourcePolicy.file]:compilerResourcePolicy.sha256,[selection.file]:selection.sha256};

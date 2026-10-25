@@ -618,6 +618,12 @@ def validate_handoff(file,digest):
  return {'format':'sabalan-c16-verified-negative-predecessor/v1','sourceCommit':ctx['sourceCommit'],'operationRoot':ctx['operationRoot'],'historicalCandidateReplacement':ctx['historicalCandidateReplacement'],'identities':{role:{k:fresh[role][k]for k in ('id','image','startedAt')}for role in ROLES},'qualificationSlots':fresh,'protectedEight':[v for v in after_rows if v['service']not in ROLES],'acceptance':{'namedVolume':ACCEPTANCE_VOLUME,'subpath':'c16-recovery-'+cohort_nonce,'target':ACCEPTANCE_TARGET,'nonce':cohort_nonce,'namespace':acceptance_namespace},'authorityCohort':{'nonce':cohort_nonce,'namespaces':authority_namespaces},'inputs':reader.inputs,'streamingInputs':reader.streaming,'qualificationSucceeded':False,'productionAdmission':False,'adoptsOriginalPopen':False}
 
 def main():
- assert not sys.flags.optimize,'NONOPTIMIZED_VERIFIER_REQUIRED';same(len(sys.argv),4,'EXACT_VERIFIER_ARGUMENTS');same(sys.argv[1],'--verify-handoff','EXACT_VERIFIER_MODE');result=validate_handoff(sys.argv[2],sys.argv[3]);print(json.dumps(result,separators=(',',':')))
+ assert not sys.flags.optimize,'NONOPTIMIZED_VERIFIER_REQUIRED';same(len(sys.argv),4,'EXACT_VERIFIER_ARGUMENTS');same(sys.argv[1],'--verify-handoff','EXACT_VERIFIER_MODE')
+ if sys.argv[3]=='6543f4851d2076af49aaf20ee4238a2935cb615fa143e45bc7a0593ae3f12edd':
+  import importlib.util
+  file=pathlib.Path(__file__).with_name('application-native-negative-capsule-baseline.policy.py');before=file.lstat();assert file.resolve(strict=True)==file and file.is_file()and not file.is_symlink()and before.st_nlink==1
+  spec=importlib.util.spec_from_file_location('current_negative_capsule_policy',file);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);result=module.validate_handoff(sys.argv[2],sys.argv[3]);after=file.lstat();assert all(getattr(before,k)==getattr(after,k)for k in ['st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns','st_nlink'])
+ else:result=validate_handoff(sys.argv[2],sys.argv[3])
+ print(json.dumps(result,separators=(',',':')))
 if __name__=='__main__':main()
 

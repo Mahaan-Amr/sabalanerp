@@ -47,6 +47,7 @@ export class OriginalOnlineReleaseController {
  #originalCarrierCensusTail=Promise.resolve();
  #inquiryScopes=new Map();
  #bootstrapObservation=null;
+ #financialObservation=null;
  #bootstrapLegacy=null;
  #productionGates=new Map();#gateControls=new Map();#checkpointJobsDraining=new Set();
  #prebuiltReleasePlan=null;
@@ -304,6 +305,48 @@ export class OriginalOnlineReleaseController {
   require('./online-release-host-kernel.cjs').validateProductionExecutionBindings(bindings,{releaseId,imageGraphs,deploymentTargetImages,sourceHost});
   return bindings;
  }
+ async observeProtectedFinancialQualificationRequest(){
+  await this.assertOwned(['MUTATION_STARTED']);assert(!this.#accepted&&!this.#bootstrap,'PROTECTED_FINANCIAL_PREDDL_ONLY');
+  const rows=await this.#database.$queryRaw`SELECT "targetCommit","checkpointJson" FROM deployment_operations WHERE id=${this.#owner.deploymentId}
+   AND "releaseId"=${this.#owner.releaseId} AND "leaseToken"=${this.#owner.leaseToken} AND "activeKey"='production'
+   AND phase='MUTATION_STARTED' AND "leaseExpiresAt">clock_timestamp()+interval '20 seconds'`;
+  assert(rows.length===1,'PROTECTED_FINANCIAL_LEASE_REQUIRED');const point=rows[0].checkpointJson;
+  assert(point?.deploymentId===this.#owner.deploymentId&&point.releaseId===this.#owner.releaseId&&point.captureMethod==='PROTECTED_MAINTENANCE_COMPLETE'
+   &&['localVerified','remoteVerified','restoreVerified','manifestReadable'].every(k=>point[k]===true)
+   &&point.compatibility?.local?.compatible===true&&point.compatibility?.remote?.compatible===true,'PROTECTED_FINANCIAL_CHECKPOINT_UNPROVEN');
+  const identities=await this.#database.$queryRaw`SELECT current_database() AS name,p.system_identifier::text AS "systemIdentifier",d.oid::text AS oid
+   FROM pg_control_system() p CROSS JOIN pg_database d WHERE d.datname=current_database()`;
+  assert(identities.length===1&&sha(bytes(identities[0]))===sha(bytes(point.sourceDatabase)),'PROTECTED_FINANCIAL_DATABASE_CHANGED');
+  const ids=(await this.#docker(['ps','--all','--filter','label=com.docker.compose.project='+this.#project,'--filter','label=com.docker.compose.service=backend','--format','{{.ID}}'])).trim().split('\n').filter(Boolean);
+  assert(ids.length===1,'PROTECTED_FINANCIAL_SOURCE_REQUIRED');const[before]=JSON.parse(await this.#docker(['inspect',ids[0]]));
+  assert(before?.Config?.Labels?.['com.docker.compose.project']===this.#project&&before.Config.Labels['com.docker.compose.service']==='backend','PROTECTED_FINANCIAL_SOURCE_CHANGED');
+  const mount=before.Mounts.find(v=>v.Destination==='/app/recovery-coordination'&&v.RW);assert(mount&&fs.realpathSync(mount.Source)===mount.Source,'PROTECTED_FINANCIAL_COORDINATION_REQUIRED');
+  const execution=await this.#observeProductionExecutionBindings(rows[0].targetCommit);assert(execution?.backend?.graph?.config,'PROTECTED_FINANCIAL_TARGET_IMAGE_REQUIRED');
+  const[after]=JSON.parse(await this.#docker(['inspect',before.Id]));
+  const source=v=>({id:v.Id,image:v.Image,startedAt:v.State.StartedAt,configurationSha256:sha(bytes({Config:v.Config,HostConfig:v.HostConfig,Mounts:v.Mounts}))});
+  assert(sha(bytes(source(before)))===sha(bytes(source(after))),'PROTECTED_FINANCIAL_SOURCE_REPLACED');
+  const request={format:'sabalan-original-protected-financial-request/v1',sequence:1,deploymentId:this.#owner.deploymentId,releaseId:this.#owner.releaseId,
+   targetCommit:rows[0].targetCommit,database:identities[0],checkpoint:point,source:source(after),targetImage:execution.backend.graph.config,productionExecutionBindings:execution};
+  if(this.#financialObservation)assert(sha(bytes(request))===sha(bytes(this.#financialObservation.request)),'PROTECTED_FINANCIAL_ORIGINAL_REQUEST_CHANGED');
+  else this.#financialObservation={request:structuredClone(request),coordinationHost:mount.Source};return request;
+ }
+ async prepareProtectedFinancialPrerequisite({evidenceDirectory,sourceSha256,binding}){
+  assert(this.#financialObservation&&!this.#financialObservation.completed,'PROTECTED_FINANCIAL_ORIGINAL_REQUEST_REQUIRED');
+  const request=await this.observeProtectedFinancialQualificationRequest(),kernel=require('./online-release-host-kernel.cjs');
+  const verified=kernel.openProtectedFinancialQualificationDirectory(evidenceDirectory,{sourceSha256,binding}),q=verified.qualification;
+  assert(q&&q.sourceCommit===request.targetCommit&&sha(bytes(q.sourceDatabase))===sha(bytes(request.database))
+   &&binding.currentExecutionImage===request.targetImage&&q.currentExecutionImage===request.targetImage,'PROTECTED_FINANCIAL_PACKAGE_TARGET_CHANGED');
+  const rows=await this.#database.$queryRaw`SELECT coalesce(json_agg(t ORDER BY migration_name,id),'[]'::json)::text AS value FROM public._prisma_migrations t`;
+  assert(rows.length===1&&rows[0].value===q.originalHistoryRaw,'PROTECTED_FINANCIAL_NATIVE_BASELINE_CHANGED');
+  const current=await this.observeProtectedFinancialQualificationRequest();assert(sha(bytes(current))===sha(bytes(request)),'PROTECTED_FINANCIAL_LEASE_CONTEXT_CHANGED');verified.revalidate();
+  const descriptor={format:'sabalan-protected-financial-migration-prerequisite/v2',evidenceDirectory,sourceSha256,binding,checkpointSha256:sha(bytes(request.checkpoint)),targetImage:request.targetImage};
+  const file=path.join(this.#financialObservation.coordinationHost,this.#owner.deploymentId+'-protected-financial-qualification.json'),raw=bytes(descriptor),fd=fs.openSync(file,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o400);
+  try{fs.writeFileSync(fd,raw);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}assert(readPrivate(file,8192,0o400).data.equals(raw),'PROTECTED_FINANCIAL_LEAF_CHANGED');
+  const parent=fs.openSync(path.dirname(file),fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);try{fs.fsyncSync(parent);}finally{fs.closeSync(parent);}
+  this.#financialObservation.completed={sourceSha256,certificateSha256:q.certificateSha256,bindingSha256:q.bindingSha256,checkpointSha256:descriptor.checkpointSha256};
+  return {format:'sabalan-original-protected-financial-prepared/v1',deploymentId:request.deploymentId,releaseId:request.releaseId,checkpointSha256:descriptor.checkpointSha256,
+   prerequisiteSha256:sha(raw),certificateSha256:q.certificateSha256,releaseAcceptanceGranted:false,productionAdmission:false};
+ }
  async observeProtectedBootstrapQualificationRequest(){
   await this.assertOwned(['MIGRATIONS_APPLIED','RELEASE_STARTED']);
   assert(!this.#accepted&&!this.#bootstrap,'ONLINE_BOOTSTRAP_REQUEST_BEFORE_ADMISSION_REQUIRED');
@@ -380,6 +423,12 @@ export class OriginalOnlineReleaseController {
    &&sha(bytes(accepted.acceptance.qualification.deploymentTargetDatabase))===sha(bytes(request.database)),'ONLINE_BOOTSTRAP_PACKAGE_TARGET_CHANGED');
   const [counts]=await this.#database.$queryRaw`SELECT (SELECT count(*)::int FROM online_releases) AS releases,
    (SELECT count(*)::int FROM online_serving_epochs) AS epochs`;
+  const financial=this.#financialObservation?.completed;
+  assert(financial&&accepted.protectedFinancialQualifications?.length===1
+   &&accepted.protectedFinancialQualifications[0].certificateSha256===financial.certificateSha256
+   &&accepted.protectedFinancialQualifications[0].bindingSha256===financial.bindingSha256
+   &&accepted.evidenceInventory.some(row=>row.file==='compatible-migrations-source.json'&&row.sha256===financial.sourceSha256)
+   &&sha(bytes(request.checkpoint))===financial.checkpointSha256,'ONLINE_BOOTSTRAP_FINANCIAL_INVENTORY_CHANGED');
   assert(counts?.releases===0&&counts.epochs===0,'ONLINE_BOOTSTRAP_REGISTRY_NOT_EMPTY');origin.revalidate();accepted.revalidate();
   const coordinationHost=observed.coordinationHost,coordinationRuntime='/app/recovery-coordination',trust=path.join(path.dirname(this.#composeFile),'.deploy-state/online-trust');
   assert(fs.realpathSync(trust)===trust&&(fs.lstatSync(trust).mode&0o777)===0o700,'ONLINE_BOOTSTRAP_TRUST_DIRECTORY_REQUIRED');

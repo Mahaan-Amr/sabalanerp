@@ -5,13 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {readQaMemoryProfile as realRead} from '../../scripts/lib/application-native-qa-profile.mjs';
+import {negativeCapsuleFormat} from '../../scripts/lib/application-native-negative-capsule-acceptance.mjs';
 const source=fs.readFileSync(new URL('../../scripts/lib/application-native-qa-profile.mjs',import.meta.url),'utf8');
 const sha=b=>createHash('sha256').update(b).digest('hex'),MiB=1024**2,roles=['backend-candidate','backend-retained'];
 function fixture(run){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sabalan-profile-mixed-'));
  try{
   const put=(name,value,raw=false)=>{const file=fs.realpathSync(dir)+path.sep+name;fs.writeFileSync(file,raw?value:JSON.stringify(value));return{file,sha256:sha(fs.readFileSync(file))};};
-  const origins=new Map(),ports={assert,fs,path,createHash,structuredClone,Object,JSON,Array,Buffer,candidateQaMemoryBytes:1536*MiB,expandedCandidateQaMemoryBytes:2048*MiB,retainedQaMemoryBytes:768*MiB,qaSwapBytes:1536*MiB,
+  const origins=new Map(),ports={assert,fs,path,createHash,structuredClone,Object,JSON,Array,Buffer,negativeCapsuleFormat,candidateQaMemoryBytes:1536*MiB,expandedCandidateQaMemoryBytes:2048*MiB,retainedQaMemoryBytes:768*MiB,qaSwapBytes:1536*MiB,
    // Unit-only external verification ports; actual stable reads, branches and recursive rechecks execute unchanged.
    validateQaMemoryTransitionReceipt:()=>{},readNegativeRecoveryHandoff:r=>origins.get(r.file),negativeRecoveryDescriptor:t=>t.descriptor,negativeRecoveryInputs:t=>t.inputs,validateNegativeRecoveryCreatedReceipt:()=>{}};
   const body=source.replace(/^import .*;\r?\n/gm,'').replace(/^export /gm,'');

@@ -88,6 +88,40 @@ def frame(fd,maximum=16384):
    raise OriginalInputEOF()
   data.extend(chunk)
 
+def receive_qualification_files(response,evidence,financial=False):
+ # Metadata and each <=512KiB frame belong to this SAME original stdin. No
+ # status file, parallel reader or generic command can fill a partial artifact.
+ require(isinstance(response.get('files'),dict) and 1<=len(response['files'])<=128)
+ if financial:
+  names=['workerstdout','workerstderr','workeroriginal','outeractive','outerfinal','privateproof','sourcecheckpoint','currentmaterial','currentcompiled','currentimage','currentinspect','certificate']
+  require(set(response['files'])=={'protected-financial-source.json',*['protected-financial-'+n+'.json' for n in names]})
+ evidence=pathlib.Path(evidence);require(not evidence.exists() and evidence.parent.resolve()==evidence.parent)
+ evidence.mkdir(mode=0o700);st=evidence.lstat();require(stat.S_ISDIR(st.st_mode) and st.st_uid==0 and st.st_mode&0o777==0o700)
+ total=0
+ for name,entry in sorted(response['files'].items()):
+  require(re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,95}',name) and set(entry)=={'sha256','bytes'})
+  maximum=65536 if name=='protected-financial-certificate.json' else 8388608 if name=='protected-financial-source.json' else 33554432 if name=='protected-financial-currentcompiled.json' else 41943040 if name=='protected-financial-workerstdout.json' else 16777216 if name.startswith('protected-financial-') else 8388608
+  require(type(entry['bytes'])is int and (entry['bytes']>=0 if name=='protected-financial-workerstderr.json' else entry['bytes']>0) and entry['bytes']<=maximum and re.fullmatch('[a-f0-9]{64}',entry['sha256']))
+  total+=entry['bytes'];require(total<=268435456)
+  fd=os.open(evidence/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o400);digest=hashlib.sha256();offset=0
+  try:
+   while offset<entry['bytes']:
+    part=frame(0,524288)
+    require(set(part)=={'format','sequence','file','offset','rawBase64'} and part['format']=='sabalan-original-qualification-chunk/v1' and type(part['sequence'])is int and part['sequence']==1 and part['file']==name and type(part['offset'])is int and part['offset']==offset)
+    raw=base64.b64decode(part['rawBase64'],validate=True);require(base64.b64encode(raw).decode()==part['rawBase64'] and 0<len(raw)<=262144 and offset+len(raw)<=entry['bytes'])
+    write(fd,raw);digest.update(raw);offset+=len(raw)
+   require(offset==entry['bytes'] and digest.hexdigest()==entry['sha256']);os.fsync(fd)
+  finally:os.close(fd)
+  target=evidence/name;before=target.lstat();require(stat.S_ISREG(before.st_mode) and before.st_uid==0 and before.st_nlink==1 and before.st_mode&0o777==0o400 and before.st_size==entry['bytes'])
+  readback=hashlib.sha256()
+  with target.open('rb') as stream:
+   for raw in iter(lambda:stream.read(262144),b''):readback.update(raw)
+  require(readback.hexdigest()==entry['sha256'] and (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)==(target.lstat().st_dev,target.lstat().st_ino,target.lstat().st_size,target.lstat().st_mtime_ns,target.lstat().st_ctime_ns))
+ directory=os.open(evidence,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ try:os.fsync(directory)
+ finally:os.close(directory)
+ return evidence
+
 def project_original_control_result(sequence,command,result):
  require(type(sequence)is int and sequence>0 and isinstance(result,dict))
  value=dict(sequence=sequence,status='COMPLETED',command=command,releaseAcceptanceGranted=False)
@@ -124,7 +158,7 @@ def project_original_control_result(sequence,command,result):
  return value
 
 def original_controller_response(fd,command):
- large={'OBSERVE_BOOTSTRAP_REQUEST','OBSERVE_ONLINE_REQUEST','BUILD_BOOTSTRAP_MATERIAL','BUILD_ONLINE_MATERIAL',
+ large={'OBSERVE_PROTECTED_FINANCIAL_REQUEST','OBSERVE_BOOTSTRAP_REQUEST','OBSERVE_ONLINE_REQUEST','BUILD_BOOTSTRAP_MATERIAL','BUILD_ONLINE_MATERIAL',
   'PREPARE_CHECKPOINT_CAPTURE','PREPARE_CHECKPOINT_PUBLICATION','READ_CONTINUOUS_CONTEXT','PREPARE_FINISH_CONTEXT',
   'READ_CYCLE_PLAN','RETIRE_EXPIRED_BUILDS','READ_CLIENT_DETACH_BARRIER','BUILD_PUBLICATION_REGISTRY'}
  return frame(fd,8388608 if command in large else 16384)
@@ -405,7 +439,7 @@ try:
  os.close(request_write);os.close(response_read)
  log(deploy.stdout,work/'deploy.stdout');log(deploy.stderr,work/'deploy.stderr')
  bootstrap=None
- for index,command in enumerate(['BOOTSTRAP_PREPARE','BOOTSTRAP_GATES','BOOTSTRAP_PUBLISH','BOOTSTRAP_ACTIVATE','BOOTSTRAP_OPENED'],1):
+ for index,command in enumerate(['FINANCIAL_PREPARE','BOOTSTRAP_PREPARE','BOOTSTRAP_GATES','BOOTSTRAP_PUBLISH','BOOTSTRAP_ACTIVATE','BOOTSTRAP_OPENED'],1):
   message=frame(request_read)
   require(set(message)=={'format','command','sequence','deploymentId','releaseId','targetCommit'} and message['format']=='sabalan-protected-bootstrap-boundary/v1' and message['command']==command and message['sequence']==index)
   require(re.fullmatch('[a-f0-9]{40}',message['targetCommit']) and deploy.poll() is None)
@@ -433,27 +467,29 @@ try:
    require(result.get('sequence')==controller_sequence and result.get('event')==('CLOSED' if name=='CLOSE' else 'COMMAND_COMPLETED')
     and (controller.poll() in (None,0) if name=='CLOSE' else controller.poll() is None))
    return result
-  if command=='BOOTSTRAP_PREPARE':
+  if command=='FINANCIAL_PREPARE':
+   target=call('OBSERVE_PROTECTED_FINANCIAL_REQUEST')['financialRequest']
+   require(target['deploymentId']==message['deploymentId'] and target['releaseId']==message['releaseId'] and target['targetCommit']==message['targetCommit'])
+   write(1,b'SABALAN_ORIGINAL_FINANCIAL_REQUEST '+encoded(target))
+   response=frame(0,65536)
+   require(set(response)=={'format','sequence','deploymentId','releaseId','requestSha256','sourceSha256','binding','files'} and response['format']=='sabalan-original-protected-financial-response/v1'
+    and type(response['sequence'])is int and response['sequence']==1 and response['deploymentId']==message['deploymentId'] and response['releaseId']==message['releaseId']
+    and response['requestSha256']==hashlib.sha256(json.dumps(target,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest())
+   evidence=receive_qualification_files(response,work/'financial-evidence',True)
+   require(hashlib.sha256((evidence/'protected-financial-source.json').read_bytes()).hexdigest()==response['sourceSha256'])
+   call('PREPARE_PROTECTED_FINANCIAL',input=dict(evidenceDirectory=str(evidence),sourceSha256=response['sourceSha256'],binding=response['binding']))
+  elif command=='BOOTSTRAP_PREPARE':
    target=call('OBSERVE_BOOTSTRAP_REQUEST')['qualificationRequest']
    require(target['deploymentId']==message['deploymentId'] and target['releaseId']==message['releaseId'] and target['targetCommit']==message['targetCommit'])
    # Only this SAME original SSH/stdin conversation can supply the later
    # signed package. The controller independently verifies its fixed trust.
    write(1,b'SABALAN_ORIGINAL_QUALIFICATION_REQUEST '+encoded(target))
-   response=frame(0,67108864)
+   response=frame(0,65536)
    require(set(response)=={'format','sequence','deploymentId','releaseId','manifestSha256','acceptanceSha256','checkpointSha256','files'}
-    and response['format']=='sabalan-original-protected-qualification-response/v1' and response['sequence']==1
+    and response['format']=='sabalan-original-protected-qualification-response/v2' and type(response['sequence'])is int and response['sequence']==1
     and response['deploymentId']==message['deploymentId'] and response['releaseId']==message['releaseId']
     and response['checkpointSha256']==hashlib.sha256(json.dumps(target['checkpoint'],sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest())
-   evidence=work/'qualified-evidence';evidence.mkdir(mode=0o700)
-   require(isinstance(response['files'],dict) and 1<=len(response['files'])<=128)
-   total=0
-   for name,entry in response['files'].items():
-    require(re.fullmatch(r'[a-z0-9][a-z0-9_.-]{0,95}',name) and set(entry)=={'rawBase64','sha256','bytes'})
-    raw=base64.b64decode(entry['rawBase64'],validate=True);total+=len(raw)
-    require(len(raw)==entry['bytes'] and 0<len(raw)<=8388608 and total<=33554432 and hashlib.sha256(raw).hexdigest()==entry['sha256'])
-    descriptor=os.open(evidence/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o400)
-    try:write(descriptor,raw);os.fsync(descriptor)
-    finally:os.close(descriptor)
+   evidence=receive_qualification_files(response,work/'qualified-evidence')
    require(hashlib.sha256((evidence/'manifest.json').read_bytes()).hexdigest()==response['manifestSha256']
     and hashlib.sha256((evidence/'acceptance.json').read_bytes()).hexdigest()==response['acceptanceSha256'])
    directory=os.open(evidence,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)

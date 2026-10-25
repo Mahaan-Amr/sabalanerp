@@ -1,4 +1,5 @@
 import {assertLocalDevSuspensionCurrent,readLocalDevSuspension,bindLocalDevSuspensionMaster} from './local-dev-frontend-suspension.mjs';
+import {isNegativeAcceptanceSubpath} from './application-native-negative-acceptance.mjs';
 import {readExplicitQaMemoryProfile,readQaMemoryProfile,expectedQaCandidateMemory} from './application-native-qa-profile.mjs';
 import {readProductionInquirySnapshot,assertSnapshotInquiryJoin} from './production-inquiry-snapshot.mjs';
 /** Original local Inquiry pair creator. No saved report can recreate completion. */
@@ -53,10 +54,10 @@ function readRetainedInquiryVolumeMount(container,target,readOnly,subpathPattern
  assert.ok(typeof subpath==='string'&&(subpath===''||subpathPattern.test(subpath)),prefix+'_SUBPATH_UNPROVEN');return{name:mount.Name,subpath};
 }
 export function readRetainedInquiryAuthorityMount(container,target,readOnly){return readRetainedInquiryVolumeMount(container,target,readOnly,/^cohort-[a-f0-9]{32}$/,'INQUIRY_AUTHORITY');}
-export function readRetainedInquiryAcceptanceMount(container){return readRetainedInquiryVolumeMount(container,'/app/online-runtime-acceptance',false,/^c16-recovery-[a-f0-9]{32}$/,'INQUIRY_ACCEPTANCE');}
+export function readRetainedInquiryAcceptanceMount(container){return readRetainedInquiryVolumeMount(container,'/app/online-runtime-acceptance',false,{test:isNegativeAcceptanceSubpath},'INQUIRY_ACCEPTANCE');}
 export function buildRetainedInquiryRotation(images,acceptance,authority,proxy){
  validateRetainedInquiryProxy(proxy);
- assert.deepEqual(Object.keys(acceptance).sort(),['name','subpath']);assert.match(acceptance.name,/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/);assert.ok(acceptance.subpath===''||/^c16-recovery-[a-f0-9]{32}$/.test(acceptance.subpath),'INQUIRY_ACCEPTANCE_SUBPATH_UNPROVEN');
+ assert.deepEqual(Object.keys(acceptance).sort(),['name','subpath']);assert.match(acceptance.name,/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/);assert.ok(acceptance.subpath===''||isNegativeAcceptanceSubpath(acceptance.subpath),'INQUIRY_ACCEPTANCE_SUBPATH_UNPROVEN');
  assert.deepEqual(Object.keys(authority).sort(),['name','subpath']);assert.match(authority.name,/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/);assert.ok(authority.subpath===''||/^cohort-[a-f0-9]{32}$/.test(authority.subpath),'INQUIRY_AUTHORITY_SUBPATH_UNPROVEN');
  const rotation={name:'sabalanerp-local',services:{},volumes:{inquiry_pair_acceptance:{external:true,name:acceptance.name},inquiry_pair_authority:{external:true,name:authority.name}}};
  // /tmp is inherited from the canonical browser overlay. Compose merges tmpfs

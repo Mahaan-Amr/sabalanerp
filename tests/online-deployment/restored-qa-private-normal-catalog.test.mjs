@@ -1,0 +1,33 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import Module,{createRequire}from'node:module';import{fileURLToPath}from'node:url';
+const root=fileURLToPath(new URL('../..',import.meta.url)),require=createRequire(path.join(root,'backend/package.json')),ts=require('typescript');
+const names=['20261014140000_online_deployment_control','20261019010000_customer_semantic_barrier','20261019020000_hr_versioned_file_cleanup','20261020010000_online_realtime_completion','20261020093000_online_serving_epochs'];
+const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
+const sha=raw=>crypto.createHash('sha256').update(raw).digest('hex');
+function fixture(){const normal={},material={},owner={deploymentId:'unit-private-owner',releaseId:'unit-private-release'},database={name:'sabalan_checkpoint_verify_123456789abc',oid:'1',systemIdentifier:'2'},state={opened:0,closed:0,readOnly:false,mutateCatalog:false,mutateHistory:false,badSql:false};let module;
+ const tableRows=input=>[...input.tables].sort().map(name=>({name,details:{unitProjection:true,definition:'actual canonical catalog function consumes this controlled data'}}));
+ const functionRows=input=>[...input.functions].sort().map(name=>({name,definition:'unit function semantics',owner:'unit-owner'}));
+ const sqls=new Map(names.map(n=>[n,fs.readFileSync(path.join(root,'backend/prisma/migrations',n,'migration.sql'))]));
+ const steps=[];const view={database,migrationEvidence:{run:{steps},historyRaw:{after:'unit-exact-current-native445'}}};
+ const normalized=file=>String(file).replaceAll('\\','/');const localPath=file=>normalized(file).startsWith('/app/prisma/migrations/')?path.join(root,'backend/prisma/migrations',normalized(file).slice('/app/prisma/migrations/'.length)):file;
+ const shim=Object.create(fs),fdFiles=new Map();shim.realpathSync=file=>normalized(file).startsWith('/app/prisma/migrations/')?file:fs.realpathSync(file);
+ shim.openSync=(file,flags,...args)=>{const fd=fs.openSync(localPath(file),flags,...args);fdFiles.set(fd,localPath(file));return fd;};
+ shim.readFileSync=(fd,...args)=>{const raw=fs.readFileSync(fd,...args);return state.badSql&&fdFiles.has(fd)?Buffer.concat([raw,Buffer.from('-- changed')]):raw;};
+ shim.closeSync=fd=>{fdFiles.delete(fd);return fs.closeSync(fd);};
+ const metadata=(st,file)=>process.platform!=='win32'?st:new Proxy(st,{get:(s,k)=>k==='mode'?(s.mode&~0o777n)|0o644n:k==='dev'?fs.lstatSync(file,{bigint:true}).dev:Reflect.get(s,k)});
+ shim.fstatSync=(fd,opts)=>metadata(fs.fstatSync(fd,opts),fdFiles.get(fd));shim.lstatSync=(file,opts)=>metadata(fs.lstatSync(localPath(file),opts),localPath(file));
+ const tx={$executeRawUnsafe:async sql=>{assert.equal(sql,'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');state.readOnly=true;},$queryRaw:async(arg,...values)=>{
+  assert.equal(state.readOnly,true);const sql=(arg.strings||arg).join('?');
+  if(sql.includes('set_config'))return[];if(sql.includes('SELECT current_database()'))return[database];if(sql.includes('json_agg(t'))return[{value:state.mutateHistory?'changed':view.migrationEvidence.historyRaw.after}];
+  const input={tables:sql.includes('SELECT c.relname')?arg.values[0]:[],functions:sql.includes('SELECT p.proname')?arg.values[0]:[]};
+  if(input.tables.length){const rows=tableRows(input);if(state.mutateCatalog)rows[0].details.definition='changed real projection';return rows;}if(input.functions.length)return functionRows(input);assert.fail('unexpected unit query');
+ }};
+ const compilerFile=path.join(root,'backend/src/services/protectedBridgeMigrationCompiler.ts'),compilerModule=new Module(compilerFile);compilerModule.filename=compilerFile;compilerModule.require=require;compilerModule._compile(ts.transpileModule(fs.readFileSync(compilerFile,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText,compilerFile);
+ const mocks={'./protectedBridgeMigrationCompiler':compilerModule.exports,'node:fs':shim,'@prisma/client':{Prisma:{sql:(strings,...values)=>({strings,values}),join:value=>value}},'./runtimeControlOwnership':{},'./protectedHistoricalHrAnchor':{},'./protectedHistoricalHrCatalog':{},
+ './restoredQaMigrationBaseline':{assertRestoredQaPrivateNormal:(n,m,o)=>{assert.equal(n,normal);assert.equal(m,material);assert.equal(o,owner);return view;}},
+ './systemRecoveryEngine':{withSystemRecoveryDatabaseClient:async(name,work)=>{assert.equal(name,database.name);state.opened++;try{return await work({$transaction:work=>work(tx)});}finally{state.closed++;}}}};
+ const file=path.join(root,'backend/src/services/protectedBridgeMigrations.ts');module=new Module(file);module.filename=file;module.require=id=>mocks[id]??require(id);module._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText,file);
+ for(const name of names){const input=module.exports.compileProtectedBridgeMigration(name,sqls.get(name));steps.push({migrationName:name,sqlSha256:input.sha256,ownedReceipt:{catalogSha256:sha(JSON.stringify(canonical({tables:tableRows(input),functions:functionRows(input)})))}});}
+ return{...module.exports,normal,material,owner,state,view};}
+test('same private catalog algorithm freshly rechecks all five against real fixed SQL and opaque native445 snapshot',async()=>{const f=fixture(),result=await f.observeRestoredQaPrivateNormalCatalog(f.normal,f.material,f.owner);assert.equal(result.catalogs.length,5);assert.equal(result.readOnly,true);assert.equal(result.financialSchemaQualified,false);assert.equal(result.productionAdmission,false);assert.equal(f.state.opened,1);assert.equal(f.state.closed,1);assert.equal(result.nativeHistorySha256,sha(f.view.migrationEvidence.historyRaw.after));});
+test('forged cap/changed fixed SQL refuse before a database opens',async()=>{for(const change of [f=>{f.normal={};},f=>{f.state.badSql=true;}]){const f=fixture();change(f);await assert.rejects(f.observeRestoredQaPrivateNormalCatalog(f.normal,f.material,f.owner));assert.equal(f.state.opened,0);assert.equal(f.state.closed,0);}});
+test('post-HTTP schema or native history drift refuses and temporary client always closes',async()=>{for(const flag of ['mutateCatalog','mutateHistory']){const f=fixture();f.state[flag]=true;await assert.rejects(f.observeRestoredQaPrivateNormalCatalog(f.normal,f.material,f.owner));assert.equal(f.state.opened,1);assert.equal(f.state.closed,1);}});

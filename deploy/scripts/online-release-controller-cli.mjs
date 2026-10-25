@@ -74,6 +74,8 @@ try{
    case 'PREPARE_RETAINED_ROLLBACK':result=rollbackPlanResult(await controller.prepareOriginalRetainedRollback(request.input));break;
    case 'START_INQUIRY':result=await controller.startInquiryRuntime(request.input);break;
    case 'STOP_INQUIRY':result=await controller.stopInquiryRuntime(request.runtimeId);break;
+   case 'OBSERVE_PROTECTED_FINANCIAL_REQUEST':result=await controller.observeProtectedFinancialQualificationRequest();break;
+   case 'PREPARE_PROTECTED_FINANCIAL':result=await controller.prepareProtectedFinancialPrerequisite(request.input);break;
    case 'OBSERVE_BOOTSTRAP_REQUEST':result=await controller.observeProtectedBootstrapQualificationRequest();break;
    case 'OBSERVE_ONLINE_REQUEST':result=await controller.observeOriginalOnlineQualificationRequest(request.input);break;
    case 'BUILD_BOOTSTRAP_MATERIAL':result=await controller.prepareOriginalBootstrapMaterial(request.input);break;
@@ -108,6 +110,7 @@ try{
    ...(request.command==='PREPARE_CHECKPOINT_PUBLICATION'?{checkpointPublication:result}:{}),
    ...(request.command==='READ_CONTINUOUS_CONTEXT'?{continuousContext:result}:{}),
    ...(request.command==='PREPARE_CHECKPOINT_CAPTURE'?{checkpointCapture:result}:{}),
+   ...(request.command==='OBSERVE_PROTECTED_FINANCIAL_REQUEST'?{financialRequest:result}:{}),
    ...(request.command==='OBSERVE_BOOTSTRAP_REQUEST'?{qualificationRequest:result}:{}),
    ...(request.command==='OBSERVE_ONLINE_REQUEST'?{qualificationRequest:result}:{}),
    ...(request.command==='BUILD_BOOTSTRAP_MATERIAL'?{bootstrapMaterial:result}:{}),

@@ -45,6 +45,10 @@ Preservation keeps the existing scanner running through application preparation,
 
 The durable session and its first host-journal entry bind the complete selection and plan SHA. Matching metadata is stored in the existing reports and recovery-coordination directories and included by the unchanged complete business checkpoint. Interrupted recovery requires matching metadata before any Compose action. Missing, changed or unreadable selection retains the protected recovery boundary; it never falls through to ordinary scanner recreation. Repair and preservation are mutually exclusive.
 
+Standalone `--capture-only` uses `sabalan-protected-capture-control-plan/v2`. Its private plan includes the same canonical `preservedClamav` selection, a `preservationContext` with phase `CAPTURE_ONLY` and its actual issuance time, and exact hashes for the two capture operation sources plus all six scanner preservation sources. The immutable control image retains its own actual source commit and source hash; those labels are verified independently from the operations bundle. The former five-field plan cannot start a capture without scanner preservation.
+
+Before operational preflight, `plan-exports` validates the image, all eight source files and an issuance age of at most 600 seconds, installs the plan-bound scanner selection, and runs fresh canonical scanner health inspection. Later reinspection requires the same raw private plan SHA and canonical selection. It does not restart the issuance window or replace the original FD9/database lease, live scanner checks, monotonic capture pause deadline, or reopening gates.
+
 Infrastructure identity uses a versioned descriptor binding the desired Compose digest separately from the actual preserved scanner configuration/image and selection. The desired `extra_hosts` alias is not claimed to have been installed on a preserved container. The existing independently verified PostgreSQL, Inquiry and business-file restore scope is unchanged: this lane does not capture signature banks, add a restore container or prove reconstruction of antivirus/host network infrastructure on a blank machine. Scanner replacement or that separate recovery operation requires its existing dedicated qualification.
 
 Before preparing a maintenance session, the built backend runs the same production-environment validator used at application startup. Missing runtime settings, including personnel-performance attestation configuration and release identity, abort while the current release remains online. Provision the approved attestation configuration and bind release identity to the measured candidate before retrying; do not fill these settings with placeholders or weaken startup validation.
@@ -339,6 +343,21 @@ proof nor the new receipt claims that the physical acceptance directory is empty
 the legacy empty-directory verifier remains unchanged. Only the two exact large
 Prisma declaration files in that archived preparation may exceed the normal
 file-size bound; their literal paths, sizes and digests remain mandatory.
+
+The separately typed C29 post-UP negative baseline authenticates only the literal
+`6543f4851d2076af49aaf20ee4238a2935cb615fa143e45bc7a0593ae3f12edd`
+handoff. It preserves the original failed cleanup child and master exit 125,
+three archives, all original stream closures and the subsequent successful
+restoration records. Its exact nested acceptance view contains two historical
+read-only capsules and no actor entries; physical emptiness is explicitly false.
+Both backends must independently recheck complete capsule inventories and three
+read-only lock identities, installed bytes, empty authority namespaces, native/SQL
+quietness and all ten current physical identities before a fresh replacement.
+The earlier successful candidate supplies historical material and the preserved
+2048 MiB resource profile only. Two new originals must supply current execution
+evidence; neither that history nor this negative baseline qualifies a candidate,
+adopts a process, or grants production admission. The earlier empty-directory
+branch remains separate and unknown nested paths are refused.
 
 ### Optional suspended local development frontend
 

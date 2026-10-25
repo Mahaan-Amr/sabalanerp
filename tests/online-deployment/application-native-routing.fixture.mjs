@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import dns from 'node:dns';
+import puppeteer from 'puppeteer';
 import {createHash} from 'node:crypto';
 import {BrowserRoutingStore,BrowserRoutingPublicationLock} from '../../deploy/scripts/browser-routing-store.mjs';
 import {BrowserOperationJournal} from '../../deploy/scripts/browser-operation-journal.mjs';
@@ -12,7 +13,37 @@ import {enrollOriginalReadonlyTransportChannel,publishOriginalBrowserBusinessRea
   holdOriginalStoppedEdgeForReadonlyRetirement} from './readonly-transport-retirement-edge.fixture.mjs';
 import {apiRoutingSnapshot} from '../../deploy/scripts/api-release-routing.mjs';
 import {assertNativePrivateIPv4,assertNativePrivateInterface} from './native-private-network.fixture.mjs';
-import {openOriginalRemoteBrowserConnection} from '../../deploy/scripts/original-remote-browser-capability.mjs';
+import {openOriginalRemoteBrowserConnection,readOriginalRemoteBrowserConnection} from '../../deploy/scripts/original-remote-browser-capability.mjs';
+
+async function holdOriginalStartupBrowserCustody() {
+  console.error('ORIGINAL_ROUTING_STARTUP_BROWSER_CLOSE_UNPROVEN');
+  for(;;)await new Promise(resolve=>setTimeout(resolve,1000));
+}
+async function runOriginalRoutingStartup(run) {
+  let browserConnection,handedOff=false;
+  try {
+    // Acquire the inherited, signed capability before any startup input can fail.
+    const retirementChannel=await enrollOriginalReadonlyTransportChannel();
+    browserConnection=await openOriginalRemoteBrowserConnection(retirementChannel);
+    return await run({retirementChannel,browserConnection,
+      handoffBrowserAcceptance:()=>{handedOff=true;}});
+  } catch(error) {
+    if(!handedOff) {
+      try {
+        const original=readOriginalRemoteBrowserConnection(browserConnection);
+        const browser=await puppeteer.connect({browserWSEndpoint:original.browserWSEndpoint});
+        await browser.close();
+      } catch {
+        // Unknown normal-close outcome retains this same original edge. No PID,
+        // receipt, signal or substitute browser can establish native closure.
+        await holdOriginalStartupBrowserCustody();
+      }
+    }
+    throw error;
+  }
+}
+
+await runOriginalRoutingStartup(async ({retirementChannel,browserConnection,handoffBrowserAcceptance})=>{
 
 // Diagnostic controller only: the real two native HTTP actors retain their own
 // request/SQL/file ownership. The inherited lock owns routing publication, not
@@ -35,7 +66,7 @@ function privateRead(file,maximum=65536) {
     return bytes;
   } finally {fs.closeSync(fd);}
 }
-const input=JSON.parse(privateRead(path.join(root,'routing-input.json'),512*1024)),index=JSON.parse(privateRead(path.join(root,'index.json')));
+const input=JSON.parse(privateRead(path.join(root,'routing-input.json'),512*1024)),index=JSON.parse(privateRead(path.join(root,'index.json'),512*1024));
 const config=JSON.parse(privateRead(path.join(root,'config.json'),512*1024)),seedBytes=privateRead(path.join(root,'app/acceptance-seed.json'));
 const edgeHost=assertNativePrivateInterface(input.edgeHost);
 assert.equal(edgeHost,config.roleTopology.main.host);
@@ -89,8 +120,6 @@ for(const name of ['ui','api','socket']) {
   await journals[name].initialize();
 }
 const journal=journals.api;
-const retirementChannel=await enrollOriginalReadonlyTransportChannel();
-const browserConnection=await openOriginalRemoteBrowserConnection(retirementChannel);
 function durableJson(file,value) {
   const fd=fs.openSync(file,'wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(value)+'\n');fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
   const directory=fs.openSync(path.dirname(file),'r');try{fs.fsyncSync(directory);}finally{fs.closeSync(directory);}
@@ -179,6 +208,9 @@ try {
       {retiredAt:new Date(now).toISOString(),supportUntil:new Date(now+86400000).toISOString()});
     publication=await store.publish(registry,publication.publicationSha256);return {registry,...publication};
   }
+  // The browser fixture owns connection/close from this call onward. Startup
+  // cleanup must never reconnect concurrently with that original browser owner.
+  handoffBrowserAcceptance();
   const browser=await runNativeBrowserAcceptance({edge:proxy,root,seed,uiArtifacts,journalDirectories,browserConnection,
     actors:input.observations.map((actor,ordinal)=>({...actor,scopeSha256:httpGrants[ordinal].sha256,
       slotId:ordinal?'backend_native_b':'backend_native_a'})),publishGeneration,readSocketPending:()=>journals.socket.pending(),
@@ -202,3 +234,4 @@ try {
   if(proxy?.server.listening&&!transportStopped)await closeProxy();
   localAgent.destroy();http.globalAgent=originalAgent;
 }
+});

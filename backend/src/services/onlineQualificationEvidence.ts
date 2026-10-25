@@ -7,6 +7,7 @@ import { runtimeNativePostgresApplicationName } from './runtimeBoundaryJournal';
 import {assertOriginalIndependentPhysicalPoint} from './onlinePhysicalCheckpointEvidence';
 import {readCanonicalCheckpointMetadata} from './deploymentCheckpointMetadataIdentity';
 import {validateProductionExecutionBindings,type ProductionImageExecutionBindings} from './onlineImageExecutionBinding';
+import {assertProtectedFinancialQualificationSource,type ProtectedFinancialQualificationBinding,type ProtectedFinancialQualificationArtifacts} from './protectedFinancialQualificationProvenance';
 
 export type OnlineQualificationScope = 'compatible-migrations' | 'coherent-independent-restore'
   | 'browser-24-hours' | 'single-worker-and-completion' | 'current-domain';
@@ -26,6 +27,7 @@ export type OnlineQualificationBinding = {
   imageGraphs: Record<'backend'|'frontend'|'inquiry',{index:string;platform:string;config:string;rootfsDiffIds:string[];archiveSha256:string;archiveBytes:number}>;
   componentSourceCommits: {backend:string;frontend:string;inquiry:string};
   runtimeCohorts: Record<OnlineQualificationScope, OnlineQualificationRuntimeIdentity[]>;
+  protectedFinancial?:ProtectedFinancialQualificationBinding;
 };
 function fail():never { throw Error('ONLINE_QUALIFICATION_SEMANTICS_UNPROVEN'); }
 const digest = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -248,7 +250,7 @@ function installedBrowserRouting(source:any,expected:OnlineQualificationBinding)
 /** Scope-specific semantics for immutable raw receipts. No signer, issuer or
  * runtime admission is exposed. Existing diagnostic receipts remain diagnostic;
  * none currently supplies all the production evidence required here. */
-export function assertOnlineQualificationProof(scope: OnlineQualificationScope, source: any, expected: OnlineQualificationBinding) {
+export function assertOnlineQualificationProof(scope: OnlineQualificationScope, source: any, expected: OnlineQualificationBinding, financialArtifacts?:ProtectedFinancialQualificationArtifacts,financialCertificate?:Buffer) {
   validateProductionExecutionBindings(expected.productionExecutionBindings,expected);
   if (![expected.manifestSha256, expected.checkpointSha256, expected.checkpointArchiveChecksum, expected.runtimeBundleSha256, expected.schemaSha256, expected.captureId].every(digest)
     || !/^[a-f0-9]{40}$/.test(expected.sourceCommit) || !/^[A-Za-z0-9_-]{8,128}$/.test(expected.releaseId)
@@ -284,6 +286,18 @@ export function assertOnlineQualificationProof(scope: OnlineQualificationScope, 
     for(const actor of cohort)if(!digest(actor.runtimeId)||!digest(actor.runtimeBundleSha256)
       || !/^[a-f0-9]{40}$/.test(actor.sourceCommit)||!/^sha256:[a-f0-9]{64}$/.test(actor.image)
       || !/^[A-Za-z0-9_-]{8,128}$/.test(actor.releaseId)||!['http','jobs'].includes(actor.purpose))fail();
+  }
+  // The independently closed production-A -> restored-B finite rehearsal is
+  // separate evidence. Ordinary online actors/expansion semantics below retain
+  // their existing scopes and may never be fabricated for these HTTP originals.
+  if(scope==='compatible-migrations'&&source?.format==='sabalan-protected-financial-qualification/v1'){
+    const b=expected.protectedFinancial,point=expected.qualificationCheckpoint;
+    if(!b||expected.recoveryMode!=='PROTECTED_MAINTENANCE_COMPLETE'||!point
+      ||b.sourceCheckpointMetadataSha256!==point.metadataSha256||b.sourceCheckpointChecksum!==point.metadata.checksum
+      ||!same(b.sourceDatabase,expected.deploymentTargetDatabase)||b.sourceCommit!==expected.sourceCommit
+      ||b.currentExecutionImage!==expected.deploymentTargetImages.backend
+)fail();
+    return assertProtectedFinancialQualificationSource(source,b,financialArtifacts!,financialCertificate!);
   }
   if (!source || source.productionAdmission !== true || source.passResult !== true
     ||source.executionKind!==(['compatible-migrations','browser-24-hours'].includes(scope)?'DIAGNOSTIC_SUPPORT':'INSTALLED_RUNTIME')

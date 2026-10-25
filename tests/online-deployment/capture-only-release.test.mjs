@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {originalServiceConfiguration,checkpointCompletion,captureControlPlan,configurationBytes} from '../../deploy/scripts/capture-only-release.mjs';
+import {originalServiceConfiguration,checkpointCompletion,captureControlPlan,configurationBytes,captureOperationSources} from '../../deploy/scripts/capture-only-release.mjs';
 const rows=()=>['backend','frontend','inquiry','nginx','postgres','clamav'].map((service,index)=>({Id:String(index+1).repeat(64),Image:'sha256:'+'a'.repeat(64),Config:{Hostname:'birth1',Image:'tag',Env:['A=B'],Labels:{'com.docker.compose.project':'sabalanerp','com.docker.compose.service':service}},HostConfig:{ReadonlyRootfs:true},Mounts:[{Type:'volume',Source:'/data/'+service,Destination:'/app/storage',RW:true,Propagation:''}],NetworkSettings:{Networks:{sabalanerp:{IPAddress:'private'}}}}));
 test('capture-only unchanged proof ignores births but refuses actual code, config, mounts and resource changes',()=>{
  const original=originalServiceConfiguration(rows()),same=rows();same[0].Id='f'.repeat(64);same[0].Config.Hostname='birth2';assert.deepEqual(originalServiceConfiguration(same),original);
@@ -16,7 +16,7 @@ test('capture-only reports actual deadline overrun and refuses old missing-host 
 });
 
 test('capture-only accepts only the exact prebuilt control image and frozen operations source',()=>{
- const operations={'deploy/scripts/deploy.sh':'a'.repeat(64),'deploy/scripts/capture-only-release.mjs':'b'.repeat(64)},plan={format:'sabalan-protected-capture-control-plan/v1',controlImage:'sha256:'+'c'.repeat(64),sourceCommit:'d'.repeat(40),sourceHash:'e'.repeat(64),operations},actual=[{Id:plan.controlImage,Config:{Labels:{'io.sabalan.performance.source-commit':plan.sourceCommit,'io.sabalan.performance.source-hash':plan.sourceHash}}}];
+ const operations=Object.fromEntries(captureOperationSources.map(name=>[name,'a'.repeat(64)])),plan={preservedClamav:{format:'sabalan-preserved-clamav/v1',containerId:'1'.repeat(64),image:'sha256:'+'2'.repeat(64),startedAt:'2026-10-24T00:00:00Z',hostPid:2,stableConfigurationSha256:'3'.repeat(64),initialIdentitySha256:'4'.repeat(64),initialHealthSha256:'5'.repeat(64)},preservationContext:{phase:'CAPTURE_ONLY',observedAt:new Date().toISOString()},format:'sabalan-protected-capture-control-plan/v2',controlImage:'sha256:'+'c'.repeat(64),sourceCommit:'d'.repeat(40),sourceHash:'e'.repeat(64),operations},actual=[{Id:plan.controlImage,Config:{Labels:{'io.sabalan.performance.source-commit':plan.sourceCommit,'io.sabalan.performance.source-hash':plan.sourceHash}}}];
  assert.equal(captureControlPlan(plan,actual,operations),plan.controlImage);assert.throws(()=>captureControlPlan({...plan,controlImage:'mutable:tag'},actual,operations));assert.throws(()=>captureControlPlan(plan,actual,{...operations,'deploy/scripts/deploy.sh':'f'.repeat(64)}));const changed=structuredClone(actual);changed[0].Config.Labels['io.sabalan.performance.source-commit']='0'.repeat(40);assert.throws(()=>captureControlPlan(plan,changed,operations));
 });
 

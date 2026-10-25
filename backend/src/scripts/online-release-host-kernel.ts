@@ -9,3 +9,5 @@ export {PrismaDeploymentStore,transitionDeployment,acquireDeploymentLease,heartb
 export {prepareProtectedOnlineBootstrap,assertProtectedOnlineBootstrap,finalizeProtectedOnlineBootstrap} from '../services/onlineReleaseBootstrap';
 export {prepareAcceptedOnlineExpansion,runAcceptedOnlineExpansion} from '../services/onlineReleaseExpansion';
 export {openTrustedOnlineQualification,verifyOnlineQualificationOrigin} from '../services/onlineQualificationProvenance';
+
+export {openProtectedFinancialQualificationDirectory} from '../services/protectedFinancialQualificationProvenance';

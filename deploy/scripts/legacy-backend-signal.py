@@ -11,6 +11,9 @@ from pathlib import Path
 import re
 import signal
 import ssl
+import socket
+import select
+import urllib.parse
 import stat
 import subprocess
 import sys
@@ -18,7 +21,12 @@ import threading
 import time
 
 LEGACY_IMAGE = 'sha256:e407ff125c6fb0b441f6fa782101a4ec5159e928a5ebae7ddc32faef869afed3'
-LEGACY_COMMIT = 'b58c53c0f88d2d89da3cb6a45949e6eca97e4308'
+# Both the immutable image and its current container have these literal labels.
+# The serving release commit is not an attestation of this older image's source.
+LEGACY_IMAGE_LABELS = {
+    'io.sabalan.performance.source-commit': 'unattested',
+    'io.sabalan.performance.source-hash': 'unattested',
+}
 LEGACY_COMMAND = ['sh', '-c', 'node dist/scripts/recovery-database-preflight.js && node dist/index.js']
 NATIVE_COMMAND = ['sh', 'scripts/with-backend-control-ownership.sh', 'sh', 'scripts/start-backend.sh']
 FORMAT = 'sabalan-legacy-backend-signal/v1'
@@ -180,7 +188,7 @@ def classify_container(value, expected_image):
     command = value['Config'].get('Cmd')
     if command == LEGACY_COMMAND:
         require(expected_image == LEGACY_IMAGE
-                and labels.get('io.sabalan.performance.source-commit') == LEGACY_COMMIT,
+                and all(labels.get(key) == expected for key, expected in LEGACY_IMAGE_LABELS.items()),
                 'LEGACY_SIGNAL_UNKNOWN_IMMUTABLE_IMAGE')
         kind = 'KNOWN_LEGACY_SHELL'
     else:
@@ -319,6 +327,186 @@ def verify_exited(actual, expected, wait_output):
             'LEGACY_SIGNAL_GRACEFUL_EXIT_UNPROVEN')
 
 
+
+# Daemon build observed by the original read-only R3: b83c47de... .
+# Primary implementation pinned to moby/moby commit 6bc6209, API 1.53.
+DAEMON_BUILD = {'Version': '29.2.1', 'ApiVersion': '1.53', 'MinAPIVersion': '1.44', 'GitCommit': '6bc6209'}
+
+def api_remaining():
+    remaining = (capture_deadline_ns() - time.monotonic_ns()) / 1_000_000_000
+    require(remaining > 0 and not interrupted, 'LEGACY_SIGNAL_CAPTURE_BUDGET_EXCEEDED_HELD')
+    return remaining
+
+class OwnedDaemonRequest:
+    def __init__(self, host, method, path, *, unbounded_stop=False, sent=None):
+        # Allocation never dispatches. The original owner stores THIS object
+        # before open() can expose any request bytes to the daemon.
+        self.host, self.method, self.path = host, method, path
+        self.unbounded_stop, self.sent = unbounded_stop, sent
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.response = None
+        self.potentialDispatch = False
+        self.underlyingComplete = False
+        self.clientTerminal = False
+        self.clientFault = False
+    def open(self):
+        self.host.assert_original()
+        self.socket.settimeout(api_remaining())
+        self.socket.connect('/var/run/docker.sock')
+        # sendall can fail AFTER all or part of the request reached the daemon.
+        self.potentialDispatch = True
+        self.socket.sendall((self.method+' '+self.path+' HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n').encode('ascii'))
+        if self.sent is not None:
+            self.sent.set()
+        if self.unbounded_stop:
+            self.socket.settimeout(None)
+        self.response = http.client.HTTPResponse(self.socket)
+        self.response.begin()
+    def bounded_json(self, maximum):
+        self.socket.settimeout(api_remaining())
+        raw = self.response.read(maximum+1)
+        require(len(raw) <= maximum, 'LEGACY_SIGNAL_DAEMON_RESPONSE_BOUND')
+        return json.loads(raw)
+    def close(self):
+        require(not self.unbounded_stop or not self.potentialDispatch or self.underlyingComplete,
+                'LEGACY_SIGNAL_STOP_COMPLETION_UNKNOWN_HELD')
+        if self.response is not None:
+            self.response.close()
+        self.socket.close()
+
+def retain_unknown_stop(request, report):
+    # No retry, resolver, signal or synthetic completion exists in this branch.
+    # Same original non-daemon worker retains exact request and inherited FD9.
+    report['stopCompletionUnknown'] = True
+    report['passResult'] = False
+    try:
+        if deadline_file is not None and not Path(deadline_file).exists():
+            save(deadline_file, dict(format=FORMAT, passResult=False,
+                 originalOwnerRetained=True, manualStopCompletionUnknown=True,
+                 potentialDispatch=request.potentialDispatch,
+                 clientTerminal=request.clientTerminal, clientFault=request.clientFault,
+                 underlyingComplete=False, originalHostPid=os.getpid()))
+    except BaseException:
+        report['stopHeldAuditFault'] = True
+    held = threading.Event()
+    while True:
+        try:
+            held.wait()
+        except BaseException:
+            report['stopHeldObservationFault'] = True
+
+def owned_normal_stop(host, snapshot, node_fd, plan, session_file, report):
+    cid = snapshot['container']['containerId']
+    require(re.fullmatch('[0-9a-f]{64}', cid))
+    initial = host.inspect(cid)
+    version_request = OwnedDaemonRequest(host, 'GET', '/version')
+    try:
+        version_request.open()
+        require(version_request.response.status == 200)
+        version = version_request.bounded_json(65536)
+        require({k: version.get(k) for k in DAEMON_BUILD} == DAEMON_BUILD, 'LEGACY_SIGNAL_DAEMON_BUILD_UNREVIEWED')
+    finally:
+        version_request.close()
+    wait = None
+    events = None
+    stop_thread = None
+    stop_sent = threading.Event()
+    stop = {'closed': False, 'status': None, 'fault': False, 'underlyingCompletionUnknown': False, 'underlyingComplete': False}
+    observation_fault = False
+    def normal_stop():
+        request = OwnedDaemonRequest(host, 'POST', '/v1.53/containers/'+cid+'/stop?signal=SIGTERM&t=-1', unbounded_stop=True, sent=stop_sent)
+        stop['request'] = request
+        try:
+            request.open()
+            stop['status'] = request.response.status
+            raw = request.response.read(65537)
+            request.clientTerminal = True
+            require(len(raw) <= 65536 and stop['status'] == 204 and not raw, 'LEGACY_SIGNAL_NORMAL_STOP_RESPONSE_UNPROVEN')
+            request.underlyingComplete = True
+            stop['underlyingComplete'] = True
+        except BaseException:
+            request.clientFault = True
+            request.clientTerminal = True
+            stop['fault'] = True
+            if request.potentialDispatch and not request.underlyingComplete:
+                stop['underlyingCompletionUnknown'] = True
+                retain_unknown_stop(request, report)
+        finally:
+            # Unknown-dispatch branch never reaches here in runtime. Its exact
+            # request stays owned even when a unit-test hold hook interrupts it.
+            if not stop['underlyingCompletionUnknown']:
+                request.close()
+                stop['closed'] = True
+    try:
+        # In this exact daemon source ContainerWait is registered BEFORE these
+        # HTTP headers are flushed. Events headers have no such meaning.
+        wait = OwnedDaemonRequest(host, 'POST', '/v1.53/containers/'+cid+'/wait?condition=next-exit')
+        wait.open()
+        require(wait.response.status == 200, 'LEGACY_SIGNAL_NEXT_EXIT_REGISTRATION_UNPROVEN')
+        report['nextExitRegistered'] = True
+        intent_ns = time.time_ns()
+        filters = json.dumps({'container': [cid], 'event': ['kill'], 'type': ['container']}, separators=(',', ':'))
+        query = urllib.parse.urlencode({'since': str(intent_ns//1_000_000_000), 'filters': filters})
+        events = OwnedDaemonRequest(host, 'GET', '/v1.53/events?'+query)
+        events.open()
+        require(events.response.status == 200)
+        host.protected_boundary(plan, session_file)
+        require(host.snapshot(snapshot['container']['image']) == snapshot)
+        require(proc_identity(snapshot['node']['pid']) == snapshot['node'] and not select.select([node_fd], [], [], 0)[0])
+        stop_thread = threading.Thread(target=normal_stop, name='original-normal-stop', daemon=False)
+        stop_thread.start()
+        require(stop_sent.wait(api_remaining()), 'LEGACY_SIGNAL_NORMAL_STOP_SEND_UNPROVEN')
+        # Replay closes the events-header/subscription race. Only a genuinely
+        # received fresh kill(SIGTERM) event can acknowledge manual stop state.
+        total = 0
+        while True:
+            events.socket.settimeout(api_remaining())
+            raw = events.response.readline(65537)
+            require(raw and len(raw) <= 65536, 'LEGACY_SIGNAL_MANUAL_STOP_EVENT_MISSING')
+            total += len(raw)
+            require(total <= 1024*1024, 'LEGACY_SIGNAL_MANUAL_STOP_EVENT_BOUND')
+            event = json.loads(raw)
+            if (event.get('Type') == 'container' and event.get('Action') == 'kill'
+                    and event.get('Actor', {}).get('ID') == cid
+                    and event.get('Actor', {}).get('Attributes', {}).get('signal') == '15'
+                    and type(event.get('timeNano')) is int and event['timeNano'] >= intent_ns):
+                report['manualStopEvent'] = event
+                break
+        host.protected_boundary(plan, session_file)
+        require(host.snapshot(snapshot['container']['image']) == snapshot, 'LEGACY_SIGNAL_ORIGINAL_INCARNATION_CHANGED')
+        require(proc_identity(snapshot['node']['pid']) == snapshot['node'] and not select.select([node_fd], [], [], 0)[0])
+        require(not interrupted and not stop['closed'], 'LEGACY_SIGNAL_ORIGINAL_STOP_CLOSED_BEFORE_NODE')
+        report['signalAttempted'] = True
+        signal.pidfd_send_signal(node_fd, signal.SIGTERM, None, 0)
+        report['signalDelivered'] = True
+        result = wait.bounded_json(65536)
+        require(type(result.get('StatusCode')) is int and result['StatusCode'] == 0 and result.get('Error') in (None, {}), 'LEGACY_SIGNAL_GRACEFUL_EXIT_REQUIRED')
+    except BaseException:
+        observation_fault = True
+        raise
+    finally:
+        # Once sent, the SAME original stop owns a daemon operation even if an
+        # observation fails. Retain it through its genuine response, never retry,
+        # cancel, escalate or release original FD9 on a deadline-only assertion.
+        if stop_thread is not None:
+            while stop_thread.is_alive():
+                try:
+                    stop_thread.join(0.25)
+                except BaseException:
+                    observation_fault = True
+            report['normalStopOriginal'] = {k: v for k, v in stop.items() if k != 'request'}
+        if events is not None:
+            events.close()
+        if wait is not None:
+            wait.close()
+        observation_fault = observation_fault or interrupted or time.monotonic_ns() >= capture_deadline_ns()
+        report['shutdownObservationFault'] = observation_fault
+    require(not observation_fault and stop['closed'] and not stop['fault'] and stop['status'] == 204)
+    actual = host.inspect(cid)
+    require(actual['RestartCount'] == initial['RestartCount'], 'LEGACY_SIGNAL_RESTARTED_INCARNATION')
+    verify_exited(actual, snapshot['container'], b'0')
+    return actual
+
 def forward_original(host, plan, plan_sha, intent_file, result_file, session_file):
     report = dict(format=FORMAT, passResult=False, signalDelivered=False, deploymentId=plan['deploymentId'],
                   releaseId=plan['releaseId'], planSha256=plan_sha, applicationNativeClosureInferred=False)
@@ -341,12 +529,7 @@ def forward_original(host, plan, plan_sha, intent_file, result_file, session_fil
             host.protected_boundary(plan, session_file)
             require(proc_identity(snapshot['node']['pid']) == snapshot['node'] and not interrupted)
             require(time.monotonic_ns() + 30_000_000_000 < capture_deadline_ns(), 'LEGACY_SIGNAL_INSUFFICIENT_CAPTURE_BUDGET')
-            report['signalAttempted'] = True
-            signal.pidfd_send_signal(fd, signal.SIGTERM, None, 0)
-            report['signalDelivered'] = True
-            wait_output = host.docker(['wait', snapshot['container']['containerId']])
-            actual = host.inspect(snapshot['container']['containerId'])
-            verify_exited(actual, snapshot['container'], wait_output)
+            actual = owned_normal_stop(host, snapshot, fd, plan, session_file, report)
             require(not interrupted)
             report.update(passResult=True, action='NORMAL_SIGTERM', legacyContainerExitedCleanly=True,
                           stoppedContainer=snapshot['container'], exitObservation=dict(

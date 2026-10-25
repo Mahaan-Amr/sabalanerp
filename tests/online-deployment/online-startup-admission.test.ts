@@ -69,7 +69,7 @@ test('verified data and JSON copies cannot become native/controller/runtime capa
   await assert.rejects(admitOnlineRuntime(verified as any, { $transaction: () => { enteredSql = true; } } as any));
   assert.equal(enteredSql, false);
 });
-for(const store of ['legacy','containerd','classic'] as const)test(`actual immutable ${store} evidence binds distinct content/execution identities and detects altered proof bytes`, () => {
+for(const store of ['legacy','containerd','classic'] as const)test(`actual immutable ${store} evidence binds distinct content/execution identities and detects altered proof bytes`, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sabalan-online-evidence-'));
   const write = (name: string, value: unknown) => { const bytes = encoded(value);fs.writeFileSync(path.join(root, name), bytes, { mode: 0o600 });
     return { file: name, bytes: bytes.length, sha256: hash(bytes) }; };
@@ -112,7 +112,7 @@ for(const store of ['legacy','containerd','classic'] as const)test(`actual immut
     const acceptanceFile = write('acceptance.json', { format: 'sabalan-online-release-acceptance/v2', deploymentId: 'lease-owned', qualification:{...qualification,...identities},
       checkpointSha256: binding.checkpointSha256, manifestSha256: manifestFile.sha256, reports });
     const expected = { manifestSha256: manifestFile.sha256, acceptanceSha256: acceptanceFile.sha256 };
-    const read = readOnlineReleaseEvidence(root, expected);assert.ok(Object.isFrozen(read.manifest.roots[0]));
+    const read = readOnlineReleaseEvidence(root, expected);const {originalOnlineEvidenceReader}=await import('../../scripts/lib/original-online-evidence-reader.mjs');const original=originalOnlineEvidenceReader().readOnlineReleaseEvidence(root,expected);assert.deepEqual(original.evidenceInventory,read.evidenceInventory);original.revalidate();assert.ok(Object.isFrozen(read.manifest.roots[0]));
     assert.equal(read.manifest.image,store==='containerd'?imageGraphs.backend.index:imageGraphs.backend.config);
     assert.throws(() => assertOnlineRuntimeAdmission(read as any),'filesystem receipts alone grant no runtime admission');
     const proofName = scopes[0] + '-proof.json';

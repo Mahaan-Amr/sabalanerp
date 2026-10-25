@@ -362,7 +362,7 @@ if mode == 'prepare':
                           restored=issue_runtime(restored_template, 'restored-inquiry'))
     authority_fd = os.open('/app/runtime-authority', os.O_RDONLY | os.O_DIRECTORY)
     os.fsync(authority_fd); os.close(authority_fd)
-    write(root / 'index.json', encoded(dict(database=database, oid=oid, grants=grants,
+    index_bytes = encoded(dict(database=database, oid=oid, grants=grants,
           restoredDatabase=restored_database, restoredOid=restored_oid, restoredGrant=restored_grant,
           privateQualification=private_pair, pristinePerformanceGrant=pristine_grant,onlinePointInquiryGrant=online_point_inquiry_grant,
           catalog=catalog,
@@ -370,7 +370,9 @@ if mode == 'prepare':
           history=original_history, schemaSha256=generated_prisma['schemaSha256'],
           nativePrisma=generated_prisma, sharedClientInventory=shared_client_before,
           baselineKind='captured-repository-native-migrations',
-          diagnosticExpansionApplied=present == '0', diagnosticExpansionSha256=hashlib.sha256(expansion).hexdigest())))
+          diagnosticExpansionApplied=present == '0', diagnosticExpansionSha256=hashlib.sha256(expansion).hexdigest()))
+    check(0 < len(index_bytes) <= 512 * 1024, 'APPLICATION_NATIVE_INDEX_CAPACITY_EXCEEDED')
+    write(root / 'index.json', index_bytes)
     print(json.dumps(dict(prepared=True, database=database)))
     sys.exit(0)
 

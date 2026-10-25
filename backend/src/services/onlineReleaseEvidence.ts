@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { completeProtectedPrivateQualificationPrerequisite,completeOnlinePrivateQualificationPrerequisite } from './deploymentGates';
 import { assertOnlineQualificationProof, type OnlineQualificationBinding } from './onlineQualificationEvidence';
+import {protectedFinancialArtifactNames,protectedFinancialArtifactMaximum,type ProtectedFinancialQualificationArtifacts} from './protectedFinancialQualificationProvenance';
 import {validateProductionExecutionBindings} from './onlineImageExecutionBinding';
 export { assertOnlineQualificationProof } from './onlineQualificationEvidence';
 
@@ -22,6 +23,18 @@ function boundedRead(fd: number, size: bigint) {
   while (offset < bytes.length) { const count = fs.readSync(fd, bytes, offset, bytes.length - offset, null); if (!count) fail(); offset += count; }
   if (fs.readSync(fd, Buffer.alloc(1), 0, 1, null) !== 0) fail(); return bytes;
 }
+/** Finite descriptors use the same private file reader and hash inventory. */
+export function readProtectedFinancialArtifactInventory(source:any,read:(file:string,sha:string,maximum:number,bytes:number,json:boolean,allowEmpty:boolean)=>Buffer){
+ if(!source?.evidence||!exact(source.evidence,[...protectedFinancialArtifactNames]))fail();
+ const raws:Record<string,Buffer>={};
+ for(const name of protectedFinancialArtifactNames){const d=source.evidence[name],maximum=name==='certificate'?65536:protectedFinancialArtifactMaximum(name);
+  if(!exact(d,['file','bytes','sha256'])||!digest(d.sha256)||!Number.isSafeInteger(d.bytes)||d.bytes<(name==='workerStderr'?0:1)||d.bytes>maximum||d.file!==`protected-financial-${name.toLowerCase()}.json`)fail();
+  const bytes=read(d.file,d.sha256,maximum,d.bytes,false,name==='workerStderr');
+  if(bytes.length!==d.bytes||hash(bytes)!==d.sha256)fail();raws[name]=bytes;
+ }
+ const {certificate,...artifacts}=raws;return {certificate,artifacts:artifacts as ProtectedFinancialQualificationArtifacts};
+}
+
 export type OnlineRetainedRoot = Readonly<{ live: string; store: string; liveDevice: string; liveInode: string;
   storeDevice: string; storeInode: string; baselineSha256: string }>;
 export type OnlineReleaseManifest = Readonly<{ format: 'sabalan-online-release-manifest/v1'; releaseId: string;
@@ -38,7 +51,7 @@ const scopes = ['release-gates', 'compatible-migrations', 'coherent-independent-
 export function readOnlineReleaseEvidence(directory: string, expected: {
   manifestSha256: string; acceptanceSha256: string;
 }): { manifest: OnlineReleaseManifest; acceptance: any; nativeClosures: readonly any[]; evidenceInventory: readonly {file:string;bytes:number;sha256:string}[]; browserRegistries: readonly any[]; migrationPlans: readonly any[];
- migrationHistories:readonly Readonly<{before:{rows:number;sha256:string};afterRows:number}>[]; revalidate: () => void } {
+ protectedFinancialQualifications:readonly any[]; migrationHistories:readonly Readonly<{before:{rows:number;sha256:string};afterRows:number}>[]; revalidate: () => void } {
   if (!path.isAbsolute(directory) || path.resolve(directory) !== directory || fs.realpathSync(directory) !== directory
     || !digest(expected.manifestSha256) || !digest(expected.acceptanceSha256)) fail();
   const root = fs.lstatSync(directory, { bigint: true });
@@ -48,9 +61,10 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
   const evidenceInventory=new Map<string,{file:string;bytes:number;sha256:string}>();
   const browserRegistries: any[] = [];
   const migrationPlans: any[] = [];
+  const protectedFinancialQualifications:any[]=[];
   const migrationHistories:Array<{before:{rows:number;sha256:string};afterRows:number}>=[];
   const pins: Array<{ file: string; identity: string; namedIdentity: string; sha256: string }> = [];
-  function read(file: string, expectedHash: string, maximum = 8 * 1024 * 1024, expectedBytes?: number) {
+  function read(file: string, expectedHash: string, maximum = 8 * 1024 * 1024, expectedBytes?: number, json=true, allowEmpty=false) {
     if (!/^[a-z0-9][a-z0-9_.-]{0,95}$/.test(file) || !digest(expectedHash)) fail();
     const target = path.join(directory, file);
     const fd = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
@@ -59,7 +73,7 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
       const named = fs.lstatSync(target, { bigint: true });
       for (const key of ['ino', 'size', 'mtimeNs', 'ctimeNs', 'uid', 'mode', 'nlink'] as const) if (named[key] !== before[key]) fail();
       if (process.platform !== 'win32' && named.dev !== before.dev) fail();
-      if (!before.isFile() || before.nlink !== 1n || before.size < 1n || before.size > BigInt(maximum)
+      if (!before.isFile() || before.nlink !== 1n || before.size < (allowEmpty?0n:1n) || before.size > BigInt(maximum)
         || (process.platform !== 'win32' && (before.mode & 0o077n) !== 0n) || (process.getuid && before.uid !== BigInt(process.getuid()))) fail();
       const bytes = boundedRead(fd, before.size);
       if (bytes.length !== Number(before.size) || (expectedBytes !== undefined && bytes.length !== expectedBytes)
@@ -67,7 +81,7 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
         || identity(named) !== identity(fs.lstatSync(target, { bigint: true }))) fail();
       pins.push({ file: target, identity: identity(before), namedIdentity: identity(named), sha256: expectedHash });
       evidenceInventory.set(file,{file,bytes:bytes.length,sha256:expectedHash});
-      return JSON.parse(bytes.toString('utf8'));
+      return json?JSON.parse(bytes.toString('utf8')):bytes;
     } finally { fs.closeSync(fd); }
   }
   const manifest = read('manifest.json', expected.manifestSha256, 128 * 1024) as OnlineReleaseManifest;
@@ -92,7 +106,7 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
   const qualification = acceptance.qualification;
   const qualificationKeys=['schemaSha256', 'sourceDatabase', 'proofDatabases', 'recoveryMode', 'deploymentTargetDatabase', 'captureId', 'images', 'checkpointArchiveChecksum','componentSourceCommits','runtimeCohorts','deploymentTargetImages','imageGraphs','imageArchiveReceipts'];
   if(Object.prototype.hasOwnProperty.call(qualification??{},'productionExecutionBindings'))qualificationKeys.push('productionExecutionBindings');
-  if(qualification?.recoveryMode==='PROTECTED_MAINTENANCE_COMPLETE')qualificationKeys.push('qualificationCheckpoint');
+  if(qualification?.recoveryMode==='PROTECTED_MAINTENANCE_COMPLETE'){qualificationKeys.push('qualificationCheckpoint');if(Object.prototype.hasOwnProperty.call(qualification,'protectedFinancial'))qualificationKeys.push('protectedFinancial');}
   if (!exact(qualification, qualificationKeys)
     || !digest(qualification.schemaSha256) || !digest(qualification.captureId) || !digest(qualification.checkpointArchiveChecksum)
     || !exact(qualification.sourceDatabase,['name','systemIdentifier','oid'])
@@ -124,6 +138,7 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
     checkpointSha256: acceptance.checkpointSha256, checkpointArchiveChecksum: qualification.checkpointArchiveChecksum, releaseId: manifest.releaseId, sourceCommit: manifest.sourceCommit,
     runtimeBundleSha256: manifest.runtimeBundleSha256, schemaSha256: qualification.schemaSha256, captureId: qualification.captureId,
     sourceDatabase: qualification.sourceDatabase,proofDatabases:qualification.proofDatabases,recoveryMode:qualification.recoveryMode, deploymentTargetDatabase: qualification.deploymentTargetDatabase, images: qualification.images,
+    ...(qualification.protectedFinancial?{protectedFinancial:qualification.protectedFinancial}:{}),
     ...(qualification.qualificationCheckpoint?{qualificationCheckpoint:qualification.qualificationCheckpoint}:{}),
     deploymentTargetImages:qualification.deploymentTargetImages,imageGraphs:qualification.imageGraphs,
     ...(qualification.productionExecutionBindings?{productionExecutionBindings:qualification.productionExecutionBindings}:{}),
@@ -154,6 +169,11 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
         if (!exact(proof, ['file', 'bytes', 'sha256']) || !Number.isSafeInteger(proof.bytes) || proof.bytes < 1
           || proof.bytes > 8 * 1024 * 1024 || !digest(proof.sha256)) fail();
         const source = read(proof.file, proof.sha256, 8 * 1024 * 1024, proof.bytes);
+        if(scope==='compatible-migrations'&&source?.format==='sabalan-protected-financial-qualification/v1'){
+          const {certificate,artifacts}=readProtectedFinancialArtifactInventory(source,read);
+          const verified=assertOnlineQualificationProof(scope,source,binding,artifacts,certificate);
+          if(!verified)fail();protectedFinancialQualifications.push(verified);
+        }else{
         assertOnlineQualificationProof(scope, source, binding);
         const originalClosures=[...source.originalNativeClosures,
           ...(scope==='browser-24-hours'?source.installedRouting.originalNativeClosures:[])];
@@ -170,6 +190,7 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
         if (scope === 'browser-24-hours') {
           browserRegistries.push(JSON.parse(Buffer.from(source.routingRegistryRawBase64,'base64').toString('utf8')));
           browserRegistries.push(JSON.parse(Buffer.from(source.installedRouting.publicationRawBase64,'base64').toString('utf8')).registry);
+        }
         }
       }
     }
@@ -189,5 +210,5 @@ export function readOnlineReleaseEvidence(directory: string, expected: {
   };
   revalidate(); return { nativeClosures:freeze([...nativeClosures.values()].sort((a,b)=>a.runtimeId.localeCompare(b.runtimeId))),
     evidenceInventory:freeze([...evidenceInventory.values()].sort((a,b)=>a.file<b.file?-1:a.file>b.file?1:0)),manifest: freeze(manifest), acceptance: freeze(acceptance), browserRegistries: freeze(browserRegistries),
-    migrationPlans: freeze(migrationPlans),migrationHistories:freeze(migrationHistories), revalidate };
+    protectedFinancialQualifications:freeze(protectedFinancialQualifications),migrationPlans: freeze(migrationPlans),migrationHistories:freeze(migrationHistories), revalidate };
 }

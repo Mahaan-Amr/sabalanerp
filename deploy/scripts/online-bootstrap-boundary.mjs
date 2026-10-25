@@ -3,7 +3,7 @@
  * Lost/unknown original custody holds this client and its parent's lease loop.
  */
 import fs from 'node:fs';
-const commands=new Set(['BOOTSTRAP_PREPARE','BOOTSTRAP_GATES','BOOTSTRAP_PUBLISH','BOOTSTRAP_ACTIVATE','BOOTSTRAP_OPENED']);
+const commands=new Set(['FINANCIAL_PREPARE','BOOTSTRAP_PREPARE','BOOTSTRAP_GATES','BOOTSTRAP_PUBLISH','BOOTSTRAP_ACTIVATE','BOOTSTRAP_OPENED']);
 const [command]=process.argv.slice(2);
 const descriptor=name=>{const value=process.env[name];if(!/^[0-9]{1,4}$/.test(value||''))throw Error('ONLINE_BOOTSTRAP_PIPE_REQUIRED');
  const fd=Number(value);if(fd<3||fd>1024||!fs.fstatSync(fd).isFIFO())throw Error('ONLINE_BOOTSTRAP_PIPE_REQUIRED');return fd;};

@@ -5,6 +5,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
+import {validateSelection,validateBinding,selectionBinding,canonical as preservationCanonical,preservationSources} from './preserved-clamav.mjs';
 const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
 const bytes=v=>Buffer.from(JSON.stringify(canonical(v))+'\n'),sha=raw=>createHash('sha256').update(raw).digest('hex');
 export function originalServiceConfiguration(rows){
@@ -35,10 +36,37 @@ export async function startOriginalCaptureServices(snapshot,io,waitSeconds){
  // image, mounts or identity. No Compose up or recreate is permitted here.
  await io.restart(snapshot.originalContainerIdentities.nginx.id);await healthy([...first,'nginx']);await inspect();
 }
-export function captureControlPlan(plan,actual,operations){
- assert.deepEqual(Object.keys(plan).sort(),['controlImage','format','operations','sourceCommit','sourceHash'].sort());assert.equal(plan.format,'sabalan-protected-capture-control-plan/v1');assert.match(plan.controlImage,/^sha256:[a-f0-9]{64}$/);assert.match(plan.sourceCommit,/^[a-f0-9]{40}$/);assert.match(plan.sourceHash,/^[a-f0-9]{64}$/);
+export const captureOperationSources=Object.freeze(['deploy/scripts/deploy.sh','deploy/scripts/capture-only-release.mjs',...preservationSources]);
+function captureScannerSelection(plan,now,requireFresh=true){
+ assert.deepEqual(Object.keys(plan.preservationContext??{}).sort(),['phase','observedAt'].sort());
+ assert.equal(plan.preservationContext.phase,'CAPTURE_ONLY','CAPTURE_SCANNER_PHASE_REQUIRED');
+ const observed=Date.parse(plan.preservationContext.observedAt);
+ assert.ok(typeof plan.preservationContext.observedAt==='string'&&Number.isFinite(observed)&&Number.isFinite(now)
+  &&now>=observed&&(!requireFresh||now-observed<=600000),'CAPTURE_SCANNER_PLAN_FRESHNESS_REQUIRED');
+ // Issuance freshness never substitutes for the independent canonical health
+ // command which deploy.sh runs before maintenance and again before reopen.
+ const selection=validateSelection(plan.preservedClamav);assert.ok(Date.parse(selection.startedAt)<=observed,'CAPTURE_SCANNER_INCARNATION_AFTER_PLAN');return selection;
+}
+export function captureControlPlan(plan,actual,operations,{now=Date.now(),admission=true,binding,planSha256}={}){
+ assert.deepEqual(Object.keys(plan).sort(),['controlImage','format','operations','sourceCommit','sourceHash','preservedClamav','preservationContext'].sort());
+ assert.equal(plan.format,'sabalan-protected-capture-control-plan/v2');assert.match(plan.controlImage,/^sha256:[a-f0-9]{64}$/);assert.match(plan.sourceCommit,/^[a-f0-9]{40}$/);assert.match(plan.sourceHash,/^[a-f0-9]{64}$/);
+ assert.ok(admission===true||admission===false);const selection=captureScannerSelection(plan,now,admission);
+ if(!admission){
+  // Reinspection is continuation of the same admitted plan, not a new grant.
+  // The original deploy owner retains its FD9/DB lease and monotonic pause
+  // deadline. Wall-clock issuance TTL is not restarted after checkpoint work.
+  const held=validateBinding(binding);assert.match(planSha256,/^[a-f0-9]{64}$/);
+  assert.equal(held.planSha256,planSha256,'CAPTURE_SCANNER_ADMITTED_PLAN_CHANGED');
+  assert.deepEqual(held.selection,selection,'CAPTURE_SCANNER_ADMITTED_SELECTION_CHANGED');
+ }
+ assert.deepEqual(Object.keys(operations).sort(),[...captureOperationSources].sort());
+ for(const value of Object.values(operations))assert.match(value,/^[a-f0-9]{64}$/);
  assert.deepEqual(plan.operations,operations);assert.equal(actual.length,1);assert.equal(actual[0].Id,plan.controlImage);const labels=actual[0].Config.Labels;
  assert.equal(labels['io.sabalan.performance.source-commit'],plan.sourceCommit);assert.equal(labels['io.sabalan.performance.source-hash'],plan.sourceHash);return plan.controlImage;
+}
+export function capturePreservationExports(plan,planSha256,actual,operations,{now=Date.now()}={}){
+ captureControlPlan(plan,actual,operations,{now});const binding=selectionBinding(plan.preservedClamav,planSha256),hex=Buffer.from(preservationCanonical(binding)).toString('hex');
+ return `export DEPLOYMENT_TARGET_BACKEND_IMAGE='${plan.controlImage}'\nexport DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX='${hex}'\n`;
 }
 export function configurationBytes(rows,env){
  const pins={};let total=0,files=0;
@@ -130,8 +158,8 @@ export function checkpointCompletion(raw,pauseSeconds,snapshot){
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);const [command,file,output,pause]=process.argv.slice(2);assert.ok(path.isAbsolute(file)&&fs.realpathSync(path.dirname(file))===path.dirname(file));
- if(command==='snapshot'||command==='verify'||command==='plan'){let raw='';for await(const chunk of process.stdin){raw+=chunk;assert.ok(Buffer.byteLength(raw)<16*1024*1024);}const rows=JSON.parse(raw);
-  if(command==='plan'){const root=output,operations={};for(const name of ['deploy/scripts/deploy.sh','deploy/scripts/capture-only-release.mjs'])operations[name]=sha(fs.readFileSync(path.join(root,name)));process.stdout.write(captureControlPlan(JSON.parse(read(file)),rows,operations));}
+ if(command==='snapshot'||command==='verify'||command==='plan'||command==='plan-exports'){let raw='';for await(const chunk of process.stdin){raw+=chunk;assert.ok(Buffer.byteLength(raw)<16*1024*1024);}const rows=JSON.parse(raw);
+  if(command==='plan'||command==='plan-exports'){const root=output,operations={};for(const name of captureOperationSources)operations[name]=sha(read(path.join(root,name)));const raw=read(file),plan=JSON.parse(raw);if(command==='plan-exports')process.stdout.write(capturePreservationExports(plan,sha(raw),rows,operations));else{const hex=process.env.DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX;assert.match(hex??'',/^(?:[a-f0-9]{2}){1,16384}$/);const binding=JSON.parse(Buffer.from(hex,'hex').toString('utf8'));process.stdout.write(captureControlPlan(plan,rows,operations,{admission:false,binding,planSha256:sha(raw)}));}}
   else {const facts={services:originalServiceConfiguration(rows),configurationBytes:configurationBytes(rows,output),originalContainerIdentities:originalContainerIdentities(rows)};if(command==='snapshot')save(file,facts);else assert.deepEqual(facts,JSON.parse(read(file)));}
  }
  else if(command==='start-original'){assert.equal(process.argv.length,9);await startPinned(file,output,pause,Number(process.argv[6]),process.argv[7],process.argv[8]);}

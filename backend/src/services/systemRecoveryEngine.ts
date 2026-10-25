@@ -17,6 +17,9 @@ import { verifyRecoveredApplicationPayloads } from './deploymentDrillApplication
 import { captureRecoveryBusinessProof, type RecoveryBusinessTableProof } from './deploymentRecoveryDataProof';
 import { adoptRecoveryStagedInquiry, captureInquiryBusinessProof, verifyInquiryTransformation,
   type InquiryBusinessProof, type InquiryTransformation } from './inquiryMigrationPlan';
+import { assertNativeRecoveryDatabaseQuiet, inspectNativeRecoveryLedger, observeNativeRecoveryOriginal,
+  recoveryDatabaseObservationQuery, validateNativeRecoveryExpectation,
+  type NativeRecoveryDatabaseIdentity, type NativeRecoveryLedgerExpectation } from './nativeRecoveryLedgerProof';
 
 const execFileAsync = promisify(execFile);
 const PACKAGES_DIR = path.join(RECOVERY_ROOT, 'packages');
@@ -106,9 +109,10 @@ export const verifyPromotedRecoveryFiles = async (manifest: RecoveryManifest, ve
   return verifyRestoredFiles(components,[...FILE_RECOVERY_MAPPINGS,{payloadPath:'inquiry',livePath:INQUIRY_SOURCE_DIR}],verifiedErasedPaths);
 };
 
-const ensureDirectories = async () => {
+const ensureDirectories = async (retireStaleWork = true) => {
   await Promise.all([PACKAGES_DIR, UPLOADS_DIR, WORK_DIR, RECOVERY_COORDINATION_DIR].map((directory) =>
     fs.promises.mkdir(directory, { recursive: true, mode: 0o700 })));
+  if (!retireStaleWork) return;
   for (const entry of await fs.promises.readdir(WORK_DIR, { withFileTypes: true })) {
     const absolute = path.join(WORK_DIR, entry.name);
     const stat = await fs.promises.stat(absolute);
@@ -201,6 +205,35 @@ const restoreDatabase = async (databaseUrl: string, database: string, source: st
     windowsHide: true,
     maxBuffer: 8 * 1024 * 1024,
   });
+};
+
+const strictRecoveryCommand = async (command: string, args: string[], environment: NodeJS.ProcessEnv) =>
+  observeNativeRecoveryOriginal(execFileAsync(command, args, {
+    env: environment, windowsHide: true, encoding: 'buffer', maxBuffer: 8 * 1024 * 1024,
+  }));
+
+const observeStrictRecoveryDatabase = async (databaseUrl: string, database: string) => {
+  const args = databaseArgs(databaseUrl, 'postgres');
+  const result = await strictRecoveryCommand('psql', [...args.connection, '-X', '-A', '-t',
+    '--set', 'ON_ERROR_STOP=1', '--command', recoveryDatabaseObservationQuery(database)], args.env);
+  return JSON.parse(result.stdout.toString('utf8').trim()) as Record<string, unknown>;
+};
+
+const retireStrictRecoveryDatabase = async (databaseUrl: string, identity: NativeRecoveryDatabaseIdentity) => {
+  assertNativeRecoveryDatabaseQuiet(await observeStrictRecoveryDatabase(databaseUrl, identity.name), identity);
+  const args = databaseArgs(databaseUrl, 'postgres');
+  // This is only the exact database created by this validation. No FORCE,
+  // termination, suppression or retirement of an unproven database is allowed.
+  await strictRecoveryCommand('psql', [...args.connection, '-X', '--set', 'ON_ERROR_STOP=1',
+    '--command', `DROP DATABASE "${identity.name}"`], args.env);
+  const after = await observeStrictRecoveryDatabase(databaseUrl, identity.name);
+  if (after.visible !== true || after.name !== identity.name || after.oid !== null
+    || after.systemIdentifier !== identity.systemIdentifier
+    || after.sessions !== 0 || after.transactions !== 0 || after.prepared !== 0) {
+    throw Object.assign(new Error('The isolated validation database did not prove complete retirement.'), {
+      code: 'RECOVERY_STRICT_DATABASE_RETIREMENT_UNPROVEN',
+    });
+  }
 };
 
 const minimalPdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
@@ -522,6 +555,33 @@ export const storeUploadedRecoveryPackage = async (temporaryPath: string, operat
 export const recoveryPackagePath = (source: string, storageName: string) =>
   path.join(source === 'CREATED' ? PACKAGES_DIR : UPLOADS_DIR, path.basename(storageName));
 
+export type StrictRestoreVerifiedProof = Awaited<ReturnType<typeof inspectNativeRecoveryLedger>> & {
+  originalRestore: Awaited<ReturnType<typeof observeNativeRecoveryOriginal>>['original'];
+};
+export type StrictRestoreCallbackContext = Readonly<{
+  proof: StrictRestoreVerifiedProof;
+  payloadRoot: string;
+  manifest: RecoveryManifest;
+  businessDataProof: RecoveryBusinessTableProof[];
+  inquiryBusinessProof: InquiryBusinessProof;
+  sourceStorageRoots: Readonly<{ performanceExports: string }>;
+}>;
+const activeStrictRestoreProofs = new WeakMap<object, { active: boolean; context: StrictRestoreCallbackContext }>();
+const freezeStrictRestoreValue = <T>(value: T): T => {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freezeStrictRestoreValue(child);
+    Object.freeze(value);
+  }
+  return value;
+};
+/** Exact engine-origin object, valid only during its awaited private callback.
+ * This proves neither source authority nor future cleanup or reusable DB ownership. */
+export const assertActiveStrictRestoreProof = (proof: unknown): StrictRestoreCallbackContext => {
+  const entry = proof && typeof proof === 'object' ? activeStrictRestoreProofs.get(proof) : undefined;
+  if (!entry?.active) throw new Error('RECOVERY_STRICT_PROOF_NOT_ACTIVE');
+  return entry.context;
+};
+
 export const validateRecoveryPackage = async (input: {
   sourcePath: string;
   passphrase: string;
@@ -529,14 +589,30 @@ export const validateRecoveryPackage = async (input: {
   verifyRestore?: boolean;
   verifyApplicationPayloads?: boolean;
   verifyBusinessData?: boolean;
+  /** Standalone owned validation only. The caller authenticates the private
+   * source/checkpoint graph and may retain this partial proof privately. A
+   * callback does not certify cleanup, original Node closure or source authority. */
+  nativeRestoreInspection?: {
+    expectedLedger: NativeRecoveryLedgerExpectation;
+    onVerified: (proof: StrictRestoreVerifiedProof) => Promise<void>;
+  };
 }) => {
-  await ensureDirectories();
+  const inspection = input.nativeRestoreInspection;
+  if (inspection) {
+    if (input.verifyRestore !== true || input.verifyApplicationPayloads !== true || input.verifyBusinessData !== true
+      || typeof inspection.onVerified !== 'function') throw new Error('RECOVERY_STRICT_COMPLETE_FLAGS_REQUIRED');
+    validateNativeRecoveryExpectation(inspection.expectedLedger);
+  }
+  await ensureDirectories(!inspection);
   const jobRoot = await fs.promises.mkdtemp(path.join(WORK_DIR, 'validate-'));
   const archivePath = path.join(jobRoot, 'payload.tar.gz');
   const payloadRoot = path.join(jobRoot, 'payload');
   let stagedDatabase: string | null = null;
   let businessDataProof: RecoveryBusinessTableProof[] | undefined;
   let inquiryBusinessProof:InquiryBusinessProof|undefined;
+  let ownedDatabase: NativeRecoveryDatabaseIdentity | undefined;
+  let validationFailure: unknown;
+  let validationFailed = false;
   try {
     await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
@@ -549,6 +625,7 @@ export const validateRecoveryPackage = async (input: {
     if (!['COMPLETE', 'SANITIZED_TEST'].includes(manifest.packageType) || !Array.isArray(manifest.components)) {
       throw Object.assign(new Error('Recovery manifest fields are invalid.'), { code: 'INVALID_RECOVERY_MANIFEST' });
     }
+    if (inspection && manifest.packageType !== 'COMPLETE') throw new Error('RECOVERY_STRICT_COMPLETE_PACKAGE_REQUIRED');
     const componentPaths = new Set(manifest.components.map((component) => component.path));
     if (!componentPaths.has('database/main.dump') || !componentPaths.has('inquiry/inquiry.db')) {
       throw Object.assign(new Error('Recovery package is missing a required data store.'), { code: 'RECOVERY_COMPONENT_MISSING' });
@@ -576,21 +653,74 @@ export const validateRecoveryPackage = async (input: {
       inquiryBusinessProof=await captureInquiryBusinessProof(path.join(payloadRoot,'inquiry','inquiry.db'));
       stagedDatabase = safeDatabaseName('sabalan_checkpoint_verify');
       await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
-      await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
-      const stagedClient = new PrismaClient({ datasources: { db: { url: databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase) } } });
+      let originalRestore: Awaited<ReturnType<typeof observeNativeRecoveryOriginal>>['original'] | undefined;
+      if (inspection) {
+        const state = await observeStrictRecoveryDatabase(process.env.DATABASE_URL || '', stagedDatabase);
+        if (typeof state.oid !== 'string' || !/^[1-9][0-9]*$/.test(state.oid)
+          || typeof state.systemIdentifier !== 'string' || !/^[1-9][0-9]*$/.test(state.systemIdentifier)) {
+          throw new Error('RECOVERY_STRICT_CREATED_DATABASE_IDENTITY_UNPROVEN');
+        }
+        ownedDatabase = { name: stagedDatabase, oid: state.oid, systemIdentifier: state.systemIdentifier };
+        assertNativeRecoveryDatabaseQuiet(state, ownedDatabase);
+        const args = databaseArgs(process.env.DATABASE_URL || '', stagedDatabase);
+        originalRestore = (await strictRecoveryCommand('pg_restore', [...args.connection, '--no-owner',
+          '--no-privileges', '--exit-on-error', path.join(payloadRoot, 'database', 'main.dump')], args.env)).original;
+      } else await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
+      const stagedUrl = new URL(databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase));
+      if (inspection) {
+        stagedUrl.searchParams.set('connection_limit', '2'); stagedUrl.searchParams.set('pool_timeout', '10');
+        // Preserve the original native guardian's application_name across the
+        // alternate database; a static name would escape its SQL observation.
+      }
+      const stagedClient = new PrismaClient({ datasources: { db: { url: stagedUrl.toString() } } });
+      let verifiedNativeProof: StrictRestoreVerifiedProof | undefined;
       try {
         await stagedClient.$queryRawUnsafe('SELECT 1');
         await validateStoredFileReferences(stagedClient, payloadRoot);
         if (input.verifyApplicationPayloads) await verifyRecoveredApplicationPayloads(stagedClient);
         if (input.verifyBusinessData) businessDataProof = await captureRecoveryBusinessProof(stagedClient);
+        if (inspection) {
+          if (!ownedDatabase || !originalRestore) throw new Error('RECOVERY_STRICT_ORIGINAL_RESTORE_UNPROVEN');
+          const proof = await stagedClient.$transaction(tx => inspectNativeRecoveryLedger(tx, inspection.expectedLedger, ownedDatabase!),
+            { timeout: 15_000, maxWait: 1_000 });
+          verifiedNativeProof = freezeStrictRestoreValue({ ...proof, originalRestore });
+        }
       } finally {
         await stagedClient.$disconnect();
       }
+      if (inspection) {
+        if (!verifiedNativeProof || !businessDataProof || !inquiryBusinessProof) throw new Error('RECOVERY_STRICT_CALLBACK_CONTEXT_UNPROVEN');
+        const context = freezeStrictRestoreValue({ proof: verifiedNativeProof, payloadRoot, manifest,
+          businessDataProof, inquiryBusinessProof, sourceStorageRoots: { performanceExports: PERFORMANCE_EXPORT_STORAGE_DIR } });
+        const entry = { active: true, context };
+        activeStrictRestoreProofs.set(verifiedNativeProof, entry);
+        try { await inspection.onVerified(verifiedNativeProof); }
+        finally { entry.active = false; }
+      }
     }
     return { manifest, compatibility, ...(businessDataProof ? { businessDataProof } : {}),...(inquiryBusinessProof?{inquiryBusinessProof}:{}) };
+  } catch (error) {
+    validationFailed = true;
+    validationFailure = error;
+    throw error;
   } finally {
-    if (stagedDatabase) await dropDatabase(process.env.DATABASE_URL || '', stagedDatabase);
-    await fs.promises.rm(jobRoot, { recursive: true, force: true });
+    if (inspection) {
+      try {
+        if (stagedDatabase) {
+          if (!ownedDatabase) throw new Error('RECOVERY_STRICT_DATABASE_OWNER_UNPROVEN');
+          await retireStrictRecoveryDatabase(process.env.DATABASE_URL || '', ownedDatabase);
+        }
+        // Failed private work remains available for the original's diagnosis.
+        if (!validationFailed) await fs.promises.rm(jobRoot, { recursive: true });
+      } catch (cleanupError) {
+        throw Object.assign(new Error('Strict recovery cleanup failed; private work is retained.'), {
+          code: 'RECOVERY_STRICT_CLEANUP_FAILED', validationFailure, cleanupError,
+        });
+      }
+    } else {
+      if (stagedDatabase) await dropDatabase(process.env.DATABASE_URL || '', stagedDatabase);
+      await fs.promises.rm(jobRoot, { recursive: true, force: true });
+    }
   }
 };
 
@@ -745,7 +875,27 @@ const liveStoredFileReferenceCandidates = (
   ];
 };
 
-const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: string) => {
+/** Integrity-only locations. The caller must separately prove permission and
+ * lifetime; this function creates no deployment or restored-database authority. */
+export type StoredFileReferenceLocations = Readonly<{
+  hrHiring:string;supportTickets:string;uploads:string;dispatchDocuments:string;
+  performanceExports:string;performanceSourceRoots:readonly string[];
+}>;
+const storedDispatchArtifactPath = (root:string,storageKey:string) => {
+  const normalized=storageKey.replace(/\\/g,'/');
+  if(!normalized||normalized.startsWith('/')||/^[a-z]:/i.test(normalized)||normalized.split('/').includes('..'))
+    throw Object.assign(new Error('Dispatch artifact storage key is unsafe.'),{code:'UNSAFE_RECOVERY_PATH'});
+  const base=path.resolve(root),candidate=path.resolve(base,normalized);
+  if(!candidate.startsWith(`${base}${path.sep}`))throw Object.assign(new Error('Dispatch artifact storage key is unsafe.'),{code:'UNSAFE_RECOVERY_PATH'});
+  return candidate;
+};
+const storedPerformanceArtifactPath = (locations:StoredFileReferenceLocations,artifactPath:string) => {
+  if(locations.performanceSourceRoots.length===1)return path.join(locations.performanceExports,performanceExportRelativePath(artifactPath,locations.performanceSourceRoots[0]));
+  const candidates=locations.performanceSourceRoots.filter(root=>path.resolve(artifactPath).startsWith(`${path.resolve(root)}${path.sep}`));
+  if(candidates.length!==1)throw Object.assign(new Error('Performance export artifact path is outside unambiguous protected storage.'),{code:'UNSAFE_RECOVERY_PATH'});
+  return path.join(locations.performanceExports,performanceExportRelativePath(artifactPath,candidates[0]));
+};
+export const validateStoredFileReferencesAtLocations = async (client: PrismaClient, locations: StoredFileReferenceLocations) => {
   const columns = await client.$queryRawUnsafe<Array<{ tableName: string; columnName: string }>>(`
     SELECT table_name AS "tableName", column_name AS "columnName"
     FROM information_schema.columns
@@ -765,13 +915,13 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
       const storageName = path.basename(String(row.value || ''));
       if (!storageName) continue;
       const candidates = column.tableName.startsWith('hr_')
-        ? [path.join(payloadRoot, 'files', 'hr-hiring', storageName)]
+        ? [path.join(locations.hrHiring, storageName)]
         : column.tableName === 'support_ticket_attachments'
-          ? [path.join(payloadRoot, 'files', 'support-tickets', storageName)]
+          ? [path.join(locations.supportTickets, storageName)]
         : [
-            path.join(payloadRoot, 'files', 'uploads', 'security-vehicle-pairs', storageName),
-            path.join(payloadRoot, 'files', 'uploads', 'security-shift-log', storageName),
-            path.join(payloadRoot, 'files', 'uploads', storageName),
+            path.join(locations.uploads, 'security-vehicle-pairs', storageName),
+            path.join(locations.uploads, 'security-shift-log', storageName),
+            path.join(locations.uploads, storageName),
           ];
       if (!candidates.some((candidate) => fs.existsSync(candidate))) {
         missing.push({ table: column.tableName, column: column.columnName, storageName });
@@ -793,7 +943,7 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
       missingPerformanceExports.push(receipt);
       continue;
     }
-    const candidate = performanceExportBackupPath(payloadRoot, receipt.artifactPath);
+    const candidate = storedPerformanceArtifactPath(locations, receipt.artifactPath);
       const stat = await fs.promises.stat(candidate).catch(() => null);
       if (!stat?.isFile() || !await hasValidPerformanceExportArtifact(candidate, receipt)) missingPerformanceExports.push(receipt);
   }
@@ -804,7 +954,7 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
     });
   }
   const dispatchArtifacts = await client.dispatchDocumentArtifact.findMany({ select: { id: true, storageKey: true, byteLength: true, sha256: true } });
-  const missingDispatchArtifacts = dispatchArtifacts.filter(artifact => !fs.existsSync(dispatchArtifactBackupPath(payloadRoot, artifact.storageKey)));
+  const missingDispatchArtifacts = dispatchArtifacts.filter(artifact => !fs.existsSync(storedDispatchArtifactPath(locations.dispatchDocuments, artifact.storageKey)));
   if (missingDispatchArtifacts.length) {
     throw Object.assign(new Error(`Recovery package has missing dispatch-document artifacts (${missingDispatchArtifacts.length}).`), {
       code: 'RECOVERY_DISPATCH_ARTIFACT_MISSING',
@@ -813,7 +963,7 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
   }
   const corruptDispatchArtifacts: Array<{ id: string; storageKey: string; expectedByteLength: string; actualByteLength: number; expectedSha256: string; actualSha256: string }> = [];
   for (const artifact of dispatchArtifacts) {
-    const artifactPath = dispatchArtifactBackupPath(payloadRoot, artifact.storageKey);
+    const artifactPath = storedDispatchArtifactPath(locations.dispatchDocuments, artifact.storageKey);
     if (!fs.existsSync(artifactPath)) continue;
     const stat = await fs.promises.stat(artifactPath);
     const actualSha256 = stat.isFile() ? await sha256File(artifactPath) : '';
@@ -835,6 +985,13 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
     });
   }
 };
+
+const validateStoredFileReferences = async (client:PrismaClient,payloadRoot:string) =>
+  validateStoredFileReferencesAtLocations(client,{
+    hrHiring:path.join(payloadRoot,'files','hr-hiring'),supportTickets:path.join(payloadRoot,'files','support-tickets'),
+    uploads:path.join(payloadRoot,'files','uploads'),dispatchDocuments:path.join(payloadRoot,'files','dispatch-documents'),
+    performanceExports:path.join(payloadRoot,'files','performance-exports'),performanceSourceRoots:[PERFORMANCE_EXPORT_STORAGE_DIR],
+  });
 
 export const validateLiveStoredFileReferences = async (client: PrismaClient) => {
   const columns = await client.$queryRawUnsafe<Array<{ tableName: string; columnName: string }>>(`

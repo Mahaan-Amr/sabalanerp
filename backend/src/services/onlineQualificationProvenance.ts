@@ -51,6 +51,6 @@ export function openTrustedOnlineQualification(directory:string,expected:{manife
  const decision=verifyOnlineQualificationOrigin(certificate.raw,key.raw,accepted);
  // Acceptance hash is the exact original file bytes (canonical JSON may have LF).
  required(decision.acceptanceSha256===expected.acceptanceSha256);
- return Object.freeze({decision,revalidate(){accepted.revalidate();required(read(ONLINE_QUALIFICATION_PUBLIC_KEY,4096,0o444).pin===key.pin
+ return Object.freeze({decision,accepted,revalidate(){accepted.revalidate();required(read(ONLINE_QUALIFICATION_PUBLIC_KEY,4096,0o444).pin===key.pin
   &&read(file,65536,0o400).pin===certificate.pin);}});
 }

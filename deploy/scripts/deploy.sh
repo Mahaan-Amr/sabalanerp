@@ -353,7 +353,13 @@ control() {
 }
 
 enter_maintenance() {
-  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+  if [ "${CAPTURE_ONLY}" -eq 1 ]; then
+    # Capture reopens these exact original containers. Their authenticated
+    # configuration already exposes the read-only maintenance marker mount.
+    verify_capture_only_configuration || return 1
+    control maintenance-on || return 1
+    MAINTENANCE_ACTIVE=1
+  elif [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
     # Make the durable boundary own every subsequent runtime change. A crash
     # before the shell flag is set is detected through the marker and journal.
     control maintenance-on
@@ -883,6 +889,14 @@ if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   prebuilt_exports="$(verify_prebuilt_release)" || exit 1
   eval "${prebuilt_exports}"
   preserved_clamav_guard health || exit 1
+elif [ "${CAPTURE_ONLY}" -eq 1 ]; then
+  # Capture has no release qualification certificate. Its separately pinned
+  # control plan must bind the existing scanner before any Compose/control
+  # action; an inherited environment binding was cleared at entry.
+  control_image="$(node -e 'const v=JSON.parse(require("fs").readFileSync(process.argv[1]));if(!/^sha256:[a-f0-9]{64}$/.test(v.controlImage))process.exit(1);process.stdout.write(v.controlImage)' "${CAPTURE_ONLY_PLAN}")"
+  capture_exports="$(docker image inspect "${control_image}" | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" plan-exports "${CAPTURE_ONLY_PLAN}" "${OPERATIONS_ROOT}")" || exit 1
+  eval "${capture_exports}"
+  preserved_clamav_guard health || exit 1
 fi
 
 DEPLOYMENT_SECRET_DIR="$(env_value DEPLOYMENT_SECRET_DIR)"
@@ -908,7 +922,9 @@ public_key_path="${DEPLOYMENT_SECRET_DIR}/remote-recovery-public.pem"
 
 # This host file is bind-mounted into nginx. A restrictive checkout or copy
 # mode must never turn the intended public 503 boundary into nginx's 403 page.
-chmod 0644 "${REPO_ROOT}/deploy/nginx/maintenance.html"
+# Preserve the verified file metadata when its public mode is already correct.
+[ "$(stat -c '%a' "${REPO_ROOT}/deploy/nginx/maintenance.html")" = 644 ] \
+  || chmod 0644 "${REPO_ROOT}/deploy/nginx/maintenance.html"
 
 mkdir -p "${REPO_ROOT}/.deploy-state"
 exec 9>"${LOCK_FILE}"
@@ -1369,6 +1385,12 @@ if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
 else
   # Reviewed bridge DDL and native Prisma history commit together. Unknown
   # pending strategies fail closed; there is no native/partial fallback.
+  if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
+    # Readonly current-C request plus the fixed historical financial certificate.
+    # No adoption roots, online registry or public acceptance exists here.
+    online_bootstrap_boundary FINANCIAL_PREPARE
+    remaining="$(remaining_mutation_seconds)" || exit 1
+  fi
   run_backend_timed "${remaining}" sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-owned-migrations.js
 fi
 phase MIGRATIONS_APPLIED

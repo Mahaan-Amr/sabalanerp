@@ -7,6 +7,16 @@ const hash=raw=>createHash('sha256').update(raw).digest('hex');
 const hex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const same=(a,b)=>assert.deepEqual(a,b);
 const LIMIT=12*1024**2;
+const liveHttpEndpoints=new WeakMap();
+/** Same-process observation of this original owner's still-live HTTP child.
+ * It grants no FD9, database lease, checkpoint or qualification acceptance.
+ * Copies, PIDs, READY receipts and serialized paths have no authority here. */
+export function assertOriginalIndependentQualificationEndpoint(witness){
+  const revalidate=witness&&typeof witness==='object'?liveHttpEndpoints.get(witness):undefined;
+  assert.ok(revalidate,'ORIGINAL_INDEPENDENT_HTTP_ENDPOINT_REQUIRED');
+  return revalidate();
+}
+
 
 /** Fixed-domain private QA issuer. The enclosing original backup controller owns
  * the container CREATE/START handles and both host locks; this closure owns every
@@ -84,7 +94,34 @@ export function createOriginalIndependentQualificationController({root,index,con
     const preimage=Buffer.from([value.format,session,actorId,grant.sha256,String(sequence),command].join('\0'),'utf8');
     http.owner.child.stdin.write(JSON.stringify({...value,signature:sign(null,preimage,privateKey).toString('base64')})+'\n');
   }
+  function assertLiveHttpEndpoint(){
+    check();same(phase,'HTTP_READY');assert.ok(http&&container&&materials);
+    const child=http.owner.child;
+    assert.ok(child instanceof ChildProcess&&!http.owner.closed&&child.exitCode===null&&child.signalCode===null
+      &&!child.killed&&child.stdin&&!child.stdin.destroyed&&!child.stdin.writableEnded
+      &&child.stdout&&!child.stdout.destroyed&&!child.stdout.readableEnded
+      &&child.stderr&&!child.stderr.destroyed&&!child.stderr.readableEnded,'ORIGINAL_HTTP_CHILD_NOT_LIVE');
+    same(child.spawnfile,'docker');same(child.spawnargs.slice(1,4),['exec','-i',container.id]);
+    const grant=index.privateQualification.httpGrant,decision=materials[grant.scope.runtimeId].decision.decision;
+    const identity=http.ready.result.identity;
+    same(identity.runtimeId,decision.runtimeId);same(identity.image,decision.image);same(identity.sourceCommit,decision.sourceCommit);
+    same(identity.database,decision.database);same(identity.httpIngress,decision.httpIngress);
+    same(identity.scopeSha256,grant.sha256);same(identity.runtimeBundleSha256,decision.runtimeBundleSha256);
+    same(identity.restoreManifestSha256,decision.restoreManifestSha256);same(identity.artifactsSha256,decision.artifactsSha256);
+    same(decision.database.name,index.restoredDatabase);same(decision.database.oid,String(index.restoredOid));
+    same(decision.httpIngress.bindHost,config.roleTopology.main.host);
+    assert.ok(Number.isInteger(decision.httpIngress.port)&&decision.httpIngress.port>=1024&&decision.httpIngress.port<=65535);
+    return Object.freeze({format:'sabalan-original-live-private-http-endpoint/v1',purpose:'RESTORED_QA_HTTP_OBSERVATION',
+      containerId:container.id,image:container.image,sourceCommit:decision.sourceCommit,runtimeId:decision.runtimeId,
+      scopeSha256:grant.sha256,database:Object.freeze({...decision.database}),
+      url:'http://'+decision.httpIngress.bindHost+':'+decision.httpIngress.port,
+      nativeOriginalPid:http.started.originalPopenPid,outerOriginalExecPid:child.pid,
+      independentPointHealthy:false,cleanupPending:true,productionAdmission:false});
+  }
   return Object.freeze({
+    httpEndpointWitness(){
+      assertLiveHttpEndpoint();const witness=Object.freeze({});liveHttpEndpoints.set(witness,assertLiveHttpEndpoint);return witness;
+    },
     enrollment:Object.freeze({publicKey:publicKeyBase64,publicKeyPem,session,actorId}),
     enrollOriginalContainer(value){check();same(phase,'NEW');assert.ok(hex(value.id));assert.match(value.image,/^sha256:[a-f0-9]{64}$/);
       same(value.image,config.image);same(value.originalCreateClosed,true);same(value.originalCreateExitCode,0);

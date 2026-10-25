@@ -9,6 +9,7 @@ import {originalOnlineEvidenceReader} from './original-online-evidence-reader.mj
 import {readOriginalRoleQualificationCompletion} from './application-native-role-coordinator.mjs';
 import {readOriginalIndependentRestoreSshCompletion,readOriginalIndependentPhysicalRestoreSshCompletion} from './independent-full-restore-ssh.mjs';
 import {readOriginalProtectedQualificationRequest,readOriginalOnlineQualificationRequest} from './original-protected-online-ssh.mjs';
+import {assertOriginalPrivateEvidenceDirectory} from './original-private-evidence-directory.mjs';
 import {readIndependentCheckpointTransport} from './independent-checkpoint-transport.mjs';
 
 const completed=new WeakMap();
@@ -117,22 +118,49 @@ export function readOriginalOnlineEvidenceAssembly(token){
 
 /** Assemble protected bootstrap generation one only. ONLINE following cycles
  * require the physical WAL/SQLite/v3-cut owner and cannot use this factory. */
-export function assembleOriginalProtectedOnlineEvidence({localCompletion,independentCompletion,protectedRequest,evidenceDirectory}){
+export function assembleOriginalProtectedOnlineEvidence({localCompletion,independentCompletion,protectedRequest,evidenceDirectory,evidenceCustody,protectedFinancial}){
  const local=readOriginalRoleQualificationCompletion(localCompletion),independent=readOriginalIndependentRestoreSshCompletion(independentCompletion),request=readOriginalProtectedQualificationRequest(protectedRequest);
  same(request.format,'sabalan-original-protected-qualification-request/v1');same(independent.recoveryMode,'PROTECTED_MAINTENANCE_COMPLETE');
- return assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical:false,revalidateRequest:()=>readOriginalProtectedQualificationRequest(protectedRequest)});
+ return assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical:false,evidenceCustody,protectedFinancial,revalidateRequest:()=>readOriginalProtectedQualificationRequest(protectedRequest)});
 }
 
 /** Following ONLINE cycles require the actual physical owner and live original
  * request. COMPLETE backup receipts cannot enter this separate factory. */
-export function assembleOriginalOnlineEvidence({localCompletion,independentCompletion,onlineRequest,evidenceDirectory}){
+export function assembleOriginalOnlineEvidence({localCompletion,independentCompletion,onlineRequest,evidenceDirectory,evidenceCustody}){
  const local=readOriginalRoleQualificationCompletion(localCompletion),independent=readOriginalIndependentPhysicalRestoreSshCompletion(independentCompletion),request=readOriginalOnlineQualificationRequest(onlineRequest);
  same(request.format,'sabalan-original-online-qualification-request/v1');same(independent.recoveryMode,'ONLINE_COHERENT_WAL');
  assert.ok(Number.isSafeInteger(request.generation)&&request.generation>=2);
- return assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical:true,revalidateRequest:()=>readOriginalOnlineQualificationRequest(onlineRequest)});
+ return assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical:true,evidenceCustody,revalidateRequest:()=>readOriginalOnlineQualificationRequest(onlineRequest)});
 }
 
-function assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical,revalidateRequest}){
+
+/** Separate signed financial artifacts. These references carry no ownership;
+ * the actual fixed-key canonical reader below validates every signed byte. */
+function protectedFinancialFiles(selection){
+ assert.ok(selection&&Object.keys(selection).sort().join(',')==='binding,sourceFile,sourceSha256');
+ assert.ok(path.isAbsolute(selection.sourceFile)&&path.resolve(selection.sourceFile)===selection.sourceFile&&/^[a-f0-9]{64}$/.test(selection.sourceSha256));
+ const directory=path.dirname(selection.sourceFile);assert.equal(fs.realpathSync(directory),directory);
+ const pins=[];const read=(file,maximum,expectedHash,empty=false)=>{
+  assert.equal(fs.realpathSync(file),file);const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+  try{const before=fs.fstatSync(fd,{bigint:true}),named=fs.lstatSync(file,{bigint:true});assert.ok(before.isFile()&&before.nlink===1n&&before.size>=(empty?0n:1n)&&before.size<=BigInt(maximum));
+   if(process.platform!=='win32')assert.ok((before.mode&0o777n)===0o400n&&before.uid===BigInt(process.getuid()));
+   const identity=st=>['dev','ino','size','mtimeNs','ctimeNs','uid','mode','nlink'].map(k=>String(st[k])).join(':');
+   for(const key of ['ino','size','mtimeNs','ctimeNs','uid','mode','nlink'])same(before[key],named[key]);if(process.platform!=='win32')same(before.dev,named.dev);
+   const raw=fs.readFileSync(fd);same(raw.length,Number(before.size));same(sha(raw),expectedHash);same(identity(before),identity(fs.fstatSync(fd,{bigint:true})));same(identity(named),identity(fs.lstatSync(file,{bigint:true})));
+   pins.push(()=>{const current=fs.lstatSync(file,{bigint:true});same(identity(current),identity(named));same(sha(fs.readFileSync(file)),expectedHash);});return raw;
+  }finally{fs.closeSync(fd);}
+ };
+ const sourceRaw=read(selection.sourceFile,8*1024**2,selection.sourceSha256),source=JSON.parse(sourceRaw),names=['workerStdout','workerStderr','workerOriginal','outerActive','outerFinal','privateProof','sourceCheckpoint','currentMaterial','currentCompiled','currentImage','currentInspect','certificate'];
+ same(source.format,'sabalan-protected-financial-qualification/v1');same(source.qualificationComplete,true);same(source.productionAdmission,false);same(Object.keys(source.evidence).sort(),[...names].sort());
+ const files={};for(const name of names){const d=source.evidence[name],maximum=name==='certificate'?65536:(name==='currentCompiled'?32:name==='workerStdout'?40:16)*1024**2;
+  same(Object.keys(d).sort(),['bytes','file','sha256']);same(d.file,'protected-financial-'+name.toLowerCase()+'.json');assert.ok(Number.isSafeInteger(d.bytes)&&d.bytes>=0&&d.bytes<=maximum);
+  const raw=read(path.join(directory,d.file),maximum,d.sha256,name==='workerStderr');same(raw.length,d.bytes);files[d.file]=raw;
+ }
+ return {source,sourceRaw,binding:structuredClone(selection.binding),files,revalidate(){for(const check of pins)check();}};
+}
+
+function assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical,evidenceCustody,protectedFinancial,revalidateRequest}){
+ const financial=protectedFinancial?protectedFinancialFiles(protectedFinancial):null;assert.ok(!physical||!financial,'FINITE_FINANCIAL_REQUIRES_PROTECTED_COMPLETE');
  const originalProductionExecution=deriveOriginalExecutionSelection(request,independent);
  assert.ok(local.originalControllers.every(row=>row.code===0&&row.signal===null)&&independent.originalControllers.every(row=>row.code===0&&row.signal===null));
  const main=ownedJson(local,'original-main-result.json').value;
@@ -177,6 +205,7 @@ function assembleOriginalEvidence({local,independent,request,evidenceDirectory,p
  const qualification={schemaSha256:main.schemaSha256,sourceDatabase,proofDatabases,recoveryMode:physical?'ONLINE_COHERENT_WAL':'PROTECTED_MAINTENANCE_COMPLETE',deploymentTargetDatabase:request.database,captureId:physical?report.layout.captureId:main.sameReleaseCoherentRestore.captureId,
   images:independent.sourceImages,checkpointArchiveChecksum:request.checkpoint.checksum,componentSourceCommits,runtimeCohorts:Object.fromEntries(scopes.map(scope=>[scope,cohorts[scope].map(actor)])),deploymentTargetImages:independent.images,imageGraphs:independent.imageGraphs,imageArchiveReceipts,
   ...(request.productionExecutionBindings?{productionExecutionBindings:structuredClone(request.productionExecutionBindings)}:{}),
+  ...(financial?{protectedFinancial:financial.binding}:{}),
   ...(!physical?{qualificationCheckpoint:{metadataSha256:checkpoint.sha256,metadata:checkpoint.metadata}}:{})};
  const binding={...qualification,manifestSha256,checkpointSha256:metadataSha(request.checkpoint),releaseId:request.releaseId,sourceCommit:request.targetCommit,runtimeBundleSha256:candidateActor.runtimeBundleSha256};
  const common=scope=>({...binding,productionAdmission:true,passResult:true,proofDatabase:proofDatabases[scope],originalNativeClosures:cohorts[scope],executionKind:['compatible-migrations','browser-24-hours'].includes(scope)?'DIAGNOSTIC_SUPPORT':'INSTALLED_RUNTIME'});
@@ -185,7 +214,7 @@ function assembleOriginalEvidence({local,independent,request,evidenceDirectory,p
  const protectedDirectoryComponents=physical?undefined:deriveProtectedDirectoryComponents({checkpointMetadataSha256:checkpoint.sha256,metadata:checkpoint.metadata,canonicalRestoreRaw:ownedJson(independent,'canonicalRestoreOutput').raw,baselineRaw:baseline.raw,requestRoots:request.roots});
  const appHealth=Object.fromEntries(roles.map(role=>{const health=report.applicationHealth[role];same(health.image,independent.images[role]);same(health.declaredSourceCommit,componentSourceCommits[role]);return [role,{...health,sourceCommit:health.declaredSourceCommit,...(physical?{captureId:qualification.captureId}:{checkpointMetadataSha256:checkpoint.sha256})}];}));
  const proofs={
-  'compatible-migrations':{...main,...common('compatible-migrations'),priorMigrationHistorySha256:main.originalHistory.sha256},
+  'compatible-migrations':financial?financial.source:{...main,...common('compatible-migrations'),priorMigrationHistorySha256:main.originalHistory.sha256},
   'coherent-independent-restore':{format:'sabalan-native-application-coherent-integration/v1',...common('coherent-independent-restore'),restoredDatabase:independent.restoredDatabase,independentHostQualified:(physical?report.recoveryMachineUuidSha256:report.recoveryHost.machineUuidSha256)!==checkpoint.metadata.sourceMachineUuidSha256,continuousWalQualified:false,immutableDifferentImagesQualified:new Set(roles.map(role=>independent.images[role])).size===3,inquiryRuntimeQualified:report.inquiryClosure.closure.originalReturncode===128&&json(report.inquiryClosure.closure.nativeRawBase64).nativeStatus===143,
    checkpoint:{...checkpoint.metadata,...(!physical?{lastDrill:report.healthyDrill}:{})},checkpointMetadata:checkpoint.metadata,checkpointTransportRawBase64:transport.descriptor.rawBase64,restoredFileRoots:baseline.value.sources.length,...(!physical?{protectedDirectoryComponents}:derivePhysicalComponents(independent,report,request)),applicationHealth:appHealth,
    inquiryNativeClosure:structuredClone(report.inquiryClosure)},
@@ -196,8 +225,8 @@ function assembleOriginalEvidence({local,independent,request,evidenceDirectory,p
  // The fixed compiled parser below is the final authority, including migration
  // compatibility, all native/SQL ownership, expiry coverage and nine domains.
  const kernel=originalOnlineEvidenceReader();
- const files={'manifest.json':manifestRaw,...archiveReceiptFiles};const reports={};
- for(const scope of scopes){const file=scope+'-source.json',raw=bytes(proofs[scope]);files[file]=raw;
+ const files={'manifest.json':manifestRaw,...archiveReceiptFiles,...(financial?financial.files:{})};const reports={};
+ for(const scope of scopes){const file=scope+'-source.json',raw=financial&&scope==='compatible-migrations'?financial.sourceRaw:bytes(proofs[scope]);files[file]=raw;
   const reportFile=scope+'.json';files[reportFile]=bytes({format:'sabalan-online-qualification/v1',scope,manifestSha256,releaseId:manifest.releaseId,sourceCommit:manifest.sourceCommit,image:manifest.image,productionAdmission:true,proofs:[{file,bytes:raw.length,sha256:sha(raw)}]});reports[scope]={file:reportFile,bytes:files[reportFile].length,sha256:sha(files[reportFile])};}
  files['release-gates.json']=bytes({format:physical?'sabalan-online-private-qualification-prerequisite/v1':'sabalan-protected-private-qualification-prerequisite/v1',releaseId:manifest.releaseId,manifestSha256,...(physical?{checkpointSha256:binding.checkpointSha256,captureId:qualification.captureId}:{qualificationCheckpointSha256:checkpoint.sha256}),publicTrafficQualified:false,qualificationReports:Object.fromEntries(scopes.map(scope=>[scope,reports[scope].sha256]))});
  reports['release-gates']={file:'release-gates.json',bytes:files['release-gates.json'].length,sha256:sha(files['release-gates.json'])};
@@ -205,15 +234,14 @@ function assembleOriginalEvidence({local,independent,request,evidenceDirectory,p
  // Whole metadata must fit the canonical parser's existing admission budget.
  // Refuse explicitly before any output is written; never truncate inventory,
  // drop attachments or relabel a partial point to fit a metadata limit.
- for(const [file,raw]of Object.entries(files))assert.ok(raw.length<=(['manifest.json','acceptance.json'].includes(file)?128*1024:8*1024**2),
+ for(const [file,raw]of Object.entries(files))assert.ok(raw.length<=(financial?.files[file]?(file==='protected-financial-currentcompiled.json'?32:file==='protected-financial-workerstdout.json'?40:file==='protected-financial-certificate.json'?65536/1024**2:16)*1024**2:['manifest.json','acceptance.json'].includes(file)?128*1024:8*1024**2),
   'ORIGINAL_ONLINE_EVIDENCE_METADATA_CAPACITY_REFUSED_'+file);
- assert.ok(path.isAbsolute(evidenceDirectory)&&path.resolve(evidenceDirectory)===evidenceDirectory&&!fs.existsSync(evidenceDirectory));
- fs.mkdirSync(evidenceDirectory,{mode:0o700});same(fs.realpathSync(evidenceDirectory),evidenceDirectory);
+ financial?.revalidate();assertOriginalPrivateEvidenceDirectory(evidenceCustody,evidenceDirectory);same(fs.readdirSync(evidenceDirectory),[]);
  // Retain any failed parser/readback directory; no cleanup or receipt adoption.
  for(const [file,raw] of Object.entries(files)){const fd=fs.openSync(path.join(evidenceDirectory,file),'wx',0o400);try{fs.writeFileSync(fd,raw);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}
  const acceptanceSha256=sha(files['acceptance.json']),accepted=kernel.readOnlineReleaseEvidence(evidenceDirectory,{manifestSha256,acceptanceSha256});accepted.revalidate();
  for(const closure of accepted.nativeClosures)assert.ok([...local.nativeClosures,...independent.nativeClosures].some(row=>row.runtimeId===closure.runtimeId&&row.nativeSha256===closure.nativeSha256&&row.workSha256===closure.workSha256&&row.activeClaimSha256===closure.activeClaimSha256),'ORIGINAL_ASSEMBLY_NATIVE_UNION_CHANGED');
- revalidateRequest();
+ financial?.revalidate();assertOriginalPrivateEvidenceDirectory(evidenceCustody,evidenceDirectory);revalidateRequest();
  const token=Object.freeze({});completed.set(token,freeze({format:'sabalan-original-online-evidence-assembly/v1',evidenceDirectory,manifestSha256,acceptanceSha256,files:Object.fromEntries(Object.entries(files).map(([file,raw])=>[file,owned(raw)])),
   originalProductionExecution,originalProductionExecutionSha256:metadataSha(originalProductionExecution),
   canonicalParser:{bundleSha256:kernel.bundleSha256,sourceHashes:kernel.sourceHashes},

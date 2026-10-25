@@ -1,9 +1,11 @@
 /** Exact preserved negative-recovery view; no current or historical closure waiver. */
 import assert from 'node:assert/strict';
+import {negativeCapsuleSubpath} from './application-native-negative-capsule-acceptance.mjs';
+export const isNegativeAcceptanceSubpath=value=>typeof value==='string'&&(/^c16-recovery-[a-f0-9]{32}$/.test(value)||value===negativeCapsuleSubpath);
 export const negativeAcceptanceVolume='sabalanerp-local_online_runtime_acceptance';
 export const negativeAcceptanceTarget='/app/online-runtime-acceptance';
 export function validateNegativeAcceptanceDescriptor(value){
- assert.deepEqual(Object.keys(value).sort(),['namedVolume','subpath','target']);assert.equal(value.namedVolume,negativeAcceptanceVolume);assert.equal(value.target,negativeAcceptanceTarget);assert.match(value.subpath,/^c16-recovery-[a-f0-9]{32}$/);return value;
+ assert.deepEqual(Object.keys(value).sort(),['namedVolume','subpath','target']);assert.equal(value.namedVolume,negativeAcceptanceVolume);assert.equal(value.target,negativeAcceptanceTarget);assert.ok(isNegativeAcceptanceSubpath(value.subpath));return value;
 }
 export function validateNegativeAcceptanceConfiguration(configuration,descriptor){
  validateNegativeAcceptanceDescriptor(descriptor);assert.equal(configuration.name,'sabalanerp-local');

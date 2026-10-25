@@ -13,7 +13,8 @@ import {inspectOriginalLocalOnlineCheckpointInputs} from './lib/original-local-o
 import {runOriginalApplicationNativeQualification,readOriginalKnownFailedLocalClosure} from './run-application-native-local.mjs';
 import {runOriginalIndependentRestoreOverSsh,waitOriginalIndependentGuardianClosure} from './lib/independent-full-restore-ssh.mjs';
 import {issueOriginalQualificationOrigin,issueOriginalWalWindowVerification,readOriginalWalWindowCertificate,issueOriginalPhysicalCheckpointVerification,issueOriginalPhysicalRepositoryPromotion,issueOriginalPhysicalCheckpointPublication,issueOriginalTerminalWalCoverage} from '../deploy/scripts/online-qualification-origin-issuer.mjs';
-import {startOriginalProtectedOnlineInstall,readOriginalProtectedQualificationRequest,sendOriginalProtectedQualificationPackage,sendOriginalProtectedWalWindowCertificate,sendOriginalProtectedPhysicalPointVerification,readOriginalProtectedCheckpointMetadataSource,sendOriginalProtectedCheckpointMetadataCertificate,sendOriginalProtectedTerminalWalCertificate,readOriginalOnlineQualificationRequest,sendOriginalOnlineQualificationPackage,retainOriginalProtectedWalWindowAcknowledgement,sendOriginalProtectedClientControl,finishOriginalProtectedClient,waitOriginalProtectedClientCallbacks} from './lib/original-protected-online-ssh.mjs';
+import {startOriginalProtectedOnlineInstall,readOriginalProtectedQualificationRequest,sendOriginalProtectedQualificationPackage,readOriginalProtectedFinancialRequest,sendOriginalProtectedFinancialPackage,sendOriginalProtectedWalWindowCertificate,sendOriginalProtectedPhysicalPointVerification,readOriginalProtectedCheckpointMetadataSource,sendOriginalProtectedCheckpointMetadataCertificate,sendOriginalProtectedTerminalWalCertificate,readOriginalOnlineQualificationRequest,sendOriginalOnlineQualificationPackage,retainOriginalProtectedWalWindowAcknowledgement,sendOriginalProtectedClientControl,finishOriginalProtectedClient,waitOriginalProtectedClientCallbacks} from './lib/original-protected-online-ssh.mjs';
+import {prepareOriginalPrivateEvidenceDirectory} from './lib/original-private-evidence-directory.mjs';
 import {assembleOriginalProtectedOnlineEvidence,assembleOriginalOnlineEvidence,readOriginalOnlineEvidenceAssembly} from './lib/original-online-evidence-assembler.mjs';
 import {runOriginalFollowingPromotion} from './lib/original-following-update-workflow.mjs';
 
@@ -31,6 +32,7 @@ function pinnedConfiguration(file,digest){
 /** This function never accepts a ChildProcess or an already-finished report as
  * ownership. The two original factories below create their own children. */
 export async function runOriginalOnlineQualificationMaster({candidateReplacementReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection,retainedBrowserPlanFile,retainedBrowserPlanSha256,deferLocal=false,input=process.stdin,output=process.stdout}){
+ let financialRequest=null;
  assert.equal(process.platform,'win32','ORIGINAL_QUALIFICATION_MASTER_WINDOWS_REQUIRED');
  assert.equal(deferLocal,true,'ORIGINAL_MASTER_REQUIRES_PRELOAD_THEN_RUN_LOCAL');
  let held=false;
@@ -95,7 +97,7 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
       assert.ok(!bootstrapClientStarted&&!bootstrapHandoff,'ORIGINAL_BOOTSTRAP_CLIENT_ALREADY_CREATED');bootstrapClientStarted=true;
      }
      const launchPlan=pinnedConfiguration(request.launchPlanFile,request.launchPlanSha256);
-     protectedInstall=startOriginalProtectedOnlineInstall({launchPlan,...(following?{serviceReference:request.serviceReference}:{}),onOnlineQualificationRequest:async token=>{
+     protectedInstall=startOriginalProtectedOnlineInstall({launchPlan,onFinancialQualificationRequest:async token=>{assert.ok(!financialRequest&&!held,'ORIGINAL_FINANCIAL_REQUEST_ALREADY_BOUND');financialRequest=token;output.write(JSON.stringify({format:'sabalan-original-master-financial-request/v1',request:readOriginalProtectedFinancialRequest(token),productionAdmission:false})+'\n');},...(following?{serviceReference:request.serviceReference}:{}),onOnlineQualificationRequest:async token=>{
       assert.ok(physical&&metadata&&certification&&!onlineRequest&&!held,'ORIGINAL_ONLINE_CERTIFIED_POINT_REQUIRED');onlineRequest=token;
       output.write(JSON.stringify({format:'sabalan-original-master-online-request/v1',request:readOriginalOnlineQualificationRequest(token),productionAdmission:false})+'\n');
      },onPhysicalPointRequest:async sourcePoint=>{
@@ -194,17 +196,22 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
 
     }else if(request.command==='ISSUE_ONLINE_ORIGIN'){
      keys(request,['command','sequence','evidenceDirectory']);assert.ok(local&&physical&&onlineRequest&&protectedInstall&&!held,'ORIGINAL_ONLINE_REQUEST_REQUIRED');
-     const assemblyCompletion=assembleOriginalOnlineEvidence({localCompletion:local.completion,independentCompletion:physical,onlineRequest,evidenceDirectory:request.evidenceDirectory});
+     const evidenceCustody=await prepareOriginalPrivateEvidenceDirectory(request.evidenceDirectory);
+     const assemblyCompletion=assembleOriginalOnlineEvidence({evidenceCustody,localCompletion:local.completion,independentCompletion:physical,onlineRequest,evidenceDirectory:request.evidenceDirectory});
      const result=await issueOriginalQualificationOrigin({localCompletion:local.completion,independentCompletion:physical,assemblyCompletion});
      await sendOriginalOnlineQualificationPackage(protectedInstall.session,onlineRequest,result.package);onlineRequest=null;
      output.write(JSON.stringify({format:'sabalan-original-online-origin-issued/v1',sequence,file:result.file,sha256:result.sha256,productionAdmission:false})+'\n');
+    }else if(request.command==='PREPARE_FINANCIAL'){
+     keys(request,['command','sequence','sourceFile','sourceSha256','binding']);assert.ok(independent&&!held&&protectedInstall&&financialRequest&&!protectedRequest,'ORIGINAL_PREDDL_FINANCIAL_REQUEST_REQUIRED');
+     await sendOriginalProtectedFinancialPackage(protectedInstall.session,financialRequest,{sourceFile:request.sourceFile,sourceSha256:request.sourceSha256,binding:request.binding});financialRequest=null;state('ORIGINAL_FINANCIAL_PACKAGE_SENT_NO_RELEASE_ACCEPTANCE');
     }else if(request.command==='ISSUE_ORIGIN'){
-     keys(request,['command','sequence','evidenceDirectory']);
+     keys(request,['command','sequence','evidenceDirectory',...(Object.hasOwn(request,'protectedFinancial')?['protectedFinancial']:[])]);
      assert.ok(independent&&!held&&protectedInstall&&protectedRequest,'ORIGINAL_PROTECTED_REQUEST_REQUIRED');
      readOriginalProtectedQualificationRequest(protectedRequest);
      // The strict issuer also requires every semantic report and proof to be
      // bound to original owned outputs. Caller JSON never supplies a pass bit.
-     const assemblyCompletion=assembleOriginalProtectedOnlineEvidence({localCompletion:local.completion,independentCompletion:independent,
+     const evidenceCustody=await prepareOriginalPrivateEvidenceDirectory(request.evidenceDirectory);
+     const assemblyCompletion=assembleOriginalProtectedOnlineEvidence({evidenceCustody,...(request.protectedFinancial?{protectedFinancial:request.protectedFinancial}:{}),localCompletion:local.completion,independentCompletion:independent,
       protectedRequest,evidenceDirectory:request.evidenceDirectory});
      const assembly=readOriginalOnlineEvidenceAssembly(assemblyCompletion);
      assert.equal(assembly.originalProtectedRequestSha256,sha(Buffer.from(JSON.stringify(sort(readOriginalProtectedQualificationRequest(protectedRequest))))));

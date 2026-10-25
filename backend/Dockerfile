@@ -110,6 +110,7 @@ COPY deploy/scripts/with-backend-control-ownership.sh ./scripts/with-backend-con
 COPY deploy/scripts/protected-bootstrap-owner.py deploy/scripts/protected-bootstrap-state.py ./scripts/
 COPY deploy/scripts/protected-file-adoption-owner.py deploy/scripts/protected-file-adoption-state.py ./scripts/
 COPY deploy/scripts/backend-runtime-owner.py deploy/scripts/online-runtime-scope.py deploy/scripts/online-runtime-owner.py ./scripts/
+COPY deploy/scripts/restored-qa-http-launcher.py ./scripts/restored-qa-http-launcher.py
 COPY deploy/scripts/online-capture-admission.py ./scripts/online-capture-admission.py
 COPY deploy/scripts/online-release-runtime.mjs deploy/scripts/online-release-inner-controller.py ./scripts/
 COPY deploy/scripts/online-common-release-edge.mjs deploy/scripts/common-release-edge.mjs deploy/scripts/api-release-routing.mjs deploy/scripts/browser-operation-journal.mjs deploy/scripts/browser-release-proxy.mjs deploy/scripts/browser-release-routing.mjs deploy/scripts/browser-routing-store.mjs deploy/scripts/release-endpoint-catalog.mjs deploy/scripts/release-forwarding.mjs deploy/scripts/socket-release-proxy.mjs ./scripts/

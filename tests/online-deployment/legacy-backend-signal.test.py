@@ -22,7 +22,7 @@ def fixture():
     value = dict(Id='1' * 64, Created='2026-10-19T00:00:00Z', Image=bridge.LEGACY_IMAGE,
                  Config=dict(Cmd=bridge.LEGACY_COMMAND, Entrypoint=['docker-entrypoint.sh'], Labels={
                      'com.docker.compose.project': 'sabalanerp', 'com.docker.compose.service': 'backend',
-                     'io.sabalan.performance.source-commit': bridge.LEGACY_COMMIT}),
+                     **bridge.LEGACY_IMAGE_LABELS}),
                  State=dict(Running=True, Pid=120, OOMKilled=False, StartedAt='2026-10-20T00:00:00Z'), Mounts=[])
     container = bridge.classify_container(value, bridge.LEGACY_IMAGE)
     init = dict(pid=120, ppid=10, startTicks='1234', pidNamespace='pid:[123]', exe='/usr/bin/dash',
@@ -33,10 +33,40 @@ def fixture():
     return value, snapshot
 
 
+def owned_stop_fixture(host, snapshot, fd, plan, session_file, report):
+    """Forwarding seam double only; real protocol has separate focused tests."""
+    report['signalAttempted'] = True
+    bridge.signal.pidfd_send_signal(fd, signal.SIGTERM, None, 0)
+    report['signalDelivered'] = True
+    observed = host.docker(['wait', snapshot['container']['containerId']])
+    actual = host.inspect(snapshot['container']['containerId'])
+    bridge.verify_exited(actual, snapshot['container'], observed)
+    return actual
+
+
 class LegacyGuards(unittest.TestCase):
     def setUp(self):
         bridge.children.clear()
         bridge.interrupted = False
+
+    def test_observed_legacy_image_has_unattested_labels_not_an_invented_source_commit(self):
+        value, _ = fixture()
+        value['Config']['Labels'].update({
+            'io.sabalan.performance.source-commit': 'unattested',
+            'io.sabalan.performance.source-hash': 'unattested',
+        })
+        observed = bridge.classify_container(value, bridge.LEGACY_IMAGE)
+        self.assertEqual(observed['kind'], 'KNOWN_LEGACY_SHELL')
+        for key in ['io.sabalan.performance.source-commit', 'io.sabalan.performance.source-hash']:
+            for label in [None, '', 'b58c53c0f88d2d89da3cb6a45949e6eca97e4308', 'f' * 64]:
+                changed = copy.deepcopy(value)
+                changed['Config']['Labels'][key] = label
+                with self.assertRaisesRegex(RuntimeError, 'UNKNOWN_IMMUTABLE_IMAGE'):
+                    bridge.classify_container(changed, bridge.LEGACY_IMAGE)
+        changed = copy.deepcopy(value)
+        changed['Image'] = 'sha256:' + 'f' * 64
+        with self.assertRaisesRegex(RuntimeError, 'UNKNOWN_IMMUTABLE_IMAGE'):
+            bridge.classify_container(changed, changed['Image'])
 
     def test_actual_observer_passes_fd9_and_late_natural_close_is_failed_without_killing_child(self):
         clock = [1_000_000_000]
@@ -140,7 +170,7 @@ class LegacyGuards(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             bridge.verify_exited(actual, expected, b'1')
 
-    def test_forward_validates_birth_twice_uses_one_pidfd_term_and_keeps_original_wait(self):
+    def test_forward_validates_birth_twice_owns_pidfd_and_delegates_normal_stop(self):
         _, snapshot = fixture()
         plan = dict(deploymentId='original_deployment', releaseId='original_release', snapshot=snapshot)
         events, audits = [], {}
@@ -157,8 +187,11 @@ class LegacyGuards(unittest.TestCase):
         def save(file, value): audits[str(file)] = copy.deepcopy(value); events.append('AUDIT')
         with tempfile.TemporaryDirectory() as directory, patch.object(bridge.os, 'pidfd_open', create=True, return_value=44) as opened, \
                 patch.object(bridge.signal, 'pidfd_send_signal', create=True) as sent, patch.object(bridge.os, 'close') as closed, \
-                patch.object(bridge, 'proc_identity', return_value=snapshot['node']), patch.object(bridge, 'save', side_effect=save):
+                patch.object(bridge, 'proc_identity', return_value=snapshot['node']), patch.object(bridge, 'save', side_effect=save), \
+                patch.object(bridge, 'owned_normal_stop', side_effect=owned_stop_fixture) as delegated:
             result = bridge.forward_original(Host(), plan, 'a' * 64, Path(directory) / 'intent', Path(directory) / 'result', 'session')
+        delegated.assert_called_once()
+        self.assertEqual(delegated.call_args.args[1:3], (snapshot, 44))
         opened.assert_called_once_with(121, 0)
         sent.assert_called_once_with(44, signal.SIGTERM, None, 0)
         closed.assert_called_once_with(44)
@@ -186,7 +219,8 @@ class LegacyGuards(unittest.TestCase):
             identity = snapshot['node'] if failure != 'birth' else {**snapshot['node'], 'startTicks': 'replacement'}
             with tempfile.TemporaryDirectory() as directory, patch.object(bridge.os, 'pidfd_open', create=True, return_value=44), \
                     patch.object(bridge.signal, 'pidfd_send_signal', create=True) as sent, patch.object(bridge.os, 'close'), \
-                    patch.object(bridge, 'proc_identity', return_value=identity), patch.object(bridge, 'save', side_effect=save):
+                    patch.object(bridge, 'proc_identity', return_value=identity), patch.object(bridge, 'save', side_effect=save), \
+                    patch.object(bridge, 'owned_normal_stop', side_effect=owned_stop_fixture):
                 with self.assertRaises((RuntimeError, KeyError)):
                     bridge.forward_original(Host(), plan, 'a' * 64, Path(directory) / 'intent', Path(directory) / 'result', 'session')
                 self.assertEqual(sent.call_count, 1 if failure == 'exit' else 0)

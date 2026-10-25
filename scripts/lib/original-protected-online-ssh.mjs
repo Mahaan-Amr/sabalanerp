@@ -14,7 +14,7 @@ const PROFILE='D:/sabalanerp-online-qa/fixed-production-openssh-profile-20261020
 const PROFILE_SHA='71c591618aff78625652a341d3798bc231e9617f0c626c55c12c9a93a453e298';
 const PREFIX='SABALAN_ORIGINAL_QUALIFICATION_REQUEST ';
 const sessions=new WeakMap(),requests=new WeakMap(),walSources=new WeakMap(),terminalSources=new WeakMap(),pointSources=new WeakMap(),metadataSources=new WeakMap();
-const onlineRequests=new WeakMap();
+const onlineRequests=new WeakMap(),financialRequests=new WeakMap();
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const exact=(value,names)=>assert.deepEqual(Object.keys(value).sort(),[...names].sort());
 const bindingKeys=['instanceId','servicePid','serviceBirth','serviceBootIdSha256','configurationSha256','launcherPid','launcherBirth','clientNonce'];
@@ -89,9 +89,9 @@ function validateRequestProductionExecution(body){
   deploymentTargetImages:Object.fromEntries(roles.map(role=>[role,bindings[role].graph.config])),
   sourceHost:{machineUuidSha256:body.checkpoint.sourceMachineUuidSha256,kernelBootIdSha256:body.checkpoint.sourceKernelBootIdSha256}});
 }
-function fixedFile(file,expected,maximum,expectedLinks=1n){
+function fixedFile(file,expected,maximum,expectedLinks=1n,allowEmpty=false){
  assert.equal(path.resolve(file),path.resolve(fs.realpathSync(file)));
- const before=fs.lstatSync(file,{bigint:true});assert.ok(before.isFile()&&!before.isSymbolicLink()&&before.nlink===expectedLinks&&before.size>0n&&before.size<=BigInt(maximum));
+ const before=fs.lstatSync(file,{bigint:true});assert.ok(before.isFile()&&!before.isSymbolicLink()&&before.nlink===expectedLinks&&before.size>=(allowEmpty?0n:1n)&&before.size<=BigInt(maximum));
  const fd=fs.openSync(file,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW??0));
  try{
   const opened=fs.fstatSync(fd,{bigint:true});assert.ok(opened.isFile()&&opened.nlink===expectedLinks);
@@ -104,6 +104,29 @@ function fixedFile(file,expected,maximum,expectedLinks=1n){
 }
 export function readOriginalProtectedQualificationRequest(token){
  const record=requests.get(token);assert.ok(record&&!record.session.held&&!record.session.closed,'ORIGINAL_PROTECTED_REQUEST_REQUIRED');return structuredClone(record.body);
+}
+export function readOriginalProtectedFinancialRequest(token){const row=financialRequests.get(token);assert.ok(row&&!row.session.closed&&!row.session.held&&!row.replied,'ORIGINAL_FINANCIAL_REQUEST_REQUIRED');return structuredClone(row.body);}
+export function verifyProtectedFinancialRequest(body){
+ exact(body,['format','sequence','deploymentId','releaseId','targetCommit','database','checkpoint','source','targetImage','productionExecutionBindings']);assert.equal(body.format,'sabalan-original-protected-financial-request/v1');assert.equal(body.sequence,1);
+ for(const k of['deploymentId','releaseId'])assert.match(body[k],/^[A-Za-z0-9_-]{8,128}$/);assert.match(body.targetCommit,/^[a-f0-9]{40}$/);exact(body.database,['name','systemIdentifier','oid']);assert.match(body.database.name,/^[A-Za-z0-9_]{1,63}$/);for(const k of['systemIdentifier','oid'])assert.match(body.database[k],/^[1-9][0-9]*$/);
+ const point=body.checkpoint;assert.equal(point.deploymentId,body.deploymentId);assert.equal(point.releaseId,body.releaseId);assert.equal(point.targetCommit,body.targetCommit);assert.equal(point.captureMethod,'PROTECTED_MAINTENANCE_COMPLETE');assert.deepEqual(point.sourceDatabase,body.database);for(const k of['localVerified','remoteVerified','restoreVerified','manifestReadable'])assert.equal(point[k],true);assert.equal(point.compatibility?.local?.compatible,true);assert.equal(point.compatibility?.remote?.compatible,true);assert.match(point.checksum,/^[a-f0-9]{64}$/);
+ exact(body.source,['id','image','startedAt','configurationSha256']);assert.match(body.source.id,/^[a-f0-9]{64}$/);assert.match(body.source.image,/^sha256:[a-f0-9]{64}$/);assert.ok(Number.isFinite(Date.parse(body.source.startedAt)));assert.match(body.source.configurationSha256,/^[a-f0-9]{64}$/);assert.match(body.targetImage,/^sha256:[a-f0-9]{64}$/);validateRequestProductionExecution(body);assert.equal(body.targetImage,body.productionExecutionBindings.backend.graph.config);return body;
+}
+/** Data-only frame encoder; no process/session token can be minted here. */
+export function* originalArtifactFrames(header,files){
+ const metadata={};let total=0;assert.ok(Object.keys(files).length>0&&Object.keys(files).length<=128);
+ for(const[name,row]of Object.entries(files)){assert.match(name,/^[a-z0-9][a-z0-9_.-]{0,95}$/);const raw=Buffer.from(row.rawBase64,'base64'),maximum=name==='protected-financial-currentcompiled.json'?32*1024**2:name==='protected-financial-workerstdout.json'?40*1024**2:name.startsWith('protected-financial-')?16*1024**2:8*1024**2;assert.equal(raw.toString('base64'),row.rawBase64);assert.equal(raw.length,row.bytes);assert.ok((raw.length>0||name==='protected-financial-workerstderr.json')&&raw.length<=maximum);assert.equal(sha(raw),row.sha256);total+=raw.length;assert.ok(total<=256*1024**2);metadata[name]={sha256:row.sha256,bytes:row.bytes};}
+ const first=Buffer.from(JSON.stringify({...header,files:metadata})+'\n');assert.ok(first.length<=65536);yield first;
+ for(const name of Object.keys(files).sort()){const raw=Buffer.from(files[name].rawBase64,'base64');for(let offset=0;offset<raw.length;offset+=262144){const frame=Buffer.from(JSON.stringify({format:'sabalan-original-qualification-chunk/v1',sequence:1,file:name,offset,rawBase64:raw.subarray(offset,offset+262144).toString('base64')})+'\n');assert.ok(frame.length<=524288);yield frame;}}
+}
+async function writeOriginalArtifactPackage(state,header,files){for(const frame of originalArtifactFrames(header,files)){assert.ok(!state.closed&&!state.held&&state.child.stdin.writable,'ORIGINAL_ARTIFACT_CHANNEL_LOST');await new Promise((resolve,reject)=>state.child.stdin.write(frame,error=>error?reject(error):resolve()));}}
+export async function sendOriginalProtectedFinancialPackage(sessionToken,requestToken,{sourceFile,sourceSha256,binding}){
+ const state=sessions.get(sessionToken),row=financialRequests.get(requestToken);assert.ok(state&&row?.session===state&&state.financialRequest===requestToken&&!row.replied&&!state.submitted&&!state.closed&&!state.held,'ORIGINAL_FINANCIAL_CHANNEL_REQUIRED');
+ const raw=fixedFile(sourceFile,sourceSha256,8*1024**2),source=JSON.parse(raw);assert.equal(path.basename(sourceFile),'protected-financial-source.json');assert.equal(source.format,'sabalan-protected-financial-qualification/v1');assert.equal(source.qualificationComplete,true);assert.equal(source.productionAdmission,false);
+ const names=['workerStdout','workerStderr','workerOriginal','outerActive','outerFinal','privateProof','sourceCheckpoint','currentMaterial','currentCompiled','currentImage','currentInspect','certificate'];exact(source.evidence,names);
+ const files={'protected-financial-source.json':{rawBase64:raw.toString('base64'),sha256:sourceSha256,bytes:raw.length}};
+ for(const name of names){const ref=source.evidence[name];exact(ref,['file','bytes','sha256']);assert.equal(ref.file,'protected-financial-'+name.toLowerCase()+'.json');const maximum=name==='currentCompiled'?32*1024**2:name==='workerStdout'?40*1024**2:name==='certificate'?65536:16*1024**2;const data=fixedFile(path.join(path.dirname(sourceFile),ref.file),ref.sha256,maximum,1n,name==='workerStderr');assert.equal(data.length,ref.bytes);files[ref.file]={rawBase64:data.toString('base64'),sha256:ref.sha256,bytes:data.length};}
+ row.replied=true;try{await writeOriginalArtifactPackage(state,{format:'sabalan-original-protected-financial-response/v1',sequence:1,deploymentId:row.body.deploymentId,releaseId:row.body.releaseId,requestSha256:sha(Buffer.from(JSON.stringify(sort(row.body)))),sourceSha256,binding},files);}catch(error){state.held='ORIGINAL_FINANCIAL_ARTIFACT_INPUT_UNKNOWN';throw error;}
 }
 export function readOriginalOnlineQualificationRequest(token){const record=onlineRequests.get(token);assert.ok(record&&!record.session.held&&!record.session.closed&&!record.replied,'ORIGINAL_ONLINE_REQUEST_REQUIRED');return structuredClone(record.body);}
 export function verifyOriginalOnlineQualificationRequest(body){
@@ -307,7 +330,7 @@ export async function sendOriginalProtectedWalWindowCertificate(sessionToken,sou
 }
 /** Starts ONLY the pinned original protected launcher. Calling this performs a
  * real protected install; preparation/import of this module performs no I/O. */
-export function startOriginalProtectedOnlineInstall({launchPlan,serviceReference,onWalWindowRequest,onTerminalWalRequest,onPhysicalPointRequest,onCheckpointMetadataRequest,onOnlineQualificationRequest}){
+export function startOriginalProtectedOnlineInstall({launchPlan,serviceReference,onWalWindowRequest,onTerminalWalRequest,onPhysicalPointRequest,onCheckpointMetadataRequest,onOnlineQualificationRequest,onFinancialQualificationRequest}){
  assert.equal(process.platform,'win32');
  const profile=JSON.parse(fixedFile(PROFILE,PROFILE_SHA,16384));
  assert.equal(profile.format,'sabalan-fixed-production-original-ssh/v1');assert.equal(profile.host,'94.182.85.254');assert.equal(profile.user,'root');assert.equal(profile.port,22);assert.equal(profile.repositoryRoot,'/opt/sabalanerp');
@@ -424,6 +447,9 @@ os.execv('/usr/bin/python3',args)
      const token=Object.freeze({});onlineRequests.set(token,{session:state,body,replied:false});state.onlineRequest=token;
      assert.equal(typeof onOnlineQualificationRequest,'function');trackClientCallback(state,onOnlineQualificationRequest,token,'ORIGINAL_ONLINE_QUALIFICATION_UNPROVEN');continue;
     }
+    if(line.startsWith('SABALAN_ORIGINAL_FINANCIAL_REQUEST ')){
+     assert.ok(!state.following&&!state.request&&!state.financialRequest&&!state.submitted,'ORIGINAL_FINANCIAL_REQUEST_ORDER');const body=verifyProtectedFinancialRequest(JSON.parse(line.slice('SABALAN_ORIGINAL_FINANCIAL_REQUEST '.length))),token=Object.freeze({});financialRequests.set(token,{session:state,body,replied:false});state.financialRequest=token;assert.equal(typeof onFinancialQualificationRequest,'function');trackClientCallback(state,onFinancialQualificationRequest,token,'ORIGINAL_FINANCIAL_REQUEST_UNPROVEN');continue;
+    }
     assert.ok(line.startsWith(PREFIX)&&state.request===null,'ORIGINAL_PROTECTED_UNEXPECTED_OUTPUT');
     const body=verifyProtectedQualificationRequest(JSON.parse(line.slice(PREFIX.length))),token=Object.freeze({});
     requests.set(token,{session:state,body});state.request=token;resolveRequest(token);
@@ -479,9 +505,6 @@ export async function sendOriginalProtectedQualificationPackage(sessionToken,req
  const state=sessions.get(sessionToken),request=requests.get(requestToken),value=readOriginalQualificationPackage(packageToken);
  assert.ok(state&&request?.session===state&&state.request===requestToken&&!state.held&&!state.closed&&!state.submitted,'ORIGINAL_PROTECTED_CHANNEL_REQUIRED');
  assert.equal(value.releaseId,request.body.releaseId);assert.equal(value.checkpointSha256,sha(Buffer.from(JSON.stringify(sort(request.body.checkpoint)))));
- assert.ok(Object.keys(value.files).length<=128);let bytes=0;
- for(const row of Object.values(value.files)){bytes+=row.bytes;assert.equal(sha(Buffer.from(row.rawBase64,'base64')),row.sha256);}assert.ok(bytes<=32*1024*1024);
- const raw=Buffer.from(JSON.stringify({...value,format:'sabalan-original-protected-qualification-response/v1',sequence:1,deploymentId:request.body.deploymentId})+'\n');
- state.submitted=true;await new Promise((resolve,reject)=>state.child.stdin.write(raw,error=>error?reject(error):resolve()));
+ state.submitted=true;try{await writeOriginalArtifactPackage(state,{...Object.fromEntries(Object.entries(value).filter(([key])=>key!=='files')),format:'sabalan-original-protected-qualification-response/v2',sequence:1,deploymentId:request.body.deploymentId},value.files);}catch(error){state.held='ORIGINAL_QUALIFICATION_ARTIFACT_INPUT_UNKNOWN';throw error;}
 }
 function sort(value){return Array.isArray(value)?value.map(sort):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,sort(value[key])])):value;}

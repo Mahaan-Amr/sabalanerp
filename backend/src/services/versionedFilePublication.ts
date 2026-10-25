@@ -7,6 +7,7 @@ import { Readable } from 'node:stream';
 import { RuntimeWorkContext } from './runtimeWorkContext';
 import type { NativeFileCaptureAuthority } from './nativeFileCaptureAuthority';
 import type { ProtectedLegacyFileAdoptionAuthority } from './protectedLegacyFileAdoptionAuthority';
+import type { RestoredQaFileAdoptionAuthority } from './restoredQaFileAdoptionAuthority';
 import { publishDurableFile, publishDurableStream, removeDurableFile, syncExistingDurableFile } from './durableFilePublication';
 
 type Identity = { device: string; inode: string; bytes: string; modified: string; changed: string };
@@ -107,7 +108,7 @@ export class VersionedFilePublication {
 
   private constructor(private readonly root: string, private readonly liveRoot: string,
     private readonly admittedWork?: RuntimeWorkContext, private readonly capture?: NativeFileCaptureAuthority,
-    private readonly protectedAdoption?:ProtectedLegacyFileAdoptionAuthority) {}
+    private readonly protectedAdoption?:ProtectedLegacyFileAdoptionAuthority|RestoredQaFileAdoptionAuthority) {}
 
   private get work(): RuntimeWorkContext {
     if (!this.admittedWork) return fail('FILE_CAPTURE_LIVE_WRITE_FORBIDDEN');
@@ -120,6 +121,17 @@ export class VersionedFilePublication {
    * It cannot return a writer, root scope, capture port or ordinary work owner. */
   static async openForProtectedLegacyAdoption(authority:ProtectedLegacyFileAdoptionAuthority){
     const {assertProtectedLegacyFileAdoptionAuthority}=await import('./protectedLegacyFileAdoptionAuthority');
+    return this.openLegacyAdoption(authority,assertProtectedLegacyFileAdoptionAuthority);
+  }
+
+  /** Same adoption algorithm, with a separate live restored-QA authority. No
+   * serving writer or ordinary protected-checkpoint authority is returned. */
+  static async openForRestoredQaLegacyAdoption(authority:RestoredQaFileAdoptionAuthority){
+    const {assertRestoredQaFileAdoptionAuthority}=await import('./restoredQaFileAdoptionAuthority');
+    return this.openLegacyAdoption(authority,assertRestoredQaFileAdoptionAuthority);
+  }
+
+  private static async openLegacyAdoption<T extends ProtectedLegacyFileAdoptionAuthority|RestoredQaFileAdoptionAuthority>(authority:T,assertProtectedLegacyFileAdoptionAuthority:(value:T)=>void){
     assertProtectedLegacyFileAdoptionAuthority(authority);await authority.assertLease();await authority.assertSource();
     const {root,liveRoot}=authority.source;
     const relative=path.relative(root,liveRoot),reverse=path.relative(liveRoot,root);

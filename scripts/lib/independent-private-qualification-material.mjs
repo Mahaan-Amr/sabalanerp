@@ -15,8 +15,34 @@ const freeze=value=>{if(value&&typeof value==='object'){Object.values(value).for
  * The original broker must independently bind these observations to its actual
  * completed baseline actor/observer and original image before signing bytes.
  */
-export function compileIndependentPrivateQualificationMaterial({index,config,baselineCompletion,facts,now}){
-  assert.equal(index.sourceDatabaseRole,'EMPTY_ISOLATED_IDENTITY_OBSERVER');
+export function compileIndependentPrivateQualificationMaterial(input){
+  assert.equal(input.index.sourceDatabaseRole,'EMPTY_ISOLATED_IDENTITY_OBSERVER');
+  return compileMaterial(input);
+}
+/** Data-only RESTORED_QA adapter. The original issuer must separately reassert
+ * the active engine callback and working-material capability before signing.
+ * These supplied observations never grant callback, SQL or signing authority. */
+export function compileRestoredQaPrivateQualificationMaterial(input){
+  const lineage=input.restoredQaLineage;
+  assert.equal(input.index.sourceDatabaseRole,'VERIFIED_COMPLETE_RESTORED_QA');
+  same(Object.keys(lineage||{}).sort(),['format','sourceDatabase','targetDatabase','completeManifestSha256','nativeHistorySha256','workingManifestSha256','cleanupPending','independentPointHealthy','productionAdmission'].sort());
+  same(lineage.format,'sabalan-live-restored-qa-private-lineage/v1');
+  same(lineage.cleanupPending,true);same(lineage.independentPointHealthy,false);same(lineage.productionAdmission,false);
+  for(const database of [lineage.sourceDatabase,lineage.targetDatabase]){
+    same(Object.keys(database).sort(),['name','oid','systemIdentifier']);
+    assert.match(database.name,/^[A-Za-z0-9_]{1,63}$/);
+    for(const field of ['oid','systemIdentifier'])assert.match(database[field],/^[1-9][0-9]*$/);
+  }
+  for(const field of ['completeManifestSha256','nativeHistorySha256','workingManifestSha256'])assert.ok(hex(lineage[field]));
+  same(lineage.targetDatabase,input.facts.database);assert.notDeepEqual(lineage.sourceDatabase,lineage.targetDatabase);
+  assert.notEqual(lineage.sourceDatabase.systemIdentifier,lineage.targetDatabase.systemIdentifier);
+  same(input.index.database,lineage.sourceDatabase.name);same(String(input.index.oid),lineage.sourceDatabase.oid);
+  const baselineManifest=JSON.parse(Buffer.from(input.facts.restoreManifestRawBase64,'base64'));
+  same(baselineManifest.restoredQaLineage,lineage);same(baselineManifest.capturedManifest.sha256,lineage.completeManifestSha256);
+  const material=compileMaterial(input,lineage);
+  return freeze({...material,format:'sabalan-original-restored-qa-private-material/v1',restoredQaLineage:structuredClone(lineage),cleanupPending:true,independentPointHealthy:false});
+}
+function compileMaterial({index,config,baselineCompletion,facts,now},restoredQaLineage){
   const pair=index.privateQualification;
   assert.ok(pair&&hex(pair.qualificationId)&&hex(pair.runtimeBundleSha256));
   same(pair.httpGrants,undefined);same(pair.oldJobsGrant,undefined);same(pair.runtimeBundles,undefined);
@@ -26,10 +52,11 @@ export function compileIndependentPrivateQualificationMaterial({index,config,bas
   same(grants[0].scope.releaseId,grants[1].scope.releaseId);
   same(grants[0].scope.gate,grants[1].scope.gate);same(grants[0].scope.interlock,grants[1].scope.interlock);
   const database={name:index.restoredDatabase,systemIdentifier:grants[0].scope.database.systemIdentifier,oid:String(index.restoredOid)};
-  const sourceDatabase={name:index.database,systemIdentifier:database.systemIdentifier,oid:String(index.oid)};
+  const sourceDatabase=restoredQaLineage?restoredQaLineage.sourceDatabase:{name:index.database,systemIdentifier:database.systemIdentifier,oid:String(index.oid)};
   assert.notEqual(database.name,sourceDatabase.name);assert.notEqual(database.oid,sourceDatabase.oid);
-  assert.match(database.name,/^qa_application_restored_[a-f0-9]{32}$/);
-  assert.match(sourceDatabase.name,/^qa_application_native_[a-f0-9]{32}$/);
+  if(restoredQaLineage)assert.match(database.name,/^sabalan_checkpoint_verify_[a-f0-9]{12}$/);
+  else assert.match(database.name,/^qa_application_restored_[a-f0-9]{32}$/);
+  if(!restoredQaLineage)assert.match(sourceDatabase.name,/^qa_application_native_[a-f0-9]{32}$/);
   same(facts.database,database);same(facts.sql,{visible:true,sessions:0,prepared:0});
   assert.equal(facts.qualificationRoot,pair.qualificationRoot);
   const material=config.privateQualificationRuntime;

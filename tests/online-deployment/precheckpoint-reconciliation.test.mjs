@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {validatePrecheckpointJournal,validateUnchangedNativeLedger,validatePrecheckpointIncarnation,reconciliationGateEnvironment} from '../../deploy/scripts/reconcile-premutation-capture.mjs';
+import {originalServiceConfiguration,originalContainerIdentities} from '../../deploy/scripts/capture-only-release.mjs';
+
+const sha=v=>createHash('sha256').update(v).digest('hex');
+const deploymentId='deploy-20261024T201416Z-b58c53c0f88d-release';
+test('canonical gate container receives exact immutable backend image instead of undefined or inherited value',()=>{const plan={controlImage:'sha256:'+'a'.repeat(64),deploymentId,releaseId:'release',targetCommit:'b'.repeat(40)},env=reconciliationGateEnvironment({DEPLOYMENT_BACKEND_IMAGE:'old-image'},plan);assert.equal(env.DEPLOYMENT_BACKEND_IMAGE,plan.controlImage);assert.equal(env.DEPLOYMENT_CONTROL_IMAGE,plan.controlImage);assert.equal('DEPLOYMENT_BACKEND_IMAGE='+env.DEPLOYMENT_BACKEND_IMAGE,'DEPLOYMENT_BACKEND_IMAGE='+plan.controlImage);assert.throws(()=>reconciliationGateEnvironment({}, {...plan,controlImage:'undefined'}));});
+function journal(phases){let previousHash=null;return Buffer.from(phases.map((phase,i)=>{const unsigned={sequence:i+1,deploymentId,phase,event:i===0?'deployment-prepared':i===phases.length-1?'deployment-finished':'phase-transition',previousHash};previousHash=sha(JSON.stringify(unsigned));return JSON.stringify({...unsigned,hash:previousHash});}).join('\n'));}
+test('negative precheckpoint scope refuses checkpoint, mutation and broken journal chains',()=>{
+ const valid=['PREFLIGHT','TRAFFIC_BLOCKED','RECOVERY_REQUIRED'];assert.equal(validatePrecheckpointJournal(journal(valid),deploymentId).checkpointCreated,false);
+ for(const phase of ['SERVICES_DRAINED','LOCAL_CHECKPOINT_VERIFIED','REMOTE_CHECKPOINT_VERIFIED','MUTATION_STARTED','ABORTED'])assert.throws(()=>validatePrecheckpointJournal(journal(['PREFLIGHT',phase,'RECOVERY_REQUIRED']),deploymentId));
+ assert.throws(()=>validatePrecheckpointJournal(Buffer.from(journal(valid).toString().replace('phase-transition','tampered')),deploymentId));assert.throws(()=>validatePrecheckpointJournal(journal(valid),'another-deployment'));
+});
+const pending=['20261014140000_online_deployment_control','20261019010000_customer_semantic_barrier','20261019020000_hr_versioned_file_cleanup','20261020010000_online_realtime_completion','20261020093000_online_serving_epochs'];
+function ledger(){const active=Array.from({length:439},(_,i)=>({id:String(i),migration_name:'migration_'+String(i).padStart(4,'0'),checksum:sha(String(i)),full_row_sha256:sha('full'+i),rolled_back_at:null}));const metadata={ledger:[...active,{...active[0],id:'rollback',rolled_back_at:'2026-01-01'}],sourceCatalog:{applicationCommit:'45cab522a285b878b60f537d09d0962912bba096',migrationFiles:[...active.map(v=>({name:v.migration_name,sha256:v.checksum})),...pending.map(name=>({name,sha256:sha(name)}))]}};return {metadata,rows:metadata.ledger.map(v=>({id:v.id,migration_name:v.migration_name,full_row_sha256:v.full_row_sha256,rolledBack:v.rolled_back_at!==null})),source:Object.fromEntries(metadata.sourceCatalog.migrationFiles.map(v=>[v.name,v.sha256]))};}
+test('native whole-row ledger preserves rollback row and five pending source migrations',()=>{
+ const {metadata,rows,source}=ledger();assert.equal(validateUnchangedNativeLedger(rows,metadata,source).nativeRows,440);
+ for(const change of [v=>{v[0].full_row_sha256=sha('changed');},v=>{v[439].rolledBack=false;},v=>v.pop(),v=>v.reverse()]){const value=structuredClone(rows);change(value);assert.throws(()=>validateUnchangedNativeLedger(value,metadata,source));}
+ const changed=structuredClone(source);changed[pending[0]]=sha('changed');assert.throws(()=>validateUnchangedNativeLedger(rows,metadata,changed));
+});
+function cohort(){const roles=['backend','frontend','inquiry','nginx','postgres','clamav'];const rows=roles.map((role,i)=>({Id:sha(role),Image:'sha256:'+sha('image'+role),Created:'2026-01-01T00:00:00Z',RestartCount:0,Config:{Hostname:'ephemeral',Image:'image-reference',Labels:{'com.docker.compose.project':'sabalanerp','com.docker.compose.service':role,'com.docker.compose.container-number':'1'},Env:Array.from({length:8},(_,j)=>'K'+j+'=value'+j)},HostConfig:{Binds:Array.from({length:7},(_,j)=>'/host/'+j+':/target/'+j+':ro')},Mounts:[],NetworkSettings:{Networks:{default:{}}},State:{Running:true,Health:{Status:'healthy'},StartedAt:'2026-01-01T00:00:01Z'}}));
+ const nginx=rows[3];nginx.Id='6974bcfb80a66b5126d961331db4d2f9f6255ba51f3eff6a6e399f864271a87d';nginx.Created='2026-10-24T20:14:57.072570001Z';nginx.State.StartedAt='2026-10-24T20:14:58.070145462Z';rows[0].RestartCount=15;rows[0].State.StartedAt='2026-10-24T20:15:22.273102628Z';
+ const old=structuredClone(rows);old[3].Id='192ab9845a6a4135f64a0e5ceb4a970003487fcd296c51cad34569f09b97cfcd';old[3].Config.Env=[1,0,2,3,4,5,6,7].map(i=>nginx.Config.Env[i]);old[3].HostConfig.Binds=[2,3,4,5,6,0,1].map(i=>nginx.HostConfig.Binds[i]);
+ return {rows,snapshot:{services:originalServiceConfiguration(old),originalContainerIdentities:originalContainerIdentities(old)},before:{expectedEight:old.map(v=>({service:v.Config.Labels['com.docker.compose.service'],project:'sabalanerp',image:v.Image,restartCount:v.RestartCount,startedAt:v.State.StartedAt}))},nginx:{snapshotSha256:sha('snapshot')},snapshotSha:sha('snapshot')};}
+test('only exact observed nginx ordering transition and unchanged other five configurations pass',()=>{
+ const c=cohort(),check=rows=>validatePrecheckpointIncarnation(rows,c.snapshot,c.before,c.nginx,c.snapshotSha);assert.equal(check(c.rows).canonicalNginxFixedOrderTransition,true);
+ for(const change of [v=>{v[3].Config.Env[0]='K0=changed';},v=>{v[3].Config.Env.reverse();},v=>{v[3].HostConfig.Binds.reverse();},v=>{v[3].HostConfig.Binds[0]=v[3].HostConfig.Binds[1];},v=>{v[3].Id=sha('foreign');},v=>{v[0].RestartCount=16;},v=>{v[1].Config.Env[0]='K0=changed';},v=>{v[3].State.Health.Status='unhealthy';}]){const rows=structuredClone(c.rows);change(rows);assert.throws(()=>check(rows));}
+});

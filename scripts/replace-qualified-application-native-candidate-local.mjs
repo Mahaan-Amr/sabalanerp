@@ -291,7 +291,7 @@ async function originalAuthorityDirectory(service,mode,observed,expected=null,pe
 }
 async function originalNegativeAcceptanceVerify(service){
  if(knownPositiveHistory||(negativeToken&&negativeDescriptor.format===negativeCapsuleFormat)){
-  const selectedDescriptor=knownPositiveHistory?{format:negativeCapsuleFormat,acceptance:acceptanceDescriptor}:negativeDescriptor;
+  const selectedDescriptor=knownPositiveHistory?{format:negativeCapsuleFormat,acceptance:knownPositiveHistory.capsuleAcceptance}:negativeDescriptor;
   const selection=negativeCapsuleAcceptanceSelection(root,selectedDescriptor),fixture=fs.readFileSync(selection.source.file);
   assert.equal(digest(fixture),selection.source.sha256);const bootstrap=negativeCapsuleAcceptanceBootstrap(selection.source.sha256);
   status();const result=await new Promise(resolve=>{const child=spawn('docker',['exec','-i',previous[service].Id,'/usr/bin/python3','-I','-B','-c',bootstrap],{stdio:['pipe','pipe','pipe']});children.push(child);let stdout='',stderr='',failure;child.stdout.on('data',bytes=>{if(Buffer.byteLength(stdout)+bytes.length<=65536)stdout+=bytes;else failure??='NEGATIVE_CAPSULE_STDOUT_BOUND';});child.stderr.on('data',bytes=>{if(Buffer.byteLength(stderr)+bytes.length<=65536)stderr+=bytes;else failure??='NEGATIVE_CAPSULE_STDERR_BOUND';});child.stdin.on('error',error=>{failure??=error.code;});child.on('error',error=>{failure??=error.code;});child.on('close',(code,signal)=>resolve({originalPid:child.pid,code,signal,stdout,stderr,failure,stdoutEof:child.stdout.readableEnded,stderrEof:child.stderr.readableEnded}));child.stdin.end(JSON.stringify({source:fixture.toString('base64'),spec:selection.spec}));});

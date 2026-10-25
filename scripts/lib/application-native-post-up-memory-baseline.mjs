@@ -1,6 +1,6 @@
 import{execFileSync as knownPositiveExec}from'node:child_process';
 import{readNegativeRecoveryHandoff,negativeRecoveryDescriptor,negativeRecoveryInputs,negativeRecoveryStreamingInputs}from'./application-native-negative-baseline.mjs';
-import{negativeCapsuleAcceptanceSelection,validateNegativeCapsuleAcceptanceResult,negativeCapsuleAcceptanceBootstrap}from'./application-native-negative-capsule-acceptance.mjs';
+import{negativeCapsuleAcceptanceFormat,negativeCapsuleFormat,negativeCapsuleNonce,negativeCapsuleSubpath,negativeCapsuleAcceptanceSelection,validateNegativeCapsuleAcceptanceResult,negativeCapsuleAcceptanceBootstrap}from'./application-native-negative-capsule-acceptance.mjs';
 /** One exact naturally closed post-UP memory failure; negative reference only. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -421,6 +421,14 @@ const knownPositiveGit=(...args)=>knownPositiveExec('git',args,{cwd:path.dirname
 export const knownPositive752=Object.freeze({file:'C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/reports/qa/application-native-candidate-752f28ed9065cb0e36bacdc5742a71b7.json',sha256:'c7c11717bc55336115a5e8848580dbcda39879e6532ab6d361a3479d76d19c8a'});
 const knownPositiveHistories=new WeakMap();
 export function isKnownPositive752(selection){return !!selection&&path.resolve(selection.file)===path.resolve(knownPositive752.file)&&selection.sha256===knownPositive752.sha256;}
+export function validateKnownPositive752Capsules(receipt){
+ const mount=receipt.acceptanceCohort.descriptor,rows=receipt.postUpBaselineAcceptanceVerified;assert.equal(mount.subpath,negativeCapsuleSubpath);assert.deepEqual(Object.keys(rows).sort(),['backend-candidate','backend-retained']);let acceptance,stable;
+ for(const service of['backend-candidate','backend-retained']){const row=rows[service];assert.ok(Number.isSafeInteger(row.originalPid)&&row.originalPid>0);assert.equal(row.code,0);assert.equal(row.signal,null);assert.equal(row.stdoutEof,true);assert.equal(row.stderrEof,true);assert.equal(row.stderr,'');assert.equal(row.failure,undefined);assert.equal(typeof row.stdout,'string');assert.ok(Buffer.byteLength(row.stdout)>0&&Buffer.byteLength(row.stdout)<=65536);const value=JSON.parse(row.stdout);assert.deepEqual(value,row.result);
+  const namespace=value.namespace;assert.ok(namespace&&typeof namespace==='object'&&!Array.isArray(namespace));assert.deepEqual(Object.keys(namespace).sort(),['st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns'].sort());for(const v of Object.values(namespace))assert.match(v,/^[0-9]+$/);assert.equal(namespace.st_uid,'0');assert.equal(namespace.st_gid,'0');assert.equal(namespace.st_mode,'16832');
+  const current={format:negativeCapsuleAcceptanceFormat,subpath:mount.subpath,nonce:negativeCapsuleNonce,namespace:structuredClone(namespace),physicalEmpty:false,actorEntries:[],canonicalCapsules:structuredClone(value.canonicalCapsules)};validateNegativeCapsuleAcceptanceResult({format:negativeCapsuleFormat,acceptance:current},value);const normalized=structuredClone(value);normalized.canonicalCapsules.inventoryChild.originalPid=0;if(stable)assert.deepEqual(normalized,stable,'HISTORICAL_TWO_CAPSULE_RESULTS_CHANGED');else{stable=normalized;acceptance=current;}
+ }
+ return acceptance;
+}
 export function readKnownPositive752History(selection){
  assert.ok(isKnownPositive752(selection),'ONLY_EXACT_KNOWN_POSITIVE_752_SUPPORTED');const inputs=new Map(),r=JSON.parse(postUpReadReference(selection,inputs));
  assert.equal(r.format,'sabalan-application-native-candidate/v1');assert.equal(r.pass,true);assert.equal(r.phase,'COMPLETE');assert.equal(r.productionAdmission,false);assert.equal(r.up.code,0);assert.equal(r.up.signal,null);assert.equal(r.originalChildren.allOriginalChildrenClosed,true);assert.equal(r.originalChildren.interrupted,false);
@@ -435,7 +443,8 @@ export function readKnownPositive752History(selection){
  assert.equal(baseline.sourcePins.reader.sha256,snapshots[0][2]);
  for(const service of['backend-candidate','backend-retained']){assert.equal(r.actual[service].memoryBytes,service==='backend-candidate'?2147483648:805306368);assert.equal(r.actual[service].memorySwapBytes,service==='backend-candidate'?2147483648:1610612736);assert.equal(r.installed[service].code,0);assert.equal(r.installed[service].signal,null);assert.equal(r.postMutationNativeQuiet[service].originalNativeProcesses,0);assert.equal(r.postMutationNativeQuiet[service].adoptsOriginalPopen,false);}
  assert.equal(r.postMutationSqlQuiet.visible,true);assert.equal(r.postMutationSqlQuiet.sessions,0);assert.equal(r.postMutationSqlQuiet.prepared,0);
- const descriptor={format:'sabalan-known-positive752-historical-origin/v1',selection:{...selection},operationsCommit:ops.operationsSourceCommit,identities:structuredClone(r.actual),acceptance:structuredClone(r.acceptanceCohort.descriptor),acceptanceOrigin:structuredClone(r.acceptanceCohort.origin),historicalOnly:true,activeActorCapability:false,productionAdmission:false};
+ const capsuleAcceptance=validateKnownPositive752Capsules(r);
+ const descriptor={format:'sabalan-known-positive752-historical-origin/v1',selection:{...selection},operationsCommit:ops.operationsSourceCommit,identities:structuredClone(r.actual),acceptance:structuredClone(r.acceptanceCohort.descriptor),capsuleAcceptance,acceptanceOrigin:structuredClone(r.acceptanceCohort.origin),historicalOnly:true,activeActorCapability:false,productionAdmission:false};
  const token=Object.freeze({});knownPositiveHistories.set(token,{inputs,descriptor});return token;
 }
 export function knownPositive752HistoryDescriptor(token){const row=knownPositiveHistories.get(token);assert.ok(row,'ORIGINAL_KNOWN_POSITIVE_HISTORY_REQUIRED');for(const[file,pin]of row.inputs)assert.deepEqual(raw(file),pin.raw);return structuredClone(row.descriptor);}

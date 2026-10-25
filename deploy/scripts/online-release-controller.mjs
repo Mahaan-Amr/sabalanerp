@@ -334,12 +334,15 @@ export class OriginalOnlineReleaseController {
   assert(this.#financialObservation&&!this.#financialObservation.completed,'PROTECTED_FINANCIAL_ORIGINAL_REQUEST_REQUIRED');
   const request=await this.observeProtectedFinancialQualificationRequest(),kernel=require('./online-release-host-kernel.cjs');
   const verified=kernel.openProtectedFinancialQualificationDirectory(evidenceDirectory,{sourceSha256,binding}),q=verified.qualification;
+  const graph=request.productionExecutionBindings?.backend?.graph;
+  assert(graph&&[graph.index,graph.config].every(image=>typeof image==='string'&&/^sha256:[a-f0-9]{64}$/.test(image))
+   &&request.targetImage===graph.config,'PROTECTED_FINANCIAL_AUTHENTICATED_IMAGE_GRAPH_REQUIRED');
   assert(q&&q.sourceCommit===request.targetCommit&&sha(bytes(q.sourceDatabase))===sha(bytes(request.database))
-   &&binding.currentExecutionImage===request.targetImage&&q.currentExecutionImage===request.targetImage,'PROTECTED_FINANCIAL_PACKAGE_TARGET_CHANGED');
+   &&q.currentExecutionImage===binding.currentExecutionImage&&[graph.index,graph.config].includes(q.currentExecutionImage),'PROTECTED_FINANCIAL_PACKAGE_TARGET_CHANGED');
   const rows=await this.#database.$queryRaw`SELECT coalesce(json_agg(t ORDER BY migration_name,id),'[]'::json)::text AS value FROM public._prisma_migrations t`;
   assert(rows.length===1&&rows[0].value===q.originalHistoryRaw,'PROTECTED_FINANCIAL_NATIVE_BASELINE_CHANGED');
   const current=await this.observeProtectedFinancialQualificationRequest();assert(sha(bytes(current))===sha(bytes(request)),'PROTECTED_FINANCIAL_LEASE_CONTEXT_CHANGED');verified.revalidate();
-  const descriptor={format:'sabalan-protected-financial-migration-prerequisite/v2',evidenceDirectory,sourceSha256,binding,checkpointSha256:sha(bytes(request.checkpoint)),targetImage:request.targetImage};
+  const descriptor={format:'sabalan-protected-financial-migration-prerequisite/v2',evidenceDirectory,sourceSha256,binding,checkpointSha256:sha(bytes(request.checkpoint)),targetImage:q.currentExecutionImage};
   const file=path.join(this.#financialObservation.coordinationHost,this.#owner.deploymentId+'-protected-financial-qualification.json'),raw=bytes(descriptor),fd=fs.openSync(file,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o400);
   try{fs.writeFileSync(fd,raw);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}assert(readPrivate(file,8192,0o400).data.equals(raw),'PROTECTED_FINANCIAL_LEAF_CHANGED');
   const parent=fs.openSync(path.dirname(file),fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);try{fs.fsyncSync(parent);}finally{fs.closeSync(parent);}

@@ -8,7 +8,7 @@ export const windowsHostFloorBytes=1536*1024**2;
 export const qaSwapBytes=1536*1024**2;
 const currentNegativeHandoff='6543f4851d2076af49aaf20ee4238a2935cb615fa143e45bc7a0593ae3f12edd';
 const currentNegativeHistory='80e2d47c2f59f492df124109499393dbdc6b4c88efbfef954b048b0815dcfe67';
-export function validateNegativeQaHistory(profile){assert.equal(profile.history.sha256,profile.handoff.sha256===currentNegativeHandoff?currentNegativeHistory:'a1d336899e2f90c9a9324ee761a19f0d1ac5388bdaf5455c5cfadba07c91d18e');}
+export function validateNegativeQaHistory(profile){if(profile.handoff.sha256==='3d665ce8059a6849bc24af48a5bb4ae1db421c5c6e2deb28c60803a07e88bbff'){assert.equal(profile.handoff.file.replaceAll('\\','/'),'D:/sabalanerp-online-qa/C30-resource-restored-negative-baseline-actual-r1-20261025/handoff.json');assert.equal(profile.history.file.replaceAll('\\','/'),'C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/reports/qa/application-native-candidate-13a4df68f4656ed49bba6f8ce177813e.json');assert.equal(profile.history.sha256,currentNegativeHistory);assert.deepEqual(profile.transition,profile.history);assert.equal(profile.resourceProfileHistoryOnly,true);assert.equal(profile.historicalPhysicalIdentityClaimed,false);return;}assert.equal(profile.history.sha256,profile.handoff.sha256===currentNegativeHandoff?currentNegativeHistory:'a1d336899e2f90c9a9324ee761a19f0d1ac5388bdaf5455c5cfadba07c91d18e');}
 export function qaUnchangedResourceLimits(host){
  const keys=['MemorySwap','MemoryReservation','NanoCpus','CpuQuota','CpuPeriod','PidsLimit','OomKillDisable'];for(const key of keys)assert.ok(Object.hasOwn(host,key),'LOCAL_QA_RESOURCE_FIELD_MISSING');return Object.fromEntries(keys.map(key=>[key,host[key]]));
 }

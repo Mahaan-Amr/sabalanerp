@@ -1,3 +1,4 @@
+import{execFileSync as knownPositiveExec}from'node:child_process';
 import{readNegativeRecoveryHandoff,negativeRecoveryDescriptor,negativeRecoveryInputs,negativeRecoveryStreamingInputs}from'./application-native-negative-baseline.mjs';
 import{negativeCapsuleAcceptanceSelection,validateNegativeCapsuleAcceptanceResult,negativeCapsuleAcceptanceBootstrap}from'./application-native-negative-capsule-acceptance.mjs';
 /** One exact naturally closed post-UP memory failure; negative reference only. */
@@ -414,3 +415,28 @@ export function validatePostUpCreatedReceipt(token, receipt) {
 
 /** Full actual bytes at mutation/final boundaries; never accepts cached SHA/stat alone. */
 export function recheckPostUpMemoryFullCustody(token){const r=tokens.get(token);assert.ok(r,'PRIVATE_POST_UP_BASELINE_REQUIRED');const buffer=Buffer.alloc(262144);verifyFullCustody(r.fullCustody,buffer,true);if(r.context===resourcePostUpFailureContext){verifyFullCustody(resourceSmallCustody,buffer,true);verifyFullCustody(resourceStreamCustody,buffer,true);}return true;}
+
+const knownPositiveGit=(...args)=>knownPositiveExec('git',args,{cwd:path.dirname(path.dirname(path.dirname(knownPositive752.file))),maxBuffer:16*1024**2});
+// Historical content only. No negative token, current observation or PID is adopted.
+export const knownPositive752=Object.freeze({file:'C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/reports/qa/application-native-candidate-752f28ed9065cb0e36bacdc5742a71b7.json',sha256:'c7c11717bc55336115a5e8848580dbcda39879e6532ab6d361a3479d76d19c8a'});
+const knownPositiveHistories=new WeakMap();
+export function isKnownPositive752(selection){return !!selection&&path.resolve(selection.file)===path.resolve(knownPositive752.file)&&selection.sha256===knownPositive752.sha256;}
+export function readKnownPositive752History(selection){
+ assert.ok(isKnownPositive752(selection),'ONLY_EXACT_KNOWN_POSITIVE_752_SUPPORTED');const inputs=new Map(),r=JSON.parse(postUpReadReference(selection,inputs));
+ assert.equal(r.format,'sabalan-application-native-candidate/v1');assert.equal(r.pass,true);assert.equal(r.phase,'COMPLETE');assert.equal(r.productionAdmission,false);assert.equal(r.up.code,0);assert.equal(r.up.signal,null);assert.equal(r.originalChildren.allOriginalChildrenClosed,true);assert.equal(r.originalChildren.interrupted,false);
+ const origin=r.candidateQaMemoryPostUpRecovery;assert.equal(origin.format,'sabalan-post-up-negative-baseline-local-qa-memory-profile/v1');assert.equal(origin.failedReportRemainsFailed,true);assert.equal(origin.originalUpAdopted,false);
+ assert.equal(origin.baseline.sha256,'52d9b8614b416d56e8cf1465db4115d24a58811b047991d75e1cda6708b2309c');const baseline=JSON.parse(postUpReadReference(origin.baseline,inputs));assert.equal(baseline.qualificationSucceeded,false);assert.equal(baseline.rotationPerformed,false);assert.equal(baseline.sourceCommit,'d978b68ae1b57234601075772a0bd865deeef254');
+ const root=path.dirname(path.dirname(path.dirname(knownPositive752.file))),ops=r.operationsOnlySourceReuse;assert.equal(ops.operationsSourceCommit,baseline.sourceCommit);assert.equal(ops.applicationSourceCommit,'81abdf515f23b82738b34202c04be725716faad4');assert.equal(ops.imageRebuilt,false);assert.equal(ops.operationsFiles.length,6);
+ const files=new Map(ops.operationsFiles.map(row=>[row.path,row]));assert.equal(files.size,6);
+ for(const row of files.values()){const committed=knownPositiveGit('show',ops.operationsSourceCommit+':'+row.path);assert.equal(sha(committed),row.committedSha256);assert.ok([sha(committed),sha(Buffer.from(committed.toString('utf8').replaceAll('\r\n','\n').replaceAll('\n','\r\n')))].includes(row.workingSha256),'HISTORICAL_WORKING_BYTES_NOT_EXACT_GIT_OR_CRLF');}
+ for(const [key,relative]of [['currentCreator','scripts/replace-qualified-application-native-candidate-local.mjs'],['currentSourceReuseHelper','scripts/lib/application-native-operations-source-reuse.mjs']]){const ref=baseline.sourcePins[key];assert.equal(path.resolve(ref.file),path.join(path.dirname(path.resolve(origin.baseline.file)),'evidence-source',key+'.mjs'));postUpReadReference(ref,inputs);assert.equal(ref.sha256,files.get(relative).workingSha256);}
+ const snapshots=[['scripts/lib/application-native-post-up-memory-baseline.mjs','immutable-parent-reader.mjs','5d205f41863b77ca9d241f6f98710bd058c72ae48fe94752658e6e7ac9959303'],['scripts/lib/application-native-qa-profile.mjs','immutable-parent-qa-profile.mjs','4a99471d3916ee8fe2122d08db975a60407323bf00947fa4b4f679637b8ddf66']];
+ for(const[relative,name,digest]of snapshots){assert.equal(r.inputs[path.join(root,relative)],digest);postUpReadReference({file:path.join('D:/sabalanerp-online-qa/C30-known-positive752-rotation-source-r1-20261025',name),sha256:digest},inputs);}
+ assert.equal(baseline.sourcePins.reader.sha256,snapshots[0][2]);
+ for(const service of['backend-candidate','backend-retained']){assert.equal(r.actual[service].memoryBytes,service==='backend-candidate'?2147483648:805306368);assert.equal(r.actual[service].memorySwapBytes,service==='backend-candidate'?2147483648:1610612736);assert.equal(r.installed[service].code,0);assert.equal(r.installed[service].signal,null);assert.equal(r.postMutationNativeQuiet[service].originalNativeProcesses,0);assert.equal(r.postMutationNativeQuiet[service].adoptsOriginalPopen,false);}
+ assert.equal(r.postMutationSqlQuiet.visible,true);assert.equal(r.postMutationSqlQuiet.sessions,0);assert.equal(r.postMutationSqlQuiet.prepared,0);
+ const descriptor={format:'sabalan-known-positive752-historical-origin/v1',selection:{...selection},operationsCommit:ops.operationsSourceCommit,identities:structuredClone(r.actual),acceptance:structuredClone(r.acceptanceCohort.descriptor),acceptanceOrigin:structuredClone(r.acceptanceCohort.origin),historicalOnly:true,activeActorCapability:false,productionAdmission:false};
+ const token=Object.freeze({});knownPositiveHistories.set(token,{inputs,descriptor});return token;
+}
+export function knownPositive752HistoryDescriptor(token){const row=knownPositiveHistories.get(token);assert.ok(row,'ORIGINAL_KNOWN_POSITIVE_HISTORY_REQUIRED');for(const[file,pin]of row.inputs)assert.deepEqual(raw(file),pin.raw);return structuredClone(row.descriptor);}
+export function knownPositive752HistoryInputs(token){knownPositive752HistoryDescriptor(token);return Object.fromEntries([...knownPositiveHistories.get(token).inputs].map(([file,pin])=>[file,pin.sha256]));}

@@ -1,3 +1,4 @@
+import{isKnownPositive752,readKnownPositive752History,knownPositive752HistoryDescriptor,knownPositive752HistoryInputs}from'./application-native-post-up-memory-baseline.mjs';
 import {readPostUpMemoryBaseline,postUpMemoryDescriptor,postUpMemoryInputs,validatePostUpCreatedReceipt} from './application-native-post-up-memory-baseline.mjs';
 import {readNegativeRecoveryHandoff,negativeRecoveryDescriptor,negativeRecoveryInputs,validateNegativeRecoveryCreatedReceipt} from './application-native-negative-baseline.mjs';
 import {negativeCapsuleFormat} from './application-native-negative-capsule-acceptance.mjs';
@@ -33,6 +34,7 @@ export function readExplicitQaMemoryProfile(selection){
  const inputs=new Map();const readRaw=(ref,allowEmpty=false)=>{assert.deepEqual(Object.keys(ref).sort(),['file','sha256']);assert.match(ref.sha256,/^[a-f0-9]{64}$/);const raw=stable(ref.file,allowEmpty);assert.equal(sha(raw),ref.sha256);const file=path.resolve(ref.file);if(inputs.has(file))assert.deepEqual(inputs.get(file).raw,raw);inputs.set(file,{raw,sha256:ref.sha256,allowEmpty:allowEmpty&&(inputs.get(file)?.allowEmpty??true)});return raw;};
  const read=ref=>JSON.parse(readRaw(ref));
  const receipt=read(selection),negativeProfile=receipt.candidateQaMemoryNegativeRecovery;
+ if(isKnownPositive752(selection)){validateQaMemoryTransitionReceipt(receipt);completed(receipt);const historical=readKnownPositive752History(selection);for(const[file,digest]of Object.entries(knownPositive752HistoryInputs(historical)))readRaw({file,sha256:digest});const descriptor=Object.freeze({format:'sabalan-explicit-local-qa-memory-profile/v1',candidateBytes:expandedCandidateQaMemoryBytes,candidateSwapBytes:expandedCandidateQaMemoryBytes,replacementReceiptSha256:selection.sha256}),token=Object.freeze({});profiles.set(token,{inputs,transition:structuredClone(selection),descriptor,historicalPositive:historical});return token;}
  if(negativeProfile){
   validateQaMemoryTransitionReceipt(receipt);completed(receipt);const origin=readNegativeRecoveryHandoff(negativeProfile.handoff),negative=negativeRecoveryDescriptor(origin);sameRef(negativeProfile.history,negative.historicalCandidateReplacement);validateNegativeRecoveryCreatedReceipt(origin,receipt);
   for(const[file,digest]of Object.entries(negativeRecoveryInputs(origin)))readRaw({file,sha256:digest},true);
@@ -49,7 +51,7 @@ export function readExplicitQaMemoryProfile(selection){
  else sameRef(selection,transition);
  const descriptor=Object.freeze({format:'sabalan-explicit-local-qa-memory-profile/v1',candidateBytes:expandedCandidateQaMemoryBytes,candidateSwapBytes:expandedCandidateQaMemoryBytes,replacementReceiptSha256:selection.sha256});const token=Object.freeze({});profiles.set(token,{inputs,transition:structuredClone(transition),descriptor,anchorProfile});return token;
 }
-export function readQaMemoryProfile(token){if(token===undefined||token===null)return null;const row=profiles.get(token);assert.ok(row,'ORIGINAL_QA_MEMORY_PROFILE_REQUIRED');if(row.postUpOrigin)postUpMemoryDescriptor(row.postUpOrigin);if(row.negativeOrigin)negativeRecoveryDescriptor(row.negativeOrigin);if(row.anchorProfile)readQaMemoryProfile(row.anchorProfile);for(const[file,pin]of row.inputs)assert.deepEqual(stable(file,pin.allowEmpty),pin.raw);return structuredClone(row.descriptor);}
+export function readQaMemoryProfile(token){if(token===undefined||token===null)return null;const row=profiles.get(token);assert.ok(row,'ORIGINAL_QA_MEMORY_PROFILE_REQUIRED');if(row.historicalPositive)knownPositive752HistoryDescriptor(row.historicalPositive);if(row.postUpOrigin)postUpMemoryDescriptor(row.postUpOrigin);if(row.negativeOrigin)negativeRecoveryDescriptor(row.negativeOrigin);if(row.anchorProfile)readQaMemoryProfile(row.anchorProfile);for(const[file,pin]of row.inputs)assert.deepEqual(stable(file,pin.allowEmpty),pin.raw);return structuredClone(row.descriptor);}
 export function qaMemoryProfileTransition(token){readQaMemoryProfile(token);return structuredClone(profiles.get(token).transition);}
 export function qaMemoryProfileInputs(token){readQaMemoryProfile(token);return Object.fromEntries([...profiles.get(token).inputs].map(([file,pin])=>[file,pin.sha256]));}
 export function expectedQaCandidateMemory(token){return readQaMemoryProfile(token)?.candidateBytes??candidateQaMemoryBytes;}

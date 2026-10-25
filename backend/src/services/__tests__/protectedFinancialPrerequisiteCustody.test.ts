@@ -5,7 +5,7 @@ const source=fs.readFileSync(path.join(__dirname,'../../scripts/deployment-owned
 const node=tree.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='readProtectedFinancialPrerequisite')!;assert.ok(node);const body=node.getText(tree);
 function load(root:string,parentMode:bigint,fileMode:bigint,legacy=false){
  let opens=0;const stats=(st:fs.BigIntStats,isParent:boolean)=>Object.assign(Object.create(Object.getPrototypeOf(st)),st,{dev:1n,uid:0n,mode:isParent?0o40000n|parentMode:0o100000n|fileMode});
- const fakeFs={...fs,lstatSync:(f:string,o:any)=>stats(fs.lstatSync(f,o)as fs.BigIntStats,f===root),fstatSync:(fd:number,o:any)=>stats(fs.fstatSync(fd,o)as fs.BigIntStats,false),openSync:(...args:any[])=>{opens++;return (fs.openSync as any)(...args);}};
+ const fakeFs={...fs,lstatSync:(f:string,_o:unknown)=>stats(fs.lstatSync(f,{bigint:true}),f===root),fstatSync:(fd:number,_o:unknown)=>stats(fs.fstatSync(fd,{bigint:true}),false),openSync:(...args:any[])=>{opens++;return (fs.openSync as any)(...args);}};
  let text=body;if(legacy){assert.equal(text.split('(parent.mode&0o022n)').length-1,1);text=text.replace('(parent.mode&0o022n)','(parent.mode&0o077n)');}
  const code=ts.transpileModule(text+';globalThis.reader=readProtectedFinancialPrerequisite',{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS}}).outputText;
  const context:any={fs:fakeFs,path,process:{env:{RECOVERY_COORDINATION_DIR:root},getuid:()=>0},Buffer,fail:(c:string)=>{throw Error(c);},canonical:(v:any):any=>Array.isArray(v)?v.map(context.canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,context.canonical(v[k])])):v};vm.runInNewContext(code,context);return {read:context.reader,opens:()=>opens};

@@ -21,6 +21,10 @@
     {
       "path": "reports/qa/issue-414-migration-users.md",
       "sha256": "a15dedadf8690d33fe37c0c63ab311d2bc9b3263b93795a47b534aff79a5416d"
+    },
+    {
+      "path": "reports/qa/issue-414-migration-users.review.md",
+      "sha256": "93296c999c9800b1fc65cc9d280b8e08bbd66770ee1c1fdecf88ace8e922cdcf"
     }
   ],
   "unchangedInputFiles": [
@@ -66,8 +70,7 @@
     "exitCode": 0,
     "passed": 42,
     "skipped": 0,
-    "command": "node --max-old-space-size=512 --test tests/online-deployment/{migration-users-acceptance,restored-qa-migration-baseline,online-release-expansion-join,protected-online-bootstrap,model-draft-preservation,model-draft-hook}.test.mjs",
-    "note": "Brace list is descriptive; invoke the six explicit filenames in PowerShell.",
+    "command": "node --max-old-space-size=512 --test tests/online-deployment/migration-users-acceptance.test.mjs tests/online-deployment/restored-qa-migration-baseline.test.mjs tests/online-deployment/online-release-expansion-join.test.mjs tests/online-deployment/protected-online-bootstrap.test.mjs tests/online-deployment/model-draft-preservation.test.mjs tests/online-deployment/model-draft-hook.test.mjs",
     "localLog": ".scratch/issue-414-node-tests.txt",
     "logSha256": "b7d9f8c6a120c0debc14de411c30ddee3946af9093124c6035bf005ebf42a244"
   },
@@ -114,5 +117,16 @@
     ]
   },
   "ownedLiveNativeOriginals": [],
-  "historicalNegativeParentsRetained": true
+  "historicalNegativeParentsRetained": true,
+  "independentReview": {
+    "implementationCommit": "ec770281",
+    "standardsFindings": 0,
+    "specFindings": 0,
+    "state": "source-ready-not-integrated-runtime"
+  },
+  "commitHookChecks": {
+    "designSystemCheck": "passed",
+    "designSystemFoundationTests": 25,
+    "architectureCheck": "passed"
+  }
 }

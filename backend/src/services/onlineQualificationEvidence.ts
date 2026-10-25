@@ -51,18 +51,113 @@ function rawJson(value: unknown, maximum = 65536) {
   return JSON.parse(bytes.toString('utf8'));
 }
 
+/** Data-only join. The original owner/origin issuer still authenticates the
+ * actual handles; no receipt JSON can mint an admission or original token. */
+function liveRestoredDirectoryJoin(source:any,proof:any,baseline:any,restore:any,baselineRaw:Buffer){
+  const join=proof.liveFinalJoin;
+  const exact=(v:any,keys:string[])=>v&&typeof v==='object'&&!Array.isArray(v)&&same(Object.keys(v).sort(),keys.slice().sort());
+  const sha=(raw:Buffer|string)=>createHash('sha256').update(raw).digest('hex');
+  const decode=(v:any,max:number)=>{if(typeof v!=='string'||v.length>Math.ceil(max/3)*4+4)fail();const b=Buffer.from(v,'base64');if(b.length<1||b.length>max||b.toString('base64')!==v)fail();return b;};
+  const json=(v:any,max:number)=>JSON.parse(decode(v,max).toString('utf8'));
+  if(!exact(join,['format','baselineCompletion','baselineOriginalRawBase64','baselineNativeSha256','workerStdoutRawBase64','workerOriginalRawBase64','ownerResultRawBase64','ownerOriginalRawBase64','ownerStdoutRawBase64','completeManifestValueRawBase64','workingManifestValueRawBase64'])
+    ||join.format!=='sabalan-original-live-restored-qa-final-join/v1'
+    ||baseline.captureSource!=='live-verified-complete-restored-qa'
+    ||!exact(baseline.restoredQaLineage,['format','sourceDatabase','targetDatabase','completeManifestSha256','nativeHistorySha256','workingManifestSha256','cleanupPending','independentPointHealthy','productionAdmission']))fail();
+  const lineage=baseline.restoredQaLineage;
+  const completeValueRaw=decode(join.completeManifestValueRawBase64,8*1024*1024),workingValueRaw=decode(join.workingManifestValueRawBase64,8*1024*1024);
+  const completeValue=JSON.parse(completeValueRaw.toString('utf8')),workingValue=JSON.parse(workingValueRaw.toString('utf8'));
+  if(JSON.stringify(completeValue)!==completeValueRaw.toString('utf8')||JSON.stringify(workingValue)!==workingValueRaw.toString('utf8')
+    ||!same(completeValue,source.checkpointMetadata.manifest)
+    ||!same(workingValue,{database:lineage.targetDatabase,sources:baseline.sources.map((r:any)=>({name:r.name,files:r.files,directories:r.directories}))}))fail();
+  if(lineage.format!=='sabalan-live-restored-qa-private-lineage/v1'||lineage.cleanupPending!==true
+    ||lineage.independentPointHealthy!==false||lineage.productionAdmission!==false
+    ||!same(lineage.sourceDatabase,source.checkpointMetadata.sourceDatabase)||!same(lineage.targetDatabase,source.restoredDatabase)
+    ||lineage.sourceDatabase.systemIdentifier===lineage.targetDatabase.systemIdentifier
+    ||lineage.completeManifestSha256!==sha(completeValueRaw)
+    ||baseline.capturedManifest?.sha256!==lineage.completeManifestSha256
+    ||lineage.workingManifestSha256!==sha(workingValueRaw))fail();
+  const completion=join.baselineCompletion;
+  if(completion?.event!=='restored-file-baseline-complete'||completion.manifestSha256!==sha(baselineRaw)
+    ||completion.capturedManifestSha256!==lineage.completeManifestSha256||completion.productionAdmission!==false
+    ||!Array.isArray(completion.proofs)||completion.proofs.length!==9)fail();
+  const original=source.originalNativeClosures.filter((c:any)=>c.runtimeId===completion.runtimeId);
+  if(original.length!==1||sha(Buffer.from(original[0].nativeRawBase64,'base64'))!==join.baselineNativeSha256)fail();
+  const baselineNative=rawJson(original[0].nativeRawBase64);
+  if(baselineNative.onlineScope?.scope?.purpose!=='jobs'||baselineNative.onlineScope.scope.role!=='control')fail();
+  const baselineOriginal=json(join.baselineOriginalRawBase64,8*1024*1024);
+  if(baselineOriginal.format!=='sabalan-original-independent-private-runtime/v1'||baselineOriginal.event!=='CLOSED'
+    ||baselineOriginal.mode!=='baseline'||!same(baselineOriginal.result,completion)
+    ||baselineOriginal.originalPopenPid!==original[0].originalPopenPid||baselineOriginal.originalReturncode!==0
+    ||['nativeRawBase64','workRawBase64','workClaimRawBase64','workScopeRawBase64'].some(k=>baselineOriginal[k]!==original[0][k]))fail();
+  const names=new Set<string>();for(const row of completion.proofs){
+    if(typeof row.name!=='string'||names.has(row.name)||row.publicOnlineAdmission!==false||!digest(row.sha256)
+      ||baseline.sources.filter((s:any)=>s.name===row.name).length!==1)fail();names.add(row.name);
+  }
+  const workerRaw=decode(join.workerStdoutRawBase64,8*1024*1024),lines=workerRaw.toString('utf8').split('\n');
+  if(lines.pop()!==''||lines.length!==3)fail();const frames=lines.map((line:string)=>JSON.parse(line));
+  for(let i=0;i<3;i++)if(frames[i].sequence!==i+1||frames[i].session!==frames[0].session||!digest(frames[i].session))fail();
+  if(frames[0].event!=='HR_REQUEST'||frames[0].format!=='sabalan-original-active-restored-qa-hr-request/v1'
+    ||frames[1].event!=='CALLBACK_DRAINED'||frames[1].format!=='sabalan-original-active-restored-qa-hr-drained/v1'
+    ||frames[2].event!=='RESTORE_RESULT'||frames[2].format!=='sabalan-original-active-restored-qa-result/v1'
+    ||!same(frames[0].manifest,source.checkpointMetadata.manifest)||!same(frames[0].targetDatabase,lineage.targetDatabase)
+    ||!same(frames[0].proof?.database,lineage.targetDatabase)||frames[0].proof.cleanupPending!==true
+    ||frames[0].proof.productionAdmission!==false||frames[0].proof.sourceAuthorityAuthenticated!==false
+    ||frames[0].proof.format!=='sabalan-private-native-complete-ledger439-proof/v1'
+    ||frames[0].proof.nativeRowsCompared!==440||frames[0].proof.activeRows!==439||frames[0].proof.rollbackRows!==1
+    ||frames[0].proof.sourceCatalogMigrations!==444||typeof frames[0].proof.rawHistoryJson!=='string'
+    ||sha(frames[0].proof.rawHistoryJson)!==lineage.nativeHistorySha256
+    ||frames[0].proof.rawHistorySha256!==lineage.nativeHistorySha256)fail();
+  if(!Array.isArray(JSON.parse(frames[0].proof.rawHistoryJson))||JSON.parse(frames[0].proof.rawHistoryJson).length!==440)fail();
+  const pg=frames[0].proof.originalRestore;
+  if(pg?.format!=='sabalan-owned-native-recovery-command/v1'||pg.code!==0||pg.signal!==null
+    ||pg.stdoutEof!==true||pg.stderrEof!==true||pg.killed!==false||pg.observationFault!==undefined)fail();
+  const result=frames[2].result,absence=result?.absence;
+  if(result?.format!=='sabalan-strict-local-complete-validation/v1'||result.strictCompleteValidationSucceeded!==true
+    ||result.databaseAbsent!==true||result.baseClientFinallyDisconnected!==true||result.productionAdmission!==false
+    ||result.financialSchemaQualified!==false||absence?.visible!==true||absence.name!==lineage.targetDatabase.name
+    ||absence.oid!==null||absence.systemIdentifier!==lineage.targetDatabase.systemIdentifier
+    ||['sessions','transactions','prepared'].some(k=>absence[k]!==0))fail();
+  const worker=json(join.workerOriginalRawBase64,8*1024*1024),owner=json(join.ownerOriginalRawBase64,131072);
+  const closed=(v:any)=>Number.isSafeInteger(v.originalPid)&&v.originalPid>1&&v.code===0&&v.signal===null
+    &&v.stdoutEof===true&&v.stderrEof===true&&v.observationFault===null&&v.killed===false;
+  if(!closed(owner)||owner.format!=='sabalan-original-existing-compose-complete-owner/v1'||owner.interrupted!==false
+    ||!closed(worker)||worker.format!=='sabalan-original-protected-financial-closure/v1'
+    ||worker.stdoutSha256!==sha(workerRaw)||worker.stdoutRawBase64!==workerRaw.toString('base64')
+    ||worker.stderrRawBase64!==''||worker.stderrSha256!==sha(Buffer.alloc(0)))fail();
+  const ownerRaw=decode(join.ownerResultRawBase64,8*1024*1024),ownerResult=JSON.parse(ownerRaw.toString('utf8'));
+  const ownerStdout=decode(join.ownerStdoutRawBase64,131072),ownerReference=JSON.parse(ownerStdout.toString('utf8'));
+  if(owner.stdoutSha256!==sha(ownerStdout)||owner.stdoutBytes!==ownerStdout.length||owner.stderrBytes!==0
+    ||owner.stderrSha256!==sha(Buffer.alloc(0))||ownerReference.sha256!==sha(ownerRaw)
+    ||ownerResult.format!=='sabalan-owned-complete-transfer-strict-restore/v1'
+    ||ownerResult.strictCompleteValidationSucceeded!==true||ownerResult.temporaryTransferRetired!==true
+    ||ownerResult.localJobRetired!==true||ownerResult.productionAdmission!==false
+    ||!same(ownerResult.protectedFinancialQualification?.binding?.sourceDatabase,lineage.sourceDatabase)
+    ||!same(ownerResult.protectedFinancialQualification?.binding?.restoredDatabase,lineage.targetDatabase)
+    ||ownerResult.protectedFinancialQualification.binding.sourceCommit!==source.sourceCommit
+    ||worker.workerSourceSha256!==ownerResult.protectedFinancialQualification.binding.workerSourceSha256
+    ||worker.controllerSourceSha256!==ownerResult.protectedFinancialQualification.binding.controllerSourceSha256
+    ||restore.format!=='sabalan-original-existing-compose-complete-restore/v1'
+    ||restore.originalBaselineSha256!==sha(baselineRaw)||restore.finalOwnerResultSha256!==sha(ownerRaw)
+    ||restore.finalOwnerClosureSha256!==sha(decode(join.ownerOriginalRawBase64,131072))
+    ||restore.finalWorkerStdoutSha256!==sha(workerRaw))fail();
+  for(const stamp of [owner.startedAt,owner.closedAt,restore.drill?.completedAt])if(typeof stamp!=='string'||!Number.isFinite(Date.parse(stamp)))fail();
+  if(Date.parse(owner.closedAt)<Date.parse(owner.startedAt)||Date.parse(restore.drill.completedAt)<Date.parse(owner.closedAt))fail();
+}
+
 function protectedDirectoryRestore(source:any,checkpointSha256:string){
   const proof=source.protectedDirectoryComponents,metadata=source.checkpointMetadata;
-  if(!proof||proof.format!=='sabalan-original-protected-directory-restore/v1'||proof.checkpointSha256!==checkpointSha256
+  const live=proof?.format==='sabalan-original-live-restored-qa-directory-restore/v1';
+  if(!proof||(!live&&proof.format!=='sabalan-original-protected-directory-restore/v1')||proof.checkpointSha256!==checkpointSha256
     ||!digest(proof.baselineSha256)||!nonempty(proof.rootBindings)||proof.rootBindings.length!==9)fail();
   const restore=rawJson(proof.canonicalRestoreOutputRawBase64,8*1024*1024),baseline=rawJson(proof.baselineRawBase64,8*1024*1024);
   const restoreSha=createHash('sha256').update(Buffer.from(proof.canonicalRestoreOutputRawBase64,'base64')).digest('hex');
   if(createHash('sha256').update(Buffer.from(proof.baselineRawBase64,'base64')).digest('hex')!==proof.baselineSha256
     ||restore.ok!==true||!hasHealthyIndependentCheckpointDrill({...source.checkpoint,lastDrill:restore.drill})
-    ||baseline.format!=='sabalan-application-restored-file-baseline/v1'||baseline.captureSource!=='canonical-complete-package'
-    ||baseline.capturedManifest?.sha256!==restoreSha||!Array.isArray(baseline.sources)||baseline.sources.length!==9
+    ||baseline.format!=='sabalan-application-restored-file-baseline/v1'||baseline.captureSource!==(live?'live-verified-complete-restored-qa':'canonical-complete-package')
+    ||(!live&&baseline.capturedManifest?.sha256!==restoreSha)||!Array.isArray(baseline.sources)||baseline.sources.length!==9
     ||metadata.manifest?.format!=='sabalan-recovery'||metadata.manifest.packageType!=='COMPLETE'
     ||!Array.isArray(metadata.manifest.components)||metadata.manifest.components.length>250000)fail();
+  if(live)liveRestoredDirectoryJoin(source,proof,baseline,restore,Buffer.from(proof.baselineRawBase64,'base64'));
   const finalDrill=source.checkpoint.lastDrill;
   for(const key of ['operationId','checkpointId','releaseId','checksum','size','sourceMachineUuidSha256','sourceKernelBootIdSha256','recoveryMachineUuidSha256','recoveryKernelBootIdSha256','startedAt'])
     if(!same(restore.drill[key],finalDrill[key]))fail();

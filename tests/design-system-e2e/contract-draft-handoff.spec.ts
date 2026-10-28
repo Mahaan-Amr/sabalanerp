@@ -54,6 +54,10 @@ test('revision refresh first preserves the original draft; storage failure keeps
   await page.goto(`/dashboard/sales/contracts/${id}/edit`);
   const calendar = page.getByRole('button', { name: 'تاریخ قرارداد', exact: true }).last();
   await expect(calendar).toBeVisible();
+  // An unidentified development build deliberately cannot qualify archival.
+  // Fail at that prerequisite instead of misdiagnosing it as a quota failure.
+  expect(browserBuildIds.size, 'Run this acceptance with an identified frontend build (SABALAN_BROWSER_BUILD_ID).').toBe(1);
+  expect([...browserBuildIds][0]).toMatch(/^erp_[a-z0-9_-]{8,90}$/);
   await expect.poll(() => state.checkpoints).toBeGreaterThan(0);
   state.conflict = true;
   await calendar.click();

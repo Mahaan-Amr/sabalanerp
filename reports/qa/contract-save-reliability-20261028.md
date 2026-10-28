@@ -1,8 +1,8 @@
 # Contract save reliability — 2026-10-28
 
-Status: implementation and focused regression checks passed. Production activation is blocked; final browser acceptance is incomplete.
+Status: complete for the user-authorized local scope. Implementation, integration checks and final browser acceptance passed. Production publication is explicitly excluded by the latest user instruction.
 
-Source base: production checkout `45cab522a285b878b60f537d09d0962912bba096`, isolated branch `codex/contract-save-reliability`. Unrelated changes in the primary checkout were preserved.
+Source base: inspected production checkout `45cab522a285b878b60f537d09d0962912bba096`, isolated branch `codex/contract-save-reliability`; implementation commit `93dbd0f2`. The running production image separately reported source `b58c53c0f88d2d89da3cb6a45949e6eca97e4308`; checkout identity is not evidence of deployed image identity. Unrelated source changes in the primary checkout were preserved.
 
 ## Findings and changes
 
@@ -26,22 +26,44 @@ No schema migration, unit-price override, global pool timeout change, automatic 
 
 - Backend build (`tsc` and cutover compilation), frontend production build, and final local frontend Docker build.
 - `npm run architecture:check`, `npm run design-system:check`, design-system foundation (25 checks) and adoption (14 checks).
-- Partner Case integration suite: 49 passed, including create/revise, quote timeout, concurrent commands, authorization, financial corrections and unchanged finality.
+- Final combined database run: 50 passed (49 Partner Case checks plus the delayed ordinary-edit check), including create/revise, quote timeout, concurrent commands, authorization, financial corrections and unchanged finality.
 - Recovery/snapshot/backend budget checks: 15 passed; delayed ordinary edit integration: 1 passed; ordinary discount edit integration passed with rollback.
 - Frontend targeted recovery/submission checks: 77 passed after the final recovery-message change. Product/delivery identity and recovery journal checks passed in the broader 81-check run before that narrow message change.
 - Mutation request headers/API normalization: 4 passed; browser handoff/session unit checks: 10 passed; Sales/Partner operational error suites passed.
-- A preliminary Partner browser check passed at desktop/mobile widths against the previously running local frontend. This is not acceptance of the final candidate.
+- Final identified-image browser acceptance: 11 passed. This covers ordinary revision refresh with real Chromium quota denial and recovery; Partner writer-conflict presentation at 1280/390px; initial numbering/reload with normal, delayed, rejected, missing-checkpoint and restore-failure saves; fourteen-product correction with timeout and exactly one explicit retry; and reviewed corrections retaining prior payments at 1280/390px.
+- Browser identity/artifact checks: 2 passed. The browser acceptance now reports a missing build identity as a prerequisite failure before testing quota recovery.
 
-## Browser and runtime limitations
+## Final local runtime and browser diagnosis
 
-Only the existing `sabalanerp-local` project and database were used; no alternate stack or database was created. Production data was not copied or changed for these tests.
+Only the existing `sabalanerp-local` project/database and its established Compose files were used. No second stack or database was created. The shared environment was coordinated with the concurrently authorized PDF review before taking an exclusive acceptance window.
 
-The local runtime initially differed from the production-based candidate. Rebuilding its frontend succeeded after retrying a dependency-download network failure. Final browser checks were not all green: the ordinary archive/reload scenario failed to reload after quota recovery, and Partner login failed. The local backend was subsequently observed replaced and left in `created` state while ClamAV was unhealthy. Its database migration history also differs from this source branch (both missing and additional migration names). No migrations were applied to reconcile that unrelated work. Final browser acceptance must be rerun on a coordinated healthy runtime with matching source identities; the archive/reload failure remains unresolved and must not be relabeled as passed.
+The previously unresolved archive/reload failure was `BROWSER_BUILD_HANDOFF_BUILD_UNPROVEN`, not loss of browser storage or an archive defect. The default unidentified development image intentionally cannot qualify preservation. Temporary targeted probes proved that the captured draft stayed equal while this prerequisite rejected both attempts. The production guard remains unchanged; no legacy build is relabeled or admitted.
 
-Temporary diagnostic changes were removed from source, and a final clean frontend image was rebuilt. No further service promotion was attempted after detecting changes to the shared runtime.
+The final frontend was built through the existing `docker-compose.performance-acceptance.yml` runner target with `SABALAN_BROWSER_BUILD_ID=erp_local_contract_save_93dbd0f2`. Its real `BUILD_ID`, `browser-build-identity.json` and request producer identity agree. On that artifact the original quota/refresh acceptance passed, including independent archive readback, exact original draft/date preservation and mobile/200% zoom checks. The final backend's compiled contract service, Partner aggregate and Partner route bytes match the local compiled source outputs exactly.
 
-## Production boundary
+The candidate backend reused the existing local database with `node dist/index.js`; no migrations were applied because this shared database also contains another task's in-progress migrations. This is a local acceptance configuration, not a production deployment procedure. Core backend/frontend/Postgres/Redis were healthy. Existing unrelated ClamAV update failure is still recorded; full antivirus/full-stack health is not claimed by the contract checks.
 
-Read-only production inspection found ClamAV unhealthy, with the repeated health result `latest update failed or is incomplete`. The mandatory health gates in `docs/operations/zero-data-loss-deployment.md` prohibit admitting a new release in this condition. No deployment, restart, production database mutation, storage cleanup or maintenance transition was performed for this implementation.
+All temporary probes were removed from source and superseded runtime containers. The prior PDF task's invoice 1, its loading reference `cmvrrj0q100xl1g1htjwj8hja`, non-voided status and exact stored PDF bytes were independently checked against the original exported PDF. Those records/files were not rewritten.
 
-Before activation: recover and verify scanner health through its documented process, run reference-aware storage preflight on production and the independent backup host, establish the verified checkpoint and all remaining protected-release gates, and finish browser acceptance. Preserve the newest two complete healthy independently verified recovery points and all active incident dependencies. No bypass or partial promotion is permitted.
+### Reproduction commands
+
+Run from this worktree, against the existing Compose project only:
+
+```sh
+docker compose -f docker-compose.local.yml ps
+docker compose -f docker-compose.local.yml -f docker-compose.performance-acceptance.yml build --build-arg NPM_CONFIG_REGISTRY=https://registry.npmjs.org --build-arg SABALAN_BROWSER_BUILD_ID=erp_local_contract_save_93dbd0f2 frontend
+docker compose -f docker-compose.local.yml -f docker-compose.performance-acceptance.yml up -d --no-deps --no-build frontend
+node scripts/run-design-system-e2e.mjs tests/design-system-e2e/contract-draft-handoff.spec.ts tests/design-system-e2e/partner-correction-recovery-errors.spec.ts --retries=0
+node scripts/run-design-system-e2e.mjs tests/design-system-e2e/partner-creation-entry-regressions.spec.ts --grep 'initial Partner inquiry persists' --retries=0
+node scripts/run-design-system-e2e.mjs tests/design-system-e2e/partner-creation-entry-regressions.spec.ts --grep 'fourteen-product correction|Reviewed Partner correction starts' --retries=0
+```
+
+Use a backend compiled from the same candidate for these browser checks. Do not apply this branch's migrations to another task's mixed local database merely to run acceptance, and do not replace shared runtime services without coordinating their use.
+
+## Production boundary and latest authorization
+
+The user subsequently instructed: “i do not want you to change anything in the server. just do the changes in the local”. No server work continued after that instruction; the interactive SSH connection was closed and no production publication is included in this task.
+
+Before that instruction, inspection found the existing ClamAV updater unable to reach its fixed mirror, and the independent proxy path also failed a bounded read-only probe. The canonical reference-aware storage preflight ran under the existing host lock on production and the independent backup host: both passed, with zero containers/images removed. Private operational logs were recorded. No application restart, migration, business-data mutation, maintenance transition or deployment occurred.
+
+A future production update requires separate user authorization and the complete documented deployment process. This local completion grants no production or online-update admission.

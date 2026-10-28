@@ -637,7 +637,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             retailLineTotal: { amount: new Prisma.Decimal(row.quantity).mul(row.retailUnitPrice.amount).toFixed(), currency: 'IRT' },
             wholesaleLineTotal: { amount: new Prisma.Decimal(row.quantity).mul(row.wholesaleUnitPriceAmount).toFixed(), currency: 'IRT' },
           })) } : {}) }) };
-      });
+      }, PARTNER_CREATION_TRANSACTION_OPTIONS);
       respond(response, result);
     } catch (failure) { respondReadFailure(response, failure); }
   });

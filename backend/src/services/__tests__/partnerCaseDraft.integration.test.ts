@@ -2414,3 +2414,113 @@ test('editor entry preserves fresh full-query decisions for finalized, approved 
     } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
   });
 });
+
+test('unfinished product replacement preserves stale delivery intent without binding it to the new row', async () => {
+  await fixture(async (tx, ids) => {
+    const submitted = await command(ids);
+    const first = await service(tx, ids).execute(submitted);
+    assert(first.ok && first.value.case, JSON.stringify(first));
+    if (!first.ok || !first.value.case) return;
+    const originalRowId = submitted.intent.rows[0].productRowId;
+    const replacementRowId = `${originalRowId}-replacement`;
+    const graph = graphFor(replacementRowId);
+    const graphHash = await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph });
+    const revision = await reviseCommand(ids, submitted, 1, first.value.case.owner.integrityHash, 'replace-with-stale-plan');
+    const intent = { ...revision.intent, graphHash, preparationCompleted: false,
+      rows: [{ productRowId: replacementRowId, retailUnitPrice: submitted.intent.rows[0].retailUnitPrice }] };
+    const revised = { ...revision, intent, idempotency: { ...revision.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent }) } };
+    const replace = (draft: ResolvedCaseDraft): ResolvedCaseDraft => ({ ...draft, graph,
+      technicalSnapshot: { ...draft.technicalSnapshot, graphHash, rows: draft.technicalSnapshot.rows.map(row => ({ ...row,
+        configurationRef: { ...row.configurationRef, productRowId: replacementRowId } })) },
+      rows: draft.rows.map(row => ({ ...row, productRowId: replacementRowId })) });
+    const result = await service(tx, ids, undefined, undefined, undefined, replace).execute(revised);
+    await tx.$executeRaw`SET CONSTRAINTS "partner_case_delivery_items_caseId_revision_productRowId_fkey" IMMEDIATE`;
+    assert(result.ok && result.value.case, JSON.stringify(result));
+    if (!result.ok || !result.value.case) return;
+    assert.deepEqual(result.value.case.deliveries, intent.deliveries,
+      'the exact old allocation remains visible for the seller to repair');
+    const retained = await tx.partnerCaseRevision.findUniqueOrThrow({ where: { caseId_revision: { caseId: ids.caseId, revision: 2 } } });
+    assert.deepEqual((retained.customerContent as { deliveries: unknown }).deliveries, intent.deliveries);
+    assert.equal(await tx.partnerCaseDeliveryItem.count({ where: { caseId: ids.caseId, revision: 2 } }), 0,
+      'obsolete allocations cannot become loadable records for replacement products');
+    const completion = await reviseCommand(ids, { ...submitted, intent }, 2, result.value.case.owner.integrityHash, 'complete-replaced-product');
+    const completedIntent = { ...completion.intent, graphHash, rows: intent.rows, preparationCompleted: true };
+    const complete = { ...completion, intent: completedIntent, idempotency: { ...completion.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent: completedIntent }) } };
+    const blocked = await service(tx, ids, undefined, undefined, undefined, replace).execute(complete);
+    assert.equal(blocked.ok ? null : blocked.error.code, 'INVALID_PAYLOAD',
+      'completion must require an explicit corrected allocation');
+    assert.equal((await tx.partnerSaleCase.findUniqueOrThrow({ where: { id: ids.caseId } })).headRevision, 2);
+    const correctedIntent = { ...completedIntent, deliveries: completedIntent.deliveries.map(delivery => ({ ...delivery,
+      items: delivery.items.map(item => ({ ...item, productRowId: replacementRowId })) })) };
+    const corrected = { ...complete, intent: correctedIntent, idempotency: { ...complete.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_DRAFT_REVISE', intent: correctedIntent }) } };
+    const saved = await service(tx, ids, undefined, undefined, undefined, replace).execute(corrected);
+    assert(saved.ok && saved.value.case, JSON.stringify(saved));
+    assert.equal(await tx.partnerCaseDeliveryItem.count({ where: { caseId: ids.caseId, revision: 3,
+      productRowId: replacementRowId } }), 1, 'explicit correction creates the exact replacement binding');
+  });
+});
+
+
+test('Partner quote before save survives five seconds and still rejects a missing seller profile', async () => {
+  const express = (await import('express')).default;
+  const { createPartnerCaseRouter } = await import('../../routes/partner-cases');
+  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  const ids = { partnerId: randomUUID(), caseId: randomUUID(), customerId: randomUUID() };
+  const delayed = new Proxy(database, { get(target, property) {
+    if (property === '$transaction') return (work: (tx: Prisma.TransactionClient) => Promise<unknown>,
+      options?: { maxWait?: number; timeout?: number }) => target.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_sleep(5.2)`;
+      return work(tx);
+    }, options);
+    return Reflect.get(target, property);
+  } });
+  const app = express(); app.use(express.json());
+  app.use('/cases', createPartnerCaseRouter({ database: delayed, authenticate: (req, _res, next) => {
+    (req as { user?: { id: string } }).user = { id: ids.partnerId }; next();
+  } }));
+  const server = app.listen(0);
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  try {
+    const address = server.address(); assert(address && typeof address !== 'string');
+    const input = await command(ids);
+    const response = await fetch(`http://127.0.0.1:${address.port}/cases/quote`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input,
+        idempotency: { ...input.idempotency, targetId: input.intent.recoveryId } }),
+    });
+    const body = await response.json() as { code?: string };
+    assert.equal(response.status, 404, JSON.stringify(body));
+    assert.equal(body.code, 'NOT_FOUND');
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await database.$disconnect();
+  }
+});
+
+test('new unfinished Case keeps unresolved delivery input and binds only exact current rows, replaying once', async () => {
+  await fixture(async (tx, ids) => {
+    const original = await command(ids);
+    const intent = { ...original.intent, preparationCompleted: false,
+      deliveries: original.intent.deliveries.map(delivery => ({ ...delivery, items: [
+        { ...delivery.items[0], quantity: '1' },
+        { productRowId: 'deleted-product-row', quantity: '1' },
+      ] })) };
+    const submitted = { ...original, intent, idempotency: { ...original.idempotency,
+      payloadHash: await canonicalHash({ schemaVersion: 1, type: 'CASE_SUBMIT', intent }) } };
+    const cases = service(tx, ids);
+    const result = await cases.execute(submitted);
+    assert(result.ok && result.value.case, JSON.stringify(result));
+    if (!result.ok || !result.value.case) return;
+    await tx.$executeRaw`SET CONSTRAINTS "partner_case_delivery_items_caseId_revision_productRowId_fkey" IMMEDIATE`;
+    assert.deepEqual(result.value.case.deliveries, intent.deliveries);
+    const bindings = await tx.partnerCaseDeliveryItem.findMany({ where: { caseId: ids.caseId, revision: 1 } });
+    assert.deepEqual(bindings.map(item => ({ productRowId: item.productRowId, quantity: item.quantity.toString() })),
+      [{ productRowId: original.intent.rows[0].productRowId, quantity: '1' }]);
+    const replay = await cases.execute(submitted);
+    assert(replay.ok, JSON.stringify(replay));
+    assert.equal(await tx.partnerCaseRevision.count({ where: { caseId: ids.caseId } }), 1);
+    assert.equal(await tx.partnerCaseDeliveryItem.count({ where: { caseId: ids.caseId } }), 1);
+  });
+});

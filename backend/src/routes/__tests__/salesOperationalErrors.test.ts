@@ -107,3 +107,12 @@ test('a signed contract edit requires Accounting correction instead of an unexpe
   )?.body.code, 'SALES_CONTRACT_FORMAL_CORRECTION_REQUIRED');
   assert.equal(knownContractUpdateBusinessFailure('database unavailable'), null);
 });
+
+
+test('a concurrent contract change returns a conflict without instructing a blind save retry', () => {
+  const response = knownContractUpdateBusinessFailure('Contract changed concurrently; reload before saving');
+  assert.equal(response?.status, 409);
+  assert.equal(response?.body.code, 'SALES_CONTRACT_VERSION_CONFLICT');
+  assert.match(response!.body.error, /نسخه.*تغییر/);
+  assert.match(response!.body.error, /پیش‌نویس/);
+});

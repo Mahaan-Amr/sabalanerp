@@ -57,7 +57,10 @@ export const salesBusinessErrorMessage = (message: unknown, fallback: string): s
 export const knownContractUpdateBusinessFailure = (message: unknown): {
   status: number;
   body: { success: false; code: string; error: string };
-} | null => message === 'DUTY_SALES_EDIT_EXPIRED'
+} | null => message === 'Contract changed concurrently; reload before saving'
+  ? { status: 409, body: { success: false, code: 'SALES_CONTRACT_VERSION_CONFLICT',
+      error: 'نسخه قرارداد هم‌زمان تغییر کرده است؛ پیش‌نویس خود را نگه دارید و پیش از ذخیره، نسخه ثبت‌شده را بررسی کنید.' } }
+  : message === 'DUTY_SALES_EDIT_EXPIRED'
   ? { status: 409, body: { success: false, code: 'DUTY_SALES_EDIT_EXPIRED',
       error: 'مهلت اصلاح پایان یافته؛ درخواست به حسابداری ارجاع شد. تغییرات ذخیره‌نشده برای بازیابی حفظ شده است.' } }
   : message === 'Signed contract commercial evidence can only change through an approved formal correction'

@@ -418,10 +418,14 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
       pricingSubjectId: item.material.pricingSubjectId }));
     if (!usage.ok) return usage;
   }
+  // Unfinished drafts retain obsolete allocations in customerContent for explicit
+  // seller repair. Only current row identities may enter fulfillment bindings;
+  // completed preparation has already required every allocation to be valid.
   for (const delivery of command.intent.deliveries) {
     await tx.partnerCaseDelivery.create({ data: { id: delivery.deliveryId, caseId, revision,
       date: new Date(`${delivery.date}T00:00:00.000Z`), destination: delivery.destination } });
-    await tx.partnerCaseDeliveryItem.createMany({ data: delivery.items.map(item => ({ caseId, revision,
+    const currentItems = delivery.items.filter(item => approvedRows.some(row => row.productRowId === item.productRowId));
+    if (currentItems.length) await tx.partnerCaseDeliveryItem.createMany({ data: currentItems.map(item => ({ caseId, revision,
       deliveryId: delivery.deliveryId, productRowId: item.productRowId, quantity: item.quantity })) });
   }
   await insertPaymentPlan(tx, caseId, revision, 'RETAIL', command.intent.customerPaymentPlan);
@@ -687,7 +691,8 @@ export function createPartnerCaseService(dependencies: PartnerCaseDependencies):
       for (const delivery of command.intent.deliveries) {
         await tx.partnerCaseDelivery.create({ data: { id: delivery.deliveryId, caseId, revision: 1,
           date: new Date(`${delivery.date}T00:00:00.000Z`), destination: delivery.destination } });
-        await tx.partnerCaseDeliveryItem.createMany({ data: delivery.items.map(item => ({ caseId, revision: 1,
+        const currentItems = delivery.items.filter(item => approvedRows.some(row => row.productRowId === item.productRowId));
+        if (currentItems.length) await tx.partnerCaseDeliveryItem.createMany({ data: currentItems.map(item => ({ caseId, revision: 1,
           deliveryId: delivery.deliveryId, productRowId: item.productRowId, quantity: item.quantity })) });
       }
       await insertPaymentPlan(tx, caseId, 1, 'RETAIL', command.intent.customerPaymentPlan);

@@ -20,6 +20,19 @@ const downstreamFailure = { response: { status: 409, data: {
 } } };
 assert.equal(reportMutationFailure(downstreamFailure), null,
   'a protected-row rejection must not revoke edit ownership or replace the business error');
+const versionFailure = { response: { status: 409, data: {
+  code: 'SALES_CONTRACT_VERSION_CONFLICT',
+  error: 'نسخه قرارداد هم‌زمان تغییر کرده است؛ پیش‌نویس خود را نگه دارید و پیش از ذخیره، نسخه ثبت‌شده را بررسی کنید.',
+} } };
+assert.equal(reportMutationFailure(versionFailure), null,
+  'a concurrent domain save does not imply another browser owns the edit lease');
+assert.equal(getContractSubmissionRecovery(409, true, versionFailure.response.data.code).uncertainMutation, false);
+assert.ok(getSalesOperationalErrorMessage(versionFailure, {
+  failedAction: 'ذخیره تغییرات قرارداد', preserveInput: true,
+  nextStep: getContractSubmissionRecovery(409, true, versionFailure.response.data.code).nextStep,
+}).includes(versionFailure.response.data.error));
+assert.equal(getContractSubmissionRecovery(500, true, versionFailure.response.data.code).uncertainMutation, true);
+assert.equal(getContractSubmissionRecovery(409, true, 'unrecognized-conflict').uncertainMutation, true);
 assert.equal(reportMutationFailure({ response: { status: 409, data: { code: 'DUTY_SALES_EDIT_EXPIRED' } } }),
   'مهلت اصلاح پایان یافته؛ درخواست به حسابداری ارجاع شد. تغییرات ذخیره‌نشده برای بازیابی حفظ شده است.',
   'expiry blocks editing with its own business state instead of a lease takeover prompt');

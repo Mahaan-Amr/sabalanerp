@@ -2689,7 +2689,8 @@ const renderCompactMetadataSection = (
   `;
 };
 
-export function renderContractPdfHeaderTemplate(contract: RenderableContract, customerOutput?: CustomerContractOutput): string {
+export function renderContractPdfHeaderTemplate(contract: RenderableContract, customerOutput?: CustomerContractOutput,
+  labels: { number?: string; date?: string } = {}): string {
   if (customerOutput) contract = { contractNumber: customerOutput.contractNumber, status: customerOutput.status, createdAt: customerOutput.contractDate };
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const logoMarkup = customerOutput ? `<div style="direction:rtl"><strong>${escapeHtml(customerOutput.seller.displayName)}</strong><div style="font-size:8px">تأمین و تحویل توسط سبلان</div></div>` : logoUrl
@@ -2702,8 +2703,8 @@ export function renderContractPdfHeaderTemplate(contract: RenderableContract, cu
       <div style="height:24mm;border:1px solid #d1d5db;border-radius:8px;padding:4px 10px 4px 5px;display:flex;align-items:center;justify-content:space-between;gap:12px;direction:ltr;background:#fff;box-sizing:border-box;overflow:hidden;">
         <div style="flex:1;display:flex;align-items:center;justify-content:flex-start;height:100%;direction:ltr;">${logoMarkup}</div>
         <div style="min-width:210px;text-align:right;direction:rtl;line-height:1.55;">
-          <div><strong>شماره قرارداد:</strong> ${escapeHtml(contractNumber)}</div>
-          <div><strong>تاریخ تنظیم:</strong> ${escapeHtml(contractDate)}</div>
+          <div><strong>${escapeHtml(labels.number || 'شماره قرارداد')}:</strong> ${escapeHtml(contractNumber)}</div>
+          <div><strong>${escapeHtml(labels.date || 'تاریخ تنظیم')}:</strong> ${escapeHtml(contractDate)}</div>
           <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(statusLabel)}</div>
           <div><strong>صفحه:</strong> <span class="pageNumber"></span></div>
         </div>
@@ -2844,6 +2845,9 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   // A mixed caller cannot carry legacy entity facts into the customer path.
   if (output) contract = { contractNumber: output.contractNumber, status: output.status, createdAt: output.contractDate };
   const variant = options.variant || 'original';
+  if ((variant === 'production' || variant === 'workshop') && options.firstPageHeader === undefined) {
+    options = { ...options, firstPageHeader: true };
+  }
   const isAccountingVariant = variant === 'accounting' || variant === 'production';
   const displayInRials = isAccountingVariant || options.displayInRials === true;
   const isWorkshopVariant = variant === 'workshop';

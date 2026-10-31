@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { renderContractHtml } from "../../utils/printTemplate";
+import { renderContractHtml, renderContractPdfHeaderTemplate } from "../../utils/printTemplate";
 import type { InvoiceSource } from "./source";
 import { pricingCurrencyKind } from '../approvedPricing/domain';
 const ExactDecimal = Prisma.Decimal.clone({ precision: 100 });
@@ -50,6 +50,9 @@ export function renderSalesInvoice(
   const date = new Date(snapshot.issuedAt).toLocaleDateString("fa-IR", {
     timeZone: "Asia/Tehran",
   });
+  const firstPageHeader = renderContractPdfHeaderTemplate({ contractNumber: snapshot.number,
+    createdAt: snapshot.issuedAt, status: 'APPROVED' }, undefined, { number: 'شماره فاکتور', date: 'تاریخ صدور' })
+    .replace('<span class="pageNumber"></span>', '<span>۱</span>');
   const lineHtml = snapshot.lines
     .map(
       (
@@ -84,6 +87,7 @@ export function renderSalesInvoice(
     })
     .join("");
   return `<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>فاکتور فروش ${escape(snapshot.number)}</title></head><body><div class="sheet">
+    <div class="invoice-first-page-header" style="height:34mm;break-inside:avoid;page-break-inside:avoid">${firstPageHeader}</div>
     <section class="section"><h2>فاکتور فروش${voidReason ? " - باطل‌شده" : ""}</h2><div class="grid two-col balanced-info">
     <div><strong>شماره فاکتور:</strong> ${invoiceNumber(snapshot.number)}</div><div><strong>تاریخ صدور:</strong> ${escape(date)}</div>
     <div><strong>شماره بارگیری:</strong> ${escape(snapshot.loadingNumber)}</div><div><strong>وضعیت:</strong> ${voidReason ? "باطل‌شده" : "صادرشده"}</div>

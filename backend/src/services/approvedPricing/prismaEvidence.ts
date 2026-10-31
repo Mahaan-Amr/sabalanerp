@@ -1,3 +1,4 @@
+import { exactQuantityText } from '../exactQuantity';
 import { Prisma } from '@prisma/client';
 import type { LockedApprovedPricingVersion } from '../pricedAllocationLedger';
 import { approvedPricingRowIntegrityHash, approvedPricingVersionIntegrityHash } from './domain';
@@ -31,7 +32,7 @@ export const persistedApprovedPricingRowIntegrityMatches = (
       contractItemId: row.contractItemId,
       productRowId: row.productRowId,
       ordinal: row.ordinal,
-      contractedQuantity: row.contractedQuantity.toFixed(3),
+      contractedQuantity: exactQuantityText(row.contractedQuantity),
       unit: row.unit,
       canonicalAllInTotal: row.canonicalAllInTotal.toFixed(12),
       discountEligible: row.discountEligible,
@@ -91,7 +92,7 @@ export const mapVerifiedApprovedPricingVersion = (
       contractItemId: approvedPricingOperationalContractItemId(row),
       productRowId: row.productRowId,
       ordinal: row.ordinal,
-      contractedQuantity: row.contractedQuantity.toFixed(3),
+      contractedQuantity: exactQuantityText(row.contractedQuantity),
       unit: row.unit,
       canonicalAllInTotal: row.canonicalAllInTotal.toFixed(12),
       discountEligible: row.discountEligible,

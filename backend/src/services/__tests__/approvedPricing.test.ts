@@ -337,7 +337,7 @@ test('reconstructs legacy v1 quantities from typed product evidence at scale thr
     productRowId: 'legacy-row-2', productType: 'slab',
     productSnapshot: { squareMeters: '12.3456' },
   });
-  assert.equal(slab.requestedAreaSquareMeters, '12.346');
+  assert.equal(slab.requestedAreaSquareMeters, '12.3456');
 });
 
 test('reconstructs missing legacy discount eligibility only when the canonical graph has no layers', () => {

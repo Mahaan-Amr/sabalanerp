@@ -1,3 +1,7 @@
+import { exactQuantityText } from './exactQuantity';
+import { assertLoadingSalesInvoice } from './salesDispatchInvoice/service';
+import { SalesInvoiceError } from './salesDispatchInvoice/source';
+import { freezeSalesInvoiceCorrection } from './salesDispatchInvoice/correction';
 import { createHash, randomUUID } from 'node:crypto';
 import { AccountingDispatchWaybillStatus, GuardDriverQueueTurnStatus, Prisma, PrismaClient } from '@prisma/client';
 import { isRetryableDispatchTransactionError, refreshProjectionContracts } from './dispatchAllocation';
@@ -18,12 +22,12 @@ type Authority = { actorRole: string; workspace: string; workspacePermission: st
 export class DispatchRecoveryValidationError extends Error {}
 export class DispatchRecoveryConflictError extends Error {}
 
-const stable = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(stable);
-  if (value instanceof Prisma.Decimal) return value.toFixed(3);
+const stable = (value: unknown, field = ''): unknown => {
+  if (Array.isArray(value)) return value.map(entry => stable(entry));
+  if (value instanceof Prisma.Decimal) return field.toLowerCase().includes('quantity') ? exactQuantityText(value) : value.toFixed(3);
   if (value instanceof Date) return value.toISOString();
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stable(item)]));
+    .sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stable(item, key)]));
   return value;
 };
 const json = (value: unknown) => stable(value) as Prisma.InputJsonValue;
@@ -62,8 +66,9 @@ const validDate = (value: Date, name: string) => {
 };
 const signedQuantity = (value: unknown) => {
   const result = new Prisma.Decimal(String(value));
-  if (!result.isFinite() || result.isZero() || result.decimalPlaces() > 3) throw new DispatchRecoveryValidationError('Correction quantity must be non-zero fixed-point scale three.');
-  return result.toDecimalPlaces(3);
+  if (!result.isFinite() || result.isZero() || result.decimalPlaces() > 30) throw new DispatchRecoveryValidationError('Correction quantity must be non-zero exact fixed-point.');
+  exactQuantityText(result);
+  return result;
 };
 const positiveQuantity = (value: unknown) => {
   const result = signedQuantity(value);
@@ -286,7 +291,7 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
         throw new DispatchRecoveryConflictError(error instanceof Error ? error.message : 'Row reattribution evidence is invalid.');
       }
       const actualLines = correction.lines.map((line) => ({ contractId: line.contractId, contractItemId: line.contractItemId,
-        productRowId: line.productRowId, unit: line.unit, quantity: line.quantity.toFixed(3),
+        productRowId: line.productRowId, unit: line.unit, quantity: exactQuantityText(line.quantity),
         returnEvidenceId: line.returnEvidenceId })).sort((left, right) => left.contractItemId.localeCompare(right.contractItemId));
       const expectedLines = expected.lines.map(({ pricingVersionId: _pricingVersionId, ...line }) => line)
         .sort((left, right) => left.contractItemId.localeCompare(right.contractItemId));
@@ -337,7 +342,7 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
     }
     for (const line of correction.lines) {
       const evidence = { id: randomUUID(), contractId: line.contractId, contractItemId: line.contractItemId, productRowId: line.productRowId,
-        unit: line.unit, kind: 'DISPATCH_CORRECTION_POSTED' as const, quantity: line.quantity.toFixed(3),
+        unit: line.unit, kind: 'DISPATCH_CORRECTION_POSTED' as const, quantity: exactQuantityText(line.quantity),
         effectiveAt: correction.effectiveAt.toISOString(), recordedAt: at.toISOString(), sourceType: 'DISPATCH_CORRECTION',
         sourceId: line.id, sourceVersion: 1, integrityHash: '', returnEvidenceId: line.returnEvidenceId || undefined,
         metadata: { waybillId: correction.waybillId, correctionId: correction.id, reversalOfId: correction.reversalOfId } };
@@ -348,11 +353,15 @@ export const postDispatchCorrection = (prisma: PrismaClient, input: { correction
     const posted = await tx.dispatchCorrection.update({ where: { id: correction.id }, data: { status: 'POSTED', postedAt: at,
       postedBy: input.actorId, integrityHash }, include: { lines: true } });
     const adjustment = adjustmentPlan ? await persistStatementAdjustment(tx, adjustmentPlan) : null;
+    let salesInvoiceCorrection: Awaited<ReturnType<typeof freezeSalesInvoiceCorrection>> = null;
+    try { salesInvoiceCorrection = adjustment ? null : await freezeSalesInvoiceCorrection(tx, correction.id, input.actorId); }
+    catch (error) { if (error instanceof SalesInvoiceError) throw new DispatchRecoveryConflictError(error.message); throw error; }
     await refreshProjectionContracts(tx, correction.lines.map((line) => line.contractId));
     await appendAudit(tx, { aggregateType: 'DISPATCH_CORRECTION', aggregateId: correction.id, eventType: 'CORRECTION_POSTED',
       payload: { waybillId: correction.waybillId, beforeStatus: 'DRAFT', afterStatus: 'POSTED', integrityHash,
         effectiveAt: correction.effectiveAt, recordedAt: at, reason: correction.reason, correlationId, idempotencyKey,
         statementAdjustmentId: adjustment?.adjustment.id || null,
+        salesInvoiceCorrectionId: salesInvoiceCorrection?.id || null,
         statementAdjustmentSequence: adjustment?.adjustment.sequence || null,
         statementAdjustmentIntegrityHash: adjustment?.adjustment.integrityHash || null,
         statementAdjustmentArtifactId: adjustment?.artifact.id || null,
@@ -381,7 +390,7 @@ export const verifyGuardPhysicalReturn = (prisma: PrismaClient, input: { movemen
   const quantity = positiveQuantity(input.quantity);
   const evidence = { id: randomUUID(), ...shipmentQuantitySourceFields(dispatchEvidence),
     productRowId: dispatchEvidence.productRowId, unit: dispatchEvidence.unit, kind: 'GUARD_RETURN_VERIFIED' as const,
-    quantity: quantity.toFixed(3), effectiveAt: movement.occurredAt.toISOString(), recordedAt: new Date().toISOString(),
+    quantity: exactQuantityText(quantity), effectiveAt: movement.occurredAt.toISOString(), recordedAt: new Date().toISOString(),
     sourceType: 'GUARD_RETURN_MOVEMENT', sourceId: `${movement.id}:${dispatchEvidence.id}`, sourceVersion: 1, integrityHash: '',
     guardReturnMovementId: movement.id, dispatchEvidenceId: dispatchEvidence.id,
     metadata: { loadingId: movement.loadingId, movementNumber: movement.movementNumber,
@@ -401,7 +410,7 @@ export const verifyGuardPhysicalReturn = (prisma: PrismaClient, input: { movemen
     recordedAt: new Date(evidence.recordedAt), metadata: json(evidence.metadata) } });
   if (created.contractId) await refreshProjectionContracts(tx, [created.contractId]);
   await appendAudit(tx, { aggregateType: 'GUARD_RETURN', aggregateId: created.id, eventType: 'PHYSICAL_RETURN_VERIFIED',
-    payload: { movementId: movement.id, dispatchEvidenceId: dispatchEvidence.id, quantity: quantity.toFixed(3),
+    payload: { movementId: movement.id, dispatchEvidenceId: dispatchEvidence.id, quantity: exactQuantityText(quantity),
       effectiveAt: movement.occurredAt, recordedAt: created.recordedAt, integrityHash: created.integrityHash },
     actorId: input.actorId, authority: input.authority, at: created.recordedAt });
   return created;
@@ -550,6 +559,8 @@ export const registerManualOutageExit = (prisma: PrismaClient, input: { id: stri
     const waybill = record.waybill;
     const revision = waybill.candidate.allocationRevision;
     if (waybill.status !== 'ISSUED' || revision.queueTurn.status !== 'LOADING_FINALIZED') throw new DispatchRecoveryConflictError('Waybill or queue state conflicts with the paper record.');
+    try { await assertLoadingSalesInvoice(tx, revision.loadingId, record.actualOccurredAt); }
+    catch (error) { if (error instanceof SalesInvoiceError) throw new DispatchRecoveryConflictError(error.message); throw error; }
     const at = new Date();
     const revisionSnapshot = revision.snapshot as Record<string, any>;
     const admission = revision.queueTurn.admissionSnapshot as Record<string, any>;
@@ -563,7 +574,7 @@ export const registerManualOutageExit = (prisma: PrismaClient, input: { id: stri
     const integrityHash = digest(snapshot);
     for (const line of revision.lines) {
       const evidence = { id: randomUUID(), ...shipmentSourceForAllocationLine(line),
-        productRowId: line.productRowId, unit: line.unit, kind: 'MANUAL_OUTAGE_EXIT' as const, quantity: line.quantity.toFixed(3),
+        productRowId: line.productRowId, unit: line.unit, kind: 'MANUAL_OUTAGE_EXIT' as const, quantity: exactQuantityText(line.quantity),
         effectiveAt: record.actualOccurredAt.toISOString(), recordedAt: at.toISOString(), sourceType: 'MANUAL_OUTAGE_EXIT',
         sourceId: `${record.id}:${line.id}`, sourceVersion: 1, integrityHash: '', metadata: { loadingId: revision.loadingId,
           waybillId: waybill.id, paperNumber: record.paperNumber, manualOutageExitId: record.id, allocationRevisionId: revision.id } };

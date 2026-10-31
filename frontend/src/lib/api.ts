@@ -672,7 +672,7 @@ export const salesAPI = {
   
   printContract: (id: string, note?: string) => api.put(`/sales/contracts/${id}/print`, { note }),
 
-  reassignResponsibleSeller: (id: string, sellerId: string, reason: string) =>
+  reassignResponsibleSeller: (id: string, sellerId: string, reason?: string) =>
     api.put(`/sales/contracts/${id}/responsible-seller`, { sellerId, reason }),
 
   assignLegacyRealizedCredit: (id: string, sellerId: string, reason: string) =>

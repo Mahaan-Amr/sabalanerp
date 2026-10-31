@@ -1,3 +1,6 @@
+import { exactQuantityText } from './exactQuantity';
+import { assertLoadingSalesInvoice } from './salesDispatchInvoice/service';
+import { SalesInvoiceError } from './salesDispatchInvoice/source';
 import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
 import { createHash, randomUUID } from 'node:crypto';
 import { assertOrdinaryContractsDispatchEligible, ordinaryDispatchSourcesEligible } from './ordinaryContractDispatchEligibility';
@@ -16,13 +19,13 @@ export const GUARD_PHYSICAL_EXIT_REASON_CODE = 'GUARD_PHYSICAL_EXIT_CONFIRMED' a
 export const guardPhysicalExitReasonEvidence = (detail?: string) => ({ reasonCode: GUARD_PHYSICAL_EXIT_REASON_CODE,
   reasonDetail: String(detail || '').trim() || null });
 
-const stableValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(stableValue);
+const stableValue = (value: unknown, field = ''): unknown => {
+  if (Array.isArray(value)) return value.map(entry => stableValue(entry));
   if (typeof value === 'bigint') return value.toString();
-  if (value instanceof Prisma.Decimal) return value.toFixed(3);
+  if (value instanceof Prisma.Decimal) return field.toLowerCase().includes('quantity') ? exactQuantityText(value) : value.toFixed(3);
   if (value instanceof Date) return value.toISOString();
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, stableValue(entry)]));
+    .sort(([left], [right]) => left.localeCompare(right)).map(([key, entry]) => [key, stableValue(entry, key)]));
   return value;
 };
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(stableValue(value))).digest('hex');
@@ -116,6 +119,9 @@ export class PhysicalGateExitService {
       }
       const waybill = authorization.waybill;
       const revision = waybill.candidate.allocationRevision;
+      let salesInvoiceId: string;
+      try { salesInvoiceId = await assertLoadingSalesInvoice(tx, revision.loadingId); }
+      catch (error) { if (error instanceof SalesInvoiceError) throw new PhysicalGateExitConflictError(error.message); throw error; }
       await assertOrdinaryContractsDispatchEligible(tx, revision.lines.map(line => line.sourceContractId), PhysicalGateExitConflictError);
       await assertPartnerCommercialDispatchEligible(tx, [revision.partnerCaseId, ...revision.lines.map(line => line.partnerCaseId)], PhysicalGateExitConflictError);
       const turn = revision.queueTurn;
@@ -142,7 +148,7 @@ export class PhysicalGateExitService {
       const plate = String(asRecord(admissionSnapshot.plate).plate || asRecord(admissionSnapshot.vehicle).plate || '').trim();
       const phoneNumber = String(notification.confirmationPhone || '').trim() || null;
       const exitId = randomUUID();
-      const snapshot = { schemaVersion: 1, authorizationId: authorization.id, authorizationIntegrityHash: authorization.integrityHash,
+      const snapshot = { schemaVersion: 1, salesInvoiceId, authorizationId: authorization.id, authorizationIntegrityHash: authorization.integrityHash,
         waybillId: waybill.id, dispatchNumber: waybill.number.toString(), waybillIntegrityHash: waybill.integrityHash,
         allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash, queueTurnId: turn.id,
         admissionIntegrityHash: turn.integrityHash, driverSource: turn.driverSource, driverId: expectedDriverId,
@@ -152,7 +158,7 @@ export class PhysicalGateExitService {
         recordedBy: actorId, snapshot: json(snapshot), integrityHash: digest(snapshot) } });
       for (const line of revision.lines) {
         const evidence = { id: `${exitId}:${line.id}`, ...shipmentSourceForAllocationLine(line),
-          productRowId: line.productRowId, unit: line.unit, kind: 'PHYSICAL_EXIT' as const, quantity: line.quantity.toFixed(3),
+          productRowId: line.productRowId, unit: line.unit, kind: 'PHYSICAL_EXIT' as const, quantity: exactQuantityText(line.quantity),
           effectiveAt: at.toISOString(), recordedAt: at.toISOString(), sourceType: 'GUARD_PHYSICAL_EXIT', sourceId: `${exitId}:${line.id}`,
           sourceVersion: 1, integrityHash: '', metadata: { loadingId: revision.loadingId, waybillId: waybill.id, physicalExitId: exitId,
             authorizationId: authorization.id, allocationLineId: line.id, allocationRevisionId: revision.id } };

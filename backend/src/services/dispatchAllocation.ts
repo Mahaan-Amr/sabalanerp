@@ -1,3 +1,4 @@
+import { exactQuantityText, ExactQuantityDecimal } from './exactQuantity';
 import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
 import { createHash } from 'node:crypto';
 import { assertOrdinaryContractsDispatchEligible } from './ordinaryContractDispatchEligibility';
@@ -18,7 +19,7 @@ import {
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
 import { isPostCutoverFinalization } from './dispatchDocuments/featureGate';
 import type { createDispatchDocuments } from './dispatchDocuments/service';
-import { AllocationPricingBindingError, assertExactStableReservationTransfer, bindFinalizedAllocationPricing } from './allocationPricingBinding';
+import { AllocationPricingBindingError, assertExactStableReservationTransfer, bindFinalizedAllocationPricing, bindApprovedAllocationPriceEvidence } from './allocationPricingBinding';
 import { createPrismaAllocationPricingBindingPort } from './allocationPricingPrismaAdapter';
 import { canonicalHash, canonicalJson, RevisionRefSchema, IdSchema, partnerError,
   type Result, type RevisionRef } from '@sabalanerp/partner-sales-contracts';
@@ -67,13 +68,13 @@ const requiredDispatchDocumentsCommands = () => {
 export class DispatchAllocationValidationError extends Error {}
 export class DispatchAllocationConflictError extends Error {}
 
-const stableValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (value instanceof Prisma.Decimal) return value.toFixed(3);
+const stableValue = (value: unknown, field = ''): unknown => {
+  if (Array.isArray(value)) return value.map(entry => stableValue(entry));
+  if (value instanceof Prisma.Decimal) return field.toLowerCase().includes('quantity') ? exactQuantityText(value) : value.toFixed(3);
   if (value && typeof value === 'object' && !(value instanceof Date)) {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => [key, stableValue(entry)]));
+      .map(([key, entry]) => [key, stableValue(entry, key)]));
   }
   return value instanceof Date ? value.toISOString() : value;
 };
@@ -85,11 +86,12 @@ const required = (value: unknown, name: string) => {
   return result;
 };
 const quantity = (value: unknown) => {
-  const result = new Prisma.Decimal(String(value));
-  if (!result.isFinite() || !result.gt(0) || result.decimalPlaces() > 3) {
-    throw new DispatchAllocationValidationError('Allocation quantities must be positive fixed-point values with at most three decimals.');
+  const result = new ExactQuantityDecimal(String(value));
+  if (!result.isFinite() || !result.gt(0) || result.decimalPlaces() > 30) {
+    throw new DispatchAllocationValidationError('Allocation quantities must be positive fixed-point values within exact storage capacity.');
   }
-  return result.toDecimalPlaces(3);
+  exactQuantityText(result);
+  return result;
 };
 const json = (value: unknown) => stableValue(value) as Prisma.InputJsonValue;
 
@@ -245,7 +247,14 @@ const bindRevisionPricing = async (tx: Tx, input: {
   }>;
 }) => {
   try {
-    return await bindFinalizedAllocationPricing(createPrismaAllocationPricingBindingPort(tx), input);
+    const port = createPrismaAllocationPricingBindingPort(tx);
+    const binding = await bindFinalizedAllocationPricing(port, input);
+    if (binding.path === 'LEGACY_WAYBILL_ONLY') {
+      // Preserve the old document path/cutover, but freeze authoritative prices
+      // before sealing this new revision so its sales invoice can be issued.
+      return { ...binding, ...await bindApprovedAllocationPriceEvidence(port, input) };
+    }
+    return binding;
   } catch (error) {
     if (error instanceof AllocationPricingBindingError) throw new DispatchAllocationConflictError(error.message);
     throw error;
@@ -294,7 +303,7 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
       const lineSnapshot = stableValue({ revisionId: revision.id, sourceKind: line.sourceKind,
         owner: { caseId: line.partnerCaseId, revision: line.partnerCaseRevision, integrityHash: line.partnerIntegrityHash },
         deliveryId: line.partnerDeliveryId, lineageId: line.partnerLineageId, productRowId: line.productRowId,
-        quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot });
+        quantity: exactQuantityText(line.quantity), unit: line.unit, snapshot: line.snapshot });
       const revisionLine = await tx.logisticsAllocationRevisionLine.create({ data: { revisionId: revision.id,
         sourceKind: 'PARTNER_CASE', sourceContractId: null, sourceContractItemId: null, productId: null,
         partnerCaseId: line.partnerCaseId, partnerCaseRevision: line.partnerCaseRevision,
@@ -303,12 +312,12 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
         quantity: line.quantity, unit: line.unit, snapshot: json(line.snapshot), integrityHash: digest(lineSnapshot) } });
       partnerPricedLines.push({ sourceKind: 'PARTNER_CASE', caseId: line.partnerCaseId,
         internalRecordId: String(input.revisionData.partnerInternalRecordId), allocationRevisionLineId: revisionLine.id,
-        productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit });
+        productRowId: line.productRowId, quantity: exactQuantityText(line.quantity), unit: line.unit });
       const evidence = { id: revisionLine.id, sourceKind: 'PARTNER_CASE' as const, contractId: null, contractItemId: null,
         partnerCaseId: line.partnerCaseId, partnerLineageId: line.partnerLineageId,
         partnerCaseRevision: line.partnerCaseRevision, partnerIntegrityHash: line.partnerIntegrityHash,
         productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_FINALIZED' as const,
-        quantity: line.quantity.toFixed(3), effectiveAt: input.finalizedAt.toISOString(), recordedAt: input.finalizedAt.toISOString(),
+        quantity: exactQuantityText(line.quantity), effectiveAt: input.finalizedAt.toISOString(), recordedAt: input.finalizedAt.toISOString(),
         sourceType: 'PARTNER_LOGISTICS_ALLOCATION_REVISION', sourceId: revisionLine.id, sourceVersion: 1,
         integrityHash: '', metadata: { loadingId: input.revisionData.loadingId, revisionId: revision.id,
           deliveryId: line.partnerDeliveryId } };
@@ -323,7 +332,7 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
     }
     const lineSnapshot = stableValue({ revisionId: revision.id, contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
-      quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot });
+      quantity: exactQuantityText(line.quantity), unit: line.unit, snapshot: line.snapshot });
     const revisionLine = await tx.logisticsAllocationRevisionLine.create({ data: {
       revisionId: revision.id, sourceContractId: line.sourceContractId, sourceContractItemId: line.sourceContractItemId,
       productRowId: line.productRowId, productId: line.productId, quantity: line.quantity, unit: line.unit,
@@ -331,10 +340,10 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
     } });
     pricedLines.push({ allocationRevisionLineId: revisionLine.id, contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId,
-      quantity: line.quantity.toFixed(3), unit: line.unit });
+      quantity: exactQuantityText(line.quantity), unit: line.unit });
     const evidence = { id: revisionLine.id, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
       productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_FINALIZED' as const,
-      quantity: line.quantity.toFixed(3), effectiveAt: input.finalizedAt.toISOString(), recordedAt: input.finalizedAt.toISOString(),
+      quantity: exactQuantityText(line.quantity), effectiveAt: input.finalizedAt.toISOString(), recordedAt: input.finalizedAt.toISOString(),
       sourceType: 'LOGISTICS_ALLOCATION_REVISION', sourceId: revisionLine.id, sourceVersion: 1, integrityHash: '',
       metadata: { loadingId: input.revisionData.loadingId, revisionId: revision.id,
         loadingLineId: input.loadingLines.get(line.sourceContractItemId) || null } };
@@ -364,7 +373,7 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
       const payload = { sourceKind: 'PARTNER_CASE' as const, caseId: row.pricingReference.caseId,
         internalRecordId: row.pricingReference.internalRecordId,
         allocationRevisionLineId: row.allocationRevisionLineId, productRowId: row.allocationRevisionLine.productRowId,
-        quantity: row.quantity.toFixed(3), unit: row.allocationRevisionLine.unit,
+        quantity: exactQuantityText(row.quantity), unit: row.allocationRevisionLine.unit,
         pricingVersionId: row.pricingReference.financialApprovalEvidenceId, pricingRowId: row.approvalEvidenceId,
         grossAmount: row.grossAmount.toFixed(12), discountAmount: row.discountAmount.toFixed(12),
         netAmount: row.netAmount.toFixed(12), consumesFinalRemainder: row.consumesFinalRemainder,
@@ -403,7 +412,7 @@ const persistFinalizedAllocationRevision = async (tx: Tx, input: {
       finalizedAt: input.finalizedAt, actorId: input.actorId, scope: input.scope,
       expectedCurrency: input.expectedCurrency, lines: pricedLines });
   }
-  if (pricingBinding.path === 'ATOMIC_WAYBILL_STATEMENT') {
+  if (pricingBinding.eventIntegrityHashes.length > 0) {
     const events = await tx.dispatchPricedAllocationEvent.findMany({ where: { allocationRevisionId: revision.id },
       orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
     for (const event of events) await appendAudit(tx, { aggregateType: 'PRICED_ALLOCATION_EVENT', aggregateId: event.id,
@@ -654,7 +663,7 @@ const finalizePartnerLoadingAllocations = async (tx: Tx, input: {
           line.partnerDeliveryId !== source.deliveryId || line.partnerLineageId !== canonical?.lineageId ||
           line.sourceContractId !== null || line.sourceContractItemId !== null || line.productId !== null ||
           line.unit !== canonical.unit || line.quantity.lte(0)) throw new DispatchAllocationConflictError('شواهد ردیف تخصیص با تحویل انتخابی همخوان نیست.');
-      requested.set(line.productRowId, (requested.get(line.productRowId) || new Prisma.Decimal(0)).add(line.quantity));
+      requested.set(line.productRowId, (requested.get(line.productRowId) || new ExactQuantityDecimal(0)).add(line.quantity));
     }
   }
   const projection = await readPartnerShipmentQuantityProjection(tx, source.owner.caseId);
@@ -672,7 +681,7 @@ const finalizePartnerLoadingAllocations = async (tx: Tx, input: {
   },
     _sum: { quantity: true } });
   for (const prior of priorDeliveryRows) {
-    const proposed = requested.get(prior.productRowId) || new Prisma.Decimal(0);
+    const proposed = requested.get(prior.productRowId) || new ExactQuantityDecimal(0);
     const selected = byRow.get(prior.productRowId);
     if (!selected || proposed.add(prior._sum.quantity || 0).gt(selected.plannedQuantity)) {
       throw new DispatchAllocationConflictError('مقدار نهایی این تحویل از برنامه مصوب بیشتر است.');
@@ -694,7 +703,7 @@ const finalizePartnerLoadingAllocations = async (tx: Tx, input: {
       revisionNumber, finalizedAt: now,
       notification: { confirmationPhone: source.recipient.phone, source: 'PARTNER_VERIFIED_CUSTOMER_OUTPUT', capturedAt: now },
       lines: draft.lines.map(line => ({ productRowId: line.productRowId,
-        lineageId: line.partnerLineageId, quantity: line.quantity.toFixed(3), unit: line.unit,
+        lineageId: line.partnerLineageId, quantity: exactQuantityText(line.quantity), unit: line.unit,
         snapshot: line.snapshot })) });
     const rows: PartnerFinalizedAllocationRow[] = draft.lines.map(line => ({ sourceKind: 'PARTNER_CASE',
       sourceContractId: null, sourceContractItemId: null, productId: null,
@@ -825,13 +834,13 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
     const projection = await readShipmentQuantityProjection(tx as unknown as PrismaClient, { contractId });
     for (const row of projection.rows) {
       if (row.health !== 'CURRENT' || !row.quantities) throw new DispatchAllocationConflictError(`Shipment row ${row.contractItemId} is not current.`);
-      available.set(row.contractItemId, { amount: new Prisma.Decimal(row.quantities.availableToLoad), unit: row.unit });
+      available.set(row.contractItemId, { amount: new ExactQuantityDecimal(row.quantities.availableToLoad), unit: row.unit });
     }
   }
   const requested = new Map<string, { amount: Prisma.Decimal; unit: string }>();
   for (const line of refreshedDrafts.flatMap((draft) => draft.lines)) {
     const current = requested.get(line.sourceContractItemId);
-    requested.set(line.sourceContractItemId, { amount: (current?.amount || new Prisma.Decimal(0)).add(line.quantity), unit: line.unit });
+    requested.set(line.sourceContractItemId, { amount: (current?.amount || new ExactQuantityDecimal(0)).add(line.quantity), unit: line.unit });
   }
   for (const [itemId, total] of requested) {
     const balance = available.get(itemId);
@@ -856,7 +865,7 @@ export const finalizeCanonicalLoadingAllocations = async (prisma: Database, inpu
       notification: { ...confirmationPhone, capturedAt: now },
       lines: draft.lines.map((line) => ({ contractId: line.sourceContractId,
         contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
-        quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot })) });
+        quantity: exactQuantityText(line.quantity), unit: line.unit, snapshot: line.snapshot })) });
     const loadingLines = new Map(loading.lines.map((line) => [line.sourceContractItemId, line.id]));
     await persistFinalizedAllocationRevision(tx, {
       revisionData: { batchId: batch.id, loadingId: loading.id, queueTurnId: draft.queueTurnId, revisionNumber,
@@ -966,9 +975,9 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     try {
       assertExactStableReservationTransfer(
         predecessorLines.map((line) => ({ contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
-          productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit })),
+          productRowId: line.productRowId, quantity: exactQuantityText(line.quantity), unit: line.unit })),
         rows.map((line) => ({ contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
-          productRowId: line.productRowId, quantity: line.quantity.toFixed(3), unit: line.unit })),
+          productRowId: line.productRowId, quantity: exactQuantityText(line.quantity), unit: line.unit })),
       );
     } catch (error) {
       if (error instanceof AllocationPricingBindingError) throw new DispatchAllocationConflictError(error.message);
@@ -983,12 +992,12 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
       if (row.health !== 'CURRENT' || !row.quantities) throw new DispatchAllocationConflictError(`Shipment row ${row.contractItemId} is not current.`);
       const transferred = stalePricingTransfer
         ? predecessorLines.filter((line) => line.sourceContractItemId === row.contractItemId)
-          .reduce((sum, line) => sum.add(line.quantity), new Prisma.Decimal(0))
-        : new Prisma.Decimal(0);
-      projections.set(row.contractItemId, { amount: new Prisma.Decimal(row.quantities.availableToLoad).add(transferred), unit: row.unit });
+          .reduce((sum, line) => sum.add(line.quantity), new ExactQuantityDecimal(0))
+        : new ExactQuantityDecimal(0);
+      projections.set(row.contractItemId, { amount: new ExactQuantityDecimal(row.quantities.availableToLoad).add(transferred), unit: row.unit });
     }
   }
-  for (const row of rows) requested.set(row.sourceContractItemId, (requested.get(row.sourceContractItemId) || new Prisma.Decimal(0)).add(row.quantity));
+  for (const row of rows) requested.set(row.sourceContractItemId, (requested.get(row.sourceContractItemId) || new ExactQuantityDecimal(0)).add(row.quantity));
   for (const [itemId, amount] of requested) {
     const projection = projections.get(itemId);
     const row = rows.find((candidate) => candidate.sourceContractItemId === itemId)!;
@@ -1011,7 +1020,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
     notification: { ...confirmationPhone, capturedAt: now },
     lines: rows.map((line) => ({ contractId: line.sourceContractId,
       contractItemId: line.sourceContractItemId, productRowId: line.productRowId, productId: line.productId,
-      quantity: line.quantity.toFixed(3), unit: line.unit, snapshot: line.snapshot })) });
+      quantity: exactQuantityText(line.quantity), unit: line.unit, snapshot: line.snapshot })) });
   const loadingLines = new Map(predecessor.loading.lines.map((line) => [line.sourceContractItemId, line.id]));
   await persistFinalizedAllocationRevision(tx, {
     revisionData: { batchId: batch.id, loadingId: predecessor.loadingId, queueTurnId: predecessor.queueTurnId,
@@ -1029,7 +1038,7 @@ export const createSuccessorAllocationRevision = async (prisma: Database, input:
       for (const line of predecessorLines) {
         const release = { id: `${revision.id}:${line.id}`, contractId: line.sourceContractId,
           contractItemId: line.sourceContractItemId, productRowId: line.productRowId, unit: line.unit,
-          kind: 'ALLOCATION_RELEASED' as const, quantity: line.quantity.toFixed(3), effectiveAt: now.toISOString(),
+          kind: 'ALLOCATION_RELEASED' as const, quantity: exactQuantityText(line.quantity), effectiveAt: now.toISOString(),
           recordedAt: now.toISOString(), sourceType: 'STALE_ALLOCATION_SUCCESSOR', sourceId: `${revision.id}:${line.id}`,
           sourceVersion: 1, integrityHash: '', metadata: { predecessorRevisionId: predecessor.id, successorRevisionId: revision.id } };
         release.integrityHash = shipmentQuantityEvidenceIntegrityHash(release);
@@ -1122,7 +1131,7 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
       const evidence = {
         id: `${candidate.id}:${line.id}`, ...source,
         productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_RELEASED' as const,
-        quantity: line.quantity.toFixed(3), effectiveAt: now.toISOString(), recordedAt: now.toISOString(),
+        quantity: exactQuantityText(line.quantity), effectiveAt: now.toISOString(), recordedAt: now.toISOString(),
         sourceType: 'ACCOUNTING_CANDIDATE_DISPOSITION', sourceId: `${candidate.id}:${line.id}`, sourceVersion: 1,
         integrityHash: '', metadata: { revisionId: candidate.allocationRevisionId, candidateId: candidate.id, revisionLineId: line.id },
       };

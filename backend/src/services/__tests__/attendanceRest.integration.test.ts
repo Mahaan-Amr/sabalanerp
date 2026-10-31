@@ -126,3 +126,18 @@ test('report filters retain known personnel, isolate selected policy and omit fu
   assert.equal(past.people.length, 0); assert(past.availablePeople.some(p => p.id === f.person.id));
   assert.equal(await tx.attendanceRecord.count({ where: { personnelId: f.person.id } }), 0);
 }));
+
+
+test('automatic prior-day unknown exit remains incomplete and reviewable without a missing-presence handover blocker', () => fixture(async (tx, f) => {
+  await assignRestPolicy(tx, { personnelIds: [f.person.id], effectiveDate: day, hasRest: false }, f.actor.id);
+  const interval = await f.interval('08:00', null);
+  const beforeScan = (await unresolvedAbsenceDays(tx, now)).find(c => c.personnelId === f.person.id && c.date === day);
+  assert(beforeScan); assert.equal(beforeScan.handoverRequired, false, 'Handover does not wait for the next person to scan');
+  await tx.attendanceInterval.update({ where: { id: interval.id }, data: { exitUnknown: true, exitSource: 'DAY_ROLLOVER' } });
+  const a = await f.accounting(); assert.equal(a.shortageMinutes, null); assert(a.issues.includes('UNKNOWN_TIME'));
+  const pending = (await unresolvedAbsenceDays(tx, now)).find(c => c.personnelId === f.person.id && c.date === day);
+  assert(pending); assert.equal(pending.handoverRequired, false);
+  await tx.attendanceInterval.update({ where: { id: interval.id }, data: { exitSource: 'MANUAL' } });
+  const manual = (await unresolvedAbsenceDays(tx, now)).find(c => c.personnelId === f.person.id && c.date === day);
+  assert(manual); assert.equal(manual.handoverRequired, true, 'Unrelated unknown time retains its review requirement');
+}));

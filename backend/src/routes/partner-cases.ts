@@ -9,7 +9,7 @@ import { technicalTransportFailure, type TechnicalFailureDiagnostic } from './pa
 import { previewPartnerWholesaleRows } from '../services/partnerSales/inquiries/wholesalePricing';
 import { canManageCommercialSettings } from '../services/ordinaryContractLifecycle';
 import { appendPartnerCommercialEvent } from '../services/partnerSales/cases/commercialEvents';
-import { approvePartnerCommercialSales, readPartnerCommercialDetails, readPartnerCommercialEditingDetails, readPartnerCommercialState, resetPartnerCommercialApprovals, lockPartnerCommercialContract, assertPartnerCommercialAvailable } from '../services/partnerSales/cases/commercialLifecycle';
+import { partnerContractCanRenew, renewPartnerContract, approvePartnerCommercialSales, readPartnerCommercialDetails, readPartnerCommercialEditingDetails, readPartnerCommercialState, resetPartnerCommercialApprovals, lockPartnerCommercialContract, assertPartnerCommercialAvailable } from '../services/partnerSales/cases/commercialLifecycle';
 import { casePdfAvailability, resolveCasePdfSnapshot } from '../services/partnerSales/customerOutput/casePdf';
 import { createCustomerOutputSnapshots } from '../services/partnerSales/customerOutput/snapshots';
 import { CustomerOutputError } from '../services/partnerSales/customerOutput/contracts';
@@ -798,7 +798,9 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const rows = await tx.partnerSaleCase.findMany({ where: body.caseId ? { id: body.caseId } : actorProfile ? { profileId: actorProfile.id } : undefined,
           orderBy: { createdAt: 'desc' }, select: { id: true, state: true, committedAt: true, commercialFlowVersion: true, pricingState: true,
             customerConfirmationState: true, headRevision: true, integrityHash: true,
-            caseNumber: true, customerContractId: true, customerContract: { select: { contractNumber: true } }, trackingCode: { select: { number: true } },
+            caseNumber: true, customerContractId: true, customerContract: { select: { contractNumber: true,
+              partnerKind: true, commercialFlowVersion: true, status: true, isInactive: true,
+              firstFinancialRecordAt: true, commercialExpiresAt: true, dispatchExpiryExempt: true } }, trackingCode: { select: { number: true } },
             head: { select: { internalProjection: true, customerProjection: true, partySnapshots: true } },
             events: { orderBy: { sequence: 'desc' }, take: body.caseId ? undefined : 0,
               select: { sequence: true, type: true, recordedAt: true } },
@@ -906,7 +908,7 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
             ...(editableRecovery ? { editRecovery: { recoveryId: editableRecovery.draftId,
               baseRevision: editableRecovery.baseRevision } } : {}),
             actions: { canContinue,
-              canRenew: !!commercial && (commercial.status === 'EXPIRED' || !!commercial.expiresAt && new Date(commercial.expiresAt) <= new Date()) && !commercial.firstFinancialRecordAt && await canManageCommercialSettings(tx, request.user!),
+              canRenew: !!row.customerContract && partnerContractCanRenew(row.customerContract, row.state) && await canManageCommercialSettings(tx, request.user!),
               canApproveSales: commit && commercialWritable && view.data.preparationCompleted !== false && !commercial?.salesApproved,
               canRejectDraft: edit && commercialWritable && commercial?.status !== 'FINAL' && !commercial?.firstFinancialRecordAt && !!commercial?.salesApproved,
               ...casePdfAvailability({ authorized: output, state: row.state, commercialFlow: !!commercial && commercial.status !== 'EXPIRED' && commercial.status !== 'CANCELLED', hasContent: Boolean(customerOutput?.success), hasSnapshot: Boolean(row.outputs[0]) }),
@@ -976,10 +978,9 @@ export function createPartnerCaseRouter(input: { database?: PrismaClient; authen
         const { root, contract } = await lockPartnerCommercialContract(tx, request.params.caseId);
         if (contract.commercialRevision !== parsed.data.revision) throw new Error('قرارداد تغییر کرده است؛ صفحه را تازه‌سازی کنید.');
         if (parsed.data.action === 'RENEW') {
-          if (contract.isInactive || contract.firstFinancialRecordAt || !(contract.status === 'EXPIRED' || contract.commercialExpiresAt && contract.commercialExpiresAt <= new Date()) || !await canManageCommercialSettings(tx, request.user!)) throw new Error('تمدید در این وضعیت مجاز نیست.');
-          // Renewal must retain the terminal state until an authorized reactivation.
-          if (!['CANCELLED', 'VOIDED'].includes(root.state)) await resetPartnerCommercialApprovals(tx, root.id, request.user!.id, parsed.data.reason);
-          await tx.salesContract.update({ where: { id: contract.id }, data: { commercialExpiresAt: new Date(Date.now() + (contract.commercialExpiryDays || 10) * 86400000) } });
+          if (!await canManageCommercialSettings(tx, request.user!)) throw new Error('تمدید فقط در اختیار مدیر فروش است.');
+          await renewPartnerContract(tx, { caseId: root.id, actorId: request.user!.id,
+            revision: parsed.data.revision, reason: parsed.data.reason! });
           return;
         }
         assertPartnerCommercialAvailable(contract);

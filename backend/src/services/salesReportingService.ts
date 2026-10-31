@@ -5,6 +5,7 @@ import * as partnerContracts from '@sabalanerp/partner-sales-contracts';
 import { projectSabalanRevenue } from './partnerSales/reporting/revenue';
 import { readPersistedPartnerEvents } from './partnerSales/events/persisted';
 import { isOrdinaryCommercialFlow } from './ordinaryContractLifecycle';
+import { assignedOrdinaryContractWhere } from './salesContractAccess';
 
 const DAY = 86_400_000;
 const REALIZED = new Set(['SIGNED', 'PRINTED']);
@@ -246,7 +247,10 @@ const validateSalesReportScope = async (access: SalesReportAccess, query: SalesR
       select: { id: true, isActive: true, departmentId: true },
     });
     const requiredDepartment = scope.departmentId && scope.departmentId !== '__no_department__' ? scope.departmentId : null;
-    if (!seller?.isActive || (requiredDepartment && seller.departmentId !== requiredDepartment)) {
+    const ownsDepartmentContract = seller?.isActive && requiredDepartment && seller.departmentId !== requiredDepartment
+      ? await prisma.salesContract.findFirst({ where: { departmentId: requiredDepartment,
+        ...assignedOrdinaryContractWhere(seller.id) }, select: { id: true } }) : null;
+    if (!seller?.isActive || (requiredDepartment && seller.departmentId !== requiredDepartment && !ownsDepartmentContract)) {
       throw new Error('Seller scope is not permitted');
     }
   }
@@ -258,7 +262,7 @@ export const buildSalesReportContractWhere = (
   query: SalesReportQuery,
 ): Prisma.SalesContractWhereInput => {
   const scope = buildSalesReportScope(access, query);
-  return {
+  const departmentWhere: Prisma.SalesContractWhereInput = {
     ...(scope.departmentId ? { departmentId: scope.departmentId } : {}),
     ...(!access.canManage ? {
       OR: [
@@ -268,6 +272,11 @@ export const buildSalesReportContractWhere = (
       ]
     } : {})
   };
+  // Department totals stay with the contract's department. A personal report
+  // also includes only that actor's explicitly assigned ordinary contracts.
+  return !access.canCompany && scope.departmentId && (!access.canManage || scope.sellerId === access.userId)
+    ? { OR: [departmentWhere, assignedOrdinaryContractWhere(access.userId)] }
+    : departmentWhere;
 };
 
 export const buildSalesReportContractPartitions = (where: Prisma.SalesContractWhereInput): {
@@ -842,7 +851,10 @@ export const getSalesReportSellers = async (access: SalesReportAccess, departmen
   }
   const targetDepartment = access.canCompany ? departmentId || undefined : access.departmentId || '__no_department__';
   return prisma.user.findMany({
-    where: { isActive: true, ...(targetDepartment ? { departmentId: targetDepartment } : {}) },
+    where: { isActive: true, ...(targetDepartment ? { OR: [
+      { departmentId: targetDepartment },
+      { responsibleSalesContracts: { some: { departmentId: targetDepartment, partnerKind: null, partnerCaseId: null } } },
+    ] } : {}) },
     select: { id: true, firstName: true, lastName: true, username: true, departmentId: true },
     orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }]
   });

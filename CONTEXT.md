@@ -2,6 +2,10 @@
 
 Sabalan ERP manages stone inventory, sales contracts, and related pricing data for Sabalan Stone. This glossary defines project-specific business terms so the product and code use the same language.
 
+**متراژ دقیق اسلب در حسابداری و ارسال**:
+مساحت نهایی اسلب که با همان مقدار دقیق توافق‌شده در تأیید مالی، رزرو بارگیری و کنترل ماندهٔ ارسال استفاده می‌شود؛ دقت نمایش، تعداد قطعات و مساحت مصرف سنگ مادر مفاهیم مستقلی هستند و مبلغ توافق‌شده با تغییر نمایش متراژ تغییر نمی‌کند.
+_Avoid_: گردکردن متراژ برای عبور از تأیید مالی، بازقیمت‌گذاری قرارداد از روی مقدار نمایشی، یا یکی‌دانستن مساحت نهایی سفارش با مصرف سنگ مادر
+
 **بازقیمت‌گذاری سیستمی ویرایش فروش همکار**:
 دریافت دوبارهٔ همهٔ نرخ‌های سیستمی برش، ابزار، پرداخت سنگ، نوع لایه و خدمات مستقل هنگام ذخیرهٔ تغییر واقعی محصولات یا خدمات در نسخهٔ تازهٔ قرارداد فروش همکار؛ قیمت دستی مشتری و قیمت سنگِ استعلام سبلان مسیر مستقل خود را حفظ می‌کنند. مشاهده، چاپ، بازیابی یا تغییر صرفِ آدرس، تحویل و پرداخت، نرخ‌های ثبت‌شده را تغییر نمی‌دهد و جزء غیرفعال یا بدون نرخ معتبر تا اصلاح انتخاب، مانع ذخیرهٔ تغییر محصولات یا خدمات است.
 _Avoid_: بازنویسی مبلغ نسخه تاریخی، جایگزینی قیمت دستی مشتری با کاتالوگ، تغییر خودکار قیمت سنگ استعلام، استفاده از نرخ قدیمی برای پنهان‌کردن جزء نامعتبر، یکی‌دانستن ابزار و پرداخت هم‌نام، یا تغییر مبلغ هنگام صرف مشاهده قرارداد
@@ -2327,7 +2331,7 @@ A permission-scoped Sales report for one seller, with ordinary Sales users fixed
 _Avoid_: giving ordinary Sales users a selector for other sellers, or calculating seller performance from contracts outside the viewer's permitted scope
 
 **مسئول فروش قرارداد**:
-The seller commercially responsible for a Sales Contract, distinct from the user who entered it. A contract converted from a potential project defaults to that project's responsible seller; otherwise it defaults to its creator, and manager-authorized reassignment requires an audit reason.
+The seller commercially responsible for a Sales Contract, distinct from the user who entered it. A contract converted from a potential project defaults to that project's responsible seller; otherwise it defaults to its creator, and authorized reassignment records an audit trail without requiring a written reason. A system administrator may assign an ordinary contract across departments; the current responsible seller can access that contract under their existing Sales permissions, while both departments and historical realized credit remain unchanged.
 _Avoid_: treating technical data entry as sales ownership, silently changing ownership, or losing the CRM project owner during conversion
 
 **ثبت‌کننده قرارداد فروش**:
@@ -2668,8 +2672,24 @@ An internal accounting print/PDF version of a sales contract. It removes the bra
 Normal money values in this accounting copy show تومان only, while the final جمع کل فاکتور shows both تومان and the ریال equivalent.
 _Avoid_: using the branded customer-facing header in the accounting copy, removing all contract identity metadata from the accounting copy, hiding the sales account/contract creator, hiding the customer/project identity needed for accounting follow-up, removing payment terms from the accounting copy, removing prices from the accounting copy, showing ریال on every dense table row, or hiding ریال from the final invoice total
 
+**فاکتور فروش ارسالی**:
+سند PDF شماره‌دار برای کل یک بارگیری نهایی‌شده با مشخصات همه راننده‌ها، قابل صدور پیش از خروج گارد و شامل مقدار بارگیری‌شده از ردیف‌های یک یا چند قرارداد با مشتری و طرف‌حساب یکسان و پروژه‌های متفاوت؛ در قرارداد همکار، قیمت فروش سبلان به همکار مبناست. شماره‌گذاری عادی و همکار مشترک و پیوسته از ۱ و بدون بازنشانی سالانه است؛ صدور و ابطال با حسابداری و مشاهده و دانلود برای حسابداری و لجستیک است، همه قراردادهای مبدأ باید دارای رکورد مالی معتبر باشند و صدورش ثبت مالی یا هزینه جدید ایجاد نمی‌کند.
+_Avoid_: یکی‌دانستن شماره این خروجی با شماره قرارداد یا شماره رکورد مالی، یا ترکیب مشتریان و طرف‌حساب‌های متفاوت
+
+**تجدید صدور فاکتور فروش ارسالی**:
+دانلود مجدد فاکتور صادرشده شماره آن را حفظ می‌کند؛ اصلاح آن با ابطال نسخه قبلی و صدور فاکتور با شماره جدید انجام می‌شود و پس از خروج، تکمیل گردش اصلاح ارسال پیش‌نیاز آن است. نسخه باطل‌شده با علامت روشن در سابقه قابل مشاهده و دانلود می‌ماند؛ اقلام و مقدارها فقط از بارگیری می‌آیند و مستقلاً در فاکتور تغییر نمی‌کنند.
+_Avoid_: تخصیص شماره تازه به هر دانلود، یا بازنویسی فاکتور قبلی به جای ابطال و صدور جدید
+
+**آمادگی خروج بارگیری دارای فاکتور فروش ارسالی**:
+خروج هر راننده یک بارگیری، علاوه بر مجوزهای معتبر خروج خودش، به تکمیل تأیید حسابداری همه بخش‌های بارگیری و صدور فاکتور معتبر برای کل آن وابسته است. تا آماده‌شدن کل بارگیری و صدور فاکتور، تأیید مستقل بار یک راننده برای خروج او کافی نیست.
+_Avoid_: خروج بخشی از بارگیری پیش از صدور فاکتور کل، یا جایگزین‌کردن مجوزهای گارد با فاکتور فروش
+
+**قرارداد فروش سنگ برای تولید یا خرید**:
+خروجی PDF حسابداری شامل همه محصولات یک قرارداد دارای رکورد مالی معتبر، برای پیگیری تولید یا خرید، بدون برنامه پرداخت.
+_Avoid_: یکی‌دانستن این خروجی با نسخه اصلی مشتری یا برنامه پرداخت قرارداد
+
 **چاپ نمره کارگاه**:
-A production-facing print/PDF version of a sales contract for workshop execution. It removes the branded/legal customer-facing header and all price-bearing information, but keeps a compact plain metadata row with contract number, contract date, print-time status, customer name only, and project/destination context so workshop sheets can be identified without exposing unnecessary customer or financial details. جدول اصلی محصولات remains the first major section and keeps all non-price production/detail rows, including product rows, سنگ مصرفی, ابزار, خدمات, برش, پرداخت سنگ, and row توضیحات, while removing purely financial total/discount rows. Price columns are removed entirely rather than left blank, and their width is redistributed to شرح، طول، عرض، مقدار/تعداد، and متراژ. It keeps برنامه تحویل with only ردیف، اقلام، متراژ/مقدار، تاریخ تحویل، and توضیحات.
+A production-facing print/PDF version of a sales contract for workshop execution. It removes the branded/legal customer-facing header and all price-bearing information, but keeps a compact plain metadata row with contract number, contract date, print-time status, customer name only, and project/destination context so workshop sheets can be identified without exposing unnecessary customer or financial details. جدول اصلی محصولات remains the first major section and keeps all non-price production/detail rows, including product rows, سنگ مصرفی, ابزار, خدمات, برش, پرداخت سنگ, and row توضیحات, while removing purely financial total/discount rows. Price columns are removed entirely rather than left blank, and their width is redistributed to شرح، طول، عرض، مقدار/تعداد، and متراژ. It keeps برنامه تحویل with ردیف، اقلام، متراژ/مقدار، تاریخ تحویل، and توضیحات, excludes برنامه پرداخت, is available only in Accounting, and requires a currently valid financially approved record for the source Contract.
 _Avoid_: exposing prices, full customer identity details, payment terms, legal text, signatures, تحویل‌گیرنده, financial total/discount rows, or blank price columns in the workshop copy, or making the workshop copy hard to identify when printed
 
 **انتخاب نسخه چاپ در حسابداری**:
@@ -3174,6 +3194,10 @@ _Avoid_: تطبیق قطعی صرفاً از روی نام، یکی‌دانست
 **خارج‌کردن فرد از ثبت خودکار حضور و غیاب**:
 متوقف‌کردن ثبت خودکار ترددهای فرد از دستگاه، با حفظ سابقه و امکان ثبت دستی طبق شرایط و مجوزهای گارد؛ این اقدام عضویت او در فهرست گارد را تغییر نمی‌دهد و حضور باز او را نمی‌بندد.
 _Avoid_: حذف پرسنل یا سوابق، حذف کاربر دستگاه، خروج خودکار از فهرست گارد، یا ساختن خروج فرضی
+
+**روز تردد پرسنل دستگاه**:
+روز تقویمی به وقت تهران که برای پرسنل غیرگارد، اولین عبور معتبر ثبت‌نشده آن ورود همان روز است؛ ثبت دستی همان روز نیز در ترتیب عبورها معتبر است. حضور باز روز گذشته با خروج نامعلوم برای اصلاح باقی می‌ماند و به‌تنهایی مانع ورود روز جدید یا تحویل شیفت گارد نیست.
+_Avoid_: خروج فرضی ساعت ۲۳:۵۹، حدس ورود صبح از برنامه کاری، انتقال خودکار کارکرد به روز بعد، یا اعمال این قاعده به حضور دستی خود گارد
 
 **وضعیت اولیه بررسی‌شده حضور**:
 اعلام داخل، بیرون یا نامعلوم بودن فرد در زمان بررسی برای آماده‌سازی آغاز ثبت خودکار؛ این اعلام به‌تنهایی وقوع ورود یا خروج، ساعت آن یا مدت حضور را اثبات نمی‌کند.

@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { createSalesInvoiceRouter } from '../services/salesDispatchInvoice/routes';
 import { lockPartnerOperationsControl } from '../services/partnerSales/authorization/technicalRollout';
 import { markCustomerAcceptance, isOrdinaryCommercialFlow, commercialDeadlinePassed, lockOrdinaryContract } from '../services/ordinaryContractLifecycle';
 import { ordinaryFinancialActionsAllowed, OrdinaryAccountingCommercialError } from '../services/ordinaryAccountingCommercialGate';
@@ -8,7 +9,8 @@ import { body, validationResult } from 'express-validator';
 import { protect, AuthRequest } from '../middleware/auth';
 import { requireWorkspaceAccess, WorkspaceRequest, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { FeatureRequest, FEATURE_PERMISSIONS, FEATURES, requireAnyNarrowFeatureAccess, requireFeatureAccess, requireNarrowFeatureAccess, type Feature } from '../middleware/feature';
-import { generatePdfFromHtml } from '../utils/pdf';
+import { generatePdfFromHtml, generatePdfBufferFromHtml } from '../utils/pdf';
+import { renderContractHtml } from '../utils/printTemplate';
 import { renderAccountingContractHtml } from '../utils/accountingPrintTemplate';
 import { readPartnerInternalDocument, renderPartnerInternalDocumentHtml,
   withPartnerInternalAccountingTarget } from '../services/partnerSales/accounting/internalDocument';
@@ -262,6 +264,7 @@ const dispatchDocuments = configureDispatchDocumentsRuntime({
   } },
 });
 router.use(createAccountingDispatchDocumentRouter({ service: dispatchDocuments, view: accountingDispatchView }));
+router.use(createSalesInvoiceRouter({ db: prisma, workspace: 'accounting', view: accountingDispatchView, edit: accountingDispatchEdit }));
 
 const accountingCorrectionsEdit = [
   protect,
@@ -386,7 +389,7 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
       const candidates = await tx.accountingDispatchCandidate.findMany({ where: { id: { in: allowedIds } }, select: {
         id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
-        allocationRevision: { select: { snapshot: true } },
+        allocationRevision: { select: { snapshot: true, loadingId: true } },
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true } },
       }, orderBy: { createdAt: 'asc' } });
@@ -394,7 +397,7 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
       return { manage, candidates: candidates.map(candidate => {
         const owner = ownerById.get(candidate.id);
         const { allocationRevision, ...candidateData } = candidate;
-        return { ...candidateData, summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
+        return { ...candidateData, loadingId: allocationRevision.loadingId, summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
           canManage: manage.allowed && Boolean(owner && (owner.sourceKind === 'SALES_CONTRACT'
           || (owner.sourceKind === 'PARTNER_CASE' && owner.partnerCaseId && writablePartnerCases.has(owner.partnerCaseId)))) };
       }) };
@@ -460,12 +463,13 @@ const resolveAccountingPdfUrl = (req: AuthRequest, pdfPath: string): string | nu
 type SalesContractPdfVariant = ContractPrintVariant;
 
 const salesContractPdfVariantFromQuery = (value: unknown): SalesContractPdfVariant => {
-  if (value === 'accounting' || value === 'workshop' || value === 'custom') return value;
+  if (value === 'accounting' || value === 'production' || value === 'workshop' || value === 'custom') return value;
   return 'original';
 };
 
 const salesContractPdfCacheKey = (variant: SalesContractPdfVariant): string => {
   if (variant === 'accounting') return 'accountingSalesPdfAccounting';
+  if (variant === 'production') return 'accountingSalesPdfProduction';
   if (variant === 'workshop') return 'accountingSalesPdfWorkshop';
   if (variant === 'custom') return 'accountingSalesPdfCustom';
   return 'print';
@@ -474,6 +478,7 @@ const salesContractPdfCacheKey = (variant: SalesContractPdfVariant): string => {
 const salesContractPdfDownloadName = (contract: any, variant: SalesContractPdfVariant): string => {
   const baseName = buildSalesContractPdfDownloadName(contract);
   if (variant === 'accounting') return baseName.replace(/\.pdf$/i, '_accounting.pdf');
+  if (variant === 'production') return baseName.replace(/\.pdf$/i, '_production.pdf');
   if (variant === 'workshop') return baseName.replace(/\.pdf$/i, '_workshop.pdf');
   if (variant === 'custom') return baseName.replace(/\.pdf$/i, '_custom.pdf');
   return baseName;
@@ -829,9 +834,21 @@ router.get('/contracts/partner/:caseId/internal-pdf', accountingContractsView, a
   try {
     const document = await readPartnerInternalDocument(req.params.caseId, req.user!.id);
     if (!document) return res.status(404).json({ success: false, error: 'سند داخلی در دسترس نیست.' });
-    const variant = ['original', 'accounting', 'workshop', 'custom'].includes(String(req.query.variant))
-      ? String(req.query.variant) as 'original' | 'accounting' | 'workshop' | 'custom' : 'accounting';
+    const variant = ['original', 'accounting', 'production', 'workshop', 'custom'].includes(String(req.query.variant))
+      ? String(req.query.variant) as ContractPrintVariant : 'accounting';
+    if (['production', 'workshop'].includes(variant) && !await prisma.accountingFinancialRecord.findFirst({ where: {
+      id: document.id, kind: 'INVOICE_CANDIDATE', status: { in: ['ISSUED', 'POSTED'] }, financiallyApprovedAt: { not: null },
+    }, select: { id: true } })) {
+      return res.status(409).json({ success: false, error: 'چاپ به رکورد مالی تأییدشده و معتبر نیاز دارد.' });
+    }
     const printOptions = { variant, customPrint: variant === 'custom' ? customPrintOptionsFromQuery(req.query) : undefined };
+    if (variant === 'production' || variant === 'workshop') {
+      const bytes = await generatePdfBufferFromHtml({ htmlContent: renderPartnerInternalDocumentHtml(document, printOptions), displayHeaderFooter: false });
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="partner_${variant}.pdf"`);
+      return res.send(bytes);
+    }
     const pdfPath = await generatePdfFromHtml({ htmlContent: renderPartnerInternalDocumentHtml(document, printOptions),
       outputDir: ACCOUNTING_PDF_DIR, fileName: `partner_internal_${document.id}_${Date.now()}`,
       landscape: false, scale: 1, widthMm: 210, heightMm: 297, displayHeaderFooter: false,
@@ -1015,7 +1032,20 @@ router.get('/contracts/:contractId/sales-pdf', accountingContractsView, async (r
     }
 
     const variant = salesContractPdfVariantFromQuery(req.query.variant);
+    if (['production', 'workshop'].includes(variant) && !await prisma.accountingFinancialRecord.findFirst({ where: {
+      contractId: contract.id, kind: 'INVOICE_CANDIDATE', status: { in: ['ISSUED', 'POSTED'] }, financiallyApprovedAt: { not: null },
+    }, select: { id: true } })) {
+      return res.status(409).json({ success: false, error: 'چاپ به رکورد مالی تأییدشده و معتبر نیاز دارد.' });
+    }
     const cacheKey = salesContractPdfCacheKey(variant);
+    if (variant === 'production' || variant === 'workshop') {
+      // These gated internal outputs have no public static-file copy or lifecycle/cache mutation.
+      const bytes = await generatePdfBufferFromHtml({ htmlContent: renderContractHtml(contract, { variant }), displayHeaderFooter: false });
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="sales_contract_${variant}.pdf"`);
+      return res.send(bytes);
+    }
     const customPrintOptions = variant === 'custom' ? customPrintOptionsFromQuery(req.query) : undefined;
     const fresh = variant !== 'original' || String(req.query.fresh || 'false').toLowerCase() === 'true';
     const shouldDownload = String(req.query.download || 'false').toLowerCase() === 'true';

@@ -1,3 +1,4 @@
+import { exactQuantityText } from '../exactQuantity';
 import { createHash, randomUUID } from 'node:crypto';
 import { assertOrdinaryContractsDispatchEligible } from '../ordinaryContractDispatchEligibility';
 import {
@@ -301,7 +302,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       for (const line of candidate.allocationRevision.lines) {
         const evidence = { id: `${candidate.id}:${line.id}`, ...shipmentSourceForAllocationLine(line),
           productRowId: line.productRowId, unit: line.unit,
-          kind: 'ALLOCATION_RELEASED' as const, quantity: line.quantity.toFixed(3), effectiveAt: at.toISOString(),
+          kind: 'ALLOCATION_RELEASED' as const, quantity: exactQuantityText(line.quantity), effectiveAt: at.toISOString(),
           recordedAt: at.toISOString(), sourceType: 'ACCOUNTING_CANDIDATE_DISPOSITION', sourceId: `${candidate.id}:${line.id}`,
           sourceVersion: 1, integrityHash: '', metadata: { revisionId: candidate.allocationRevisionId,
             candidateId: candidate.id, revisionLineId: line.id } };

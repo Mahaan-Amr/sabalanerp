@@ -4,7 +4,7 @@ import { prisma } from '../lib/prisma';
 // Handles payment business logic
 
 import { PrismaClient } from '@prisma/client';
-import { validateContractAccess } from './contractService';
+import { validateContractAccess } from './salesContractAccess';
 
 
 export interface CreatePaymentData {
@@ -98,7 +98,7 @@ export async function createPayment(
   // Validate user access
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, departmentId: true }
+    select: { id: true, role: true, departmentId: true }
   });
 
   if (!user) {
@@ -163,7 +163,7 @@ export async function getPayments(
   // Validate user access
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, departmentId: true }
+    select: { id: true, role: true, departmentId: true }
   });
 
   if (!user) {
@@ -221,7 +221,7 @@ export async function updatePayment(
   // Validate user access
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, departmentId: true }
+    select: { id: true, role: true, departmentId: true }
   });
 
   if (!user) {
@@ -291,7 +291,7 @@ export async function deletePayment(
   // Validate user access
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, departmentId: true }
+    select: { id: true, role: true, departmentId: true }
   });
 
   if (!user) {

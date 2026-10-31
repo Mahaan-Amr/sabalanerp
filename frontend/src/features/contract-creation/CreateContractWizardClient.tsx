@@ -5473,7 +5473,6 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           nextAvailableRemainingStones: smartCutPlan.remainingStones,
           previousProduct: previousLongitudinalProduct
         });
-    const missingCuttingRateWarning = shouldCutByGeometry && finalCuttingCostPerMeter <= 0;
     const calculatedCuttingCost = smartCutPlan.enabled ? smartCutPlan.totalCuttingCost : finalCuttingCost;
     const billableCuttingCost = getBillableCuttingCost({
       productType: 'longitudinal',
@@ -5542,8 +5541,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         ? 0
         : longitudinalMaterialPricing.originalTotalPrice,
       // Stone cutting is geometry-driven; pricing can be unavailable while cut still exists.
-      isCut: shouldCutByGeometry,
-      cutType: shouldCutByGeometry ? 'longitudinal' : null,
+      isCut: productConfig.isCut === true,
+      cutType: productConfig.cutType || null,
       // Preserve originalWidth if editing, otherwise use selectedProduct.widthValue
       originalWidth: (isEditMode && productConfig.originalWidth) ? productConfig.originalWidth : selectedProduct.widthValue,
       // Store originalLength when product is first created (when not from remaining stone)
@@ -5552,22 +5551,16 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         ? productConfig.originalLength
         : (lengthUnit === 'm' ? customerFields.length : (customerFields.length / 100)),
       cuttingCost: billableCuttingCost,
-      physicalCuttingCost: calculatedCuttingCost,
+      physicalCuttingCost: productConfig.physicalCuttingCost,
       cuttingCostPerMeter: finalCuttingCostPerMeter,
-      cuttingBreakdown: smartCutPlan.enabled ? smartCutPlan.cuttingBreakdown : undefined,
+      cuttingBreakdown: productConfig.cuttingBreakdown,
       smartCutPlan: (smartCutPlan.enabled || smartCutPlan.derivedQuantity) ? smartCutPlan : null,
       smartCutAllowPhysicalSplitting: !!productConfig.smartCutAllowPhysicalSplitting,
       smartCutDerivedDimension: smartCutPlan.derivedDimension || null,
       smartCutDerivedQuantity: !!smartCutPlan.derivedQuantity,
-      cutDescription:
-        productConfig.cutDescription ||
-        (shouldCutByGeometry
-          ? `برش طولی خودکار (${originalWidth}cm → ${userEnteredWidthInCm.toFixed(2)}cm)${
-              missingCuttingRateWarning ? ' - نرخ برش طولی یافت نشد و هزینه برش صفر شد.' : ''
-            }`
-          : ''),
+      cutDescription: productConfig.cutDescription || '',
       remainingStones: remainingStoneEditState.remainingStones,
-      cutDetails: (isEditMode && productConfig.cutDetails) ? productConfig.cutDetails : [],
+      cutDetails: productConfig.cutDetails || [],
       // Preserve remaining stone usage tracking when editing
       usedRemainingStones: remainingStoneEditState.usedRemainingStones,
       totalUsedRemainingWidth: remainingStoneEditState.totalUsedRemainingWidth,

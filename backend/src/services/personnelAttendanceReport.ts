@@ -21,13 +21,13 @@ export type PersonnelAttendanceSourceRow = {
   personnelLastName: string | null;
   personnel?: { firstName: string; lastName: string } | null;
   employee?: { firstName: string; lastName: string; personnelId: string | null } | null;
-  intervals: Array<{ enteredAt: Date | null; exitedAt: Date | null; status: AttendanceIntervalStatus | string; exitUnknown?: boolean; revision?: number; confirmedRevision?: number }>;
+  intervals: Array<{ enteredAt: Date | null; exitedAt: Date | null; status: AttendanceIntervalStatus | string; exitUnknown?: boolean; exitSource?: string | null; revision?: number; confirmedRevision?: number }>;
   accounting?: AccountingProjection;
 };
 
 export type PersonnelAttendanceDay = {
   date: string;
-  intervals: Array<{ enteredAt: string | null; exitedAt: string | null; exitUnknown?: boolean }>;
+  intervals: Array<{ enteredAt: string | null; exitedAt: string | null; exitUnknown?: boolean; exitSource?: string | null }>;
   physicalDurationUnknown?: boolean;
   durationUnknown?: boolean;
   provisional?: boolean;
@@ -140,7 +140,7 @@ export function buildPersonnelAttendanceReport(rows: PersonnelAttendanceSourceRo
       day.durationUnknown = row.accounting.issues.some(i => i !== 'OPEN_DAY');
       day.physicalDurationUnknown = row.accounting.issues.some(i => ['UNKNOWN_TIME', 'OVERLAPPING_ATTENDANCE'].includes(i));
       day.provisional = !row.accounting.final;
-      day.intervals.push(...valid.map(interval => ({ enteredAt: interval.enteredAt?.toISOString() || null, exitedAt: interval.exitedAt?.toISOString() || null, exitUnknown: interval.exitUnknown })));
+      day.intervals.push(...valid.map(interval => ({ enteredAt: interval.enteredAt?.toISOString() || null, exitedAt: interval.exitedAt?.toISOString() || null, exitUnknown: interval.exitUnknown, exitSource: interval.exitSource })));
       openIntervals += valid.filter(i => !i.enteredAt || !i.exitedAt || i.exitUnknown).length;
       continue;
     }
@@ -149,7 +149,7 @@ export function buildPersonnelAttendanceReport(rows: PersonnelAttendanceSourceRo
     for (const interval of valid) {
       if (!interval.enteredAt || !interval.exitedAt || interval.exitUnknown) { day.durationUnknown = true; day.physicalDurationUnknown = true; }
       if (interval.revision !== undefined && interval.revision !== interval.confirmedRevision) day.provisional = true;
-      day.intervals.push({ enteredAt: interval.enteredAt?.toISOString() || null, exitedAt: interval.exitedAt?.toISOString() || null, exitUnknown: interval.exitUnknown });
+      day.intervals.push({ enteredAt: interval.enteredAt?.toISOString() || null, exitedAt: interval.exitedAt?.toISOString() || null, exitUnknown: interval.exitUnknown, exitSource: interval.exitSource });
       if (!interval.enteredAt || !interval.exitedAt || interval.exitUnknown) { openIntervals++; continue; }
       const minutes = Math.floor((interval.exitedAt.getTime() - interval.enteredAt.getTime()) / 60_000);
       if (minutes < 0) throw new Error('بازه تردد با زمان خروج پیش از ورود یافت شد.');

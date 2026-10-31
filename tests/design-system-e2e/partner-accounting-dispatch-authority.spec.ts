@@ -35,6 +35,8 @@ for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const)
       await reply(route, view.authorities[0]);
     });
     await page.goto(`/dashboard/accounting/contracts/partner/${caseId}`);
+    await expect(page.getByText('۱۶٬۰۰۰ ریال (۱٬۶۰۰ تومان)', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/IRT/)).toHaveCount(0);
     const paper = page.getByRole('button', { name: 'ثبت امضای کاغذی مشتری', exact: true });
     const manager = page.getByRole('button', { name: 'درخواست تأیید مدیریتی', exact: true });
     await expect(paper).toBeEnabled(); await expect(manager).toBeDisabled();

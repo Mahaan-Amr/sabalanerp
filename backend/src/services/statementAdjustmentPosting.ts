@@ -1,3 +1,5 @@
+import { exactQuantityText } from './exactQuantity';
+import { readShipmentPriceCorrections } from './shipmentPricingHistory';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { approvedPricingOperationalContractItemId, mapVerifiedApprovedPricingVersion, persistedApprovedPricingInclude } from './approvedPricing';
@@ -59,7 +61,7 @@ const originalPricedEvents = async (tx: Tx, pricingRowIds: string[]): Promise<Pr
       allocationRevisionLineId: event.allocationRevisionLineId,
       pricingVersionId: event.pricingVersionId,
       pricingRowId: event.pricingRowId,
-      quantity: event.quantity.toFixed(3),
+      quantity: exactQuantityText(event.quantity),
       grossAmount: event.grossAmount.toFixed(12),
       discountAmount: event.discountAmount.toFixed(12),
       netAmount: event.netAmount.toFixed(12),
@@ -81,14 +83,7 @@ const originalPricedEvents = async (tx: Tx, pricingRowIds: string[]): Promise<Pr
 };
 
 const priorAdjustmentEvents = async (tx: Tx, pricingRowIds: Set<string>): Promise<PriorPricedAllocationEvent[]> => {
-  const adjustments = await tx.dispatchStatementAdjustment.findMany({ orderBy: [{ issuedAt: 'asc' }, { id: 'asc' }] });
-  return adjustments.flatMap((adjustment) => {
-    const snapshot = adjustment.snapshot as unknown as StatementAdjustmentSnapshot;
-    const relevant = snapshot?.schemaVersion === 1 && snapshot.lines?.some((line) => pricingRowIds.has(line.pricingRowId));
-    if (!relevant) return [];
-    return statementAdjustmentPriorEvents({ snapshot, integrityHash: adjustment.integrityHash })
-      .filter((event) => pricingRowIds.has(event.pricingRowId));
-  });
+  return readShipmentPriceCorrections(tx, [...pricingRowIds]);
 };
 
 type ImmutableAdjustmentRenderContext = {
@@ -199,7 +194,7 @@ export const planStatementAdjustment = async (tx: Tx, input: {
         throw new Error(`Correction line ${line.id} no longer matches the original frozen pricing row.`);
       }
       return { correctionLineId: line.id, contractId: line.contractId, contractItemId: line.contractItemId,
-        productRowId: line.productRowId, label: lineLabel(revisionLine), unit: line.unit, quantity: line.quantity.toFixed(3) };
+        productRowId: line.productRowId, label: lineLabel(revisionLine), unit: line.unit, quantity: exactQuantityText(line.quantity) };
     }),
     renderContext: readImmutableAdjustmentRenderContext(correction.waybill, input.artifactPreparer.templateVersion),
   });

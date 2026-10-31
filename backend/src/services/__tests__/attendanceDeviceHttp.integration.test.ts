@@ -114,6 +114,22 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
     const incomplete = await securityCall('/reports/personnel-attendance-preview', { startDate: date, endDate: date, personnelIds: [personnelId] });
     assert.equal((await incomplete.json() as { data: any }).data.people[0].durationUnknown, true);
 
+    const pendingState = await call(`/state?personnelId=${personnelId}&status=pending`, undefined, undefined, cookie);
+    assert.equal(pendingState.status, 200);
+    const pendingData = (await pendingState.json() as { data: any }).data;
+    assert(pendingData.intervals.some((i: any) => i.id === interval.id), 'Unknown exits remain in the actionable list');
+    // Filter before pagination: many recent ordinary intervals must not hide an older unresolved one.
+    const ordinaryRecord = await prisma.attendanceRecord.create({ data: { personnelId, date: new Date('2097-01-01T00:00:00Z'), status: 'PRESENT' } });
+    for (let n = 0; n < 101; n++) {
+      await prisma.attendanceInterval.create({ data: { attendanceRecordId: ordinaryRecord.id, enteredAt: new Date(Date.parse('2097-01-01T00:00:00Z') + n * 120000), exitedAt: new Date(Date.parse('2097-01-01T00:01:00Z') + n * 120000), entryRecordedBy: admin.id } });
+    }
+    const filtered = (await (await call(`/state?personnelId=${personnelId}&status=pending`, undefined, undefined, cookie)).json() as { data: any }).data;
+    assert(filtered.intervals.some((i: any) => i.id === interval.id));
+    assert(filtered.intervals.every((i: any) => i.exitUnknown || !i.enteredAt || !i.exitedAt));
+    const pagedHistory = (await (await call(`/state?personnelId=${personnelId}&status=all`, undefined, undefined, cookie)).json() as { data: any }).data;
+    assert.equal(pagedHistory.intervals.length, 100);
+    await prisma.attendanceRecord.delete({ where: { id: ordinaryRecord.id } });
+
     const before = new Date(Date.now() - 3600000);
     await prisma.attendanceTerminal.update({ where: { id: terminal.id }, data: { mode: 'ACTIVE', activatedAt: before } });
     await prisma.attendanceTerminalPeriod.updateMany({ where: { terminalId: terminal.id }, data: { mode: 'ACTIVE', startsAt: before } });

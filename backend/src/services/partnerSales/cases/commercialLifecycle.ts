@@ -20,6 +20,31 @@ export const isPartnerCommercialFlow = (contract: Pick<SalesContract, 'partnerKi
 export const partnerDeadlinePassed = (contract: Pick<SalesContract, 'firstFinancialRecordAt' | 'commercialExpiresAt' | 'dispatchExpiryExempt'>, now = new Date()) =>
   !contract.firstFinancialRecordAt && !contract.dispatchExpiryExempt && !!contract.commercialExpiresAt && contract.commercialExpiresAt <= now;
 
+/** Renewal never reactivates a cancelled/voided Case or reopens financial history. */
+export function partnerContractCanRenew(contract: Pick<SalesContract, 'partnerKind' | 'commercialFlowVersion' |
+  'status' | 'isInactive' | 'firstFinancialRecordAt' | 'commercialExpiresAt' | 'dispatchExpiryExempt'>,
+  caseState: string, now = new Date()) {
+  return isPartnerCommercialFlow(contract) && !contract.isInactive && !['CANCELLED', 'VOIDED'].includes(caseState)
+    && contract.status !== 'CANCELLED' && !contract.firstFinancialRecordAt
+    && (contract.status === 'EXPIRED' || partnerDeadlinePassed(contract, now));
+}
+
+export async function renewPartnerContract(tx: Tx, input: { caseId: string; actorId: string; revision: number; reason: string }) {
+  const reason = input.reason.trim();
+  if (!reason) throw new Error('دلیل تمدید قرارداد الزامی است.');
+  const { root, contract } = await lockPartnerCommercialContract(tx, input.caseId);
+  if (contract.commercialRevision !== input.revision) throw new Error('قرارداد تغییر کرده است؛ صفحه را تازه‌سازی کنید.');
+  if (!partnerContractCanRenew(contract, root.state)) throw new Error('قرارداد قابل تمدید نیست.');
+  await resetPartnerCommercialApprovals(tx, root.id, input.actorId, reason);
+  const updated = await tx.salesContract.update({ where: { id: contract.id }, data: {
+    commercialExpiresAt: new Date(Date.now() + (contract.commercialExpiryDays || 10) * 86_400_000),
+    signatures: { ...((contract.signatures as Record<string, Prisma.JsonValue>) || {}),
+      approve: null, sign: null, customerAcceptance: null, digitalConfirmation: null },
+  } });
+  await audit(tx, contract.id, input.actorId, 'COMMERCIAL_EXPIRY_RENEWED', contract, updated, reason);
+  return updated;
+}
+
 export async function lockPartnerCommercialContract(tx: Tx, caseId: string) {
   await tx.$queryRaw`SELECT id FROM partner_sale_cases WHERE id = ${caseId} FOR UPDATE`;
   const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: { customerContract: true, profile: { select: { userId: true } } } });

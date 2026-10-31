@@ -491,7 +491,7 @@ export default function AttendancePage() {
         )}
       </ErpSection>
       </>}
-      <PersonnelReviewDialogs state={device.state} person={reviewPerson} initial={initialMapping} onClose={() => { setReviewPerson(null); setInitialMapping(null); }} onSaved={async () => { await device.load(); await fetchAttendanceData(true); }} />
+      <PersonnelReviewDialogs onCorrect={interval => { const record = attendanceRecords.find(r => r.employee.id === reviewPerson?.id); if (record) { openIntervalDialog(record, interval, 'correct'); setReviewPerson(null); } }} state={device.state} person={reviewPerson} initial={initialMapping} onClose={() => { setReviewPerson(null); setInitialMapping(null); }} onSaved={async () => { await device.load(); await fetchAttendanceData(true); }} />
       <ErpSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} title="فیلترهای حضور و غیاب" footer={<div className="flex justify-end"><ErpButton label="مشاهده نتایج" onClick={() => setFiltersOpen(false)} variant="solid" /></div>}>
         {filterControls}
       </ErpSheet>

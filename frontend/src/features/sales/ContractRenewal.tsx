@@ -2,10 +2,12 @@
 import { useEffect, useState } from 'react';
 import { ErpButton, ErpField, ErpInlineState, ErpSheet, ErpTextarea } from '@/components/erp';
 import { salesAPI } from '@/lib/api';
+import { decidePartnerCommercial, readPartnerCases } from '@/features/partner-sales/cases/partnerCaseHttpPort';
 import { assertSuccessfulSalesResponse, getSalesOperationalErrorMessage } from './salesOperationalError';
 
-export function ContractRenewal({ contractId, onClose, onRenewed }: {
+export function ContractRenewal({ contractId, partnerCaseId, onClose, onRenewed }: {
   contractId: string | null;
+  partnerCaseId?: string;
   onClose: () => void;
   onRenewed: () => void | Promise<void>;
 }) {
@@ -17,7 +19,13 @@ export function ContractRenewal({ contractId, onClose, onRenewed }: {
     if (!contractId || pending || !reason.trim()) return;
     setPending(true); setError(null);
     try {
-      assertSuccessfulSalesResponse(await salesAPI.renewContract(contractId, reason.trim()));
+      if (partnerCaseId) {
+        const row = (await readPartnerCases(partnerCaseId))[0];
+        if (!row?.commercial || !row.actions.canRenew) throw new Error('تمدید در این وضعیت مجاز نیست؛ اطلاعات قرارداد را تازه‌سازی کنید.');
+        assertSuccessfulSalesResponse({ data: await decidePartnerCommercial(partnerCaseId, row.commercial.revision, 'RENEW', reason.trim()) });
+      } else {
+        assertSuccessfulSalesResponse(await salesAPI.renewContract(contractId, reason.trim()));
+      }
       onClose();
       await onRenewed();
     } catch (failure) {

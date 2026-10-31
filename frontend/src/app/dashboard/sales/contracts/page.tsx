@@ -752,7 +752,7 @@ function OrdinaryContractsPage() {
         />
       )}
     </ErpListPage>
-    <ContractRenewal contractId={renewalContractId} onClose={() => setRenewalContractId(null)} onRenewed={() => loadContracts(1, { append: false })} />
+    <ContractRenewal partnerCaseId={contracts.find(contract => contract.id === renewalContractId)?.partnerCaseId ?? undefined} contractId={renewalContractId} onClose={() => setRenewalContractId(null)} onRenewed={() => loadContracts(1, { append: false })} />
     </>
   );
 }

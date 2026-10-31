@@ -17,6 +17,7 @@ import {
   ErpSheet,
 } from "@/components/erp";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
+import SalesDispatchInvoices from "@/features/accounting/SalesDispatchInvoices";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
@@ -351,6 +352,11 @@ export default function AccountingDispatchPage() {
                             )}
                         </div>
                       </div>
+                    )}
+                    {candidate.loadingId && dispatchCandidates.find((item) => item.loadingId === candidate.loadingId)?.id === candidate.id && (
+                      <SalesDispatchInvoices workspace="accounting" loadingId={candidate.loadingId}
+                        canManage={candidate.canManage && dispatchCapabilities.canManageAccountingCandidates}
+                        refreshKey={dispatchCandidates}/>
                     )}
                   </ErpCard>
                 );

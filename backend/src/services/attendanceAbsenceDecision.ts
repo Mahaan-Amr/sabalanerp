@@ -1,14 +1,15 @@
+import { onlyDeferredUnknownTimes } from './attendanceDayBoundary';
 import { Prisma } from '@prisma/client';
 import { parsePersonnelAttendanceReportOptions } from './personnelAttendanceReport';
 import { loadPersonnelAttendanceAccounting } from './personnelAttendanceAccounting';
 import { restReason } from './attendanceRestPolicy';
-import { parseSecurityBusinessDate, securityDateKey } from '../utils/securityBusinessDate';
+import { parseSecurityBusinessDate, securityDateKey, securityDateKeyFromInstant } from '../utils/securityBusinessDate';
 
 export async function unresolvedAbsenceDays(db: Prisma.TransactionClient, now = new Date()) {
   const first = await db.attendanceRestPolicy.findFirst({ orderBy: { effectiveFrom: 'asc' } });
   const today = parseSecurityBusinessDate(undefined, now);
   if (!first || first.effectiveFrom > today) return [];
-  const cases: Array<{ personnelId: string; name: string; date: string; evidenceHash: string; issues: string[]; issueLabels: string[]; requiredMinutes: number | null; canConfirm: boolean }> = [];
+  const cases: Array<{ personnelId: string; name: string; date: string; evidenceHash: string; issues: string[]; issueLabels: string[]; requiredMinutes: number | null; canConfirm: boolean; handoverRequired: boolean }> = [];
   for (let from = first.effectiveFrom; from <= today; from = new Date(from.getTime() + 93 * 86400000)) {
     const end = new Date(Math.min(today.getTime(), from.getTime() + 92 * 86400000));
     const options = parsePersonnelAttendanceReportOptions({ startDate: securityDateKey(from), endDate: securityDateKey(end), mergeMatchingNames: false });
@@ -16,7 +17,7 @@ export async function unresolvedAbsenceDays(db: Prisma.TransactionClient, now = 
     for (const person of report.people) for (const day of person.days) {
       const a = day.accounting;
       if (!a || a.issues.includes('OPEN_DAY') || !a.issues.some(issue => ['MISSING_PRESENCE', 'UNKNOWN_TIME', 'OVERLAPPING_ATTENDANCE', 'LEAVE_PRESENCE_CONFLICT', 'OVERLAPPING_LEAVE', 'PENDING_AUTHORITY'].includes(issue))) continue;
-      cases.push({ personnelId: person.personnelIds[0], name: person.name, date: day.date, evidenceHash: a.evidenceHash, issues: a.issues, issueLabels: a.issueLabels, requiredMinutes: a.requiredMinutes, canConfirm: a.issues.includes('MISSING_PRESENCE') && a.issues.every(issue => issue === 'MISSING_PRESENCE') });
+      cases.push({ personnelId: person.personnelIds[0], name: person.name, date: day.date, evidenceHash: a.evidenceHash, issues: a.issues, issueLabels: a.issueLabels, requiredMinutes: a.requiredMinutes, handoverRequired: !(onlyDeferredUnknownTimes(day.intervals, securityDateKeyFromInstant(now)) && !a.issues.some(issue => ['MISSING_PRESENCE', 'OVERLAPPING_ATTENDANCE', 'LEAVE_PRESENCE_CONFLICT', 'OVERLAPPING_LEAVE', 'PENDING_AUTHORITY', 'AMBIGUOUS_DEVICE'].includes(issue))), canConfirm: a.issues.includes('MISSING_PRESENCE') && a.issues.every(issue => issue === 'MISSING_PRESENCE') });
     }
   }
   return cases;

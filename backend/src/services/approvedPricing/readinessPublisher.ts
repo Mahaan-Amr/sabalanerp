@@ -1,3 +1,4 @@
+import { exactQuantityText } from '../exactQuantity';
 import { createHash } from 'node:crypto';
 import { PricingReadinessStatus, Prisma, PrismaClient } from '@prisma/client';
 import { sumCanonicalQuantities } from '../pricedAllocationLedger';
@@ -44,7 +45,7 @@ export const publishCurrentApprovedPricingReadinessWithinTransaction = (
     schemaVersion: 1, contractId: input.contractId, pricingVersionId: version.id,
     sourceFinancialRecordId: version.sourceFinancialRecordId, pricingIntegrityHash: version.integrityHash,
     rowIntegrityHashes: version.rows.map(row => row.integrityHash),
-    sourceCount: 1, quantityTotal: sumCanonicalQuantities(version.rows.map(row => row.contractedQuantity.toFixed(3))),
+    sourceCount: 1, quantityTotal: sumCanonicalQuantities(version.rows.map(row => exactQuantityText(row.contractedQuantity))),
     amountTotal: version.grossAmount.toFixed(12),
   };
   const sourceIdentityHash = approvedPricingReadinessHash({ contractId: input.contractId,
@@ -57,7 +58,7 @@ export const publishCurrentApprovedPricingReadinessWithinTransaction = (
     if (existing.status === PricingReadinessStatus.READY && existing.reasons.length === 0
       && existing.sourceFinancialRecordId === version.sourceFinancialRecordId && existing.sourceCount === 1
       && existing.sourceIdentityHash === sourceIdentityHash
-      && existing.quantityTotal?.toFixed(3) === evidence.quantityTotal
+      && (existing.quantityTotal == null ? undefined : exactQuantityText(existing.quantityTotal)) === evidence.quantityTotal
       && existing.amountTotal?.toFixed(12) === evidence.amountTotal && existing.evidenceHash === evidenceHash) return existing;
     throw new Error('Approved-pricing readiness was already published with different evidence.');
   }

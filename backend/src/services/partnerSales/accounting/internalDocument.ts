@@ -191,7 +191,7 @@ export function renderPartnerInternalDocumentHtml(document: NonNullable<Awaited<
     <div>سند داخلی: ${escape(document.partnerContext.internalRecordNumber)}</div>
     ${totals && showMoney ? `<div>جمع اقلام: ${amount(totals.net)} ${currencyLabel} · تخفیف: ${amount(totals.discount)} ${currencyLabel} · مالیات: ${amount(totals.tax)} ${currencyLabel} · هزینه‌های جانبی: ${amount(totals.charges)} ${currencyLabel}</div>` : ''}
     ${showMoney ? `<strong>جمع خرید از سبلان: ${amount(document.amount)} ${currencyLabel} (${grouped(new Prisma.Decimal(document.amount).div(document.currency === 'IRR' ? 10 : 1))} تومان)</strong>` : unpriced && variant !== 'workshop' && options.customPrint?.showPrices !== false && options.customPrint?.showTotals !== false ? '<strong>جمع خرید از سبلان: در انتظار استعلام</strong>' : ''}
-    ${variant !== 'workshop' && options.customPrint?.showPaymentSection !== false && !document.paymentPlan?.installments.length ? '<div>برنامه پرداخت به سبلان هنوز ثبت نشده است.</div>' : ''}
+    ${variant !== 'production' && variant !== 'workshop' && options.customPrint?.showPaymentSection !== false && !document.paymentPlan?.installments.length ? '<div>برنامه پرداخت به سبلان هنوز ثبت نشده است.</div>' : ''}
     ${document.technicalEvidenceAvailable === false ? '<div>جزئیات فنی نسخه قطعی در دسترس نیست.</div>' : ''}
   </section>`;
   return html.replace('<footer class="footer">', internalSection + '<footer class="footer">');

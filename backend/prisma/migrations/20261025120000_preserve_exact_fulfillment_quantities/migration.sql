@@ -1,0 +1,36 @@
+-- Widen only; retain all existing values, identities and evidence hashes.
+-- No historical quantities or agreed amounts are recalculated.
+ALTER TABLE "accounting_inventory_cost_evidence" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "accounting_invoice_candidate_items" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "accounting_return_evidence_consumptions" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "accounting_tax_invoice_lines" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "contract_approved_pricing_rows" ALTER COLUMN "contractedQuantity" TYPE DECIMAL(65,30);
+ALTER TABLE "contract_items" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "contract_pricing_readiness_results" ALTER COLUMN "quantityTotal" TYPE DECIMAL(65,30);
+ALTER TABLE "delivery_products" ALTER COLUMN "deliveredQuantity" TYPE DECIMAL(65,30);
+ALTER TABLE "delivery_products" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "dispatch_correction_lines" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "dispatch_priced_allocation_events" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "inventory_valuation_evidence" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_allocation_draft_lines" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_allocation_revision_lines" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_corrections" ALTER COLUMN "deltaQuantity" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_driver_allocations" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_lines" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "partner_fulfillment_lineages" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "partner_priced_allocation_events" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "shipment_quantity_evidence" ALTER COLUMN "quantity" TYPE DECIMAL(65,30);
+ALTER TABLE "shipment_quantity_projections" ALTER COLUMN "availableToLoad" TYPE DECIMAL(65,30);
+ALTER TABLE "shipment_quantity_projections" ALTER COLUMN "contracted" TYPE DECIMAL(65,30);
+ALTER TABLE "shipment_quantity_projections" ALTER COLUMN "finalizedReserved" TYPE DECIMAL(65,30);
+ALTER TABLE "shipment_quantity_projections" ALTER COLUMN "physicallyDispatched" TYPE DECIMAL(65,30);
+ALTER TABLE "shipment_statement_migration_evidence" ALTER COLUMN "afterQuantityTotal" TYPE DECIMAL(65,30);
+ALTER TABLE "shipment_statement_migration_evidence" ALTER COLUMN "beforeQuantityTotal" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_lines" ALTER COLUMN "khatRas" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_lines" ALTER COLUMN "pieceCount" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_lines" ALTER COLUMN "plus" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_lines" ALTER COLUMN "minus" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_driver_allocations" ALTER COLUMN "khatRas" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_driver_allocations" ALTER COLUMN "pieceCount" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_driver_allocations" ALTER COLUMN "plus" TYPE DECIMAL(65,30);
+ALTER TABLE "logistics_loading_driver_allocations" ALTER COLUMN "minus" TYPE DECIMAL(65,30);

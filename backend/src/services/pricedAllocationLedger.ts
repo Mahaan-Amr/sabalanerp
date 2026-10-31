@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
+import { EXACT_QUANTITY_SCALE, exactQuantityText } from './exactQuantity';
 import type { ApprovedPricingVersionContract } from './dispatchDocuments/contracts';
 
-const QUANTITY_SCALE = 3;
+const QUANTITY_SCALE = EXACT_QUANTITY_SCALE;
 const MONEY_SCALE = 12;
 const ALGORITHM = 'shipment-money-allocation-v1' as const;
 
@@ -112,7 +113,8 @@ const formatFixed = (atoms: bigint, scale: number): string => {
   const sign = atoms < 0n ? '-' : '';
   const absolute = atoms < 0n ? -atoms : atoms;
   const base = pow10(scale);
-  return `${sign}${absolute / base}.${String(absolute % base).padStart(scale, '0')}`;
+  const result = `${sign}${absolute / base}.${String(absolute % base).padStart(scale, '0')}`;
+  return scale === QUANTITY_SCALE ? exactQuantityText(result) : result;
 };
 
 export const sumCanonicalQuantities = (values: string[]): string =>

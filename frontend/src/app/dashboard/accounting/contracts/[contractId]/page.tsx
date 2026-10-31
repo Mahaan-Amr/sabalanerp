@@ -530,6 +530,8 @@ export default function AccountingContractDetailPage(props: {
       if (preset === "workshop") {
         return {
           ...next,
+          showCustomerSection: false,
+          showDeliverySection: true,
           showPrices: false,
           showPaymentSection: false,
           showTotals: false,
@@ -586,6 +588,13 @@ export default function AccountingContractDetailPage(props: {
         variant: salesPdfVariant,
         ...buildCustomPrintParams(),
       };
+      if (tryPrint && (salesPdfVariant === 'production' || salesPdfVariant === 'workshop')) {
+        const response = await accountingAPI.downloadSalesContractPdf(params.contractId, pdfParams);
+        const url = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+        openPdfUrl(url, true);
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+        return;
+      }
       if (!tryPrint) {
         const response = await accountingAPI.downloadSalesContractPdf(
           params.contractId,
@@ -867,6 +876,7 @@ export default function AccountingContractDetailPage(props: {
           <AccountingContractPrintActions value={salesPdfVariant}
             options={Object.entries(salesPdfVariantLabels).map(([value, label]) => ({ value, label }))}
             onChange={value => setSalesPdfVariant(value as SalesPdfVariant)} pending={Boolean(pdfActionLoading)}
+            blockedReason={['production', 'workshop'].includes(salesPdfVariant) && !(data.financialRecords || []).some((record: any) => ['ISSUED', 'POSTED'].includes(record.status) && record.financiallyApprovedAt) ? 'این خروجی به رکورد مالی تأییدشده و معتبر نیاز دارد.' : undefined}
             onDownload={() => void openSalesContractPdf(false)} onPrint={() => void openSalesContractPdf(true)} />
           {salesPdfVariant === "custom" && <AccountingCustomPrintSettings customPrintSettings={customPrintSettings}
             setCustomPrintSettings={setCustomPrintSettings} applyCustomPreset={applyCustomPreset} />}

@@ -152,6 +152,16 @@ export const bindFinalizedAllocationPricing = async (
       'Post-cutover shipment statement finalization is paused; legacy fallback is forbidden.',
     );
   }
+  return { path: 'ATOMIC_WAYBILL_STATEMENT', ...await bindApprovedAllocationPriceEvidence(port, input) };
+};
+
+/** Shared approved-price evidence writer, without issuing documents or changing
+ * the optional shipment-statement cutover. Numbered sales invoices also need
+ * this evidence when finalizing a new loading on the pre-cutover document path. */
+export const bindApprovedAllocationPriceEvidence = async (
+  port: AllocationPricingBindingPort,
+  input: Parameters<typeof bindFinalizedAllocationPricing>[1],
+): Promise<{ pricingVersionIds: string[]; eventIntegrityHashes: string[] }> => {
   if (input.lines.some((line) => !isPositiveCanonicalQuantity(line.quantity))) {
     throw new AllocationPricingBindingError('PRICED_ALLOCATION_INVALID', 'Finalized allocation quantities must be positive.');
   }
@@ -204,5 +214,5 @@ export const bindFinalizedAllocationPricing = async (
     await port.createPricedEvent({ ...payload, integrityHash });
     hashes.push(integrityHash);
   }
-  return { path: 'ATOMIC_WAYBILL_STATEMENT', pricingVersionIds: references.map((item) => item.pricingVersionId), eventIntegrityHashes: hashes };
+  return { pricingVersionIds: references.map((item) => item.pricingVersionId), eventIntegrityHashes: hashes };
 };

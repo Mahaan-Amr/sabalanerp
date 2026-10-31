@@ -7,6 +7,7 @@ This is a Git source delivery, not a production release. The user authorized pub
 - Local application candidate: `64f4dd59d2a9e177b65be94342330b101a505da4`, including contract-save implementation `93dbd0f2` and its completed local acceptance.
 - Both remote branches initially pointed to `0c40f60d832f6ac9471f4fbec3bfd918a4225094`.
 - The candidate and remote history diverged by 255 candidate commits and 5 remote commits. Merge `30b5f1b8b75dfa31feb7e38d1aa47b4a40a71f26` preserves both histories without conflicts or rewriting.
+- During preparation, completed first-page PDF header fix `ca7910933eb00bd47ebe61d4b9556f71db50f72f` was separately published from the primary checkout. The delivery also merges that newer remote tip and retains its three source/test files.
 - Relative to the original remote tip, the merged source changes 1,868 files with 214,245 added and 2,737 removed lines, before this handoff note.
 - Existing untracked PDFs, screenshots, temporary QA and runtime artifacts remain local and are excluded from this delivery. Already tracked native evidence remains byte-identical; historical whitespace in captured output is not rewritten merely to normalize formatting.
 
@@ -30,7 +31,18 @@ The configured submodule origin is `https://github.com/Mahaan-Amr/sabalaninquiry
 
 The intended gitlink and associated source history are preserved rather than silently substituted. Publishing this parent repository does not recover the missing Inquiry bytes. ERP build success does not validate the complete three-application release.
 
+The primary checkout's existing Inquiry worktree at the prior available commit is retained. After synchronizing the parent branches, Git may report that submodule as modified because its checked-out commit cannot match the unavailable gitlink; this is the documented dependency mismatch, not omitted ERP source changes.
+
 **The coworker may retrieve/review the parent source, but must not update the server until this dependency is recovered and the complete release is validated.** Recover the original Inquiry Git objects from an earlier device, clone or backup, verify the exact commit, and publish a reachable ref in the configured submodule repository. A Git commit hash alone cannot reconstruct its missing contents. If recovery proves impossible, replacement Inquiry work requires a separately reviewed implementation and renewed acceptance; old qualification receipts do not qualify a replacement tree.
+
+On a device that still has the original Inquiry clone, first verify the object and only then publish a new source ref:
+
+```sh
+git -C apps/sabalan-inquiry cat-file -e 63407dd94f17471b030b0aa59c80313c107c3a54^{commit}
+git -C apps/sabalan-inquiry push origin 63407dd94f17471b030b0aa59c80313c107c3a54:refs/heads/codex/inquiry-browser-deployment
+```
+
+The second command is conditional on the first succeeding in that original clone. It is a handoff instruction, not a command executed by this task.
 
 ## Git handoff
 

@@ -406,9 +406,9 @@ export function createPartnerInquiryService(dependencies: PartnerInquiryDependen
         }, select: { id: true, headRevision: true, state: true, customerContractId: true } }) : undefined;
         if (command.type === 'CASE_PRICING_SUBMIT' && (!scopedCase ||
             (scopedCase.customerContractId && await partnerContractWasDeleted(tx, scopedCase.customerContractId)) ||
-            (scopedCase.state === 'COMMITTED' && (!scopedCase.customerContractId ||
-              !await partnerTechnicalCaseIsEditable(tx, { contractId: scopedCase.customerContractId,
-                caseState: scopedCase.state, actorId: dependencies.actorId }))))) {
+            (scopedCase.state === 'COMMITTED' && !scopedCase.customerContractId) ||
+            (scopedCase.customerContractId && !await partnerTechnicalCaseIsEditable(tx, {
+              contractId: scopedCase.customerContractId, caseState: scopedCase.state, actorId: dependencies.actorId })))) {
           return { ok: false, error: partnerError('STATE_CONFLICT') };
         }
         let inquiry = await tx.partnerInquiry.findUnique({ where: { id: scope }, select: {

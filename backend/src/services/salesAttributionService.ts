@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { isOrdinaryCommercialFlow, isCommerciallyFinal } from './ordinaryContractLifecycle';
+import { getEffectiveUserAccess } from './effectiveAccessService';
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -225,11 +226,8 @@ export const recordContractReactivation = async (
 
 export const reassignContractSeller = async (
   prisma: PrismaClient,
-  params: { contractId: string; nextSellerId: string; actorId: string; reason: string }
+  params: { contractId: string; nextSellerId: string; actorId: string; reason?: string }
 ) => prisma.$transaction(async (tx) => {
-  const contract = await tx.salesContract.findUnique({ where: { id: params.contractId } });
-  if (!contract) throw new Error('Contract not found');
-
   // Partner activation locks the profile before it evaluates ordinary Sales
   // responsibility. Take the same lock first so an assignment can neither
   // slip past that evaluation nor deadlock by acquiring the User first.
@@ -239,10 +237,17 @@ export const reassignContractSeller = async (
     WHERE "userId" = ${params.nextSellerId}
     FOR UPDATE
   `);
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM sales_contracts WHERE id = ${params.contractId} FOR UPDATE`);
+  const contract = await tx.salesContract.findUnique({ where: { id: params.contractId } });
+  if (!contract) throw new Error('Contract not found');
+  if (contract.isInactive) throw new Error('Inactive contracts are read-only');
+  const actor = await tx.user.findUnique({ where: { id: params.actorId }, select: { role: true, departmentId: true } });
+  if (!actor || (actor.role !== 'ADMIN' && actor.departmentId !== contract.departmentId)) throw new Error('Access denied');
   const nextSeller = await tx.user.findUnique({
     where: { id: params.nextSellerId },
     select: {
       id: true,
+      role: true,
       isActive: true,
       departmentId: true,
       partnerProfile: { select: { irreversibleAt: true } }
@@ -252,7 +257,15 @@ export const reassignContractSeller = async (
   if (nextSeller.partnerProfile?.irreversibleAt && contract.partnerKind !== 'PARTNER_CUSTOMER') {
     throw new Error('Irreversible Partner persona cannot own an ordinary Sales contract');
   }
-  if (nextSeller.departmentId !== contract.departmentId) throw new Error('Responsible seller must belong to the contract department');
+  if (nextSeller.departmentId !== contract.departmentId
+    && (actor.role !== 'ADMIN' || contract.partnerKind || contract.partnerCaseId)) {
+    throw new Error('Cross-department responsibility requires a system administrator');
+  }
+  const access = await getEffectiveUserAccess(tx, { userId: nextSeller.id, userRole: nextSeller.role });
+  if (!access.workspaces.some(item => item.workspace === 'sales')
+    || !access.features.some(item => item.feature === 'sales_contracts_view')) {
+    throw new Error('Responsible seller requires Sales contract access');
+  }
   if (contract.responsibleSellerId === nextSeller.id) return contract;
 
   const updated = await tx.salesContract.update({
@@ -266,7 +279,7 @@ export const reassignContractSeller = async (
       nextSellerId: nextSeller.id,
       changedBy: params.actorId,
       changeType: 'RESPONSIBILITY_REASSIGNED',
-      reason: params.reason
+      reason: params.reason?.trim() || 'تغییر مسئول فروش بدون دلیل متنی'
     }
   });
   return updated;

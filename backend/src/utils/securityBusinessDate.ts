@@ -17,6 +17,11 @@ export const securityDateKeyFromInstant = (value: Date) => {
 
 export const securityDateKey = (value: Date) => value.toISOString().slice(0, 10);
 
+// Manual attendance is entered to minute precision. The current server minute
+// is allowed, but no later minute is a completed real-world movement.
+export const isFutureSecurityAttendanceTime = (value: Date, now = new Date()) =>
+  Math.floor(value.getTime() / 60_000) > Math.floor(now.getTime() / 60_000);
+
 export const parseSecurityBusinessDate = (value?: unknown, fallback = new Date()) => {
   const raw = String(value || '').trim();
   const key = DATE_ONLY_RE.test(raw)

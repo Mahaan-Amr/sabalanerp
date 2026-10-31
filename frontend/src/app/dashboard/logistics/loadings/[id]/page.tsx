@@ -29,7 +29,9 @@ import {
 } from "@/components/erp";
 import { dashboardAPI, logisticsAPI } from "@/lib/api";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
+import SalesDispatchInvoices from "@/features/accounting/SalesDispatchInvoices";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
+import { loadingDriverSnapshots } from '../../loading-driver-snapshots';
 import { userFacingError } from "@/features/dispatch/userFacingError";
 import {
   StatusBadge,
@@ -145,7 +147,7 @@ export default function LoadingDetailPage() {
     );
 
   const driver = loading.driverSnapshot || {};
-  const assignedDrivers = loading.driverAssignments || [];
+  const assignedDrivers = loadingDriverSnapshots(loading).map(driverSnapshot => ({ driverSnapshot }));
   const driverSummary = loadingDriversName(loading);
   const plateSummary = assignedDrivers.length
     ? assignedDrivers
@@ -412,6 +414,7 @@ export default function LoadingDetailPage() {
         </ErpSection>
       )}
 
+      {loading.status !== 'DRAFT' && section !== 'print' && <SalesDispatchInvoices workspace="logistics" loadingId={loading.id} refreshKey={loading}/>}
       <div hidden={section !== "cases"}>
         <RoleAwareDispatchCases
           workspace="logistics"

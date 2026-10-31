@@ -85,6 +85,10 @@ export const requestAccountingSalesContractCorrection = (
     const authority = await createAuditedPartnerAuthorization(tx, { actorId: input.actorUserId, purpose: 'ACCOUNTING', channel: 'API' },
       { correlationId: input.idempotencyKey, reason }).authorize('ACCOUNTING_READ', { kind: 'CASE', id: pair.root.id });
     if (!authority.ok) throw new Error('PARTNER_CORRECTION_FORBIDDEN');
+    const { readPartnerFinancialEditBoundary } = await import('./partnerSales/cases/commercialEditPermission');
+    if ((await readPartnerFinancialEditBoundary(tx, pair.contract.id)).hasActiveRecord) {
+      throw new Error('PARTNER_CORRECTION_REQUIRES_FINANCIAL_VOID');
+    }
   }
   if (pair && !pair.root.committedAt) throw new Error('مجوز حسابداری برای قرارداد قبلاً قطعی‌شده قابل درخواست است.');
   if (!contract) throw new Error('CONTRACT_NOT_FOUND');

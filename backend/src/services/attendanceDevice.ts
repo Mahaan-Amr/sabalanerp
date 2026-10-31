@@ -1,3 +1,5 @@
+import { DAY_ROLLOVER_REASON, DAY_ROLLOVER_SOURCE, isDeferredDayExit } from './attendanceDayBoundary';
+import { unresolvedAbsenceDays } from './attendanceAbsenceDecision';
 import { createHash, randomBytes } from 'node:crypto';
 import { AttendanceIntervalStatus, AttendanceWorkScheduleStatus, Prisma } from '@prisma/client';
 import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay } from '../utils/personnelWorkSchedule';
@@ -65,8 +67,7 @@ export async function refreshDeviceAttendance(db: DB, recordId: string) {
   const delay = first?.enteredAt && record.scheduledStartTime && record.workScheduleStatus === 'WORKDAY' ? calculateDelayMinutes(time(first.enteredAt), record.scheduledStartTime) : record.workScheduleStatus === 'NON_WORKING_DAY' ? 0 : null;
   const duration = rows.reduce((n, i) => n + (i.enteredAt && i.exitedAt ? Math.floor((i.exitedAt.getTime() - i.enteredAt.getTime()) / 60000) : 0), 0);
   const overtime = pending ? null : record.workScheduleStatus === 'NON_WORKING_DAY' ? duration : last?.exitedAt && record.scheduledStartTime && record.scheduledEndTime ? calculateScheduledOvertime(time(last.exitedAt), record.scheduledStartTime, record.scheduledEndTime) : null;
-  const provisional = rows.some(i => i.confirmedRevision !== i.revision);
-  const marker = pending ? 'زمان حضور در انتظار تکمیل' : provisional ? 'تردد دستگاه تأییدنشده / موقت' : 'تردد بررسی‌شده';
+  const marker = pending ? 'زمان حضور در انتظار تکمیل' : 'تردد معتبر دستگاه؛ ثبت سیستمی';
   await db.attendanceRecord.update({ where: { id: recordId }, data: {
     entryTime: first?.enteredAt ? time(first.enteredAt) : null, exitTime: last?.exitedAt ? time(last.exitedAt) : null,
     delayMinutes: delay, overtimeMinutes: overtime, overtimePending: pending,
@@ -143,7 +144,9 @@ export async function ingestPunch(db: DB, terminalId: string, input: PunchInput,
   if (!person?.isActive || !await rostered(db, person.id, at)) return set('REVIEW', 'پرسنل فعال عضو فهرست گارد نیست');
   const rows = await db.attendanceInterval.findMany({ where: { attendanceRecord: { personnelId: person.id }, status: 'ACTIVE' }, orderBy: { enteredAt: 'asc' } });
   const boundaries = rows.flatMap(i => [...(i.enteredAt ? [{ at: i.enteredAt, direction: 'ENTRY', interval: i, source: i.entrySource }] : []), ...(i.exitedAt ? [{ at: i.exitedAt, direction: 'EXIT', interval: i, source: i.exitSource }] : [])]).sort((a, b) => a.at.getTime() - b.at.getTime());
-  const near = boundaries.filter(b => Math.abs(b.at.getTime() - at.getTime()) <= 120000);
+  const dayKey = securityDateKeyFromInstant(at);
+  const dayStart = new Date(`${dayKey}T00:00:00+03:30`);
+  const near = boundaries.filter(b => securityDateKeyFromInstant(b.at) === dayKey && Math.abs(b.at.getTime() - at.getTime()) <= 120000);
   // Linking to a manual boundary must be unambiguous and have no intervening movement.
   const manual = near.filter(b => b.source === 'MANUAL' || (b.direction === 'EXIT' && !b.source));
   const candidate = manual.length === 1 ? manual[0] : null;
@@ -152,17 +155,25 @@ export async function ingestPunch(db: DB, terminalId: string, input: PunchInput,
   }
   const previousRows = await db.$queryRaw<{ occurredAt: Date; correctedOccurredAt: Date | null }[]>`SELECT "occurredAt", "correctedOccurredAt" FROM attendance_punches WHERE "personnelId" = ${person.id} AND id <> ${punch.id} AND status IN ('APPLIED', 'CONFIRMED', 'LINKED') AND COALESCE("correctedOccurredAt", "occurredAt") <= ${at} ORDER BY COALESCE("correctedOccurredAt", "occurredAt") DESC LIMIT 1`;
   const previous = previousRows[0];
-  if (previous && at.getTime() - (previous.correctedOccurredAt || previous.occurredAt).getTime() <= 10000) return set('DUPLICATE', 'اسکن تکراری احتمالی تا ۱۰ ثانیه');
-  if (await db.attendancePunch.findFirst({ where: { personnelId: person.id, id: { not: punch.id }, occurredAt: { lte: at }, status: 'REVIEW' } })) return set('REVIEW', 'تردد وابسته به ابهام قبلی');
+  if (previous && securityDateKeyFromInstant(previous.correctedOccurredAt || previous.occurredAt) === dayKey && at.getTime() - (previous.correctedOccurredAt || previous.occurredAt).getTime() <= 10000) return set('DUPLICATE', 'اسکن تکراری احتمالی تا ۱۰ ثانیه');
+  if (await db.attendancePunch.findFirst({ where: { personnelId: person.id, id: { not: punch.id }, status: 'REVIEW', OR: [{ correctedOccurredAt: { gte: dayStart, lte: at } }, { correctedOccurredAt: null, occurredAt: { gte: dayStart, lte: at } }] } })) return set('REVIEW', 'تردد وابسته به ابهام قبلی');
   if (boundaries.some(b => b.at > at)) return set('REVIEW', 'رویداد دیررس؛ ترتیب یا ثبت دستی نیازمند بررسی');
-  const open = rows.find(i => !i.exitedAt && !i.exitUnknown);
+  const priorOpen = rows.filter(i => !i.exitedAt && !i.exitUnknown && securityDateKeyFromInstant(i.enteredAt || i.observedInsideAt!) < dayKey);
+  if (priorOpen.length > 1 || priorOpen.some(i => (i.enteredAt || i.observedInsideAt!) < terminal.activatedAt!)) return set('REVIEW', 'حضور باز قدیمی یا متعارض پیش از راه‌اندازی؛ ابتدا واقعیت سابقه را بررسی کنید.');
+  const open = rows.find(i => !i.exitedAt && !i.exitUnknown && !priorOpen.includes(i));
   if (open && !open.enteredAt) return set('REVIEW', 'ساعت ورود نامعلوم است؛ بررسی نگهبان لازم است');
-  if (open?.enteredAt && securityDateKeyFromInstant(open.enteredAt) !== securityDateKeyFromInstant(at)) return set('REVIEW', 'حضور باز روز قبل؛ خروج شبانه یا ورود تازه؟');
   const evidenceSinceMapping = boundaries.some(b => b.at >= mapping.effectiveFrom);
-  if (!evidenceSinceMapping && (mapping.initialState === 'UNKNOWN' || (mapping.initialState === 'INSIDE') !== Boolean(open))) return set('REVIEW', 'وضعیت یا ساعت ورود اولیه نامعلوم یا ناسازگار است');
+  if (!evidenceSinceMapping && securityDateKeyFromInstant(mapping.effectiveFrom) === dayKey && (mapping.initialState === 'UNKNOWN' || (mapping.initialState === 'INSIDE') !== Boolean(open))) return set('REVIEW', 'وضعیت یا ساعت ورود اولیه نامعلوم یا ناسازگار است');
   const direction = open ? 'EXIT' : 'ENTRY';
   await db.$executeRawUnsafe('SAVEPOINT attendance_apply');
   try {
+    for (const before of priorOpen) {
+      const after = await db.attendanceInterval.update({ where: { id: before.id }, data: { exitUnknown: true, exitSource: DAY_ROLLOVER_SOURCE, exitReason: DAY_ROLLOVER_REASON, exitRecordedBy: null, revision: { increment: 1 }, confirmedRevision: 0, confirmedBy: null, confirmedAt: null } });
+      const evidence = { actorType: 'SYSTEM', triggerPunchId: punch.id, dayKey, before, after };
+      await deviceAudit(db, terminalId, terminal.createdBy, 'DAY_ROLLOVER_UNKNOWN_EXIT', DAY_ROLLOVER_REASON, evidence);
+      await db.attendanceIntervalAudit.create({ data: { intervalId: before.id, actorId: terminal.createdBy, action: 'SYSTEM_DAY_ROLLOVER', reason: DAY_ROLLOVER_REASON, beforeData: JSON.parse(JSON.stringify(before)), afterData: JSON.parse(JSON.stringify({ ...after, automation: { actorType: 'SYSTEM', triggerPunchId: punch.id, dayKey } })) } });
+      await refreshDeviceAttendance(db, before.attendanceRecordId);
+    }
     await applyMovement(db, punch.id, person.id, direction, at);
     await db.$executeRawUnsafe('RELEASE SAVEPOINT attendance_apply');
   } catch (error) {
@@ -217,10 +228,11 @@ export async function markUnknownExit(db: DB, intervalId: string, reasonValue: u
 export async function reviewFingerprint(db: DB) {
   const [punches, intervals] = await Promise.all([
     db.attendancePunch.findMany({ where: { status: { in: ['REVIEW', 'DUPLICATE'] } }, select: { id: true }, orderBy: { id: 'asc' } }),
-    db.attendanceInterval.findMany({ where: { status: 'ACTIVE' }, select: { id: true, revision: true, confirmedRevision: true, enteredAt: true, exitUnknown: true }, orderBy: { id: 'asc' } }),
+    db.attendanceInterval.findMany({ where: { status: 'ACTIVE' }, select: { id: true, revision: true, confirmedRevision: true, enteredAt: true, exitUnknown: true, exitSource: true }, orderBy: { id: 'asc' } }),
   ]);
-  const pending = intervals.filter(i => i.revision !== i.confirmedRevision || !i.enteredAt || i.exitUnknown);
-  return { hash: tokenHash(JSON.stringify([punches, pending])), count: punches.length + pending.length };
+  const pending = intervals.filter(i => (!i.enteredAt || i.exitUnknown) && !isDeferredDayExit(i));
+  const missing = (await unresolvedAbsenceDays(db)).filter(c => c.handoverRequired);
+  return { hash: tokenHash(JSON.stringify([punches, pending, missing])), count: punches.length + pending.length + missing.length };
 }
 export async function requireReviewHandover(db: DB, actorId: string) {
   const pending = await reviewFingerprint(db);

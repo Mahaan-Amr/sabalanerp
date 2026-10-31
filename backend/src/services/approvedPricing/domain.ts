@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { roundContractPayableTotal, verifyContractMonetaryRounding } from '@sabalanerp/contract-product-graph';
 import { isValidFinanciallyApprovedInvoice } from '../accountingStatus';
+import { slabAccountingQuantity } from './slabAccountingQuantity';
+import { exactQuantityText } from '../exactQuantity';
 import {
   reconcileOptimizerDerivedLongitudinalQuantity,
   type OptimizerDerivedQuantityEvidence,
@@ -53,7 +55,10 @@ const exact = (value: unknown, scale: number, label: string) => {
 };
 
 const money = (value: unknown, label: string) => exact(value, 12, label);
-const quantity = (value: unknown, label: string) => exact(value, 3, label);
+const quantity = (value: unknown, label: string) => {
+  try { return exactQuantityText(value); }
+  catch { throw new ApprovedPricingEvidenceError(`${label} exceeds exact quantity capacity or is invalid`); }
+};
 
 const canonicalize = (value: unknown): unknown => {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
@@ -197,7 +202,7 @@ export const productQuantityPolicy = (productType: string, label: string) => {
   return policy;
 };
 
-const pricingCurrencyKind = (currency: string) => {
+export const pricingCurrencyKind = (currency: string) => {
   const normalized = currency.trim().toLowerCase();
   if (['تومان', 'toman', 'ØªÙˆÙ…Ø§Ù†'.toLowerCase()].includes(normalized)) return 'TOMAN';
   if (['ریال', 'rial', 'Ø±ÛŒØ§Ù„'.toLowerCase()].includes(normalized)) return 'RIAL';
@@ -250,7 +255,10 @@ const projectApprovedPricingRows = (input: {
   versionNumber: number;
   normalizedLegacyNonLayerProductRowIds: ReadonlySet<string>;
   quantityEvidenceByRow: ReadonlyMap<string, OptimizerDerivedQuantityEvidence>;
+  graphSchemaVersion: number;
+  roundingPolicy: string;
 }) => {
+  const slabQuantityEvidence: NonNullable<ReturnType<typeof slabAccountingQuantity>>[] = [];
   let selectedEligibleBase = new Prisma.Decimal(0);
   let gross = new Prisma.Decimal(0);
   const rows = input.graphRows.map((graphRow, index) => {
@@ -263,11 +271,20 @@ const projectApprovedPricingRows = (input: {
     const snapshotType = requiredString(snapshot.productType, `Product ${graphRow.productRowId} type`);
     if (snapshotType !== graphRow.productType || item.productType !== graphRow.productType) throw new ApprovedPricingEvidenceError(`Canonical row ${graphRow.productRowId} types conflict`);
     const quantityEvidence = input.quantityEvidenceByRow.get(graphRow.productRowId);
-    const quantityPolicy = quantityEvidence
+    const slabEvidence = graphRow.productType === 'slab' ? slabAccountingQuantity({
+      productRowId: graphRow.productRowId,
+      rawArea: snapshot.squareMeters,
+      canonicalArea: graphRow.requestedAreaSquareMeters,
+      graphSchemaVersion: input.graphSchemaVersion,
+      roundingPolicy: input.roundingPolicy,
+    }) : null;
+    if (slabEvidence) slabQuantityEvidence.push(slabEvidence);
+    const quantityPolicy = quantityEvidence || slabEvidence
       ? null
       : productQuantityPolicy(graphRow.productType, `Product ${graphRow.productRowId}`);
     const contracted = quantityEvidence
       ? { unit: quantityEvidence.unit, quantity: quantityEvidence.sealedQuantity }
+      : slabEvidence ? { unit: slabEvidence.unit, quantity: slabEvidence.sealedQuantity }
       : quantityPolicy!.snapshot(snapshot, `Product ${graphRow.productRowId}`);
     if (!new Prisma.Decimal(contracted.quantity).gt(0)) throw new ApprovedPricingEvidenceError(`Product ${graphRow.productRowId} quantity must be positive`);
     const snapshotItemQuantity = graphRow.productType === 'prepared' ? snapshot.preparedQuantity ?? snapshot.quantity : snapshot.quantity;
@@ -347,7 +364,7 @@ const projectApprovedPricingRows = (input: {
     };
     return { id: randomUUID(), ...rowPayload, integrityHash: approvedPricingRowIntegrityHash(rowPayload) };
   });
-  return { rows, selectedEligibleBase, gross };
+  return { rows, selectedEligibleBase, gross, slabQuantityEvidence };
 };
 
 const validateApprovalEnvelope = (source: ApprovedPricingSource, versionNumber: number) => {
@@ -618,7 +635,7 @@ export const buildApprovedPricingVersion = (
     }
   }
 
-  const { rows, selectedEligibleBase, gross } = projectApprovedPricingRows({
+  const { rows, selectedEligibleBase, gross, slabQuantityEvidence } = projectApprovedPricingRows({
     graphRows: selectedGraphRows,
     itemByRow,
     snapshotByRow,
@@ -628,6 +645,8 @@ export const buildApprovedPricingVersion = (
     versionNumber,
     normalizedLegacyNonLayerProductRowIds: new Set(discountEligibility.normalizedNonLayerProductRowIds),
     quantityEvidenceByRow,
+    graphSchemaVersion: graph.schemaVersion,
+    roundingPolicy: graph.roundingPolicy,
   });
 
   const grossAmount = money(gross, 'Approved pricing gross amount');
@@ -780,6 +799,7 @@ export const buildApprovedPricingVersion = (
         }
       : {}),
     ...(quantityNormalizations.length > 0 ? { quantityNormalizations } : {}),
+    ...(slabQuantityEvidence.length > 0 ? { quantityPrecisionEvidence: slabQuantityEvidence } : {}),
     ...(financialAmountNormalizations.length > 0 ? { financialAmountNormalizations } : {}),
     financialApproval: {
       financialRecordId: source.leaf.id,

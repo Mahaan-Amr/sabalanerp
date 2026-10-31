@@ -1,3 +1,4 @@
+import { validateContractAccess } from './salesContractAccess';
 import { partnerDispatchAccess, lockDispatchContract, dispatchAccountingHref, assertDispatchFinality } from './contractDispatchTarget';
 import { isPartnerCommercialFlow, assertPartnerCommercialAvailable } from './partnerSales/cases/commercialLifecycle';
 import { Prisma, type PrismaClient, type SalesContract } from '@prisma/client';
@@ -60,7 +61,7 @@ export const dispatchCreditAccess = async (db: CreditDb, contract: SalesContract
   const partnerRead = !partner || await partnerDispatchAccess(db, contract, actorId);
   const partnerWrite = !partner || (partnerRead && await partnerDispatchAccess(db, contract, actorId, true));
   const accounting = partnerRead && feature('accounting', 'accounting_contracts_view');
-  const sales = !partner && feature('sales', 'sales_contracts_view') && (!user.departmentId || user.departmentId === contract.departmentId);
+  const sales = !partner && feature('sales', 'sales_contracts_view') && validateContractAccess(contract, user);
   const manage = partnerWrite && await canManageDispatch(db, user.id);
   const managerDecision = await canReviewManagerDispatch(db, user.id, contract);
   const manageCustomerCredit = !partner && !!contract.customerCreditCustomerId && await canManageCustomerCredit(db, actorId);

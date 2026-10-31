@@ -1,3 +1,4 @@
+import { readPartnerFinancialEditBoundary } from './commercialEditPermission';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type SalesContract } from '@prisma/client';
 import { canonicalHash, PartnerEventSchema } from '@sabalanerp/partner-sales-contracts';
@@ -31,11 +32,18 @@ export async function recordPartnerCommercialCorrectionFinality(
   const decision = request && await tx.crossWorkspaceDuty.findFirst({ where: { sourceType: 'SALES_CONTRACT_CORRECTION',
     sourceId: request.id, sourceActionCode: 'ACCOUNTING_DECIDE_CONTRACT_CORRECTION', status: 'COMPLETED' },
     orderBy: { respondedAt: 'desc' } });
-  if (!request || !decision?.respondedByUserId || !decision.respondedAt
-    || (decision.structuredResultJson as { actionCode?: string } | null)?.actionCode !== 'APPROVE') {
+  const requiresAccounting = (await readPartnerFinancialEditBoundary(tx, contract.id)).requiresCorrection;
+  if (requiresAccounting && (!request || !decision?.respondedByUserId || !decision.respondedAt
+    || (decision.structuredResultJson as { actionCode?: string } | null)?.actionCode !== 'APPROVE')) {
     throw new Error('شواهد مجوز اصلاح قرارداد کامل نیست.');
   }
   const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+  // Pre-financial edits have commercial approval authority rather than an
+  // Accounting permission. Retain that distinction in the finality evidence.
+  const permissionId = requiresAccounting ? request!.id : `commercial-approvals:${contract.id}:${contract.commercialRevision}`;
+  const decisionId = requiresAccounting ? decision!.id : permissionId;
+  const approvedBy = requiresAccounting ? decision!.respondedByUserId! : contract.approvedBy ?? actorId;
+  const approvedAt = requiresAccounting ? decision!.respondedAt! : clock.now;
   const recordedAt = clock.now.toISOString();
   const effectiveDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(clock.now);
   const owner = views.accounting.owner;
@@ -49,10 +57,10 @@ export async function recordPartnerCommercialCorrectionFinality(
   const commandId = randomUUID();
   await tx.partnerCorrectionOpportunity.create({ data: { id: correctionId, caseId,
     predecessorRevision: effective.owner.revision, scope: 'SHARED',
-    scopeHash: await canonicalHash({ permissionId: request.id, owner, commercialRevision: contract.commercialRevision }),
-    requesterId: request.createdBy, approvedBy: decision.respondedByUserId, approvedAt: decision.respondedAt,
-    expiresAt: clock.now, calendarVersion: 'COMMON_COMMERCIAL_FINALITY_V1',
-    evidence: json({ permissionId: request.id, decisionId: decision.id, commercialRevision: contract.commercialRevision,
+    scopeHash: await canonicalHash({ permissionId, owner, commercialRevision: contract.commercialRevision }),
+    requesterId: requiresAccounting ? request!.createdBy : actorId, approvedBy, approvedAt,
+    expiresAt: new Date(Math.max(clock.now.getTime(), approvedAt.getTime() + 1)), calendarVersion: 'COMMON_COMMERCIAL_FINALITY_V1',
+    evidence: json({ permissionId, decisionId, authority: requiresAccounting ? 'ACCOUNTING_CORRECTION' : 'PRE_FINANCIAL_COMMERCIAL_APPROVALS', commercialRevision: contract.commercialRevision,
       salesApprovalRevision: contract.salesApprovalRevision, customerAcceptanceRevision: contract.customerAcceptanceRevision }) } });
   const adjustment = PartnerEventSchema.parse({ schemaVersion: 1, type: 'SABALAN_ADJUSTMENT', eventId: randomUUID(),
     commandId, correlationId: commandId, actorId, recordedAt, effectiveDate, owner,
@@ -63,7 +71,7 @@ export async function recordPartnerCommercialCorrectionFinality(
     delta, currency, commandId, evidence: json(adjustment) } });
   const correction = PartnerEventSchema.parse({ schemaVersion: 1, type: 'CORRECTION_EFFECTIVE', eventId: randomUUID(),
     commandId, correlationId: commandId, actorId, recordedAt, effectiveDate, owner,
-    predecessor: effective.owner, correctionId, scope: 'SHARED', gateEvidenceIds: [decision.id, `commercial:${contract.id}:${contract.commercialRevision}`] });
+    predecessor: effective.owner, correctionId, scope: 'SHARED', gateEvidenceIds: [decisionId, `commercial:${contract.id}:${contract.commercialRevision}`] });
   await tx.partnerSaleCase.update({ where: { id: caseId }, data: { stateRevision: { increment: 1 } } });
   for (const [index, event] of [adjustment, correction].entries()) {
     await tx.partnerCaseEvent.create({ data: { id: event.eventId, caseId, caseRevision: owner.revision,

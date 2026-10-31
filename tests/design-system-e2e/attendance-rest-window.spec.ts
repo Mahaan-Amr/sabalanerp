@@ -1,0 +1,46 @@
+import { readFileSync } from 'node:fs';
+import { expect, test } from '@playwright/test';
+import { loginAsAdmin, assertNoHorizontalOverflow, setTheme, setViewportAndZoom } from './support/design-system';
+
+test('rest entitlement stays explicit and missing-presence review uses a centered accessible modal without saving', async ({ page }) => {
+  if (process.env.ATTENDANCE_E2E_SESSION_FILE) {
+    const state = JSON.parse(readFileSync(process.env.ATTENDANCE_E2E_SESSION_FILE, 'utf8'));
+    await page.context().addCookies([state.cookie]);
+  } else await loginAsAdmin(page);
+  await page.route('**/api/hr/personnel-attendance-rest', route => route.fulfill({ json: { success: true, data: { canEdit: true, policies: [], personnel: [{ id: 'qa-person', firstName: 'نمونه', lastName: 'استراحت', attendanceRestAssignments: [] }] } } }));
+  await page.goto('/dashboard/hr/personnel/attendance-rest');
+  await expect(page.getByText('تخصیص تعیین‌نشده', { exact: true })).toBeVisible();
+  const assignment = page.getByRole('combobox', { name: 'تخصیص استراحت' });
+  await expect(assignment).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'ثبت تخصیص ۰ نفر' })).toBeDisabled();
+  await page.setViewportSize({ width: 390, height: 844 }); await assertNoHorizontalOverflow(page);
+  await page.screenshot({ animations: 'disabled', path: '.codex-tmp/attendance/rest-window-2026-10-21/rest-mobile.png', fullPage: true });
+  await page.route('**/api/attendance-device/absence-cases', route => route.fulfill({ json: { success: true, data: [{ personnelId: 'qa-person', name: 'نمونه استراحت', date: '2026-10-20', evidenceHash: 'synthetic', issueLabels: ['عدم حضور ثبت‌شده؛ نیازمند تعیین تکلیف'], requiredMinutes: 480, canConfirm: true }] } }));
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/dashboard/security/attendance');
+  const open = page.getByRole('button', { name: 'ثبت واقعیت عدم حضور', exact: true });
+  await open.click();
+  const dialog = page.getByRole('dialog', { name: 'تعیین تکلیف عدم حضور نمونه استراحت' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveCSS('opacity', '1');
+  expect(await dialog.evaluate(e => getComputedStyle(e).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+  await expect(dialog.getByRole('button', { name: 'ثبت تصمیم حسابرسی‌شده' })).toBeDisabled();
+  await expect(dialog.getByRole('checkbox')).toHaveCount(2);
+  await dialog.getByRole('checkbox').nth(0).check(); await dialog.getByRole('checkbox').nth(1).check();
+  await dialog.getByRole('textbox', { name: 'دلیل و مبنای بررسی' }).fill('آزمون رابط؛ بدون ثبت تصمیم');
+  await expect(dialog.getByRole('button', { name: 'ثبت تصمیم حسابرسی‌شده' })).toBeEnabled();
+  await dialog.getByRole('checkbox').nth(0).uncheck();
+  await expect(dialog.getByRole('button', { name: 'ثبت تصمیم حسابرسی‌شده' })).toBeDisabled();
+  const box = await dialog.boundingBox(); expect(box).not.toBeNull();
+  expect(Math.abs(box!.x + box!.width / 2 - 720)).toBeLessThan(3);
+  expect(Math.abs(box!.y + box!.height / 2 - 500)).toBeLessThan(3);
+  await page.screenshot({ animations: 'disabled', path: '.codex-tmp/attendance/rest-window-2026-10-21/absence-desktop.png' });
+  await page.keyboard.press('Escape'); await expect(dialog).toBeHidden(); await expect(open).toBeFocused();
+  await page.setViewportSize({ width: 390, height: 844 }); await open.click(); await expect(dialog).toBeVisible(); await assertNoHorizontalOverflow(page);
+  await page.screenshot({ animations: 'disabled', path: '.codex-tmp/attendance/rest-window-2026-10-21/absence-mobile.png' });
+  await page.keyboard.press('Escape'); await expect(dialog).toBeHidden();
+  await setViewportAndZoom(page, { width: 1440, height: 1000 }, 2);
+  await setTheme(page, 'light'); await open.click(); await expect(dialog).toBeVisible(); await assertNoHorizontalOverflow(page);
+  await page.screenshot({ animations: 'disabled', path: '.codex-tmp/attendance/rest-window-2026-10-21/absence-zoom-light.png' });
+  await page.keyboard.press('Escape'); await expect(dialog).toBeHidden();
+});

@@ -1,3 +1,5 @@
+import { exactQuantityText } from './exactQuantity';
+import { readShipmentPriceCorrections } from './shipmentPricingHistory';
 import { Prisma } from '@prisma/client';
 import type { AllocationPricingBindingPort, LockedPricingEvidence, PricedEventWrite, PricingReferenceWrite } from './allocationPricingBinding';
 import {
@@ -94,7 +96,7 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
             contractItemId: approvedPricingOperationalContractItemId(row),
             productRowId: row.productRowId,
             ordinal: row.ordinal,
-            contractedQuantity: row.contractedQuantity.toFixed(3),
+            contractedQuantity: exactQuantityText(row.contractedQuantity),
             unit: row.unit,
             canonicalAllInTotal: row.canonicalAllInTotal.toFixed(12),
             discountEligible: row.discountEligible,
@@ -107,7 +109,7 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
           reasons: readiness.reasons.map((reason) => ({ code: reason.code, detail: reason.detail as Record<string, unknown> })),
           sourceCount: readiness.sourceCount,
           sourceIdentityHash: readiness.sourceIdentityHash,
-          quantityTotal: readiness.quantityTotal?.toFixed(3) ?? null,
+          quantityTotal: (readiness.quantityTotal == null ? undefined : exactQuantityText(readiness.quantityTotal)) ?? null,
           amountTotal: readiness.amountTotal?.toFixed(12) ?? null,
         },
         versionIntegrityVerified: persistedApprovedPricingVersionIntegrityMatches(storedVersion),
@@ -125,7 +127,7 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
         quantity: true, grossAmount: true, discountAmount: true, netAmount: true, consumesFinalRemainder: true,
         evidence: true, integrityHash: true, recordedBy: true },
     });
-    return rows.map((row) => {
+    const original = rows.map((row) => {
       const evidence = record(row.evidence);
       const ledgerSequence = Number(evidence.ledgerSequence);
       const payload = {
@@ -133,7 +135,7 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
         allocationRevisionLineId: row.allocationRevisionLineId,
         pricingVersionId: row.pricingVersionId,
         pricingRowId: row.pricingRowId,
-        quantity: row.quantity.toFixed(3),
+        quantity: exactQuantityText(row.quantity),
         grossAmount: row.grossAmount.toFixed(12),
         discountAmount: row.discountAmount.toFixed(12),
         netAmount: row.netAmount.toFixed(12),
@@ -147,6 +149,7 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
         integrityVerified: Number.isSafeInteger(ledgerSequence) && ledgerSequence > 0
           && row.integrityHash === pricedAllocationIntegrityHash(payload) };
     });
+    return [...original, ...await readShipmentPriceCorrections(tx, pricingRowIds)];
   },
 
   createPricingReference: async (reference: PricingReferenceWrite) => {

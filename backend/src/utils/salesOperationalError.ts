@@ -27,6 +27,10 @@ export const unexpectedSalesErrorResponse = ({
 });
 
 const KNOWN_SALES_ERRORS: Record<string, string> = {
+  'Responsible seller not found or inactive': 'فروشنده انتخاب‌شده فعال نیست؛ فروشنده فعال دیگری را انتخاب کنید.',
+  'Responsible seller requires Sales contract access': 'فروشنده انتخاب‌شده دسترسی مشاهده قراردادهای فروش ندارد؛ دسترسی او را بررسی کنید.',
+  'Cross-department responsibility requires a system administrator': 'واگذاری مسئولیت به بخش دیگر فقط توسط مدیر کل مجاز است.',
+  'Irreversible Partner persona cannot own an ordinary Sales contract': 'فروشنده همکار نمی‌تواند مسئول قرارداد فروش داخلی باشد؛ فروشنده داخلی انتخاب کنید.',
   'Contract not found': 'قرارداد پیدا نشد؛ به فهرست قراردادها برگردید و قرارداد دیگری را انتخاب کنید.',
   'User not found': 'کاربر مرتبط پیدا نشد؛ صفحه را تازه‌سازی و کاربر را دوباره انتخاب کنید.',
   'Access denied': 'اجازه انجام این عملیات را ندارید؛ به صفحه قبل برگردید.',

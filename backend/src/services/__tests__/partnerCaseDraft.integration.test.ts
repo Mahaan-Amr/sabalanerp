@@ -1757,11 +1757,85 @@ test('Partner reactivation returns to note, requires manager authority, rejects 
   }, undefined, true);
 });
 
+test('final Partner without financial history permits technical entry and commercial edits without Accounting', async () => {
+  const { partnerTechnicalCaseIsEditable } = await import('../partnerSales/cases/commercialEditPermission');
+  await fixture(async (tx, ids) => {
+    const final = await finalCommercialFixture(tx, ids);
+    assert.equal(await partnerTechnicalCaseIsEditable(tx, { contractId: final.root.customerContractId!,
+      caseState: 'COMMITTED', actorId: ids.partnerId }), true);
+    const command = await reviseCommand(ids, final.input, final.owner.revision, final.owner.integrityHash, 'final-no-financial', 'COMMITTED');
+    command.intent.deliveries[0].destination = 'مقصد جدید بدون ثبت مالی';
+    command.idempotency.payloadHash = await canonicalHash({ schemaVersion: 1, type: command.type, intent: command.intent });
+    const result = await service(tx, ids).execute(command);
+    assert.ok(result.ok && result.value.case, JSON.stringify(result));
+    const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: final.root.customerContractId! } });
+    assert.equal(contract.status, 'DRAFT');
+    assert.equal(contract.salesApprovalRevision, null);
+    assert.equal(contract.customerAcceptanceRevision, null);
+    assert.equal(await tx.accountingCorrectionRequest.count({ where: { contractId: contract.id } }), 0);
+    const { approvePartnerCommercialSales, acceptPartnerCustomer } = await import('../partnerSales/cases/commercialLifecycle');
+    await approvePartnerCommercialSales(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: contract.commercialRevision });
+    await acceptPartnerCustomer(tx, { caseId: ids.caseId, actorId: ids.partnerId, revision: contract.commercialRevision, method: 'PAPER' });
+    const refinalized = await tx.salesContract.findUniqueOrThrow({ where: { id: contract.id } });
+    assert.equal(refinalized.status, 'SIGNED');
+    assert.equal(await tx.accountingCorrectionRequest.count({ where: { contractId: contract.id } }), 0);
+    assert.equal(await tx.partnerCaseEvent.count({ where: { caseId: ids.caseId, type: 'CORRECTION_EFFECTIVE' } }), 1);
+    await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+  });
+});
+
+test('Partner financial record blocks edits and correction opening until voided, then requires Accounting permission', async () => {
+  const { partnerTechnicalCaseIsEditable } = await import('../partnerSales/cases/commercialEditPermission');
+  const { openPartnerCommercialEditPermission } = await import('../crossWorkspaceDutyAdapters/salesContractCorrectionDutyAdapter');
+  await fixture(async (tx, ids) => {
+    const final = await finalCommercialFixture(tx, ids);
+    const record = await tx.accountingFinancialRecord.create({ data: { kind: 'INVOICE_CANDIDATE', status: 'DRAFT',
+      sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: final.root.internalRecordId!, amount: '200', currency: 'IRT',
+      createdBy: ids.managerId, sourceSnapshot: {}, metadata: { partnerCaseId: ids.caseId } } });
+    const technical = { contractId: final.root.customerContractId!, caseState: 'COMMITTED', actorId: ids.partnerId };
+    const command = await reviseCommand(ids, final.input, final.owner.revision, final.owner.integrityHash, 'financial-boundary', 'COMMITTED');
+    command.intent.deliveries[0].destination = 'مقصد اصلاح مالی';
+    command.idempotency.payloadHash = await canonicalHash({ schemaVersion: 1, type: command.type, intent: command.intent });
+    const permission = { contractId: final.root.customerContractId!, actorUserId: ids.responderId,
+      reason: 'اصلاح پس از ابطال رکورد مالی', requestKey: randomUUID(), now: new Date() };
+    assert.equal(await partnerTechnicalCaseIsEditable(tx, technical), false);
+    assert.equal((await service(tx, ids).execute(command)).ok, false);
+    await assert.rejects(openPartnerCommercialEditPermission(tx, permission),
+      { message: 'PARTNER_CORRECTION_REQUIRES_FINANCIAL_VOID' });
+    await tx.accountingFinancialRecord.update({ where: { id: record.id }, data: { status: 'VOIDED' } });
+    assert.equal(await partnerTechnicalCaseIsEditable(tx, technical), false, 'voiding does not erase history');
+    assert.equal((await service(tx, ids).execute(command)).ok, false);
+    await approvePartnerEdit(tx, permission);
+    assert.equal(await partnerTechnicalCaseIsEditable(tx, technical), true);
+    await tx.accountingFinancialRecord.update({ where: { id: record.id }, data: { status: 'DRAFT' } });
+    assert.equal(await partnerTechnicalCaseIsEditable(tx, technical), false, 'an existing permission cannot bypass a live record');
+    assert.equal((await service(tx, ids).execute(command)).ok, false);
+    await tx.accountingFinancialRecord.update({ where: { id: record.id }, data: { status: 'VOIDED' } });
+    const edited = await service(tx, ids).execute(command);
+    assert.ok(edited.ok && edited.value.case, JSON.stringify(edited));
+    const { resolveCurrentSabalanPlan, resolveInvoiceSabalanPlan } = await import('../partnerSales/accounting/sabalanPlanEvidence');
+    const originalPlan = await tx.partnerPaymentPlan.findFirstOrThrow({ where: { caseId: ids.caseId, purpose: 'SABALAN' },
+      orderBy: { version: 'desc' } });
+    if (!edited.ok || !edited.value.case) return;
+    const successor = await reviseCommand(ids, { ...final.input, intent: command.intent }, edited.value.case.owner.revision,
+      edited.value.case.owner.integrityHash, 'next-financial-boundary', 'COMMITTED');
+    assert.equal((await service(tx, ids).execute(successor)).ok, true);
+    const { PaymentPlanSchema } = await import('@sabalanerp/partner-sales-contracts');
+    const fallback = PaymentPlanSchema.parse(originalPlan.evidence);
+    assert.notEqual((await resolveCurrentSabalanPlan(tx, ids.caseId, fallback)).planId, originalPlan.id);
+    assert.equal((await resolveInvoiceSabalanPlan(tx, edited.value.case.owner, fallback, fallback)).planId, originalPlan.id,
+      'voided invoices can validate their retained plan after a commercial edit creates a successor');
+    await assert.rejects(resolveInvoiceSabalanPlan(tx, edited.value.case.owner, fallback,
+      { ...fallback, planId: 'missing-historical-plan' }), /Missing.*invoice payment plan/);
+  });
+});
+
 test('one Accounting permission permits repeated Partner edits, resets both approvals, expires and can be renewed', async () => {
   const openPartnerCommercialEditPermission = (db: Prisma.TransactionClient, input: Parameters<typeof approvePartnerEdit>[1]) => approvePartnerEdit(db, input);
   const { readPartnerCommercialEditPermission } = await import('../partnerSales/cases/commercialEditPermission');
   await fixture(async (tx, ids) => {
     const final = await finalCommercialFixture(tx, ids);
+    await tx.salesContract.update({ where: { id: final.root.customerContractId! }, data: { firstFinancialRecordAt: new Date() } });
     const first = await reviseCommand(ids, final.input, final.owner.revision, final.owner.integrityHash, 'shared-edit-one', 'COMMITTED');
     first.intent.deliveries[0].destination = 'تهران، مقصد ویرایش نخست';
     first.idempotency.payloadHash = await canonicalHash({ schemaVersion: 1, type: first.type, intent: first.intent });
@@ -2139,6 +2213,7 @@ test('approved committed Partner correction acquires reads and checkpoints its r
   const { PARTNER_TECHNICAL_RECOVERY_KIND } = await import('../contractRecoveryProtection');
   await fixture(async (tx, ids) => {
     const final = await finalCommercialFixture(tx, ids);
+    await tx.salesContract.update({ where: { id: final.root.customerContractId! }, data: { firstFinancialRecordAt: new Date() } });
     const staleTime = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
     await tx.salesContractEditSession.create({ data: { draftId: ids.caseId, contractId: final.root.customerContractId,
       ownerUserId: ids.partnerId, browserSessionId: 'old-browser', leaseToken: randomUUID(), schemaVersion: 1,
@@ -2182,6 +2257,7 @@ test('approved committed Partner correction acquires reads and checkpoints its r
 test('approved finalized Partner correction can request a successor price while retaining finality until commercial save', async () => {
   await fixture(async (tx, ids) => {
     const final = await finalCommercialFixture(tx, ids);
+    await tx.salesContract.update({ where: { id: final.root.customerContractId! }, data: { firstFinancialRecordAt: new Date() } });
     const inquiries = createPartnerInquiryService({ actorId: ids.partnerId, transaction: work => work(tx),
       authorize: async () => ({ ok: true, value: { evidenceId: 'fixture' } }),
       resolveInitialResponder: async () => ({ ok: true, value: { responderId: ids.responderId, eligibilityEvidence: {} } }),
@@ -2221,6 +2297,8 @@ test('Partner draft deletion preserves correction permission and financial histo
   const { readPartnerCommercialEditPermission } = await import('../partnerSales/cases/commercialEditPermission');
   await fixture(async (tx, ids) => {
     const final = await finalCommercialFixture(tx, ids);
+    await approvePartnerEdit(tx, { contractId: final.root.customerContractId!, actorUserId: ids.responderId,
+      reason: 'لغو شود', requestKey: randomUUID(), now: new Date() });
     const views = await readCurrentPartnerCaseViews(tx, ids.caseId);
     assert.ok(views?.accounting);
     const prepared = await preparePartnerFinancialSource({ view: { ...views.accounting, state: 'COMMITTED' }, partnerSellerId: ids.partnerId }, final.owner);
@@ -2230,8 +2308,6 @@ test('Partner draft deletion preserves correction permission and financial histo
       currency: prepared.value.amount.currency, createdBy: ids.managerId, sourceSnapshot: JSON.parse(JSON.stringify({ partnerPreparation: prepared.value })),
       metadata: { partnerCaseId: ids.caseId, commitmentEventId: final.root.commitmentEventId } } });
     await reconcilePartnerFinancialRealization(tx, ids.caseId, ids.managerId, `${record.id}-create`);
-    await approvePartnerEdit(tx, { contractId: final.root.customerContractId!, actorUserId: ids.responderId,
-      reason: 'لغو شود', requestKey: randomUUID(), now: new Date() });
     const remove = { kind: 'DELETE_DRAFT_ACCOUNTING_RECORD' as const, recordId: record.id, note: 'حذف پیش‌نویس برای لغو قرارداد' };
     await assert.rejects(deleteDraftAccountingRecordInTransaction(tx, remove, { userId: ids.partnerId, role: 'USER' }), /مجوز|دسترسی/);
     await tx.accountingFinancialRecord.update({ where: { id: record.id }, data: { status: 'ISSUED' } });
@@ -2388,7 +2464,13 @@ test('editor entry preserves fresh full-query decisions for finalized, approved 
           ...(row?.editRecovery ? { editRecovery: row.editRecovery } : {}) }, label);
         if (expected !== undefined) assert.equal(entry.body.data.canContinue, expected, label);
       };
-      await parity('final without correction', false);
+      await parity('final without financial history', true);
+      const record = await tx.accountingFinancialRecord.create({ data: { kind: 'INVOICE_CANDIDATE', status: 'DRAFT',
+        sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: final.root.internalRecordId!, amount: '200', currency: 'IRT',
+        createdBy: ids.managerId, sourceSnapshot: {}, metadata: { partnerCaseId: ids.caseId } } });
+      await parity('active financial record without timestamp', false);
+      await tx.accountingFinancialRecord.update({ where: { id: record.id }, data: { status: 'VOIDED' } });
+      await parity('voided financial history without correction', false);
       await approvePartnerEdit(tx, { contractId, actorUserId: ids.responderId,
         reason: 'بررسی یکسان مجوز ویرایش', requestKey: randomUUID(), now: new Date() });
       await parity('approved final correction', true);

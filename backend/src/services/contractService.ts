@@ -1,3 +1,5 @@
+import { validateContractAccess } from './salesContractAccess';
+export { validateContractAccess } from './salesContractAccess';
 import { prisma } from '../lib/prisma';
 import { enqueueContractCancellationNotice } from './contractCancellationNotice';
 import { synchronizeSellerCredit } from './contractDispatchCredit';
@@ -1046,7 +1048,7 @@ export async function updateContract(
 
   const user = await client.user.findUnique({
     where: { id: userId },
-    select: { role: true, departmentId: true }
+    select: { id: true, role: true, departmentId: true }
   });
 
   if (!user) {
@@ -1525,31 +1527,6 @@ export async function getContract(contractId: string) {
 }
 
 /**
- * Validate contract access
- */
-export function validateContractAccess(
-  contract: { departmentId: string | null },
-  user: { role: string; departmentId: string | null }
-): boolean {
-  // Admins can access all contracts
-  if (user.role === 'ADMIN') {
-    return true;
-  }
-
-  // Users can only access contracts from their department
-  if (user.departmentId && contract.departmentId === user.departmentId) {
-    return true;
-  }
-
-  // If user has no department, allow flexible access
-  if (!user.departmentId) {
-    return true;
-  }
-
-  return false;
-}
-
-/**
  * Approve contract
  */
 export async function approveContract(
@@ -1571,7 +1548,7 @@ export async function approveContract(
   }
 
   if (isOrdinaryCommercialFlow(contract)) {
-    const actor = await prisma.user.findUnique({ where: { id: userId }, select: { role: true, departmentId: true } });
+    const actor = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true, departmentId: true } });
     if (!actor || !validateContractAccess(contract, actor)) throw new Error('Access denied');
     return prisma.$transaction(async tx => {
       const updated = await approveOrdinarySales(tx, contractId, userId, note, expectedRevision);

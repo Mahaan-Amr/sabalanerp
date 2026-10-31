@@ -1,3 +1,4 @@
+import { saveRestPolicy, assignRestPolicy } from '../services/attendanceRestPolicy';
 import { correctPersonnelIdentity, identityUserSelect, personnelIdentityVersion, PersonnelIdentityError } from '../services/hrPersonnelIdentity';
 import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
@@ -1908,6 +1909,30 @@ router.put('/personnel/:id', editAccess, async (req: WorkspaceRequest, res) => {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     res.json({ success: true, data: record });
   } catch (error) { handleError(res, error, 'Update HR personnel'); }
+});
+
+router.get('/personnel-attendance-rest', viewAccess, async (req: WorkspaceRequest, res) => {
+  try {
+    const [policies, personnel, permissions] = await Promise.all([
+      prisma.attendanceRestPolicy.findMany({ orderBy: { effectiveFrom: 'desc' } }),
+      prisma.personnel.findMany({ where: { isActive: true }, select: { id: true, firstName: true, lastName: true, attendanceRestAssignments: { orderBy: { effectiveFrom: 'desc' } } }, orderBy: [{ lastName: 'asc' }, { id: 'asc' }] }),
+      activeHrActionPermissionsForUser(prisma, actorId(req)),
+    ]);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ success: true, data: { policies, personnel, canEdit: permissions.includes('MANAGE_PERSONNEL_SCHEDULE') } });
+  } catch (error) { handleError(res, error, 'Read personnel rest policy'); }
+});
+router.post('/personnel-attendance-rest/policies', editAccess, requireHrActionPermission('MANAGE_PERSONNEL_SCHEDULE'), async (req: WorkspaceRequest, res) => {
+  try {
+    const row = await prisma.$transaction(db => saveRestPolicy(db, req.body, actorId(req)), { isolationLevel: 'Serializable' });
+    res.status(201).json({ success: true, data: row });
+  } catch (error) { handleError(res, error, 'Append personnel rest policy'); }
+});
+router.post('/personnel-attendance-rest/assignments', editAccess, requireHrActionPermission('MANAGE_PERSONNEL_SCHEDULE'), async (req: WorkspaceRequest, res) => {
+  try {
+    const rows = await prisma.$transaction(db => assignRestPolicy(db, req.body, actorId(req)), { isolationLevel: 'Serializable' });
+    res.status(201).json({ success: true, data: rows });
+  } catch (error) { handleError(res, error, 'Append personnel rest assignments'); }
 });
 
 router.put('/personnel/:id/work-schedule', editAccess, requireHrActionPermission('MANAGE_PERSONNEL_SCHEDULE'), async (req: WorkspaceRequest, res) => {

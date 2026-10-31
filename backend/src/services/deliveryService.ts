@@ -4,7 +4,7 @@ import { prisma } from '../lib/prisma';
 // Handles delivery business logic
 
 import { PrismaClient } from '@prisma/client';
-import { validateContractAccess } from './contractService';
+import { validateContractAccess } from './salesContractAccess';
 
 
 export interface CreateDeliveryData {
@@ -58,7 +58,7 @@ export async function createDelivery(
   // Validate user access
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, departmentId: true }
+    select: { id: true, role: true, departmentId: true }
   });
 
   if (!user) {
@@ -118,7 +118,7 @@ export async function getDeliveries(
   // Validate user access
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, departmentId: true }
+    select: { id: true, role: true, departmentId: true }
   });
 
   if (!user) {
@@ -170,7 +170,7 @@ export async function updateDelivery(
   // Validate user access
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, departmentId: true }
+    select: { id: true, role: true, departmentId: true }
   });
 
   if (!user) {
@@ -238,7 +238,7 @@ export async function deleteDelivery(
   // Validate user access
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { role: true, departmentId: true }
+    select: { id: true, role: true, departmentId: true }
   });
 
   if (!user) {

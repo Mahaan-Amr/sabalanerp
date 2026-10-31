@@ -1,6 +1,7 @@
 'use client';
 import { ErpBadge } from '@/components/erp';
 import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPresentation';
+import { loadingDriverSnapshots } from './loading-driver-snapshots';
 
 export const statusLabels: Record<string, string> = {
   DRAFT: 'پیش‌نویس',
@@ -39,7 +40,7 @@ export const driverName = (snapshot: any) => {
 };
 
 export const loadingDriversName = (loading: any) => {
-  const drivers = loading?.drivers || loading?.driverAssignments || [];
+  const drivers = loadingDriverSnapshots(loading);
   if (drivers.length) {
     return drivers
       .map((driver: any) => {

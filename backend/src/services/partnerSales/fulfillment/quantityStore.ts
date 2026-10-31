@@ -1,3 +1,4 @@
+import { exactQuantityText } from '../../exactQuantity';
 import { Prisma } from '@prisma/client';
 import { canonicalHash, FulfillmentViewSchema, partnerError, type Result, type FulfillmentView } from '@sabalanerp/partner-sales-contracts';
 import { projectPartnerShipmentQuantities, type PartnerShipmentQuantityEvidence } from '../../shipmentQuantityProjection';
@@ -49,7 +50,7 @@ export async function capturePartnerContractedQuantities(tx: Prisma.TransactionC
     const lineage = lineages.find(row => row.productRowId === product.productRowId);
     if (!lineage || lineage.internalRecordId !== view.recordId || lineage.unit !== product.unit) return conflict();
     const quantity = new Prisma.Decimal(product.quantity);
-    if (!quantity.isFinite() || quantity.lt(0) || quantity.decimalPlaces() > 3) return conflict();
+    if (!quantity.isFinite() || quantity.lt(0) || quantity.decimalPlaces() > 30) return conflict();
     const identity = { sourceType: 'PARTNER_CASE_CONTRACTED_QUANTITY', sourceId: lineage.id, sourceVersion: view.owner.revision };
     const previous = await tx.shipmentQuantityEvidence.findUnique({ where: { sourceType_sourceId_sourceVersion: identity } });
     if (previous) {
@@ -58,7 +59,7 @@ export async function capturePartnerContractedQuantities(tx: Prisma.TransactionC
           previous.partnerIntegrityHash !== view.owner.integrityHash || previous.productRowId !== product.productRowId ||
           previous.unit !== product.unit || previous.kind !== 'CONTRACTED_SET' || !previous.quantity.equals(product.quantity) ||
           previous.integrityHash !== shipmentQuantityEvidenceIntegrityHash({ ...shipmentQuantitySourceFields(previous),
-            ...previous, quantity: previous.quantity.toFixed(3), effectiveAt: previous.effectiveAt.toISOString(),
+            ...previous, quantity: exactQuantityText(previous.quantity), effectiveAt: previous.effectiveAt.toISOString(),
             recordedAt: previous.recordedAt.toISOString(), metadata: object(previous.metadata),
             guardReturnMovementId: previous.guardReturnMovementId ?? undefined,
             returnEvidenceId: previous.returnEvidenceId ?? undefined, dispatchEvidenceId: previous.dispatchEvidenceId ?? undefined,
@@ -69,7 +70,7 @@ export async function capturePartnerContractedQuantities(tx: Prisma.TransactionC
       sourceKind: 'PARTNER_CASE', contractId: null, contractItemId: null, partnerCaseId: view.owner.caseId,
       partnerLineageId: lineage.id, partnerCaseRevision: view.owner.revision, partnerIntegrityHash: view.owner.integrityHash,
       productRowId: product.productRowId, unit: product.unit, kind: 'CONTRACTED_SET',
-      quantity: quantity.toFixed(3),
+      quantity: exactQuantityText(quantity),
       effectiveAt: (view.owner.revision === sale.committedRevision ? sale.committedAt : sale.events[0].recordedAt).toISOString(),
       recordedAt: clock.now.toISOString(), integrityHash: '', metadata: {} };
     await tx.shipmentQuantityEvidence.create({ data: { ...evidence, integrityHash: shipmentQuantityEvidenceIntegrityHash(evidence), effectiveAt: new Date(evidence.effectiveAt),
@@ -112,7 +113,7 @@ export async function readPartnerShipmentQuantityProjection(tx: Prisma.Transacti
         row.partnerLineage.caseId !== caseId || row.partnerLineage.productRowId !== row.productRowId ||
         row.partnerLineage.unit !== row.unit) return conflict();
     const fact: PartnerPersistedShipmentEvidence = { ...identity, id: row.id, productRowId: row.productRowId,
-      unit: row.unit, kind: row.kind, quantity: row.quantity.toFixed(3), effectiveAt: row.effectiveAt.toISOString(),
+      unit: row.unit, kind: row.kind, quantity: exactQuantityText(row.quantity), effectiveAt: row.effectiveAt.toISOString(),
       recordedAt: row.recordedAt.toISOString(), sourceType: row.sourceType, sourceId: row.sourceId,
       sourceVersion: row.sourceVersion, integrityHash: row.integrityHash, metadata: object(row.metadata),
       guardReturnMovementId: row.guardReturnMovementId ?? undefined, returnEvidenceId: row.returnEvidenceId ?? undefined,

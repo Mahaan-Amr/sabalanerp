@@ -1,3 +1,4 @@
+import { exactQuantityText, ExactQuantityDecimal } from '../exactQuantity';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -413,7 +414,7 @@ export const validatesStatementAdjustmentEvidence = (input: {
   if (snapshotLines.length !== correction.lines.length || new Set(snapshotLines.map((line: any) => line.correctionLineId)).size !== correction.lines.length
     || snapshotLines.some((line: any) => { const source = correctionLines.get(line.correctionLineId); return !source
       || line.contractId !== source.contractId || line.contractItemId !== source.contractItemId || line.productRowId !== source.productRowId
-      || line.unit !== source.unit || line.quantityDelta !== source.quantity.toFixed(3); })) return false;
+      || line.unit !== source.unit || line.quantityDelta !== exactQuantityText(source.quantity); })) return false;
   if (snapshotLines.some((line: any) => {
     const reference = input.pricingReferences.find(item => item.contractId === line.contractId && item.pricingVersionId === line.pricingVersionId);
     const pricingRow = reference?.pricingVersion?.rows.find(row => row.id === line.pricingRowId);
@@ -467,7 +468,7 @@ export const validatesAdjustmentLedgerContinuity = (input: {
       const ledgerSequence = Number(evidence.ledgerSequence);
       if (!Number.isSafeInteger(ledgerSequence) || ledgerSequence !== (prior?.sequence ?? 0) + 1
         || (prior && (evidence.beforeQuantity !== prior.quantity || evidence.beforeGross !== prior.gross || evidence.beforeDiscount !== prior.discount))
-        || new Prisma.Decimal(String(evidence.afterQuantity)).minus(String(evidence.beforeQuantity)).toFixed(3) !== event.quantity.toFixed(3)
+        || exactQuantityText(new ExactQuantityDecimal(String(evidence.afterQuantity)).minus(String(evidence.beforeQuantity))) !== exactQuantityText(event.quantity)
         || new Prisma.Decimal(String(evidence.afterGross)).minus(String(evidence.beforeGross)).toFixed(12) !== event.grossAmount.toFixed(12)
         || new Prisma.Decimal(String(evidence.afterDiscount)).minus(String(evidence.beforeDiscount)).toFixed(12) !== event.discountAmount.toFixed(12)
         || new Prisma.Decimal(event.grossAmount.toFixed(12)).minus(event.discountAmount.toFixed(12)).toFixed(12)
@@ -484,7 +485,7 @@ export const validatesAdjustmentLedgerContinuity = (input: {
         if (!prior || line.ledgerSequence !== prior.sequence + 1 || evidence.ledgerSequence !== line.ledgerSequence
           || evidence.beforeQuantity !== prior.quantity || evidence.beforeGross !== prior.gross || evidence.beforeDiscount !== prior.discount
           || line.afterQuantity !== evidence.afterQuantity
-          || new Prisma.Decimal(String(evidence.afterQuantity)).minus(String(evidence.beforeQuantity)).toFixed(3) !== line.quantityDelta
+          || exactQuantityText(new ExactQuantityDecimal(String(evidence.afterQuantity)).minus(String(evidence.beforeQuantity))) !== line.quantityDelta
           || new Prisma.Decimal(String(evidence.afterGross)).minus(String(evidence.beforeGross)).toFixed(12) !== line.grossAmountDelta
           || new Prisma.Decimal(String(evidence.afterDiscount)).minus(String(evidence.beforeDiscount)).toFixed(12) !== line.discountDelta) return false;
         state.set(line.pricingRowId, { sequence: line.ledgerSequence, quantity: String(evidence.afterQuantity),
@@ -537,7 +538,7 @@ export const createPrismaDispatchReplayTruthVerifier = (prisma: PrismaClient): D
     }
     for (const event of revision.pricedAllocationEvents) if (pricedAllocationIntegrityHash({ allocationRevisionId: event.allocationRevisionId,
       allocationRevisionLineId: event.allocationRevisionLineId, pricingVersionId: event.pricingVersionId, pricingRowId: event.pricingRowId,
-      quantity: event.quantity.toFixed(3), grossAmount: event.grossAmount.toFixed(12), discountAmount: event.discountAmount.toFixed(12), netAmount: event.netAmount.toFixed(12),
+      quantity: exactQuantityText(event.quantity), grossAmount: event.grossAmount.toFixed(12), discountAmount: event.discountAmount.toFixed(12), netAmount: event.netAmount.toFixed(12),
       consumesFinalRemainder: event.consumesFinalRemainder, evidence: event.evidence, recordedBy: event.recordedBy }) !== event.integrityHash) return false;
     let pricedAllocation;
     try { pricedAllocation = await readBoundPricedAllocation(tx, revision.id); } catch { return false; }
@@ -598,7 +599,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     const row = matches[0]; const metadata = row?.metadata as Record<string, unknown> | undefined;
     const normalized = row && (row.sourceKind === 'SALES_CONTRACT' ? row.contractId && row.contractItemId
       ? { id: row.id, contractId: row.contractId, contractItemId: row.contractItemId,
-      productRowId: row.productRowId, unit: row.unit, kind: row.kind, quantity: row.quantity.toFixed(3),
+      productRowId: row.productRowId, unit: row.unit, kind: row.kind, quantity: exactQuantityText(row.quantity),
       effectiveAt: row.effectiveAt.toISOString(), recordedAt: row.recordedAt.toISOString(), sourceType: row.sourceType,
       sourceId: row.sourceId, sourceVersion: row.sourceVersion, integrityHash: row.integrityHash, metadata: metadata ?? {},
       guardReturnMovementId: row.guardReturnMovementId ?? undefined, returnEvidenceId: row.returnEvidenceId ?? undefined,
@@ -607,7 +608,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
         ? { id: row.id, sourceKind: 'PARTNER_CASE' as const, contractId: null, contractItemId: null,
           partnerCaseId: row.partnerCaseId, partnerLineageId: row.partnerLineageId,
           partnerCaseRevision: row.partnerCaseRevision, partnerIntegrityHash: row.partnerIntegrityHash,
-          productRowId: row.productRowId, unit: row.unit, kind: row.kind, quantity: row.quantity.toFixed(3),
+          productRowId: row.productRowId, unit: row.unit, kind: row.kind, quantity: exactQuantityText(row.quantity),
           effectiveAt: row.effectiveAt.toISOString(), recordedAt: row.recordedAt.toISOString(), sourceType: row.sourceType,
           sourceId: row.sourceId, sourceVersion: row.sourceVersion, integrityHash: row.integrityHash, metadata: metadata ?? {},
           guardReturnMovementId: row.guardReturnMovementId ?? undefined, returnEvidenceId: row.returnEvidenceId ?? undefined,
@@ -617,7 +618,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
         partnerCaseId: lineSource.partnerCaseId, partnerLineageId: lineSource.partnerLineageId,
         partnerCaseRevision: lineSource.partnerCaseRevision, partnerIntegrityHash: lineSource.partnerIntegrityHash }
         : { contractId: lineSource.contractId, contractItemId: lineSource.contractItemId }),
-      productRowId: line.productRowId, unit: line.unit, quantity: line.quantity.toFixed(3), sourceType: exitSource.type,
+      productRowId: line.productRowId, unit: line.unit, quantity: exactQuantityText(line.quantity), sourceType: exitSource.type,
       sourceId: exitSource.id, kind: exitSource.kind, effectiveAt: exitSource.effectiveAt.toISOString(),
       recordedAt: exitSource.recordedAt?.toISOString() ?? '', waybillId: waybill.id, allocationRevisionId: revision.id,
     });
@@ -626,7 +627,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     else exitQuantityWitnesses.push({ stage: 'EXIT', ...(lineSource.sourceKind === 'PARTNER_CASE'
       ? { sourceKind: 'PARTNER_CASE' as const, caseId: lineSource.partnerCaseId, lineageId: lineSource.partnerLineageId }
       : { contractId: lineSource.contractId, contractItemId: lineSource.contractItemId }),
-      productRowId: row.productRowId, unit: row.unit, value: row.quantity.toFixed(3) });
+      productRowId: row.productRowId, unit: row.unit, value: exactQuantityText(row.quantity) });
   }
   if (exitSource && exitQuantityRows.length !== revision.lines.length) issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: waybill.id,
     detail: 'Exit quantity evidence cardinality differs from finalized allocation rows.' });
@@ -677,7 +678,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
   const lineById = new Map(revision.lines.map(line => [line.id, line]));
   for (const event of revision.pricedAllocationEvents) {
     const payload = { allocationRevisionId: event.allocationRevisionId, allocationRevisionLineId: event.allocationRevisionLineId,
-      pricingVersionId: event.pricingVersionId, pricingRowId: event.pricingRowId, quantity: event.quantity.toFixed(3),
+      pricingVersionId: event.pricingVersionId, pricingRowId: event.pricingRowId, quantity: exactQuantityText(event.quantity),
       grossAmount: event.grossAmount.toFixed(12), discountAmount: event.discountAmount.toFixed(12), netAmount: event.netAmount.toFixed(12),
       consumesFinalRemainder: event.consumesFinalRemainder, evidence: event.evidence, recordedBy: event.recordedBy };
     const line = lineById.get(event.allocationRevisionLineId);
@@ -690,7 +691,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       || eventEvidence?.readinessEvidenceHash !== revision.pricingReferences.find(reference => reference.pricingVersionId === event.pricingVersionId)?.readinessEvidenceHash) {
       issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: event.id, detail: 'Priced-event decision evidence does not bind approved pricing, row, and readiness hashes.' });
     }
-    if (!line || line.quantity.toFixed(3) !== event.quantity.toFixed(3)) issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: event.id, detail: 'Allocation line and priced-event quantity differ.' });
+    if (!line || exactQuantityText(line.quantity) !== exactQuantityText(event.quantity)) issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: event.id, detail: 'Allocation line and priced-event quantity differ.' });
     if (event.grossAmount.minus(event.discountAmount).toFixed(12) !== event.netAmount.toFixed(12)) issues.push({ code: 'MONEY_CONSERVATION_MISMATCH', subjectId: event.id, detail: 'Priced-event gross minus discount differs from net.' });
     if (pricedAllocationIntegrityHash(payload) !== event.integrityHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: event.id, detail: 'Priced-allocation evidence hash changed.' });
   }
@@ -699,13 +700,13 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     const evidence = event.evidence as Record<string, unknown>;
     const payload = { sourceKind: 'PARTNER_CASE' as const, caseId: partnerPricing!.caseId,
       internalRecordId: partnerPricing!.internalRecordId, allocationRevisionLineId: event.allocationRevisionLineId,
-      productRowId: line?.productRowId ?? '', quantity: event.quantity.toFixed(3), unit: line?.unit ?? '',
+      productRowId: line?.productRowId ?? '', quantity: exactQuantityText(event.quantity), unit: line?.unit ?? '',
       pricingVersionId: partnerPricing!.financialApprovalEvidenceId, pricingRowId: event.approvalEvidenceId,
       grossAmount: event.grossAmount.toFixed(12), discountAmount: event.discountAmount.toFixed(12),
       netAmount: event.netAmount.toFixed(12), consumesFinalRemainder: event.consumesFinalRemainder,
       evidence: event.evidence, recordedBy: event.recordedBy };
     if (!line || line.sourceKind !== 'PARTNER_CASE' || line.partnerCaseId !== partnerPricing!.caseId
-        || line.quantity.toFixed(3) !== event.quantity.toFixed(3)) issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH',
+        || exactQuantityText(line.quantity) !== exactQuantityText(event.quantity)) issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH',
       subjectId: event.id, detail: 'Partner allocation line and priced-event quantity or owner differ.' });
     if (!event.recordedAt || !event.recordedBy || evidence.readinessEvidenceHash !== partnerPricing!.readinessEvidenceHash
         || evidence.pricingIntegrityHash !== partnerPricing!.pricingIntegrityHash) issues.push({ code: 'AUDIT_SOURCE_MISMATCH',
@@ -739,7 +740,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     const correctionHash = dispatchCorrectionIntegrityHash({ correctionId: correction.id, waybillId: correction.waybillId, reason: correction.reason,
       effectiveAt: correction.effectiveAt, lines: correction.lines, postedAt: correction.postedAt });
     if (correction.integrityHash !== correctionHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: correction.id, detail: 'Posted correction hash changed.' });
-    for (const line of correction.lines) if (!line.contractId || !line.contractItemId || !line.productRowId || !line.unit || line.quantity.toFixed(3) === '0.000') issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: line.id, detail: 'Correction line identity/unit/quantity evidence is incomplete.' });
+    for (const line of correction.lines) if (!line.contractId || !line.contractItemId || !line.productRowId || !line.unit || exactQuantityText(line.quantity) === '0.000') issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: line.id, detail: 'Correction line identity/unit/quantity evidence is incomplete.' });
   }
   const waybillSnapshot = waybill.snapshot as Record<string, any>;
   const provenance = waybillSnapshot?.documentProvenance as Record<string, any> | undefined;
@@ -846,19 +847,19 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       ...revision.lines.map(line => { const source = shipmentSourceForAllocationLine(line); return { stage: 'ALLOCATION' as const,
         ...(source.sourceKind === 'PARTNER_CASE' ? { sourceKind: 'PARTNER_CASE' as const, caseId: source.partnerCaseId, lineageId: source.partnerLineageId }
           : { contractId: source.contractId, contractItemId: source.contractItemId }),
-        productRowId: line.productRowId, unit: line.unit, value: line.quantity.toFixed(3) }; }),
+        productRowId: line.productRowId, unit: line.unit, value: exactQuantityText(line.quantity) }; }),
       ...revision.pricedAllocationEvents.map(event => { const line = lineById.get(event.allocationRevisionLineId); return { stage: 'PRICED' as const,
-        contractId: line?.sourceContractId ?? '', contractItemId: line?.sourceContractItemId ?? '', productRowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: event.quantity.toFixed(3) }; }),
+        contractId: line?.sourceContractId ?? '', contractItemId: line?.sourceContractItemId ?? '', productRowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: exactQuantityText(event.quantity) }; }),
       ...(primarySourceHash ? revision.pricedAllocationEvents.map(event => { const line = lineById.get(event.allocationRevisionLineId); return { stage: 'DOCUMENTED' as const,
-        contractId: line?.sourceContractId ?? '', contractItemId: line?.sourceContractItemId ?? '', productRowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: event.quantity.toFixed(3) }; }) : []),
+        contractId: line?.sourceContractId ?? '', contractItemId: line?.sourceContractItemId ?? '', productRowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: exactQuantityText(event.quantity) }; }) : []),
       ...(partnerPricing?.events.map(event => { const line = lineById.get(event.allocationRevisionLineId)!;
         const source = shipmentSourceForAllocationLine(line); if (source.sourceKind !== 'PARTNER_CASE') throw new Error('Partner pricing line source changed');
         return { stage: 'PRICED' as const, sourceKind: 'PARTNER_CASE' as const, caseId: source.partnerCaseId,
-          lineageId: source.partnerLineageId, productRowId: line.productRowId, unit: line.unit, value: event.quantity.toFixed(3) }; }) ?? []),
+          lineageId: source.partnerLineageId, productRowId: line.productRowId, unit: line.unit, value: exactQuantityText(event.quantity) }; }) ?? []),
       ...(primarySourceHash ? partnerPricing?.events.map(event => { const line = lineById.get(event.allocationRevisionLineId)!;
         const source = shipmentSourceForAllocationLine(line); if (source.sourceKind !== 'PARTNER_CASE') throw new Error('Partner pricing line source changed');
         return { stage: 'DOCUMENTED' as const, sourceKind: 'PARTNER_CASE' as const, caseId: source.partnerCaseId,
-          lineageId: source.partnerLineageId, productRowId: line.productRowId, unit: line.unit, value: event.quantity.toFixed(3) }; }) ?? [] : []),
+          lineageId: source.partnerLineageId, productRowId: line.productRowId, unit: line.unit, value: exactQuantityText(event.quantity) }; }) ?? [] : []),
       ...exitQuantityWitnesses,
     ],
     moneyWitnesses: [
@@ -952,7 +953,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
         const successorAudit = rows.find(row => row.eventType === 'SUCCESSOR_ALLOCATION_FINALIZED'); const successorPayload = successorAudit?.payload as Record<string, any> | undefined;
         const snapshot = revision.snapshot as Record<string, any>; const predecessor = revision.predecessorRevision;
         const stableLines = (lines: typeof revision.lines) => lines.map(line => [line.sourceContractId, line.sourceContractItemId,
-          line.productRowId, line.unit, line.quantity.toFixed(3)]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+          line.productRowId, line.unit, exactQuantityText(line.quantity)]).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
         if (!predecessor || snapshot?.predecessorRevisionId !== predecessor.id || !successorAudit
           || successorPayload?.predecessorRevisionId !== predecessor.id || successorAudit.actorId !== revision.finalizedBy
           || successorAudit.recordedAt.toISOString() !== revision.finalizedAt.toISOString()

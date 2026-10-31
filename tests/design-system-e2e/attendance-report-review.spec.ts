@@ -1,0 +1,40 @@
+import { readFileSync } from 'node:fs';
+import { expect, test } from '@playwright/test';
+import { loginAsAdmin, assertNoHorizontalOverflow } from './support/design-system';
+
+test('real local report retains selected personnel across periods and empty filters with assigned rest context', async ({ page }) => {
+  if (process.env.ATTENDANCE_E2E_SESSION_FILE) {
+    const state = JSON.parse(readFileSync(process.env.ATTENDANCE_E2E_SESSION_FILE, 'utf8'));
+    await page.context().addCookies([state.cookie]);
+  } else await loginAsAdmin(page);
+  await page.goto('/dashboard/security/reports/personnel-attendance');
+  await expect(page.getByRole('button', { name: 'ماه جاری تا امروز', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const arya = page.getByRole('button', { name: 'آریا متانت', exact: true });
+  const shakila = page.getByRole('button', { name: 'شکیلا مرزبان', exact: true });
+  await arya.click(); await expect(arya).toHaveAttribute('aria-pressed', 'true');
+  await shakila.click(); await expect(shakila).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('۲ نفر انتخاب‌شده', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('استراحت روش قدیم (دقیقه)', { exact: true })).toHaveCount(0);
+  await expect(page.getByText(/استراحت: 13:00–14:00/)).toBeVisible();
+  await expect(page.getByText(/بدون استراحت · موظفی روزانه/)).toBeVisible();
+  await expect(page.getByText(/تجمیع شناسه‌های دارای نام یکسان/)).toHaveCount(0);
+  await page.getByRole('checkbox', { name: 'روزهای بدون تردد ثبت‌شده', exact: true }).uncheck();
+  await expect(page.getByText('در این بازه رکوردی برای گزارش وجود ندارد', { exact: true })).toBeVisible();
+  await expect(arya).toHaveAttribute('aria-pressed', 'true'); await expect(shakila).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('یک یا چند نفر در بازه انتخاب‌شده رکورد ندارند.', { exact: true })).toHaveCount(0);
+  await page.getByRole('checkbox', { name: 'روزهای بدون تردد ثبت‌شده', exact: true }).check();
+  await page.getByRole('button', { name: 'ماه گذشته', exact: true }).click();
+  await expect(page.getByText('۲ نفر انتخاب‌شده', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'دریافت PDF ۲ نفر', exact: true })).toBeEnabled();
+  await expect(page.getByLabel('استراحت روش قدیم (دقیقه)', { exact: true })).toHaveValue('');
+  await expect(page.getByText('حضور فیزیکی:', { exact: false }).filter({ hasText: 'ناقص' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'ماه جاری تا امروز', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'دریافت PDF ۲ نفر', exact: true })).toBeEnabled();
+  await page.screenshot({ path: '.codex-tmp/attendance/report-fix-2026-10-21/report-desktop.png', fullPage: true });
+  await page.getByRole('button', { name: 'جزئیات روزها', exact: true }).first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('بدون تردد ثبت‌شده', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 390, height: 844 }); await assertNoHorizontalOverflow(page);
+  await page.screenshot({ path: '.codex-tmp/attendance/report-fix-2026-10-21/report-mobile.png', fullPage: true });
+});

@@ -65,6 +65,7 @@ export default function PartnerInternalAccountingContractPage() {
   const [customPrintSettings, setCustomPrintSettings] = useState<CustomPrintSettings>(defaultCustomPrintSettings);
   const applyCustomPreset = (preset: CustomPrintPreset) => setCustomPrintSettings(current => ({ ...current, preset,
     productRowsMode: preset === 'summarized' ? 'summarized' : 'detailed', showPrices: preset !== 'workshop',
+    showCustomerSection: preset !== 'workshop', showDeliverySection: true,
     showPaymentSection: preset !== 'workshop', showTotals: preset !== 'workshop',
     columns: { ...current.columns, rate: preset !== 'workshop', total: preset !== 'workshop' } }));
   const [action, setAction] = useState<'flag' | 'correction'>();
@@ -112,7 +113,12 @@ export default function PartnerInternalAccountingContractPage() {
         const { columns, ...sections } = customPrintSettings; Object.assign(params, sections);
         for (const [key, value] of Object.entries(columns)) params[`column_${key}`] = value;
       }
-      if (print) {
+      if (print && (printVariant === 'production' || printVariant === 'workshop')) {
+        const response = await accountingAPI.downloadPartnerInternalPdf(caseId, params);
+        const url = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+        window.open(`${url}#page=1&zoom=page-fit`, '_blank', 'noopener,noreferrer');
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } else if (print) {
         const response = await accountingAPI.getPartnerInternalPdf(caseId, params);
         const url = response.data?.data?.url;
         if (!response.data?.success || !url) throw new Error('PDF URL missing');

@@ -7,7 +7,7 @@ import { PrismaClient } from '@prisma/client';
 import { generatePdfFromHtml } from './pdf';
 import { ContractCustomPrintOptions, ContractPrintVariant, renderContractHtml, renderContractPdfHeaderTemplate } from './printTemplate';
 
-export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-partner-customer-output-v25-2026-09-22';
+export const SALES_CONTRACT_PDF_TEMPLATE_VERSION = 'sales-contract-cutting-witness-v27-2026-10-29';
 
 export const salesContractPrintableInclude = {
   productGraphState: true,
@@ -155,7 +155,7 @@ export const buildSalesContractPdfFingerprint = (
 ): string => {
   const printableContract = {
     templateVersion: contract?.partnerKind === 'PARTNER_CUSTOMER'
-      ? `${SALES_CONTRACT_PDF_TEMPLATE_VERSION}:partner-product-details-v1` : SALES_CONTRACT_PDF_TEMPLATE_VERSION,
+      ? `${SALES_CONTRACT_PDF_TEMPLATE_VERSION}:partner-product-details-v2-slab-cutting` : SALES_CONTRACT_PDF_TEMPLATE_VERSION,
     variant,
     customPrint: variant === 'custom' ? customPrint : undefined,
     id: contract?.id,

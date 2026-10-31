@@ -1,7 +1,7 @@
 'use client';
 import React from 'react';
 import { ErpInput, ErpSelect } from '@/components/erp';
-export type SalesPdfVariant = 'original' | 'accounting' | 'workshop' | 'custom';
+export type SalesPdfVariant = 'original' | 'accounting' | 'production' | 'workshop' | 'custom';
 export type CustomPrintPreset = 'accounting' | 'workshop' | 'detailed' | 'summarized';
 export type CustomProductRowsMode = 'detailed' | 'summarized';
 export type CustomPrintSettings = {
@@ -32,6 +32,7 @@ export type CustomPrintSettings = {
 export const salesPdfVariantLabels: Record<SalesPdfVariant, string> = {
   original: "چاپ نسخه اصلی",
   accounting: "چاپ حسابداری",
+  production: "قرارداد فروش سنگ",
   workshop: "چاپ نمره کارگاه",
   custom: "چاپ سفارشی",
 };

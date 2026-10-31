@@ -87,6 +87,7 @@ export function PartnerAccountingDetailView({ signaturePanel, lifecyclePanel, fi
       {lifecyclePanel}
       {doc.flags.filter(flag => flag.status === 'OPEN').map(flag => <ErpInlineState key={flag.id} kind="stale" title={flag.title} className="mt-3" />)}
       <ErpSection title="خروجی چاپ قرارداد"><AccountingContractPrintActions value={printVariant} options={Object.entries(salesPdfVariantLabels).map(([value, label]) => ({ value, label }))}
+        blockedReason={['production', 'workshop'].includes(printVariant) && (doc.preparationOnly || !['ISSUED', 'POSTED'].includes(doc.status)) ? 'این خروجی به رکورد مالی تأییدشده و معتبر نیاز دارد.' : undefined}
         onChange={value => onPrintVariant?.(value as SalesPdfVariant)} pending={pending} onDownload={() => onPdf(false)} onPrint={() => onPdf(true)} />
         {printVariant === 'custom' && setCustomPrintSettings && applyCustomPreset && <AccountingCustomPrintSettings
           customPrintSettings={customPrintSettings} setCustomPrintSettings={setCustomPrintSettings} applyCustomPreset={applyCustomPreset} />}

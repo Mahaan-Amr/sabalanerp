@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -215,7 +216,7 @@ test('production conservation keeps contract, item, product row, and unit in the
 
 test('production replay uses writer-owned Guard and correction hash formats', () => {
   assert.deepEqual(guardPhysicalExitReasonEvidence(), { reasonCode: 'GUARD_PHYSICAL_EXIT_CONFIRMED', reasonDetail: null });
-  const correction = { correctionId: 'correction-1', waybillId: 'waybill-1', reason: 'verified return', effectiveAt: new Date('2026-08-09T08:00:00.000Z'), lines: [{ id: 'line-1', quantity: { toFixed: () => '1.000' } }], postedAt: new Date('2026-08-09T09:00:00.000Z') };
+  const correction = { correctionId: 'correction-1', waybillId: 'waybill-1', reason: 'verified return', effectiveAt: new Date('2026-08-09T08:00:00.000Z'), lines: [{ id: 'line-1', quantity: new Prisma.Decimal('1.000') }], postedAt: new Date('2026-08-09T09:00:00.000Z') };
   assert.match(dispatchCorrectionIntegrityHash(correction), /^[a-f0-9]{64}$/);
   const correctionPayload = { workspace: 'accounting', effectiveAuthority: { actorRole: 'ADMIN' }, waybillId: 'waybill-1', reason: 'verified return', integrityHash: dispatchCorrectionIntegrityHash(correction) };
   const correctionAudit = dispatchLifecycleAuditEventHash({ aggregateType: 'DISPATCH_CORRECTION', aggregateId: 'correction-1', eventType: 'CORRECTION_POSTED', payload: correctionPayload, actorId: 'actor-1', authority: correctionPayload.effectiveAuthority as never, at: new Date('2026-08-09T09:00:00.000Z'), previousHash: null });
@@ -424,7 +425,7 @@ test('durable restoration lookup reconstructs the exact persisted completion eve
 
 test('statement adjustment replay cross-binds immutable sources and rejects a self-consistent row tamper', () => {
   const at = new Date('2026-08-20T13:00:00.000Z'); const originalStatement = { id: 'statement-1', sourceIntegrityHash: 'a'.repeat(64), sha256: 'b'.repeat(64) };
-  const line = { id: 'correction-line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'M3', quantity: { toFixed: () => '-1.000' } };
+  const line = { id: 'correction-line-1', contractId: 'contract-1', contractItemId: 'item-1', productRowId: 'row-1', unit: 'M3', quantity: new Prisma.Decimal('-1.000') };
   const correction = { id: 'correction-1', reason: 'returned quantity', integrityHash: 'c'.repeat(64), postedAt: at, postedBy: 'accountant-1', lines: [line] };
   const snapshot = { schemaVersion: 1, adjustmentId: 'adjustment-1', waybillId: 'waybill-1', correctionId: correction.id, sequence: 1,
     reason: correction.reason, correctionIntegrityHash: correction.integrityHash, originalStatementDocumentId: originalStatement.id,
@@ -452,7 +453,7 @@ test('statement adjustment replay cross-binds immutable sources and rejects a se
       pricingVersion: { currency: 'TOMAN', rows: [{ id: 'pricing-row-1', contractItemId: 'frozen-item-1', linkedContractItemId: line.contractItemId,
         productRowId: line.productRowId, unit: line.unit, integrityHash: 'f'.repeat(64) }] } }], command, audit };
   assert.equal(validatesStatementAdjustmentEvidence(input), true);
-  const amount = (value: string) => ({ toFixed: () => value });
+  const amount = (value: string) => new Prisma.Decimal(value);
   const baseEvents = [{ pricingRowId: 'pricing-row-1', ledgerSequence: 1, quantity: amount('2.000'),
     grossAmount: amount('20.000000000000'), discountAmount: amount('2.000000000000'), netAmount: amount('18.000000000000'), evidence: {
       ledgerSequence: 1, beforeQuantity: '0.000', afterQuantity: '2.000', beforeGross: '0.000000000000',
@@ -483,7 +484,7 @@ test('statement adjustment replay cross-binds immutable sources and rejects a se
 });
 
 test('mandatory Prisma truth verifier accepts only immutable writer-owned pricing/event/provenance sources', async () => {
-  const decimal = (value: string) => ({ toFixed: () => value });
+  const decimal = (value: string) => new Prisma.Decimal(value);
   const versionBase = { id: 'pricing-1', contractId: 'contract-1', versionNumber: 1, sourceFinancialRecordId: 'financial-1',
     approvedAt: new Date('2026-08-09T07:00:00.000Z'), approvedBy: 'finance-1', schemaVersion: 1, currency: 'TOMAN',
     grossAmount: '100.000000000000', discountAmount: '10.000000000000', netAmount: '90.000000000000', sourceEvidence: { source: 'approved' } };

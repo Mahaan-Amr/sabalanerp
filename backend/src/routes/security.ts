@@ -1,3 +1,4 @@
+import { loadPersonnelAttendanceAccounting } from '../services/personnelAttendanceAccounting';
 import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import fs from 'fs';
@@ -14,7 +15,7 @@ import { downloadAndRemoveDocumentPdf } from '../services/documentPdfDownload';
 import { buildPersonnelAttendanceReport, parsePersonnelAttendanceReportOptions, PersonnelAttendanceReportInputError, PersonnelAttendanceReportOptions } from '../services/personnelAttendanceReport';
 import { renderPersonnelAttendanceReportPdf } from '../services/personnelAttendanceReportPdf';
 import { renderSecurityAttendanceReportHtml, securityAttendanceStatusLabel, SecurityAttendanceReportRow } from '../utils/securityAttendanceReport';
-import { addSecurityDays, parseSecurityBusinessDate, securityNowTime, securityPersianDate, securityPersianDateWithWeekday } from '../utils/securityBusinessDate';
+import { addSecurityDays, isFutureSecurityAttendanceTime, parseSecurityBusinessDate, securityNowTime, securityPersianDate, securityPersianDateWithWeekday } from '../utils/securityBusinessDate';
 import { calculateDelayMinutes, calculateScheduledOvertime, loadApplicableWorkSchedules, resolveWorkScheduleDay, scheduledStartHasPassed } from '../utils/personnelWorkSchedule';
 import { buildDashboardRecentReports, buildSecurityDashboardAwareness } from '../services/securityDashboardAwareness';
 import { buildCombinedSecurityShiftTimeline, validateShiftSessionCorrectionPolicy } from '../services/securityShiftSessionPolicy';
@@ -394,7 +395,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       exitTime: movement.finalExit || record?.exitTime || null,
       status: derivedStatus,
       exceptionType: fullDayLeave?.exceptionType || hourlyLeaves[0]?.exceptionType || record?.exceptionType || null,
-      notes: [record?.notes, movement.intervals.some((i: any) => i.revision !== i.confirmedRevision) ? 'تأییدنشده / موقت' : null, movement.intervals.some((i: any) => i.exitUnknown) ? 'خروج فراموش‌شده؛ ساعت نامعلوم' : null, ambiguousDevicePeople.has(personnel.id) ? 'تردد دستگاه نیازمند بررسی است؛ وضعیت قطعی نیست' : null].filter(Boolean).join('\n') || null,
+      notes: [record?.notes, movement.intervals.some((i: any) => !i.enteredAt || i.exitUnknown) ? 'زمان حضور نیازمند بررسی' : null, movement.intervals.some((i: any) => i.exitUnknown) ? 'خروج فراموش‌شده؛ ساعت نامعلوم' : null, ambiguousDevicePeople.has(personnel.id) ? 'تردد دستگاه نیازمند بررسی است؛ وضعیت قطعی نیست' : null].filter(Boolean).join('\n') || null,
       digitalSignature: record?.digitalSignature || null,
       createdAt: record?.createdAt || null,
       shift: null,
@@ -402,7 +403,7 @@ const buildDailyAttendance = async (filters: { date?: unknown; departmentId?: un
       movementTimeline: movementSegments(movement.intervals, hourlyLeaves),
       physicalPresenceMinutes: movement.presenceMinutes,
       durationUnknown: movement.durationUnknown,
-      verificationPending: movement.intervals.some((i: any) => i.revision !== i.confirmedRevision),
+      verificationPending: movement.intervals.some((i: any) => !i.enteredAt || i.exitUnknown),
       outsideMinutes: movement.intervals.some((i: any) => i.exitUnknown) ? null : movement.outsideMinutes,
       presencePending: movement.isOpen,
       accountedWorkMinutes: movement.durationUnknown ? null : unionMinutes(accountedWindows),
@@ -2195,6 +2196,7 @@ router.post('/attendance/checkin', protect, attendanceDeviceReview, [
     if (entryUnknown && targetDate.getTime() !== parseDayQuery().getTime()) return res.status(400).json({ success: false, error: 'مشاهده حضور با ساعت ورود نامعلوم فقط برای امروز مجاز است؛ سابقه قبلی را اصلاح کنید.' });
     const observedInsideAt = entryUnknown ? new Date() : null;
     const enteredAt = entryUnknown ? null : businessInstant(targetDate, currentTime);
+    if (enteredAt && isFutureSecurityAttendanceTime(enteredAt)) return res.status(400).json({ success: false, error: 'زمان ورود نمی‌تواند در آینده باشد.' });
     const [rosterPerson] = await loadAttendancePopulation(targetDate, { personnelId: personnel.id });
     if (!rosterPerson) return res.status(400).json({ success: false, error: 'این فرد در فهرست حضور و غیاب گارد برای این تاریخ نیست.' });
     const scheduleMap = await loadApplicableWorkSchedules(prisma, [personnel.id], targetDate);
@@ -2363,6 +2365,7 @@ router.post('/attendance/checkout', protect, attendanceDeviceReview, [
     if (!openInterval.enteredAt && exitedAt <= openInterval.observedInsideAt!) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از مشاهده حضور باشد.' });
     if (exitedAt <= (openInterval.enteredAt || openInterval.observedInsideAt!)) exitedAt = businessInstant(attendanceRecord.date, currentTime, true);
     if (exitedAt <= (openInterval.enteredAt || openInterval.observedInsideAt!)) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از زمان ورود باشد.' });
+    if (isFutureSecurityAttendanceTime(exitedAt)) return res.status(400).json({ success: false, error: 'زمان خروج نمی‌تواند در آینده باشد.' });
 
     const completedPresenceMinutes = attendanceRecord.intervals.reduce((sum, interval) => {
       if (interval.status === AttendanceIntervalStatus.VOIDED) return sum;
@@ -2422,6 +2425,9 @@ router.put('/attendance/intervals/:id', protect, attendanceDeviceReview, [
     if (!interval || interval.status === AttendanceIntervalStatus.VOIDED) return res.status(404).json({ success: false, error: 'بازه حضور فعال پیدا نشد.' });
     const enteredAt = new Date(req.body.enteredAt);
     const exitedAt = req.body.exitedAt ? new Date(req.body.exitedAt) : null;
+    const now = new Date();
+    if (isFutureSecurityAttendanceTime(enteredAt, now)) return res.status(400).json({ success: false, error: 'زمان ورود نمی‌تواند در آینده باشد.' });
+    if (exitedAt && isFutureSecurityAttendanceTime(exitedAt, now)) return res.status(400).json({ success: false, error: 'زمان خروج نمی‌تواند در آینده باشد.' });
     if (exitedAt && exitedAt <= enteredAt) return res.status(400).json({ success: false, error: 'زمان خروج باید بعد از زمان ورود باشد.' });
     const overlapEnd = exitedAt || new Date('2100-01-01T00:00:00.000Z');
     const conflict = await prisma.attendanceInterval.findFirst({
@@ -3633,20 +3639,8 @@ router.post('/reports/completed-shifts.pdf', protect, securityAdmin, async (req:
   } catch (error: any) { console.error('Export selected security shifts error:', error); return res.status(500).json({ success: false, error: 'ساخت گزارش شیفت‌ها ناموفق بود.' }); }
 });
 
-const loadPersonnelAttendanceReport = async (options: PersonnelAttendanceReportOptions) => {
-  const records = await prisma.attendanceRecord.findMany({
-    where: { date: { gte: options.startDate, lt: addDays(options.endDate, 1) } },
-    select: {
-      id: true, date: true, personnelId: true, employeeId: true, securityPersonnelId: true,
-      personnelFirstName: true, personnelLastName: true,
-      personnel: { select: { firstName: true, lastName: true } },
-      employee: { select: { firstName: true, lastName: true, personnelId: true } },
-      intervals: { select: { enteredAt: true, exitedAt: true, status: true, exitUnknown: true, revision: true, confirmedRevision: true }, orderBy: { enteredAt: 'asc' } },
-    },
-    orderBy: [{ date: 'asc' }, { id: 'asc' }],
-  });
-  return buildPersonnelAttendanceReport(records, options);
-};
+const loadPersonnelAttendanceReport = async (options: PersonnelAttendanceReportOptions) =>
+  prisma.$transaction(db => loadPersonnelAttendanceAccounting(db, options), { isolationLevel: 'RepeatableRead', timeout: 30000 });
 
 router.post('/reports/personnel-attendance-preview', protect, authorize('ADMIN', 'MANAGER'), securityAdmin, async (req: AuthRequest, res: Response) => {
   try {

@@ -167,13 +167,10 @@ async function reviseDraft(tx: Transaction, dependencies: PartnerCaseDependencie
   }
   if (current.customerContract) {
     assertPartnerCommercialAvailable(current.customerContract);
-    const financial = current.customerContract.firstFinancialRecordAt || await tx.accountingFinancialRecord.findFirst({
-      where: { sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: current.internalRecordId ?? '' }, select: { id: true },
-    });
-    if (financial || current.state === 'COMMITTED' || current.customerContract.status === 'SIGNED') {
-      const { readPartnerCommercialEditPermission } = await import('./commercialEditPermission');
-      const duty = await readPartnerCommercialEditPermission(tx, current.customerContract.id, dependencies.actorId);
-      if (!duty) return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') } as const;
+    const { partnerTechnicalCaseIsEditable } = await import('./commercialEditPermission');
+    if (!await partnerTechnicalCaseIsEditable(tx, { contractId: current.customerContract.id,
+      caseState: current.state, actorId: dependencies.actorId })) {
+      return { ok: false, error: partnerError('DEPENDENCY_BLOCKED') } as const;
     }
   }
   if (command.expected.revision !== current.headRevision) return { ok: false, error: partnerError('ROW_STALE') } as const;

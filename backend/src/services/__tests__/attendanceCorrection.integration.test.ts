@@ -124,6 +124,9 @@ test('all three legacy overlap shapes are corrected through the real service in 
       const record=await tx.attendanceRecord.create({data:{id:`preview-record-${index}`,personnelId:row.person,date:new Date(row.day+'T00:00:00Z'),status:'PRESENT',personnelFirstName:'نمونه',personnelLastName:row.person}});
       await tx.attendanceInterval.create({data:{id:`preview-interval-${index}`,attendanceRecordId:record.id,enteredAt:new Date(row.entry),exitedAt:row.exit?new Date(row.exit):null,entryRecordedBy:'SIMULATED_REVIEWER'}});
     }
+    const { overlappingAttendanceIds } = await import('../attendanceReviewScope');
+    assert.equal((await overlappingAttendanceIds(tx)).length, 6, 'All three legacy conflicts stay discoverable before any correction');
+    assert.equal((await overlappingAttendanceIds(tx, 'preview-a')).length, 2);
     await tx.$executeRawUnsafe('CREATE TRIGGER preview_integrity BEFORE INSERT OR UPDATE ON pg_temp.attendance_intervals FOR EACH ROW EXECUTE FUNCTION public.attendance_interval_integrity()');
     const publicBefore=await tx.$queryRawUnsafe('SELECT count(*)::int AS count FROM public.attendance_intervals');
     for(const index of [0,2,4]){

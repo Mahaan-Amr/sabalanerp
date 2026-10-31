@@ -3,6 +3,7 @@ import {
   AllocationPricingBindingError,
   assertExactStableReservationTransfer,
   bindFinalizedAllocationPricing,
+  bindApprovedAllocationPriceEvidence,
   type AllocationPricingBindingPort,
   type LockedPricingEvidence,
 } from '../allocationPricingBinding';
@@ -159,6 +160,12 @@ assert.throws(() => assertExactStableReservationTransfer(
 ), (error: unknown) => error instanceof AllocationPricingBindingError && error.code === 'PRICING_SCOPE_MISMATCH');
 
 console.log('allocation pricing binding tests passed');
+{
+  const {port,calls} = makePort({loadCutover: async () => { throw new Error('Invoice evidence must not activate the statement feature'); }});
+  const result = await bindApprovedAllocationPriceEvidence(port,input);
+  assert.equal(result.pricingVersionIds.length,1);
+  assert.equal(calls.events.length,1);
+}
 };
 
 void main();

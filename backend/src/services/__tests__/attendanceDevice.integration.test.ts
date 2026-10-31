@@ -81,15 +81,21 @@ test('replayed source is idempotent and 10-second repeated scan does not change 
   const next = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: new Date(at('08:00').getTime() + 11000).toISOString(), verifyMode: 1, inOutRaw: 255 }, now);
   assert.equal(next.direction, 'EXIT');
 }));
-test('09 yesterday -> 07 today is ambiguous even below 24 hours; dependent scans remain unresolved', () => fixture(async (db, f) => {
-  await f.punch('09:00');
+test('yesterday 09 -> today 07 enters the new day and leaves an audited unknown exit, with no fabricated human signature', () => fixture(async (db, f) => {
+  const first = await f.punch('09:00');
   const next = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T07:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now);
-  assert.equal(next.status, 'REVIEW'); assert.match(next.reason || '', /روز قبل/);
-  const third = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T12:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now);
-  assert.equal(third.status, 'REVIEW'); assert.match(third.reason || '', /ابهام قبلی/);
-  await resolvePunch(db, next.id, { action: 'EXIT', reason: 'خروج واقعی شب‌کاری' }, f.actor.id);
-  const record = await db.attendanceRecord.findFirstOrThrow({ where: { personnelId: f.person.id } });
-  assert.equal(record.date.toISOString(), day.toISOString());
+  assert.equal(next.status, 'APPLIED'); assert.equal(next.direction, 'ENTRY');
+  const old = await db.attendanceInterval.findUniqueOrThrow({ where: { id: first.intervalId } });
+  assert.equal(old.exitUnknown, true); assert.equal(old.exitedAt, null); assert.equal(old.exitSource, 'DAY_ROLLOVER'); assert.equal(old.exitRecordedBy, null);
+  assert.equal(old.confirmedBy, null); assert.equal(old.confirmedRevision, 0);
+  const current = await db.attendanceInterval.findUniqueOrThrow({ where: { id: next.intervalId! }, include: { attendanceRecord: true } });
+  assert.equal(current.attendanceRecord.date.toISOString().slice(0, 10), '2026-10-16');
+  const audit = await db.attendanceIntervalAudit.findFirstOrThrow({ where: { intervalId: old.id, action: 'SYSTEM_DAY_ROLLOVER' } });
+  assert.equal((audit.afterData as any).automation.actorType, 'SYSTEM');
+  const third = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T17:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  assert.equal(third.direction, 'EXIT');
+  assert.equal(await db.attendanceIntervalAudit.count({ where: { intervalId: old.id, action: 'SYSTEM_DAY_ROLLOVER' } }), 1);
+  assert.equal((await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T07:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now)).id, next.id);
 }));
 test('unknown departure permits a later entry and keeps previous duration unknown without inventing an exit', () => fixture(async (db, f) => {
   const first = await f.punch('08:00');
@@ -152,12 +158,17 @@ test('no roster membership never becomes automatic attendance', () => fixture(as
 
 test('guard handover records a specific pending snapshot; new evidence requires renewed handover', () => fixture(async (db, f) => {
   const { requireReviewHandover, reviewFingerprint } = await import('../attendanceDevice');
-  await f.punch('08:00');
+  const first = await f.punch('08:00');
+  const baseline = await reviewFingerprint(db);
+  await db.attendanceReviewHandover.create({ data: { actorId: f.actor.id, assigneeId: 'isolated-next-guard', reason: 'acknowledge existing local cases', pendingCount: baseline.count, evidenceHash: baseline.hash } });
+  await requireReviewHandover(db, f.actor.id); // Ordinary system acceptance needs no separate signature.
+  await db.attendancePunch.update({ where: { id: first.id }, data: { status: 'REVIEW', reason: 'ابهام آزمایشی' } });
   await assert.rejects(requireReviewHandover(db, f.actor.id), /پیش از تحویل/);
   const pending = await reviewFingerprint(db);
   await db.attendanceReviewHandover.create({ data: { actorId: f.actor.id, assigneeId: 'isolated-next-guard', reason: 'تحویل برای پیگیری', pendingCount: pending.count, evidenceHash: pending.hash } });
   await requireReviewHandover(db, f.actor.id);
-  await f.punch('17:00');
+  const next = await f.punch('17:00');
+  await db.attendancePunch.update({ where: { id: next.id }, data: { status: 'REVIEW', reason: 'ابهام تازه' } });
   await assert.rejects(requireReviewHandover(db, f.actor.id), /پیش از تحویل/);
 }));
 
@@ -289,4 +300,75 @@ test('a device clock ahead of ERP is corrected without changing its raw timestam
   const punch = await ingestRaw(db, f.terminal.id, { deviceCode: '1', occurredAt: raw.toISOString(), verifyMode: 1, inOutRaw: 255 }, received);
   assert.equal(punch.status, 'APPLIED'); assert.equal(punch.occurredAt.toISOString(), raw.toISOString());
   assert.equal(punch.correctedOccurredAt?.toISOString(), received.toISOString());
+}));
+
+
+test('Tehran midnight overrides the ten-second duplicate window and keeps the prior-day unknown exit out of shift blocking', () => fixture(async (db, f) => {
+  const { requireReviewHandover, reviewFingerprint } = await import('../attendanceDevice');
+  const first = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-15T23:59:58+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  const baseline = await reviewFingerprint(db);
+  await db.attendanceReviewHandover.create({ data: { actorId: f.actor.id, assigneeId: 'next', reason: 'baseline only', pendingCount: baseline.count, evidenceHash: baseline.hash } });
+  const next = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T00:00:01+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  assert.equal(next.direction, 'ENTRY'); assert.equal(next.status, 'APPLIED');
+  assert.equal((await db.attendanceInterval.findUniqueOrThrow({ where: { id: first.intervalId! } })).exitUnknown, true);
+  await requireReviewHandover(db, f.actor.id);
+}));
+
+test('a late first scan is entry, while old review evidence does not force the new day to exit or block same-day manual reconciliation', () => fixture(async (db, f) => {
+  const old = await f.punch('08:00');
+  await db.attendancePunch.update({ where: { id: old.id }, data: { status: 'REVIEW', reason: 'prior day unresolved' } });
+  const next = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T16:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  assert.equal(next.direction, 'ENTRY');
+  assert.equal((await db.attendanceInterval.findUniqueOrThrow({ where: { id: next.intervalId! } })).enteredAt?.toISOString(), '2026-10-16T12:30:00.000Z');
+  await db.attendancePunch.update({ where: { id: next.id }, data: { status: 'REVIEW' } });
+  const sameDay = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T17:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  assert.equal(sameDay.status, 'REVIEW'); assert.match(sameDay.reason || '', /ابهام قبلی/);
+}));
+
+test('comparison-mode next-day scans never roll over operational intervals', () => fixture(async (db, f) => {
+  const first = await f.punch('08:00');
+  const before = await db.attendanceInterval.findUniqueOrThrow({ where: { id: first.intervalId } });
+  await db.attendanceTerminal.update({ where: { id: f.terminal.id }, data: { mode: 'SHADOW', activatedAt: null } });
+  const next = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T08:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  assert.equal(next.status, 'SHADOW'); assert.equal(next.intervalId, null);
+  assert.deepEqual(await db.attendanceInterval.findUniqueOrThrow({ where: { id: first.intervalId } }), before);
+}));
+
+test('manual entry today is honored and a previous-day manual boundary is not linked across midnight', () => fixture(async (db, f) => {
+  const record = await db.attendanceRecord.create({ data: { personnelId: f.person.id, date: day, status: 'PRESENT' } });
+  const old = await db.attendanceInterval.create({ data: { attendanceRecordId: record.id, enteredAt: at('23:59'), entryRecordedBy: f.actor.id } });
+  const next = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T00:00:20+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  assert.equal(next.direction, 'ENTRY'); assert.notEqual(next.intervalId, old.id);
+  await db.attendanceInterval.update({ where: { id: next.intervalId! }, data: { exitedAt: new Date('2026-10-16T01:00:00+03:30'), exitSource: 'MANUAL' } });
+  const todayRecord = await db.attendanceRecord.findFirstOrThrow({ where: { personnelId: f.person.id, date: new Date('2026-10-16T00:00:00Z') } });
+  await db.attendanceInterval.create({ data: { attendanceRecordId: todayRecord.id, enteredAt: new Date('2026-10-16T08:00:00+03:30'), entryRecordedBy: f.actor.id } });
+  const exit = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T16:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  assert.equal(exit.direction, 'EXIT');
+}));
+
+
+test('a prior-day initial-inside baseline does not misclassify the first new-day scan', () => fixture(async (db, f) => {
+  await db.attendanceTerminalMapping.update({ where: { id: f.mapping.id }, data: { initialState: 'INSIDE' } });
+  const next = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T16:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  assert.equal(next.status, 'APPLIED'); assert.equal(next.direction, 'ENTRY');
+}));
+
+
+test('a failed rollover and new-entry transaction restores the old interval and all audit writes', () => fixture(async (db, f) => {
+  const first = await f.punch('08:00');
+  const before = await db.attendanceInterval.findUniqueOrThrow({ where: { id: first.intervalId } });
+  await db.attendanceTerminal.update({ where: { id: f.terminal.id }, data: { createdBy: 'invalid-automation-owner' } });
+  const next = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T08:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  assert.equal(next.status, 'REVIEW'); assert.equal(next.intervalId, null);
+  assert.deepEqual(await db.attendanceInterval.findUniqueOrThrow({ where: { id: first.intervalId } }), before);
+  assert.equal(await db.attendanceDeviceAudit.count({ where: { terminalId: f.terminal.id, action: 'DAY_ROLLOVER_UNKNOWN_EXIT' } }), 0);
+}));
+
+
+test('pre-activation disputed open history is never retroactively repaired by the new daily rule', () => fixture(async (db, f) => {
+  const record = await db.attendanceRecord.create({ data: { personnelId: f.person.id, date: new Date('2026-10-14T00:00:00Z'), status: 'PRESENT' } });
+  const old = await db.attendanceInterval.create({ data: { attendanceRecordId: record.id, enteredAt: new Date('2026-10-14T08:00:00+03:30'), entryRecordedBy: f.actor.id } });
+  const next = await ingestPunch(db, f.terminal.id, { deviceCode: '1', occurredAt: '2026-10-16T08:00:00+03:30', verifyMode: 1, inOutRaw: 255 }, now);
+  assert.equal(next.status, 'REVIEW'); assert.equal(next.intervalId, null);
+  assert.deepEqual(await db.attendanceInterval.findUniqueOrThrow({ where: { id: old.id } }), old);
 }));

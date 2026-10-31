@@ -6,7 +6,7 @@ import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCredit
 import { ContractRenewal } from '@/features/sales/ContractRenewal';
 import { ContractReactivation } from '@/features/sales/ContractReactivation';
 import { contractLifecycleLabel, contractLifecycleFilterOptions, isCurrentContractFlow, type ContractLifecyclePresentation } from '@/features/sales/contractLifecyclePresentation';
-import { ErpPressable, ErpSelect, ErpTextarea } from "@/components/erp";
+import { ErpButton, ErpField, ErpPressable, ErpSelect, ErpTextarea } from "@/components/erp";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import {
@@ -474,7 +474,7 @@ export default function ContractDetailPage() {
   };
 
   const handleSellerChange = async () => {
-    if (!contract || !nextSellerId || !sellerChangeReason.trim()) return;
+    if (!contract || !nextSellerId) return;
     const errorSource = "seller-change";
     const requestSequence = beginOperation(errorSource);
     setOperationPending(errorSource, true);
@@ -482,7 +482,6 @@ export default function ContractDetailPage() {
       const response = await salesAPI.reassignResponsibleSeller(
         contract.id,
         nextSellerId,
-        sellerChangeReason.trim(),
       );
       if (!isLatestOperation(errorSource, requestSequence)) return;
       assertSuccessfulSalesResponse(response);
@@ -498,7 +497,7 @@ export default function ContractDetailPage() {
         getSalesOperationalErrorMessage(reason, {
           failedAction: "تغییر مسئول فروش قرارداد",
           nextStep:
-            "فروشنده جدید و دلیل تغییر را بررسی کنید و دوباره تلاش کنید.",
+            "فروشنده جدید را بررسی کنید و دوباره تلاش کنید.",
           uncertainMutation: true,
         }),
         getSalesOperationalErrorKind(reason),
@@ -1740,57 +1739,50 @@ export default function ContractDetailPage() {
             {detailSection === "summary" && canManageSellers && (
               <ErpSection
                 title="تغییر مسئول فروش قرارداد"
-                description="تغییر مسئول فقط روی پایپ‌لاین فعلی اثر دارد و اعتبار فروش قطعی گذشته را بازنویسی نمی‌کند."
+                description="مسئول جدید با مجوزهای فروش خودش به این قرارداد دسترسی دارد؛ اعتبار فروش قطعی گذشته تغییر نمی‌کند."
               >
                 <div className="space-y-3">
                   <ErpSelect
+                    aria-label="مسئول فروش جدید"
                     value={nextSellerId}
                     onChange={(event) => setNextSellerId(event.target.value)}
                     className="w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
                   >
                     <option value="">انتخاب فروشنده جدید</option>
-                    {sellerOptions.map((seller) => (
+                    {sellerOptions.filter((seller) => currentUser?.role === "ADMIN" || seller.departmentId === contract.department.id).map((seller) => (
                       <option key={seller.id} value={seller.id}>
                         {`${seller.firstName || ""} ${seller.lastName || ""}`.trim() ||
                           seller.username}
                       </option>
                     ))}
                   </ErpSelect>
-                  <ErpTextarea
-                    value={sellerChangeReason}
-                    onChange={(event) =>
-                      setSellerChangeReason(event.target.value)
-                    }
-                    placeholder="دلیل تغییر مسئول (الزامی)"
-                    className="min-h-20 w-full rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] px-3 py-2 text-sm dark:border-[var(--sds-border-strong)] dark:bg-[var(--sds-surface-raised)]"
-                  />
-                  <ErpPressable
-                    type="submit"
-                    disabled={
-                      sellerMutationPending ||
-                      !nextSellerId ||
-                      !sellerChangeReason.trim()
-                    }
+                  <ErpButton
+                    disabled={sellerMutationPending || !nextSellerId}
                     onClick={handleSellerChange}
-                    className="w-full rounded-lg bg-[var(--sds-accent)] px-3 py-2 text-sm font-bold text-[var(--sds-text-inverse)] disabled:opacity-50"
-                  >
-                    {pendingOperations.has("seller-change")
-                      ? "در حال ثبت..."
-                      : "ثبت تغییر مسئول با سابقه حسابرسی"}
-                  </ErpPressable>
+                    label={pendingOperations.has("seller-change") ? "در حال ثبت..." : "ثبت مسئول فروش"}
+                  />
                   {contract.realizedAt && !contract.realizedSeller && (
-                    <ErpPressable
-                      type="submit"
-                      disabled={
-                        sellerMutationPending ||
-                        !nextSellerId ||
-                        !sellerChangeReason.trim()
-                      }
-                      onClick={handleLegacyCreditAssignment}
-                      className="w-full rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-warning)] disabled:opacity-50"
-                    >
-                      انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی
-                    </ErpPressable>
+                    <>
+                      <ErpField label="دلیل انتساب اعتبار فروش قطعی قدیمی" required>
+                        <ErpTextarea
+                          aria-label="دلیل انتساب اعتبار فروش قطعی قدیمی"
+                          value={sellerChangeReason}
+                          onChange={(event) => setSellerChangeReason(event.target.value)}
+                        />
+                      </ErpField>
+                      <ErpPressable
+                        type="submit"
+                        disabled={
+                          sellerMutationPending ||
+                          !nextSellerId ||
+                          !sellerChangeReason.trim()
+                        }
+                        onClick={handleLegacyCreditAssignment}
+                        className="w-full rounded-lg border border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-3 py-2 text-sm font-bold text-[var(--sds-warning)] disabled:opacity-50"
+                      >
+                        انتساب اعتبار فروش قطعی قدیمی با سابقه حسابرسی
+                      </ErpPressable>
+                    </>
                   )}
                 </div>
               </ErpSection>

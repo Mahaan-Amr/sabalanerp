@@ -1,4 +1,6 @@
+import { exactQuantityText, ExactQuantityDecimal } from '../services/exactQuantity';
 import { prisma } from '../lib/prisma';
+import { createSalesInvoiceRouter } from '../services/salesDispatchInvoice/routes';
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { GuardDriverQueueTurnStatus, Prisma, PrismaClient, SecurityDriverQueueTurnStatus } from '@prisma/client';
@@ -15,6 +17,8 @@ import { randomUUID } from 'node:crypto';
 import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { ordinaryContractDispatchEligible, assertOrdinaryContractsDispatchEligible } from '../services/ordinaryContractDispatchEligibility';
 import { PartnerLoadingCommandError } from '../services/partnerSales/fulfillment/loadingAuthority';
+import { resolveLogisticsContractRow } from '../services/logisticsContractRow';
+import { readShipmentQuantityProjection } from '../services/shipmentQuantityProjectionStore';
 
 const router = express.Router();
 const respondPartnerLoading = (res: Response, result: Result<unknown>, successStatus = 200) => {
@@ -34,6 +38,7 @@ const canEdit = requireWorkspaceAccess(WORKSPACES.LOGISTICS, WORKSPACE_PERMISSIO
 const canView = requireWorkspaceAccess(WORKSPACES.LOGISTICS, WORKSPACE_PERMISSIONS.VIEW);
 const canViewDashboard = requireFeatureAccess(FEATURES.LOGISTICS_DASHBOARD_VIEW, FEATURE_PERMISSIONS.VIEW);
 const canViewLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_VIEW, FEATURE_PERMISSIONS.VIEW);
+router.use(createSalesInvoiceRouter({ db: prisma, workspace: 'logistics', view: [canView, canViewLoadings] }));
 const canCreateLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_CREATE, FEATURE_PERMISSIONS.EDIT);
 const canEditLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_EDIT, FEATURE_PERMISSIONS.EDIT);
 const canFinalizeLoadings = requireFeatureAccess(FEATURES.LOGISTICS_LOADINGS_FINALIZE, FEATURE_PERMISSIONS.EDIT);
@@ -118,7 +123,7 @@ const toNumber = (value: unknown, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const decimalInput = (value: unknown) => Number(toNumber(value).toFixed(3));
+const decimalInput = (value: unknown) => new ExactQuantityDecimal(exactQuantityText(value));
 
 const normalizeDigits = (value: unknown): string => {
   if (typeof value !== 'string' && typeof value !== 'number') return '';
@@ -168,44 +173,32 @@ const productDisplayName = (product: any, snapshot?: any) => {
   return snapshot?.stoneName || snapshot?.name || product?.namePersian || product?.name || 'محصول';
 };
 
-const getContractProducts = (contract: any) => {
-  const data = contract?.contractData as any;
-  return Array.isArray(data?.products) ? data.products : Array.isArray(data?.items) ? data.items : [];
-};
-
-const itemSnapshot = (contract: any, item: any, itemIndex: number) => {
-  const products = getContractProducts(contract);
-  const byIndex = products[itemIndex];
-  if (byIndex && (!byIndex.productId || byIndex.productId === item.productId)) return byIndex;
-  return products.find((product: any) => product?.productId === item.productId) || null;
-};
-
 const getDeliverableQuantity = (item: any, snapshot: any, unit: string) => {
   if (unit === 'meter') {
     const length = toNumber(snapshot?.length ?? snapshot?.actualLength ?? snapshot?.actualLengthMeters);
     const lengthM = snapshot?.lengthUnit === 'cm' ? length / 100 : length;
     const quantity = toNumber(snapshot?.quantity, 1);
     const total = lengthM * quantity;
-    return total > 0 ? Number(total.toFixed(3)) : toNumber(item.quantity);
+    return total > 0 ? Number(total) : toNumber(item.quantity);
   }
 
   if (unit === 'squareMeter') {
     const squareMeters = toNumber(snapshot?.squareMeters);
-    if (squareMeters > 0) return Number(squareMeters.toFixed(3));
+    if (squareMeters > 0) return Number(squareMeters);
     const preparedQuantity = toNumber(snapshot?.preparedQuantity);
-    if (preparedQuantity > 0) return Number(preparedQuantity.toFixed(3));
+    if (preparedQuantity > 0) return Number(preparedQuantity);
   }
 
   if (unit === 'ton') {
     const preparedQuantity = toNumber(snapshot?.preparedQuantity);
-    if (preparedQuantity > 0) return Number(preparedQuantity.toFixed(3));
+    if (preparedQuantity > 0) return Number(preparedQuantity);
   }
 
   return toNumber(snapshot?.preparedQuantity ?? snapshot?.quantity ?? item.quantity);
 };
 
-const productSnapshotFor = (contract: any, item: any, itemIndex: number) => {
-  const snapshot = itemSnapshot(contract, item, itemIndex);
+const productSnapshotFor = (contract: any, item: any) => {
+  const snapshot = resolveLogisticsContractRow(contract?.contractData, item);
   const unit = inferUnit(item, snapshot);
   const contractedQuantity = getDeliverableQuantity(item, snapshot, unit);
   return {
@@ -230,6 +223,13 @@ const productSnapshotFor = (contract: any, item: any, itemIndex: number) => {
     snapshot
   };
 };
+
+const productGroupKey = (item: any, snapshot: any) => [
+  item.productId, item.productType || '', snapshot.unit,
+  snapshot.width ?? '', snapshot.thickness ?? '',
+  JSON.stringify(snapshot.services || []), JSON.stringify(snapshot.tools || []),
+  JSON.stringify(snapshot.finishing || null)
+].join('|');
 
 const getProjectWithCustomer = async (projectId: string) => {
   return prisma.projectAddress.findUnique({
@@ -308,27 +308,23 @@ const buildRemainingForProject = async (projectId: string) => {
   }
 
   const contracts = await getProjectContracts(projectId, project.customerId);
-  const itemIds = contracts.flatMap((contract) => contract.items.map((item) => item.id));
-  const consumed = await getConsumptionByItemIds(itemIds);
+  const projections = await Promise.all(contracts.map(contract => readShipmentQuantityProjection(prisma, { contractId: contract.id })));
+  const balances = new Map(projections.flatMap(projection => projection.rows).map(row => [row.contractItemId, row]));
   const groups = new Map<string, any>();
 
   for (const contract of contracts) {
-    contract.items.forEach((item, index) => {
-      const snapshot = productSnapshotFor(contract, item, index);
-      const unit = snapshot.unit;
-      const contractedQuantity = snapshot.quantity;
-      const finalizedLoadedQuantity = consumed.get(item.id) || 0;
-      const remainingQuantity = Number((contractedQuantity - finalizedLoadedQuantity).toFixed(3));
-      const groupKey = [
-        item.productId,
-        item.productType || '',
-        unit,
-        snapshot.width ?? '',
-        snapshot.thickness ?? '',
-        JSON.stringify(snapshot.services || []),
-        JSON.stringify(snapshot.tools || []),
-        JSON.stringify(snapshot.finishing || null)
-      ].join('|');
+    contract.items.forEach((item) => {
+      const balance = balances.get(item.id);
+      if (!balance || balance.health !== 'CURRENT' || !balance.quantities || !balance.canAuthorizeLoading) return;
+      const snapshot = productSnapshotFor(contract, item);
+      const unit = balance.unit;
+      const contractedQuantity = new ExactQuantityDecimal(balance.quantities.contracted).toNumber();
+      const remainingQuantity = new ExactQuantityDecimal(balance.quantities.availableToLoad).toNumber();
+      const finalizedLoadedQuantity = new ExactQuantityDecimal(balance.quantities.finalizedReserved)
+        .plus(balance.quantities.physicallyDispatched).toNumber();
+      snapshot.quantity = contractedQuantity;
+      snapshot.unit = unit;
+      const groupKey = productGroupKey(item, snapshot);
 
       if (!groups.has(groupKey)) {
         groups.set(groupKey, {
@@ -381,9 +377,9 @@ const buildRemainingForProject = async (projectId: string) => {
     groups: Array.from(groups.values())
       .map((group) => ({
         ...group,
-        contractedTotal: Number(group.contractedTotal.toFixed(3)),
-        finalizedLoadedTotal: Number(group.finalizedLoadedTotal.toFixed(3)),
-        remainingTotal: Number(group.remainingTotal.toFixed(3)),
+        contractedTotal: Number(group.contractedTotal),
+        finalizedLoadedTotal: Number(group.finalizedLoadedTotal),
+        remainingTotal: Number(group.remainingTotal),
         sources: group.sources.sort((a: any, b: any) => a.contractNumber.localeCompare(b.contractNumber))
       }))
       .filter((group) => group.remainingTotal > 0)
@@ -585,8 +581,16 @@ const linePayloadToCreate = async (line: any) => {
   const plus = decimalInput(line.plus || 0);
   const minus = decimalInput(line.minus || 0);
   const calculated = khatRas !== null && pieceCount !== null
-    ? decimalInput((khatRas * pieceCount) + plus - minus)
+    ? decimalInput(khatRas.mul(pieceCount).plus(plus).minus(minus))
     : decimalInput(line.quantity);
+  const productSnapshot = productSnapshotFor(sourceItem.contract, sourceItem);
+  const projection = await readShipmentQuantityProjection(prisma, { contractId: sourceItem.contractId });
+  const balance = projection.rows.find(row => row.contractItemId === sourceItem.id && row.productRowId === sourceItem.productRowId);
+  if (!balance || balance.health !== 'CURRENT' || !balance.quantities || !balance.canAuthorizeLoading || balance.unit !== unit) {
+    throw new DispatchAllocationConflictError('مانده معتبر این ردیف برای بارگیری در دسترس نیست؛ اطلاعات ارسال را بررسی کنید.');
+  }
+  productSnapshot.quantity = new ExactQuantityDecimal(balance.quantities.contracted).toNumber();
+  productSnapshot.unit = balance.unit;
 
   return {
     sourceContractId: sourceItem.contractId,
@@ -599,24 +603,24 @@ const linePayloadToCreate = async (line: any) => {
     pieceCount,
     plus,
     minus,
-    productSnapshot: line.productSnapshot || {
-      productId: sourceItem.productId,
-      name: sourceItem.product.namePersian || sourceItem.product.name,
-      productType: sourceItem.productType
-    },
-    sourceSnapshot: line.sourceSnapshot || {
+    productSnapshot,
+    sourceSnapshot: {
+      ...line.sourceSnapshot,
       contractId: sourceItem.contractId,
       contractNumber: sourceItem.contract.contractNumber,
       contractItemId: sourceItem.id,
-      contractedQuantity: productSnapshotFor(sourceItem.contract, sourceItem, 0).quantity
+      productRowId: sourceItem.productRowId,
+      groupKey: productGroupKey(sourceItem, productSnapshot),
+      contractedQuantity: productSnapshot.quantity,
+      remainingQuantity: new ExactQuantityDecimal(balance.quantities.availableToLoad).toNumber()
     },
     calculationSnapshot: {
       formula: khatRas !== null && pieceCount !== null ? 'khatRas * pieceCount + plus - minus' : 'direct',
-      khatRas,
-      pieceCount,
-      plus,
-      minus,
-      calculatedQuantity: calculated,
+      khatRas: khatRas?.toFixed() ?? null,
+      pieceCount: pieceCount?.toFixed() ?? null,
+      plus: plus.toFixed(),
+      minus: minus.toFixed(),
+      calculatedQuantity: exactQuantityText(calculated),
       unit
     },
     notes: line.notes || null
@@ -644,7 +648,7 @@ const buildLinesAndDriverAllocations = async (body: any) => {
       allocationCreates.push(payload);
       const key = payload.sourceContractItemId;
       const existing = totals.get(key);
-      totals.set(key, existing ? { ...existing, quantity: toNumber(existing.quantity) + toNumber(payload.quantity) } : { ...payload });
+      totals.set(key, existing ? { ...existing, quantity: decimalInput(existing.quantity).plus(payload.quantity) } : { ...payload });
     }
     allocationCreatesByTurn.set(queueTurnId, allocationCreates);
   }
@@ -657,7 +661,7 @@ const buildLinesAndDriverAllocations = async (body: any) => {
     minus: 0,
     calculationSnapshot: {
       formula: 'sum_driver_allocations',
-      calculatedQuantity: toNumber(line.quantity),
+      calculatedQuantity: exactQuantityText(line.quantity),
       unit: line.unit
     }
   }));
@@ -665,8 +669,8 @@ const buildLinesAndDriverAllocations = async (body: any) => {
   return { lineCreates, allocationCreatesByTurn };
 };
 
-const loadLoading = (id: string) => {
-  return prisma.logisticsLoading.findUnique({
+const loadLoading = async (id: string) => {
+  const loading = await prisma.logisticsLoading.findUnique({
     where: { id, sourceKind: 'SALES_CONTRACT' },
     include: {
       customer: true,
@@ -716,9 +720,20 @@ const loadLoading = (id: string) => {
       }
     }
   });
+  if (!loading) return null;
+  return {
+    ...loading,
+    canonicalAllocationRevisions: loading.canonicalAllocationRevisions.map(revision => ({
+      ...revision,
+      candidate: revision.candidate ? {
+        ...revision.candidate,
+        waybills: revision.candidate.waybills.map(waybill => ({ ...waybill, number: waybill.number.toString() })),
+      } : null,
+    })),
+  };
 };
 
-const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string; quantity: number; unit: string }>, excludeLoadingId?: string) => {
+const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string; quantity: Prisma.Decimal.Value; unit: string }>, excludeLoadingId?: string) => {
   const itemIds = lines.map((line) => line.sourceContractItemId);
   const sourceItems = await prisma.contractItem.findMany({
     where: { id: { in: itemIds }, retiredAt: null },
@@ -741,10 +756,10 @@ const validateLineRemaining = async (lines: Array<{ sourceContractItemId: string
     const item = sourceById.get(line.sourceContractItemId);
     if (!item) throw new Error('Source contract item not found');
     if (item.contract.isInactive) throw new Error('Inactive contracts cannot be used for loading operations');
-    const snapshot = productSnapshotFor((item as any).contract, item, 0);
+    const snapshot = productSnapshotFor((item as any).contract, item);
     const remaining = snapshot.quantity - (consumed.get(line.sourceContractItemId) || 0);
     const allowed = remaining + (isLinearUnit(line.unit) ? LINEAR_TOLERANCE : 0);
-    if (line.quantity > allowed + 0.0001) {
+    if (decimalInput(line.quantity).gt(allowed + 0.0001)) {
       throw new Error(`Loaded quantity exceeds remaining for source row ${line.sourceContractItemId}`);
     }
   }
@@ -852,7 +867,7 @@ router.get('/customers/:customerId/projects', canView, canCreateLoadings, async 
         projectManagerName: project.projectManagerName || project.customer.projectManagerName,
         projectManagerNumber: project.projectManagerNumber || project.customer.projectManagerNumber,
         remainingCount,
-        remainingTotal: Number(remainingTotal.toFixed(3))
+        remainingTotal: Number(remainingTotal)
       }))
     });
   } catch (error) {
@@ -1224,11 +1239,11 @@ router.post('/loadings/:id/corrections', canEdit, canCreateCorrections, [
     const deltaQuantity = decimalInput(req.body.deltaQuantity);
     const unit = String(req.body.unit || inferUnit(sourceItem, null));
 
-    if (deltaQuantity > 0) {
+    if (deltaQuantity.gt(0)) {
       await validateLineRemaining([{ sourceContractItemId: sourceItem.id, quantity: deltaQuantity, unit }]);
     } else {
       const consumed = await getConsumptionByItemIds([sourceItem.id]);
-      if (Math.abs(deltaQuantity) > (consumed.get(sourceItem.id) || 0) + 0.0001) {
+      if (deltaQuantity.abs().toNumber() > (consumed.get(sourceItem.id) || 0) + 0.0001) {
         return res.status(400).json({ success: false, error: 'Correction cannot reduce loaded amount below zero' });
       }
     }

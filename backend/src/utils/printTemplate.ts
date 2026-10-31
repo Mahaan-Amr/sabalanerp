@@ -17,7 +17,7 @@ interface RenderableContract {
   partnerCommercialStatus?: string;
   partnerKind?: string | null;
   partnerCaseId?: string | null;
-  totalAmount?: number | null;
+  totalAmount?: number | string | Prisma.Decimal | null;
   currency?: string | null;
   notes?: string | null;
   createdAt?: Date | string;
@@ -41,6 +41,7 @@ interface NormalizedCut {
   type: string;
   code?: string;
   meters: number;
+  squareMeters?: number;
   rate: number;
   cost: number;
 }
@@ -182,7 +183,7 @@ interface FlatProductRow {
   renderAsNoteRow?: boolean;
 }
 
-export type ContractPrintVariant = 'original' | 'summary' | 'accounting' | 'workshop' | 'custom';
+export type ContractPrintVariant = 'original' | 'summary' | 'accounting' | 'production' | 'workshop' | 'custom';
 
 export type ContractPrintColumnKey =
   | 'index'
@@ -703,7 +704,20 @@ const lengthValueToMeters = (value: unknown, unit: unknown): number => {
   return unit === 'cm' ? numeric / 100 : numeric;
 };
 
-const restoreLongitudinalCustomerRequest = (product: any): any => {
+const legacyCutMeters = (product: any, cut: any): number => {
+  if (cut?.meters != null) return toNumber(cut.meters);
+  if (product?.productType === 'longitudinal') {
+    // Legacy length is consumed mother-stone length in cm, not billable cut
+    // meters. Only this saved operation's own rate/amount can recover billing.
+    const rate = toNumber(cut?.rate ?? cut?.cuttingCostPerMeter);
+    const cost = toNumber(cut?.cost ?? cut?.cuttingCost);
+    if (rate > 0 && cost > 0) return cost / rate;
+    return toNumber(cut?.length) / 100;
+  }
+  return toNumber(cut?.length);
+};
+
+export const restoreLongitudinalCustomerRequest = (product: any): any => {
   const plan = product?.smartCutPlan;
   if (
     product?.productType !== 'longitudinal' ||
@@ -1123,17 +1137,50 @@ const normalizeProducts = (
           }))
         : [];
 
-      const cutsFromDetails: NormalizedCut[] = cutsFromBreakdown.length > 0
+      const canonicalUncut = product?.productType === 'longitudinal' &&
+        product?.isCut === false && toNumber(product?.cuttingCost) === 0 &&
+        product?.meta?.pricing?.authority === 'canonical-current-save' &&
+        toNumber(product?.meta?.pricing?.cuttingCost) === 0;
+      const cutsFromDetails: NormalizedCut[] = cutsFromBreakdown.length > 0 || canonicalUncut
         ? []
         : (!product?.smartCutDerivedQuantity && Array.isArray(product?.cutDetails)
           ? product.cutDetails.map((cut: any) => ({
               type: cutTypeLabel(cut),
               code: firstText(cut?.code, cut?.sourceCode),
-              meters: toNumber(cut?.meters || cut?.length),
+              meters: legacyCutMeters(product, cut),
               rate: toNumber(cut?.rate || cut?.cuttingCostPerMeter),
               cost: toNumber(cut?.cost || cut?.cuttingCost)
             }))
           : []);
+
+      // Physical packing cuts remain in the snapshot for production. They are
+      // not the billing lines when the seller selected square-meter cutting.
+      const squareMeterSlab = product?.productType === 'slab' && (
+        product?.slabCuttingMode === 'perSquareMeter' ||
+        (product?.slabCuttingMode == null && product?.slabPolicyInput?.cuttingPricingMethod === 'squareMeter')
+      );
+      let cuts = [...cutsFromBreakdown, ...cutsFromDetails];
+      if (squareMeterSlab) {
+        const verticalCuts = (Array.isArray(product?.cutDetails) ? product.cutDetails : [])
+          .filter((cut: any) => cut?.type === 'vertical')
+          .map((cut: any): NormalizedCut => ({
+            type: cutTypeLabel(cut),
+            code: firstText(cut?.code, cut?.sourceCode),
+            meters: toNumber(cut?.meters ?? cut?.length),
+            rate: toNumber(cut?.rate ?? cut?.cuttingCostPerMeter),
+            cost: toNumber(cut?.cost ?? cut?.cuttingCost)
+          }));
+        const verticalCost = toNumber(product?.slabVerticalCutCost ??
+          verticalCuts.reduce((sum: number, cut: NormalizedCut) => sum + cut.cost, 0));
+        cuts = [{
+          type: 'برش اسلب بر اساس مساحت',
+          meters: 0,
+          squareMeters: toNumber(product?.squareMeters),
+          rate: toNumber(product?.slabCuttingPricePerSquareMeter ?? product?.slabPolicyInput?.squareMeterCutRateToman),
+          // Preserve the saved charge; printing must not reprice the contract.
+          cost: toNumber(product?.cuttingCost) - verticalCost
+        }, ...verticalCuts];
+      }
 
       const services: NormalizedService[] = [];
       (product?.appliedSubServices || []).forEach((service: any) => {
@@ -1303,7 +1350,7 @@ const normalizeProducts = (
         mandatoryPercentage: toNumber(product?.mandatoryPercentage),
         totalPrice: toNumber(product?.totalPrice || relationItem?.totalPrice),
         description,
-        cuts: [...cutsFromBreakdown, ...cutsFromDetails],
+        cuts,
         services,
         tools: dedupedTools,
         layerSummary: product?.layerTypeName
@@ -1593,7 +1640,7 @@ const normalizeFinancials = (
 };
 
 const isMeaningfulCut = (cut: NormalizedCut): boolean =>
-  cut.meters > 0 || cut.rate > 0 || cut.cost > 0;
+  cut.meters > 0 || toNumber(cut.squareMeters) > 0 || cut.rate > 0 || cut.cost > 0;
 
 const isMeaningfulService = (service: NormalizedService): boolean =>
   hasTextValue(service.name) || service.amount > 0 || service.rate > 0 || service.cost > 0;
@@ -1892,8 +1939,8 @@ const buildFlatProductRows = (
           code: cut.code,
           category: 'برش',
           description: cut.type,
-          amount: cut.meters,
-          unitLabel: 'متر طول',
+          amount: cut.squareMeters ?? cut.meters,
+          unitLabel: cut.squareMeters === undefined ? 'متر طول' : 'متر مربع',
           rate: cut.rate,
           total: cut.cost,
           groupByRate: true
@@ -2020,10 +2067,11 @@ const buildFlatProductRows = (
 
       const aggregatedCuts = new Map<string, NormalizedCut>();
       product.cuts.filter(isMeaningfulCut).forEach(cut => {
-        const key = `${cut.code || ''}|${cut.type}|${cut.rate}`;
+        const key = `${cut.code || ''}|${cut.type}|${cut.rate}|${cut.squareMeters === undefined ? 'meter' : 'squareMeter'}`;
         const existing = aggregatedCuts.get(key);
         if (existing) {
           existing.meters += cut.meters;
+          if (cut.squareMeters !== undefined) existing.squareMeters = toNumber(existing.squareMeters) + cut.squareMeters;
           existing.cost += cut.cost;
         } else {
           aggregatedCuts.set(key, { ...cut });
@@ -2037,8 +2085,8 @@ const buildFlatProductRows = (
         category: 'برش',
         length: '',
         width: '',
-        linearMeasurement: toFaNumber(cut.meters, 4),
-        squareMeasurement: '',
+        linearMeasurement: cut.squareMeters === undefined ? toFaNumber(cut.meters, 4) : '',
+        squareMeasurement: cut.squareMeters === undefined ? '' : toFaNumber(cut.squareMeters, 4),
         count: '',
         rate: formatPrintMoneyCell(cut.rate, currency, options),
         total: formatPrintMoneyCell(cut.cost, currency, options)
@@ -2210,8 +2258,8 @@ const buildFlatProductRows = (
         category: 'برش',
         length: '',
         width: '',
-        linearMeasurement: toFaNumber(cut.meters, 4),
-        squareMeasurement: '',
+        linearMeasurement: cut.squareMeters === undefined ? toFaNumber(cut.meters, 4) : '',
+        squareMeasurement: cut.squareMeters === undefined ? '' : toFaNumber(cut.squareMeters, 4),
         count: '',
         rate: formatPrintMoneyCell(cut.rate, currency, options),
         total: formatPrintMoneyCell(cut.cost, currency, options)
@@ -2597,6 +2645,7 @@ const getContractHeaderMeta = (contract: RenderableContract) => {
 const variantTitle = (variant: ContractPrintVariant): string => {
   if (variant === 'custom') return 'چاپ سفارشی حسابداری';
   if (variant === 'accounting') return 'چاپ حسابداری';
+  if (variant === 'production') return 'قرارداد فروش سنگ';
   if (variant === 'workshop') return 'چاپ نمره کارگاه';
   if (variant === 'summary') return 'خلاصه قرارداد';
   return 'چاپ نسخه اصلی';
@@ -2613,7 +2662,7 @@ const renderCompactMetadataSection = (
   if (options.variant === 'original' || options.variant === 'summary') return '';
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const salesAccountName = getUserName(contract.createdByUser);
-  const accountingFields = options.variant === 'accounting'
+  const accountingFields = options.variant === 'accounting' || options.variant === 'production'
     ? `
         <div><strong>حساب فروش:</strong> ${escapeHtml(salesAccountName)}</div>
       `
@@ -2795,7 +2844,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   // A mixed caller cannot carry legacy entity facts into the customer path.
   if (output) contract = { contractNumber: output.contractNumber, status: output.status, createdAt: output.contractDate };
   const variant = options.variant || 'original';
-  const isAccountingVariant = variant === 'accounting';
+  const isAccountingVariant = variant === 'accounting' || variant === 'production';
   const displayInRials = isAccountingVariant || options.displayInRials === true;
   const isWorkshopVariant = variant === 'workshop';
   const isCustomVariant = variant === 'custom';
@@ -2814,7 +2863,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
   const showProductsSection = customPrint.showProductsSection !== false;
   const showPriceColumns = !isWorkshopVariant && customPrint.showPrices !== false;
   const showDeliverySection = customPrint.showDeliverySection !== false;
-  const showPaymentSection = !isWorkshopVariant && customPrint.showPaymentSection !== false;
+  const showPaymentSection = variant !== 'production' && !isWorkshopVariant && customPrint.showPaymentSection !== false;
   const showDigitalConfirmation = variant === 'original' || isSummaryVariant;
   const showLegalNotes = variant === 'original' || isSummaryVariant;
   const showSignatures = variant === 'original' || isSummaryVariant;
@@ -3034,7 +3083,7 @@ export function renderContractHtml(contract: RenderableContract, options: Render
 
     @page {
       size: A4 portrait;
-      margin: ${options.firstPageHeader ? '5mm' : options.reservePdfHeaderSpace ? '50mm 5mm 5mm 5mm' : '0'};
+      margin: ${options.firstPageHeader ? '5mm' : options.reservePdfHeaderSpace ? '50mm 5mm 5mm 5mm' : variant === 'production' || isWorkshopVariant ? '8mm 6mm 10mm' : '0'};
     }
 
     * {

@@ -1,7 +1,9 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import express, { Response } from 'express';
+import multer from 'multer';
 import { Prisma } from '@prisma/client';
 import * as XLSX from 'xlsx';
 import { prisma } from '../lib/prisma';
@@ -17,17 +19,24 @@ import {
 } from '../services/accountingPeriodEndPrismaRepository';
 import { createAccountingLedgerPrismaRepository } from '../services/accountingLedgerPrismaRepository';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
-import { scanHiringFile, sha256File } from '../services/hrHiringFileStorage';
+import { HR_HIRING_ALLOWED_MIME, scanHiringFile, sha256File, validateHiringFileSignature } from '../services/hrHiringFileStorage';
 import { recordOperationalReconciliation } from '../services/accountingOperationalReconciliation';
 import { buildOfficialReportExportRows, officialReportPeriodLabels, officialReportPdfPageSize } from '../services/accountingOfficialReportExport';
 import { parseOfficialReportDate } from '../services/accountingOfficialReportDates';
 import { retainOfficialReportArtifact } from '../services/accountingOfficialReportArtifact';
 import { ACCOUNTING_OFFICIAL_REPORT_ROOT, versionedAccountingReportFiles } from '../services/accountingFileRuntime';
+import { archiveWritePath, resolveArchiveReadPath } from '../services/accountingArchiveStorage';
+import { publishDurableFile } from '../services/durableFilePublication';
+import { assertAssetEvidenceFiles } from '../services/accountingAssetEvidenceIntegrity';
+import { assetUploadIdentity, assertMatchingAssetUpload } from '../services/accountingAssetUploadIdentity';
+
 
 const router = express.Router();
 const viewAccess = [protect, requireWorkspaceAccessWithClient(prisma, WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.VIEW)];
 const editAccess = [protect, requireWorkspaceAccessWithClient(prisma, WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.EDIT)];
 const managerAccess = [protect, requireWorkspaceAccessWithClient(prisma, WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.ADMIN)];
+const assetEvidenceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => callback(null, HR_HIRING_ALLOWED_MIME.has(file.mimetype)) });
 
 const serialize = (value: unknown) => JSON.parse(JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item));
 const date = (value: unknown, label: string) => {
@@ -54,14 +63,6 @@ const jsonHash = (value: unknown) => createHash('sha256').update(JSON.stringify(
 const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[character]!));
-const accountingArchivePath = (storageKey: string) => {
-  const root = path.resolve(process.cwd(), 'storage', 'accounting-archive');
-  const normalized = storageKey.replace(/\\/g, '/');
-  if (!normalized || normalized.startsWith('/') || /^[a-z]:/i.test(normalized) || normalized.split('/').includes('..')) throw new Error('نشانی فایل بایگانی معتبر نیست.');
-  const resolved = path.resolve(root, normalized);
-  if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('نشانی فایل بایگانی معتبر نیست.');
-  return resolved;
-};
 
 const reportTypeFa: Record<string, string> = {
   TRIAL_BALANCE: 'تراز آزمایشی', FINANCIAL_STATEMENT: 'صورت‌های مالی', CASH_FLOW: 'صورت جریان وجوه نقد',
@@ -123,7 +124,9 @@ const evidenceFromBody = (body: any): PeriodEndEvidence => {
     ...common, kind: 'ASSET_PAYMENT', assetId: positiveText(body.assetId, 'شناسه دارایی'), amountRials: rials(body.amountRials, 'مبلغ پرداخت'),
   };
   if (common.kind === 'ASSET_COST') return {
-    ...common, kind: 'ASSET_COST', assetId: positiveText(body.assetId, 'شناسه دارایی'), costKind: body.costKind,
+    ...common, kind: 'ASSET_COST', assetId: positiveText(body.assetId, 'شناسه دارایی'),
+    costKind: (['PURCHASE', 'DIRECTLY_ATTRIBUTABLE', 'CONSTRUCTION_IN_PROGRESS'].includes(body.costKind)
+      ? body.costKind : (() => { throw new Error('نوع بهای دارایی معتبر نیست.'); })()),
     amountRials: rials(body.amountRials, 'بهای دارایی'), constructionInProgressAccountId: positiveText(body.constructionInProgressAccountId, 'حساب دارایی در جریان تکمیل'),
     creditAccountId: positiveText(body.creditAccountId, 'حساب بستانکار'), documentIds: (body.documentIds || []).map((item: unknown) => positiveText(item, 'شناسه مدرک')),
   };
@@ -234,14 +237,95 @@ router.post('/operational-reconciliations', async (req: WorkspaceRequest, res: R
 });
 
 router.post('/evidence', ...editAccess, run(async (req) => {
-  const application = createAccountingPeriodEndApplication(createAccountingPeriodEndPrismaRepository(prisma), { now: () => new Date() });
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+  const evidence = evidenceFromBody(req.body.evidence);
+  if (evidence.kind === 'ASSET_COST' || evidence.kind === 'ASSET_READY_FOR_USE') {
+    const assetId = evidence.kind === 'ASSET_COST' ? evidence.assetId : evidence.asset.id;
+    await tx.$queryRaw`SELECT id FROM accounting_fixed_assets WHERE id = ${assetId} FOR UPDATE`;
+    const asset = await tx.accountingFixedAsset.findUnique({ where: { id: assetId },
+      include: { components: true, events: true } });
+    const retryingReady = evidence.kind === 'ASSET_READY_FOR_USE' && asset?.status === 'ACTIVE'
+      && asset.events.some((event) => event.sourceType === 'ASSET_READY_FOR_USE'
+        && event.sourceId === evidence.sourceId && event.sourceVersion === evidence.sourceVersion);
+    const retryingCost = evidence.kind === 'ASSET_COST' && asset?.status === 'ACTIVE'
+      && asset.events.some((event) => event.sourceType === 'ASSET_COST'
+        && event.sourceId === evidence.sourceId && event.sourceVersion === evidence.sourceVersion);
+    if (!asset || asset.bookId !== req.body.bookId || (asset.status !== 'UNDER_CONSTRUCTION' && !retryingReady && !retryingCost)) {
+      throw new Error('داراییِ در جریان تکمیل برای ثبت این رویداد معتبر نیست.');
+    }
+    const policy = await tx.accountingAssetClassPolicy.findUniqueOrThrow({ where: { id: asset.classPolicyId } });
+    const proof = await tx.accountingArchiveEvidence.findUnique({ where: { id: evidence.sourceId } });
+    const requiredProofType = evidence.kind === 'ASSET_COST' ? 'ASSET_COST' : 'ASSET_READY_FOR_USE';
+    if (!proof || proof.bookId !== asset.bookId || proof.sourceEntityType !== 'FIXED_ASSET'
+      || proof.sourceEntityId !== asset.id || proof.evidenceType !== requiredProofType
+      || proof.malwareScanStatus !== 'CLEAN' || !proof.malwareScanAt) {
+      throw new Error('مدرک معتبر و بررسی‌شدهٔ همین دارایی لازم است.');
+    }
+    const proofIds = evidence.kind === 'ASSET_COST' ? evidence.documentIds : [evidence.sourceId];
+    const proofs = await tx.accountingArchiveEvidence.findMany({ where: { id: { in: proofIds } } });
+    await assertAssetEvidenceFiles({ proofs, proofIds, sourceId: evidence.sourceId,
+      assetId: asset.id, bookId: asset.bookId, evidenceType: requiredProofType });
+    const eventCost = (event: { payload: unknown }) => {
+      const value = (event.payload as { amountRials?: unknown } | null)?.amountRials;
+      if (typeof value !== 'string' || !/^\d+$/.test(value)) throw new Error('بهای ثبت‌شده دارایی ناقص یا نامعتبر است؛ بررسی شواهد لازم است.');
+      return BigInt(value);
+    };
+    const postedCost = asset.events.filter((event) => event.sourceType === 'ASSET_COST')
+      .reduce((total, event) => total + eventCost(event), 0n);
+    if (evidence.kind === 'ASSET_COST') {
+      const priorUse = asset.events.find((event) => event.sourceType === 'ASSET_COST'
+        && event.sourceId === evidence.sourceId && event.sourceVersion === evidence.sourceVersion);
+      const otherCost = postedCost - (priorUse ? eventCost(priorUse) : 0n);
+      if (evidence.constructionInProgressAccountId !== policy.cipAccountId
+        || evidence.creditAccountId === policy.cipAccountId
+        || evidence.amountRials <= 0n || otherCost + evidence.amountRials > BigInt(asset.bookCostRials.toFixed(0))) {
+        throw new Error('حساب یا جمع بهای دارایی با سیاست و پرونده دارایی هم‌خوان نیست.');
+      }
+    }
+    if (evidence.kind === 'ASSET_READY_FOR_USE') {
+      if (evidence.asset.classPolicyVersionId !== asset.classPolicyId
+        || evidence.asset.registerNumber !== asset.registerNumber
+        || evidence.asset.costRials !== BigInt(asset.bookCostRials.toFixed(0))
+        || evidence.asset.taxBasis.costRials !== BigInt(asset.taxCostRials.toFixed(0))
+        || evidence.asset.assetAccountId !== policy.assetAccountId
+        || evidence.asset.constructionInProgressAccountId !== policy.cipAccountId
+        || evidence.asset.bookMethod !== policy.bookMethod
+        || evidence.asset.taxBasis.method !== policy.taxMethod
+        || evidence.asset.readyForUseAt.getTime() !== evidence.occurredAt.getTime()
+        || evidence.asset.components.length !== asset.components.length
+        || new Set(evidence.asset.components.map((component) => component.id)).size !== asset.components.length
+        || evidence.asset.components.some((component) => {
+          const stored = asset.components.find((row) => row.id === component.id);
+          return !stored || component.costRials !== BigInt(stored.bookCostRials.toFixed(0))
+            || component.residualValueRials !== BigInt(stored.residualValueRials.toFixed(0))
+            || component.usefulLifeMonths !== stored.usefulLifeMonths
+            || component.titlePersian !== stored.titlePersian;
+        })) {
+        throw new Error('مشخصات آماده‌به‌کار با پرونده دارایی هم‌خوان نیست.');
+      }
+      if (postedCost !== evidence.asset.costRials) {
+        throw new Error('بهای انباشته در جریان تکمیل باید دقیقاً با بهای دارایی برابر باشد.');
+      }
+    }
+  }
+  const application = createAccountingPeriodEndApplication(createAccountingPeriodEndPrismaRepository(tx, true), { now: () => new Date() });
   return application.acceptEvidence({
     bookId: positiveText(req.body.bookId, 'دفتر حسابداری'),
     fiscalYearId: positiveText(req.body.fiscalYearId, 'سال مالی'),
     periodId: positiveText(req.body.periodId, 'دوره مالی'),
     actorId: req.user!.id,
-    evidence: evidenceFromBody(req.body.evidence),
+    evidence,
   });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 20_000 });
+    } catch (error) {
+      const retryable = error instanceof Prisma.PrismaClientKnownRequestError
+        && (error.code === 'P2034' || error.code === 'P2002');
+      if (!retryable || attempt === 3) throw error;
+    }
+  }
+  throw new Error('ثبت مدرک دارایی پس از چند تلاش هم‌زمان تکمیل نشد.');
 }, true));
 
 router.post('/payroll-obligations/:id/settlement-voucher', ...editAccess, run(async (req) => prisma.$transaction(async (tx) => {
@@ -327,20 +411,50 @@ router.post('/payroll-obligations/:id/settlement-attempts', ...editAccess, run(a
   return next;
 }), true));
 
-router.post('/asset-policies', ...managerAccess, run((req) => prisma.accountingAssetClassPolicy.create({
-  data: {
+router.post('/asset-policies', ...managerAccess, run(async (req) => {
+  const bookId = positiveText(req.body.bookId, 'دفتر حسابداری');
+  const version = Number(req.body.version);
+  const usefulLifeMonths = Number(req.body.usefulLifeMonths);
+  const residualValueBasisPoints = Number(req.body.residualValueBasisPoints || 0);
+  const decliningRateBasisPoints = req.body.decliningRateBasisPoints == null || req.body.decliningRateBasisPoints === ''
+    ? null : Number(req.body.decliningRateBasisPoints);
+  const bookMethod = depreciationMethod(req.body.bookMethod, 'روش استهلاک دفتری');
+  const taxMethod = depreciationMethod(req.body.taxMethod, 'روش استهلاک مالیاتی');
+  const threshold = rials(req.body.capitalizationThresholdRials, 'حد نصاب سرمایه‌ای');
+  if (!Number.isInteger(version) || version < 1 || !Number.isInteger(usefulLifeMonths) || usefulLifeMonths < 1
+    || !Number.isInteger(residualValueBasisPoints) || residualValueBasisPoints < 0 || residualValueBasisPoints > 10_000
+    || threshold < 0n || (decliningRateBasisPoints != null && (!Number.isInteger(decliningRateBasisPoints)
+      || decliningRateBasisPoints < 1 || decliningRateBasisPoints > 10_000))
+    || ((bookMethod === 'DECLINING_BALANCE' || taxMethod === 'DECLINING_BALANCE') && decliningRateBasisPoints == null)) {
+    throw new Error('نسخه، عمر مفید، حد سرمایه‌ای یا نرخ سیاست دارایی معتبر نیست.');
+  }
+  const accountFields = ['assetAccountId', 'cipAccountId', 'depreciationExpenseAccountId',
+    'accumulatedDepreciationAccountId', 'impairmentExpenseAccountId', 'impairmentAllowanceAccountId',
+    'disposalGainAccountId', 'disposalLossAccountId'] as const;
+  const accountIds = accountFields.map((field) => positiveText(req.body[field], 'حساب معین سیاست'));
+  const accounts = await prisma.accountingLedgerAccount.findMany({ where: { id: { in: accountIds }, bookId, level: 'MOIN' } });
+  if (new Set(accounts.map((account) => account.id)).size !== new Set(accountIds).size) {
+    throw new Error('همه حساب‌های سیاست باید معین‌های معتبر همین دفتر باشند.');
+  }
+  const prior = await prisma.accountingAssetClassPolicy.findFirst({ where: { bookId,
+    classCode: positiveText(req.body.classCode, 'کد طبقه دارایی') }, orderBy: { version: 'desc' } });
+  const effectiveFrom = date(req.body.effectiveFrom, 'تاریخ اثر سیاست');
+  const effectiveTo = req.body.effectiveTo ? date(req.body.effectiveTo, 'تاریخ پایان سیاست') : null;
+  if (version !== (prior?.version || 0) + 1 || (prior && effectiveFrom <= prior.effectiveFrom)) {
+    throw new Error('نسخه و تاریخ اثر سیاست باید پس از آخرین نسخه همان طبقه باشد.');
+  }
+  if ((effectiveTo && effectiveTo < effectiveFrom) || (prior?.effectiveTo && prior.effectiveTo >= effectiveFrom)) {
+    throw new Error('بازه اثر نسخه‌های سیاست دارایی نباید معکوس یا هم‌پوشان باشد.');
+  }
+  return prisma.accountingAssetClassPolicy.create({ data: {
     bookId: positiveText(req.body.bookId, 'دفتر حسابداری'),
     classCode: positiveText(req.body.classCode, 'کد طبقه دارایی'),
-    version: Number(req.body.version),
+    version,
     titlePersian: positiveText(req.body.titlePersian, 'عنوان طبقه دارایی'),
-    effectiveFrom: date(req.body.effectiveFrom, 'تاریخ اثر سیاست'),
-    effectiveTo: req.body.effectiveTo ? date(req.body.effectiveTo, 'تاریخ پایان سیاست') : null,
-    capitalizationThresholdRials: rials(req.body.capitalizationThresholdRials, 'حد نصاب سرمایه‌ای').toString(),
-    bookMethod: positiveText(req.body.bookMethod, 'روش استهلاک دفتری'),
-    taxMethod: positiveText(req.body.taxMethod, 'روش استهلاک مالیاتی'),
-    usefulLifeMonths: Number(req.body.usefulLifeMonths),
-    residualValueBasisPoints: Number(req.body.residualValueBasisPoints || 0),
-    decliningRateBasisPoints: req.body.decliningRateBasisPoints == null ? null : Number(req.body.decliningRateBasisPoints),
+    effectiveFrom,
+    effectiveTo,
+    capitalizationThresholdRials: threshold.toString(),
+    bookMethod, taxMethod, usefulLifeMonths, residualValueBasisPoints, decliningRateBasisPoints,
     assetAccountId: positiveText(req.body.assetAccountId, 'حساب دارایی'),
     cipAccountId: positiveText(req.body.cipAccountId, 'حساب جریان تکمیل'),
     depreciationExpenseAccountId: positiveText(req.body.depreciationExpenseAccountId, 'حساب هزینه استهلاک'),
@@ -351,8 +465,8 @@ router.post('/asset-policies', ...managerAccess, run((req) => prisma.accountingA
     disposalLossAccountId: positiveText(req.body.disposalLossAccountId, 'حساب زیان واگذاری'),
     changeReason: req.body.changeReason ? String(req.body.changeReason) : null,
     createdBy: req.user!.id,
-  },
-}), true));
+  } });
+}, true));
 
 router.post('/assets', ...editAccess, run(async (req) => prisma.$transaction(async (tx) => {
   const policy = await tx.accountingAssetClassPolicy.findUnique({ where: { id: positiveText(req.body.classPolicyId, 'سیاست طبقه دارایی') } });
@@ -364,8 +478,23 @@ router.post('/assets', ...editAccess, run(async (req) => prisma.$transaction(asy
     residualValueRials: rials(component.residualValueRials, 'ارزش اسقاط جزء'),
   }));
   const bookCost = rials(req.body.bookCostRials, 'بهای دفتری دارایی');
-  if (components.length === 0 || components.reduce((total: bigint, component: any) => total + component.bookCostRials, 0n) !== bookCost) {
-    throw new Error('جمع بهای اجزای دارایی باید دقیقاً با بهای دفتری دارایی برابر باشد.');
+  const taxCost = rials(req.body.taxCostRials, 'بهای مالیاتی دارایی');
+  const acquisitionAt = date(req.body.acquisitionAt, 'تاریخ تحصیل');
+  const effectivePolicy = await tx.accountingAssetClassPolicy.findFirst({ where: { bookId: policy.bookId,
+    classCode: policy.classCode, effectiveFrom: { lte: acquisitionAt },
+    OR: [{ effectiveTo: null }, { effectiveTo: { gte: acquisitionAt } }] },
+    orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }] });
+  if (bookCost <= 0n || bookCost < BigInt(policy.capitalizationThresholdRials.toFixed(0))
+    || taxCost < 0n || acquisitionAt < policy.effectiveFrom
+    || (policy.effectiveTo && acquisitionAt > policy.effectiveTo) || effectivePolicy?.id !== policy.id
+    || components.length === 0
+    || components.some((component: any) => component.bookCostRials <= 0n || component.taxCostRials < 0n
+      || component.residualValueRials < 0n || component.residualValueRials > component.bookCostRials
+      || !Number.isInteger(Number(component.usefulLifeMonths || policy.usefulLifeMonths))
+      || Number(component.usefulLifeMonths || policy.usefulLifeMonths) < 1)
+    || components.reduce((total: bigint, component: any) => total + component.bookCostRials, 0n) !== bookCost
+    || components.reduce((total: bigint, component: any) => total + component.taxCostRials, 0n) !== taxCost) {
+    throw new Error('تاریخ، مبلغ و اجزای دارایی باید با سیاست و جمع بهای دفتری/مالیاتی برابر باشند.');
   }
   return tx.accountingFixedAsset.create({
     data: {
@@ -378,10 +507,10 @@ router.post('/assets', ...editAccess, run(async (req) => prisma.$transaction(asy
       costCenterId: req.body.costCenterId,
       location: req.body.location,
       custodianPartyId: req.body.custodianPartyId,
-      acquisitionAt: date(req.body.acquisitionAt, 'تاریخ تحصیل'),
+      acquisitionAt,
       status: 'UNDER_CONSTRUCTION',
       bookCostRials: bookCost.toString(),
-      taxCostRials: rials(req.body.taxCostRials, 'بهای مالیاتی دارایی').toString(),
+      taxCostRials: taxCost.toString(),
       createdBy: req.user!.id,
       components: { create: components.map((component: any) => ({
         componentIdentity: positiveText(component.componentIdentity, 'شناسه جزء'),
@@ -1059,9 +1188,145 @@ router.post('/restatement-cases', ...managerAccess, run((req) => prisma.accounti
   decidedBy: req.user!.id,
 } }), true));
 
+router.get('/assets/:id/evidence', ...viewAccess, run(async (req) => {
+  const asset = await prisma.accountingFixedAsset.findUnique({ where: { id: req.params.id } });
+  if (!asset || asset.bookId !== positiveText(req.query.bookId, 'دفتر حسابداری')) {
+    throw new Error('دارایی در دفتر انتخاب‌شده پیدا نشد.');
+  }
+  const rows = await prisma.accountingArchiveEvidence.findMany({ where: { bookId: asset.bookId,
+    sourceEntityType: 'FIXED_ASSET', sourceEntityId: asset.id }, orderBy: { uploadedAt: 'desc' } });
+  return rows.map(({ storageKey: _protectedStorageKey, ...row }) => row);
+}));
+
+router.get('/assets/:id/evidence/:evidenceId/download', ...editAccess, async (req: WorkspaceRequest, res: Response) => {
+  try {
+    const bookId = positiveText(req.query.bookId, 'دفتر حسابداری');
+    const asset = await prisma.accountingFixedAsset.findUnique({ where: { id: req.params.id } });
+    if (!asset || asset.bookId !== bookId) throw new Error('دارایی در دفتر انتخاب‌شده پیدا نشد.');
+    const evidence = await prisma.accountingArchiveEvidence.findFirst({ where: {
+      id: req.params.evidenceId, bookId, sourceEntityType: 'FIXED_ASSET', sourceEntityId: asset.id,
+    } });
+    if (!evidence) throw new Error('مدرک این دارایی پیدا نشد.');
+    if (evidence.malwareScanStatus !== 'CLEAN' || !evidence.malwareScanAt) {
+      throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل دریافت نیست.');
+    }
+    const filePath = await resolveArchiveReadPath(evidence.storageKey);
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile() || BigInt(stat.size) !== evidence.sizeBytes || await sha256File(filePath) !== evidence.contentHash) {
+      throw new Error('تمامیت فایل مدرک دارایی تأیید نشد.');
+    }
+    await createAccountingLedgerPrismaRepository(prisma).transaction((tx) => tx.appendAudit({
+      action: 'ASSET_EVIDENCE_DOWNLOAD', result: 'SUCCEEDED', actorId: req.user!.id,
+      effectiveProfile: req.workspacePermission === 'admin' ? 'ACCOUNTING_MANAGER' : 'ACCOUNTANT',
+      entityType: 'ACCOUNTING_ARCHIVE_EVIDENCE', entityId: evidence.id,
+      correlationId: String(req.get('X-Correlation-ID') || randomUUID()),
+      reason: 'بررسی مدرک دارایی پیش از ثبت اثر حسابداری', payloadHash: evidence.contentHash,
+      sessionContext: { assetId: asset.id, bookId },
+    }));
+    const extension = path.extname(evidence.storageKey).replace(/[^.a-zA-Z0-9]/g, '');
+    res.type(evidence.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="asset-evidence-${evidence.id}${extension}"`);
+    return res.sendFile(filePath);
+  } catch (error) {
+    const trackingId = `ACC-ASSET-${Date.now().toString(36).toUpperCase()}`;
+    console.error('Accounting asset evidence download failed:', { trackingId, error });
+    return res.status(400).json({ success: false,
+      error: error instanceof Error && /[\u0600-\u06ff]/.test(error.message) ? error.message : 'دریافت مدرک دارایی انجام نشد.', trackingId });
+  }
+});
+
+router.post('/assets/:id/evidence', ...editAccess, assetEvidenceUpload.single('file'), run(async (req) => {
+  const asset = await prisma.accountingFixedAsset.findUnique({ where: { id: req.params.id } });
+  if (!asset || asset.bookId !== req.body.bookId) {
+    throw new Error('دارایی در این دفتر پیدا نشد.');
+  }
+  if (!req.file) throw new Error('فایل مدرک دارایی الزامی است.');
+  const evidenceType = req.body.purpose === 'COST' ? 'ASSET_COST'
+    : req.body.purpose === 'READY' ? 'ASSET_READY_FOR_USE' : null;
+  if (!evidenceType) throw new Error('نوع مدرک دارایی معتبر نیست.');
+  const requestKey = String(req.get('x-idempotency-key') || '').trim();
+  if (!/^[a-zA-Z0-9._:-]{8,200}$/.test(requestKey)) throw new Error('شناسه تکرار درخواست مدرک معتبر نیست.');
+  const evidenceIdentity = assetUploadIdentity(req.user!.id, asset.id, requestKey);
+  const storageKey = `${evidenceIdentity}.asset`;
+  // Scan in private staging; publish only clean bytes into the existing protected,
+  // versioned accounting root so online capture sees the mutation.
+  const staging = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'sabalan-asset-evidence-'));
+  const filePath = path.join(staging, 'upload');
+  const finalPath = archiveWritePath(storageKey);
+  const files = versionedAccountingReportFiles();
+  const versionedKey = `archive-evidence/${storageKey}`;
+  try {
+    await fs.promises.writeFile(filePath, req.file.buffer, { flag: 'wx', mode: 0o600 });
+    const contentHash = await sha256File(filePath);
+    const verifyPrior = async (prior: NonNullable<Awaited<ReturnType<typeof prisma.accountingArchiveEvidence.findUnique>>>) => {
+      assertMatchingAssetUpload(prior, { bookId: asset.bookId, assetId: asset.id,
+        actorId: req.user!.id, evidenceType, contentHash, sizeBytes: BigInt(req.file!.size), mimeType: req.file!.mimetype });
+      const retained = await resolveArchiveReadPath(prior.storageKey);
+      const retainedStat = await fs.promises.stat(retained);
+      if (!retainedStat.isFile() || BigInt(retainedStat.size) !== prior.sizeBytes || await sha256File(retained) !== prior.contentHash) {
+        throw new Error('فایل مدرک ثبت‌شده قابل تأیید نیست؛ بازیابی لازم است.');
+      }
+      return prior;
+    };
+    const existing = await prisma.accountingArchiveEvidence.findUnique({ where: { evidenceIdentity } });
+    if (existing) {
+      const { storageKey: _protectedStorageKey, ...publicEvidence } = await verifyPrior(existing);
+      return publicEvidence;
+    }
+    validateHiringFileSignature(filePath, req.file!.mimetype);
+    if (await scanHiringFile(filePath) !== 'CLEAN') throw new Error('مدرک تا زمان تأیید بررسی بدافزار قابل ثبت نیست.');
+    const stored = await prisma.$transaction(async tx => {
+      // Serialize the same durable command identity, even across backend workers.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${evidenceIdentity}, 0))`;
+      const prior = await tx.accountingArchiveEvidence.findUnique({ where: { evidenceIdentity } });
+      if (prior) return verifyPrior(prior);
+      await tx.$queryRaw`SELECT id FROM accounting_fixed_assets WHERE id = ${asset.id} FOR UPDATE`;
+      const currentAsset = await tx.accountingFixedAsset.findUnique({ where: { id: asset.id } });
+      if (!currentAsset || currentAsset.bookId !== asset.bookId || currentAsset.status !== 'UNDER_CONSTRUCTION') {
+        throw new Error('داراییِ در جریان تکمیل در این دفتر پیدا نشد.');
+      }
+      try {
+        if (files) await files.publish(versionedKey, req.file!.buffer);
+        else await publishDurableFile(finalPath, req.file!.buffer);
+      } catch (error: any) {
+        // A previous transaction may have failed after durable publication.
+        // Reuse only the exact same bytes; an unknown failure never authorizes replacement.
+        if (!['FILE_VERSION_ALREADY_EXISTS', 'EEXIST'].includes(error?.code)) throw error;
+        const previous = files ? await files.read(versionedKey) : await fs.promises.readFile(finalPath);
+        if (!previous || createHash('sha256').update(previous).digest('hex') !== contentHash) {
+          throw new Error('فایل باقی‌مانده با مدرک درخواستی سازگار نیست؛ بررسی لازم است.');
+        }
+      }
+      const created = await tx.accountingArchiveEvidence.create({ data: {
+        bookId: asset.bookId, evidenceIdentity,
+        evidenceType, sourceEntityType: 'FIXED_ASSET', sourceEntityId: asset.id,
+        contentHash, storageKey, mimeType: req.file!.mimetype, sizeBytes: BigInt(req.file!.size),
+        malwareScanStatus: 'CLEAN', malwareScanAt: new Date(), retentionPolicyId: 'ASSET_DOCUMENT_V1',
+        uploadedBy: req.user!.id,
+      } });
+      await createAccountingLedgerPrismaRepository(tx, true).appendAudit({
+        action: 'ASSET_EVIDENCE_UPLOADED', result: 'SUCCEEDED', actorId: req.user!.id,
+        effectiveProfile: req.workspacePermission === 'admin' ? 'ACCOUNTING_MANAGER' : 'ACCOUNTANT',
+        entityType: 'ACCOUNTING_ARCHIVE_EVIDENCE', entityId: created.id,
+        correlationId: String(req.get('X-Correlation-ID') || randomUUID()),
+        reason: 'ثبت مدرک دارایی', payloadHash: contentHash,
+        sessionContext: { assetId: asset.id, bookId: asset.bookId, evidenceType },
+      });
+      return created;
+    }, { timeout: 20_000 });
+    const { storageKey: _protectedStorageKey, ...publicEvidence } = stored;
+    return publicEvidence;
+  } finally {
+    // Database acknowledgment may be lost after commit: retain published bytes
+    // instead of deleting a file that a committed evidence row may reference.
+    await fs.promises.unlink(filePath).catch((error: any) => { if (error?.code !== 'ENOENT') throw error; });
+    await fs.promises.rmdir(staging);
+  }
+}, true));
+
 router.post('/archive-evidence', ...managerAccess, run(async (req) => {
   const storageKey = positiveText(req.body.storageKey, 'نشانی امن مدرک');
-  const filePath = accountingArchivePath(storageKey);
+  const filePath = await resolveArchiveReadPath(storageKey);
   const stat = await fs.promises.stat(filePath).catch(() => null);
   if (!stat?.isFile()) throw new Error('فایل بایگانی در مخزن امن پیدا نشد.');
   const [contentHash, malwareScanStatus] = await Promise.all([sha256File(filePath), scanHiringFile(filePath)]);
@@ -1118,7 +1383,7 @@ router.get('/archive-evidence/:id/download', ...managerAccess, async (req: Works
   try {
     const evidence = await prisma.accountingArchiveEvidence.findUniqueOrThrow({ where: { id: req.params.id } });
     if (evidence.malwareScanStatus !== 'CLEAN' || !evidence.malwareScanAt) throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل دریافت نیست.');
-    const filePath = accountingArchivePath(evidence.storageKey);
+    const filePath = await resolveArchiveReadPath(evidence.storageKey);
     const contentHash = await sha256File(filePath);
     if (contentHash !== evidence.contentHash) throw new Error('تمامیت فایل بایگانی تأیید نشد.');
     await createAccountingLedgerPrismaRepository(prisma).transaction((tx) => tx.appendAudit({

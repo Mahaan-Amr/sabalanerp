@@ -38,6 +38,7 @@ import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPre
 import { userFacingError } from "@/features/dispatch/userFacingError";
 import AccountingCustomPrintSettings, { defaultCustomPrintSettings, salesPdfVariantLabels, type SalesPdfVariant, type CustomPrintPreset, type CustomProductRowsMode, type CustomPrintSettings } from '@/features/accounting/AccountingCustomPrintSettings';
 import AccountingContractPrintActions, { accountingContractTabs } from "@/features/accounting/AccountingContractPrintActions";
+import { financialRecordReviewHref } from "@/features/accounting/financialRecordReviewHref";
 import AccountingActionModal from "@/features/accounting/AccountingActionModal";
 import AccountingVoidWorkflowPanel, {
   type AccountingVoidWorkflowView,
@@ -51,8 +52,6 @@ import {
 import {
   CompactQueueItem,
   accountingActionAvailability,
-  FinancialInvoiceApprovalForm,
-  FinancialInvoiceApprovalPayload,
   StatusBadge,
   contractStatusLabels,
   dateFa,
@@ -106,6 +105,9 @@ export default function AccountingContractDetailPage(props: {
       ? (searchParams.get("focus") as "receivable" | "check")
       : null;
   const focusedRecordId = (searchParams.get("recordId") || "").trim();
+  const requestedReturn = searchParams.get("returnTo") || "";
+  const backHref = (requestedReturn === "/dashboard/accounting" || requestedReturn.startsWith("/dashboard/accounting/") || requestedReturn.startsWith("/dashboard/accounting?")) && !requestedReturn.startsWith("//")
+    ? requestedReturn : "/dashboard/accounting/contracts";
   const [data, setData] = useState<any>(null);
   const [detailSection, setDetailSection] = useState<
     "summary" | "items" | "financial" | "collections" | "compliance"
@@ -312,18 +314,6 @@ export default function AccountingContractDetailPage(props: {
     } finally {
       setActionLoading(false);
     }
-  };
-
-  const approveFinancialInvoice = (
-    payload: FinancialInvoiceApprovalPayload,
-  ) => {
-    execute({
-      kind: "APPROVE_FINANCIAL_INVOICE",
-      invoiceId: payload.invoiceId,
-      systemInvoiceNumber: payload.systemInvoiceNumber,
-      systemInvoiceDate: payload.systemInvoiceDate,
-      sepidarAmount: payload.sepidarAmount,
-    });
   };
 
   const deleteDraftRecord = async (values: Record<string, string | number>) => {
@@ -631,7 +621,7 @@ export default function AccountingContractDetailPage(props: {
       <ErpPage
         eyebrow="حسابداری"
         title="قرارداد یافت نشد"
-        backHref="/dashboard/accounting/contracts"
+        backHref={backHref}
       >
         <ErpSection>این قرارداد در رجیستر حسابداری پیدا نشد.</ErpSection>
       </ErpPage>
@@ -667,7 +657,7 @@ export default function AccountingContractDetailPage(props: {
         <span>{contract.customer?.displayName}</span>
         <AccountingCustomerCategoryBadge contract={contract} />
       </span>}
-      backHref="/dashboard/accounting/contracts"
+      backHref={backHref}
       actions={[
         {
           label: "به‌روزرسانی",
@@ -1137,11 +1127,8 @@ export default function AccountingContractDetailPage(props: {
                                   {actionError}
                                 </div>
                               )}
-                              <FinancialInvoiceApprovalForm
-                                invoice={replacementRecord}
-                                busy={actionLoading}
-                                onApprove={approveFinancialInvoice}
-                              />
+                              <ErpButton label="بررسی و تأیید مالی" href={financialRecordReviewHref(replacementRecord.id,
+                                `/dashboard/accounting/contracts/${encodeURIComponent(params.contractId)}?section=financial`)} />
                             </div>
                           )}
                       </div>
@@ -1220,11 +1207,8 @@ export default function AccountingContractDetailPage(props: {
                                     مالی انجام می‌شود.
                                   </div>
                                 ) : (
-                                  <FinancialInvoiceApprovalForm
-                                    invoice={record}
-                                    busy={actionLoading}
-                                    onApprove={approveFinancialInvoice}
-                                  />
+                                  <ErpButton label="بررسی رکورد مالی" href={financialRecordReviewHref(record.id,
+                                    `/dashboard/accounting/contracts/${encodeURIComponent(params.contractId)}?section=financial`)} />
                                 )}
                                 {record.status === "DRAFT" && (
                                   <div className="flex justify-end">

@@ -1,0 +1,28 @@
+import { promises as fs } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { resolveArchiveReadPath } from './accountingArchiveStorage';
+
+type Proof = { id: string; bookId: string; sourceEntityType: string; sourceEntityId: string;
+  evidenceType: string; malwareScanStatus: string; malwareScanAt: Date | null;
+  storageKey: string; sizeBytes: bigint; contentHash: string };
+export async function assertAssetEvidenceFiles(input: { proofs: Proof[]; proofIds: string[]; sourceId: string;
+  assetId: string; bookId: string; evidenceType: string; applicationRoot?: string }) {
+  if (!input.proofIds.includes(input.sourceId) || new Set(input.proofIds).size !== input.proofIds.length) {
+    throw new Error('مدارک باید به منبع همین رویداد مرتبط و بدون تکرار باشند.');
+  }
+  if (input.proofs.length !== input.proofIds.length || input.proofs.some(item => !input.proofIds.includes(item.id))) {
+    throw new Error('مدرک موردنیاز دارایی پیدا نشد.');
+  }
+  for (const item of input.proofs) {
+    if (item.bookId !== input.bookId || item.sourceEntityType !== 'FIXED_ASSET'
+      || item.sourceEntityId !== input.assetId || item.evidenceType !== input.evidenceType
+      || item.malwareScanStatus !== 'CLEAN' || !item.malwareScanAt) {
+      throw new Error('مدرک معتبر و بررسی‌شدهٔ همین دارایی لازم است.');
+    }
+    const filePath = await resolveArchiveReadPath(item.storageKey, input.applicationRoot);
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile() || BigInt(stat.size) !== item.sizeBytes) throw new Error('تمامیت فایل مدرک دارایی تأیید نشد.');
+    const digest = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+    if (digest !== item.contentHash) throw new Error('تمامیت فایل مدرک دارایی تأیید نشد.');
+  }
+}

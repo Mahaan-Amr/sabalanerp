@@ -2,6 +2,7 @@
 import { ErpPersianDateField } from '@/components/erp';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ErpBadge,
   ErpButton,
@@ -19,6 +20,7 @@ import {
 } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
 import { downloadBlobResponse } from '@/lib/downloadFile';
+import { AccountingFixedAssetsPanel } from '@/features/accounting/AccountingFixedAssetsPanel';
 
 type Tab = 'assets' | 'payroll' | 'schedules' | 'reports' | 'tax' | 'close' | 'archive';
 type Notice = { kind: 'success' | 'error'; title: string };
@@ -53,11 +55,20 @@ const digits = (value: unknown) => {
 const dateFa = (value?: string | null) => value ? new Date(value).toLocaleDateString('fa-IR') : '—';
 
 export default function AccountingPeriodEndPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [context, setContext] = useState<any>();
   const [overview, setOverview] = useState<any>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState<Tab>('assets');
+  const requestedTab = searchParams.get('tab');
+  const tab: Tab = requestedTab && ['assets', 'payroll', 'schedules', 'reports', 'tax', 'close', 'archive'].includes(requestedTab)
+    ? requestedTab as Tab : 'assets';
+  const setTab = (next: Tab) => {
+    const query = new URLSearchParams(searchParams.toString());
+    query.set('tab', next);
+    router.replace(`/dashboard/accounting/period-end?${query.toString()}`, { scroll: false });
+  };
   const [notice, setNotice] = useState<Notice>();
   const [commandFeedback, setCommandFeedback] = useState<(Notice & { scope: string })>();
   const [closeReason, setCloseReason] = useState('');
@@ -82,7 +93,7 @@ export default function AccountingPeriodEndPage() {
       }
     } catch (error: any) {
       setNotice({ kind: 'error', title: error.response?.data?.error || 'خواندن اطلاعات پایان دوره ناموفق بود.' });
-    } finally { setLoading(false); }
+    } finally { if (!background) setLoading(false); }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -142,9 +153,10 @@ export default function AccountingPeriodEndPage() {
         />
       </ErpSection>
 
-      {tab === 'assets' && <ErpSection title="دفتر دارایی‌های ثابت" description="استهلاک فقط پس از شاهد آماده‌به‌کار آغاز می‌شود و مبنای دفتری از مبنای مالیاتی جدا می‌ماند.">
-        {!overview?.assets?.length ? <ErpEmptyState title="هنوز دارایی ثابتی ثبت نشده است." description="سیاست طبقه و هویت پایدار دارایی از مسیر مدیر حسابداری ثبت می‌شود." /> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{overview.assets.map((asset: any) => <ErpCard key={asset.id} className="p-4"><div className="flex flex-wrap items-start justify-between gap-3 [&>*]:min-w-0 [&>*]:max-w-full [&>*]:break-words"><div><strong>{asset.registerNumber} · {asset.titlePersian}</strong><span className="mt-1 block text-sm text-[var(--sds-text-secondary)]">{asset.location || 'مکان ثبت نشده'} · {digits(asset.components?.length)} جزء</span></div><ErpBadge tone={toneOf(asset.status) as any}>{statusFa[asset.status] || asset.status}</ErpBadge></div><div className="mt-3 grid gap-1 text-sm"><span>بهای دفتری: {digits(asset.bookCostRials)} ریال</span><span>مبنای مالیاتی: {digits(asset.taxCostRials)} ریال</span><span>آماده‌به‌کار: {dateFa(asset.readyForUseAt)}</span></div></ErpCard>)}</div>}
-      </ErpSection>}
+      {tab === 'assets' && <AccountingFixedAssetsPanel book={book} years={years}
+        policies={overview?.assetPolicies || []} assets={overview?.assets || []}
+        accessProfile={context?.accessProfile || 'VIEWER'}
+        onRefresh={() => load(true)} />}
 
       {tab === 'payroll' && <ErpSection title="تحویل و تسویه حقوق" description="جزئیات فردی در منابع انسانی می‌ماند؛ دفترکل فقط خلاصه متوازن و تعهدات کنترل‌شده را می‌بیند.">
         {!overview?.payroll?.length ? <ErpEmptyState title="تحویل تأییدشده‌ای از منابع انسانی دریافت نشده است." /> : <div className="space-y-3">{overview.payroll.map((handoff: any) => <ErpCard key={handoff.id} className="p-4"><div className="flex flex-wrap items-center justify-between gap-3"><strong>دوره حقوق {handoff.payrollRunId} · نسخه {Number(handoff.payrollRunVersion).toLocaleString('fa-IR')}</strong><ErpBadge tone={toneOf(handoff.status) as any}>{statusFa[handoff.status] || handoff.status}</ErpBadge></div><div className="mt-3 grid gap-2 md:grid-cols-3"><span>بدهکار: {digits(handoff.debitTotalRials)} ریال</span><span>بستانکار: {digits(handoff.creditTotalRials)} ریال</span><span>تعهد باز: {digits(handoff.obligations?.filter((item: any) => item.status !== 'SETTLED').length)} مورد</span></div></ErpCard>)}</div>}

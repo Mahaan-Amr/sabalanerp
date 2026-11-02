@@ -1194,6 +1194,18 @@ export const accountingAPI = {
   createAssetClassPolicy: (data: any) => api.post('/accounting/period-end/asset-policies', data),
   createFixedAsset: (data: any) => api.post('/accounting/period-end/assets', data),
   postAssetDepreciation: (id: string, data: any) => api.post(`/accounting/period-end/assets/${id}/depreciation`, data),
+  getAssetEvidence: (id: string, bookId: string) => api.get(`/accounting/period-end/assets/${id}/evidence`, { params: { bookId } }),
+  downloadAssetEvidence: (assetId: string, evidenceId: string, bookId: string) => api.get(
+    `/accounting/period-end/assets/${assetId}/evidence/${evidenceId}/download`,
+    { params: { bookId }, responseType: 'blob' },
+  ),
+  uploadAssetEvidence: (id: string, bookId: string, purpose: 'COST' | 'READY', file: File) => {
+    const data = new FormData();
+    data.append('bookId', bookId);
+    data.append('purpose', purpose);
+    data.append('file', file);
+    return api.post(`/accounting/period-end/assets/${id}/evidence`, data, { headers: { 'Content-Type': undefined } });
+  },
   createRecognitionSchedule: (data: any) => api.post('/accounting/period-end/schedules', data),
   createEstimateCase: (data: any) => api.post('/accounting/period-end/estimate-cases', data),
   createFinancialStatementMapping: (data: any) => api.post('/accounting/period-end/mappings', data),

@@ -13,6 +13,8 @@ import { readOrdinaryFinancialRegistration } from './ordinaryContractReactivatio
 import { accountingContractListSelect, accountingFinancialSummarySelect, attachAccountingListDates,
   accountingFinancialRegisterSelect, accountingAuditRegisterSelect, attachPartnerRegisterSnapshots } from './accountingListProjection';
 import { attachAccountingTrendAuditState } from './accountingReadProjection';
+import { resolveAccountingWorkAttention } from './accountingWorkAttention';
+import { accountingProjectedRialCurrency } from './accountingProjectedRialCurrency';
 import { normalizePersianSearchTokens } from './crmCustomerSearch';
 import { randomUUID } from 'node:crypto';
 import { canonicalHash, InstantSchema, partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
@@ -961,6 +963,22 @@ const buildContractRow = async (contract: any, settings: any) => {
     }
   ];
 
+  const attention = resolveAccountingWorkAttention({
+    eligible,
+    invoiceStatus,
+    receivableStatus,
+    taxStatus,
+    hasReceivable: receivables.some((item: any) => item.status !== ReceivableStatus.VOIDED),
+    missingTaxFields: missingFields,
+    openCorrections,
+    openBlockerFlags: openFlags.filter((flag: any) => flag.severity === AccountingFlagSeverity.BLOCKER),
+    openInvoiceCandidates,
+    overdueReceivables,
+    assignedUsers: contract.accountingAssignees || {},
+    signedAt: contract.signedAt,
+    createdAt: contract.createdAt,
+  });
+
   return {
     contractId: contract.id,
     contractNumber: contract.contractNumber,
@@ -1002,12 +1020,14 @@ const buildContractRow = async (contract: any, settings: any) => {
       openFlags: openFlags.length,
       openBlockerFlags: openFlags.filter((flag: any) => flag.severity === AccountingFlagSeverity.BLOCKER).length,
       openCorrections: openCorrections.length,
+      currency: accountingProjectedRialCurrency(contract.currency, records, payments),
       totalContractAmount: decimalToString(contractAmount),
       invoicedAmount: decimalToString(invoicedAmount),
       receivedAmount: decimalToString(receivedAmount),
       remainingAmount: decimalToString(remainingAmount)
     },
     financialRecords: normalizeFinancialRecords(records, contractAmount),
+    attention,
     nextBestActions
   };
 };
@@ -1124,7 +1144,7 @@ const attachAccountingCollections = async (contracts: any[]) => {
     }),
     prisma.accountingPaymentStatus.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, amount: true },
+      select: { contractId: true, status: true, amount: true, currency: true },
       orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }]
     }),
     prisma.accountingTaxRecord.findMany({
@@ -1134,15 +1154,23 @@ const attachAccountingCollections = async (contracts: any[]) => {
     }),
     prisma.accountingContractFlag.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, severity: true },
+      select: { contractId: true, status: true, severity: true, title: true, createdAt: true, assignedToUserId: true },
       orderBy: { createdAt: 'desc' }
     }),
     prisma.accountingCorrectionRequest.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true },
+      select: { contractId: true, status: true, createdAt: true, assignedToUserId: true },
       orderBy: { createdAt: 'desc' }
     })
   ]);
+
+  const assigneeIds = [...new Set([...flags, ...corrections]
+    .map((item) => item.assignedToUserId).filter((id): id is string => Boolean(id)))];
+  const assignees = assigneeIds.length ? await prisma.user.findMany({
+    where: { id: { in: assigneeIds } }, select: { id: true, firstName: true, lastName: true },
+  }) : [];
+  const assigneeNames = Object.fromEntries(assignees.map((user) =>
+    [user.id, `${user.firstName} ${user.lastName}`.trim()]));
 
   const group = <T extends { contractId: string | null }>(rows: T[]) => {
     const grouped = new Map<string, T[]>();
@@ -1163,7 +1191,8 @@ const attachAccountingCollections = async (contracts: any[]) => {
     accountingPayments: byContract.payments.get(contract.id) ?? [],
     accountingTaxRecords: byContract.taxes.get(contract.id) ?? [],
     accountingFlags: byContract.flags.get(contract.id) ?? [],
-    accountingCorrections: byContract.corrections.get(contract.id) ?? []
+    accountingCorrections: byContract.corrections.get(contract.id) ?? [],
+    accountingAssignees: assigneeNames,
   }));
 };
 
@@ -1362,7 +1391,16 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       });
     }
   }
-  if (reviewableView || query.sort === 'attention') {
+  if (query.sort === 'work_queue') {
+    items = [...items].sort((left, right) => {
+      const leftPriority = left.attention?.priority ?? Number.MAX_SAFE_INTEGER;
+      const rightPriority = right.attention?.priority ?? Number.MAX_SAFE_INTEGER;
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      const leftSince = left.attention?.waitingSince ? new Date(left.attention.waitingSince).getTime() : Number.MAX_SAFE_INTEGER;
+      const rightSince = right.attention?.waitingSince ? new Date(right.attention.waitingSince).getTime() : Number.MAX_SAFE_INTEGER;
+      return leftSince - rightSince;
+    });
+  } else if (reviewableView || query.sort === 'attention') {
     items = orderReviewableContracts(items);
   } else {
     const amountInRials = (item: any) => accountingAmountInRials(item.accounting.totalContractAmount, item.accounting.currency);
@@ -1409,7 +1447,7 @@ const getAccountingWorkspaceInScope = async (scope: AccountingReadScope, query: 
   const now = new Date();
   const [period, contractResponse, records, receivables, payments, taxRecords, corrections, auditLogs] = await Promise.all([
     getOrCreateCurrentPeriod(),
-    preloadedContracts || listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }),
+    preloadedContracts || listAccountingContracts({ view: 'reviewable', sort: 'work_queue', page: 1, pageSize: 12 }),
     prisma.accountingFinancialRecord.findMany({ where: scope.financial(), orderBy: { createdAt: 'desc' }, take: 8 }),
     prisma.accountingReceivable.findMany({ where: scope.receivable(), orderBy: { dueDate: 'asc' }, take: 8 }),
     prisma.accountingPaymentStatus.findMany({ where: scope.payment(), orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }], take: 8 }),
@@ -1601,7 +1639,7 @@ export const getAccountingDashboard = async (query: any = {}, requestedRange: un
   let workspaceCompleted = false;
   // Ordinary contract summaries already use their own read path. Start that
   // independent work before waiting for the Partner authorization snapshot.
-  const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 });
+  const contracts = listAccountingContracts({ view: 'reviewable', sort: 'work_queue', page: 1, pageSize: 12 });
   void contracts.catch(() => {});
   try {
     return await withAccountingReadScope(prisma, actor, async scope => {
@@ -3918,6 +3956,7 @@ const applyContractSearch = async (where: { contractId?: any; AND?: any }, query
 export const listFinancialRecords = async (query: any = {}, actor?: AccountingReadActor) => withAccountingReadScope(prisma, actor, async scope => {
   const prisma = scope.database;
   const where: Prisma.AccountingFinancialRecordWhereInput = scope.financial();
+  if (query.recordId) where.id = String(query.recordId);
   // Filter the Partner source before pagination. Filtering contextualized page
   // results would omit valid cases as soon as ordinary records fill the page.
   if (query.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) where.sourceKind = PARTNER_INTERNAL_ACCOUNTING_SOURCE;
@@ -3953,7 +3992,8 @@ export const listFinancialRecords = async (query: any = {}, actor?: AccountingRe
     prisma.accountingFinancialRecord.findMany({
       where: scope.financial(where),
       select: { ...accountingFinancialRegisterSelect, invoiceItems: true,
-        taxRecords: { where: scope.tax() }, receivables: { where: scope.receivable() } },
+        taxRecords: { where: scope.tax() }, receivables: { where: scope.receivable(),
+          ...(query.recordId ? { include: { paymentStatuses: { where: scope.payment(), orderBy: { createdAt: 'desc' } } } } : {}) } },
       orderBy: { createdAt: 'desc' },
       skip,
       take: pageSize

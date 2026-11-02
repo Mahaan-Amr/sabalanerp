@@ -25,7 +25,29 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   else if(!['diff','fetch','checkout','pull','submodule'].includes(a[0]))throw Error('Unexpected Git operation');
   return;
  }
+ if(kind==='python3'){
+  const [script,mode,compose,environment,previousImage,plan,session]=a;
+  if(!script?.endsWith('/deploy/scripts/legacy-backend-signal.py')||!['--preflight','--forward','--assert-resolved'].includes(mode))throw Error('Unexpected fixture python command');
+  if(compose!==path.join(root,'docker-compose.prod.yml')||environment!==path.join(root,'.env.prod')||previousImage!==image('backend')||plan!==path.join(root,'.deploy-state','legacy-backend-drain-'+process.env.DEPLOYMENT_ID+'.json'))throw Error('Legacy signal fixture identity mismatch');
+  const marker=path.join(root,'reports/fixture-legacy-preflight.json');
+  const forwarded=path.join(root,'reports/fixture-legacy-forward.json');
+  if(mode==='--preflight'){if(a.length!==6)throw Error('Legacy preflight arguments');fs.writeFileSync(marker,JSON.stringify({previousImage,plan}),{flag:'wx'});}
+  else if(mode==='--forward'){
+   if(a.length!==7||session!==path.join(root,'reports/active-deployment-session.json')||!fs.existsSync(marker)||phase()!=='TRAFFIC_BLOCKED'||!fs.existsSync(path.join(root,'maintenance.json')))throw Error('Legacy forward boundary unproven');
+   if(JSON.stringify(JSON.parse(fs.readFileSync(marker)))!==JSON.stringify({previousImage,plan}))throw Error('Legacy preflight changed');
+   fs.writeFileSync(forwarded,JSON.stringify({previousImage,plan}),{flag:'wx'});
+  } else {
+   if(a.length!==6||!fs.existsSync(marker)||!fs.existsSync(forwarded)||JSON.stringify(JSON.parse(fs.readFileSync(marker)))!==JSON.stringify({previousImage,plan})||JSON.stringify(JSON.parse(fs.readFileSync(forwarded)))!==JSON.stringify({previousImage,plan}))throw Error('Legacy resolution without original forward');
+  }
+  return;
+ }
  if(kind==='node'){
+  if(a[0]?.endsWith('/backup-retention-host.mjs')){
+   if(a[1]==='--inspect'){if(a.length!==3||a[2]!==path.join(root,'.env.prod'))throw Error('Unexpected backup inspection');console.log(JSON.stringify({inspected:true,sshStarted:false}));return;}
+   const [,environment,id,stage,receipt,holds]=a;
+   if(a.length!==6||environment!==path.join(root,'.env.prod')||!['BEFORE_CHECKPOINT','AFTER_CHECKPOINT'].includes(stage)||receipt!==path.join(root,'reports',`remote-retention-${id}-${stage}.json`)||holds!==path.join(root,'reports',`retention-holds-${id}-${stage}.json`)||JSON.stringify(JSON.parse(fs.readFileSync(holds)))!=='[]')throw Error('Unexpected backup fixture request');
+   fs.writeFileSync(receipt,JSON.stringify({format:'fixture-only-host-retention',deploymentId:id,stage})+'\n',{flag:'wx',mode:0o400});return;
+  }
   if(a[0]?.endsWith('/clamav-incident-recovery.mjs')){
    const {validateIncidentSnapshot}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-incident-policy.mjs')));
    const evidence=JSON.parse(fs.readFileSync(a[3]));validateIncidentSnapshot(evidence,image('clamav'));
@@ -135,6 +157,17 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   }
   return;
  }
+ if(a.includes('dist/scripts/deployment-retention-local.js')){
+  const i=a.indexOf('dist/scripts/deployment-retention-local.js'),command=a[i+1],stage=a[i+2],id=env('DEPLOYMENT_ID');
+  if(!['BEFORE_CHECKPOINT','AFTER_CHECKPOINT'].includes(stage))throw Error('Unexpected retention stage');
+  const name=`remote-retention-${id}-${stage}.json`,file=path.join(root,'reports',name);
+  if(command==='export-holds')fs.writeFileSync(path.join(root,'reports',`retention-holds-${id}-${stage}.json`),'[]\n',{flag:'wx',mode:0o400});
+  else if(command==='apply'){
+   const receipt=JSON.parse(fs.readFileSync(file));
+   if(receipt.format!=='fixture-only-host-retention'||receipt.deploymentId!==id||receipt.stage!==stage||env('DEPLOYMENT_REMOTE_RETENTION_RECEIPT')!==`/app/deployment-reports/${name}`||env('DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256')!==hash(fs.readFileSync(file)))throw Error('Retention receipt mismatch');
+  } else throw Error('Unexpected retention command');
+  return;
+ }
  if(a.includes('dist/scripts/deployment-checkpoint.js')){
   installTsHook();const {encryptRecoveryArchive,decryptRecoveryArchive}=require(path.join(repository,'backend/src/services/recoveryCrypto.ts'));
   const payload=path.join(root,'payload');fs.mkdirSync(path.join(payload,'recovery-coordination'),{recursive:true});
@@ -151,7 +184,14 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   const {verifyUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
   await verifyUnit({unit,id,checkpoint});save('checkpoint.json',checkpoint);return;
  }
- if(a.includes('db:migrate:deploy')){if(['post-mutation','rollback-qualifier'].includes(failure))process.exit(44);return;}
+ if(a.includes('dist/scripts/deployment-inquiry.js')){
+  if(!a.includes('scripts/with-backend-control-ownership.sh')||phase()!=='MIGRATIONS_APPLIED')throw Error('Inquiry ownership boundary unproven');
+  return;
+ }
+ if(a.includes('dist/scripts/deployment-owned-migrations.js')){
+  if(!a.includes('scripts/with-backend-control-ownership.sh')||phase()!=='MUTATION_STARTED')throw Error('Migration ownership boundary unproven');
+  if(['post-mutation','rollback-qualifier'].includes(failure))process.exit(44);return;
+ }
  if(a.includes('dist/scripts/deployment-rollback.js')){
   installTsHook();const {decryptRecoveryArchive}=require(path.join(repository,'backend/src/services/recoveryCrypto.ts'));
   const {requireBoundary,recoverUnit,restoreUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
@@ -161,6 +201,11 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   await recoverUnit({unit,id,checkpoint:read('checkpoint.json'),readArchive:destination=>decryptRecoveryArchive(path.join(root,'checkpoint.sabrec'),destination,fs.readFileSync(path.join(root,'fixture-key'),'utf8'))});
   await restoreUnit({bank,unit,id,checkpoint:read('checkpoint.json')});
   const state=read('runtime.json');state.bankRestored=true;save('runtime.json',state);return;
+ }
+ if(a.includes('sh') && a.includes('-c') && a.at(-1).includes('exec python3 - --assert-closed')){
+  const prior=fs.readFileSync(log,'utf8').trim().split('\n').map(line=>JSON.parse(line));
+  if(!prior.some(row=>row.kind==='python3'&&row.args[1]==='--assert-resolved'))throw Error('Native closure before signal resolution');
+  return;
  }
  if(a.includes('exec')){
   const text=a.at(-1);

@@ -13,6 +13,11 @@ const newBrowser = notificationEventDefinition('NEW_BROWSER_LOGIN');
 assert.equal(newBrowser.mandatory, true);
 assert.deepEqual(newBrowser.allowedRecipientResolvers, ['DIRECT_USER']);
 
+const purchasingUpdated = notificationEventDefinition('PURCHASING_UPDATED');
+assert.deepEqual(purchasingUpdated.allowedChannels, ['IN_APP']);
+assert.deepEqual(purchasingUpdated.allowedRecipientResolvers, ['DIRECT_USER']);
+assert.deepEqual(purchasingUpdated.allowedVariables, []);
+
 const correctionEdited = notificationEventDefinition('ACCOUNTING_CONTRACT_CORRECTION_EDITED');
 assert.equal(correctionEdited.titleTemplate, 'اصلاح قرارداد ثبت شد');
 assert.equal(correctionEdited.messageTemplate, 'اصلاح قرارداد {{contractNumber}} ثبت و برای بررسی حسابداری آماده شد.');
@@ -168,6 +173,7 @@ assert.deepEqual(registeredNotificationEventTypes(), [
   'PERFORMANCE_SUBMISSION_DECIDED',
   'PERFORMANCE_SUMMARY_UPDATED',
   'PERFORMANCE_SUPERVISOR_TASK',
+  'PURCHASING_UPDATED',
   'RECOVERY_BACKUP_STALE',
   'SALES_CONTRACT_READY_FOR_ACCOUNTING',
   'SUPPORT_TICKET_ASSIGNED',

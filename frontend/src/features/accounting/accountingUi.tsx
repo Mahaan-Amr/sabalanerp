@@ -91,7 +91,7 @@ export type AccountingContractRow = {
     reason: string;
     evidence: string;
     owner: string;
-    waitingSince: string;
+    waitingSince: string | null;
     nextAction: string;
   } | null;
   nextBestActions?: Array<{

@@ -24,3 +24,12 @@ test('historical archive evidence remains readable while new evidence uses prote
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('runtime archive path normalizes separators and rejects root and traversal escapes', () => {
+  const root = path.resolve(os.tmpdir(), 'archive-path-test');
+  const slash = String.fromCharCode(92); for (const key of [`..${slash}outside`, `..${slash}${slash}outside`, `${slash}${slash}server${slash}share${slash}file`, `C:${slash}outside`, '../outside']) {
+    assert.throws(() => archiveWritePath(key, root), /معتبر نیست/, key);
+  }
+  const base = path.join(root, 'storage', 'accounting-contracts', '.official-reports', 'archive-evidence');
+  assert.equal(archiveWritePath(`nested${slash}inside`, root), path.join(base, 'nested', 'inside'));
+});

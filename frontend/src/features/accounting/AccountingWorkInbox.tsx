@@ -2,7 +2,8 @@ import React from 'react';
 import { ErpButton, ErpCard, ErpEmptyState, ErpSection } from '@/components/erp';
 import { type AccountingContractRow, evidenceMoney } from './accountingUi';
 
-const waitingLabel = (value: string, now: Date) => {
+const waitingLabel = (value: string | null, now: Date) => {
+  if (!value) return 'زمان انتظار نامشخص';
   const started = new Date(value);
   if (Number.isNaN(started.getTime())) return 'زمان انتظار نامشخص';
   const days = Math.max(0, Math.floor((now.getTime() - started.getTime()) / 86_400_000));
@@ -15,7 +16,8 @@ export function AccountingWorkInbox({ contracts, now = new Date() }: {
 }) {
   const tasks = contracts.filter(contract => contract.attention)
     .sort((left, right) => left.attention!.priority - right.attention!.priority
-      || new Date(left.attention!.waitingSince).getTime() - new Date(right.attention!.waitingSince).getTime())
+      || (left.attention!.waitingSince ? new Date(left.attention!.waitingSince).getTime() : Number.MAX_SAFE_INTEGER)
+        - (right.attention!.waitingSince ? new Date(right.attention!.waitingSince).getTime() : Number.MAX_SAFE_INTEGER))
     .slice(0, 6);
   return <ErpSection title="کارهای امروز">
     {tasks.length ? <div className="space-y-3">{tasks.map(contract => {
@@ -33,8 +35,8 @@ export function AccountingWorkInbox({ contracts, now = new Date() }: {
           {detailHref ? <ErpButton label={attention.nextAction} href={detailHref} /> : <span>پرونده همکار در دسترس نیست.</span>}
         </div>
         <div className="sds-text-secondary mt-3 grid gap-1 text-sm sm:grid-cols-2 xl:grid-cols-4">
-          <span>مبلغ قرارداد: {evidenceMoney(contract.accounting.totalContractAmount, contract.accounting.currency)}</span>
-          <span>دریافت‌شده: {evidenceMoney(contract.accounting.receivedAmount, contract.accounting.currency)} · مانده: {evidenceMoney(contract.accounting.remainingAmount, contract.accounting.currency)}</span>
+          <span>مبلغ قرارداد: {contract.amountKnown === false ? 'نامشخص' : evidenceMoney(contract.accounting.totalContractAmount, contract.accounting.currency)}</span>
+          <span>دریافت‌شده: {evidenceMoney(contract.accounting.receivedAmount, contract.accounting.currency)} · مانده: {contract.amountKnown === false ? 'نامشخص' : evidenceMoney(contract.accounting.remainingAmount, contract.accounting.currency)}</span>
           <span>مدت انتظار: {waitingLabel(attention.waitingSince, now)}</span>
           <span>مسئول فعلی: {attention.owner}</span>
         </div>

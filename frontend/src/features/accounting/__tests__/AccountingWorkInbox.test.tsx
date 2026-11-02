@@ -57,3 +57,15 @@ test('work inbox displays the recorded currency without guessing unknown units',
   const unknown = { ...row, accounting: { ...row.accounting, currency: undefined } };
   assert(renderToStaticMarkup(<AccountingWorkInbox contracts={[unknown]} />).includes('داده معتبر در دسترس نیست'));
 });
+
+test('unpriced partner preparation displays unknown amount and waiting time', () => {
+  const pending = { ...row, preparationOnly: true, amountKnown: false,
+    partnerContext: { caseId: 'partner-unknown', caseNumber: '1', customerContractNumber: 'C', internalRecordNumber: 'I',
+      debtor: { displayName: 'همکار' }, endCustomer: { displayName: 'مشتری' }, actionUrl: '' },
+    attention: { ...row.attention!, waitingSince: null } };
+  const html = renderToStaticMarkup(<AccountingWorkInbox contracts={[pending]} />);
+  assert(html.includes('مبلغ قرارداد: نامشخص'));
+  assert(html.includes('مانده: نامشخص'));
+  assert(html.includes('زمان انتظار نامشخص'));
+  assert(html.includes('/dashboard/accounting/contracts/partner/partner-unknown'));
+});

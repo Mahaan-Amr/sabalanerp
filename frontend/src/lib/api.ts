@@ -1,4 +1,5 @@
-﻿import { normalizePartnerInput } from '@sabalanerp/partner-sales-contracts';
+import { buildAssetEvidenceForm } from '@/features/accounting/assetEvidenceContentDigest';
+import { normalizePartnerInput } from '@sabalanerp/partner-sales-contracts';
 import axios from 'axios';
 
 import type { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
@@ -1199,11 +1200,8 @@ export const accountingAPI = {
     `/accounting/period-end/assets/${assetId}/evidence/${evidenceId}/download`,
     { params: { bookId }, responseType: 'blob' },
   ),
-  uploadAssetEvidence: (id: string, bookId: string, purpose: 'COST' | 'READY', file: File) => {
-    const data = new FormData();
-    data.append('bookId', bookId);
-    data.append('purpose', purpose);
-    data.append('file', file);
+  uploadAssetEvidence: async (id: string, bookId: string, purpose: 'COST' | 'READY', file: File) => {
+    const data = await buildAssetEvidenceForm(bookId, purpose, file);
     return api.post(`/accounting/period-end/assets/${id}/evidence`, data, { headers: { 'Content-Type': undefined } });
   },
   createRecognitionSchedule: (data: any) => api.post('/accounting/period-end/schedules', data),

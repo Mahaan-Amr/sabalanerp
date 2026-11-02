@@ -55,6 +55,43 @@ const preflight = deploy.indexOf('run_backend node dist/scripts/validate-product
 assert.ok(preflight > 0);
 assert.ok(preflight < deploy.indexOf('\ncontrol prepare\n'), 'invalid startup configuration must fail before the maintenance session exists');
 const startup = fs.readFileSync(path.resolve(process.cwd(), 'src/index.ts'), 'utf8');
-assert.match(startup, /import \{ validateProductionEnvironment \} from '\.\/services\/productionEnvironment'/);
-assert.match(startup, /validateProductionEnvironment\(\)/);
+const application = fs.readFileSync(path.resolve(process.cwd(), 'src/application.ts'), 'utf8');
+assert.match(startup, /import \{ createApplication \} from '\.\/application'/);
+assert.ok(startup.indexOf('= createApplication(') > 0 && startup.indexOf('= createApplication(') < startup.indexOf('startRuntime(runtimeRole,'),
+  'standalone and candidate must construct the validated application before runtime activation');
+assert.match(application, /import \{ validateProductionEnvironment \} from '\.\/services\/productionEnvironment'/);
+assert.match(application, /function createHttpApplication\([\s\S]*?validateProductionEnvironment\(\)/);
+for (const factory of ['createApplication', 'createOnlineApplication', 'createPrivateQualificationApplication']) {
+  const start = application.indexOf(`export function ${factory}(`);
+  const end = application.indexOf('\nexport function ', start + 1) < 0
+    ? application.indexOf('\nfunction createHttpApplication(', start + 1) : application.indexOf('\nexport function ', start + 1);
+  assert.ok(start >= 0 && end > start && application.slice(start, end).includes('createHttpApplication('),
+    `${factory} must use the validated HTTP application factory`);
+}
+const online = fs.readFileSync(path.resolve(process.cwd(), 'src/online.ts'), 'utf8');
+const jobsStart = online.indexOf("if (purpose === 'jobs') {");
+const jobsEnd = online.indexOf("const canonical = await import('./application');", jobsStart);
+assert.ok(jobsStart >= 0 && jobsEnd > jobsStart, 'online jobs and HTTP paths must be identifiable');
+const jobs = online.slice(jobsStart, jobsEnd);
+assert.match(jobs, /const \{ validateProductionEnvironment \} = await import\('\.\/services\/productionEnvironment'\);/);
+const jobsValidation = jobs.indexOf('validateProductionEnvironment();');
+assert.ok(jobsValidation >= 0 && jobsValidation < jobs.indexOf('producer = await createOnlineRealtimeProducer(')
+  && jobsValidation < jobs.indexOf('workers = await startOnlineApplicationWorkers('),
+  'online jobs must validate production configuration before starting producers or workers');
+const onlineHttp = online.slice(jobsEnd);
+const onlineApp = onlineHttp.indexOf('application = canonical.createOnlineApplication(');
+assert.ok(onlineApp >= 0 && onlineApp < onlineHttp.indexOf('consumer = await startOnlineRealtimeConsumer(')
+  && onlineApp < onlineHttp.indexOf('application!.server.listen('),
+  'online HTTP must construct the validated application before consumer or listener startup');
+
+const qualification = fs.readFileSync(path.resolve(process.cwd(), 'src/onlinePrivateQualification.ts'), 'utf8');
+assert.match(qualification, /const \{\s*validateProductionEnvironment\s*\}\s*=\s*await import\('\.\/services\/productionEnvironment'\)/);
+const qualificationValidation = qualification.indexOf('validateProductionEnvironment();');
+for (const operation of ['producer=await createOnlineQualificationRealtimeProducer(',
+  'workers=await startPrivateQualificationApplicationWorkers(', 'consumer=await startPrivateQualificationRealtimeConsumer(',
+  'app!.server.listen(']) {
+  const position = qualification.indexOf(operation);
+  assert.ok(qualificationValidation >= 0 && position > qualificationValidation,
+    `private qualification must validate production configuration before ${operation}`);
+}
 console.log('production environment preflight tests passed');

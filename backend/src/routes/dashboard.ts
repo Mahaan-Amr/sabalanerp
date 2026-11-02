@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
+import { asyncRoute } from '../middleware/asyncRoute';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { getUserWorkspaces } from '../middleware/workspace';
 import { getEffectiveUserAccess } from '../services/effectiveAccessService';
@@ -13,18 +14,18 @@ import { resolveWorkspaceActionAvailability, WORKSPACE_ACTION_RULES } from '../s
 
 const router = express.Router();
 
-router.get('/route-availability', protect, async (req: any, res) => {
+router.get('/route-availability', protect, asyncRoute(async (req: any, res) => {
   res.setHeader('Cache-Control', 'private, no-store');
   res.setHeader('Vary', 'Cookie, Authorization');
   const path = typeof req.query.path === 'string' ? req.query.path : '';
   if (!path.startsWith('/dashboard')) return res.status(400).json({ success: false, message: 'مسیر ارسال‌شده معتبر نیست.' });
   const data = await resolveWorkspaceRouteAvailability(prisma, { userId: req.user.id, role: req.user.role, path });
   return res.json({ success: true, data });
-});
+}));
 
 export const createActionAvailabilityHandler = (
   resolver = resolveWorkspaceActionAvailability,
-) => async (req: any, res: any) => {
+) => asyncRoute(async (req: any, res: any) => {
   res.setHeader('Cache-Control', 'private, no-store');
   res.setHeader('Vary', 'Cookie, Authorization');
   const workspace = String(req.query.workspace || '').toLowerCase() as keyof typeof WORKSPACE_ACTION_RULES;
@@ -34,7 +35,7 @@ export const createActionAvailabilityHandler = (
   });
   const data = await resolver(prisma, { userId: req.user.id, role: req.user.role, workspace });
   return res.json({ success: true, data });
-};
+});
 
 router.get('/action-availability', protect, createActionAvailabilityHandler());
 

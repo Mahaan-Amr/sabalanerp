@@ -2,6 +2,25 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
+/** Hash without buffering the complete document; reject changed or replaced files. */
+export async function sha256ArchiveFile(filePath: string): Promise<string> {
+  const file = await fs.open(filePath, 'r');
+  try {
+    const before = await file.stat({ bigint: true });
+    if (!before.isFile()) throw new Error('فایل بایگانی معتبر نیست.');
+    const hash = createHash('sha256');
+    for await (const chunk of file.createReadStream({ autoClose: false })) hash.update(chunk as Buffer);
+    const after = await file.stat({ bigint: true });
+    const pathAfter = await fs.stat(filePath, { bigint: true });
+    const same = (a: typeof before, b: typeof before) => (process.platform === 'win32' || a.dev === b.dev) && a.ino === b.ino
+      && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
+    if (!same(before, after) || !same(before, pathAfter)) throw new Error('فایل بایگانی هنگام بررسی تغییر کرد.');
+    return hash.digest('hex');
+  } finally {
+    await file.close();
+  }
+}
+
 const safeArchivePath = (root: string, storageKey: string) => {
   const normalized = storageKey.replace(/\\/g, '/');
   if (!normalized || normalized.startsWith('/') || /^[a-z]:/i.test(normalized)
@@ -20,7 +39,7 @@ export const resolveArchiveReadPath = async (storageKey: string, applicationRoot
   // A duplicate key with different content is ambiguous; never silently select one.
   const candidates = [current, historical];
   const present = await Promise.all(candidates.map(async (candidate) => {
-    try { const bytes = await fs.readFile(candidate); return { candidate, digest: createHash('sha256').update(bytes).digest('hex') }; }
+    try { return { candidate, digest: await sha256ArchiveFile(candidate) }; }
     catch (error: any) { if (error?.code === 'ENOENT') return null; throw error; }
   }));
   const found = present.filter((item): item is NonNullable<typeof item> => item !== null);

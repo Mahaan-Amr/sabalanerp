@@ -1,6 +1,5 @@
 import { promises as fs } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { resolveArchiveReadPath } from './accountingArchiveStorage';
+import { resolveArchiveReadPath, sha256ArchiveFile } from './accountingArchiveStorage';
 
 type Proof = { id: string; bookId: string; sourceEntityType: string; sourceEntityId: string;
   evidenceType: string; malwareScanStatus: string; malwareScanAt: Date | null;
@@ -22,7 +21,7 @@ export async function assertAssetEvidenceFiles(input: { proofs: Proof[]; proofId
     const filePath = await resolveArchiveReadPath(item.storageKey, input.applicationRoot);
     const stat = await fs.stat(filePath);
     if (!stat.isFile() || BigInt(stat.size) !== item.sizeBytes) throw new Error('تمامیت فایل مدرک دارایی تأیید نشد.');
-    const digest = createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+    const digest = await sha256ArchiveFile(filePath);
     if (digest !== item.contentHash) throw new Error('تمامیت فایل مدرک دارایی تأیید نشد.');
   }
 }

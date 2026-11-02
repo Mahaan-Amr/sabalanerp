@@ -4719,6 +4719,7 @@ model AccountingFinancialRecord {
   pricingReadinessResults ContractPricingReadinessResult[]
   partnerShipmentPricing  PartnerAllocationRevisionPricing[]
   invoiceNumberClaim      AccountingInvoiceNumberClaim?
+  approvalReceipt         AccountingFinancialApprovalReceipt?
 
   @@index([kind, status])
   @@index([sourceKind, sourceId])
@@ -4726,6 +4727,18 @@ model AccountingFinancialRecord {
   @@index([customerId])
   @@index([systemInvoiceNumber])
   @@map("accounting_financial_records")
+}
+
+model AccountingFinancialApprovalReceipt {
+  financialRecordId String                    @id
+  actorId           String
+  idempotencyKey    String
+  payloadHash       String
+  response          Json
+  createdAt         DateTime                  @default(now())
+  financialRecord   AccountingFinancialRecord @relation(fields: [financialRecordId], references: [id], onDelete: Restrict)
+
+  @@map("accounting_financial_approval_receipts")
 }
 
 model AccountingInvoiceNumberClaim {

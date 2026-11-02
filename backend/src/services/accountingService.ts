@@ -2282,8 +2282,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
   const sepidarAmount = toDecimal(command.sepidarAmount);
   if (sepidarAmount.lte(0)) throw new Error('Sepidar amount is required');
 
-  let partnerApproval = false;
-  const runFinancialApprovalTransaction = createFinancialApprovalTransactionRunner(prisma, () => partnerApproval);
+  const runFinancialApprovalTransaction = createFinancialApprovalTransactionRunner(prisma, () => true);
   const result = await runFinancialApprovalTransaction(async (tx) => {
     let partnerCommand: { actorId: string; operation: string; targetScope: string; key: string; payloadHash: string } | undefined;
     let partnerAuthorization: PartnerFinancialApprovalAuthorization | undefined;
@@ -2293,7 +2292,6 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'منبع صورتحساب همکار معتبر نیست؛ بررسی پرونده در حسابداری لازم است.');
     }
     if (unlockedSource?.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
-      partnerApproval = true;
       const decision = await authorizePartnerFinancialApproval(tx, unlockedSource, { actorId: actor.userId,
         correlationId: approvalCorrelationId, downstreamNote: command.downstreamNote || command.note });
       if (!decision.ok) return { partnerDenied: true as const };
@@ -2314,6 +2312,19 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     await lockFinancialApprovalRecord(tx, invoiceId);
     let before = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
     if (!before) throw new Error('Invoice record not found');
+    let ordinaryReceipt: { actorId: string; idempotencyKey: string; payloadHash: string } | undefined;
+    if (before.sourceKind !== PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
+      const { correlationId: _correlationId, ...payload } = command;
+      ordinaryReceipt = { actorId: actor.userId, idempotencyKey: approvalIdempotencyKey,
+        payloadHash: await canonicalHash(payload) };
+      const previous = await tx.accountingFinancialApprovalReceipt.findUnique({ where: { financialRecordId: invoiceId } });
+      if (previous && previous.actorId === ordinaryReceipt.actorId && previous.idempotencyKey === ordinaryReceipt.idempotencyKey) {
+        if (previous.payloadHash !== ordinaryReceipt.payloadHash) {
+          throw accountingVoidInputError('این درخواست تأیید قبلاً با اطلاعات دیگری ثبت شده است؛ صفحه را تازه کنید.');
+        }
+        return { ordinaryResponse: previous.response as ReturnType<typeof actionResponse> };
+      }
+    }
     if (before.kind !== FinancialRecordKind.INVOICE_CANDIDATE) {
       throw new Error('Only invoice records can be financially approved');
     }
@@ -2565,6 +2576,14 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     if (partnerCommand) await tx.partnerCommandOutcome.create({ data: {
       id: `partner-accounting:${(await canonicalHash(partnerCommand)).slice(10)}`, ...partnerCommand, outcome: { invoiceId: updated.id },
     } });
+    if (ordinaryReceipt) {
+      const response = actionResponse('APPLIED', 'تایید مالی ثبت شد',
+        { contractId: updated.contractId || undefined, financialRecordIds: [updated.id] });
+      await tx.accountingFinancialApprovalReceipt.create({ data: {
+        financialRecordId: updated.id, response: toJsonValue(response), ...ordinaryReceipt,
+      } });
+      return { ordinaryResponse: response };
+    }
     return updated;
   }).catch((error: unknown) => {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -2578,6 +2597,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
 
   if ('partnerDenied' in result) throw new PartnerAccountingCommandError('FORBIDDEN',
     'مجوز تأیید مالی این پرونده همکار فعال نیست؛ مدیر حسابداری باید دسترسی پرونده را بررسی کند.');
+  if ('ordinaryResponse' in result) return result.ordinaryResponse;
   return actionResponse('APPLIED', 'تایید مالی ثبت شد', { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
 };
 

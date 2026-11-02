@@ -29,6 +29,7 @@ import { archiveWritePath, resolveArchiveReadPath } from '../services/accounting
 import { publishDurableFile } from '../services/durableFilePublication';
 import { assertAssetEvidenceFiles } from '../services/accountingAssetEvidenceIntegrity';
 import { assetUploadIdentity, assertMatchingAssetUpload } from '../services/accountingAssetUploadIdentity';
+import { createAssetPolicyWithinTransaction } from '../services/accountingAssetPolicyIntervals';
 
 
 const router = express.Router();
@@ -436,19 +437,12 @@ router.post('/asset-policies', ...managerAccess, run(async (req) => {
   if (new Set(accounts.map((account) => account.id)).size !== new Set(accountIds).size) {
     throw new Error('همه حساب‌های سیاست باید معین‌های معتبر همین دفتر باشند.');
   }
-  const prior = await prisma.accountingAssetClassPolicy.findFirst({ where: { bookId,
-    classCode: positiveText(req.body.classCode, 'کد طبقه دارایی') }, orderBy: { version: 'desc' } });
+  const classCode = positiveText(req.body.classCode, 'کد طبقه دارایی');
   const effectiveFrom = date(req.body.effectiveFrom, 'تاریخ اثر سیاست');
   const effectiveTo = req.body.effectiveTo ? date(req.body.effectiveTo, 'تاریخ پایان سیاست') : null;
-  if (version !== (prior?.version || 0) + 1 || (prior && effectiveFrom <= prior.effectiveFrom)) {
-    throw new Error('نسخه و تاریخ اثر سیاست باید پس از آخرین نسخه همان طبقه باشد.');
-  }
-  if ((effectiveTo && effectiveTo < effectiveFrom) || (prior?.effectiveTo && prior.effectiveTo >= effectiveFrom)) {
-    throw new Error('بازه اثر نسخه‌های سیاست دارایی نباید معکوس یا هم‌پوشان باشد.');
-  }
-  return prisma.accountingAssetClassPolicy.create({ data: {
+  return prisma.$transaction((tx) => createAssetPolicyWithinTransaction(tx, {
     bookId: positiveText(req.body.bookId, 'دفتر حسابداری'),
-    classCode: positiveText(req.body.classCode, 'کد طبقه دارایی'),
+    classCode,
     version,
     titlePersian: positiveText(req.body.titlePersian, 'عنوان طبقه دارایی'),
     effectiveFrom,
@@ -465,7 +459,7 @@ router.post('/asset-policies', ...managerAccess, run(async (req) => {
     disposalLossAccountId: positiveText(req.body.disposalLossAccountId, 'حساب زیان واگذاری'),
     changeReason: req.body.changeReason ? String(req.body.changeReason) : null,
     createdBy: req.user!.id,
-  } });
+  }));
 }, true));
 
 router.post('/assets', ...editAccess, run(async (req) => prisma.$transaction(async (tx) => {

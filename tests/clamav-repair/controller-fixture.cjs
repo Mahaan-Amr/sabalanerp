@@ -42,6 +42,21 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   return;
  }
  if(kind==='node'){
+  // Only this exact production binder is adapted: CI is intentionally non-root,
+  // while production requires root-owned receipts. Preserve all other checks and
+  // verify the test-only receipt identity before returning its digest.
+  const binderLine=fs.readFileSync(path.join(repository,'deploy/scripts/deploy.sh'),'utf8').split('\n').find(line=>line.includes('DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256="$(node -e '));
+  const binder=binderLine?.match(/node -e '([^']+)'/)?.[1];
+  if(a[0]==='-e'&&a[1]===binder){
+   if(a.length!==3)throw Error('Unexpected fixture binder arguments');
+   const file=a[2],before=fs.lstatSync(file,{bigint:true});
+   if(path.dirname(file)!==path.join(root,'reports')||fs.realpathSync(file)!==file||!before.isFile()||before.uid!==BigInt(process.getuid())||before.nlink!==1n||(before.mode&511n)!==256n||before.size>8388608n)throw Error('Invalid fixture receipt custody');
+   const raw=fs.readFileSync(file),after=fs.lstatSync(file,{bigint:true});
+   for(const key of ['dev','ino','size','mtimeNs','ctimeNs'])if(before[key]!==after[key])throw Error('Fixture receipt changed');
+   const value=JSON.parse(raw);
+   if(value.format!=='fixture-only-host-retention'||!['BEFORE_CHECKPOINT','AFTER_CHECKPOINT'].includes(value.stage)||path.basename(file)!==`remote-retention-${value.deploymentId}-${value.stage}.json`)throw Error('Invalid fixture receipt identity');
+   process.stdout.write(hash(raw));return;
+  }
   if(a[0]?.endsWith('/backup-retention-host.mjs')){
    if(a[1]==='--inspect'){if(a.length!==3||a[2]!==path.join(root,'.env.prod'))throw Error('Unexpected backup inspection');console.log(JSON.stringify({inspected:true,sshStarted:false}));return;}
    const [,environment,id,stage,receipt,holds]=a;

@@ -8,6 +8,8 @@ import {
   FaUsers,
   FaUserTie,
   FaCalculator,
+  FaShoppingCart,
+  FaExchangeAlt,
   FaMoneyCheckAlt,
   FaWarehouse,
   FaShieldAlt,
@@ -53,6 +55,7 @@ import { ErpPressable, useErpPresentationScope } from '@/components/erp';
 import { DutyCountBadge } from '@/features/cross-workspace-duties/DutyCountBadge';
 import { useCrossWorkspaceDutyCount } from '@/features/cross-workspace-duties/useCrossWorkspaceDutyCount';
 import { projectHrNavigation } from '@/features/hr/hrAccessNavigation';
+import { purchasingAPI } from '@/features/purchasing/api';
 
 interface NavigationItem {
   name: string;
@@ -94,11 +97,13 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
   const [canOpenSecurityShiftReport, setCanOpenSecurityShiftReport] =
     useState(false);
   const [partnerRouteAccess, setPartnerRouteAccess] = useState<Record<string, boolean>>({});
+  const [purchasingSections,setPurchasingSections]=useState<string[]>([]);
   const pathname = usePathname();
   const crmPresentation = useErpPresentationScope() === 'workspace';
   const dutyCount = useCrossWorkspaceDutyCount(currentWorkspace || null);
 
   const collapsed = !!collapsedProp;
+  useEffect(()=>{if(currentWorkspace!==WORKSPACES.PURCHASING)return;let active=true;setPurchasingSections([]);void purchasingAPI.access().then(r=>{if(active)setPurchasingSections(r.data.data.sections);}).catch(()=>{if(active)setPurchasingSections([]);});return()=>{active=false;};},[currentWorkspace,currentUser?.id]);
 
   useEffect(() => {
     loadCurrentUser();
@@ -176,6 +181,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
         currentUser.role !== "MANAGER"
       ) {
         const workspaceIcons: Record<string, any> = {
+          FaShoppingCart,
           FaFileContract,
           FaUsers,
           FaUserTie,
@@ -585,6 +591,11 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
           },
         ];
 
+      case WORKSPACES.PURCHASING:
+        return [{name:'PurchasingDashboard',namePersian:'داشبورد خرید',href:'/dashboard/purchasing',icon:FaShoppingCart,show:true,exact:true},
+          {name:'inquiries',namePersian:'استعلام تأمین‌کنندگان',href:'/dashboard/purchasing/inquiries',icon:FaClipboardList,show:purchasingSections.includes('inquiries')},
+          {name:'purchase-records',namePersian:'سوابق و جزئیات',href:'/dashboard/purchasing/requests',icon:FaHistory,show:true,children:[
+          ...[['requests','درخواست‌های خرید',FaClipboardList],['orders','سفارش‌های خرید',FaClipboardList],['receipts','دریافت بار',FaTruck],['exchanges','تعویض‌ها',FaExchangeAlt],['suppliers','تأمین‌کنندگان',FaBuilding],['inventory','بارهای پذیرفته‌شده',FaWarehouse],['finance','پیگیری حسابداری',FaCalculator],['changes','تغییر و لغو',FaHistory]].map(([id,label,icon])=>({name:String(id),namePersian:String(label),href:`/dashboard/purchasing/${id}`,icon,show:purchasingSections.includes(String(id))}))]}];
       case WORKSPACES.HR:
         return projectHrNavigation(currentUser?.permissions?.features || [], currentUser?.role).map((item) => ({
           name: item.id,

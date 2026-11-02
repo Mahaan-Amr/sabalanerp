@@ -49,7 +49,7 @@ const decimal = (value: string, label = 'مقدار'): Decimal => {
   const whole = match[1].replace(/^0+(?=\d)/, '');
   // Quantity scale is evidence (for example 2.500 tonne), not presentation noise.
   const fraction = match[2] ?? '';
-  if (fraction.length > 6 || whole.length > 18) {
+  if (fraction.length > 30 || whole.length > 35) {
     throw new SupplyChainAccountingError('FIXED_POINT_QUANTITY_OUT_OF_RANGE', `${label} از دقت مجاز بیشتر است.`, 400);
   }
   const units = BigInt(`${whole}${fraction}`);
@@ -194,6 +194,7 @@ const emptyState = (): RepositoryState => ({
 
 export interface AccountingSupplyChainRepository {
   transaction<T>(operation: (repository: AccountingSupplyChainRepository) => Promise<T>): Promise<T>;
+  lockInventoryIdentities(ids:readonly string[]):Promise<void>;
   seedParty(party: PartyRecord): Promise<void>;
   getParty(id: string): Promise<PartyRecord | null>;
   saveParty(party: PartyRecord): Promise<void>;
@@ -240,6 +241,7 @@ export interface AccountingSupplyChainRepository {
 export const createInMemorySupplyChainRepository = (): AccountingSupplyChainRepository => {
   let state = emptyState();
   const repository: AccountingSupplyChainRepository = {
+    lockInventoryIdentities:async()=>{},
     transaction: async (operation) => {
       const snapshot = structuredClone(state);
       try { return await operation(repository); } catch (error) { state = snapshot; throw error; }
@@ -413,9 +415,9 @@ export const createAccountingSupplyChainApplication = (
   },
 ) => {
   const evidenceTypesFor = (commandName: string, path: string): readonly string[] => {
-    if (/(?:^|\.)orderEvidence$/.test(path)) return ['PURCHASE_ORDER_APPROVAL'];
+    if (/(?:^|\.)orderEvidence$/.test(path)) return ['PURCHASE_ORDER_APPROVAL','PURCHASING_ORDER_SLICE'];
     if (/(?:^|\.)receiptEvidence$/.test(path)) {
-      return commandName === 'assignCustomerCheck' ? ['CUSTOMER_PAYMENT_STATUS'] : ['GUARD_INBOUND_MOVEMENT'];
+      return commandName === 'assignCustomerCheck' ? ['CUSTOMER_PAYMENT_STATUS'] : ['GUARD_INBOUND_MOVEMENT','PURCHASING_RECEIPT_SLICE'];
     }
     if (/(?:^|\.)acceptedServiceEvidence$/.test(path)) return ['SERVICE_ACCEPTANCE'];
     if (/\.inventoryReturns\.\d+\.evidence$/.test(`.${path}`)) return ['GUARD_OUTBOUND_MOVEMENT'];
@@ -576,6 +578,21 @@ export const createAccountingSupplyChainApplication = (
         if (prior) return prior;
         const party = await tx.getParty(command.supplierPartyId);
         if (!party) throw new SupplyChainAccountingError('PARTY_NOT_FOUND', 'طرف حساب تأمین‌کننده یافت نشد.', 404);
+        // A Purchasing handoff may value already received custody. Verify its
+        // canonical inventory events before posting; never trust a client flag.
+        for(const line of command.lines.filter(l=>l.kind==='INVENTORY'&&l.receiptEvidence?.type==='PURCHASING_RECEIPT_SLICE')) {
+          const payload=line.receiptEvidence!.payload as Record<string,unknown>;
+          if(payload.physicalIdentityId) {
+            if(!line.inventory||line.inventory.identityId!==payload.physicalIdentityId)throw new SupplyChainAccountingError('PURCHASE_IDENTITY_MISMATCH','هویت موجودی فاکتور با رسید پذیرفته‌شده برابر نیست.');
+            const events=await tx.listInventoryEvents(line.inventory.identityId),layers=await tx.listLayers(line.inventory.identityId);
+            const physical=events.filter(e=>e.eventType==='RECEIPT'&&e.evidence.type==='INVENTORY_PURCHASE_ACCEPTANCE'&&e.evidence.id===payload.receiptId);
+            const returned=events.filter(e=>e.eventType==='RETURN');
+            const total=(values:ReadonlyArray<{quantity:string}>)=>values.reduce((n,e)=>addDecimal(n,decimal(e.quantity)),ZERO_DECIMAL);
+            const net=subtractDecimal(total(physical),total(returned));
+            const claimed=addDecimal(total(layers),total(command.lines.filter(l=>l.kind==='INVENTORY'&&l.inventory?.identityId===line.inventory!.identityId)));
+            if(!net||compareDecimal(claimed,net)>0)throw new SupplyChainAccountingError('PURCHASE_RECEIPT_ALREADY_VALUED','مقدار قابل ارزش‌گذاری همین رسید کافی نیست؛ فاکتور یا برگشت قبلی را بررسی کنید.');
+          }
+        }
         const duplicate = await tx.findInvoiceByNumber(command.supplierPartyId, command.supplierInvoiceNumber.trim());
         const firstMismatch = command.lines.map((line) => mismatch(line, command.supplierPartyId)).find(Boolean)
           ?? (duplicate ? { code: 'DUPLICATE_SUPPLIER_INVOICE', message: 'شماره فاکتور تأمین‌کننده تکراری است.' } : null);
@@ -635,7 +652,8 @@ export const createAccountingSupplyChainApplication = (
             quantity: decimal(line.quantity).canonical, valueRials: allocatedValue,
             valuationMethod: line.inventory.valuationMethod, sourceType: 'SUPPLIER_INVOICE', sourceId: invoiceId, createdAt: dependencies.now(),
           });
-          await tx.saveInventoryEvent({
+          const receiptPayload=line.receiptEvidence!.payload as Record<string,unknown>;
+          if(!(line.receiptEvidence!.type==='PURCHASING_RECEIPT_SLICE'&&receiptPayload.physicalIdentityId))await tx.saveInventoryEvent({
             id: randomUUID(), identityId: line.inventory.identityId, eventType: 'RECEIPT',
             warehouseId: line.inventory.warehouseId, locationId: line.inventory.locationId,
             unit: line.unit, quantity: decimal(line.quantity).canonical, voucherId: posted.voucherId,
@@ -1458,6 +1476,12 @@ export const createAccountingSupplyChainApplication = (
         };
         try {
           return await repository.transaction(async (tx) => {
+            const identities=new Set<string>();
+            const collect=(value:unknown):void=>{if(!value||typeof value!=='object'||value instanceof Date)return;if(Array.isArray(value)){value.forEach(collect);return;}for(const [key,item] of Object.entries(value)){if(key==='identityId'&&typeof item==='string')identities.add(item);else if(key!=='payload')collect(item);}};
+            collect(command);
+            const reservationId=(command as {reservationId?:string}).reservationId;
+            if(reservationId){const reservation=await tx.getReservation(reservationId);if(reservation)identities.add(reservation.identityId);}
+            await tx.lockInventoryIdentities([...identities].sort());
             const resolvedCommand = await resolveEvidenceTree(command, String(property)) as typeof command;
             const result = await Reflect.apply(member, target, [resolvedCommand, ...args.slice(1)]);
             await tx.saveCommandAudit({ ...baseAudit, result: 'SUCCEEDED' });

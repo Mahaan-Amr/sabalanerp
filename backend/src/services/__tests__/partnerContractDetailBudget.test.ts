@@ -22,3 +22,14 @@ test('detail projection still fails closed for incomplete Case pointers before r
     }), null);
   }
 });
+
+test('detail errors are Persian, traceable and preserve hidden existence', async () => {
+  const {partnerSalesContractDetailFailure} = await import('../partnerSales/cases/contractDetail');
+  for (const status of [403,404,409,503]) {
+    const failure = partnerSalesContractDetailFailure({status,code:status===404?'CUSTOMER_OUT_OF_SCOPE':'FORBIDDEN'},'detail-reference');
+    assert.equal(failure.status,status);assert.equal(failure.body.trackingId,'detail-reference');
+    assert.match(failure.body.error,/[\u0600-\u06ff]/);assert.doesNotMatch(failure.body.error,/[A-Za-z]/);
+    if(status===404)assert.equal(failure.body.code,'NOT_FOUND');
+  }
+  assert.equal(partnerSalesContractDetailFailure(null,'missing-proof').status,409);
+});

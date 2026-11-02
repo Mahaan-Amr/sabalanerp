@@ -22,16 +22,16 @@ test('ordinary seller explicitly creates, displays and edits activity; NONE has 
     const invalid = await page.request.post('/api/crm/customers', { data: { firstName: 'آزمون', lastName: 'نامعتبر', customerType: 'Individual' } });
     expect(invalid.status()).toBe(400);
     await page.goto('/dashboard/crm/customers/create');
-    await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+    await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
     await expect(category(page)).toHaveValue('');
     await page.getByRole('textbox', { name: 'نام', exact: true }).fill('آزمون فعالیت');
     const surname = `دسته-${Date.now()}`;
     await page.getByRole('textbox', { name: 'نام خانوادگی', exact: true }).fill(surname);
     await page.getByRole('textbox', { name: 'شماره تماس اول', exact: true }).fill(`091${String(Date.now()).slice(-8)}`);
-    await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+    await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
     await expect(page.getByText('دسته‌بندی فعالیت مشتری الزامی است', { exact: true })).toBeVisible();
     await category(page).selectOption('BUILDER');
-    await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+    await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
     await page.getByRole('textbox', { name: 'نام پروژه', exact: true }).fill('پروژه آزمون فعالیت');
     await page.getByRole('textbox', { name: 'آدرس', exact: true }).fill('نشانی آزمون محلی');
     const created = page.waitForResponse(response => response.url().endsWith('/api/crm/customers') && response.request().method() === 'POST');
@@ -101,13 +101,13 @@ test('real Partner creates a customer with explicit NONE through the shared wiza
   try {
     await page.context().addCookies([{ name: 'sabalan_session', value: seeded.token, domain: 'localhost', path: '/', httpOnly: true, sameSite: 'Lax', secure: false }]);
     await page.goto('/dashboard/crm/customers/create');
-    await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+    await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
     await expect(category(page)).toHaveValue('');
     await page.getByRole('textbox', { name: 'نام', exact: true }).fill('آزمون ساخت همکار');
     await page.getByRole('textbox', { name: 'نام خانوادگی', exact: true }).fill(`فعالیت-${Date.now()}`);
     await page.getByRole('textbox', { name: 'شماره تماس اول', exact: true }).fill(`092${String(Date.now()).slice(-8)}`);
     await category(page).selectOption('NONE');
-    await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+    await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
     await page.getByRole('textbox', { name: 'نام پروژه', exact: true }).fill('پروژه آزمون همکار');
     await page.getByRole('textbox', { name: 'آدرس', exact: true }).fill('نشانی آزمون همکار');
     const created = page.waitForResponse(res => res.url().includes('/api/crm/partner/contract-customers') && res.request().method() === 'POST');

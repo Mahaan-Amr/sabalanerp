@@ -296,7 +296,7 @@ test('Logistics driver tabs retain both allocations across a draft save and revi
   await input.fill('25');
   await page.getByRole('button', { name: 'علی رضایی', exact: true }).click();
   await expect(input).toHaveValue('15');
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(page.getByRole('heading', { name: 'بازبینی و نهایی‌سازی' })).toBeVisible();
   expect(savedLoading.lines[0]).toMatchObject({ sourceContractItemId: 'parity-source', quantity: 40, unit: 'meter' });
   expect(savedAllocations['turn-a'].lines[0]).toMatchObject({ sourceContractItemId: 'parity-source', quantity: 15, unit: 'meter' });

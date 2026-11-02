@@ -130,7 +130,7 @@ test('customer restriction metrics filter all matching results and preserve the 
   const search = page.getByPlaceholder('جستجو بر اساس نام، شماره تماس یا شرکت...');
   await search.fill('مینا');
   await expect.poll(() => requests.at(-1)?.searchParams.get('search')).toBe('مینا');
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect.poll(() => requests.at(-1)?.searchParams.get('page')).toBe('2');
   await metrics.getByRole('button', { name: /بلک‌لیست/ }).click();
   await expect.poll(() => requests.at(-1)?.searchParams.get('isBlacklisted')).toBe('true');

@@ -1,3 +1,5 @@
+import { accessFor as purchasingAccess, canReadDocument as canReadPurchasingDocument } from './purchasing/access';
+import { asDoc as purchasingDoc } from './purchasing/repository';
 import { canReadTransferNotice } from './partnerSales/crm/transferAccess';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { FEATURES, getUserFeatures } from '../middleware/feature';
@@ -186,6 +188,13 @@ export const filterCurrentlyAuthorizedNotifications = async <
   rows: T[],
 ) => {
   if (user.isActive === false) return [];
+  if (rows.some(row => row.event?.resourceType === 'PURCHASING_DOCUMENT')) {
+    const access = await purchasingAccess(database, user).catch(() => null);
+    const documents = await database.purchasingDocument.findMany({ where: { id: { in: rows.filter(r => r.event?.resourceType === 'PURCHASING_DOCUMENT').map(r => r.event?.resourceId || '') } } });
+    const readable = new Set<string>();
+    if (access) for (const doc of documents) if (await canReadPurchasingDocument(database, access, purchasingDoc(doc))) readable.add(doc.id);
+    rows = rows.filter(row => row.event?.resourceType !== 'PURCHASING_DOCUMENT' || readable.has(row.event?.resourceId || ''));
+  }
   // Partner restrictions precede the general ADMIN override. Unwired central
   // authorization, revoked grants and old assignments all deny access.
   const transferRows = rows.filter(row => row.event?.resourceType === 'PARTNER_CUSTOMER_TRANSFER');
@@ -297,6 +306,7 @@ export const filterCurrentlyAuthorizedNotifications = async <
     // ADMIN bypass applies only to ordinary workspace/feature notifications.
     if (event?.feature && event.workspace && event.resourceType !== 'HR_DUTY' &&
         !accessibleFeatures.includes(`${event.workspace}:${event.feature}`)) return false;
+    if (event?.resourceType === 'PURCHASING_DOCUMENT') return true;
     if (user.role === 'ADMIN') return true;
     if (!event) return true;
     if (event.resourceType === 'support-ticket' && event.resourceId) {

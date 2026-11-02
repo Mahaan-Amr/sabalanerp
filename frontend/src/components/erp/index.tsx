@@ -875,17 +875,21 @@ export function ErpPage({ eyebrow, title, description, actions = [], metrics = [
   );
 }
 
-export function ErpFilters({ filters }: { filters: ErpFilter[] }) {
+export function ErpFilters({ filters, layout = 'default', showLabels = false }: {
+  filters: ErpFilter[];
+  layout?: 'default' | 'wide-search';
+  showLabels?: boolean;
+}) {
   const filterGroupId = React.useId();
   if (!filters.length) return null;
   return (
     <ErpSection>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className={cx('grid grid-cols-1 gap-3', layout === 'wide-search' ? 'items-end lg:grid-cols-[minmax(0,2.5fr)_minmax(0,1fr)_minmax(0,1fr)]' : 'md:grid-cols-2 xl:grid-cols-4')}>
         {filters.map((filter) => {
           const controlId = `${filterGroupId}-${filter.id}`;
           return filter.type === 'search' ? (
             <div key={filter.id} className="block">
-              <label htmlFor={controlId} className="sr-only">{filter.label}</label>
+              <label htmlFor={controlId} className={showLabels ? erpFieldLabelClassName : 'sr-only'}>{filter.label}</label>
               <div className="flex gap-2">
                 <div className="relative min-w-0 flex-1">
                   <FaSearch className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--sds-text-muted)]" />
@@ -906,7 +910,7 @@ export function ErpFilters({ filters }: { filters: ErpFilter[] }) {
             </div>
           ) : (
             <label key={filter.id} className="block">
-              <span className="sr-only">{filter.label}</span>
+              <span className={showLabels ? erpFieldLabelClassName : 'sr-only'}>{filter.label}</span>
               <EnhancedDropdown
                 value={filter.value}
                 onChange={filter.onChange}
@@ -964,11 +968,13 @@ function ErpListRowActions({ actions, mode }: { actions: ErpAction[]; mode: 'ico
   </>;
 }
 
-export function ErpListPage<T>({ rows, rowKey, columns, filters = [], sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, emptyState, isLoading, footer, children, ...pageProps }: {
+export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayout = 'default', showFilterLabels = false, sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, emptyState, isLoading, footer, children, ...pageProps }: {
   rows: T[];
   rowKey: (row: T) => string;
   columns: ErpColumn<T>[];
   filters?: ErpFilter[];
+  filterLayout?: 'default' | 'wide-search';
+  showFilterLabels?: boolean;
   sectionNavigation?: React.ReactNode;
   rowActions?: (row: T) => ErpAction[];
   rowActionMode?: 'icons' | 'menu';
@@ -993,7 +999,7 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], sectionNav
   return (
     <ErpPage {...pageProps}>
       {sectionNavigation}
-      <ErpFilters filters={filters} />
+      <ErpFilters filters={filters} layout={filterLayout} showLabels={showFilterLabels} />
       {children}
       <ErpSection>
         {isLoading ? (
@@ -1183,15 +1189,18 @@ export type ErpNeumorphicWorkflowStep = {
 
 export function ErpNeumorphicWorkflowLayout({
   title,
+  context,
   children,
   className,
 }: WithChildren & {
   title: React.ReactNode;
+  context?: React.ReactNode;
   className?: string;
 }) {
   return (
     <ErpWorkspacePage
       title={title}
+      context={context}
       className={cx('sds-neumorphic-workflow-scope relative z-0 py-4 sm:py-8', className)}
     >
       {children}

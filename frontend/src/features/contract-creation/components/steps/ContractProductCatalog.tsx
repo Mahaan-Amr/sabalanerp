@@ -27,11 +27,13 @@ interface ContractProductCatalogProps {
   items: readonly ContractCatalogItem[];
   onSelect: (item: ContractCatalogItem) => void;
   searchId?: string;
+  showTypeFilters?: boolean;
+  wrapFacts?: boolean;
 }
 
 /** The one catalog/search/list surface used by every contract-creation channel. */
 export function ContractProductCatalog({ query, onQueryChange, activeType, onTypeChange,
-  typeOptions, items, onSelect, searchId = 'contract-product-search' }: ContractProductCatalogProps) {
+  typeOptions, items, onSelect, searchId = 'contract-product-search',showTypeFilters=true,wrapFacts=false }: ContractProductCatalogProps) {
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
   const highlightedRef = useRef<HTMLButtonElement | null>(null);
 
@@ -49,7 +51,7 @@ export function ContractProductCatalog({ query, onQueryChange, activeType, onTyp
   };
 
   return <section aria-label="کاتالوگ محصولات"><ErpCard className="p-4">
-    <div className="flex gap-1 overflow-x-auto pb-3" role="tablist" aria-label="نوع محصول">
+    {showTypeFilters&&<div className="flex gap-1 overflow-x-auto pb-3" role="tablist" aria-label="نوع محصول">
       <ErpPressable type="button" role="tab" aria-selected={!activeType}
         onClick={() => onTypeChange(null)} tone={!activeType ? 'primary' : 'neutral'}
         variant={!activeType ? 'solid' : 'ghost'} className="min-h-11 px-3 text-xs">همه</ErpPressable>
@@ -59,7 +61,7 @@ export function ContractProductCatalog({ query, onQueryChange, activeType, onTyp
         variant={activeType === type.id ? 'solid' : 'ghost'} className="min-h-11 px-3 text-xs">
         {type.label}
       </ErpPressable>)}
-    </div>
+    </div>}
     <label htmlFor={searchId} className="sds-text-secondary mb-1 block text-xs font-medium">جستجوی محصول</label>
     <ErpInput id={searchId} type="search" value={query} onChange={event => onQueryChange(event.target.value)}
       onKeyDown={event => {
@@ -82,7 +84,7 @@ export function ContractProductCatalog({ query, onQueryChange, activeType, onTyp
             onMouseEnter={() => setHighlightedIndex(index)} onClick={() => onSelect(item)}
             className={`sds-divider grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-2 py-2.5 text-right last:border-b-0 ${highlighted ? 'bg-[var(--sds-accent-soft)]' : ''}`}>
             <span className="min-w-0"><strong className="sds-text-primary block truncate text-sm">{item.name}</strong>
-              <span className="sds-text-muted mt-0.5 block truncate text-xs">{item.facts}</span></span>
+              <span className={`sds-text-muted mt-0.5 block text-xs ${wrapFacts?'whitespace-normal break-words':'truncate'}`}>{item.facts}</span></span>
             <span className="text-xs font-medium text-[var(--sds-accent)]">انتخاب</span>
           </ErpPressable>;
         })}

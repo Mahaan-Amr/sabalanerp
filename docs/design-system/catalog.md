@@ -17,9 +17,11 @@ Import from `@/components/erp`. Prefer a workflow-sized composition over rebuild
 | Feedback | `ErpInlineState`, `ErpEmptyState`, `ErpLoading`, `ErpSkeleton`, `ErpStatus`, `ErpBadge` |
 | Focused work | `ErpSheet` with `presentation="modal"` for dialogs and `pending` for protected actions; product configuration uses `CentralProductModalShell` |
 
-`ErpListPage` supports `sectionNavigation` before filters and `rowActionMode="menu"` for a labeled primary row action with secondary actions in the canonical portal menu. Its default icon presentation remains available.
+`ErpListPage` supports `sectionNavigation` before filters and `rowActionMode="menu"` for a labeled primary row action with secondary actions in the canonical portal menu. Its default icon presentation remains available. Use `filterLayout="wide-search"` for a three-column desktop filter group with a wider first search field, and `showFilterLabels` for persistent labels. Both are opt-in; narrow screens retain a single column. `ErpFilters` exposes the same options as `layout` and `showLabels`.
 
-`ErpDisclosure hoverEffect="shadow"` uses the shared card hover shadow while preserving the header colors. The default disclosure presentation remains unchanged.
+`ErpDisclosure hoverEffect="shadow"` uses the shared card hover shadow while preserving the header colors. The default disclosure presentation remains unchanged. `ErpNeumorphicWorkflowLayout context` adds optional workflow context beneath the title through the canonical workspace header.
+
+`ErpSearchableSelect` exposes optional `onSearchChange` and `loading` for server-backed option discovery. The feature owns authorization, debouncing, stale-response protection, and retaining the selected identity; the shared control retains its existing keyboard, focus and portal behavior.
 
 `ErpActionMenu portal` escapes scrolling containers on desktop and uses the canonical focused sheet on mobile. `ErpNeumorphicWorkflowProgress` steps may specify `disabled` and `disabledReason` to preserve workflow prerequisites. `ErpSummaryGrid` supports two, three or four columns.
 

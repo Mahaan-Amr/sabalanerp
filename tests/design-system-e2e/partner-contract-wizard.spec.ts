@@ -87,7 +87,7 @@ test('Partner creation consumes the shared eight-step date, customer, and projec
   await expect(workflow.getByText('فروشنده همکار آزمایشی', { exact: true })).toBeVisible();
   await expect(workflow.getByRole('button', { name: 'تاریخ قرارداد', exact: true }).last()).toBeVisible();
   await expect(workflow.getByText('شماره پس از ثبت موفق قرارداد تخصیص داده می‌شود.', { exact: true })).toBeVisible();
-  await expect(workflow.getByRole('textbox', { name: 'پیش‌نمایش شماره احتمالی قرارداد همکار', exact: true })).toHaveValue('100777');
+  await expect(workflow.getByText('پیش‌نمایش شماره احتمالی قرارداد همکار', { exact: true }).locator('..').locator('dd')).toHaveText('100777');
 
   // Partner persists Gregorian dates but opens the same Jalali picker as ordinary Sales.
   const dateTrigger = workflow.getByRole('button', { name: 'تاریخ قرارداد', exact: true }).last();
@@ -110,12 +110,12 @@ test('Partner creation consumes the shared eight-step date, customer, and projec
   await expect(calendar.locator('[aria-selected="true"][data-date]')).toHaveAttribute('data-date', selectedDate!);
   await page.keyboard.press('Escape');
 
-  await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await workflow.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(workflow.getByRole('searchbox', { name: 'جستجوی مشتری' })).toHaveAttribute('placeholder', 'جستجو با نام یا شماره تلفن');
   const customer = workflow.getByRole('button', { name: /مشتری همکار آزمایشی/ });
   await expect(customer).toHaveAttribute('aria-pressed', 'true');
 
-  await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await workflow.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   const project = workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ });
   await expect(project.getByText('خیابان آزمایشی، کوچه ۱۰', { exact: true })).toBeVisible();
   await expect(project.getByText('شیراز', { exact: true })).toBeVisible();
@@ -207,9 +207,9 @@ test('a resumed Partner product draft stays inside the shared eight-step contrac
   // recovery while navigating back and forward through its entry fields.
   await expect(workflow.getByRole('button', { name: 'ایجاد مشتری', exact: true }).first()).toBeVisible();
   await workflow.getByRole('button', { name: /مشتری همکار آزمایشی/ }).click();
-  await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await workflow.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ }).click();
-  await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await workflow.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(workflow.getByRole('region', { name: 'محصولات قرارداد', exact: true })
     .getByText('سنگ بازیابی‌شده', { exact: true }).first()).toBeVisible();
   await expect.poll(() => page.evaluate(() => JSON.parse(window.localStorage
@@ -334,9 +334,9 @@ for (const expireLease of [false, true]) test(expireLease
   await expect(page).toHaveURL(/step=2.*draftId=return-draft/);
   await expect(page.getByRole('searchbox', { name: 'جستجوی مشتری' })).toBeVisible();
   await page.getByRole('button', { name: /مشتری بازگشت/ }).last().click();
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await page.getByRole('button', { name: /پروژه بازگشت/ }).last().click();
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(page.getByText('جستجوی محصول', { exact: true })).toBeVisible();
   await expect(page.getByText(/وضعیت فعلی اجازه این اقدام را نمی‌دهد/)).toHaveCount(0);
   expect(inquiryRequests).toEqual([]);

@@ -63,7 +63,10 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
   const hasExtraPayment = extraPaymentAmount > 0.01;
   const extraPaymentReasonEnabled = existingContract;
 
+  const paymentEntryDisabled = !existingContract && totalContractAmount <= 0;
+
   const handleAddPaymentEntry = () => {
+    if (paymentEntryDisabled) return;
     if (onAddPaymentEntry) {
       onAddPaymentEntry();
       return;
@@ -182,6 +185,7 @@ export const Step7PaymentMethod: React.FC<Step7PaymentMethodProps> = ({
 
         <ContractPaymentEntriesSection payments={wizardData.payment.payments} currency={wizardData.payment.currency}
           remaining={remainingAmount > 0 ? formatPrice(remainingAmount, wizardData.payment.currency) : undefined}
+          disabled={paymentEntryDisabled}
           onAdd={handleAddPaymentEntry} onRemove={handleRemovePayment}
           onEdit={payment => {
             if (onEditPaymentEntry && payment.id) onEditPaymentEntry(payment.id);

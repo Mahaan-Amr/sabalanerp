@@ -46,6 +46,7 @@ type FeatureDefinition = AccessFeatureDefinition & { source: 'legacy' | 'hr' };
 type Feedback = { kind: 'success' | 'error' | 'stale'; title: string; description?: string };
 
 const WORKSPACES = [
+  { key: 'purchasing', label: 'خرید' },
   { key: 'crm', label: 'ارتباط با مشتریان' },
   { key: 'sales', label: 'فروش' },
   { key: 'inventory', label: 'انبار' },

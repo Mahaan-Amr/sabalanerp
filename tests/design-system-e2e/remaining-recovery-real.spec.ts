@@ -82,9 +82,9 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
       expect(projectCanonicalProductGraph(graph, audience).products.slice(1, 4).map(p => p.baseAmountToman)).toEqual(['0', '0', '0']);
     }
     await expect(page).toHaveURL(new RegExp(`/dashboard/sales/contracts/${id}`), { timeout: 60_000 });
-    await expect(page.getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('heading', { name: 'مشخصات قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'اطلاعات قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('heading', { name: 'مشخصات قرارداد', exact: true })).toBeVisible({ timeout: 60_000 });
     for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
       await page.setViewportSize({ width, height: 900 });
       await setTheme(page, theme);

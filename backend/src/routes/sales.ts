@@ -77,7 +77,7 @@ import { resolveWorkspaceRecipientIds } from '../services/domainNotificationReci
 import { ContractPartyIdentityValidationError } from '../services/contractPartyIdentity';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { readCurrentPartnerCaseViews } from '../services/partnerSales/cases/lifecycle';
-import { readPartnerSalesContractDetail } from '../services/partnerSales/cases/contractDetail';
+import { readPartnerSalesContractDetail, partnerSalesContractDetailFailure, authorizePartnerSalesCaseRead } from '../services/partnerSales/cases/contractDetail';
 import { applyPartnerContractListScope, canPartnerReadSalesContract,
   readPartnerProfileId, ownsPartnerCustomerContract } from '../services/partnerSales/contractVisibility';
 import { ensureSalesErrorTracking, knownContractUpdateBusinessFailure, knownCustomerCreditFailure, salesBusinessErrorMessage, unexpectedSalesErrorResponse } from '../utils/salesOperationalError';
@@ -937,9 +937,8 @@ router.get('/contracts/:id', protect, requireSalesDetailRead, async (req: any, r
         ? req.headers['x-correlation-id'] : randomUUID();
       const projected = await readPartnerSalesContractDetail(prisma, { contract, actorId: req.user.id, correlationId });
       if (!projected || projected.ok === false) {
-        const status = projected && 'error' in projected ? projected.error.status : 409;
-        return res.status(status).json({ success: false,
-          error: status === 404 ? 'Contract not found' : 'Partner case evidence is unavailable' });
+        const failure = partnerSalesContractDetailFailure(projected && 'error' in projected ? projected.error : null, correlationId);
+        return res.status(failure.status).json(failure.body);
       }
       responseContract = { ...contract, partnerCaseView: projected.view,
         partnerActions: { canPreview: projected.output, canIssue: projected.output,
@@ -2450,8 +2449,9 @@ const cancellationNoticeAuthority = async (tx: Prisma.TransactionClient, req: an
     throw new Error('قرارداد در دسترس نیست.');
   }
   if (contract.partnerCaseId) {
-    const decision = await createAuditedPartnerAuthorization(tx, { actorId: req.user.id, purpose: 'PARTNER', channel: 'DETAIL' },
-      { correlationId: randomUUID() }).authorize('CASE_READ', { kind: 'CASE', id: contract.partnerCaseId });
+    const decision = await authorizePartnerSalesCaseRead(tx, {
+      actorId: req.user.id, caseId: contract.partnerCaseId, correlationId: randomUUID(),
+    });
     if (!decision.ok) throw new Error('اجازه مشاهده این پرونده را ندارید.');
     const output = await createAuditedPartnerAuthorization(tx, { actorId: req.user.id, purpose: 'CUSTOMER_OUTPUT', channel: 'API' },
       { correlationId: randomUUID() }).authorize('CUSTOMER_OUTPUT', { kind: 'CASE', id: contract.partnerCaseId });

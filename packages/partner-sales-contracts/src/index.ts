@@ -38,3 +38,5 @@ export * from './technical-services';
 export * from './commercial-lifecycle';
 
 export * from './wholesale-pricing';
+
+export * from './catalog-classification';

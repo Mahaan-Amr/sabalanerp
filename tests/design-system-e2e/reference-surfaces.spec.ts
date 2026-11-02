@@ -14,6 +14,16 @@ const semanticColors = async (page: Page) =>
   });
 
 test('Sales landing and the first contract step use the minimal shared workflow language', async ({ page }) => {
+  // A cold sibling entry can make Next dev fully reload the currently open wizard.
+  // Finish that compilation before asserting the intentional document navigation.
+  const openCompiledRoute = async (path: string) => {
+    const response = await page.request.get(path);
+    expect(response.ok()).toBe(true);
+    await page.waitForLoadState('networkidle');
+    await page.goto(path, { waitUntil: 'domcontentloaded' });
+    await expect(page).toHaveURL(new URL(path, page.url()).href);
+  };
+
   test.setTimeout(180_000);
   await login(page);
   await page.goto('/dashboard/sales');
@@ -57,7 +67,7 @@ test('Sales landing and the first contract step use the minimal shared workflow 
       (firstStepIconBox!.y + firstStepIconBox!.height / 2),
   )).toBeLessThanOrEqual(1);
 
-  const next = workflow.getByRole('button', { name: 'بعدی', exact: true });
+  const next = workflow.getByRole('button', { name: /^(?:بعدی|ادامه:)/ });
   const previous = workflow.getByRole('button', { name: 'قبلی', exact: true });
   const nextBox = await next.boundingBox();
   const previousBox = await previous.boundingBox();
@@ -66,7 +76,7 @@ test('Sales landing and the first contract step use the minimal shared workflow 
   expect(nextBox!.x).toBeGreaterThan(previousBox!.x);
 
   const nextIconBox = await next.locator('svg').boundingBox();
-  const nextLabelBox = await next.getByText('بعدی', { exact: true }).boundingBox();
+  const nextLabelBox = await next.getByText(/^ادامه:/).boundingBox();
   const previousIconBox = await previous.locator('svg').boundingBox();
   const previousLabelBox = await previous.getByText('قبلی', { exact: true }).boundingBox();
   expect(nextIconBox).not.toBeNull();
@@ -110,7 +120,7 @@ test('Sales landing and the first contract step use the minimal shared workflow 
 
   await page.waitForLoadState('networkidle');
   await page.evaluate(() => localStorage.removeItem('contractWizardState'));
-  await page.goto('/dashboard/sales/contracts/collaboration/create', { waitUntil: 'domcontentloaded' });
+  await openCompiledRoute('/dashboard/sales/contracts/collaboration/create');
   const collaborationWorkflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
   await expect(collaborationWorkflow).toBeVisible({ timeout: 60_000 });
   await expect(collaborationWorkflow.getByRole('heading', { name: 'قرارداد همکاری در فروش', exact: true })).toBeVisible();
@@ -159,7 +169,7 @@ test('Sales landing and the first contract step use the minimal shared workflow 
       })
     });
   });
-  await page.goto('/dashboard/sales/contracts/e2e-edit/edit');
+  await openCompiledRoute('/dashboard/sales/contracts/e2e-edit/edit');
   const editWorkflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
   await expect(editWorkflow.getByRole('heading', { name: 'ویرایش قرارداد', exact: true })).toBeVisible();
   const editProgress = editWorkflow.getByRole('navigation', { name: 'مراحل ویرایش قرارداد' });
@@ -1155,7 +1165,7 @@ test('Contract Creation keeps early and consequential steps accessible and respo
         deliveries: [],
         payment: {
           payments: [],
-          currency: 'ØªÙˆÙ…Ø§Ù†',
+          currency: 'تومان',
           totalContractAmount: 0
         },
         discount: null,

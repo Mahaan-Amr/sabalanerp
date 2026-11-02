@@ -35,6 +35,7 @@ export function ContractWizardStage({
   onStepClick,
   children,
 }: ContractWizardStageProps) {
+  const nextStep = steps[steps.findIndex(step => step.id === currentStep) + 1];
   return (
     <>
       <WizardProgressBar
@@ -49,6 +50,7 @@ export function ContractWizardStage({
       </ErpNeumorphicCard>
       <WizardNavigation
         {...navigation}
+        labels={{ ...navigation.labels, next: navigation.labels?.next ?? (nextStep ? `ادامه: ${nextStep.title}` : undefined) }}
         currentStep={navigationStep}
         totalSteps={steps.length}
       />
@@ -69,7 +71,8 @@ export function ContractWizardFrame({
   children,
 }: ContractWizardFrameProps) {
   return (
-    <ErpNeumorphicWorkflowLayout title={title}>
+    <ErpNeumorphicWorkflowLayout title={title}
+      context={`مرحله ${(navigationStep ?? currentStep).toLocaleString('fa-IR')} از ${steps.length.toLocaleString('fa-IR')} · ${steps.find(step => step.id === currentStep)?.title || ''}`}>
       <ContractWizardStage
         currentStep={currentStep}
         navigationStep={navigationStep}

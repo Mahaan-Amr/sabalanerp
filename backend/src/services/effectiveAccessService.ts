@@ -38,7 +38,8 @@ export type AuthorizationProvenanceSource =
   | 'ROLE_FEATURE'
   | 'CANONICAL_HR_WORKSPACE'
   | 'CANONICAL_HR_FEATURE'
-  | 'HR_MANAGER_OVERRIDE';
+  | 'HR_MANAGER_OVERRIDE'
+  | 'PURCHASING_MANAGER_OVERRIDE';
 
 type EffectiveAccessClient = Pick<
   PrismaClient | Prisma.TransactionClient,
@@ -57,7 +58,7 @@ const EXPLICIT_FEATURES = new Set<string>([
   FEATURES.SALES_PARTNER_INQUIRIES_RESPOND,
 ]);
 
-const ADMIN_WORKSPACES = ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security', 'bi', 'logistics'];
+const ADMIN_WORKSPACES = ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security', 'bi', 'logistics', 'purchasing'];
 const HR_FEATURE_CODES = HR_REDESIGN_CATALOG.workspaceFeatures.map(({ code }) => code);
 const HR_ACTION_CODES = new Set(AUTHORIZABLE_HR_ACTION_PERMISSIONS.map(({ code }) => code));
 
@@ -151,6 +152,12 @@ export const getEffectiveUserAccess = async (
       .map((grant) => ({ workspace: grant.workspace, permission: permission(grant.permissionLevel) })),
   ];
 
+  if (input.userRole === 'MANAGER') {
+    const existingPurchasing = workspaces.find(x => x.workspace === 'purchasing');
+    if (existingPurchasing) existingPurchasing.permission = 'admin';
+    else workspaces.push({ workspace: 'purchasing', permission: 'admin' });
+  }
+
   const activeDirectFeatures = directFeatures.filter((grant) => grant.workspace !== 'hr' && activeLegacyGrant(grant, at));
   const activeRoleFeatures = roleFeatures.filter((grant) => grant.workspace !== 'hr' && activeLegacyGrant(grant, at));
   const nonHrFeatureCodes = new Set([
@@ -223,6 +230,7 @@ export const getEffectiveUserAccess = async (
 
   const features = [...nonHrFeatures, ...hrFeatures].filter(row => !disabled.has(row.feature));
   const workspaceProvenance = workspaces.map((grant) => {
+    if (grant.workspace === 'purchasing' && input.userRole === 'MANAGER') return { ...grant, source: 'PURCHASING_MANAGER_OVERRIDE' as const, grantId: null };
     if (grant.workspace === 'hr') {
       return { ...grant, source: canonicalHr ? 'CANONICAL_HR_WORKSPACE' as const : 'ROLE_WORKSPACE' as const,
         grantId: canonicalHr?.id ?? inheritedHr?.id ?? null };

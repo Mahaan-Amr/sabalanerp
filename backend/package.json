@@ -167,7 +167,8 @@
     "verify:external-vehicle-operations": "tsx scripts/verify-external-vehicle-operations.ts",
     "test:hr-vehicle-operations": "tsx --test src/routes/__tests__/hrVehicleOperationsRegression.test.ts src/services/__tests__/hrVehicleChangeInstant.test.ts src/services/__tests__/dispatchMasterDataPolicy.test.ts src/services/__tests__/companyVehicleEntry.test.ts src/services/__tests__/hrDriverDispatchReadiness.test.ts",
     "test:hr-vehicle-operations:db": "tsx --test src/services/__tests__/hrVehicleOperations.integration.test.ts",
-    "verify:hr-vehicle-operations": "tsx scripts/verify-hr-vehicle-operations.ts"
+    "verify:hr-vehicle-operations": "tsx scripts/verify-hr-vehicle-operations.ts",
+    "test:purchasing:db": "tsx src/services/__tests__/purchasing.integration.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.16.1",

@@ -2690,7 +2690,7 @@ const renderCompactMetadataSection = (
 };
 
 export function renderContractPdfHeaderTemplate(contract: RenderableContract, customerOutput?: CustomerContractOutput,
-  labels: { number?: string; date?: string } = {}): string {
+  labels: { number?: string; date?: string; statusValue?: string } = {}): string {
   if (customerOutput) contract = { contractNumber: customerOutput.contractNumber, status: customerOutput.status, createdAt: customerOutput.contractDate };
   const { contractNumber, contractDate, statusLabel } = getContractHeaderMeta(contract);
   const logoMarkup = customerOutput ? `<div style="direction:rtl"><strong>${escapeHtml(customerOutput.seller.displayName)}</strong><div style="font-size:8px">تأمین و تحویل توسط سبلان</div></div>` : logoUrl
@@ -2705,7 +2705,7 @@ export function renderContractPdfHeaderTemplate(contract: RenderableContract, cu
         <div style="min-width:210px;text-align:right;direction:rtl;line-height:1.55;">
           <div><strong>${escapeHtml(labels.number || 'شماره قرارداد')}:</strong> ${escapeHtml(contractNumber)}</div>
           <div><strong>${escapeHtml(labels.date || 'تاریخ تنظیم')}:</strong> ${escapeHtml(contractDate)}</div>
-          <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(statusLabel)}</div>
+          <div><strong>وضعیت هنگام چاپ:</strong> ${escapeHtml(labels.statusValue ?? statusLabel)}</div>
           <div><strong>صفحه:</strong> <span class="pageNumber"></span></div>
         </div>
       </div>

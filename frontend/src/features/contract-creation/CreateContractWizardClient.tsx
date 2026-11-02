@@ -6424,6 +6424,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
   return (
     <OperationMinimumContext.Provider value={operationMinimumState}>
     <ErpNeumorphicWorkflowLayout
+      context={`مرحله ${visibleCurrentStep.toLocaleString('fa-IR')} از ${visibleWizardSteps.length.toLocaleString('fa-IR')} · ${visibleWizardSteps.find(step => step.id === currentStep)?.title || ''}`}
       title={isContractEditMode
         ? 'ویرایش قرارداد'
         : isCollaborationContract

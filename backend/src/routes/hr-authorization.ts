@@ -245,7 +245,7 @@ router.post('/user-access/:userId', administer, asyncHandler(async (req, res) =>
     if (requestedRole !== target.role) await tx.user.update({ where: { id: targetUserId }, data: { role: requestedRole as never } });
 
     const existingWorkspacePermissions = await tx.workspacePermission.findMany({ where: { userId: targetUserId } });
-    for (const workspace of ['crm', 'sales', 'inventory', 'security', 'accounting', 'bi', 'logistics']) {
+    for (const workspace of ['crm', 'sales', 'inventory', 'security', 'accounting', 'bi', 'logistics', 'purchasing']) {
       const level = requestedWorkspaces[workspace];
       const existing = existingWorkspacePermissions.find((permission) => permission.workspace === workspace);
       const nextExpiry = expiryWasProvided ? effectiveTo ?? null : existing?.expiresAt ?? null;

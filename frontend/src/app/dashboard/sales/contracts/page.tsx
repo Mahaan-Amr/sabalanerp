@@ -10,7 +10,6 @@ import {
   FaClock,
   FaDownload,
   FaEdit,
-  FaExclamationTriangle,
   FaEye,
   FaFileContract,
   FaPlus,
@@ -106,24 +105,6 @@ const statusTones: Record<string, ErpTone> = {
 };
 
 const statusOptions = [...contractLifecycleFilterOptions, { label: 'لغو یا منقضی', value: 'CANCELLED,EXPIRED' }];
-
-const getStatusIcon = (status: string) => {
-  switch (status) {
-    case 'PENDING_APPROVAL':
-    case 'EXPIRED':
-      return FaClock;
-    case 'APPROVED':
-      return FaCheck;
-    case 'SIGNED':
-      return FaSignature;
-    case 'PRINTED':
-      return FaPrint;
-    case 'CANCELLED':
-      return FaExclamationTriangle;
-    default:
-      return FaFileContract;
-  }
-};
 
 const formatCurrency = (amount: Contract['totalAmount'], currency: string) => {
   return formatPrice(amount, currency);
@@ -358,9 +339,9 @@ function OrdinaryContractsPage() {
     const totalAmount = sumNumericValues(filteredContracts, (contract) => contract.totalAmount);
     return [
       { label: 'کل قراردادها', value: pagination.total.toLocaleString('fa-IR'), icon: FaFileContract, tone: 'primary' },
-      { label: 'نتایج فعلی', value: filteredContracts.length.toLocaleString('fa-IR'), hint: statusOptions.find(option => option.value === statusFilter)?.label, icon: FaEye, tone: 'info' },
+      { label: 'بارگذاری‌شده', value: filteredContracts.length.toLocaleString('fa-IR'), hint: statusOptions.find(option => option.value === statusFilter)?.label, icon: FaEye, tone: 'info' },
       { label: 'پیش‌نویس', value: contracts.filter((contract) => contractLifecycleFilterStatus(contract) === 'PENDING_APPROVAL').length.toLocaleString('fa-IR'), icon: FaClock, tone: 'warning' },
-      { label: 'مبلغ نتایج', value: formatCurrency(totalAmount, 'تومان'), icon: FaFileContract, tone: 'success' },
+      { label: 'مبلغ نتایج بارگذاری‌شده', value: formatCurrency(totalAmount, 'تومان'), icon: FaFileContract, tone: 'success' },
     ];
   }, [contracts, filteredContracts, pagination.total, statusFilter]);
 
@@ -486,21 +467,21 @@ function OrdinaryContractsPage() {
       header: 'قرارداد',
       priority: 'primary',
       cell: (contract) => {
-        const StatusIcon = getStatusIcon(contract.status);
         const rowError = latestOperationError((item) => item.contractId === contract.id);
         return (
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5 inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--sds-accent)]/10 text-[var(--sds-accent)] dark:bg-[var(--sds-accent-surface)] dark:text-[var(--sds-accent)]">
-              <StatusIcon className="h-4 w-4" />
-            </span>
+          <div className="min-w-0 lg:min-w-48">
             <div className="min-w-0">
-              <p className="break-words font-semibold text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">
-                {sanitizeUiTextWithCandidates([contract.titlePersian, contract.title, contract.contractNumber], 'قرارداد فروش')}
+              <p className="text-base font-semibold text-[var(--sds-text-primary)]">
+                قرارداد <bdi>{sanitizeUiText(contract.contractNumber, '—')}</bdi>
               </p>
-              <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
-                عمومی: {sanitizeUiText(contract.contractNumber, '—')}
-                {contract.creatorSequenceNumber != null ? ` | داخلی من: ${contract.creatorSequenceNumber}` : ''}
+              <p className="mt-1 break-words text-xs text-[var(--sds-text-secondary)]">
+                {sanitizeUiTextWithCandidates([contract.titlePersian, contract.title], 'قرارداد فروش')}
               </p>
+              {contract.creatorSequenceNumber != null && (
+                <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
+                  داخلی من: <bdi>{contract.creatorSequenceNumber}</bdi>
+                </p>
+              )}
               {rowError && (
                 <ErpInlineState kind={rowError.kind} title={rowError.message} className="mt-2" />
               )}
@@ -518,7 +499,7 @@ function OrdinaryContractsPage() {
         <div>
           <p className="font-medium text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]">{getCustomerName(contract)}</p>
           {sanitizeUiText(contract.customer.companyName, '') && (
-            <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{sanitizeUiText(contract.customer.companyName, '')}</p>
+            <p className="mt-1 text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">{sanitizeUiText(contract.customer.companyName, '')}</p>
           )}
         </div>
       ),
@@ -541,7 +522,7 @@ function OrdinaryContractsPage() {
       priority: 'secondary',
       align: 'end',
       cell: (contract) => (
-        <span className="font-semibold text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">
+        <span className="whitespace-nowrap font-medium tabular-nums text-[var(--sds-text-primary)]">
           {formatCurrency(contract.totalAmount, sanitizeUiText(contract.currency, 'تومان'))}
         </span>
       ),
@@ -551,7 +532,16 @@ function OrdinaryContractsPage() {
       header: 'تاریخ',
       mobileLabel: 'تاریخ',
       priority: 'meta',
-      cell: (contract) => PersianCalendar.formatForDisplay(contract.createdAt),
+      cell: (contract) => {
+        const formatted = PersianCalendar.formatForDisplay(contract.createdAt);
+        const parts = formatted.match(/^(.*?) (\d{4}\/\d{2}\/\d{2})$/);
+        return (
+          <div className="text-xs leading-5">
+            {parts && <p className="text-[var(--sds-text-secondary)]">{parts[1]}</p>}
+            <bdi className="whitespace-nowrap tabular-nums">{parts ? parts[2] : formatted}</bdi>
+          </div>
+        );
+      },
     },
     {
       id: 'status',
@@ -559,9 +549,11 @@ function OrdinaryContractsPage() {
       mobileLabel: 'وضعیت',
       priority: 'meta',
       cell: (contract) => (
-        <ErpBadge tone={statusTones[contract.status] || 'neutral'}>
-          {contractLifecycleLabel(contract)}
-        </ErpBadge>
+        <span className="whitespace-nowrap">
+          <ErpBadge tone={statusTones[contract.status] || 'neutral'}>
+            {contractLifecycleLabel(contract)}
+          </ErpBadge>
+        </span>
       ),
     },
     {
@@ -573,13 +565,13 @@ function OrdinaryContractsPage() {
         const accounting = contract.accounting;
         if (!accounting) return <ErpBadge tone="neutral">ثبت نشده</ErpBadge>;
         return (
-          <div className="flex flex-col items-start gap-1">
+          <div className="flex flex-col items-start gap-1 whitespace-nowrap">
             <StatusBadge
               status={accounting.sourceStatus}
               label={sourceStatusLabels[accounting.sourceStatus] || operationalStatusLabel(accounting.sourceStatus)}
             />
             {accounting.openCorrections > 0 && (
-              <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+              <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
                 {accounting.openCorrections > 0 ? `${accounting.openCorrections.toLocaleString('fa-IR')} اصلاحیه` : ''}
               </span>
             )}
@@ -594,7 +586,7 @@ function OrdinaryContractsPage() {
 
   const getRowActions = (contract: Contract): ErpAction[] => {
     const actions: ErpAction[] = [
-      { label: 'مشاهده قرارداد', href: `/dashboard/sales/contracts/${contract.id}`, icon: FaEye, tone: 'primary' },
+      { label: 'مشاهده', href: `/dashboard/sales/contracts/${contract.id}`, tone: 'primary' },
     ];
 
     if (contractPermissions.canView) {
@@ -675,7 +667,17 @@ function OrdinaryContractsPage() {
         { label: 'ایجاد قرارداد مشارکتی', href: '/dashboard/sales/contracts/collaboration/create', icon: FaPlus, tone: 'info', variant: 'outline' }
       ]}
       metrics={metrics}
+      filterLayout="wide-search"
+      showFilterLabels
       filters={[
+        {
+          id: 'search',
+          label: 'جستجو',
+          type: 'search',
+          value: searchTerm,
+          onChange: setSearchTerm,
+          placeholder: 'شماره قرارداد، مشتری، ثبت‌کننده، شرکت یا مدیر پروژه',
+        },
         {
           id: 'lifecycleView',
           label: 'نمای قراردادها',
@@ -686,14 +688,6 @@ function OrdinaryContractsPage() {
             { label: 'فعال', value: 'active' },
             { label: 'غیرفعال', value: 'inactive' },
           ],
-        },
-        {
-          id: 'search',
-          label: 'جستجو',
-          type: 'search',
-          value: searchTerm,
-          onChange: setSearchTerm,
-          placeholder: 'جستجو در شماره قرارداد، مشتری، ثبت‌کننده، شرکت یا مدیر پروژه...',
         },
         {
           id: 'status',
@@ -708,11 +702,12 @@ function OrdinaryContractsPage() {
       rowKey={(contract) => contract.id}
       columns={columns}
       rowActions={getRowActions}
+      rowActionMode="menu"
       isLoading={loading}
       footer={
         filteredContracts.length > 0 ? (
           <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
-            <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">
+            <p className="text-sm text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-secondary)]">
               {contracts.length.toLocaleString('fa-IR')} از {pagination.total.toLocaleString('fa-IR')} قرارداد نمایش داده شده است
             </p>
             {hasMoreContracts && (

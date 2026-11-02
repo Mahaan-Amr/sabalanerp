@@ -243,3 +243,13 @@ test('product edit validation maps only safe messages to editable fields', () =>
     { path: 'customerId', msg: 'Prisma customerId failed' },
   ]), { basePrice: 'قیمت پایه باید صفر یا بیشتر باشد؛ قیمت را اصلاح کنید.' });
 });
+
+test('Partner contract access denial remains actionable Persian with its server tracking reference', () => {
+  const denial = 'اجازه مشاهده این قرارداد همکار را ندارید؛ از مدیر سامانه بخواهید دسترسی مشاهده قراردادهای همکار را بررسی کند.';
+  const error = {response:{status:403,data:{success:false,error:denial,code:'FORBIDDEN',trackingId:'partner-detail-403'}}};
+  const message = getSalesOperationalErrorMessage(error,{failedAction:'دریافت قرارداد',nextStep:'به فهرست قراردادها برگردید یا دوباره تلاش کنید.'});
+  assert.match(message,/اجازه مشاهده این قرارداد همکار را ندارید/);
+  assert.match(message,/کد پیگیری: partner-detail-403/);
+  assert.doesNotMatch(message,/پاسخ قابل‌استفاده‌ای/);
+  assert.equal(getSalesOperationalErrorKind(error),'permission');
+});

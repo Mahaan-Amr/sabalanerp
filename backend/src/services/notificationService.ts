@@ -129,6 +129,7 @@ export const publishNotificationEvent = async (
       [...definition.allowedRecipientResolvers],
     ) as NotificationPolicyDraft['recipientResolvers'],
   };
+  if (input.type === 'PURCHASING_UPDATED') { policyDraft.channels = ['IN_APP']; policyDraft.recipientResolvers = ['DIRECT_USER']; }
   if (isPartnerInquiryNotification(input.type)) {
     // Partner inquiry notifications have fixed, non-economic text and are
     // in-app only even if an older/custom stored policy asks for wider delivery.

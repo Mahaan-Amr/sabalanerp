@@ -17,10 +17,10 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
   test('CRM customer creation exposes canonical validation and dirty states', async ({ page }) => {
     await page.goto('/dashboard/crm/customers/create');
     await expect(page.getByRole('heading', { name: 'ایجاد مشتری جدید' })).toBeVisible();
-    const next = page.getByRole('button', { name: 'بعدی' });
+    const next = page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ });
     await assertVisibleFocus(next);
     await page.keyboard.press('Enter');
-    await page.getByRole('button', { name: 'بعدی' }).click();
+    await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
     await expect(page.getByRole('alert').filter({ hasText: 'نام الزامی است' })).toBeVisible();
     await page.getByRole('textbox', { name: 'نام', exact: true }).fill('مشتری آزمون');
     await expect(page.getByRole('status').filter({ hasText: 'اطلاعات واردشده تا زمان ثبت نهایی ذخیره نمی‌شوند' })).toBeVisible();

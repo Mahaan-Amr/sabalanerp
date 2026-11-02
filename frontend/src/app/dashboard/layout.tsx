@@ -188,7 +188,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     searchParams.get("workspace") === "sales";
   const showsSalesMobileNavigation = isSalesWorkspace || isSalesCustomerIndex;
   const isCrmWorkspace = usesCrmPresentation(pathname, searchParams);
-  const isNeumorphicWorkspace = isHrWorkspace || isSalesLanding || isCrmWorkspace;
+  const isNeumorphicWorkspace = isHrWorkspace || isSalesLanding || isCrmWorkspace || pathname.startsWith('/dashboard/purchasing');
   const hasMobileBottomNavigation = isHrWorkspace || showsSalesMobileNavigation || isCrmWorkspace;
   const isWorkspaceDetail = pathname !== "/dashboard";
   const effectiveHrFeatures = user?.permissions?.features || [];
@@ -543,7 +543,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   return (
-    <ErpPresentationProvider scope={isCrmWorkspace ? 'workspace' : 'default'}>
+    <ErpPresentationProvider scope={isCrmWorkspace || pathname.startsWith('/dashboard/purchasing') ? 'workspace' : 'default'}>
     <div
       data-erp-presentation={isCrmWorkspace ? 'workspace' : undefined}
       className="dashboard-shell sds-neumorphic-scope min-h-screen overflow-x-hidden bg-[var(--sds-surface-canvas)] text-[var(--sds-text-primary)]"
@@ -665,7 +665,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       <div
         data-dashboard-content
         data-erp-presentation={isCrmWorkspace ? 'workspace' : undefined}
-        className={`transition-all duration-300 ${isCrmWorkspace ? 'sds-neumorphic-workflow-scope' : ''} ${isWorkspaceDetail ? "dashboard-workspace-detail" : ""}`}
+        className={`transition-all duration-300 ${isCrmWorkspace || pathname.startsWith('/dashboard/purchasing') ? 'sds-neumorphic-workflow-scope' : ''} ${isWorkspaceDetail ? "dashboard-workspace-detail" : ""}`}
       >
         {/* Top Bar */}
         <header

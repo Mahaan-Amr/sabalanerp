@@ -182,11 +182,11 @@ for (const width of [1280, 390]) test(`New stone customer price remains empty ${
   });
   await page.goto('/dashboard/sales/contracts/create?entry=new-contract');
   const workflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
-  await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await workflow.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await workflow.getByRole('button', { name: /مشتری قیمت خالی/ }).click();
-  await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await workflow.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await workflow.getByRole('button', { name: /پروژه قیمت خالی/ }).click();
-  await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await workflow.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(page.getByText('دریافت کاتالوگ فنی انجام نشد؛ محصولات قرارداد حفظ شده‌اند.', { exact: true })).toBeVisible();
   await expect(page.getByText(/این محصول دیگر در کاتالوگ فعال نیست/)).toHaveCount(0);
   await page.getByRole('button', { name: 'تلاش مجدد دریافت کاتالوگ', exact: true }).click();

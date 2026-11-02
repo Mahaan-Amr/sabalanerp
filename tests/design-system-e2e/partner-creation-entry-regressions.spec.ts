@@ -26,7 +26,7 @@ const staleRuntime = { actorId, inquiryId,
   saved, configuredRows: [], customerId: oldCustomer.id, projectId: 'old-project', contractDate: '2026-01-01' };
 const runtimeKey = `partner-creation-runtime:${actorId}:${inquiryId}`;
 const workflow = (page: Page) => page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
-const next = (page: Page) => workflow(page).getByRole('button', { name: 'بعدی', exact: true });
+const next = (page: Page) => workflow(page).getByRole('button', { name: /^(?:بعدی|ادامه:)/ });
 const previous = (page: Page) => workflow(page).getByRole('button', { name: 'قبلی', exact: true });
 
 for (const saveMode of ['normal', 'delayed', 'failure', 'missing checkpoint', 'restore failure'] as const) test(`initial Partner inquiry persists its pricing step before numbering and survives immediate reload: ${saveMode}`, async ({ page }) => {

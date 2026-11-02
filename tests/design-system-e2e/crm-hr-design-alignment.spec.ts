@@ -51,7 +51,7 @@ test('CRM forms propagate HR presentation into body portals while Sales retains 
   await expect(page.getByRole('heading', { name: 'ایجاد مشتری جدید' })).toBeVisible();
   await expect(page.locator('.sds-neumorphic-workflow-scope').first()).toBeVisible();
   await expect(page.locator('.dashboard-shell')).toHaveAttribute('data-erp-presentation', 'workspace');
-  await page.getByRole('button', { name: 'بعدی' }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await page.getByRole('button', { name: 'اطلاعات تکمیلی' }).click();
   const date = page.getByRole('button', { name: /تاریخ تولد|تاریخ تولد را انتخاب کنید/ }).first();
   await date.click();
@@ -167,17 +167,17 @@ test('CRM Sales-style wizard preserves validation, supplementary draft fields an
   const progress = page.getByRole('navigation', { name: 'مراحل ثبت مشتری' });
   await expect(progress.locator('ol li')).toHaveCount(3);
   await expect(progress.locator('[aria-current="step"]')).toHaveAccessibleName('نوع مشتری');
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(page.getByRole('alert').filter({ hasText: 'نام الزامی است' })).toBeVisible();
   await page.getByRole('textbox', { name: 'نام', exact: true }).fill('مینا');
   await page.getByRole('textbox', { name: 'نام خانوادگی', exact: true }).fill('آزمایشی');
   await page.getByRole('textbox', { name: 'شماره تماس اول', exact: true }).fill('09129876543');
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(page.getByRole('alert').filter({ hasText: 'دسته‌بندی فعالیت مشتری الزامی است' })).toBeVisible();
   await expect(progress.locator('[aria-current="step"]')).toHaveAccessibleName('اطلاعات پایه');
   await page.getByRole('combobox', { name: 'دسته‌بندی فعالیت مشتری', exact: true }).selectOption('NONE');
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(progress.locator('[aria-current="step"]')).toHaveAccessibleName('اطلاعات پروژه');
   await page.getByRole('textbox', { name: 'نام پروژه', exact: true }).fill('پروژه نمونه');
   await page.getByRole('textbox', { name: 'آدرس', exact: true }).fill('تهران');
@@ -187,7 +187,7 @@ test('CRM Sales-style wizard preserves validation, supplementary draft fields an
   await page.getByRole('button', { name: 'قبلی', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'نام', exact: true })).toHaveValue('مینا');
   await expect(page.getByRole('combobox', { name: 'دسته‌بندی فعالیت مشتری', exact: true })).toHaveValue('NONE');
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(projectManager).toHaveValue('حسین رضایی');
   await expect(page.getByRole('textbox', { name: 'نام پروژه', exact: true })).toHaveValue('پروژه نمونه');
   await expect(page.getByRole('textbox', { name: 'آدرس', exact: true })).toHaveValue('تهران');
@@ -214,7 +214,7 @@ test('CRM Sales-style wizard preserves validation, supplementary draft fields an
 test('CRM collaborative wizard retains two steps while Sales keeps the original customer flow', async ({ page }) => {
   await page.goto('/dashboard/crm/customers/create?customerType=Collaborative');
   await expect(page.getByRole('navigation', { name: 'مراحل ثبت مشتری' }).locator('ol li')).toHaveCount(2);
-  await page.getByRole('button', { name: 'بعدی', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:بعدی|ادامه:)/ }).click();
   await expect(page.getByRole('button', { name: 'ثبت مشتری', exact: true })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'نام پروژه', exact: true })).toHaveCount(0);
   await page.goto('/dashboard/crm/customers/create?returnTo=contract&step=3');

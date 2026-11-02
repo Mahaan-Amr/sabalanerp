@@ -1,3 +1,4 @@
+import { accessFor as purchasingAccessFor, purchasingSections } from './purchasing/access';
 import { ownsPartnerCustomerContract } from './partnerSales/contractVisibility';
 import { canReadTransferNotice } from './partnerSales/crm/transferAccess';
 import type { PrismaClient } from '@prisma/client';
@@ -94,8 +95,14 @@ export const resolveWorkspaceRouteAvailability = async (
       await ownsPartnerCustomerContract(prisma, input.userId, ownedDetailId)) return { allowed: true, reason: null };
   const rule = rules.find((candidate) => candidate.pattern.test(input.path));
   if (!rule) {
-    const workspace = input.path.match(/^\/dashboard\/(sales|crm|hr|accounting|inventory|security|bi|logistics)(?:\/|$)/)?.[1];
+    const workspace = input.path.match(/^\/dashboard\/(sales|crm|hr|accounting|inventory|security|bi|logistics|purchasing)(?:\/|$)/)?.[1];
     if (!workspace) return { allowed: true, reason: null };
+    if (workspace === 'purchasing') {
+      const access=await purchasingAccessFor(prisma,{id:input.userId,role:input.role}).catch(()=>null);
+      const section=input.path.split('?')[0].split('/')[3];
+      const allowed=Boolean(access&&(!section||purchasingSections(access).includes(section)));
+      return {allowed,reason:allowed?null:'دسترسی این بخش خرید برای شما فعال نیست.'};
+    }
     const effective = await getEffectiveUserAccess(prisma, { userId: input.userId, userRole: input.role });
     const allowed = effective.workspaces.some((grant) => grant.workspace === workspace);
     return { allowed, reason: allowed ? null : 'دسترسی فعال به این فضای کاری ثبت نشده است. مدیر همان فضای کاری باید مجوز را بررسی کند.' };

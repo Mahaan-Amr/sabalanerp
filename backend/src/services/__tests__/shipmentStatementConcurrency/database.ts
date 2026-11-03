@@ -71,6 +71,36 @@ export const createTemporaryConcurrencyDatabase = async (input: {
   const quoted = `"${databaseName}"`;
   verifyComposeTarget(input.repositoryRoot);
   compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'CREATE DATABASE ${quoted}'`);
+  const readIdentity = () => compose(input.repositoryRoot,
+    `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT (SELECT system_identifier::text FROM pg_control_system()) || ':' || oid::text FROM pg_database WHERE datname = '${databaseName}'"`).trim();
+  // Unknown identity retains the newly created database for inspection.
+  const identity = readIdentity();
+  if (!/^\d+:\d+$/.test(identity)) throw new Error('Temporary database identity unproven; preserving data.');
+  // Reached only after this invocation successfully created its exact database.
+  // Never infer ownership from the name alone or terminate another session.
+  let cleaned = false;
+  const cleanupOwnedDatabase = async () => {
+    if (cleaned) return;
+    assertTemporaryConcurrencyDatabaseName(databaseName);
+    try {
+        if (readIdentity() !== identity) throw new Error('Temporary database identity changed; preserving data.');
+        const outstanding = compose(input.repositoryRoot,
+          `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = '${databaseName}') + (SELECT count(*) FROM pg_prepared_xacts WHERE database = '${databaseName}')"`).trim();
+        if (outstanding !== '0') throw new Error('Temporary database still has sessions or prepared transactions; preserving its data.');
+        // Contract: a coordinated window excludes other actors creating or
+        // dropping this run-owned name between this check and DROP. PostgreSQL
+        // does not offer an OID-conditional DROP DATABASE.
+        if (readIdentity() !== identity) throw new Error('Temporary database identity changed; preserving data.');
+        compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE ${quoted}'`);
+        const remaining = compose(input.repositoryRoot,
+          `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT count(*) FROM pg_database WHERE datname = '${databaseName}'"`).trim();
+        if (remaining === '0') { cleaned = true; return; }
+        throw new Error('Database absence not proven after DROP.');
+    } catch (error) {
+      // DROP may have taken effect even if the response was lost. Never retry.
+      throw new Error(`Temporary concurrency database cleanup UNKNOWN for ${databaseName}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
   try {
     if (input.migrateEmptySchema) {
       const prismaExecutable = path.join(input.repositoryRoot, 'backend', 'node_modules', 'prisma', 'build', 'index.js');
@@ -85,35 +115,13 @@ export const createTemporaryConcurrencyDatabase = async (input: {
       compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
     }
   } catch (error) {
-    compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
-    throw error;
+    // A timed-out setup descendant can retain database work after its direct
+    // child exits. Without independent tree and EOF proof, preserve it.
+    throw Object.assign(new Error(`Temporary database setup UNKNOWN for ${databaseName}; preserve data and child evidence.`), { cause: error });
   }
-  let cleaned = false;
   return {
     runId, databaseName, databaseUrl,
     client: () => new PrismaClient({ datasources: { db: { url: databaseUrl } } }),
-    cleanup: async () => {
-      if (cleaned) return;
-      assertTemporaryConcurrencyDatabaseName(databaseName);
-      let lastError: unknown;
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        try {
-          const outstanding = compose(input.repositoryRoot,
-            `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = '${databaseName}') + (SELECT count(*) FROM pg_prepared_xacts WHERE database = '${databaseName}')"`).trim();
-          if (outstanding !== '0') {
-            throw new Error('Temporary database still has sessions or prepared transactions; preserving its data.');
-          }
-          // A new connection racing the census makes the ordinary DROP fail.
-          // Never terminate another client's unfinished work to finish a test.
-          compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
-          const remaining = compose(input.repositoryRoot,
-            `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT count(*) FROM pg_database WHERE datname = '${databaseName}'"`).trim();
-          if (remaining === '0') { cleaned = true; return; }
-          lastError = new Error(`Exact database still exists after cleanup attempt ${attempt}.`);
-        } catch (error) { lastError = error; }
-      }
-      throw new Error(`Temporary concurrency database cleanup failed for ${databaseName}: ${
-        lastError instanceof Error ? lastError.message : String(lastError)}`);
-    },
+    cleanup: cleanupOwnedDatabase,
   };
 };

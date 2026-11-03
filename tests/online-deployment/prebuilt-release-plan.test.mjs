@@ -8,7 +8,7 @@ import {validatePrebuiltReleasePlan,prebuiltReleaseExports,requirePrebuiltScanne
 
 const hash=character=>character.repeat(64),image=character=>'sha256:'+hash(character);
 function fixture(){
- const operations={receiptSha256:hash('a'),files:Object.fromEntries(['deploy/scripts/deploy.sh','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'].map(name=>[name,hash('b')]))};
+ const operations={receiptSha256:hash('a'),files:Object.fromEntries(['deploy/scripts/deploy.sh','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/prebuilt-migration-inventory.mjs','deploy/scripts/normal-migration-projection.mjs','deploy/scripts/deployment-role-binding.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'].map(name=>[name,hash('b')]))};
  const plan={format:'sabalan-prebuilt-protected-release-plan/v1',applicationCommit:'a'.repeat(40),applicationTree:'b'.repeat(40),applicationSourceHash:hash('c'),inquirySourceCommit:'d'.repeat(40),images:{},operations};
  const actual={head:plan.applicationCommit,tree:plan.applicationTree,status:'',inquiryGitlink:plan.inquirySourceCommit,inquiryHead:plan.inquirySourceCommit,inquiryStatus:'',operations:structuredClone(operations),images:{},buildReceipts:{},archiveReceipts:{},linuxCheckoutByteHash:hash('f')};
  for(const [index,role]of ['backend','frontend','inquiry'].entries()){
@@ -39,6 +39,11 @@ test('changed source, dirty gitlink, images, graph, build bytes, operations and 
   ({actual})=>{actual.buildReceipts.backend.performanceSourceHash=hash('f');},({actual})=>{actual.images.backend.Config.Labels['io.sabalan.performance.source-hash']=hash('f');},({actual})=>{actual.archiveReceipts.frontend.platform=image('f');},
   ({actual})=>{actual.operations.files['deploy/scripts/deploy.sh']=hash('f');},({plan})=>{plan.images.frontend.browser.id='erp_rebuilt_other123';},({plan})=>{plan.images.inquiry.browser.id='inquiry_rebuilt_other123';},
   ({plan,actual})=>{delete plan.operations.files['deploy/scripts/storage-preflight.sh'];delete actual.operations.files['deploy/scripts/storage-preflight.sh'];},
+  ({plan,actual})=>{delete plan.operations.files['deploy/scripts/prebuilt-migration-inventory.mjs'];delete actual.operations.files['deploy/scripts/prebuilt-migration-inventory.mjs'];},
+  ({plan,actual})=>{delete plan.operations.files['deploy/scripts/normal-migration-projection.mjs'];delete actual.operations.files['deploy/scripts/normal-migration-projection.mjs'];},
+  ({actual})=>{actual.operations.files['deploy/scripts/normal-migration-projection.mjs']=hash('f');},
+  ({plan,actual})=>{delete plan.operations.files['deploy/scripts/deployment-role-binding.mjs'];delete actual.operations.files['deploy/scripts/deployment-role-binding.mjs'];},
+  ({actual})=>{actual.operations.files['deploy/scripts/deployment-role-binding.mjs']=hash('f');},
  ]){const input=fixture();mutate(input);assert.throws(()=>validatePrebuiltReleasePlan(input.plan,input.actual));}
 });
 

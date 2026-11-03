@@ -7,6 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {validateSelection,selectionBinding,canonical,preservationSources} from './preserved-clamav.mjs';
 import {productionImageStore} from './production-image-execution-binding.mjs';
+import {readPrebuiltMigrationInventory} from './prebuilt-migration-inventory.mjs';
 
 const roles=['backend','frontend','inquiry'],digest=/^[a-f0-9]{64}$/,commit=/^[a-f0-9]{40}$/,image=/^sha256:[a-f0-9]{64}$/;
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
@@ -24,7 +25,7 @@ export function validatePrebuiltReleasePlan(plan,actual){
  assert.equal(actual.status,'','PREBUILT_APPLICATION_CHECKOUT_DIRTY');assert.equal(actual.inquiryStatus,'','PREBUILT_INQUIRY_CHECKOUT_DIRTY');
  assert.equal(actual.inquiryGitlink,plan.inquirySourceCommit);assert.equal(actual.inquiryHead,plan.inquirySourceCommit);
  assert.deepEqual(actual.operations,plan.operations,'PREBUILT_OPERATIONS_CHANGED');
- for(const name of ['deploy/scripts/deploy.sh','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'])assert.match(plan.operations.files[name],digest);
+ for(const name of ['deploy/scripts/deploy.sh','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/prebuilt-migration-inventory.mjs','deploy/scripts/normal-migration-projection.mjs','deploy/scripts/deployment-role-binding.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'])assert.match(plan.operations.files[name],digest);
  for(const role of roles){
   const selected=plan.images[role],observed=actual.images[role],receipt=actual.buildReceipts[role];
   keys(selected,['image','sourceCommit','archiveGraph','archiveReceipt','buildReceipt',...(role==='backend'?[]:['browser'])]);
@@ -71,6 +72,34 @@ function command(executable,args,cwd){const child=spawnSync(executable,args,{cwd
 function originalPipes(){
  assert.equal(process.env.DEPLOYMENT_MODE??'release','release');const descriptors=['DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD','DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD'].map(key=>{assert.match(process.env[key]??'',/^[1-9][0-9]*$/);const fd=Number(process.env[key]);assert.ok(fd>=3&&fs.fstatSync(fd).isFIFO(),'PREBUILT_ORIGINAL_PIPE_REQUIRED');return fd;});assert.notEqual(descriptors[0],descriptors[1]);
 }
+/** Host-owned projection of an already verified prebuilt selection. It carries
+ * evidence only; backend admission and the owned checkpoint remain required. */
+export function writeMigrationProjection(repository,selection,applicationTree,planSha256,inventory,format='sabalan-prebuilt-migration-projection/v1'){
+ assert.ok(['sabalan-prebuilt-migration-projection/v1','sabalan-build-migration-projection/v1'].includes(format));
+ const deploymentId=process.env.DEPLOYMENT_ID,releaseId=process.env.DEPLOYMENT_RELEASE_ID;
+ for(const value of [deploymentId,releaseId])assert.match(value??'',/^[A-Za-z0-9_-]{8,160}$/,'MIGRATION_PROJECTION_OWNER');
+ const directory=path.join(repository,'.deploy-state'),lock=path.join(directory,'deployment.lock');
+ assert.equal(fs.realpathSync(directory),directory);assert.equal(fs.realpathSync(lock),lock);
+ const parent=fs.lstatSync(directory,{bigint:true}),named=fs.lstatSync(lock,{bigint:true}),held=fs.fstatSync(9,{bigint:true});
+ assert.ok(parent.isDirectory()&&parent.uid===0n&&!(parent.mode&0o022n),'MIGRATION_PROJECTION_DIRECTORY');
+ assert.ok(named.isFile()&&named.nlink===1n&&named.uid===0n&&!(named.mode&0o022n)&&held.dev===named.dev&&held.ino===named.ino,'MIGRATION_PROJECTION_LOCK_IDENTITY');
+ const info=fs.readFileSync('/proc/self/fdinfo/9','utf8');
+ assert.ok([...info.matchAll(/^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+[0-9a-f]+:[0-9a-f]+:(\d+)\s+0\s+EOF\s*$/gm)].some(row=>row[1]===held.ino.toString()),'MIGRATION_PROJECTION_LOCK_UNPROVEN');
+ const record={format,deploymentId,releaseId,planSha256,
+  applicationCommit:selection.applicationCommit,applicationTree,applicationSourceHash:selection.applicationSourceHash,
+  backendImage:selection.images.backend,inventory,hostLock:{device:held.dev.toString(),inode:held.ino.toString()},releaseAdmission:false};
+ const bytes=Buffer.from(JSON.stringify(record)+'\n');assert.ok(bytes.length<=1024*1024,'MIGRATION_PROJECTION_BOUND');
+ const file=path.join(directory,`migration-projection-${deploymentId}.json`);
+ let fd;
+ try {fd=fs.openSync(file,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600);}
+ catch(error){if(error?.code!=='EEXIST')throw error;read(file,sha(bytes),{privatePlan:true,maximum:1024*1024});return {file,sha256:sha(bytes)};}
+ try {fs.writeFileSync(fd,bytes);fs.fchmodSync(fd,0o400);fs.fsyncSync(fd);}
+ catch(error){throw Object.assign(new Error('MIGRATION_PROJECTION_PARTIAL_RETAINED',{cause:error}),{code:'MIGRATION_PROJECTION_PARTIAL_RETAINED'});}
+ finally {fs.closeSync(fd);}
+ const d=fs.openSync(directory,fs.constants.O_RDONLY);try{fs.fsyncSync(d);}finally{fs.closeSync(d);}
+ read(file,sha(bytes),{privatePlan:true,maximum:1024*1024});
+ return {file,sha256:sha(bytes)};
+}
 export function prebuiltReleaseExports(value){
  const entries={DEPLOYMENT_TARGET_COMMIT:value.applicationCommit,DEPLOYMENT_TARGET_BACKEND_IMAGE:value.images.backend,DEPLOYMENT_BACKEND_IMAGE:value.images.backend,DEPLOYMENT_FRONTEND_IMAGE:value.images.frontend,DEPLOYMENT_INQUIRY_IMAGE:value.images.inquiry,DEPLOYMENT_PREBUILT_BACKEND_EXECUTION_IMAGE:value.images.backend,DEPLOYMENT_PREBUILT_FRONTEND_EXECUTION_IMAGE:value.images.frontend,DEPLOYMENT_PREBUILT_INQUIRY_EXECUTION_IMAGE:value.images.inquiry,DEPLOYMENT_BROWSER_BUILD_ID:value.frontendBuildId,PERFORMANCE_RELEASE_COMMIT:value.applicationCommit,PERFORMANCE_RELEASE_SOURCE_HASH:value.applicationSourceHash,PERFORMANCE_RELEASE_BACKEND_IMAGE:value.images.backend,PERFORMANCE_RELEASE_FRONTEND_IMAGE:value.images.frontend,PERFORMANCE_RELEASE_INQUIRY_IMAGE:value.images.inquiry};
  if(value.preservedClamav)entries.DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX=Buffer.from(canonical(selectionBinding(value.preservedClamav,value.planSha256))).toString('hex');
@@ -94,5 +123,13 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   command('docker',['compose','--env-file',process.env.DEPLOYMENT_PREBUILT_ENV_FILE,'-f',path.join(repository,'docker-compose.prod.yml'),'-p','sabalanerp','ps','--format','json'],repository);
   const rows=JSON.parse(command('docker',['image','inspect',selected.image],repository));assert.equal(rows.length,1);actual.images[role]=rows[0];
  }
- process.stdout.write(prebuiltReleaseExports({...validatePrebuiltReleasePlan(plan,actual),planSha256:expected}));
+ const validated=validatePrebuiltReleasePlan(plan,actual);
+ // Bind inventory discovery to the already verified Git commit. This output
+ // is deliberately not exported as authority; transport and executor binding
+ // still require the original host owner and its immutable-image witness.
+ const inventory=readPrebuiltMigrationInventory(repository,validated.applicationCommit);
+ assert.equal(inventory.commit,validated.applicationCommit);
+ assert.equal(inventory.releaseAdmission,false);
+ if(process.env.DEPLOYMENT_PREBUILT_WRITE_PROJECTION==='1')writeMigrationProjection(repository,validated,plan.applicationTree,expected,inventory);
+ process.stdout.write(prebuiltReleaseExports({...validated,planSha256:expected}));
 }

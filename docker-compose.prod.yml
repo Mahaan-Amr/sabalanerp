@@ -57,6 +57,8 @@ services:
       dockerfile: backend/Dockerfile
       network: host
       args:
+        PERFORMANCE_SOURCE_COMMIT: ${PERFORMANCE_RELEASE_COMMIT:-unattested}
+        PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_RELEASE_SOURCE_HASH:-unattested}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         http_proxy: ${http_proxy:-}

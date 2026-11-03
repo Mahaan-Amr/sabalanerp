@@ -3,6 +3,14 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { assertRuntimeControlOwnership } from './runtimeControlOwnership';
+import {readProtectedMigrationSources,validateProtectedMigrationHistory} from './protectedMigrationHistory';
+import {compileExactCandidatePending,exactCandidateMigrationNames,exactCandidatePlanSha256} from './protectedCandidateMigrationInventory';
+import {readCandidateTransactionObservation} from './protectedCandidateTransactionObservation';
+import {candidateStageProjection} from './protectedCandidateStageProjection';
+import {compareCandidateStage} from './protectedCandidateStageComparison';
+import {observeCandidateRelationSecurity} from './protectedCandidateRelationSecurity';
+import {observeCandidateExplicitDimensions} from './protectedCandidateExplicitDimensions';
+import {readCandidateProjection} from './protectedCandidateProjection';
 
 const known = {
   '20261014120000_hr_vehicle_assignment_plans': {
@@ -94,9 +102,13 @@ async function assertLease(tx: Prisma.TransactionClient, owner: Owner) {
     || checkpoint.manifestReadable !== true || typeof checkpoint.checksum !== 'string' || !/^[a-f0-9]{64}$/.test(checkpoint.checksum)) {
     failure('PROTECTED_BRIDGE_CHECKPOINT_LEASE_UNPROVEN');
   }
+  // Returned only inside the existing owner transaction; this is a binding
+  // for a future receipt, not an independent authorization token.
+  return Object.freeze({checkpointChecksum:checkpoint.checksum as string});
 }
 
-async function catalog(tx: Prisma.TransactionClient, input: ReturnType<typeof compileProtectedBridgeMigration>) {
+type CatalogInput = Readonly<{tables:string[];functions:string[]}>;
+async function catalog(tx: Prisma.TransactionClient, input: CatalogInput) {
   const tables = await tx.$queryRaw<Array<{ name: string; details: unknown }>>(Prisma.sql`
     SELECT c.relname AS name, jsonb_build_object('kind',c.relkind,'persistence',c.relpersistence,'owner',pg_get_userbyid(c.relowner),
       'rls',c.relrowsecurity,'forceRls',c.relforcerowsecurity,'replicaIdentity',c.relreplident,
@@ -142,6 +154,65 @@ export async function assertProtectedBridgeMigrationAuthority(database: PrismaCl
   await database.$transaction(async tx => { await assertLease(tx, owner); assertBoundary(); }, { maxWait: 1000, timeout: 5000 });
 }
 
+/** Candidate routing uses the same owner, native boundary and transaction
+ * lock as the existing bridge. No caller can supply catalog qualification.
+ * This route performs no DDL until the in-transaction catalog is qualified. */
+export async function applyProtectedCandidatePlan(database:PrismaClient,inputOwner:Owner){
+ const owner=Object.freeze({...inputOwner}),boundary=protectedBoundary(owner);let applied=0;
+ const projectionHash=(prefix:number)=>{
+  const projection=candidateStageProjection(prefix);
+  if(projection.state!=='SCOPED_EXPECTATION')return failure('CANDIDATE_STAGE_PROJECTION_UNPROVEN');
+  return sha(JSON.stringify({prefix,tables:projection.tables,functions:projection.functions}));
+ };
+ for(let index=0;index<exactCandidateMigrationNames.length;index++){
+  boundary();
+  const outcome=await database.$transaction(async tx=>{
+  await tx.$queryRaw`SELECT set_config('lock_timeout','250ms',true),set_config('statement_timeout','10000ms',true),set_config('search_path','public',true)`;
+  const [lock]=await tx.$queryRaw<Array<{owned:boolean}>>`SELECT pg_try_advisory_xact_lock(741936426::bigint) AS owned`;
+  if(!lock?.owned)failure('PROTECTED_BRIDGE_ALREADY_RUNNING');
+  const lease=await assertLease(tx,owner);boundary();
+  const files=readProtectedMigrationSources(path.resolve(__dirname,'../../prisma/migrations'));
+  const plan=compileExactCandidatePending(exactCandidateMigrationNames.map(name=>({name,bytes:files.get(name)!})));
+  const observation=await readCandidateTransactionObservation(tx,owner,files);
+  if(observation.checkpointChecksum!==lease.checkpointChecksum)failure('CANDIDATE_CONTEXT_CHANGED');
+  const controlImage=process.env.DEPLOYMENT_CONTROL_IMAGE;
+  if(!controlImage||!/^sha256:[a-f0-9]{64}$/.test(controlImage))failure('CANDIDATE_CONTROL_IMAGE_UNPROVEN');
+  const sourceProjection=readCandidateProjection({deploymentId:owner.deploymentId,releaseId:owner.releaseId,targetCommit:observation.targetCommit,controlImage:controlImage!},files);
+  if(sourceProjection.sourceImageBinding!=='HOST_REPORTED_NOT_INDEPENDENT')failure('CANDIDATE_SOURCE_BINDING_UNPROVEN');
+  await assertLease(tx,owner);boundary();
+  if(observation.prefixLength<index)failure('CANDIDATE_RESUME_PREFIX_UNPROVEN');
+  // Source-map completeness and serving-role binding are still unresolved;
+  // no caller can override the internally obtained coverage or lease state.
+  if(observation.stageComparison.state!=='SCOPED_MATCH'||observation.explicitDimensions.state!=='SCOPED_MATCH'||
+    observation.relationSecurity.state!=='SCOPED_MATCH'||observation.unresolvedCatalog.length!==0)failure('CANDIDATE_EXECUTOR_CATALOG_UNQUALIFIED');
+  // Host image/container sequencing and the Compose DB-role comparison are
+  // separate required deployment gates, not facts invented by this observer.
+  // The deployment CLI does not route candidate DDL here until that path and
+  // the native integration tests are reviewed and wired.
+  const beforeHash=projectionHash(observation.prefixLength);
+  if(observation.prefixLength>0&&observation.lastReceiptScopedProjectionSha256!==beforeHash)failure('CANDIDATE_RESUME_CATALOG_CHANGED');
+  if(observation.prefixLength>index)return {applied:false};
+  const step=plan[index];
+  for(const statement of step.statements){boundary();await tx.$executeRawUnsafe(statement);}
+  const after=await compareCandidateStage(tx,index+1),security=await observeCandidateRelationSecurity(tx,index+1),explicit=await observeCandidateExplicitDimensions(tx,index+1);
+  if(after.state!=='SCOPED_MATCH'||security.state!=='SCOPED_MATCH'||explicit.state!=='SCOPED_MATCH')failure('CANDIDATE_AFTER_CATALOG_UNPROVEN');
+  await assertLease(tx,owner);boundary();
+  const afterHash=projectionHash(index+1);
+  // Digests identify the pinned scoped expectations whose individual object
+  // hashes were compared above; they are not full-catalog measurements.
+  const receipt=JSON.stringify({format:'sabalan-owned-candidate-migration/v2',planSha256:exactCandidatePlanSha256,sqlSha256:step.sha256,
+   checkpointSha256:lease.checkpointChecksum,beforeScopedProjectionSha256:beforeHash,afterScopedProjectionSha256:afterHash});
+  await tx.$executeRaw`INSERT INTO public._prisma_migrations (id,checksum,finished_at,migration_name,logs,started_at,applied_steps_count)
+   VALUES (${randomUUID()},${step.sha256},clock_timestamp(),${step.name},${receipt},clock_timestamp(),1)`;
+  const committed=await readCandidateTransactionObservation(tx,owner,files);
+  if(committed.prefixLength!==index+1||committed.lastReceiptScopedProjectionSha256!==afterHash)failure('CANDIDATE_WRITTEN_HISTORY_UNPROVEN');
+  await assertLease(tx,owner);boundary();return {applied:true};
+  },{maxWait:1000,timeout:15000});
+  if(outcome.applied)applied++;
+ }
+ return {applied,planSha256:exactCandidatePlanSha256};
+}
+
 /** Protected bridge only; no online/public entry point. The existing
  * coordinated checkpoint flow must first own the native control lock and have
  * advanced its exact lease through remote verification to MUTATION_STARTED.
@@ -158,6 +229,11 @@ export async function applyProtectedBridgeMigration(database: PrismaClient, inpu
     const [lock] = await tx.$queryRaw<Array<{ owned: boolean }>>`SELECT pg_try_advisory_xact_lock(741936426::bigint) AS owned`;
     if (!lock?.owned) failure('PROTECTED_BRIDGE_ALREADY_RUNNING');
     await assertLease(tx, owner); assertBoundary();
+    const sourceFiles=readProtectedMigrationSources(path.resolve(__dirname,'../../prisma/migrations'));
+    const completeHistory=await tx.$queryRaw<Array<{name:string;checksum:string;finished:Date|null;rolledBack:Date|null}>>`
+      SELECT migration_name AS name,checksum,finished_at AS finished,rolled_back_at AS "rolledBack" FROM public._prisma_migrations FOR SHARE`;
+    validateProtectedMigrationHistory(completeHistory,sourceFiles);
+    await assertLease(tx,owner);assertBoundary();
     const history = await tx.$queryRaw<Array<{ checksum: string; finished: Date | null; logs: string | null }>>`
       SELECT checksum, finished_at AS finished, logs FROM public._prisma_migrations
       WHERE migration_name=${input.name} AND rolled_back_at IS NULL`;

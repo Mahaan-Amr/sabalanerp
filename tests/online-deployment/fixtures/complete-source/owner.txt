@@ -1,0 +1,313 @@
+"""Dedicated SAME-live-owner complete-transfer/strict-restore lifecycle.
+SOURCE TEMPLATE: no runnable binding is issued; main refuses before any action.
+No stdin payload, secret, plaintext application key, or secret digest is logged.
+Custody follows reviewed owner62236 SAME-Popen drain/close/retry, raw collector
+instead of its line protocol because the middle phase is encrypted bytes.
+"""
+import argparse,base64,hashlib,json,os,pathlib,secrets,signal,subprocess,sys,threading,importlib.util,shlex
+from threading import Event,Lock
+_FINAL_VALIDATED_INPUT=None
+BOUND_SOURCE_INPUTS={'format': 'sabalan-owned-complete-transfer-restore-input/v1', 'composeProject': 'sabalanerp-local', 'runtimeAdmissionClaimed': False, 'capture': {'file': 'D:\\sabalanerp-online-qa\\C30-canonical-capture-original-nginx-actual-r1-20261024\\canonical-capture-original.json', 'sha256': 'dd51cb81045022b97986ac0f24d0979d181c5a68ac85dbba207b9329aa6f6534'}, 'sourceLedger': {'file': 'D:\\sabalanerp-online-qa\\production-ledger-schema-readonly-r2-20261024T175432807981Z.json', 'sha256': 'a1bee468e6f97d80050c20b95f053b61f321fb015e2a58c9b3640242401b2aa3'}, 'sourceLedgerOriginal': {'file': 'D:\\sabalanerp-online-qa\\production-ledger-schema-readonly-r2-20261024T175432807981Z-original.json', 'sha256': '52b269d5ca7182aaee615832f8a33c1d92980873ccdc111a9c8ea73c3efd2926'}, 'postCaptureState': {'file': 'D:\\sabalanerp-online-qa\\source-install-healthy-baseline-20261025T053309990939Z.json', 'sha256': '8000a607e130d32a774ac7f907f9cf73cc7a2f15cf5bcf4db7a4db04352b453d'}, 'applicationKeyCustody': {'file': 'D:\\sabalanerp-online-qa\\C30-observed-backend-restart-appkey-source-r1-20261025\\source-review.json', 'sha256': 'fcab84669abb3489e19f0a48e42965e28b8b53981102b5f51ef65b0cb0ebb55c'}, 'localAlternateDatabaseEntry': {'file': 'D:\\sabalanerp-online-qa\\C30-local-strict-material-staging-source-r2-fresh-authority-cohort-20261025\\source-review.json', 'sha256': '7af34f6752ecc4408c00c55eba3ccc6cbab4531369531ee64d61cacf4b07626f'}, 'strictEngineSource': {'file': 'D:\\sabalanerp-online-qa\\C30-restored-qa-financial-final-backend-freeze-r8-bigint-test-overloads-20261025\\source-review.json', 'sha256': '656c1ddcef144975814b980463b6165c0129bf09d15b7f6e10c2892261509109'}, 'qaCallbackSource': {'file': 'D:\\sabalanerp-online-qa\\C30-restored-qa-baseline-private-completion-source-r7-explicit-array-types-20261025\\source-review.json', 'sha256': '61b7f8a625ef0a3d5690c57217e65e11f394cea47381005bf5fe4f212d0710c9'}, 'phaseCommands': {'initialComposeGuard': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'compose', '-f', 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.local.yml', 'ps', '--format', 'json'], 'stageInitial': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'exec', '-i', '42be8619ce4d91ff369578d74721b155f60b20f741d0796a1f12ff36aad37633', '/usr/bin/python3.11', '-I', '-B', '-c', "import base64;exec(compile(base64.b64decode('IiIiTmV3IGV4YWN0IHByaXZhdGUgc3RyaWN0IG1hdGVyaWFsIG9ubHksIGV4aXN0aW5nIGNhbmRpZGF0ZS4gTm8gYXBwL0RCL2d1YXJkaWFuLiIiIgppbXBvcnQgb3Msc3lzLHN0YXQsanNvbixoYXNobGliLHRhcmZpbGUscmUKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmRlZiBuZWVkKHYpOgogaWYgbm90IHY6cmFpc2UgQXNzZXJ0aW9uRXJyb3IoJ0xPQ0FMX1NUUklDVF9TVEFHSU5HX1JFRlVTRUQnKQpkZWYgaWRlbnRpdHkocyk6cmV0dXJuIHR1cGxlKGdldGF0dHIocyxrKWZvciBrIGluIFsnc3RfZGV2Jywnc3RfaW5vJywnc3RfbW9kZScsJ3N0X3VpZCcsJ3N0X25saW5rJywnc3Rfc2l6ZScsJ3N0X210aW1lX25zJywnc3RfY3RpbWVfbnMnXSkKZGVmIHNhZmUobmFtZSk6cmV0dXJuIGlzaW5zdGFuY2UobmFtZSxzdHIpYW5kIDA8bGVuKG5hbWUpPD00MDk2IGFuZCBub3QgbmFtZS5zdGFydHN3aXRoKCcvJylhbmQgJ1xcJ25vdCBpbiBuYW1lIGFuZCAnOidub3QgaW4gbmFtZSBhbmQgYWxsKHAgbm90IGluICgnJywnLicsJy4uJylmb3IgcCBpbiBuYW1lLnNwbGl0KCcvJykpCmRlZiBkaXJlY3RvcnkocCk6CiBzPXAubHN0YXQoKTtuZWVkKHAucmVzb2x2ZShzdHJpY3Q9VHJ1ZSk9PXAgYW5kIHN0YXQuU19JU0RJUihzLnN0X21vZGUpYW5kIHMuc3RfdWlkPT0wIGFuZCBub3Qgcy5zdF9tb2RlJjBvMDc3KTtyZXR1cm4ocy5zdF9kZXYscy5zdF9pbm8pCmRlZiBleGFjdF9wYXRoKHJvb3QscmVsYXRpdmUpOgogbmVlZChzYWZlKHJlbGF0aXZlKSk7Y3VycmVudD1yb290CiBmb3IgcGFydCBpbiByZWxhdGl2ZS5zcGxpdCgnLycpWzotMV06CiAgY3VycmVudD1jdXJyZW50L3BhcnQKICBpZiBub3QgY3VycmVudC5leGlzdHMoKTpjdXJyZW50Lm1rZGlyKG1vZGU9MG83MDApCiAgZGlyZWN0b3J5KGN1cnJlbnQpCiByZXR1cm4gcm9vdC9yZWxhdGl2ZQpkZWYgbmFtZXNwYWNlKHMpOnJldHVybiB7azpzdHIoZ2V0YXR0cihzLGspKWZvciBrIGluIFsnc3RfZGV2Jywnc3RfaW5vJywnc3RfdWlkJywnc3RfZ2lkJywnc3RfbW9kZScsJ3N0X25saW5rJywnc3Rfc2l6ZScsJ3N0X210aW1lX25zJywnc3RfY3RpbWVfbnMnXX0KZGVmIGluaXRpYWwob3BlcmF0aW9uLGV4cGVjdGVkX25hbWVzcGFjZSk6CiBuZWVkKHN5cy5wbGF0Zm9ybT09J2xpbnV4J2FuZCBvcy5nZXR1aWQoKT09MCBhbmQgcmUuZnVsbG1hdGNoKCdbYS1mMC05XXszMn0nLG9wZXJhdGlvbikpO2Jhc2U9UGF0aCgnL2FwcC9ydW50aW1lLWF1dGhvcml0eScpO2JlZm9yZT1kaXJlY3RvcnkoYmFzZSk7b3JpZ2luYWw9bmFtZXNwYWNlKGJhc2UubHN0YXQoKSk7bmVlZChvcmlnaW5hbD09ZXhwZWN0ZWRfbmFtZXNwYWNlIGFuZCBsaXN0KGJhc2UuaXRlcmRpcigpKT09W10pCiByb290PWJhc2UvKCdhcHBsaWNhdGlvbi1uYXRpdmUtJytvcGVyYXRpb24pO25lZWQobm90IHJvb3QuZXhpc3RzKCkpO3Jvb3QubWtkaXIobW9kZT0wbzcwMCk7c3RhZ2U9cm9vdC8nc3RyaWN0LWNvbXBsZXRlLW1hdGVyaWFsJztzdGFnZS5ta2Rpcihtb2RlPTBvNzAwKTtuZWVkKGRpcmVjdG9yeShiYXNlKT09YmVmb3JlIGFuZCBvcy5saXN0ZGlyKGJhc2UpPT1bcm9vdC5uYW1lXSkKIHJldHVybiB7J2Zvcm1hdCc6J3NhYmFsYW4tbG9jYWwtc3RyaWN0LW1hdGVyaWFsLXBhcmVudC92MScsJ29wZXJhdGlvbic6b3BlcmF0aW9uLCdyb290JzpzdHIocm9vdCksJ3N0YWdlJzpzdHIoc3RhZ2UpLCdyb290RGlyZWN0b3J5SWRlbnRpdHknOmxpc3QoZGlyZWN0b3J5KHJvb3QpKSwnc3RhZ2VEaXJlY3RvcnlJZGVudGl0eSc6bGlzdChkaXJlY3Rvcnkoc3RhZ2UpKSwnYXV0aG9yaXR5TmFtZXNwYWNlQmVmb3JlJzpvcmlnaW5hbCwnYXV0aG9yaXR5TmFtZXNwYWNlQWZ0ZXInOm5hbWVzcGFjZShiYXNlLmxzdGF0KCkpLCdhdXRob3JpdHlSb290SW5pdGlhbGx5RW1wdHknOlRydWUsJ2V4aXN0aW5nQWNjZXB0YW5jZUFjY2Vzc2VkJzpGYWxzZSwnYXBwU3RhcnRlZCc6RmFsc2UsJ2RhdGFiYXNlRXhlY3V0ZWQnOkZhbHNlLCdwcm9kdWN0aW9uQWRtaXNzaW9uJzpGYWxzZX0KZGVmIHVucGFjayhvcGVyYXRpb24sYXJjaGl2ZV9zaGEsbWFuaWZlc3Rfc2hhKToKIG5lZWQoc3lzLnBsYXRmb3JtPT0nbGludXgnYW5kIG9zLmdldHVpZCgpPT0wIGFuZCByZS5mdWxsbWF0Y2goJ1thLWYwLTldezMyfScsb3BlcmF0aW9uKWFuZCByZS5mdWxsbWF0Y2goJ1thLWYwLTldezY0fScsYXJjaGl2ZV9zaGEpYW5kIHJlLmZ1bGxtYXRjaCgnW2EtZjAtOV17NjR9JyxtYW5pZmVzdF9zaGEpKTtyb290PVBhdGgoJy9hcHAvcnVudGltZS1hdXRob3JpdHknKS8oJ2FwcGxpY2F0aW9uLW5hdGl2ZS0nK29wZXJhdGlvbik7c3RhZ2U9cm9vdC8nc3RyaWN0LWNvbXBsZXRlLW1hdGVyaWFsJztyPWRpcmVjdG9yeShyb290KTtkaXJlY3Rvcnkoc3RhZ2UpO25lZWQobGlzdChzdGFnZS5pdGVyZGlyKCkpPT1bXSkKIGFyY2hpdmU9cm9vdC8nbWF0ZXJpYWwtaW5wdXQudGFyJztmZD1vcy5vcGVuKGFyY2hpdmUsb3MuT19SRE9OTFl8b3MuT19OT0ZPTExPV3xvcy5PX05PTkJMT0NLKTtiZWZvcmU9b3MuZnN0YXQoZmQpO25lZWQoc3RhdC5TX0lTUkVHKGJlZm9yZS5zdF9tb2RlKWFuZCBiZWZvcmUuc3RfdWlkPT0wIGFuZCBiZWZvcmUuc3Rfbmxpbms9PTEgYW5kIDA8YmVmb3JlLnN0X3NpemU8PTUxMioxMDI0KioyKTtoPWhhc2hsaWIuc2hhMjU2KCk7Y291bnQ9MAogdHJ5OgogIHdoaWxlIHJhdzo9b3MucmVhZChmZCwyNjIxNDQpOmNvdW50Kz1sZW4ocmF3KTtuZWVkKGNvdW50PD01MTIqMTAyNCoqMik7aC51cGRhdGUocmF3KQogIG5lZWQoaC5oZXhkaWdlc3QoKT09YXJjaGl2ZV9zaGEgYW5kIGNvdW50PT1iZWZvcmUuc3Rfc2l6ZSBhbmQgaWRlbnRpdHkoYmVmb3JlKT09aWRlbnRpdHkob3MuZnN0YXQoZmQpKT09aWRlbnRpdHkoYXJjaGl2ZS5sc3RhdCgpKSk7b3MubHNlZWsoZmQsMCxvcy5TRUVLX1NFVCkKICB3aXRoIG9zLmZkb3Blbihvcy5kdXAoZmQpLCdyYicpYXMgc291cmNlLHRhcmZpbGUub3BlbihmaWxlb2JqPXNvdXJjZSxtb2RlPSdyfCcpYXMgdGFyOgogICBmaXJzdD10YXIubmV4dCgpO25lZWQoZmlyc3QgaXMgbm90IE5vbmUgYW5kIGZpcnN0Lm5hbWU9PSdzdGFnZS1tYW5pZmVzdC5qc29uJ2FuZCBmaXJzdC5pc2ZpbGUoKWFuZCAwPGZpcnN0LnNpemU8PTQqMTAyNCoqMik7cmF3PXRhci5leHRyYWN0ZmlsZShmaXJzdCkucmVhZCg0KjEwMjQqKjIrMSk7bmVlZChsZW4ocmF3KT09Zmlyc3Quc2l6ZSBhbmQgaGFzaGxpYi5zaGEyNTYocmF3KS5oZXhkaWdlc3QoKT09bWFuaWZlc3Rfc2hhKTttYW5pZmVzdD1qc29uLmxvYWRzKHJhdyk7bmVlZChzZXQobWFuaWZlc3QpPT17J2Zvcm1hdCcsJ29wZXJhdGlvbicsJ2ZpbGVzJ31hbmQgbWFuaWZlc3RbJ2Zvcm1hdCddPT0nc2FiYWxhbi1sb2NhbC1zdHJpY3QtbWF0ZXJpYWwtZmlsZXMvdjEnYW5kIG1hbmlmZXN0WydvcGVyYXRpb24nXT09b3BlcmF0aW9uIGFuZCBpc2luc3RhbmNlKG1hbmlmZXN0WydmaWxlcyddLGRpY3QpYW5kIDM8PWxlbihtYW5pZmVzdFsnZmlsZXMnXSk8PTUwMDAwKQogICBwbGFubmVkPW1hbmlmZXN0WydmaWxlcyddO25lZWQoYWxsKHNhZmUobmFtZSlhbmQgc2V0KHYpPT17J2J5dGVzJywnc2hhMjU2J31hbmQgdHlwZSh2WydieXRlcyddKWlzIGludCBhbmQgMDw9dlsnYnl0ZXMnXTw9NTEyKjEwMjQqKjIgYW5kIHJlLmZ1bGxtYXRjaCgnW2EtZjAtOV17NjR9Jyx2WydzaGEyNTYnXSlmb3IgbmFtZSx2IGluIHBsYW5uZWQuaXRlbXMoKSkpO25lZWQoJ3N0YWdlLW1hbmlmZXN0Lmpzb24nbm90IGluIHBsYW5uZWQpCiAgIHNwYWNlPW9zLnN0YXR2ZnMoc3RhZ2UpO25lZWQoc3BhY2UuZl9iYXZhaWwqc3BhY2UuZl9mcnNpemU+PXN1bSh4WydieXRlcyddZm9yIHggaW4gcGxhbm5lZC52YWx1ZXMoKSkrMTI0Mjk0NTY3Mis1MTIqMTAyNCoqMik7c2Vlbj1zZXQoKQogICBmb3IgZW50cnkgaW4gdGFyOgogICAgaWYgZW50cnkgaXMgZmlyc3Q6Y29udGludWUKICAgIG5hbWU9ZW50cnkubmFtZTtuZWVkKG5hbWUgaW4gcGxhbm5lZCBhbmQgbmFtZSBub3QgaW4gc2VlbiBhbmQgZW50cnkuaXNmaWxlKClhbmQgbm90IGVudHJ5Lmlzc3ltKClhbmQgbm90IGVudHJ5LmlzbG5rKClhbmQgZW50cnkuc2l6ZT09cGxhbm5lZFtuYW1lXVsnYnl0ZXMnXSk7c2Vlbi5hZGQobmFtZSk7dGFyZ2V0PWV4YWN0X3BhdGgoc3RhZ2UsbmFtZSk7b3V0PW9zLm9wZW4odGFyZ2V0LG9zLk9fUkRXUnxvcy5PX0NSRUFUfG9zLk9fRVhDTHxvcy5PX05PRk9MTE9XLDBvNDAwKTtoPWhhc2hsaWIuc2hhMjU2KCk7dG90YWw9MAogICAgdHJ5OgogICAgIGRhdGE9dGFyLmV4dHJhY3RmaWxlKGVudHJ5KQogICAgIHdoaWxlIGNodW5rOj1kYXRhLnJlYWQoMjYyMTQ0KToKICAgICAgdG90YWwrPWxlbihjaHVuayk7bmVlZCh0b3RhbDw9ZW50cnkuc2l6ZSk7aC51cGRhdGUoY2h1bmspO29mZnNldD0wCiAgICAgIHdoaWxlIG9mZnNldDxsZW4oY2h1bmspOndyaXR0ZW49b3Mud3JpdGUob3V0LGNodW5rW29mZnNldDpdKTtuZWVkKHdyaXR0ZW4+MCk7b2Zmc2V0Kz13cml0dGVuCiAgICAgbmVlZCh0b3RhbD09ZW50cnkuc2l6ZSBhbmQgaC5oZXhkaWdlc3QoKT09cGxhbm5lZFtuYW1lXVsnc2hhMjU2J10pO29zLmZzeW5jKG91dCk7cz1vcy5mc3RhdChvdXQpO25lZWQocy5zdF91aWQ9PTAgYW5kIHMuc3Rfbmxpbms9PTEgYW5kIHMuc3RfbW9kZT09MG8xMDA0MDAgYW5kIHMuc3Rfc2l6ZT09ZW50cnkuc2l6ZSk7b3MubHNlZWsob3V0LDAsb3MuU0VFS19TRVQpO2NoZWNrPWhhc2hsaWIuc2hhMjU2KCk7Y2hlY2tlZD0wCiAgICAgd2hpbGUgcGFydDo9b3MucmVhZChvdXQsMjYyMTQ0KTpjaGVja2VkKz1sZW4ocGFydCk7bmVlZChjaGVja2VkPD1lbnRyeS5zaXplKTtjaGVjay51cGRhdGUocGFydCkKICAgICBuZWVkKGNoZWNrZWQ9PWVudHJ5LnNpemUgYW5kIGNoZWNrLmhleGRpZ2VzdCgpPT1wbGFubmVkW25hbWVdWydzaGEyNTYnXWFuZCBpZGVudGl0eShzKT09aWRlbnRpdHkob3MuZnN0YXQob3V0KSk9PWlkZW50aXR5KHRhcmdldC5sc3RhdCgpKWFuZCB0YXJnZXQucmVzb2x2ZShzdHJpY3Q9VHJ1ZSk9PXRhcmdldCkKICAgIGZpbmFsbHk6b3MuY2xvc2Uob3V0KQogICBuZWVkKHNlZW49PXNldChwbGFubmVkKSk7bmVlZChpZGVudGl0eShvcy5mc3RhdChmZCkpPT1pZGVudGl0eShhcmNoaXZlLmxzdGF0KCkpPT1pZGVudGl0eShiZWZvcmUpKTtuZWVkKGRpcmVjdG9yeShyb290KT09cikKICByZXR1cm4geydmb3JtYXQnOidzYWJhbGFuLWxvY2FsLXN0cmljdC1tYXRlcmlhbC1zdGFnZWQvdjEnLCdvcGVyYXRpb24nOm9wZXJhdGlvbiwnYXJjaGl2ZVNoYTI1Nic6YXJjaGl2ZV9zaGEsJ21hbmlmZXN0U2hhMjU2JzptYW5pZmVzdF9zaGEsJ2ZpbGVzJzpsZW4oc2VlbiksJ2J5dGVzJzpzdW0oeFsnYnl0ZXMnXWZvciB4IGluIHBsYW5uZWQudmFsdWVzKCkpLCdzdGFnZSc6c3RyKHN0YWdlKSwnYXBwU3RhcnRlZCc6RmFsc2UsJ2RhdGFiYXNlRXhlY3V0ZWQnOkZhbHNlLCdwcm9kdWN0aW9uQWRtaXNzaW9uJzpGYWxzZX0KIGZpbmFsbHk6b3MuY2xvc2UoZmQpCmRlZiBjaXBoZXIob3BlcmF0aW9uLGV4cGVjdGVkX3NoYSxleHBlY3RlZF9ieXRlcyk6CiBuZWVkKHN5cy5wbGF0Zm9ybT09J2xpbnV4J2FuZCBvcy5nZXR1aWQoKT09MCBhbmQgcmUuZnVsbG1hdGNoKCdbYS1mMC05XXszMn0nLG9wZXJhdGlvbilhbmQgcmUuZnVsbG1hdGNoKCdbYS1mMC05XXs2NH0nLGV4cGVjdGVkX3NoYSlhbmQgdHlwZShleHBlY3RlZF9ieXRlcylpcyBpbnQgYW5kIDA8ZXhwZWN0ZWRfYnl0ZXM8PTE2KjEwMjQqKjMpO3Jvb3Q9UGF0aCgnL2FwcC9ydW50aW1lLWF1dGhvcml0eScpLygnYXBwbGljYXRpb24tbmF0aXZlLScrb3BlcmF0aW9uKTtzdGFnZT1yb290LydzdHJpY3QtY29tcGxldGUtbWF0ZXJpYWwnO2RpcmVjdG9yeShyb290KTtkaXJlY3Rvcnkoc3RhZ2UpO2ZpbGU9c3RhZ2UvJ3NvdXJjZS1jb21wbGV0ZS5yZXNlYWxlZCc7ZmQ9b3Mub3BlbihmaWxlLG9zLk9fUkRPTkxZfG9zLk9fTk9GT0xMT1d8b3MuT19OT05CTE9DSyk7YmVmb3JlPW9zLmZzdGF0KGZkKTtuZWVkKHN0YXQuU19JU1JFRyhiZWZvcmUuc3RfbW9kZSlhbmQgYmVmb3JlLnN0X3VpZD09MCBhbmQgYmVmb3JlLnN0X25saW5rPT0xIGFuZCBiZWZvcmUuc3Rfc2l6ZT09ZXhwZWN0ZWRfYnl0ZXMpO2g9aGFzaGxpYi5zaGEyNTYoKTtjb3VudD0wCiB0cnk6CiAgd2hpbGUgY2h1bms6PW9zLnJlYWQoZmQsMjYyMTQ0KTpjb3VudCs9bGVuKGNodW5rKTtuZWVkKGNvdW50PD1leHBlY3RlZF9ieXRlcyk7aC51cGRhdGUoY2h1bmspCiAgbmVlZChjb3VudD09ZXhwZWN0ZWRfYnl0ZXMgYW5kIGguaGV4ZGlnZXN0KCk9PWV4cGVjdGVkX3NoYSBhbmQgaWRlbnRpdHkoYmVmb3JlKT09aWRlbnRpdHkob3MuZnN0YXQoZmQpKT09aWRlbnRpdHkoZmlsZS5sc3RhdCgpKSk7b3MuZmNobW9kKGZkLDBvNDAwKTtvcy5mc3luYyhmZCk7YWZ0ZXI9b3MuZnN0YXQoZmQpO25lZWQoYWZ0ZXIuc3RfbW9kZT09MG8xMDA0MDAgYW5kIGFmdGVyLnN0X3VpZD09MCBhbmQgYWZ0ZXIuc3Rfbmxpbms9PTEgYW5kIGFmdGVyLnN0X2Rldj09YmVmb3JlLnN0X2RldiBhbmQgYWZ0ZXIuc3RfaW5vPT1iZWZvcmUuc3RfaW5vIGFuZCBpZGVudGl0eShhZnRlcik9PWlkZW50aXR5KGZpbGUubHN0YXQoKSkpCiAgcmV0dXJuIHsnZm9ybWF0Jzonc2FiYWxhbi1sb2NhbC1zdHJpY3QtY2lwaGVyLXN0YWdlZC92MScsJ29wZXJhdGlvbic6b3BlcmF0aW9uLCdmaWxlJzpzdHIoZmlsZSksJ3NoYTI1Nic6ZXhwZWN0ZWRfc2hhLCdieXRlcyc6ZXhwZWN0ZWRfYnl0ZXMsJ2FwcFN0YXJ0ZWQnOkZhbHNlLCdkYXRhYmFzZUV4ZWN1dGVkJzpGYWxzZSwncHJvZHVjdGlvbkFkbWlzc2lvbic6RmFsc2V9CiBmaW5hbGx5Om9zLmNsb3NlKGZkKQpkZWYgbWFpbigpOnJhaXNlIEFzc2VydGlvbkVycm9yKCdTT1VSQ0VfT1dORURfRklYRURfUEhBU0VfT05MWScpCgoKcHJpbnQoanNvbi5kdW1wcyhpbml0aWFsKCdkMWQ4MzMzMmMzNDc0MTlkOTFiNjYwNTFhZGYzOWQ4MScseydzdF9kZXYnOiAnMjExMicsICdzdF9pbm8nOiAnODM4NDM1JywgJ3N0X3VpZCc6ICcwJywgJ3N0X2dpZCc6ICcwJywgJ3N0X21vZGUnOiAnMTY4MzInLCAnc3RfbmxpbmsnOiAnMicsICdzdF9zaXplJzogJzQwOTYnLCAnc3RfbXRpbWVfbnMnOiAnMTc5MjkwNjY0NDYwMTU5ODIwNCcsICdzdF9jdGltZV9ucyc6ICcxNzkyOTA2NjQ0NjAxNTk4MjA0J30pLHNlcGFyYXRvcnM9KCcsJywnOicpKSxmbHVzaD1UcnVlKQo='),'<fixed-strict-stage>','exec'))"], 'archiveComposeGuard': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'compose', '-f', 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.local.yml', 'ps', '--format', 'json'], 'stageArchive': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'cp', 'D:\\sabalanerp-online-qa\\C30-complete-final-plan-d1d83332c347419d91b66051adf39d81\\linux-material.tar', '42be8619ce4d91ff369578d74721b155f60b20f741d0796a1f12ff36aad37633:/app/runtime-authority/application-native-d1d83332c347419d91b66051adf39d81/material-input.tar'], 'unpackComposeGuard': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'compose', '-f', 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.local.yml', 'ps', '--format', 'json'], 'stageUnpack': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'exec', '-i', '42be8619ce4d91ff369578d74721b155f60b20f741d0796a1f12ff36aad37633', '/usr/bin/python3.11', '-I', '-B', '-c', "import base64;exec(compile(base64.b64decode('IiIiTmV3IGV4YWN0IHByaXZhdGUgc3RyaWN0IG1hdGVyaWFsIG9ubHksIGV4aXN0aW5nIGNhbmRpZGF0ZS4gTm8gYXBwL0RCL2d1YXJkaWFuLiIiIgppbXBvcnQgb3Msc3lzLHN0YXQsanNvbixoYXNobGliLHRhcmZpbGUscmUKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmRlZiBuZWVkKHYpOgogaWYgbm90IHY6cmFpc2UgQXNzZXJ0aW9uRXJyb3IoJ0xPQ0FMX1NUUklDVF9TVEFHSU5HX1JFRlVTRUQnKQpkZWYgaWRlbnRpdHkocyk6cmV0dXJuIHR1cGxlKGdldGF0dHIocyxrKWZvciBrIGluIFsnc3RfZGV2Jywnc3RfaW5vJywnc3RfbW9kZScsJ3N0X3VpZCcsJ3N0X25saW5rJywnc3Rfc2l6ZScsJ3N0X210aW1lX25zJywnc3RfY3RpbWVfbnMnXSkKZGVmIHNhZmUobmFtZSk6cmV0dXJuIGlzaW5zdGFuY2UobmFtZSxzdHIpYW5kIDA8bGVuKG5hbWUpPD00MDk2IGFuZCBub3QgbmFtZS5zdGFydHN3aXRoKCcvJylhbmQgJ1xcJ25vdCBpbiBuYW1lIGFuZCAnOidub3QgaW4gbmFtZSBhbmQgYWxsKHAgbm90IGluICgnJywnLicsJy4uJylmb3IgcCBpbiBuYW1lLnNwbGl0KCcvJykpCmRlZiBkaXJlY3RvcnkocCk6CiBzPXAubHN0YXQoKTtuZWVkKHAucmVzb2x2ZShzdHJpY3Q9VHJ1ZSk9PXAgYW5kIHN0YXQuU19JU0RJUihzLnN0X21vZGUpYW5kIHMuc3RfdWlkPT0wIGFuZCBub3Qgcy5zdF9tb2RlJjBvMDc3KTtyZXR1cm4ocy5zdF9kZXYscy5zdF9pbm8pCmRlZiBleGFjdF9wYXRoKHJvb3QscmVsYXRpdmUpOgogbmVlZChzYWZlKHJlbGF0aXZlKSk7Y3VycmVudD1yb290CiBmb3IgcGFydCBpbiByZWxhdGl2ZS5zcGxpdCgnLycpWzotMV06CiAgY3VycmVudD1jdXJyZW50L3BhcnQKICBpZiBub3QgY3VycmVudC5leGlzdHMoKTpjdXJyZW50Lm1rZGlyKG1vZGU9MG83MDApCiAgZGlyZWN0b3J5KGN1cnJlbnQpCiByZXR1cm4gcm9vdC9yZWxhdGl2ZQpkZWYgbmFtZXNwYWNlKHMpOnJldHVybiB7azpzdHIoZ2V0YXR0cihzLGspKWZvciBrIGluIFsnc3RfZGV2Jywnc3RfaW5vJywnc3RfdWlkJywnc3RfZ2lkJywnc3RfbW9kZScsJ3N0X25saW5rJywnc3Rfc2l6ZScsJ3N0X210aW1lX25zJywnc3RfY3RpbWVfbnMnXX0KZGVmIGluaXRpYWwob3BlcmF0aW9uLGV4cGVjdGVkX25hbWVzcGFjZSk6CiBuZWVkKHN5cy5wbGF0Zm9ybT09J2xpbnV4J2FuZCBvcy5nZXR1aWQoKT09MCBhbmQgcmUuZnVsbG1hdGNoKCdbYS1mMC05XXszMn0nLG9wZXJhdGlvbikpO2Jhc2U9UGF0aCgnL2FwcC9ydW50aW1lLWF1dGhvcml0eScpO2JlZm9yZT1kaXJlY3RvcnkoYmFzZSk7b3JpZ2luYWw9bmFtZXNwYWNlKGJhc2UubHN0YXQoKSk7bmVlZChvcmlnaW5hbD09ZXhwZWN0ZWRfbmFtZXNwYWNlIGFuZCBsaXN0KGJhc2UuaXRlcmRpcigpKT09W10pCiByb290PWJhc2UvKCdhcHBsaWNhdGlvbi1uYXRpdmUtJytvcGVyYXRpb24pO25lZWQobm90IHJvb3QuZXhpc3RzKCkpO3Jvb3QubWtkaXIobW9kZT0wbzcwMCk7c3RhZ2U9cm9vdC8nc3RyaWN0LWNvbXBsZXRlLW1hdGVyaWFsJztzdGFnZS5ta2Rpcihtb2RlPTBvNzAwKTtuZWVkKGRpcmVjdG9yeShiYXNlKT09YmVmb3JlIGFuZCBvcy5saXN0ZGlyKGJhc2UpPT1bcm9vdC5uYW1lXSkKIHJldHVybiB7J2Zvcm1hdCc6J3NhYmFsYW4tbG9jYWwtc3RyaWN0LW1hdGVyaWFsLXBhcmVudC92MScsJ29wZXJhdGlvbic6b3BlcmF0aW9uLCdyb290JzpzdHIocm9vdCksJ3N0YWdlJzpzdHIoc3RhZ2UpLCdyb290RGlyZWN0b3J5SWRlbnRpdHknOmxpc3QoZGlyZWN0b3J5KHJvb3QpKSwnc3RhZ2VEaXJlY3RvcnlJZGVudGl0eSc6bGlzdChkaXJlY3Rvcnkoc3RhZ2UpKSwnYXV0aG9yaXR5TmFtZXNwYWNlQmVmb3JlJzpvcmlnaW5hbCwnYXV0aG9yaXR5TmFtZXNwYWNlQWZ0ZXInOm5hbWVzcGFjZShiYXNlLmxzdGF0KCkpLCdhdXRob3JpdHlSb290SW5pdGlhbGx5RW1wdHknOlRydWUsJ2V4aXN0aW5nQWNjZXB0YW5jZUFjY2Vzc2VkJzpGYWxzZSwnYXBwU3RhcnRlZCc6RmFsc2UsJ2RhdGFiYXNlRXhlY3V0ZWQnOkZhbHNlLCdwcm9kdWN0aW9uQWRtaXNzaW9uJzpGYWxzZX0KZGVmIHVucGFjayhvcGVyYXRpb24sYXJjaGl2ZV9zaGEsbWFuaWZlc3Rfc2hhKToKIG5lZWQoc3lzLnBsYXRmb3JtPT0nbGludXgnYW5kIG9zLmdldHVpZCgpPT0wIGFuZCByZS5mdWxsbWF0Y2goJ1thLWYwLTldezMyfScsb3BlcmF0aW9uKWFuZCByZS5mdWxsbWF0Y2goJ1thLWYwLTldezY0fScsYXJjaGl2ZV9zaGEpYW5kIHJlLmZ1bGxtYXRjaCgnW2EtZjAtOV17NjR9JyxtYW5pZmVzdF9zaGEpKTtyb290PVBhdGgoJy9hcHAvcnVudGltZS1hdXRob3JpdHknKS8oJ2FwcGxpY2F0aW9uLW5hdGl2ZS0nK29wZXJhdGlvbik7c3RhZ2U9cm9vdC8nc3RyaWN0LWNvbXBsZXRlLW1hdGVyaWFsJztyPWRpcmVjdG9yeShyb290KTtkaXJlY3Rvcnkoc3RhZ2UpO25lZWQobGlzdChzdGFnZS5pdGVyZGlyKCkpPT1bXSkKIGFyY2hpdmU9cm9vdC8nbWF0ZXJpYWwtaW5wdXQudGFyJztmZD1vcy5vcGVuKGFyY2hpdmUsb3MuT19SRE9OTFl8b3MuT19OT0ZPTExPV3xvcy5PX05PTkJMT0NLKTtiZWZvcmU9b3MuZnN0YXQoZmQpO25lZWQoc3RhdC5TX0lTUkVHKGJlZm9yZS5zdF9tb2RlKWFuZCBiZWZvcmUuc3RfdWlkPT0wIGFuZCBiZWZvcmUuc3Rfbmxpbms9PTEgYW5kIDA8YmVmb3JlLnN0X3NpemU8PTUxMioxMDI0KioyKTtoPWhhc2hsaWIuc2hhMjU2KCk7Y291bnQ9MAogdHJ5OgogIHdoaWxlIHJhdzo9b3MucmVhZChmZCwyNjIxNDQpOmNvdW50Kz1sZW4ocmF3KTtuZWVkKGNvdW50PD01MTIqMTAyNCoqMik7aC51cGRhdGUocmF3KQogIG5lZWQoaC5oZXhkaWdlc3QoKT09YXJjaGl2ZV9zaGEgYW5kIGNvdW50PT1iZWZvcmUuc3Rfc2l6ZSBhbmQgaWRlbnRpdHkoYmVmb3JlKT09aWRlbnRpdHkob3MuZnN0YXQoZmQpKT09aWRlbnRpdHkoYXJjaGl2ZS5sc3RhdCgpKSk7b3MubHNlZWsoZmQsMCxvcy5TRUVLX1NFVCkKICB3aXRoIG9zLmZkb3Blbihvcy5kdXAoZmQpLCdyYicpYXMgc291cmNlLHRhcmZpbGUub3BlbihmaWxlb2JqPXNvdXJjZSxtb2RlPSdyfCcpYXMgdGFyOgogICBmaXJzdD10YXIubmV4dCgpO25lZWQoZmlyc3QgaXMgbm90IE5vbmUgYW5kIGZpcnN0Lm5hbWU9PSdzdGFnZS1tYW5pZmVzdC5qc29uJ2FuZCBmaXJzdC5pc2ZpbGUoKWFuZCAwPGZpcnN0LnNpemU8PTQqMTAyNCoqMik7cmF3PXRhci5leHRyYWN0ZmlsZShmaXJzdCkucmVhZCg0KjEwMjQqKjIrMSk7bmVlZChsZW4ocmF3KT09Zmlyc3Quc2l6ZSBhbmQgaGFzaGxpYi5zaGEyNTYocmF3KS5oZXhkaWdlc3QoKT09bWFuaWZlc3Rfc2hhKTttYW5pZmVzdD1qc29uLmxvYWRzKHJhdyk7bmVlZChzZXQobWFuaWZlc3QpPT17J2Zvcm1hdCcsJ29wZXJhdGlvbicsJ2ZpbGVzJ31hbmQgbWFuaWZlc3RbJ2Zvcm1hdCddPT0nc2FiYWxhbi1sb2NhbC1zdHJpY3QtbWF0ZXJpYWwtZmlsZXMvdjEnYW5kIG1hbmlmZXN0WydvcGVyYXRpb24nXT09b3BlcmF0aW9uIGFuZCBpc2luc3RhbmNlKG1hbmlmZXN0WydmaWxlcyddLGRpY3QpYW5kIDM8PWxlbihtYW5pZmVzdFsnZmlsZXMnXSk8PTUwMDAwKQogICBwbGFubmVkPW1hbmlmZXN0WydmaWxlcyddO25lZWQoYWxsKHNhZmUobmFtZSlhbmQgc2V0KHYpPT17J2J5dGVzJywnc2hhMjU2J31hbmQgdHlwZSh2WydieXRlcyddKWlzIGludCBhbmQgMDw9dlsnYnl0ZXMnXTw9NTEyKjEwMjQqKjIgYW5kIHJlLmZ1bGxtYXRjaCgnW2EtZjAtOV17NjR9Jyx2WydzaGEyNTYnXSlmb3IgbmFtZSx2IGluIHBsYW5uZWQuaXRlbXMoKSkpO25lZWQoJ3N0YWdlLW1hbmlmZXN0Lmpzb24nbm90IGluIHBsYW5uZWQpCiAgIHNwYWNlPW9zLnN0YXR2ZnMoc3RhZ2UpO25lZWQoc3BhY2UuZl9iYXZhaWwqc3BhY2UuZl9mcnNpemU+PXN1bSh4WydieXRlcyddZm9yIHggaW4gcGxhbm5lZC52YWx1ZXMoKSkrMTI0Mjk0NTY3Mis1MTIqMTAyNCoqMik7c2Vlbj1zZXQoKQogICBmb3IgZW50cnkgaW4gdGFyOgogICAgaWYgZW50cnkgaXMgZmlyc3Q6Y29udGludWUKICAgIG5hbWU9ZW50cnkubmFtZTtuZWVkKG5hbWUgaW4gcGxhbm5lZCBhbmQgbmFtZSBub3QgaW4gc2VlbiBhbmQgZW50cnkuaXNmaWxlKClhbmQgbm90IGVudHJ5Lmlzc3ltKClhbmQgbm90IGVudHJ5LmlzbG5rKClhbmQgZW50cnkuc2l6ZT09cGxhbm5lZFtuYW1lXVsnYnl0ZXMnXSk7c2Vlbi5hZGQobmFtZSk7dGFyZ2V0PWV4YWN0X3BhdGgoc3RhZ2UsbmFtZSk7b3V0PW9zLm9wZW4odGFyZ2V0LG9zLk9fUkRXUnxvcy5PX0NSRUFUfG9zLk9fRVhDTHxvcy5PX05PRk9MTE9XLDBvNDAwKTtoPWhhc2hsaWIuc2hhMjU2KCk7dG90YWw9MAogICAgdHJ5OgogICAgIGRhdGE9dGFyLmV4dHJhY3RmaWxlKGVudHJ5KQogICAgIHdoaWxlIGNodW5rOj1kYXRhLnJlYWQoMjYyMTQ0KToKICAgICAgdG90YWwrPWxlbihjaHVuayk7bmVlZCh0b3RhbDw9ZW50cnkuc2l6ZSk7aC51cGRhdGUoY2h1bmspO29mZnNldD0wCiAgICAgIHdoaWxlIG9mZnNldDxsZW4oY2h1bmspOndyaXR0ZW49b3Mud3JpdGUob3V0LGNodW5rW29mZnNldDpdKTtuZWVkKHdyaXR0ZW4+MCk7b2Zmc2V0Kz13cml0dGVuCiAgICAgbmVlZCh0b3RhbD09ZW50cnkuc2l6ZSBhbmQgaC5oZXhkaWdlc3QoKT09cGxhbm5lZFtuYW1lXVsnc2hhMjU2J10pO29zLmZzeW5jKG91dCk7cz1vcy5mc3RhdChvdXQpO25lZWQocy5zdF91aWQ9PTAgYW5kIHMuc3Rfbmxpbms9PTEgYW5kIHMuc3RfbW9kZT09MG8xMDA0MDAgYW5kIHMuc3Rfc2l6ZT09ZW50cnkuc2l6ZSk7b3MubHNlZWsob3V0LDAsb3MuU0VFS19TRVQpO2NoZWNrPWhhc2hsaWIuc2hhMjU2KCk7Y2hlY2tlZD0wCiAgICAgd2hpbGUgcGFydDo9b3MucmVhZChvdXQsMjYyMTQ0KTpjaGVja2VkKz1sZW4ocGFydCk7bmVlZChjaGVja2VkPD1lbnRyeS5zaXplKTtjaGVjay51cGRhdGUocGFydCkKICAgICBuZWVkKGNoZWNrZWQ9PWVudHJ5LnNpemUgYW5kIGNoZWNrLmhleGRpZ2VzdCgpPT1wbGFubmVkW25hbWVdWydzaGEyNTYnXWFuZCBpZGVudGl0eShzKT09aWRlbnRpdHkob3MuZnN0YXQob3V0KSk9PWlkZW50aXR5KHRhcmdldC5sc3RhdCgpKWFuZCB0YXJnZXQucmVzb2x2ZShzdHJpY3Q9VHJ1ZSk9PXRhcmdldCkKICAgIGZpbmFsbHk6b3MuY2xvc2Uob3V0KQogICBuZWVkKHNlZW49PXNldChwbGFubmVkKSk7bmVlZChpZGVudGl0eShvcy5mc3RhdChmZCkpPT1pZGVudGl0eShhcmNoaXZlLmxzdGF0KCkpPT1pZGVudGl0eShiZWZvcmUpKTtuZWVkKGRpcmVjdG9yeShyb290KT09cikKICByZXR1cm4geydmb3JtYXQnOidzYWJhbGFuLWxvY2FsLXN0cmljdC1tYXRlcmlhbC1zdGFnZWQvdjEnLCdvcGVyYXRpb24nOm9wZXJhdGlvbiwnYXJjaGl2ZVNoYTI1Nic6YXJjaGl2ZV9zaGEsJ21hbmlmZXN0U2hhMjU2JzptYW5pZmVzdF9zaGEsJ2ZpbGVzJzpsZW4oc2VlbiksJ2J5dGVzJzpzdW0oeFsnYnl0ZXMnXWZvciB4IGluIHBsYW5uZWQudmFsdWVzKCkpLCdzdGFnZSc6c3RyKHN0YWdlKSwnYXBwU3RhcnRlZCc6RmFsc2UsJ2RhdGFiYXNlRXhlY3V0ZWQnOkZhbHNlLCdwcm9kdWN0aW9uQWRtaXNzaW9uJzpGYWxzZX0KIGZpbmFsbHk6b3MuY2xvc2UoZmQpCmRlZiBjaXBoZXIob3BlcmF0aW9uLGV4cGVjdGVkX3NoYSxleHBlY3RlZF9ieXRlcyk6CiBuZWVkKHN5cy5wbGF0Zm9ybT09J2xpbnV4J2FuZCBvcy5nZXR1aWQoKT09MCBhbmQgcmUuZnVsbG1hdGNoKCdbYS1mMC05XXszMn0nLG9wZXJhdGlvbilhbmQgcmUuZnVsbG1hdGNoKCdbYS1mMC05XXs2NH0nLGV4cGVjdGVkX3NoYSlhbmQgdHlwZShleHBlY3RlZF9ieXRlcylpcyBpbnQgYW5kIDA8ZXhwZWN0ZWRfYnl0ZXM8PTE2KjEwMjQqKjMpO3Jvb3Q9UGF0aCgnL2FwcC9ydW50aW1lLWF1dGhvcml0eScpLygnYXBwbGljYXRpb24tbmF0aXZlLScrb3BlcmF0aW9uKTtzdGFnZT1yb290LydzdHJpY3QtY29tcGxldGUtbWF0ZXJpYWwnO2RpcmVjdG9yeShyb290KTtkaXJlY3Rvcnkoc3RhZ2UpO2ZpbGU9c3RhZ2UvJ3NvdXJjZS1jb21wbGV0ZS5yZXNlYWxlZCc7ZmQ9b3Mub3BlbihmaWxlLG9zLk9fUkRPTkxZfG9zLk9fTk9GT0xMT1d8b3MuT19OT05CTE9DSyk7YmVmb3JlPW9zLmZzdGF0KGZkKTtuZWVkKHN0YXQuU19JU1JFRyhiZWZvcmUuc3RfbW9kZSlhbmQgYmVmb3JlLnN0X3VpZD09MCBhbmQgYmVmb3JlLnN0X25saW5rPT0xIGFuZCBiZWZvcmUuc3Rfc2l6ZT09ZXhwZWN0ZWRfYnl0ZXMpO2g9aGFzaGxpYi5zaGEyNTYoKTtjb3VudD0wCiB0cnk6CiAgd2hpbGUgY2h1bms6PW9zLnJlYWQoZmQsMjYyMTQ0KTpjb3VudCs9bGVuKGNodW5rKTtuZWVkKGNvdW50PD1leHBlY3RlZF9ieXRlcyk7aC51cGRhdGUoY2h1bmspCiAgbmVlZChjb3VudD09ZXhwZWN0ZWRfYnl0ZXMgYW5kIGguaGV4ZGlnZXN0KCk9PWV4cGVjdGVkX3NoYSBhbmQgaWRlbnRpdHkoYmVmb3JlKT09aWRlbnRpdHkob3MuZnN0YXQoZmQpKT09aWRlbnRpdHkoZmlsZS5sc3RhdCgpKSk7b3MuZmNobW9kKGZkLDBvNDAwKTtvcy5mc3luYyhmZCk7YWZ0ZXI9b3MuZnN0YXQoZmQpO25lZWQoYWZ0ZXIuc3RfbW9kZT09MG8xMDA0MDAgYW5kIGFmdGVyLnN0X3VpZD09MCBhbmQgYWZ0ZXIuc3Rfbmxpbms9PTEgYW5kIGFmdGVyLnN0X2Rldj09YmVmb3JlLnN0X2RldiBhbmQgYWZ0ZXIuc3RfaW5vPT1iZWZvcmUuc3RfaW5vIGFuZCBpZGVudGl0eShhZnRlcik9PWlkZW50aXR5KGZpbGUubHN0YXQoKSkpCiAgcmV0dXJuIHsnZm9ybWF0Jzonc2FiYWxhbi1sb2NhbC1zdHJpY3QtY2lwaGVyLXN0YWdlZC92MScsJ29wZXJhdGlvbic6b3BlcmF0aW9uLCdmaWxlJzpzdHIoZmlsZSksJ3NoYTI1Nic6ZXhwZWN0ZWRfc2hhLCdieXRlcyc6ZXhwZWN0ZWRfYnl0ZXMsJ2FwcFN0YXJ0ZWQnOkZhbHNlLCdkYXRhYmFzZUV4ZWN1dGVkJzpGYWxzZSwncHJvZHVjdGlvbkFkbWlzc2lvbic6RmFsc2V9CiBmaW5hbGx5Om9zLmNsb3NlKGZkKQpkZWYgbWFpbigpOnJhaXNlIEFzc2VydGlvbkVycm9yKCdTT1VSQ0VfT1dORURfRklYRURfUEhBU0VfT05MWScpCgoKcHJpbnQoanNvbi5kdW1wcyh1bnBhY2soJ2QxZDgzMzMyYzM0NzQxOWQ5MWI2NjA1MWFkZjM5ZDgxJywnMzE3YzQyYWRmMjczYWFhZTI3ZGVmN2M4MDZhOGI5ODIzNTJkZjY5YTJlNGU0YzI0MGE1ZDVlYTZlNWYyODI0NScsJzExMDg0N2IyNzM1MGQ0MmRiMjM2ODFjNTk5YTAzYjJjMTcyMmRiZGU2YzU4NTc5OWU2Mjk3NzgyMjZlZjA2OTMnKSxzZXBhcmF0b3JzPSgnLCcsJzonKSksZmx1c2g9VHJ1ZSkK'),'<fixed-strict-stage>','exec'))"], 'stageCipherComposeGuard': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'compose', '-f', 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.local.yml', 'ps', '--format', 'json'], 'stageCipher': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'cp', 'D:\\sabalanerp-online-qa\\C30-complete-final-runtime-d1d83332c347419d91b66051adf39d81\\cipherDownload.stdout.raw', '42be8619ce4d91ff369578d74721b155f60b20f741d0796a1f12ff36aad37633:/app/runtime-authority/application-native-d1d83332c347419d91b66051adf39d81/strict-complete-material/source-complete.resealed'], 'verifyCipherComposeGuard': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'compose', '-f', 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.local.yml', 'ps', '--format', 'json'], 'localStrictComposeGuard': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'compose', '-f', 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.local.yml', 'ps', '--format', 'json'], 'localStrictRestore': ['C:/Program Files/nodejs/node.exe', '--max-old-space-size=512', 'D:\\sabalanerp-online-qa\\C30-complete-final-plan-d1d83332c347419d91b66051adf39d81\\windows\\controller.mjs'], 'localCleanupComposeGuard': ['C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'compose', '-f', 'C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.local.yml', 'ps', '--format', 'json']}, 'helperPins': {'memory_appkeys.py': '5951de8119dcc310ff3e96c0457111bf27cc51a64a4dafd1209547ff0894344e', 'backup_credential.py': '2d7114304b5b31647a91b4d6fdfaa281de6e4d3ddcfbec4be962ecd2f85b321d', 'appkey_delivery.py': '55ec1755e0baabfdce27fcd60655e29d91f570dcf4e733a97193e27e9d0bd3b9', 'backup_material.py': '5217dfaf53e5aed577925ac385a37c41008098b81808798c40bed9d3606411cb', 'terminal_cleanup.py': '751f962033c1cb30dfd89dfada04474822a5a899454b90e388e83f9388b2be83', 'terminal_local.py': '052edee21768d887c158a01a3ad174fcb1067af89b5be118174cd391cdb244f3'}, 'applicationKeyRuntimeSpec': {'file': 'D:\\sabalanerp-online-qa\\C30-complete-final-plan-d1d83332c347419d91b66051adf39d81\\windows\\application-key-runtime-spec.json', 'sha256': 'c574941ce196a0d28c3b7212b64d56f42fed8927bd774d7a7b4371357e9b71ed'}, 'applicationKeyBinding': {'operation': 'd1d83332c347419d91b66051adf39d81', 'captureReceiptSha256': 'dd51cb81045022b97986ac0f24d0979d181c5a68ac85dbba207b9329aa6f6534', 'postCaptureStateSha256': '8000a607e130d32a774ac7f907f9cf73cc7a2f15cf5bcf4db7a4db04352b453d', 'sourceEnvironmentSha256': 'c40b5cb87d0a70a827303adc6f886a421e53bd8e7b5d3a2e3bc5d5254ce944e7'}, 'windowsNode': {'file': 'C:/Program Files/nodejs/node.exe', 'sha256': '364dbc8442f8d5c04fd4226bcfcf8e60d3268627eb1d7be214a91bb7d74cdbb9', 'bytes': 83208848}, 'windowsPython': {'file': 'C:/Users/mahan/AppData/Local/Programs/Python/Python314/python.exe', 'sha256': '7ca24f26d6e3f463419ee4f537ddd3acd312c38fe45e678cce08572f26a8bd1a', 'bytes': 106328}, 'privateOutput': 'D:\\sabalanerp-online-qa\\C30-complete-final-runtime-d1d83332c347419d91b66051adf39d81\\financial-evidence', 'candidateContainerId': '42be8619ce4d91ff369578d74721b155f60b20f741d0796a1f12ff36aad37633', 'executionImage': 'sha256:327e1a686b8446ade7205b7a36fc401e510cd5f4b5e2e27e154424c535cb0fa3', 'dockerExecutable': 'C:/Users/mahan/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe', 'linuxPython': '/usr/bin/python3.11', 'localContainerIds': {'backend': 'a1ea34a8d7d878b906fba7b4fdbe975df13a6b00d63a863eacce34b9827e86ff', 'backend-candidate': '42be8619ce4d91ff369578d74721b155f60b20f741d0796a1f12ff36aad37633', 'backend-retained': '483a0b24a76e1cb6fedc4e435fdc77dfd25c2f622aebf7f0324c0864fb89d9cc', 'clamav': '4416d3bb85fa7a7fd4365a670ee3519a0ce2430b7a985ff19f7765d807e6c379', 'frontend': 'ad23f762dc1b27d2be76c335a3d7a4e20d08832a9a2e055904a4af84a9248c21', 'frontend-candidate': '7a4e3dc2ab52aa134b804c99236f6238ee2510dfaf76be4dd78e1d06f7173678', 'frontend-retained': '41d55c7e6efea2bb859166ce7f756fdd2b94d362378cbc660a7709f731b30dd5', 'inquiry': '6d161695e215498048ff24e56e9602ce77871bfb6b390bf1356caecfdf9807d8', 'postgres': 'e553787e69f44c7bdf7dab94fad43a231f5ba99d988dc783234486a5a844a528', 'redis': '23d38a0d5c7bcbd0d484b2bacc9c02683b2fca74c8bb138a7739f5c4eab2ab12'}, 'localComposeIds': {'backend': 'a1ea34a8d7d8', 'backend-candidate': '42be8619ce4d', 'backend-retained': '483a0b24a76e', 'clamav': '4416d3bb85fa', 'frontend': 'ad23f762dc1b', 'frontend-candidate': '7a4e3dc2ab52', 'frontend-retained': '41d55c7e6efe', 'inquiry': '6d161695e215', 'postgres': 'e553787e69f4', 'redis': '23d38a0d5c7b'}, 'authorityNamespace': {'st_dev': '2112', 'st_ino': '838435', 'st_uid': '0', 'st_gid': '0', 'st_mode': '16832', 'st_nlink': '2', 'st_size': '4096', 'st_mtime_ns': '1792906644601598204', 'st_ctime_ns': '1792906644601598204'}, 'stageReceiver': {'file': 'D:\\sabalanerp-online-qa\\C30-local-strict-material-staging-source-r2-fresh-authority-cohort-20261025\\receiver.py', 'sha256': '1a5afe9e105b902d8bfa113a4b9aa3006877bfe497d265a1b9bd9d962f953ee1'}, 'localMaterialArchive': {'file': 'D:\\sabalanerp-online-qa\\C30-complete-final-plan-d1d83332c347419d91b66051adf39d81\\linux-material.tar', 'bytes': 157593600, 'sha256': '317c42adf273aaae27def7c806a8b982352df69a2e4e4c240a5d5ea6e5f28245', 'manifestSha256': '110847b27350d42db23681c599a03b2c1722dbde6c585799e629778226ef0693', 'files': 6626}, 'operationOutput': 'D:\\sabalanerp-online-qa\\C30-complete-final-runtime-d1d83332c347419d91b66051adf39d81', 'finalReviewedValidator': {'file': 'D:\\sabalanerp-online-qa\\C30-complete-final-plan-d1d83332c347419d91b66051adf39d81\\windows\\final-validator.py', 'sha256': '2c426f6720a54b525f5c0d93d02865757f086435a284c0c0f127b65c317337ed'}}
+Q=pathlib.Path('D:/sabalanerp-online-qa')
+def digest(raw):return hashlib.sha256(raw).hexdigest()
+def file_sha(path):
+ h=hashlib.sha256()
+ with open(path,'rb')as stream:
+  while chunk:=stream.read(65536):h.update(chunk)
+ return h.hexdigest()
+def save(path,value):
+ raw=(json.dumps(value,indent=2)+'\n').encode();fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_BINARY',0),0o600)
+ with os.fdopen(fd,'wb')as f:f.write(raw);f.flush();os.fsync(f.fileno())
+ return {'file':str(path),'sha256':digest(raw)}
+def read(ref):
+ p=pathlib.Path(ref['file']);before=p.lstat();assert p.is_absolute()and p.resolve(strict=True)==p and p.is_file()and not p.is_symlink()and before.st_nlink==1 and 0<before.st_size<=16*1024**2
+ raw=p.read_bytes();after=p.lstat();assert tuple(getattr(before,k)for k in ['st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns','st_nlink'])==tuple(getattr(after,k)for k in ['st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns','st_nlink'])and digest(raw)==ref['sha256'];return json.loads(raw)
+def validate_bound_inputs(binding):
+ global _FINAL_VALIDATED_INPUT
+ # A future immutable renderer must fill literal source-owned refs/commands and
+ # be independently reviewed; an arbitrary caller flag cannot activate main.
+ assert binding is not None,'UNRESOLVED_GENUINE_CAPTURE_AND_RUNTIME_BINDING'
+ assert binding is BOUND_SOURCE_INPUTS,'EXACT_SOURCE_OWNED_BINDING_REQUIRED'
+ assert binding['format']=='sabalan-owned-complete-transfer-restore-input/v1'
+ assert binding['composeProject']=='sabalanerp-local' and binding['runtimeAdmissionClaimed']is False
+ required=['capture','sourceLedger','sourceLedgerOriginal','postCaptureState','applicationKeyCustody','localAlternateDatabaseEntry','strictEngineSource','qaCallbackSource','phaseCommands']
+ assert all(binding.get(k)for k in required),'UNRESOLVED_SOURCE_OR_SECRET_CUSTODY'
+ for k in required[:-1]:read(binding[k])
+ assert set(binding['phaseCommands'])=={'initialComposeGuard','stageInitial','archiveComposeGuard','stageArchive','unpackComposeGuard','stageUnpack','stageCipherComposeGuard','stageCipher','localStrictComposeGuard','localStrictRestore','localCleanupComposeGuard','verifyCipherComposeGuard'}
+ assert set(binding.get('helperPins',{}))=={'memory_appkeys.py','backup_credential.py','appkey_delivery.py','backup_material.py','terminal_cleanup.py','terminal_local.py'}
+ assert all(binding.get(k)for k in ['applicationKeyRuntimeSpec','windowsNode','windowsPython'])
+ # Full actualcapture/ledger/postcapture/EXFD9 validators must be source-bound
+ # by the final immutable producer before any runtime binding can be published.
+ assert binding.get('finalReviewedValidator')is not None,'UNRESOLVED_FINAL_SOURCE_VALIDATOR'
+ validator=pathlib.Path(binding['finalReviewedValidator']['file']);assert file_sha(validator)==binding['finalReviewedValidator']['sha256'];fingerprint=digest(json.dumps(binding,sort_keys=True,separators=(',',':')).encode())
+ if _FINAL_VALIDATED_INPUT is not None:
+  assert _FINAL_VALIDATED_INPUT[0]is binding and _FINAL_VALIDATED_INPUT[1]==fingerprint;return
+ import runpy;assert runpy.run_path(str(validator),run_name='source_bound_revalidator')['validate'](binding)is True
+ _FINAL_VALIDATED_INPUT=(binding,fingerprint)
+class CompleteRestoreOwner:
+ def __init__(self,directory):
+  self.directory=pathlib.Path(directory);self.interrupted=False;self.cancellations=[];self.children=[];self._handlers={}
+  for sig in [signal.SIGINT,signal.SIGTERM]:
+   self._handlers[sig]=signal.getsignal(sig);signal.signal(sig,self._cancel)
+ def _cancel(self,sig,_frame):self.interrupted=True;self.cancellations.append(int(sig))
+ def close(self):
+  for sig,handler in self._handlers.items():signal.signal(sig,handler)
+ def run_original(self,argv,phase,secret_input=b'',maximum_stdout=8*1024**2,redact_password=None):
+  assert phase in ('windowsReadiness','initialComposeGuard','stageInitial','archiveComposeGuard','stageArchive','unpackComposeGuard','stageUnpack','backupPrepare','backupReseal','cipherDownload','localStrictRestore','backupCleanup','localCleanupComposeGuard','localCleanup','appkeyDelivery','appkeySourceAcl','credentialIdentity','credentialAcl','stageCipherComposeGuard','localStrictComposeGuard','stageCipher','verifyCipherComposeGuard','verifyCipher')and isinstance(secret_input,bytes)
+  assert not self.interrupted,'PRIOR_CANCELLATION_STICKY'
+  # Never put body/secret in argv, environment, intent, closure or inputBase64.
+  assert not secret_input or all(secret_input.decode('ascii',errors='ignore')not in str(a)for a in argv)
+  assert redact_password is None or(isinstance(redact_password,bytes)and 0<len(redact_password)<=1024 and phase in ('backupPrepare','backupReseal','cipherDownload','backupCleanup'))
+  out_path=self.directory/(phase+'.stdout.raw');err_path=self.directory/(phase+'.stderr.raw');faults=[];facts={'stdoutEof':False,'stderrEof':False,'stdoutBytes':0,'stderrBytes':0};child=None;reader=None
+  redaction_tails={'stdout':b'','stderr':b''};redaction_seen=False
+  fault_counts={};fault_total=0;fault_log_overflow=False;retry_pause=Event();fault_lock=Lock()
+  def fault(error):
+   nonlocal fault_total,fault_log_overflow
+   name=error if isinstance(error,str)else type(error).__name__
+   # Saturated counts and at most32 distinct labels keep even a permanently
+   # unobservable original retained without an unbounded error-history heap.
+   limit=2**53-1
+   with fault_lock:
+    if fault_total<limit:fault_total+=1
+    else:fault_log_overflow=True
+    if name in fault_counts:
+     if fault_counts[name]<limit:fault_counts[name]+=1
+     else:fault_log_overflow=True
+    elif len(fault_counts)<32:fault_counts[name]=1;faults.append(name)
+    else:fault_log_overflow=True
+   # No retry signals the child or closes its output handles. Repeated OS
+   # read/write/thread errors hold this original with bounded retry frequency.
+   if not isinstance(error,str):retry_pause.wait(.05)
+  def finish(operation):
+   # Finalization faults remain sticky even after this actual child has closed.
+   # Preserve its raw handles until the same operation really succeeds.
+   while True:
+    try:return operation()
+    except BaseException as error:fault(error)
+  def output_bytes(stream,raw,final=False):
+   nonlocal redaction_seen
+   # Cipher stdout is already encrypted and must remain byte-exact. Textual
+   # output may never persist a password, including a split chunk boundary.
+   if redact_password is None or(stream=='stdout'and phase=='cipherDownload'):return raw
+   data=redaction_tails[stream]+raw
+   if redact_password in data:
+    redaction_seen=True;fault('PASSWORD_OUTPUT_REDACTED')
+    while redact_password in data:data=data.replace(redact_password,b'')
+   keep=0 if final else min(len(data),len(redact_password)-1)
+   redaction_tails[stream]=data[-keep:]if keep else b''
+   return data[:-keep]if keep else data
+  def close_input():
+   if child is not None and child.stdin is not None:
+    while True:
+     try:child.stdin.close();break
+     except BaseException as error:fault(error)
+    child.stdin=None
+  with open(out_path,'xb')as out,open(err_path,'xb')as err:
+   def pump_stderr():
+    while True:
+     try:chunk=child.stderr.read(65536)
+     except BaseException as error:fault(error);close_input();continue
+     if not chunk:
+      facts['stderrEof']=True;tail=output_bytes('stderr',b'',True);finish(lambda:err.write(tail));break
+     facts['stderrBytes']+=len(chunk)
+     if facts['stderrBytes']<=1024**2:
+      try:err.write(output_bytes('stderr',chunk))
+      except BaseException as error:fault(error);close_input()
+     else:fault('STDERR_BOUND_EXCEEDED');close_input()
+    try:err.flush();os.fsync(err.fileno())
+    except BaseException as error:fault(error)
+   try:
+    child=subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt'else 0)
+    # The encompassing try begins before the first reader start/write. If
+    # either fails this SAME child remains here until actual wait+both EOF.
+    reader=threading.Thread(target=pump_stderr,daemon=False);reader.start()
+    if self.interrupted:close_input()
+    elif secret_input:
+     written=child.stdin.write(secret_input);assert written==len(secret_input);child.stdin.flush()
+    close_input()
+    while True:
+     try:chunk=child.stdout.read(65536)
+     except BaseException as error:fault(error);close_input();continue
+     if not chunk:
+      facts['stdoutEof']=True;tail=output_bytes('stdout',b'',True);finish(lambda:out.write(tail));break
+     facts['stdoutBytes']+=len(chunk)
+     if facts['stdoutBytes']<=maximum_stdout:
+      try:out.write(output_bytes('stdout',chunk))
+      except BaseException as error:fault(error);close_input()
+     else:fault('STDOUT_BOUND_EXCEEDED');close_input()
+    while True:
+     try:code=child.wait();reader.join();break
+     except BaseException as error:fault(error)
+   except BaseException as error:
+    fault(error);close_input()
+    if child is None:raise
+    if reader is not None and reader.ident is not None:
+     while not facts['stdoutEof']:
+      try:
+       chunk=child.stdout.read(65536)
+       if not chunk:
+        facts['stdoutEof']=True;tail=output_bytes('stdout',b'',True);finish(lambda:out.write(tail));break
+       facts['stdoutBytes']+=len(chunk)
+       if facts['stdoutBytes']<=maximum_stdout:out.write(output_bytes('stdout',chunk))
+      except BaseException as e:fault(e)
+     while True:
+      try:code=child.wait();reader.join();break
+      except BaseException as e:fault(e)
+    else:
+     # A failed reader start does not authorize buffering a multi-GiB encrypted
+     # stream in communicate(). Retain this SAME original until its concurrent
+     # stderr reader really starts, then drain stdout with the existing bound.
+     while True:
+      try:
+       reader=threading.Thread(target=pump_stderr,daemon=False);reader.start();break
+      except BaseException as e:
+       fault(e)
+       if reader is not None and reader.ident is not None:break
+     while not facts['stdoutEof']:
+      try:
+       chunk=child.stdout.read(65536)
+       if not chunk:
+        facts['stdoutEof']=True;tail=output_bytes('stdout',b'',True);finish(lambda:out.write(tail));break
+       facts['stdoutBytes']+=len(chunk)
+       if facts['stdoutBytes']<=maximum_stdout:out.write(output_bytes('stdout',chunk))
+       else:fault('STDOUT_BOUND_EXCEEDED')
+      except BaseException as e:fault(e)
+     while True:
+      try:code=child.wait();reader.join();break
+      except BaseException as e:fault(e)
+   finish(child.stdout.close);finish(child.stderr.close)
+   finish(out.flush);finish(lambda:os.fsync(out.fileno()));finish(err.flush);finish(lambda:os.fsync(err.fileno()))
+   finish(out.close);finish(err.close)
+  stdout_sha=finish(lambda:file_sha(out_path));stderr_sha=finish(lambda:file_sha(err_path))
+  row={'format':'sabalan-secret-stdin-original-closure/v1','phase':phase,'originalPid':child.pid,'code':code,'signal':-code if code<0 else None,**facts,
+   'observationFaults':faults,'observationFaultCounts':fault_counts,'observationFaultTotal':fault_total,'observationFaultLogOverflow':fault_log_overflow,'localInterrupted':self.interrupted,'cancellations':list(self.cancellations),'stdinBodyStored':False,'stdinSecretStored':False,
+   'stdout':{'file':str(out_path),'sha256':stdout_sha},'stderr':{'file':str(err_path),'sha256':stderr_sha},
+   'passwordOutputRedacted':redaction_seen,'storedStreamHashesAreActualUnredactedBytes':not redaction_seen,'productionAdmission':False}
+  # Preserve durable actual closure even when final receipt I/O fails after
+  # real child EOF. Retry the SAME exclusively held file, never its pathname.
+  def persist_record(name,record):
+   receipt=self.directory/name
+   fd=finish(lambda:os.open(receipt,os.O_RDWR|os.O_CREAT|os.O_EXCL|getattr(os,'O_BINARY',0),0o600));held=os.fstat(fd)
+   try:
+    while True:
+     try:
+      record.update(observationFaultTotal=fault_total,observationFaultLogOverflow=fault_log_overflow,localInterrupted=self.interrupted,cancellations=list(self.cancellations))
+      raw=(json.dumps(record,indent=2)+'\n').encode();assert len(raw)<=1024**2
+      named=receipt.lstat();assert (held.st_dev,held.st_ino,held.st_nlink)==(named.st_dev,named.st_ino,named.st_nlink)and not receipt.is_symlink()
+      os.lseek(fd,0,os.SEEK_SET);offset=0
+      while offset<len(raw):
+       count=os.write(fd,raw[offset:]);assert count>0;offset+=count
+      os.ftruncate(fd,len(raw));os.fsync(fd);os.lseek(fd,0,os.SEEK_SET);readback=b''
+      while part:=os.read(fd,65536):readback+=part;assert len(readback)<=1024**2
+      assert readback==raw;break
+     except BaseException as error:fault(error)
+    ref={'file':str(receipt),'sha256':digest(raw)}
+   finally:finish(lambda:os.close(fd))
+   return ref
+  ref=persist_record(phase+'.original-closed.json',row)
+  self.children.append(ref)
+  if fault_total>row['observationFaultTotal']:
+   negative={'format':'sabalan-original-receipt-finalization-negative/v1','phase':phase,'originalPid':child.pid,'primaryClosure':ref,'actualChildClosed':True,'primaryReceiptDescriptorClosed':True,'observationFaults':faults,'observationFaultCounts':fault_counts,'productionAdmission':False}
+   self.children.append(persist_record(phase+'.receipt-finalization-negative.json',negative))
+  assert code==0 and row['signal']is None and facts['stdoutEof']and facts['stderrEof']and not faults and not self.interrupted,'ORIGINAL_NEGATIVE_OR_INTERRUPTED_RETAINED'
+  return row
+ def execute_complete_flow(self,binding,backup_password):
+  validate_bound_inputs(binding)
+  # Every helper is a fixed sibling; no caller module or application key value
+  # can be supplied as an authority override. Final source binds these hashes.
+  helpers={}
+  for name in ['memory_appkeys','backup_credential','appkey_delivery','backup_material','terminal_cleanup']:
+   file=pathlib.Path(__file__).with_name(name+'.py');assert file_sha(file)==binding['helperPins'][name+'.py']
+   spec=importlib.util.spec_from_file_location('fixed_'+name,file);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);helpers[name]=module
+  secret=bytearray(secrets.token_urlsafe(48).encode('ascii'))
+  recipient=helpers['memory_appkeys'].MemoryRecipient();application_keys=None
+  try:
+   # Source-owned fresh cohort is established before secret/key/backup work.
+   initial=None
+   for phase in ['initialComposeGuard','stageInitial','archiveComposeGuard','stageArchive','unpackComposeGuard','stageUnpack']:
+    staged=self.run_original(binding['phaseCommands'][phase],phase)
+    if phase.endswith('ComposeGuard'):helpers['terminal_cleanup'].validate_compose_guard(staged,binding)
+    if phase=='stageInitial':
+     initial=json.loads(pathlib.Path(staged['stdout']['file']).read_bytes());helpers['terminal_cleanup'].validate_initial(initial,binding)
+   assert initial is not None
+   command,output,spec_sha,remote_sha=helpers['appkey_delivery'].materialize(self,binding,recipient.public_pem)
+   delivery=self.run_original(command,'appkeyDelivery',maximum_stdout=65536)
+   envelope=helpers['appkey_delivery'].delivered(json.loads(pathlib.Path(delivery['stdout']['file']).read_bytes()),output,spec_sha,remote_sha)
+   application_keys=recipient.open(envelope,binding['applicationKeyBinding'])
+   operation=binding['applicationKeyBinding']['operation'];backup_plan=helpers['backup_material'].build(operation)
+   with helpers['backup_credential'].private_backup_password(self,backup_password)as password_file:
+    material=self.run_original(helpers['backup_credential'].plink_argv(password_file,backup_plan['prepareRemoteCommand']),'backupPrepare',backup_plan['materialFrame'],redact_password=backup_password.encode('utf8'))
+    prepared_value=json.loads(pathlib.Path(material['stdout']['file']).read_bytes());transfer_file=helpers['backup_material'].prepared(prepared_value,backup_plan,operation)
+    first=self.run_original(helpers['backup_credential'].plink_argv(password_file,backup_plan['resealRemoteCommand']),'backupReseal',bytes(secret),redact_password=backup_password.encode('utf8'))
+    transfer=json.loads(pathlib.Path(first['stdout']['file']).read_bytes());assert transfer['format']=='sabalan-independent-complete-transfer-content/v1'and transfer['privateRsaExported']is False and transfer['transferPassphraseStored']is False
+    assert transfer['operation']==operation and transfer['cipherFile']==transfer_file and transfer['sourceCipherSha256']==backup_plan['sourceCipherSha256']and transfer['sourceCipherBytes']==backup_plan['sourceCipherBytes']
+    assert transfer['fullGcmAuthenticated']is True and transfer['plaintextIdentityProvenance']=='ORIGINAL_AUTHENTICATED_DECRYPT'and transfer['publishedPlaintextDigestClaimed']is False
+    download='exec cat -- '+shlex.quote(transfer_file)
+    second=self.run_original(helpers['backup_credential'].plink_argv(password_file,download),'cipherDownload',maximum_stdout=transfer['cipherBytes'],redact_password=backup_password.encode('utf8'))
+    assert second['stdoutBytes']==transfer['cipherBytes']and second['stdout']['sha256']==transfer['cipherSha256']
+    for phase in ['stageCipherComposeGuard','stageCipher','verifyCipherComposeGuard']:
+     row=self.run_original(binding['phaseCommands'][phase],phase)
+     if phase.endswith('ComposeGuard'):
+      text=pathlib.Path(row['stdout']['file']).read_text()
+      try:rows=json.loads(text);rows=rows if isinstance(rows,list)else[rows]
+      except ValueError:rows=[json.loads(line)for line in text.splitlines()if line.strip()]
+      assert len(rows)==10 and {r['Service']:r['ID']for r in rows}==binding['localComposeIds']and all(r['Project']=='sabalanerp-local'and r['State']=='running'and r['Health']=='healthy'for r in rows)
+    verified=self.run_original(helpers['terminal_cleanup'].cipher_command(binding,transfer),'verifyCipher')
+    helpers['terminal_cleanup'].validate_cipher(verified,binding,transfer)
+    current_guard=self.run_original(binding['phaseCommands']['localStrictComposeGuard'],'localStrictComposeGuard');helpers['terminal_cleanup'].validate_compose_guard(current_guard,binding)
+    body=json.dumps({'passphrase':secret.decode('ascii'),'applicationKeys':application_keys},separators=(',',':')).encode()
+    third=self.run_original(binding['phaseCommands']['localStrictRestore'],'localStrictRestore',body)
+    value=json.loads(pathlib.Path(third['stdout']['file']).read_bytes());assert value['strictCompleteValidationSucceeded']is True and value['databaseAbsent']is True and value['productionAdmission']is False
+    assert not self.interrupted
+    qualification,pins=helpers['terminal_cleanup'].validated_qualification(value,binding,self.directory)
+    # Failed FULL never enters retirement; all incident evidence stays held.
+    local_command=helpers['terminal_cleanup'].local_command(binding,pins,initial)
+    guard=self.run_original(binding['phaseCommands']['localCleanupComposeGuard'],'localCleanupComposeGuard')
+    helpers['terminal_cleanup'].validate_compose_guard(guard,binding)
+    local_retired=self.run_original(local_command,'localCleanup')
+    helpers['terminal_cleanup'].validate_local_retired(local_retired,operation)
+    backup_command=helpers['backup_material'].cleanup_command(operation,prepared_value,transfer)
+    backup_retired=self.run_original(helpers['backup_credential'].plink_argv(password_file,backup_command),'backupCleanup',redact_password=backup_password.encode('utf8'))
+    helpers['terminal_cleanup'].validate_backup_retired(backup_retired,operation)
+    assert not self.interrupted
+   # SAME credential file finally retired after all plink/Docker originals.
+   windows_retired=helpers['terminal_cleanup'].retire_windows_inputs(binding,second,transfer,self.directory);save(self.directory/'windows-inputs-retired.json',windows_retired)
+   return {'format':'sabalan-owned-complete-transfer-strict-restore/v1','children':list(self.children),'strictCompleteValidationSucceeded':True,'protectedFinancialQualification':qualification,'temporaryTransferRetired':True,'localJobRetired':True,'outerOriginalClosurePending':True,'productionAdmission':False}
+  finally:
+   recipient.close()
+   if application_keys is not None:application_keys.clear()
+   for i in range(len(secret)):secret[i]=0
+
+def read_master_private_credential(operation):
+ import re
+ assert re.fullmatch(r'[a-f0-9]{32}',operation)
+ print(json.dumps({'format':'sabalan-r9-master-private-credential-ready/v1','operation':operation,'credentialsRead':False,'productionAdmission':False}),flush=True)
+ raw=bytearray(sys.stdin.buffer.readline(16385))
+ try:
+  assert 0<len(raw)<=16384 and raw.endswith(b'\n')
+  assert sys.stdin.buffer.read(1)==b''
+  frame=json.loads(raw)
+  assert isinstance(frame,dict) and set(frame)=={'format','operation','credential'}
+  assert frame['format']=='sabalan-r9-master-private-credential/v1' and frame['operation']==operation
+  credential=frame['credential']
+  assert isinstance(credential,str) and 0<len(credential.encode('utf-8'))<=4096 and '\x00'not in credential
+  frame.clear()
+  return credential
+ finally:
+  for i in range(len(raw)):raw[i]=0
+
+def main():
+ assert not sys.flags.optimize;parser=argparse.ArgumentParser();parser.add_argument('--execute-reviewed',required=True,choices=['yes']);parser.add_argument('--master-private-credential-stdin',choices=['yes']);args=parser.parse_args();validate_bound_inputs(BOUND_SOURCE_INPUTS)
+ import runpy,getpass
+ producer=runpy.run_path('D:\\sabalanerp-online-qa\\C30-strict-complete-actual-plan-source-r9-full-capsule-observer-20261025\\prepare.py',run_name='fixed_private_runtime_creator');directory=pathlib.Path(BOUND_SOURCE_INPUTS['operationOutput']);assert not directory.exists();acl=producer['private_output'](directory);save(directory/'private-acl-original.json',acl)
+ owner=CompleteRestoreOwner(directory);password=None
+ try:
+  readiness={'file': 'D:\\sabalanerp-online-qa\\C30-complete-final-plan-d1d83332c347419d91b66051adf39d81\\windows\\windows-readiness.mjs', 'sha256': '0c562a6fc319c198182fe7e9d77eda9bd7fbdc25df8f379aa9d280555d81e12a'};assert file_sha(pathlib.Path(readiness['file']))==readiness['sha256']
+  readiness_row=owner.run_original([BOUND_SOURCE_INPUTS['windowsNode']['file'],'--max-old-space-size=512',readiness['file']],'windowsReadiness')
+  assert pathlib.Path(readiness_row['stderr']['file']).read_bytes()==b''
+  assert json.loads(pathlib.Path(readiness_row['stdout']['file']).read_bytes())=={'format':'sabalan-fixed-controller-windows-readiness/v1','callersChecked':3,'keyAccessed':False,'credentialsRead':False,'nativeActionsExecuted':False,'productionAdmission':False}
+  password=read_master_private_credential('d1d83332c347419d91b66051adf39d81') if args.master_private_credential_stdin=='yes' else getpass.getpass('Private SSH credential: ');assert password
+  result=owner.execute_complete_flow(BOUND_SOURCE_INPUTS,password);ref=save(directory/'result.json',result);print(json.dumps({'file':ref['file'],'sha256':ref['sha256'],'strictCompleteValidationSucceeded':True,'outerOriginalClosurePending':True,'productionAdmission':False}))
+ finally:
+  password=None;owner.close()
+if __name__=='__main__':main()

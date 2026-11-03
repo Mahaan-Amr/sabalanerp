@@ -111,7 +111,8 @@ function validateOriginalMainHttpOwner(entry,grant,index,status){
 
 /** Diagnostic only. The private key and both original Docker-exec handles never
  * leave this closure. There is deliberately no public arbitrary signer. */
-export function createOriginalRoleCoordinator({directory,topology,fileHashes,retainedBrowserCompletion,originalServiceIdentities,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile=null,localDevSuspension,onHeld=()=>{}}){
+export function createOriginalRoleCoordinator({directory,topology,fileHashes,retainedBrowserCompletion,originalServiceIdentities,independentOptions,sameComposePhysicalCallbacks,localQualificationMode='ONLINE_POINT',nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile=null,localDevSuspension,onHeld=()=>{}}){
+ assert.ok(['ONLINE_POINT','PROTECTED_COMPLETE'].includes(localQualificationMode));
   assert.match(directory,/^\/app\/online-runtime-acceptance\/application-native-[a-f0-9]{32}$/);
   const retained=retainedBrowserCompletion?readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion):null;assert.deepEqual(localDevSuspension??null,retained?.report.localDevSuspension??null,'ORIGINAL_RETAINED_SUSPENSION_SELECTION_REQUIRED');
   for(const role of ['main','candidate']){
@@ -518,13 +519,14 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
         }return;
       }
       if(body.command==='RUN_ORIGINAL_ONLINE_CHECKPOINT'){
+        assert.equal(localQualificationMode,'ONLINE_POINT','PROTECTED_COMPLETE_HAS_NO_PHYSICAL_PREREQUISITE');
         same(body.input,{});assertLegacyReady();assert.ok(independentOptions&&nativeOwnerElfReceipt&&legacyRestoration&&originalOnlineInquiry&&!localOnlineOwner);
         assert.ok(completedPhases.has('PRIVATE_LEGACY_BROWSER_TICKETS_VERIFIED'));
         pending={requestId:body.requestId,expected:'ORIGINAL_ONLINE_CHECKPOINT_DONE',kind:'local-online-checkpoint'};
         void (async()=>{
           if(!localCrypto)localCrypto=await createOriginalLocalCheckpointCrypto({localDevSuspension,directory,topology,scratch:'D:/sabalanerp-online-qa/original-crypto-'+randomBytes(16).toString('hex')});
           const capturePlan=originalController.prepareOriginalLocalOnlineCapturePlan();
-          localOnlineOwner=await createOriginalLocalOnlineCheckpoint({capturePlan,coordinator:originalController,cryptoExecutor:localCrypto,independentOptions,nativeOwnerElfReceipt});
+          localOnlineOwner=await createOriginalLocalOnlineCheckpoint({capturePlan,coordinator:originalController,cryptoExecutor:localCrypto,independentOptions,sameComposePhysicalCallbacks,nativeOwnerElfReceipt});
           const point=await localOnlineOwner.point();await localOnlineOwner.tick();localOnlineCompletion=await localOnlineOwner.finishPointOnlyQualification();
           const completion=readOriginalLocalOnlineCheckpointCompletion(localOnlineCompletion),raw=Buffer.from(JSON.stringify(completion));
           const result={format:completion.format,operation:completion.operation,productionAdmission:false,continuousWalQualified:false,finalIntervalCompletion:false,
@@ -674,7 +676,8 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
     finishOriginalQualification:()=>{
       same(held,null);same(pending,null);same(roles.size,2);
       assert.ok(!localCrypto||localCryptoClosed,'ORIGINAL_CRYPTO_COMMANDS_NOT_CLOSED');
-      assert.ok(localOnlineCompletion,'ORIGINAL_LOCAL_ONLINE_POINT_COMPLETION_REQUIRED');
+      if(localQualificationMode==='ONLINE_POINT')assert.ok(localOnlineCompletion,'ORIGINAL_LOCAL_ONLINE_POINT_COMPLETION_REQUIRED');
+      else assert.ok(!localOnlineOwner&&!localOnlineCompletion&&!originalOnlineInquiry,'PROTECTED_COMPLETE_PHYSICAL_SCOPE_CHANGED');
       assert.ok(legacyRestoration&&legacyDockerChildren.every(row=>row.closed&&!row.unknown&&row.code===0&&row.signal===null),'ORIGINAL_LEGACY_UI_RESTORATION_REQUIRED');
       for(const owner of roles.values()){same(owner.closed,true);same(owner.result.code,0);same(owner.result.signal,null);}
       const candidate=roles.get('candidate');same(candidate.closeMode,'QUALIFIED');same(candidate.closedReceipt.qualificationSucceeded,true);
@@ -698,13 +701,17 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
       const resultRaw=Buffer.from(roles.get('main').result.stdout),result=JSON.parse(resultRaw);
       same(result.format,'sabalan-application-native/v1');same(result.passResult,true);same(result.productionAdmission,false);
       same(result.originalDatabaseRetiredWithoutForce,true);same(result.genuinePrivateQualificationPair.originalPairClosed,true);
+      if(localQualificationMode==='PROTECTED_COMPLETE'){
+       same(result.genuinePrivateQualificationPair.localQualificationMode,'PROTECTED_COMPLETE');
+       same(result.genuinePrivateQualificationPair.originalOnlinePhysicalPoint,null);same(result.genuinePrivateQualificationPair.originalOnlinePointInquiryClosure,null);
+      }
       same(result.genuinePrivateQualificationPair.actualHttpTargets,2);
       same(result.genuinePrivateQualificationPair.originalHttpClosures.length,2);
       assert.ok(retainedBrowserCompletion,'ORIGINAL_RETAINED_BROWSER_COMPLETION_REQUIRED');
       const retainedFinal=readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);same(retainedFinal.reportSha256,retained.reportSha256);
       const retainedRaw=fs.readFileSync(retainedFinal.reportFile);same(sha(retainedRaw),retainedFinal.reportSha256);
       const outputFiles={
-       'original-local-online-point.json':Buffer.from(JSON.stringify(readOriginalLocalOnlineCheckpointCompletion(localOnlineCompletion))),
+       ...(localOnlineCompletion?{'original-local-online-point.json':Buffer.from(JSON.stringify(readOriginalLocalOnlineCheckpointCompletion(localOnlineCompletion)))}:{}),
        'original-retained-browser-result.json':retainedRaw,
        'original-private-legacy-ui-restoration.json':fs.readFileSync(readOriginalPrivateLegacyUiRestoration(legacyRestoration).receiptFile),
        'original-main-result.json':resultRaw,
@@ -719,11 +726,12 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
        format:'sabalan-original-role-qualification-completion/v1',controllerSourceSha256:sha(fs.readFileSync(new URL(import.meta.url))),
        originalControllers:[...roles].map(([role,owner])=>({role,originalPid:owner.child.pid,code:owner.result.code,signal:owner.result.signal})),
        fileHashes:{...structuredClone(fileHashes),...Object.fromEntries(Object.entries(ownedOutputs).map(([file,value])=>[file,value.sha256]))},ownedOutputs,nativeClosures:[...closures.values()].sort((a,b)=>a.runtimeId.localeCompare(b.runtimeId)),
-       historySha256:sha(Buffer.from(JSON.stringify(history))),retainedBrowser:{reportSha256:retainedFinal.reportSha256,actualProductionLegacy55Qualified:retainedFinal.report.actualProductionLegacy55Qualified===true},productionAdmission:false}));originalQualificationPointCompletions.set(token,localOnlineCompletion);return token;
+       historySha256:sha(Buffer.from(JSON.stringify(history))),localQualificationMode,retainedBrowser:{reportSha256:retainedFinal.reportSha256,actualProductionLegacy55Qualified:retainedFinal.report.actualProductionLegacy55Qualified===true},productionAdmission:false}));if(localOnlineCompletion)originalQualificationPointCompletions.set(token,localOnlineCompletion);return token;
     },
     enrollCandidate:body=>{assert.equal(phase,'NEW');send('candidate','ENROLL',body);phase='ENROLLED';},
     enrollMain:(body,configurationBytes)=>{assert.equal(phase,'ENROLLED');assert.ok(Buffer.isBuffer(configurationBytes));
       same(sha(configurationBytes),fileHashes['config.json']);mainConfiguration=JSON.parse(configurationBytes);
+      same(mainConfiguration.localQualificationMode??'ONLINE_POINT',localQualificationMode);
       same(mainConfiguration.originalHostEnrollment.publicKey,publicSPKI);same(mainConfiguration.originalHostEnrollment.session,session);
       same(mainConfiguration.roleTopology,topology);same(mainConfiguration.image,topology.main.image);
       mainIndex=body.index;send('main','ENROLL',body);},

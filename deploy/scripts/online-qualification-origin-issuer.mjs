@@ -7,6 +7,8 @@ import {spawn} from 'node:child_process';
 import {createHash,createPrivateKey,createPublicKey,sign} from 'node:crypto';
 import {readOriginalRoleQualificationCompletion} from '../../scripts/lib/application-native-role-coordinator.mjs';
 import {readOriginalIndependentRestoreSshCompletion} from '../../scripts/lib/independent-full-restore-ssh.mjs';
+import {readOriginalExistingComposeComplete} from '../../scripts/lib/original-existing-compose-complete.mjs';
+import {readOriginalPhysicalCompletion} from '../../scripts/lib/original-physical-completion.mjs';
 const assert=(value,code)=>{if(!value)throw Error(code);};
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 const bytes=value=>Buffer.from(JSON.stringify(canonical(value))),sha=value=>createHash('sha256').update(value).digest('hex');
@@ -36,7 +38,9 @@ export async function issueOriginalQualificationOrigin({localCompletion,independ
  const {readOriginalOnlineEvidenceAssembly}=await import('../../scripts/lib/original-online-evidence-assembler.mjs');
  const assembly=readOriginalOnlineEvidenceAssembly(assemblyCompletion);
  const physical=typeof assembly.originalOnlineRequestSha256==='string';
- const independent=physical?(await import('../../scripts/lib/independent-full-restore-ssh.mjs')).readOriginalIndependentPhysicalRestoreSshCompletion(independentCompletion):readOriginalIndependentRestoreSshCompletion(independentCompletion);
+ assert(!physical||assembly.independentCompletionKind===undefined||assembly.independentCompletionKind==='EXISTING_COMPOSE_PHYSICAL','QUALIFICATION_COMPLETE_CANNOT_ENTER_PHYSICAL');
+ const independent=physical?readOriginalPhysicalCompletion(independentCompletion)
+  :assembly.independentCompletionKind==='EXISTING_COMPOSE_COMPLETE'?readOriginalExistingComposeComplete(independentCompletion):readOriginalIndependentRestoreSshCompletion(independentCompletion);
  const completionHash=value=>sha(bytes(value));
  assert(assembly.originalLocalCompletionSha256===completionHash(local)&&assembly.originalIndependentCompletionSha256===completionHash(independent),
   'QUALIFICATION_ASSEMBLY_ORIGINAL_OWNERS_CHANGED');
@@ -86,6 +90,8 @@ export async function issueOriginalQualificationOrigin({localCompletion,independ
   for(const proof of report.proofs??[])assert(outputHashes.has(proof.sha256),'QUALIFICATION_PROOF_NOT_ORIGINAL_OUTPUT');
  }
  await assertProtectedKeyAcl();
+ if(assembly.independentCompletionKind==='EXISTING_COMPOSE_COMPLETE')readOriginalExistingComposeComplete(independentCompletion);
+ if(physical)readOriginalPhysicalCompletion(independentCompletion);
  const before=fs.lstatSync(KEY,{bigint:true});assert(before.isFile()&&!before.isSymbolicLink()&&before.nlink===1n&&before.size>0n&&before.size<=4096n&&fs.realpathSync(KEY)===KEY,'QUALIFICATION_FIXED_KEY_UNPROVEN');
  const rawKey=fs.readFileSync(KEY),key=createPrivateKey(rawKey);assert(key.asymmetricKeyType==='ed25519','QUALIFICATION_ED25519_REQUIRED');
  const decision={format:'sabalan-original-online-qualification/v1',releaseId:accepted.manifest.releaseId,manifestSha256,acceptanceSha256,
@@ -112,20 +118,21 @@ export async function issueOriginalQualificationOrigin({localCompletion,independ
 /** The independent replay owns an immutable physical point before production
  * metadata exists. This certificate grants no release or continuous-WAL claim. */
 const originalPhysicalVerifications=new WeakMap();
-export function readOriginalPhysicalCheckpointVerification(token){const value=originalPhysicalVerifications.get(token);assert(value,'ORIGINAL_PHYSICAL_VERIFICATION_REQUIRED');return structuredClone(value);}
+const physicalAuthorityChecks=new WeakMap();
+export function readOriginalPhysicalCheckpointVerification(token){const value=originalPhysicalVerifications.get(token);assert(value,'ORIGINAL_PHYSICAL_VERIFICATION_REQUIRED');physicalAuthorityChecks.get(token)?.();return structuredClone(value);}
 export async function issueOriginalPhysicalCheckpointVerification({independentCompletion}){
- const {readOriginalIndependentPhysicalRestoreSshCompletion}=await import('../../scripts/lib/independent-full-restore-ssh.mjs');
- const original=readOriginalIndependentPhysicalRestoreSshCompletion(independentCompletion);
+ const original=readOriginalPhysicalCompletion(independentCompletion);
  assert(original.originalControllers.length>0&&original.originalControllers.every(row=>row.code===0&&row.signal===null),'PHYSICAL_ORIGINAL_REPLAY_NOT_CLOSED');
  for(const field of ['sealedManifestSha256','plaintextManifestSha256','cipherInventorySha256'])assert(/^[a-f0-9]{64}$/.test(original[field]),'PHYSICAL_ORIGINAL_POINT_REQUIRED');
  const owned=original.ownedOutputs?.report;
  assert(owned&&Buffer.from(owned.rawBase64,'base64').length===owned.bytes&&sha(Buffer.from(owned.rawBase64,'base64'))===owned.sha256,'PHYSICAL_ORIGINAL_REPORT_REQUIRED');
  const report=JSON.parse(Buffer.from(owned.rawBase64,'base64'));
- assert(report.format==='sabalan-original-independent-online-physical-restore/v1'&&report.sealedManifestSha256===original.sealedManifestSha256
+ assert(['sabalan-original-independent-online-physical-restore/v1','sabalan-original-same-compose-online-physical-restore/v1'].includes(report.format)&&report.sealedManifestSha256===original.sealedManifestSha256
   &&report.plaintextManifestSha256===original.plaintextManifestSha256&&report.cipherInventorySha256===original.cipherInventorySha256
   &&sha(bytes(report.sourceDatabase))===sha(bytes(original.sourceDatabase))&&sha(bytes(report.restorePoint))===sha(bytes(original.restorePoint))
   &&report.continuousWalQualified===false,'PHYSICAL_ORIGINAL_REPORT_BINDING');
  await assertProtectedKeyAcl();
+ readOriginalPhysicalCompletion(independentCompletion);
  const before=fs.lstatSync(KEY,{bigint:true});assert(before.isFile()&&!before.isSymbolicLink()&&before.nlink===1n&&before.size>0n&&before.size<=4096n&&fs.realpathSync(KEY)===KEY,'QUALIFICATION_FIXED_KEY_UNPROVEN');
  const key=createPrivateKey(fs.readFileSync(KEY));assert(key.asymmetricKeyType==='ed25519','QUALIFICATION_ED25519_REQUIRED');
  const now=Date.now(),decision={format:'sabalan-original-physical-checkpoint-verification/v1',
@@ -136,7 +143,7 @@ export async function issueOriginalPhysicalCheckpointVerification({independentCo
  assert(pin(before)===pin(fs.lstatSync(KEY,{bigint:true}))&&observers.every(row=>row.closed&&!row.unknown),'PHYSICAL_ORIGINAL_ISSUER_UNPROVEN');
  const envelope={format:'sabalan-signed-physical-checkpoint-verification/v1',decision,
   signature:sign(null,Buffer.concat([Buffer.from('sabalan-original-physical-checkpoint-verification/v1\n'),bytes(decision)]),key).toString('base64')};
- const token=Object.freeze({});originalPhysicalVerifications.set(token,envelope);return token;
+ const token=Object.freeze({});originalPhysicalVerifications.set(token,envelope);physicalAuthorityChecks.set(token,()=>readOriginalPhysicalCompletion(independentCompletion));return token;
 }
 
 const originalWalCertificates=new WeakMap();
@@ -164,16 +171,16 @@ export async function issueOriginalWalWindowVerification({sourceWindow,independe
 
 const originalPhysicalPublications=new WeakMap();
 const originalRepositoryPromotions=new WeakMap();
-export function readOriginalPhysicalRepositoryPromotion(token){const value=originalRepositoryPromotions.get(token);assert(value,'ORIGINAL_PHYSICAL_REPOSITORY_PROMOTION_REQUIRED');return structuredClone(value);}
+export function readOriginalPhysicalRepositoryPromotion(token){const value=originalRepositoryPromotions.get(token);assert(value,'ORIGINAL_PHYSICAL_REPOSITORY_PROMOTION_REQUIRED');physicalAuthorityChecks.get(token)?.();return structuredClone(value);}
 export async function issueOriginalPhysicalRepositoryPromotion({physicalCompletion,repositoryPromotion}){
  const {readOriginalIndependentPhysicalRestoreSshCompletion,readOriginalIndependentPhysicalRepositoryPromotion}=await import('../../scripts/lib/independent-full-restore-ssh.mjs');
  const {assertOriginalCheckpointRepository}=await import('./online-checkpoint-finalization.mjs');
- const physical=readOriginalIndependentPhysicalRestoreSshCompletion(physicalCompletion),promotion=readOriginalIndependentPhysicalRepositoryPromotion(repositoryPromotion);
+ const physical=readOriginalPhysicalCompletion(physicalCompletion),promotion=readOriginalIndependentPhysicalRepositoryPromotion(repositoryPromotion);
  const physicalCompletionSha256=sha(bytes(physical));
  assert(promotion.physicalCompletionSha256===physicalCompletionSha256&&promotion.originalControllers.length>0
   &&promotion.originalControllers.every(row=>row.code===0&&row.signal===null),'ORIGINAL_PHYSICAL_REPOSITORY_READBACK_REQUIRED');
  const repository=assertOriginalCheckpointRepository(promotion.repositoryDescriptor,physical,promotion.repositoryDescriptor.captureId);
- await assertProtectedKeyAcl();const before=fs.lstatSync(KEY,{bigint:true});
+ await assertProtectedKeyAcl();readOriginalPhysicalCompletion(physicalCompletion);const before=fs.lstatSync(KEY,{bigint:true});
  assert(before.isFile()&&!before.isSymbolicLink()&&before.nlink===1n&&before.size>0n&&before.size<=4096n&&fs.realpathSync(KEY)===KEY,'QUALIFICATION_FIXED_KEY_UNPROVEN');
  const key=createPrivateKey(fs.readFileSync(KEY));assert(key.asymmetricKeyType==='ed25519','QUALIFICATION_ED25519_REQUIRED');
  const now=Date.now(),decision={format:'sabalan-original-physical-repository-promotion/v1',physicalCompletionSha256,
@@ -181,19 +188,19 @@ export async function issueOriginalPhysicalRepositoryPromotion({physicalCompleti
  assert(pin(before)===pin(fs.lstatSync(KEY,{bigint:true}))&&observers.every(row=>row.closed&&!row.unknown),'ORIGINAL_PHYSICAL_PROMOTION_ISSUER_UNPROVEN');
  const envelope={format:'sabalan-signed-physical-repository-promotion/v1',decision,
   signature:sign(null,Buffer.concat([Buffer.from('sabalan-original-physical-repository-promotion/v1\n'),bytes(decision)]),key).toString('base64')};
- const token=Object.freeze({});originalRepositoryPromotions.set(token,envelope);return token;
+ const token=Object.freeze({});originalRepositoryPromotions.set(token,envelope);physicalAuthorityChecks.set(token,()=>readOriginalPhysicalCompletion(physicalCompletion));return token;
 }
-export function readOriginalPhysicalCheckpointPublication(token){const value=originalPhysicalPublications.get(token);assert(value,'ORIGINAL_PHYSICAL_PUBLICATION_REQUIRED');return structuredClone(value);}
+export function readOriginalPhysicalCheckpointPublication(token){const value=originalPhysicalPublications.get(token);assert(value,'ORIGINAL_PHYSICAL_PUBLICATION_REQUIRED');physicalAuthorityChecks.get(token)?.();return structuredClone(value);}
 export async function issueOriginalPhysicalCheckpointPublication({physicalCompletion,repositoryPromotion,metadataCompletion}){
  const {readOriginalIndependentPhysicalRestoreSshCompletion,readOriginalIndependentPhysicalRepositoryPromotion,readOriginalIndependentPhysicalMetadataPublication}=await import('../../scripts/lib/independent-full-restore-ssh.mjs');
- const physical=readOriginalIndependentPhysicalRestoreSshCompletion(physicalCompletion),promotion=readOriginalIndependentPhysicalRepositoryPromotion(repositoryPromotion),metadata=readOriginalIndependentPhysicalMetadataPublication(metadataCompletion);
+ const physical=readOriginalPhysicalCompletion(physicalCompletion),promotion=readOriginalIndependentPhysicalRepositoryPromotion(repositoryPromotion),metadata=readOriginalIndependentPhysicalMetadataPublication(metadataCompletion);
  assert(metadata.physicalCompletionSha256===sha(bytes(physical))&&metadata.sealedManifestSha256===physical.sealedManifestSha256
   &&metadata.cipherInventorySha256===physical.cipherInventorySha256&&metadata.originalControllers.length>0
   &&metadata.originalControllers.every(row=>row.code===0&&row.signal===null),'ORIGINAL_PHYSICAL_METADATA_READBACK_REQUIRED');
  assert(promotion.physicalCompletionSha256===metadata.physicalCompletionSha256
   &&sha(bytes(promotion.repositoryDescriptor))===sha(bytes(metadata.repositoryDescriptor)),'ORIGINAL_PHYSICAL_REPOSITORY_METADATA_CHANGED');
  for(const field of ['canonicalMetadataSha256','remoteMetadataSha256'])assert(/^[a-f0-9]{64}$/.test(metadata[field]),'ORIGINAL_PHYSICAL_METADATA_HASH_REQUIRED');
- await assertProtectedKeyAcl();const before=fs.lstatSync(KEY,{bigint:true});
+ await assertProtectedKeyAcl();readOriginalPhysicalCompletion(physicalCompletion);const before=fs.lstatSync(KEY,{bigint:true});
  assert(before.isFile()&&!before.isSymbolicLink()&&before.nlink===1n&&before.size>0n&&before.size<=4096n&&fs.realpathSync(KEY)===KEY,'QUALIFICATION_FIXED_KEY_UNPROVEN');
  const key=createPrivateKey(fs.readFileSync(KEY));assert(key.asymmetricKeyType==='ed25519','QUALIFICATION_ED25519_REQUIRED');
  const now=Date.now(),decision={format:'sabalan-original-physical-checkpoint-publication/v1',canonicalMetadataSha256:metadata.canonicalMetadataSha256,
@@ -202,7 +209,7 @@ export async function issueOriginalPhysicalCheckpointPublication({physicalComple
  assert(pin(before)===pin(fs.lstatSync(KEY,{bigint:true}))&&observers.every(row=>row.closed&&!row.unknown),'ORIGINAL_PHYSICAL_METADATA_ISSUER_UNPROVEN');
  const envelope={format:'sabalan-signed-physical-checkpoint-publication/v1',decision,
   signature:sign(null,Buffer.concat([Buffer.from('sabalan-original-physical-checkpoint-publication/v1\n'),bytes(decision)]),key).toString('base64')};
- const token=Object.freeze({});originalPhysicalPublications.set(token,envelope);return token;
+ const token=Object.freeze({});originalPhysicalPublications.set(token,envelope);physicalAuthorityChecks.set(token,()=>readOriginalPhysicalCompletion(physicalCompletion));return token;
 }
 
 const originalTerminalCertificates=new WeakMap();

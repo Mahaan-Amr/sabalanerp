@@ -56,17 +56,34 @@ export function assertOriginalLiveWalCoverage(value:any,point:any,database:any,c
 }
 export function assertOriginalIndependentPhysicalPoint(source:any,expected:any){
  const report=raw(source.physicalRestoreRawBase64,32*1024*1024).value,metadata=source.checkpointMetadata;
- if(report.format!=='sabalan-original-independent-online-physical-restore/v1'||report.continuousWalQualified!==false
+ const sameCompose=report.format==='sabalan-original-same-compose-online-physical-restore/v1';
+ if((!sameCompose&&report.format!=='sabalan-original-independent-online-physical-restore/v1')||report.continuousWalQualified!==false
   ||!digest(report.sealedManifestSha256)||!digest(report.plaintextManifestSha256)||!digest(report.cipherInventorySha256)
   ||!same(report.sourceDatabase,expected.deploymentTargetDatabase)
-  ||report.sourceMachineUuidSha256!==metadata.sourceMachineUuidSha256||report.sourceKernelBootIdSha256!==metadata.sourceKernelBootIdSha256
-  ||!digest(report.recoveryMachineUuidSha256)||report.recoveryMachineUuidSha256===report.sourceMachineUuidSha256
-  ||!digest(report.recoveryKernelBootIdSha256)||report.recoveryKernelBootIdSha256===report.sourceKernelBootIdSha256
+  ||(sameCompose?report.sourceHost?.machineUuidSha256!==metadata.sourceMachineUuidSha256||report.sourceHost?.kernelBootIdSha256!==metadata.sourceKernelBootIdSha256:
+    report.sourceMachineUuidSha256!==metadata.sourceMachineUuidSha256||report.sourceKernelBootIdSha256!==metadata.sourceKernelBootIdSha256)
+  ||(!sameCompose&&(!digest(report.recoveryMachineUuidSha256)||report.recoveryMachineUuidSha256===report.sourceMachineUuidSha256
+   ||!digest(report.recoveryKernelBootIdSha256)||report.recoveryKernelBootIdSha256===report.sourceKernelBootIdSha256))
   ||!Number.isFinite(Date.parse(report.startedAt))||!Number.isFinite(Date.parse(report.completedAt))||Date.parse(report.completedAt)<Date.parse(report.startedAt)
   ||metadata.physicalPoint?.sealedManifestSha256!==report.sealedManifestSha256
   ||metadata.physicalPoint?.plaintextManifestSha256!==report.plaintextManifestSha256
   ||metadata.physicalPoint?.cipherInventorySha256!==report.cipherInventorySha256
   ||!same(metadata.physicalPoint?.restorePoint,report.restorePoint))fail();
+ if(sameCompose){
+  for(const host of [report.sourceHost,report.replayHost,report.rsaHost])if(!host||!same(Object.keys(host).sort(),['kernelBootIdSha256','machineUuidSha256'])||!Object.values(host).every(digest))fail();
+  if(report.rsaHost.machineUuidSha256===report.sourceHost.machineUuidSha256
+   ||Object.prototype.hasOwnProperty.call(report,'recoveryMachineUuidSha256')||Object.prototype.hasOwnProperty.call(report,'recoveryKernelBootIdSha256'))fail();
+  const i=report.restoredIncarnation,r=report.originalSerialRestoration;
+  if(i?.format!=='sabalan-original-serial-restored-incarnation/v1'||i.project!=='sabalanerp-local'||i.service!=='postgres'
+   ||!digest(i.containerId)||!/^sha256:[a-f0-9]{64}$/.test(i.image)||!Number.isFinite(Date.parse(i.startedAt))
+   ||!Number.isSafeInteger(i.epoch)||i.epoch<1||i.productionAdmission!==false||!/^[a-f0-9]{32}$/.test(i.operation)||!/^[1-9][0-9]*$/.test(i.systemIdentifier)
+   ||r?.originalClusterRestored!==true||r.operation!==i.operation||!Array.isArray(r.originalControllers)||r.originalControllers.length<1
+   ||r.originalControllers.some((v:any)=>v.code!==0||v.signal!==null||v.stdoutEof!==true||v.stderrEof!==true||v.observationFault!==false))fail();
+  const application=report.originalApplicationReport,original=raw(application?.rawBase64,32*1024*1024);
+  if(application.sha256!==original.sha256||application.bytes!==original.bytes.length||Object.prototype.hasOwnProperty.call(original.value,'restoredIncarnation')
+   ||original.value.format!==report.format||original.value.pass!==true||original.value.phase!=='COMPLETE'
+   ||!same(original.value.replayHost,report.replayHost)||!same(original.value.rsaHost,report.rsaHost))fail();
+ }
  const layout=report.layout,replay=report.replay,point=report.restorePoint;
  if(!layout||layout.format!=='sabalan-original-independent-online-layout/v1'||layout.captureId!==expected.captureId
   ||!same({...layout.restorePoint,timeline:point.timeline},point)||layout.coverage?.timeline!==point.timeline||layout.sourceDatabase?.systemIdentifier!==expected.deploymentTargetDatabase.systemIdentifier

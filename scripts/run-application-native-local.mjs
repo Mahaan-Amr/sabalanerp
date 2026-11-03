@@ -22,7 +22,8 @@ export function readOriginalKnownFailedLocalClosure(error){
  const value=originalKnownFailedLocalClosures.get(error);if(!value)return null;value.revalidate();return structuredClone(value.facts);
 }
 
-export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,nativeOwnerElfReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection}){
+export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,sameComposePhysicalCallbacks,localQualificationMode='ONLINE_POINT',nativeOwnerElfReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection}){
+assert.ok(['ONLINE_POINT','PROTECTED_COMPLETE'].includes(localQualificationMode));
 if(frontendSnapshot){
  assert.deepEqual(Object.keys(frontendSnapshot).sort(),['file','sha256']);
  const {readMeasuredFrontendSnapshot}=await import('../deploy/scripts/production-frontend-snapshot.mjs');
@@ -242,9 +243,9 @@ assert.match(files['hr-file-expansion.sql'].toString(),/^-- Generated bounded on
 files['original-retained-browser-result.json']=fs.readFileSync(retainedBrowserFacts.reportFile);
 assert.equal(sha(files['original-retained-browser-result.json']),retainedBrowserFacts.reportSha256);
 const fileHashes=Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,sha(bytes)]));
-const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile,localDevSuspension,
+const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,sameComposePhysicalCallbacks,localQualificationMode,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile,localDevSuspension,
   onHeld:value=>{const reportPath=path.join(root,'reports/qa',path.basename(directory)+'-role-held.json');fs.writeFileSync(reportPath,JSON.stringify(value,null,2)+'\n');console.log(JSON.stringify({format:'sabalan-original-inner-controller-held/v1',event:'ORIGINAL_INNER_CONTROLLER_HELD',status:'ROLEHELD',reportPath,reason:'ORIGINAL_CONTROLLER_HELD'}));}});
-files['config.json']=Buffer.from(JSON.stringify({sourceCommit,...(qaMemoryProfile?{qaMemoryProfile:{...readQaMemoryProfile(qaMemoryProfile),receiptFile:'qa-memory-replacement-receipt.json'}}:{}),
+files['config.json']=Buffer.from(JSON.stringify({sourceCommit,localQualificationMode,...(qaMemoryProfile?{qaMemoryProfile:{...readQaMemoryProfile(qaMemoryProfile),receiptFile:'qa-memory-replacement-receipt.json'}}:{}),
   retainedBrowserReport:{file:'original-retained-browser-result.json',sha256:retainedBrowserFacts.reportSha256},
   image:retained.Image,bundleSha256,roleTopology,roleQualification:{file:roleQualificationFile,sha256:sha(roleQualificationBytes)},
   privateQualificationRuntime,

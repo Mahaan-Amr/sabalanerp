@@ -25,11 +25,29 @@ test('real purchasing uses shared workspace cards and compact centered Persian f
   await page.context().addCookies([{ name: SESSION_COOKIE, value: token, domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' }]);
   await page.goto('/dashboard/purchasing');
   await expect(page.getByRole('button', { name: 'استعلام جدید', exact: true })).toBeVisible();
-  await expect(page.getByRole('main').getByRole('group', { name: 'گزینه‌ها', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('link', { name: 'استعلام تأمین‌کنندگان', exact: true })).toHaveAttribute('href', '/dashboard/purchasing/inquiries');
+  await expect(page.getByRole('main').getByRole('group', { name: 'گزینه‌ها', exact: true })).toHaveCount(1);
+  await expect(page.locator('nav').getByRole('link', { name: 'استعلام‌های ثبت‌شده', exact: true })).toHaveAttribute('href', '/dashboard/purchasing/inquiries');
+  await expect(page.locator('[data-dashboard-main]').getByRole('link',{name:'استعلام‌های ثبت‌شده',exact:true})).toHaveAttribute('href','/dashboard/purchasing/inquiries');
   await expect(page.locator('.sds-neumorphic-scope').first()).toBeVisible();
+  for(const [label,section,title] of [['درخواست نیازمند تأمین در فهرست','requests','درخواست‌ها'],['سفارش منتظر دریافت در فهرست','orders','سفارش‌های خرید'],['رسید منتظر کیفیت در فهرست','receipts','دریافت بار']]){
+    const card=page.getByRole('link').filter({hasText:label});
+    await expect(card).toHaveAttribute('href',`/dashboard/purchasing/${section}?view=attention`);
+    await card.focus();await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/dashboard/purchasing/${section}\\?view=attention$`));
+    await expect(page.getByRole('heading',{name:title,exact:true})).toBeVisible();
+    for(const target of ['requests','orders','receipts'])await expect(page.locator(`[data-dashboard-main] a[href="/dashboard/purchasing/${target}?view=attention"]`)).toBeVisible();
+    await expect(page.getByRole('combobox',{name:'وضعیت پرونده',exact:true})).toContainText(section==='requests'?'نیازمند تأمین':section==='orders'?'منتظر دریافت':'منتظر بررسی کیفیت');
+    await page.goto('/dashboard/purchasing');
+    await expect(page.getByRole('button',{name:'استعلام جدید',exact:true})).toBeVisible();
+  }
+  await page.locator('[data-dashboard-main] a[href="/dashboard/purchasing/requests?view=attention"]').click();
+  for(const target of ['orders','receipts','requests']){await page.locator(`[data-dashboard-main] a[href="/dashboard/purchasing/${target}?view=attention"]`).click();await expect(page).toHaveURL(new RegExp(`/dashboard/purchasing/${target}\\?view=attention$`));await expect(page.getByRole('combobox',{name:'وضعیت پرونده',exact:true})).toContainText(target==='requests'?'نیازمند تأمین':target==='orders'?'منتظر دریافت':'منتظر بررسی کیفیت');}
+  await page.goto('/dashboard/purchasing');
   for (const theme of ['light', 'dark'] as const) { await setTheme(page, theme); await page.screenshot({ path: `test-results/purchasing-desktop-${theme}.png`, fullPage: true }); }
   await page.screenshot({ path: 'test-results/purchasing-desktop.png', fullPage: true });
+  await expect(page.getByRole('textbox',{name:'جست‌وجوی قرارداد',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'قراردادهای فروش',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'کارهای باز',exact:true})).toHaveCount(0);
   await page.getByRole('textbox',{name:'جست‌وجوی قرارداد',exact:true}).fill('100312');
   await page.getByRole('button',{name:'انتخاب اقلام قرارداد ۱۰۰۳۱۲',exact:true}).click();
   await expect(page.getByRole('heading',{name:'استعلام جدید',exact:true})).toBeVisible();
@@ -54,7 +72,6 @@ test('real purchasing uses shared workspace cards and compact centered Persian f
   for(const theme of ['light','dark'] as const){await setTheme(page,theme);await page.screenshot({path:`test-results/purchasing-contract-start-${theme}.png`,fullPage:true});}
   await page.setViewportSize({width:390,height:844});await assertNoHorizontalOverflow(page);
   await setViewportAndZoom(page,{width:1440,height:1000},2);await assertNoHorizontalOverflow(page);
-  page.once('dialog',dialog=>dialog.accept()); // Explicitly discard this unsaved read-only QA draft.
   await page.goto('/dashboard/purchasing/receipts');
   await page.getByRole('button',{name:'ثبت دریافت بار',exact:true}).click();
   const modal = page.getByRole('dialog', { name: 'دریافت بار', exact: true });
@@ -78,9 +95,8 @@ test('real purchasing uses shared workspace cards and compact centered Persian f
   await page.screenshot({ path: 'test-results/purchasing-request-zoom.png' });
   await page.keyboard.press('Escape'); await expect(modal).toHaveCount(0);
   await page.setViewportSize({ width: 1440, height: 1000 }); await page.evaluate(() => { document.documentElement.style.zoom = '1'; });
-  page.once('dialog',async dialog=>{expect(dialog.type()).toBe('beforeunload');await dialog.accept();}); // Discard only the deliberately invalid, unsubmitted QA draft.
   if(await page.getByRole('button',{name:'بازکردن منو',exact:true}).isVisible())await page.getByRole('button',{name:'بازکردن منو',exact:true}).click();
-  const sectionTitles:Record<string,string>={inquiries:'استعلام تأمین‌کنندگان',orders:'سفارش‌های خرید',receipts:'دریافت بار',exchanges:'تعویض‌ها',suppliers:'تأمین‌کنندگان',inventory:'بارهای پذیرفته‌شده',finance:'پیگیری حسابداری',changes:'تغییر و لغو'};
+  const sectionTitles:Record<string,string>={inquiries:'استعلام‌های ثبت‌شده',orders:'سفارش‌های خرید',receipts:'دریافت بار',exchanges:'تعویض‌ها',suppliers:'تأمین‌کنندگان',inventory:'بارهای پذیرفته‌شده',finance:'پیگیری حسابداری',changes:'تغییر و لغو'};
   for (const section of ['inquiries', 'orders', 'receipts', 'exchanges', 'suppliers', 'inventory', 'finance', 'changes']) {
     console.log('Purchasing QA section:',section);
     if(section!=='inquiries'&&!await page.locator(`nav a[href="/dashboard/purchasing/${section}"]`).isVisible())await page.getByRole('button',{name:/سوابق و جزئیات/}).click();

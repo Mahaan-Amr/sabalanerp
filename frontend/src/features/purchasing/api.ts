@@ -1,5 +1,6 @@
 import api from '@/lib/api';
 export type PurchaseDocument = {
+  stoneSummary?:string;
   id: string; number: string; displayTitle?:string; kind: string; version: number; status: string;
   ownerId: string; creatorId: string; contractId: string | null; customerId: string | null; parentId: string | null;
   data: Record<string, any>; progress: Record<string, string | null | boolean>; toReturn?: string;

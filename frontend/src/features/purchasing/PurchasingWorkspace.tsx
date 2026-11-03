@@ -3,20 +3,21 @@ import {purchaseDimensions,purchaseNumber as groupedNumber,purchaseText,purchase
 import { PurchaseSupplierPicker } from './PurchaseSupplierPicker';
 import { ReceiptInventorySummary } from './ReceiptInventorySummary';
 import { OrderCosts } from './OrderCosts';
-import { PurchaseDraftRecovery } from './PurchaseDraftRecovery';
 import { PurchaseAttachments } from './PurchaseAttachments';
 import { AccountingReview } from './AccountingReview';
 import { inquiryOrderDefaults } from './inquiryOrderDefaults';
 import { InquiryComparison } from './InquiryComparison';
+import {ensureInquiryHistory,hasInquiryParent,inquiryHref} from './inquiryNavigation';
 import { PurchaseDashboard } from './PurchaseDashboard';
-import { PurchaseStart } from './PurchaseStart';
+import {purchaseMetrics} from './purchaseMetrics';
+import { PurchaseStart,type PurchaseInquirySeed } from './PurchaseStart';
 import { InquiryCaseView } from './InquiryCaseView';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter,useSearchParams } from 'next/navigation';
-import { FaPlus, FaSync, FaClipboardList, FaTruck, FaBoxOpen } from 'react-icons/fa';
+import { FaPlus, FaEye, FaSync, FaClipboardList, FaTruck, FaBoxOpen } from 'react-icons/fa';
 import { ErpPresentationProvider, ErpListPage, ErpButton, ErpCard, ErpBadge, ErpField, ErpInput, ErpTextarea, ErpSearchableSelect, ErpSheet, ErpInlineState, ErpLoading, ErpEmptyState, ErpFieldView, ErpDisclosure, ErpCheckbox, ErpPersianDateField, type ErpAction, type ErpColumn } from '@/components/erp';
 import { purchasingAPI, purchaseError, type PurchaseDocument as Doc, type PurchaseWorkspace, type ContractOption, type Option, type CommandResult } from './api';
-const tabs = { inquiries: 'استعلام تأمین‌کنندگان', requests: 'درخواست‌ها', orders: 'سفارش‌های خرید', receipts: 'دریافت بار', exchanges: 'تعویض‌ها', suppliers: 'تأمین‌کنندگان', inventory: 'بارهای پذیرفته‌شده', finance: 'پیگیری حسابداری', changes: 'تغییر و لغو' };
+const tabs = { inquiries: 'استعلام‌های ثبت‌شده', requests: 'درخواست‌ها', orders: 'سفارش‌های خرید', receipts: 'دریافت بار', exchanges: 'تعویض‌ها', suppliers: 'تأمین‌کنندگان', inventory: 'بارهای پذیرفته‌شده', finance: 'پیگیری حسابداری', changes: 'تغییر و لغو' };
 export type PurchasingTab = keyof typeof tabs;
 const descriptions: Record<PurchasingTab, string> = {
   inquiries: 'قیمت‌ها را مقایسه کنید؛ برای نیاز واقعی، پیشنهاد منتخب را به سفارش ادامه دهید.',
@@ -38,16 +39,19 @@ type PendingCommand = { key: string; type: string; input: Record<string, unknown
 type Feedback = { kind: 'success' | 'error' | 'stale'; title: string; result?: CommandResult };
 export default function PurchasingWorkspace({ tab = 'requests', dashboard = false }: { tab?: PurchasingTab; dashboard?: boolean }) {
   const router = useRouter();
-  const documentId=useSearchParams().get('document')||'';
+  const params=useSearchParams();
+  const documentId=params.get('document')||'';
+  const attentionView=params.get('view')==='attention'&&['requests','orders','receipts'].includes(tab);
   const [extraAllocations, setExtraAllocations] = useState<{ requestId: string; quantity: string; purchaseQuantity: string }[]>([]), [costs, setCosts] = useState<{ title: string; recipientId: string; amount: string }[]>([]);
   const [workspace, setWorkspace] = useState<PurchaseWorkspace | null>(null), [loading, setLoading] = useState(true), [feedback, setFeedback] = useState<Feedback | null>(null);
-  const [search, setSearch] = useState(''), [filter, setFilter] = useState('all'), [sheet, setSheet] = useState(''), [draft, setDraft] = useState<Draft>({}), [errors, setErrors] = useState<Record<string, string>>({});
+  const [search, setSearch] = useState(''), [filter, setFilter] = useState(attentionView?'attention':'all'), [sheet, setSheet] = useState(''), [draft, setDraft] = useState<Draft>({}), [errors, setErrors] = useState<Record<string, string>>({});
+  useEffect(()=>{setFilter(current=>attentionView?'attention':current==='attention'?'all':current);},[attentionView,tab]);
   const [busy, setBusy] = useState(false), [uncertain, setUncertain] = useState<PendingCommand | null>(null), inFlight = useRef(false);
   const [selected, setSelected] = useState<Doc | null>(null), [detail, setDetail] = useState<any>(null), [suppliers, setSuppliers] = useState<Option[]>([]), [buyers, setBuyers] = useState<Option[]>([]), [contracts, setContracts] = useState<ContractOption[]>([]), [customers, setCustomers] = useState<Option[]>([]), [parties, setParties] = useState<Option[]>([]), [existing, setExisting] = useState<Option[]>([]), [contractSearch, setContractSearch] = useState('');
   const supplierReturn = useRef<{ draft: Draft; selected: Doc | null; allocations: typeof extraAllocations; costs: typeof costs } | null>(null);
-  const documentOpened = useRef('');
   const [attachmentLocked,setAttachmentLocked]=useState(false);
   const [startingContract,setStartingContract]=useState<ContractOption|null>(null);
+  const [inquirySeed,setInquirySeed]=useState<PurchaseInquirySeed|null>(null);
   const access = workspace?.access;
   const readActorId=access?.actorId;
   const load = useCallback(async () => { try { const response = await purchasingAPI.workspace(search); setWorkspace(response.data.data); } catch (error) { setFeedback({ kind: 'error', title: purchaseError(error) }); } finally { setLoading(false); } }, [search]);
@@ -59,18 +63,39 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
   const allDocs = workspace ? [...(workspace.inquiries || []), ...workspace.requests, ...workspace.orders, ...workspace.receipts, ...workspace.exchanges, ...workspace.finance, ...workspace.changes] : [];
   const find = (id: string) => allDocs.find(d => d.id === id);
   useEffect(()=>{
-    if(!readActorId||!documentId)return;
-    const key=`${readActorId}:${documentId}`;
-    if(documentOpened.current===key)return;
-    documentOpened.current=key;let active=true;
+    if(!readActorId)return;
+    if(!documentId){setSelected(null);setDetail(null);setSheet(current=>['INQUIRY_CASE','INQUIRY_DETAIL','OPENING_INQUIRY'].includes(current)?'':current);return;}
+    let active=true;setSheet('OPENING_INQUIRY');
     void purchasingAPI.detail(documentId).then(r=>{
       if(!active)return;
-      setSelected({...r.data.data.document,progress:{}});setDetail(r.data.data);
+      const doc=r.data.data.document;
+      if(doc.kind==='INQUIRY_CASE'||doc.kind==='INQUIRY')ensureInquiryHistory(doc.id,doc.kind==='INQUIRY'?doc.parentId:null);
+      setSelected({...doc,progress:{}});setDetail(r.data.data);
       setSheet(r.data.data.document.kind==='INQUIRY_CASE'?'INQUIRY_CASE':r.data.data.document.kind==='INQUIRY'?'INQUIRY_DETAIL':'DETAIL');
-    }).catch(e=>{if(active){documentOpened.current='';setSheet('');setFeedback({kind:'error',title:purchaseError(e)});}});
+    }).catch(e=>{if(active){setSheet('');setFeedback({kind:'error',title:purchaseError(e)});}});
     return()=>{active=false;};
   },[readActorId,documentId]);
   const selectedRequest = find(get('requestId')), selectedOrder = find(get('orderId')), selectedContract = contracts.find(c => c.id === draft.contractId), destinationCustomer = customers.find(c => c.id === draft.customerId);
+  function navigateInquiry(id:string) {
+    const href=inquiryHref(id);
+    if(window.location.pathname==='/dashboard/purchasing/inquiries')window.history.pushState({},'',href);
+    else router.push(href);
+  }
+  async function repeatInquiry(doc:Doc) {
+    setSheet('OPENING_INQUIRY');
+    try {
+      const response=await purchasingAPI.detail(doc.id),data=response.data.data;
+      const lines:Doc[]=doc.kind==='INQUIRY_CASE'?data.lines:[data.document];
+      const usable=lines.length>0&&lines.every(line=>line.data.productId&&!line.data.raw);
+      setStartingContract(null);setInquirySeed({sourceTitle:purchaseTitle(doc),items:usable?lines.map(line=>({productId:line.data.productId,productCode:line.data.productCode,stone:line.data.stone,unit:line.data.unit,quantity:'',dimensions:line.data.technical?.dimensions||'',quoteScope:line.data.technical?.dimensions?'specific':'general'})):[],query:usable?'':lines[0]?.data.stone||''});setSheet('START');
+    }catch(error){setSheet('');setFeedback({kind:'error',title:purchaseError(error)});}
+  }
+  function changeStatusFilter(value:string) {
+    setFilter(value);const query=new URLSearchParams(params.toString());
+    if(value==='attention')query.set('view','attention');else query.delete('view');
+    router.replace(`/dashboard/purchasing/${tab}${query.size?`?${query}`:''}`,{scroll:false});
+  }
+  function backInquiry(parentId?:string|null) { if(hasInquiryParent(parentId))router.back();else router.replace(inquiryHref(parentId)); }
   function changeTab(value: string) { router.push(`/dashboard/purchasing/${value}`); }
   function open(type: string, doc?: Doc) {
     if (uncertain) { setSheet(uncertain.type); return; }
@@ -146,7 +171,7 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
   if (!workspace || !access) return <ErpEmptyState title="فضای خرید قابل دریافت نیست" description={feedback?.title || 'دسترسی و ارتباط را بررسی کنید.'} action={{ label: 'تلاش دوباره', onClick: load }} />;
   const receipts = workspace.receipts;
   const rows: Doc[] = tab === 'suppliers' ? suppliers.map(s => ({ id: s.id, number: s.name, kind: 'SUPPLIER', data: s, progress: {}, version: 1, status: 'OPEN', ownerId: '', creatorId: '', contractId: null, customerId: null, parentId: null, createdAt: '' })) : tab === 'inventory' ? receipts.filter(r => positive(r.progress.accepted) && r.data.route === 'warehouse') : workspace[tab];
-  const visibleRows = rows.filter(d => filter === 'all' || (filter === 'closed' ? d.status !== 'OPEN' : d.status === 'OPEN'));
+  const visibleRows = rows.filter(d => filter === 'attention' ? tab === 'requests' ? d.status === 'OPEN' && d.progress.missing !== '0' : tab === 'orders' ? d.status === 'OPEN' && d.progress.remaining !== '0' : tab === 'receipts' && d.progress.pending !== '0' : filter === 'all' || (filter === 'closed' ? d.status !== 'OPEN' : d.status === 'OPEN'));
   const displayStatus = (d: Doc) => {
     if(d.kind==='REQUEST'&&d.status==='OPEN'&&d.progress.quoteChanged)return <ErpBadge tone="warning">پیشنهاد مانده سفارش نیاز به بازبینی دارد</ErpBadge>;
     if(d.status==='OPEN'&&['REQUEST','ORDER'].includes(d.kind)&&d.progress.financialBlocked)return <ErpBadge tone="warning">{d.kind==='ORDER'||positive(d.progress.ordered)?'رکورد مالی تغییر کرده؛ پیگیری تعهد قبلی':'منتظر رکورد مالی برای سفارش قطعی'}</ErpBadge>;
@@ -155,27 +180,30 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
     if (d.kind === 'REQUEST' && d.progress.sourceChanged) return <ErpBadge tone="warning">قرارداد تغییر کرده؛ بررسی نیاز</ErpBadge>;
     if (d.status !== 'OPEN') return <ErpBadge>{({ CANCELLED: 'لغوشده', RESOLVED: 'تعیین تکلیف شده', VOID: 'باطل' } as Record<string, string>)[d.status] || d.status}</ErpBadge>;
     if (d.kind === 'INQUIRY') return <ErpBadge tone={d.data.selection?.length ? 'info' : 'warning'}>{d.data.selection?.length ? 'پیشنهاد منتخب دارد' : d.data.offers?.length ? 'آماده مقایسه پیشنهادها' : 'در انتظار پیشنهاد تأمین‌کننده'}</ErpBadge>;
-    if (d.kind === 'INQUIRY_CASE') return <ErpBadge tone="info">پیگیری اقلام استعلام</ErpBadge>;
+    if (d.kind === 'INQUIRY_CASE') {
+      const count=Number(d.progress.offerCount||0),validLines=Number(d.progress.validLines||0),total=d.data.lineIds?.length||0;
+      return <ErpBadge tone={!count||validLines<total?'warning':'success'}>{!count?'در انتظار ثبت پیشنهاد':!validLines?'پیشنهاد معتبر ندارد':validLines<total?'پیشنهاد بعضی اقلام ثبت شده':'پیشنهادها ثبت شده'}</ErpBadge>;
+    }
     if (d.kind === 'RECEIPT') return <ErpBadge tone={positive(d.progress.toReturn) ? 'danger' : positive(d.progress.pending) ? 'warning' : 'success'}>{positive(d.progress.toReturn) ? 'رد قطعی؛ برگشت باقی است' : positive(d.progress.pending) ? 'در انتظار بررسی کیفیت' : positive(d.progress.rejected) ? 'رد قطعی؛ برگشت ثبت شد' : 'کیفیت پذیرفته شد'}</ErpBadge>;
     if (d.kind === 'ORDER') return <ErpBadge tone={positive(d.progress.toReturn) ? 'danger' : positive(d.progress.remaining) || positive(d.progress.replacementRemaining) ? 'warning' : 'info'}>{positive(d.progress.toReturn) ? 'برگشت کالای نامناسب باز است' : positive(d.progress.replacementRemaining) ? 'در انتظار جایگزین' : positive(d.progress.remaining) ? 'در انتظار دریافت' : positive(d.progress.pending) ? 'دریافت شد؛ کیفیت در انتظار بررسی' : d.progress.accepted === d.data.quantity ? 'تأمین کامل' : positive(d.data.closedQuantity) ? 'باقی سفارش بسته شد؛ کسری نیاز جداست' : 'دریافت پایان یافت؛ کسری تأمین باز است'}</ErpBadge>;
     if (d.kind === 'REQUEST') return <ErpBadge tone={d.progress.missing === '0' ? 'success' : positive(d.progress.ordered) ? 'info' : 'warning'}>{d.progress.missing === '0' ? d.data.raw ? 'سنگ خام تأمین شد؛ فرآوری جداست' : 'تأمین کامل' : positive(d.progress.ordered) ? 'در حال تأمین' : 'در انتظار خرید'}</ErpBadge>;
     return <ErpBadge tone="info">{d.kind === 'EXCHANGE' ? positive(d.progress.remaining) ? 'در انتظار جایگزین' : 'جایگزین دریافت شد' : d.kind === 'ADVANCE' ? 'درخواست به حسابداری' : 'نیازمند پیگیری'}</ErpBadge>;
   };
   const columns: ErpColumn<Doc>[] = [
-    { id: 'number', header: tab === 'suppliers' ? 'تأمین‌کننده' : 'سند / سنگ', priority: 'primary', cell: d => <div><strong>{tab==='inquiries'?purchaseTitle(d):d.number}</strong><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{tab==='inquiries'?`شماره پیگیری: ${d.number}`:purchaseText(d.data.stone || d.data.title || d.data.name)}</p></div> },
+    { id: 'number', header: tab === 'suppliers' ? 'تأمین‌کننده' : 'سند / سنگ', priority: 'primary', cell: d => <div><strong>{tab==='inquiries'?purchaseTitle(d):d.number}</strong><p className="mt-1 text-xs text-[var(--sds-text-secondary)]">{tab==='inquiries'?`${d.stoneSummary?`${purchaseText(d.stoneSummary)} · `:''}شماره پیگیری: ${d.number}`:purchaseText(d.data.stone || d.data.title || d.data.name)}</p></div> },
     { id: 'source', header: tab === 'receipts' ? 'سفارش / نوع بار' : 'مبدأ / تأمین‌کننده', cell: d => d.source ? <div>قرارداد {purchaseDigits(d.source.number)}<p>{purchaseText(d.source.customer)}</p></div> : purchaseText(d.data.supplierName) || d.order?.number || (d.data.reason === 'stock' ? 'نیاز انبار' : d.data.exchangeId ? 'بار جایگزین' : '—') },
     { id: 'quantity', header: tab === 'finance' ? 'مبلغ (تومان)' : 'مقدار', cell: d => d.kind === 'INQUIRY_CASE' ? `${fa(d.data.lineIds?.length || 0)} قلم` : tab === 'suppliers' ? d.data.contact || '—' : quantity(tab === 'finance' ? d.data.amount : d.data.quantity, tab==='finance'?'':d.data.unit) },
     ...(['requests', 'orders', 'receipts', 'inventory', 'exchanges'].includes(tab) ? [{ id: 'progress', header: 'پیشرفت تأمین', cell: (d: Doc) => <div className="space-y-1 text-sm">
       {tab === 'receipts' || tab === 'inventory' ? <><p>پذیرفته‌شده: {quantity(d.progress.accepted, d.data.unit)}</p><p>در انتظار بررسی: {quantity(d.progress.pending, d.data.unit)}</p></> : <><p>{tab === 'requests' ? 'سفارش‌شده' : 'دریافت‌شده'}: {quantity(tab === 'requests' ? d.progress.ordered : d.progress.received, d.data.unit)}</p><p>پذیرفته‌شده: {quantity(d.progress.accepted, d.data.unit)}</p></>}
     </div> }] : []),
-    ...(tab === 'inquiries' ? [{ id: 'offers', header: 'پیشنهاد تأمین‌کنندگان', cell: (d: Doc) => d.kind === 'INQUIRY_CASE' ? `${fa(d.data.lineIds?.length || 0)} قلم برای بررسی` : `${fa(d.data.offers?.length || 0)} پیشنهاد` }] : []),
+    ...(tab === 'inquiries' ? [{ id: 'offers', header: 'پیشنهاد تأمین‌کنندگان', cell: (d: Doc) => d.kind === 'INQUIRY_CASE' ? `${fa(d.progress.offerCount||0)} پیشنهاد برای ${fa(d.progress.quotedLines||0)} قلم` : `${fa(d.data.offers?.length || 0)} پیشنهاد` }] : []),
     ...(tab === 'receipts' ? [{ id: 'rejected', header: 'پیگیری بار ردشده', cell: (d: Doc) => <div className="space-y-1 text-sm"><p>رد قطعی: {quantity(d.progress.rejected, d.data.unit)}</p><p>برگشت واقعی: {quantity(d.progress.returned, d.data.unit)}</p></div> }] : []),
     ...(tab === 'orders' && access.prices ? [{ id: 'price', header: 'نرخ واحد (تومان)', cell: (d: Doc) => d.data.price == null ? 'در انتظار توافق' : fa(d.data.price) }] : []),
     { id: 'status', header: 'وضعیت', cell: displayStatus },
   ];
   const actionsFor = (d: Doc): ErpAction[] => {
     const actions: ErpAction[] = [];
-    if (d.kind === 'INQUIRY' || d.kind === 'INQUIRY_CASE') actions.push({label:'ادامه استعلام',onClick:() => {setSelected(d);setSheet(d.kind==='INQUIRY_CASE'?'INQUIRY_CASE':'INQUIRY_DETAIL');}});
+    if (d.kind === 'INQUIRY' || d.kind === 'INQUIRY_CASE') {actions.push({label:'مشاهده استعلام',icon:FaEye,onClick:() => navigateInquiry(d.id)});if(access.requester)actions.push({label:d.kind==='INQUIRY_CASE'?'استعلام جدید برای این اقلام':'استعلام جدید برای این سنگ',icon:FaPlus,onClick:()=>repeatInquiry(d)});}
     if (d.kind === 'REQUEST') {
       if(access.buyer&&d.parentId&&d.data.inquirySelection)actions.push({label:'بازبینی پیشنهادهای این درخواست',onClick:()=>router.push(`/dashboard/purchasing/inquiries?document=${encodeURIComponent(d.parentId!)}`)});
       if(access.buyer&&positive(d.progress.stockSurplus))actions.push({label:'انتقال مازاد مشتری به سهم انبار',onClick:()=>open('STOCK_SURPLUS',d)});
@@ -213,18 +241,18 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
     if(preferred)actions.sort((left,right)=>Number(right.label===preferred)-Number(left.label===preferred));
     return actions;
   };
-  const primary: ErpAction[] = ['requests','inquiries'].includes(tab) && access.requester ? [{ label: 'استعلام جدید', onClick: () => {setStartingContract(null);setSheet('START');}, icon: FaPlus, variant: 'solid' }] : tab === 'orders' && access.buyer ? [{ label: 'سفارش خرید جدید', onClick: () => open('ORDER'), icon: FaPlus, variant: 'solid' }] : tab === 'receipts' && (access.buyer || access.receiver) ? [{ label: 'ثبت دریافت بار', onClick: () => open('RECEIPT'), icon: FaPlus, variant: 'solid' }] : tab === 'suppliers' && access.buyer ? [{ label: 'تأمین‌کننده جدید', onClick: () => open('SUPPLIER'), icon: FaPlus, variant: 'solid' }] : [];
+  const primary: ErpAction[] = ['requests','inquiries'].includes(tab) && access.requester ? [{ label: 'استعلام جدید', onClick: () => {setStartingContract(null);setInquirySeed(null);setSheet('START');}, icon: FaPlus, variant: 'solid' }] : tab === 'orders' && access.buyer ? [{ label: 'سفارش خرید جدید', onClick: () => open('ORDER'), icon: FaPlus, variant: 'solid' }] : tab === 'receipts' && (access.buyer || access.receiver) ? [{ label: 'ثبت دریافت بار', onClick: () => open('RECEIPT'), icon: FaPlus, variant: 'solid' }] : tab === 'suppliers' && access.buyer ? [{ label: 'تأمین‌کننده جدید', onClick: () => open('SUPPLIER'), icon: FaPlus, variant: 'solid' }] : [];
   const titles: Record<string, string> = { ACCOUNTING_HANDOFF_CANCEL:'لغو ارسال به حسابداری', STOCK_SURPLUS:'انتقال مازاد مشتری به سهم انبار', HISTORICAL_PURCHASE:'خرید انجام‌شده', ACCOUNTING_HANDOFF:'ارسال برای تطبیق حسابداری', ACCOUNTING_RECOGNIZE:'فاکتور حسابداری', ACCOUNTING_SUPPLIER_LINK:'تطبیق طرف‌حساب', CANCEL: 'لغو درخواست خرید', REQUEST: 'ویرایش درخواست خرید', ORDER: 'سفارش خرید', RECEIPT: draft.exchangeId ? 'دریافت بار جایگزین' : 'دریافت بار', ACCEPT: 'پذیرش کیفیت', REJECT: 'رد قطعی کیفیت', RETURN: 'برگشت واقعی بار', EXCHANGE: 'تعویض با تأمین‌کننده', RETURN_ACCEPTED: 'برگشت پس از پذیرش', SUPPLIER: 'تأمین‌کننده', DETAIL: 'جزئیات و سوابق', QUOTE: 'پاسخ مسئول خرید', CHANGE: 'درخواست تغییر یا لغو', ASSIGN: 'واگذاری مسئول پیگیری', PRICE: 'قیمت توافقی', ADVANCE: 'درخواست پیش‌پرداخت', CLOSE_REMAINDER: 'بستن باقی سفارش کارخانه', LINK_EXISTING: 'اتصال به سابقه موجود', RESOLVE_CHANGE: 'نتیجه واقعی تغییر' };
-  if (sheet === 'INQUIRY_DETAIL' && selected) return <ErpPresentationProvider scope="workspace"><InquiryComparison id={selected.id} access={access} onBack={() => setSheet('')} onChanged={load} onOrderRequest={openInquiryOrder}/></ErpPresentationProvider>;
-  if (sheet === 'INQUIRY_CASE' && selected) return <ErpPresentationProvider scope="workspace"><InquiryCaseView id={selected.id} access={access} onBack={()=>setSheet('')} onChanged={load} onOrderRequest={openInquiryOrder}/></ErpPresentationProvider>;
+  if (sheet === 'INQUIRY_DETAIL' && selected) return <ErpPresentationProvider scope="workspace"><InquiryComparison id={selected.id} access={access} onBack={() => backInquiry(selected.parentId)} onChanged={load} onOrderRequest={openInquiryOrder}/></ErpPresentationProvider>;
+  if (sheet === 'INQUIRY_CASE' && selected) return <ErpPresentationProvider scope="workspace"><InquiryCaseView id={selected.id} access={access} onBack={()=>backInquiry()} onChanged={load} onOpenLine={navigateInquiry}/></ErpPresentationProvider>;
   if(sheet==='OPENING_INQUIRY')return <ErpLoading/>;
-  if (sheet === 'START') return <ErpPresentationProvider scope="workspace"><PurchaseStart access={access} initialContract={startingContract} onBack={()=>setSheet('')} onCreated={async result=>{setSheet('OPENING_INQUIRY');router.replace(`/dashboard/purchasing/inquiries?document=${encodeURIComponent(result.id)}`);}}/></ErpPresentationProvider>;
-  if (dashboard && !sheet) return <ErpPresentationProvider scope="workspace"><PurchaseDashboard workspace={workspace} onStart={()=>{setStartingContract(null);setSheet('START');}} onStartContract={contract=>{setStartingContract(contract);setSheet('START');}} onNavigate={changeTab} onContinue={(doc,action)=>{if(action==='INQUIRY_CASE'||action==='INQUIRY_DETAIL'){setSelected(doc);setSheet(action);}else open(action,doc);}}/></ErpPresentationProvider>;
+  if (sheet === 'START') return <ErpPresentationProvider scope="workspace"><PurchaseStart access={access} initialContract={startingContract} initialSeed={inquirySeed} onBack={()=>setSheet('')} onCreated={async result=>{setSheet('OPENING_INQUIRY');router.push(inquiryHref(result.id));}}/></ErpPresentationProvider>;
+  if (dashboard && !sheet) return <ErpPresentationProvider scope="workspace"><PurchaseDashboard workspace={workspace} onStart={()=>{setStartingContract(null);setInquirySeed(null);setSheet('START');}} onStartContract={contract=>{setStartingContract(contract);setInquirySeed(null);setSheet('START');}} onNavigate={changeTab} onContinue={(doc,action)=>{if(action==='INQUIRY_CASE'||action==='INQUIRY_DETAIL'){navigateInquiry(doc.id);}else open(action,doc);}}/></ErpPresentationProvider>;
   return <ErpPresentationProvider scope="workspace"><div className="sds-neumorphic-scope space-y-5 pb-20">
     <ErpListPage title={tabs[tab]} eyebrow="فضای کاری خرید" description={descriptions[tab]} actions={[...primary,...(tab==='orders'&&access.buyer?[{label:'ثبت خرید انجام‌شده',variant:'outline' as const,onClick:()=>open('HISTORICAL_PURCHASE')}]:[]), { label: 'به‌روزرسانی', icon: FaSync, tone: 'neutral', variant: 'soft', onClick: load }]}
-      metrics={[{ label: 'نیازمند تأمین در فهرست جاری', value: fa(workspace.requests.filter(d => d.progress.missing !== '0' && d.status === 'OPEN').length), tone: 'primary', icon: FaClipboardList }, { label: 'منتظر دریافت در فهرست جاری', value: fa(workspace.orders.filter(d => positive(d.progress.remaining) || positive(d.progress.replacementRemaining)).length), tone: 'info', icon: FaTruck }, { label: 'منتظر کیفیت در فهرست جاری', value: fa(workspace.receipts.filter(d => positive(d.progress.pending)).length), tone: 'warning', icon: FaBoxOpen }]}
-      rows={visibleRows} rowKey={d => d.id} columns={columns} rowActions={actionsFor} rowActionMode="menu"
-      filters={[{ id: 'search', type: 'search', label: 'جست‌وجو', placeholder: 'شماره سند، قرارداد، سنگ یا تأمین‌کننده', value: search, onChange: setSearch }, { id: 'status', type: 'select', label: 'وضعیت پرونده', value: filter, onChange: setFilter, options: [{ value: 'all', label: 'همه پرونده‌ها' }, { value: 'open', label: 'باز' }, { value: 'closed', label: 'بسته و تعیین تکلیف‌شده' }] }]}
+      metrics={purchaseMetrics(workspace)}
+      rows={visibleRows} rowKey={d => d.id} columns={columns} rowActions={actionsFor} rowActionMode={tab==='inquiries'?'icons':'menu'}
+      filters={[{ id: 'search', type: 'search', label: 'جست‌وجو', placeholder: 'شماره سند، قرارداد، سنگ یا تأمین‌کننده', value: search, onChange: setSearch }, { id: 'status', type: 'select', label: 'وضعیت پرونده', value: filter, onChange: changeStatusFilter, options: [...(['requests','orders','receipts'].includes(tab)?[{value:'attention',label:tab==='requests'?'نیازمند تأمین':tab==='orders'?'منتظر دریافت':'منتظر بررسی کیفیت'}]:[]),{ value: 'all', label: 'همه پرونده‌ها' }, { value: 'open', label: 'باز' }, { value: 'closed', label: 'بسته و تعیین تکلیف‌شده' }] }]}
       emptyState={<ErpEmptyState title="موردی برای نمایش وجود ندارد." description="با این جست‌وجو و فیلتر، موردی در این بخش پیدا نشد." />}
       footer={<p className="text-xs text-[var(--sds-text-muted)]">نمایش حداکثر {fa(workspace.limit)} از {fa(workspace.total)} سند مطابق جست‌وجو و دسترسی شما؛ برای پرونده قدیمی از جست‌وجو استفاده کنید.</p>}
     >{feedback && <ErpInlineState kind={feedback.kind} title={feedback.title} action={nextAction()} />}</ErpListPage>
@@ -305,7 +333,6 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
         {sheet === 'CANCEL' && <ErpInlineState kind="permission" title="درخواست لغو می‌شود؛ سابقه آن باقی می‌ماند. این کار تعهد سفارش ایجادشده را لغو نمی‌کند." />}
         {sheet === 'CLOSE_REMAINDER' && <><ErpInlineState kind="permission" title="باقی سفارش این کارخانه بسته می‌شود؛ کسری نیاز مشتری همچنان باز می‌ماند." />{notes}</>}
         {sheet === 'LINK_EXISTING' && <>{select('sourceType', 'نوع سابقه', [...(access.accountant ? [{ id: 'SUPPLIER_INVOICE', name: 'فاکتور تأمین‌کننده' }, { id: 'PAYMENT', name: 'پرداخت حسابداری' }] : []), ...(access.receiver ? [{ id: 'INVENTORY_EVENT', name: 'رویداد موجودی' }] : [])])}{existing.filter(e => e.type === draft.sourceType).length > 0 && select('sourceId', 'انتخاب سابقه موجود', existing.filter(e => e.type === draft.sourceType).map(e => ({ id: e.id, name: e.label || e.name })))}{!existing.filter(e => e.type === draft.sourceType).length && field('sourceId', 'شناسه سابقه معتبر', { required: true })}<ErpInlineState kind="permission" title="اتصال فقط سابقه موجود را پیوند می‌دهد؛ موجودی، بدهی یا پرداخت دوباره ثبت نمی‌شود." /></>}
-      {sheet&& !['DETAIL','START','INQUIRY_DETAIL','INQUIRY_CASE'].includes(sheet)&&<PurchaseDraftRecovery key={`${sheet}:${selected?.id||'new'}:${selected?.version||'new'}`} action={sheet} record={selected?.id||'new'} version={String(selected?.version||'new')} model={{draft,allocations:extraAllocations,costs}} busy={busy} uncertain={Boolean(uncertain)} onRestore={model=>{setDraft(model.draft);setExtraAllocations(model.allocations);setCosts(model.costs);setErrors({});}}/>}
       </fieldset></div>
     </ErpSheet>
   </div></ErpPresentationProvider>;

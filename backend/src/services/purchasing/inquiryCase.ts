@@ -14,7 +14,7 @@ export async function startInquiryCase(tx: Tx, actor: Actor, access: Access, inp
   const contractId = reason === 'contract' ? required(input.contractId, 'contractId', 'قرارداد') : null;
   const ownerId = required(input.ownerId, 'ownerId', 'مسئول پیگیری خرید');
   const group = await createDocument(tx, actor.id, 'INQUIRY_CASE', {
-    reason, title: text(input.title) || (reason === 'contract' ? 'تأمین اقلام قرارداد' : reason === 'stock' ? 'تأمین نیاز انبار' : reason==='market'?'استعلام مستقل قیمت':'استعلام پیش از قرارداد'),
+    reason, titleIsCustom:Boolean(text(input.title)), title: text(input.title) || (reason === 'contract' ? 'تأمین اقلام قرارداد' : reason === 'stock' ? 'تأمین نیاز انبار' : reason==='market'?'استعلام مستقل قیمت':'استعلام پیش از قرارداد'),
     lineIds: [], notes: text(input.notes),
   }, { ownerId, contractId });
   const lineIds: string[] = [], seen = new Set<string>();

@@ -4,15 +4,17 @@ import {PrismaClient} from '../../backend/node_modules/@prisma/client';
 import {createAuthoritativeSession,SESSION_COOKIE} from '../../backend/src/services/identitySessionService';
 import {assertNoHorizontalOverflow,setTheme} from './support/design-system';
 const db=new PrismaClient({datasources:{db:{url:'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?connection_limit=2&pool_timeout=10'}}});
+const inquiryTitle='بازبینی قیمت تراورتن برای پروژه نمونه';
 const internal=randomUUID(),stone='تراورتن نمونه بررسی تجربه استعلام';
 let actorId='',token='',caseId='',lineId='',supplierId='';
 test.beforeAll(async()=>{
  const actor=await db.user.create({data:{username:`qa-quote-ux-${internal}`,email:`${internal}@example.invalid`,password:'unused',role:'ADMIN',firstName:'آزمایش',lastName:'کاربری استعلام'}});actorId=actor.id;
  token=(await createAuthoritativeSession(db,actorId,{userAgent:'Local quotation usability QA'})).token;
  const supplier=await db.purchasingSupplier.create({data:{name:`کارخانه نمونه · ${internal}`,identityKey:`QA-UX:${internal}`,contact:'آزمایش محلی',createdBy:actorId}});supplierId=supplier.id;
- const parent=await db.purchasingDocument.create({data:{kind:'INQUIRY_CASE',ownerId:actorId,creatorId:actorId,data:{reason:'market',title:`استعلام مستقل ${internal}`,lineIds:[]}}});caseId=parent.id;
- const line=await db.purchasingDocument.create({data:{kind:'INQUIRY',parentId:caseId,ownerId:actorId,creatorId:actorId,data:{reason:'market',stone,unit:'مترمربع',quantity:'1234567.125',specKey:`QA-UX:${internal}`,technical:{},selection:[],offers:[{id:randomUUID(),supplierId,supplierName:supplier.name,price:'1000000',quantity:'1234567.125',capacity:'estimate',status:'VALID',variant:'نقدی',recordedAt:new Date().toISOString(),validUntil:null}]}}});lineId=line.id;
- await db.purchasingDocument.update({where:{id:caseId},data:{data:{reason:'market',title:`استعلام مستقل ${internal}`,lineIds:[lineId]}}});
+ const parent=await db.purchasingDocument.create({data:{kind:'INQUIRY_CASE',ownerId:actorId,creatorId:actorId,data:{reason:'market',title:inquiryTitle,lineIds:[]}}});caseId=parent.id;
+ const catalogItem=await db.product.findFirstOrThrow({where:{isActive:true,deletedAt:null}});
+ const line=await db.purchasingDocument.create({data:{kind:'INQUIRY',parentId:caseId,ownerId:actorId,creatorId:actorId,data:{reason:'market',productId:catalogItem.id,stone,unit:'مترمربع',quantity:'1234567.125',specKey:`QA-UX:${internal}`,productCode:'001234',technical:{width:'30',widthUnit:'cm',thicknessValue:'2',stoneType:'تراورتن',finish:'صیقل',quality:'ممتاز',dimensions:'طول برش ۱۲۰ سانتی‌متر'},selection:[],offers:[{id:randomUUID(),supplierId,supplierName:supplier.name,price:'1000000',quantity:'1234567.125',capacity:'estimate',status:'VALID',variant:'نقدی',recordedAt:new Date().toISOString(),validUntil:null}]}}});lineId=line.id;
+ await db.purchasingDocument.update({where:{id:caseId},data:{data:{reason:'market',title:inquiryTitle,lineIds:[lineId]}}});
 });
 test.afterAll(async()=>{try{
  if(lineId)await db.purchasingDocument.deleteMany({where:{id:lineId,creatorId:actorId}});
@@ -23,11 +25,15 @@ test.afterAll(async()=>{try{
 test.beforeEach(async({page})=>{await page.context().addCookies([{name:SESSION_COOKIE,value:token,domain:'localhost',path:'/',httpOnly:true,secure:false,sameSite:'Lax'}]);});
 test('readable inquiry names, contextual proposal action, exact grouped input and one-level details',async({page},info)=>{
  await page.goto(`/dashboard/purchasing/inquiries?document=${caseId}`);
- await expect(page.getByRole('heading',{name:`${stone} · استعلام مستقل`,exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{name:inquiryTitle,exact:true})).toBeVisible();
  await expect(page.getByText('مقدار: ۱,۲۳۴,۵۶۷.۱۲۵ مترمربع',{exact:true})).toBeVisible();
  await expect(page.locator('[data-dashboard-main]')).not.toContainText(internal);
  await page.getByRole('button',{name:'ادامه',exact:true}).click();
  await expect(page.getByRole('heading',{name:stone,exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'مشخصات سنگ',exact:true})).toBeVisible();
+ await expect(page.getByText('۰۰۱۲۳۴',{exact:true})).toBeVisible();
+ await expect(page.getByText('۳۰ سانتی‌متر',{exact:true})).toBeVisible();
+ await page.screenshot({path:info.outputPath('inquiry-overview-desktop.png'),fullPage:true});
  await expect(page.getByText('هر مترمربع: ۱,۰۰۰,۰۰۰',{exact:true}).filter({visible:true})).toBeVisible();
  await expect(page.locator('[data-dashboard-main]')).not.toContainText(internal);
  const action=page.getByRole('button',{name:'ثبت پیشنهاد تأمین‌کننده',exact:true});
@@ -41,11 +47,16 @@ test('readable inquiry names, contextual proposal action, exact grouped input an
  const price=modal.getByRole('textbox',{name:'نرخ هر مترمربع (تومان)',exact:true}),amount=modal.getByRole('textbox',{name:'مقدار قابل تأمین',exact:true});
  await price.fill('1000000');await expect(price).toHaveValue('1,000,000');
  await amount.fill('۱۲۳۴۵۶۷.۱۲۳۴۵۶۷۸۹');await expect(amount).toHaveValue('1,234,567.123456789');
- await expect(modal.getByRole('combobox',{name:'وضعیت همین پیشنهاد جدید',exact:true})).toContainText('معتبر؛ تأمین‌کننده امکان تأمین دارد');
+ await expect(modal.getByRole('combobox',{name:'وضعیت همین پیشنهاد جدید',exact:true})).toHaveCount(0);
  await modal.getByRole('button',{name:/^حمل، موعد و شرایط پرداخت/}).click();
  const variant=modal.getByRole('combobox',{name:'نوع پیشنهاد پرداخت',exact:true});await variant.click();
  await page.getByRole('option',{name:'چکی',exact:true}).click();await expect(variant).toContainText('چکی');
  await expect(modal.getByRole('textbox',{name:'عنوان گزینه، مانند نقدی یا چکی',exact:true})).toHaveCount(0);
+ await modal.getByRole('button',{name:/^مدت تأمین به‌جای تاریخ معین/}).click();
+ await expect(modal.getByRole('combobox',{name:'نوع روز',exact:true})).toHaveCount(0);
+ await expect(modal.getByRole('textbox',{name:'روز کاری تا آماده‌شدن',exact:true})).toBeVisible();
+ await expect(modal.getByRole('textbox',{name:'روز کاری تا رسیدن',exact:true})).toBeVisible();
+ await modal.getByRole('button',{name:/^مدت تأمین به‌جای تاریخ معین/}).click();
 
  await modal.getByRole('button',{name:/^ارتباط با پیشنهاد قبلی/}).click();
  await expect(modal.getByRole('combobox',{name:'پیشنهادی که این پیشنهاد جدید جایگزین آن می‌شود',exact:true})).toBeVisible();
@@ -53,6 +64,9 @@ test('readable inquiry names, contextual proposal action, exact grouped input an
  await page.setViewportSize({width:390,height:844});await assertNoHorizontalOverflow(page);
  await setTheme(page,'dark');await page.screenshot({path:info.outputPath('proposal-mobile-dark.png')});
  await page.keyboard.press('Escape');
+ await expect(modal).toHaveCount(0);
+ await page.getByRole('button',{name:/^جزئیات و سوابق/}).click();
+ await page.screenshot({path:info.outputPath('inquiry-overview-mobile-dark.png'),fullPage:true});
  expect((await db.purchasingDocument.findUniqueOrThrow({where:{id:lineId}})).data).toHaveProperty('offers.0.price','1000000');
  const saved=await db.purchasingDocument.findUniqueOrThrow({where:{id:lineId}});
  await db.purchasingDocument.update({where:{id:lineId},data:{data:{...(saved.data as Record<string,unknown>),reason:'stock'}}});
@@ -66,13 +80,84 @@ test('catalog reuses Sales families with server filtering and readable list titl
  await page.getByRole('combobox',{name:'نوع کار',exact:true}).click();await page.getByRole('option',{name:'استعلام مستقل قیمت',exact:true}).click();
  const typeBox=await page.getByRole('combobox',{name:'نوع کار',exact:true}).boundingBox(),ownerBox=await page.getByRole('combobox',{name:'مسئول پیگیری خرید',exact:true}).boundingBox();expect(Math.abs(typeBox!.y-ownerBox!.y)).toBeLessThan(4);
  await expect(page.getByRole('combobox',{name:'خرید برای',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:/^حفظ و بازیابی پیش‌نویس/})).toHaveCount(0);
  for(const [family,name] of [['longitudinal','طولی'],['stair','پله'],['slab','اسلب'],['prepared','آماده']]){
    const tab=page.getByRole('tab',{name,exact:true});await expect(tab).toBeVisible();
    const read=page.waitForResponse(r=>r.url().includes('/purchasing/catalog')&&new URL(r.url()).searchParams.get('family')===family);
    await tab.click();expect((await read).status()).toBe(200);await expect(tab).toHaveAttribute('aria-selected','true');
+   if(family==='longitudinal'){await page.getByRole('region',{name:'کاتالوگ محصولات',exact:true}).getByRole('option').first().click();await expect(page.getByRole('combobox',{name:'دامنه قیمت قلم 1',exact:true})).toHaveCount(0);await expect(page.getByRole('combobox',{name:'استعلام قبلی قلم 1',exact:true})).toHaveCount(0);await expect(page.getByRole('textbox',{name:'مشخصات اضافهٔ موردنیاز (اختیاری)',exact:true})).toBeVisible();}
  }
  await page.screenshot({path:info.outputPath('catalog-categories.png'),fullPage:true});
- page.once('dialog',dialog=>dialog.accept());await page.goto('/dashboard/purchasing/inquiries');
- const row=page.getByRole('row').filter({hasText:`${stone} · استعلام مستقل`});await expect(row).toBeVisible();await expect(row).not.toContainText(internal);
+ await page.goto('/dashboard/purchasing/inquiries');
+ const searchRead=page.waitForResponse(r=>r.url().includes('/purchasing/workspace')&&new URL(r.url()).searchParams.get('q')===inquiryTitle);
+ await page.getByRole('searchbox',{name:'جست‌وجو',exact:true}).fill(inquiryTitle);
+ expect((await searchRead).status()).toBe(200);
+ await expect(page.getByRole('row')).toHaveCount(2);
+ const row=page.getByRole('row').filter({hasText:inquiryTitle});await expect(row).toBeVisible();await expect(row).not.toContainText(internal);await expect(row).toContainText('پیشنهادها ثبت شده');await expect(row).toContainText('۱ پیشنهاد برای ۱ قلم');await expect(row.getByRole('link',{name:'ادامه استعلام',exact:true})).toHaveCount(0);
  await page.screenshot({path:info.outputPath('readable-inquiry-list.png'),fullPage:true});
+});
+
+test('browser back returns from inquiry item to its case instead of old finance page',async({page})=>{
+ await page.goto('/dashboard/purchasing/finance');
+ await expect(page.getByRole('heading',{name:'پیگیری حسابداری',exact:true})).toBeVisible();
+ await page.goto(`/dashboard/purchasing/inquiries?document=${caseId}`);
+ await expect(page.getByRole('heading',{name:inquiryTitle,exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'ادامه',exact:true}).click();
+ await expect(page).toHaveURL(new RegExp(`document=${lineId}$`));
+ await expect(page.getByRole('heading',{name:stone,exact:true})).toBeVisible();
+ await page.goBack();
+ await expect(page.getByRole('heading',{name:inquiryTitle,exact:true})).toBeVisible();
+ await page.goBack();
+ await expect(page).toHaveURL(/\/dashboard\/purchasing\/inquiries$/);
+ await expect(page.getByRole('heading',{name:'استعلام‌های ثبت‌شده',exact:true})).toBeVisible();
+ await page.goForward();
+ await expect(page.getByRole('heading',{name:inquiryTitle,exact:true})).toBeVisible();
+ await page.goForward();
+ await expect(page.getByRole('heading',{name:stone,exact:true})).toBeVisible();
+ await page.reload();
+ await expect(page.getByRole('heading',{name:stone,exact:true})).toBeVisible();
+ await page.goBack();
+ await expect(page.getByRole('heading',{name:inquiryTitle,exact:true})).toBeVisible();
+});
+
+test('mobile direct item links and visible back controls keep the inquiry hierarchy',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ await page.goto('/dashboard/purchasing/finance');
+ await expect(page.getByRole('heading',{name:'پیگیری حسابداری',exact:true})).toBeVisible();
+ await page.goto(`/dashboard/purchasing/inquiries?document=${lineId}`);
+ await expect(page.getByRole('heading',{name:stone,exact:true})).toBeVisible();
+ await page.goBack();
+ await expect(page.getByRole('heading',{name:inquiryTitle,exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'ادامه',exact:true}).click();
+ await expect(page.getByRole('heading',{name:stone,exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'بازگشت',exact:true}).click();
+ await expect(page.getByRole('heading',{name:inquiryTitle,exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'بازگشت به استعلام‌ها',exact:true}).click();
+ await expect(page).toHaveURL(/\/dashboard\/purchasing\/inquiries$/);
+ await expect(page.getByRole('heading',{name:'استعلام‌های ثبت‌شده',exact:true})).toBeVisible();
+ await assertNoHorizontalOverflow(page);
+});
+
+test('named saved inquiries expose separate view and fresh inquiry actions without changing old offers',async({page},info)=>{
+ const before=await db.purchasingDocument.findUniqueOrThrow({where:{id:lineId}}),count=await db.purchasingDocument.count({where:{creatorId:actorId}});
+ await page.goto('/dashboard/purchasing/inquiries');
+ const searchRead=page.waitForResponse(r=>r.url().includes('/purchasing/workspace')&&new URL(r.url()).searchParams.get('q')===inquiryTitle);
+ await page.getByRole('searchbox',{name:'جست‌وجو',exact:true}).fill(inquiryTitle);
+ expect((await searchRead).status()).toBe(200);
+ await expect(page.getByRole('row')).toHaveCount(2);
+ const row=page.getByRole('row').filter({hasText:inquiryTitle});await expect(row).toBeVisible();
+ await expect(row.getByRole('button',{name:'مشاهده استعلام',exact:true})).toBeVisible();
+ await expect(row.getByRole('button',{name:'ادامه استعلام',exact:true})).toHaveCount(0);
+ await expect(row).toContainText('پیشنهادها ثبت شده');
+ await page.screenshot({path:info.outputPath('named-inquiry-actions.png'),fullPage:true});
+ await row.getByRole('button',{name:'استعلام جدید برای این اقلام',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'استعلام جدید',exact:true})).toBeVisible();
+ await expect(page.getByRole('combobox',{name:'نوع کار',exact:true})).toContainText('استعلام مستقل قیمت');
+ await expect(page.getByRole('textbox',{name:'سنگ و مشخصات اولیه',exact:true})).toHaveValue(stone);
+ await expect(page.getByLabel(/مقدار موردنیاز.*اختیاری/)).toHaveValue('');
+ await expect(page.getByRole('textbox',{name:'مشخصات اضافهٔ موردنیاز (اختیاری)',exact:true})).toHaveValue('طول برش ۱۲۰ سانتی‌متر');
+ await expect(page.getByText(/قیمت‌ها و پیشنهادهای قبلی منتقل نمی‌شوند/)).toBeVisible();
+ expect((await db.purchasingDocument.findUniqueOrThrow({where:{id:lineId}})).data).toEqual(before.data);
+ expect(await db.purchasingDocument.count({where:{creatorId:actorId}})).toBe(count);
+ await page.screenshot({path:info.outputPath('fresh-inquiry-from-same-stone.png'),fullPage:true});
 });

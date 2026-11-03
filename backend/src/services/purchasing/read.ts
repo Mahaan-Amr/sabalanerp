@@ -86,7 +86,7 @@ export async function purchasingWorkspace(actor: Actor, q = '', db: Database = p
   const search = text(q, 100), digits = cleanDigits(search), number = /^\d{1,9}$/.test(digits) ? Number(digits) : null;
   const matchingContracts = search ? await db.salesContract.findMany({ where: { contractNumber: { contains: search } }, select: { id: true }, take: 100 }) : [];
   const childMatches=search?await db.purchasingDocument.findMany({where:{kind:'INQUIRY',parentId:{not:null},OR:[{data:{path:['stone'],string_contains:search}},...(number===null?[]:[{number}])]},select:{parentId:true},take:500}):[];
-  const where: Prisma.PurchasingDocumentWhereInput = { kind: { in: visibleKinds }, AND:[{OR:[{kind:{not:'INQUIRY'}},{parentId:null}]}], ...(visibleIds ? { id: { in: visibleIds } } : {}), ...(search ? { OR: [{ id: { contains: search } },{id:{in:childMatches.map(c=>c.parentId!)}}, { contractId: { in: matchingContracts.map(c => c.id) } }, { data: { path: ['stone'], string_contains: search } }, { data: { path: ['supplierName'], string_contains: search } }, ...(number === null ? [] : [{ number }])] } : {}) };
+  const where: Prisma.PurchasingDocumentWhereInput = { kind: { in: visibleKinds }, AND:[{OR:[{kind:{not:'INQUIRY'}},{parentId:null}]}], ...(visibleIds ? { id: { in: visibleIds } } : {}), ...(search ? { OR: [{ id: { contains: search } },{id:{in:childMatches.map(c=>c.parentId!)}}, { contractId: { in: matchingContracts.map(c => c.id) } }, { data: { path: ['stone'], string_contains: search } }, {data:{path:['title'],string_contains:search}}, { data: { path: ['supplierName'], string_contains: search } }, ...(number === null ? [] : [{ number }])] } : {}) };
   const [rows, total] = await Promise.all([db.purchasingDocument.findMany({ where, orderBy: { createdAt: 'desc' }, take: 500 }), db.purchasingDocument.count({ where })]);
   const requested = rows.map(asDoc);
   const caseIds=requested.filter(d=>d.kind==='INQUIRY_CASE').map(d=>d.id);
@@ -95,7 +95,7 @@ export async function purchasingWorkspace(actor: Actor, q = '', db: Database = p
   const convertedNeeds=convertedIds.length?await db.purchasingDocument.findMany({where:{id:{in:convertedIds},kind:'REQUEST',status:{not:'CANCELLED'}},select:{id:true,data:true}}):[];
   const caseProgress=(doc:Doc)=>{
     const lines=caseLines.filter(l=>l.parentId===doc.id);
-    return {openLines:lines.filter(l=>doc.data.reason==='market'?!(l.data.offers||[]).some(offerValid):!((l.data.converted||[]).some((r:any)=>convertedNeeds.some(n=>n.id===r.requestId)))||Boolean(l.data.quantity&&gt(l.data.quantity,add(...convertedNeeds.filter(n=>(l.data.converted||[]).some((r:any)=>r.requestId===n.id)).map(n=>(n.data as any).purchaseQuantity||(n.data as any).quantity))))).length};
+    return {offerCount:String(lines.reduce((count,line)=>count+(line.data.offers||[]).length,0)),quotedLines:String(lines.filter(line=>(line.data.offers||[]).length>0).length),validLines:String(lines.filter(line=>(line.data.offers||[]).some(offerValid)).length),selectedLines:String(lines.filter(line=>(line.data.selection||[]).length>0).length),openLines:lines.filter(l=>doc.data.reason==='market'?!(l.data.offers||[]).some(offerValid):!((l.data.converted||[]).some((r:any)=>convertedNeeds.some(n=>n.id===r.requestId)))||Boolean(l.data.quantity&&gt(l.data.quantity,add(...convertedNeeds.filter(n=>(l.data.converted||[]).some((r:any)=>r.requestId===n.id)).map(n=>(n.data as any).purchaseQuantity||(n.data as any).quantity))))).length};
   };
   const requestIds = requested.filter(d => d.kind === 'REQUEST').map(d => d.id);
   const allocations = await db.purchasingLink.findMany({ where: { targetId: { in: requestIds }, purpose: 'ALLOCATION' } });
@@ -140,7 +140,7 @@ export async function purchasingWorkspace(actor: Actor, q = '', db: Database = p
     for(const doc of finance){const item=items.find(i=>i.id===doc.data.openItemId);if(item){const paid=item.allocations.reduce((n,l)=>n+BigInt(l.amountRials.toFixed()),0n),remaining=BigInt(item.amountRials.toFixed())-paid;doc.data={...doc.data,remainingRials:remaining.toString(),paymentStatus:remaining===0n?'SETTLED':paid>0n?'PARTIALLY_SETTLED':'POSTED_UNSETTLED'};}}
   }
   const changes = requested.filter(d => d.kind === 'CHANGE').map(encode);
-  return json({ access: a, inquiries: requested.filter(d => d.kind === 'INQUIRY_CASE' || d.kind === 'INQUIRY' && !d.parentId).map(d=>({...encode(d),displayTitle:d.kind==='INQUIRY_CASE'?inquiryCaseTitle(d,caseLines.filter(l=>l.parentId===d.id)):d.data.stone,progress:d.kind==='INQUIRY_CASE'?caseProgress(d):{}})), requests, orders, receipts, exchanges, finance, changes, total, limit: 500 });
+  return json({ access: a, inquiries: requested.filter(d => d.kind === 'INQUIRY_CASE' || d.kind === 'INQUIRY' && !d.parentId).map(d=>({...encode(d),displayTitle:d.kind==='INQUIRY_CASE'?inquiryCaseTitle(d,caseLines.filter(l=>l.parentId===d.id)):d.data.stone,stoneSummary:d.kind==='INQUIRY_CASE'?[...new Set(caseLines.filter(l=>l.parentId===d.id).map(l=>l.data.stone))].join('، '):d.data.stone,progress:d.kind==='INQUIRY_CASE'?caseProgress(d):{}})), requests, orders, receipts, exchanges, finance, changes, total, limit: 500 });
 }
 const terminalStatus = (status: string) => ['CANCELLED', 'EXPIRED', 'VOID'].includes(status);
 export async function purchasingDetail(actor: Actor, id: string, db: Database = prisma) {
@@ -158,6 +158,9 @@ export async function purchasingDetail(actor: Actor, id: string, db: Database = 
 }
 
 function inquiryCaseTitle(doc:Doc,lines:Doc[]) {
+ const title=text(doc.data.title);
+ const defaults=['تأمین اقلام قرارداد','تأمین نیاز انبار','استعلام مستقل قیمت','استعلام پیش از قرارداد'];
+ if(title&&(doc.data.titleIsCustom===true||!defaults.includes(title)))return title;
  const names=[...new Set(lines.map(l=>l.data.stone).filter(Boolean))];
  const stone=names[0]||doc.data.title||'اقلام انتخاب‌شده';
  const extra=names.length>1?` و ${names.length-1} کالای دیگر`:'';

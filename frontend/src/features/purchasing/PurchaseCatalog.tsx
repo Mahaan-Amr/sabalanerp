@@ -5,8 +5,8 @@ import {ContractProductCatalog,type ContractCatalogFamily,type ContractCatalogTy
 import {purchasingAPI,purchaseError,type CatalogProduct} from './api';
 import {purchaseNumber as fa,purchaseDigits,purchaseText} from './presentation';
 
-export function PurchaseCatalog({onSelect,disabled=false}:{onSelect:(product:CatalogProduct)=>void;disabled?:boolean}) {
-  const [query,setQuery]=useState(''),[items,setItems]=useState<CatalogProduct[]>([]),[cursor,setCursor]=useState<string|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState('');
+export function PurchaseCatalog({onSelect,disabled=false,initialQuery=''}:{initialQuery?:string;onSelect:(product:CatalogProduct)=>void;disabled?:boolean}) {
+  const [query,setQuery]=useState(initialQuery),[items,setItems]=useState<CatalogProduct[]>([]),[cursor,setCursor]=useState<string|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState('');
   const [family,setFamily]=useState<ContractCatalogFamily|null>(null),[types,setTypes]=useState<ContractCatalogTypeOption[]>([]);
   const sequence=useRef(0);
   useEffect(()=>{const current=sequence;const serial=++current.current;setLoading(true);const timer=setTimeout(()=>{

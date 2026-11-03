@@ -65,10 +65,17 @@ test('real RFQ to 40/15/25 rejection, physical return, partial replacement and l
     await modal.getByLabel('مقدار قابل تأمین',{exact:true}).fill('40');
     await modal.getByRole('button',{name:/^حمل، موعد و شرایط پرداخت/}).click();
     await choose(page,modal.getByRole('combobox',{name:'نوع پیشنهاد پرداخت',exact:true}),index?'چکی':'نقدی');
+    await modal.getByRole('button',{name:/^مدت تأمین به‌جای تاریخ معین/}).click();
+    await modal.getByRole('textbox',{name:'روز کاری تا آماده‌شدن',exact:true}).fill('3');
+    await modal.getByRole('textbox',{name:'روز کاری تا رسیدن',exact:true}).fill('5');
+    await expect(modal.getByRole('combobox',{name:'نوع روز',exact:true})).toHaveCount(0);
     await command(page,'INQUIRY_OFFER',()=>modal.getByRole('button',{name:'ثبت پیشنهاد',exact:true}).click());
     await expect(modal).not.toBeVisible();
     expect(((await document(inquiryId)).data as any).offers.at(-1).variant).toBe(index?'چکی':'نقدی');
     expect(((await document(inquiryId)).data as any).offers.at(-1).capacity).toBe('estimate');
+    expect(((await document(inquiryId)).data as any).offers.at(-1).dayKind).toBe('working');
+    expect(((await document(inquiryId)).data as any).offers.at(-1).status).toBe('VALID');
+    await expect(page.getByText('آماده‌شدن: ۳ روز کاری پس از سفارش قطعی',{exact:true}).filter({visible:true}).first()).toBeVisible();
     await page.screenshot({path:info.outputPath(`after-offer-${index}.png`),fullPage:true});
     await expect(page.getByRole('heading',{name:stone,exact:true})).toBeVisible();
   }
@@ -169,9 +176,7 @@ test('independent catalog inquiry retains prices and a later need explicitly reu
   await catalog.getByRole('searchbox',{name:'جستجوی محصول',exact:true}).fill(sku.code);
   await expect(choice).toContainText('۷۲۳,۴۵۶');await choice.click();
   await page.getByLabel(/مقدار موردنیاز.*اختیاری/).fill('4');
-  await choose(page,page.getByRole('combobox',{name:'دامنه قیمت قلم 1',exact:true}),'برای ابعاد یا فرآوری مشخص');
-  await page.getByRole('button',{name:/^مشخصات تکمیلی و استعلام قبلی/}).click();
-  await page.getByRole('textbox',{name:'ابعاد و ضخامت',exact:true}).fill('ابعاد مشخص مورد تأیید کارخانه');
+  await page.getByRole('textbox',{name:'مشخصات اضافهٔ موردنیاز (اختیاری)',exact:true}).fill('ابعاد مشخص مورد تأیید کارخانه');
   const need=await command(page,'INQUIRY_START',()=>page.getByRole('button',{name:/^ادامه به قیمت‌ها/}).click());
   await page.getByRole('button',{name:'ادامه',exact:true}).click();
   const prior=page.getByRole('row').filter({hasText:suppliers[0].name}).filter({hasText:'۷۲۳,۴۵۶'});

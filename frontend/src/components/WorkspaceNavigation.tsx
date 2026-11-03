@@ -593,7 +593,7 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({
 
       case WORKSPACES.PURCHASING:
         return [{name:'PurchasingDashboard',namePersian:'داشبورد خرید',href:'/dashboard/purchasing',icon:FaShoppingCart,show:true,exact:true},
-          {name:'inquiries',namePersian:'استعلام تأمین‌کنندگان',href:'/dashboard/purchasing/inquiries',icon:FaClipboardList,show:purchasingSections.includes('inquiries')},
+          {name:'inquiries',namePersian:'استعلام‌های ثبت‌شده',href:'/dashboard/purchasing/inquiries',icon:FaClipboardList,show:purchasingSections.includes('inquiries')},
           {name:'purchase-records',namePersian:'سوابق و جزئیات',href:'/dashboard/purchasing/requests',icon:FaHistory,show:true,children:[
           ...[['requests','درخواست‌های خرید',FaClipboardList],['orders','سفارش‌های خرید',FaClipboardList],['receipts','دریافت بار',FaTruck],['exchanges','تعویض‌ها',FaExchangeAlt],['suppliers','تأمین‌کنندگان',FaBuilding],['inventory','بارهای پذیرفته‌شده',FaWarehouse],['finance','پیگیری حسابداری',FaCalculator],['changes','تغییر و لغو',FaHistory]].map(([id,label,icon])=>({name:String(id),namePersian:String(label),href:`/dashboard/purchasing/${id}`,icon,show:purchasingSections.includes(String(id))}))]}];
       case WORKSPACES.HR:

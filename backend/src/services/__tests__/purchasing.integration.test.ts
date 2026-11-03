@@ -352,6 +352,11 @@ async function execute() {
       const offerId=marketLine.data.offers[0].id;
       const caseRead=await purchasingDetail(actor,market.id,tx) as any;
       assert(caseRead.document.displayTitle.includes(sku.namePersian||sku.name));assert(caseRead.document.displayTitle.includes('استعلام مستقل'));checks++;
+      const customTitle=`عنوان اختصاصی آزمایش ${token}`;
+      const namedCase=await command('INQUIRY_START',{reason:'market',title:customTitle,ownerId:admin.id,lines:[{productId:sku.id,unit:'مترمربع'}]},{id:user.id,role:user.role});
+      const namedRead=await purchasingDetail(actor,namedCase.id,tx) as any;assert.equal(namedRead.document.displayTitle,customTitle);checks++;
+      const titleSearch=await purchasingWorkspace(actor,customTitle,tx) as any;assert(titleSearch.inquiries.some((row:any)=>row.id===namedCase.id&&row.displayTitle===customTitle));assert(!titleSearch.inquiries.some((row:any)=>row.id===market.id));checks++;
+      const marketView=await purchasingWorkspace(actor,'',tx) as any;const marketSummary=marketView.inquiries.find((row:any)=>row.id===market.id);assert.equal(marketSummary.progress.offerCount,'1');assert.equal(marketSummary.progress.quotedLines,'1');assert.equal(marketSummary.progress.validLines,'1');checks++;
       const families=['longitudinal','stair','slab','prepared'];
       for(const family of families){const page=await purchasingCatalog(actor,'','',tx,family) as any;assert.equal(page.types.length,4);assert(page.items.length<=60);checks++;}
       const sellerCatalog=await purchasingCatalog({id:user.id,role:user.role},sku.code,'',tx) as any;

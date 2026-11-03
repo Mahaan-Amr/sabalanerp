@@ -23,7 +23,7 @@ jobs:
     # This runner owns the approved, long-running sabalanerp-local Compose project.
     runs-on: [self-hosted, sabalanerp-local]
     environment: design-system-e2e
-    timeout-minutes: 30
+    timeout-minutes: 60
     concurrency:
       group: sabalanerp-local-design-system-browser
       cancel-in-progress: false
@@ -39,6 +39,15 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Prepare browser fixture dependencies
+        run: |
+          npm ci --prefix packages/contract-product-graph
+          npm run build:contract-product-graph
+          npm ci --prefix packages/partner-sales-contracts
+          npm run build:partner-sales-contracts
+          npm ci --prefix backend
+          npm --prefix backend run db:generate
+          npm ci --prefix frontend
       - name: Ensure Chrome is available
         run: |
           if node --input-type=module -e "import { chromium } from '@playwright/test'; const browser = await chromium.launch({ channel: 'chrome' }); await browser.close();"; then

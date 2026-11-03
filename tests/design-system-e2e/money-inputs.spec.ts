@@ -6,25 +6,22 @@ test('Partner accounting money input groups digits while submitting exact canoni
   const caseId = 'money-input-fixture';
   const amount = '694064000.125';
   const amountRial = '6940640001.25';
-  await page.route(`**/api/accounting/contracts/partner/${caseId}/internal`, route => route.fulfill({
-    json: { success: true, data: {
-      id: 'money-invoice', caseState: 'COMMITTED', status: 'DRAFT', amount, currency: 'IRT',
-      receivedAmount: '0', remainingAmount: amount, systemInvoiceNumber: '1766',
-      actions: { canCreateInvoice: true, canResolveFlag: false, canFlag: false,
-        canRequestCorrection: false, canReviewInvoice: true, canCreateReceivable: false },
-      partnerContext: { caseId, caseNumber: 'money-case', trackingNumber: 99, customerContractNumber: '100333',
-        internalRecordNumber: 'PI-100333', debtor: { displayName: 'همکار آزمایشی' }, endCustomer: { displayName: 'مشتری آزمون' } },
-      items: [], receivables: [], taxRecords: [], flags: [],
-    } },
+  await page.route('**/api/accounting/financial-records?**', route => route.fulfill({
+    json: { success: true, data: { items: [{
+      id: 'money-invoice', kind: 'INVOICE_CANDIDATE', sourceKind: 'PARTNER_INTERNAL_RECORD',
+      status: 'DRAFT', amount, currency: 'IRT', systemInvoiceNumber: '1766',
+      partnerContext: { caseId, caseNumber: 'money-case', debtor: { displayName: 'همکار آزمایشی' } },
+    }], actionAvailability: { approve: true } } },
+  }));
+  await page.route('**/api/accounting/audit?**', route => route.fulfill({
+    json: { success: true, data: { items: [], total: 0 } },
   }));
   let payload: Record<string, unknown> | undefined;
   await page.route('**/api/accounting/actions', route => {
     payload = route.request().postDataJSON();
     return route.fulfill({ json: { success: true } });
   });
-  await page.goto(`/dashboard/accounting/contracts/partner/${caseId}`);
-  await page.getByRole('button', { name: 'رکوردهای مالی', exact: true }).click();
-  await page.getByRole('button', { name: 'ایجاد پیش‌نویس صورتحساب', exact: true }).click();
+  await page.goto('/dashboard/accounting/invoice-candidates/money-invoice');
   const input = page.getByPlaceholder('مبلغ سپیدار', { exact: true });
   await input.fill('۶۹۴۰۶۴۰۰۰٫۱۲۵');
   await expect(input).toHaveValue('694,064,000.125');

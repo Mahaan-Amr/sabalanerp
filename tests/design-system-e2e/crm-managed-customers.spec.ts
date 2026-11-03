@@ -44,7 +44,7 @@ test('Admin sees edit blacklist and lock actions on a Partner customer', async (
     permissions: { canViewAllCustomers: true, canDeleteCustomers: true }, pagination: { page: 1, total: 1, pages: 1 } } }));
   await page.goto('/dashboard/crm/customers');
   await expect(page.getByRole('link', { name: 'ویرایش', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'افزودن به لیست سیاه', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'افزودن به بلک‌لیست', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'قفل کردن', exact: true })).toBeVisible();
 });
 

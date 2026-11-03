@@ -42,8 +42,16 @@ function restored(){
   completeManifestSha256:'d'.repeat(64),nativeHistorySha256:'a'.repeat(64),workingManifestSha256:'b'.repeat(64),
   cleanupPending:true,independentPointHealthy:false,productionAdmission:false};
  v.index.sourceDatabaseRole='VERIFIED_COMPLETE_RESTORED_QA';v.index.database=sourceDatabase.name;v.index.oid=sourceDatabase.oid;
+ const manifestValue={format:'sabalan-recovery',packageType:'COMPLETE',components:[]};
+ const history=Array.from({length:440},(_,n)=>({id:String(n)}));
+ const baseline=JSON.parse(Buffer.from(v.facts.restoreManifestRawBase64,'base64'));
+ for(const root of baseline.sources){root.files=[];root.directories=[];}
+ const working={database:v.facts.database,sources:baseline.sources.map(({name,files,directories})=>({name,files,directories}))};
+ for(const [name,value,field]of [['completeManifestValue',manifestValue,'completeManifestSha256'],['workingManifestValue',working,'workingManifestSha256'],['nativeHistory',history,'nativeHistorySha256']]){
+  const raw=Buffer.from(JSON.stringify(value));v.facts[name+'RawBase64']=raw.toString('base64');lineage[field]=sha(raw);
+ }
  v.restoredQaLineage=lineage;
- const manifest=JSON.parse(Buffer.from(v.facts.restoreManifestRawBase64,'base64'));manifest.restoredQaLineage=lineage;
+ const manifest=baseline;manifest.restoredQaLineage=lineage;manifest.capturedManifest.sha256=lineage.completeManifestSha256;v.baselineCompletion.capturedManifestSha256=lineage.completeManifestSha256;v.facts.capturedManifestSha256=lineage.completeManifestSha256;
  const raw=Buffer.concat([qualificationBytes(manifest),Buffer.from('\n')]);v.facts.restoreManifestRawBase64=raw.toString('base64');
  v.baselineCompletion.manifestSha256=sha(raw);v.facts.baselineCompletion=v.baselineCompletion;v.facts.restoreManifestSha256=sha(raw);
  return v;
@@ -68,4 +76,29 @@ test('restored QA compiler rejects source-role laundering, unbound lineage and f
  for(const change of changes){const v=restored();change(v);assert.throws(()=>compiler.compileRestoredQaPrivateQualificationMaterial(v));}
  const old=fixture();assert.throws(()=>compiler.compileRestoredQaPrivateQualificationMaterial(old));
  assert.equal(compiler.compileIndependentPrivateQualificationMaterial(old).actualHttpTargets,1);
+});
+
+// Restored material must bind the actual raw values, not caller-supplied digests.
+test('restored QA refuses lineage without original COMPLETE, working and history bytes',()=>{
+ for(const field of ['completeManifestValueRawBase64','workingManifestValueRawBase64','nativeHistoryRawBase64']){const v=restored();delete v.facts[field];assert.throws(()=>compiler.compileRestoredQaPrivateQualificationMaterial(v));}
+});
+
+test('restored QA rejects changed raw values even when baseline lineage is preserved',()=>{
+ for(const field of ['completeManifestValueRawBase64','workingManifestValueRawBase64','nativeHistoryRawBase64']){const v=restored();v.facts[field]=Buffer.from('{}').toString('base64');assert.throws(()=>compiler.compileRestoredQaPrivateQualificationMaterial(v));}
+});
+
+test('restored QA rejects a version store aliased to its live business root',()=>{
+ const v=restored(),root=v.facts.roots[0];root.store=root.live;
+ const manifest=JSON.parse(Buffer.from(v.facts.restoreManifestRawBase64,'base64'));manifest.sources[0].storeRoot=root.live;
+ const raw=Buffer.concat([qualificationBytes(manifest),Buffer.from('\n')]);
+ v.facts.restoreManifestRawBase64=raw.toString('base64');v.facts.restoreManifestSha256=sha(raw);v.baselineCompletion.manifestSha256=sha(raw);
+ assert.throws(()=>compiler.compileRestoredQaPrivateQualificationMaterial(v));
+});
+
+test('different-cluster restored QA may retain the same numeric OID as production',()=>{
+ const v=restored();v.restoredQaLineage.sourceDatabase.oid=v.facts.database.oid;v.index.oid=v.facts.database.oid;
+ const manifest=JSON.parse(Buffer.from(v.facts.restoreManifestRawBase64,'base64'));manifest.restoredQaLineage=v.restoredQaLineage;
+ const raw=Buffer.concat([qualificationBytes(manifest),Buffer.from('\n')]);v.facts.restoreManifestRawBase64=raw.toString('base64');v.facts.restoreManifestSha256=sha(raw);v.baselineCompletion.manifestSha256=sha(raw);
+ const result=compiler.compileRestoredQaPrivateQualificationMaterial(v);assert.equal(result.actualHttpTargets,1);
+ assert.notEqual(result.restoredQaLineage.sourceDatabase.systemIdentifier,result.restoredQaLineage.targetDatabase.systemIdentifier);
 });

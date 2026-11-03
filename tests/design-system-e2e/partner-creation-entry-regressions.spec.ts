@@ -463,7 +463,7 @@ test('rapid Start New confirmation sends one DELETE throughout the transition', 
   } finally { release(); }
   await expect(workflow(page).getByRole('button', { name: 'تاریخ قرارداد', exact: true }).last()).toBeVisible();
   expect(state.deletes).toEqual([oldRecoveryId]);
-  expect(new Set(state.acquisitions).size).toBe(1);
+  await expect.poll(() => new Set(state.acquisitions).size).toBe(1);
 });
 
 test('valid explicit resume restores its live runtime and preserves actor isolation', async ({ page }) => {

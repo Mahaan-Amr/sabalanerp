@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { NextFunction, Request, Response } from 'express';
+import { deploymentMaintenanceActive } from './deploymentMaintenance';
 
 export const RECOVERY_ROOT = process.env.RECOVERY_STORAGE_DIR || path.join(process.cwd(), 'storage', 'recovery');
 export const RECOVERY_COORDINATION_DIR = process.env.RECOVERY_COORDINATION_DIR || path.join(RECOVERY_ROOT, 'coordination');
@@ -60,6 +61,14 @@ const allowedDuringMaintenance = (req: Request) =>
 export const recoveryWriteGuard = (req: Request, res: Response, next: NextFunction) => {
   const state = getRecoveryRuntimeState();
   if (allowedDuringMaintenance(req)) return next();
+  if (deploymentMaintenanceActive(RECOVERY_COORDINATION_DIR)) {
+    res.status(503).json({
+      success: false,
+      error: 'DEPLOYMENT_MAINTENANCE',
+      message: 'A verified deployment is in progress.',
+    });
+    return;
+  }
   if (state.mode === 'NORMAL') {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       activeWrites += 1;

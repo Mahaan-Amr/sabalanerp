@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { Prisma, PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
@@ -14,7 +15,6 @@ import { commitStagedHiringFiles, planHiringFilesForDeletion, restoreStagedHirin
 import { PERSONNEL_ERASURE_LEASE_MS } from '../services/hrPersonnelErasureRecovery';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 router.use(protect);
 

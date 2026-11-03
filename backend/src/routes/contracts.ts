@@ -1,4 +1,5 @@
-﻿import express, { Response } from 'express';
+import { prisma } from '../lib/prisma';
+import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect, authorize } from '../middleware/auth';
@@ -7,7 +8,6 @@ import { generatePdfFromHtml } from '../utils/pdf';
 import { renderContractHtml } from '../utils/printTemplate';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // @desc    Get all contracts
 // @route   GET /api/contracts

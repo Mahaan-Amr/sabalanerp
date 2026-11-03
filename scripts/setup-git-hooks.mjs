@@ -7,7 +7,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const gitDirectory = path.join(repositoryRoot, '.git');
 
 if (!fs.existsSync(gitDirectory)) {
-  process.stdout.write('No Git worktree detected; Sabalan Design System hooks were not configured.\n');
+  process.stdout.write('No Git worktree detected; repository safety hooks were not configured.\n');
   process.exit(0);
 }
 
@@ -22,4 +22,4 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 
-process.stdout.write('Configured Sabalan Design System pre-commit gates.\n');
+process.stdout.write('Configured design-system and database-ownership pre-commit gates.\n');

@@ -1,8 +1,8 @@
+import { prisma } from '../lib/prisma';
 import { Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { parseCookies, resolveAuthoritativeSession, SESSION_COOKIE } from '../services/identitySessionService';
 
-const prisma = new PrismaClient();
 
 export interface AuthRequest extends Request {
   user?: {

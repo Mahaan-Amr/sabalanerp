@@ -679,6 +679,30 @@ model RecoveryAuditEvent {
   @@map("recovery_audit_events")
 }
 
+model DeploymentOperation {
+  id             String   @id
+  activeKey      String?  @unique
+  releaseId      String
+  targetCommit   String
+  owner          String
+  phase          String
+  leaseToken     String   @unique
+  leaseExpiresAt DateTime
+  heartbeatAt    DateTime
+  startedAt      DateTime
+  completedAt    DateTime?
+  errorCode      String?
+  errorMessage   String?
+  checkpointJson Json?
+  reportJson     Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([phase, leaseExpiresAt])
+  @@index([startedAt])
+  @@map("deployment_operations")
+}
+
 model Personnel {
   id                                  String                                  @id @default(cuid())
   firstName                           String

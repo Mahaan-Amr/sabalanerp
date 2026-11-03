@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import multer from 'multer';
 import path from 'path';
@@ -8,7 +9,6 @@ import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../mi
 import { buildCatalogPlan, applyCatalogPlan, buildExportWorkbook, buildTemplateWorkbook, CatalogKey } from '../services/catalogExcelSync';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 const upload = multer({
   dest: 'uploads/',

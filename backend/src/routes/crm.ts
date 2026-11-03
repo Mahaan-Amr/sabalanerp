@@ -1,4 +1,5 @@
-﻿import express, { Response } from 'express';
+import { prisma } from '../lib/prisma';
+import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
@@ -6,7 +7,6 @@ import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../mi
 import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
 
 const isOwnerScopedUser = (req: any) => req?.user?.role && req.user.role !== 'ADMIN';

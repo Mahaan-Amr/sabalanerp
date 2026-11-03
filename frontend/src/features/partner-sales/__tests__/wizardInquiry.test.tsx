@@ -8,59 +8,19 @@ import { createPartnerInquiryReader } from '../inquiries/partnerInquiryReader';
 import type { PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
 import { enterPartnerWizard } from '../../contract-creation/partner/partnerWizardEntry';
 import { createPartnerInquirySubmission, type PartnerInquirySubmitCommand } from '../inquiries/partnerInquirySubmission';
-import { buildPartnerInquiryBulkRows, resolveLatestPartnerInquiryRow } from '../inquiries/partnerInquiryBulk';
 
-test('bulk inquiry model distinguishes reusable, missing, pending, rejected, expired and re-inquiry rows', () => {
-  const fixture = createPartnerFixtures();
-  const base = fixture.inquiry.rows[0];
-  const configured = [base, ...(['missing', 'pending', 'rejected', 'expired', 'changed', 'successor'] as const).map(id => ({
-    ...base, rowId: id, configurationRef: { ...base.configurationRef, productRowId: `${id}-product` },
-  }))].map(row => ({ rowId: row.rowId, configuration: row.configurationRef }));
-  const inquiry = structuredClone(fixture.inquiry);
-  inquiry.rows = [base,
-    { ...base, rowId: 'pending', state: 'PENDING', approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined,
-      approvedRowBinding: undefined, configurationRef: { ...base.configurationRef, productRowId: 'pending-product' } },
-    { ...base, rowId: 'rejected', state: 'REJECTED', approvedPrice: undefined, approvedAt: undefined, expiresAt: undefined,
-      approvedRowBinding: undefined, configurationRef: { ...base.configurationRef, productRowId: 'rejected-product' } },
-    { ...base, rowId: 'expired', expiresAt: '2026-08-27T08:00:00.000Z',
-      configurationRef: { ...base.configurationRef, productRowId: 'expired-product' } },
-    { ...base, rowId: 'changed', configurationRef: { ...base.configurationRef, productRowId: 'changed-product' } },
-    { ...base, rowId: 'successor', approvedRowBinding: { ...base.approvedRowBinding!, rowId: 'successor' },
-      successor: { inquiryId: 'next', rowId: 'next-row', revision: 1, state: 'PENDING' },
-      configurationRef: { ...base.configurationRef, productRowId: 'successor-product' } },
-  ];
-  const rows = buildPartnerInquiryBulkRows({ configuredRows: configured, inquiry,
-    now: Date.parse('2026-08-27T09:00:00.000Z'), mismatchedRowIds: ['changed'] });
-  assert.deepEqual(rows.map(row => row.status), ['USABLE', 'MISSING', 'PENDING', 'REJECTED', 'EXPIRED',
-    'REINQUIRY_REQUIRED', 'USABLE']);
-  assert.deepEqual(rows.map(row => row.selectable), [false, true, false, true, true, true, false]);
-  assert.match(rows.at(-1)?.detail ?? '', /قیمت فعلی معتبر/);
-});
-
-test('re-inquiry continues from the latest rejected successor instead of resubmitting its predecessor', async () => {
-  const fixture = createPartnerFixtures();
-  const predecessor = { ...fixture.inquiry.rows[0], state: 'REJECTED' as const, approvedPrice: undefined,
-    approvedAt: undefined, expiresAt: undefined, approvedRowBinding: undefined,
-    successor: { inquiryId: 'successor-inquiry', rowId: 'successor-row', revision: 2, state: 'REJECTED' as const } };
-  const successor = { ...predecessor, rowId: 'successor-row', revision: 2, successor: undefined };
-  const latest = await resolveLatestPartnerInquiryRow({ query: (async () => ({ ok: true, value: {
-    ...fixture.inquiry, inquiryId: 'successor-inquiry', rows: [successor],
-  } })) as PartnerQueryV2Port['query'] }, predecessor);
-  assert.equal(latest.rowId, 'successor-row');
-  assert.equal(latest.revision, 2);
-});
-
-test('partial inquiry shows each outcome without the obsolete manual Wizard entry', () => {
+test('partial inquiry shows each outcome and only one Dock progression for usable approvals', () => {
   const { inquiry } = createPartnerFixtures();
   inquiry.rows.push({ rowId: 'pending', revision: 1, description: 'اسلب در انتظار', state: 'PENDING', configuration: [], usedCaseNumbers: [], configurationRef: { ...inquiry.rows[0].configurationRef, productRowId: 'pending-product' } });
   inquiry.rows.push({ rowId: 'rejected', revision: 1, description: 'پله ردشده', state: 'REJECTED', configuration: [], usedCaseNumbers: [], noteOrReason: 'این سنگ موجود نیست', configurationRef: { ...inquiry.rows[0].configurationRef, productRowId: 'rejected-product' } });
   const html = renderToStaticMarkup(<PartnerInquiryPanel
     inquiry={inquiry} now={Date.parse('2026-08-27T09:00:00.000Z')}
     pending={false} onRefresh={() => undefined} onReinquire={() => undefined}
+    onEnterWizard={() => undefined}
   />);
   assert.match(html, /پاسخ جزئی/);
   assert.match(html, /این سنگ موجود نیست/);
-  assert.doesNotMatch(html, /ساخت پرونده و ورود به Wizard/);
+  assert.equal((html.match(/ساخت پرونده و ورود به Wizard/g) || []).length, 1);
   assert.match(html, /۱ ردیف آماده/);
   assert.match(html, /استعلام مجدد/);
   assert.doesNotMatch(html, /materialRate|calculationPolicy|fixture-313-rate/);
@@ -70,33 +30,21 @@ test('exact product-row references own entry; quantity and delivery changes do n
   const fixture = createPartnerFixtures();
   const base = { ...fixture.draftSubmissionReference, customerId: '', contractDate: '2026-08-27',
     customerPaymentPlan: fixture.partner.customerPaymentPlan, deliveries: [], retailDiscount: { amount: '0', currency: 'IRR' as const } };
-  const { graphHash: _browserCannotSupplyGraphHash, ...safeBase } = base;
-  const input = { inquiry: fixture.inquiry, now: Date.parse('2026-08-27T09:00:00.000Z'), base: safeBase,
-    validated: { ...fixture.technicalSaved, rows: fixture.technicalSaved.rows.map(row => ({ ...row, quantity: '250' })) } };
+  const input = { inquiry: fixture.inquiry, now: Date.parse('2026-08-27T09:00:00.000Z'), base,
+    quantities: [{ productRowId: fixture.configurationDraft.productRowId, quantity: '250', unit: 'm' }] };
   const draft = enterPartnerWizard(input);
   assert.equal(draft?.rows[0].quantity, '250');
-  assert.equal(draft?.intent.graphHash, fixture.technicalSaved.graphHash);
-  assert.equal(draft?.intent.rows[0].retailUnitPrice.amount, '');
-  const explicitlyPriced = enterPartnerWizard({ ...input, retailUnitPrices: new Map([
-    [fixture.configurationDraft.productRowId, { amount: '1250', currency: 'IRR' as const }],
-  ]) });
-  assert.equal(explicitlyPriced?.intent.rows[0].retailUnitPrice.amount, '1250');
-  assert.equal(enterPartnerWizard({ ...input, validated: { ...input.validated,
-    recoveryRevision: input.validated.recoveryRevision + 1 } }), null);
-  const mismatched = enterPartnerWizard({ ...input, mismatchedRowIds: [fixture.inquiry.rows[0].rowId],
-    retailUnitPrices: new Map([[fixture.configurationDraft.productRowId, { amount: '1250', currency: 'IRR' as const }]]) });
-  assert.equal(mismatched?.intent.rows[0].approvedRowBinding, undefined);
-  assert.equal(mismatched?.intent.rows[0].retailUnitPrice.amount, '1250');
-  const expired = enterPartnerWizard({ ...input, now: Date.parse(fixture.approval.expiresAt),
-    retailUnitPrices: new Map([[fixture.configurationDraft.productRowId, { amount: '1250', currency: 'IRR' as const }]]) });
-  assert.equal(expired?.intent.rows[0].approvedRowBinding, undefined);
+  assert.equal(draft?.intent.rows[0].retailUnitPrice.amount, '800');
+  assert.equal(enterPartnerWizard({ ...input, quantities: [{ productRowId: fixture.inquiry.rows[0].rowId, quantity: '250', unit: 'm' }] }), null);
+  assert.equal(enterPartnerWizard({ ...input, mismatchedRowIds: [fixture.inquiry.rows[0].rowId] }), null);
+  assert.equal(enterPartnerWizard({ ...input, now: Date.parse(fixture.approval.expiresAt) }), null);
 });
 
 test('a pending successor remains visible while its valid predecessor is still usable', () => {
   const { inquiry } = createPartnerFixtures();
   inquiry.rows[0].successor = { inquiryId: 'next-inquiry', rowId: 'next-row', revision: 1, state: 'PENDING' };
   const html = renderToStaticMarkup(<PartnerInquiryPanel inquiry={inquiry} now={Date.parse('2026-08-27T09:00:00.000Z')}
-    pending={false} onRefresh={() => undefined} onReinquire={() => undefined} onOpenInquiry={() => undefined} />);
+    pending={false} onRefresh={() => undefined} onReinquire={() => undefined} onEnterWizard={() => undefined} onOpenInquiry={() => undefined} />);
   assert.match(html, /۱ ردیف آماده/);
   assert.match(html, /استعلام بعدی: در انتظار پاسخ/);
   assert.match(html, /مشاهده استعلام بعدی/);
@@ -123,15 +71,15 @@ test('bulk inquiry retry replays safe recovery references and the original succe
   assert.equal(submit.getSnapshot().phase, 'submitted');
 });
 
-test('expiry removes approval readiness without exposing a second Case-creation action', () => {
+test('expiry at the exact boundary removes an approval from the Dock without removing its evidence', () => {
   const { inquiry } = createPartnerFixtures();
   const html = renderToStaticMarkup(<PartnerInquiryPanel inquiry={inquiry}
     now={Date.parse(inquiry.rows[0].expiresAt!)} pending={false}
-    onRefresh={() => undefined} onReinquire={() => undefined} />);
+    onRefresh={() => undefined} onReinquire={() => undefined} onEnterWizard={() => undefined} />);
   assert.match(html, /۰ ردیف آماده/);
   assert.match(html, /پایان اعتبار/);
   assert.match(html, /۸۰۰ ریال/);
-  assert.doesNotMatch(html, /ساخت پرونده و ورود به Wizard/);
+  assert.match(html, /disabled=""[^>]*><span>ساخت پرونده و ورود به Wizard/);
 });
 
 test('a late earlier refresh cannot replace the latest partial response', async () => {
@@ -163,75 +111,4 @@ test('recovered inquiry command cannot be replayed into a different inquiry scop
   await different.retry();
   assert.equal(sent, false);
   assert.ok(pending);
-});
-
-
-test('wizard presentation keeps offered evidence without accepting it and preserves financial rows', () => {
-  const fixture = createPartnerFixtures();
-  const { graphHash: _hash, ...reference } = fixture.draftSubmissionReference;
-  const draft = enterPartnerWizard({ inquiry: fixture.inquiry, now: Date.parse('2026-08-27T09:00:00.000Z'),
-    base: { ...reference, customerId: '', contractDate: '2026-08-27', customerPaymentPlan: fixture.partner.customerPaymentPlan,
-      deliveries: [], retailDiscount: { amount: '0', currency: 'IRR' } }, validated: fixture.technicalSaved,
-    productPresentation: new Map([[fixture.configurationDraft.productRowId, { title: 'نام واقعی سنگ', parentProductRowId: 'parent-row' }]]) });
-  assert.equal(draft?.rows[0].inquiryRow.description, 'نام واقعی سنگ');
-  assert.equal(draft?.rows[0].parentProductRowId, 'parent-row');
-  assert.deepEqual(draft?.rows[0].inquiryRow.approvedRowBinding, fixture.inquiry.rows[0].approvedRowBinding);
-  assert.equal(draft?.intent.rows[0].approvedRowBinding, undefined);
-  assert.equal('parentProductRowId' in draft!.intent.rows[0], false);
-});
-
-test('four material subjects retain a paid remainder child as a zero-material financial row', () => {
-  const fixture = createPartnerFixtures();
-  const { graphHash: _hash, ...reference } = fixture.draftSubmissionReference;
-  const refs = Array.from({ length: 4 }, (_, index) => ({ ...fixture.configurationDraft, productRowId: `root-${index}` }));
-  const child = { ...fixture.configurationDraft, productRowId: 'paid-child' };
-  const inquiryRows = refs.map((configurationRef, index) => ({ ...fixture.inquiry.rows[0], rowId: `approval-${index}`,
-    configurationRef, approvedRowBinding: { ...fixture.inquiry.rows[0].approvedRowBinding!, rowId: `approval-${index}` } }));
-  const validated = { ...fixture.technicalSaved,
-    rows: [...refs, child].map(configurationRef => ({ ...fixture.technicalSaved.rows[0], configurationRef })),
-    pricingSubjects: refs.map(configurationRef => ({ configurationRef, role: 'PRIMARY' as const })) };
-  const wizard = enterPartnerWizard({ inquiryRows, now: Date.parse('2026-08-27T09:00:00.000Z'),
-    base: { ...reference, customerId: '', contractDate: '2026-08-27', customerPaymentPlan: fixture.partner.customerPaymentPlan,
-      deliveries: [], retailDiscount: { amount: '0', currency: 'IRT' } }, validated,
-    productPresentation: new Map([['paid-child', { title: 'فرزند', parentProductRowId: 'root-0' }]]) });
-  assert.ok(wizard);
-  assert.equal(wizard.rows.filter(row => !row.parentProductRowId).length, 4);
-  assert.equal(wizard.intent.rows.length, 5, 'physical and financial child is preserved');
-  assert.deepEqual(wizard.intent.rows.at(-1)?.retailUnitPrice, { amount: '0', currency: 'IRT' });
-  assert.deepEqual(wizard.intent.rows.at(-1)?.approvedRowBinding, wizard.intent.rows[0].approvedRowBinding,
-    'paid child retains source material approval, without another inquiry');
-});
-
-test('saving one correction retains both rejected products and their reasons across recovery revisions', () => {
-  const fixture = createPartnerFixtures();
-  const original = fixture.inquiry.rows[0];
-  const secondRef = { ...original.configurationRef, productRowId: 'second-rejected-product' };
-  const rejected = [original, { ...original, rowId: 'second-rejected-row', configurationRef: secondRef }]
-    .map((row, index) => ({ ...row, state: 'REJECTED' as const, approvedPrice: undefined,
-      approvedAt: undefined, expiresAt: undefined, approvedRowBinding: undefined,
-      noteOrReason: `اصلاح محصول ${index + 1}` }));
-  const recoveryRevision = fixture.technicalSaved.recoveryRevision + 1;
-  const validated = { ...fixture.technicalSaved, recoveryRevision,
-    rows: [fixture.technicalSaved.rows[0], { ...fixture.technicalSaved.rows[0], configurationRef: secondRef }]
-      .map(row => ({ ...row, configurationRef: { ...row.configurationRef, recoveryRevision } })) };
-  const draft = enterPartnerWizard({ inquiryRows: rejected, now: Date.parse('2026-08-27T09:00:00.000Z'), validated,
-    base: { recoveryId: validated.recoveryId, recoveryRevision, customerId: '', contractDate: '2026-08-27',
-      customerPaymentPlan: fixture.partner.customerPaymentPlan, retailDiscount: { amount: '0', currency: 'IRR' }, deliveries: [] } });
-  assert.ok(draft);
-  assert.equal(draft.rows.length, 2);
-  draft.rows.forEach((row, index) => {
-    assert.equal(row.inquiryRow.state, 'REJECTED');
-    assert.equal(row.inquiryRow.rowId, rejected[index].rowId);
-    assert.equal(row.inquiryRow.noteOrReason, rejected[index].noteOrReason);
-    assert.equal(row.inquiryRow.configurationRef.recoveryRevision, recoveryRevision);
-    assert.equal(row.inquiryRow.submissionState, 'UNSENT');
-    assert.equal(row.inquiryRow.approvedRowBinding, undefined);
-  });
-  const pending = { ...rejected[0], rowId: 'submitted-successor', state: 'PENDING' as const };
-  const afterResubmission = enterPartnerWizard({ inquiryRows: [pending, rejected[1]],
-    now: Date.parse('2026-08-27T09:00:00.000Z'), validated,
-    base: draft.intent });
-  assert.equal(afterResubmission?.rows[0].inquiryRow.rowId, 'submitted-successor');
-  assert.equal(afterResubmission?.rows[0].inquiryRow.submissionState, undefined);
-  assert.equal(afterResubmission?.rows[1].inquiryRow.state, 'REJECTED');
 });

@@ -5,8 +5,6 @@ import * as contracts from '../../../../packages/partner-sales-contracts';
 import { PartnerReportingService } from '../partnerSales/reporting/service';
 import type { CaseEvidence, Query, ReportingSource, ReportExportStore, FrozenExport, Root } from '../partnerSales/reporting/contracts';
 import { matchesCustomerContractNumber } from '../partnerSales/reporting/customerSearch';
-import { comparableCommercialRevision } from '../partnerSales/reporting/comparable';
-import { verifyPartnerReportingHead } from '../partnerSales/reporting/prisma';
 import { registerPartnerReportRoutes, ReportHandler, ReportResponse } from '../../routes/partner-reports';
 
 // Resolve the documented /testing export through package self-reference.
@@ -20,17 +18,6 @@ const commitment: contracts.PartnerEvent = {
   trigger: 'SIGNED', salesCreditOwnerId: root.partnerSellerId, sabalanNetAmount: { amount: '1600', currency: 'IRR' },
 };
 const query: Query = { purpose: 'PARTNER', from: '2026-08-01', to: '2026-08-31' };
-
-test('reporting accepts an unpriced correction head but rejects missing priced projections or a foreign revision', () => {
-  const { sabalanTotals: _totals, sabalanPaymentPlan: _plan, resaleDifference: _margin, ...original } = fixture.partner;
-  const pending = { ...original, pricingState: 'INCOMPLETE' as const,
-    products: original.products.map(({ wholesaleUnitPrice: _price, ...product }) => product) };
-  const linked = { internalRecordId: fixture.accounting.recordId, customerContractNumber: fixture.partner.customerContractNumber! };
-  assert.doesNotThrow(() => verifyPartnerReportingHead({ partner: pending }, pending.owner, linked));
-  assert.throws(() => verifyPartnerReportingHead({ partner: fixture.partner }, fixture.partner.owner, linked));
-  assert.throws(() => verifyPartnerReportingHead({ partner: pending }, { ...pending.owner, revision: pending.owner.revision + 1 }, linked));
-  assert.throws(() => verifyPartnerReportingHead({ partner: pending, accounting: fixture.accounting }, pending.owner, linked));
-});
 
 function harness() {
   const state = { purpose: 'PARTNER' as contracts.PermissionContext['purpose'], allowed: true, role: 'PARTNER' as contracts.PermissionContext['persona'],
@@ -60,11 +47,11 @@ function harness() {
         return { ok: true, value: context(purpose, channel, target) };
       } }; },
       async caseEvidence(target) { state.reads++; return structuredClone(datasets.find(item => item.root.caseId === target.caseId)!); },
-      async putExport(artifact) { artifacts.set(artifact.id, structuredClone(artifact)); },
     });
   } };
   const artifacts = new Map<string, FrozenExport>();
-  const store: ReportExportStore = { async get(id) { return structuredClone(artifacts.get(id) || null); } };
+  const store: ReportExportStore = { async put(artifact) { artifacts.set(artifact.id, structuredClone(artifact)); },
+    async get(id) { return structuredClone(artifacts.get(id) || null); } };
   return { state, data, datasets, service: new PartnerReportingService(contracts, source, store) };
 }
 
@@ -76,43 +63,9 @@ test('Partner queries keep discounted retail, wholesale and Accounting balances 
     wholesalePurchases: '1600', retailSales: '1800', retailCollected: '0', netComparableMargin: '200',
   }, accountingBalance: '1200', accountingReceivedAsOf: '400', accountingCovered: 1, accountingEligible: 1 });
   assert.equal(report.rows[0].collectionStatus, 'UNPAID');
-  assert.equal(report.series.length, 1);
-  assert.deepEqual(report.series[0].points.map(point => ({ month: point.jalaliMonth, debt: point.debtBalance,
-    receivable: point.receivableBalance, receipts: point.receipts, transactions: point.transactions.length })), [
-    { month: '1405/05', debt: '0', receivable: '0', receipts: '0', transactions: 0 },
-    { month: '1405/06', debt: '1600', receivable: '1800', receipts: '0', transactions: 1 },
-  ]);
   assert.equal(JSON.stringify(report).includes('FIXTURE-INTERNAL-313'), false);
   assert.equal((await service.query({ ...query, search: 'FIXTURE-INTERNAL-313' })).count, 0);
   assert.equal((await service.query({ ...query, search: 'FIXTURE-CUSTOMER-313' })).count, 1);
-});
-
-test('pre-pricing draft revisions are not treated as broken finalized report evidence', () => {
-  const prePricing = { ...fixture.partner, state: 'DRAFT' as const, sabalanTotals: undefined,
-    customerContractNumber: undefined, internalRecordNumber: undefined };
-  assert.equal(comparableCommercialRevision(prePricing, {
-    wholesaleEnvelope: fixture.wholesaleEnvelope,
-    retailEnvelope: fixture.retailEnvelope,
-  }), null);
-});
-
-test('a committed report fails closed when the customer contract identity is missing', async () => {
-  const { service, data } = harness();
-  data.commercial![0].view.customerContractNumber = undefined;
-  await assert.rejects(service.query(query), { code: 'INTEGRITY_CONFLICT' });
-});
-
-test('current reports omit retired zero-obligation lineage without hiding an outstanding retired balance', async () => {
-  const { service, data } = harness();
-  const current = data.fulfillment.products[0]!;
-  data.deliveryProgress = [{ productRowId: current.productRowId, unit: current.unit,
-    contracted: current.quantity, reserved: '0.000', dispatched: '0.000' },
-  { productRowId: 'retired-row', unit: current.unit, contracted: '0.000', reserved: '0.000', dispatched: '0.000' }];
-  const report = await service.query(query);
-  assert.equal(report.rows[0].deliveryProgress?.length, 1);
-  assert.equal(JSON.stringify(report.rows[0].deliveryProgress).includes('retired-row'), false);
-  data.deliveryProgress[1]!.dispatched = '1.000';
-  await assert.rejects(service.query(query), { code: 'INTEGRITY_CONFLICT' });
 });
 
 test('Accounting cross-search never widens to retail and Logistics receives no prices', async () => {
@@ -176,14 +129,6 @@ test('export freezes filtered data, then rechecks current actor, scope and expor
   await assert.rejects(() => service.downloadExport(created.exportId), { code: 'NOT_FOUND' });
 });
 
-test('another actor without a report grant cannot distinguish existing and missing exports', async () => {
-  const { service, state } = harness();
-  const created = await service.createExport(query);
-  state.actorId = 'other-actor'; state.allowed = false;
-  await assert.rejects(() => service.downloadExport(created.exportId), { code: 'NOT_FOUND' });
-  await assert.rejects(() => service.downloadExport('missing-export'), { code: 'NOT_FOUND' });
-});
-
 test('channel denials exclude rows before count and totals, and hidden detail matches missing detail', async () => {
   const { service, state } = harness(); state.blockedChannels = ['COUNT', 'SEARCH', 'DETAIL'];
   assert.equal((await service.count(query)).count, 0);
@@ -207,10 +152,6 @@ test('retail receipts and reversals affect only the private collection flow', as
   assert.equal(report.rows[0].collectionStatus, 'PARTIAL');
   assert.equal(report.totals[0].accountingBalance, '1200');
   assert.equal(report.rows[0].metrics!.wholesalePurchases, '1600');
-  // A timestamp and lexical event ID are not a causal sequence.
-  data.events[1].eventId = 'z-receipt'; data.events[2].eventId = 'a-reversal';
-  data.events[2].recordedAt = data.events[1].recordedAt;
-  assert.equal((await service.query(query)).rows[0].metrics!.retailCollected, '800');
 });
 
 test('retail-only successor books its discount change on the correction date', async () => {
@@ -227,8 +168,6 @@ test('retail-only successor books its discount change on the correction date', a
   assert.equal(report.rows[0].metrics!.retailSales, '-100');
   assert.equal(report.rows[0].metrics!.netComparableMargin, '-100');
   assert.equal(report.rows[0].metrics!.wholesalePurchases, '0');
-  data.events[1].recordedAt = data.events[0].recordedAt; data.events[1].eventId = 'a-correction';
-  assert.equal((await service.query({ ...query, from: '2026-09-01', to: '2026-09-30' })).rows[0].metrics!.retailSales, '-100');
 });
 
 test('a source returning a later revision for a closed period is rejected', async () => {
@@ -316,11 +255,11 @@ test('same-snapshot totals stay complete across pagination and currencies never 
   assert.deepEqual(currencies.totals.map(total => [total.currency, total.metrics.retailSales]), [['IRR', '1800'], ['IRT', '1800']]);
 });
 
-test('suspended and terminated Partners retain read history while pending cannot report', async () => {
+test('suspended Partners retain read history while pending/terminated cannot report', async () => {
   const { service, state } = harness(); state.partnerStatus = 'SUSPENDED';
   assert.equal((await service.query(query)).count, 1);
   state.partnerStatus = 'PENDING'; await assert.rejects(() => service.query(query), { code: 'FORBIDDEN' });
-  state.partnerStatus = 'TERMINATED'; assert.equal((await service.query(query)).count, 1);
+  state.partnerStatus = 'TERMINATED'; await assert.rejects(() => service.query(query), { code: 'FORBIDDEN' });
 });
 
 test('a reviewed void posts negative period flows and keeps original commitment evidence', async () => {
@@ -345,59 +284,4 @@ test('negative margin is reported without blocking an authorized below-cost sale
   assert.equal((await service.query(query)).rows[0].metrics!.netComparableMargin, '-100');
 });
 
-test('cancelling a revised note reverses the previous effective sale without needing an unpriced head', async () => {
-  const { service, data } = harness();
-  data.internal.state = 'VOIDED'; data.commercial![0].view.state = 'VOIDED';
-  data.account!.status = 'VOIDED'; data.account!.balance.amount = '0';
-  const base = { schemaVersion: 1 as const, owner: { ...fixture.case.head, revision: fixture.case.head.revision + 1,
-    integrityHash: `sha256-v1:${'a'.repeat(64)}` }, commandId: 'cancel-note-command', correlationId: 'cancel-note-correlation',
-    actorId: 'partner-326', effectiveDate: '2026-08-28', recordedAt: '2026-08-28T07:00:00.000Z' };
-  data.events.push({ ...base, type: 'SABALAN_ADJUSTMENT', eventId: 'cancel-note-adjustment', internalRecordId: fixture.accounting.recordId,
-    originalRealizationEventId: commitment.eventId, correctionId: 'cancel-note-326', delta: '-1600', currency: 'IRR', reason: 'لغو یادداشت اصلاحی' });
-  data.events.push({ ...base, type: 'CASE_VOIDED', eventId: 'cancel-note-event', recordedAt: '2026-08-28T07:01:00.000Z',
-    correctionId: 'cancel-note-326', commitmentEventId: commitment.eventId, adjustmentEventIds: ['cancel-note-adjustment'],
-    dependencyEvidenceIds: ['manager-permission'], reason: 'لغو یادداشت اصلاحی' });
-  const report = await service.query({ ...query, from: '2026-08-28' });
-  assert.equal(report.rows[0].metrics!.retailSales, '-1800');
-  assert.equal(report.rows[0].metrics!.netComparableMargin, '-200');
-  assert.equal(report.rows[0].state, 'VOIDED');
-});
-
 export { harness, query, root, commitment };
-
-
-test('numbered awaiting-pricing revisions do not invalidate the frozen committed report', () => {
-  const waiting = { ...fixture.partner, state: 'DRAFT' as const, sabalanTotals: undefined };
-  assert.equal(comparableCommercialRevision(waiting, {
-    wholesaleEnvelope: fixture.wholesaleEnvelope, retailEnvelope: fixture.retailEnvelope,
-  }), null);
-});
-
-
-test('a commitment referencing a missing pricing basis still fails closed', async () => {
-  const { service, data } = harness();
-  data.commercial = [];
-  await assert.rejects(service.query(query), { code: 'INTEGRITY_CONFLICT' });
-});
-
-test('PDF download renders the frozen export and rejects a revoked current grant before rendering', async () => {
-  const { service, state, data } = harness();
-  const created = await service.createExport(query);
-  data.account!.balance.amount = '999';
-  const handlers = new Map<string, ReportHandler>(); let renders = 0;
-  registerPartnerReportRoutes({ get(path, handler) { handlers.set(path, handler); }, post() {} }, {
-    runtime: contracts, async serviceFor() { return service; }, async renderPdf(report) {
-      renders++; assert.equal(report.totals[0].accountingBalance, '1200'); return Buffer.from('%PDF-frozen');
-    },
-  });
-  const headers: Record<string, string> = {}; let body: unknown; let status = 200;
-  const response: ReportResponse = { status(code) { status = code; return response; }, json(value) { body = value; },
-    send(value) { body = value; }, setHeader(name, value) { headers[name] = value; } };
-  const request = { query: {}, body: {}, params: { id: created.exportId } };
-  await handlers.get('/exports/:id/pdf')!(request, response);
-  assert.equal(headers['Content-Type'], 'application/pdf'); assert.match(headers['Content-Disposition'], /\.pdf"$/);
-  assert.equal(headers['Cache-Control'], 'private, no-store'); assert.equal((body as Buffer).toString(), '%PDF-frozen');
-  state.allowed = false;
-  await handlers.get('/exports/:id/pdf')!(request, response);
-  assert.equal(status, 404); assert.equal(renders, 1); assert.equal(Buffer.isBuffer(body), false);
-});

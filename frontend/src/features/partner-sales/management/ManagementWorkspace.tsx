@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PartnerManagementWorkspaceViewV2Schema, partnerError } from '@sabalanerp/partner-sales-contracts';
 import type { PartnerCommandPort, PartnerManagementCommandV2Port, PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
-import { ErpButton, ErpField, ErpInlineState, ErpLoading, ErpSelect, ErpWorkspacePage, ErpSegmentedControl, ErpInput } from '@/components/erp';
+import { ErpButton, ErpField, ErpInlineState, ErpLoading, ErpSelect, ErpWorkspacePage } from '@/components/erp';
 import { actionPresentation } from './availability';
 import { PartnerCommandSession, type CommandFeedback } from './commandSession';
 import { CommandFeedbackView } from './CommandFeedbackView';
@@ -14,19 +14,11 @@ import { useWorkspaceQuery } from './useWorkspaceQuery';
 export function ManagementWorkspace({ queryPort, commandPort, managementPort }: {
   queryPort: PartnerQueryV2Port; commandPort: PartnerCommandPort; managementPort: PartnerManagementCommandV2Port;
 }) {
-  const [section, setSection] = useState<'PROFILES' | 'TRANSFERS'>(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('transferId') ? 'TRANSFERS' : 'PROFILES');
-  const [history, setHistory] = useState(false);
-  const [transferStatus, setTransferStatus] = useState<'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'>('PENDING');
-  const [search, setSearch] = useState('');
-  const [querySearch, setQuerySearch] = useState('');
-  const [transferId, setTransferId] = useState<string | undefined>(() => typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('transferId') || undefined : undefined);
-  useEffect(() => { const timer = setTimeout(() => setQuerySearch(search.trim()), 250); return () => clearTimeout(timer); }, [search]);
   const load = useCallback(async (cursor?: string) => {
-    const response = await queryPort.query({ schemaVersion: 2, purpose: 'PARTNER_MANAGEMENT', limit: 20, section, history, transferStatus, search: querySearch, ...(transferId ? { transferId } : {}), ...(cursor ? { cursor } : {}) });
+    const response = await queryPort.query({ schemaVersion: 2, purpose: 'PARTNER_MANAGEMENT', limit: 20, ...(cursor ? { cursor } : {}) });
     return response.ok ? { ok: true as const, value: PartnerManagementWorkspaceViewV2Schema.parse(response.value) } : response;
-  }, [queryPort, section, history, transferStatus, querySearch, transferId]);
-  const resource = useWorkspaceQuery(load, JSON.stringify([section, history, transferStatus, querySearch, transferId]));
-  useEffect(() => { const sections = resource.view?.availableSections; if (sections?.length && !sections.includes(section)) setSection(sections[0]); }, [resource.view?.availableSections, section]);
+  }, [queryPort]);
+  const resource = useWorkspaceQuery(load);
   const session = useMemo(() => new PartnerCommandSession(commandPort, resource.view?.actorId || 'unloaded', managementPort), [commandPort, managementPort, resource.view?.actorId]);
   const [choice, setChoice] = useState<ManagementChoice | null>(null);
   const [option, setOption] = useState('');
@@ -40,16 +32,12 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
   const running = useRef(false);
   const locked = pending || feedback?.kind === 'uncertain';
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
-  const inquiryOptions = choice?.profile?.responder?.pendingInquiries || [];
-  const availabilitySource = choice?.action === 'RESPONDER_REASSIGN'
-    ? inquiryOptions.flatMap(item => item.actions)
-    : choice?.profile?.actions || choice?.transfer?.actions || resource.view?.actions || [];
-  const availability = choice && actionPresentation(availabilitySource, choice.action, now);
+  const availability = choice && actionPresentation(choice.profile?.actions || choice.transfer?.actions || resource.view?.actions || [], choice.action, now);
   const options = choice?.action === 'PROFILE_CREATE' ? resource.view?.identityCandidates?.map(item => ({ id: item.identityEvidenceId, label: item.displayName })) || []
-    : choice?.action === 'IDENTITY_VERIFY' && choice.profile?.identityRevision ? choice.profile.identityRevision.options
     : choice?.action === 'COMMERCIAL_TERMS_MANAGE' ? choice.profile?.commercialTerms?.options || []
       : choice?.action === 'CREDIT_TERMS_MANAGE' ? choice.profile?.creditTerms?.options || []
         : choice?.action === 'RESPONDER_ASSIGN' || choice?.action === 'RESPONDER_REASSIGN' ? choice.profile?.responder?.eligibleOptions || [] : null;
+  const inquiryOptions = choice?.profile?.responder?.pendingInquiries || [];
 
   function choose(next: ManagementChoice) {
     setChoice(next); setOption(''); setInquiryId(''); setFieldError(undefined); setFeedback(null); setMustReview(false);
@@ -75,8 +63,6 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
       else if (choice!.action === 'PROFILE_CREATE') outcome = await session.submitManagement({ type: 'PROFILE_CREATE', identityEvidenceId: option, reason }, option);
       else if (choice!.action === 'CUSTOMER_TRANSFER_DECIDE' && choice!.transfer && choice!.outcome) outcome = await session.submit({ type: 'CUSTOMER_TRANSFER_DECIDE',
         transferId: choice!.transfer.transferId, expectedRevision: choice!.transfer.revision, outcome: choice!.outcome, reason }, choice!.transfer.transferId);
-      else if (target && choice!.action === 'IDENTITY_VERIFY' && choice!.profile!.identityRevision) outcome = await session.submitManagement({
-        type: 'IDENTITY_VERSION_REGISTER', ...target, evidenceId: option }, target.profileId);
       else if (target && choice!.action === 'IDENTITY_VERIFY' && choice!.profile!.identity) outcome = await session.submitManagement({ type: 'IDENTITY_VERIFY', ...target,
         evidenceId: choice!.profile!.identity.evidenceId }, target.profileId);
       else if (target && (choice!.action === 'COMMERCIAL_TERMS_MANAGE' || choice!.action === 'CREDIT_TERMS_MANAGE')) outcome = await session.submitManagement({
@@ -88,8 +74,7 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
         transition: conversion, dispositionEvidenceIds: conversion === 'RESOLVE' ? choice!.profile!.conversion.dispositionEvidenceIds : [] }, target.profileId);
       else if (target && ['PROFILE_ACTIVATE', 'PROFILE_SUSPEND', 'PROFILE_TERMINATE'].includes(choice!.action)) outcome = await session.submit({ type: 'PROFILE_TRANSITION', ...target,
         to: choice!.action === 'PROFILE_ACTIVATE' ? 'ACTIVE' : choice!.action === 'PROFILE_SUSPEND' ? 'SUSPENDED' : 'TERMINATED',
-        // Activation remains unavailable in the production projection until a
-        // versioned evidence transport is composed; other transitions need none.
+        // No client-produced gate truth. The owner must evaluate all current gates in its transaction.
         gateEvidenceIds: [] }, target.profileId);
       else outcome = { kind: 'error', error: partnerError('FORBIDDEN') };
       setFeedback(outcome);
@@ -100,22 +85,12 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
       }
     } finally { running.current = false; setPending(false); }
   }
-  const consequence = choice?.action === 'PROFILE_TERMINATE' ? 'کار تازه متوقف و موارد باز تعیین‌تکلیف می‌شوند؛ حساب کاربری و سوابق حفظ می‌شوند و همکاری بعداً قابل ازسرگیری است.'
+  const consequence = choice?.action === 'PROFILE_TERMINATE' ? 'ورود و کار تازه متوقف می‌شود؛ سوابق و کارهای قطعی حسابداری و تحویل حفظ می‌شوند.'
     : choice?.action === 'PROFILE_SUSPEND' ? 'کار تازه و پاسخ قیمت متوقف می‌شود. مهلت اعتبار قیمت‌ها ادامه دارد.'
       : choice?.action === 'CUSTOMER_TRANSFER_DECIDE' ? 'فقط مالکیت جاری مشتری تعیین می‌شود؛ تاریخچه، مسئولیت پروژه و اعتبار فروش تغییر نمی‌کند.'
         : choice?.action === 'RESPONDER_REASSIGN' ? 'فقط ردیف‌های منتظر پاسخ واگذار می‌شوند؛ سابقه تصمیم‌های قبلی تغییر نمی‌کند.'
           : 'این تصمیم با هویت شما و دلیل ثبت می‌شود. سامانه پیش از ثبت، مجوز و شرایط جاری را دوباره بررسی می‌کند.';
-  return <ErpWorkspacePage title="مدیریت همکاران">
-    <ErpSegmentedControl value={section} onChange={value => { setSection(value); setChoice(null); setSearch(''); setTransferId(undefined); }}
-      options={([{ value: 'PROFILES' as const, label: 'فروشندگان همکار', disabled: locked }, { value: 'TRANSFERS' as const, label: 'درخواست‌های انتقال مشتری', disabled: locked }]).filter(option => !resource.view?.availableSections || resource.view.availableSections.includes(option.value))} />
-    <div className="flex flex-wrap gap-3">
-      <ErpField label="جست‌وجو"><ErpInput value={search} onChange={event => { setSearch(event.target.value); setTransferId(undefined); }} /></ErpField>
-      {section === 'PROFILES' ? <ErpSegmentedControl value={history ? 'HISTORY' : 'CURRENT'} onChange={value => setHistory(value === 'HISTORY')}
-        options={[{ value: 'CURRENT', label: 'همکاری‌های جاری' }, { value: 'HISTORY', label: 'سوابق' }]} />
-        : <ErpField label="وضعیت درخواست"><ErpSelect value={transferStatus} onChange={event => { setTransferStatus(event.target.value as typeof transferStatus); setTransferId(undefined); }}>
-          <option value="PENDING">در انتظار بررسی</option><option value="APPROVED">تأییدشده</option><option value="REJECTED">ردشده</option><option value="CANCELLED">لغوشده</option>
-        </ErpSelect></ErpField>}
-    </div>
+  return <ErpWorkspacePage title="مدیریت فروشندگان همکار">
     {resource.loading && !resource.view && <ErpLoading />}
     {resource.error && <ErpInlineState kind="error" className="flex-col items-start" title={resource.error}
       action={{ label: 'دریافت وضعیت تازه', disabled: locked || resource.loading, onClick: () => void refreshDecision() }} />}
@@ -128,7 +103,7 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
       <ManagementView view={resource.view} now={now} disabled={locked || resource.loading || Boolean(resource.error)} onChoose={choose} />
     </>}
     {choice && <PartnerDecision key={`${choice.action}:${choice.profile?.profile.profileId || choice.transfer?.transferId || 'create'}:${choice.outcome || ''}`}
-      title={choice.action === 'IDENTITY_VERIFY' && choice.profile?.identityRevision ? 'ثبت نسخه جدید هویت' : actionLabels[choice.action] || 'ثبت تصمیم'} consequence={consequence} open pending={locked} danger={choice.action === 'PROFILE_TERMINATE'}
+      title={actionLabels[choice.action] || 'ثبت تصمیم'} consequence={consequence} open pending={locked} danger={choice.action === 'PROFILE_TERMINATE'}
       disabled={!availability?.enabled || mustReview || resource.loading || Boolean(resource.error)} onClose={() => setChoice(null)} onConfirm={reason => void submit(reason)}
       feedback={<CommandFeedbackView feedback={feedback} pending={pending} onRetry={() => void submit('', true)} onRefresh={() => void refreshDecision()} />}>
       {availability?.reason && <ErpInlineState kind="permission" title={availability.reason} />}
@@ -137,8 +112,6 @@ export function ManagementWorkspace({ queryPort, commandPort, managementPort }: 
           <option value="">انتخاب کنید</option>{options.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
         </ErpSelect>
       </ErpField>}
-      {choice.action === 'IDENTITY_VERIFY' && choice.profile?.identityRevision && option && <ErpInlineState kind="empty"
-        title={`تغییرات نسخه جدید: ${choice.profile.identityRevision.options.find(item => item.id === option)?.changes.join('؛ ') || '—'}`} />}
       {choice.action === 'RESPONDER_REASSIGN' && <ErpField label="استعلام منتظر پاسخ" required error={fieldError}>
         <ErpSelect value={inquiryId} disabled={locked || mustReview} onChange={event => setInquiryId(event.target.value)}><option value="">انتخاب کنید</option>
           {inquiryOptions.map(item => <option key={item.inquiryId} value={item.inquiryId} disabled={!actionPresentation(item.actions, 'RESPONDER_REASSIGN', now)?.enabled}>{item.label}</option>)}

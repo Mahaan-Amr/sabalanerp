@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { partnerTrackingCode, type PermissionContext } from '../../../../../packages/partner-sales-contracts';
+import type { PermissionContext } from '../../../../../packages/partner-sales-contracts';
 import { ContractRuntime, FrozenExport, Query, Report, ReportChannel, ReportExportStore, ReportingError, ReportingSnapshot, ReportingSource, Root } from './contracts';
 import { projectReportRow, totalMetrics } from './projection';
 import { sum } from './money';
@@ -7,37 +7,6 @@ import { effectiveThrough } from './revenue';
 
 const purposes = ['PARTNER', 'MANAGEMENT', 'ACCOUNTING', 'FULFILLMENT'];
 const states = ['DRAFT', 'AWAITING_CUSTOMER_CONFIRMATION', 'CUSTOMER_APPROVED', 'COMMITTED', 'CANCELLED', 'VOIDED'];
-const jalaliMonth = (date: string) => {
-  const parts = new Intl.DateTimeFormat('en-u-ca-persian', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit' })
-    .formatToParts(new Date(`${date}T12:00:00.000Z`));
-  const year = parts.find(part => part.type === 'year')?.value;
-  const month = parts.find(part => part.type === 'month')?.value;
-  if (!year || !month) throw new ReportingError('INTEGRITY_CONFLICT');
-  return `${year}/${month.padStart(2, '0')}`;
-};
-const jalaliMonthsInRange = (from: string, to: string) => {
-  const keys = new Set<string>([jalaliMonth(from), jalaliMonth(to)]);
-  const cursor = new Date(`${from}T12:00:00.000Z`); const end = new Date(`${to}T12:00:00.000Z`);
-  while (cursor < end) { cursor.setUTCDate(cursor.getUTCDate() + 15); if (cursor <= end) keys.add(jalaliMonth(cursor.toISOString().slice(0, 10))); }
-  return [...keys].sort();
-};
-const reportSeries = (rows: Report['rows'], from: string, to: string) => {
-  const currencies = [...new Set(rows.flatMap(row => row.currency ? [row.currency] : []))].sort();
-  return currencies.map(currency => {
-    const transactions = rows.filter(row => row.currency === currency).flatMap(row => row.chartTransactions || [])
-      .sort((left, right) => left.effectiveDate.localeCompare(right.effectiveDate) || left.caseId.localeCompare(right.caseId));
-    let debt = sum(transactions.filter(item => item.effectiveDate < from).map(item => item.debtDelta));
-    let receivable = sum(transactions.filter(item => item.effectiveDate < from).map(item => item.receivableDelta));
-    const points = jalaliMonthsInRange(from, to).map(month => {
-      const scoped = transactions.filter(item => item.effectiveDate >= from && item.effectiveDate <= to && jalaliMonth(item.effectiveDate) === month);
-      debt = sum([debt, ...scoped.map(item => item.debtDelta)]);
-      receivable = sum([receivable, ...scoped.map(item => item.receivableDelta)]);
-      return { jalaliMonth: month, debtBalance: debt, receivableBalance: receivable,
-        receipts: sum(scoped.map(item => item.receiptDelta)), transactions: scoped };
-    });
-    return { currency, points };
-  });
-};
 
 export class PartnerReportingService {
   constructor(private readonly runtime: ContractRuntime, private readonly source: ReportingSource,
@@ -73,7 +42,7 @@ export class PartnerReportingService {
       || context.persona === 'PUBLIC' || (context.grantExpiresAt && context.grantExpiresAt <= now)
       || (context.scope === 'DEPARTMENT' && !context.departmentId)
       || (query.purpose === 'PARTNER' && (context.persona !== 'PARTNER' || context.scope !== 'OWN'
-        || context.actorId !== context.partnerSellerId || !['ACTIVE', 'SUSPENDED', 'TERMINATED'].includes(context.partnerStatus)))
+        || context.actorId !== context.partnerSellerId || !['ACTIVE', 'SUSPENDED'].includes(context.partnerStatus)))
       || (query.purpose !== 'PARTNER' && context.persona !== 'INTERNAL')
       || (query.purpose === 'MANAGEMENT' && !['DEPARTMENT', 'COMPANY'].includes(context.scope))
       || (['ACCOUNTING', 'FULFILLMENT'].includes(query.purpose) && !['PURPOSE_BOUND', 'DEPARTMENT', 'COMPANY'].includes(context.scope))) {
@@ -112,11 +81,7 @@ export class PartnerReportingService {
       if (data.root.caseId !== root.caseId || data.root.partnerSellerId !== root.partnerSellerId
         || data.root.departmentId !== root.departmentId) throw new ReportingError('INTEGRITY_CONFLICT');
       const row = projectReportRow(this.runtime, data, query.purpose, { from: query.from, to: query.to, asOf: snapshot.capturedAt });
-      if (root.trackingNumber) {
-        row.trackingNumber = root.trackingNumber;
-        row.chartTransactions?.forEach(transaction => { transaction.trackingNumber = root.trackingNumber; });
-      }
-      const searchable = [row.caseNumber, partnerTrackingCode(row.caseNumber, row.trackingNumber), row.customerContractNumber,
+      const searchable = [row.caseNumber, row.customerContractNumber,
         ...(['MANAGEMENT', 'ACCOUNTING'].includes(query.purpose) ? [row.internalRecordNumber || ''] : [])];
       if (query.search && !searchable.some(number => number.toLocaleLowerCase('en').includes(query.search!.toLocaleLowerCase('en')))) continue;
       if (query.state && row.state !== query.state) continue;
@@ -140,7 +105,7 @@ export class PartnerReportingService {
           accountingReceivedAsOf: group.some(row => row.account) ? sum(group.flatMap(row => row.account ? [row.account.received.amount] : [])) : null,
           accountingCovered: group.filter(row => row.account !== null && row.account !== undefined).length,
           accountingEligible: group.length };
-      }), series: ['PARTNER', 'MANAGEMENT'].includes(query.purpose) ? reportSeries(rows, query.from, query.to) : [] };
+      }) };
     return { report, roots: selectedRoots, actorId: context.actorId };
   }
 
@@ -163,7 +128,7 @@ export class PartnerReportingService {
       const expiresAt = new Date(new Date(snapshot.capturedAt).getTime() + 15 * 60_000).toISOString();
       const artifact: FrozenExport = { id: randomUUID(), actorId: result.actorId, expiresAt,
         query, report: result.report, roots: result.roots, contentHash: await this.runtime.canonicalHash(result.report) };
-      await snapshot.putExport(artifact);
+      await this.exports.put(artifact);
       return artifact;
     });
     return { exportId: artifact.id, snapshotId: artifact.report.snapshotId, capturedAt: artifact.report.capturedAt,
@@ -174,23 +139,16 @@ export class PartnerReportingService {
     if (!this.runtime.IdSchema.safeParse(id).success) throw new ReportingError('NOT_FOUND');
     const artifact = await this.exports.get(id);
     if (!artifact) throw new ReportingError('NOT_FOUND');
-    try {
-      return await this.source.read(artifact.query, async snapshot => {
-        const context = this.access(snapshot, artifact.query);
-        if (artifact.actorId !== context.actorId || artifact.expiresAt <= snapshot.capturedAt) throw new ReportingError('NOT_FOUND');
-        if (await this.runtime.canonicalHash(artifact.report) !== artifact.contentHash) throw new ReportingError('INTEGRITY_CONFLICT');
-        for (const root of artifact.roots) {
-          const current = snapshot.roots.find(candidate => candidate.caseId === root.caseId);
-          if (!current || current.partnerSellerId !== root.partnerSellerId
-            || !await this.allowed(snapshot, artifact.query, current, 'EXPORT', context.actorId)) throw new ReportingError('NOT_FOUND');
-        }
-        return structuredClone(artifact.report);
-      });
-    } catch (error) {
-      if (error instanceof ReportingError && ['NOT_FOUND', 'FORBIDDEN', 'PARTNER_NOT_ACTIVE', 'CUSTOMER_OUT_OF_SCOPE', 'NOT_ASSIGNED'].includes(error.code)) {
-        throw new ReportingError('NOT_FOUND');
+    return this.source.read(artifact.query, async snapshot => {
+      const context = this.access(snapshot, artifact.query);
+      if (artifact.actorId !== context.actorId || artifact.expiresAt <= snapshot.capturedAt) throw new ReportingError('NOT_FOUND');
+      if (await this.runtime.canonicalHash(artifact.report) !== artifact.contentHash) throw new ReportingError('INTEGRITY_CONFLICT');
+      for (const root of artifact.roots) {
+        const current = snapshot.roots.find(candidate => candidate.caseId === root.caseId);
+        if (!current || current.partnerSellerId !== root.partnerSellerId
+          || !await this.allowed(snapshot, artifact.query, current, 'EXPORT', context.actorId)) throw new ReportingError('NOT_FOUND');
       }
-      throw error;
-    }
+      return structuredClone(artifact.report);
+    });
   }
 }

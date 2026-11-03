@@ -1,0 +1,481 @@
+﻿// useContractSubmission Hook
+// Manages contract creation and submission
+
+import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import type { ContractProduct, ContractWizardData } from '../types/contract.types';
+import { salesAPI } from '@/lib/api';
+import { PersianCalendar } from '@/lib/persian-calendar';
+import { sumNumericValues } from '@/lib/numberFormat';
+import { mapAxiosFormErrors } from '@/lib/formErrors';
+import { CONTRACT_DRAFT_STORAGE_KEY } from '../utils/contractDraftStorage';
+import { normalizeProductFinishing } from '../utils/finishingUtils';
+import { getPreparedQuantity, getPreparedUnit, isPreparedProductType, normalizeContractProductType } from '../utils/preparedProductUtils';
+import {
+  calculateProductOperations,
+  repairRecoverableLegacyProductSemantics
+} from '@sabalanerp/contract-product-graph';
+import { getDeliverableProductEntries, reconcileDeliveryProductReferences } from '../utils/deliveryScheduleController';
+import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
+import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
+import { getContractGrossPayableTotal, reconcileContractProductPricing } from '../utils/contractProductPricing';
+import { reconcileContractProductGraph } from '../utils/contractProductGraphReconciliation';
+import {
+  hasUnconfirmedProductQuantityOverride,
+  normalizeProductFinishingCollection
+} from '../utils/productFinishingCollections';
+import { normalizeContractProductRowIdentities } from '../utils/contractProductIdentity';
+import {
+  isContractProductValidationFailure,
+  mapProductValidationFailure
+} from '../utils/contractSubmissionErrors';
+import {
+  clearContractSubmissionDiagnostic,
+  storeContractSubmissionDiagnostic
+} from '../utils/contractSubmissionDiagnostics';
+import { validateContractPartyIdentity } from '../services/contractPartyIdentity';
+import { finalizeSuccessfulContractCommit } from '../utils/contractCreationCompletion';
+
+interface UseContractSubmissionOptions {
+  wizardData: ContractWizardData;
+  updateWizardData: (updates: Partial<ContractWizardData>) => void;
+  setCurrentStep: (step: number) => void;
+  setErrors: (errors: Record<string, string>) => void;
+  setLoading: (loading: boolean) => void;
+  validateCurrentStep: () => boolean;
+  validateAllSteps?: () => boolean;
+  generateContractHTML: (data: any) => string;
+  userDepartment?: string;
+  departments?: Array<{ id: string }>;
+  mode?: 'create' | 'edit';
+  contractId?: string;
+  editSession?: {
+    draftId: string;
+    browserSessionId: string;
+    leaseToken: string;
+    baseRevision: number;
+  } | null;
+  onCommitted?: () => Promise<void> | void;
+  onEditSessionFailure?: (error: unknown) => string | null;
+  draftStorageKey?: string;
+}
+
+const toIsoDate = (value?: string | null): string | undefined => {
+  if (!value) return undefined;
+  try {
+    if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(value)) {
+      return PersianCalendar.toGregorian(value, 'jYYYY/jMM/jDD').toISOString();
+    }
+  } catch (error) {
+    console.error('Error converting Persian date:', error);
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+};
+
+export const useContractSubmission = (options: UseContractSubmissionOptions) => {
+  const {
+    wizardData,
+    updateWizardData,
+    setCurrentStep,
+    setErrors,
+    setLoading,
+    validateCurrentStep,
+    validateAllSteps,
+    generateContractHTML,
+    userDepartment,
+    departments,
+    mode = 'create',
+    contractId,
+    editSession,
+    onCommitted,
+    onEditSessionFailure,
+    draftStorageKey = CONTRACT_DRAFT_STORAGE_KEY
+  } = options;
+
+  const router = useRouter();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleCreateContract = useCallback(async () => {
+    const isEditMode = mode === 'edit';
+    const editContractId = contractId;
+    if (isEditMode) {
+      if (!editContractId) {
+        setErrors({ general: 'شناسه قرارداد برای ویرایش مشخص نیست.' });
+        return;
+      }
+      if (validateAllSteps && !validateAllSteps()) return;
+    } else if (!validateCurrentStep()) {
+      return;
+    }
+
+    const partyIdentityError = validateContractPartyIdentity(wizardData);
+    if (partyIdentityError) {
+      setErrors({ general: `ثبت قرارداد متوقف شد: ${partyIdentityError}` });
+      setCurrentStep(wizardData.customer?.id === wizardData.customerId ? 3 : 2);
+      return;
+    }
+
+    const identityNormalization = normalizeContractProductRowIdentities(wizardData.products);
+    if (identityNormalization.blockedDuplicateRowIds.length > 0) {
+      const blockedRowId = identityNormalization.blockedDuplicateRowIds[0];
+      const blockedIndex = wizardData.products.findIndex(product => product.rowId === blockedRowId);
+      const message = 'وابستگی‌های محصول تکثیرشده قابل تشخیص نیست؛ محصول را باز کرده و دوباره ذخیره کنید';
+      setErrors({
+        products: message,
+        ...(blockedIndex >= 0 && wizardData.products[blockedIndex]?.rowId
+          ? { [`productRow:${wizardData.products[blockedIndex].rowId}`]: message }
+          : {})
+      });
+      setCurrentStep(4);
+      return;
+    }
+    if (identityNormalization.blockedOperationRowIds.length > 0) {
+      const blockedRowId = identityNormalization.blockedOperationRowIds[0];
+      const message =
+        'ساختار عملیات این محصول قابل تشخیص نیست؛ ابزارها و پرداخت‌ها را بازبینی و دوباره ذخیره کنید';
+      setErrors({
+        products: message,
+        [`productRow:${blockedRowId}`]: message
+      });
+      setCurrentStep(4);
+      return;
+    }
+    const semanticRepair = repairRecoverableLegacyProductSemantics({
+      contractId: editContractId || 'contract-create-draft',
+      revision: editSession?.baseRevision ?? 0,
+      calculationPolicy: {
+        calculation: 'calculation-v1',
+        packing: 'packing-v1',
+        pricing: 'pricing-v1',
+        rounding: 'rounding-v1'
+      },
+      products: identityNormalization.products as unknown as
+        Readonly<Record<string, unknown>>[]
+    });
+    const submissionProducts =
+      semanticRepair.products as unknown as ContractProduct[];
+    if (submissionProducts.some((product, index) => product !== wizardData.products[index])) {
+      updateWizardData({ products: submissionProducts });
+    }
+    if (semanticRepair.evidence.length > 0) {
+      console.info('[contract-product-semantic-repair]', {
+        stage: 'client-final-preflight',
+        affectedProductRowIds:
+          semanticRepair.evidence.map(evidence => evidence.productRowId),
+        repairKinds: Array.from(new Set(
+          semanticRepair.evidence.flatMap(evidence => evidence.repairKinds)
+        ))
+      });
+    }
+
+    const unresolvedLegacyAddOnRows = submissionProducts.filter(hasUnresolvedLegacyRemainingChildAddOns);
+    if (unresolvedLegacyAddOnRows.length > 0) {
+      setErrors({
+        products: `${unresolvedLegacyAddOnRows.length} محصول باقی‌مانده دارای افزونه قدیمی تعیین‌تکلیف‌نشده است. در مرحله انتخاب محصولات، برای هر مورد «پذیرش و محاسبه مجدد» یا «حذف» را انتخاب کنید.`
+      });
+      setCurrentStep(4);
+      return;
+    }
+
+    const productGraphConflicts = reconcileContractProductGraph(submissionProducts);
+    if (productGraphConflicts.length > 0) {
+      setErrors({
+        products: `ثبت قرارداد متوقف شد: ${productGraphConflicts.map((conflict) => conflict.message).join(' | ')}`
+      });
+      setCurrentStep(4);
+      return;
+    }
+
+    const currentDeliveryReferences = reconcileDeliveryProductReferences(submissionProducts, wizardData.deliveries);
+    if (currentDeliveryReferences.conflicts.length > 0) {
+      setErrors({
+        deliveries: `برنامه تحویل نیاز به بازبینی دارد: ${currentDeliveryReferences.conflicts.map((conflict) => conflict.message).join(' | ')}`
+      });
+      setCurrentStep(5);
+      return;
+    }
+
+    if (submissionProducts.some(hasUnconfirmedProductQuantityOverride)) {
+      setErrors({ products: 'مقدار دستی ابزار یا پرداخت پس از تغییر هندسه نیاز به تأیید دارد.' });
+      setCurrentStep(4);
+      return;
+    }
+    
+    setIsSubmitting(true);
+    setLoading(true);
+    try {
+      const targetDepartmentId = userDepartment || departments?.[0]?.id;
+      if (!targetDepartmentId) {
+        setErrors({ general: 'برای ثبت قرارداد، دپارتمان فروش کاربر باید مشخص باشد.' });
+        return;
+      }
+
+      // Calculate total amount
+      const normalizedProducts = submissionProducts.map((originalProduct) => {
+        const normalizedProductType = normalizeContractProductType(originalProduct.productType) || originalProduct.productType;
+        let productWithType = {
+          ...originalProduct,
+          productType: normalizedProductType,
+          ...(isPreparedProductType(normalizedProductType) && {
+            preparedUnit: getPreparedUnit(originalProduct),
+            preparedQuantity: getPreparedQuantity(originalProduct),
+            quantity: getPreparedQuantity(originalProduct),
+            squareMeters: getPreparedUnit(originalProduct) === 'squareMeter' ? getPreparedQuantity(originalProduct) : 0,
+            unitPrice: originalProduct.unitPrice ?? originalProduct.pricePerSquareMeter ?? 0,
+            pricePerSquareMeter: originalProduct.unitPrice ?? originalProduct.pricePerSquareMeter ?? 0
+          })
+        };
+        if (originalProduct.operationPolicyInput) {
+          const operationResult = calculateProductOperations(originalProduct.operationPolicyInput);
+          if (!operationResult.ok) {
+            throw new Error(operationResult.conflicts.map(conflict => conflict.message).join(' | '));
+          }
+          const appliedById = new Map(
+            (originalProduct.appliedSubServices || []).map(item => [item.id, item])
+          );
+          const finishingsById = new Map(
+            (originalProduct.finishings || []).map(item => [item.selectionId, item])
+          );
+          productWithType = {
+            ...productWithType,
+            appliedSubServices: operationResult.result.tools.map(tool => ({
+              ...(appliedById.get(tool.toolSelectionId) as any),
+              id: tool.toolSelectionId,
+              subServiceId: tool.catalogItemId,
+              meter: Number(tool.finalQuantity),
+              cost: Number(tool.amountToman),
+              calculationBase: tool.unit === 'meter' ? 'length' : 'squareMeters',
+              edges: Object.fromEntries((tool.edges || []).map(edge => [edge, true]))
+            })),
+            finishings: operationResult.result.finishings.map(finishing => ({
+              ...(finishingsById.get(finishing.finishingSelectionId) as any),
+              selectionId: finishing.finishingSelectionId,
+              finishingId: finishing.catalogItemId,
+              name: finishing.name,
+              calculationBase: finishing.unit === 'meter' ? 'length' : 'squareMeters',
+              unitPrice: Number(finishing.rateToman),
+              automaticQuantity: Number(finishing.automaticQuantity),
+              quantity: Number(finishing.finalQuantity),
+              quantityMode: finishing.quantityOverride ? 'manual' : 'auto',
+              overrideStatus: 'current',
+              cost: Number(finishing.amountToman)
+            })),
+            totalSubServiceCost: operationResult.result.tools.reduce(
+              (sum, tool) => sum + Number(tool.amountToman), 0
+            )
+          };
+        }
+        const product = normalizeMandatoryLongitudinalCuttingPricing(productWithType);
+        const finishing = normalizeProductFinishing(product);
+        if (!finishing) return reconcileContractProductPricing({
+          ...product,
+          finishings: normalizeProductFinishingCollection(product)
+        });
+        return reconcileContractProductPricing({
+          ...product,
+          finishings: normalizeProductFinishingCollection(product),
+          finishingCalculationBase: product.finishingCalculationBase || finishing.calculationBase,
+          finishingUnitPrice: product.finishingUnitPrice ?? finishing.unitPrice,
+          finishingQuantity: product.finishingQuantity ?? finishing.quantity,
+          finishingPricePerSquareMeter: product.finishingPricePerSquareMeter ?? finishing.unitPrice,
+          finishingSquareMeters:
+            product.finishingSquareMeters ??
+            (finishing.calculationBase === 'squareMeters' ? finishing.quantity : null),
+          finishingCost: product.finishingCost ?? finishing.cost
+        });
+      });
+      const totalAmount = wizardData.payment.totalContractAmount ||
+        getContractGrossPayableTotal(normalizedProducts, wizardData.serviceRows || []);
+      const normalizedDeliveryReferences = reconcileDeliveryProductReferences(normalizedProducts, currentDeliveryReferences.deliveries);
+      const deliverableProductRowIds = new Set(
+        getDeliverableProductEntries(normalizedProducts)
+          .map(({ product }) => product.rowId)
+          .filter((rowId): rowId is string => !!rowId)
+      );
+      const contractDeliveries = deliverableProductRowIds.size === 0
+        ? []
+        : normalizedDeliveryReferences.deliveries.map((delivery) => ({
+          ...delivery,
+          products: delivery.products.filter((product) =>
+            product.rowType !== 'service' &&
+            !!product.productRowId &&
+            deliverableProductRowIds.has(product.productRowId)
+          )
+        })).filter((delivery) => delivery.products.length > 0);
+      
+      // Create/update contract
+      const contractData = {
+        title: 'قرارداد فروش سنگ',
+        titlePersian: 'قرارداد فروش سنگ',
+        customerId: wizardData.customerId,
+        departmentId: targetDepartmentId,
+        content: generateContractHTML({
+          contractNumber: wizardData.contractNumber,
+          contractDate: wizardData.contractDate,
+          customer: wizardData.customer,
+          project: wizardData.project,
+          products: normalizedProducts,
+          serviceRows: wizardData.serviceRows || [],
+          deliveries: contractDeliveries,
+          payment: wizardData.payment,
+          discount: wizardData.discount || null
+        }),
+        contractData: {
+          ...wizardData,
+          contractNumber: wizardData.contractNumber,
+          contractDate: wizardData.contractDate,
+          customerId: wizardData.customerId || wizardData.customer?.id || '',
+          projectId: wizardData.projectId || wizardData.project?.id || '',
+          customer: wizardData.customer,
+          project: wizardData.project,
+          products: normalizedProducts,
+          serviceRows: wizardData.serviceRows || [],
+          deliveries: contractDeliveries,
+          payment: wizardData.payment,
+          discount: wizardData.discount || null
+        },
+        totalAmount,
+        currency: 'تومان',
+        operationIdentityRepairEvidence:
+          identityNormalization.operationRepairEvidence,
+        productSemanticRepairEvidence: semanticRepair.evidence,
+        potentialProjectId: typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('potentialProjectId') || undefined
+          : undefined,
+        _relations: {
+          items: normalizedProducts.map((product) => ({
+            productId: product.productId,
+            productRowId: product.rowId,
+            productType: product.productType,
+            quantity: product.quantity,
+            unitPrice: product.unitPrice ?? product.pricePerSquareMeter,
+            totalPrice: product.totalPrice,
+            description: product.description || null,
+            isMandatory: product.isMandatory || false,
+            mandatoryPercentage: product.mandatoryPercentage || null,
+            originalTotalPrice: product.originalTotalPrice || null,
+            stairSystemId: product.stairSystemId || null,
+            stairPartType: product.stairPartType || null
+          })),
+          deliveries: contractDeliveries.map((delivery) => ({
+            deliveryDate: toIsoDate(delivery.deliveryDate) || new Date().toISOString(),
+            deliveryAddress: delivery.deliveryAddress || wizardData.project?.address || '',
+            driver: delivery.projectManagerName || null,
+            vehicle: delivery.receiverName || null,
+            notes: delivery.notes || null,
+            products: delivery.products
+              .filter((dp) => dp.rowType !== 'service' && !!dp.productRowId)
+              .map((dp) => {
+              const product = normalizedProducts.find((candidate) => candidate.rowId === dp.productRowId);
+              return {
+                productId: product?.productId || dp.productId,
+                productRowId: dp.productRowId,
+                quantity: dp.amount ?? dp.quantity,
+                notes: product?.description || null
+              };
+            })
+          })),
+          payments: wizardData.payment.payments.map((paymentEntry) => {
+            const method = paymentEntry.method as string;
+            const paymentMethod = method === 'CHECK' ? 'CHECK' : method === 'CUSTOMER_BALANCE' ? 'RECEIPT' : 'CASH';
+            const cashType = method === 'CASH_SHIBA' ? 'SHIBA' : method === 'CASH_CARD' ? 'CARD' : undefined;
+            const notes = [
+              method === 'CUSTOMER_BALANCE' ? 'استفاده از باقی مانده مشتری' : null,
+              paymentEntry.description || null
+            ].filter(Boolean).join('، ');
+            return {
+              paymentMethod,
+              totalAmount: paymentEntry.amount,
+              currency: wizardData.payment.currency,
+              status: paymentEntry.status === 'PAID' ? 'COMPLETED' : 'PENDING',
+              paymentDate: toIsoDate(paymentEntry.paymentDate),
+              checkNumber: paymentEntry.checkNumber || null,
+              checkOwnerName: paymentEntry.checkOwnerName || null,
+              handoverDate: toIsoDate(paymentEntry.handoverDate),
+              cashType: cashType ?? paymentEntry.cashType ?? null,
+              nationalCode: paymentEntry.nationalCode || null,
+              notes: notes || null
+            };
+          })
+        }
+      };
+      
+      const response = isEditMode
+        ? await salesAPI.updateContract(editContractId as string, contractData, editSession || undefined)
+        : await salesAPI.createContract(contractData, editSession || undefined);
+      
+      if (response.data.success) {
+        clearContractSubmissionDiagnostic();
+        if (isEditMode) {
+          await finalizeSuccessfulContractCommit({
+            contractId: editContractId as string,
+            finalizeRecovery: onCommitted,
+            justCreated: false,
+            navigate: (destination) => router.replace(destination)
+          });
+          return;
+        }
+        const createdContractId = response.data.data.id;
+        const savedContractNumber = response.data.data.contractNumber || wizardData.contractNumber;
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(draftStorageKey);
+          localStorage.removeItem(CONTRACT_DRAFT_STORAGE_KEY);
+          localStorage.removeItem('contractWizardState');
+        }
+        await finalizeSuccessfulContractCommit({
+          contractId: createdContractId,
+          finalizeRecovery: onCommitted,
+          navigate: (destination) => router.replace(
+            `${destination}&contractNumber=${encodeURIComponent(savedContractNumber)}`
+          )
+        });
+      } else {
+        setErrors({ general: response.data.error || 'خطا در ثبت قرارداد' });
+      }
+    } catch (error: any) {
+      console.error('Error creating contract:', error);
+      console.error('Error response:', error.response?.data);
+
+      const editSessionMessage = onEditSessionFailure?.(error);
+      const initialMappedErrors = editSessionMessage
+        ? { general: editSessionMessage }
+        : mapAxiosFormErrors(error, 'خطا در ایجاد قرارداد');
+      const mappedErrors = mapProductValidationFailure(
+        error,
+        initialMappedErrors
+      );
+      setErrors(mappedErrors);
+      storeContractSubmissionDiagnostic(error);
+      if (isContractProductValidationFailure(error, mappedErrors)) {
+        setCurrentStep(4);
+      }
+    } finally {
+      setIsSubmitting(false);
+      setLoading(false);
+    }
+  }, [
+    wizardData,
+    updateWizardData,
+    setCurrentStep,
+    setErrors,
+    setLoading,
+    validateCurrentStep,
+    validateAllSteps,
+    generateContractHTML,
+    userDepartment,
+    departments,
+    mode,
+    contractId,
+    editSession,
+    onCommitted,
+    onEditSessionFailure,
+    draftStorageKey,
+    router
+  ]);
+
+  return {
+    handleCreateContract,
+    isSubmitting
+  };
+};

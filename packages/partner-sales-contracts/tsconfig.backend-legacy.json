@@ -1,5 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": { "module": "CommonJS", "moduleResolution": "Node" },
-  "include": ["../../backend/contract-tests/partner-sales-public.ts"]
-}

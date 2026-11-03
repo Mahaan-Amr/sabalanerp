@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <title>گزارش جامع تغییرات GitHub سامانه سبلان</title>
+  <style>
+    @font-face{font-family:Yekan;src:url('file:///D:/sabalanerp/frontend/public/yekan-bakh/YekanBakh-Regular.woff2') format('woff2');font-weight:400}
+    @font-face{font-family:Yekan;src:url('file:///D:/sabalanerp/frontend/public/yekan-bakh/YekanBakh-SemiBold.woff2') format('woff2');font-weight:600}
+    @font-face{font-family:Yekan;src:url('file:///D:/sabalanerp/frontend/public/yekan-bakh/YekanBakh-Bold.woff2') format('woff2');font-weight:700}
+    @font-face{font-family:Yekan;src:url('file:///D:/sabalanerp/frontend/public/yekan-bakh/YekanBakh-ExtraBold.woff2') format('woff2');font-weight:800}
+    *{box-sizing:border-box}
+    @page{size:A4;margin:0}
+    html,body{margin:0;padding:0;background:#e8efee;color:#253944;font-family:Yekan,Tahoma,sans-serif;font-size:13px;line-height:1.85}
+    body{direction:rtl;text-align:right}
+    .page{width:210mm;height:297mm;margin:0 auto;background:#fbfaf7;padding:16mm 17mm 12mm;position:relative;overflow:hidden;page-break-after:always;display:flex;flex-direction:column}
+    .page:last-child{page-break-after:auto}
+    .topline{position:absolute;top:0;left:0;right:0;height:5mm;background:linear-gradient(90deg,#278b83,#1e536a)}
+    .page-head{display:flex;align-items:center;justify-content:space-between;margin:3mm 0 7mm;color:#69808a;font-size:10px}
+    .brand{display:flex;align-items:center;gap:8px;color:#1d6074;font-weight:700}
+    .mark{width:28px;height:28px;border-radius:9px;background:#0f5757;color:white;display:grid;place-items:center;font-size:18px;font-weight:800;direction:ltr}
+    h1,h2,h3,h4,p{margin-top:0}
+    h1{font-size:28px;line-height:1.5;color:#1e586f;margin-bottom:3mm;font-weight:800}
+    h2{font-size:22px;line-height:1.55;color:#1e586f;margin-bottom:2mm;font-weight:800}
+    h3{font-size:16px;color:#1f667c;margin-bottom:2mm;font-weight:700}
+    h4{font-size:13px;color:#234e61;margin-bottom:1mm;font-weight:700}
+    .eyebrow{color:#198b84;font-weight:700;font-size:11px;margin-bottom:2mm}
+    .lead{font-size:15px;color:#40545f;line-height:2.05;margin-bottom:5mm}
+    .muted{color:#687c87}.small{font-size:10px}.tiny{font-size:8.8px}.ltr{direction:ltr;unicode-bidi:isolate;display:inline-block}.nowrap{white-space:nowrap}
+    .grid{display:grid;gap:4mm}.g2{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+    .card{background:#fff;border:1px solid #d5e1e2;border-radius:14px;padding:4mm;break-inside:avoid}
+    .soft{background:#f1f7f5;border-color:#cce2de}.blue{background:#edf5f8;border-color:#c9e0e8}.sand{background:#fbf5ea;border-color:#ead9b7}
+    .card p:last-child,.callout p:last-child{margin-bottom:0}
+    .metric{padding:4mm 3mm;text-align:center}.metric strong{display:block;color:#1d6074;font-size:24px;line-height:1.2}.metric span{color:#6e8089;font-size:10px}
+    .callout{background:#1f6077;color:#fff;border-radius:14px;padding:4mm 5mm;margin:4mm 0}.callout strong{color:#fff}
+    .note{background:#f2f7f5;border-right:4px solid #28938a;padding:3mm 4mm;margin:4mm 0;color:#395661}
+    .warn{background:#fff6e7;border-right:4px solid #c28a29;padding:3mm 4mm;margin:4mm 0;color:#5b4c34}
+    ul{margin:1.5mm 0 0;padding:0 5mm 0 0}li{margin:1.2mm 0}li::marker{color:#218d86}
+    .tag{display:inline-block;border-radius:999px;padding:1mm 3mm;font-size:9px;font-weight:700;background:#dff2eb;color:#19775f}.tag.amber{background:#f8e7c9;color:#8c621d}.tag.blue{background:#e3f0f5;color:#1f6077}.tag.gray{background:#edf0f1;color:#5d6e77}
+    .divider{height:1px;background:#d7e1e1;margin:5mm 0}
+    .flow{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm;margin:4mm 0}.step{background:#fff;border:1px solid #d5e1e2;border-radius:12px;padding:3mm;text-align:center}.step b{display:block;color:#1d6074;margin-bottom:1mm}
+    table{width:100%;border-collapse:separate;border-spacing:0;font-size:10.2px;border:1px solid #d5e1e2;border-radius:12px;overflow:hidden;background:#fff}
+    th{background:#eaf4f3;color:#21586a;font-weight:700;padding:2.4mm;text-align:right;border-bottom:1px solid #d5e1e2}
+    td{padding:2.2mm 2.4mm;border-bottom:1px solid #e4ebeb;vertical-align:top}tr:last-child td{border-bottom:0}
+    a{color:#126d79;text-decoration:none}.source a{direction:ltr;unicode-bidi:isolate}
+    .footer{margin-top:auto;border-top:1px solid #d7e1e1;padding-top:3mm;display:flex;justify-content:space-between;color:#87979e;font-size:8.8px}
+    .cover{background:linear-gradient(145deg,#173f55 0%,#1d6070 52%,#278b83 100%);color:#fff;padding:19mm;display:block}
+    .cover:before,.cover:after{content:"";position:absolute;border:1px solid rgba(255,255,255,.16);border-radius:50%}
+    .cover:before{width:115mm;height:115mm;left:-45mm;top:-35mm}.cover:after{width:110mm;height:110mm;right:-40mm;bottom:-40mm}
+    .cover .logo{width:43mm;height:43mm;background:#fff;border-radius:13mm;display:grid;place-items:center;color:#125958;font-size:37mm;line-height:1;font-weight:800;direction:ltr;margin:3mm 0 42mm auto}
+    .cover h1{color:#fff;font-size:34px;max-width:150mm}.cover .lead{color:#dceced;max-width:150mm}.cover .summary{position:absolute;right:19mm;left:19mm;bottom:40mm;border:1px solid rgba(255,255,255,.24);background:rgba(255,255,255,.11);border-radius:14px;padding:5mm 6mm}.cover .meta{position:absolute;right:19mm;left:19mm;bottom:18mm;display:flex;justify-content:space-between;color:#d5e6e7;font-size:10px}
+    .timeline{position:relative;padding-right:8mm}.timeline:before{content:"";position:absolute;right:2.4mm;top:2mm;bottom:2mm;width:2px;background:#c8dcdd}.event{position:relative;margin-bottom:3mm;padding:2.6mm 3.5mm;background:#fff;border:1px solid #dbe5e5;border-radius:10px}.event:before{content:"";position:absolute;right:-7mm;top:5mm;width:7px;height:7px;border-radius:50%;background:#278b83;border:2px solid #fbfaf7}.event b{color:#1f6077}.event .hash{direction:ltr;unicode-bidi:isolate;color:#87979e;font-size:8.5px}
+    .impact-row{display:grid;grid-template-columns:32mm 1fr 25mm;gap:3mm;align-items:center;padding:3mm 0;border-bottom:1px solid #dde5e5}.impact-row:last-child{border-bottom:0}.impact-row b{color:#245c70}.score{text-align:center;border-radius:999px;padding:1mm 2mm;background:#dff2eb;color:#17735b;font-weight:700}.score.med{background:#f7e7c9;color:#89621e}
+  </style>
+</head>
+<body>
+  <section class="page cover">
+    <div class="logo">S</div>
+    <div class="eyebrow" style="color:#d7eceb">گزارش مدیریتی به‌روزرسانی سامانه سبلان</div>
+    <h1>گزارش جامع تغییرات GitHub<br>از ۱۹ تا ۲۵ مرداد ۱۴۰۵</h1>
+    <p class="lead">مروری مدیریتی و مستند بر تغییرات محصول، منابع انسانی، قرارداد و حسابداری، ایمنی استقرار و همگرایی تجربهٔ کاربری.</p>
+    <div class="summary">
+      <strong>خلاصهٔ یک‌خطی</strong>
+      <p>این بازه یک جهش زیربنایی بوده است: سامانه هم‌زمان از نظر تجربهٔ روزانه، کنترل دسترسی، چرخهٔ قرارداد و ایمنی انتشار بالغ‌تر شده؛ با این حال، بسته‌شدن کار در GitHub هنوز به‌تنهایی اثبات انتشار در محیط عملیاتی نیست.</p>
+    </div>
+    <div class="meta"><span>تهیه‌شده بر پایهٔ شاخهٔ <span class="ltr">origin/main</span></span><span>نسخهٔ گزارش: ۲۵ مرداد ۱۴۰۵</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>خلاصهٔ مدیریتی</span></div>
+    <div class="eyebrow">در یک نگاه</div><h1>چه چیزی در این شش روز تغییر کرده است؟</h1>
+    <p class="lead">تغییرات از زمان تولید گزارش نمونه - ۱۰ اوت ۲۰۲۶، ساعت ۱۹:۳۰ به وقت ایران - تا آخرین commit موجود در شاخهٔ اصلی در ۱۶ اوت ۲۰۲۶، ساعت ۱۲:۰۶ بررسی شده‌اند.</p>
+    <div class="grid g4">
+      <div class="card metric"><strong>۳۳</strong><span>commit روی main</span></div>
+      <div class="card metric"><strong>۳۰</strong><span>commit غیرادغامی</span></div>
+      <div class="card metric"><strong>۳۰۶</strong><span>فایل تغییرکرده</span></div>
+      <div class="card metric"><strong>۹</strong><span>مسیر طراحی‌سیستم بسته‌شده</span></div>
+    </div>
+    <div class="grid g3" style="margin-top:4mm">
+      <div class="card soft"><h3>محصول و تجربهٔ کاربری</h3><p>همگرایی صفحات CRM، موجودی، فروش، منابع انسانی، مدیریت، لجستیک و مسیرهای عمومی روی الگوهای مشترک؛ همراه با RTL، موبایل، حالت روشن/تیره و دسترس‌پذیری.</p></div>
+      <div class="card blue"><h3>کنترل و حاکمیت</h3><p>تمرکز مدیریت دسترسی، حذف گردش‌های اختیار قدیمی، کنترل پیش‌نیازهای مجوز به‌صورت تراکنشی و قواعد روشن‌تر برای حذف یا غیرفعال‌سازی قرارداد.</p></div>
+      <div class="card sand"><h3>تاب‌آوری عملیاتی</h3><p>تقویت انتشار بدون از‌دست‌رفتن داده، checkpoint خارج از سرور، قفل و lease، بازیابی، صفحهٔ نگهداری و بازآرایی اتصال پایگاه داده.</p></div>
+    </div>
+    <div class="callout"><strong>نتیجه برای مدیریت:</strong> بیشترین ارزش این دوره «افزودن چند صفحه» نیست؛ کاهش تفاوت رفتار میان واحدها، قابل‌پیگیری‌ترشدن اختیار و تصمیم، و کم‌شدن ریسک انتشار و بازیابی است.</div>
+    <div class="note"><strong>مرز این گزارش:</strong> داده‌ها از تاریخچهٔ Git، Issueهای GitHub و وضعیت GitHub Actions استخراج شده‌اند. هیچ Release یا Tag رسمی در مخزن ثبت نشده؛ بنابراین «آماده در main» با «فعال در production» یکی در نظر گرفته نشده است.</div>
+    <div class="footer"><span>گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۲</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>تجربهٔ کاربری و طراحی‌سیستم</span></div>
+    <div class="eyebrow">همگرایی سراسری</div><h2>از «صفحات شبیه‌به‌هم» به یک زبان عملیاتی مشترک</h2>
+    <p class="lead">پروژهٔ همگرایی طراحی‌سیستم به ۹ مسیر اجرایی تقسیم شد و Issueهای ۲۷۶ تا ۲۸۴ بسته شدند. هدف فقط ظاهر یکسان نیست؛ رفتار فرم، خطا، وضعیت، اقدام، صفحهٔ موبایل، RTL، صفحه‌کلید و دسترس‌پذیری نیز باید قابل پیش‌بینی باشد.</p>
+    <div class="grid g2">
+      <div class="card soft"><h3>CRM، موجودی و فروش</h3><ul><li>جزئیات، ایجاد و ویرایش مشتری در CRM</li><li>مدیریت خدمات، نوع برش، پرداخت سنگ و زیرخدمت</li><li>ایجاد و ویرایش محصول و ساخت قالب قرارداد</li><li>حفظ منطق قیمت، شناسه، مجوز و بازیابی در حین ساده‌سازی UI</li></ul></div>
+      <div class="card blue"><h3>منابع انسانی، مدیریت و لجستیک</h3><ul><li>فرم‌ها و چرخهٔ استخدام، زمان‌بندی فارسی و برنامهٔ کاری</li><li>ایجاد کاربر، نقش و مجوز، و حالت‌های عملیاتی مدیریت</li><li>ایجاد و جزئیات بارگیری، صفحات عمومی و احراز هویت</li><li>همسان‌سازی اقدام‌ها، بازخوردها و وضعیت‌های انتظار یا خطا</li></ul></div>
+      <div class="card"><h3>زیرساخت پذیرش</h3><p>اسکن ایستا برای توکن و ترکیب‌بندی، baseline تصویری کنترل‌شده، تست مرورگر مبتنی بر Docker محلی، بررسی RTL، عرض ۳۹۰ پیکسل، زوم ۲۰۰٪، focus، keyboard و Axe.</p></div>
+      <div class="card"><h3>overlay و بازخورد مشترک</h3><p>دیالوگ موفقیت/خطا، همگام‌سازی Excel کاتالوگ و عملیات حسابداری به ترکیب‌بندی مشترک منتقل شده‌اند؛ با کنترل Escape، محصورسازی focus، بازگردانی focus و جلوگیری از اقدام تکراری.</p></div>
+    </div>
+    <div class="callout"><strong>اثر روزانه:</strong> کاربر میان واحدها با دکمه، فرم و وضعیت متفاوت روبه‌رو نمی‌شود؛ آموزش ساده‌تر، خطای کلیک کمتر و تشخیص وضعیت سریع‌تر می‌شود.</div>
+    <div class="warn"><strong>وضعیت هنوز نهایی نیست:</strong> Issue شمارهٔ ۲۸۵ برای audit و cutover نهایی سراسری باز است. بسته‌شدن ۹ مسیر، پیش‌نیاز مهم است؛ اما اثبات پوشش تمام صفحات و حذف کامل بدهی ترکیب‌بندی هنوز یک مرحلهٔ مستقل دارد.</div>
+    <div class="footer"><span>گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۳</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>منابع انسانی و کنترل دسترسی</span></div>
+    <div class="eyebrow">اختیار روشن‌تر، جست‌وجوی سریع‌تر</div><h2>مدیریت دسترسی از گردش قدیمی به سیاست قابل‌کنترل منتقل شد</h2>
+    <p class="lead">Issue شمارهٔ ۲۷۲ بسته شده و مدل اختیار مبتنی بر مجوز جای گردش‌های قدیمی را گرفته است. در ادامه، مدیریت دسترسی در یک workspace متمرکز و پیش‌نیازهای مجوز در سطح تراکنش enforce شده‌اند.</p>
+    <div class="flow">
+      <div class="step"><b>۱. تعریف اختیار</b><span>مجوز اقدام، نقش و پیش‌نیاز به‌جای مسیرهای ضمنی</span></div>
+      <div class="step"><b>۲. ویرایش متمرکز</b><span>مدیریت نقش و permission در یک فضای واحد</span></div>
+      <div class="step"><b>۳. کنترل تراکنشی</b><span>ثبت هماهنگ مجوز و پیش‌نیاز؛ بدون وضعیت نیمه‌کاره</span></div>
+      <div class="step"><b>۴. تجربهٔ قابل‌فهم</b><span>نمایش روشن‌تر انتخاب‌ها، جست‌وجو و خطا</span></div>
+    </div>
+    <div class="grid g2">
+      <div class="card soft"><h3>بهبود چرخهٔ استخدام</h3><ul><li>بازطراحی مسیرهای بررسی مصاحبه و اطلاعات داوطلب</li><li>جست‌وجوی بهتر در استخدام و افراد</li><li>کنترل‌های تاریخ جلالی خواناتر و پایدارتر</li><li>بهبود صفحات معیار مصاحبه و ساختار سازمانی</li></ul></div>
+      <div class="card blue"><h3>بهبود امنیت و ادارهٔ دسترسی</h3><ul><li>حفظ پیش‌نیاز مجوز میان عملیات workspace</li><li>ممانعت از ثبت ناقص یا ناسازگار مجوزها</li><li>کاهش تکرار صفحهٔ مدیریت permission</li><li>نگه‌داشت معنای role، grant و audit در حین تغییر UI</li></ul></div>
+    </div>
+    <div class="note"><strong>برای مدیر واحد:</strong> پرسش «چه کسی اجازهٔ این اقدام را دارد؟» باید پاسخ روشن‌تر و قابل‌ردگیری‌تری داشته باشد. تغییر رابط، معنای اختیار را عوض نکرده؛ بلکه نمایش و اعمال آن را متمرکزتر کرده است.</div>
+    <div class="grid g3">
+      <div class="card sand"><h4>ریسک کاهش‌یافته</h4><p>اعطای ناقص permission یا از بین رفتن پیش‌نیاز در عملیات ترکیبی.</p></div>
+      <div class="card sand"><h4>ارزش عملیاتی</h4><p>یافتن فرد، نقش و وضعیت استخدام با اصطکاک کمتر.</p></div>
+      <div class="card sand"><h4>نیاز مدیریتی</h4><p>بازبینی نمونه‌ای نقش‌های حساس پس از انتشار واقعی.</p></div>
+    </div>
+    <div class="footer"><span>گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۴</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>قرارداد، فروش و حسابداری</span></div>
+    <div class="eyebrow">کنترل چرخهٔ عمر و شواهد مالی</div><h2>قرارداد کمتر حذف می‌شود؛ تصمیم و سابقه بیشتر حفظ می‌شود</h2>
+    <p class="lead">قواعد چرخهٔ عمر قرارداد اکنون حذف سخت، غیرفعال‌سازی و فعال‌سازی مجدد را بر اساس وضعیت و وابستگی‌ها کنترل می‌کنند. هم‌زمان چند نقص حسابداری و اسناد چاپی اصلاح شده است.</p>
+    <div class="grid g2">
+      <div class="card soft"><h3>حذف سخت فقط در حالت مجاز</h3><p>قرارداد باید در وضعیت پیش‌نویس یا لغوشده باشد و سند مالی یا عملیات فیزیکی قطعی نداشته باشد. در غیر این صورت، blocker همراه با نوع و تعداد وابستگی نمایش داده می‌شود.</p></div>
+      <div class="card soft"><h3>غیرفعال‌سازی با کنترل کار باز</h3><p>تحویل باز، بارگیری باز یا گردش مالی ناتمام مانع غیرفعال‌سازی است. مدیر تنها در محدودهٔ مجاز می‌تواند اقدام کند و اختیارهای حساس‌تر برای ادمین باقی می‌ماند.</p></div>
+      <div class="card blue"><h3>تاریخ و سند حسابداری</h3><p>محدودیت سنی غیرضروری برای تاریخ فاکتور حذف شده، اما اعتبار قالب تاریخ باقی مانده است. همچنین قیمت‌ها در PDF حسابداری به ریال اصلاح شده‌اند.</p></div>
+      <div class="card blue"><h3>Idempotency و شواهد تخفیف</h3><p>مسیر حسابداری header مشترک idempotency را می‌پذیرد. برای قراردادهای قدیمی بدون تخفیف نیز شواهد صفر/عدم‌وجود تخفیف در زمان تأیید مالی normalize می‌شود و تضادها پذیرفته نمی‌شوند.</p></div>
+    </div>
+    <div class="callout"><strong>اثر مدیریتی:</strong> سابقهٔ قرارداد و سند مالی کمتر در معرض حذف یا تفسیر مبهم قرار می‌گیرد؛ عملیات تکراری حسابداری بهتر مهار می‌شود و قرارداد قدیمیِ بدون تخفیف از مسیر کنترل‌شده عبور می‌کند.</div>
+    <div class="warn"><strong>نکتهٔ کنترلی:</strong> normalization شواهد قدیمی به معنی نادیده‌گرفتن تخفیف نیست. هر مبلغ غیرصفر، دادهٔ خراب یا adjustment ناسازگار باید همچنان تعارض تلقی شود و نیاز به بررسی دارد.</div>
+    <div class="footer"><span>گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۵</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>استقرار، داده و بازیابی</span></div>
+    <div class="eyebrow">انتشار ایمن‌تر</div><h2>مسیر deployment برای شکستِ کنترل‌شده طراحی شده است</h2>
+    <p class="lead">بخش قابل‌توجهی از تغییرات این دوره به جلوگیری از از‌دست‌رفتن داده و بهبود قابلیت بازیابی اختصاص دارد. این تغییرات جزئیات فنی‌اند، اما اثرشان مدیریتی است: انتشار باید یا کامل و قابل‌اثبات باشد، یا fail-closed متوقف شود.</p>
+    <div class="flow">
+      <div class="step"><b>قفل و lease</b><span>مالکیت advisory lock و محدودهٔ اعتبار عملیات بررسی می‌شود</span></div>
+      <div class="step"><b>checkpoint</b><span>نسخهٔ قابل‌بازیابی خارج از سرور verify می‌شود</span></div>
+      <div class="step"><b>شروع release</b><span>upstream پروکسی refresh و سرویس‌ها کنترل می‌شوند</span></div>
+      <div class="step"><b>بازیابی/توقف</b><span>صفحهٔ نگهداری و بستهٔ recovery باید خوانا و معتبر باشند</span></div>
+    </div>
+    <div class="grid g2">
+      <div class="card soft"><h3>مالکیت پایگاه داده</h3><p>runtime اصلی backend باید فقط یک PrismaClient مشترک داشته باشد. برای connection_limit و pool_timeout مقدار صریح تعریف شده و guardrail معماری برای جلوگیری از clientهای پراکنده اضافه شده است.</p></div>
+      <div class="card soft"><h3>پایداری checkpoint</h3><p>verify در محدودهٔ lease نگه داشته شده، hashing تکراری حذف شده، upload موقت قابل‌ادامه است و فایل‌های پشتیبانِ موردارجاع هنگام پاک‌سازی stage حفظ می‌شوند.</p></div>
+      <div class="card blue"><h3>اجرای jobهای پس‌زمینه</h3><p>TTY غیرفعال و stdin بسته شده تا job کنترلی در محیط غیرتعاملی معطل نماند. session قفل نیز به‌شکل قطعی آزاد می‌شود.</p></div>
+      <div class="card blue"><h3>مرز نگهداری و recovery</h3><p>storage بازیابی، خوانایی maintenance page، artifactهای منقضی و کامل‌بودن verify خارج از سرور صریح‌تر کنترل می‌شوند.</p></div>
+    </div>
+    <div class="callout"><strong>پیام اصلی:</strong> سرعت انتشار مهم است، اما این تغییرات اولویت را به checkpoint قابل‌اثبات، مالکیت روشن قفل، بازیابی معتبر و بازگشت fail-closed داده‌اند.</div>
+    <div class="footer"><span>گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۶</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>شواهد کیفیت و وضعیت انتشار</span></div>
+    <div class="eyebrow">آنچه GitHub اثبات می‌کند - و آنچه نمی‌کند</div><h2>آخرین guardrail سبز است؛ انتشار production هنوز سند جدا می‌خواهد</h2>
+    <div class="grid g4">
+      <div class="card metric"><strong>۱۳٬۵۴۶</strong><span>خط افزوده</span></div>
+      <div class="card metric"><strong>۸٬۸۰۲</strong><span>خط حذف‌شده</span></div>
+      <div class="card metric"><strong>۱۰۴</strong><span>فایل جدید</span></div>
+      <div class="card metric"><strong>۲۰۲</strong><span>فایل ویرایش‌شده</span></div>
+    </div>
+    <div class="divider"></div>
+    <div class="grid g2">
+      <div class="card soft"><span class="tag">موفق</span><h3 style="margin-top:2mm">Backend architecture guardrails</h3><p>اجرای مربوط به آخرین commit شاخهٔ main با موفقیت تمام شده است. خطای اولیهٔ commit زیربنایی پایگاه داده نیز در commit بعدی CI اصلاح شده و اجراهای بعدی ثبت‌شده موفق‌اند.</p></div>
+      <div class="card sand"><span class="tag amber">نیازمند مدرک تکمیلی</span><h3 style="margin-top:2mm">Release / Tag / Production</h3><p>در مخزن هیچ GitHub Release یا Tag رسمی دیده نشد. همچنین موفقیت workflow معماری، جایگزین اجرای همهٔ تست‌های رفتاری، طراحی‌سیستم و تأیید عملیاتی production نیست.</p></div>
+    </div>
+    <table style="margin-top:5mm">
+      <thead><tr><th>سطح شواهد</th><th>وضعیت</th><th>برداشت درست برای مدیریت</th></tr></thead>
+      <tbody>
+        <tr><td>تاریخچهٔ main</td><td><span class="tag">موجود</span></td><td>کد تغییرات روی شاخهٔ اصلی ثبت شده و hash آن قابل‌ارجاع است.</td></tr>
+        <tr><td>Issueهای اجرایی</td><td><span class="tag">۹ بسته</span></td><td>مسیرهای طراحی‌سیستم ۲۷۶ تا ۲۸۴ بسته شده‌اند؛ audit نهایی ۲۸۵ باز است.</td></tr>
+        <tr><td>CI معماری backend</td><td><span class="tag">موفق</span></td><td>guardrail معماری آخرین head عبور کرده است.</td></tr>
+        <tr><td>انتشار production</td><td><span class="tag amber">اثبات‌نشده</span></td><td>نیازمند شناسهٔ release، زمان استقرار، health gate و تأیید مالک عملیاتی است.</td></tr>
+        <tr><td>پذیرش سراسری UI</td><td><span class="tag amber">در انتظار #۲۸۵</span></td><td>پوشش نهایی همهٔ صفحات و حذف بدهی باقی‌مانده هنوز باید audit شود.</td></tr>
+      </tbody>
+    </table>
+    <div class="note"><strong>شفافیت فرآیند:</strong> در بازهٔ این گزارش PR ادغام‌شدهٔ جدیدی ثبت نشده و تغییرات عمدتاً به‌صورت commit و merge مستقیم روی main دیده می‌شوند. برای تغییرات پرریسک، ثبت PR و تأیید مستقل می‌تواند ردپای تصمیم را قوی‌تر کند.</div>
+    <div class="footer"><span>گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۷</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>نقشهٔ اثر بر واحدها</span></div>
+    <div class="eyebrow">تغییر فنی، پیامد کسب‌وکاری</div><h2>هر واحد دقیقاً چه تغییری را احساس می‌کند؟</h2>
+    <div class="card" style="padding:3mm 5mm">
+      <div class="impact-row"><b>مدیریت</b><span>وضعیت‌ها و اقدام‌های هماهنگ‌تر؛ سابقهٔ تصمیم قرارداد و اختیار روشن‌تر؛ گزارش‌پذیری بهتر.</span><span class="score">اثر زیاد</span></div>
+      <div class="impact-row"><b>منابع انسانی</b><span>جست‌وجوی بهتر، کنترل تاریخ جلالی، چرخهٔ استخدام منظم‌تر و مدیریت متمرکز مجوزها.</span><span class="score">اثر زیاد</span></div>
+      <div class="impact-row"><b>حسابداری</b><span>قیمت PDF به ریال، idempotency مشترک، قواعد تاریخ فاکتور و شواهد legacy بدون تخفیف.</span><span class="score">اثر زیاد</span></div>
+      <div class="impact-row"><b>فروش</b><span>تجربهٔ هماهنگ‌تر محصول و قالب قرارداد؛ کنترل چرخهٔ عمر قرارداد و blockerهای وابستگی.</span><span class="score">اثر زیاد</span></div>
+      <div class="impact-row"><b>موجودی</b><span>CRUD یکپارچه‌تر برای خدمات، نوع برش، پرداخت سنگ و زیرخدمت؛ رفتار قابل‌پیش‌بینی‌تر فرم‌ها.</span><span class="score">اثر زیاد</span></div>
+      <div class="impact-row"><b>لجستیک</b><span>مسیرهای بارگیری همگرا با طراحی‌سیستم و حفظ معنا و کنترل‌های quantity/reservation.</span><span class="score med">اثر متوسط</span></div>
+      <div class="impact-row"><b>فناوری و عملیات</b><span>استقرار fail-closed، checkpoint و recovery قوی‌تر، اتصال DB کنترل‌شده و guardrail CI.</span><span class="score">اثر زیاد</span></div>
+      <div class="impact-row"><b>کاربر عمومی</b><span>صفحات ورود، ثبت‌نام، تأیید و درخواست با کنترل‌های canonical و دسترس‌پذیری بهتر.</span><span class="score med">اثر متوسط</span></div>
+    </div>
+    <div class="divider"></div><h3>ریسک‌های باقیمانده برای تصمیم مدیریتی</h3>
+    <div class="grid g3">
+      <div class="card sand"><h4>۱. فاصلهٔ main تا production</h4><p>بدون release evidence نباید زمان فعال‌شدن واقعی برای کاربران قطعی فرض شود.</p></div>
+      <div class="card sand"><h4>۲. audit نهایی UI</h4><p>Issue ۲۸۵ باز است و باید تمام صفحات، accessibility و visual regression را جمع‌بندی کند.</p></div>
+      <div class="card sand"><h4>۳. تغییرات مستقیم روی main</h4><p>برای حوزه‌های مالی و استقرار، review مستقل و trace تصمیم ارزش کنترلی دارد.</p></div>
+    </div>
+    <div class="footer"><span>گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۸</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>اقدام پیشنهادی</span></div>
+    <div class="eyebrow">گام بعدی برای مدیریت</div><h2>سه تصمیم کوتاه، قبل از اعلام «انتشار کامل»</h2>
+    <div class="grid g3">
+      <div class="card soft"><span class="tag">اولویت ۱</span><h3 style="margin-top:2mm">شناسنامهٔ release</h3><p>برای نسخهٔ production، commit head، زمان استقرار، محیط، نتیجهٔ health gate و مسئول تأیید ثبت شود. پیشنهاد: release از hash <span class="ltr">072e441</span> یا جانشین تأییدشدهٔ آن ساخته شود.</p></div>
+      <div class="card soft"><span class="tag">اولویت ۲</span><h3 style="margin-top:2mm">بستن audit نهایی</h3><p>Issue ۲۸۵ با پوشش همهٔ مسیرهای تعاملی، RTL، موبایل، روشن/تیره، keyboard، Axe و visual baseline تکمیل و نتیجهٔ استثناها ثبت شود.</p></div>
+      <div class="card soft"><span class="tag">اولویت ۳</span><h3 style="margin-top:2mm">پذیرش واحدها</h3><p>یک smoke test کوتاه با نمایندهٔ HR، حسابداری، فروش، موجودی و لجستیک اجرا و موارد توقف‌آور پیش از اعلام عمومی جدا شود.</p></div>
+    </div>
+    <div class="divider"></div>
+    <h3>چک‌لیست پیشنهادی Go / No-Go</h3>
+    <table>
+      <thead><tr><th>کنترل</th><th>مدرک موردنیاز</th><th>مالک پیشنهادی</th><th>وضعیت فعلی از GitHub</th></tr></thead>
+      <tbody>
+        <tr><td>هویت نسخه</td><td>hash، image digest یا release tag</td><td>فناوری</td><td><span class="tag amber">Tag/Release ندارد</span></td></tr>
+        <tr><td>سلامت migration و DB</td><td>نتیجهٔ migration، pool و architecture check</td><td>Backend/DB</td><td><span class="tag blue">guardrail معماری موفق</span></td></tr>
+        <tr><td>بازیابی</td><td>checkpoint خارج از سرور و verify معتبر</td><td>عملیات</td><td><span class="tag blue">منطق تقویت شده</span></td></tr>
+        <tr><td>پذیرش UI</td><td>نتیجهٔ #۲۸۵ و baselineهای موردتأیید</td><td>Frontend/QA</td><td><span class="tag amber">باز</span></td></tr>
+        <tr><td>پذیرش کسب‌وکار</td><td>سناریوهای کوتاه واحدها و امضای مالک</td><td>مدیران واحد</td><td><span class="tag gray">در GitHub اثبات نشده</span></td></tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>پیشنهاد تصمیم:</strong> تغییرات از نظر دامنه و شواهد کدنویسی قابل‌توجه و امیدوارکننده‌اند؛ اعلام «آماده برای استفادهٔ عمومی» بهتر است مشروط به شناسنامهٔ release، audit شمارهٔ ۲۸۵ و پذیرش کوتاه واحدهای کلیدی باشد.</div>
+    <div class="footer"><span>گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۹</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>خط زمانی commitها - بخش اول</span></div>
+    <div class="eyebrow">۱۰ تا ۱۲ اوت ۲۰۲۶</div><h2>از کنترل دسترسی تا استقرار بدون از‌دست‌رفتن داده</h2>
+    <div class="timeline tiny">
+      <div class="event"><b>مدل اختیار مبتنی بر permission مستند شد</b> <span class="hash">1a63534</span><br><span>ثبت تصمیم دامنه‌ای برای بازطراحی HR.</span></div>
+      <div class="event"><b>idempotency حسابداری و قیمت PDF ریالی اصلاح شد</b> <span class="hash">7792b6e / ff775ab</span><br><span>مهار درخواست تکراری و اصلاح نمایش مالی سند چاپی.</span></div>
+      <div class="event"><b>استقرار بدون از‌دست‌رفتن داده و PrismaClient مشترک</b> <span class="hash">d40335e</span><br><span>افزودن lease، checkpoint، recovery و guardrail معماری پایگاه داده.</span></div>
+      <div class="event"><b>CI برای ساخت package داخلی اصلاح شد</b> <span class="hash">049c280</span><br><span>رفع شکست workflow زیربنایی.</span></div>
+      <div class="event"><b>گردش‌های اختیار قدیمی HR جایگزین شد</b> <span class="hash">00eedbd</span><br><span>migration، route، service و آزمون‌های مرتبط با Issue ۲۷۲.</span></div>
+      <div class="event"><b>زنجیرهٔ deployment سخت‌گیرانه‌تر شد</b> <span class="hash">6a20faf تا 809ffbd</span><br><span>storage و maintenance page، session lock، مالکیت advisory، verify خارج از سرور، artifact منقضی، refresh proxy و حذف hashing تکراری.</span></div>
+      <div class="event"><b>حاکمیت چرخهٔ عمر قرارداد اضافه شد</b> <span class="hash">847b616</span><br><span>کنترل حذف، غیرفعال‌سازی، وابستگی‌های مالی/فیزیکی و تاریخ فاکتور.</span></div>
+      <div class="event"><b>مدیریت دسترسی متمرکز شد</b> <span class="hash">63023f4 / 86e8063 / 058f84c</span><br><span>پیش‌نیازهای permission به‌صورت تراکنشی enforce و میان عملیات حفظ شدند.</span></div>
+      <div class="event"><b>verify checkpoint داخل lease نگه داشته شد</b> <span class="hash">0f4c896</span><br><span>کاهش خطر اعتبارسنجی پس از پایان مالکیت انتشار.</span></div>
+    </div>
+    <div class="footer"><span>گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۱۰</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>خط زمانی commitها - بخش دوم</span></div>
+    <div class="eyebrow">۱۳ تا ۱۶ اوت ۲۰۲۶</div><h2>تمرکز بر تجربهٔ کاربر، پذیرش و پایداری عملیات</h2>
+    <div class="timeline tiny">
+      <div class="event"><b>جست‌وجوی افراد و UX مجوزها بهتر شد</b> <span class="hash">5b57181</span><br><span>بهبود middleware، users، صفحات permission و معیارهای مصاحبه.</span></div>
+      <div class="event"><b>جست‌وجوی استخدام و تاریخ جلالی اصلاح شد</b> <span class="hash">090011d</span><br><span>کنترل‌های تاریخ و تجربهٔ صفحات استخدام و ساختار سازمانی.</span></div>
+      <div class="event"><b>jobهای deployment برای اجرای غیرتعاملی پایدار شدند</b> <span class="hash">dc0b4e8 / a66d0b7</span><br><span>غیرفعال‌سازی TTY و بستن stdin.</span></div>
+      <div class="event"><b>بنیاد و پذیرش طراحی‌سیستم تکمیل شد</b> <span class="hash">6da93bf</span><br><span>توکن‌ها، scanner، زیرساخت E2E، baseline تصویری و tracer bullet ایجاد دپارتمان.</span></div>
+      <div class="event"><b>CRM، موجودی و فروش همگرا شدند</b> <span class="hash">94248db / 072e441</span><br><span>صفحات مشتری، خدمات موجودی، محصول و قالب قرارداد به composition مشترک منتقل شدند.</span></div>
+      <div class="event"><b>HR، مدیریت، لجستیک و مسیرهای عمومی همگرا شدند</b> <span class="hash">8090377</span><br><span>چرخهٔ استخدام، personnel، کاربران، بارگیری، apply و confirmation.</span></div>
+      <div class="event"><b>فایل‌های پشتیبان موردارجاع حفظ شدند</b> <span class="hash">73e231f</span><br><span>پاک‌سازی stage نباید support file موردنیاز recovery را حذف کند.</span></div>
+      <div class="event"><b>upload موقت checkpoint قابل‌ادامه شد</b> <span class="hash">ec50fe3</span><br><span>تاب‌آوری انتقال فایل checkpoint در خطاهای گذرا.</span></div>
+      <div class="event"><b>قراردادهای interaction پذیرش پایدار شد</b> <span class="hash">cd228bb</span><br><span>اصلاح‌های جزئی برای تست‌های طراحی‌سیستم و تعامل.</span></div>
+      <div class="event"><b>شواهد قرارداد legacy بدون تخفیف normalize شد</b> <span class="hash">f49e3d5</span><br><span>ثبت منشأ شواهد و رد تضادهای مالی در تأیید.</span></div>
+    </div>
+    <div class="footer"><span>گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۱۱</span></div>
+  </section>
+
+  <section class="page">
+    <div class="topline"></div><div class="page-head"><span class="brand"><span class="mark">S</span> سامانه سبلان</span><span>منابع و روش تهیه</span></div>
+    <div class="eyebrow">قابل‌پیگیری و قابل‌تکرار</div><h2>این گزارش چگونه تهیه شده است؟</h2>
+    <p class="lead">گزارش، دستور یا متن نمونهٔ پیوست‌شده را به‌عنوان منبع تغییرات تلقی نکرده است. PDF نمونه فقط برای فهم قالب، لحن مدیریتی و صفحه‌آرایی RTL استفاده شد؛ واقعیت‌های فنی از GitHub و تاریخچهٔ مخزن استخراج شده‌اند.</p>
+    <div class="grid g2 source">
+      <div class="card soft"><h3>محدودهٔ Git</h3><p>مقایسهٔ commit پایه <span class="ltr">86b02b9</span> با head <span class="ltr">072e441</span> روی <span class="ltr">origin/main</span>.</p><p><a href="https://github.com/Mahaan-Amr/sabalanerp/compare/86b02b96d390286f81678f21926960efe1a0ae90...072e441ffd594e5e70baa6a4aab7cf85eeb4d321">مشاهدهٔ مقایسه در GitHub</a></p></div>
+      <div class="card blue"><h3>Issueهای کلیدی</h3><p><a href="https://github.com/Mahaan-Amr/sabalanerp/issues/272">#272 - بازطراحی اختیار HR</a><br><a href="https://github.com/Mahaan-Amr/sabalanerp/issues/275">#275 - برنامهٔ همگرایی طراحی‌سیستم</a><br><a href="https://github.com/Mahaan-Amr/sabalanerp/issues/285">#285 - audit و cutover نهایی</a></p></div>
+      <div class="card"><h3>شواهد CI</h3><p>آخرین اجرای «Backend architecture guardrails» برای head گزارش موفق بوده است.</p><p><a href="https://github.com/Mahaan-Amr/sabalanerp/actions/runs/31936904245">مشاهدهٔ اجرای GitHub Actions</a></p></div>
+      <div class="card"><h3>روش شمارش</h3><p>۳۳ commit شامل mergeها؛ ۳۰ commit غیرادغامی؛ diff تجمیعی ۳۰۶ فایل، ۱۳٬۵۴۶ خط افزوده و ۸٬۸۰۲ خط حذف‌شده.</p></div>
+    </div>
+    <div class="divider"></div><h3>محدودیت‌های آگاهانه</h3>
+    <ul><li>بسته‌شدن Issue یا سبزبودن یک workflow، به‌تنهایی تأیید production نیست.</li><li>آمار خطوط، شاخص حجم تغییر است و معادل مستقیم ارزش یا کیفیت نیست.</li><li>این گزارش وضعیت کد و شواهد GitHub را توصیف می‌کند؛ پذیرش کاربر نهایی و عملیات واقعی نیازمند مدرک جداگانه است.</li></ul>
+    <div class="callout"><strong>جمع‌بندی نهایی:</strong> سامانه در این بازه از نظر یکپارچگی تجربه، وضوح اختیار، حفظ سابقهٔ قرارداد و تاب‌آوری انتشار پیشرفت جدی داشته است. تصمیم مدیریتی مناسب، عبور کنترل‌شده از «کد آماده در main» به «نسخهٔ قابل‌اثبات در production» است.</div>
+    <div class="footer"><span>پایان گزارش جامع تغییرات GitHub سامانه سبلان</span><span>۱۲</span></div>
+  </section>
+</body>
+</html>

@@ -10,7 +10,7 @@ export type Period = { from: string; to: string; asOf: string };
 export type ReportPurpose = 'PARTNER' | 'MANAGEMENT' | 'ACCOUNTING' | 'FULFILLMENT';
 export type ReportChannel = 'LIST' | 'DETAIL' | 'SEARCH' | 'COUNT' | 'EXPORT';
 export type Currency = Foundation.Money['currency'];
-export type Root = { caseId: string; partnerSellerId: string; departmentId: string | null; trackingNumber?: number };
+export type Root = { caseId: string; partnerSellerId: string; departmentId: string | null };
 export type Purchase = Foundation.PartnerAccountView['purchases'][number];
 
 export class ReportingError extends Error {
@@ -45,7 +45,6 @@ export type DeliveryProgress = {
 export type CaseEvidence = {
   root: Root;
   events: Foundation.PartnerEvent[];
-  financialRevenue?: Array<{ amount: string; effectiveDate: string; recordedAt: string }>;
   internal: Foundation.SabalanInternalRecordView;
   // Not requested from an Accounting/Logistics source; no broad entity is serialized.
   commercial?: CommercialRevision[];
@@ -70,26 +69,18 @@ export interface ReportingSnapshot {
   roots: readonly Root[];
   authorization(purpose: ReportPurpose, channel: ReportChannel): Foundation.PartnerAuthorizationPort;
   caseEvidence(root: Root, purpose: ReportPurpose): Promise<CaseEvidence>;
-  /** Persists the frozen artifact in the same repeatable-read transaction as its source evidence. */
-  putExport(artifact: FrozenExport): Promise<void>;
 }
 export type Metrics = {
   wholesalePurchases: string;
   retailSales?: string; retailCollected?: string; netComparableMargin?: string;
 };
-export type ReportChartTransaction = {
-  caseId: string; caseNumber: string; trackingNumber?: number; customerContractNumber: string; effectiveDate: string;
-  kind: 'COMMITMENT' | 'CORRECTION' | 'VOID' | 'SABALAN_RECEIPT' | 'CUSTOMER_RECEIPT' | 'CUSTOMER_RECEIPT_REVERSAL';
-  debtDelta: string; receivableDelta: string; receiptDelta: string;
-};
 export type ReportRow = {
-  caseId: string; revision: number; caseNumber: string; trackingNumber?: number; customerContractNumber: string;
+  caseId: string; revision: number; caseNumber: string; customerContractNumber: string;
   internalRecordNumber?: string; state: Foundation.CaseState;
   currency?: Currency; metrics?: Metrics;
   account?: Purchase | null;
   customerPaymentPlan?: Foundation.PartnerCaseView['customerPaymentPlan'];
   collectionStatus?: 'UNPAID' | 'PARTIAL' | 'SETTLED' | 'OVERPAID';
-  chartTransactions?: ReportChartTransaction[];
   deliveries: Foundation.FulfillmentView['deliveries'];
   deliveryProgress: DeliveryProgress[] | null;
 };
@@ -101,8 +92,6 @@ export type Report = {
   count: number; offset: number; limit: number; rows: ReportRow[];
   totals: { currency: Currency; metrics: Metrics; accountingBalance: string | null; accountingReceivedAsOf: string | null;
     accountingCovered: number; accountingEligible: number }[];
-  series: { currency: Currency; points: Array<{ jalaliMonth: string; debtBalance: string;
-    receivableBalance: string; receipts: string; transactions: ReportChartTransaction[] }> }[];
 };
 
 export type FrozenExport = {
@@ -111,5 +100,6 @@ export type FrozenExport = {
 };
 /** Private durable storage supplied by #334. No public/static file URLs. */
 export interface ReportExportStore {
+  put(artifact: FrozenExport): Promise<void>;
   get(id: string): Promise<FrozenExport | null>;
 }

@@ -27,18 +27,19 @@ test('a Manager title never manufactures an action and a projected expired grant
   assert.doesNotMatch(hidden, /ایجاد پروفایل|فعال‌سازی|تغییر شرایط/);
   const expired = renderToStaticMarkup(<ManagementView view={{ ...base, actions: [{ action: 'PROFILE_CREATE', enabled: true, expiresAt: '2026-08-27T10:00:00.000Z' }] }}
     now={Date.parse('2026-08-27T10:00:00.000Z')} disabled={false} onChoose={() => undefined} />);
-  assert.doesNotMatch(expired, /ایجاد پروفایل|هویت همکاری|شرایط تجاری|اعتبار و پرداخت/);
+  assert.match(expired, /ایجاد پروفایل/);
+  assert.match(expired, /disabled=""/);
+  assert.match(expired, /مهلت دسترسی/);
 });
 
 test('response review keeps different prices and mixed rejection visible before confirmation', () => {
   const html = renderToStaticMarkup(<ResponseReview rowNumbers={{ a: 1, b: 2, c: 3 }} decisions={[
     { rowId: 'a', expectedRevision: 1, outcome: 'APPROVED', wholesaleUnitPrice: { amount: '120000', currency: 'IRR' } },
-    { rowId: 'b', expectedRevision: 1, outcome: 'APPROVED', wholesaleUnitPrice: { amount: '25000.50', currency: 'IRT' } },
+    { rowId: 'b', expectedRevision: 1, outcome: 'APPROVED', wholesaleUnitPrice: { amount: '25000', currency: 'IRT' } },
     { rowId: 'c', expectedRevision: 1, outcome: 'REJECTED', reason: 'مشخصات ناقص است' },
   ]} />);
-  assert.match(html, /۱۲۰٬۰۰۰/);
-  assert.match(html, /۲۵٬۰۰۰/);
-  assert.match(html, /٫۵ تومان/);
+  assert.match(html, /120000/);
+  assert.match(html, /25000/);
   assert.match(html, /ریال/);
   assert.match(html, /تومان/);
   assert.match(html, /مشخصات ناقص است/);
@@ -46,36 +47,14 @@ test('response review keeps different prices and mixed rejection visible before 
 
 test('an unavailable responder row shows evidence but no editable price or decision controls', () => {
   const html = renderToStaticMarkup(<ResponseRow number={1} row={{ rowId: 'fixture-row', revision: 2,
-    description: 'گرانیت نهبندان ممتاز',
-    configuration: [{ label: 'عرض قطعه', value: '۶۰ سانتی‌متر' }, { label: 'تعداد قطعه', value: '۱۲ عدد' }, { label: 'مساحت', value: '7.5 متر مربع' }],
     identity: { schemaVersion: 1, partnerSellerId: 'fixture-partner', catalogProductId: 'fixture-stone', family: 'slab',
-      unit: 'count', configuration: [{ key: 'private-fingerprint', value: `sha256-v1:${'1'.repeat(64)}` }], materialRateEvidenceId: 'internal-rate',
+      unit: 'متر مربع', configuration: [{ key: 'width', value: '۶۰ سانتی‌متر' }], materialRateEvidenceId: 'internal-rate',
       materialRateHash: `sha256-v1:${'0'.repeat(64)}`, components: [], currency: 'IRR', calculationPolicyVersion: 'v1', roundingPolicyVersion: 'v1' },
-    approvedPrice: { amount: '120000', currency: 'IRR' }, used: true, state: 'APPROVED',
-    approvedAt: '2026-08-27T08:00:00.000Z', expiresAt: '2026-08-29T08:00:00.000Z', actions: [] }} canRespond={false}
-    status="پاسخ این استعلام به شما واگذار نشده است." draft={{ amount: '', outcome: 'APPROVED', note: '' }}
+    approvedPrice: { amount: '120000', currency: 'IRR' }, used: true }} canRespond={false}
+    status="پاسخ این استعلام به شما واگذار نشده است." draft={{ selected: false, amount: '', outcome: 'APPROVED', note: '' }}
     pending={false} onChange={() => undefined} />);
   assert.match(html, /۶۰ سانتی‌متر/);
-  assert.match(html, /گرانیت نهبندان ممتاز/);
-  assert.match(html, /تعداد قطعه/);
-  assert.match(html, /مساحت/);
-  assert.match(html, /7.5 متر مربع/);
-  assert.match(html, /واحد قیمت: عدد/);
-  assert.match(html, /۱۲۰٬۰۰۰/);
+  assert.match(html, /120000/);
   assert.match(html, /واگذار نشده/);
-  assert.doesNotMatch(html, /<input|<textarea|<select|internal-rate|sha256|private-fingerprint|قیمت مشتری|حاشیه سود|>count</);
-});
-
-test('an accepted responder price never asks for an explanation', () => {
-  const html = renderToStaticMarkup(<ResponseRow number={1} row={{ rowId: 'fixture-row', revision: 2,
-    description: 'گرانیت نهبندان', configuration: [],
-    identity: { schemaVersion: 1, partnerSellerId: 'fixture-partner', catalogProductId: 'fixture-stone', family: 'longitudinal',
-      unit: 'squareMeter', configuration: [], materialRateEvidenceId: 'internal-rate',
-      materialRateHash: `sha256-v1:${'0'.repeat(64)}`, components: [], currency: 'IRT',
-      calculationPolicyVersion: 'v1', roundingPolicyVersion: 'v1' },
-    used: false, state: 'PENDING', actions: [{ action: 'INQUIRY_RESPOND', enabled: true }] }} canRespond
-    status="در انتظار پاسخ" draft={{ amount: '25000', outcome: 'APPROVED', note: 'نباید ارسال شود' }}
-    pending={false} onChange={() => undefined} />);
-  assert.match(html, /ثبت قیمت سبلان/);
-  assert.doesNotMatch(html, /یادداشت ردیف|<textarea/);
+  assert.doesNotMatch(html, /<input|<textarea|<select|internal-rate|sha256|قیمت مشتری|حاشیه سود/);
 });

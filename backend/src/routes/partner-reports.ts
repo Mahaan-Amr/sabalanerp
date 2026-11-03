@@ -1,12 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { ContractRuntime, Query, ReportingError, type Report } from '../services/partnerSales/reporting/contracts';
+import { ContractRuntime, Query, ReportingError } from '../services/partnerSales/reporting/contracts';
 import { PartnerReportingService } from '../services/partnerSales/reporting/service';
-import { Router } from 'express';
-import * as runtime from '@sabalanerp/partner-sales-contracts';
-import { prisma } from '../lib/prisma';
-import { protect, type AuthRequest } from '../middleware/auth';
-import { createPrismaPartnerReportExportStore, createPrismaPartnerReportingSource } from '../services/partnerSales/reporting/prisma';
-import { generatePartnerReportPdf } from '../utils/partnerReportPdf';
 
 // Structural Express-compatible boundary. #334 supplies Router and authenticated
 // request-bound service; importing this module neither registers nor activates it.
@@ -15,7 +9,6 @@ export type ReportResponse = {
   status(code: number): ReportResponse;
   json(body: unknown): unknown;
   setHeader(name: string, value: string): unknown;
-  send?(body: Buffer): unknown;
 };
 export type ReportHandler = (request: ReportRequest, response: ReportResponse) => Promise<void>;
 export interface ReportRouter {
@@ -39,7 +32,6 @@ export function registerPartnerReportRoutes(router: ReportRouter, dependencies: 
   /** MUST authenticate each request (including downloads); never reuse a service
    * whose source is bound to a different actor. This is an injected #319/#334 seam. */
   serviceFor(request: ReportRequest): Promise<PartnerReportingService>;
-  renderPdf?: (report: Report) => Promise<Buffer>;
 }) {
   const handle = (action: (service: PartnerReportingService, request: ReportRequest, response: ReportResponse) => Promise<unknown>): ReportHandler => async (request, response) => {
     response.setHeader('Cache-Control', 'private, no-store');
@@ -49,10 +41,7 @@ export function registerPartnerReportRoutes(router: ReportRouter, dependencies: 
       response.json({ success: true, data: await action(service, request, response) });
     } catch (error) {
       const safe = dependencies.runtime.partnerError(error instanceof ReportingError ? error.code : 'INTEGRITY_CONFLICT');
-      const supportReference = randomUUID();
-      console.error('Partner report request failed', { supportReference, code: safe.code,
-        cause: error instanceof Error ? error.message : 'Unknown reporting failure' });
-      response.status(safe.status).json({ success: false, error: safe.message, code: safe.code, supportReference });
+      response.status(safe.status).json({ success: false, error: safe.message, code: safe.code, supportReference: randomUUID() });
     }
   };
   router.get('/', handle((service, request) => service.query(queryInput(request.query))));
@@ -64,38 +53,5 @@ export function registerPartnerReportRoutes(router: ReportRouter, dependencies: 
     response.setHeader('Content-Disposition', `attachment; filename="partner-report-${request.params.id}.json"`);
     return report;
   }));
-  router.get('/exports/:id/pdf', async (request, response) => {
-    response.setHeader('Cache-Control', 'private, no-store');
-    response.setHeader('X-Content-Type-Options', 'nosniff');
-    try {
-      const service = await dependencies.serviceFor(request);
-      const report = await service.downloadExport(request.params.id);
-      const bytes = await (dependencies.renderPdf ?? generatePartnerReportPdf)(report);
-      response.setHeader('Content-Type', 'application/pdf');
-      response.setHeader('Content-Disposition', `attachment; filename="partner-report-${report.scope.from}-${report.scope.to}.pdf"`);
-      if (!response.send) throw new Error('Binary response unavailable');
-      response.send(bytes);
-    } catch (error) {
-      const safe = dependencies.runtime.partnerError(error instanceof ReportingError ? error.code : 'INTEGRITY_CONFLICT');
-      response.status(safe.status).json({ success: false, error: safe.message, code: safe.code });
-    }
-  });
   return router;
 }
-
-export function createPartnerReportRouter() {
-  const router = Router();
-  router.use(protect);
-  registerPartnerReportRoutes(router, { runtime, serviceFor: async request => {
-    const authenticated = request as AuthRequest;
-    if (!authenticated.user) throw new ReportingError('FORBIDDEN');
-    const supplied = authenticated.get('X-Correlation-Id');
-    const correlationId = supplied && /^[A-Za-z0-9][A-Za-z0-9:_-]{0,159}$/.test(supplied) ? supplied : randomUUID();
-    return new PartnerReportingService(runtime,
-      createPrismaPartnerReportingSource({ database: prisma, actorId: authenticated.user.id, correlationId }),
-      createPrismaPartnerReportExportStore(prisma));
-  } });
-  return router;
-}
-
-export default createPartnerReportRouter();

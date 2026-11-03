@@ -1,8 +1,6 @@
 import { contracts, type Money, type PartnerErrorCode, type Result, type RevisionRef, type SabalanInternalRecordView } from './contracts';
 import type { CommittedAccountingSource } from './repository';
 
-export const PARTNER_INTERNAL_ACCOUNTING_SOURCE = 'PARTNER_INTERNAL_RECORD' as const;
-
 export type PartnerAccountingSource = {
   view: SabalanInternalRecordView;
   partnerSellerId: string;
@@ -65,10 +63,6 @@ export async function preparePartnerFinancialSource(source: PartnerAccountingSou
   if (!parsed.success || !contracts.IdSchema.safeParse(source.partnerSellerId).success ||
       !contracts.RevisionRefSchema.safeParse(expected).success) return failure('INVALID_PAYLOAD');
   const view = parsed.data;
-  if (view.totals.monetaryRounding !== undefined) {
-    try { contracts.partnerContractPayableTotal(view.totals); }
-    catch { return failure('INTEGRITY_CONFLICT'); }
-  }
   const conflict = contracts.checkExpectedRevision(expected, view.owner);
   if (conflict) return { ok: false, error: conflict };
   if (view.state !== 'COMMITTED' && view.state !== 'VOIDED') return failure('STATE_CONFLICT');
@@ -76,7 +70,7 @@ export async function preparePartnerFinancialSource(source: PartnerAccountingSou
   const installments = view.sabalanPaymentPlan.installments;
   if (new Set(installments.map(row => row.installmentId)).size !== installments.length ||
       installments.some(row => row.amount.currency !== view.totals.currency || (row.method === 'CHECK' && (!row.check || row.check.dueDate !== row.dueDate))) ||
-      (installments.length > 0 && !equalAmounts(sumAmounts(installments.map(row => row.amount.amount)), view.totals.payable))) return failure('INTEGRITY_CONFLICT');
+      !equalAmounts(sumAmounts(installments.map(row => row.amount.amount)), view.totals.payable)) return failure('INTEGRITY_CONFLICT');
   const evidence = {
     sourceKind: view.sourceKind, internalRecordId: view.recordId,
     debtor: { partnerSellerId: source.partnerSellerId, commercialAccountId: view.commercialAccountId, identity: view.debtor },

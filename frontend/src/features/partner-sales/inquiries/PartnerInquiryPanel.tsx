@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import { PartnerWholesalePricingSummary } from './PartnerWholesalePricingSummary';
 import { ErpBadge, ErpButton, ErpCard, ErpInlineState } from '@/components/erp';
 import {
   inquiryMoney, inquiryRowState, inquiryStateLabel, inquirySummary,
@@ -14,11 +13,12 @@ export interface PartnerInquiryPanelProps {
   pending: boolean;
   onRefresh: () => void;
   onReinquire: (row: PartnerInquiryRow) => void;
+  onEnterWizard: (rows: PartnerInquiryRow[]) => void;
   onOpenInquiry?: (inquiryId: string) => void;
   mismatchedRowIds?: readonly string[];
 }
 
-export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinquire, onOpenInquiry, mismatchedRowIds = [] }: PartnerInquiryPanelProps) {
+export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinquire, onEnterWizard, onOpenInquiry, mismatchedRowIds = [] }: PartnerInquiryPanelProps) {
   const usable = usableInquiryRows(inquiry, now).filter(row => !mismatchedRowIds.includes(row.rowId));
   return <section dir="rtl" aria-label="استعلام قیمت" className="min-w-0 space-y-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -38,11 +38,10 @@ export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinqu
             {row.configuration.map((fact, index) => <div key={`${fact.label}:${index}`} className="flex flex-wrap gap-1"><dt>{fact.label}:</dt><dd className="break-words">{fact.value}</dd></div>)}
           </dl>
           {row.approvedPrice && <p className="text-sm">قیمت فروش سبلان به شما: <strong>{inquiryMoney(row)}</strong></p>}
-          <PartnerWholesalePricingSummary policy={row.wholesaleMandatory} pricing={row.wholesalePricing} currency={row.approvedPrice?.currency} />
           {row.expiresAt && <p className="text-sm text-[var(--sds-text-secondary)]">اعتبار تا {new Date(row.expiresAt).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' })}</p>}
           {row.noteOrReason && <p className="break-words text-sm">{row.noteOrReason}</p>}
           {row.predecessor && <div className="space-y-1 text-sm text-[var(--sds-text-secondary)]">
-            {row.predecessor.reason && <p>استعلام مجدد: {row.predecessor.reason}</p>}
+            <p>استعلام مجدد: {row.predecessor.reason}</p>
             {onOpenInquiry && <ErpButton label="مشاهده استعلام قبلی" variant="ghost" onClick={() => onOpenInquiry(row.predecessor!.inquiryId)} />}
           </div>}
           {row.successor && <div className="space-y-1 text-sm text-[var(--sds-text-secondary)]">
@@ -51,12 +50,13 @@ export function PartnerInquiryPanel({ inquiry, now, pending, onRefresh, onReinqu
           </div>}
           {mismatchedRowIds.includes(row.rowId) && <ErpInlineState kind="stale" title="مشخصات محصول تغییر کرده است؛ قیمت جدید استعلام بگیرید." />}
           {expiring && <ErpInlineState kind="stale" title="کمتر از شش ساعت تا پایان اعتبار قیمت باقی مانده است." />}
-          {(['APPROVED', 'REJECTED', 'EXPIRED', 'SUPERSEDED', 'CANCELLED'].includes(state) || mismatchedRowIds.includes(row.rowId)) && <ErpButton label="استعلام مجدد" variant="outline" disabled={pending || row.successor?.state === 'PENDING'} onClick={() => onReinquire(row)} />}
+          {(['REJECTED', 'EXPIRED', 'SUPERSEDED', 'CANCELLED'].includes(state) || mismatchedRowIds.includes(row.rowId)) && <ErpButton label="استعلام مجدد" variant="outline" disabled={pending || row.successor?.state === 'PENDING'} onClick={() => onReinquire(row)} />}
         </ErpCard>;
       })}
     </div>
-    <div aria-label="آمادگی پرونده" className="sticky bottom-0 z-10 rounded-[var(--sds-radius-card)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] p-4">
+    <div aria-label="آمادگی پرونده" className="sticky bottom-0 z-10 flex flex-col gap-3 rounded-[var(--sds-radius-card)] border border-[var(--sds-border-default)] bg-[var(--sds-surface-panel)] p-4 sm:flex-row sm:items-center sm:justify-between">
       <div><p className="font-bold">{persianCount(usable.length)} ردیف آماده</p><p className="mt-1 text-sm text-[var(--sds-text-secondary)]">قیمت فروش به مشتری پیش از ثبت قابل تغییر است.</p></div>
+      <ErpButton label="ساخت پرونده و ورود به Wizard" variant="solid" disabled={pending || usable.length === 0} onClick={() => onEnterWizard(usable)} className="w-full sm:w-auto" />
     </div>
   </section>;
 }

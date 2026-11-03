@@ -1,0 +1,1799 @@
+"use client";
+
+import {
+  ErpBadge,
+  ErpButton,
+  ErpCard,
+  ErpCheckbox,
+  ErpInput,
+  ErpInlineState,
+  ErpPage,
+  ErpPressable,
+  ErpSelect,
+  ErpSection,
+  ErpSegmentedControl,
+  ErpTextarea,
+} from "@/components/erp";
+import { useTheme } from "@/contexts/ThemeContext";
+import { hiringAPI } from "@/lib/hiringApi";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FaArrowLeft,
+  FaArrowRight,
+  FaCheck,
+  FaHistory,
+  FaMoon,
+  FaPlus,
+  FaSun,
+  FaTrash,
+} from "react-icons/fa";
+import {
+  createInitialInterviewState,
+  criterionIsComplete,
+  initialManagementActivities,
+  interviewCriteria,
+  scoreLabels,
+  type CriterionAnswer,
+  type InterviewCriterion,
+  type InterviewState,
+  type Judgment,
+  type ManagementActivity,
+  type NumericScore,
+  type Score,
+} from "./interviewPrototypeData";
+import {
+  customCriteriaAreComplete,
+  customCriterionIsComplete,
+  hydrateInterviewState,
+  InterviewSnapshotError,
+  initialInterviewScoreSummary,
+  normalizeInitialInterviewPayload,
+  publishedCriteriaForInterview,
+  type CustomCriterion,
+  type InterviewEvidencePayload,
+  type LegacyInterviewPayload,
+  type ProductionInterviewPayload,
+  type PublishedInterviewCriterion,
+} from "./interviewEvidence";
+import { interviewCompletionFocusTarget, shouldShowNextCriterion } from "../guidedInterviewState";
+import { InterviewDraftSaveCoordinator, type InterviewDraftSaveSnapshot } from "../interviewDraftSaveCoordinator";
+import { completeHrInterview, HrInterviewCompletionError, interviewCompletionFocus } from "../hrInterviewCompletion";
+
+export type { ProductionInterviewPayload } from "./interviewEvidence";
+
+type Variant = "A" | "B" | "C";
+type Surface = "interview" | "checklist" | "defaults" | "history";
+
+const variantNames: Record<Variant, string> = {
+  A: "مسیر هدایت‌شده",
+  B: "کاربرگ کامل",
+  C: "میز تصمیم",
+};
+const prototypeVariants: Variant[] = ["A", "B", "C"];
+
+const judgmentLabels: Record<Exclude<Judgment, null>, string> = {
+  POSITIVE: "مثبت",
+  NEUTRAL: "خنثی",
+  NEGATIVE: "منفی",
+};
+
+const surfaceOptions = [
+  { value: "interview" as const, label: "مصاحبه اولیه HR" },
+  { value: "checklist" as const, label: "بررسی‌های مدیریت شرکت" },
+  { value: "defaults" as const, label: "معیارهای پیش‌فرض" },
+  { value: "history" as const, label: "تاریخچه نسخه‌ها" },
+];
+
+export function RequiredInterviewChoice<T extends string>({
+  ariaLabel,
+  value,
+  onChange,
+  options,
+}: {
+  ariaLabel: string;
+  value: T | null;
+  onChange: (value: T | null) => void;
+  options: Array<{ value: T; label: React.ReactNode }>;
+}) {
+  return (
+    <div className="space-y-2" role="group" aria-label={ariaLabel}>
+      <ErpSegmentedControl
+        value={(value ?? "__UNANSWERED__") as T}
+        onChange={onChange}
+        options={options}
+      />
+      <div className="flex min-h-11 items-center justify-end">
+        {value === null ? (
+          <span className="text-sm font-medium text-[var(--sds-warning)]">
+            هنوز انتخاب نشده
+          </span>
+        ) : (
+          <ErpButton
+            label="پاک‌کردن انتخاب"
+            variant="ghost"
+            tone="neutral"
+            onClick={() => onChange(null)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function ScoreControl({
+  value,
+  onChange,
+  allowUnassessed = true,
+}: {
+  value: Score;
+  onChange: (score: Score) => void;
+  allowUnassessed?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <div
+        className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6"
+        role="group"
+        aria-label="امتیاز معیار"
+      >
+        {(Object.entries(scoreLabels) as Array<[string, string]>).map(
+          ([score, label]) => {
+            const numericScore = Number(score) as NumericScore;
+            return (
+              <ErpButton
+                key={score}
+                label={`${Number(score).toLocaleString("fa-IR")} · ${label}`}
+                onClick={() => onChange(numericScore)}
+                variant={value === numericScore ? "solid" : "soft"}
+                tone={value === numericScore ? "primary" : "neutral"}
+                className="min-h-11"
+              />
+            );
+          },
+        )}
+        {allowUnassessed && <ErpButton
+          label="ارزیابی نشد"
+          onClick={() => onChange("UNASSESSED")}
+          variant={value === "UNASSESSED" ? "outline" : "ghost"}
+          tone="neutral"
+          className="min-h-11"
+        />}
+      </div>
+      <div className="flex min-h-11 items-center justify-end">
+        {value === null ? (
+          <span className="text-sm font-medium text-[var(--sds-warning)]">
+            هنوز انتخاب نشده
+          </span>
+        ) : (
+          <ErpButton
+            label="پاک‌کردن انتخاب"
+            variant="ghost"
+            tone="neutral"
+            onClick={() => onChange(null)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function JudgmentControl({
+  value,
+  onChange,
+}: {
+  value: Judgment;
+  onChange: (value: Judgment) => void;
+}) {
+  return (
+    <RequiredInterviewChoice
+      ariaLabel="اثر در تصمیم"
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: "POSITIVE", label: "مثبت" },
+        { value: "NEUTRAL", label: "خنثی" },
+        { value: "NEGATIVE", label: "منفی" },
+      ]}
+    />
+  );
+}
+
+function FieldLabel({
+  children,
+  required = false,
+}: {
+  children: React.ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <span className="mb-2 block text-sm font-semibold text-[var(--sds-text-primary)]">
+      {children}
+      {required ? " *" : ""}
+    </span>
+  );
+}
+
+function CriterionEditor({
+  criterion,
+  answer,
+  onChange,
+  onScoreChange,
+  compact = false,
+}: {
+  criterion: InterviewCriterion;
+  answer: CriterionAnswer;
+  onChange: (answer: CriterionAnswer) => void;
+  onScoreChange?: (score: Score) => void;
+  compact?: boolean;
+}) {
+  const update = <K extends keyof CriterionAnswer>(
+    key: K,
+    value: CriterionAnswer[K],
+  ) => onChange({ ...answer, [key]: value });
+
+  return (
+    <div className={compact ? "space-y-3" : "space-y-5"}>
+      {answer.legacyScore !== undefined || answer.legacyNote ? (
+        <ErpInlineState
+          kind="stale"
+          title={`پاسخ نسخه قدیمی حفظ شده است${answer.legacyScore !== undefined && answer.legacyScore !== null ? `؛ امتیاز قبلی: ${answer.legacyScore === "UNASSESSED" ? "ارزیابی‌نشده" : answer.legacyScore.toLocaleString("fa-IR")}` : ""}${answer.legacyNote ? `؛ یادداشت قبلی: ${answer.legacyNote}` : ""}. برای ساختار جدید، پاسخ این بخش را تکمیل کنید.`}
+        />
+      ) : null}
+      {criterion.prompt ? (
+        <p className="text-sm leading-6 text-[var(--sds-text-secondary)]">
+          {criterion.prompt}
+        </p>
+      ) : null}
+
+      {criterion.kind === "score" ? (
+        <>
+          <div>
+            <FieldLabel required>امتیاز مصاحبه‌گر</FieldLabel>
+            <ScoreControl
+              value={answer.score}
+              allowUnassessed={criterion.allowUnassessed !== false}
+              onChange={(score) => {
+                update("score", score);
+                onScoreChange?.(score);
+              }}
+            />
+          </div>
+          <div>
+            <FieldLabel>
+              یادداشت مصاحبه‌گر
+            </FieldLabel>
+            <ErpTextarea
+              rows={compact ? 2 : 3}
+              value={answer.note}
+              onChange={(event) => update("note", event.target.value)}
+              placeholder="یادداشت مصاحبه‌گر (اختیاری)"
+            />
+          </div>
+        </>
+      ) : null}
+
+      {criterion.kind === "text" ? (
+        <div>
+          <FieldLabel required>پاسخ ثبت‌شده</FieldLabel>
+          <ErpTextarea
+            rows={compact ? 3 : 5}
+            value={answer.text}
+            onChange={(event) => update("text", event.target.value)}
+            placeholder="پاسخ متقاضی را ثبت کنید"
+          />
+        </div>
+      ) : null}
+
+      {criterion.kind === "yesNo" ? (
+        <div className="space-y-4">
+          <div>
+            <FieldLabel required>پاسخ</FieldLabel>
+            <RequiredInterviewChoice
+              ariaLabel="پاسخ"
+              value={answer.companionPresent}
+              onChange={(value) => update("companionPresent", value)}
+              options={[
+                { value: "YES", label: "بله" },
+                { value: "NO", label: "خیر" },
+              ]}
+            />
+          </div>
+          <div><FieldLabel required>اثر این پاسخ بر متقاضی</FieldLabel><JudgmentControl value={answer.judgment} onChange={(value) => update("judgment", value)} /></div>
+          {answer.judgment === "NEGATIVE" && <div><FieldLabel required>دلیل اثر منفی</FieldLabel><ErpTextarea value={answer.note} onChange={(event) => update("note", event.target.value)} /></div>}
+        </div>
+      ) : null}
+
+      {criterion.kind === "address" ? (
+        <>
+          <div>
+            <FieldLabel required>آدرس و توضیح مصاحبه‌گر</FieldLabel>
+            <ErpTextarea
+              rows={compact ? 3 : 4}
+              value={answer.text}
+              onChange={(event) => update("text", event.target.value)}
+              placeholder="فاصله، شرایط رفت‌وآمد، نوع و فرهنگ محله"
+            />
+          </div>
+          <div>
+            <FieldLabel required>اثر در تصمیم</FieldLabel>
+            <JudgmentControl
+              value={answer.judgment}
+              onChange={(value) => update("judgment", value)}
+            />
+          </div>
+          <div>
+            <FieldLabel required={answer.judgment === "NEGATIVE"}>
+              دلیل ارزیابی
+            </FieldLabel>
+            <ErpTextarea
+              rows={2}
+              value={answer.note}
+              onChange={(event) => update("note", event.target.value)}
+            />
+          </div>
+        </>
+      ) : null}
+
+      {criterion.kind === "companion" ? (
+        <>
+          <div>
+            <FieldLabel required>
+              آیا متقاضی با همراه حضور پیدا کرده است؟
+            </FieldLabel>
+            <RequiredInterviewChoice
+              ariaLabel="حضور همراه"
+              value={answer.companionPresent}
+              onChange={(value) => update("companionPresent", value)}
+              options={[
+                { value: "YES", label: "بله" },
+                { value: "NO", label: "خیر" },
+              ]}
+            />
+          </div>
+          <div>
+            <FieldLabel required>اثر در تصمیم</FieldLabel>
+            <JudgmentControl
+              value={answer.judgment}
+              onChange={(value) => update("judgment", value)}
+            />
+          </div>
+          <div>
+            <FieldLabel required={answer.judgment === "NEGATIVE"}>
+              دلیل ارزیابی
+            </FieldLabel>
+            <ErpTextarea
+              rows={2}
+              value={answer.note}
+              onChange={(event) => update("note", event.target.value)}
+            />
+          </div>
+        </>
+      ) : null}
+
+      {criterion.kind === "strengthsWeaknesses" ? (
+        <div className="grid gap-5 lg:grid-cols-2">
+          <div className="space-y-3">
+            <FieldLabel required>پنج نقطه مثبت از زبان متقاضی</FieldLabel>
+            {answer.strengths.map((item, index) => (
+              <ErpInput
+                key={`strength-${index}`}
+                value={item}
+                onChange={(event) => {
+                  const next = [...answer.strengths];
+                  next[index] = event.target.value;
+                  update("strengths", next);
+                }}
+                aria-label={`نقطه مثبت ${index + 1}`}
+                placeholder={`نقطه مثبت ${(index + 1).toLocaleString("fa-IR")}`}
+              />
+            ))}
+          </div>
+          <div className="space-y-3">
+            <FieldLabel required>پنج نقطه منفی از زبان متقاضی</FieldLabel>
+            {answer.weaknesses.map((item, index) => (
+              <ErpInput
+                key={`weakness-${index}`}
+                value={item}
+                onChange={(event) => {
+                  const next = [...answer.weaknesses];
+                  next[index] = event.target.value;
+                  update("weaknesses", next);
+                }}
+                aria-label={`نقطه منفی ${index + 1}`}
+                placeholder={`نقطه منفی ${(index + 1).toLocaleString("fa-IR")}`}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DecisionEditor({
+  state,
+  onChange,
+  onReasonBlur,
+}: {
+  state: InterviewState;
+  onChange: (state: InterviewState) => void;
+  onReasonBlur?: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <FieldLabel required>نتیجه مستقل مصاحبه‌گر</FieldLabel>
+        <RequiredInterviewChoice
+          ariaLabel="نتیجه مستقل مصاحبه‌گر"
+          value={state.decision}
+          onChange={(value) => onChange({ ...state, decision: value })}
+          options={[
+            { value: "POSITIVE", label: "مثبت" },
+            { value: "NEGATIVE", label: "منفی" },
+          ]}
+        />
+      </div>
+      <div>
+        <FieldLabel required>دلیل تصمیم</FieldLabel>
+        <ErpTextarea
+          value={state.decisionReason}
+          onChange={(event) =>
+            onChange({ ...state, decisionReason: event.target.value })
+          }
+          onBlur={onReasonBlur}
+          aria-label="دلیل تصمیم"
+          placeholder="دلیل نتیجه مثبت یا منفی را ثبت کنید"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ProgressSummary({ state, criteria = interviewCriteria }: { state: InterviewState; criteria?: InterviewCriterion[] }) {
+  const complete = criteria.filter((criterion) =>
+    criterionIsComplete(criterion, state.answers[criterion.id]),
+  ).length;
+  const scores = criteria
+    .map((criterion) => state.answers[criterion.id].score)
+    .filter((score): score is NumericScore => typeof score === "number");
+  const average = scores.length
+    ? scores.reduce((sum, score) => sum + score, 0) / scores.length
+    : null;
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <ErpCard className="p-3">
+        <p className="text-xs text-[var(--sds-text-muted)]">تکمیل معیارها</p>
+        <p className="mt-1 text-xl font-bold text-[var(--sds-text-primary)]">
+          {complete.toLocaleString("fa-IR")} از ۱۷
+        </p>
+      </ErpCard>
+      <ErpCard className="p-3">
+        <p className="text-xs text-[var(--sds-text-muted)]">میانگین امتیاز</p>
+        <p className="mt-1 text-xl font-bold text-[var(--sds-text-primary)]">
+          {average === null
+            ? "—"
+            : average.toLocaleString("fa-IR", { maximumFractionDigits: 1 })}
+        </p>
+      </ErpCard>
+    </div>
+  );
+}
+
+function GuidedVariant({
+  state,
+  onChange,
+  criteria = interviewCriteria,
+  summaryRef,
+  summaryHighlighted = false,
+  onFinalCriterionComplete,
+  onSummaryReasonBlur,
+  focusCriterionRequest,
+}: {
+  state: InterviewState;
+  onChange: (state: InterviewState) => void;
+  criteria?: InterviewCriterion[];
+  summaryRef?: React.RefObject<HTMLDivElement>;
+  summaryHighlighted?: boolean;
+  onFinalCriterionComplete?: () => void;
+  onSummaryReasonBlur?: () => void;
+  focusCriterionRequest?: { index: number; key: number } | null;
+}) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [criterionHighlighted, setCriterionHighlighted] = useState(false);
+  const criterionRef = useRef<HTMLDivElement>(null);
+  const criterion = criteria[Math.min(activeIndex, criteria.length - 1)];
+  useEffect(() => {
+    if (!focusCriterionRequest) return;
+    setActiveIndex(focusCriterionRequest.index);
+    setCriterionHighlighted(true);
+    const highlightTimer = window.setTimeout(() => setCriterionHighlighted(false), 2_000);
+    window.setTimeout(() => {
+      criterionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      criterionRef.current?.querySelector<HTMLElement>("button, input, textarea, select")?.focus();
+    }, 0);
+    return () => window.clearTimeout(highlightTimer);
+  }, [focusCriterionRequest]);
+  return (
+    <div className="grid gap-4 xl:grid-cols-[15rem_minmax(0,1fr)_18rem]">
+      <ErpSection
+        title="مسیر مصاحبه"
+        description="هر معیار را جداگانه بررسی کنید."
+      >
+        <div className="max-h-[65vh] space-y-1 overflow-y-auto pe-1">
+          {criteria.map((item, index) => {
+            const complete = criterionIsComplete(item, state.answers[item.id]);
+            return (
+              <ErpPressable
+                key={item.id}
+                onClick={() => setActiveIndex(index)}
+                variant={activeIndex === index ? "soft" : "ghost"}
+                tone={activeIndex === index ? "primary" : "neutral"}
+                className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg px-3 text-right text-sm"
+              >
+                <span>
+                  {item.order.toLocaleString("fa-IR")}. {item.title}
+                </span>
+                {complete ? (
+                  <FaCheck
+                    className="shrink-0 text-[var(--sds-success)]"
+                    aria-label="تکمیل شده"
+                  />
+                ) : null}
+              </ErpPressable>
+            );
+          })}
+        </div>
+      </ErpSection>
+
+      <div ref={criterionRef} data-interview-criterion-id={criterion.id} className={`rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${criterionHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"}`}>
+      <ErpSection title={`${criterion.order.toLocaleString("fa-IR")}. ${criterion.title}`}>
+        <CriterionEditor
+          criterion={criterion}
+          answer={state.answers[criterion.id]}
+          onChange={(answer) => {
+            const wasComplete = criterionIsComplete(criterion, state.answers[criterion.id]);
+            const nextState = {
+              ...state,
+              answers: { ...state.answers, [criterion.id]: answer },
+            };
+            onChange(nextState);
+            const isFinal = activeIndex === criteria.length - 1;
+            if (isFinal && !wasComplete && criterionIsComplete(criterion, answer)) {
+              onFinalCriterionComplete?.();
+            }
+          }}
+          onScoreChange={() => {
+            if (activeIndex < criteria.length - 1) setActiveIndex((value) => value + 1);
+          }}
+        />
+        <div className="mt-6 flex items-center justify-between gap-2 border-t border-[var(--sds-border-default)] pt-4">
+          <ErpButton
+            label="معیار قبلی"
+            icon={FaArrowRight}
+            disabled={activeIndex === 0}
+            onClick={() => setActiveIndex((value) => value - 1)}
+            tone="neutral"
+          />
+          <ErpBadge
+            tone={
+              criterionIsComplete(criterion, state.answers[criterion.id])
+                ? "success"
+                : "warning"
+            }
+          >
+            {criterionIsComplete(criterion, state.answers[criterion.id])
+              ? "تکمیل شده"
+              : "نیازمند تکمیل"}
+          </ErpBadge>
+          {shouldShowNextCriterion(activeIndex, criteria.length) ? (
+            <ErpButton label="معیار بعدی" icon={FaArrowLeft} onClick={() => setActiveIndex((value) => value + 1)} />
+          ) : <span aria-hidden="true" />}
+        </div>
+      </ErpSection>
+      </div>
+
+      <div
+        ref={summaryRef}
+        className={`space-y-4 rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${summaryHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"} xl:sticky xl:top-4 xl:self-start`}
+      >
+        <ProgressSummary state={state} criteria={criteria} />
+        <ErpSection title="جمع‌بندی مصاحبه">
+          <DecisionEditor state={state} onChange={onChange} onReasonBlur={onSummaryReasonBlur} />
+        </ErpSection>
+      </div>
+    </div>
+  );
+}
+
+const worksheetGroups = [
+  {
+    title: "مشاهده و سابقه",
+    ids: ["appearance", "grooming", "resume", "address"],
+  },
+  {
+    title: "شایستگی‌های رفتاری",
+    ids: [
+      "responsibility",
+      "honesty",
+      "teamwork",
+      "resilience",
+      "communication",
+    ],
+  },
+  {
+    title: "انگیزه و مسیر شغلی",
+    ids: ["motivation", "previousJob", "stability"],
+  },
+  {
+    title: "شناخت فرد و انتظارها",
+    ids: [
+      "selfView",
+      "workplaceValues",
+      "createdValues",
+      "achievement",
+      "companion",
+    ],
+  },
+];
+
+function WorksheetVariant({
+  state,
+  onChange,
+}: {
+  state: InterviewState;
+  onChange: (state: InterviewState) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <ProgressSummary state={state} />
+      {worksheetGroups.map((group) => (
+        <ErpSection key={group.title} title={group.title}>
+          <div className="grid gap-4 xl:grid-cols-2">
+            {group.ids.map((id) => {
+              const criterion = interviewCriteria.find(
+                (item) => item.id === id,
+              )!;
+              return (
+                <ErpCard
+                  key={id}
+                  className={
+                    criterion.kind === "strengthsWeaknesses"
+                      ? "p-4 xl:col-span-2"
+                      : "p-4"
+                  }
+                >
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <h3 className="font-semibold text-[var(--sds-text-primary)]">
+                      {criterion.order.toLocaleString("fa-IR")}.{" "}
+                      {criterion.title}
+                    </h3>
+                    <ErpBadge
+                      tone={
+                        criterionIsComplete(criterion, state.answers[id])
+                          ? "success"
+                          : "neutral"
+                      }
+                    >
+                      {criterionIsComplete(criterion, state.answers[id])
+                        ? "کامل"
+                        : "باز"}
+                    </ErpBadge>
+                  </div>
+                  <CriterionEditor
+                    compact
+                    criterion={criterion}
+                    answer={state.answers[id]}
+                    onChange={(answer) =>
+                      onChange({
+                        ...state,
+                        answers: { ...state.answers, [id]: answer },
+                      })
+                    }
+                  />
+                </ErpCard>
+              );
+            })}
+          </div>
+        </ErpSection>
+      ))}
+      <ErpSection title="نتیجه مصاحبه">
+        <DecisionEditor state={state} onChange={onChange} />
+      </ErpSection>
+    </div>
+  );
+}
+
+function DecisionDeskVariant({
+  state,
+  onChange,
+}: {
+  state: InterviewState;
+  onChange: (state: InterviewState) => void;
+}) {
+  const [selectedId, setSelectedId] = useState(interviewCriteria[0].id);
+  const selected = interviewCriteria.find(
+    (criterion) => criterion.id === selectedId,
+  )!;
+  const buckets = useMemo(
+    () => ({
+      complete: interviewCriteria.filter((criterion) =>
+        criterionIsComplete(criterion, state.answers[criterion.id]),
+      ),
+      scored: interviewCriteria.filter(
+        (criterion) =>
+          typeof state.answers[criterion.id].score === "number" &&
+          !criterionIsComplete(criterion, state.answers[criterion.id]),
+      ),
+      open: interviewCriteria.filter(
+        (criterion) =>
+          state.answers[criterion.id].score === null &&
+          !criterionIsComplete(criterion, state.answers[criterion.id]),
+      ),
+    }),
+    [state.answers],
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <ErpSection
+          title="شواهد مصاحبه"
+          description="معیارها بر اساس وضعیت ثبت مرتب شده‌اند."
+        >
+          <div className="grid gap-3 md:grid-cols-3">
+            {(
+              [
+                ["open", "ثبت نشده", "warning"],
+                ["scored", "نیمه‌کامل", "info"],
+                ["complete", "تکمیل شده", "success"],
+              ] as const
+            ).map(([key, title, tone]) => (
+              <div
+                key={key}
+                className="rounded-xl border border-[var(--sds-border-default)] bg-[var(--sds-surface-subtle)] p-3"
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-[var(--sds-text-primary)]">
+                    {title}
+                  </h3>
+                  <ErpBadge tone={tone}>
+                    {buckets[key].length.toLocaleString("fa-IR")}
+                  </ErpBadge>
+                </div>
+                <div className="space-y-2">
+                  {buckets[key].map((criterion) => (
+                    <ErpPressable
+                      key={criterion.id}
+                      onClick={() => setSelectedId(criterion.id)}
+                      variant={selectedId === criterion.id ? "soft" : "ghost"}
+                      tone={selectedId === criterion.id ? "primary" : "neutral"}
+                      className="min-h-11 w-full rounded-lg px-3 text-right text-sm"
+                    >
+                      {criterion.order.toLocaleString("fa-IR")}.{" "}
+                      {criterion.title}
+                    </ErpPressable>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </ErpSection>
+        <div className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+          <ProgressSummary state={state} />
+          <ErpSection title="تصمیم فعلی">
+            <DecisionEditor state={state} onChange={onChange} />
+          </ErpSection>
+        </div>
+      </div>
+      <ErpSection
+        title={`${selected.order.toLocaleString("fa-IR")}. ${selected.title}`}
+        description={selected.prompt}
+      >
+        <CriterionEditor
+          criterion={selected}
+          answer={state.answers[selected.id]}
+          onChange={(answer) =>
+            onChange({
+              ...state,
+              answers: { ...state.answers, [selected.id]: answer },
+            })
+          }
+        />
+      </ErpSection>
+    </div>
+  );
+}
+
+function CaseSpecificCriteria({
+  criteria,
+  onChange,
+}: {
+  criteria: CustomCriterion[];
+  onChange: (criteria: CustomCriterion[]) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<CustomCriterion["kind"]>("text");
+  const update = (id: string, next: Partial<CustomCriterion>) =>
+    onChange(
+      criteria.map((criterion) =>
+        criterion.id === id ? { ...criterion, ...next } : criterion,
+      ),
+    );
+
+  return (
+    <ErpSection
+      title="معیارهای اختصاصی این متقاضی"
+      description="این موارد فقط به همین پرونده افزوده می‌شوند و فهرست پیش‌فرض را تغییر نمی‌دهند."
+    >
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem_auto]">
+        <ErpInput
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="عنوان معیار جدید"
+          aria-label="عنوان معیار اختصاصی"
+        />
+        <ErpSelect
+          value={kind}
+          onChange={(event) =>
+            setKind(event.target.value as CustomCriterion["kind"])
+          }
+          aria-label="نوع پاسخ معیار اختصاصی"
+        >
+          <option value="text">پاسخ تشریحی</option>
+          <option value="score">امتیاز ۱ تا ۵</option>
+          <option value="yes-no">بله یا خیر</option>
+        </ErpSelect>
+        <ErpButton
+          label="افزودن معیار"
+          icon={FaPlus}
+          disabled={!title.trim()}
+          onClick={() => {
+            onChange([
+              ...criteria,
+              {
+                id: `extra-${Date.now()}`,
+                title: title.trim(),
+                kind,
+                score: null,
+                text: "",
+                yesNo: null,
+              },
+            ]);
+            setTitle("");
+          }}
+        />
+      </div>
+
+      {criteria.length ? (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {criteria.map((criterion, index) => (
+            <ErpCard key={criterion.id} className="space-y-3 p-4" data-custom-criterion-index={index}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-[var(--sds-text-primary)]">
+                    {criterion.title}
+                  </h3>
+                  <ErpBadge tone="purple">
+                    {criterion.kind === "score"
+                      ? "امتیازی"
+                      : criterion.kind === "yes-no"
+                        ? "بله یا خیر"
+                        : "تشریحی"}
+                  </ErpBadge>
+                </div>
+                <ErpButton
+                  label="حذف معیار اختصاصی"
+                  icon={FaTrash}
+                  tone="danger"
+                  variant="ghost"
+                  onClick={() =>
+                    onChange(
+                      criteria.filter((item) => item.id !== criterion.id),
+                    )
+                  }
+                />
+              </div>
+              {criterion.kind === "score" ? (
+                <ScoreControl
+                  value={criterion.score}
+                  onChange={(score) => update(criterion.id, { score })}
+                />
+              ) : null}
+              {criterion.kind === "text" ? (
+                <ErpTextarea
+                  value={criterion.text}
+                  onChange={(event) =>
+                    update(criterion.id, { text: event.target.value })
+                  }
+                  placeholder="پاسخ یا مشاهده مصاحبه‌گر"
+                  aria-label={`پاسخ ${criterion.title}`}
+                />
+              ) : null}
+              {criterion.kind === "yes-no" ? (
+                <RequiredInterviewChoice
+                  ariaLabel={`پاسخ ${criterion.title}`}
+                  value={criterion.yesNo}
+                  onChange={(value) => update(criterion.id, { yesNo: value })}
+                  options={[
+                    { value: "YES", label: "بله" },
+                    { value: "NO", label: "خیر" },
+                  ]}
+                />
+              ) : null}
+            </ErpCard>
+          ))}
+        </div>
+      ) : null}
+    </ErpSection>
+  );
+}
+
+function InterviewCompletion({
+  state,
+  customCriteria,
+  completed,
+  onCompletedChange,
+}: {
+  state: InterviewState;
+  customCriteria: CustomCriterion[];
+  completed: boolean;
+  onCompletedChange: (completed: boolean) => void;
+}) {
+  const defaultsComplete = interviewCriteria.every((criterion) =>
+    criterionIsComplete(criterion, state.answers[criterion.id]),
+  );
+  const extrasComplete = customCriteriaAreComplete(customCriteria);
+  const canComplete =
+    defaultsComplete &&
+    extrasComplete &&
+    state.decision !== null &&
+    state.decisionReason.trim().length > 0;
+
+  return (
+    <ErpSection title="تکمیل مصاحبه">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <ErpBadge tone={completed ? "success" : canComplete ? "info" : "warning"}>
+            {completed
+              ? "نسخه تکمیل‌شده"
+              : canComplete
+                ? "آماده تکمیل"
+                : "اطلاعات ناقص"}
+          </ErpBadge>
+          <span className="text-sm text-[var(--sds-text-secondary)]">
+            نتیجه و دلیل مستقل مصاحبه‌گر برای تکمیل اجباری است.
+          </span>
+        </div>
+        {completed ? (
+          <ErpButton
+            label="ایجاد نسخه اصلاحی"
+            icon={FaHistory}
+            variant="outline"
+            onClick={() => onCompletedChange(false)}
+          />
+        ) : (
+          <ErpButton
+            label="ثبت و تکمیل مصاحبه"
+            icon={FaCheck}
+            variant="solid"
+            disabled={!canComplete}
+            onClick={() => onCompletedChange(true)}
+          />
+        )}
+      </div>
+    </ErpSection>
+  );
+}
+
+function DefaultCriteriaEditor({
+  titles,
+  onChange,
+}: {
+  titles: string[];
+  onChange: (titles: string[]) => void;
+}) {
+  return (
+    <ErpSection
+      title="معیارهای پیش‌فرض مصاحبه اولیه HR"
+      description="فقط مدیر منابع انسانی می‌تواند این فهرست واحد را تغییر دهد. تغییرات برای مصاحبه‌های جدید است و پرونده‌های شروع‌شده نسخه خود را حفظ می‌کنند."
+    >
+      <div className="grid gap-3 lg:grid-cols-2">
+        {interviewCriteria.map((criterion, index) => (
+          <ErpCard key={criterion.id} className="p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-[var(--sds-text-primary)]">
+                معیار {criterion.order.toLocaleString("fa-IR")}
+              </span>
+              <ErpBadge tone="neutral">
+                {criterion.kind === "score"
+                  ? "امتیازی"
+                  : criterion.kind === "companion"
+                    ? "بله/خیر + ارزیابی"
+                    : criterion.kind === "address"
+                      ? "تشریحی + ارزیابی"
+                      : "تشریحی"}
+              </ErpBadge>
+            </div>
+            <ErpInput
+              value={titles[index]}
+              onChange={(event) => {
+                const next = [...titles];
+                next[index] = event.target.value;
+                onChange(next);
+              }}
+              aria-label={`عنوان معیار پیش‌فرض ${criterion.order}`}
+            />
+          </ErpCard>
+        ))}
+      </div>
+      <div className="mt-4 flex justify-end">
+        <ErpButton
+          label="ذخیره برای مصاحبه‌های جدید"
+          icon={FaCheck}
+          variant="solid"
+          disabled={titles.some((title) => !title.trim())}
+        />
+      </div>
+    </ErpSection>
+  );
+}
+
+function ManagementChecklist({
+  activities,
+  onChange,
+  noExtraReview,
+  onNoExtraReviewChange,
+  noExtraReason,
+  onNoExtraReasonChange,
+}: {
+  activities: ManagementActivity[];
+  onChange: (activities: ManagementActivity[]) => void;
+  noExtraReview: boolean;
+  onNoExtraReviewChange: (value: boolean) => void;
+  noExtraReason: string;
+  onNoExtraReasonChange: (value: string) => void;
+}) {
+  const [customTitle, setCustomTitle] = useState("");
+  const updateActivity = (id: string, next: Partial<ManagementActivity>) =>
+    onChange(
+      activities.map((activity) =>
+        activity.id === id ? { ...activity, ...next } : activity,
+      ),
+    );
+
+  return (
+    <div className="space-y-4">
+      <ErpSection
+        title="انتخاب بررسی‌های تکمیلی"
+        description="صفر یا چند فعالیت را برای همین متقاضی مشخص کنید."
+      >
+        <div className="grid gap-3 lg:grid-cols-2">
+          {activities.map((activity) => (
+            <ErpCard key={activity.id} className="p-4">
+              <ErpCheckbox
+                checked={activity.selected}
+                disabled={noExtraReview}
+                onChange={(event) =>
+                  updateActivity(activity.id, {
+                    selected: event.target.checked,
+                  })
+                }
+                label={
+                  <span className="font-semibold text-[var(--sds-text-primary)]">
+                    {activity.title}
+                  </span>
+                }
+              />
+              {activity.selected && !noExtraReview ? (
+                <div className="mt-3 space-y-2 border-t border-[var(--sds-border-default)] pt-3">
+                  {activity.criteria.map((criterion, index) => (
+                    <ErpInput
+                      key={`${activity.id}-${index}`}
+                      value={criterion}
+                      onChange={(event) => {
+                        const criteria = [...activity.criteria];
+                        criteria[index] = event.target.value;
+                        updateActivity(activity.id, { criteria });
+                      }}
+                      aria-label={`معیار ${activity.title} ${index + 1}`}
+                    />
+                  ))}
+                  <ErpButton
+                    label="افزودن معیار"
+                    icon={FaPlus}
+                    tone="neutral"
+                    variant="ghost"
+                    onClick={() =>
+                      updateActivity(activity.id, {
+                        criteria: [...activity.criteria, ""],
+                      })
+                    }
+                  />
+                </div>
+              ) : null}
+            </ErpCard>
+          ))}
+        </div>
+        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <ErpInput
+            value={customTitle}
+            onChange={(event) => setCustomTitle(event.target.value)}
+            placeholder="عنوان فعالیت سفارشی"
+          />
+          <ErpButton
+            label="افزودن فعالیت سفارشی"
+            icon={FaPlus}
+            disabled={!customTitle.trim() || noExtraReview}
+            onClick={() => {
+              onChange([
+                ...activities,
+                {
+                  id: `custom-${activities.length}`,
+                  title: customTitle.trim(),
+                  selected: true,
+                  custom: true,
+                  criteria: [""],
+                },
+              ]);
+              setCustomTitle("");
+            }}
+          />
+        </div>
+      </ErpSection>
+      <ErpSection title="بدون بررسی تکمیلی">
+        <ErpCheckbox
+          checked={noExtraReview}
+          onChange={(event) => onNoExtraReviewChange(event.target.checked)}
+          label="هیچ فعالیت تکمیلی برای این متقاضی لازم نیست"
+        />
+        {noExtraReview ? (
+          <div className="mt-3">
+            <FieldLabel required>دلیل</FieldLabel>
+            <ErpTextarea
+              value={noExtraReason}
+              onChange={(event) => onNoExtraReasonChange(event.target.value)}
+            />
+          </div>
+        ) : null}
+      </ErpSection>
+      <div className="flex justify-end">
+        <ErpButton
+          label="نهایی‌کردن فهرست بررسی‌ها"
+          icon={FaCheck}
+          variant="solid"
+          disabled={
+            noExtraReview
+              ? !noExtraReason.trim()
+              : !activities.some((activity) => activity.selected)
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function VersionHistory() {
+  return (
+    <ErpSection
+      title="تاریخچه غیرقابل‌حذف"
+      description="این داده نمونه است و رفتار نسخه‌بندی را نشان می‌دهد."
+    >
+      <div className="space-y-3">
+        <ErpCard className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-semibold text-[var(--sds-text-primary)]">
+                نسخه ۲ · نسخه جاری
+              </h3>
+              <ErpBadge tone="success">معتبر</ErpBadge>
+            </div>
+            <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">
+              اصلاح امتیاز ثبات شغلی پس از دریافت توضیح تکمیلی متقاضی
+            </p>
+          </div>
+          <p className="text-xs text-[var(--sds-text-muted)]">
+            سارا احمدی · ۱۴۰۵/۰۵/۱۵، ۱۱:۴۲
+          </p>
+        </ErpCard>
+        <ErpCard className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-semibold text-[var(--sds-text-primary)]">
+                نسخه ۱ · تکمیل اولیه
+              </h3>
+              <ErpBadge tone="neutral">جایگزین شده</ErpBadge>
+            </div>
+            <p className="mt-2 text-sm text-[var(--sds-text-secondary)]">
+              نتیجه مثبت با دلیل و ۱۷ معیار ثبت‌شده
+            </p>
+          </div>
+          <p className="text-xs text-[var(--sds-text-muted)]">
+            سارا احمدی · ۱۴۰۵/۰۵/۱۵، ۱۰:۱۸
+          </p>
+        </ErpCard>
+      </div>
+      <div className="mt-4 flex justify-end">
+        <ErpButton
+          label="ایجاد نسخه اصلاحی"
+          icon={FaHistory}
+          variant="outline"
+        />
+      </div>
+    </ErpSection>
+  );
+}
+
+function PrototypeSwitcher({
+  variant,
+  onVariantChange,
+}: {
+  variant: Variant;
+  onVariantChange: (variant: Variant) => void;
+}) {
+  const cycle = useCallback(
+    (direction: -1 | 1) => {
+      const index = prototypeVariants.indexOf(variant);
+      onVariantChange(
+        prototypeVariants[
+          (index + direction + prototypeVariants.length) %
+            prototypeVariants.length
+        ],
+      );
+    },
+    [onVariantChange, variant],
+  );
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches("input, textarea, select, [contenteditable='true']"))
+        return;
+      if (event.key === "ArrowLeft") cycle(1);
+      if (event.key === "ArrowRight") cycle(-1);
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, [cycle]);
+
+  return (
+    <div className="fixed bottom-4 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-2 rounded-full border border-[var(--sds-border-strong)] bg-[var(--sds-surface-raised)] p-2 shadow-[var(--sds-shadow-raised)]">
+      <ErpButton
+        label="طرح قبلی"
+        icon={FaArrowRight}
+        onClick={() => cycle(-1)}
+        variant="ghost"
+        tone="neutral"
+        className="min-h-11"
+      />
+      <span className="min-w-36 text-center text-sm font-bold text-[var(--sds-text-primary)]">
+        {variant} · {variantNames[variant]}
+      </span>
+      <ErpButton
+        label="طرح بعدی"
+        icon={FaArrowLeft}
+        onClick={() => cycle(1)}
+        variant="ghost"
+        tone="neutral"
+        className="min-h-11"
+      />
+    </div>
+  );
+}
+
+const initialProductionInterviewModel = (initialPayload?: InterviewEvidencePayload | null) => {
+  if (!initialPayload) {
+    return {
+      payload: null,
+      criteria: interviewCriteria,
+      error: undefined as unknown,
+    };
+  }
+  try {
+    const payload = normalizeInitialInterviewPayload(initialPayload)!;
+    return {
+      payload,
+      criteria: publishedCriteriaForInterview(payload.criteriaSnapshot),
+      error: undefined as unknown,
+    };
+  } catch (error) {
+    return {
+      payload: null,
+      criteria: [] as InterviewCriterion[],
+      error,
+    };
+  }
+};
+
+export function ProductionHrInterview({
+  initialPayload,
+  initialVersion = 0,
+  history = [],
+  busy,
+  onSaveDraft,
+  onComplete,
+  onReloadDraft,
+}: {
+  initialPayload?: InterviewEvidencePayload | null;
+  initialVersion?: number;
+  history?: Array<{ version: number; decidedAt?: string; outcome?: string }>;
+  busy: boolean;
+  onSaveDraft: (payload: ProductionInterviewPayload, expectedVersion: number) => Promise<{ version: number }>;
+  onComplete: (payload: ProductionInterviewPayload) => Promise<void>;
+  onReloadDraft?: () => Promise<{ payload: InterviewEvidencePayload; version: number }>;
+}) {
+  const [initialModel] = useState(() => initialProductionInterviewModel(initialPayload));
+  const [criteriaSnapshot, setCriteriaSnapshot] = useState<PublishedInterviewCriterion[] | undefined>(() => initialModel.payload?.criteriaSnapshot);
+  const [criteriaTemplateVersion, setCriteriaTemplateVersion] = useState(initialModel.payload?.criteriaTemplateVersion ?? 0);
+  const [criteria, setCriteria] = useState<InterviewCriterion[]>(initialModel.criteria);
+  const [state, setState] = useState<InterviewState>(() => initialModel.payload?.state || createInitialInterviewState(initialModel.criteria));
+  const [customCriteria, setCustomCriteria] = useState<CustomCriterion[]>(() => initialModel.payload?.customCriteria || []);
+  const [snapshotError, setSnapshotError] = useState<unknown>(initialModel.error);
+  const saveDraftRef = useRef(onSaveDraft);
+  const [saveSnapshot, setSaveSnapshot] = useState<InterviewDraftSaveSnapshot>({ status: initialVersion ? "saved" : "idle", version: initialVersion });
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const [completionError, setCompletionError] = useState<unknown>();
+  const [summaryHighlighted, setSummaryHighlighted] = useState(false);
+  const [customHighlighted, setCustomHighlighted] = useState(false);
+  const [completionHighlighted, setCompletionHighlighted] = useState(false);
+  const [focusCriterionRequest, setFocusCriterionRequest] = useState<{ index: number; key: number } | null>(null);
+  const initialRender = useRef(true);
+  const suppressNextAutosave = useRef(false);
+  const completionGuided = useRef(false);
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const customCriteriaRef = useRef<HTMLDivElement>(null);
+  const completionRef = useRef<HTMLDivElement>(null);
+  const attentionTimer = useRef<number | null>(null);
+  const payload = useMemo<ProductionInterviewPayload>(() => ({ schemaVersion: 2, state, customCriteria, criteriaTemplateVersion, criteriaSnapshot }), [criteriaSnapshot, criteriaTemplateVersion, customCriteria, state]);
+  const criteriaComplete = criteria.every((criterion) => criterionIsComplete(criterion, state.answers[criterion.id]));
+  const customCriteriaComplete = customCriteriaAreComplete(customCriteria);
+  const summaryComplete = state.decision !== null && state.decisionReason.trim().length > 0;
+  const canComplete = !snapshotError && Boolean(criteriaSnapshot?.length) && criteriaComplete && customCriteriaComplete && summaryComplete;
+  const coordinatorRef = useRef<InterviewDraftSaveCoordinator<ProductionInterviewPayload> | null>(null);
+  if (!coordinatorRef.current) {
+    coordinatorRef.current = new InterviewDraftSaveCoordinator({
+      initialVersion,
+      save: (nextPayload, expectedVersion) => saveDraftRef.current(nextPayload, expectedVersion),
+      onChange: setSaveSnapshot,
+    });
+  }
+  useEffect(() => { saveDraftRef.current = onSaveDraft; }, [onSaveDraft]);
+  useEffect(() => () => {
+    coordinatorRef.current?.dispose();
+    if (attentionTimer.current) window.clearTimeout(attentionTimer.current);
+  }, []);
+  useEffect(() => {
+    if (!canComplete) completionGuided.current = false;
+  }, [canComplete]);
+
+  const highlight = useCallback((target: "summary" | "custom" | "completion") => {
+    setSummaryHighlighted(target === "summary");
+    setCustomHighlighted(target === "custom");
+    setCompletionHighlighted(target === "completion");
+    if (attentionTimer.current) window.clearTimeout(attentionTimer.current);
+    attentionTimer.current = window.setTimeout(() => {
+      setSummaryHighlighted(false);
+      setCustomHighlighted(false);
+      setCompletionHighlighted(false);
+    }, 2_000);
+  }, []);
+
+  const focusSummary = useCallback(() => {
+    highlight("summary");
+    summaryRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => {
+      const selector = state.decision === null ? "button" : 'textarea[aria-label="دلیل تصمیم"]';
+      summaryRef.current?.querySelector<HTMLElement>(selector)?.focus();
+    }, 0);
+  }, [highlight, state.decision]);
+
+  const guideAfterSummary = useCallback(() => {
+    const target = interviewCompletionFocusTarget({ criteriaComplete, customCriteriaComplete, summaryComplete });
+    if (target === "criterion") {
+      const index = criteria.findIndex((criterion) => !criterionIsComplete(criterion, state.answers[criterion.id]));
+      if (index >= 0) setFocusCriterionRequest({ index, key: Date.now() });
+      return;
+    }
+    if (target === "custom-criterion") {
+      const index = customCriteria.findIndex((criterion) => !customCriterionIsComplete(criterion));
+      highlight("custom");
+      const card = customCriteriaRef.current?.querySelector<HTMLElement>(`[data-custom-criterion-index="${index}"]`);
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => card?.querySelector<HTMLElement>("button, input, textarea, select")?.focus(), 0);
+      return;
+    }
+    if (target === "summary") {
+      focusSummary();
+      return;
+    }
+    if (completionGuided.current) return;
+    completionGuided.current = true;
+    highlight("completion");
+    completionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => completionRef.current?.querySelector<HTMLButtonElement>("button")?.focus(), 0);
+  }, [criteria, criteriaComplete, customCriteria, customCriteriaComplete, focusSummary, highlight, state.answers, summaryComplete]);
+
+  const completeCurrentInterview = useCallback(async () => {
+    setCompletionError(undefined);
+    setCompleting(true);
+    try {
+      await completeHrInterview({
+        payload,
+        flush: (nextPayload) => coordinatorRef.current!.flush(nextPayload),
+        complete: onComplete,
+      });
+    } catch (error) {
+      setCompletionError(error);
+      const focus = interviewCompletionFocus(
+        error,
+        criteria.map((criterion) => criterion.id),
+        customCriteria.map((criterion) => criterion.id),
+      );
+      if (focus.target === "criterion") {
+        setFocusCriterionRequest({ index: focus.index, key: Date.now() });
+      } else if (focus.target === "custom-criterion") {
+        highlight("custom");
+        const card = customCriteriaRef.current?.querySelector<HTMLElement>(`[data-custom-criterion-index="${focus.index}"]`);
+        card?.scrollIntoView({ behavior: "smooth", block: "center" });
+        window.setTimeout(() => card?.querySelector<HTMLElement>("button, input, textarea, select")?.focus(), 0);
+      } else if (focus.target === "summary") {
+        focusSummary();
+      } else {
+        highlight("completion");
+        completionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        window.setTimeout(() => completionRef.current?.querySelector<HTMLElement>('[role="alert"] button')?.focus(), 0);
+      }
+    } finally {
+      setCompleting(false);
+    }
+  }, [criteria, customCriteria, focusSummary, highlight, onComplete, payload]);
+
+  useEffect(() => {
+    if (initialPayload) return;
+    let active = true;
+    void hiringAPI.interviewCriteria().then(({ data }) => {
+      if (!active) return;
+      const snapshot = data.data.criteriaJson as PublishedInterviewCriterion[];
+      const nextCriteria = publishedCriteriaForInterview(snapshot);
+      setCriteriaSnapshot(snapshot);
+      setCriteriaTemplateVersion(Number(data.data.version || 0));
+      setCriteria(nextCriteria);
+      setState((current) => hydrateInterviewState(current, nextCriteria));
+      setSnapshotError(undefined);
+    }).catch((error) => setSaveSnapshot((current) => ({ ...current, status: "error", error })));
+    return () => { active = false; };
+  }, [initialPayload]);
+
+  useEffect(() => {
+    if (snapshotError || !criteriaSnapshot?.length) return;
+    if (initialRender.current) {
+      initialRender.current = false;
+      return;
+    }
+    if (suppressNextAutosave.current) {
+      suppressNextAutosave.current = false;
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      coordinatorRef.current?.queue(payload);
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [criteriaSnapshot?.length, payload, snapshotError]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ErpBadge tone={["error", "conflict"].includes(saveSnapshot.status) ? "danger" : saveSnapshot.status === "saving" ? "warning" : "success"}>
+          {saveSnapshot.status === "conflict" ? "تعارض نسخه پیش‌نویس" : saveSnapshot.status === "error" ? "ذخیره پیش‌نویس ناموفق" : saveSnapshot.status === "saving" ? "در حال ذخیره…" : saveSnapshot.version ? `پیش‌نویس نسخه ${saveSnapshot.version.toLocaleString("fa-IR")}` : "پیش‌نویس جدید"}
+        </ErpBadge>
+        <span className="text-xs text-[var(--sds-text-muted)]">تغییرها به‌صورت خودکار ذخیره می‌شوند.</span>
+      </div>
+      {saveSnapshot.status === "error" && (
+        <ErpInlineState
+          kind="error"
+          title="ذخیره خودکار انجام نشد. اطلاعات واردشده در این صفحه حفظ شده است."
+          action={{ label: "تلاش مجدد", onClick: () => { coordinatorRef.current?.retry(); } }}
+        />
+      )}
+      {saveSnapshot.status === "conflict" && (
+        <ErpInlineState
+          kind="error"
+          title="پیش‌نویس توسط کاربر دیگری تغییر کرده است. تغییرات فعلی شما حفظ شده‌اند؛ نسخه جدید سرور را بارگذاری کنید یا یک نسخه از تغییرات محلی بردارید."
+        />
+      )}
+      {saveSnapshot.status === "conflict" && (
+        <ErpCard className="flex flex-wrap gap-2 p-3"><ErpButton label="کپی تغییرات من" variant="outline" onClick={() => void navigator.clipboard.writeText(JSON.stringify(payload, null, 2))} /><ErpButton label="بارگذاری نسخه جدید سرور" tone="warning" onClick={async () => {
+            if (!onReloadDraft) return;
+            const latest = await onReloadDraft();
+            suppressNextAutosave.current = true;
+            try {
+              const normalized = normalizeInitialInterviewPayload(latest.payload)!;
+              const nextCriteria = publishedCriteriaForInterview(normalized.criteriaSnapshot);
+              setCriteriaSnapshot(normalized.criteriaSnapshot);
+              setCriteriaTemplateVersion(normalized.criteriaTemplateVersion || 0);
+              setCriteria(nextCriteria);
+              setState(normalized.state);
+              setCustomCriteria(normalized.customCriteria);
+              setSnapshotError(undefined);
+              coordinatorRef.current?.reset(latest.version);
+            } catch (error) {
+              setSnapshotError(error);
+            }
+          }} /></ErpCard>
+      )}
+      {snapshotError ? (
+        <ErpInlineState
+          kind="error"
+          title={snapshotError instanceof InterviewSnapshotError
+            ? snapshotError.message
+            : "نسخه معیارهای این مصاحبه قابل بازیابی نیست. اطلاعات شما حفظ شده است؛ با پشتیبانی تماس بگیرید."}
+        />
+      ) : null}
+      {!snapshotError ? <>
+      <GuidedVariant
+        state={state}
+        onChange={setState}
+        criteria={criteria}
+        summaryRef={summaryRef}
+        summaryHighlighted={summaryHighlighted}
+        onFinalCriterionComplete={focusSummary}
+        onSummaryReasonBlur={guideAfterSummary}
+        focusCriterionRequest={focusCriterionRequest}
+      />
+      <div ref={customCriteriaRef} className={`rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${customHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"}`}>
+        <CaseSpecificCriteria criteria={customCriteria} onChange={(next) => { completionGuided.current = false; setCustomCriteria(next); }} />
+      </div>
+      <div ref={completionRef} className={`rounded-[var(--sds-radius-lg)] transition-[outline-color,box-shadow] duration-300 motion-reduce:transition-none ${completionHighlighted ? "outline outline-2 outline-[var(--sds-focus-ring)] shadow-[var(--sds-shadow-focus)]" : "outline outline-2 outline-transparent"}`}>
+      <ErpSection title="تکمیل مصاحبه">
+        <div className="space-y-3">
+          {completionError !== undefined ? (
+            <HrInterviewCompletionError
+              error={completionError}
+              onRetry={() => { void completeCurrentInterview(); }}
+            />
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+          <ErpBadge tone={canComplete ? "info" : "warning"}>{canComplete ? "آماده تکمیل" : "اطلاعات ناقص"}</ErpBadge>
+          <ErpButton
+            label="ثبت و تکمیل مصاحبه"
+            icon={FaCheck}
+            tone="success"
+            disabled={busy || completing || !canComplete}
+            onClick={() => { void completeCurrentInterview(); }}
+          />
+          </div>
+        </div>
+      </ErpSection>
+      </div>
+      {history.length > 0 && (
+        <ErpSection title="تاریخچه نسخه‌ها">
+          <ErpButton label={historyOpen ? "بستن تاریخچه" : "نمایش نسخه‌های قبلی"} variant="ghost" onClick={() => setHistoryOpen((open) => !open)} />
+          {historyOpen && <div className="mt-3 space-y-2">
+            {history.map((item) => (
+              <ErpCard key={item.version} className="flex items-center justify-between gap-3 p-3 text-sm">
+                <b>نسخه {item.version.toLocaleString("fa-IR")}</b>
+                <ErpBadge tone={item.outcome === "POSITIVE" ? "success" : "danger"}>{item.outcome === "POSITIVE" ? "مثبت" : "منفی"}</ErpBadge>
+              </ErpCard>
+            ))}
+          </div>}
+        </ErpSection>
+      )}
+      </> : null}
+    </div>
+  );
+}
+
+export function ProductionInterviewReport({
+  payload,
+  version,
+  outcome,
+  explanation,
+  history = [],
+}: {
+  payload: InterviewEvidencePayload;
+  version: number;
+  outcome?: string;
+  explanation?: string | null;
+  history?: Array<{ version: number; outcome?: string; explanation?: string | null; evidenceJson?: InterviewEvidencePayload }>;
+}) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const scoreSummary = initialInterviewScoreSummary(payload);
+  const scoreSummaryCard = (
+    <ErpCard className="p-4">
+      <p className="text-xs text-[var(--sds-text-muted)]">میانگین امتیاز مصاحبه</p>
+      <p className="mt-1 text-xl font-bold text-[var(--sds-text-primary)]">
+        {scoreSummary.average === null
+          ? "میانگین قابل محاسبه نیست"
+          : `${scoreSummary.average.toLocaleString("fa-IR", { maximumFractionDigits: 1 })} از ۵`}
+      </p>
+      {scoreSummary.scoredCount > 0 && (
+        <p className="mt-1 text-xs text-[var(--sds-text-secondary)]">
+          بر اساس {scoreSummary.scoredCount.toLocaleString("fa-IR")} معیار امتیازدار
+        </p>
+      )}
+    </ErpCard>
+  );
+  if ((payload as ProductionInterviewPayload).schemaVersion !== 2) {
+    const legacy = payload as LegacyInterviewPayload;
+    const legacyById = new Map((legacy.criteria || []).map((criterion) => [criterion.criterionId, criterion]));
+    return <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ErpBadge tone={outcome === "POSITIVE" ? "success" : "danger"}>{outcome === "POSITIVE" ? "نتیجه مثبت" : "نتیجه منفی"}</ErpBadge>
+        <span className="text-sm text-[var(--sds-text-secondary)]">گزارش قدیمی نسخه {version.toLocaleString("fa-IR")}</span>
+      </div>
+      <ErpInlineState kind="stale" title="این گزارش با ساختار نسخه قدیمی ثبت شده و بدون تغییر در داده‌های اصلی نمایش داده می‌شود." />
+      {scoreSummaryCard}
+      <div className="grid gap-3 md:grid-cols-2">
+        {interviewCriteria.map((criterion) => {
+          const answer = legacyById.get(criterion.id);
+          return <ErpCard key={criterion.id} className="space-y-2 p-4">
+            <b>{criterion.order.toLocaleString("fa-IR")}. {criterion.title}</b>
+            <p>{answer?.score === "UNASSESSED" ? "ارزیابی نشد" : answer?.score ? `امتیاز ${answer.score.toLocaleString("fa-IR")}` : "ثبت نشده"}</p>
+            {answer?.note ? <p className="whitespace-pre-wrap text-sm text-[var(--sds-text-secondary)]">یادداشت: {answer.note}</p> : null}
+          </ErpCard>;
+        })}
+      </div>
+      <ErpSection title="جمع‌بندی مصاحبه"><p className="whitespace-pre-wrap">{explanation || "بدون توضیح"}</p></ErpSection>
+    </div>;
+  }
+  let criteria: InterviewCriterion[];
+  let state: InterviewState;
+  try {
+    const normalized = normalizeInitialInterviewPayload(payload)!;
+    criteria = publishedCriteriaForInterview(normalized.criteriaSnapshot);
+    state = normalized.state;
+  } catch (error) {
+    return <ErpInlineState
+      kind="error"
+      title={error instanceof InterviewSnapshotError
+        ? error.message
+        : "گزارش مصاحبه به‌دلیل نامعتبر بودن نسخه معیارها قابل نمایش نیست. با پشتیبانی تماس بگیرید."}
+    />;
+  }
+  const judgment = (value: Judgment) => value ? judgmentLabels[value] : "ثبت نشده";
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <ErpBadge tone={state.decision === "POSITIVE" ? "success" : "danger"}>{state.decision === "POSITIVE" ? "نتیجه مثبت" : "نتیجه منفی"}</ErpBadge>
+      <span className="text-sm text-[var(--sds-text-secondary)]">گزارش نسخه {version.toLocaleString("fa-IR")}</span>
+    </div>
+    {scoreSummaryCard}
+    <div className="grid gap-3 md:grid-cols-2">
+      {criteria.map((criterion) => {
+        const answer = state.answers[criterion.id];
+        return <ErpCard key={criterion.id} className="space-y-2 p-4">
+          <b>{criterion.order.toLocaleString("fa-IR")}. {criterion.title}</b>
+          {criterion.prompt && <p className="text-sm text-[var(--sds-text-secondary)]">{criterion.prompt}</p>}
+          {criterion.kind === "score" && <p>{answer.score === "UNASSESSED" ? "ارزیابی نشد" : `امتیاز ${answer.score?.toLocaleString("fa-IR")}`}</p>}
+          {criterion.kind === "text" && <p className="whitespace-pre-wrap">{answer.text}</p>}
+          {criterion.kind === "yesNo" && <><p>{answer.companionPresent === "YES" ? "بله" : "خیر"} · {judgment(answer.judgment)}</p></>}
+          {criterion.kind === "address" && <><p className="whitespace-pre-wrap">{answer.text}</p><p>{judgment(answer.judgment)}</p></>}
+          {criterion.kind === "companion" && <p>{answer.companionPresent === "YES" ? "با همراه" : "بدون همراه"} · {judgment(answer.judgment)}</p>}
+          {criterion.kind === "strengthsWeaknesses" && <div className="grid gap-2 sm:grid-cols-2"><div><b>نقاط قوت</b>{answer.strengths.map((item, index) => <p key={`s-${index}`}>{item}</p>)}</div><div><b>نقاط ضعف</b>{answer.weaknesses.map((item, index) => <p key={`w-${index}`}>{item}</p>)}</div></div>}
+          {answer.note && <p className="whitespace-pre-wrap text-sm text-[var(--sds-text-secondary)]">یادداشت: {answer.note}</p>}
+        </ErpCard>;
+      })}
+    </div>
+    <ErpSection title="جمع‌بندی مصاحبه"><p className="whitespace-pre-wrap">{state.decisionReason}</p></ErpSection>
+    {history.length > 0 && <ErpSection title="تاریخچه نسخه‌ها">
+      <ErpButton label={historyOpen ? "بستن تاریخچه" : "نمایش نسخه‌های قبلی"} variant="ghost" onClick={() => setHistoryOpen((open) => !open)} />
+      {historyOpen && <div className="mt-3 space-y-4">{history.map((item) => <ErpCard key={item.version} className="p-4">{item.evidenceJson ? <ProductionInterviewReport payload={item.evidenceJson} version={item.version} outcome={item.outcome} explanation={item.explanation} /> : <div className="flex items-center justify-between gap-3"><b>نسخه {item.version.toLocaleString("fa-IR")}</b><ErpBadge tone={item.outcome === "POSITIVE" ? "success" : "danger"}>{item.outcome === "POSITIVE" ? "مثبت" : "منفی"}</ErpBadge></div>}</ErpCard>)}</div>}
+    </ErpSection>}
+  </div>;
+}
+
+export default function HrInterviewPrototype() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { theme, setTheme } = useTheme();
+  const requestedVariant = searchParams.get("variant")?.toUpperCase();
+  const variant: Variant =
+    requestedVariant === "B" || requestedVariant === "C"
+      ? requestedVariant
+      : "A";
+  const requestedSurface = searchParams.get("surface");
+  const surface: Surface =
+    requestedSurface === "checklist" ||
+    requestedSurface === "defaults" ||
+    requestedSurface === "history"
+      ? requestedSurface
+      : "interview";
+  const [state, setState] = useState(createInitialInterviewState);
+  const [customCriteria, setCustomCriteria] = useState<CustomCriterion[]>([]);
+  const [interviewCompleted, setInterviewCompleted] = useState(false);
+  const [defaultTitles, setDefaultTitles] = useState(() =>
+    interviewCriteria.map((criterion) => criterion.title),
+  );
+  const [activities, setActivities] = useState(initialManagementActivities);
+  const [noExtraReview, setNoExtraReview] = useState(false);
+  const [noExtraReason, setNoExtraReason] = useState("");
+
+  const setQuery = useCallback(
+    (key: string, value: string) => {
+      const next = new URLSearchParams(searchParams.toString());
+      next.set(key, value);
+      router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
+
+  return (
+    <div dir="rtl" className="pb-24">
+      <ErpPage
+        eyebrow="نمونه آزمایشی · اطلاعات ذخیره نمی‌شود"
+        title="مصاحبه اولیه HR و بررسی‌های مدیریت"
+        description={`طرح ${variant}: ${variantNames[variant]} · متقاضی نمونه: مریم رضایی · کارشناس فروش`}
+        backHref="/dashboard/hr/hiring"
+        actions={[
+          {
+            label: theme === "dark" ? "حالت روشن" : "حالت تیره",
+            icon: theme === "dark" ? FaSun : FaMoon,
+            onClick: () => setTheme(theme === "dark" ? "light" : "dark"),
+            tone: "neutral",
+            variant: "outline",
+          },
+        ]}
+      >
+        <div className="mb-4">
+          <ErpSegmentedControl
+            options={surfaceOptions}
+            value={surface}
+            onChange={(value) => setQuery("surface", value)}
+          />
+        </div>
+
+        {surface === "interview" && variant === "A" ? (
+          <GuidedVariant state={state} onChange={setState} />
+        ) : null}
+        {surface === "interview" && variant === "B" ? (
+          <WorksheetVariant state={state} onChange={setState} />
+        ) : null}
+        {surface === "interview" && variant === "C" ? (
+          <DecisionDeskVariant state={state} onChange={setState} />
+        ) : null}
+        {surface === "interview" ? (
+          <div className="mt-4 space-y-4">
+            <CaseSpecificCriteria
+              criteria={customCriteria}
+              onChange={setCustomCriteria}
+            />
+            <InterviewCompletion
+              state={state}
+              customCriteria={customCriteria}
+              completed={interviewCompleted}
+              onCompletedChange={setInterviewCompleted}
+            />
+          </div>
+        ) : null}
+        {surface === "checklist" ? (
+          <ManagementChecklist
+            activities={activities}
+            onChange={setActivities}
+            noExtraReview={noExtraReview}
+            onNoExtraReviewChange={(value) => {
+              setNoExtraReview(value);
+              if (value)
+                setActivities((current) =>
+                  current.map((activity) => ({ ...activity, selected: false })),
+                );
+            }}
+            noExtraReason={noExtraReason}
+            onNoExtraReasonChange={setNoExtraReason}
+          />
+        ) : null}
+        {surface === "defaults" ? (
+          <DefaultCriteriaEditor
+            titles={defaultTitles}
+            onChange={setDefaultTitles}
+          />
+        ) : null}
+        {surface === "history" ? <VersionHistory /> : null}
+      </ErpPage>
+      <PrototypeSwitcher
+        variant={variant}
+        onVariantChange={(next) => setQuery("variant", next)}
+      />
+    </div>
+  );
+}

@@ -32,7 +32,7 @@ export function operationForCommand(command: PartnerCommand): Operation {
   }[command.gate] as Operation;
   const commands: Record<Exclude<PartnerCommand['type'], 'PROFILE_TRANSITION' | 'CORRECTION_GATE'>, Operation> = {
     CASE_SUBMIT: 'CASE_SUBMIT', CASE_DRAFT_REVISE: 'CASE_DRAFT_WRITE', CASE_CANCEL: 'CASE_CANCEL', CASE_COMMIT: 'CASE_COMMIT',
-    CUSTOMER_CONFIRMATION_SEND: 'CUSTOMER_CONFIRMATION_SEND', INQUIRY_SUBMIT: 'INQUIRY_WRITE', CASE_PRICING_SUBMIT: 'INQUIRY_WRITE', INQUIRY_DECIDE: 'INQUIRY_RESPOND',
+    CUSTOMER_CONFIRMATION_SEND: 'CUSTOMER_CONFIRMATION_SEND', INQUIRY_SUBMIT: 'INQUIRY_WRITE', INQUIRY_DECIDE: 'INQUIRY_RESPOND',
     INQUIRY_CANCEL: 'INQUIRY_WRITE', INQUIRY_REASSIGN: 'RESPONDER_REASSIGN', CORRECTION_REQUEST: 'CORRECTION_REQUEST',
     RETAIL_CORRECTION_SAVE: 'RETAIL_CORRECTION_SAVE', SHARED_CORRECTION_SAVE: 'SHARED_CORRECTION_SAVE', VOID_REMEDIATION_REQUEST: 'VOID_REMEDIATION_REQUEST',
     RETAIL_RECEIPT: 'RETAIL_COLLECTION_WRITE', RETAIL_RECEIPT_REVERSE: 'RETAIL_COLLECTION_WRITE',
@@ -79,6 +79,7 @@ export function checkOperationsGate(contract: ContractRuntime, state: Operations
   if (committedOperation && (input.caseState === 'COMMITTED' || input.caseState === 'VOIDED')) {
     return input.integrityVerified === true ? null : contract.partnerError('INTEGRITY_CONFLICT');
   }
+  if (state.operationalPaused) return contract.partnerError('OPERATIONAL_PAUSE');
   if (category !== 'ENROLL' && input.permission.partnerStatus !== 'ACTIVE') return contract.partnerError('PARTNER_NOT_ACTIVE');
   if (!state.cohort?.name.trim() || (input.operation !== 'COHORT_ENROLL' && !state.cohort.sellerIds.includes(input.permission.partnerSellerId))) return contract.partnerError('COHORT_NOT_READY');
   if (requiresReadiness(input.operation)) {

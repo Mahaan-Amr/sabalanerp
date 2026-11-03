@@ -1,5 +1,4 @@
-import { partnerInputHash as canonicalHash, PartnerCommandSchema, PartnerErrorSchema, type PartnerCommand, type PartnerCommandPort } from '@sabalanerp/partner-sales-contracts';
-import { getPartnerSalesErrorMessage } from '../partnerSalesErrorMessage';
+import { canonicalHash, PartnerCommandSchema, PartnerErrorSchema, type PartnerCommand, type PartnerCommandPort } from '@sabalanerp/partner-sales-contracts';
 
 export type PartnerInquirySubmitCommand = Extract<PartnerCommand, { type: 'INQUIRY_SUBMIT' }>;
 export type PartnerConfiguredInquiryRows = PartnerInquirySubmitCommand['rows'];
@@ -35,7 +34,7 @@ export function createPartnerInquirySubmission({ commands, actorId, inquiryId, r
       if (!response.ok) {
         const error = PartnerErrorSchema.parse(response.error);
         await recovery.clearPending();
-        publish({ phase: 'editing', message: getPartnerSalesErrorMessage(error) }); return;
+        publish({ phase: 'editing', message: error.message }); return;
       }
       if (response.value.commandId !== command.commandId) { uncertain(); return; }
       await recovery.clearPending();

@@ -1,50 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createPartnerFixtures } from '@sabalanerp/partner-sales-contracts/testing';
-import { roundPartnerContractTotals } from '@sabalanerp/partner-sales-contracts';
 import { preparePartnerFinancialSource } from '../partnerSales/accounting/source';
 import { createPartnerAccountingAdapter } from '../partnerSales/accounting/adapter';
 import { PartnerAccountingFixture } from './partnerAccountingFixture';
-import {
-  hasConflictingPartnerAccountingEvidence,
-  hasPartnerAccountingEvidence,
-} from '../partnerSales/accounting/provenance';
-
-test('Accounting prepares the rounded wholesale debt without rounding product rates', async () => {
-  const fixture = new PartnerAccountingFixture();
-  const view = fixture.source.view;
-  view.totals = roundPartnerContractTotals({ net: '200.8', discount: '0', tax: '0', charges: '0', currency: 'IRR' });
-  view.products[0].wholesaleUnitPrice = '100.4';
-  view.products[0].quantity = '2';
-  view.sabalanPaymentPlan.installments[0].amount = { amount: '201', currency: 'IRR' };
-  const prepared = await preparePartnerFinancialSource(fixture.source, view.owner);
-  assert.equal(prepared.ok, true, JSON.stringify(prepared));
-  if (prepared.ok) assert.equal(prepared.value.amount.amount, '201');
-  assert.equal(view.products[0].wholesaleUnitPrice, '100.4');
-  view.totals.monetaryRounding!.difference = '0';
-  assert.equal((await preparePartnerFinancialSource(fixture.source, view.owner)).ok, false);
-});
-
-test('ordinary Contract snapshot null ownership is not private Partner evidence', () => {
-  const ordinary = {
-    sourceKind: 'SALES_CONTRACT', sourceId: 'contract-1', contractId: 'contract-1',
-    metadata: { mode: 'FROM_CONTRACT_TOTAL' }, sourceSnapshot: { id: 'contract-1', partnerCaseId: null },
-  };
-  assert.equal(hasConflictingPartnerAccountingEvidence(ordinary), false);
-  assert.equal(hasConflictingPartnerAccountingEvidence({
-    ...ordinary, sourceSnapshot: { id: 'contract-1', retained: { partnerCaseId: null } },
-  }), true, 'nested incomplete Partner evidence must remain fail-closed');
-  assert.equal(hasConflictingPartnerAccountingEvidence({
-    ...ordinary, metadata: { partnerCaseId: null },
-  }), true, 'command metadata is never ordinary Contract schema shape');
-  assert.equal(hasConflictingPartnerAccountingEvidence({
-    ...ordinary, sourceId: 'another-contract',
-  }), true, 'the compatibility rule requires a coherent ordinary source identity');
-  assert.equal(hasConflictingPartnerAccountingEvidence({
-    ...ordinary, sourceSnapshot: { id: 'contract-1', partnerCaseId: 'partner-case-1' },
-  }), true, 'a non-null Partner owner remains private evidence');
-  assert.equal(hasPartnerAccountingEvidence({ retained: { financialEvidenceHash: null } }), true);
-});
 
 test('financial preparation keeps the Partner debtor, approved wholesale and Sabalan terms', async () => {
   const fixture = createPartnerFixtures();
@@ -60,18 +19,6 @@ test('financial preparation keeps the Partner debtor, approved wholesale and Sab
   assert.equal(result.value.products[0].wholesaleUnitPrice, '800');
 });
 
-test('a committed fixed Sabalan debt is queueable before an installment schedule is entered', async () => {
-  const fixture = createPartnerFixtures();
-  const view = { ...fixture.accounting, state: 'COMMITTED' as const,
-    sabalanPaymentPlan: { ...fixture.accounting.sabalanPaymentPlan, installments: [] } };
-  const result = await preparePartnerFinancialSource({ view,
-    partnerSellerId: fixture.case.partnerSellerId }, fixture.case.head);
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-  assert.deepEqual(result.value.amount, { amount: '1600', currency: 'IRR' });
-  assert.deepEqual(result.value.paymentPlan.installments, []);
-});
-
 test('commitment queues once and does not create an official receivable', async () => {
   const fixture = new PartnerAccountingFixture();
   const adapter = createPartnerAccountingAdapter(fixture);
@@ -79,19 +26,6 @@ test('commitment queues once and does not create an official receivable', async 
   assert.equal(first.ok, true);
   assert.deepEqual(await adapter.enqueueCommitted(fixture.source.view, fixture.commitment), first);
   assert.equal(fixture.queues.length, 1);
-  assert.equal(fixture.receivables.length, 0);
-});
-
-test('first invoice after an effective correction retains the original realization and uses the successor terms', async () => {
-  const fixture = new PartnerAccountingFixture();
-  fixture.source.view = { ...fixture.source.view, owner: { ...fixture.source.view.owner,
-    revision: fixture.source.view.owner.revision + 1, integrityHash: `sha256-v1:${'d'.repeat(64)}` } };
-  const adapter = createPartnerAccountingAdapter(fixture);
-  const result = await adapter.enqueueCommitted(fixture.source.view, fixture.commitment);
-  assert.equal(result.ok, true);
-  assert.equal(fixture.queues.length, 1);
-  assert.equal(fixture.queues[0].commitmentEventId, fixture.commitment.eventId);
-  assert.equal(fixture.queues[0].preparation.owner.revision, fixture.source.view.owner.revision);
   assert.equal(fixture.receivables.length, 0);
 });
 

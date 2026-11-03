@@ -1,0 +1,283 @@
+import axios from "axios";
+
+const rawBase =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === "production" ? "/api" : "http://localhost:5000");
+const baseURL = `${rawBase.endsWith("/api") ? rawBase : `${rawBase}/api`}/hr-hiring`;
+
+const internal = axios.create({ baseURL });
+internal.interceptors.request.use((config) => {
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+const applicant = axios.create({ baseURL });
+applicant.interceptors.request.use((config) => {
+  const token =
+    typeof window !== "undefined"
+      ? sessionStorage.getItem("hrApplicantSession")
+      : null;
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+export const hiringAPI = {
+  list: (params?: Record<string, string>) =>
+    internal.get("/applications", { params }),
+  archive: (id: string, reason: string) =>
+    internal.post(`/applications/${id}/archive`, { reason }),
+  restore: (id: string, reason: string) =>
+    internal.post(`/applications/${id}/restore`, { reason }),
+  getDeletionPreview: (id: string) =>
+    internal.get(`/applications/${id}/deletion-preview`),
+  permanentlyDelete: (id: string, data: any) =>
+    internal.post(`/applications/${id}/permanent-delete`, data),
+  get: (id: string) => internal.get(`/applications/${id}`),
+  revealApplicantOtp: (id: string) => internal.get(`/applications/${id}/applicant-otp`),
+  getOverview: (id: string, returnTo?: string) =>
+    internal.get(`/applications/${id}/overview`, { params: returnTo ? { returnTo } : undefined }),
+  getFullInformation: (id: string) =>
+    internal.get(`/applications/${id}/full-information`),
+  getClosureSummary: (id: string) =>
+    internal.get(`/applications/${id}/closure-summary`),
+  myAuthorities: () => internal.get("/me/authorities"),
+  myActionPermissions: () => internal.get("/me/action-permissions"),
+  interviewCriteria: () => internal.get("/interview-criteria"),
+  publishInterviewCriteria: (criteria: any[]) => internal.post("/interview-criteria/publish", { criteria }),
+  companyEvaluations: (id: string) => internal.get(`/applications/${id}/company-evaluations`),
+  eligibleCompanyEvaluationPersonnel: (id: string, type: string) => internal.get(`/applications/${id}/company-evaluations/eligible-personnel`, { params: { type } }),
+  addCompanyEvaluation: (id: string, data: any) => internal.post(`/applications/${id}/company-evaluations`, data),
+  reassignCompanyEvaluation: (id: string, occurrenceId: string, evaluatorPersonnelId: string) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/reassign`, { evaluatorPersonnelId }),
+  cancelCompanyEvaluation: (id: string, occurrenceId: string) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/cancel`),
+  recordCompanyEvaluationResult: (id: string, occurrenceId: string, data: FormData) => internal.post(`/applications/${id}/company-evaluations/${occurrenceId}/result`, data),
+  downloadCompanyEvaluationEvidence: (id: string, occurrenceId: string) => internal.get(`/applications/${id}/company-evaluations/${occurrenceId}/evidence/download`, { responseType: "blob" }),
+  workItemSummary: () => internal.get("/work-items/summary"),
+  workItems: (params?: Record<string, string>) =>
+    internal.get("/work-items", { params }),
+  workItemUsers: () => internal.get("/work-items/users"),
+  createWorkItem: (data: any) => internal.post("/work-items", data),
+  updateWorkItem: (id: string, data: any) =>
+    internal.patch(`/work-items/${id}`, data),
+  claimWorkItem: (id: string) => internal.post(`/work-items/${id}/claim`),
+  create: (data: any) => internal.post("/applications", data),
+  invite: (id: string) => internal.post(`/applications/${id}/invitations`),
+  refreshInvitationDelivery: (id: string, invitationId: string) =>
+    internal.post(
+      `/applications/${id}/invitations/${invitationId}/delivery/refresh`,
+    ),
+  refreshCandidateSmsDelivery: (id: string, purpose: string, referenceId: string) =>
+    internal.post(`/applications/${id}/sms/${purpose}/${referenceId}/delivery/refresh`),
+  retryInvitation: (id: string, invitationId: string) =>
+    internal.post(`/applications/${id}/invitations/${invitationId}/retry`),
+  recordDecision: (id: string, kind: string, data: any) =>
+    internal.post(`/applications/${id}/decisions/${kind}`, data),
+  getInitialInterview: (id: string) => internal.get(`/applications/${id}/initial-interview`),
+  saveInitialInterviewDraft: (id: string, payload: Record<string, unknown>, expectedVersion: number) =>
+    internal.put(`/applications/${id}/initial-interview/draft`, { payload, expectedVersion }),
+  preIdentityTemplates: () => internal.get("/pre-identity/templates"),
+  createPreIdentityTemplate: (data: any) =>
+    internal.post("/pre-identity/templates", data),
+  applyPreIdentityTemplate: (id: string, templateId: string) =>
+    internal.post(`/applications/${id}/pre-identity/apply-template`, {
+      templateId,
+    }),
+  addPreIdentityItem: (id: string, data: any) =>
+    internal.post(`/applications/${id}/pre-identity/items`, data),
+  finalizePreIdentity: (id: string) =>
+    internal.post(`/applications/${id}/pre-identity/finalize`),
+  recordPreIdentityResult: (id: string, itemId: string, data: FormData) =>
+    internal.put(
+      `/applications/${id}/pre-identity/items/${itemId}/result`,
+      data,
+    ),
+  correctPreIdentityItem: (id: string, itemId: string, reason: string) =>
+    internal.post(`/applications/${id}/pre-identity/items/${itemId}/correct`, {
+      reason,
+    }),
+  downloadPreIdentityEvidence: (id: string, itemId: string) =>
+    internal.get(
+      `/applications/${id}/pre-identity/items/${itemId}/evidence/download`,
+      { responseType: "blob" },
+    ),
+  resolvePreIdentityNegative: (id: string, itemId: string, data: any) =>
+    internal.post(
+      `/applications/${id}/pre-identity/items/${itemId}/resolve`,
+      data,
+    ),
+  releasePreIdentity: (id: string) =>
+    internal.post(`/applications/${id}/pre-identity/release`),
+  decideAssessment: (id: string, data: any) =>
+    internal.post(`/applications/${id}/assessments/decision`, data),
+  createFormalAssessmentPlan: (id: string, data: any) =>
+    internal.post(`/applications/${id}/formal-assessment-plans`, data),
+  recordFormalAssessmentResult: (id: string, kind: string, data: any) =>
+    internal.post(`/applications/${id}/formal-assessments/${kind}/result`, data),
+  uploadFormalAssessmentEvidence: (id: string, kind: string, files: File[]) => {
+    const data = new FormData();
+    files.forEach((file) => data.append("files", file));
+    return internal.post(`/applications/${id}/formal-assessments/${kind}/evidence`, data);
+  },
+  downloadFormalAssessmentEvidence: (id: string, linkId: string) =>
+    internal.get(`/applications/${id}/formal-assessments/evidence/${linkId}/download`, { responseType: 'blob' }),
+  finallyReject: (id: string, data: any) =>
+    internal.post(`/applications/${id}/final-rejection`, data),
+  reactivateDisposition: (id: string, reason: string) =>
+    internal.post(`/applications/${id}/disposition/reactivate`, { reason }),
+  authorizeReopening: (id: string, reason: string) =>
+    internal.post(`/applications/${id}/reopen/authorize`, { reason }),
+  executeReopening: (id: string, data: any) =>
+    internal.post(`/applications/${id}/reopen/execute`, data),
+  addCollateralRequirement: (id: string, data: any) =>
+    internal.post(`/applications/${id}/collateral-requirements`, data),
+  markCollateralNotRequired: (id: string) =>
+    internal.post(`/applications/${id}/collateral-requirements/not-required`),
+  returnForm: (id: string, data: any) =>
+    internal.post(`/applications/${id}/form/return`, data),
+  retryCorrectionNotification: (id: string) =>
+    internal.post(`/applications/${id}/form/correction/retry`),
+  uploadDocument: (id: string, data: FormData) =>
+    internal.post(`/applications/${id}/documents`, data),
+  downloadDocument: (id: string, documentId: string) =>
+    internal.get(`/applications/${id}/documents/${documentId}/download`, {
+      responseType: "blob",
+    }),
+  setIdentityCheck: (id: string, field: string, data: any) =>
+    internal.put(`/applications/${id}/identity-checks/${field}`, data),
+  resolveIdentityConflict: (id: string, conflictId: string, data: any) =>
+    internal.post(`/applications/${id}/identity-conflicts/${conflictId}/resolve`, data),
+  approveIdentity: (id: string) =>
+    internal.post(`/applications/${id}/identity/approve`),
+  createCompensation: (id: string, data: any) =>
+    internal.post(`/applications/${id}/compensation`, data),
+  reviewCompensationPayroll: (id: string, snapshotId: string, data: any) =>
+    internal.post(`/applications/${id}/compensation/${snapshotId}/payroll-review`, data),
+  retryOfferNotification: (id: string, snapshotId: string) =>
+    internal.post(
+      `/applications/${id}/compensation/${snapshotId}/notification/retry`,
+    ),
+  recordOfflineOfferDecision: (id: string, snapshotId: string, data: any) =>
+    internal.post(
+      `/applications/${id}/compensation/${snapshotId}/offline-decision`,
+      data,
+    ),
+  addCollateral: (id: string, data: FormData) =>
+    internal.post(`/applications/${id}/collateral`, data),
+  reviewCollateral: (id: string, itemId: string, data: any) =>
+    internal.put(`/applications/${id}/collateral/${itemId}/review`, data),
+  returnCollateral: (id: string, itemId: string, data: any) =>
+    internal.put(`/applications/${id}/collateral/${itemId}/return`, data),
+  confirmCollateralReturn: (id: string, itemId: string) =>
+    internal.post(`/applications/${id}/collateral/${itemId}/return-confirm`),
+  approveCollateral: (id: string) =>
+    internal.post(`/applications/${id}/collateral/approve`),
+  collateralTemplates: (params?: Record<string, string>) =>
+    internal.get("/collateral-templates", { params }),
+  createCollateralTemplate: (data: any) =>
+    internal.post("/collateral-templates", data),
+  setCollateralTemplateActive: (id: string, isActive: boolean) =>
+    internal.patch(`/collateral-templates/${id}/active`, { isActive }),
+  applyCollateralTemplate: (id: string, templateId: string) =>
+    internal.post(`/applications/${id}/collateral/apply-template`, {
+      templateId,
+    }),
+  addAssessment: (id: string, data: FormData) =>
+    internal.post(`/applications/${id}/assessments`, data),
+  completeAssessments: (id: string) =>
+    internal.post(`/applications/${id}/assessments/complete`),
+  reviseAssessment: (id: string, assessmentId: string, resultJson: any) =>
+    internal.post(`/applications/${id}/assessments/${assessmentId}/revise`, {
+      resultJson,
+    }),
+  voidAssessment: (id: string, assessmentId: string, reason: string) =>
+    internal.post(`/applications/${id}/assessments/${assessmentId}/void`, {
+      reason,
+    }),
+  acknowledgeAssessmentReview: (id: string) =>
+    internal.post(`/applications/${id}/assessments/review-acknowledge`),
+  downloadAssessment: (id: string, assessmentId: string) =>
+    internal.get(`/applications/${id}/assessments/${assessmentId}/download`, {
+      responseType: "blob",
+    }),
+  downloadCollateral: (id: string, itemId: string) =>
+    internal.get(`/applications/${id}/collateral/${itemId}/download`, {
+      responseType: "blob",
+    }),
+  downloadCollateralReturnEvidence: (id: string, itemId: string) =>
+    internal.get(
+      `/applications/${id}/collateral/${itemId}/return-evidence/download`,
+      { responseType: "blob" },
+    ),
+  downloadCollateralReturnVersion: (id: string, returnId: string) =>
+    internal.get(`/applications/${id}/collateral-returns/${returnId}/download`, {
+      responseType: "blob",
+    }),
+  convert: (id: string, data: any) =>
+    internal.post(`/applications/${id}/convert`, data),
+  uploadContract: (id: string, data: FormData) =>
+    internal.post(`/applications/${id}/contracts`, data),
+  downloadContract: (id: string, contractId: string) =>
+    internal.get(`/applications/${id}/contracts/${contractId}/download`, {
+      responseType: "blob",
+    }),
+  approveContract: (id: string, contractId: string) =>
+    internal.post(`/applications/${id}/contracts/${contractId}/approve`),
+  submitContract: (id: string, contractId: string) =>
+    internal.post(`/applications/${id}/contracts/${contractId}/submit`),
+  withdrawContract: (id: string, contractId: string, reason: string) =>
+    internal.post(`/applications/${id}/contracts/${contractId}/withdraw`, { reason }),
+  returnContract: (id: string, contractId: string, reason: string) =>
+    internal.post(`/applications/${id}/contracts/${contractId}/return`, {
+      reason,
+    }),
+  setPayroll: (id: string, data: any) =>
+    internal.post(`/applications/${id}/payroll-participation`, data),
+  setInsurance: (id: string, data: any) =>
+    internal.put(`/applications/${id}/insurance`, data),
+  revisePlannedStart: (id: string, data: any) =>
+    internal.post(`/applications/${id}/planned-start-revision`, data),
+  companyEvaluationSettings: () => internal.get('/company-evaluation-settings'),
+  saveCompanyEvaluationSettings: (type: string, positionIds: string[], reason?: string) =>
+    internal.put(`/company-evaluation-settings/${type}`, { positionIds, reason }),
+  activate: (id: string) => internal.post(`/applications/${id}/activate`),
+  close: (id: string, data: any) =>
+    internal.post(`/applications/${id}/close`, data),
+  authorities: () => internal.get("/authorities"),
+  authorityUsers: () => internal.get("/authorities/users"),
+  setAuthority: (data: any) => internal.post("/authorities", data),
+  revokeAuthority: (id: string, reason: string) =>
+    internal.post(`/authorities/${id}/revoke`, { reason }),
+};
+
+export const applicantHiringAPI = {
+  verify: (mobile: string, otp: string) =>
+    axios.post(`${baseURL}/public/invitations/verify`, { mobile, otp }),
+  get: () => applicant.get("/public/application"),
+  getClosedState: () => applicant.get("/public/application/closed-state"),
+  saveDraft: (data: any) => applicant.put("/public/application/draft", data),
+  submit: (data: any) => applicant.post("/public/application/submit", data),
+  acceptCompensation: () =>
+    applicant.post("/public/application/compensation/accept", {
+      accepted: true,
+    }),
+  declineCompensation: (category: string, note: string) =>
+    applicant.post("/public/application/compensation/decline", {
+      category,
+      note,
+    }),
+  submitFormalAssessmentResult: (kind: string, result: Record<string, unknown>) =>
+    applicant.post(`/public/application/formal-assessments/${kind}/result`, { result }),
+  uploadFormalAssessmentEvidence: (kind: string, files: File[]) => {
+    const data = new FormData();
+    files.forEach((file) => data.append("files", file));
+    return applicant.post(`/public/application/formal-assessments/${kind}/evidence`, data);
+  },
+};
+
+export const hiringError = (error: any) => {
+  const code = error?.response?.data?.error;
+  if (code === "HR_AUTHORIZATION_DENIED") return "مجوز لازم برای مشاهده این بخش منابع انسانی به شما داده نشده است.";
+  if (code === "HR_ACTION_PERMISSION_REQUIRED") return "مجوز انجام این عملیات منابع انسانی به شما داده نشده است.";
+  return code || error?.message || "عملیات ناموفق بود.";
+};

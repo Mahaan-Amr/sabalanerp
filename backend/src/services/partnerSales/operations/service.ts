@@ -111,10 +111,9 @@ export function createOperationsService(contract: ContractRuntime, store: Operat
       const state = await tx.readState();
       if (state.revision !== input.expectedRevision) throw new OperationsError('ROW_STALE');
       if (!state.enrollmentPaused || state.cohort) throw new OperationsError('STATE_CONFLICT');
-      const readiness = await requireReadiness(tx, state);
       const next = { ...state, revision: state.revision + 1, cohort: { id: input.id, name: input.name.trim(), sellerIds: [] } };
       await tx.writeState(next);
-      await audit(tx, actor, next, 'COHORT_DEFINED', input.reason, readiness.evidenceId);
+      await audit(tx, actor, next, 'COHORT_DEFINED', input.reason);
       return next;
     }),
     enroll: (input: { sellerId: string; expectedRevision: number; reason: string }) => transact(async tx => {
@@ -140,7 +139,6 @@ export function createOperationsService(contract: ContractRuntime, store: Operat
       const parsed = contract.PartnerCommandSchema.safeParse(input);
       if (!parsed.success || parsed.data.type !== 'OPERATIONS_PAUSE') throw new OperationsError('INVALID_PAYLOAD');
       const command = parsed.data;
-      if (command.kind === 'OPERATIONAL') throw new OperationsError('STATE_CONFLICT');
       if (command.idempotency.actorId !== actor.actorId || command.idempotency.targetId !== 'partner-operations') throw new OperationsError('FORBIDDEN');
       const intentHash = await contract.canonicalHash({ kind: command.kind, paused: command.paused, expectedRevision: command.expectedRevision, reason: command.reason });
       if (intentHash !== command.idempotency.payloadHash) throw new OperationsError('INVALID_PAYLOAD');
@@ -153,9 +151,13 @@ export function createOperationsService(contract: ContractRuntime, store: Operat
       const state = await tx.readState();
       if (state.revision !== command.expectedRevision) throw new OperationsError('ROW_STALE');
       let evidenceId: string | undefined;
-      if (!command.paused) evidenceId = (await requireReadiness(tx, state)).evidenceId;
+      if (!command.paused) {
+        evidenceId = (await requireReadiness(tx, state)).evidenceId;
+        if (command.kind === 'OPERATIONAL' && (await tx.listOpenIncidents()).length) throw new OperationsError('INTEGRITY_CONFLICT');
+      }
       const next = { ...state, revision: state.revision + 1,
-        enrollmentPaused: command.paused };
+        ...(command.kind === 'ENROLLMENT' ? { enrollmentPaused: command.paused } : { operationalPaused: command.paused }),
+        ...(command.kind === 'OPERATIONAL' && command.paused ? { lastOperationalPauseAt: tx.now() } : {}) };
       await tx.writeState(next);
       await audit(tx, actor, next, 'PAUSE_CHANGED', command.reason, evidenceId);
       await tx.appendCommand({ key, intentHash, result: next });

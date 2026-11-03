@@ -1,6 +1,9 @@
-import { partnerContractPayableTotal } from '@sabalanerp/partner-sales-contracts';
+import { Prisma } from '@prisma/client';
 import { BusinessIdentity, ContractRuntime, CurrentOutput, CustomerOutputError, Output, Snapshot } from './contracts';
-import { projectCustomerVisibleRevisionContent } from './customerVisible';
+
+// The wire allows 80-character decimals. Validate sums without changing Prisma's
+// shared Decimal configuration or rounding valid large evidence to 20 digits.
+const OutputDecimal = Prisma.Decimal.clone({ precision: 200 });
 
 export function createCustomerOutputSnapshots(contract: ContractRuntime) {
   const conflict = (): never => { throw new CustomerOutputError('INTEGRITY_CONFLICT'); };
@@ -8,24 +11,18 @@ export function createCustomerOutputSnapshots(contract: ContractRuntime) {
   function checkCommercialContent(content: Output): void {
     const ids = new Set(content.products.map(row => row.productRowId));
     if (ids.size !== content.products.length) conflict();
-    const serviceIds = new Set(content.products.filter(row => row.productType === 'service').map(row => row.productRowId));
     const deliveryIds = new Set<string>();
     for (const delivery of content.deliveries) {
       if (deliveryIds.has(delivery.deliveryId)) conflict();
       deliveryIds.add(delivery.deliveryId);
       const rows = new Set<string>();
       for (const row of delivery.items) {
-        if (!ids.has(row.productRowId) || serviceIds.has(row.productRowId) || rows.has(row.productRowId)) conflict();
+        if (!ids.has(row.productRowId) || rows.has(row.productRowId)) conflict();
         rows.add(row.productRowId);
-      }
-      const serviceRows = new Set<string>();
-      for (const row of delivery.serviceItems ?? []) {
-        if (!serviceIds.has(row.serviceRowId) || serviceRows.has(row.serviceRowId)) conflict();
-        serviceRows.add(row.serviceRowId);
       }
     }
     const totals = content.totals;
-    try { partnerContractPayableTotal(totals); } catch { conflict(); }
+    if (!new OutputDecimal(totals.net).minus(totals.discount).plus(totals.tax).plus(totals.charges).equals(totals.payable)) conflict();
     const installments = content.customerPaymentPlan.installments;
     if (new Set(installments.map(row => row.installmentId)).size !== installments.length
       || installments.some(row => row.amount.currency !== totals.currency)) conflict();
@@ -83,10 +80,7 @@ export function createCustomerOutputSnapshots(contract: ContractRuntime) {
     if (snapshot.owner.revision > current.owner.revision) return conflict();
     if (snapshot.owner.revision === current.owner.revision && snapshot.owner.integrityHash !== current.owner.integrityHash) return conflict();
     const cancelled = current.state === 'CANCELLED' || current.state === 'VOIDED';
-    const sameCustomerContent = current.customerContent !== undefined && contract.canonicalJson(
-      projectCustomerVisibleRevisionContent(snapshot.content)) === contract.canonicalJson(
-      projectCustomerVisibleRevisionContent(current.customerContent));
-    const replaced = (snapshot.owner.revision !== current.owner.revision && !sameCustomerContent)
+    const replaced = snapshot.owner.revision !== current.owner.revision
       || snapshot.normalizedRecipient !== current.normalizedRecipient;
     if (!verifiedAt && (cancelled || replaced)) throw new CustomerOutputError('ROW_STALE');
     if (verifiedAt) {

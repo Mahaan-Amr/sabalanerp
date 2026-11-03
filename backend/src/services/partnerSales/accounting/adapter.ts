@@ -19,14 +19,14 @@ export function createPartnerAccountingAdapter(repository: PartnerAccountingRepo
       if (contracts.canonicalJson(parsedView.data) !== contracts.canonicalJson(source.view) ||
           contracts.canonicalJson(parsedEvent.data) !== contracts.canonicalJson(source.commitment) ||
           source.commitment.internalRecordId !== source.view.recordId ||
-          source.commitment.salesCreditOwnerId !== source.partnerSellerId) return failure('INTEGRITY_CONFLICT');
+          source.commitment.salesCreditOwnerId !== source.partnerSellerId ||
+          contracts.checkExpectedRevision(source.commitment.owner, source.view.owner)) return failure('INTEGRITY_CONFLICT');
       const existing = await tx.findQueue(source.view.owner.caseId);
       if (existing) {
         if (existing.commitmentEventId !== source.commitment.eventId || existing.preparation.evidenceHash !== prepared.value.evidenceHash) return failure('IDEMPOTENCY_CONFLICT');
         return { ok: true, value: { queueEvidenceId: existing.queueEvidenceId } };
       }
-      const initialId = `partner-accounting:${(await contracts.canonicalHash(source.commitment.eventId)).slice(10)}`;
-      const queueEvidenceId = tx.nextQueueEvidenceId ? await tx.nextQueueEvidenceId(source.view.owner.caseId, initialId) : initialId;
+      const queueEvidenceId = `partner-accounting:${(await contracts.canonicalHash(source.commitment.eventId)).slice(10)}`;
       await tx.insertQueue({ queueEvidenceId, commitmentEventId: source.commitment.eventId, preparation: prepared.value });
       return { ok: true, value: { queueEvidenceId } };
     });
@@ -58,8 +58,8 @@ export function createPartnerAccountingAdapter(repository: PartnerAccountingRepo
       if (source.value.view.state !== 'COMMITTED') return failure('STATE_CONFLICT');
       return prepareCommittedAccountingSource(source.value, expected);
     }),
-    /** Explicit receivable command for an already approved invoice. The legacy
-     * method name is retained for compatibility; invoice approval never calls it. */
+    /** Hook after the existing Accounting workflow has approved an invoice. The
+     * repository must join that same transaction, not commit approval separately. */
     acceptFinancialApproval: (expected: RevisionRef, invoiceRecordId: string) => repository.transaction(async tx => {
       const loaded = await tx.readAuthorizedSource(expected, 'APPROVAL');
       if (!loaded.ok) return loaded;

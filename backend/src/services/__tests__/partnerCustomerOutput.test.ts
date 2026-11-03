@@ -6,7 +6,6 @@ import { createCustomerOutputSnapshots } from '../partnerSales/customerOutput/sn
 import { createCustomerConfirmationAdapter, ConfirmationSession, ConfirmationSource, CustomerConfirmationStore } from '../partnerSales/customerOutput/confirmation';
 import { createCustomerOutputIssuer, CustomerIssuanceStore } from '../partnerSales/customerOutput/issuance';
 import type { ContractRuntime, Notification, Output, Result, Snapshot } from '../partnerSales/customerOutput/contracts';
-import { roundPartnerContractTotals } from '@sabalanerp/partner-sales-contracts';
 import { generateCustomerContractPdf } from '../../utils/pdf';
 
 const packageRequire = createRequire(path.resolve(__dirname, '../../../../packages/partner-sales-contracts/package.json'));
@@ -25,7 +24,7 @@ function source(): ConfirmationSource {
   const { outputHash, seller, ...retail } = fixture.customer;
   return {
     owner: fixture.case.head, contractNumber: retail.contractNumber,
-    normalizedRecipient: '+989120000001', state: 'COMMITTED', retail,
+    normalizedRecipient: '+989120000001', state: 'DRAFT', retail,
     business: { tradeName: 'سنگ آفتاب', legalName: 'شرکت آفتاب', businessPhone: '02111111111', businessAddress: 'نشانی تجاری' },
   };
 }
@@ -34,18 +33,6 @@ async function snapshot() {
   const current = source();
   return snapshots.mint({ ...current, snapshotId: 'output-325', createdAt: now, expiresAt: expiry });
 }
-
-test('customer output seals the rounded total and preserves precise retail rows', async () => {
-  const current = source();
-  current.retail.totals = roundPartnerContractTotals({ net: '200.8', discount: '0', tax: '0', charges: '0', currency: 'IRR' });
-  current.retail.products[0].retailUnitPrice = '100.4';
-  current.retail.products[0].quantity = '2';
-  current.retail.customerPaymentPlan.installments[0].amount = { amount: '201', currency: 'IRR' };
-  const sealed = await snapshots.mint({ ...current, snapshotId: 'rounded-output', createdAt: now, expiresAt: expiry });
-  assert.equal(sealed.content.totals.payable, '201');
-  assert.equal(sealed.content.products[0].retailUnitPrice, '100.4');
-  assert.equal((await snapshots.read(sealed)).content.customerPaymentPlan.installments[0].amount.amount, '201');
-});
 
 // Module fixture only. #334/#335 must prove these port contracts against the
 // real Case/session/outbox schema, row locks, constraints and authorization.
@@ -89,7 +76,7 @@ function confirmationFixture() {
           markCustomerApproved: async (_snapshot, verifiedAt) => {
             assert.ok(session);
             session.verifiedAt = verifiedAt;
-            current.state = 'COMMITTED';
+            current.state = 'CUSTOMER_APPROVED';
             approvals++;
           },
         });
@@ -135,74 +122,6 @@ test('snapshot arithmetic validates the full exact decimal wire range without gl
   input.retail.customerPaymentPlan.installments[0].amount.amount = input.retail.totals.payable;
   const sealed = await snapshots.mint({ ...input, snapshotId: 'large-output', createdAt: now, expiresAt: expiry });
   assert.equal(sealed.content.totals.payable, '1000000000000000000000000000001');
-});
-
-test('an internal-only revision keeps the existing customer link usable', async () => {
-  const sealed = await snapshot();
-  const currentContent = { ...sealed.content, revision: sealed.content.revision + 1,
-    outputHash: `sha256-v1:${'f'.repeat(64)}`,
-    products: sealed.content.products.map(product => ({ ...product, productRowId: `${product.productRowId}-next` })),
-    customerPaymentPlan: { ...sealed.content.customerPaymentPlan,
-      planId: `${sealed.content.customerPaymentPlan.planId}-next`, version: sealed.content.customerPaymentPlan.version + 1,
-      predecessorPlanId: sealed.content.customerPaymentPlan.planId,
-      installments: sealed.content.customerPaymentPlan.installments.map(item => ({ ...item,
-        installmentId: `${item.installmentId}-next` })) },
-    deliveries: sealed.content.deliveries.map(delivery => ({ ...delivery, deliveryId: `${delivery.deliveryId}-next`,
-      items: delivery.items.map(item => ({ ...item, productRowId: `${item.productRowId}-next` })) })),
-  };
-  const current = { owner: { ...sealed.owner, revision: currentContent.revision,
-    integrityHash: `sha256-v1:${'e'.repeat(64)}` }, contractNumber: sealed.content.contractNumber,
-    normalizedRecipient: sealed.normalizedRecipient, state: 'AWAITING_CUSTOMER_CONFIRMATION' as const,
-    customerContent: currentContent };
-  assert.deepEqual(snapshots.disposition(sealed, current, null, '2026-08-28T12:00:00.000Z'), {
-    readOnly: false, banner: null,
-  });
-  assert.throws(() => snapshots.disposition(sealed, { ...current, customerContent: {
-    ...currentContent, products: currentContent.products.map((product, index) => index === 0
-      ? { ...product, retailUnitPrice: '9999' } : product),
-  } }, null, '2026-08-28T12:00:00.000Z'));
-});
-
-test('changing which product is assigned to a delivery invalidates the customer revision', async () => {
-  const input = source();
-  const first = input.retail.products[0];
-  const second = { ...first, productRowId: `${first.productRowId}-second`, description: 'محصول دوم' };
-  input.retail.products = [first, second];
-  input.retail.totals = { ...input.retail.totals, net: '4000', payable: '4000' };
-  input.retail.customerPaymentPlan.installments[0].amount.amount = '4000';
-  const originalDelivery = input.retail.deliveries[0];
-  input.retail.deliveries = [
-    { ...originalDelivery, deliveryId: `${originalDelivery.deliveryId}-first`,
-      items: [{ productRowId: first.productRowId, quantity: first.quantity }] },
-    { ...originalDelivery, deliveryId: `${originalDelivery.deliveryId}-second`, date: '2026-08-30',
-      items: [{ productRowId: second.productRowId, quantity: second.quantity }] },
-  ];
-  const sealed = await snapshots.mint({ ...input, snapshotId: 'delivery-relation-output', createdAt: now, expiresAt: expiry });
-  const nextIds = new Map(sealed.content.products.map(product =>
-    [product.productRowId, `${product.productRowId}-next`] as const));
-  const currentContent = {
-    ...sealed.content,
-    revision: sealed.content.revision + 1,
-    outputHash: `sha256-v1:${'f'.repeat(64)}`,
-    products: sealed.content.products.map(product => ({ ...product,
-      productRowId: nextIds.get(product.productRowId)! })),
-    deliveries: sealed.content.deliveries.map((delivery, index, deliveries) => ({
-      ...delivery,
-      deliveryId: `${delivery.deliveryId}-next`,
-      items: delivery.items.map(item => ({ ...item,
-        productRowId: nextIds.get(deliveries[1 - index].items[0].productRowId)! })),
-    })),
-  };
-  const current = {
-    owner: { ...sealed.owner, revision: currentContent.revision,
-      integrityHash: `sha256-v1:${'e'.repeat(64)}` },
-    contractNumber: sealed.content.contractNumber,
-    normalizedRecipient: sealed.normalizedRecipient,
-    state: 'AWAITING_CUSTOMER_CONFIRMATION' as const,
-    customerContent: currentContent,
-  };
-
-  assert.throws(() => snapshots.disposition(sealed, current, null, '2026-08-28T12:00:00.000Z'));
 });
 
 test('recursive strict allowlist rejects forbidden fields at every object boundary', async () => {

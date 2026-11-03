@@ -23,7 +23,7 @@ export function createManagementFixture(persona: ManagementPersona) {
   const profile: PartnerManagementProfileViewV2 = {
     profile: { ...seed.profile, profileId: 'fixture-331-profile', status: 'PENDING', identityVerified: false,
       commercialTermsReady: false, creditTermsReady: false, responderReady: false, conversionCleared: true, cohortReady: true },
-    displayName: 'همکار آزمایشی آریا', actions: [], lifecycleBlockers: [],
+    displayName: 'همکار آزمایشی آریا', actions: [],
     identity: { evidenceId: 'fixture-331-identity', legalName: 'همکار آزمایشی آریا', phone: '۰۹۱۲۰۰۰۰۰۰۰۰', address: 'تهران، نشانی آزمایشی', personType: 'LEGAL' },
     commercialTerms: { summary: 'شرایط تجاری هنوز ثبت نشده است.', options: [{ id: 'fixture-331-commercial', label: 'شرایط مصوب فروش همکار' }] },
     creditTerms: { summary: 'شرایط اعتبار هنوز ثبت نشده است.', options: [{ id: 'fixture-331-credit', label: 'پرداخت نقدی مصوب حسابداری' }] },
@@ -47,7 +47,7 @@ export function createManagementFixture(persona: ManagementPersona) {
       ...(allowed.includes('PROFILE_CREATE') ? { identityCandidates: [{ identityEvidenceId: 'fixture-331-new-identity', displayName: 'هویت آزمایشی آماده ایجاد' }] } : {}),
       profiles: visible ? profiles.map(item => {
         const currentActions = allowed.filter(action => action !== 'PROFILE_CREATE' && action !== 'CUSTOMER_TRANSFER_DECIDE')
-          .filter(action => action !== 'PROFILE_ACTIVATE' || item.profile.status === 'SUSPENDED' || item.profile.status === 'TERMINATED')
+          .filter(action => action !== 'PROFILE_ACTIVATE' || item.profile.status === 'PENDING' || item.profile.status === 'SUSPENDED')
           .filter(action => action !== 'PROFILE_SUSPEND' || item.profile.status === 'ACTIVE')
           .filter(action => action !== 'PROFILE_TERMINATE' || item.profile.status !== 'TERMINATED')
           .map(action => availability(action, item));
@@ -104,8 +104,7 @@ export function createManagementFixture(persona: ManagementPersona) {
     const previous = managementLedger.get(command.idempotency.key);
     if (previous) return previous.hash === command.idempotency.payloadHash ? structuredClone(previous.result) : { ok: false, error: partnerError('IDEMPOTENCY_CONFLICT') };
     const action: PartnerActionV2 = command.type === 'COMMERCIAL_TERMS_SET' ? 'COMMERCIAL_TERMS_MANAGE'
-      : command.type === 'CREDIT_TERMS_SET' ? 'CREDIT_TERMS_MANAGE' : command.type === 'PROFILE_CONVERSION' ? 'PROFILE_CONVERSION_MANAGE'
-        : command.type === 'IDENTITY_VERSION_REGISTER' ? 'IDENTITY_VERIFY' : command.type;
+      : command.type === 'CREDIT_TERMS_SET' ? 'CREDIT_TERMS_MANAGE' : command.type === 'PROFILE_CONVERSION' ? 'PROFILE_CONVERSION_MANAGE' : command.type;
     let result: ManagementResult = { ok: false, error: partnerError('FORBIDDEN') };
     let changed = false;
     let item = 'profileId' in command ? profiles.find(item => item.profile.profileId === command.profileId) : undefined;
@@ -117,9 +116,6 @@ export function createManagementFixture(persona: ManagementPersona) {
       else if ('expectedRevision' in command && item.profile.revision !== command.expectedRevision) result = { ok: false, error: partnerError('ROW_STALE') };
       else {
         if (command.type === 'IDENTITY_VERIFY' && command.evidenceId === item.identity?.evidenceId) item.profile.identityVerified = true;
-        else if (command.type === 'IDENTITY_VERSION_REGISTER' && item.identityRevision?.options.some(option => option.id === command.evidenceId)) {
-          item.identity!.evidenceId = command.evidenceId; item.identityRevision = undefined;
-        }
         else if (command.type === 'COMMERCIAL_TERMS_SET' && item.commercialTerms?.options.some(option => option.id === command.termsVersionId)) {
           item.commercialTerms.currentVersionId = command.termsVersionId; item.commercialTerms.summary = 'شرایط مصوب فروش همکار ثبت شده است.'; item.profile.commercialTermsReady = true;
         } else if (command.type === 'CREDIT_TERMS_SET' && item.creditTerms?.options.some(option => option.id === command.termsVersionId)) {

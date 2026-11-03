@@ -1,49 +1,67 @@
 'use client';
-import React, { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ResponderWorkspaceViewV2Schema } from '@sabalanerp/partner-sales-contracts';
-import type { PartnerCommandPort, PartnerQueryV2Port, PartnerQueryV2 } from '@sabalanerp/partner-sales-contracts';
-import { ErpBadge, ErpButton, ErpEmptyState, ErpInlineState, ErpListPage } from '@/components/erp';
+import type { PartnerCommandPort, PartnerQueryV2Port } from '@sabalanerp/partner-sales-contracts';
+import { ErpButton, ErpEmptyState, ErpInlineState, ErpLoading, ErpSection, ErpWorkspacePage } from '@/components/erp';
+import { actionPresentation } from '../management/availability';
+import { PartnerCommandSession } from '../management/commandSession';
 import { useWorkspaceQuery } from '../management/useWorkspaceQuery';
-import { responderContracts } from './responderContracts';
-import { ResponderContractWorkspace } from './ResponderContractWorkspace';
-type Query = Extract<PartnerQueryV2, { purpose: 'RESPONDER_WORKSPACE' }>;
-const time = (value: string) => new Date(value).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran', dateStyle: 'short', timeStyle: 'short' });
-export function ResponderWorkspace({ queryPort, inquiryQueryPort = queryPort, commandPort }: {
-  queryPort: PartnerQueryV2Port; inquiryQueryPort?: PartnerQueryV2Port; commandPort: PartnerCommandPort;
-}) {
-  const params = useSearchParams();
-  const inquiryId = params.get('inquiryId');
-  if (inquiryId) return <ResponderContractWorkspace inquiryId={inquiryId} queryPort={queryPort} inquiryQueryPort={inquiryQueryPort} commandPort={commandPort} />;
-  return <ResponderList queryPort={queryPort} initialView={params.get('view') === 'history' ? 'history' : params.get('view') === 'pending' ? 'pending' : 'all'} />;
-}
-function ResponderList({ queryPort, initialView }: { queryPort: PartnerQueryV2Port; initialView: Query['view'] }) {
-  const [view, setView] = useState<Query['view']>(initialView);
-  const [status, setStatus] = useState<Query['status']>('all');
-  const [search, setSearch] = useState('');
-  const [querySearch, setQuerySearch] = useState('');
-  useEffect(() => { const timer = window.setTimeout(() => setQuerySearch(search.trim()), 250); return () => window.clearTimeout(timer); }, [search]);
+import { ResponderEditor } from './ResponderEditor';
+import type { ResponseDrafts } from './responseDraft';
+
+const states = { PENDING: 'در انتظار پاسخ', APPROVED: 'تأییدشده', REJECTED: 'ردشده', EXPIRED: 'منقضی‌شده', SUPERSEDED: 'جایگزین‌شده', CANCELLED: 'لغوشده' };
+const tehranTime = (instant: string) => new Date(instant).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran', dateStyle: 'short', timeStyle: 'short' });
+
+export function ResponderWorkspace({ queryPort, commandPort }: { queryPort: PartnerQueryV2Port; commandPort: PartnerCommandPort }) {
   const load = useCallback(async (cursor?: string) => {
-    const response = await queryPort.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', view, status, search: querySearch, ...(cursor ? { cursor } : {}) });
+    const response = await queryPort.query({ schemaVersion: 2, purpose: 'RESPONDER_WORKSPACE', limit: 20, ...(cursor ? { cursor } : {}) });
     return response.ok ? { ok: true as const, value: ResponderWorkspaceViewV2Schema.parse(response.value) } : response;
-  }, [queryPort, view, status, querySearch]);
-  const resource = useWorkspaceQuery(load, `${view}:${status}:${querySearch}`);
-  const rows = resource.view?.contracts ?? responderContracts(resource.view?.inquiries ?? []);
-  return <div className="mx-auto w-full max-w-6xl"><ErpListPage title="استعلام های همکار" eyebrow="فروش" rows={rows} rowKey={row => row.id} isLoading={resource.loading}
-    actions={[{ label: 'به‌روزرسانی', variant: 'outline', tone: 'neutral', onClick: () => void resource.refresh().catch(() => undefined) }]}
-    filters={[
-      { id: 'search', label: 'جستجو', type: 'search', value: search, onChange: setSearch, placeholder: 'نام مشتری، همکار یا شماره قرارداد' },
-      { id: 'response', label: 'وضعیت پاسخ', type: 'select', value: view ?? 'all', onChange: value => setView(value as Query['view']), options: [{ value: 'all', label: 'همه' }, { value: 'pending', label: 'نیازمند پاسخ' }, { value: 'answered', label: 'پاسخ داده شده' }, { value: 'history', label: 'سوابق' }] },
-      { id: 'status', label: 'وضعیت استعلام', type: 'select', value: status ?? 'all', onChange: value => setStatus(value as Query['status']), options: [{ value: 'all', label: 'همه وضعیت‌ها' }, { value: 'approved', label: 'قیمت ارائه‌شده' }, { value: 'rejected', label: 'رد جهت اصلاح' }, { value: 'expired', label: 'قیمت منقضی‌شده' }, { value: 'cancelled', label: 'لغوشده' }, { value: 'superseded', label: 'جایگزین‌شده' }] },
-    ]}
-    columns={[
-      { id: 'customer', header: 'نام مشتری', cell: row => <div><p className="font-semibold">{row.customer}</p><p className="text-xs sds-text-secondary">{row.partnerDisplayName}</p></div> },
-      { id: 'number', header: 'شماره قرارداد', cell: row => <div><p>{row.label}</p><p className="text-xs sds-text-secondary">{row.pending ? 'درخواست' : 'پاسخ'}: {time(row.pending ? row.requestedAt : row.answeredAt ?? row.requestedAt)}</p></div> },
-      { id: 'status', header: 'وضعیت', cell: row => <div className="space-y-1"><ErpBadge tone={row.pending ? 'warning' : row.cancelled ? 'neutral' : row.answeredRows ? 'success' : 'neutral'}>{row.pending ? 'استعلام نشده' : row.cancelled ? 'لغوشده' : row.answeredRows ? 'استعلام شده' : 'جایگزین‌شده'}</ErpBadge>{row.pending && <p className="text-xs sds-text-secondary">{row.answeredRows.toLocaleString('fa-IR')} از {row.currentRows.toLocaleString('fa-IR')} ردیف پاسخ گرفته‌اند</p>}</div> },
-      { id: 'tools', header: 'ابزارها', cell: row => <ErpButton label="مشاهده قرارداد" variant="outline" href={`/dashboard/sales/partner-inquiries/${encodeURIComponent(row.id)}`} /> },
-    ]}
-    emptyState={<ErpEmptyState title="استعلامی با این فیلتر وجود ندارد." />}
-    footer={<div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm sds-text-secondary">۲۰ قرارداد در هر صفحه</p><div className="flex gap-2">{resource.canGoBack && <ErpButton label="صفحه قبل" variant="outline" disabled={resource.loading} onClick={resource.back} />}{resource.view?.nextCursor && <ErpButton label="صفحه بعد" variant="outline" disabled={resource.loading} onClick={() => resource.next(resource.view!.nextCursor!)} />}</div></div>}>
-    {resource.error && <ErpInlineState kind="error" title={resource.error} action={{ label: 'دریافت وضعیت تازه', onClick: () => void resource.refresh().catch(() => undefined) }} />}
-  </ErpListPage></div>;
+  }, [queryPort]);
+  const resource = useWorkspaceQuery(load);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [locked, setLocked] = useState(false);
+  const [draftsByInquiry, setDraftsByInquiry] = useState<Record<string, ResponseDrafts>>({});
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  const inquiry = resource.view?.inquiries.find(item => item.inquiryId === selected) || resource.view?.inquiries[0];
+  const activeInquiryId = inquiry?.inquiryId;
+  const setDrafts = useCallback<React.Dispatch<React.SetStateAction<ResponseDrafts>>>((update) => {
+    if (!activeInquiryId) return;
+    setDraftsByInquiry(previous => ({ ...previous, [activeInquiryId]: typeof update === 'function' ? update(previous[activeInquiryId] || {}) : update }));
+  }, [activeInquiryId]);
+  useEffect(() => setDraftsByInquiry({}), [resource.view?.actorId]);
+  const session = useMemo(() => new PartnerCommandSession(commandPort, resource.view?.actorId || 'unloaded'), [commandPort, resource.view?.actorId]);
+  const inquiryAvailability = inquiry && actionPresentation(inquiry.actions, 'INQUIRY_RESPOND', now);
+  const editableRowIds = inquiry?.rows.filter(row => row.state === 'PENDING' && inquiryAvailability?.enabled && actionPresentation(row.actions, 'INQUIRY_RESPOND', now)?.enabled).map(row => row.rowId) || [];
+  const rowStatus = Object.fromEntries(inquiry?.rows.map(row => {
+    const availability = actionPresentation(row.actions, 'INQUIRY_RESPOND', now);
+    return [row.rowId, <div key={row.rowId} className="space-y-2">
+      <p>{row.state === 'APPROVED' && row.expiresAt && Date.parse(row.expiresAt) <= now ? states.EXPIRED : states[row.state]}</p>
+      {row.expiresAt && <p>پایان اعتبار: {tehranTime(row.expiresAt)} (تهران)</p>}
+      {row.noteOrReason && <p>{row.noteOrReason}</p>}
+      {(inquiryAvailability?.reason || availability?.reason) && <p>{inquiryAvailability?.reason || availability?.reason}</p>}
+    </div>];
+  }) || []);
+  return <ErpWorkspacePage title="پاسخ استعلام‌های همکار">
+    {resource.loading && !resource.view && <ErpLoading />}
+    {resource.error && <ErpInlineState kind="error" className="flex-col items-start" title={resource.error}
+      action={{ label: 'دریافت وضعیت تازه', disabled: resource.loading || locked, onClick: () => void resource.refresh().catch(() => undefined) }} />}
+    {resource.view && <>
+      <div className="flex flex-wrap justify-end gap-2">
+        <ErpButton label="تازه‌سازی صف" variant="outline" disabled={locked || resource.loading} onClick={() => void resource.refresh().catch(() => undefined)} />
+        {resource.canGoBack && <ErpButton label="صفحه قبل" disabled={locked || resource.loading} onClick={resource.back} />}
+        {resource.view.nextCursor && <ErpButton label="صفحه بعد" disabled={locked || resource.loading} onClick={() => resource.next(resource.view!.nextCursor!)} />}
+      </div>
+      {resource.view.inquiries.length === 0 ? <ErpEmptyState title="استعلام منتسبی در دسترس نیست." /> : <ErpSection title="صف پاسخ">
+        <div className="flex flex-wrap gap-2">{resource.view.inquiries.map(item => <ErpButton key={item.inquiryId} label={item.partnerDisplayName}
+          variant={inquiry?.inquiryId === item.inquiryId ? 'solid' : 'outline'} disabled={locked || resource.loading}
+          onClick={() => setSelected(item.inquiryId)} />)}</div>
+      </ErpSection>}
+      {inquiry && <ResponderEditor key={inquiry.inquiryId} inquiry={inquiry}
+        drafts={draftsByInquiry[inquiry.inquiryId] || {}} onDraftsChange={setDrafts}
+        editableRowIds={resource.error || resource.loading ? [] : editableRowIds} rowStatus={rowStatus} session={session}
+        refresh={resource.refresh} onLockChange={setLocked} />}
+    </>}
+  </ErpWorkspacePage>;
 }

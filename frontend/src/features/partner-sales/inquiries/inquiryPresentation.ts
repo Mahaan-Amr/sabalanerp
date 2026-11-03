@@ -1,9 +1,7 @@
 import type { PartnerInquiryViewV2 } from '@sabalanerp/partner-sales-contracts';
-import { formatPartnerMoney } from '../presentation';
 
 export type PartnerInquiryView = PartnerInquiryViewV2;
-/** Only the wizard creates an unsent placeholder; the inquiry wire never does. */
-export type PartnerInquiryRow = PartnerInquiryView['rows'][number] & { submissionState?: 'UNSENT' };
+export type PartnerInquiryRow = PartnerInquiryView['rows'][number];
 
 export function inquiryRowState(row: PartnerInquiryRow, now: number): PartnerInquiryRow['state'] {
   if (row.state !== 'APPROVED') return row.state;
@@ -35,5 +33,5 @@ export function inquirySummary(inquiry: PartnerInquiryView): string {
 
 export const persianCount = (value: number): string => value.toLocaleString('fa-IR');
 export const inquiryMoney = (row: PartnerInquiryRow): string => row.approvedPrice
-  ? formatPartnerMoney(row.approvedPrice.amount, row.approvedPrice.currency)
+  ? `${row.approvedPrice.amount.replace(/[0-9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} ${row.approvedPrice.currency === 'IRR' ? 'ریال' : 'تومان'}`
   : '—';

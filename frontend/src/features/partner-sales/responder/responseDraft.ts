@@ -1,8 +1,6 @@
-import { WHOLESALE_MANDATORY_DEFAULT_PERCENTAGE } from '@sabalanerp/partner-sales-contracts';
 import type { InquiryBatchResult, PartnerCommand } from '@sabalanerp/partner-sales-contracts';
 
-export type ResponseDraft = { outcome: 'APPROVED' | 'REJECTED'; amount: string; note: string;
-  mandatoryEnabled?: boolean; mandatoryPercentage?: string };
+export type ResponseDraft = { selected: boolean; outcome: 'APPROVED' | 'REJECTED'; amount: string; note: string };
 export type ResponseDrafts = Record<string, ResponseDraft>;
 type Decision = Extract<PartnerCommand, { type: 'INQUIRY_DECIDE' }>['decisions'][number];
 
@@ -10,6 +8,7 @@ export function settleResponseDrafts(drafts: ResponseDrafts, batch: InquiryBatch
   const next = { ...drafts };
   for (const outcome of batch.outcomes) {
     if (outcome.ok) delete next[outcome.rowId];
+    else if (next[outcome.rowId]) next[outcome.rowId] = { ...next[outcome.rowId], selected: false };
   }
   return next;
 }
@@ -27,22 +26,19 @@ export function responseDecisions(rows: readonly { rowId: string; revision: numb
   const decisions: Decision[] = [];
   for (const row of rows) {
     const draft = drafts[row.rowId];
-    if (!draft) continue;
+    if (!draft?.selected) continue;
     const note = draft.note.trim();
     if (draft.outcome === 'REJECTED') {
       if (!/[\u0600-\u06ff]/.test(note)) errors[row.rowId] = 'دلیل رد را به فارسی بنویسید.';
       else decisions.push({ rowId: row.rowId, expectedRevision: row.revision, outcome: 'REJECTED', reason: note });
     } else {
       const amount = exactAmount(draft.amount);
-      const percentage = exactAmount(draft.mandatoryPercentage ?? WHOLESALE_MANDATORY_DEFAULT_PERCENTAGE);
-      if (percentage === null || Number(percentage) > 100) errors[row.rowId] = 'درصد حکمی باید بین صفر و صد باشد.';
-      else if (amount === null || !/[1-9]/.test(amount)) errors[row.rowId] = 'قیمت هر واحد باید عددی مثبت باشد.';
+      if (amount === null) errors[row.rowId] = 'قیمت هر واحد را با رقم و بدون جداکننده بنویسید.';
       else decisions.push({ rowId: row.rowId, expectedRevision: row.revision, outcome: 'APPROVED',
-        wholesaleUnitPrice: { amount, currency: row.currency },
-        ...(draft.mandatoryEnabled !== undefined ? { wholesaleMandatory: { enabled: draft.mandatoryEnabled, percentage: percentage! } } : {}) });
+        wholesaleUnitPrice: { amount, currency: row.currency }, ...(note ? { note } : {}) });
     }
   }
   if (Object.keys(errors).length) return { ok: false, errors };
-  if (!decisions.length) return { ok: false, errors: { selection: 'پاسخ قیمت حداقل یک ردیف را وارد کنید.' } };
+  if (!decisions.length) return { ok: false, errors: { selection: 'حداقل یک ردیف را انتخاب کنید.' } };
   return { ok: true, decisions };
 }

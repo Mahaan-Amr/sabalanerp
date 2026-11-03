@@ -1,121 +1,102 @@
 import type { PartnerEvent } from '../../../../../packages/partner-sales-contracts';
-import { CaseEvidence, CommercialRevision, ContractRuntime, Metrics, Period, ReportChartTransaction, ReportPurpose, ReportRow, ReportingError } from './contracts';
+import { CaseEvidence, CommercialRevision, ContractRuntime, Metrics, Period, ReportPurpose, ReportRow, ReportingError } from './contracts';
 import { negate, subtract, sum } from './money';
-import { effectiveThrough, projectSabalanRevenue, visibleEvents } from './revenue';
-import { caseHistory, collectionHistory } from './history';
+import { projectSabalanRevenue, visibleEvents } from './revenue';
 
-const conflict = (): never => { throw new ReportingError('INTEGRITY_CONFLICT'); };
+const conflict = () => { throw new ReportingError('INTEGRITY_CONFLICT'); };
 const inPeriod = (event: PartnerEvent, period: Period) => event.effectiveDate >= period.from;
 
-function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: PartnerEvent[], period: Period, history: ReturnType<typeof caseHistory>) {
+function retailMetrics(runtime: ContractRuntime, data: CaseEvidence, events: PartnerEvent[], period: Period) {
   const revisions = new Map<number, CommercialRevision>();
   for (const candidate of data.commercial || []) {
     const view = runtime.PartnerCaseViewSchema.parse(candidate.view);
     const retail = runtime.MoneySchema.parse(candidate.comparable.retail);
     const sabalan = runtime.MoneySchema.parse(candidate.comparable.sabalan);
     runtime.IdSchema.parse(candidate.comparable.evidenceId);
-    const sabalanTotals = view.sabalanTotals;
-    if (!sabalanTotals) conflict();
     if (view.owner.caseId !== data.root.caseId || revisions.has(view.owner.revision)
       || retail.currency !== sabalan.currency || retail.currency !== data.internal.totals.currency
-      || view.retailTotals.currency !== retail.currency || sabalanTotals!.currency !== sabalan.currency) conflict();
+      || view.retailTotals.currency !== retail.currency || view.sabalanTotals.currency !== sabalan.currency) conflict();
     revisions.set(view.owner.revision, { view, comparable: { retail, sabalan, evidenceId: candidate.comparable.evidenceId } });
   }
   const current = revisions.get(data.internal.owner.revision);
-  if (!current) return conflict();
-  if (runtime.checkExpectedRevision(data.internal.owner, current.view.owner)) return conflict();
-  const customerContractNumber = current.view.customerContractNumber;
-  if (!customerContractNumber) return conflict();
+  if (!current || runtime.checkExpectedRevision(data.internal.owner, current.view.owner)) conflict();
   const revision = (ref: PartnerEvent['owner']) => {
     const value = revisions.get(ref.revision);
     if (!value || runtime.checkExpectedRevision(ref, value.view.owner)) return conflict();
     return value;
   };
-  const voidRevision = (event: Extract<PartnerEvent, { type: 'CASE_VOIDED' }>) => {
-    const effective = [history.commitment, ...history.corrections, ...history.recommitments]
-      .filter(item => item && item.owner.revision <= event.owner.revision && item.recordedAt <= event.recordedAt)
-      .sort((left, right) => left!.owner.revision - right!.owner.revision).at(-1);
-    if (!effective) return conflict();
-    return revision(effective.owner);
-  };
+  let effective: CommercialRevision | undefined;
   const sales: string[] = []; const margins: string[] = [];
-  if (history.commitment) {
-    const initial = revision(history.commitment.owner);
-    if (subtract(initial.comparable.sabalan.amount, history.commitment.sabalanNetAmount.amount) !== '0') conflict();
-    if (inPeriod(history.commitment, period)) {
-      sales.push(initial.comparable.retail.amount);
-      margins.push(subtract(initial.comparable.retail.amount, initial.comparable.sabalan.amount));
+  const receipts = new Map<string, { amount: string; currency: string; planId: string }>();
+  const reversed = new Map<string, string[]>();
+  const reversalIds = new Map<string, string>();
+  const allCollected: string[] = []; const periodCollected: string[] = [];
+  const corrections = new Set<string>();
+  for (const event of events) {
+    if (event.owner.caseId !== data.root.caseId) conflict();
+    if (event.type === 'CASE_COMMITTED' && !effective) {
+      effective = revision(event.owner);
+      if (subtract(effective.comparable.sabalan.amount, event.sabalanNetAmount.amount) !== '0') conflict();
+      if (inPeriod(event, period)) {
+        sales.push(effective.comparable.retail.amount);
+        margins.push(subtract(effective.comparable.retail.amount, effective.comparable.sabalan.amount));
+      }
+    }
+    if (event.type === 'CORRECTION_EFFECTIVE' && !corrections.has(event.correctionId)) {
+      if (!effective || runtime.checkExpectedRevision(event.predecessor, effective.view.owner)) conflict();
+      const next = revision(event.owner);
+      const retailDelta = subtract(next.comparable.retail.amount, effective!.comparable.retail.amount);
+      const wholesaleDelta = subtract(next.comparable.sabalan.amount, effective!.comparable.sabalan.amount);
+      if (event.scope === 'RETAIL_ONLY' && wholesaleDelta !== '0') conflict();
+      if (wholesaleDelta !== '0') {
+        const adjustments = events.filter(item => item.type === 'SABALAN_ADJUSTMENT' && item.correctionId === event.correctionId);
+        if (!adjustments.length || adjustments.some(item => item.effectiveDate !== event.effectiveDate)) conflict();
+        const amounts = adjustments.map(item => item.type === 'SABALAN_ADJUSTMENT' ? item.delta : '0');
+        if (sum(amounts) !== wholesaleDelta) conflict();
+      }
+      if (inPeriod(event, period)) { sales.push(retailDelta); margins.push(subtract(retailDelta, wholesaleDelta)); }
+      effective = next; corrections.add(event.correctionId);
+    }
+    if (event.type === 'CASE_VOIDED') {
+      if (!effective || corrections.has(event.correctionId)) conflict();
+      if (inPeriod(event, period)) {
+        sales.push(negate(effective!.comparable.retail.amount));
+        margins.push(negate(subtract(effective!.comparable.retail.amount, effective!.comparable.sabalan.amount)));
+      }
+      corrections.add(event.correctionId);
+    }
+    if (event.type === 'RETAIL_RECEIPT') {
+      if (event.amount.currency !== data.internal.totals.currency) conflict();
+      const previous = receipts.get(event.receiptId);
+      if (previous) {
+        if (subtract(previous.amount, event.amount.amount) !== '0' || previous.planId !== event.planId) conflict();
+        continue;
+      }
+      if (![...revisions.values()].some(item => item.view.customerPaymentPlan.planId === event.planId)) conflict();
+      receipts.set(event.receiptId, { amount: event.amount.amount, currency: event.amount.currency, planId: event.planId });
+      allCollected.push(event.amount.amount);
+      if (inPeriod(event, period)) periodCollected.push(event.amount.amount);
+    }
+    if (event.type === 'RETAIL_RECEIPT_REVERSED') {
+      const original = receipts.get(event.originalReceiptId);
+      const fingerprint = `${event.originalReceiptId}:${event.planId}:${event.amount.currency}:${sum([event.amount.amount])}`;
+      if (reversalIds.has(event.reversalId)) {
+        if (reversalIds.get(event.reversalId) !== fingerprint) conflict();
+        continue;
+      }
+      if (!original || original.planId !== event.planId || original.currency !== event.amount.currency) conflict();
+      const amounts = reversed.get(event.originalReceiptId) || [];
+      amounts.push(event.amount.amount); reversed.set(event.originalReceiptId, amounts);
+      if (subtract(original!.amount, sum(amounts)).startsWith('-')) conflict();
+      reversalIds.set(event.reversalId, fingerprint); allCollected.push(negate(event.amount.amount));
+      if (inPeriod(event, period)) periodCollected.push(negate(event.amount.amount));
     }
   }
-  for (const event of history.corrections) {
-    const previous = revision(event.predecessor);
-    const next = revision(event.owner);
-    const retailDelta = subtract(next.comparable.retail.amount, previous.comparable.retail.amount);
-    const wholesaleDelta = subtract(next.comparable.sabalan.amount, previous.comparable.sabalan.amount);
-    if (event.scope === 'RETAIL_ONLY' && wholesaleDelta !== '0') conflict();
-    if (wholesaleDelta !== '0') {
-      const adjustments = events.filter(item => item.type === 'SABALAN_ADJUSTMENT' && item.correctionId === event.correctionId);
-      if (!adjustments.length || adjustments.some(item => item.effectiveDate !== event.effectiveDate)) conflict();
-      const amounts = adjustments.map(item => item.type === 'SABALAN_ADJUSTMENT' ? item.delta : '0');
-      if (sum(amounts) !== wholesaleDelta) conflict();
-    }
-    if (inPeriod(event, period)) { sales.push(retailDelta); margins.push(subtract(retailDelta, wholesaleDelta)); }
-  }
-  for (const event of history.recommitments) {
-    const renewed = revision(event.owner);
-    if (inPeriod(event, period)) {
-      sales.push(renewed.comparable.retail.amount);
-      margins.push(subtract(renewed.comparable.retail.amount, renewed.comparable.sabalan.amount));
-    }
-  }
-  for (const event of history.voids.filter(item => inPeriod(item, period))) {
-    const voided = voidRevision(event);
-    // Cancelling an activation before renewed finality has no new retail sale
-    // to reverse. Its audited wholesale adjustment is zero.
-    const neutralization = events.filter(item => item.type === 'SABALAN_ADJUSTMENT' && event.adjustmentEventIds.includes(item.eventId));
-    if (neutralization.length && sum(neutralization.map(item => item.type === 'SABALAN_ADJUSTMENT' ? item.delta : '0')) === '0') continue;
-    sales.push(negate(voided.comparable.retail.amount));
-    margins.push(negate(subtract(voided.comparable.retail.amount, voided.comparable.sabalan.amount)));
-  }
-  const { collected, periodCollected } = collectionHistory(events, {
-    planIds: new Set([...revisions.values()].map(item => item.view.customerPaymentPlan.planId)),
-    currency: data.internal.totals.currency, period,
-  });
+  const collected = sum(allCollected);
+  if (effective && runtime.checkExpectedRevision(effective.view.owner, current!.view.owner)) conflict();
   const balance = subtract(current!.view.retailTotals.payable, collected);
   const collectionStatus = balance.startsWith('-') ? 'OVERPAID' : balance === '0' ? 'SETTLED' : collected === '0' ? 'UNPAID' : 'PARTIAL';
-  const transaction = (event: PartnerEvent, kind: ReportChartTransaction['kind'], debtDelta = '0', receivableDelta = '0', receiptDelta = '0') => ({
-    caseId: data.root.caseId, caseNumber: current!.view.caseNumber,
-    customerContractNumber, effectiveDate: event.effectiveDate,
-    kind, debtDelta, receivableDelta, receiptDelta,
-  });
-  const chartTransactions: ReportChartTransaction[] = [];
-  for (const event of events) {
-    if (event.type === 'CASE_COMMITTED') {
-      const committed = revision(event.owner);
-      chartTransactions.push(transaction(event, 'COMMITMENT', event.sabalanNetAmount.amount, committed.comparable.retail.amount));
-    } else if (event.type === 'CASE_RECOMMITTED') {
-      const renewed = revision(event.owner);
-      chartTransactions.push(transaction(event, 'COMMITMENT', '0', renewed.comparable.retail.amount));
-    } else if (event.type === 'CORRECTION_EFFECTIVE') {
-      const previous = revision(event.predecessor); const next = revision(event.owner);
-      chartTransactions.push(transaction(event, 'CORRECTION', '0', subtract(next.comparable.retail.amount, previous.comparable.retail.amount)));
-    } else if (event.type === 'SABALAN_ADJUSTMENT') {
-      chartTransactions.push(transaction(event, 'CORRECTION', event.delta));
-    } else if (event.type === 'SABALAN_RECEIPT') {
-      chartTransactions.push(transaction(event, 'SABALAN_RECEIPT', negate(event.amount.amount)));
-    } else if (event.type === 'RETAIL_RECEIPT') {
-      chartTransactions.push(transaction(event, 'CUSTOMER_RECEIPT', '0', negate(event.amount.amount), event.amount.amount));
-    } else if (event.type === 'RETAIL_RECEIPT_REVERSED') {
-      chartTransactions.push(transaction(event, 'CUSTOMER_RECEIPT_REVERSAL', '0', event.amount.amount, negate(event.amount.amount)));
-    } else if (event.type === 'CASE_VOIDED') {
-      const voided = voidRevision(event);
-      const neutralization = events.filter(item => item.type === 'SABALAN_ADJUSTMENT' && event.adjustmentEventIds.includes(item.eventId));
-      const emptyCycle = neutralization.length && sum(neutralization.map(item => item.type === 'SABALAN_ADJUSTMENT' ? item.delta : '0')) === '0';
-      chartTransactions.push(transaction(event, 'VOID', '0', emptyCycle ? '0' : negate(voided.comparable.retail.amount)));
-    }
-  }
-  return { current: current!, retailSales: sum(sales), retailCollected: periodCollected,
-    netComparableMargin: sum(margins), collectionStatus, chartTransactions } as const;
+  return { current: current!, retailSales: sum(sales), retailCollected: sum(periodCollected), netComparableMargin: sum(margins), collectionStatus } as const;
 }
 
 export function projectReportRow(runtime: ContractRuntime, data: CaseEvidence, purpose: ReportPurpose, period: Period): ReportRow {
@@ -127,10 +108,16 @@ export function projectReportRow(runtime: ContractRuntime, data: CaseEvidence, p
   if (events.some(event => event.owner.caseId !== data.root.caseId
     || ('internalRecordId' in event && event.internalRecordId !== internal.recordId)
     || (event.type === 'CASE_COMMITTED' && event.salesCreditOwnerId !== data.root.partnerSellerId))) conflict();
-  const history = caseHistory(runtime, events);
-  if (history.effective && runtime.checkExpectedRevision(history.effective, internal.owner)) conflict();
-  if (['COMMITTED', 'VOIDED'].includes(internal.state) && !history.effective) conflict();
-  if (history.voided) {
+  let effectiveOwner = events.find(event => event.type === 'CASE_COMMITTED')?.owner;
+  for (const event of events) {
+    if (event.type === 'CORRECTION_EFFECTIVE') {
+      if (!effectiveOwner || runtime.checkExpectedRevision(event.predecessor, effectiveOwner)) conflict();
+      effectiveOwner = event.owner;
+    }
+  }
+  if (effectiveOwner && runtime.checkExpectedRevision(effectiveOwner, internal.owner)) conflict();
+  if (['COMMITTED', 'VOIDED'].includes(internal.state) && !effectiveOwner) conflict();
+  if (events.some(event => event.type === 'CASE_VOIDED')) {
     if (internal.state !== 'VOIDED') conflict();
     for (const event of events) {
       if (event.type !== 'CASE_VOIDED') continue;
@@ -147,31 +134,23 @@ export function projectReportRow(runtime: ContractRuntime, data: CaseEvidence, p
     deliveries: fulfillment.deliveries, deliveryProgress: null };
   if (data.deliveryProgress !== null) {
     const seen = new Set<string>();
-    row.deliveryProgress = data.deliveryProgress.flatMap(item => {
+    row.deliveryProgress = data.deliveryProgress.map(item => {
       const product = fulfillment.products.find(product => product.productRowId === item.productRowId);
-      if ((product && product.unit !== item.unit) || seen.has(item.productRowId)) conflict();
+      if (!product || product.unit !== item.unit || seen.has(item.productRowId)) conflict();
       seen.add(item.productRowId);
       for (const amount of [item.contracted, item.reserved, item.dispatched]) {
         runtime.SignedDecimalSchema.parse(amount);
         if (amount.startsWith('-')) conflict();
       }
-      if (!product) {
-        if ([item.contracted, item.reserved, item.dispatched].some(amount => subtract(amount, '0') !== '0')) conflict();
-        return [];
-      }
-      if (subtract(item.contracted, product.quantity) !== '0') conflict();
       if (subtract(item.contracted, sum([item.reserved, item.dispatched])).startsWith('-')) conflict();
-      return [{ productRowId: item.productRowId, unit: item.unit, contracted: item.contracted, reserved: item.reserved, dispatched: item.dispatched }];
+      return { productRowId: item.productRowId, unit: item.unit, contracted: item.contracted, reserved: item.reserved, dispatched: item.dispatched };
     });
-    if (fulfillment.products.some(product => !seen.has(product.productRowId))) conflict();
   }
   if (purpose === 'FULFILLMENT') return row;
   row.currency = internal.totals.currency;
   if (purpose !== 'PARTNER') row.internalRecordNumber = internal.recordNumber;
   const revenue = projectSabalanRevenue(runtime, events, period);
-  row.metrics = { wholesalePurchases: sum(data.financialRevenue !== undefined
-    ? data.financialRevenue.filter(event => event.effectiveDate >= period.from && event.effectiveDate <= effectiveThrough(period) && event.recordedAt <= period.asOf).map(event => event.amount)
-    : revenue.map(event => event.amount)) };
+  row.metrics = { wholesalePurchases: sum(revenue.map(event => event.amount)) };
   if (data.account === null) row.account = null;
   else {
     const account = runtime.PartnerAccountViewSchema.parse({ schemaVersion: 1, purpose: 'PARTNER_ACCOUNT',
@@ -187,12 +166,11 @@ export function projectReportRow(runtime: ContractRuntime, data: CaseEvidence, p
           dueDate: item.dueDate, amount: item.amount, method: item.method })) } };
   }
   if (purpose === 'PARTNER' || purpose === 'MANAGEMENT') {
-    const retail = retailMetrics(runtime, data, events, period, history);
+    const retail = retailMetrics(runtime, data, events, period);
     if (retail.current.view.caseNumber !== internal.caseNumber || retail.current.view.customerContractNumber !== internal.customerContractNumber) conflict();
     row.metrics.retailSales = retail.retailSales; row.metrics.retailCollected = retail.retailCollected;
     row.metrics.netComparableMargin = retail.netComparableMargin;
     row.customerPaymentPlan = retail.current.view.customerPaymentPlan; row.collectionStatus = retail.collectionStatus;
-    row.chartTransactions = retail.chartTransactions;
   }
   return row;
 }

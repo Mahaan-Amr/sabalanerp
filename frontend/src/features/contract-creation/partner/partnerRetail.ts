@@ -1,84 +1,26 @@
 import { DecimalSchema, QuantitySchema, type Money } from '@sabalanerp/partner-sales-contracts';
-import { roundContractPayableTotal } from '@sabalanerp/contract-product-graph';
 import type { PartnerInquiryRow } from '../../partner-sales/inquiries/inquiryPresentation';
 import type { PartnerDraftIntent } from './partnerCaseSubmission';
 
 export interface PartnerRetailRow {
   productRowId: string;
-  /** Presentation only; never part of the submitted financial intent. */
-  parentProductRowId?: string;
   quantity: string;
   unit: string;
   inquiryRow: PartnerInquiryRow;
   retailUnitPrice: Money;
-  /** Canonical blended rate: Partner material rate plus system-owned components. */
-  retailEffectiveUnitPrice?: Money;
-  wholesaleUnitPrice?: Money;
-  /** Exact server quote totals; effective rates may contain repeating decimals. */
-  retailLineTotal?: Money;
-  wholesaleLineTotal?: Money;
 }
 
-/** Independent services have catalog pricing and never carry inquiry authority. */
-export interface PartnerRetailServiceRow {
-  serviceRowId: string;
-  title: string;
-  quantity: string;
-  unit: string;
-  retailUnitPrice: Money;
-  wholesaleUnitPrice?: Money;
-  retailLineTotal?: Money;
-  wholesaleLineTotal?: Money;
-}
-type FinancialRow = Pick<PartnerRetailRow, 'productRowId' | 'quantity' | 'retailUnitPrice' |
-  'retailEffectiveUnitPrice' | 'wholesaleUnitPrice' | 'retailLineTotal' | 'wholesaleLineTotal'>;
-const financialRows = (rows: PartnerRetailRow[], services: readonly PartnerRetailServiceRow[]): FinancialRow[] => [
-  ...rows, ...services.map(service => ({ ...service, productRowId: service.serviceRowId })),
-];
-
-export function refreshPartnerInquiryRow(row: PartnerRetailRow, inquiryRow: PartnerInquiryRow): PartnerRetailRow {
-  const sameApproval = row.inquiryRow.rowId === inquiryRow.rowId
-    && row.inquiryRow.revision === inquiryRow.revision
-    && JSON.stringify(row.inquiryRow.approvedRowBinding) === JSON.stringify(inquiryRow.approvedRowBinding)
-    && row.inquiryRow.approvedPrice?.amount === inquiryRow.approvedPrice?.amount
-    && row.inquiryRow.approvedPrice?.currency === inquiryRow.approvedPrice?.currency;
-  if (sameApproval && inquiryRow.approvedPrice) return { ...row, inquiryRow };
-  const { wholesaleUnitPrice: _staleQuote, wholesaleLineTotal: _staleTotal, ...withoutStaleQuote } = row;
-  void _staleQuote;
-  void _staleTotal;
-  return { ...withoutStaleQuote, inquiryRow };
-}
-
-export function defaultPartnerRetailRows(rows: (Omit<PartnerRetailRow, 'retailUnitPrice'> & { retailUnitPrice?: Money })[]): PartnerRetailRow[] {
-  return rows.map(row => ({ ...row, retailUnitPrice: row.retailUnitPrice ??
-    { amount: '', currency: 'IRT' } }));
+export function defaultPartnerRetailRows(rows: Omit<PartnerRetailRow, 'retailUnitPrice'>[]): PartnerRetailRow[] {
+  return rows.map(row => {
+    if (!row.inquiryRow.approvedPrice || !row.inquiryRow.approvedRowBinding) throw new Error('Approved row required');
+    return { ...row, retailUnitPrice: { ...row.inquiryRow.approvedPrice } };
+  });
 }
 
 export function partnerRetailIntentRows(rows: PartnerRetailRow[]): PartnerDraftIntent['rows'] {
   return rows.map(row => {
-    let source = row;
-    const visited = new Set<string>();
-    while (source.parentProductRowId && !visited.has(source.productRowId)) {
-      visited.add(source.productRowId);
-      const parent = rows.find(item => item.productRowId === source.parentProductRowId);
-      if (!parent) break;
-      source = parent;
-    }
-    return { productRowId: row.productRowId,
-      ...(source.inquiryRow.approvedRowBinding ? { approvedRowBinding: source.inquiryRow.approvedRowBinding } : {}),
-      retailUnitPrice: row.retailUnitPrice };
-  });
-}
-
-/** Reading an offer is presentation; only retain decisions already in the saved intent. */
-export function partnerRetailDraftRows(rows: PartnerRetailRow[], accepted: PartnerDraftIntent['rows']): PartnerDraftIntent['rows'] {
-  return partnerRetailIntentRows(rows).map(row => {
-    const previous = accepted.find(item => item.productRowId === row.productRowId)?.approvedRowBinding;
-    const offered = row.approvedRowBinding;
-    const same = previous && offered && previous.inquiryId === offered.inquiryId
-      && previous.rowId === offered.rowId && previous.revision === offered.revision;
-    const { approvedRowBinding: _binding, ...retail } = row;
-    return same ? { ...retail, approvedRowBinding: previous } : retail;
+    if (!row.inquiryRow.approvedRowBinding) throw new Error('Approved row required');
+    return { productRowId: row.productRowId, approvedRowBinding: row.inquiryRow.approvedRowBinding, retailUnitPrice: row.retailUnitPrice };
   });
 }
 
@@ -100,11 +42,6 @@ function product(left: string, right: string): Decimal {
   const a = decimal(left); const b = decimal(right);
   return { digits: a.digits * b.digits, scale: a.scale + b.scale };
 }
-function quotedLineTotal(quantity: string, rate: Money, total?: Money): Decimal {
-  if (!total) return product(quantity, rate.amount);
-  if (total.currency !== rate.currency) throw new Error('currency mismatch');
-  return decimal(total.amount);
-}
 function display(value: Decimal): string {
   const negative = value.digits < BigInt(0);
   const digits = (negative ? -value.digits : value.digits).toString().padStart(value.scale + 1, '0');
@@ -112,73 +49,11 @@ function display(value: Decimal): string {
   return (negative ? '-' : '') + result;
 }
 
-export function partnerPriceLineTotal(lines: readonly { quantity: string; rate: Money }[], currency: Money['currency']): string | null {
-  try {
-    let total = decimal('0');
-    for (const line of lines) {
-      if (line.rate.currency !== currency) return null;
-      total = add(total, product(line.quantity, line.rate.amount));
-    }
-    return display(total);
-  } catch { return null; }
-}
-
-/** Flatten each family under its root without changing financial row identity. */
-export function partnerRetailGroups(rows: PartnerRetailRow[]) {
-  const byId = new Map(rows.map(row => [row.productRowId, row]));
-  const owner = (row: PartnerRetailRow) => {
-    const seen = new Set([row.productRowId]);
-    let current = row;
-    while (current.parentProductRowId && byId.has(current.parentProductRowId)) {
-      if (seen.has(current.parentProductRowId)) return row.productRowId;
-      seen.add(current.parentProductRowId);
-      current = byId.get(current.parentProductRowId)!;
-    }
-    return current.productRowId;
-  };
-  const groups = new Map<string, PartnerRetailRow[]>();
+export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money) {
+  let wholesale = decimal('0'); let retail = decimal('0');
   for (const row of rows) {
-    const id = owner(row);
-    groups.set(id, [...(groups.get(id) ?? []), row]);
-  }
-  return Array.from(groups.entries()).map(([id, members]) => ({ root: byId.get(id)!, children: members.filter(row => row.productRowId !== id) }));
-}
-
-function retailSubtotal(rows: FinancialRow[], currency: Money['currency']): Decimal | null {
-  let subtotal = decimal('0');
-  try {
-    for (const row of rows) {
-      const effectiveRetail = row.retailEffectiveUnitPrice ?? row.retailUnitPrice;
-      if (effectiveRetail.currency !== currency) return null;
-      QuantitySchema.parse(row.quantity);
-      subtotal = add(subtotal, quotedLineTotal(row.quantity, effectiveRetail, row.retailLineTotal));
-    }
-    return subtotal;
-  } catch { return null; }
-}
-
-/** Derive the frozen customer discount without touching any Sabalan price. */
-export function partnerRetailDiscountFromPercent(rows: PartnerRetailRow[], percent: string,
-  currency: Money['currency'], services: readonly PartnerRetailServiceRow[] = []): Money | null {
-  if (!DecimalSchema.safeParse(percent).success || Number(percent) > 100) return null;
-  const subtotal = retailSubtotal(financialRows(rows, services), currency);
-  if (!subtotal) return null;
-  const rate = decimal(percent);
-  return { amount: display({ digits: subtotal.digits * rate.digits,
-    scale: subtotal.scale + rate.scale + 2 }), currency };
-}
-
-export function partnerRetailSubtotal(rows: PartnerRetailRow[], currency: Money['currency'],
-  services: readonly PartnerRetailServiceRow[] = []): string | null {
-  const subtotal = retailSubtotal(financialRows(rows, services), currency);
-  return subtotal ? display(subtotal) : null;
-}
-
-export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money, services: readonly PartnerRetailServiceRow[] = []) {
-  let wholesale = decimal('0'); let retail = decimal('0'); let pricingReady = true;
-  for (const row of financialRows(rows, services)) {
-    const approved = row.wholesaleUnitPrice;
-    if (row.retailUnitPrice.currency !== discount.currency || (approved && approved.currency !== discount.currency)) {
+    const approved = row.inquiryRow.approvedPrice;
+    if (!approved || approved.currency !== discount.currency || row.retailUnitPrice.currency !== discount.currency) {
       return { valid: false as const, field: 'price' as const, productRowId: row.productRowId, message: 'واحد پول ردیف‌ها یکسان نیست؛ قیمت تأییدشده را بررسی کنید.' };
     }
     if (!DecimalSchema.safeParse(row.retailUnitPrice.amount).success) return {
@@ -186,11 +61,8 @@ export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money, 
     };
     try {
       QuantitySchema.parse(row.quantity);
-      if (approved) wholesale = add(wholesale, quotedLineTotal(row.quantity, approved, row.wholesaleLineTotal));
-      else pricingReady = false;
-      const effectiveRetail = row.retailEffectiveUnitPrice ?? row.retailUnitPrice;
-      if (effectiveRetail.currency !== discount.currency) throw new Error('currency mismatch');
-      retail = add(retail, quotedLineTotal(row.quantity, effectiveRetail, row.retailLineTotal));
+      wholesale = add(wholesale, product(row.quantity, approved.amount));
+      retail = add(retail, product(row.quantity, row.retailUnitPrice.amount));
     } catch {
       return { valid: false as const, field: 'quantity' as const, productRowId: row.productRowId, message: 'مقدار و قیمت تأییدشده را بررسی کنید.' };
     }
@@ -198,70 +70,9 @@ export function partnerRetailSummary(rows: PartnerRetailRow[], discount: Money, 
   try { retail = add(retail, decimal(discount.amount), true); }
   catch { return { valid: false as const, field: 'discount' as const, message: 'مبلغ تخفیف را کامل وارد کنید.' }; }
   if (retail.digits < BigInt(0)) return { valid: false as const, field: 'discount' as const, message: 'تخفیف نمی‌تواند از جمع فروش بیشتر باشد.' };
-  const retailPayable = roundContractPayableTotal(display(retail), discount.currency).roundedAmount;
-  const wholesalePayable = roundContractPayableTotal(display(wholesale), discount.currency).roundedAmount;
-  const difference = add(decimal(retailPayable), decimal(wholesalePayable), true);
-  return { valid: true as const, pricingReady, wholesale: pricingReady ? wholesalePayable : undefined,
-    retail: retailPayable, difference: pricingReady ? display(difference) : undefined,
-    loss: pricingReady && difference.digits < BigInt(0) };
+  const difference = add(retail, wholesale, true);
+  return { valid: true as const, wholesale: display(wholesale), retail: display(retail), difference: display(difference), loss: difference.digits < BigInt(0) };
 }
 
-export function partnerRetailRowSummary(row: PartnerRetailRow) {
-  if (!row.wholesaleUnitPrice || row.wholesaleUnitPrice.currency !== row.retailUnitPrice.currency) return null;
-  try {
-    const wholesale = quotedLineTotal(row.quantity, row.wholesaleUnitPrice, row.wholesaleLineTotal);
-    const retail = quotedLineTotal(row.quantity, row.retailEffectiveUnitPrice ?? row.retailUnitPrice, row.retailLineTotal);
-    const difference = add(retail, wholesale, true);
-    return { wholesale: display(wholesale), retail: display(retail), difference: display(difference),
-      loss: difference.digits < BigInt(0) };
-  } catch { return null; }
-}
-
-export const partnerMoneyText = (amount: string, currency: Money['currency']) => {
-  const [whole, fraction] = amount.split('.');
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  const formatted = (fraction === undefined ? grouped : `${grouped}.${fraction}`)
-    .replace(/[0-9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
-  return `${formatted} ${currency === 'IRR' ? 'ریال' : 'تومان'}`;
-};
-
-export function remainingPartnerAmount(total: string, allocated: readonly string[]): string | null {
-  try {
-    let value = decimal(total);
-    for (const amount of allocated) value = add(value, decimal(amount), true);
-    return value.digits < BigInt(0) ? null : display(value);
-  } catch { return null; }
-}
-
-/** Exact payment summary, including over-allocation; never changes installments. */
-export function partnerPaymentAllocation(total: Money, installments: readonly { amount: Money }[]) {
-  try {
-    const paid = installments.reduce((sum, installment) => {
-      if (installment.amount.currency !== total.currency) throw new Error('currency mismatch');
-      return add(sum, decimal(installment.amount.amount));
-    }, decimal('0'));
-    const balance = add(decimal(total.amount), paid, true);
-    return { paid: display(paid), remaining: display(balance),
-      extra: balance.digits < BigInt(0) ? display({ ...balance, digits: -balance.digits }) : '0',
-      state: balance.digits === BigInt(0) ? 'matched' as const : balance.digits > BigInt(0) ? 'short' as const : 'over' as const };
-  } catch { return null; }
-}
-
-export function stepPartnerDeliveryAmount(current: string, maximum: string, direction: -1 | 1): string | null {
-  try {
-    let next = add(decimal(current), decimal('1'), direction === -1);
-    const ceiling = decimal(maximum);
-    if (next.digits < BigInt(0)) next = decimal('0');
-    if (add(ceiling, next, true).digits < BigInt(0)) next = ceiling;
-    return display(next);
-  } catch { return null; }
-}
-
-/** Unsaved backing identity; the payment form requires an explicit method and amount. */
-export function newPartnerPaymentInstallment(currency: Money['currency'], installmentId: string, currentDate: string): PartnerDraftIntent['customerPaymentPlan']['installments'][number] {
-  return {
-    installmentId, dueDate: currentDate,
-    amount: { amount: '0', currency },
-    method: 'BANK_TRANSFER', subtype: 'SHIBA',
-  };
-}
+export const partnerMoneyText = (amount: string, currency: Money['currency']) =>
+  `${amount.replace(/[0-9]/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)])} ${currency === 'IRR' ? 'ریال' : 'تومان'}`;

@@ -33,7 +33,6 @@ export type PartnerReceivable = {
   paymentPlan: PartnerFinancialPreparation['paymentPlan'];
 };
 export type PartnerAccountPurchase = {
-  trackingNumber?: number;
   source: PartnerAccountingSource;
   /** Accounting resolves the effective replacement chain in one read snapshot.
    * Received/balance include official receipt reversals and check movements; no
@@ -70,7 +69,6 @@ export type PartnerAccountingFact = {
 export interface PartnerAccountingTransaction {
   readAuthorizedSource(expected: RevisionRef, action: 'QUEUE' | 'PREPARE' | 'APPROVAL' | 'PUBLISH_FACT'): Promise<Result<CommittedAccountingSource>>;
   findQueue(caseId: string): Promise<AccountingQueueEntry | null>;
-  nextQueueEvidenceId?(caseId: string, initialId: string): Promise<string>;
   /** Unique on Case and original commitment; never replaces a queued snapshot. */
   insertQueue(entry: AccountingQueueEntry): Promise<void>;
   /** Scope lookup to the already-authorized Case; hidden and missing collapse. */

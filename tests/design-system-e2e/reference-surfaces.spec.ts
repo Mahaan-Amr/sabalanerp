@@ -1,3 +1,4 @@
+import { scopeContractNavigationFixture } from './support/contract-navigation-fixture';
 import { expect, test, type Page } from '@playwright/test';
 import { loginAsAdmin as login } from './support/design-system';
 
@@ -690,10 +691,9 @@ test('Product Selection restores into the shared interface without changing pers
     }));
   });
 
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4');
+  await scopeContractNavigationFixture(page);
+  await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=4');
   const resumeDraft = page.getByRole('button', { name: 'ادامه پیش‌نویس قبلی', exact: true });
-  await expect(resumeDraft).toBeVisible();
-  await resumeDraft.click();
   await expect(resumeDraft).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'کاتالوگ محصولات' })).toBeVisible();
   await expect(page.locator('main.sds-workspace')).toHaveCount(1);
@@ -1073,7 +1073,8 @@ test('Stair layer summary keeps its established values visible while recalculati
     }));
   });
 
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4', { waitUntil: 'domcontentloaded' });
+  await scopeContractNavigationFixture(page);
+  await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=4', { waitUntil: 'domcontentloaded' });
   const parentRow = page.locator('[data-contract-row-id="stair-parent-e2e"]');
   await expect(parentRow).toBeVisible({ timeout: 60_000 });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1173,7 +1174,8 @@ test('Contract Creation keeps early and consequential steps accessible and respo
       }
     }));
   });
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=7');
+  await scopeContractNavigationFixture(page);
+  await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=7');
 
   const consequentialWorkspace = page.locator('main.sds-workspace');
   await expect(consequentialWorkspace.getByText('مبلغ تخفیف (تومان)')).toBeVisible();
@@ -1219,7 +1221,8 @@ test('Contract payment converts the active percentage range to a toman cap', asy
       }
     }));
   });
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=7');
+  await scopeContractNavigationFixture(page);
+  await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=7');
 
   const workspace = page.locator('main.sds-workspace');
   await expect(workspace.getByText('مبلغ تخفیف (تومان)')).toBeVisible();
@@ -1230,10 +1233,17 @@ test('Contract payment converts the active percentage range to a toman cap', asy
   await workspace.getByRole('button', { name: 'درصد', exact: true }).click();
   await expect(workspace.getByRole('textbox', { name: 'درصد تخفیف' })).toHaveValue('3.42');
   await expect(workspace.getByText(/تخفیف اعمال‌شده/)).toContainText(/۳.۰۰۰.۰۰۰ تومان/);
-  await workspace.getByRole('textbox', { name: 'درصد تخفیف' }).fill('4.5');
-  await expect(workspace.getByText(/تخفیف اعمال‌شده/)).toContainText(/۳.۹۴۱.۸۶۱ تومان/);
+  const percent = workspace.getByRole('textbox', { name: 'درصد تخفیف' });
+  await percent.fill('4.5');
+  // ADR-0118 retains an invalid explicit entry; rounding up cannot exceed the whole-toman cap.
+  await expect(percent).toHaveValue('4.5');
+  await expect(percent).toHaveAttribute('aria-invalid', 'true');
+  await expect(workspace.getByText(/تخفیف واردشده بیشتر از سقف مجاز است/)).toBeVisible();
   await workspace.getByRole('button', { name: 'تومان', exact: true }).click();
-  await expect(workspace.getByRole('textbox', { name: 'مبلغ تخفیف (تومان)' })).toHaveValue(/3,941,861|۳٬۹۴۱٬۸۶۱/);
+  await expect(amount).toHaveValue(/3,941,862|۳٬۹۴۱٬۸۶۲/);
+  await amount.fill('3941861');
+  await expect(workspace.getByText(/تخفیف اعمال‌شده/)).toContainText(/۳.۹۴۱.۸۶۱ تومان/);
+  await expect(amount).not.toHaveAttribute('aria-invalid', 'true');
   await workspace.getByRole('button', { name: /^افزودن پرداخت/ }).click();
   const paymentDialog = page.getByRole('dialog', { name: 'افزودن پرداخت', exact: true });
   await expect(paymentDialog).toBeVisible();
@@ -1373,7 +1383,8 @@ test('Contract submission preserves input across an invalid response, succeeds o
       }
     }));
   });
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
+  await scopeContractNavigationFixture(page);
+  await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
 
   const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
   await expect(submit).toBeEnabled({ timeout: 60_000 });
@@ -1736,6 +1747,7 @@ test('Guard personnel worktime report previews the selected scope and daily rest
     const body = route.request().postDataJSON();
     previewBodies.push(body);
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
+      hasLegacyPolicy: true, hasWindowPolicy: false,
       availablePeople: [{ id: 'person-1', name: 'آریا متانت' }, { id: 'person-2', name: 'احمد عزیزی' }],
       people: [{ key: 'آریا متانت', name: 'آریا متانت', grossMinutes: 540, netMinutes: 420, daysWithMovement: 1, days: [{
         date: '2026-08-23', grossMinutes: 540, netMinutes: 420,
@@ -1751,17 +1763,18 @@ test('Guard personnel worktime report previews the selected scope and daily rest
   await page.goto('/dashboard/security/reports/personnel-attendance');
   const workspace = page.locator('main.sds-workspace');
   await expect(workspace.getByRole('heading', { name: 'گزارش کارکرد پرسنل' })).toBeVisible();
-  await expect(workspace.getByRole('button', { name: 'ماه گذشته' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(workspace.getByText('کارکرد:')).toBeVisible();
-  await expect.poll(() => previewBodies.at(-1)?.restMinutes).toBe(120);
-  await workspace.getByRole('spinbutton', { name: 'استراحت روزانه (دقیقه)' }).fill('90');
+  await expect(workspace.getByRole('button', { name: 'ماه جاری تا امروز' })).toHaveAttribute('aria-pressed', 'true');
+  await workspace.getByRole('button', { name: 'ماه گذشته', exact: true }).click();
+  await expect(workspace.getByText(/^کارکرد عادی \/ خالص:/)).toBeVisible();
+  await expect.poll(() => previewBodies.at(-1)?.restMinutes).toBeUndefined();
+  await workspace.getByRole('spinbutton', { name: 'استراحت روش قدیم (دقیقه)' }).fill('90');
   await expect.poll(() => previewBodies.at(-1)?.restMinutes).toBe(90);
   await workspace.getByRole('button', { name: 'آریا متانت', exact: true }).click();
   await expect.poll(() => previewBodies.at(-1)?.personnelIds).toEqual(['person-1']);
   await workspace.getByRole('button', { name: 'جزئیات روزها' }).click();
   const dayDetails = page.getByRole('dialog', { name: 'روزهای آریا متانت' });
   await expect(dayDetails).toBeVisible();
-  await expect(dayDetails.getByText('کارکرد ۹:۰۰ · بدون استراحت ۷:۰۰')).toBeVisible();
+  await expect(dayDetails.getByText('حضور فیزیکی ۹:۰۰ · کارکرد عادی / خالص ۷:۰۰')).toBeVisible();
   await dayDetails.getByRole('button', { name: 'بستن' }).last().click();
   if (process.env.PERSONNEL_ATTENDANCE_QA_SCREENSHOT) {
     await page.screenshot({ path: process.env.PERSONNEL_ATTENDANCE_QA_SCREENSHOT, fullPage: true });

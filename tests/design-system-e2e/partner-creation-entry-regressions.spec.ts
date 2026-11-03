@@ -666,6 +666,7 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     retailDiscount: { amount: '0', currency: 'IRT' }, belowCostConfirmed: false };
   await loginAsAdmin(page);
   await page.setViewportSize({ width, height: 900 });
+  if (width === 1280) await page.clock.install();
   const recoveryState = await mockPartner(page, true);
   let openingProductCatalogReads = 0;
   await page.route('**/api/partner/technical/catalog/query', route => {
@@ -770,7 +771,13 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     await workflow(page).getByRole('button', { name: 'بررسی تازه استعلام', exact: true }).click();
     await expect.poll(() => pricingReads).toBeGreaterThan(readsBeforeManual);
     const readsBeforePolling = pricingReads;
-    await expect.poll(() => pricingReads, { timeout: 30_000 }).toBeGreaterThanOrEqual(readsBeforePolling + 2);
+    // Advance each actual ten-second timer separately, awaiting its completed read.
+    for (let cycle = 0; cycle < 2; cycle++) {
+      const beforeRead = await workflow(page).getByText(/^آخرین دریافت:/).textContent();
+      await page.clock.runFor(10_000);
+      await expect.poll(() => pricingReads).toBeGreaterThanOrEqual(readsBeforePolling + cycle + 1);
+      await expect(workflow(page).getByText(/^آخرین دریافت:/)).not.toHaveText(beforeRead!);
+    }
     await page.waitForTimeout(1_000);
     expect(wizardWrites, 'unchanged pricing refreshes must not acquire leases and autosave').toBe(writesBeforePolling);
     await page.evaluate(() => {
@@ -778,7 +785,7 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
       document.dispatchEvent(new Event('visibilitychange'));
     });
     const readsBeforeHidden = pricingReads;
-    await page.waitForTimeout(11_000);
+    await page.clock.runFor(11_000);
     expect(pricingReads, 'hidden pages must not poll Partner inquiries').toBe(readsBeforeHidden);
     await page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
@@ -804,6 +811,7 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
   await expect(cancel).toBeVisible();
   await expect(cancel.getByRole('button', { name: 'تأیید لغو قرارداد', exact: true })).toBeDisabled();
   await page.keyboard.press('Escape');
+  if (width === 1280) await page.clock.runFor(1_000);
   await expect(cancel).toBeHidden();
   await expect.poll(() => recoveryState.wizard?.step).toBe('confirmation');
   expect(recoveryState.wizard?.reviewedCorrectionRequestId).toBe(correctionRequestId);
@@ -925,8 +933,12 @@ for (const scenario of [
   if (scenario.step === 'delivery') await expect(workflow(page).getByRole('textbox', { name: 'آدرس تحویل', exact: true })).toHaveValue('نشانی ذخیره‌شده');
   await expect(workflow(page).getByText('محاسبه مبلغ محصولات انجام نشد؛ دوباره تلاش کنید.', { exact: true })).toHaveCount(0);
   expect(blockedQuoteRequests).toBe(0);
-  await expect.poll(() => savedIntents.length).toBeGreaterThan(0);
-  for (const savedIntent of savedIntents) expect(savedIntent).toEqual(intent);
+  await expect.poll(() => page.evaluate(key =>
+    JSON.parse(localStorage.getItem(key) || '{}').draft?.intent,
+  `partner-wizard-draft:${actorId}:${oldRecoveryId}`)).toEqual(intent);
+  // Hydration retains the acknowledged checkpoint without a redundant server write.
+  await page.waitForTimeout(1_000);
+  expect(savedIntents).toHaveLength(0);
   await assertNoHorizontalOverflow(page);
 });
 

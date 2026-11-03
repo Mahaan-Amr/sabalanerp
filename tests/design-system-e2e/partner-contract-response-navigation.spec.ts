@@ -20,7 +20,7 @@ for (const width of [1280, 390]) for (const outcome of ['READY', 'PARTIAL', 'REJ
   await page.route('**/api/partner/**', async route => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/commercial')) { commands.push(route.request().postDataJSON().action); approved = true; }
-    await route.fulfill({ json: { success: true, data: await partnerCaseReadFixtureData(path, { cases: [{ view, pricingResponseState: outcome,
+    await route.fulfill({ json: { success: true, data: await partnerCaseReadFixtureData(path, { cases: [{ view, pricingResponseState: outcome, inquiryResponseComplete: approved && outcome !== 'PARTIAL',
       commercial: { version: 1, revision: 1, status: approved ? outcome === 'READY' ? 'QUOTED' : 'DRAFT' : 'NOTE', salesApproved: approved,
         customerAccepted: false, inquiry: 'WAITING', expiresAt: null, firstFinancialRecordAt: null },
       snapshotId: null, history: [], editRecovery: { recoveryId: 'response-draft', baseRevision: 0 },
@@ -36,6 +36,13 @@ for (const width of [1280, 390]) for (const outcome of ['READY', 'PARTIAL', 'REJ
   await expect(page.getByRole('button', { name: 'تایید', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'ویرایش', exact: true })).toBeVisible();
   await page.screenshot({ path: `tmp/qa/partner-sales-2026-10-11/offer-response-${outcome}-${width}.png`, fullPage: true });
-  await page.getByRole('button', { name: 'بررسی استعلام سبلان', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`caseId=${encodeURIComponent(view.owner.caseId)}&draftId=response-draft&baseRevision=0&returnTo=contract&step=5`));
+  const review = page.getByRole('button', { name: 'بررسی پاسخ سبلان', exact: true });
+  if (outcome === 'PARTIAL') {
+    await expect(review).toHaveCount(0);
+    await page.getByRole('button', { name: 'ویرایش', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`caseId=${encodeURIComponent(view.owner.caseId)}&draftId=response-draft&baseRevision=0$`));
+  } else {
+    await review.click();
+    await expect(page).toHaveURL(new RegExp(`caseId=${encodeURIComponent(view.owner.caseId)}&draftId=response-draft&baseRevision=0&returnTo=contract&step=5`));
+  }
 });

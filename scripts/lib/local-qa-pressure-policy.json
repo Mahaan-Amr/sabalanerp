@@ -1,0 +1,10 @@
+{
+  "version": "local-qa-pressure-v1",
+  "maximumCommitPercent": 90,
+  "maximumVmFullAvg10": 5,
+  "maximumVmSomeAvg10": 20,
+  "sampleMaximumAgeMs": 5000,
+  "probeMaximumDurationMs": 2500,
+  "monitorIntervalMs": 2000,
+  "maximumSamples": 16384
+}

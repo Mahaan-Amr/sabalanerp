@@ -149,7 +149,7 @@ export function assertRestoredQaPrivateNormal(normal:RestoredQaPrivateNormal,mat
  const view=assertRestoredQaWorkingMaterial(material,owner);assert.deepEqual(view.database,s.context.proof.database);
  assert.equal(fs.existsSync(path.join(view.roots['recovery-coordination'],'deployment-maintenance.json')),false);
  assert.ok(s.migrationEvidence,'RESTORED_QA_VERIFIED_MIGRATION_EVIDENCE_MISSING');
- return Object.freeze({database:view.database,root:view.root,classification:'RESTORED_QA_PRIVATE_CONTROL_CLOSED_WITHOUT_PUBLICATION' as const,
+ return Object.freeze({database:view.database,sourceDatabase:s.descriptor.sourceDatabase,sourceCheckpoint:s.descriptor.sourceCheckpoint,root:view.root,classification:'RESTORED_QA_PRIVATE_CONTROL_CLOSED_WITHOUT_PUBLICATION' as const,
   migrationEvidence:s.migrationEvidence,cleanupPending:true as const,independentPointHealthy:false as const,productionAdmission:false as const});
 }
 export async function completeRestoredQaPrivateControl(baseline:RestoredQaMigrationBaseline,owner:Owner,
@@ -201,4 +201,31 @@ export async function completeRestoredQaPrivateControl(baseline:RestoredQaMigrat
   classification:'RESTORED_QA_PRIVATE_CONTROL_CLOSED_WITHOUT_PUBLICATION' as const,database:view.database,native,
   cleanupPending:true as const,httpOriginalClosurePending:true as const,independentPointHealthy:false as const,productionAdmission:false as const,
   financialSchemaQualified:false as const,publicTrafficOpened:false as const})});
+}
+
+/** Final readback while the SAME strict callback and private NORMAL cap remain
+ * live. All application actors must have closed before this client is opened.
+ * The client is disconnected before returning the observation to the composer. */
+export async function recheckRestoredQaPrivateApplications(normal:RestoredQaPrivateNormal,
+ material:RestoredQaWorkingMaterial,owner:Readonly<{deploymentId:string;releaseId:string}>){
+ const before=assertRestoredQaPrivateNormal(normal,material,owner),s=normalStates.get(normal)!;
+ const view=assertRestoredQaWorkingMaterial(material,owner);
+ const result=await withSystemRecoveryDatabaseClient(view.database.name,db=>db.$transaction(async tx=>{
+  const identities=await tx.$queryRaw<Array<{name:string;oid:string;systemIdentifier:string;visible:boolean;sessions:number;prepared:number}>>`
+   SELECT current_database() AS name,(SELECT oid::text FROM pg_database WHERE datname=current_database()) AS oid,
+    (SELECT system_identifier::text FROM pg_control_system()) AS "systemIdentifier",
+    (SELECT rolsuper OR pg_has_role(current_user,'pg_read_all_stats','member') FROM pg_roles WHERE rolname=current_user) AS visible,
+    (SELECT count(*)::int FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid()) AS sessions,
+    (SELECT count(*)::int FROM pg_prepared_xacts WHERE database=current_database()) AS prepared`;
+  assert.deepEqual(identities,[{...view.database,visible:true,sessions:0,prepared:0}]);
+  const rows=await tx.$queryRaw<Array<{value:string}>>`SELECT coalesce(json_agg(t ORDER BY migration_name,id),'[]'::json)::text AS value FROM public._prisma_migrations t`;
+  assert.equal(rows.length,1);assert.equal(rows[0].value,before.migrationEvidence.historyRaw.after);
+  const business=await assertRecoveryBusinessProof(tx,s.context.businessDataProof);
+  verifyWorkingFiles(s.context,view);assertRestoredQaPrivateNormal(normal,material,owner);
+  return Object.freeze({format:'sabalan-restored-qa-final-application-readback/v1' as const,database:view.database,
+   business,nativeHistorySha256:digest(rows[0].value),originalNativeHistorySha256:s.context.proof.rawHistorySha256,
+   sql:Object.freeze({visible:true as const,sessions:0,prepared:0}),filesVerified:true as const,
+   cleanupPending:true as const,independentPointHealthy:false as const,productionAdmission:false as const});
+ },{maxWait:1000,timeout:15000}));
+ assertRestoredQaPrivateNormal(normal,material,owner);return result;
 }

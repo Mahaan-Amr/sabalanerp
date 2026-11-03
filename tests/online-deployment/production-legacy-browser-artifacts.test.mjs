@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import {validateProductionLegacyBrowserObservation,productionLegacyFrontendBuild} from '../../scripts/lib/production-legacy-browser-artifacts.mjs';
-const original=JSON.parse(fs.readFileSync(new URL('../../reports/qa/production-legacy-browser-readonly-edfedc2663e44683bee2067f502602af.json',import.meta.url)));
+const original=JSON.parse(fs.readFileSync('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp/reports/qa/production-legacy-browser-readonly-edfedc2663e44683bee2067f502602af.json'));
 test('actual uninstrumented production native BUILD_ID is retained without changing its meaning',()=>{
  const actual=validateProductionLegacyBrowserObservation(original);assert.equal(actual.browser.buildId,productionLegacyFrontendBuild);assert.equal(actual.browser.assets.length,269);assert.deepEqual(actual.frontend.mounts,[]);
 });

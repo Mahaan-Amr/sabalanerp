@@ -1,0 +1,487 @@
+{
+  "model": {
+    "name": "sabalanerp-local",
+    "services": {
+      "inquiry": {
+        "build": {
+          "context": "/fixture",
+          "dockerfile": "Dockerfile"
+        },
+        "cpus": 1,
+        "command": [
+          "/app/local-inquiry-preservation-carrier.cjs"
+        ],
+        "entrypoint": [
+          "/usr/local/bin/node"
+        ],
+        "environment": {
+          "ADMIN_EMAIL": "fixture",
+          "ADMIN_PASSWORD": "fixture",
+          "DATABASE_URL": "fixture",
+          "NEXT_TELEMETRY_DISABLED": "fixture",
+          "NODE_ENV": "fixture",
+          "NODE_VERSION": "fixture",
+          "PATH": "fixture",
+          "PORT": "fixture",
+          "RECOVERY_COORDINATION_DIR": "fixture",
+          "SESSION_SECRET": "fixture",
+          "YARN_VERSION": "fixture"
+        },
+        "hostname": "6d161695e215",
+        "healthcheck": {
+          "test": [
+            "CMD",
+            "/usr/local/bin/node",
+            "/app/local-inquiry-preservation-carrier.cjs",
+            "health"
+          ],
+          "timeout": "15s",
+          "interval": "5s",
+          "retries": 3,
+          "start_period": "5s"
+        },
+        "image": "sha256:da12a363ef8fcbb46df2fa29066b4302b21fc861fea32a676886716ee5bb6f84",
+        "logging": {
+          "driver": "local",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "536870912",
+        "networks": {
+          "default": null
+        },
+        "ports": [
+          {
+            "mode": "ingress",
+            "host_ip": "127.0.0.1",
+            "target": 3001,
+            "published": "3001",
+            "protocol": "tcp"
+          }
+        ],
+        "restart": "unless-stopped",
+        "stop_grace_period": "30s",
+        "volumes": [
+          {
+            "type": "volume",
+            "source": "inquiry_data",
+            "target": "/data",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "recovery_coordination",
+            "target": "/app/recovery-coordination",
+            "volume": {}
+          }
+        ],
+        "working_dir": "/app"
+      }
+    },
+    "networks": {
+      "default": {
+        "name": "sabalanerp-local_default",
+        "ipam": {}
+      }
+    },
+    "volumes": {
+      "inquiry_data": {
+        "name": "sabalanerp-local_inquiry_data"
+      },
+      "recovery_coordination": {
+        "name": "sabalanerp-local_recovery_coordination"
+      }
+    }
+  },
+  "container": {
+    "Id": "ef1cead72877dca6ad5764cd1802fb9ad3f1501459040046ae19852f872337c3",
+    "Created": "2026-10-26T11:19:09.152643266Z",
+    "Path": "/usr/local/bin/node",
+    "Args": [
+      "/app/local-inquiry-preservation-carrier.cjs"
+    ],
+    "State": {
+      "Running": true,
+      "StartedAt": "2026-10-26T11:19:10.330593246Z",
+      "Health": {
+        "Status": "healthy"
+      }
+    },
+    "Image": "sha256:da12a363ef8fcbb46df2fa29066b4302b21fc861fea32a676886716ee5bb6f84",
+    "ResolvConfPath": "/var/lib/docker/containers/ef1cead72877dca6ad5764cd1802fb9ad3f1501459040046ae19852f872337c3/resolv.conf",
+    "HostnamePath": "/var/lib/docker/containers/ef1cead72877dca6ad5764cd1802fb9ad3f1501459040046ae19852f872337c3/hostname",
+    "HostsPath": "/var/lib/docker/containers/ef1cead72877dca6ad5764cd1802fb9ad3f1501459040046ae19852f872337c3/hosts",
+    "LogPath": "",
+    "Name": "/sabalanerp-local-inquiry-1",
+    "RestartCount": 0,
+    "Driver": "overlayfs",
+    "Platform": "linux",
+    "MountLabel": "",
+    "ProcessLabel": "",
+    "AppArmorProfile": "",
+    "ExecIDs": null,
+    "HostConfig": {
+      "Binds": [
+        "sabalanerp-local_inquiry_data:/data:ro",
+        "sabalanerp-local_recovery_coordination:/app/recovery-coordination:rw"
+      ],
+      "ContainerIDFile": "",
+      "LogConfig": {
+        "Type": "local",
+        "Config": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "NetworkMode": "sabalanerp-local_default",
+      "PortBindings": {
+        "3001/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "3001"
+          }
+        ]
+      },
+      "RestartPolicy": {
+        "Name": "unless-stopped",
+        "MaximumRetryCount": 0
+      },
+      "AutoRemove": false,
+      "VolumeDriver": "",
+      "VolumesFrom": null,
+      "ConsoleSize": [
+        0,
+        0
+      ],
+      "CapAdd": null,
+      "CapDrop": null,
+      "CgroupnsMode": "private",
+      "Dns": null,
+      "DnsOptions": null,
+      "DnsSearch": null,
+      "ExtraHosts": [],
+      "GroupAdd": null,
+      "IpcMode": "private",
+      "Cgroup": "",
+      "Links": null,
+      "OomScoreAdj": 0,
+      "PidMode": "",
+      "Privileged": false,
+      "PublishAllPorts": false,
+      "ReadonlyRootfs": false,
+      "SecurityOpt": null,
+      "UTSMode": "",
+      "UsernsMode": "",
+      "ShmSize": 67108864,
+      "Runtime": "runc",
+      "Isolation": "",
+      "CpuShares": 0,
+      "Memory": 536870912,
+      "NanoCpus": 1000000000,
+      "CgroupParent": "",
+      "BlkioWeight": 0,
+      "BlkioWeightDevice": null,
+      "BlkioDeviceReadBps": null,
+      "BlkioDeviceWriteBps": null,
+      "BlkioDeviceReadIOps": null,
+      "BlkioDeviceWriteIOps": null,
+      "CpuPeriod": 0,
+      "CpuQuota": 0,
+      "CpuRealtimePeriod": 0,
+      "CpuRealtimeRuntime": 0,
+      "CpusetCpus": "",
+      "CpusetMems": "",
+      "Devices": null,
+      "DeviceCgroupRules": null,
+      "DeviceRequests": null,
+      "MemoryReservation": 0,
+      "MemorySwap": 1073741824,
+      "MemorySwappiness": null,
+      "OomKillDisable": null,
+      "PidsLimit": null,
+      "Ulimits": null,
+      "CpuCount": 0,
+      "CpuPercent": 0,
+      "IOMaximumIOps": 0,
+      "IOMaximumBandwidth": 0,
+      "MaskedPaths": [
+        "/proc/acpi",
+        "/proc/asound",
+        "/proc/interrupts",
+        "/proc/kcore",
+        "/proc/keys",
+        "/proc/latency_stats",
+        "/proc/sched_debug",
+        "/proc/scsi",
+        "/proc/timer_list",
+        "/proc/timer_stats",
+        "/sys/devices/virtual/powercap",
+        "/sys/firmware"
+      ],
+      "ReadonlyPaths": [
+        "/proc/bus",
+        "/proc/fs",
+        "/proc/irq",
+        "/proc/sys",
+        "/proc/sysrq-trigger"
+      ]
+    },
+    "Storage": {
+      "RootFS": {
+        "Snapshot": {
+          "Name": "overlayfs"
+        }
+      }
+    },
+    "Mounts": [
+      {
+        "Type": "volume",
+        "Name": "sabalanerp-local_inquiry_data",
+        "Source": "/var/lib/docker/volumes/sabalanerp-local_inquiry_data/_data",
+        "Destination": "/data",
+        "Driver": "local",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": ""
+      },
+      {
+        "Type": "volume",
+        "Name": "sabalanerp-local_recovery_coordination",
+        "Source": "/var/lib/docker/volumes/sabalanerp-local_recovery_coordination/_data",
+        "Destination": "/app/recovery-coordination",
+        "Driver": "local",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": ""
+      }
+    ],
+    "Config": {
+      "Hostname": "6d161695e215",
+      "Domainname": "",
+      "User": "",
+      "AttachStdin": false,
+      "AttachStdout": true,
+      "AttachStderr": true,
+      "ExposedPorts": {
+        "3001/tcp": {}
+      },
+      "Tty": false,
+      "OpenStdin": false,
+      "StdinOnce": false,
+      "Env": [
+        "DATABASE_URL=fixture",
+        "PATH=fixture",
+        "ADMIN_EMAIL=fixture",
+        "RECOVERY_COORDINATION_DIR=fixture",
+        "PORT=fixture",
+        "NODE_ENV=fixture",
+        "SESSION_SECRET=fixture",
+        "NEXT_TELEMETRY_DISABLED=fixture",
+        "NODE_VERSION=fixture",
+        "ADMIN_PASSWORD=fixture",
+        "YARN_VERSION=fixture"
+      ],
+      "Cmd": [
+        "/app/local-inquiry-preservation-carrier.cjs"
+      ],
+      "Healthcheck": {
+        "Test": [
+          "CMD",
+          "/usr/local/bin/node",
+          "/app/local-inquiry-preservation-carrier.cjs",
+          "health"
+        ],
+        "Interval": 5000000000,
+        "Timeout": 15000000000,
+        "StartPeriod": 5000000000,
+        "Retries": 3
+      },
+      "Image": "sha256:da12a363ef8fcbb46df2fa29066b4302b21fc861fea32a676886716ee5bb6f84",
+      "Volumes": null,
+      "WorkingDir": "/app",
+      "Entrypoint": [
+        "/usr/local/bin/node"
+      ],
+      "Labels": {
+        "com.docker.compose.config-hash": "6a0c1a9ef1ce44a15d4fd127d96eb2ae2be757d937ad0e7d436474decc879cc8",
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "",
+        "com.docker.compose.image": "sha256:859cb0212acf458d21fb9ba1cf30ec734775a01e073b9d8b44a15375637b43e5",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "sabalanerp-local",
+        "com.docker.compose.project.config_files": "D:\\sabalanerp\\docker-compose.local.yml,D:\\sabalanerp-online-qa\\issue419-inquiry-selection-a3a7aa1b5bcfbb58e69ee66a15474612\\rollback.compose.json,D:\\sabalanerp-online-qa\\inquiry-preservation-up-45a3abee3a6e0b70b514371147a58873\\forward.compose.json",
+        "com.docker.compose.project.working_dir": "D:\\sabalanerp",
+        "com.docker.compose.replace": "inquiry-1",
+        "com.docker.compose.service": "inquiry",
+        "com.docker.compose.version": "5.5.1",
+        "io.sabalan.carrier.role": "local-preservation-only",
+        "io.sabalan.online-qa": "inquiry-native-actions",
+        "io.sabalan.online-qa.archive-sha256": "f038fe95a7664b9af67ee060921a6b76aa499783b6ce0c01a316ebc3ae60792c",
+        "io.sabalan.performance.source-commit": "unattested",
+        "io.sabalan.performance.source-hash": "unattested"
+      },
+      "StopTimeout": 30
+    },
+    "NetworkSettings": {
+      "SandboxID": "31733f4648bdc8d8b85722f9a757c2182dcc8ba4672f1ea332851b201caf1d16",
+      "SandboxKey": "/var/run/docker/netns/31733f4648bd",
+      "Ports": {
+        "3001/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "3001"
+          }
+        ]
+      },
+      "Networks": {
+        "sabalanerp-local_default": {
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": [
+            "sabalanerp-local-inquiry-1",
+            "inquiry"
+          ],
+          "DriverOpts": null,
+          "GwPriority": 0,
+          "NetworkID": "0b1f506dadbca25b7134bb22f825b6d3e752bfe17673ddbabca727ed1db710e0",
+          "EndpointID": "d711b0fc731a5cd11b3d2c289ba247f402c4eaf70fd9d1494ad6528e80091a2f",
+          "Gateway": "172.18.0.1",
+          "IPAddress": "172.18.0.7",
+          "MacAddress": "4e:5b:65:c6:e5:86",
+          "IPPrefixLen": 16,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": [
+            "sabalanerp-local-inquiry-1",
+            "inquiry",
+            "ef1cead72877",
+            "6d161695e215"
+          ]
+        }
+      }
+    },
+    "ImageManifestDescriptor": {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:859cb0212acf458d21fb9ba1cf30ec734775a01e073b9d8b44a15375637b43e5",
+      "size": 6179,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    }
+  },
+  "image": {
+    "Id": "sha256:da12a363ef8fcbb46df2fa29066b4302b21fc861fea32a676886716ee5bb6f84",
+    "RepoTags": [
+      "sabalanerp-inquiry-preservation:651552eec55a98fb321995b20f92b4ef"
+    ],
+    "RepoDigests": [
+      "sabalanerp-inquiry-preservation@sha256:da12a363ef8fcbb46df2fa29066b4302b21fc861fea32a676886716ee5bb6f84"
+    ],
+    "Comment": "buildkit.dockerfile.v0",
+    "Created": "2026-10-26T10:23:09.395997339Z",
+    "Config": {
+      "ExposedPorts": {
+        "3001/tcp": {}
+      },
+      "Env": [
+        "PATH=fixture",
+        "NODE_VERSION=fixture",
+        "YARN_VERSION=fixture",
+        "NODE_ENV=fixture",
+        "NEXT_TELEMETRY_DISABLED=fixture",
+        "PORT=fixture"
+      ],
+      "Entrypoint": [
+        "docker-entrypoint.sh"
+      ],
+      "Cmd": [
+        "node",
+        "/app/local-inquiry-preservation-carrier.cjs"
+      ],
+      "WorkingDir": "/app",
+      "Labels": {
+        "com.docker.compose.project": "sabalanerp-local",
+        "com.docker.compose.service": "inquiry",
+        "com.docker.compose.version": "5.5.1",
+        "io.sabalan.carrier.role": "local-preservation-only",
+        "io.sabalan.online-qa": "inquiry-native-actions",
+        "io.sabalan.online-qa.archive-sha256": "f038fe95a7664b9af67ee060921a6b76aa499783b6ce0c01a316ebc3ae60792c",
+        "io.sabalan.performance.source-commit": "unattested",
+        "io.sabalan.performance.source-hash": "unattested"
+      },
+      "ArgsEscaped": true,
+      "Healthcheck": {
+        "Test": [
+          "CMD",
+          "node",
+          "/app/local-inquiry-preservation-carrier.cjs",
+          "health"
+        ],
+        "Interval": 5000000000,
+        "Timeout": 15000000000,
+        "StartPeriod": 5000000000,
+        "Retries": 3
+      }
+    },
+    "Architecture": "amd64",
+    "Os": "linux",
+    "Size": 1759241461,
+    "RootFS": {
+      "Type": "layers",
+      "Layers": [
+        "sha256:0da811fd3ed46c38cea69079fa395a3d715dbdbdd5c8177107c450bf6332bbfa",
+        "sha256:4337a9b79b842bfe58037ff8e3040c28e8e3366009befe7bc70694869e6ad9a1",
+        "sha256:631e9f799a80c48d29ea547226d4c97b5c4e4698baadbae796fbcb67b1cbdcba",
+        "sha256:f991bccee0f1f8f692280d0e1f83f48001576c08d33c53d6a1463d5062a6ff18",
+        "sha256:d592f6b23cfaeb0a7d534376e0d4a3a32255df78a9feda01e3a6a015bada66d5",
+        "sha256:dd76d5ba6288c7cd80155b22bea2c6acc390a05cade0b987b0228a30ed2a648f",
+        "sha256:f8de8b500fa06a9a176257dabdfbb12a885f4519f9682a178c7eeed88124ff25",
+        "sha256:f80b13975d6b26d7041986643eaedb3d4dce8545baac6b84e7d4f1b4c8ee1e0b",
+        "sha256:2663e5dcfd1493ba84dfc89bb55cbe738316d200db2f03d274af8969ee9ca4f1",
+        "sha256:9bf37120808cf7ef923137e39c988a31ace8271f748a7faffe9ebdd50d5c7eaf",
+        "sha256:c780de2e1c379e16b58c6a0856cec35cc2ac5f8f398f5506bef6599c2ca864ed",
+        "sha256:b12902035a0286f5c649d15cf3490a1055d28419cd0213ded91f3cd80c570164",
+        "sha256:9ac26237c97596b4e990333b8c7fb386420776e21cd38fad056e74a9fd94a52c",
+        "sha256:067433e96ea6453143b5f88359b3fd644c57dc3da4529bf3f19523af238126c4",
+        "sha256:403d80b17182f807b4622688cd471a8208d0606304c7e1ed0537702f4182fb44",
+        "sha256:50500c9a8f3be686ad92b6e71fe1716d78cc6f93ad3c07bf5c3d4d6b4aeafecd",
+        "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+        "sha256:820333305432a2103c827e8f8cfd7dcaee593dc55527392db1f72b76531065c3",
+        "sha256:47c6f52b43233a99c3d65998b7de418ba3d658203c9aedf75b61673db0e5bee9",
+        "sha256:3a7b18be4329ced70103ba4ffa71594a0e3d75b394a83dabc6b04af3884e1dbd",
+        "sha256:56e9621203b836c6c310eb0aa364d6d7570ce48511abf8d8298e12cb84083b5b",
+        "sha256:1a1c629fc6f7df833a43c2a83e31cc9909638db189ce19b2358f555bd51a298b",
+        "sha256:d26dd36e41ed29770cfc14b484ed877f400368f055049ed5642c0a8b41a698f8",
+        "sha256:4e58a788026cc3840d0fb4b33f8bb42a6e8c9aa46777e2afa57852b5a71f5ee5",
+        "sha256:d591e805b53b8b39d1c855dd72df6ebf4176cec8c65ac7bf22d1ae6bad21c774",
+        "sha256:4a8069968a0896ee68d2475c73d0aa3888e6b0f780cfb1f03fadfd30cfcd321f",
+        "sha256:552fd4964384939481b5ea0f4e3784d8eede1bb7671c754621084926ddd0b910",
+        "sha256:0e980412870273db25f5269f36cd6aa6d3636004c13dd4382082aee463479064",
+        "sha256:db770c15a3f500af0dce3a4ca5e00f02ffeac3f628a1efa7d8bc8898664572a4",
+        "sha256:ac43cac056162bad1d01d3873ef39715fec1dea50e01088d28e395051aa05e00",
+        "sha256:625ca60a8d74fbfd1261bf82809a81d5bf157c1e293b84d984eb5537396cea82"
+      ]
+    },
+    "Metadata": {
+      "LastTagTime": "2026-10-26T10:23:09.6541693Z"
+    },
+    "Descriptor": {
+      "mediaType": "application/vnd.oci.image.index.v1+json",
+      "digest": "sha256:da12a363ef8fcbb46df2fa29066b4302b21fc861fea32a676886716ee5bb6f84",
+      "size": 856
+    },
+    "Identity": {
+      "Build": [
+        {
+          "Ref": "a2ah18itv0frueljo7bbw7zi3",
+          "CreatedAt": "2026-10-26T10:23:09.763584894Z"
+        }
+      ]
+    }
+  }
+}

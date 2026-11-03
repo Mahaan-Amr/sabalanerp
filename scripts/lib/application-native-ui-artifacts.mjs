@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {frozenUiRepackagingFormat,assertFrozenUiRepackaging} from './frozen-ui-repackaging.mjs';
 import {qualifiedFrontendRuntimeBase} from './production-frontend-base-artifacts.mjs';
+import {nativeHistoricalFile} from './frozen-native-history.mjs';
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const read=file=>{const raw=fs.readFileSync(file);return {raw,value:JSON.parse(raw.toString('utf8')),sha256:sha(raw)};};
 const points={
@@ -32,7 +33,7 @@ export function collectApplicationUiArtifacts({root,capture,containers,inspectIm
       const base=qualifiedFrontendRuntimeBase(root,material.source.runtimeBase.receipt);
       assert.deepEqual(base,material.source.runtimeBase);assert.equal(base.baseImage,material.source.baseImage);
       capture('reports/qa/'+base.receipt);capture('reports/qa/'+base.source.transferReceipt);capture('reports/qa/'+base.source.exportReceipt);
-      const baseReceipt=JSON.parse(fs.readFileSync(path.join(root,'reports/qa',base.receipt)));
+      const baseReceipt=JSON.parse(fs.readFileSync(nativeHistoricalFile(root,'reports/qa/'+base.receipt)));
       if(baseReceipt.originalFailedImportReceipt)capture('reports/qa/'+baseReceipt.originalFailedImportReceipt);
     }
     assert.equal(image.phase,'COMPLETE');assert.equal(image.pass,true);assert.equal(image.imageQualified,true);

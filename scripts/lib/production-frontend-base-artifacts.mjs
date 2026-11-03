@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {nativeHistoricalFile} from './frozen-native-history.mjs';
 
 export const productionFrontendConfig = 'sha256:55ae5c9b07716b503c6b941755003afa9fca983cb4d4fe49540ddf3af4831046';
 const transferName = 'production-frontend-base-transfer-c37071ab25dc45f4b708872172fdf8a0.json';
@@ -30,7 +31,7 @@ export function stableFrontendBaseFile(file, limit = 1024 * 1024 ** 2) {
 export function qualifiedProductionFrontendArchive(repository, snapshotSelection=null) {
   if(snapshotSelection){assert.deepEqual(Object.keys(snapshotSelection).sort(),['file','sha256']);const measured=readMeasuredFrontendSnapshot(fs.realpathSync(snapshotSelection.file),snapshotSelection.sha256),source=measured.source,archive=fs.realpathSync(source.archive),proof=inspectPrivateDockerArchive(archive,source.sourceIndex);assert.deepEqual(proof,measured.packet.archive.proof);const archiveFile=stableFrontendBaseFile(archive);assert.equal(archiveFile.sha256,proof.archiveSha256);return{archive,archiveFile,configIdentity:source.configIdentity,sourceIndex:source.sourceIndex,sourcePlatform:source.sourcePlatform,layers:source.layers,snapshotSelection:{file:fs.realpathSync(snapshotSelection.file),sha256:snapshotSelection.sha256},sourceSnapshot:measured.browser.sourceSnapshot};}
 
-  const transferPath = path.join(repository,'reports/qa',transferName), exportPath = path.join(repository,'reports/qa',exportName);
+  const transferPath = nativeHistoricalFile(repository,'reports/qa/'+transferName), exportPath = nativeHistoricalFile(repository,'reports/qa/'+exportName);
   const transferFile = stableFrontendBaseFile(transferPath,4*1024**2), exportFile = stableFrontendBaseFile(exportPath,4*1024**2);
   const transfer = JSON.parse(fs.readFileSync(transferPath)), exported = JSON.parse(fs.readFileSync(exportPath));
   assert.equal(transfer.pass,true); assert.equal(transfer.scpExitCode,0); assert.equal(transfer.sourceExportReceipt,exportName);
@@ -57,7 +58,7 @@ export function qualifiedProductionFrontendArchive(repository, snapshotSelection
 
 export function qualifiedFrontendRuntimeBase(repository, receiptName) {
   assert.match(receiptName,/^production-frontend-base-local-[a-f0-9]{32}\.json$/);
-  const file = path.join(repository,'reports/qa',receiptName), receiptFile = stableFrontendBaseFile(file,4*1024**2);
+  const file = nativeHistoricalFile(repository,'reports/qa/'+receiptName), receiptFile = stableFrontendBaseFile(file,4*1024**2);
   const receipt = JSON.parse(fs.readFileSync(file));
   assert.ok(['sabalan-production-frontend-base-local/v1','sabalan-production-frontend-engine-base-local/v1'].includes(receipt.format)); assert.equal(receipt.phase,'COMPLETE');
   assert.equal(receipt.pass,true); assert.equal(receipt.load.code,0); assert.equal(receipt.load.signal,null);
@@ -68,7 +69,7 @@ export function qualifiedFrontendRuntimeBase(repository, receiptName) {
     assert.equal(receipt.originalRequestedConfigIdentityFailed,true);assert.equal(receipt.noNewLoadExecuted,true);
     assert.equal(receipt.sourceConfigIdentity,source.configIdentity);assert.equal(receipt.engineImageIdentity,source.sourceIndex);
     baseImage=source.sourceIndex;
-    const priorPath=path.join(repository,'reports/qa',receipt.originalFailedImportReceipt);
+    const priorPath=nativeHistoricalFile(repository,'reports/qa/'+receipt.originalFailedImportReceipt);
     assert.equal(receipt.originalFailedImportReceipt,'production-frontend-base-local-bee8adabf607c7e5eba735f328612750.json');
     assert.deepEqual(stableFrontendBaseFile(priorPath,4*1024**2),receipt.originalFailedImportReceiptFile);
     const prior=JSON.parse(fs.readFileSync(priorPath));assert.equal(prior.pass,false);assert.deepEqual(prior.load,receipt.load);

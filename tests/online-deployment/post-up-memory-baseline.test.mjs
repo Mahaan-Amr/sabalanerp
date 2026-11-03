@@ -5,16 +5,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import vm from 'node:vm';
+import vm from 'node:vm';import{createRequire}from'node:module';const ts=createRequire(new URL('../../backend/package.json',import.meta.url))('typescript');
 import { pathToFileURL } from 'node:url';
 const R = 'C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp';
 const packet = path.resolve(import.meta.dirname, '../..');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'post-up-pure-unit-'));
 const sha = b => createHash('sha256').update(b).digest('hex');
 function copy(relative) { const dest = path.join(temp, relative); if (fs.existsSync(dest))
-    return; const source = fs.existsSync(path.join(packet, relative)) ? path.join(packet, relative) : path.join(R, relative); const bytes = fs.readFileSync(source); fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, bytes); const text = bytes.toString(); for (const m of text.matchAll(/(?:from\s*|import\s*)['"](\.[^'"]+\.mjs)['"]/g)) {
-    copy(path.posix.normalize(path.posix.join(path.posix.dirname(relative), m[1])));
-} }
+    return; const source = fs.existsSync(path.join(packet, relative)) ? path.join(packet, relative) : path.join(R, relative); const bytes = fs.readFileSync(source); fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, bytes); const text = bytes.toString(); const tree=ts.createSourceFile(relative,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);const follow=value=>{if(value?.startsWith('.')&&/\.(?:mjs|cjs|js|json)$/.test(value))copy(path.posix.normalize(path.posix.join(path.posix.dirname(relative),value)));};const visit=n=>{if((ts.isImportDeclaration(n)||ts.isExportDeclaration(n))&&n.moduleSpecifier&&ts.isStringLiteral(n.moduleSpecifier))follow(n.moduleSpecifier.text);if(ts.isCallExpression(n)&&n.arguments.length&&ts.isStringLiteral(n.arguments[0])&&(n.expression.kind===ts.SyntaxKind.ImportKeyword||ts.isIdentifier(n.expression)&&n.expression.text==='require'||ts.isCallExpression(n.expression)&&ts.isIdentifier(n.expression.expression)&&n.expression.expression.text==='createRequire'))follow(n.arguments[0].text);ts.forEachChild(n,visit);};visit(tree);
+}
+copy('scripts/lib/frozen-native-history.json');
 copy('scripts/lib/application-native-post-up-memory-baseline.mjs');
 copy('scripts/replace-qualified-application-native-candidate-local.mjs');
 copy('scripts/lib/application-native-qa-memory.mjs');

@@ -1,0 +1,19 @@
+/** Post-LOCAL live plan seal. A file-only rendered plan/report cannot enter the
+ * private registry or supply LOCAL/lease ownership. No key/credential read. */
+import assert from'node:assert/strict';import path from'node:path';import net from'node:net';import{randomBytes}from'node:crypto';
+import{assertOriginalCandidateRollbackOwner,readOriginalCompleteConstruction}from'./original-candidate-rollback-owner.mjs';import{readOriginalRoleQualificationCompletion}from'./application-native-role-coordinator.mjs';
+import{collectOriginalCompleteProductionInputs,readOriginalCompleteProductionInputs}from'./original-complete-production-inputs.mjs';import{readOriginalCompleteConstructorPackage}from'./original-complete-constructor-package.mjs';import{renderOriginalCompleteRuntimePlan}from'./original-complete-runtime-plan.mjs';
+import{prepareOriginalPrivateEvidenceDirectory,assertOriginalPrivateEvidenceDirectory}from'./original-private-evidence-directory.mjs';
+const plans=new WeakMap();
+async function unusedPort(){const server=net.createServer();await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});const port=server.address().port;await new Promise(resolve=>server.close(resolve));return port;}
+export function readOriginalConstructedCompletePlan(token,owner,completion){const value=plans.get(token);assert.ok(value&&value.owner===owner&&value.completion===completion,'ORIGINAL_COMPLETE_CONSTRUCTED_PLAN_REQUIRED');value.revalidate();return value;}
+export async function constructOriginalCompleteRuntime({configurationReference,nativeOwner,localCompletion}){
+ assertOriginalCandidateRollbackOwner(nativeOwner);const local=readOriginalRoleQualificationCompletion(localCompletion);assert.equal(local.localQualificationMode,'PROTECTED_COMPLETE');await nativeOwner.assertCompleteCurrent();const pkg=readOriginalCompleteConstructorPackage(configurationReference);
+ const productionToken=await collectOriginalCompleteProductionInputs(nativeOwner),production=readOriginalCompleteProductionInputs(productionToken,nativeOwner),operation=randomBytes(16).toString('hex');assert.equal(production.value.beforeLocal,false,'POST_LOCAL_PRODUCTION_OBSERVATION_REQUIRED');
+ const construction=await nativeOwner.collectCompleteConstruction(operation,{backend:pkg.loaded.refs.backendArchive,inquiry:pkg.loaded.refs.inquiryArchive}),current=readOriginalCompleteConstruction(construction,nativeOwner,localCompletion);
+ const directory=path.join(nativeOwner.directory,'complete-plan-'+operation),auditDirectory=path.join(nativeOwner.directory,'complete-run-'+operation),custody=await prepareOriginalPrivateEvidenceDirectory(directory),auditCustody=await prepareOriginalPrivateEvidenceDirectory(auditDirectory);
+ const ports={issuer:await unusedPort(),reader:await unusedPort(),inquiry:await unusedPort()};assert.equal(new Set(Object.values(ports)).size,3,'COMPLETE_PORT_SELECTION_COLLISION');
+ const guard=async()=>{assertOriginalCandidateRollbackOwner(nativeOwner);await current.revalidate();production.revalidate();pkg.revalidate();assertOriginalPrivateEvidenceDirectory(custody,directory);assertOriginalPrivateEvidenceDirectory(auditCustody,auditDirectory);};
+ const rendered=await renderOriginalCompleteRuntimePlan({loaded:pkg.loaded,context:current.body,production:production.value,operation,ports,directory,auditDirectory,assertCurrent:guard});await guard();rendered.revalidate();
+ const token=Object.freeze({});plans.set(token,{owner:nativeOwner,completion:localCompletion,...rendered,auditCustody,revalidate(){assertOriginalCandidateRollbackOwner(nativeOwner);pkg.revalidate();production.revalidate();rendered.revalidate();assertOriginalPrivateEvidenceDirectory(custody,directory);assertOriginalPrivateEvidenceDirectory(auditCustody,auditDirectory);},assertCurrent:guard});return token;
+}

@@ -1,0 +1,60 @@
+import {spawn} from 'node:child_process';
+import {randomBytes,createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+import {retainOriginalHrChannel,need} from './protocol.mjs';
+const BOUND_SOURCE_INPUTS=null;
+const requests=new WeakMap();
+const closedFinancialRequests=new WeakMap();
+const digest=v=>createHash('sha256').update(v).digest('hex');
+/** Reader grants nothing to JSON/PIDs/copies; tickets never leave this process. */
+export function readOriginalActiveHrRequest(ticket){
+ const s=requests.get(ticket);need(s&&s.active&&s.live()&&!s.consumed,'HR_LIVE_ORIGINAL_REQUEST_REQUIRED');
+ s.consumed=true;return {request:structuredClone(s.request),authority:s.authority,revalidate:()=>need(s.active&&s.live(),'HR_CALLBACK_NO_LONGER_ACTIVE')};
+}
+/** Only the actual SAME original controller's one-use closed ticket can reach
+ * the financial signer. JSON/PID/receipt copies never enroll in this map. */
+export function readOriginalClosedFinancialRequest(ticket){
+ const s=closedFinancialRequests.get(ticket);need(s&&s.active&&!s.consumed,'FINANCIAL_CLOSED_ORIGINAL_REQUIRED');s.revalidate();s.consumed=true;
+ return {binding:s.binding,artifacts:s.artifacts,verify:s.verify,revalidate:s.revalidate};
+}
+function frozen(value){if(value&&typeof value==='object'){for(const v of Object.values(value))frozen(v);Object.freeze(value);}return value;}
+function closedOriginal(child,row){
+ need(child.pid===row.originalPid&&child.exitCode===0&&child.signalCode===null&&!child.killed&&child.stdout.readableEnded&&child.stderr.readableEnded&&child.stdin.writableFinished
+  &&row.code===0&&row.signal===null&&row.stdoutEof===true&&row.stderrEof===true&&row.observationFault===false&&row.localInterrupted===false&&row.callbackDrained===true,'FINANCIAL_SAME_ORIGINAL_NOT_CLOSED');
+}
+async function runBoundController(){
+ need(BOUND_SOURCE_INPUTS,'HR_CONTROLLER_SOURCE_BINDING_REQUIRED');
+ // A reviewed immutable successor must fill literal executable/argv/material,
+ // source-A checkpoint/query and exact Linux entry bindings. No CLI overrides.
+ const b=BOUND_SOURCE_INPUTS;await b.authenticate();
+ const session=randomBytes(32).toString('hex');
+ const secret=[];let size=0;for await(const raw of process.stdin){size+=raw.length;need(size<=12*1024*1024);secret.push(raw);}
+ const initial=Buffer.concat(secret);need(initial.length>0);const secretFrame=JSON.parse(initial.toString('utf8'));
+ const {issueOriginalRestoredQaHrCertificate,issueOriginalClosedFinancialCertificate}=await import('./fixed-issuer.mjs');
+ const child=spawn(b.executable,b.argv,{shell:false,windowsHide:true,stdio:['pipe','pipe','pipe'],env:b.environment});
+ let closure;try{const row=await retainOriginalHrChannel(child,{session,observeRaw:b.observeOriginalRaw,observe:async row=>{closure=await b.persistOriginalChildClosure(row);},initial:Buffer.from(JSON.stringify({...secretFrame,hrSession:session})),onRequest:async(request,live)=>{
+   const token=Object.freeze({});const s={active:true,consumed:false,request,authority:b.authorityForOriginalCallback(request),live};requests.set(token,s);
+   try{return await issueOriginalRestoredQaHrCertificate(token);}finally{s.active=false;requests.delete(token);}
+ }});
+  const result=formatOriginalHrResult(row,closure);closedOriginal(child,row);const rowHash=digest(JSON.stringify(row)),material=await b.financialArtifactsForOriginal(row,closure);
+  need(material&&typeof material.revalidate==='function');material.revalidate();closedOriginal(child,row);need(rowHash===digest(JSON.stringify(row)));
+  const binding=frozen(structuredClone(material.binding)),artifacts=Object.fromEntries(Object.entries(material.artifacts).map(([k,v])=>{need(Buffer.isBuffer(v));return[k,Buffer.from(v)];})),pins=Object.fromEntries(Object.entries(artifacts).map(([k,v])=>[k,digest(v)]));
+  const verify=await b.loadPinnedFinancialVerifier();need(typeof verify==='function');
+  const ticket=Object.freeze({}),state={active:true,consumed:false,binding,artifacts,verify,revalidate(){need(state.active);closedOriginal(child,row);need(rowHash===digest(JSON.stringify(row)));for(const [k,v]of Object.entries(artifacts))need(digest(v)===pins[k]);material.revalidate();}};closedFinancialRequests.set(ticket,state);
+  try{const certificate=await issueOriginalClosedFinancialCertificate(ticket);state.revalidate();
+   const publishedArtifacts={...artifacts,certificate};const source={format:'sabalan-protected-financial-qualification/v1',qualificationComplete:true,productionAdmission:false,evidence:Object.fromEntries(Object.entries(publishedArtifacts).map(([name,raw])=>[name,{file:'protected-financial-'+name.toLowerCase()+'.json',bytes:raw.length,sha256:digest(raw)}]))};
+   const raw=Buffer.from(JSON.stringify(source)+'\n'),ref=await b.persistFinancialQualification(raw,binding,publishedArtifacts);state.revalidate();need(ref&&typeof ref.file==='string'&&ref.file.length>0&&ref.sha256===digest(raw));
+   return {...result,protectedFinancialQualification:{...ref,binding}};
+  }finally{state.active=false;closedFinancialRequests.delete(ticket);}
+ }finally{initial.fill(0);for(const raw of secret)raw.fill(0);}
+}
+/** Data formatting only: not a completion token or signer authority. */
+export function formatOriginalHrResult(row,closure){
+ need(row&&row.code===0&&row.signal===null&&row.stdoutEof===true&&row.stderrEof===true&&row.callbackDrained===true&&row.localInterrupted===false&&row.observationFault===false&&row.result&&typeof row.result==='object');
+ need(Number.isSafeInteger(row.originalPid)&&row.originalPid>0&&[row.stdoutBytes,row.stderrBytes].every(v=>Number.isSafeInteger(v)&&v>=0)&&[row.stdoutSha256,row.stderrSha256,closure?.sha256].every(v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v))&&typeof closure.file==='string'&&closure.file.length>0);
+ const {result,...original}=row;const value={...result,originalRestoreControllerClosure:{format:'sabalan-original-restored-qa-docker-child/v1',...original,closure}};
+ need(Buffer.byteLength(JSON.stringify(value))<=8*1024*1024);return value;
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
+ runBoundController().then(value=>{process.stdout.write(JSON.stringify(value)+'\n');}).catch(()=>{process.stderr.write('HR_CONTROLLER_SOURCE_BINDING_REQUIRED_OR_ORIGINAL_FAILURE\n');process.exitCode=1;});
+}

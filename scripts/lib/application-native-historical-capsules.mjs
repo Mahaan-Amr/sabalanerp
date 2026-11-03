@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {nativeHistoricalFile} from './frozen-native-history.mjs';
 
 const volumeName='sabalanerp-local_online_runtime_acceptance';
 const roots=Object.freeze([
@@ -78,11 +79,11 @@ const inputs=Object.freeze({
 });
 
 export function historicalCapsuleInputFiles(repositoryRoot){
-  return Object.values(inputs).map(ref=>path.join(repositoryRoot,ref.file));
+  return Object.values(inputs).map(ref=>nativeHistoricalFile(repositoryRoot,ref.file));
 }
 
 /** Host-side constructor authenticates existing receipts/helpers; no caller paths. */
-export function historicalCapsulePreflightSpec(repositoryRoot,capture=file=>fs.readFileSync(path.join(repositoryRoot,file))){
+export function historicalCapsulePreflightSpec(repositoryRoot,capture=file=>fs.readFileSync(nativeHistoricalFile(repositoryRoot,file))){
   const bytes={};
   for(const [name,ref]of Object.entries(inputs)){
     const raw=capture(ref.file);assert.equal(sha(raw),ref.sha256,'HISTORICAL_CAPSULE_INPUT_CHANGED:'+ref.file);

@@ -14,8 +14,8 @@ function fixture(run){
   const put=(name,value,raw=false)=>{const file=fs.realpathSync(dir)+path.sep+name;fs.writeFileSync(file,raw?value:JSON.stringify(value));return{file,sha256:sha(fs.readFileSync(file))};};
   const origins=new Map(),ports={assert,fs,path,createHash,structuredClone,Object,JSON,Array,Buffer,negativeCapsuleFormat,candidateQaMemoryBytes:1536*MiB,expandedCandidateQaMemoryBytes:2048*MiB,retainedQaMemoryBytes:768*MiB,qaSwapBytes:1536*MiB,
    // Unit-only external verification ports; actual stable reads, branches and recursive rechecks execute unchanged.
-   validateQaMemoryTransitionReceipt:()=>{},readNegativeRecoveryHandoff:r=>origins.get(r.file),negativeRecoveryDescriptor:t=>t.descriptor,negativeRecoveryInputs:t=>t.inputs,validateNegativeRecoveryCreatedReceipt:()=>{}};
-  const body=source.replace(/^import .*;\r?\n/gm,'').replace(/^export /gm,'');
+   isKnownPositive752:()=>false,validateQaMemoryTransitionReceipt:()=>{},readNegativeRecoveryHandoff:r=>origins.get(r.file),negativeRecoveryDescriptor:t=>t.descriptor,negativeRecoveryInputs:t=>t.inputs,validateNegativeRecoveryCreatedReceipt:()=>{}};
+  const body=source.replace(/^import(?:\s|\{)[^\n]*;\r?\n/gm,'').replace(/^export /gm,'');
   const api=new Function(...Object.keys(ports),`${body};return {readExplicitQaMemoryProfile,readQaMemoryProfile,qaMemoryProfileInputs,qaMemoryProfileTransition,inspectUnitPin:(token,file)=>profiles.get(token).inputs.get(file)};`)(...Object.values(ports));
   const ids=n=>Object.fromEntries(roles.map((r,i)=>[r,{id:n+r,image:'image'+i,startedAt:n}]));
   const complete=n=>({format:'sabalan-application-native-candidate/v1',pass:true,phase:'COMPLETE',productionAdmission:false,up:{code:0,signal:null},originalChildren:{allOriginalChildrenClosed:true,interrupted:false},actual:Object.fromEntries(roles.map(r=>[r,{...ids(n)[r],memoryBytes:(r===roles[0]?2048:768)*MiB,memorySwapBytes:(r===roles[0]?2048:1536)*MiB}]))});

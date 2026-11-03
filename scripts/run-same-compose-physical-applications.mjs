@@ -1,0 +1,20 @@
+/** Fixed finite entry. The #413 binding supplies existing resources/ports only;
+ * the reviewed physical algorithm and report producer remain in #418. */
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+import {runSameComposePhysicalApplications} from './lib/same-compose-physical-applications.mjs';
+const sha=raw=>createHash('sha256').update(raw).digest('hex');
+assert.equal(process.argv.length,4);
+const raw=fs.readFileSync(process.argv[2]);assert.equal(sha(raw),process.argv[3]);
+const config=JSON.parse(raw);assert.equal(config.format,'sabalan-physical-applications-worker-binding/v1');
+assert.equal(fs.realpathSync(config.binding.file),config.binding.file);
+assert.equal(sha(fs.readFileSync(config.binding.file)),config.binding.sha256);
+const binding=await import(pathToFileURL(config.binding.file).href);
+assert.equal(typeof binding.bindExistingPhysicalApplicationPorts,'function');
+const ports=await binding.bindExistingPhysicalApplicationPorts(config.resources);
+const result=await runSameComposePhysicalApplications({input:config.input,ports});
+assert.equal(sha(fs.readFileSync(config.binding.file)),config.binding.sha256);
+assert.equal(sha(fs.readFileSync(process.argv[2])),process.argv[3]);
+process.stdout.write(JSON.stringify(result)+'\n');

@@ -1,0 +1,66 @@
+"""Private terminal data construction; only called by retained COMPLETE owner.
+No generic delete API: fixed fresh-cohort job and four newly made backup files.
+"""
+import json,pathlib,hashlib,re,base64
+def need(v):
+ if not v:raise AssertionError('STRICT_TERMINAL_CLEANUP_REFUSED')
+def sha(raw):return hashlib.sha256(raw).hexdigest()
+def pinned(ref,maximum=8*1024**2):
+ p=pathlib.Path(ref['file']);a=p.lstat();need(p.is_absolute()and p.resolve(strict=True)==p and p.is_file()and not p.is_symlink()and a.st_nlink==1 and 0<a.st_size<=maximum);raw=p.read_bytes();b=p.lstat();need(all(getattr(a,k)==getattr(b,k)for k in ['st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns','st_nlink'])and sha(raw)==ref['sha256']);return raw
+HEX=re.compile('[a-f0-9]{64}')
+NAMES={'outerActive','outerFinal','privateProof','currentCompiled','currentImage','currentInspect','currentMaterial','sourceCheckpoint','workerStderr','workerStdout','workerOriginal','certificate'}
+def validated_qualification(value,binding,output):
+ need(value['strictCompleteValidationSucceeded']is True and value['databaseAbsent']is True and value['productionAdmission']is False)
+ original=value['originalRestoreControllerClosure'];need(original['code']==0 and original['signal']is None and original['stdoutEof']is True and original['stderrEof']is True and original['localInterrupted']is False and original['observationFault']is False and original['callbackDrained']is True)
+ q=value['protectedFinancialQualification'];need(set(q)=={'file','sha256','binding'}and pathlib.Path(q['file'])==pathlib.Path(binding['privateOutput'])/'protected-financial-source.json');raw=pinned(q);source=json.loads(raw)
+ need(source['format']=='sabalan-protected-financial-qualification/v1'and source['qualificationComplete']is True and source['productionAdmission']is False and set(source['evidence'])==NAMES);pins={}
+ for name,row in source['evidence'].items():
+  need(set(row)=={'file','bytes','sha256'}and row['file']=='protected-financial-'+name.lower()+'.json'and type(row['bytes'])is int and row['bytes']>=0 and re.fullmatch('[a-f0-9]{64}',row['sha256']))
+  maximum=32*1024**2 if name=='currentCompiled'else 40*1024**2 if name=='workerStdout'else 16*1024**2
+  if row['bytes']==0:
+   need(name=='workerStderr'and sha(b'')==row['sha256']);f=pathlib.Path(q['file']).parent/row['file'];need(f.is_file()and not f.is_symlink()and f.stat().st_nlink==1 and f.stat().st_size==0)
+  else:need(len(pinned({'file':str(pathlib.Path(q['file']).parent/row['file']),'sha256':row['sha256']},maximum))==row['bytes'])
+  if name in ('outerActive','outerFinal'):pins[name]=row['sha256']
+ need(q['binding']['currentExecutionImage']==binding['executionImage']and q['binding']['format']=='sabalan-protected-financial-binding/v1')
+ return q,pins
+def local_command(binding,pins,initial):
+ operation=binding['applicationKeyBinding']['operation'];need(re.fullmatch('[a-f0-9]{32}',operation));validate_initial(initial,binding)
+ source=pathlib.Path(__file__).with_name('terminal_local.py');raw=source.read_bytes();need(sha(raw)==binding['helperPins']['terminal_local.py']);raw=raw.replace(b"if __name__=='__main__':main()",b'')
+ raw+=('\nprint(json.dumps(retire('+repr(operation)+','+repr(initial)+','+repr(pins)+'),separators=(\",\",\":\")),flush=True)\n').encode();compile(raw,'fixed-owned-local-retirement','exec')
+ code='import base64;exec(compile(base64.b64decode('+repr(base64.b64encode(raw).decode())+"),'<fixed-owned-local-retirement>','exec'))";need(len(code.encode())<24000)
+ need(re.fullmatch('[a-f0-9]{64}',binding['candidateContainerId'])and re.fullmatch('/[A-Za-z0-9_./-]+',binding['linuxPython']))
+ return [binding['dockerExecutable'],'exec','-i',binding['candidateContainerId'],binding['linuxPython'],'-I','-B','-c',code]
+def validate_compose_guard(row,binding):
+ raw=pinned(row['stdout'],65536).decode()
+ try:rows=json.loads(raw);rows=rows if isinstance(rows,list)else[rows]
+ except ValueError:rows=[json.loads(line)for line in raw.splitlines()if line.strip()]
+ need(len(rows)==10 and {r['Service']:r['ID']for r in rows}==binding['localComposeIds']and all(r['Project']=='sabalanerp-local'and r['State']=='running'and r['Health']=='healthy'for r in rows))
+def validate_local_retired(row,operation):
+ value=json.loads(pinned(row['stdout']));need(value['format']=='sabalan-owned-local-strict-job-retired/v1'and value['operation']==operation and value['jobAbsent']is True and value['authorityEmpty']is True and value['historicalAcceptanceAccessed']is False and value['productionAdmission']is False)
+def validate_backup_retired(row,operation):
+ value=json.loads(pinned(row['stdout']));need(value['format']=='sabalan-owned-backup-transfer-retired/v1'and value['operation']==operation and value['materialAbsent']is True and value['transferRootAbsent']is True and value['sourceCheckpointUnchanged']is True and value['privateKeyRead']is False and value['productionAdmission']is False)
+
+def validate_initial(initial,binding):
+ operation=binding['applicationKeyBinding']['operation'];root='/app/runtime-authority/application-native-'+operation
+ need(initial['format']=='sabalan-local-strict-material-parent/v1'and initial['operation']==operation and initial['root']==root and initial['stage']==root+'/strict-complete-material'and initial['authorityRootInitiallyEmpty']is True and initial['existingAcceptanceAccessed']is False and initial['appStarted']is False and initial['databaseExecuted']is False and initial['productionAdmission']is False)
+ need(initial['authorityNamespaceBefore']==binding['authorityNamespace'])
+ for name in ['rootDirectoryIdentity','stageDirectoryIdentity']:need(isinstance(initial[name],list)and len(initial[name])==2 and all(type(v)is int and v>0 for v in initial[name]))
+
+def cipher_command(binding,transfer):
+ operation=binding['applicationKeyBinding']['operation'];need(transfer['operation']==operation and re.fullmatch('[a-f0-9]{64}',transfer['cipherSha256'])and type(transfer['cipherBytes'])is int and 0<transfer['cipherBytes']<=16*1024**3)
+ source=pinned(binding['stageReceiver']);source=source.replace(b"if __name__=='__main__':main()",b'');source+=('\nprint(json.dumps(cipher('+repr(operation)+','+repr(transfer['cipherSha256'])+','+repr(transfer['cipherBytes'])+'),separators=(",",":")),flush=True)\n').encode();compile(source,'fixed-cipher-readback','exec')
+ code='import base64;exec(compile(base64.b64decode('+repr(base64.b64encode(source).decode())+"),'<fixed-cipher-readback>','exec'))";need(len(code.encode())<24000)
+ return[binding['dockerExecutable'],'exec','-i',binding['candidateContainerId'],binding['linuxPython'],'-I','-B','-c',code]
+def validate_cipher(row,binding,transfer):
+ value=json.loads(pinned(row['stdout']));operation=binding['applicationKeyBinding']['operation'];need(value['format']=='sabalan-local-strict-cipher-staged/v1'and value['operation']==operation and value['file']=='/app/runtime-authority/application-native-'+operation+'/strict-complete-material/source-complete.resealed'and value['sha256']==transfer['cipherSha256']and value['bytes']==transfer['cipherBytes']and value['databaseExecuted']is False and value['appStarted']is False)
+def retire_windows_inputs(binding,download,transfer,output):
+ operation=binding['applicationKeyBinding']['operation'];archive=binding['localMaterialArchive'];a=pathlib.Path(archive['file']);cipher=pathlib.Path(download['stdout']['file']);need(a==pathlib.Path('D:/sabalanerp-online-qa')/('C30-complete-final-plan-'+operation)/'linux-material.tar'and cipher==pathlib.Path(output)/'cipherDownload.stdout.raw')
+ checked=[]
+ for path,size,digest in [(a,archive['bytes'],archive['sha256']),(cipher,transfer['cipherBytes'],transfer['cipherSha256'])]:
+  before=path.lstat();need(path.resolve(strict=True)==path and path.is_file()and not path.is_symlink()and before.st_nlink==1 and before.st_size==size and HEX.fullmatch(digest));h=hashlib.sha256()
+  with path.open('rb')as stream:
+   while raw:=stream.read(262144):h.update(raw)
+  after=path.lstat();fields=lambda s:tuple(getattr(s,k)for k in ['st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns','st_nlink']);need(fields(before)==fields(after)and h.hexdigest()==digest);checked.append((path,fields(before)))
+ for path,before in checked:
+  need(tuple(getattr(path.lstat(),k)for k in ['st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns','st_nlink'])==before);path.unlink()
+ need(not a.exists()and not cipher.exists());return {'format':'sabalan-owned-windows-transfer-inputs-retired/v1','operation':operation,'sourceArchiveAbsent':True,'downloadedCipherAbsent':True,'productionAdmission':False}

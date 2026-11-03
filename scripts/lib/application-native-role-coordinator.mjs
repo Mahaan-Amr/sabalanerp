@@ -10,14 +10,19 @@ import {compilePrivateQualificationMaterial,qualificationBytes} from './applicat
 import {consumeOriginalPrivateLegacyUiCommand,beginOriginalPrivateLegacyUiCarrier,readOriginalPrivateLegacyUiCarrier,restoreOriginalPrivateLegacyUiCarrier,readOriginalPrivateLegacyUiRestoration,readOriginalPrivateLegacyUiComposeEnvironment} from './original-private-legacy-ui-carrier.mjs';
 import {createOriginalLocalCheckpointCrypto,readOriginalLocalCheckpointCryptoCompletion} from './original-local-checkpoint-crypto.mjs';
 import {createOriginalLocalOnlineCheckpoint,readOriginalLocalOnlineCheckpointCompletion} from './original-local-online-checkpoint.mjs';
+import {retainOriginalRoleRestoredIssuer} from './original-role-restored-issuer.mjs';
 
 const originalQualificationCompletions=new WeakMap();
+const originalQualificationRetainedCompletions=new WeakMap();
 const originalQualificationPointCompletions=new WeakMap();
+const originalRestoredIssuers=new WeakMap();
+export function readOriginalRoleRestoredIssuer(token){const issuer=originalRestoredIssuers.get(token);assert.ok(issuer,'ORIGINAL_LOCAL_COMPLETE_ISSUER_REQUIRED');return issuer;}
 export function readOriginalRoleOnlinePointCompletion(token){const value=originalQualificationPointCompletions.get(token);assert.ok(value,'ORIGINAL_ROLE_ONLINE_POINT_COMPLETION_REQUIRED');return value;}
 const originalPrivateBrowserControllers=new WeakSet();
 const originalOnlineCapturePlans=new WeakMap();
 export function readOriginalLocalOnlineCapturePlan(token){const value=originalOnlineCapturePlans.get(token);assert.ok(value,'ORIGINAL_LOCAL_ONLINE_CAPTURE_PLAN_REQUIRED');value.assertLive();return structuredClone(value.plan);}
 export function assertOriginalPrivateBrowserRoundController(controller){assert.ok(originalPrivateBrowserControllers.has(controller),'ORIGINAL_PRIVATE_BROWSER_CONTROLLER_REQUIRED');}
+export function readOriginalRoleRetainedBrowserCompletion(token){readOriginalRoleQualificationCompletion(token);const retained=originalQualificationRetainedCompletions.get(token);assert.ok(retained,'ORIGINAL_LOCAL_RETAINED_COMPLETION_REQUIRED');readOriginalRetainedBrowserQualificationCompletion(retained);return retained;}
 export function readOriginalRoleQualificationCompletion(token){
  const value=originalQualificationCompletions.get(token);assert.ok(value,'ORIGINAL_ROLE_COMPLETION_TOKEN_REQUIRED');return structuredClone(value);
 }
@@ -111,14 +116,25 @@ function validateOriginalMainHttpOwner(entry,grant,index,status){
 
 /** Diagnostic only. The private key and both original Docker-exec handles never
  * leave this closure. There is deliberately no public arbitrary signer. */
-export function createOriginalRoleCoordinator({directory,topology,fileHashes,retainedBrowserCompletion,originalServiceIdentities,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile=null,localDevSuspension,onHeld=()=>{}}){
+/** Refuse only new work; existing authenticated drain/restore requests remain owed. */
+export function admitOriginalRoleMemoryRequest(body,{assertAdmission,refuse}){
+ if(/^(?:FINISH_|WAIT_|PREPARE_PRIVATE_)/.test(body.command)||body.command==='RESTORE_PRIVATE_RETAINED_UI')return true;
+ try{assertAdmission();return true;}catch{
+  refuse({requestId:body.requestId,failedEvent:transitions[body.command]?.[0]??({ISSUE_PRIVATE_QUALIFICATION:'PRIVATE_QUALIFICATION_ISSUED',ROTATE_PRIVATE_LEGACY_UI:'PRIVATE_LEGACY_UI_ROTATED',RUN_ORIGINAL_ONLINE_CHECKPOINT:'ORIGINAL_ONLINE_CHECKPOINT_DONE',SEAL_LOCAL_CHECKPOINT_COMPONENTS:'LOCAL_CHECKPOINT_COMPONENTS_SEALED',SEAL_LOCAL_WAL_WINDOW:'LOCAL_WAL_WINDOW_SEALED'})[body.command],
+   kind:transitions[body.command]?.[1]??body.command,actorId:null,noWorkStarted:true,decision:'NATIVE_ACTOR_NOT_STARTED',reason:'LOCAL_HOST_MEMORY_PRESSURE',productionAdmission:false});return false;
+ }
+}
+
+export function createOriginalRoleCoordinator({directory,topology,fileHashes,retainedBrowserCompletion,originalServiceIdentities,independentOptions,sameComposePhysicalCallbacks,localQualificationMode='ONLINE_POINT',nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile=null,localDevSuspension,assertMemoryWorkAdmission=()=>{},onHeld=()=>{}}){
+ assert.ok(['ONLINE_POINT','PROTECTED_COMPLETE'].includes(localQualificationMode));
   assert.match(directory,/^\/app\/online-runtime-acceptance\/application-native-[a-f0-9]{32}$/);
-  const retained=retainedBrowserCompletion?readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion):null;assert.deepEqual(localDevSuspension??null,retained?.report.localDevSuspension??null,'ORIGINAL_RETAINED_SUSPENSION_SELECTION_REQUIRED');
+  const retained=retainedBrowserCompletion?readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion):null;assert.deepEqual(localDevSuspension??null,retained?.currentLocalDevSuspension??null,'ORIGINAL_RETAINED_SUSPENSION_SELECTION_REQUIRED');
   for(const role of ['main','candidate']){
     assert.ok(hex(topology[role].containerId));assert.match(topology[role].image,/^sha256:[a-f0-9]{64}$/);
     assert.match(topology[role].host,/^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/);
   }
   const {privateKey,publicKey}=generateKeyPairSync('ed25519'),session=randomBytes(32).toString('hex');
+  let retainedCompleteIssuer=null;
   const publicSPKI=publicKey.export({type:'spki',format:'der'}).toString('base64');
   const roles=new Map(),actors=new Map();let pending=null,held=null,phase='NEW',heldKeeper=null,evidenceFailure=null,mainIndex=null;
   let mainRequests=0,firstMigrationRequest=null,migrationTerminal=null;
@@ -503,6 +519,7 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
       }
       same(value.event,'REQUEST');assert.equal(pending,null);
       assert.equal(owner.failedClosed,undefined);assert.ok(hex(body.requestId));
+      if(!admitOriginalRoleMemoryRequest(body,{assertAdmission:assertMemoryWorkAdmission,refuse:receipt=>{assert.ok(receipt.failedEvent,'UNKNOWN_MEMORY_REFUSAL_REQUEST');phaseRefusals.push(receipt);phase='PHASE_FAILED';send('main','PHASE_REFUSED',receipt);}}))return;
       if(body.command==='ISSUE_PRIVATE_QUALIFICATION'){
         pending={requestId:body.requestId,expected:'PRIVATE_QUALIFICATION_ISSUED',kind:'private-qualification-issuer'};
         void issueOriginalQualification(body).catch(hold);return;
@@ -518,13 +535,14 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
         }return;
       }
       if(body.command==='RUN_ORIGINAL_ONLINE_CHECKPOINT'){
+        assert.equal(localQualificationMode,'ONLINE_POINT','PROTECTED_COMPLETE_HAS_NO_PHYSICAL_PREREQUISITE');
         same(body.input,{});assertLegacyReady();assert.ok(independentOptions&&nativeOwnerElfReceipt&&legacyRestoration&&originalOnlineInquiry&&!localOnlineOwner);
         assert.ok(completedPhases.has('PRIVATE_LEGACY_BROWSER_TICKETS_VERIFIED'));
         pending={requestId:body.requestId,expected:'ORIGINAL_ONLINE_CHECKPOINT_DONE',kind:'local-online-checkpoint'};
         void (async()=>{
           if(!localCrypto)localCrypto=await createOriginalLocalCheckpointCrypto({localDevSuspension,directory,topology,scratch:'D:/sabalanerp-online-qa/original-crypto-'+randomBytes(16).toString('hex')});
           const capturePlan=originalController.prepareOriginalLocalOnlineCapturePlan();
-          localOnlineOwner=await createOriginalLocalOnlineCheckpoint({capturePlan,coordinator:originalController,cryptoExecutor:localCrypto,independentOptions,nativeOwnerElfReceipt});
+          localOnlineOwner=await createOriginalLocalOnlineCheckpoint({capturePlan,coordinator:originalController,cryptoExecutor:localCrypto,independentOptions,sameComposePhysicalCallbacks,nativeOwnerElfReceipt});
           const point=await localOnlineOwner.point();await localOnlineOwner.tick();localOnlineCompletion=await localOnlineOwner.finishPointOnlyQualification();
           const completion=readOriginalLocalOnlineCheckpointCompletion(localOnlineCompletion),raw=Buffer.from(JSON.stringify(completion));
           const result={format:completion.format,operation:completion.operation,productionAdmission:false,continuousWalQualified:false,finalIntervalCompletion:false,
@@ -674,7 +692,8 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
     finishOriginalQualification:()=>{
       same(held,null);same(pending,null);same(roles.size,2);
       assert.ok(!localCrypto||localCryptoClosed,'ORIGINAL_CRYPTO_COMMANDS_NOT_CLOSED');
-      assert.ok(localOnlineCompletion,'ORIGINAL_LOCAL_ONLINE_POINT_COMPLETION_REQUIRED');
+      if(localQualificationMode==='ONLINE_POINT')assert.ok(localOnlineCompletion,'ORIGINAL_LOCAL_ONLINE_POINT_COMPLETION_REQUIRED');
+      else assert.ok(!localOnlineOwner&&!localOnlineCompletion&&!originalOnlineInquiry,'PROTECTED_COMPLETE_PHYSICAL_SCOPE_CHANGED');
       assert.ok(legacyRestoration&&legacyDockerChildren.every(row=>row.closed&&!row.unknown&&row.code===0&&row.signal===null),'ORIGINAL_LEGACY_UI_RESTORATION_REQUIRED');
       for(const owner of roles.values()){same(owner.closed,true);same(owner.result.code,0);same(owner.result.signal,null);}
       const candidate=roles.get('candidate');same(candidate.closeMode,'QUALIFIED');same(candidate.closedReceipt.qualificationSucceeded,true);
@@ -698,13 +717,17 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
       const resultRaw=Buffer.from(roles.get('main').result.stdout),result=JSON.parse(resultRaw);
       same(result.format,'sabalan-application-native/v1');same(result.passResult,true);same(result.productionAdmission,false);
       same(result.originalDatabaseRetiredWithoutForce,true);same(result.genuinePrivateQualificationPair.originalPairClosed,true);
+      if(localQualificationMode==='PROTECTED_COMPLETE'){
+       same(result.genuinePrivateQualificationPair.localQualificationMode,'PROTECTED_COMPLETE');
+       same(result.genuinePrivateQualificationPair.originalOnlinePhysicalPoint,null);same(result.genuinePrivateQualificationPair.originalOnlinePointInquiryClosure,null);
+      }
       same(result.genuinePrivateQualificationPair.actualHttpTargets,2);
       same(result.genuinePrivateQualificationPair.originalHttpClosures.length,2);
       assert.ok(retainedBrowserCompletion,'ORIGINAL_RETAINED_BROWSER_COMPLETION_REQUIRED');
       const retainedFinal=readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);same(retainedFinal.reportSha256,retained.reportSha256);
       const retainedRaw=fs.readFileSync(retainedFinal.reportFile);same(sha(retainedRaw),retainedFinal.reportSha256);
       const outputFiles={
-       'original-local-online-point.json':Buffer.from(JSON.stringify(readOriginalLocalOnlineCheckpointCompletion(localOnlineCompletion))),
+       ...(localOnlineCompletion?{'original-local-online-point.json':Buffer.from(JSON.stringify(readOriginalLocalOnlineCheckpointCompletion(localOnlineCompletion)))}:{}),
        'original-retained-browser-result.json':retainedRaw,
        'original-private-legacy-ui-restoration.json':fs.readFileSync(readOriginalPrivateLegacyUiRestoration(legacyRestoration).receiptFile),
        'original-main-result.json':resultRaw,
@@ -715,15 +738,22 @@ export function createOriginalRoleCoordinator({directory,topology,fileHashes,ret
        'original-private-final-fence.json':Buffer.from(JSON.stringify(qualificationState.fence)),
       };
       const ownedOutputs=Object.fromEntries(Object.entries(outputFiles).map(([file,raw])=>[file,{sha256:sha(raw),bytes:raw.length,rawBase64:raw.toString('base64')} ]));
+      if(localQualificationMode==='PROTECTED_COMPLETE'){
+       assert.equal(retainedCompleteIssuer,null,'ORIGINAL_LOCAL_COMPLETE_ISSUER_ALREADY_RETAINED');
+       retainedCompleteIssuer=retainOriginalRoleRestoredIssuer({privateKey,publicKey,session,
+        local:{image:topology.candidate.image,host:topology.candidate.host,sourceCommit:mainConfiguration.privateQualificationSourceCommits.candidate,runtime:mainConfiguration.privateQualificationRuntimes.candidate,databaseSystemIdentifier:mainIndex.grants[0].scope.database.systemIdentifier},
+        assertLocalOriginalsClosed:()=>{same(held,null);same(pending,null);assert.ok([...roles.values()].every(owner=>owner.closed&&owner.result.code===0&&owner.result.signal===null));assert.ok([...actors.values()].every(actor=>actor.closed));same(qualificationState.http.closed,true);same(qualificationState.fence.phase,'CLOSED');}});
+      }
       const token=Object.freeze({});originalQualificationCompletions.set(token,Object.freeze({
        format:'sabalan-original-role-qualification-completion/v1',controllerSourceSha256:sha(fs.readFileSync(new URL(import.meta.url))),
        originalControllers:[...roles].map(([role,owner])=>({role,originalPid:owner.child.pid,code:owner.result.code,signal:owner.result.signal})),
        fileHashes:{...structuredClone(fileHashes),...Object.fromEntries(Object.entries(ownedOutputs).map(([file,value])=>[file,value.sha256]))},ownedOutputs,nativeClosures:[...closures.values()].sort((a,b)=>a.runtimeId.localeCompare(b.runtimeId)),
-       historySha256:sha(Buffer.from(JSON.stringify(history))),retainedBrowser:{reportSha256:retainedFinal.reportSha256,actualProductionLegacy55Qualified:retainedFinal.report.actualProductionLegacy55Qualified===true},productionAdmission:false}));originalQualificationPointCompletions.set(token,localOnlineCompletion);return token;
+       historySha256:sha(Buffer.from(JSON.stringify(history))),localQualificationMode,retainedBrowser:{reportSha256:retainedFinal.reportSha256,actualProductionLegacy55Qualified:retainedFinal.report.actualProductionLegacy55Qualified===true},productionAdmission:false}));originalQualificationRetainedCompletions.set(token,retainedBrowserCompletion);if(localOnlineCompletion)originalQualificationPointCompletions.set(token,localOnlineCompletion);if(retainedCompleteIssuer)originalRestoredIssuers.set(token,retainedCompleteIssuer);return token;
     },
     enrollCandidate:body=>{assert.equal(phase,'NEW');send('candidate','ENROLL',body);phase='ENROLLED';},
     enrollMain:(body,configurationBytes)=>{assert.equal(phase,'ENROLLED');assert.ok(Buffer.isBuffer(configurationBytes));
       same(sha(configurationBytes),fileHashes['config.json']);mainConfiguration=JSON.parse(configurationBytes);
+      same(mainConfiguration.localQualificationMode??'ONLINE_POINT',localQualificationMode);
       same(mainConfiguration.originalHostEnrollment.publicKey,publicSPKI);same(mainConfiguration.originalHostEnrollment.session,session);
       same(mainConfiguration.roleTopology,topology);same(mainConfiguration.image,topology.main.image);
       mainIndex=body.index;send('main','ENROLL',body);},

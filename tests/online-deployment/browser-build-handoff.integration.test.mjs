@@ -17,7 +17,7 @@ const sha = name => createHash('sha256').update(fs.readFileSync(path.join(root, 
 const sources = Object.fromEntries(qualifiedNames.map(name => [name, sha(name)]));
 const require = createRequire(new URL('../../frontend/package.json', import.meta.url));
 const { chromium } = require('@playwright/test'), { buildSync } = require('esbuild');
-const bundle = buildSync({ absWorkingDir: path.join(root, 'frontend'), bundle: true, write: false, platform: 'browser', format: 'iife',
+const bundle = buildSync({ nodePaths:(process.env.NODE_PATH??'').split(path.delimiter).filter(Boolean),absWorkingDir: path.join(root, 'frontend'), bundle: true, write: false, platform: 'browser', format: 'iife',
   define: { 'process.env.NODE_ENV': '"test"', 'process.env.NEXT_PUBLIC_API_URL': '"/api"',
     'process.env.NEXT_PUBLIC_BROWSER_BUILD_ID': '"erp_handoff_browser_20261019"' },
   stdin: { resolveDir: path.join(root, 'frontend'), loader: 'tsx', contents: `

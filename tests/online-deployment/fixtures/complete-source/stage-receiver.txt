@@ -1,0 +1,55 @@
+"""New exact private strict material only, existing candidate. No app/DB/guardian."""
+import os,sys,stat,json,hashlib,tarfile,re
+from pathlib import Path
+def need(v):
+ if not v:raise AssertionError('LOCAL_STRICT_STAGING_REFUSED')
+def identity(s):return tuple(getattr(s,k)for k in ['st_dev','st_ino','st_mode','st_uid','st_nlink','st_size','st_mtime_ns','st_ctime_ns'])
+def safe(name):return isinstance(name,str)and 0<len(name)<=4096 and not name.startswith('/')and '\\'not in name and ':'not in name and all(p not in ('','.','..')for p in name.split('/'))
+def directory(p):
+ s=p.lstat();need(p.resolve(strict=True)==p and stat.S_ISDIR(s.st_mode)and s.st_uid==0 and not s.st_mode&0o077);return(s.st_dev,s.st_ino)
+def exact_path(root,relative):
+ need(safe(relative));current=root
+ for part in relative.split('/')[:-1]:
+  current=current/part
+  if not current.exists():current.mkdir(mode=0o700)
+  directory(current)
+ return root/relative
+def namespace(s):return {k:str(getattr(s,k))for k in ['st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns']}
+def initial(operation,expected_namespace):
+ need(sys.platform=='linux'and os.getuid()==0 and re.fullmatch('[a-f0-9]{32}',operation));base=Path('/app/runtime-authority');before=directory(base);original=namespace(base.lstat());need(original==expected_namespace and list(base.iterdir())==[])
+ root=base/('application-native-'+operation);need(not root.exists());root.mkdir(mode=0o700);stage=root/'strict-complete-material';stage.mkdir(mode=0o700);need(directory(base)==before and os.listdir(base)==[root.name])
+ return {'format':'sabalan-local-strict-material-parent/v1','operation':operation,'root':str(root),'stage':str(stage),'rootDirectoryIdentity':list(directory(root)),'stageDirectoryIdentity':list(directory(stage)),'authorityNamespaceBefore':original,'authorityNamespaceAfter':namespace(base.lstat()),'authorityRootInitiallyEmpty':True,'existingAcceptanceAccessed':False,'appStarted':False,'databaseExecuted':False,'productionAdmission':False}
+def unpack(operation,archive_sha,manifest_sha):
+ need(sys.platform=='linux'and os.getuid()==0 and re.fullmatch('[a-f0-9]{32}',operation)and re.fullmatch('[a-f0-9]{64}',archive_sha)and re.fullmatch('[a-f0-9]{64}',manifest_sha));root=Path('/app/runtime-authority')/('application-native-'+operation);stage=root/'strict-complete-material';r=directory(root);directory(stage);need(list(stage.iterdir())==[])
+ archive=root/'material-input.tar';fd=os.open(archive,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK);before=os.fstat(fd);need(stat.S_ISREG(before.st_mode)and before.st_uid==0 and before.st_nlink==1 and 0<before.st_size<=512*1024**2);h=hashlib.sha256();count=0
+ try:
+  while raw:=os.read(fd,262144):count+=len(raw);need(count<=512*1024**2);h.update(raw)
+  need(h.hexdigest()==archive_sha and count==before.st_size and identity(before)==identity(os.fstat(fd))==identity(archive.lstat()));os.lseek(fd,0,os.SEEK_SET)
+  with os.fdopen(os.dup(fd),'rb')as source,tarfile.open(fileobj=source,mode='r|')as tar:
+   first=tar.next();need(first is not None and first.name=='stage-manifest.json'and first.isfile()and 0<first.size<=4*1024**2);raw=tar.extractfile(first).read(4*1024**2+1);need(len(raw)==first.size and hashlib.sha256(raw).hexdigest()==manifest_sha);manifest=json.loads(raw);need(set(manifest)=={'format','operation','files'}and manifest['format']=='sabalan-local-strict-material-files/v1'and manifest['operation']==operation and isinstance(manifest['files'],dict)and 3<=len(manifest['files'])<=50000)
+   planned=manifest['files'];need(all(safe(name)and set(v)=={'bytes','sha256'}and type(v['bytes'])is int and 0<=v['bytes']<=512*1024**2 and re.fullmatch('[a-f0-9]{64}',v['sha256'])for name,v in planned.items()));need('stage-manifest.json'not in planned)
+   space=os.statvfs(stage);need(space.f_bavail*space.f_frsize>=sum(x['bytes']for x in planned.values())+1242945672+512*1024**2);seen=set()
+   for entry in tar:
+    if entry is first:continue
+    name=entry.name;need(name in planned and name not in seen and entry.isfile()and not entry.issym()and not entry.islnk()and entry.size==planned[name]['bytes']);seen.add(name);target=exact_path(stage,name);out=os.open(target,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o400);h=hashlib.sha256();total=0
+    try:
+     data=tar.extractfile(entry)
+     while chunk:=data.read(262144):
+      total+=len(chunk);need(total<=entry.size);h.update(chunk);offset=0
+      while offset<len(chunk):written=os.write(out,chunk[offset:]);need(written>0);offset+=written
+     need(total==entry.size and h.hexdigest()==planned[name]['sha256']);os.fsync(out);s=os.fstat(out);need(s.st_uid==0 and s.st_nlink==1 and s.st_mode==0o100400 and s.st_size==entry.size);os.lseek(out,0,os.SEEK_SET);check=hashlib.sha256();checked=0
+     while part:=os.read(out,262144):checked+=len(part);need(checked<=entry.size);check.update(part)
+     need(checked==entry.size and check.hexdigest()==planned[name]['sha256']and identity(s)==identity(os.fstat(out))==identity(target.lstat())and target.resolve(strict=True)==target)
+    finally:os.close(out)
+   need(seen==set(planned));need(identity(os.fstat(fd))==identity(archive.lstat())==identity(before));need(directory(root)==r)
+  return {'format':'sabalan-local-strict-material-staged/v1','operation':operation,'archiveSha256':archive_sha,'manifestSha256':manifest_sha,'files':len(seen),'bytes':sum(x['bytes']for x in planned.values()),'stage':str(stage),'appStarted':False,'databaseExecuted':False,'productionAdmission':False}
+ finally:os.close(fd)
+def cipher(operation,expected_sha,expected_bytes):
+ need(sys.platform=='linux'and os.getuid()==0 and re.fullmatch('[a-f0-9]{32}',operation)and re.fullmatch('[a-f0-9]{64}',expected_sha)and type(expected_bytes)is int and 0<expected_bytes<=16*1024**3);root=Path('/app/runtime-authority')/('application-native-'+operation);stage=root/'strict-complete-material';directory(root);directory(stage);file=stage/'source-complete.resealed';fd=os.open(file,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK);before=os.fstat(fd);need(stat.S_ISREG(before.st_mode)and before.st_uid==0 and before.st_nlink==1 and before.st_size==expected_bytes);h=hashlib.sha256();count=0
+ try:
+  while chunk:=os.read(fd,262144):count+=len(chunk);need(count<=expected_bytes);h.update(chunk)
+  need(count==expected_bytes and h.hexdigest()==expected_sha and identity(before)==identity(os.fstat(fd))==identity(file.lstat()));os.fchmod(fd,0o400);os.fsync(fd);after=os.fstat(fd);need(after.st_mode==0o100400 and after.st_uid==0 and after.st_nlink==1 and after.st_dev==before.st_dev and after.st_ino==before.st_ino and identity(after)==identity(file.lstat()))
+  return {'format':'sabalan-local-strict-cipher-staged/v1','operation':operation,'file':str(file),'sha256':expected_sha,'bytes':expected_bytes,'appStarted':False,'databaseExecuted':False,'productionAdmission':False}
+ finally:os.close(fd)
+def main():raise AssertionError('SOURCE_OWNED_FIXED_PHASE_ONLY')
+if __name__=='__main__':main()

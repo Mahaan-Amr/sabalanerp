@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),ts=require('../../backend/node_modules/typescript');
-const source=fs.readFileSync(new URL('../../scripts/run-original-online-qualification-master.mjs',import.meta.url),'utf8'),tree=ts.createSourceFile('master.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+const source=fs.readFileSync(new URL('../../scripts/lib/original-online-qualification-master.mjs',import.meta.url),'utf8'),tree=ts.createSourceFile('master.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
 const declaration=tree.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='runOriginalOnlineQualificationMaster').getText(tree).replace(/^export\s+/,'');
 async function exercise({pendingControl=false,extraFinish={},signalDuringFirst=false}={}){
  const order=[],events=[],listeners=new Map();let settleControl,resolveHeld;const held=new Promise(resolve=>{resolveHeld=resolve;});

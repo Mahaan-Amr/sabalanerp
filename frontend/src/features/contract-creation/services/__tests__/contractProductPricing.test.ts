@@ -78,6 +78,62 @@ const product = (overrides: Partial<ContractProduct> = {}): ContractProduct => (
 }
 
 {
+  const prepared = product({
+    productType: 'prepared',
+    preparedUnit: 'count',
+    preparedQuantity: 200,
+    quantity: 200,
+    unitPrice: 200_000,
+    pricePerSquareMeter: 200_000,
+    originalTotalPrice: 40_000_000,
+    totalPrice: 40_000_000,
+    cuttingCost: 0,
+    physicalCuttingCost: 0,
+    cuttingBreakdown: []
+  });
+  const reconciled = reconcileContractProductPricing(prepared);
+  assert.equal(reconciled.totalPrice, 40_000_000);
+  assert.deepEqual(reconciled.meta?.pricing, {
+    authority: 'canonical-current-save',
+    materialBase: 40_000_000,
+    mandatoryAmount: 0,
+    cuttingCost: 0,
+    toolsCost: 0,
+    finishingCost: 0,
+    totalPrice: 40_000_000,
+    reconciled: true
+  });
+}
+
+{
+  const incompletePreparedEvidence = product({
+    productType: 'prepared',
+    preparedUnit: 'count',
+    preparedQuantity: 200,
+    quantity: 200,
+    unitPrice: 200_000,
+    pricePerSquareMeter: 200_000,
+    originalTotalPrice: 40_000_000,
+    totalPrice: 40_000_000,
+    cuttingCost: 0,
+    physicalCuttingCost: 0,
+    cuttingBreakdown: [],
+    meta: {
+      pricing: {
+        authority: 'canonical-current-save',
+        materialBase: 40_000_000,
+        totalPrice: 40_000_000,
+        reconciled: true
+      }
+    }
+  });
+  const reconciled = reconcileContractProductPricing(incompletePreparedEvidence);
+  assert.notEqual(reconciled, incompletePreparedEvidence);
+  assert.equal(reconciled.meta?.pricing?.toolsCost, 0);
+  assert.equal(reconciled.meta?.pricing?.finishingCost, 0);
+}
+
+{
   const withOperations = product({
     cuttingCost: 0,
     physicalCuttingCost: 0,

@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpPressable, ErpInput, ErpSelect } from '@/components/erp';
 import {
   calculateProductOperations,
@@ -79,6 +80,7 @@ function CatalogResults({
   onSelect: (item: OperationCatalogItem) => void;
   focusOnMount?: boolean;
 }) {
+  const showPricing = useProductPricingVisibility();
   const [query, setQuery] = React.useState('');
   const searchRef = React.useRef<HTMLInputElement>(null);
   const searchId =
@@ -118,11 +120,11 @@ function CatalogResults({
             className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-start text-xs hover:bg-[var(--sds-surface-subtle)]"
           >
             <span className="font-semibold">{item.name}</span>
-            <span className="text-[var(--sds-text-muted)]">
+            {showPricing && <span className="text-[var(--sds-text-muted)]">
               {item.rateToman === undefined || item.rateToman === null
                 ? 'نرخ ثبت نشده'
                 : `${formatPrice(item.rateToman)} / ${operationUnitLabel(item.unit)}`}
-            </span>
+            </span>}
           </ErpPressable>
         ))}
       </div>
@@ -145,6 +147,7 @@ export function OperationCollectionsSection({
   toolCacheKey?: string;
   finishingCacheKey?: string;
 }) {
+  const showPricing = useProductPricingVisibility();
   const [addingTool, setAddingTool] = React.useState(false);
   const [addingFinishing, setAddingFinishing] = React.useState(false);
   const [overrideEditing, setOverrideEditing] = React.useState<string | null>(null);
@@ -177,8 +180,10 @@ export function OperationCollectionsSection({
     presentation.toolsById.get(id);
   const calculatedFinishing = (id: string) =>
     presentation.finishingsById.get(id);
-  const conflictFor = (id: string) =>
-    presentation.conflictByEntityId.get(id);
+  const conflictFor = (id: string) => {
+    const conflict = presentation.conflictByEntityId.get(id);
+    return !showPricing && conflict?.code === 'inventory-rate-missing' ? undefined : conflict;
+  };
   const conflictMessage = (
     conflict: ReturnType<typeof conflictFor>
   ) => {
@@ -406,8 +411,8 @@ export function OperationCollectionsSection({
                   <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(tool.unit)}</span>
-                <span>{tool.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(tool.rateToman)}</span>
-                <span className="font-semibold">{calculated ? formatPrice(calculated.amountToman) : '—'}</span>
+                {showPricing && <span>{tool.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(tool.rateToman)}</span>}
+                {showPricing && <span className="font-semibold">{calculated ? formatPrice(calculated.amountToman) : '—'}</span>}
                 {input.groups.length > 1 && (
                   <label className="inline-flex items-center gap-1">
                     اعمال روی
@@ -640,8 +645,8 @@ export function OperationCollectionsSection({
                   <span className="text-[var(--sds-text-muted)]">خارج از کاتالوگ فعلی</span>
                 )}
                 <span>{calculated?.finalQuantity ?? '—'}{operationUnitLabel(finishing.unit)}</span>
-                <span>{finishing.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(finishing.rateToman)}</span>
-                <span className="font-semibold">{calculated ? formatPrice(calculated.amountToman) : '—'}</span>
+                {showPricing && <span>{finishing.rateToman === undefined ? 'نرخ ثبت نشده' : formatPrice(finishing.rateToman)}</span>}
+                {showPricing && <span className="font-semibold">{calculated ? formatPrice(calculated.amountToman) : '—'}</span>}
                 {input.groups.length > 1 && (
                   <label className="inline-flex items-center gap-1">
                     اعمال روی
@@ -803,7 +808,7 @@ export function OperationCollectionsSection({
         })}
       </InlineCollectionSection>
 
-      {!presentation.complete && (
+      {!calculation.ok && calculation.conflicts.some(conflict => showPricing || conflict.code !== 'inventory-rate-missing') && (
         <div
           data-operation-total-incomplete
           className="border-t border-[var(--sds-warning-border)] bg-[var(--sds-warning-surface)] px-2 py-2 text-xs font-semibold text-[var(--sds-warning)] dark:border-[var(--sds-warning-border)] dark:bg-[var(--sds-warning-surface)] dark:text-[var(--sds-warning)]"

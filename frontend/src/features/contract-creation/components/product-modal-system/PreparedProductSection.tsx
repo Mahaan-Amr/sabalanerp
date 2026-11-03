@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { formatPrice } from '@/lib/numberFormat';
@@ -35,6 +36,7 @@ export function PreparedProductSection({
   onChange: (config: Partial<ContractProduct>) => void;
   catalogFactLine: string;
 }) {
+  const showPricing = useProductPricingVisibility();
   const resolved = resolvePreparedProductPresentation(config, product);
   return (
     <div className="space-y-3">
@@ -93,7 +95,7 @@ export function PreparedProductSection({
             className={inputClass}
           />
         </div>
-        <div>
+        {showPricing && <div>
           <label className="mb-1 block text-xs font-semibold">قیمت واحد</label>
           <FormattedNumberInput
             value={resolved.unitPrice}
@@ -101,7 +103,7 @@ export function PreparedProductSection({
             min={0}
             className={inputClass}
           />
-        </div>
+        </div>}
       </div>
 
       <div>
@@ -115,7 +117,7 @@ export function PreparedProductSection({
         />
       </div>
 
-      <section aria-label="خلاصه محاسبه" className="border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
+      {showPricing && <section aria-label="خلاصه محاسبه" className="border-t border-[var(--sds-border-default)] dark:border-[var(--sds-border-subtle)]">
         <h3 className="py-2 text-sm font-bold">خلاصه محاسبه</h3>
         <div className="grid min-h-9 grid-cols-[7rem_1fr] items-center gap-3 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs dark:border-[var(--sds-border-subtle)]">
           <span className="text-[var(--sds-text-muted)]">جمع</span>
@@ -123,7 +125,7 @@ export function PreparedProductSection({
             {resolved.quantity} × {formatPrice(resolved.unitPrice)} = {formatPrice(resolved.total)}
           </span>
         </div>
-      </section>
+      </section>}
     </div>
   );
 }

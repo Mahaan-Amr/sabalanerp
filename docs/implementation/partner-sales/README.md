@@ -1,4 +1,4 @@
-# Partner shared contracts 1.0.0
+# Partner shared contracts 1.1.0
 
 Foundation delivery for [#313](https://github.com/Mahaan-Amr/sabalanerp/issues/313), within [Epic #311](https://github.com/Mahaan-Amr/sabalanerp/issues/311). This is buildable contract/fixture acceptance, **not** runtime, database, UI or release acceptance. Integration is #334, combined QA #335, release readiness #336.
 
@@ -14,9 +14,9 @@ npm --prefix frontend run test:partner-sales-contracts
 npm run test:contract-product-graph
 ```
 
-Package: `@sabalanerp/partner-sales-contracts@1.0.0`; wire `schemaVersion: 1`; hash `sha256-v1`. Public entry `src/index.ts` compiles to CommonJS + declarations; Node16/backend and Bundler/ES5 frontend consumers are typechecked. `/testing` exports synthetic fixtures, a fixed clock, sandbox notifications and a read-only query adapter. It cannot activate, commit or send SMS. No database, Prisma client or environment secret is read by this package.
+Package: `@sabalanerp/partner-sales-contracts@1.1.0`; original wire `schemaVersion: 1` plus separately named [workspace v2 interfaces](workspace-v2.md); hash `sha256-v1`. Public entry `src/index.ts` compiles to CommonJS + declarations; Node16/backend and Bundler/ES5 frontend consumers are typechecked. `/testing` exports synthetic fixtures, a fixed clock, sandbox notifications and read-only query adapters. It cannot activate, commit or send SMS. No database, Prisma client or environment secret is read by this package.
 
-Backend/frontend manifests expose consumer-test scripts only. Production dependency/Docker copying must land together under #334; no new service import or missing Docker file dependency is introduced now. The graph package is a real dependency of this package, not a copied geometry model.
+The coordinated #330/#331 follow-up adds backend/frontend file dependencies and matching Docker build/runtime package copying together. Both packages compile before build dependencies are pruned. Transport, policy and producer registration still belong to #334; dependency installation alone activates nothing. The graph package is a real dependency of this package, not a copied geometry model.
 
 ## Interface and invariants
 

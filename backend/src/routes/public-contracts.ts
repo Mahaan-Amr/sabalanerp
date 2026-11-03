@@ -4,6 +4,8 @@ import { contractConfirmationService } from '../services/contractConfirmationSer
 import { getRequestEvidence } from '../utils/requestEvidence';
 
 const router = express.Router();
+const confirmationError = (result: { success: boolean; error?: string }) =>
+  result.error || 'اطلاعات تأیید قرارداد در دسترس نیست';
 
 router.post(
   '/contracts/confirm/lookup',
@@ -24,7 +26,7 @@ router.post(
     });
 
     if (!result.success) {
-      return res.status(400).json({ success: false, error: result.error });
+      return res.status(400).json({ success: false, error: confirmationError(result) });
     }
 
     return res.json({ success: true, data: result.data });
@@ -52,7 +54,7 @@ router.post(
     });
 
     if (!result.success) {
-      return res.status(400).json({ success: false, error: result.error });
+      return res.status(400).json({ success: false, error: confirmationError(result) });
     }
 
     return res.json({
@@ -82,7 +84,7 @@ router.post(
     });
 
     if (!result.success) {
-      return res.status(400).json({ success: false, error: result.error });
+      return res.status(400).json({ success: false, error: confirmationError(result) });
     }
 
     return res.json({
@@ -111,7 +113,7 @@ router.get(
     );
 
     if (!result.success) {
-      return res.status(400).json({ success: false, error: result.error });
+      return res.status(400).json({ success: false, error: confirmationError(result) });
     }
 
     return res.json({ success: true, data: result.data });
@@ -137,7 +139,7 @@ router.post(
     });
 
     if (!result.success) {
-      return res.status(400).json({ success: false, error: result.error });
+      return res.status(400).json({ success: false, error: confirmationError(result) });
     }
 
     return res.json({
@@ -163,7 +165,7 @@ router.post(
     });
 
     if (!result.success) {
-      return res.status(400).json({ success: false, error: result.error });
+      return res.status(400).json({ success: false, error: confirmationError(result) });
     }
 
     return res.json({

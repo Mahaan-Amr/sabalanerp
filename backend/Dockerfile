@@ -23,6 +23,9 @@ COPY backend/package*.json ./
 COPY packages/contract-product-graph/package*.json /packages/contract-product-graph/
 COPY packages/contract-product-graph/tsconfig*.json /packages/contract-product-graph/
 COPY packages/contract-product-graph/src /packages/contract-product-graph/src
+COPY packages/partner-sales-contracts/package*.json /packages/partner-sales-contracts/
+COPY packages/partner-sales-contracts/tsconfig*.json /packages/partner-sales-contracts/
+COPY packages/partner-sales-contracts/src /packages/partner-sales-contracts/src
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 RUN --mount=type=cache,target=/root/.npm \
   npm config set fetch-retries 5 \
@@ -32,6 +35,11 @@ RUN --mount=type=cache,target=/root/.npm \
   && cd /packages/contract-product-graph \
   && npm ci --prefer-offline --no-audit --fund=false \
   && npm run build \
+  && cd /packages/partner-sales-contracts \
+  && npm ci --include=dev --prefer-offline --no-audit --fund=false \
+  && npm run build \
+  && npm prune --omit=dev \
+  && cd /packages/contract-product-graph \
   && npm prune --omit=dev \
   && cd /app \
   && npm ci --prefer-offline --no-audit --fund=false
@@ -87,6 +95,7 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /packages/contract-product-graph /packages/contract-product-graph
+COPY --from=builder /packages/partner-sales-contracts /packages/partner-sales-contracts
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/dist ./dist
 COPY backend/public ./public

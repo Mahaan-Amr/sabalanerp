@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpInlineState, ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { formatPrice } from '@/lib/numberFormat';
@@ -149,6 +150,7 @@ export function LongitudinalProductSection({
   calculation?: LongitudinalProductCalculation | null;
   calculating?: boolean;
 }) {
+  const showPricing = useProductPricingVisibility();
   const localCalculation = React.useMemo(
     () => workerCalculation === undefined && !calculating
       ? calculateLongitudinalProduct(input)
@@ -163,7 +165,7 @@ export function LongitudinalProductSection({
     );
   const cutRateErrorRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
-    if (!showValidation || !missingLongRate) return;
+    if (!showPricing || !showValidation || !missingLongRate) return;
     const frame = requestAnimationFrame(() => {
       const target = cutRateErrorRef.current;
       target?.scrollIntoView({
@@ -175,7 +177,7 @@ export function LongitudinalProductSection({
       target?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [missingLongRate, showValidation]);
+  }, [missingLongRate, showPricing, showValidation]);
   const geometryPreviewCalculation = React.useMemo(() => {
     if (!missingLongRate) return null;
     const zero = parseCanonicalDecimal('0');
@@ -335,7 +337,7 @@ export function LongitudinalProductSection({
         <div className={errorClass}>{conflictFor('dimensions')}</div>
       )}
 
-      {input.baseMaterialPricing === 'paid-source-zero' ? (
+      {showPricing && (input.baseMaterialPricing === 'paid-source-zero' ? (
         <ErpInlineState
           kind="empty"
           title="هزینه سنگ مادر قبلاً در محصول منبع محاسبه شده است؛ این ردیف فقط هزینه برش و عملیات جدید را دارد."
@@ -349,10 +351,10 @@ export function LongitudinalProductSection({
           onValueChange={value => commitDecimal('baseRateToman', value, input.lastManualField)}
           error={conflictFor('baseRateToman')}
         />
-      )}
+      ))}
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-[var(--sds-border-default)] py-2 dark:border-[var(--sds-border-subtle)]">
-        {input.baseMaterialPricing !== 'paid-source-zero' && (
+        {showPricing && input.baseMaterialPricing !== 'paid-source-zero' && (
           <>
             <label className="inline-flex items-center gap-2 text-xs font-semibold">
               <CompactSwitch
@@ -398,7 +400,7 @@ export function LongitudinalProductSection({
           <CompactSwitch
             label="برش کالیبر"
             checked={resolved?.calibrationEnabled ?? input.calibrationEnabled}
-            disabled={noPhysicalCut || missingLongRate}
+            disabled={noPhysicalCut || (showPricing && missingLongRate)}
             onChange={calibrationEnabled => onChange({
               ...input,
               calibrationEnabled,
@@ -409,7 +411,7 @@ export function LongitudinalProductSection({
         </label>
       </div>
 
-      {missingLongRate && (
+      {showPricing && missingLongRate && (
         <div
           ref={cutRateErrorRef}
           id="longitudinal-cut-rate-error"
@@ -439,7 +441,7 @@ export function LongitudinalProductSection({
             ))}
           </div>
         )}
-        {!calculating && summaryRows.map(row => (
+        {!calculating && summaryRows.filter(row => showPricing || row.key === 'layout' || row.key === 'remainder').map(row => (
           <div
             key={row.key}
             className="grid min-h-9 grid-cols-[7rem_1fr] items-center gap-3 border-t border-[var(--sds-border-subtle)] py-1.5 text-xs dark:border-[var(--sds-border-subtle)]"

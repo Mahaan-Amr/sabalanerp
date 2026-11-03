@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import smsService from './smsService';
 import { recordContractCancellation } from './salesAttributionService';
+import type { PartnerConfirmationHooks } from './partnerSales/customerOutput/existingFlow';
 
 
 const LINK_TTL_DAYS = parseInt(process.env.CONTRACT_CONFIRM_LINK_TTL_DAYS || '60', 10);
@@ -174,6 +175,7 @@ async function createAuditLog(params: {
 }
 
 export class ContractConfirmationService {
+  constructor(private readonly partnerOutput?: PartnerConfirmationHooks) {}
   private async findSessionByContractAndPhone(
     contractNumber: string,
     phoneNumber: string,
@@ -251,6 +253,8 @@ export class ContractConfirmationService {
     explicitToken?: string;
     meta?: RequestEvidenceMeta;
   }): Promise<SendConfirmationResult> {
+    const partner = await this.partnerOutput?.sendForConfirmation(params);
+    if (partner !== undefined) return partner;
     const contract = await prisma.salesContract.findUnique({
       where: { id: params.contractId },
       include: {
@@ -479,6 +483,8 @@ export class ContractConfirmationService {
   }
 
   async getPublicContractByToken(token: string, meta?: RequestEvidenceMeta) {
+    const partner = await this.partnerOutput?.getPublicContractByToken(token, meta);
+    if (partner !== undefined) return partner;
     const tokenHash = hashValue(token);
     const session = await prisma.contractPublicConfirmation.findUnique({
       where: { tokenHash },
@@ -545,6 +551,8 @@ export class ContractConfirmationService {
     phoneNumber: string;
     meta?: RequestEvidenceMeta;
   }) {
+    const partner = await this.partnerOutput?.getPublicContractByManualLookup(params);
+    if (partner !== undefined) return partner;
     const lookup = await this.findSessionByContractAndPhone(params.contractNumber, params.phoneNumber, [
       'PENDING',
       'VERIFIED'
@@ -578,6 +586,8 @@ export class ContractConfirmationService {
     code: string;
     meta?: RequestEvidenceMeta;
   }) {
+    const partner = await this.partnerOutput?.verifyPublicOtp(params);
+    if (partner !== undefined) return partner;
     const tokenHash = hashValue(params.token);
     const session = await prisma.contractPublicConfirmation.findUnique({
       where: { tokenHash },
@@ -706,6 +716,8 @@ export class ContractConfirmationService {
     code: string;
     meta?: RequestEvidenceMeta;
   }) {
+    const partner = await this.partnerOutput?.verifyPublicOtpByManualLookup(params);
+    if (partner !== undefined) return partner;
     const lookup = await this.findSessionByContractAndPhone(
       params.contractNumber,
       params.phoneNumber
@@ -842,6 +854,8 @@ export class ContractConfirmationService {
   }
 
   async resendFromPublicToken(params: { token: string; meta?: RequestEvidenceMeta }) {
+    const partner = await this.partnerOutput?.resendFromPublicToken(params);
+    if (partner !== undefined) return partner;
     const tokenHash = hashValue(params.token);
     const session = await prisma.contractPublicConfirmation.findUnique({
       where: { tokenHash },
@@ -878,6 +892,8 @@ export class ContractConfirmationService {
     phoneNumber: string;
     meta?: RequestEvidenceMeta;
   }) {
+    const partner = await this.partnerOutput?.resendFromManualLookup(params);
+    if (partner !== undefined) return partner;
     const lookup = await this.findSessionByContractAndPhone(
       params.contractNumber,
       params.phoneNumber
@@ -901,6 +917,8 @@ export class ContractConfirmationService {
     canCancelApproved: boolean;
     meta?: RequestEvidenceMeta;
   }) {
+    const partner = await this.partnerOutput?.cancelContract(params);
+    if (partner !== undefined) return partner;
     const contract = await prisma.salesContract.findUnique({
       where: { id: params.contractId }
     });

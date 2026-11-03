@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useProductPricingVisibility } from './productPricingVisibility';
 import { ErpPressable, ErpInput } from '@/components/erp';
 import { formatPrice } from '@/lib/numberFormat';
 import type {
@@ -126,6 +127,7 @@ export function StairLayerDraftRow({
   readonly onChange: (draft: StairLayerConfigurationDraft) => void;
   readonly onRemove: () => void;
 }) {
+  const showPricing = useProductPricingVisibility();
   const update = (changes: Partial<StairLayerConfigurationDraft>) =>
     onChange({ ...draft, ...changes });
   const layersPerParentPiece = Number(draft.layersPerParentPiece);
@@ -160,7 +162,7 @@ export function StairLayerDraftRow({
             </span>
           )}
         </div>
-        <div className="min-w-0 border-y border-[var(--sds-border-default)] py-2 text-xs dark:border-[var(--sds-border-subtle)]">
+        {showPricing && <div className="min-w-0 border-y border-[var(--sds-border-default)] py-2 text-xs dark:border-[var(--sds-border-subtle)]">
           <span className="block text-[var(--sds-text-muted)] dark:text-[var(--sds-text-muted)]">
             قیمت نوع لایه · {draft.layerUnit ? UNIT_LABELS[draft.layerUnit] : '—'}
           </span>
@@ -172,7 +174,7 @@ export function StairLayerDraftRow({
               {errors.layerRateToman}
             </span>
           )}
-        </div>
+        </div>}
         <FlatInput
           label="تعداد لایه برای هر پله"
           value={draft.layersPerParentPiece}

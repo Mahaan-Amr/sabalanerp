@@ -24,6 +24,7 @@
   "dependencies": {
     "@react-three/fiber": "^8.18.0",
     "@sabalanerp/contract-product-graph": "file:../packages/contract-product-graph",
+    "@sabalanerp/partner-sales-contracts": "file:../packages/partner-sales-contracts",
     "@types/js-cookie": "^3.0.6",
     "@types/moment-jalaali": "^0.7.9",
     "@types/node": "^20",

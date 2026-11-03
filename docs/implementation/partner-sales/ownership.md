@@ -1,6 +1,6 @@
-# Partner implementation ownership — contract 1.0.0
+# Partner implementation ownership — contract 1.1.0
 
-Issue #313; Epic #311. Package `@sabalanerp/partner-sales-contracts@1.0.0`, wire `schemaVersion: 1`. These are responsibility owners, not invented human assignees. Claimants record their actual identity in their issue. Scope below reserves paths; it does not authorize activation or edits to another lane.
+Issue #313; Epic #311. Package `@sabalanerp/partner-sales-contracts@1.1.0`, original wire `schemaVersion: 1` plus explicit [workspace v2 companions](workspace-v2.md). These are responsibility owners, not invented human assignees. Claimants record their actual identity in their issue. Scope below reserves paths; it does not authorize activation or edits to another lane.
 
 ## Single-writer registry
 
@@ -51,6 +51,21 @@ Issue #313; Epic #311. Package `@sabalanerp/partner-sales-contracts@1.0.0`, wire
 | `frontend/src/features/contract-creation/**` | #330 Partner composition hooks | #332 requests changes through #330, not a competing wizard. |
 | Dockerfiles, deployment/health/backup/recovery configuration | #334 with operations owner review | Not changed by this foundation; preserve zero-data-loss gates. |
 
+Coordinated follow-up reservations (recorded in the relevant issue before edits):
+
+- #313 is the sole writer for the bounded 1.1.0 public workspace/command/query
+  extensions and frontend/backend dependency + Docker package wiring requested by
+  #330/#331; #333 reviewed the narrow packaging scope. This does not include any
+  deployment, service, maintenance or activation change. Ownership returns to #334
+  after publication.
+- #325 additionally owns the narrow `backend/src/utils/printTemplate.ts` typed
+  customer-output entry using the existing layout/fonts/sections, frozen business
+  identity and no private-data/logo fallback. The remaining-stone release owner
+  confirmed no overlap; ordinary-contract rendering must remain intact.
+- #327 additionally owns the six new event-name expectations in
+  `backend/src/services/__tests__/notificationPolicy.test.ts`; the exact complete
+  registry assertion and every existing event remain enforced.
+
 A path not listed is **not** implicitly owned. Owner coordination must be recorded in the Epic/child before changing a shared file. Git/index operations in a shared checkout are serialized; independent worktrees still use only `sabalanerp-local` for runtime QA.
 
 ## Compatibility and change procedure
@@ -58,4 +73,4 @@ A path not listed is **not** implicitly owned. Owner coordination must be record
 1. Pin exact package and wire versions in each delivery. This table is the consumer manifest for every executable child (#314–#336); #312 is the resolved human prerequisite and consumes no runtime package.
 2. Strict DTOs reject unknown fields. Adding a field can break an older strict reader: coordinate both producer and consumers before changing the wire schema, even if TypeScript calls it optional. Breaking wire changes require a new schema version and explicit old-reader handling; do not silently widen 1.0.0.
 3. Contract changes name every affected child, update fixtures and both consumer suites, and land through the shared writer. Each owner acknowledges the version in its issue.
-4. Runtime imports and Docker packaging are enabled together by #334. This delivery adds root build/install scripts and backend/frontend contract-test scripts, not runtime imports into running services. No broken file dependency is introduced into their Docker manifests.
+4. Runtime imports and Docker packaging are enabled together. The original 1.0.0 delivery added only build/install/consumer-test scripts; the coordinated 1.1.0 follow-up supplies frontend/backend dependencies and Docker package retention. Runtime producers, authorization and transport registration remain #334 work with activation closed.

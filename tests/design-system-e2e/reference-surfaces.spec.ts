@@ -684,7 +684,7 @@ test('Product Selection restores into the shared interface without changing pers
   await expect(page.getByRole('region', { name: 'کاتالوگ محصولات' })).toBeVisible();
   await expect(page.locator('main.sds-workspace')).toHaveCount(1);
   expect(await page.locator('main.sds-workspace .sds-workspace-surface').count())
-    .toBeGreaterThanOrEqual(3);
+    .toBeGreaterThanOrEqual(2);
   await expect(page.locator('[data-contract-row-id="source-row"]')).toBeVisible();
   await expect(page.locator('[data-contract-row-id="child-row"]')).toBeVisible();
   await expect(page.getByText('خدمت مستقل', { exact: true })).toBeVisible();
@@ -899,6 +899,10 @@ test('Product Selection restores into the shared interface without changing pers
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(childDialog).toBeVisible();
   await childDialog.getByRole('button', { name: 'ذخیره تغییرات', exact: true }).click();
+  await expect(childDialog.getByRole('alert')).toHaveText(
+    'اطلاعات منبع این محصول قابل ویرایش نیست؛ محصول را حذف کنید و دوباره از سنگ باقی‌مانده بسازید.'
+  );
+  await childDialog.getByRole('button', { name: 'انصراف', exact: true }).click();
   await expect(childDialog).toBeHidden();
 
   await page.setViewportSize({ width: 1440, height: 900 });

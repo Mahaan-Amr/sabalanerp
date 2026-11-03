@@ -127,7 +127,7 @@ test('Partner creation consumes the shared eight-step date, customer, and projec
   await assertNoSeriousAxeViolations(page);
 });
 
-test('a resumed Partner inquiry stays inside the same seven-step contract wizard', async ({ page }) => {
+test('a resumed Partner inquiry stays inside the same eight-step contract wizard', async ({ page }) => {
   await loginAsAdmin(page);
   await page.addInitScript(() => {
     window.localStorage.setItem('partner-creation-runtime:partner-e2e:partner-inquiry-e2e', JSON.stringify({
@@ -177,33 +177,28 @@ test('a resumed Partner inquiry stays inside the same seven-step contract wizard
   await setTheme(page, 'light');
   const workflow = page.locator('main.sds-workspace.sds-neumorphic-workflow-scope');
   await expect(workflow.getByRole('heading', { name: 'ایجاد فروش همکار', exact: true })).toBeVisible();
-  await expect(workflow.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' }).getByRole('button')).toHaveCount(7);
+  await expect(workflow.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' }).getByRole('button')).toHaveCount(8);
   await expect(workflow).toHaveCSS('direction', 'rtl');
   const previous = workflow.getByRole('button', { name: 'قبلی', exact: true });
   await expect(previous).toBeEnabled();
   await previous.click();
   await expect(workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ })).toHaveAttribute('aria-pressed', 'true');
   await previous.click();
-  await workflow.getByRole('button', { name: 'ایجاد مشتری', exact: true }).first().click();
-  await page.getByRole('textbox', { name: 'نام', exact: true }).fill('مشتری');
-  await page.getByRole('textbox', { name: 'نام خانوادگی', exact: true }).fill('تازه');
-  await page.getByRole('textbox', { name: 'شماره تماس', exact: true }).fill('09121111111');
-  await page.getByRole('textbox', { name: 'نشانی تحویل', exact: true }).fill('تهران');
-  await page.getByRole('button', { name: 'ثبت مشتری و ادامه', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => JSON.parse(window.localStorage
-    .getItem('partner-creation-runtime:partner-e2e:partner-inquiry-e2e') || '{}')))
-    .toMatchObject({ customerId: 'partner-customer-created' });
   await workflow.getByRole('button', { name: /مشتری همکار آزمایشی/ }).click();
   await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
   await workflow.getByRole('button', { name: /پروژه همکار آزمایشی/ }).click();
   await workflow.getByRole('button', { name: 'بعدی', exact: true }).click();
-  await expect(workflow.getByText('مشخصات فنی ذخیره‌شده برای ۰ ردیف', { exact: true })).toBeVisible();
+  await expect(workflow.getByText('هنوز محصولی اضافه نشده است', { exact: true })).toBeVisible();
   await setTheme(page, 'dark');
   await setViewportAndZoom(page, { width: 390, height: 844 });
   expect(await workflow.evaluate(element => element.getBoundingClientRect().right <= document.documentElement.clientWidth + 1)).toBe(true);
+  await previous.click();
+  await previous.click();
+  await workflow.getByRole('button', { name: 'ایجاد مشتری', exact: true }).first().click();
+  await expect(page).toHaveURL(/\/dashboard\/crm\/customers\/create\?/);
 });
 
-test('the independent price inquiry remains outside customer and project selection', async ({ page }) => {
+test('a new price inquiry starts from a numbered Partner sale case', async ({ page }) => {
   await loginAsAdmin(page);
   await page.route('**/api/partner/cases/creation-context', route => route.fulfill({
     status: 200,
@@ -229,7 +224,9 @@ test('the independent price inquiry remains outside customer and project selecti
   });
 
   await page.goto('/dashboard/sales/partner-inquiries?newInquiry=1');
-  await expect(page.getByRole('heading', { name: 'استعلام قیمت جدید', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'استعلام‌های قیمت', exact: true })).toBeVisible();
+  await expect(page.getByText(/استعلام جدید فقط از داخل پرونده شماره‌دار فروش همکار ایجاد می‌شود/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ایجاد قرارداد فروش همکار', exact: true })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'مراحل ایجاد قرارداد' })).toHaveCount(0);
   await expect(page.getByRole('searchbox', { name: 'جستجوی مشتری' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /پروژه/ })).toHaveCount(0);

@@ -88,7 +88,7 @@ test('HR decision sheet requires a reason for rejection', async ({ page }) => {
 test('workflow hides all surfaces without an independent action permission', async ({ page }) => {
   await loginAsAdmin(page);
   await mockWorkflowApi(page, {});
-  await page.goto('/dashboard/hr/personnel/performance');
+  await page.goto(`/dashboard/hr/personnel/performance/supervisor/${sectionId}`);
   await expect(page.getByText('هیچ مجوز فعال برای گردش ارزیابی عملکرد ندارید.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'شروع بازسازی' })).toHaveCount(0);
 });
@@ -96,7 +96,7 @@ test('workflow hides all surfaces without an independent action permission', asy
 test('independent suspension permission exposes the audited accepted-result action', async ({ page }) => {
   await loginAsAdmin(page);
   await mockWorkflowApi(page, { PAUSE_PERFORMANCE_EVALUATION: true });
-  await page.goto('/dashboard/hr/personnel/performance');
+  await page.goto(`/dashboard/hr/personnel/performance/supervisor/${sectionId}`);
   await page.getByRole('button', { name: /اقدام‌های منابع انسانی/ }).click();
   await page.getByRole('button', { name: 'تعلیق اثر نتیجه' }).click();
   const dialog = page.getByRole('dialog', { name: 'تعلیق اثر نتیجه' });

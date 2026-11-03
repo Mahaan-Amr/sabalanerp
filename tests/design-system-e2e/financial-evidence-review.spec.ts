@@ -138,6 +138,7 @@ test('approval conflict reloads the contract and opens the exact dedicated revie
   const fixture = await installAccountingFixture(page);
   await page.goto(`/dashboard/accounting/contracts/${contractId}`);
   await waitForStableState(page);
+  await page.getByRole('button', { name: 'رکوردهای مالی', exact: true }).click();
 
   await page.getByText('شماره فاکتور سیستمی', { exact: true }).locator('..').locator('input').fill('1168');
   await page.getByText('مبلغ سپیدار (ریال)', { exact: true }).locator('..').locator('input').fill('380300000');

@@ -49,7 +49,7 @@ export function originalOnlineEvidenceReader(){
    assert.ok(!stat.isSymbolicLink());if(stat.isDirectory())snapshot(file);else if(/\.(?:ts|json)$/.test(name))before.set(file,sha(read(file)));
   }};snapshot(path.join(repository,'backend/src/services'));
   const result=esbuild.buildSync({absWorkingDir:repository,stdin:{contents:
-   "export {readOnlineReleaseEvidence} from './backend/src/services/onlineReleaseEvidence';export {verifyOnlineQualificationOrigin} from './backend/src/services/onlineQualificationProvenance';export {validateProductionExecutionBindings} from './backend/src/services/onlineImageExecutionBinding';",
+   "export {readOnlineReleaseEvidence} from './backend/src/services/onlineReleaseEvidence';export {assertOnlineQualificationProof} from './backend/src/services/onlineQualificationEvidence';export {verifyOnlineQualificationOrigin} from './backend/src/services/onlineQualificationProvenance';export {validateProductionExecutionBindings} from './backend/src/services/onlineImageExecutionBinding';",
    resolveDir:repository,sourcefile:'original-canonical-online-reader.ts',loader:'ts'},bundle:true,platform:'node',format:'cjs',target:'node22',write:false,metafile:true,logLevel:'silent'});
   for(const name of Object.keys(result.metafile.inputs)){
    if(name==='original-canonical-online-reader.ts')continue;
@@ -69,6 +69,7 @@ export function originalOnlineEvidenceReader(){
   module._compile(adapted,module.filename);
   assert.equal(typeof module.exports.readOnlineReleaseEvidence,'function');assert.equal(typeof module.exports.verifyOnlineQualificationOrigin,'function');
   parser=Object.freeze({readOnlineReleaseEvidence:(...args)=>{revalidate();const value=module.exports.readOnlineReleaseEvidence(...args);revalidate();return value;},
+   assertOnlineQualificationProof:(...args)=>{revalidate();const value=module.exports.assertOnlineQualificationProof(...args);revalidate();return value;},
    verifyOnlineQualificationOrigin:(...args)=>{revalidate();return module.exports.verifyOnlineQualificationOrigin(...args);},revalidate,
    validateProductionExecutionBindings:(...args)=>{revalidate();return module.exports.validateProductionExecutionBindings(...args);},
    sourceHashes:Object.freeze(Object.fromEntries([...sources].map(([file,digest])=>[path.relative(repository,file).replaceAll('\\','/'),digest]))),bundleSha256:sha(Buffer.from(adapted)),platformAdapter:Object.freeze({applied:process.platform==='win32',sourceSha256:financialSourceSha256,emittedLinuxKeyBlockSha256,originalBundleSha256:sha(result.outputFiles[0].contents),fixedPublicKeySha256})});

@@ -155,6 +155,64 @@ def provision_private_qualification_public_key(authority, configuration):
         write(destination, pem, 0o444)
 
 
+def export_identity(value):
+    return {key: str(getattr(value, key)) for key in
+            ['st_dev', 'st_ino', 'st_mode', 'st_uid', 'st_nlink', 'st_size', 'st_mtime_ns', 'st_ctime_ns']}
+
+
+def publish_runtime_export(authority, runtime_id, raw):
+    """Keep exact source-created public export identity, separately from scope authority."""
+    check(re.fullmatch(r'[a-f0-9]{64}', runtime_id), 'APPLICATION_EXPORT_ID_INVALID')
+    check(authority.resolve(strict=True) == authority and not authority.is_symlink(), 'APPLICATION_EXPORT_ROOT_UNSAFE')
+    file = authority / (runtime_id + '.json')
+    write(file, raw)
+    value = file.lstat()
+    return dict(name=file.name, sha256=hashlib.sha256(raw).hexdigest(), identity=export_identity(value),
+                parent={key: str(getattr(authority.stat(), key)) for key in ['st_dev', 'st_ino']})
+
+
+def retire_runtime_exports(authority, exports, assert_original_readers_closed):
+    """Called only after successful local qualification; unknown custody never deletes.
+
+    The existing coordinator's exclusive resource lease covers the whole operation.
+    Trust keys, private grants, work/native journals and timestamps are preserved.
+    """
+    assert_original_readers_closed()
+    check(authority.resolve(strict=True) == authority and not authority.is_symlink(), 'APPLICATION_EXPORT_ROOT_UNSAFE')
+    before = export_identity(authority.stat())
+    names = [entry['name'] for entry in exports]
+    check(names and len(names) == len(set(names)) and all(re.fullmatch(r'[a-f0-9]{64}\.json', name) for name in names),
+          'APPLICATION_EXPORT_SELECTION_INVALID')
+    trust = {'qualification-controller-public-key.pem', 'release-controller-public-key.pem'}
+    check(set(os.listdir(authority)) - trust == set(names), 'APPLICATION_EXPORT_NAMESPACE_POLLUTED')
+    def validate(entry):
+        check(entry['parent'] == {key: str(getattr(authority.stat(), key)) for key in ['st_dev', 'st_ino']},
+              'APPLICATION_EXPORT_ROOT_CHANGED')
+        file = authority / entry['name']
+        value = file.lstat()
+        check(stat.S_ISREG(value.st_mode) and value.st_nlink == 1 and export_identity(value) == entry['identity'],
+              'APPLICATION_EXPORT_IDENTITY_CHANGED')
+        check(hashlib.sha256(file.read_bytes()).hexdigest() == entry['sha256']
+              and export_identity(file.lstat()) == entry['identity'], 'APPLICATION_EXPORT_BYTES_CHANGED')
+    # Refuse the whole selection before removing anything if a known input changed.
+    for entry in exports:
+        validate(entry)
+    assert_original_readers_closed()
+    for entry in exports:
+        validate(entry)
+        (authority / entry['name']).unlink()
+    if os.name != 'nt':
+        descriptor = os.open(authority, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    after = export_identity(authority.stat())
+    check(not (set(os.listdir(authority)) - trust), 'APPLICATION_EXPORT_NAMESPACE_POLLUTED')
+    return dict(format='sabalan-local-public-export-retirement/v1', productionAdmission=False,
+                retired=exports, directoryBefore=before, directoryAfter=after, timestampsRestored=False)
+
+
 def lock(file):
     write(file, b'', 0o600)
     value = file.stat()
@@ -180,7 +238,7 @@ def issue_runtime(template, name, purpose='http'):
           runtimeId=runtime_id, image=scope['image'], registrySha256=scope['manifestSha256'], generation=1,
           gate={key: scope['gate'][key] for key in ['device', 'inode', 'ownerUid']}, postgresApplicationName=namespace))), 0o600)
     raw = encoded(scope)
-    write(Path('/app/runtime-authority') / (runtime_id + '.json'), raw)
+    public_exports.append(publish_runtime_export(Path('/app/runtime-authority'), runtime_id, raw))
     return dict(name=name, scope=scope, file='/run/sabalan-online/' + runtime_id + '.json', sha256=hashlib.sha256(raw).hexdigest())
 
 
@@ -213,6 +271,7 @@ def executed_writer_coverage(observations, migration, private_pair):
 
 
 if mode == 'prepare':
+    public_exports = []
     config = json.loads((root / 'config.json').read_bytes())
     private_runtime = config['privateQualificationRuntime']
     check(private_runtime['entryPath'] == '/app/dist/onlinePrivateQualification.js'
@@ -294,7 +353,7 @@ if mode == 'prepare':
                          gate={key: gate[key] for key in ['device', 'inode', 'ownerUid']}, postgresApplicationName=namespace))
         write(boundary / 'scope.json', encoded(provision), 0o600)
         raw = encoded(scope)
-        write(Path('/app/runtime-authority') / (runtime_id + '.json'), raw)
+        public_exports.append(publish_runtime_export(Path('/app/runtime-authority'), runtime_id, raw))
         grants.append(dict(name=name, scope=scope, file='/run/sabalan-online/' + runtime_id + '.json', sha256=hashlib.sha256(raw).hexdigest()))
     restored_database = 'qa_application_restored_' + secrets.token_hex(16)
     sql('CREATE DATABASE "' + restored_database + '"')
@@ -362,7 +421,7 @@ if mode == 'prepare':
                           restored=issue_runtime(restored_template, 'restored-inquiry'))
     authority_fd = os.open('/app/runtime-authority', os.O_RDONLY | os.O_DIRECTORY)
     os.fsync(authority_fd); os.close(authority_fd)
-    index_bytes = encoded(dict(database=database, oid=oid, grants=grants,
+    index_bytes = encoded(dict(database=database, oid=oid, grants=grants, publicExports=public_exports,
           restoredDatabase=restored_database, restoredOid=restored_oid, restoredGrant=restored_grant,
           privateQualification=private_pair, pristinePerformanceGrant=pristine_grant,onlinePointInquiryGrant=online_point_inquiry_grant,
           catalog=catalog,
@@ -789,9 +848,19 @@ try:
     coverage_module=importlib.util.module_from_spec(coverage_spec);coverage_spec.loader.exec_module(coverage_module)
     installed_coverage=coverage_module.derive(private_pair,json.loads(retained_raw),
         json.loads((root/'pristine-performance-installed-profile.json').read_bytes()),index['schemaSha256'])
+    def assert_local_export_readers_closed():
+        check(all(child.poll() == 0 for _, child in actors)
+              and transport.edge is not None and transport.edge.poll() == 0 and role_client.chrome_closed
+              and capture_module.original_capture_custody_closed(sql) and private_pair_module.original_custody_closed(),
+              'APPLICATION_EXPORT_ORIGINAL_READERS_UNKNOWN')
+        for name in [database, index['restoredDatabase'], index['privateQualification']['domainRestore']['database']]:
+            check(sql("SELECT count(*) FROM pg_database WHERE datname='" + name + "'") == '0',
+                  'APPLICATION_EXPORT_DATABASE_STILL_PRESENT')
+    export_retirement = retire_runtime_exports(Path('/app/runtime-authority'), index['publicExports'], assert_local_export_readers_closed)
+    write(root / 'public-export-retirement.json', encoded(export_retirement))
     proven = True
     print(json.dumps(dict(format='sabalan-application-native/v1', passResult=True, productionAdmission=False,
-                          observations=observations, originalNativeClosures=closures,
+                          observations=observations, originalNativeClosures=closures, publicExportRetirement=export_retirement,
                           bothServingReadersObservedLaterCommit='123456800',
                           exactOriginalPersianDrainingMessageVerified=True,
                           pairedRouting=routing, originalReadonlyTransportRetirement=transport_retirement,

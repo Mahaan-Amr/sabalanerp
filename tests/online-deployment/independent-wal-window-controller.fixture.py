@@ -1,11 +1,65 @@
 """Original bounded WAL verifier under the restore guardian's SAME lock OFDs.
 No Docker, SSH, SQL, runtime adoption, or successful-report import.
 """
-import base64,hashlib,json,os,re,stat,subprocess,threading
+import base64,hashlib,json,os,re,stat,subprocess,threading,tarfile
 from pathlib import Path
 
 MAX_CIPHER=256*1024**2
 MAX_PLAIN=64*1024**2
+
+
+def verify_components_original(config,source,read):
+ """RSA/GCM only on the independent host, under the launcher's two locks.
+ No PostgreSQL, Docker stack or application process is started by this lane.
+ """
+ assert source['format']=='sabalan-original-independent-components-input/v1'
+ point=config['onlinePhysicalPoint'];assert source['captureId']==point['captureId']
+ for key in ('sealedSha256','manifestSha256'):assert source[key]==point[key]
+ worker=Path(config['bundleRoot'])/'independent-online-components.worker.cjs'
+ read(worker,config['sourcePins'][worker.name])
+ codec=Path(config['bundleRoot'])/'recoveryCrypto.cjs';read(codec,config['sourcePins'][codec.name])
+ operation=config['operation'];assert re.fullmatch('[a-f0-9]{32}',operation)
+ directory=Path('/root/sabalan-recovery-private/native-qa')/('online-components-'+operation)
+ directory.mkdir(mode=0o700);plain=directory/'plaintext';plain.mkdir(mode=0o700)
+ value=dict(format='sabalan-independent-online-components-input/v1',execution='INDEPENDENT_NATIVE_COMPONENTS',
+  operation=operation,captureId=point['captureId'],root=str(plain),sealedFile=point['sealedFile'],sealedSha256=point['sealedSha256'],
+  manifestFile=point['manifestFile'],manifestSha256=point['manifestSha256'],cipherPaths=point['cipherPaths'],
+  codecFile=str(codec),codecSha256=config['sourcePins'][codec.name],keyFile=config['recoveryPrivateKeyPath'],keySha256=config['recoveryPrivateKeySha256'])
+ file=directory/'input.json';raw=frame(value);write(file,raw)
+ child=subprocess.Popen([config['nodeExecutable'],'--max-old-space-size=192',str(worker),str(file),hashlib.sha256(raw).hexdigest()],
+  stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,pass_fds=(9,10))
+ # communicate retains the actual child and drains both original pipes. A
+ # negative/unknown result reaches the launcher's held-owner boundary.
+ out,err=child.communicate();assert child.returncode==0 and not err and 0<len(out)<=32*1024**2
+ report=json.loads(out);assert report['captureId']==point['captureId']
+ assert report['fullGcmAuthenticated'] is True and report['independentRsaDecryptVerified'] is True
+ facts={}
+ for role in ('coherent-cut','coverage-manifest','wal-capture'):
+  rows=[row for row in report['components'] if row['role']==role];assert len(rows)==1;row=rows[0]
+  content=read(Path(row['path']),row['sha256'],8*1024**2)
+  facts[role]=dict(rawBase64=base64.b64encode(content).decode(),bytes=len(content),sha256=row['sha256'])
+ base=[row for row in report['components'] if row['role']=='physical-base'];assert len(base)==1
+ base_file=Path(base[0]['path']);assert base_file.parent==plain and base_file.resolve(strict=True)==base_file
+ archive_facts={};names=set()
+ with tarfile.open(base_file,'r:') as archive:
+  for member in archive:
+   name=member.name.rstrip('/');assert name and not name.startswith('/') and not set(name.split('/'))&{'','..','.'} and name not in names
+   names.add(name);assert len(names)<=250000 and member.type in (tarfile.REGTYPE,tarfile.AREGTYPE,tarfile.DIRTYPE) and not member.issparse() and not member.pax_headers
+   if name in ('backup_manifest','global/pg_control'):
+    assert member.isfile() and 0<member.size<=64*1024**2
+    content=archive.extractfile(member).read(64*1024**2+1);assert len(content)==member.size
+    archive_facts[name]=hashlib.sha256(content).hexdigest()
+ assert set(archive_facts)=={'backup_manifest','global/pg_control'}
+ with base_file.open('rb') as stream:assert hashlib.file_digest(stream,'sha256').hexdigest()==base[0]['sha256']
+ write(directory/'decryption.json',out)
+ host=dict(machineUuidSha256=hashlib.sha256(Path('/etc/machine-id').read_text().strip().lower().encode()).hexdigest(),
+  kernelBootIdSha256=hashlib.sha256(Path('/proc/sys/kernel/random/boot_id').read_text().strip().lower().encode()).hexdigest())
+ assert host!=point['sourceHost'] and host['machineUuidSha256']!=point['sourceHost']['machineUuidSha256']
+ return dict(format='sabalan-original-independent-components-result/v1',captureId=point['captureId'],rsaHost=host,
+  sealedManifestSha256=point['sealedSha256'],plaintextManifestSha256=point['manifestSha256'],
+  originalVerifier=dict(pid=child.pid,code=child.returncode,signal=None,stdoutEof=True,stderrEof=True),
+  workerSourceSha256=config['sourcePins'][worker.name],decryptionRawBase64=base64.b64encode(out).decode(),
+  decryptionSha256=hashlib.sha256(out).hexdigest(),materialFacts=facts,physicalBaseFacts=archive_facts,physicalReplayQualified=False,productionAdmission=False)
 
 def frame(value):return (json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode()
 def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()

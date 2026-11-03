@@ -16,6 +16,22 @@ This is a maintenance-only repair, independent of attendance R3. No schema, atte
 
 ## Local runtime
 
+Local Compose uses `deploy/clamav/Dockerfile.local` and the fixed HTTPS C3SL/UFPR
+mirror `https://clamavdb.c3sl.ufpr.br`, listed by the university at
+<https://www.c3sl.ufpr.br/espelhos/>. Its bounded CVD-header qualification on
+2026-11-03 observed daily version 28173, matching official freshness DNS, while
+FEUP still served 28172 and returned 404 for the 28173 patch. FreshClam must
+still authenticate and load publisher signatures during a real eligible cycle.
+
+This local image changes only the acquisition origin. Production keeps its
+existing Dockerfile, FEUP source and protected qualification contract. Local
+recreation reuses `clamav_database` with the exact existing `freshclam.dat`,
+updater schedule and result evidence. Do not clear or advance those files:
+changing the source does not authorize an early attempt or claim healthy state.
+The DNS freshness authority, `TestDatabases`, TLS verification, signature checks,
+serialized updater, 7200-second interval and fail-closed health gates remain.
+
+
 ### Explicit private acquisition transport
 
 The default immutable image uses `CLAMAV_ACQUISITION_TRANSPORT=direct`. An

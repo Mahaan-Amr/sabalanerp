@@ -7,7 +7,7 @@ import {
   projectCanonicalProductGraph
 } from '@sabalanerp/contract-product-graph';
 import { body, validationResult } from 'express-validator';
-import { CorrectionRequestStatus, PrismaClient } from '@prisma/client';
+import { CorrectionRequestStatus, Prisma, PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
@@ -49,6 +49,8 @@ import {
   readContractProductGraphWithoutWriting
 } from '../services/contractProductGraphMigration';
 import { buildSellerProductHistory } from '../services/sellerProductHistory';
+import { assertContractQuantityEvidenceReadyForFinalization } from '../services/contractQuantityEvidenceGuard';
+import { ApprovedPricingEvidenceError, asApprovedPricingEvidenceError } from '../services/approvedPricing/evidenceError';
 import {
   acquireSalesContractEditSession,
   assertSalesContractEditOwnership,
@@ -1520,14 +1522,25 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
 
     const signedAt = new Date();
     await prisma.$transaction(async (tx) => {
-      await tx.salesContract.update({
-        where: { id: req.params.id },
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id" FROM "sales_contracts" WHERE "id" = ${req.params.id} FOR UPDATE
+      `);
+      const lockedContract = await tx.salesContract.findUnique({ where: { id: req.params.id } });
+      if (!lockedContract || lockedContract.isInactive || lockedContract.status !== 'APPROVED') {
+        throw new ApprovedPricingEvidenceError('Contract changed before finalization');
+      }
+      if (req.user.role !== 'ADMIN' && req.user.departmentId && lockedContract.departmentId !== req.user.departmentId) {
+        throw new ApprovedPricingEvidenceError('Contract access changed before finalization');
+      }
+      await assertContractQuantityEvidenceReadyForFinalization(tx, lockedContract.id);
+      const signed = await tx.salesContract.updateMany({
+        where: { id: req.params.id, status: 'APPROVED', updatedAt: lockedContract.updatedAt },
         data: {
           status: 'SIGNED',
           signedBy: req.user.id,
           signedAt,
           signatures: {
-            ...(contract.signatures as any || {}),
+            ...(lockedContract.signatures as any || {}),
             sign: {
               by: req.user.id,
               at: signedAt.toISOString(),
@@ -1536,7 +1549,8 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
           }
         }
       });
-      await snapshotRealizedSale(tx, contract.id, req.user.id, signedAt);
+      if (signed.count !== 1) throw new ApprovedPricingEvidenceError('Contract changed during finalization');
+      await snapshotRealizedSale(tx, lockedContract.id, req.user.id, signedAt);
     });
 
     const updatedContract = await prisma.salesContract.findUniqueOrThrow({
@@ -1583,6 +1597,13 @@ router.put('/contracts/:id/sign', protect, requireFeatureAccess(FEATURES.SALES_C
     return;
   } catch (error) {
     console.error('Sign sales contract error:', error);
+    if (asApprovedPricingEvidenceError(error)) {
+      res.status(409).json({
+        success: false,
+        error: 'ثبت نهایی انجام نشد؛ دوباره تلاش کنید'
+      });
+      return;
+    }
     res.status(500).json({
       success: false,
       error: 'Server error'

@@ -2,7 +2,6 @@
 import { ErpButton, ErpCard, ErpCheckbox, ErpField, ErpIconButton, ErpInlineState, ErpInput } from '@/components/erp';
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { FaEye, FaEyeSlash, FaUser, FaArrowRight } from 'react-icons/fa';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { authAPI } from '@/lib/api';
@@ -15,7 +14,6 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const router = useRouter();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -66,7 +64,10 @@ export default function LoginPage() {
           ? storedReturnTo
           : '/dashboard';
         sessionStorage.removeItem('post-login-return-to');
-        router.push(data.data.mustChangePassword ? '/change-password' : returnTo);
+        // Authentication providers live above this route. A document navigation
+        // makes every provider read the newly issued HttpOnly session before any
+        // protected workspace or realtime request can start.
+        window.location.assign(data.data.mustChangePassword ? '/change-password' : returnTo);
       } else {
         setErrors({ general: data.error || 'ورود ناموفق بود' });
       }

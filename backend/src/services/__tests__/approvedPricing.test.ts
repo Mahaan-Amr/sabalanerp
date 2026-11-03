@@ -23,17 +23,95 @@ import {
   OptimizerQuantityEvidenceConflictError,
 } from '../optimizerDerivedQuantityEvidence';
 import {
+  bindFrozenRowsToPostSnapshotCanonicalGraph,
   bindLegacyRowsToMigratedGraph,
   financialCommercialSnapshotMatches,
   reconstructLegacyV1DiscountEligibility,
   reconstructLegacyV1Pricing,
   reconstructLegacyV1Quantity,
+  rebindFrozenContractItemIdentities,
   resolveFinancialApprovalGraphEvidence,
 } from '../approvedPricing/prismaRepository';
 import {
   ApprovedPricingEvidenceError,
   asApprovedPricingEvidenceError,
 } from '../approvedPricing/evidenceError';
+import { resolveCommercialQuantityPolicy } from '../commercialQuantityPolicy';
+import { approvedPricingOperationalContractItemId } from '../approvedPricing/prismaEvidence';
+
+test('keeps frozen pricing identity for integrity while exposing the live item operationally', () => {
+  assert.equal(approvedPricingOperationalContractItemId({
+    contractItemId: 'frozen-item',
+    linkedContractItemId: 'live-item',
+  }), 'live-item');
+  assert.equal(approvedPricingOperationalContractItemId({
+    contractItemId: 'ordinary-live-item',
+    linkedContractItemId: 'ordinary-live-item',
+  }), 'ordinary-live-item');
+  assert.equal(approvedPricingOperationalContractItemId({
+    contractItemId: 'recovered-frozen-item',
+    linkedContractItemId: null,
+  }), 'recovered-frozen-item');
+});
+
+test('rebinds a frozen source identity to the live item only through its stable product row', () => {
+  const result = rebindFrozenContractItemIdentities({
+    snapshotItems: [{ id: 'frozen-item', productId: 'product-1', productRowId: 'row-1', productType: 'longitudinal' }],
+    liveItems: [{ id: 'live-item', productId: 'product-1', productRowId: 'row-1', productType: 'longitudinal' }],
+    invoiceItems: [{ id: 'invoice-item', contractItemId: 'frozen-item' }],
+  });
+
+  assert.equal(result.idMap.get('frozen-item'), 'live-item');
+  assert.deepEqual(result.rebindings, [{
+    sourceContractItemId: 'frozen-item',
+    linkedContractItemId: 'live-item',
+    invoiceItemId: 'invoice-item',
+    productRowId: 'row-1',
+    rule: 'FROZEN_STABLE_PRODUCT_ROW_LIVE_ITEM_REBINDING_V1',
+  }]);
+});
+
+test('rejects frozen identity rebinding when product identity is not exact', () => {
+  assert.throws(() => rebindFrozenContractItemIdentities({
+    snapshotItems: [{ id: 'frozen-item', productId: 'product-1', productRowId: 'row-1', productType: 'longitudinal' }],
+    liveItems: [{ id: 'live-item', productId: 'different-product', productRowId: 'row-1', productType: 'longitudinal' }],
+    invoiceItems: [{ id: 'invoice-item', contractItemId: 'frozen-item' }],
+  }), ApprovedPricingEvidenceError);
+});
+
+const longitudinalCommercialPolicy = (roundingPolicy: 'rounding-v1' | 'rounding-v2') =>
+  resolveCommercialQuantityPolicy({ graphSchemaVersion: 1, roundingPolicy, productFamily: 'longitudinal' });
+
+test('defines versioned piece, measured, and billable roles for every canonical product family', () => {
+  assert.deepEqual(resolveCommercialQuantityPolicy({
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    productFamily: 'prepared',
+    commercialUnit: 'count',
+  }).billableQuantity, {
+    role: 'BILLABLE_QUANTITY', basis: 'PIECE_COUNT', unit: 'count', scale: 0,
+  });
+  assert.equal(resolveCommercialQuantityPolicy({ graphSchemaVersion: 1, roundingPolicy: 'rounding-v1',
+    productFamily: 'prepared', commercialUnit: 'ton' }).billableQuantity.scale, 3);
+  for (const productFamily of ['longitudinal', 'slab']) {
+    const policy = resolveCommercialQuantityPolicy({ graphSchemaVersion: 1, roundingPolicy: 'rounding-v1', productFamily });
+    assert.equal(policy.version, 'commercial-quantity-v1');
+    assert.equal(policy.pieceCount.scale, 0);
+    assert.equal(policy.billableQuantity.basis, 'MEASURED_QUANTITY');
+    assert.equal(policy.billableQuantity.scale, 3);
+  }
+  for (const productFamily of ['stair', 'volumetric']) {
+    const policy = resolveCommercialQuantityPolicy({ graphSchemaVersion: 1, roundingPolicy: 'rounding-v1', productFamily });
+    assert.equal(policy.billableQuantity.basis, 'PIECE_COUNT');
+    assert.equal(policy.billableQuantity.unit, 'count');
+    assert.equal(policy.billableQuantity.scale, 0);
+  }
+  assert.throws(() => resolveCommercialQuantityPolicy({
+    graphSchemaVersion: 1,
+    roundingPolicy: 'rounding-v2',
+    productFamily: 'unknown',
+  }), ApprovedPricingEvidenceError);
+});
 
 test('only typed evidence failures can become a financial review case', () => {
   const evidenceFailure = new ApprovedPricingEvidenceError('frozen evidence conflict');
@@ -94,6 +172,68 @@ test('accepts a missing draft graph snapshot only from the exact deterministic l
     migrationAuditCommandId: 'legacy-migration:contract-1:same-hash',
     snapshotOriginallyMissing: true,
   });
+});
+
+test('accepts a post-snapshot canonical graph only from its exact audited writer revision and hashes', () => {
+  const currentGraphState = {
+    schemaVersion: 1, revision: 2, graph: { schemaVersion: 1 },
+    inputHash: 'canonical-hash', resultHash: 'canonical-hash', totalAmountToman: '100',
+  };
+  const resolved = resolveFinancialApprovalGraphEvidence({
+    snapshotGraphState: null,
+    currentGraphState,
+    migrationAudit: {
+      commandId: 'wizard-save:contract-1:2:canonical-hash', resultRevision: 2,
+      inputHash: 'canonical-hash', resultHash: 'canonical-hash',
+      command: { kind: 'canonical-wizard-save' },
+    },
+  });
+  assert.equal(resolved.graphState, currentGraphState);
+  assert.equal(resolved.compatibility?.evidenceOrigin, 'POST_SNAPSHOT_DETERMINISTIC_CANONICAL_GRAPH_BINDING');
+  assert.throws(() => resolveFinancialApprovalGraphEvidence({
+    snapshotGraphState: null,
+    currentGraphState,
+    migrationAudit: {
+      commandId: 'wizard-save:contract-1:2:wrong', resultRevision: 2,
+      inputHash: 'wrong', resultHash: 'canonical-hash', command: { kind: 'canonical-wizard-save' },
+    },
+  }), /no matching deterministic legacy migration/);
+});
+
+test('binds frozen rows to a later canonical graph only by a unique complete commercial tuple', () => {
+  const binding = bindFrozenRowsToPostSnapshotCanonicalGraph({
+    contractData: { products: [
+      { productId: 'product-1', productType: 'longitudinal', quantity: '9375', totalPrice: '3000000000' },
+      { productId: 'product-1', productType: 'longitudinal', quantity: '6250', totalPrice: '3000000000' },
+    ] },
+    snapshotItems: [
+      { id: 'item-1', productId: 'product-1', productType: 'longitudinal', quantity: '9375', totalPrice: '3000000000' },
+      { id: 'item-2', productId: 'product-1', productType: 'longitudinal', quantity: '6250', totalPrice: '3000000000' },
+    ],
+    graphRows: [
+      { productRowId: 'row-b', catalogProductId: 'product-1', productType: 'longitudinal', legacySnapshot: { productId: 'product-1', productType: 'longitudinal', quantity: '6250', totalPrice: '3000000000' } },
+      { productRowId: 'row-a', catalogProductId: 'product-1', productType: 'longitudinal', legacySnapshot: { productId: 'product-1', productType: 'longitudinal', quantity: '9375', totalPrice: '3000000000' } },
+    ],
+  });
+  assert.deepEqual(binding.snapshotItems.map(item => item.productRowId), ['row-a', 'row-b']);
+  assert.deepEqual(binding.assignments.map(assignment => assignment.rule), [
+    'FROZEN_ITEM_AND_PRODUCT_UNIQUE_COMMERCIAL_TUPLE_V1',
+    'FROZEN_ITEM_AND_PRODUCT_UNIQUE_COMMERCIAL_TUPLE_V1',
+  ]);
+  assert.throws(() => bindFrozenRowsToPostSnapshotCanonicalGraph({
+    contractData: { products: [
+      { productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' },
+      { productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' },
+    ] },
+    snapshotItems: [
+      { id: 'item-1', productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' },
+      { id: 'item-2', productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' },
+    ],
+    graphRows: [
+      { productRowId: 'row-a', catalogProductId: 'product-1', productType: 'longitudinal', legacySnapshot: { productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' } },
+      { productRowId: 'row-b', catalogProductId: 'product-1', productType: 'longitudinal', legacySnapshot: { productId: 'product-1', productType: 'longitudinal', quantity: '50', totalPrice: '100' } },
+    ],
+  }), /no unique canonical graph witness/);
 });
 
 test('reconstructs legacy v1 quantities from typed product evidence at scale three', () => {
@@ -565,6 +705,7 @@ test('seals an optimizer-derived longitudinal zero sentinel from agreeing frozen
     },
     compatibility: {
       policy: 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE',
+      commercialQuantityPolicy: longitudinalCommercialPolicy('rounding-v1'),
       graphSchemaVersion: 1,
       rounding: 'ROUND_HALF_UP',
       sealedScale: 3,
@@ -608,6 +749,7 @@ test('seals a graph-v1 optimizer float through its recorded scale-two persistenc
   assert.equal(version.rows[0]?.contractedQuantity, '58.333');
   assert.deepEqual((version.sourceEvidence.quantityNormalizations as any[])[0]?.compatibility, {
     policy: 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE',
+    commercialQuantityPolicy: longitudinalCommercialPolicy('rounding-v1'),
     graphSchemaVersion: 1,
     rounding: 'ROUND_HALF_UP',
     sealedScale: 3,
@@ -619,6 +761,16 @@ test('seals a graph-v1 optimizer float through its recorded scale-two persistenc
     rawProductionQuantity: '58.33333333333334',
     rawCanonicalGraphQuantity: '58.333333333333333333',
     sourceTransformation: 'ROUND_HALF_UP_SCALE_THREE',
+    commercialEquivalences: [{
+      leftSource: 'PRODUCT_GRAPH',
+      rightSource: 'OPTIMIZER_TOTAL',
+      rawLeft: '58.333333333333333333',
+      rawRight: '58.33333333333334',
+      comparableLeft: '58.333',
+      comparableRight: '58.333',
+      rawDifference: '-6.667e-15',
+      rule: 'ROUND_HALF_UP_SCALE_THREE',
+    }],
     rawPersistedDeliveryTotal: '58.33',
     sealedQuantity: '58.333',
     persistedComparableQuantity: '58.33',
@@ -646,6 +798,7 @@ test('seals a new rounding-v2 optimizer float through audited scale-three persis
   assert.equal(version.rows[0]?.contractedQuantity, '58.333');
   assert.deepEqual((version.sourceEvidence.quantityNormalizations as any[])[0]?.compatibility, {
     policy: 'CONTRACT_PRODUCT_GRAPH_V2_SCALE_THREE_PERSISTENCE',
+    commercialQuantityPolicy: longitudinalCommercialPolicy('rounding-v2'),
     graphSchemaVersion: 1,
     rounding: 'ROUND_HALF_UP',
     sealedScale: 3,
@@ -686,6 +839,53 @@ test('uses explicit half-up rounding for an exact scale-three tie', () => {
   );
 });
 
+test('treats floating-point residue as equal only after the recorded scale-three commercial conversion', () => {
+  const source = optimizerDerivedSourceFixture();
+  (source.contract.contractData as any).products[0].smartCutPlan = {
+    ...(source.contract.contractData as any).products[0].smartCutPlan,
+    totalRequestedLengthM: '50',
+    productionPieces: [{ lengthM: '50.00000000000001', quantity: '1' }],
+  };
+  (source.contract.productGraph!.rows as any)[0].requestedLengthMeters = '50';
+  (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '50';
+  (source.contract.contractData as any).deliveries[0].products[0].quantity = '50';
+
+  const version = buildApprovedPricingVersion(source, 1, 'optimizer-floating-residue');
+  const normalization = (version.sourceEvidence.quantityNormalizations as any[])[0];
+  assert.equal(version.rows[0]?.contractedQuantity, '50.000');
+  assert.deepEqual(normalization.compatibility.commercialEquivalences, [{
+    leftSource: 'OPTIMIZER_PRODUCTION',
+    rightSource: 'OPTIMIZER_TOTAL',
+    rawLeft: '50.00000000000001',
+    rawRight: '50',
+    comparableLeft: '50.000',
+    comparableRight: '50.000',
+    rawDifference: '1e-14',
+    rule: 'ROUND_HALF_UP_SCALE_THREE',
+  }]);
+});
+
+test('reconciles the frozen 100302-style graph residue under rounding-v2 without guessing quantity', () => {
+  const source = optimizerDerivedSourceFixture();
+  source.contract.productGraph!.roundingPolicy = 'rounding-v2';
+  (source.contract.contractData as any).products[0].smartCutPlan = {
+    ...(source.contract.contractData as any).products[0].smartCutPlan,
+    totalRequestedLengthM: '16.66666666666667',
+    productionPieces: [{ lengthM: '16.66666666666667', quantity: '1' }],
+  };
+  (source.contract.productGraph!.rows as any)[0].requestedLengthMeters = '16.666666666666666667';
+  (source.leaf.sourceSnapshot as any).deliveries[0].products[0].quantity = '16.667';
+  (source.contract.contractData as any).deliveries[0].products[0].quantity = '16.66666666666667';
+
+  const version = buildApprovedPricingVersion(source, 1, 'optimizer-100302-residue');
+  assert.equal(version.rows[0]?.contractedQuantity, '16.667');
+  assert.equal(
+    (version.sourceEvidence.quantityNormalizations as any[])[0]
+      .compatibility.commercialEquivalences[0].rawDifference,
+    '-3.333e-15',
+  );
+});
+
 test('keeps incomplete or conflicting optimizer-derived quantity evidence fail-closed', () => {
   const cases: readonly [string, (source: ApprovedPricingSource) => void, RegExp][] = [
     ['missing persisted Delivery', source => {
@@ -712,8 +912,8 @@ test('keeps incomplete or conflicting optimizer-derived quantity evidence fail-c
         ...source.contract.productGraph!.rows[0], requestedLengthMeters: '41',
       };
     }, /canonical graph quantity conflicts with optimizer plan/],
-    ['more than scale-three precision', source => {
-      (source.contract.contractData as any).products[0].smartCutPlan.totalRequestedLengthM = '40.0001';
+    ['different after scale-three precision', source => {
+      (source.contract.contractData as any).products[0].smartCutPlan.totalRequestedLengthM = '40.0005';
     }, /optimizer quantities conflict/],
   ];
 
@@ -738,9 +938,9 @@ test('captures exact raw optimizer conflict evidence without tolerance guessing'
       assert.equal(error.evidence?.productRowId, 'row-1');
       assert.equal(error.evidence?.rule, 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE');
       assert.equal(error.evidence?.rawOptimizerQuantity, '40');
-      assert.equal(error.evidence?.transformedOptimizerQuantity, '40');
+      assert.equal(error.evidence?.transformedOptimizerQuantity, '40.000');
       assert.equal(error.evidence?.rawProductionQuantity, '120');
-      assert.equal(error.evidence?.transformedProductionQuantity, '120');
+      assert.equal(error.evidence?.transformedProductionQuantity, '120.000');
       assert.equal(error.evidence?.rawCanonicalGraphQuantity, '40');
       assert.equal(error.evidence?.transformedCanonicalGraphQuantity, '40.000');
       assert.equal(error.evidence?.difference, '80');
@@ -758,10 +958,10 @@ test('captures exact raw optimizer conflict evidence without tolerance guessing'
         leftSource: 'OPTIMIZER_PRODUCTION',
         rightSource: 'OPTIMIZER_TOTAL',
         unit: 'meter',
-        basis: 'RAW',
-        rule: 'EXACT_DECIMAL',
-        leftComparableValue: '120',
-        rightComparableValue: '40',
+        basis: 'HISTORICAL_TRANSFORMED',
+        rule: 'ROUND_HALF_UP_SCALE_THREE',
+        leftComparableValue: '120.000',
+        rightComparableValue: '40.000',
         value: '80',
       }]);
       assert.match(error.userMessageFa, /مدیر حسابداری.*پروندهٔ بررسی کمیت/);
@@ -814,9 +1014,9 @@ test('captures the exact named difference for graph, persisted Delivery, and inv
       },
       key: 'INVOICE_MINUS_OPTIMIZER',
       value: '-1',
-      basis: 'RAW',
-      leftComparableValue: '39',
-      rightComparableValue: '40',
+      basis: 'HISTORICAL_TRANSFORMED',
+      leftComparableValue: '39.000',
+      rightComparableValue: '40.000',
     },
   ];
 
@@ -848,7 +1048,7 @@ test('captures the exact named difference for graph, persisted Delivery, and inv
             ? 'ROUND_HALF_UP_SCALE_THREE'
             : item.name === 'persisted Delivery'
               ? 'ROUND_HALF_UP_SCALE_TWO_PER_ROW_THEN_SUM'
-              : 'EXACT_DECIMAL',
+              : 'ROUND_HALF_UP_SCALE_THREE',
           leftComparableValue: item.leftComparableValue,
           rightComparableValue: item.rightComparableValue,
         }], item.name);

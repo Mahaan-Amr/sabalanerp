@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import type { AllocationPricingBindingPort, LockedPricingEvidence, PricedEventWrite, PricingReferenceWrite } from './allocationPricingBinding';
 import {
   persistedApprovedPricingInclude,
+  approvedPricingOperationalContractItemId,
   persistedApprovedPricingRowIntegrityMatches,
   persistedApprovedPricingVersionIntegrityMatches,
 } from './approvedPricing';
@@ -20,7 +21,10 @@ const lockRows = async (tx: Tx, table: string, column: string, ids: string[]) =>
   const target = new Map<string, { predicate: string; order: string }>([
     ['contract_approved_pricing_heads:contractId', { predicate: '"contract_approved_pricing_heads"."contractId"', order: '"contractId"' }],
     ['sales_contracts:id', { predicate: '"sales_contracts"."id"', order: '"id"' }],
-    ['contract_approved_pricing_rows:contractItemId', { predicate: '"contract_approved_pricing_rows"."contractItemId"', order: '"contractItemId", "id"' }],
+    ['contract_approved_pricing_rows:contractItemId', {
+      predicate: 'COALESCE("contract_approved_pricing_rows"."linkedContractItemId", "contract_approved_pricing_rows"."contractItemId")',
+      order: 'COALESCE("linkedContractItemId", "contractItemId"), "id"',
+    }],
     ['dispatch_priced_allocation_events:pricingRowId', { predicate: '"dispatch_priced_allocation_events"."pricingRowId"', order: '"pricingRowId", "recordedAt", "id"' }],
   ]).get(`${table}:${column}`);
   if (!target) throw new Error('Unsupported approved-pricing lock target.');
@@ -89,7 +93,7 @@ export const createPrismaAllocationPricingBindingPort = (tx: Tx): AllocationPric
           readinessEvidenceHash: readiness.evidenceHash,
           rows: storedVersion.rows.map((row) => ({
             id: row.id,
-            contractItemId: row.contractItemId,
+            contractItemId: approvedPricingOperationalContractItemId(row),
             productRowId: row.productRowId,
             ordinal: row.ordinal,
             contractedQuantity: row.contractedQuantity.toFixed(3),

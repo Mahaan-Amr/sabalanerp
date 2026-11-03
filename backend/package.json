@@ -80,6 +80,8 @@
     "test:approved-pricing:db": "tsx src/services/__tests__/approvedPricingPrisma.test.ts",
     "test:approved-pricing:concurrency": "tsx src/services/__tests__/approvedPricingConcurrency.test.ts",
     "audit:contract-financial-evidence": "tsx src/scripts/audit-contract-financial-evidence.ts",
+    "reconcile:contract-financial-evidence": "tsx src/scripts/reconcile-contract-financial-evidence.ts",
+    "reconcile:contract-financial-evidence:apply": "tsx src/scripts/reconcile-contract-financial-evidence.ts --apply",
     "test:contract-creation-discount:db": "tsx src/services/__tests__/contractCreationDiscountEvidence.integration.test.ts",
     "test:contract-snapshot-boundary": "tsx src/services/__tests__/contractSnapshotBoundary.test.ts && tsx src/services/__tests__/contractSnapshotPersistence.integration.test.ts && tsx src/services/__tests__/accountingSnapshotBoundary.integration.test.ts",
     "test:priced-allocation-ledger": "tsx src/services/__tests__/pricedAllocationLedger.test.ts && tsx src/services/__tests__/allocationPricingBinding.test.ts && tsx src/services/__tests__/allocationPricingReadModel.test.ts && tsx src/services/__tests__/dispatchAllocationRetry.test.ts",

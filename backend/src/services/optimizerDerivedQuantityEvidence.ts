@@ -3,6 +3,7 @@ import {
   ApprovedPricingEvidenceError,
   asApprovedPricingEvidenceError,
 } from './approvedPricing/evidenceError';
+import { resolveCommercialQuantityPolicy } from './commercialQuantityPolicy';
 
 // Deliberate witness-validation failures are typed evidence conflicts; runtime failures remain native.
 
@@ -80,6 +81,17 @@ export type OptimizerDerivedQuantityEvidence = {
     rawProductionQuantity: string;
     rawCanonicalGraphQuantity?: string;
     sourceTransformation?: 'ROUND_HALF_UP_SCALE_THREE';
+    commercialEquivalences?: readonly {
+      leftSource: 'OPTIMIZER_PRODUCTION' | 'PRODUCT_GRAPH' | 'WIZARD_DELIVERY' | 'INVOICE';
+      rightSource: 'OPTIMIZER_TOTAL';
+      rawLeft: string;
+      rawRight: string;
+      comparableLeft: string;
+      comparableRight: string;
+      rawDifference: string;
+      rule: 'ROUND_HALF_UP_SCALE_THREE';
+    }[];
+    commercialQuantityPolicy: ReturnType<typeof resolveCommercialQuantityPolicy>;
     rawPersistedDeliveryTotal: string;
     sealedQuantity: string;
     persistedComparableQuantity: string;
@@ -160,6 +172,12 @@ const requiredString = (value: unknown, label: string) => {
 const fixedQuantity = (value: Prisma.Decimal) =>
   value.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP).toFixed(3);
 
+const commercialComparable = (value: Prisma.Decimal, scale: number) =>
+  value.toDecimalPlaces(scale, Prisma.Decimal.ROUND_HALF_UP);
+
+const commerciallyEqual = (left: Prisma.Decimal, right: Prisma.Decimal, scale: number) =>
+  commercialComparable(left, scale).eq(commercialComparable(right, scale));
+
 const optimizerQuantityPolicy = (input: Pick<OptimizerDerivedQuantityInput,
   'graphSchemaVersion' | 'roundingPolicy' | 'producer' | 'producerVersion' | 'graphAuditCommandId'>) => {
   const hasRecordedProducer = Boolean(input.graphAuditCommandId) &&
@@ -167,12 +185,18 @@ const optimizerQuantityPolicy = (input: Pick<OptimizerDerivedQuantityInput,
   if (hasRecordedProducer &&
     (input.producer === 'LEGACY_MIGRATION' || input.producer === 'CANONICAL_WIZARD_SAVE') &&
     input.graphSchemaVersion === 1 && input.roundingPolicy === 'rounding-v1') {
+    const commercialQuantityPolicy = resolveCommercialQuantityPolicy({
+      graphSchemaVersion: input.graphSchemaVersion,
+      roundingPolicy: input.roundingPolicy,
+      productFamily: 'longitudinal',
+    });
     return {
       policy: 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE' as const,
       graphSchemaVersion: 1 as const,
       sourceScale: undefined,
       persistedScale: 2 as const,
-      sealedScale: 3 as const,
+      sealedScale: commercialQuantityPolicy.billableQuantity.scale as 3,
+      commercialQuantityPolicy,
       producer: input.producer,
       producerVersion: input.producerVersion as 0 | 1,
       graphAuditCommandId: input.graphAuditCommandId!,
@@ -180,12 +204,18 @@ const optimizerQuantityPolicy = (input: Pick<OptimizerDerivedQuantityInput,
   }
   if (hasRecordedProducer && input.producer === 'CANONICAL_WIZARD_SAVE' &&
     input.graphSchemaVersion === 1 && input.roundingPolicy === 'rounding-v2') {
+    const commercialQuantityPolicy = resolveCommercialQuantityPolicy({
+      graphSchemaVersion: input.graphSchemaVersion,
+      roundingPolicy: input.roundingPolicy,
+      productFamily: 'longitudinal',
+    });
     return {
       policy: 'CONTRACT_PRODUCT_GRAPH_V2_SCALE_THREE_PERSISTENCE' as const,
       graphSchemaVersion: 1 as const,
       sourceScale: undefined,
       persistedScale: 3 as const,
-      sealedScale: 3 as const,
+      sealedScale: commercialQuantityPolicy.billableQuantity.scale as 3,
+      commercialQuantityPolicy,
       producer: input.producer,
       producerVersion: input.producerVersion as 0 | 1,
       graphAuditCommandId: input.graphAuditCommandId!,
@@ -255,7 +285,7 @@ const reconcileOptimizerDerivedLongitudinalQuantityInternal = (
         .mul(positive(piece.quantity, `Product ${input.productRowId} optimizer production quantity ${index}`, policy.sourceScale)),
     );
   }, new Prisma.Decimal(0));
-  if (!productionQuantity.eq(planQuantity)) {
+  if (!commerciallyEqual(productionQuantity, planQuantity, policy.sealedScale)) {
     throw new OptimizerQuantityEvidenceConflictError({
       productRowId: input.productRowId,
       policy: policy.policy,
@@ -267,16 +297,35 @@ const reconcileOptimizerDerivedLongitudinalQuantityInternal = (
 
   const graphQuantity = positive(input.graphRequestedLengthMeters, `Product ${input.productRowId} canonical graph length`, policy.sourceScale);
   let sourceTransformation: 'ROUND_HALF_UP_SCALE_THREE' | undefined;
+  if (!commerciallyEqual(graphQuantity, planQuantity, policy.sealedScale)) {
+    throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} canonical graph quantity conflicts with optimizer plan`);
+  }
   if (!graphQuantity.eq(planQuantity)) {
-    if (policy.policy !== 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE') {
-      throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} canonical graph quantity conflicts with optimizer plan`);
-    }
-    if (!planQuantity.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP)
-      .eq(graphQuantity.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP))) {
-      throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} canonical graph quantity conflicts with optimizer plan`);
-    }
     sourceTransformation = 'ROUND_HALF_UP_SCALE_THREE';
   }
+
+  type CommercialEquivalence = NonNullable<
+    OptimizerDerivedQuantityEvidence['compatibility']['commercialEquivalences']
+  >[number];
+  const commercialEquivalences: CommercialEquivalence[] = [];
+  const recordCommercialEquivalence = (
+    leftSource: (typeof commercialEquivalences)[number]['leftSource'],
+    left: Prisma.Decimal,
+  ) => {
+    if (left.eq(planQuantity)) return;
+    commercialEquivalences.push({
+      leftSource,
+      rightSource: 'OPTIMIZER_TOTAL',
+      rawLeft: left.toString(),
+      rawRight: planQuantity.toString(),
+      comparableLeft: commercialComparable(left, policy.sealedScale).toFixed(policy.sealedScale),
+      comparableRight: commercialComparable(planQuantity, policy.sealedScale).toFixed(policy.sealedScale),
+      rawDifference: left.minus(planQuantity).toString(),
+      rule: 'ROUND_HALF_UP_SCALE_THREE',
+    });
+  };
+  recordCommercialEquivalence('OPTIMIZER_PRODUCTION', productionQuantity);
+  recordCommercialEquivalence('PRODUCT_GRAPH', graphQuantity);
 
   if (!Array.isArray(input.persistedDeliveries) || input.persistedDeliveries.length === 0) {
     throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} persisted Delivery evidence is missing`);
@@ -345,9 +394,10 @@ const reconcileOptimizerDerivedLongitudinalQuantityInternal = (
           );
         }
       }
-      if (wizardRows === 0 || !wizardTotal.eq(planQuantity)) {
+      if (wizardRows === 0 || !commerciallyEqual(wizardTotal, planQuantity, policy.sealedScale)) {
         throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} wizard Delivery quantity conflicts`);
       }
+      recordCommercialEquivalence('WIZARD_DELIVERY', wizardTotal);
       wizardEvidence = { present: true, rows: rawWizardRows, totalQuantity: fixedQuantity(wizardTotal) };
       persistedComparableQuantity = wizardPersistedComparableTotal;
     }
@@ -380,9 +430,11 @@ const reconcileOptimizerDerivedLongitudinalQuantityInternal = (
   const invoiceQuantity = input.rawInvoiceItemQuantity === undefined
     ? undefined
     : decimal(input.rawInvoiceItemQuantity, `Product ${input.productRowId} invoice quantity`);
-  if (invoiceQuantity !== undefined && !invoiceQuantity.eq(0) && !invoiceQuantity.eq(planQuantity)) {
+  if (invoiceQuantity !== undefined && !invoiceQuantity.eq(0) &&
+    !commerciallyEqual(invoiceQuantity, planQuantity, policy.sealedScale)) {
     throw new ApprovedPricingEvidenceError(`Product ${input.productRowId} invoice quantity conflicts with sealed meters`);
   }
+  if (invoiceQuantity !== undefined && !invoiceQuantity.eq(0)) recordCommercialEquivalence('INVOICE', invoiceQuantity);
 
   return {
     evidenceOrigin: OPTIMIZER_DERIVED_QUANTITY_EVIDENCE_ORIGIN,
@@ -403,6 +455,7 @@ const reconcileOptimizerDerivedLongitudinalQuantityInternal = (
     wizardDelivery: wizardEvidence,
     compatibility: {
       policy: policy.policy,
+      commercialQuantityPolicy: policy.commercialQuantityPolicy,
       graphSchemaVersion: policy.graphSchemaVersion,
       rounding: 'ROUND_HALF_UP' as const,
       sealedScale: policy.sealedScale,
@@ -414,6 +467,7 @@ const reconcileOptimizerDerivedLongitudinalQuantityInternal = (
       rawProductionQuantity: productionQuantity.toString(),
       rawCanonicalGraphQuantity: graphQuantity.toString(),
       ...(sourceTransformation ? { sourceTransformation } : {}),
+      ...(commercialEquivalences.length > 0 ? { commercialEquivalences } : {}),
       rawPersistedDeliveryTotal: persistedTotal.toString(),
       sealedQuantity: fixedQuantity(planQuantity),
       persistedComparableQuantity: persistedComparableQuantity.toFixed(policy.persistedScale),
@@ -483,7 +537,7 @@ const rawQuantityReviewEvidence = (input: OptimizerDerivedQuantityInput, conflic
   const plan = optionalRecord(snapshot?.smartCutPlan);
   const provenPolicy = provenHistoricalPersistencePolicy(input);
   const deliveryScale = provenPolicy?.persistedScale ?? null;
-  const graphScale = provenPolicy?.policy === 'CONTRACT_PRODUCT_GRAPH_V1_SCALE_TWO_PERSISTENCE' ? 3 : null;
+  const commercialScale = provenPolicy?.sealedScale ?? null;
   const persistedRows: Array<{ deliveryId: string; deliveryProductId: string; rawQuantity: string; transformedQuantity?: string }> = [];
   if (Array.isArray(input.persistedDeliveries)) {
     for (const rawDelivery of input.persistedDeliveries) {
@@ -536,19 +590,11 @@ const rawQuantityReviewEvidence = (input: OptimizerDerivedQuantityInput, conflic
   const rawPersistedDeliveryTotal = exactTotal(persistedRows.map(row => row.rawQuantity));
   const transformedPersistedDeliveryTotal = exactTotal(persistedRows.map(row => row.transformedQuantity), deliveryScale);
   const transformedWizardDeliveryTotal = exactTotal(wizardRows.map(row => row.transformedQuantity), deliveryScale);
-  const transformedOptimizerQuantity = provenPolicy ? rawOptimizerQuantity : undefined;
-  const transformedProductionQuantity = provenPolicy ? rawProductionQuantity : undefined;
-  const transformedCanonicalGraphQuantity = !provenPolicy
-    ? undefined
-    : graphScale === null
-      ? rawCanonicalGraphQuantity
-      : historicalConvertedQuantity(rawCanonicalGraphQuantity, graphScale);
-  const graphComparableOptimizerQuantity = !provenPolicy
-    ? undefined
-    : graphScale === null
-      ? rawOptimizerQuantity
-      : historicalConvertedQuantity(rawOptimizerQuantity, graphScale);
-  const transformedInvoiceItemQuantity = provenPolicy ? rawInvoiceItemQuantity : undefined;
+  const transformedOptimizerQuantity = historicalConvertedQuantity(rawOptimizerQuantity, commercialScale);
+  const transformedProductionQuantity = historicalConvertedQuantity(rawProductionQuantity, commercialScale);
+  const transformedCanonicalGraphQuantity = historicalConvertedQuantity(rawCanonicalGraphQuantity, commercialScale);
+  const graphComparableOptimizerQuantity = transformedOptimizerQuantity;
+  const transformedInvoiceItemQuantity = historicalConvertedQuantity(rawInvoiceItemQuantity, commercialScale);
   const deliveryComparableOptimizerQuantity = historicalConvertedQuantity(rawOptimizerQuantity, deliveryScale);
   const persistedComparableQuantity = transformedWizardDeliveryTotal || deliveryComparableOptimizerQuantity;
   const comparisonDifferences: Array<{
@@ -573,11 +619,11 @@ const rawQuantityReviewEvidence = (input: OptimizerDerivedQuantityInput, conflic
       leftSource: 'OPTIMIZER_PRODUCTION',
       rightSource: 'OPTIMIZER_TOTAL',
       unit: 'meter',
-      basis: 'RAW',
-      rule: 'EXACT_DECIMAL',
-      leftComparableValue: rawProductionQuantity,
-      rightComparableValue: rawOptimizerQuantity,
-    }, exactDifference(rawProductionQuantity, rawOptimizerQuantity));
+      basis: 'HISTORICAL_TRANSFORMED',
+      rule: 'ROUND_HALF_UP_SCALE_THREE',
+      leftComparableValue: transformedProductionQuantity,
+      rightComparableValue: transformedOptimizerQuantity,
+    }, exactDifference(transformedProductionQuantity, transformedOptimizerQuantity));
   }
   if (/canonical graph quantity conflicts/i.test(conflictDetail)) {
     addDifference({
@@ -586,8 +632,8 @@ const rawQuantityReviewEvidence = (input: OptimizerDerivedQuantityInput, conflic
       leftSource: 'PRODUCT_GRAPH',
       rightSource: 'OPTIMIZER_TOTAL',
       unit: 'meter',
-      basis: graphScale === null ? 'RAW' : 'HISTORICAL_TRANSFORMED',
-      rule: graphScale === null ? 'EXACT_DECIMAL' : 'ROUND_HALF_UP_SCALE_THREE',
+      basis: 'HISTORICAL_TRANSFORMED',
+      rule: 'ROUND_HALF_UP_SCALE_THREE',
       leftComparableValue: transformedCanonicalGraphQuantity,
       rightComparableValue: graphComparableOptimizerQuantity,
     }, exactDifference(transformedCanonicalGraphQuantity, graphComparableOptimizerQuantity));
@@ -614,11 +660,11 @@ const rawQuantityReviewEvidence = (input: OptimizerDerivedQuantityInput, conflic
       leftSource: 'INVOICE',
       rightSource: 'OPTIMIZER_TOTAL',
       unit: 'meter',
-      basis: 'RAW',
-      rule: 'EXACT_DECIMAL',
-      leftComparableValue: rawInvoiceItemQuantity,
-      rightComparableValue: rawOptimizerQuantity,
-    }, exactDifference(rawInvoiceItemQuantity, rawOptimizerQuantity));
+      basis: 'HISTORICAL_TRANSFORMED',
+      rule: 'ROUND_HALF_UP_SCALE_THREE',
+      leftComparableValue: transformedInvoiceItemQuantity,
+      rightComparableValue: transformedOptimizerQuantity,
+    }, exactDifference(transformedInvoiceItemQuantity, transformedOptimizerQuantity));
   }
   return {
     productRowId: input.productRowId,
@@ -633,19 +679,17 @@ const rawQuantityReviewEvidence = (input: OptimizerDerivedQuantityInput, conflic
     rawContractItemQuantity: String(input.rawContractItemQuantity ?? ''),
     rawInvoiceItemQuantity,
     transformedInvoiceItemQuantity,
-    invoiceComparisonRule: provenPolicy ? 'EXACT_DECIMAL' : undefined,
+    invoiceComparisonRule: provenPolicy ? 'ROUND_HALF_UP_SCALE_THREE' : undefined,
     rawOptimizerQuantity,
     transformedOptimizerQuantity,
-    optimizerComparisonRule: provenPolicy ? 'EXACT_DECIMAL' : undefined,
+    optimizerComparisonRule: provenPolicy ? 'ROUND_HALF_UP_SCALE_THREE' : undefined,
     rawProductionQuantity,
     transformedProductionQuantity,
-    productionComparisonRule: provenPolicy ? 'EXACT_DECIMAL' : undefined,
+    productionComparisonRule: provenPolicy ? 'ROUND_HALF_UP_SCALE_THREE' : undefined,
     rawProductionPieces: Array.isArray(plan?.productionPieces) ? plan.productionPieces : [],
     rawCanonicalGraphQuantity,
     transformedCanonicalGraphQuantity,
-    graphComparisonRule: !provenPolicy
-      ? undefined
-      : graphScale === null ? 'EXACT_DECIMAL' : 'ROUND_HALF_UP_SCALE_THREE',
+    graphComparisonRule: provenPolicy ? 'ROUND_HALF_UP_SCALE_THREE' : undefined,
     rawPersistedDeliveryRows: persistedRows,
     rawPersistedDeliveryTotal,
     transformedPersistedDeliveryTotal,

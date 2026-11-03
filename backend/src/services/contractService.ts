@@ -25,6 +25,7 @@ import {
   isExplicitZeroDiscountInput,
 } from './contractDiscountEvidence';
 import { sanitizeContractDataCustomerSnapshot } from './contractSnapshotBoundary';
+import { assertContractQuantityEvidenceReadyForFinalization } from './contractQuantityEvidenceGuard';
 import { completeSalesContractCorrectionEdit } from './salesContractCorrectionDuty';
 import {
   validateContractPartyChangeCompleteness,
@@ -785,6 +786,7 @@ export async function createContract(
               : [])
           ]
         });
+        await assertContractQuantityEvidenceReadyForFinalization(tx, contract.id);
         if (potentialProject) {
           await tx.crmPotentialProject.update({
             where: { id: potentialProject.id },
@@ -852,6 +854,10 @@ export async function updateContract(
   });
   const approvedSalesCorrection = await getApprovedSalesCorrection(contractId);
 
+  if ((contract.status === 'SIGNED' || contract.status === 'PRINTED') && !approvedSalesCorrection) {
+    throw new Error('Signed contract commercial evidence can only change through an approved formal correction');
+  }
+
   if (financiallyApprovedRecord && !approvedSalesCorrection) {
     throw new Error('Contract cannot be modified after accounting financial approval');
   }
@@ -860,17 +866,45 @@ export async function updateContract(
 
   // Update contract and relation snapshots atomically.
   const updatedContract = await prisma.$transaction(async (tx) => {
-    const nextCustomerId = data.customerId || contract.customerId;
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "sales_contracts" WHERE "id" = ${contractId} FOR UPDATE
+    `);
+    await tx.$queryRaw(Prisma.sql`
+      SELECT "id" FROM "accounting_correction_requests" WHERE "contractId" = ${contractId} FOR UPDATE
+    `);
+    const transactionContract = await tx.salesContract.findUnique({
+      where: { id: contractId },
+      include: { department: true },
+    });
+    if (!transactionContract) throw new Error('Contract not found');
+    if (transactionContract.updatedAt.getTime() !== contract.updatedAt.getTime()) {
+      throw new Error('Contract changed concurrently; reload before saving');
+    }
+    if (!validateContractAccess(transactionContract, user)) throw new Error('Access denied');
+    if (transactionContract.isInactive) throw new Error('Contract cannot be modified in current status');
+    const transactionCorrection = await getApprovedSalesCorrection(contractId, tx);
+    const transactionFinancialApproval = await tx.accountingFinancialRecord.findFirst({
+      where: { contractId, financiallyApprovedAt: { not: null } },
+      select: { id: true },
+    });
+    if ((transactionContract.status === 'SIGNED' || transactionContract.status === 'PRINTED') && !transactionCorrection) {
+      throw new Error('Signed contract commercial evidence can only change through an approved formal correction');
+    }
+    if (transactionFinancialApproval && !transactionCorrection) {
+      throw new Error('Contract cannot be modified after accounting financial approval');
+    }
+
+    const nextCustomerId = data.customerId || transactionContract.customerId;
     validateContractPartyChangeCompleteness({
-      previousCustomerId: contract.customerId,
+      previousCustomerId: transactionContract.customerId,
       customerId: nextCustomerId,
       contractData: data.contractData,
       content: data.content
     });
     await validateContractPartyIdentity({
       customerId: nextCustomerId,
-      contractData: (data.contractData ?? contract.contractData) as Record<string, unknown>,
-      content: data.content ?? contract.content
+      contractData: (data.contractData ?? transactionContract.contractData) as Record<string, unknown>,
+      content: data.content ?? transactionContract.content
     }, {
       findCustomer: id => tx.crmCustomer.findUnique({
         where: { id },
@@ -886,7 +920,7 @@ export async function updateContract(
       ? parseCanonicalProductGraph(existingGraph.graph).calculationPolicy
       : CURRENT_CONTRACT_PRODUCT_POLICY_V2;
     const operationIdentityRepair = repairContractDataOperationIdentities(
-      data.contractData ?? contract.contractData
+      data.contractData ?? transactionContract.contractData
     );
     const productSemanticRepair = repairContractDataProductSemantics(
       operationIdentityRepair.contractData,
@@ -994,7 +1028,7 @@ export async function updateContract(
       }
     }
 
-    if (approvedSalesCorrection) {
+    if (transactionCorrection) {
       await completeSalesContractCorrectionEdit(tx, {
         contractId,
         actorUserId: userId,
@@ -1003,16 +1037,16 @@ export async function updateContract(
       });
     }
 
-    if (contract.realizedAt && data.totalAmount !== undefined) {
+    if (transactionContract.realizedAt && data.totalAmount !== undefined) {
       await recordRealizedAdjustment(tx, {
         contractId,
-        previousAmount: contract.totalAmount,
+        previousAmount: transactionContract.totalAmount,
         nextAmount: data.totalAmount,
-        sourceKey: approvedSalesCorrection
-          ? `accounting-correction:${approvedSalesCorrection.id}`
+        sourceKey: transactionCorrection
+          ? `accounting-correction:${transactionCorrection.id}`
           : `contract-adjustment:${contractId}:${Date.now()}`,
         actorId: userId,
-        reason: approvedSalesCorrection?.accountantNote || data.notes || 'Sales contract amount corrected'
+        reason: transactionCorrection?.accountantNote || data.notes || 'Sales contract amount corrected'
       });
     }
 
@@ -1020,7 +1054,7 @@ export async function updateContract(
       contractId,
       actorId: userId,
       contractData: nextContractData,
-      totalAmount: data.totalAmount ?? contract.totalAmount,
+      totalAmount: data.totalAmount ?? transactionContract.totalAmount,
       revision: (existingGraph?.revision ?? 0) + 1,
       calculationPolicy,
       operationIdentityRepairEvidence,
@@ -1043,14 +1077,14 @@ export async function updateContract(
       ]
     });
 
-    return tx.salesContract.update({
+    const persistedContract = await tx.salesContract.update({
       where: { id: contractId },
       data: {
         title: data.title,
         titlePersian: data.titlePersian,
         content: data.content,
         customerId: nextCustomerId,
-        totalAmount: data.totalAmount !== undefined ? parseFloat(String(data.totalAmount)) : contract.totalAmount,
+        totalAmount: data.totalAmount !== undefined ? parseFloat(String(data.totalAmount)) : transactionContract.totalAmount,
         currency: data.currency,
         notes: data.notes,
         contractData: nextContractData,
@@ -1090,6 +1124,8 @@ export async function updateContract(
         payments: true
       }
     });
+    await assertContractQuantityEvidenceReadyForFinalization(tx, contractId);
+    return persistedContract;
   });
 
   return updatedContract;

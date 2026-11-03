@@ -2,6 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 import { workspacePermissionsAPI } from '@/lib/api';
 
 // Workspace Types
@@ -179,9 +180,17 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
+  const { isAuthenticated, loading: authLoading } = useAuth();
 
   // Load user permissions from API
   const loadUserPermissions = useCallback(async () => {
+    if (authLoading) return;
+    if (!isAuthenticated) {
+      setUserPermissions(initializePermissions());
+      setAccessibleWorkspaces([]);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       
@@ -227,7 +236,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authLoading, isAuthenticated]);
 
   // Determine current workspace from pathname
   const determineCurrentWorkspace = useCallback(() => {
@@ -291,20 +300,17 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({ children }
     await loadUserPermissions();
   };
 
-  // Initialize on mount and pathname change
-  useEffect(() => {
-    loadUserPermissions();
-  }, [loadUserPermissions]);
-
   useEffect(() => {
     const workspace = determineCurrentWorkspace();
     setCurrentWorkspaceState(workspace);
     if (workspace) localStorage.setItem(LAST_WORKSPACE_STORAGE_KEY, workspace);
 
-    if (pathname.startsWith('/dashboard')) {
+    if (pathname.startsWith('/dashboard') && !authLoading) {
       loadUserPermissions();
+    } else if (!authLoading) {
+      setLoading(false);
     }
-  }, [pathname, determineCurrentWorkspace, loadUserPermissions]);
+  }, [pathname, determineCurrentWorkspace, loadUserPermissions, authLoading]);
 
   const value: WorkspaceContextType = {
     currentWorkspace,

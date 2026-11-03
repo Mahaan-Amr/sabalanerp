@@ -34,6 +34,7 @@ import {
   requiresCurrentWaybillAudit,
   createDurableDispatchRecoveryAuditPort,
   dispatchRecoveryIntegrityHash,
+  DISPATCH_ORPHAN_MIN_SAFETY_WINDOW_MS,
   validatesAdjustmentLedgerContinuity,
 } from '../dispatchDocumentAuditRecovery';
 import { recoveryEngineInternals, sanitizedDispatchArtifactMetadata } from '../systemRecoveryEngine';
@@ -404,8 +405,8 @@ test('statement adjustment replay cross-binds immutable sources and rejects a se
     statementAdjustmentArtifactId: artifact.id, statementAdjustmentArtifactSourceIntegrityHash: integrityHash } };
   const input = { waybillId: 'waybill-1', correction, adjustment, originalStatement,
     pricingReferences: [{ contractId: 'contract-1', pricingVersionId: 'pricing-1', expectedPricingHash: 'd'.repeat(64), readinessEvidenceHash: 'e'.repeat(64),
-      pricingVersion: { currency: 'TOMAN', rows: [{ id: 'pricing-row-1', contractItemId: line.contractItemId, productRowId: line.productRowId,
-        unit: line.unit, integrityHash: 'f'.repeat(64) }] } }], command, audit };
+      pricingVersion: { currency: 'TOMAN', rows: [{ id: 'pricing-row-1', contractItemId: 'frozen-item-1', linkedContractItemId: line.contractItemId,
+        productRowId: line.productRowId, unit: line.unit, integrityHash: 'f'.repeat(64) }] } }], command, audit };
   assert.equal(validatesStatementAdjustmentEvidence(input), true);
   const amount = (value: string) => ({ toFixed: () => value });
   const baseEvents = [{ pricingRowId: 'pricing-row-1', ledgerSequence: 1, quantity: amount('2.000'),
@@ -660,7 +661,7 @@ test('orphan quarantine rechecks references and cleanup waits for the safety win
   }), /changed or was reused/);
   const cleanup = await cleanupQuarantinedDispatchDocumentOrphan({
     storageKey: quarantined.storageKey, actorId: 'support-2', reason: 'safety window elapsed', correlationId: 'cleanup-1', idempotencyKey: 'cleanup-command-1', authority,
-    now: new Date('2026-08-20T00:00:00.000Z'),
+    now: new Date(new Date(quarantined.quarantinedAt).getTime() + DISPATCH_ORPHAN_MIN_SAFETY_WINDOW_MS + 1),
     repository: { isReferenced: async () => false, readQuarantineEvidence: async () => ({ quarantinedAt: quarantined.quarantinedAt, reconciliationReportHash: 'c'.repeat(64) }) },
     storage: { stageCleanup: async () => { actions.push('cleanup'); }, restoreStagedCleanup: async () => {}, finalizeCleanup: async () => {} },
     audit: { append: async event => { audit.push(event); } },

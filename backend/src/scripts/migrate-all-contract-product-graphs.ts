@@ -1,13 +1,32 @@
 import { PrismaClient } from '@prisma/client';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   dryRunLegacyContractProductGraphMigration,
   migrateLegacyContractProductGraph,
 } from '../services/contractProductGraphMigration';
+import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 
 const apply = process.argv.includes('--apply');
-const databaseUrl = String(process.env.MIGRATION_DATABASE_URL || '').trim();
-const actorId = String(process.env.MIGRATION_ACTOR_ID || '').trim();
-const backupReference = String(process.env.CONTRACT_GRAPH_BACKUP_REFERENCE || '').trim();
+const deploymentMode = process.argv.includes('--deployment-checkpoint');
+const databaseUrl = String(process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL || '').trim();
+let actorId = String(process.env.MIGRATION_ACTOR_ID || '').trim();
+let backupReference = String(process.env.CONTRACT_GRAPH_BACKUP_REFERENCE || '').trim();
+
+if (deploymentMode) {
+  const deploymentId = String(process.env.DEPLOYMENT_ID || '').trim();
+  if (!deploymentId) throw new Error('DEPLOYMENT_ID is required in deployment-checkpoint mode');
+  const checkpoint = JSON.parse(fs.readFileSync(
+    path.join(RECOVERY_COORDINATION_DIR, 'deployment-checkpoint.json'),
+    'utf8',
+  )) as Record<string, unknown>;
+  if (checkpoint.deploymentId !== deploymentId || checkpoint.localVerified !== true ||
+    checkpoint.remoteVerified !== true || typeof checkpoint.checksum !== 'string') {
+    throw new Error('Verified deployment checkpoint is required for contract graph migration');
+  }
+  actorId = `system-deployment:${deploymentId}`;
+  backupReference = `deployment-checkpoint:${deploymentId}:${checkpoint.checksum}`;
+}
 
 if (!databaseUrl) throw new Error('MIGRATION_DATABASE_URL is required');
 if (apply && !actorId) throw new Error('MIGRATION_ACTOR_ID is required in apply mode');

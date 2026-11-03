@@ -11,6 +11,10 @@ export type PersistedApprovedPricingVersion = Prisma.ContractApprovedPricingVers
 }>;
 export type PersistedApprovedPricingRow = PersistedApprovedPricingVersion['rows'][number];
 
+export const approvedPricingOperationalContractItemId = (
+  row: { contractItemId: string; linkedContractItemId?: string | null },
+) => row.linkedContractItemId ?? row.contractItemId;
+
 export const approvedPricingJsonRecord = (value: unknown): Readonly<Record<string, unknown>> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
 
@@ -84,7 +88,7 @@ export const mapVerifiedApprovedPricingVersion = (
     readinessEvidenceHash,
     rows: version.rows.map((row) => ({
       id: row.id,
-      contractItemId: row.contractItemId,
+      contractItemId: approvedPricingOperationalContractItemId(row),
       productRowId: row.productRowId,
       ordinal: row.ordinal,
       contractedQuantity: row.contractedQuantity.toFixed(3),

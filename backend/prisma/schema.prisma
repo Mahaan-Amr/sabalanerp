@@ -2277,7 +2277,7 @@ model ContractItem {
   logisticsLoadingCorrections       LogisticsLoadingCorrection[]
   shipmentQuantityEvidence          ShipmentQuantityEvidence[]
   shipmentQuantityProjection        ShipmentQuantityProjection?
-  approvedPricingRows               ContractApprovedPricingRow[]
+  approvedPricingRows               ContractApprovedPricingRow[]      @relation("ApprovedPricingLiveContractItem")
 
   @@unique([contractId, productRowId])
   @@map("contract_items")
@@ -3019,7 +3019,12 @@ model ContractApprovedPricingVersion {
 model ContractApprovedPricingRow {
   id                     String                          @id @default(cuid())
   pricingVersionId       String
+  // Immutable source-evidence identity. Historical recovered rows may refer to
+  // a frozen row that never existed in contract_items, so this is not an FK.
   contractItemId         String
+  // Live relational target for ordinary rows. Deterministically recovered
+  // historical evidence has no live ContractItem and therefore stores null.
+  linkedContractItemId   String?
   productRowId           String
   ordinal                Int
   contractedQuantity     Decimal                         @db.Decimal(18, 3)
@@ -3029,13 +3034,14 @@ model ContractApprovedPricingRow {
   componentEvidence      Json
   integrityHash          String                          @unique
   pricingVersion         ContractApprovedPricingVersion  @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
-  contractItem           ContractItem                    @relation(fields: [contractItemId], references: [id], onDelete: Restrict)
+  contractItem           ContractItem?                    @relation("ApprovedPricingLiveContractItem", fields: [linkedContractItemId], references: [id], onDelete: Restrict)
   pricedAllocationEvents DispatchPricedAllocationEvent[]
 
   @@unique([pricingVersionId, ordinal])
   @@unique([pricingVersionId, contractItemId])
   @@unique([pricingVersionId, productRowId])
   @@index([contractItemId])
+  @@index([linkedContractItemId])
   @@map("contract_approved_pricing_rows")
 }
 

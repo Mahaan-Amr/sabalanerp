@@ -56,9 +56,9 @@ test('quantity review presentation exposes exact witnesses and a guided source c
   );
 
   assert.equal(result.kind, 'QUANTITY');
-  assert.equal(result.primaryAction.kind, 'OPEN_SALES_CONTRACT');
-  assert.equal(result.primaryAction.href, '/dashboard/sales/contracts/contract-1');
-  assert.equal(result.canRetryReconciliation, true);
+  assert.equal(result.primaryAction?.kind, 'OPEN_SALES_CONTRACT');
+  assert.equal(result.primaryAction?.href, '/dashboard/sales/contracts/contract-1');
+  assert.equal(result.canRetryReconciliation, false);
   assert.deepEqual(result.witnesses, [
     { source: 'OPTIMIZER_TOTAL', labelFa: 'کمیت کل optimizer', rawValue: '10.125', transformedValue: '10.125', unit: 'متر' },
     { source: 'OPTIMIZER_PRODUCTION', labelFa: 'جمع قطعات تولیدی optimizer', rawValue: '10.124', transformedValue: '10.124', unit: 'متر' },
@@ -86,8 +86,8 @@ test('a case retired with its stale draft does not claim that financial approval
 
   assert.equal(result.resolutionMode, 'SOURCE_DRAFT_RETIRED');
   assert.equal(result.readyForFinancialApproval, false);
-  assert.equal(result.primaryAction.kind, 'OPEN_ACCOUNTING_CONTRACT');
-  assert.match(result.primaryAction.labelFa, /پیش‌فاکتور تازه/);
+  assert.equal(result.primaryAction?.kind, 'OPEN_ACCOUNTING_CONTRACT');
+  assert.match(result.primaryAction?.labelFa ?? '', /پیش‌فاکتور تازه/);
 });
 
 test('a legacy generic resolution remains unverified and cannot claim approval readiness', () => {
@@ -117,6 +117,8 @@ test('only a marked successful evidence recheck can claim approval readiness', (
 
   assert.equal(result.resolutionMode, 'RECONCILED_BY_EVIDENCE_RECHECK');
   assert.equal(result.readyForFinancialApproval, true);
+  assert.match(result.messageFa, /به‌صورت خودکار و قطعی تطبیق یافتند/);
+  assert.doesNotMatch(result.messageFa, /باید پرونده.*تعیین تکلیف/);
 });
 
 test('financial evidence review cannot be closed or cancelled as a generic flag', () => {
@@ -124,4 +126,19 @@ test('financial evidence review cannot be closed or cancelled as a generic flag'
     () => assertGeneralFlagTransitionAllowed(quantityCase),
     /پرونده بررسی شواهد مالی فقط پس از بازآزمایی موفق بسته می‌شود/,
   );
+});
+
+test('technical recovery is presented as automatic and never asks the user to contact support', () => {
+  const result = presentFinancialEvidenceReviewCase({
+    ...quantityCase,
+    evidence: {
+      ...quantityCase.evidence,
+      remediationKind: 'TECHNICAL_SUPPORT',
+    },
+  });
+
+  assert.equal(result.primaryAction, null);
+  assert.equal(result.canRetryReconciliation, false);
+  assert.match(result.guidance, /سامانه.*خودکار.*پشتیبانی فنی/);
+  assert.doesNotMatch(result.guidance, /مشکل را.*ثبت کنید|گزارش.*کنید|ارجاع.*کنید/);
 });

@@ -196,7 +196,7 @@ for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
     motherLengthValue: 1.5
   } as Product;
   const canonicalLayer = calculateCanonicalLayerDraft({
-    part: 'tread',
+    part: 'tread' as const,
     draft: stairDraft({
       layerConfigurationDraftId: 'layer-configuration-1',
       numberOfLayersPerStair: 1,
@@ -248,7 +248,7 @@ for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
     widthValue: 40
   } as Product;
   const layerInput = {
-    part: 'tread',
+    part: 'tread' as const,
     draft: stairDraft({
       stoneId: parentStone.id,
       stoneProduct: parentStone,
@@ -270,7 +270,7 @@ for (const part of ['tread', 'riser', 'landing'] as StairStepperPart[]) {
     creationOrder: 0,
     availableInventory: [],
     parentRemainingStoneIds: [],
-    layerUnit: 'squareMeter',
+    layerUnit: 'squareMeter' as const,
     getCuttingTypePricePerMeter: () => 10_000
   };
   const layerRequest = createCanonicalLayerCalculationRequest(layerInput);

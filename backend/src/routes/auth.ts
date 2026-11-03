@@ -84,11 +84,11 @@ router.post('/login', [
     const user = users.length === 1 ? users[0] : null;
     if (!user || !user.isActive || user.erasedAt || users.length > 1) {
       await recordFailedLogin(req, canonicalIdentifier, user?.id || null, !user ? 'UNKNOWN_OR_AMBIGUOUS' : 'INACTIVE_ACCOUNT');
-      return res.status(401).json({ success: false, error: 'Invalid credentials' });
+      return res.status(401).json({ success: false, error: 'نام کاربری یا رمز عبور نادرست است.' });
     }
     if (!(await bcrypt.compare(req.body.password, user.password))) {
       await recordFailedLogin(req, canonicalIdentifier, user.id, 'INVALID_PASSWORD');
-      return res.status(401).json({ success: false, error: 'Invalid credentials' });
+      return res.status(401).json({ success: false, error: 'نام کاربری یا رمز عبور نادرست است.' });
     }
     const context = requestContext(req);
     const cookies = parseCookies(req.headers.cookie);

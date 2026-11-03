@@ -10,46 +10,12 @@ import { readPartnerAccountingCapabilities } from './capabilities';
 import { prepareCommittedAccountingSource, PARTNER_INTERNAL_ACCOUNTING_SOURCE } from './source';
 import { readCurrentPartnerCaseViews } from '../cases/lifecycle';
 import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
+import { resolveCurrentSabalanPlan } from './sabalanPlanEvidence';
+export { PartnerSabalanPlanIntegrityError, resolveCurrentSabalanPlan } from './sabalanPlanEvidence';
 
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-export class PartnerSabalanPlanIntegrityError extends Error {}
-
-export async function resolveCurrentSabalanPlan(tx: Prisma.TransactionClient, caseId: string,
-  fallback: ReturnType<typeof PaymentPlanSchema.parse>) {
-  const latest = await tx.partnerPaymentPlan.findFirst({ where: { caseId, purpose: 'SABALAN' },
-    orderBy: [{ version: 'desc' }, { id: 'desc' }], select: { id: true, caseId: true, caseRevision: true,
-      purpose: true, version: true, predecessorId: true, effectiveDate: true, evidence: true, integrityHash: true,
-      predecessor: { select: { id: true, caseId: true, purpose: true, version: true } },
-      installments: { orderBy: { id: 'asc' }, select: { id: true, dueDate: true, amount: true,
-        currency: true, method: true, evidence: true } } } });
-  const parsed = PaymentPlanSchema.safeParse(latest?.evidence);
-  if (!latest) return fallback;
-  if (!parsed.success || latest.caseId !== caseId || latest.purpose !== 'SABALAN' ||
-      latest.caseRevision < 1 || parsed.data.planId !== latest.id ||
-      parsed.data.version !== latest.version || parsed.data.predecessorPlanId !== latest.predecessorId ||
-      (latest.version === 1 ? latest.predecessor !== null : latest.predecessor?.id !== latest.predecessorId ||
-        latest.predecessor.caseId !== caseId || latest.predecessor.purpose !== 'SABALAN' ||
-        latest.predecessor.version !== latest.version - 1) ||
-      parsed.data.effectiveDate !== latest.effectiveDate.toISOString().slice(0, 10) ||
-      parsed.data.installments.length !== latest.installments.length ||
-      await canonicalHash({ purpose: 'PARTNER_SABALAN_PAYMENT_PLAN', schemaVersion: 1,
-        caseId: latest.caseId, revision: latest.caseRevision, plan: parsed.data }) !== latest.integrityHash) {
-    throw new PartnerSabalanPlanIntegrityError('Invalid Partner Sabalan payment plan evidence');
-  }
-  const persisted = new Map(latest.installments.map(item => [item.id, item]));
-  for (const item of parsed.data.installments) {
-    const row = persisted.get(item.installmentId);
-    if (!row || row.dueDate.toISOString().slice(0, 10) !== item.dueDate || row.amount.toString() !== item.amount.amount ||
-        row.currency !== item.amount.currency || row.method !== item.method ||
-        await canonicalHash(row.evidence) !== await canonicalHash(item)) {
-      throw new PartnerSabalanPlanIntegrityError('Invalid Partner Sabalan installment evidence');
-    }
-  }
-  return parsed.data;
-}
-
 export async function withCurrentSabalanPlan(tx: Prisma.TransactionClient, view: ReturnType<typeof SabalanInternalRecordViewSchema.parse>) {
   return { ...view, sabalanPaymentPlan: await resolveCurrentSabalanPlan(tx, view.owner.caseId, view.sabalanPaymentPlan) };
 }

@@ -19,6 +19,8 @@
     "test:sales-operational-errors": "tsx src/routes/__tests__/salesOperationalErrors.test.ts",
     "test:contract-party-identity": "tsx src/services/__tests__/contractPartyIdentity.test.ts && tsx src/services/__tests__/crmCustomerSearch.test.ts",
     "test:contract-cancellation": "tsx src/services/__tests__/contractCancellationPolicy.test.ts",
+    "test:contract-cancellation-sms": "tsx --test src/services/__tests__/contractCancellationNotice.test.ts src/services/__tests__/contractCancellationNoticePolicy.test.ts src/services/__tests__/contractCancellationSmsTemplate.test.ts",
+    "test:contract-cancellation-sms:db": "tsx --test src/services/__tests__/contractCancellationNotice.integration.test.ts",
     "test:contract-print": "tsx src/utils/__tests__/printTemplateLongitudinalOptimizer.test.ts && tsx src/utils/__tests__/printTemplateProjectName.test.ts && tsx src/utils/__tests__/printTemplateStairLayer.test.ts && tsx src/utils/__tests__/printTemplateOperationLookup.test.ts && tsx src/utils/__tests__/printTemplateAccountingCurrency.test.ts && tsx src/utils/__tests__/printTemplateRemainingRecovery.test.ts && tsx --test src/utils/__tests__/printTemplateTehranTime.test.ts",
     "test:catalog-spreadsheet": "tsx --test src/services/__tests__/catalogSpreadsheetCompatibility.test.ts",
     "test:partner-customer-pdf": "tsx --test src/services/__tests__/partnerCustomerPdfUpgradeSmoke.test.ts",

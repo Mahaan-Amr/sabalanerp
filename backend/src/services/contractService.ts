@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { enqueueContractCancellationNotice } from './contractCancellationNotice';
 import { synchronizeSellerCredit } from './contractDispatchCredit';
 import { validateSpecialCustomerCreditPlan } from './specialCustomerCredit';
 import { refreshDispatchExpiryExemption } from './ordinaryContractLifecycle';
@@ -1619,38 +1620,27 @@ export async function rejectContract(
   userId: string,
   note?: string
 ) {
-  const contract = await prisma.salesContract.findUnique({
-    where: { id: contractId }
-  });
-
-  if (!contract) {
-    throw new Error('Contract not found');
-  }
-
-  if (contract.isInactive) {
-    throw new Error('Contract cannot be rejected in current status');
-  }
-
-  if (contract.status !== 'DRAFT' && contract.status !== 'PENDING_APPROVAL') {
-    throw new Error('Contract cannot be rejected in current status');
-  }
-
-  const updatedContract = await prisma.salesContract.update({
-    where: { id: contractId },
-    data: {
-      status: 'CANCELLED',
-      lostAt: new Date(),
-      signatures: {
-        ...(contract.signatures as any || {}),
-        reject: {
-          by: userId,
-          at: new Date().toISOString(),
-          note: note || null
+  return prisma.$transaction(async tx => {
+    await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" = ${contractId} FOR UPDATE`);
+    const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
+    if (!contract) throw new Error('Contract not found');
+    if (contract.isInactive || contract.status !== 'DRAFT' && contract.status !== 'PENDING_APPROVAL') {
+      throw new Error('Contract cannot be rejected in current status');
+    }
+    const cancellationAt = new Date();
+    const updatedContract = await tx.salesContract.update({
+      where: { id: contractId },
+      data: {
+        status: 'CANCELLED',
+        lostAt: cancellationAt,
+        signatures: {
+          ...(contract.signatures as Prisma.JsonObject || {}),
+          reject: { by: userId, at: cancellationAt.toISOString(), note: note || null },
         }
       }
-    }
+    });
+    await enqueueContractCancellationNotice(tx, { contractId, eventKey: `ordinary-reject:${randomUUID()}`, at: cancellationAt });
+    return updatedContract;
   });
-
-  return updatedContract;
 }
 import { assertContractOperationMinimums } from './operationMinimumGuard';

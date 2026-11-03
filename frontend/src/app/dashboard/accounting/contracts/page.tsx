@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   FaCheckCircle,
-  FaClipboardCheck,
   FaExclamationTriangle,
   FaEye,
   FaDownload,
@@ -18,7 +17,6 @@ import {
 } from 'react-icons/fa';
 import {
   ErpBadge,
-  ErpEmptyState,
   ErpListPage,
   ErpPagination,
   ErpSection,
@@ -33,6 +31,7 @@ import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPre
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
 import AccountingCustomerCategoryBadge from '@/features/accounting/AccountingCustomerCategoryBadge';
 import { financialEvidenceReviewFromConflict } from '@/features/accounting/financialEvidenceReview';
+import { AccountingContractsFeedback, accountingContractsResponse } from '@/features/accounting/AccountingContractsFeedback';
 import {
   canonicalizeContractsQuery,
   patchContractsQuery,
@@ -79,6 +78,7 @@ export default function AccountingContractsPage() {
   const [rows, setRows] = useState<AccountingContractRow[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState(query.search);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -122,6 +122,7 @@ export default function AccountingContractsPage() {
   const loadContracts = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const response = await accountingAPI.getContracts({
         view: query.view || undefined,
         lifecycleView: query.lifecycleView,
@@ -133,16 +134,16 @@ export default function AccountingContractsPage() {
         page: query.page,
         pageSize: pagination.pageSize,
       });
-      if (response.data.success) {
-        setRows(response.data.data.items);
-        setPagination({
-          page: response.data.data.page,
-          pageSize: response.data.data.pageSize,
-          total: response.data.data.total,
-        });
-      }
+      const data = accountingContractsResponse(response.data);
+      setRows(data.items);
+      setPagination({
+        page: data.page,
+        pageSize: data.pageSize,
+        total: data.total,
+      });
     } catch (error) {
       console.error('Error loading accounting contracts:', error);
+      setLoadError(accountingFailureMessage(error, 'دریافت قراردادهای حسابداری انجام نشد. دوباره تلاش کنید.'));
     } finally {
       setLoading(false);
     }
@@ -567,7 +568,7 @@ export default function AccountingContractsPage() {
           options: sourceStatusOptions,
         },
       ]}
-      rows={rows}
+      rows={loadError ? [] : rows}
       rowKey={(contract) => contract.contractId}
       rowClassName={(contract) => contract.sourceKind === 'PARTNER_INTERNAL_RECORD'
         ? 'border-2 border-[var(--sds-purple-border)]'
@@ -575,9 +576,9 @@ export default function AccountingContractsPage() {
       columns={columns}
       rowActions={rowActions}
       isLoading={loading}
-      emptyState={<ErpEmptyState icon={FaClipboardCheck} title="قراردادی یافت نشد" description="فیلترها را تغییر دهید یا بعد از ثبت قرارداد جدید دوباره بررسی کنید." />}
+      emptyState={<AccountingContractsFeedback error={loadError} onRetry={loadContracts} />}
       footer={
-        <ErpPagination
+        !loadError && <ErpPagination
           currentPage={pagination.page}
           totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)}
           totalItems={pagination.total}

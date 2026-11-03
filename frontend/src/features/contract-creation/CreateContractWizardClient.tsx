@@ -1,4 +1,5 @@
 'use client';
+import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 
 import { OperationMinimumContext, OperationMinimumSummary, contractOperationMinimumState } from './components/product-modal-system/OperationMinimumContext';
 import { evaluateOperationMinimums, operationMinimumMessage } from '@sabalanerp/contract-product-graph';
@@ -710,6 +711,7 @@ export default function CreateContractWizard({
   initialContractStatus = null,
   correctionExpiresAt = null,
 }: CreateContractWizardProps = {}) {
+  const smsSuccess = useSmsSuccess();
   const router = useRouter();
   const [reactivationTarget, setReactivationTarget] = useState<ContractReactivationTarget | null>(null);
   const replacementInitialized = useRef(false);
@@ -4720,6 +4722,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           lastSentAt: new Date().toISOString()
         }
       });
+      smsSuccess.show();
       await refreshConfirmationStatus();
       clearSignatureError(errorSource);
     } catch (error: any) {
@@ -4753,6 +4756,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
         }), getSalesOperationalErrorKind(failure));
         return;
       }
+      smsSuccess.show();
       await refreshConfirmationStatus();
       clearSignatureError(errorSource);
     } catch (error: any) {
@@ -6422,6 +6426,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
     >
       <ContractReactivation target={reactivationTarget} onClose={() => setReactivationTarget(null)}
         onReactivated={() => window.location.assign(`/dashboard/sales/contracts/${wizardData.signature?.contractId}/edit`)} />
+      {smsSuccess.feedback}
 
         {editRecoverySuccessMessage && (
           <ErpInlineState

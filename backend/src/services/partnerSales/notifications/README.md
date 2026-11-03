@@ -1,5 +1,7 @@
 # Partner notification/duty adapter — #327
 
+Commercial cancellation SMS now uses the shared `contractCancellationNotice` runtime under ADR-0127. Its transaction hooks cover Partner cancellation and Accounting void, require digital acceptance in the current activation period, and resolve the current active Customer mobile for each attempt. The historical-link notification interface below remains a distinct channel contract and must not also dispatch a cancellation SMS; its old snapshot-recipient policy does not govern the new SMS.
+
 Consumes the `@sabalanerp/partner-sales-contracts@1.0.0` notification interface, also tested with the shared writer's compatible `1.1.0` package; notification wire `schemaVersion: 1`, `sha256-v1`. Runtime exports are injected through the public entry point; no manifest, schema, migration, route, shell, or activation changes belong to this lane.
 
 ## Integration contract for #334

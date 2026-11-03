@@ -100,6 +100,7 @@ class SmsService {
   private apiUrl: string;
   private templateId: number;
   private contractConfirmationTemplateId: number;
+  private contractCancellationTemplateId: number;
   private hiringInvitationTemplateId: number;
   private hiringCorrectionTemplateId: number;
   private hiringOfferTemplateId: number;
@@ -120,6 +121,7 @@ class SmsService {
       process.env.SMS_IR_CONTRACT_CONFIRM_TEMPLATE_ID || '385075',
       10
     );
+    this.contractCancellationTemplateId = Number(process.env.SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID || '0');
     this.hiringInvitationTemplateId = resolveHiringInvitationTemplate(
       process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID
     );
@@ -352,6 +354,15 @@ class SmsService {
       { name: 'ContractNumber', value: params.contractNumber },
       { name: 'Code', value: params.code }
     ]);
+  }
+
+  async sendContractCancellationMessage(params: { phoneNumber: string; contractNumber: string }): Promise<SmsSendResult> {
+    if (this.environment === 'sandbox' && !this.apiKey) return { success: true };
+    if (!Number.isInteger(this.contractCancellationTemplateId) || this.contractCancellationTemplateId <= 0) {
+      return { success: false, error: 'قالب پیامک لغو قرارداد تنظیم نشده است.' };
+    }
+    return this.sendTemplate(this.formatPhoneNumber(params.phoneNumber), this.contractCancellationTemplateId,
+      [{ name: 'ContractNumber', value: params.contractNumber }]);
   }
 
   async sendHiringInvitation(params: {

@@ -1,4 +1,5 @@
 'use client';
+import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 import { PartnerInquiryProductFacts } from '../../partner-sales/inquiries/PartnerInquiryProductFacts';
 import { PartnerWholesalePricingSummary } from '../../partner-sales/inquiries/PartnerWholesalePricingSummary';
 
@@ -178,6 +179,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
   const [discardOpen, setDiscardOpen] = useState(false);
   const [recoveryPending, setRecoveryPending] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState(false);
+  const smsSuccess = useSmsSuccess();
   const [quotePending, setQuotePending] = useState(false);
   const [commitOpen, setCommitOpen] = useState(false);
   const [actionPending, setActionPending] = useState(false);
@@ -427,7 +429,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     if (!onSendConfirmation || !result.case || confirmationFlight.current || disabled) return;
     confirmationFlight.current = true;
     setActionPending(true); setError(null);
-    try { await onSendConfirmation(result.case.owner.caseId); setConfirmationSent(true); }
+    try { await onSendConfirmation(result.case.owner.caseId); smsSuccess.show(); setConfirmationSent(true); }
     catch (failure) { setError(partnerSalesActionFeedback(failure, 'ارسال پیامک تأیید').message); }
     finally { confirmationFlight.current = false; setActionPending(false); }
   };
@@ -438,6 +440,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
     clickableSteps={Boolean(result.case)}
     onStepClick={step => move(step - 1)}
     notices={<div className="mb-4 space-y-3">
+      {smsSuccess.feedback}
       {correctionExpired ? <ErpInlineState kind="stale"
         title="مهلت اصلاح پایان یافته؛ درخواست به حسابداری ارجاع شد. تغییرات ذخیره‌نشده برای بازیابی حفظ شده است."
         action={{ label: 'مشاهده وظایف فروش', href: '/dashboard/sales/duties' }} />

@@ -1,4 +1,5 @@
 'use client';
+import { assertSuccessfulSalesResult } from '@/features/sales/salesOperationalError';
 
 import { createPartnerVisibleRefresh } from './partnerVisibleRefresh';
 import { partnerWizardPersistenceKey } from './partnerWizardPersistence';
@@ -1846,7 +1847,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
         setWizard(null);
         router.replace(partnerProductEditPath(current.intent.recoveryId, caseId));
       });
-    }} onSendConfirmation={caseId => sendPartnerConfirmation(caseId).then(() => undefined)}
+    }} onSendConfirmation={async caseId => { const result = await sendPartnerConfirmation(caseId); assertSuccessfulSalesResult(result); }}
     onFinalize={async view => {
       finalizationFlight.current = true;
       wizardSavePending.current = null;

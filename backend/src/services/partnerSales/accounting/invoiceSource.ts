@@ -5,6 +5,7 @@ import { PartnerAccountingCommandError } from './errors';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource,
   type PartnerFinancialPreparation } from './source';
 import { subtract } from '../reporting/money';
+import { resolveInvoiceSabalanPlan } from './sabalanPlanEvidence';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -23,7 +24,11 @@ export async function readPartnerInvoiceSource(tx: Prisma.TransactionClient, inv
   if (!current || current.row.internalRecordId !== invoice.sourceId) throw conflict();
   const historical = await readPartnerRevisionProjections(tx, owner.data);
   if (!historical?.accounting) throw conflict();
-  const prepared = await preparePartnerFinancialSource({ view: { ...historical.accounting, state: 'COMMITTED' },
+  const invoicePlan = await resolveInvoiceSabalanPlan(tx, owner.data,
+    historical.accounting.sabalanPaymentPlan, preparation?.paymentPlan);
+  const prepared = await preparePartnerFinancialSource({ view: {
+    ...historical.accounting, sabalanPaymentPlan: invoicePlan, state: 'COMMITTED',
+  },
     partnerSellerId: current.row.profile.userId }, owner.data);
   if (!prepared.ok || !preparation || !matchesFinancialPreparation(prepared.value, preparation) ||
       invoice.currency !== prepared.value.amount.currency || subtract(invoice.amount.toString(), prepared.value.amount.amount) !== '0') throw conflict();

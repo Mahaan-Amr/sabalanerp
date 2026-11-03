@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient, type SalesContract } from '@prisma/client';
+import { suppressContractCancellationNotices } from './contractCancellationNotice';
 import { createHash } from 'node:crypto';
 import type { RequestEvidenceMeta } from '../utils/requestEvidence';
 import { getEffectiveUserAccess } from './effectiveAccessService';
@@ -89,6 +90,7 @@ export const reactivateOrdinaryContract = (database: Database, input: {
         correctionDutyId: actions.correctionDutyId || null } },
   } });
   await invalidateCommercialApprovals(tx, contract.id);
+  await suppressContractCancellationNotices(tx, contract.id);
   const authorities = await tx.contractDispatchAuthority.findMany({ where: { contractId: contract.id,
     revision: { not: revision }, OR: [{ kind: 'MANAGER', status: { in: ['PENDING', 'APPROVED'] } },
       { kind: { in: ['DATE', 'TRANSFER', 'CUSTOMER_DATE'] }, status: 'PENDING' }] } });
@@ -106,7 +108,7 @@ export const reactivateOrdinaryContract = (database: Database, input: {
   const evidence = { by: input.actorId, at: now.toISOString(), reason, revision, restoredStatus: 'DRAFT',
     correctionDutyId: actions.correctionDutyId, cancellationAt: (signatures.cancellation as any)?.at || null };
   await tx.contractConfirmationAuditLog.create({ data: { contractId: contract.id,
-    eventType: 'CONTRACT_REACTIVATED', eventPayloadJson: evidence, ...input.meta,
+    eventType: 'CONTRACT_REACTIVATED', eventAt: now, eventPayloadJson: evidence, ...input.meta,
     eventHash: createHash('sha256').update(JSON.stringify(evidence)).digest('hex') } });
   return { contractId: updated.id, status: updated.status, commercialRevision: revision };
   };

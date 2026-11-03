@@ -1,4 +1,5 @@
 'use client';
+import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
 
 import { partnerInquiryLabels } from '@sabalanerp/partner-sales-contracts';
 import { decidePartnerCommercial } from './partnerCaseHttpPort';
@@ -26,6 +27,7 @@ import { partnerUnifiedCaseListPage, partnerCaseListTags, type PartnerCaseIssue,
 type CaseError = { key: string; message: string; kind: 'error' | 'permission' | 'stale'; caseId: string; order: number };
 
 export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDrafts?: PartnerRecoveryListRow[] }) {
+  const smsSuccess = useSmsSuccess();
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedCaseId = searchParams.get('caseId') || undefined;
@@ -218,6 +220,7 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
         action={{ label: 'تلاش دوباره', onClick: load }} />}</ErpListPage>;
   }
   return <ErpWorkspacePage title="پرونده‌های فروش همکار" context="وضعیت پرونده و وصول مشتری">
+    {smsSuccess.feedback}
     {loadError && <ErpInlineState kind={loadError.kind} title={loadError.message} action={{ label: 'تلاش دوباره', onClick: load }} />}
     {!loadError && !rows.length && <ErpEmptyState icon={FaFileContract} title="پرونده‌ای ثبت نشده است" />}
     <div className="space-y-8">{rows.map(row => {
@@ -248,6 +251,8 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
             onFinalize: () => { setFinalizeTarget(row); setLossAccepted(false); },
             onSendConfirmation: () => void runAction(caseId, 'send-confirmation', 'ارسال تأییدیه فروش همکار', async () => {
               const result = await sendPartnerConfirmation(caseId);
+              assertSuccessfulSalesResult(result);
+              smsSuccess.show();
               return result;
             }),
             onRequestCorrection: () => void runAction(caseId, 'request-correction:retail', 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, 'RETAIL_ONLY')),

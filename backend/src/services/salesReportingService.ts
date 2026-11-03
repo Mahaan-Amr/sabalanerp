@@ -397,7 +397,7 @@ export const buildSalesReport = async (access: SalesReportAccess, query: SalesRe
       createdByUser: { select: { id: true, firstName: true, lastName: true, username: true } },
       responsibleSeller: { select: { id: true, firstName: true, lastName: true, username: true } },
       realizedSeller: { select: { id: true, firstName: true, lastName: true, username: true } },
-      items: { include: { product: true } },
+      items: { where: { retiredAt: null }, include: { product: true } },
       deliveries: true,
       payments: { include: { installments: true } },
       reportingEvents: true,

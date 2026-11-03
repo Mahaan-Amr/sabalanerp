@@ -126,7 +126,7 @@ export async function getContractItems(
 
   // Get contract items
   const items = await prisma.contractItem.findMany({
-    where: { contractId },
+    where: { contractId, retiredAt: null },
     include: {
       product: true
     },
@@ -156,7 +156,7 @@ export async function updateContractItem(
     }
   });
 
-  if (!contractItem) {
+  if (!contractItem || contractItem.retiredAt) {
     throw new Error('Contract item not found');
   }
 
@@ -184,7 +184,7 @@ export async function updateContractItem(
 
   // Update contract item
   const updatedItem = await prisma.contractItem.update({
-    where: { id: itemId },
+    where: { id: itemId, retiredAt: null },
     data: {
       quantity: data.quantity !== undefined ? parseFloat(String(data.quantity)) : contractItem.quantity,
       unitPrice: data.unitPrice !== undefined ? parseFloat(String(data.unitPrice)) : contractItem.unitPrice,
@@ -225,7 +225,7 @@ export async function deleteContractItem(
     }
   });
 
-  if (!contractItem) {
+  if (!contractItem || contractItem.retiredAt) {
     throw new Error('Contract item not found');
   }
 
@@ -253,7 +253,7 @@ export async function deleteContractItem(
 
   // Delete contract item
   await prisma.contractItem.delete({
-    where: { id: itemId }
+    where: { id: itemId, retiredAt: null }
   });
 
   return { success: true };

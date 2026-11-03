@@ -12,7 +12,7 @@ export const accountingContractListSelect = {
   customerAcceptanceRevision: true, customerAcceptanceMethod: true,
   commercialExpiresAt: true, firstFinancialRecordAt: true, dispatchExpiryExempt: true,
   partnerCaseId: true, partnerKind: true,
-  customer: true, items: { select: { totalPrice: true } },
+  customer: true, items: { where: { retiredAt: null }, select: { totalPrice: true } },
 } satisfies Prisma.SalesContractSelect;
 
 export const accountingFinancialSummarySelect = {

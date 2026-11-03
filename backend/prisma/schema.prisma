@@ -2408,6 +2408,10 @@ model ContractItem {
   contractId                        String
   productId                         String
   productRowId                      String?
+  retiredAt                         DateTime?
+  retiredByCorrectionId             String?
+  retirementEvidence                Json?
+  retiredByCorrection               AccountingCorrectionRequest?       @relation("RetiredContractItems", fields: [retiredByCorrectionId], references: [id], onDelete: Restrict, map: "contract_items_retirement_correction_fk")
   productType                       String? // نوع محصول: 'longitudinal' | 'stair' | etc.
   quantity                          Decimal                            @db.Decimal(18, 3)
   unitPrice                         Decimal                            @db.Decimal(25, 12)
@@ -2432,6 +2436,7 @@ model ContractItem {
   approvedPricingRows               ContractApprovedPricingRow[]       @relation("ApprovedPricingLiveContractItem")
 
   @@unique([contractId, productRowId])
+  @@index([contractId, retiredAt])
   @@map("contract_items")
 }
 
@@ -4615,6 +4620,7 @@ model AccountingCorrectionRequest {
   resolvedAt            DateTime?
   createdAt             DateTime                  @default(now())
   updatedAt             DateTime                  @updatedAt
+  retiredContractItems  ContractItem[]            @relation("RetiredContractItems")
 
   @@index([contractId])
   @@index([recordId])

@@ -17,11 +17,15 @@ import {
 import {
   adaptLegacyStairOperations,
   appendStairLayerConfiguration,
+  createRemainingStoneChildDraft,
   createFreshStairPartDraft,
   getFreshContractProductDefaults,
+  getUnsupportedRemainingStoneChildEditMessage,
   getContractQuantityInputPolicy,
   materializeStairLayerConfigurations,
   mergeEditedRemainingStoneState,
+  normalizeRemainingStoneChildForEditing,
+  resolveProductConfigurationSourceWidthCm,
   removeStairLayerConfiguration,
   resolveExistingCalibrationCutEnabled,
   resolveLongitudinalDraftForSave,
@@ -338,6 +342,30 @@ assert.deepEqual(getFreshContractProductDefaults('longitudinal'), {
     assert.equal(resolved.draft.sawKerfCm, 0.3);
     assert.equal(resolved.draft.calibrationCutEnabled, true);
   }
+
+  const remainingChildResolved = resolveLongitudinalDraftForSave({
+    ...staleFlatDraft,
+    parentProductRowId: 'paid-source-parent'
+  });
+  assert.equal(remainingChildResolved.ok, true);
+  if (remainingChildResolved.ok) {
+    assert.equal(
+      remainingChildResolved.draft.longitudinalPolicyInput?.baseMaterialPricing,
+      'paid-source-zero'
+    );
+    assert.equal(
+      Number(remainingChildResolved.draft.longitudinalPolicyInput?.baseRateToman),
+      0
+    );
+    assert.equal(
+      remainingChildResolved.draft.longitudinalPolicyInput?.mandatoryEnabled,
+      false
+    );
+    assert.equal(remainingChildResolved.draft.pricePerSquareMeter, 0);
+    assert.equal(remainingChildResolved.draft.isMandatory, false);
+    assert.equal(remainingChildResolved.calculation.result.baseAmountToman, '0');
+    assert.equal(remainingChildResolved.calculation.result.mandatoryAmountToman, '0');
+  }
 }
 
 {
@@ -392,6 +420,128 @@ assert.deepEqual(getFreshContractProductDefaults('stair'), {
   quantity: 1,
   calibrationCutEnabled: false
 });
+
+{
+  const source = {
+    ...makeContractProduct({
+      productType: 'stair',
+      stoneCode: 'STAIR-1',
+      stoneName: 'پله مرمریت',
+      cuttingCostPerMeter: 20_000
+    }),
+    rowId: 'source-stair-row'
+  };
+  const draft = createRemainingStoneChildDraft({
+    sourceProduct: source,
+    remainingStone: {
+      id: 'remaining-stair-1',
+      width: 5,
+      length: 1.2,
+      quantity: 1,
+      squareMeters: 0.06,
+      isAvailable: true,
+      sourceCutId: 'source-cut-1'
+    },
+    parentProductIndex: 3
+  });
+
+  assert.equal(draft.productType, 'longitudinal');
+  assert.equal(draft.parentProductRowId, 'source-stair-row');
+  assert.equal(draft.parentProductIndex, 3);
+  assert.equal(draft.productId, source.productId);
+  assert.equal(draft.originalTotalPrice, 0);
+  assert.deepEqual(draft.appliedSubServices, []);
+
+  assert.throws(() => createRemainingStoneChildDraft({
+    sourceProduct: { ...makeContractProduct(), rowId: '' },
+    remainingStone: {
+      id: 'remaining-without-parent',
+      width: 5,
+      length: 1,
+      quantity: 1,
+      squareMeters: 0.05,
+      isAvailable: true,
+      sourceCutId: 'source-cut-without-parent'
+    },
+    parentProductIndex: 0
+  }), /stable product row identity/);
+}
+
+{
+  const legacyChild = makeContractProduct({
+    rowId: 'legacy-child-row',
+    parentProductRowId: 'source-stair-row',
+    productType: 'stair',
+    length: 1.2,
+    width: 5,
+    originalWidth: 5
+  });
+  const source = makeContractProduct({
+    rowId: 'source-stair-row',
+    productType: 'stair'
+  });
+  const editable = normalizeRemainingStoneChildForEditing(legacyChild, source);
+
+  assert.equal(editable.productType, 'longitudinal');
+  assert.equal(editable.parentProductRowId, 'source-stair-row');
+  assert.equal(editable.length, 1.2);
+  assert.equal(editable.width, 5);
+
+  const independentStair = makeContractProduct({ productType: 'stair' });
+  assert.equal(
+    normalizeRemainingStoneChildForEditing(independentStair),
+    independentStair
+  );
+
+  const independentlyTypedChild = makeContractProduct({
+    rowId: 'independent-slab-child',
+    parentProductRowId: 'source-stair-row',
+    productType: 'slab'
+  });
+  assert.equal(
+    normalizeRemainingStoneChildForEditing(independentlyTypedChild, source),
+    independentlyTypedChild
+  );
+  assert.match(
+    getUnsupportedRemainingStoneChildEditMessage(independentlyTypedChild) || '',
+    /نوع محصول بدون تغییر حفظ شد/
+  );
+  assert.equal(
+    getUnsupportedRemainingStoneChildEditMessage(editable),
+    null
+  );
+
+  const unsupportedPreparedChild = makeContractProduct({
+    rowId: 'independent-prepared-child',
+    parentProductRowId: 'source-stair-row',
+    productType: 'prepared'
+  });
+  assert.match(
+    getUnsupportedRemainingStoneChildEditMessage(unsupportedPreparedChild) || '',
+    /سیاست معتبر/
+  );
+
+  const stairLayer = makeContractProduct({
+    rowId: 'stair-layer-row',
+    parentProductRowId: 'source-stair-row',
+    productType: 'stair',
+    meta: { isLayer: true }
+  });
+  assert.equal(
+    normalizeRemainingStoneChildForEditing(stairLayer, source),
+    stairLayer
+  );
+
+  const catalogProduct = product;
+  assert.equal(
+    resolveProductConfigurationSourceWidthCm(legacyChild, catalogProduct),
+    5
+  );
+  assert.equal(
+    resolveProductConfigurationSourceWidthCm(independentStair, catalogProduct),
+    Number(catalogProduct.widthValue)
+  );
+}
 
 const adaptedLegacyOperations = adaptLegacyStairOperations({
   product: makeContractProduct({

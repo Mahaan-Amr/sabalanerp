@@ -454,35 +454,53 @@ test('Product Selection restores into the shared interface without changing pers
             usedSquareMetersForSubServices: 0
           },
           {
-            rowId: 'child-row',
-            parentProductRowId: 'source-row',
-            productId: 'catalog-child',
+            rowId: 'legacy-source-row',
+            productId: 'catalog-stair-source',
             product: {},
-            productType: 'longitudinal',
-            stoneCode: 'S-01-R',
-            stoneName: 'باقی‌مانده سنگ مادر',
-            diameterOrWidth: 20,
+            productType: 'stair',
+            stoneCode: 'ST-01',
+            stoneName: 'سنگ پله مادر',
+            diameterOrWidth: 40,
             length: 1,
-            width: 20,
+            width: 40,
             quantity: 1,
-            squareMeters: 0.2,
+            squareMeters: 0.4,
             pricePerSquareMeter: 100000,
-            totalPrice: 20000,
+            totalPrice: 40000,
             description: '',
             currency: 'تومان',
             lengthUnit: 'm',
             widthUnit: 'cm',
             isMandatory: false,
             mandatoryPercentage: 25,
-            originalTotalPrice: 20000,
+            originalTotalPrice: 40000,
             isCut: false,
             cutType: null,
-            originalWidth: 20,
+            originalWidth: 40,
             originalLength: 1,
             cuttingCost: 0,
             cuttingCostPerMeter: 0,
             cutDescription: '',
-            remainingStones: [],
+            remainingStoneSourceInventory: [{
+              id: 'legacy-source-stock',
+              width: 20,
+              length: 1,
+              squareMeters: 0.2,
+              isAvailable: true,
+              sourceCutId: 'legacy-source-cut',
+              position: { startWidth: 0, startLength: 0 },
+              quantity: 1
+            }],
+            remainingStones: [{
+              id: 'legacy-source-stock',
+              width: 20,
+              length: 1,
+              squareMeters: 0.2,
+              isAvailable: true,
+              sourceCutId: 'legacy-source-cut',
+              position: { startWidth: 0, startLength: 0 },
+              quantity: 1
+            }],
             cutDetails: [],
             usedRemainingStones: [],
             totalUsedRemainingWidth: 0,
@@ -491,6 +509,148 @@ test('Product Selection restores into the shared interface without changing pers
             totalSubServiceCost: 0,
             usedLengthForSubServices: 0,
             usedSquareMetersForSubServices: 0
+          },
+          {
+            rowId: 'child-row',
+            parentProductRowId: 'legacy-source-row',
+            productId: 'catalog-child',
+            product: {},
+            productType: 'stair',
+            stoneCode: 'S-01-R',
+            stoneName: 'باقی‌مانده سنگ مادر',
+            diameterOrWidth: 20,
+            length: 1,
+            width: 20,
+            quantity: 1,
+            squareMeters: 0.2,
+            pricePerSquareMeter: 0,
+            totalPrice: 70000,
+            description: '',
+            currency: 'تومان',
+            lengthUnit: 'm',
+            widthUnit: 'cm',
+            isMandatory: false,
+            mandatoryPercentage: 25,
+            originalTotalPrice: 0,
+            isCut: false,
+            cutType: null,
+            originalWidth: 20,
+            originalLength: 1,
+            cuttingCost: 20000,
+            cuttingCostPerMeter: 20000,
+            cutDescription: '',
+            remainingStones: [],
+            cutDetails: [],
+            usedRemainingStones: [],
+            totalUsedRemainingWidth: 0,
+            totalUsedRemainingLength: 0,
+            appliedSubServices: [],
+            totalSubServiceCost: 50000,
+            usedLengthForSubServices: 0,
+            usedSquareMetersForSubServices: 0,
+            remainingStoneAllocationOrder: 0,
+            meta: {
+              remainingSource: {
+                sourceProductRowId: 'legacy-source-row',
+                sourceProductIndex: 1,
+                sourceRemainingStoneId: 'legacy-source-stock',
+                sourceRemainingStone: {
+                  id: 'legacy-source-stock',
+                  width: 20,
+                  length: 1,
+                  squareMeters: 0.2,
+                  isAvailable: true,
+                  sourceCutId: 'legacy-source-cut',
+                  position: { startWidth: 0, startLength: 0 },
+                  quantity: 1
+                },
+                partitionId: 'legacy-child-partition',
+                allocationId: 'legacy-child-allocation',
+                allocationOrder: 0,
+                allocatedQuantity: 1,
+                generatedRemainingStoneIds: [],
+                physicalPieces: [{
+                  width: 20,
+                  length: 1,
+                  squareMeters: 0.2,
+                  quantity: 1
+                }]
+              }
+            },
+            operationPolicyInput: {
+              policyVersion: 'calculation-v1',
+              pricingPolicyVersion: 'pricing-v1',
+              roundingPolicyVersion: 'rounding-v1',
+              productRowId: 'child-row',
+              lengthMeters: '1',
+              widthMeters: '0.2',
+              quantity: 1,
+              groups: [{ operationGroupId: 'child-tool-group', scope: '1' }],
+              tools: [{
+                toolSelectionId: 'child-tool',
+                operationGroupId: 'child-tool-group',
+                catalogItemId: 'tool-half-round',
+                catalogSnapshotVersion: 'qa-v1',
+                name: 'نیم لول',
+                unit: 'meter',
+                rateToman: '50000',
+                edges: ['front']
+              }],
+              finishings: []
+            }
+          },
+          {
+            rowId: 'unsupported-slab-source-row',
+            productId: 'catalog-second-stair-source',
+            product: {},
+            productType: 'stair',
+            stoneCode: 'ST-02',
+            stoneName: 'سنگ مادر مستقل دوم',
+            diameterOrWidth: 40,
+            length: 1,
+            width: 40,
+            quantity: 1,
+            squareMeters: 0.4,
+            pricePerSquareMeter: 100000,
+            totalPrice: 40000,
+            currency: 'تومان',
+            lengthUnit: 'm',
+            widthUnit: 'cm',
+            isMandatory: false,
+            mandatoryPercentage: 0,
+            originalTotalPrice: 40000,
+            originalWidth: 40,
+            originalLength: 1,
+            remainingStones: [],
+            cutDetails: [],
+            appliedSubServices: []
+          },
+          {
+            rowId: 'unsupported-slab-child-row',
+            parentProductRowId: 'unsupported-slab-source-row',
+            productId: 'catalog-slab-child',
+            product: {},
+            productType: 'slab',
+            stoneCode: 'SLAB-R',
+            stoneName: 'باقی‌مانده اسلب مستقل',
+            diameterOrWidth: 20,
+            length: 1,
+            width: 20,
+            quantity: 1,
+            squareMeters: 0.2,
+            pricePerSquareMeter: 100000,
+            totalPrice: 20000,
+            currency: 'تومان',
+            lengthUnit: 'm',
+            widthUnit: 'cm',
+            isMandatory: false,
+            mandatoryPercentage: 0,
+            originalTotalPrice: 20000,
+            originalWidth: 20,
+            originalLength: 1,
+            remainingStones: [],
+            cutDetails: [],
+            appliedSubServices: []
           }
         ],
         serviceRows: [{
@@ -528,7 +688,21 @@ test('Product Selection restores into the shared interface without changing pers
   await expect(page.getByText('خدمت مستقل', { exact: true })).toBeVisible();
   expect(await page.locator('[data-contract-row-id]').evaluateAll((rows) =>
     rows.map((row) => row.getAttribute('data-contract-row-id'))
-  )).toEqual(['source-row', 'child-row']);
+  )).toEqual([
+    'source-row',
+    'legacy-source-row',
+    'child-row',
+    'unsupported-slab-source-row',
+    'unsupported-slab-child-row'
+  ]);
+  const unsupportedSlabChild = page.locator(
+    '[data-contract-row-id="unsupported-slab-child-row"]'
+  );
+  await unsupportedSlabChild.getByRole('button', { name: 'ویرایش', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText(
+    'ویرایش این نوع فرزند باقی‌مانده هنوز سیاست معتبر «سنگ مادر پرداخت‌شده» ندارد؛ نوع محصول بدون تغییر حفظ شد.'
+  )).toBeVisible();
   await expect(page.getByRole('button', { name: 'تکثیر', exact: true }).first()).toHaveClass(/sds-action/);
 
   const search = page.getByRole('searchbox', { name: 'جستجوی محصول' });
@@ -700,6 +874,38 @@ test('Product Selection restores into the shared interface without changing pers
     );
     return Boolean(topmost && !navigation.contains(topmost));
   })).toBe(true);
+
+  await productDialog.getByRole('button', { name: 'انصراف', exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const childRow = page.locator('[data-contract-row-id="child-row"]');
+  await childRow.getByRole('button', { name: 'ویرایش', exact: true }).click();
+  const childDialog = page.getByRole('dialog');
+  await expect(childDialog.getByRole('heading', { name: 'ویرایش تنظیمات محصول' })).toBeVisible();
+  await expect(childDialog.getByText('طولی', { exact: true }).first()).toBeVisible();
+  await expect(childDialog.locator('#longitudinal-length')).toHaveValue('1');
+  await expect(childDialog.locator('#longitudinal-width')).toHaveValue('20');
+  await expect(childDialog.locator('#longitudinal-quantity')).toHaveValue('1');
+  await expect(childDialog.getByText('نیم لول', { exact: true })).toBeVisible();
+  await expect(childDialog.getByRole('status').filter({
+    hasText: 'هزینه سنگ مادر قبلاً در محصول منبع محاسبه شده است'
+  })).toBeVisible();
+  await expect(childDialog.getByRole('textbox', {
+    name: 'فی هر مترمربع (تومان)'
+  })).toHaveCount(0);
+  await expect(childDialog.getByRole('switch', { name: 'حکمی' })).toHaveCount(0);
+  await expect(childDialog.getByRole('textbox', { name: 'درصد حکمی' })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(childDialog).toBeVisible();
+  await childDialog.getByRole('button', { name: 'ذخیره تغییرات', exact: true }).click();
+  await expect(childDialog).toBeHidden();
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await childRow.getByRole('button', { name: 'ویرایش', exact: true }).click();
+  const savedChildDialog = page.getByRole('dialog');
+  await expect(savedChildDialog.getByText('طولی', { exact: true }).first()).toBeVisible();
+  await expect(savedChildDialog.locator('#longitudinal-length')).toHaveValue('1');
+  await expect(savedChildDialog.locator('#longitudinal-width')).toHaveValue('20');
+  await expect(savedChildDialog.getByText('نیم لول', { exact: true })).toBeVisible();
 });
 
 test('Stair layer summary keeps its established values visible while recalculating', async ({ page }) => {

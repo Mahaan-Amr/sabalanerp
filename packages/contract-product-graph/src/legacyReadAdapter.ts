@@ -514,6 +514,7 @@ export const readLegacyProductGraph = ({
       ? product.meta as Readonly<Record<string, unknown>>
       : undefined;
     const isLegacyLayer = legacyMeta?.isLayer === true;
+    const isRemainingStoneChild = parentReference.value !== undefined && !isLegacyLayer;
     const legacyOperationRecord = (
       product.operationPolicyInput !== null &&
       typeof product.operationPolicyInput === 'object' &&
@@ -564,12 +565,18 @@ export const readLegacyProductGraph = ({
           );
           if (canonicalRowIndex >= 0) {
             const canonicalRow = rows[canonicalRowIndex];
+            const hasCanonicalProductCalculation =
+              canonicalRow.commercial.calculationSnapshot !== undefined;
+            const amountBeforeOperations =
+              isRemainingStoneChild && !hasCanonicalProductCalculation
+              ? new Decimal(String(product.cuttingCost ?? '0'))
+              : new Decimal(canonicalRow.commercial.totalAmountToman ?? '0');
             rows[canonicalRowIndex] = {
               ...canonicalRow,
               commercial: {
                 ...canonicalRow.commercial,
                 totalAmountToman: parseCanonicalDecimal(
-                  new Decimal(canonicalRow.commercial.totalAmountToman ?? '0')
+                  amountBeforeOperations
                     .plus(operationResult.result.totalAmountToman ?? '0')
                     .toFixed()
                 )

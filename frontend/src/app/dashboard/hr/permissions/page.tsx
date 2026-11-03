@@ -30,6 +30,7 @@ import {
   type AccessFeatureDefinition,
   type AccessLevel,
 } from '@/features/access-management/accessEditorState';
+import { isAccessEffectiveAt } from '@/features/access-management/userWorkspaceProjection';
 
 type User = { id: string; firstName: string; lastName: string; email: string; username: string; role: string };
 type DirectPermission = { id: string; workspace: string; permissionLevel: AccessLevel; feature?: string; expiresAt?: string | null; isActive: boolean };
@@ -63,13 +64,6 @@ const HR_BASE_FEATURE_LABELS_FA: Record<string, string> = {
   USER_ADMINISTRATION: 'مدیریت کاربران',
 };
 
-const activeNow = (permission: { isActive?: boolean; status?: string; expiresAt?: string | null; effectiveFrom?: string; effectiveTo?: string | null }) => {
-  const now = Date.now();
-  if (permission.isActive === false || (permission.status && permission.status !== 'ACTIVE')) return false;
-  if (permission.expiresAt && new Date(permission.expiresAt).getTime() <= now) return false;
-  if (permission.effectiveFrom && new Date(permission.effectiveFrom).getTime() > now) return false;
-  return !permission.effectiveTo || new Date(permission.effectiveTo).getTime() > now;
-};
 const userName = (user: User) => `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.username;
 const recommendedLevel = (feature: string): AccessLevel => /_(create|edit|delete|approve|reject|sign|import|export|update|toggle|start|end|assign|verify|validate|send)$/.test(feature) ? 'edit' : 'view';
 const normalizeLegacyDefinition = (definition: any): FeatureDefinition => ({
@@ -151,10 +145,12 @@ export default function PermissionsPage() {
         workspacePermissionsAPI.getUserPermissions({ userId, limit: 100 }),
         permissionsAPI.getUserFeaturePermissions(userId),
       ]);
-      const workspaces = (workspaceResponse.data.data || []).filter(activeNow);
-      const features = (featureResponse.data.data || []).filter(activeNow);
-      const activeHrWorkspaces = (authorizationContext.workspaceGrants || []).filter((grant: HrGrant) => grant.userId === userId && activeNow(grant));
-      const activeHrFeatures = (authorizationContext.featureGrants || []).filter((grant: HrGrant) => grant.userId === userId && activeNow(grant));
+      const clientEvaluationTime = Date.now();
+      const serverEvaluationTime = authorizationContext.evaluatedAt;
+      const workspaces = (workspaceResponse.data.data || []).filter((permission: DirectPermission) => isAccessEffectiveAt(permission, clientEvaluationTime));
+      const features = (featureResponse.data.data || []).filter((permission: DirectPermission) => isAccessEffectiveAt(permission, clientEvaluationTime));
+      const activeHrWorkspaces = (authorizationContext.workspaceGrants || []).filter((grant: HrGrant) => grant.userId === userId && isAccessEffectiveAt(grant, serverEvaluationTime));
+      const activeHrFeatures = (authorizationContext.featureGrants || []).filter((grant: HrGrant) => grant.userId === userId && isAccessEffectiveAt(grant, serverEvaluationTime));
       const levels = Object.fromEntries(WORKSPACES.map(({ key }) => [key, workspaces.find((permission: DirectPermission) => permission.workspace === key)?.permissionLevel || null])) as Record<string, AccessLevel | null>;
       const newestHrWorkspace = activeHrWorkspaces[0];
       if (newestHrWorkspace) levels.hr = FROM_HR_LEVEL[newestHrWorkspace.level as 'VIEW' | 'EDIT' | 'ADMIN'];

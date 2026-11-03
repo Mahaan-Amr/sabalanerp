@@ -49,6 +49,110 @@ export const getFreshContractProductDefaults = (
   return { quantity: 1 };
 };
 
+export const createRemainingStoneChildDraft = ({
+  sourceProduct,
+  remainingStone,
+  parentProductIndex
+}: {
+  sourceProduct: ContractProduct & { rowId: string };
+  remainingStone: RemainingStone;
+  parentProductIndex: number;
+}): Partial<ContractProduct> => {
+  if (!sourceProduct.rowId.trim()) {
+    throw new Error('Remaining-stone source requires a stable product row identity.');
+  }
+  const stock = sanitizeRemainingStoneEntry(remainingStone);
+  return {
+    productId: sourceProduct.productId,
+    product: sourceProduct.product,
+    productType: 'longitudinal',
+    stoneCode: `${sourceProduct.stoneCode}-R${stock.id.slice(-4)}`,
+    stoneName: `${sourceProduct.stoneName} (از باقی‌مانده)`,
+    diameterOrWidth: stock.width,
+    length: stock.length,
+    width: stock.width,
+    quantity: stock.quantity || 1,
+    squareMeters: stock.squareMeters,
+    pricePerSquareMeter: 0,
+    totalPrice: 0,
+    description: `ساخته شده از سنگ باقی‌مانده (${stock.width}cm عرض)`,
+    currency: sourceProduct.currency,
+    sawKerfEnabled: false,
+    sawKerfCm: null,
+    lengthUnit: sourceProduct.lengthUnit || 'm',
+    widthUnit: sourceProduct.widthUnit || 'cm',
+    isMandatory: false,
+    mandatoryPercentage: 0,
+    originalTotalPrice: 0,
+    isCut: false,
+    originalWidth: stock.width,
+    originalLength: stock.length,
+    cuttingCost: 0,
+    cuttingCostPerMeter: sourceProduct.cuttingCostPerMeter || 0,
+    remainingStones: [],
+    cutDetails: [],
+    appliedSubServices: [],
+    totalSubServiceCost: 0,
+    usedLengthForSubServices: 0,
+    usedSquareMetersForSubServices: 0,
+    parentProductRowId: sourceProduct.rowId,
+    parentProductIndex: parentProductIndex >= 0 ? parentProductIndex : undefined
+  };
+};
+
+export const normalizeRemainingStoneChildForEditing = (
+  product: ContractProduct,
+  sourceProduct?: ContractProduct
+): ContractProduct => {
+  const isStairLayer = Boolean(
+    (product.meta as { isLayer?: boolean } | undefined)?.isLayer
+  );
+  const hasStableRemainingSource = Boolean(
+    product.parentProductRowId || product.meta?.remainingSource
+  );
+  const inheritedLegacyType = Boolean(
+    sourceProduct && product.productType === sourceProduct.productType
+  );
+  if (
+    isStairLayer ||
+    !hasStableRemainingSource ||
+    product.productType === 'longitudinal' ||
+    !inheritedLegacyType
+  ) {
+    return product;
+  }
+  return { ...product, productType: 'longitudinal' };
+};
+
+export const getUnsupportedRemainingStoneChildEditMessage = (
+  product: ContractProduct | null | undefined
+): string | null => {
+  if (!product || (product.meta as { isLayer?: boolean } | undefined)?.isLayer) {
+    return null;
+  }
+  const isRemainingStoneChild = Boolean(
+    product.parentProductRowId || product.meta?.remainingSource
+  );
+  if (!isRemainingStoneChild || product.productType === 'longitudinal') {
+    return null;
+  }
+  return 'ویرایش این نوع فرزند باقی‌مانده هنوز سیاست معتبر «سنگ مادر پرداخت‌شده» ندارد؛ نوع محصول بدون تغییر حفظ شد.';
+};
+
+export const resolveProductConfigurationSourceWidthCm = (
+  product: Partial<ContractProduct>,
+  catalogProduct: Product
+): number => {
+  const isRemainingStoneChild = Boolean(
+    product.parentProductRowId || product.meta?.remainingSource
+  );
+  const remainingWidthCm = Number(product.originalWidth);
+  if (isRemainingStoneChild && remainingWidthCm > 0) {
+    return remainingWidthCm;
+  }
+  return Number(catalogProduct.widthValue) || 0;
+};
+
 export const resolveExistingCalibrationCutEnabled = (value: boolean | null | undefined): boolean =>
   value ?? true;
 
@@ -73,13 +177,21 @@ export type LongitudinalDraftForSaveResolution =
 export const resolveLongitudinalDraftForSave = (
   draft: Partial<ContractProduct>
 ): LongitudinalDraftForSaveResolution => {
-  const input = draft.longitudinalPolicyInput;
-  if (!input) {
+  const storedInput = draft.longitudinalPolicyInput;
+  if (!storedInput) {
     return {
       ok: false,
       message: 'اطلاعات ویرایش محصول طولی کامل نیست.'
     };
   }
+  const input = draft.parentProductRowId || draft.meta?.remainingSource
+    ? {
+        ...storedInput,
+        baseMaterialPricing: 'paid-source-zero' as const,
+        baseRateToman: parseCanonicalDecimal('0'),
+        mandatoryEnabled: false
+      }
+    : storedInput;
 
   const calculation = calculateLongitudinalProduct(input);
   if (!calculation.ok) {
@@ -100,6 +212,7 @@ export const resolveLongitudinalDraftForSave = (
     calculation,
     draft: {
       ...draft,
+      longitudinalPolicyInput: input,
       length,
       width,
       quantity: result.quantity ?? 0,

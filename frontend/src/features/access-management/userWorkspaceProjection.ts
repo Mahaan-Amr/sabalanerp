@@ -15,6 +15,19 @@ export type CanonicalHrWorkspaceGrant = {
   effectiveTo?: string | null;
 };
 
+export type CanonicalHrWorkspaceSnapshot = {
+  grants: CanonicalHrWorkspaceGrant[];
+  evaluatedAt: string;
+};
+
+export type TimeBoundAccess = {
+  isActive?: boolean;
+  status?: string;
+  expiresAt?: string | null;
+  effectiveFrom?: string;
+  effectiveTo?: string | null;
+};
+
 export type ProjectedWorkspaceAccess = {
   key: string;
   workspace: string;
@@ -24,17 +37,34 @@ export type ProjectedWorkspaceAccess = {
 
 const hrLevel = (level: CanonicalHrWorkspaceGrant['level']) => level.toLowerCase();
 
+const accessEvaluationTime = (evaluatedAt: string | number) => {
+  const evaluationTime = typeof evaluatedAt === 'number' ? evaluatedAt : new Date(evaluatedAt).getTime();
+  if (!Number.isFinite(evaluationTime)) {
+    throw new Error('An authoritative server evaluation time is required for HR access projection.');
+  }
+  return evaluationTime;
+};
+
+export const isAccessEffectiveAt = (access: TimeBoundAccess, evaluatedAt: string | number) => {
+  const evaluationTime = accessEvaluationTime(evaluatedAt);
+  if (access.isActive === false || (access.status && access.status !== 'ACTIVE')) return false;
+  if (access.expiresAt && new Date(access.expiresAt).getTime() <= evaluationTime) return false;
+  if (access.effectiveFrom && new Date(access.effectiveFrom).getTime() > evaluationTime) return false;
+  return !access.effectiveTo || new Date(access.effectiveTo).getTime() > evaluationTime;
+};
+
 export const projectUserWorkspaceAccess = ({
   role,
   directPermissions,
   roleDefaults,
-  canonicalHrGrants,
+  canonicalHrSnapshot,
 }: {
   role: string;
   directPermissions: WorkspaceProjectionPermission[];
   roleDefaults: WorkspaceProjectionPermission[];
-  canonicalHrGrants: CanonicalHrWorkspaceGrant[];
+  canonicalHrSnapshot: CanonicalHrWorkspaceSnapshot;
 }): ProjectedWorkspaceAccess[] => {
+  accessEvaluationTime(canonicalHrSnapshot.evaluatedAt);
   if (role === 'ADMIN') {
     return ['sales', 'crm', 'hr', 'accounting', 'inventory', 'security', 'bi', 'logistics'].map((workspace) => ({
       key: `admin-${workspace}`,
@@ -47,14 +77,9 @@ export const projectUserWorkspaceAccess = ({
   const activeDirect = directPermissions.filter((permission) => permission.isActive && permission.workspace !== 'hr');
   const activeRole = roleDefaults.filter((permission) => permission.isActive);
   const directWorkspaces = new Set(activeDirect.map((permission) => permission.workspace));
-  const canonicalHr = [...canonicalHrGrants]
-    .filter((grant) => {
-      const now = Date.now();
-      return grant.status === 'ACTIVE'
-        && grant.workspaceCode === 'HUMAN_RESOURCES'
-        && (!grant.effectiveFrom || new Date(grant.effectiveFrom).getTime() <= now)
-        && (!grant.effectiveTo || new Date(grant.effectiveTo).getTime() > now);
-    })
+  const canonicalHr = [...canonicalHrSnapshot.grants]
+    .filter((grant) => isAccessEffectiveAt(grant, canonicalHrSnapshot.evaluatedAt)
+      && grant.workspaceCode === 'HUMAN_RESOURCES')
     .sort((left, right) => String(right.effectiveFrom || '').localeCompare(String(left.effectiveFrom || '')))[0];
 
   return [

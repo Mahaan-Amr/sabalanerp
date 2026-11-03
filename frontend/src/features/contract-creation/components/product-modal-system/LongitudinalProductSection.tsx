@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ErpInput } from '@/components/erp';
+import { ErpInlineState, ErpInput } from '@/components/erp';
 import FormattedNumberInput from '@/components/FormattedNumberInput';
 import { formatPrice } from '@/lib/numberFormat';
 import {
@@ -343,45 +343,56 @@ export function LongitudinalProductSection({
         <div className={errorClass}>{conflictFor('dimensions')}</div>
       )}
 
-      <CompactDecimalField
-        id="longitudinal-base-rate"
-        label="فی هر مترمربع (تومان)"
-        value={input.baseRateToman ?? ''}
-        monetary
-        onValueChange={value => commitDecimal('baseRateToman', value, input.lastManualField)}
-        error={conflictFor('baseRateToman')}
-      />
+      {input.baseMaterialPricing === 'paid-source-zero' ? (
+        <ErpInlineState
+          kind="empty"
+          title="هزینه سنگ مادر قبلاً در محصول منبع محاسبه شده است؛ این ردیف فقط هزینه برش و عملیات جدید را دارد."
+        />
+      ) : (
+        <CompactDecimalField
+          id="longitudinal-base-rate"
+          label="فی هر مترمربع (تومان)"
+          value={input.baseRateToman ?? ''}
+          monetary
+          onValueChange={value => commitDecimal('baseRateToman', value, input.lastManualField)}
+          error={conflictFor('baseRateToman')}
+        />
+      )}
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-[var(--sds-border-default)] py-2 dark:border-[var(--sds-border-subtle)]">
-        <label className="inline-flex items-center gap-2 text-xs font-semibold">
-          <CompactSwitch
-            label="حکمی"
-            checked={input.mandatoryEnabled}
-            onChange={mandatoryEnabled => onChange({ ...input, mandatoryEnabled })}
-          />
-          حکمی
-        </label>
-        <div className="w-28">
-          <CompactDecimalField
-            id="longitudinal-mandatory-percentage"
-            label="درصد حکمی"
-            value={input.mandatoryPercentage}
-            onValueChange={value => {
-              if (value.trim() === '') return;
-              try {
-                const percentage = parseCanonicalDecimal(value);
-                onChange({
-                  ...input,
-                  mandatoryPercentage: percentage,
-                  rememberedMandatoryPercentage: percentage
-                });
-              } catch {
-                // Keep the in-progress value local until it becomes valid.
-              }
-            }}
-            error={conflictFor('mandatoryPercentage')}
-          />
-        </div>
+        {input.baseMaterialPricing !== 'paid-source-zero' && (
+          <>
+            <label className="inline-flex items-center gap-2 text-xs font-semibold">
+              <CompactSwitch
+                label="حکمی"
+                checked={input.mandatoryEnabled}
+                onChange={mandatoryEnabled => onChange({ ...input, mandatoryEnabled })}
+              />
+              حکمی
+            </label>
+            <div className="w-28">
+              <CompactDecimalField
+                id="longitudinal-mandatory-percentage"
+                label="درصد حکمی"
+                value={input.mandatoryPercentage}
+                onValueChange={value => {
+                  if (value.trim() === '') return;
+                  try {
+                    const percentage = parseCanonicalDecimal(value);
+                    onChange({
+                      ...input,
+                      mandatoryPercentage: percentage,
+                      rememberedMandatoryPercentage: percentage
+                    });
+                  } catch {
+                    // Keep the in-progress value local until it becomes valid.
+                  }
+                }}
+                error={conflictFor('mandatoryPercentage')}
+              />
+            </div>
+          </>
+        )}
         <label className="inline-flex items-center gap-2 text-xs font-semibold">
           <CompactSwitch
             label="خوراک اره"

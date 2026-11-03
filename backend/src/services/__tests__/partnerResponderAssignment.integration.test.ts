@@ -65,7 +65,7 @@ test('profile responder assignment is append-only, CAS protected and exactly rep
         assert.equal((initial.value.eligibilityEvidence.currentEligibility as { source?: string }).source,
           'CURRENT_RESPONDER_AUTHORITY');
       }
-      await tx.partnerReleaseCohort.update({ where: { id: partnerId }, data: { operationalPaused: false } });
+      await tx.partnerOperationsControl.update({ where: { id: 'partner-operations' }, data: { operationalPaused: false } });
       const rows = [{ rowId: `${partnerId}-inquiry-row`, configuration: { recoveryId: `${partnerId}-recovery`,
         recoveryRevision: 1, productRowId: `${partnerId}-inquiry-row` } }];
       const inquiryIntent = { schemaVersion: 1 as const, type: 'INQUIRY_SUBMIT' as const, partnerSellerId: partnerId, rows };

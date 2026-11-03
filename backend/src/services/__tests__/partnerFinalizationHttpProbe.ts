@@ -36,7 +36,8 @@ async function main() {
         key = `${expected.caseId}-finalization`) => {
         const response = await fetch(`${base}${path.startsWith('/api/') ? path : `/api/logistics${path}`}`, {
           method, headers: { 'content-type': 'application/json', cookie: `${SESSION_COOKIE}=${token}`,
-            'Idempotency-Key': key, 'X-Correlation-Id': key }, ...(body ? { body: JSON.stringify(body) } : {}) });
+            'Idempotency-Key': key, 'X-Correlation-Id': key, Connection: 'close' },
+          ...(body ? { body: JSON.stringify(body) } : {}) });
         return { status: response.status, body: await response.json() as any };
       };
       const storedPdfFiles = async () => {

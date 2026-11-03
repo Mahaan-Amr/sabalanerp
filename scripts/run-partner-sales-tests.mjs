@@ -39,7 +39,7 @@ const manifest = {
   cachedPatchHash: digest(gitBytes(['diff', '--cached', '--binary'])),
   workingPatchHash: digest(gitBytes(['diff', '--binary'])),
   workspaceStatus: git(['status', '--short']), checks: [], status: 'blocked',
-  limitations: ['Production activation remains closed pending the separate release decision.', 'Runtime container identity is recorded separately from checkout HEAD.', 'External SMS remains the approved local sandbox fake; persisted OTP/session behavior is covered by backend integration tests.', 'The external trustseal.enamad.ir/logo.aspx footer image is replaced with a neutral browser-test placeholder; local UI and APIs are not intercepted.', 'Known legacy redirect diagnostics remain open as LEGACY-314-01; functional browser pass does not close them.'],
+  limitations: ['Production activation remains closed pending the separate release decision.', 'Runtime container identity is recorded separately from checkout HEAD.', 'External SMS remains the approved local sandbox fake; persisted OTP/session behavior is covered by backend integration tests.', 'The external trustseal.enamad.ir/logo.aspx footer image is replaced with a neutral browser-test placeholder; local UI and APIs are not intercepted.', 'Anonymous redirect diagnostics remain fatal and are recorded per browser project; no exception is allowlisted.'],
 };
 
 async function hashFiles(root) {

@@ -19,6 +19,7 @@ import {
   TaxSubmissionStatus
 } from '@prisma/client';
 import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
+import { lockFinancialApprovalRecord, sealApprovedPricingAtFinancialApproval } from './approvedPricing';
 import { captureContractQuantityVersionAtFinancialApproval } from './shipmentQuantityProjectionStore';
 
 const prisma = new PrismaClient();
@@ -674,6 +675,7 @@ const buildContractRow = async (contract: any, settings: any) => {
 const getAccountingInclude = () => ({
   customer: true,
   items: { include: { product: true } },
+  productGraphState: true,
   deliveries: { include: { products: true } },
   payments: { include: { installments: true } }
 });
@@ -1268,6 +1270,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
   if (sepidarAmount.lte(0)) throw new Error('Sepidar amount is required');
 
   const result = await prisma.$transaction(async (tx) => {
+    await lockFinancialApprovalRecord(tx, invoiceId);
     const before = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
     if (!before) throw new Error('Invoice record not found');
     if (before.kind !== FinancialRecordKind.INVOICE_CANDIDATE) {
@@ -1337,6 +1340,8 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       }
     });
 
+    await sealApprovedPricingAtFinancialApproval(tx, updated.id);
+
     if (updated.contractId) {
       await captureContractQuantityVersionAtFinancialApproval(tx, {
         contractId: updated.contractId,
@@ -1366,7 +1371,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       if (contract) await publishAccountingActionWithinTransaction(notificationHook, tx, command.kind, contract, updated.id);
     }
     return updated;
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
   return actionResponse('APPLIED', 'تایید مالی ثبت شد', { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
 };

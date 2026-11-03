@@ -1,17 +1,17 @@
 # Baseline observations outside #314 ownership
 
-## LEGACY-314-01 — duplicate anonymous redirects cancel login requests
+## LEGACY-314-01 — duplicate anonymous redirects cancel login requests (resolved by integrated baseline)
 
-- **Status:** open; owner: shared authentication/dashboard-shell maintainer, triage through #335. No application fix is included in #314.
+- **Status:** resolved in #335 acceptance. The integrated #334 baseline removed the duplicate-navigation behavior; no additional authentication change was needed in this ticket.
 - **Runtime:** existing `sabalanerp-local`, development frontend, observed 2026-08-27. Checkout reference `c3d8a9922b99201d094e5e2bbd0562903a786442`; runtime identity is independently recorded in the run manifest.
 - **Actor/path:** fresh unauthenticated browser → `/dashboard/sales/contracts/create` → `/login`.
 - **Reproduce:** `node scripts/run-partner-sales-tests.mjs browser`; inspect `known-legacy-observations` attachments and traces in each viewport/theme project.
 - **Expected:** authentication rejection leads to one usable login navigation without router fallback errors.
 - **Observed:** the login eventually renders, but multiple 401 handlers request navigation, cancelling `/login` document and RSC requests with `net::ERR_ABORTED`. Next.js can log `Failed to fetch RSC payload ... Falling back to browser navigation.` Dashboard layout also logs the expected 401 `Auth check error`. Browser HTTP 401s themselves are correct rejection behavior.
 - **Source evidence:** `frontend/src/lib/api.ts` assigns `window.location.href = '/login'` for 401s; `frontend/src/app/dashboard/layout.tsx` also calls `router.push('/login')` after its auth check. This is a source-based explanation of the observed duplicate navigation, not a verified fix.
-- **Impact:** diagnostic noise/redundant navigation during anonymous entry. Navigation, RTL, visible controls and keyboard focus passed separately. The clean-console/network subflow is **fail**, not silently promoted to pass.
+- **Final verification:** the final #335 Partner harness recorded zero anonymous redirect observations in all four desktop/narrow, light/dark projects. Navigation, RTL, visible controls, keyboard focus and clean console/network assertions all passed with zero retries.
 - **Original diagnostic run:** `partner-qa-d12f6280-3130-4eb0-bb05-846075e2a53a`; all four projects correctly failed when the stricter observer first exposed this condition.
-- **Evidence handling:** the harness records only this exact known failure separately. Other console errors, uncaught exceptions, HTTP failures and failed resources remain test failures. It does not intercept a response, fake a successful navigation, or change application behavior. Final #335 acceptance must resolve or explicitly triage this observation; #314's green functional checks do not close it.
+- **Evidence handling:** the harness continues to make every anonymous redirect diagnostic fatal and records observations per project. No exception is allowlisted, no response is intercepted and no successful navigation is faked.
 
 ## Harness execution notes (not product defects)
 

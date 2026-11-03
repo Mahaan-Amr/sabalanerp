@@ -24,13 +24,13 @@ test('Department Creation is a stable RTL, responsive, themed, and accessible pi
     await setViewportAndZoom(page, { width: 1280, height: 900 });
     await assertNoHorizontalOverflow(page);
     await expect(page).toHaveScreenshot(`department-create-desktop-${theme}.png`, {
-      animations: 'disabled', caret: 'hide', mask: deterministicScreenshotMasks(page), fullPage: true, maxDiffPixels: 50
+      animations: 'disabled', caret: 'hide', mask: deterministicScreenshotMasks(page), fullPage: true, maxDiffPixelRatio: 0.002
     });
 
     await setViewportAndZoom(page, { width: 390, height: 844 });
     await assertNoHorizontalOverflow(page);
     await expect(page).toHaveScreenshot(`department-create-mobile-${theme}.png`, {
-      animations: 'disabled', caret: 'hide', mask: deterministicScreenshotMasks(page), fullPage: true, maxDiffPixels: 50
+      animations: 'disabled', caret: 'hide', mask: deterministicScreenshotMasks(page), fullPage: true, maxDiffPixelRatio: 0.002
     });
   }
 

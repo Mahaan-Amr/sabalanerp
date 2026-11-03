@@ -424,10 +424,12 @@ async function main() {
         { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
       assert.equal(trend.status, 200);
       const trendBody = await trend.json() as any;
-      const partnerPoint = trendBody.data.partnerSeries.find((series: any) => series.currency === 'IRR').points.at(-1);
-      assert.equal(partnerPoint.invoiced, '1600');
-      assert.equal(partnerPoint.received, '0');
-      assert.equal(partnerPoint.outstanding, '1600');
+      const partnerPoints = trendBody.data.partnerSeries.find((series: any) => series.currency === 'IRR').points;
+      assert.equal(partnerPoints.some((point: any) => point.invoiced === '1600'), true,
+        'the invoice remains attributed to its effective day when the test crosses a Tehran day boundary');
+      const currentPartnerPoint = partnerPoints.at(-1);
+      assert.equal(currentPartnerPoint.received, '0');
+      assert.equal(currentPartnerPoint.outstanding, '1600');
       const workspace = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/accounting/workspace`,
         { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
       const workspaceBody = await workspace.json() as any;

@@ -81,6 +81,8 @@ model Personnel {
   id                                  String                               @id @default(cuid())
   firstName                           String
   lastName                            String
+  nationalCode                        String?                              @unique
+  employeeNumber                      String?                              @unique
   departmentId                        String?
   isActive                            Boolean                              @default(true)
   createdAt                           DateTime                             @default(now())
@@ -91,6 +93,7 @@ model Personnel {
   instantReportParticipants           SecurityShiftLogParticipant[]
   user                                User?
   department                          Department?                          @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  hrEmploymentRelationships           HrEmploymentRelationship[]
 
   @@index([isActive, departmentId])
   @@index([lastName, firstName])
@@ -432,7 +435,7 @@ model SecurityShiftTemporaryCoverage {
 }
 
 model AttendanceRecord {
-  id                    String            @id @default(cuid())
+  id                    String                        @id @default(cuid())
   employeeId            String?
   personnelId           String?
   securityPersonnelId   String
@@ -440,7 +443,7 @@ model AttendanceRecord {
   shiftId               String
   entryTime             String?
   exitTime              String?
-  status                AttendanceStatus  @default(PRESENT)
+  status                AttendanceStatus              @default(PRESENT)
   exceptionType         String?
   exceptionTime         String?
   exceptionDuration     Int?
@@ -457,12 +460,12 @@ model AttendanceRecord {
   delayMinutes          Int?
   overtimeMinutes       Int?
   overtimePending       Boolean                       @default(false)
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
-  employee              User?             @relation(fields: [employeeId], references: [id], onDelete: SetNull)
-  personnel             Personnel?        @relation(fields: [personnelId], references: [id], onDelete: Restrict)
-  securityPersonnel     SecurityPersonnel @relation(fields: [securityPersonnelId], references: [id], onDelete: Cascade)
-  shift                 Shift             @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
+  employee              User?                         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  personnel             Personnel?                    @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  securityPersonnel     SecurityPersonnel             @relation(fields: [securityPersonnelId], references: [id], onDelete: Cascade)
+  shift                 Shift                         @relation(fields: [shiftId], references: [id], onDelete: Cascade)
 
   @@index([personnelId, date])
   @@index([employeeId, date])
@@ -2548,4 +2551,170 @@ model ContractConfirmationAuditLog {
   @@index([contractId, eventAt])
   @@index([sessionId])
   @@map("contract_confirmation_audit_logs")
+}
+
+enum HrOrganizationalUnitType {
+  COMPANY
+  DIVISION
+  DEPARTMENT
+  SECTION
+  TEAM
+}
+
+enum HrEmploymentStatus {
+  PLANNED
+  ACTIVE
+  SUSPENDED
+  ENDED
+}
+
+enum HrAssignmentType {
+  PRIMARY
+  SECONDARY
+  ACTING
+}
+
+model HrOrganizationalUnit {
+  id                 String                   @id @default(cuid())
+  code               String                   @unique
+  name               String
+  type               HrOrganizationalUnitType
+  parentId           String?
+  legacyDepartmentId String?                  @unique
+  isActive           Boolean                  @default(true)
+  createdBy          String
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  parent             HrOrganizationalUnit?    @relation("HrUnitHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children           HrOrganizationalUnit[]   @relation("HrUnitHierarchy")
+  positions          HrPosition[]
+  assignments        HrEmploymentAssignment[]
+
+  @@index([parentId, isActive])
+  @@map("hr_organizational_units")
+}
+
+model HrWorkplace {
+  id          String                   @id @default(cuid())
+  code        String                   @unique
+  name        String
+  description String?
+  isActive    Boolean                  @default(true)
+  createdBy   String
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  positions   HrPosition[]
+  assignments HrEmploymentAssignment[]
+
+  @@map("hr_workplaces")
+}
+
+model HrCostCenter {
+  id          String                   @id @default(cuid())
+  code        String                   @unique
+  name        String
+  description String?
+  isActive    Boolean                  @default(true)
+  createdBy   String
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  positions   HrPosition[]
+  assignments HrEmploymentAssignment[]
+
+  @@map("hr_cost_centers")
+}
+
+model HrJob {
+  id               String       @id @default(cuid())
+  code             String       @unique
+  title            String
+  description      String?
+  responsibilities String?
+  isActive         Boolean      @default(true)
+  createdBy        String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  positions        HrPosition[]
+
+  @@map("hr_jobs")
+}
+
+model HrPosition {
+  id                   String                   @id @default(cuid())
+  code                 String                   @unique
+  title                String
+  jobId                String
+  organizationalUnitId String
+  workplaceId          String?
+  costCenterId         String?
+  supervisorPositionId String?
+  capacity             Int                      @default(1)
+  isActive             Boolean                  @default(true)
+  createdBy            String
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  job                  HrJob                    @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  organizationalUnit   HrOrganizationalUnit     @relation(fields: [organizationalUnitId], references: [id], onDelete: Restrict)
+  workplace            HrWorkplace?             @relation(fields: [workplaceId], references: [id], onDelete: Restrict)
+  costCenter           HrCostCenter?            @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  supervisorPosition   HrPosition?              @relation("HrPositionReporting", fields: [supervisorPositionId], references: [id], onDelete: Restrict)
+  subordinatePositions HrPosition[]             @relation("HrPositionReporting")
+  assignments          HrEmploymentAssignment[]
+
+  @@index([organizationalUnitId, isActive])
+  @@index([jobId, isActive])
+  @@index([supervisorPositionId])
+  @@map("hr_positions")
+}
+
+model HrEmploymentRelationship {
+  id                String                   @id @default(cuid())
+  personnelId       String
+  status            HrEmploymentStatus
+  effectiveFrom     DateTime
+  effectiveTo       DateTime?
+  originalStartDate DateTime?
+  startDateVerified Boolean                  @default(false)
+  endReason         String?
+  sourceSystem      String?
+  sourceId          String?
+  migratedAt        DateTime?
+  createdBy         String
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  personnel         Personnel                @relation(fields: [personnelId], references: [id], onDelete: Restrict)
+  assignments       HrEmploymentAssignment[]
+
+  @@unique([sourceSystem, sourceId])
+  @@index([personnelId, status, effectiveFrom, effectiveTo])
+  @@map("hr_employment_relationships")
+}
+
+model HrEmploymentAssignment {
+  id                                String                   @id @default(cuid())
+  employmentRelationshipId          String
+  positionId                        String
+  type                              HrAssignmentType
+  effectiveFrom                     DateTime
+  effectiveTo                       DateTime?
+  organizationalUnitId              String?
+  workplaceId                       String?
+  costCenterId                      String?
+  responsibleSupervisorAssignmentId String?
+  scheduleContributing              Boolean                  @default(false)
+  createdBy                         String
+  createdAt                         DateTime                 @default(now())
+  updatedAt                         DateTime                 @updatedAt
+  employmentRelationship            HrEmploymentRelationship @relation(fields: [employmentRelationshipId], references: [id], onDelete: Restrict)
+  position                          HrPosition               @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  organizationalUnit                HrOrganizationalUnit?    @relation(fields: [organizationalUnitId], references: [id], onDelete: Restrict)
+  workplace                         HrWorkplace?             @relation(fields: [workplaceId], references: [id], onDelete: Restrict)
+  costCenter                        HrCostCenter?            @relation(fields: [costCenterId], references: [id], onDelete: Restrict)
+  responsibleSupervisorAssignment   HrEmploymentAssignment?  @relation("HrResponsibleSupervisor", fields: [responsibleSupervisorAssignmentId], references: [id], onDelete: Restrict)
+  supervisedAssignments             HrEmploymentAssignment[] @relation("HrResponsibleSupervisor")
+
+  @@index([employmentRelationshipId, type, effectiveFrom, effectiveTo])
+  @@index([positionId, effectiveFrom, effectiveTo])
+  @@index([responsibleSupervisorAssignmentId])
+  @@map("hr_employment_assignments")
 }

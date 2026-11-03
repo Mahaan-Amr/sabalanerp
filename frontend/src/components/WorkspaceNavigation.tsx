@@ -447,32 +447,25 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
             show: true
           },
           {
-            name: 'Employees',
-            namePersian: 'کارکنان',
-            href: '/dashboard/hr/employees',
+            name: 'Organization',
+            namePersian: 'ساختار سازمانی',
+            href: '/dashboard/hr/structure',
+            icon: FaBuilding,
+            show: true
+          },
+          {
+            name: 'Personnel',
+            namePersian: 'پرسنل و استخدام',
+            href: '/dashboard/hr/personnel',
             icon: FaUsers,
             show: true
           },
           {
-            name: 'Payroll',
-            namePersian: 'حقوق و دستمزد',
-            href: '/dashboard/hr/payroll',
-            icon: FaCalculator,
-            show: true
-          },
-          {
-            name: 'Attendance',
-            namePersian: 'حضور و غیاب',
-            href: '/dashboard/hr/attendance',
-            icon: FaCalendarAlt,
-            show: true
-          },
-          {
-            name: 'Reports',
-            namePersian: 'گزارش‌های HR',
-            href: '/dashboard/hr/reports',
-            icon: FaChartLine,
-            show: true
+            name: 'Migration',
+            namePersian: 'مهاجرت و تطبیق',
+            href: '/dashboard/hr/migration',
+            icon: FaClipboardList,
+            show: hasPermission(WORKSPACES.HR, 'admin' as any)
           }
         ];
 
@@ -791,4 +784,3 @@ export const WorkspaceNavigation: React.FC<WorkspaceNavigationProps> = ({ classN
     </div>
   );
 };
-

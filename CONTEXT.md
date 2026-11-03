@@ -1206,8 +1206,8 @@ The first personnel registry records only first name, last name, related departm
 _Avoid_: forcing login-style contact fields onto non-user personnel, collecting sensitive identity fields before a workflow requires them, or blocking attendance setup on HR/payroll completeness
 
 **تشخیص تکراری پرسنل سازمانی**:
-An exact duplicate full name inside the same department is treated as a likely duplicate and should be blocked or require explicit admin confirmation, while the same full name may exist in different departments. User-to-personnel migration should link to an existing matching personnel record instead of creating a duplicate.
-_Avoid_: silently creating same-name same-department duplicates, globally blocking common names across departments, or duplicating personnel records during user migration
+An Iranian National Code match, when available, identifies the same person and prevents a second Personnel identity. Similar full name, birth date, phone, or organizational placement produces a duplicate warning for review but never an automatic hard match; User migration, Candidate conversion, and rehire link to confirmed existing Personnel instead of creating duplicates.
+_Avoid_: treating names as unique identity, automatically merging on similarity, creating another Personnel for a returning worker or matching Candidate, exposing National Code outside authorized Human Resources access
 
 **غیرفعال‌سازی پرسنل سازمانی**:
 The normal way to remove personnel from active operational selection while preserving their historical attendance, mission, exception, report, and future workflow records. Hard deletion is reserved for accidental records with no operational history.
@@ -1320,7 +1320,7 @@ If a person has an older attendance record with ورود and no خروج, حرا
 _Avoid_: overwriting yesterday's record with today's action, creating automatic خروج without operator confirmation, or allowing overlapping open attendance records for the same person
 
 **ساعت کاری پرسنل**:
-The optional effective-dated recurring weekly schedule owned by the Personnel identity, containing one complete start-to-end work interval for each selected Persian-calendar weekday. Personnel management and the linked User management form both display and update this same schedule rather than keeping separate schedules. Bulk entry can assign an interval to selected days, after which either boundary remains independently editable for each day; applying bulk time overwrites only the currently selected days, preserves unselected days, and requires confirmation when it would replace differing values. A configured day must have both boundaries, and an absent schedule has neither configured days nor times. When a day's end time is not later than its start time, its interval ends on the following calendar day. Weekday selection follows the project calendar's Saturday-to-Friday order and provides presets for every day and for the standard workweek of Saturday through Thursday. A new schedule version starts on a selected Jalali effective date of today or later, so future changes do not rewrite earlier schedule history. ADMIN and MANAGER roles with User/Personnel management access may edit the schedule; Security consumes and displays the applicable baseline but does not change it.
+The optional effective-dated recurring weekly schedule owned by Human Resources as the canonical expected-work baseline for the Personnel identity, containing one complete start-to-end work interval for each selected Persian-calendar weekday. Personnel management and the linked User management form both display and update this same schedule rather than keeping separate schedules. Bulk entry can assign an interval to selected days, after which either boundary remains independently editable for each day; applying bulk time overwrites only the currently selected days, preserves unselected days, and requires confirmation when it would replace differing values. A configured day must have both boundaries, and an absent schedule has neither configured days nor times. When a day's end time is not later than its start time, its interval ends on the following calendar day. Weekday selection follows the project calendar's Saturday-to-Friday order and provides presets for every day and for the standard workweek of Saturday through Thursday. A new schedule version starts on a selected Jalali effective date of today or later, so future changes do not rewrite earlier schedule history. Authorized User/Personnel management roles may edit the schedule; Security consumes and displays the applicable baseline but does not change it.
 _Avoid_: storing conflicting work schedules on User and Personnel, treating a login account as the workforce source of truth, letting Security rewrite its own reporting baseline, saving only one boundary of a configured day, keeping selected days without complete times, rejecting an overnight interval merely because its end clock time is earlier than its start clock time, forcing every selected day to keep the same interval after bulk entry, treating Friday as part of the standard-workweek preset, or backdating a schedule change into historical attendance
 
 **روز غیرکاری پرسنل**:
@@ -1377,3 +1377,329 @@ _Avoid_: treating the old paper table as the required digital UI layout, or keep
 **برنامه تحویل در برابر بارگیری**:
 برنامه تحویل is the sales/customer promise for planned delivery timing and amounts; بارگیری is the logistics record of actual loading and shipment.
 _Avoid_: merging promised delivery schedule data with actual loading transactions when shipped quantities, dates, or drivers differ
+
+## Human Resources and Leave
+
+**HR Migration Baseline**:
+The declared cutover reference used to introduce existing Personnel into the new HR model without manufacturing unknown history. Existing active Personnel receive a migrated active Employment Relationship with source identifiers and migration provenance, but creation timestamps are never treated as hire dates and unknown dates remain explicitly unknown for HR verification. Existing User-to-Personnel links are preserved, while unlinked Users remain access identities until deliberately classified. Departments become typed Organizational Units only after hierarchy review, existing schedules retain their known effective dates as legacy records, and only genuine leave Exception Requests become Leave Requests; other exceptions retain their attendance or Security meaning. Migration provides a repeat-safe dry run, reconciliation totals, and duplicate or conflict reporting, and never destructively deletes source records.
+_Avoid_: invented employment or schedule history, automatically turning every User into Personnel, coercing every exception into leave, losing source provenance, destructive one-shot migration without reconciliation
+
+**Leave Request**:
+An employee's request for approved time away from expected work, owned by Human Resources regardless of which workspace later consumes its result.
+_Avoid_: Security exception, attendance correction, shift exception
+
+**Employee Leave Self-Service**:
+The employee-facing leave entry and tracking surface in Personal Affairs. It is the single place where an employee submits and follows their own Leave Requests.
+_Avoid_: a second Security leave form, workspace-specific copies of the same request
+
+**Leave Approval**:
+The policy-driven workflow that changes a pending Leave Request into approved or rejected time away from work. Automated checks validate schedule, overlap, balance, and Leave Type rules; the effective Responsible Supervisor is the sole human approver for a routine request. Human Resources owns policy and the ledger but joins the approval only for configured exceptions such as negative balance, unpaid leave, extended duration, medical or legal review, or a retroactive request. The route and responsible actors are snapshotted at submission. An effective-dated delegate may act during an approver's absence; otherwise the request visibly escalates through the reporting hierarchy. Security consumes the approved result and never approves leave.
+_Avoid_: making HR manually approve every routine request, using generic application roles instead of accountable effective-dated people, Security approval, silently rerouting a submitted request, stalled requests with no delegation or escalation
+
+**Leave Balance Ledger**:
+The auditable source from which an Employment Relationship's balance for each balance-consuming Leave Type is calculated. Entitlement, accrual, carryover or transfer, reservation, usage, expiry, adjustment, and reversal are separate immutable entries; no actor directly edits the resulting balance. A pending request reserves entitlement, approval converts the reservation into usage, and rejection or cancellation releases it. Cancelling confirmed usage creates a reversal rather than deleting history. Adjustments are dated and retain the reason, acting person, and any required approver snapshot. A request cannot exceed available balance unless that Leave Type's explicit negative-balance policy permits it, while Leave Types configured without a balance bypass balance consumption.
+_Avoid_: an editable final balance, deleting or rewriting ledger history, independent balances outside an Employment Relationship, consuming the same available entitlement through concurrent pending requests, treating every Leave Type as balance-consuming
+
+**Leave Consumption Duration**:
+The amount charged to a Leave Balance Ledger from the employee's Combined Expected Schedule rather than raw calendar days or manually asserted hours. Daily leave covers every expected interval within the selected dates, while hourly leave uses an exact start and end time; rest days and non-working intervals consume nothing. The calculation includes all schedule-contributing assignments and retains the applicable schedule and version references. A pre-approval schedule change recalculates the duration and visibly informs the requester, while a post-approval change creates a review conflict and never silently changes approved consumption or finalized attendance.
+_Avoid_: charging calendar days without expected work, ignoring contributing assignments, manually entering the consumed duration as authoritative, silently recalculating approved leave after a schedule change
+
+**Leave Revision and Cancellation**:
+The controlled lifecycle for changing a submitted or approved Leave Request without rewriting its decisions. A requester may withdraw a pending request and release its reservation. Changing dates, times, or Leave Type after submission creates a visible revision and reruns validation and approval. Cancelling future approved leave follows the same operational approval route because replacement coverage may already exist. After leave starts, only an authorized Human Resources correction may reverse consumption and trigger attendance reevaluation through new dated records with a reason and required approval. The original request, approval, coverage, ledger, and attendance evidence remain intact, and overlapping active Leave Requests for the same employee are rejected.
+_Avoid_: editing an approved request in place, deleting approved leave or its operational consequences, employee self-cancellation after leave starts, retaining a balance reservation after withdrawal, accepting overlapping active leave
+
+**Security Leave Consequence**:
+The operational staffing and attendance effect that Security derives from an approved Leave Request, such as identifying a shift that needs replacement coverage.
+_Avoid_: letting Security own the Leave Request or its HR approval policy
+
+**Attendance Exception**:
+An operational discrepancy or correction concerning recorded presence, such as a missing entry, late arrival, early departure, or absence correction. It is distinct from a Leave Request even when approved leave explains the discrepancy.
+_Avoid_: using Attendance Exception as an umbrella term for leave policy
+
+**Job**:
+A reusable description of the nature of work and its expected responsibilities and capabilities, independent of a particular place in Sabalan's organization.
+_Avoid_: Position, organizational seat, employee assignment
+
+**Position**:
+A defined place in Sabalan's organization that applies a Job within a specific organizational, reporting, workplace, and shift context. Each Position has an approved headcount capacity and may hold multiple active personnel assignments up to that capacity; its vacancy is the unfilled portion of that capacity.
+_Avoid_: Job, treating the nature of work and its organizational placement as one field, duplicating an otherwise identical Position for every occupant
+
+**Position Reporting Line**:
+The normal supervisory relationship from one Position to its supervising Position, preserved independently of whichever personnel currently occupy either Position. A temporary or exceptional reporting relationship is a separate override rather than a rewrite of the normal structure.
+_Avoid_: permanently storing the normal reporting line only between Personnel, editing every subordinate when a manager changes, replacing the normal structure for a temporary arrangement
+
+**Employment Assignment**:
+The effective-dated relationship that places Personnel in a Position for a defined period. Personnel may hold concurrent assignments, but exactly one active assignment is primary; every other active assignment is explicitly secondary or acting. Transfers, promotions, and other placement changes close or supersede assignments while preserving the organizational history that applied on each date.
+_Avoid_: a mutable Position field on Personnel, multiple primary assignments, unclassified concurrent duties, overwriting earlier placements, reconstructing historical reporting or cost attribution from today's organization
+
+**Capacity-Bearing Assignment**:
+A primary or secondary Employment Assignment that occupies one place within a Position's approved headcount capacity. An acting assignment provides temporary operational coverage without consuming permanent capacity, so the covered Position remains vacant for staffing and recruitment purposes.
+_Avoid_: counting acting coverage as a permanent occupant, hiding a vacancy because someone is acting in it, ignoring secondary assignments in headcount
+
+**Employment Relationship**:
+An effective-dated period during which Personnel is employed by Sabalan. Departure closes the current relationship without removing the Personnel identity, and a later rehire creates a new relationship to which that period's contracts, assignments, employment status, and exit records belong.
+_Avoid_: treating Personnel and employment as the same lifecycle, overwriting an earlier employment period on rehire, creating duplicate Personnel for a returning worker
+
+**Employment Status**:
+The current lifecycle state of an Employment Relationship: Planned before its start, Active while employment is in force, Suspended while employment continues but work is temporarily stopped, or Ended after the relationship concludes. Ordinary leave is derived from approved Leave Requests, and probation is a dated employment phase rather than an Employment Status.
+_Avoid_: using leave, probation, contract state, or attendance state as Employment Status, using a generic inactive state that hides whether employment is planned, suspended, or ended
+
+**Probation Phase**:
+An effective-dated phase within an Employment Relationship during which an employee may remain Active while a required probation review is pending. The review explicitly records confirmation, an authorized extension with its reason and new end date, or employment termination; every extension preserves the earlier period and decision history. Reaching the planned end date without a decision creates an overdue escalation and never silently confirms or terminates employment.
+_Avoid_: representing probation as Employment Status, overwriting the original probation dates, automatic confirmation or termination at the planned end date, extending probation without an authorized reason
+
+**Employment Termination Decision**:
+The explicit Human Resources decision that records the notice date, last working date, effective employment end, reason, and authorized actors and opens a coordinated Offboarding Case. Employment remains Active until the effective end unless separately suspended. At that instant the Employment Relationship and active Assignments close, Position capacity is released, and expected scheduling stops. ERP and physical access each use an exact cutoff time, while early or extended access requires explicit, scoped, time-bounded approval from the relevant owner. Records are disabled or closed rather than deleted.
+_Avoid_: deriving termination from contract expiry or incomplete work, releasing capacity before the effective end, deleting Personnel or User, using one vague date for notice, final work, employment end, and access cutoff
+
+**Offboarding Case**:
+The coordinated set of separately owned tasks created by an Employment Termination Decision, including equipment return, document handover, payroll settlement, exit interview, ERP access revocation, and physical access revocation. Each task retains its owner, timing, status, and evidence. An unfinished settlement or unreturned asset remains an overdue post-employment obligation and never falsely keeps the Employment Relationship Active; historical attendance, approvals, contracts, assignments, and audit evidence remain intact.
+_Avoid_: making employment end depend on every administrative task completing, merging access state with Employment Status, losing evidence after departure, one unowned offboarding checklist
+
+**Suspended Employment Capacity**:
+A Suspended Employment Relationship retains its capacity-bearing Position assignments because employment and permanent placement continue. Any temporary operational gap is covered through an acting assignment or other temporary coverage unless Human Resources explicitly changes or ends the permanent assignment.
+_Avoid_: creating a permanent vacancy from suspension, triggering ordinary recruitment solely because of suspension, removing the employee's Position without an explicit HR decision
+
+**Committed Position Capacity**:
+Capacity reserved by a capacity-bearing assignment on an accepted, future-dated Planned Employment Relationship. It is not active headcount before the start date, but it closes the permanent vacancy so Recruitment does not hire against the same capacity again; an unaccepted offer remains in Recruitment and reserves nothing.
+_Avoid_: counting a future hire as currently active, recruiting against capacity already committed to an accepted hire, reserving capacity for an unaccepted offer
+
+**Expired Employment Contract**:
+An Employment Contract whose end date has passed without a recorded renewal or replacement. It creates an urgent Human Resources action but does not automatically end the Employment Relationship, release Position capacity, remove attendance expectations, or revoke access.
+_Avoid_: treating contract expiry as automatic termination, silently releasing staffing capacity, continuing without an HR alert
+
+**Governing Employment Contract**:
+The single Employment Contract whose effective period governs an Employment Relationship on a given date. Renewals are sequential governing contracts, while corrections and changed clauses are amendments to the applicable contract rather than overlapping governing contracts.
+_Avoid_: multiple governing contracts active on the same date, representing an amendment as a competing contract, using a second contract to compensate a secondary or acting assignment
+
+**Employment Type**:
+The classification of how a person works within an Employment Relationship, such as full-time, part-time, seasonal, or trainee work. It is distinct from the legal form of the governing contract.
+_Avoid_: Contract Type, Position, Employment Status
+
+**Contract Type**:
+The classification of the legal form used by a Governing Employment Contract, independent of the employee's working arrangement.
+_Avoid_: Employment Type, Contract Status, using one combined classification for legal form and working arrangement
+
+**HR Classification Catalog**:
+A Human Resources-managed list of stable coded classifications, including Employment Types and Contract Types, whose Persian names and descriptions may evolve. Deactivation prevents future selection while preserving the classification on historical records.
+_Avoid_: hardcoded display values that require software migrations, deleting catalog values used by history, allowing a renamed label to change a stable business identity
+
+**Personnel Document**:
+A versioned record with a document category, confidentiality level, source, effective and expiry dates, and retention policy. Identity, contract, compensation, disciplinary, and medical categories have separately scoped permissions rather than inheriting one broad HR view. Medical evidence is highly restricted: a Responsible Supervisor sees only the necessary operational result, while Security sees only approved absence and coverage consequences. Viewing, downloading, replacing, and exporting sensitive documents are audited; replacement creates a new version instead of overwriting the prior evidence. Expiry raises an alert but does not itself end employment or invalidate a decision unless an explicit policy requires that consequence.
+_Avoid_: general HR access exposing every document, supervisors seeing diagnoses or medical attachments, Security seeing medical details, overwriting evidence, unaudited export, treating document expiry as automatic employment termination
+
+**Assignment Context**:
+The Organizational Unit, Workplace, Cost Center, and shift context actually applicable to an Employment Assignment for its effective period. Position values provide the defaults for minimal entry, while explicit assignment values and overrides preserve the context used by historical staffing, attendance, payroll, and reporting.
+_Avoid_: deriving history from today's Position defaults, storing mutable placement only on Personnel, requiring repeated entry when Position defaults already apply
+
+**Security Rota**:
+The Security-owned operational plan that assigns eligible guards to coverage duties. It consumes HR-owned expected-work schedules and approved leave but does not replace the canonical employee Work Schedule or define company-wide attendance expectations.
+_Avoid_: a second employee schedule source of truth, letting operational guard coverage redefine HR work expectations, using the guard rota for general personnel attendance
+
+**Applicable Work Schedule**:
+The single expected-work schedule selected for Personnel at a moment by precedence: an effective Personnel Schedule Override, then the Employment Assignment schedule or Shift Pattern, then the Position default. If none exists, the schedule is undefined and requires Human Resources attention.
+_Avoid_: combining multiple schedule sources, silently choosing an arbitrary source, treating an undefined schedule as a non-working day
+
+**Personnel Schedule Override**:
+An effective-dated exception that temporarily replaces the otherwise Applicable Work Schedule for one Personnel. A person may have at most one active override at any moment, and the system rejects overlapping override periods rather than resolving them through hidden priority.
+_Avoid_: overlapping overrides, editing the underlying Position or Assignment for a temporary change, internal priority that is invisible to users
+
+**Rotating Shift Pattern**:
+A reusable repeating cycle of work intervals and non-working periods with an Anchor Date that identifies the first day of the cycle. The applicable cycle day for any later date is calculated from that anchor; a temporary deviation is a Schedule Override rather than a change to the Pattern.
+_Avoid_: a rotating cycle without an Anchor Date, editing the Pattern for one person's temporary change, generating independently editable daily copies as the source of truth
+
+**Shift Pattern Version**:
+An effective-dated version of a Shift Pattern. A permanent cycle or anchor change creates a new version or new schedule assignment from its effective date and never overwrites the Pattern that governed earlier dates.
+_Avoid_: retroactively changing historical expected work, editing an old version in place, using a temporary Override for a permanent cycle change
+
+**Schedule-Level Non-Overlap**:
+The rule that at most one schedule source of the same precedence level may apply to a Personnel at any moment. Conflicting effective periods at one level are rejected rather than resolved by invisible priority.
+_Avoid_: simultaneous same-level schedules, last-write-wins scheduling, undocumented internal precedence within one level
+
+**Finalized Attendance Schedule Evidence**:
+The expected-work evidence retained when attendance is finalized, containing either the applicable schedule snapshot or an immutable reference to the exact schedule or Shift Pattern version that governed that attendance.
+_Avoid_: recalculating finalized attendance from current schedules, losing the governing version, changing historical lateness or overtime after a future schedule update
+
+**Base Assignment Schedule**:
+The expected-work schedule supplied by the primary Employment Assignment. It is the base used for attendance unless a Personnel Schedule Override temporarily replaces it.
+_Avoid_: deriving competing base schedules from secondary or acting assignments, using assignment priority that is not visible to Human Resources
+
+**Schedule-Contributing Assignment**:
+A secondary or acting Employment Assignment explicitly marked to add recurring expected-work intervals to the base schedule. Non-contributing assignments add no attendance expectation, and contributing intervals must not overlap the base or another contributing interval.
+_Avoid_: letting every additional assignment silently change attendance, overlapping expected-work intervals, using a secondary assignment to replace the base schedule
+
+**Combined Expected Schedule**:
+The Base Assignment Schedule, or its temporary Personnel Schedule Override, together with every applicable non-overlapping Schedule-Contributing Assignment interval.
+_Avoid_: choosing only one responsibility when several explicitly contribute hours, double-counting overlapping intervals, treating titles without schedule contribution as expected work
+
+**Schedule Override Scope**:
+The explicit boundary of a Personnel Schedule Override. Base-only scope replaces the Base Assignment Schedule while applicable Schedule-Contributing Assignments remain active; whole-schedule scope temporarily replaces both the base and all additive assignment intervals. Base-only is the default.
+_Avoid_: silently suspending secondary duties, making override scope implicit, applying a whole-schedule replacement when only the primary schedule was intended
+
+**Base-Only Override Conflict**:
+An invalid schedule state in which a base-only Personnel Schedule Override overlaps an applicable Schedule-Contributing Assignment interval. The system rejects the Override and identifies the conflicting assignment, dates, hours, overlap, and explicit resolution choices rather than accepting a warning.
+_Avoid_: warning-only confirmation, silently merging overlapping intervals, saving an ambiguous schedule and deferring the conflict to attendance or payroll
+
+**Expected Assignment Hours**:
+The non-overlapping intervals added by an explicitly Schedule-Contributing secondary or acting assignment to the Combined Expected Schedule. They carry ordinary lateness and absence expectations and are not overtime merely because they fall outside the primary assignment's base hours; compensation for the added responsibility is determined separately by assignment and payroll rules.
+_Avoid_: classifying one interval as both mandatory attendance and automatic overtime, ignoring absence from additive expected hours, deriving responsibility compensation solely from clock time
+
+**Overtime Candidate**:
+System-calculated extra presence outside the Combined Expected Schedule, based on immutable actual entry and exit evidence. It is not payable overtime until the responsible supervisor explicitly confirms that the work was authorized and performed.
+_Avoid_: paying from clock presence alone, letting Security determine compensation entitlement, deleting raw attendance when the candidate is rejected or corrected
+
+**Approved Overtime**:
+An Overtime Candidate confirmed by the responsible supervisor and available for Human Resources review and Payroll consumption. Human Resources may correct attendance or classification while preserving the raw entry/exit evidence and the approval audit trail.
+_Avoid_: sending pending or rejected candidates to Payroll, modifying raw attendance to force a payment result, losing who approved or corrected the classification
+
+**Responsible Supervisor**:
+The one accountable Personnel selected for an Employment Assignment from active occupants of its supervising Position. A sole eligible occupant is suggested or selected automatically; when several are eligible, saving the subordinate assignment requires an explicit selection whose effective period is fully covered by the supervisor's active assignment. Supervisor changes are effective-dated and preserve earlier responsibility.
+_Avoid_: arbitrary selection among multiple occupants, a supervisor outside the supervising Position, responsibility extending beyond the supervisor's assignment, deleting previous supervisor history
+
+**Approval Actor Snapshot**:
+The immutable identity evidence attached to an approval, including the actual approver's Personnel or User identifier and displayed identity at the time of action. Later supervisor, assignment, account, or name changes do not rewrite who performed the historical approval.
+_Avoid_: deriving the historical approver from today's reporting line, replacing the actual actor with a Position label, losing approver identity after organizational change
+
+**Vacant Supervisor Escalation**:
+The visible temporary approval route used when a supervising Position has no active occupant. Human Resources is alerted to create an effective-dated acting assignment, while urgent approvals escalate to the nearest occupied supervising Position above it and retain the escalation reason, route, and actual approver in the audit trail.
+_Avoid_: silently choosing an unrelated manager, permanently blocking urgent approvals, treating escalation as a substitute for filling the reporting gap, hiding that the normal supervisor was vacant
+
+**Identity-Incomplete Personnel**:
+A provisional Personnel identity created before a reliable National Code or equivalent identity document is available. It remains visibly flagged for Human Resources completion and duplicate review without blocking early recruitment, onboarding, or essential operational setup.
+_Avoid_: requiring National Code before any provisional record, treating a provisional record as identity-verified, hiding the incomplete identity state
+
+**Candidate**:
+A reusable recruitment-bank identity for a person who may pursue different opportunities at Sabalan over time. Identity, contact details, resume, skills, and employment history belong to the Candidate and survive individual application outcomes.
+_Avoid_: Personnel before hiring, duplicating the person for every vacancy, storing vacancy-specific decisions on the reusable profile
+
+**Job Application**:
+The Candidate's pursuit of one approved vacancy or Recruitment Request. Screening, interviews, assessments, proposed compensation, and the final decision belong to that Application, while hiring links the Candidate to a Personnel identity without deleting recruitment history.
+_Avoid_: overwriting an earlier application with a later one, treating Candidate and Application as one record, deleting recruitment evidence after hiring
+
+**Recruitment Request**:
+The approved authorization to recruit a defined number of people into a specific Position. Formal Job Applications belong to an approved request; each accepted hire consumes one requested opening and committed Position capacity, and the request closes when its openings are filled or explicitly cancelled.
+_Avoid_: informal hiring outside approved structure, accepting more hires than authorized openings, treating an unsolicited resume as a formal Application before it is linked to a request
+
+**Talent-Bank Candidate**:
+A Candidate retained by Human Resources without a current formal Job Application. The profile may later be linked to an approved Recruitment Request without duplicating the person or inventing an earlier application history.
+_Avoid_: discarding unsolicited resumes, counting talent-bank profiles as active applicants, placing a Candidate in a hiring pipeline without an approved request
+
+**Vacancy-Fill Request**:
+A Recruitment Request that uses currently available approved Position capacity.
+_Avoid_: recruiting without an actual vacancy, increasing Position capacity implicitly
+
+**Planned-Replacement Request**:
+A Recruitment Request linked to the departing Personnel and Employment Assignment with an expected end date. Recruitment may begin before departure, but the accepted hire's capacity commitment starts after the departure unless an explicit handover overlap is approved.
+_Avoid_: waiting until departure to begin all replacement recruitment, double-filling capacity without an approved handover, losing which assignment is being replaced
+
+**Capacity-Increase Request**:
+A Recruitment Request whose purpose is to add authorized Position capacity. The capacity increase must be explicitly approved before the request enters formal recruitment.
+_Avoid_: treating growth as an ordinary vacancy, allowing a hire to increase headcount implicitly, recruiting against unapproved capacity
+
+**Recruitment Request Approval**:
+The type-aware authorization of a Recruitment Request. Vacancy-fill and planned-replacement requests require the Responsible Supervisor or Manager followed by Human Resources; a Capacity-Increase Request additionally requires authorized executive or budget approval.
+_Avoid_: one undifferentiated approval flow, letting Human Resources silently authorize increased headcount cost, requiring executive approval for every routine replacement
+
+**Handover Overlap**:
+An explicitly approved date range during which the departing and incoming assignments may temporarily exceed a Position's ordinary capacity for knowledge transfer. It belongs to a Planned-Replacement Request and does not permanently increase approved capacity.
+_Avoid_: hidden double occupancy, permanent capacity growth through a replacement workflow, overlap without start and end dates or accountable approval
+
+**Approver Assignment**:
+An effective-dated assignment of a named approval responsibility, such as Human Resources approval or workforce capacity/budget approval, to an eligible accountable person. Business authority is resolved from this assignment rather than a hardcoded user or broad application role, while every completed decision retains its Approval Actor Snapshot.
+_Avoid_: treating every MANAGER as authorized, hardcoding a current approver, rewriting old authority after responsibility changes, silently approving when no eligible approver is configured
+
+**Application Stage**:
+The minimal visible phase of a Job Application: Received, Screening, Assessment, Offer, or Closed. Detailed interviews, tests, reviews, approvals, and transitions are checklist items and append-only history events rather than additional mandatory stages.
+_Avoid_: turning every recruitment activity into a status, forcing every Candidate through irrelevant steps, losing activity history because only the current stage is stored
+
+**Application Outcome**:
+The reason a Job Application is Closed: Hired, Rejected, Withdrawn, or Recruitment Request Cancelled. Outcome is separate from stage so closure meaning is explicit and does not overload the pipeline.
+_Avoid_: a generic closed state without reason, treating withdrawal as rejection, deleting an Application when its Recruitment Request is cancelled
+
+**Recruitment Checklist Template**:
+The Job- or Position-specific definition of required and optional screening, interview, test, reference, certificate, and approval activities inside the fixed Application Stages. A Job Application snapshots the applicable template version when entering the pipeline so later template changes do not rewrite its required work or history.
+_Avoid_: one universal assessment sequence for every Job, adding custom pipeline stages per Position, recalculating an active Application from a later template version
+
+**Candidate Profile**:
+The reusable Candidate-owned recruitment information shared across Applications, including identity and contact details, resume, education, skills, languages, and employment history.
+_Avoid_: vacancy-specific decisions, internal interviewer notes, duplicating the profile for every Application
+
+**Application Form**:
+The Position- or Recruitment Request-specific candidate responses for one Job Application, including availability, desired compensation, declarations, and configured questions.
+_Avoid_: copying every historical paper field into every application, storing reusable Candidate facts repeatedly, exposing internal assessment content
+
+**Internal Candidate Assessment**:
+Restricted recruitment evidence created by authorized Sabalan reviewers, including interview notes, psychological or aptitude test results, management assessment, and hiring recommendations.
+_Avoid_: candidate-editable assessment, exposing confidential notes in candidate-facing views, treating assessment evidence as reusable Candidate identity data
+
+**Justified Recruitment Field**:
+A field from the source questionnaire that Human Resources explicitly classifies as required, optional, or omitted for a defined recruitment purpose. Sensitive family, social, or personal details are not mandatory merely because they appeared on the paper form.
+_Avoid_: one-to-one digitization without purpose review, collecting every available personal detail, hiding why a sensitive field is required
+
+**Recruitment Data Scope**:
+The field-group access granted to a participant according to their assigned recruitment responsibility. Candidate self-service, interviewer work, hiring-manager decisions, Human Resources processing, identity documents, assessments, compensation, and confidential notes are distinct scopes rather than one HR-wide view.
+_Avoid_: treating HR workspace VIEW as access to every candidate field, showing internal assessments to Candidates, exposing unnecessary identity or family data to interviewers or hiring managers
+
+**Sensitive Recruitment Access Event**:
+The audit evidence produced whenever protected candidate identity, document, psychological assessment, compensation, or confidential-note data is viewed, changed, exported, or downloaded.
+_Avoid_: auditing only edits, untracked document downloads, relying on hidden interface controls as privacy enforcement
+
+**Recruitment Data Retention**:
+The configurable period and disposition for closed Job Applications and Candidate data. Essential decision and audit history remains for the approved period; talent-bank searchability requires recorded consent, non-consented reusable profile data is anonymized or removed after retention, and especially sensitive documents or assessments may expire sooner.
+_Avoid_: immediate deletion of defensible history, indefinite retention by default, keeping a Candidate searchable without consent, forcing every recruitment data group to share one retention duration
+
+**Verified Hire Transfer**:
+The explicit mapping that links or creates Personnel from a hired Candidate and transfers only approved, verified identity, contact, education, skill, certificate, and required document data with source provenance. Conflicting existing Personnel values require Human Resources review, while Internal Candidate Assessments remain in restricted Recruitment history.
+_Avoid_: copying the entire recruitment file into Personnel, silently overwriting verified personnel data, losing where a transferred value came from, exposing confidential interview or psychological evidence through the general personnel profile
+
+**Accepted Offer**:
+The Candidate's recorded acceptance while the Job Application remains in the Offer stage pending successful employment conversion. It does not by itself create Personnel employment, reserve capacity, or mean Hired.
+_Avoid_: treating verbal or recorded acceptance as completed hiring, closing the Application before employment records exist, partially creating employment after acceptance
+
+**Hire Conversion**:
+The atomic operation that links or creates Personnel, creates the Planned Employment Relationship and capacity-bearing primary Employment Assignment, reserves committed capacity, links the source Application and Recruitment Request, and opens onboarding. The Application receives the Hired outcome only after the whole conversion succeeds.
+_Avoid_: partial hiring records, marking Hired before conversion completes, consuming an opening or capacity without the linked employment foundation
+
+**Onboarding Case**:
+The new hire's effective onboarding file created by Hire Conversion from snapshots of the current company-wide checklist and the applicable Job or Position checklist. Later template changes do not rewrite an active or completed case.
+_Avoid_: one universal checklist for every Job, recalculating active onboarding from current templates, losing which requirements applied when hiring occurred
+
+**Onboarding Task**:
+A company-wide or Job-specific onboarding requirement with mandatory or optional classification, accountable owner, due date, status, and completion evidence. Job-specific tasks cover training, safety, operational readiness, and authorizations without duplicating common administrative tasks.
+_Avoid_: tasks without accountable ownership, completion without evidence when evidence is required, mixing common and Position-specific requirements into an unstructured note
+
+**Onboarding Requirement Level**:
+The operational effect of an Onboarding Task: Activation Blocker prevents the Employment Relationship from becoming Active; Post-Start Required permits activation but remains tracked and escalated until completion; Optional is situational or recommended and does not block activation.
+_Avoid_: treating every task as a start blocker, silently ignoring overdue required work, letting an optional task prevent employment activation
+
+**Independent-Work Blocker**:
+A Job-specific Onboarding Task whose incompletion permits active employment and supervised work but forbids independent performance of the affected hazardous or controlled operation until training, clearance, and authorization are complete.
+_Avoid_: confusing employment activation with equipment authorization, allowing independent hazardous work before clearance, preventing all supervised work when only independent operation is blocked
+
+**Onboarding-Blocked Start**:
+The condition in which a Planned Employment Relationship reaches its intended start date while an Activation Blocker remains incomplete. Employment stays Planned, Position capacity remains committed, Human Resources and the hiring manager are urgently alerted, and resolution requires completing the blocker or formally changing the start date.
+_Avoid_: automatic activation to hide incomplete onboarding, releasing committed capacity, silently moving the start date, ignoring an overdue blocker
+
+**Pre-Activation Attendance Evidence**:
+Immutable actual presence recorded by Security for Personnel whose Employment Relationship has not yet been authorized to become Active. The record exposes the policy discrepancy and is never deleted or altered to make onboarding appear compliant.
+_Avoid_: blocking Security from recording physical reality, treating attendance recording as employment authorization, deleting evidence after Human Resources resolves the onboarding problem
+
+**Pre-Activation Activity Permit**:
+A separate, explicit, time-bounded authorization for limited activity while the Employment Relationship remains Planned and Onboarding Blockers remain unresolved. It identifies the permitted activity and location, validity period, approving actor, required supervisor presence, device or system access restrictions, and exception reason; it never activates employment or removes an Activation Blocker.
+_Avoid_: deriving permission from attendance, a broad permission to work normally, an undated or unscoped exception, treating the permit as completion or waiver of onboarding
+
+**Pre-Activation Permit Approval**:
+The scope-dependent authorization for a Pre-Activation Activity Permit: Human Resources and the Responsible Supervisor approve every permit, with additional safety or equipment authority for hazardous work and system or data owner approval for ERP or sensitive access. Security verifies a valid permit at entry but does not approve it; self-approval is forbidden, approvals retain actor snapshots, and the permit expires automatically.
+_Avoid_: one generic approver for every risk, Security authorizing employment, self-approval, access continuing after permit expiry
+
+**Organizational Unit**:
+A typed node in Sabalan's single organizational hierarchy, covering levels such as company, division, department, workshop, production line, and administrative section.
+_Avoid_: a separate hierarchy or table for every organizational level, treating workplace or cost center as an organizational parent
+
+**Workplace**:
+The physical or operational location where work is performed, independent of the Organizational Unit hierarchy so one location may serve multiple units.
+_Avoid_: Organizational Unit, Cost Center
+
+**Cost Center**:
+The accounting classification to which workforce cost is attributed, independent of the Organizational Unit and Workplace hierarchies.
+_Avoid_: Department, Workplace, deriving accounting ownership only from organizational placement

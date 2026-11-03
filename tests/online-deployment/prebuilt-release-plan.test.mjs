@@ -8,7 +8,7 @@ import {validatePrebuiltReleasePlan,prebuiltReleaseExports,requirePrebuiltScanne
 
 const hash=character=>character.repeat(64),image=character=>'sha256:'+hash(character);
 function fixture(){
- const operations={receiptSha256:hash('a'),files:Object.fromEntries(['deploy/scripts/deploy.sh','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'].map(name=>[name,hash('b')]))};
+ const operations={receiptSha256:hash('a'),files:Object.fromEntries(['deploy/scripts/deploy.sh','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/prebuilt-migration-inventory.mjs','deploy/scripts/normal-migration-projection.mjs','deploy/scripts/deployment-role-binding.mjs','deploy/scripts/migration-control-inspection.mjs','deploy/scripts/migration-control-host.mjs','deploy/scripts/migration-control-state.mjs','deploy/scripts/production-image-execution-binding.mjs','scripts/lib/private-docker-image-archive.mjs','scripts/lib/production-backend-base-process.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'].map(name=>[name,hash('b')]))};
  const plan={format:'sabalan-prebuilt-protected-release-plan/v1',applicationCommit:'a'.repeat(40),applicationTree:'b'.repeat(40),applicationSourceHash:hash('c'),inquirySourceCommit:'d'.repeat(40),images:{},operations};
  const actual={head:plan.applicationCommit,tree:plan.applicationTree,status:'',inquiryGitlink:plan.inquirySourceCommit,inquiryHead:plan.inquirySourceCommit,inquiryStatus:'',operations:structuredClone(operations),images:{},buildReceipts:{},archiveReceipts:{},linuxCheckoutByteHash:hash('f')};
  for(const [index,role]of ['backend','frontend','inquiry'].entries()){
@@ -39,10 +39,42 @@ test('changed source, dirty gitlink, images, graph, build bytes, operations and 
   ({actual})=>{actual.buildReceipts.backend.performanceSourceHash=hash('f');},({actual})=>{actual.images.backend.Config.Labels['io.sabalan.performance.source-hash']=hash('f');},({actual})=>{actual.archiveReceipts.frontend.platform=image('f');},
   ({actual})=>{actual.operations.files['deploy/scripts/deploy.sh']=hash('f');},({plan})=>{plan.images.frontend.browser.id='erp_rebuilt_other123';},({plan})=>{plan.images.inquiry.browser.id='inquiry_rebuilt_other123';},
   ({plan,actual})=>{delete plan.operations.files['deploy/scripts/storage-preflight.sh'];delete actual.operations.files['deploy/scripts/storage-preflight.sh'];},
+  ({plan,actual})=>{delete plan.operations.files['deploy/scripts/prebuilt-migration-inventory.mjs'];delete actual.operations.files['deploy/scripts/prebuilt-migration-inventory.mjs'];},
+  ({plan,actual})=>{delete plan.operations.files['deploy/scripts/normal-migration-projection.mjs'];delete actual.operations.files['deploy/scripts/normal-migration-projection.mjs'];},
+  ({actual})=>{actual.operations.files['deploy/scripts/normal-migration-projection.mjs']=hash('f');},
+  ({plan,actual})=>{delete plan.operations.files['deploy/scripts/deployment-role-binding.mjs'];delete actual.operations.files['deploy/scripts/deployment-role-binding.mjs'];},
+  ({actual})=>{actual.operations.files['deploy/scripts/deployment-role-binding.mjs']=hash('f');},
+  ...['deploy/scripts/migration-control-inspection.mjs','deploy/scripts/migration-control-host.mjs','deploy/scripts/migration-control-state.mjs','deploy/scripts/production-image-execution-binding.mjs','scripts/lib/private-docker-image-archive.mjs','scripts/lib/production-backend-base-process.mjs'].map(name=>({plan,actual})=>{delete plan.operations.files[name];delete actual.operations.files[name];}),
  ]){const input=fixture();mutate(input);assert.throws(()=>validatePrebuiltReleasePlan(input.plan,input.actual));}
 });
 
 const script=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),bash=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh';
+test('unknown original migration control retains ownership before rollback or cleanup',()=>{
+ const start=script.indexOf('recover_failure() {'),end=script.indexOf('  if [ "${SESSION_PREPARED}" -eq 0 ]; then',start);
+ assert.ok(start>=0&&end>start);
+ const body=script.slice(start,end)+'\n}\n';
+ const run=spawnSync(bash,['-c',`set -eu
+MIGRATION_CONTROL_UNKNOWN=1
+control(){ echo "control:$1"; return 1; }
+sleep(){ exit 97; }
+cleanup_locks(){ echo CLEANUP; }
+drain_release_for_rollback(){ echo DRAIN; }
+${body}
+recover_failure 1`],{encoding:'utf8',timeout:5000});
+ assert.equal(run.status,97,run.stderr);assert.match(run.stderr,/heartbeat failed/);assert.doesNotMatch(run.stdout+run.stderr,/control:heartbeat/);
+ assert.doesNotMatch(run.stdout+run.stderr,/CLEANUP|DRAIN|finish|maintenance-off/);
+});
+test('recovery checks durable migration uncertainty before starting recovery actions',()=>{
+ const resume=script.indexOf('if [ -f "${SESSION_HOST_PATH}" ]; then');
+ const check=script.indexOf('migration-control-state.mjs" check',resume);
+ const switchImages=script.indexOf('switch_to_previous_images',resume);
+ const startPostgres=script.indexOf('compose up -d --no-deps postgres',resume);
+ assert.ok(resume>=0&&check>resume&&check<switchImages&&check<startPostgres);
+ const begin=script.indexOf('migration-control-state.mjs" begin');
+ const invoke=script.indexOf('migration-control-host.mjs" run',begin);
+ const complete=script.indexOf('migration-control-state.mjs" complete',invoke);
+ assert.ok(begin>=0&&begin<invoke&&invoke<complete);
+});
 test('prebuilt real shell lane retains cleanup/capacity and never fetches, builds, retags or derives a browser ID',()=>{
  const start=script.indexOf('if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then\nif [ "${PREBUILT_RELEASE}" -eq 0 ]; then'),end=script.indexOf('elif [ "${CAPTURE_ONLY}" -eq 1 ]; then',start);assert.ok(start>0&&end>start);const block=script.slice(start,end)+'fi\n';
  for(const [capacity,verifyExit,status,events]of [[2097152,0,0,['CLEANUP','MEASURE','VERIFY','CONFIG','READY']],[10,0,1,['CLEANUP','MEASURE']],[2097152,7,1,['CLEANUP','MEASURE','VERIFY']]]){

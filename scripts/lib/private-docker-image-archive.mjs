@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 
-export function inspectPrivateDockerArchive(file, expectedIndex) {
-  assert.match(expectedIndex, /^sha256:[a-f0-9]{64}$/);
+function inspectArchive(file, expectedIndex, allowDirectManifest = false) {
+  const discovered = expectedIndex === undefined;
+  let directManifest = false;
+  if (expectedIndex !== undefined) assert.match(expectedIndex, /^sha256:[a-f0-9]{64}$/);
   assert.equal(fs.realpathSync(file), file);
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
   try {
@@ -49,11 +51,27 @@ export function inspectPrivateDockerArchive(file, expectedIndex) {
       return JSON.parse(bytes.toString('utf8'));
     };
     const blob = value => { assert.match(value, /^sha256:[a-f0-9]{64}$/); return 'blobs/sha256/' + value.slice(7); };
+    if (expectedIndex === undefined) {
+      // A saved OCI archive must identify one root descriptor. Its bytes are
+      // verified below; the caller separately binds the result to a native ID.
+      const root = json('index.json');
+      assert.equal(root.schemaVersion, 2);
+      assert.ok(Array.isArray(root.manifests) && root.manifests.length === 1);
+      expectedIndex = root.manifests[0].digest;
+      assert.match(expectedIndex, /^sha256:[a-f0-9]{64}$/);
+      assert.equal(entries.get(blob(expectedIndex))?.size, root.manifests[0].size);
+      directManifest = root.manifests[0].mediaType === 'application/vnd.oci.image.manifest.v1+json' || root.manifests[0].mediaType === 'application/vnd.docker.distribution.manifest.v2+json';
+    }
     const index = json(blob(expectedIndex)); assert.equal(index.schemaVersion, 2);
-    const platforms = index.manifests.filter(value => value.platform?.os === 'linux' && value.platform?.architecture === 'amd64');
-    assert.equal(platforms.length, 1);
-    const platform = json(blob(platforms[0].digest)); assert.equal(platform.schemaVersion, 2);
-    assert.equal(entries.get(blob(platforms[0].digest)).size, platforms[0].size);
+    let platform,platformDigest;
+    if (discovered && directManifest) { assert.ok(allowDirectManifest); platform=index; platformDigest=expectedIndex; }
+    else {
+      assert.ok(Array.isArray(index.manifests));
+      const platforms = index.manifests.filter(value => value.platform?.os === 'linux' && value.platform?.architecture === 'amd64');
+      assert.equal(platforms.length, 1);
+      platformDigest=platforms[0].digest; platform = json(blob(platformDigest)); assert.equal(platform.schemaVersion, 2);
+      assert.equal(entries.get(blob(platformDigest)).size, platforms[0].size);
+    }
     const config = json(blob(platform.config.digest));
     assert.equal(entries.get(blob(platform.config.digest)).size, platform.config.size);
     assert.equal(config.os, 'linux'); assert.equal(config.architecture, 'amd64'); assert.equal(config.rootfs.type, 'layers');
@@ -68,7 +86,22 @@ export function inspectPrivateDockerArchive(file, expectedIndex) {
     const identity = value => [process.platform === 'win32' ? 0n : value.dev,
       value.ino, value.size, value.mtimeNs, value.ctimeNs, value.nlink].map(String).join(':');
     assert.equal(identity(before), identity(after)); assert.equal(identity(before), identity(named));
-    return { index: expectedIndex, platform: platforms[0].digest, config: platform.config.digest,
+    return { index: expectedIndex, platform: platformDigest, config: platform.config.digest,
       rootfsDiffIds: config.rootfs.diff_ids, blobs, archiveSha256, archiveBytes: length };
   } finally { fs.closeSync(descriptor); }
+}
+
+export function inspectPrivateDockerArchive(file, expectedIndex) {
+  assert.match(expectedIndex, /^sha256:[a-f0-9]{64}$/);
+  return inspectArchive(file, expectedIndex);
+}
+
+/** For a freshly saved host image, discover the single OCI root and then bind
+ * its verified graph to the actual Docker execution namespace. */
+export function inspectPrivateDockerArchiveForExecution(file, executionImageId, store) {
+  assert.match(executionImageId, /^sha256:[a-f0-9]{64}$/);
+  assert.ok(['classic', 'containerd'].includes(store));
+  const graph = inspectArchive(file, undefined, store === 'classic');
+  assert.equal(store === 'containerd' ? graph.index : graph.config, executionImageId);
+  return graph;
 }

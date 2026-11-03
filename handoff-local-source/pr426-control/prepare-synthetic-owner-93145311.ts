@@ -1,0 +1,8 @@
+import fs from 'node:fs';
+import {createSyntheticCandidateOwner} from 'C:/Users/mahan/.codex/worktrees/candidate-migration-review/sabalanerp/backend/src/services/__tests__/protectedCandidateSyntheticOwner';
+const d='D:/sabalan-private-build-93145311-e0847af934b64f16b286a72e265aaecd',p=JSON.parse(fs.readFileSync(d+'/test-host-input-93145311.json','utf8'));
+if(p.testOnly!==true||p.deploymentId!=='test-candidate-e2cc9d5fec4c4f6986fd18be516f8c5b'||p.releaseId!=='test-release-e2cc9d5fec4c4f6986fd18be516f8c5b')throw Error('TEST_IDENTITY_UNPROVEN');
+const generated=createSyntheticCandidateOwner();const owner={...generated,deploymentId:p.deploymentId,releaseId:p.releaseId,checkpoint:{...generated.checkpoint,deploymentId:p.deploymentId,releaseId:p.releaseId}};
+const fd=fs.openSync(d+'/synthetic-test-owner.json','wx',0o600);try{fs.writeFileSync(fd,JSON.stringify(owner)+'\n');fs.fsyncSync(fd)}finally{fs.closeSync(fd)};
+const check=JSON.parse(fs.readFileSync(d+'/synthetic-test-owner.json','utf8'));if(check.deploymentId!==p.deploymentId||check.releaseId!==p.releaseId||check.checkpoint.deploymentId!==p.deploymentId||check.checkpoint.releaseId!==p.releaseId||!/^[a-f0-9]{64}$/.test(check.leaseToken)||!/^[a-f0-9]{64}$/.test(check.checkpoint.checksum))throw Error('OWNER_READBACK_UNPROVEN');
+console.log(JSON.stringify({state:'PRIVATE_TEST_OWNER_PREPARED_NOT_SEEDED',deploymentId:p.deploymentId,releaseId:p.releaseId,productionAdmission:false}));

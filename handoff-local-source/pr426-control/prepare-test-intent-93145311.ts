@@ -1,0 +1,3 @@
+import {prepareNativeStageIntent} from 'C:/Users/mahan/.codex/worktrees/candidate-migration-review/sabalanerp/backend/src/services/__tests__/protectedCandidateNativeStageIntent';
+const result=prepareNativeStageIntent('D:/sabalan-private-build-93145311-e0847af934b64f16b286a72e265aaecd','7667464637415309346');
+console.log(JSON.stringify({...result,clusterIdentity:'HISTORICAL_RECHECK_REQUIRED',productionAdmission:false}));

@@ -1,0 +1,18 @@
+import fs from 'node:fs';
+import {createHash} from 'node:crypto';
+import {writeMigrationProjection} from './deploy/scripts/prebuilt-release-plan.mjs';
+const fail=()=>{throw Error('TEST_PRODUCER_UNKNOWN');};
+if(process.getuid?.()!==0||process.argv.length!==3)fail();
+const [file]=process.argv.slice(2);
+if(file!=='/inputs/test-host-input.json')fail();
+const digest=process.env.TEST_INPUT_SHA256||'',raw=fs.readFileSync(file);
+if(!/^[a-f0-9]{64}$/.test(digest)||createHash('sha256').update(raw).digest('hex')!==digest||raw.length>1048576)fail();
+const x=JSON.parse(raw.toString('utf8'));
+if(x.format!=='sabalan-test-projection-input/v1'||x.testOnly!==true||!/^test-candidate-[a-f0-9]{32}$/.test(x.deploymentId)||x.releaseId!=='test-release-'+x.deploymentId.slice('test-candidate-'.length)||x.selection?.releaseAdmission!==false||x.inventory?.releaseAdmission!==false)fail();
+if(x.selection.applicationCommit!=='93145311c11d9e4190d9ab2e599829504abfc146'||x.selection.applicationSourceHash!=='772c76a31b72cb750504e93bb7a6c8fdd1789d1f21966d1fa8610dcd25a70092'||x.selection.images?.backend!=='sha256:8af727044bd510903f4647bad6fb361c604492bf3803e2cd64e096c36334b8aa')fail();
+if(x.applicationTree!=='20fdc5ae8905c20d445a954b4a891365b23c2812'||x.inventory.commit!==x.selection.applicationCommit||!/^[a-f0-9]{64}$/.test(x.planSha256))fail();
+const sha=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+if(!Array.isArray(x.inventory.entries)||sha(x.inventory.entries)!==x.inventory.sha256||sha({format:'sabalan-normal-build-migration-binding/v1',commit:x.selection.applicationCommit,tree:x.applicationTree,sourceHash:x.selection.applicationSourceHash,image:x.selection.images.backend,inventorySha256:x.inventory.sha256})!==x.planSha256)fail();
+process.env.DEPLOYMENT_ID=x.deploymentId;process.env.DEPLOYMENT_RELEASE_ID=x.releaseId;
+const result=writeMigrationProjection('/work',x.selection,x.applicationTree,x.planSha256,x.inventory,'sabalan-build-migration-projection/v1');
+process.stdout.write(JSON.stringify({testOnly:true,file:result.file,sha256:result.sha256,releaseAdmission:false})+'\n');

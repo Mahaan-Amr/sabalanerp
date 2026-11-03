@@ -17,7 +17,7 @@ const hostFiles=['deploy/scripts/preserved-clamav.mjs','backend/scripts/preserve
  'deploy/scripts/online-release-launcher.py','deploy/scripts/online-owner-service.py','deploy/systemd/sabalan-online-owner.service',
  'deploy/scripts/online-production-gates.mjs','deploy/scripts/online-client-terminal-observation.py','deploy/scripts/online-owner-install-guard.mjs',
  'deploy/scripts/browser-routing-store.mjs','deploy/scripts/browser-release-routing.mjs',
- 'deploy/scripts/online-bootstrap-boundary.mjs','deploy/scripts/install-online-controller-trust.mjs','deploy/scripts/deploy.sh','deploy/scripts/capture-only-release.mjs','deploy/scripts/prebuilt-release-plan.mjs',
+ 'deploy/scripts/online-bootstrap-boundary.mjs','deploy/scripts/install-online-controller-trust.mjs','deploy/scripts/deploy.sh','deploy/scripts/capture-only-release.mjs','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/prebuilt-migration-inventory.mjs','deploy/scripts/normal-migration-projection.mjs','deploy/scripts/deployment-role-binding.mjs','deploy/scripts/migration-control-inspection.mjs','deploy/scripts/migration-control-host.mjs','deploy/scripts/migration-control-state.mjs','deploy/scripts/production-image-execution-binding.mjs','scripts/lib/private-docker-image-archive.mjs','scripts/lib/production-backend-base-process.mjs',
  'deploy/scripts/legacy-backend-signal.py',
  'deploy/scripts/canonical-previous-release-configuration.mjs','deploy/scripts/verify-premutation-configuration-repair.mjs','deploy/scripts/reconcile-premutation-capture.mjs',
  'deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-capacity.mjs',

@@ -1,0 +1,70 @@
+"""Retire only this original's fresh current authority job AFTER strict closure.
+No public CLI, application/DB action, source checkpoint or acceptance access.
+"""
+import os,stat,json,re,hashlib
+from pathlib import Path
+BASE=Path('/app/runtime-authority')
+def need(v):
+ if not v:raise AssertionError('OWNED_TERMINAL_LOCAL_RETIREMENT_REFUSED')
+def identity(s):return tuple(getattr(s,k)for k in ['st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns','st_mode','st_uid','st_nlink'])
+def directory(p):
+ s=p.lstat();need(p.resolve(strict=True)==p and stat.S_ISDIR(s.st_mode)and s.st_uid==0 and not s.st_mode&0o022);return [s.st_dev,s.st_ino]
+def read_private(p,expected):
+ before=p.lstat();need(p.resolve(strict=True)==p and stat.S_ISREG(before.st_mode)and before.st_uid==0 and before.st_nlink==1 and not before.st_mode&0o077 and 0<before.st_size<=16384)
+ fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+ try:
+  need(identity(os.fstat(fd))==identity(before));raw=os.read(fd,16385);need(len(raw)==before.st_size and hashlib.sha256(raw).hexdigest()==expected and identity(os.fstat(fd))==identity(p.lstat())==identity(before));return json.loads(raw)
+ finally:os.close(fd)
+def closed_native(active,final):
+ need(active['format']==final['format']=='sabalan-runtime-native/v1'and active['phase']=='ACTIVE'and final['phase']=='QUIESCENT'and final['nativeReaped']is True and final['databaseQuiet']is True and final['nativeStatus']==0 and final['stoppedBySignal']is False)
+ for key in ['instanceId','namespace','clusterIdentifier','guardian','commandSha256']:need(active[key]==final[key])
+ need(re.fullmatch('[a-f0-9]{48}',final['instanceId'])and final['namespace']=='sabalan-rt-'+final['instanceId'])
+ birth=final['guardian'];need(type(birth['pid'])is int and birth['pid']>0 and re.fullmatch('[1-9][0-9]*',birth['startTicks']))
+ need(birth['bootId']==Path('/proc/sys/kernel/random/boot_id').read_text().strip()and birth['pidNamespace']==os.readlink('/proc/self/ns/pid'))
+ try:fields=Path('/proc/'+str(birth['pid'])+'/stat').read_text().rsplit(') ',1)[1].split()
+ except FileNotFoundError:fields=None
+ need(fields is None or fields[19]!=birth['startTicks']or fields[0]=='Z')
+def retire(operation,initial,pins):
+ need(os.getuid()==0 and re.fullmatch('[a-f0-9]{32}',operation));root=BASE/('application-native-'+operation);work=root/'restored-complete-app';base_identity=directory(BASE)
+ need(initial['format']=='sabalan-local-strict-material-parent/v1'and initial['operation']==operation and initial['root']==str(root)and initial['stage']==str(root/'strict-complete-material')and initial['authorityRootInitiallyEmpty']is True and initial['existingAcceptanceAccessed']is False)
+ need(directory(root)==initial['rootDirectoryIdentity']and directory(root/'strict-complete-material')==initial['stageDirectoryIdentity']and os.listdir(BASE)==[root.name])
+ need(set(pins)=={'outerActive','outerFinal'}and all(re.fullmatch('[a-f0-9]{64}',x)for x in pins.values()))
+ coord=work/'recovery-coordination';active=read_private(coord/'strict-original-active-native.json',pins['outerActive']);final=read_private(coord/'deployment-runtime-native.json',pins['outerFinal']);need(final['activeClaimSha256']==pins['outerActive']);closed_native(active,final)
+ # Reject any descendant mount before walking; no mount traversal/removal.
+ for line in Path('/proc/self/mountinfo').read_text().splitlines():
+  mount=line.split()[4];need('\\'not in mount or not mount.startswith(str(root)));need(mount!=str(root)and not mount.startswith(str(root)+'/'))
+ entries=[];lock_keys=set()
+ def scan(p):
+  s=p.lstat();need(s.st_uid==0);kind=stat.S_IFMT(s.st_mode)
+  if kind==stat.S_IFDIR:
+   need(not s.st_mode&0o022 and p.resolve(strict=True)==p)
+   for name in sorted(os.listdir(p)):scan(p/name)
+  elif kind==stat.S_IFREG:need(s.st_nlink==1 and not s.st_mode&0o022)
+  else:need(kind==stat.S_IFLNK) # unlink link itself; never resolve/read target.
+  entries.append((p,identity(s),kind));lock_keys.add((os.major(s.st_dev),os.minor(s.st_dev),s.st_ino))
+ scan(root)
+ for line in Path('/proc/locks').read_text().splitlines():
+  fields=line.split();offset=1 if len(fields)>1 and fields[1]=='->'else 0
+  if len(fields)>5+offset:
+   native=fields[5+offset].split(':')
+   if len(native)==3:need((int(native[0],16),int(native[1],16),int(native[2]))not in lock_keys)
+ # All names/identities and guardian retirement checked before first removal.
+ need(directory(BASE)==base_identity and directory(root)==initial['rootDirectoryIdentity']);closed_native(active,final)
+ for p,original,kind in entries:need(identity(p.lstat())==original)
+ original_directories={p:original for p,original,kind in entries if kind==stat.S_IFDIR}
+ for p,original,kind in entries:
+  ancestor=p.parent
+  while ancestor!=BASE:
+   expected=original_directories[ancestor];need(directory(ancestor)==[expected[0],expected[1]]);ancestor=ancestor.parent
+  current=p.lstat()
+  if kind==stat.S_IFDIR:need(directory(p)==[original[0],original[1]])
+  else:need(identity(current)==original)
+  if kind==stat.S_IFDIR:p.rmdir()
+  else:p.unlink()
+ fd=os.open(BASE,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+ try:os.fsync(fd)
+ finally:os.close(fd)
+ need(directory(BASE)==base_identity and os.listdir(BASE)==[]and not root.exists())
+ return {'format':'sabalan-owned-local-strict-job-retired/v1','operation':operation,'jobAbsent':True,'authorityEmpty':True,'authorityDirectoryIdentity':base_identity,'authorityNamespaceAfter':{k:str(getattr(BASE.lstat(),k))for k in ['st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns']},'historicalAcceptanceAccessed':False,'productionAdmission':False}
+def main():raise AssertionError('SAME_ORIGINAL_PRIVATE_TERMINAL_SOURCE_ONLY')
+if __name__=='__main__':main()

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {readFrozenC3ReadonlyProtocolSource,c3ReadonlyProtocolSuccessor} from './c3-readonly-transport-successor.mjs';
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'
   ?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
@@ -12,10 +13,11 @@ const expectedNames=['backend/src/application.ts','backend/src/services/identity
 /** Trusted diagnostic preparation only. The actual esbuild onLoad capture map
  * must already contain every reviewed module; this cannot invent membership or
  * approve a source tuple different from the issuer's explicitly reviewed one. */
-export function collectApplicationReadonlyTransportArtifacts({capture,sources,bundle,bundleSha256}){
+export function collectApplicationReadonlyTransportArtifacts({capture,sources,bundle,bundleSha256,root,operationsSourceReuse}){
   assert.equal(typeof capture,'function');assert.ok(Buffer.isBuffer(bundle));assert.equal(sha(bundle),bundleSha256);
   capture('scripts/lib/application-native-readonly-transport-artifacts.mjs');
-  const issuer=capture('deploy/scripts/readonly-transport-retirement.py');
+  const baseIssuer=capture('deploy/scripts/readonly-transport-retirement.py');let issuer=baseIssuer;
+  if(operationsSourceReuse){capture('scripts/lib/c3-readonly-transport-successor.mjs');issuer=readFrozenC3ReadonlyProtocolSource({root,operationsSourceReuse,base:baseIssuer});}
   const match=/^APPROVED_PROTOCOL_SOURCES = \{\r?\n((?:    '[A-Za-z0-9_./-]+': '[a-f0-9]{64}',\r?\n)+)\}/m.exec(issuer.toString('utf8'));
   assert.ok(match,'reviewed protocol tuple must have an exact bounded literal shape');
   const pins=Object.fromEntries([...match[1].matchAll(/^    '([^']+)': '([a-f0-9]{64})',$/gm)].map(value=>[value[1],value[2]]));
@@ -29,5 +31,5 @@ export function collectApplicationReadonlyTransportArtifacts({capture,sources,bu
   return {files:{'readonly-transport-retirement.py':issuer,
     'readonly-transport-retirement-native.fixture.py':capture('tests/online-deployment/readonly-transport-retirement-native.fixture.py'),
     'readonly-socket-protocol.json':receipt},
-    proof:Object.freeze({protocolReceiptSha256:sha(receipt),bundleSha256,sources:Object.freeze({...pins}),productionAdmission:false})};
+    proof:Object.freeze({protocolReceiptSha256:sha(receipt),bundleSha256,sources:Object.freeze({...pins}),...(operationsSourceReuse?{issuerSourceReuse:{...c3ReadonlyProtocolSuccessor,operationsSourceCommit:operationsSourceReuse.operationsSourceCommit,sourceOnly:true}}:{}),productionAdmission:false})};
 }

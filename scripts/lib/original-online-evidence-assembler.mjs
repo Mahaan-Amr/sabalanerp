@@ -11,6 +11,10 @@ import {readOriginalIndependentRestoreSshCompletion,readOriginalIndependentPhysi
 import {readOriginalProtectedQualificationRequest,readOriginalOnlineQualificationRequest} from './original-protected-online-ssh.mjs';
 import {assertOriginalPrivateEvidenceDirectory} from './original-private-evidence-directory.mjs';
 import {readIndependentCheckpointTransport} from './independent-checkpoint-transport.mjs';
+import {readOriginalExistingComposeComplete,joinOriginalCompleteProtectedContext} from './original-existing-compose-complete.mjs';
+import {readOriginalPhysicalCompletion} from './original-physical-completion.mjs';
+import {isOriginalSameComposePhysical} from './original-same-compose-physical.mjs';
+import {projectOriginalOnlineManifest} from './original-online-manifest-projection.mjs';
 
 const completed=new WeakMap();
 const scopes=['compatible-migrations','coherent-independent-restore','browser-24-hours','single-worker-and-completion','current-domain'];
@@ -124,13 +128,24 @@ export function assembleOriginalProtectedOnlineEvidence({localCompletion,indepen
  return assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical:false,evidenceCustody,protectedFinancial,revalidateRequest:()=>readOriginalProtectedQualificationRequest(protectedRequest)});
 }
 
+/** Same original existing-service COMPLETE, deliberately separate from SSH and
+ * physical completion authority. A parsed capture or SSH token cannot enter. */
+export function assembleOriginalProtectedCompleteEvidence({localCompletion,independentCompletion,protectedRequest,evidenceDirectory,evidenceCustody,protectedFinancial}){
+ const local=readOriginalRoleQualificationCompletion(localCompletion),independent=readOriginalExistingComposeComplete(independentCompletion),request=readOriginalProtectedQualificationRequest(protectedRequest);
+ same(request.format,'sabalan-original-protected-qualification-request/v1');same(independent.recoveryMode,'PROTECTED_MAINTENANCE_COMPLETE');
+ return assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical:false,complete:true,evidenceCustody,protectedFinancial,
+  contextualComplete:binding=>joinOriginalCompleteProtectedContext(independentCompletion,protectedRequest,binding),
+  revalidateRequest:()=>{readOriginalExistingComposeComplete(independentCompletion);readOriginalProtectedQualificationRequest(protectedRequest);}});
+}
+
 /** Following ONLINE cycles require the actual physical owner and live original
  * request. COMPLETE backup receipts cannot enter this separate factory. */
 export function assembleOriginalOnlineEvidence({localCompletion,independentCompletion,onlineRequest,evidenceDirectory,evidenceCustody}){
- const local=readOriginalRoleQualificationCompletion(localCompletion),independent=readOriginalIndependentPhysicalRestoreSshCompletion(independentCompletion),request=readOriginalOnlineQualificationRequest(onlineRequest);
+ const local=readOriginalRoleQualificationCompletion(localCompletion),independent=readOriginalPhysicalCompletion(independentCompletion),request=readOriginalOnlineQualificationRequest(onlineRequest);
  same(request.format,'sabalan-original-online-qualification-request/v1');same(independent.recoveryMode,'ONLINE_COHERENT_WAL');
  assert.ok(Number.isSafeInteger(request.generation)&&request.generation>=2);
- return assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical:true,evidenceCustody,revalidateRequest:()=>readOriginalOnlineQualificationRequest(onlineRequest)});
+ return assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical:true,sameCompose:isOriginalSameComposePhysical(independentCompletion),evidenceCustody,
+  revalidateRequest:()=>{readOriginalPhysicalCompletion(independentCompletion);readOriginalOnlineQualificationRequest(onlineRequest);}});
 }
 
 
@@ -159,7 +174,7 @@ function protectedFinancialFiles(selection){
  return {source,sourceRaw,binding:structuredClone(selection.binding),files,revalidate(){for(const check of pins)check();}};
 }
 
-function assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical,evidenceCustody,protectedFinancial,revalidateRequest}){
+function assembleOriginalEvidence({local,independent,request,evidenceDirectory,physical,complete=false,sameCompose=false,evidenceCustody,protectedFinancial,revalidateRequest,contextualComplete}){
  const financial=protectedFinancial?protectedFinancialFiles(protectedFinancial):null;assert.ok(!physical||!financial,'FINITE_FINANCIAL_REQUIRES_PROTECTED_COMPLETE');
  const originalProductionExecution=deriveOriginalExecutionSelection(request,independent);
  assert.ok(local.originalControllers.every(row=>row.code===0&&row.signal===null)&&independent.originalControllers.every(row=>row.code===0&&row.signal===null));
@@ -191,9 +206,7 @@ function assembleOriginalEvidence({local,independent,request,evidenceDirectory,p
   const observed=sql.namespaces.filter(row=>row.namespace===namespace);same(observed.length,1);same(observed[0].sessions,0);
   return naturalClosure({...value,claimNative:claim.native,freshSql:{visible:sql.visible,systemIdentifier:sql.database.systemIdentifier,databaseOid:sql.database.oid,namespace,namespaceSessions:observed[0].sessions,prepared:sql.prepared}},independent);
  });
- const manifest={format:'sabalan-online-release-manifest/v1',releaseId:request.releaseId,sourceCommit:request.targetCommit,image:originalProductionExecution.executionImages.backend,runtimeBundleSha256:candidateActor.runtimeBundleSha256,generation:physical?request.generation:1,
-  database:{name:request.database.name,systemIdentifier:request.database.systemIdentifier},roots:request.roots,ephemeralRoots:request.ephemeralRoots};
- const manifestRaw=bytes(manifest),manifestSha256=sha(manifestRaw);
+ const {manifest,raw:manifestRaw,sha256:manifestSha256}=projectOriginalOnlineManifest({request,runtimeBundleSha256:candidateActor.runtimeBundleSha256,executionImage:originalProductionExecution.executionImages.backend,physical});
  const proofDatabases={'compatible-migrations':sourceDatabase,'coherent-independent-restore':independent.proofDatabase,'browser-24-hours':sourceDatabase,'single-worker-and-completion':pairDatabase,'current-domain':pairDatabase};
  const cohorts={'compatible-migrations':sourceClosures,'coherent-independent-restore':independentClosures,'browser-24-hours':sourceClosures,'single-worker-and-completion':[...httpClosures,...jobsClosures],'current-domain':httpClosures};
  const componentSourceCommits=Object.fromEntries(roles.map(role=>[role,report.images[role].sourceCommit]));same(componentSourceCommits.backend,request.targetCommit);
@@ -211,17 +224,20 @@ function assembleOriginalEvidence({local,independent,request,evidenceDirectory,p
  const common=scope=>({...binding,productionAdmission:true,passResult:true,proofDatabase:proofDatabases[scope],originalNativeClosures:cohorts[scope],executionKind:['compatible-migrations','browser-24-hours'].includes(scope)?'DIAGNOSTIC_SUPPORT':'INSTALLED_RUNTIME'});
  const bridge=json(pair.bridgeProofRawBase64),commands=bridge.durable.commands;
  const singleWorker={unknownOwners:[...httpClosures,...jobsClosures].filter(row=>json(row.workRawBase64).phase!=='QUIESCENT').length,unresolvedCommands:commands.filter(row=>row.status!=='SETTLED').length,nativeJobsObserved:jobsClosures.length>=2,httpTargetCount:httpClosures.length,rowFenceVerified:pair.hostClosed.fence.phase==='CLOSED',targetRuntimeIds:httpClosures.map(row=>row.runtimeId)};
- const protectedDirectoryComponents=physical?undefined:deriveProtectedDirectoryComponents({checkpointMetadataSha256:checkpoint.sha256,metadata:checkpoint.metadata,canonicalRestoreRaw:ownedJson(independent,'canonicalRestoreOutput').raw,baselineRaw:baseline.raw,requestRoots:request.roots});
+ const completedProof=complete?contextualComplete(binding).proof:null;
+ if(complete)originalOnlineEvidenceReader().assertOnlineQualificationProof('coherent-independent-restore',completedProof,binding);
+ const protectedDirectoryComponents=physical?undefined:complete?completedProof.protectedDirectoryComponents:deriveProtectedDirectoryComponents({checkpointMetadataSha256:checkpoint.sha256,metadata:checkpoint.metadata,canonicalRestoreRaw:ownedJson(independent,'canonicalRestoreOutput').raw,baselineRaw:baseline.raw,requestRoots:request.roots});
  const appHealth=Object.fromEntries(roles.map(role=>{const health=report.applicationHealth[role];same(health.image,independent.images[role]);same(health.declaredSourceCommit,componentSourceCommits[role]);return [role,{...health,sourceCommit:health.declaredSourceCommit,...(physical?{captureId:qualification.captureId}:{checkpointMetadataSha256:checkpoint.sha256})}];}));
  const proofs={
   'compatible-migrations':financial?financial.source:{...main,...common('compatible-migrations'),priorMigrationHistorySha256:main.originalHistory.sha256},
-  'coherent-independent-restore':{format:'sabalan-native-application-coherent-integration/v1',...common('coherent-independent-restore'),restoredDatabase:independent.restoredDatabase,independentHostQualified:(physical?report.recoveryMachineUuidSha256:report.recoveryHost.machineUuidSha256)!==checkpoint.metadata.sourceMachineUuidSha256,continuousWalQualified:false,immutableDifferentImagesQualified:new Set(roles.map(role=>independent.images[role])).size===3,inquiryRuntimeQualified:report.inquiryClosure.closure.originalReturncode===128&&json(report.inquiryClosure.closure.nativeRawBase64).nativeStatus===143,
+  'coherent-independent-restore':{format:'sabalan-native-application-coherent-integration/v1',...common('coherent-independent-restore'),restoredDatabase:independent.restoredDatabase,independentHostQualified:(sameCompose?report.rsaHost.machineUuidSha256:physical?report.recoveryMachineUuidSha256:report.recoveryHost.machineUuidSha256)!==checkpoint.metadata.sourceMachineUuidSha256,continuousWalQualified:false,immutableDifferentImagesQualified:new Set(roles.map(role=>independent.images[role])).size===3,inquiryRuntimeQualified:report.inquiryClosure.closure.originalReturncode===128&&json(report.inquiryClosure.closure.nativeRawBase64).nativeStatus===143,
    checkpoint:{...checkpoint.metadata,...(!physical?{lastDrill:report.healthyDrill}:{})},checkpointMetadata:checkpoint.metadata,checkpointTransportRawBase64:transport.descriptor.rawBase64,restoredFileRoots:baseline.value.sources.length,...(!physical?{protectedDirectoryComponents}:derivePhysicalComponents(independent,report,request)),applicationHealth:appHealth,
    inquiryNativeClosure:structuredClone(report.inquiryClosure)},
   'browser-24-hours':{...browser,...common('browser-24-hours'),installedRouting:pair.installedRouting},
   'single-worker-and-completion':{format:main.format,...common('single-worker-and-completion'),singleWorker,bridgeProofRawBase64:pair.bridgeProofRawBase64,bridgeAfterDrain:pair.bridgeAfterDrain,workerOwnershipIntervals:pair.workerOwnershipIntervals},
   'current-domain':{format:main.format,...common('current-domain'),domainCases:main.domainCases,writerCoverage:main.writerCoverage}
  };
+ if(complete)proofs['coherent-independent-restore']=completedProof;
  // The fixed compiled parser below is the final authority, including migration
  // compatibility, all native/SQL ownership, expiry coverage and nine domains.
  const kernel=originalOnlineEvidenceReader();
@@ -245,5 +261,7 @@ function assembleOriginalEvidence({local,independent,request,evidenceDirectory,p
  const token=Object.freeze({});completed.set(token,freeze({format:'sabalan-original-online-evidence-assembly/v1',evidenceDirectory,manifestSha256,acceptanceSha256,files:Object.fromEntries(Object.entries(files).map(([file,raw])=>[file,owned(raw)])),
   originalProductionExecution,originalProductionExecutionSha256:metadataSha(originalProductionExecution),
   canonicalParser:{bundleSha256:kernel.bundleSha256,sourceHashes:kernel.sourceHashes},
-  originalLocalCompletionSha256:metadataSha(local),originalIndependentCompletionSha256:metadataSha(independent),...(physical?{originalOnlineRequestSha256:metadataSha(request)}:{originalProtectedRequestSha256:metadataSha(request)}),productionAdmission:false}));return token;
+  originalLocalCompletionSha256:metadataSha(local),originalIndependentCompletionSha256:metadataSha(independent),
+  ...(complete?{independentCompletionKind:'EXISTING_COMPOSE_COMPLETE'}:sameCompose?{independentCompletionKind:'EXISTING_COMPOSE_PHYSICAL'}:{}),
+  ...(physical?{originalOnlineRequestSha256:metadataSha(request)}:{originalProtectedRequestSha256:metadataSha(request)}),productionAdmission:false}));return token;
 }

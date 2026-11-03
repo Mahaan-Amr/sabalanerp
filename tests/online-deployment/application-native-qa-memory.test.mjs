@@ -29,7 +29,7 @@ test('Compose budget candidate1536 and explicitretained768; guardskeep384floor',
 
 test('swap1536 and CPU/pids resource facts remain exact, hostsample follows mandatoryDockerstatus',()=>{
  validateQaSwapConfiguration(1536*1024**2,1536*1024**2);assert.throws(()=>validateQaSwapConfiguration(1536*1024**2,2560*1024**2));const limits={MemorySwap:1536*1024**2,MemoryReservation:0,NanoCpus:1000000000,CpuQuota:0,CpuPeriod:0,PidsLimit:null,OomKillDisable:null};assert.deepEqual(qaUnchangedResourceLimits(limits),limits);assert.throws(()=>qaUnchangedResourceLimits({MemorySwap:1}));
- const source=fs.readFileSync(new URL('../../scripts/replace-qualified-application-native-candidate-local.mjs',import.meta.url),'utf8');assert.match(source,/status\(\);const beforeUpMemory=hostMemory/);assert.ok(!source.slice(source.indexOf('const beforeUpMemory'),source.indexOf('report.up=await')).includes('status()'));
+ const source=fs.readFileSync(new URL('../../scripts/replace-qualified-application-native-candidate-local.mjs',import.meta.url),'utf8');const sample=source.indexOf('let beforeUpMemory=');assert.ok(sample>0&&source.lastIndexOf('status();',sample)>source.indexOf('if(negativeToken)'));assert.match(source,/validateQaHostMemoryObservation\(beforeUpMemory,candidateQaMemoryMode,Date.now\(\),memorySelection\);report.up=await/);
  const compose=fs.readFileSync(new URL('../../docker-compose.online-acceptance.yml',import.meta.url),'utf8');assert.equal((compose.match(/memswap_limit: 1536m/g)||[]).length,1);
 });
 
@@ -49,4 +49,10 @@ test('unknown cap, unsupportedtransition, nonQAservice, swapdrift and CPUdrift r
 test('old explicit flag remains V1, new V2 requires all original predecessor/cohort controls',()=>{
  assert.equal(parse([...argv.slice(0,-1),'--candidate-qa-memory-1280']).candidateQaMemoryTransition,'v1');
  assert.throws(()=>parse([...argv,'--candidate-qa-memory-1280']));assert.throws(()=>parse([...argv.slice(0,-1),'--candidate-qa-memory-1792']));
+});
+
+test('legacy before/after receipts cannot silently adopt pressure schema',()=>{
+ const pressure={format:'sabalan-local-qa-pressure/v1',platform:'win32',observedAt:new Date(now).toISOString(),availableBytes:256*1024**2,commitTotalBytes:8*1024**3,commitLimitBytes:16*1024**3,lowMemory:false,vm:{probeContainerId:'a'.repeat(64),bootId:'11111111-1111-1111-1111-111111111111',fullAvg10:0,someAvg10:0,oomKills:0},probe:{durationMs:1,children:[{originalPid:1,code:0,stdoutEof:true,stderrEof:true},{originalPid:2,code:0,stdoutEof:true,stderrEof:true}]}};
+ for(const field of ['beforeUp','afterUp']){const v=value();v.candidateQaMemoryTransition[field]=pressure;assert.throws(()=>receipt(v));}
+ const selected=value();selected.localQaMemoryPolicy='local-qa-pressure-v1';selected.candidateQaMemoryTransition.beforeUp=pressure;selected.candidateQaMemoryTransition.afterUp=pressure;receipt(selected);
 });

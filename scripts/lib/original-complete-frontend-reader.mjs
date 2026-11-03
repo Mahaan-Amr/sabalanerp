@@ -1,0 +1,14 @@
+/** Source-owned frontend adapter: actual finite installed reader, never saved
+ * health booleans or a replacement app/database/server. */
+import assert from 'node:assert/strict';import {createHash} from 'node:crypto';
+const sha=b=>createHash('sha256').update(b).digest('hex');
+export function createOriginalCompleteFrontendReader({material,images,executionImages,frontendAsset,assertOriginalCurrent}){
+ let used=false;
+ for(const role of ['backend','frontend','inquiry'])assert.equal(images[role].executionImage,executionImages[role]);
+ return Object.freeze({async observe({endpoint,inquiry,database,assertActive}){assert.equal(used,false,'ORIGINAL_FRONTEND_READER_ALREADY_USED');used=true;assertActive();await assertOriginalCurrent();const observed=await material.observeOriginalFrontend({endpoint,inquiry,database,images,executionImages,frontendAsset});assertActive();await assertOriginalCurrent();
+  const value=observed.value,row=observed.original;assert.equal(value.format,'sabalan-original-complete-frontend-reader/v1');assert.equal(value.productionAdmission,false);assert.equal(value.privatePasswordCases,1);for(const k of ['authenticated','businessVerified','filesVerified','originalUserSessionQualified','positiveAndNegativeAuthorization','revokedSessionRefused'])assert.equal(value[k],true);
+  assert.ok(value.readers.length>=12&&value.readers.every(r=>r.requestClosed&&r.responseSeen&&r.responseClosed&&r.responseEof));assert.equal(row.code,0);assert.equal(row.signal,null);assert.equal(row.stdoutEof&&row.stderrEof,true);assert.equal(row.killed,false);assert.equal(row.stderr,'');assert.equal(row.spawnError,undefined);assert.equal(row.streamError,undefined);assert.equal(row.outputBoundExceeded,false);
+  const raw=Buffer.from(value.healthRawBase64,'base64');assert.equal(raw.toString('base64'),value.healthRawBase64);assert.equal(sha(raw),value.healthSha256);const health=JSON.parse(raw);assert.equal(health.format,'sabalan-original-complete-application-health/v1');assert.deepEqual(health.database,database);assert.equal(health.productionAdmission,false);assert.deepEqual(Object.keys(health.applications).sort(),['backend','frontend','inquiry']);for(const role of ['backend','frontend','inquiry']){const h=health.applications[role];assert.equal(h.image,images[role].image);assert.equal(h.executionImage,executionImages[role]);assert.equal(h.config,images[role].config);assert.equal(h.index,images[role].index);assert.equal(h.platform,images[role].platform);assert.equal(h.store,images[role].store);assert.equal(h.sourceCommit,images[role].sourceCommit);assert.equal(h.status,200);assert.equal(sha(Buffer.from(h.responseRawBase64,'base64')),h.responseSha256);}
+  return{healthRaw:raw,authenticated:true,businessVerified:true,filesVerified:true,original:{role:'frontend',originalPid:row.originalPid,code:row.code,signal:row.signal,stdoutEof:row.stdoutEof,stderrEof:row.stderrEof,killed:row.killed,observationFault:null,sha256:sha(raw)}};
+ }});
+}

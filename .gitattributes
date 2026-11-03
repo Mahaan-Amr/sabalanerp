@@ -10,6 +10,7 @@
 *.sh text eol=lf working-tree-encoding=UTF-8
 
 # Native operation receipts are hashed as received; retain their exact bytes.
+scripts/lib/original-complete-financial-verifier.mjs -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 reports/qa/actual-image-customer-*.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 reports/qa/production-package-*-readonly-20261019.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 reports/qa/production-ledger-shape-readonly-20261019.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
@@ -27,3 +28,36 @@ reports/qa/api-v2-published-owner-*.txt -text -working-tree-encoding whitespace=
 reports/qa/native-file-capture-port-*.txt -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 reports/qa/application-native-coherent-source-freeze-r2-20261019.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 reports/qa/application-native-coherent-source-freeze-r3-20261019.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+reports/qa/issue-419-c3-bindings-20261026/SOURCE-HARNESS-NEGATIVE-CLOSURE.json -text -working-tree-encoding whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
+# Preserve finite constructor test transcripts as observed.
+reports/qa/issue-419-c3-bindings-20261026/CONSTRUCTOR-*.tap -text -working-tree-encoding -whitespace
+
+# Keep historical failure/closure regression transcripts byte-for-byte.
+reports/qa/issue-419-c3-bindings-20261026/FAILURE-TRIAGE-*.tap -text -working-tree-encoding -whitespace
+
+# Finite remaining-case test transcripts retain native bytes.
+reports/qa/issue-419-c3-bindings-20261026/REMAINING-*.tap -text -working-tree-encoding -whitespace
+
+reports/qa/issue-419-c3-bindings-20261026/RENEWAL-*.tap -text -working-tree-encoding -whitespace
+
+# Native supervisor receipts retain the producer's actual newline bytes.
+reports/qa/issue-419-c3-bindings-20261026/NATIVE-CONNECTION-*.json -text -working-tree-encoding -whitespace
+reports/qa/issue-419-c3-bindings-20261026/ROOT-CURRENT-*.tap -text -working-tree-encoding -whitespace
+reports/qa/issue-419-c3-bindings-20261026/CAPSULE-HELD-FINGERPRINT-LINUX-r1-REJECTED.json -text -working-tree-encoding -whitespace
+reports/qa/issue-419-c3-bindings-20261026/RAM-WINDOWS-PROCESS-CENSUS-20261028.json -text -working-tree-encoding -whitespace
+
+# Recovery/lifecycle receipts keep their originally hashed Windows bytes.
+reports/qa/issue-419-c3-bindings-20261026/AUTHORIZED-R5-RETIREMENT-20261031.fa.md -text -working-tree-encoding -whitespace
+reports/qa/issue-419-c3-bindings-20261026/AUTHORIZED-R5-RETIREMENT-20261031.json -text -working-tree-encoding -whitespace
+reports/qa/issue-419-c3-bindings-20261026/CONNECTION-ONLY-LIFECYCLE-20261031.fa.md -text -working-tree-encoding -whitespace
+reports/qa/issue-419-c3-bindings-20261026/CONNECTION-ONLY-LIFECYCLE-20261031.json -text -working-tree-encoding -whitespace
+reports/qa/issue-419-c3-bindings-20261026/HELD-OWNER-RECOVERY-QUALIFIED-20261030.fa.md -text -working-tree-encoding -whitespace
+reports/qa/issue-419-c3-bindings-20261026/HELD-OWNER-RECOVERY-QUALIFIED-20261030.json -text -working-tree-encoding -whitespace
+
+# Exact source-successor pressure test transcripts, including negative runs.
+reports/qa/local-qa-pressure-20261031/*.tap -text -working-tree-encoding -whitespace
+reports/qa/local-qa-pressure-20261031/*.txt -text -working-tree-encoding -whitespace
+
+# Preserve the actual post-retirement constructor receipt bytes.
+reports/qa/issue-419-c3-bindings-20261026/POST-RETIREMENT-CONSTRUCTOR-SUCCESSOR-20261031.json -text -working-tree-encoding -whitespace

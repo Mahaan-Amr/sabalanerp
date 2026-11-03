@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {createRequire} from 'node:module';
 import {writeOriginalMasterFailureDiagnostic} from '../../scripts/lib/original-master-failure-diagnostic.mjs';
 const require=createRequire(import.meta.url),ts=require('../../backend/node_modules/typescript');
-const filename=new URL('../../scripts/run-original-online-qualification-master.mjs',import.meta.url),source=fs.readFileSync(filename,'utf8'),tree=ts.createSourceFile(filename.pathname,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+const filename=new URL('../../scripts/lib/original-online-qualification-master.mjs',import.meta.url),source=fs.readFileSync(filename,'utf8'),tree=ts.createSourceFile(filename.pathname,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
 const declaration=tree.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='runOriginalOnlineQualificationMaster');assert.ok(declaration);
 const keyDeclaration=tree.statements.find(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>d.name.getText(tree)==='keys'));assert.ok(keyDeclaration);
 // Execute the actual finite request parser and option forwarding. Original

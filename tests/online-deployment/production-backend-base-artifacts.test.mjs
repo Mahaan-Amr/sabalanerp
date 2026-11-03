@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import {nativeHistoricalFile} from '../../scripts/lib/frozen-native-history.mjs';
 import {backendBaseIdentity,qualifiedProductionBackendExport,freshBothHostBackendBasePreflight,
   backendBaseReadonlyFsyncFailure,inspectBackendBaseReadonlyFsyncFailure} from '../../scripts/lib/production-backend-base-artifacts.mjs';
 import {originalBackendBaseCommands} from '../../scripts/lib/production-backend-base-process.mjs';
@@ -31,7 +32,7 @@ function temporary(){const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpd
   return {root,close(){assert.equal(fs.realpathSync(root),root);assert.equal(path.dirname(root),fs.realpathSync(os.tmpdir()));
     assert.match(path.basename(root),/^sabalan-backend-base-test-/);fs.rmSync(root,{recursive:true});}};}
 function fixture(){const value=temporary();fs.mkdirSync(path.join(value.root,'reports/qa'),{recursive:true});fs.mkdirSync(path.join(value.root,'backend'));
-  for(const name of [backendBaseIdentity.exportReceipt,backendBaseIdentity.dependencyReceipt])fs.copyFileSync(path.join(repository,'reports/qa',name),path.join(value.root,'reports/qa',name));
+  for(const name of [backendBaseIdentity.exportReceipt,backendBaseIdentity.dependencyReceipt])fs.copyFileSync(nativeHistoricalFile(repository,'reports/qa/'+name),path.join(value.root,'reports/qa',name));
   for(const name of ['package.json','package-lock.json'])fs.copyFileSync(path.join(repository,'backend',name),path.join(value.root,'backend',name));return value;}
 
 test('real retained receipts bind distinct engine-index/config identities and all21 layers without Docker',()=>{
@@ -74,7 +75,7 @@ test('an export with the config replaced by its engine index is rejected before 
 test('actual both-host receipt data must be fresh at the caller clock',()=>{
   const value=fixture();try{
     const name='both-host-storage-preflight-before-independent-decryption-9da46fabd18f4545aa806a9dfd77ee9d.json';
-    const file=path.join(value.root,'reports/qa',name);fs.copyFileSync(path.join(repository,'reports/qa',name),file);
+    const file=path.join(value.root,'reports/qa',name);fs.copyFileSync(nativeHistoricalFile(repository,'reports/qa/'+name),file);
     const observed=Date.parse(JSON.parse(fs.readFileSync(file)).observedAt);
     assert.equal(freshBothHostBackendBasePreflight(value.root,file,observed+1).hosts.length,2);
     assert.throws(()=>freshBothHostBackendBasePreflight(value.root,file,observed+600001),/FRESH_BOTH_HOST_PREFLIGHT_REQUIRED/);

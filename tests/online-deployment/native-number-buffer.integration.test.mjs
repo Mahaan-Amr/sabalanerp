@@ -1,13 +1,15 @@
+import{acceptedWorkspaceTestResolution}from'./accepted-workspace-resolution.fixture.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 import {execFileSync} from 'node:child_process';
 import test from 'node:test';
 
+const accepted=acceptedWorkspaceTestResolution();
 const root=path.resolve(import.meta.dirname,'../..');
 const require=createRequire(new URL('../../frontend/package.json',import.meta.url));
 const {chromium}=require('@playwright/test'),{buildSync}=require('esbuild');
-const bundle=buildSync({absWorkingDir:path.join(root,'frontend'),bundle:true,write:false,platform:'browser',format:'iife',
+const bundle=buildSync({alias:accepted.alias,nodePaths:accepted.nodePaths,absWorkingDir:path.join(root,'frontend'),bundle:true,write:false,platform:'browser',format:'iife',
   define:{'process.env':'{}','process.env.NODE_ENV':'"test"','process.env.NEXT_PUBLIC_BROWSER_BUILD_ID':'"erp_native_number_20261020"'},
   stdin:{resolveDir:path.join(root,'frontend'),loader:'tsx',contents:`
     import React,{useState,useLayoutEffect}from'react';import{createRoot}from'react-dom/client';import{flushSync}from'react-dom';
@@ -46,7 +48,7 @@ test('actual React canonical numeric input keeps invalid native text and blocks 
     await input.fill('12');
     const valid=await page.evaluate(async()=>({badInput:document.querySelector('input').validity.badInput,
       model:window.nativeNumber.model,result:await window.nativeNumber.preserve()}));
-    assert.equal(valid.badInput,false);assert.equal(valid.model,'12');assert.equal(valid.result.status,'PRESERVED');
+    accepted.revalidate();assert.equal(valid.badInput,false);assert.equal(valid.model,'12');assert.equal(valid.result.status,'PRESERVED');
     await context.close();
   }finally{await browser.close();}
 });

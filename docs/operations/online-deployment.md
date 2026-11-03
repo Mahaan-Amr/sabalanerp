@@ -334,3 +334,7 @@ exact complete retained-row hash and the exact successful prefix, preserving
 all history through 427/428 to 435/436 (successful/total). This is no production
 history adoption, and does not widen bootstrap, bridge or online admission.
 See [actual-image qualification](../../reports/qa/actual-image-customer-overlap-20261019.md).
+
+### Retained pre-input return custody (local #419)
+
+A closed retained producer may register its one exact hold only through private custody belonging to the same live Root. Observe both backend parents and native/work-scope quietness, preserve every older entry and canonical capsule, repeat the observations, and verify both returned browser models before committing the new baseline. A report or operation name alone grants no authority. A positive component followed by a negative memory END remains a negative parent and must take the same verified rollback path. Interruption, an open reader, an unknown entry or either model mismatch remains HELD. This successor does not repair an already HELD Root or authorize deleting a hold. See [source review evidence](../../reports/qa/issue-419-c3-bindings-20261026/DBCD-RETAINED-HOLD-CUSTODY-SUCCESSOR-20261101.json).

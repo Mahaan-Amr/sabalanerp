@@ -13,20 +13,23 @@ const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const keys=(value,expected)=>assert.deepEqual(Object.keys(value).sort(),expected.slice().sort());
 const graphKeys=['index','platform','config','rootfsDiffIds','archiveSha256','archiveBytes'];
 export function requirePrebuiltScannerSelection(plan){assert.ok(plan.preservedClamav,'PREBUILT_SCANNER_PRESERVATION_SELECTION_REQUIRED');return validateSelection(plan.preservedClamav);}
-export function validatePrebuiltReleasePlan(plan,actual){
+// Content inspection has no installed-image, checkout or runtime authority.
+export function validatePrebuiltReleaseInputs(plan,actual){return validatePrebuiltRelease(plan,actual,false);}
+export function validatePrebuiltReleasePlan(plan,actual){return validatePrebuiltRelease(plan,actual,true);}
+function validatePrebuiltRelease(plan,actual,installed){
  keys(plan,['format','applicationCommit','applicationTree','applicationSourceHash','inquirySourceCommit','images','operations',...(Object.hasOwn(plan,'imageStore')?['imageStore']:[]),...(Object.hasOwn(plan,'preservedClamav')?['preservedClamav']:[])]);
  assert.equal(plan.format,'sabalan-prebuilt-protected-release-plan/v1');
  if(plan.preservedClamav){validateSelection(plan.preservedClamav);for(const name of preservationSources)assert.match(plan.operations.files[name],digest);}
- const store=plan.imageStore??'classic';assert.ok(['classic','containerd'].includes(store));assert.equal(actual.imageStore??'classic',store,'PREBUILT_NATIVE_IMAGE_STORE_CHANGED');
+ const store=plan.imageStore??'classic';assert.ok(['classic','containerd'].includes(store));if(installed)assert.equal(actual.imageStore??'classic',store,'PREBUILT_NATIVE_IMAGE_STORE_CHANGED');
  for(const key of ['applicationCommit','applicationTree','inquirySourceCommit'])assert.match(plan[key],commit);
  assert.match(plan.applicationSourceHash,digest);keys(plan.images,roles);keys(plan.operations,['receiptSha256','files']);assert.match(plan.operations.receiptSha256,digest);
- assert.equal(actual.head,plan.applicationCommit,'PREBUILT_APPLICATION_COMMIT_CHANGED');assert.equal(actual.tree,plan.applicationTree,'PREBUILT_APPLICATION_TREE_CHANGED');
+ if(installed){assert.equal(actual.head,plan.applicationCommit,'PREBUILT_APPLICATION_COMMIT_CHANGED');assert.equal(actual.tree,plan.applicationTree,'PREBUILT_APPLICATION_TREE_CHANGED');
  assert.equal(actual.status,'','PREBUILT_APPLICATION_CHECKOUT_DIRTY');assert.equal(actual.inquiryStatus,'','PREBUILT_INQUIRY_CHECKOUT_DIRTY');
- assert.equal(actual.inquiryGitlink,plan.inquirySourceCommit);assert.equal(actual.inquiryHead,plan.inquirySourceCommit);
+ assert.equal(actual.inquiryGitlink,plan.inquirySourceCommit);assert.equal(actual.inquiryHead,plan.inquirySourceCommit);}
  assert.deepEqual(actual.operations,plan.operations,'PREBUILT_OPERATIONS_CHANGED');
  for(const name of ['deploy/scripts/deploy.sh','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'])assert.match(plan.operations.files[name],digest);
  for(const role of roles){
-  const selected=plan.images[role],observed=actual.images[role],receipt=actual.buildReceipts[role];
+  const selected=plan.images[role],observed=installed?actual.images[role]:null,receipt=actual.buildReceipts[role];
   keys(selected,['image','sourceCommit','archiveGraph','archiveReceipt','buildReceipt',...(role==='backend'?[]:['browser'])]);
   assert.match(selected.image,image);assert.match(selected.sourceCommit,commit);
   for(const reference of [selected.buildReceipt,selected.archiveReceipt]){keys(reference,['file','sha256']);assert.ok(path.posix.isAbsolute(reference.file));assert.match(reference.sha256,digest);}
@@ -35,14 +38,14 @@ export function validatePrebuiltReleasePlan(plan,actual){
   assert.equal(store==='containerd'?graph.index:graph.config,selected.image,'PREBUILT_ACTIVATION_EXECUTION_NAMESPACE_CHANGED');assert.match(graph.archiveSha256,digest);assert.ok(Number.isSafeInteger(graph.archiveBytes)&&graph.archiveBytes>0);
   assert.ok(Array.isArray(graph.rootfsDiffIds)&&graph.rootfsDiffIds.length>0&&graph.rootfsDiffIds.length<=128);for(const layer of graph.rootfsDiffIds)assert.match(layer,image);
   for(const key of graphKeys)assert.deepEqual(actual.archiveReceipts[role][key],graph[key],'PREBUILT_ARCHIVE_GRAPH_CHANGED');
-  assert.equal(observed.Id,selected.image,'PREBUILT_INSTALLED_EXECUTION_CHANGED');assert.equal(observed.Os,'linux');assert.equal(observed.Architecture,'amd64');assert.deepEqual(observed.RootFS.Layers,graph.rootfsDiffIds,'PREBUILT_INSTALLED_LAYERS_CHANGED');
+  if(installed){assert.equal(observed.Id,selected.image,'PREBUILT_INSTALLED_EXECUTION_CHANGED');assert.equal(observed.Os,'linux');assert.equal(observed.Architecture,'amd64');assert.deepEqual(observed.RootFS.Layers,graph.rootfsDiffIds,'PREBUILT_INSTALLED_LAYERS_CHANGED');
   if(store==='containerd'){assert.equal(observed.Descriptor?.digest,graph.index);assert.ok(['application/vnd.oci.image.index.v1+json','application/vnd.docker.distribution.manifest.list.v2+json'].includes(observed.Descriptor?.mediaType));assert.ok(Number.isSafeInteger(observed.Descriptor.size)&&observed.Descriptor.size>0);}
-  else assert.ok(!observed.Descriptor);
+  else assert.ok(!observed.Descriptor);}
   if(role==='backend'){
    assert.equal(selected.sourceCommit,plan.applicationCommit);assert.equal(receipt.format,'sabalan-current-backend-image/v1');assert.equal(receipt.pass,true);assert.equal(receipt.sourceUnchanged,true);
    assert.equal(receipt.sourceCommit,plan.applicationCommit);assert.equal(receipt.image.id,graph.index);assert.equal(receipt.performanceSourceHash,plan.applicationSourceHash);
    assert.equal(receipt.image.labels['io.sabalan.performance.source-commit'],plan.applicationCommit);assert.equal(receipt.image.labels['io.sabalan.performance.source-hash'],plan.applicationSourceHash);
-   assert.equal(observed.Config.Labels['io.sabalan.performance.source-commit'],plan.applicationCommit);assert.equal(observed.Config.Labels['io.sabalan.performance.source-hash'],plan.applicationSourceHash);
+   if(installed){assert.equal(observed.Config.Labels['io.sabalan.performance.source-commit'],plan.applicationCommit);assert.equal(observed.Config.Labels['io.sabalan.performance.source-hash'],plan.applicationSourceHash);}
   }else{
    keys(selected.browser,['id','nativeBuildId','manifestSha256']);assert.match(selected.browser.nativeBuildId,/^[A-Za-z0-9_-]{1,128}$/);assert.match(selected.browser.manifestSha256,digest);
    if(role==='frontend'){

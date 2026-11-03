@@ -1,0 +1,1512 @@
+{
+  "componentOnly": true,
+  "historicalSanitizedDataNotAdmission": true,
+  "model": {
+    "name": "sabalanerp-local",
+    "services": {
+      "backend-candidate": {
+        "profiles": [
+          "online-acceptance"
+        ],
+        "cpus": 1,
+        "command": [
+          "node",
+          "dist/index.js"
+        ],
+        "depends_on": {
+          "clamav": {
+            "condition": "service_healthy",
+            "required": true
+          },
+          "postgres": {
+            "condition": "service_healthy",
+            "required": true
+          },
+          "redis": {
+            "condition": "service_healthy",
+            "required": true
+          }
+        },
+        "entrypoint": null,
+        "environment": {
+          "ACCOUNTING_RECONCILIATION_PRODUCERS": "fixture-service-ACCOUNTING_RECONCILIATION_PRODUCERS",
+          "ALLOW_SANITIZED_RECOVERY": "fixture-service-ALLOW_SANITIZED_RECOVERY",
+          "ALLOW_UNSCANNED_HR_FILES": "fixture-service-ALLOW_UNSCANNED_HR_FILES",
+          "APP_COMMIT": "fixture-service-APP_COMMIT",
+          "APP_VERSION": "fixture-service-APP_VERSION",
+          "BACKEND_RUNTIME_ROLE": "fixture-service-BACKEND_RUNTIME_ROLE",
+          "BIOMETRIC_CONNECTOR_MODE": "fixture-service-BIOMETRIC_CONNECTOR_MODE",
+          "BIOMETRIC_TEMPLATE_KEY_BASE64": "fixture-service-BIOMETRIC_TEMPLATE_KEY_BASE64",
+          "BIOMETRIC_WORKSTATIONS_JSON": "fixture-service-BIOMETRIC_WORKSTATIONS_JSON",
+          "DATABASE_URL": "fixture-service-DATABASE_URL",
+          "DEPLOYMENT_RELEASE_ID": "fixture-service-DEPLOYMENT_RELEASE_ID",
+          "DISPATCH_CONFIRMATION_OTP_SECRET": "fixture-service-DISPATCH_CONFIRMATION_OTP_SECRET",
+          "FRONTEND_URL": "fixture-service-FRONTEND_URL",
+          "HR_HIRING_ANTIVIRUS_COMMAND": "fixture-service-HR_HIRING_ANTIVIRUS_COMMAND",
+          "INQUIRY_RECOVERY_COORDINATED": "fixture-service-INQUIRY_RECOVERY_COORDINATED",
+          "INQUIRY_RECOVERY_SOURCE_DIR": "fixture-service-INQUIRY_RECOVERY_SOURCE_DIR",
+          "JWT_SECRET": "fixture-service-JWT_SECRET",
+          "NODE_ENV": "fixture-service-NODE_ENV",
+          "PARTNER_SCHEMA_ID": "fixture-service-PARTNER_SCHEMA_ID",
+          "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64": "fixture-service-PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64",
+          "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID": "fixture-service-PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID",
+          "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64": "fixture-service-PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64",
+          "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID": "fixture-service-PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID",
+          "PORT": "fixture-service-PORT",
+          "PUBLIC_APP_URL": "fixture-service-PUBLIC_APP_URL",
+          "PUPPETEER_EXECUTABLE_PATH": "fixture-service-PUPPETEER_EXECUTABLE_PATH",
+          "RECOVERY_COORDINATION_DIR": "fixture-service-RECOVERY_COORDINATION_DIR",
+          "RECOVERY_STORAGE_DIR": "fixture-service-RECOVERY_STORAGE_DIR",
+          "SEPIDAR_ALLOW_UNCOORDINATED_STAGING": "fixture-service-SEPIDAR_ALLOW_UNCOORDINATED_STAGING",
+          "SEPIDAR_BACKUP_STORAGE_ROOT": "fixture-service-SEPIDAR_BACKUP_STORAGE_ROOT",
+          "SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID": "fixture-service-SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID",
+          "SMS_IR_DISPATCH_EXIT_TEMPLATE_ID": "fixture-service-SMS_IR_DISPATCH_EXIT_TEMPLATE_ID",
+          "SMS_IR_ENVIRONMENT": "fixture-service-SMS_IR_ENVIRONMENT",
+          "WEB_PUSH_VAPID_PRIVATE_KEY": "fixture-service-WEB_PUSH_VAPID_PRIVATE_KEY",
+          "WEB_PUSH_VAPID_PUBLIC_KEY": "fixture-service-WEB_PUSH_VAPID_PUBLIC_KEY",
+          "WEB_PUSH_VAPID_SUBJECT": "fixture-service-WEB_PUSH_VAPID_SUBJECT"
+        },
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "node -e \"require('http').get('http://127.0.0.1:5000/api/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));\""
+          ],
+          "timeout": "5s",
+          "interval": "10s",
+          "retries": 20,
+          "start_period": "30s"
+        },
+        "image": "sha256:327e1a686b8446ade7205b7a36fc401e510cd5f4b5e2e27e154424c535cb0fa3",
+        "logging": {
+          "driver": "local",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "2147483648",
+        "memswap_limit": "2147483648",
+        "networks": {
+          "default": null
+        },
+        "ports": [
+          {
+            "mode": "ingress",
+            "host_ip": "127.0.0.1",
+            "target": 5000,
+            "published": "5100",
+            "protocol": "tcp"
+          }
+        ],
+        "pull_policy": "never",
+        "read_only": true,
+        "restart": "unless-stopped",
+        "stop_grace_period": "5m0s",
+        "tmpfs": [
+          "/tmp"
+        ],
+        "volumes": [
+          {
+            "type": "volume",
+            "source": "backend_storage_contracts",
+            "target": "/app/storage/contracts",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_storage_hr_hiring",
+            "target": "/app/storage/hr-hiring",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_storage_accounting_contracts",
+            "target": "/app/storage/accounting-contracts",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_storage_support_tickets",
+            "target": "/app/storage/support-tickets",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_uploads",
+            "target": "/app/uploads",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_recovery",
+            "target": "/app/storage/recovery",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_storage_sepidar_backups",
+            "target": "/app/storage/sepidar-backups",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "recovery_coordination",
+            "target": "/app/recovery-coordination",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "inquiry_data",
+            "target": "/app/recovery-sources/inquiry",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_acceptance",
+            "target": "/app/online-runtime-acceptance",
+            "volume": {
+              "nocopy": true,
+              "subpath": "c16-recovery-70360dba0eb244dc91cdfcd0533315f9/c16-recovery-32c29444431a4f98bc6070f4182e7bb8"
+            }
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_authority",
+            "target": "/app/runtime-authority",
+            "volume": {
+              "nocopy": true,
+              "subpath": "cohort-0de041a6c7a307e6099865523af8032d"
+            }
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_jobs_authority",
+            "target": "/run/sabalan-online",
+            "read_only": true,
+            "volume": {
+              "nocopy": true,
+              "subpath": "cohort-0de041a6c7a307e6099865523af8032d"
+            }
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_acceptance",
+            "target": "/app/online-runtime-acceptance/application-prisma-ebcfd40fff0a28e39d983c6616893b50",
+            "read_only": true,
+            "volume": {
+              "nocopy": true,
+              "subpath": "application-prisma-ebcfd40fff0a28e39d983c6616893b50"
+            }
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_acceptance",
+            "target": "/app/online-runtime-acceptance/inquiry-coherent-7878c93646acd9ac37cef95e27a4029d",
+            "read_only": true,
+            "volume": {
+              "nocopy": true,
+              "subpath": "inquiry-coherent-7878c93646acd9ac37cef95e27a4029d"
+            }
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_authority",
+            "target": "/app/qualification-authority-root",
+            "volume": {
+              "nocopy": true
+            }
+          }
+        ]
+      },
+      "backend-retained": {
+        "profiles": [
+          "online-acceptance"
+        ],
+        "cpus": 1,
+        "command": [
+          "node",
+          "dist/index.js"
+        ],
+        "depends_on": {
+          "clamav": {
+            "condition": "service_healthy",
+            "required": true
+          },
+          "postgres": {
+            "condition": "service_healthy",
+            "required": true
+          },
+          "redis": {
+            "condition": "service_healthy",
+            "required": true
+          }
+        },
+        "entrypoint": null,
+        "environment": {
+          "ACCOUNTING_RECONCILIATION_PRODUCERS": "fixture-service-ACCOUNTING_RECONCILIATION_PRODUCERS",
+          "ALLOW_SANITIZED_RECOVERY": "fixture-service-ALLOW_SANITIZED_RECOVERY",
+          "ALLOW_UNSCANNED_HR_FILES": "fixture-service-ALLOW_UNSCANNED_HR_FILES",
+          "APP_COMMIT": "fixture-service-APP_COMMIT",
+          "APP_VERSION": "fixture-service-APP_VERSION",
+          "BACKEND_RUNTIME_ROLE": "fixture-service-BACKEND_RUNTIME_ROLE",
+          "BIOMETRIC_CONNECTOR_MODE": "fixture-service-BIOMETRIC_CONNECTOR_MODE",
+          "BIOMETRIC_TEMPLATE_KEY_BASE64": "fixture-service-BIOMETRIC_TEMPLATE_KEY_BASE64",
+          "BIOMETRIC_WORKSTATIONS_JSON": "fixture-service-BIOMETRIC_WORKSTATIONS_JSON",
+          "DATABASE_URL": "fixture-service-DATABASE_URL",
+          "DEPLOYMENT_RELEASE_ID": "fixture-service-DEPLOYMENT_RELEASE_ID",
+          "DISPATCH_CONFIRMATION_OTP_SECRET": "fixture-service-DISPATCH_CONFIRMATION_OTP_SECRET",
+          "FRONTEND_URL": "fixture-service-FRONTEND_URL",
+          "HR_HIRING_ANTIVIRUS_COMMAND": "fixture-service-HR_HIRING_ANTIVIRUS_COMMAND",
+          "INQUIRY_RECOVERY_COORDINATED": "fixture-service-INQUIRY_RECOVERY_COORDINATED",
+          "INQUIRY_RECOVERY_SOURCE_DIR": "fixture-service-INQUIRY_RECOVERY_SOURCE_DIR",
+          "JWT_SECRET": "fixture-service-JWT_SECRET",
+          "NODE_ENV": "fixture-service-NODE_ENV",
+          "PARTNER_SCHEMA_ID": "fixture-service-PARTNER_SCHEMA_ID",
+          "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64": "fixture-service-PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64",
+          "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID": "fixture-service-PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID",
+          "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64": "fixture-service-PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64",
+          "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID": "fixture-service-PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID",
+          "PORT": "fixture-service-PORT",
+          "PUBLIC_APP_URL": "fixture-service-PUBLIC_APP_URL",
+          "PUPPETEER_EXECUTABLE_PATH": "fixture-service-PUPPETEER_EXECUTABLE_PATH",
+          "RECOVERY_COORDINATION_DIR": "fixture-service-RECOVERY_COORDINATION_DIR",
+          "RECOVERY_STORAGE_DIR": "fixture-service-RECOVERY_STORAGE_DIR",
+          "SEPIDAR_ALLOW_UNCOORDINATED_STAGING": "fixture-service-SEPIDAR_ALLOW_UNCOORDINATED_STAGING",
+          "SEPIDAR_BACKUP_STORAGE_ROOT": "fixture-service-SEPIDAR_BACKUP_STORAGE_ROOT",
+          "SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID": "fixture-service-SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID",
+          "SMS_IR_DISPATCH_EXIT_TEMPLATE_ID": "fixture-service-SMS_IR_DISPATCH_EXIT_TEMPLATE_ID",
+          "SMS_IR_ENVIRONMENT": "fixture-service-SMS_IR_ENVIRONMENT",
+          "WEB_PUSH_VAPID_PRIVATE_KEY": "fixture-service-WEB_PUSH_VAPID_PRIVATE_KEY",
+          "WEB_PUSH_VAPID_PUBLIC_KEY": "fixture-service-WEB_PUSH_VAPID_PUBLIC_KEY",
+          "WEB_PUSH_VAPID_SUBJECT": "fixture-service-WEB_PUSH_VAPID_SUBJECT"
+        },
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "node -e \"require('http').get('http://127.0.0.1:5000/api/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));\""
+          ],
+          "timeout": "5s",
+          "interval": "10s",
+          "retries": 20,
+          "start_period": "30s"
+        },
+        "image": "sha256:89dd62e901f2077f70c800bd9b705251730fa23531f7c3cc42fdaee1d9c71186",
+        "logging": {
+          "driver": "local",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "805306368",
+        "memswap_limit": "1610612736",
+        "networks": {
+          "default": null
+        },
+        "ports": [
+          {
+            "mode": "ingress",
+            "host_ip": "127.0.0.1",
+            "target": 5000,
+            "published": "5101",
+            "protocol": "tcp"
+          }
+        ],
+        "pull_policy": "never",
+        "read_only": true,
+        "restart": "unless-stopped",
+        "stop_grace_period": "5m0s",
+        "tmpfs": [
+          "/tmp"
+        ],
+        "volumes": [
+          {
+            "type": "volume",
+            "source": "backend_storage_contracts",
+            "target": "/app/storage/contracts",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_storage_hr_hiring",
+            "target": "/app/storage/hr-hiring",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_storage_accounting_contracts",
+            "target": "/app/storage/accounting-contracts",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_storage_support_tickets",
+            "target": "/app/storage/support-tickets",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_uploads",
+            "target": "/app/uploads",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_recovery",
+            "target": "/app/storage/recovery",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "backend_storage_sepidar_backups",
+            "target": "/app/storage/sepidar-backups",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "recovery_coordination",
+            "target": "/app/recovery-coordination",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "inquiry_data",
+            "target": "/app/recovery-sources/inquiry",
+            "read_only": true,
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_acceptance",
+            "target": "/app/online-runtime-acceptance",
+            "volume": {
+              "nocopy": true,
+              "subpath": "c16-recovery-70360dba0eb244dc91cdfcd0533315f9/c16-recovery-32c29444431a4f98bc6070f4182e7bb8"
+            }
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_authority",
+            "target": "/run/sabalan-online",
+            "read_only": true,
+            "volume": {
+              "nocopy": true,
+              "subpath": "cohort-0de041a6c7a307e6099865523af8032d"
+            }
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_jobs_authority",
+            "target": "/app/jobs-authority",
+            "volume": {
+              "nocopy": true,
+              "subpath": "cohort-0de041a6c7a307e6099865523af8032d"
+            }
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_acceptance",
+            "target": "/app/online-runtime-acceptance/application-prisma-ebcfd40fff0a28e39d983c6616893b50",
+            "read_only": true,
+            "volume": {
+              "nocopy": true,
+              "subpath": "application-prisma-ebcfd40fff0a28e39d983c6616893b50"
+            }
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_acceptance",
+            "target": "/app/online-runtime-acceptance/inquiry-coherent-7878c93646acd9ac37cef95e27a4029d",
+            "read_only": true,
+            "volume": {
+              "nocopy": true,
+              "subpath": "inquiry-coherent-7878c93646acd9ac37cef95e27a4029d"
+            }
+          },
+          {
+            "type": "volume",
+            "source": "online_runtime_jobs_authority",
+            "target": "/app/qualification-jobs-root",
+            "volume": {
+              "nocopy": true
+            }
+          }
+        ]
+      }
+    },
+    "volumes": {
+      "backend_recovery": {
+        "name": "sabalanerp-local_backend_recovery"
+      },
+      "backend_storage_accounting_contracts": {
+        "name": "sabalanerp-local_backend_storage_accounting_contracts"
+      },
+      "backend_storage_contracts": {
+        "name": "sabalanerp-local_backend_storage_contracts"
+      },
+      "backend_storage_hr_hiring": {
+        "name": "sabalanerp-local_backend_storage_hr_hiring"
+      },
+      "backend_storage_sepidar_backups": {
+        "name": "sabalanerp-local_backend_storage_sepidar_backups"
+      },
+      "backend_storage_support_tickets": {
+        "name": "sabalanerp-local_backend_storage_support_tickets"
+      },
+      "backend_uploads": {
+        "name": "sabalanerp-local_backend_uploads"
+      },
+      "clamav_database": {
+        "name": "sabalanerp-local_clamav_database"
+      },
+      "inquiry_data": {
+        "name": "sabalanerp-local_inquiry_data"
+      },
+      "online_runtime_acceptance": {
+        "name": "sabalanerp-local_online_runtime_acceptance"
+      },
+      "online_runtime_authority": {
+        "name": "sabalanerp-local_online_runtime_authority"
+      },
+      "online_runtime_jobs_authority": {
+        "name": "sabalanerp-local_online_runtime_jobs_authority"
+      },
+      "postgres_data": {
+        "name": "sabalanerp-local_postgres_data"
+      },
+      "recovery_coordination": {
+        "name": "sabalanerp-local_recovery_coordination"
+      },
+      "redis_data": {
+        "name": "sabalanerp-local_redis_data"
+      }
+    },
+    "networks": {
+      "default": {
+        "name": "sabalanerp-local_default",
+        "ipam": {}
+      }
+    }
+  },
+  "slots": {
+    "backend-candidate": {
+      "container": {
+        "service": "backend-candidate",
+        "Id": "42be8619ce4d91ff369578d74721b155f60b20f741d0796a1f12ff36aad37633",
+        "Image": "sha256:327e1a686b8446ade7205b7a36fc401e510cd5f4b5e2e27e154424c535cb0fa3",
+        "StartedAt": "2026-10-25T12:28:16.929389241Z",
+        "Pid": 50739,
+        "NetworkSettings": {
+          "SandboxID": "82bf839dc16b6f275199e776e474241d63d277ddefd11f937cb20f208b5e684f",
+          "SandboxKey": "/var/run/docker/netns/82bf839dc16b",
+          "Ports": {
+            "5000/tcp": [
+              {
+                "HostIp": "127.0.0.1",
+                "HostPort": "5100"
+              }
+            ]
+          },
+          "Networks": {
+            "sabalanerp-local_default": {
+              "IPAMConfig": null,
+              "Links": null,
+              "Aliases": [
+                "sabalanerp-local-backend-candidate-1",
+                "backend-candidate"
+              ],
+              "DriverOpts": null,
+              "GwPriority": 0,
+              "NetworkID": "0b1f506dadbca25b7134bb22f825b6d3e752bfe17673ddbabca727ed1db710e0",
+              "EndpointID": "fad350a786dd2a5fc4e3455c08c0d5dd3b629c4a86f102f41ef74aa18fbb90aa",
+              "Gateway": "172.18.0.1",
+              "IPAddress": "172.18.0.10",
+              "MacAddress": "0e:d1:49:29:1b:1d",
+              "IPPrefixLen": 16,
+              "IPv6Gateway": "",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "DNSNames": [
+                "sabalanerp-local-backend-candidate-1",
+                "backend-candidate",
+                "42be8619ce4d"
+              ]
+            }
+          }
+        },
+        "Config": {
+          "Hostname": "42be8619ce4d",
+          "Domainname": "",
+          "User": "",
+          "AttachStdin": false,
+          "AttachStdout": true,
+          "AttachStderr": true,
+          "ExposedPorts": {
+            "5000/tcp": {}
+          },
+          "Tty": false,
+          "OpenStdin": false,
+          "StdinOnce": false,
+          "Env": [
+            "NODE_ENV=fixture-service-NODE_ENV",
+            "BIOMETRIC_TEMPLATE_KEY_BASE64=fixture-service-BIOMETRIC_TEMPLATE_KEY_BASE64",
+            "SMS_IR_ENVIRONMENT=fixture-service-SMS_IR_ENVIRONMENT",
+            "SEPIDAR_ALLOW_UNCOORDINATED_STAGING=fixture-service-SEPIDAR_ALLOW_UNCOORDINATED_STAGING",
+            "SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID=fixture-service-SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID",
+            "SMS_IR_DISPATCH_EXIT_TEMPLATE_ID=fixture-service-SMS_IR_DISPATCH_EXIT_TEMPLATE_ID",
+            "FRONTEND_URL=fixture-service-FRONTEND_URL",
+            "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID=fixture-service-PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID",
+            "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64=fixture-service-PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64",
+            "APP_COMMIT=fixture-service-APP_COMMIT",
+            "DATABASE_URL=fixture-service-DATABASE_URL",
+            "INQUIRY_RECOVERY_SOURCE_DIR=fixture-service-INQUIRY_RECOVERY_SOURCE_DIR",
+            "WEB_PUSH_VAPID_PRIVATE_KEY=fixture-service-WEB_PUSH_VAPID_PRIVATE_KEY",
+            "BIOMETRIC_WORKSTATIONS_JSON=fixture-service-BIOMETRIC_WORKSTATIONS_JSON",
+            "ALLOW_UNSCANNED_HR_FILES=fixture-service-ALLOW_UNSCANNED_HR_FILES",
+            "INQUIRY_RECOVERY_COORDINATED=fixture-service-INQUIRY_RECOVERY_COORDINATED",
+            "DISPATCH_CONFIRMATION_OTP_SECRET=fixture-service-DISPATCH_CONFIRMATION_OTP_SECRET",
+            "SEPIDAR_BACKUP_STORAGE_ROOT=fixture-service-SEPIDAR_BACKUP_STORAGE_ROOT",
+            "PARTNER_SCHEMA_ID=fixture-service-PARTNER_SCHEMA_ID",
+            "RECOVERY_STORAGE_DIR=fixture-service-RECOVERY_STORAGE_DIR",
+            "ACCOUNTING_RECONCILIATION_PRODUCERS=fixture-service-ACCOUNTING_RECONCILIATION_PRODUCERS",
+            "HR_HIRING_ANTIVIRUS_COMMAND=fixture-service-HR_HIRING_ANTIVIRUS_COMMAND",
+            "PUBLIC_APP_URL=fixture-service-PUBLIC_APP_URL",
+            "APP_VERSION=fixture-service-APP_VERSION",
+            "WEB_PUSH_VAPID_PUBLIC_KEY=fixture-service-WEB_PUSH_VAPID_PUBLIC_KEY",
+            "JWT_SECRET=fixture-service-JWT_SECRET",
+            "PORT=fixture-service-PORT",
+            "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID=fixture-service-PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID",
+            "WEB_PUSH_VAPID_SUBJECT=fixture-service-WEB_PUSH_VAPID_SUBJECT",
+            "RECOVERY_COORDINATION_DIR=fixture-service-RECOVERY_COORDINATION_DIR",
+            "ALLOW_SANITIZED_RECOVERY=fixture-service-ALLOW_SANITIZED_RECOVERY",
+            "DEPLOYMENT_RELEASE_ID=fixture-service-DEPLOYMENT_RELEASE_ID",
+            "BIOMETRIC_CONNECTOR_MODE=fixture-service-BIOMETRIC_CONNECTOR_MODE",
+            "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64=fixture-service-PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64",
+            "PUPPETEER_EXECUTABLE_PATH=fixture-service-PUPPETEER_EXECUTABLE_PATH",
+            "BACKEND_RUNTIME_ROLE=fixture-service-BACKEND_RUNTIME_ROLE",
+            "PATH=fixture-image-PATH",
+            "NODE_VERSION=fixture-image-NODE_VERSION",
+            "YARN_VERSION=fixture-image-YARN_VERSION"
+          ],
+          "Cmd": [
+            "node",
+            "dist/index.js"
+          ],
+          "Healthcheck": {
+            "Test": [
+              "CMD-SHELL",
+              "node -e \"require('http').get('http://127.0.0.1:5000/api/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));\""
+            ],
+            "Interval": 10000000000,
+            "Timeout": 5000000000,
+            "StartPeriod": 30000000000,
+            "Retries": 20
+          },
+          "Image": "sha256:327e1a686b8446ade7205b7a36fc401e510cd5f4b5e2e27e154424c535cb0fa3",
+          "Volumes": null,
+          "WorkingDir": "/app",
+          "Entrypoint": [
+            "docker-entrypoint.sh"
+          ],
+          "Labels": {
+            "com.docker.compose.config-hash": "51d40cfd2897bb82e6b42f82d1ff9a194961081e4fa39ab9a4d9d8029ebc6a84",
+            "com.docker.compose.container-number": "1",
+            "com.docker.compose.depends_on": "",
+            "com.docker.compose.image": "sha256:81dcb42f63fa148c8dcee521ad507d076cea32839174da7c2f3767fd0eab21e7",
+            "com.docker.compose.oneoff": "False",
+            "com.docker.compose.project": "sabalanerp-local",
+            "com.docker.compose.project.config_files": "D:\\sabalanerp\\docker-compose.local.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.online-acceptance.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.online-runtime-authority-acceptance.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.application-native-role-isolation.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.application-native-mixed-images.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.application-native-historical-capsules.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.application-native-authority-cohort.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.application-native-negative-acceptance-cohort.yml",
+            "com.docker.compose.project.working_dir": "D:\\sabalanerp",
+            "com.docker.compose.replace": "backend-candidate-1",
+            "com.docker.compose.service": "backend-candidate",
+            "com.docker.compose.version": "5.5.1",
+            "io.sabalan.compact.source-commit": "81abdf515f23b82738b34202c04be725716faad4",
+            "io.sabalan.compact.source-inventory-sha256": "c2ab88b3c5d9b4def5f7b07bb780f0064f7ac538baf8850b804364e2adda9c28",
+            "io.sabalan.performance.source-commit": "81abdf515f23b82738b34202c04be725716faad4",
+            "io.sabalan.performance.source-hash": "aa09a73d472d4d23374bca77af84b12c312c9250ef4ebca2078cd5553a6bbb2e"
+          },
+          "StopTimeout": 300
+        },
+        "HostConfig": {
+          "Binds": [
+            "sabalanerp-local_backend_storage_hr_hiring:/app/storage/hr-hiring:ro",
+            "sabalanerp-local_backend_storage_accounting_contracts:/app/storage/accounting-contracts:ro",
+            "sabalanerp-local_backend_storage_support_tickets:/app/storage/support-tickets:ro",
+            "sabalanerp-local_recovery_coordination:/app/recovery-coordination:ro",
+            "sabalanerp-local_inquiry_data:/app/recovery-sources/inquiry:ro",
+            "sabalanerp-local_backend_storage_contracts:/app/storage/contracts:ro",
+            "sabalanerp-local_backend_uploads:/app/uploads:ro",
+            "sabalanerp-local_backend_recovery:/app/storage/recovery:ro",
+            "sabalanerp-local_backend_storage_sepidar_backups:/app/storage/sepidar-backups:ro"
+          ],
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "local",
+            "Config": {
+              "max-file": "3",
+              "max-size": "10m"
+            }
+          },
+          "NetworkMode": "sabalanerp-local_default",
+          "PortBindings": {
+            "5000/tcp": [
+              {
+                "HostIp": "127.0.0.1",
+                "HostPort": "5100"
+              }
+            ]
+          },
+          "RestartPolicy": {
+            "Name": "unless-stopped",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": false,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [
+            0,
+            0
+          ],
+          "CapAdd": null,
+          "CapDrop": null,
+          "CgroupnsMode": "private",
+          "Dns": null,
+          "DnsOptions": null,
+          "DnsSearch": null,
+          "ExtraHosts": [],
+          "GroupAdd": null,
+          "IpcMode": "private",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": true,
+          "SecurityOpt": null,
+          "Tmpfs": {
+            "/tmp": ""
+          },
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 67108864,
+          "Runtime": "runc",
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 2147483648,
+          "NanoCpus": 1000000000,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": null,
+          "BlkioDeviceReadBps": null,
+          "BlkioDeviceWriteBps": null,
+          "BlkioDeviceReadIOps": null,
+          "BlkioDeviceWriteIOps": null,
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "",
+          "CpusetMems": "",
+          "Devices": null,
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 2147483648,
+          "MemorySwappiness": null,
+          "OomKillDisable": null,
+          "PidsLimit": null,
+          "Ulimits": null,
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "Mounts": [
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_acceptance",
+              "Target": "/app/online-runtime-acceptance/inquiry-coherent-7878c93646acd9ac37cef95e27a4029d",
+              "ReadOnly": true,
+              "VolumeOptions": {
+                "NoCopy": true,
+                "Subpath": "inquiry-coherent-7878c93646acd9ac37cef95e27a4029d"
+              }
+            },
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_authority",
+              "Target": "/app/qualification-authority-root",
+              "VolumeOptions": {
+                "NoCopy": true
+              }
+            },
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_acceptance",
+              "Target": "/app/online-runtime-acceptance",
+              "VolumeOptions": {
+                "NoCopy": true,
+                "Subpath": "c16-recovery-70360dba0eb244dc91cdfcd0533315f9/c16-recovery-32c29444431a4f98bc6070f4182e7bb8"
+              }
+            },
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_jobs_authority",
+              "Target": "/run/sabalan-online",
+              "ReadOnly": true,
+              "VolumeOptions": {
+                "NoCopy": true,
+                "Subpath": "cohort-0de041a6c7a307e6099865523af8032d"
+              }
+            },
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_acceptance",
+              "Target": "/app/online-runtime-acceptance/application-prisma-ebcfd40fff0a28e39d983c6616893b50",
+              "ReadOnly": true,
+              "VolumeOptions": {
+                "NoCopy": true,
+                "Subpath": "application-prisma-ebcfd40fff0a28e39d983c6616893b50"
+              }
+            },
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_authority",
+              "Target": "/app/runtime-authority",
+              "VolumeOptions": {
+                "NoCopy": true,
+                "Subpath": "cohort-0de041a6c7a307e6099865523af8032d"
+              }
+            }
+          ],
+          "MaskedPaths": [
+            "/proc/acpi",
+            "/proc/asound",
+            "/proc/interrupts",
+            "/proc/kcore",
+            "/proc/keys",
+            "/proc/latency_stats",
+            "/proc/sched_debug",
+            "/proc/scsi",
+            "/proc/timer_list",
+            "/proc/timer_stats",
+            "/sys/devices/virtual/powercap",
+            "/sys/firmware"
+          ],
+          "ReadonlyPaths": [
+            "/proc/bus",
+            "/proc/fs",
+            "/proc/irq",
+            "/proc/sys",
+            "/proc/sysrq-trigger"
+          ]
+        },
+        "Mounts": [
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_acceptance",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_acceptance/_data",
+            "Destination": "/app/online-runtime-acceptance",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": true,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_acceptance",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_acceptance/_data",
+            "Destination": "/app/online-runtime-acceptance/application-prisma-ebcfd40fff0a28e39d983c6616893b50",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_acceptance",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_acceptance/_data",
+            "Destination": "/app/online-runtime-acceptance/inquiry-coherent-7878c93646acd9ac37cef95e27a4029d",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_authority",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_authority/_data",
+            "Destination": "/app/qualification-authority-root",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": true,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_recovery_coordination",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_recovery_coordination/_data",
+            "Destination": "/app/recovery-coordination",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_inquiry_data",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_inquiry_data/_data",
+            "Destination": "/app/recovery-sources/inquiry",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_authority",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_authority/_data",
+            "Destination": "/app/runtime-authority",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": true,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_storage_accounting_contracts",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_storage_accounting_contracts/_data",
+            "Destination": "/app/storage/accounting-contracts",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_storage_contracts",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_storage_contracts/_data",
+            "Destination": "/app/storage/contracts",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_storage_hr_hiring",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_storage_hr_hiring/_data",
+            "Destination": "/app/storage/hr-hiring",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_recovery",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_recovery/_data",
+            "Destination": "/app/storage/recovery",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_storage_sepidar_backups",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_storage_sepidar_backups/_data",
+            "Destination": "/app/storage/sepidar-backups",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_storage_support_tickets",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_storage_support_tickets/_data",
+            "Destination": "/app/storage/support-tickets",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_uploads",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_uploads/_data",
+            "Destination": "/app/uploads",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_jobs_authority",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_jobs_authority/_data",
+            "Destination": "/run/sabalan-online",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": false,
+            "Propagation": ""
+          }
+        ]
+      },
+      "image": {
+        "Id": "sha256:327e1a686b8446ade7205b7a36fc401e510cd5f4b5e2e27e154424c535cb0fa3",
+        "Config": {
+          "ExposedPorts": {
+            "5000/tcp": {}
+          },
+          "Env": [
+            "PATH=fixture-image-PATH",
+            "NODE_VERSION=fixture-image-NODE_VERSION",
+            "YARN_VERSION=fixture-image-YARN_VERSION",
+            "NODE_ENV=fixture-image-NODE_ENV",
+            "PORT=fixture-image-PORT",
+            "PUPPETEER_EXECUTABLE_PATH=fixture-image-PUPPETEER_EXECUTABLE_PATH"
+          ],
+          "Entrypoint": [
+            "docker-entrypoint.sh"
+          ],
+          "Cmd": [
+            "sh",
+            "-c",
+            "node dist/scripts/recovery-database-preflight.js && node dist/index.js"
+          ],
+          "WorkingDir": "/app",
+          "Labels": {
+            "com.docker.compose.project": "sabalanerp",
+            "com.docker.compose.service": "backend",
+            "com.docker.compose.version": "5.0.2",
+            "io.sabalan.compact.source-commit": "81abdf515f23b82738b34202c04be725716faad4",
+            "io.sabalan.compact.source-inventory-sha256": "c2ab88b3c5d9b4def5f7b07bb780f0064f7ac538baf8850b804364e2adda9c28",
+            "io.sabalan.performance.source-commit": "81abdf515f23b82738b34202c04be725716faad4",
+            "io.sabalan.performance.source-hash": "aa09a73d472d4d23374bca77af84b12c312c9250ef4ebca2078cd5553a6bbb2e"
+          },
+          "ArgsEscaped": true
+        }
+      }
+    },
+    "backend-retained": {
+      "container": {
+        "service": "backend-retained",
+        "Id": "483a0b24a76e1cb6fedc4e435fdc77dfd25c2f622aebf7f0324c0864fb89d9cc",
+        "Image": "sha256:89dd62e901f2077f70c800bd9b705251730fa23531f7c3cc42fdaee1d9c71186",
+        "StartedAt": "2026-10-25T12:28:18.292526246Z",
+        "Pid": 50885,
+        "NetworkSettings": {
+          "SandboxID": "bcae329c972d37f0b3ed111f516fb81eba20ce5f38fee3796d5b5ecda459402d",
+          "SandboxKey": "/var/run/docker/netns/bcae329c972d",
+          "Ports": {
+            "5000/tcp": [
+              {
+                "HostIp": "127.0.0.1",
+                "HostPort": "5101"
+              }
+            ]
+          },
+          "Networks": {
+            "sabalanerp-local_default": {
+              "IPAMConfig": null,
+              "Links": null,
+              "Aliases": [
+                "sabalanerp-local-backend-retained-1",
+                "backend-retained"
+              ],
+              "DriverOpts": null,
+              "GwPriority": 0,
+              "NetworkID": "0b1f506dadbca25b7134bb22f825b6d3e752bfe17673ddbabca727ed1db710e0",
+              "EndpointID": "427533bcf4a73321ee65432721e0116a719e47c469b9639cf6078a55875e780f",
+              "Gateway": "172.18.0.1",
+              "IPAddress": "172.18.0.11",
+              "MacAddress": "f2:ac:ce:aa:b7:62",
+              "IPPrefixLen": 16,
+              "IPv6Gateway": "",
+              "GlobalIPv6Address": "",
+              "GlobalIPv6PrefixLen": 0,
+              "DNSNames": [
+                "sabalanerp-local-backend-retained-1",
+                "backend-retained",
+                "483a0b24a76e"
+              ]
+            }
+          }
+        },
+        "Config": {
+          "Hostname": "483a0b24a76e",
+          "Domainname": "",
+          "User": "",
+          "AttachStdin": false,
+          "AttachStdout": true,
+          "AttachStderr": true,
+          "ExposedPorts": {
+            "5000/tcp": {}
+          },
+          "Tty": false,
+          "OpenStdin": false,
+          "StdinOnce": false,
+          "Env": [
+            "ALLOW_SANITIZED_RECOVERY=fixture-service-ALLOW_SANITIZED_RECOVERY",
+            "BACKEND_RUNTIME_ROLE=fixture-service-BACKEND_RUNTIME_ROLE",
+            "JWT_SECRET=fixture-service-JWT_SECRET",
+            "SMS_IR_ENVIRONMENT=fixture-service-SMS_IR_ENVIRONMENT",
+            "BIOMETRIC_WORKSTATIONS_JSON=fixture-service-BIOMETRIC_WORKSTATIONS_JSON",
+            "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID=fixture-service-PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID",
+            "WEB_PUSH_VAPID_PRIVATE_KEY=fixture-service-WEB_PUSH_VAPID_PRIVATE_KEY",
+            "DEPLOYMENT_RELEASE_ID=fixture-service-DEPLOYMENT_RELEASE_ID",
+            "DATABASE_URL=fixture-service-DATABASE_URL",
+            "RECOVERY_STORAGE_DIR=fixture-service-RECOVERY_STORAGE_DIR",
+            "INQUIRY_RECOVERY_COORDINATED=fixture-service-INQUIRY_RECOVERY_COORDINATED",
+            "PUPPETEER_EXECUTABLE_PATH=fixture-service-PUPPETEER_EXECUTABLE_PATH",
+            "APP_VERSION=fixture-service-APP_VERSION",
+            "INQUIRY_RECOVERY_SOURCE_DIR=fixture-service-INQUIRY_RECOVERY_SOURCE_DIR",
+            "BIOMETRIC_CONNECTOR_MODE=fixture-service-BIOMETRIC_CONNECTOR_MODE",
+            "FRONTEND_URL=fixture-service-FRONTEND_URL",
+            "DISPATCH_CONFIRMATION_OTP_SECRET=fixture-service-DISPATCH_CONFIRMATION_OTP_SECRET",
+            "ALLOW_UNSCANNED_HR_FILES=fixture-service-ALLOW_UNSCANNED_HR_FILES",
+            "PUBLIC_APP_URL=fixture-service-PUBLIC_APP_URL",
+            "PARTNER_SCHEMA_ID=fixture-service-PARTNER_SCHEMA_ID",
+            "RECOVERY_COORDINATION_DIR=fixture-service-RECOVERY_COORDINATION_DIR",
+            "PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64=fixture-service-PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64",
+            "WEB_PUSH_VAPID_PUBLIC_KEY=fixture-service-WEB_PUSH_VAPID_PUBLIC_KEY",
+            "SMS_IR_DISPATCH_EXIT_TEMPLATE_ID=fixture-service-SMS_IR_DISPATCH_EXIT_TEMPLATE_ID",
+            "SEPIDAR_BACKUP_STORAGE_ROOT=fixture-service-SEPIDAR_BACKUP_STORAGE_ROOT",
+            "HR_HIRING_ANTIVIRUS_COMMAND=fixture-service-HR_HIRING_ANTIVIRUS_COMMAND",
+            "PORT=fixture-service-PORT",
+            "SEPIDAR_ALLOW_UNCOORDINATED_STAGING=fixture-service-SEPIDAR_ALLOW_UNCOORDINATED_STAGING",
+            "SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID=fixture-service-SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID",
+            "WEB_PUSH_VAPID_SUBJECT=fixture-service-WEB_PUSH_VAPID_SUBJECT",
+            "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID=fixture-service-PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID",
+            "ACCOUNTING_RECONCILIATION_PRODUCERS=fixture-service-ACCOUNTING_RECONCILIATION_PRODUCERS",
+            "PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64=fixture-service-PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64",
+            "BIOMETRIC_TEMPLATE_KEY_BASE64=fixture-service-BIOMETRIC_TEMPLATE_KEY_BASE64",
+            "APP_COMMIT=fixture-service-APP_COMMIT",
+            "NODE_ENV=fixture-service-NODE_ENV",
+            "PATH=fixture-image-PATH",
+            "NODE_VERSION=fixture-image-NODE_VERSION",
+            "YARN_VERSION=fixture-image-YARN_VERSION"
+          ],
+          "Cmd": [
+            "node",
+            "dist/index.js"
+          ],
+          "Healthcheck": {
+            "Test": [
+              "CMD-SHELL",
+              "node -e \"require('http').get('http://127.0.0.1:5000/api/ready',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));\""
+            ],
+            "Interval": 10000000000,
+            "Timeout": 5000000000,
+            "StartPeriod": 30000000000,
+            "Retries": 20
+          },
+          "Image": "sha256:89dd62e901f2077f70c800bd9b705251730fa23531f7c3cc42fdaee1d9c71186",
+          "Volumes": null,
+          "WorkingDir": "/app",
+          "Entrypoint": [
+            "docker-entrypoint.sh"
+          ],
+          "Labels": {
+            "com.docker.compose.config-hash": "c571be58b8e76151e8484a63d461a3149e3263f142b1036c1457d82b261e7a5a",
+            "com.docker.compose.container-number": "1",
+            "com.docker.compose.depends_on": "",
+            "com.docker.compose.image": "sha256:91451e64cfdfd97ccab3792593f3bfba8021cbbb1b7d017a608daba6e26281bc",
+            "com.docker.compose.oneoff": "False",
+            "com.docker.compose.project": "sabalanerp-local",
+            "com.docker.compose.project.config_files": "D:\\sabalanerp\\docker-compose.local.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.online-acceptance.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.online-runtime-authority-acceptance.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.application-native-role-isolation.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.application-native-mixed-images.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.application-native-historical-capsules.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.application-native-authority-cohort.yml,C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\docker-compose.application-native-negative-acceptance-cohort.yml",
+            "com.docker.compose.project.working_dir": "D:\\sabalanerp",
+            "com.docker.compose.replace": "backend-retained-1",
+            "com.docker.compose.service": "backend-retained",
+            "com.docker.compose.version": "5.5.1",
+            "io.sabalan.compact.source-commit": "7af34849e2aff4a23a32adb7387bf99283c3864e",
+            "io.sabalan.compact.source-inventory-sha256": "7f324df699e2dfab18a16e419638dc095734c6964d82c8e683a7e1aa6ddf793d",
+            "io.sabalan.performance.source-commit": "7af34849e2aff4a23a32adb7387bf99283c3864e",
+            "io.sabalan.performance.source-hash": "858f1fe37727fe9fa20ba76542c7d878ab38149da0e62252b7face2c05c9b909"
+          },
+          "StopTimeout": 300
+        },
+        "HostConfig": {
+          "Binds": [
+            "sabalanerp-local_inquiry_data:/app/recovery-sources/inquiry:ro",
+            "sabalanerp-local_backend_storage_accounting_contracts:/app/storage/accounting-contracts:ro",
+            "sabalanerp-local_backend_storage_support_tickets:/app/storage/support-tickets:ro",
+            "sabalanerp-local_backend_recovery:/app/storage/recovery:ro",
+            "sabalanerp-local_recovery_coordination:/app/recovery-coordination:ro",
+            "sabalanerp-local_backend_uploads:/app/uploads:ro",
+            "sabalanerp-local_backend_storage_contracts:/app/storage/contracts:ro",
+            "sabalanerp-local_backend_storage_hr_hiring:/app/storage/hr-hiring:ro",
+            "sabalanerp-local_backend_storage_sepidar_backups:/app/storage/sepidar-backups:ro"
+          ],
+          "ContainerIDFile": "",
+          "LogConfig": {
+            "Type": "local",
+            "Config": {
+              "max-file": "3",
+              "max-size": "10m"
+            }
+          },
+          "NetworkMode": "sabalanerp-local_default",
+          "PortBindings": {
+            "5000/tcp": [
+              {
+                "HostIp": "127.0.0.1",
+                "HostPort": "5101"
+              }
+            ]
+          },
+          "RestartPolicy": {
+            "Name": "unless-stopped",
+            "MaximumRetryCount": 0
+          },
+          "AutoRemove": false,
+          "VolumeDriver": "",
+          "VolumesFrom": null,
+          "ConsoleSize": [
+            0,
+            0
+          ],
+          "CapAdd": null,
+          "CapDrop": null,
+          "CgroupnsMode": "private",
+          "Dns": null,
+          "DnsOptions": null,
+          "DnsSearch": null,
+          "ExtraHosts": [],
+          "GroupAdd": null,
+          "IpcMode": "private",
+          "Cgroup": "",
+          "Links": null,
+          "OomScoreAdj": 0,
+          "PidMode": "",
+          "Privileged": false,
+          "PublishAllPorts": false,
+          "ReadonlyRootfs": true,
+          "SecurityOpt": null,
+          "Tmpfs": {
+            "/tmp": ""
+          },
+          "UTSMode": "",
+          "UsernsMode": "",
+          "ShmSize": 67108864,
+          "Runtime": "runc",
+          "Isolation": "",
+          "CpuShares": 0,
+          "Memory": 805306368,
+          "NanoCpus": 1000000000,
+          "CgroupParent": "",
+          "BlkioWeight": 0,
+          "BlkioWeightDevice": null,
+          "BlkioDeviceReadBps": null,
+          "BlkioDeviceWriteBps": null,
+          "BlkioDeviceReadIOps": null,
+          "BlkioDeviceWriteIOps": null,
+          "CpuPeriod": 0,
+          "CpuQuota": 0,
+          "CpuRealtimePeriod": 0,
+          "CpuRealtimeRuntime": 0,
+          "CpusetCpus": "",
+          "CpusetMems": "",
+          "Devices": null,
+          "DeviceCgroupRules": null,
+          "DeviceRequests": null,
+          "MemoryReservation": 0,
+          "MemorySwap": 1610612736,
+          "MemorySwappiness": null,
+          "OomKillDisable": null,
+          "PidsLimit": null,
+          "Ulimits": null,
+          "CpuCount": 0,
+          "CpuPercent": 0,
+          "IOMaximumIOps": 0,
+          "IOMaximumBandwidth": 0,
+          "Mounts": [
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_acceptance",
+              "Target": "/app/online-runtime-acceptance/inquiry-coherent-7878c93646acd9ac37cef95e27a4029d",
+              "ReadOnly": true,
+              "VolumeOptions": {
+                "NoCopy": true,
+                "Subpath": "inquiry-coherent-7878c93646acd9ac37cef95e27a4029d"
+              }
+            },
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_acceptance",
+              "Target": "/app/online-runtime-acceptance",
+              "VolumeOptions": {
+                "NoCopy": true,
+                "Subpath": "c16-recovery-70360dba0eb244dc91cdfcd0533315f9/c16-recovery-32c29444431a4f98bc6070f4182e7bb8"
+              }
+            },
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_jobs_authority",
+              "Target": "/app/qualification-jobs-root",
+              "VolumeOptions": {
+                "NoCopy": true
+              }
+            },
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_jobs_authority",
+              "Target": "/app/jobs-authority",
+              "VolumeOptions": {
+                "NoCopy": true,
+                "Subpath": "cohort-0de041a6c7a307e6099865523af8032d"
+              }
+            },
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_authority",
+              "Target": "/run/sabalan-online",
+              "ReadOnly": true,
+              "VolumeOptions": {
+                "NoCopy": true,
+                "Subpath": "cohort-0de041a6c7a307e6099865523af8032d"
+              }
+            },
+            {
+              "Type": "volume",
+              "Source": "sabalanerp-local_online_runtime_acceptance",
+              "Target": "/app/online-runtime-acceptance/application-prisma-ebcfd40fff0a28e39d983c6616893b50",
+              "ReadOnly": true,
+              "VolumeOptions": {
+                "NoCopy": true,
+                "Subpath": "application-prisma-ebcfd40fff0a28e39d983c6616893b50"
+              }
+            }
+          ],
+          "MaskedPaths": [
+            "/proc/acpi",
+            "/proc/asound",
+            "/proc/interrupts",
+            "/proc/kcore",
+            "/proc/keys",
+            "/proc/latency_stats",
+            "/proc/sched_debug",
+            "/proc/scsi",
+            "/proc/timer_list",
+            "/proc/timer_stats",
+            "/sys/devices/virtual/powercap",
+            "/sys/firmware"
+          ],
+          "ReadonlyPaths": [
+            "/proc/bus",
+            "/proc/fs",
+            "/proc/irq",
+            "/proc/sys",
+            "/proc/sysrq-trigger"
+          ]
+        },
+        "Mounts": [
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_jobs_authority",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_jobs_authority/_data",
+            "Destination": "/app/jobs-authority",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": true,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_acceptance",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_acceptance/_data",
+            "Destination": "/app/online-runtime-acceptance",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": true,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_acceptance",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_acceptance/_data",
+            "Destination": "/app/online-runtime-acceptance/application-prisma-ebcfd40fff0a28e39d983c6616893b50",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_acceptance",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_acceptance/_data",
+            "Destination": "/app/online-runtime-acceptance/inquiry-coherent-7878c93646acd9ac37cef95e27a4029d",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_jobs_authority",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_jobs_authority/_data",
+            "Destination": "/app/qualification-jobs-root",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": true,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_recovery_coordination",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_recovery_coordination/_data",
+            "Destination": "/app/recovery-coordination",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_inquiry_data",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_inquiry_data/_data",
+            "Destination": "/app/recovery-sources/inquiry",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_storage_accounting_contracts",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_storage_accounting_contracts/_data",
+            "Destination": "/app/storage/accounting-contracts",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_storage_contracts",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_storage_contracts/_data",
+            "Destination": "/app/storage/contracts",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_storage_hr_hiring",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_storage_hr_hiring/_data",
+            "Destination": "/app/storage/hr-hiring",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_recovery",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_recovery/_data",
+            "Destination": "/app/storage/recovery",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_storage_sepidar_backups",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_storage_sepidar_backups/_data",
+            "Destination": "/app/storage/sepidar-backups",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_storage_support_tickets",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_storage_support_tickets/_data",
+            "Destination": "/app/storage/support-tickets",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_backend_uploads",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_backend_uploads/_data",
+            "Destination": "/app/uploads",
+            "Driver": "local",
+            "Mode": "ro",
+            "RW": false,
+            "Propagation": ""
+          },
+          {
+            "Type": "volume",
+            "Name": "sabalanerp-local_online_runtime_authority",
+            "Source": "/var/lib/docker/volumes/sabalanerp-local_online_runtime_authority/_data",
+            "Destination": "/run/sabalan-online",
+            "Driver": "local",
+            "Mode": "z",
+            "RW": false,
+            "Propagation": ""
+          }
+        ]
+      },
+      "image": {
+        "Id": "sha256:89dd62e901f2077f70c800bd9b705251730fa23531f7c3cc42fdaee1d9c71186",
+        "Config": {
+          "ExposedPorts": {
+            "5000/tcp": {}
+          },
+          "Env": [
+            "PATH=fixture-image-PATH",
+            "NODE_VERSION=fixture-image-NODE_VERSION",
+            "YARN_VERSION=fixture-image-YARN_VERSION",
+            "NODE_ENV=fixture-image-NODE_ENV",
+            "PORT=fixture-image-PORT",
+            "PUPPETEER_EXECUTABLE_PATH=fixture-image-PUPPETEER_EXECUTABLE_PATH"
+          ],
+          "Entrypoint": [
+            "docker-entrypoint.sh"
+          ],
+          "Cmd": [
+            "sh",
+            "-c",
+            "node dist/scripts/recovery-database-preflight.js && node dist/index.js"
+          ],
+          "WorkingDir": "/app",
+          "Labels": {
+            "com.docker.compose.project": "sabalanerp",
+            "com.docker.compose.service": "backend",
+            "com.docker.compose.version": "5.0.2",
+            "io.sabalan.compact.source-commit": "7af34849e2aff4a23a32adb7387bf99283c3864e",
+            "io.sabalan.compact.source-inventory-sha256": "7f324df699e2dfab18a16e419638dc095734c6964d82c8e683a7e1aa6ddf793d",
+            "io.sabalan.performance.source-commit": "7af34849e2aff4a23a32adb7387bf99283c3864e",
+            "io.sabalan.performance.source-hash": "858f1fe37727fe9fa20ba76542c7d878ab38149da0e62252b7face2c05c9b909"
+          },
+          "ArgsEscaped": true
+        }
+      }
+    }
+  }
+}

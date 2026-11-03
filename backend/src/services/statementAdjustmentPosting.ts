@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import { mapVerifiedApprovedPricingVersion, persistedApprovedPricingInclude } from './approvedPricing';
+import { approvedPricingOperationalContractItemId, mapVerifiedApprovedPricingVersion, persistedApprovedPricingInclude } from './approvedPricing';
 import type { PreparedStatementAdjustmentArtifact } from './dispatchDocuments';
 import {
   pricedAllocationIntegrityHash,
@@ -166,7 +166,7 @@ export const planStatementAdjustment = async (tx: Tx, input: {
     return mapVerifiedApprovedPricingVersion(reference.pricingVersion, reference.readinessEvidenceHash);
   });
   const pricingRows = references.flatMap((reference) => reference.pricingVersion.rows);
-  const pricingByItem = new Map(pricingRows.map((row) => [row.contractItemId, row]));
+  const pricingByItem = new Map(pricingRows.map((row) => [approvedPricingOperationalContractItemId(row), row]));
   const revisionByItem = new Map(correction.waybill.candidate.allocationRevision.lines
     .map((line) => [line.sourceContractItemId, line]));
   const pricingRowIds = new Set(pricingRows.map((row) => row.id));

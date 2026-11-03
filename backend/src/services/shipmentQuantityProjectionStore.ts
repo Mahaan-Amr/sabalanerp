@@ -5,6 +5,7 @@ import {
   type ShipmentQuantityEvidence,
   type ShipmentQuantityProjection,
 } from './shipmentQuantityProjection';
+import { approvedPricingOperationalContractItemId } from './approvedPricing';
 
 type Scope = { contractId?: string; customerId?: string };
 
@@ -228,7 +229,7 @@ export const captureContractQuantityVersionAtFinancialApproval = async (
     include: { rows: true },
   });
   if (!pricingVersion) throw new Error('Approved pricing quantity evidence is missing for shipment capture');
-  const pricingRows = new Map(pricingVersion.rows.map((row) => [row.contractItemId, row]));
+  const pricingRows = new Map(pricingVersion.rows.map((row) => [approvedPricingOperationalContractItemId(row), row]));
   const approvedAt = approval.approvedAt.toISOString();
   const metadata = { financialRecordId: approval.financialRecordId, financiallyApprovedAt: approvedAt };
   const versions = contract.items.map((item) => buildContractRowQuantityEvidence(contract, item, {
@@ -323,11 +324,12 @@ export const readShipmentQuantityProjection = async (
   const approvedPricingContractItems = new Set<string>();
   for (const version of approvedPricingVersions) {
     for (const row of version.rows) {
-      approvedPricingContractItems.add(row.contractItemId);
+      const operationalContractItemId = approvedPricingOperationalContractItemId(row);
+      approvedPricingContractItems.add(operationalContractItemId);
       const event: ShipmentQuantityEvidence = {
         id: `approved-pricing:${row.id}`,
         contractId: version.contractId,
-        contractItemId: row.contractItemId,
+        contractItemId: operationalContractItemId,
         productRowId: row.productRowId,
         unit: row.unit,
         kind: 'CONTRACTED_SET',

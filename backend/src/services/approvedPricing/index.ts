@@ -37,6 +37,7 @@ export const preflightApprovedPricingAtFinancialApproval = async (
   tx: Prisma.TransactionClient,
   financialRecordId: string,
   actorId: string,
+  effectiveAt = new Date(),
 ) => {
   const repository = new PrismaApprovedPricingRepository(tx, {
     reason: 'بازآزمایی پرونده بررسی شواهد مالی',
@@ -57,13 +58,12 @@ export const preflightApprovedPricingAtFinancialApproval = async (
       userMessageFa: 'منبع شواهد قیمت‌گذاری این پیش‌فاکتور پیدا نشد. پرونده باید توسط پشتیبانی بررسی و سپس دوباره بازآزمایی شود.',
       remediationKind: 'EVIDENCE_RECOVERY',
     });
-    const now = new Date();
     const preflightSource = {
       ...source,
       leaf: {
         ...source.leaf,
         status: AccountingRecordStatus.ISSUED,
-        financiallyApprovedAt: now,
+        financiallyApprovedAt: effectiveAt,
         financiallyApprovedBy: actorId,
       },
     };

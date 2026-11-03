@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { FaArrowLeft, FaCheckCircle, FaExclamationTriangle, FaRedo } from 'react-icons/fa';
+import { FaArrowLeft, FaCheckCircle, FaExclamationTriangle } from 'react-icons/fa';
 import {
   ErpBadge,
   ErpButton,
@@ -25,7 +25,7 @@ type ReviewCase = {
   rule?: string | null;
   ruleLabelFa?: string | null;
   guidance: string;
-  primaryAction: { kind: string; labelFa: string; href: string };
+  primaryAction: { kind: string; labelFa: string; href: string } | null;
   canRetryReconciliation: boolean;
   resolutionMode: 'RECONCILED_BY_EVIDENCE_RECHECK' | 'SOURCE_DRAFT_RETIRED' | 'LEGACY_UNVERIFIED';
   readyForFinancialApproval: boolean;
@@ -64,9 +64,7 @@ export default function FinancialEvidenceReviewPage({
   const [reviewCase, setReviewCase] = useState<ReviewCase | null>(null);
   const [contractNumber, setContractNumber] = useState('');
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [resultMessage, setResultMessage] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -84,7 +82,9 @@ export default function FinancialEvidenceReviewPage({
       setReviewCase(found);
       setContractNumber(data?.contract?.contractNumber || '');
     } catch (requestError: any) {
-      setError(requestError?.response?.data?.error || 'دریافت پرونده بررسی انجام نشد.');
+      setError(requestError?.response?.status === 403
+        ? 'شما به فضای کاری حسابداری دسترسی ندارید.'
+        : requestError?.response?.data?.error || 'دریافت پرونده بررسی انجام نشد.');
     } finally {
       setLoading(false);
     }
@@ -93,36 +93,6 @@ export default function FinancialEvidenceReviewPage({
   useEffect(() => {
     load();
   }, [load]);
-
-  const recheck = async () => {
-    if (!reviewCase) return;
-    try {
-      setBusy(true);
-      setError('');
-      setResultMessage('');
-      const response = await accountingAPI.executeAction({
-        kind: 'RECHECK_FINANCIAL_EVIDENCE_REVIEW',
-        reviewCaseId: reviewCase.id,
-      });
-      setResultMessage(response.data?.data?.messageFa || 'بازآزمایی شواهد انجام شد.');
-      await load();
-    } catch (requestError: any) {
-      setError(requestError?.response?.data?.error || 'بازآزمایی شواهد انجام نشد.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const openSupportFromExactCase = () => {
-    const route = `/dashboard/accounting/contracts/${encodeURIComponent(params.contractId)}/financial-evidence-reviews/${encodeURIComponent(params.caseId)}`;
-    sessionStorage.setItem('support-ticket-origin', JSON.stringify({
-      route,
-      pageTitle: document.title,
-      viewport: { width: window.innerWidth, height: window.innerHeight },
-      buildCommit: process.env.NEXT_PUBLIC_BUILD_COMMIT || 'local',
-    }));
-    window.location.assign('/dashboard/support/new');
-  };
 
   if (loading) return <ErpLoading />;
 
@@ -138,7 +108,6 @@ export default function FinancialEvidenceReviewPage({
   const resolved = reviewCase.status === 'RESOLVED';
   const readyForFinancialApproval = reviewCase.readyForFinancialApproval;
   const sourceDraftRetired = resolved && reviewCase.resolutionMode === 'SOURCE_DRAFT_RETIRED';
-  const primaryOpensSupport = reviewCase.primaryAction.kind === 'OPEN_SUPPORT';
   const primaryAction = readyForFinancialApproval
     ? {
         label: 'ادامه تأیید مالی',
@@ -146,12 +115,12 @@ export default function FinancialEvidenceReviewPage({
         icon: FaCheckCircle,
         tone: 'success' as const,
       }
-    : {
+    : reviewCase.primaryAction ? {
         label: reviewCase.primaryAction.labelFa,
-        ...(primaryOpensSupport ? { onClick: openSupportFromExactCase } : { href: reviewCase.primaryAction.href }),
+        href: reviewCase.primaryAction.href,
         icon: FaArrowLeft,
         tone: 'warning' as const,
-      };
+      } : null;
   return (
     <ErpPage
       eyebrow="حسابداری"
@@ -165,7 +134,7 @@ export default function FinancialEvidenceReviewPage({
       >
         <ErpSection
           title="وضعیت پرونده"
-          actions={[primaryAction]}
+          actions={primaryAction ? [primaryAction] : []}
         >
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
@@ -176,7 +145,13 @@ export default function FinancialEvidenceReviewPage({
                     ? 'پیش‌فاکتور ناسازگار کنار گذاشته شد'
                     : 'تأیید مالی مسدود'}
               </ErpBadge>
-              <ErpBadge tone="neutral" variant="outline">{reviewCase.kind === 'QUANTITY' ? 'تعارض کمیت' : 'تعارض شواهد مالی'}</ErpBadge>
+              <ErpBadge tone="neutral" variant="outline">
+                {readyForFinancialApproval
+                  ? 'شواهد تطبیق‌یافته'
+                  : reviewCase.kind === 'QUANTITY'
+                    ? 'تعارض کمیت'
+                    : 'تعارض شواهد مالی'}
+              </ErpBadge>
             </div>
             <p className="text-sm leading-7 text-[var(--sds-text-primary)]">{reviewCase.messageFa}</p>
             <ErpInlineState
@@ -187,7 +162,6 @@ export default function FinancialEvidenceReviewPage({
                   ? 'پیش‌فاکتور ناسازگار حذف شده است. پس از تکمیل اصلاح فروش، به پرونده حسابداری برگردید و یک پیش‌فاکتور تازه بسازید؛ تأیید مالی پیش‌فاکتور تازه دوباره همه شواهد را کنترل می‌کند.'
                 : reviewCase.guidance}
             />
-            {resultMessage && <ErpInlineState kind={readyForFinancialApproval ? 'success' : 'stale'} title={resultMessage} />}
             {error && <ErpInlineState kind="error" title={error} />}
           </div>
         </ErpSection>
@@ -283,20 +257,13 @@ export default function FinancialEvidenceReviewPage({
             </li>
           ))}
         </ol>
-        {!resolved && (
+        {!resolved && reviewCase.primaryAction && (
           <div className="mt-4 flex flex-wrap gap-2">
             <ErpButton
               label={reviewCase.primaryAction.labelFa}
-              {...(primaryOpensSupport ? { onClick: openSupportFromExactCase } : { href: reviewCase.primaryAction.href })}
+              href={reviewCase.primaryAction.href}
               tone="warning"
               variant="outline"
-            />
-            <ErpButton
-              label={busy ? 'در حال بازآزمایی…' : 'بازآزمایی شواهد'}
-              icon={FaRedo}
-              tone="primary"
-              disabled={busy || !reviewCase.canRetryReconciliation}
-              onClick={recheck}
             />
           </div>
         )}

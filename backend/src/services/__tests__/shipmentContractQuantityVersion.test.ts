@@ -78,7 +78,7 @@ test('shipment capture uses the approved-pricing scale-three quantity instead of
       items: [{ id: 'item-optimizer', productRowId: 'row-optimizer', productId: 'product-a', productType: 'longitudinal', quantity: new Prisma.Decimal(0) }],
     }) },
     contractApprovedPricingVersion: { findUnique: async () => ({ rows: [{
-      id: 'pricing-row-optimizer', contractItemId: 'item-optimizer',
+      id: 'pricing-row-optimizer', contractItemId: 'frozen-item-optimizer', linkedContractItemId: 'item-optimizer',
       contractedQuantity: new Prisma.Decimal('58.333'), unit: 'meter',
     }] }) },
     shipmentQuantityEvidence: { createMany: async ({ data }: any) => { created.push(...data); return { count: data.length }; } },
@@ -92,6 +92,7 @@ test('shipment capture uses the approved-pricing scale-three quantity instead of
   assert.equal(created[0].unit, 'meter');
   assert.equal(created[0].metadata.quantityEvidenceOrigin, 'APPROVED_PRICING_ROW');
   assert.equal(created[0].metadata.approvedPricingRowId, 'pricing-row-optimizer');
+  assert.equal(created[0].contractItemId, 'item-optimizer');
 });
 
 test('approved pricing prevents a later legacy zero-sentinel capture from superseding shipment truth', () => {

@@ -99,6 +99,7 @@ Before public traffic opens, all of the following pass:
 - backend readiness and database query;
 - frontend, Inquiry, Nginx, and ClamAV health;
 - contract-product-graph migration audit and every release-specific acceptance command;
+- a retained contract-by-contract financial-evidence preflight report with zero unresolved results; case resolution is atomic and is skipped entirely when any contract is unresolved;
 - isolated read/write smoke tests with deterministic cleanup;
 - checkpoint and release manifest integrity;
 - protected file counts, checksums, and database-to-file reference validation;

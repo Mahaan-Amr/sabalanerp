@@ -304,7 +304,7 @@ const preparePosting = (command: EvidenceCommand): PeriodEndPosting | PeriodEndR
 
 export const createAccountingPeriodEndApplication = (
   repository: PeriodEndRepository,
-  dependencies: { now: () => Date },
+  dependencies: { now: () => Date; validateNewEvidence?: (command: EvidenceCommand) => Promise<void> },
 ) => ({
   acceptEvidence: async (command: EvidenceCommand): Promise<PeriodEndResult> => repository.transaction(async (tx) => {
     const { sourceHash, ...unsignedEvidence } = command.evidence;
@@ -319,6 +319,8 @@ export const createAccountingPeriodEndApplication = (
     if (hashPeriodEndEvidence(unsignedEvidence as JsonLike) !== sourceHash) {
       return tx.saveResult(identity, exception(sourceHash, 'EVIDENCE_INTEGRITY_FAILED', 'هش شواهد با محتوای تحویل‌شده مطابقت ندارد.'));
     }
+    // Mutable lifecycle and document checks apply only to new commands, never durable replays.
+    await dependencies.validateNewEvidence?.(command);
     const prepared = preparePosting(command);
     if ('kind' in prepared) return tx.saveResult(identity, prepared);
     const posted = await tx.postVoucher(prepared);

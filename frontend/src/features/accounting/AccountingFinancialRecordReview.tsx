@@ -78,7 +78,7 @@ export function AccountingFinancialRecordReview({ record, auditRows, auditTotal 
     : receivables.length > 1 ? 'مانده هر دریافتنی در پایین آمده است' : 'هنوز دریافتنی ثبت نشده';
   const approvalOpen = !['ISSUED', 'POSTED', 'VOIDED'].includes(record.status);
   const sourceHref = partner && record.partnerContext?.caseId
-    ? `/dashboard/sales/partner-cases?caseId=${encodeURIComponent(record.partnerContext.caseId)}`
+    ? `/dashboard/accounting/contracts/partner/${encodeURIComponent(record.partnerContext.caseId)}`
     : record.contractId ? `/dashboard/accounting/contracts/${encodeURIComponent(record.contractId)}` : null;
 
   return <div className="space-y-4">

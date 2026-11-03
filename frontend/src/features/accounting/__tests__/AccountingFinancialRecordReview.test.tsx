@@ -76,7 +76,8 @@ test('financial review links to source case and shows witness fingerprint withou
       }] } } }}
     auditRows={[]} canApprove={false} showAccountingDetails={false} onApprove={async () => {}}
   />);
-  assert.match(html, /partner-cases\?caseId=case-1/);
+  assert.match(html, /href="\/dashboard\/accounting\/contracts\/partner\/case-1"/);
+  assert.doesNotMatch(html, /dashboard\/sales\/partner-cases/);
   assert.match(html, /اثر انگشت شاهد منشأ: aabbcc/);
   assert.match(html, /واحد نیازمند بررسی/);
   assert.doesNotMatch(html, /mysteryUnit/);

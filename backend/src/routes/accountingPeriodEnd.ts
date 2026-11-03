@@ -242,76 +242,78 @@ router.post('/evidence', ...editAccess, run(async (req) => {
     try {
       return await prisma.$transaction(async (tx) => {
   const evidence = evidenceFromBody(req.body.evidence);
-  if (evidence.kind === 'ASSET_COST' || evidence.kind === 'ASSET_READY_FOR_USE') {
-    const assetId = evidence.kind === 'ASSET_COST' ? evidence.assetId : evidence.asset.id;
-    await tx.$queryRaw`SELECT id FROM accounting_fixed_assets WHERE id = ${assetId} FOR UPDATE`;
-    const asset = await tx.accountingFixedAsset.findUnique({ where: { id: assetId },
-      include: { components: true, events: true } });
-    const retryingReady = evidence.kind === 'ASSET_READY_FOR_USE' && asset?.status === 'ACTIVE'
-      && asset.events.some((event) => event.sourceType === 'ASSET_READY_FOR_USE'
-        && event.sourceId === evidence.sourceId && event.sourceVersion === evidence.sourceVersion);
-    const retryingCost = evidence.kind === 'ASSET_COST' && asset?.status === 'ACTIVE'
-      && asset.events.some((event) => event.sourceType === 'ASSET_COST'
-        && event.sourceId === evidence.sourceId && event.sourceVersion === evidence.sourceVersion);
-    if (!asset || asset.bookId !== req.body.bookId || (asset.status !== 'UNDER_CONSTRUCTION' && !retryingReady && !retryingCost)) {
-      throw new Error('داراییِ در جریان تکمیل برای ثبت این رویداد معتبر نیست.');
-    }
-    const policy = await tx.accountingAssetClassPolicy.findUniqueOrThrow({ where: { id: asset.classPolicyId } });
-    const proof = await tx.accountingArchiveEvidence.findUnique({ where: { id: evidence.sourceId } });
-    const requiredProofType = evidence.kind === 'ASSET_COST' ? 'ASSET_COST' : 'ASSET_READY_FOR_USE';
-    if (!proof || proof.bookId !== asset.bookId || proof.sourceEntityType !== 'FIXED_ASSET'
-      || proof.sourceEntityId !== asset.id || proof.evidenceType !== requiredProofType
-      || proof.malwareScanStatus !== 'CLEAN' || !proof.malwareScanAt) {
-      throw new Error('مدرک معتبر و بررسی‌شدهٔ همین دارایی لازم است.');
-    }
-    const proofIds = evidence.kind === 'ASSET_COST' ? evidence.documentIds : [evidence.sourceId];
-    const proofs = await tx.accountingArchiveEvidence.findMany({ where: { id: { in: proofIds } } });
-    await assertAssetEvidenceFiles({ proofs, proofIds, sourceId: evidence.sourceId,
-      assetId: asset.id, bookId: asset.bookId, evidenceType: requiredProofType });
-    const eventCost = (event: { payload: unknown }) => {
-      const value = (event.payload as { amountRials?: unknown } | null)?.amountRials;
-      if (typeof value !== 'string' || !/^\d+$/.test(value)) throw new Error('بهای ثبت‌شده دارایی ناقص یا نامعتبر است؛ بررسی شواهد لازم است.');
-      return BigInt(value);
-    };
-    const postedCost = asset.events.filter((event) => event.sourceType === 'ASSET_COST')
-      .reduce((total, event) => total + eventCost(event), 0n);
-    if (evidence.kind === 'ASSET_COST') {
-      const priorUse = asset.events.find((event) => event.sourceType === 'ASSET_COST'
-        && event.sourceId === evidence.sourceId && event.sourceVersion === evidence.sourceVersion);
-      const otherCost = postedCost - (priorUse ? eventCost(priorUse) : 0n);
-      if (evidence.constructionInProgressAccountId !== policy.cipAccountId
-        || evidence.creditAccountId === policy.cipAccountId
-        || evidence.amountRials <= 0n || otherCost + evidence.amountRials > BigInt(asset.bookCostRials.toFixed(0))) {
-        throw new Error('حساب یا جمع بهای دارایی با سیاست و پرونده دارایی هم‌خوان نیست.');
+  const validateNewEvidence = async () => {
+    if (evidence.kind === 'ASSET_COST' || evidence.kind === 'ASSET_READY_FOR_USE') {
+      const assetId = evidence.kind === 'ASSET_COST' ? evidence.assetId : evidence.asset.id;
+      await tx.$queryRaw`SELECT id FROM accounting_fixed_assets WHERE id = ${assetId} FOR UPDATE`;
+      const asset = await tx.accountingFixedAsset.findUnique({ where: { id: assetId },
+        include: { components: true, events: true } });
+      const retryingReady = evidence.kind === 'ASSET_READY_FOR_USE' && asset?.status === 'ACTIVE'
+        && asset.events.some((event) => event.sourceType === 'ASSET_READY_FOR_USE'
+          && event.sourceId === evidence.sourceId && event.sourceVersion === evidence.sourceVersion);
+      const retryingCost = evidence.kind === 'ASSET_COST' && asset?.status === 'ACTIVE'
+        && asset.events.some((event) => event.sourceType === 'ASSET_COST'
+          && event.sourceId === evidence.sourceId && event.sourceVersion === evidence.sourceVersion);
+      if (!asset || asset.bookId !== req.body.bookId || (asset.status !== 'UNDER_CONSTRUCTION' && !retryingReady && !retryingCost)) {
+        throw new Error('داراییِ در جریان تکمیل برای ثبت این رویداد معتبر نیست.');
+      }
+      const policy = await tx.accountingAssetClassPolicy.findUniqueOrThrow({ where: { id: asset.classPolicyId } });
+      const proof = await tx.accountingArchiveEvidence.findUnique({ where: { id: evidence.sourceId } });
+      const requiredProofType = evidence.kind === 'ASSET_COST' ? 'ASSET_COST' : 'ASSET_READY_FOR_USE';
+      if (!proof || proof.bookId !== asset.bookId || proof.sourceEntityType !== 'FIXED_ASSET'
+        || proof.sourceEntityId !== asset.id || proof.evidenceType !== requiredProofType
+        || proof.malwareScanStatus !== 'CLEAN' || !proof.malwareScanAt) {
+        throw new Error('مدرک معتبر و بررسی‌شدهٔ همین دارایی لازم است.');
+      }
+      const proofIds = evidence.kind === 'ASSET_COST' ? evidence.documentIds : [evidence.sourceId];
+      const proofs = await tx.accountingArchiveEvidence.findMany({ where: { id: { in: proofIds } } });
+      await assertAssetEvidenceFiles({ proofs, proofIds, sourceId: evidence.sourceId,
+        assetId: asset.id, bookId: asset.bookId, evidenceType: requiredProofType });
+      const eventCost = (event: { payload: unknown }) => {
+        const value = (event.payload as { amountRials?: unknown } | null)?.amountRials;
+        if (typeof value !== 'string' || !/^\d+$/.test(value)) throw new Error('بهای ثبت‌شده دارایی ناقص یا نامعتبر است؛ بررسی شواهد لازم است.');
+        return BigInt(value);
+      };
+      const postedCost = asset.events.filter((event) => event.sourceType === 'ASSET_COST')
+        .reduce((total, event) => total + eventCost(event), 0n);
+      if (evidence.kind === 'ASSET_COST') {
+        const priorUse = asset.events.find((event) => event.sourceType === 'ASSET_COST'
+          && event.sourceId === evidence.sourceId && event.sourceVersion === evidence.sourceVersion);
+        const otherCost = postedCost - (priorUse ? eventCost(priorUse) : 0n);
+        if (evidence.constructionInProgressAccountId !== policy.cipAccountId
+          || evidence.creditAccountId === policy.cipAccountId
+          || evidence.amountRials <= 0n || otherCost + evidence.amountRials > BigInt(asset.bookCostRials.toFixed(0))) {
+          throw new Error('حساب یا جمع بهای دارایی با سیاست و پرونده دارایی هم‌خوان نیست.');
+        }
+      }
+      if (evidence.kind === 'ASSET_READY_FOR_USE') {
+        if (evidence.asset.classPolicyVersionId !== asset.classPolicyId
+          || evidence.asset.registerNumber !== asset.registerNumber
+          || evidence.asset.costRials !== BigInt(asset.bookCostRials.toFixed(0))
+          || evidence.asset.taxBasis.costRials !== BigInt(asset.taxCostRials.toFixed(0))
+          || evidence.asset.assetAccountId !== policy.assetAccountId
+          || evidence.asset.constructionInProgressAccountId !== policy.cipAccountId
+          || evidence.asset.bookMethod !== policy.bookMethod
+          || evidence.asset.taxBasis.method !== policy.taxMethod
+          || evidence.asset.readyForUseAt.getTime() !== evidence.occurredAt.getTime()
+          || evidence.asset.components.length !== asset.components.length
+          || new Set(evidence.asset.components.map((component) => component.id)).size !== asset.components.length
+          || evidence.asset.components.some((component) => {
+            const stored = asset.components.find((row) => row.id === component.id);
+            return !stored || component.costRials !== BigInt(stored.bookCostRials.toFixed(0))
+              || component.residualValueRials !== BigInt(stored.residualValueRials.toFixed(0))
+              || component.usefulLifeMonths !== stored.usefulLifeMonths
+              || component.titlePersian !== stored.titlePersian;
+          })) {
+          throw new Error('مشخصات آماده‌به‌کار با پرونده دارایی هم‌خوان نیست.');
+        }
+        if (postedCost !== evidence.asset.costRials) {
+          throw new Error('بهای انباشته در جریان تکمیل باید دقیقاً با بهای دارایی برابر باشد.');
+        }
       }
     }
-    if (evidence.kind === 'ASSET_READY_FOR_USE') {
-      if (evidence.asset.classPolicyVersionId !== asset.classPolicyId
-        || evidence.asset.registerNumber !== asset.registerNumber
-        || evidence.asset.costRials !== BigInt(asset.bookCostRials.toFixed(0))
-        || evidence.asset.taxBasis.costRials !== BigInt(asset.taxCostRials.toFixed(0))
-        || evidence.asset.assetAccountId !== policy.assetAccountId
-        || evidence.asset.constructionInProgressAccountId !== policy.cipAccountId
-        || evidence.asset.bookMethod !== policy.bookMethod
-        || evidence.asset.taxBasis.method !== policy.taxMethod
-        || evidence.asset.readyForUseAt.getTime() !== evidence.occurredAt.getTime()
-        || evidence.asset.components.length !== asset.components.length
-        || new Set(evidence.asset.components.map((component) => component.id)).size !== asset.components.length
-        || evidence.asset.components.some((component) => {
-          const stored = asset.components.find((row) => row.id === component.id);
-          return !stored || component.costRials !== BigInt(stored.bookCostRials.toFixed(0))
-            || component.residualValueRials !== BigInt(stored.residualValueRials.toFixed(0))
-            || component.usefulLifeMonths !== stored.usefulLifeMonths
-            || component.titlePersian !== stored.titlePersian;
-        })) {
-        throw new Error('مشخصات آماده‌به‌کار با پرونده دارایی هم‌خوان نیست.');
-      }
-      if (postedCost !== evidence.asset.costRials) {
-        throw new Error('بهای انباشته در جریان تکمیل باید دقیقاً با بهای دارایی برابر باشد.');
-      }
-    }
-  }
-  const application = createAccountingPeriodEndApplication(createAccountingPeriodEndPrismaRepository(tx, true), { now: () => new Date() });
+  };
+  const application = createAccountingPeriodEndApplication(createAccountingPeriodEndPrismaRepository(tx, true), { now: () => new Date(), validateNewEvidence });
   return application.acceptEvidence({
     bookId: positiveText(req.body.bookId, 'دفتر حسابداری'),
     fiscalYearId: positiveText(req.body.fiscalYearId, 'سال مالی'),

@@ -14,6 +14,8 @@ import {collectApplicationUiArtifacts} from './lib/application-native-ui-artifac
 import {createOriginalRoleCoordinator} from './lib/application-native-role-coordinator.mjs';
 import {collectApplicationFullCatalogArtifacts,stageOriginalFullCatalog} from './lib/application-native-full-catalog-artifacts.mjs';
 import {observeOriginalPreparedMemory} from './lib/application-native-prepared-memory.mjs';
+import {nativeHistoricalFile} from './lib/frozen-native-history.mjs';
+import {readC3OperationsSourceReuse,revalidateC3OperationsSourceReuse} from './lib/c3-operations-source-reuse.mjs';
 import {runOriginalRetainedBrowserQualificationRounds,readOriginalRetainedBrowserQualificationCompletion} from './lib/original-retained-browser-qualification.mjs';
 
 const originalKnownFailedLocalClosures=new WeakMap();
@@ -22,7 +24,8 @@ export function readOriginalKnownFailedLocalClosure(error){
  const value=originalKnownFailedLocalClosures.get(error);if(!value)return null;value.revalidate();return structuredClone(value.facts);
 }
 
-export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,nativeOwnerElfReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection}){
+export async function runOriginalApplicationNativeQualification({candidateReplacementReceipt,retainedBrowserCompletion,retainedBrowserPlanFile,retainedBrowserPlanSha256,independentOptions,sameComposePhysicalCallbacks,localQualificationMode='ONLINE_POINT',nativeOwner,nativeOwnerElfReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection}){
+assert.ok(['ONLINE_POINT','PROTECTED_COMPLETE'].includes(localQualificationMode));
 if(frontendSnapshot){
  assert.deepEqual(Object.keys(frontendSnapshot).sort(),['file','sha256']);
  const {readMeasuredFrontendSnapshot}=await import('../deploy/scripts/production-frontend-snapshot.mjs');
@@ -30,8 +33,8 @@ if(frontendSnapshot){
 }
 assert.equal(typeof candidateReplacementReceipt,'string','EXPLICIT_ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED');
 assert.ok(path.isAbsolute(candidateReplacementReceipt)&&fs.lstatSync(candidateReplacementReceipt).isFile(),'ACTUAL_CANDIDATE_REPLACEMENT_RECEIPT_REQUIRED_BEFORE_DOCKER');
-if(!retainedBrowserCompletion){assert.ok(retainedBrowserPlanFile&&retainedBrowserPlanSha256,'ORIGINAL_RETAINED_BROWSER_PLAN_REQUIRED');retainedBrowserCompletion=await runOriginalRetainedBrowserQualificationRounds({planFile:retainedBrowserPlanFile,planSha256:retainedBrowserPlanSha256});}
-const retainedBrowserFacts=readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);const localDevSuspension=retainedBrowserFacts.report.localDevSuspension;assertLocalDevSuspensionCurrent(localDevSuspension);
+if(!retainedBrowserCompletion){assert.ok(retainedBrowserPlanFile&&retainedBrowserPlanSha256,'ORIGINAL_RETAINED_BROWSER_PLAN_REQUIRED');retainedBrowserCompletion=await runOriginalRetainedBrowserQualificationRounds({planFile:retainedBrowserPlanFile,planSha256:retainedBrowserPlanSha256,nativeOwner});}
+const retainedBrowserFacts=readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);if(nativeOwner)await nativeOwner.assertRetainedFrontendCurrent(retainedBrowserCompletion);const localDevSuspension=retainedBrowserFacts.currentLocalDevSuspension;assertLocalDevSuspensionCurrent(localDevSuspension);
 const root=path.resolve(import.meta.dirname,'..'),require=createRequire(import.meta.url),esbuild=require('../backend/node_modules/esbuild');
 const loaderFor=name=>{const loader={'.ts':'ts','.js':'js','.mjs':'js','.json':'json'}[path.extname(name)];assert.ok(loader,'unsupported captured module extension');return loader;};
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex'),compose=['compose','-f','D:/sabalanerp/docker-compose.local.yml'];
@@ -49,7 +52,7 @@ function inspect(){const rows=status(),names=services.map(service=>rows.find(row
   return Object.fromEntries(values.map(value=>{assert.equal(value.Config.Labels['com.docker.compose.project'],'sabalanerp-local');
     const service=value.Config.Labels['com.docker.compose.service'];assert.ok(services.includes(service));return [service,value];}));}
 const identity=value=>({id:value.Id,image:value.Image,startedAt:value.State.StartedAt});
-const initial=inspect(),before=Object.fromEntries(services.map(service=>[service,identity(initial[service])]));
+const initial=nativeOwner?await nativeOwner.inspectOriginalLocalPreparation():inspect(),before=Object.fromEntries(services.map(service=>[service,identity(initial[service])]));
 for(const service of ['frontend-retained','frontend-candidate']){const restored=retainedBrowserFacts.report.restoredSlots[service];assert.deepEqual(identity(initial[service]),{id:restored.id,image:restored.image,startedAt:restored.startedAt},'ORIGINAL_RESTORED_UI_INCARNATION_CHANGED');}
 const candidate=initial['backend-candidate'],retained=initial['backend-retained'];
 const directory='/app/online-runtime-acceptance/application-native-'+randomBytes(16).toString('hex');
@@ -67,21 +70,27 @@ assert.ok(!candidate.Mounts.some(mount=>mount.RW&&mount.Source===candidateJobs.S
 assert.ok(!retained.Mounts.some(mount=>mount.RW&&mount.Source===retainedAuthority.Source));
 for(const slot of [candidate,retained])assert.ok(slot.Mounts.some(mount=>mount.Name==='sabalanerp-local_online_runtime_acceptance'
   && mount.RW && mount.Destination==='/app/online-runtime-acceptance'));
-const sources={},capture=name=>{const bytes=fs.readFileSync(path.join(root,name)),hash=sha(bytes);
+const sources={},historicalSources={},capture=name=>{const file=nativeHistoricalFile(root,name),bytes=fs.readFileSync(file),hash=sha(bytes);
+  if(file!==path.join(root,name))historicalSources[name]={file,sha256:hash,historicalOnly:true,activeCapability:false};
   if(sources[name])assert.equal(sources[name],hash);sources[name]=hash;return bytes;};
 capture('scripts/run-application-native-local.mjs');
 capture('scripts/lib/application-native-role-coordinator.mjs');
 capture('scripts/lib/application-native-prepared-memory.mjs');
+capture('scripts/lib/frozen-native-history.mjs');capture('scripts/lib/frozen-native-history.json');
+capture('scripts/lib/c3-operations-source-reuse.mjs');
 for(const source of ['scripts/lib/original-private-legacy-ui-carrier.mjs',
  'scripts/lib/application-native-qa-profile.mjs','scripts/lib/application-native-post-up-memory-baseline.mjs','scripts/lib/production-legacy-browser-artifacts.mjs','scripts/lib/production-frontend-base-artifacts.mjs',
  'scripts/lib/private-docker-image-archive.mjs','deploy/scripts/production-frontend-snapshot.mjs'])capture(source);
 capture('scripts/lib/local-dev-frontend-suspension.mjs');capture('scripts/run-local-dev-frontend-suspension.mjs');capture('docker-compose.application-native-role-isolation.yml');
 const {collectNativeCandidateArtifacts,candidateReplacementReceiptArgument}=await import('./lib/application-native-candidate-artifacts.mjs');
-const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
-const candidateArtifacts=collectNativeCandidateArtifacts({root,capture,containers:initial,sourceCommit,
+const operationsSourceReuse=nativeOwner?await nativeOwner.readOriginalLocalPreparationSource():readC3OperationsSourceReuse({root});
+const operationsSourceCommit=operationsSourceReuse?.operationsSourceCommit??execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
+const sourceCommit=operationsSourceReuse?.applicationSourceCommit??operationsSourceCommit;
+const candidateArtifacts=collectNativeCandidateArtifacts({root,capture,containers:initial,sourceCommit,nativeOwner,
  receiptArgument:candidateReplacementReceiptArgument(['--candidate-replacement-receipt',candidateReplacementReceipt])});
 const {roleQualificationFile,roleQualificationBytes,roleQualification,privateQualificationRuntime}=candidateArtifacts;
-const qaMemoryProfile=(roleQualification.candidateQaMemoryTransition?.format==='sabalan-explicit-local-qa-candidate-memory-transition/v3'||roleQualification.candidateQaMemoryProfile||roleQualification.candidateQaMemoryRecovery||roleQualification.candidateQaMemoryPostUpRecovery)?readExplicitQaMemoryProfile({file:candidateReplacementReceipt,sha256:sha(roleQualificationBytes)}):null;assert.deepEqual(retainedBrowserFacts.report.qaMemoryProfile??null,readQaMemoryProfile(qaMemoryProfile));
+if(nativeOwner)nativeOwner.registerOriginalLocalDirectory(roleQualification,directory);
+const qaMemoryProfile=(roleQualification.candidateQaMemoryTransition?.format==='sabalan-explicit-local-qa-candidate-memory-transition/v3'||roleQualification.candidateQaMemoryProfile||roleQualification.candidateQaMemoryRecovery||roleQualification.candidateQaMemoryPostUpRecovery)?readExplicitQaMemoryProfile({file:candidateReplacementReceipt,sha256:sha(roleQualificationBytes)},{nativeOwner}):null;assert.deepEqual(retainedBrowserFacts.report.qaMemoryProfile??null,readQaMemoryProfile(qaMemoryProfile));
 const built=await esbuild.build({absWorkingDir:root,entryPoints:['tests/online-deployment/application-native.worker.ts'],
   bundle:true,platform:'node',packages:'external',format:'cjs',target:'node22',write:false,logLevel:'silent',
   plugins:[{name:'capture-application-native-sources',setup(build){build.onLoad({filter:/.*/,namespace:'file'},args=>{
@@ -91,7 +100,7 @@ const built=await esbuild.build({absWorkingDir:root,entryPoints:['tests/online-d
   });}}]});
 const bundle=Buffer.from(built.outputFiles[0].contents),bundleSha256=sha(bundle);
 const files={'application-worker.cjs':bundle};if(qaMemoryProfile)files['qa-memory-replacement-receipt.json']=roleQualificationBytes;
-const readonlyTransport=collectApplicationReadonlyTransportArtifacts({capture,sources,bundle,bundleSha256});
+const readonlyTransport=collectApplicationReadonlyTransportArtifacts({capture,sources,bundle,bundleSha256,root,operationsSourceReuse});
 Object.assign(files,readonlyTransport.files);
 const ui=collectApplicationUiArtifacts({root,capture,containers:initial,inspectImage:image=>{
   status();const raw=execFileSync('docker',['image','inspect',image],{encoding:'utf8'});
@@ -242,9 +251,9 @@ assert.match(files['hr-file-expansion.sql'].toString(),/^-- Generated bounded on
 files['original-retained-browser-result.json']=fs.readFileSync(retainedBrowserFacts.reportFile);
 assert.equal(sha(files['original-retained-browser-result.json']),retainedBrowserFacts.reportSha256);
 const fileHashes=Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,sha(bytes)]));
-const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile,localDevSuspension,
+const coordinator=createOriginalRoleCoordinator({directory,topology:roleTopology,fileHashes,retainedBrowserCompletion,originalServiceIdentities:before,independentOptions,sameComposePhysicalCallbacks,localQualificationMode,nativeOwnerElfReceipt,frontendSnapshot,qaMemoryProfile,localDevSuspension,assertMemoryWorkAdmission:()=>nativeOwner?.assertMemoryWorkAdmission(),
   onHeld:value=>{const reportPath=path.join(root,'reports/qa',path.basename(directory)+'-role-held.json');fs.writeFileSync(reportPath,JSON.stringify(value,null,2)+'\n');console.log(JSON.stringify({format:'sabalan-original-inner-controller-held/v1',event:'ORIGINAL_INNER_CONTROLLER_HELD',status:'ROLEHELD',reportPath,reason:'ORIGINAL_CONTROLLER_HELD'}));}});
-files['config.json']=Buffer.from(JSON.stringify({sourceCommit,...(qaMemoryProfile?{qaMemoryProfile:{...readQaMemoryProfile(qaMemoryProfile),receiptFile:'qa-memory-replacement-receipt.json'}}:{}),
+files['config.json']=Buffer.from(JSON.stringify({sourceCommit,localQualificationMode,...(qaMemoryProfile?{qaMemoryProfile:{...readQaMemoryProfile(qaMemoryProfile),receiptFile:'qa-memory-replacement-receipt.json'}}:{}),
   retainedBrowserReport:{file:'original-retained-browser-result.json',sha256:retainedBrowserFacts.reportSha256},
   image:retained.Image,bundleSha256,roleTopology,roleQualification:{file:roleQualificationFile,sha256:sha(roleQualificationBytes)},
   privateQualificationRuntime,
@@ -263,7 +272,7 @@ const bootstrap=`const fs=require('fs'),path=require('path');process.umask(0o077
 status();execFileSync('docker',['exec','-i',candidate.Id,'node','-e',bootstrap],{
   input:JSON.stringify(Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,bytes.toString('base64')])))});
 const report={format:'sabalan-application-native-local/v1',pass:false,productionAdmission:false,workingRoot:directory,
-  before,sources,bundleSha256,uiQualification:ui.proof,readonlyTransport:readonlyTransport.proof,diagnosticOverlay:true,
+  before,sources,historicalSources,sourceCommit,operationsSourceCommit,operationsSourceReuse,bundleSha256,uiQualification:ui.proof,readonlyTransport:readonlyTransport.proof,diagnosticOverlay:true,
   retainedBrowser:{reportFile:retainedBrowserFacts.reportFile,reportSha256:retainedBrowserFacts.reportSha256,restoredSlots:retainedBrowserFacts.report.restoredSlots,actualProductionLegacy55Qualified:false}};
 const reportPath=path.join(root,'reports/qa',path.basename(directory)+'.json');const save=()=>fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');save();
 report.fullCatalogSource=fullCatalog.proof;save();
@@ -289,6 +298,7 @@ const roleEnrollment={requestId:randomBytes(32).toString('hex'),index:roleIndex,
 let candidateController;
 try{
 report.candidateQualification=candidateArtifacts.revalidate();save();
+revalidateC3OperationsSourceReuse(root,operationsSourceReuse);
 candidateController=coordinator.launch('candidate');await candidateController.ready;
 coordinator.enrollCandidate(roleEnrollment);
 const mainController=coordinator.launch('main');await mainController.ready;coordinator.enrollMain(roleEnrollment,files['config.json']);
@@ -303,7 +313,8 @@ for(const service of services){
  assert.deepEqual(identity(after[service]),expected);
 }
 candidateArtifacts.revalidate();
-for(const [name,hash]of Object.entries(sources))assert.equal(sha(fs.readFileSync(path.join(root,name))),hash,'Captured source changed: '+name);
+revalidateC3OperationsSourceReuse(root,operationsSourceReuse);
+for(const [name,hash]of Object.entries(sources))assert.equal(sha(fs.readFileSync(nativeHistoricalFile(root,name))),hash,'Captured source changed: '+name);
 report.result=result;report.identitiesUnchanged=!legacyRestoration;report.originalLegacyUiRestoration=legacyRestoration;
 report.protectedServiceIdentitiesVerified=true;report.sourcesUnchanged=true;report.pass=true;save();
 }catch(error){
@@ -323,14 +334,16 @@ report.protectedServiceIdentitiesVerified=true;report.sourcesUnchanged=true;repo
       const revalidate=()=>{
         assert.ok(coordinator.allControllersClosed(),'ORIGINAL_FAILED_LOCAL_CONTROLLERS_CHANGED');
         readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);candidateArtifacts.revalidate();
+        revalidateC3OperationsSourceReuse(root,operationsSourceReuse);
         const after=inspect(),legacyRestoration=coordinator.readOriginalPrivateLegacyRestoration();
         for(const service of services){const expected=service==='frontend-retained'&&legacyRestoration?legacyRestoration.restored:before[service];assert.deepEqual(identity(after[service]),expected);}
-        for(const[name,hash]of Object.entries(sources))assert.equal(sha(fs.readFileSync(path.join(root,name))),hash,'Captured source changed: '+name);
+        for(const[name,hash]of Object.entries(sources))assert.equal(sha(fs.readFileSync(nativeHistoricalFile(root,name))),hash,'Captured source changed: '+name);
       };
       revalidate();const retained=readOriginalRetainedBrowserQualificationCompletion(retainedBrowserCompletion);
       report.pass=false;report.knownFailedOriginalClosure=true;report.negativeResourcesClosed=resources;save();
-      const reportSha256=sha(fs.readFileSync(reportPath)),negative=new Error('ORIGINAL_LOCAL_KNOWN_FAILED_CLOSED',{cause:error});
-      originalKnownFailedLocalClosures.set(negative,{revalidate:()=>{revalidate();assert.equal(sha(fs.readFileSync(reportPath)),reportSha256);},facts:Object.freeze({format:'sabalan-same-process-known-failed-local-closure/v1',reportPath,reportSha256,retainedReportSha256:retained.reportSha256,...resources})});
+      const reportSha256=sha(fs.readFileSync(reportPath)),negative=new Error('ORIGINAL_LOCAL_KNOWN_FAILED_CLOSED',{cause:error}),current=inspect();
+      const currentServiceIdentities=Object.fromEntries(services.map(service=>[service,identity(current[service])]));
+      originalKnownFailedLocalClosures.set(negative,{revalidate:()=>{revalidate();assert.equal(sha(fs.readFileSync(reportPath)),reportSha256);},facts:Object.freeze({format:'sabalan-same-process-known-failed-local-closure/v1',reportPath,reportSha256,retainedReportSha256:retained.reportSha256,currentServiceIdentities,...resources})});
       throw negative;
     }catch(closureError){if(originalKnownFailedLocalClosures.has(closureError))throw closureError;await coordinator.retainOnFailure(closureError);}
   }

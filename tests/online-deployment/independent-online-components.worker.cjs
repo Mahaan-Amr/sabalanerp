@@ -41,12 +41,17 @@ async function main(){
  privateFile(config.codecFile,config.codecSha256,1024**2);const codec=require(config.codecFile);
  const key=privateFile(config.keyFile,config.keySha256,65536).toString('utf8'),publicKey=crypto.createPublicKey(key);
  assert.equal(sha(publicKey.export({type:'spki',format:'der'})),sealed.independentPublicKeySha256);
- assert.equal(fs.realpathSync(config.root),config.root);assert.ok(config.root.startsWith('/app/online-runtime-acceptance/application-native-'+config.operation+'/'));
+ const native=config.execution==='INDEPENDENT_NATIVE_COMPONENTS';
+ assert.equal(fs.realpathSync(config.root),config.root);
+ if(native)assert.equal(config.root,'/root/sabalan-recovery-private/native-qa/online-components-'+config.operation+'/plaintext');
+ else{assert.equal(config.execution,undefined);assert.ok(config.root.startsWith('/app/online-runtime-acceptance/application-native-'+config.operation+'/'));}
  const directory=fs.lstatSync(config.root);assert.ok(directory.isDirectory()&&directory.uid===0&&!(directory.mode&0o077));assert.deepEqual(fs.readdirSync(config.root),[]);
  assert.deepEqual(Object.keys(config.cipherPaths).sort(),objects.map(row=>row.name).sort());
  const originalSources=[],results=[];
  for(const row of objects){
-  const cipher=config.cipherPaths[row.name];assert.ok(path.posix.isAbsolute(cipher)&&cipher.startsWith('/checkpoints/')&&path.posix.normalize(cipher)===cipher);
+  const cipher=config.cipherPaths[row.name];assert.ok(path.posix.isAbsolute(cipher)&&path.posix.normalize(cipher)===cipher);
+  if(native)assert.equal(cipher,'/root/sabalan-recovery-private/native-qa/online-point-'+config.captureId+'/ciphertexts/'+row.name+'.sabrec');
+  else assert.ok(cipher.startsWith('/checkpoints/'));
   assert.equal(fs.realpathSync(cipher),cipher);const before=fs.lstatSync(cipher,{bigint:true});assert.ok(before.isFile()&&before.nlink===1n&&before.uid===0n&&!(before.mode&0o077n));assert.equal(Number(before.size),row.cipherBytes);
   assert.equal(await codec.sha256File(cipher),row.cipherSha256);originalSources.push({file:cipher,identity:pin(before),sha256:row.cipherSha256});
   const space=fs.statfsSync(config.root,{bigint:true});assert.ok(space.bavail*space.bsize>=BigInt(row.bytes)+64n*1024n**2n);

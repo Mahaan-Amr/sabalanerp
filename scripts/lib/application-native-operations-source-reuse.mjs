@@ -1,4 +1,5 @@
 import{readKnownPositive752History,knownPositive752HistoryDescriptor}from'./application-native-post-up-memory-baseline.mjs';
+import {readC3OperationsSourceReuse} from './c3-operations-source-reuse.mjs';
 /** Exact operations-only descendant of one already built image; no image/source relabel. */
 import assert from'node:assert/strict';import fs from'node:fs';import path from'node:path';import{createHash}from'node:crypto';import{execFileSync}from'node:child_process';
 import{postUpMemoryDescriptor}from'./application-native-post-up-memory-baseline.mjs';
@@ -11,6 +12,7 @@ export function validateOperationsReuseFacts(f){assert.equal(f.applicationSource
 export function assertCandidateApplicationSource({root,imageReceiptRaw,materialReceiptRaw,postUpToken,previousReplacement}){
  const git=(...args)=>execFileSync('git',args,{cwd:root,encoding:'utf8',maxBuffer:16*1024**2}).trim(),head=git('rev-parse','HEAD'),image=JSON.parse(imageReceiptRaw),material=JSON.parse(materialReceiptRaw);
  if(image.sourceCommit===head)return null; // Original strict ordinary path remains exactly strict.
+ const c3=readC3OperationsSourceReuse({root,imageReceiptRaw,materialReceiptRaw});if(c3)return c3;
  if(!postUpToken&&previousReplacement)return assertKnownPositiveApplicationSource({root,imageReceiptRaw,materialReceiptRaw,previousReplacement});
  const baseline=postUpMemoryDescriptor(postUpToken);assert.equal(baseline.failed.sha256,'9d99f83515ebf1f2add49fc9812420c3349b08be630265106a5e816a1c244e29');assert.equal(sha(imageReceiptRaw),imageSha);assert.equal(sha(materialReceiptRaw),materialSha);assert.equal(baseline.components.candidate.image.sha256,imageSha);assert.equal(baseline.components.candidate.material.sha256,materialSha);
  const baselineRaw=read(baseline.selection.file,16*1024**2);assert.equal(sha(baselineRaw),baseline.selection.sha256);const b=JSON.parse(baselineRaw);assert.equal(b.sourceCommit,head);assert.equal(b.qualificationSucceeded,false);assert.equal(b.rotationPerformed,false);

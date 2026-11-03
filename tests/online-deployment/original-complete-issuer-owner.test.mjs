@@ -1,0 +1,42 @@
+/** Connected finite originals + real authenticated sockets; modeled app facts.
+ * This is an integration-port test, not native FULL/application admission. */
+import test from 'node:test';import assert from 'node:assert/strict';import http from 'node:http';
+import {generateKeyPairSync,createHash,createHmac,hkdfSync} from 'node:crypto';
+import {collectOriginalCompleteIssuerOwner} from '../../scripts/lib/original-complete-issuer-owner.mjs';
+import {retainOriginalRoleRestoredIssuer} from '../../scripts/lib/original-role-restored-issuer.mjs';
+import {readOriginalCompleteOwner} from '../../scripts/lib/original-existing-compose-owner.mjs';
+import {createOriginalCompleteResourcePorts} from '../../scripts/lib/original-complete-resource-ports.mjs';
+import {restored} from './restored-qa-material.fixture.mjs';
+const operation='a'.repeat(32),sha=b=>createHash('sha256').update(b).digest('hex');
+const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
+async function availablePort(){const server=http.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));return port;}
+for(const mode of ['success','changed-trust','replay','open-sql'])test('connected original owner/v2 issuer '+mode,async()=>{
+ const key=generateKeyPairSync('ed25519'),session='b'.repeat(64),input=restored({coordinationDirectory:'/app/runtime-authority/application-native-'+operation+'/restored-complete-app/coherent-private/coordination',releaseId:'qa-complete-'+operation});delete input.now;input.facts.originalSqlProbe={returncode:0,reaped:true};
+ const pem=Buffer.from(key.publicKey.export({type:'spki',format:'pem'}));let inode='2',seenFrame=false,exerciseFailure,originalClosed,transportClosed;
+ const resources={assertCurrent:async()=>{},readFixedTrust:async()=>({bytes:pem.length,rawBase64:pem.toString('base64'),sha256:sha(pem),identity:{uid:0,nlink:1,mode:0o100444,device:'1',inode,mtimeNs:'3',ctimeNs:'3'}}),observePrivateMaterial:async()=>structuredClone(input),assertHttpActive:async()=>{},assertHttpPreparedAndFenced:async()=>{},preparePrivateLayout:async()=>({completeManifestSha256:input.restoredQaLineage.completeManifestSha256,published:true})};
+ const retainedIssuer=retainOriginalRoleRestoredIssuer({...key,session,local:{image:input.config.image,sourceCommit:input.config.sourceCommit,runtime:input.config.privateQualificationRuntime,host:input.config.roleTopology.main.host,databaseSystemIdentifier:input.facts.database.systemIdentifier},assertLocalOriginalsClosed:()=>{}}),issuerPort=await availablePort();
+ const exercise=http.createServer((request,response)=>{void(async()=>{try{
+  const chunks=[];for await(const b of request)chunks.push(b);const frame=JSON.parse(Buffer.concat(chunks));assert.equal(frame.format,'sabalan-r9-master-private-credential/v2');assert.equal(frame.credential,'component-private');assert.match(frame.transportPassphrase,/^[A-Za-z0-9_-]{64}$/);seenFrame=true;
+  const secret=Buffer.from(hkdfSync('sha256',Buffer.from(frame.transportPassphrase),Buffer.from(operation,'hex'),Buffer.from('sabalan-original-restored-issuer/v1'),32));let sequence=0;
+  const send=async(kind,seq)=>{const value={format:'sabalan-original-restored-issuer/v1',operation,sequence:seq??++sequence,challenge:'c'.repeat(64),kind},raw=JSON.stringify(canonical(value)),mac=createHmac('sha256',secret).update(value.format+'\0request\0').update(raw).digest('hex');const result=await fetch('http://127.0.0.1:'+issuerPort+'/original-restored-issuer/v1',{method:'POST',headers:{Connection:'close','x-sabalan-issuer-mac':mac},body:raw});return{status:result.status,value:await result.json()};};
+  const enrolled=await send('ENROLL');assert.equal(enrolled.status,200);Object.assign(input.config,{publicKey:enrolled.value.result.publicKey,session:enrolled.value.result.session,actorId:enrolled.value.result.actorId});
+  assert.equal((await send('PREPARE_LAYOUT')).status,200);
+  if(mode==='changed-trust')inode='4';if(mode==='open-sql')input.facts.sql.sessions=1;
+  if(mode==='replay'){assert.equal((await send('ASSERT_ACTIVE',1)).status,409);}else{const issued=await send('ISSUE_MATERIAL');assert.equal(issued.status,mode==='success'?200:409);if(mode==='success'){assert.equal(Object.keys(issued.value.result.materials).length,2);for(const kind of ['PREPARE_DRAIN','SHUTDOWN'])assert.equal((await send(kind)).status,200);}}
+  secret.fill(0);
+ }catch(e){exerciseFailure=e;}finally{response.setHeader('Connection','close');response.end('closed');}})();});await new Promise(r=>exercise.listen(0,'127.0.0.1',r));
+ const code="const http=require('http');console.log(JSON.stringify({format:'sabalan-r9-master-private-credential-ready/v1',operation:'"+operation+"',credentialsRead:false,productionAdmission:false}));let a=[];process.stdin.on('data',b=>a.push(b));process.stdin.on('end',()=>{const raw=Buffer.concat(a);const q=http.request({hostname:'127.0.0.1',port:"+exercise.address().port+",method:'POST',headers:{Connection:'close'}},r=>{r.resume();r.on('end',()=>console.log(JSON.stringify({file:'component-only.json',sha256:'d'.repeat(64),strictCompleteValidationSucceeded:true,outerOriginalClosurePending:true,productionAdmission:false})));});q.end(raw);});";
+ try{const action=()=>collectOriginalCompleteIssuerOwner({retainedIssuer,resources,expectedManifestSha256:input.restoredQaLineage.completeManifestSha256,issuerPort,operation,command:{executable:process.execPath,argv:['-e',code],environment:process.env},beforeCredential:async()=>{},acquireCredential:async()=>'component-private',onClosed:async(row,transport)=>{originalClosed=row;transportClosed=transport;}});
+  if(mode==='success'){const owner=await action();const row=readOriginalCompleteOwner(owner).row;assert.equal(row.code,0);assert.ok(row.stdoutEof&&row.stderrEof);assert.ok(originalClosed);}else await assert.rejects(action(),/ISSUER_TRANSPORT_HELD/);
+  assert.equal(seenFrame,true);if(exerciseFailure)throw exerciseFailure;
+  assert.equal(originalClosed.code,0);assert.equal(originalClosed.signal,null);assert.ok(originalClosed.stdoutEof&&originalClosed.stderrEof);assert.equal(transportClosed.phase,'CLOSED');assert.equal(transportClosed.fault,mode==='success'?null:'ORIGINAL_ISSUER_OPERATION_UNPROVEN');
+ }finally{await new Promise(r=>exercise.close(r));}
+});
+test('JSON/report objects cannot create current COMPLETE resource ports',()=>{assert.throws(()=>createOriginalCompleteResourcePorts({nativeOwner:{assertHeld(){}},operation,observerSha256:'e'.repeat(64)}),/ORIGINAL_NATIVE_ROLLBACK_OWNER_REQUIRED/);});
+
+// Exercise the actual source-owned request adapter; only the live Root brand is
+// modeled here. The complete manifest remains at the publisher boundary.
+test('full manifest stays outside bounded exact-schema Linux material request',async()=>{
+ let admission=0;
+ const {default:Module,createRequire}=await import('node:module'),{default:fs}=await import('node:fs'),{default:path}=await import('node:path');const file=path.resolve('scripts/lib/original-complete-resource-ports.mjs'),m=new Module(file),require=createRequire(file),owner={assertMemoryWorkAdmission(){admission++;},assertCompleteCurrent:async()=>{},readCompleteResource:async request=>{assert.deepEqual(Object.keys(request).sort(),['mode','observerSha256','operation']);assert.ok(Buffer.byteLength(JSON.stringify(request))<=4096);return{observed:true};},publishCompleteLayout:async(op,manifest)=>{assert.equal(manifest.components.length,500);return{published:true};}};m.filename=file;m.require=id=>id==='./original-candidate-rollback-owner.mjs'?{assertOriginalCandidateRollbackOwner:value=>assert.equal(value,owner)}:require(id);m._compile(require('../../backend/node_modules/esbuild').transformSync(fs.readFileSync(file,'utf8'),{format:'cjs',target:'node22'}).code,file);const ports=m.exports.createOriginalCompleteResourcePorts({nativeOwner:owner,operation,observerSha256:'e'.repeat(64),expectedManifest:{components:Array.from({length:500},()=>({sha256:'a'.repeat(64)}))}});assert.equal((await ports.observePrivateMaterial()).observed,true);assert.equal((await ports.preparePrivateLayout()).published,true);assert.equal(admission,1);const leaf=fs.readFileSync('deploy/scripts/original-restored-resource-observer.py','utf8');assert.ok(leaf.includes("require(set(request) == {'mode', 'operation', 'observerSha256'})"));
+});

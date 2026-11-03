@@ -43,7 +43,7 @@ def read(file, expected, maximum=16*1024**2):
 def main():
     assert sys.platform=='linux' and os.getuid()==0 and not sys.flags.optimize and len(sys.argv) in (3,4)
     standalone=len(sys.argv)==4
-    if standalone:assert sys.argv[3] in ('wal-only','metadata-only','repository-promotion','certification-ack','terminal-ack','point-transfer')
+    if standalone:assert sys.argv[3] in ('wal-only','metadata-only','repository-promotion','certification-ack','terminal-ack','point-transfer','components-only')
     os.umask(0o077);config_file=Path(sys.argv[1]);assert config_file.is_relative_to(PRIVATE)
     config=json.loads(read(config_file,sys.argv[2]));assert config['format']=='sabalan-original-independent-full-restore-input/v1'
     root=Path(config['controllerRoot']);assert root.is_relative_to(PRIVATE) and root.resolve(strict=True)==root
@@ -85,7 +85,8 @@ def main():
             else:
                 raw=sys.stdin.buffer.readline(16*1024**2+1);assert raw and len(raw)<=16*1024**2 and raw.endswith(b'\n')
                 source=json.loads(raw)
-                if sys.argv[3]=='repository-promotion':result=window.promote_repository_original(config,source,read)
+                if sys.argv[3]=='components-only':result=window.verify_components_original(config,source,read)
+                elif sys.argv[3]=='repository-promotion':result=window.promote_repository_original(config,source,read)
                 elif sys.argv[3]=='certification-ack':result=window.certify_point_original(config,source,read)
                 elif sys.argv[3]=='terminal-ack':result=window.persist_terminal_original(config,source,read)
                 elif sys.argv[3]=='point-transfer':result=window.receive_physical_point(config,source,helper,read)

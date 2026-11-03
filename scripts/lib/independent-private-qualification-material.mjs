@@ -37,7 +37,21 @@ export function compileRestoredQaPrivateQualificationMaterial(input){
   same(lineage.targetDatabase,input.facts.database);assert.notDeepEqual(lineage.sourceDatabase,lineage.targetDatabase);
   assert.notEqual(lineage.sourceDatabase.systemIdentifier,lineage.targetDatabase.systemIdentifier);
   same(input.index.database,lineage.sourceDatabase.name);same(String(input.index.oid),lineage.sourceDatabase.oid);
+  const rawValues={};
+  for(const [name,digest] of [['completeManifestValue',lineage.completeManifestSha256],['workingManifestValue',lineage.workingManifestSha256],['nativeHistory',lineage.nativeHistorySha256]]){
+    const encoded=input.facts[name+'RawBase64'];
+    assert.equal(typeof encoded,'string','RESTORED_QA_RAW_VALUE_REQUIRED');
+    assert.ok(encoded.length>0&&encoded.length<=Math.ceil(8*1024**2/3)*4);
+    const raw=Buffer.from(encoded,'base64');assert.ok(raw.length>0&&raw.length<=8*1024**2);same(raw.toString('base64'),encoded);same(sha(raw),digest);
+    rawValues[name]=JSON.parse(raw);
+  }
+  same(rawValues.completeManifestValue.format,'sabalan-recovery');same(rawValues.completeManifestValue.packageType,'COMPLETE');
+  assert.ok(Array.isArray(rawValues.completeManifestValue.components));
+  assert.ok(Array.isArray(rawValues.nativeHistory)&&rawValues.nativeHistory.length===440);
+  same(rawValues.workingManifestValue.database,lineage.targetDatabase);
+  assert.equal(typeof input.facts.restoreManifestRawBase64,'string');assert.ok(input.facts.restoreManifestRawBase64.length<=Math.ceil(8*1024**2/3)*4);
   const baselineManifest=JSON.parse(Buffer.from(input.facts.restoreManifestRawBase64,'base64'));
+  same(rawValues.workingManifestValue.sources,baselineManifest.sources.map(({name,files,directories})=>({name,files,directories})));
   same(baselineManifest.restoredQaLineage,lineage);same(baselineManifest.capturedManifest.sha256,lineage.completeManifestSha256);
   const material=compileMaterial(input,lineage);
   return freeze({...material,format:'sabalan-original-restored-qa-private-material/v1',restoredQaLineage:structuredClone(lineage),cleanupPending:true,independentPointHealthy:false});
@@ -53,7 +67,7 @@ function compileMaterial({index,config,baselineCompletion,facts,now},restoredQaL
   same(grants[0].scope.gate,grants[1].scope.gate);same(grants[0].scope.interlock,grants[1].scope.interlock);
   const database={name:index.restoredDatabase,systemIdentifier:grants[0].scope.database.systemIdentifier,oid:String(index.restoredOid)};
   const sourceDatabase=restoredQaLineage?restoredQaLineage.sourceDatabase:{name:index.database,systemIdentifier:database.systemIdentifier,oid:String(index.oid)};
-  assert.notEqual(database.name,sourceDatabase.name);assert.notEqual(database.oid,sourceDatabase.oid);
+  if(!restoredQaLineage){assert.notEqual(database.name,sourceDatabase.name);assert.notEqual(database.oid,sourceDatabase.oid);}
   if(restoredQaLineage)assert.match(database.name,/^sabalan_checkpoint_verify_[a-f0-9]{12}$/);
   else assert.match(database.name,/^qa_application_restored_[a-f0-9]{32}$/);
   if(!restoredQaLineage)assert.match(sourceDatabase.name,/^qa_application_native_[a-f0-9]{32}$/);
@@ -71,6 +85,7 @@ function compileMaterial({index,config,baselineCompletion,facts,now},restoredQaL
   same(facts.restoreManifestSha256,baselineCompletion.manifestSha256);
   same(facts.capturedManifestSha256,baselineCompletion.capturedManifestSha256);
   assert.equal(typeof facts.restoreManifestRawBase64,'string');
+  assert.ok(facts.restoreManifestRawBase64.length<=Math.ceil(8*1024**2/3)*4);
   const manifestBytes=Buffer.from(facts.restoreManifestRawBase64,'base64');
   assert.ok(manifestBytes.length>0&&manifestBytes.length<=8*1024**2);
   same(manifestBytes.toString('base64'),facts.restoreManifestRawBase64);
@@ -94,6 +109,13 @@ function compileMaterial({index,config,baselineCompletion,facts,now},restoredQaL
     same(proofs.length,1);same(proofs[0].sha256,root.baselineSha256);same(proofs[0].publicOnlineAdmission,false);
   }
   same([...facts.ephemeralRoots].sort(),['bi-reports','reports','sales-reports'].map(name=>pair.qualificationRoot+'/storage/'+name).sort());
+  const allRoots=[...facts.roots.flatMap(root=>[root.live,root.store]),...facts.ephemeralRoots];
+  for(const root of allRoots){confined(pair.qualificationRoot,root);same(path.posix.normalize(root),root);}
+  for(let i=0;i<allRoots.length;i++)for(let j=i+1;j<allRoots.length;j++){
+    assert.ok(allRoots[i]!==allRoots[j]&&!allRoots[i].startsWith(allRoots[j]+'/')&&!allRoots[j].startsWith(allRoots[i]+'/'),'PRIVATE_QUALIFICATION_ROOTS_OVERLAP');
+  }
+  assert.equal(new Set([index.restoredBaselineGrant.scope.runtimeId,...grants.map(g=>g.scope.runtimeId)]).size,3);
+
   same(Object.keys(facts.httpIngress).sort(),['bindHost','port']);same(facts.httpIngress.bindHost,config.roleTopology.main.host);
   assert.ok(Number.isInteger(facts.httpIngress.port)&&facts.httpIngress.port>=1024&&facts.httpIngress.port<=65535);
   const targets=grants.filter(grant=>grant.scope.purpose==='http').map(grant=>({runtimeId:grant.scope.runtimeId,

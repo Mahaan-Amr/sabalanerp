@@ -1,0 +1,11 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import {createHash} from 'node:crypto';
+import {renderExactC3ReadonlyProtocolSource,readFrozenC3ReadonlyProtocolSource,c3ReadonlyProtocolSuccessor} from '../../scripts/lib/c3-readonly-transport-successor.mjs';
+const base=fs.readFileSync(new URL('../../deploy/scripts/readonly-transport-retirement.py',import.meta.url)),sha=b=>createHash('sha256').update(b).digest('hex');
+test('exact C3 successor preserves the historical issuer and every byte except the three reviewed literals',()=>{
+ const raw=renderExactC3ReadonlyProtocolSource(base);assert.equal(sha(raw),c3ReadonlyProtocolSuccessor.successorSha256);assert.equal(sha(base),c3ReadonlyProtocolSuccessor.baseSha256);
+ const tuple=b=>Object.fromEntries([...b.toString().matchAll(/^    '((?:backend|tests)\/[^']+)': '([a-f0-9]{64})',$/gm)].map(m=>[m[1],m[2]])),before=tuple(base),after=tuple(raw);assert.equal(Object.keys(after).length,12);let reversed=raw.toString();const changed=[];
+ for(const [name,digest]of Object.entries(after)){const actual=fs.readFileSync(new URL('../../'+name,import.meta.url));assert.equal(sha(actual),digest);if(before[name]!==digest){changed.push(name);reversed=reversed.replace("    '"+name+"': '"+digest+"',","    '"+name+"': '"+before[name]+"',");}}
+ assert.deepEqual(changed.sort(),['backend/src/services/onlineRuntimeWork.ts','tests/online-deployment/application-native.worker.ts','tests/online-deployment/support-staged-http-native.fixture.ts']);assert.ok(Buffer.from(reversed).equals(base));
+});
+test('changed base and a fourth tuple change cannot become an approved successor',()=>{for(const raw of [Buffer.concat([base,Buffer.from('\n')]),Buffer.from(base.toString().replace('998f00f36558bb448ed997608a7c316230cb2efee2e30d49336f1638b0fc3363','0'.repeat(64)))])assert.throws(()=>renderExactC3ReadonlyProtocolSource(raw),/BASE_ISSUER_CHANGED/);});
+test('a caller boolean or replacement application commit cannot select C3 protocol approval',()=>{for(const value of [true,{}, {applicationSourceCommit:'0'.repeat(40)}])assert.throws(()=>readFrozenC3ReadonlyProtocolSource({root:process.cwd(),operationsSourceReuse:value,base}),/EXACT_APPLICATION_REQUIRED/);});

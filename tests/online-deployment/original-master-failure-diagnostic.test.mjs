@@ -5,7 +5,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {describeOriginalMasterFailure,writeOriginalMasterFailureDiagnostic} from '../../scripts/lib/original-master-failure-diagnostic.mjs';
-const root=path.resolve(import.meta.dirname,'../..'),source=path.join(root,'scripts/run-original-online-qualification-master.mjs');
+const root=path.resolve(import.meta.dirname,'../..'),source=path.join(root,'scripts/lib/original-online-qualification-master.mjs');
 test('failure diagnostic emits only bounded known locations and message digest',()=>{
  const secret='postgresql://secret-user:secret-password@example.invalid/db?token=TOP_SECRET';
  const e=new Error(secret);e.name='AssertionError';e.code='ERR_ASSERTION';e.actual=secret;e.expected=secret;
@@ -25,5 +25,5 @@ test('failed diagnostic sink cannot release the original hold or throw new autho
  const text=fs.readFileSync(source,'utf8').replace(/\r\n/g,'\n');
  assert.ok(text.includes("held=true;writeOriginalMasterFailureDiagnostic(error,sequence);state('ORIGINAL_MASTER_REQUEST_FAILED_RETAINED');"));
  assert.ok(text.includes("negative&&activeCommand==='RUN_LOCAL'"));
- assert.ok(text.includes('await new Promise(()=>{void keeper;void local;void independent;void protectedInstall;void protectedRequest;void retainedBrowser;});'));
+ assert.ok(text.includes('await new Promise(()=>{void keeper;void local;void independent;void imageRepository;void protectedInstall;void protectedRequest;void retainedBrowser;});'));
 });

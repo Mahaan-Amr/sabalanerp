@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import fs from 'node:fs';import{createHash}from'node:crypto';import path from'node:path';
 import {createOriginalLocalOnlineCheckpoint,readOriginalLocalOnlinePhysicalPointSource,readOriginalLocalOnlineWalWindowSource,
  readOriginalLocalOnlineCheckpointCompletion,isOriginalLocalOnlinePhysicalPointSource,isOriginalLocalOnlineWalWindowSource,
  readOriginalLocalOnlinePointWindowAcknowledgements,inspectOriginalLocalOnlineCheckpointInputs} from '../../scripts/lib/original-local-online-checkpoint.mjs';
@@ -17,5 +17,5 @@ test('local native point, windows and completion cannot be adopted from JSON or 
 
 const nativeReceipt='D:/sabalanerp-online-qa/native-process-owner-qualified-bcf8149601a9df66f1d186f3b9889844/receipt.json';
 test('actual fixed runtime preflight verifies original receipt.json and sysroot before any native owner starts',{skip:process.platform!=='win32'||!fs.existsSync(nativeReceipt)},()=>{
- const facts=inspectOriginalLocalOnlineCheckpointInputs({nativeOwnerElfReceipt:nativeReceipt});assert.equal(Object.keys(facts.sourcePins).length,22);assert.equal(facts.productionAdmission,false);
+ const facts=inspectOriginalLocalOnlineCheckpointInputs({nativeOwnerElfReceipt:nativeReceipt});assert.equal(Object.keys(facts.sourcePins).length,25);for(const name of ['deploy/scripts/local-dev-frontend-suspension.py','scripts/lib/local-dev-frontend-suspension.mjs','scripts/run-local-dev-frontend-suspension.mjs'])assert.equal(facts.sourcePins[name],createHash('sha256').update(fs.readFileSync(path.resolve(name))).digest('hex'));for(const[name,digest]of Object.entries(facts.sourcePins))assert.equal(digest,createHash('sha256').update(fs.readFileSync(path.resolve(name))).digest('hex'));assert.equal(facts.productionAdmission,false);
 });

@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {retainOriginalCompleteNativeSession} from '../../scripts/lib/original-complete-native-session.mjs';
+test('fixed original pipe commands retain real zero/both EOF and reject caller commands',async()=>{
+ const program="const rl=require('readline').createInterface({input:process.stdin});console.log(JSON.stringify({event:'ORIGINAL_STARTED',originalPopenPid:process.pid,productionAdmission:false}));rl.on('line',line=>{const f=JSON.parse(line);console.log(JSON.stringify({...f,result:{observed:f.command}}));});";let row;
+ const session=retainOriginalCompleteNativeSession({command:{executable:process.execPath,argv:['-e',program],environment:process.env},commands:['BORROW','STOP'],onClosed:async value=>row=value});
+ assert.ok((await session.started()).originalPopenPid>1);await assert.rejects(session.send('arbitrary'),/FIXED_NATIVE_COMMAND/);assert.deepEqual(await session.send('BORROW'),{observed:'BORROW'});assert.deepEqual(await session.send('STOP'),{observed:'STOP'});const closure=await session.finish();assert.equal(closure.originalPid,row.originalPid);assert.equal(closure.stdoutEof&&closure.stderrEof,true);assert.equal(closure.code,0);assert.equal(closure.killed,false);assert.throws(()=>session.assertLive());
+});

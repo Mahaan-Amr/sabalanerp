@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-const source=fs.readFileSync(new URL('../../scripts/run-original-online-qualification-master.mjs',import.meta.url),'utf8');
+const source=fs.readFileSync(new URL('../../scripts/lib/original-online-qualification-master.mjs',import.meta.url),'utf8');
 const declaration=source.slice(source.indexOf('export async function runOriginalOnlineQualificationMaster('),source.indexOf('\nfunction sort(')).replace(/^export /,'');
 const hex='a'.repeat(64),reference={instanceId:hex,servicePid:123,serviceBirth:'456',configurationSha256:hex};
 const detached={...reference,serviceBootIdSha256:hex,launcherPid:124,launcherBirth:'457',mode:'BOOTSTRAP'};

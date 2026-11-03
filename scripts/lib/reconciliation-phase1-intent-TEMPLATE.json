@@ -1,0 +1,54 @@
+{
+  "format": "phase1-reviewed-intent/v1",
+  "operation": "a0d2baba08ec7e004d1458675799db6a",
+  "action": "READ_ONLY_AUDIT_NEW_OWN_LEASE",
+  "allowedTargets": [
+    "D:/sabalanerp-online-qa/deployment.lock",
+    "D:/sabalanerp-online-qa/419-safe-rollback-a0d2baba08ec7e004d1458675799db6a/baseline.json",
+    "C:/Users/mahan/.codex/worktrees/native-c3-execution-419/sabalanerp/reports/qa/application-native-b0db9e621d4d29fa857a13285ca6254b-role-held.json"
+  ],
+  "reviewEvidenceSha256": null,
+  "sources": [
+    {
+      "path": "reconciliation-phase1-operational.mjs",
+      "sha256": "d7a0c2548b550345735f69b56a3d65181aba79b3e92106d11a67262648a6231b"
+    },
+    {
+      "path": "reconciliation-readonly-phase1-cli.mjs",
+      "sha256": "d131e15f7e58dbf30fccc67860e5ea4f8dae9966889d5641ecefacbdf1df07de"
+    },
+    {
+      "path": "reconciliation-phase1-census.ps1",
+      "sha256": "cb889e1a05078bfd23a35b3662b7205aa81789c80bd6933c0e42076dc40cae41"
+    },
+    {
+      "path": "reconciliation-phase1-evidence.ps1",
+      "sha256": "7ca63dd78bb04c801a2fc98299e7cd816e8f0cc6db84474bcb5c5395b0ae765f"
+    },
+    {
+      "path": "reconciliation-phase1-lock-identity.ps1",
+      "sha256": "6c8641c4fdfb7d0e1d9c6e451edb85a39b836a6d521a8048e70b9d40ca43e1ed"
+    },
+    {
+      "path": "serial-physical/host-lease.mjs",
+      "sha256": "fb33daf411d28b19d0eb2186ec7e13c910b90fc368ca0a981a1777299d3fe4fd"
+    },
+    {
+      "path": "serial-physical/host-lease.ps1",
+      "sha256": "4783bc2c95b617091f99e58a4e8bfb0d42e91997089c38b4cb0ceaf51e6d0a09"
+    },
+    {
+      "path": "reconciliation-phase1-core.mjs",
+      "sha256": "87e2b0d974b43550099a891c42fbaee7f1920951f078738768d713b383a526ab"
+    },
+    {
+      "path": "reconciliation-phase1-verify.mjs",
+      "sha256": "a7d1c9d9eada3eb44f09b4fa746a73170123b2a286f0ec6dfbbcd1d95ba8a3bb"
+    },
+    {
+      "path": "reconciliation-phase1-source-proof.ps1",
+      "sha256": "67329aa9de96cf82c6721815080da25f48e9198597afde258d472f31968963ae"
+    }
+  ],
+  "outputRootPolicy": "FRESH_PRIVATE_PARENT_HANDLE_BOUND"
+}

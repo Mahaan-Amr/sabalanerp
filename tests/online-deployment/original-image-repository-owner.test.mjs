@@ -1,0 +1,36 @@
+import{generateKeyPairSync}from'node:crypto';import{retainOriginalRoleRestoredIssuer}from'../../scripts/lib/original-role-restored-issuer.mjs';
+import{readOriginalImageCallbackRefusal}from'../../scripts/lib/original-existing-compose-owner.mjs';
+import{originalBackendBaseCommands}from'../../scripts/lib/production-backend-base-process.mjs';
+import test from'node:test';import assert from'node:assert/strict';import path from'node:path';import{collectOriginalCompleteOwner,readOriginalCompleteOwner,assertOriginalCompleteActiveOwner,assertOriginalCompleteReadyOwner,assertOriginalCompleteClosedOwnerFor,isOriginalCompleteOwner,readOriginalImageRepositoryOwner,assertOriginalImageRepositoryActiveOwner,assertOriginalImageRepositoryReadyOwner,assertOriginalImageRepositoryClosedOwnerFor}from'../../scripts/lib/original-existing-compose-owner.mjs';
+const operation='c'.repeat(32),fixture=path.resolve('tests/online-deployment/fixtures/image-repository-owner.fixture.py');
+function options(mode,onClosed=async()=>{}){const stages=[];return{stages,options:{purpose:'IMAGE_REPOSITORY',command:{executable:'C:/Users/mahan/AppData/Local/Programs/Python/Python314/python.exe',argv:['-I','-B',fixture,operation,mode]},operation,beforeCredential:async()=>{},acquireCredential:async()=> 'ephemeral-image-test-secret',onClosed,onImageRepositoryRequest:async(request,owner)=>{assert.equal(assertOriginalImageRepositoryActiveOwner(owner),operation);assert.equal(assertOriginalImageRepositoryReadyOwner(owner),operation);assert.throws(()=>assertOriginalCompleteActiveOwner(owner),/PURPOSE_REQUIRED/);assert.throws(()=>assertOriginalCompleteReadyOwner(owner),/PURPOSE_REQUIRED/);stages.push(request.stage);return{format:'sabalan-image-repository-phase-plan/v1',operation,stage:request.stage,configuration:{file:path.resolve('C:/modeled-image-'+request.stage+'.json'),sha256:'a'.repeat(64)},productionAdmission:false};}}};}
+for(const mode of ['success','known-negative'])test('same original duplex child closes and preserves '+mode,async()=>{const{stages,options:input}=options(mode);const token=await collectOriginalCompleteOwner(input),closed=readOriginalImageRepositoryOwner(token);assert.equal(isOriginalCompleteOwner(token),false);assert.throws(()=>readOriginalCompleteOwner(token),/OWNER_REQUIRED/);assert.equal(closed.purpose,'IMAGE_REPOSITORY');assert.deepEqual(stages,['BACKEND_ENCRYPT','BACKEND_LOCAL_VERIFY','BACKUP_STORE']);assert.equal(closed.resultReference.retrievalQualified,mode==='success');assert.equal(closed.row.code,0);assert.ok(closed.row.stdoutEof&&closed.row.stderrEof);assert.equal(closed.resultReference.strictCompleteValidationSucceeded,undefined);});
+for(const mode of ['wrong-sequence','echo'])test('bad frame closes original input and refuses '+mode,async()=>{let row;const{options:input}=options(mode,async value=>row=value);await assert.rejects(collectOriginalCompleteOwner(input));assert.ok(row.stdoutEof&&row.stderrEof);assert.equal(row.observationFault,true);assert.equal(row.stdoutSha256,undefined);assert.ok(!JSON.stringify(row).includes('ephemeral-image-test-secret'));});
+
+test('image owner cannot bind COMPLETE issuer or cross COMPLETE closure lineage',async()=>{
+ let readyOwner;const{options:input}=options('success');input.onOriginalReady=async owner=>{readyOwner=owner;const keys=generateKeyPairSync('ed25519'),retained=retainOriginalRoleRestoredIssuer({...keys,session:'a'.repeat(64),local:{image:'sha256:'+'b'.repeat(64),sourceCommit:'c'.repeat(40),databaseSystemIdentifier:'123'},assertLocalOriginalsClosed(){}});await assert.rejects(retained.beginOriginalComplete({operation,ownerToken:owner,resources:{assertCurrent:()=>assert.fail('PURPOSE_CHECK_MUST_PRECEDE_RESOURCES')}}),/PURPOSE_REQUIRED/);};
+ const token=await collectOriginalCompleteOwner(input);assertOriginalImageRepositoryClosedOwnerFor(token,readyOwner);assert.throws(()=>assertOriginalCompleteClosedOwnerFor(token,readyOwner),/PURPOSE_REQUIRED/);
+});
+test('COMPLETE owner cannot become image owner even with matching PID-free data',async()=>{
+ const code="process.stdout.write(JSON.stringify({format:'sabalan-r9-master-private-credential-ready/v1',operation:'"+operation+"',credentialsRead:false,productionAdmission:false})+String.fromCharCode(10));process.stdin.resume();process.stdin.on('end',()=>process.stdout.write(JSON.stringify({file:'modeled-complete.json',sha256:'a'.repeat(64),strictCompleteValidationSucceeded:true,outerOriginalClosurePending:true,productionAdmission:false})+String.fromCharCode(10)));";
+ let owner;const token=await collectOriginalCompleteOwner({operation,command:{executable:process.execPath,argv:['-e',code]},beforeCredential:async()=>{},acquireCredential:async()=> 'test-private-only',onClosed:async()=>{},onOriginalReady:async value=>{owner=value;assert.throws(()=>assertOriginalImageRepositoryReadyOwner(value),/IMAGE_REPOSITORY_LIVE_OWNER_REQUIRED/);}});assert.equal(isOriginalCompleteOwner(token),true);assert.throws(()=>readOriginalImageRepositoryOwner(token),/IMAGE_REPOSITORY_OWNER_REQUIRED/);assert.throws(()=>assertOriginalImageRepositoryClosedOwnerFor(token,owner),/IMAGE_REPOSITORY_OWNER_REQUIRED/);
+});
+
+test('same child request, actual closed preflight refusal, negative result and natural EOF remain privately coupled',async()=>{
+ const{options:input}=options('callback-refusal');const refusals=new WeakSet();let refused,preflight;
+ input.isKnownClosedCallbackRefusal=error=>refusals.has(error);
+ input.onImageRepositoryRequest=async()=>{
+  const commands=originalBackendBaseCommands();
+  try{preflight=await commands.run(input.command.executable,['-I','-B','-c',"print('closed-preflight-refusal')"]);commands.assertSuccessful(preflight);assert.equal(preflight.stdout.trim(),'closed-preflight-refusal');}
+  finally{const closed=await commands.close();assert.equal(closed.allOriginalChildrenClosed,true);assert.equal(closed.interrupted,false);}
+  refused=Error('PRIVATE_CLOSED_PREFLIGHT_REFUSAL');refusals.add(refused);throw refused;
+ };
+ const token=await collectOriginalCompleteOwner(input),value=readOriginalImageRepositoryOwner(token);
+ assert.equal(readOriginalImageCallbackRefusal(token),refused);assert.equal(value.resultReference.retrievalQualified,false);assert.equal(value.row.code,0);assert.ok(value.row.stdoutEof&&value.row.stderrEof&&preflight.stdoutEof&&preflight.stderrEof);assert.equal(value.row.observationFault,null);
+ assert.throws(()=>readOriginalImageCallbackRefusal(structuredClone(token)));
+});
+test('private refusal before credential still drains the SAME ready original without acquiring a secret',async()=>{
+ const{options:input}=options('before-credential-refusal');let checks=0,acquired=0;const refusal=Error('PRIVATE_CLOSED_GATE');
+ input.beforeCredential=async()=>{if(++checks>1)throw refusal;};input.isKnownClosedCallbackRefusal=error=>error===refusal;input.acquireCredential=async()=>{acquired++;throw Error('MUST_NOT_ACQUIRE');};
+ const token=await collectOriginalCompleteOwner(input),value=readOriginalImageRepositoryOwner(token);assert.equal(acquired,0);assert.equal(readOriginalImageCallbackRefusal(token),refusal);assert.equal(value.resultReference.retrievalQualified,false);assert.equal(value.row.code,0);assert.ok(value.row.stdoutEof&&value.row.stderrEof);
+});

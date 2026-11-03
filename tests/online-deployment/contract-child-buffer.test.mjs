@@ -1,12 +1,14 @@
+import{acceptedWorkspaceTestResolution}from'./accepted-workspace-resolution.fixture.mjs';
 import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import {createRequire} from 'node:module';import {fileURLToPath} from 'node:url';import test from 'node:test';
+const accepted=acceptedWorkspaceTestResolution();
 const frontend=fileURLToPath(new URL('../../frontend/',import.meta.url)),require=createRequire(path.join(frontend,'package.json')),{buildSync}=require('esbuild'),React=require('react');
-function load(relative){const code=buildSync({entryPoints:[path.join(frontend,'src',relative)],bundle:true,write:false,platform:'node',format:'cjs'}).outputFiles[0].text;const module={exports:{}};new Function('module','exports','require',code)(module,module.exports,require);return module.exports;}
+function load(relative){const code=buildSync({alias:accepted.alias,nodePaths:accepted.nodePaths,entryPoints:[path.join(frontend,'src',relative)],bundle:true,write:false,platform:'node',format:'cjs'}).outputFiles[0].text;const module={exports:{}};new Function('module','exports','require',code)(module,module.exports,require);return module.exports;}
 const {BrowserBuildHandoff}=load('lib/browserBuildHandoff.ts'),{registerUnarchivedDraftGuard}=load('lib/unarchivedDraftGuard.ts'),{createContractAutosaveDraft}=load('features/contract-creation/utils/contractDraftStorage.ts'),{recoverContractModalIdentity}=load('features/contract-creation/utils/contractModalRecoveryIdentity.ts');
 const lease={userId:'owner_a',sessionId:'session_a',generation:1};
 function fieldFactory(guard){const filename=path.join(frontend,'src/features/contract-creation/components/product-modal-system/LongitudinalProductSection.tsx');
  const stubs=['@/components/erp','./productModalPrimitives','./productPricingVisibility','@/components/FormattedNumberInput','@/lib/useUnarchivedDraftGuard'];
  const source=fs.readFileSync(filename,'utf8')+'\nexport {CompactDecimalField};';
- const code=buildSync({stdin:{contents:source,resolveDir:path.dirname(filename),sourcefile:filename,loader:'tsx'},bundle:true,write:false,platform:'node',format:'cjs',external:['react',...stubs],tsconfig:path.join(frontend,'tsconfig.json')}).outputFiles[0].text;
+ const code=buildSync({alias:accepted.alias,nodePaths:accepted.nodePaths,stdin:{contents:source,resolveDir:path.dirname(filename),sourcefile:filename,loader:'tsx'},bundle:true,write:false,platform:'node',format:'cjs',external:['react',...stubs],tsconfig:path.join(frontend,'tsconfig.json')}).outputFiles[0].text;
  const states=[];let index=0,release;const react={...React,useState:initial=>{const n=index++;if(!(n in states))states[n]=initial;return [states[n],v=>{states[n]=v;}];},useRef:initial=>{const n=index++;return states[n]??={current:initial};},useEffect(){}};
  const module={exports:{}};const mocks={react,'@/components/erp':{ErpInput:'input',ErpInlineState:'status'},'./productModalPrimitives':{CompactSwitch:'switch',CompactUnitSwitch:'unit'},'./productPricingVisibility':{useProductPricingVisibility:()=>true},'@/components/FormattedNumberInput':{default:'numeric'},'@/lib/useUnarchivedDraftGuard':{useUnarchivedDraftGuard:(workflow,active)=>{release?.();release=active?guard(workflow):undefined;}}};
  new Function('module','exports','require',code)(module,module.exports,key=>Object.hasOwn(mocks,key)?mocks[key]:require(key));
@@ -20,7 +22,7 @@ test('actual quantity child keeps1.5 while parent3; parent-only handoff was fals
   const render=fieldFactory(workflow=>guarded?registerUnarchivedDraftGuard(handoff,workflow,'quantity'):()=>{});
   const props={id:'quantity-buffer',label:'تعداد',value:String(parent),inputMode:'numeric',onValueChange:text=>{if(/^[1-9]\d*$/.test(text))parent=Number(text);}};
   findInput(render(props)).props.onChange({target:{value:'1.5'}});const input=findInput(render(props));assert.equal(input.props.value,'1.5');assert.equal(parent,3);
-  const result=await handoff.preserve(lease,()=>{});assert.equal(result.status,guarded?'BLOCKED':'PRESERVED');assert.equal(writes,guarded?0:1);
+  accepted.revalidate();const result=await handoff.preserve(lease,()=>{});accepted.revalidate();assert.equal(result.status,guarded?'BLOCKED':'PRESERVED');assert.equal(writes,guarded?0:1);
  }
 });
 test('payment/product modal restore retains exact edit identity and refuses missing, mismatched or ambiguous ownership before mutation',()=>{
@@ -40,7 +42,7 @@ function contractRecoveryFixture(){
  const handoff=new BrowserBuildHandoff('erp_contract_reload_20261020',async input=>{writes++;return {...input,format:'sabalan-browser-draft/v1',id:'archive',sha256:'a'.repeat(64),capturedAt:'2026-10-20T00:00:00Z'};});
  const react={useState:initial=>[typeof initial==='function'?initial():initial,()=>{}],useRef:value=>({current:value}),useMemo:fn=>fn(),useCallback:fn=>fn,useEffect(){},useLayoutEffect:fn=>effects.push(fn)};
  const file=path.join(frontend,'src/features/contract-creation/hooks/useContractEditRecovery.ts');
- const code=buildSync({entryPoints:[file],bundle:true,write:false,platform:'node',format:'cjs',external:['react','@/lib/api','@/lib/browserBuildHandoff'],tsconfig:path.join(frontend,'tsconfig.json')}).outputFiles[0].text;
+ const code=buildSync({alias:accepted.alias,nodePaths:accepted.nodePaths,entryPoints:[file],bundle:true,write:false,platform:'node',format:'cjs',external:['react','@/lib/api','@/lib/browserBuildHandoff'],tsconfig:path.join(frontend,'tsconfig.json')}).outputFiles[0].text;
  const memory={getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};
  const window={sessionStorage:memory,localStorage:memory,location:{reload:()=>reloads++}};
  const mocks={'react':react,'@/lib/browserBuildHandoff':{browserBuildHandoff:handoff},'@/lib/api':{salesAPI:{},browserSessionContinuation:{acquire:async()=>lease,assertCurrent(){}}}};

@@ -1,0 +1,3 @@
+import test from'node:test';import assert from'node:assert/strict';import{closedReadOnlyObservationPassed as passed}from'../../scripts/lib/read-only-observation-result.mjs';
+const positive={prerequisitesPassed:true,originalChildren:{allOriginalChildrenClosed:true,interrupted:false},leaseClosed:true};
+test('PASS follows actual positive closure, never prerequisites alone',()=>{assert.equal(passed(positive),true);for(const change of[{prerequisitesPassed:false},{originalChildren:{allOriginalChildrenClosed:true,interrupted:true}},{originalChildren:{allOriginalChildrenClosed:false,interrupted:false}},{originalChildren:null},{leaseClosed:false},{failure:{code:'LATE_FAILURE'}}])assert.equal(passed({...positive,...change}),false);});

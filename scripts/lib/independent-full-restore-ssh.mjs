@@ -7,8 +7,10 @@ import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
 import {readIndependentCheckpointTransport} from './independent-checkpoint-transport.mjs';
 import {validatePhysicalPointProducer} from '../run-independent-full-restore-controller.mjs';
+import {readOriginalPhysicalCompletion} from './original-physical-completion.mjs';
 
 const completed=new WeakMap(),physicalCompleted=new WeakMap(),guardians=new WeakMap(),windowCompleted=new WeakMap(),metadataCompleted=new WeakMap(),repositoryCompleted=new WeakMap(),certificationCompleted=new WeakMap(),terminalCompleted=new WeakMap(),pointTransferred=new WeakMap();
+const componentCompleted=new WeakMap();
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const hex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const same=(a,b)=>assert.deepEqual(a,b);
@@ -85,6 +87,9 @@ function nativeRows(report){
       activeClaimSha256:native.activeClaimSha256,guardian:native.guardian,nativeStatus:native.nativeStatus,stoppedBySignal:native.stoppedBySignal};
   });
 }
+/** Data-only native transcript validation shared with the same-Compose
+ * application collector. This does not insert any private completion token. */
+export function validateOriginalIndependentApplicationClosures(report){return nativeRows(report);}
 
 /** Data-only strict protocol verifier. It does not mint a completion token. */
 export function verifyOriginalIndependentSshProtocol(raw,expected){
@@ -205,17 +210,30 @@ export async function runOriginalIndependentRestoreOverSsh({pythonExecutable,pyt
     throw Error('ORIGINAL_GUARDIAN_EVENT_REFUSED');
   }
   child.on('error',hold);child.stdin.on('error',hold);
+  const ended={stdout:false,stderr:false};for(const name of ['stdout','stderr'])child[name].once('end',()=>{ended[name]=true;});
   child.stdout.on('data',raw=>{try{outBytes+=raw.length;assert.ok(outBytes<=32*1024**2,'ORIGINAL_SSH_OUTPUT_BOUND');lineBuffer=Buffer.concat([lineBuffer,raw]);for(;;){const index=lineBuffer.indexOf(10);if(index<0)break;const line=lineBuffer.subarray(0,index+1);lineBuffer=lineBuffer.subarray(index+1);const value=JSON.parse(line);if(value.event)event(value);else stdout.push(line);}}catch(error){hold(error);}});
   child.stderr.on('data',raw=>{errBytes+=raw.length;if(errBytes>65536){hold(Error('ORIGINAL_SSH_STDERR_BOUND'));return;}stderr.push(raw);});
   const request={profile,password,transferHelperSha256,imageSources:walStandalone||metadataPublication?{}:expected.imageSources??{},remote:expected.remote,remoteControllerSha256:expected.remoteControllerSha256,remoteConfigurationSha256:expected.remoteConfigurationSha256,...(live?{liveGuardian:true}:{}),...(walStandalone?{walStandalone:true}:{}),...(metadataPublication?{metadataPublication}:{})};
   if(live)child.stdin.write(frame(request));else child.stdin.end(frame(request));password=undefined;request.password=undefined;
   const result=await new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));
   try{
+    same(ended,{stdout:true,stderr:true});
     if(guardian)guardian.closed=true;same(held,null);same(lineBuffer.length,0);same(result,{code:0,signal:null});if(live)assert.ok(guardian&&guardian.closing&&guardian.pending.size===0);same(sha(fs.readFileSync(ownFile)),controllerSourceSha256);same(sha(fs.readFileSync(workerFile)),workerSourceSha256);same(sha(fs.readFileSync(transferHelperFile)),transferHelperSha256);same(sha(fs.readFileSync(profilePath)),profileSha256);same(sha(fs.readFileSync(pythonExecutable)),pythonExecutableSha256);same(sha(fs.readFileSync(plink)),profile.plinkExecutableSha256);
     if(metadataPublication){
       const raw=Buffer.concat(stdout),envelope=JSON.parse(raw);same(envelope.format,'sabalan-original-independent-ssh/v1');same(envelope.originalRemoteExitStatus,0);same(envelope.originalPlinkReturncode,0);assert.ok(envelope.originalPlinkPid>1);
       same(envelope.remoteControllerSha256,expected.remoteControllerSha256);same(envelope.remoteConfigurationSha256,expected.remoteConfigurationSha256);same(envelope.enforcedHostKeySha256,expected.hostKeySha256);same(envelope.hostKeyBinding,'PINNED_PLINK_ENFORCED');same(envelope.imageTransfers,[]);
       const remoteRaw=Buffer.from(envelope.remoteStdoutBase64,'base64');same(remoteRaw.toString('base64'),envelope.remoteStdoutBase64);const report=JSON.parse(remoteRaw);
+      if(metadataPublication.format==='sabalan-original-independent-components-input/v1'){
+        const {assertOriginalComponentDecryption}=await import('./independent-components-evidence.mjs');
+        const source=metadataPublication;
+        same(report.rsaHost,expected.recoveryHost);
+        const decryption=assertOriginalComponentDecryption(report,source);
+        const record=freeze({...report,controllerSourceSha256,historySha256:sha(raw),
+          ownedOutputs:{report:ownedBytes(remoteRaw),protocol:ownedBytes(raw),decryption:ownedBytes(decryption)},
+          originalControllers:[{pid:child.pid,code:0,signal:null,stdoutEof:true,stderrEof:true,role:'components-ssh-owner'},
+           {pid:envelope.originalPlinkPid,code:0,signal:null,role:'components-ssh'},report.originalVerifier]});
+        clearInterval(keeper);return record;
+      }
       if(metadataPublication.format==='sabalan-original-independent-physical-point-transfer-input/v1'){
         const source=metadataPublication;const r=source.request;same(report.format,'sabalan-original-independent-physical-point-transfer/v1');same(report.productionAdmission,false);same(report.requestSha256,source.requestSha256);same(report.challenge,r.challenge);same(report.captureId,r.captureId);same(report.cipherInventorySha256,source.cipherInventorySha256);same(report.sourceOriginalPid,source.sourceOriginalPid);same(report.sourceRuntimeId,source.sourceRuntimeId);same(report.initialWindowBindings.map(({bindingFile,bindingSha256,...row})=>row),source.initialWindows);for(const row of report.initialWindowBindings){assert.ok(hex(row.bindingSha256));same(row.bindingFile,row.dependencyFile.replace(/dependency\.json$/,'point-binding.json'));}same(report.fullCipherReadbackVerified,true);same(report.fsyncFileAndDirectory,true);
         const root='/root/sabalan-recovery-private/native-qa/online-point-'+r.captureId;const point=report.onlinePhysicalPoint;
@@ -325,10 +343,12 @@ export function originalIndependentGuardianAvailability(token){
 }
 
 function publicationSource(physicalCompletion,options){
- const physical=readOriginalIndependentPhysicalRestoreSshCompletion(physicalCompletion);assert.ok(options?.expected?.onlinePhysicalPoint);
+ const physical=readOriginalPhysicalCompletion(physicalCompletion);assert.ok(options?.expected?.onlinePhysicalPoint);
  const expected=structuredClone(options.expected),point=expected.onlinePhysicalPoint;
- same(point.root,physical.remotePointDirectory);same(point.sealedFile,physical.remoteSealedManifestFile);same(point.manifestFile,physical.remotePlaintextManifestFile);same(point.sealedSha256,physical.sealedManifestSha256);same(point.manifestSha256,physical.plaintextManifestSha256);same(point.cipherPaths,physical.cipherPaths);
- same(expected.remoteControllerSha256,physical.remoteControllerSourceSha256);same(expected.remoteConfigurationSha256,physical.remoteConfigurationSha256);
+ const custody=physical.rsaCustody??{root:physical.remotePointDirectory,sealedFile:physical.remoteSealedManifestFile,manifestFile:physical.remotePlaintextManifestFile,cipherPaths:physical.cipherPaths,
+  remoteControllerSourceSha256:physical.remoteControllerSourceSha256,remoteConfigurationSha256:physical.remoteConfigurationSha256};
+ same(point.root,custody.root);same(point.sealedFile,custody.sealedFile);same(point.manifestFile,custody.manifestFile);same(point.sealedSha256,physical.sealedManifestSha256);same(point.manifestSha256,physical.plaintextManifestSha256);same(point.cipherPaths,custody.cipherPaths);
+ same(expected.remoteControllerSha256,custody.remoteControllerSourceSha256);same(expected.remoteConfigurationSha256,custody.remoteConfigurationSha256);
  const common={sealedManifestSha256:physical.sealedManifestSha256,plaintextManifestSha256:physical.plaintextManifestSha256,cipherInventorySha256:physical.cipherInventorySha256,physicalCompletionSha256:sha(Buffer.from(JSON.stringify(canonical(physical))))};
  return {physical,expected,common};
 }
@@ -409,5 +429,20 @@ export async function runOriginalIndependentPhysicalPointTransfer({sourcePoint,o
  const value=freeze({...record,expected,remoteControllerSourceSha256:expected.remoteControllerSha256,sourceOriginalPid:source.sourceOriginalPid,sourceRequestSha256:material.requestSha256});const token=Object.freeze({});pointTransferred.set(token,value);return token;
 }
 export function readOriginalIndependentPhysicalPointTransfer(token){const value=pointTransferred.get(token);assert.ok(value,'ORIGINAL_PHYSICAL_POINT_TRANSFER_UNPROVEN');return value;}
+export async function readOriginalPhysicalPointSource(token){return readOriginalPointSource(token);}
+
+export function readOriginalIndependentComponents(token){const value=componentCompleted.get(token);assert.ok(value,'ORIGINAL_INDEPENDENT_COMPONENTS_REQUIRED');return structuredClone(value);}
+/** Authenticated independent RSA/GCM only; this never invokes physical replay,
+ * an application, Docker create or the obsolete separate backup stack. */
+export async function runOriginalIndependentComponents({sourcePoint,pointTransfer,options}){
+ const source=await readOriginalPointSource(sourcePoint),transfer=readOriginalIndependentPhysicalPointTransfer(pointTransfer);
+ same(transfer.expected,options.expected);same(source.request.captureId,options.expected.onlinePhysicalPoint.captureId);
+ const material={format:'sabalan-original-independent-components-input/v1',captureId:source.request.captureId,
+  sealedSha256:source.sealedManifestSha256,manifestSha256:source.plaintextManifestSha256,
+  sourceHost:source.sourceHost,ownedOutputs:source.ownedOutputs};
+ const record=await runOriginalIndependentRestoreOverSsh({...options,walStandalone:false,metadataPublication:material});
+ await readOriginalPointSource(sourcePoint);
+ const token=Object.freeze({});componentCompleted.set(token,freeze(record));return token;
+}
 
 export async function waitOriginalIndependentGuardianClosure(token){const value=guardians.get(token);assert.ok(value,'ORIGINAL_INDEPENDENT_GUARDIAN_UNPROVEN');if(value.held)throw Error('ORIGINAL_INDEPENDENT_GUARDIAN_HELD');await value.normalClosure;assert.ok(value.normalClosed&&!value.held);}

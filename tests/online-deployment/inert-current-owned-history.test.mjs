@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { inertAcceptanceSpec, inertAcceptanceSpecSha256, inertAcceptanceInventorySummary,
   inertAcceptanceInputFiles, validateInertAcceptanceResult } from '../../scripts/lib/application-native-inert-acceptance.mjs';
 
-const root = path.resolve(import.meta.dirname, '../..');
+const root = path.resolve('C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp');
 const spec = inertAcceptanceSpec(root);
 const clone = structuredClone;
 const sha = raw => createHash('sha256').update(raw).digest('hex');

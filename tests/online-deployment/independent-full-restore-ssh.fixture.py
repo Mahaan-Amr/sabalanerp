@@ -17,7 +17,7 @@ import uuid
 REMOTE_BOOTSTRAP="""import hashlib
 import importlib.util,os,pathlib,stat,sys
 p=pathlib.Path(sys.argv[1]); expected=sys.argv[2]; config=sys.argv[3]; config_sha=sys.argv[4]; mode=sys.argv[5]
-assert mode in ('full','wal-only','metadata-only','repository-promotion','certification-ack','terminal-ack','point-transfer')
+assert mode in ('full','wal-only','metadata-only','repository-promotion','certification-ack','terminal-ack','point-transfer','components-only')
 assert p.resolve(strict=True)==p
 fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
 try:
@@ -70,7 +70,9 @@ def main():
         protected=subprocess.run(['C:/Windows/System32/icacls.exe',str(private_file),'/inheritance:r','/grant:r',user+':F'],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)
         assert protected.returncode==0,'ORIGINAL_SSH_PRIVATE_ACL_UNPROVEN'
         private_file.write_text(password+'\n',encoding='utf8');password=None
-        args=['/usr/bin/python3','-I','-B','-c',REMOTE_BOOTSTRAP,remote['launcherPath'],request['remoteControllerSha256'],remote['configurationPath'],request['remoteConfigurationSha256'],({'sabalan-original-physical-repository-promotion-input/v1':'repository-promotion','sabalan-original-physical-certification-input/v1':'certification-ack','sabalan-original-terminal-coverage-persistence-input/v1':'terminal-ack','sabalan-original-independent-physical-point-transfer-input/v1':'point-transfer'}.get(request['metadataPublication']['format'],'metadata-only')) if request.get('metadataPublication') else 'wal-only' if request.get('walStandalone') else 'full']
+        modes={'sabalan-original-physical-repository-promotion-input/v1':'repository-promotion','sabalan-original-physical-certification-input/v1':'certification-ack','sabalan-original-terminal-coverage-persistence-input/v1':'terminal-ack','sabalan-original-independent-physical-point-transfer-input/v1':'point-transfer','sabalan-original-independent-components-input/v1':'components-only'}
+        mode=modes.get(request['metadataPublication']['format'],'metadata-only') if request.get('metadataPublication') else 'wal-only' if request.get('walStandalone') else 'full'
+        args=['/usr/bin/python3','-I','-B','-c',REMOTE_BOOTSTRAP,remote['launcherPath'],request['remoteControllerSha256'],remote['configurationPath'],request['remoteConfigurationSha256'],mode]
         # The command is fixed. shlex quotes path/hash arguments; neither the
         # profile nor a caller supplies executable code or an arbitrary command.
         fingerprint='SHA256:'+base64.b64encode(bytes.fromhex(profile['hostKeySha256'])).decode().rstrip('=')

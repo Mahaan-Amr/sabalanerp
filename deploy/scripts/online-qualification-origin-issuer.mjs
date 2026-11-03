@@ -7,6 +7,7 @@ import {spawn} from 'node:child_process';
 import {createHash,createPrivateKey,createPublicKey,sign} from 'node:crypto';
 import {readOriginalRoleQualificationCompletion} from '../../scripts/lib/application-native-role-coordinator.mjs';
 import {readOriginalIndependentRestoreSshCompletion} from '../../scripts/lib/independent-full-restore-ssh.mjs';
+import {readOriginalExistingComposeComplete} from '../../scripts/lib/original-existing-compose-complete.mjs';
 const assert=(value,code)=>{if(!value)throw Error(code);};
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 const bytes=value=>Buffer.from(JSON.stringify(canonical(value))),sha=value=>createHash('sha256').update(value).digest('hex');
@@ -36,7 +37,9 @@ export async function issueOriginalQualificationOrigin({localCompletion,independ
  const {readOriginalOnlineEvidenceAssembly}=await import('../../scripts/lib/original-online-evidence-assembler.mjs');
  const assembly=readOriginalOnlineEvidenceAssembly(assemblyCompletion);
  const physical=typeof assembly.originalOnlineRequestSha256==='string';
- const independent=physical?(await import('../../scripts/lib/independent-full-restore-ssh.mjs')).readOriginalIndependentPhysicalRestoreSshCompletion(independentCompletion):readOriginalIndependentRestoreSshCompletion(independentCompletion);
+ assert(!physical||assembly.independentCompletionKind===undefined,'QUALIFICATION_COMPLETE_CANNOT_ENTER_PHYSICAL');
+ const independent=physical?(await import('../../scripts/lib/independent-full-restore-ssh.mjs')).readOriginalIndependentPhysicalRestoreSshCompletion(independentCompletion)
+  :assembly.independentCompletionKind==='EXISTING_COMPOSE_COMPLETE'?readOriginalExistingComposeComplete(independentCompletion):readOriginalIndependentRestoreSshCompletion(independentCompletion);
  const completionHash=value=>sha(bytes(value));
  assert(assembly.originalLocalCompletionSha256===completionHash(local)&&assembly.originalIndependentCompletionSha256===completionHash(independent),
   'QUALIFICATION_ASSEMBLY_ORIGINAL_OWNERS_CHANGED');
@@ -86,6 +89,7 @@ export async function issueOriginalQualificationOrigin({localCompletion,independ
   for(const proof of report.proofs??[])assert(outputHashes.has(proof.sha256),'QUALIFICATION_PROOF_NOT_ORIGINAL_OUTPUT');
  }
  await assertProtectedKeyAcl();
+ if(assembly.independentCompletionKind==='EXISTING_COMPOSE_COMPLETE')readOriginalExistingComposeComplete(independentCompletion);
  const before=fs.lstatSync(KEY,{bigint:true});assert(before.isFile()&&!before.isSymbolicLink()&&before.nlink===1n&&before.size>0n&&before.size<=4096n&&fs.realpathSync(KEY)===KEY,'QUALIFICATION_FIXED_KEY_UNPROVEN');
  const rawKey=fs.readFileSync(KEY),key=createPrivateKey(rawKey);assert(key.asymmetricKeyType==='ed25519','QUALIFICATION_ED25519_REQUIRED');
  const decision={format:'sabalan-original-online-qualification/v1',releaseId:accepted.manifest.releaseId,manifestSha256,acceptanceSha256,

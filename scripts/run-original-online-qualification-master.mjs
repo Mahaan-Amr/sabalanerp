@@ -17,6 +17,8 @@ import {startOriginalProtectedOnlineInstall,readOriginalProtectedQualificationRe
 import {prepareOriginalPrivateEvidenceDirectory} from './lib/original-private-evidence-directory.mjs';
 import {assembleOriginalProtectedOnlineEvidence,assembleOriginalOnlineEvidence,readOriginalOnlineEvidenceAssembly} from './lib/original-online-evidence-assembler.mjs';
 import {runOriginalFollowingPromotion} from './lib/original-following-update-workflow.mjs';
+import {runOriginalExistingComposeComplete,isOriginalExistingComposeComplete} from './lib/original-existing-compose-complete.mjs';
+import {assembleOriginalProtectedCompleteEvidence} from './lib/original-online-evidence-assembler.mjs';
 
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const keys=(value,names)=>assert.deepEqual(Object.keys(value).sort(),[...names].sort());
@@ -75,6 +77,16 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
      assert.ok(independentOptions&&localRuntime,'ORIGINAL_INDEPENDENT_AND_LOCAL_RUNTIME_CONFIGURATION_REQUIRED_BEFORE_LOCAL');
      local=await runOriginalApplicationNativeQualification({candidateReplacementReceipt:request.candidateReplacementReceipt,prismaQualificationReceipt:request.prismaQualificationReceipt??prismaQualificationReceipt,frontendSnapshot:request.frontendSnapshot??frontendSnapshot,fullCatalogSelection:request.fullCatalogSelection??fullCatalogSelection,retainedBrowserCompletion:retainedBrowser,independentOptions,...localRuntime});
      state('LOCAL_QUALIFICATION_CLOSED_RETAINED');
+    }else if(request.command==='RUN_COMPLETE'){
+     keys(request,['command','sequence','configurationFile','configurationSha256','password']);
+     assert.ok(local&&!independent&&!held&&!protectedInstall,'ORIGINAL_COMPLETE_LOCAL_AND_UNUSED_OWNER_REQUIRED');
+     assert.equal(typeof request.password,'string');
+     let credential=request.password;delete request.password;
+     try{independent=await runOriginalExistingComposeComplete({configurationFile:request.configurationFile,configurationSha256:request.configurationSha256,
+      localCompletion:local.completion,acquireCredential:async()=>{assert.ok(!held,'ORIGINAL_MASTER_HELD');const value=credential;credential=null;return value;},
+      onClosed:async row=>{assert.ok(!held&&row.code===0&&row.signal===null&&row.stdoutEof&&row.stderrEof,'ORIGINAL_COMPLETE_CLOSURE_REQUIRED');}});
+     }finally{credential=null;}
+     state('COMPLETE_QUALIFICATION_CLOSED_RETAINED');
     }else if(request.command==='RUN_INDEPENDENT'){
      keys(request,['command','sequence','configurationFile','configurationSha256','password']);
      assert.ok(local,'ORIGINAL_LOCAL_COMPLETION_REQUIRED');assert.equal(independent,null,'ORIGINAL_INDEPENDENT_ALREADY_CREATED');assert.equal(typeof request.password,'string');
@@ -211,7 +223,8 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
      // The strict issuer also requires every semantic report and proof to be
      // bound to original owned outputs. Caller JSON never supplies a pass bit.
      const evidenceCustody=await prepareOriginalPrivateEvidenceDirectory(request.evidenceDirectory);
-     const assemblyCompletion=assembleOriginalProtectedOnlineEvidence({evidenceCustody,...(request.protectedFinancial?{protectedFinancial:request.protectedFinancial}:{}),localCompletion:local.completion,independentCompletion:independent,
+     const assemble=isOriginalExistingComposeComplete(independent)?assembleOriginalProtectedCompleteEvidence:assembleOriginalProtectedOnlineEvidence;
+     const assemblyCompletion=assemble({evidenceCustody,...(request.protectedFinancial?{protectedFinancial:request.protectedFinancial}:{}),localCompletion:local.completion,independentCompletion:independent,
       protectedRequest,evidenceDirectory:request.evidenceDirectory});
      const assembly=readOriginalOnlineEvidenceAssembly(assemblyCompletion);
      assert.equal(assembly.originalProtectedRequestSha256,sha(Buffer.from(JSON.stringify(sort(readOriginalProtectedQualificationRequest(protectedRequest))))));

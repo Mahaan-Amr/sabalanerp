@@ -120,12 +120,23 @@ function liveRestoredDirectoryJoin(source:any,proof:any,baseline:any,restore:any
   const worker=json(join.workerOriginalRawBase64,8*1024*1024),owner=json(join.ownerOriginalRawBase64,131072);
   const closed=(v:any)=>Number.isSafeInteger(v.originalPid)&&v.originalPid>1&&v.code===0&&v.signal===null
     &&v.stdoutEof===true&&v.stderrEof===true&&v.observationFault===null&&v.killed===false;
-  if(!closed(owner)||owner.format!=='sabalan-original-existing-compose-complete-owner/v1'||owner.interrupted!==false
+  const collectedOwner=owner.format==='sabalan-original-complete-owner-closure/v1';
+  if(!closed(owner)||(!collectedOwner&&owner.format!=='sabalan-original-existing-compose-complete-owner/v1')||owner.interrupted!==false
     ||!closed(worker)||worker.format!=='sabalan-original-protected-financial-closure/v1'
     ||worker.stdoutSha256!==sha(workerRaw)||worker.stdoutRawBase64!==workerRaw.toString('base64')
     ||worker.stderrRawBase64!==''||worker.stderrSha256!==sha(Buffer.alloc(0)))fail();
   const ownerRaw=decode(join.ownerResultRawBase64,8*1024*1024),ownerResult=JSON.parse(ownerRaw.toString('utf8'));
-  const ownerStdout=decode(join.ownerStdoutRawBase64,131072),ownerReference=JSON.parse(ownerStdout.toString('utf8'));
+  const ownerStdout=decode(join.ownerStdoutRawBase64,131072);
+  let ownerReference;
+  if(collectedOwner){
+    const lines=ownerStdout.toString('utf8').split('\n');if(lines.pop()!==''||lines.length!==2)fail();
+    const ready=JSON.parse(lines[0]);ownerReference=JSON.parse(lines[1]);
+    if(!exact(ready,['format','operation','credentialsRead','productionAdmission'])
+      ||ready.format!=='sabalan-r9-master-private-credential-ready/v1'||ready.credentialsRead!==false||ready.productionAdmission!==false
+      ||!same(ready.operation,ownerResult.operation)||!/^([a-f0-9]{32})$/.test(ready.operation)
+      ||!exact(ownerReference,['file','sha256','strictCompleteValidationSucceeded','outerOriginalClosurePending','productionAdmission'])
+      ||ownerReference.strictCompleteValidationSucceeded!==true||ownerReference.outerOriginalClosurePending!==true||ownerReference.productionAdmission!==false)fail();
+  }else ownerReference=JSON.parse(ownerStdout.toString('utf8'));
   if(owner.stdoutSha256!==sha(ownerStdout)||owner.stdoutBytes!==ownerStdout.length||owner.stderrBytes!==0
     ||owner.stderrSha256!==sha(Buffer.alloc(0))||ownerReference.sha256!==sha(ownerRaw)
     ||ownerResult.format!=='sabalan-owned-complete-transfer-strict-restore/v1'

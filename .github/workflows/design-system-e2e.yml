@@ -28,6 +28,7 @@ jobs:
       group: sabalanerp-local-design-system-browser
       cancel-in-progress: false
     env:
+      SABALAN_BROWSER_BUILD_ID: erp_ci_${{ github.sha }}
       DESIGN_SYSTEM_E2E_ADMIN_USERNAME: ${{ secrets.DESIGN_SYSTEM_E2E_ADMIN_USERNAME }}
       DESIGN_SYSTEM_E2E_ADMIN_PASSWORD: ${{ secrets.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD }}
     steps:
@@ -56,7 +57,9 @@ jobs:
             npx playwright install chrome
           fi
       - run: npm run docker:local:ps
-      - run: npm run docker:local:up
+      - run: npm run docker:local:acceptance:build
+      - run: npm run docker:local:ps
+      - run: npm run docker:local:acceptance:up
       - run: npm run test:design-system:e2e
       - uses: actions/upload-artifact@v4
         if: failure()

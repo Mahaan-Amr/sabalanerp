@@ -1,0 +1,20 @@
+const fs=require('node:fs');
+const {prisma,disconnectDatabase}=require('/app/dist/lib/prisma.js');
+(async()=>{
+const root='/app/recovery-coordination';
+const report=JSON.parse(fs.readFileSync(root+'/deployment-report.json','utf8'));
+const checkpoint=JSON.parse(fs.readFileSync(root+'/deployment-checkpoint.json','utf8'));
+const deployment=await prisma.deploymentOperation.findUniqueOrThrow({where:{id:report.deploymentId},select:{id:true,releaseId:true,targetCommit:true,phase:true,completedAt:true,errorCode:true,activeKey:true}});
+const releaseDeployment=deployment;
+const active=await prisma.deploymentOperation.count({where:{activeKey:{not:null}}});
+const unfinished=await prisma.$queryRawUnsafe('SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL');
+const maintenance=fs.existsSync(root+'/deployment-maintenance.json')?JSON.parse(fs.readFileSync(root+'/deployment-maintenance.json','utf8')):null;
+const images={backend:process.env.PERFORMANCE_RELEASE_BACKEND_IMAGE,frontend:process.env.PERFORMANCE_RELEASE_FRONTEND_IMAGE,inquiry:process.env.PERFORMANCE_RELEASE_INQUIRY_IMAGE};
+const migration=await prisma.$queryRawUnsafe("SELECT migration_name, finished_at IS NOT NULL AS finished, rolled_back_at IS NOT NULL AS rolled_back FROM _prisma_migrations WHERE migration_name = '20261012160000_contract_cancellation_notices'");
+const loadedSms=(()=>{const previousInfo=console.info;console.info=()=>{};try{return require('/app/dist/services/smsService.js').default;}finally{console.info=previousInfo;}})();
+const sms={loadedTemplateId:loadedSms.contractCancellationTemplateId,loadedEnvironment:loadedSms.environment,templateId:process.env.SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID,environment:process.env.SMS_IR_ENVIRONMENT,hasApiKey:Boolean(process.env.SMS_IR_API_KEY)};
+const noticeCounts=await prisma.contractCancellationNotice.groupBy({by:['status'],_count:{_all:true}});
+const result={migration,sms,noticeCounts,deployment,releaseDeployment,runningCommit:process.env.APP_COMMIT,performanceCommit:process.env.PERFORMANCE_RELEASE_COMMIT,images,activeDeployments:active,unfinishedMigrations:unfinished[0].count,maintenanceActive:maintenance!==null,gates:report.gates.map(g=>({name:g.name,passed:g.passed})),checkpoint:{deploymentId:checkpoint.deploymentId,releaseId:checkpoint.releaseId,localVerified:checkpoint.localVerified,remoteVerified:checkpoint.remoteVerified,manifestReadable:checkpoint.manifestReadable,checksum:checkpoint.checksum,size:checkpoint.size}};
+console.log(JSON.stringify(result));
+if(migration.length!==1||!migration[0].finished||migration[0].rolled_back||sms.loadedTemplateId!==774074||sms.loadedEnvironment!=='production'||sms.templateId!=='774074'||sms.environment!=='production'||!sms.hasApiKey||releaseDeployment.phase!=='COMPLETED'||deployment.phase!=='COMPLETED'||deployment.targetCommit!==process.env.APP_COMMIT||active!==0||result.unfinishedMigrations!==0||result.maintenanceActive||result.gates.some(g=>!g.passed)||!checkpoint.localVerified||!checkpoint.remoteVerified||!checkpoint.manifestReadable)process.exitCode=1;
+})().catch(e=>{console.error(JSON.stringify({ok:false,code:e.code||'VERIFICATION_FAILED'}));process.exitCode=1}).finally(()=>disconnectDatabase());

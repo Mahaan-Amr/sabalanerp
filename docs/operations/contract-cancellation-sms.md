@@ -2,7 +2,7 @@
 
 Decision: [ADR-0127](../adr/0127-notify-commercial-cancellation-at-current-customer-mobile.md).
 
-The owner supplied template ID **774074** for `SabalanContractCancellation` on 2026-10-12. The original screenshot showed «در حال بررسی»; a fresh read of the provider's template list on the same day confirmed «تایید», with category «اطلاع‌رسانی». Configuration uses this approved ID. The API parameter remains exactly `ContractNumber`. Provider acceptance of a real business submission and handset delivery must be reported separately; QA uses fake gateways and never sends unsolicited customer SMS.
+The owner supplied template ID **774074** for `SabalanContractCancellation` on 2026-10-12. The attached sms.ir screenshot shows its category as «اطلاع‌رسانی» and approval status as «در حال بررسی». Configuration now uses this ID; live sending still requires provider approval. The parameter remains `ContractNumber`.
 
 In the same sms.ir «لیست قالب‌ها» page used for `SabalanContractConfirmation` and the dispatch/hiring templates, click «افزودن قالب». Use title `SabalanContractCancellation` (or «اطلاع‌رسانی لغو قرارداد سبلان»), category «اطلاع‌رسانی», and this text:
 

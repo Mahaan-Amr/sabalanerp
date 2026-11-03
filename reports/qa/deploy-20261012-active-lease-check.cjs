@@ -1,0 +1,1 @@
+const {prisma,disconnectDatabase}=require('/app/dist/lib/prisma.js');prisma.deploymentOperation.findMany({where:{activeKey:{not:null}},select:{id:true,phase:true,leaseExpiresAt:true,completedAt:true,activeKey:true}}).then(x=>console.log(JSON.stringify(x))).finally(()=>disconnectDatabase());

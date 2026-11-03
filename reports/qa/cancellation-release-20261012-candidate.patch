@@ -1,0 +1,1538 @@
+diff --git a/CONTEXT.md b/CONTEXT.md
+index 3df92077..46778d89 100644
+--- a/CONTEXT.md
++++ b/CONTEXT.md
+@@ -6,6 +6,10 @@ Sabalan ERP manages stone inventory, sales contracts, and related pricing data f
+ شماره موبایل مشتری که درخواست مشخص پذیرش دیجیتال قرارداد برای آن ارسال شده و سابقه همان پذیرش به آن مربوط است؛ این شماره با تغییر بعدی اطلاعات تماس مشتری در CRM عوض نمی‌شود.
+ _Avoid_: تمام شماره‌های مشتری، شماره فعلی CRM به‌عنوان هویت پذیرش قبلی، یا شماره مدیر پروژه به‌عنوان امضاکننده قطعی
+ 
++**اطلاع‌رسانی لغو تجاری قرارداد**:
++اعلام لغو قرارداد فروش عادی یا همکار دارای پذیرش دیجیتال مشتری در دوره جاری فعالیت قرارداد، به موبایل فعال فعلی مشتری. دوره تازه با فعال‌سازی پس از لغو آغاز می‌شود؛ انقضا و غیرفعال‌سازی اداری، لغو تجاری نیستند.
++_Avoid_: پیامک کد تأیید، تغییر سابقه شماره تأییدکننده، یا اطلاع‌رسانی خودکار لغوهای گذشته
++
+ **مساحت مبنای قیمت سنگ برشی**:
+ مساحت مصرف سنگ مادر برای محاسبه مبلغ اصل سنگ طولی، پله و اسلب، مطابق قاعده فروش عادی سبلان؛ این مقدار می‌تواند با مساحت نهایی سفارش متفاوت باشد. ابزار، برش و خدمات واحد قیمت خود را دارند و محصولات آماده و حجمی واحد تجاری تعریف‌شده خود را حفظ می‌کنند.
+ _Avoid_: متر طول به‌عنوان مبنای مبلغ اصل سنگ برشی، یکی‌دانستن مساحت مصرف با مساحت تحویلی، یا تغییر خودکار مبلغ توافق تأییدشده
+diff --git a/backend/.env.example b/backend/.env.example
+index e58e076c..531627bd 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -54,6 +54,7 @@ SMS_IR_API_KEY="CHANGE_ME"
+ SMS_IR_API_URL="https://api.sms.ir/v1"
+ SMS_IR_TEMPLATE_ID=135816
+ SMS_IR_CONTRACT_CONFIRM_TEMPLATE_ID=385075
++SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID=774074
+ SMS_IR_HIRING_INVITATION_TEMPLATE_ID=343660
+ SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS=CODE
+ SMS_IR_HIRING_CORRECTION_TEMPLATE_ID=763918
+diff --git a/backend/package.json b/backend/package.json
+index 6f2c1ddc..216c536f 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -19,6 +19,8 @@
+     "test:sales-operational-errors": "tsx src/routes/__tests__/salesOperationalErrors.test.ts",
+     "test:contract-party-identity": "tsx src/services/__tests__/contractPartyIdentity.test.ts && tsx src/services/__tests__/crmCustomerSearch.test.ts",
+     "test:contract-cancellation": "tsx src/services/__tests__/contractCancellationPolicy.test.ts",
++    "test:contract-cancellation-sms": "tsx --test src/services/__tests__/contractCancellationNotice.test.ts src/services/__tests__/contractCancellationNoticePolicy.test.ts src/services/__tests__/contractCancellationSmsTemplate.test.ts",
++    "test:contract-cancellation-sms:db": "tsx --test src/services/__tests__/contractCancellationNotice.integration.test.ts",
+     "test:contract-print": "tsx src/utils/__tests__/printTemplateLongitudinalOptimizer.test.ts && tsx src/utils/__tests__/printTemplateProjectName.test.ts && tsx src/utils/__tests__/printTemplateStairLayer.test.ts && tsx src/utils/__tests__/printTemplateOperationLookup.test.ts && tsx src/utils/__tests__/printTemplateAccountingCurrency.test.ts && tsx src/utils/__tests__/printTemplateRemainingRecovery.test.ts && tsx --test src/utils/__tests__/printTemplateTehranTime.test.ts",
+     "test:catalog-spreadsheet": "tsx --test src/services/__tests__/catalogSpreadsheetCompatibility.test.ts",
+     "test:partner-customer-pdf": "tsx --test src/services/__tests__/partnerCustomerPdfUpgradeSmoke.test.ts",
+diff --git a/backend/prisma/migrations/20261012160000_contract_cancellation_notices/migration.sql b/backend/prisma/migrations/20261012160000_contract_cancellation_notices/migration.sql
+new file mode 100644
+index 00000000..ef6131ee
+--- /dev/null
++++ b/backend/prisma/migrations/20261012160000_contract_cancellation_notices/migration.sql
+@@ -0,0 +1,35 @@
++CREATE TABLE "contract_cancellation_notices" (
++  "id" TEXT NOT NULL PRIMARY KEY,
++  "eventKey" TEXT NOT NULL,
++  "contractId" TEXT,
++  "sourceContractId" TEXT NOT NULL,
++  "customerId" TEXT NOT NULL,
++  "contractNumber" TEXT NOT NULL,
++  "status" TEXT NOT NULL DEFAULT 'PENDING',
++  "selectedPhone" TEXT,
++  "attemptCount" INTEGER NOT NULL DEFAULT 0,
++  "availableAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "lastAttemptAt" TIMESTAMP(3),
++  "lastError" TEXT,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "updatedAt" TIMESTAMP(3) NOT NULL,
++  CONSTRAINT "contract_cancellation_notices_contractId_fkey" FOREIGN KEY ("contractId") REFERENCES "sales_contracts"("id") ON DELETE SET NULL ON UPDATE CASCADE,
++  CONSTRAINT "contract_cancellation_notice_status" CHECK ("status" IN ('PENDING','SENDING','RETRY','SENT','UNKNOWN','NEEDS_PHONE','NEEDS_SELECTION','FAILED','SUPPRESSED'))
++);
++CREATE UNIQUE INDEX "contract_cancellation_notices_eventKey_key" ON "contract_cancellation_notices"("eventKey");
++CREATE INDEX "contract_cancellation_notices_contractId_createdAt_idx" ON "contract_cancellation_notices"("contractId", "createdAt");
++CREATE INDEX "contract_cancellation_notices_status_availableAt_idx" ON "contract_cancellation_notices"("status", "availableAt");
++CREATE TABLE "contract_cancellation_notice_attempts" (
++  "id" TEXT NOT NULL PRIMARY KEY,
++  "noticeId" TEXT NOT NULL,
++  "sequence" INTEGER NOT NULL,
++  "phoneNumber" TEXT NOT NULL,
++  "status" TEXT NOT NULL,
++  "providerMessageId" TEXT,
++  "error" TEXT,
++  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  "completedAt" TIMESTAMP(3),
++  CONSTRAINT "contract_cancellation_notice_attempts_noticeId_fkey" FOREIGN KEY ("noticeId") REFERENCES "contract_cancellation_notices"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
++  CONSTRAINT "contract_cancellation_notice_attempt_status" CHECK ("status" IN ('SENDING','SENT','FAILED','UNKNOWN','SUPPRESSED'))
++);
++CREATE UNIQUE INDEX "contract_cancellation_notice_attempts_noticeId_sequence_key" ON "contract_cancellation_notice_attempts"("noticeId", "sequence");
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index baf5ec6b..d6ac069a 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -1901,6 +1901,7 @@ model SalesContract {
+   verificationCodes                 ContractVerificationCode[]
+   publicConfirmations               ContractPublicConfirmation[]
+   confirmationAuditLogs             ContractConfirmationAuditLog[]
++  cancellationNotices               ContractCancellationNotice[]
+   logisticsLoadingLines             LogisticsLoadingLine[]
+   logisticsLoadingDriverAllocations LogisticsLoadingDriverAllocation[]
+   wonCrmPotentialProject            CrmPotentialProject?               @relation("CrmPotentialProjectWonContract")
+@@ -7824,6 +7825,46 @@ model ContractPublicConfirmation {
+   @@map("contract_public_confirmations")
+ }
+ 
++/// One durable intent per commercial cancellation, never backfilled from status.
++model ContractCancellationNotice {
++  id             String   @id @default(cuid())
++  eventKey       String   @unique
++  contractId     String?
++  sourceContractId String
++  customerId     String
++  contractNumber String
++  status         String   @default("PENDING")
++  selectedPhone  String?
++  attemptCount   Int      @default(0)
++  availableAt    DateTime @default(now())
++  lastAttemptAt  DateTime?
++  lastError      String?
++  createdAt      DateTime @default(now())
++  updatedAt      DateTime @updatedAt
++  contract       SalesContract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
++  attempts       ContractCancellationNoticeAttempt[]
++
++  @@index([contractId, createdAt])
++  @@index([status, availableAt])
++  @@map("contract_cancellation_notices")
++}
++
++model ContractCancellationNoticeAttempt {
++  id                String   @id @default(cuid())
++  noticeId          String
++  sequence          Int
++  phoneNumber       String
++  status            String
++  providerMessageId String?
++  error             String?
++  createdAt         DateTime @default(now())
++  completedAt       DateTime?
++  notice            ContractCancellationNotice @relation(fields: [noticeId], references: [id], onDelete: Restrict)
++
++  @@unique([noticeId, sequence])
++  @@map("contract_cancellation_notice_attempts")
++}
++
+ model ContractConfirmationAuditLog {
+   id                  String        @id @default(cuid())
+   contractId          String
+diff --git a/backend/src/index.ts b/backend/src/index.ts
+index 215c5e3c..f8a664a4 100644
+--- a/backend/src/index.ts
++++ b/backend/src/index.ts
+@@ -100,6 +100,7 @@ import {
+ import { startNotificationOutboxDelivery } from "./services/notificationService";
+ import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
+ import { startDispatchBuyerSmsDelivery } from "./services/dispatchBuyerSmsWorker";
++import { startContractCancellationNoticeDelivery } from "./services/contractCancellationNotice";
+ import { startAccountingTaxpayerOutboxDelivery } from "./services/accountingTaxpayerOutboxWorker";
+ import { startCrossWorkspaceDutyDeadlineMaintenance } from "./services/crossWorkspaceDutyModule";
+ import { registerPartnerNotificationAccess } from "./services/partnerSales/notifications/access";
+@@ -375,6 +376,7 @@ initializeSystemRecovery(prisma).then(async () => {
+     });
+     startSupportTicketMaintenance(prisma);
+     startDispatchBuyerSmsDelivery(prisma);
++    startContractCancellationNoticeDelivery(prisma);
+     startAccountingTaxpayerOutboxDelivery(prisma);
+     startCrossWorkspaceDutyDeadlineMaintenance(prisma);
+     startPersonnelPerformanceMaintenance(prisma);
+diff --git a/backend/src/routes/sales.ts b/backend/src/routes/sales.ts
+index 9c367a1b..b2d0c637 100644
+--- a/backend/src/routes/sales.ts
++++ b/backend/src/routes/sales.ts
+@@ -33,6 +33,7 @@ import {
+ } from '../services/contractService';
+ import { getNextContractNumberPreview } from '../services/contractNumberService';
+ import { contractConfirmationService } from '../services/contractConfirmationService';
++import { readContractCancellationNotice, retryContractCancellationNotice } from '../services/contractCancellationNotice';
+ import { buildAccountingSummaryForContracts } from '../services/accountingService';
+ import { getRequestEvidence } from '../utils/requestEvidence';
+ import { buildContractSearchConditions, parseContractStatuses } from '../services/contractListQuery';
+@@ -2445,6 +2446,55 @@ router.get('/contracts/:contractId/confirmation-recipients', protect,
+     }
+   });
+ 
++const cancellationNoticeAuthority = async (tx: Prisma.TransactionClient, req: any) => {
++  const contract = await tx.salesContract.findUnique({ where: { id: req.params.contractId } });
++  if (!contract || !validateContractAccess(contract, req.user)
++    || !await canPartnerReadSalesContract(prisma, { userId: req.user.id, role: req.user.role, contractId: contract.id })) {
++    throw new Error('قرارداد در دسترس نیست.');
++  }
++  if (contract.partnerCaseId) {
++    const decision = await createAuditedPartnerAuthorization(tx, { actorId: req.user.id, purpose: 'PARTNER', channel: 'DETAIL' },
++      { correlationId: randomUUID() }).authorize('CASE_READ', { kind: 'CASE', id: contract.partnerCaseId });
++    if (!decision.ok) throw new Error('اجازه مشاهده این پرونده را ندارید.');
++    const output = await createAuditedPartnerAuthorization(tx, { actorId: req.user.id, purpose: 'CUSTOMER_OUTPUT', channel: 'API' },
++      { correlationId: randomUUID() }).authorize('CUSTOMER_OUTPUT', { kind: 'CASE', id: contract.partnerCaseId });
++    return output.ok;
++  }
++  const access = await resolveNarrowFeatureAccess(tx, { userId: req.user.id, role: req.user.role,
++    workspace: WORKSPACES.SALES, feature: FEATURES.SALES_VERIFICATION_SEND, requiredPermission: 'edit' });
++  const effective = await getEffectiveUserAccess(tx, { userId: req.user.id, userRole: req.user.role });
++  return access.allowed && effective.workspaces.some(workspace => workspace.workspace === WORKSPACES.SALES
++    && ['edit', 'admin'].includes(workspace.permission));
++};
++
++router.get('/contracts/:contractId/cancellation-notice', protect, requireSalesDetailRead, async (req: any, res: Response) => {
++  try {
++    const data = await prisma.$transaction(async tx => {
++      const canSend = await cancellationNoticeAuthority(tx, req);
++      const notice = await readContractCancellationNotice(tx, req.params.contractId);
++      return notice ? { ...notice, canRetry: canSend && notice.canRetry } : null;
++    });
++    return res.json({ success: true, data });
++  } catch {
++    return res.status(403).json({ success: false, error: 'اطلاع‌رسانی این قرارداد در دسترس نیست.' });
++  }
++});
++
++router.post('/contracts/:contractId/cancellation-notice/retry', protect,
++  requireSalesDetailRead,
++  async (req: any, res: Response) => {
++    try {
++      const data = await prisma.$transaction(async tx => {
++        if (!await cancellationNoticeAuthority(tx, req)) throw new Error('اجازه ارسال پیامک را ندارید.');
++        return retryContractCancellationNotice(tx, { contractId: req.params.contractId,
++          actorId: req.user.id, phoneNumber: typeof req.body?.phoneNumber === 'string' ? req.body.phoneNumber : undefined });
++      });
++      return res.json({ success: true, data });
++    } catch (error) {
++      return res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'درخواست ارسال انجام نشد.' });
++    }
++  });
++
+ // @desc    Get contract confirmation status
+ // @route   GET /api/sales/contracts/:contractId/confirmation-status
+ // @access  Private/Sales Workspace
+diff --git a/backend/src/services/__tests__/contractCancellationNotice.integration.test.ts b/backend/src/services/__tests__/contractCancellationNotice.integration.test.ts
+new file mode 100644
+index 00000000..c7df1c92
+--- /dev/null
++++ b/backend/src/services/__tests__/contractCancellationNotice.integration.test.ts
+@@ -0,0 +1,95 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { randomUUID } from 'node:crypto';
++import { prisma, disconnectDatabase } from '../../lib/prisma';
++import { ContractConfirmationService } from '../contractConfirmationService';
++import { deliverContractCancellationNotice, enqueueContractCancellationNotice, retryContractCancellationNotice,
++  suppressContractCancellationNotices } from '../contractCancellationNotice';
++
++test('cancellation intents commit atomically, retain current recipients, serialize delivery and honor activation periods', async () => {
++  const target = new URL(process.env.DATABASE_URL || '');
++  assert.ok(['localhost', '127.0.0.1', 'postgres'].includes(target.hostname) && target.pathname === '/sabalanerp',
++    'Use the existing sabalanerp-local services');
++  assert.equal(target.port, target.hostname === 'postgres' ? '5432' : '55432', 'Use the existing Compose PostgreSQL published port');
++  const contractIds: string[] = [];
++  let customerId: string | undefined;
++  const service = new ContractConfirmationService();
++  const sent: string[] = [];
++  const gateway = { sendContractCancellationMessage: async (input: { phoneNumber: string }) => {
++    sent.push(input.phoneNumber); return { success: true, messageId: 404 };
++  } };
++  try {
++    const source = await prisma.salesContract.findFirstOrThrow({ where: { partnerCaseId: null, partnerKind: null } });
++    const customer = await prisma.crmCustomer.create({ data: { firstName: 'QA Cancellation', lastName: randomUUID(),
++      phoneNumbers: { create: { number: '09120000002', type: 'mobile', isPrimary: true } } }, include: { phoneNumbers: true } });
++    customerId = customer.id;
++    const create = async (accepted: boolean) => {
++      const contract = await prisma.salesContract.create({ data: { contractNumber: `QA-CANCEL-SMS-${randomUUID()}`,
++        title: 'Cancellation SMS QA', titlePersian: 'آزمون پیامک لغو', content: 'QA', customerId: customer.id,
++        createdBy: source.createdBy, responsibleSellerId: source.responsibleSellerId, departmentId: source.departmentId,
++        status: 'DRAFT', commercialFlowVersion: 1, commercialRevision: 2 } });
++      contractIds.push(contract.id);
++      await prisma.contractPublicConfirmation.create({ data: { contractId: contract.id, tokenHash: randomUUID(),
++        phoneNumber: '09120000001', otpCodeHash: 'qa', otpExpiresAt: new Date(), linkExpiresAt: new Date(),
++        status: accepted ? 'VERIFIED' : 'PENDING', verifiedAt: accepted ? new Date(Date.now() - 10000) : null,
++        commercialRevision: 1, lastSentAt: new Date(Date.now() - 20000) } });
++      return contract;
++    };
++    const accepted = await create(true);
++    const rejected = await create(false);
++    await service.cancelContract({ contractId: rejected.id, requestedBy: source.createdBy, canCancelApproved: true });
++    assert.equal(await prisma.contractCancellationNotice.count({ where: { contractId: rejected.id } }), 0, 'SMS submission alone does not qualify');
++    await assert.rejects(prisma.$transaction(async tx => {
++      await service.cancelContract({ contractId: accepted.id, requestedBy: source.createdBy, canCancelApproved: true, transaction: tx });
++      throw new Error('QA rollback');
++    }), /QA rollback/);
++    assert.equal((await prisma.salesContract.findUniqueOrThrow({ where: { id: accepted.id } })).status, 'DRAFT');
++    assert.equal(await prisma.contractCancellationNotice.count({ where: { contractId: accepted.id } }), 0);
++    await service.cancelContract({ contractId: accepted.id, requestedBy: source.createdBy, canCancelApproved: true });
++    await service.cancelContract({ contractId: accepted.id, requestedBy: source.createdBy, canCancelApproved: true });
++    assert.equal(await prisma.contractCancellationNotice.count({ where: { contractId: accepted.id } }), 1, 'Repeated cancellation does not enqueue another notice');
++    const notice = await prisma.contractCancellationNotice.findFirstOrThrow({ where: { contractId: accepted.id } });
++    await Promise.all([deliverContractCancellationNotice(prisma, notice.id, gateway), deliverContractCancellationNotice(prisma, notice.id, gateway)]);
++    assert.deepEqual(sent, ['09120000002'], 'Deliver once to the current mobile, not historical OTP recipient');
++    assert.equal((await prisma.contractPublicConfirmation.findFirstOrThrow({ where: { contractId: accepted.id } })).phoneNumber, '09120000001');
++    assert.equal((await prisma.contractCancellationNotice.findUniqueOrThrow({ where: { id: notice.id } })).status, 'SENT');
++
++    const retrying = await create(true);
++    await service.cancelContract({ contractId: retrying.id, requestedBy: source.createdBy, canCancelApproved: true });
++    const retry = await prisma.contractCancellationNotice.findFirstOrThrow({ where: { contractId: retrying.id } });
++    await deliverContractCancellationNotice(prisma, retry.id, { sendContractCancellationMessage: async () => ({ success: false, error: 'QA rejected', failureKind: 'PROVIDER_REJECTION' as const }) });
++    assert.equal((await prisma.salesContract.findUniqueOrThrow({ where: { id: retrying.id } })).status, 'CANCELLED');
++    await prisma.phoneNumber.update({ where: { id: customer.phoneNumbers[0].id }, data: { number: '09120000003' } });
++    await prisma.$transaction(tx => retryContractCancellationNotice(tx, { contractId: retrying.id, actorId: source.createdBy }));
++    await deliverContractCancellationNotice(prisma, retry.id, gateway);
++    const attempts = await prisma.contractCancellationNoticeAttempt.findMany({ where: { noticeId: retry.id }, orderBy: { sequence: 'asc' } });
++    assert.deepEqual(attempts.map(attempt => attempt.phoneNumber), ['09120000002', '09120000003']);
++    assert.deepEqual(attempts.map(attempt => attempt.status), ['FAILED', 'SENT']);
++
++    const reactivated = await create(true);
++    await service.cancelContract({ contractId: reactivated.id, requestedBy: source.createdBy, canCancelApproved: true });
++    const oldNotice = await prisma.contractCancellationNotice.findFirstOrThrow({ where: { contractId: reactivated.id } });
++    await prisma.$transaction(async tx => {
++      await tx.salesContract.update({ where: { id: reactivated.id }, data: { status: 'DRAFT' } });
++      await tx.contractConfirmationAuditLog.create({ data: { contractId: reactivated.id, eventType: 'CONTRACT_REACTIVATED' } });
++      await suppressContractCancellationNotices(tx, reactivated.id);
++    });
++    await deliverContractCancellationNotice(prisma, oldNotice.id, gateway);
++    assert.equal((await prisma.contractCancellationNotice.findUniqueOrThrow({ where: { id: oldNotice.id } })).status, 'SUPPRESSED');
++    await service.cancelContract({ contractId: reactivated.id, requestedBy: source.createdBy, canCancelApproved: true });
++    assert.equal(await prisma.contractCancellationNotice.count({ where: { contractId: reactivated.id } }), 1, 'Previous activation acceptance cannot qualify a new cancellation');
++    await prisma.contractPublicConfirmation.updateMany({ where: { contractId: reactivated.id }, data: { verifiedAt: new Date(Date.now() + 1000) } });
++    const newNotice = await prisma.$transaction(tx => enqueueContractCancellationNotice(tx, { contractId: reactivated.id, eventKey: randomUUID(), at: new Date() }));
++    assert.ok(newNotice, 'Fresh digital acceptance qualifies for a new period');
++  } finally {
++    const notices = await prisma.contractCancellationNotice.findMany({ where: { contractId: { in: contractIds } }, select: { id: true } });
++    await prisma.contractCancellationNoticeAttempt.deleteMany({ where: { noticeId: { in: notices.map(notice => notice.id) } } });
++    await prisma.contractCancellationNotice.deleteMany({ where: { contractId: { in: contractIds } } });
++    await prisma.salesReportingEvent.deleteMany({ where: { contractId: { in: contractIds } } });
++    await prisma.contractConfirmationAuditLog.deleteMany({ where: { contractId: { in: contractIds } } });
++    await prisma.contractPublicConfirmation.deleteMany({ where: { contractId: { in: contractIds } } });
++    await prisma.salesContract.deleteMany({ where: { id: { in: contractIds } } });
++    if (customerId) await prisma.crmCustomer.delete({ where: { id: customerId } });
++    await disconnectDatabase();
++  }
++});
+diff --git a/backend/src/services/__tests__/contractCancellationNotice.test.ts b/backend/src/services/__tests__/contractCancellationNotice.test.ts
+new file mode 100644
+index 00000000..beb82400
+--- /dev/null
++++ b/backend/src/services/__tests__/contractCancellationNotice.test.ts
+@@ -0,0 +1,80 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import type { Prisma } from '@prisma/client';
++import { enqueueContractCancellationNotice, suppressContractCancellationNotices } from '../contractCancellationNotice';
++
++function fixture(input: { verifiedAt?: Date; lastSentAt?: Date; cycleAt?: Date; partner?: boolean; legacy?: boolean } = {}) {
++  const intents = new Map<string, { eventKey: string; status: string }>();
++  const observed: { where?: { verifiedAt: { gt?: Date; not?: null } } } = {};
++  const contract = { id: 'contract', customerId: 'current-customer', contractNumber: '404', partnerCaseId: input.partner ? 'case' : null,
++    commercialFlowVersion: input.legacy ? 0 : 1 };
++  const tx = {
++    salesContract: { findUniqueOrThrow: async () => contract },
++    contractConfirmationAuditLog: { findFirst: async () => input.cycleAt && !input.partner
++      ? { eventAt: new Date(0), eventPayloadJson: { at: input.cycleAt.toISOString() } } : null },
++    partnerCaseEvent: { findFirst: async () => input.cycleAt ? { recordedAt: input.cycleAt } : null },
++    contractPublicConfirmation: { findFirst: async (query: { where: { verifiedAt: { gt?: Date; not?: null } } }) => {
++      observed.where = query.where;
++      return input.verifiedAt && input.lastSentAt && (!query.where.verifiedAt.gt || input.verifiedAt > query.where.verifiedAt.gt)
++        ? { verifiedAt: input.verifiedAt, commercialRevision: 1 } : null;
++    } },
++    contractVerificationCode: { findFirst: async () => input.legacy && input.verifiedAt ? { verifiedAt: input.verifiedAt } : null },
++    contractCancellationNotice: {
++      upsert: async (query: { where: { eventKey: string }; create: { eventKey: string } }) => {
++        const prior = intents.get(query.where.eventKey);
++        if (prior) return prior;
++        const created = { ...query.create, status: 'PENDING' }; intents.set(created.eventKey, created); return created;
++      },
++      updateMany: async (query: { where: { status: { in: string[] } }; data: { status: string } }) => {
++        for (const notice of intents.values()) if (query.where.status.in.includes(notice.status)) notice.status = query.data.status;
++      },
++    },
++    contractCancellationNoticeAttempt: { updateMany: async () => ({ count: 0 }) },
++  } as unknown as Prisma.TransactionClient;
++  return { tx, intents, observed };
++}
++const at = new Date('2026-10-12T10:00:00Z');
++const command = { contractId: 'contract', eventKey: 'cancellation-event', at };
++
++test('SMS sent without digital acceptance and paper-only contracts do not enqueue', async () => {
++  for (const input of [{ lastSentAt: at }, {}]) {
++    const { tx, intents } = fixture(input);
++    assert.equal(await enqueueContractCancellationNotice(tx, command), null);
++    assert.equal(intents.size, 0);
++  }
++});
++test('accepted earlier commercial versions qualify once per cancellation event in both sales flows', async () => {
++  for (const partner of [false, true]) {
++    const { tx, intents } = fixture({ verifiedAt: at, lastSentAt: at, partner });
++    await enqueueContractCancellationNotice(tx, command);
++    await enqueueContractCancellationNotice(tx, command);
++    assert.equal(intents.size, 1);
++    await enqueueContractCancellationNotice(tx, { ...command, eventKey: 'another-cancellation' });
++    assert.equal(intents.size, 2);
++  }
++});
++test('reactivation separates acceptance periods and uses event instant rather than transaction start', async () => {
++  const cycleAt = new Date(at.getTime() + 1000);
++  for (const partner of [false, true]) {
++    const old = fixture({ verifiedAt: at, lastSentAt: at, cycleAt, partner });
++    assert.equal(await enqueueContractCancellationNotice(old.tx, command), null);
++    assert.equal(old.observed.where?.verifiedAt.gt?.getTime(), cycleAt.getTime());
++    const fresh = fixture({ verifiedAt: new Date(at.getTime() + 2000), lastSentAt: at, cycleAt, partner });
++    assert.ok(await enqueueContractCancellationNotice(fresh.tx, command));
++  }
++});
++test('reactivation suppresses unsent intents while preserving sent and historical rows', async () => {
++  const { tx, intents } = fixture({ verifiedAt: at, lastSentAt: at });
++  for (const status of ['PENDING', 'RETRY', 'SENDING', 'UNKNOWN', 'NEEDS_PHONE', 'NEEDS_SELECTION', 'FAILED', 'SENT']) {
++    intents.set(status, { eventKey: status, status });
++  }
++  await suppressContractCancellationNotices(tx, 'contract');
++  assert.equal(intents.size, 8);
++  for (const [key, row] of intents) assert.equal(row.status, key === 'SENT' ? 'SENT' : 'SUPPRESSED');
++});
++test('legacy verified OTP evidence qualifies separately from invalidated unused codes', async () => {
++  const accepted = fixture({ legacy: true, verifiedAt: at });
++  assert.ok(await enqueueContractCancellationNotice(accepted.tx, command));
++  const invalidated = fixture({ legacy: true });
++  assert.equal(await enqueueContractCancellationNotice(invalidated.tx, command), null);
++});
+diff --git a/backend/src/services/__tests__/contractCancellationNoticePolicy.test.ts b/backend/src/services/__tests__/contractCancellationNoticePolicy.test.ts
+new file mode 100644
+index 00000000..51780f8f
+--- /dev/null
++++ b/backend/src/services/__tests__/contractCancellationNoticePolicy.test.ts
+@@ -0,0 +1,39 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { cancellationSubmissionIsUnknown, normalizeCancellationMobile, resolveCancellationRecipient } from '../contractCancellationNoticePolicy';
++
++const mobile = (number: string, isPrimary = false, isActive = true) => ({ number, isPrimary, isActive, type: 'mobile' });
++test('primary and sole active mobile win over historical, inactive and landline records', () => {
++  const phones = [mobile('09120000001', true, false), mobile('+989120000002'), mobile('09120000003', true),
++    { ...mobile('02112345678', true), type: 'home' }];
++  assert.equal(resolveCancellationRecipient(phones).phoneNumber, '09120000003');
++  assert.equal(resolveCancellationRecipient(phones).canChoosePhone, false);
++  assert.equal(resolveCancellationRecipient(phones.slice(0, 2)).phoneNumber, '09120000002');
++  assert.equal(resolveCancellationRecipient(phones, '09120000001').phoneNumber, '09120000003');
++});
++test('several mobiles without primary require an active explicit choice', () => {
++  const phones = [mobile('09120000001'), mobile('09120000002')];
++  assert.equal(resolveCancellationRecipient(phones).status, 'NEEDS_SELECTION');
++  assert.equal(resolveCancellationRecipient(phones).canChoosePhone, true);
++  assert.equal(resolveCancellationRecipient(phones, '09120000002').phoneNumber, '09120000002');
++  assert.equal(resolveCancellationRecipient(phones, '09120000003').phoneNumber, null);
++});
++test('every attempt resolves changed current contact data and never uses an inactive selected recipient', () => {
++  const phones = [mobile('09120000001', false, false), mobile('09120000002', true)];
++  assert.equal(resolveCancellationRecipient(phones, '09120000001').phoneNumber, '09120000002');
++  assert.equal(resolveCancellationRecipient([]).status, 'NEEDS_PHONE');
++  assert.equal(resolveCancellationRecipient([mobile('invalid')]).status, 'NEEDS_PHONE');
++});
++test('mobile normalization handles Persian digits and international representations without accepting landlines', () => {
++  for (const value of ['۰۹۱۲۰۰۰۰۰۰۱', '٠٩١٢٠٠٠٠٠٠١', '00989120000001', '+98 912 000 0001', '9120000001']) {
++    assert.equal(normalizeCancellationMobile(value), '09120000001');
++  }
++  assert.equal(normalizeCancellationMobile('02112345678'), null);
++});
++test('ambiguous provider outcomes stop automatic retries while definite rejections and connection failures may retry', () => {
++  assert.equal(cancellationSubmissionIsUnknown({ success: false, failureKind: 'NETWORK', errorCode: 'ECONNRESET' }), true);
++  assert.equal(cancellationSubmissionIsUnknown({ success: false, failureKind: 'HTTP', httpStatus: 504 }), true);
++  assert.equal(cancellationSubmissionIsUnknown({ success: false, failureKind: 'NETWORK', errorCode: 'ENOTFOUND' }), false);
++  assert.equal(cancellationSubmissionIsUnknown({ success: false, failureKind: 'PROVIDER_REJECTION' }), false);
++  assert.equal(cancellationSubmissionIsUnknown({ success: true }), false);
++});
+diff --git a/backend/src/services/__tests__/contractCancellationSmsTemplate.test.ts b/backend/src/services/__tests__/contractCancellationSmsTemplate.test.ts
+new file mode 100644
+index 00000000..1b962bf3
+--- /dev/null
++++ b/backend/src/services/__tests__/contractCancellationSmsTemplate.test.ts
+@@ -0,0 +1,48 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import axios from 'axios';
++import smsService from '../smsService';
++
++// Test instances use the application's existing SMS class; no real request is
++// allowed and no production environment or credentials are read by the gateway.
++const Constructor = smsService.constructor as new () => typeof smsService;
++const environment = {
++  SMS_IR_API_KEY: 'qa-fake-key', SMS_IR_API_URL: 'https://api.sms.ir/v1',
++  SMS_IR_ENVIRONMENT: 'production', SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID: '774074',
++};
++function withEnvironment(run: () => Promise<void>) {
++  const saved = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]));
++  Object.assign(process.env, environment);
++  return run().finally(() => {
++    for (const [key, value] of Object.entries(saved)) {
++      if (value === undefined) delete process.env[key]; else process.env[key] = value;
++    }
++  });
++}
++
++test('cancellation uses the existing SMS.ir template transport and exact ContractNumber parameter', async t => withEnvironment(async () => {
++  const requests: unknown[][] = [];
++  t.mock.method(axios, 'post', async (...args: unknown[]) => {
++    requests.push(args);
++    return { data: { status: 1, message: 'accepted', data: { messageId: 404 } } };
++  });
++  const service = new Constructor();
++  const result = await service.sendContractCancellationMessage({ phoneNumber: '09120000002', contractNumber: '1405-001234' });
++  assert.equal(result.success, true);
++  assert.equal(result.messageId, 404);
++  assert.equal(requests.length, 1);
++  assert.equal(requests[0][0], 'https://api.sms.ir/v1/send/verify');
++  assert.deepEqual(requests[0][1], { mobile: '09120000002', templateId: 774074,
++    parameters: [{ name: 'ContractNumber', value: '1405-001234' }] });
++}));
++
++test('missing or invalid cancellation template cannot send through the confirmation template', async t => withEnvironment(async () => {
++  const request = t.mock.method(axios, 'post', async () => { throw new Error('Unexpected external request'); });
++  for (const templateId of ['', '0', '-1', 'not-a-number', '880001.5']) {
++    process.env.SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID = templateId;
++    const result = await new Constructor().sendContractCancellationMessage({ phoneNumber: '09120000002', contractNumber: '404' });
++    assert.equal(result.success, false);
++    assert.match(result.error!, /قالب/);
++  }
++  assert.equal(request.mock.callCount(), 0);
++}));
+diff --git a/backend/src/services/contractCancellationNotice.ts b/backend/src/services/contractCancellationNotice.ts
+new file mode 100644
+index 00000000..3fcc8b08
+--- /dev/null
++++ b/backend/src/services/contractCancellationNotice.ts
+@@ -0,0 +1,194 @@
++import { Prisma, type PrismaClient } from '@prisma/client';
++import smsService from './smsService';
++import { getRecoveryRuntimeState, withRecoveryBackgroundWrite } from './recoveryRuntime';
++import { cancellationNoticeRetryStatuses, cancellationSubmissionIsUnknown, normalizeCancellationMobile, resolveCancellationRecipient } from './contractCancellationNoticePolicy';
++
++type Transaction = Prisma.TransactionClient;
++const pendingStatuses = ['PENDING', 'RETRY', 'NEEDS_PHONE', 'NEEDS_SELECTION'];
++
++// Writers already own their business locks. This helper never contacts a provider.
++export async function enqueueContractCancellationNotice(tx: Transaction, input: {
++  contractId: string; eventKey: string; at: Date;
++}) {
++  const contract = await tx.salesContract.findUniqueOrThrow({ where: { id: input.contractId } });
++  const ordinaryCycle = await tx.contractConfirmationAuditLog.findFirst({ where: {
++    contractId: contract.id, eventType: 'CONTRACT_REACTIVATED',
++  }, orderBy: { eventAt: 'desc' } });
++  const partnerCycle = contract.partnerCaseId ? await tx.partnerCaseEvent.findFirst({ where: {
++    caseId: contract.partnerCaseId, type: 'CASE_REACTIVATED',
++  }, orderBy: { sequence: 'desc' } }) : null;
++  const ordinaryEvidenceAt = (ordinaryCycle?.eventPayloadJson as Prisma.JsonObject | null)?.at;
++  const ordinaryAt = typeof ordinaryEvidenceAt === 'string' && Number.isFinite(Date.parse(ordinaryEvidenceAt))
++    ? new Date(ordinaryEvidenceAt) : ordinaryCycle?.eventAt;
++  const cycleAt = partnerCycle?.recordedAt ?? ordinaryAt;
++  const acceptance = await tx.contractPublicConfirmation.findFirst({ where: {
++    contractId: contract.id, verifiedAt: cycleAt ? { gt: cycleAt } : { not: null }, lastSentAt: { not: null },
++  }, orderBy: { verifiedAt: 'desc' } });
++  // Legacy ordinary OTP evidence has its own table; verified=true alone also
++  // means an invalidated unused code, so a real verifiedAt is mandatory.
++  const legacyAcceptance = !acceptance && !contract.partnerCaseId && contract.commercialFlowVersion === 0
++    ? await tx.contractVerificationCode.findFirst({ where: { contractId: contract.id,
++      verified: true, verifiedAt: cycleAt ? { gt: cycleAt } : { not: null } } }) : null;
++  if (!acceptance && !legacyAcceptance) return null;
++  return tx.contractCancellationNotice.upsert({ where: { eventKey: input.eventKey }, update: {}, create: {
++    eventKey: input.eventKey, contractId: contract.id, contractNumber: contract.contractNumber,
++    sourceContractId: contract.id, customerId: contract.customerId,
++    createdAt: input.at, availableAt: input.at,
++  } });
++}
++
++export async function suppressContractCancellationNotices(tx: Transaction, contractId: string) {
++  await tx.contractCancellationNotice.updateMany({ where: { contractId,
++    status: { in: [...cancellationNoticeRetryStatuses, 'SENDING'] } },
++  data: { status: 'SUPPRESSED', lastError: null } });
++  await tx.contractCancellationNoticeAttempt.updateMany({ where: { status: 'SENDING', notice: { contractId } },
++    data: { status: 'SUPPRESSED', completedAt: new Date() } });
++}
++
++async function lockNoticeOwner(tx: Transaction, contractId: string | null) {
++  if (!contractId) return;
++  const identity = await tx.salesContract.findUnique({ where: { id: contractId }, select: { partnerCaseId: true } });
++  // Match Partner writer lock order: Case first, then its customer Contract.
++  if (identity?.partnerCaseId) await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "partner_sale_cases" WHERE "id" = ${identity.partnerCaseId} FOR UPDATE`);
++  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" = ${contractId} FOR UPDATE`);
++}
++
++async function readRecipient(tx: Transaction, contractId: string | null, selected?: string | null, retainedCustomerId?: string) {
++  const contract = contractId ? await tx.salesContract.findUnique({ where: { id: contractId }, include: {
++    customer: { include: { phoneNumbers: true } },
++  } }) : null;
++  // A guarded administrative hard deletion must retain the cancellation
++  // history and must not veto an already committed Customer notification.
++  const customer = contract?.customer ?? (retainedCustomerId ? await tx.crmCustomer.findUnique({
++    where: { id: retainedCustomerId }, include: { phoneNumbers: true },
++  }) : null);
++  const recipient = resolveCancellationRecipient(customer?.isActive && !customer.cardDeletedAt ? customer.phoneNumbers : [], selected);
++  return { contract, recipient };
++}
++
++export async function readContractCancellationNotice(tx: Transaction, contractId: string) {
++  const notice = await tx.contractCancellationNotice.findFirst({ where: { contractId }, orderBy: { createdAt: 'desc' },
++    include: { attempts: { orderBy: { sequence: 'desc' }, take: 10 } } });
++  if (!notice) return null;
++  const { contract, recipient } = await readRecipient(tx, contractId, notice.selectedPhone);
++  return { ...notice, availablePhoneNumbers: recipient.availablePhoneNumbers, defaultPhoneNumber: recipient.phoneNumber,
++    canChoosePhone: recipient.canChoosePhone,
++    canRetry: contract?.status === 'CANCELLED' && cancellationNoticeRetryStatuses.includes(notice.status) };
++}
++
++export async function retryContractCancellationNotice(tx: Transaction, input: {
++  contractId: string; phoneNumber?: string; actorId: string;
++}) {
++  await lockNoticeOwner(tx, input.contractId);
++  const notice = await tx.contractCancellationNotice.findFirst({ where: { contractId: input.contractId }, orderBy: { createdAt: 'desc' } });
++  if (!notice || !cancellationNoticeRetryStatuses.includes(notice.status)) throw new Error('این اطلاع‌رسانی قابل ارسال مجدد نیست.');
++  const { contract, recipient } = await readRecipient(tx, input.contractId, input.phoneNumber);
++  if (contract?.status !== 'CANCELLED') throw new Error('قرارداد دیگر لغوشده نیست.');
++  if (input.phoneNumber && !recipient.availablePhoneNumbers.includes(normalizeCancellationMobile(input.phoneNumber) || '')) {
++    throw new Error('شماره انتخاب‌شده دیگر فعال نیست؛ شماره‌های مشتری را تازه‌سازی کنید.');
++  }
++  if (!recipient.phoneNumber) throw new Error(recipient.status === 'NEEDS_SELECTION'
++    ? 'شماره گیرنده را انتخاب کنید.' : 'ابتدا موبایل فعال مشتری را ثبت کنید.');
++  const updated = await tx.contractCancellationNotice.update({ where: { id: notice.id }, data: {
++    selectedPhone: recipient.phoneNumber, status: 'PENDING', availableAt: new Date(), lastError: null,
++  } });
++  await tx.contractConfirmationAuditLog.create({ data: { contractId: input.contractId,
++    eventType: 'CANCELLATION_NOTICE_RETRY_REQUESTED', eventPayloadJson: {
++      noticeId: notice.id, requestedBy: input.actorId, phoneNumber: recipient.phoneNumber, previousStatus: notice.status,
++    } } });
++  return updated;
++}
++
++type Gateway = Pick<typeof smsService, 'sendContractCancellationMessage'>;
++
++export async function deliverContractCancellationNotice(database: PrismaClient, noticeId: string, gateway: Gateway = smsService) {
++  const claimed = await database.$transaction(async tx => {
++    const initial = await tx.contractCancellationNotice.findUnique({ where: { id: noticeId } });
++    if (!initial) return null;
++    await lockNoticeOwner(tx, initial.contractId);
++    await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "contract_cancellation_notices" WHERE "id" = ${noticeId} FOR UPDATE`);
++    const notice = await tx.contractCancellationNotice.findUniqueOrThrow({ where: { id: noticeId } });
++    if (!pendingStatuses.includes(notice.status) || notice.availableAt > new Date()) return null;
++    const { contract, recipient } = await readRecipient(tx, notice.contractId, notice.selectedPhone, notice.customerId);
++    if (contract && contract.status !== 'CANCELLED') {
++      await suppressContractCancellationNotices(tx, contract.id);
++      return null;
++    }
++    if (!recipient.phoneNumber) {
++      await tx.contractCancellationNotice.update({ where: { id: notice.id }, data: {
++        status: recipient.status, selectedPhone: null, availableAt: new Date(Date.now() + 60_000),
++      } });
++      return null;
++    }
++    const attempt = await tx.contractCancellationNoticeAttempt.create({ data: {
++      noticeId: notice.id, sequence: notice.attemptCount + 1, phoneNumber: recipient.phoneNumber, status: 'SENDING',
++    } });
++    await tx.contractCancellationNotice.update({ where: { id: notice.id }, data: {
++      status: 'SENDING', attemptCount: attempt.sequence, lastAttemptAt: new Date(),
++    } });
++    return { notice, attempt };
++  });
++  if (!claimed) return;
++  // Retain the business lock through provider submission so a completed
++  // reactivation cannot race an obsolete SMS. A crash leaves a durable SENDING
++  // attempt, recovered as UNKNOWN rather than automatically duplicating it.
++  await database.$transaction(async tx => {
++    await lockNoticeOwner(tx, claimed.notice.contractId);
++    await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "contract_cancellation_notices" WHERE "id" = ${noticeId} FOR UPDATE`);
++    const current = await tx.contractCancellationNotice.findUniqueOrThrow({ where: { id: noticeId } });
++    const { contract, recipient } = await readRecipient(tx, current.contractId, current.selectedPhone, current.customerId);
++    if (current.status !== 'SENDING' || contract && contract.status !== 'CANCELLED' || recipient.phoneNumber !== claimed.attempt.phoneNumber) {
++      await tx.contractCancellationNoticeAttempt.update({ where: { id: claimed.attempt.id }, data: { status: 'SUPPRESSED', completedAt: new Date() } });
++      if (current.status === 'SENDING') await tx.contractCancellationNotice.update({ where: { id: current.id }, data: {
++        status: !contract || contract.status === 'CANCELLED' ? 'PENDING' : 'SUPPRESSED',
++      } });
++      return;
++    }
++    let result: Awaited<ReturnType<Gateway['sendContractCancellationMessage']>>;
++    try { result = await gateway.sendContractCancellationMessage({ phoneNumber: claimed.attempt.phoneNumber, contractNumber: current.contractNumber }); }
++    catch { result = { success: false, error: 'نتیجه ارسال پیامک مشخص نیست.', failureKind: 'NETWORK', errorCode: 'ECONNRESET' }; }
++    const unknown = cancellationSubmissionIsUnknown(result);
++    const status = result.success ? 'SENT' : unknown ? 'UNKNOWN' : 'FAILED';
++    const detail = result.success ? null : (result.error || 'ارسال پیامک انجام نشد.').slice(0, 500);
++    await tx.contractCancellationNoticeAttempt.update({ where: { id: claimed.attempt.id }, data: {
++      status, completedAt: new Date(), providerMessageId: result.messageId ? String(result.messageId) : null, error: detail,
++    } });
++    await tx.contractCancellationNotice.update({ where: { id: current.id }, data: {
++      status: result.success ? 'SENT' : unknown ? 'UNKNOWN' : current.attemptCount < 5 ? 'RETRY' : 'FAILED',
++      lastError: detail, availableAt: new Date(Date.now() + Math.min(60 * 60_000, 60_000 * 2 ** current.attemptCount)),
++    } });
++  }, { timeout: 45_000 });
++}
++
++export async function deliverPendingContractCancellationNotices(database: PrismaClient) {
++  const stale = await database.contractCancellationNotice.findMany({ where: { status: 'SENDING',
++    lastAttemptAt: { lt: new Date(Date.now() - 5 * 60_000) } }, take: 50 });
++  for (const notice of stale) await database.$transaction(async tx => {
++    await lockNoticeOwner(tx, notice.contractId);
++    const changed = await tx.contractCancellationNotice.updateMany({ where: { id: notice.id, status: 'SENDING',
++      lastAttemptAt: notice.lastAttemptAt }, data: { status: 'UNKNOWN', lastError: 'نتیجه تلاش قبلی مشخص نیست؛ پیش از ارسال مجدد بررسی کنید.' } });
++    if (changed.count) await tx.contractCancellationNoticeAttempt.updateMany({ where: { noticeId: notice.id, status: 'SENDING' },
++      data: { status: 'UNKNOWN', completedAt: new Date() } });
++  });
++  const ready = await database.contractCancellationNotice.findMany({ where: { status: { in: pendingStatuses },
++    availableAt: { lte: new Date() } }, orderBy: { availableAt: 'asc' }, take: 25 });
++  for (const notice of ready) {
++    if (getRecoveryRuntimeState().mode !== 'NORMAL') return;
++    try { await deliverContractCancellationNotice(database, notice.id); }
++    catch (error) { console.error('Contract cancellation notice worker failed', { noticeId: notice.id, error }); }
++  }
++}
++
++export function startContractCancellationNoticeDelivery(database: PrismaClient) {
++  let running = false;
++  const run = async () => {
++    if (running || getRecoveryRuntimeState().mode !== 'NORMAL') return;
++    running = true;
++    try { await withRecoveryBackgroundWrite(() => deliverPendingContractCancellationNotices(database)); }
++    catch (error) { console.error('Contract cancellation notice scan failed', error); }
++    finally { running = false; }
++  };
++  void run();
++  const timer = setInterval(() => void run(), 15_000);
++  timer.unref();
++}
+diff --git a/backend/src/services/contractCancellationNoticePolicy.ts b/backend/src/services/contractCancellationNoticePolicy.ts
+new file mode 100644
+index 00000000..16d6b3f1
+--- /dev/null
++++ b/backend/src/services/contractCancellationNoticePolicy.ts
+@@ -0,0 +1,32 @@
++export type CurrentMobile = { number: string; type: string; isActive: boolean; isPrimary: boolean };
++
++export function normalizeCancellationMobile(value: string): string | null {
++  const digits = value.replace(/[۰-۹]/g, char => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(char)))
++    .replace(/[٠-٩]/g, char => String('٠١٢٣٤٥٦٧٨٩'.indexOf(char))).replace(/\D/g, '');
++  const local = digits.startsWith('0098') ? `0${digits.slice(4)}`
++    : digits.startsWith('98') && digits.length === 12 ? `0${digits.slice(2)}`
++    : digits.startsWith('9') && digits.length === 10 ? `0${digits}` : digits;
++  return /^09\d{9}$/.test(local) ? local : null;
++}
++
++export function resolveCancellationRecipient(phones: CurrentMobile[], selected?: string | null) {
++  const active = phones.filter(phone => phone.isActive && phone.type === 'mobile')
++    .map(phone => ({ ...phone, normalized: normalizeCancellationMobile(phone.number) }))
++    .filter((phone): phone is CurrentMobile & { normalized: string } => !!phone.normalized);
++  const available = [...new Set(active.map(phone => phone.normalized))];
++  const primary = [...new Set(active.filter(phone => phone.isPrimary).map(phone => phone.normalized))];
++  const explicit = selected ? normalizeCancellationMobile(selected) : null;
++  const phoneNumber = primary.length === 1 ? primary[0] : available.length === 1 ? available[0]
++    : explicit && available.includes(explicit) ? explicit : null;
++  return { availablePhoneNumbers: available, phoneNumber,
++    canChoosePhone: available.length > 1 && primary.length !== 1,
++    status: phoneNumber ? 'PENDING' : available.length ? 'NEEDS_SELECTION' : 'NEEDS_PHONE' };
++}
++
++export const cancellationNoticeRetryStatuses = ['PENDING', 'RETRY', 'NEEDS_PHONE', 'NEEDS_SELECTION', 'FAILED', 'UNKNOWN'];
++
++export function cancellationSubmissionIsUnknown(result: { success: boolean; failureKind?: string; errorCode?: string; httpStatus?: number }) {
++  return !result.success && (result.failureKind === 'NETWORK'
++    && ['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EPIPE', 'UND_ERR_SOCKET'].includes(result.errorCode || '')
++    || result.failureKind === 'HTTP' && (result.httpStatus === 408 || Number(result.httpStatus) >= 500));
++}
+diff --git a/backend/src/services/contractConfirmationService.ts b/backend/src/services/contractConfirmationService.ts
+index ecff9b8f..8b8ced85 100644
+--- a/backend/src/services/contractConfirmationService.ts
++++ b/backend/src/services/contractConfirmationService.ts
+@@ -1,4 +1,5 @@
+ import { confirmationResendCooldownError } from './contractConfirmationPolicy';
++import { enqueueContractCancellationNotice } from './contractCancellationNotice';
+ import { prisma } from '../lib/prisma';
+ import { isOrdinaryCommercialFlow, assertCommercialActionAvailable, markCustomerAcceptance, lockOrdinaryContract } from './ordinaryContractLifecycle';
+ import { PrismaClient, Prisma } from '@prisma/client';
+@@ -1059,6 +1060,8 @@ export class ContractConfirmationService {
+           cancelledAt: new Date()
+         }
+       });
++      await enqueueContractCancellationNotice(tx, { contractId: contract.id,
++        eventKey: `ordinary-cancel:${crypto.randomUUID()}`, at: cancellationAt });
+     };
+     if (params.transaction) await commitCancellation(params.transaction);
+     else await prisma.$transaction(commitCancellation);
+diff --git a/backend/src/services/contractService.ts b/backend/src/services/contractService.ts
+index 83e2598f..64d586de 100644
+--- a/backend/src/services/contractService.ts
++++ b/backend/src/services/contractService.ts
+@@ -1,4 +1,5 @@
+ import { prisma } from '../lib/prisma';
++import { enqueueContractCancellationNotice } from './contractCancellationNotice';
+ import { synchronizeSellerCredit } from './contractDispatchCredit';
+ import { validateSpecialCustomerCreditPlan } from './specialCustomerCredit';
+ import { refreshDispatchExpiryExemption } from './ordinaryContractLifecycle';
+@@ -1619,38 +1620,27 @@ export async function rejectContract(
+   userId: string,
+   note?: string
+ ) {
+-  const contract = await prisma.salesContract.findUnique({
+-    where: { id: contractId }
+-  });
+-
+-  if (!contract) {
+-    throw new Error('Contract not found');
+-  }
+-
+-  if (contract.isInactive) {
+-    throw new Error('Contract cannot be rejected in current status');
+-  }
+-
+-  if (contract.status !== 'DRAFT' && contract.status !== 'PENDING_APPROVAL') {
+-    throw new Error('Contract cannot be rejected in current status');
+-  }
+-
+-  const updatedContract = await prisma.salesContract.update({
+-    where: { id: contractId },
+-    data: {
+-      status: 'CANCELLED',
+-      lostAt: new Date(),
+-      signatures: {
+-        ...(contract.signatures as any || {}),
+-        reject: {
+-          by: userId,
+-          at: new Date().toISOString(),
+-          note: note || null
++  return prisma.$transaction(async tx => {
++    await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "sales_contracts" WHERE "id" = ${contractId} FOR UPDATE`);
++    const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
++    if (!contract) throw new Error('Contract not found');
++    if (contract.isInactive || contract.status !== 'DRAFT' && contract.status !== 'PENDING_APPROVAL') {
++      throw new Error('Contract cannot be rejected in current status');
++    }
++    const cancellationAt = new Date();
++    const updatedContract = await tx.salesContract.update({
++      where: { id: contractId },
++      data: {
++        status: 'CANCELLED',
++        lostAt: cancellationAt,
++        signatures: {
++          ...(contract.signatures as Prisma.JsonObject || {}),
++          reject: { by: userId, at: cancellationAt.toISOString(), note: note || null },
+         }
+       }
+-    }
++    });
++    await enqueueContractCancellationNotice(tx, { contractId, eventKey: `ordinary-reject:${randomUUID()}`, at: cancellationAt });
++    return updatedContract;
+   });
+-
+-  return updatedContract;
+ }
+ import { assertContractOperationMinimums } from './operationMinimumGuard';
+diff --git a/backend/src/services/crossWorkspaceDutyAdapters/partnerFinancialCorrectionAdapter.ts b/backend/src/services/crossWorkspaceDutyAdapters/partnerFinancialCorrectionAdapter.ts
+index 38142d17..3afff57e 100644
+--- a/backend/src/services/crossWorkspaceDutyAdapters/partnerFinancialCorrectionAdapter.ts
++++ b/backend/src/services/crossWorkspaceDutyAdapters/partnerFinancialCorrectionAdapter.ts
+@@ -1,4 +1,5 @@
+ import { randomUUID } from 'node:crypto';
++import { enqueueContractCancellationNotice } from '../contractCancellationNotice';
+ import { readRetailCorrectionState } from '../partnerSales/corrections/persistedRetailState';
+ import { caseComparableAmount } from '../partnerSales/reporting/comparable';
+ import { subtract } from '../partnerSales/reporting/money';
+@@ -557,6 +558,8 @@ async function finalizeVoid(tx: Transaction, input: {
+       customerContractCancellation: { contractNumber: input.snapshot.customerContractNumber, status: 'CANCELLED' },
+       internalObligationVoid: { recordNumber: input.snapshot.internalRecordNumber, adjustmentEventId } }) } });
+   const noticeOutboxId = randomUUID();
++  await enqueueContractCancellationNotice(tx, { contractId: current.customerContractId,
++    eventKey: `partner-cancel:${voidEventId}`, at: new Date(instant) });
+   await tx.partnerOutboxMessage.create({ data: { id: noticeOutboxId, eventId: voidEventId,
+     purpose: 'CUSTOMER_CANCELLATION_NOTICE', deduplicationKey: `partner-void-notice:${input.command.correctionId}`,
+     safePayload: json({ schemaVersion: 1, kind: 'CUSTOMER_CANCELLED',
+diff --git a/backend/src/services/ordinaryContractReactivation.ts b/backend/src/services/ordinaryContractReactivation.ts
+index 24ddc05d..7ac6928d 100644
+--- a/backend/src/services/ordinaryContractReactivation.ts
++++ b/backend/src/services/ordinaryContractReactivation.ts
+@@ -1,4 +1,5 @@
+ import { Prisma, type PrismaClient, type SalesContract } from '@prisma/client';
++import { suppressContractCancellationNotices } from './contractCancellationNotice';
+ import { createHash } from 'node:crypto';
+ import type { RequestEvidenceMeta } from '../utils/requestEvidence';
+ import { getEffectiveUserAccess } from './effectiveAccessService';
+@@ -89,6 +90,7 @@ export const reactivateOrdinaryContract = (database: Database, input: {
+         correctionDutyId: actions.correctionDutyId || null } },
+   } });
+   await invalidateCommercialApprovals(tx, contract.id);
++  await suppressContractCancellationNotices(tx, contract.id);
+   const authorities = await tx.contractDispatchAuthority.findMany({ where: { contractId: contract.id,
+     revision: { not: revision }, OR: [{ kind: 'MANAGER', status: { in: ['PENDING', 'APPROVED'] } },
+       { kind: { in: ['DATE', 'TRANSFER', 'CUSTOMER_DATE'] }, status: 'PENDING' }] } });
+@@ -106,7 +108,7 @@ export const reactivateOrdinaryContract = (database: Database, input: {
+   const evidence = { by: input.actorId, at: now.toISOString(), reason, revision, restoredStatus: 'DRAFT',
+     correctionDutyId: actions.correctionDutyId, cancellationAt: (signatures.cancellation as any)?.at || null };
+   await tx.contractConfirmationAuditLog.create({ data: { contractId: contract.id,
+-    eventType: 'CONTRACT_REACTIVATED', eventPayloadJson: evidence, ...input.meta,
++    eventType: 'CONTRACT_REACTIVATED', eventAt: now, eventPayloadJson: evidence, ...input.meta,
+     eventHash: createHash('sha256').update(JSON.stringify(evidence)).digest('hex') } });
+   return { contractId: updated.id, status: updated.status, commercialRevision: revision };
+   };
+diff --git a/backend/src/services/partnerSales/cases/lifecycle.ts b/backend/src/services/partnerSales/cases/lifecycle.ts
+index 89ef9b25..7e92bb02 100644
+--- a/backend/src/services/partnerSales/cases/lifecycle.ts
++++ b/backend/src/services/partnerSales/cases/lifecycle.ts
+@@ -1,4 +1,5 @@
+ import { partnerReactivationAt } from './reactivationPricing';
++import { enqueueContractCancellationNotice } from '../../contractCancellationNotice';
+ import { randomUUID } from 'node:crypto';
+ import { Prisma, type PrismaClient } from '@prisma/client';
+ import {
+@@ -440,6 +441,7 @@ Promise<ExecutionResult> {
+         owner, correctionId, commitmentEventId: row.commitmentEventId, adjustmentEventIds: [adjustmentId], dependencyEvidenceIds: [permission.id], reason: command.reason });
+       await tx.partnerSaleCase.update({ where: { id: caseId }, data: { state: 'VOIDED', stateRevision: { increment: 1 } } });
+       await tx.salesContract.update({ where: { id: row.customerContractId }, data: { status: 'CANCELLED', lostAt: new Date(at.instant) } });
++      await enqueueContractCancellationNotice(tx, { contractId: row.customerContractId, eventKey: `partner-cancel:${eventId}`, at: new Date(at.instant) });
+       await tx.partnerCaseEvent.create({ data: { id: eventId, caseId, caseRevision: owner.revision, integrityHash: owner.integrityHash,
+         sequence: sequence + 1, stateRevision: row.stateRevision + 1, type: voided.type, fromState: row.state, toState: 'VOIDED',
+         actorId: dependencies.actorId, commandId: command.commandId, correlationId: command.correlationId,
+@@ -462,6 +464,9 @@ Promise<ExecutionResult> {
+     if (updated.count !== 1) throw new RollbackLifecycleResult({ ok: false, error: partnerError('ROW_STALE') });
+     if (row.customerContractId) await tx.salesContract.update({ where: { id: row.customerContractId },
+       data: { status: 'CANCELLED', lostAt: new Date(at.instant) } });
++    if (row.customerContractId) await enqueueContractCancellationNotice(tx, {
++      contractId: row.customerContractId, eventKey: `partner-cancel:${eventId}`, at: new Date(at.instant),
++    });
+     await tx.partnerCaseEvent.create({ data: { id: eventId, caseId, caseRevision: row.headRevision,
+       integrityHash: row.integrityHash, sequence, stateRevision: row.stateRevision + 1, type: event.type,
+       fromState: row.state, toState: 'CANCELLED', actorId: dependencies.actorId, commandId: command.commandId,
+diff --git a/backend/src/services/partnerSales/cases/reactivation.ts b/backend/src/services/partnerSales/cases/reactivation.ts
+index 3c34f56f..9cc6e25a 100644
+--- a/backend/src/services/partnerSales/cases/reactivation.ts
++++ b/backend/src/services/partnerSales/cases/reactivation.ts
+@@ -1,4 +1,5 @@
+ import { randomUUID } from 'node:crypto';
++import { suppressContractCancellationNotices } from '../../contractCancellationNotice';
+ import { Prisma } from '@prisma/client';
+ import { PartnerEventSchema, canonicalHash, checkExpectedRevision, type RevisionRef } from '@sabalanerp/partner-sales-contracts';
+ import { createAuditedPartnerAuthorization } from '../authorization/audited';
+@@ -64,6 +65,7 @@ export async function reactivatePartnerCase(tx: Prisma.TransactionClient, input:
+   await tx.salesContract.update({ where: { id: contract.id }, data: { isInactive: false,
+     inactiveAt: null, inactiveBy: null, inactiveReason: null, lostAt: null } });
+   const updated = await resetPartnerCommercialApprovals(tx, root.id, input.actorId, input.reason);
++  await suppressContractCancellationNotices(tx, contract.id);
+   const sessions = await tx.salesContractEditSession.findMany({ where: { ownerUserId: input.actorId, purpose: 'PARTNER_TECHNICAL',
+     OR: [{ contractId: contract.id }, { recovery: { path: ['partnerCaseId'], equals: root.id } }] } });
+   for (const session of sessions) {
+diff --git a/backend/src/services/partnerSales/notifications/README.md b/backend/src/services/partnerSales/notifications/README.md
+index b74fdcaa..8a0241c8 100644
+--- a/backend/src/services/partnerSales/notifications/README.md
++++ b/backend/src/services/partnerSales/notifications/README.md
+@@ -1,5 +1,7 @@
+ # Partner notification/duty adapter — #327
+ 
++Commercial cancellation SMS now uses the shared `contractCancellationNotice` runtime under ADR-0127. Its transaction hooks cover Partner cancellation and Accounting void, require digital acceptance in the current activation period, and resolve the current active Customer mobile for each attempt. The historical-link notification interface below remains a distinct channel contract and must not also dispatch a cancellation SMS; its old snapshot-recipient policy does not govern the new SMS.
++
+ Consumes the `@sabalanerp/partner-sales-contracts@1.0.0` notification interface, also tested with the shared writer's compatible `1.1.0` package; notification wire `schemaVersion: 1`, `sha256-v1`. Runtime exports are injected through the public entry point; no manifest, schema, migration, route, shell, or activation changes belong to this lane.
+ 
+ ## Integration contract for #334
+diff --git a/backend/src/services/smsService.ts b/backend/src/services/smsService.ts
+index 5c6dcc23..affc6cee 100644
+--- a/backend/src/services/smsService.ts
++++ b/backend/src/services/smsService.ts
+@@ -100,6 +100,7 @@ class SmsService {
+   private apiUrl: string;
+   private templateId: number;
+   private contractConfirmationTemplateId: number;
++  private contractCancellationTemplateId: number;
+   private hiringInvitationTemplateId: number;
+   private hiringCorrectionTemplateId: number;
+   private hiringOfferTemplateId: number;
+@@ -120,6 +121,7 @@ class SmsService {
+       process.env.SMS_IR_CONTRACT_CONFIRM_TEMPLATE_ID || '385075',
+       10
+     );
++    this.contractCancellationTemplateId = Number(process.env.SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID || '0');
+     this.hiringInvitationTemplateId = resolveHiringInvitationTemplate(
+       process.env.SMS_IR_HIRING_INVITATION_TEMPLATE_ID
+     );
+@@ -354,6 +356,15 @@ class SmsService {
+     ]);
+   }
+ 
++  async sendContractCancellationMessage(params: { phoneNumber: string; contractNumber: string }): Promise<SmsSendResult> {
++    if (this.environment === 'sandbox' && !this.apiKey) return { success: true };
++    if (!Number.isInteger(this.contractCancellationTemplateId) || this.contractCancellationTemplateId <= 0) {
++      return { success: false, error: 'قالب پیامک لغو قرارداد تنظیم نشده است.' };
++    }
++    return this.sendTemplate(this.formatPhoneNumber(params.phoneNumber), this.contractCancellationTemplateId,
++      [{ name: 'ContractNumber', value: params.contractNumber }]);
++  }
++
+   async sendHiringInvitation(params: {
+     phoneNumber: string;
+     code: string;
+diff --git a/docker-compose.local.yml b/docker-compose.local.yml
+index 08c47c5b..6c50cbca 100644
+--- a/docker-compose.local.yml
++++ b/docker-compose.local.yml
+@@ -90,6 +90,7 @@ services:
+       FRONTEND_URL: http://localhost:${LOCAL_FRONTEND_HOST_PORT:-3000}
+       PUBLIC_APP_URL: http://localhost:${LOCAL_FRONTEND_HOST_PORT:-3000}
+       SMS_IR_ENVIRONMENT: sandbox
++      SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID: ${SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID:-774074}
+       SMS_IR_DISPATCH_EXIT_TEMPLATE_ID: "0"
+       BIOMETRIC_TEMPLATE_KEY_BASE64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+       DISPATCH_CONFIRMATION_OTP_SECRET: local-dispatch-confirmation-otp-secret
+diff --git a/docker-compose.prod.yml b/docker-compose.prod.yml
+index b4d50bbf..e5b824cc 100644
+--- a/docker-compose.prod.yml
++++ b/docker-compose.prod.yml
+@@ -97,6 +97,7 @@ services:
+       SMS_IR_API_URL: ${SMS_IR_API_URL}
+       SMS_IR_TEMPLATE_ID: ${SMS_IR_TEMPLATE_ID}
+       SMS_IR_CONTRACT_CONFIRM_TEMPLATE_ID: ${SMS_IR_CONTRACT_CONFIRM_TEMPLATE_ID}
++      SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID: ${SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID:-774074}
+       SMS_IR_HIRING_INVITATION_TEMPLATE_ID: ${SMS_IR_HIRING_INVITATION_TEMPLATE_ID}
+       SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS: ${SMS_IR_HIRING_INVITATION_TEMPLATE_PARAMETERS}
+       SMS_IR_HIRING_CORRECTION_TEMPLATE_ID: ${SMS_IR_HIRING_CORRECTION_TEMPLATE_ID:-763918}
+diff --git a/docs/adr/0127-notify-commercial-cancellation-at-current-customer-mobile.md b/docs/adr/0127-notify-commercial-cancellation-at-current-customer-mobile.md
+new file mode 100644
+index 00000000..bb783c6e
+--- /dev/null
++++ b/docs/adr/0127-notify-commercial-cancellation-at-current-customer-mobile.md
+@@ -0,0 +1,13 @@
++---
++status: accepted
++---
++
++# Notify commercial cancellation at the current Customer mobile
++
++On 2026-10-12 the owner confirmed notification for every newly committed commercial cancellation of ordinary and Partner customer Contracts with digital Customer acceptance in the current activation period. Acceptance of an earlier commercial version in that period qualifies; SMS submission alone and paper-only acceptance do not. Reactivation starts a fresh period. Expiry and administrative deactivation are excluded, and historical cancellations are not backfilled.
++
++Cancellation and a durable notification intent commit together. External delivery happens afterward and failures cannot undo cancellation. Each cancellation event has one intent with retained attempt history; replay cannot create another notice. Reactivation suppresses unsent notices while preserving history.
++
++The owner explicitly chose the current active Customer mobile over the historical accepted recipient because the Customer may have lost access to the old number. Select the active primary mobile, or the sole active valid mobile. Several mobiles without a primary require Seller selection; no valid mobile leaves the notice waiting for Customer contact correction. Every retry resolves current contact data again and records its actual destination. Acceptance evidence remains immutable under ADR-0123; this decision changes notification destination only.
++
++The SMS template contains only ContractNumber and fixed cancellation information, without cancellation reason. Sellers receive a small success status for four seconds after successful initial or repeated Customer confirmation SMS submission in both sales flows. Provider acceptance is distinct from handset delivery. Local implementation is authorized by the completed design interview; this decision does not authorize production deployment or attest validation.
+diff --git a/docs/operations/contract-cancellation-sms.md b/docs/operations/contract-cancellation-sms.md
+new file mode 100644
+index 00000000..3b8f3495
+--- /dev/null
++++ b/docs/operations/contract-cancellation-sms.md
+@@ -0,0 +1,34 @@
++# Commercial Contract cancellation SMS
++
++Decision: [ADR-0127](../adr/0127-notify-commercial-cancellation-at-current-customer-mobile.md).
++
++The owner supplied template ID **774074** for `SabalanContractCancellation` on 2026-10-12. The attached sms.ir screenshot shows its category as «اطلاع‌رسانی» and approval status as «در حال بررسی». Configuration now uses this ID; live sending still requires provider approval. The parameter remains `ContractNumber`.
++
++In the same sms.ir «لیست قالب‌ها» page used for `SabalanContractConfirmation` and the dispatch/hiring templates, click «افزودن قالب». Use title `SabalanContractCancellation` (or «اطلاع‌رسانی لغو قرارداد سبلان»), category «اطلاع‌رسانی», and this text:
++
++```text
++مشتری گرامی، قرارداد شما به شماره #ContractNumber# لغو شد.
++سنگ سبلان
++```
++
++The only parameter name is `ContractNumber` (same spelling and case), with the complete customer-facing Contract number. In template text write `#ContractNumber#`; in any separate parameter-name field enter `ContractNumber` without `#`. No OTP or cancellation reason is sent. Submit the new template for approval, then copy its own «شناسه قالب»; do not reuse `385075`, which belongs to the confirmation template.
++
++Configure that assigned numeric ID as `SMS_IR_CONTRACT_CANCEL_TEMPLATE_ID` in the backend environment and restart/recreate the backend through its normal environment workflow so the service loads it, just like the other SMS template IDs. The cancellation method uses the same `smsService.sendTemplate`, `POST /v1/send/verify`, API key and phone formatter as the existing templates, with `parameters: [{ name: 'ContractNumber', value: '<full contract number>' }]`. The API method name Verify does not require an OTP parameter in this informational template. Zero/missing configuration produces a visible failure and retains the intent. Production configuration/deployment follows the existing zero-data-loss procedure; this document does not enable real SMS or authorize deployment.
++
++Cancellation writes one durable intent in its business transaction. The backend scans eligible pending notices every 15 seconds and records each attempt's destination and result. Failed submissions retry with bounded exponential delays, up to five attempts before requiring a Seller request. Unknown network outcomes or interrupted sending attempts require review before manual retry because sms.ir does not provide an application idempotency key for Verify submissions. Local sandbox without an API key simulates acceptance without contacting sms.ir.
++
++The Contract detail page displays notice status, latest attempt history and permissioned retry/recipient selection. Missing phone data waits for CRM correction. Several active mobiles without one primary require Seller selection. Every new attempt resolves current active mobile data; old accepted recipients remain unchanged as acceptance evidence. Reactivation suppresses pending notices, and only fresh digital acceptance in the new activation period qualifies for another cancellation notice. Existing cancelled Contracts do not create notices through scanning.
++
++Successful confirmation SMS actions show «پیامک با موفقیت ارسال شد ✨» for four seconds. This indicates provider acceptance, not handset delivery.
++
++The intent retains the original Contract identity, number and Customer reference even if the existing guarded administrative hard-delete workflow removes an ordinary Contract. Deletion does not erase attempt history or veto an already committed notification; active contact data still comes from that Customer's current CRM record.
++
++Validation commands:
++
++```text
++npm --prefix backend run test:contract-cancellation-sms
++npm --prefix backend run test:contract-cancellation-sms:db
++npm run test:design-system:e2e -- ordinary-confirmation-recipient.spec.ts contract-cancellation-notice.spec.ts
++```
++
++The database suite requires the existing local Compose schema with this migration applied and `DATABASE_URL` explicitly targeting its PostgreSQL service (`127.0.0.1:55432/sabalanerp` from the host). Verify the existing project before migration or runtime QA. The suite creates and removes only its namespaced fixtures and fakes SMS submission.
+diff --git a/frontend/src/app/dashboard/sales/contracts/[id]/page.tsx b/frontend/src/app/dashboard/sales/contracts/[id]/page.tsx
+index 03d7f2a3..a34eaf28 100644
+--- a/frontend/src/app/dashboard/sales/contracts/[id]/page.tsx
++++ b/frontend/src/app/dashboard/sales/contracts/[id]/page.tsx
+@@ -1,5 +1,7 @@
+ "use client";
+ import { ContractConfirmationResend } from '@/features/sales/ContractConfirmationResend';
++import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
++import { ContractCancellationNotice } from '@/features/sales/ContractCancellationNotice';
+ import ContractDispatchCreditPanel from '@/features/sales/ContractDispatchCreditPanel';
+ import { ContractRenewal } from '@/features/sales/ContractRenewal';
+ import { ContractReactivation } from '@/features/sales/ContractReactivation';
+@@ -238,6 +240,7 @@ const getCustomerName = (contract: Contract) =>
+   );
+ 
+ export default function ContractDetailPage() {
++  const smsSuccess = useSmsSuccess();
+   const { hasPermission } = useWorkspace();
+   const params = useParams();
+   const searchParams = useSearchParams();
+@@ -250,7 +253,6 @@ export default function ContractDetailPage() {
+ 
+   const [renewalOpen, setRenewalOpen] = useState(false);
+   const [resendOpen, setResendOpen] = useState(false);
+-  const [confirmationSentPhone, setConfirmationSentPhone] = useState<string | null>(null);
+   const [reactivationOpen, setReactivationOpen] = useState(false);
+   const reactivationRouter = useRouter();
+   const [contract, setContract] = useState<Contract | null>(null);
+@@ -892,6 +894,7 @@ export default function ContractDetailPage() {
+         onDownload={() => void handleDownloadPdf()}
+         onPrint={() => void handlePrintContract()}
+       />
++      <ContractCancellationNotice contractId={contract.id} />
+       </>
+     );
+   }
+@@ -977,7 +980,7 @@ export default function ContractDetailPage() {
+   if (canResendConfirmation) {
+     actions.push({
+       label: "ارسال دوباره کد تایید",
+-      onClick: () => { setConfirmationSentPhone(null); setResendOpen(true); },
++      onClick: () => { setResendOpen(true); },
+       icon: FaRedo,
+       tone: "info" as ErpTone,
+       disabled: pendingOperations.has("resend-confirmation"),
+@@ -1027,7 +1030,7 @@ export default function ContractDetailPage() {
+   return (
+     <>
+       <ContractConfirmationResend contractId={resendOpen ? contract.id : null} onClose={() => setResendOpen(false)}
+-        onSent={phone => { setConfirmationSentPhone(phone); clearOperationalError("resend-confirmation"); }} />
++        onSent={() => { smsSuccess.show(); clearOperationalError("resend-confirmation"); }} />
+       <ContractRenewal contractId={renewalOpen ? contract.id : null} onClose={() => setRenewalOpen(false)} onRenewed={loadContract} />
+       <ContractReactivation target={reactivationOpen && contract.reactivationActions ? { id: contract.id,
+         expectedRevision: contract.reactivationActions.expectedRevision } : null}
+@@ -1053,7 +1056,8 @@ export default function ContractDetailPage() {
+           className="mb-4"
+         />
+       )}
+-      {confirmationSentPhone && <ErpInlineState kind="empty" title={`درخواست ارسال کد به ${confirmationSentPhone} با موفقیت ثبت شد.`} />}
++      {smsSuccess.feedback}
++      <ContractCancellationNotice contractId={contract.id} />
+       {loadError && (
+         <ErpInlineState
+           kind="stale"
+diff --git a/frontend/src/features/contract-creation/CreateContractWizardClient.tsx b/frontend/src/features/contract-creation/CreateContractWizardClient.tsx
+index db0949e0..c234d58f 100644
+--- a/frontend/src/features/contract-creation/CreateContractWizardClient.tsx
++++ b/frontend/src/features/contract-creation/CreateContractWizardClient.tsx
+@@ -1,4 +1,5 @@
+ 'use client';
++import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
+ 
+ import { OperationMinimumContext, OperationMinimumSummary, contractOperationMinimumState } from './components/product-modal-system/OperationMinimumContext';
+ import { evaluateOperationMinimums, operationMinimumMessage } from '@sabalanerp/contract-product-graph';
+@@ -710,6 +711,7 @@ export default function CreateContractWizard({
+   initialContractStatus = null,
+   correctionExpiresAt = null,
+ }: CreateContractWizardProps = {}) {
++  const smsSuccess = useSmsSuccess();
+   const router = useRouter();
+   const [reactivationTarget, setReactivationTarget] = useState<ContractReactivationTarget | null>(null);
+   const replacementInitialized = useRef(false);
+@@ -4720,6 +4722,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2):
+           lastSentAt: new Date().toISOString()
+         }
+       });
++      smsSuccess.show();
+       await refreshConfirmationStatus();
+       clearSignatureError(errorSource);
+     } catch (error: any) {
+@@ -4753,6 +4756,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2):
+         }), getSalesOperationalErrorKind(failure));
+         return;
+       }
++      smsSuccess.show();
+       await refreshConfirmationStatus();
+       clearSignatureError(errorSource);
+     } catch (error: any) {
+@@ -6422,6 +6426,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2):
+     >
+       <ContractReactivation target={reactivationTarget} onClose={() => setReactivationTarget(null)}
+         onReactivated={() => window.location.assign(`/dashboard/sales/contracts/${wizardData.signature?.contractId}/edit`)} />
++      {smsSuccess.feedback}
+ 
+         {editRecoverySuccessMessage && (
+           <ErpInlineState
+diff --git a/frontend/src/features/contract-creation/partner/PartnerContractWizard.tsx b/frontend/src/features/contract-creation/partner/PartnerContractWizard.tsx
+index 7b5f12ad..179273f5 100644
+--- a/frontend/src/features/contract-creation/partner/PartnerContractWizard.tsx
++++ b/frontend/src/features/contract-creation/partner/PartnerContractWizard.tsx
+@@ -1,4 +1,5 @@
+ 'use client';
++import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
+ import { PartnerInquiryProductFacts } from '../../partner-sales/inquiries/PartnerInquiryProductFacts';
+ import { PartnerWholesalePricingSummary } from '../../partner-sales/inquiries/PartnerWholesalePricingSummary';
+ 
+@@ -178,6 +179,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
+   const [discardOpen, setDiscardOpen] = useState(false);
+   const [recoveryPending, setRecoveryPending] = useState(false);
+   const [confirmationSent, setConfirmationSent] = useState(false);
++  const smsSuccess = useSmsSuccess();
+   const [quotePending, setQuotePending] = useState(false);
+   const [commitOpen, setCommitOpen] = useState(false);
+   const [actionPending, setActionPending] = useState(false);
+@@ -427,7 +429,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
+     if (!onSendConfirmation || !result.case || confirmationFlight.current || disabled) return;
+     confirmationFlight.current = true;
+     setActionPending(true); setError(null);
+-    try { await onSendConfirmation(result.case.owner.caseId); setConfirmationSent(true); }
++    try { await onSendConfirmation(result.case.owner.caseId); smsSuccess.show(); setConfirmationSent(true); }
+     catch (failure) { setError(partnerSalesActionFeedback(failure, 'ارسال پیامک تأیید').message); }
+     finally { confirmationFlight.current = false; setActionPending(false); }
+   };
+@@ -438,6 +440,7 @@ export function PartnerContractWizard({ draft, onChange, recovery, submission, n
+     clickableSteps={Boolean(result.case)}
+     onStepClick={step => move(step - 1)}
+     notices={<div className="mb-4 space-y-3">
++      {smsSuccess.feedback}
+       {correctionExpired ? <ErpInlineState kind="stale"
+         title="مهلت اصلاح پایان یافته؛ درخواست به حسابداری ارجاع شد. تغییرات ذخیره‌نشده برای بازیابی حفظ شده است."
+         action={{ label: 'مشاهده وظایف فروش', href: '/dashboard/sales/duties' }} />
+diff --git a/frontend/src/features/contract-creation/partner/PartnerCreationRuntime.tsx b/frontend/src/features/contract-creation/partner/PartnerCreationRuntime.tsx
+index d5e0b57f..5864cfb8 100644
+--- a/frontend/src/features/contract-creation/partner/PartnerCreationRuntime.tsx
++++ b/frontend/src/features/contract-creation/partner/PartnerCreationRuntime.tsx
+@@ -1,4 +1,5 @@
+ 'use client';
++import { assertSuccessfulSalesResult } from '@/features/sales/salesOperationalError';
+ 
+ import { createPartnerVisibleRefresh } from './partnerVisibleRefresh';
+ import { partnerWizardPersistenceKey } from './partnerWizardPersistence';
+@@ -1846,7 +1847,7 @@ function PartnerCreationRuntimeSession({ ordinary, mode }: { ordinary: React.Rea
+         setWizard(null);
+         router.replace(partnerProductEditPath(current.intent.recoveryId, caseId));
+       });
+-    }} onSendConfirmation={caseId => sendPartnerConfirmation(caseId).then(() => undefined)}
++    }} onSendConfirmation={async caseId => { const result = await sendPartnerConfirmation(caseId); assertSuccessfulSalesResult(result); }}
+     onFinalize={async view => {
+       finalizationFlight.current = true;
+       wizardSavePending.current = null;
+diff --git a/frontend/src/features/partner-sales/cases/PartnerCaseRuntime.tsx b/frontend/src/features/partner-sales/cases/PartnerCaseRuntime.tsx
+index a422b174..263edcb1 100644
+--- a/frontend/src/features/partner-sales/cases/PartnerCaseRuntime.tsx
++++ b/frontend/src/features/partner-sales/cases/PartnerCaseRuntime.tsx
+@@ -1,4 +1,5 @@
+ 'use client';
++import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
+ 
+ import { partnerInquiryLabels } from '@sabalanerp/partner-sales-contracts';
+ import { decidePartnerCommercial } from './partnerCaseHttpPort';
+@@ -26,6 +27,7 @@ import { partnerUnifiedCaseListPage, partnerCaseListTags, type PartnerCaseIssue,
+ type CaseError = { key: string; message: string; kind: 'error' | 'permission' | 'stale'; caseId: string; order: number };
+ 
+ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDrafts?: PartnerRecoveryListRow[] }) {
++  const smsSuccess = useSmsSuccess();
+   const router = useRouter();
+   const searchParams = useSearchParams();
+   const selectedCaseId = searchParams.get('caseId') || undefined;
+@@ -218,6 +220,7 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
+         action={{ label: 'تلاش دوباره', onClick: load }} />}</ErpListPage>;
+   }
+   return <ErpWorkspacePage title="پرونده‌های فروش همکار" context="وضعیت پرونده و وصول مشتری">
++    {smsSuccess.feedback}
+     {loadError && <ErpInlineState kind={loadError.kind} title={loadError.message} action={{ label: 'تلاش دوباره', onClick: load }} />}
+     {!loadError && !rows.length && <ErpEmptyState icon={FaFileContract} title="پرونده‌ای ثبت نشده است" />}
+     <div className="space-y-8">{rows.map(row => {
+@@ -248,6 +251,8 @@ export function PartnerCaseRuntime({ recoverableDrafts = [] }: { recoverableDraf
+             onFinalize: () => { setFinalizeTarget(row); setLossAccepted(false); },
+             onSendConfirmation: () => void runAction(caseId, 'send-confirmation', 'ارسال تأییدیه فروش همکار', async () => {
+               const result = await sendPartnerConfirmation(caseId);
++              assertSuccessfulSalesResult(result);
++              smsSuccess.show();
+               return result;
+             }),
+             onRequestCorrection: () => void runAction(caseId, 'request-correction:retail', 'ثبت درخواست اصلاح فروش همکار', () => requestPartnerCorrection(row.view, 'RETAIL_ONLY')),
+diff --git a/frontend/src/features/partner-sales/cases/PartnerContractCancellation.tsx b/frontend/src/features/partner-sales/cases/PartnerContractCancellation.tsx
+index b175db28..57887926 100644
+--- a/frontend/src/features/partner-sales/cases/PartnerContractCancellation.tsx
++++ b/frontend/src/features/partner-sales/cases/PartnerContractCancellation.tsx
+@@ -1,4 +1,5 @@
+ 'use client';
++import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
+ import { useCallback, useEffect, useRef, useState } from 'react';
+ import { useRouter } from 'next/navigation';
+ import type { PartnerCaseRuntimeRow } from '@sabalanerp/partner-sales-contracts';
+@@ -7,6 +8,7 @@ import { cancelPartnerCase, reactivatePartnerCase, readPartnerCases, sendPartner
+ import { partnerSalesActionFeedback } from '../partnerSalesErrorMessage';
+ import { assertSuccessfulSalesResult } from '@/features/sales/salesOperationalError';
+ export function PartnerContractCancellation({ caseId, presentation }: { caseId: string; presentation?: 'wizard' }) {
++  const smsSuccess = useSmsSuccess();
+   const router = useRouter();
+   const [row, setRow] = useState<PartnerCaseRuntimeRow>();
+   const [open, setOpen] = useState(false);
+@@ -22,6 +24,7 @@ export function PartnerContractCancellation({ caseId, presentation }: { caseId:
+   useEffect(() => { let active = true; setRow(undefined); void readPartnerCases(caseId).then(rows => { if (active) setRow(rows.find(item => item.view.owner.caseId === caseId)); }).catch(() => { if (active) setRow(undefined); }); return () => { active = false; }; }, [caseId]);
+   if (!row || (!row.actions.canCancel && !row.actions.canSendConfirmation && !cancelled)) return null;
+   const content = <>
++    {smsSuccess.feedback}
+     <div className="flex flex-wrap gap-3">
+       {row.actions.canSendConfirmation && <ErpButton label="ارسال پیامک تأیید" tone="primary" disabled={pending} onClick={() => {
+         if (confirmationFlight.current) return;
+@@ -29,7 +32,7 @@ export function PartnerContractCancellation({ caseId, presentation }: { caseId:
+         setPending(true); setConfirmationFeedback(undefined);
+         void sendPartnerConfirmation(caseId).then(result => {
+           assertSuccessfulSalesResult(result);
+-          setConfirmationFeedback({ kind: 'success', message: 'پیامک تأیید قرارداد برای مشتری ارسال شد.' });
++          smsSuccess.show();
+         }).catch(failure => setConfirmationFeedback({ kind: 'error', message: partnerSalesActionFeedback(failure, 'ارسال پیامک تأیید').message }))
+           .finally(() => { confirmationFlight.current = false; setPending(false); });
+       }} />}
+diff --git a/frontend/src/features/partner-sales/cases/PartnerSalesContractWorkspace.tsx b/frontend/src/features/partner-sales/cases/PartnerSalesContractWorkspace.tsx
+index 622cd3a1..381de7ac 100644
+--- a/frontend/src/features/partner-sales/cases/PartnerSalesContractWorkspace.tsx
++++ b/frontend/src/features/partner-sales/cases/PartnerSalesContractWorkspace.tsx
+@@ -1,4 +1,5 @@
+ 'use client';
++import { useSmsSuccess } from '@/features/sales/useSmsSuccess';
+ import { PartnerContractCancellation } from './PartnerContractCancellation';
+ 
+ import { useCallback, useEffect, useRef, useState } from 'react';
+@@ -18,6 +19,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
+   decisionActions?: ErpAction[];
+ }) {
+   const router = useRouter();
++  const smsSuccess = useSmsSuccess();
+   const [row, setRow] = useState<PartnerCaseRuntimeRow>();
+   const [error, setError] = useState<ReturnType<typeof partnerSalesActionFeedback>>();
+   const actionFlight = useRef(false);
+@@ -52,6 +54,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
+   const actions = row?.actions;
+   const currentView = row?.view ?? view;
+   return <>
++    {smsSuccess.feedback}
+     {['CANCELLED', 'VOIDED'].includes(currentView.state) && <PartnerContractCancellation caseId={currentView.owner.caseId} />}
+     {error && <ErpInlineState kind={error.kind} title={error.message} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
+     <PartnerCaseWorkspace view={currentView}
+@@ -78,6 +81,7 @@ export function PartnerSalesContractWorkspace({ view, canDownload, canPrint, onD
+         onSendConfirmation: () => { if (!pending) void run(async () => {
+           const result = await sendPartnerConfirmation(currentView.owner.caseId);
+           assertSuccessfulSalesResult(result);
++          smsSuccess.show();
+           return result;
+         }); },
+         onContinue: row?.editRecovery ? () => router.push(
+diff --git a/frontend/src/features/sales/ContractCancellationNotice.tsx b/frontend/src/features/sales/ContractCancellationNotice.tsx
+new file mode 100644
+index 00000000..24f34175
+--- /dev/null
++++ b/frontend/src/features/sales/ContractCancellationNotice.tsx
+@@ -0,0 +1,79 @@
++'use client';
++import { useCallback, useEffect, useState } from 'react';
++import { ErpButton, ErpDisclosure, ErpField, ErpFieldView, ErpInlineState, ErpSelect, ErpSection } from '@/components/erp';
++import { salesAPI } from '@/lib/api';
++import { assertSuccessfulSalesResponse, getSalesOperationalErrorMessage } from './salesOperationalError';
++
++type Notice = { status: string; canRetry: boolean; canChoosePhone: boolean; availablePhoneNumbers: string[]; defaultPhoneNumber: string | null;
++  lastError: string | null; attempts: { id: string; phoneNumber: string; status: string; createdAt: string }[] };
++const labels: Record<string, string> = {
++  PENDING: 'در انتظار ارسال', SENDING: 'در حال ارسال', RETRY: 'در انتظار تلاش مجدد', SENT: 'پیامک لغو ارسال شد',
++  NEEDS_PHONE: 'نیازمند شماره مشتری', NEEDS_SELECTION: 'نیازمند انتخاب شماره مشتری', FAILED: 'ارسال ناموفق',
++  UNKNOWN: 'نتیجه ارسال مشخص نیست', SUPPRESSED: 'ارسال پس از فعال‌سازی قرارداد متوقف شد',
++};
++
++export function ContractCancellationNotice({ contractId }: { contractId: string }) {
++  const [notice, setNotice] = useState<Notice | null>(null);
++  const [phone, setPhone] = useState('');
++  const [pending, setPending] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++  const load = useCallback(async () => {
++    const response = await salesAPI.getCancellationNotice(contractId);
++    assertSuccessfulSalesResponse(response);
++    const next: Notice | null = response.data.data;
++    setNotice(next); setPhone(next?.defaultPhoneNumber || '');
++  }, [contractId]);
++  useEffect(() => {
++    let active = true;
++    const refresh = async () => {
++      try {
++        const response = await salesAPI.getCancellationNotice(contractId);
++        assertSuccessfulSalesResponse(response);
++        if (!active) return;
++        const next: Notice | null = response.data.data;
++        setNotice(next);
++        setPhone(current => next?.availablePhoneNumbers.includes(current) ? current : next?.defaultPhoneNumber || '');
++      } catch { /* Keep the last visible delivery evidence during refresh failure. */ }
++    };
++    setNotice(null); setPhone(''); setError(null);
++    void refresh();
++    const timer = window.setInterval(() => void refresh(), 15_000);
++    return () => { active = false; window.clearInterval(timer); };
++  }, [contractId]);
++  const retry = async () => {
++    if (pending) return;
++    setPending(true); setError(null);
++    try {
++      const response = await salesAPI.retryCancellationNotice(contractId, phone);
++      assertSuccessfulSalesResponse(response);
++      await load();
++    } catch (failure) { setError(getSalesOperationalErrorMessage(failure, {
++      failedAction: 'درخواست ارسال اطلاع‌رسانی لغو', nextStep: 'شماره فعال مشتری را بررسی و دوباره تلاش کنید.',
++    })); } finally { setPending(false); }
++  };
++  if (!notice) return null;
++  return <ErpSection title="پیامک لغو قرارداد">
++    <ErpInlineState kind={notice.status === 'SENT' ? 'success' : ['UNKNOWN', 'FAILED'].includes(notice.status) ? 'error' : 'empty'}
++      title={labels[notice.status] || notice.status} />
++    {notice.lastError && <ErpInlineState kind="stale" title={notice.lastError} />}
++    {notice.canRetry && <>
++      {notice.canChoosePhone ? <ErpField label="شماره گیرنده">
++        <ErpSelect value={phone} disabled={pending} onChange={event => setPhone(event.target.value)}>
++          <option value="">انتخاب شماره</option>
++          {notice.availablePhoneNumbers.map(number => <option key={number} value={number}>{number}</option>)}
++        </ErpSelect>
++      </ErpField> : <ErpFieldView label="شماره گیرنده" value={phone || 'موبایل فعال ثبت نشده است'} />}
++      {notice.status === 'UNKNOWN' && <ErpInlineState kind="stale" title="ممکن است پیامک قبلی ارسال شده باشد؛ پیش از تلاش مجدد، وضعیت آن را بررسی کنید." />}
++      <div className="flex flex-wrap gap-2">
++        <ErpButton label="درخواست ارسال" disabled={pending || !phone} onClick={() => void retry()} />
++        <ErpButton label="دریافت دوباره شماره‌ها" variant="ghost" disabled={pending}
++          onClick={() => void load().catch(() => setError('دریافت شماره‌ها انجام نشد.'))} />
++      </div>
++    </>}
++    {error && <ErpInlineState kind="error" title={error} />}
++    {!!notice.attempts.length && <ErpDisclosure title="سابقه ارسال">
++      {notice.attempts.map(attempt => <ErpFieldView key={attempt.id} label={new Date(attempt.createdAt).toLocaleString('fa-IR')}
++        value={`${attempt.phoneNumber} — ${labels[attempt.status] || attempt.status}`} />)}
++    </ErpDisclosure>}
++  </ErpSection>;
++}
+diff --git a/frontend/src/features/sales/useSmsSuccess.tsx b/frontend/src/features/sales/useSmsSuccess.tsx
+new file mode 100644
+index 00000000..97274dc2
+--- /dev/null
++++ b/frontend/src/features/sales/useSmsSuccess.tsx
+@@ -0,0 +1,16 @@
++'use client';
++import { useCallback, useEffect, useState } from 'react';
++import { ErpInlineState } from '@/components/erp';
++
++export function useSmsSuccess() {
++  const [sequence, setSequence] = useState(0);
++  const [visible, setVisible] = useState(false);
++  const show = useCallback(() => { setVisible(true); setSequence(value => value + 1); }, []);
++  useEffect(() => {
++    if (!sequence) return;
++    const timer = window.setTimeout(() => setVisible(false), 4_000);
++    return () => window.clearTimeout(timer);
++  }, [sequence]);
++  return { show, feedback: visible ? <ErpInlineState kind="success" title="پیامک با موفقیت ارسال شد ✨"
++    className="fixed bottom-6 left-1/2 z-50 w-max max-w-[calc(100vw-2rem)] -translate-x-1/2" /> : null };
++}
+diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
+index b5ae5dd6..b4665849 100644
+--- a/frontend/src/lib/api.ts
++++ b/frontend/src/lib/api.ts
+@@ -679,6 +679,8 @@ export const salesAPI = {
+   createPayment: (contractId: string, paymentData: any) => api.post(`/sales/contracts/${contractId}/payments`, paymentData),
+   
+   // Digital confirmation
++  getCancellationNotice: (contractId: string) => api.get(`/sales/contracts/${contractId}/cancellation-notice`),
++  retryCancellationNotice: (contractId: string, phoneNumber?: string) => api.post(`/sales/contracts/${contractId}/cancellation-notice/retry`, { phoneNumber }),
+   sendForConfirmation: (contractId: string) =>
+     api.post(`/sales/contracts/${contractId}/send-for-confirmation`),
+ 
+diff --git a/tests/design-system-e2e/contract-cancellation-notice.spec.ts b/tests/design-system-e2e/contract-cancellation-notice.spec.ts
+new file mode 100644
+index 00000000..a1bcea93
+--- /dev/null
++++ b/tests/design-system-e2e/contract-cancellation-notice.spec.ts
+@@ -0,0 +1,53 @@
++import { expect, test, type Route } from '@playwright/test';
++import { loginAsAdmin, setViewportAndZoom, setTheme, assertNoHorizontalOverflow } from './support/design-system';
++
++const id = 'qa-cancellation-notice';
++const reply = (route: Route, data: unknown) => route.fulfill({ json: { success: true, data } });
++for (const width of [1280, 390]) test(`cancellation notice selection, delivery history and pending protection at ${width}px`, async ({ page }, info) => {
++  await loginAsAdmin(page);
++  await setViewportAndZoom(page, { width, height: 900 });
++  await page.route(`**/api/sales/contracts/${id}`, route => reply(route, {
++    id, contractNumber: 'QA-CANCEL', titlePersian: 'قرارداد فروش سنگ', status: 'CANCELLED',
++    commercialFlowVersion: 1, commercialRevision: 1, totalAmount: 100000, currency: 'ریال',
++    createdAt: '2026-10-12T00:00:00Z', updatedAt: '2026-10-12T00:00:00Z',
++    customer: { id: 'qa-customer', firstName: 'مشتری', lastName: 'آزمون', customerType: 'INDIVIDUAL' },
++    department: { id: 'sales', namePersian: 'فروش' },
++    createdByUser: { id: 'admin', firstName: 'مدیر', lastName: 'آزمون', username: 'admin' },
++    responsibleSeller: { id: 'admin', firstName: 'مدیر', lastName: 'آزمون', username: 'admin' },
++    items: [], deliveries: [], payments: [], commercialActions: { canEdit: false, canSendConfirmation: false },
++  }));
++  await page.route('**/api/sales/reports/sellers*', route => reply(route, []));
++  let status = 'NEEDS_SELECTION';
++  await page.route(`**/api/sales/contracts/${id}/cancellation-notice`, route => reply(route, {
++    status, canRetry: status !== 'SENT', canChoosePhone: true, availablePhoneNumbers: ['09120000002', '09120000003'],
++    defaultPhoneNumber: null, lastError: null,
++    attempts: [{ id: 'attempt-1', status: 'FAILED', phoneNumber: '09120000001', createdAt: '2026-10-12T00:00:00Z' }],
++  }));
++  let release: (() => void) | undefined;
++  let requests = 0;
++  await page.route(`**/api/sales/contracts/${id}/cancellation-notice/retry`, async route => {
++    expect(route.request().postDataJSON()).toEqual({ phoneNumber: '09120000003' });
++    requests++;
++    await new Promise<void>(resolve => { release = resolve; });
++    status = 'PENDING';
++    await reply(route, { status });
++  });
++  await page.goto(`/dashboard/sales/contracts/${id}`);
++  await expect(page.getByText('نیازمند انتخاب شماره مشتری', { exact: true })).toBeVisible();
++  const submit = page.getByRole('button', { name: 'درخواست ارسال', exact: true });
++  await expect(submit).toBeDisabled();
++  const recipient = page.getByRole('combobox', { name: 'شماره گیرنده' });
++  await recipient.selectOption('09120000003');
++  await page.getByRole('button', { name: 'سابقه ارسال' }).click();
++  await expect(page.getByText('09120000001 — ارسال ناموفق', { exact: true })).toBeVisible();
++  for (const theme of ['light', 'dark'] as const) {
++    await setTheme(page, theme); await assertNoHorizontalOverflow(page);
++    await page.screenshot({ path: info.outputPath(`cancellation-${width}-${theme}.png`), fullPage: true });
++  }
++  await submit.click();
++  await expect.poll(() => requests).toBe(1);
++  await expect(submit).toBeDisabled(); await expect(recipient).toBeDisabled();
++  release!();
++  await expect(page.getByText('در انتظار ارسال', { exact: true })).toBeVisible();
++  await expect(page.getByText('پیامک با موفقیت ارسال شد ✨', { exact: true })).toHaveCount(0);
++});
+diff --git a/tests/design-system-e2e/ordinary-confirmation-recipient.spec.ts b/tests/design-system-e2e/ordinary-confirmation-recipient.spec.ts
+index 3a5c509e..750d27f8 100644
+--- a/tests/design-system-e2e/ordinary-confirmation-recipient.spec.ts
++++ b/tests/design-system-e2e/ordinary-confirmation-recipient.spec.ts
+@@ -18,6 +18,7 @@ for (const width of [1280, 390]) test(`recipient selection, failed-send retry an
+     commercialActions: { canRenew: false, canEdit: true, canApproveSales: false, canSendConfirmation: true },
+   }));
+   await page.route('**/api/sales/reports/sellers*', route => reply(route, []));
++  await page.route(`**/api/sales/contracts/${id}/cancellation-notice`, route => reply(route, null));
+   let numbers = ['09120000002', '09120000004'];
+   await page.route(`**/api/sales/contracts/${id}/confirmation-recipients`, route => reply(route, {
+     availablePhoneNumbers: numbers, defaultPhoneNumber: numbers[0], phoneNumber: '09120000001', sessionStatus: 'PENDING',
+@@ -46,6 +47,7 @@ for (const width of [1280, 390]) test(`recipient selection, failed-send retry an
+   const submit = dialog.getByRole('button', { name: 'ارسال کد تأیید', exact: true });
+   await submit.click();
+   await expect(dialog).toContainText('ارسال پیامک تایید انجام نشد');
++  await expect(page.getByText('پیامک با موفقیت ارسال شد ✨', { exact: true })).toHaveCount(0);
+   await expect(recipient).toHaveValue('09120000004');
+   await submit.click();
+   await expect.poll(() => attempts).toBe(2);
+@@ -55,7 +57,11 @@ for (const width of [1280, 390]) test(`recipient selection, failed-send retry an
+   await expect(dialog).toBeVisible();
+   release!();
+   await expect(dialog).toHaveCount(0);
+-  await expect(page.getByText('درخواست ارسال کد به 09120000004 با موفقیت ثبت شد.')).toBeVisible();
++  const success = page.getByText('پیامک با موفقیت ارسال شد ✨', { exact: true });
++  await expect(success).toBeVisible();
++  const box = await success.boundingBox();
++  expect(box!.y + box!.height).toBeLessThanOrEqual(900);
++  await expect(success).toHaveCount(0, { timeout: 6_000 });
+   numbers = [];
+   await page.getByRole('button', { name: 'ارسال دوباره کد تایید', exact: true }).click();
+   await expect(dialog).toContainText('موبایل فعال و معتبر ثبت نشده است');

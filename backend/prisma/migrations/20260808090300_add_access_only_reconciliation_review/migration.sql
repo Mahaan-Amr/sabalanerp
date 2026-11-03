@@ -1,2 +1,0 @@
-ALTER TYPE "HrReconciliationReviewOutcome"
-ADD VALUE IF NOT EXISTS 'ACCEPTED_ACCESS_ONLY';

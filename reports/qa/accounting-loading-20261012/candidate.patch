@@ -1,0 +1,283 @@
+diff --git a/backend/src/routes/accounting.ts b/backend/src/routes/accounting.ts
+index d5ec549a..1a8ed5df 100644
+--- a/backend/src/routes/accounting.ts
++++ b/backend/src/routes/accounting.ts
+@@ -594,11 +594,14 @@ export const createAccountingFinancialTrendResponse = (
+ 
+ router.get('/financial-trend', accountingView, createAccountingFinancialTrendResponse());
+ 
+-router.get('/contracts', accountingContractsView, async (req: AuthRequest, res: Response) => {
++export const createAccountingContractsResponse = (
++  loadContracts: typeof listAccountingContracts = listAccountingContracts,
++  loadCapabilities: typeof getAccountingActionCapabilities = getAccountingActionCapabilities,
++) => async (req: AuthRequest, res: Response) => {
+   try {
+     const [data, capabilities] = await Promise.all([
+-      listAccountingContracts(req.query as any, { userId: req.user!.id }),
+-      getAccountingActionCapabilities(req.user!.id, req.user!.role),
++      loadContracts(req.query as any, { userId: req.user!.id }),
++      loadCapabilities(req.user!.id, req.user!.role),
+     ]);
+     res.json({ success: true, data: {
+       ...data,
+@@ -606,9 +609,11 @@ router.get('/contracts', accountingContractsView, async (req: AuthRequest, res:
+     } });
+   } catch (error) {
+     console.error('Accounting contracts error:', error);
+-    res.status(500).json({ success: false, error: 'Server error' });
++    accountingReadFailure(res, error);
+   }
+-});
++};
++
++router.get('/contracts', accountingContractsView, createAccountingContractsResponse());
+ 
+ router.get('/contracts/:contractId', accountingContractsView, async (req: AuthRequest, res: Response) => {
+   try {
+diff --git a/backend/src/services/__tests__/partnerReadSnapshot.integration.test.ts b/backend/src/services/__tests__/partnerReadSnapshot.integration.test.ts
+index be785fa7..9150cfab 100644
+--- a/backend/src/services/__tests__/partnerReadSnapshot.integration.test.ts
++++ b/backend/src/services/__tests__/partnerReadSnapshot.integration.test.ts
+@@ -16,9 +16,9 @@ test('Partner read snapshots coexist while a writer waits for their shared bound
+   let secondEntered = false;
+   let writerEntered = false;
+ 
+-  const first = readPartnerSnapshot(prisma, async () => { firstEntered(); await held; });
++  const first = readPartnerSnapshot(prisma, async () => { firstEntered(); await held; }, { multiRootAuthority: false });
+   await firstStarted;
+-  const second = readPartnerSnapshot(prisma, async () => { secondEntered = true; });
++  const second = readPartnerSnapshot(prisma, async () => { secondEntered = true; }, { multiRootAuthority: false });
+   let writer: Promise<void> | null = null;
+   try {
+     await pause(300);
+diff --git a/backend/src/services/partnerSales/accounting/invoiceSource.ts b/backend/src/services/partnerSales/accounting/invoiceSource.ts
+index b9878c35..d0762cc1 100644
+--- a/backend/src/services/partnerSales/accounting/invoiceSource.ts
++++ b/backend/src/services/partnerSales/accounting/invoiceSource.ts
+@@ -5,6 +5,7 @@ import { PartnerAccountingCommandError } from './errors';
+ import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource,
+   type PartnerFinancialPreparation } from './source';
+ import { subtract } from '../reporting/money';
++import { resolveInvoiceSabalanPlan } from './sabalanPlanEvidence';
+ 
+ const object = (value: unknown): Record<string, unknown> | undefined =>
+   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+@@ -23,7 +24,11 @@ export async function readPartnerInvoiceSource(tx: Prisma.TransactionClient, inv
+   if (!current || current.row.internalRecordId !== invoice.sourceId) throw conflict();
+   const historical = await readPartnerRevisionProjections(tx, owner.data);
+   if (!historical?.accounting) throw conflict();
+-  const prepared = await preparePartnerFinancialSource({ view: { ...historical.accounting, state: 'COMMITTED' },
++  const invoicePlan = await resolveInvoiceSabalanPlan(tx, owner.data,
++    historical.accounting.sabalanPaymentPlan, preparation?.paymentPlan);
++  const prepared = await preparePartnerFinancialSource({ view: {
++    ...historical.accounting, sabalanPaymentPlan: invoicePlan, state: 'COMMITTED',
++  },
+     partnerSellerId: current.row.profile.userId }, owner.data);
+   if (!prepared.ok || !preparation || !matchesFinancialPreparation(prepared.value, preparation) ||
+       invoice.currency !== prepared.value.amount.currency || subtract(invoice.amount.toString(), prepared.value.amount.amount) !== '0') throw conflict();
+diff --git a/backend/src/services/partnerSales/accounting/readScope.ts b/backend/src/services/partnerSales/accounting/readScope.ts
+index 8485ccec..79ce88a3 100644
+--- a/backend/src/services/partnerSales/accounting/readScope.ts
++++ b/backend/src/services/partnerSales/accounting/readScope.ts
+@@ -4,7 +4,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
+ import { RevisionRefSchema } from '@sabalanerp/partner-sales-contracts';
+ import { createAuditedPartnerAuthorization } from '../authorization/audited';
+ import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from '../cases/lifecycle';
+-import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource, type PartnerFinancialPreparation } from './source';
++import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource, type PartnerFinancialPreparation, type PartnerAccountingSource } from './source';
+ import { subtract } from '../reporting/money';
+ import { PartnerAccountingCommandError } from './errors';
+ import { PartnerCollectionIntegrityError, readPartnerCollections } from './collections';
+@@ -16,7 +16,7 @@ import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
+ import { PARTNER_ACCOUNTING_MARKER_JSON_PATH } from './provenance';
+ import { assertPartnerAccountingWitnesses as assertWitnesses, readPartnerReceivableEvidence } from './receivableEvidence';
+ import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvidence';
+-import { withCurrentSabalanPlan } from './sabalanPlan';
++import { resolveCurrentSabalanPlan, resolveInvoiceSabalanPlan } from './sabalanPlanEvidence';
+ import { readAuthorizedPartnerAuditWitnesses } from '../../accountingReadProjection';
+ 
+ const object = (value: unknown): Record<string, unknown> | undefined =>
+@@ -134,6 +134,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
+   ] };
+   const contextByInvoice = new Map<string, PartnerAccountingContext>();
+   const healthyCases = new Set<string>();
++  const currentAccountingByCase = new Map<string, PartnerAccountingSource['view']>();
+   const committedCases = new Set<string>();
+   const finalCases = new Set<string>();
+   const commercialByCase = new Map<string, string>();
+@@ -164,7 +165,8 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
+           object(invoice.metadata)?.partnerCaseId !== row.id) throw conflict();
+       if (!healthyCases.has(row.id)) {
+         const current = await readCurrentPartnerCaseViews(database, row.id);
+-        if (!current) throw conflict();
++        if (!current?.accounting) throw conflict();
++        currentAccountingByCase.set(row.id, current.accounting);
+         if (current.row.state === 'COMMITTED') committedCases.add(row.id);
+         const commercial = await readPartnerCommercialState(database, row.id);
+         if (commercial) commercialByCase.set(row.id, commercial.status);
+@@ -174,8 +176,20 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
+       }
+       const views = await readPartnerRevisionProjections(database, owner.data);
+       if (!views?.accounting) throw conflict();
+-      const accountingView = await withCurrentSabalanPlan(database, views.accounting);
+-      const prepared = await preparePartnerFinancialSource({ view: { ...accountingView, state: 'COMMITTED' },
++      // Validate live terms against the current Case, independently of the
++      // invoice's immutable historical revision and financial preparation.
++      const currentAccounting = currentAccountingByCase.get(row.id);
++      if (!currentAccounting) throw conflict();
++      const currentPlan = await resolveCurrentSabalanPlan(database, row.id, currentAccounting.sabalanPaymentPlan);
++      const currentPrepared = await preparePartnerFinancialSource({ view: {
++        ...currentAccounting, sabalanPaymentPlan: currentPlan, state: 'COMMITTED',
++      }, partnerSellerId: row.profile.userId }, currentAccounting.owner);
++      if (!currentPrepared.ok) throw conflict();
++      const invoicePlan = await resolveInvoiceSabalanPlan(database, owner.data,
++        views.accounting.sabalanPaymentPlan, preparation?.paymentPlan);
++      const prepared = await preparePartnerFinancialSource({ view: {
++        ...views.accounting, sabalanPaymentPlan: invoicePlan, state: 'COMMITTED',
++      },
+         partnerSellerId: row.profile.userId }, owner.data);
+       if (!prepared.ok || !preparation || !matchesFinancialPreparation(prepared.value, preparation) ||
+           invoice.currency !== prepared.value.amount.currency || subtract(invoice.amount.toString(), prepared.value.amount.amount) !== '0') throw conflict();
+diff --git a/backend/src/services/partnerSales/accounting/sabalanPlan.ts b/backend/src/services/partnerSales/accounting/sabalanPlan.ts
+index 49f1be97..928da062 100644
+--- a/backend/src/services/partnerSales/accounting/sabalanPlan.ts
++++ b/backend/src/services/partnerSales/accounting/sabalanPlan.ts
+@@ -10,46 +10,12 @@ import { readPartnerAccountingCapabilities } from './capabilities';
+ import { prepareCommittedAccountingSource, PARTNER_INTERNAL_ACCOUNTING_SOURCE } from './source';
+ import { readCurrentPartnerCaseViews } from '../cases/lifecycle';
+ import { partnerPredecessorIsFrozen } from '../corrections/mutationFreeze';
++import { resolveCurrentSabalanPlan } from './sabalanPlanEvidence';
++export { PartnerSabalanPlanIntegrityError, resolveCurrentSabalanPlan } from './sabalanPlanEvidence';
+ 
+ const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+ const object = (value: unknown): Record<string, unknown> | undefined =>
+   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+-export class PartnerSabalanPlanIntegrityError extends Error {}
+-
+-export async function resolveCurrentSabalanPlan(tx: Prisma.TransactionClient, caseId: string,
+-  fallback: ReturnType<typeof PaymentPlanSchema.parse>) {
+-  const latest = await tx.partnerPaymentPlan.findFirst({ where: { caseId, purpose: 'SABALAN' },
+-    orderBy: [{ version: 'desc' }, { id: 'desc' }], select: { id: true, caseId: true, caseRevision: true,
+-      purpose: true, version: true, predecessorId: true, effectiveDate: true, evidence: true, integrityHash: true,
+-      predecessor: { select: { id: true, caseId: true, purpose: true, version: true } },
+-      installments: { orderBy: { id: 'asc' }, select: { id: true, dueDate: true, amount: true,
+-        currency: true, method: true, evidence: true } } } });
+-  const parsed = PaymentPlanSchema.safeParse(latest?.evidence);
+-  if (!latest) return fallback;
+-  if (!parsed.success || latest.caseId !== caseId || latest.purpose !== 'SABALAN' ||
+-      latest.caseRevision < 1 || parsed.data.planId !== latest.id ||
+-      parsed.data.version !== latest.version || parsed.data.predecessorPlanId !== latest.predecessorId ||
+-      (latest.version === 1 ? latest.predecessor !== null : latest.predecessor?.id !== latest.predecessorId ||
+-        latest.predecessor.caseId !== caseId || latest.predecessor.purpose !== 'SABALAN' ||
+-        latest.predecessor.version !== latest.version - 1) ||
+-      parsed.data.effectiveDate !== latest.effectiveDate.toISOString().slice(0, 10) ||
+-      parsed.data.installments.length !== latest.installments.length ||
+-      await canonicalHash({ purpose: 'PARTNER_SABALAN_PAYMENT_PLAN', schemaVersion: 1,
+-        caseId: latest.caseId, revision: latest.caseRevision, plan: parsed.data }) !== latest.integrityHash) {
+-    throw new PartnerSabalanPlanIntegrityError('Invalid Partner Sabalan payment plan evidence');
+-  }
+-  const persisted = new Map(latest.installments.map(item => [item.id, item]));
+-  for (const item of parsed.data.installments) {
+-    const row = persisted.get(item.installmentId);
+-    if (!row || row.dueDate.toISOString().slice(0, 10) !== item.dueDate || row.amount.toString() !== item.amount.amount ||
+-        row.currency !== item.amount.currency || row.method !== item.method ||
+-        await canonicalHash(row.evidence) !== await canonicalHash(item)) {
+-      throw new PartnerSabalanPlanIntegrityError('Invalid Partner Sabalan installment evidence');
+-    }
+-  }
+-  return parsed.data;
+-}
+-
+ export async function withCurrentSabalanPlan(tx: Prisma.TransactionClient, view: ReturnType<typeof SabalanInternalRecordViewSchema.parse>) {
+   return { ...view, sabalanPaymentPlan: await resolveCurrentSabalanPlan(tx, view.owner.caseId, view.sabalanPaymentPlan) };
+ }
+diff --git a/frontend/src/app/dashboard/accounting/contracts/page.tsx b/frontend/src/app/dashboard/accounting/contracts/page.tsx
+index 2ff579d4..87ec26cf 100644
+--- a/frontend/src/app/dashboard/accounting/contracts/page.tsx
++++ b/frontend/src/app/dashboard/accounting/contracts/page.tsx
+@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
+ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+ import {
+   FaCheckCircle,
+-  FaClipboardCheck,
+   FaExclamationTriangle,
+   FaEye,
+   FaDownload,
+@@ -18,7 +17,6 @@ import {
+ } from 'react-icons/fa';
+ import {
+   ErpBadge,
+-  ErpEmptyState,
+   ErpListPage,
+   ErpPagination,
+   ErpSection,
+@@ -33,6 +31,7 @@ import { operationalStatusLabel } from '@/features/dispatch/operationalStatusPre
+ import AccountingActionModal from '@/features/accounting/AccountingActionModal';
+ import AccountingCustomerCategoryBadge from '@/features/accounting/AccountingCustomerCategoryBadge';
+ import { financialEvidenceReviewFromConflict } from '@/features/accounting/financialEvidenceReview';
++import { AccountingContractsFeedback, accountingContractsResponse } from '@/features/accounting/AccountingContractsFeedback';
+ import {
+   canonicalizeContractsQuery,
+   patchContractsQuery,
+@@ -79,6 +78,7 @@ export default function AccountingContractsPage() {
+   const [rows, setRows] = useState<AccountingContractRow[]>([]);
+   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0 });
+   const [loading, setLoading] = useState(true);
++  const [loadError, setLoadError] = useState<string | null>(null);
+   const [searchInput, setSearchInput] = useState(query.search);
+   const [actionLoading, setActionLoading] = useState<string | null>(null);
+   const [actionError, setActionError] = useState<string | null>(null);
+@@ -122,6 +122,7 @@ export default function AccountingContractsPage() {
+   const loadContracts = useCallback(async () => {
+     try {
+       setLoading(true);
++      setLoadError(null);
+       const response = await accountingAPI.getContracts({
+         view: query.view || undefined,
+         lifecycleView: query.lifecycleView,
+@@ -133,16 +134,16 @@ export default function AccountingContractsPage() {
+         page: query.page,
+         pageSize: pagination.pageSize,
+       });
+-      if (response.data.success) {
+-        setRows(response.data.data.items);
+-        setPagination({
+-          page: response.data.data.page,
+-          pageSize: response.data.data.pageSize,
+-          total: response.data.data.total,
+-        });
+-      }
++      const data = accountingContractsResponse(response.data);
++      setRows(data.items);
++      setPagination({
++        page: data.page,
++        pageSize: data.pageSize,
++        total: data.total,
++      });
+     } catch (error) {
+       console.error('Error loading accounting contracts:', error);
++      setLoadError(accountingFailureMessage(error, 'دریافت قراردادهای حسابداری انجام نشد. دوباره تلاش کنید.'));
+     } finally {
+       setLoading(false);
+     }
+@@ -567,7 +568,7 @@ export default function AccountingContractsPage() {
+           options: sourceStatusOptions,
+         },
+       ]}
+-      rows={rows}
++      rows={loadError ? [] : rows}
+       rowKey={(contract) => contract.contractId}
+       rowClassName={(contract) => contract.sourceKind === 'PARTNER_INTERNAL_RECORD'
+         ? 'border-2 border-[var(--sds-purple-border)]'
+@@ -575,9 +576,9 @@ export default function AccountingContractsPage() {
+       columns={columns}
+       rowActions={rowActions}
+       isLoading={loading}
+-      emptyState={<ErpEmptyState icon={FaClipboardCheck} title="قراردادی یافت نشد" description="فیلترها را تغییر دهید یا بعد از ثبت قرارداد جدید دوباره بررسی کنید." />}
++      emptyState={<AccountingContractsFeedback error={loadError} onRetry={loadContracts} />}
+       footer={
+-        <ErpPagination
++        !loadError && <ErpPagination
+           currentPage={pagination.page}
+           totalPages={Math.max(Math.ceil(pagination.total / pagination.pageSize), 1)}
+           totalItems={pagination.total}

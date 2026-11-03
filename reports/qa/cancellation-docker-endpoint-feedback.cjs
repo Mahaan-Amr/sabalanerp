@@ -1,0 +1,2 @@
+const {spawnSync}=require('child_process');
+for(const args of [['--version'],['-H','npipe:////./pipe/dockerDesktopLinuxEngine','version','--format','{{.Client.Version}} {{.Server.Version}}'],['-H','npipe:////./pipe/dockerDesktopLinuxEngine','compose','-f','docker-compose.local.yml','ps','--format','json']]){const r=spawnSync('docker',args,{encoding:'utf8',timeout:15000});console.log(JSON.stringify({test:args.join(' '),exit:r.status,error:r.error?.code,output:(r.stdout||r.stderr||'').slice(0,5000)}));}

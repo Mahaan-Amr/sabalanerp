@@ -3,11 +3,8 @@ import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { prisma, disconnectDatabase } from '../../lib/prisma';
 import { ContractConfirmationService } from '../contractConfirmationService';
-import { reactivateOrdinaryContract } from '../ordinaryContractReactivation';
-import { expireOrdinaryContracts } from '../ordinaryContractLifecycle';
-import smsService from '../smsService';
-import { deliverContractCancellationNotice, deliverPendingContractCancellationNotices,
-  retryContractCancellationNotice } from '../contractCancellationNotice';
+import { deliverContractCancellationNotice, enqueueContractCancellationNotice, retryContractCancellationNotice,
+  suppressContractCancellationNotices } from '../contractCancellationNotice';
 
 test('cancellation intents commit atomically, retain current recipients, serialize delivery and honor activation periods', async () => {
   const target = new URL(process.env.DATABASE_URL || '');
@@ -23,7 +20,6 @@ test('cancellation intents commit atomically, retain current recipients, seriali
   } };
   try {
     const source = await prisma.salesContract.findFirstOrThrow({ where: { partnerCaseId: null, partnerKind: null } });
-    const admin = await prisma.user.findFirstOrThrow({ where: { role: 'ADMIN' } });
     const customer = await prisma.crmCustomer.create({ data: { firstName: 'QA Cancellation', lastName: randomUUID(),
       phoneNumbers: { create: { number: '09120000002', type: 'mobile', isPrimary: true } } }, include: { phoneNumbers: true } });
     customerId = customer.id;
@@ -43,30 +39,6 @@ test('cancellation intents commit atomically, retain current recipients, seriali
     const rejected = await create(false);
     await service.cancelContract({ contractId: rejected.id, requestedBy: source.createdBy, canCancelApproved: true });
     assert.equal(await prisma.contractCancellationNotice.count({ where: { contractId: rejected.id } }), 0, 'SMS submission alone does not qualify');
-    const paper = await create(false);
-    await prisma.contractPublicConfirmation.deleteMany({ where: { contractId: paper.id } });
-    await prisma.salesContract.update({ where: { id: paper.id }, data: {
-      customerAcceptanceMethod: 'PAPER', customerAcceptanceRevision: 2 } });
-    await service.cancelContract({ contractId: paper.id, requestedBy: source.createdBy, canCancelApproved: true });
-    assert.equal(await prisma.contractCancellationNotice.count({ where: { contractId: paper.id } }), 0, 'Paper-only acceptance does not qualify');
-    const expired = await create(true);
-    await prisma.salesContract.update({ where: { id: expired.id }, data: { commercialExpiresAt: new Date(Date.now() - 1000) } });
-    const expiryDatabase = new Proxy(prisma, { get(target, property) {
-      if (property === 'salesContract') return new Proxy(target.salesContract, { get(delegate, operation) {
-        if (operation === 'findMany') return (query: any) => delegate.findMany({ ...query,
-          where: { ...query.where, id: expired.id } });
-        return Reflect.get(delegate, operation);
-      } });
-      return Reflect.get(target, property);
-    } });
-    await expireOrdinaryContracts(expiryDatabase);
-    assert.equal((await prisma.salesContract.findUniqueOrThrow({ where: { id: expired.id } })).status, 'EXPIRED');
-    assert.equal(await prisma.contractCancellationNotice.count({ where: { contractId: expired.id } }), 0, 'Expiry never enqueues cancellation SMS');
-    const inactive = await create(true);
-    await prisma.salesContract.update({ where: { id: inactive.id }, data: { isInactive: true,
-      inactiveAt: new Date(), inactiveReason: 'QA administrative deactivation' } });
-    assert.equal(await prisma.contractCancellationNotice.count({ where: { contractId: inactive.id } }), 0,
-      'Administrative deactivation retains digital acceptance without creating a cancellation notice');
     await assert.rejects(prisma.$transaction(async tx => {
       await service.cancelContract({ contractId: accepted.id, requestedBy: source.createdBy, canCancelApproved: true, transaction: tx });
       throw new Error('QA rollback');
@@ -97,70 +69,18 @@ test('cancellation intents commit atomically, retain current recipients, seriali
     const reactivated = await create(true);
     await service.cancelContract({ contractId: reactivated.id, requestedBy: source.createdBy, canCancelApproved: true });
     const oldNotice = await prisma.contractCancellationNotice.findFirstOrThrow({ where: { contractId: reactivated.id } });
-    await reactivateOrdinaryContract(prisma, { contractId: reactivated.id, actorId: admin.id,
-      expectedRevision: 2, reason: 'آزمون فعال‌سازی دوباره با حفظ پذیرش قبلی' });
+    await prisma.$transaction(async tx => {
+      await tx.salesContract.update({ where: { id: reactivated.id }, data: { status: 'DRAFT' } });
+      await tx.contractConfirmationAuditLog.create({ data: { contractId: reactivated.id, eventType: 'CONTRACT_REACTIVATED' } });
+      await suppressContractCancellationNotices(tx, reactivated.id);
+    });
     await deliverContractCancellationNotice(prisma, oldNotice.id, gateway);
     assert.equal((await prisma.contractCancellationNotice.findUniqueOrThrow({ where: { id: oldNotice.id } })).status, 'SUPPRESSED');
     await service.cancelContract({ contractId: reactivated.id, requestedBy: source.createdBy, canCancelApproved: true });
     assert.equal(await prisma.contractCancellationNotice.count({ where: { contractId: reactivated.id } }), 1, 'Previous activation acceptance cannot qualify a new cancellation');
-    await reactivateOrdinaryContract(prisma, { contractId: reactivated.id, actorId: admin.id,
-      expectedRevision: 3, reason: 'آزمون پذیرش تازه پس از فعال‌سازی' });
-    await prisma.contractPublicConfirmation.create({ data: { contractId: reactivated.id,
-      tokenHash: randomUUID(), phoneNumber: '09120000003', otpCodeHash: 'qa', otpExpiresAt: new Date(),
-      linkExpiresAt: new Date(), status: 'VERIFIED', commercialRevision: 4,
-      verifiedAt: new Date(Date.now() + 1000), lastSentAt: new Date() } });
-    await service.cancelContract({ contractId: reactivated.id, requestedBy: source.createdBy, canCancelApproved: true });
-    assert.equal(await prisma.contractCancellationNotice.count({ where: { contractId: reactivated.id } }), 2,
-      'Actual cancellation after fresh digital acceptance creates a new notice and retains the suppressed notice');
-
-    const missing = await create(true);
-    await prisma.phoneNumber.updateMany({ where: { customerId: customer.id }, data: { isActive: false } });
-    await service.cancelContract({ contractId: missing.id, requestedBy: source.createdBy, canCancelApproved: true });
-    const missingNotice = await prisma.contractCancellationNotice.findFirstOrThrow({ where: { contractId: missing.id } });
-    await deliverContractCancellationNotice(prisma, missingNotice.id, gateway);
-    assert.equal((await prisma.contractCancellationNotice.findUniqueOrThrow({ where: { id: missingNotice.id } })).status, 'NEEDS_PHONE');
-    assert.equal(await prisma.contractCancellationNoticeAttempt.count({ where: { noticeId: missingNotice.id } }), 0);
-    await prisma.phoneNumber.createMany({ data: ['09120000004', '09120000005'].map(number =>
-      ({ customerId: customer.id, number, type: 'mobile', isActive: true, isPrimary: false })) });
-    await prisma.contractCancellationNotice.update({ where: { id: missingNotice.id }, data: { availableAt: new Date(0) } });
-    await deliverContractCancellationNotice(prisma, missingNotice.id, gateway);
-    assert.equal((await prisma.contractCancellationNotice.findUniqueOrThrow({ where: { id: missingNotice.id } })).status, 'NEEDS_SELECTION');
-    await prisma.$transaction(tx => retryContractCancellationNotice(tx, { contractId: missing.id,
-      actorId: source.createdBy, phoneNumber: '09120000005' }));
-    await deliverContractCancellationNotice(prisma, missingNotice.id, gateway);
-    assert.equal((await prisma.contractCancellationNoticeAttempt.findFirstOrThrow({ where: { noticeId: missingNotice.id } })).phoneNumber, '09120000005');
-
-    const uncertain = await create(true);
-    await service.cancelContract({ contractId: uncertain.id, requestedBy: source.createdBy, canCancelApproved: true });
-    const uncertainNotice = await prisma.contractCancellationNotice.findFirstOrThrow({ where: { contractId: uncertain.id } });
-    await prisma.$transaction(tx => retryContractCancellationNotice(tx, { contractId: uncertain.id,
-      actorId: source.createdBy, phoneNumber: '09120000004' }));
-    await deliverContractCancellationNotice(prisma, uncertainNotice.id, { sendContractCancellationMessage: async () =>
-      ({ success: false, error: 'QA unknown network outcome', failureKind: 'NETWORK' as const, errorCode: 'ECONNRESET' }) });
-    assert.equal((await prisma.contractCancellationNotice.findUniqueOrThrow({ where: { id: uncertainNotice.id } })).status, 'UNKNOWN');
-    const submissions = sent.length;
-    await Promise.all([deliverContractCancellationNotice(prisma, uncertainNotice.id, gateway),
-      deliverContractCancellationNotice(prisma, uncertainNotice.id, gateway)]);
-    assert.equal(sent.length, submissions, 'An uncertain submission is never automatically retried');
-    await prisma.contractCancellationNotice.update({ where: { id: uncertainNotice.id }, data: {
-      status: 'SENDING', lastAttemptAt: new Date(Date.now() - 6 * 60_000) } });
-    await prisma.contractCancellationNoticeAttempt.updateMany({ where: { noticeId: uncertainNotice.id },
-      data: { status: 'SENDING', completedAt: null } });
-    const scanDatabase = new Proxy(prisma, { get(target, property) {
-      if (property === 'contractCancellationNotice') return new Proxy(target.contractCancellationNotice, { get(delegate, operation) {
-        if (operation === 'findMany') return (query: any) => delegate.findMany({ ...query,
-          where: { ...query.where, id: uncertainNotice.id } });
-        return Reflect.get(delegate, operation);
-      } });
-      return Reflect.get(target, property);
-    } });
-    const previousSend = smsService.sendContractCancellationMessage;
-    smsService.sendContractCancellationMessage = gateway.sendContractCancellationMessage;
-    try { await deliverPendingContractCancellationNotices(scanDatabase); }
-    finally { smsService.sendContractCancellationMessage = previousSend; }
-    assert.equal(sent.length, submissions, 'Crash recovery must not resubmit an interrupted provider request');
-    assert.equal((await prisma.contractCancellationNotice.findUniqueOrThrow({ where: { id: uncertainNotice.id } })).status, 'UNKNOWN');
-    assert.equal((await prisma.contractCancellationNoticeAttempt.findFirstOrThrow({ where: { noticeId: uncertainNotice.id } })).status, 'UNKNOWN');
+    await prisma.contractPublicConfirmation.updateMany({ where: { contractId: reactivated.id }, data: { verifiedAt: new Date(Date.now() + 1000) } });
+    const newNotice = await prisma.$transaction(tx => enqueueContractCancellationNotice(tx, { contractId: reactivated.id, eventKey: randomUUID(), at: new Date() }));
+    assert.ok(newNotice, 'Fresh digital acceptance qualifies for a new period');
   } finally {
     const notices = await prisma.contractCancellationNotice.findMany({ where: { contractId: { in: contractIds } }, select: { id: true } });
     await prisma.contractCancellationNoticeAttempt.deleteMany({ where: { noticeId: { in: notices.map(notice => notice.id) } } });

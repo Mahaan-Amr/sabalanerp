@@ -32,6 +32,8 @@ jobs:
       DESIGN_SYSTEM_E2E_ADMIN_PASSWORD: ${{ secrets.DESIGN_SYSTEM_E2E_ADMIN_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: 20

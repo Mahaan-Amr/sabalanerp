@@ -29,6 +29,7 @@ function fixture(options={}){
  const config={format:'sabalan-online-original-launcher/v1',repositoryRoot:repository,environmentFile:repository+'/deploy/.env.prod',sessionFile:repository+'/reports/deploy/active-deployment-session.json',controllerConfig:{project:'sabalanerp',composeFile:repository+'/docker-compose.prod.yml'},prebuiltReleasePlan:planRef,hostPackReceiptSha256:receiptRef.sha256,databaseUrl:'postgresql://fixture:fixture@127.0.0.1:5432/fixture_database?connection_limit=1&pool_timeout=10'};
  const configRef=put(configurationFile,config),lock=stat(),directory=stat(true);
  const containers=['backend','frontend','inquiry','nginx','postgres','clamav','other-one','other-two'].map((name,i)=>({Id:String(i+1).repeat(64),Image:'sha256:'+String(i+1).repeat(64),RestartCount:0,State:{Running:true,StartedAt:'2026-10-21T00:00:00Z',Health:{Status:'healthy'}},Config:{Labels:{'com.docker.compose.project':i<6?'sabalanerp':'foreign','com.docker.compose.service':name}},Mounts:name==='backend'?[{Type:'volume',Destination:'/app/recovery-coordination',Source:'/var/lib/docker/volumes/coordination/_data'}]:[]}));
+ containers[3].Mounts=[{Type:'volume',Destination:'/etc/letsencrypt',Source:'/var/lib/docker/volumes/actual-certificates/_data'}];
  if(options.birthChanged)containers[7].State.StartedAt='2026-10-21T01:00:00Z';
  if(options.healthChanged)containers[0].State.Health.Status='unhealthy';
  const native=(exe,args)=>{
@@ -53,12 +54,25 @@ function fixture(options={}){
  const fakeFs={constants:fs.constants,realpathSync:value=>value,fstatSync:fd=>{assert.equal(fd,9);return lock;},lstatSync:file=>{if(file.endsWith('/deployment.lock'))return lock;if(file==='/var/lib/docker/volumes/coordination/_data')return directory;if(options.marker&&file.endsWith(options.marker))return stat();throw Object.assign(Error('fixture absent'),{code:'ENOENT'});},readFileSync:(file,encoding)=>{assert.ok(['/etc/machine-id','/sys/class/dmi/id/product_uuid','/proc/sys/kernel/random/boot_id'].includes(file));assert.equal(encoding,'utf8');return file.includes('product_uuid')?'FIXTURE-DMI\n':file.includes('boot')?'FIXTURE-BOOT\n':'FIXTURE-MACHINE-ID\n';}};
  class PrismaClient{
   constructor(input){constructed++;assert.equal(input.datasources.db.url,config.databaseUrl);}
-  async $queryRaw(strings){const sql=strings.join('?');queries.push(sql);if(options.queryFailure)throw Error('fixture query refused');if(sql.includes('activeKey'))return options.activeLease?[{id:'active'}]:[];if(sql.includes('current_database'))return[{name:'fixture_database',system:'123456'}];assert.ok(sql.includes('_prisma_migrations'));return[{migration_name:'genuine_fixture',checksum:h('c'),finished_at:new Date(options.changedDate?'2026-10-20T00:00:00Z':'2026-10-19T00:00:00Z'),rolled_back_at:null}];}
-  async $disconnect(){disconnects++;await new Promise(done=>setImmediate(done));if(options.signalDuringDisconnect)listeners.get('SIGTERM')();if(options.markerDuringDisconnect)options.marker='deployment-maintenance.json';if(options.lockChangedDuringDisconnect)lock.ctimeNs=99n;}
+  async $queryRaw(strings){const sql=strings.join('?');queries.push(sql);if(options.queryFailure)throw Error('fixture query refused');if(sql.includes('activeKey'))return options.activeLease?[{id:'active'}]:[];if(sql.includes('current_database'))return[{name:'fixture_database',system:'123456'}];assert.ok(sql.includes('_prisma_migrations'));if(options.configurationDuringObservation)containers[0].Config.Environment=['changed'];if(options.incarnationDuringObservation)Object.assign(containers[0].State,options.incarnationDuringObservation);if(options.restartDuringObservation)containers[0].RestartCount++;return[{migration_name:'genuine_fixture',checksum:h('c'),finished_at:new Date(options.changedDate?'2026-10-20T00:00:00Z':'2026-10-19T00:00:00Z'),rolled_back_at:null}];}
+  async $disconnect(){disconnects++;await new Promise(done=>setImmediate(done));if(options.signalDuringDisconnect)listeners.get('SIGTERM')();if(options.markerDuringDisconnect)options.marker='deployment-maintenance.json';if(options.lockChangedDuringDisconnect)lock.ctimeNs=99n;if(options.protectedDuringDisconnect)options.protectedChanged=true;if(options.cronDuringDisconnect)options.cronChanged=true;}
  }
  const read=(file,digest)=>{assert.ok(files.has(file),'unexpected private I/O path');const raw=files.get(file);assert.equal(sha(raw),digest);return raw;};
  const ownerProcess={platform:'linux',getuid:()=>0,env:options.env??{},on:(name,fn)=>listeners.set(name,fn),off:name=>listeners.delete(name)};
- const observe=new Function('assert','fs','path','root','process','spawn','require','read','validatePrebuiltReleasePlan','productionImageStore','createHash','URL',variables.join(';')+';'+declaration('absent')+';return '+declaration('observeOriginalOwnerInstall'))(assert,fakeFs,path.posix,pack,ownerProcess,spawn,()=>({PrismaClient}),read,validatePrebuiltReleasePlan,productionImageStore,createHash,URL);
+ const installationFiles=renewalRoot=>{
+  const protectedNames=['deploy/.env.prod','deploy/nginx/nginx.conf','deploy/nginx/conf.d/app.conf.template','deploy/nginx/maintenance-check.conf','deploy/nginx/maintenance.html'].map(name=>repository+'/'+name);
+  const renewal=renewalRoot+'/'+(options.renewalName??'different.example.conf');
+  const names=[...protectedNames,'/var/spool/cron/crontabs/root',repository+'/deploy/scripts/renew-cert.sh',renewal];
+  const raw=file=>Buffer.from(file===renewal?'SECRET_FIXTURE_NEVER_RETURN'+Boolean(options.cronChanged):'protected fixture '+Boolean(options.protectedChanged));
+  const fileStat=file=>({...stat(),ino:BigInt(names.indexOf(file)+10),size:BigInt(raw(file).length),isSymbolicLink:()=>false});
+  const filesFs={constants:fs.constants,realpathSync:file=>file,lstatSync:file=>{
+   if(file===renewalRoot)return{...stat(true),isSymbolicLink:()=>false};
+   if(names.includes(file))return fileStat(file);
+   throw Object.assign(Error('absent fixture path'),{code:'ENOENT'});
+  },readdirSync:folder=>{assert.equal(folder,renewalRoot);return[{name:path.posix.basename(renewal),isFile:()=>true,isSymbolicLink:()=>false}];},openSync:file=>file,fstatSync:fd=>fileStat(fd),readFileSync:fd=>raw(fd),closeSync:()=>{}};
+  return new Function('assert','fs','path','pin','sha','directoryPin','return '+declaration('installationFiles'))(assert,filesFs,path.posix,st=>['dev','ino','uid','gid','mode','nlink','size','mtimeNs','ctimeNs'].map(key=>String(st[key])),sha,()=>[])(renewalRoot);
+ };
+ const observe=new Function('assert','fs','path','root','process','spawn','require','read','validatePrebuiltReleasePlan','productionImageStore','createHash','URL','installationFiles',variables.join(';')+';'+declaration('absent')+';return '+declaration('observeOriginalOwnerInstall'))(assert,fakeFs,path.posix,pack,ownerProcess,spawn,()=>({PrismaClient}),read,validatePrebuiltReleasePlan,productionImageStore,createHash,URL,installationFiles);
  return{run:()=>observe(configurationFile,configRef.sha256),calls,queries,containers,listeners,get disconnects(){return disconnects;},get constructed(){return constructed;}};
 }
 test('actual install guard validates canonical prebuilt content, uses only fixed read-only argv and inherits FD9 in every original child',async()=>{
@@ -74,10 +88,26 @@ test('before/after baseline excludes observer PIDs while binding all container b
  const changedDate=await fixture({changedDate:true}).run();assert.notEqual(a.baseline.migrationLedgerSha256,changedDate.baseline.migrationLedgerSha256);assert.notEqual(a.baselineSha256,changedDate.baselineSha256);
 });
 
+test('creation-only baseline binds full configuration, protected-file and cron identities',async()=>{
+ const initial=await fixture().run();
+ assert.equal(initial.baseline.creationOnly,true);assert.equal(initial.baseline.activeLeaseCount,0);
+ assert.match(initial.baseline.serviceConfigurationSha256,/^[a-f0-9]{64}$/);
+ for(const options of [{protectedChanged:true},{cronChanged:true}])assert.notEqual((await fixture(options).run()).baselineSha256,initial.baselineSha256);
+ assert.ok(Object.hasOwn(initial.baseline.cronFiles,'/var/lib/docker/volumes/actual-certificates/_data/renewal/different.example.conf'));
+ assert.doesNotMatch(JSON.stringify(initial),/SECRET_FIXTURE_NEVER_RETURN/);
+ const other=await fixture({renewalName:'other-domain.example.conf'}).run();assert.notEqual(other.baselineSha256,initial.baselineSha256);
+});
+
+test('restarted, stopped or unhealthy incarnations between original observations cannot publish the old healthy baseline',async()=>{
+ for(const options of [{incarnationDuringObservation:{StartedAt:'later'}},{incarnationDuringObservation:{Running:false}},{incarnationDuringObservation:{Health:{Status:'unhealthy'}}},{restartDuringObservation:true}]){
+  const f=fixture(options);await assert.rejects(f.run(),/ONLINE_INSTALL_INCARNATION_CHANGED_DURING_OBSERVATION/);assert.equal(f.disconnects,1);
+ }
+});
+
 test('ambient daemon, Git, loader and preload selectors refuse before the first native child or database',async()=>{
  for(const key of ['DOCKER_HOST','DOCKER_CONTEXT','GIT_CONFIG_SYSTEM','GIT_CONFIG_COUNT','LD_PRELOAD','NODE_OPTIONS','NODE_PRELOAD_ANY']){const f=fixture({env:{[key]:'fixture-untrusted'}});await assert.rejects(f.run());assert.equal(f.calls.length,0);assert.equal(f.constructed,0);assert.equal(f.disconnects,0);}
 });
 
 test('cancellation, marker reappearance and changed original FD9 during actual awaited disconnect cannot publish a positive baseline',async()=>{
- for(const option of ['signalDuringDisconnect','markerDuringDisconnect','lockChangedDuringDisconnect']){const f=fixture({[option]:true});await assert.rejects(f.run());assert.equal(f.disconnects,1);assert.equal(f.listeners.size,0);}
+ for(const option of ['signalDuringDisconnect','markerDuringDisconnect','lockChangedDuringDisconnect','protectedDuringDisconnect','cronDuringDisconnect','configurationDuringObservation']){const f=fixture({[option]:true});await assert.rejects(f.run());assert.equal(f.disconnects,1);assert.equal(f.listeners.size,0);}
 });

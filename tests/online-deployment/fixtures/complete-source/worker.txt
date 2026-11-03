@@ -1,0 +1,125 @@
+"use strict";
+// Standalone strict validation entry source. No serving/promotion/migration
+// authority; immutable actual runtime/capsule binding is deliberately absent.
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const SOURCE_BINDING=null;
+const sha=raw=>crypto.createHash('sha256').update(raw).digest('hex');
+const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
+const same=(a,b)=>JSON.stringify(canonical(a))===JSON.stringify(canonical(b));
+const keyFields=['PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64','PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID','PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_BASE64','PERSONNEL_PERFORMANCE_EXPORT_ENCRYPTION_KEY_ID'];
+function validateSecretEnvelope(v){
+ assert.deepEqual(Object.keys(v).sort(),['applicationKeys','passphrase']);assert.ok(typeof v.passphrase==='string'&&Buffer.byteLength(v.passphrase)>=32&&Buffer.byteLength(v.passphrase)<=4096&&!/[\r\n\0]/.test(v.passphrase));
+ assert.deepEqual(Object.keys(v.applicationKeys).sort(),[...keyFields].sort());
+ for(const k of keyFields)assert.ok(typeof v.applicationKeys[k]==='string'&&v.applicationKeys[k].length>0&&v.applicationKeys[k].length<=4096&&!/[\r\n\0]/.test(v.applicationKeys[k]));
+ for(const k of keyFields.filter(k=>k.endsWith('_BASE64'))){const decoded=Buffer.from(v.applicationKeys[k],'base64');assert.equal(decoded.length,32);assert.equal(decoded.toString('base64'),v.applicationKeys[k]);}
+ assert.notEqual(v.applicationKeys[keyFields[0]],v.applicationKeys[keyFields[2]]);return v;
+}
+function writePrivate(directory,name,value){
+ assert.equal(path.dirname(path.join(directory,name)),directory);const file=path.join(directory,name),raw=Buffer.from(JSON.stringify(value)+'\n');
+ const fd=fs.openSync(file,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600);try{fs.writeFileSync(fd,raw);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}return {file,sha256:sha(raw)};
+}
+async function performStrictComplete(runtime,input,secret,qaWork){
+ validateSecretEnvelope(secret);let privateProof,privateContext,proofRef,absence;
+ try{
+  // The runtime import happens only after main has installed independently
+  // delivered real keys in this original Node process; never the parent env.
+  runtime.assertIndependentRecoveryApplicationKeys();
+  const result=await runtime.validateRecoveryPackage({sourcePath:input.sourcePath,passphrase:secret.passphrase,prisma:runtime.prisma,
+   verifyRestore:true,verifyApplicationPayloads:true,verifyBusinessData:true,
+   nativeRestoreInspection:{expectedLedger:input.expectedLedger,onVerified:async proof=>{
+    const context=runtime.assertActiveStrictRestoreProof(proof);privateProof=proof;privateContext=context;
+    assert.ok(same(context.manifest,input.checkpoint.manifest));assert.equal(context.manifest.packageType,'COMPLETE');
+    // Close the standalone base-reader pool too before callback-owned B work;
+    // the engine has already finally disconnected its temporary QA reader.
+    await runtime.disconnectDatabase();assert.equal(runtime.assertActiveStrictRestoreProof(proof),context);
+    await qaWork(context,proof);assert.equal(runtime.assertActiveStrictRestoreProof(proof),context);
+    proofRef=writePrivate(input.privateOutput,'native-complete-private-proof.json',{proof,manifest:context.manifest,businessDataProof:context.businessDataProof,inquiryBusinessProof:context.inquiryBusinessProof,
+     cleanupPending:true,sourceAuthorityAuthenticated:false,productionAdmission:false});
+   }}});
+  assert.ok(privateProof&&privateContext&&proofRef);assert.ok(same(result.manifest,input.checkpoint.manifest));
+  assert.throws(()=>runtime.assertActiveStrictRestoreProof(privateProof),/PROOF_NOT_ACTIVE/);
+  const rows=await runtime.prisma.$queryRawUnsafe(runtime.recoveryDatabaseObservationQuery(privateProof.database.name)+' AS value');assert.equal(rows.length,1);absence=JSON.parse(rows[0].value);
+  assert.equal(absence.visible,true);assert.equal(absence.name,privateProof.database.name);assert.equal(absence.oid,null);assert.equal(absence.systemIdentifier,privateProof.database.systemIdentifier);
+  for(const k of ['sessions','transactions','prepared'])assert.equal(absence[k],0);
+ }finally{await runtime.disconnectDatabase();}
+ return {format:'sabalan-strict-local-complete-validation/v1',strictCompleteValidationSucceeded:true,databaseAbsent:true,
+  privateProof:proofRef,absence,baseClientFinallyDisconnected:true,nativeGuardianCompletionPending:true,outerOriginalClosurePending:true,
+  independentRecoveryPointHealthy:false,productionAdmission:false};
+}
+
+const FRAME_LIMIT=12*1024*1024;
+function createInteractiveChannel(input,output){
+ let pending=Buffer.alloc(0),queue=[],waiter=null,ended=false,failed=false,failure,seen=0,writes=0,session;
+ const fail=e=>{if(!failed){failed=true;failure=e;}if(waiter){const w=waiter;waiter=null;w.reject(failure);}};
+ input.on('error',fail);output.on('error',fail);
+ input.on('data',raw=>{if(failed)return;try{
+  assert.ok(pending.length+raw.length<=FRAME_LIMIT+1);pending=Buffer.concat([pending,raw]);let i;
+  while((i=pending.indexOf(10))!==-1){assert.ok(++seen<=2);const line=pending.subarray(0,i);pending=pending.subarray(i+1);assert.ok(line.length>0&&line.length<=FRAME_LIMIT);
+   const frame=JSON.parse(line.toString('utf8'));if(waiter){const w=waiter;waiter=null;w.resolve(frame);}else{assert.ok(queue.length<2);queue.push(frame);}
+  }
+ }catch(e){fail(e);pending=Buffer.alloc(0);}});
+ input.on('end',()=>{ended=true;if(pending.length)fail(Error('HR_PARTIAL_INPUT_FRAME'));if(waiter){const w=waiter;waiter=null;w.reject(Error('HR_ORIGINAL_INPUT_EOF_BEFORE_CERTIFICATE'));}});
+ const next=()=>{if(failed)return Promise.reject(failure);if(queue.length)return Promise.resolve(queue.shift());if(ended)return Promise.reject(Error('HR_ORIGINAL_INPUT_CLOSED'));assert.equal(waiter,null);return new Promise((resolve,reject)=>{waiter={resolve,reject};});};
+ const send=async frame=>{if(failed)throw failure;const raw=Buffer.from(JSON.stringify(frame)+'\n');assert.ok(raw.length<=FRAME_LIMIT+1);await new Promise((resolve,reject)=>{try{output.write(raw,e=>e?reject(e):resolve());}catch(e){reject(e);}});if(failed)throw failure;writes++;};
+ return Object.freeze({async readInitial(){assert.equal(session,undefined);const frame=await next();assert.deepEqual(Object.keys(frame).sort(),['applicationKeys','hrSession','passphrase']);assert.match(frame.hrSession,/^[a-f0-9]{64}$/);session=frame.hrSession;return validateSecretEnvelope({applicationKeys:frame.applicationKeys,passphrase:frame.passphrase});},
+  async request(context,proof,intendedOwner){assert.ok(session);assert.equal(writes,0);assert.equal(context.proof,proof);
+   await send({format:'sabalan-original-active-restored-qa-hr-request/v1',session,sequence:1,event:'HR_REQUEST',proof,manifest:context.manifest,businessDataProof:context.businessDataProof,inquiryBusinessProof:context.inquiryBusinessProof,targetDatabase:proof.database,intendedOwner});
+   const frame=await next();assert.deepEqual(Object.keys(frame).sort(),['certificateBase64','event','format','sequence','session']);assert.equal(frame.format,'sabalan-original-active-restored-qa-hr-certificate/v1');assert.equal(frame.session,session);assert.equal(frame.sequence,1);assert.equal(frame.event,'HR_CERTIFICATE');
+   assert.ok(typeof frame.certificateBase64==='string'&&frame.certificateBase64.length>0&&frame.certificateBase64.length<=1398104);const raw=Buffer.from(frame.certificateBase64,'base64');assert.ok(raw.length>0&&raw.length<=1024*1024&&raw.toString('base64')===frame.certificateBase64);return raw;
+  },async drained(){assert.equal(writes,1);assert.ok(!queue.length&&!failed);await send({format:'sabalan-original-active-restored-qa-hr-drained/v1',session,sequence:2,event:'CALLBACK_DRAINED'});
+   if(!ended)await new Promise((resolve,reject)=>{input.once('end',resolve);input.once('error',reject);});if(failed)throw failure;assert.equal(pending.length,0);assert.equal(queue.length,0);
+  },async result(value){assert.equal(writes,2);assert.ok(ended&&!failed);await send({format:'sabalan-original-active-restored-qa-result/v1',session,sequence:3,event:'RESTORE_RESULT',result:value});}
+ });
+}
+function readTrustedPublicKey(){
+ const file='/etc/sabalan/online/qualification-public-key.pem';assert.equal(fs.realpathSync(file),file);const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+ const pin=s=>[s.dev,s.ino,s.uid,s.mode,s.nlink,s.size,s.mtimeNs,s.ctimeNs].join(':');try{const before=fs.fstatSync(fd,{bigint:true});assert.ok(before.isFile()&&before.uid===0n&&before.nlink===1n&&(before.mode&0o777n)===0o444n&&before.size>0n&&before.size<=4096n);const raw=fs.readFileSync(fd);assert.equal(pin(before),pin(fs.fstatSync(fd,{bigint:true})));assert.equal(pin(before),pin(fs.lstatSync(file,{bigint:true})));assert.equal(sha(raw),'e61a06dfe5562a2375cb3051178ad9760857a7a01ea8b88f094a6e6123fdbc48');return raw;}finally{fs.closeSync(fd);}
+}
+function publishHrAuthority(input,certificate){
+ assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);const directory=input.coordinationDirectory;assert.equal(directory,path.join(process.cwd(),'recovery-coordination'));assert.equal(process.env.RECOVERY_COORDINATION_DIR,directory);assert.equal(fs.realpathSync(directory),directory);
+ const st=fs.lstatSync(directory,{bigint:true});assert.ok(st.isDirectory()&&st.uid===0n&&!(st.mode&0o022n));assert.match(input.intendedOwner.deploymentId,/^[A-Za-z0-9_-]{8,128}$/);
+ assert.ok(Buffer.isBuffer(input.checkpointRaw)&&sha(input.checkpointRaw)===input.checkpointSha256);
+ const refs=[];for(const [suffix,raw]of [['decision',certificate],['checkpoint',input.checkpointRaw]]){
+  const file=path.join(directory,input.intendedOwner.deploymentId+'-restored-qa-historical-hr-'+suffix+'.json');const fd=fs.openSync(file,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o400);
+  try{fs.writeFileSync(fd,raw);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}assert.equal(sha(fs.readFileSync(file)),sha(raw));refs.push({file,sha256:sha(raw)});
+ }const fd=fs.openSync(directory,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY|fs.constants.O_NOFOLLOW);try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}return refs;
+}
+/** Actual active-engine callback orchestration. Runtime methods are supplied
+ * only by the fixed compiled graph in a future immutable source binding. A
+ * caller's JSON cannot supply an engine object, baseline or HTTP capability. */
+function assertNoSecretOutput(value,depth=0,budget={nodes:0}){
+ assert.ok(depth<=64&&++budget.nodes<=50000);assert.equal(Buffer.isBuffer(value),false);
+ if(value&&typeof value==='object')for(const [key,child]of Object.entries(value)){assert.ok(!['leaseToken','passphrase','applicationKeys','privateKey',...keyFields].includes(key),'PRIVATE_SECRET_IN_RESULT_REFUSED');assertNoSecretOutput(child,depth+1,budget);}
+}
+async function performInteractiveStrictComplete(runtime,input,secret,channel,qaWork){
+ assert.equal(typeof runtime.withRestoredQaPrivateControlQualification,'function');assert.equal(typeof qaWork,'function');let privateWork;
+ const result=await performStrictComplete(runtime,input,secret,async(context,proof)=>{
+  assert.equal(runtime.assertActiveStrictRestoreProof(proof),context);assert.equal(context.proof,proof);
+  assert.ok(same(context.manifest,input.checkpoint.manifest));assert.ok(Buffer.isBuffer(input.checkpointRaw)&&sha(input.checkpointRaw)===input.checkpointSha256);
+  const certificate=await channel.request(context,proof,input.intendedOwner);assert.equal(runtime.assertActiveStrictRestoreProof(proof),context);
+  const publicKey=readTrustedPublicKey();runtime.verifyRestoredQaHistoricalDecision(certificate,publicKey,input.checkpointRaw,context,new Date().toISOString());
+  publishHrAuthority(input,certificate);assert.equal(runtime.assertActiveStrictRestoreProof(proof),context);
+  privateWork=await runtime.withRestoredQaPrivateControlQualification(proof,input.intendedOwner,input.targetCommit,input.migrationFiles,qaWork);
+  assert.equal(runtime.assertActiveStrictRestoreProof(proof),context);assert.equal(privateWork.proof.productionAdmission,false);assert.equal(privateWork.proof.financialSchemaQualified,false);
+  await channel.drained();assert.equal(runtime.assertActiveStrictRestoreProof(proof),context);
+ });
+ const final={...result,privateQa:privateWork,financialSchemaQualified:false,productionAdmission:false};assertNoSecretOutput(final);await channel.result(final);return final;
+}
+function requireSourceBinding(){
+ assert.ok(SOURCE_BINDING,'UNRESOLVED_GENUINE_CAPTURE_KEYS_LOCAL_EXFD9_AND_CALLBACK_BINDING');
+ return SOURCE_BINDING;
+}
+async function main(){
+ const binding=requireSourceBinding(); // BEFORE stdin/key/import/files/actors.
+ assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);
+ // These are literal source-owned imports/material joins in the immutable
+ // EX9 successor, never CLI paths, modules or functions supplied in JSON.
+ await binding.authenticateOriginalEntry();
+ const channel=createInteractiveChannel(process.stdin,process.stdout),secret=await channel.readInitial();
+ for(const key of keyFields)process.env[key]=secret.applicationKeys[key];
+ const privateConsole=new (require('node:console').Console)({stdout:process.stderr,stderr:process.stderr});for(const key of ['log','info','debug'])console[key]=privateConsole[key].bind(privateConsole);
+ const runtime=await binding.loadPinnedRuntime(),input=await binding.loadPinnedInput(),qaWork=await binding.loadPinnedQaWork();
+ await performInteractiveStrictComplete(runtime,input,secret,channel,qaWork);
+}
+module.exports={validateSecretEnvelope,performStrictComplete,requireSourceBinding,createInteractiveChannel,performInteractiveStrictComplete,publishHrAuthority};
+if(require.main===module)main().catch(()=>{process.stderr.write('STRICT_LOCAL_COMPLETE_UNPROVEN\n');process.exitCode=1;});

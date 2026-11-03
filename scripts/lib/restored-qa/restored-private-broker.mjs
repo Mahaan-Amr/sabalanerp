@@ -1,0 +1,181 @@
+import assert from 'node:assert/strict';
+import {spawn,ChildProcess} from 'node:child_process';
+import {createPublicKey,createHash,verify} from 'node:crypto';
+import {compileRestoredQaPrivateQualificationMaterial,qualificationBytes} from '../independent-private-qualification-material.mjs';
+import fs from 'node:fs';import path from 'node:path';import {createRequire}from'node:module';const require=createRequire(import.meta.url);
+
+const hash=raw=>createHash('sha256').update(raw).digest('hex');
+const hex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
+const same=(a,b)=>assert.deepEqual(a,b);
+const LIMIT=12*1024**2;
+const liveHttpEndpoints=new WeakMap();
+/** Same-process observation of this original owner's still-live HTTP child.
+ * It grants no FD9, database lease, checkpoint or qualification acceptance.
+ * Copies, PIDs, READY receipts and serialized paths have no authority here. */
+export function assertOriginalIndependentQualificationEndpoint(witness){
+  const revalidate=witness&&typeof witness==='object'?liveHttpEndpoints.get(witness):undefined;
+  assert.ok(revalidate,'ORIGINAL_INDEPENDENT_HTTP_ENDPOINT_REQUIRED');
+  return revalidate();
+}
+
+
+/** Fixed-domain private QA issuer. The enclosing original backup controller owns
+ * the container CREATE/START handles and both host locks; this closure owns every
+ * exec and consumes the original QA issuer. It has no public arbitrary signing method,
+ * production release capability, accepted-row constructor or file adoption API.
+ */
+export function createRestoredQaOriginalBroker({proof,scope,root,index,config,sourcePins,python,issuer,onHeld=()=>{}}){
+  const {assertActiveStrictRestoreProof}=require('/app/dist/services/systemRecoveryEngine.js');
+  const {assertRestoredQaPrivateNormal}=require('/app/dist/services/restoredQaMigrationBaseline.js');
+  const context=assertActiveStrictRestoreProof(proof),normal=assertRestoredQaPrivateNormal(scope.normal,scope.material,scope.owner);
+  assert.equal(root,path.join(normal.root,'coherent-private'));assert.deepEqual(index.restoredQaLineage.targetDatabase,normal.database);assert.equal(context.proof,proof);
+  const beforeDocker=async()=>{assert.equal(assertActiveStrictRestoreProof(proof),context);assertRestoredQaPrivateNormal(scope.normal,scope.material,scope.owner);issuer.assertActive();};
+  assert.equal(python.file,'/usr/bin/python3.11');const pythonRaw=fs.readFileSync(python.file);assert.equal(hash(pythonRaw),python.sha256);assert.equal(pythonRaw.subarray(0,4).toString('hex'),'7f454c46');
+  index=structuredClone(index);config=structuredClone(config);sourcePins=structuredClone(sourcePins);
+  assert.match(root,/^\/app\/runtime-authority\/application-native-[a-f0-9]{32}\/restored-complete-app\/coherent-private$/);
+  assert.equal(typeof beforeDocker,'function');assert.equal(typeof onHeld,'function');
+  for(const name of ['independent-private-runtime.py','private-qualification-observer.py','private-qualification-materialize.py','private-qualification-bootstrap.sql'])assert.ok(hex(sourcePins[name]));
+  // Consume the original carrier's fixed QA issuer. Never replace the shared
+  // read-only trust mount or import a serialized private key into this callback.
+  issuer.assertActive();
+  const {publicKey:publicKeyBase64,publicKeyPem,session,actorId}=issuer.enrollment;
+  assert.ok(hex(session)&&hex(actorId));
+  const publicKey=createPublicKey(publicKeyPem);
+  same(publicKey.export({type:'spki',format:'der'}).toString('base64'),publicKeyBase64);
+  const signed=async(method,value,preimage)=>{
+    issuer.assertActive();const signature=await issuer[method](value);issuer.assertActive();
+    assert.equal(typeof signature,'string');assert.ok(verify(null,preimage,publicKey,Buffer.from(signature,'base64')));
+    return signature;
+  };
+  let phase='ENROLLED',held=null,container=Object.freeze({id:config.existingContainerId,image:config.image}),baseline=null,material=null,materials=null,http=null,sequence=0,keeper;
+  const children=[];
+  function hold(error){if(!held){held=error;phase='HELD';keeper=setInterval(()=>{void issuer;void children;},30000);
+    onHeld({format:'sabalan-original-independent-qualification/v1',phase,productionAdmission:false,code:error.message,
+      children:children.map(v=>({pid:v.child.pid,closed:v.closed,code:v.code,signal:v.signal}))});}return error;}
+  const check=()=>assert.equal(held,null);
+  async function launch(name,args=[],input){
+    check();assert.ok(container);assert.ok(hex(sourcePins[name]));await beforeDocker(container);
+    const bootstrap="import hashlib,runpy,sys; p=sys.argv[1]; expected=sys.argv[2]; assert hashlib.sha256(open(p,'rb').read()).hexdigest()==expected; sys.argv=[p]+sys.argv[3:]; runpy.run_path(p,run_name='__main__')";
+    const environment=Object.fromEntries(Object.entries(process.env).filter(([name])=>!name.startsWith('BACKEND_CONTROL_')&&!name.startsWith('BACKEND_CAPTURE_')&&!name.startsWith('BACKEND_NATIVE_')&&!name.startsWith('BACKEND_ONLINE_')&&!name.startsWith('BACKEND_WORKER_')&&!name.startsWith('INQUIRY_NATIVE_')));
+    const child=spawn(python.file,['-I','-B','-c',bootstrap,root+'/'+name,sourcePins[name],...args],{env:environment,stdio:['pipe','pipe','pipe']});
+    const owner={child,closed:false,code:null,signal:null,stdout:[],stderr:[],outBytes:0,errBytes:0,lines:[],buffer:'',waiters:[]};children.push(owner);
+    owner.done=new Promise(resolve=>child.once('close',(code,signal)=>{owner.closed=true;owner.code=code;owner.signal=signal;resolve();for(const wake of owner.waiters.splice(0))wake();}));
+    try{child.on('error',error=>hold(error));child.stdin.on('error',error=>hold(error));child.stdout.on('error',error=>hold(error));child.stderr.on('error',error=>hold(error));
+    child.stdout.on('data',raw=>{owner.outBytes+=raw.length;if(owner.outBytes>LIMIT){hold(Error('INDEPENDENT_ORIGINAL_OUTPUT_BOUND'));return;}
+      owner.stdout.push(raw);owner.buffer+=raw.toString('utf8');for(;;){const newline=owner.buffer.indexOf('\n');if(newline<0)break;
+        const line=owner.buffer.slice(0,newline);owner.lines.push(line);owner.buffer=owner.buffer.slice(newline+1);try{if(JSON.parse(line).event==='HELD')hold(Error('INDEPENDENT_ORIGINAL_NATIVE_HELD'));}catch(error){hold(error);}}
+      for(const wake of owner.waiters.splice(0))wake();});
+    child.stderr.on('data',raw=>{owner.errBytes+=raw.length;if(owner.errBytes>65536){hold(Error('INDEPENDENT_ORIGINAL_STDERR_BOUND'));return;}owner.stderr.push(raw);});
+    if(input!==undefined)child.stdin.end(JSON.stringify(input));
+    }catch(error){hold(error);try{child.stdin.end();}catch{}for(const stream of[child.stdout,child.stderr]){try{stream.on('error',error=>hold(error));stream.resume();}catch{}}}
+    return owner;
+  }
+  async function event(owner,name){
+    for(;;){check();while(owner.lines.length){const raw=owner.lines.shift();let value;try{value=JSON.parse(raw);}catch{throw hold(Error('INDEPENDENT_ORIGINAL_EVENT_INVALID'));}
+      same(value.format,'sabalan-original-independent-private-runtime/v1');same(value.productionAdmission,false);
+      if(value.event==='HELD')throw hold(Error('INDEPENDENT_ORIGINAL_NATIVE_HELD'));
+      same(value.event,name);return value;}
+      if(owner.closed)throw hold(Error('INDEPENDENT_ORIGINAL_EXIT_BEFORE_EVENT'));
+      await new Promise(resolve=>owner.waiters.push(resolve));}
+  }
+  async function ended(owner){await owner.done;check();same(owner.code,0);same(owner.signal,null);same(owner.buffer,'');same(owner.lines,[]);same(owner.child.stdout.readableEnded,true);same(owner.child.stderr.readableEnded,true);}
+  async function helper(name,input){const owner=await launch(name,[],{root,...input});await owner.done;check();same(owner.code,0);same(owner.signal,null);
+    same(owner.child.stdout.readableEnded,true);same(owner.child.stderr.readableEnded,true);return JSON.parse(Buffer.concat(owner.stdout));}
+  function closure(value,started,grant){
+    same(value.event,'CLOSED');same(value.originalReturncode,0);same(value.originalPopenPid,started.originalPopenPid);same(value.scopeSha256,grant.sha256);
+    const native=JSON.parse(Buffer.from(value.nativeRawBase64,'base64')),work=JSON.parse(Buffer.from(value.workRawBase64,'base64'));
+    same(native.phase,'QUIESCENT');same(work.phase,'QUIESCENT');same(native.guardian,started.birth);
+    const claim=JSON.parse(Buffer.from(value.workClaimRawBase64,'base64')),scopeValue=JSON.parse(Buffer.from(value.workScopeRawBase64,'base64'));
+    same(scopeValue.scope.runtimeId,grant.scope.runtimeId);same(claim.native,{scopeSha256:grant.sha256,claimSha256:hash(Buffer.from(started.activeNativeRawBase64,'base64'))});same(work.claimSha256,hash(Buffer.from(value.workClaimRawBase64,'base64')));same(claim.scopeSha256,hash(Buffer.from(value.workScopeRawBase64,'base64')));
+    same(native.activeClaimSha256,hash(Buffer.from(started.activeNativeRawBase64,'base64')));
+    same(native.onlineScope.scope,grant.scope);same(native.onlineScope.sha256,grant.sha256);
+    same(native.nativeReaped,true);same(native.databaseQuiet,true);same(native.nativeStatus,0);same(native.stoppedBySignal,false);
+  }
+  function initialized(result,mode){
+    same(result.format,'sabalan-original-private-qualification-initializer/v1');same(result.mode,mode);
+    same(result.qualificationId,index.privateQualification.qualificationId);same(result.targetsSha256,material.targetsSha256);
+    same(result.databaseName,index.restoredDatabase);same(result.databaseOid,String(index.restoredOid));
+    same(result.systemIdentifier,index.privateQualification.httpGrant.scope.database.systemIdentifier);
+    same(result.targetCount,1);same(result.productionAdmission,false);
+    same(result.phase,{initialize:'ACTIVE',fence:'DRAINING',close:'CLOSED'}[mode]);
+    assert.ok(result.originalSqlChildren.length&&result.originalSqlChildren.every(v=>v.returncode===0&&v.reaped===true));
+  }
+  function start(value,grant){
+    same(value.event,'STARTED');same(value.scopeSha256,grant.sha256);assert.ok(Number.isSafeInteger(value.originalPopenPid)&&value.originalPopenPid>1);
+    same(value.birth.pid,value.originalPopenPid);const native=JSON.parse(Buffer.from(value.activeNativeRawBase64,'base64'));
+    same(native.phase,'ACTIVE');same(native.guardian,value.birth);same(native.onlineScope.scope,grant.scope);same(native.onlineScope.sha256,grant.sha256);
+  }
+  async function control(command){
+    check();assert.ok(http&&!http.owner.closed);const grant=index.privateQualification.httpGrant;
+    const value={format:'sabalan-private-qualification-control/v1',session,actorId,scopeSha256:grant.sha256,sequence:++sequence,command};
+    const preimage=Buffer.from([value.format,session,actorId,grant.sha256,String(sequence),command].join('\0'),'utf8');
+    const signature=await signed('signControl',value,preimage);check();assert.ok(!http.owner.closed);http.owner.child.stdin.write(JSON.stringify({...value,signature})+'\n');
+  }
+  function assertLiveHttpEndpoint(){
+    check();assert.equal(assertActiveStrictRestoreProof(proof),context);assertRestoredQaPrivateNormal(scope.normal,scope.material,scope.owner);same(phase,'HTTP_READY');assert.ok(http&&container&&materials);
+    const child=http.owner.child;
+    assert.ok(child instanceof ChildProcess&&!http.owner.closed&&child.exitCode===null&&child.signalCode===null
+      &&!child.killed&&child.stdin&&!child.stdin.destroyed&&!child.stdin.writableEnded
+      &&child.stdout&&!child.stdout.destroyed&&!child.stdout.readableEnded
+      &&child.stderr&&!child.stderr.destroyed&&!child.stderr.readableEnded,'ORIGINAL_HTTP_CHILD_NOT_LIVE');
+    same(child.spawnfile,python.file);same(child.spawnargs.slice(1,4),['-I','-B','-c']);
+    const grant=index.privateQualification.httpGrant,decision=materials[grant.scope.runtimeId].decision.decision;
+    const identity=http.ready.result.identity;
+    same(identity.runtimeId,decision.runtimeId);same(identity.image,decision.image);same(identity.sourceCommit,decision.sourceCommit);
+    same(identity.database,decision.database);same(identity.httpIngress,decision.httpIngress);
+    same(identity.scopeSha256,grant.sha256);same(identity.runtimeBundleSha256,decision.runtimeBundleSha256);
+    same(identity.restoreManifestSha256,decision.restoreManifestSha256);same(identity.artifactsSha256,decision.artifactsSha256);
+    same(decision.database.name,index.restoredDatabase);same(decision.database.oid,String(index.restoredOid));
+    same(decision.httpIngress.bindHost,config.roleTopology.main.host);
+    assert.ok(Number.isInteger(decision.httpIngress.port)&&decision.httpIngress.port>=1024&&decision.httpIngress.port<=65535);
+    return Object.freeze({format:'sabalan-original-live-private-http-endpoint/v1',purpose:'RESTORED_QA_HTTP_OBSERVATION',
+      containerId:container.id,image:container.image,sourceCommit:decision.sourceCommit,runtimeId:decision.runtimeId,
+      scopeSha256:grant.sha256,database:Object.freeze({...decision.database}),
+      url:'http://'+decision.httpIngress.bindHost+':'+decision.httpIngress.port,
+      nativeOriginalPid:http.started.originalPopenPid,outerOriginalExecPid:child.pid,
+      independentPointHealthy:false,cleanupPending:true,productionAdmission:false});
+  }
+  return Object.freeze({
+    httpEndpointWitness(){
+      assertLiveHttpEndpoint();const witness=Object.freeze({});liveHttpEndpoints.set(witness,assertLiveHttpEndpoint);return witness;
+    },
+    enrollment:Object.freeze({publicKey:publicKeyBase64,publicKeyPem,session,actorId}),
+    async runBaseline(controllerSha256){try{check();same(phase,'ENROLLED');assert.ok(hex(controllerSha256));phase='BASELINE_RUNNING';
+      const owner=await launch('independent-private-runtime.py',[root,'baseline',controllerSha256]);
+      const started=await event(owner,'STARTED');start(started,index.restoredBaselineGrant);
+      const closed=await event(owner,'CLOSED');closure(closed,started,index.restoredBaselineGrant);await ended(owner);
+      same(closed.result.event,'restored-file-baseline-complete');same(closed.result.runtimeId,index.restoredBaselineGrant.scope.runtimeId);
+      baseline={owner,started,closed};phase='BASELINE_CLOSED';return closed;
+    }catch(error){throw hold(error);}},
+    async initialize(){try{check();same(phase,'BASELINE_CLOSED');assert.ok(baseline.owner.closed);phase='INITIALIZING';
+      const facts=await helper('private-qualification-observer.py',{});
+      same(facts.format,'sabalan-original-private-qualification-observation/v1');same(facts.originalSqlProbe.returncode,0);same(facts.originalSqlProbe.reaped,true);
+      same(facts.restoredQaLineage,index.restoredQaLineage);
+      material=compileRestoredQaPrivateQualificationMaterial({index,config,baselineCompletion:baseline.closed.result,facts,restoredQaLineage:index.restoredQaLineage,now:new Date()});
+      materials={};
+      for(const [id,decision]of Object.entries(material.decisionsByRuntime)){
+        const artifacts=material.artifactsByRuntime[id];
+        const signature=await signed('signDecision',{decision,artifacts},Buffer.concat([Buffer.from('sabalan-online-private-qualification/v1\n'),qualificationBytes(decision)]));
+        materials[id]={artifacts,decision:{format:'sabalan-signed-online-private-qualification/v1',decision,signature}};
+      }
+      const result=await helper('private-qualification-materialize.py',{mode:'initialize',materials,bootstrapSha256:sourcePins['private-qualification-bootstrap.sql']});
+      initialized(result,'initialize');phase='INITIALIZED';return {initializer:result,observation:{database:facts.database,sql:facts.sql,originalSqlProbe:facts.originalSqlProbe,restoreManifestSha256:facts.restoreManifestSha256,restoredQaLineage:facts.restoredQaLineage}};
+    }catch(error){throw hold(error);}},
+    async startHttp(controllerSha256){try{check();same(phase,'INITIALIZED');phase='HTTP_STARTING';
+      const owner=await launch('independent-private-runtime.py',[root,'http',controllerSha256]);const started=await event(owner,'STARTED');
+      start(started,index.privateQualification.httpGrant);const ready=await event(owner,'READY');same(ready.result.event,'READY');same(ready.result.actorId,actorId);
+      same(ready.result.installedEntrySha256,config.privateQualificationRuntime.entrySha256);
+      same(ready.result.identity.runtimeId,index.privateQualification.httpGrant.scope.runtimeId);same(ready.result.identity.image,config.image);
+      http={owner,started,ready};phase='HTTP_READY';return ready;
+    }catch(error){throw hold(error);}},
+    async closeHttp(){try{check();same(phase,'HTTP_READY');phase='HTTP_PREPARING';await control('PRIVATE_PREPARE_DRAIN');
+      const prepared=await event(http.owner,'PREPARED');same(prepared.result.sequence,1);same(prepared.result.actorId,actorId);
+      const fenced=await helper('private-qualification-materialize.py',{mode:'fence',materials,bootstrapSha256:sourcePins['private-qualification-bootstrap.sql']});initialized(fenced,'fence');
+      await control('PRIVATE_SHUTDOWN');const closed=await event(http.owner,'CLOSED');closure(closed,http.started,index.privateQualification.httpGrant);await ended(http.owner);
+      const final=await helper('private-qualification-materialize.py',{mode:'close',materials,bootstrapSha256:sourcePins['private-qualification-bootstrap.sql']});initialized(final,'close');
+      assert.ok(children.every(v=>v.closed&&v.code===0&&v.signal===null));phase='CLOSED';clearInterval(keeper);return {closed,fence:fenced,close:final,productionAdmission:false};
+    }catch(error){throw hold(error);}},
+    async awaitRetainedClosure(){for(const owner of children)await owner.done;assert.ok(children.every(v=>v.closed));clearInterval(keeper);if(held)throw held;},
+    inspect(){return Object.freeze({phase,held:held?.message??null,originalExecs:children.map(v=>({pid:v.child.pid,closed:v.closed,code:v.code,signal:v.signal})),productionAdmission:false});},
+  });
+}

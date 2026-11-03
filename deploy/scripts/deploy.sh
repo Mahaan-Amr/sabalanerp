@@ -8,6 +8,7 @@ CAPTURE_ONLY=0
 unset DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS
 PREBUILT_RELEASE=0
 unset DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX
+unset DEPLOYMENT_MIGRATION_PROJECTION_SOURCE
 PREBUILT_RELEASE_PLAN=""
 PREBUILT_RELEASE_SHA256=""
 if [ "${1:-}" = "--prebuilt-release" ]; then
@@ -69,6 +70,7 @@ LOCK_FILE="${REPO_ROOT}/.deploy-state/deployment.lock"
 ADVISORY_PID=""
 ADVISORY_APPLICATION_NAME=""
 MUTATION_STARTED=0
+MIGRATION_CONTROL_UNKNOWN=0
 BOOTSTRAP=0
 SESSION_PREPARED=0
 MAINTENANCE_ACTIVE=0
@@ -132,7 +134,7 @@ compose() {
 }
 
 verify_prebuilt_release() {
-  DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" node "${OPERATIONS_ROOT}/deploy/scripts/prebuilt-release-plan.mjs" \
+  DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" DEPLOYMENT_PREBUILT_WRITE_PROJECTION="${1:-0}" node "${OPERATIONS_ROOT}/deploy/scripts/prebuilt-release-plan.mjs" \
     "${PREBUILT_RELEASE_PLAN}" "${PREBUILT_RELEASE_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
 }
 
@@ -238,6 +240,12 @@ run_backend() {
 run_backend_timed() {
   duration="$1"
   shift
+  if [ -n "${DEPLOYMENT_MIGRATION_PROJECTION_SOURCE:-}" ]; then
+    [ "${DEPLOYMENT_MIGRATION_PROJECTION_SOURCE}" = "${REPO_ROOT}/.deploy-state/migration-projection-${DEPLOYMENT_ID}.json" ] || return 1
+    case "${DEPLOYMENT_MIGRATION_PROJECTION_SOURCE}" in *','*|*':'*|*'
+'*) return 1;; esac
+    [ -f "${DEPLOYMENT_MIGRATION_PROJECTION_SOURCE}" ] && [ ! -L "${DEPLOYMENT_MIGRATION_PROJECTION_SOURCE}" ] || return 1
+  fi
   timeout "${duration}" env \
     DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
     BACKEND_DB_CONNECTION_LIMIT=2 \
@@ -272,6 +280,7 @@ run_backend_timed() {
       -e "DEPLOYMENT_REMOTE_RETENTION_RECEIPT=${DEPLOYMENT_REMOTE_RETENTION_RECEIPT:-}" \
       -e "DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256=${DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256:-}" \
       -e "INQUIRY_ALREADY_DRAINED=true" \
+      ${DEPLOYMENT_MIGRATION_PROJECTION_SOURCE:+--volume} ${DEPLOYMENT_MIGRATION_PROJECTION_SOURCE:+"${DEPLOYMENT_MIGRATION_PROJECTION_SOURCE}:/run/deployment-migration-projection.json:ro"} \
       deployment "$@"
 }
 
@@ -312,7 +321,7 @@ run_original_owned_with_heartbeat() {
     sleep 5
     owned_heartbeat_elapsed=$((owned_heartbeat_elapsed + 5))
     if [ "${owned_heartbeat_elapsed}" -ge 60 ] && kill -0 "${owned_pid}" 2>/dev/null; then
-      if ! control heartbeat >&2; then
+      if ! control heartbeat >/dev/null 2>&1; then
         owned_heartbeat_failed=1
         echo "Protected original child remains owned; lease renewal failed." >&2
       fi
@@ -687,6 +696,16 @@ recover_failure() {
   trap - EXIT INT TERM
   echo "Deployment failed; entering deterministic recovery (exit ${exit_code})." >&2
 
+  if [ "${MIGRATION_CONTROL_UNKNOWN}" -eq 1 ]; then
+    # The original migration exec may still own FD9 or database work. Retain
+    # this host owner and its lease; neither rollback nor unlock is safe until
+    # the existing operation is independently reconciled. Host death remains
+    # an unresolved recovery event, not a successful closure.
+    trap '' INT TERM
+    echo 'Migration control outcome is unknown; maintenance and original ownership are retained.' >&2
+    while :; do control heartbeat >/dev/null 2>&1 || echo "Deployment lease heartbeat failed while migration control remains held." >&2; sleep 30; done
+  fi
+
   if [ "${SESSION_PREPARED}" -eq 0 ]; then
     if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
       node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" persist "${REPO_ROOT}" previous || exit 1
@@ -954,6 +973,11 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   [ "${bootstrap_value}" = "true" ] && BOOTSTRAP=1 || BOOTSTRAP=0
   export DEPLOYMENT_ID DEPLOYMENT_RELEASE_ID DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_OWNER DEPLOYMENT_PHASE DEPLOYMENT_TARGET_BACKEND_IMAGE
   export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE DEPLOYMENT_PREVIOUS_NGINX_IMAGE DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE
+  migration_evidence="$(node "${OPERATIONS_ROOT}/deploy/scripts/migration-control-state.mjs" check "${REPO_ROOT}")" || migration_evidence=UNKNOWN
+  case "${migration_evidence}" in
+    NONE|COMPLETE) ;;
+    *) MIGRATION_CONTROL_UNKNOWN=1; recover_failure 1 ;;
+  esac
   if [ -f "${CONFIGURATION_STATE}" ]; then
     CONFIGURATION_ACTIVE=1
     configuration_traffic_state="$(node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" recovery-state "${REPO_ROOT}" "${DEPLOYMENT_ID}")"
@@ -1129,6 +1153,12 @@ DEPLOYMENT_POSTGRES_IMAGE="${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"
 DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
 export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE DEPLOYMENT_POSTGRES_IMAGE DEPLOYMENT_CLAMAV_IMAGE
 
+# Bind ordinary builds to the exact clean checkout before Docker sees it.
+[ -z "$(git status --porcelain --untracked-files=all)" ] || { echo 'Deployment source is not clean.' >&2; exit 1; }
+[ "$(git rev-parse HEAD)" = "${DEPLOYMENT_TARGET_COMMIT}" ] || { echo 'Deployment commit changed before build.' >&2; exit 1; }
+PERFORMANCE_RELEASE_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
+PERFORMANCE_RELEASE_SOURCE_HASH="$(node --input-type=module -e 'import { performanceSourceHash } from "./scripts/performance-source-identity.mjs"; console.log(await performanceSourceHash());')"
+export PERFORMANCE_RELEASE_COMMIT PERFORMANCE_RELEASE_SOURCE_HASH
 compose config --quiet
 echo "Building immutable release ${DEPLOYMENT_RELEASE_ID} before maintenance..."
 # Keep compiler heaps from competing with the live release on the production host.
@@ -1138,6 +1168,8 @@ for release_service in backend frontend inquiry; do
   compose build "${release_service}"
 done
 DEPLOYMENT_BACKEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_BACKEND_IMAGE}")"
+[ "$(docker image inspect --format '{{index .Config.Labels "io.sabalan.performance.source-commit"}}' "${DEPLOYMENT_BACKEND_IMAGE}")" = "${PERFORMANCE_RELEASE_COMMIT}" ] || { echo 'Backend image source commit is unproven.' >&2; exit 1; }
+[ "$(docker image inspect --format '{{index .Config.Labels "io.sabalan.performance.source-hash"}}' "${DEPLOYMENT_BACKEND_IMAGE}")" = "${PERFORMANCE_RELEASE_SOURCE_HASH}" ] || { echo 'Backend image source hash is unproven.' >&2; exit 1; }
 DEPLOYMENT_FRONTEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_FRONTEND_IMAGE}")"
 DEPLOYMENT_INQUIRY_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_INQUIRY_IMAGE}")"
 DEPLOYMENT_NGINX_IMAGE="$(docker image inspect --format '{{.Id}}' nginx:1.27-alpine)"
@@ -1152,8 +1184,9 @@ docker_available_bytes=$((docker_available_kb * 1024))
 }
 DEPLOYMENT_TARGET_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
 export DEPLOYMENT_TARGET_BACKEND_IMAGE
-PERFORMANCE_RELEASE_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
-PERFORMANCE_RELEASE_SOURCE_HASH="$(node --input-type=module -e 'import { performanceSourceHash } from "./scripts/performance-source-identity.mjs"; console.log(await performanceSourceHash());')"
+[ -z "$(git status --porcelain --untracked-files=all)" ] || { echo 'Deployment source changed during build.' >&2; exit 1; }
+[ "$(git rev-parse HEAD)" = "${DEPLOYMENT_TARGET_COMMIT}" ] || { echo 'Deployment commit changed during build.' >&2; exit 1; }
+[ "$(node --input-type=module -e 'import { performanceSourceHash } from "./scripts/performance-source-identity.mjs"; console.log(await performanceSourceHash());')" = "${PERFORMANCE_RELEASE_SOURCE_HASH}" ] || { echo 'Deployment source bytes changed during build.' >&2; exit 1; }
 PERFORMANCE_RELEASE_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
 PERFORMANCE_RELEASE_FRONTEND_IMAGE="${DEPLOYMENT_FRONTEND_IMAGE}"
 PERFORMANCE_RELEASE_INQUIRY_IMAGE="${DEPLOYMENT_INQUIRY_IMAGE}"
@@ -1204,6 +1237,21 @@ fi
 if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
   DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
   export DEPLOYMENT_CLAMAV_IMAGE
+fi
+if [ "${CONFIGURATION_ACTIVE}" -eq 0 ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then
+  DEPLOYMENT_REPO_ROOT="${REPO_ROOT}"
+  DEPLOYMENT_MIGRATION_ENV_FILE="${ENV_FILE}"
+  export DEPLOYMENT_REPO_ROOT DEPLOYMENT_MIGRATION_ENV_FILE
+  unset DEPLOYMENT_MIGRATION_PREBUILT_PLAN DEPLOYMENT_MIGRATION_PREBUILT_SHA256
+  if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
+    DEPLOYMENT_MIGRATION_PREBUILT_PLAN="${PREBUILT_RELEASE_PLAN}"
+    DEPLOYMENT_MIGRATION_PREBUILT_SHA256="${PREBUILT_RELEASE_SHA256}"
+    export DEPLOYMENT_MIGRATION_PREBUILT_PLAN DEPLOYMENT_MIGRATION_PREBUILT_SHA256
+  else
+    # Save/verify the selected backend image before maintenance; incomplete
+    # archives remain private and are never adopted by a later operation.
+    node "${OPERATIONS_ROOT}/deploy/scripts/migration-control-host.mjs" prepare || exit 1
+  fi
 fi
 if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   [ "${DEPLOYMENT_MODE}" = "release" ] || { echo "Capture-only requires the canonical release control image." >&2; exit 1; }
@@ -1335,8 +1383,20 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
 fi
 
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
-  prebuilt_exports="$(verify_prebuilt_release)" || exit 1
+  prebuilt_exports="$(verify_prebuilt_release 1)" || exit 1
   eval "${prebuilt_exports}"
+elif [ "${CONFIGURATION_ACTIVE}" -eq 0 ]; then
+  # The operations bundle is reviewed and kept immutable for the entire
+  # operation under zero-data-loss-deployment.md. The online launcher pins
+  # its host-pack receipt; a direct operator-run bundle relies on that
+  # documented custody and checksum record, not an environment claim.
+  [ -f "${OPERATIONS_ROOT}/deploy/scripts/normal-migration-projection.mjs" ] && [ ! -L "${OPERATIONS_ROOT}/deploy/scripts/normal-migration-projection.mjs" ] || exit 1
+  node "${OPERATIONS_ROOT}/deploy/scripts/normal-migration-projection.mjs" "${REPO_ROOT}" || exit 1
+fi
+if [ "${CONFIGURATION_ACTIVE}" -eq 0 ]; then
+  # Compose output may contain credentials; the fixed verifier reads it only
+  # from the private pipe and emits no config or URL, including on failure.
+  COMPOSE_PROFILES=deployment DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" compose config --format json | node "${OPERATIONS_ROOT}/deploy/scripts/deployment-role-binding.mjs" || exit 1
 fi
 preserved_clamav_guard identity || exit 1
 phase MUTATION_STARTED
@@ -1369,7 +1429,15 @@ if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
 else
   # Reviewed bridge DDL and native Prisma history commit together. Unknown
   # pending strategies fail closed; there is no native/partial fallback.
-  run_backend_timed "${remaining}" sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-owned-migrations.js
+  DEPLOYMENT_MIGRATION_PROJECTION_SOURCE="${REPO_ROOT}/.deploy-state/migration-projection-${DEPLOYMENT_ID}.json"
+  DEPLOYMENT_MIGRATION_DEADLINE_SECONDS="${remaining}"
+  export DEPLOYMENT_MIGRATION_PROJECTION_SOURCE DEPLOYMENT_MIGRATION_DEADLINE_SECONDS
+  MIGRATION_CONTROL_UNKNOWN=1
+  node "${OPERATIONS_ROOT}/deploy/scripts/migration-control-state.mjs" begin "${REPO_ROOT}"
+  run_original_owned_with_heartbeat node "${OPERATIONS_ROOT}/deploy/scripts/migration-control-host.mjs" run
+  node "${OPERATIONS_ROOT}/deploy/scripts/migration-control-state.mjs" complete "${REPO_ROOT}"
+  MIGRATION_CONTROL_UNKNOWN=0
+  unset DEPLOYMENT_MIGRATION_PROJECTION_SOURCE DEPLOYMENT_MIGRATION_DEADLINE_SECONDS
 fi
 phase MIGRATIONS_APPLIED
 if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then

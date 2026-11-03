@@ -14,9 +14,10 @@ const invoke = async (workspace: string) => {
     }]));
   });
   await handler(
-    { query: { workspace }, user: { id: 'admin', role: 'ADMIN' } },
+    { query: { workspace }, user: { id: 'admin', role: 'ADMIN' } } as any,
     { setHeader(name: string, value: string) { headers.set(name, value); return this; },
-      status(code: number) { status = code; return this; }, json(value: unknown) { body = value; return this; } },
+      status(code: number) { status = code; return this; }, json(value: unknown) { body = value; return this; } } as any,
+    () => {},
   );
   return { status, body, calls, headers };
 };

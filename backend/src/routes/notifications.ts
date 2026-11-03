@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { body, validationResult } from 'express-validator';
 import { authorize, protect, type AuthRequest } from '../middleware/auth';
 import { enforceMutationIdempotency } from '../middleware/idempotency';
+import { asyncRoute } from '../middleware/asyncRoute';
 import {
   filterCurrentlyAuthorizedNotifications,
   type NotificationWithAuthorizationEvent,
@@ -54,7 +55,7 @@ type NotificationListItem = {
   category: NotificationCategory;
   sessionId: string | null;
 };
-router.get('/', async (req: AuthRequest, res) => {
+router.get('/', asyncRoute(async (req: AuthRequest, res) => {
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
   const state = ['UNREAD', 'READ', 'IMPORTANT'].includes(String(req.query.state || '').toUpperCase())
     ? String(req.query.state).toUpperCase()
@@ -134,9 +135,9 @@ router.get('/', async (req: AuthRequest, res) => {
     data,
     pagination: { nextCursor, hasMore },
   });
-});
+}));
 
-router.get('/unread-count', async (req: AuthRequest, res) => {
+router.get('/unread-count', asyncRoute(async (req: AuthRequest, res) => {
   const rows = await prisma.notification.findMany({
     where: { userId: req.user!.id, readAt: null },
     select: {
@@ -146,9 +147,9 @@ router.get('/unread-count', async (req: AuthRequest, res) => {
   });
   const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows);
   res.json({ success: true, data: { count: authorizedRows.length } });
-});
+}));
 
-router.get('/metadata', async (req: AuthRequest, res) => {
+router.get('/metadata', asyncRoute(async (req: AuthRequest, res) => {
   const rows = await prisma.notification.findMany({
     where: { userId: req.user!.id },
     select: {
@@ -165,9 +166,9 @@ router.get('/metadata', async (req: AuthRequest, res) => {
       workspaces: [...new Set(authorizedRows.map((row) => row.event?.workspace).filter((value): value is string => Boolean(value)))].sort(),
     },
   });
-});
+}));
 
-router.put('/read-all', async (req: AuthRequest, res) => {
+router.put('/read-all', asyncRoute(async (req: AuthRequest, res) => {
   const rows = await prisma.notification.findMany({
     where: { userId: req.user!.id, readAt: null },
     select: { id: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
@@ -178,9 +179,9 @@ router.put('/read-all', async (req: AuthRequest, res) => {
     data: { readAt: new Date() },
   });
   res.json({ success: true, data: { updated: result.count } });
-});
+}));
 
-router.put('/:id/read', async (req: AuthRequest, res) => {
+router.put('/:id/read', asyncRoute(async (req: AuthRequest, res) => {
   const notification = await prisma.notification.findFirst({
     where: { id: req.params.id, userId: req.user!.id },
     select: { id: true, type: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
@@ -193,9 +194,9 @@ router.put('/:id/read', async (req: AuthRequest, res) => {
     data: { readAt: new Date() },
   });
   res.json({ success: true });
-});
+}));
 
-router.delete('/:id/read', async (req: AuthRequest, res) => {
+router.delete('/:id/read', asyncRoute(async (req: AuthRequest, res) => {
   const notification = await prisma.notification.findFirst({
     where: { id: req.params.id, userId: req.user!.id },
     select: { id: true, type: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
@@ -205,7 +206,7 @@ router.delete('/:id/read', async (req: AuthRequest, res) => {
   if (!authorized) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
   await prisma.notification.update({ where: { id: notification.id }, data: { readAt: null } });
   res.json({ success: true });
-});
+}));
 
 router.post(
   '/:id/security-resolution',

@@ -288,12 +288,14 @@ test('print handoff replay accepts exact success and legitimate failed attempts 
     items: [{ artifactId: 'statement-pdf', ordinal: 2 }, { artifactId: 'waybill-pdf', ordinal: 1 }] };
   const successAudit = { eventType: 'PRINT_BYTES_HANDED_OFF', actorId: 'accountant-1', recordedAt: at,
     payload: { handoffId: 'handoff-1', attemptId: 'attempt-1', operationIdempotencyKey: 'print-1', correlationId: 'attempt-1',
-      artifactIds: ['waybill-pdf', 'statement-pdf'], failureCode: null } };
+      requestedKinds: ['WAYBILL', 'STATEMENT'], artifactIds: ['waybill-pdf', 'statement-pdf'], failureCode: null } };
   assert.equal(validatesPrintHandoffTransition({ handoff: success, audit: successAudit, artifactKinds }), true);
   const failed = { ...base, status: 'FAILED', failureCode: 'BYTE_HANDOFF_FAILED', items: [] };
   const failedAudit = { ...successAudit, eventType: 'PRINT_BYTES_HANDOFF_FAILED',
     payload: { ...successAudit.payload, failureCode: 'BYTE_HANDOFF_FAILED' } };
   assert.equal(validatesPrintHandoffTransition({ handoff: failed, audit: failedAudit, artifactKinds }), true);
+  assert.equal(validatesPrintHandoffTransition({ handoff: failed,
+    audit: { ...failedAudit, payload: { ...failedAudit.payload, requestedKinds: ['WAYBILL'] } }, artifactKinds }), false);
   assert.equal(validatesPrintHandoffTransition({ handoff: failed,
     audit: { ...failedAudit, payload: { ...failedAudit.payload, failureCode: 'tampered' } }, artifactKinds }), false);
 });
@@ -465,6 +467,55 @@ test('restore accepts only original verified bytes and records failures without 
   });
   assert.equal(ambiguous.status, 'RESTORED');
   assert.equal(ambiguousRollback, false);
+});
+
+test('restore replays its durable result without rewriting bytes and rejects an idempotency intent conflict', async () => {
+  const original = Buffer.from('original-pdf-bytes');
+  const metadata = artifact('artifact-retry', 'issued/retry.pdf', original);
+  const persisted: DispatchArtifactAuditEvent[] = [];
+  let recovered = 0;
+  let reads = 0;
+  let staged = 0;
+  let committed = 0;
+  const audit = {
+    append: async (event: DispatchArtifactAuditEvent) => { persisted.push(event); },
+    readCompletedRestoration: async (artifactId: string, idempotencyKey: string) => persisted.find(event =>
+      event.action === 'RESTORATION_COMPLETED' && event.artifactId === artifactId && event.idempotencyKey === idempotencyKey) ?? null,
+  };
+  const base = {
+    actorId: 'support-1', reason: 'restore drill', correlationId: 'restore-retry', idempotencyKey: 'restore-command-retry', metadata, authority,
+    encryptedBackup: { readOriginal: async () => ({ bytes: original, recoveryPackageId: 'backup-retry', encrypted: true }) },
+    storage: {
+      recoverInterruptedWrite: async () => { recovered += 1; },
+      stageOriginal: async () => { staged += 1; },
+      commitStagedOriginal: async () => { committed += 1; },
+      markStagedOriginalCompleted: async () => {},
+      finalizeStagedOriginal: async () => {},
+      read: async () => { reads += 1; return original; },
+      restorePrevious: async () => {},
+    },
+    audit,
+  };
+
+  const first = await restoreDispatchDocumentArtifact(base);
+  const auditCount = persisted.length;
+  const retried = await restoreDispatchDocumentArtifact({ ...base, correlationId: 'restore-retry-request-2' });
+
+  assert.deepEqual(retried, first);
+  assert.equal(recovered, 1);
+  assert.equal(reads, 2);
+  assert.equal(staged, 1);
+  assert.equal(committed, 1);
+  assert.equal(persisted.length, auditCount);
+  await assert.rejects(
+    restoreDispatchDocumentArtifact({ ...base, reason: 'different restoration intent' }),
+    /idempotency key conflicts with a different restoration intent/i,
+  );
+  assert.equal(recovered, 1);
+  assert.equal(reads, 2);
+  assert.equal(staged, 1);
+  assert.equal(committed, 1);
+  assert.equal(persisted.length, auditCount);
 });
 
 test('orphan quarantine rechecks references and cleanup waits for the safety window', async () => {

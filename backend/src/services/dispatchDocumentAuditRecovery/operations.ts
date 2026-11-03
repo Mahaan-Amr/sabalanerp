@@ -26,6 +26,7 @@ import { dispatchDocumentSourceIntegrityHash } from '../dispatchDocuments/prisma
 import { readBoundPricedAllocation } from '../allocationPricingReadModel';
 import { approvedPricingLifecycleAuditHash } from '../approvedPricing/prismaRepository';
 import { dispatchAllocationLifecycleAuditHash } from '../dispatchAllocation';
+import { shipmentQuantityEvidenceIntegrityHash } from '../shipmentQuantityProjectionStore';
 
 const execFileAsync = promisify(execFile);
 
@@ -191,7 +192,7 @@ export const verifyProductionDispatchAuditChains = (audits: readonly { aggregate
   const issues: Array<{ code: string; subjectId: string; detail: string }> = []; const previous = new Map<string, string | null>();
   for (const audit of audits) {
     const key = `${audit.aggregateType}:${audit.aggregateId}`; const expectedPrevious = previous.get(key) ?? null; const payload = audit.payload as Record<string, any>;
-    const expectedHash = audit.aggregateType === 'DISPATCH_CORRECTION'
+    const expectedHash = audit.aggregateType === 'DISPATCH_CORRECTION' || audit.aggregateType === 'MANUAL_OUTAGE_EXIT'
       ? dispatchLifecycleAuditEventHash({ aggregateType: audit.aggregateType, aggregateId: audit.aggregateId, eventType: audit.eventType, payload, actorId: audit.actorId, authority: payload.effectiveAuthority, at: audit.recordedAt, previousHash: audit.previousHash })
       : audit.aggregateType === 'APPROVED_PRICING_VERSION'
         ? approvedPricingLifecycleAuditHash({ aggregateType: 'APPROVED_PRICING_VERSION', aggregateId: audit.aggregateId,
@@ -256,6 +257,35 @@ export const validAccountingDispatchAuthority = (value: unknown) => {
     && Boolean(authority?.actorRole) && ['edit', 'admin'].includes(String(authority?.workspacePermission || '').toLowerCase())
     && ['edit', 'admin'].includes(String(authority?.featurePermission || '').toLowerCase());
 };
+const validGuardAdminAuthority = (value: unknown) => { const authority = value as Record<string, unknown> | undefined;
+  return authority?.workspace === 'security' && String(authority?.workspacePermission || '').toLowerCase() === 'admin'
+    && Boolean(authority?.actorRole); };
+export const validatesManualOutageExitEvidence = (input: {
+  waybill: { id: string; integrityHash: string };
+  revision: { id: string; integrityHash: string; queueTurnId: string };
+  exit: { id: string; paperNumber: string; outageId: string; waybillId: string; allocationRevisionId: string; queueTurnId: string;
+    status: string; actualOccurredAt: Date; recordedAt: Date | null; recordedBy: string | null; accountingApprovedBy: string | null;
+    guardApprovedBy: string | null; paperEvidence: unknown; snapshot: unknown; integrityHash: string | null };
+  audit?: { eventType: string; actorId: string; recordedAt: Date; payload: unknown };
+}) => {
+  const { exit, waybill, revision, audit } = input; const snapshot = exit.snapshot as Record<string, any> | null;
+  const payload = audit?.payload as Record<string, any> | undefined;
+  return Boolean(snapshot && exit.status === 'REGISTERED' && exit.integrityHash && dispatchRecoveryIntegrityHash(snapshot) === exit.integrityHash
+    && exit.waybillId === waybill.id && exit.allocationRevisionId === revision.id && exit.queueTurnId === revision.queueTurnId
+    && snapshot.schemaVersion === 1 && snapshot.method === 'MANUAL_OUTAGE_EXIT' && snapshot.paperNumber === exit.paperNumber
+    && snapshot.outageId === exit.outageId && snapshot.waybillId === waybill.id && snapshot.waybillIntegrityHash === waybill.integrityHash
+    && snapshot.allocationRevisionId === revision.id && snapshot.allocationIntegrityHash === revision.integrityHash
+    && snapshot.queueTurnId === revision.queueTurnId && snapshot.actualOccurredAt === exit.actualOccurredAt.toISOString()
+    && snapshot.recordedAt === exit.recordedAt?.toISOString() && snapshot.accountingApprovedBy === exit.accountingApprovedBy
+    && snapshot.guardApprovedBy === exit.guardApprovedBy && JSON.stringify(snapshot.paperEvidence) === JSON.stringify(exit.paperEvidence)
+    && audit?.eventType === 'MANUAL_OUTAGE_EXIT_REGISTERED' && audit.actorId === exit.recordedBy
+    && audit.recordedAt.toISOString() === exit.recordedAt?.toISOString() && payload?.paperNumber === exit.paperNumber
+    && payload?.waybillId === waybill.id && payload?.actualOccurredAt === exit.actualOccurredAt.toISOString()
+    && payload?.recordedAt === exit.recordedAt?.toISOString() && payload?.integrityHash === exit.integrityHash
+    && payload?.before?.waybill === 'ISSUED' && payload?.before?.queueTurn === 'LOADING_FINALIZED'
+    && payload?.after?.waybill === 'EXIT_RECORDED' && payload?.after?.queueTurn === 'EXIT_RECORDED'
+    && validGuardAdminAuthority(payload?.effectiveAuthority));
+};
 const orderedPrimaryArtifacts = <T extends { kind: string; statementAdjustmentId?: string | null }>(artifacts: readonly T[]) =>
   artifacts.filter(item => !item.statementAdjustmentId && (item.kind === 'WAYBILL' || item.kind === 'STATEMENT'))
     .sort((left, right) => (left.kind === 'WAYBILL' ? 0 : 1) - (right.kind === 'WAYBILL' ? 0 : 1));
@@ -284,7 +314,8 @@ export const validatesPrintHandoffTransition = (input: {
     && audit.recordedAt.toISOString() === handoff.completedAt?.toISOString()
     && payload?.handoffId === handoff.id && payload?.attemptId === handoff.idempotencyKey
     && payload?.correlationId === handoff.correlationId && typeof payload?.operationIdempotencyKey === 'string'
-    && Boolean(payload.operationIdempotencyKey) && artifactIds.every(id => handoff.requestedKinds.includes(input.artifactKinds.get(id) ?? ''));
+    && Boolean(payload.operationIdempotencyKey) && JSON.stringify(payload?.requestedKinds) === JSON.stringify(handoff.requestedKinds)
+    && artifactIds.every(id => handoff.requestedKinds.includes(input.artifactKinds.get(id) ?? ''));
   if (!common) return false;
   if (handoff.status === 'SUCCEEDED') return audit?.eventType === 'PRINT_BYTES_HANDED_OFF' && payload?.failureCode === null
     && JSON.stringify(artifactIds) === JSON.stringify([...handoff.items].sort((a, b) => a.ordinal - b.ordinal).map(item => item.artifactId));
@@ -415,6 +446,38 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
   if (!waybill) throw new Error('Dispatch waybill does not exist.');
   const issues: Array<{ code: string; subjectId: string; detail: string }> = [];
   const revision = waybill.candidate.allocationRevision;
+  if (waybill.physicalExit && waybill.manualOutageExit) issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: waybill.id,
+    detail: 'Physical and manual-outage exit evidence are mutually exclusive.' });
+  const exitSource = waybill.physicalExit ? { type: 'GUARD_PHYSICAL_EXIT', id: waybill.physicalExit.id, kind: 'PHYSICAL_EXIT',
+    effectiveAt: waybill.physicalExit.occurredAt, recordedAt: waybill.physicalExit.recordedAt }
+    : waybill.manualOutageExit ? { type: 'MANUAL_OUTAGE_EXIT', id: waybill.manualOutageExit.id, kind: 'MANUAL_OUTAGE_EXIT',
+      effectiveAt: waybill.manualOutageExit.actualOccurredAt, recordedAt: waybill.manualOutageExit.recordedAt } : null;
+  const exitQuantityRows = exitSource ? await prisma.shipmentQuantityEvidence.findMany({ where: {
+    sourceType: exitSource.type, sourceId: { startsWith: `${exitSource.id}:` },
+  }, orderBy: [{ contractId: 'asc' }, { contractItemId: 'asc' }, { productRowId: 'asc' }, { id: 'asc' }] }) : [];
+  const exitQuantityWitnesses: Array<{ stage: 'EXIT'; contractId: string; contractItemId: string; productRowId: string; unit: string; value: string }> = [];
+  if (exitSource) for (const line of revision.lines) {
+    const matches = exitQuantityRows.filter(row => row.contractId === line.sourceContractId && row.contractItemId === line.sourceContractItemId
+      && row.productRowId === line.productRowId && row.unit === line.unit);
+    const row = matches[0]; const metadata = row?.metadata as Record<string, any> | undefined;
+    const expectedHash = row ? shipmentQuantityEvidenceIntegrityHash({ id: row.id, contractId: row.contractId,
+      contractItemId: row.contractItemId, productRowId: row.productRowId, unit: row.unit, kind: row.kind,
+      quantity: row.quantity.toFixed(3), effectiveAt: row.effectiveAt.toISOString(), recordedAt: row.recordedAt.toISOString(),
+      sourceType: row.sourceType, sourceId: row.sourceId, sourceVersion: row.sourceVersion, integrityHash: row.integrityHash,
+      metadata: (metadata ?? {}) as Record<string, unknown>, guardReturnMovementId: row.guardReturnMovementId ?? undefined,
+      returnEvidenceId: row.returnEvidenceId ?? undefined, dispatchEvidenceId: row.dispatchEvidenceId ?? undefined }) : null;
+    const valid = matches.length === 1 && row && row.kind === exitSource.kind && row.quantity.toFixed(3) === line.quantity.toFixed(3)
+      && row.effectiveAt.toISOString() === exitSource.effectiveAt.toISOString()
+      && row.recordedAt.toISOString() === exitSource.recordedAt?.toISOString() && row.sourceVersion === 1
+      && row.sourceId === `${exitSource.id}:${line.id}` && row.integrityHash === expectedHash
+      && metadata?.waybillId === waybill.id && metadata?.allocationRevisionId === revision.id;
+    if (!valid) issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: line.id,
+      detail: 'Persisted exit quantity evidence is missing, duplicated, tampered, or does not bind the full stable row identity at scale three.' });
+    else exitQuantityWitnesses.push({ stage: 'EXIT', contractId: row.contractId, contractItemId: row.contractItemId,
+      productRowId: row.productRowId, unit: row.unit, value: row.quantity.toFixed(3) });
+  }
+  if (exitQuantityRows.length !== revision.lines.length) issues.push({ code: 'QUANTITY_CONSERVATION_MISMATCH', subjectId: waybill.id,
+    detail: 'Exit quantity evidence cardinality differs from finalized allocation rows.' });
   if (waybill.candidate.status !== 'ACCEPTED' || !waybill.candidate.dispositionAt || !waybill.candidate.dispositionBy) issues.push({ code: 'BROKEN_EVIDENCE_LINK', subjectId: waybill.candidate.id, detail: 'Issued documents require an accepted candidate disposition with actor/time.' });
   if (!revision.finalizedAt || !revision.finalizedBy) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: revision.id, detail: 'Allocation finalization actor/time is missing.' });
   if (dispatchRecoveryIntegrityHash(revision.snapshot) !== revision.integrityHash) issues.push({ code: 'INTEGRITY_HASH_MISMATCH', subjectId: revision.id, detail: 'Allocation snapshot hash changed.' });
@@ -565,7 +628,8 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
   }
   issues.push(...validateDispatchLifecycleConservation({
     candidate: { status: waybill.candidate.status, dispositionAt: waybill.candidate.dispositionAt?.toISOString() ?? null, dispositionBy: waybill.candidate.dispositionBy },
-    lifecycle: { requiresPrintHandoff: waybill.printHandoffs.some(item => item.status === 'SUCCEEDED'), hasPrintHandoff: waybill.printHandoffs.some(item => item.status === 'SUCCEEDED'), requiresGuardExit: waybill.status === 'EXIT_RECORDED', hasGuardExit: Boolean(waybill.physicalExit), requiredAdjustmentIds: posted.map(item => item.statementAdjustment?.id ?? `missing:${item.id}`), actualAdjustmentIds: posted.flatMap(item => item.statementAdjustment ? [item.statementAdjustment.id] : []) },
+    lifecycle: { requiresPrintHandoff: waybill.printHandoffs.some(item => item.status === 'SUCCEEDED'), hasPrintHandoff: waybill.printHandoffs.some(item => item.status === 'SUCCEEDED'), requiresGuardExit: waybill.status === 'EXIT_RECORDED',
+      hasGuardExit: Boolean(waybill.physicalExit || waybill.manualOutageExit), requiredAdjustmentIds: posted.map(item => item.statementAdjustment?.id ?? `missing:${item.id}`), actualAdjustmentIds: posted.flatMap(item => item.statementAdjustment ? [item.statementAdjustment.id] : []) },
     quantityWitnesses: [
       ...revision.lines.map(line => ({ stage: 'ALLOCATION' as const, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
         productRowId: line.productRowId, unit: line.unit, value: line.quantity.toFixed(3) })),
@@ -573,8 +637,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
         contractId: line?.sourceContractId ?? '', contractItemId: line?.sourceContractItemId ?? '', productRowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: event.quantity.toFixed(3) }; }),
       ...(primarySourceHash ? revision.pricedAllocationEvents.map(event => { const line = lineById.get(event.allocationRevisionLineId); return { stage: 'DOCUMENTED' as const,
         contractId: line?.sourceContractId ?? '', contractItemId: line?.sourceContractItemId ?? '', productRowId: line?.productRowId ?? '', unit: line?.unit ?? '', value: event.quantity.toFixed(3) }; }) : []),
-      ...(waybill.physicalExit ? revision.lines.map(line => ({ stage: 'EXIT' as const, contractId: line.sourceContractId,
-        contractItemId: line.sourceContractItemId, productRowId: line.productRowId, unit: line.unit, value: line.quantity.toFixed(3) })) : []),
+      ...exitQuantityWitnesses,
     ],
     moneyWitnesses: [
       ...[...pricedMoney].map(([currency, value]) => ({ stage: 'PRICED' as const, currency, gross: value.gross.toFixed(12), discount: value.discount.toFixed(12), net: value.net.toFixed(12) })),
@@ -582,13 +645,18 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
     ],
     adjustmentWitnesses,
   }));
-  const expectedAggregates = [
+  const expectedAggregates: Array<{ aggregateType: string; aggregateId: string; sourceHash: string; role?: 'CURRENT' | 'PREDECESSOR_TRANSITION'; optional?: boolean }> = [
     { aggregateType: 'LOGISTICS_ALLOCATION_REVISION', aggregateId: revision.id, sourceHash: revision.integrityHash },
     { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: waybill.candidate.id, sourceHash: revision.integrityHash },
-    { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.replacesWaybillId ?? waybill.id, sourceHash: waybill.integrityHash },
+    ...(waybill.replacesWaybillId ? [{ aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.replacesWaybillId,
+      sourceHash: waybill.integrityHash, role: 'PREDECESSOR_TRANSITION' as const }] : []),
+    { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id, sourceHash: waybill.integrityHash,
+      role: 'CURRENT', optional: Boolean(waybill.replacesWaybillId) },
     ...revision.pricingReferences.map(reference => ({ aggregateType: 'APPROVED_PRICING_VERSION', aggregateId: reference.pricingVersionId, sourceHash: reference.expectedPricingHash })),
     ...revision.pricedAllocationEvents.map(event => ({ aggregateType: 'PRICED_ALLOCATION_EVENT', aggregateId: event.id, sourceHash: event.integrityHash })),
     ...(waybill.physicalExit ? [{ aggregateType: 'GUARD_PHYSICAL_EXIT', aggregateId: waybill.physicalExit.id, sourceHash: waybill.physicalExit.integrityHash }] : []),
+    ...(waybill.manualOutageExit ? [{ aggregateType: 'MANUAL_OUTAGE_EXIT', aggregateId: waybill.manualOutageExit.id,
+      sourceHash: waybill.manualOutageExit.integrityHash ?? '' }] : []),
     ...waybill.dispatchCorrections.filter(item => item.status === 'POSTED').map(item => ({ aggregateType: 'DISPATCH_CORRECTION', aggregateId: item.id, sourceHash: item.integrityHash! })),
   ];
   const audits = await prisma.dispatchLifecycleAudit.findMany({ where: { OR: expectedAggregates.map(item => ({ aggregateType: item.aggregateType, aggregateId: item.aggregateId })) }, orderBy: [{ aggregateType: 'asc' }, { aggregateId: 'asc' }, { recordedAt: 'asc' }, { id: 'asc' }] });
@@ -614,7 +682,7 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
   }
   for (const expected of expectedAggregates) {
     const rows = audits.filter(audit => audit.aggregateType === expected.aggregateType && audit.aggregateId === expected.aggregateId);
-    if (!rows.length) { const legacy = expected.aggregateType === 'APPROVED_PRICING_VERSION' || expected.aggregateType === 'PRICED_ALLOCATION_EVENT';
+    if (!rows.length) { if (expected.optional) continue; const legacy = expected.aggregateType === 'APPROVED_PRICING_VERSION' || expected.aggregateType === 'PRICED_ALLOCATION_EVENT';
       issues.push({ code: legacy ? 'LEGACY_UNRECONCILED' : 'MISSING_EVIDENCE', subjectId: expected.aggregateId,
         detail: `No writer-owned ${expected.aggregateType} audit binds actor/time/reason/correlation/idempotency/source/before-after evidence.` }); continue; }
     const payloads = rows.map(row => row.payload as Record<string, any>);
@@ -622,13 +690,16 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
       : Boolean(value && typeof value === 'object' && Object.values(value as Record<string, unknown>).some(item => contains(item, expectedValue))));
     const linked = payloads.some(payload => contains(payload, expected.sourceHash)
       || (expected.aggregateType === 'ACCOUNTING_DISPATCH_CANDIDATE' && payload.allocationRevisionId === revision.id)
-      || (expected.aggregateType === 'ACCOUNTING_DISPATCH_WAYBILL' && (payload.candidateId === waybill.candidate.id || payload.replacementWaybillId === waybill.id))
+      || (expected.aggregateType === 'ACCOUNTING_DISPATCH_WAYBILL' && expected.role === 'CURRENT')
+      || (expected.aggregateType === 'ACCOUNTING_DISPATCH_WAYBILL' && expected.role === 'PREDECESSOR_TRANSITION' && payload.replacementWaybillId === waybill.id)
       || (expected.aggregateType === 'GUARD_PHYSICAL_EXIT' && payload.waybillId === waybill.id)
+      || (expected.aggregateType === 'MANUAL_OUTAGE_EXIT' && payload.waybillId === waybill.id)
       || (expected.aggregateType === 'DISPATCH_CORRECTION' && payload.waybillId === waybill.id && payload.integrityHash === expected.sourceHash));
     if (!linked) issues.push({ code: 'AUDIT_SOURCE_MISMATCH', subjectId: expected.aggregateId, detail: 'Parent audit does not bind the expected immutable source identity/hash.' });
     if (expected.aggregateType === 'ACCOUNTING_DISPATCH_WAYBILL') {
-      const issued = rows.find(row => row.eventType === (waybill.replacesWaybillId ? 'DOCUMENT_BUNDLE_REPLACED' : 'PRIMARY_BUNDLE_ISSUED'));
-      const transitionIssue = validatePersistedDocumentTransition({ waybill: { id: waybill.id, candidateId: waybill.candidate.id,
+      if (expected.role === 'PREDECESSOR_TRANSITION' || !waybill.replacesWaybillId) {
+        const issued = rows.find(row => row.eventType === (waybill.replacesWaybillId ? 'DOCUMENT_BUNDLE_REPLACED' : 'PRIMARY_BUNDLE_ISSUED'));
+        const transitionIssue = validatePersistedDocumentTransition({ waybill: { id: waybill.id, candidateId: waybill.candidate.id,
         integrityHash: waybill.integrityHash, replacesWaybillId: waybill.replacesWaybillId, issuedAt: waybill.issuedAt, issuedBy: waybill.issuedBy },
         predecessor: waybill.replacesWaybill ? { id: waybill.replacesWaybill.id, status: waybill.replacesWaybill.status,
           integrityHash: waybill.replacesWaybill.integrityHash, voidedAt: waybill.replacesWaybill.voidedAt,
@@ -636,9 +707,10 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
           replacementWaybillId: waybill.replacesWaybill.replacementWaybill?.id ?? null, physicalExit: waybill.replacesWaybill.physicalExit,
           manualOutageExit: waybill.replacesWaybill.manualOutageExit } : undefined,
         primarySourceHash, primaryArtifactIds: primaryArtifacts.map(artifact => artifact.id), command: issuanceCommand, audit: issued });
-      if (transitionIssue) issues.push({ code: transitionIssue, subjectId: waybill.id,
-        detail: 'Document transition lacks exact source/replacement/actor/time/reason/correlation/idempotency binding.' });
-      for (const handoff of waybill.printHandoffs) {
+        if (transitionIssue) issues.push({ code: transitionIssue, subjectId: waybill.id,
+          detail: 'Document transition lacks exact source/replacement/actor/time/reason/correlation/idempotency binding.' });
+      }
+      if (expected.role === 'CURRENT') for (const handoff of waybill.printHandoffs) {
         const handoffAudit = rows.find(row => (row.payload as Record<string, any>)?.handoffId === handoff.id);
         if (!validatesPrintHandoffTransition({ handoff, audit: handoffAudit,
           artifactKinds: new Map(waybill.documentArtifacts.map(item => [item.id, item.kind])) })) {
@@ -748,6 +820,12 @@ export const replayPersistedDispatchDocumentChain = async (prisma: PrismaClient,
         issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: expected.aggregateId,
           detail: 'Guard exit audit lacks exact actor/time/authority/session/correlation/source/before-after binding.' });
       }
+    }
+    if (expected.aggregateType === 'MANUAL_OUTAGE_EXIT') {
+      const registered = rows.find(row => row.eventType === 'MANUAL_OUTAGE_EXIT_REGISTERED');
+      if (!waybill.manualOutageExit || !validatesManualOutageExitEvidence({ waybill, revision,
+        exit: waybill.manualOutageExit, audit: registered })) issues.push({ code: 'INCOMPLETE_AUDIT_METADATA', subjectId: expected.aggregateId,
+        detail: 'Manual outage exit lacks exact immutable snapshot/hash, dual approvals, actor/time, Guard authority, or before/after audit binding.' });
     }
   }
   const replayAudits = [...audits,

@@ -320,6 +320,115 @@ const longitudinalPolicyInput = ({
   assert.equal(stairCalculation.ok, true);
   if (!stairCalculation.ok) throw new Error('expected stair calculation');
 
+  {
+    const treadInput: StairPartPolicyInput = {
+      ...stairInput,
+      sourceBatchId: parseStableIdentity('source-batch', 'mixed-stair-tread-source'),
+      motherWidthMeters: parseCanonicalDecimal('0.35'),
+      crossDimensionMeters: parseCanonicalDecimal('0.35'),
+      quantity: 12
+    };
+    const riserInput: StairPartPolicyInput = {
+      ...stairInput,
+      part: 'riser',
+      sourceBatchId: parseStableIdentity('source-batch', 'mixed-stair-riser-source'),
+      motherWidthMeters: parseCanonicalDecimal('0.4'),
+      crossDimensionMeters: parseCanonicalDecimal('0.4'),
+      quantity: 6
+    };
+    const secondTreadInput: StairPartPolicyInput = {
+      ...treadInput,
+      sourceBatchId: parseStableIdentity(
+        'source-batch',
+        'mixed-stair-second-tread-source'
+      ),
+      lengthMeters: parseCanonicalDecimal('1.3'),
+      quantity: 38
+    };
+    const secondRiserInput: StairPartPolicyInput = {
+      ...riserInput,
+      sourceBatchId: parseStableIdentity(
+        'source-batch',
+        'mixed-stair-second-riser-source'
+      ),
+      lengthMeters: parseCanonicalDecimal('1.3'),
+      quantity: 19
+    };
+    const treadCalculation = calculateStairPart(treadInput);
+    const riserCalculation = calculateStairPart(riserInput);
+    const secondTreadCalculation = calculateStairPart(secondTreadInput);
+    const secondRiserCalculation = calculateStairPart(secondRiserInput);
+    assert.equal(treadCalculation.ok, true);
+    assert.equal(riserCalculation.ok, true);
+    assert.equal(secondTreadCalculation.ok, true);
+    assert.equal(secondRiserCalculation.ok, true);
+    if (
+      !treadCalculation.ok ||
+      !riserCalculation.ok ||
+      !secondTreadCalculation.ok ||
+      !secondRiserCalculation.ok
+    ) {
+      throw new Error('expected mixed-catalog stair calculations');
+    }
+    const totalAmountToman =
+      Number(treadCalculation.result.totalAmountToman) +
+      Number(riserCalculation.result.totalAmountToman) +
+      Number(secondTreadCalculation.result.totalAmountToman) +
+      Number(secondRiserCalculation.result.totalAmountToman);
+    const mixedCatalogStairMigration = planLegacyProductGraphMigration({
+      contractId: 'mixed-catalog-stair',
+      revision: 0,
+      calculationPolicy: policy,
+      products: [{
+        productRowId: parseStableIdentity('product-row', 'mixed-stair-tread'),
+        productId: 'catalog-stair-35cm',
+        productType: 'stair',
+        name: '35 cm tread',
+        totalPrice: Number(treadCalculation.result.totalAmountToman),
+        stairPartPolicyInput: treadInput
+      }, {
+        productRowId: parseStableIdentity('product-row', 'mixed-stair-riser'),
+        productId: 'catalog-stair-40cm',
+        productType: 'stair',
+        name: '40 cm riser',
+        totalPrice: Number(riserCalculation.result.totalAmountToman),
+        stairPartPolicyInput: riserInput
+      }, {
+        productRowId: parseStableIdentity('product-row', 'mixed-stair-second-tread'),
+        productId: 'catalog-stair-35cm',
+        productType: 'stair',
+        name: 'Second 35 cm tread',
+        totalPrice: Number(secondTreadCalculation.result.totalAmountToman),
+        stairPartPolicyInput: secondTreadInput
+      }, {
+        productRowId: parseStableIdentity('product-row', 'mixed-stair-second-riser'),
+        productId: 'catalog-stair-40cm',
+        productType: 'stair',
+        name: 'Second 40 cm riser',
+        totalPrice: Number(secondRiserCalculation.result.totalAmountToman),
+        stairPartPolicyInput: secondRiserInput
+      }]
+    }, totalAmountToman);
+    assert.equal(
+      mixedCatalogStairMigration.ok,
+      true,
+      JSON.stringify(mixedCatalogStairMigration)
+    );
+    if (!mixedCatalogStairMigration.ok) {
+      throw new Error('expected repeated mixed-catalog stair rows to migrate');
+    }
+    assert.equal(mixedCatalogStairMigration.graph.rows.length, 4);
+    assert.deepEqual(
+      mixedCatalogStairMigration.graph.rows.map(row => row.catalogProductId),
+      [
+        'catalog-stair-35cm',
+        'catalog-stair-40cm',
+        'catalog-stair-35cm',
+        'catalog-stair-40cm'
+      ]
+    );
+  }
+
   const operationGroupId = parseStableIdentity(
     'operation-group',
     'stair-parent-operations'

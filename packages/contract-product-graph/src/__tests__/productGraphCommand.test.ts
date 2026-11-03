@@ -1032,8 +1032,6 @@ const addRowCommand = (
   assert.equal(added.graph.revision, 8);
   assert.deepEqual(added.graph.stairSystems, [{
     stairSystemId,
-    catalogProductId: 'catalog-stone-40',
-    catalogSnapshotVersion: 'inventory-42',
     quantityMode: 'staircases',
     totalSteps: 4,
     numberOfStaircases: 2,
@@ -1066,6 +1064,60 @@ const addRowCommand = (
     parseCanonicalProductGraph(serializeCanonicalProductGraph(added.graph)),
     added.graph
   );
+  const parsedHistoricalSystemCatalogFields = parseCanonicalProductGraph({
+    ...added.graph,
+    stairSystems: added.graph.stairSystems.map(system => ({
+      ...system,
+      catalogProductId: 'historical-system-owned-catalog',
+      catalogSnapshotVersion: 'historical-system-owned-snapshot'
+    }))
+  });
+  assert.deepEqual(
+    parsedHistoricalSystemCatalogFields.stairSystems,
+    added.graph.stairSystems
+  );
+
+  const laterCatalogSnapshot = {
+    catalogProductId: 'catalog-stone-35',
+    snapshotVersion: 'inventory-35',
+    facts: {
+      motherWidthMeters: parseCanonicalDecimal('0.35')
+    }
+  };
+  const laterRowId = parseStableIdentity('product-row', 'stair-later-35-row');
+  const addedOneByOne = executeProductGraphCommand({
+    graph: added.graph,
+    command: {
+      commandId: parseStableIdentity('audit-mutation', 'add-stair-row-one-by-one'),
+      type: 'add-row',
+      baseRevision: added.graph.revision,
+      calculationPolicy: versions,
+      sellerIntent: {
+        row: row({
+          productRowId: laterRowId,
+          catalogProductId: laterCatalogSnapshot.catalogProductId,
+          catalogSnapshotVersion: laterCatalogSnapshot.snapshotVersion,
+          productType: 'stair',
+          contractualTitle: '35 cm stair row added later',
+          commercial: {}
+        }),
+        stairPartPolicyInput: stairInput('riser', 'later-35', {
+          motherWidthMeters: parseCanonicalDecimal('0.35'),
+          quantity: 1
+        })
+      },
+      catalogSnapshots: [laterCatalogSnapshot]
+    }
+  });
+  assert.equal(addedOneByOne.ok, true, JSON.stringify(addedOneByOne));
+  if (!addedOneByOne.ok) {
+    throw new Error('Expected a different catalog product to join a stair system later.');
+  }
+  assert.equal(
+    addedOneByOne.graph.rows.find(item => item.productRowId === laterRowId)?.catalogProductId,
+    laterCatalogSnapshot.catalogProductId
+  );
+  assert.deepEqual(addedOneByOne.graph.stairSystems, added.graph.stairSystems);
 
   const riserBeforeEdit = structuredClone(added.graph.rows[1]);
   const edited = executeProductGraphCommand({
@@ -1222,15 +1274,14 @@ const addRowCommand = (
     '960'
   );
 
-  const contradictoryCatalogGraph = emptyGraph();
-  const contradictoryCatalogBefore = structuredClone(contradictoryCatalogGraph);
-  const contradictoryCatalog = executeProductGraphCommand({
-    graph: contradictoryCatalogGraph,
+  const mixedCatalogGraph = emptyGraph();
+  const mixedCatalog = executeProductGraphCommand({
+    graph: mixedCatalogGraph,
     command: {
       ...stairCommand,
       commandId: parseStableIdentity(
         'audit-mutation',
-        'contradictory-stair-catalog'
+        'mixed-stair-catalog'
       ),
       sellerIntent: {
         ...stairCommand.sellerIntent,
@@ -1240,21 +1291,26 @@ const addRowCommand = (
             ...stairCommand.sellerIntent.parts[1],
             row: {
               ...stairCommand.sellerIntent.parts[1].row,
-              catalogProductId: 'different-catalog-stone'
-            }
+              catalogProductId: laterCatalogSnapshot.catalogProductId,
+              catalogSnapshotVersion: laterCatalogSnapshot.snapshotVersion
+            },
+            stairPartPolicyInput: stairInput('riser', 'mixed-35', {
+              motherWidthMeters: parseCanonicalDecimal('0.35')
+            })
           }
         ]
-      }
+      },
+      catalogSnapshots: [stairCatalogSnapshot, laterCatalogSnapshot]
     }
   });
-  assert.equal(contradictoryCatalog.ok, false);
-  assert.equal(
-    contradictoryCatalog.ok
-      ? undefined
-      : contradictoryCatalog.conflicts[0]?.code,
-    'catalog-snapshot-conflict'
+  assert.equal(mixedCatalog.ok, true, JSON.stringify(mixedCatalog));
+  if (!mixedCatalog.ok) {
+    throw new Error('Expected one stair system to accept row-owned catalog snapshots.');
+  }
+  assert.deepEqual(
+    mixedCatalog.graph.rows.map(item => item.catalogProductId),
+    ['catalog-stone-40', 'catalog-stone-35']
   );
-  assert.deepEqual(contradictoryCatalogGraph, contradictoryCatalogBefore);
 
   assert.deepEqual(
     migrateLegacyNosing(

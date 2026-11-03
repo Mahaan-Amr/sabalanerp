@@ -27,8 +27,6 @@ export interface StaircaseQuantityIntent {
 
 export interface CanonicalStairSystem {
   readonly stairSystemId: StableIdentity<'stair-system'>;
-  readonly catalogProductId: string;
-  readonly catalogSnapshotVersion: string;
   readonly quantityMode: StairQuantityMode;
   readonly totalSteps: number;
   readonly numberOfStaircases?: number;
@@ -37,7 +35,7 @@ export interface CanonicalStairSystem {
 
 export type ResolvedStaircaseQuantity = Omit<
   CanonicalStairSystem,
-  'stairSystemId' | 'catalogProductId' | 'catalogSnapshotVersion'
+  'stairSystemId'
 >;
 
 export interface StairPartPolicyInput {

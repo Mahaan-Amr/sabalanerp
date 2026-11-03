@@ -452,8 +452,6 @@ export const readLegacyProductGraph = ({
           );
           stairSystemsById.set(policyInput.stairSystemId, {
             stairSystemId: policyInput.stairSystemId,
-            catalogProductId,
-            catalogSnapshotVersion: stairCatalogSnapshotVersion,
             quantityMode: existingSystem?.quantityMode ?? 'steps',
             totalSteps: Math.max(
               existingSystem?.totalSteps ?? 0,

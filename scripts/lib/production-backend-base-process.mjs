@@ -11,16 +11,25 @@ export function originalBackendBaseCommands(){
       assert.equal(closed,false);
       const child=spawn(executable,args,{cwd,env,stdio:[input===undefined?'ignore':'pipe','pipe','pipe'],windowsHide:true});
       const owner={child,originalPid:child.pid??null,closed:false,stdoutBytes:0,stderrBytes:0,exceeded:false};owners.push(owner);
-      const output=[],errors=[];let spawnError,streamError;
+      const output=[],errors=[],captures=[];let spawnError,streamError;
       for(const [stream,chunks,key]of [[child.stdout,output,'stdoutBytes'],[child.stderr,errors,'stderrBytes']]){
         stream.on('error',error=>{streamError=error.code??'CHILD_STREAM_ERROR';});
-        stream.on('data',bytes=>{owner[key]+=bytes.length;if(owner[key]<=maximum)chunks.push(bytes);else owner.exceeded=true;});
+        const capture=bytes=>{owner[key]+=bytes.length;if(owner[key]<=maximum)chunks.push(bytes);else owner.exceeded=true;};
+        captures.push({stream,capture});stream.on('data',capture);
       }
       child.once('error',error=>{spawnError=error.code??'CHILD_SPAWN_FAILED';});
       owner.completion=new Promise(resolve=>child.once('close',(code,signal)=>{
         owner.closed=true;owner.result={originalPid:owner.originalPid,code,signal,spawnError,streamError,
+          stdoutEof:child.stdout.readableEnded,stderrEof:child.stderr.readableEnded,killed:child.killed,
           naturalChildClosure:typeof code==='number'&&signal===null,outputBoundExceeded:owner.exceeded,
-          stdout:Buffer.concat(output).toString('utf8'),stderr:Buffer.concat(errors).toString('utf8')};resolve(owner.result);
+          stdout:Buffer.concat(output).toString('utf8'),stderr:Buffer.concat(errors).toString('utf8')};
+        // The exact returned result and original child/closure evidence remain.
+        // Only redundant raw copies may retire after actual close and both EOFs.
+        if(owner.result.stdoutEof&&owner.result.stderrEof){
+          for(const {stream,capture}of captures)stream.removeListener('data',capture);
+          output.length=0;errors.length=0;captures.length=0;
+        }
+        resolve(owner.result);
       }));
       if(input!==undefined){child.stdin.on('error',error=>{streamError=error.code??'CHILD_INPUT_ERROR';});child.stdin.end(input);}
       return owner.completion;

@@ -269,6 +269,12 @@ evidence; this protocol description makes no claim that a real cycle passed.
 
 ### Explicit larger local QA candidate profile
 
+The selected successor entry v2 / supervisor plan v3 uses the versioned local pressure policy in
+[local-qa-memory-pressure.md](local-qa-memory-pressure.md) in place of the Windows
+Available-RAM floors below. Those floors remain the historical contract for
+legacy launchers/receipts; container/actor limits, storage reserves, production
+gates and data/closure invariants below remain mandatory for both policies.
+
 The default local candidate remains 1536 MiB with a 1536 MiB Docker memory-plus-swap
 limit. When that exact original cohort refuses the full catalog before starting an
 actor, the reviewed replacement CLI can explicitly select
@@ -362,6 +368,64 @@ branch remains separate and unknown nested paths are refused.
 ### Optional suspended local development frontend
 
 Build and qualify the current candidate while all ten local services are healthy. Only explicit operator authorization permits `scripts/run-local-dev-frontend-suspension.mjs --suspend --candidate-replacement-receipt <file> --candidate-replacement-sha256 <sha>` afterward. This owner stops only the inspected frontend container ID, records its original child close and both EOFs, and creates a durable restoration obligation. It changes no QA UI coverage, native memory floor, production gate, or deployment authority.
+
+The explicitly authorized C3 pre-UP variant uses this same owner through the
+genuine Root, selected with `--suspend-development-frontend` when packaging the
+v2 launch. The existing read-only preparation budget first captures ten genuinely
+healthy services, immutable rollback resources and SQLite conservation. The
+selected UI readers remain `frontend-candidate` and `frontend-retained`; an actual
+Compose dependency, shared namespace or volume dependency on development
+`frontend` refuses before stopping it. The exact inspected development frontend
+image/configuration and same-CID start path must be available. A durable
+Root-bound restoration obligation precedes `stop --time -1`; Docker never receives
+a timeout permitting SIGKILL in this variant. Original close, both EOFs and clean
+exit 0/143 prove suspension. The frontend remains explicitly exited/PID0, never
+reported healthy; all other service-health checks stay strict.
+
+The same Root passively records post-stop samples for at most 60 seconds.
+The selected `local-qa-pressure-v1` lane requires two consecutive fresh pressure
+admissions under `docs/operations/local-qa-memory-pressure.md`; the legacy floor
+still applies to any legacy lane. No WSL cache or swap credit applies. Only then
+may fresh operational preflight and candidate replacement proceed. The pre-UP
+stopped receipt is not candidate qualification. After the genuine replacement
+and all its original children close successfully, the same Root qualifies the
+new slot identities against the original stop closure. The selected local #419
+successor may carry ONLY this qualified scope through the same master's paired
+retained-browser pre-input segment. Both versions retain their required concurrent
+native/browser qualification. Before the master input loop, first LOCAL namespace
+or COMPLETE reader, the SAME producer completion must prove all four session EOFs,
+closed readers, exact returned browser models/holds and native/work/SQL quietness.
+Only then may the SAME Root use its existing canonical START of the original
+frontend CID/image/configuration. It must prove actual all-ten health, unchanged
+SQLite/configuration/resources and an endpoint in the original network/IPAM subnet
+before retiring the restoration obligation.
+
+The immutable retained report still describes the stopped historical scope.
+A private same-Root return acknowledgement transitions that same completion to
+its verified running epoch, and the genuine LOCAL factory retains that token for
+COMPLETE binding. Report edits, a null field, a second master or a saved token
+cannot supply this authority. Root's owned observations verify the current
+frontend before LOCAL and at heavy-lane/LOCAL-completion/COMPLETE admission; cached
+epoch data alone never supplies health. The new measured frontend incarnation
+updates the current rollback/candidate baselines, preserving all older receipts.
+
+This exception applies only to that verified pre-input retained segment, before
+any LOCAL/COMPLETE binding; arbitrary MASTER_RETAINED restoration, deployment,
+production switching and #420 remain prohibited. Pressure faults never reset.
+Publication/unlink/readback uncertainty remains fail-closed. A returned frontend
+followed by a negative parent uses the canonical rollback with that running
+baseline and no second START. See the pressure runbook for exact custody checks.
+
+V2 master enrollment authenticates the actual native-plan argv/hash and its
+supervisor-evidence selection, as well as the generated retained-browser plan.
+Pre-UP/known-restored failure returns this frontend through the same Root before
+releasing its lease. That Root must prove its own live process incarnation,
+closed children, permitted negative phase and fresh native/grant/SQL quietness;
+no JSON report can authorize excluding another live master. Legacy external
+restoration still requires the matching original master's actual closure. An
+unknown owner/closure or unproven restoration remains held with its durable
+obligation. This exception permits no database restore, gate reduction, image
+build, Docker/WSL restart or change to the following-cycle terminal boundary.
 
 The retained plan may select `localDevSuspension: {file, sha256}` together with `localDevMasterEvidence: {planFile, evidenceDirectory}` (future absolute supervisor-plan and evidence paths, without a circular future hash). Actual retained execution binds the same original Windows master PID and exact string native birth to that produced supervisor plan before QA. Genuine retained completion carries the selection into local QA, crypto, legacy UI and both checkpoint producer guards; default and production paths remain strict. Only the development frontend may be genuinely exited. All ten services remain in the census; controlled QA UI slot recreation keeps its existing original-owner checks.
 

@@ -12,7 +12,7 @@ assert.ok(start>0&&end>start);
 function harness({authorityCode=0,forceMissingEof=false,authorityOverflow=false}={}){
  const children=[],report={authorityCohort:{prepared:{},verified:{}}},service='backend-candidate',cid='a'.repeat(64),root=path.resolve('synthetic-readonly-probe');let statusCalls=0,saves=0;
  const authoritySource=Buffer.from(authorityOverflow?"import sys;sys.stderr.write('x'*65537)":authorityCode?`import sys;sys.exit(${authorityCode})`:"import json,sys;p=json.load(sys.stdin);print(json.dumps({'mode':p['mode'],'synthetic':True}))");
- const context={assert,Buffer,JSON,path,Promise,root,report,children,interrupted:false,cohortNonce:'b'.repeat(32),authorityCohortSources:['unused','synthetic.fixture.py'],previous:{[service]:{Id:cid}},
+ const context={assert,Buffer,JSON,path,Promise,root,report,children,mutationObserver:null,interrupted:false,cohortNonce:'b'.repeat(32),authorityCohortSources:['unused','synthetic.fixture.py'],previous:{[service]:{Id:cid}},
   digest:b=>createHash('sha256').update(b).digest('hex'),status:()=>{statusCalls++;},save:()=>{saves++;},authorityWriterRoot:(observed,name)=>{assert.equal(name,service);assert.equal(observed.Id,cid);return{kind:'runtime',target:'/synthetic-authority'};},
   fs:{readFileSync:file=>{assert.equal(file,path.join(root,'synthetic.fixture.py'));return authoritySource;}},
   installedProbe:Buffer.from('console.log(JSON.stringify({synthetic:true}));console.error("finite-probe-stderr");'),validateInstalledNativeRole:(value,expected)=>assert.deepEqual(value,expected),

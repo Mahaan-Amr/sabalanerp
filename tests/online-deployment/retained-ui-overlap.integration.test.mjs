@@ -23,6 +23,7 @@ const names = services.map(service => 'sabalanerp-local-' + service + '-1');
 const proxyRuntimeSources = [
   'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-release-proxy.mjs', 'deploy/scripts/api-release-routing.mjs',
   'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-operation-journal.mjs',
+  'deploy/scripts/release-forwarding.mjs','deploy/scripts/release-endpoint-catalog.mjs',
   'tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/private-ui-management.fixture.mjs',
   'tests/online-deployment/private-ui-startup.fixture.mjs',
 ];

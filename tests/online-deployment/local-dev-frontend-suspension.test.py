@@ -20,6 +20,9 @@ def mutate_receipt(cfg,change):
  v=json.loads(base64.b64decode(cfg['localDevSuspension']['receiptRawBase64']));change(v);raw=json.dumps(v).encode();s=cfg['localDevSuspension'];s['receiptRawBase64']=base64.b64encode(raw).decode();s['receiptSha256']=s['selection']['sha256']=m.sha(raw)
 
 class Rules(unittest.TestCase):
+ def test_natural_no_escalation_stop_retains_same_capture_checks(self):
+  config,rows,dev=fixture();mutate_receipt(config,lambda v:v['stop']['argv'].__setitem__(2,'-1'))
+  self.assertEqual(m.validate_scope(config,False)['stop']['argv'][2],'-1')
  def test_actual_js_validator_accepts_independent_python_exact_query_digest_and_refuses_typo(self):
   expected=hashlib.md5(b'SELECT 1').hexdigest();self.assertEqual(expected,'b1698e52a0f16203489454196a0c6307')
   module=(ROOT/'scripts/lib/local-dev-frontend-suspension.mjs').as_uri();script="import {validateLocalDevRestoreSql as check} from "+json.dumps(module)+";const slots=[{host:'172.20.0.2',database:'sabalanerp'}];check({prepared:0,sessions:[{client:slots[0].host,database:slots[0].database,application:'sabalanerp-online-candidate',state:'idle',xact:false,queryMd5:process.argv[1]}]},slots);"

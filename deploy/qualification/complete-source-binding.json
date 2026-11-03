@@ -1,0 +1,10 @@
+{
+  "format": "sabalan-original-complete-source-binding/v2",
+  "constructorModule": "scripts/lib/original-complete-runtime-constructor.mjs",
+  "configuration": {
+    "file": "D:\\sabalanerp-online-qa\\419-complete-constructor-eeb362d6c1b2fba4190a36c3becba7e0\\constructor-configuration.json",
+    "sha256": "866f19b85d981890655a0dafd0ce3b735e707f676d441bea38b49c37f5e40c67"
+  },
+  "runtimeBindingIssued": false,
+  "productionAdmission": false
+}

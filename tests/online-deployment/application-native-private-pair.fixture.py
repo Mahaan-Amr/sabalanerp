@@ -19,6 +19,18 @@ PROVIDER_ENV = dict(NODE_ENV='test', SMS_IR_API_KEY='', SMS_IR_ENVIRONMENT='prod
     https_proxy='', all_proxy='', NO_PROXY='127.0.0.1,localhost', no_proxy='127.0.0.1,localhost')
 
 
+def qualify_original_local_checkpoint(mode,role_client,check):
+    """Protected COMPLETE earns its own restore, without circular point replay."""
+    check(mode in ('ONLINE_POINT','PROTECTED_COMPLETE'),'UNKNOWN_LOCAL_QUALIFICATION_SCOPE')
+    if mode=='PROTECTED_COMPLETE':return None,None
+    inquiry=role_client.request('START_ONLINE_POINT_INQUIRY',{},'ONLINE_POINT_INQUIRY_READY')
+    point=role_client.request('RUN_ORIGINAL_ONLINE_CHECKPOINT',{},'ORIGINAL_ONLINE_CHECKPOINT_DONE')
+    closed=role_client.request('FINISH_ONLINE_POINT_INQUIRY',dict(actorId=inquiry['actorId']),'ONLINE_POINT_INQUIRY_DONE',actor_id=inquiry['actorId'])
+    check(point['result']['originalPointOnlyClosed'] is True and point['result']['continuousWalQualified'] is False
+        and point['result']['finalIntervalCompletion'] is False,'PRIVATE_POINT_ONLY_CLOSURE_UNPROVEN')
+    return point,closed
+
+
 def birth(pid):
     process=Path('/proc')/str(pid); fields=(process/'stat').read_text().rsplit(') ',1)[1].split()
     return dict(pid=pid,startTicks=fields[19],bootId=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
@@ -149,6 +161,9 @@ def run(root,index,config,source,sql,history,write,encoded,check,role_client,sou
         business_failure=failure
     role_client.request('PREPARE_PRIVATE_JOBS',dict(actorId=jobs['actorId']),'PRIVATE_JOBS_PREPARED',actor_id=jobs['actorId'])
     job_closed=role_client.request('FINISH_PRIVATE_JOBS',dict(actorId=jobs['actorId']),'PRIVATE_JOBS_DONE',jobs_grant,actor_id=jobs['actorId'])
+    local_mode=config.get('localQualificationMode','ONLINE_POINT')
+    check(local_mode in ('ONLINE_POINT','PROTECTED_COMPLETE'),'UNKNOWN_LOCAL_QUALIFICATION_SCOPE')
+    online_point=None;inquiry_point_closed=None
     if business_failure is None:
         try:
             private_chrome=role_client.request('START_PRIVATE_CHROME',{},'PRIVATE_CHROME_READY')
@@ -209,11 +224,7 @@ def run(root,index,config,source,sql,history,write,encoded,check,role_client,sou
                 role_client.request('RESTORE_PRIVATE_RETAINED_UI',{},'PRIVATE_LEGACY_UI_RESTORED')
             business_failure=failure
     if business_failure is None:
-        inquiry_point=role_client.request('START_ONLINE_POINT_INQUIRY',{},'ONLINE_POINT_INQUIRY_READY')
-        online_point=role_client.request('RUN_ORIGINAL_ONLINE_CHECKPOINT',{},'ORIGINAL_ONLINE_CHECKPOINT_DONE')
-        inquiry_point_closed=role_client.request('FINISH_ONLINE_POINT_INQUIRY',dict(actorId=inquiry_point['actorId']),'ONLINE_POINT_INQUIRY_DONE',actor_id=inquiry_point['actorId'])
-        check(online_point['result']['originalPointOnlyClosed'] is True and online_point['result']['continuousWalQualified'] is False
-            and online_point['result']['finalIntervalCompletion'] is False,'PRIVATE_POINT_ONLY_CLOSURE_UNPROVEN')
+        online_point,inquiry_point_closed=qualify_original_local_checkpoint(local_mode,role_client,check)
     role_client.request('PREPARE_PRIVATE_HTTP2',dict(actorId=http2['actorId']),'PRIVATE_HTTP2_PREPARED',actor_id=http2['actorId'])
     control=role_client.request('PREPARE_PRIVATE_HTTP',dict(actorId=actor_id),'PRIVATE_HTTP_PREPARE_AUTHORIZED')
     child.stdin.write(control['wire'].encode()+b'\n');child.stdin.flush();prepared=event('PREPARED')
@@ -278,5 +289,5 @@ def run(root,index,config,source,sql,history,write,encoded,check,role_client,sou
     return dict(format='sabalan-original-private-qualification-pair/v1',productionAdmission=False,originalPairClosed=True,
         actualHttpTargets=2,twoHttpTargetsQualified=True,actualInstalledEntry=True,actualCanonicalWorkersStarted=True,
         actualProductionLegacy55Qualified=True,installedLegacyRouting=installed_legacy_routing,installedLegacySqlObserver=legacy_verified,
-        originalOnlinePhysicalPoint=online_point,originalOnlinePointInquiryClosure=inquiry_point_closed,
+        localQualificationMode=local_mode,originalOnlinePhysicalPoint=online_point,originalOnlinePointInquiryClosure=inquiry_point_closed,
         installedRouting=installed_routing_proof,installedDomainRestore=installed_restore,installedDomainWriters=domain,bridge=bridge,bridgeProofRawBase64=base64.b64encode((app/'private-pair-bridge-proof.json').read_bytes()).decode(),bridgeAfterDrain=bridge_after_drain,hostClosed=final,originalHttpClosure=closure,originalHttpClosures=[closure,http2_closed['closure']],originalJobsClosure=job_closed['closure'],originalJobsClosures=[old_job_closure,job_closed['closure']],workerOwnershipIntervals=[old_job_closure['ownershipInterval'],job_closed['closure']['ownershipInterval']],resourcesBefore=before,resourcesAfter=after)

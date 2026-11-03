@@ -1,0 +1,338 @@
+{
+  "format": "sabalan-frozen-native-historical-data/v1",
+  "historicalOnly": true,
+  "activeCapability": false,
+  "root": "C:/Users/mahan/.codex/worktrees/online-deployment/sabalanerp",
+  "files": {
+    "reports/qa/application-native-role-slots-aeca1063d2275dde6b8fbda710d1de34.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\application-native-role-slots-aeca1063d2275dde6b8fbda710d1de34.json",
+      "bytes": 2290408,
+      "sha256": "bbcb8b820003b984dd75c9b89e622b13b6264626a8651fd7c95572a584d759f8",
+      "identity": {
+        "dev": "0",
+        "ino": "46161896180568152",
+        "size": "2290408",
+        "mtimeNs": "1792452856999896000",
+        "ctimeNs": "1792452856999896000",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/current-backend-image-41f7dd679cc93ae31d18380c1c13786c.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-backend-image-41f7dd679cc93ae31d18380c1c13786c.json",
+      "bytes": 32352,
+      "sha256": "431b6ab3b673a1dfe226b28f5a5e845628e3f91b78f667e4d946f67fe9d8e775",
+      "identity": {
+        "dev": "0",
+        "ino": "39687971716447644",
+        "size": "32352",
+        "mtimeNs": "1792453044829823700",
+        "ctimeNs": "1792453044829823700",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/current-backend-material-d320bded734e4af6b7aede2f0c1fa7a9.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-backend-material-d320bded734e4af6b7aede2f0c1fa7a9.json",
+      "bytes": 1317252,
+      "sha256": "8f9fb4f08af5027181232596b6f82fcb5c88b5d34556e629653ef5f3e7d5dc1d",
+      "identity": {
+        "dev": "0",
+        "ino": "22236523160386976",
+        "size": "1317252",
+        "mtimeNs": "1792453044838825300",
+        "ctimeNs": "1792453044838825300",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/application-prisma-ebcfd40fff0a28e39d983c6616893b50.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\application-prisma-ebcfd40fff0a28e39d983c6616893b50.json",
+      "bytes": 138178,
+      "sha256": "95063299b73e3ef2212e2359e544643dd73b268cfa198faee16d8b53747da384",
+      "identity": {
+        "dev": "0",
+        "ino": "16888498602757806",
+        "size": "138178",
+        "mtimeNs": "1792506345053802500",
+        "ctimeNs": "1792506345053802500",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/inquiry-coherent-61138945df5c6dfceba7b55726201e9c.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\inquiry-coherent-61138945df5c6dfceba7b55726201e9c.json",
+      "bytes": 9145,
+      "sha256": "e88d42144d37ea567047db1d6a8bdf66244ba39f5a7606b7fc9d0612a51d634f",
+      "identity": {
+        "dev": "0",
+        "ino": "49539595901108665",
+        "size": "9145",
+        "mtimeNs": "1792399395934596400",
+        "ctimeNs": "1792399395934596400",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/inquiry-restored-continuation-f86e6b783a3fb12f5079750e1b66d85e.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\inquiry-restored-continuation-f86e6b783a3fb12f5079750e1b66d85e.json",
+      "bytes": 3775,
+      "sha256": "796274cb1342ec6c371529b882ddebea8fd022483793c74e0afa502d8b412d5b",
+      "identity": {
+        "dev": "0",
+        "ino": "47850746040811998",
+        "size": "3775",
+        "mtimeNs": "1792397257852787700",
+        "ctimeNs": "1792397257852787700",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/current-frontend-image-f1d2f35620e97112f093e3f2e8815027.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-frontend-image-f1d2f35620e97112f093e3f2e8815027.json",
+      "bytes": 202614,
+      "sha256": "84546ebcca06798fc5508c0fcfbf9032bc22d49f23e02bb2a5c2443fa984dc24",
+      "identity": {
+        "dev": "0",
+        "ino": "21955048183616588",
+        "size": "202614",
+        "mtimeNs": "1792413070616809600",
+        "ctimeNs": "1792413070616809600",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/current-frontend-bundle-fa93e6481b00ee2bb70b1034030bce2d.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-frontend-bundle-fa93e6481b00ee2bb70b1034030bce2d.json",
+      "bytes": 2427197,
+      "sha256": "13891ceedb73de92dd94893388bf422d001b91f2408ab788b209d134348c7c2c",
+      "identity": {
+        "dev": "0",
+        "ino": "18577348463121708",
+        "size": "2427197",
+        "mtimeNs": "1792412994566249900",
+        "ctimeNs": "1792412994566249900",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/current-frontend-image-792da52dca314b79ba0f2cde7d38c36d.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-frontend-image-792da52dca314b79ba0f2cde7d38c36d.json",
+      "bytes": 207387,
+      "sha256": "4a4f2cd82ca4e78feccde5c3d22f7022e1dad672c2576deaffda774ec19c966d",
+      "identity": {
+        "dev": "0",
+        "ino": "12947848930229393",
+        "size": "207387",
+        "mtimeNs": "1792818072073071300",
+        "ctimeNs": "1792818072073071300",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/current-frontend-bundle-cb97dee63c3d8b1c1243100530c33fb7.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-frontend-bundle-cb97dee63c3d8b1c1243100530c33fb7.json",
+      "bytes": 1971423,
+      "sha256": "54a4e1d5311ba9843a6c9fdef7c35b1c3a300ede97ad57d243257fb40a765541",
+      "identity": {
+        "dev": "0",
+        "ino": "20829148276714295",
+        "size": "1971423",
+        "mtimeNs": "1792817884133678500",
+        "ctimeNs": "1792817884133678500",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/inquiry-native-next-image-20261018.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\inquiry-native-next-image-20261018.json",
+      "bytes": 5023,
+      "sha256": "c2353ffd981a417157c74e16abb179d61df254bb1f04b694ecb64db8ce3815ba",
+      "identity": {
+        "dev": "0",
+        "ino": "12947848930081069",
+        "size": "5023",
+        "mtimeNs": "1792296737801789500",
+        "ctimeNs": "1792296737801789500",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/current-frontend-image-a0d91677d0bb07955be5541f74b9caee.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-frontend-image-a0d91677d0bb07955be5541f74b9caee.json",
+      "bytes": 202697,
+      "sha256": "7f24d502e7f93a0348b272010dce2412892a7909abf1611304a059e5b5006383",
+      "identity": {
+        "dev": "0",
+        "ino": "28147497671135487",
+        "size": "202697",
+        "mtimeNs": "1792402205094833300",
+        "ctimeNs": "1792402205094833300",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/production-backend-base-local-552130ef718c951043eec3d57aad761b.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\production-backend-base-local-552130ef718c951043eec3d57aad761b.json",
+      "bytes": 33214,
+      "sha256": "5bc84d8107c4b449111ef81f3d49cbb2c80fd715be2d9fbcb7fd9ad70cdcf276",
+      "identity": {
+        "dev": "0",
+        "ino": "16888498602640902",
+        "size": "33214",
+        "mtimeNs": "1792443057016808600",
+        "ctimeNs": "1792443057016808600",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/production-backend-base-transfer-reconciliation-0cccf15683c54ca044d33a679f39cfec.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\production-backend-base-transfer-reconciliation-0cccf15683c54ca044d33a679f39cfec.json",
+      "bytes": 7595,
+      "sha256": "0a61c19a0bea31b255231faf2638edd67339e9ee0fe8787bf8239f25cdf84004",
+      "identity": {
+        "dev": "0",
+        "ino": "3377699720606602",
+        "size": "7595",
+        "mtimeNs": "1792442876709088100",
+        "ctimeNs": "1792442876709088100",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/production-image-export-b39dbefcc66448449f62d93159a31151.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\production-image-export-b39dbefcc66448449f62d93159a31151.json",
+      "bytes": 11728,
+      "sha256": "316758304177064c0e1fd8f79598b5143bd97b4b826673a7123dce44341c8f3f",
+      "identity": {
+        "dev": "0",
+        "ino": "16044073673851333",
+        "size": "11728",
+        "mtimeNs": "1792316363961107400",
+        "ctimeNs": "1792316363961107400",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/current-frontend-bundle-e1c4ea205818116fa0c550dae3328d39.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\current-frontend-bundle-e1c4ea205818116fa0c550dae3328d39.json",
+      "bytes": 1169803,
+      "sha256": "4c5129ba622670f1252adedb7f52648c44ea4f0177e8832f57a2778126a2ebf4",
+      "identity": {
+        "dev": "0",
+        "ino": "57139420272319208",
+        "size": "1169803",
+        "mtimeNs": "1792401178749704400",
+        "ctimeNs": "1792401178749704400",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/production-frontend-base-local-21977cdf26c9a0f1b14329707bf88be6.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\production-frontend-base-local-21977cdf26c9a0f1b14329707bf88be6.json",
+      "bytes": 11539,
+      "sha256": "741f740053acedbf46830d34603544978d224940a6bc290681c27b4d3322de98",
+      "identity": {
+        "dev": "0",
+        "ino": "104708691336407049",
+        "size": "11539",
+        "mtimeNs": "1792412874932799900",
+        "ctimeNs": "1792412874932799900",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/production-frontend-base-transfer-c37071ab25dc45f4b708872172fdf8a0.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\production-frontend-base-transfer-c37071ab25dc45f4b708872172fdf8a0.json",
+      "bytes": 721,
+      "sha256": "eaa8135c93bee5fca6133cc99afd1ab872466c53aa6d45ef28d68b57db982094",
+      "identity": {
+        "dev": "0",
+        "ino": "68116944364073875",
+        "size": "721",
+        "mtimeNs": "1792411971020022700",
+        "ctimeNs": "1792411971020022700",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/production-frontend-base-local-bee8adabf607c7e5eba735f328612750.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\production-frontend-base-local-bee8adabf607c7e5eba735f328612750.json",
+      "bytes": 9412,
+      "sha256": "22522d6fe8b5ea398822422b63e44dbdf278cf50cff6bd48d341b65a96742496",
+      "identity": {
+        "dev": "0",
+        "ino": "11540474045322805",
+        "size": "9412",
+        "mtimeNs": "1792412765876722200",
+        "ctimeNs": "1792412765876722200",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/production-backend-dependencies-readonly-626ef06eee6b43bebd92f29b110ae845.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\production-backend-dependencies-readonly-626ef06eee6b43bebd92f29b110ae845.json",
+      "bytes": 12703,
+      "sha256": "0ea6ddf7935f1fc2dbd1d96160adff0b1968f76b9e691b88305c68b665a016bd",
+      "identity": {
+        "dev": "0",
+        "ino": "14355223813500682",
+        "size": "12703",
+        "mtimeNs": "1792417735518138000",
+        "ctimeNs": "1792417735518138000",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/both-host-storage-preflight-before-independent-decryption-9da46fabd18f4545aa806a9dfd77ee9d.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\both-host-storage-preflight-before-independent-decryption-9da46fabd18f4545aa806a9dfd77ee9d.json",
+      "bytes": 2622,
+      "sha256": "4a1e2d1669bec7272d4e82042dec4bbda3d265aec6e537951c820e92fb698c94",
+      "identity": {
+        "dev": "0",
+        "ino": "17732923532808323",
+        "size": "2622",
+        "mtimeNs": "1792376223595012900",
+        "ctimeNs": "1792376223595012900",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    },
+    "reports/qa/production-backend-base-transfer-9cea3ef0c8abde4f780af9d622690c63.json": {
+      "file": "C:\\Users\\mahan\\.codex\\worktrees\\online-deployment\\sabalanerp\\reports\\qa\\production-backend-base-transfer-9cea3ef0c8abde4f780af9d622690c63.json",
+      "bytes": 22722,
+      "sha256": "1c8ab6de062a75f87c085734efba4fbd51ea5743bf88d3b1262c78c00dfb433b",
+      "identity": {
+        "dev": "0",
+        "ino": "13510798882114328",
+        "size": "22722",
+        "mtimeNs": "1792441651257979900",
+        "ctimeNs": "1792441651257979900",
+        "mode": "33206",
+        "nlink": "1",
+        "descriptorDevice": "3055882712"
+      }
+    }
+  }
+}

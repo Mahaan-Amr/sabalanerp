@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {nativeHistoricalFile} from './frozen-native-history.mjs';
 
 export const backendBaseIdentity=Object.freeze({
   exportReceipt:'production-image-export-b39dbefcc66448449f62d93159a31151.json',
@@ -38,7 +39,7 @@ const ordered=value=>Object.fromEntries(Object.entries(value??{}).sort(([a],[b])
  * proof of every installed package byte, schema/client or current runtime. */
 export function qualifiedProductionBackendExport(repository){
   const expected=backendBaseIdentity;
-  const exported=jsonFile(path.join(repository,'reports/qa',expected.exportReceipt));
+  const exported=jsonFile(nativeHistoricalFile(repository,'reports/qa/'+expected.exportReceipt));
   assert.equal(exported.value.sshExitCode,0);const result=JSON.parse(exported.value.stdout);
   assert.equal(result.operation,'production-image-export-b39dbefcc66448449f62d93159a31151');
   assert.equal(result.nativeExitCode,0);assert.equal(result.nativeClosureVerified,true);assert.equal(result.sourceUnchanged,true);
@@ -50,7 +51,7 @@ export function qualifiedProductionBackendExport(repository){
   assert.equal(raw.index,expected.sourceIndex);assert.equal(raw.platform,expected.sourcePlatform);assert.equal(raw.config,expected.configIdentity);
   assert.equal(raw.archiveBytes,expected.rawBytes);assert.equal(raw.archiveSha256,expected.rawSha256);
   assert.equal(raw.rootfsDiffIds.length,expected.layerCount);raw.rootfsDiffIds.forEach(value=>assert.match(value,/^sha256:[a-f0-9]{64}$/));
-  const dependencies=jsonFile(path.join(repository,'reports/qa',expected.dependencyReceipt));
+  const dependencies=jsonFile(nativeHistoricalFile(repository,'reports/qa/'+expected.dependencyReceipt));
   assert.equal(dependencies.value.sshExitCode,0);const observed=JSON.parse(dependencies.value.stdout);
   assert.equal(observed.format,'sabalan-production-backend-dependencies-readonly/v1');assert.equal(observed.productionMutated,false);
   assert.deepEqual(observed.servicesAfter,observed.servicesBefore);assert.equal(Object.keys(observed.servicesBefore).length,6);
@@ -94,7 +95,7 @@ export const backendBaseReadonlyFsyncFailure=Object.freeze({
 });
 /** ONE actual terminal transfer failure; no generic failure/adoption path. */
 export function inspectBackendBaseReadonlyFsyncFailure(repository){
-  const receipt=jsonFile(path.join(repository,'reports/qa',backendBaseReadonlyFsyncFailure.receipt));
+  const receipt=jsonFile(nativeHistoricalFile(repository,'reports/qa/'+backendBaseReadonlyFsyncFailure.receipt));
   assert.equal(receipt.identity.sha256,backendBaseReadonlyFsyncFailure.sha256);
   const value=receipt.value,source=qualifiedProductionBackendExport(repository);
   assert.equal(value.format,'sabalan-production-backend-base-transfer/v1');assert.equal(value.phase,'FAILED_HELD');assert.equal(value.pass,false);

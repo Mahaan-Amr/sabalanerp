@@ -647,7 +647,11 @@ test('Partner payments have no discount editor and preserve the full balance thr
 });
 
 
-for (const width of [1280, 390]) test(`Reviewed Partner correction starts at date and preserves prior payment at ${width}px`, async ({ page }) => {
+for (const { width, pollingOnly } of [
+  { width: 1280, pollingOnly: true },
+  { width: 1280, pollingOnly: false },
+  { width: 390, pollingOnly: false },
+]) test(`Reviewed Partner correction starts at date and preserves prior payment at ${width}px${pollingOnly ? ' with inquiry polling' : ''}`, async ({ page }) => {
   const { createPartnerFixtures } = await import('../../packages/partner-sales-contracts/dist/testing');
   const fixture = createPartnerFixtures();
   const caseId = fixture.partner.owner.caseId;
@@ -666,7 +670,7 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     retailDiscount: { amount: '0', currency: 'IRT' }, belowCostConfirmed: false };
   await loginAsAdmin(page);
   await page.setViewportSize({ width, height: 900 });
-  if (width === 1280) await page.clock.install();
+  if (pollingOnly) await page.clock.install();
   const recoveryState = await mockPartner(page, true);
   let openingProductCatalogReads = 0;
   await page.route('**/api/partner/technical/catalog/query', route => {
@@ -762,7 +766,7 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     await setTheme(page, theme); await assertNoHorizontalOverflow(page);
     await page.screenshot({ path: `reports/qa/partner-confirmation/confirmation-${width}-${theme}.png`, fullPage: true });
   }
-  if (width === 1280) {
+  if (pollingOnly) {
     // Allow the actual step edit and initial approval binding to persist first.
     await page.waitForTimeout(1_500);
     const writesBeforePolling = wizardWrites;
@@ -804,14 +808,13 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     await workflow(page).getByRole('button', { name: 'تلاش مجدد', exact: true }).click();
     await expect(workflow(page).getByText('دریافت پاسخ جدید استعلام انجام نشد؛ اطلاعات قبلی حفظ شده است.', { exact: true })).toHaveCount(0);
     expect(wizardWrites).toBe(writesBeforePolling);
-
+    return;
   }
   await workflow(page).getByRole('button', { name: 'لغو قرارداد', exact: true }).click();
   const cancel = page.getByRole('dialog', { name: 'لغو قرارداد', exact: true });
   await expect(cancel).toBeVisible();
   await expect(cancel.getByRole('button', { name: 'تأیید لغو قرارداد', exact: true })).toBeDisabled();
   await page.keyboard.press('Escape');
-  if (width === 1280) await page.clock.runFor(1_000);
   await expect(cancel).toBeHidden();
   await expect.poll(() => recoveryState.wizard?.step).toBe('confirmation');
   expect(recoveryState.wizard?.reviewedCorrectionRequestId).toBe(correctionRequestId);

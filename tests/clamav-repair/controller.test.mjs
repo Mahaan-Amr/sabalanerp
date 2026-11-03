@@ -1,11 +1,12 @@
+import './retention-receipt-binder.test.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8');
+const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n');
 test('protected release captures the stopped bank before checkpoint, applies target after journaled mutation, and verifies before reopening',()=>{
- const steps=['phase SERVICES_DRAINED\ncapture_clamav_checkpoint','run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js','phase REMOTE_CHECKPOINT_VERIFIED','phase MUTATION_STARTED','node scripts/clamav-checkpoint.mjs activate','phase RELEASE_STARTED','verify_clamav_repair_runtime\nremaining_mutation_seconds','phase TRAFFIC_OPENED'];
+ const steps=['phase SERVICES_DRAINED','preserved_clamav_guard identity || exit 1','capture_clamav_checkpoint','run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js','phase REMOTE_CHECKPOINT_VERIFIED','phase MUTATION_STARTED','node scripts/clamav-checkpoint.mjs activate','phase RELEASE_STARTED','verify_clamav_repair_runtime\nremaining_mutation_seconds','phase TRAFFIC_OPENED'];
  let previous=-1;
- for(const step of steps) {const index=source.indexOf(step);assert.ok(index>previous,`missing or out of order: ${step}`);previous=index;}
+ for(const step of steps) {const index=source.indexOf(step, previous + 1);assert.ok(index>previous,`missing or out of order: ${step}`);previous=index;}
  assert.doesNotMatch(source,/compose up -d postgres clamav/,'pre-checkpoint must not replace AV');
  assert.match(source,/if \[ "\$\{DEPLOYMENT_CLAMAV_REPAIR\}" = true \] && \[ "\$\{MUTATION_STARTED\}" -eq 0 \]; then[\s\S]*compose start clamav[\s\S]*--no-deps/);
  assert.match(source,/deployment-rollback.js[\s\S]*switch_to_previous_images\n    restore_clamav_configuration[\s\S]*verify_clamav_repair_runtime[\s\S]*DEPLOYMENT_GATE_MODE=ROLLBACK/);
@@ -64,8 +65,8 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
   }
   const environment=path.join(root,'.env.prod');
   fs.writeFileSync(environment,`DEPLOYMENT_SECRET_DIR=${root}/secrets\nDEPLOYMENT_REMOTE_MOUNT_HOST=${root}/remote\nDEPLOYMENT_REPORT_DIR_HOST=${root}/reports\nDEPLOYMENT_OWNER=fixture\nDEPLOYMENT_BACKEND_IMAGE_REPOSITORY=fixture/backend\nDEPLOYMENT_FRONTEND_IMAGE_REPOSITORY=fixture/frontend\nDEPLOYMENT_INQUIRY_IMAGE_REPOSITORY=fixture/inquiry\nDOMAIN=fixture.invalid\nINQUIRY_DOMAIN=inquiry.fixture.invalid\n`);
-  for(const kind of ['git','docker','node'])fs.writeFileSync(path.join(root,'bin',kind),`#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} ${kind} "$@"\n`,{mode:0o755});
-  const shims={flock:'exit 0',curl:'printf 503',df:"printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 900000000 1 899999999 1%% /\\n'",sleep:'exec /bin/sleep 0.02',timeout:'shift; exec "$@"'};
+  for(const kind of ['git','docker','node','python3'])fs.writeFileSync(path.join(root,'bin',kind),`#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} ${kind} "$@"\n`,{mode:0o755});
+  const shims={sh:`case "$1" in */deploy/scripts/storage-preflight.sh) printf '%s\\n' '{"kind":"storage-preflight","args":[]}' >> '${root}/commands.jsonl'; exit 0;; *) exec /bin/sh "$@";; esac`,flock:'exit 0',curl:'printf 503',df:"printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 900000000 1 899999999 1%% /\\n'",sleep:'exec /bin/sleep 0.02',timeout:'shift; exec "$@"'};
   for(const [name,body]of Object.entries(shims))fs.writeFileSync(path.join(root,'bin',name),'#!/bin/sh\n'+body+'\n',{mode:0o755});
   const result=spawnSync('/bin/sh',[path.join(repository,'deploy/scripts/deploy.sh'),environment],{cwd:root,encoding:'utf8',timeout:110000,env:{...process.env,PATH:path.join(root,'bin')+':'+process.env.PATH,TEST_RELEASE_ROOT:root,TEST_SOURCE_ROOT:repository,TEST_RELEASE_FAILURE:failure,TEST_TYPESCRIPT_JS:typescript,DEPLOYMENT_REPO_ROOT:root,DEPLOYMENT_MODE:'release',DEPLOYMENT_CLAMAV_OPERATION:resumed?'repair':incident?'incident-recovery':'repair',DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE:incident?path.join(root,'incident.json'):'',DEPLOYMENT_CLAMAV_TARGET_IMAGE:resumed?'':targetImage,DEPLOYMENT_CLAMAV_BASE_COMMIT:'a'.repeat(40),DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:incident?'':path.join(root,'proof.json'),DEPLOYMENT_CLAMAV_READY_FILE:path.join(root,'candidate/target.json')}});
   const expected=resumed?1:{qualification:41,'remote-tamper':43,'post-mutation':44,'rollback-qualifier':44,'after-open':46,success:0,'stale-target':90,'updater-refusal':90,'install-interrupted':90,'lease-expired':90,'before-maintenance':22,'acquire-failure':23,'after-acquire':24,'marker-interrupted':25}[failure];
@@ -73,6 +74,21 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
   const commands=fs.readFileSync(path.join(root,'commands.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line));
   const includes=text=>commands.filter(c=>c.args.includes(text));
   const controls=verb=>commands.filter(c=>c.args.includes('dist/scripts/deployment-control.js')&&c.args.at(-1)===verb);
+  const legacy=mode=>commands.findIndex(c=>c.kind==='python3'&&c.args[1]===mode);
+  const checkpoint=commands.findIndex(c=>c.kind==='docker'&&c.args.includes('dist/scripts/deployment-checkpoint.js'));
+  const hostStage=stage=>commands.findIndex(c=>c.kind==='node'&&c.args[0]?.endsWith('/backup-retention-host.mjs')&&c.args.includes(stage));
+  const closure=commands.findIndex(c=>c.kind==='docker'&&c.args.includes('sh')&&c.args.includes('-c')&&c.args.at(-1).includes('exec python3 - --assert-closed'));
+  if(legacy('--preflight')>=0){
+   const storage=commands.findIndex(c=>c.kind==='storage-preflight');
+   assert.ok(storage>=0&&storage<legacy('--preflight'),'storage preflight must run before the legacy plan');
+  }
+  if(checkpoint>=0){
+   assert.ok(legacy('--preflight')>=0&&legacy('--forward')>legacy('--preflight')&&legacy('--assert-resolved')>legacy('--forward'));
+   assert.ok(closure>legacy('--assert-resolved')&&checkpoint>closure,'checkpoint requires resolved signal and native closure');
+   assert.ok(hostStage('BEFORE_CHECKPOINT')>closure&&hostStage('BEFORE_CHECKPOINT')<checkpoint,'independent retention must precede checkpoint');
+   if(failure==='remote-tamper')assert.equal(hostStage('AFTER_CHECKPOINT'),-1,'failed checkpoint cannot retire remote data');
+   else assert.ok(hostStage('AFTER_CHECKPOINT')>checkpoint,'retention after capture must follow verified checkpoint');
+  }
   const activation=commands.findIndex(c=>c.args.includes('scripts/clamav-checkpoint.mjs')&&c.args.at(-1)==='activate');
   const remotePhase=commands.findIndex(c=>c.args.includes('DEPLOYMENT_PHASE=REMOTE_CHECKPOINT_VERIFIED'));
   if(['post-mutation','rollback-qualifier','after-open','success','install-interrupted','lease-expired'].includes(failure))assert.ok(activation>remotePhase&&remotePhase>=0,'activation requires both verified checkpoints');

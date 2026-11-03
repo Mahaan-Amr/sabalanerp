@@ -3,10 +3,7 @@ import { assertNoHorizontalOverflow, assertNoSeriousAxeViolations, loginAsAdmin,
 
 test('contract creation keeps date, customer selection and return navigation intact with readable RTL', async ({ page }, info) => {
   await loginAsAdmin(page);
-  // Complete cold Next dev compilation before leaving the current document.
-  expect((await page.request.get('/dashboard/sales/contracts/create')).ok()).toBe(true);
-  await page.waitForLoadState('networkidle');
-  await page.goto('/dashboard/sales/contracts/create');
+  await page.goto('/dashboard/sales/contracts/create?fresh=1');
   const workflow = page.locator('main.sds-workspace');
   await expect(workflow.getByRole('heading', { name: 'اطلاعات ثبت', exact: true })).toBeVisible();
   await setViewportAndZoom(page, { width: 1600, height: 1050 });

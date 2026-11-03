@@ -1,3 +1,4 @@
+import { scopeContractNavigationFixture } from './support/contract-navigation-fixture';
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import { loginAsAdmin } from './support/design-system';
@@ -40,7 +41,8 @@ test('remaining recovery error keeps every row and shows exact chain guidance on
       discount: null, signature: null
     } }));
   }, products);
-  await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
+  await scopeContractNavigationFixture(page);
+  await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
   const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
   await expect(submit).toBeEnabled({ timeout: 60_000 });
   await submit.click();

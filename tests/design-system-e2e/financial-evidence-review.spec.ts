@@ -109,18 +109,24 @@ const contractDetail = (caseOpen: boolean, presentedCase = reviewCase) => ({
 
 const installAccountingFixture = async (page: Page, initialCaseOpen = false, presentedCase = reviewCase) => {
   let caseOpen = initialCaseOpen;
-  let detailReads = 0;
   await page.route(`**/api/accounting/contracts/${contractId}/lifecycle`, route => json(route, 200, {
     success: true,
     data: { deactivationEligibility: { blockers: [] }, deleteEligibility: { blockers: [] } },
   }));
   await page.route(`**/api/accounting/contracts/${contractId}`, route => {
-    detailReads += 1;
     return json(route, 200, { success: true, data: contractDetail(caseOpen, presentedCase) });
   });
+  await page.route('**/api/accounting/financial-records?**', route => json(route, 200, {
+    success: true, data: { items: [{ ...contractDetail(caseOpen).financialRecords[0], contractId,
+      contract: contractDetail(caseOpen).contract }], actionAvailability: { approve: true } },
+  }));
+  await page.route('**/api/accounting/audit?**', route => json(route, 200, {
+    success: true, data: { items: [], total: 0 },
+  }));
   await page.route('**/api/accounting/actions', async route => {
-    const body = route.request().postDataJSON() as { kind?: string };
+    const body = route.request().postDataJSON() as { kind?: string; invoiceId?: string };
     if (body.kind !== 'APPROVE_FINANCIAL_INVOICE') return json(route, 400, { success: false, error: 'فرمان آزمایشی ناشناخته است.' });
+    expect(body.invoiceId).toBe(invoiceId);
     caseOpen = true;
     return json(route, 409, {
       success: false,
@@ -130,24 +136,25 @@ const installAccountingFixture = async (page: Page, initialCaseOpen = false, pre
       actionUrl: caseHref,
     });
   });
-  return { detailReads: () => detailReads };
 };
 
-test('approval conflict reloads the contract and opens the exact dedicated review case', async ({ page }) => {
+test('contract opens its financial record and approval conflict links the exact evidence case', async ({ page }) => {
   await loginAsAdmin(page);
-  const fixture = await installAccountingFixture(page);
+  await installAccountingFixture(page);
   await page.goto(`/dashboard/accounting/contracts/${contractId}`);
   await waitForStableState(page);
   await page.getByRole('button', { name: 'رکوردهای مالی', exact: true }).click();
+  const recordLink = page.getByRole('link', { name: 'بررسی رکورد مالی', exact: true });
+  await expect(recordLink).toHaveAttribute('href', `/dashboard/accounting/invoice-candidates/${invoiceId}?returnTo=${encodeURIComponent(`/dashboard/accounting/contracts/${contractId}?section=financial`)}`);
+  await recordLink.click();
 
   await page.getByText('شماره فاکتور سیستمی', { exact: true }).locator('..').locator('input').fill('1168');
   await page.getByText('مبلغ سپیدار (ریال)', { exact: true }).locator('..').locator('input').fill('380300000');
-  const readsBeforeApproval = fixture.detailReads();
   await page.getByRole('button', { name: 'تایید مالی', exact: true }).click();
 
-  const reviewLink = page.getByRole('link', { name: 'رفتن به پرونده بررسی', exact: true });
+  const reviewLink = page.getByRole('link', { name: 'پرونده بررسی شواهد', exact: true });
   await expect(reviewLink).toHaveAttribute('href', caseHref);
-  expect(fixture.detailReads()).toBeGreaterThan(readsBeforeApproval);
+  await expect(page.getByRole('heading', { name: 'بررسی رکورد مالی', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'بستن پرچم' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'لغو پرچم' })).toHaveCount(0);
 
@@ -162,12 +169,10 @@ test('approval conflict reloads the contract and opens the exact dedicated revie
   await expect(page.getByText(/حذف پیش‌نویس/).first()).toBeVisible();
 });
 
-test('list approval conflict reloads the affected summary before showing its case link', async ({ page }) => {
+test('list opens the exact financial record before an evidence-conflict approval', async ({ page }) => {
   await loginAsAdmin(page);
-  let listReads = 0;
-  let caseOpen = false;
+  await installAccountingFixture(page);
   await page.route('**/api/accounting/contracts?**', route => {
-    listReads += 1;
     return json(route, 200, {
       success: true,
       data: {
@@ -184,7 +189,7 @@ test('list approval conflict reloads the affected summary before showing its cas
           accounting: {
             sourceStatus: 'READY', eligibleForFinancialRecords: true,
             invoiceStatus: 'DRAFT', receivableStatus: 'NONE', taxStatus: 'NOT_READY',
-            openFlags: caseOpen ? 1 : 0, openBlockerFlags: caseOpen ? 1 : 0, openCorrections: 0,
+            openFlags: 0, openBlockerFlags: 0, openCorrections: 0,
             totalContractAmount: '380300000', invoicedAmount: '380300000', receivedAmount: '0', remainingAmount: '380300000',
           },
           financialRecords: [{
@@ -198,27 +203,18 @@ test('list approval conflict reloads the affected summary before showing its cas
       },
     });
   });
-  await page.route('**/api/accounting/actions', route => {
-    caseOpen = true;
-    return json(route, 409, {
-      success: false,
-      code: 'FINANCIAL_EVIDENCE_CONFLICT',
-      error: 'تأیید مالی متوقف شد و پرونده بررسی ایجاد شد.',
-      reviewCase: { id: caseId, contractId, actionUrl: caseHref },
-      actionUrl: caseHref,
-    });
-  });
   await page.goto('/dashboard/accounting/contracts');
   await waitForStableState(page);
 
-  await page.getByRole('button', { name: 'تایید مالی', exact: true }).first().click();
+  const recordLink = page.getByRole('link', { name: 'بررسی و تأیید مالی', exact: true }).first();
+  await expect(recordLink).toHaveAttribute('href', `/dashboard/accounting/invoice-candidates/${invoiceId}?returnTo=${encodeURIComponent('/dashboard/accounting/contracts')}`);
+  await recordLink.click();
   await page.getByText('شماره فاکتور سیستمی', { exact: true }).locator('..').locator('input').fill('1168');
   await page.getByText('مبلغ سپیدار (ریال)', { exact: true }).locator('..').locator('input').fill('380300000');
-  const readsBeforeApproval = listReads;
-  await page.locator('div.fixed.inset-0.z-50').getByRole('button', { name: 'تایید مالی', exact: true }).click();
+  await page.getByRole('button', { name: 'تایید مالی', exact: true }).click();
 
-  await expect(page.getByRole('link', { name: 'رفتن به پرونده بررسی', exact: true })).toHaveAttribute('href', caseHref);
-  expect(listReads).toBeGreaterThan(readsBeforeApproval);
+  await expect(page.getByRole('link', { name: 'پرونده بررسی شواهد', exact: true })).toHaveAttribute('href', caseHref);
+  await expect(page.getByRole('heading', { name: 'بررسی رکورد مالی', exact: true })).toBeVisible();
 });
 
 test('dedicated review remains usable in dark mobile layout', async ({ page }) => {

@@ -208,3 +208,23 @@ test('actual managed private rollback checks image mode and gateway alias before
   assert.equal(f.calls.some(args=>args.includes('freshclam')&&!args.includes('--version')),false,'rollback inspection never forces an update');
  }
 });
+
+
+test('local acquisition changes only the fixed mirror while production and updater controls remain unchanged', async () => {
+ const {readFile}=await import('node:fs/promises');
+ const production=await readFile(new URL('../../deploy/clamav/freshclam.conf',import.meta.url),'utf8');
+ const local=await readFile(new URL('../../deploy/clamav/freshclam.local.conf',import.meta.url),'utf8');
+ const directives=value=>value.split('\n').map(line=>line.trim()).filter(line=>line&&!line.startsWith('#'));
+ assert.deepEqual(directives(local),directives(production).map(line=>line==='DatabaseMirror https://mirrors.fe.up.pt/pub/clamav'
+  ? 'DatabaseMirror https://clamavdb.c3sl.ufpr.br' : line));
+ const productionRecipe=await readFile(new URL('../../deploy/clamav/Dockerfile',import.meta.url),'utf8');
+ const localRecipe=await readFile(new URL('../../deploy/clamav/Dockerfile.local',import.meta.url),'utf8');
+ const recipe=value=>value.split('\n').filter(line=>!line.startsWith('#')).join('\n');
+ assert.equal(recipe(localRecipe).replaceAll('freshclam.local.conf','freshclam.conf'),recipe(productionRecipe)
+  .replace('COPY deploy/clamav/clamd.conf deploy/clamav/freshclam.conf /etc/clamav/',
+   'COPY deploy/clamav/clamd.conf /etc/clamav/clamd.conf\nCOPY deploy/clamav/freshclam.conf /etc/clamav/freshclam.conf'));
+ const compose=await readFile(new URL('../../docker-compose.local.yml',import.meta.url),'utf8');
+ assert.match(compose,/dockerfile: deploy\/clamav\/Dockerfile\.local/);
+ const prodCompose=await readFile(new URL('../../docker-compose.prod.yml',import.meta.url),'utf8');
+ assert.doesNotMatch(prodCompose,/Dockerfile\.local|freshclam\.local\.conf|c3sl-local/);
+});

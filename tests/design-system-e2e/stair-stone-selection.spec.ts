@@ -1,3 +1,4 @@
+import { scopeContractNavigationFixture } from './support/contract-navigation-fixture';
 import { expect, test } from '@playwright/test';
 import { loginAsAdmin, assertNoHorizontalOverflow } from './support/design-system';
 
@@ -25,7 +26,8 @@ for (const width of [1280, 390]) {
         payment: { payments: [], currency: 'تومان', totalContractAmount: 0 }, discount: null, signature: null
       }
     })));
-    await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4');
+    await scopeContractNavigationFixture(page);
+    await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=4');
     await page.getByRole('tab', { name: 'پله', exact: true }).click();
     await page.getByRole('option', { name: /گوهره/ }).first().click();
     const dialog = page.getByRole('dialog', { name: 'تنظیمات محصول', exact: true });

@@ -147,6 +147,25 @@ for (const failure of ['storage', 'preflight', 'native-closure', 'checkpoint', '
     const fakeNodeEval=path.join(f.root,'fixture-node-eval.cjs');
     fs.writeFileSync(fakeNodeEval,`const fs=require('fs'),assert=require('assert/strict'),crypto=require('crypto'),path=require('path'),cp=require('child_process');const a=process.argv.slice(2);if(a[0]==='-e'&&a[1]===${JSON.stringify(binderSource)}){const file=a[2];assert.equal(path.resolve(path.dirname(file)),path.resolve(process.env.TEST_REPORTS));assert.match(path.basename(file),/^remote-retention-deploy-.+-(BEFORE_CHECKPOINT|AFTER_CHECKPOINT)\\.json$/);const raw=fs.readFileSync(file),r=JSON.parse(raw);assert.equal(r.format,'fixture-only-host-retention');assert.ok(path.basename(file).includes(r.deploymentId+'-'+r.stage));process.stdout.write(crypto.createHash('sha256').update(raw).digest('hex'));}else{const result=cp.spawnSync(process.execPath,a,{stdio:'inherit'});if(result.error)throw result.error;process.exitCode=result.status??1;}`);
     fs.writeFileSync(path.join(bin,'node'), `#!/bin/sh\ncase "$1" in */backup-retention-host.mjs) shift; exec '${nodeBinary}' '${fakeBackupHost.replaceAll('\\','/')}' "$@";; -e) exec '${nodeBinary}' '${fakeNodeEval.replaceAll('\\','/')}' "$@";; *) exec '${nodeBinary}' "$@";; esac\n`,{mode:0o755});
+    // Model only the legacy-signal port for this shell-ordering fixture. The real
+    // original-host bridge has independent tests for lock, process and lease proof.
+    // Never return a fixture success for an unexpected command, identity or order.
+    const fakeLegacySignal = path.join(f.root, 'fixture-legacy-signal.cjs');
+    fs.writeFileSync(fakeLegacySignal, `const fs=require('fs'),path=require('path'),assert=require('assert/strict');
+const a=process.argv.slice(2),[script,mode,compose,environment,image,plan,session]=a;
+assert.ok(script.endsWith('/deploy/scripts/legacy-backend-signal.py'));
+assert.ok(['--preflight','--forward','--assert-resolved'].includes(mode));
+assert.equal(compose,path.join(process.env.DEPLOYMENT_REPO_ROOT,'docker-compose.prod.yml').replaceAll(String.fromCharCode(92),'/'));
+assert.equal(environment,process.env.TEST_ENV);assert.match(image,/^sha256:[a-f0-9]{64}$/);
+assert.equal(image,JSON.parse(fs.readFileSync(process.env.TEST_CONTAINERS))[0].Image);
+assert.equal(plan,path.join(process.env.DEPLOYMENT_REPO_ROOT,'.deploy-state','legacy-backend-drain-'+process.env.DEPLOYMENT_ID+'.json').replaceAll(String.fromCharCode(92),'/'));
+const marker=path.join(process.env.TEST_REPORTS,'fixture-legacy-preflight.json');
+fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(['fixture-legacy-signal',mode])+'\\n');
+if(mode==='--preflight'){assert.equal(a.length,6);fs.writeFileSync(marker,JSON.stringify({image,plan}),{flag:'wx'});}
+else if(mode==='--forward'){assert.equal(a.length,7);assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});assert.equal(session,path.join(process.env.TEST_REPORTS,'active-deployment-session.json').replaceAll(String.fromCharCode(92),'/'));assert.equal(JSON.parse(fs.readFileSync(session)).phase,'TRAFFIC_BLOCKED');}
+else {assert.equal(a.length,6);if(fs.existsSync(marker))assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});}
+`);
+    fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\ncase "$1" in */deploy/scripts/legacy-backend-signal.py) exec '${nodeBinary}' '${fakeLegacySignal.replaceAll('\\', '/')}' "$@";; *) echo 'fixture refuses unexpected python invocation' >&2; exit 99;; esac\n`, { mode: 0o755 });
     const fakeDocker = path.join(f.root, 'fake-docker.cjs');
     fs.writeFileSync(fakeDocker, `const fs=require('fs');const path=require('path');const a=process.argv.slice(2);fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(a)+'\\n');const records=JSON.parse(fs.readFileSync(process.env.TEST_CONTAINERS));const env=k=>(a.find(v=>v.startsWith(k+'='))||'').slice(k.length+1);const session=path.join(process.env.TEST_REPORTS,'active-deployment-session.json');
 if(a[0]==='inspect' && a.includes('--format')){console.log(a.includes('{{.Image}}')?records.find(r=>r.Id===a.at(-1)).Image:'10.0.0.2');}
@@ -183,6 +202,15 @@ else{process.exit(99);}`);
     const rows=commands.trim().split(/\r?\n/).map(line=>JSON.parse(line));
     const hostStage=stage=>rows.findIndex(row=>row[0]==='host-backup-retention'&&row.includes(stage));
     const checkpoint=rows.findIndex(row=>row.includes('dist/scripts/deployment-checkpoint.js'));
+    const nativeClosure = rows.findIndex(row => row.includes('sh') && row.includes('-c') && row.at(-1).includes('exec python3 - --assert-closed'));
+    const legacy = mode => rows.findIndex(row => row[0] === 'fixture-legacy-signal' && row[1] === mode);
+    if (!['storage', 'preflight'].includes(failure)) {
+      assert.ok(legacy('--preflight') >= 0 && legacy('--forward') > legacy('--preflight'));
+      assert.ok(legacy('--assert-resolved') > legacy('--forward'), 'legacy signal must resolve after forwarding');
+      assert.ok(nativeClosure > legacy('--assert-resolved'), 'legacy signal must resolve before native closure');
+      if (checkpoint >= 0) assert.ok(checkpoint > nativeClosure, 'checkpoint must follow native closure');
+    }
+
     assert.equal(hostStage('BEFORE_CHECKPOINT')>=0,!['storage','preflight','native-closure'].includes(failure));
     assert.equal(hostStage('AFTER_CHECKPOINT')>=0,['after-mutation','success'].includes(failure));
     if(checkpoint>=0)assert.ok(hostStage('BEFORE_CHECKPOINT')<checkpoint,'fixed backup owner must finish before canonical capture');

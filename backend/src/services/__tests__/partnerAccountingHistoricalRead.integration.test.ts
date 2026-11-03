@@ -9,7 +9,8 @@ import { seedHistoricalAccountingRead } from './partnerAccountingHistoricalReadS
 for (const writerBound of [false, true]) {
 test(`real-schema authenticated Accounting reads preserve ${writerBound ? 'writer-bound nonempty v4 invoice with later v5 plan' : 'v3 invoice with valid v4 plan'}`, async () => {
   const source = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
-  assert.equal(source.hostname, '127.0.0.1'); assert.equal(source.port, '55432'); assert.equal(source.pathname, '/sabalanerp');
+  assert.equal(source.hostname, '127.0.0.1'); assert.equal(source.port, '55432');
+  assert.ok(source.pathname === '/sabalanerp' || /^\/sabalanerp_qa_[a-z0-9_]{1,48}$/.test(source.pathname));
   const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: process.cwd(), sourceDatabaseUrl: source.toString() });
   const database = temporary.client();
   try {
@@ -39,6 +40,39 @@ test(`real-schema authenticated Accounting reads preserve ${writerBound ? 'write
         assert.ok(JSON.stringify(workspace).includes('historical-invoice'));
         const dashboard = await getAccountingDashboard({}, '6m', new Date(), actor);
         assert.ok(JSON.stringify(dashboard).includes('historical-invoice'));
+        const task = dashboard.workspace.queues.contracts.find((item: any) =>
+          item.financialRecords?.some((record: any) => record.id === 'historical-invoice'));
+        assert.ok(task, 'authorized Partner draft enters the actual dashboard contract queue');
+        assert.equal(task.attention?.reason, 'پیش‌نویس در انتظار بررسی مالی');
+        assert.equal(task.sourceKind, 'PARTNER_INTERNAL_RECORD');
+        // Force the first real snapshot to roll back after reading the Partner
+        // task, then revoke the actor before readPartnerSnapshot retries.
+        // This runs only in the isolated temporary test database.
+        const transaction = prisma.$transaction.bind(prisma);
+        let inject = true;
+        (prisma as any).$transaction = async (work: any, options: any) => {
+          if (!inject || typeof work !== 'function' || options?.isolationLevel !== 'RepeatableRead') {
+            return transaction(work, options);
+          }
+          inject = false;
+          try {
+            return await transaction(async (tx: any) => {
+              await work(tx);
+              throw Object.assign(new Error('injected serialization conflict'), { code: 'P2034' });
+            }, options);
+          } catch (error: any) {
+            if (error?.code === 'P2034') await prisma.user.update({ where: { id: actor.userId }, data: { role: 'USER' } });
+            throw error;
+          }
+        };
+        try {
+          const retried = await getAccountingDashboard({}, '6m', new Date(), actor);
+          assert.ok(!JSON.stringify(retried).includes('historical-invoice'),
+            'retry must rebuild the Partner queue after real persisted authority revocation');
+          assert.equal(inject, false, 'the first authorized transaction really reached the injected rollback');
+        } finally {
+          (prisma as any).$transaction = transaction;
+        }
         console.log('authenticated lists and dashboard passed');
       } finally { await prisma.$disconnect(); }
       })().catch(error => { console.error(error); process.exitCode = 1; });`;

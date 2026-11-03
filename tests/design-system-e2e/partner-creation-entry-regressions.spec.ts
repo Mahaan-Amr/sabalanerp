@@ -331,7 +331,7 @@ test('fourteen-product correction preserves mandatory intent on timeout, retries
   expect(attempts).toBe(2);
   // Initial hydration is reused. The new Case revision requires one fresh
   // commercial read; StrictMode callers must share its in-flight response.
-  expect(caseReads, 'one hydration and one fresh post-command commercial read').toBe(2);
+  await expect.poll(() => caseReads, { message: 'one hydration and one fresh post-command commercial read' }).toBe(2);
   expect(catalogProductReads, 'prepared transition must retain the loaded catalog').toBe(1);
   console.log(JSON.stringify({ workflow: 'fourteen-product-correction', attempts, caseReads, contextReads, catalogProductReads }));
   // Let the 700ms autosave consume the acknowledged no-op before changing intent.
@@ -463,7 +463,7 @@ test('rapid Start New confirmation sends one DELETE throughout the transition', 
   } finally { release(); }
   await expect(workflow(page).getByRole('button', { name: 'تاریخ قرارداد', exact: true }).last()).toBeVisible();
   expect(state.deletes).toEqual([oldRecoveryId]);
-  expect(new Set(state.acquisitions).size).toBe(1);
+  await expect.poll(() => new Set(state.acquisitions).size).toBe(1);
 });
 
 test('valid explicit resume restores its live runtime and preserves actor isolation', async ({ page }) => {
@@ -647,7 +647,11 @@ test('Partner payments have no discount editor and preserve the full balance thr
 });
 
 
-for (const width of [1280, 390]) test(`Reviewed Partner correction starts at date and preserves prior payment at ${width}px`, async ({ page }) => {
+for (const { width, pollingOnly } of [
+  { width: 1280, pollingOnly: true },
+  { width: 1280, pollingOnly: false },
+  { width: 390, pollingOnly: false },
+]) test(`Reviewed Partner correction starts at date and preserves prior payment at ${width}px${pollingOnly ? ' with inquiry polling' : ''}`, async ({ page }) => {
   const { createPartnerFixtures } = await import('../../packages/partner-sales-contracts/dist/testing');
   const fixture = createPartnerFixtures();
   const caseId = fixture.partner.owner.caseId;
@@ -666,6 +670,7 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     retailDiscount: { amount: '0', currency: 'IRT' }, belowCostConfirmed: false };
   await loginAsAdmin(page);
   await page.setViewportSize({ width, height: 900 });
+  if (pollingOnly) await page.clock.install();
   const recoveryState = await mockPartner(page, true);
   let openingProductCatalogReads = 0;
   await page.route('**/api/partner/technical/catalog/query', route => {
@@ -761,7 +766,7 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     await setTheme(page, theme); await assertNoHorizontalOverflow(page);
     await page.screenshot({ path: `reports/qa/partner-confirmation/confirmation-${width}-${theme}.png`, fullPage: true });
   }
-  if (width === 1280) {
+  if (pollingOnly) {
     // Allow the actual step edit and initial approval binding to persist first.
     await page.waitForTimeout(1_500);
     const writesBeforePolling = wizardWrites;
@@ -770,7 +775,13 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     await workflow(page).getByRole('button', { name: 'بررسی تازه استعلام', exact: true }).click();
     await expect.poll(() => pricingReads).toBeGreaterThan(readsBeforeManual);
     const readsBeforePolling = pricingReads;
-    await expect.poll(() => pricingReads, { timeout: 30_000 }).toBeGreaterThanOrEqual(readsBeforePolling + 2);
+    // Advance each actual ten-second timer separately, awaiting its completed read.
+    for (let cycle = 0; cycle < 2; cycle++) {
+      const beforeRead = await workflow(page).getByText(/^آخرین دریافت:/).textContent();
+      await page.clock.runFor(10_000);
+      await expect.poll(() => pricingReads).toBeGreaterThanOrEqual(readsBeforePolling + cycle + 1);
+      await expect(workflow(page).getByText(/^آخرین دریافت:/)).not.toHaveText(beforeRead!);
+    }
     await page.waitForTimeout(1_000);
     expect(wizardWrites, 'unchanged pricing refreshes must not acquire leases and autosave').toBe(writesBeforePolling);
     await page.evaluate(() => {
@@ -778,7 +789,7 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
       document.dispatchEvent(new Event('visibilitychange'));
     });
     const readsBeforeHidden = pricingReads;
-    await page.waitForTimeout(11_000);
+    await page.clock.runFor(11_000);
     expect(pricingReads, 'hidden pages must not poll Partner inquiries').toBe(readsBeforeHidden);
     await page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
@@ -797,7 +808,7 @@ for (const width of [1280, 390]) test(`Reviewed Partner correction starts at dat
     await workflow(page).getByRole('button', { name: 'تلاش مجدد', exact: true }).click();
     await expect(workflow(page).getByText('دریافت پاسخ جدید استعلام انجام نشد؛ اطلاعات قبلی حفظ شده است.', { exact: true })).toHaveCount(0);
     expect(wizardWrites).toBe(writesBeforePolling);
-
+    return;
   }
   await workflow(page).getByRole('button', { name: 'لغو قرارداد', exact: true }).click();
   const cancel = page.getByRole('dialog', { name: 'لغو قرارداد', exact: true });
@@ -925,8 +936,12 @@ for (const scenario of [
   if (scenario.step === 'delivery') await expect(workflow(page).getByRole('textbox', { name: 'آدرس تحویل', exact: true })).toHaveValue('نشانی ذخیره‌شده');
   await expect(workflow(page).getByText('محاسبه مبلغ محصولات انجام نشد؛ دوباره تلاش کنید.', { exact: true })).toHaveCount(0);
   expect(blockedQuoteRequests).toBe(0);
-  await expect.poll(() => savedIntents.length).toBeGreaterThan(0);
-  for (const savedIntent of savedIntents) expect(savedIntent).toEqual(intent);
+  await expect.poll(() => page.evaluate(key =>
+    JSON.parse(localStorage.getItem(key) || '{}').draft?.intent,
+  `partner-wizard-draft:${actorId}:${oldRecoveryId}`)).toEqual(intent);
+  // Hydration retains the acknowledged checkpoint without a redundant server write.
+  await page.waitForTimeout(1_000);
+  expect(savedIntents).toHaveLength(0);
   await assertNoHorizontalOverflow(page);
 });
 

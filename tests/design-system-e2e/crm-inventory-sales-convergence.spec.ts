@@ -57,6 +57,10 @@ test.describe('CRM, Inventory, and Sales convergence journeys', () => {
     await page.route('**/api/crm/customers/customer-e2e/**', async (route) => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {} }) });
     });
+    await page.route('**/api/crm/customers/customer-e2e/credit', route => route.fulfill({ json: {
+      success: true, data: { customerId: customer.id, trustCategory: 'NORMAL', policyVersion: 1,
+        limitRials: null, usedRials: '0', availableRials: null, deficitRials: '0', canManage: false },
+    } }));
     await page.goto('/dashboard/crm/customers/customer-e2e');
     await expect(page.getByRole('heading', { name: 'مینا آزمایشی' })).toBeVisible();
     await expect(page.locator('.sds-tone-warning').filter({ hasText: 'سرنخ' }).first()).toBeVisible();

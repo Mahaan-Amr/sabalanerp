@@ -1,6 +1,16 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { assertNoSeriousAxeViolations, loginAsAdmin, setTheme, setViewportAndZoom } from './support/design-system';
 import { createPartnerFixtures, createPartnerTechnicalCatalogFixtures } from '../../packages/partner-sales-contracts/dist/testing';
+
+const installPartnerListEntry = async (page: Page) => {
+  await page.route('**/api/partner/cases/creation-context*', route => route.fulfill({ json: { success: true, data: {
+    schemaVersion: 1, kind: 'PARTNER', actorId: 'qa-partner-actor', profileId: 'qa-partner-profile',
+    writable: true, inquiryIds: [], customers: [], projects: [], recoverableDrafts: [],
+  } } }));
+  await page.route('**/api/partner/cases/changes-v2*', route => route.fulfill({ json: {
+    success: true, data: { version: null },
+  } }));
+};
 
 test('Partner contract header exposes Sales toolbar actions with the preserved SMS label', async ({ page }) => {
   await loginAsAdmin(page);
@@ -28,25 +38,26 @@ test('Partner contract header exposes Sales toolbar actions with the preserved S
     }] } }),
   }));
   await page.goto('/dashboard/sales/contracts/partner-toolbar-e2e');
-  for (const name of ['ویرایش', 'دانلود PDF', 'پرینت', 'ارسال پیامک تأیید']) {
+  for (const name of ['درخواست اصلاح', 'دانلود PDF', 'پرینت', 'ارسال پیامک تأیید']) {
     await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
   }
+  await expect(page.getByRole('button', { name: 'ویرایش', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'ارسال دوباره کد تایید', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'تایید', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'رد', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'امضا', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'تایید', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'امضا', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'تایید', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'رد', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'امضا', exact: true }).click();
+  // Partner customer consent is obtained through SMS, never a seller's legacy sign action.
   await expect(page.getByRole('button', { name: 'امضا', exact: true })).toHaveCount(0);
-  expect(decisions).toEqual(['approve', 'sign']);
+  expect(decisions).toEqual(['approve']);
   status = 'DRAFT';
   await page.reload();
   await page.getByRole('button', { name: 'رد', exact: true }).click();
   await expect(page.getByRole('button', { name: 'تایید', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'امضا', exact: true })).toHaveCount(0);
-  expect(decisions).toEqual(['approve', 'sign', 'reject']);
+  expect(decisions).toEqual(['approve', 'reject']);
   await setViewportAndZoom(page, { width: 390, height: 844 });
   await expect(page.getByRole('button', { name: 'ارسال پیامک تأیید', exact: true })).toBeVisible();
   await assertNoSeriousAxeViolations(page);
@@ -451,14 +462,15 @@ test('Partner case list shows current offered prices before acceptance and uses 
   const fixture = createPartnerFixtures();
   const unpriced = { ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY',
     products: fixture.partner.products.map(({ wholesaleUnitPrice: _price, approvalEvidenceId: _approval, ...product }) => product),
-    wholesaleTotals: undefined, sabalanPaymentPlan: undefined, difference: undefined };
+    sabalanTotals: undefined, sabalanPaymentPlan: undefined, resaleDifference: undefined };
   await page.route('**/api/partner/cases/query-v2', route => route.fulfill({ json: { success: true, data: { cases: [{
     view: unpriced, pricingResponseState: 'READY', snapshotId: null,
     actions: { canContinue: false, canPreview: false, canIssue: false, canFinalize: false,
       canSendConfirmation: false, canRequestCorrection: false, canCancel: true, canRequestVoid: false },
   }] } } }));
-  await page.goto('/dashboard/sales/partner-cases');
-  await expect(page.getByRole('heading', { name: 'پیش نویس ها و پرونده ها', exact: true })).toBeVisible();
+  await installPartnerListEntry(page);
+  await page.goto('/dashboard/sales/contracts');
+  await expect(page.getByRole('heading', { name: 'قراردادهای فروش', exact: true })).toBeVisible();
   await expect(page.locator('table').getByText('آماده تکمیل', { exact: true })).toBeVisible();
   await expect(page.locator('table').getByText('در انتظار پاسخ سبلان', { exact: true })).toHaveCount(0);
 });
@@ -478,13 +490,14 @@ test('committed Partner output buttons work without a confirmation snapshot', as
     requests.push(route.request().postDataJSON());
     return route.fulfill({ contentType: 'application/pdf', body: '%PDF-1.4\n%%EOF' });
   });
-  await page.goto(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(view.owner.caseId)}`);
+  await installPartnerListEntry(page);
+  await page.goto(`/dashboard/sales/contracts?caseId=${encodeURIComponent(view.owner.caseId)}`);
   const section = page;
-  await expect(section.getByRole('button', { name: 'پیش‌نمایش', exact: true })).toBeEnabled();
-  await section.getByRole('button', { name: 'پیش‌نمایش', exact: true }).click();
+  await expect(section.getByRole('button', { name: 'پیش‌نمایش قرارداد', exact: true })).toBeEnabled();
+  await section.getByRole('button', { name: 'پیش‌نمایش قرارداد', exact: true }).click();
   await expect.poll(() => requests.length).toBe(1);
   expect(requests[0]).toEqual({ mode: 'PREVIEW', expected: view.owner });
-  await section.getByRole('button', { name: 'صدور PDF نهایی', exact: true }).click();
+  await section.getByRole('button', { name: 'صدور نهایی PDF', exact: true }).click();
   await expect.poll(() => requests.length).toBe(2);
   expect(requests[1]).toEqual({ mode: 'FINAL', expected: view.owner });
 });

@@ -1,0 +1,39 @@
+.workspace { padding-bottom: 7rem; display: grid; gap: 1.25rem; min-width: 0; }
+.header, .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; }
+.toolbar { padding: 1rem; }
+.heading { font-size: 1.2rem; font-weight: 800; }
+.subtitle { color: var(--sds-text-secondary); font-size: .85rem; margin-top: .4rem; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(17rem, .4fr); gap: 1rem; align-items: start; }
+.sticky { position: sticky; top: 1rem; display: grid; gap: 1rem; }
+.tableWrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: .85rem; text-align: right; }
+.table th { color: var(--sds-text-secondary); font-weight: 500; padding: .85rem .65rem; white-space: nowrap; background: var(--sds-surface-subtle); }
+.table td { padding: .65rem; border-bottom: 1px solid var(--sds-border-subtle); vertical-align: middle; }
+.group td { background: var(--sds-accent-soft); color: var(--sds-accent-on-soft); padding: .65rem 1rem; }
+.selected { background: var(--sds-surface-subtle); }
+.amount { min-width: 9rem; width: 10rem; }
+.money { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sources { display: grid; gap: .75rem; }
+.source { padding-block: .75rem; border-bottom: 1px solid var(--sds-border-subtle); display: grid; gap: .65rem; }
+.sourceTop { display: flex; align-items: start; justify-content: space-between; gap: .5rem; }
+.sourceBudgets { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; }
+.sourceBudgets > p { grid-column: 1 / -1; }
+.compact th:nth-child(4), .compact th:nth-child(5), .compact tr:not(.group) td:nth-child(4), .compact tr:not(.group) td:nth-child(5) { display: none; }
+.footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem; border-top: 1px solid var(--sds-border-default); }
+.review { display: grid; gap: 1rem; }
+.share { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; padding: .65rem 0; border-bottom: 1px solid var(--sds-border-subtle); }
+.draft { max-height: 18rem; overflow: auto; direction: ltr; text-align: left; font-size: .75rem; padding: 1rem; background: var(--sds-surface-subtle); }
+.warning { color: var(--sds-danger); font-size: .8rem; }
+.sourcesCount { font-size: .8rem; color: var(--sds-text-secondary); }
+@media (max-width: 1150px) { .split { grid-template-columns: minmax(0, 1fr); } .sticky { position: static; } }
+@media (max-width: 700px) {
+  .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+  .table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .table tr:not(.group) { padding: .75rem; border-bottom: 1px solid var(--sds-border-default); }
+  .table td { border: 0; padding: .3rem 0; overflow-wrap: anywhere; }
+  .table td[data-label]::before { content: attr(data-label) ' '; color: var(--sds-text-secondary); margin-inline-end: .5rem; }
+  .table .group td { padding: .8rem; }
+  .table td.amount { width: 100%; }
+  .money { white-space: normal; }
+  .sourceBudgets { grid-template-columns: minmax(0, 1fr); }
+}

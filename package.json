@@ -51,6 +51,7 @@
     "prototype:hr-interview": "docker compose -f docker-compose.local.yml up -d --build frontend",
     "prototype:hr-performance-analytics": "docker compose -f docker-compose.local.yml up -d --build frontend",
     "prototype:accounting-dashboard": "docker compose -f docker-compose.local.yml up -d --build frontend",
+    "prototype:customer-allocation": "node scripts/run-customer-allocation-prototype.mjs",
     "docker:prod:build": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml build",
     "check:frontend-docker-workspace": "node deploy/scripts/check-frontend-docker-workspace.mjs",
     "docker:prod:up": "docker compose --env-file deploy/.env.prod -f docker-compose.prod.yml up -d",

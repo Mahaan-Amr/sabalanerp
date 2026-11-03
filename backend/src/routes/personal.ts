@@ -1,10 +1,10 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { ExceptionStatus, ExceptionType, PrismaClient, SecurityShiftCoverageStatus, SecurityShiftPlanStatus } from '@prisma/client';
 import { protect, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 const PERSONAL_LEAVE_TYPES = ['استحقاقی', 'استعلاجی', 'استعلاجی سازمانی', 'بدون حقوق'] as const;
 

@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
@@ -8,7 +9,6 @@ import { summarizeCoreDashboard } from '../services/coreDashboardSummary';
 import { buildRealizedSalesHeadline, buildSalesReportContractWhere, buildSalesReportScope, resolveAllTimeSalesReportPeriod } from '../services/salesReportingService';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // @desc    Get dashboard statistics
 // @route   GET /api/dashboard/stats

@@ -1,9 +1,9 @@
-﻿import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
+import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import smsService from './smsService';
 import { recordContractCancellation } from './salesAttributionService';
 
-const prisma = new PrismaClient();
 
 const LINK_TTL_DAYS = parseInt(process.env.CONTRACT_CONFIRM_LINK_TTL_DAYS || '60', 10);
 const OTP_TTL_MINUTES = parseInt(process.env.CONTRACT_CONFIRM_OTP_TTL_MINUTES || '10', 10);

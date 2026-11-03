@@ -1,4 +1,5 @@
-﻿import express from "express";
+import { disconnectDatabase, prisma } from './lib/prisma';
+import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
@@ -6,7 +7,6 @@ import "dotenv/config";
 import path from "path";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { PrismaClient } from "@prisma/client";
 import {
   parseCookies,
   resolveAuthoritativeSession,
@@ -79,11 +79,11 @@ import { startNotificationOutboxDelivery } from "./services/notificationService"
 import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
 import { startDispatchBuyerSmsDelivery } from "./services/dispatchBuyerSmsWorker";
 
-const prisma = new PrismaClient();
 initializeRecoveryRuntime();
 const app = express();
 app.set("trust proxy", 1);
 const server = createServer(app);
+let isShuttingDown = false;
 const isProduction = process.env.NODE_ENV === "production";
 const configuredFrontendUrl = process.env.FRONTEND_URL;
 
@@ -339,6 +339,10 @@ app.get("/api/health", async (req, res) => {
 });
 
 app.get("/api/ready", async (req, res) => {
+  if (isShuttingDown) {
+    res.status(503).json({ ready: false, reason: "SHUTTING_DOWN" });
+    return;
+  }
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ ready: true });
@@ -393,5 +397,34 @@ initializeSystemRecovery(prisma).finally(() => {
     console.log(`? Health check: http://localhost:${PORT}/api/health`);
   });
 });
+
+const shutdown = async (signal: NodeJS.Signals) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`Received ${signal}; draining connections before shutdown.`);
+
+  const forcedExit = setTimeout(() => {
+    console.error("Graceful shutdown timed out.");
+    process.exit(1);
+  }, 25_000);
+  forcedExit.unref();
+
+  try {
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        io.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+    await disconnectDatabase();
+    clearTimeout(forcedExit);
+    process.exit(0);
+  } catch (error) {
+    console.error("Graceful shutdown failed:", error);
+    process.exit(1);
+  }
+};
+
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.once("SIGINT", () => void shutdown("SIGINT"));
 
 export { io };

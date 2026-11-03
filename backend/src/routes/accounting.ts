@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import path from 'path';
 import { body, validationResult } from 'express-validator';
@@ -54,7 +55,6 @@ import {
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const ACCOUNTING_PDF_DIR = path.join(process.cwd(), 'storage', 'accounting-contracts');
 
 const accountingView = [

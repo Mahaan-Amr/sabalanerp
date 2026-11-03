@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
-
-async function seedSecurityData() {
+async function seedSecurityData(prisma: PrismaClient) {
   console.log('Seeding security data...');
 
   try {

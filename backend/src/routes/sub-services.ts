@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Request, Response } from 'express';
 import { body, query, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
@@ -6,7 +7,6 @@ import { requireWorkspaceAccess, WORKSPACES, WORKSPACE_PERMISSIONS } from '../mi
 import { requireFeatureAccess, requireAnyFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // @desc    Get all sub-services with filtering and search
 // @route   GET /api/sub-services

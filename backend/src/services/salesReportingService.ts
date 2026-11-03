@@ -1,7 +1,7 @@
+import { prisma } from '../lib/prisma';
 import { AccountingRecordStatus, FinancialRecordKind, Prisma, PrismaClient } from '@prisma/client';
 import { rankBiSellers } from './biRecommendationService';
 
-const prisma = new PrismaClient();
 const DAY = 86_400_000;
 const REALIZED = new Set(['SIGNED', 'PRINTED']);
 const PIPELINE = new Set(['PENDING_APPROVAL', 'APPROVED']);

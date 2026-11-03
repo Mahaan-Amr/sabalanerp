@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,7 +38,6 @@ import {
 
 const router = express.Router();
 const execFileAsync = promisify(execFile);
-const prisma = new PrismaClient();
 const ticketTypes = ['TECHNICAL_ERROR', 'INCORRECT_DATA', 'ACCESS_PROBLEM', 'GUIDANCE', 'IMPROVEMENT', 'SECURITY_PRIVACY', 'OTHER'];
 const impacts: TicketImpact[] = ['MINOR', 'SINGLE_TASK', 'BLOCKED', 'WIDESPREAD'];
 const ticketStorageDir = path.resolve(process.env.SUPPORT_TICKET_STORAGE_DIR || path.join(process.cwd(), 'storage', 'support-tickets'));

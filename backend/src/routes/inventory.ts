@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { body, query, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
@@ -6,7 +7,6 @@ import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../mi
 import { requireFeatureAccess, FEATURES, FEATURE_PERMISSIONS } from '../middleware/feature';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // ==================== CUT TYPES ====================
 

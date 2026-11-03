@@ -68,6 +68,12 @@ test('Partner global account is reachable from reports and stays outside individ
   });
   await page.route('**/api/partner/cases/query-v2', route => route.fulfill({ status: 200,
     contentType: 'application/json', body: JSON.stringify({ success: true, data: { cases: [] } }) }));
+  await page.route('**/api/dashboard/route-availability?*', route => {
+    const path = new URL(route.request().url()).searchParams.get('path');
+    return path === '/dashboard/sales/partner-reports'
+      ? route.fulfill({ json: { success: true, data: { allowed: true, workspace: 'sales' } } })
+      : route.fallback();
+  });
   await installPartnerListEntry(page);
   await page.goto('/dashboard/sales/contracts?caseId=account-separation-test');
   await expect(page.getByText('پرونده‌ای ثبت نشده است', { exact: true })).toBeVisible();

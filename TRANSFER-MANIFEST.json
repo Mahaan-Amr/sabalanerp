@@ -1,0 +1,1486 @@
+{
+  "version": 1,
+  "date": "2026-11-03",
+  "purpose": "Code-only move to another Windows PC",
+  "sourceInventory": {
+    "worktrees": 98,
+    "dirtyWorktrees": 34,
+    "localBranches": 144,
+    "stashes": 9
+  },
+  "publishedPR426Head": "478607bb3a0a78a9abc2e75f42e002cdcd96e769",
+  "scope": "Source, tests, specifications, templates and code continuation notes; no runtime grants or data backup transfer",
+  "snapshots": [
+    {
+      "source": "codex/bi-workspace-redesign",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-bi-workspace-redesign",
+      "commit": "1c35654d29f999299fea1c549c16dd95048f570e",
+      "tree": "b7b4ae8cf929e6e79f9561cd6b76c2e7739fb802",
+      "parent": "05db1b45afdbf452a9115854f3db360c4bbea351",
+      "originalHead": "77e90a29e62815084b51631593987bb74dc0d9a9",
+      "files": 943,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/fix-hr-access-clock-skew",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-fix-hr-access-clock-skew",
+      "commit": "314dbc3787920162ad17cf40295d6b03f2ac79b6",
+      "tree": "bdfa18742aa0806df1b475407f64adfd3afe14e9",
+      "parent": "141dbb8414f100af47bf15c88483f5dca86029cf",
+      "originalHead": "6d4bd1c15a22c2b9325d15bea06fa55570842d07",
+      "files": 1421,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/fix-partner-ci-submodule",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-fix-partner-ci-submodule",
+      "commit": "d4c9d359aa5f654d47f1d587b6af1e32273cd58c",
+      "tree": "193b32ba67ac3d0c064fa24cd98d19d0b6a6e056",
+      "parent": "678359aa8ade8abc0e69e44dc4c5285936b3942d",
+      "originalHead": "5e8d036d5386daa9bac23163c12398234ea129b8",
+      "files": 1689,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/immutable-final-package-413",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-immutable-final-package-413",
+      "commit": "4d598ecfb62dee84f26464edcc2e30a545ac9bb9",
+      "tree": "d018e3a372daccb624b4c0ab507ad5a830975961",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "7d117ffa42c8c93c38c7291b90af9659761106e0",
+      "files": 4666,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/immutable-install-inputs-413",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-immutable-install-inputs-413",
+      "commit": "906878a67b3eb7697015a3316dca3f59dfcca88d",
+      "tree": "91a05299c5d21c13d5a0dc9c026b507201c07967",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "8720e05623cdce5c2931b887359408a2536308ed",
+      "files": 4551,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/inquiry-carrier-411",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-inquiry-carrier-411",
+      "commit": "e5f717fe661721243f14295de5abfd621d0598fd",
+      "tree": "e37f2aa454a0b18f27d2dd6132b7d5c412327fa7",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "9887efa67e76d51b55da9e6beb0fcda97fd2010d",
+      "files": 4553,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/issue-266-accounting-ui",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-issue-266-accounting-ui",
+      "commit": "d7ff8d633fee0bb8e26235720bafae57c672be44",
+      "tree": "605826fd788f0957e215dd909e8ccea486ec8475",
+      "parent": "6a8ce90876a3bb1e108dd0a09e56ac5a027277b5",
+      "originalHead": "66569550c32c295851a4de8d1570406196ea2240",
+      "files": 1056,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/issue-267-legacy-pricing",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-issue-267-legacy-pricing",
+      "commit": "a28a9e8662cca9b1e0a04c0f068fa024b79ada29",
+      "tree": "3d46a50607cd40ebbca5396c587dea39f990dc26",
+      "parent": "ee80a286721568ffc944cc7c140df18e48a03588",
+      "originalHead": "d53b26a6db7aee9c1f7e1838f68cbc343d3db942",
+      "files": 1077,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/issue-409-namespace-owner",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-issue-409-namespace-owner",
+      "commit": "be78743d5229d679104e6a4d7cbadaf38abb0fef",
+      "tree": "01bf6314ada9ad5e46aa194ac9c5881bc5303a44",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "cb8605db0d4b504eff9bd4d10ee22c535fa61422",
+      "files": 4552,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/issue-410-restored-applications",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-issue-410-restored-applications",
+      "commit": "e0804db6c171b779ba31e254f153389125ed0022",
+      "tree": "29736e55ed6b8573199d9f42495076a2cba5c6a5",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "053055419061ed84749e7b76425206a4e8f91c87",
+      "files": 4566,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/issue-415-browser-completion",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-issue-415-browser-completion",
+      "commit": "7b22af300653a8a964c8d2c7cceb612bf5c2124c",
+      "tree": "937376bdeb1c86eb00b122bf9a74ab82c6225c1e",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "750812e144d793752e013dbd2dc7b265aeba3f25",
+      "files": 4549,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/issue-417-complete-master",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-issue-417-complete-master",
+      "commit": "b27461b47a307fa44ae61c26d62a4291ad0b2ee5",
+      "tree": "a0ecd274f52cae4f71c990a4d4d36c3c366b5679",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "c6528a3139cdb09b8bbf6c3584c5843c4e94f40d",
+      "files": 4593,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/issue-418-physical-callbacks",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-issue-418-physical-callbacks",
+      "commit": "6b4f43f0add1984d084d31f9cbbbadc9451970d8",
+      "tree": "d7e77763a63de7430c66a77c3fda47be89e5baa3",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "f06928eeda8b1b8d9e376cbae5c4366fbc046fe2",
+      "files": 4637,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/local-main-backup-20260811",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-local-main-backup-20260811",
+      "commit": "f2ade33ba22ca538e91e7dd8b8d301c3cfd44e3a",
+      "tree": "daddf714e60471bb827f687ff91f176935ef1dc1",
+      "parent": "8c9a08885f1c888c86bdc172237a32a36769bcb0",
+      "originalHead": "78ee87d5119153a6bd16089743d2f5bafcf38da1",
+      "files": 1073,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/native-c3-bindings-419",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-native-c3-bindings-419",
+      "commit": "b7b738f2578c30ab206e8bf4a11ddc55df6075ed",
+      "tree": "2bef5e7f2d364a5b0b9fa92a79f6516384bd035c",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "97440c0b891bb9f3a0bf9abc856a20195f95ec07",
+      "files": 4886,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/native-complete-419",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-native-complete-419",
+      "commit": "444263cfaf60b9ea96d894bbaabd291f2cf144f9",
+      "tree": "d972f8fe68a8fddc62c924931159538efdc6c717",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "fefbbae9edd45ba4d7ef28751a9583dd01bf4e43",
+      "files": 4765,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/online-deployment",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-online-deployment",
+      "commit": "ba70dadb609d87cbf3ef41b366e7e84f034192c4",
+      "tree": "8c50d47164d40bc54bcd95c169cb86454e0f5654",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "3c4bed9daa2f97eabb79f2ba5d48fa2e5265d4f5",
+      "files": 4560,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/preserved-main-20260909",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-preserved-main-20260909",
+      "commit": "fe1aac3abf96270ca29cac20d4cef90c9e02a0a6",
+      "tree": "ac91a45d0e4f5f3be61d8fb9f5a089c8eaa852d2",
+      "parent": "6f05ccefa7893cf60ef72145a83bd4baf5b8ba0b",
+      "originalHead": "f152fe562e708540244fbd1633ada21f64b37e65",
+      "files": 1709,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/prototype-bi-workspace",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-prototype-bi-workspace",
+      "commit": "e760fe1abc7688fbddf0af3d944c6580568277f7",
+      "tree": "66d75bd00aa693d75ba93e7d23186dfb73ea06bc",
+      "parent": "c2df4c2759261346753ca4502effa06f9e053066",
+      "originalHead": "a7cec404551c2bbb0aacc2a137c6034cbac788b9",
+      "files": 915,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/prototype-customer-allocation-ux",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-prototype-customer-allocation-ux",
+      "commit": "2b0a46822a201095e5fbda99ba551f6348d65eb1",
+      "tree": "e8f3bc460e1958386a6d006a6d1c949162a3198e",
+      "parent": "d9b3caabdca35e98d4eedc868f665df5ffc4cb49",
+      "originalHead": "d0e2019f7d8f78f8eebae3ec526e730fa664827c",
+      "files": 3421,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/qa-memory-pressure-successor",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-qa-memory-pressure-successor",
+      "commit": "dd231dbc1b363f280051069d9cebde3d3d241b74",
+      "tree": "aea0b21e8748d30a2d084ca761c91d0d6dc25c76",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "70a6bb4669bb33f916204209b677f4144e346107",
+      "files": 4886,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/source-a-components-412",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-source-a-components-412",
+      "commit": "2e5818d5d95f1321d0dc3c33e956695c53c555b1",
+      "tree": "9c979a0873d7f64b47e3ad5e6ce3b26f1bd3a994",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "1ca8ecbba091767d992decaa9515b3bf51a7637e",
+      "files": 4558,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "codex/ticket-416-serial-physical",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-ticket-416-serial-physical",
+      "commit": "adbdfe16a5a085c185040e375f390ad7b3a116d9",
+      "tree": "443e4e753f6bcee07eea396a3a84d3f04e9cf2e0",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "c554c9cc68ecb520b79812686b22eae9c0999483",
+      "files": 4572,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "detached-1a9d940e892a",
+      "kind": "committed",
+      "branch": "codex/pc-transfer-20261103/committed-detached-1a9d940e892a",
+      "commit": "127739408e9252853890d382c5184af87c7234a1",
+      "tree": "3bbd73bdd10fb27bf480d5991c61744b337b1ef8",
+      "parent": "e73830dffb15f29652748d6807d4d93ce82ab321",
+      "originalHead": "1a9d940e892a2258e21562b10845e3aef7bf05cb",
+      "files": 4739,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "worktree-000-",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-000",
+      "commit": "4ba8eedb773997e1afed030cd7d9cd236651ae7c",
+      "tree": "79693572d414a16119330823caa2039ce11c4a17",
+      "parent": "d9b3caabdca35e98d4eedc868f665df5ffc4cb49",
+      "originalHead": "d9b3caabdca35e98d4eedc868f665df5ffc4cb49",
+      "worktreeId": "000",
+      "files": 3566,
+      "redactions": [
+        {
+          "file": "reports/qa/ordinary-contract-lifecycle/pdf-smoke.mjs",
+          "reason": "Local login credential replaced with SABALAN_SMOKE_PASSWORD environment lookup in public snapshot only."
+        }
+      ],
+      "localChangeCount": 442
+    },
+    {
+      "source": "worktree-008-deploy-20261007",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-008-deploy-20261007",
+      "commit": "2cfe99f5dbd40efcb88223c8b871626a55ab5af9",
+      "tree": "ceb22a38e0b54151f10629b665aed8048b6c858b",
+      "parent": "7746cfe11df9f4d11edb8c1a5ae1278951103c27",
+      "originalHead": "7746cfe11df9f4d11edb8c1a5ae1278951103c27",
+      "worktreeId": "008",
+      "files": 3307,
+      "redactions": [],
+      "localChangeCount": 12
+    },
+    {
+      "source": "worktree-012-integrate-accounting-security",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-012-integrate-accounting-security",
+      "commit": "d93e695874b4a5480493fc583295c165c7939f1f",
+      "tree": "bc5678ff9e3cf677a4ce0b9eada73427b0a6de6c",
+      "parent": "e73830dffb15f29652748d6807d4d93ce82ab321",
+      "originalHead": "e73830dffb15f29652748d6807d4d93ce82ab321",
+      "worktreeId": "012",
+      "files": 4673,
+      "redactions": [],
+      "localChangeCount": 15
+    },
+    {
+      "source": "worktree-022-native-c3-execution-419",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-022-native-c3-execution-419",
+      "commit": "19b22f41f670f993eb77c2c379bc0e9044eaf27c",
+      "tree": "5d59864cf3bad9e52ac1f78600b0c3494544216c",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "97440c0b891bb9f3a0bf9abc856a20195f95ec07",
+      "worktreeId": "022",
+      "files": 4889,
+      "redactions": [],
+      "localChangeCount": 3
+    },
+    {
+      "source": "worktree-023-native-complete-419",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-023-native-complete-419",
+      "commit": "0db131ba537e8b25185adf0a2ea016e01bbe373d",
+      "tree": "92aba18ff01924e929f088c160d6df64de125b43",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "fefbbae9edd45ba4d7ef28751a9583dd01bf4e43",
+      "worktreeId": "023",
+      "files": 4819,
+      "redactions": [],
+      "localChangeCount": 54
+    },
+    {
+      "source": "worktree-024-online-deployment",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-024-online-deployment",
+      "commit": "87f640a9f29b5cf3bbad6fd7f344da82b6b3ceba",
+      "tree": "92b217581dc7178aa2e45c606fd39bde91d5d6ef",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "3c4bed9daa2f97eabb79f2ba5d48fa2e5265d4f5",
+      "worktreeId": "024",
+      "files": 4717,
+      "redactions": [],
+      "localChangeCount": 159
+    },
+    {
+      "source": "worktree-025-phase1-existing-lease",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-025-phase1-existing-lease",
+      "commit": "19166822cc3510d4a9c3889bd43d62f8a0181332",
+      "tree": "99c645af9ac63437431af3cdac7a9d8e75cf9e6f",
+      "parent": "ae056d6036c62499171f0d91691e1287942e75f7",
+      "originalHead": "97440c0b891bb9f3a0bf9abc856a20195f95ec07",
+      "worktreeId": "025",
+      "files": 4909,
+      "redactions": [],
+      "localChangeCount": 25
+    },
+    {
+      "source": "worktree-026-protected-migration-executor",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-026-protected-migration-executor",
+      "commit": "0afb42ca8b8f536d3219106d9d893afe661b8b1f",
+      "tree": "a32a7bc75558ea096a5d2e343998de8b4dd4a4cb",
+      "parent": "e73830dffb15f29652748d6807d4d93ce82ab321",
+      "originalHead": "e73830dffb15f29652748d6807d4d93ce82ab321",
+      "worktreeId": "026",
+      "files": 4741,
+      "redactions": [],
+      "localChangeCount": 91
+    },
+    {
+      "source": "worktree-028-release-accounting-attendance",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-028-release-accounting-attendance",
+      "commit": "0820da7f6554eaacbf17c8f02bc385cc2f288cbe",
+      "tree": "5d4671307ab5dad4cbde7f70018aeb095536c3b6",
+      "parent": "b58c53c0f88d2d89da3cb6a45949e6eca97e4308",
+      "originalHead": "b58c53c0f88d2d89da3cb6a45949e6eca97e4308",
+      "worktreeId": "028",
+      "files": 3551,
+      "redactions": [],
+      "localChangeCount": 6
+    },
+    {
+      "source": "worktree-029-release-ferpheri-20260928",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-029-release-ferpheri-20260928",
+      "commit": "c99f88494a8377d0ad2e717abb47db575cc49d8b",
+      "tree": "b1216639fd05e9add7848ef9f0b39121d777a06c",
+      "parent": "196f4de63b68639a1165c0d64f1dcf6e8f8cf585",
+      "originalHead": "196f4de63b68639a1165c0d64f1dcf6e8f8cf585",
+      "worktreeId": "029",
+      "files": 2989,
+      "redactions": [],
+      "localChangeCount": 5
+    },
+    {
+      "source": "worktree-035-.scratch",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-035-.scratch",
+      "commit": "1e4c9f0edeaf2a093f89e50bcd602fff98e8a70e",
+      "tree": "52560325d58baec974b99db5f75564eb0de57a3a",
+      "parent": "218fcb7a5a8907ab4ba409248cdab14261b14042",
+      "originalHead": "218fcb7a5a8907ab4ba409248cdab14261b14042",
+      "worktreeId": "035",
+      "files": 1181,
+      "redactions": [],
+      "localChangeCount": 1
+    },
+    {
+      "source": "worktree-042-",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-042",
+      "commit": "0eaf1c46943bc45f397ca98979c3fce9658062de",
+      "tree": "0b33f3c700b4134f1ddba6fc42cba5a234333e7a",
+      "parent": "50899f8484ac1f4280c3488c4806400bbbf30f87",
+      "originalHead": "50899f8484ac1f4280c3488c4806400bbbf30f87",
+      "worktreeId": "042",
+      "files": 2374,
+      "redactions": [],
+      "localChangeCount": 1
+    },
+    {
+      "source": "worktree-043-",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-043",
+      "commit": "b64a7ce2dbc3807914e10b0458d5aaaff3223f06",
+      "tree": "7b5425431d451926e6b773eb32cdb9b5eb036dad",
+      "parent": "f397e3aa0e07269617f92e97de58e99d8d271ac5",
+      "originalHead": "f397e3aa0e07269617f92e97de58e99d8d271ac5",
+      "worktreeId": "043",
+      "files": 554,
+      "redactions": [],
+      "localChangeCount": 21
+    },
+    {
+      "source": "worktree-052-",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-052",
+      "commit": "e4820df2ff9ebdc24a6289a1544f3563517b6a90",
+      "tree": "7ee27bf71b56ef0121127dc22a61a18ae9061da6",
+      "parent": "c75577ef0ff6d3aff8235eb7dba9ffba8b6ef6df",
+      "originalHead": "c75577ef0ff6d3aff8235eb7dba9ffba8b6ef6df",
+      "worktreeId": "052",
+      "files": 2189,
+      "redactions": [],
+      "localChangeCount": 4
+    },
+    {
+      "source": "worktree-075-sabalanerp-worktrees",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-075-sabalanerp-worktrees",
+      "commit": "a9c235340aac419b0a04607512fe2da33aeca5f9",
+      "tree": "8a92f6e232aedc532e0674b45136902bb745f81a",
+      "parent": "4816d1960569af6b0b029cb2903530782463a224",
+      "originalHead": "4816d1960569af6b0b029cb2903530782463a224",
+      "worktreeId": "075",
+      "files": 1135,
+      "redactions": [],
+      "localChangeCount": 7
+    },
+    {
+      "source": "worktree-079-sabalanerp-worktrees",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-worktree-079-sabalanerp-worktrees",
+      "commit": "a24e613b4c327c66b5aa4c7747313955bb0a0e74",
+      "tree": "69a5c99f19b40eb718198603f2605ba9633ebbe7",
+      "parent": "78de8d31e093b8e7dde8c39699be9dc1e52c470b",
+      "originalHead": "78de8d31e093b8e7dde8c39699be9dc1e52c470b",
+      "worktreeId": "079",
+      "files": 1132,
+      "redactions": [],
+      "localChangeCount": 4
+    },
+    {
+      "source": "index-028",
+      "kind": "index",
+      "branch": "codex/pc-transfer-20261103/index-index-028",
+      "commit": "a4a75d2c4e2186649564712ddbe5b6882063d036",
+      "tree": "9f0a8651f14c394ae51c321ff2a826a7fbb0c99a",
+      "parent": "b58c53c0f88d2d89da3cb6a45949e6eca97e4308",
+      "originalHead": "b58c53c0f88d2d89da3cb6a45949e6eca97e4308",
+      "worktreeId": "028",
+      "files": 3551,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "index-043",
+      "kind": "index",
+      "branch": "codex/pc-transfer-20261103/index-index-043",
+      "commit": "ae40409a937a2a8268e78c8ecec55d6db0246e3f",
+      "tree": "2b4022263eaab6e970c63f2a583a6a21b6777e9c",
+      "parent": "f397e3aa0e07269617f92e97de58e99d8d271ac5",
+      "originalHead": "f397e3aa0e07269617f92e97de58e99d8d271ac5",
+      "worktreeId": "043",
+      "files": 554,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "ignored-source-000",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-ignored-source-000",
+      "commit": "50e43e9b53bf0a32b49774ba7ba4a21d4223f65e",
+      "tree": "a6255af12e23b43530841a169474596bd104e3b2",
+      "parent": "d9b3caabdca35e98d4eedc868f665df5ffc4cb49",
+      "originalHead": "d9b3caabdca35e98d4eedc868f665df5ffc4cb49",
+      "worktreeId": "000",
+      "files": 3421,
+      "redactions": [],
+      "localChangeCount": 6
+    },
+    {
+      "source": "pr426-control-drafts",
+      "kind": "working",
+      "branch": "codex/pc-transfer-20261103/working-pr426-control-drafts",
+      "commit": "99994f0c7588f70e67ceb81f5a366761a6979393",
+      "tree": "0f39f5915c8afae0ddbfbe25ccf5c46b6f914e55",
+      "parent": "e73830dffb15f29652748d6807d4d93ce82ab321",
+      "originalHead": "1a9d940e892a2258e21562b10845e3aef7bf05cb",
+      "files": 4761,
+      "redactions": [],
+      "localChangeCount": 22
+    },
+    {
+      "source": "stash-0-working",
+      "kind": "stash-working",
+      "branch": "codex/pc-transfer-20261103/stash-working-stash-0-working",
+      "commit": "131cfc85c4faa3acb4ae915c79f1818da2a6a486",
+      "tree": "bf4bf5b2df05e32fc3ce7be8b69a4ac4a56b98b4",
+      "parent": "585657db18011c68a9bdefe7028cbd0543e39604",
+      "originalHead": "cd76a5619acefc35b8003ba6f7e5f0590486a361",
+      "files": 4417,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-0-index",
+      "kind": "stash-index",
+      "branch": "codex/pc-transfer-20261103/stash-index-stash-0-index",
+      "commit": "c35329ca39ad9dc97678562ccbde30b9318a8989",
+      "tree": "c87a198d920c872157bfbb7c071ec0df6964e529",
+      "parent": "585657db18011c68a9bdefe7028cbd0543e39604",
+      "originalHead": "b148f66b14470d7465f54b89a97cab3dcb5af371",
+      "files": 4417,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-1-working",
+      "kind": "stash-working",
+      "branch": "codex/pc-transfer-20261103/stash-working-stash-1-working",
+      "commit": "3adcfbd7e147fbf6b22b2b17769b420b73192bba",
+      "tree": "28b6c996fad444aeadf4992cf98b891c7f59ddd7",
+      "parent": "c0884aaabdd16b6a524252f0565950c8ab7cfce7",
+      "originalHead": "2b5c76b2e836e8a9129e90a094ed80e35d346a9b",
+      "files": 3330,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-1-index",
+      "kind": "stash-index",
+      "branch": "codex/pc-transfer-20261103/stash-index-stash-1-index",
+      "commit": "954f8bf51ecdf7593376ff2fbaad0b975d7fb1a3",
+      "tree": "d4cc298c5ba2a80b9300d4c3ce5b13842343029b",
+      "parent": "c0884aaabdd16b6a524252f0565950c8ab7cfce7",
+      "originalHead": "542f9ec650671bb1631ca9f7f0a2e0dd7fdea7be",
+      "files": 3330,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-1-untracked",
+      "kind": "stash-untracked",
+      "branch": "codex/pc-transfer-20261103/stash-untracked-stash-1-untracked",
+      "commit": "5e788089d5547bed61c33b9bb6bd1cfc334ddcab",
+      "tree": "5248772b4f850b93a63b5aa0345973c3464c75f3",
+      "parent": "686a935a3c10d067d5aec5722a0087de85b0e84c",
+      "originalHead": "d4caab10c2c384bb8a3b241b8d1d99c4d8af189c",
+      "files": 186,
+      "redactions": [
+        {
+          "file": "reports/qa/ordinary-contract-lifecycle/pdf-smoke.mjs",
+          "reason": "Local login credential replaced with SABALAN_SMOKE_PASSWORD environment lookup in public snapshot only."
+        }
+      ],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-2-working",
+      "kind": "stash-working",
+      "branch": "codex/pc-transfer-20261103/stash-working-stash-2-working",
+      "commit": "280ab84d17ba3836334b1953742025844744096e",
+      "tree": "66a2c880e595ac72f0827d62a36eb97a43714d8a",
+      "parent": "4a5f2372424374807c1a98d1a4733755f7bec884",
+      "originalHead": "588a8af4417e5d97b5ba0afd993dee8d055c86b1",
+      "files": 3174,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-2-index",
+      "kind": "stash-index",
+      "branch": "codex/pc-transfer-20261103/stash-index-stash-2-index",
+      "commit": "789af2f47ca310896cf158fa51fccb6e47cf64e6",
+      "tree": "40343aced5368f2b9561fd7a24aacb5bfd9d89b1",
+      "parent": "4a5f2372424374807c1a98d1a4733755f7bec884",
+      "originalHead": "cc182d665bc60c777ea65a177992b83ee046c896",
+      "files": 3174,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-2-untracked",
+      "kind": "stash-untracked",
+      "branch": "codex/pc-transfer-20261103/stash-untracked-stash-2-untracked",
+      "commit": "2586224995bf3e04ab94a402f254198a12e4990d",
+      "tree": "fef018db813d95d676a647e407d337723908828f",
+      "parent": "686a935a3c10d067d5aec5722a0087de85b0e84c",
+      "originalHead": "b7ba74c240f00ff7c1b5e9e89ba4a1333c30dc57",
+      "files": 5,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-3-working",
+      "kind": "stash-working",
+      "branch": "codex/pc-transfer-20261103/stash-working-stash-3-working",
+      "commit": "8b83220debf032920ecae733bc33599dffb02d3a",
+      "tree": "918a96587db8ed437e95d860e3d7ad3c1ed771c1",
+      "parent": "8824b9c6dbc54fe9d11f4c1a9db91a1972aea912",
+      "originalHead": "3880727f0edde5fc0791a3b9f8c20bd82c537d58",
+      "files": 2440,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-3-index",
+      "kind": "stash-index",
+      "branch": "codex/pc-transfer-20261103/stash-index-stash-3-index",
+      "commit": "80ae2c48c70fb4ee6addacf09d3ed7357fb22585",
+      "tree": "77d16abf53f9404fa34a7a815ae00d483b15fcd3",
+      "parent": "8824b9c6dbc54fe9d11f4c1a9db91a1972aea912",
+      "originalHead": "e7ef149626b0d161b690f26f81046031047592f1",
+      "files": 2440,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-4-working",
+      "kind": "stash-working",
+      "branch": "codex/pc-transfer-20261103/stash-working-stash-4-working",
+      "commit": "ff13f1a992215425bee5034d39ec4ad30b06377a",
+      "tree": "0e3369d5c2a441cfaec81e6162d2c9b357db2fdd",
+      "parent": "6f05ccefa7893cf60ef72145a83bd4baf5b8ba0b",
+      "originalHead": "3a4d50555f877e5bc12f6366f8a03821e45e2575",
+      "files": 1641,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-4-index",
+      "kind": "stash-index",
+      "branch": "codex/pc-transfer-20261103/stash-index-stash-4-index",
+      "commit": "167fdd204a21bc6adb4647411f4adce4c4957e96",
+      "tree": "9b6fefe866a57d87692a60727ed268bcfd7bd00c",
+      "parent": "6f05ccefa7893cf60ef72145a83bd4baf5b8ba0b",
+      "originalHead": "020d84b38d421344fe7687f94b50514b187570fa",
+      "files": 1709,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-4-untracked",
+      "kind": "stash-untracked",
+      "branch": "codex/pc-transfer-20261103/stash-untracked-stash-4-untracked",
+      "commit": "f67f370e46e70e1411cef040b14be7937f240986",
+      "tree": "18d7ab87d524db543d4e7bab826360a9e1f6bcdf",
+      "parent": "686a935a3c10d067d5aec5722a0087de85b0e84c",
+      "originalHead": "a602854c800b4e59086d2b41a68bfefcb54cb11b",
+      "files": 2555,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-5-working",
+      "kind": "stash-working",
+      "branch": "codex/pc-transfer-20261103/stash-working-stash-5-working",
+      "commit": "d6dfde975be201a3babccd3a4048d35b132b85fc",
+      "tree": "cc7411ed84d9c9987f5994ae9412225328ac5d98",
+      "parent": "c75577ef0ff6d3aff8235eb7dba9ffba8b6ef6df",
+      "originalHead": "315655d7ab99e3284e823865078d150d17ce7293",
+      "files": 2190,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-5-index",
+      "kind": "stash-index",
+      "branch": "codex/pc-transfer-20261103/stash-index-stash-5-index",
+      "commit": "23a36f9285adcf23fc75f64bb8de4489789235d1",
+      "tree": "38392700b3736c20ae63d530cbf84d4c54c8a6e4",
+      "parent": "c75577ef0ff6d3aff8235eb7dba9ffba8b6ef6df",
+      "originalHead": "fb826952c8f2625efdaa6ff35311bad382245391",
+      "files": 2190,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-6-working",
+      "kind": "stash-working",
+      "branch": "codex/pc-transfer-20261103/stash-working-stash-6-working",
+      "commit": "1a12c9e7ae4d337554bedbe53d38dd06d75f779b",
+      "tree": "2cee575689265bf992b9d7c6db514f1e80cbc208",
+      "parent": "9fcf2edb4f5f580f0e2e71347cd60fd374f8b3aa",
+      "originalHead": "8a4de1ef754ad130838136319588a8fd03a6def6",
+      "files": 1497,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-6-index",
+      "kind": "stash-index",
+      "branch": "codex/pc-transfer-20261103/stash-index-stash-6-index",
+      "commit": "1a1b6496789e02a32b47a4b22b7a301110fe0701",
+      "tree": "5f1731bf1a092161c929a4780b1e69897f337c83",
+      "parent": "9fcf2edb4f5f580f0e2e71347cd60fd374f8b3aa",
+      "originalHead": "9f94088766d71889c5164ed46428967bd48b16ed",
+      "files": 1497,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-7-working",
+      "kind": "stash-working",
+      "branch": "codex/pc-transfer-20261103/stash-working-stash-7-working",
+      "commit": "c8b32579159b75638fe6f976d73c251509148fb2",
+      "tree": "bf9e17e6ed5b2da0546e910efafb96b4fcb7eff2",
+      "parent": "a817c8c94ce5ac34148f6cb15e2a1e72b2c63718",
+      "originalHead": "92c6bdeb1f59c5ce1ce7e1922baf416cd3e7b3d7",
+      "files": 1491,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-7-index",
+      "kind": "stash-index",
+      "branch": "codex/pc-transfer-20261103/stash-index-stash-7-index",
+      "commit": "9871825b883a962fea7c615bdab45896af656495",
+      "tree": "f13104aa36e619a5c4c0dfff6e2d8a91995fa412",
+      "parent": "a817c8c94ce5ac34148f6cb15e2a1e72b2c63718",
+      "originalHead": "68903c174b5cc3aaf0cc40d47c9ea8784820ea26",
+      "files": 1491,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-8-working",
+      "kind": "stash-working",
+      "branch": "codex/pc-transfer-20261103/stash-working-stash-8-working",
+      "commit": "840fbb5c164807fb9a02423fb27d6a99298035bb",
+      "tree": "25c4bd2a0672b3113e5d7351a725f69008d6be89",
+      "parent": "8c9a08885f1c888c86bdc172237a32a36769bcb0",
+      "originalHead": "daf1a0446abc9ce27be7d4edc62ff2e378be0db9",
+      "files": 1073,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "stash-8-index",
+      "kind": "stash-index",
+      "branch": "codex/pc-transfer-20261103/stash-index-stash-8-index",
+      "commit": "3bd7e227be6208dce8ece702b3872f691eb94e11",
+      "tree": "aab8061be6a3516845940bc1b9cbcd51e3012857",
+      "parent": "8c9a08885f1c888c86bdc172237a32a36769bcb0",
+      "originalHead": "771a5118104e662dc7fd42a418e1aa729926e750",
+      "files": 1073,
+      "redactions": [],
+      "localChangeCount": 0
+    },
+    {
+      "source": "continuation alias: issue-419",
+      "kind": "alias",
+      "branch": "codex/pc-transfer-20261103/issue-419",
+      "commit": "19b22f41f670f993eb77c2c379bc0e9044eaf27c",
+      "tree": "5d59864cf3bad9e52ac1f78600b0c3494544216c",
+      "target": "codex/pc-transfer-20261103/working-worktree-022-native-c3-execution-419",
+      "localChangeCount": 0
+    },
+    {
+      "source": "continuation alias: issue-419-phase1",
+      "kind": "alias",
+      "branch": "codex/pc-transfer-20261103/issue-419-phase1",
+      "commit": "19166822cc3510d4a9c3889bd43d62f8a0181332",
+      "tree": "99c645af9ac63437431af3cdac7a9d8e75cf9e6f",
+      "target": "codex/pc-transfer-20261103/working-worktree-025-phase1-existing-lease",
+      "localChangeCount": 0
+    },
+    {
+      "source": "continuation alias: pr426-candidate",
+      "kind": "alias",
+      "branch": "codex/pc-transfer-20261103/pr426-candidate",
+      "commit": "127739408e9252853890d382c5184af87c7234a1",
+      "tree": "3bbd73bdd10fb27bf480d5991c61744b337b1ef8",
+      "target": "codex/pc-transfer-20261103/committed-detached-1a9d940e892a",
+      "localChangeCount": 0
+    },
+    {
+      "source": "continuation alias: pr426-control-drafts",
+      "kind": "alias",
+      "branch": "codex/pc-transfer-20261103/pr426-control-drafts",
+      "commit": "99994f0c7588f70e67ceb81f5a366761a6979393",
+      "tree": "0f39f5915c8afae0ddbfbe25ccf5c46b6f914e55",
+      "target": "codex/pc-transfer-20261103/working-pr426-control-drafts",
+      "localChangeCount": 0
+    }
+  ],
+  "existingBranches": [
+    {
+      "name": "codex/accounting-bank-file-import",
+      "originalCommit": "646822514d73e47f48d56908be636c87ec349ce5"
+    },
+    {
+      "name": "codex/accounting-ledger-foundation",
+      "originalCommit": "c1b071427be5daa15fbb22f4d1f811e3687ad7cd"
+    },
+    {
+      "name": "codex/accounting-official-reports",
+      "originalCommit": "935e46c6e5abadf591fca6b06e040767342dc1a2"
+    },
+    {
+      "name": "codex/accounting-operational-completion",
+      "originalCommit": "c5fbe12f08ab0af3f6be98fde97428cc3679afdb"
+    },
+    {
+      "name": "codex/accounting-parallel-evidence",
+      "originalCommit": "53301963f7106e0b24cf9df144dc94b512c66f67"
+    },
+    {
+      "name": "codex/accounting-qa-feedback",
+      "originalCommit": "8e42248fb707d31c3dd9550898a6fb52920ea978"
+    },
+    {
+      "name": "codex/accounting-release-integration",
+      "originalCommit": "7cbf13075397ea56f903cf2b14c2521834a82776"
+    },
+    {
+      "name": "codex/accounting-ux-consolidation",
+      "originalCommit": "2a70656addb04507cda00068c952a83672119c63"
+    },
+    {
+      "name": "codex/bi-workspace-redesign",
+      "originalCommit": "77e90a29e62815084b51631593987bb74dc0d9a9"
+    },
+    {
+      "name": "codex/biometric-configuration-release",
+      "originalCommit": "fc9d14f6cdf8451e9a9b13fc46c7ec16e6045e74"
+    },
+    {
+      "name": "codex/clamav-incident-recovery-20261020",
+      "originalCommit": "37b2ef624d6ae1d36fbfae66c95bdadff62d2945"
+    },
+    {
+      "name": "codex/clamav-private-egress",
+      "originalCommit": "c447ce1b6a216db0d8d6dcf1b33dd8dda02a9a20"
+    },
+    {
+      "name": "codex/collaboration-service-contracts",
+      "originalCommit": "ba5d7226c8c0c621e6fcb256b095e2ec0098ce02"
+    },
+    {
+      "name": "codex/configure-dispatch-sms-templates",
+      "originalCommit": "0c9fca5f0088f226dee88bd01e7cd3725d534e3b"
+    },
+    {
+      "name": "codex/contract-duplicate-submission-fix",
+      "originalCommit": "dfacf8fb08c5390daca2441d159990f2e33a75dd"
+    },
+    {
+      "name": "codex/contract-edit-session-fix",
+      "originalCommit": "67d7ca5ce60365b72b039afc5f1e68bfa4f32cd2"
+    },
+    {
+      "name": "codex/contract-edit-total",
+      "originalCommit": "16a4f8eacb556cf7effe8fdf8fb006fc77c6c2fc"
+    },
+    {
+      "name": "codex/contract-item-retirement",
+      "originalCommit": "70d1e8ee410ab26979cbb10cb5d82c92b53ca6bb"
+    },
+    {
+      "name": "codex/contract-product-graph-refactor",
+      "originalCommit": "38cdf858a4ce27c04cab49c43cb9bd37fb6c7723"
+    },
+    {
+      "name": "codex/contract-save-dispatch-fix",
+      "originalCommit": "a2c75f1027a069e91837ff433e1c91cdc7746798"
+    },
+    {
+      "name": "codex/contract-submit-graph-repair",
+      "originalCommit": "1e399bc082125e1911a81ae2ec0820df8fb3dcea"
+    },
+    {
+      "name": "codex/customer-finance-workspace-ui",
+      "originalCommit": "d9b3caabdca35e98d4eedc868f665df5ffc4cb49"
+    },
+    {
+      "name": "codex/deploy-20260827",
+      "originalCommit": "846f48cff711c62a4929f7575e881868fef16e40"
+    },
+    {
+      "name": "codex/deploy-20260901",
+      "originalCommit": "85ef47c20591cae372773758ae40a0ebcad9fb62"
+    },
+    {
+      "name": "codex/deploy-20260905",
+      "originalCommit": "50899f8484ac1f4280c3488c4806400bbbf30f87"
+    },
+    {
+      "name": "codex/deploy-20261007",
+      "originalCommit": "7746cfe11df9f4d11edb8c1a5ae1278951103c27"
+    },
+    {
+      "name": "codex/dispatch-master-data",
+      "originalCommit": "aacd1d2395f3460e4ca7537e0618a5fe9a45256f"
+    },
+    {
+      "name": "codex/fingerprint-connector-simulator",
+      "originalCommit": "14fbdd114c62b61346e82c48dfbbe573eb9c7e7f"
+    },
+    {
+      "name": "codex/fix-accounting-100282",
+      "originalCommit": "2253b773d1ec8d3189d2f108a09201a086e6baea"
+    },
+    {
+      "name": "codex/fix-accounting-idempotency",
+      "originalCommit": "7792b6ef9cec00404bf0ba1372b2a932ebdc5460"
+    },
+    {
+      "name": "codex/fix-contract-product-financial-drift",
+      "originalCommit": "254c9024bb68bb165d98bbca6db2508014da977d"
+    },
+    {
+      "name": "codex/fix-contract-submission-eligibility",
+      "originalCommit": "002e26aa5031ba9b8f57bee88fd11fe18610df3b"
+    },
+    {
+      "name": "codex/fix-hr-access-clock-skew",
+      "originalCommit": "6d4bd1c15a22c2b9325d15bea06fa55570842d07"
+    },
+    {
+      "name": "codex/fix-hr-cutover-deploy",
+      "originalCommit": "36a3590345fe7151cf88786f097168ffd4e500ab"
+    },
+    {
+      "name": "codex/fix-legacy-money-rounding-20260825",
+      "originalCommit": "69ee390800ff3996f3386d4f175800da235a93b0"
+    },
+    {
+      "name": "codex/fix-notification-policy-race",
+      "originalCommit": "c3d8a9922b99201d094e5e2bbd0562903a786442"
+    },
+    {
+      "name": "codex/fix-partner-ci-submodule",
+      "originalCommit": "5e8d036d5386daa9bac23163c12398234ea129b8"
+    },
+    {
+      "name": "codex/fix-partner-next-dev",
+      "originalCommit": "5f04a46d4d2149f1b61be69e248d07b0744c6243"
+    },
+    {
+      "name": "codex/fix-public-workflows-stair-modal",
+      "originalCommit": "f7416abc17a946283fc9c8f508f8791b0c8157f7"
+    },
+    {
+      "name": "codex/fix-remaining-child-canonical",
+      "originalCommit": "c8b166f6ece08506bcdea863ae30228bf404190b"
+    },
+    {
+      "name": "codex/immutable-final-package-413",
+      "originalCommit": "7d117ffa42c8c93c38c7291b90af9659761106e0"
+    },
+    {
+      "name": "codex/immutable-install-inputs-413",
+      "originalCommit": "8720e05623cdce5c2931b887359408a2536308ed"
+    },
+    {
+      "name": "codex/inquiry-carrier-411",
+      "originalCommit": "9887efa67e76d51b55da9e6beb0fcda97fd2010d"
+    },
+    {
+      "name": "codex/integrate-accounting-security",
+      "originalCommit": "e73830dffb15f29652748d6807d4d93ce82ab321"
+    },
+    {
+      "name": "codex/integrate-ferpheri",
+      "originalCommit": "b2a7e18ca1b6c359a99cba03bb05b10104d78164"
+    },
+    {
+      "name": "codex/issue-216-canonical-guard-queue",
+      "originalCommit": "7da2b2f472f8e8bf73a435840f20de121f696f48"
+    },
+    {
+      "name": "codex/issue-224-biomini",
+      "originalCommit": "ce47c535caff6ae70a9301e45a0fe1d0d0b5b8c6"
+    },
+    {
+      "name": "codex/issue-256-completion",
+      "originalCommit": "218fcb7a5a8907ab4ba409248cdab14261b14042"
+    },
+    {
+      "name": "codex/issue-257-data-contracts",
+      "originalCommit": "ea7137d92590c4da436fdbbfcf2daa481548977c"
+    },
+    {
+      "name": "codex/issue-258-priced-ledger",
+      "originalCommit": "46150ff24671e2a13c1748299637cb8751a33972"
+    },
+    {
+      "name": "codex/issue-259-approved-pricing",
+      "originalCommit": "e194bc0cc6abfecc4c6dfb05c08e88c5fc0680f2"
+    },
+    {
+      "name": "codex/issue-260-concurrency",
+      "originalCommit": "4816d1960569af6b0b029cb2903530782463a224"
+    },
+    {
+      "name": "codex/issue-261-dispatch-documents",
+      "originalCommit": "f18f0f53a323f564af1f9aa1e3535cb4adee7533"
+    },
+    {
+      "name": "codex/issue-262-statement-adjustments",
+      "originalCommit": "2cdbee3694d19d1818945b91f27a752e6298deb7"
+    },
+    {
+      "name": "codex/issue-263-cutover",
+      "originalCommit": "8631dcc9a8060300b279dbebc996cd2cc40568eb"
+    },
+    {
+      "name": "codex/issue-264-dispatch-pdfs",
+      "originalCommit": "6b77cf5c44a76b8682215322698c4897a8621422"
+    },
+    {
+      "name": "codex/issue-265-audit-recovery",
+      "originalCommit": "78de8d31e093b8e7dde8c39699be9dc1e52c470b"
+    },
+    {
+      "name": "codex/issue-266-accounting-ui",
+      "originalCommit": "66569550c32c295851a4de8d1570406196ea2240"
+    },
+    {
+      "name": "codex/issue-267-legacy-pricing",
+      "originalCommit": "d53b26a6db7aee9c1f7e1838f68cbc343d3db942"
+    },
+    {
+      "name": "codex/issue-315-publish",
+      "originalCommit": "7bd2821179f2da97474c040e5c589b8c46ce274f"
+    },
+    {
+      "name": "codex/issue-317-crm",
+      "originalCommit": "92da4d8b847fca89163e387d4cdb9a5230e43131"
+    },
+    {
+      "name": "codex/issue-319-completion",
+      "originalCommit": "abf287600a6e98e74de2157547aeec43e7bae9e8"
+    },
+    {
+      "name": "codex/issue-321-lifecycle",
+      "originalCommit": "8ceafe3414115abe6f1877733f9040c712e37f37"
+    },
+    {
+      "name": "codex/issue-322-accounting",
+      "originalCommit": "0852a3b8a0b2d348518bcf189d1ef54cd7a5129e"
+    },
+    {
+      "name": "codex/issue-325-output",
+      "originalCommit": "718ca0be654c24c87f7e5bfa35857aab684a9fb3"
+    },
+    {
+      "name": "codex/issue-326-reporting",
+      "originalCommit": "d706544a0af55c3013c675e8db2ded160603ba8a"
+    },
+    {
+      "name": "codex/issue-329-shared-correction",
+      "originalCommit": "f0b116e1dad634f0026bc37982050a3f683def86"
+    },
+    {
+      "name": "codex/issue-330-completion",
+      "originalCommit": "e2a56a037f0b6a6ffef252364b766433cd8fd8f8"
+    },
+    {
+      "name": "codex/issue-330-wizard-review",
+      "originalCommit": "048af5b946bb0eb643a59b3632f9bd6a5924c23e"
+    },
+    {
+      "name": "codex/issue-331-management-responder",
+      "originalCommit": "1c93b47f4b136e0a732884767958a8280a5a4868"
+    },
+    {
+      "name": "codex/issue-332",
+      "originalCommit": "4d8e3b752860f13d1b7ff4103175eb2146e7cd12"
+    },
+    {
+      "name": "codex/issue-334-integration",
+      "originalCommit": "c75577ef0ff6d3aff8235eb7dba9ffba8b6ef6df"
+    },
+    {
+      "name": "codex/issue-335-qa",
+      "originalCommit": "3d4a487e5a629741a8159458e2cfef059e4c55c0"
+    },
+    {
+      "name": "codex/issue-336-release",
+      "originalCommit": "f6013f9b957a70b74d5863d6854fcc544e0e3450"
+    },
+    {
+      "name": "codex/issue-336-resume",
+      "originalCommit": "c7b7d314be679415a42981cef86128aa96f092c9"
+    },
+    {
+      "name": "codex/issue-364",
+      "originalCommit": "377872469f9049c66b72e17ba49412816e56a5ae"
+    },
+    {
+      "name": "codex/issue-384",
+      "originalCommit": "81d81b53a7bccf711449d641e27e498a7c910e0f"
+    },
+    {
+      "name": "codex/issue-385",
+      "originalCommit": "ee8ff7244ce78bb16a43e077ed2bbde95eec904c"
+    },
+    {
+      "name": "codex/issue-386",
+      "originalCommit": "d5af6f2260857aaf6a2870b9f88afc35eb2ba107"
+    },
+    {
+      "name": "codex/issue-387",
+      "originalCommit": "9aa02df39f5a7584323bde41f00b4448cddb590f"
+    },
+    {
+      "name": "codex/issue-409-namespace-owner",
+      "originalCommit": "cb8605db0d4b504eff9bd4d10ee22c535fa61422"
+    },
+    {
+      "name": "codex/issue-410-restored-applications",
+      "originalCommit": "053055419061ed84749e7b76425206a4e8f91c87"
+    },
+    {
+      "name": "codex/issue-414-main",
+      "originalCommit": "049890a470aa9290573b6fd2bc547e87107f6584"
+    },
+    {
+      "name": "codex/issue-414-migration-users",
+      "originalCommit": "4a5111614467fb54894d2cbc132cf154dea5fc56"
+    },
+    {
+      "name": "codex/issue-415-browser-completion",
+      "originalCommit": "750812e144d793752e013dbd2dc7b265aeba3f25"
+    },
+    {
+      "name": "codex/issue-417-complete-master",
+      "originalCommit": "c6528a3139cdb09b8bbf6c3584c5843c4e94f40d"
+    },
+    {
+      "name": "codex/issue-418-physical-callbacks",
+      "originalCommit": "f06928eeda8b1b8d9e376cbae5c4366fbc046fe2"
+    },
+    {
+      "name": "codex/issue327-notifications",
+      "originalCommit": "452efef8c4b58d9bcad79a3daca17c9bbe6b3da8"
+    },
+    {
+      "name": "codex/issues-219-220",
+      "originalCommit": "952ecc14f8f11cd4813694e27e8b280fb0731759"
+    },
+    {
+      "name": "codex/local-main-backup-20260811",
+      "originalCommit": "78ee87d5119153a6bd16089743d2f5bafcf38da1"
+    },
+    {
+      "name": "codex/local-main-pre-sync-20260811",
+      "originalCommit": "78ee87d5119153a6bd16089743d2f5bafcf38da1"
+    },
+    {
+      "name": "codex/merge-ferpheri-20260811",
+      "originalCommit": "d290b59a237e2299bdbd238a860c8022fdec447b"
+    },
+    {
+      "name": "codex/merge-ferpheri-20260817",
+      "originalCommit": "a03b11e9e6432880adf08c48e4097c4159a80e7b"
+    },
+    {
+      "name": "codex/merge-ferpheri-20260823",
+      "originalCommit": "6f3e4d4331cbc6f15e81b2ae01507b6f3aaf8728"
+    },
+    {
+      "name": "codex/merge-ferpheri-20260823-c",
+      "originalCommit": "751345d55a0ca74b8b24604e917b4be7817255fd"
+    },
+    {
+      "name": "codex/merge-ferpheri-20260825-d",
+      "originalCommit": "c3d8a9922b99201d094e5e2bbd0562903a786442"
+    },
+    {
+      "name": "codex/merge-ferpheri-20260914",
+      "originalCommit": "eba8d40c84ae46df5fd9056c7533eb5c7033d4b2"
+    },
+    {
+      "name": "codex/mobile-contract-step-selector",
+      "originalCommit": "6ba45cc78b12c9d99b6b08bf65e89fbd33cf0855"
+    },
+    {
+      "name": "codex/native-c3-bindings-419",
+      "originalCommit": "97440c0b891bb9f3a0bf9abc856a20195f95ec07"
+    },
+    {
+      "name": "codex/native-complete-419",
+      "originalCommit": "fefbbae9edd45ba4d7ef28751a9583dd01bf4e43"
+    },
+    {
+      "name": "codex/online-deployment",
+      "originalCommit": "3c4bed9daa2f97eabb79f2ba5d48fa2e5265d4f5"
+    },
+    {
+      "name": "codex/partner-contract-wizard-parity",
+      "originalCommit": "920abc807a82408555148d84c0633b2ef153aaff"
+    },
+    {
+      "name": "codex/partner-operations-333",
+      "originalCommit": "627a0cb66e145189f25bfadb2b1ff91b0d09684c"
+    },
+    {
+      "name": "codex/partner-technical-core",
+      "originalCommit": "4ba2ec02514706ebb23c9d3897f2ada084e1b093"
+    },
+    {
+      "name": "codex/partner-technical-save-publish",
+      "originalCommit": "bfead2d13d497375529774017a789f5bb7fe34d5"
+    },
+    {
+      "name": "codex/partner-workspace-contracts-v2",
+      "originalCommit": "678359aa8ade8abc0e69e44dc4c5285936b3942d"
+    },
+    {
+      "name": "codex/preserved-main-20260909",
+      "originalCommit": "f152fe562e708540244fbd1633ada21f64b37e65"
+    },
+    {
+      "name": "codex/production-performance-20260909",
+      "originalCommit": "73d8e2d9cbb5973499ee5a0ccf18e94e9c181a14"
+    },
+    {
+      "name": "codex/prototype-accounting-statement-review",
+      "originalCommit": "d856420743ee44b52e3b930fec0908637b562c09"
+    },
+    {
+      "name": "codex/prototype-bi-workspace",
+      "originalCommit": "a7cec404551c2bbb0aacc2a137c6034cbac788b9"
+    },
+    {
+      "name": "codex/prototype-customer-allocation-ux",
+      "originalCommit": "d0e2019f7d8f78f8eebae3ec526e730fa664827c"
+    },
+    {
+      "name": "codex/prototype-customer-finance-ux",
+      "originalCommit": "d6b76b2a6137e9835c5b5628e7cf79ea408c6112"
+    },
+    {
+      "name": "codex/prototype-dispatch-docs-251",
+      "originalCommit": "e92989408f1308d71db2a62b25329fda4604b833"
+    },
+    {
+      "name": "codex/prototype-driver-dispatch-203",
+      "originalCommit": "b88fe92f0d6d15efc36132759f1ccf29bab81e3e"
+    },
+    {
+      "name": "codex/prototype-issue-249-priced-allocation",
+      "originalCommit": "a676de91d050aaaaaf147b2369d7faf81ea82055"
+    },
+    {
+      "name": "codex/prototype-partner-inquiry-contract-journey",
+      "originalCommit": "7fdd0f4b33c51c6dda7055b480c7ac3f0723ead8"
+    },
+    {
+      "name": "codex/prototype-partner-management-reporting",
+      "originalCommit": "c981dece0c440ef5a0dbbcf6f47440feb3dbae4d"
+    },
+    {
+      "name": "codex/prototype-shipment-statement-reconciliation",
+      "originalCommit": "6a8ce90876a3bb1e108dd0a09e56ac5a027277b5"
+    },
+    {
+      "name": "codex/qa-memory-pressure-successor",
+      "originalCommit": "70a6bb4669bb33f916204209b677f4144e346107"
+    },
+    {
+      "name": "codex/release-accounting-attendance-20261020",
+      "originalCommit": "b58c53c0f88d2d89da3cb6a45949e6eca97e4308"
+    },
+    {
+      "name": "codex/release-ferpheri-20260928",
+      "originalCommit": "196f4de63b68639a1165c0d64f1dcf6e8f8cf585"
+    },
+    {
+      "name": "codex/release-integration-20260909",
+      "originalCommit": "f4ca0ad2733434f917a6fc4682d7c8ae5d9a6a61"
+    },
+    {
+      "name": "codex/sabalan-design-system-rollout",
+      "originalCommit": "b97be547c74127672e693c60551318e9707b99d2"
+    },
+    {
+      "name": "codex/security-workspace-polish",
+      "originalCommit": "92055e8e3e3f23d7eda863e6d526be39eaf315d2"
+    },
+    {
+      "name": "codex/shipment-quantity-projections",
+      "originalCommit": "715b816306ffcac4dfc6e33b0ebdcc01370b2599"
+    },
+    {
+      "name": "codex/source-a-components-412",
+      "originalCommit": "1ca8ecbba091767d992decaa9515b3bf51a7637e"
+    },
+    {
+      "name": "codex/stair-layer-product-graph",
+      "originalCommit": "dab7153383f79c16ffd8a24f81cc2b04e2d42d3f"
+    },
+    {
+      "name": "codex/stair-mixed-catalog-main",
+      "originalCommit": "71f80c65b524b507c8ae0568bad625d65e8dc8c0"
+    },
+    {
+      "name": "codex/stair-product-modal-reliability",
+      "originalCommit": "919d26c1e665a7dc421b27792273a94954709683"
+    },
+    {
+      "name": "codex/support-ticket-notification-center",
+      "originalCommit": "a6910bc49381253b07f1c127a029acb76b43f6a6"
+    },
+    {
+      "name": "codex/sync-ferpheri-20260824",
+      "originalCommit": "ff89bfe953478c6446abeacd210bd1320623a64d"
+    },
+    {
+      "name": "codex/sync-main-ferpheri-20260927",
+      "originalCommit": "68219037f39ece125903bce11e043f4cbf79e3b1"
+    },
+    {
+      "name": "codex/ticket-416-serial-physical",
+      "originalCommit": "c554c9cc68ecb520b79812686b22eae9c0999483"
+    },
+    {
+      "name": "codex/zero-data-loss-sync",
+      "originalCommit": "809ffbd0b8a190358a1ca1444c9e40fc439c1a73"
+    },
+    {
+      "name": "feature/accounting-correction-sales-unlock",
+      "originalCommit": "be3fba5d0899c98e4b3379e8af051ecf94f3629a"
+    },
+    {
+      "name": "feature/print-quantity-column-order",
+      "originalCommit": "9ca221aab0adba30706b30cdf15af2bfbf46b7f2"
+    },
+    {
+      "name": "main",
+      "originalCommit": "09e9d5ca7fa195b9b26778336f1ebed117cabee9"
+    },
+    {
+      "name": "research/fingerprint-scanner",
+      "originalCommit": "5ab8419fee7f21cef6ca98cad8c4d4bc7456c169"
+    },
+    {
+      "name": "research/iran-biometric-evidence",
+      "originalCommit": "388e1e6148e916133abe6690b084510de0bb5262"
+    },
+    {
+      "name": "research/partner-access-boundaries",
+      "originalCommit": "abcb0872c95d87794ca38f5310de212e5f3cae73"
+    },
+    {
+      "name": "research/partner-contract-confirmation",
+      "originalCommit": "61c8c9790b20e5d1deacdb0eb02580b10d51fa7f"
+    },
+    {
+      "name": "research/partner-product-financial-graph",
+      "originalCommit": "c88608479336b212284a45724e86ab5fa0040824"
+    },
+    {
+      "name": "research/partner-product-graph",
+      "originalCommit": "cc05e3b68e1b6efddbd28ef196997c6164a1fb53"
+    },
+    {
+      "name": "research/partner-sales-crm-access-boundary",
+      "originalCommit": "4975a7c9535e0ffb0a6fb93006e823c4013d1bec"
+    }
+  ],
+  "originalStashes": [
+    {
+      "slot": 0,
+      "originalCommit": "cd76a5619acefc35b8003ba6f7e5f0590486a361"
+    },
+    {
+      "slot": 1,
+      "originalCommit": "2b5c76b2e836e8a9129e90a094ed80e35d346a9b"
+    },
+    {
+      "slot": 2,
+      "originalCommit": "588a8af4417e5d97b5ba0afd993dee8d055c86b1"
+    },
+    {
+      "slot": 3,
+      "originalCommit": "3880727f0edde5fc0791a3b9f8c20bd82c537d58"
+    },
+    {
+      "slot": 4,
+      "originalCommit": "3a4d50555f877e5bc12f6366f8a03821e45e2575"
+    },
+    {
+      "slot": 5,
+      "originalCommit": "315655d7ab99e3284e823865078d150d17ce7293"
+    },
+    {
+      "slot": 6,
+      "originalCommit": "8a4de1ef754ad130838136319588a8fd03a6def6"
+    },
+    {
+      "slot": 7,
+      "originalCommit": "92c6bdeb1f59c5ce1ce7e1922baf416cd3e7b3d7"
+    },
+    {
+      "slot": 8,
+      "originalCommit": "daf1a0446abc9ce27be7d4edc62ff2e378be0db9"
+    }
+  ],
+  "submodule": {
+    "repository": "Mahaan-Amr/sabalaninquirycodex",
+    "requiredHistoricalCommit": "63407dd94f17471b030b0aa59c80313c107c3a54",
+    "transferBranch": "codex/pc-transfer-20261103/inquiry-419"
+  },
+  "security": {
+    "newSourceBlobsScanned": 1343,
+    "unresolvedFindings": 0,
+    "heuristicScanLimitation": "Pattern scans and manual context review reduce exposure risk; they are not a proof that arbitrary source contains no sensitive information."
+  }
+}

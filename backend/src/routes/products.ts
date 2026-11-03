@@ -1,4 +1,5 @@
-﻿import express, { Response } from 'express';
+import { prisma } from '../lib/prisma';
+import express, { Response } from 'express';
 import { body, query, validationResult } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { protect } from '../middleware/auth';
@@ -11,7 +12,6 @@ import fs from 'fs';
 import { applyCatalogPlan, buildCatalogPlan, buildExportWorkbook, buildTemplateWorkbook, canonicalizeProductData } from '../services/catalogExcelSync';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
 
 // Log all requests to products router

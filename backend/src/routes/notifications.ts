@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import { body, validationResult } from 'express-validator';
@@ -23,7 +24,6 @@ import {
 import { revokeSessions } from '../services/identitySessionService';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const priorities: NotificationPriority[] = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
 const channels: NotificationChannel[] = ['IN_APP', 'REALTIME', 'WEB_PUSH'];
 const recipientResolvers: NotificationRecipientResolver[] = [

@@ -1,10 +1,10 @@
+import { prisma } from '../lib/prisma';
 // Delivery service
 // Handles delivery business logic
 
 import { PrismaClient } from '@prisma/client';
 import { validateContractAccess } from './contractService';
 
-const prisma = new PrismaClient();
 
 export interface CreateDeliveryData {
   deliveryDate: string;

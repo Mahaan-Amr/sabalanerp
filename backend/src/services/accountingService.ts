@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import {
   AccountingFlagCategory,
   AccountingFlagSeverity,
@@ -21,7 +22,6 @@ import {
 import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
 import { captureContractQuantityVersionAtFinancialApproval } from './shipmentQuantityProjectionStore';
 
-const prisma = new PrismaClient();
 
 const ELIGIBLE_CONTRACT_STATUSES: ContractStatus[] = [
   ContractStatus.APPROVED,

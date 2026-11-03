@@ -305,7 +305,7 @@ async function main() {
   });
 
   // Seed security data
-  await seedSecurityData();
+  await seedSecurityData(prisma);
 
   console.log('Database seeding completed successfully!');
   console.log('Created:');

@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express from 'express';
 import { GuardDriverSource, PrismaClient } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
@@ -9,7 +10,6 @@ import { approveManualOutageExit, DispatchRecoveryConflictError, DispatchRecover
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const physicalExitService = new PhysicalGateExitService(prisma);
 const guardView = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
 const guardEdit = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);

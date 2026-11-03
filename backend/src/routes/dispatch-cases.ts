@@ -1,3 +1,4 @@
+import { prisma } from '../lib/prisma';
 import express, { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { protect, AuthRequest } from '../middleware/auth';
@@ -7,7 +8,6 @@ import { FEATURES } from '../middleware/feature';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 const allowed = new Set(['hr', 'vehicle-operations', 'security', 'logistics', 'accounting']);
 const requiredFeature: Record<string, string> = {
   hr: FEATURES.HR_INTERNAL_DRIVERS_VIEW,

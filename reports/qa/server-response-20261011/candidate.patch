@@ -1,0 +1,695 @@
+diff --git a/backend/package.json b/backend/package.json
+index f0359956..4864de7b 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -4,6 +4,7 @@
+   "description": "ERP Backend API",
+   "main": "dist/index.js",
+   "scripts": {
++    "test:duty-read-performance": "tsx --test src/services/__tests__/dutySummaryPerformance.test.ts src/services/__tests__/savedTechnicalResolutionPerformance.test.ts",
+     "duty:baseline": "tsx src/scripts/report-hr-duty-baseline.ts",
+     "duty:reconcile:sales-contract-corrections": "tsx src/scripts/report-sales-contract-correction-duty-reconciliation.ts",
+     "duty:migrate:shared-decisions:dry": "tsx src/scripts/migrate-open-shared-decision-duties.ts",
+diff --git a/backend/src/services/__tests__/dutySummaryPerformance.test.ts b/backend/src/services/__tests__/dutySummaryPerformance.test.ts
+new file mode 100644
+index 00000000..2115c6c2
+--- /dev/null
++++ b/backend/src/services/__tests__/dutySummaryPerformance.test.ts
+@@ -0,0 +1,46 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { getCrossWorkspaceDutySummary } from '../crossWorkspaceDutyInbox';
++import { PARTNER_PRICING_DUTY_DEFINITIONS } from '../crossWorkspaceDutyAdapters/partnerPricingDutyAdapter';
++
++test('summary reads a source once across views and rereads it on the next request', async () => {
++  const now = new Date('2026-10-11T10:00:00Z');
++  const definition = PARTNER_PRICING_DUTY_DEFINITIONS.PARTNER_PRICE_REVIEW;
++  const duty = { id: 'duty', sourceType: 'PARTNER_PRICING', sourceId: 'inquiry', sourceVersion: 1,
++    sourceActionCode: definition.sourceActionCode, envelopeCode: definition.envelopeCode, envelopeVersion: 1,
++    destinationWorkspaceCode: 'SALES', currentAssigneeUserId: 'actor', status: 'OPEN',
++    dueAt: now, createdAt: now, updatedAt: now, respondedAt: null, structuredResultJson: null,
++    assignmentHistory: [], envelope: { isActive: true, allowedFieldsJson: [...definition.allowedFields],
++      allowedEvidenceJson: [], allowedActionCodesJson: [], responseSchemaJson: definition.responseSchema } };
++  let reads = 0;
++  let evidenceReads = 0;
++  let pending = true;
++  const rows = Array.from({ length: 16 }, (_, index) => ({ outcome: 'PENDING', definition: {
++    version: 1, configurationRef: { recoveryId: 'recovery', recoveryRevision: 1, productRowId: `row-${index}` },
++    identity: { schemaVersion: 1, partnerSellerId: 'partner', catalogProductId: 'stone', family: 'prepared', unit: 'count',
++      configuration: [{ key: 'quantity', value: '2' }], materialRateEvidenceId: 'rate',
++      materialRateHash: 'sha256-v1:' + 'a'.repeat(64), components: [], currency: 'IRT',
++      calculationPolicyVersion: 'calc', roundingPolicyVersion: 'rounding' }, description: 'سنگ', configuration: [],
++  } }));
++  const database = {
++    user: { findUnique: async () => ({ role: 'ADMIN', isActive: true }) },
++    crossWorkspaceDuty: { findMany: async ({ where }: any) => where.status === 'OPEN'
++      && where.currentAssigneeUserId !== null ? [duty] : [] },
++    crossWorkspaceDutyHistoryReceipt: { findUnique: async () => null },
++    crossWorkspaceDutyAvailableReceipt: { findUnique: async () => null },
++    salesContractEditSession: { findUnique: async () => { evidenceReads++; return {
++      ownerUserId: 'partner', recovery: { validatedSnapshots: [] } }; } },
++    partnerInquiry: { findUnique: async () => { reads++; return { id: 'inquiry', caseId: 'case',
++      case: { customer: { firstName: 'مشتری', lastName: '' } },
++      profile: { userId: 'partner' }, rows: pending ? rows : [] }; } },
++  };
++  const input = { actorUserId: 'actor', workspaceCode: 'sales', now };
++  const summary = await getCrossWorkspaceDutySummary(database as any, input);
++  assert.deepEqual(summary, { open: 1, available: 0, availableUnseen: 0, attention: 1,
++    dueSoon: 1, overdue: 0, triage: 1, historyUnseen: 0, canManageTriage: true });
++  assert.equal(reads, 1, 'one summary must not reload the same source for triage');
++  assert.equal(evidenceReads, 1, 'sixteen rows must share one protected journal read');
++  pending = false;
++  assert.equal((await getCrossWorkspaceDutySummary(database as any, input)).attention, 0);
++  assert.equal(reads, 2, 'the shared Prisma client must not retain a previous request source');
++});
+diff --git a/backend/src/services/__tests__/partnerPricingDutyAdapter.test.ts b/backend/src/services/__tests__/partnerPricingDutyAdapter.test.ts
+index a805aca5..7bfe7a4f 100644
+--- a/backend/src/services/__tests__/partnerPricingDutyAdapter.test.ts
++++ b/backend/src/services/__tests__/partnerPricingDutyAdapter.test.ts
+@@ -10,7 +10,7 @@ test('resolved case pricing creates a return duty assigned to the Partner seller
+       id: 'inquiry-1', caseId: 'case-1', revision: 4,
+       case: { caseNumber: 'PF-1001' }, profile: { userId: 'partner-user-1' },
+       rows: [{ outcome: 'APPROVED' }, { outcome: 'REJECTED' }],
+-    }) },
++    }), findFirst: async () => ({ id: 'inquiry-1' }), findMany: async () => [] },
+     crossWorkspaceDutyEnvelope: { upsert: async () => ({ id: 'envelope-1' }) },
+     crossWorkspaceDuty: { upsert: async ({ create }: { create: Record<string, unknown> }) => {
+       createdDuty = create; return { id: 'duty-1', ...create };
+@@ -102,7 +102,7 @@ test('replacing a pricing duty records waiver in audit without completed-respons
+   let audit: Record<string, unknown> | undefined;
+   const database = {
+     partnerInquiry: { findUniqueOrThrow: async () => ({ id: 'inquiry-1', caseId: 'case-1', revision: 5,
+-      case: { caseNumber: 'PF-1001' }, assignments: [{ responderId: 'seller-1' }] }) },
++      case: { caseNumber: 'PF-1001' }, assignments: [{ responderId: 'seller-1' }] }), findMany: async () => [] },
+     crossWorkspaceDutyEnvelope: { upsert: async () => ({}) },
+     crossWorkspaceDuty: {
+       findMany: async () => [{ id: 'old-duty', sourceVersion: 4, envelopeVersion: 1, createdAt: new Date() }],
+diff --git a/backend/src/services/__tests__/savedTechnicalResolutionPerformance.test.ts b/backend/src/services/__tests__/savedTechnicalResolutionPerformance.test.ts
+new file mode 100644
+index 00000000..e1af0a38
+--- /dev/null
++++ b/backend/src/services/__tests__/savedTechnicalResolutionPerformance.test.ts
+@@ -0,0 +1,82 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { canonicalHash, PartnerTechnicalDraftSchema } from '@sabalanerp/partner-sales-contracts';
++import { createPartnerTechnicalCatalogFixtures } from '@sabalanerp/partner-sales-contracts/testing';
++import { compilePartnerTechnicalGraph } from '../partnerSales/cases/technicalGraph';
++import { encodeTechnicalSavedSnapshot } from '../partnerSales/cases/technicalSavedRecords';
++import { createSavedTechnicalConfigurationResolver, resolveSavedTechnicalConfiguration } from '../partnerSales/inquiries/adapters';
++
++async function evidence(revision = 1) {
++  const catalog = createPartnerTechnicalCatalogFixtures();
++  const product = catalog.products[0];
++  const context = { catalog, policy: { calculation: 'calc', packing: 'packing', pricing: 'pricing', rounding: 'rounding' },
++    products: [{ catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
++      preparedRates: [{ kind: 'readyPiece' as const, unit: 'count' as const, rateToman: '12345' }] }] };
++  const draft = PartnerTechnicalDraftSchema.parse({ schemaVersion: 1, inputRevision: revision, rows: [{
++    productRowId: 'row', catalogItemId: product.catalogItemId, catalogSnapshotVersion: product.catalogSnapshotVersion,
++    family: 'prepared', configuration: { kind: 'readyPiece', unit: 'count', quantity: '2' } }] });
++  const compiled = compilePartnerTechnicalGraph(draft, context);
++  assert.ok(compiled.ok);
++  const reference = { recoveryId: 'recovery', recoveryRevision: revision, productRowId: 'row' };
++  const record = await encodeTechnicalSavedSnapshot({ version: 1, sessionId: 'session', draft, context,
++    graph: compiled.value.graph, identities: [{ productRowId: 'row', identity: {
++      schemaVersion: 1, partnerSellerId: 'actor', catalogProductId: product.catalogItemId, family: 'prepared', unit: 'count',
++      configuration: [{ key: 'quantity', value: '2' }], materialRateEvidenceId: 'rate',
++      materialRateHash: 'sha256-v1:' + 'a'.repeat(64), components: [], currency: 'IRT',
++      calculationPolicyVersion: 'calc', roundingPolicyVersion: 'rounding' } }],
++    view: { schemaVersion: 1, recoveryId: 'recovery', recoveryRevision: revision, inputRevision: revision,
++      graphHash: await canonicalHash({ purpose: 'PARTNER_CASE_GRAPH', schemaVersion: 1, graph: compiled.value.graph }),
++      updatedAt: '2026-10-11T10:00:00.000Z', rows: [{ configurationRef: reference, quantity: '2', unit: 'count', configurationChange: 'NEW' }] } });
++  return { record, reference };
++}
++
++test('resolution verifies the referenced revision without traversing unrelated large payloads', async () => {
++  const { record, reference } = await evidence();
++  let unrelatedTraversals = 0;
++  // Instrument the database JSON boundary to enforce a deterministic work budget,
++  // independent of machine speed. Unrelated evidence must not enter hashing/parsing.
++  const unrelated = { payload: { view: { recoveryRevision: 2 },
++    get context() { unrelatedTraversals++; return { largeCatalog: 'irrelevant' }; } }, integrityHash: 'invalid' };
++  const database = { salesContractEditSession: { findUnique: async () => ({ ownerUserId: 'actor',
++    recovery: { validatedSnapshots: [unrelated, { ...record, integrityHash: 'corrupt' }, record] } }) } };
++  const result = await resolveSavedTechnicalConfiguration(database as any, { actorId: 'actor', reference });
++  assert.ok(result.ok, 'a corrupt candidate must not hide a subsequent valid candidate of the same revision');
++  assert.equal(result.value.measures?.count, '2');
++  assert.equal(unrelatedTraversals, 0);
++});
++
++test('scoped resolution separates revisions and actors; a new operation rereads ownership and integrity', async () => {
++  const first = await evidence();
++  const second = await evidence(2);
++  let ownerUserId = 'actor';
++  let history = [first.record, second.record];
++  let reads = 0;
++  const database = { salesContractEditSession: { findUnique: async () => { reads++; return {
++    ownerUserId, recovery: { validatedSnapshots: history } }; } } };
++  const resolve = createSavedTechnicalConfigurationResolver();
++  const results = await Promise.all([first, second].map(item => resolve(database as any, { actorId: 'actor', reference: item.reference })));
++  assert.ok(results.every(item => item.ok));
++  assert.equal(reads, 1);
++  assert.equal((await resolve(database as any, { actorId: 'foreign', reference: first.reference })).ok, false);
++  ownerUserId = 'foreign';
++  assert.equal((await createSavedTechnicalConfigurationResolver()(database as any, { actorId: 'actor', reference: first.reference })).ok, false);
++  ownerUserId = 'actor';
++  history = [{ ...first.record, integrityHash: 'corrupt' }];
++  assert.equal((await createSavedTechnicalConfigurationResolver()(database as any, { actorId: 'actor', reference: first.reference })).ok, false);
++});
++
++test('legacy saved views and submitted evidence retain full integrity checks', async () => {
++  const { record, reference } = await evidence();
++  const payload = structuredClone(record.payload) as any;
++  delete payload.view.graphHash;
++  const legacy = { payload, integrityHash: await canonicalHash(payload) };
++  const outcome = { schemaVersion: 1, validatedSnapshots: [legacy] };
++  let payloadHash = await canonicalHash(outcome);
++  const database = { salesContractEditSession: { findUnique: async () => null },
++    partnerCommandOutcome: { findUnique: async ({ where }: any) =>
++      where.actorId_operation_targetScope_key.actorId === 'actor' ? { outcome, payloadHash } : null } };
++  assert.equal((await resolveSavedTechnicalConfiguration(database as any, { actorId: 'actor', reference })).ok, true);
++  assert.equal((await resolveSavedTechnicalConfiguration(database as any, { actorId: 'foreign', reference })).ok, false);
++  payloadHash = 'corrupt';
++  await assert.rejects(resolveSavedTechnicalConfiguration(database as any, { actorId: 'actor', reference }), /integrity conflict/);
++});
+diff --git a/backend/src/services/crossWorkspaceDutyAdapters/partnerPricingDutyAdapter.ts b/backend/src/services/crossWorkspaceDutyAdapters/partnerPricingDutyAdapter.ts
+index 2927f4b6..d4c60709 100644
+--- a/backend/src/services/crossWorkspaceDutyAdapters/partnerPricingDutyAdapter.ts
++++ b/backend/src/services/crossWorkspaceDutyAdapters/partnerPricingDutyAdapter.ts
+@@ -1,4 +1,4 @@
+-import { resolveSavedTechnicalConfiguration } from '../partnerSales/inquiries/adapters';
++import { createSavedTechnicalConfigurationResolver } from '../partnerSales/inquiries/adapters';
+ import { parseInquiryDefinition } from '../partnerSales/inquiries/definition';
+ import { Prisma } from '@prisma/client';
+ import type { CrossWorkspaceDutySourceAdapter } from './types';
+@@ -126,10 +126,11 @@ export const createPartnerPricingDuty = async (database: any, input: {
+ };
+ 
+ async function materialPriceRows(database: any, inquiry: any) {
++  const resolveConfiguration = createSavedTechnicalConfigurationResolver();
+   const rows: typeof inquiry.rows = [];
+   for (const row of inquiry.rows) {
+     const definition = parseInquiryDefinition(row.definition);
+-    const resolved = definition && inquiry.profile?.userId && await resolveSavedTechnicalConfiguration(database, {
++    const resolved = definition && inquiry.profile?.userId && await resolveConfiguration(database, {
+       actorId: inquiry.profile.userId, reference: definition.configurationRef,
+     });
+     if (resolved?.ok && resolved.value.paidSourceProductRowId) continue;
+diff --git a/backend/src/services/crossWorkspaceDutyInbox.ts b/backend/src/services/crossWorkspaceDutyInbox.ts
+index 21c53876..37411ae5 100644
+--- a/backend/src/services/crossWorkspaceDutyInbox.ts
++++ b/backend/src/services/crossWorkspaceDutyInbox.ts
+@@ -10,6 +10,7 @@ import {
+   crossWorkspaceDutyResponseRequiresReason,
+   formatCrossWorkspaceDutyDeadlineTehran,
+   loadCrossWorkspaceDutySourceProjection,
++  createCrossWorkspaceDutySourceProjectionReader,
+ } from './crossWorkspaceDutyModule';
+ import { resolveWorkspaceDutyAuthority } from './crossWorkspaceDutyAuthority';
+ 
+@@ -219,12 +220,13 @@ const authorizeLoadedDuty = async (
+   now: Date,
+   knownManager?: boolean,
+   summaryOnly = false,
++  readSource = loadCrossWorkspaceDutySourceProjection,
+ ) => {
+   if (duty.status === 'OPEN' && duty.sourceType === 'SALES_CONTRACT_CORRECTION'
+     && duty.sourceActionCode === 'SALES_EDIT_CONTRACT_CORRECTION' && duty.dueAt <= now) {
+     throw new Error('DUTY_SALES_EDIT_EXPIRED');
+   }
+-  const source = await loadCrossWorkspaceDutySourceProjection(database, {
++  const source = await readSource(database, {
+     sourceType: duty.sourceType,
+     sourceId: duty.sourceId,
+     sourceActionCode: duty.sourceActionCode,
+@@ -330,9 +332,10 @@ export const getCrossWorkspaceDutyDetail = async (
+   });
+ };
+ 
+-export const listCrossWorkspaceDuties = async (
++const listDuties = async (
+   database: Database,
+   input: { actorUserId: string; workspaceCode: string; view: 'assigned' | 'available' | 'triage' | 'history'; now?: Date; summaryOnly?: boolean; search?: string },
++  readSource: typeof loadCrossWorkspaceDutySourceProjection,
+ ) => {
+   const now = input.now ?? new Date();
+   const workspaceCode = crossWorkspaceDutyDestinationCode(input.workspaceCode);
+@@ -355,7 +358,7 @@ export const listCrossWorkspaceDuties = async (
+   const visible: Array<ReturnType<typeof projectCrossWorkspaceDuty>> = [];
+   const project = async (duty: typeof duties[number]) => {
+     try {
+-      const authorized = await authorizeLoadedDuty(database, duty, input.actorUserId, workspaceCode, now, manager, input.summaryOnly);
++      const authorized = await authorizeLoadedDuty(database, duty, input.actorUserId, workspaceCode, now, manager, input.summaryOnly, readSource);
+       if (input.view === 'available' && authorized.access !== 'AVAILABLE') return null;
+       if (input.view === 'assigned' && !['ASSIGNEE', 'SHARED'].includes(authorized.access)) return null;
+       if (input.view === 'triage' && authorized.access === 'SHARED') return null;
+@@ -411,16 +414,20 @@ export const listCrossWorkspaceDuties = async (
+   return query ? visible.filter(row => normalize([row.fields.title, row.fields.description].filter(Boolean).join(' ')).includes(query)) : visible;
+ };
+ 
++export const listCrossWorkspaceDuties = (database: Database, input: Parameters<typeof listDuties>[1]) =>
++  listDuties(database, input, createCrossWorkspaceDutySourceProjectionReader());
++
+ export const getCrossWorkspaceDutySummary = async (
+   database: Database,
+   input: { actorUserId: string; workspaceCode: string; now?: Date },
+ ) => {
+   const now = input.now ?? new Date();
+-  const assigned = await listCrossWorkspaceDuties(database, { ...input, view: 'assigned', now, summaryOnly: true });
+-  const available = await listCrossWorkspaceDuties(database, { ...input, view: 'available', now, summaryOnly: true });
++  const readSource = createCrossWorkspaceDutySourceProjectionReader();
++  const assigned = await listDuties(database, { ...input, view: 'assigned', now, summaryOnly: true }, readSource);
++  const available = await listDuties(database, { ...input, view: 'available', now, summaryOnly: true }, readSource);
+   const manager = await isManager(database, input.actorUserId, crossWorkspaceDutyDestinationCode(input.workspaceCode), now);
+   const triage = manager
+-    ? await listCrossWorkspaceDuties(database, { ...input, view: 'triage', now, summaryOnly: true })
++    ? await listDuties(database, { ...input, view: 'triage', now, summaryOnly: true }, readSource)
+     : [];
+   const destinationWorkspaceCode = crossWorkspaceDutyDestinationCode(input.workspaceCode);
+   const historyReceipt = await database.crossWorkspaceDutyHistoryReceipt.findUnique({
+@@ -437,7 +444,7 @@ export const getCrossWorkspaceDutySummary = async (
+     } },
+     select: { lastSeenAt: true },
+   });
+-  const history = await listCrossWorkspaceDuties(database, { ...input, view: 'history', now, summaryOnly: true });
++  const history = await listDuties(database, { ...input, view: 'history', now, summaryOnly: true }, readSource);
+   const historyUnseen = history.filter((duty) => (
+     !historyReceipt || new Date(duty.updatedAt) > historyReceipt.lastSeenAt
+   )).length;
+diff --git a/backend/src/services/crossWorkspaceDutyModule.ts b/backend/src/services/crossWorkspaceDutyModule.ts
+index f654dd82..d8cce781 100644
+--- a/backend/src/services/crossWorkspaceDutyModule.ts
++++ b/backend/src/services/crossWorkspaceDutyModule.ts
+@@ -90,6 +90,22 @@ export const loadCrossWorkspaceDutySourceProjection = (
+   input: CrossWorkspaceDutySourceProjectionInput,
+ ) => registeredAdapter(input.sourceType).loadInboxProjection(database, input);
+ 
++/** One read operation only. Source evidence is shared; actor authority is never cached. */
++export const createCrossWorkspaceDutySourceProjectionReader = () => {
++  const databases = new WeakMap<object, Map<string, ReturnType<typeof loadCrossWorkspaceDutySourceProjection>>>();
++  return (database: CrossWorkspaceDutyDatabase, input: CrossWorkspaceDutySourceProjectionInput) => {
++    let projections = databases.get(database);
++    if (!projections) { projections = new Map(); databases.set(database, projections); }
++    const key = JSON.stringify([input.sourceType, input.sourceId, input.sourceActionCode, input.sourceVersion]);
++    let reading = projections.get(key);
++    if (!reading) {
++      reading = loadCrossWorkspaceDutySourceProjection(database, input);
++      projections.set(key, reading);
++    }
++    return reading;
++  };
++};
++
+ export const respondToCrossWorkspaceDuty = async (
+   database: CrossWorkspaceDutyDatabase,
+   input: RespondToCrossWorkspaceDutyInput,
+diff --git a/backend/src/services/partnerSales/inquiries/adapters.ts b/backend/src/services/partnerSales/inquiries/adapters.ts
+index aaf977a2..475b8f79 100644
+--- a/backend/src/services/partnerSales/inquiries/adapters.ts
++++ b/backend/src/services/partnerSales/inquiries/adapters.ts
+@@ -171,15 +171,19 @@ export function presentSavedTechnicalConfiguration(input: {
+ /** Resolves an opaque saved reference from the protected recovery journal. The
+  * returned public display is rebuilt from its frozen safe catalog projection;
+  * private rates, graph context and pricing hashes never leave this adapter. */
+-type SavedHistoryCache = Map<string, Promise<TechnicalSavedSnapshot[] | undefined>>;
++type SavedHistoryCache = {
++  histories: Map<string, Promise<unknown[] | undefined>>;
++  revisions: Map<string, Promise<TechnicalSavedSnapshot[] | undefined>>;
++};
++const savedHistoryCache = (): SavedHistoryCache => ({ histories: new Map(), revisions: new Map() });
+ 
+-/** Cache verified evidence only within one database snapshot, never across requests
+- * or transactions. Ownership and integrity validation remain identical. */
++/** Create inside one read operation or transaction, never at module scope. A
++ * long-lived Prisma client does not itself delimit an operation or DB snapshot. */
+ export function createSavedTechnicalConfigurationResolver(): PartnerInquiryDependencies['resolveConfiguration'] {
+   const transactions = new WeakMap<object, SavedHistoryCache>();
+   return (tx, input) => {
+     let cache = transactions.get(tx);
+-    if (!cache) { cache = new Map(); transactions.set(tx, cache); }
++    if (!cache) { cache = savedHistoryCache(); transactions.set(tx, cache); }
+     return resolveSavedConfiguration(tx, input, cache);
+   };
+ }
+@@ -187,10 +191,10 @@ export const resolveSavedTechnicalConfiguration: PartnerInquiryDependencies['res
+   resolveSavedConfiguration(tx, input);
+ 
+ async function resolveSavedConfiguration(tx: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[0],
+-  input: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[1], cache?: SavedHistoryCache):
++  input: Parameters<PartnerInquiryDependencies['resolveConfiguration']>[1], cache = savedHistoryCache()):
+   ReturnType<PartnerInquiryDependencies['resolveConfiguration']> {
+   const key = JSON.stringify([input.actorId, input.reference.recoveryId]);
+-  let reading = cache?.get(key);
++  let reading = cache.histories.get(key);
+   if (!reading) {
+     reading = (async () => {
+       const session = await tx.salesContractEditSession.findUnique({ where: { draftId: input.reference.recoveryId },
+@@ -200,12 +204,26 @@ async function resolveSavedConfiguration(tx: Parameters<PartnerInquiryDependenci
+         ? (session.recovery as Record<string, unknown>).validatedSnapshots
+         : await readSubmittedTechnicalSnapshots(tx, input.actorId, input.reference.recoveryId);
+       if (!Array.isArray(history)) return undefined;
+-      const decoded = await Promise.all(history.map(record => decodeTechnicalSavedSnapshot(record)));
++      return history;
++    })();
++    cache.histories.set(key, reading);
++  }
++  const revisionKey = JSON.stringify([input.actorId, input.reference.recoveryId, input.reference.recoveryRevision]);
++  let verifying = cache.revisions.get(revisionKey);
++  if (!verifying) {
++    verifying = (async () => {
++      const records = await reading;
++      if (!records) return undefined;
++      // This untrusted hint only narrows work. Every selected candidate still
++      // passes the full envelope, graph, identity and view integrity decoder.
++      const candidates = records.filter(record => (record as { payload?: { view?: { recoveryRevision?: unknown } } } | null)
++        ?.payload?.view?.recoveryRevision === input.reference.recoveryRevision);
++      const decoded = await Promise.all(candidates.map(record => decodeTechnicalSavedSnapshot(record)));
+       return decoded.filter((record): record is TechnicalSavedSnapshot => record !== undefined);
+     })();
+-    cache?.set(key, reading);
++    cache.revisions.set(revisionKey, verifying);
+   }
+-  const history = await reading;
++  const history = await verifying;
+   if (!history) return { ok: false, error: partnerError('NOT_FOUND') };
+   for (const snapshot of history) {
+     if (!snapshot || snapshot.view.recoveryRevision !== input.reference.recoveryRevision) continue;
+diff --git a/docs/qa/server-response-performance.md b/docs/qa/server-response-performance.md
+new file mode 100644
+index 00000000..f497b49a
+--- /dev/null
++++ b/docs/qa/server-response-performance.md
+@@ -0,0 +1,38 @@
++# Server response performance repair
++
++Approved scope on 2026-10-11; review base `c0c5c83f` (main, including ferpheri).
++
++Production profiling located repeated saved technical snapshot decoding in duty
++summary reads. A read-only sixteen-row benchmark measured 9629 ms uncached versus
++433 ms with the existing operation-scoped resolver. This is a resolver measurement,
++not a promise of equivalent acceleration for every API.
++
++## Required behavior
++
++- Reuse source projections only inside one list/summary read operation. Keep all
++  existing per-actor authorization, assignments, shared eligibility, expired-work
++  rules, history redaction, receipts, due-date and attention counting semantics.
++- Reuse protected technical history within one operation and database identity.
++  Select the referenced revision before expensive decoding, while retaining full
++  envelope, graph, identity, view and submitted-journal integrity validation.
++  Preserve candidate order, legacy evidence and rejection of foreign ownership.
++- No process-wide source, evidence, permission or settled-count cache. A new
++  operation on the same long-lived Prisma client must reread current evidence.
++- Coalesce simultaneous frontend count requests by authentication session and
++  workspace. A duty mutation during a flight must trigger a fresh read before
++  publishing. Ignore obsolete/unmounted hook responses. Keep the last successful
++  count on a transient failure within the same session only.
++- No business-data rewrite, schema change, integrity shortcut or timeout increase.
++
++## Accepted test seams and release gates
++
++Exercise the actual duty summary and saved technical resolver, concurrent count
++requests, and readiness while representative technical evidence is being read.
++Use the existing `sabalanerp-local` services for transaction-rolled-back integration
++fixtures. Validate types, backend architecture, relevant broad tests and frontend
++design-system acceptance. Run independent standards and spec reviews.
++
++Production deployment is authorized after verification and must use the canonical
++deployment runner, verified local and remote checkpoint, immutable release images,
++maintenance boundary and complete release health gates required by ADR-0039.
++Verify live API responsiveness, release identity and container health afterward.
+diff --git a/frontend/e2e/fixtures/duty-count-hook.tsx b/frontend/e2e/fixtures/duty-count-hook.tsx
+new file mode 100644
+index 00000000..0ac857ef
+--- /dev/null
++++ b/frontend/e2e/fixtures/duty-count-hook.tsx
+@@ -0,0 +1,19 @@
++import React, { useState } from 'react';
++import { createRoot } from 'react-dom/client';
++import { AuthProvider, useAuth } from '../../src/contexts/AuthContext';
++import { useCrossWorkspaceDutyCount } from '../../src/features/cross-workspace-duties/useCrossWorkspaceDutyCount';
++
++const Counter = ({ workspace }: { workspace: string }) => <output>{useCrossWorkspaceDutyCount(workspace)}</output>;
++function Fixture() {
++  const [workspace, setWorkspace] = useState('sales');
++  const [mounted, setMounted] = useState(true);
++  const auth = useAuth();
++  return <>
++    <button onClick={() => setWorkspace('accounting')}>accounting</button>
++    <button onClick={() => void auth.logout()}>logout</button>
++    <button onClick={() => void auth.login('fixture', 'fixture')}>login</button>
++    <button onClick={() => setMounted(value => !value)}>mount</button>
++    {mounted && <><Counter workspace={workspace} /><Counter workspace={workspace} /></>}
++  </>;
++}
++createRoot(document.getElementById('fixture')!).render(<AuthProvider><Fixture /></AuthProvider>);
+diff --git a/frontend/package.json b/frontend/package.json
+index c17c38e1..0b3a60d2 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -3,6 +3,7 @@
+   "version": "0.1.0",
+   "private": true,
+   "scripts": {
++    "test:duty-count": "tsx --test src/features/cross-workspace-duties/dutyCountRequests.test.ts",
+     "dev": "node --max-old-space-size=7168 node_modules/next/dist/bin/next dev",
+     "build": "node --max-old-space-size=8192 node_modules/next/dist/bin/next build",
+     "test:partner-sales-contracts": "npm --prefix ../packages/partner-sales-contracts run test:consumer:frontend",
+diff --git a/frontend/src/features/cross-workspace-duties/dutyCountRequests.test.ts b/frontend/src/features/cross-workspace-duties/dutyCountRequests.test.ts
+new file mode 100644
+index 00000000..94c490ac
+--- /dev/null
++++ b/frontend/src/features/cross-workspace-duties/dutyCountRequests.test.ts
+@@ -0,0 +1,34 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { createDutyCountRequests } from './dutyCountRequests';
++
++test('concurrent counters share the flight; a mutation during it refreshes before publishing', async () => {
++  const pending: Array<{ resolve: (value: number) => void; reject: (error: Error) => void }> = [];
++  const requests = createDutyCountRequests(async () => new Promise<number>((resolve, reject) => pending.push({ resolve, reject })));
++  const actor = {};
++  const first = requests(actor, 'sales');
++  const second = requests(actor, 'sales');
++  assert.equal(pending.length, 1);
++  requests(actor, 'sales', true);
++  pending[0].resolve(3);
++  await new Promise(resolve => setImmediate(resolve));
++  assert.equal(pending.length, 2);
++  pending[1].resolve(4);
++  assert.deepEqual(await Promise.all([first, second]), [4, 4]);
++  const fresh = requests(actor, 'sales');
++  assert.equal(pending.length, 3, 'settled counts must never be cached');
++  pending[2].resolve(5);
++  assert.equal(await fresh, 5);
++});
++
++test('workspaces and authentication sessions are isolated and failures can retry', async () => {
++  let loads = 0;
++  const requests = createDutyCountRequests(async () => { loads++; throw new Error('offline'); });
++  const actor = {};
++  const results = await Promise.allSettled([requests(actor, 'sales'), requests(actor, 'sales'),
++    requests(actor, 'accounting'), requests({}, 'sales')]);
++  assert.ok(results.every(result => result.status === 'rejected'));
++  assert.equal(loads, 3);
++  await assert.rejects(requests(actor, 'sales'), /offline/);
++  assert.equal(loads, 4);
++});
+diff --git a/frontend/src/features/cross-workspace-duties/dutyCountRequests.ts b/frontend/src/features/cross-workspace-duties/dutyCountRequests.ts
+new file mode 100644
+index 00000000..41ba79ca
+--- /dev/null
++++ b/frontend/src/features/cross-workspace-duties/dutyCountRequests.ts
+@@ -0,0 +1,31 @@
++/** Share pending network work only within one authentication session. No settled
++ * count or permission is cached. A mutation invalidates an in-flight response. */
++export function createDutyCountRequests(load: (workspace: string) => Promise<number>) {
++  const sessions = new WeakMap<object, Map<string, { promise: Promise<number>; dirty: boolean }>>();
++  return (session: object, workspace: string, changed = false): Promise<number> => {
++    let flights = sessions.get(session);
++    if (!flights) { flights = new Map(); sessions.set(session, flights); }
++    const existing = flights.get(workspace);
++    if (existing) {
++      if (changed) existing.dirty = true;
++      return existing.promise;
++    }
++    const flight = { dirty: false, promise: undefined as unknown as Promise<number> };
++    flight.promise = (async () => {
++      try {
++        do {
++          flight.dirty = false;
++          try {
++            const count = await load(workspace);
++            if (!flight.dirty) return count;
++          } catch (error) {
++            if (!flight.dirty) throw error;
++          }
++        } while (flight.dirty);
++        throw new Error('DUTY_COUNT_REFRESH_INTERRUPTED');
++      } finally { flights.delete(workspace); }
++    })();
++    flights.set(workspace, flight);
++    return flight.promise;
++  };
++}
+diff --git a/frontend/src/features/cross-workspace-duties/useCrossWorkspaceDutyCount.ts b/frontend/src/features/cross-workspace-duties/useCrossWorkspaceDutyCount.ts
+index 12180084..7ee52df5 100644
+--- a/frontend/src/features/cross-workspace-duties/useCrossWorkspaceDutyCount.ts
++++ b/frontend/src/features/cross-workspace-duties/useCrossWorkspaceDutyCount.ts
+@@ -1,38 +1,46 @@
+ 'use client';
+ 
+-import { useCallback, useEffect, useState } from 'react';
++import { useEffect, useState } from 'react';
++import { useAuth } from '@/contexts/AuthContext';
++import { createDutyCountRequests } from './dutyCountRequests';
+ import {
+   CROSS_WORKSPACE_DUTY_CHANGED_EVENT,
+   crossWorkspaceDutyApi,
+ } from './crossWorkspaceDutyApi';
+ 
++const requestCount = createDutyCountRequests(async workspace => {
++  const response = await crossWorkspaceDutyApi.summary(workspace);
++  return response.data.data.attention;
++});
++
+ export const useCrossWorkspaceDutyCount = (workspace: string | null) => {
+-  const [count, setCount] = useState(0);
+-  const refresh = useCallback(async () => {
+-    if (!workspace) {
+-      setCount(0);
+-      return;
+-    }
+-    try {
+-      const response = await crossWorkspaceDutyApi.summary(workspace);
+-      setCount(response.data.data.attention);
+-    } catch {
+-      // Preserve the last successful count during transient failures.
+-    }
+-  }, [workspace]);
++  const { user } = useAuth();
++  const [result, setResult] = useState<{ session: typeof user; workspace: string | null; count: number } | null>(null);
+ 
+   useEffect(() => {
++    if (!user || !workspace) return;
++    let active = true;
++    const refresh = async (changed = false) => {
++      try {
++        const count = await requestCount(user, workspace, changed);
++        if (active) setResult({ session: user, workspace, count });
++      } catch {
++        // Preserve the last successful count for this session during transient failures.
++      }
++    };
+     void refresh();
+     const interval = window.setInterval(() => void refresh(), 60_000);
+-    const onChange = () => void refresh();
++    const onChange = () => void refresh(true);
++    const onFocus = () => void refresh();
+     window.addEventListener(CROSS_WORKSPACE_DUTY_CHANGED_EVENT, onChange);
+-    window.addEventListener('focus', onChange);
++    window.addEventListener('focus', onFocus);
+     return () => {
++      active = false;
+       window.clearInterval(interval);
+       window.removeEventListener(CROSS_WORKSPACE_DUTY_CHANGED_EVENT, onChange);
+-      window.removeEventListener('focus', onChange);
++      window.removeEventListener('focus', onFocus);
+     };
+-  }, [refresh]);
++  }, [user, workspace]);
+ 
+-  return count;
++  return user && result?.session === user && result.workspace === workspace ? result.count : 0;
+ };
+diff --git a/package.json b/package.json
+index 7f46b40e..8dd100bc 100644
+--- a/package.json
++++ b/package.json
+@@ -4,6 +4,7 @@
+   "description": "ERP system with Next.js frontend and Express.js backend",
+   "main": "index.js",
+   "scripts": {
++    "test:duty-performance": "npm --prefix backend run test:duty-read-performance && npm --prefix frontend run test:duty-count && node --test tests/duty-performance/hook-lifecycle.test.mjs",
+     "duty:baseline": "node scripts/run-duty-baseline-local.mjs",
+     "duty:reconcile:sales-contract-corrections": "node scripts/run-sales-contract-correction-duty-reconciliation-local.mjs",
+     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+diff --git a/tests/duty-performance/hook-lifecycle.test.mjs b/tests/duty-performance/hook-lifecycle.test.mjs
+new file mode 100644
+index 00000000..711d7ec8
+--- /dev/null
++++ b/tests/duty-performance/hook-lifecycle.test.mjs
+@@ -0,0 +1,73 @@
++import test from 'node:test';
++import path from 'node:path';
++import { mkdir } from 'node:fs/promises';
++import { createRequire } from 'node:module';
++import { execFileSync } from 'node:child_process';
++import assert from 'node:assert/strict';
++const frontendRequire = createRequire(path.resolve('frontend/package.json'));
++const backendRequire = createRequire(path.resolve('backend/package.json'));
++const { chromium, expect } = frontendRequire('@playwright/test');
++
++test('actual count hooks isolate workspace/auth changes, unmounts, failures and mutation refresh', async () => {
++  const status = execFileSync('docker', ['compose', '-f', 'docker-compose.local.yml', 'ps', '--format', 'json'],
++    { encoding: 'utf8', windowsHide: true }).trim();
++  const services = status.startsWith('[') ? JSON.parse(status) : status.split(/\r?\n/).map(line => JSON.parse(line));
++  const frontend = services.find(service => service.Service === 'frontend');
++  assert.equal(frontend?.Project, 'sabalanerp-local');
++  assert.equal(frontend?.State, 'running');
++  assert.equal(frontend?.Health, 'healthy');
++  const output = path.resolve('reports/qa/server-response-20261011');
++  await mkdir(output, { recursive: true });
++  const bundle = path.join(output, 'hook-browser-fixture.js');
++  backendRequire('esbuild').buildSync({ entryPoints: ['frontend/e2e/fixtures/duty-count-hook.tsx'],
++    bundle: true, platform: 'browser', format: 'iife', tsconfig: 'frontend/tsconfig.json', outfile: bundle,
++    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_API_URL': '"/api"' } });
++  const browser = await chromium.launch({ channel: 'chrome', headless: true });
++  try {
++    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
++    const user = { id: 'fixture-session', username: 'fixture', role: 'ADMIN' };
++    await page.route('**/api/auth/**', route => route.fulfill({ json: { success: true,
++      data: route.request().url().endsWith('/login') ? { user } : user } }));
++    const pending = [];
++    await page.route('**/api/duties/workspaces/*/summary', route => new Promise(resolve => {
++      pending.push(async (attention, status = 200) => { await route.fulfill({ status,
++        json: { success: status === 200, data: { attention } } }); resolve(); });
++    }));
++    // Use the approved existing application's origin; no additional test server.
++    await page.goto('http://127.0.0.1:3000/login');
++    await page.setContent('<html dir="rtl"><body><div id="fixture"></div></body></html>');
++    await page.addScriptTag({ path: bundle });
++    const count = async value => {
++      await expect(page.locator('output')).toHaveCount(2);
++      await expect(page.locator('output').nth(0)).toHaveText(String(value));
++      await expect(page.locator('output').nth(1)).toHaveText(String(value));
++    };
++    const waitRequests = length => expect.poll(() => pending.length).toBe(length);
++    const focus = () => page.evaluate(() => { for (let i = 0; i < 6; i++) window.dispatchEvent(new Event('focus')); });
++    await waitRequests(1);
++    await pending[0](7); await count(7);
++    await focus(); await waitRequests(2);
++    await pending[1](0, 503); await count(7);
++    await focus(); await waitRequests(3);
++    await page.getByRole('button', { name: 'accounting', exact: true }).click();
++    await waitRequests(4); await count(0);
++    await pending[2](99); await pending[3](4); await count(4);
++    await focus(); await waitRequests(5);
++    await page.getByRole('button', { name: 'logout', exact: true }).click(); await count(0);
++    await page.getByRole('button', { name: 'login', exact: true }).click(); await waitRequests(6);
++    await pending[4](88); await count(0);
++    await pending[5](3); await count(3);
++    await focus(); await waitRequests(7);
++    await page.getByRole('button', { name: 'mount', exact: true }).click();
++    await expect(page.locator('output')).toHaveCount(0); await pending[6](60);
++    await page.getByRole('button', { name: 'mount', exact: true }).click();
++    await waitRequests(8); await count(0); await pending[7](9); await count(9);
++    await focus(); await waitRequests(9);
++    await page.evaluate(() => window.dispatchEvent(new Event('cross-workspace-duty:changed')));
++    await pending[8](10); await waitRequests(10); await count(9);
++    await pending[9](11); await count(11);
++    await page.setViewportSize({ width: 390, height: 844 });
++    await count(11);
++    await page.screenshot({ path: path.join(output, 'hook-lifecycle.png') });
++  } finally { await browser.close(); }
++});

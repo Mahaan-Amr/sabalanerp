@@ -331,7 +331,7 @@ test('fourteen-product correction preserves mandatory intent on timeout, retries
   expect(attempts).toBe(2);
   // Initial hydration is reused. The new Case revision requires one fresh
   // commercial read; StrictMode callers must share its in-flight response.
-  expect(caseReads, 'one hydration and one fresh post-command commercial read').toBe(2);
+  await expect.poll(() => caseReads, { message: 'one hydration and one fresh post-command commercial read' }).toBe(2);
   expect(catalogProductReads, 'prepared transition must retain the loaded catalog').toBe(1);
   console.log(JSON.stringify({ workflow: 'fourteen-product-correction', attempts, caseReads, contextReads, catalogProductReads }));
   // Let the 700ms autosave consume the acknowledged no-op before changing intent.

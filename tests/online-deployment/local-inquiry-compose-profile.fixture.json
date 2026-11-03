@@ -1,0 +1,413 @@
+{
+  "format": "synthetic-local-inquiry-profile-fixture/v1",
+  "testOnly": true,
+  "runtimeAdmission": false,
+  "before": {
+    "Id": "ba48cb3ae81aebbfcbacc1f0151f0c99686ee424f1eaffe0c0dfe17e036dc507",
+    "Name": "/sabalanerp-local-inquiry-1",
+    "Image": "sha256:10189496a7054f3517eab7efae410e4130189ed17f665169e0139f10ac183495",
+    "ImageManifestDescriptor": {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:24e595ce04484132e340ad261605e480778189f91a3f2cf895e99071537dd2ee",
+      "size": 3340,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    "Config": {
+      "Hostname": "6d161695e215",
+      "Domainname": "",
+      "User": "",
+      "AttachStdin": false,
+      "AttachStdout": true,
+      "AttachStderr": true,
+      "ExposedPorts": {
+        "3001/tcp": {}
+      },
+      "Tty": false,
+      "OpenStdin": false,
+      "StdinOnce": false,
+      "Env": [
+        "ADMIN_PASSWORD=fixture-only",
+        "YARN_VERSION=fixture-only",
+        "PORT=fixture-only",
+        "NEXT_TELEMETRY_DISABLED=fixture-only",
+        "DATABASE_URL=fixture-only",
+        "NODE_VERSION=fixture-only",
+        "ADMIN_EMAIL=fixture-only",
+        "PATH=fixture-only",
+        "SESSION_SECRET=fixture-only",
+        "NODE_ENV=fixture-only",
+        "RECOVERY_COORDINATION_DIR=fixture-only"
+      ],
+      "Cmd": [
+        "/app/run-inquiry-with-recovery.sh"
+      ],
+      "Healthcheck": {
+        "Test": [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://127.0.0.1:3001',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1));\""
+        ],
+        "Interval": 10000000000,
+        "Timeout": 5000000000,
+        "StartPeriod": 30000000000,
+        "Retries": 20
+      },
+      "Image": "sha256:10189496a7054f3517eab7efae410e4130189ed17f665169e0139f10ac183495",
+      "Volumes": null,
+      "WorkingDir": "/app",
+      "Entrypoint": [
+        "docker-entrypoint.sh"
+      ],
+      "Labels": {
+        "com.docker.compose.config-hash": "58b6b9fa599d887848503e142411829d7ccb31fcc4d14e7f15ffac11f51d37ee",
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.depends_on": "",
+        "com.docker.compose.image": "sha256:24e595ce04484132e340ad261605e480778189f91a3f2cf895e99071537dd2ee",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project": "sabalanerp-local",
+        "com.docker.compose.project.config_files": "D:\\sabalanerp\\docker-compose.local.yml,D:\\sabalanerp-online-qa\\issue419-inquiry-selection-a3a7aa1b5bcfbb58e69ee66a15474612\\rollback.compose.json",
+        "com.docker.compose.project.working_dir": "D:\\sabalanerp",
+        "com.docker.compose.replace": "inquiry-1",
+        "com.docker.compose.service": "inquiry",
+        "com.docker.compose.version": "5.5.1",
+        "io.sabalan.performance.source-commit": "unattested",
+        "io.sabalan.performance.source-hash": "unattested"
+      },
+      "StopTimeout": 30
+    },
+    "HostConfig": {
+      "Binds": [
+        "sabalanerp-local_inquiry_data:/data:rw",
+        "sabalanerp-local_recovery_coordination:/app/recovery-coordination:rw"
+      ],
+      "ContainerIDFile": "",
+      "LogConfig": {
+        "Type": "local",
+        "Config": {
+          "max-file": "3",
+          "max-size": "10m"
+        }
+      },
+      "NetworkMode": "sabalanerp-local_default",
+      "PortBindings": {
+        "3001/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "3001"
+          }
+        ]
+      },
+      "RestartPolicy": {
+        "Name": "unless-stopped",
+        "MaximumRetryCount": 0
+      },
+      "AutoRemove": false,
+      "VolumeDriver": "",
+      "VolumesFrom": null,
+      "ConsoleSize": [
+        0,
+        0
+      ],
+      "CapAdd": null,
+      "CapDrop": null,
+      "CgroupnsMode": "private",
+      "Dns": null,
+      "DnsOptions": null,
+      "DnsSearch": null,
+      "ExtraHosts": [],
+      "GroupAdd": null,
+      "IpcMode": "private",
+      "Cgroup": "",
+      "Links": null,
+      "OomScoreAdj": 0,
+      "PidMode": "",
+      "Privileged": false,
+      "PublishAllPorts": false,
+      "ReadonlyRootfs": false,
+      "SecurityOpt": null,
+      "UTSMode": "",
+      "UsernsMode": "",
+      "ShmSize": 67108864,
+      "Runtime": "runc",
+      "Isolation": "",
+      "CpuShares": 0,
+      "Memory": 536870912,
+      "NanoCpus": 1000000000,
+      "CgroupParent": "",
+      "BlkioWeight": 0,
+      "BlkioWeightDevice": null,
+      "BlkioDeviceReadBps": null,
+      "BlkioDeviceWriteBps": null,
+      "BlkioDeviceReadIOps": null,
+      "BlkioDeviceWriteIOps": null,
+      "CpuPeriod": 0,
+      "CpuQuota": 0,
+      "CpuRealtimePeriod": 0,
+      "CpuRealtimeRuntime": 0,
+      "CpusetCpus": "",
+      "CpusetMems": "",
+      "Devices": null,
+      "DeviceCgroupRules": null,
+      "DeviceRequests": null,
+      "MemoryReservation": 0,
+      "MemorySwap": 1073741824,
+      "MemorySwappiness": null,
+      "OomKillDisable": null,
+      "PidsLimit": null,
+      "Ulimits": null,
+      "CpuCount": 0,
+      "CpuPercent": 0,
+      "IOMaximumIOps": 0,
+      "IOMaximumBandwidth": 0,
+      "MaskedPaths": [
+        "/proc/acpi",
+        "/proc/asound",
+        "/proc/interrupts",
+        "/proc/kcore",
+        "/proc/keys",
+        "/proc/latency_stats",
+        "/proc/sched_debug",
+        "/proc/scsi",
+        "/proc/timer_list",
+        "/proc/timer_stats",
+        "/sys/devices/virtual/powercap",
+        "/sys/firmware"
+      ],
+      "ReadonlyPaths": [
+        "/proc/bus",
+        "/proc/fs",
+        "/proc/irq",
+        "/proc/sys",
+        "/proc/sysrq-trigger"
+      ]
+    },
+    "Mounts": [
+      {
+        "Type": "volume",
+        "Name": "sabalanerp-local_inquiry_data",
+        "Source": "/var/lib/docker/volumes/sabalanerp-local_inquiry_data/_data",
+        "Destination": "/data",
+        "Driver": "local",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": ""
+      },
+      {
+        "Type": "volume",
+        "Name": "sabalanerp-local_recovery_coordination",
+        "Source": "/var/lib/docker/volumes/sabalanerp-local_recovery_coordination/_data",
+        "Destination": "/app/recovery-coordination",
+        "Driver": "local",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": ""
+      }
+    ],
+    "NetworkSettings": {
+      "SandboxID": "7c8034aaa3ae8a71cbbc675c802af67d3c422cc42338bcc9fbde03091317a146",
+      "SandboxKey": "/var/run/docker/netns/7c8034aaa3ae",
+      "Ports": {
+        "3001/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "3001"
+          }
+        ]
+      },
+      "Networks": {
+        "sabalanerp-local_default": {
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": [
+            "sabalanerp-local-inquiry-1",
+            "inquiry"
+          ],
+          "DriverOpts": null,
+          "GwPriority": 0,
+          "NetworkID": "0b1f506dadbca25b7134bb22f825b6d3e752bfe17673ddbabca727ed1db710e0",
+          "EndpointID": "b0519117f1ed45540749ff8a5de4746b41bc6d0c28d64b778d3e000e61c3c1e1",
+          "Gateway": "172.18.0.1",
+          "IPAddress": "172.18.0.7",
+          "MacAddress": "d2:04:cf:96:6f:a0",
+          "IPPrefixLen": 16,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": [
+            "sabalanerp-local-inquiry-1",
+            "inquiry",
+            "ba48cb3ae81a",
+            "6d161695e215"
+          ]
+        }
+      }
+    }
+  },
+  "image": {
+    "Id": "sha256:10189496a7054f3517eab7efae410e4130189ed17f665169e0139f10ac183495",
+    "Config": {
+      "User": "",
+      "Env": [
+        "ADMIN_PASSWORD=fixture-only",
+        "YARN_VERSION=fixture-only",
+        "PORT=fixture-only",
+        "NEXT_TELEMETRY_DISABLED=fixture-only",
+        "DATABASE_URL=fixture-only",
+        "NODE_VERSION=fixture-only",
+        "ADMIN_EMAIL=fixture-only",
+        "PATH=fixture-only",
+        "SESSION_SECRET=fixture-only",
+        "NODE_ENV=fixture-only",
+        "RECOVERY_COORDINATION_DIR=fixture-only"
+      ],
+      "ExposedPorts": {
+        "3001/tcp": {}
+      },
+      "Volumes": null,
+      "Labels": {
+        "io.sabalan.performance.source-commit": "unattested",
+        "io.sabalan.performance.source-hash": "unattested"
+      }
+    }
+  },
+  "model": {
+    "name": "sabalanerp-local",
+    "services": {
+      "inquiry": {
+        "build": {
+          "context": "fixture-only",
+          "dockerfile": "fixture-only"
+        },
+        "cpus": 1,
+        "command": [
+          "/app/run-inquiry-with-recovery.sh"
+        ],
+        "entrypoint": [
+          "docker-entrypoint.sh"
+        ],
+        "environment": {
+          "ADMIN_PASSWORD": "fixture-only",
+          "YARN_VERSION": "fixture-only",
+          "PORT": "fixture-only",
+          "NEXT_TELEMETRY_DISABLED": "fixture-only",
+          "DATABASE_URL": "fixture-only",
+          "NODE_VERSION": "fixture-only",
+          "ADMIN_EMAIL": "fixture-only",
+          "PATH": "fixture-only",
+          "SESSION_SECRET": "fixture-only",
+          "NODE_ENV": "fixture-only",
+          "RECOVERY_COORDINATION_DIR": "fixture-only"
+        },
+        "hostname": "6d161695e215",
+        "healthcheck": {
+          "test": [
+            "CMD-SHELL",
+            "node -e \"require('http').get('http://127.0.0.1:3001',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1));\""
+          ],
+          "timeout": "5s",
+          "interval": "10s",
+          "retries": 20,
+          "start_period": "30s"
+        },
+        "image": "sha256:10189496a7054f3517eab7efae410e4130189ed17f665169e0139f10ac183495",
+        "logging": {
+          "driver": "local",
+          "options": {
+            "max-file": "3",
+            "max-size": "10m"
+          }
+        },
+        "mem_limit": "536870912",
+        "networks": {
+          "default": null
+        },
+        "ports": [
+          {
+            "mode": "ingress",
+            "host_ip": "127.0.0.1",
+            "target": 3001,
+            "published": "3001",
+            "protocol": "tcp"
+          }
+        ],
+        "restart": "unless-stopped",
+        "stop_grace_period": "30s",
+        "volumes": [
+          {
+            "type": "volume",
+            "source": "inquiry_data",
+            "target": "/data",
+            "volume": {}
+          },
+          {
+            "type": "volume",
+            "source": "recovery_coordination",
+            "target": "/app/recovery-coordination",
+            "volume": {}
+          }
+        ],
+        "working_dir": "/app"
+      }
+    },
+    "networks": {
+      "default": {
+        "name": "sabalanerp-local_default",
+        "ipam": {}
+      }
+    },
+    "volumes": {
+      "inquiry_data": {
+        "name": "sabalanerp-local_inquiry_data"
+      },
+      "recovery_coordination": {
+        "name": "sabalanerp-local_recovery_coordination"
+      }
+    }
+  },
+  "resources": {
+    "network": {
+      "Id": "0b1f506dadbca25b7134bb22f825b6d3e752bfe17673ddbabca727ed1db710e0",
+      "Name": "sabalanerp-local_default",
+      "Driver": "bridge",
+      "Scope": "local",
+      "Internal": false,
+      "Attachable": false,
+      "EnableIPv6": false,
+      "EnableIPv4": true,
+      "Options": {
+        "com.docker.network.enable_ipv4": "true",
+        "com.docker.network.enable_ipv6": "false"
+      },
+      "Labels": {
+        "com.docker.compose.project": "sabalanerp-local",
+        "com.docker.compose.network": "default"
+      }
+    },
+    "volumes": {
+      "sabalanerp-local_inquiry_data": {
+        "Name": "sabalanerp-local_inquiry_data",
+        "Driver": "local",
+        "Scope": "local",
+        "Options": null,
+        "Mountpoint": "/var/lib/docker/volumes/sabalanerp-local_inquiry_data/_data",
+        "Labels": {
+          "com.docker.compose.project": "sabalanerp-local",
+          "com.docker.compose.volume": "inquiry_data"
+        }
+      },
+      "sabalanerp-local_recovery_coordination": {
+        "Name": "sabalanerp-local_recovery_coordination",
+        "Driver": "local",
+        "Scope": "local",
+        "Options": null,
+        "Mountpoint": "/var/lib/docker/volumes/sabalanerp-local_recovery_coordination/_data",
+        "Labels": {
+          "com.docker.compose.project": "sabalanerp-local",
+          "com.docker.compose.volume": "recovery_coordination"
+        }
+      }
+    }
+  }
+}

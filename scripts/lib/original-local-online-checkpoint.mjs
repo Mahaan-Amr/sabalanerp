@@ -13,6 +13,7 @@ import {collectNativeProcessOwnerElfArtifacts} from './native-process-owner-elf-
 import {originalBackendBaseCommands} from './production-backend-base-process.mjs';
 import {backendBaseLocalGuards} from './production-backend-base-local-guard.mjs';
 import {verifyOriginalPhysicalPointTransfer,verifyOriginalWalWindowRequest} from './original-protected-online-ssh.mjs';
+import {assertOriginalSameComposePhysicalCallbacks,runOriginalSameComposePhysical,readOriginalSameComposePhysical} from './original-same-compose-physical.mjs';
 
 const completed=new WeakMap(),completedOwners=new WeakMap(),points=new WeakMap(),windows=new WeakMap(),owners=new Set();
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
@@ -67,7 +68,8 @@ export function inspectOriginalLocalOnlineCheckpointInputs({nativeOwnerElfReceip
  return {format:'sabalan-local-online-checkpoint-content-inspection/v1',sourcePins,nativeOwner:elf.proof,qualificationSha256:qualificationSha,productionAdmission:false};
 }
 
-export async function createOriginalLocalOnlineCheckpoint({capturePlan,coordinator,cryptoExecutor,independentOptions,nativeOwnerElfReceipt}){
+export async function createOriginalLocalOnlineCheckpoint({capturePlan,coordinator,cryptoExecutor,independentOptions,sameComposePhysicalCallbacks,nativeOwnerElfReceipt}){
+ assertOriginalSameComposePhysicalCallbacks(sameComposePhysicalCallbacks);
  assert.equal(process.platform,'win32');assertOriginalPrivateBrowserRoundController(coordinator);assertOriginalLocalCheckpointCryptoExecutor(cryptoExecutor);
  assert.ok(independentOptions?.expected&&typeof nativeOwnerElfReceipt==='string','ORIGINAL_LOCAL_ONLINE_FIXED_INPUTS_REQUIRED');
  let currentIndependentOptions=independentOptions;
@@ -144,12 +146,12 @@ export async function createOriginalLocalOnlineCheckpoint({capturePlan,coordinat
    const header={request,producerRawBase64:producer.raw.toString('base64'),plaintextManifestRawBase64:manifest.raw.toString('base64'),sealedManifestRawBase64:sealed.raw.toString('base64'),sourceHost:value.sourceHost,postgresUser:value.postgresUser};
    const verified=verifyOriginalPhysicalPointTransfer(header);const files=verified.objects.map(row=>{const hosts=crypto.hostObjects.filter(host=>host.cipherSha256===row.sha256&&host.cipherBytes===row.bytes);assert.equal(hosts.length,1);return {name:row.name,sourcePath:row.sourcePath,file:hosts[0].cipherFile,bytes:row.bytes,sha256:row.sha256};});
    const source=Object.freeze({});points.set(source,{owner:state,crypto:sealedRows[0].token,value:{...verified,sourceOriginalPid:child.pid,sourceRuntimeId:plan.grant.scope.runtimeId,files}});state.point={source,value};
-   let guardianResolve;state.guardianReady=new Promise(resolve=>{guardianResolve=resolve;});
+   assertOriginalSameComposePhysicalCallbacks(sameComposePhysicalCallbacks);
    const api=await import('./independent-full-restore-ssh.mjs'),transfer=await api.runOriginalIndependentPhysicalPointTransfer({sourcePoint:source,options:independentOptions});
    currentIndependentOptions={...independentOptions,expected:api.readOriginalIndependentPhysicalPointTransfer(transfer).expected};
-   state.independent=await api.runOriginalIndependentPhysicalRestoreOverSsh({...currentIndependentOptions,pointTransfer:transfer,onOriginalGuardianReady:guardian=>{state.guardian=guardian;guardianResolve(guardian);}});
+   state.independent=await runOriginalSameComposePhysical({callbackBinding:sameComposePhysicalCallbacks,sourcePoint:source,pointTransfer:transfer,options:currentIndependentOptions});
    return {format:'sabalan-original-local-online-point-qualification/v1',continuousWalQualified:false,finalIntervalCompletion:false,
-    point:structuredClone(value),independent:api.readOriginalIndependentPhysicalRestoreSshCompletion(state.independent)};
+    point:structuredClone(value),independent:readOriginalSameComposePhysical(state.independent)};
   },
   async tick(){return call('TICK');},
   async finishPointOnlyQualification(){assert.ok(state.point&&state.independent);state.closing=true;const result=await call('FINISH_POINT_ONLY');child.stdin.end();
@@ -164,7 +166,7 @@ export async function createOriginalLocalOnlineCheckpoint({capturePlan,coordinat
    assert.deepEqual(await guard.protectedIdentities(),plan.originalServiceIdentities);const commandClosure=await commands.close();
    const token=Object.freeze({});completed.set(token,{format:'sabalan-original-local-online-point-completion/v1',operation,productionAdmission:false,continuousWalQualified:false,finalIntervalCompletion:false,
     originalControllers:[{originalPid:child.pid,code:0,signal:null}],point:state.point.value,result,originalNamespaceClosure:state.closedResult,commandClosure,sourcePins,sourceHostIdentity,
-    independent:(await import('./independent-full-restore-ssh.mjs')).readOriginalIndependentPhysicalRestoreSshCompletion(state.independent)});
+    independent:readOriginalSameComposePhysical(state.independent)});
    completedOwners.set(token,state);
    clearInterval(keeper);owners.delete(state);return token;
   }

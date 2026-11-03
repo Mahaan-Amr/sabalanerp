@@ -26,7 +26,27 @@ function read(file,expected,mode,maximum=128*1024**2){
  }finally{fs.closeSync(fd);}
 }
 function absent(file){try{fs.lstatSync(file);}catch(error){if(error.code==='ENOENT')return;throw error;}throw Error('ONLINE_INSTALL_ACTIVE_MARKER');}
+function installationFiles(renewalRoot){
+ const files=['/opt/sabalanerp/deploy/.env.prod','/opt/sabalanerp/deploy/nginx/nginx.conf','/opt/sabalanerp/deploy/nginx/conf.d/app.conf.template','/opt/sabalanerp/deploy/nginx/maintenance-check.conf','/opt/sabalanerp/deploy/nginx/maintenance.html'];
+ const secrets='/opt/sabalanerp/deploy/secrets';
+ try{const st=fs.lstatSync(secrets,{bigint:true});assert.ok(st.isDirectory()&&!st.isSymbolicLink()&&st.uid===0n&&!(st.mode&0o022n));
+  for(const entry of fs.readdirSync(secrets,{withFileTypes:true})){assert.ok(entry.isFile()&&!entry.isSymbolicLink());files.push(path.join(secrets,entry.name));}
+ }catch(error){if(error.code!=='ENOENT')throw error;}
+ const fingerprint=file=>{assert.equal(fs.realpathSync(file),file);const named=fs.lstatSync(file,{bigint:true});assert.ok(named.isFile()&&!named.isSymbolicLink()&&named.uid===0n&&named.nlink===1n&&!(named.mode&0o022n)&&named.size<=32n*1024n**2n);
+  const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+  try{assert.deepEqual(pin(fs.fstatSync(fd,{bigint:true})),pin(named));const raw=fs.readFileSync(fd);assert.deepEqual(pin(fs.fstatSync(fd,{bigint:true})),pin(named));assert.deepEqual(pin(fs.lstatSync(file,{bigint:true})),pin(named));return{identity:pin(named),sha256:sha(raw)};}finally{fs.closeSync(fd);}};
+ const protectedFiles=Object.fromEntries(files.sort().map(file=>[file,fingerprint(file)]));
+ assert.ok(path.isAbsolute(renewalRoot)&&fs.realpathSync(renewalRoot)===renewalRoot);
+ const renewalDirectory=fs.lstatSync(renewalRoot,{bigint:true});assert.ok(renewalDirectory.isDirectory()&&renewalDirectory.uid===0n&&!(renewalDirectory.mode&0o022n));
+ const renewals=fs.readdirSync(renewalRoot,{withFileTypes:true});assert.ok(renewals.length>0&&renewals.length<=256);
+ // Bind the complete actual mounted renewal inventory. Certificate names come
+ // from the configured deployment and need not equal the repository name.
+ for(const entry of renewals)assert.ok(entry.isFile()&&!entry.isSymbolicLink()&&/^[A-Za-z0-9_.-]+\.conf$/.test(entry.name));
+ const cronFiles=Object.fromEntries(['/var/spool/cron/crontabs/root','/opt/sabalanerp/deploy/scripts/renew-cert.sh',...renewals.map(entry=>path.join(renewalRoot,entry.name)).sort()].map(file=>[file,fingerprint(file)]));
+ return{protectedFiles,cronFiles};
+}
 export async function observeOriginalOwnerInstall(configurationFile,configurationSha256){
+ const observedAt=new Date().toISOString();
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);
  assert.match(configurationFile,/^\/opt\/sabalanerp\/\.deploy-state\/online-control-[a-f0-9]{32}\/launcher-config\.json$/);
  assert.ok(!Object.keys(process.env).some(key=>key.startsWith('LD_')||key.startsWith('DOCKER_')||key.startsWith('GIT_')||key==='NODE_OPTIONS'||key.startsWith('NODE_PRELOAD')));
@@ -41,6 +61,7 @@ export async function observeOriginalOwnerInstall(configurationFile,configuratio
  const guard=()=>{assert.deepEqual(pin(fs.fstatSync(9,{bigint:true})),originalLock);assert.deepEqual(pin(fs.lstatSync(lock,{bigint:true})),originalLock);
   for(const file of [configuration.sessionFile,path.join(repository,'.deploy-state/pending-restore.json'),path.join(repository,'.deploy-state/deployment-maintenance.json')])absent(file);};
  guard();
+ let protectedBefore,renewalRoot;
  const children=[];let interrupted=false;const listeners=['SIGINT','SIGTERM','SIGHUP'].map(name=>{const fn=()=>{interrupted=true;};process.on(name,fn);return[name,fn];});
  async function run(executable,args){
   guard();assert.equal(interrupted,false);
@@ -80,9 +101,16 @@ export async function observeOriginalOwnerInstall(configurationFile,configuratio
   validatePrebuiltReleasePlan(plan,actual);
   const ids=(await docker(['ps','--all','--no-trunc','--format','{{.ID}}'])).trim().split('\n').filter(Boolean).sort();assert.ok(ids.length>0&&ids.length<=1024);for(const id of ids)assert.match(id,/^[a-f0-9]{64}$/);
   const containers=JSON.parse(await docker(['inspect',...ids]));assert.equal(containers.length,ids.length);
+  const fullConfiguration=rows=>sha(bytes(rows.map(row=>({id:row.Id,config:row.Config,hostConfig:row.HostConfig,mounts:row.Mounts,networks:row.NetworkSettings?.Networks})).sort((a,b)=>a.id.localeCompare(b.id))));
+  const serviceConfigurationSha256=fullConfiguration(containers);
+  const containerCensus=rows=>rows.map(row=>({id:row.Id,image:row.Image,startedAt:row.State.StartedAt,restarts:row.RestartCount,running:row.State.Running,health:row.State.Health?.Status??null,project:row.Config.Labels?.['com.docker.compose.project']??null,service:row.Config.Labels?.['com.docker.compose.service']??null})).sort((a,b)=>a.id.localeCompare(b.id));
+  const census=containerCensus(containers);
   const mains=['backend','frontend','inquiry','nginx','postgres','clamav'];
   for(const name of mains){const rows=containers.filter(row=>row.Config.Labels?.['com.docker.compose.project']==='sabalanerp'&&row.Config.Labels?.['com.docker.compose.service']===name&&row.State.Running);
    assert.equal(rows.length,1);assert.equal(rows[0].State.Health?.Status,'healthy');}
+  const nginx=containers.find(row=>row.Config.Labels?.['com.docker.compose.project']==='sabalanerp'&&row.Config.Labels?.['com.docker.compose.service']==='nginx'&&row.State.Running);
+  const certificates=nginx.Mounts.filter(row=>row.Type==='volume'&&row.Destination==='/etc/letsencrypt');assert.equal(certificates.length,1);
+  renewalRoot=path.join(certificates[0].Source,'renewal');protectedBefore=installationFiles(renewalRoot);
   const backend=containers.find(row=>row.Config.Labels?.['com.docker.compose.project']==='sabalanerp'&&row.Config.Labels?.['com.docker.compose.service']==='backend'&&row.State.Running);
   const coordination=backend.Mounts.filter(row=>row.Type==='volume'&&row.Destination==='/app/recovery-coordination');assert.equal(coordination.length,1);
   const coordinationRoot=coordination[0].Source;assert.equal(fs.realpathSync(coordinationRoot),coordinationRoot);const directory=fs.lstatSync(coordinationRoot,{bigint:true});assert.ok(directory.isDirectory()&&directory.uid===0n&&!(directory.mode&0o022n));
@@ -94,17 +122,21 @@ export async function observeOriginalOwnerInstall(configurationFile,configuratio
   assert.equal(identity.name,decodeURIComponent(url.pathname.slice(1)));assert.match(identity.system,/^[0-9]+$/);
   const ledger=await database.$queryRaw`SELECT migration_name,checksum,finished_at,rolled_back_at FROM "_prisma_migrations" ORDER BY started_at,id`;
   assert.ok(ledger.length>0&&ledger.length<=10000);
-  const census=containers.map(row=>({id:row.Id,image:row.Image,startedAt:row.State.StartedAt,restarts:row.RestartCount,running:row.State.Running,health:row.State.Health?.Status??null,project:row.Config.Labels?.['com.docker.compose.project']??null,service:row.Config.Labels?.['com.docker.compose.service']??null})).sort((a,b)=>a.id.localeCompare(b.id));
+  assert.deepEqual((await docker(['ps','--all','--no-trunc','--format','{{.ID}}'])).trim().split('\n').filter(Boolean).sort(),ids,'ONLINE_INSTALL_CENSUS_CHANGED_DURING_OBSERVATION');
+  const after=JSON.parse(await docker(['inspect',...ids]));
+  assert.equal(fullConfiguration(after),serviceConfigurationSha256,'ONLINE_INSTALL_CONFIGURATION_CHANGED_DURING_OBSERVATION');
+  assert.deepEqual(containerCensus(after),census,'ONLINE_INSTALL_INCARNATION_CHANGED_DURING_OBSERVATION');
   guard();absent(path.join(coordinationRoot,'deployment-maintenance.json'));assert.deepEqual(directoryPin(fs.lstatSync(coordinationRoot,{bigint:true})),directoryPin(directory));
   const baseline={applicationCommit:actual.head,applicationTree:actual.tree,inquiryCommit:actual.inquiryHead,configurationSha256,operationsReceiptSha256:configuration.hostPackReceiptSha256,
-   lockIdentity:originalLock,containers:census,databaseIdentity:identity,migrationLedgerSha256:sha(bytes(ledger)),machineUuidSha256:sha(fs.readFileSync('/sys/class/dmi/id/product_uuid','utf8').trim().toLowerCase()),kernelBootIdSha256:sha(fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim().toLowerCase())};
+   lockIdentity:originalLock,containers:census,databaseIdentity:identity,migrationLedgerSha256:sha(bytes(ledger)),machineUuidSha256:sha(fs.readFileSync('/sys/class/dmi/id/product_uuid','utf8').trim().toLowerCase()),kernelBootIdSha256:sha(fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim().toLowerCase()),
+   ...protectedBefore,serviceConfigurationSha256,activeLeaseCount:0,creationOnly:true};
   assert.ok(children.every(row=>row.closed&&row.result.code===0&&row.result.signal===null));assert.equal(interrupted,false);
   completed={format:'sabalan-original-owner-install-readonly-guard/v1',baselineSha256:sha(bytes(baseline)),baseline,originalChildren:children.map(row=>({pid:row.child.pid,...row.result})),readOnly:true,productionAdmission:false};
  }finally{
-  try{if(database)await database.$disconnect();guard();assert.equal(interrupted,false);}
+  try{if(database)await database.$disconnect();guard();assert.equal(interrupted,false);if(protectedBefore)assert.deepEqual(installationFiles(renewalRoot),protectedBefore,'ONLINE_INSTALL_PROTECTED_OR_CRON_CHANGED');}
   finally{for(const[name,listener]of listeners)process.off(name,listener);}
  }
- return completed;
+ return {...completed,observedAt,completedAt:new Date().toISOString()};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  try{assert.equal(process.argv.length,4);console.log(JSON.stringify(await observeOriginalOwnerInstall(...process.argv.slice(2))));}

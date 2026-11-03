@@ -17,6 +17,9 @@ import {startOriginalProtectedOnlineInstall,readOriginalProtectedQualificationRe
 import {prepareOriginalPrivateEvidenceDirectory} from './lib/original-private-evidence-directory.mjs';
 import {assembleOriginalProtectedOnlineEvidence,assembleOriginalOnlineEvidence,readOriginalOnlineEvidenceAssembly} from './lib/original-online-evidence-assembler.mjs';
 import {runOriginalFollowingPromotion} from './lib/original-following-update-workflow.mjs';
+import {runOriginalExistingComposeComplete,isOriginalExistingComposeComplete} from './lib/original-existing-compose-complete.mjs';
+import {assembleOriginalProtectedCompleteEvidence} from './lib/original-online-evidence-assembler.mjs';
+import {assertOriginalSameComposePhysicalCallbacks,runOriginalSameComposePhysical,readOriginalSameComposePhysical} from './lib/original-same-compose-physical.mjs';
 
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 const keys=(value,names)=>assert.deepEqual(Object.keys(value).sort(),[...names].sort());
@@ -31,10 +34,11 @@ function pinnedConfiguration(file,digest){
 }
 /** This function never accepts a ChildProcess or an already-finished report as
  * ownership. The two original factories below create their own children. */
-export async function runOriginalOnlineQualificationMaster({candidateReplacementReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection,retainedBrowserPlanFile,retainedBrowserPlanSha256,deferLocal=false,input=process.stdin,output=process.stdout}){
+export async function runOriginalOnlineQualificationMaster({candidateReplacementReceipt,prismaQualificationReceipt,frontendSnapshot,fullCatalogSelection,retainedBrowserPlanFile,retainedBrowserPlanSha256,sameComposePhysicalCallbacks,deferLocal=false,input=process.stdin,output=process.stdout}){
  let financialRequest=null;
  assert.equal(process.platform,'win32','ORIGINAL_QUALIFICATION_MASTER_WINDOWS_REQUIRED');
  assert.equal(deferLocal,true,'ORIGINAL_MASTER_REQUIRES_PRELOAD_THEN_RUN_LOCAL');
+ if(sameComposePhysicalCallbacks)assertOriginalSameComposePhysicalCallbacks(sameComposePhysicalCallbacks);
  let held=false;
  const signalListeners=['SIGINT','SIGTERM','SIGHUP'].map(name=>{const listener=()=>{held=true;};process.on?.(name,listener);return[name,listener];});
  let local=null,retainedBrowser=null;
@@ -73,8 +77,18 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
     }else if(request.command==='RUN_LOCAL'){
      keys(request,['command','sequence','candidateReplacementReceipt',...['prismaQualificationReceipt','frontendSnapshot','fullCatalogSelection'].filter(key=>Object.hasOwn(request,key))]);assert.ok(!local&&!held,'ORIGINAL_LOCAL_ALREADY_CREATED');
      assert.ok(independentOptions&&localRuntime,'ORIGINAL_INDEPENDENT_AND_LOCAL_RUNTIME_CONFIGURATION_REQUIRED_BEFORE_LOCAL');
-     local=await runOriginalApplicationNativeQualification({candidateReplacementReceipt:request.candidateReplacementReceipt,prismaQualificationReceipt:request.prismaQualificationReceipt??prismaQualificationReceipt,frontendSnapshot:request.frontendSnapshot??frontendSnapshot,fullCatalogSelection:request.fullCatalogSelection??fullCatalogSelection,retainedBrowserCompletion:retainedBrowser,independentOptions,...localRuntime});
+     local=await runOriginalApplicationNativeQualification({candidateReplacementReceipt:request.candidateReplacementReceipt,prismaQualificationReceipt:request.prismaQualificationReceipt??prismaQualificationReceipt,frontendSnapshot:request.frontendSnapshot??frontendSnapshot,fullCatalogSelection:request.fullCatalogSelection??fullCatalogSelection,retainedBrowserCompletion:retainedBrowser,independentOptions,sameComposePhysicalCallbacks,localQualificationMode:'PROTECTED_COMPLETE',...localRuntime});
      state('LOCAL_QUALIFICATION_CLOSED_RETAINED');
+    }else if(request.command==='RUN_COMPLETE'){
+     keys(request,['command','sequence','configurationFile','configurationSha256','password']);
+     assert.ok(local&&!independent&&!held&&!protectedInstall,'ORIGINAL_COMPLETE_LOCAL_AND_UNUSED_OWNER_REQUIRED');
+     assert.equal(typeof request.password,'string');
+     let credential=request.password;delete request.password;
+     try{independent=await runOriginalExistingComposeComplete({configurationFile:request.configurationFile,configurationSha256:request.configurationSha256,
+      localCompletion:local.completion,acquireCredential:async()=>{assert.ok(!held,'ORIGINAL_MASTER_HELD');const value=credential;credential=null;return value;},
+      onClosed:async row=>{assert.ok(!held&&row.code===0&&row.signal===null&&row.stdoutEof&&row.stderrEof,'ORIGINAL_COMPLETE_CLOSURE_REQUIRED');}});
+     }finally{credential=null;}
+     state('COMPLETE_QUALIFICATION_CLOSED_RETAINED');
     }else if(request.command==='RUN_INDEPENDENT'){
      keys(request,['command','sequence','configurationFile','configurationSha256','password']);
      assert.ok(local,'ORIGINAL_LOCAL_COMPLETION_REQUIRED');assert.equal(independent,null,'ORIGINAL_INDEPENDENT_ALREADY_CREATED');assert.equal(typeof request.password,'string');
@@ -102,15 +116,15 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
       output.write(JSON.stringify({format:'sabalan-original-master-online-request/v1',request:readOriginalOnlineQualificationRequest(token),productionAdmission:false})+'\n');
      },onPhysicalPointRequest:async sourcePoint=>{
       assert.ok(independentOptions&&!held&&!physical,'ORIGINAL_PHYSICAL_POINT_ALREADY_CREATED');
-      let guardianReady;physicalGuardianReady=new Promise(resolve=>{guardianReady=resolve;});
+      assertOriginalSameComposePhysicalCallbacks(sameComposePhysicalCallbacks);
       const api=await import('./lib/independent-full-restore-ssh.mjs');
       const transfer=await api.runOriginalIndependentPhysicalPointTransfer({sourcePoint,options:independentOptions});
       independentOptions={...independentOptions,expected:api.readOriginalIndependentPhysicalPointTransfer(transfer).expected};
-      physical=await api.runOriginalIndependentPhysicalRestoreOverSsh({...independentOptions,pointTransfer:transfer,onOriginalGuardianReady:value=>{independentGuardian=value;guardians.add(value);guardianReady(value);},onHeld:()=>{held=true;state('PHYSICAL_ORIGINAL_HELD');}});
+      physical=await runOriginalSameComposePhysical({callbackBinding:sameComposePhysicalCallbacks,sourcePoint,pointTransfer:transfer,options:independentOptions});
       promotion=await api.runOriginalIndependentPhysicalRepositoryPromotion({physicalCompletion:physical,options:independentOptions});
       physicalCertificate=await issueOriginalPhysicalCheckpointVerification({independentCompletion:physical});
       repositoryCertificate=await issueOriginalPhysicalRepositoryPromotion({physicalCompletion:physical,repositoryPromotion:promotion});
-      await sendOriginalProtectedPhysicalPointVerification(protectedInstall.session,sourcePoint,{physicalCertificate,repositoryCertificate,reportRawBase64:api.readOriginalIndependentPhysicalRestoreSshCompletion(physical).ownedOutputs.report.rawBase64});
+      await sendOriginalProtectedPhysicalPointVerification(protectedInstall.session,sourcePoint,{physicalCertificate,repositoryCertificate,reportRawBase64:readOriginalSameComposePhysical(physical).ownedOutputs.report.rawBase64});
      },onCheckpointMetadataRequest:async sourceMetadata=>{
       assert.ok(physical&&promotion&&physicalCertificate&&repositoryCertificate&&!metadata&&!held,'ORIGINAL_PHYSICAL_PROMOTION_REQUIRED');
       const api=await import('./lib/independent-full-restore-ssh.mjs'),request=readOriginalProtectedCheckpointMetadataSource(sourceMetadata);
@@ -211,7 +225,8 @@ export async function runOriginalOnlineQualificationMaster({candidateReplacement
      // The strict issuer also requires every semantic report and proof to be
      // bound to original owned outputs. Caller JSON never supplies a pass bit.
      const evidenceCustody=await prepareOriginalPrivateEvidenceDirectory(request.evidenceDirectory);
-     const assemblyCompletion=assembleOriginalProtectedOnlineEvidence({evidenceCustody,...(request.protectedFinancial?{protectedFinancial:request.protectedFinancial}:{}),localCompletion:local.completion,independentCompletion:independent,
+     const assemble=isOriginalExistingComposeComplete(independent)?assembleOriginalProtectedCompleteEvidence:assembleOriginalProtectedOnlineEvidence;
+     const assemblyCompletion=assemble({evidenceCustody,...(request.protectedFinancial?{protectedFinancial:request.protectedFinancial}:{}),localCompletion:local.completion,independentCompletion:independent,
       protectedRequest,evidenceDirectory:request.evidenceDirectory});
      const assembly=readOriginalOnlineEvidenceAssembly(assemblyCompletion);
      assert.equal(assembly.originalProtectedRequestSha256,sha(Buffer.from(JSON.stringify(sort(readOriginalProtectedQualificationRequest(protectedRequest))))));

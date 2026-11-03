@@ -1,0 +1,5 @@
+# Preserve the actual producer bytes of these hashed Windows receipts.
+C3-INSTALLATION-INVENTORY-b297e08be1d542db982b0942859db831.json -text
+C3-INSTALLATION-RECONCILIATION-4707ef7972914104bdca968508bf1b69.json -text
+ORIGINAL-PRESERVATION-074e5f82192b4576833d29e74fccec06.json -text
+CONTINUATION-EVIDENCE.json -text

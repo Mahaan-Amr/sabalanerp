@@ -4,6 +4,7 @@ import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PrismaDispatchDocumentRepository, runSerializableDispatchOperation } from '../dispatchDocuments/prismaRepository';
 import { DispatchDocumentConflictError } from '../dispatchDocuments/service';
+import { PhysicalGateExitService } from '../physicalGateExit';
 import { createDispatchDocumentsTemporaryDatabase } from './dispatchDocumentsTemporaryDatabase';
 
 const countSourceEvidence = async (prisma: PrismaClient) => ({
@@ -43,17 +44,19 @@ const run = async () => {
   const previousGate = process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED;
   process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED = 'true';
   try {
-    const candidate = await observer.accountingDispatchCandidate.findFirstOrThrow({
+    const candidates = await observer.accountingDispatchCandidate.findMany({
       where: { status: 'PENDING', workItem: { status: 'OPEN' }, waybills: { none: {} } },
-      include: { allocationRevision: { select: { finalizedAt: true } } }, orderBy: { createdAt: 'desc' },
+      include: { allocationRevision: { select: { finalizedAt: true } } }, orderBy: { createdAt: 'desc' }, take: 2,
     });
+    assert.equal(candidates.length, 2, 'production decision and issuance races require two pending candidates');
+    const [candidate, decisionCandidate] = candidates;
     const actor = await observer.user.findFirstOrThrow({ where: { isActive: true }, select: { id: true } });
     const manifest = await observer.shipmentStatementMigrationManifest.create({ data: {
       migrationName: `dispatch-documents-concurrency-${database.runId}`, schemaVersion: 1,
       sourceSchemaHash: createHash('sha256').update(`source-${database.runId}`).digest('hex'), createdBy: actor.id,
     } });
     await observer.shipmentStatementCutover.update({ where: { id: 'customer-shipment-statements' }, data: {
-      enabled: true, cutoverAt: new Date(candidate.allocationRevision.finalizedAt.getTime() - 1_000),
+      enabled: true, cutoverAt: new Date('2000-01-01T00:00:00.000Z'),
       activatedAt: new Date(), activatedBy: actor.id, manifestId: manifest.id,
       integrityHash: createHash('sha256').update(`cutover-${database.runId}`).digest('hex'),
     } });
@@ -88,14 +91,59 @@ const run = async () => {
       idempotencyKey: `same-key-${database.runId}`, actorId: actor.id,
       correlationId: `same-key-${database.runId}`, intentFingerprint: createHash('sha256').update(`same-intent-${database.runId}`).digest('hex') };
 
-    const results = await Promise.all([first.acceptAndIssue(input), second.acceptAndIssue(input)]);
-    assert.deepEqual(results[0], results[1], 'same-key concurrent issuance replays the exact durable result');
+    const decisionWaybillId = randomUUID();
+    const decisionNumber = await first.allocateWaybillNumber();
+    const decisionIntent = createHash('sha256').update(`decision-accept-${database.runId}`).digest('hex');
+    const decisionInput = { ...input, candidateId: decisionCandidate.id,
+      allocationRevisionId: decisionCandidate.allocationRevisionId,
+      waybillSnapshot: { candidateId: decisionCandidate.id },
+      waybill: { ...input.waybill, id: decisionWaybillId, number: decisionNumber },
+      artifacts: input.artifacts.map(item => ({ ...item, id: randomUUID(), waybillId: decisionWaybillId,
+        storageKey: `${item.storageKey}-decision` })), idempotencyKey: `decision-accept-${database.runId}`,
+      correlationId: `decision-accept-${database.runId}`, intentFingerprint: decisionIntent };
+    const decisionResults = await Promise.allSettled([
+      first.acceptAndIssue(decisionInput),
+      second.rejectCandidate({ candidateId: decisionCandidate.id, action: 'REJECT', reason: 'concurrent rejection',
+        idempotencyKey: `decision-reject-${database.runId}`, actorId: actor.id,
+        correlationId: `decision-reject-${database.runId}`,
+        intentFingerprint: createHash('sha256').update(`decision-reject-${database.runId}`).digest('hex') }),
+    ]);
+    assert.equal(decisionResults[0].status, 'fulfilled', 'the lock-owning production issuance command commits first');
+    assert.equal(decisionResults[1].status, 'rejected', 'the competing production rejection observes the terminal decision');
+    assert.equal((await observer.accountingDispatchCandidate.findUniqueOrThrow({ where: { id: decisionCandidate.id } })).status,
+      'ACCEPTED');
+    assert.equal(await observer.accountingDispatchWaybill.count({ where: { candidateId: decisionCandidate.id } }), 1);
+    assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE',
+      scopeId: decisionCandidate.id } }), 1);
+    assert.equal(await observer.shipmentQuantityEvidence.count({ where: { sourceType: 'ACCOUNTING_CANDIDATE_DISPOSITION',
+      sourceId: { startsWith: `${decisionCandidate.id}:` } } }), 0, 'the losing rejection releases no reservation evidence');
+
+    const unavailableStorage = { stage: async () => undefined, read: async () => null };
+    const unavailableRepository = new PrismaDispatchDocumentRepository(firstRaw, verifier, unavailableStorage);
+    await assert.rejects(() => unavailableRepository.acceptAndIssue(input), /artifact.*missing|not found|durable/i,
+      'the production transaction must fail closed when staged artifact bytes are unavailable');
+    assert.equal(await observer.accountingDispatchWaybill.count({ where: { candidateId: candidate.id } }), 0);
+    assert.equal(await observer.dispatchDocumentArtifact.count({ where: { waybillId } }), 0);
+    assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id } }), 0);
+
+    const unknownResponse = new Error('injected unknown response after durable issuance commit');
+    let firstCommittedResult: Awaited<ReturnType<typeof first.acceptAndIssue>> | undefined;
+    const results = await Promise.allSettled([
+      first.acceptAndIssue(input).then(result => { firstCommittedResult = result; throw unknownResponse; }),
+      second.acceptAndIssue(input),
+    ]);
+    assert.equal(results[0].status, 'rejected');
+    assert.equal((results[0] as PromiseRejectedResult).reason, unknownResponse,
+      'the first caller loses its response only after the production transaction has durably committed');
+    assert.equal(results[1].status, 'fulfilled');
+    const durableResult = (results[1] as PromiseFulfilledResult<Awaited<ReturnType<typeof second.acceptAndIssue>>>).value;
+    assert.deepEqual(firstCommittedResult, durableResult, 'both production callers reached the same durable command result');
     assert.equal(await observer.accountingDispatchWaybill.count({ where: { id: waybillId } }), 1);
     assert.equal(await observer.dispatchDocumentArtifact.count({ where: { waybillId } }), 2);
     assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id,
       idempotencyKey: input.idempotencyKey } }), 1);
     assert.equal(await observer.dispatchLifecycleAudit.count({ where: { aggregateId: waybillId, eventType: 'PRIMARY_BUNDLE_ISSUED' } }), 1);
-    assert.deepEqual(await first.acceptAndIssue(input), results[0], 'an unknown-response retry returns the persisted result');
+    assert.deepEqual(await first.acceptAndIssue(input), durableResult, 'an unknown-response retry returns the persisted result');
     await assert.rejects(() => second.acceptAndIssue({ ...input, intentFingerprint: '8'.repeat(64) }),
       DispatchDocumentConflictError, 'same scope and key with a different intent stays a conflict');
     await assert.rejects(() => second.acceptAndIssue({ ...input, idempotencyKey: `${input.idempotencyKey}-different`,
@@ -106,7 +154,7 @@ const run = async () => {
     const p2002Fingerprint = createHash('sha256').update(p2002Key).digest('hex');
     const duplicateCommandData = { scope: 'CANDIDATE' as const, scopeId: candidate.id, idempotencyKey: p2002Key,
       command: 'ACCEPT_AND_ISSUE' as const, status: 'SUCCEEDED' as const,
-      result: { intentFingerprint: p2002Fingerprint, value: results[0] }, actorId: actor.id,
+      result: { intentFingerprint: p2002Fingerprint, value: durableResult }, actorId: actor.id,
       correlationId: p2002Key, completedAt: new Date() };
     await firstRaw.dispatchDocumentCommandResult.create({ data: duplicateCommandData });
     const durableReader = new PrismaDispatchDocumentRepository(secondRaw, verifier, storage);
@@ -114,18 +162,58 @@ const run = async () => {
     const replayed = await runSerializableDispatchOperation(secondRaw, async tx => {
       try { await tx.dispatchDocumentCommandResult.create({ data: duplicateCommandData }); }
       catch (error) { runnerErrorCode = (error as { code?: string }).code; throw error; }
-      return results[0];
+      return durableResult;
     }, async () => await durableReader.findCommandResult({ scope: 'CANDIDATE', scopeId: candidate.id,
-      idempotencyKey: p2002Key, command: 'ACCEPT_AND_ISSUE', intentFingerprint: p2002Fingerprint }) as typeof results[0] | null);
+      idempotencyKey: p2002Key, command: 'ACCEPT_AND_ISSUE', intentFingerprint: p2002Fingerprint }) as typeof durableResult | null);
     assert.equal(runnerErrorCode, 'P2002', 'a real Serializable transaction reaches the command-key unique violation');
-    assert.deepEqual(replayed, results[0],
+    assert.deepEqual(replayed, durableResult,
       'the production Serializable runner replays the exact durable result after its real P2002');
     assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id,
       idempotencyKey: p2002Key } }), 1);
 
-    console.log(JSON.stringify({ runId: database.runId, temporaryDatabase: database.databaseName,
+    const authorization = await observer.dispatchExitAuthorization.findFirst({ where: { status: 'ACTIVE',
+      validUntil: { gt: new Date() }, physicalExit: null,
+      waybill: { status: 'ISSUED', manualOutageExit: null, replacementWaybill: null,
+        candidate: { allocationRevision: { finalizedAt: { gt: new Date('2000-01-01T00:00:00.000Z') } } } } },
+    include: { waybill: { include: { candidate: { include: { allocationRevision: true } } } } }, orderBy: { issuedAt: 'asc' } });
+    assert.ok(authorization, 'production replace/Guard-exit race requires one active unexited authorization');
+    const predecessor = authorization.waybill;
+    const replacementId = randomUUID();
+    const replacementNumber = await second.allocateWaybillNumber();
+    const replacementArtifacts = input.artifacts.map(item => ({ ...item, id: randomUUID(), waybillId: replacementId,
+      storageKey: `${item.storageKey}-replacement-${database.runId}` }));
+    const replacementInput = { waybillId: predecessor.id,
+      allocationRevisionId: predecessor.candidate.allocationRevisionId, expectedSourceIntegrityHash: '6'.repeat(64),
+      waybillSnapshot: { predecessorId: predecessor.id, candidateId: predecessor.candidateId },
+      replacement: { id: replacementId, number: replacementNumber, status: 'ISSUED' as const,
+        issuedAt: new Date().toISOString(), replacesWaybillId: predecessor.id }, artifacts: replacementArtifacts,
+      reason: 'concurrent replacement', idempotencyKey: `replace-${database.runId}`, actorId: actor.id,
+      correlationId: `replace-${database.runId}`, authority: { actorRole: 'ADMIN', workspace: 'accounting' },
+      intentFingerprint: createHash('sha256').update(`replace-${database.runId}`).digest('hex') };
+    const exitService = new PhysicalGateExitService(firstRaw, { now: () => new Date() });
+    const lifecycleResults = await Promise.allSettled([
+      exitService.recordExit({ authorizationId: authorization.id, actorId: actor.id,
+        effectiveAuthority: { actorRole: 'SECURITY', workspace: 'security' } }),
+      second.replaceWaybill(replacementInput),
+    ]);
+    assert.equal(lifecycleResults.filter(result => result.status === 'fulfilled').length, 1,
+      'only one production Guard exit or document replacement may commit');
+    const [exit, replacement] = await Promise.all([
+      observer.guardPhysicalExit.findUnique({ where: { authorizationId: authorization.id } }),
+      observer.accountingDispatchWaybill.findUnique({ where: { id: replacementId } }),
+    ]);
+    assert.notEqual(Boolean(exit), Boolean(replacement), 'production lifecycle race persists exactly one winner');
+    assert.equal(await observer.dispatchLifecycleAudit.count({ where: exit
+      ? { aggregateType: 'GUARD_PHYSICAL_EXIT', aggregateId: exit.id, eventType: 'PHYSICAL_EXIT_RECORDED' }
+      : { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: predecessor.id, eventType: 'DOCUMENT_BUNDLE_REPLACED' } }), 1);
+
+    console.log(JSON.stringify({ kind: 'issue260-production-issuance-concurrency-proof', runId: database.runId,
+      temporaryDatabase: database.databaseName, scenarios: ['accept-vs-reject-or-successor',
+        'issuance-idempotency-artifact-commit-retry', 'void-or-replace-vs-guard-exit'],
       observedTransactionErrors: [...firstErrors, ...secondErrors], issuedWaybills: 1, issuedArtifacts: 2,
-      commandResults: 1, issuanceAudits: 1 }));
+      commandResults: 1, issuanceAudits: 1, artifactFailureRolledBack: true,
+      decisionWinner: 'ACCEPTED', decisionCommandResults: 1,
+      lifecycleWinner: exit ? 'GUARD_EXIT' : 'REPLACEMENT', unknownResponseInjectedAfterCommit: true }));
   } finally {
     if (previousGate === undefined) delete process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED;
     else process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED = previousGate;

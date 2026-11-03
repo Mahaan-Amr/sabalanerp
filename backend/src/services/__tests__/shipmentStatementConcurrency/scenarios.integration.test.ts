@@ -1,16 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { Prisma } from '@prisma/client';
 import { bindFinalizedAllocationPricing } from '../../allocationPricingBinding';
 import { createPrismaAllocationPricingBindingPort } from '../../allocationPricingPrismaAdapter';
-import { assessBoundAllocationPricingFreshness } from '../../allocationPricingReadModel';
-import { PrismaApprovedPricingRepository } from '../../approvedPricing/prismaRepository';
-import { verifyDispatchArtifactStorageUnderLock } from '../../dispatchDocuments/artifactStorageLock';
 import { TwoPartyBarrier } from './barrier';
 import { createTemporaryConcurrencyDatabase } from './database';
-import { advanceConcurrentPricingVersion, createConcurrentPricingFixture } from './pricingFixture';
+import { createConcurrentPricingFixture } from './pricingFixture';
 import { runSerializableWithRetry } from './retry';
 import { ConcurrencyTrace, type ScenarioResult } from './trace';
 
@@ -60,30 +56,26 @@ const run = async () => {
     results.push({ name: 'competing-finalizations-scale-twelve-remainder', repetitions: 1, anomalies: [],
       durationMs: Number((performance.now() - started).toFixed(3)) });
 
-    const pricingRaceBarrier = new TwoPartyBarrier('pricing-replacement-vs-accounting-freshness', 10_000);
-    const financialAdvance = runSerializableWithRetry({ client: first, actor: `${fixture.actorId}-financial`,
-      scenario: 'financial-approval-vs-finalization-and-acceptance', trace, work: async (tx, attempt) => {
-        if (attempt === 1) await pricingRaceBarrier.arrive('financial');
-        return new PrismaApprovedPricingRepository(tx).withContractLock(fixture.item.contractId,
-          () => advanceConcurrentPricingVersion(tx, fixture, database.runId));
-      } });
-    const accountingFreshness = runSerializableWithRetry({ client: second, actor: `${fixture.actorId}-accounting`,
-      scenario: 'financial-approval-vs-finalization-and-acceptance', trace, work: async (tx, attempt) => {
-        if (attempt === 1) await pricingRaceBarrier.arrive('accounting');
-        await createPrismaAllocationPricingBindingPort(tx).lockPricingScope([
-          `APPROVED_PRICING_HEAD:${fixture.item.contractId}`,
-        ]);
-        return assessBoundAllocationPricingFreshness(tx, fixture.lines[0].revisionId);
-      } });
-    const [advancedVersionId, freshnessAtCommit] = await Promise.all([financialAdvance, accountingFreshness]);
-    assert.ok(['CURRENT', 'STALE_REQUIRES_SUCCESSOR'].includes(freshnessAtCommit.status),
-      'Accounting observes either the old head before replacement commits or the new head after it commits');
-    assert.equal((await observer.contractApprovedPricingHead.findUniqueOrThrow({
-      where: { contractId: fixture.item.contractId } })).currentVersionId, advancedVersionId);
-    assert.equal((await observer.$transaction(tx => assessBoundAllocationPricingFreshness(tx,
-      fixture.lines[0].revisionId), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })).status,
-    'STALE_REQUIRES_SUCCESSOR', 'a committed pricing replacement makes the earlier bound allocation stale');
-    results.push({ name: 'financial-approval-vs-finalization-and-acceptance', repetitions: 1, anomalies: [] });
+    const financialStarted = performance.now();
+    const financialRun = spawnSync(process.execPath, [path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      path.resolve(process.cwd(), 'src', 'services', '__tests__', 'shipmentStatementConcurrency',
+        'productionFinancialLogistics.test.ts')], { cwd: process.cwd(), encoding: 'utf8', timeout: 120_000,
+      env: { ...process.env, DATABASE_URL: database.databaseUrl, CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'true' } });
+    assert.equal(financialRun.error, undefined, `financial/logistics production subprocess failed: ${financialRun.error?.message || ''}`);
+    assert.equal(financialRun.signal, null, `financial/logistics production subprocess timed out or was killed: ${financialRun.signal || ''}`);
+    assert.equal(financialRun.status, 0, `financial/logistics production subprocess failed\n${financialRun.stdout}\n${financialRun.stderr}`);
+    const financialProof = financialRun.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+      .map(line => { try { return JSON.parse(line) as Record<string, unknown>; } catch { return null; } })
+      .find(line => line?.kind === 'issue260-financial-logistics-production-proof');
+    assert.ok(financialProof, `financial/logistics production proof was not emitted\n${financialRun.stdout}`);
+    assert.equal(financialProof.finalBinding, 'ATOMIC_WAYBILL_STATEMENT');
+    assert.ok(['ACCEPTED', 'STALE_REQUIRES_SUCCESSOR'].includes(String(financialProof.acceptanceStatus)));
+    const financialDurationMs = Number((performance.now() - financialStarted).toFixed(3));
+    for (const scenario of ['financial-approval-vs-finalization', 'pricing-replacement-vs-accounting-acceptance']) {
+      trace.record({ scenario, actor: 'production-financial-logistics-seams', phase: 'two-connection-race',
+        outcome: 'zero-anomaly', detail: { ...financialProof, durationMs: financialDurationMs } });
+      results.push({ name: scenario, repetitions: 1, anomalies: [], durationMs: financialDurationMs });
+    }
 
     const lockContracts = await observer.salesContract.findMany({ select: { id: true }, orderBy: { id: 'asc' }, take: 2 });
     assert.equal(lockContracts.length, 2, 'Deadlock retry diagnostic requires two production contract rows.');
@@ -103,120 +95,29 @@ const run = async () => {
       deadlockDiagnostic(second, `${fixture.actorId}-deadlock-b`, true)]), [true, true]);
     results.push({ name: 'retry-after-deadlock', repetitions: 1, anomalies: [] });
 
-    const candidate = await observer.accountingDispatchCandidate.findFirst({ where: { waybills: { none: {} } }, orderBy: { id: 'asc' } });
-    assert.ok(candidate, 'Concurrency snapshot requires a candidate without a waybill.');
-    await observer.accountingDispatchCandidate.update({ where: { id: candidate.id }, data: { status: 'PENDING',
-      dispositionAt: null, dispositionBy: null, dispositionReason: null } });
-    const decisionBarrier = new TwoPartyBarrier('accept-vs-reject', 10_000);
-    const decide = (client: typeof first, actor: string, status: 'ACCEPTED' | 'REJECTED') => runSerializableWithRetry({
-      client, actor, scenario: 'accept-vs-reject-or-successor', trace, work: async (tx, attempt) => {
-        const observed = await tx.accountingDispatchCandidate.findUniqueOrThrow({ where: { id: candidate.id }, select: { status: true } });
-        if (attempt === 1) await decisionBarrier.arrive(actor);
-        if (observed.status !== 'PENDING') return false;
-        const changed = await tx.accountingDispatchCandidate.updateMany({ where: { id: candidate.id, status: 'PENDING' },
-          data: { status, dispositionAt: new Date(), dispositionBy: actor, dispositionReason: status } });
-        if (changed.count === 1) await tx.dispatchLifecycleAudit.create({ data: { id: `${database.runId}-${status.toLowerCase()}`,
-          aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id, eventType: `CONCURRENCY_${status}`,
-          payload: { runId: database.runId }, actorId: actor, eventHash: `${status === 'ACCEPTED' ? 'c' : 'd'}${database.runId.padEnd(63, '0')}`.slice(0, 64) } });
-        return changed.count === 1;
-      } });
-    const decisions = await Promise.all([decide(first, `${fixture.actorId}-accept`, 'ACCEPTED'),
-      decide(second, `${fixture.actorId}-reject`, 'REJECTED')]);
-    assert.equal(decisions.filter(Boolean).length, 1, 'only one terminal candidate decision commits');
-    assert.equal(await observer.dispatchLifecycleAudit.count({ where: { aggregateId: candidate.id,
-      eventType: { in: ['CONCURRENCY_ACCEPTED', 'CONCURRENCY_REJECTED'] } } }), 1, 'losing decision emits no audit event');
-    results.push({ name: 'accept-vs-reject-or-successor', repetitions: 1, anomalies: [] });
-
-    const waybill = await observer.accountingDispatchWaybill.findFirst({ where: { status: 'ISSUED', physicalExit: null,
-      manualOutageExit: null, replacementWaybill: null }, orderBy: { id: 'asc' } });
-    assert.ok(waybill, 'Concurrency snapshot requires one unexited waybill.');
-    const lifecycleBarrier = new TwoPartyBarrier('void-replace-vs-guard-exit', 10_000);
-    const transition = (client: typeof first, actor: string, status: 'VOIDED' | 'EXIT_RECORDED') => runSerializableWithRetry({
-      client, actor, scenario: 'void-or-replace-vs-guard-exit', trace, work: async (tx, attempt) => {
-        const observed = await tx.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybill.id }, select: { status: true } });
-        if (attempt === 1) await lifecycleBarrier.arrive(actor);
-        if (observed.status !== 'ISSUED') return false;
-        const changed = await tx.accountingDispatchWaybill.updateMany({ where: { id: waybill.id, status: 'ISSUED' }, data: { status } });
-        if (changed.count === 1) await tx.dispatchLifecycleAudit.create({ data: { id: `${database.runId}-${status.toLowerCase()}`,
-          aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id, eventType: `CONCURRENCY_${status}`,
-          payload: { runId: database.runId }, actorId: actor,
-          eventHash: createHash('sha256').update(`${database.runId}:${status}`).digest('hex') } });
-        return changed.count === 1;
-      } });
-    const transitions = await Promise.all([transition(first, `${fixture.actorId}-documents`, 'VOIDED'),
-      transition(second, `${fixture.actorId}-guard`, 'EXIT_RECORDED')]);
-    assert.equal(transitions.filter(Boolean).length, 1, 'void/replacement and Guard exit cannot both win');
-    assert.equal(await observer.dispatchLifecycleAudit.count({ where: { aggregateId: waybill.id,
-      eventType: { in: ['CONCURRENCY_VOIDED', 'CONCURRENCY_EXIT_RECORDED'] } } }), 1);
-    results.push({ name: 'void-or-replace-vs-guard-exit', repetitions: 1, anomalies: [] });
-
-    const artifactBytes = new TextEncoder().encode(`dispatch-bundle-${database.runId}`);
-    const artifact = { id: `concurrency-artifact-${database.runId}`, waybillId: waybill.id, kind: 'WAYBILL' as const,
-      templateVersion: 'concurrency-v1', storageKey: `dispatch-documents/concurrency-${database.runId}.pdf`,
-      mediaType: 'application/pdf', byteLength: artifactBytes.byteLength,
-      sha256: createHash('sha256').update(artifactBytes).digest('hex'), sourceIntegrityHash: '3'.repeat(64),
-      publishedBy: fixture.actorId };
-    const storage = { stage: async () => undefined, read: async (key: string) => key === artifact.storageKey ? artifactBytes : null };
-    const operationKey = `issue-${database.runId}`;
-    const intentFingerprint = createHash('sha256').update(`${candidate.id}:atomic-bundle`).digest('hex');
-    const rollbackMarker = new Error('intentional database commit failure');
-    await assert.rejects(() => observer.$transaction(async tx => {
-      await verifyDispatchArtifactStorageUnderLock({ transaction: tx, storage, artifacts: [artifact] });
-      await tx.dispatchDocumentArtifact.create({ data: artifact });
-      await tx.dispatchDocumentCommandResult.create({ data: { scope: 'CANDIDATE', scopeId: candidate.id,
-        idempotencyKey: operationKey, command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED',
-        result: { intentFingerprint, value: { artifactId: artifact.id } }, actorId: fixture.actorId,
-        correlationId: `rollback-${database.runId}`, completedAt: new Date() } });
-      throw rollbackMarker;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), error => error === rollbackMarker);
-    assert.equal(await observer.dispatchDocumentArtifact.count({ where: { id: artifact.id } }), 0,
-      'database commit failure retains neither artifact metadata nor command result');
-    assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id,
-      idempotencyKey: operationKey } }), 0);
-
-    const issuanceBarrier = new TwoPartyBarrier('same-idempotency-key-issuance', 10_000);
-    const issue = (client: typeof first, actor: string, idempotencyKey: string, fingerprint: string, coordinate = false) => runSerializableWithRetry({
-      client, actor, scenario: 'issuance-idempotency-artifact-commit-retry', trace,
-      retryWhen: error => idempotencyKey === operationKey && (error as { code?: string })?.code === 'P2002',
-      work: async (tx, attempt) => {
-        if (attempt === 1 && coordinate) await issuanceBarrier.arrive(actor);
-        await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))',
-          `ACCOUNTING_DISPATCH_CANDIDATE:${candidate.id}`);
-        const prior = await tx.dispatchDocumentCommandResult.findUnique({ where: { scope_scopeId_idempotencyKey: {
-          scope: 'CANDIDATE', scopeId: candidate.id, idempotencyKey } } });
-        if (prior) {
-          const envelope = prior.result as { intentFingerprint?: string; value?: { artifactId?: string } };
-          if (prior.command !== 'ACCEPT_AND_ISSUE' || envelope.intentFingerprint !== fingerprint) throw new Error('IDEMPOTENCY_INTENT_CONFLICT');
-          return envelope.value!;
-        }
-        await verifyDispatchArtifactStorageUnderLock({ transaction: tx, storage, artifacts: [artifact] });
-        await tx.dispatchDocumentArtifact.create({ data: artifact });
-        const value = { artifactId: artifact.id };
-        await tx.dispatchDocumentCommandResult.create({ data: { scope: 'CANDIDATE', scopeId: candidate.id,
-          idempotencyKey, command: 'ACCEPT_AND_ISSUE', status: 'SUCCEEDED', result: { intentFingerprint: fingerprint, value },
-          actorId: actor, correlationId: actor, completedAt: new Date() } });
-        await tx.dispatchLifecycleAudit.create({ data: { id: `issuance-audit-${database.runId}`,
-          aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id, eventType: 'CONCURRENCY_PRIMARY_BUNDLE_ISSUED',
-          payload: { idempotencyKey, artifactId: artifact.id }, actorId: actor,
-          eventHash: createHash('sha256').update(`${database.runId}:issuance`).digest('hex') } });
-        return value;
-      } });
-    const sameKey = await Promise.all([issue(first, `${fixture.actorId}-issue-a`, operationKey, intentFingerprint, true),
-      issue(second, `${fixture.actorId}-issue-b`, operationKey, intentFingerprint, true)]);
-    assert.deepEqual(sameKey[0], sameKey[1], 'same-key retry replays the exact persisted issuance result');
-    const unknownResponseReplay = await issue(first, `${fixture.actorId}-unknown-response-retry`, operationKey, intentFingerprint);
-    assert.deepEqual(unknownResponseReplay, sameKey[0]);
-    assert.equal(await observer.dispatchDocumentArtifact.count({ where: { id: artifact.id } }), 1);
-    assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id,
-      idempotencyKey: operationKey } }), 1);
-    assert.equal(await observer.dispatchLifecycleAudit.count({ where: { eventType: 'CONCURRENCY_PRIMARY_BUNDLE_ISSUED',
-      aggregateId: waybill.id } }), 1);
-    await assert.rejects(() => issue(second, `${fixture.actorId}-different-key`, `${operationKey}-different`,
-      createHash('sha256').update(`${candidate.id}:different-intent`).digest('hex')),
-    error => (error as { code?: string }).code === 'P2002' || /unique constraint/i.test(String(error)));
-    assert.equal(await observer.dispatchDocumentCommandResult.count({ where: { scope: 'CANDIDATE', scopeId: candidate.id,
-      idempotencyKey: `${operationKey}-different` } }), 0, 'different-key duplicate bundle leaves no partial command result');
-    results.push({ name: 'issuance-idempotency-artifact-commit-retry', repetitions: 1, anomalies: [] });
+    const issuanceStarted = performance.now();
+    const issuanceRun = spawnSync(process.execPath, [path.resolve(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      path.resolve(process.cwd(), 'src', 'services', '__tests__', 'dispatchDocumentsIssuanceConcurrency.test.ts')], {
+      cwd: process.cwd(), encoding: 'utf8', timeout: 120_000, env: { ...process.env, DATABASE_URL: sourceDatabaseUrl },
+    });
+    assert.equal(issuanceRun.error, undefined, `production issuance subprocess failed: ${issuanceRun.error?.message || ''}`);
+    assert.equal(issuanceRun.signal, null, `production issuance subprocess timed out or was killed: ${issuanceRun.signal || ''}`);
+    assert.equal(issuanceRun.status, 0, `production issuance subprocess failed\n${issuanceRun.stdout}\n${issuanceRun.stderr}`);
+    const issuanceProof = issuanceRun.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+      .map(line => { try { return JSON.parse(line) as Record<string, unknown>; } catch { return null; } })
+      .find(line => line?.kind === 'issue260-production-issuance-concurrency-proof');
+    assert.ok(issuanceProof, `production issuance proof was not emitted\n${issuanceRun.stdout}`);
+    assert.equal(issuanceProof.unknownResponseInjectedAfterCommit, true);
+    assert.equal(issuanceProof.decisionWinner, 'ACCEPTED');
+    assert.ok(['GUARD_EXIT', 'REPLACEMENT'].includes(String(issuanceProof.lifecycleWinner)));
+    assert.equal(issuanceProof.issuedWaybills, 1);
+    assert.equal(issuanceProof.issuedArtifacts, 2);
+    const issuanceDurationMs = Number((performance.now() - issuanceStarted).toFixed(3));
+    trace.record({ scenario: 'issuance-idempotency-artifact-commit-retry', actor: 'dispatchDocuments-production-seam',
+      phase: 'same-key-and-unknown-response', outcome: 'zero-anomaly', detail: { ...issuanceProof, durationMs: issuanceDurationMs } });
+    results.push({ name: 'issuance-idempotency-artifact-commit-retry', repetitions: 1, anomalies: [], durationMs: issuanceDurationMs });
+    results.push({ name: 'accept-vs-reject-or-successor', repetitions: 1, anomalies: [], durationMs: issuanceDurationMs });
+    results.push({ name: 'void-or-replace-vs-guard-exit', repetitions: 1, anomalies: [], durationMs: issuanceDurationMs });
 
     const adjustmentStarted = performance.now();
     trace.record({ scenario: 'concurrent-correction-adjustment-sequence-posting', actor: 'issue262-production-seam',

@@ -1,0 +1,14 @@
+[
+  {
+    "sha256": "b5ea90ba1fd1c3779635ec8f8461d99fd9f495d9be100ad411cd0555bfb20612",
+    "path": "backend/src/services/versionedFilePublication.ts"
+  },
+  {
+    "sha256": "cd84b657379b306bd7a57f9324bdd02cdbbee2139fa2fce3fdb6f4d00b73bfab",
+    "path": "backend/src/services/hrVersionedFileTransaction.ts"
+  },
+  {
+    "sha256": "4c78693053514233f0157b3d352de168945467b54227893c8f451d9aedf16c49",
+    "path": "tests/online-deployment/versioned-file-move.fixture.cjs"
+  }
+]

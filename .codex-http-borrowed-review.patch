@@ -1,0 +1,573 @@
+diff --git a/backend/src/services/httpRequestLifecycle.ts b/backend/src/services/httpRequestLifecycle.ts
+index 35c06303..fa9cca66 100644
+--- a/backend/src/services/httpRequestLifecycle.ts
++++ b/backend/src/services/httpRequestLifecycle.ts
+@@ -1,6 +1,7 @@
+ import type { Application, NextFunction, Request, RequestHandler, Response } from 'express';
+ 
+-type RequestOwnership = { release(): void | Promise<void> };
++type OwnedCallback = { run<T>(body: () => T): T; release(): void };
++type RequestOwnership = { release(): void | Promise<void>; run?<T>(body: () => T): T; reserve?(): OwnedCallback };
+ type RequestWork = { responseDone: boolean; mutation: boolean; writeAdmitted: boolean; writes: number; handlers: Set<symbol>; onFinish: Set<() => void>;
+   ownership?: RequestOwnership; releasing?: boolean; ownershipFailed?: boolean };
+ type WriteReservation = { run<T>(work: () => Promise<T>): Promise<T>; cancel(): void };
+@@ -51,7 +52,9 @@ export class HttpRequestLifecycle {
+     // while the kernel/journal admission is pending. It cannot outlive drain.
+     void Promise.resolve().then(() => this.acquireOwnership!(req)).then(ownership => {
+       work.ownership = ownership;
+-      if (!req.aborted && !res.destroyed) next();
++      if (!req.aborted && !res.destroyed) {
++        if (ownership.run) ownership.run(() => next()); else next();
++      }
+     }, next).then(() => {
+       work.handlers.delete(admission); this.releaseIfDone(work);
+     }, error => {
+@@ -78,17 +81,19 @@ export class HttpRequestLifecycle {
+         code: 'RECOVERY_WRITE_ADMISSION_CLOSED', status: 503, statusCode: 503, isOperational: true,
+       });
+     }
++    const ownedCallback = work.ownership?.reserve?.();
+     const token = Symbol();
+     work.handlers.add(token);
+     work.writes += 1;
+     this.active.add(work);
+     let consumed = false;
+-    const release = () => { work.writes -= 1; work.handlers.delete(token); this.releaseIfDone(work); };
++    const release = () => { work.writes -= 1; work.handlers.delete(token); ownedCallback?.release(); this.releaseIfDone(work); };
+     return {
+       run: async execute => {
+         if (consumed) throw new Error('HTTP_WRITE_RESERVATION_CONSUMED');
+         consumed = true;
+-        try { return await execute(); } finally { release(); }
++        try { return await (ownedCallback ? ownedCallback.run(execute) : work.ownership?.run ? work.ownership.run(execute) : execute()); }
++        finally { release(); }
+       },
+       cancel: () => { if (!consumed) { consumed = true; release(); } },
+     };
+@@ -124,7 +129,8 @@ export class HttpRequestLifecycle {
+       try { next(error); } finally { if (returned && !promise) release(); }
+     };
+     try {
+-      const result = handler.apply(receiver, [...parameters, proceed]);
++      const execute = () => handler.apply(receiver, [...parameters, proceed]);
++      const result = work.ownership?.run ? work.ownership.run(execute) : execute();
+       returned = true;
+       promise = result !== null && result !== undefined && typeof result.then === 'function';
+       if (promise) {
+diff --git a/backend/src/services/onlineRuntimeWork.ts b/backend/src/services/onlineRuntimeWork.ts
+index 2d9c1026..b0106d92 100644
+--- a/backend/src/services/onlineRuntimeWork.ts
++++ b/backend/src/services/onlineRuntimeWork.ts
+@@ -78,5 +78,5 @@ export async function createScopedRuntimeWork(configuration: WorkInput): Promise
+     if (input.scope.purpose !== 'http') throw failure('RUNTIME_HTTP_OWNERSHIP_REQUIRED');
+     assertOwner();
+   };
+-  return new RuntimeWorkBoundary(tasks, runtimeHttpRequests, assertWorker, assertHttp);
++  return new RuntimeWorkBoundary(tasks, runtimeHttpRequests, assertWorker, assertHttp, assertOwner);
+ }
+diff --git a/backend/src/services/runtimeWorkBoundary.ts b/backend/src/services/runtimeWorkBoundary.ts
+index fd9f2e0a..01b29dfc 100644
+--- a/backend/src/services/runtimeWorkBoundary.ts
++++ b/backend/src/services/runtimeWorkBoundary.ts
+@@ -1,6 +1,7 @@
+ import type { RequestHandler } from 'express';
+ import { HttpRequestLifecycle } from './httpRequestLifecycle';
+ import { RuntimeTaskAdmission } from './runtimeTaskAdmission';
++import { RuntimeLeasedWorkContext } from './runtimeLeasedWorkContext';
+ 
+ const unavailable = () => Object.assign(new Error('RUNTIME_WORK_ADMISSION_CLOSED'), {
+   code: 'RUNTIME_WORK_ADMISSION_CLOSED', status: 503, statusCode: 503, isOperational: true,
+@@ -18,9 +19,12 @@ const unavailable = () => Object.assign(new Error('RUNTIME_WORK_ADMISSION_CLOSED
+ export class RuntimeWorkBoundary {
+   private accepting = true;
+   readonly requests: HttpRequestLifecycle;
++  readonly context: RuntimeLeasedWorkContext;
+ 
+   constructor(private readonly tasks: RuntimeTaskAdmission, admission: (() => boolean) | HttpRequestLifecycle,
+-    private readonly assertBackgroundOwner: () => void, private readonly assertHttpOwner: () => void = () => {}) {
++    private readonly assertBackgroundOwner: () => void, private readonly assertHttpOwner: () => void = () => {},
++    assertWorkOwner: () => void = assertBackgroundOwner) {
++    this.context = new RuntimeLeasedWorkContext(tasks, assertWorkOwner);
+     if (admission instanceof HttpRequestLifecycle) {
+       admission.bindOwnership(() => this.acquireHttp());
+       this.requests = admission;
+@@ -32,16 +36,10 @@ export class RuntimeWorkBoundary {
+ 
+   private async acquireHttp() {
+     this.assertHttpOwner();
+-    const lease = await this.acquire();
+-    try { this.assertHttpOwner(); }
+-    catch (error) { await lease.release(); throw error; }
+-    return lease;
+-  }
+-
+-  private async acquire() {
+     if (!this.accepting) throw unavailable();
+-    const lease = await this.tasks.acquire();
+-    if (!this.accepting) { await lease.release(); throw unavailable(); }
++    const lease = await this.context.acquireOwned();
++    try { this.assertHttpOwner(); if (!this.accepting) throw unavailable(); }
++    catch (error) { await lease.release(); throw error; }
+     return lease;
+   }
+ 
+@@ -61,11 +59,10 @@ export class RuntimeWorkBoundary {
+    * detached timer/provider promise as an already completed callback here. */
+   async runBackground<T>(work: () => Promise<T>): Promise<T> {
+     this.assertBackgroundOwner();
+-    const lease = await this.acquire();
+-    try {
++    return this.context.run(async () => {
+       this.assertBackgroundOwner();
+       return await work();
+-    } finally { await lease.release(); }
++    });
+   }
+ 
+   async stopAndDrain(timeoutMs: number) {
+diff --git a/scripts/run-online-scoped-work-local.mjs b/scripts/run-online-scoped-work-local.mjs
+index e21466c0..8c6c0c77 100644
+--- a/scripts/run-online-scoped-work-local.mjs
++++ b/scripts/run-online-scoped-work-local.mjs
+@@ -65,7 +65,7 @@ assert.ok(closureFunction, 'actual protected release/rollback boundary function
+ files['streamed-closure.fixture.sh'] = Buffer.from('run_backend() { "$@"; }\n' + closureFunction + '\nassert_native_runtime_closed\n');
+ files['deploy/scripts/backend-runtime-owner.py'] = files['backend-runtime-owner.py'];
+ for (const [name, source] of [[ 'services/onlineRuntimeWork.js', 'backend/src/services/onlineRuntimeWork.ts'],
+-  ...['onlineCaptureAdmission', 'kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkBoundary', 'httpRequestLifecycle', 'durableUpload', 'durableFilePublication'].map(name => ['services/' + name + '.js', 'backend/src/services/' + name + '.ts']),
++  ...['onlineCaptureAdmission', 'kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext', 'runtimeLeasedWorkContext', 'runtimeWorkBoundary', 'httpRequestLifecycle', 'durableUpload', 'durableFilePublication'].map(name => ['services/' + name + '.js', 'backend/src/services/' + name + '.ts']),
+   ['lib/prisma.js', 'backend/src/lib/prisma.ts'],
+   ['services/runtimeControlOwnership.js', 'backend/src/services/runtimeControlOwnership.ts'],
+   ['services/onlineRuntimeScope.js', 'backend/src/services/onlineRuntimeScope.ts'],
+diff --git a/scripts/run-runtime-request-database-local.mjs b/scripts/run-runtime-request-database-local.mjs
+index 3fc752f2..c4a1624d 100644
+--- a/scripts/run-runtime-request-database-local.mjs
++++ b/scripts/run-runtime-request-database-local.mjs
+@@ -47,7 +47,7 @@ const volumes = slots.map(value => {
+ assert.equal(volumes[0], volumes[1]);
+ const operation = 'request-database-' + randomBytes(16).toString('hex');
+ const directory = '/app/online-runtime-acceptance/' + operation;
+-const files = Object.fromEntries(['kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'httpRequestLifecycle', 'runtimeWorkBoundary', 'runtimeDatabaseBoundary'].map(name =>
++const files = Object.fromEntries(['kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext', 'runtimeLeasedWorkContext', 'httpRequestLifecycle', 'runtimeWorkBoundary', 'runtimeDatabaseBoundary'].map(name =>
+   [name + '.js', fs.readFileSync(path.join(backendDist, 'services', name + '.js'))]));
+ files['worker.cjs'] = fs.readFileSync(path.join(root, 'tests/online-deployment/runtime-request-database.worker.cjs'));
+ const scopes = slots.map(value => ({ runtimeId: randomBytes(32).toString('hex'), image: value.Image,
+@@ -143,9 +143,11 @@ await call(0, 'refused-http', { reference: 'retiring-refused' });
+ assert.equal((await rows()).length, 2); assert.equal((await call(1, 'exclusive')).acquired, false);
+ await call(0, 'finish', { reference: 'lost-response' }); await call(0, 'drain', { timeoutMs: 1000 });
+ assert.equal((await rows()).length, 3); assert.equal((await call(1, 'exclusive')).acquired, true);
+-await call(1, 'refused-http', { reference: 'boundary-refused' }); assert.equal((await rows()).length, 3);
++const waiting = await call(1, 'waiting-http', { reference: 'fresh-response' });
++assert.equal(waiting.handlerEntered, false); assert.equal(waiting.answered, false);
++assert.equal(waiting.snapshot.phase, 'QUIESCENT'); assert.equal((await rows()).length, 3);
+ await call(1, 'unlock');
+-await call(1, 'begin', { reference: 'fresh-response', mode: 'early' }); await call(1, 'finish', { reference: 'fresh-response' });
++await call(1, 'await-http-entry', { reference: 'fresh-response' }); await call(1, 'finish', { reference: 'fresh-response' });
+ await call(1, 'drain', { timeoutMs: 1000 });
+ const expected = [
+   { id: 'background', runtime_id: second.scope.runtimeId, amount: '123456789.12345678', quantity: '0.00000001' },
+diff --git a/tests/online-deployment/runtime-request-database.worker.cjs b/tests/online-deployment/runtime-request-database.worker.cjs
+index f71f0ab8..267d6c80 100644
+--- a/tests/online-deployment/runtime-request-database.worker.cjs
++++ b/tests/online-deployment/runtime-request-database.worker.cjs
+@@ -91,6 +91,22 @@ async function run(command) {
+       const result = await value.response.promise; assert.equal(result.status, 503); assert.equal(handlers, before);
+       return { status: result.status, handlerEntered: false };
+     }
++    case 'waiting-http': {
++      // Control commands must remain available while a new HTTP admission
++      // waits outside an actual EX capture. Do not await this response here.
++      const before = handlers, value = item(command.reference, 'early');
++      let answered = false; void value.response.promise.then(() => { answered = true; });
++      value.client = request(value);
++      await new Promise(resolve => setTimeout(resolve, 30));
++      assert.equal(handlers, before); assert.equal(answered, false);
++      return { handlerEntered: false, answered: false, snapshot: await journal.inspect() };
++    }
++    case 'await-http-entry': {
++      const value = work.get(command.reference); assert.ok(value);
++      await Promise.race([value.entered.promise, value.done.promise.then(() => { throw value.error || Error('WORK_ENDED_BEFORE_ENTRY'); })]);
++      assert.equal((await value.response.promise).status, 202);
++      return { entered: true };
++    }
+     case 'snapshot': return journal.inspect();
+     case 'drain': await boundary.stopAndDrain(command.timeoutMs); return {};
+     case 'exclusive': {
+diff --git a/backend/src/services/runtimeLeasedWorkContext.ts b/backend/src/services/runtimeLeasedWorkContext.ts
+new file mode 100644
+--- /dev/null
++++ b/backend/src/services/runtimeLeasedWorkContext.ts
+@@ -0,0 +1,81 @@
++import { AsyncLocalStorage } from 'node:async_hooks';
++import { RuntimeWorkContext } from './runtimeWorkContext';
++import type { RuntimeTaskAdmission } from './runtimeTaskAdmission';
++
++type LeasedWork = { active: boolean; pending: Set<Promise<unknown>> };
++const fail = () => Object.assign(new Error('RUNTIME_LEASED_WORK_NOT_ACTIVE'), { code: 'RUNTIME_LEASED_WORK_NOT_ACTIVE' });
++
++/** Share an actual acquired request reference with nested storage work. A
++ * caller cannot supply a fabricated lease: this owner acquires it itself.
++ * Request completion still belongs to HttpRequestLifecycle; release waits for
++ * even ignored nested promises before releasing the real admission reference. */
++export class RuntimeLeasedWorkContext extends RuntimeWorkContext {
++  private readonly leasedStorage = new AsyncLocalStorage<LeasedWork>();
++
++  constructor(private readonly admission: RuntimeTaskAdmission, private readonly owner: () => void) {
++    super(admission, owner);
++  }
++
++  override assertActive() {
++    const work = this.leasedStorage.getStore();
++    if (!work?.active) return super.assertActive();
++    this.owner();
++  }
++
++  override run<T>(body: () => Promise<T>): Promise<T> {
++    const work = this.leasedStorage.getStore();
++    if (!work?.active) return super.run(body);
++    const child = Promise.resolve().then(() => { this.owner(); return body(); });
++    work.pending.add(child);
++    void child.then(() => work.pending.delete(child), () => work.pending.delete(child));
++    return child;
++  }
++
++  async acquireOwned() {
++    this.owner();
++    const lease = await this.admission.acquire();
++    try { this.owner(); }
++    catch (error) { await lease.release(); throw error; }
++    const work: LeasedWork = { active: true, pending: new Set() };
++    let releasing = false;
++    const invoke = <T>(body: () => T, reserved = false): T => {
++      if (!work.active || (!reserved && releasing && this.leasedStorage.getStore() !== work)) throw fail();
++      this.owner();
++      return this.leasedStorage.run(work, () => {
++        const value = body();
++        if (value !== null && value !== undefined && typeof (value as any).then === 'function') {
++          const observed = Promise.resolve(value);
++          work.pending.add(observed);
++          void observed.then(() => work.pending.delete(observed), () => work.pending.delete(observed));
++        }
++        return value;
++      });
++    };
++    return {
++      run: <T>(body: () => T): T => invoke(body),
++      reserve: () => {
++        // A future callback is reserved by an already admitted descendant,
++        // never by an external late callback reviving an answered request.
++        if (!work.active || this.leasedStorage.getStore() !== work) throw fail();
++        this.owner();
++        let complete!: () => void, released = false;
++        const marker = new Promise<void>(resolve => { complete = resolve; });
++        work.pending.add(marker);
++        return {
++          run: <T>(body: () => T): T => { if (released) throw fail(); return invoke(body, true); },
++          release: () => {
++            if (released) throw fail();
++            released = true; work.pending.delete(marker); complete();
++          },
++        };
++      },
++      release: async () => {
++        if (!work.active || releasing) throw fail();
++        releasing = true;
++        while (work.pending.size) await Promise.allSettled([...work.pending]);
++        work.active = false;
++        await lease.release();
++      },
++    };
++  }
++}
+diff --git a/scripts/run-runtime-shared-file-work-local.mjs b/scripts/run-runtime-shared-file-work-local.mjs
+new file mode 100644
+--- /dev/null
++++ b/scripts/run-runtime-shared-file-work-local.mjs
+@@ -0,0 +1,86 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import path from 'node:path';
++import { execFileSync, spawn } from 'node:child_process';
++import { randomBytes, createHash } from 'node:crypto';
++import { createRequire } from 'node:module';
++const require = createRequire(import.meta.url);
++
++const root = path.resolve(import.meta.dirname, '..');
++const canonical = process.env.SABALAN_LOCAL_REPOSITORY_ROOT || 'D:/sabalanerp';
++const compose = ['compose', '-f', path.join(canonical, 'docker-compose.local.yml')];
++function verify() {
++  const output = execFileSync('docker', [...compose, 'ps', '--format', 'json'], { encoding: 'utf8' });
++  let rows;
++  try { const parsed = JSON.parse(output); rows = Array.isArray(parsed) ? parsed : [parsed]; }
++  catch { rows = output.trim().split(/\r?\n/).map(line => JSON.parse(line)); }
++  for (const name of ['backend', 'frontend', 'postgres', 'inquiry']) assert.ok(rows.some(row =>
++    row.Project === 'sabalanerp-local' && row.Service === name && row.State === 'running' && row.Health === 'healthy'));
++  return rows;
++}
++function inspect(service) {
++  const row = verify().find(row => row.Service === service); assert.ok(row);
++  const [value] = JSON.parse(execFileSync('docker', ['inspect', row.Name], { encoding: 'utf8' }));
++  assert.equal(value.Config.Labels['com.docker.compose.project'], 'sabalanerp-local');
++  return value;
++}
++const before = Object.fromEntries(['backend', 'frontend', 'postgres', 'inquiry'].map(service => {
++  const value = inspect(service); return [service, { id: value.Id, image: value.Image, startedAt: value.State.StartedAt }];
++}));
++const slot = inspect('backend-candidate');
++assert.ok(slot.Config.Env.includes('BACKEND_RUNTIME_ROLE=candidate'));
++assert.equal(slot.Image, before.backend.image);
++assert.ok(slot.Mounts.some(mount => mount.Type === 'volume' && mount.RW
++  && mount.Name === 'sabalanerp-local_online_runtime_acceptance' && mount.Destination === '/app/online-runtime-acceptance'));
++const directory = '/app/online-runtime-acceptance/runtime-shared-file-work-' + randomBytes(16).toString('hex');
++const ts = require('../backend/node_modules/typescript');
++const files = { 'fixture.cjs': fs.readFileSync(path.join(root, 'tests/online-deployment/runtime-shared-file-work.fixture.cjs')) };
++const sourceHashes = {};
++for (const name of ['kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext',
++  'durableFilePublication', 'versionedFilePublication', 'runtimeWorkBoundary', 'runtimeLeasedWorkContext', 'httpRequestLifecycle']) {
++  const source = path.join(root, 'backend/src/services', name + '.ts');
++  assert.ok(path.isAbsolute(source));
++  const bytes = fs.readFileSync(source); sourceHashes[name + '.ts'] = createHash('sha256').update(bytes).digest('hex');
++  files[name + '.js'] = Buffer.from(ts.transpileModule(bytes.toString('utf8'), {
++    compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
++  }).outputText);
++}
++const bootstrap = `const fs=require('fs'),path=require('path'),input=JSON.parse(fs.readFileSync(0,'utf8'));
++  const root=${JSON.stringify(directory)};fs.mkdirSync(root,{mode:0o700});fs.chmodSync(root,0o700);
++  for(const [name,encoded] of Object.entries(input)){if(!new RegExp('^(?:dispatchDocuments/)?[A-Za-z0-9_.-]+$').test(name)||name.includes('..'))throw Error('UNSAFE_SOURCE');
++    fs.mkdirSync(path.dirname(path.join(root,name)),{recursive:true,mode:0o700});
++    const fd=fs.openSync(path.join(root,name),'wx',0o400);try{fs.writeFileSync(fd,Buffer.from(encoded,'base64'));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}
++  const fd=fs.openSync(root,'r');try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}`;
++verify(); execFileSync('docker', ['exec', '-i', slot.Id, 'node', '-e', bootstrap], {
++  input: JSON.stringify(Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, bytes.toString('base64')]))), encoding: 'utf8',
++});
++verify();
++const output = await new Promise((resolve, reject) => {
++  const child = spawn('docker', ['exec', slot.Id, 'node', '--test', directory + '/fixture.cjs'], {
++    stdio: ['ignore', 'pipe', 'pipe'],
++  });
++  let stdout = '', stderr = '';
++  child.stdout.on('data', bytes => { stdout += bytes; });
++  child.stderr.on('data', bytes => { stderr += bytes; });
++  child.once('error', reject);
++  child.once('close', (code, signal) => code === 0 && !signal ? resolve(stdout)
++    : reject(Error('RUNTIME_SHARED_FILE_WORK_NATIVE_FIXTURE_FAILED ' + JSON.stringify({ code, signal, stdout, stderr, directory }))));
++});
++assert.match(output, /# fail 0\r?\n/); const report = { format: 'sabalan-runtime-shared-file-work-native/v1', pass: true, tap: output, workingRoot: directory };
++const reportPath = path.join(root, 'reports/qa', path.basename(directory) + '.json');
++const sources = Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, createHash('sha256').update(bytes).digest('hex')]));
++// Preserve closed test output before observing shared services. An unrelated
++// restart must fail the final gate without losing the expensive diagnostic.
++fs.writeFileSync(reportPath.replace(/\.json$/, '.core.json'), JSON.stringify({ ...report, pass: false,
++  testAssertionsPassed: true, canonicalVerification: 'PENDING', canonicalServicesBefore: before,
++  sourceHashes, sources, productionAdmission: false }, null, 2) + '\n', { flag: 'wx' });
++for (const [service, expected] of Object.entries(before)) {
++  const value = inspect(service);
++  assert.deepEqual({ id: value.Id, image: value.Image, startedAt: value.State.StartedAt }, expected);
++}
++report.canonicalServicesUnchanged = before;
++report.sourceHashes = sourceHashes;
++report.sources = sources;
++report.productionAdmission = false;
++fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
++console.log(JSON.stringify({ pass: true, reportPath }));
+diff --git a/tests/online-deployment/runtime-shared-file-work.fixture.cjs b/tests/online-deployment/runtime-shared-file-work.fixture.cjs
+new file mode 100644
+--- /dev/null
++++ b/tests/online-deployment/runtime-shared-file-work.fixture.cjs
+@@ -0,0 +1,197 @@
++'use strict';
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const { randomBytes } = require('node:crypto');
++const { spawnSync } = require('node:child_process');
++const { test } = require('node:test');
++const express = require('express');
++const { KernelWriteAdmission } = require('./kernelWriteAdmission');
++const { RuntimeBoundaryJournal, runtimeBoundaryProvisionBytes, runtimeNativePostgresApplicationName } = require('./runtimeBoundaryJournal');
++const { RuntimeTaskAdmission } = require('./runtimeTaskAdmission');
++const { RuntimeWorkBoundary } = require('./runtimeWorkBoundary');
++const { RuntimeWorkContext } = require('./runtimeWorkContext');
++const { VersionedFilePublication } = require('./versionedFilePublication');
++const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
++
++async function fixture(assertOwner = () => {}) {
++  const root = path.join(__dirname, randomBytes(16).toString('hex')); fs.mkdirSync(root, { mode: 0o700 });
++  const gate = path.join(root, 'deployment-write-admission.lock'); fs.writeFileSync(gate, '', { flag: 'wx', mode: 0o600 });
++  const value = fs.statSync(gate, { bigint: true }), runtimeId = randomBytes(32).toString('hex');
++  const gateIdentity = { device: String(value.dev), inode: String(value.ino), ownerUid: Number(value.uid) };
++  const scope = { runtimeId, image: 'sha256:' + 'a'.repeat(64), registrySha256: 'b'.repeat(64), generation: 1,
++    gate: gateIdentity, postgresApplicationName: runtimeNativePostgresApplicationName(runtimeId) };
++  const journalRoot = path.join(root, runtimeId); fs.mkdirSync(journalRoot, { mode: 0o700 });
++  fs.writeFileSync(path.join(journalRoot, 'scope.json'), runtimeBoundaryProvisionBytes(scope), { flag: 'wx', mode: 0o600 });
++  const journal = new RuntimeBoundaryJournal(journalRoot, scope); await journal.initialize();
++  let open = true;
++  const tasks = new RuntimeTaskAdmission(new KernelWriteAdmission(gate, gateIdentity, () => {}), journal, () => {}, () => open);
++  const boundary = new RuntimeWorkBoundary(tasks, () => true, assertOwner, assertOwner);
++  assert.ok(boundary.context instanceof RuntimeWorkContext, 'actual HTTP and nested file work must share one completion context');
++  const store = path.join(root, 'versions'), live = path.join(root, 'live');
++  for (const directory of [store, live]) fs.mkdirSync(directory, { mode: 0o700 });
++  const publisher = await VersionedFilePublication.open(store, live, boundary.context);
++  return { root, gate, journal, boundary, publisher, live, close: () => { open = false; }, reopen: () => { open = true; } };
++}
++
++test('an early HTTP response retains its admitted file write across capture closure while a new request waits outside', async () => {
++  const value = await fixture(), entered = deferred(), proceed = deferred(), finished = deferred();
++  const app = express(); app.use(value.boundary.middleware); let lateStarted = false;
++  app.post('/old', async (_req, res) => {
++    res.status(202).json({ accepted: true }); entered.resolve(); await proceed.promise;
++    await value.publisher.publish('invoice.pdf', Buffer.from('COMPLETED BEFORE THE CUT 123456789.12345678'));
++    finished.resolve();
++  });
++  app.post('/new', (_req, res) => { lateStarted = true; res.json({ accepted: true }); });
++  value.boundary.requests.install(app);
++  const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
++  const url = 'http://127.0.0.1:' + server.address().port;
++  let late;
++  try {
++    assert.equal((await fetch(url + '/old', { method: 'POST' })).status, 202); await entered.promise;
++    value.close(); late = fetch(url + '/new', { method: 'POST' });
++    await new Promise(resolve => setTimeout(resolve, 30)); assert.equal(lateStarted, false);
++    assert.equal((await value.journal.inspect()).phase, 'ACTIVE');
++    proceed.resolve();
++    let timer;
++    try { await Promise.race([finished.promise, new Promise((_, reject) => { timer = setTimeout(() => reject(Error('ADMITTED_FILE_DEADLOCKED_BEHIND_CAPTURE')), 2000); })]); }
++    finally { clearTimeout(timer); }
++    let exclusive = false;
++    const deadline = performance.now() + 2000;
++    while (!exclusive && performance.now() < deadline) {
++      exclusive = spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', value.gate, '/usr/bin/true']).status === 0;
++      if (!exclusive) await new Promise(resolve => setTimeout(resolve, 5));
++    }
++    assert.equal(exclusive, true);
++    assert.equal(lateStarted, false);
++    assert.equal(fs.readFileSync(path.join(value.live, 'invoice.pdf'), 'utf8'), 'COMPLETED BEFORE THE CUT 123456789.12345678');
++    value.reopen(); assert.equal((await late).status, 200); assert.equal(lateStarted, true);
++  } finally {
++    value.reopen(); proceed.resolve(); if (late) await late;
++    await value.boundary.stopAndDrain(2000); await new Promise(resolve => server.close(resolve));
++  }
++});
++
++test('a disconnected real HTTP client cannot release an unfinished nested file writer', async () => {
++  const value = await fixture(), entered = deferred(), proceed = deferred(), finished = deferred();
++  const app = express(); app.use(value.boundary.middleware);
++  app.post('/disconnect', async (_req, _res) => {
++    entered.resolve(); await proceed.promise;
++    await value.publisher.publish('disconnected.pdf', Buffer.from('SAVED AFTER DISCONNECT'));
++    finished.resolve();
++  });
++  value.boundary.requests.install(app);
++  const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
++  const request = require('node:http').request({ host: '127.0.0.1', port: server.address().port, path: '/disconnect', method: 'POST' });
++  request.on('error', () => {}); request.end();
++  try {
++    await entered.promise; value.close(); request.destroy();
++    await assert.rejects(value.boundary.requests.waitForDrain(30), /HTTP_REQUEST_DRAIN_TIMEOUT/);
++    assert.equal(spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', value.gate, '/usr/bin/true']).status, 1);
++    proceed.resolve(); await finished.promise; await value.boundary.requests.waitForDrain(2000);
++    assert.equal(fs.readFileSync(path.join(value.live, 'disconnected.pdf'), 'utf8'), 'SAVED AFTER DISCONNECT');
++    assert.equal(spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', value.gate, '/usr/bin/true']).status, 0);
++  } finally {
++    proceed.resolve(); request.destroy(); value.reopen();
++    await value.boundary.stopAndDrain(2000); await new Promise(resolve => server.close(resolve));
++  }
++});
++
++test('an unfired reservation blocks drain until cancellation and cannot revive a completed owner', async () => {
++  const value = await fixture(); let reservation, savedRequest;
++  const app = express(); app.use(value.boundary.middleware);
++  app.post('/reserve', (req, res) => {
++    savedRequest = req; reservation = value.boundary.requests.reserveWrite(req); res.status(202).end();
++  });
++  value.boundary.requests.install(app);
++  const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
++  try {
++    assert.equal((await fetch('http://127.0.0.1:' + server.address().port + '/reserve', { method: 'POST' })).status, 202);
++    value.close();
++    await assert.rejects(value.boundary.requests.waitForDrain(30), /HTTP_REQUEST_DRAIN_TIMEOUT/);
++    assert.equal(spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', value.gate, '/usr/bin/true']).status, 1);
++    reservation.cancel(); await value.boundary.requests.waitForDrain(2000);
++    assert.equal(spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', value.gate, '/usr/bin/true']).status, 0);
++    await assert.rejects(reservation.run(async () => value.publisher.publish('stale.pdf', Buffer.from('STALE'))), /HTTP_WRITE_RESERVATION_CONSUMED/);
++    value.reopen();
++    assert.throws(() => value.boundary.requests.reserveWrite(savedRequest), /RUNTIME_LEASED_WORK_NOT_ACTIVE/);
++    assert.equal(fs.existsSync(path.join(value.live, 'stale.pdf')), false);
++  } finally {
++    reservation?.cancel(); value.reopen();
++    await value.boundary.stopAndDrain(2000); await new Promise(resolve => server.close(resolve));
++  }
++});
++
++test('owner revocation refuses a reserved callback without publishing and releases only its completed work', async () => {
++  let valid = true;
++  const value = await fixture(() => { if (!valid) throw Error('ACTUAL_OWNER_REVOKED'); });
++  let reservation;
++  const app = express(); app.use(value.boundary.middleware);
++  app.post('/revoke', (req, res) => { reservation = value.boundary.requests.reserveWrite(req); res.status(202).end(); });
++  value.boundary.requests.install(app);
++  const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
++  try {
++    assert.equal((await fetch('http://127.0.0.1:' + server.address().port + '/revoke', { method: 'POST' })).status, 202);
++    valid = false; value.close();
++    await assert.rejects(reservation.run(async () => value.publisher.publish('revoked.pdf', Buffer.from('REVOKED'))), /ACTUAL_OWNER_REVOKED/);
++    await value.boundary.requests.waitForDrain(2000);
++    assert.equal(fs.existsSync(path.join(value.live, 'revoked.pdf')), false);
++  } finally {
++    reservation?.cancel(); valid = true; value.reopen();
++    await value.boundary.stopAndDrain(2000); await new Promise(resolve => server.close(resolve));
++  }
++});
++
++test('an admitted background action completes nested file work during capture closure and cannot restart after retirement', async () => {
++  const value = await fixture(), entered = deferred(), proceed = deferred();
++  const action = value.boundary.runBackground(async () => {
++    entered.resolve(); await proceed.promise;
++    await value.publisher.publish('job.pdf', Buffer.from('FINISHED ADMITTED JOB'));
++  });
++  try {
++    await entered.promise; value.close();
++    assert.equal(spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', value.gate, '/usr/bin/true']).status, 1);
++    proceed.resolve(); await action;
++    assert.equal(fs.readFileSync(path.join(value.live, 'job.pdf'), 'utf8'), 'FINISHED ADMITTED JOB');
++    assert.equal(spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', value.gate, '/usr/bin/true']).status, 0);
++    await value.boundary.stopAndDrain(2000);
++    await assert.rejects(value.boundary.runBackground(async () => value.publisher.publish('late-job.pdf', Buffer.from('LATE'))));
++    assert.equal(fs.existsSync(path.join(value.live, 'late-job.pdf')), false);
++  } finally { proceed.resolve(); value.reopen(); await action; await value.boundary.stopAndDrain(2000); }
++});
++
++test('a still-owned ignored child can reserve a future callback while response ownership is already draining', async () => {
++  const value = await fixture(), entered = deferred(), proceed = deferred(), scheduled = deferred();
++  const callbackStarted = deferred(), callbackProceed = deferred(), outcome = deferred();
++  const app = express(); app.use(value.boundary.middleware);
++  app.post('/callback', (req, res) => {
++    void value.boundary.context.run(async () => {
++      entered.resolve(); await proceed.promise;
++      const reservation = value.boundary.requests.reserveWrite(req);
++      setTimeout(() => {
++        void reservation.run(async () => {
++          callbackStarted.resolve(); await callbackProceed.promise;
++          await value.publisher.publish('receipt.pdf', Buffer.from('COMPLETED RESERVED CALLBACK 0.00000001'));
++        }).then(() => outcome.resolve({ ok: true }), error => outcome.resolve({ ok: false, code: error.code }));
++      }, 20);
++      scheduled.resolve();
++    });
++    res.status(202).json({ accepted: true });
++  });
++  value.boundary.requests.install(app);
++  const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
++  const url = 'http://127.0.0.1:' + server.address().port;
++  try {
++    assert.equal((await fetch(url + '/callback', { method: 'POST' })).status, 202); await entered.promise;
++    value.close(); await new Promise(resolve => setTimeout(resolve, 20)); proceed.resolve(); await scheduled.promise;
++    const started = await Promise.race([callbackStarted.promise.then(() => true), outcome.promise.then(() => false)]);
++    assert.equal(started, true, 'a reserved callback must retain the original native admission after its parent returns');
++    assert.equal(spawnSync('/usr/bin/flock', ['--exclusive', '--nonblock', value.gate, '/usr/bin/true']).status, 1);
++    await assert.rejects(value.boundary.requests.waitForDrain(30), /HTTP_REQUEST_DRAIN_TIMEOUT/);
++    callbackProceed.resolve(); assert.deepEqual(await outcome.promise, { ok: true });
++    assert.equal(fs.readFileSync(path.join(value.live, 'receipt.pdf'), 'utf8'), 'COMPLETED RESERVED CALLBACK 0.00000001');
++  } finally {
++    value.reopen(); proceed.resolve(); callbackProceed.resolve(); await outcome.promise;
++    await value.boundary.stopAndDrain(2000); await new Promise(resolve => server.close(resolve));
++  }
++});

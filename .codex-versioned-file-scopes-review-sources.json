@@ -1,0 +1,7 @@
+{
+  "backend/src/services/versionedFilePublication.ts": "d43d4a5d88e8c1183bc1d90af3fa0735ca11ee5227aee52f819313c75a69641c",
+  "backend/src/services/dispatchDocuments/filesystemStorage.ts": "274a91a1d3aed911fbe999f81bbe18e00ae870e26aa0ae5d87b1f2f818fc5254",
+  "backend/src/services/dispatchDocuments/runtime.ts": "73b45f176a3bb32363ead17546ea281ac0ec6c26ebe0ed45a0816e2dda1f5924",
+  "scripts/run-versioned-file-publication-local.mjs": "fb4760ecc91093881fe9e886850ca4e1ccf0b777f6f72808128e7bd22c175cc1",
+  "tests/online-deployment/versioned-file-scopes.fixture.cjs": "4cf402ee7a96ce3722d9a8d992fa3c7f16f9b6544dfb13cf321cf004cd316e22"
+}

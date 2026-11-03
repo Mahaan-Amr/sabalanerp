@@ -1,0 +1,31 @@
+{
+  "base": "a381559cb80699f24fb1a531944ec34b546fa25c",
+  "scope": "Reuse restored configured ledger in isolated actual-image fixture; preserve failed ambient gates",
+  "paths": {
+    ".gitattributes": "81a1e6a86d8e197e90121e862f1975af635d2f14d2ce20a56a37c0e25632731f",
+    "backend/src/services/__tests__/closedCustomerExpansion.integration.test.ts": "e09848254ccdc8dc127c312b00665e90044d632976d76ebe6cdd51c1da01676f",
+    "backend/src/services/__tests__/customerFinanceFixture.ts": "25a3bae09abde8ca1c109387490445ec82a25f3331b0cbc2dc081beff5a93019",
+    "scripts/verify-production-image-customer-overlap.mjs": "375432b4cd4f4f77513dda161ca8eede747f022f2f2dcbd123aa5f412cd010f5",
+    "tests/online-deployment/production-image-customer-overlap.fixture.cjs": "ff3b086832062d28217d606deae3450a2f05511c69b12e78207be1fb27b5adba",
+    "reports/qa/actual-image-customer-overlap-20261019.md": "b3aa5e7e19d01871dcb741b688605883e2019d4e807f85bfe7d0306b9c896310",
+    "docs/operations/online-deployment.md": "f11f4585d466eb501661a183ba9f8bc1ffacfbda2d0821f2aa8413c0750ad995",
+    "reports/qa/production-ledger-shape-readonly-20261019.json": "b4f4d563d1da8ac5c80360f4587b15776f7ff9838360ec5dd2449963a0380515",
+    "reports/qa/closed-customer-expansion-bac89a2aea55e61e2809044f71074405.json": "77f9a4dd2563ff978900c7640b3255029d44fdd5277892d947f5986200427bbb",
+    "reports/qa/closed-customer-expansion-2fcd435bc77e57fcc378ce61593509f3.json": "808dedc5ae05a64dc3bcc1af884aa2f8a55a31a3e8a8ae50e85d32b0570af3c5",
+    "reports/qa/closed-customer-expansion-1a132d92fa5ee884bb2b62b16638de4c.json": "c78d0c5c6f7bac9929d1588315e2db96455361bd458b4c52cdb27c22997f5c9d",
+    "reports/qa/actual-image-customer-e75c41429d29f628e3c5dc93a105b968.json": "6207ee7d9f15d956d12a62ef21e05d093d6cb1916c106642a901abbf713a70a4",
+    "reports/qa/actual-image-customer-e75c41429d29f628e3c5dc93a105b968-intent.json": "49a128d1014b30c1e005fa6c31a3f0842df698d66226d2c4d6e0caff937292ae",
+    "reports/qa/actual-image-customer-e75c41429d29f628e3c5dc93a105b968-closed-failed-validation.json": "5ff7f12d7ef1e197d27393c92c99ecda4f0a63b8e15ba71fac33f0ecb6be97f7",
+    "reports/qa/actual-image-customer-31c1b5e481f4ecef93594cb1db91c91a.json": "d90b6311a656d0e59c39838c3399cd76280c497c44bb499fb8f2b56edb8f2e67",
+    "reports/qa/actual-image-customer-31c1b5e481f4ecef93594cb1db91c91a-intent.json": "70adaf887d2cedd8c71dce037492aa11eaaac09867129628fa339f731ec945c9",
+    "reports/qa/actual-image-customer-31c1b5e481f4ecef93594cb1db91c91a-closed-failed-validation.json": "b148940ddc7180b1a95db03b7d1acb41b96b28a95dfa9e503a749be0a11450e2",
+    "reports/qa/actual-image-customer-d5b4216c094dd4a3805c5f41552e0e2c.json": "0d61065f3514549685e401ece0ec2bdef7c1759bd88a2bec78d7f4ece7bc3222",
+    "reports/qa/actual-image-customer-d5b4216c094dd4a3805c5f41552e0e2c-intent.json": "697a0a4af824837b3720e40ab45c0629843e444d866f0bef2e0ab31a4ef37f73",
+    "reports/qa/actual-image-customer-d5b4216c094dd4a3805c5f41552e0e2c-closed-failed-validation.json": "8037c692c4596a40882d950e7e505d3d612054495eb17a523921da441ade9f43",
+    "reports/qa/actual-image-customer-e75c41429d29f628e3c5dc93a105b968-failure-readonly.json": "aeba51bc067ce3b6bc1a5949a5b790e4193a43075d46aca98e3d55bc7f3bb1f4",
+    "reports/qa/actual-image-customer-31c1b5e481f4ecef93594cb1db91c91a-ambient-readonly.json": "1d3c977ae11447e890e90bde83c4221e59e6dbd0318859eb8182ef89acde50e4",
+    "reports/qa/both-host-storage-preflight-before-independent-decryption-728894fe64bf4364ab6837968eec46ae.json": "920ac4e241e84a48521fc3faaf802c583b8d01719badc12bf18c106e646c5a42",
+    "reports/qa/both-host-storage-preflight-before-independent-decryption-07e93f9da0294af88f6312eb01537aca.json": "dd43151e58e15915ae6bbdb1d10e975eaa51c78244bc60d09fce85c811ff650d",
+    "reports/qa/both-host-storage-preflight-before-independent-decryption-feda6d2b6d17476f87d68fe149a59b0c.json": "998d6cfd638e9556d090f411d65d471da7d6326a385aa7e18f445029853eab10"
+  }
+}

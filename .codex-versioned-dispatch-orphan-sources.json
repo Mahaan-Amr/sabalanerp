@@ -1,0 +1,22 @@
+[
+  {
+    "sha256": "f484a96a89534bbe5f6d0bad0848f3d998a73b508c98769fa3eed34a61aaf236",
+    "path": "backend/src/services/dispatchVersionedOrphanStorage.ts"
+  },
+  {
+    "sha256": "cd5a0a8953e0cdbf1126e3c7139915b3739f2fa20f05d994353c7a60149d886b",
+    "path": "backend/src/services/dispatchDocumentAuditRecovery/operations.ts"
+  },
+  {
+    "sha256": "ef59913c5d5d7482339c5284cf0a8c100ccc479f12e747e8af40fc2d636eed21",
+    "path": "backend/src/services/__tests__/dispatchDocumentAuditRecovery.test.ts"
+  },
+  {
+    "sha256": "cddea18b85b5cb493a68d441085dd654f3114cd3f7d93845c989b192aafa11ed",
+    "path": "scripts/run-versioned-file-publication-local.mjs"
+  },
+  {
+    "sha256": "ce6a8acd3f7e96d88ebc655da7148cb80bb90d1a60e01c834ab5d1b7f70900f5",
+    "path": "tests/online-deployment/versioned-file-orphan.fixture.cjs"
+  }
+]

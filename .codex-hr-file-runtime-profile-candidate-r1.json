@@ -1,0 +1,33 @@
+{
+  "base": "c55888895c8b3c5b04829a61fd0a6754926ac35c",
+  "scope": "Private actual HR upload/erasure route composition and legacy mutation refusal; no production startup or admission",
+  "paths": {
+    "backend/src/routes/hr-duties.ts": "a1c4a12bdce8cc7daa3d5504b357e64fd91ee516d457388e0aa67aa11dbf877a",
+    "backend/src/routes/hr-hiring.ts": "29ebaafad66bd316edf46a7855fc43280c3462eed26848282f2b54a5b798ded0",
+    "backend/src/routes/hr.ts": "e61d3ce487460d0fc4694f0fe09fa91f7233557f445bab1db2194bd628180589",
+    "backend/src/services/hrDeletionFileCleanup.ts": "805bab0fe635d8d889579c8ccc6bee723692753b2dc804a03fbcfc98936f7f5f",
+    "backend/src/services/hrPersonnelErasureRecovery.ts": "4e912292619bc959269879c978fcfb3e49d5e61e17ce3215131e61a56aeba5b8",
+    "backend/src/services/hrPersonnelErasureGraph.ts": "9726ea056ae0d45ebb594ebb29cddd36d1dca7790272a80c4675af23380cae4b",
+    "backend/src/services/httpRequestLifecycle.ts": "64a385c70b648a675ea60be5c9ba8a3fed5104c329b459630f3c9e224d924b73",
+    "backend/src/services/hrFileRuntime.ts": "ce901720edffc25706d73190de960ba1e1293382728b07d18f3f8c72889c0442",
+    "scripts/run-hr-erasure-file-recovery-local.mjs": "4fd6b66174a74e515fe5f1aedcacdfee5b6d8c69189779fb5afd65f3d56c865b",
+    "tests/online-deployment/hr-file-runtime-profile.fixture.ts": "3a5f8a13d8cb1050670c5d529c35533f26a57ac7dd5cdd711141ceea052542e1",
+    "reports/qa/hr-file-runtime-profile-20261019.md": "f431443f32b88bdfdf37b42930a7837d8d924e4c4f80590ce78397089e66707d",
+    "docs/operations/online-deployment.md": "22252a6673ffda360c01d9272c73dc83227562c3be63cbd8d8f9f0795dc66247",
+    "reports/qa/hr-erasure-file-recovery-ee4f19c7256924e464ae6f71c864d6cc.json": "3256ea14a360c6b40c79b36c360b3dbf676702d943d9817565638294ad7f9ee9",
+    "reports/qa/hr-erasure-file-recovery-a12798fa287d32cbf1e9350daebae99d.json": "a782db6d32fdb99638556731905ad541a7332c6f91712d8c1997554431eada4b",
+    "reports/qa/hr-erasure-file-recovery-b0abe075a19f5f35f4e9010973edbd28.json": "e8866afb36525b7aeee7525dddc4b9db92b1482f8a30928787741696fc428079",
+    "reports/qa/hr-erasure-file-recovery-c2640bc58a508a0c113c7731a4d84d20.json": "9e2b0cb0783d3c66847479c2338dd7c5e2997e642fe46bcdd39eed4144b66880",
+    "reports/qa/hr-erasure-file-recovery-d2302f0fcba1100e2cdead8ad9dfd341.json": "8a5a1c9686cb2d657bd42eb4b29a2ebe4edb10b9c0d0b48c488cb818ebebe0dd",
+    "reports/qa/hr-erasure-file-recovery-5b82a9b3ddc51d650f82060c93e52210.json": "5fa5793515efbb0ed395972fee12715fdebd4405e677cf63de4f88bf2a29a290",
+    "reports/qa/hr-erasure-file-recovery-a40ad0190fbddd190b72e63e32bf3547.json": "0654b89060d0bada821fe11d202f7090e19c30d7f56d47509fee88b0b2841f4c",
+    "reports/qa/hr-erasure-file-recovery-e2f0728fb1bb7afc12b40b97580b142f.json": "8a0244e42dbc53a2260a5c7fdc16597ecc4227753ace189608d9c4486283ac87",
+    "reports/qa/hr-erasure-file-recovery-f5f0ee06eb986dd293a38c097d5a6763.json": "6c0dbc11395300d1fa9a629aef54c3855980d014cb59fc00adf05b69a0a09d5b",
+    "reports/qa/hr-erasure-file-recovery-b1a0fb6df33d9cfd172c80bcbb33254a.json": "76f589a2d9a509b992ae33c76c53c383ea1e90396659b489b28b3b7b0c9b16f6",
+    "reports/qa/hr-erasure-file-recovery-45fe59e5f6254d303a2391b1610aa99b.json": "361346e063a00ac60e9836526dd16d723561011f1e388d699d43a333175437ee",
+    "reports/qa/hr-erasure-file-recovery-2dc31a081d37c69e27898ecd8461da52.json": "1e0ed02bfdb3d292a44a0a16441bb61e5588e108c7b8455084c9c4d505670193",
+    "reports/qa/hr-erasure-file-recovery-f2f11ec0a118ad57c289a89a0202a0e1.json": "1613107d326bbfcef904e4ffdf898182f2ab2d31905036ed25387f66e179e057",
+    "reports/qa/hr-erasure-file-recovery-a6ff383778ac3a53540b2799f2a1d0cd.json": "6ec929948689c7d043aed34a01417c97d20c3cb664f3465d02c286f5f251dacc",
+    "reports/qa/hr-erasure-file-recovery-d055276c40f5041a956d31e855f0312b.json": "938e84022dcf4a93230f76186372c6343637d1312e4f60e1e3019e4c40535587"
+  }
+}

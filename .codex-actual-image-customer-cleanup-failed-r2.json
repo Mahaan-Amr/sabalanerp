@@ -1,0 +1,22 @@
+{
+  "base": "c713b93bb9811a9fb96b4af01a9a007f83c87275",
+  "files": {
+    "tests/online-deployment/production-image-customer-cleanup-failed.fixture.py": "321e6d0c182e815f21143b801bf6f1fba54be3dfaa2addff2356963f86befc0f",
+    "tests/online-deployment/production-image-customer-retire.fixture.py": "9134926393675ea4846e4dd925ff6fc132a8592df009672767f081b33fa08b54",
+    "tests/online-deployment/production-image-customer-close-failed.fixture.py": "58e8094f1ed0f35626f4a871c741ec69cecbf70c7a41707a7b2ccd60c3bf2995",
+    "reports/qa/actual-image-customer-close-failed-397b4ae149876fb621fc180b0d932cfe.json": "e0ea187ef9889d13e6cba60faa6681b3e5ef9277241398b079dba7bbcb21a5c9",
+    "reports/qa/actual-image-customer-failed-readonly-diagnostic-20261019.json": "a1bf6a4f71468cc6552c972274515d634e181002f0090c9db264c34383e98938",
+    "D:/sabalanerp-online-qa/run-reviewed-backup-operation-with-password-20261019.py": "7479d236a121faba110702a1d2afbbdd0b892d8a190980b951c2f18812950fbb",
+    "deploy/scripts/closed-derived-process-references.py": "a6570121bc431553a3f215ccaf73063d642921501fe8ab1b7310a8ec4175ff4a",
+    "deploy/scripts/closed-diagnostic-holds.py": "543c507fcd97ac32310e0dc0e8e73cde391669075fbdd55d3f7870bdfdd80b36",
+    "tests/online-deployment/closed-derived-process-references.fixture.py": "d3746f4a45e6bfb26763fe2a79aca3e836133d80be27021bc2e040efe7d700e0",
+    "tests/online-deployment/closed-diagnostic-holds.fixture.py": "42067a5e7cd1807e6e2f2aac56a061443bdb4b0a38836139818fb8548cf98747",
+    "scripts/run-closed-derived-process-references-local.mjs": "3c6be5bfd4da4c66e2fe96a5d1518e78efc1a0adcf58f0d40260024a46972df2",
+    "reports/qa/closed-derived-retirement-guards-20261019.md": "9f375aa82d9719de973ac1debb92eccfdaa83f0a3715aff55fb80af98921ae21",
+    "reports/qa/closed-derived-references-red-20261019.json": "4a427ed0db58f15939211ee361a22b6a656bdc762082d12287f2309f1c6f7ba8",
+    "reports/qa/closed-derived-references-mmap-red-20261019.json": "080e449c6f0389d5bafce7c25fa8a495fa4bab6f7c1e27c02db403f97c71cc99",
+    "reports/qa/closed-derived-references-holds-final-20261019.json": "8d28e66026e0367e6dd8f91f1c4b16f976c886c2ed4a7b555cc026ae2353c0d5",
+    "D:/sabalanerp-online-qa/prepare-failed-customer-retirement-20261019.py": "3186dee701fe0d00230774db7488041480c97038e1ffdee0e31fc8a897c6e5ba",
+    "D:/sabalanerp-online-qa/actual-image-customer-cleanup-failed-readonly-b594fd0f8ba74c52895ffcbc5ca88506.py": "3dbb912b73f211b227902d5df20b51497d6571fcc36776642afd846b13212370"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "base": "cba44e5fb66b23e67141f40c32dafb091aa4d652",
+  "files": {
+    "backend/src/services/closedCustomerExpansion.ts": "658858584d57277413b09c9d357257021d8d0a4414a7992789d9909b54de85b0",
+    "backend/src/services/__tests__/closedCustomerExpansion.test.ts": "6f4f1a4f6276fc255c1c104a2658a5e6b8919b10596b8d83a539b369f27057f8",
+    "backend/src/services/__tests__/closedCustomerExpansion.integration.test.ts": "236950fef7a08180348fcf161bd39e95c8164ce808c3e66a2276fbe0d20ba230",
+    "scripts/run-closed-customer-expansion-local.mjs": "5cafa312e7ce9b1c5adfef3423238fbb5cea553dc2d51bedb6f654a1375c0205",
+    "reports/qa/closed-customer-expansion-20261019.md": "eca6b04aae9f9ebaae63b2125c7bf8a8a21522644ecf62bc0c03a3e629953ca8",
+    "reports/qa/closed-customer-expansion-a25902cd6e1cfbb939605e3454e8747b.json": "f1f1f81e50448e4eb6ea744ffad3666e7ea23e9ab064edc280e3b8eb61630003",
+    "reports/qa/closed-customer-expansion-f907973cea85d80fea5db5666d3b8015.json": "57ed635b67af1f93bdbeb5b889ac885db24830a573ad529d6ddcad05c5f927e2",
+    "reports/qa/closed-customer-expansion-0f98ffe5f413392eabb7b9b0f54f9f49.json": "265e64a42ab8b905079605b28ae43c49f1acf9194161a5cf25dd53ca723e7237",
+    "reports/qa/closed-customer-expansion-2cd8df74451cf4612e780e180d7b6664.json": "59400040e25539dc735ee50899df015102ce14efc4f2b02afe96fd7b31d52084",
+    "docs/operations/online-deployment.md": "a9712fdc57274b133e508d5b1175c4b65cb0b4978f0477855cb7ea8256c09ef3"
+  }
+}

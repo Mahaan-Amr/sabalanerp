@@ -1,0 +1,283 @@
+diff --git a/backend/src/services/dispatchDocuments/filesystemStorage.ts b/backend/src/services/dispatchDocuments/filesystemStorage.ts
+index 0ea20c31..035ee3d6 100644
+--- a/backend/src/services/dispatchDocuments/filesystemStorage.ts
++++ b/backend/src/services/dispatchDocuments/filesystemStorage.ts
+@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
+ import path from 'node:path';
+ import type { DispatchArtifactStorage } from './ports';
+ import { publishDurableFile, removeDurableFile } from '../durableFilePublication';
+-import { VersionedFilePublication } from '../versionedFilePublication';
++import { VersionedFilePublication, assertVersionedFileRootScope, type VersionedFileRootScope } from '../versionedFilePublication';
+ 
+ const resolveKey = (root: string, storageKey: string) => {
+   if (!/^dispatch-documents\/[A-Za-z0-9_-]+\.pdf$/.test(storageKey)) throw new Error('Invalid dispatch artifact storage key.');
+@@ -44,3 +44,15 @@ export const createVersionedFilesystemDispatchArtifactStorage = (
+     },
+   };
+ };
++
++/** Explicit root-confined composition for the platform's shared file owner. */
++export const createScopedVersionedFilesystemDispatchArtifactStorage = (
++  root: string, files: VersionedFileRootScope,
++): DispatchArtifactStorage => {
++  assertVersionedFileRootScope(files, root);
++  return {
++    async stage({ storageKey, bytes }) { resolveKey(root, storageKey); await files.publish(storageKey, bytes); },
++    async read(storageKey) { resolveKey(root, storageKey); return files.read(storageKey); },
++    async discard(storageKey) { resolveKey(root, storageKey); await files.remove(storageKey); },
++  };
++};
+diff --git a/backend/src/services/dispatchDocuments/runtime.ts b/backend/src/services/dispatchDocuments/runtime.ts
+index 5f008cd6..718d7a6e 100644
+--- a/backend/src/services/dispatchDocuments/runtime.ts
++++ b/backend/src/services/dispatchDocuments/runtime.ts
+@@ -5,7 +5,8 @@ import { createPrismaDispatchDocumentAccessPolicy } from './prismaAccessPolicy';
+ import { installStatementAdjustmentArtifactPreparer } from '../statementAdjustmentRuntime';
+ import { createStatementAdjustmentArtifactPreparer } from './adjustmentArtifactPreparer';
+ import type { DispatchArtifactPublisher } from './contracts';
+-import { createFilesystemDispatchArtifactStorage } from './filesystemStorage';
++import { createFilesystemDispatchArtifactStorage, createScopedVersionedFilesystemDispatchArtifactStorage } from './filesystemStorage';
++import type { VersionedFileRootScope } from '../versionedFilePublication';
+ import { createDispatchIntegrityIncidentReporter } from './integrityIncidentReporter';
+ import { PrismaDispatchDocumentRepository } from './prismaRepository';
+ import { allocationPricingIntegrityVerifier, PrismaDispatchDocumentSourceReader } from './prismaSourceReader';
+@@ -17,8 +18,12 @@ export const configureDispatchDocumentsRuntime = (input: {
+   templateVersion: string;
+   generatorVersion: string;
+   storageRoot?: string;
++  filePublication?: VersionedFileRootScope;
+ }) => {
+-  const storage = createFilesystemDispatchArtifactStorage(input.storageRoot || path.join(process.cwd(), 'storage', 'dispatch-documents'));
++  const root = input.storageRoot || path.join(process.cwd(), 'storage', 'dispatch-documents');
++  const storage = input.filePublication
++    ? createScopedVersionedFilesystemDispatchArtifactStorage(root, input.filePublication)
++    : createFilesystemDispatchArtifactStorage(root);
+   const service = createDispatchDocuments({
+     repository: new PrismaDispatchDocumentRepository(input.prisma, allocationPricingIntegrityVerifier, storage),
+     sourceReader: new PrismaDispatchDocumentSourceReader(input.prisma, input.templateVersion, input.generatorVersion),
+diff --git a/backend/src/services/versionedFilePublication.ts b/backend/src/services/versionedFilePublication.ts
+index 982523e7..1fd4f966 100644
+--- a/backend/src/services/versionedFilePublication.ts
++++ b/backend/src/services/versionedFilePublication.ts
+@@ -13,6 +13,23 @@ type Version = { format: 'sabalan-file-version/v1'; key: string; generation: num
+ type StreamInput = { source: Readable; assertReady(): void; finish(): Promise<void> };
+ type FileClaim = { key: string; id: string; target: string; pending: string; heldIdentity: Identity;
+   previous: { sha256: string; value: Version } | null; actual: Identity | null };
++export type VersionedFileRootHead = Readonly<{ versionSha256: string; operation: 'PUT' | 'DELETE'; byteLength: number }>;
++export type VersionedFileRootScope = Readonly<{
++  publish(key: string, bytes: Uint8Array, options?: { replace?: boolean }): Promise<string>;
++  publishUpload(key: string, source: Readable): ReturnType<VersionedFilePublication['publishUpload']>;
++  remove(key: string): Promise<string>;
++  removeUpload(key: string, versionSha256: string): Promise<string>;
++  inspect(key: string): Promise<VersionedFileRootHead | null>;
++  read(key: string): Promise<Buffer | null>;
++  readVersion(key: string, versionSha256: string): Promise<Buffer | null>;
++  moveTo(destination: VersionedFileRootScope, sourceKey: string, destinationKey: string, expectedSourceSha256: string): ReturnType<VersionedFilePublication['move']>;
++}>;
++const rootScopes = new WeakMap<VersionedFileRootScope, { owner: VersionedFilePublication; root: string; prefix: string }>();
++export function assertVersionedFileRootScope(scope: VersionedFileRootScope, root: string) {
++  if (!rootScopes.has(scope) || rootScopes.get(scope)!.root !== path.resolve(root)) {
++    fail('FILE_VERSION_STORAGE_ROOT_MISMATCH');
++  }
++}
+ const hash = (data: Uint8Array | string) => createHash('sha256').update(data).digest('hex');
+ const shaPattern = /^[a-f0-9]{64}$/;
+ const fail = (code: string): never => { throw Object.assign(new Error(code), { code }); };
+@@ -111,6 +128,68 @@ export class VersionedFilePublication {
+ 
+   ownsRoot(root: string) { return path.resolve(root) === this.liveRoot; }
+ 
++  /** Bind existing private subdirectories to the same completion, capacity and
++   * version owner. This grants a confined port, never release/root coverage.
++   * No directories are created, no baseline is adopted and no caller can use
++   * another scope's version receipt or move between independent owners. */
++  bindRoot(root: string): Promise<VersionedFileRootScope> {
++    return this.work.run(async () => {
++      this.work.assertActive(); await this.assertDirectories();
++      if (typeof root !== 'string' || !path.isAbsolute(root) || path.resolve(root) !== root) fail('FILE_VERSION_STORAGE_ROOT_MISMATCH');
++      const relative = path.relative(this.liveRoot, root);
++      if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) fail('FILE_VERSION_STORAGE_ROOT_MISMATCH');
++      const additions: Array<[string, Identity]> = [];
++      let current = this.liveRoot;
++      for (const part of relative ? relative.split(path.sep) : []) {
++        current = path.join(current, part); additions.push([current, await privateDirectory(current)]);
++      }
++      await this.assertDirectories();
++      for (const [directory, expected] of additions) {
++        const actual = await privateDirectory(directory);
++        if (actual.device !== expected.device || actual.inode !== expected.inode) fail('FILE_VERSION_DIRECTORY_CHANGED');
++      }
++      for (const [directory, expected] of additions) this.directories.set(directory, expected);
++      const prefix = relative.split(path.sep).join('/');
++      // Preserve malformed keys until the writer validates them, so an upload
++      // still transfers stream ownership and completes actual destruction.
++      const key = (value: string) => typeof value === 'string' && prefix ? prefix + '/' + value : value;
++      const inspect = (value: string) => this.work.run(async (): Promise<VersionedFileRootHead | null> => {
++        this.work.assertActive(); await this.assertDirectories();
++        const full = key(value), target = this.key(full).target;
++        const head = await this.head(full), actual = await this.current(target);
++        if (!same(actual, head?.value.live ?? null)) fail('FILE_VERSION_UNTRACKED_LIVE_CHANGE');
++        return head ? Object.freeze({ versionSha256: head.sha256, operation: head.value.operation,
++          byteLength: head.value.object?.bytes ?? 0 }) : null;
++      });
++      const readVersion = (value: string, sha256: string) => this.work.run(async () => {
++        this.work.assertActive(); await this.assertDirectories();
++        const full = key(value); this.key(full);
++        if ((await this.version(sha256)).value.key !== full) fail('FILE_VERSION_SELECTION_INVALID');
++        return this.readVersion(sha256);
++      });
++      const scope: VersionedFileRootScope = Object.freeze({
++        publish: (value: string, bytes: Uint8Array, options?: { replace?: boolean }) => this.publish(key(value), bytes, options),
++        publishUpload: (value: string, source: Readable) => this.publishUpload(key(value), source),
++        remove: (value: string) => this.remove(key(value)),
++        removeUpload: (value: string, sha256: string) => this.removeUpload(key(value), sha256),
++        inspect, readVersion,
++        read: (value: string) => this.work.run(async () => {
++          const head = await inspect(value);
++          return head ? readVersion(value, head.versionSha256) : null;
++        }),
++        moveTo: async (destination: VersionedFileRootScope, sourceKey: string, destinationKey: string, expected: string) => {
++          const binding = rootScopes.get(destination);
++          if (!binding || binding.owner !== this) fail('FILE_VERSION_STORAGE_ROOT_MISMATCH');
++          const destinationFull = typeof destinationKey === 'string' && binding.prefix
++            ? binding.prefix + '/' + destinationKey : destinationKey;
++          return this.move(key(sourceKey), destinationFull, expected);
++        },
++      });
++      rootScopes.set(scope, { owner: this, root, prefix });
++      return scope;
++    });
++  }
++
+   private async reservation(key: string) {
+     const file = path.join(this.root, 'reservations', this.key(key).id + '.json');
+     try {
+diff --git a/scripts/run-versioned-file-publication-local.mjs b/scripts/run-versioned-file-publication-local.mjs
+index a9520dd4..a28f88e7 100644
+--- a/scripts/run-versioned-file-publication-local.mjs
++++ b/scripts/run-versioned-file-publication-local.mjs
+@@ -33,7 +33,7 @@ assert.equal(slot.Image, before.backend.image);
+ assert.ok(slot.Mounts.some(mount => mount.Type === 'volume' && mount.RW
+   && mount.Name === 'sabalanerp-local_online_runtime_acceptance' && mount.Destination === '/app/online-runtime-acceptance'));
+ const suite = process.env.ONLINE_VERSIONED_FILES_SUITE || 'publication';
+-assert.ok(['publication', 'legacy', 'move'].includes(suite));
++assert.ok(['publication', 'legacy', 'move', 'scopes'].includes(suite));
+ const directory = '/app/online-runtime-acceptance/versioned-file-' + suite + '-' + randomBytes(16).toString('hex');
+ const ts = require('../backend/node_modules/typescript');
+ const files = { 'fixture.cjs': fs.readFileSync(path.join(root, 'tests/online-deployment/versioned-file-' + suite + '.fixture.cjs')) };
+--- /dev/null
++++ b/tests/online-deployment/versioned-file-scopes.fixture.cjs
+@@ -0,0 +1,113 @@
++'use strict';
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const path = require('node:path');
++const { randomBytes } = require('node:crypto');
++const { spawn, spawnSync } = require('node:child_process');
++const { test } = require('node:test');
++const { KernelWriteAdmission } = require('./kernelWriteAdmission');
++const { RuntimeBoundaryJournal, runtimeBoundaryProvisionBytes, runtimeNativePostgresApplicationName } = require('./runtimeBoundaryJournal');
++const { RuntimeTaskAdmission } = require('./runtimeTaskAdmission');
++const { RuntimeWorkContext } = require('./runtimeWorkContext');
++const { VersionedFilePublication, assertVersionedFileRootScope } = require('./versionedFilePublication');
++
++async function fixture(name = randomBytes(16).toString('hex'), existing = false) {
++  assert.match(name, /^[a-f0-9]{32}$/);
++  const root = path.join(__dirname, name); if (!existing) fs.mkdirSync(root, { mode: 0o700 });
++  const gate = path.join(root, 'deployment-write-admission.lock'); if (!existing) fs.writeFileSync(gate, '', { flag: 'wx', mode: 0o600 });
++  const value = fs.statSync(gate, { bigint: true });
++  const identity = { device: String(value.dev), inode: String(value.ino), ownerUid: Number(value.uid) };
++  const runtimeId = randomBytes(32).toString('hex'), journalRoot = path.join(root, runtimeId); fs.mkdirSync(journalRoot, { mode: 0o700 });
++  const scope = { runtimeId, image: 'sha256:' + 'a'.repeat(64), registrySha256: 'b'.repeat(64), generation: 1,
++    gate: identity, postgresApplicationName: runtimeNativePostgresApplicationName(runtimeId) };
++  fs.writeFileSync(path.join(journalRoot, 'scope.json'), runtimeBoundaryProvisionBytes(scope), { flag: 'wx', mode: 0o600 });
++  const journal = new RuntimeBoundaryJournal(journalRoot, scope); await journal.initialize();
++  const work = new RuntimeWorkContext(new RuntimeTaskAdmission(new KernelWriteAdmission(gate, identity, () => {}), journal, () => {}), () => {});
++  const store = path.join(root, 'versions'), live = path.join(root, 'live');
++  if (!existing) for (const p of [store, live]) fs.mkdirSync(p, { mode: 0o700 });
++  const publisher = await VersionedFilePublication.open(store, live, work);
++  const fd = fs.openSync(gate, 'r');
++  const command = mode => {
++    const result = spawnSync('/usr/bin/flock', [mode, '--nonblock', '3'], { stdio: ['ignore', 'ignore', 'pipe', fd] });
++    assert.equal(result.status, 0, result.stderr.toString());
++  };
++  return { root, work, store, live, publisher, fd, lock: () => command('--exclusive'), unlock: () => command('--unlock'),
++    async close() { command('--unlock'); fs.closeSync(fd); await work.stopAndDrain(1000); } };
++}
++
++
++async function scope(v,name){const root=path.join(v.live,name);fs.mkdirSync(root,{mode:0o700});return {root,files:await v.publisher.bindRoot(root)};}
++
++test('root scopes isolate sibling bytes and version reads while sharing the sealed cut',async()=>{
++ const v=await fixture();try{
++  const a=await scope(v,'contracts'),b=await scope(v,'people');
++  const av=await a.files.publish('same.pdf',Buffer.from('CONTRACT'));
++  const bv=await b.files.publish('same.pdf',Buffer.from('PERSONNEL'));
++  assert.equal((await a.files.read('same.pdf')).toString(),'CONTRACT');assert.equal((await b.files.read('same.pdf')).toString(),'PERSONNEL');
++  assert.equal((await a.files.readVersion('same.pdf',av)).toString(),'CONTRACT');
++  await assert.rejects(a.files.readVersion('same.pdf',bv),/FILE_VERSION_SELECTION_INVALID/);
++  assert.equal((await a.files.inspect('same.pdf')).versionSha256,av);
++  v.lock();const cut=await v.publisher.seal('a'.repeat(64),v.fd);v.unlock();assert.equal(cut.manifest.heads.length,2);
++  assert.equal(fs.readFileSync(path.join(a.root,'same.pdf'),'utf8'),'CONTRACT');
++ }finally{await v.close();}
++});
++
++test('scope roots, aliases and escaped keys refuse before file intents',async()=>{
++ const v=await fixture();try{
++  const a=await scope(v,'contracts');
++  await assert.rejects(v.publisher.bindRoot(v.root),/FILE_VERSION_STORAGE_ROOT_MISMATCH/);
++  fs.symlinkSync(a.root,path.join(v.live,'alias'),'dir');
++  await assert.rejects(v.publisher.bindRoot(path.join(v.live,'alias')),/FILE_VERSION_DIRECTORY_ALIAS/);
++  for(const key of ['../escape.pdf','/absolute.pdf','sub/../../escape.pdf',''])await assert.rejects(a.files.publish(key,Buffer.from('NO')),/FILE_VERSION_KEY_INVALID/);
++  assert.deepEqual(fs.readdirSync(path.join(v.store,'pending')),[]);
++  assert.throws(()=>assertVersionedFileRootScope({...a.files},a.root),/FILE_VERSION_STORAGE_ROOT_MISMATCH/);
++  assert.throws(()=>assertVersionedFileRootScope(a.files,v.live),/FILE_VERSION_STORAGE_ROOT_MISMATCH/);
++ }finally{await v.close();}
++});
++
++test('rebinding cannot bless a replacement directory incarnation',async()=>{
++ const v=await fixture();try{
++  const a=await scope(v,'contracts');await a.files.publish('original.pdf',Buffer.from('OLD'));
++  fs.renameSync(a.root,a.root+'-retired');fs.mkdirSync(a.root,{mode:0o700});
++  await assert.rejects(v.publisher.bindRoot(a.root),/FILE_VERSION_DIRECTORY_CHANGED/);
++  await assert.rejects(a.files.publish('new.pdf',Buffer.from('NO')),/FILE_VERSION_DIRECTORY_CHANGED/);
++  assert.equal(fs.existsSync(path.join(a.root,'new.pdf')),false);
++ }finally{await v.close();}
++});
++
++test('sibling relocation uses one actual owner and refuses stale or foreign moves',async()=>{
++ const v=await fixture(),other=await fixture();try{
++  const a=await scope(v,'documents'),b=await scope(v,'quarantine'),foreign=await scope(other,'documents');
++  const original=await a.files.publish('file.pdf',Buffer.from('ORIGINAL'));
++  await assert.rejects(a.files.moveTo(foreign.files,'file.pdf','file.pdf',original),/FILE_VERSION_STORAGE_ROOT_MISMATCH/);
++  const moved=await a.files.moveTo(b.files,'file.pdf','file.pdf',original);
++  assert.equal(await a.files.read('file.pdf'),null);assert.equal((await b.files.read('file.pdf')).toString(),'ORIGINAL');
++  await a.files.publish('file.pdf',Buffer.from('NEW'));
++  await assert.rejects(b.files.moveTo(a.files,'file.pdf','file.pdf',moved.destinationVersionSha256),/FILE_VERSION_ALREADY_EXISTS/);
++  assert.equal((await a.files.read('file.pdf')).toString(),'NEW');assert.deepEqual(fs.readdirSync(path.join(v.store,'pending')),[]);
++ }finally{await v.close();await other.close();}
++});
++
++test('invalid scoped upload retains admission until actual input destruction completes',async()=>{
++ const v=await fixture();let release,started;const hold=new Promise(r=>{release=r;}),seen=new Promise(r=>{started=r;});let pending;
++ try{
++  const a=await scope(v,'uploads');const {Readable}=require('node:stream');
++  const input=new Readable({read(){},destroy(error,done){started();hold.then(()=>done(error));}});
++  pending=a.files.publishUpload('../escape.pdf',input);const rejected=assert.rejects(pending,/FILE_VERSION_KEY_INVALID/);await seen;
++  const blocked=spawnSync('/usr/bin/flock',['--exclusive','--nonblock','3'],{stdio:['ignore','ignore','pipe',v.fd]});assert.equal(blocked.status,1);assert.equal(input.closed,false);
++  release();await rejected;assert.equal(input.closed,true);v.lock();v.unlock();
++ }finally{release?.();await pending?.catch(()=>{});await v.close();}
++});
++
++test('scoped Dispatch storage publishes and tombstones through its admitted root',async()=>{
++ const v=await fixture();try{
++  const a=await scope(v,'artifacts');const {createScopedVersionedFilesystemDispatchArtifactStorage}=require('./dispatchDocuments/filesystemStorage');
++  const storage=createScopedVersionedFilesystemDispatchArtifactStorage(a.root,a.files);
++  await storage.stage({storageKey:'dispatch-documents/document.pdf',bytes:Buffer.from('ORIGINAL DISPATCH')});
++  assert.equal(Buffer.from(await storage.read('dispatch-documents/document.pdf')).toString(),'ORIGINAL DISPATCH');
++  const head=await a.files.inspect('dispatch-documents/document.pdf');await storage.discard('dispatch-documents/document.pdf');
++  assert.equal(await storage.read('dispatch-documents/document.pdf'),null);
++  assert.equal((await a.files.readVersion('dispatch-documents/document.pdf',head.versionSha256)).toString(),'ORIGINAL DISPATCH');
++  assert.throws(()=>createScopedVersionedFilesystemDispatchArtifactStorage(v.live,a.files),/FILE_VERSION_STORAGE_ROOT_MISMATCH/);
++ }finally{await v.close();}
++});

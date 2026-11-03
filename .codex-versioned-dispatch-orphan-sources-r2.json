@@ -1,0 +1,30 @@
+[
+  {
+    "path": "backend/src/services/dispatchVersionedOrphanStorage.ts",
+    "sha256": "75dacd8db3dbf6aced713ea46a3e6ae3265cd1d4088d0206ffb014823ce1b630"
+  },
+  {
+    "path": "backend/src/services/dispatchQuarantineFileReceipt.ts",
+    "sha256": "3276d654db8ffa2c9732f957ee5ae33e565c33147a06ef43495f3a737cec78cf"
+  },
+  {
+    "path": "backend/src/services/dispatchDocumentAuditRecovery/index.ts",
+    "sha256": "45aba9545561143e59ea425613669056508ea90f98250448427ca1ba00a45e6f"
+  },
+  {
+    "path": "backend/src/services/dispatchDocumentAuditRecovery/operations.ts",
+    "sha256": "6194aff288e4b795f216d4266a81c65b1452c819e5b714c388dd0880f8cb016c"
+  },
+  {
+    "path": "backend/src/services/__tests__/dispatchDocumentAuditRecovery.test.ts",
+    "sha256": "7eca94bc0d0bc82622f712cfb72813ea0badfc35c273880cc9d9760225db9f19"
+  },
+  {
+    "path": "scripts/run-versioned-file-publication-local.mjs",
+    "sha256": "6ee5b157cc74d75afb7a81680a805d066f5a37cafd09807715c4f303e2111233"
+  },
+  {
+    "path": "tests/online-deployment/versioned-file-orphan.fixture.cjs",
+    "sha256": "a2b486e4332b36ace39b89df1db38a5702e8c6bfa4d8ce07650caf036ee04b8a"
+  }
+]

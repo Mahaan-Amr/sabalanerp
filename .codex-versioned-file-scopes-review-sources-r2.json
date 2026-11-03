@@ -1,0 +1,22 @@
+[
+  {
+    "sha256": "331609b6edc3312fc01b447285a3b219a8b14102afc247bfd33a55e6ac21d7de",
+    "path": "backend/src/services/versionedFilePublication.ts"
+  },
+  {
+    "sha256": "274a91a1d3aed911fbe999f81bbe18e00ae870e26aa0ae5d87b1f2f818fc5254",
+    "path": "backend/src/services/dispatchDocuments/filesystemStorage.ts"
+  },
+  {
+    "sha256": "73b45f176a3bb32363ead17546ea281ac0ec6c26ebe0ed45a0816e2dda1f5924",
+    "path": "backend/src/services/dispatchDocuments/runtime.ts"
+  },
+  {
+    "sha256": "fb4760ecc91093881fe9e886850ca4e1ccf0b777f6f72808128e7bd22c175cc1",
+    "path": "scripts/run-versioned-file-publication-local.mjs"
+  },
+  {
+    "sha256": "3693536fd5715e03cac4b4c3b3e23ac4ed607daf27caee71e9ed660cf5f875d0",
+    "path": "tests/online-deployment/versioned-file-scopes.fixture.cjs"
+  }
+]

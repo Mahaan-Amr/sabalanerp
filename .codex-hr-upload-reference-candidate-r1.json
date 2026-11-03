@@ -1,0 +1,29 @@
+{
+  "format": "sabalan-frozen-component-candidate/v1",
+  "base": "126ee1c88af8fce3a2d09e7de88cc5fc258b7818",
+  "scope": "HR upload reference safety; no online activation",
+  "paths": {
+    "backend/src/routes/hr-duties.ts": "1e7ba5e31b56dea2703d533d17bb87d9c5b33ce6f9af2d53e9ce293826712107",
+    "backend/src/routes/hr-hiring.ts": "87558b10457cb192635db1a4bede937262b14e50b9addbf8d5a998ceb4dd9831",
+    "backend/src/services/durableUpload.ts": "4689b79c28ea94ede2a7eb95a96d21a2bf7805db8f6d3b3d3c35a839dcf37edb",
+    "backend/src/services/hrHiringFileStorage.ts": "7c40d1f05faa447cb7994daf9e043fc6cd8a5231e2a2da64c99ff956c2a38627",
+    "docs/operations/online-deployment.md": "a6aaa5e5daf9b876f45aaa63aa280eb7b92603d39243f4bbf5b3efdc638dc2b3",
+    "reports/qa/hr-erasure-file-recovery-2e45741d1660ef27c155c12fbdcc2565.json": "c5915bb7adc5a3e14e86f545593ae4e1a0daf0a261159e7385c8888f7940d801",
+    "reports/qa/hr-erasure-file-recovery-3c52871cf5fabe02934f7b2d07acdbe3.json": "824aeb882e14d3f8fd663e878d56b7b1f8f6e4da66ae42aab61ffe630b92e5ce",
+    "reports/qa/hr-erasure-file-recovery-3d08e0a6ea0c427783ff12fc28b36314.json": "7f71473654e08c2a94a83c9884f1df356425528c5d229e8dfc0b520dc705bc3e",
+    "reports/qa/hr-erasure-file-recovery-49f7a5d15bb1b15c8af97fd9f5b9e28f.json": "bba91bdba569c88936562f48181c9209d27e4de801a6f727bd9dc7771e51b464",
+    "reports/qa/hr-erasure-file-recovery-61aafbb8bfe51c9510569f15ff705f9b.json": "164ef785bbda0f050f3ad4b4d0c2649c570ca3573edad2873ea3c4259b8b9ff1",
+    "reports/qa/hr-erasure-file-recovery-76216f12ce6f41d35f6930797c4a9020.json": "02ac086e7f6ef5101bbc7d5c9b1ddcad4274ed9fca3237e5bb18797336a011de",
+    "reports/qa/hr-erasure-file-recovery-e3e4f2d0417b3beeebb0193b2c7f27ad.json": "63b48bd4bc7c7ed64111b8c3540243d35858490c016f32c1756666e2afba62ee",
+    "reports/qa/hr-upload-reference-safety-20261019.md": "14c6731304dfa767bc05747f82e1dac49a1555ab39338666a3c6632ca0dfa827",
+    "reports/qa/versioned-upload-5b1cc37a1ee49aca3dd59103be048017.core.json": "46d19df1b7ecd5ca2cf6ed2973a814261a2e94fcb2b08054118161af69f9c441",
+    "reports/qa/versioned-upload-5b1cc37a1ee49aca3dd59103be048017.json": "c4ebcf2b7800d1f48047251468f0a32358f2652e794019396d0b42fbba9018db",
+    "reports/qa/versioned-upload-a15e477ee3853a62d6128969ff45d70a.failed.json": "8dd8420f2f29e882accc8ed9dcadca3f88187626bd72d64c5abacaf007c5228e",
+    "reports/qa/versioned-upload-db47858cc777da9c49efa2e9bebffad2.core.json": "f275417d2a213750fc5632d91a986d0344970a9d6e6fb3c7d61cdb01a8a199a4",
+    "reports/qa/versioned-upload-db47858cc777da9c49efa2e9bebffad2.json": "deb472691bcdf746ac6c0b7ed28264d5ad9f77d1993dd80c204161b24e0a1d82",
+    "scripts/run-hr-erasure-file-recovery-local.mjs": "4ec27167bd28536f8ee1541370c18812b8d4c9bb6ea252450af867c4181c4a64",
+    "scripts/run-versioned-upload-local.mjs": "ff81732617f878d35c52a9fa997e4c539da7d11f37ecce35efdbef212301967f",
+    "tests/online-deployment/hr-erasure-file-retry-http.fixture.ts": "bfda62da4c94cfd53656948be207131a54d7a4d8f989bad11174b4740847c30c",
+    "tests/online-deployment/versioned-upload.fixture.cjs": "6e563eb37a32e5f1bd63c27f3ad9684d0fbfe76ce90319de428a73ac8ce28f11"
+  }
+}

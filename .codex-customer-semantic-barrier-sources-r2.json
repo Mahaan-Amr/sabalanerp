@@ -1,0 +1,29 @@
+{
+  "base": "724f6c775467017ba1c842933ffa3d788a607fca",
+  "files": {
+    "backend/prisma/schema.prisma": "89f0009233f6b25a24293ee0d8a3b5fda5e16005444254f9ce09e17216bbedec",
+    "backend/prisma/migrations/20261019010000_customer_semantic_barrier/migration.sql": "f21138c410c8653d8fcfc46b266c4ae91e82385adb0263fa0696bad9fa36ce55",
+    "backend/src/services/customerSemanticCompatibility.ts": "f15ee14a5baf0611685775b94368475395fe7214294e0147fa05f3840a85d28b",
+    "backend/src/services/accountingCustomerCheckBank.ts": "896565941a426a93c3dc740aeac81906622b541a24777643550ea3702768466f",
+    "backend/src/services/accountingCustomerCheckEndorsement.ts": "470cc4f7cc6d359c38c3735ccb536b1e508a8b5f03c3d46e7a299dfca562c814",
+    "backend/src/services/accountingCustomerCommand.ts": "b8b74bac508db8efd043401f699e0b765107b96bbbd393ab0b0ca52c24b8188f",
+    "backend/src/services/accountingCustomerOpeningAttribution.ts": "6a82d534fb50a6977385d7a4270ebe15154479c7c600310760026a5db58ed8df",
+    "backend/src/services/accountingCustomerReceiptCorrection.ts": "eaa0ea6506344f2eab35abc65ca402239a137bbd2d4bc322cb5c85da0c188443",
+    "backend/src/services/accountingCustomerReceiptParts.ts": "322bcea71cb20858e83a881ba9273d771b6f403ec1e6841785458c3a70d546fe",
+    "backend/src/services/accountingCustomerReceiptResolution.ts": "46c07010c06faba1e8c0cf8859247d2f69934f52421d7d579fa032c246f83a51",
+    "backend/src/services/accountingCustomerTreasuryPrisma.ts": "982682f2c86ed684d006815a1b89314202f1c54077b2409238b4386b082e665a",
+    "backend/src/services/accountingCustomerWorkspace.ts": "1cb123330838f2f2d71425618f0193087946be2e85c022c13732379e0867ed49",
+    "backend/src/services/__tests__/customerFinanceFixture.ts": "44cc29422851d5637f7e8423d91d4286b75d81f46f38d5caa1a1193b9430e28b",
+    "backend/src/services/__tests__/customerSemanticBarrier.integration.test.ts": "65fbe14e6749964860be672996c3f2b62fbdf889823899590637643410714540",
+    "backend/src/services/__tests__/customerSemanticCommandBarrier.integration.test.ts": "be97f8faa9f3c238eadba7fea63519124e8db05a36d9f8f80b4cfe01c42e85f2",
+    "backend/src/services/__tests__/customerSemanticBarrierInstall.integration.test.ts": "e6ee1b39e36135cad60b019afebb306a07b52d01f62a0843c3278ae94fd846fa",
+    "scripts/run-customer-semantic-barrier-local.mjs": "ca568e7a78759aed5accb43e0ed9517cc4202b419fa0a909c120f342cdaf5d43",
+    "docs/operations/online-deployment.md": "f4f972d531a8db330187eb864562be743ebfd4208f9f743fc931e28202b6ec0e",
+    "reports/qa/customer-semantic-barrier-20261019.md": "c9923075ba5e4726265b19250bf88e321898d1c23ceda138075da0f54f51970a",
+    "backend/src/services/__tests__/customerSemanticBarrierRace.integration.test.ts": "c8d01772d91b99ef5b80ec1570ff41d2bb680ec226e7a04b161db022f1a90f91",
+    "reports/qa/customer-semantic-barrier-86a5013662edd7bd101c9ec7a8075f8e.json": "6c3b701ba8894f43be7720bcac7ab8cf75941aa19ef55cecc7b4cb99bca5ef4d",
+    "reports/qa/customer-semantic-barrier-c9099fa2bcfeafa0882f719751f2f278.json": "5766bef585395f7a77cddab53718c43ca8a4678e8a54115f3d01748da054df74",
+    "reports/qa/customer-semantic-barrier-667f8b00ef57d54a9648a50bc0b6d0e7.json": "3c7d9cb037a5426de3cd426bf58584997ece130926f89e3c5d1c61da3f4331b9",
+    "reports/qa/customer-semantic-barrier-e6dff697e2effc8315c6b45de093c3a2.json": "5b72e0848af146ad75c9b021a3d9404ae000a70dbe4bf07c0f4b8cd620c4dfdd"
+  }
+}

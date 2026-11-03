@@ -1,0 +1,1618 @@
+diff --git a/backend/src/index.ts b/backend/src/index.ts
+index d68728f9..bf0992f3 100644
+--- a/backend/src/index.ts
++++ b/backend/src/index.ts
+@@ -1,121 +1,28 @@
++import 'dotenv/config';
++import { readFile } from 'fs/promises';
++import { performance } from 'node:perf_hooks';
++import { createApplication } from './application';
+ import { startBiometricStagedCaptureMaintenance } from './services/biometricStagedCaptureMaintenance';
+ import { stopBackgroundJobs } from './services/backgroundJobLifecycle';
+ import { resolveRuntimeRole, startRuntime } from './services/runtimeStartup';
+ import { assertRuntimeControlAdmission } from './services/runtimeControlOwnership';
+ import { runtimeHttpRequests } from './services/httpRequestLifecycle';
+-import { RealtimeDeliveryLifecycle } from './services/realtimeDeliveryLifecycle';
+-import { deploymentMaintenanceActive } from './services/deploymentMaintenance';
+ import { disconnectDatabase, prisma } from './lib/prisma';
+-import { validateProductionEnvironment } from './services/productionEnvironment';
+-import express from "express";
+-import cors from "cors";
+-import helmet from "helmet";
+-import morgan from "morgan";
+-import "dotenv/config";
+-import path from "path";
+-import { readFile } from "fs/promises";
+-import { createServer } from "http";
+-import { performance } from 'node:perf_hooks';
+-import { Server } from "socket.io";
+-import { registerRealtimePublisher } from "./services/realtimePublisher";
+-import { authorizeHrUser } from "./services/hrAuthorizationService";
+-import { normalizeStructuredNumeralsMiddleware } from './middleware/normalizeStructuredNumerals';
+-
+-// Import routes
+-import authRoutes from "./routes/auth";
+-import userRoutes from "./routes/users";
+-import postRoutes from "./routes/posts";
+-import orderRoutes from "./routes/orders";
+-import contractRoutes from "./routes/contracts";
+-import contractTemplateRoutes from "./routes/contractTemplates";
+-import customerRoutes from "./routes/customers";
+-import departmentRoutes from "./routes/departments";
+-import personnelRoutes from "./routes/personnel";
+-import dashboardRoutes from "./routes/dashboard";
+-import personalRoutes from "./routes/personal";
+-import securityRoutes from "./routes/security";
+-import sabalanCalendarRoutes from "./routes/sabalan-calendar";
+-
+-// Import workspace routes
+-import salesRoutes from "./routes/sales";
+-import dispatchCreditRoutes from "./routes/dispatchCredit";
+-import crmRoutes from "./routes/crm";
+-import inventoryRoutes from "./routes/inventory";
+-import accountingRoutes from "./routes/accounting";
+-import biRoutes from "./routes/bi";
+-import logisticsRoutes from "./routes/logistics";
+-import hrRoutes from "./routes/hr";
+-import hrHiringRoutes from "./routes/hr-hiring";
+-import hrApplicantExperienceRoutes from "./routes/hr-applicant-experience";
+-import crossWorkspaceDutyRoutes from "./routes/hr-duties";
+-import workspacePermissionsRoutes from "./routes/workspace-permissions";
+-import permissionsRoutes from "./routes/permissions";
+-import productsRoutes from "./routes/products";
+-import servicesRoutes from "./routes/services";
+-import cuttingTypesRoutes from "./routes/cutting-types";
+-import subServicesRoutes from "./routes/sub-services";
+-import stairStandardLengthRoutes from "./routes/stair-standard-lengths";
+-import layerTypesRoutes from "./routes/layer-types";
+-import stoneFinishingRoutes from "./routes/stone-finishings";
+-import catalogExcelRoutes from "./routes/catalog-excel";
+-import publicContractsRoutes from "./routes/public-contracts";
+-import uploadsRoutes from "./routes/uploads";
+-import testHrHiringSmsRoutes from "./routes/test-hr-hiring-sms";
+-import systemRecoveryRoutes from "./routes/system-recovery";
+-import notificationRoutes from "./routes/notifications";
+-import supportTicketRoutes from "./routes/support-tickets";
+-import dispatchMasterDataRoutes from "./routes/dispatch-master-data";
+-import biometricConnectorRoutes from "./routes/biometric-connector";
+-import dispatchConfirmationRoutes from "./routes/dispatch-confirmation";
+-import shipmentQuantityRoutes from "./routes/shipment-quantities";
+-import dispatchCaseRoutes from "./routes/dispatch-cases";
+-import dispatchCutoverRoutes from "./routes/dispatch-cutover";
+-import shipmentStatementOperationsRoutes from "./routes/shipment-statement-operations";
+-import partnerTechnicalRoutes from "./routes/partner-technical";
+-import partnerTechnicalPolicyRoutes from "./routes/partner-technical-policy";
+-import partnerInquiryRoutes from "./routes/partner-inquiries";
+-import partnerManagementRoutes from "./routes/partner-management";
+-import partnerWorkspaceRoutes from "./routes/partner-workspaces";
+-import partnerCaseRoutes from "./routes/partner-cases";
+-import partnerRetailCollectionRoutes from "./routes/partner-retail-collections";
+-import partnerFulfillmentRoutes from "./routes/partner-fulfillment";
+-import partnerCorrectionRoutes from "./routes/partner-corrections";
+-import partnerAccountingRoutes from "./routes/partner-accounting";
+-import partnerReportRoutes from "./routes/partner-reports";
+-import partnerOperationsRoutes from "./routes/partner-operations";
+-import partnerActivationRoutes from "./routes/partner-activation";
+-
+-// Import middleware
+-import { errorHandler } from "./middleware/errorHandler";
+-import { notFound } from "./middleware/notFound";
+-import { startAuthenticationRetentionCleanup } from "./services/authenticationRetentionService";
+-import { startHiringInvitationDeliveryPolling } from "./services/hrHiringDeliveryPollingService";
+-import { startPersonnelErasureRecovery } from "./services/hrPersonnelErasureRecovery";
+-import {
+-  getRecoveryRuntimeState,
+-  RECOVERY_COORDINATION_DIR,
+-  withRecoveryBackgroundWrite,
+-  initializeRecoveryRuntime,
+-  recoveryWriteGuard,
+-  waitForActiveWrites,
+-  waitForRecoveryOperationDrain,
+-} from "./services/recoveryRuntime";
+-import {
+-  initializeSystemRecovery,
+-  startSystemRecoveryMaintenance,
+-} from "./services/systemRecoveryLifecycle";
+-import { startNotificationOutboxDelivery } from "./services/notificationService";
+-import { startSupportTicketMaintenance } from "./services/supportTicketMaintenance";
+-import { startHrVehicleAssignmentMaintenance } from "./services/hrVehicleAssignmentWorker";
+-import { startDispatchBuyerSmsDelivery } from "./services/dispatchBuyerSmsWorker";
+-import { startContractCancellationNoticeDelivery } from "./services/contractCancellationNotice";
+-import { startAccountingTaxpayerOutboxDelivery } from "./services/accountingTaxpayerOutboxWorker";
+-import { startCrossWorkspaceDutyDeadlineMaintenance } from "./services/crossWorkspaceDutyModule";
+-import { registerPartnerNotificationAccess } from "./services/partnerSales/notifications/access";
+-import { inquiryNotificationAccess, startPartnerInquiryNotificationDelivery } from "./services/partnerSales/notifications/inquiryDelivery";
+-import { verifyHrRedesignCutover } from "./services/hrRedesignCutover";
+-import { resolveHrRedesignCutoverStartup } from "./services/hrRedesignCutoverStartup";
+-import { startPersonnelPerformanceMaintenance } from "./services/personnelPerformanceMaintenance";
++import { startAuthenticationRetentionCleanup } from './services/authenticationRetentionService';
++import { startHiringInvitationDeliveryPolling } from './services/hrHiringDeliveryPollingService';
++import { startPersonnelErasureRecovery } from './services/hrPersonnelErasureRecovery';
++import { getRecoveryRuntimeState, initializeRecoveryRuntime, waitForActiveWrites, waitForRecoveryOperationDrain } from './services/recoveryRuntime';
++import { initializeSystemRecovery, startSystemRecoveryMaintenance } from './services/systemRecoveryLifecycle';
++import { startNotificationOutboxDelivery } from './services/notificationService';
++import { startSupportTicketMaintenance } from './services/supportTicketMaintenance';
++import { startHrVehicleAssignmentMaintenance } from './services/hrVehicleAssignmentWorker';
++import { startDispatchBuyerSmsDelivery } from './services/dispatchBuyerSmsWorker';
++import { startContractCancellationNoticeDelivery } from './services/contractCancellationNotice';
++import { startAccountingTaxpayerOutboxDelivery } from './services/accountingTaxpayerOutboxWorker';
++import { startCrossWorkspaceDutyDeadlineMaintenance } from './services/crossWorkspaceDutyModule';
++import { startPartnerInquiryNotificationDelivery } from './services/partnerSales/notifications/inquiryDelivery';
++import { verifyHrRedesignCutover } from './services/hrRedesignCutover';
++import { startPersonnelPerformanceMaintenance } from './services/personnelPerformanceMaintenance';
+ import { startOrdinaryContractExpiry } from './services/ordinaryContractLifecycle';
+ 
+ const runtimeRole = resolveRuntimeRole(process.env.BACKEND_RUNTIME_ROLE);
+@@ -123,265 +30,12 @@ if (runtimeRole === 'standalone') {
+   assertRuntimeControlAdmission();
+   initializeRecoveryRuntime();
+ }
+-registerPartnerNotificationAccess(inquiryNotificationAccess);
+-const app = express();
+-app.set("trust proxy", 1);
+-const server = createServer(app);
+ let isShuttingDown = false;
+-const isProduction = process.env.NODE_ENV === "production";
+-const configuredFrontendUrl = process.env.FRONTEND_URL;
+-
+-validateProductionEnvironment();
+-const hrRedesignCutoverStartup = isProduction
+-  ? resolveHrRedesignCutoverStartup(process.env)
+-  : { enabled: false, acceptancePath: null, sourceRevision: null };
+-
+-const allowedOrigins = (configuredFrontendUrl || "")
+-  .split(",")
+-  .map((origin) => origin.trim())
+-  .filter(Boolean);
+-
+-const resolveCorsOrigin = () => {
+-  if (!isProduction) {
+-    return configuredFrontendUrl || "http://localhost:3000";
+-  }
+-  return allowedOrigins;
+-};
+-
+-const io = new Server(server, {
+-  cors: {
+-    origin: resolveCorsOrigin(),
+-    methods: ["GET", "POST"],
+-    credentials: true,
+-  },
+-});
+-const realtimeDelivery = new RealtimeDeliveryLifecycle(prisma, () => io.sockets.sockets.values(), async userId => {
+-  const authorization = await authorizeHrUser(prisma, userId, {
+-    workspaceLevel: 'VIEW', feature: { code: 'PERSONNEL', level: 'VIEW' },
+-  });
+-  return authorization.allowed;
+-}, () => runtimeRole === 'standalone' && !isShuttingDown && getRecoveryRuntimeState().mode === 'NORMAL'
+-  && !deploymentMaintenanceActive(RECOVERY_COORDINATION_DIR), async work => {
+-  const result = await withRecoveryBackgroundWrite(async () => ({ value: await work() }));
+-  if (!result) throw new Error('REALTIME_DELIVERY_UNAVAILABLE');
+-  return result.value;
++const { app, server, io, realtimeDelivery, hrRedesignCutoverStartup } = createApplication({
++  runtimeRole, isShuttingDown: () => isShuttingDown,
+ });
+-
+ const PORT = process.env.PORT || 5000;
+ 
+-// Middleware
+-app.use(helmet());
+-app.use((req, res, next) => {
+-  const probe = req.path === '/api/health' || req.path === '/api/ready';
+-  if (!probe && (isShuttingDown || runtimeRole === 'candidate')) {
+-    res.status(503).json({ success: false, error: isShuttingDown ? 'RUNTIME_DRAINING' : 'CANDIDATE_NOT_ACTIVE',
+-      message: 'سامانه در حال آماده‌سازی نسخه است؛ کمی بعد دوباره تلاش کنید.' });
+-    return;
+-  }
+-  next();
+-});
+-app.use(runtimeHttpRequests.middleware);
+-app.use(
+-  cors({
+-    origin: resolveCorsOrigin(),
+-    credentials: true,
+-  }),
+-);
+-app.use(morgan("combined"));
+-app.use(express.json({ limit: "10mb" }));
+-app.use(express.urlencoded({ extended: true }));
+-app.use(normalizeStructuredNumeralsMiddleware);
+-app.use(recoveryWriteGuard);
+-
+-// Routes
+-app.use("/api/system-recovery", systemRecoveryRoutes);
+-app.use("/api/auth", authRoutes);
+-app.use("/api/notifications", notificationRoutes);
+-app.use("/api/support-tickets", supportTicketRoutes);
+-app.use("/api/dispatch-master-data", dispatchMasterDataRoutes);
+-app.use("/api/biometric-connector", biometricConnectorRoutes);
+-app.use("/api/dispatch-confirmation", dispatchConfirmationRoutes);
+-app.use("/api/shipment-quantities", shipmentQuantityRoutes);
+-app.use("/api/dispatch-cases", dispatchCaseRoutes);
+-app.use("/api/dispatch-cutover", dispatchCutoverRoutes);
+-app.use("/api/shipment-statement-operations", shipmentStatementOperationsRoutes);
+-app.use("/api/partner/technical", partnerTechnicalRoutes);
+-app.use("/api/partner/management/technical-policy", partnerTechnicalPolicyRoutes);
+-app.use("/api/partner/inquiries", partnerInquiryRoutes);
+-app.use("/api/partner/management", partnerManagementRoutes);
+-app.use("/api/partner/workspaces", partnerWorkspaceRoutes);
+-app.use("/api/partner/cases", partnerCaseRoutes);
+-app.use("/api/partner/retail-collections", partnerRetailCollectionRoutes);
+-app.use("/api/partner/fulfillment", partnerFulfillmentRoutes);
+-app.use("/api/partner/corrections", partnerCorrectionRoutes);
+-app.use("/api/partner/accounting", partnerAccountingRoutes);
+-app.use("/api/partner/reports", partnerReportRoutes);
+-app.use("/api/partner/operations", partnerOperationsRoutes);
+-app.use("/api/partner/activation", partnerActivationRoutes);
+-app.use("/api/users", userRoutes);
+-app.use("/api/posts", postRoutes);
+-app.use("/api/orders", orderRoutes);
+-app.use("/api/contracts", contractRoutes);
+-app.use("/api/contract-templates", contractTemplateRoutes);
+-app.use("/api/customers", customerRoutes);
+-app.use("/api/departments", departmentRoutes);
+-app.use("/api/personnel", personnelRoutes);
+-app.use("/api/dashboard", dashboardRoutes);
+-app.use("/api/personal", personalRoutes);
+-app.use("/api/sabalan-calendar", sabalanCalendarRoutes);
+-
+-// Workspace-specific routes
+-app.use("/api/security", securityRoutes);
+-
+-// Workspace-specific routes
+-if (!isProduction) console.log("? Registering workspace routes...");
+-app.use("/api/sales", salesRoutes);
+-app.use("/api/dispatch-credit", dispatchCreditRoutes);
+-app.use("/api/crm", crmRoutes);
+-app.use("/api/inventory", inventoryRoutes);
+-app.use("/api/accounting", accountingRoutes);
+-app.use("/api/bi", biRoutes);
+-app.use("/api/logistics", logisticsRoutes);
+-app.use("/api/hr", hrRoutes);
+-app.use("/api/hr-duties", crossWorkspaceDutyRoutes);
+-app.use("/api/duties", crossWorkspaceDutyRoutes);
+-app.use("/api/hr-hiring", hrApplicantExperienceRoutes);
+-app.use("/api/hr-hiring", hrHiringRoutes);
+-app.use("/api/workspace-permissions", workspacePermissionsRoutes);
+-app.use("/api/permissions", permissionsRoutes);
+-app.use("/api/catalog-excel", catalogExcelRoutes);
+-if (!isProduction) console.log("? Registering products routes...");
+-app.use("/api/products", productsRoutes);
+-if (!isProduction) console.log("? Registering services routes...");
+-app.use("/api/services", servicesRoutes);
+-if (!isProduction) console.log("? Registering cutting types routes...");
+-app.use("/api/cutting-types", cuttingTypesRoutes);
+-if (!isProduction) console.log("? Registering sub-services routes...");
+-app.use("/api/sub-services", subServicesRoutes);
+-if (!isProduction) console.log("? Registering stair standard length routes...");
+-app.use("/api/stair-standard-lengths", stairStandardLengthRoutes);
+-if (!isProduction) console.log("? Registering layer type routes...");
+-app.use("/api/layer-types", layerTypesRoutes);
+-if (!isProduction) console.log("? Registering stone finishing routes...");
+-app.use("/api/stone-finishings", stoneFinishingRoutes);
+-app.use("/api/uploads", uploadsRoutes);
+-app.use("/api/public", publicContractsRoutes);
+-if (process.env.NODE_ENV === "test" && process.env.HR_HIRING_E2E === "true") {
+-  app.use("/api/test/hr-hiring-sms", testHrHiringSmsRoutes);
+-}
+-if (!isProduction) console.log("? All routes registered successfully");
+-
+-// Static files for generated PDFs (contracts)
+-app.use(
+-  "/files/contracts",
+-  express.static(path.join(process.cwd(), "storage", "contracts"), {
+-    etag: false,
+-    maxAge: "0",
+-    setHeaders: (res) => {
+-      res.setHeader(
+-        "Cache-Control",
+-        "no-store, no-cache, must-revalidate, proxy-revalidate",
+-      );
+-      res.setHeader("Pragma", "no-cache");
+-      res.setHeader("Expires", "0");
+-      res.setHeader("Surrogate-Control", "no-store");
+-    },
+-  }),
+-);
+-
+-app.use(
+-  "/files/accounting-contracts",
+-  express.static(path.join(process.cwd(), "storage", "accounting-contracts"), {
+-    dotfiles: "deny",
+-    etag: false,
+-    maxAge: "0",
+-    setHeaders: (res) => {
+-      res.setHeader(
+-        "Cache-Control",
+-        "no-store, no-cache, must-revalidate, proxy-revalidate",
+-      );
+-      res.setHeader("Pragma", "no-cache");
+-      res.setHeader("Expires", "0");
+-      res.setHeader("Surrogate-Control", "no-store");
+-    },
+-  }),
+-);
+-
+-app.use(
+-  "/files/uploads/images",
+-  express.static(path.join(process.cwd(), "uploads", "images"), {
+-    etag: false,
+-    maxAge: "1h",
+-  }),
+-);
+-
+-app.get("/favicon.ico", (_req, res) => {
+-  res.status(204).end();
+-});
+-
+-// Health check
+-app.get("/api/health", async (req, res) => {
+-  try {
+-    await prisma.$queryRaw`SELECT 1`;
+-    res.json({
+-      status: "OK",
+-      database: "OK",
+-      timestamp: new Date().toISOString(),
+-      uptime: process.uptime(),
+-    });
+-  } catch (error) {
+-    res.status(503).json({
+-      status: "DEGRADED",
+-      database: "DOWN",
+-      timestamp: new Date().toISOString(),
+-    });
+-  }
+-});
+-
+-app.get("/api/ready", async (req, res) => {
+-  if (isShuttingDown) {
+-    res.status(503).json({ ready: false, reason: "SHUTTING_DOWN" });
+-    return;
+-  }
+-  try {
+-    await prisma.$queryRaw`SELECT 1`;
+-    res.json({ ready: true, runtimeRole });
+-  } catch (error) {
+-    res.status(503).json({ ready: false });
+-  }
+-});
+-
+-// Socket.io connections use the same authoritative, revocable session cookie as HTTP.
+-io.use(async (socket, next) => {
+-  if (runtimeRole === 'candidate' || isShuttingDown) return next(new Error('Runtime is not accepting connections'));
+-  try {
+-    await realtimeDelivery.authenticate(socket);
+-    if (isShuttingDown) { socket.disconnect(true); return next(new Error('Runtime is draining')); }
+-    next();
+-  } catch {
+-    next(new Error("Authentication required"));
+-  }
+-});
+-
+-// Socket.io connection handling
+-io.on("connection", (socket) => {
+-  if (!isProduction) console.log("User connected:", socket.id);
+-  socket.join(`user-${socket.data.userId}`);
+-
+-  socket.on("disconnect", () => {
+-    if (!isProduction) console.log("User disconnected:", socket.id);
+-  });
+-});
+-
+-registerRealtimePublisher((event) => {
+-  void realtimeDelivery.invalidate(event).catch(() => console.error('REALTIME_INVALIDATION_FAILED'));
+-});
+-
+-// Error handling middleware
+-app.use(notFound);
+-app.use(errorHandler);
+-runtimeHttpRequests.install(app);
+-
+ // Start only after interrupted recovery has been finalized or safely rolled back.
+ startRuntime(runtimeRole, {
+   assertControlOwnership: assertRuntimeControlAdmission,
+diff --git a/backend/src/routes/accountingPeriodEnd.ts b/backend/src/routes/accountingPeriodEnd.ts
+index 1d09f134..187a47c9 100644
+--- a/backend/src/routes/accountingPeriodEnd.ts
++++ b/backend/src/routes/accountingPeriodEnd.ts
+@@ -22,6 +22,7 @@ import { recordOperationalReconciliation } from '../services/accountingOperation
+ import { buildOfficialReportExportRows, officialReportPeriodLabels, officialReportPdfPageSize } from '../services/accountingOfficialReportExport';
+ import { parseOfficialReportDate } from '../services/accountingOfficialReportDates';
+ import { retainOfficialReportArtifact } from '../services/accountingOfficialReportArtifact';
++import { ACCOUNTING_OFFICIAL_REPORT_ROOT, versionedAccountingReportFiles } from '../services/accountingFileRuntime';
+ 
+ const router = express.Router();
+ const viewAccess = [protect, requireWorkspaceAccessWithClient(prisma, WORKSPACES.ACCOUNTING, WORKSPACE_PERMISSIONS.VIEW)];
+@@ -88,7 +89,7 @@ const frozenExport = (snapshotId: string, format: 'pdf' | 'xlsx', render: () =>
+   const stored = await tx.accountingOfficialReportSnapshot.findUniqueOrThrow({ where: { id: snapshotId } });
+   const field = format === 'pdf' ? 'pdfHash' : 'excelHash';
+   return retainOfficialReportArtifact({ snapshotId, format, existingHash: stored[field],
+-    root: path.join(process.cwd(), 'storage', 'accounting-contracts', '.official-reports'), render,
++    root: ACCOUNTING_OFFICIAL_REPORT_ROOT, files: versionedAccountingReportFiles(), render,
+     recordHash: async (hash) => { await tx.accountingOfficialReportSnapshot.update({ where: { id: snapshotId }, data: { [field]: hash } }); },
+   });
+ }, { timeout: 180_000, maxWait: 180_000 });
+diff --git a/backend/src/services/accountingOfficialReportArtifact.ts b/backend/src/services/accountingOfficialReportArtifact.ts
+index 9bfebc56..307d33d1 100644
+--- a/backend/src/services/accountingOfficialReportArtifact.ts
++++ b/backend/src/services/accountingOfficialReportArtifact.ts
+@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
+ import { promises as fs } from 'node:fs';
+ import path from 'node:path';
+ import { publishDurableFile, syncExistingDurableFile } from './durableFilePublication';
++import { assertVersionedFileRootScope, type VersionedFileRootScope } from './versionedFilePublication';
+ 
+ const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+ 
+@@ -9,13 +10,22 @@ const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex
+ export async function retainOfficialReportArtifact(input: {
+   snapshotId: string; format: 'pdf' | 'xlsx'; existingHash: string | null;
+   root: string; render: () => Promise<Buffer>; recordHash: (hash: string) => Promise<void>;
++  files?: VersionedFileRootScope;
+ }) {
++  // Explicit private composition only: an injected owner must be genuine and
++  // confined to the exact report root, including frozen-read-only requests.
++  if (input.files !== undefined) assertVersionedFileRootScope(input.files, input.root);
+   if (!/^[a-zA-Z0-9_-]+$/.test(input.snapshotId)) throw new Error('شناسه گزارش معتبر نیست.');
+   const directory = path.join(input.root, input.snapshotId);
+   if (input.existingHash) {
+     if (!/^[a-f0-9]{64}$/.test(input.existingHash)) throw new Error('اثر انگشت خروجی معتبر نیست.');
+     let bytes: Buffer;
+-    try { bytes = await fs.readFile(path.join(directory, `${input.existingHash}.${input.format}`)); }
++    try {
++      const key = `${input.snapshotId}/${input.existingHash}.${input.format}`;
++      const frozen = input.files ? await input.files.read(key) : await fs.readFile(path.join(input.root, key));
++      if (!frozen) throw new Error('OFFICIAL_REPORT_ARTIFACT_MISSING');
++      bytes = frozen;
++    }
+     catch { throw new Error('فایل منجمد این نسخه در دسترس نیست؛ بازیابی فایل یا ساخت نسخه جدید گزارش لازم است.'); }
+     if (digest(bytes) !== input.existingHash) throw new Error('اثر انگشت فایل منجمد با سابقه گزارش مطابقت ندارد.');
+     return { bytes, hash: input.existingHash };
+@@ -23,10 +33,18 @@ export async function retainOfficialReportArtifact(input: {
+   const bytes = await input.render();
+   const hash = digest(bytes);
+   const target = path.join(directory, `${hash}.${input.format}`);
+-  try { await publishDurableFile(target, bytes); }
+-  catch (error: any) { if (error.code !== 'EEXIST') throw error; }
+-  if (digest(await fs.readFile(target)) !== hash) throw new Error('ذخیره فایل منجمد تأیید نشد.');
+-  await syncExistingDurableFile(target);
++  if (input.files) {
++    const key = `${input.snapshotId}/${hash}.${input.format}`;
++    try { await input.files.publish(key, bytes); }
++    catch (error: any) { if (error?.code !== 'FILE_VERSION_ALREADY_EXISTS') throw error; }
++    const frozen = await input.files.read(key);
++    if (!frozen || digest(frozen) !== hash) throw new Error('ذخیره فایل منجمد تأیید نشد.');
++  } else {
++    try { await publishDurableFile(target, bytes); }
++    catch (error: any) { if (error.code !== 'EEXIST') throw error; }
++    if (digest(await fs.readFile(target)) !== hash) throw new Error('ذخیره فایل منجمد تأیید نشد.');
++    await syncExistingDurableFile(target);
++  }
+   await input.recordHash(hash);
+   return { bytes, hash };
+ }
+diff --git a/backend/src/services/versionedFilePublication.ts b/backend/src/services/versionedFilePublication.ts
+index bacf7eab..07763b2b 100644
+--- a/backend/src/services/versionedFilePublication.ts
++++ b/backend/src/services/versionedFilePublication.ts
+@@ -5,6 +5,7 @@ import path from 'node:path';
+ import { createHash, randomUUID } from 'node:crypto';
+ import { Readable } from 'node:stream';
+ import { RuntimeWorkContext } from './runtimeWorkContext';
++import type { NativeFileCaptureAuthority } from './nativeFileCaptureAuthority';
+ import { publishDurableFile, publishDurableStream, removeDurableFile, syncExistingDurableFile } from './durableFilePublication';
+ 
+ type Identity = { device: string; inode: string; bytes: string; modified: string; changed: string };
+@@ -99,7 +100,33 @@ export class VersionedFilePublication {
+   private readonly directories = new Map<string, Identity>();
+ 
+   private constructor(private readonly root: string, private readonly liveRoot: string,
+-    private readonly work: RuntimeWorkContext) {}
++    private readonly admittedWork?: RuntimeWorkContext, private readonly capture?: NativeFileCaptureAuthority) {}
++
++  private get work(): RuntimeWorkContext {
++    if (!this.admittedWork) return fail('FILE_CAPTURE_LIVE_WRITE_FORBIDDEN');
++    return this.admittedWork;
++  }
++
++  private gateIdentity() { return this.capture ? this.capture.gateIdentity() : this.work.gateIdentity(); }
++
++  /** Read an existing store under its genuine native capture owner. No normal
++   * SH work is entered while FD10 owns EX; no application-work stand-in is
++   * constructed. The returned port exposes only this capture's immutable seal. */
++  static async openForCapture(authority: NativeFileCaptureAuthority) {
++    const { assertNativeFileCaptureAuthority } = await import('./nativeFileCaptureAuthority');
++    assertNativeFileCaptureAuthority(authority);
++    const { root, liveRoot } = authority.source;
++    const overlap = path.relative(root, liveRoot), reverse = path.relative(liveRoot, root);
++    if (!overlap || (!overlap.startsWith('..' + path.sep) && !path.isAbsolute(overlap))
++      || (!reverse.startsWith('..' + path.sep) && !path.isAbsolute(reverse))) fail('FILE_VERSION_ROOT_OVERLAP');
++    const owner = new VersionedFilePublication(root, liveRoot, undefined, authority);
++    for (const directory of [root, liveRoot, ...['objects', 'versions', 'heads', 'pending', 'seals', 'reservations'].map(name => path.join(root, name))]) {
++      owner.directories.set(directory, await privateDirectory(directory));
++      authority.assertOwned();
++    }
++    await owner.assertDirectories();
++    return Object.freeze({ seal: () => owner.seal(authority.captureId, 10) });
++  }
+ 
+   static async open(root: string, liveRoot: string, work: RuntimeWorkContext) {
+     if (process.platform !== 'linux' || !(work instanceof RuntimeWorkContext)) fail('FILE_VERSION_ADMITTED_LINUX_REQUIRED');
+@@ -124,16 +151,18 @@ export class VersionedFilePublication {
+   }
+ 
+   private async assertDirectories() {
++    this.capture?.assertOwned();
+     for (const [directory, expected] of this.directories) {
+       const actual = await privateDirectory(directory);
+       if (actual.device !== expected.device || actual.inode !== expected.inode) fail('FILE_VERSION_DIRECTORY_CHANGED');
+     }
++    this.capture?.assertOwned();
+   }
+ 
+   ownsRoot(root: string) { return path.resolve(root) === this.liveRoot; }
+ 
+   /** Domain journals must retain this same admission through SQL and files. */
+-  ownsWork(work: RuntimeWorkContext) { return work === this.work; }
++  ownsWork(work: RuntimeWorkContext) { return !!this.admittedWork && work === this.admittedWork; }
+ 
+   /** Bind existing private subdirectories to the same completion, capacity and
+    * version owner. This grants a confined port, never release/root coverage.
+@@ -270,7 +299,7 @@ export class VersionedFilePublication {
+   }
+ 
+   private cutManifest(captureId: string, heads: Array<{ key: string; sha256: string }>) {
+-    return { format: 'sabalan-file-version-cut/v1', captureId, gate: this.work.gateIdentity(),
++    return { format: 'sabalan-file-version-cut/v1', captureId, gate: this.gateIdentity(),
+       source: { path: this.liveRoot, device: this.directories.get(this.liveRoot)!.device, inode: this.directories.get(this.liveRoot)!.inode }, heads };
+   }
+ 
+@@ -671,8 +700,9 @@ export class VersionedFilePublication {
+   }
+ 
+   private exclusiveGate(exclusiveGateFd: number) {
+-    const expected = this.work.gateIdentity();
++    const expected = this.gateIdentity();
+     const assertGate = () => {
++      this.capture?.assertOwned();
+       const value = nativeFs.fstatSync(exclusiveGateFd, { bigint: true });
+       const named = nativeFs.readlinkSync('/proc/self/fd/' + exclusiveGateFd);
+       const parent = nativeFs.lstatSync(path.dirname(named), { bigint: true });
+diff --git a/deploy/scripts/browser-operation-journal.mjs b/deploy/scripts/browser-operation-journal.mjs
+index 523019cd..43c7dcc2 100644
+--- a/deploy/scripts/browser-operation-journal.mjs
++++ b/deploy/scripts/browser-operation-journal.mjs
+@@ -1,4 +1,5 @@
+ import fs from 'node:fs/promises';
++import {constants} from 'node:fs';
+ import path from 'node:path';
+ import {createHash,randomBytes} from 'node:crypto';
+ 
+@@ -75,7 +76,7 @@ export class BrowserOperationJournal {
+       || !digest.test(record.instanceId) || !digest.test(record.registryIdentity) || !digest.test(record.manifestSha256)
+       || !Number.isSafeInteger(record.generation) || record.generation<1
+       || !name.test(record.buildId) || !name.test(record.slotId) || !/^sha256:[a-f0-9]{64}$/.test(record.image)
+-      || !['GET','HEAD','POST','OPTIONS'].includes(record.method) || !timestamp(record.startedAt)) fail('BROWSER_JOURNAL_INTENT_INVALID');
++      || !['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(record.method) || !timestamp(record.startedAt)) fail('BROWSER_JOURNAL_INTENT_INVALID');
+   }
+ 
+   async begin({registryIdentity,generation,buildId,slotId,image,manifestSha256,method}) {
+@@ -101,9 +102,30 @@ export class BrowserOperationJournal {
+       const existing=await this.#readStrict(file);
+       this.#validateCompletion(existing.value,intent,id);
+       if(existing.value.outcome!==outcome)fail('BROWSER_JOURNAL_COMPLETION_CONFLICT');
++      // A prior attempt can have created this exact file but failed before its
++      // directory fsync. EEXIST proves visibility, not durable completion.
++      await this.#persistExistingCompletion(file,existing.hash);
+     }
+   }
+ 
++  async #persistExistingCompletion(file,expectedHash) {
++    await this.#assertRoot();
++    const handle=await fs.open(file,(process.platform==='win32'?constants.O_RDWR:constants.O_RDONLY)
++      | constants.O_NOFOLLOW | constants.O_NONBLOCK);
++    const identity=value=>[value.dev,value.ino,value.size,value.mtimeNs,value.ctimeNs,value.mode,value.uid,value.nlink].map(String).join(':');
++    try {
++      const before=await handle.stat({bigint:true});
++      if(!before.isFile() || before.nlink!==1n || before.size>4096n
++        || (process.platform!=='win32' && ((before.mode&0o077n)!==0n || before.uid!==BigInt(process.getuid()))))fail('BROWSER_JOURNAL_RECORD_UNSAFE');
++      if(sha256(await handle.readFile())!==expectedHash)fail('BROWSER_JOURNAL_COMPLETION_CONFLICT');
++      await handle.sync();
++      if(identity(before)!==identity(await handle.stat({bigint:true}))
++        || identity(before)!==identity(await fs.lstat(file,{bigint:true})))fail('BROWSER_JOURNAL_COMPLETION_CONFLICT');
++      await this.#syncDirectory();await this.#assertRoot();
++      if(identity(before)!==identity(await fs.lstat(file,{bigint:true})))fail('BROWSER_JOURNAL_COMPLETION_CONFLICT');
++    } finally {await handle.close();}
++  }
++
+   #validateCompletion(record,intent,id) {
+     if(!exact(record,['format','id','instanceId','intentSha256','outcome','completedAt'])
+       || record.format!=='sabalan-browser-operation-completion/v1' || record.id!==id
+diff --git a/deploy/scripts/browser-release-proxy.mjs b/deploy/scripts/browser-release-proxy.mjs
+index 42e76ad2..ac188379 100644
+--- a/deploy/scripts/browser-release-proxy.mjs
++++ b/deploy/scripts/browser-release-proxy.mjs
+@@ -1,5 +1,6 @@
+ import http from 'node:http';
+ import {compileBrowserRoutingRegistry,selectBrowserRelease,nativeActionIdentity,browserRoutingIdentity} from './browser-release-routing.mjs';
++import {compileApiRoutingRegistry,selectApiRelease,apiRoutingIdentity} from './api-release-routing.mjs';
+ 
+ const excluded = new Set(['connection','proxy-connection','keep-alive','te','trailer','transfer-encoding','upgrade','proxy-authorization','proxy-authenticate']);
+ function forwardedHeaders(headers) {
+@@ -11,8 +12,18 @@ const error=(code,status=503)=>Object.assign(new Error(code),{code,status});
+ /** Private UI transport primitive. Admission, persistent publication and live
+  * runtime proof belong to the deployment controller, not to client headers or
+  * this selector. There is intentionally no production CLI/listener here. */
+-export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicationsByHost,
+-  operationJournal,bodyLimit=10*1024*1024,totalBodyLimit=32*1024*1024,timeoutMs=90000}) {
++export function createBrowserReleaseProxy(options) { return createReleaseProxy(options,false); }
++
++/** Separate private business transport. Browser and backend bindings must be
++ * read from one owned, atomically published snapshot. Authentication/session
++ * and domain authorization remain enforced by the selected canonical backend.
++ * No public listener, compatibility attestation or release admission is added. */
++export function createApiReleaseProxy({loadSnapshot,...options}) {
++  return createReleaseProxy({...options,loadRegistry:loadSnapshot},true);
++}
++
++function createReleaseProxy({loadRegistry,slotEndpoints,applicationsByHost,
++  operationJournal,bodyLimit=10*1024*1024,totalBodyLimit=32*1024*1024,timeoutMs=90000},api) {
+   if(typeof loadRegistry!=='function' || !Number.isSafeInteger(bodyLimit) || bodyLimit<1
+     || !Number.isSafeInteger(totalBodyLimit) || totalBodyLimit<bodyLimit
+     || !Number.isInteger(timeoutMs) || timeoutMs<1000 || timeoutMs>240000
+@@ -21,13 +32,14 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
+   const endpoints=new Map(),hosts=new Map();
+   for(const endpoint of slotEndpoints) {
+     if(!/^[a-z][a-z0-9_-]{7,95}$/.test(endpoint.slotId) || endpoints.has(endpoint.slotId)
+-      || !/^(frontend|inquiry)(?:-[a-z0-9]+)*$/.test(endpoint.host)
++      || !(api ? /^backend(?:-[a-z0-9]+)*$/ : /^(frontend|inquiry)(?:-[a-z0-9]+)*$/).test(endpoint.host)
+       || !Number.isInteger(endpoint.port) || endpoint.port<1024 || endpoint.port>65535
+-      || !/^sha256:[a-f0-9]{64}$/.test(endpoint.image)) throw error('BROWSER_PROXY_ENDPOINT_INVALID');
++      || !/^sha256:[a-f0-9]{64}$/.test(endpoint.image)
++      || (api && !/^[a-f0-9]{64}$/.test(endpoint.manifestSha256))) throw error('BROWSER_PROXY_ENDPOINT_INVALID');
+     endpoints.set(endpoint.slotId,Object.freeze({...endpoint}));
+   }
+   for(const [host,application] of Object.entries(applicationsByHost)) {
+-    if(!/^[a-z0-9.-]+(?::[0-9]{1,5})?$/.test(host) || !['erp','inquiry'].includes(application)) throw error('BROWSER_PROXY_HOST_INVALID');
++    if(!/^[a-z0-9.-]+(?::[0-9]{1,5})?$/.test(host) || !(api ? ['erp'] : ['erp','inquiry']).includes(application)) throw error('BROWSER_PROXY_HOST_INVALID');
+     hosts.set(host,application);
+   }
+   let accepting=true,bodyBytes=0,generation=0,sequence=0,registryIdentity=null;
+@@ -36,7 +48,8 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
+     if(response.destroyed)return;
+     if(response.headersSent){response.destroy();return;}
+     response.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store, private'});
+-    response.end(JSON.stringify({success:false,error:code,message:code==='BROWSER_UPSTREAM_OUTCOME_UNKNOWN'
++    response.end(JSON.stringify({success:false,error:code,message:code==='API_BUILD_REFRESH_REQUIRED'
++      ? 'برای ادامه، نوشته‌های این فرم را حفظ کنید و سپس صفحه را تازه کنید.' : code==='BROWSER_UPSTREAM_OUTCOME_UNKNOWN'
+       ? 'نتیجهٔ درخواست مشخص نیست؛ پیش از تکرار، وضعیت ثبت آن را بررسی کنید.'
+       : 'این نسخه فعلاً پاسخ‌گو نیست؛ نوشته‌های صفحه را نگه دارید و دوباره تلاش کنید.'}));
+   };
+@@ -55,7 +68,8 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
+       let normalizedPath;
+       try { normalizedPath=decodeURIComponent(url.pathname); } catch {throw error('BROWSER_PROXY_PATH_INVALID',400);}
+       if(/[\u0000-\u001f\u007f]/.test(normalizedPath))throw error('BROWSER_PROXY_PATH_INVALID',400);
+-      if(/^\/(api|socket\.io|files)(?:\/|$)/i.test(normalizedPath))throw error('BROWSER_PROXY_BUSINESS_PATH_FORBIDDEN',404);
++      if(api ? !/^\/(api|files)(?:\/|$)/i.test(normalizedPath)
++        : /^\/(api|socket\.io|files)(?:\/|$)/i.test(normalizedPath))throw error('BROWSER_PROXY_BUSINESS_PATH_FORBIDDEN',404);
+       const declared=request.headers['content-length'];
+       if(declared!==undefined && (typeof declared!=='string' || !/^\d+$/.test(declared)
+         || !Number.isSafeInteger(Number(declared))))throw error('BROWSER_PROXY_BODY_INVALID',400);
+@@ -74,7 +88,9 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
+       if(['GET','HEAD'].includes(method) && body.length)throw error('BROWSER_PROXY_BODY_INVALID',400);
+       let native={},actionIds=[];
+       const actionHeader=request.headers['next-action'];
+-      if(actionHeader!==undefined) {
++      if(api) {
++        if(actionHeader!==undefined || !['GET','HEAD','POST','PUT','PATCH','DELETE','OPTIONS'].includes(method))throw error('API_PROXY_METHOD_UNPROVEN',405);
++      } else if(actionHeader!==undefined) {
+         if(typeof actionHeader!=='string' || method!=='POST')throw error('BROWSER_ACTION_INVALID',400);
+         actionIds=[actionHeader];
+       } else if(method==='POST') {
+@@ -84,28 +100,36 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
+         const form=await new Request('http://browser.invalid',{method:'POST',headers:{'content-type':contentType},body}).formData();
+         native=nativeActionIdentity(form);actionIds=native.actionIds;
+       } else if(!['GET','HEAD','OPTIONS'].includes(method))throw error('BROWSER_PROXY_METHOD_UNPROVEN',405);
+-      const input=await loadRegistry();
+-      const registry=compileBrowserRoutingRegistry(input);
++      const snapshot=await loadRegistry();
++      const input=api ? snapshot.browser : snapshot;
++      const registry=api ? compileApiRoutingRegistry(input,snapshot.api) : compileBrowserRoutingRegistry(input);
+       if(registry.generation<generation)throw error('BROWSER_PROXY_GENERATION_REGRESSED');
+-      const nextIdentity=browserRoutingIdentity(input);
++      const nextIdentity=api ? apiRoutingIdentity(input,snapshot.api) : browserRoutingIdentity(input);
+       if(registry.generation===generation && nextIdentity!==registryIdentity)throw error('BROWSER_PROXY_GENERATION_REUSED');
+       generation=registry.generation;
+       registryIdentity=nextIdentity;
+-      const selection=selectBrowserRelease(registry,{application,
++      const selection=api ? selectApiRelease(registry,request.headers['x-deployment-id']) : selectBrowserRelease(registry,{application,
+         deploymentId:request.headers['x-deployment-id'],
+         assetDeploymentId:url.pathname.startsWith('/_next/static/') ? singleQuery(url,'dpl'):null,
+         assetPath:url.pathname.startsWith('/_next/static/') ? normalizedPath:null,
+         isRsc:request.headers.rsc==='1',actionIds,...native});
+       const endpoint=endpoints.get(selection.slotId);
+       if(!endpoint || endpoint.image!==selection.image
+-        || !endpoint.host.startsWith(application==='erp' ? 'frontend':'inquiry'))throw error('BROWSER_PROXY_SLOT_IDENTITY_UNAVAILABLE');
++        || (api ? endpoint.manifestSha256!==selection.manifestSha256 || !endpoint.host.startsWith('backend')
++          : !endpoint.host.startsWith(application==='erp' ? 'frontend':'inquiry')))throw error('BROWSER_PROXY_SLOT_IDENTITY_UNAVAILABLE');
++      if(api && selection.requiresDraftHandoff)throw error('API_BUILD_REFRESH_REQUIRED',409);
+       const headers=forwardedHeaders(request.headers);
+       delete headers['x-forwarded-host'];
+       headers['x-forwarded-host']=request.headers.host;
++      if(api) {
++        headers['x-deployment-id']=selection.buildId;
++        headers['x-forwarded-for']=request.socket.remoteAddress;
++        headers['x-forwarded-proto']='http';
++      }
+       if(body.length || !['GET','HEAD'].includes(method))headers['content-length']=String(body.length);
+       intentId=await operationJournal.begin({registryIdentity:nextIdentity,generation:registry.generation,
+         buildId:selection.buildId,slotId:selection.slotId,image:selection.image,
+-        manifestSha256:registry.builds[selection.buildId].manifestSha256,method});
++        manifestSha256:api ? selection.manifestSha256 : registry.builds[selection.buildId].manifestSha256,method});
+       headers['x-sabalan-proxy-operation-id']=intentId;
+       await new Promise((resolve,reject)=>{
+         let incomingResponse;
+@@ -116,7 +140,7 @@ export function createBrowserReleaseProxy({loadRegistry,slotEndpoints,applicatio
+           resultHeaders['x-sabalan-proxy-operation-id']=intentId;
+           // UI documents/RSC/actions may contain current private data. Exact
+           // immutable static bytes retain their own upstream caching policy.
+-          if(!url.pathname.startsWith('/_next/static/'))resultHeaders['cache-control']='no-store, private';
++          if(api || !url.pathname.startsWith('/_next/static/'))resultHeaders['cache-control']='no-store, private';
+           if(!response.destroyed)response.writeHead(incoming.statusCode||502,resultHeaders);
+           incoming.on('data',chunk=>{if(!response.destroyed && !response.write(chunk))incoming.pause();});
+           incoming.once('end',()=>{
+diff --git a/deploy/scripts/browser-release-routing.mjs b/deploy/scripts/browser-release-routing.mjs
+index 193f5503..154aa8ca 100644
+--- a/deploy/scripts/browser-release-routing.mjs
++++ b/deploy/scripts/browser-release-routing.mjs
+@@ -12,7 +12,7 @@ const fail = code => { throw Object.assign(new Error(code), { code }); };
+  * It deliberately returns a required build even after its support deadline:
+  * expiration must preserve a draft before the client agrees to change builds. */
+ export function compileBrowserRoutingRegistry(input) {
+-  if (!input || input.format !== 'sabalan-browser-routing/v1'
++  if (!input || !['sabalan-browser-routing/v1','sabalan-browser-routing/v2'].includes(input.format)
+     || !Number.isSafeInteger(input.generation) || input.generation < 1
+     || !Array.isArray(input.builds) || !input.builds.length || input.builds.length > 256) fail('BROWSER_REGISTRY_INVALID');
+   const builds = new Map();
+@@ -45,8 +45,32 @@ export function compileBrowserRoutingRegistry(input) {
+     if (previous && previous.sha256 !== asset.sha256) fail('BROWSER_ASSET_PATH_COLLISION');
+     assets.set(key, asset);
+   }
++  const apiBindings=input.format==='sabalan-browser-routing/v2'
++    ? Object.freeze(Object.values(compileBrowserApiBindings(Object.fromEntries(builds),input.apiBindings))) : undefined;
++  if(input.format==='sabalan-browser-routing/v1' && Object.hasOwn(input,'apiBindings'))fail('BROWSER_API_PAIRED_FORMAT_REQUIRED');
+   return Object.freeze({ generation:input.generation, builds:Object.freeze(Object.fromEntries(builds)),
+-    current:Object.freeze({...input.current}), legacy:Object.freeze({...input.legacy}) });
++    current:Object.freeze({...input.current}), legacy:Object.freeze({...input.legacy}),
++    ...(apiBindings?{apiBindings}:{}) });
++}
++
++/** Exact backend owners for every retained ERP producer. Neither this
++ * structural check nor a paired routing publication grants release admission. */
++export function compileBrowserApiBindings(builds,input) {
++  if(!Array.isArray(input) || input.length>256)fail('BROWSER_API_BINDINGS_INVALID');
++  const bindings={};
++  for(const binding of input){
++    const keys=['buildId','browserManifestSha256','slotId','image','manifestSha256'];
++    if(!binding || Array.isArray(binding) || Object.keys(binding).length!==keys.length
++      || keys.some(key=>!Object.hasOwn(binding,key)) || !identity.test(binding.buildId)
++      || Object.hasOwn(bindings,binding.buildId) || !identity.test(binding.slotId)
++      || !/^backend_[a-z0-9_-]+$/.test(binding.slotId) || !image.test(binding.image)
++      || !digest.test(binding.manifestSha256))fail('BROWSER_API_BINDING_INVALID');
++    const build=Object.hasOwn(builds,binding.buildId)?builds[binding.buildId]:null;
++    if(!build || build.application!=='erp' || build.manifestSha256!==binding.browserManifestSha256)fail('BROWSER_API_BINDING_BUILD_MISMATCH');
++    bindings[binding.buildId]=Object.freeze({...binding});
++  }
++  if(Object.values(builds).some(build=>build.application==='erp' && !Object.hasOwn(bindings,build.id)))fail('BROWSER_API_BINDINGS_INCOMPLETE');
++  return Object.freeze(bindings);
+ }
+ 
+ function timestamp(value) {
+@@ -137,6 +161,7 @@ export function browserRoutingIdentity(input) {
+   const normalized={format:input.format,generation:input.generation,current:input.current,legacy:input.legacy,
+     builds:input.builds.map(build=>({...build,actionIds:[...build.actionIds].sort(),assets:[...build.assets].sort((a,b)=>a.path.localeCompare(b.path))}))
+       .sort((a,b)=>a.id.localeCompare(b.id))};
++  if(input.format==='sabalan-browser-routing/v2')normalized.apiBindings=input.apiBindings.map(binding=>({...binding})).sort((a,b)=>a.buildId.localeCompare(b.buildId));
+   const canonical=value=>Array.isArray(value) ? value.map(canonical) : value && typeof value==='object'
+     ? Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])) : value;
+   return createHash('sha256').update(JSON.stringify(canonical(normalized))).digest('hex');
+diff --git a/deploy/scripts/browser-routing-store.mjs b/deploy/scripts/browser-routing-store.mjs
+index 8f306cd7..d32d8aa9 100644
+--- a/deploy/scripts/browser-routing-store.mjs
++++ b/deploy/scripts/browser-routing-store.mjs
+@@ -202,6 +202,13 @@ export class BrowserRoutingStore {
+ 
+ function assertTransition(previous, next, supportPromises) {
+   compileBrowserRoutingRegistry(next);
++  if(previous?.format==='sabalan-browser-routing/v2') {
++    if(next.format!=='sabalan-browser-routing/v2')fail('BROWSER_ROUTING_API_REMOVED');
++    const bindings=new Map(next.apiBindings.map(binding=>[binding.buildId,binding]));
++    for(const binding of previous.apiBindings) {
++      if(!bindings.has(binding.buildId) || !encode(bindings.get(binding.buildId)).equals(encode(binding)))fail('BROWSER_ROUTING_API_IDENTITY_CHANGED');
++    }
++  }
+   for (const build of next.builds) {
+     if (build.supportUntil !== null && Date.parse(build.supportUntil) < (supportPromises.get(build.id) ?? -Infinity)) {
+       fail('BROWSER_ROUTING_HISTORICAL_SUPPORT_SHORTENED');
+diff --git a/deploy/scripts/capture-coherent-components.py b/deploy/scripts/capture-coherent-components.py
+index febc79e5..bfb1b645 100644
+--- a/deploy/scripts/capture-coherent-components.py
++++ b/deploy/scripts/capture-coherent-components.py
+@@ -64,13 +64,16 @@ def run():
+     if not scope_file.is_absolute() or scope_file.resolve(strict=True) != scope_file:
+         raise RuntimeError('COHERENT_CAPTURE_SCOPE_UNSAFE')
+     scope, scope_sha = read_scope(scope_file)
+-    if (set(scope) != {'format', 'captureId', 'handshake', 'systemIdentifier', 'databaseName',
+-                      'storeRoot', 'sources', 'inquiry', 'logicalDump'}
+-            or scope['format'] != 'sabalan-coherent-capture-scope/v1'
++    automatic_sealer = scope.get('format') == 'sabalan-coherent-capture-scope/v3'
++    expected_scope = {'format', 'captureId', 'handshake', 'systemIdentifier', 'databaseName',
++                      'storeRoot', 'sources', 'inquiry', 'logicalDump'} | ({'sealer'} if automatic_sealer else set())
++    if (set(scope) != expected_scope
++            or scope['format'] not in ['sabalan-coherent-capture-scope/v1', 'sabalan-coherent-capture-scope/v2', 'sabalan-coherent-capture-scope/v3']
+             or not re.fullmatch(r'[a-f0-9]{64}', scope['captureId'])
+             or not re.fullmatch(r'[a-f0-9]{64}', scope['handshake'])
+             or not re.fullmatch(r'[1-9][0-9]{0,24}', scope['systemIdentifier'])
+             or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,62}', scope['databaseName'])
++            or (scope['format'] in ['sabalan-coherent-capture-scope/v2', 'sabalan-coherent-capture-scope/v3'] and scope['storeRoot'] is not None)
+             or not isinstance(scope['logicalDump'], bool)):
+         raise RuntimeError('COHERENT_CAPTURE_SCOPE_INVALID')
+     work = scope_file.parent
+@@ -82,7 +85,11 @@ def run():
+     if namespace is None:
+         raise RuntimeError('COHERENT_CAPTURE_NATIVE_OWNER_REQUIRED')
+     gate = os.fstat(10)
+-    store = files.FileGenerations(scope['storeRoot'], 10, gate.st_dev, gate.st_ino)
++    versioned = scope['format'] in ['sabalan-coherent-capture-scope/v2', 'sabalan-coherent-capture-scope/v3']
++    cuts = load('coherent_versioned_cuts', 'coherent-versioned-file-cuts.py').VersionedFileCuts(
++        scope['sources'], scope['captureId'], 10) if versioned else None
++    store = None if versioned else files.FileGenerations(scope['storeRoot'], 10, gate.st_dev, gate.st_ino)
++    assert_gate = cuts.assert_gate if versioned else store.assert_gate
+     fd = os.open(work, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+     diagnostic = os.open(work / 'native.log', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+     boundary, completed = None, False
+@@ -97,15 +104,38 @@ def run():
+             if online['scope']['format'] == 'sabalan-online-runtime-scope/v2':
+                 backend_boundary = load('coherent_backend_boundary', 'online-backend-boundary.py').inspect_registered_backend_boundary(os.environ['DATABASE_URL'])
+                 files.publish_record(fd, 'registered-backend-boundary.json', backend_boundary)
+-        boundary = postgres.DatabaseFreeze(os.environ['DATABASE_URL'], 10, store.assert_gate, diagnostic)
++        if automatic_sealer and backend_boundary is None:
++            raise RuntimeError('COHERENT_CAPTURE_NATIVE_FLEET_REQUIRED')
++        boundary = postgres.DatabaseFreeze(os.environ['DATABASE_URL'], 10, assert_gate, diagnostic)
+         database = boundary.acquire(scope['systemIdentifier'], scope['databaseName'])
+-        print(json.dumps({'phase': 'FROZEN', 'handshake': scope['handshake'], 'relations': database['relations']}), flush=True)
++        if versioned:
++            # Absence must be observed after the actual SQL freeze, immediately
++            # before exposing its handshake. A cut made during lock acquisition
++            # is not this boundary, even when it was absent at worker startup.
++            cuts.assert_unsealed()
++        automatic_cuts = None
++        if automatic_sealer:
++            selected = load('native_versioned_file_sealer', 'native-versioned-file-sealer.py').run(
++                scope_file, scope_sha, scope, native_descriptors, fd)
++            automatic_cuts = cuts.accept(selected)
++        frozen = {'phase': 'FROZEN', 'handshake': scope['handshake'], 'relations': database['relations']}
++        if automatic_cuts is not None:
++            frozen['versionedCuts'] = automatic_cuts['versionedCuts']
++        print(json.dumps(frozen), flush=True)
+         if not select.select([sys.stdin.buffer], [], [], 10)[0]:
+             raise RuntimeError('COHERENT_CAPTURE_CONTROLLER_ACK_MISSING')
+-        acknowledgement = sys.stdin.buffer.readline(1024)
+-        if json.loads(acknowledgement) != {'phase': 'BEGIN_CAPTURE', 'handshake': scope['handshake']}:
++        acknowledgement = json.loads(sys.stdin.buffer.readline(262144 if versioned else 1024))
++        expected_ack = {'phase', 'handshake', 'versionedCuts'} if versioned else {'phase', 'handshake'}
++        if (not isinstance(acknowledgement, dict) or set(acknowledgement) != expected_ack
++                or acknowledgement['phase'] != 'BEGIN_CAPTURE' or acknowledgement['handshake'] != scope['handshake']):
+             raise RuntimeError('COHERENT_CAPTURE_CONTROLLER_ACK_INVALID')
+-        store.assert_owner()
++        if automatic_cuts is not None and acknowledgement['versionedCuts'] != automatic_cuts['versionedCuts']:
++            raise RuntimeError('COHERENT_CAPTURE_NATIVE_SEALS_CHANGED')
++        selected_cuts = automatic_cuts if automatic_cuts is not None else (cuts.accept(acknowledgement['versionedCuts']) if versioned else None)
++        if versioned:
++            cuts.assert_unchanged()
++        else:
++            store.assert_owner()
+         boundary.assert_frozen()
+         inquiry = scope['inquiry']
+         if (not isinstance(inquiry, dict) or set(inquiry) != {'path', 'device', 'inode'}
+@@ -130,7 +160,32 @@ def run():
+         if check.returncode != 0 or check.stdout.strip() != b'ok':
+             raise RuntimeError('COHERENT_CAPTURE_INQUIRY_INTEGRITY_FAILED')
+         sqlite_root_identity = source_identity(snapshot_root)
+-        generation = store.capture(scope['sources'] + [dict(sqlite_root_identity, name='inquiry', path=str(snapshot_root))], scope['captureId'])
++        sqlite_evidence = None
++        if versioned:
++            snapshot = os.open(snapshot_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
++            try:
++                before = os.fstat(snapshot)
++                if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_uid != os.geteuid()
++                        or not 0 < before.st_size <= 512 * 1024**2):
++                    raise RuntimeError('COHERENT_CAPTURE_INQUIRY_SNAPSHOT_UNSAFE')
++                checksum = hashlib.sha256()
++                while chunk := os.read(snapshot, 262144):
++                    checksum.update(chunk)
++                if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != tuple(
++                        getattr(os.fstat(snapshot), field) for field in ['st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns']):
++                    raise RuntimeError('COHERENT_CAPTURE_INQUIRY_SNAPSHOT_CHANGED')
++                os.fsync(snapshot)
++                sqlite_evidence = dict(file='inquiry/inquiry.db', bytes=before.st_size, sha256=checksum.hexdigest(), source=inquiry)
++            finally:
++                os.close(snapshot)
++            snapshot_directory = os.open(snapshot_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++            try:
++                os.fsync(snapshot_directory)
++            finally:
++                os.close(snapshot_directory)
++            generation = None
++        else:
++            generation = store.capture(scope['sources'] + [dict(sqlite_root_identity, name='inquiry', path=str(snapshot_root))], scope['captureId'])
+         dump_evidence = None
+         if scope['logicalDump']:
+             rows = boundary.command("SELECT json_build_object('snapshot',pg_export_snapshot())::text;")
+@@ -155,13 +210,19 @@ def run():
+         boundary = None
+         if read_scope(scope_file)[1] != scope_sha:
+             raise RuntimeError('COHERENT_CAPTURE_SCOPE_CHANGED')
+-        result = {'format': 'sabalan-coherent-component/v2' if backend_boundary else 'sabalan-coherent-component/v1',
++        if versioned:
++            cuts.assert_unchanged()
++        result = {'format': 'sabalan-coherent-component/v3' if versioned else ('sabalan-coherent-component/v2' if backend_boundary else 'sabalan-coherent-component/v1'),
+                   'phase': 'CAPTURED_AWAITING_NATIVE_CLOSURE',
+                   'captureId': scope['captureId'], 'scopeSha256': scope_sha,
+                   'nativeClaimSha256': os.environ['BACKEND_NATIVE_CLAIM_SHA256'],
+-                  'database': database, 'restorePoint': point, 'fileGenerationSha256': generation['sha256'],
++                  'database': database, 'restorePoint': point,
+                   'logicalDump': dump_evidence, 'captureBoundaryMs': round((time.monotonic() - started) * 1000),
+                   'productionRecoveryPoint': False}
++        if versioned:
++            result.update(selected_cuts, sqliteSnapshot=sqlite_evidence)
++        else:
++            result['fileGenerationSha256'] = generation['sha256']
+         if backend_boundary:
+             result['registeredBackendBoundarySha256'] = hashlib.sha256(files.encoded(backend_boundary)).hexdigest()
+         files.publish_record(fd, 'captured.json', result)
+diff --git a/deploy/scripts/online-backend-boundary.py b/deploy/scripts/online-backend-boundary.py
+index 6d518086..5c1e9914 100644
+--- a/deploy/scripts/online-backend-boundary.py
++++ b/deploy/scripts/online-backend-boundary.py
+@@ -41,6 +41,15 @@ def exact(value, keys):
+     return isinstance(value, dict) and set(value) == set(keys)
+ 
+ 
++def namespace_predicate(names):
++    """An empty owned set never means unrelated unnamed pool connections."""
++    require(isinstance(names, list) and len(names) <= 128
++            and all(isinstance(name, str) and re.fullmatch(r'sabalan-rt-[a-f0-9]{48}', name) for name in names))
++    if not names:
++        return 'FALSE'
++    return "application_name = ANY(ARRAY[" + ','.join("'" + name + "'" for name in names) + ']::text[])'
++
++
+ def private_directory(file):
+     value = file.lstat()
+     require(file.resolve(strict=True) == file and stat.S_ISDIR(value.st_mode)
+@@ -247,14 +256,14 @@ def inspect_registered_backend_boundary(source_url):
+     source = urlsplit(source_url)
+     names = active_names + closed_names
+     require(all(re.fullmatch(r'sabalan-rt-[a-f0-9]{48}', name) for name in names))
+-    literal_names = ','.join("'" + name + "'" for name in names) or "''"
+-    literal_closed = ','.join("'" + name + "'" for name in closed_names) or "''"
++    owned_names = namespace_predicate(names)
++    owned_closed = namespace_predicate(closed_names)
+     query = """SELECT json_build_object('system',c.system_identifier::text,
+  'visible',r.rolsuper OR pg_has_role(current_user,'pg_read_all_stats','USAGE'),
+  'database',current_database(),'prepared',(SELECT count(*) FROM pg_prepared_xacts),
+- 'busy',(SELECT count(*) FROM pg_stat_activity WHERE application_name IN (""" + literal_names + """)
++ 'busy',(SELECT count(*) FROM pg_stat_activity WHERE """ + owned_names + """
+  AND (datname IS DISTINCT FROM current_database() OR state IS DISTINCT FROM 'idle' OR xact_start IS NOT NULL)),
+- 'closed',(SELECT count(*) FROM pg_stat_activity WHERE application_name IN (""" + literal_closed + """)))
++ 'closed',(SELECT count(*) FROM pg_stat_activity WHERE """ + owned_closed + """))
+  FROM pg_control_system() c CROSS JOIN pg_roles r WHERE r.rolname=current_user"""
+     environment = {key: value for key, value in os.environ.items() if not key.startswith('PG')}
+     environment.update(PGHOST=source.hostname, PGPORT=str(source.port or 5432), PGDATABASE=scope['database']['name'],
+diff --git a/deploy/scripts/recovery-versioned-files.py b/deploy/scripts/recovery-versioned-files.py
+index 9621d56c..7211351e 100644
+--- a/deploy/scripts/recovery-versioned-files.py
++++ b/deploy/scripts/recovery-versioned-files.py
+@@ -96,11 +96,9 @@ def key(value):
+     return value
+ 
+ 
+-class SealedVersionedFiles:
+-    def __init__(self, root, capture_id, sha256):
+-        if not isinstance(capture_id, str) or not SHA.fullmatch(capture_id) or not isinstance(sha256, str) or not SHA.fullmatch(sha256):
+-            fail('VERSIONED_RESTORE_SELECTION_INVALID')
+-        self.root, self.capture_id, self.sha256 = root, capture_id, sha256
++class _ImmutableVersionedStore:
++    def __init__(self, root):
++        self.root = root
+         self.identities = {path: directory(path) for path in [root, *[os.path.join(root, part)
+                            for part in ('objects', 'versions', 'seals')]]}
+         descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+@@ -109,6 +107,10 @@ class SealedVersionedFiles:
+         finally:
+             os.close(descriptor)
+         sync_ancestors(root)
++
++    def cut_metadata(self, capture_id, sha256):
++        if not isinstance(capture_id, str) or not SHA.fullmatch(capture_id) or not isinstance(sha256, str) or not SHA.fullmatch(sha256):
++            fail('VERSIONED_RESTORE_SELECTION_INVALID')
+         raw = self.read('seals', capture_id + '.json', MAX_MANIFEST)
+         if digest(raw) != sha256:
+             fail('VERSIONED_RESTORE_SEAL_CHANGED')
+@@ -126,6 +128,76 @@ class SealedVersionedFiles:
+                            for field in ('device', 'inode'))
+                 or not isinstance(value['heads'], list) or len(value['heads']) > MAX_KEYS):
+             fail('VERSIONED_RESTORE_SEAL_INVALID')
++        return value
++
++    def assert_owner(self):
++        if any(directory(path) != expected for path, expected in self.identities.items()):
++            fail('VERSIONED_RESTORE_STORE_CHANGED')
++
++    def open(self, part, name, maximum):
++        self.assert_owner()
++        parent = os.open(os.path.join(self.root, part), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++        try:
++            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
++            try:
++                value = os.fstat(fd)
++                if (not stat.S_ISREG(value.st_mode) or value.st_nlink != 1 or value.st_uid != os.geteuid()
++                        or value.st_mode & 0o222 or value.st_size > maximum
++                        or mount(fd) != self.mount_id or mount(parent) != self.mount_id):
++                    fail('VERSIONED_RESTORE_RECORD_UNSAFE')
++                return fd, value
++            except BaseException:
++                os.close(fd)
++                raise
++        finally:
++            os.close(parent)
++
++    def finish(self, fd, before, part, name):
++        if stable(before) != stable(os.fstat(fd)) or stable(before) != stable(os.lstat(os.path.join(self.root, part, name))):
++            fail('VERSIONED_RESTORE_RECORD_CHANGED')
++        os.fsync(fd)
++        self.assert_owner()
++
++    def read(self, part, name, maximum):
++        fd, before = self.open(part, name, maximum)
++        try:
++            chunks, size = [], 0
++            while size < before.st_size:
++                chunk = os.read(fd, min(262144, before.st_size - size))
++                if not chunk:
++                    fail('VERSIONED_RESTORE_RECORD_CHANGED')
++                chunks.append(chunk)
++                size += len(chunk)
++            self.finish(fd, before, part, name)
++            return b''.join(chunks)
++        finally:
++            os.close(fd)
++
++    @staticmethod
++    def decode(raw):
++        value = json.loads(raw)
++        if encoded(value) != raw:
++            fail('VERSIONED_RESTORE_RECORD_INVALID')
++        return value
++
++def read_sealed_cut_metadata(root, capture_id, sha256):
++    """Read only immutable bounded seal metadata; grants no restore validation.
++
++    Full SealedVersionedFiles construction still verifies every predecessor and
++    selected object before restoration. Capture must validate its own EX gate.
++    """
++    if not isinstance(capture_id, str) or not SHA.fullmatch(capture_id) or not isinstance(sha256, str) or not SHA.fullmatch(sha256):
++        fail('VERSIONED_RESTORE_SELECTION_INVALID')
++    return _ImmutableVersionedStore(root).cut_metadata(capture_id, sha256)
++
++
++class SealedVersionedFiles(_ImmutableVersionedStore):
++    def __init__(self, root, capture_id, sha256):
++        if not isinstance(capture_id, str) or not SHA.fullmatch(capture_id) or not isinstance(sha256, str) or not SHA.fullmatch(sha256):
++            fail('VERSIONED_RESTORE_SELECTION_INVALID')
++        self.capture_id, self.sha256 = capture_id, sha256
++        super().__init__(root)
++        value = self.cut_metadata(capture_id, sha256)
+         self.live_source = value['source']['path']
+         self.entries, seen, directories, selected_objects, chains = [], set(), {''}, set(), []
+         previous_key = None
+@@ -192,56 +264,6 @@ class SealedVersionedFiles:
+             size += record_bytes
+         return count, size
+ 
+-    def assert_owner(self):
+-        if any(directory(path) != expected for path, expected in self.identities.items()):
+-            fail('VERSIONED_RESTORE_STORE_CHANGED')
+-
+-    def open(self, part, name, maximum):
+-        self.assert_owner()
+-        parent = os.open(os.path.join(self.root, part), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+-        try:
+-            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+-            try:
+-                value = os.fstat(fd)
+-                if (not stat.S_ISREG(value.st_mode) or value.st_nlink != 1 or value.st_uid != os.geteuid()
+-                        or value.st_mode & 0o222 or value.st_size > maximum
+-                        or mount(fd) != self.mount_id or mount(parent) != self.mount_id):
+-                    fail('VERSIONED_RESTORE_RECORD_UNSAFE')
+-                return fd, value
+-            except BaseException:
+-                os.close(fd)
+-                raise
+-        finally:
+-            os.close(parent)
+-
+-    def finish(self, fd, before, part, name):
+-        if stable(before) != stable(os.fstat(fd)) or stable(before) != stable(os.lstat(os.path.join(self.root, part, name))):
+-            fail('VERSIONED_RESTORE_RECORD_CHANGED')
+-        os.fsync(fd)
+-        self.assert_owner()
+-
+-    def read(self, part, name, maximum):
+-        fd, before = self.open(part, name, maximum)
+-        try:
+-            chunks, size = [], 0
+-            while size < before.st_size:
+-                chunk = os.read(fd, min(262144, before.st_size - size))
+-                if not chunk:
+-                    fail('VERSIONED_RESTORE_RECORD_CHANGED')
+-                chunks.append(chunk)
+-                size += len(chunk)
+-            self.finish(fd, before, part, name)
+-            return b''.join(chunks)
+-        finally:
+-            os.close(fd)
+-
+-    @staticmethod
+-    def decode(raw):
+-        value = json.loads(raw)
+-        if encoded(value) != raw:
+-            fail('VERSIONED_RESTORE_RECORD_INVALID')
+-        return value
+-
+     def version(self, sha256):
+         raw = self.read('versions', sha256 + '.json', 16384)
+         # Walk one predecessor at a time. There are at most MAX_KEYS heads and
+diff --git a/docs/operations/online-deployment.md b/docs/operations/online-deployment.md
+index 029f07e7..0f7eab8e 100644
+--- a/docs/operations/online-deployment.md
++++ b/docs/operations/online-deployment.md
+@@ -4,6 +4,8 @@ The owner-approved outcome is specified in [Issue #405](https://github.com/Mahaa
+ 
+ ## Current foundation
+ 
++- Connected canonical backend capture/restore, native dual-backend work, actual restored Inquiry native forms, paired UI/API routing publication and Contract expiry handoff are now tracked in the [integration ledger](../../reports/qa/update-restore-integration-20261019.md). Their distinct source/database scopes and failed authoring runs remain explicit. They do not yet constitute one complete frozen-release update/restore proof or enable production online admission.
++
+ - All three current production application images now exist as independently imported config/rootfs identities on the backup host, with no tags or application startup. Inquiry passed native closure and unchanged foreign comparison; earlier backend/frontend ambient failures remain preserved. Accepted private ciphertexts remain retained after exact redundant-plaintext retirement. Fresh bounded old-test payload retirement supplied space without removing the shared diagnostic image or production recovery objects. See [Inquiry/current image-set evidence](../../reports/qa/actual-inquiry-private-image-import-20261019.md) and [exact test-payload retirement](../../reports/qa/obsolete-local-test-payload-retirement-20261019.md). Full coherent application restoration remains pending.
+ 
+ - The exact current frontend config/rootfs also passed actual tagless backup-daemon import and native closure; its independent cipher remains retained after exact scratch retirement. The foreign comparison remains false after an unrelated replacement. Its earlier capacity refusal remains historical; later scoped cleanup supplied space for the Inquiry import described above. See [frontend evidence](../../reports/qa/actual-frontend-private-image-import-20261019.md).
+diff --git a/frontend/src/features/contract-creation/CreateContractWizardClient.tsx b/frontend/src/features/contract-creation/CreateContractWizardClient.tsx
+index 127f3d73..a5d04b5c 100644
+--- a/frontend/src/features/contract-creation/CreateContractWizardClient.tsx
++++ b/frontend/src/features/contract-creation/CreateContractWizardClient.tsx
+@@ -2742,6 +2742,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2):
+     setDiscoveredRecoveryDraftId(freshDraftId);
+   }, [recoveryUserId]);
+   const editRecovery = useContractEditRecovery({
++    captureDraft: (capturedAt) => buildContractAutosaveDraft(capturedAt),
+     correctionExpiresAt,
+     scope: recoveryScope,
+     contractId: isContractEditMode ? contractId : null,
+@@ -2890,7 +2891,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2):
+     replacementWizardData
+   ]);
+ 
+-  const buildContractAutosaveDraft = useCallback(() => {
++  const buildContractAutosaveDraft = useCallback((capturedAt = Date.now()) => {
+     if (!isContractEditMode && !hasMeaningfulDraftProgress) {
+       return null;
+     }
+@@ -2946,7 +2947,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2):
+         quantityDraft: stairQuantityDraft,
+         quantityManuallyEdited: stairQuantityManuallyEdited
+       }
+-    });
++    }, capturedAt);
+   }, [
+     currentStep,
+     contractDateChanged,
+diff --git a/frontend/src/features/contract-creation/hooks/useContractEditRecovery.ts b/frontend/src/features/contract-creation/hooks/useContractEditRecovery.ts
+index 51c95772..f325ea2c 100644
+--- a/frontend/src/features/contract-creation/hooks/useContractEditRecovery.ts
++++ b/frontend/src/features/contract-creation/hooks/useContractEditRecovery.ts
+@@ -1,6 +1,7 @@
+-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
++import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+ import { salesAPI, browserSessionContinuation } from '@/lib/api';
+ import { archiveBrowserDraft } from '@/lib/browserDraftArchive';
++import { browserBuildHandoff } from '@/lib/browserBuildHandoff';
+ import {
+   createCoalescedContractCheckpointState,
+   createContractRecoveryEnvelope,
+@@ -24,6 +25,7 @@ const BROWSER_SESSION_STORAGE_KEY = 'sabalan-contract-browser-session-id';
+ const CHECKPOINT_DELAY_MS = 250;
+ const HEARTBEAT_INTERVAL_MS = 25_000;
+ const ACTIVE_DOCUMENT_BROWSER_SESSION_KEY = '__sabalanContractBrowserSessionId';
++const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+ 
+ const createStableClientId = (prefix: string): string => {
+   const randomId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+@@ -107,6 +109,7 @@ interface UseContractEditRecoveryInput<Payload> {
+   onRecoveryAvailable?: (payload: Payload) => void;
+   onRestore: (payload: Payload) => void;
+   correctionExpiresAt?: string | null;
++  captureDraft?: (capturedAt: number) => Payload | null;
+ }
+ 
+ export const useContractEditRecovery = <Payload>({
+@@ -119,6 +122,7 @@ export const useContractEditRecovery = <Payload>({
+   onRecoveryAvailable,
+   onRestore,
+   correctionExpiresAt,
++  captureDraft,
+ }: UseContractEditRecoveryInput<Payload>) => {
+   const scopeKey = scope ? getContractRecoveryStorageKey(scope) : null;
+   const [browserSessionId] = useState(getOrCreateContractBrowserSessionId);
+@@ -145,6 +149,21 @@ export const useContractEditRecovery = <Payload>({
+   const onCreationDraftUnavailableRef = useRef(onCreationDraftUnavailable);
+   const deactivatedRef = useRef(false);
+   const blocked = blockReason !== null;
++  const committedCapture = useRef(captureDraft);
++  // Capture current committed domain state on demand, not the delayed
++  // queueRecovery effect's last payload. Layout runs before event/network work
++  // can observe a newly committed editor render.
++  useBrowserLayoutEffect(() => { committedCapture.current = captureDraft; }, [captureDraft]);
++  useBrowserLayoutEffect(() => {
++    if (!scope || !captureDraft) return;
++    return browserBuildHandoff.register({ userId: scope.userId, workflow: 'sales-contract', draftId: scope.draftId,
++      schemaVersion: scope.schemaVersion, baseRevision: scope.baseRevision, capturePayloadJson: (capturedAt) => {
++        if (deactivatedRef.current) throw Error('CONTRACT_DRAFT_OWNER_INACTIVE');
++        const payload = committedCapture.current?.(capturedAt);
++        if (payload === null || payload === undefined) throw Error('CONTRACT_DRAFT_CAPTURE_UNAVAILABLE');
++        return JSON.stringify(payload);
++      } });
++  }, [scopeKey, Boolean(captureDraft)]);
+ 
+   useEffect(() => {
+     onRestoreRef.current = onRestore;
+diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
+index 36ee2466..d7bd4e01 100644
+--- a/frontend/src/lib/api.ts
++++ b/frontend/src/lib/api.ts
+@@ -8,6 +8,7 @@ import { buildAuthorizedPhysicalExitRequest } from './authorizedPhysicalExitRequ
+ import { createPrivateClient } from './privateClientScope';
+ import { BrowserSessionContinuation, type BrowserSessionLease, type BrowserLoginAttempt } from './browserSessionContinuation';
+ import { bindBrowserBuildRequestIdentity } from './browserBuildRequestIdentity';
++import { browserBuildHandoff } from './browserBuildHandoff';
+ 
+ const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5000');
+ const API_BASE = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
+@@ -211,7 +212,22 @@ api.interceptors.response.use(
+     clearRetryKey(response.config as RetryAwareConfig);
+     return response;
+   },
+-  (error) => {
++  async (error) => {
++    if (error.response?.status === 409
++      && [error.response.data?.code, error.response.data?.error].includes('API_BUILD_REFRESH_REQUIRED')) {
++      // Expiry can reject the fresh /auth/me probe before a business request
++      // acquires its lease. A prior tab lease may preserve local bytes only;
++      // it never bypasses that denied request or authorizes a retry.
++      const lease = (error.config as RetryAwareConfig | undefined)?.browserSessionLease
++        || browserSessionContinuation.localRecoveryLease();
++      const handoff = lease ? await browserBuildHandoff.preserve(lease, () => browserSessionContinuation.assertCurrent(lease))
++        : { status: 'BLOCKED', code: 'BROWSER_BUILD_HANDOFF_OWNER_UNPROVEN', archives: [] };
++      error.browserBuildHandoff = handoff;
++      error.response.data = { ...error.response.data, code: 'API_BUILD_REFRESH_REQUIRED', buildHandoff: handoff,
++        message: handoff.status === 'PRESERVED'
++          ? 'پیش‌نویس‌های ثبت‌شده محفوظ شدند؛ برای ادامه صفحه را تازه کنید.'
++          : 'ذخیرهٔ مطمئن نوشته‌های این صفحه تأیید نشد؛ صفحه را نبندید یا تازه نکنید.' };
++    }
+     if (error.response?.status === 401) {
+       if (browserSessionContinuation.expectedUserId()) browserSessionContinuation.invalidate(error.browserSessionAttempt
+         || error.config?.browserLoginAttempt || error.config?.browserSessionLease || error.config?.browserBootstrapScope);
+diff --git a/frontend/src/lib/browserSessionContinuation.test.ts b/frontend/src/lib/browserSessionContinuation.test.ts
+index 98885b85..9cd18cf3 100644
+--- a/frontend/src/lib/browserSessionContinuation.test.ts
++++ b/frontend/src/lib/browserSessionContinuation.test.ts
+@@ -2,6 +2,19 @@ import assert from 'node:assert/strict';
+ import test from 'node:test';
+ import { BrowserSessionContinuation } from './browserSessionContinuation';
+ 
++test('last proven lease is available only for local recovery and is cleared by identity boundaries', async () => {
++  let probes = 0;
++  const scope = new BrowserSessionContinuation(async () => { probes++; return { userId: 'owner_a', sessionId: 'session_a' }; });
++  assert.equal(scope.localRecoveryLease(), undefined);
++  const first = await scope.acquire(); assert.deepEqual(scope.localRecoveryLease(), first);
++  assert.equal(probes, 1, 'reading local recovery identity must not probe an expired backend');
++  const copy = scope.localRecoveryLease()!; copy.userId = 'foreign'; assert.deepEqual(scope.localRecoveryLease(), first);
++  scope.invalidate(); assert.equal(scope.localRecoveryLease(), undefined);
++  scope.completeLogin({ userId: 'owner_a', sessionId: 'session_new' }, scope.beginLogin());
++  assert.equal(scope.localRecoveryLease(), undefined, 'a login alone is not the prior acquired lease');
++  await scope.acquire(); assert.ok(scope.localRecoveryLease()); scope.clear(); assert.equal(scope.localRecoveryLease(), undefined);
++});
++
+ test('fresh account-bound probes coalesce only while pending and block account substitution', async () => {
+   let userId = 'owner_a', sessionId = 'session_a', probes = 0;
+   const scope = new BrowserSessionContinuation(async expected => {
+diff --git a/frontend/src/lib/browserSessionContinuation.ts b/frontend/src/lib/browserSessionContinuation.ts
+index bc897a3a..46b97a98 100644
+--- a/frontend/src/lib/browserSessionContinuation.ts
++++ b/frontend/src/lib/browserSessionContinuation.ts
+@@ -15,12 +15,20 @@ export class BrowserSessionContinuation {
+   private generation = 0;
+   private blocked = false;
+   private probing?: Promise<BrowserSessionIdentity>;
++  private recoveryLease?: BrowserSessionLease;
+   private listeners = new Set<() => void>();
+   constructor(private readonly readSession: (expectedUserId?: string) => Promise<BrowserSessionIdentity>) {}
+   snapshot = () => this.blocked ? this.owner || null : null;
+   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+   private notify() { this.listeners.forEach(listener => listener()); }
+   expectedUserId() { return this.owner; }
++  /** A prior successful probe's tab identity for local archival only. It never
++   * authorizes a network operation or substitutes for acquire(). */
++  localRecoveryLease(): BrowserSessionLease | undefined {
++    if (!this.recoveryLease || this.blocked || this.recoveryLease.generation !== this.generation
++      || this.recoveryLease.userId !== this.owner) return undefined;
++    return { ...this.recoveryLease };
++  }
+   beginLogin(): BrowserLoginAttempt { return { generation: this.generation, userId: this.owner }; }
+   acceptBootstrap(identity: BrowserSessionIdentity, attempt: BrowserLoginAttempt) {
+     if (attempt.generation !== this.generation || (attempt.userId && attempt.userId !== this.owner)) throw changed();
+@@ -30,11 +38,12 @@ export class BrowserSessionContinuation {
+     if (!valid(identity) || attempt.generation !== this.generation || attempt.userId !== this.owner
+       || (this.owner && identity.userId !== this.owner)) throw changed();
+     this.owner ??= identity.userId;
+-    this.generation++; this.blocked = false; this.probing = undefined; this.notify();
++    this.generation++; this.blocked = false; this.probing = undefined; this.recoveryLease = undefined; this.notify();
+   }
+ 
+   invalidate(attempt?: BrowserLoginAttempt) {
+     if (attempt && (attempt.generation !== this.generation || (attempt.userId && attempt.userId !== this.owner))) return;
++    this.recoveryLease = undefined;
+     if (!this.blocked) { this.blocked = true; this.generation++; this.notify(); }
+   }
+ 
+@@ -43,6 +52,7 @@ export class BrowserSessionContinuation {
+       this.invalidate(); throw changed();
+     }
+     if (this.blocked) throw changed();
++    if (this.recoveryLease?.sessionId !== identity.sessionId) this.recoveryLease = undefined;
+     this.owner ??= identity.userId;
+     return { ...identity };
+   }
+@@ -62,7 +72,7 @@ export class BrowserSessionContinuation {
+     try {
+       const identity = await this.probing;
+       if (generation !== this.generation || this.blocked) throw changed();
+-      return { ...identity, generation };
++      const lease = { ...identity, generation }; this.recoveryLease = { ...lease }; return lease;
+     } catch (error: any) {
+       if (generation === this.generation && this.owner
+         && (error?.code === 'AUTH_CONTEXT_CHANGED' || error?.response?.status === 401)) this.invalidate();
+@@ -75,6 +85,6 @@ export class BrowserSessionContinuation {
+   }
+ 
+   clear() {
+-    this.generation++; this.owner = undefined; this.blocked = false; this.probing = undefined; this.notify();
++    this.generation++; this.owner = undefined; this.blocked = false; this.probing = undefined; this.recoveryLease = undefined; this.notify();
+   }
+ }
+diff --git a/frontend/src/lib/hiringApi.ts b/frontend/src/lib/hiringApi.ts
+index cfb66d65..53cffa10 100644
+--- a/frontend/src/lib/hiringApi.ts
++++ b/frontend/src/lib/hiringApi.ts
+@@ -15,6 +15,14 @@ const internal = {
+   patch: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.patch<T>(`/hr-hiring${url}`, data, config),
+ };
+ 
++// Invitation verification precedes the applicant session. Bind only the
++// immutable producer identity; never inherit applicant/staff authentication.
++const invitationVerification = axios.create({ baseURL });
++invitationVerification.interceptors.request.use((config) => {
++  bindBrowserBuildRequestIdentity(config.headers);
++  return config;
++});
++
+ const applicant = axios.create({ baseURL });
+ applicant.interceptors.request.use((config) => {
+   bindBrowserBuildRequestIdentity(config.headers);
+@@ -255,7 +263,7 @@ export const hiringAPI = {
+ 
+ export const applicantHiringAPI = {
+   verify: (mobile: string, otp: string) =>
+-    axios.post(`${baseURL}/public/invitations/verify`, { mobile, otp }),
++    invitationVerification.post('/public/invitations/verify', { mobile, otp }),
+   get: () => applicant.get("/public/application"),
+   getClosedState: () => applicant.get("/public/application/closed-state"),
+   saveDraft: (data: any) => applicant.put("/public/application/draft", data),
+diff --git a/scripts/run-hr-erasure-file-recovery-local.mjs b/scripts/run-hr-erasure-file-recovery-local.mjs
+index d8f556a3..a6d8f41f 100644
+--- a/scripts/run-hr-erasure-file-recovery-local.mjs
++++ b/scripts/run-hr-erasure-file-recovery-local.mjs
+@@ -6,9 +6,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
+ import { createRequire } from 'node:module';
+ 
+ const root = path.resolve(import.meta.dirname, '..'), sha = bytes => createHash('sha256').update(bytes).digest('hex');
+-const suite = process.env.HR_ERASURE_FILE_SUITE || 'legacy'; assert.ok(['legacy', 'native', 'predecessor', 'profile'].includes(suite));
+-const native = suite === 'native' || suite === 'profile';
+-const test = suite === 'profile' ? 'tests/online-deployment/hr-file-runtime-profile.fixture.ts'
++const suite = process.env.HR_ERASURE_FILE_SUITE || 'legacy'; assert.ok(['legacy', 'native', 'predecessor', 'profile', 'application'].includes(suite));
++const native = suite === 'native' || suite === 'profile' || suite === 'application';
++const test = suite === 'application' ? 'tests/online-deployment/application-runtime-profile.fixture.ts'
++  : suite === 'profile' ? 'tests/online-deployment/hr-file-runtime-profile.fixture.ts'
+   : suite === 'native' ? 'tests/online-deployment/hr-erasure-file-journal.fixture.ts'
+   : suite === 'predecessor' ? 'backend/src/services/__tests__/hrDeletionFileCleanupPredecessor.integration.test.ts'
+   : 'backend/src/services/__tests__/hrErasureFileRecovery.integration.test.ts';
+@@ -31,7 +32,7 @@ const built = await esbuild.build({ absWorkingDir: root,
+     build.onLoad({ filter: /.*/, namespace: 'file' }, args => {
+       const name = path.relative(root, args.path).split(path.sep).join('/');
+       assert.ok(name && !name.startsWith('../') && !path.isAbsolute(name));
+-      const loader = { '.ts': 'ts', '.js': 'js', '.json': 'json' }[path.extname(args.path)]; assert.ok(loader);
++      const loader = { '.ts': 'ts', '.js': 'js', '.mjs': 'js', '.json': 'json' }[path.extname(args.path)]; assert.ok(loader);
+       return { contents: capture(name), loader, resolveDir: path.dirname(args.path) };
+     });
+   } }],
+@@ -103,10 +104,11 @@ try {
+     const target = new URL(url.href); target.hostname = 'postgres'; target.port = '5432'; nativeUrl = target.href;
+     const bootstrap = `process.umask(0o077);process.chdir(require('path').dirname(process.argv[1]));
+       const input=JSON.parse(require('fs').readFileSync(0,'utf8'));process.env.DATABASE_URL=input.databaseUrl;
++      ${suite === 'application' ? `process.env.NODE_ENV='test';process.env.RECOVERY_STORAGE_DIR=process.cwd()+'/private-recovery';process.env.RECOVERY_COORDINATION_DIR=process.cwd()+'/private-recovery/coordination';process.env.SUPPORT_TICKET_STORAGE_DIR=process.cwd()+'/storage/support-tickets';` : ''}
+       Object.defineProperty(globalThis,'__sabalanHrErasureNativeInput',{value:Object.freeze(input),writable:false,configurable:false});require(process.argv[1]);`;
+     verify(); result = spawnSync('docker', ['exec', '-i', '-e', 'NODE_PATH=/app/node_modules', candidate.Id,
+       'node', '-e', bootstrap, nativeDirectory + '/fixture.cjs'], {
+-      input: JSON.stringify({ databaseUrl: nativeUrl, migrationSql: migration.toString('utf8') }), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
++      input: JSON.stringify({ databaseUrl: nativeUrl, migrationSql: migration.toString('utf8'), ...(suite === 'application' ? { diagnosticBaseImage: candidate.Image, diagnosticBundleSha256: sha(bundle) } : {}) }), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
+     });
+   } else result = spawnSync(process.execPath, ['--test', entry], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024,
+     env: { ...process.env, NODE_PATH: path.join(root, 'backend/node_modules'), DATABASE_URL: url.href, HR_ERASURE_FILE_LOCAL_ACCEPTANCE: '1' } });
+@@ -139,6 +141,10 @@ if (suite === 'native') {
+   assert.match(report.stdout, /"versionedJobApplicationObserverClosed":true/);
+   assert.match(report.stdout, /"versionedPersonnelErasurePassed":true/);
+ }
++else if (suite === 'application') {
++  assert.match(report.stdout, /"actualCanonicalApplicationProfilePassed":true/);
++  assert.match(report.stdout, /"actualCanonicalApplicationClosed":true/);
++}
+ else if (suite === 'profile') assert.match(report.stdout, /"actualHrVersionedProfilePassed":true/);
+ else { assert.match(report.stdout, /# fail 0\r?\n/); assert.match(report.stdout, /# skipped 0\r?\n/); }
+ for (const [name, hash] of Object.entries(sources)) assert.equal(sha(fs.readFileSync(path.join(root, name))), hash);
+diff --git a/tests/online-deployment/browser-routing-store.test.mjs b/tests/online-deployment/browser-routing-store.test.mjs
+index 50a76509..33e33b3b 100644
+--- a/tests/online-deployment/browser-routing-store.test.mjs
++++ b/tests/online-deployment/browser-routing-store.test.mjs
+@@ -8,6 +8,7 @@ import os from 'node:os';
+ import test from 'node:test';
+ import {BrowserRoutingStore, BrowserRoutingPublicationLock} from '../../deploy/scripts/browser-routing-store.mjs';
+ import {selectBrowserRelease, compileBrowserRoutingRegistry} from '../../deploy/scripts/browser-release-routing.mjs';
++import {apiRoutingSnapshot,compileApiRoutingRegistry,selectApiRelease} from '../../deploy/scripts/api-release-routing.mjs';
+ 
+ const image = `sha256:${'a'.repeat(64)}`;
+ const baseline = () => ({format: 'sabalan-browser-routing/v1', generation: 1,
+@@ -22,6 +23,34 @@ const retire = (input, name, time) => {
+   result.builds.push(next); result.current.erp = name; return result;
+ };
+ 
++test('one durable publication switches browser and API bindings together and preserves every retained backend identity',async()=>{
++  await fixture(async({directory,publicationLock,owner})=>{
++    const store=new BrowserRoutingStore({directory,publicationLock,assertReleaseOwnership:owner});
++    const initial=baseline();initial.format='sabalan-browser-routing/v2';
++    initial.apiBindings=[{buildId:'erp_first',browserManifestSha256:'b'.repeat(64),slotId:'backend_first',image,manifestSha256:'c'.repeat(64)}];
++    const first=await store.publish(initial,null);
++    const next=retire(initial,'erp_second','2026-10-19T00:00:00.000Z');
++    next.apiBindings.push({buildId:'erp_second',browserManifestSha256:'b'.repeat(64),slotId:'backend_second',image,manifestSha256:'d'.repeat(64)});
++    const second=await store.publish(next,first.publicationSha256);
++    const published=await store.readPublication(),snapshot=apiRoutingSnapshot(published.registry);
++    assert.equal(published.publicationSha256,second.publicationSha256);
++    assert.equal(snapshot.browser.current.erp,'erp_second');assert.equal(snapshot.api.generation,2);
++    const api=compileApiRoutingRegistry(snapshot.browser,snapshot.api);
++    assert.equal(selectApiRelease(api,'erp_first',0).slotId,'backend_first');
++    assert.equal(selectApiRelease(api,'erp_second',0).slotId,'backend_second');
++    assert.equal(selectApiRelease(api,null,0).slotId,'backend_first');
++    const changed=structuredClone(next);changed.generation++;
++    changed.apiBindings[0].image='sha256:'+'e'.repeat(64);
++    await assert.rejects(store.publish(changed,second.publicationSha256),/BROWSER_ROUTING_API_IDENTITY_CHANGED/);
++    const downgraded=structuredClone(next);downgraded.generation++;downgraded.format='sabalan-browser-routing/v1';delete downgraded.apiBindings;
++    await assert.rejects(store.publish(downgraded,second.publicationSha256),/BROWSER_ROUTING_API_REMOVED/);
++    const partial=structuredClone(next);partial.generation++;partial.apiBindings.pop();
++    await assert.rejects(store.publish(partial,second.publicationSha256),/BROWSER_API_BINDINGS_INCOMPLETE/);
++    assert.equal((await store.readPublication()).publicationSha256,second.publicationSha256);
++    assert.deepEqual((await fs.readdir(directory)).sort(),['published-00000001.json','published-00000002.json']);
++  });
++});
++
+ async function fixture(run) {
+   assert.equal(process.platform, 'linux', 'native publication acceptance requires Linux');
+   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sabalan-routing-store-'));
+diff --git a/tests/online-deployment/retained-ui-overlap.integration.test.mjs b/tests/online-deployment/retained-ui-overlap.integration.test.mjs
+index 949c08ed..acefafa7 100644
+--- a/tests/online-deployment/retained-ui-overlap.integration.test.mjs
++++ b/tests/online-deployment/retained-ui-overlap.integration.test.mjs
+@@ -6,6 +6,7 @@ import os from 'node:os';
+ import {createHash, randomBytes} from 'node:crypto';
+ import {createRequire} from 'node:module';
+ import {execFileSync} from 'node:child_process';
++import {pathToFileURL} from 'node:url';
+ import test from 'node:test';
+ import {prepareRetainedUiBundle} from './retained-ui-bundle.fixture.mjs';
+ 
+@@ -19,6 +20,12 @@ const proxyImage = 'sha256:33cb69566bb1de4f8895e73486be364ccad1d60e978ba0a30f34c
+ const candidate = '7f4d8f79c29c6d80045ea490e8ddcab156416c072c286467cac1c6ce298ba5e2';
+ const services = ['frontend-online-old', 'frontend-online-new', 'frontend-online-proxy'];
+ const names = services.map(service => 'sabalanerp-local-' + service + '-1');
++const proxyRuntimeSources = [
++  'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-release-proxy.mjs', 'deploy/scripts/api-release-routing.mjs',
++  'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-operation-journal.mjs',
++  'tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/private-ui-management.fixture.mjs',
++  'tests/online-deployment/private-ui-startup.fixture.mjs',
++];
+ 
+ function verify() {
+   const output = execFileSync('docker', ['compose', '-f', path.join(canonical, 'docker-compose.local.yml'), 'ps', '--format', 'json'], {encoding: 'utf8'});
+@@ -35,6 +42,25 @@ function identities() {
+ }
+ const sourceHash = name => sha(fs.readFileSync(path.join(repository, name)));
+ 
++test('copied retained proxy dependency graph resolves its complete captured runtime', async () => {
++  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'sabalan-retained-dependency-'));
++  const expected = Object.fromEntries(proxyRuntimeSources.map(name => [name, sourceHash(name)]));
++  try {
++    for (const name of proxyRuntimeSources) {
++      const target = path.join(directory, name); await fsp.mkdir(path.dirname(target), {recursive: true});
++      await fsp.copyFile(path.join(repository, name), target);
++      assert.equal(sha(await fsp.readFile(target)), expected[name]);
++    }
++    const imported = await import(pathToFileURL(path.join(directory, 'deploy/scripts/browser-release-proxy.mjs')).href);
++    assert.equal(typeof imported.createBrowserReleaseProxy, 'function'); assert.equal(typeof imported.createApiReleaseProxy, 'function');
++    for (const name of proxyRuntimeSources) assert.equal(sourceHash(name), expected[name]);
++  } finally {
++    assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
++    assert.ok(path.basename(directory).startsWith('sabalan-retained-dependency-'));
++    await fsp.rm(directory, {recursive: true});
++  }
++});
++
+ test('immutable real Next builds preserve old tabs across durable switch, proxy restart, failed new slot and current-code rollback',
+   {skip: !enabled || !canonical, timeout: 900000}, async () => {
+     assert.equal(path.resolve(canonical).toLowerCase(), path.resolve('D:/sabalanerp').toLowerCase());
+@@ -43,11 +69,8 @@ test('immutable real Next builds preserve old tabs across durable switch, proxy
+     const stage = path.join(os.tmpdir(), 'sabalan-retained-ui-' + operation);
+     const report = {operation, canonical: before, productionAdmission: false, inquiryActionsExercised: false,
+       businessApiExercised: false, privateRoot, sources: Object.fromEntries([
+-        'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-release-proxy.mjs',
+-        'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-operation-journal.mjs',
+-        'tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/retained-ui-bundle.fixture.mjs',
+-        'tests/online-deployment/private-ui-management.fixture.mjs', 'tests/online-deployment/private-ui-management.test.mjs',
+-        'tests/online-deployment/private-ui-startup.fixture.mjs', 'tests/online-deployment/private-ui-startup.test.mjs',
++        ...proxyRuntimeSources, 'tests/online-deployment/retained-ui-bundle.fixture.mjs',
++        'tests/online-deployment/private-ui-management.test.mjs', 'tests/online-deployment/private-ui-startup.test.mjs',
+         'tests/online-deployment/retained-ui-overlap.integration.test.mjs', 'tests/online-deployment/Dockerfile.retained-ui',
+         'docker-compose.retained-ui-acceptance.yml',
+       ].map(name => [name, sourceHash(name)]))};
+diff --git a/tests/online-deployment/retire-retained-ui-acceptance.fixture.mjs b/tests/online-deployment/retire-retained-ui-acceptance.fixture.mjs
+index 39d48b35..0857023a 100644
+--- a/tests/online-deployment/retire-retained-ui-acceptance.fixture.mjs
++++ b/tests/online-deployment/retire-retained-ui-acceptance.fixture.mjs
+@@ -74,9 +74,18 @@ if (alreadyHeld) {
+     assert.equal(report.results.proxyRestartGeneration, 2);
+     assert.ok(Date.parse(proxy.State.StartedAt) > Date.parse(accepted.get(proxy.Id).startedAt));
+   }
+-  for (const name of ['tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/private-ui-startup.fixture.mjs',
++  const protectedSources = ['tests/online-deployment/retained-ui-proxy.worker.mjs', 'tests/online-deployment/private-ui-startup.fixture.mjs',
+     'tests/online-deployment/private-ui-management.fixture.mjs', 'deploy/scripts/browser-release-proxy.mjs',
+-    'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-operation-journal.mjs']) {
++    'deploy/scripts/browser-routing-store.mjs', 'deploy/scripts/browser-release-routing.mjs', 'deploy/scripts/browser-operation-journal.mjs'];
++  const apiDependency = 'deploy/scripts/api-release-routing.mjs';
++  if (Object.hasOwn(report.sources, apiDependency)) protectedSources.push(apiDependency);
++  else {
++    // An older receipt did not qualify this later dependency. Preserve its
++    // original observation; never backfill/adopt current bytes into a held run.
++    const proxySource = fs.readFileSync(path.join(repository, 'deploy/scripts/browser-release-proxy.mjs'), 'utf8');
++    assert.doesNotMatch(proxySource, /\bfrom\s*['"]\.\/api-release-routing\.mjs['"]/, 'HISTORICAL_PROXY_DEPENDENCY_UNQUALIFIED');
++  }
++  for (const name of protectedSources) {
+     assert.equal(createHash('sha256').update(fs.readFileSync(path.join(repository, name))).digest('hex'), report.sources[name]);
+   }
+   const heldBytes = docker(['exec', reader, 'cat', root + '/transport-shutdown-held.json']);

@@ -1,0 +1,83 @@
+backend/src\utils\pdf.ts:142:  fs.writeFileSync(outputPath, bytes);
+backend/src\routes\catalog-excel.ts:86:        try { fs.unlinkSync(req.file.path); } catch {}
+backend/src\services\accountingOfficialReportArtifact.ts:26:  try { await fs.writeFile(target, bytes, { flag: 'wx', mode: 0o600 }); }
+backend/src\routes\hr.ts:2169:    const [activePersonnel, inactivePersonnel, linkedUsers, unlinkedUsers, departments, schedules, exceptions, migrated] = await Promise.all([
+backend/src\routes\hr.ts:2173:    res.json({ success: true, data: { counts: { activePersonnel, inactivePersonnel, linkedUsers, unlinkedUsers, departments: departments.length, schedules, migrated }, departments, exceptions: exceptions.map((row) => ({ type: row.exceptionType, count: row._count })), conflicts: { duplicateNames: duplicates.map((row) => ({ ...row, count: Number(row.count) })), inactivePersonnelNeedReview: inactivePersonnel } } });
+backend/src\routes\hr.ts:2305:  'unlinked-users': 'کاربران بدون پرسنل',
+backend/src\routes\hr.ts:2332:    } else if (category === 'linked-users' || category === 'unlinked-users') {
+backend/src\services\biometricAuthenticatedConnector.ts:1:import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+backend/src\services\biometricAuthenticatedConnector.ts:58:    writeFileSync(temporaryPath, JSON.stringify([...this.records.values()]), { encoding: 'utf8', mode: 0o600 });
+backend/src\services\biometricAuthenticatedConnector.ts:59:    renameSync(temporaryPath, this.path);
+backend/src\services\catalogExcelSync.ts:575:  try { fs.unlinkSync(filePath); } catch {}
+backend/src\routes\products.ts:110:    fs.renameSync(filePath, destination);
+backend/src\routes\products.ts:218:      try { fs.unlinkSync(req.file.path); } catch {}
+backend/src\routes\products.ts:1096:      fs.unlinkSync(req.file.path);
+backend/src\routes\products.ts:1285:    fs.unlinkSync(req.file.path);
+backend/src\routes\salesReports.ts:213:    res.download(file, `sales-report-${Date.now()}.pdf`, () => fs.unlink(file, () => undefined));
+backend/src\routes\security.ts:442:  try { fs.unlinkSync(file.path); } catch { /* best effort cleanup */ }
+backend/src\routes\security.ts:633:  try { fs.unlinkSync(path.join(vehiclePhotoDir, photo.storageName)); } catch { /* best effort */ }
+backend/src\routes\security.ts:642:  pair.photos.forEach((photo) => { try { fs.unlinkSync(path.join(vehiclePhotoDir, photo.storageName)); } catch { /* best effort */ } });
+backend/src\routes\security.ts:3590:    return res.download(pdfPath, `security-personnel-reports-${result.personnel.employeeNumber || result.personnel.id}.pdf`, () => fs.unlink(pdfPath, () => undefined));
+backend/src\routes\security.ts:3648:    return res.download(pdfPath, 'security-shifts.pdf', () => fs.unlink(pdfPath, () => undefined));
+backend/src\routes\security.ts:3723:    return res.download(pdfPath, 'security-attendance.pdf', () => fs.unlink(pdfPath, () => undefined));
+backend/src\routes\security.ts:3755:    return res.download(pdfPath, 'security-latest-completed-shift.pdf', () => fs.unlink(pdfPath, () => undefined));
+backend/src\routes\security.ts:3820:    res.download(pdfPath, 'security-personnel-performance.pdf', () => fs.unlink(pdfPath, () => undefined));
+backend/src\routes\security.ts:3919:    res.download(pdfPath, 'security-report.pdf', () => fs.unlink(pdfPath, () => undefined));
+backend/src\routes\support-tickets.ts:113:  try { fs.unlinkSync(filePath); } catch {}
+backend/src\services\deploymentCheckpointStorage.ts:62:    fs.createWriteStream(temporaryPath, { flags: start ? 'a' : 'wx', mode: 0o600 }),
+backend/src\services\deploymentCheckpointStorage.ts:194:    await fs.promises.rename(temporary, destination);
+backend/src\services\deploymentCheckpointStorage.ts:330:  await fs.promises.appendFile(input.auditPath, audit.map((entry) => JSON.stringify({ at: new Date().toISOString(), ...entry })).join('\n') + (audit.length ? '\n' : ''), { encoding: 'utf8', mode: 0o600 });
+backend/src\services\deploymentCheckpointStorage.ts:354:    await handle.writeFile(`${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`);
+backend/src\services\deploymentCheckpointStorage.ts:474:    if (archivePresent) await fs.promises.unlink(artifact.archivePath);
+backend/src\services\deploymentCheckpointStorage.ts:478:    await fs.promises.unlink(artifact.metadataPath);
+backend/src\services\deploymentCheckpointStorage.ts:565:    if (archivePresent) await fs.promises.unlink(artifact.archivePath);
+backend/src\services\deploymentCheckpointStorage.ts:566:    await fs.promises.unlink(artifact.metadataPath);
+backend/src\services\deploymentMaintenance.ts:46:  await fs.promises.writeFile(temporary, JSON.stringify(state), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+backend/src\services\deploymentMaintenance.ts:47:  await fs.promises.rename(temporary, target);
+backend/src\services\dispatchDocumentAuditRecovery\operations.ts:75:  const syncFile = async (target: string, bytes: Buffer) => { const descriptor = await fs.promises.open(target, 'w'); try { await descriptor.writeFile(bytes); await descriptor.sync(); } finally { await descriptor.close(); } };
+backend/src\services\dispatchDocumentAuditRecovery\operations.ts:80:    await fs.promises.rename(source, destination);
+backend/src\services\dispatchDocumentAuditRecovery\operations.ts:92:        if (state.hadPrevious && fs.existsSync(targets.previous)) { const recovery = `${targets.staged}.rollback`; await fs.promises.copyFile(targets.previous, recovery); const handle = await fs.promises.open(recovery, 'r+'); try { await handle.sync(); } finally { await handle.close(); } await fs.promises.rename(recovery, targets.destination); }
+backend/src\services\dispatchDocumentAuditRecovery\operations.ts:104:      if (hadPrevious) { await fs.promises.copyFile(targets.destination, targets.previous); const handle = await fs.promises.open(targets.previous, 'r+'); try { await handle.sync(); } finally { await handle.close(); } }
+backend/src\services\dispatchDocumentAuditRecovery\operations.ts:110:      await fs.promises.rename(targets.staged, targets.destination);
+backend/src\services\dispatchDocumentAuditRecovery\operations.ts:120:      if (bytes !== null) { const rollback = `${targets.staged}.rollback`; await syncFile(rollback, bytes); await fs.promises.rename(rollback, targets.destination); }
+backend/src\services\dispatchDocuments\filesystemStorage.ts:1:import { mkdir, open, readFile, unlink } from 'node:fs/promises';
+backend/src\services\dispatchDocuments\filesystemStorage.ts:19:      await handle.writeFile(bytes);
+backend/src\services\dispatchDocuments\filesystemStorage.ts:30:    try { await unlink(resolveKey(root, storageKey)); }
+backend/src\services\hrDeletionFileTransaction.ts:28:    fs.renameSync(item.stagedPath, item.originalPath);
+backend/src\services\hrDeletionFileTransaction.ts:56:      fs.renameSync(item.originalPath, item.stagedPath);
+backend/src\services\hrDeletionFileTransaction.ts:81:      if (fs.existsSync(item.stagedPath)) fs.unlinkSync(item.stagedPath);
+backend/src\services\hrHiringFileStorage.ts:74:  try { fs.unlinkSync(filePath); } catch { /* best-effort cleanup */ }
+backend/src\services\partnerSales\cases\aggregate.ts:463:      const unlinked = await tx.crmPotentialProject.updateMany({ where: { id: previousProjectId,
+backend/src\services\partnerSales\cases\aggregate.ts:467:      if (unlinked.count !== 1) return { ok: false, error: partnerError('ROW_STALE') } as const;
+backend/src\services\personnelPerformanceDisclosureStore.ts:6:import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+backend/src\services\personnelPerformanceDisclosureStore.ts:56:    await unlink(artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+backend/src\services\personnelPerformanceDisclosureStore.ts:815:    await writeFile(pdfPath, bytes, { mode: 0o600, flag: 'wx' });
+backend/src\services\personnelPerformanceDisclosureStore.ts:894:      await writeFile(artifactPath, encryptPerformanceExportArtifact(rendered.bytes, exportKey.key), { mode: 0o600 });
+backend/src\services\personnelPerformanceDisclosureStore.ts:1162:      await unlink(artifactPath).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; });
+backend/src\services\protectedBootstrapMigrations.ts:56:    fs.copyFileSync(path.join(prismaRoot, 'schema.prisma'), path.join(staging, 'schema.prisma'));
+backend/src\services\protectedBootstrapMigrations.ts:57:    fs.copyFileSync(path.join(directory, 'migration_lock.toml'), path.join(staging, 'migrations/migration_lock.toml'));
+backend/src\services\protectedBootstrapMigrations.ts:60:      fs.writeFileSync(path.join(staging, 'migrations', name, 'migration.sql'), bytes, { flag: 'wx', mode: 0o400 });
+backend/src\services\recoveryCrypto.ts:72:  const output = fs.createWriteStream(destinationPath, { flags: 'wx' });
+backend/src\services\recoveryCrypto.ts:77:  await fs.promises.appendFile(destinationPath, cipher.getAuthTag());
+backend/src\services\recoveryCrypto.ts:133:  const output = fs.createWriteStream(destinationPath, { flags: 'wx' });
+backend/src\services\recoveryCrypto.ts:138:  await fs.promises.appendFile(destinationPath, cipher.getAuthTag());
+backend/src\services\recoveryCrypto.ts:191:      await pipeline(fs.createReadStream(sourcePath, { start: ciphertextStart, end: ciphertextEnd }), decipher, fs.createWriteStream(destinationPath, { flags: 'wx' }));
+backend/src\services\recoveryCoordinationState.ts:48:        fs.writeFileSync(descriptor, JSON.stringify({ mode: 'NORMAL', updatedAt: new Date().toISOString() }));
+backend/src\services\recoveryCoordinationState.ts:63:      try { fs.writeFileSync(descriptor, serialized); fs.fsyncSync(descriptor); }
+backend/src\services\recoveryCoordinationState.ts:65:      fs.renameSync(temporary, this.file);
+backend/src\services\runtimeBoundaryJournal.ts:127:    try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
+backend/src\services\runtimeBoundaryJournal.ts:156:    await fs.rename(path.join(this.directory, temporary), path.join(this.directory, 'state.json'));
+backend/src\services\shipmentStatementCutover\index.ts:2:import { link, mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises';
+backend/src\services\shipmentStatementCutover\index.ts:208:    await writeFile(outputPath, output, { encoding: 'utf8', flag: 'wx' });
+backend/src\services\shipmentStatementCutover\index.ts:214:    await writeFile(artifactPath, receiptBytes, { flag: 'wx' });
+backend/src\services\shipmentStatementCutover\index.ts:581:    await handle.writeFile(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+backend/src\services\shipmentStatementCutover\index.ts:591:    await unlink(temporary).catch(error => {
+backend/src\services\supportTicketMaintenance.ts:18:    fs.unlinkSync(target);
+backend/src\services\supportTicketMaintenance.ts:231:      await fs.promises.unlink(target).catch(() => undefined);
+backend/src\services\systemRecoveryEngine.ts:353:    await fs.promises.writeFile(target, sanitizedTransform?.(relative) ?? sanitizedPlaceholder(relative), { mode: 0o600 });
+backend/src\services\systemRecoveryEngine.ts:391:  await fs.promises.writeFile(path.join(payloadRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+backend/src\services\systemRecoveryEngine.ts:516:  await fs.promises.rename(temporaryPath, destination);
+backend/src\services\systemRecoveryEngine.ts:623:  await fs.promises.writeFile(INQUIRY_RESTART_MARKER, operationId, { encoding: 'utf8', mode: 0o600 });
+backend/src\services\systemRecoveryEngine.ts:638:  await fs.promises.writeFile(RESTORE_JOURNAL_PATH, JSON.stringify(journal), { encoding: 'utf8', mode: 0o600 });
+backend/src\services\systemRecoveryEngine.ts:651:  await fs.promises.rename(safetyStaging, safetyDestination);
+backend/src\services\systemRecoveryEngine.ts:1003:      await fs.promises.writeFile(SANITIZED_MARKER_PATH, JSON.stringify({ operationId: input.operationId, restoredAt: new Date().toISOString() }), { mode: 0o600 });

@@ -1,0 +1,19 @@
+{
+  "base": "227cb76199f3c5028daae27c258d40f4f3e41f70",
+  "scope": "Private versioned Personnel command and actual-key graph discovery; no public activation",
+  "paths": {
+    "backend/src/services/hrPersonnelErasureGraph.ts": "cbb1191775bd9c5c4998263dfca8471f8bfb8a12e6faddbe16c1ce0a968f710e",
+    "backend/src/services/hrVersionedPersonnelErasure.ts": "23864481ce0e37fa7c2c9fe4c18478f1717bfb9c9a1be102b8296f8cead9147d",
+    "tests/online-deployment/hr-versioned-personnel-erasure.fixture.ts": "d2d8b39d587caa10f9ad31a15ad95d8a22edaddc446c3fffed8cfd1b41c8b7f3",
+    "tests/online-deployment/hr-erasure-file-journal.fixture.ts": "ad6adcfcf4a7287bec6e719beb2a8882d13800816128b31a8fadfe6e2b3928b3",
+    "scripts/run-hr-erasure-file-recovery-local.mjs": "2b29aed497ab2ed36da7279b4b3fe2d0dd0092a01e413801bc025b1f94631c4d",
+    "reports/qa/hr-versioned-personnel-erasure-20261019.md": "7e264d06e8667b304c650bd714d8d70d700b7468b97499400c63b749f262cbac",
+    "docs/operations/online-deployment.md": "223896838319acb286d45b3139a1c98287d1caa95173768936df6bf673cedf45",
+    "reports/qa/hr-erasure-file-recovery-dba0572e362c861e13bbaba237842f64.json": "76c4be0dfe1f361893ba46519db6d7c40fa735677c36c56bd5c0d7ab6bd986e1",
+    "reports/qa/hr-erasure-file-recovery-3cc29150c8843f37625856345d2d8f20.json": "5c42ab1679893564781eea624fccd1f00de375070d62f293e1e68267c721c296",
+    "reports/qa/hr-erasure-file-recovery-69a8df64d0e1dad5a90aad369f308c7d.json": "1df3a28333221f49f9bcabe23aa3121421b75d17235c52fc35b3dcbf2f4faef8",
+    "reports/qa/hr-erasure-file-recovery-c77f767085ac92700ce22aaf3d09721b.json": "68987a7c9daf57f44477cf6d6d94f95a61c1c1a6defa8ec6f9e2497a779df667",
+    "reports/qa/hr-erasure-file-recovery-cbfaf4df881e98a947e07ca33e4a5f6e.json": "a811f8f725cbc63ffa6f0e7ae5bece75cc5c120c1a582e78872ff059bb6ae3c8",
+    "reports/qa/hr-erasure-file-recovery-9f76b3e03e0b20700b42c678f0d23627.json": "336e92b13104f58703de65400555dc5c2ba5fc0fd100aa8ff2283726bf8689ee"
+  }
+}

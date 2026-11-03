@@ -1,0 +1,38 @@
+[
+  {
+    "sha256": "e12a8b988d8a90d45ef9ee66860c4053c11d204efdb8aaa26cd0ffcaff82ef83",
+    "path": "backend/src/services/versionedFilePublication.ts"
+  },
+  {
+    "sha256": "8b3e66798b797f4c89184fef8c20fa9de025e5c7c122fe5e2ba16b9c22b9af80",
+    "path": "tests/online-deployment/versioned-file-scopes.fixture.cjs"
+  },
+  {
+    "sha256": "4192d05896f2933b6f63e003bf478a3932e0da7197a6c2c1a3eb2df427e00959",
+    "path": "backend/src/services/dispatchVersionedOrphanStorage.ts"
+  },
+  {
+    "sha256": "3276d654db8ffa2c9732f957ee5ae33e565c33147a06ef43495f3a737cec78cf",
+    "path": "backend/src/services/dispatchQuarantineFileReceipt.ts"
+  },
+  {
+    "sha256": "45aba9545561143e59ea425613669056508ea90f98250448427ca1ba00a45e6f",
+    "path": "backend/src/services/dispatchDocumentAuditRecovery/index.ts"
+  },
+  {
+    "sha256": "6194aff288e4b795f216d4266a81c65b1452c819e5b714c388dd0880f8cb016c",
+    "path": "backend/src/services/dispatchDocumentAuditRecovery/operations.ts"
+  },
+  {
+    "sha256": "7eca94bc0d0bc82622f712cfb72813ea0badfc35c273880cc9d9760225db9f19",
+    "path": "backend/src/services/__tests__/dispatchDocumentAuditRecovery.test.ts"
+  },
+  {
+    "sha256": "6ee5b157cc74d75afb7a81680a805d066f5a37cafd09807715c4f303e2111233",
+    "path": "scripts/run-versioned-file-publication-local.mjs"
+  },
+  {
+    "sha256": "8385cb5c6dbf82f1cb3751147e6bc227447ce1fe58b12b8457729e43457ece98",
+    "path": "tests/online-deployment/versioned-file-orphan.fixture.cjs"
+  }
+]

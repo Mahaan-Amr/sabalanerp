@@ -1,0 +1,25 @@
+{
+  "base": "c713b93bb9811a9fb96b4af01a9a007f83c87275",
+  "files": {
+    "scripts/prepare-production-image-customer-overlap.mjs": "ae6e59b17c3b1f59b0d529df0933cab5e0f771322a362d10b2146c7d7bc43380",
+    "scripts/prepare-production-image-customer-remote.mjs": "dc23b237f7dcd72eefac665f244d18db3d3c5f5248a4fb6206bc03831542e0e8",
+    "scripts/verify-production-image-customer-overlap.mjs": "46e8c7400b08d67986ad13daa66622159e8aaf0947c1dc13a4f4c2c7bb2dfed7",
+    "tests/online-deployment/production-image-customer-overlap.fixture.cjs": "db9d630c790d66536bc7b864c66a1bd8a59aa0b55e439cd86abfd2b0e87e9bce",
+    "tests/online-deployment/production-image-customer-owner.fixture.py": "c4e92092dd34209d40a30d7c42fbc26c01ebf882b088b307f66de0e92104f014",
+    "tests/online-deployment/production-image-customer-postgres.fixture.sh": "ff95a5090376dc8c4fcf694d7110ac89712d9ff471a35ab396c5c4ed29be023e",
+    "tests/online-deployment/production-image-customer-retire.fixture.py": "891bd61e530d382eb17a8c18f09ab2aacdac4190f7c3414fae0960f2a4b095ac",
+    "reports/qa/actual-image-customer-overlap-20261019.md": "d87e17c694a6cc03dc06b839f9983704c8210b1d05179b2b8c155f0c44d5676c",
+    "D:/sabalanerp-online-qa/run-reviewed-backup-operation-with-password-20261019.py": "7479d236a121faba110702a1d2afbbdd0b892d8a190980b951c2f18812950fbb",
+    "D:/sabalanerp-online-qa/refresh-both-host-preflight-20261018.py": "41e4e3dc05f158993bb9a5ef4606612198db302c918fec633636042605436f07",
+    "D:/sabalanerp-online-qa/closed-base-mount-guard-20261018.py": "165101a51ecc00db4b12ff65a5b2fe55f7037b4407ccdde5e799afa7bda54cd7",
+    "D:/sabalanerp-online-qa/actual-image-customer-dd67e319494eb352c7fd8729eb5b3fa8/input-manifest.json": "3e0975289bcc02caac79d3522c1d72328a65b337f74e0783e8105763455b5540",
+    "backend/src/services/closedCustomerExpansion.ts": "c18448a0786f91053d32e93e16087aad4748b462114a61d2b7c15a53025d29a9",
+    "backend/src/services/__tests__/closedCustomerExpansion.integration.test.ts": "21a21806c74d552352ae3ad8adea0b0b213efff9ba58575d9f1e698d773a0f28",
+    "scripts/run-closed-customer-expansion-local.mjs": "fcf7e73358d910c1ea035d0ef0977e7d3c2c498df168e4ad3c81541d37f28258",
+    "docs/operations/online-deployment.md": "8eff1ad60091d460d822ff7f0657172d5db13146ff73583fa4abc24202858d61",
+    "reports/qa/production-retained-migration-identity-20261019.json": "6588a6f8a471b5b4a8c5268361a050298afb796d1d4069b1de0075eb8d33b646",
+    "reports/qa/closed-customer-expansion-2bd56de9395a42df18d21166b154db78.json": "915e9f2d36712d47e98cad09bcf66d05cf8d941d29f7a44e0b9fe0d129c89d0f",
+    "reports/qa/closed-customer-expansion-331b63bc496ee8a5778e72b260f72942.json": "fd575e6a84133df3aaaa88c11bc4c51008bb153efc11379f1674bcd80990da04",
+    "reports/qa/closed-customer-expansion-bc7bd0604e4c8f14fcdbc236c4be6c1c.json": "bc26fef04fb3b68c51563dc32eebe55d4e5b693edcd51c48e7d19aa9c6447503"
+  }
+}

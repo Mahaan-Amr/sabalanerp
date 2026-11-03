@@ -1,0 +1,374 @@
+diff --git a/deploy/scripts/recovery-file-generations.py b/deploy/scripts/recovery-file-generations.py
+index b08a6ee1..d139b365 100644
+--- a/deploy/scripts/recovery-file-generations.py
++++ b/deploy/scripts/recovery-file-generations.py
+@@ -123,43 +123,18 @@ def publish_record(directory, name, value, maximum=MAX_MANIFEST_BYTES):
+     return hashlib.sha256(data).hexdigest()
+ 
+ 
+-class FileGenerations:
+-    def __init__(self, root, gate_fd, gate_device, gate_inode):
+-        self.root, self.gate_fd = root, gate_fd
+-        self.gate_identity = (int(gate_device), int(gate_inode))
++class _FileGenerationReader:
++    selected_sha = None
++
++    def __init__(self, root):
++        self.root = root
+         self.root_identity = identity(private_directory(root))
+-        self.assert_gate()
++        self.objects_identity = identity(private_directory(os.path.join(root, "objects")))
++        self.captures_identity = identity(private_directory(os.path.join(root, "captures")))
+         sync_ancestry(root)
+-        for name in ("objects", "captures"):
+-            target = os.path.join(root, name)
+-            try:
+-                private_directory(target, create=True)
+-            except FileExistsError:
+-                private_directory(target)
+-        self.objects_identity = identity(os.lstat(os.path.join(root, "objects")))
+-        self.captures_identity = identity(os.lstat(os.path.join(root, "captures")))
+-
+-    def assert_gate(self):
+-        value = os.fstat(self.gate_fd)
+-        named = os.readlink("/proc/self/fd/" + str(self.gate_fd))
+-        parent = os.lstat(os.path.dirname(named))
+-        if (identity(value) != self.gate_identity or not stat.S_ISREG(value.st_mode)
+-                or value.st_nlink != 1 or value.st_size != 0
+-                or value.st_uid != os.geteuid() or value.st_mode & 0o022
+-                or os.path.basename(named) != "deployment-write-admission.lock"
+-                or os.path.realpath(named) != named or identity(os.lstat(named)) != identity(value)
+-                or not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.geteuid()
+-                or parent.st_mode & 0o022):
+-            fail("FILE_GENERATION_GATE_CHANGED")
+-        with open("/proc/self/fdinfo/" + str(self.gate_fd), encoding="ascii") as source:
+-            details = source.read()
+-        if not re.search(r"^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+"
+-                         r"[0-9a-f]+:[0-9a-f]+:" + str(value.st_ino)
+-                         + r"\s+0\s+EOF\s*$", details, re.M):
+-            fail("FILE_GENERATION_EXCLUSIVE_GATE_REQUIRED")
++        self.assert_owner()
+ 
+     def assert_owner(self):
+-        self.assert_gate()
+         if identity(private_directory(self.root)) != self.root_identity:
+             fail("FILE_GENERATION_STORE_CHANGED")
+         for name, expected in (("objects", self.objects_identity),
+@@ -169,6 +144,8 @@ class FileGenerations:
+ 
+     def _history(self, selected_sha=None, *, for_capture=False):
+         self.assert_owner()
++        if self.selected_sha is not None and (for_capture or selected_sha != self.selected_sha):
++            fail("FILE_GENERATION_SELECTION_CHANGED")
+         directory = os.path.join(self.root, "captures")
+         names = sorted(os.listdir(directory))
+         if len(names) > MAX_HISTORY_COUNT or (for_capture and len(names) >= MAX_HISTORY_COUNT):
+@@ -215,6 +192,10 @@ class FileGenerations:
+                         fail("FILE_GENERATION_HISTORY_INVALID")
+                     selected = manifest
+                 last = manifest
++                # Later captures may be in progress. A reader pins one complete
++                # immutable prefix, never adopts or waits for a future suffix.
++                if self.selected_sha is not None and previous == self.selected_sha:
++                    break
+             finally:
+                 os.close(fd)
+         sync_directory(directory)
+@@ -294,6 +275,127 @@ class FileGenerations:
+         finally:
+             os.close(fd)
+ 
++    def verify(self, sha256):
++        history = self._history(sha256)
++        manifest = history["selected"]
++        if manifest is None:
++            fail("FILE_GENERATION_MANIFEST_NOT_FOUND")
++        fd = os.open(os.path.join(self.root, "objects"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++        try:
++            for entry in manifest["entries"]:
++                self.assert_owner()
++                self._object(fd, entry)
++        finally:
++            os.close(fd)
++        return manifest
++
++    def restore(self, sha256, target):
++        manifest = self.verify(sha256)
++        # Always a new private stage. Never merge into or roll back live data.
++        if (not os.path.isabs(target) or os.path.normpath(target) != target
++                or os.path.realpath(os.path.dirname(target)) != os.path.dirname(target)):
++            fail("FILE_GENERATION_RESTORE_TARGET_INVALID")
++        for protected in [self.root] + [source["path"] for source in manifest["sources"]]:
++            if os.path.commonpath([target, protected]) in (target, protected):
++                fail("FILE_GENERATION_RESTORE_TARGET_INVALID")
++        private_directory(target, create=True)
++        objects = os.open(os.path.join(self.root, "objects"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++        try:
++            for entry in manifest["entries"]:
++                self.assert_owner()
++                destination = os.path.join(target, entry["source"], *entry["path"].split("/"))
++                parent = os.path.dirname(destination)
++                os.makedirs(parent, mode=0o700, exist_ok=True)
++                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
++                try:
++                    self._object(objects, entry, fd)
++                    os.fsync(fd)
++                finally:
++                    os.close(fd)
++                # Persist every newly created ancestor, including empty sources.
++                current = parent
++                while current != target:
++                    sync_directory(current)
++                    current = os.path.dirname(current)
++            for source in manifest["sources"]:
++                directory = os.path.join(target, source["name"])
++                os.makedirs(directory, mode=0o700, exist_ok=True)
++                sync_directory(directory)
++            sync_directory(target)
++            self.assert_owner()
++            return {"manifestSha256": sha256, "files": len(manifest["entries"]),
++                    "bytes": sum(entry["bytes"] for entry in manifest["entries"])}
++        finally:
++            os.close(objects)
++
++
++class SealedFileGeneration(_FileGenerationReader):
++    """Materialize one hash-pinned immutable prefix outside the write pause.
++
++    No source file is opened, no gate is acquired/inherited and no capture,
++    prune, traffic or recovery-point publication operation is exposed. The
++    controller still owns native completion, privacy/dependency retention and
++    coherent PostgreSQL/SQLite selection; this reader grants none of those.
++    """
++    def __init__(self, root, sha256):
++        if not isinstance(sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", sha256):
++            fail("FILE_GENERATION_SELECTION_INVALID")
++        self.selected_sha = sha256
++        super().__init__(root)
++
++    def verify(self, sha256=None):
++        if sha256 is not None and sha256 != self.selected_sha:
++            fail("FILE_GENERATION_SELECTION_CHANGED")
++        return super().verify(self.selected_sha)
++
++    def restore(self, target):
++        return super().restore(self.selected_sha, target)
++
++
++class FileGenerations(_FileGenerationReader):
++    def __init__(self, root, gate_fd, gate_device, gate_inode):
++        self.root, self.gate_fd = root, gate_fd
++        self.gate_identity = (int(gate_device), int(gate_inode))
++        self.root_identity = identity(private_directory(root))
++        self.assert_gate()
++        sync_ancestry(root)
++        for name in ("objects", "captures"):
++            target = os.path.join(root, name)
++            try:
++                private_directory(target, create=True)
++            except FileExistsError:
++                private_directory(target)
++        self.objects_identity = identity(os.lstat(os.path.join(root, "objects")))
++        self.captures_identity = identity(os.lstat(os.path.join(root, "captures")))
++
++    def assert_gate(self):
++        value = os.fstat(self.gate_fd)
++        named = os.readlink("/proc/self/fd/" + str(self.gate_fd))
++        parent = os.lstat(os.path.dirname(named))
++        if (identity(value) != self.gate_identity or not stat.S_ISREG(value.st_mode)
++                or value.st_nlink != 1 or value.st_size != 0
++                or value.st_uid != os.geteuid() or value.st_mode & 0o022
++                or os.path.basename(named) != "deployment-write-admission.lock"
++                or os.path.realpath(named) != named or identity(os.lstat(named)) != identity(value)
++                or not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.geteuid()
++                or parent.st_mode & 0o022):
++            fail("FILE_GENERATION_GATE_CHANGED")
++        with open("/proc/self/fdinfo/" + str(self.gate_fd), encoding="ascii") as source:
++            details = source.read()
++        if not re.search(r"^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+"
++                         r"[0-9a-f]+:[0-9a-f]+:" + str(value.st_ino)
++                         + r"\s+0\s+EOF\s*$", details, re.M):
++            fail("FILE_GENERATION_EXCLUSIVE_GATE_REQUIRED")
++
++    def assert_owner(self):
++        self.assert_gate()
++        if identity(private_directory(self.root)) != self.root_identity:
++            fail("FILE_GENERATION_STORE_CHANGED")
++        for name, expected in (("objects", self.objects_identity),
++                               ("captures", self.captures_identity)):
++            if identity(private_directory(os.path.join(self.root, name))) != expected:
++                fail("FILE_GENERATION_STORE_CHANGED")
++
+     def _copy(self, source_fd, name, objects_fd, source, relative):
+         opened = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                          dir_fd=source_fd)
+@@ -442,56 +544,3 @@ class FileGenerations:
+         finally:
+             os.close(objects)
+             os.close(fd)
+-
+-    def verify(self, sha256):
+-        history = self._history(sha256)
+-        manifest = history["selected"]
+-        if manifest is None:
+-            fail("FILE_GENERATION_MANIFEST_NOT_FOUND")
+-        fd = os.open(os.path.join(self.root, "objects"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+-        try:
+-            for entry in manifest["entries"]:
+-                self.assert_owner()
+-                self._object(fd, entry)
+-        finally:
+-            os.close(fd)
+-        return manifest
+-
+-    def restore(self, sha256, target):
+-        manifest = self.verify(sha256)
+-        # Always a new private stage. Never merge into or roll back live data.
+-        if (not os.path.isabs(target) or os.path.normpath(target) != target
+-                or os.path.realpath(os.path.dirname(target)) != os.path.dirname(target)):
+-            fail("FILE_GENERATION_RESTORE_TARGET_INVALID")
+-        for protected in [self.root] + [source["path"] for source in manifest["sources"]]:
+-            if os.path.commonpath([target, protected]) in (target, protected):
+-                fail("FILE_GENERATION_RESTORE_TARGET_INVALID")
+-        private_directory(target, create=True)
+-        objects = os.open(os.path.join(self.root, "objects"), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+-        try:
+-            for entry in manifest["entries"]:
+-                self.assert_owner()
+-                destination = os.path.join(target, entry["source"], *entry["path"].split("/"))
+-                parent = os.path.dirname(destination)
+-                os.makedirs(parent, mode=0o700, exist_ok=True)
+-                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+-                try:
+-                    self._object(objects, entry, fd)
+-                    os.fsync(fd)
+-                finally:
+-                    os.close(fd)
+-                # Persist every newly created ancestor, including empty sources.
+-                current = parent
+-                while current != target:
+-                    sync_directory(current)
+-                    current = os.path.dirname(current)
+-            for source in manifest["sources"]:
+-                directory = os.path.join(target, source["name"])
+-                os.makedirs(directory, mode=0o700, exist_ok=True)
+-                sync_directory(directory)
+-            sync_directory(target)
+-            self.assert_owner()
+-            return {"manifestSha256": sha256, "files": len(manifest["entries"]),
+-                    "bytes": sum(entry["bytes"] for entry in manifest["entries"])}
+-        finally:
+-            os.close(objects)
+diff --git a/tests/online-deployment/file-generations-native.fixture.py b/tests/online-deployment/file-generations-native.fixture.py
+index 4fbc33b4..352475e7 100644
+--- a/tests/online-deployment/file-generations-native.fixture.py
++++ b/tests/online-deployment/file-generations-native.fixture.py
+@@ -37,6 +37,31 @@ def expect_error(code, run):
+         raise AssertionError('Expected ' + code)
+ 
+ 
++if len(sys.argv) == 4 and sys.argv[2] == 'materialize-child':
++    # No gate descriptor is inherited. Stop during an actual native output
++    # write, so the parent can exercise a later cut while copying is unfinished.
++    assert not any('deployment-write-admission.lock' in os.readlink('/proc/self/fd/' + name)
++                   for name in os.listdir('/proc/self/fd') if name.isdigit()
++                   and os.path.exists('/proc/self/fd/' + name))
++    original_write = os.write
++    paused = False
++
++    def paused_write(fd, data):
++        global paused
++        written = original_write(fd, data)
++        if not paused and os.readlink('/proc/self/fd/' + str(fd)).endswith('/invoice.pdf'):
++            paused = True
++            os.kill(os.getpid(), signal.SIGSTOP)
++        return written
++
++    os.write = paused_write
++    result = module.SealedFileGeneration(str(root / 'store'), sys.argv[3]).restore(
++        str(root / 'restore-concurrent-materializer'))
++    assert paused
++    print(json.dumps(result), flush=True)
++    sys.exit(0)
++
++
+ if len(sys.argv) == 4 and sys.argv[2] in ('capture-child', 'seal-child'):
+     gate = int(sys.argv[3])
+     gate_stat = os.fstat(gate)
+@@ -116,12 +141,66 @@ for case in ('symlink', 'unfinished', 'fifo'):
+     expect_error('FILE_GENERATION_CAPTURE_UNFINISHED', lambda: candidate.capture([source(target_source)], 'b' * 64))
+     refusals.append(case)
+ 
++# A sealed generation materializes from independent objects after the write
++# pause has ended. The reader owns no gate, cannot capture and never reopens a
++# mutable source pathname, even while a serving writer owns the shared gate.
++fcntl.flock(gate, fcntl.LOCK_SH)
++reader = module.SealedFileGeneration(str(store_root), first['sha256'])
++assert not hasattr(reader, 'capture') and not hasattr(reader, 'assert_gate')
++assert reader.verify()['captureId'] == '1' * 64
++outside_pause = reader.restore(str(root / 'restore-with-serving-writer'))
++assert outside_pause['files'] == 2
++assert (root / 'restore-with-serving-writer/uploads/invoice.pdf').read_bytes() == b'ORIGINAL-PDF-123456789.12345678'
++assert (root / 'restore-with-serving-writer/uploads/deleted.txt').read_bytes() == b'OLD-DELETED-ATTACHMENT'
++fcntl.flock(gate, fcntl.LOCK_EX)
++
++# A real separate process is paused halfway through old-version output. A new
++# exclusive cut and mutable source changes proceed, then the reader finishes
++# the original bytes without inheriting or extending the original write pause.
++fcntl.flock(gate, fcntl.LOCK_UN)
++materializer = subprocess.Popen([sys.executable, '-B', __file__, str(root), 'materialize-child', first['sha256']],
++                               close_fds=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
++deadline = time.monotonic() + 10
++while time.monotonic() < deadline and materializer.poll() is None:
++    fields = Path('/proc/' + str(materializer.pid) + '/stat').read_text().rsplit(')', 1)[1].split()
++    if fields[0] == 'T':
++        break
++    time.sleep(0.001)
++else:
++    raise AssertionError('Materializer did not reach actual incomplete output')
++try:
++    fcntl.flock(gate, fcntl.LOCK_EX | fcntl.LOCK_NB)
++    (live / 'invoice.pdf').write_bytes(b'LIVE-THIRD-VERSION-123')
++    third = store.capture([source(live)], '3' * 64)
++    assert third['manifest']['generation'] == 3
++    fcntl.flock(gate, fcntl.LOCK_UN)
++finally:
++    materializer.send_signal(signal.SIGCONT)
++copied, copy_error = materializer.communicate(timeout=10)
++assert materializer.returncode == 0, copy_error.decode()
++concurrent_result = json.loads(copied)
++assert (root / 'restore-concurrent-materializer/uploads/invoice.pdf').read_bytes() == b'ORIGINAL-PDF-123456789.12345678'
++assert module.SealedFileGeneration(str(store_root), first['sha256']).verify()['generation'] == 1
++expect_error('FILE_GENERATION_SELECTION_CHANGED', lambda: reader.verify(second['sha256']))
++fcntl.flock(gate, fcntl.LOCK_EX)
++
+ # A same-size tamper must fail native verification, even with intact metadata.
+ corrupt = store_root / 'objects' / hashlib.sha256(b'NEW-PDF-0.00000001').hexdigest()
+ os.chmod(corrupt, 0o600)
+ corrupt.write_bytes(b'X' * len(b'NEW-PDF-0.00000001'))
+ os.chmod(corrupt, 0o400)
+ expect_error('FILE_GENERATION_OBJECT_CHANGED', lambda: store.verify(second['sha256']))
++expect_error('FILE_GENERATION_OBJECT_CHANGED', lambda: module.SealedFileGeneration(str(store_root), second['sha256']).verify())
++expect_error('FILE_GENERATION_SELECTION_INVALID', lambda: module.SealedFileGeneration(str(store_root), '../live'))
++expect_error('FILE_GENERATION_MANIFEST_NOT_FOUND', lambda: module.SealedFileGeneration(str(store_root), '0' * 64).verify())
++
++# An incomplete future capture cannot invalidate a completed selected prefix;
++# it still blocks the controller's next capture through the original writer.
++incomplete = store_root / 'captures' / ('000000000004-' + '4' * 64)
++incomplete.mkdir(mode=0o700)
++assert reader.verify()['generation'] == 1
++expect_error('FILE_GENERATION_CAPTURE_UNFINISHED', lambda: store.capture([source(live)], '5' * 64))
++expect_error('FILE_GENERATION_CAPTURE_UNFINISHED', lambda: module.SealedFileGeneration(str(store_root), '0' * 64).verify())
+ 
+ # Oversized canonical metadata is refused before any named record is created.
+ metadata = root / 'metadata-boundary'
+@@ -263,6 +342,9 @@ report = {'format': 'sabalan-file-generations-native/v1', 'pass': True,
+                   'captureCapacity': 10000, 'retainedRestoreAtCapacity': True,
+                   'nativeChildSignal': 'SIGKILL', 'partialCaptureRetained': True,
+                   'replacementRefused': True, 'workingRoot': str(root)}
++report['sealedRestoreOutsideWritePause'] = outside_pause
++report['concurrentMaterializer'] = dict(concurrent_result, laterCutWhileCopyIncomplete=True,
++    originalSourcePathNotReopened=True, futureIncompleteCaptureRetained=True)
+ with (root / 'native-proof.json').open('x') as proof:
+     os.chmod(root / 'native-proof.json', 0o400)
+     json.dump(report, proof, sort_keys=True)

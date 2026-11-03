@@ -1,0 +1,14 @@
+/** Pure fixed SAME-service RO authority mount proposal; performs no Docker action. */
+import assert from'node:assert/strict';import{createHash}from'node:crypto';
+const sha=b=>createHash('sha256').update(b).digest('hex'),same=(a,b)=>assert.deepEqual(a,b);
+export function composeInquiryAuthorityOverride({project,service,cohortNonce,existingImage,existingHostname}){
+ same(project,'sabalanerp-local');same(service,'inquiry');assert.match(cohortNonce,/^[a-f0-9]{32}$/);assert.match(existingImage,/^sha256:[a-f0-9]{64}$/);assert.match(existingHostname,/^[A-Za-z0-9_.-]{1,63}$/);
+ return{services:{inquiry:{hostname:existingHostname,volumes:[{type:'volume',source:'online_runtime_authority',target:'/run/sabalan-online',read_only:true,volume:{nocopy:true,subpath:'cohort-'+cohortNonce}}]}},volumes:{online_runtime_authority:{external:true,name:'sabalanerp-local_online_runtime_authority'}}};
+}
+export function validateInquiryCarrierTransition(before,after,request){
+ same(request.project,'sabalanerp-local');same(request.service,'inquiry');assert.match(request.cohortNonce,/^[a-f0-9]{32}$/);assert.notEqual(before.Id,after.Id);same(before.Image,after.Image);same(before.Image,request.existingImage);assert.notEqual(before.State.StartedAt,after.State.StartedAt);same(after.State.Running,true);same(after.State.Health.Status,'healthy');
+ same(before.Config,after.Config);const host=structuredClone(after.HostConfig),mounts=host.Mounts||[],selected=mounts.filter(m=>m.Target==='/run/sabalan-online');same(selected.length,1);same(selected[0],{Type:'volume',Source:'sabalanerp-local_online_runtime_authority',Target:'/run/sabalan-online',ReadOnly:true,VolumeOptions:{NoCopy:true,Subpath:'cohort-'+request.cohortNonce}});host.Mounts=mounts.filter(m=>m.Target!=='/run/sabalan-online');same(host,before.HostConfig);
+ const prior=before.Mounts,added=after.Mounts.filter(m=>m.Destination==='/run/sabalan-online');same(added.length,1);same(added[0].Type,'volume');same(added[0].Name,'sabalanerp-local_online_runtime_authority');same(added[0].RW,false);same(added[0].Source,'/var/lib/docker/volumes/sabalanerp-local_online_runtime_authority/_data');same(after.Mounts.filter(m=>m.Destination!=='/run/sabalan-online'),prior);same(before.HostConfig.PortBindings,after.HostConfig.PortBindings);same(Object.keys(before.NetworkSettings.Networks).sort(),Object.keys(after.NetworkSettings.Networks).sort());
+ same(request.originalDatabaseBefore,request.originalDatabaseAfter);same(request.originalDatabaseBefore.path,'/data/inquiry.db');assert.match(request.originalDatabaseBefore.sha256,/^[a-f0-9]{64}$/);
+ return{format:'sabalan-same-inquiry-authority-mount-transition/v1',beforeId:before.Id,afterId:after.Id,image:after.Image,beforeStartedAt:before.State.StartedAt,afterStartedAt:after.State.StartedAt,cohortNonce:request.cohortNonce,originalDatabase:structuredClone(request.originalDatabaseAfter),onlyReadOnlyAuthorityMountAdded:true,productionAdmission:false};
+}

@@ -1,0 +1,22 @@
+{
+  "base": "46507408f2f770d334b4327a297d3e31d36d6af6",
+  "scope": "Empty versioned HR parent exclusion from legacy recovery and retry; private composition only",
+  "paths": {
+    "backend/src/services/hrDeletionFileCleanup.ts": "a3d06af333bb4a59b73fe721982624407848abdad22a82c3003beb7b4d0822b5",
+    "backend/src/services/hrLegacyFileCleanupRows.ts": "070f41e3b48d8fc1acf90fa4fc875bb80c4a1d556b9b57f0eca479efe9950836",
+    "backend/src/services/hrPersonnelErasureRecovery.ts": "4c5391bf0a43f27c548680e6c095457e9f69cb81dd0f0920f44ea891e4757db0",
+    "backend/src/services/hrVersionedJobApplicationErasure.ts": "4d0dbb2d5c3f974aa56e72c5d35974116010fc2761357e27e01e095c4ed318aa",
+    "tests/online-deployment/hr-erasure-file-journal.fixture.ts": "6fa96ae95542a5aca169acae25ffbd5c13c3b70a5637e9b8aa0b4ee04db819ce",
+    "tests/online-deployment/hr-erasure-file-retry-http.fixture.ts": "06b533bc18d30eed7ba23b628f7c12404c347e8ab196a0acff7ddfe06a749835",
+    "tests/online-deployment/hr-versioned-job-application-erasure.fixture.ts": "40962953b0707e9c3823c0e635a388ef875fe14b0ef5f9993f0451f5b7557d30",
+    "reports/qa/hr-empty-file-protocol-ownership-20261019.md": "f98793b5fe858ec2df51d9e8fc1c22d2e04b0f658a1f9ae207a6aade7a637724",
+    "docs/operations/online-deployment.md": "e962dcfb40c6a4d3e8fcb0a4e7874f3db75cf4a80c15af052a1104d0dc71ddf5",
+    "reports/qa/hr-erasure-file-recovery-25f3b9719148c415f2ae31d0a0ffc2a5.json": "3728a28c43f55861eb3b79754fc3625989b32c06942fdf4c1c0d8e34a3451695",
+    "reports/qa/hr-erasure-file-recovery-9f9b2176e775350e9e212fcfa742b5ba.json": "b6d660db4f0372cfa8d6ff3a36dfc062842941a1d7ba3bc6e8b6490d962c7568",
+    "reports/qa/hr-erasure-file-recovery-fce63500ddd46162c1ef470f35af8cf9.json": "f7b99d20933665bfd5ceadbdf0c75cec1db454687318e9b36c4bb59bb652ec41",
+    "reports/qa/hr-erasure-file-recovery-2d109a9bbf32e6b38b020603aff453f2.json": "5a6d03db6481c24e6330ac2a4e89cdb1d2487b0b49178c6efa1f06fd814f37d5",
+    "reports/qa/hr-erasure-file-recovery-a0ae3d5b89f4ae5ca2e00aeb57b1b4df.json": "c2db379ea6722bdb2914b71755f278f5a97114dd296ab5feace6b8c84efb0863",
+    "reports/qa/hr-erasure-file-recovery-4423322def664427abd7612832ac810d.json": "28cb0b02e561a8ab394cac328b0ba39ea969832cadd29144bf5182246fc14c9d",
+    "reports/qa/hr-erasure-file-recovery-e203cc097ec3431d377fe907edc80e8c.json": "5cf8257c78a4d089f4de4c3f64c0823a6218b494b1ffd6209874961cb35553b2"
+  }
+}

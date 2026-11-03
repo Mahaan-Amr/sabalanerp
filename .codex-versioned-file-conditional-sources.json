@@ -1,0 +1,10 @@
+[
+  {
+    "sha256": "6a0263fd5eb9ee555dc05b1d853a3e38fa73405821fc80e134d44218f7e9f0d6",
+    "path": "backend/src/services/versionedFilePublication.ts"
+  },
+  {
+    "sha256": "1dfa3ee516091366fbfdd02ffe55560e6d775c235340736e78c3e33c58afe26b",
+    "path": "tests/online-deployment/versioned-file-scopes.fixture.cjs"
+  }
+]

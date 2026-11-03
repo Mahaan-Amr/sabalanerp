@@ -1,0 +1,8 @@
+{
+  "base": "c713b93bb9811a9fb96b4af01a9a007f83c87275",
+  "files": {
+    "tests/online-deployment/production-image-customer-close-failed.fixture.py": "58e8094f1ed0f35626f4a871c741ec69cecbf70c7a41707a7b2ccd60c3bf2995",
+    "reports/qa/actual-image-customer-failed-readonly-diagnostic-20261019.json": "a1bf6a4f71468cc6552c972274515d634e181002f0090c9db264c34383e98938",
+    "D:/sabalanerp-online-qa/run-reviewed-backup-operation-with-password-20261019.py": "7479d236a121faba110702a1d2afbbdd0b892d8a190980b951c2f18812950fbb"
+  }
+}

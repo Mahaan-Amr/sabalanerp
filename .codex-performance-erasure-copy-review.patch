@@ -1,0 +1,130 @@
+diff --git a/backend/src/services/__tests__/dispatchDocumentsTemporaryDatabase.ts b/backend/src/services/__tests__/dispatchDocumentsTemporaryDatabase.ts
+index b883b3f5..57329472 100644
+--- a/backend/src/services/__tests__/dispatchDocumentsTemporaryDatabase.ts
++++ b/backend/src/services/__tests__/dispatchDocumentsTemporaryDatabase.ts
+@@ -109,7 +109,9 @@ export const createDispatchDocumentsTemporaryDatabase = async (input: {
+       let lastError: unknown;
+       for (let attempt = 1; attempt <= 3; attempt += 1) {
+         try {
+-          compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${databaseName}' AND pid <> pg_backend_pid()"`);
++          const outstanding = compose(input.repositoryRoot,
++            `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = '${databaseName}') + (SELECT count(*) FROM pg_prepared_xacts WHERE database = '${databaseName}')"`).trim();
++          if (outstanding !== '0') throw new Error('Temporary database still has sessions or prepared transactions; preserving its data.');
+           compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
+           const remaining = compose(input.repositoryRoot,
+             `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command "SELECT count(*) FROM pg_database WHERE datname = '${databaseName}'"`).trim();
+diff --git a/backend/src/services/__tests__/personnelPerformanceErasure.integration.test.ts b/backend/src/services/__tests__/personnelPerformanceErasure.integration.test.ts
+index a35e5522..e6740247 100644
+--- a/backend/src/services/__tests__/personnelPerformanceErasure.integration.test.ts
++++ b/backend/src/services/__tests__/personnelPerformanceErasure.integration.test.ts
+@@ -19,6 +19,8 @@ import { raceEvidenceMarker, runOrderedPerformanceRace } from './performanceAcce
+ 
+ const main = async () => {
+   const database = await createDispatchDocumentsTemporaryDatabase({
++    schemaOnly: true,
++    referenceDataTables: ['hr_workspace_catalogs', 'hr_feature_catalogs', 'performance_disclosure_revision'],
+     repositoryRoot: path.resolve(process.cwd(), '..'),
+     sourceDatabaseUrl: process.env.DATABASE_URL
+       ?? 'postgresql://postgres:sabalanerp-local-only@127.0.0.1:55432/sabalanerp?connection_limit=4&pool_timeout=10',
+@@ -119,6 +121,11 @@ const main = async () => {
+       assert.equal(await tx.performanceDraft.count({ where: { id: draftId } }), 0);
+       assert.equal(await tx.performanceEncryptedPayload.count({ where: { id: draftPayload.id } }), 0);
+       assert.equal(await tx.performanceDeletionReceipt.count({ where: { deletedRecordId: { in: [draftId, draftPayload.id] } } }), 2);
++      const backupCopiesBeforeExpiry = await tx.performanceRecoverableCopy.count({ where: { operationId: operation.id, location: 'INDEPENDENT_BACKUP' } });
++      assert.equal((await executePerformanceErasureOperation(tx, operation.id, new Date('2027-01-02Z'))).status,
++        'LIVE_ERASED_BACKUP_PENDING', 'elapsed retention is not evidence that retained backup bytes were removed');
++      assert.equal(await tx.performanceRecoverableCopy.count({ where: { operationId: operation.id, location: 'INDEPENDENT_BACKUP' } }),
++        backupCopiesBeforeExpiry, 'the clock cannot invent a physical backup erasure receipt');
+       const replay = await executePerformanceErasureOperation(tx, operation.id, new Date('2026-09-10Z'));
+       assert.equal(replay.id, operation.id, 'a retry reuses the stable operation without duplicate deletion');
+       const backupHold = await placePerformanceLegalHold(tx, { actorUserId: actor.id, aggregateType: 'EVALUATION',
+@@ -136,6 +143,13 @@ const main = async () => {
+       await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: operation.id, location: 'INDEPENDENT_BACKUP',
+         copyKey: `${suffix}:backup`, status: 'ERASED', evidenceHash: canonicalPerformanceHash({ suffix, backup: 'expired' }) });
+       assert.equal((await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operation.id } })).status, 'COMPLETED');
++      await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: operation.id, location: 'INDEPENDENT_BACKUP',
++        copyKey: `${suffix}:backup`, status: 'UNKNOWN', evidenceHash: canonicalPerformanceHash({ suffix, backup: 'unproven-new-observation' }) });
++      const uncertainBackup = await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operation.id } });
++      assert.equal(uncertainBackup.status, 'LIVE_ERASED_BACKUP_PENDING');
++      assert.equal(uncertainBackup.completedAt, null, 'new uncertainty must withdraw the completion claim');
++      await recordPerformanceRecoverableCopy(tx, { actorUserId: actor.id, operationId: operation.id, location: 'INDEPENDENT_BACKUP',
++        copyKey: `${suffix}:backup`, status: 'ERASED', evidenceHash: canonicalPerformanceHash({ suffix, backup: 'reverified-erased' }) });
+       await tx.performanceEncryptedPayload.create({ data: checkpointPayload });
+       await tx.performanceDraft.create({ data: checkpointDraft });
+       const receiptCountBeforeReplay = await tx.performanceDeletionReceipt.count({ where: { deletedRecordId: { in: [draftId, draftPayload.id] } } });
+diff --git a/backend/src/services/__tests__/personnelPerformanceErasure.test.ts b/backend/src/services/__tests__/personnelPerformanceErasure.test.ts
+index fb50c44c..e8b1fcdb 100644
+--- a/backend/src/services/__tests__/personnelPerformanceErasure.test.ts
++++ b/backend/src/services/__tests__/personnelPerformanceErasure.test.ts
+@@ -44,6 +44,11 @@ assert.equal(decidePerformanceErasureProgress({ ...base, copies: base.copies.map
+ assert.equal(decidePerformanceErasureProgress({ ...base, copies: base.copies.map((copy) => copy.location === 'INDEPENDENT_BACKUP'
+   ? { ...copy, status: 'RECOVERABLE' as const } : copy), liveErased: true }), 'LIVE_ERASED_BACKUP_PENDING');
+ assert.equal(decidePerformanceErasureProgress({ ...base, copies: base.copies.map((copy) => ({ ...copy, status: 'ERASED' as const })), liveErased: true }), 'COMPLETED');
++assert.equal(decidePerformanceErasureProgress({ ...base, liveErased: true,
++  copies: base.copies.map(copy => ({ ...copy, status: copy.location === 'INDEPENDENT_BACKUP' ? 'UNKNOWN' as const : 'ERASED' as const })) }),
++  'LIVE_ERASED_BACKUP_PENDING', 'unknown retained copies cannot certify complete erasure after live deletion');
++assert.equal(decidePerformanceErasureProgress({ ...base, liveErased: true, copies: [] }), 'LIVE_ERASED_BACKUP_PENDING',
++  'an absent copy inventory cannot certify complete erasure');
+ assert.equal(decidePerformanceErasureProgress({ ...base, partialFailure: true }), 'PARTIAL_RESTRICTED');
+ 
+ console.log('Performance erasure policy tests passed.');
+diff --git a/backend/src/services/personnelPerformanceErasure.ts b/backend/src/services/personnelPerformanceErasure.ts
+index 2a40f581..36a88893 100644
+--- a/backend/src/services/personnelPerformanceErasure.ts
++++ b/backend/src/services/personnelPerformanceErasure.ts
+@@ -90,6 +90,9 @@ export const decidePerformanceErasureProgress = (input: {
+     return 'COPY_REVIEW_REQUIRED';
+   }
+   if (!input.liveErased) return 'READY';
+-  if (input.copies.some(({ status }) => status === 'PRESENT' || status === 'RECOVERABLE')) return 'LIVE_ERASED_BACKUP_PENDING';
++  if (input.copies.length !== requiredPerformanceCopyLocations.length || requiredPerformanceCopyLocations.some(location => {
++    const copies = input.copies.filter(copy => copy.location === location);
++    return copies.length !== 1 || !['VERIFIED_ABSENT', 'ERASED'].includes(copies[0].status);
++  })) return 'LIVE_ERASED_BACKUP_PENDING';
+   return 'COMPLETED';
+ };
+diff --git a/backend/src/services/personnelPerformanceErasureStore.ts b/backend/src/services/personnelPerformanceErasureStore.ts
+index f4adfeb5..6a3fee62 100644
+--- a/backend/src/services/personnelPerformanceErasureStore.ts
++++ b/backend/src/services/personnelPerformanceErasureStore.ts
+@@ -104,15 +104,9 @@ const activePerformanceErasureHold = async (tx: Client, operation: { encryptedSc
+ const refreshOperationStatus = async (tx: Client, operationId: string, now = new Date()) => {
+   const operation = await tx.performanceErasureOperation.findUniqueOrThrow({ where: { id: operationId } });
+   const activeHold = operation.liveErasedAt ? await activePerformanceErasureHold(tx, operation) : null;
+-  const expired = activeHold ? [] : await tx.performanceRecoverableCopy.findMany({ where: { operationId, location: 'INDEPENDENT_BACKUP',
+-    status: 'RECOVERABLE', recoverableUntil: { lte: now } }, orderBy: { version: 'desc' } });
+-  if (expired[0]) {
+-    const latestBackup = await tx.performanceRecoverableCopy.findFirst({ where: { operationId, location: 'INDEPENDENT_BACKUP' }, orderBy: { version: 'desc' } });
+-    if (latestBackup?.id === expired[0].id) await tx.performanceRecoverableCopy.create({ data: { operationId, location: 'INDEPENDENT_BACKUP',
+-      copyKeyHash: sha256(`expired:${expired[0].id}`), status: 'ERASED', version: latestBackup.version + 1, checkedAt: now,
+-      evidenceHash: canonicalPerformanceHash({ operationId, sourceCopyId: expired[0].id, recoverableUntil: expired[0].recoverableUntil?.toISOString(),
+-        source: 'INDEPENDENT_BACKUP_RETENTION_EXPIRY' }) } });
+-  }
++  // Retention time schedules inspection; it cannot prove that bytes and all
++  // dependent base/WAL/file versions were actually removed. Only a subsequent
++  // explicit copy observation can change the append-only evidence inventory.
+   const [impact, approvals, rows] = await Promise.all([
+     tx.performanceErasureImpactApproval.findUnique({ where: { policyVersionId: operation.policyVersionId } }),
+     tx.performanceErasureApproval.findMany({ where: { operationId }, select: { actorUserId: true } }),
+diff --git a/docs/operations/personnel-performance-operations.md b/docs/operations/personnel-performance-operations.md
+index efe6cd09..f2ad4de0 100644
+--- a/docs/operations/personnel-performance-operations.md
++++ b/docs/operations/personnel-performance-operations.md
+@@ -16,7 +16,7 @@ Dependencies must identify their kind. Closed disputes, corrections and conseque
+ 
+ Export cleanup takes the same aggregate-scope advisory lock as the database legal-hold trigger and rechecks the hold before filesystem deletion. It requires a Read Committed cleanup transaction so an older snapshot cannot overlook a committed hold. The runtime commits an export cleanup intent before filesystem deletion. A failed database mutation preserves its stable retry identifier and never commits a deletion receipt. Successful live cleanup is explicitly `LIVE_DELETED_PENDING_BACKUP`; it does not attest backup expiry. The worker scans bounded pages and continues past held or failed records. A full process-crash/storage-failure recovery rehearsal remains required.
+ 
+-Live deletion is not proof of backup expiry. Until every recoverable copy has been independently accounted for, a deletion must be reported as **live deletion; awaiting backup expiry**. Preserve the ten latest releases and twelve monthly points under ADR-0039. Replay authorized erasures before reopening a restored service. Never prune protected checkpoints to satisfy performance retention or reset the database to discard post-cutover writes.
++Live deletion is not proof of backup expiry. Until every recoverable copy has been independently accounted for, a deletion must be reported as **live deletion; awaiting backup expiry**. ADR-0131 supersedes ADR-0039's retention count: keep the newest two complete healthy independently verified recovery points, verify a replacement before pruning, and additionally preserve active operations, incident/legal holds and all required base/WAL/file/image dependencies. Replay authorized erasures before reopening a restored service. Never prune protected checkpoints to satisfy performance retention or reset the database to discard post-cutover writes.
+ 
+ Each export generation attempt commits an immutable artifact-path inventory entry before writing bytes. Failed, interrupted and superseded attempts remain inventoried for hold-aware cleanup instead of being unlinked by worker error handlers. Publication and cleanup serialize their file operations; a delayed renderer rechecks status, attempt and expiry before writing. The cleanup regression covers a held failed attempt and its eventual live deletion. Previously orphaned files whose paths were already discarded require separate storage reconciliation; migration can inventory only paths still recorded in the database.
+ 
+@@ -157,7 +157,7 @@ Daily maintenance reassesses every evaluation through the same retention interfa
+ 
+ The first operation under each policy version records a population and record-count impact preview and remains blocked until an authorized retention manager approves it. An operation above the explicitly approved `PERFORMANCE_ERASURE_BULK_THRESHOLD` additionally requires two distinct, append-only approvals; a missing or invalid threshold fails closed instead of inventing a business limit. Routine operations at or below the threshold need no record-by-record approval. The operation identity, assessment, policy, scope and dependency hashes are immutable; process or storage failure moves the same operation to `PARTIAL_RESTRICTED`, restricts the remaining evaluation, preserves the failed transaction without a completion receipt, and schedules a retry under that identity.
+ 
+-Every operation inventories `LIVE_DATABASE`, `SEARCH_INDEX`, `APPLICATION_CACHE`, `TEMPORARY_STORAGE`, `DATABASE_REPLICA`, `ARTIFACT_STORAGE` and `INDEPENDENT_BACKUP`. Unknown locations and recoverable non-backup copies block live deletion. Copy evidence is versioned and append-only. An independently retained backup may remain after transactional live deletion, but the operation is then only `LIVE_ERASED_BACKUP_PENDING`; it becomes `COMPLETED` only after later evidence or the recorded independent expiry proves that no recoverable copy remains. Deletion receipts contain hashed scope and dependency evidence, not Personnel identity or deleted confidential content.
++Every operation inventories `LIVE_DATABASE`, `SEARCH_INDEX`, `APPLICATION_CACHE`, `TEMPORARY_STORAGE`, `DATABASE_REPLICA`, `ARTIFACT_STORAGE` and `INDEPENDENT_BACKUP`. Unknown locations and recoverable non-backup copies block live deletion. Copy evidence is versioned and append-only. An independently retained backup may remain after transactional live deletion, but the operation is then only `LIVE_ERASED_BACKUP_PENDING`; it becomes `COMPLETED` only when every required location has exactly one resolved current observation of `VERIFIED_ABSENT` or `ERASED`. A recorded retention deadline schedules inspection and never creates an erasure observation by itself. New unknown evidence withdraws completion and clears its timestamp. Independent cleanup must account for retained versions and dependent recovery bytes; an API evidence hash alone does not certify online recovery coverage. Deletion receipts contain hashed scope and dependency evidence, not Personnel identity or deleted confidential content.
+ 
+ The retention endpoints expose the impact preview, operation/copy status, bulk approvals and evidence recording under `MANAGE_PERFORMANCE_RETENTION`. Normal execution remains in maintenance. Legal holds are rechecked by the database deletion guards and overdue 90-day reviews are escalated through the durable notification outbox. During System Recovery, the pre-restore safety database is read through the documented alternate-client exception and all previously completed live erasures are replayed against the promoted database before the safety database is dropped or writes reopen. Missing policy or replay evidence leaves recovery fail-closed in maintenance.
+ 

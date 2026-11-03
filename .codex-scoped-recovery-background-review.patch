@@ -1,0 +1,184 @@
+diff --git a/backend/src/services/onlineRuntimeWork.ts b/backend/src/services/onlineRuntimeWork.ts
+index b0106d92..d06f6cff 100644
+--- a/backend/src/services/onlineRuntimeWork.ts
++++ b/backend/src/services/onlineRuntimeWork.ts
+@@ -9,6 +9,7 @@ import { RuntimeBoundaryJournal, runtimeNativePostgresApplicationName } from './
+ import { RuntimeTaskAdmission } from './runtimeTaskAdmission';
+ import { RuntimeWorkBoundary } from './runtimeWorkBoundary';
+ import { OnlineCaptureAdmission } from './onlineCaptureAdmission';
++import { bindScopedRecoveryBackgroundOwner } from './recoveryRuntime';
+ 
+ type WorkInput = Readonly<{ registrySha256: string; generation: number; canJoin: () => boolean }>;
+ const failure = (code: string) => Object.assign(new Error(code), { code });
+@@ -78,5 +79,7 @@ export async function createScopedRuntimeWork(configuration: WorkInput): Promise
+     if (input.scope.purpose !== 'http') throw failure('RUNTIME_HTTP_OWNERSHIP_REQUIRED');
+     assertOwner();
+   };
+-  return new RuntimeWorkBoundary(tasks, runtimeHttpRequests, assertWorker, assertHttp, assertOwner);
++  const boundary = new RuntimeWorkBoundary(tasks, runtimeHttpRequests, assertWorker, assertHttp, assertOwner);
++  if (input.scope.purpose === 'jobs') bindScopedRecoveryBackgroundOwner(boundary);
++  return boundary;
+ }
+diff --git a/backend/src/services/recoveryRuntime.ts b/backend/src/services/recoveryRuntime.ts
+index 3a54666e..83106a55 100644
+--- a/backend/src/services/recoveryRuntime.ts
++++ b/backend/src/services/recoveryRuntime.ts
+@@ -5,17 +5,52 @@ import { bindRuntimeHttpWriteAdmission, runtimeHttpRequests } from './httpReques
+ import { RecoveryCoordinationState, RecoveryRuntimeState } from './recoveryCoordinationState';
+ import { RecoveryOperationAdmission } from './recoveryOperationAdmission';
+ import { assertRuntimeControlAdmission } from './runtimeControlOwnership';
++import { RuntimeWorkBoundary } from './runtimeWorkBoundary';
++import { loadOnlineRuntimeScope } from './onlineRuntimeScope';
++import { applicationRuntimeDatabaseUrl } from './runtimeNativeAuthority';
+ 
+ export const RECOVERY_ROOT = process.env.RECOVERY_STORAGE_DIR || path.join(process.cwd(), 'storage', 'recovery');
+ export const RECOVERY_COORDINATION_DIR = process.env.RECOVERY_COORDINATION_DIR || path.join(RECOVERY_ROOT, 'coordination');
+ const coordinationState = new RecoveryCoordinationState(RECOVERY_COORDINATION_DIR);
+ const recoveryOperations = new RecoveryOperationAdmission();
+ let activeWrites = 0;
++let backgroundObserved = false;
++let scopedBackground: { boundary: RuntimeWorkBoundary; assertOwner: () => void } | undefined;
++
++/** Private native composition, before any background admission. This does not
++ * start jobs, initialize coordination, publish a role or grant control access. */
++export const bindScopedRecoveryBackgroundOwner = (boundary: RuntimeWorkBoundary) => {
++  const failure = () => new Error('SCOPED_BACKGROUND_OWNER_UNPROVEN');
++  const input = loadOnlineRuntimeScope();
++  if (backgroundObserved || scopedBackground || !(boundary instanceof RuntimeWorkBoundary)
++    || boundary.requests !== runtimeHttpRequests || !input || input.scope.purpose !== 'jobs'
++    || input.scope.role !== 'control' || RECOVERY_COORDINATION_DIR !== input.scope.coordinationDirectory) throw failure();
++  const assertOwner = () => {
++    if (loadOnlineRuntimeScope() !== input || !applicationRuntimeDatabaseUrl()) throw failure();
++    const gate = boundary.context.gateIdentity();
++    if (gate.device !== input.scope.gate.device || gate.inode !== input.scope.gate.inode
++      || gate.ownerUid !== input.scope.gate.ownerUid) throw failure();
++  };
++  assertOwner();
++  scopedBackground = { boundary, assertOwner };
++};
+ 
+ /** Background mutations share the same maintenance admission and drain as HTTP writes.
+  * Check and register synchronously, before awaiting work; recovery cannot see a
+  * drained system while an admitted background write is still running. */
+ export const withRecoveryBackgroundWrite = async <T>(work: () => Promise<T>): Promise<T | undefined> => {
++  backgroundObserved = true;
++  if (scopedBackground) {
++    const owner = scopedBackground;
++    owner.assertOwner();
++    return owner.boundary.runBackground(async () => {
++      owner.assertOwner();
++      if (getRecoveryRuntimeState().mode !== 'NORMAL' || deploymentMaintenanceActive(RECOVERY_COORDINATION_DIR)) return undefined;
++      activeWrites += 1;
++      try { return await work(); }
++      finally { activeWrites -= 1; }
++    });
++  }
+   if (getRecoveryRuntimeState().mode !== 'NORMAL' || deploymentMaintenanceActive(RECOVERY_COORDINATION_DIR)) return undefined;
+   assertRuntimeControlAdmission();
+   activeWrites += 1;
+diff --git a/scripts/run-online-scoped-work-local.mjs b/scripts/run-online-scoped-work-local.mjs
+index 8c6c0c77..f8b8fa00 100644
+--- a/scripts/run-online-scoped-work-local.mjs
++++ b/scripts/run-online-scoped-work-local.mjs
+@@ -65,7 +65,7 @@ assert.ok(closureFunction, 'actual protected release/rollback boundary function
+ files['streamed-closure.fixture.sh'] = Buffer.from('run_backend() { "$@"; }\n' + closureFunction + '\nassert_native_runtime_closed\n');
+ files['deploy/scripts/backend-runtime-owner.py'] = files['backend-runtime-owner.py'];
+ for (const [name, source] of [[ 'services/onlineRuntimeWork.js', 'backend/src/services/onlineRuntimeWork.ts'],
+-  ...['onlineCaptureAdmission', 'kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext', 'runtimeLeasedWorkContext', 'runtimeWorkBoundary', 'httpRequestLifecycle', 'durableUpload', 'durableFilePublication'].map(name => ['services/' + name + '.js', 'backend/src/services/' + name + '.ts']),
++  ...['onlineCaptureAdmission', 'kernelWriteAdmission', 'runtimeBoundaryJournal', 'runtimeTaskAdmission', 'runtimeWorkContext', 'runtimeLeasedWorkContext', 'runtimeWorkBoundary', 'httpRequestLifecycle', 'durableUpload', 'durableFilePublication', 'versionedFilePublication', 'recoveryRuntime', 'recoveryCoordinationState', 'recoveryOperationAdmission', 'deploymentMaintenance'].map(name => ['services/' + name + '.js', 'backend/src/services/' + name + '.ts']),
+   ['lib/prisma.js', 'backend/src/lib/prisma.ts'],
+   ['services/runtimeControlOwnership.js', 'backend/src/services/runtimeControlOwnership.ts'],
+   ['services/onlineRuntimeScope.js', 'backend/src/services/onlineRuntimeScope.ts'],
+diff --git a/tests/online-deployment/online-native-owner.fixture.py b/tests/online-deployment/online-native-owner.fixture.py
+index e24e49a7..b2958bd4 100644
+--- a/tests/online-deployment/online-native-owner.fixture.py
++++ b/tests/online-deployment/online-native-owner.fixture.py
+@@ -74,6 +74,7 @@ if mode in ['prepare', 'prepare-admission']:
+     system = sql('SELECT system_identifier FROM pg_control_system()')
+     coordination = root / 'coordination'
+     coordination.mkdir(mode=0o700)
++    write(coordination / 'state.json', encoded(dict(mode='NORMAL', updatedAt=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))), 0o600)
+     gate = lock(coordination / 'deployment-write-admission.lock')
+     interlock = lock(coordination / 'deployment-runtime-control.lock')
+     worker = lock(coordination / 'deployment-online-worker.lock')
+@@ -143,6 +144,7 @@ if mode in ['prepare', 'prepare-admission']:
+     if admission:
+         paused_coordination = root / 'interrupted-capture-coordination'
+         paused_coordination.mkdir(mode=0o700)
++        write(paused_coordination / 'state.json', encoded(dict(mode='NORMAL', updatedAt=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))), 0o600)
+         (paused_coordination / 'diagnostic-finish').mkdir(mode=0o700)
+         for name in ['online', 'online/native', 'online/work']:
+             (paused_coordination / name).mkdir(mode=0o700)
+@@ -219,6 +221,7 @@ def ready(child):
+     if not raw:
+         child.wait(timeout=5)
+         diagnostic = child.stderr.read(4096)
++        write(root / ('startup-diagnostic-' + str(child.pid) + '.stderr'), diagnostic or b'NO_STDERR\n', 0o600)
+         require(False, 'ONLINE_SCOPED_WORK_NOT_IMPLEMENTED' if b'ONLINE_SCOPED_WORK_NOT_IMPLEMENTED' in diagnostic
+                 else 'CAPTURE_NAMESPACE_PROBE_REJECTED' if b'CAPTURE_NAMESPACE_PROBE_REJECTED' in diagnostic else 'WORKER_DID_NOT_START')
+     value = json.loads(raw)
+diff --git a/tests/online-deployment/online-scoped-work.worker.cjs b/tests/online-deployment/online-scoped-work.worker.cjs
+index c9d9c5bd..19015ad7 100644
+--- a/tests/online-deployment/online-scoped-work.worker.cjs
++++ b/tests/online-deployment/online-scoped-work.worker.cjs
+@@ -9,8 +9,10 @@ const express = require('/app/node_modules/express');
+ const { prisma, disconnectDatabase } = require('./lib/prisma');
+ const { loadOnlineRuntimeScope } = require('./services/onlineRuntimeScope');
+ const { createScopedRuntimeWork } = require('./services/onlineRuntimeWork');
+-const { runtimeHttpRequests, bindRuntimeHttpWriteAdmission } = require('./services/httpRequestLifecycle');
++const { runtimeHttpRequests } = require('./services/httpRequestLifecycle');
++const { withRecoveryBackgroundWrite } = require('./services/recoveryRuntime');
+ const input = loadOnlineRuntimeScope();
++let runtimeWork, server;
+ 
+ if (input.scope.purpose === 'capture') require('./native-worker.cjs');
+ else (async () => {
+@@ -20,17 +22,16 @@ else (async () => {
+     storage: { destination: input.scope.coordinationDirectory + '/diagnostic-uploads/' + input.scope.runtimeId,
+       filename: (_request, _file, complete) => complete(null, 'proof.bin') }, limits: { fileSize: 8192 },
+   }) : undefined;
+-  bindRuntimeHttpWriteAdmission(() => true);
+   await assert.rejects(createScopedRuntimeWork({ registrySha256: 'c'.repeat(64), generation: 1, canJoin: () => true }), /REGISTRY_MISMATCH/);
+   const work = await createScopedRuntimeWork({ registrySha256: input.scope.manifestSha256, generation: 1,
+     canJoin: () => true });
++  runtimeWork = work;
+   assert.strictEqual(work.requests, runtimeHttpRequests);
+   const workClaim = JSON.parse(fs.readFileSync(input.scope.boundaryDirectory + '/claim.json'));
+   assert.equal(workClaim.format, 'sabalan-runtime-claim/v2');
+   assert.deepEqual(workClaim.native, { scopeSha256: input.sha256, claimSha256: process.env.BACKEND_NATIVE_CLAIM_SHA256 });
+   const [identity] = await prisma.$queryRawUnsafe("SELECT current_setting('application_name') AS name");
+   const mode = process.argv[2];
+-  let server;
+   if (input.scope.purpose === 'http') {
+     let incorrectlyAdmitted = false;
+     await assert.rejects(work.runBackground(async () => { incorrectlyAdmitted = true; }), /WORKER_OWNERSHIP/);
+@@ -92,7 +93,7 @@ else (async () => {
+       }); request.once('error', reject);
+     });
+     assert.equal(status, 503); assert.equal(dispatched, false);
+-    if (mode === 'jobs') await work.runBackground(() => prisma.$executeRawUnsafe("INSERT INTO online_native_probe VALUES ('worker', 123456789.12345678, 0.00000001)"));
++    if (mode === 'jobs') assert.equal(await withRecoveryBackgroundWrite(() => prisma.$executeRawUnsafe("INSERT INTO online_native_probe VALUES ('worker', 123456789.12345678, 0.00000001)")), 1);
+   }
+   console.log(JSON.stringify({ event: 'ready', pid: process.pid, namespace: identity.name,
+     purpose: input.scope.purpose, ...(server ? { port: server.address().port } : {}) }));
+@@ -103,7 +104,7 @@ else (async () => {
+       request.once('error', reject); request.end();
+     });
+   } else if (mode === 'lost-worker') {
+-    await work.runBackground(() => prisma.$executeRawUnsafe("DO $$ BEGIN PERFORM pg_sleep(3); INSERT INTO online_native_probe VALUES ('lost-worker', 123456789.12345678, 0.00000001); END $$"));
++    await withRecoveryBackgroundWrite(() => prisma.$executeRawUnsafe("DO $$ BEGIN PERFORM pg_sleep(3); INSERT INTO online_native_probe VALUES ('lost-worker', 123456789.12345678, 0.00000001); END $$"));
+   } else {
+     while (!fs.existsSync(input.scope.coordinationDirectory + '/diagnostic-finish/' + input.scope.runtimeId)) await new Promise(resolve => setTimeout(resolve, 20));
+   }
+@@ -112,5 +113,10 @@ else (async () => {
+   await disconnectDatabase();
+ })().catch(async error => {
+   console.error(error?.message === 'ONLINE_SCOPED_WORK_NOT_IMPLEMENTED' ? error.message : 'ONLINE_SCOPED_WORK_FAILED');
+-  try { await disconnectDatabase(); } finally { process.exitCode = 1; }
++  try {
++    if (runtimeWork) await runtimeWork.stopAndDrain(2000);
++    if (server) await new Promise(resolve => server.close(resolve));
++    await disconnectDatabase();
++  } catch { console.error('ONLINE_SCOPED_WORK_FAILURE_DRAIN_UNPROVEN'); }
++  finally { process.exitCode = 1; }
+ });

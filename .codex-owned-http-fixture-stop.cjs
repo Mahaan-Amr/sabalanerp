@@ -1,0 +1,18 @@
+const assert=require('node:assert/strict'),WebSocket=require('/app/node_modules/ws');
+(async()=>{const list=await(await fetch('http://127.0.0.1:9229/json/list')).json();assert.equal(list.length,1);assert.equal(list[0].url,'file:///app/online-runtime-acceptance/request-database-9dab4485e22eb6843d4332e26fe4ac31/worker.cjs');
+const ws=new WebSocket(list[0].webSocketDebuggerUrl);await new Promise((r,j)=>{ws.once('open',r);ws.once('error',j);});let next=0;const pending=new Map(),events=[];ws.on('message',b=>{const v=JSON.parse(b);if(v.id){const p=pending.get(v.id);if(p){pending.delete(v.id);v.error?p.reject(Error(JSON.stringify(v.error))):p.resolve(v.result);}}else events.push(v);});
+const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++next;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});
+try{const identity=await call('Runtime.evaluate',{expression:'({pid:process.pid,argv:process.argv,resources:process.getActiveResourcesInfo()})',returnByValue:true});console.log('IDENTITY',JSON.stringify(identity));
+const proto=await call('Runtime.evaluate',{expression:'(()=>{const timer=setInterval(()=>{},999999);const proto=Object.getPrototypeOf(timer);clearInterval(timer);return proto;})()'});assert.ok(proto.result.objectId);
+const objects=await call('Runtime.queryObjects',{prototypeObjectId:proto.result.objectId});
+const selected=await call('Runtime.callFunctionOn',{objectId:objects.objects.objectId,functionDeclaration:'function(){const selected=this.filter(t=>t._repeat===60000 && t._onTimeout && t._onTimeout.toString()==="() => {}");if(selected.length!==1)throw Error("EOF_TIMER_NOT_UNIQUE_"+selected.length);return selected[0]._onTimeout;}' });
+assert.equal(selected.exceptionDetails,undefined);assert.ok(selected.result.objectId);console.log('OWNED_EOF_TIMER_SELECTED');
+await call('Debugger.enable');await call('Debugger.setBreakpointOnFunctionCall',{objectId:selected.result.objectId});
+const invocation=call('Runtime.callFunctionOn',{objectId:selected.result.objectId,functionDeclaration:'function(){return this();}'});
+let pause;for(let i=0;i<100;i++){pause=events.find(e=>e.method==='Debugger.paused');if(pause)break;await new Promise(r=>setTimeout(r,10));}assert.ok(pause);
+const frame=pause.params.callFrames[0];console.log('PAUSED_OWNED_EOF_CALLBACK',JSON.stringify({url:frame.url,location:frame.location,functionName:frame.functionName}));
+const scope=await call('Debugger.evaluateOnCallFrame',{callFrameId:frame.callFrameId,expression:'({run:typeof run,resolveStopped:typeof resolveStopped,stopping,exclusive:exclusive===undefined,root})',returnByValue:true});console.log('ORIGINAL_OWNER_SCOPE',JSON.stringify(scope));
+assert.equal(scope.result?.value?.run,'function');assert.equal(scope.result?.value?.resolveStopped,'function');assert.equal(scope.result.value.exclusive,true);assert.equal(scope.result.value.stopping,false);
+const stopped=await call('Debugger.evaluateOnCallFrame',{callFrameId:frame.callFrameId,expression:'void run({operation:"stop"}).then(value=>{if(value.stopped)resolveStopped();})',returnByValue:true});assert.equal(stopped.exceptionDetails,undefined);console.log('ORIGINAL_STOP_PATH_INVOKED');
+await call('Debugger.resume');await invocation;
+}finally{ws.close();}})().catch(e=>{console.error(e.stack);process.exitCode=1;});

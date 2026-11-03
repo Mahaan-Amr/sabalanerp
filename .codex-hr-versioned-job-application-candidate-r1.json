@@ -1,0 +1,23 @@
+{
+  "format": "sabalan-frozen-component-candidate/v1",
+  "base": "93b6cc1a92f1fb79bc3eb112894e71543d754217",
+  "scope": "Private versioned Job Application erasure command; no public route or online activation",
+  "paths": {
+    "backend/src/services/hrVersionedDeletionFileJournal.ts": "c731293fd87f9100d4aab807834da74363751ea938cd1dd2d4a07b01836a7a87",
+    "backend/src/services/hrVersionedJobApplicationErasure.ts": "6b630ad905f231728f2583df8c38e97b3a99e519088f8721ae63eb9166ce06a5",
+    "docs/operations/online-deployment.md": "03ccf992d7ec700394e6a7dff84ff08c4efc4ded170ec0f034db06e1dacec798",
+    "reports/qa/hr-erasure-file-recovery-160b49edb35bd7c9d7458fce03d66a17.json": "907bc6887215202adddeabd9e76403ecbb8a855b76ec4d7eba8366ab5029afba",
+    "reports/qa/hr-erasure-file-recovery-35d6543f6af25822af0c7e59ee6185c8.json": "12cc0f3dd2b6da777fba9d11e6188a0fe25895b72328a7f66d912eba10a5b8c7",
+    "reports/qa/hr-erasure-file-recovery-4801516a8182fd7e5cd26929a3ef9fdd.json": "cf47be4ae39c5600d73ee0e95651d2063f280653c0b58fa606860148c5e686fb",
+    "reports/qa/hr-erasure-file-recovery-63ee86be4944642976418f8e18cd1173.json": "3759a3afca485da930aed49df6cef1844ab707b6775947e9a2c13b0461471171",
+    "reports/qa/hr-erasure-file-recovery-69e3af231ecaae7e3da3abdf20ead32b.json": "98efabb545e52c0a22c524cdd03ffb6658e853849e57f0b57a0bd2a5cd14f75e",
+    "reports/qa/hr-erasure-file-recovery-8518b5ccadeb1819cded675e49f9ef4a.json": "c035ec67479dbcbca49eb71f0182970350691dc7341415f5a628cc320df1e7f4",
+    "reports/qa/hr-erasure-file-recovery-aba239c1baffc5fc0ed3a43d054db234.json": "850cd5b9b3a714d79cc0e18803509a88a11c01a9fc2486cf74f6dd7ced2bb799",
+    "reports/qa/hr-erasure-file-recovery-e635ac9bf70a3c51a0ea2fe0a64cea79.json": "aff75ff3419aeebe5c1363defced08d10ef6b20503040813980d5c97aaba6737",
+    "reports/qa/hr-versioned-job-application-erasure-20261019.md": "be7a56f54933f050a760cd26b492e254d636572628073faf248b09d25b7da854",
+    "scripts/run-hr-erasure-file-recovery-local.mjs": "b99427a7ec7329c8d882f82366118e0b7098fdb02a02a5bd12041e91286893b0",
+    "tests/online-deployment/hr-erasure-file-journal.fixture.ts": "0540cb487aee1d1f5a9fcc07972fe8e7754fb3e9940f23eee12a3cd2f9062dd1",
+    "tests/online-deployment/hr-versioned-job-application-concurrency.fixture.ts": "d9be491d2c618b920e9029b0b7cac5a700b195451c5c192152016dfd32eea55c",
+    "tests/online-deployment/hr-versioned-job-application-erasure.fixture.ts": "54d3ece6235114bcc8caa0cb4bbbccb02fd1875794ef26feec7ea6573bf5b453"
+  }
+}

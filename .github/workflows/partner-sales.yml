@@ -5,10 +5,10 @@ permissions:
 
 on:
   pull_request:
-    paths: ['tests/partner-sales/**', 'docs/qa/partner-sales/**', 'scripts/run-partner-sales-tests.mjs', 'playwright.partner-sales.config.ts', 'frontend/src/app/**', 'apps/sabalan-inquiry/app/**', 'backend/src/middleware/feature.ts', 'backend/src/services/hrActionPermissionCatalog.ts', 'backend/prisma/schema.prisma', 'packages/partner-sales-contracts/**', 'packages/contract-product-graph/**', 'package*.json', 'frontend/package*.json', 'scripts/design-system-e2e-preflight.mjs', 'docker-compose.local.yml', '.github/workflows/partner-sales.yml']
+    paths: ['tests/partner-sales/**', 'docs/qa/partner-sales/**', 'scripts/run-partner-sales-tests.mjs', 'playwright.partner-sales.config.ts', 'frontend/src/app/**', 'apps/sabalan-inquiry', 'apps/sabalan-inquiry/app/**', '.gitmodules', 'backend/src/middleware/feature.ts', 'backend/src/services/hrActionPermissionCatalog.ts', 'backend/prisma/schema.prisma', 'packages/partner-sales-contracts/**', 'packages/contract-product-graph/**', 'package*.json', 'frontend/package*.json', 'scripts/design-system-e2e-preflight.mjs', 'docker-compose.local.yml', '.github/workflows/partner-sales.yml']
   push:
     branches: [main]
-    paths: ['tests/partner-sales/**', 'docs/qa/partner-sales/**', 'scripts/run-partner-sales-tests.mjs', 'playwright.partner-sales.config.ts', 'frontend/src/app/**', 'apps/sabalan-inquiry/app/**', 'backend/src/middleware/feature.ts', 'backend/src/services/hrActionPermissionCatalog.ts', 'backend/prisma/schema.prisma', 'packages/partner-sales-contracts/**', 'packages/contract-product-graph/**', 'package*.json', 'frontend/package*.json', 'scripts/design-system-e2e-preflight.mjs', 'docker-compose.local.yml', '.github/workflows/partner-sales.yml']
+    paths: ['tests/partner-sales/**', 'docs/qa/partner-sales/**', 'scripts/run-partner-sales-tests.mjs', 'playwright.partner-sales.config.ts', 'frontend/src/app/**', 'apps/sabalan-inquiry', 'apps/sabalan-inquiry/app/**', '.gitmodules', 'backend/src/middleware/feature.ts', 'backend/src/services/hrActionPermissionCatalog.ts', 'backend/prisma/schema.prisma', 'packages/partner-sales-contracts/**', 'packages/contract-product-graph/**', 'package*.json', 'frontend/package*.json', 'scripts/design-system-e2e-preflight.mjs', 'docker-compose.local.yml', '.github/workflows/partner-sales.yml']
   workflow_dispatch:
 
 jobs:
@@ -17,6 +17,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Inventory includes Inquiry at the parent commit's gitlink, never its latest branch.
+          submodules: true
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -53,6 +57,7 @@ jobs:
         with:
           clean: false
           persist-credentials: false
+          submodules: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22

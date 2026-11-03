@@ -765,7 +765,9 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
           ...(lastName && { lastName }),
           ...(email && { email }),
           ...(username && { username }),
-          ...(role && { role }),
+          // PostgreSQL UPDATE OF role guards also run for unchanged values.
+          // Full profile forms must not turn ordinary edits into role writes.
+          ...(role && role !== current.role && { role }),
           personnelId: linkedPersonnelId,
           ...(departmentId !== undefined && { departmentId: departmentId || null }),
           ...(isActive !== undefined && { isActive }),
@@ -813,6 +815,9 @@ router.put('/:id', protect, authorize('ADMIN', 'MANAGER'), [
   } catch (error: any) {
     if (error instanceof PersonnelIdentityError) return res.status(error.status).json({ success: false, code: error.code, error: error.message });
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') return res.status(409).json({ success: false, code: 'PERSONNEL_IDENTITY_CONFLICT', error: 'اطلاعات هم‌زمان تغییر کرده است؛ صفحه را به‌روزرسانی کنید.' });
+    if (error instanceof Prisma.PrismaClientUnknownRequestError && error.message.includes('incompatible authority or responsibility for irreversible Partner persona')) {
+      return res.status(409).json({ success: false, code: 'PARTNER_PERSONA_CONFLICT', error: 'این نقش با حساب همکار سازگار نیست؛ نقش حساب را تغییر ندهید.' });
+    }
     console.error('Update user error:', error);
     const conflict = error.message?.includes('پرسنل') || error.message?.includes('last active administrator');
     res.status(conflict ? 409 : 500).json({

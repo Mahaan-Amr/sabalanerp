@@ -1,0 +1,1 @@
+const {spawnSync}=require('child_process');const r=spawnSync('wsl.exe',['-d','docker-desktop','-e','sh','-c','command -v docker; ls -l /var/run/docker.sock /run/docker.sock 2>/dev/null; ps -eo comm | head -8'],{encoding:'utf8',timeout:15000});console.log(JSON.stringify({exit:r.status,error:r.error?.code,output:(r.stdout||r.stderr||'').slice(0,1500)}));

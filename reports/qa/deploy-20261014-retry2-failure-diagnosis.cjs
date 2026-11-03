@@ -1,0 +1,4 @@
+const fs=require('fs'),{execFileSync}=require('child_process');const log=fs.readFileSync('/opt/sabalanerp/reports/deploy/codex-update-20261014-update2-retry2.log','utf8'),lines=log.split('\n');
+const codes=['EIO','ECONNRESET','ETIMEDOUT','ENOTCONN','P1001','P1002','P2024','DEPLOYMENT_LEASE_EXPIRED','DEPLOYMENT_LEASE_INVALID','DEPLOYMENT_REMOTE_CHECKSUM_MISMATCH','heartbeat failed','maintenance remains active','previous release did not pass','lease heartbeat failed'];console.log(JSON.stringify({at:new Date().toISOString(),knownFailureMarkers:codes.filter(c=>log.includes(c))}));
+for(const line of lines.slice(-160)){try{const r=JSON.parse(line);console.log(JSON.stringify({ok:r.ok,code:r.code,errorCode:r.errorCode,phase:r.phase||r.deployment?.phase,event:r.event}));}catch{}}
+console.log(execFileSync('docker',['ps','--format','{{.Names}} {{.Status}}'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}));

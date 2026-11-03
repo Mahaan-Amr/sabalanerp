@@ -1,0 +1,84 @@
+diff --git a/backend/src/services/__tests__/deploymentCheckpointStorage.test.ts b/backend/src/services/__tests__/deploymentCheckpointStorage.test.ts
+index d914c0a0..266fbe50 100644
+--- a/backend/src/services/__tests__/deploymentCheckpointStorage.test.ts
++++ b/backend/src/services/__tests__/deploymentCheckpointStorage.test.ts
+@@ -17,6 +17,52 @@ const run = async () => {
+     await fs.promises.writeFile(source, 'verified-checkpoint');
+     const store = new FilesystemRemoteCheckpointStore(root);
+     await store.assertAvailable(1);
++    const enumerationRoot = path.join(root, 'remote-enumeration');
++    await fs.promises.mkdir(path.join(enumerationRoot, 'empty-historical-directory'), { recursive: true });
++    const protectedArchive = path.join(enumerationRoot, 'protected.sabrec');
++    await fs.promises.writeFile(protectedArchive, 'retained-checkpoint');
++    const originalReaddir = fs.promises.readdir;
++    let enumerationAttempts = 0;
++    try {
++      (fs.promises as any).readdir = async (directory: string, options: any) => {
++        if (directory === enumerationRoot && ++enumerationAttempts === 1) {
++          throw Object.assign(new Error('transient SSHFS directory read'), { code: 'EIO' });
++        }
++        return originalReaddir(directory, options);
++      };
++      await new FilesystemRemoteCheckpointStore(enumerationRoot, { retryDelayMs: 1 }).assertAvailable(1);
++      assert.equal(enumerationAttempts, 2, 'a transient directory error must retry the complete listing');
++      assert.equal(await fs.promises.readFile(protectedArchive, 'utf8'), 'retained-checkpoint');
++      enumerationAttempts = 0;
++      (fs.promises as any).readdir = async (directory: string, options: any) => {
++        if (directory === enumerationRoot) {
++          enumerationAttempts += 1;
++          throw Object.assign(new Error('persistent SSHFS directory failure'), { code: 'EIO' });
++        }
++        return originalReaddir(directory, options);
++      };
++      await assert.rejects(
++        () => new FilesystemRemoteCheckpointStore(enumerationRoot, { retryDelayMs: 1 }).assertAvailable(1),
++        (error: any) => error.code === 'EIO',
++      );
++      assert.equal(enumerationAttempts, 4, 'persistent directory failure must abort after three retries');
++      enumerationAttempts = 0;
++      (fs.promises as any).readdir = async (directory: string, options: any) => {
++        if (directory === enumerationRoot) {
++          enumerationAttempts += 1;
++          throw Object.assign(new Error('directory permission denied'), { code: 'EACCES' });
++        }
++        return originalReaddir(directory, options);
++      };
++      await assert.rejects(
++        () => new FilesystemRemoteCheckpointStore(enumerationRoot, { retryDelayMs: 1 }).assertAvailable(1),
++        (error: any) => error.code === 'EACCES',
++      );
++      assert.equal(enumerationAttempts, 1, 'permission failures must not be hidden by storage retries');
++      assert.equal(await fs.promises.readFile(protectedArchive, 'utf8'), 'retained-checkpoint');
++    } finally {
++      fs.promises.readdir = originalReaddir;
++    }
+     const partialPath = path.join(root, 'release-1', 'deployment-1.sabrec.uploading');
+     await fs.promises.mkdir(path.dirname(partialPath), { recursive: true });
+     await fs.promises.writeFile(partialPath, 'verified');
+diff --git a/backend/src/services/deploymentCheckpointStorage.ts b/backend/src/services/deploymentCheckpointStorage.ts
+index e779118c..c3ad9d23 100644
+--- a/backend/src/services/deploymentCheckpointStorage.ts
++++ b/backend/src/services/deploymentCheckpointStorage.ts
+@@ -108,8 +108,21 @@ export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
+     return { availableBytes };
+   }
+ 
++  private async readRemoteDirectory(directory: string) {
++    for (let retry = 0; ; retry += 1) {
++      try {
++        return await fs.promises.readdir(directory, { withFileTypes: true });
++      } catch (error: any) {
++        if (!transientRemoteStorageCodes.has(error?.code) || retry >= 3) throw error;
++        // Restart the complete listing after a transient SSHFS failure. An
++        // unreadable directory must still abort checkpoint preparation.
++        await new Promise(resolve => setTimeout(resolve, Math.min((this.options.retryDelayMs ?? 3_000) * 2 ** retry, 30_000)));
++      }
++    }
++  }
++
+   private async removeExpiredIncompleteUploads(directory: string): Promise<void> {
+-    const entries = await fs.promises.readdir(directory, { withFileTypes: true });
++    const entries = await this.readRemoteDirectory(directory);
+     for (const entry of entries) {
+       const absolute = path.join(directory, entry.name);
+       if (entry.isDirectory()) await this.removeExpiredIncompleteUploads(absolute);

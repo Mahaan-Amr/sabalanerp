@@ -1,0 +1,4 @@
+const fs=require('fs'),path=require('path'),root='D:/SabalanERP-Offsite-Recovery',digests=new Set();let sidecarsRead=0;
+const collect=v=>{if(typeof v==='string'&&/^sha256:[a-f0-9]{64}$/.test(v))digests.add(v);else if(Array.isArray(v))v.forEach(collect);else if(v&&typeof v==='object')Object.values(v).forEach(collect)};
+const visit=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=path.join(d,e.name);if(e.isDirectory())visit(f);else if(e.isFile()&&e.name.endsWith('.sabrec.json')){collect(JSON.parse(fs.readFileSync(f,'utf8')));sidecarsRead++;}}};visit(root);
+fs.writeFileSync('D:/sabalanerp/reports/qa/deploy-20261014-retry4-remote-image-protection.json',JSON.stringify({checkedAt:new Date().toISOString(),sidecarsRead,imageDigests:[...digests]}));console.log(JSON.stringify({sidecarsRead,protectedImages:digests.size}));

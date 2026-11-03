@@ -1,0 +1,2262 @@
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 412812ea..feb57669 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -48,6 +48,7 @@ COPY backend/prisma ./prisma
+ COPY backend/tsconfig.json ./
+ COPY backend/tsconfig.cutover.json ./
+ COPY backend/scripts/shipment-statement-cutover.ts ./scripts/shipment-statement-cutover.ts
++COPY backend/scripts/clamav-checkpoint.mjs backend/scripts/clamav-checkpoint.d.mts backend/scripts/clamav-incident-policy.mjs ./scripts/
+ COPY backend/src ./src
+ 
+ RUN npx prisma generate
+diff --git a/backend/package.json b/backend/package.json
+index 216c536f..897457f5 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -70,7 +70,7 @@
+     "test:personnel-performance-disclosure:db": "tsx src/services/__tests__/personnelPerformanceDisclosure.integration.test.ts && tsx src/services/__tests__/personnelPerformanceExportLineage.integration.test.ts",
+     "test:user-deletion-policy": "tsx src/services/__tests__/userDeletionPolicy.test.ts",
+     "test:system-recovery": "tsx src/services/__tests__/systemRecoveryPolicy.test.ts && tsx src/services/__tests__/systemRecoveryFileReferences.test.ts && tsx src/services/__tests__/recoveryCrypto.test.ts",
+-    "test:deployment-control": "tsx src/services/__tests__/deploymentControl.test.ts && tsx src/services/__tests__/deploymentMaintenance.test.ts && tsx src/services/__tests__/deploymentCheckpointPolicy.test.ts && tsx src/services/__tests__/deploymentCheckpointStorage.test.ts && tsx src/services/__tests__/deploymentCheckpointRuntime.test.ts && tsx src/services/__tests__/deploymentBuildCapacity.test.ts && tsx src/services/__tests__/productionEnvironment.test.ts && node ../scripts/performance-deployment-environment.test.mjs && node --test ../scripts/deployment-configuration.test.mjs && tsx src/services/__tests__/deploymentGates.test.ts && tsx src/services/__tests__/deploymentHostJournal.test.ts && tsx src/services/__tests__/deploymentDrillPolicy.test.ts && tsx src/services/__tests__/deploymentProxyRefresh.test.ts && tsx --test src/services/__tests__/deploymentDrillMetadata.test.ts && tsx --test src/services/__tests__/nativePostgresCli.test.ts",
++    "test:deployment-control": "tsx src/services/__tests__/deploymentControl.test.ts && tsx src/services/__tests__/deploymentMaintenance.test.ts && tsx src/services/__tests__/deploymentCheckpointPolicy.test.ts && tsx src/services/__tests__/deploymentCheckpointStorage.test.ts && tsx src/services/__tests__/deploymentCheckpointRuntime.test.ts && tsx src/services/__tests__/deploymentBuildCapacity.test.ts && tsx src/services/__tests__/productionEnvironment.test.ts && node ../scripts/performance-deployment-environment.test.mjs && node --test ../scripts/deployment-configuration.test.mjs && tsx src/services/__tests__/deploymentGates.test.ts && tsx src/services/__tests__/deploymentHostJournal.test.ts && tsx src/services/__tests__/deploymentDrillPolicy.test.ts && tsx src/services/__tests__/deploymentProxyRefresh.test.ts && tsx --test src/services/__tests__/deploymentDrillMetadata.test.ts && tsx --test src/services/__tests__/nativePostgresCli.test.ts && npm --prefix .. run test:clamav-repair",
+     "test:notifications": "tsx src/services/__tests__/notificationPolicy.test.ts && tsx src/services/__tests__/notificationPolicyConcurrency.test.ts && tsx src/services/__tests__/performanceOperationalNotificationAccess.test.ts",
+     "test:notifications:db": "tsx --test src/services/__tests__/notificationPolicyConcurrency.integration.test.ts",
+     "test:support-tickets": "tsx src/services/__tests__/supportTicketPolicy.test.ts",
+diff --git a/backend/scripts/clamav-checkpoint.d.mts b/backend/scripts/clamav-checkpoint.d.mts
+new file mode 100644
+index 00000000..c8b19a26
+--- /dev/null
++++ b/backend/scripts/clamav-checkpoint.d.mts
+@@ -0,0 +1,4 @@
++export function verifyUnit(input: {unit: string; id: string; checkpoint?: any}): Promise<any>;
++export function recoverUnit(input: {unit: string; id: string; checkpoint: any; readArchive: (destination: string) => Promise<void>}): Promise<void>;
++export function restoreUnit(input: {bank: string; unit: string; id: string; checkpoint: any; beforeMutation?: () => Promise<void>}): Promise<void>;
++export function requireBoundary(input: {session: any; active: any; maintenance: any; id: string; token: string; phase: string}): void;
+diff --git a/backend/scripts/clamav-checkpoint.mjs b/backend/scripts/clamav-checkpoint.mjs
+new file mode 100644
+index 00000000..e84feefe
+--- /dev/null
++++ b/backend/scripts/clamav-checkpoint.mjs
+@@ -0,0 +1,182 @@
++import fs from 'node:fs/promises';
++import { createReadStream, createWriteStream } from 'node:fs';
++import crypto from 'node:crypto';
++import path from 'node:path';
++import os from 'node:os';
++import { execFile, spawn } from 'node:child_process';
++import { pipeline } from 'node:stream/promises';
++import { promisify } from 'node:util';
++import { fileURLToPath } from 'node:url';
++import { validateIncidentSnapshot, requireIncidentSession } from './clamav-incident-policy.mjs';
++const exec = promisify(execFile);
++const fail = (message) => { throw new Error(message); };
++const validId = id => /^[a-zA-Z0-9_-]{1,160}$/.test(id) ? id : fail('Unsafe deployment id');
++export const immutableImage = value => /^(?:[a-zA-Z0-9./:_-]+@)?sha256:[a-f0-9]{64}$/.test(value || '') ? value : fail('An immutable ClamAV image digest is required');
++export function requireBoundary({session, active, maintenance, id, token, phase}) {
++ if (!['SERVICES_DRAINED','MUTATION_STARTED','ROLLBACK_STARTED'].includes(phase)
++   || !token || session?.deploymentId !== id || session?.leaseToken !== token || session?.phase !== phase
++   || active?.id !== id || active?.leaseToken !== token || active?.phase !== phase
++   || !Number.isFinite(new Date(active.leaseExpiresAt).getTime()) || new Date(active.leaseExpiresAt).getTime() <= Date.now() || maintenance?.deploymentId !== id) fail('ClamAV operation requires the owned lease, journal phase and maintenance boundary');
++}
++async function digest(file) {
++ const stat=await fs.lstat(file);
++ if(!stat.isFile() || stat.isSymbolicLink()) fail('Checkpoint component must be a regular file');
++ const hash=crypto.createHash('sha256');
++ for await (const chunk of createReadStream(file)) hash.update(chunk);
++ return {sha256:hash.digest('hex'),size:stat.size};
++}
++async function safeTree(root) {
++ for (const entry of await fs.readdir(root,{withFileTypes:true})) {
++   if (/\n|\r/.test(entry.name) || (!entry.isDirectory() && !entry.isFile())) fail('Unsafe ClamAV bank file type or name');
++   if(entry.isDirectory()) await safeTree(path.join(root,entry.name));
++ }
++}
++export async function captureUnit({bank,unit,id,image}) {
++ validId(id); immutableImage(image);
++ await safeTree(bank);
++ await fs.mkdir(unit,{recursive:true,mode:0o700});
++ if(await fs.stat(path.join(unit,'unit.json')).catch(()=>null)) fail('Checkpoint unit already exists; refusing overwrite');
++ await exec('tar',['-cpf',path.join(unit,'bank.tar'),'-C',bank,'.']);
++ const incident = await fs.stat(path.join(unit,'incident-snapshot.json')).catch(()=>null);
++ if (incident && await fs.stat(path.join(unit,'rollback-proof.json')).catch(()=>null)) fail('Incident evidence cannot be substituted for a healthy rollback proof');
++ const evidenceFile = incident ? 'incident-snapshot.json' : 'rollback-proof.json';
++ if(await fs.stat(path.join(unit,evidenceFile)).catch(()=>null)) {
++  const proof=JSON.parse(await fs.readFile(path.join(unit,evidenceFile),'utf8'));
++  if (incident) validateIncidentSnapshot(proof, image);
++  if(proof.image!==image || proof.configArchiveSha256!==(await digest(path.join(unit,'config.tar'))).sha256) fail('Rehearsed rollback configuration/image differs from the drained snapshot');
++  if(Object.keys(proof.bankFiles || {}).length!==3) fail('Rollback bank evidence is incomplete');
++  for(const [file,expected] of Object.entries(proof.bankFiles)) {
++   if(!/^(main|daily|bytecode)[.](cvd|cld)$/.test(file) || (await digest(path.join(bank,file))).sha256!==expected) fail('Rollback bank changed after rehearsal; refusing maintenance mutation');
++  }
++ }
++ const files={};
++ for(const file of ['bank.tar','config.tar','target-bank.tar','target.json','rollback-proof.json','incident-snapshot.json']) {
++   if((file.startsWith('target') || file==='rollback-proof.json' || file==='incident-snapshot.json') && !await fs.stat(path.join(unit,file)).catch(()=>null)) continue;
++   files[file]=await digest(path.join(unit,file));
++ }
++ const metadata={version:1,deploymentId:id,image,files};
++ await fs.writeFile(path.join(unit,'unit.json'),JSON.stringify(metadata)+'\n',{mode:0o600,flag:'wx'});
++ return metadata;
++}
++export async function verifyUnit({unit,id,checkpoint}) {
++ validId(id);
++ const metadata=JSON.parse(await fs.readFile(path.join(unit,'unit.json'),'utf8'));
++ if(metadata.version!==1 || metadata.deploymentId!==id) fail('ClamAV checkpoint identity mismatch');
++ immutableImage(metadata.image);
++ if(checkpoint && (checkpoint.deploymentId!==id || !checkpoint.localVerified || !checkpoint.remoteVerified || checkpoint.rollbackReleaseSet?.clamav!==metadata.image)) fail('ClamAV rollback requires the verified coordinated checkpoint and previous image');
++ if (!metadata.files?.['bank.tar'] || !metadata.files?.['config.tar'] || Object.keys(metadata.files).some(file=>!['bank.tar','config.tar','target-bank.tar','target.json','rollback-proof.json','incident-snapshot.json'].includes(file))
++  || (metadata.files['incident-snapshot.json'] && metadata.files['rollback-proof.json'])) fail('Invalid checkpoint components');
++ for(const file of [...Object.keys(metadata.files),'unit.json']) {
++   const actual=await digest(path.join(unit,file));
++   if(file!=='unit.json' && JSON.stringify(actual)!==JSON.stringify(metadata.files[file])) fail('ClamAV unit checksum changed');
++   if(checkpoint) {
++     const expected=checkpoint.manifest?.components?.find(item=>item.path===`recovery-coordination/clamav-checkpoint-${id}/${file}`);
++     if(!expected || expected.sha256!==actual.sha256 || expected.size!==actual.size) fail('ClamAV unit is absent from the verified encrypted checkpoint manifest');
++   }
++ }
++ return metadata;
++}
++export async function recoverUnit({unit,id,checkpoint,readArchive}) {
++ validId(id);
++ if(checkpoint?.deploymentId!==id || !checkpoint.localVerified || !checkpoint.remoteVerified) fail('Unit recovery requires the verified coordinated checkpoint');
++ const prefix=`recovery-coordination/clamav-checkpoint-${id}/`;
++ const components=checkpoint.manifest?.components?.filter(item=>item.path.startsWith(prefix)) || [];
++ const allowed=['unit.json','bank.tar','config.tar','target-bank.tar','target.json','rollback-proof.json','incident-snapshot.json'];
++ const files=components.map(item=>item.path.slice(prefix.length));
++ if(!['unit.json','bank.tar','config.tar'].every(file=>files.includes(file)) || new Set(files).size!==files.length || files.some(file=>!allowed.includes(file))) fail('Invalid protected ClamAV unit manifest');
++ await fs.mkdir(path.dirname(unit),{recursive:true,mode:0o700});
++ const previous=await fs.lstat(unit).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
++ if(previous && (!previous.isDirectory() || previous.isSymbolicLink())) fail('Unsafe coordination unit destination');
++ const job=await fs.mkdtemp(path.join(path.dirname(unit),'.clamav-recover-'));
++ const recovered=path.join(job,'unit'), backup=path.join(job,'previous');
++ try {
++  const archive=path.join(job,'payload.tar.gz');
++  // The caller authenticates/decrypts the already checksum-verified recovery package.
++  await readArchive(archive);
++  const names=(await exec('tar',['-tzf',archive],{maxBuffer:16*1024*1024})).stdout.split(/\r?\n/).filter(Boolean);
++  await fs.mkdir(recovered,{mode:0o700});
++  for(const component of components) {
++   const matches=names.filter(name=>name.replace(/^\.\//,'')===component.path);
++   if(matches.length!==1) fail('Missing or duplicate protected unit archive entry');
++   const destination=path.join(recovered,component.path.slice(prefix.length));
++   // Stream selected content to a newly created regular file. Never extract paths,
++   // ownership or links from the enclosing archive into the coordination directory.
++   const child=spawn('tar',['-xzOf',archive,matches[0]],{stdio:['ignore','pipe','pipe']});
++   child.stderr.resume();
++   const exited=new Promise((resolve,reject)=>{
++    child.once('error',reject);
++    child.once('close',code=>code===0?resolve():reject(new Error('Protected unit extraction failed')));
++   });
++   try {await Promise.all([pipeline(child.stdout,createWriteStream(destination,{flags:'wx',mode:0o600})),exited]);}
++   finally {if(child.exitCode===null)child.kill();}
++   const actual=await digest(destination);
++   if(actual.sha256!==component.sha256 || actual.size!==component.size) fail('Recovered unit failed encrypted manifest validation');
++  }
++  await verifyUnit({unit:recovered,id,checkpoint});
++  if(previous)await fs.rename(unit,backup);
++  try {await fs.rename(recovered,unit);}
++  catch(error){if(previous)await fs.rename(backup,unit);throw error;}
++ } finally {await fs.rm(job,{recursive:true,force:true});}
++}
++export async function validateBankArchive(archive) {
++ const names=(await exec('tar',['-tf',archive])).stdout.split('\n').filter(Boolean);
++ const entries=(await exec('tar',['-tvf',archive])).stdout.split('\n').filter(Boolean);
++ if(!names.length || entries.length!==names.length || entries.some(line=>!['-','d'].includes(line[0]))
++   || names.some(name=>name.startsWith('/') || /^[a-z]:/i.test(name) || name.includes('\\') || name.split('/').includes('..'))) fail('Unsafe bank archive paths or file types');
++}
++export async function restoreUnit({bank,unit,id,checkpoint,archive='bank.tar',beforeMutation}) {
++ const verified=await verifyUnit({unit,id,checkpoint});
++ if(!['bank.tar','target-bank.tar'].includes(archive) || !verified.files[archive]) fail('Unprotected bank archive');
++ await validateBankArchive(path.join(unit,archive));
++ // Only archives produced by captureUnit and authenticated by the recovery manifest reach extraction.
++ const staging=await fs.mkdtemp(path.join(os.tmpdir(),'clamav-restore-'));
++ try {
++   await exec('tar',['-xpf',path.join(unit,archive),'-C',staging]);
++   await safeTree(staging);
++   // The scanner and updater must remain stopped under the owned deployment lease.
++   await safeTree(bank);
++   if (beforeMutation) await beforeMutation();
++   for(const entry of await fs.readdir(bank)) await fs.rm(path.join(bank,entry),{recursive:true,force:true});
++   await exec('tar',['-xpf',path.join(unit,archive),'-C',bank]);
++ } finally {await fs.rm(staging,{recursive:true,force:true});}
++}
++async function main() {
++ const {createRequire}=await import('node:module');
++ const require=createRequire(import.meta.url);
++ const {prisma,disconnectDatabase}=require('../dist/lib/prisma.js');
++ try {
++  const id=validId(process.env.DEPLOYMENT_ID || '');
++  const coordination=process.env.RECOVERY_COORDINATION_DIR || '/app/recovery-coordination';
++  const reports=process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
++  const session=JSON.parse(await fs.readFile(path.join(reports,'active-deployment-session.json'),'utf8'));
++  const active=await prisma.deploymentOperation.findUnique({where:{activeKey:'production'}});
++  const maintenance=JSON.parse(await fs.readFile(path.join(coordination,'deployment-maintenance.json'),'utf8'));
++  const phase=process.argv[2]==='capture'?'SERVICES_DRAINED':'MUTATION_STARTED';
++  requireBoundary({session,active,maintenance,id,token:process.env.DEPLOYMENT_LEASE_TOKEN,phase});
++  const unit=path.join(coordination,`clamav-checkpoint-${id}`);
++  const incident = process.env.DEPLOYMENT_CLAMAV_OPERATION === 'incident-recovery';
++  if (incident) requireIncidentSession(session, process.env.DEPLOYMENT_CLAMAV_OPERATION, process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256);
++  else if (session.clamavOperation === 'incident-recovery') fail('Incident operation cannot be downgraded to ordinary repair');
++  if(process.argv[2]==='capture') {
++   const evidence = incident ? 'incident-snapshot.json' : 'rollback-proof.json';
++   const expected = incident ? process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256 : process.env.DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256;
++   if((await digest(path.join(unit,evidence))).sha256!==expected) fail('Original-instance evidence changed after preflight');
++   await captureUnit({bank:'/app/recovery-sources/clamav',unit,id,image:process.env.DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE});
++  } else if(process.argv[2]==='activate') {
++    const checkpoint=JSON.parse(await fs.readFile(path.join(coordination,'deployment-checkpoint.json'),'utf8'));
++    await verifyUnit({unit,id,checkpoint});
++    const receipt=JSON.parse(await fs.readFile(path.join(unit,'target.json'),'utf8'));
++    const actual=await digest(path.join(unit,'target-bank.tar'));
++    if(receipt.image!==immutableImage(process.env.DEPLOYMENT_CLAMAV_TARGET_IMAGE) || receipt.bankSha256!==actual.sha256) fail('Target image/bank binding failed');
++    await restoreUnit({bank:'/app/recovery-sources/clamav',unit,id,checkpoint,archive:'target-bank.tar',beforeMutation: async () => {
++      const liveSession=JSON.parse(await fs.readFile(path.join(reports,'active-deployment-session.json'),'utf8'));
++      const liveMaintenance=JSON.parse(await fs.readFile(path.join(coordination,'deployment-maintenance.json'),'utf8'));
++      const liveActive=await prisma.deploymentOperation.findUnique({where:{activeKey:'production'}});
++      requireBoundary({session:liveSession,active:liveActive,maintenance:liveMaintenance,id,token:process.env.DEPLOYMENT_LEASE_TOKEN,phase:'MUTATION_STARTED'});
++      if (incident) requireIncidentSession(liveSession, process.env.DEPLOYMENT_CLAMAV_OPERATION, process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256);
++    }});
++  } else fail('Unsupported ClamAV checkpoint command');
++  console.log(JSON.stringify({ok:true,unit:id}));
++ } finally {await disconnectDatabase();}
++}
++if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) main().catch(error=>{console.error(error.message);process.exitCode=1;});
+diff --git a/backend/scripts/clamav-incident-policy.mjs b/backend/scripts/clamav-incident-policy.mjs
+new file mode 100644
+index 00000000..3ef2f664
+--- /dev/null
++++ b/backend/scripts/clamav-incident-policy.mjs
+@@ -0,0 +1,26 @@
++// Incident evidence records an unhealthy original. It is deliberately not a
++// rollback-health proof and can never authorize reopening the original release.
++export function validateIncidentSnapshot(value, image, now = Date.now()) {
++ const families = ['main', 'daily', 'bytecode'];
++ if (value?.kind !== 'DEGRADED_CLAMAV_INCIDENT_V1' || value.image !== image
++  || !/^sha256:[a-f0-9]{64}$/.test(image || '') || !/^1\.4\.(5|6)$/.test(value.engine || '')
++  || !Number.isFinite(Date.parse(value.checkedAt)) || now - Date.parse(value.checkedAt) < 0
++  || now - Date.parse(value.checkedAt) > 3600000
++  || !/^[a-f0-9]{64}$/.test(value.configArchiveSha256 || '')
++  || !Array.isArray(value.issues) || !value.issues.length
++  || value.issues.some(issue => !['UPDATER_NOT_LIVE', 'SIGNATURES_STALE'].includes(issue))
++  || Object.keys(value.bankFiles || {}).length !== 3
++  || families.some(name => !Number.isSafeInteger(value.versions?.[name]) || value.versions[name] < 1
++   || Object.entries(value.bankFiles).filter(([file, digest]) => new RegExp('^' + name + '[.](cvd|cld)$').test(file) && /^[a-f0-9]{64}$/.test(digest)).length !== 1)
++  || value.reopenOriginal !== false || ['updaterHealthy', 'restoreRehearsalPassed', 'fullReleaseRehearsalPassed'].some(key => key in value)) {
++  throw new Error('Explicit, fresh degraded-instance evidence is required; it is not a healthy rollback proof');
++ }
++ return value;
++}
++
++export function requireIncidentSession(session, operation, snapshotSha256) {
++ if (operation !== 'incident-recovery' || session?.clamavOperation !== operation
++  || !/^[a-f0-9]{64}$/.test(snapshotSha256 || '') || session.clamavIncidentSnapshotSha256 !== snapshotSha256) {
++  throw new Error('Incident recovery must match the operation and snapshot bound to its owned session');
++ }
++}
+diff --git a/backend/src/scripts/deployment-checkpoint.ts b/backend/src/scripts/deployment-checkpoint.ts
+index a8aa6cdb..f8ccdb6f 100644
+--- a/backend/src/scripts/deployment-checkpoint.ts
++++ b/backend/src/scripts/deployment-checkpoint.ts
+@@ -1,4 +1,5 @@
+ import fs from 'node:fs';
++import { verifyUnit } from '../../scripts/clamav-checkpoint.mjs';
+ import path from 'node:path';
+ import { disconnectDatabase, prisma } from '../lib/prisma';
+ import {
+@@ -52,6 +53,8 @@ const main = async () => {
+   const releaseId = required('DEPLOYMENT_RELEASE_ID');
+   const targetCommit = required('DEPLOYMENT_TARGET_COMMIT');
+   const remoteRoot = required('DEPLOYMENT_REMOTE_MOUNT');
++  const clamavUnit = path.join(RECOVERY_COORDINATION_DIR, `clamav-checkpoint-${deploymentId}`);
++  if (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true') await verifyUnit({ unit: clamavUnit, id: deploymentId });
+   const localKey = await readSecret('DEPLOYMENT_LOCAL_ROLLBACK_KEY');
+   const remotePublicKey = await readConfiguredFile('DEPLOYMENT_REMOTE_RECOVERY_PUBLIC_KEY');
+   const packagesRoot = path.join(RECOVERY_ROOT, 'packages');
+@@ -130,6 +133,10 @@ const main = async () => {
+     },
+   };
+ 
++  if (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true') {
++    await verifyUnit({ unit: clamavUnit, id: deploymentId, checkpoint: { ...metadata, manifest: localValidation.manifest } });
++  }
++
+   const localMetadataPath = `${result.destination}.json`;
+   const coordinationMetadataPath = path.join(RECOVERY_COORDINATION_DIR, 'deployment-checkpoint.json');
+   const remoteMetadataKey = `${objectKey}.json`;
+diff --git a/backend/src/scripts/deployment-control.ts b/backend/src/scripts/deployment-control.ts
+index 953da80a..b6c29679 100644
+--- a/backend/src/scripts/deployment-control.ts
++++ b/backend/src/scripts/deployment-control.ts
+@@ -32,6 +32,8 @@ type Session = {
+   phase: DeploymentPhase;
+   bootstrap: boolean;
+   controlImage: string;
++  clamavOperation?: 'repair' | 'incident-recovery';
++  clamavIncidentSnapshotSha256?: string;
+   rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres' | 'clamav', string>;
+   rollbackPerformanceEnvironment?: Record<string, string>;
+ };
+@@ -69,6 +71,12 @@ const journal = async (session: Session, event: string, details?: Record<string,
+   });
+ 
+ const prepare = async () => {
++  const clamavOperation = process.env.DEPLOYMENT_CLAMAV_OPERATION || 'repair';
++  if (!['repair', 'incident-recovery'].includes(clamavOperation)) throw new Error('Unknown ClamAV operation.');
++  const incidentSha = process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256;
++  if (clamavOperation === 'incident-recovery' && (process.env.DEPLOYMENT_CLAMAV_REPAIR !== 'true' || !/^[a-f0-9]{64}$/.test(incidentSha || ''))) {
++    throw new Error('Incident recovery requires an explicitly bound degraded-instance snapshot.');
++  }
+   const rollbackPerformanceEnvironment = JSON.parse(process.env.DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT || '{}');
+   const identityKey = /^PERFORMANCE_(RELEASE_(COMMIT|SOURCE_HASH|SCHEMA_HASH|POLICY_HASH|INFRASTRUCTURE_HASH|BACKEND_IMAGE|FRONTEND_IMAGE|INQUIRY_IMAGE)|RUNTIME_INFRASTRUCTURE_HASH)$/;
+   if (!rollbackPerformanceEnvironment || typeof rollbackPerformanceEnvironment !== 'object' || Array.isArray(rollbackPerformanceEnvironment)
+@@ -85,6 +93,8 @@ const prepare = async () => {
+     phase: 'PREFLIGHT',
+     bootstrap: false,
+     controlImage: required('DEPLOYMENT_CONTROL_IMAGE'),
++    clamavOperation: clamavOperation as 'repair' | 'incident-recovery',
++    ...(clamavOperation === 'incident-recovery' ? { clamavIncidentSnapshotSha256: incidentSha } : {}),
+     rollbackPerformanceEnvironment,
+     rollbackReleaseSet: {
+       backend: required('DEPLOYMENT_PREVIOUS_BACKEND_IMAGE'),
+@@ -97,7 +107,10 @@ const prepare = async () => {
+   };
+   await writeSession(session, true);
+   await fs.promises.rm(JOURNAL_PATH, { force: true });
+-  await journal(session, 'deployment-prepared');
++  await journal(session, 'deployment-prepared', {
++    clamavOperation: session.clamavOperation,
++    ...(session.clamavIncidentSnapshotSha256 ? { clamavIncidentSnapshotSha256: session.clamavIncidentSnapshotSha256 } : {}),
++  });
+   return session;
+ };
+ 
+diff --git a/backend/src/scripts/deployment-rollback.ts b/backend/src/scripts/deployment-rollback.ts
+index 54b39c14..fd0abd9d 100644
+--- a/backend/src/scripts/deployment-rollback.ts
++++ b/backend/src/scripts/deployment-rollback.ts
+@@ -1,8 +1,9 @@
+ import fs from 'node:fs';
++import { recoverUnit, restoreUnit, requireBoundary } from '../../scripts/clamav-checkpoint.mjs';
+ import path from 'node:path';
+ import { disconnectDatabase, prisma } from '../lib/prisma';
+ import { readSecret } from '../services/deploymentCheckpointStorage';
+-import { sha256File } from '../services/recoveryCrypto';
++import { decryptRecoveryArchive, sha256File } from '../services/recoveryCrypto';
+ import { stageAndPromoteRecovery, validateRecoveryPackage } from '../services/systemRecoveryEngine';
+ import { RECOVERY_COORDINATION_DIR, setRecoveryRuntimeState } from '../services/recoveryRuntime';
+ 
+@@ -12,7 +13,7 @@ type CheckpointMetadata = {
+   checksum: string;
+   localVerified: boolean;
+   remoteVerified: boolean;
+-  rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx', string>;
++  rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres' | 'clamav', string>;
+ };
+ 
+ const main = async () => {
+@@ -27,7 +28,29 @@ const main = async () => {
+     throw Object.assign(new Error('The local rollback checkpoint checksum changed.'), { code: 'DEPLOYMENT_ROLLBACK_CHECKSUM_MISMATCH' });
+   }
+   const localKey = await readSecret('DEPLOYMENT_LOCAL_ROLLBACK_KEY');
+-  await validateRecoveryPackage({ sourcePath: metadata.localPath, passphrase: localKey, prisma });
++  const validated = await validateRecoveryPackage({ sourcePath: metadata.localPath, passphrase: localKey, prisma });
++  const clamavUnit = path.join(RECOVERY_COORDINATION_DIR, `clamav-checkpoint-${metadata.deploymentId}`);
++  if (validated.manifest.components.some((item) => item.path.startsWith(`recovery-coordination/clamav-checkpoint-${metadata.deploymentId}/`))) {
++    const session = JSON.parse(await fs.promises.readFile(path.join(process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports', 'active-deployment-session.json'), 'utf8'));
++    const maintenance = JSON.parse(await fs.promises.readFile(path.join(RECOVERY_COORDINATION_DIR, 'deployment-maintenance.json'), 'utf8'));
++    const active = await prisma.deploymentOperation.findUnique({ where: { activeKey: 'production' } });
++    requireBoundary({ session, active, maintenance, id: metadata.deploymentId, token: process.env.DEPLOYMENT_LEASE_TOKEN || '', phase: 'ROLLBACK_STARTED' });
++    await recoverUnit({
++      unit: clamavUnit, id: metadata.deploymentId, checkpoint: { ...metadata, manifest: validated.manifest },
++      readArchive: (destination) => decryptRecoveryArchive(metadata.localPath, destination, localKey),
++    });
++    // Recheck the live lease after potentially large archive IO, before any bank mutation.
++    const liveSession = JSON.parse(await fs.promises.readFile(path.join(process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports', 'active-deployment-session.json'), 'utf8'));
++    const liveMaintenance = JSON.parse(await fs.promises.readFile(path.join(RECOVERY_COORDINATION_DIR, 'deployment-maintenance.json'), 'utf8'));
++    const liveActive = await prisma.deploymentOperation.findUnique({ where: { activeKey: 'production' } });
++    requireBoundary({ session: liveSession, active: liveActive, maintenance: liveMaintenance, id: metadata.deploymentId, token: process.env.DEPLOYMENT_LEASE_TOKEN || '', phase: 'ROLLBACK_STARTED' });
++    await restoreUnit({ bank: '/app/recovery-sources/clamav', unit: clamavUnit, id: metadata.deploymentId, checkpoint: { ...metadata, manifest: validated.manifest }, beforeMutation: async () => {
++      const currentSession = JSON.parse(await fs.promises.readFile(path.join(process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports', 'active-deployment-session.json'), 'utf8'));
++      const currentMaintenance = JSON.parse(await fs.promises.readFile(path.join(RECOVERY_COORDINATION_DIR, 'deployment-maintenance.json'), 'utf8'));
++      const currentActive = await prisma.deploymentOperation.findUnique({ where: { activeKey: 'production' } });
++      requireBoundary({ session: currentSession, active: currentActive, maintenance: currentMaintenance, id: metadata.deploymentId, token: process.env.DEPLOYMENT_LEASE_TOKEN || '', phase: 'ROLLBACK_STARTED' });
++    } });
++  }
+   setRecoveryRuntimeState('MAINTENANCE', metadata.deploymentId, 'Automatic deployment rollback is in progress.');
+   const result = await stageAndPromoteRecovery({
+     operationId: `rollback-${metadata.deploymentId}`,
+diff --git a/deploy/clamav/Dockerfile b/deploy/clamav/Dockerfile
+new file mode 100644
+index 00000000..6c96fafa
+--- /dev/null
++++ b/deploy/clamav/Dockerfile
+@@ -0,0 +1,11 @@
++# Official 1.4.6 amd64 image; the derived image is separately pinned for production.
++ARG CLAMAV_BASE_IMAGE=clamav/clamav@sha256:fefe26428207c7ec3e51396376cbd5084528f134b504db76a92363ed534e0b10
++FROM ${CLAMAV_BASE_IMAGE}
++COPY deploy/clamav/clamd.conf deploy/clamav/freshclam.conf /etc/clamav/
++COPY deploy/clamav/health.sh /usr/local/bin/sabalan-clamav-health
++COPY deploy/clamav/update-once.sh /usr/local/bin/sabalan-clamav-update-once
++COPY deploy/clamav/updater.sh /usr/local/bin/sabalan-clamav-updater
++COPY deploy/clamav/entrypoint.sh /usr/local/bin/sabalan-clamav-entrypoint
++RUN chmod 755 /usr/local/bin/sabalan-clamav-* && command -v flock
++ENTRYPOINT ["/sbin/tini", "-g", "--", "/usr/local/bin/sabalan-clamav-entrypoint"]
++HEALTHCHECK --interval=15s --timeout=10s --start-period=5m --retries=3 CMD /usr/local/bin/sabalan-clamav-health
+diff --git a/deploy/clamav/clamd.conf b/deploy/clamav/clamd.conf
+new file mode 100644
+index 00000000..1fd8c0a5
+--- /dev/null
++++ b/deploy/clamav/clamd.conf
+@@ -0,0 +1,9 @@
++Foreground yes
++User clamav
++DatabaseDirectory /var/lib/clamav
++LocalSocket /tmp/clamd.sock
++FixStaleSocket yes
++TCPSocket 3310
++TCPAddr 0.0.0.0
++LogTime yes
++ConcurrentDatabaseReload no
+diff --git a/deploy/clamav/entrypoint.sh b/deploy/clamav/entrypoint.sh
+new file mode 100644
+index 00000000..9852b7dd
+--- /dev/null
++++ b/deploy/clamav/entrypoint.sh
+@@ -0,0 +1,43 @@
++#!/bin/sh
++set -eu
++run_dir="${CLAMAV_RUN_DIRECTORY:-/run/sabalan-clamav}"
++db_dir="${CLAMAV_DATABASE_DIRECTORY:-/var/lib/clamav}"
++mkdir -p "$run_dir" "$db_dir" /var/log/clamav
++chown clamav:clamav "$db_dir" /var/log/clamav
++# State files are deliberately persistent across container recreation.
++for name in freshclam.dat .sabalan-updater-state .sabalan-updater-state.next .sabalan-updater.lock .sabalan-freshclam-result .sabalan-freshclam-result.next; do
++  [ ! -L "$db_dir/$name" ] || { echo 'Unsafe updater state symlink.' >&2; exit 1; }
++  [ ! -e "$db_dir/$name" ] || chown clamav:clamav "$db_dir/$name"
++done
++scanner=''; updater=''
++rm -f "$run_dir/clamd.pid" "$run_dir/updater.pid"
++stop() {
++  trap - TERM INT EXIT
++  for child in "$scanner" "$updater"; do [ -z "$child" ] || kill -TERM "$child" 2>/dev/null || true; done
++  for child in "$scanner" "$updater"; do [ -z "$child" ] || wait "$child" 2>/dev/null || true; done
++}
++trap 'stop; exit 0' TERM INT
++trap stop EXIT
++clamd --foreground --config-file=/etc/clamav/clamd.conf &
++scanner=$!
++printf '%s\n' "$scanner" > "$run_dir/clamd.pid"
++# Avoid racing initial bank load with FreshClam's load test or losing its RELOAD notification.
++startup_deadline="$(( $(date +%s) + 300 ))"
++until timeout 10 clamdscan --ping=1 >/dev/null 2>&1; do
++  kill -0 "$scanner" 2>/dev/null || exit 1
++  case "$(sed 's/.*) //' "/proc/$scanner/stat" | cut -d' ' -f1)" in Z) exit 1;; esac
++  [ "$(date +%s)" -lt "$startup_deadline" ] || exit 1
++  sleep 1 & wait $!
++done
++su -s /bin/sh clamav -c 'exec /usr/local/bin/sabalan-clamav-updater' &
++updater=$!
++printf '%s\n' "$updater" > "$run_dir/updater.pid"
++while kill -0 "$scanner" 2>/dev/null && kill -0 "$updater" 2>/dev/null; do
++  for pid in "$scanner" "$updater"; do
++    case "$(if [ -r "/proc/$pid/stat" ]; then sed 's/.*) //' "/proc/$pid/stat" | cut -d' ' -f1; else ps -o stat= -p "$pid" 2>/dev/null || true; fi)" in ''|*Z*) exit 1;; esac
++  done
++  sleep 5 & wait $!
++done
++# An unexpected child exit must stop the container, rather than leave a green tail process.
++sleep 30 & wait $!
++exit 1
+diff --git a/deploy/clamav/freshclam.conf b/deploy/clamav/freshclam.conf
+new file mode 100644
+index 00000000..922c9bb1
+--- /dev/null
++++ b/deploy/clamav/freshclam.conf
+@@ -0,0 +1,12 @@
++DatabaseDirectory /var/lib/clamav
++DatabaseOwner clamav
++# FEUP public mirror of the publisher-signed official CVD/CDIFF databases.
++# Do not fall back to the vendor CDN while its recorded refusal remains active.
++DatabaseMirror https://mirrors.fe.up.pt/pub/clamav
++DNSDatabaseInfo current.cvd.clamav.net
++ScriptedUpdates yes
++TestDatabases yes
++NotifyClamd /etc/clamav/clamd.conf
++ConnectTimeout 30
++ReceiveTimeout 60
++MaxAttempts 3
+diff --git a/deploy/clamav/health.sh b/deploy/clamav/health.sh
+new file mode 100644
+index 00000000..84c89af5
+--- /dev/null
++++ b/deploy/clamav/health.sh
+@@ -0,0 +1,32 @@
++#!/bin/sh
++set -eu
++fail() { echo "ClamAV unhealthy: $*" >&2; exit 1; }
++run_dir="${CLAMAV_RUN_DIRECTORY:-/run/sabalan-clamav}"
++db_dir="${CLAMAV_DATABASE_DIRECTORY:-/var/lib/clamav}"
++interval="${CLAMAV_UPDATE_INTERVAL_SECONDS:-7200}"
++case "$interval" in ''|*[!0-9]*) fail 'invalid update interval';; esac
++[ "$interval" -ge 3600 ] && [ "$interval" -le 86400 ] || fail 'invalid update interval'
++for name in clamd updater; do
++  [ -f "$run_dir/$name.pid" ] || fail "$name PID is missing"
++  pid="$(cat "$run_dir/$name.pid")"
++  case "$pid" in ''|*[!0-9]*) fail "$name PID is invalid";; esac
++  kill -0 "$pid" 2>/dev/null || fail "$name stopped"
++  # kill -0 succeeds for zombies. Linux BusyBox ps does not support -p.
++  state="$(if [ -r "/proc/$pid/stat" ]; then sed 's/.*) //' "/proc/$pid/stat" | cut -d' ' -f1; else ps -o stat= -p "$pid" 2>/dev/null || true; fi)"
++  case "$state" in ''|*Z*) fail "$name is missing or defunct";; esac
++done
++[ -f "$db_dir/.sabalan-updater-state" ] || fail 'no verified update cycle'
++read -r attempted succeeded result next < "$db_dir/.sabalan-updater-state"
++for value in "$attempted" "$succeeded" "$result" "$next"; do
++  case "$value" in ''|*[!0-9]*) fail 'invalid persisted updater state';; esac
++done
++now="$(date +%s)"
++[ "$result" -eq 0 ] && [ "$succeeded" -gt 0 ] && [ "$succeeded" -ge "$attempted" ] || fail 'latest update failed or is incomplete'
++[ "$now" -ge "$succeeded" ] && [ "$((now - succeeded))" -le "$((interval * 2))" ] || fail 'successful update evidence is stale'
++log="$db_dir/.sabalan-freshclam-result"
++[ -f "$log" ] || fail 'no successful FreshClam result evidence'
++if grep -Ev '^(WARNING: )?Cool-down expired, ok to try again\.$' "$log" | grep -Eiq 'cool.down|rate.limit|blocked|ERROR:|HTTP[^0-9]*(429|403)'; then fail 'FreshClam reports cooldown or error'; fi
++for name in main daily bytecode; do
++  grep -Eq "(^|[[:space:]])$name[.](cvd|cld) (database is up-to-date|updated)" "$log" || fail "$name has no successful update evidence"
++done
++clamdscan --ping=1 >/dev/null 2>&1 || fail 'scanner is unavailable'
+diff --git a/deploy/clamav/inspect-native.sh b/deploy/clamav/inspect-native.sh
+new file mode 100644
+index 00000000..18b61b72
+--- /dev/null
++++ b/deploy/clamav/inspect-native.sh
+@@ -0,0 +1,15 @@
++#!/bin/sh
++# Read-only evidence for the official legacy daemon layout. No update or mutation.
++set -eu
++printf 'CLOCK\t%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "$(cut -d' ' -f1 /proc/uptime)" "$(getconf CLK_TCK)" "$(id -u clamav)" "$(date +%z)"
++for entry in /proc/[0-9]*; do
++  name="$(cat "$entry/comm" 2>/dev/null || true)"
++  case "$name" in freshclam|clamd)
++    stat="$(sed 's/.*) //' "$entry/stat")"
++    state="$(printf '%s\n' "$stat" | awk '{print $1}')"
++    started="$(printf '%s\n' "$stat" | awk '{print $20}')"
++    uid="$(awk '/^Uid:/{print $2}' "$entry/status")"
++    arguments="$(base64 < "$entry/cmdline" | tr -d '\n')"
++    printf 'PROCESS\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "${entry##*/}" "$uid" "$state" "$started" "$arguments"
++  ;; esac
++done
+diff --git a/deploy/clamav/update-once.sh b/deploy/clamav/update-once.sh
+new file mode 100644
+index 00000000..388888a5
+--- /dev/null
++++ b/deploy/clamav/update-once.sh
+@@ -0,0 +1,47 @@
++#!/bin/sh
++set -eu
++db_dir="${CLAMAV_DATABASE_DIRECTORY:-/var/lib/clamav}"
++interval="${CLAMAV_UPDATE_INTERVAL_SECONDS:-7200}"
++case "$interval" in ''|*[!0-9]*) exit 1;; esac
++[ "$interval" -ge 3600 ] && [ "$interval" -le 86400 ] || exit 1
++state="$db_dir/.sabalan-updater-state"
++# flock is held for the complete FreshClam invocation, never just state writes.
++exec 9>"$db_dir/.sabalan-updater.lock"
++flock -n 9 || exit 75
++attempted=0; succeeded=0; result=1; next=0
++if [ -f "$state" ]; then
++  read -r attempted succeeded result next < "$state"
++  for value in "$attempted" "$succeeded" "$result" "$next"; do
++    case "$value" in ''|*[!0-9]*) echo 'Invalid updater state; refusing to reset its schedule.' >&2; exit 1;; esac
++  done
++fi
++now="$(date +%s)"
++[ "$now" -ge "$next" ] || exit 0
++# Reserve the next slot before running. Recreate/crash must not force another download.
++next="$((now + interval))"
++umask 077
++printf '%s %s 1 %s\n' "$now" "$succeeded" "$next" > "$state.next"
++sync -f "$state.next"
++mv "$state.next" "$state"
++sync -f "$db_dir"
++result=0
++log="$db_dir/.sabalan-freshclam-result"
++freshclam --stdout --config-file=/etc/clamav/freshclam.conf --datadir="$db_dir" > "$log.next" 2>&1 || result=$?
++mv "$log.next" "$log"
++cat "$log"
++# FreshClam 1.4.6 can return zero while honoring a previous CDN cooldown.
++# Require explicit success for every official database, not just its exit status.
++if [ "$result" -eq 0 ]; then
++  if grep -Ev '^(WARNING: )?Cool-down expired, ok to try again\.$' "$log" | grep -Eiq 'cool.down|rate.limit|blocked|ERROR:|HTTP[^0-9]*(429|403)'; then result=17; fi
++  for name in main daily bytecode; do
++    if ! grep -Eq "(^|[[:space:]])$name[.](cvd|cld) (database is up-to-date|updated)" "$log"; then result=17; fi
++  done
++fi
++finished="$(date +%s)"
++if [ "$result" -eq 0 ]; then succeeded="$finished"; fi
++printf '%s %s %s %s\n' "$now" "$succeeded" "$result" "$next" > "$state.next"
++sync -f "$state.next"
++mv "$state.next" "$state"
++sync -f "$db_dir"
++[ "$result" -eq 0 ] || echo "FreshClam failed (exit $result); cooldown and next scheduled slot retained." >&2
++exit "$result"
+diff --git a/deploy/clamav/updater.sh b/deploy/clamav/updater.sh
+new file mode 100644
+index 00000000..0e34a558
+--- /dev/null
++++ b/deploy/clamav/updater.sh
+@@ -0,0 +1,7 @@
++#!/bin/sh
++set -eu
++while :; do
++  /usr/local/bin/sabalan-clamav-update-once || true
++  # This loop only inspects the persistent schedule. Downloads remain >=1 hour apart.
++  sleep 30 & wait $!
++done
+diff --git a/deploy/scripts/deploy.sh b/deploy/scripts/deploy.sh
+index 1680bcfd..40ca4767 100644
+--- a/deploy/scripts/deploy.sh
++++ b/deploy/scripts/deploy.sh
+@@ -12,6 +12,19 @@ case "${DEPLOYMENT_MODE}" in
+ esac
+ CONFIGURATION_STATE="${REPO_ROOT}/.deploy-state/biometric-configuration.json"
+ CONFIGURATION_ACTIVE=0
++DEPLOYMENT_CLAMAV_TARGET_IMAGE="${DEPLOYMENT_CLAMAV_TARGET_IMAGE:-}"
++DEPLOYMENT_CLAMAV_REPAIR=false
++[ -z "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" ] || DEPLOYMENT_CLAMAV_REPAIR=true
++if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] && [ "${DEPLOYMENT_MODE}" != release ]; then
++  echo "ClamAV repair requires the complete protected release path." >&2; exit 1
++fi
++export DEPLOYMENT_CLAMAV_REPAIR DEPLOYMENT_CLAMAV_TARGET_IMAGE
++DEPLOYMENT_CLAMAV_OPERATION="${DEPLOYMENT_CLAMAV_OPERATION:-repair}"
++case "${DEPLOYMENT_CLAMAV_OPERATION}" in repair|incident-recovery) ;; *) echo 'Unknown ClamAV operation.' >&2; exit 1;; esac
++if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" != true ]; then
++  echo 'Incident recovery requires a qualified immutable ClamAV target.' >&2; exit 1
++fi
++export DEPLOYMENT_CLAMAV_OPERATION
+ DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
+ DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
+ COMPOSE_FILE="docker-compose.prod.yml"
+@@ -49,7 +62,17 @@ compose() {
+ 
+ start_release_services() {
+   wait_seconds="$1"
+-  compose up -d --no-build --wait --wait-timeout "${wait_seconds}" postgres clamav backend frontend inquiry nginx
++  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ] && [ "${DEPLOYMENT_PHASE:-}" = ROLLBACK_STARTED ]; then
++    echo 'Original incident state was restored; its known-unhealthy scanner cannot authorize reopening. Maintenance is retained.' >&2
++    return 1
++  fi
++  if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] && [ "${MUTATION_STARTED}" -eq 0 ]; then
++    # A failed preflight/checkpoint must restart the exact old container, never apply target config.
++    compose start clamav
++    compose up -d --no-deps --no-build --wait --wait-timeout "${wait_seconds}" postgres backend frontend inquiry nginx
++  else
++    compose up -d --no-build --wait --wait-timeout "${wait_seconds}" postgres clamav backend frontend inquiry nginx
++  fi
+   # Nginx resolves Compose service names when its workers start. Recreate it
+   # after application containers have their final addresses so rollout and
+   # rollback cannot reopen traffic through stale upstream IPs.
+@@ -59,6 +82,11 @@ start_release_services() {
+ run_backend() {
+   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
+     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
++      -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
++      -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
++      -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
++      -e "DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256=${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256:-}" \
++      -e "DEPLOYMENT_CLAMAV_TARGET_IMAGE=${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" \
+       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
+       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
+       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
+@@ -91,11 +119,17 @@ run_backend_timed() {
+     BACKEND_DB_CONNECTION_LIMIT=2 \
+     DATABASE_APPLICATION_NAME=sabalanerp-deployment \
+     docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
++      -e "DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256=${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256:-}" \
++      -e "DEPLOYMENT_CLAMAV_REPAIR=${DEPLOYMENT_CLAMAV_REPAIR}" \
++      -e "DEPLOYMENT_CLAMAV_OPERATION=${DEPLOYMENT_CLAMAV_OPERATION}" \
++      -e "DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256=${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256:-}" \
++      -e "DEPLOYMENT_CLAMAV_TARGET_IMAGE=${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" \
+       -e "DEPLOYMENT_ID=${DEPLOYMENT_ID}" \
+       -e "DEPLOYMENT_RELEASE_ID=${DEPLOYMENT_RELEASE_ID}" \
+       -e "DEPLOYMENT_TARGET_COMMIT=${DEPLOYMENT_TARGET_COMMIT}" \
+       -e "DEPLOYMENT_LEASE_TOKEN=${DEPLOYMENT_LEASE_TOKEN:-}" \
+       -e "DEPLOYMENT_OWNER=${DEPLOYMENT_OWNER}" \
++      -e "DEPLOYMENT_PHASE=${DEPLOYMENT_PHASE:-}" \
+       -e "DEPLOYMENT_LEASE_MS=1200000" \
+       -e "DEPLOYMENT_CONTROL_IMAGE=${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
+       -e "DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP=${DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP:-false}" \
+@@ -214,6 +248,7 @@ drain_release_for_rollback() {
+     rollback_backend_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${rollback_backend_container}")"
+   fi
+   compose stop -t 30 frontend backend inquiry
++  if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then compose stop -t 60 clamav; fi
+   if [ -n "${rollback_backend_ip}" ]; then
+     rollback_sessions="$(compose exec -T postgres sh -c "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM pg_stat_activity WHERE client_addr = '${rollback_backend_ip}'::inet\"")"
+     [ "${rollback_sessions}" = "0" ] || { echo "The failed release retained ${rollback_sessions} database sessions; rollback promotion is unsafe." >&2; return 1; }
+@@ -293,6 +328,55 @@ switch_to_previous_images() {
+   eval "${rollback_runtime_exports}"
+ }
+ 
++clamav_unit_name() { printf 'clamav-checkpoint-%s' "${DEPLOYMENT_ID}"; }
++
++capture_clamav_checkpoint() {
++  [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || return 0
++  compose stop -t 60 clamav
++  clamav_container="$(compose ps -aq clamav)"
++  [ "$(docker inspect --format '{{.State.Running}}' "${clamav_container}")" = false ] || return 1
++  clamav_unit="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)"
++  mkdir -m 700 "${clamav_unit}"
++  docker cp "${clamav_container}:/etc/clamav/." - >"${clamav_unit}/config.tar"
++  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
++    cp "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}" "${clamav_unit}/incident-snapshot.json"
++  else
++    cp "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" "${clamav_unit}/rollback-proof.json"
++  fi
++  cp "${DEPLOYMENT_CLAMAV_READY_FILE}" "${clamav_unit}/target.json"
++  cp "$(dirname "${DEPLOYMENT_CLAMAV_READY_FILE}")/target-bank.tar" "${clamav_unit}/target-bank.tar"
++  docker cp "${clamav_unit}" "$(compose ps -aq backend):/app/recovery-coordination/"
++  run_backend node scripts/clamav-checkpoint.mjs capture
++}
++
++restore_clamav_configuration() {
++  [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || return 0
++  # deployment-rollback has already authenticated this unit against the decrypted checkpoint.
++  # Never start the old scanner with the target bank or target configuration.
++  clamav_config="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)-restore.tar"
++  docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/config.tar" "${clamav_config}"
++  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" != incident-recovery ]; then
++    DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE="${REPO_ROOT}/.deploy-state/$(clamav_unit_name)-rollback-proof.json"
++    docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/rollback-proof.json" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}"
++    export DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE
++  fi
++  compose create --no-deps clamav
++  docker cp -a - "$(compose ps -aq clamav):/etc/clamav/" <"${clamav_config}"
++}
++
++verify_clamav_repair_runtime() {
++  [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || return 0
++  clamav_runtime_timeout=120
++  if [ "${MUTATION_STARTED}" -eq 1 ] && [ "${DEPLOYMENT_PHASE:-}" != ROLLBACK_STARTED ]; then
++    clamav_runtime_timeout="$(remaining_mutation_seconds)" || return 1
++  fi
++  if [ "${DEPLOYMENT_PHASE:-}" = ROLLBACK_STARTED ]; then
++    timeout "${clamav_runtime_timeout}" node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" inspect-rollback "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-runtime-${DEPLOYMENT_ID}.json"
++  else
++    timeout "${clamav_runtime_timeout}" node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" inspect "$(compose ps -q clamav)" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-runtime-${DEPLOYMENT_ID}.json"
++  fi
++}
++
+ refresh_performance_database_identity() {
+   identity_name="performance-database-${DEPLOYMENT_ID}.json"
+   if [ "${MUTATION_STARTED}" -eq 1 ]; then
+@@ -367,6 +451,18 @@ recover_failure() {
+   fi
+ 
+   if [ "${MUTATION_STARTED}" -eq 0 ]; then
++    if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ] && [ "${MAINTENANCE_ACTIVE}" -eq 1 ]; then
++      # No original data is changed, but a known-degraded release cannot be
++      # claimed healthy merely because the remote checkpoint failed.
++      DEPLOYMENT_PHASE=RECOVERY_REQUIRED
++      DEPLOYMENT_RESULT=RECOVERY_REQUIRED
++      export DEPLOYMENT_PHASE DEPLOYMENT_RESULT
++      if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then control finish || true; fi
++      run_backend node dist/scripts/deployment-notify.js || true
++      cleanup_locks
++      echo 'Incident preparation failed within maintenance; original data is retained and recovery remains required.' >&2
++      exit "${exit_code}"
++    fi
+     control maintenance-on || true
+     MAINTENANCE_ACTIVE=1
+     switch_to_previous_images
+@@ -410,7 +506,9 @@ recover_failure() {
+     && run_backend node dist/scripts/deployment-rollback.js \
+     && run_backend node dist/scripts/deployment-finalize-recovery.js; then
+     switch_to_previous_images
++    restore_clamav_configuration || exit 1
+     if start_release_services 300 \
++      && verify_clamav_repair_runtime \
+       && DEPLOYMENT_GATE_MODE=ROLLBACK run_backend node dist/scripts/deployment-gates.js; then
+       referral_ready=1
+       if [ "${FINANCIAL_EVIDENCE_REFERRAL_REQUIRED}" -eq 1 ]; then
+@@ -510,6 +608,12 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
+   DEPLOYMENT_OWNER="$(session_value owner)"
+   DEPLOYMENT_PHASE="$(session_value phase)"
+   DEPLOYMENT_TARGET_BACKEND_IMAGE="$(session_value controlImage)"
++  incident_operation="$(session_value clamavOperation)"
++  if [ "${incident_operation}" = incident-recovery ]; then
++    DEPLOYMENT_CLAMAV_OPERATION=incident-recovery
++    DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256="$(session_value clamavIncidentSnapshotSha256)"
++    export DEPLOYMENT_CLAMAV_OPERATION DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256
++  fi
+   DEPLOYMENT_PREVIOUS_BACKEND_IMAGE="$(session_value rollbackReleaseSet.backend)"
+   DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE="$(session_value rollbackReleaseSet.frontend)"
+   DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE="$(session_value rollbackReleaseSet.inquiry)"
+@@ -531,10 +635,14 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
+       recover_failure 1
+     fi
+   fi
++  if [ -d "${REPO_ROOT}/.deploy-state/$(clamav_unit_name)" ] || docker cp "$(compose ps -aq backend):/app/recovery-coordination/$(clamav_unit_name)/unit.json" "${REPO_ROOT}/.deploy-state/clamav-resume-unit.json" 2>/dev/null; then
++    DEPLOYMENT_CLAMAV_REPAIR=true
++    export DEPLOYMENT_CLAMAV_REPAIR
++  fi
+   SESSION_PREPARED=1
+   [ "${DEPLOYMENT_PHASE}" = "PREFLIGHT" ] || DB_LEASE_ACQUIRED=1
+   switch_to_previous_images
+-  compose up -d postgres clamav
++  compose up -d postgres
+   try_acquire_advisory || { echo "Interrupted deployment recovery cannot acquire its PostgreSQL advisory lease." >&2; exit 1; }
+   control maintenance-on
+   MAINTENANCE_ACTIVE=1
+@@ -617,6 +725,28 @@ DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TA
+ DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
+ APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
+ export DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_ID DEPLOYMENT_OWNER APP_COMMIT
++if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
++  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
++    [ -f "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE:-}" ] || { echo 'A fresh degraded-instance snapshot is required before incident maintenance.' >&2; exit 1; }
++    [ -z "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:-}" ] || { echo 'Incident evidence must never be presented as a healthy rollback proof.' >&2; exit 1; }
++    node "${OPERATIONS_ROOT}/scripts/clamav-incident-recovery.mjs" verify "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}"
++    DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256="$(node --input-type=module -e 'import {fileDigest} from "./scripts/clamav-release-readiness.mjs"; console.log(await fileDigest(process.argv[1]));' "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}")"
++    export DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256
++  else
++  [ -f "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:-}" ] || { echo "A separately reviewed current rollback rehearsal proof is required before maintenance." >&2; exit 1; }
++  mkdir -p "${DEPLOYMENT_REPORT_DIR_HOST}"
++  node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" rollback-proof "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" "${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
++  timeout 120 node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" inspect-rollback "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}" >"${DEPLOYMENT_REPORT_DIR_HOST}/clamav-rollback-preflight-${DEPLOYMENT_ID}.json"
++  DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256="$(node --input-type=module -e 'import {fileDigest} from "./scripts/clamav-release-readiness.mjs"; console.log(await fileDigest(process.argv[1]));' "${DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE}")"
++  export DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256
++  fi
++  node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" scope "${DEPLOYMENT_CLAMAV_BASE_COMMIT:-}"
++  [ -f "${DEPLOYMENT_CLAMAV_READY_FILE:-}" ] || { echo "A reviewed, current ClamAV staging receipt is required before maintenance." >&2; exit 1; }
++  node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" verify "${DEPLOYMENT_CLAMAV_READY_FILE}" "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
++  [ "$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}")" = "${DEPLOYMENT_CLAMAV_TARGET_IMAGE}" ] || {
++    echo "The ClamAV target must be the locally available immutable image id from staging." >&2; exit 1;
++  }
++fi
+ 
+ if [ "${DEPLOYMENT_MODE}" = "release" ]; then
+ backend_image_size="$(docker image inspect --format '{{.Size}}' "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}")"
+@@ -692,12 +822,22 @@ else
+   compose config --quiet
+   echo "Applying workstation configuration to the existing immutable release ${DEPLOYMENT_TARGET_COMMIT}; no source fetch or image build."
+ fi
++if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
++  DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
++  export DEPLOYMENT_CLAMAV_IMAGE
++fi
+ refresh_performance_database_identity
+ 
+ run_backend node dist/scripts/validate-production-environment.js
+ run_backend node dist/scripts/deployment-drill-preflight.js
+ 
+-compose up -d postgres clamav
++if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
++  node "${OPERATIONS_ROOT}/scripts/clamav-incident-recovery.mjs" verify "$(compose ps -q clamav)" "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}"
++  incident_snapshot_digest="$(node --input-type=module -e 'import {fileDigest} from "./scripts/clamav-release-readiness.mjs"; console.log(await fileDigest(process.argv[1]));' "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE}")"
++  [ "${incident_snapshot_digest}" = "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256}" ] || { echo 'Incident snapshot changed during preparation.' >&2; exit 1; }
++fi
++
++compose up -d postgres
+ control prepare
+ SESSION_PREPARED=1
+ 
+@@ -742,6 +882,7 @@ fi
+ phase TRAFFIC_BLOCKED
+ if [ "${DRAINED_EARLY}" -eq 0 ]; then drain_current_services; fi
+ phase SERVICES_DRAINED
++capture_clamav_checkpoint
+ 
+ postgres_available_kb="$(compose exec -T postgres sh -c 'df -Pk "$PGDATA" | awk "NR==2 {print \$4}"')"
+ postgres_database_bytes="$(compose exec -T postgres sh -c 'psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_database_size(current_database())"')"
+@@ -769,6 +910,12 @@ phase REMOTE_CHECKPOINT_VERIFIED
+ phase MUTATION_STARTED
+ MUTATION_STARTED=1
+ mutation_started_at="$(date +%s)"
++if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
++  remaining="$(remaining_mutation_seconds)" || exit 1
++  run_backend_timed "${remaining}" node scripts/clamav-checkpoint.mjs activate
++  DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_CLAMAV_TARGET_IMAGE}"
++  export DEPLOYMENT_CLAMAV_IMAGE
++fi
+ if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
+   node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" persist "${REPO_ROOT}"
+ fi
+@@ -905,6 +1052,8 @@ timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FIL
+   rm -f "${test_file}"
+ '
+ remaining_mutation_seconds >/dev/null
++verify_clamav_repair_runtime
++remaining_mutation_seconds >/dev/null
+ phase GATES_PASSED
+ 
+ if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
+diff --git a/docker-compose.prod.yml b/docker-compose.prod.yml
+index e5b824cc..2ce631b1 100644
+--- a/docker-compose.prod.yml
++++ b/docker-compose.prod.yml
+@@ -40,7 +40,7 @@ services:
+     volumes:
+       - clamav_database:/var/lib/clamav
+     healthcheck:
+-      test: ["CMD-SHELL", "clamdscan --ping=1"]
++      test: ["CMD-SHELL", "if command -v sabalan-clamav-health >/dev/null; then sabalan-clamav-health; else clamdscan --ping=1; fi"]
+       interval: 15s
+       timeout: 10s
+       retries: 40
+@@ -182,6 +182,7 @@ services:
+       SHIPMENT_STATEMENT_INCIDENT_CONTACTS: ${SHIPMENT_STATEMENT_INCIDENT_CONTACTS:-}
+       SHIPMENT_STATEMENT_MONITORING_CHECKS: ${SHIPMENT_STATEMENT_MONITORING_CHECKS:-}
+     volumes:
++      - clamav_database:/app/recovery-sources/clamav
+       - ${DEPLOYMENT_SECRET_DIR:-./deploy/secrets}:/run/deployment-secrets:ro
+       - ${DEPLOYMENT_REMOTE_MOUNT_HOST:-./backups/remote-checkpoints}:/app/deployment-remote
+       - ${DEPLOYMENT_REPORT_DIR_HOST:-./reports/deploy}:/app/deployment-reports
+diff --git a/docs/operations/clamav-repair.md b/docs/operations/clamav-repair.md
+new file mode 100644
+index 00000000..04278f2f
+--- /dev/null
++++ b/docs/operations/clamav-repair.md
+@@ -0,0 +1,90 @@
++# Protected ClamAV repair
++
++## Explicit degraded-instance incident recovery
++
++Ordinary repair still requires a healthy, rehearsed previous scanner and is unchanged. An already degraded installation cannot truthfully supply that proof. `DEPLOYMENT_CLAMAV_OPERATION=incident-recovery` is a separate incident operation on the exact deployed source base; it is not an ordinary application release and cannot contain business changes or migrations. The source-scope gate and every checkpoint, lease, mutation deadline, complete-release gate and post-open rollback prohibition still apply.
++
++Before entering maintenance, prepare and review a real healthy target with current publisher signatures, successful FreshClam cycle, matching loaded bank, CLEAN and streamed EICAR rejection. Record the actual running original with `node scripts/clamav-incident-recovery.mjs snapshot <container> <private-file>`, then supply that file as `DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE`. Do not supply a rollback-health proof in incident mode. The read-only snapshot records its image, effective configuration hash, exact signed bank hashes/versions and specific observed degradation. It explicitly denies reopening the original. Preflight re-inspects the original; the durable owned session binds the operation and snapshot checksum. Capture rechecks those bytes and the stopped original before the full encrypted checkpoint is independently read back.
++
++Only after the complete local and independent checkpoint passes may the journal enter mutation and activate the authenticated target image/bank. All six release identities form the resulting complete release set; rebuilding maintenance-only application images does not authorize business-source changes. On any failure after maintenance begins, never reopen the known-degraded original as a successful rollback. After mutation, the one coordinated restore recovers its exact data, original bank/configuration, numeric ownership and cooldown, then retains maintenance in `RECOVERY_REQUIRED`. The restored scanner remains stopped rather than making an uncontrolled update attempt. An unresolved incident blocks subsequent ordinary releases. Failure before maintenance leaves the running original untouched. This availability trade-off preserves ADR-0039's fail-closed recovery rule; it supplies no health exception.
++
++For acquisition, Cisco's supported `cvdupdate` may prepare a publisher-signed bank on another authorized network; retain its version, official origin, checksums and signature-verification evidence. That evidence is not updater-health evidence. Recurring production acquisition remains FreshClam with `TestDatabases yes`, normal persistent scheduling and unchanged signature verification. The fixed HTTPS FEUP mirror (`https://mirrors.fe.up.pt/pub/clamav`) serves official signed CVD/CDIFF files; official `current.cvd.clamav.net` DNS remains the independent freshness authority. No arbitrary mirror, custom database URL, TLS bypass or fallback request to a CDN currently refusing requests is introduced. Preserve existing cooldown and scheduler files; importing a signed file alone cannot manufacture a successful cycle or advance its next eligible update slot. Verify the chosen mirror using a real naturally eligible FreshClam cycle before activation, and a later natural cycle before incident closure. See [ClamAV's mirror guidance](https://docs.clamav.net/appendix/CvdPrivateMirror.html) and the [FEUP mirror index](https://mirrors.fe.up.pt/pub/clamav/).
++
++This is a maintenance-only repair, independent of attendance R3. No schema, attendance, correction, PDF or shared-duty behavior is changed. Cloud execution, deployment and automatic attendance require separate authorization. Local test success does not prove cloud readiness.
++
++## Local runtime
++
++Use only `sabalanerp-local` and `docker-compose.local.yml`. Check its inventory before any Docker action. The ClamAV service builds `deploy/clamav/Dockerfile` from the pinned official **amd64 1.4.6** manifest. Do not use this local mutable tag as a production release identity.
++
++The supervisor watches both clamd and the scheduler, rejects zombies and terminates on child death. The updater runs as `clamav`, serializes the entire invocation with a persistent `flock`, reserves and syncs its next slot before FreshClam, and retains `freshclam.dat`. The default interval is 7,200 seconds; values below one hour are rejected. Recreate must preserve the volume and schedule. Never delete cooldown state or force an update to obtain a green check.
++
++FreshClam 1.4.6 can exit **zero during CDN cooldown without checking any database**. Success therefore requires explicit successful/up-to-date results for main, daily and bytecode, no refusal/error, a recent persisted successful cycle, both live processes, and scanner responsiveness. A failed or incomplete attempt remains unhealthy. Health does not replace release freshness verification against DNS. No TLS, signature, or TestDatabases bypass exists. `ConcurrentDatabaseReload no` reduces double-bank memory during scanner reload; scans may temporarily block, never become assumed CLEAN. FreshClam's separate load test still needs measured memory headroom.
++
++## Tests
++
++- `npm run test:clamav-repair`: boundary, manifest/tamper, numeric ownership, rollback, readiness and controller wiring.
++- `npm run test:clamav-repair:lifecycle:docker`: deliberate updater termination and scanner outage/recovery in the existing local container; run separately when brief local scan downtime is acceptable. It checks the unprivileged worker, restart, unchanged cooldown/schedule, and application refusal of unscanned files.
++- `npm run test:clamav-repair:docker`: isolated temporary files/processes inside the existing local ClamAV container; real Linux flock, concurrent writers, crash/recreate scheduling, network errors and zero-exit cooldown. No external FreshClam request is made by these fixtures.
++- `npm run test:clamav-repair:restore:docker`: real signed-bank snapshot, authenticated encryption/decryption, reconstruction after losing the coordination copy, isolated bank restoration with numeric ownership, and an offline CLEAN/EICAR scan inside the existing containers. It preserves the live bank, cooldown and updater schedule. This is a component rehearsal, not a complete protected release or remote-store rehearsal.
++- `npm --prefix backend run test:deployment-control`: includes portable ClamAV tests. Unix controller fixtures need Linux tools; run in the existing backend container with isolated QA source when the workstation lacks them.
++- `npm --prefix backend run test:system-recovery`, `npm run architecture:check`, backend build, `npm run docker:verify`, `npm run docker:local:verify-antivirus`.
++
++Record blocked checks as blocked. A successful CLEAN/EICAR check with an old signed bank is not current-signature readiness.
++
++## Candidate preparation, only after authorization
++
++Refresh the deployed source identity and migration ledger read-only first. Apply only this maintenance patch to that deployed source, and commit/review that independent candidate. Do not deploy the current feature branch to repair ClamAV. `DEPLOYMENT_CLAMAV_BASE_COMMIT` must equal the running release's recorded source identity. The scope gate rejects unrelated paths, migrations, dependency changes and unrelated package commands.
++
++Prepare an inactive candidate on the authorized deployment network with the official engine, persistent cooldown state and one writer. Network failures or 403/429 stop preparation. Use FreshClam; do not download CVD files with curl/wget or an untrusted mirror. The staging host must have capacity for the live scanner plus the candidate's database load test; local CPU emulation and a startup measurement are not production peak-memory evidence.
++
++Inspect the inactive candidate with `node scripts/clamav-release-readiness.mjs inspect <container>`. After it has a real successful update cycle, `export <container> <private-new-directory>` writes `target.json` and `target-bank.tar`. The export holds the updater's lock while snapshotting the bank, checks signed database versions, proves a real scanner load plus streamed EICAR rejection and binds the archive checksum to the immutable image ID. Target receipts must include `eicarRejected: true` from the real probe; regenerate older receipts rather than editing their flags. It never updates the candidate or live bank. A DNS/version mismatch fails closed; do not force another download to hide a concurrent upstream publication.
++
++Before a separately approved execution set:
++
++- `DEPLOYMENT_MODE=release` (the workstation configuration mode is prohibited).
++- `DEPLOYMENT_CLAMAV_BASE_COMMIT`: freshly proven deployed source SHA.
++- `DEPLOYMENT_CLAMAV_TARGET_IMAGE`: exact locally available `sha256:...` image ID from the staging receipt.
++- `DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE`: private reviewed rehearsal evidence for the previous immutable image and its current bank/configuration; required before maintenance.
++- `DEPLOYMENT_CLAMAV_READY_FILE`: absolute private path to `target.json`, adjacent to its protected `target-bank.tar`.
++
++Rollback proof is an operator-reviewed result of the complete protected rehearsal, not a success receipt generated from assumptions. It contains `image`, compatible `engine` (managed 1.4.6, or explicitly qualified native 1.4.5/1.4.6), `checkedAt` (within 24 hours), current DNS `versions`, `restoreRehearsalPassed`, `fullReleaseRehearsalPassed`, `updaterHealthy`, `scannerClean`, `eicarRejected`, `configArchiveSha256` (the exact Docker-captured effective config archive), and `bankFiles` (exactly main/daily/bytecode cvd-or-cld filenames mapped to SHA-256). All five result flags must be true. The proof's checksum is bound at preflight and rechecked after drain; the actually captured bank and configuration must match it before checkpoint can become eligible. A stale original bank or missing rehearsal proof stops preparation. No fake proof is supplied by this patch. For a native previous image, the proof must explicitly set `runtimeVerifier: "native-1.4-daemon-v1"` and include `main.cvd`, so the legacy entrypoint cannot take its initial-download branch with database testing disabled. The native verifier is permitted only for the previous immutable release; target promotion remains managed 1.4.6. A stale bank or defunct native updater still cannot qualify. Do not fabricate a proof, relabel an image, change a bank outside maintenance, or weaken health gates.
++
++These inputs do not bypass any normal lease, independent checkpoint, complete release, health, recovery-drill, backup or reopening gate. No command to deploy is authorized by this document.
++
++## Checkpoint and rollback unit
++
++Before checkpoint, no target ClamAV image/configuration is started. The old container stops after services drain. Its effective `/etc/clamav` archive, complete signature bank, numeric ownership/modes, FreshClam cooldown and scheduler state are captured as `recovery-coordination/clamav-checkpoint-<deployment-id>`. The staged target bank and receipt are included in the same unit. Only the deployment job mounts the bank for protected capture/restore; the application backend gains no writable bank mount.
++
++The existing COMPLETE recovery package encrypts this unit, restore-validates the package, uploads it and verifies independent full readback. Additional manifest checks require every unit component, including unit metadata, to be present and hash-identical. A missing/unverified/tampered unit aborts before mutation.
++
++Only the owned live lease, matching maintenance owner and journaled `MUTATION_STARTED` permit activation. The protected target bank is installed while the scanner remains stopped; the complete release then starts with the immutable target image. DNS freshness and real update health are mandatory before reopening. The normal 15-minute mutation deadline remains in effect.
++
++On pre-reopen failure, drain/stop ClamAV, reconstruct the saved unit directly from the authenticated encrypted checkpoint and validate every component against its decrypted recovery manifest, restore the exact old bank including cooldown/ownership, restore the effective old configuration and previous immutable image, and run every rollback gate. Reconstructing the unit does not depend on an intact extra coordination copy. Paths from the enclosing archive are never extracted into the live coordination directory: selected file content is streamed to private regular files, hashes are checked, and the complete verified unit replaces the coordination copy. The live lease and maintenance owner are checked again after archive IO and before bank mutation. Bank extraction is offline under the owned maintenance lease; an interrupted/failed extraction retains maintenance and the protected archives, rather than starting a partial bank. No old checkpoint is restored after public writes may have resumed. Such a failure is a new incident requiring a new protected boundary.
++
++A rollback to the formerly stale bank is not a successful freshness repair. If the old release cannot pass the additional updater/freshness gate, maintenance remains active. Prove a compatible, acceptable rollback set and rehearse the complete protected deployment before authorizing cloud execution. An earlier healthy-looking PONG is insufficient.
++
++First successful/up-to-date cycle is necessary for release readiness. A naturally scheduled subsequent cycle (about two hours later), with a named operator and authorization, is necessary to close the updater incident. Do not hold the mutation window open for two hours, force the schedule, or create an unrequested automation.
++
++## Local result: 19 October 2026
++
++The implementation is tested locally; it is not approved for cloud execution. The local official bank remains daily 28150 (11 October). Existing FreshClam state reports CDN cooldown through **20 October 2026 05:59:39 UTC / 09:29:39 Tehran**. No cooldown reset, network change or forced download was made. Zero-exit cooldown was reproduced and is now rejected by health/readiness. Record the actual next authorized update outcome; do not mark current signatures or a recurring real update cycle proven yet.
++
++Official DNS field mapping is main=1, daily=2 and bytecode=7 (zero-based), as specified by [Cisco-Talos cvdupdate](https://github.com/Cisco-Talos/cvdupdate/blob/main/cvdupdate/cvdupdate.py). A recorded eight-field response is covered by a regression test.
++
++## Local blocker follow-up: 19 October 2026
++
++The remaining local recovery dependency was corrected: a lost or corrupted coordination copy can be reconstructed from the authenticated encrypted checkpoint, with manifest validation before replacement and a renewed lease check before bank mutation. Failed extraction, missing/duplicate components, tampering, or an unverified checkpoint cannot replace the existing unit or change the bank. The readiness receipt now requires literal boolean verification results; maintenance package validation preserves every existing deployment test and allows only the reviewed ClamAV commands. The rollback proof must match the supported runtime verifier; incompatible legacy-engine evidence is refused before maintenance.
++
++Run memory-heavy tests and Docker builds **sequentially** on the local Docker VM. It currently has about 5.3 GiB total memory. An initial concurrent offline-bank-load/build run caused a real OOM and local scanner restart; this failed evidence is retained. The measured 2 GiB limit had under 20% anonymous-memory reserve. The local-only ClamAV limit is now 3 GiB; the rehearsal requires at least 20% reserve for its tested bank. Production memory is not changed or attested by this local setting. A successful serial component rehearsal must show no new OOM/kill events and a responsive live scanner, and report peak cgroup and anonymous memory. File-cache reclaim at `memory.max` is reported separately. This does not establish headroom for a newer bank or the real FreshClam `TestDatabases` cycle. Never disable `TestDatabases` or accept missing scanner results.
++
++External closure still requires a legitimate successful FreshClam update after CDN cooldown, a natural later scheduled success, and a separately approved complete protected release/rollback rehearsal with current target and previous image/bank/configuration. Legacy previous-image acceptance and freshly verified cloud identity/capacity/remote backup gates remain unproven by local component tests. No cloud execution, attendance activation or Git push is implied.
++
++## Native rollback qualification and controller fault rehearsal
++
++The earlier engine-only restriction has been replaced by an explicit read-only native verifier. [The official 1.4 entrypoint](https://github.com/Cisco-Talos/clamav-docker/blob/main/clamav/1.4/alpine/scripts/docker-entrypoint.sh) starts a foreground FreshClam daemon separately and can leave its tail process alive when a child dies. The checker therefore examines actual `/proc` identities rather than relying on PONG or container liveness. It requires exactly one non-root, non-defunct `freshclam` daemon with the standard arguments and 12–24 checks per day, plus a live non-root `clamd`. A complete latest update cycle for all three official databases must postdate that daemon process and be within two intervals; errors, cooldown, partial cycles, unsigned or mismatched versions, unknown arguments/configuration includes and alternate mirrors/directories fail. Configuration retains database testing, notification and the official mirror.
++
++Native cycle evidence is correlated with the regular FreshClam log and its timestamp in the container timezone, so replayed log headers or scanner-file names in shared stdout cannot supply update evidence. The latest cycle is checked again after scanning. Both native and managed rollback inspection require signed current banks, a loaded daemon matching daily, CLEAN and streamed EICAR detection, exact reviewed bank-file hashes and effective-config archive hash. Container/process identity and the latest updater result are checked again after inspection. `inspect-rollback <container> <proof>` runs before maintenance and after rollback, using the authenticated proof recovered with the bank. The probe makes no FreshClam update request, creates no files in the inspected container and changes no settings. Normal scanner log events may be generated by the test scans.
++
++The real release controller is also exercised against test-only CLI adapters for qualification rejection, remote-copy tampering, failure after mutation, rollback-verifier failure, post-open failure and success. The fixture calls the real boundary, capture, verification, encryption/decryption, authenticated unit reconstruction and bank restore functions. It proves control order, single rollback, maintenance retention and the prohibition on restoring old data after traffic opens. Docker/Git/database control and remote transport are private fixtures: this is not a deployment, a production proof, an independent remote-store attestation or a real legacy-image rehearsal.
++
++Remaining operational qualification is explicit: wait for the recorded CDN cooldown without deleting its state, obtain legitimate current signatures and a natural subsequent successful cycle, then perform separately authorized real previous-image/target-image and remote-checkpoint qualification. A currently defunct/stale cloud installation may need a protected bootstrap decision; this patch does not modify it or grant a health exception.
+diff --git a/package.json b/package.json
+index ff0d3e2f..ec5b272f 100644
+--- a/package.json
++++ b/package.json
+@@ -82,10 +82,10 @@
+     "test:personnel-performance-policy:db": "npm --prefix backend run test:personnel-performance-policy:db",
+     "test:personnel-performance-workflow": "npm --prefix backend run test:personnel-performance-workflow",
+     "test:personnel-performance-workflow:db": "npm --prefix backend run test:personnel-performance-workflow:db",
+-  "test:personnel-performance-workflow:ui": "npm --prefix frontend run test:hr-performance-workflow",
+-  "test:personnel-performance-disclosure": "npm --prefix backend run test:personnel-performance-disclosure && npm --prefix frontend run test:hr-performance-disclosure",
+-  "test:personnel-performance-disclosure:db": "npm --prefix backend run test:personnel-performance-disclosure:db",
+-  "test:personnel-performance": "npm --prefix backend run test:personnel-performance-foundation && npm run test:personnel-performance-policy && npm run test:personnel-performance-workflow && npm run test:personnel-performance-workflow:ui && npm run test:personnel-performance-disclosure && npm run test:personnel-performance-operations",
++    "test:personnel-performance-workflow:ui": "npm --prefix frontend run test:hr-performance-workflow",
++    "test:personnel-performance-disclosure": "npm --prefix backend run test:personnel-performance-disclosure && npm --prefix frontend run test:hr-performance-disclosure",
++    "test:personnel-performance-disclosure:db": "npm --prefix backend run test:personnel-performance-disclosure:db",
++    "test:personnel-performance": "npm --prefix backend run test:personnel-performance-foundation && npm run test:personnel-performance-policy && npm run test:personnel-performance-workflow && npm run test:personnel-performance-workflow:ui && npm run test:personnel-performance-disclosure && npm run test:personnel-performance-operations",
+     "audit:hr-onboarding-retirement": "npm --prefix backend run audit:hr-onboarding-retirement",
+     "design-system:report": "node scripts/design-system-adoption.mjs report",
+     "design-system:baseline": "node scripts/design-system-adoption.mjs baseline",
+@@ -104,7 +104,11 @@
+     "test:hr-hiring:e2e:ci": "playwright test --config=playwright.hr-hiring.config.ts",
+     "test:hr-hiring:e2e:down": "docker compose -f docker-compose.e2e.yml down -v",
+     "prototype:shipment-statement-reconciliation": "node scripts/prototypes/shipment-statement-reconciliation/tui.mjs",
+-    "test:dispatch-document-pdfs:docker": "node scripts/run-dispatch-document-pdf-qa.mjs"
++    "test:dispatch-document-pdfs:docker": "node scripts/run-dispatch-document-pdf-qa.mjs",
++    "test:clamav-repair": "node --test tests/clamav-repair/health.test.mjs tests/clamav-repair/checkpoint.test.mjs tests/clamav-repair/readiness.test.mjs tests/clamav-repair/controller.test.mjs tests/clamav-repair/incident-recovery.test.mjs",
++    "test:clamav-repair:docker": "node --test tests/clamav-repair/updater-linux.test.mjs",
++    "test:clamav-repair:lifecycle:docker": "node --test tests/clamav-repair/lifecycle-linux.test.mjs",
++    "test:clamav-repair:restore:docker": "node --test tests/clamav-repair/restore-linux.test.mjs"
+   },
+   "keywords": [
+     "erp",
+diff --git a/scripts/clamav-incident-recovery.mjs b/scripts/clamav-incident-recovery.mjs
+new file mode 100644
+index 00000000..07ba2778
+--- /dev/null
++++ b/scripts/clamav-incident-recovery.mjs
+@@ -0,0 +1,52 @@
++import fs from 'node:fs/promises';
++import crypto from 'node:crypto';
++import { execFile } from 'node:child_process';
++import { promisify } from 'node:util';
++import { pathToFileURL } from 'node:url';
++import { publishedVersions, parseNativeProbe } from './clamav-release-readiness.mjs';
++import { validateIncidentSnapshot } from '../backend/scripts/clamav-incident-policy.mjs';
++const execute = promisify(execFile);
++const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
++
++export async function inspectIncident(container) {
++ const run = async args => (await execute('docker', args, {maxBuffer: 4 * 1024 * 1024})).stdout.trim();
++ const before = JSON.parse(await run(['inspect', container]))[0];
++ if (!before.State.Running) throw new Error('Original incident container must still be running before maintenance');
++ const engine = (await run(['exec', container, 'freshclam', '--version'])).match(/^ClamAV ([0-9.]+)/)?.[1];
++ const probe = await fs.readFile(new URL('../deploy/clamav/inspect-native.sh', import.meta.url), 'utf8');
++ const sample = parseNativeProbe(await run(['exec', container, 'sh', '-ec', probe]));
++ const freshclam = sample.processes.filter(process => process.name === 'freshclam');
++ const issues = [];
++ if (freshclam.length !== 1 || !/^[RSDI]$/.test(freshclam[0].state)) issues.push('UPDATER_NOT_LIVE');
++ const versions = {}, bankFiles = {};
++ for (const family of ['main', 'daily', 'bytecode']) {
++  const file = await run(['exec', container, 'sh', '-ec', `set -- /var/lib/clamav/${family}.c[vl]d; test "$#" -eq 1; test -f "$1"; basename "$1"`]);
++  if (!new RegExp('^' + family + '[.](cvd|cld)$').test(file)) throw new Error('Ambiguous original bank');
++  const info = await run(['exec', container, 'sigtool', '--info', '/var/lib/clamav/' + file]);
++  if (!info.includes('Verification OK')) throw new Error('Original bank signature could not be verified');
++  versions[family] = Number(info.match(/^Version: (\d+)/m)?.[1]);
++  bankFiles[file] = (await run(['exec', container, 'sha256sum', '/var/lib/clamav/' + file])).split(/\s/)[0];
++ }
++ const published = await publishedVersions();
++ if (Object.keys(versions).some(name => versions[name] !== published[name])) issues.push('SIGNATURES_STALE');
++ const config = (await execute('docker', ['cp', container + ':/etc/clamav/.', '-'], {encoding: 'buffer', maxBuffer: 4 * 1024 * 1024})).stdout;
++ const after = JSON.parse(await run(['inspect', container]))[0];
++ if (before.Id !== after.Id || before.Image !== after.Image || before.State.StartedAt !== after.State.StartedAt || !after.State.Running) throw new Error('Original instance changed during incident inspection');
++ return validateIncidentSnapshot({kind: 'DEGRADED_CLAMAV_INCIDENT_V1', image: before.Image, engine,
++  checkedAt: new Date().toISOString(), versions, bankFiles, configArchiveSha256: hash(config), issues, reopenOriginal: false}, before.Image);
++}
++
++if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
++ try {
++  const [command, container, file] = process.argv.slice(2);
++  const actual = await inspectIncident(container);
++  if (command === 'snapshot') await fs.writeFile(file, JSON.stringify(actual, null, 2) + '\n', {mode: 0o600, flag: 'wx'});
++  else if (command === 'verify') {
++   const expected = validateIncidentSnapshot(JSON.parse(await fs.readFile(file, 'utf8')), actual.image);
++   for (const key of ['image', 'engine', 'versions', 'bankFiles', 'configArchiveSha256', 'issues', 'reopenOriginal']) {
++    if (JSON.stringify(expected[key]) !== JSON.stringify(actual[key])) throw new Error('Original incident instance differs from reviewed snapshot: ' + key);
++   }
++  } else throw new Error('Use snapshot|verify <original-container> <private-snapshot-file>');
++  console.log(JSON.stringify(actual));
++ } catch (error) { console.error(error.message); process.exitCode = 1; }
++}
+diff --git a/scripts/clamav-release-readiness.mjs b/scripts/clamav-release-readiness.mjs
+new file mode 100644
+index 00000000..8c3128d6
+--- /dev/null
++++ b/scripts/clamav-release-readiness.mjs
+@@ -0,0 +1,264 @@
++import fs from 'node:fs/promises';
++import crypto from 'node:crypto';
++import {createReadStream} from 'node:fs';
++import path from 'node:path';
++import { execFile } from 'node:child_process';
++import { promisify } from 'node:util';
++import { resolveTxt } from 'node:dns/promises';
++import { pathToFileURL } from 'node:url';
++import { immutableImage } from '../backend/scripts/clamav-checkpoint.mjs';
++const exec=promisify(execFile);
++const managedVerifier='managed-1.4.6-v1', nativeVerifier='native-1.4-daemon-v1';
++const updateRefusal=line=>!/^(WARNING: )?Cool-down expired, ok to try again\.$/.test(line) && /cool.?down|rate.?limit|blocked|ERROR:|HTTP[^0-9]*(429|403)/i.test(line);
++export function validateNativeUpdater(sample,config,logs,versions,clamdConfig='') {
++ const fail=()=>{throw new Error('Native rollback updater evidence is incomplete, stale or unsafe');};
++ const options=text=>{
++  const values=new Map();
++  for(const raw of text.split(/\r?\n/)) {
++   const line=raw.trim(); if(!line || line.startsWith('#'))continue;
++   const match=line.match(/^(\S+)\s+(.+?)\s*$/); if(!match)fail();
++   const key=match[1].toLowerCase();
++   if(values.has(key))fail(); values.set(key,match[2]);
++  }
++  return values;
++ };
++ const settings=options(config), daemonSettings=options(clamdConfig);
++ for(const values of [settings,daemonSettings]) {
++  if(values.has('include') || (values.has('databasedirectory') && values.get('databasedirectory')!=='/var/lib/clamav'))fail();
++ }
++ if(settings.get('databasemirror')!=='database.clamav.net' || settings.get('notifyclamd')!=='/etc/clamav/clamd.conf' || settings.get('updatelogfile')!=='/var/log/clamav/freshclam.log'
++  || ['privatemirror','databasecustomurl','httpproxyserver'].some(key=>settings.has(key))
++  || ['testdatabases','scriptedupdates','bytecode'].some(key=>settings.has(key) && settings.get(key)!=='yes')
++  || (settings.has('dnsdatabaseinfo') && settings.get('dnsdatabaseinfo')!=='current.cvd.clamav.net')
++  || (settings.has('databaseowner') && settings.get('databaseowner')!=='clamav'))fail();
++ if(!sample || ![sample.now,sample.uptime,sample.hz,sample.clamavUid].every(value=>Number.isFinite(value) && value>0)
++  || sample.processes?.length!==2 || !/^[+-]\d{4}$/.test(sample.zoneOffset || ''))fail();
++ let freshclam;
++ for(const name of ['freshclam','clamd']) {
++  const matches=sample.processes.filter(p=>p.name===name);
++  if(matches.length!==1)fail();
++  const p=matches[0];
++  if(!Number.isSafeInteger(p.pid) || p.pid<=1 || p.uid!==sample.clamavUid || !/^[RSDI]$/.test(p.state)
++   || !Number.isSafeInteger(p.startTicks) || p.startTicks<=0 || p.startTicks/sample.hz>sample.uptime)fail();
++  const allowed=name==='freshclam'?[/^--checks=\d+$/,/^--daemon$/,/^--foreground$/,/^--stdout$/,/^--user=clamav$/]:[/^--foreground$/];
++  if(!Array.isArray(p.args) || path.posix.basename(p.args[0] || '')!==name || p.args.slice(1).some(arg=>!allowed.some(pattern=>pattern.test(arg)))
++   || new Set(p.args.slice(1)).size!==p.args.length-1 || !p.args.includes('--foreground'))fail();
++  if(name==='freshclam') {
++   if(!['--daemon','--stdout','--user=clamav'].every(arg=>p.args.includes(arg)) || p.args.filter(arg=>arg.startsWith('--checks=')).length!==1)fail();
++   freshclam=p;
++  }
++ }
++ const checks=Number(freshclam.args.find(arg=>arg.startsWith('--checks=')).slice(9));
++ if(!Number.isInteger(checks) || checks<12 || checks>24)fail();
++ const intervalSeconds=86400/checks;
++ const started=sample.now-sample.uptime+freshclam.startTicks/sample.hz;
++ let cycle=null;
++ for(const line of logs.split(/\r?\n/)) {
++  if(!line.trim())continue;
++  const match=line.match(/^(\S+)\s+(.*)$/); if(!match)fail();
++  const at=Date.parse(match[1])/1000; if(!Number.isFinite(at))fail();
++  if(/^ClamAV update process started at /.test(match[2]))cycle={at,lines:[]};
++  if(cycle)cycle.lines.push({at,text:match[2]});
++ }
++ if(!cycle || cycle.at<started-2 || cycle.at>sample.now+2 || sample.now-cycle.at>intervalSeconds*2
++  || cycle.lines.some(line=>line.at<cycle.at || line.at>sample.now+2 || updateRefusal(line.text)))fail();
++ const headerTime=Date.parse(cycle.lines[0].text.slice('ClamAV update process started at '.length)+' '+sample.zoneOffset)/1000;
++ if(!Number.isFinite(headerTime) || Math.abs(headerTime-cycle.at)>2)fail();
++ // Correlate stdout with FreshClam's own regular-file log. Scanner file names
++ // must not be able to forge update evidence in the shared container output.
++ let dedicated=null;
++ for(const raw of String(sample.updaterLog || '').split(/\r?\n/)) {
++  const line=raw.replace(/^[A-Z][a-z]{2} [A-Z][a-z]{2}\s+\d+ \d\d:\d\d:\d\d \d{4} -> /,'');
++  if(/^ClamAV update process started at /.test(line))dedicated=[];
++  if(dedicated)dedicated.push(line);
++ }
++ if(!dedicated || dedicated[0]!==cycle.lines[0].text || dedicated.some(updateRefusal))fail();
++ for(const name of ['main','daily','bytecode']) {
++  const successes=cycle.lines.map(line=>line.text.match(new RegExp('(^|\\s)'+name+'[.](cvd|cld) (database is up-to-date|updated) \\(version: (\\d+)[,)]'))).filter(Boolean);
++  if(!successes.length || successes.some(match=>Number(match[4])!==versions[name]) || !dedicated.some(line=>cycle.lines.some(observed=>observed.text===line && new RegExp('^'+name+'[.](cvd|cld) ').test(line))))fail();
++ }
++ return {runtimeVerifier:nativeVerifier,intervalSeconds,lastSuccessfulCycle:new Date(cycle.at*1000).toISOString(),pid:freshclam.pid,startTicks:freshclam.startTicks};
++}
++export async function publishedVersions(resolve=resolveTxt) {
++ const text=(await resolve('current.cvd.clamav.net')).map(parts=>parts.join(''));
++ if(text.length!==1) throw new Error('Ambiguous ClamAV DNS response');
++ const fields=text[0].split(':');
++ // Official record schema: Cisco-Talos cvdupdate default_state DNS field indices.
++ const versions={main:Number(fields[1]),daily:Number(fields[2]),bytecode:Number(fields[7])};
++ if(Object.values(versions).some(value=>!Number.isSafeInteger(value)||value<=0)) throw new Error('Invalid published database versions');
++ return versions;
++}
++export function validateRepairPaths(files) {
++ const allowed=new Set(['backend/Dockerfile','backend/package.json','package.json','docker-compose.prod.yml','docker-compose.local.yml','deploy/scripts/deploy.sh','backend/src/scripts/deployment-checkpoint.ts','backend/src/scripts/deployment-rollback.ts','backend/src/scripts/deployment-control.ts','backend/scripts/clamav-checkpoint.mjs','backend/scripts/clamav-checkpoint.d.mts','backend/scripts/clamav-incident-policy.mjs','scripts/clamav-release-readiness.mjs','scripts/clamav-incident-recovery.mjs','docs/operations/clamav-repair.md']);
++ for(const file of files) if(!allowed.has(file) && !/^deploy\/clamav\/[a-zA-Z0-9_.-]+$/.test(file) && !/^tests\/clamav-repair\/[a-zA-Z0-9_.-]+$/.test(file)) throw new Error('ClamAV maintenance release contains unrelated source or migrations');
++}
++export function validateRepairPackage(previousValue,targetValue,file) {
++ const previous=structuredClone(previousValue), target=structuredClone(targetValue);
++ const commands={
++  'test:clamav-repair':'node --test tests/clamav-repair/health.test.mjs tests/clamav-repair/checkpoint.test.mjs tests/clamav-repair/readiness.test.mjs tests/clamav-repair/controller.test.mjs tests/clamav-repair/incident-recovery.test.mjs',
++  'test:clamav-repair:docker':'node --test tests/clamav-repair/updater-linux.test.mjs',
++  'test:clamav-repair:lifecycle:docker':'node --test tests/clamav-repair/lifecycle-linux.test.mjs',
++  'test:clamav-repair:restore:docker':'node --test tests/clamav-repair/restore-linux.test.mjs',
++ };
++ if(file==='backend/package.json') {
++  const original=previous.scripts?.['test:deployment-control'];
++  const next=target.scripts?.['test:deployment-control'];
++  if(next!==original && (!original || next!==original+' && npm --prefix .. run test:clamav-repair')) throw new Error('Repair must preserve every existing deployment test');
++  if(previous.scripts)delete previous.scripts['test:deployment-control'];
++  if(target.scripts)delete target.scripts['test:deployment-control'];
++ } else if(file==='package.json') {
++  for(const value of [previous,target]) for(const key of Object.keys(value.scripts || {})) if(key.startsWith('test:clamav-repair')) {
++   if(value.scripts[key]!==commands[key]) throw new Error('Unreviewed ClamAV test command');
++   delete value.scripts[key];
++  }
++ }
++ if(JSON.stringify(previous)!==JSON.stringify(target)) throw new Error('Repair changes dependencies or unrelated commands');
++}
++async function verifyRepairScope(base) {
++ const identity=JSON.parse(process.env.DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT || '{}');
++ if(!/^[a-f0-9]{40}$/.test(base || '') || identity.PERFORMANCE_RELEASE_COMMIT!==base) throw new Error('Repair base must match the proven running release identity');
++ const files=(await exec('git',['diff','--name-only',base,'HEAD'])).stdout.trim().split('\n').filter(Boolean);
++ validateRepairPaths(files);
++ for(const file of ['package.json','backend/package.json']) {
++  const previous=JSON.parse((await exec('git',['show',`${base}:${file}`])).stdout);
++  const target=JSON.parse(await fs.readFile(file,'utf8'));
++  validateRepairPackage(previous,target,file);
++ }
++}
++export async function fileDigest(file) { const hash=crypto.createHash('sha256'); for await (const chunk of createReadStream(file)) hash.update(chunk); return hash.digest('hex'); }
++export function validateReceipt(value,image,versions,now=Date.now()) {
++ immutableImage(image);
++ if(value?.image!==image || value.engine!=='1.4.6' || value.updaterHealthy!==true || value.signatureVerified!==true || value.loadVerified!==true || value.eicarRejected!==true
++  || value.loadedDaily!==versions.daily
++  || !Number.isFinite(Date.parse(value.checkedAt)) || now-Date.parse(value.checkedAt)<0 || now-Date.parse(value.checkedAt)>24*3600000
++  || ['main','daily','bytecode'].some(name=>value.versions?.[name]!==versions[name])) throw new Error('ClamAV readiness is missing, stale or does not match the image and published signatures');
++ return value;
++}
++export function validateRollbackProof(value,image,versions,now=Date.now()) {
++ immutableImage(image);
++ const families=['main','daily','bytecode'];
++ const verifier=value?.runtimeVerifier || managedVerifier;
++ // Native rollback has its own strict read-only verifier; target promotion stays managed-only.
++ if(value?.image!==image || !((value.engine==='1.4.6' && verifier===managedVerifier) || (/^1\.4\.(5|6)$/.test(value.engine || '') && verifier===nativeVerifier && value.bankFiles?.['main.cvd']))
++  || !Number.isFinite(Date.parse(value.checkedAt)) || now-Date.parse(value.checkedAt)<0 || now-Date.parse(value.checkedAt)>24*3600000
++  || ['restoreRehearsalPassed','fullReleaseRehearsalPassed','updaterHealthy','scannerClean','eicarRejected'].some(key=>value[key]!==true)
++  || families.some(name=>value.versions?.[name]!==versions[name]) || !/^[a-f0-9]{64}$/.test(value.configArchiveSha256 || '')
++  || Object.keys(value.bankFiles || {}).length!==3
++  || families.some(name=>Object.entries(value.bankFiles || {}).filter(([file,hash])=>new RegExp('^'+name+'[.](cvd|cld)$').test(file) && /^[a-f0-9]{64}$/.test(hash)).length!==1)) throw new Error('A rehearsed current rollback image, bank and configuration are required before maintenance');
++ return value;
++}
++async function inspectBank(container,inspect,run,execute) {
++ if(!inspect.State.Running) throw new Error('Candidate is not running');
++ const image=immutableImage(inspect.Image);
++ const engine=(await run(['exec',container,'freshclam','--version'])).match(/^ClamAV ([0-9.]+)/)?.[1];
++ const versions={};
++ for(const name of ['main','daily','bytecode']) {
++   // FreshClam can replace cvd by cld; require exactly one readable signed database per family.
++   const info=await run(['exec',container,'sh','-ec',`set -- /var/lib/clamav/${name}.c[vl]d; test "$#" -eq 1; test -f "$1"; sigtool --info "$1"`]);
++   if(!/Verification OK/.test(info)) throw new Error('Signature verification failed');
++   versions[name]=Number(info.match(/^Version: (\d+)/m)?.[1]);
++ }
++ const loaded=(await run(['exec',container,'clamdscan','--version'])).match(/^ClamAV ([0-9.]+)\/(\d+)/);
++ if(loaded?.[1]!==engine || Number(loaded?.[2])!==versions.daily) throw new Error('Daemon has not loaded the verified current database');
++ // A real scan checks that the target engine loaded the bank; health checks the successful update cycle.
++ await run(['exec',container,'clamdscan','--no-summary','/etc/hosts']);
++ // Stream the standard fixture, without creating a file in the inspected container.
++ const eicar=String.raw`printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' | clamdscan --stream --no-summary -`;
++ let detected=false;
++ try {await execute('docker',['exec',container,'sh','-ec',eicar],{maxBuffer:4*1024*1024});}
++ catch(error){if(Number(error.code)===1 && /Eicar[^\n]*FOUND/i.test(String(error.stdout)+String(error.stderr)))detected=true;else throw error;}
++ if(!detected)throw new Error('Scanner did not reject the streamed EICAR fixture');
++ return {checkedAt:new Date().toISOString(),image,engine,versions,loadedDaily:Number(loaded[2]),updaterHealthy:true,signatureVerified:true,loadVerified:true,eicarRejected:true};
++}
++export async function inspectCandidate(container,execute=exec,resolve=resolveTxt) {
++ // A caller prepares an inactive candidate under separate authorization. This command only inspects it.
++ const run=async(args)=> (await execute('docker',args,{maxBuffer:4*1024*1024})).stdout.trim();
++ const inspect=JSON.parse(await run(['inspect',container]))[0];
++ if(!inspect.State.Running)throw new Error('Candidate is not running');
++ await run(['exec',container,'/usr/local/bin/sabalan-clamav-health']);
++ const value=await inspectBank(container,inspect,run,execute);
++ return validateReceipt(value,value.image,await publishedVersions(resolve));
++}
++export function parseNativeProbe(text) {
++ const lines=text.trim().split('\n').map(line=>line.split('\t'));
++ const header=lines.shift();
++ if(header?.[0]!=='CLOCK' || header.length!==6)throw new Error('Invalid native process probe');
++ const processes=lines.map(fields=>{
++  if(fields[0]!=='PROCESS' || fields.length!==7)throw new Error('Invalid native process record');
++  const name=fields[1], args=Buffer.from(fields[6],'base64').toString().split('\0').filter(Boolean);
++  // QEMU user-mode may prepend its executable and the guest binary; keep the actual argv.
++  const start=args.findLastIndex(arg=>path.posix.basename(arg)===name);
++  return {name,pid:Number(fields[2]),uid:Number(fields[3]),state:fields[4],startTicks:Number(fields[5]),args:start>=0?args.slice(start):[]};
++ });
++ return {now:Number(header[1]),uptime:Number(header[2]),hz:Number(header[3]),clamavUid:Number(header[4]),zoneOffset:header[5],processes};
++}
++export async function inspectRollback(container,proof,execute=exec,resolve=resolveTxt) {
++ const published=await publishedVersions(resolve);
++ validateRollbackProof(proof,proof.image,published);
++ const run=async(args)=> (await execute('docker',args,{maxBuffer:4*1024*1024})).stdout.trim();
++ const before=JSON.parse(await run(['inspect',container]))[0];
++ if(!before.State.Running || before.Image!==proof.image)throw new Error('Running rollback image differs from its reviewed proof');
++ const verifier=proof.runtimeVerifier || managedVerifier;
++ const probe=await fs.readFile(new URL('../deploy/clamav/inspect-native.sh',import.meta.url),'utf8');
++ const snapshot=async()=>parseNativeProbe(await run(['exec',container,'sh','-ec',probe]));
++ const nativeEvidence=async()=>{
++  const sample=await snapshot();
++  const config=await run(['exec',container,'cat','/etc/clamav/freshclam.conf']);
++  const daemonConfig=await run(['exec',container,'cat','/etc/clamav/clamd.conf']);
++  sample.updaterLog=await run(['exec',container,'sh','-ec','test -f /var/log/clamav/freshclam.log; test ! -L /var/log/clamav/freshclam.log; tail -c 4194304 /var/log/clamav/freshclam.log']);
++  const result=await execute('docker',['logs','--timestamps','--since',new Date((sample.now-14400)*1000).toISOString(),'--tail','20000',container],{maxBuffer:4*1024*1024});
++  const logs=(String(result.stdout)+'\n'+String(result.stderr || '')).split('\n').filter(Boolean).sort((a,b)=>Date.parse(a.split(' ')[0])-Date.parse(b.split(' ')[0])).join('\n');
++  return {sample,evidence:validateNativeUpdater(sample,config,logs,published,daemonConfig)};
++ };
++ let native, first;
++ if(verifier===nativeVerifier) {
++  const result=await nativeEvidence(); first=result.sample; native=result.evidence;
++ } else await run(['exec',container,'/usr/local/bin/sabalan-clamav-health']);
++ const fingerprints=async()=>{
++  const hashes={};
++  for(const file of Object.keys(proof.bankFiles))hashes[file]=(await run(['exec',container,'sha256sum','/var/lib/clamav/'+file])).split(/\s/)[0];
++  const archive=await execute('docker',['cp',`${container}:/etc/clamav/.`,'-'],{encoding:'buffer',maxBuffer:4*1024*1024});
++  if(crypto.createHash('sha256').update(archive.stdout).digest('hex')!==proof.configArchiveSha256 || Object.entries(proof.bankFiles).some(([file,expected])=>hashes[file]!==expected))throw new Error('Rollback bank or effective configuration differs from its reviewed proof');
++  return hashes;
++ };
++ await fingerprints();
++ const value=await inspectBank(container,before,run,execute);
++ if(value.engine!==proof.engine || ['main','daily','bytecode'].some(name=>value.versions[name]!==published[name]))throw new Error('Rollback engine or verified bank is not current');
++ await fingerprints();
++ const after=JSON.parse(await run(['inspect',container]))[0];
++ if(!after.State.Running || after.Id!==before.Id || after.Image!==before.Image || after.State.StartedAt!==before.State.StartedAt)throw new Error('Rollback container restarted during qualification');
++ if(native) {
++  const result=await nativeEvidence(), last=result.sample;
++  const signature=p=>p.processes.map(({name,pid,uid,startTicks,args})=>({name,pid,uid,startTicks,args})).sort((a,b)=>a.pid-b.pid);
++  if(last.processes.some(p=>!/^[RSDI]$/.test(p.state)) || JSON.stringify(signature(first))!==JSON.stringify(signature(last)))throw new Error('Native daemon changed during qualification');
++  native=result.evidence;
++ } else await run(['exec',container,'/usr/local/bin/sabalan-clamav-health']);
++ return {...value,runtimeVerifier:verifier,configAndBankMatched:true,...(native?{nativeUpdater:native}:{})};
++}
++if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
++ const [command,input,image]=process.argv.slice(2);
++ try {
++  if(command==='scope') await verifyRepairScope(input);
++  else if(command==='inspect') process.stdout.write(JSON.stringify(await inspectCandidate(input),null,2)+'\n');
++  else if(command==='inspect-rollback') process.stdout.write(JSON.stringify(await inspectRollback(input,JSON.parse(await fs.readFile(image,'utf8'))),null,2)+'\n');
++  else if(command==='export') {
++   const receipt=await inspectCandidate(input);
++   await fs.mkdir(image,{recursive:true,mode:0o700});
++   const temporary=`/tmp/sabalan-clamav-candidate-${crypto.randomBytes(12).toString('hex')}.tar`;
++   try {
++    await exec('docker',['exec',input,'flock','/var/lib/clamav/.sabalan-updater.lock','tar','-cpf',temporary,'-C','/var/lib/clamav','.']);
++    const bank=path.join(image,'target-bank.tar');
++    await exec('docker',['cp',`${input}:${temporary}`,bank]);
++    const after=await inspectCandidate(input);
++    if(JSON.stringify(receipt.versions)!==JSON.stringify(after.versions)) throw new Error('Bank changed while preparing candidate; review without a forced update');
++    await fs.writeFile(path.join(image,'target.json'),JSON.stringify({...after,bankSha256:await fileDigest(bank)},null,2)+'\n',{mode:0o600,flag:'wx'});
++   } finally {await exec('docker',['exec',input,'rm','-f',temporary]);}
++  }
++  else if(command==='rollback-proof') validateRollbackProof(JSON.parse(await fs.readFile(input,'utf8')),image,await publishedVersions());
++  else if(command==='verify') {
++   const receipt=validateReceipt(JSON.parse(await fs.readFile(input,'utf8')),image,await publishedVersions());
++   if(receipt.bankSha256!==await fileDigest(path.join(path.dirname(input),'target-bank.tar'))) throw new Error('Prepared signature bank checksum mismatch');
++  }
++  else throw new Error('Use inspect/export <inactive-container> [output-directory] or verify <receipt> <immutable-image>');
++ } catch(error){console.error(error.message);process.exitCode=1;}
++}
+diff --git a/tests/clamav-repair/checkpoint.test.mjs b/tests/clamav-repair/checkpoint.test.mjs
+new file mode 100644
+index 00000000..6d7e0225
+--- /dev/null
++++ b/tests/clamav-repair/checkpoint.test.mjs
+@@ -0,0 +1,119 @@
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import test from 'node:test';
++import { captureUnit, verifyUnit, restoreUnit, requireBoundary, immutableImage } from '../../backend/scripts/clamav-checkpoint.mjs';
++
++test('only an owned maintenance lease and the correct journal phase permit bank mutation', () => {
++ const session={deploymentId:'test',leaseToken:'secret',phase:'MUTATION_STARTED'};
++ const active={id:'test',leaseToken:'secret',phase:'MUTATION_STARTED',leaseExpiresAt:new Date(Date.now()+60000)};
++ const maintenance={deploymentId:'test'};
++ assert.doesNotThrow(()=>requireBoundary({session,active,maintenance,id:'test',token:'secret',phase:'MUTATION_STARTED'}));
++ for(const patch of [{token:'other'},{phase:'SERVICES_DRAINED'},{maintenance:null},{active:{...active,leaseExpiresAt:new Date(0)}},{session:{...session,phase:'TRAFFIC_OPENED'}},{active:{...active,leaseExpiresAt:'invalid'}}]) {
++   assert.throws(()=>requireBoundary({session,active,maintenance,id:'test',token:'secret',phase:'MUTATION_STARTED',...patch}));
++ }
++ assert.throws(()=>immutableImage('clamav/clamav:1.4'));
++ assert.equal(immutableImage('sha256:'+'a'.repeat(64)), 'sha256:'+'a'.repeat(64));
++});
++
++test('bank, cooldown, configuration and numeric ownership survive rollback; tamper fails before live changes', async () => {
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'clamav-checkpoint-'));
++ try {
++ const bank=path.join(root,'bank'), unit=path.join(root,'clamav-checkpoint-test');
++ fs.mkdirSync(bank); fs.mkdirSync(unit);
++ fs.writeFileSync(path.join(bank,'daily.cvd'),'signed-fixture');
++ fs.writeFileSync(path.join(bank,'freshclam.dat'),'cooldown');
++ fs.writeFileSync(path.join(bank,'.sabalan-updater-state'),'1 1 0 7201\n',{mode:0o600});
++ fs.writeFileSync(path.join(unit,'config.tar'),'opaque-config-archive');
++ const owner=process.getuid()===0 ? 100 : process.getuid();
++ const group=process.getuid()===0 ? 101 : process.getgid();
++ fs.chownSync(path.join(bank,'daily.cvd'),owner,group);
++ const metadata=await captureUnit({bank,unit,id:'test',image:'sha256:'+'a'.repeat(64)});
++ const manifest={components: Object.entries(metadata.files).map(([file,item])=>({path:`recovery-coordination/clamav-checkpoint-test/${file}`,...item}))};
++ // The manifest also protects unit metadata rather than trusting its own checksums.
++ const {createHash}=await import('node:crypto');
++ const bytes=fs.readFileSync(path.join(unit,'unit.json'));
++ manifest.components.push({path:'recovery-coordination/clamav-checkpoint-test/unit.json',sha256:createHash('sha256').update(bytes).digest('hex'),size:bytes.length});
++ const checkpoint={deploymentId:'test',localVerified:true,remoteVerified:true,manifest,rollbackReleaseSet:{clamav:metadata.image}};
++ await verifyUnit({unit,id:'test',checkpoint});
++ fs.writeFileSync(path.join(bank,'daily.cvd'),'changed'); fs.writeFileSync(path.join(bank,'new.cvd'),'newer');
++ await restoreUnit({bank,unit,id:'test',checkpoint});
++ assert.equal(fs.readFileSync(path.join(bank,'daily.cvd'),'utf8'),'signed-fixture');
++ assert.equal(fs.readFileSync(path.join(bank,'freshclam.dat'),'utf8'),'cooldown');
++ assert.equal(fs.existsSync(path.join(bank,'new.cvd')),false);
++ assert.equal(fs.statSync(path.join(bank,'.sabalan-updater-state')).mode & 0o777,0o600);
++ assert.equal(fs.statSync(path.join(bank,'daily.cvd')).uid,owner);
++ assert.equal(fs.statSync(path.join(bank,'daily.cvd')).gid,group);
++ fs.appendFileSync(path.join(unit,'bank.tar'),'tamper');
++ fs.writeFileSync(path.join(bank,'daily.cvd'),'retain-on-invalid-restore');
++ await assert.rejects(()=>restoreUnit({bank,unit,id:'test',checkpoint}));
++ assert.equal(fs.readFileSync(path.join(bank,'daily.cvd'),'utf8'),'retain-on-invalid-restore');
++ await assert.rejects(()=>verifyUnit({unit,id:'test',checkpoint:{...checkpoint,remoteVerified:false}}));
++ } finally {fs.rmSync(root,{recursive:true,force:true});}
++});
++
++
++test('bank archives containing links are refused before extraction', async()=>{
++ const {execFileSync}=await import('node:child_process');
++ const {validateBankArchive}=await import('../../backend/scripts/clamav-checkpoint.mjs');
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'clamav-archive-'));
++ try {
++  fs.mkdirSync(path.join(root,'bank'));
++  fs.symlinkSync('../outside',path.join(root,'bank','link'));
++  execFileSync('tar',['-cpf',path.join(root,'unsafe.tar'),'-C',path.join(root,'bank'),'.']);
++  await assert.rejects(()=>validateBankArchive(path.join(root,'unsafe.tar')));
++ } finally {fs.rmSync(root,{recursive:true,force:true});}
++});
++
++test('a reviewed rollback proof must match the bank and effective configuration actually drained',async()=>{
++ const {createHash}=await import('node:crypto');
++ const hash=value=>createHash('sha256').update(value).digest('hex');
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'clamav-rollback-proof-'));
++ try {
++  const bank=path.join(root,'bank'), unit=path.join(root,'clamav-checkpoint-proof');
++  fs.mkdirSync(bank);fs.mkdirSync(unit);
++  for(const name of ['main','daily','bytecode'])fs.writeFileSync(path.join(bank,`${name}.cvd`),name);
++  fs.writeFileSync(path.join(unit,'config.tar'),'config');
++  const proof={image:'sha256:'+'a'.repeat(64),configArchiveSha256:hash('config'),bankFiles:Object.fromEntries(['main','daily','bytecode'].map(name=>[`${name}.cvd`,hash(name)]))};
++  fs.writeFileSync(path.join(unit,'rollback-proof.json'),JSON.stringify(proof));
++  fs.writeFileSync(path.join(bank,'daily.cvd'),'changed-since-rehearsal');
++  await assert.rejects(()=>captureUnit({bank,unit,id:'proof',image:proof.image}),/bank changed/);
++  assert.equal(fs.existsSync(path.join(unit,'unit.json')),false,'an unproven snapshot cannot become a verified unit');
++  fs.writeFileSync(path.join(bank,'daily.cvd'),'daily');
++  const captured=await captureUnit({bank,unit,id:'proof',image:proof.image});
++  assert.ok(captured.files['rollback-proof.json']);
++ } finally {fs.rmSync(root,{recursive:true,force:true});}
++});
++
++test('rollback reconstructs a lost coordination unit only from authenticated checkpoint components', async () => {
++ const { recoverUnit } = await import('../../backend/scripts/clamav-checkpoint.mjs');
++ const {execFileSync}=await import('node:child_process');
++ const {createHash}=await import('node:crypto');
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'clamav-recover-'));
++ try {
++  const bank=path.join(root,'bank'), payload=path.join(root,'payload');
++  const unit=path.join(payload,'recovery-coordination','clamav-checkpoint-lost');
++  fs.mkdirSync(bank);fs.mkdirSync(unit,{recursive:true});
++  fs.writeFileSync(path.join(bank,'daily.cvd'),'original');
++  fs.writeFileSync(path.join(unit,'config.tar'),'config');
++  const metadata=await captureUnit({bank,unit,id:'lost',image:'sha256:'+'a'.repeat(64)});
++  const components=fs.readdirSync(unit).map(file=>{const bytes=fs.readFileSync(path.join(unit,file));return {path:`recovery-coordination/clamav-checkpoint-lost/${file}`,size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};});
++  const checkpoint={deploymentId:'lost',localVerified:true,remoteVerified:true,manifest:{components},rollbackReleaseSet:{clamav:metadata.image}};
++  const archive=path.join(root,'payload.tar.gz');
++  execFileSync('tar',['-czf',archive,'-C',payload,'recovery-coordination']);
++  fs.rmSync(payload,{recursive:true});
++  const destination=path.join(root,'recovered');
++  await recoverUnit({unit:destination,id:'lost',checkpoint,readArchive:target=>fs.promises.copyFile(archive,target)});
++  await verifyUnit({unit:destination,id:'lost',checkpoint});
++  fs.writeFileSync(path.join(bank,'daily.cvd'),'mutated');
++  await restoreUnit({bank,unit:destination,id:'lost',checkpoint});
++  assert.equal(fs.readFileSync(path.join(bank,'daily.cvd'),'utf8'),'original');
++  // A missing or tampered encrypted component must not replace even one existing unit file.
++  fs.writeFileSync(path.join(destination,'config.tar'),'retain-on-failure');
++  const invalid={...checkpoint,manifest:{components:components.map(c=>c.path.endsWith('bank.tar')?{...c,sha256:'0'.repeat(64)}:c)}};
++  await assert.rejects(()=>recoverUnit({unit:destination,id:'lost',checkpoint:invalid,readArchive:target=>fs.promises.copyFile(archive,target)}));
++  assert.equal(fs.readFileSync(path.join(destination,'config.tar'),'utf8'),'retain-on-failure');
++  await assert.rejects(()=>recoverUnit({unit:destination,id:'lost',checkpoint:{...checkpoint,remoteVerified:false},readArchive:()=>{throw Error('must not decrypt');}}),/verified/);
++ } finally {fs.rmSync(root,{recursive:true,force:true});}
++});
+diff --git a/tests/clamav-repair/controller-fixture.cjs b/tests/clamav-repair/controller-fixture.cjs
+new file mode 100644
+index 00000000..5fbc2dbe
+--- /dev/null
++++ b/tests/clamav-repair/controller-fixture.cjs
+@@ -0,0 +1,172 @@
++// Test-only CLI adapters. Never delegate Docker, Git, curl or readiness traffic to real hosts.
++const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),cp=require('node:child_process');
++const root=process.env.TEST_RELEASE_ROOT, repository=process.env.TEST_SOURCE_ROOT;
++const [kind,...a]=process.argv.slice(2), log=path.join(root,'commands.jsonl');
++const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
++const read=file=>JSON.parse(fs.readFileSync(path.join(root,file),'utf8'));
++const save=(file,value)=>fs.writeFileSync(path.join(root,file),JSON.stringify(value));
++const record=value=>fs.appendFileSync(log,JSON.stringify(value)+'\n');
++const env=key=>(a.find(value=>value.startsWith(key+'='))||'').slice(key.length+1);
++const phase=()=>fs.existsSync(path.join(root,'reports/active-deployment-session.json'))?read('reports/active-deployment-session.json').phase:'';
++const failure=process.env.TEST_RELEASE_FAILURE;
++const copy=(source,destination)=>fs.cpSync(source,destination,{recursive:true});
++const coordination=path.join(root,'coordination'), bank=path.join(root,'bank');
++function installTsHook(){
++ const ts=require(process.env.TEST_TYPESCRIPT_JS);
++ require.extensions['.ts']=(module,file)=>module._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText,file);
++}
++const serviceImages={backend:'1',frontend:'2',inquiry:'3',nginx:'4',postgres:'5',clamav:'6'};
++const image=service=>'sha256:'+serviceImages[service].repeat(64);
++const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE_RELEASE_SOURCE_HASH:'b'.repeat(64),PERFORMANCE_RELEASE_BACKEND_IMAGE:image('backend'),PERFORMANCE_RELEASE_FRONTEND_IMAGE:image('frontend'),PERFORMANCE_RELEASE_INQUIRY_IMAGE:image('inquiry'),PERFORMANCE_RELEASE_SCHEMA_HASH:'b'.repeat(64),PERFORMANCE_RELEASE_POLICY_HASH:'b'.repeat(64),PERFORMANCE_RELEASE_INFRASTRUCTURE_HASH:'b'.repeat(64),PERFORMANCE_RUNTIME_INFRASTRUCTURE_HASH:'b'.repeat(64)};
++(async()=>{
++ record({kind,args:a,phase:phase()});
++ if(kind==='git'){
++  if(a[0]==='rev-parse')console.log('c'.repeat(40));
++  else if(!['diff','fetch','checkout','pull','submodule'].includes(a[0]))throw Error('Unexpected Git operation');
++  return;
++ }
++ if(kind==='node'){
++  if(a[0]?.endsWith('/clamav-incident-recovery.mjs')){
++   const {validateIncidentSnapshot}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-incident-policy.mjs')));
++   const evidence=JSON.parse(fs.readFileSync(a[3]));validateIncidentSnapshot(evidence,image('clamav'));
++   for(const [file,digest]of Object.entries(evidence.bankFiles))if(hash(fs.readFileSync(path.join(bank,file)))!==digest)throw Error('Original incident bank changed');
++   if(read('runtime.json').clamav!==evidence.image)throw Error('Original incident image changed');
++   console.log('{}');return;
++  }
++  if(a[0]?.endsWith('/clamav-release-readiness.mjs')){
++   const [script,command,input,expected]=a;
++   const policy=await import(require('node:url').pathToFileURL(path.join(repository,'scripts/clamav-release-readiness.mjs')));
++   const versions={main:63,daily:28157,bytecode:339};
++   if(command==='rollback-proof')policy.validateRollbackProof(JSON.parse(fs.readFileSync(input)),expected,versions);
++   else if(command==='scope')policy.validateRepairPaths(['deploy/clamav/inspect-native.sh']);
++   else if(command==='verify'){
++    const receipt=policy.validateReceipt(JSON.parse(fs.readFileSync(input)),expected,versions);
++    if(receipt.bankSha256!==hash(fs.readFileSync(path.join(path.dirname(input),'target-bank.tar'))))throw Error('Target binding mismatch');
++   } else if(command==='inspect-rollback'){
++    const proof=JSON.parse(fs.readFileSync(expected));policy.validateRollbackProof(proof,proof.image,versions);
++    if(failure==='qualification' || (failure==='rollback-qualifier' && phase()==='ROLLBACK_STARTED'))process.exit(41);
++    for(const [file,digest] of Object.entries(proof.bankFiles))if(hash(fs.readFileSync(path.join(bank,file)))!==digest)throw Error('Rollback bank mismatch');
++    if(read('runtime.json').clamav!==proof.image)throw Error('Wrong rollback image');
++   } else if(command==='inspect'){
++    const receipt=read('candidate/target.json');policy.validateReceipt(receipt,read('runtime.json').clamav,versions);
++   } else throw Error('Unexpected readiness command');
++   console.log('{}');return;
++  }
++  if(a[0]==='--input-type=module' && a.some(value=>value.includes('performanceSourceHash'))){console.log('b'.repeat(64));return;}
++  const result=cp.spawnSync(process.execPath,a,{stdio:'inherit',env:process.env});process.exit(result.status??1);
++ }
++ if(kind!=='docker')throw Error('Only known test adapters are permitted');
++ if(a[0]==='info'){console.log(root);return;}
++ if(a[0]==='image' && a[1]==='inspect'){
++  if(a.includes('{{.Size}}'))console.log('1000000');
++  else {const name=a.at(-1); console.log(name.startsWith('sha256:')?name:name.startsWith('fixture/backend:')?'sha256:'+'8'.repeat(64):name.startsWith('fixture/frontend:')?'sha256:'+'9'.repeat(64):name.startsWith('fixture/inquiry:')?'sha256:'+'a'.repeat(64):image('nginx'));}return;
++ }
++ if(a[0]==='builder')return;
++ if(a[0]==='inspect'){
++  if(a.includes('--format')){
++   const format=a[a.indexOf('--format')+1],service=a.at(-1);
++   console.log(format==='{{.Image}}'?image(service):format==='{{.State.Running}}'?'false':'10.0.0.2');
++  } else console.log(JSON.stringify([{Id:'backend',Image:image('backend'),Config:{Env:Object.entries(rollbackEnvironment).map(([k,v])=>k+'='+v)},State:{Running:true}}]));
++  return;
++ }
++ if(a[0]==='cp'){
++  const [source,destination]=a.slice(1).filter(value=>value!=='-a');
++  if(source==='clamav:/etc/clamav/.' && destination==='-'){process.stdout.write('effective-config-fixture');return;}
++  if(source.startsWith('backend:/app/recovery-coordination/')){copy(path.join(coordination,source.split('/app/recovery-coordination/')[1]),destination);return;}
++  if(destination==='backend:/app/recovery-coordination/'){copy(source,path.join(coordination,path.basename(source)));return;}
++  if(source==='-'){
++   if(!read('runtime.json').bankRestored)throw Error('Configuration must follow bank restore');
++   fs.writeFileSync(path.join(root,'restored-config.tar'),fs.readFileSync(0));return;
++  }
++  throw Error('Unexpected copy');
++ }
++ if(a[0]!=='compose')throw Error('Unexpected Docker command');
++ if(a.includes('ps')){console.log(a.at(-1));return;}
++ if(a.includes('config')){console.log('services: {}');return;}
++ if(a.includes('build')||a.includes('create')||a.includes('stop')||a.includes('start'))return;
++ if(a.includes('up')){
++  if(a.includes('clamav')){const state=read('runtime.json');state.clamav=process.env.DEPLOYMENT_CLAMAV_IMAGE;save('runtime.json',state);}return;
++ }
++ if(a.includes('dist/scripts/deployment-control.js')){
++  const command=a[a.indexOf('dist/scripts/deployment-control.js')+1],session='reports/active-deployment-session.json';
++  if(command==='prepare')save(session,{deploymentId:env('DEPLOYMENT_ID'),leaseToken:'fixture-lease',phase:'PREFLIGHT',rollbackPerformanceEnvironment:rollbackEnvironment,clamavOperation:env('DEPLOYMENT_CLAMAV_OPERATION'),clamavIncidentSnapshotSha256:env('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256')});
++  else if(command==='maintenance-on')save('maintenance.json',{deploymentId:env('DEPLOYMENT_ID')});
++  else if(command==='maintenance-off'){
++   if(failure==='after-open' && phase()==='TRAFFIC_OPENED')process.exit(46);
++   fs.rmSync(path.join(root,'maintenance.json'),{force:true});
++  } else if(command==='acquire'||command==='transition'||command==='local-transition'){
++   const s=read(session);s.phase=command==='acquire'?'LEASE_ACQUIRED':env('DEPLOYMENT_PHASE');save(session,s);
++   save('active.json',{id:s.deploymentId,leaseToken:s.leaseToken,phase:s.phase,leaseExpiresAt:new Date(Date.now()+1200000).toISOString()});
++  } else if(command==='finish'||command==='cancel-preflight'){
++   save('finished.json',{result:env('DEPLOYMENT_RESULT'),phase:env('DEPLOYMENT_PHASE')});fs.rmSync(path.join(root,session),{force:true});
++  } else if(command!=='heartbeat')throw Error('Unexpected control command');
++  return;
++ }
++ if(a.includes('dist/scripts/deployment-performance-identity.js')){
++  save('reports/performance-database-'+env('DEPLOYMENT_ID')+'.json',{schemaHash:'b'.repeat(64),policyHash:'b'.repeat(64)});return;
++ }
++ const id=env('DEPLOYMENT_ID'),unit=path.join(coordination,'clamav-checkpoint-'+id);
++ if(a.includes('scripts/clamav-checkpoint.mjs')){
++  const {requireBoundary,captureUnit,restoreUnit,verifyUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
++  const command=a[a.indexOf('scripts/clamav-checkpoint.mjs')+1];
++  requireBoundary({session:read('reports/active-deployment-session.json'),active:read('active.json'),maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:command==='capture'?'SERVICES_DRAINED':'MUTATION_STARTED'});
++  if(command==='capture'){
++   const incident=env('DEPLOYMENT_CLAMAV_OPERATION')==='incident-recovery';
++   if(incident){const {requireIncidentSession}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-incident-policy.mjs')));requireIncidentSession(read('reports/active-deployment-session.json'),'incident-recovery',env('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256'));}
++   if(hash(fs.readFileSync(path.join(unit,incident?'incident-snapshot.json':'rollback-proof.json')))!==env(incident?'DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256':'DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_SHA256'))throw Error('Original evidence changed');
++   await captureUnit({bank,unit,id,image:image('clamav')});
++  }
++  else {
++   const checkpoint=read('checkpoint.json');await verifyUnit({unit,id,checkpoint});
++   const receipt=JSON.parse(fs.readFileSync(path.join(unit,'target.json')));
++   if(receipt.image!==env('DEPLOYMENT_CLAMAV_TARGET_IMAGE')||receipt.bankSha256!==hash(fs.readFileSync(path.join(unit,'target-bank.tar'))))throw Error('Activation binding mismatch');
++   await restoreUnit({bank,unit,id,checkpoint,archive:'target-bank.tar',beforeMutation:async()=>{
++    if(failure==='install-interrupted')throw Error('Injected interrupted installation');
++    const active=read('active.json');if(failure==='lease-expired')active.leaseExpiresAt=new Date(0).toISOString();
++    requireBoundary({session:read('reports/active-deployment-session.json'),active,maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:'MUTATION_STARTED'});
++   }});
++  }
++  return;
++ }
++ if(a.includes('dist/scripts/deployment-checkpoint.js')){
++  installTsHook();const {encryptRecoveryArchive,decryptRecoveryArchive}=require(path.join(repository,'backend/src/services/recoveryCrypto.ts'));
++  const payload=path.join(root,'payload');fs.mkdirSync(path.join(payload,'recovery-coordination'),{recursive:true});
++  copy(unit,path.join(payload,'recovery-coordination',path.basename(unit)));
++  const components=fs.readdirSync(unit).map(file=>{const bytes=fs.readFileSync(path.join(unit,file));return {path:'recovery-coordination/'+path.basename(unit)+'/'+file,size:bytes.length,sha256:hash(bytes)};});
++  cp.execFileSync('tar',['-czf',path.join(root,'payload.tar.gz'),'-C',payload,'.']);
++  const key=crypto.randomBytes(32).toString('hex');fs.writeFileSync(path.join(root,'fixture-key'),key,{mode:0o600});
++  await encryptRecoveryArchive(path.join(root,'payload.tar.gz'),path.join(root,'checkpoint.sabrec'),key);
++  copy(path.join(root,'checkpoint.sabrec'),path.join(root,'remote/checkpoint.sabrec'));
++  if(failure==='remote-tamper')fs.appendFileSync(path.join(root,'remote/checkpoint.sabrec'),'tamper');
++  if(hash(fs.readFileSync(path.join(root,'checkpoint.sabrec')))!==hash(fs.readFileSync(path.join(root,'remote/checkpoint.sabrec'))))process.exit(43);
++  await decryptRecoveryArchive(path.join(root,'remote/checkpoint.sabrec'),path.join(root,'verified-payload.tar.gz'),key);
++  const checkpoint={deploymentId:id,localVerified:true,remoteVerified:true,manifest:{components},rollbackReleaseSet:{clamav:image('clamav')}};
++  const {verifyUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
++  await verifyUnit({unit,id,checkpoint});save('checkpoint.json',checkpoint);return;
++ }
++ if(a.includes('db:migrate:deploy')){if(['post-mutation','rollback-qualifier'].includes(failure))process.exit(44);return;}
++ if(a.includes('dist/scripts/deployment-rollback.js')){
++  installTsHook();const {decryptRecoveryArchive}=require(path.join(repository,'backend/src/services/recoveryCrypto.ts'));
++  const {requireBoundary,recoverUnit,restoreUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
++  requireBoundary({session:read('reports/active-deployment-session.json'),active:read('active.json'),maintenance:read('maintenance.json'),id,token:env('DEPLOYMENT_LEASE_TOKEN'),phase:'ROLLBACK_STARTED'});
++  // Exercise loss of the extra copy, actual authenticated reconstruction and bank restore.
++  fs.rmSync(unit,{recursive:true});
++  await recoverUnit({unit,id,checkpoint:read('checkpoint.json'),readArchive:destination=>decryptRecoveryArchive(path.join(root,'checkpoint.sabrec'),destination,fs.readFileSync(path.join(root,'fixture-key'),'utf8'))});
++  await restoreUnit({bank,unit,id,checkpoint:read('checkpoint.json')});
++  const state=read('runtime.json');state.bankRestored=true;save('runtime.json',state);return;
++ }
++ if(a.includes('exec')){
++  const text=a.at(-1);
++  if(text.includes('pg_sleep(21600)')){fs.writeFileSync(path.join(root,'advisory.pid'),String(process.pid));setInterval(()=>{},1000);return;}
++  if(text.includes('pg_locks'))console.log('1');
++  else if(text.includes('pg_stat_activity WHERE client_addr'))console.log('0');
++  else if(text.includes('round(100.0'))console.log('20');
++  else if(text.includes('pg_database_size'))console.log('1000000');
++  else if(text.includes('df -Pk'))console.log('6000000');
++  else if(!text.includes('pg_terminate_backend')&&!text.includes('HR_HIRING_ANTIVIRUS_COMMAND'))throw Error('Unexpected exec');
++  return;
++ }
++ const allowed=['validate-production-environment','deployment-drill-preflight','deployment-notify','deployment-gates','deployment-finalize-recovery','dry-run-contract-product-graph-migration','audit-hr-onboarding-task-retirement','migrate-all-contract-product-graphs','reconcile-contract-financial-evidence'];
++ if(allowed.some(script=>a.includes('dist/scripts/'+script+'.js')))return;
++ throw Error('Unexpected fixture CLI operation: '+JSON.stringify(a));
++})().catch(error=>{console.error(error.message);process.exitCode=90;});
+diff --git a/tests/clamav-repair/controller.test.mjs b/tests/clamav-repair/controller.test.mjs
+new file mode 100644
+index 00000000..d703c028
+--- /dev/null
++++ b/tests/clamav-repair/controller.test.mjs
+@@ -0,0 +1,89 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8');
++test('protected release captures the stopped bank before checkpoint, applies target after journaled mutation, and verifies before reopening',()=>{
++ const steps=['phase SERVICES_DRAINED\ncapture_clamav_checkpoint','run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js','phase REMOTE_CHECKPOINT_VERIFIED','phase MUTATION_STARTED','node scripts/clamav-checkpoint.mjs activate','phase RELEASE_STARTED','verify_clamav_repair_runtime\nremaining_mutation_seconds','phase TRAFFIC_OPENED'];
++ let previous=-1;
++ for(const step of steps) {const index=source.indexOf(step);assert.ok(index>previous,`missing or out of order: ${step}`);previous=index;}
++ assert.doesNotMatch(source,/compose up -d postgres clamav/,'pre-checkpoint must not replace AV');
++ assert.match(source,/if \[ "\$\{DEPLOYMENT_CLAMAV_REPAIR\}" = true \] && \[ "\$\{MUTATION_STARTED\}" -eq 0 \]; then[\s\S]*compose start clamav[\s\S]*--no-deps/);
++ assert.match(source,/deployment-rollback.js[\s\S]*switch_to_previous_images\n    restore_clamav_configuration[\s\S]*verify_clamav_repair_runtime[\s\S]*DEPLOYMENT_GATE_MODE=ROLLBACK/);
++ assert.match(source,/PUBLIC_TRAFFIC_OPEN.*[\s\S]*rollback is forbidden because new writes may exist/);
++ assert.match(source,/DEPLOYMENT_MODE.*release.*[\s\S]*ClamAV repair requires the complete protected release path/);
++});
++
++// Execute the real controller against fail-closed CLI adapters. All files, leases,
++// image state and backup transport are private fixtures; no real deployment occurs.
++for(const scenario of ['qualification','remote-tamper','post-mutation','rollback-qualifier','after-open','success','incident-success','incident-remote-tamper','incident-post-mutation','incident-after-open','incident-stale-target','incident-updater-refusal','incident-install-interrupted','incident-lease-expired']) test(`complete controller fixture: ${scenario}`,{timeout:120000},async()=>{
++ const incident=scenario.startsWith('incident-'), failure=scenario.replace(/^incident-/,'');
++ const os=await import('node:os'),path=await import('node:path'),crypto=await import('node:crypto');
++ const {spawnSync,execFileSync}=await import('node:child_process');const {createRequire}=await import('node:module');
++ const repository=new URL('../../',import.meta.url).pathname;
++ const require=createRequire(import.meta.url),root=fs.mkdtempSync(path.join(os.tmpdir(),'sabalan-clamav-controller-'));
++ const fixture=new URL('./controller-fixture.cjs',import.meta.url).pathname;
++ const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
++ const quote=text=>"'"+text.replaceAll("'","'\\''")+"'";
++ let typescript;
++ try{typescript=require.resolve('typescript',{paths:[path.join(repository,'backend')]});}catch{typescript=path.resolve(repository,'../typescript.js');}
++ assert.ok(fs.existsSync(typescript),'the isolated QA harness must provide TypeScript for the real recovery crypto');
++ try {
++  for(const dir of ['.git','bin','secrets','remote','reports','coordination','bank','candidate','candidate-bank','scripts','backend/scripts','deploy/nginx'])fs.mkdirSync(path.join(root,dir),{recursive:true});
++  fs.writeFileSync(path.join(root,'deploy/nginx/maintenance.html'),'test-only maintenance');
++  fs.writeFileSync(path.join(root,'secrets/local-rollback-key'),'fixture-only-'.repeat(4));
++  fs.writeFileSync(path.join(root,'secrets/remote-recovery-public.pem'),'-----BEGIN PUBLIC KEY-----');
++  fs.copyFileSync(path.join(repository,'scripts/performance-deployment-environment.mjs'),path.join(root,'scripts/performance-deployment-environment.mjs'));
++  fs.copyFileSync(path.join(repository,'scripts/clamav-release-readiness.mjs'),path.join(root,'scripts/clamav-release-readiness.mjs'));
++  fs.copyFileSync(path.join(repository,'backend/scripts/clamav-checkpoint.mjs'),path.join(root,'backend/scripts/clamav-checkpoint.mjs'));
++  fs.copyFileSync(path.join(repository,'backend/scripts/clamav-incident-policy.mjs'),path.join(root,'backend/scripts/clamav-incident-policy.mjs'));
++  const originals={};
++  for(const name of ['main','daily','bytecode']){
++   fs.writeFileSync(path.join(root,'bank',name+'.cvd'),'original-'+name);
++   fs.writeFileSync(path.join(root,'candidate-bank',name+'.cvd'),'target-'+name);
++   originals[name+'.cvd']=hash(Buffer.from('original-'+name));
++  }
++  fs.writeFileSync(path.join(root,'bank/freshclam.dat'),'native-cooldown-fixture');
++  execFileSync('tar',['-cpf',path.join(root,'candidate/target-bank.tar'),'-C',path.join(root,'candidate-bank'),'.']);
++  const oldImage='sha256:'+'6'.repeat(64),targetImage='sha256:'+'f'.repeat(64),versions={main:63,daily:28157,bytecode:339};
++  const proof={image:oldImage,engine:'1.4.5',runtimeVerifier:'native-1.4-daemon-v1',checkedAt:new Date().toISOString(),versions,restoreRehearsalPassed:true,fullReleaseRehearsalPassed:true,updaterHealthy:true,scannerClean:true,eicarRejected:true,configArchiveSha256:hash(Buffer.from('effective-config-fixture')),bankFiles:originals};
++  fs.writeFileSync(path.join(root,'proof.json'),JSON.stringify(proof));
++  if(incident)fs.writeFileSync(path.join(root,'incident.json'),JSON.stringify({kind:'DEGRADED_CLAMAV_INCIDENT_V1',image:oldImage,engine:'1.4.5',checkedAt:new Date().toISOString(),versions:{...versions,daily:28138},bankFiles:originals,configArchiveSha256:proof.configArchiveSha256,issues:['UPDATER_NOT_LIVE','SIGNATURES_STALE'],reopenOriginal:false}));
++  const target={image:targetImage,engine:'1.4.6',checkedAt:new Date().toISOString(),versions,loadedDaily:versions.daily,updaterHealthy:true,signatureVerified:true,loadVerified:true,eicarRejected:true,bankSha256:hash(fs.readFileSync(path.join(root,'candidate/target-bank.tar')))};
++  fs.writeFileSync(path.join(root,'candidate/target.json'),JSON.stringify(target));
++  if(failure==='stale-target')fs.writeFileSync(path.join(root,'candidate/target.json'),JSON.stringify({...target,versions:{...versions,daily:28138}}));
++  if(failure==='updater-refusal')fs.writeFileSync(path.join(root,'candidate/target.json'),JSON.stringify({...target,updaterHealthy:false}));
++  fs.writeFileSync(path.join(root,'runtime.json'),JSON.stringify({clamav:oldImage,bankRestored:false}));
++  const environment=path.join(root,'.env.prod');
++  fs.writeFileSync(environment,`DEPLOYMENT_SECRET_DIR=${root}/secrets\nDEPLOYMENT_REMOTE_MOUNT_HOST=${root}/remote\nDEPLOYMENT_REPORT_DIR_HOST=${root}/reports\nDEPLOYMENT_OWNER=fixture\nDEPLOYMENT_BACKEND_IMAGE_REPOSITORY=fixture/backend\nDEPLOYMENT_FRONTEND_IMAGE_REPOSITORY=fixture/frontend\nDEPLOYMENT_INQUIRY_IMAGE_REPOSITORY=fixture/inquiry\nDOMAIN=fixture.invalid\nINQUIRY_DOMAIN=inquiry.fixture.invalid\n`);
++  for(const kind of ['git','docker','node'])fs.writeFileSync(path.join(root,'bin',kind),`#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} ${kind} "$@"\n`,{mode:0o755});
++  const shims={flock:'exit 0',curl:'printf 503',df:"printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 900000000 1 899999999 1%% /\\n'",sleep:'exec /bin/sleep 0.02',timeout:'shift; exec "$@"'};
++  for(const [name,body]of Object.entries(shims))fs.writeFileSync(path.join(root,'bin',name),'#!/bin/sh\n'+body+'\n',{mode:0o755});
++  const result=spawnSync('/bin/sh',[path.join(repository,'deploy/scripts/deploy.sh'),environment],{cwd:root,encoding:'utf8',timeout:110000,env:{...process.env,PATH:path.join(root,'bin')+':'+process.env.PATH,TEST_RELEASE_ROOT:root,TEST_SOURCE_ROOT:repository,TEST_RELEASE_FAILURE:failure,TEST_TYPESCRIPT_JS:typescript,DEPLOYMENT_REPO_ROOT:root,DEPLOYMENT_MODE:'release',DEPLOYMENT_CLAMAV_OPERATION:incident?'incident-recovery':'repair',DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE:incident?path.join(root,'incident.json'):'',DEPLOYMENT_CLAMAV_TARGET_IMAGE:targetImage,DEPLOYMENT_CLAMAV_BASE_COMMIT:'a'.repeat(40),DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:incident?'':path.join(root,'proof.json'),DEPLOYMENT_CLAMAV_READY_FILE:path.join(root,'candidate/target.json')}});
++  const expected={qualification:41,'remote-tamper':43,'post-mutation':44,'rollback-qualifier':44,'after-open':46,success:0,'stale-target':90,'updater-refusal':90,'install-interrupted':90,'lease-expired':90}[failure];
++  assert.equal(result.status,expected,`${result.stdout}\n${result.stderr}`);
++  const commands=fs.readFileSync(path.join(root,'commands.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line));
++  const includes=text=>commands.filter(c=>c.args.includes(text));
++  const controls=verb=>commands.filter(c=>c.args.includes('dist/scripts/deployment-control.js')&&c.args.at(-1)===verb);
++  const activation=commands.findIndex(c=>c.args.includes('scripts/clamav-checkpoint.mjs')&&c.args.at(-1)==='activate');
++  const remotePhase=commands.findIndex(c=>c.args.includes('DEPLOYMENT_PHASE=REMOTE_CHECKPOINT_VERIFIED'));
++  if(['post-mutation','rollback-qualifier','after-open','success','install-interrupted','lease-expired'].includes(failure))assert.ok(activation>remotePhase&&remotePhase>=0,'activation requires both verified checkpoints');
++  else assert.equal(activation,-1,'failed qualification or checkpoint must never activate');
++  assert.equal(includes('dist/scripts/deployment-rollback.js').length,['post-mutation','rollback-qualifier','install-interrupted','lease-expired'].includes(failure)?1:0,'never replay rollback or restore old data after public writes');
++  if(['qualification','stale-target','updater-refusal'].includes(failure))assert.equal(controls('maintenance-on').length,0);
++  else if(failure==='rollback-qualifier'||failure==='after-open'||(incident&&['remote-tamper','post-mutation','install-interrupted','lease-expired'].includes(failure))){
++   assert.ok(fs.existsSync(path.join(root,'maintenance.json')),'failed rollback verification or post-open failure retains maintenance');
++   assert.equal(controls('maintenance-off').length,failure==='after-open'?1:0);
++  } else assert.equal(fs.existsSync(path.join(root,'maintenance.json')),false);
++  const targetRemains=['success','after-open'].includes(failure);
++  for(const name of ['main','daily','bytecode'])assert.equal(fs.readFileSync(path.join(root,'bank',name+'.cvd'),'utf8'),(targetRemains?'target-':'original-')+name);
++  if(['post-mutation','rollback-qualifier','install-interrupted','lease-expired'].includes(failure)){
++   assert.equal(fs.readFileSync(path.join(root,'bank/freshclam.dat'),'utf8'),'native-cooldown-fixture');
++   assert.equal(fs.readFileSync(path.join(root,'restored-config.tar'),'utf8'),'effective-config-fixture');
++   if(!incident)assert.ok(commands.some(c=>c.kind==='node'&&c.args[1]==='inspect-rollback'&&c.phase==='ROLLBACK_STARTED'));
++   if(incident)assert.equal(commands.filter(c=>c.kind==='node'&&c.args[1]==='inspect-rollback').length,0,'degraded evidence must not be passed to the healthy verifier');
++  }
++ } finally {
++  const pid=path.join(root,'advisory.pid');if(fs.existsSync(pid)){try{process.kill(Number(fs.readFileSync(pid,'utf8')));}catch(error){if(error.code!=='ESRCH')throw error;}}
++  fs.rmSync(root,{recursive:true,force:true});
++ }
++});
+diff --git a/tests/clamav-repair/health.test.mjs b/tests/clamav-repair/health.test.mjs
+new file mode 100644
+index 00000000..3e80ef46
+--- /dev/null
++++ b/tests/clamav-repair/health.test.mjs
+@@ -0,0 +1,33 @@
++import assert from 'node:assert/strict';
++import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import { spawn, spawnSync } from 'node:child_process';
++import test from 'node:test';
++const command = new URL('../../deploy/clamav/health.sh',import.meta.url).pathname;
++test('scanner availability alone cannot hide a stopped updater or a failed update', async () => {
++  const root = mkdtempSync(path.join(os.tmpdir(), 'sabalan-clamav-health-'));
++  const child = spawn('sleep', ['30']);
++  try {
++    mkdirSync(path.join(root, 'bin')); mkdirSync(path.join(root, 'run')); mkdirSync(path.join(root, 'db'));
++    writeFileSync(path.join(root, 'bin/clamdscan'), '#!/bin/sh\nprintf "PONG\\n"\n', { mode: 0o755 });
++    writeFileSync(path.join(root, 'run/clamd.pid'), String(child.pid));
++    const env = { ...process.env, PATH: path.join(root, 'bin') + ':' + process.env.PATH,
++      CLAMAV_RUN_DIRECTORY: path.join(root, 'run'), CLAMAV_DATABASE_DIRECTORY: path.join(root, 'db') };
++    const check = () => spawnSync('sh', [command], { env, encoding: 'utf8' });
++    assert.equal(check().status, 1, 'missing updater must fail despite PONG');
++    writeFileSync(path.join(root, 'run/updater.pid'), String(child.pid));
++    const now = Math.floor(Date.now() / 1000);
++    writeFileSync(path.join(root, 'db/.sabalan-updater-state'), `${now} ${now} 0 ${now + 7200}\n`);
++    assert.equal(check().status, 1, 'an exit code of zero without update evidence must fail');
++    writeFileSync(path.join(root, 'db/.sabalan-freshclam-result'), ['main','daily','bytecode'].map(name=>`${name}.cvd database is up-to-date (version: 1)`).join('\n'));
++    assert.equal(check().status, 0, 'a live updater with a recent successful cycle must pass');
++    const successes=['main','daily','bytecode'].map(name=>`${name}.cvd database is up-to-date (version: 1)`).join('\n');
++    writeFileSync(path.join(root, 'db/.sabalan-freshclam-result'), 'WARNING: Cool-down expired, ok to try again.\n'+successes);
++    assert.equal(check().status, 0, 'a real complete success after naturally expired cooldown is not an active refusal');
++    writeFileSync(path.join(root, 'db/.sabalan-freshclam-result'), 'WARNING: Cool-down expired, ok to try again.\nWARNING: You are still on cool-down until after: tomorrow\n'+successes);
++    assert.equal(check().status, 1, 'expiry text must never mask a subsequent refusal');
++    writeFileSync(path.join(root, 'db/.sabalan-updater-state'), `${now} ${now - 7200} 17 ${now + 7200}\n`);
++    assert.equal(check().status, 1, 'a CDN refusal must not reuse an older successful result');
++  } finally { child.kill(); rmSync(root, { recursive: true, force: true }); }
++});
+diff --git a/tests/clamav-repair/incident-recovery.test.mjs b/tests/clamav-repair/incident-recovery.test.mjs
+new file mode 100644
+index 00000000..e80a4923
+--- /dev/null
++++ b/tests/clamav-repair/incident-recovery.test.mjs
+@@ -0,0 +1,37 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs/promises';
++import {validateIncidentSnapshot, requireIncidentSession} from '../../backend/scripts/clamav-incident-policy.mjs';
++import {validateRollbackProof, validateRepairPaths} from '../../scripts/clamav-release-readiness.mjs';
++
++const image='sha256:'+'a'.repeat(64);
++const evidence=()=>({kind:'DEGRADED_CLAMAV_INCIDENT_V1',image,engine:'1.4.5',checkedAt:new Date().toISOString(),
++ versions:{main:63,daily:28138,bytecode:339},bankFiles:Object.fromEntries(['main','daily','bytecode'].map(name=>[name+'.cvd','b'.repeat(64)])),
++ configArchiveSha256:'c'.repeat(64),issues:['UPDATER_NOT_LIVE','SIGNATURES_STALE'],reopenOriginal:false});
++
++test('degraded evidence is explicit, fresh and cannot masquerade as a healthy rollback proof',()=>{
++ const original=evidence(); assert.equal(validateIncidentSnapshot(original,image),original);
++ assert.throws(()=>validateRollbackProof(original,image,{main:63,daily:28159,bytecode:339}));
++ for(const patch of [{kind:'repair'},{image:'mutable:latest'},{issues:[]},{issues:['IGNORE_HEALTH']},{reopenOriginal:true},
++  {checkedAt:'2000-01-01'},{checkedAt:new Date(Date.now()+10000).toISOString()},{bankFiles:{}},{configArchiveSha256:''},
++  {updaterHealthy:true},{updaterHealthy:false},{restoreRehearsalPassed:true},{fullReleaseRehearsalPassed:true}]) {
++  assert.throws(()=>validateIncidentSnapshot({...original,...patch},image));
++ }
++});
++
++test('incident operation and snapshot cannot be switched after its lease-owning session is prepared',()=>{
++ const digest='d'.repeat(64),session={clamavOperation:'incident-recovery',clamavIncidentSnapshotSha256:digest};
++ assert.doesNotThrow(()=>requireIncidentSession(session,'incident-recovery',digest));
++ for(const [s,op,sha] of [[{},'incident-recovery',digest],[session,'repair',digest],[session,'incident-recovery','e'.repeat(64)],
++  [{...session,clamavOperation:'repair'},'incident-recovery',digest]])assert.throws(()=>requireIncidentSession(s,op,sha));
++});
++
++test('incident scope stays maintenance-only and the fixed mirror preserves publisher verification and independent freshness',async()=>{
++ assert.doesNotThrow(()=>validateRepairPaths(['scripts/clamav-incident-recovery.mjs','backend/scripts/clamav-incident-policy.mjs','backend/src/scripts/deployment-control.ts']));
++ for(const file of ['backend/prisma/schema.prisma','backend/prisma/migrations/new/migration.sql','backend/src/routes/accounting.ts','frontend/src/app/page.tsx'])assert.throws(()=>validateRepairPaths([file]));
++ const config=await fs.readFile(new URL('../../deploy/clamav/freshclam.conf',import.meta.url),'utf8');
++ assert.match(config,/^DatabaseMirror https:\/\/mirrors\.fe\.up\.pt\/pub\/clamav$/m);
++ assert.match(config,/^DNSDatabaseInfo current\.cvd\.clamav\.net$/m);
++ assert.match(config,/^TestDatabases yes$/m);
++ assert.doesNotMatch(config,/^(?:PrivateMirror|DatabaseCustomURL|HTTPProxyServer) /m);
++});
+diff --git a/tests/clamav-repair/lifecycle-linux.test.mjs b/tests/clamav-repair/lifecycle-linux.test.mjs
+new file mode 100644
+index 00000000..25784680
+--- /dev/null
++++ b/tests/clamav-repair/lifecycle-linux.test.mjs
+@@ -0,0 +1,38 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {execFileSync} from 'node:child_process';
++const cwd=new URL('../../',import.meta.url).pathname;
++const docker=(...args)=>execFileSync('docker',args,{cwd,encoding:'utf8',timeout:70000}).trim();
++const compose=(...args)=>docker('compose','-f','docker-compose.local.yml',...args);
++const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
++const id='sabalanerp-local-clamav-1';
++const readState=()=>docker('exec',id,'cat','/var/lib/clamav/.sabalan-updater-state');
++const inspect=()=>JSON.parse(docker('inspect',id))[0];
++test('updater death restarts the existing container without another request; unavailable scanner is never CLEAN',{timeout:180000},async()=>{
++ assert.ok(compose('ps','clamav').includes(id));
++ const before=readState(), next=Number(before.split(/\s+/)[3]);
++ assert.ok(next>Date.now()/1000+180,'run this fault test away from the next naturally scheduled update');
++ const cooldown=docker('exec',id,'sha256sum','/var/lib/clamav/freshclam.dat');
++ const restarts=inspect().RestartCount;
++ const uid=docker('exec',id,'sh','-ec','p="$(cat /run/sabalan-clamav/updater.pid)"; awk \'/^Uid:/{print $2}\' "/proc/$p/status"');
++ assert.equal(uid,'100','updater must run without root privileges');
++ docker('exec',id,'sh','-ec','kill -TERM "$(cat /run/sabalan-clamav/updater.pid)"');
++ let restarted=false;
++ for(let i=0;i<55;i++){ await sleep(1000);if(inspect().RestartCount>restarts){restarted=true;break;} }
++ assert.equal(restarted,true,'supervisor must terminate instead of leaving a green tail process');
++ await sleep(1500);
++ assert.equal(readState(),before,'restart must retain the reserved next request slot');
++ assert.equal(docker('exec',id,'sha256sum','/var/lib/clamav/freshclam.dat'),cooldown);
++ compose('stop','-t','30','clamav');
++ try {
++  const result=compose('exec','-T','backend','node','-e',`const {scanHiringFile}=require('./dist/services/hrHiringFileStorage');(async()=>{try{await scanHiringFile('/etc/hosts');throw Error('UNSCANNED_ACCEPTED');}catch(e){if(e.message==='UNSCANNED_ACCEPTED')throw e;console.log('SCANNER_UNAVAILABLE_REJECTED');}})().catch(e=>{console.error(e.message);process.exitCode=1;});`);
++  assert.match(result,/SCANNER_UNAVAILABLE_REJECTED/);
++ } finally {compose('start','clamav');}
++ let scanner=false;
++ for(let i=0;i<75;i++) {
++  try {docker('exec',id,'clamdscan','--ping=1');scanner=true;break;}catch{await sleep(1000);}
++ }
++ assert.equal(scanner,true,'scanner must recover after the fault test');
++ assert.equal(readState(),before);
++ assert.equal(docker('exec',id,'sha256sum','/var/lib/clamav/freshclam.dat'),cooldown);
++});
+diff --git a/tests/clamav-repair/readiness.test.mjs b/tests/clamav-repair/readiness.test.mjs
+new file mode 100644
+index 00000000..e7edf680
+--- /dev/null
++++ b/tests/clamav-repair/readiness.test.mjs
+@@ -0,0 +1,117 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {publishedVersions,validateReceipt} from '../../scripts/clamav-release-readiness.mjs';
++test('a bundled bank, old evidence or a mismatched target cannot authorize maintenance',async()=>{
++ const versions=await publishedVersions(async()=>[['1.4.6:62:100:1:1:1:99999:339']]);
++ assert.deepEqual(versions,{main:62,daily:100,bytecode:339});
++ const image='sha256:'+'a'.repeat(64);
++ const good={image,checkedAt:new Date().toISOString(),engine:'1.4.6',versions,loadedDaily:100,updaterHealthy:true,signatureVerified:true,loadVerified:true,eicarRejected:true};
++ assert.equal(validateReceipt(good,image,versions),good);
++ for(const patch of [{versions:{...versions,daily:99}},{updaterHealthy:false},{eicarRejected:false},{signatureVerified:false},{signatureVerified:'yes'},{loadVerified:'yes'},{loadedDaily:99},{checkedAt:'2000-01-01'},{image:'sha256:'+'b'.repeat(64)}]) assert.throws(()=>validateReceipt({...good,...patch},image,versions));
++});
++
++test('a maintenance-only repair refuses personnel code and schema changes',async()=>{
++ const {validateRepairPaths}=await import('../../scripts/clamav-release-readiness.mjs');
++ assert.doesNotThrow(()=>validateRepairPaths(['deploy/clamav/health.sh','backend/src/scripts/deployment-checkpoint.ts']));
++ for(const file of ['backend/prisma/migrations/new/migration.sql','backend/src/routes/security.ts','frontend/src/app/page.tsx']) assert.throws(()=>validateRepairPaths([file]));
++});
++
++test('real official eight-field DNS record reads bytecode from its documented field',async()=>{
++ // Cisco-Talos cvdupdate default_state: main=1, daily=2, bytecode=7.
++ const actual=await publishedVersions(async()=>[['1.4.6:63:28157:1792389600:1:90:49192:339']]);
++ assert.deepEqual(actual,{main:63,daily:28157,bytecode:339});
++});
++
++test('maintenance cannot begin without a rehearsed current rollback pair',async()=>{
++ const {validateRollbackProof}=await import('../../scripts/clamav-release-readiness.mjs');
++ const versions={main:63,daily:28157,bytecode:339}, image='sha256:'+'a'.repeat(64);
++ const value={image,engine:'1.4.6',checkedAt:new Date().toISOString(),versions,restoreRehearsalPassed:true,fullReleaseRehearsalPassed:true,updaterHealthy:true,scannerClean:true,eicarRejected:true,configArchiveSha256:'b'.repeat(64),bankFiles:{'main.cvd':'c'.repeat(64),'daily.cvd':'d'.repeat(64),'bytecode.cvd':'e'.repeat(64)}};
++ assert.doesNotThrow(()=>validateRollbackProof(value,image,versions));
++ for(const patch of [{engine:'1.4.5'},{restoreRehearsalPassed:false},{fullReleaseRehearsalPassed:false},{versions:{...versions,daily:28150}},{image:'latest'},{bankFiles:{}}])assert.throws(()=>validateRollbackProof({...value,...patch},image,versions));
++});
++
++test('maintenance package changes cannot replace deployment gates or hide arbitrary test commands',async()=>{
++ const {validateRepairPackage}=await import('../../scripts/clamav-release-readiness.mjs');
++ const previous={scripts:{'test:deployment-control':'existing required gates',build:'tsc'},dependencies:{stable:'1'}};
++ const target=structuredClone(previous);
++ target.scripts['test:deployment-control']+=' && npm --prefix .. run test:clamav-repair';
++ assert.doesNotThrow(()=>validateRepairPackage(previous,target,'backend/package.json'));
++ target.scripts['test:deployment-control']='echo tests skipped';
++ assert.throws(()=>validateRepairPackage(previous,target,'backend/package.json'),/preserve/);
++ assert.throws(()=>validateRepairPackage({scripts:{}},{scripts:{'test:clamav-repair:hidden':'echo skipped'}},'package.json'),/Unreviewed/);
++ assert.throws(()=>validateRepairPackage(previous,{...previous,dependencies:{stable:'2'}},'backend/package.json'),/dependencies/);
++});
++
++test('a native legacy rollback requires a live unprivileged daemon and its own recent complete update cycle',async()=>{
++ const {validateNativeUpdater}=await import('../../scripts/clamav-release-readiness.mjs');
++ const now=Date.now(),versions={main:63,daily:28157,bytecode:339};
++ const process=(name,pid)=>({name,pid,state:'S',uid:100,startTicks:9990000,args:name==='freshclam'?['freshclam','--checks=12','--daemon','--foreground','--stdout','--user=clamav']:['clamd','--foreground']});
++ const sample={now:now/1000,uptime:100000,hz:100,clamavUid:100,zoneOffset:'+0000',processes:[process('freshclam',12),process('clamd',13)]};
++ const config='UpdateLogFile /var/log/clamav/freshclam.log\nDatabaseMirror database.clamav.net\nNotifyClamd /etc/clamav/clamd.conf\nDatabaseOwner clamav\n';
++ const stamp=(seconds,text)=>new Date(now-seconds*1000).toISOString()+' '+text;
++ const logs=[stamp(90,'ClamAV update process started at '+new Date(now-90000).toUTCString().replace(' GMT','')),...Object.entries(versions).map(([name,version],i)=>stamp(89-i,`${name}.cvd database is up-to-date (version: ${version}, sigs: 100)`))].join('\n');
++ sample.updaterLog=logs.split('\n').map(line=>line.slice(line.indexOf(' ')+1)).join('\n');
++ assert.equal(validateNativeUpdater(sample,config,logs,versions).intervalSeconds,7200);
++ for(const patch of [{processes:[]},{processes:[{...process('freshclam',12),state:'Z'},process('clamd',13)]},{processes:[{...process('freshclam',12),uid:0},process('clamd',13)]},{processes:[process('freshclam',12),process('freshclam',14),process('clamd',13)]},{processes:[{...process('freshclam',12),startTicks:9999500},process('clamd',13)]}])assert.throws(()=>validateNativeUpdater({...sample,...patch},config,logs,versions));
++ for(const extra of ['TestDatabases no','PrivateMirror untrusted.test','DatabaseDirectory /other','DatabaseMirror untrusted.test','NotifyClamd /other','Include /other.conf'])assert.throws(()=>validateNativeUpdater(sample,config+extra+'\n',logs,versions));
++ for(const extra of [stamp(1,'ERROR: download failed'),stamp(1,'WARNING: cooldown'),stamp(1,'ClamAV update process started at now')])assert.throws(()=>validateNativeUpdater(sample,config,logs+'\n'+extra,versions));
++ assert.throws(()=>validateNativeUpdater(sample,config,logs.replace('version: 28157','version: 28150'),versions));
++ assert.throws(()=>validateNativeUpdater({...sample,updaterLog:'forged stdout has no dedicated evidence'},config,logs,versions));
++ assert.throws(()=>validateNativeUpdater(sample,config,logs.split('\n').filter(line=>!line.includes('main.cvd')).join('\n'),versions));
++});
++
++function nativeFixture() {
++ const now=Date.now(),versions={main:63,daily:28157,bytecode:339},image='sha256:'+'a'.repeat(64), configArchive=Buffer.from('effective-config-fixture');
++ const config='UpdateLogFile /var/log/clamav/freshclam.log\nDatabaseMirror database.clamav.net\nNotifyClamd /etc/clamav/clamd.conf\nDatabaseOwner clamav\n';
++ const args=['freshclam','--checks=12','--daemon','--foreground','--stdout','--user=clamav'];
++ const encode=a=>Buffer.from(a.join('\0')+'\0').toString('base64');
++ const probe=`CLOCK\t${now/1000}\t100000\t100\t100\t+0000\nPROCESS\tfreshclam\t12\t100\tS\t9990000\t${encode(args)}\nPROCESS\tclamd\t13\t100\tS\t9990000\t${encode(['clamd','--foreground'])}\n`;
++ const logs=[`${new Date(now-90000).toISOString()} ClamAV update process started at ${new Date(now-90000).toUTCString().replace(' GMT','')}`,...Object.entries(versions).map(([name,version],i)=>`${new Date(now-(89-i)*1000).toISOString()} ${name}.cvd database is up-to-date (version: ${version}, sigs: 100)`) ].join('\n');
++ // Synthetic qualification evidence only; never saved as a deployable rehearsal proof.
++ const proof={image,engine:'1.4.5',runtimeVerifier:'native-1.4-daemon-v1',checkedAt:new Date(now).toISOString(),versions,restoreRehearsalPassed:true,fullReleaseRehearsalPassed:true,updaterHealthy:true,scannerClean:true,eicarRejected:true,configArchiveSha256:null,bankFiles:{'main.cvd':'b'.repeat(64),'daily.cvd':'c'.repeat(64),'bytecode.cvd':'d'.repeat(64)}};
++ const calls=[], mode={};let inspections=0,logReads=0;
++ const execute=async(command,a)=>{
++  assert.equal(command,'docker');calls.push(a);
++  const result=stdout=>({stdout,stderr:''});
++  if(a[0]==='inspect'){inspections++;return result(JSON.stringify([{Id:'fixture-container',Image:mode.image || image,State:{Running:true,StartedAt:mode.restart && inspections>1?'changed':'stable'}}]));}
++  if(a[0]==='cp'){assert.equal(a.at(-1),'-');return result(mode.configChanged?Buffer.from('changed'):configArchive);}
++  if(a[0]==='logs'){logReads++;return result(mode.lateFailure&&logReads>1?logs+'\n'+new Date().toISOString()+' ERROR: updater failed after first probe':mode.log || logs);}
++  assert.equal(a[0],'exec');
++  const program=a[2];
++  if(program==='/usr/local/bin/sabalan-clamav-health')return result('');
++  if(program==='cat')return result(a.at(-1).endsWith('freshclam.conf')?config:'DatabaseDirectory /var/lib/clamav\n');
++  if(program==='sha256sum')return result((mode.bankChanged?'0'.repeat(64):proof.bankFiles[a.at(-1).split('/').at(-1)])+'  bank');
++  if(program==='freshclam'){assert.deepEqual(a.slice(2),['freshclam','--version']);return result('ClamAV 1.4.5/28157/date');}
++  if(program==='clamdscan')return result(a.includes('--version')?'ClamAV 1.4.5/28157/date':'/etc/hosts: OK');
++  assert.equal(program,'sh');
++  if(a.at(-1).includes('getconf CLK_TCK'))return result(mode.probe || probe);
++  if(a.at(-1).includes('tail -c 4194304'))return result(mode.dedicated || logs.split('\n').map(line=>line.slice(line.indexOf(' ')+1)).join('\n'));
++  if(a.at(-1).includes('sigtool --info')){const name=a.at(-1).match(/clamav\/(main|daily|bytecode)/)[1];return result(`Version: ${versions[name]}\nVerification OK`);}
++  if(a.at(-1).includes('EICAR-STANDARD')){if(mode.eicarClean)return result('stdin: OK');throw Object.assign(new Error('Expected detection'),{code:1,stdout:'stdin: Eicar-Test-Signature FOUND',stderr:''});}
++  throw Error('Unexpected inspector operation: '+JSON.stringify(a));
++ };
++ return {proof,execute,mode,calls,probe,logs,configArchive,resolve:async()=>[['1.4.6:63:28157:1792389600:1:90:49192:339']]};
++}
++
++test('the actual rollback inspection path admits a verified native daemon without admitting it as the new target',async()=>{
++ const {inspectRollback,inspectCandidate}=await import('../../scripts/clamav-release-readiness.mjs');
++ const {createHash}=await import('node:crypto');
++ const f=nativeFixture();f.proof.configArchiveSha256=createHash('sha256').update(f.configArchive).digest('hex');
++ const value=await inspectRollback('fixture',f.proof,f.execute,f.resolve);
++ assert.equal(value.runtimeVerifier,'native-1.4-daemon-v1');assert.equal(value.eicarRejected,true);assert.equal(value.configAndBankMatched,true);
++ assert.equal(f.calls.some(a=>a.includes('/usr/local/bin/sabalan-clamav-health')),false,'native path must prove its real updater rather than assume the managed helper exists');
++ assert.equal(f.calls.some(a=>a.includes('freshclam')&&!a.includes('--version')),false,'inspection must never invoke an update');
++ await assert.rejects(()=>inspectCandidate('fixture',f.execute,f.resolve),/readiness/,'legacy qualification must not permit target promotion');
++});
++
++test('rollback inspection refuses dead workers, cooldown, altered bindings, scanner false-clean and mid-check restarts',async()=>{
++ const {inspectRollback}=await import('../../scripts/clamav-release-readiness.mjs');const {createHash}=await import('node:crypto');
++ for(const kind of ['zombie','cooldown','configChanged','bankChanged','eicarClean','restart','image','lateFailure']) {
++  const f=nativeFixture();f.proof.configArchiveSha256=createHash('sha256').update(f.configArchive).digest('hex');
++  if(kind==='zombie')f.mode.probe=f.probe.replace('\tS\t9990000','\tZ\t9990000');
++  else if(kind==='cooldown')f.mode.log=f.logs+'\n'+new Date().toISOString()+' WARNING: cooldown';
++  else if(kind==='image')f.mode.image='sha256:'+'e'.repeat(64);
++  else f.mode[kind]=true;
++  await assert.rejects(()=>inspectRollback('fixture',f.proof,f.execute,f.resolve),kind);
++ }
++});
+diff --git a/tests/clamav-repair/restore-linux.test.mjs b/tests/clamav-repair/restore-linux.test.mjs
+new file mode 100644
+index 00000000..78e4680c
+--- /dev/null
++++ b/tests/clamav-repair/restore-linux.test.mjs
+@@ -0,0 +1,88 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import {execFileSync} from 'node:child_process';
++const cwd=new URL('../../',import.meta.url).pathname;
++const docker=(...args)=>execFileSync('docker',args,{cwd,encoding:'utf8',timeout:180000,maxBuffer:4*1024*1024}).trim();
++const av='sabalanerp-local-clamav-1', backend='sabalanerp-local-backend-1';
++
++test('a real encrypted bank can reconstruct lost coordination files and scan after isolated restore',{timeout:360000},async()=>{
++ assert.match(docker('compose','-f','docker-compose.local.yml','ps'),/sabalanerp-local-clamav-1/);
++ docker('exec',av,'clamdscan','--ping=1');
++ const host=fs.mkdtempSync(path.join(os.tmpdir(),'sabalan-bank-rehearsal-'));
++ const job='/tmp/sabalan-bank-rehearsal-'+path.basename(host);
++ const state=()=>docker('exec',av,'sh','-ec','sha256sum /var/lib/clamav/freshclam.dat /var/lib/clamav/.sabalan-updater-state');
++ const before=state();
++ try {
++  docker('exec',av,'mkdir','-m','700',job);
++  docker('exec',backend,'mkdir','-m','700',job);
++  docker('exec',av,'flock','/var/lib/clamav/.sabalan-updater.lock','tar','-cpf',job+'/bank.tar','-C','/var/lib/clamav','.');
++  docker('cp',av+':'+job+'/bank.tar',host+'/bank.tar');
++  docker('cp',host+'/bank.tar',backend+':'+job+'/bank.tar');
++  docker('cp',path.join(cwd,'backend/scripts/clamav-checkpoint.mjs'),backend+':'+job+'/checkpoint.mjs');
++  const runner=String.raw`
++   const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),assert=require('node:assert/strict');
++   const {execFileSync}=require('node:child_process');
++   const {encryptRecoveryArchive,decryptRecoveryArchive}=require('/app/dist/services/recoveryCrypto');
++   (async()=>{
++    const job=process.argv[1], {captureUnit,recoverUnit,restoreUnit}=await import(job+'/checkpoint.mjs');
++    const bank=job+'/bank', payload=job+'/payload',unit=payload+'/recovery-coordination/clamav-checkpoint-local';
++    fs.mkdirSync(bank);fs.mkdirSync(unit,{recursive:true});
++    execFileSync('tar',['-xpf',job+'/bank.tar','-C',bank]);
++    fs.writeFileSync(unit+'/config.tar','isolated configuration fixture; no live configuration restored');
++    const metadata=await captureUnit({bank,unit,id:'local',image:'sha256:'+'a'.repeat(64)});
++    const components=fs.readdirSync(unit).map(file=>{const value=fs.readFileSync(unit+'/'+file);return {path:'recovery-coordination/clamav-checkpoint-local/'+file,sha256:crypto.createHash('sha256').update(value).digest('hex'),size:value.length};});
++    const checkpoint={deploymentId:'local',localVerified:true,remoteVerified:true,rollbackReleaseSet:{clamav:metadata.image},manifest:{components}};
++    execFileSync('tar',['-czf',job+'/payload.tar.gz','-C',payload,'.']);
++    const secret=crypto.randomBytes(32).toString('hex');
++    await encryptRecoveryArchive(job+'/payload.tar.gz',job+'/checkpoint.sabrec',secret);
++    fs.rmSync(payload,{recursive:true});fs.rmSync(job+'/payload.tar.gz');
++    fs.rmSync(bank,{recursive:true});fs.mkdirSync(bank);
++    await recoverUnit({unit:job+'/reconstructed',id:'local',checkpoint,readArchive:destination=>decryptRecoveryArchive(job+'/checkpoint.sabrec',destination,secret)});
++    await restoreUnit({bank,unit:job+'/reconstructed',id:'local',checkpoint});
++    // The complete real bank is compared, including native cooldown and scheduler state.
++    const original=job+'/original';fs.mkdirSync(original);execFileSync('tar',['-xpf',job+'/bank.tar','-C',original]);
++    const fingerprint=root=>fs.readdirSync(root).sort().map(file=>{const p=root+'/'+file,s=fs.statSync(p);return [file,s.mode&511,s.uid,s.gid,s.isFile()?crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'):'directory'];});
++    assert.deepEqual(fingerprint(bank),fingerprint(original));
++    execFileSync('tar',['-cpf',job+'/restored.tar','-C',bank,'.']);
++    console.log(JSON.stringify({encryptedRoundTrip:true,lostCoordinationRecovered:true,realBankOwnershipAndContentsPreserved:true,fullReleaseRehearsal:false,remoteStoreExercised:false}));
++   })().catch(error=>{console.error(error);process.exitCode=1;});`;
++  const result=docker('exec',backend,'node','-e',runner,job);
++  assert.equal(JSON.parse(result).realBankOwnershipAndContentsPreserved,true);
++  docker('cp',backend+':'+job+'/restored.tar',host+'/restored.tar');
++  docker('cp',host+'/restored.tar',av+':'+job+'/restored.tar');
++  docker('exec',av,'sh','-ec',`mkdir '${job}/bank'; tar -xpf '${job}/restored.tar' -C '${job}/bank'`);
++  // No FreshClam call, schedule reset, or live-bank replacement. One offline load
++  // exercises restored signatures alongside the actual running scanner.
++  const scan=docker('exec',av,'sh','-ec',`
++   printf '%s' 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > '${job}/eicar';
++   cat /sys/fs/cgroup/memory.events > '${job}/events-before';
++   base=$(cat /sys/fs/cgroup/memory.current); peak=$base; anon_peak=0;
++   (set +e; clamscan --database='${job}/bank' --no-summary /etc/hosts '${job}/eicar' > '${job}/scan.log' 2>&1; echo $? > '${job}/scan.exit') & scan_pid=$!;
++   while kill -0 "$scan_pid" 2>/dev/null; do current=$(cat /sys/fs/cgroup/memory.current); [ "$current" -le "$peak" ] || peak=$current; anon=$(awk '$1 == "anon" {print $2}' /sys/fs/cgroup/memory.stat); [ "$anon" -le "$anon_peak" ] || anon_peak=$anon; sleep .1; done;
++   wait "$scan_pid";
++   test "$(cat '${job}/scan.exit')" = 1;
++   grep -q '/etc/hosts: OK' '${job}/scan.log'; grep -q 'Eicar.*FOUND' '${job}/scan.log';
++   echo "BASE_BYTES=$base PEAK_BYTES=$peak ANON_PEAK_BYTES=$anon_peak LIMIT_BYTES=$(cat /sys/fs/cgroup/memory.max)";
++   echo MEMORY_EVENTS_BEFORE; cat '${job}/events-before'; echo MEMORY_EVENTS_AFTER; cat /sys/fs/cgroup/memory.events;
++   cat '${job}/scan.log';
++   # The kernel may reclaim file cache at memory.max without an allocation failure.
++   # Fail on OOM/kill changes; report max/reclaim pressure without calling it headroom proof.
++   awk '$1 ~ /^oom/ {print}' '${job}/events-before' > '${job}/oom-before';
++   awk '$1 ~ /^oom/ {print}' /sys/fs/cgroup/memory.events > '${job}/oom-after';
++   cmp '${job}/oom-before' '${job}/oom-after';
++   clamdscan --ping=1 >/dev/null;
++  `);
++  assert.match(scan,/Eicar.*FOUND/);
++  const memory=scan.match(/ANON_PEAK_BYTES=(\d+) LIMIT_BYTES=(\d+)/);
++  assert.ok(memory,'the real load must report measured memory evidence');
++  assert.ok(Number(memory[1])<=Number(memory[2])*0.8,'the tested bank needs at least 20% anonymous-memory reserve; increase local capacity and retest, never disable database tests');
++  assert.equal(state(),before,'native cooldown and updater schedule must remain unchanged');
++  console.log(result);console.log(scan);
++ } finally {
++  for(const container of [av,backend]){try{docker('exec',container,'rm','-rf',job);}catch(error){console.error('QA cleanup failed for '+container);throw error;}}
++  fs.rmSync(host,{recursive:true,force:true});
++ }
++});
+diff --git a/tests/clamav-repair/updater-linux.test.mjs b/tests/clamav-repair/updater-linux.test.mjs
+new file mode 100644
+index 00000000..42a9b5d7
+--- /dev/null
++++ b/tests/clamav-repair/updater-linux.test.mjs
+@@ -0,0 +1,149 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { spawnSync } from 'node:child_process';
++import fs from 'node:fs';
++import { fileURLToPath } from 'node:url';
++const repositoryRoot=fileURLToPath(new URL('../../',import.meta.url));
++const source=fs.readFileSync(new URL('../../deploy/clamav/update-once.sh',import.meta.url),'utf8');
++test('real flock, cooldown-as-zero, persisted retry slots, process death and concurrent writers (existing local Compose)',()=>{
++ const inventory=spawnSync('docker',['compose','-f','docker-compose.local.yml','ps','--format','json','clamav'],{encoding:'utf8',cwd:repositoryRoot});
++ assert.equal(inventory.status,0,inventory.stderr);
++ assert.ok(inventory.stdout.includes('sabalanerp-local-clamav-1'),'requires the existing local project');
++ const script=`set -eu
++root="$(mktemp -d /tmp/sabalan-updater-test.XXXXXX)"
++trap 'rm -rf "$root"' EXIT
++mkdir "$root/bin" "$root/db"
++cat > "$root/update.sh" <<'UPDATE_SOURCE'
++${source}
++UPDATE_SOURCE
++cat > "$root/bin/date" <<'DATE_SOURCE'
++#!/bin/sh
++cat "$TEST_ROOT/now"
++DATE_SOURCE
++cat > "$root/bin/freshclam" <<'FRESH_SOURCE'
++#!/bin/sh
++echo attempt >> "$TEST_ROOT/attempts"
++if [ -f "$TEST_ROOT/block" ]; then
++  echo "$PPID" > "$TEST_ROOT/writer-parent"
++  while [ -f "$TEST_ROOT/block" ]; do sleep 0.05; done
++fi
++case "$(cat "$TEST_ROOT/result")" in
++ cooldown) echo 'WARNING: You are still on cool-down until after: tomorrow'; exit 0;;
++ denied) echo 'ERROR: HTTP 403'; exit 17;;
++ network) echo 'ERROR: DNS unavailable'; exit 52;;
++ *) echo 'WARNING: Cool-down expired, ok to try again.'; for name in main daily bytecode; do echo "$name.cvd database is up-to-date (version: 1)"; done;;
++esac
++FRESH_SOURCE
++chmod +x "$root/bin/"*
++export TEST_ROOT="$root" CLAMAV_DATABASE_DIRECTORY="$root/db" PATH="$root/bin:$PATH"
++echo 100000 > "$root/now"
++echo cooldown > "$root/result"
++status=0; sh "$root/update.sh" >/dev/null 2>&1 || status=$?
++[ "$status" = 17 ]
++[ "$(cat "$root/db/.sabalan-updater-state")" = '100000 0 17 107200' ]
++# Recreation cannot erase cooldown or schedule another request.
++sh "$root/update.sh"
++[ "$(wc -l < "$root/attempts")" -eq 1 ]
++echo 107200 > "$root/now"; echo success > "$root/result"
++sh "$root/update.sh" >/dev/null
++[ "$(cat "$root/db/.sabalan-updater-state")" = '107200 107200 0 114400' ]
++# A held writer prevents a second updater even at a due time.
++echo 114400 > "$root/now"; touch "$root/block"
++sh "$root/update.sh" >/dev/null 2>&1 & writer=$!
++for i in 1 2 3 4 5 6 7 8 9 10; do [ ! -f "$root/writer-parent" ] || break; sleep 0.1; done
++[ -f "$root/writer-parent" ]
++status=0; sh "$root/update.sh" >/dev/null 2>&1 || status=$?
++[ "$status" = 75 ]
++# Kill during the request: the reserved slot survives and blocks restart storms.
++kill -KILL "$writer"; wait "$writer" 2>/dev/null || true
++rm "$root/block"
++sleep 0.2
++[ "$(cat "$root/db/.sabalan-updater-state")" = '114400 107200 1 121600' ]
++sh "$root/update.sh"
++[ "$(wc -l < "$root/attempts")" -eq 3 ]
++echo 121600 > "$root/now"; echo denied > "$root/result"
++status=0; sh "$root/update.sh" >/dev/null 2>&1 || status=$?
++[ "$status" = 17 ]
++echo 128800 > "$root/now"; echo network > "$root/result"
++status=0; sh "$root/update.sh" >/dev/null 2>&1 || status=$?
++[ "$status" = 52 ]
++echo UPDATER_LINUX_OK
++`;
++ const result=spawnSync('docker',['exec','-i','sabalanerp-local-clamav-1','sh','-s'],{input:script,encoding:'utf8',timeout:20000});
++ assert.equal(result.status,0,JSON.stringify({stdout:result.stdout,stderr:result.stderr,error:result.error?.message}));
++ assert.match(result.stdout,/UPDATER_LINUX_OK/);
++});
++
++test('startup retains native cooldown bytes and makes them writable by the managed updater; symlinks fail closed',()=>{
++ const inventory=spawnSync('docker',['compose','-f','docker-compose.local.yml','ps','--format','json','clamav'],{encoding:'utf8',cwd:repositoryRoot});
++ assert.equal(inventory.status,0,inventory.stderr);
++ assert.match(inventory.stdout,/sabalanerp-local-clamav-1/);
++ const entrypoint=fs.readFileSync(new URL('../../deploy/clamav/entrypoint.sh',import.meta.url),'utf8');
++ // Only redirect the log directory; scanner/updater commands are isolated fixtures.
++ const script=`set -eu
++root="$(mktemp -d /tmp/sabalan-cooldown-owner.XXXXXX)"
++supervisor=''
++cleanup() {
++  if [ -n "$supervisor" ]; then kill -TERM "$supervisor" 2>/dev/null || true; wait "$supervisor" 2>/dev/null || true; fi
++  rm -rf "$root"
++}
++trap cleanup EXIT
++mkdir "$root/bin" "$root/db" "$root/log"
++chmod 755 "$root"
++cat > "$root/entrypoint.sh" <<'ENTRYPOINT_SOURCE'
++${entrypoint.replaceAll('/var/log/clamav','"$TEST_ROOT/log"')}
++ENTRYPOINT_SOURCE
++cat > "$root/bin/clamd" <<'SCANNER'
++#!/bin/sh
++exec sleep 60
++SCANNER
++cat > "$root/bin/clamdscan" <<'PING'
++#!/bin/sh
++exit 0
++PING
++cat > "$root/bin/su" <<'WORKER'
++#!/bin/sh
++exec /bin/su -s /bin/sh clamav -c 'test -w "$CLAMAV_DATABASE_DIRECTORY/freshclam.dat" && printf ready > "$CLAMAV_DATABASE_DIRECTORY/.ownership-probe" && exec sleep 60'
++WORKER
++chmod 755 "$root/bin/"*
++export TEST_ROOT="$root" CLAMAV_DATABASE_DIRECTORY="$root/db" CLAMAV_RUN_DIRECTORY="$root/run" PATH="$root/bin:$PATH"
++printf 'retained native cooldown bytes' > "$root/db/freshclam.dat"
++chmod 600 "$root/db/freshclam.dat"
++chown 0:0 "$root/db/freshclam.dat"
++before="$(sha256sum "$root/db/freshclam.dat")"
++sh "$root/entrypoint.sh" > "$root/startup.log" 2>&1 & supervisor=$!
++for i in $(seq 1 60); do [ ! -f "$root/db/.ownership-probe" ] || break; sleep 0.1; done
++if [ ! -f "$root/db/.ownership-probe" ]; then cat "$root/startup.log"; exit 1; fi
++[ "$(stat -c %u "$root/db/freshclam.dat")" = "$(id -u clamav)" ]
++[ "$(stat -c %a "$root/db/freshclam.dat")" = 600 ]
++[ "$(sha256sum "$root/db/freshclam.dat")" = "$before" ]
++kill -TERM "$supervisor"; wait "$supervisor" || true; supervisor=''
++mv "$root/db/freshclam.dat" "$root/outside-cooldown"
++ln -s "$root/outside-cooldown" "$root/db/freshclam.dat"
++status=0; sh "$root/entrypoint.sh" > "$root/refusal.log" 2>&1 || status=$?
++[ "$status" -ne 0 ]
++grep -q 'Unsafe updater state symlink' "$root/refusal.log"
++echo COOLDOWN_OWNERSHIP_OK
++`;
++ const result=spawnSync('docker',['exec','-i','sabalanerp-local-clamav-1','sh','-s'],{input:script,encoding:'utf8',timeout:20000,cwd:repositoryRoot});
++ assert.equal(result.status,0,JSON.stringify({stdout:result.stdout,stderr:result.stderr,error:result.error?.message}));
++ assert.match(result.stdout,/COOLDOWN_OWNERSHIP_OK/);
++});
++
++test('real process evidence and streamed EICAR inspection create no scanner fixture files',async()=>{
++ const {parseNativeProbe,validateNativeUpdater}=await import('../../scripts/clamav-release-readiness.mjs');
++ const inventory=spawnSync('docker',['compose','-f','docker-compose.local.yml','ps','clamav'],{encoding:'utf8'});
++ assert.equal(inventory.status,0,inventory.stderr);assert.match(inventory.stdout,/sabalanerp-local-clamav-1/);
++ const native=fs.readFileSync(new URL('../../deploy/clamav/inspect-native.sh',import.meta.url),'utf8');
++ const sample=spawnSync('docker',['exec','-i','sabalanerp-local-clamav-1','sh','-s'],{input:native,encoding:'utf8',timeout:10000});
++ assert.equal(sample.status,0,sample.stderr);
++ const value=parseNativeProbe(sample.stdout);
++ assert.ok(value.processes.some(p=>p.name==='clamd'&&p.uid===value.clamavUid&&p.state!=='Z'));
++ // The local managed scheduler is not a native daemon; this must never fake native readiness.
++ assert.throws(()=>validateNativeUpdater(value,'DatabaseMirror database.clamav.net\nNotifyClamd /etc/clamav/clamd.conf\n','',{}));
++ const script=String.raw`printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' | clamdscan --stream --no-summary -`;
++ const detected=spawnSync('docker',['exec','sabalanerp-local-clamav-1','sh','-ec',script],{encoding:'utf8',timeout:15000});
++ assert.equal(detected.status,1,detected.stdout+detected.stderr);assert.match(detected.stdout,/Eicar.*FOUND/i);
++ const clean=spawnSync('docker',['exec','sabalanerp-local-clamav-1','clamdscan','--no-summary','/etc/hosts'],{encoding:'utf8',timeout:15000});
++ assert.equal(clean.status,0,clean.stdout+clean.stderr);assert.match(clean.stdout,/OK/);
++});

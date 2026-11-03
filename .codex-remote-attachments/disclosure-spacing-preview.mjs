@@ -1,0 +1,44 @@
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { chromium, expect } = require('@playwright/test');
+const browser = await chromium.launch({ channel: 'chrome', headless: true });
+try {
+ const page = await browser.newPage({ viewport: { width: 1536, height: 1050 }, reducedMotion: 'reduce', locale: 'fa-IR', timezoneId: 'Asia/Tehran' });
+ let writes = 0;
+ page.on('request', r => { if (r.method() !== 'GET' && r.url().includes('/api/accounting/')) writes++; });
+ await page.goto('http://127.0.0.1:3000/login');
+ await page.evaluate(()=>{localStorage.setItem('theme','light');document.documentElement.classList.remove('dark')});
+ await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('admin');
+ await page.locator('input[type="password"]').fill('admin123');
+ await page.getByRole('button', { name: 'ورود', exact: true }).click();
+ await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60000 });
+ const base = 'http://127.0.0.1:3000/dashboard/accounting/customer-accounts/customer%3Acmqmlgrtf000512abdnhdvmpo';
+ // Resolve the customer through the existing list instead of relying on an old screenshot ID.
+ await page.goto('http://127.0.0.1:3000/dashboard/accounting/customer-accounts');
+ const searchResponse = page.waitForResponse(r => r.url().includes('/api/accounting/ledger/customer-accounts?') && r.url().includes('search=') && r.status() === 200);
+ await page.getByRole('searchbox', { name: 'جستجوی مشتری', exact: true }).fill('رستگار');
+ await searchResponse;
+ await expect(page.getByRole('link', { name: 'مشاهده حساب مشتری', exact: true }).first()).toBeVisible();
+ await page.getByRole('link', { name: 'مشاهده حساب مشتری', exact: true }).first().click();
+ await expect(page.getByRole('heading', { name: 'جمشید رستگار', exact: true })).toBeVisible({timeout:90000});
+ const lightToggle = page.getByRole('button',{name:'فعال‌کردن حالت روشن',exact:true}); if(await lightToggle.isVisible()) await lightToggle.click();
+ const url = page.url().split('?')[0];
+ await page.goto(`${url}?variant=B`);
+ await page.getByRole('button',{name:'جزئیات',exact:true}).first().click({timeout:90000});
+ const dialog=page.getByRole('dialog',{name:'جزئیات بدهی'});
+ const disclosure=dialog.getByRole('button',{name:/دریافت‌های مرتبط/});
+ const measure=await disclosure.evaluate(el=>{const s=getComputedStyle(el);return {start:parseFloat(s.paddingInlineStart),end:parseFloat(s.paddingInlineEnd),height:el.getBoundingClientRect().height}});
+ console.log('Disclosure header spacing:',measure);
+ if(measure.start<16 || measure.end<16 || measure.height<44) throw new Error('Disclosure header needs horizontal inset and an accessible target');
+ await disclosure.click();
+ await expect(disclosure).toHaveAttribute('aria-expanded','false');
+ await disclosure.focus();
+ await page.keyboard.press('Enter');
+ await expect(disclosure).toHaveAttribute('aria-expanded','true');
+ await page.screenshot({path:'test-results/accounting-ledger/disclosure-spacing-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ if (!await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) throw new Error('Mobile overflow');
+ await page.screenshot({path:'test-results/accounting-ledger/disclosure-spacing-mobile.png',fullPage:true});
+ if(writes) throw new Error('Unexpected financial write');
+ console.log('Disclosure spacing, toggle and keyboard verified; zero accounting writes.');
+} finally {await browser.close();}

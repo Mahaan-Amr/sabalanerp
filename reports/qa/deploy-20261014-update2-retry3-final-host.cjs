@@ -1,0 +1,18 @@
+const fs=require('fs'),{execFileSync}=require('child_process');
+const cwd='/opt/sabalanerp';
+const run=(command,args)=>execFileSync(command,args,{cwd,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+run('docker',['compose','--env-file','deploy/.env.prod','-f','docker-compose.prod.yml','ps']);
+run('docker',['cp','reports/qa/deploy-20261014-update2-final-runtime.cjs','sabalanerp-backend-1:/tmp/deploy-final-runtime.cjs']);
+const runtime=JSON.parse(run('docker',['exec','sabalanerp-backend-1','node','/tmp/deploy-final-runtime.cjs']));
+const services=['backend','frontend','inquiry','nginx','postgres','clamav'];
+const containers=JSON.parse(run('docker',['inspect',...services.map(s=>'sabalanerp-'+s+'-1')])).map((c,i)=>({service:services[i],image:c.Image,configuredImage:c.Config.Image,state:c.State.Status,health:c.State.Health?.Status}));
+const imageMatches=['backend','frontend','inquiry'].every(s=>containers.find(c=>c.service===s).image===runtime.images[s]);
+const applicationImages=JSON.parse(run('docker',['image','inspect',...containers.filter(c=>['backend','frontend','inquiry'].includes(c.service)).map(c=>c.image)])).map(i=>({id:i.Id,sourceCommit:i.Config.Labels?.['io.sabalan.performance.source-commit'],sourceHash:i.Config.Labels?.['io.sabalan.performance.source-hash']}));
+const imageIdentityMatches=applicationImages.length===3&&applicationImages.every(i=>i.sourceCommit===runtime.runningCommit&&/^[a-f0-9]{64}$/.test(i.sourceHash))&&new Set(applicationImages.map(i=>i.sourceHash)).size===1;
+const git={checkout:run('git',['rev-parse','HEAD']),main:run('git',['rev-parse','origin/main']),ferpheri:run('git',['rev-parse','origin/ferpheri']),trackedChanges:run('git',['status','--porcelain','--untracked-files=no'])};
+const publicChecks={login:run('curl',['--max-time','30','-sS','-o','/dev/null','-w','%{http_code}','https://sabalanerp.com/login']),ready:run('curl',['--max-time','30','-sS','-o','/dev/null','-w','%{http_code}','https://sabalanerp.com/api/ready'])};
+const exit=fs.readFileSync(cwd+'/reports/deploy/codex-update-20261014-update2-retry3.exit','utf8').trim();
+const startupLogs=run('docker',['logs','--since','30m','sabalanerp-backend-1']);
+const worker={started:startupLogs.includes('Contract cancellation notice delivery worker started'),failure:startupLogs.includes('Contract cancellation notice worker failed')||startupLogs.includes('Contract cancellation notice scan failed')};
+const ok=worker.started&&!worker.failure&&exit==='0'&&runtime.deployment.phase==='COMPLETED'&&imageMatches&&imageIdentityMatches&&containers.every(c=>c.state==='running'&&c.health==='healthy')&&publicChecks.login==='200'&&publicChecks.ready==='200'&&git.checkout===runtime.runningCommit&&git.main===runtime.runningCommit&&git.trackedChanges==='';
+console.log(JSON.stringify({ok,checkedAt:new Date().toISOString(),exit,git,runtime,worker,imageMatches,imageIdentityMatches,applicationImages,containers,publicChecks}));if(!ok)process.exitCode=1;

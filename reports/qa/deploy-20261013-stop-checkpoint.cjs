@@ -1,0 +1,10 @@
+const fs=require('node:fs'),path=require('node:path'),{execFileSync}=require('node:child_process');
+const run=(cmd,args)=>execFileSync(cmd,args,{cwd:'/opt/sabalanerp',encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+const config=fs.readFileSync('/opt/sabalanerp/deploy/.env.prod','utf8');const dir=config.match(/^DEPLOYMENT_REPORT_DIR_HOST=(.*)$/m)?.[1]?.trim().replace(/^['"]|['"]$/g,'');if(!dir)throw Error('REPORT_DIR_UNRESOLVED');
+const session=JSON.parse(fs.readFileSync(path.resolve('/opt/sabalanerp',dir,'active-deployment-session.json'),'utf8'));
+if(session.deploymentId!=='deploy-20261013T060202Z-129b1f970e1a-release'||session.phase!=='SERVICES_DRAINED')throw Error('STOP_REFUSED_PHASE_CHANGED');
+run('docker',['compose','--env-file','deploy/.env.prod','-f','docker-compose.prod.yml','ps']);
+const ids=run('docker',['ps','-q','--filter','label=com.docker.compose.project=sabalanerp','--filter','label=com.docker.compose.service=deployment']).split('\n').filter(Boolean);
+const targets=ids.flatMap(id=>{const c=JSON.parse(run('docker',['inspect',id]))[0];return c.State.Status==='running'&&c.Config.Cmd?.length===2&&c.Config.Cmd[0]==='node'&&c.Config.Cmd[1]==='dist/scripts/deployment-checkpoint.js'?[id]:[]});
+if(targets.length!==1)throw Error('STOP_REFUSED_TARGET_NOT_UNIQUE');
+run('docker',['stop','--time','10',targets[0]]);console.log(JSON.stringify({checkpointReadStopped:true,boundedStopSeconds:10,formalRecoveryExpected:true,phase:session.phase}));

@@ -1,0 +1,14 @@
+const fs=require('fs'),{execFileSync}=require('child_process');
+const cwd='/opt/sabalanerp';
+const run=(command,args)=>execFileSync(command,args,{cwd,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+run('docker',['compose','--env-file','deploy/.env.prod','-f','docker-compose.prod.yml','ps']);
+run('docker',['cp','reports/qa/deploy-20261012-final-runtime.cjs','sabalanerp-backend-1:/tmp/deploy-final-runtime.cjs']);
+const runtime=JSON.parse(run('docker',['exec','sabalanerp-backend-1','node','/tmp/deploy-final-runtime.cjs']));
+const services=['backend','frontend','inquiry','nginx','postgres','clamav'];
+const containers=JSON.parse(run('docker',['inspect',...services.map(s=>'sabalanerp-'+s+'-1')])).map((c,i)=>({service:services[i],image:c.Image,configuredImage:c.Config.Image,state:c.State.Status,health:c.State.Health?.Status}));
+const imageMatches=['backend','frontend','inquiry'].every(s=>containers.find(c=>c.service===s).image===runtime.images[s]);
+const git={checkout:run('git',['rev-parse','HEAD']),main:run('git',['rev-parse','origin/main']),ferpheri:run('git',['rev-parse','origin/ferpheri']),trackedChanges:run('git',['status','--porcelain','--untracked-files=no'])};
+const publicChecks={login:run('curl',['--max-time','30','-sS','-o','/dev/null','-w','%{http_code}','https://sabalanerp.com/login']),ready:run('curl',['--max-time','30','-sS','-o','/dev/null','-w','%{http_code}','https://sabalanerp.com/api/ready'])};
+const exit=fs.readFileSync(cwd+'/reports/deploy/codex-update-20261012-main.exit','utf8').trim();
+const ok=exit==='0'&&runtime.deployment.phase==='COMPLETED'&&imageMatches&&containers.every(c=>c.state==='running'&&c.health==='healthy')&&publicChecks.login==='200'&&publicChecks.ready==='200'&&git.checkout===runtime.runningCommit&&git.main===runtime.runningCommit&&git.trackedChanges==='';
+console.log(JSON.stringify({ok,checkedAt:new Date().toISOString(),exit,git,runtime,imageMatches,containers,publicChecks}));if(!ok)process.exitCode=1;

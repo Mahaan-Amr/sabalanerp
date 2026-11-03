@@ -1,0 +1,42 @@
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { chromium, expect } = require('@playwright/test');
+const browser = await chromium.launch({ channel: 'chrome', headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'fa-IR', timezoneId: 'Asia/Tehran' });
+  let writes = 0;
+  page.on('request', r => { if (r.method() === 'POST' && r.url().includes('/api/accounting/ledger/')) writes++; });
+  await page.goto('http://127.0.0.1:3000/login');
+  await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('admin');
+  await page.locator('input[type="password"]').fill('admin123');
+  await page.getByRole('button', { name: 'ورود', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60000 });
+  await page.goto('http://127.0.0.1:3000/dashboard/accounting/customer-accounts');
+  const searched = page.waitForResponse(r => r.url().includes('/api/accounting/ledger/customer-accounts?') && r.url().includes('search=') && r.status() === 200);
+  await page.getByRole('searchbox', { name: 'جستجوی مشتری', exact: true }).fill('رستگار');
+  await searched;
+  const [detailResponse] = await Promise.all([page.waitForResponse(r => r.url().includes('/api/accounting/ledger/customer-accounts/') && !r.url().includes('/context'), { timeout: 90000 }), page.getByRole('link', { name: 'مشاهده حساب مشتری', exact: true }).first().click()]);
+  if (detailResponse.status() !== 200) throw new Error(`Customer read failed ${detailResponse.status()}: ${(await detailResponse.text()).slice(0, 900)}`);
+  const account = (await detailResponse.json()).data;
+  const item = account.activityItems.find(row => row.financialRecordId && row.contractId);
+  if (!item) throw new Error('Expected the existing training attribution to be readable.');
+  const record = account.financialRecords.find(row => row.id === item.financialRecordId);
+  const contract = account.contracts.find(row => row.id === item.contractId);
+  await page.getByRole('button', { name: /رکوردها و دریافتنی‌ها/ }).click();
+  const section = page.getByRole('region', { name: `اقلام قطعی فاکتور ${record.systemInvoiceNumber}`, exact: true });
+  await expect(section).toBeVisible();
+  await section.getByRole('button', { name: /منابع تخصیص فعال/ }).click();
+  await expect(section.getByText(/سهم این بدهی/)).toBeVisible();
+  await page.screenshot({ path: 'test-results/accounting-ledger/unified-training-records-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (!await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) throw new Error('Customer record view overflows mobile viewport.');
+  await page.screenshot({ path: 'test-results/accounting-ledger/unified-training-records-mobile.png', fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await section.getByRole('link', { name: 'رسیدگی مالی قرارداد مرتبط', exact: true }).click();
+  const contractSection = page.getByRole('region', { name: `اقلام قطعی دفتر مالی قرارداد ${contract.contractNumber}`, exact: true });
+  await expect(contractSection).toBeVisible({ timeout: 45000 });
+  await page.screenshot({ path: 'test-results/accounting-ledger/unified-training-contract-desktop.png', fullPage: true });
+  if (writes !== 0) throw new Error('Read verification must not submit financial commands.');
+  process.stdout.write('Live training customer: invoice + contract linked views and mobile verified; zero financial POST commands.\n');
+} finally { await browser.close(); }
+

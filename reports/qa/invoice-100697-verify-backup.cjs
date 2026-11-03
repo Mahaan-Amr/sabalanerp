@@ -1,0 +1,23 @@
+const fs=require('node:fs'),crypto=require('node:crypto');
+const {spawn}=require('node:child_process');
+const {pipeline}=require('node:stream/promises');
+const {Writable}=require('node:stream');
+const folder='C:/Users/mahan/.codex/backups/invoice-100697-20261013';
+(async()=>{
+  const manifestFile=fs.readdirSync(folder).filter(x=>/^backup-manifest-\d+\.json$/.test(x)).sort().at(-1);
+  const m=JSON.parse(fs.readFileSync(folder+'/'+manifestFile,'utf8'));
+  const key=fs.readFileSync(folder+'/recovery-key.bin');
+  const decrypt=()=>{const d=crypto.createDecipheriv('aes-256-gcm',key,Buffer.from(m.iv,'hex'));d.setAuthTag(Buffer.from(m.authTag,'hex'));return d};
+  const hash=crypto.createHash('sha256');
+  await pipeline(fs.createReadStream(m.localArchive),decrypt(),new Writable({write(chunk,enc,cb){hash.update(chunk);cb()}}));
+  if(hash.digest('hex')!==m.plaintextSha256)throw Error('DECRYPT_HASH_MISMATCH');
+  const cmd=`docker exec -i sabalanerp-postgres-1 sh -c 'umask 077; cat > /tmp/invoice-100697-backup-verify-20261013.dump; pg_restore --list /tmp/invoice-100697-backup-verify-20261013.dump; r=$?; rm -f /tmp/invoice-100697-backup-verify-20261013.dump; exit $r'`;
+  const child=spawn('ssh',['-o','BatchMode=yes','-o','ConnectTimeout=12','-i','C:/Users/mahan/.ssh/sabalan_codex_deploy_ed25519','root@94.182.85.254',cmd],{windowsHide:true,stdio:['pipe','pipe','pipe']});
+  let toc='',err='';child.stdout.on('data',b=>{toc+=b.toString()});child.stderr.on('data',b=>{err+=b.toString()});
+  const done=new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',code=>code===0?resolve():reject(Error('RESTORE_LIST_FAILED:'+err.slice(0,250))))});
+  await Promise.all([pipeline(fs.createReadStream(m.localArchive),decrypt(),child.stdin),done]);
+  if(!toc.includes('accounting_financial_records')||!toc.includes('partner_case_revisions'))throw Error('RESTORE_LIST_INCOMPLETE');
+  m.decryptVerified=true;m.restoreListVerified=true;m.restoreListEntries=toc.split('\n').filter(x=>/^\d+;/.test(x)).length;m.verifiedAt=new Date().toISOString();
+  fs.writeFileSync(folder+'/verified-backup-manifest.json',JSON.stringify(m,null,2));
+  console.log(JSON.stringify(m));
+})().catch(e=>{console.error(e.message);process.exitCode=1});

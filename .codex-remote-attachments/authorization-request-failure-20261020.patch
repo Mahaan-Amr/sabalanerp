@@ -1,0 +1,292 @@
+diff --git a/backend/package.json b/backend/package.json
+index 90dd9ef5..35570e90 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -4,6 +4,7 @@
+   "description": "ERP Backend API",
+   "main": "dist/index.js",
+   "scripts": {
++    "test:authorization-request-failure": "tsx src/routes/__tests__/authorizationRequestFailure.test.ts",
+     "test:partner-customer-crm:db": "tsx --test src/services/__tests__/partnerCustomerCrm.integration.test.ts src/services/__tests__/crmCustomerManagement.integration.test.ts",
+     "test:duty-read-performance": "tsx --test src/services/__tests__/dutySummaryPerformance.test.ts src/services/__tests__/savedTechnicalResolutionPerformance.test.ts",
+     "duty:baseline": "tsx src/scripts/report-hr-duty-baseline.ts",
+diff --git a/backend/src/middleware/asyncRoute.ts b/backend/src/middleware/asyncRoute.ts
+new file mode 100644
+index 00000000..c0cae639
+--- /dev/null
++++ b/backend/src/middleware/asyncRoute.ts
+@@ -0,0 +1,21 @@
++import type { NextFunction, Request, Response } from 'express';
++
++/** Express 4 does not forward rejected async handlers to error middleware. */
++export const asyncRoute = (
++  handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>,
++) => async (req: Request, res: Response, next: NextFunction) => {
++  try {
++    await handler(req, res, next);
++  } catch (error) {
++    // Prisma messages can contain SQL or protected data. Retain the diagnostic
++    // code without disclosing the original message to the client or logs.
++    const code = (error as { code?: unknown } | null)?.code;
++    console.error('Async request failed', { code: typeof code === 'string' && /^P\d{4}$/.test(code) ? code : 'REQUEST_FAILED' });
++    const message = 'خطای داخلی سرور. لطفاً دوباره تلاش کنید.';
++    if (res.headersSent) {
++      next(new Error(message));
++      return;
++    }
++    res.status(500).json({ success: false, error: message });
++  }
++};
+diff --git a/backend/src/routes/__tests__/authorizationRequestFailure.test.ts b/backend/src/routes/__tests__/authorizationRequestFailure.test.ts
+new file mode 100644
+index 00000000..defedda1
+--- /dev/null
++++ b/backend/src/routes/__tests__/authorizationRequestFailure.test.ts
+@@ -0,0 +1,97 @@
++import assert from 'node:assert/strict';
++import express from 'express';
++import type { AddressInfo } from 'node:net';
++import notifications from '../notifications';
++import dashboard, { createActionAvailabilityHandler } from '../dashboard';
++import { prisma } from '../../lib/prisma';
++
++// Exercise the registered HTTP handlers; authentication is supplied by this
++// isolated harness so no database, credentials or production writes are needed.
++const registeredHandler = (router: any, method: string, path: string) => {
++  const route = router.stack.find((layer: any) => layer.route?.path === path && layer.route.methods[method]);
++  assert.ok(route, `${method} ${path} is registered`);
++  return route.route.stack.at(-1).handle;
++};
++
++const run = async () => {
++  const timeout = Object.assign(new Error('Transaction already closed: private database detail'), { code: 'P2028' });
++  const row = { id: 'notice', type: 'PARTNER_CUSTOMER_TRANSFER', createdAt: new Date(),
++    event: { resourceType: 'PARTNER_CUSTOMER_TRANSFER', resourceId: 'transfer' } };
++  const originals = { findMany: prisma.notification.findMany, findFirst: prisma.notification.findFirst,
++    transaction: prisma.$transaction, update: prisma.notification.update, updateMany: prisma.notification.updateMany };
++  const unhandled: unknown[] = [];
++  const onUnhandled = (error: unknown) => { unhandled.push(error); };
++  let writes = 0;
++  let transactions = 0;
++  let failedLockReads = 0;
++  let active = true;
++  const tx = {
++    user: { findUnique: async () => ({ isActive: active }) },
++    partnerCustomerTransfer: { findUnique: async () => ({ customerId: 'customer',
++      fromOwnerUserId: 'another-actor', requestedBy: 'another-actor', toProfile: { userId: 'partner' } }) },
++    $queryRaw: async () => { failedLockReads += 1; throw timeout; },
++  };
++  (prisma.notification as any).findMany = async () => [row];
++  (prisma.notification as any).findFirst = async () => row;
++  (prisma as any).$transaction = async (callback: (database: unknown) => Promise<unknown>) => {
++    transactions += 1;
++    return callback(tx);
++  };
++  (prisma.notification as any).update = async () => { writes += 1; };
++  (prisma.notification as any).updateMany = async () => { writes += 1; };
++  process.on('unhandledRejection', onUnhandled);
++  const app = express();
++  app.use((req: any, _res, next) => { req.user = { id: 'actor', role: 'ADMIN' }; next(); });
++  const cases = [
++    ['get', '/', '/notices'], ['get', '/unread-count', '/count'], ['get', '/metadata', '/metadata'],
++    ['put', '/read-all', '/read-all'], ['put', '/:id/read', '/notice/read'],
++    ['delete', '/:id/read', '/notice/unread'],
++  ];
++  for (const [method, path, url] of cases) (app as any)[method](url, registeredHandler(notifications, method, path));
++  app.get('/availability', registeredHandler(dashboard, 'get', '/route-availability'));
++  app.get('/actions', createActionAvailabilityHandler(async () => { throw timeout; }));
++  app.get('/ping', (_req, res) => { res.json({ ok: true }); });
++  const server = app.listen(0, '127.0.0.1');
++  await new Promise<void>(resolve => server.once('listening', resolve));
++  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
++  try {
++    for (const [method, , url] of cases.concat([
++      ['get', '', '/availability?path=/dashboard/crm/customer-transfers/transfer'],
++      ['get', '', '/actions?workspace=accounting'],
++    ])) {
++      let response: globalThis.Response;
++      try { response = await fetch(base + url, { method: method.toUpperCase(), signal: AbortSignal.timeout(1500) }); }
++      catch { assert.fail(`${method} ${url}: authorization failure escaped the HTTP boundary (${unhandled.length} unhandled rejections)`); }
++      assert.equal(response.status, 500, url);
++      const body = await response.json() as any;
++      assert.equal(body.success, false);
++      assert.equal(body.data, undefined, 'failure must not grant access or expose notification data');
++      assert.doesNotMatch(JSON.stringify(body), /private database detail|Transaction already closed|P2028/);
++      assert.equal((await fetch(base + '/ping')).status, 200, 'backend keeps serving after failure');
++    }
++    assert.equal(transactions, 7, 'notification and transfer route failures reached the authorization transaction');
++    assert.equal(failedLockReads, 7, 'the real Partner authorization lock read reproduced the production timeout');
++    assert.equal(writes, 0, 'failed authorization cannot mark notifications read/unread');
++    assert.equal(unhandled.length, 0);
++    assert.equal((await fetch(base + '/availability?path=invalid')).status, 400);
++    assert.equal((await fetch(base + '/actions?workspace=invalid')).status, 400);
++    active = false;
++    const denied = await fetch(base + '/availability?path=/dashboard/crm/customer-transfers/transfer');
++    assert.equal(denied.status, 200);
++    assert.equal((await denied.json() as any).data.allowed, false, 'real denial remains a denial, not a server failure');
++    (prisma.notification as any).findMany = async () => [];
++    assert.deepEqual(await (await fetch(base + '/count')).json(), { success: true, data: { count: 0 } });
++    (prisma.notification as any).findFirst = async () => null;
++    assert.equal((await fetch(base + '/notice/read', { method: 'PUT' })).status, 404);
++    assert.equal(writes, 0);
++    console.log('Authorization request failure HTTP regression passed (8 endpoints).');
++  } finally {
++    server.closeAllConnections();
++    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
++    process.off('unhandledRejection', onUnhandled);
++    Object.assign(prisma.notification, { findMany: originals.findMany, findFirst: originals.findFirst,
++      update: originals.update, updateMany: originals.updateMany });
++    (prisma as any).$transaction = originals.transaction;
++  }
++};
++void run().catch(error => { console.error(error); process.exitCode = 1; });
+diff --git a/backend/src/routes/__tests__/dashboardActionAvailabilityRoutes.test.ts b/backend/src/routes/__tests__/dashboardActionAvailabilityRoutes.test.ts
+index 100cd49d..0f9d07d4 100644
+--- a/backend/src/routes/__tests__/dashboardActionAvailabilityRoutes.test.ts
++++ b/backend/src/routes/__tests__/dashboardActionAvailabilityRoutes.test.ts
+@@ -14,9 +14,10 @@ const invoke = async (workspace: string) => {
+     }]));
+   });
+   await handler(
+-    { query: { workspace }, user: { id: 'admin', role: 'ADMIN' } },
++    { query: { workspace }, user: { id: 'admin', role: 'ADMIN' } } as any,
+     { setHeader(name: string, value: string) { headers.set(name, value); return this; },
+-      status(code: number) { status = code; return this; }, json(value: unknown) { body = value; return this; } },
++      status(code: number) { status = code; return this; }, json(value: unknown) { body = value; return this; } } as any,
++    () => {},
+   );
+   return { status, body, calls, headers };
+ };
+diff --git a/backend/src/routes/dashboard.ts b/backend/src/routes/dashboard.ts
+index e60002bf..b3f47c8f 100644
+--- a/backend/src/routes/dashboard.ts
++++ b/backend/src/routes/dashboard.ts
+@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
+ import express from 'express';
+ import { PrismaClient } from '@prisma/client';
+ import { protect } from '../middleware/auth';
++import { asyncRoute } from '../middleware/asyncRoute';
+ import { requireFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
+ import { getUserWorkspaces } from '../middleware/workspace';
+ import { getEffectiveUserAccess } from '../services/effectiveAccessService';
+@@ -13,18 +14,18 @@ import { resolveWorkspaceActionAvailability, WORKSPACE_ACTION_RULES } from '../s
+ 
+ const router = express.Router();
+ 
+-router.get('/route-availability', protect, async (req: any, res) => {
++router.get('/route-availability', protect, asyncRoute(async (req: any, res) => {
+   res.setHeader('Cache-Control', 'private, no-store');
+   res.setHeader('Vary', 'Cookie, Authorization');
+   const path = typeof req.query.path === 'string' ? req.query.path : '';
+   if (!path.startsWith('/dashboard')) return res.status(400).json({ success: false, message: 'مسیر ارسال‌شده معتبر نیست.' });
+   const data = await resolveWorkspaceRouteAvailability(prisma, { userId: req.user.id, role: req.user.role, path });
+   return res.json({ success: true, data });
+-});
++}));
+ 
+ export const createActionAvailabilityHandler = (
+   resolver = resolveWorkspaceActionAvailability,
+-) => async (req: any, res: any) => {
++) => asyncRoute(async (req: any, res: any) => {
+   res.setHeader('Cache-Control', 'private, no-store');
+   res.setHeader('Vary', 'Cookie, Authorization');
+   const workspace = String(req.query.workspace || '').toLowerCase() as keyof typeof WORKSPACE_ACTION_RULES;
+@@ -34,7 +35,7 @@ export const createActionAvailabilityHandler = (
+   });
+   const data = await resolver(prisma, { userId: req.user.id, role: req.user.role, workspace });
+   return res.json({ success: true, data });
+-};
++});
+ 
+ router.get('/action-availability', protect, createActionAvailabilityHandler());
+ 
+diff --git a/backend/src/routes/notifications.ts b/backend/src/routes/notifications.ts
+index b20092a7..bff5f4f3 100644
+--- a/backend/src/routes/notifications.ts
++++ b/backend/src/routes/notifications.ts
+@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
+ import { body, validationResult } from 'express-validator';
+ import { authorize, protect, type AuthRequest } from '../middleware/auth';
+ import { enforceMutationIdempotency } from '../middleware/idempotency';
++import { asyncRoute } from '../middleware/asyncRoute';
+ import {
+   filterCurrentlyAuthorizedNotifications,
+   type NotificationWithAuthorizationEvent,
+@@ -54,7 +55,7 @@ type NotificationListItem = {
+   category: NotificationCategory;
+   sessionId: string | null;
+ };
+-router.get('/', async (req: AuthRequest, res) => {
++router.get('/', asyncRoute(async (req: AuthRequest, res) => {
+   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+   const state = ['UNREAD', 'READ', 'IMPORTANT'].includes(String(req.query.state || '').toUpperCase())
+     ? String(req.query.state).toUpperCase()
+@@ -134,9 +135,9 @@ router.get('/', async (req: AuthRequest, res) => {
+     data,
+     pagination: { nextCursor, hasMore },
+   });
+-});
++}));
+ 
+-router.get('/unread-count', async (req: AuthRequest, res) => {
++router.get('/unread-count', asyncRoute(async (req: AuthRequest, res) => {
+   const rows = await prisma.notification.findMany({
+     where: { userId: req.user!.id, readAt: null },
+     select: {
+@@ -146,9 +147,9 @@ router.get('/unread-count', async (req: AuthRequest, res) => {
+   });
+   const authorizedRows = await filterCurrentlyAuthorizedNotifications(prisma, req.user!, rows);
+   res.json({ success: true, data: { count: authorizedRows.length } });
+-});
++}));
+ 
+-router.get('/metadata', async (req: AuthRequest, res) => {
++router.get('/metadata', asyncRoute(async (req: AuthRequest, res) => {
+   const rows = await prisma.notification.findMany({
+     where: { userId: req.user!.id },
+     select: {
+@@ -165,9 +166,9 @@ router.get('/metadata', async (req: AuthRequest, res) => {
+       workspaces: [...new Set(authorizedRows.map((row) => row.event?.workspace).filter((value): value is string => Boolean(value)))].sort(),
+     },
+   });
+-});
++}));
+ 
+-router.put('/read-all', async (req: AuthRequest, res) => {
++router.put('/read-all', asyncRoute(async (req: AuthRequest, res) => {
+   const rows = await prisma.notification.findMany({
+     where: { userId: req.user!.id, readAt: null },
+     select: { id: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
+@@ -178,9 +179,9 @@ router.put('/read-all', async (req: AuthRequest, res) => {
+     data: { readAt: new Date() },
+   });
+   res.json({ success: true, data: { updated: result.count } });
+-});
++}));
+ 
+-router.put('/:id/read', async (req: AuthRequest, res) => {
++router.put('/:id/read', asyncRoute(async (req: AuthRequest, res) => {
+   const notification = await prisma.notification.findFirst({
+     where: { id: req.params.id, userId: req.user!.id },
+     select: { id: true, type: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
+@@ -193,9 +194,9 @@ router.put('/:id/read', async (req: AuthRequest, res) => {
+     data: { readAt: new Date() },
+   });
+   res.json({ success: true });
+-});
++}));
+ 
+-router.delete('/:id/read', async (req: AuthRequest, res) => {
++router.delete('/:id/read', asyncRoute(async (req: AuthRequest, res) => {
+   const notification = await prisma.notification.findFirst({
+     where: { id: req.params.id, userId: req.user!.id },
+     select: { id: true, type: true, event: { select: { workspace: true, feature: true, resourceType: true, resourceId: true } } },
+@@ -205,7 +206,7 @@ router.delete('/:id/read', async (req: AuthRequest, res) => {
+   if (!authorized) return res.status(404).json({ success: false, error: 'اعلان پیدا نشد.' });
+   await prisma.notification.update({ where: { id: notification.id }, data: { readAt: null } });
+   res.json({ success: true });
+-});
++}));
+ 
+ router.post(
+   '/:id/security-resolution',

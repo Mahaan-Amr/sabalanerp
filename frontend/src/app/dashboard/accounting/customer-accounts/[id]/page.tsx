@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { FaEye, FaFileExcel, FaFilePdf, FaMoneyBillWave, FaSync } from 'react-icons/fa';
 import { ErpBadge, ErpButton, ErpCard, ErpDisclosure, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpPresentationProvider, ErpSection, ErpSegmentedControl, ErpSheet, ErpSummaryGrid, ErpWorkspacePage, type ErpAction } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
@@ -16,6 +16,7 @@ import CustomerAccountAnalytics from '@/features/accounting/CustomerAccountAnaly
 import CustomerReceiptTrace from '@/features/accounting/CustomerReceiptTrace';
 import { customerAccountInsights } from '@/features/accounting/customerAccountInsights';
 import workspaceStyles from '@/features/accounting/customerAccountWorkspace.module.css';
+import CustomerAllocationPrototype from '@/features/accounting/allocation-prototype/CustomerAllocationPrototype';
 
 type Tab = 'overview' | 'items' | 'contracts' | 'records' | 'receipts' | 'statement' | 'analytics';
 function AccountCards<T>({ items, render, empty }: { items: T[]; render: (item: T, index: number) => ReactNode; empty: string }) {
@@ -29,6 +30,7 @@ function AccountCards<T>({ items, render, empty }: { items: T[]; render: (item: 
 }
 export default function CustomerAccountDetailPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const accountId = decodeURIComponent(params.id);
   const [data, setData] = useState<CustomerAccount>();
   const [loading, setLoading] = useState(true);
@@ -83,6 +85,14 @@ export default function CustomerAccountDetailPage() {
     return totals;
   }, new Map<string, bigint>())).map(([currency, value]) => accountMoney(`${value / BigInt(100)}.${(value % BigInt(100)).toString().padStart(2, '0')}`, currency)).join(' + ') : '';
   const insight = data ? customerAccountInsights(data) : undefined;
+  const prototypeVariant = searchParams.get('variant');
+  if (process.env.NODE_ENV !== 'production' && process.env.NEXT_PUBLIC_ENABLE_PROTOTYPES === '1' && prototypeVariant && ['A', 'B', 'C'].includes(prototypeVariant)) {
+    return <ErpPresentationProvider scope="workspace"><ErpWorkspacePage title={data?.displayName || 'پرونده مالی مشتری'} backHref="/dashboard/accounting/customer-accounts">
+      {loading && <ErpInlineState kind="empty" title="در حال بارگیری پرونده مالی…" />}
+      {error && <ErpInlineState kind="error" title={error} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
+      {data && !loading && <CustomerAllocationPrototype account={data} variant={prototypeVariant} />}
+    </ErpWorkspacePage></ErpPresentationProvider>;
+  }
   return <ErpPresentationProvider scope="workspace"><ErpWorkspacePage title={data?.displayName || 'پرونده مالی مشتری'} backHref="/dashboard/accounting/customer-accounts"
     context={data && <div className="flex flex-wrap items-center gap-2"><ErpBadge tone={data.customer?.trustCategory === 'SPECIAL' ? 'purple' : 'neutral'}>{data.customer?.trustCategory === 'SPECIAL' ? 'مشتری خاص' : data.customer ? 'مشتری عادی' : 'هویت تاریخی'}</ErpBadge>
       {data.customer?.cardDeletedAt && <ErpBadge tone="neutral">پرونده تاریخی</ErpBadge>}<span>{data.customer?.workNumber || data.customer?.homeNumber}</span></div>}

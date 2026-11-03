@@ -1,0 +1,2 @@
+const fs=require('fs'),path=require('path'),{execFileSync}=require('child_process');
+const c=JSON.parse(execFileSync('docker',['inspect','sabalanerp-backend-1'],{encoding:'utf8'}))[0];const root=c.Mounts.find(m=>m.Destination==='/app/storage/recovery')?.Source;if(!root)throw Error('RECOVERY_VOLUME_MISSING');console.log(execFileSync('du',['-x','-B1','-d','2',root],{encoding:'utf8'}));

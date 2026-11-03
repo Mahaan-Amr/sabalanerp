@@ -1,0 +1,61 @@
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { chromium, expect } = require('@playwright/test');
+const browser = await chromium.launch({ channel: 'chrome', headless: true });
+try {
+ const page = await browser.newPage({ viewport: { width: 1536, height: 1050 }, reducedMotion: 'reduce', locale: 'fa-IR', timezoneId: 'Asia/Tehran' });
+ let writes = 0;
+ page.on('request', r => { if (r.method() !== 'GET' && r.url().includes('/api/accounting/')) writes++; });
+ await page.goto('http://127.0.0.1:3000/login');
+ await page.evaluate(()=>{localStorage.setItem('theme','light');document.documentElement.classList.remove('dark')});
+ await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('admin');
+ await page.locator('input[type="password"]').fill('admin123');
+ await page.getByRole('button', { name: 'ورود', exact: true }).click();
+ await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60000 });
+ const base = 'http://127.0.0.1:3000/dashboard/accounting/customer-accounts/customer%3Acmqmlgrtf000512abdnhdvmpo';
+ // Resolve the customer through the existing list instead of relying on an old screenshot ID.
+ await page.goto('http://127.0.0.1:3000/dashboard/accounting/customer-accounts');
+ const searchResponse = page.waitForResponse(r => r.url().includes('/api/accounting/ledger/customer-accounts?') && r.url().includes('search=') && r.status() === 200);
+ await page.getByRole('searchbox', { name: 'جستجوی مشتری', exact: true }).fill('رستگار');
+ await searchResponse;
+ await expect(page.getByRole('link', { name: 'مشاهده حساب مشتری', exact: true }).first()).toBeVisible();
+ await page.getByRole('link', { name: 'مشاهده حساب مشتری', exact: true }).first().click();
+ await expect(page.getByRole('heading', { name: 'جمشید رستگار', exact: true })).toBeVisible({timeout:90000});
+ const lightToggle = page.getByRole('button',{name:'فعال‌کردن حالت روشن',exact:true}); if(await lightToggle.isVisible()) await lightToggle.click();
+ const url = page.url().split('?')[0];
+ for (const variant of ['A','B','C']) {
+  await page.goto(`${url}?variant=${variant}`);
+  await expect(page.getByText('آزمایشی · بدون ثبت',{exact:true})).toBeVisible({timeout:90000});
+  await expect(page.getByRole('button',{name:'سایر عملیات',exact:true})).toBeVisible();
+  await page.screenshot({path:`test-results/accounting-ledger/minimal-${variant}-desktop.png`,fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  if (!await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)) throw new Error(`Mobile overflow ${variant}`);
+  await page.screenshot({path:`test-results/accounting-ledger/minimal-${variant}-mobile.png`,fullPage:true});
+  await page.setViewportSize({width:1536,height:1050});
+ }
+ await page.getByRole('button',{name:'بدهی‌ها',exact:true}).click();
+ await page.getByRole('searchbox',{name:'جستجوی قلم یا فاکتور'}).fill('987');
+ await expect(page.getByText('فاکتور 987',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'جزئیات',exact:true}).click();
+ await expect(page.getByRole('dialog',{name:'جزئیات بدهی'})).toBeVisible();
+ await expect(page.getByRole('dialog').getByText('اصل قلم',{exact:true})).toBeVisible();
+ await page.keyboard.press('Escape');
+ await page.getByRole('searchbox',{name:'جستجوی قلم یا فاکتور'}).fill('ناموجود');
+ await expect(page.getByText('قلمی با این فیلتر وجود ندارد')).toBeVisible();
+ await page.getByRole('button',{name:'تحلیل',exact:true}).click();
+ await expect(page.getByRole('img',{name:/درصد از اقلام/})).toBeVisible();
+ await page.getByRole('button',{name:'گردش',exact:true}).click();
+ await expect(page.getByText('مانده افتتاحیه',{exact:false}).first()).toBeVisible();
+ await page.getByRole('button',{name:'سایر عملیات',exact:true}).click();
+ await page.getByRole('button',{name:'اطلاعات حساب',exact:true}).click();
+ await expect(page.getByRole('dialog').getByText('قابل استرداد نقدی',{exact:true})).toBeVisible();
+ await page.keyboard.press('Escape');
+ await page.getByRole('button',{name:'ثبت دریافت',exact:true}).click();
+ const dialog=page.getByRole('dialog');
+ await dialog.getByRole('textbox',{name:'مبلغ آزمایشی (ریال)'}).fill('123456789');
+ await dialog.getByRole('button',{name:'پیش‌نمایش',exact:true}).click();
+ await expect(dialog.getByRole('textbox',{name:'مبلغ آزمایشی (ریال)'})).toHaveValue('123,456,789');
+ await expect(dialog.getByText(/مبلغ:.*بدون ثبت/)).toBeVisible();
+ if(writes) throw new Error(`${writes} unexpected writes`);
+ console.log('Minimal variants: navigation, scoped detail, search, charts, grouped input and zero financial writes verified.');
+} finally { await browser.close(); }

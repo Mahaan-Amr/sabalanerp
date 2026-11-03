@@ -1,0 +1,462 @@
+diff --git a/backend/src/services/__tests__/contractMonetaryRounding.integration.test.ts b/backend/src/services/__tests__/contractMonetaryRounding.integration.test.ts
+index c61aaebd..cd7ec66e 100644
+--- a/backend/src/services/__tests__/contractMonetaryRounding.integration.test.ts
++++ b/backend/src/services/__tests__/contractMonetaryRounding.integration.test.ts
+@@ -17,6 +17,7 @@ async function run() {
+       { unit: 'count', quantity: 1, rate: 100.4, rowTotal: 100.4, sourceTotal: '200.8', payable: 201 },
+       { unit: 'count', quantity: 1, rate: 0.2, rowTotal: 0.2, sourceTotal: '0.4', payable: 0 },
+       { unit: 'ton', quantity: 1.333, rate: 100.45, rowTotal: 133.89985, sourceTotal: '267.7997', payable: 268 },
++      { unit: 'squareMeter', quantity: 12345.678, rate: 1234567.8912, rowTotal: '15241577653.8942336', sourceTotal: '30483155307.7884672', payable: 30483155308 },
+     ]) {
+     const sourceData = JSON.parse(JSON.stringify(source.contractData));
+     const products = ['round-row-a', 'round-row-b'].map(rowId => ({ rowId,
+diff --git a/backend/src/services/__tests__/contractQuantityPersistence.test.ts b/backend/src/services/__tests__/contractQuantityPersistence.test.ts
+index a9cae667..2b33de36 100644
+--- a/backend/src/services/__tests__/contractQuantityPersistence.test.ts
++++ b/backend/src/services/__tests__/contractQuantityPersistence.test.ts
+@@ -1,6 +1,6 @@
+ import assert from 'node:assert/strict';
+ import test from 'node:test';
+-import { persistContractQuantityAtPolicyScale } from '../contractService';
++import { persistContractQuantityAtPolicyScale, persistContractMonetaryAmount } from '../contractService';
+ import {
+   CURRENT_CONTRACT_PRODUCT_POLICY,
+   CURRENT_CONTRACT_PRODUCT_POLICY_V2,
+@@ -25,3 +25,8 @@ test('contract writer rejects malformed quantities instead of creating a zero se
+     );
+   }
+ });
++
++test('contract item money preserves prepared precision without a Number round trip', () => {
++  assert.equal(persistContractMonetaryAmount('15241577653.8942336').toString(), '15241577653.8942336');
++  for (const value of ['not-a-number', 'Infinity', '-1']) assert.throws(() => persistContractMonetaryAmount(value));
++});
+diff --git a/backend/src/services/contractService.ts b/backend/src/services/contractService.ts
+index 2726edb3..bce2673e 100644
+--- a/backend/src/services/contractService.ts
++++ b/backend/src/services/contractService.ts
+@@ -539,12 +539,12 @@ export interface UpdateContractData {
+       productRowId?: string | null;
+       productType?: string | null;
+       quantity: number;
+-      unitPrice: number;
+-      totalPrice: number;
++      unitPrice: number | string;
++      totalPrice: number | string;
+       description?: string | null;
+       isMandatory?: boolean;
+       mandatoryPercentage?: number | null;
+-      originalTotalPrice?: number | null;
++      originalTotalPrice?: number | string | null;
+       stairSystemId?: string | null;
+       stairPartType?: string | null;
+     }>;
+@@ -602,6 +602,17 @@ const toDecimalNumber = (value: unknown, fallback = 0): number => {
+   return Number.isFinite(parsed) ? parsed : fallback;
+ };
+ 
++export const persistContractMonetaryAmount = (value: string | number): Prisma.Decimal => {
++  const amount = new Prisma.Decimal(String(value));
++  if (!amount.isFinite() || amount.isNegative()) {
++    throw new Error('مبلغ واردشده معتبر نیست؛ مقدار را بررسی کنید و دوباره قرارداد را ذخیره کنید.');
++  }
++  return amount;
++};
++
++const persistNullableContractMonetaryAmount = (value: string | number | null | undefined) =>
++  value === null || value === undefined || value === '' ? null : persistContractMonetaryAmount(value);
++
+ export const persistContractQuantityAtPolicyScale = (
+   value: unknown,
+   calculationPolicy: typeof CURRENT_CONTRACT_PRODUCT_POLICY,
+@@ -634,12 +645,12 @@ const contractItemWriteData = (
+   productRowId: item.productRowId,
+   productType: item.productType || null,
+   quantity: persistContractQuantityAtPolicyScale(item.quantity, calculationPolicy),
+-  unitPrice: toDecimalNumber(item.unitPrice),
+-  totalPrice: toDecimalNumber(item.totalPrice),
++  unitPrice: persistContractMonetaryAmount(item.unitPrice),
++  totalPrice: persistContractMonetaryAmount(item.totalPrice),
+   description: item.description || null,
+   isMandatory: item.isMandatory || false,
+   mandatoryPercentage: toNullableDecimalNumber(item.mandatoryPercentage),
+-  originalTotalPrice: toNullableDecimalNumber(item.originalTotalPrice),
++  originalTotalPrice: persistNullableContractMonetaryAmount(item.originalTotalPrice),
+   stairSystemId: item.stairSystemId || null,
+   stairPartType: item.stairPartType || null,
+ });
+@@ -842,12 +853,12 @@ export async function createContract(
+               productRowId: item.productRowId || null,
+               productType: item.productType || null,
+               quantity: persistContractQuantityAtPolicyScale(item.quantity, CURRENT_CONTRACT_PRODUCT_POLICY_V3),
+-              unitPrice: toDecimalNumber(item.unitPrice),
+-              totalPrice: toDecimalNumber(item.totalPrice),
++              unitPrice: persistContractMonetaryAmount(item.unitPrice),
++              totalPrice: persistContractMonetaryAmount(item.totalPrice),
+               description: item.description || null,
+               isMandatory: item.isMandatory || false,
+               mandatoryPercentage: toNullableDecimalNumber(item.mandatoryPercentage),
+-              originalTotalPrice: toNullableDecimalNumber(item.originalTotalPrice),
++              originalTotalPrice: persistNullableContractMonetaryAmount(item.originalTotalPrice),
+               stairSystemId: item.stairSystemId || null,
+               stairPartType: item.stairPartType || null
+             }))
+diff --git a/frontend/src/features/contract-creation/CreateContractWizardClient.tsx b/frontend/src/features/contract-creation/CreateContractWizardClient.tsx
+index b47d1b1d..d17a1ea9 100644
+--- a/frontend/src/features/contract-creation/CreateContractWizardClient.tsx
++++ b/frontend/src/features/contract-creation/CreateContractWizardClient.tsx
+@@ -5606,7 +5606,8 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2):
+         cuttingCost: finalProduct.cuttingCost,
+         toolsCost: existingSubServiceCost,
+         finishingCost: resolvedFinishingCost,
+-        totalPrice: finalProduct.totalPrice
++        totalPrice: finalProduct.totalPrice,
++        ...(canonicalPricing?.ok ? { exactAmounts: canonicalPricing.exactAmounts } : {})
+       }
+     } as any;
+ 
+diff --git a/frontend/src/features/contract-creation/hooks/useContractSubmission.ts b/frontend/src/features/contract-creation/hooks/useContractSubmission.ts
+index 9d0ac23b..e1268adf 100644
+--- a/frontend/src/features/contract-creation/hooks/useContractSubmission.ts
++++ b/frontend/src/features/contract-creation/hooks/useContractSubmission.ts
+@@ -18,7 +18,8 @@ import {
+ import { getDeliverableProductEntries, reconcileDeliveryProductReferences } from '../utils/deliveryScheduleController';
+ import { normalizeMandatoryLongitudinalCuttingPricing } from '../utils/mandatoryCuttingPricing';
+ import { hasUnresolvedLegacyRemainingChildAddOns } from '../services/remainingStoneChildAddOnService';
+-import { reconcileContractProductPricing } from '../utils/contractProductPricing';
++import { reconcileContractProductPricing, serializeContractProductMonetaryAmounts } from '../utils/contractProductPricing';
++import { serializeContractServiceRow } from '../utils/contractServiceRows';
+ import { prepareContractSubmissionFinancials } from '../utils/contractSubmissionFinancials';
+ import { reconcileContractProductGraph } from '../utils/contractProductGraphReconciliation';
+ import {
+@@ -301,6 +302,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) =>
+           finishingCost: product.finishingCost ?? finishing.cost
+         });
+       });
++      const monetaryProducts = normalizedProducts.map(serializeContractProductMonetaryAmounts);
+       const {
+         totalAmount,
+         monetaryRounding,
+@@ -363,8 +365,8 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) =>
+           projectId: wizardData.projectId || wizardData.project?.id || '',
+           customer: wizardData.customer,
+           project: wizardData.project,
+-          products: normalizedProducts,
+-          serviceRows: wizardData.serviceRows || [],
++          products: monetaryProducts,
++          serviceRows: (wizardData.serviceRows || []).map(serializeContractServiceRow),
+           deliveries: contractDeliveries,
+           payment: normalizedPayment,
+           discount: wizardData.discount || null
+@@ -378,7 +380,7 @@ export const useContractSubmission = (options: UseContractSubmissionOptions) =>
+           ? new URLSearchParams(window.location.search).get('potentialProjectId') || undefined
+           : undefined,
+         _relations: {
+-          items: normalizedProducts.map((product) => ({
++          items: monetaryProducts.map((product) => ({
+             productId: product.productId,
+             productRowId: product.rowId,
+             productType: product.productType,
+diff --git a/frontend/src/features/contract-creation/services/__tests__/canonicalProductSavePricing.test.ts b/frontend/src/features/contract-creation/services/__tests__/canonicalProductSavePricing.test.ts
+index d965361d..6858b815 100644
+--- a/frontend/src/features/contract-creation/services/__tests__/canonicalProductSavePricing.test.ts
++++ b/frontend/src/features/contract-creation/services/__tests__/canonicalProductSavePricing.test.ts
+@@ -6,7 +6,8 @@ import {
+   type StairLayerConfigurationInput, type ProductOperationsInput
+ } from '@sabalanerp/contract-product-graph';
+ import { canonicalProductSavePricing } from '../../utils/canonicalProductSavePricing';
+-import { getContractPayableTotal, getContractProductPriceComponents, reconcileContractProductPricing } from '../../utils/contractProductPricing';
++import { getContractPayableTotal, getContractUnroundedPayableTotal, getContractProductPriceComponents, reconcileContractProductPricing, serializeContractProductMonetaryAmounts } from '../../utils/contractProductPricing';
++import { createContractServiceRow, recalculateContractServiceRow, serializeContractServiceRow } from '../../utils/contractServiceRows';
+ import { recalculateRemainingChildAddOns } from '../remainingStoneChildAddOnService';
+ import type { ContractProduct } from '../../types/contract.types';
+ 
+@@ -106,3 +107,27 @@ const child = recalculateRemainingChildAddOns({ productType: 'longitudinal', ope
+ assert.ok(child.ok);
+ assert.equal(child.product.totalSubServiceCost, 30, 'remaining-child replay must retain the canonical rounded charge instead of 30.12');
+ console.log('canonicalProductSavePricing all-family tests passed');
++
++const exactPreparedAmount = multiplyContractMonetaryAmounts('12345.678', '1234567.8912');
++assert.equal(exactPreparedAmount, '15241577653.8942336');
++const exactPreparedPricing = canonicalProductSavePricing({ materialBase: exactPreparedAmount, cuttingCost: 0, totalAmount: exactPreparedAmount });
++const exactPrepared = { rowId: 'precise-prepared', productId: 'stone', productType: 'prepared', preparedKind: 'cubic',
++  preparedUnit: 'squareMeter', preparedQuantity: 12345.678, quantity: 12345.678, squareMeters: 12345.678,
++  unitPrice: 1234567.8912, pricePerSquareMeter: 1234567.8912, originalTotalPrice: exactPreparedPricing.materialBase,
++  totalPrice: exactPreparedPricing.totalPrice, meta: { pricing: exactPreparedPricing } } as ContractProduct;
++const exactPreparedSubmission = serializeContractProductMonetaryAmounts(exactPrepared);
++assert.equal(exactPreparedSubmission.totalPrice, exactPreparedAmount);
++assert.equal(getContractUnroundedPayableTotal([exactPrepared]), exactPreparedAmount);
++assert.equal(getContractPayableTotal([exactPrepared]), 15_241_577_654);
++assert.ok(planLegacyProductGraphMigration({ contractId: 'precise-prepared', revision: 1, calculationPolicy: graphPolicy,
++  products: [exactPreparedSubmission] }).ok, 'submission preserves independently replayable prepared money');
++assert.equal(serializeContractProductMonetaryAmounts({ ...exactPrepared, totalPrice: exactPrepared.totalPrice + 1 }).totalPrice,
++  exactPrepared.totalPrice + 1, 'changed witnesses are not replaced by stale precise metadata');
++for (const kind of ['tool', 'cutting', 'finishing'] as const) {
++  const service = createContractServiceRow(kind, { id: 'service', name: 'service', pricePerMeter: 50,
++    unitPrice: 50, calculationBase: 'length' } as any, 0.29);
++  assert.equal(service.totalPrice, 14.5);
++  assert.equal(recalculateContractServiceRow({ ...service, quantity: 1 }, { quantity: 0.29 }).totalPrice, 14.5);
++  assert.equal(serializeContractServiceRow(service).totalPrice, '14.5');
++  assert.equal(getContractPayableTotal([], [service]), 15, 'round services only after exact decimal multiplication');
++}
+diff --git a/frontend/src/features/contract-creation/services/__tests__/cuttingPricingPolicy.test.ts b/frontend/src/features/contract-creation/services/__tests__/cuttingPricingPolicy.test.ts
+index eb95f9a7..aeeb89c1 100644
+--- a/frontend/src/features/contract-creation/services/__tests__/cuttingPricingPolicy.test.ts
++++ b/frontend/src/features/contract-creation/services/__tests__/cuttingPricingPolicy.test.ts
+@@ -73,3 +73,19 @@ for (const scenario of [
+   assert.ok(breakdown);
+   assert.equal(breakdown.reduce((sum, line) => sum + line.cost, 0), scenario.expected);
+ }
++
++// Repeating physical meterage must reach pricing before any display rounding.
++for (const [meters, rate, expected] of [
++  ['6.6666749966666667', 20_000, 133_333],
++  ['6.6666666666666666667', 2_000_000, 13_333_333]
++] as const) {
++  const stock = { id: 'precise-stock', width: 2, length: Number(meters),
++    quantity: 1, isAvailable: true } as RemainingStone;
++  const row = { id: 'precise-child', width: 1, length: Number(meters), quantity: 1 } as StonePartition;
++  const breakdown = calculateRemainingChildCuttingBreakdown({
++    row, stock, rate, longitudinalCutMeters: meters, crossCutMeters: '0'
++  });
++  assert.ok(breakdown);
++  assert.equal(breakdown[0].cost, expected, 'price full meterage instead of a six-decimal display value');
++  assert.equal(breakdown[0].meters, Number(meters));
++}
+diff --git a/frontend/src/features/contract-creation/services/remainingStoneAllocationReplayService.ts b/frontend/src/features/contract-creation/services/remainingStoneAllocationReplayService.ts
+index 1b150260..5829ab51 100644
+--- a/frontend/src/features/contract-creation/services/remainingStoneAllocationReplayService.ts
++++ b/frontend/src/features/contract-creation/services/remainingStoneAllocationReplayService.ts
+@@ -412,8 +412,8 @@ export const replayRemainingStoneAllocations = ({
+       rate: Number(recalculatedChild.cuttingCostPerMeter || 0),
+       sourcePieceQuantities: successfulAllocation.sourcePieceQuantitiesByRow.get(row.id),
+       physicalPieces,
+-      longitudinalCutMeters: successfulAllocation.longitudinalCutMeters,
+-      crossCutMeters: successfulAllocation.crossCutMeters,
++      longitudinalCutMeters: successfulAllocation.canonicalLongitudinalCutMeters ?? successfulAllocation.longitudinalCutMeters,
++      crossCutMeters: successfulAllocation.canonicalCrossCutMeters ?? successfulAllocation.crossCutMeters,
+       sawKerfCm: recalculatedChild.sawKerfEnabled
+         ? Number(recalculatedChild.sawKerfCm || 0)
+         : 0
+diff --git a/frontend/src/features/contract-creation/services/remainingStoneCuttingService.ts b/frontend/src/features/contract-creation/services/remainingStoneCuttingService.ts
+index b6d8fd8d..ad23b378 100644
+--- a/frontend/src/features/contract-creation/services/remainingStoneCuttingService.ts
++++ b/frontend/src/features/contract-creation/services/remainingStoneCuttingService.ts
+@@ -7,8 +7,6 @@ import {
+   parseStableIdentity
+ } from '@sabalanerp/contract-product-graph';
+ 
+-const normalizeCalculatedNumber = (value: number): number => Number(value.toFixed(6));
+-
+ export const calculateRemainingChildCuttingBreakdown = ({
+   row,
+   stock,
+@@ -23,8 +21,8 @@ export const calculateRemainingChildCuttingBreakdown = ({
+   stock: RemainingStone;
+   rate: number;
+   sourcePieceQuantities?: number[];
+-  longitudinalCutMeters?: number;
+-  crossCutMeters?: number;
++  longitudinalCutMeters?: number | string;
++  crossCutMeters?: number | string;
+   physicalPieces?: StonePartition[];
+   sawKerfCm?: number;
+ }): CuttingBreakdownEntry[] | undefined => {
+@@ -61,15 +59,16 @@ export const calculateRemainingChildCuttingBreakdown = ({
+     ['longitudinal', longitudinalCutMeters ?? (packed?.ok ? packed.plan.longitudinalCutMeters : 0)],
+     ['cross', crossCutMeters ?? (packed?.ok ? packed.plan.crossCutMeters : 0)]
+   ] as const).flatMap(([type, canonicalMeters]) => {
+-    const meters = normalizeCalculatedNumber(Number(canonicalMeters));
+-    return meters > 0 ? [{ type, meters }] : [];
++    const quantity = parseCanonicalDecimal(String(canonicalMeters));
++    const meters = Number(quantity);
++    return meters > 0 ? [{ type, meters, quantity }] : [];
+   });
+   const pricing = calculatePricing({
+     policyVersion: 'pricing-v1',
+     roundingPolicyVersion: 'rounding-v2',
+-    lines: cuttingQuantities.map(({ type, meters }) => ({
++    lines: cuttingQuantities.map(({ type, quantity }) => ({
+       lineId: `${row.id}:${type}-cut`,
+-      quantity: parseCanonicalDecimal(String(meters)),
++      quantity,
+       rateToman: parseCanonicalDecimal(String(safeRate))
+     }))
+   });
+diff --git a/frontend/src/features/contract-creation/services/remainingStonePartitionService.ts b/frontend/src/features/contract-creation/services/remainingStonePartitionService.ts
+index b52464ee..585245dd 100644
+--- a/frontend/src/features/contract-creation/services/remainingStonePartitionService.ts
++++ b/frontend/src/features/contract-creation/services/remainingStonePartitionService.ts
+@@ -30,6 +30,8 @@ export interface RemainingPartitionAllocation {
+   sourcePieceQuantitiesByRow: Map<string, number[]>;
+   longitudinalCutMeters: number;
+   crossCutMeters: number;
++  canonicalLongitudinalCutMeters?: string;
++  canonicalCrossCutMeters?: string;
+ }
+ 
+ interface RemainingPartitionAllocationOptions {
+@@ -342,6 +344,8 @@ export const allocateRemainingStonePartitions = (
+     physicalPiecesByRow,
+     sourcePieceQuantitiesByRow,
+     longitudinalCutMeters: normalizeGeometryNumber(Number(plan.longitudinalCutMeters)),
+-    crossCutMeters: normalizeGeometryNumber(Number(plan.crossCutMeters))
++    crossCutMeters: normalizeGeometryNumber(Number(plan.crossCutMeters)),
++    canonicalLongitudinalCutMeters: plan.longitudinalCutMeters,
++    canonicalCrossCutMeters: plan.crossCutMeters
+   };
+ };
+diff --git a/frontend/src/features/contract-creation/utils/canonicalProductSavePricing.ts b/frontend/src/features/contract-creation/utils/canonicalProductSavePricing.ts
+index acd0e82b..cb554c04 100644
+--- a/frontend/src/features/contract-creation/utils/canonicalProductSavePricing.ts
++++ b/frontend/src/features/contract-creation/utils/canonicalProductSavePricing.ts
+@@ -1,4 +1,4 @@
+-import { sumContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
++import { parseCanonicalDecimal, sumContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
+ 
+ type Amount = string | number;
+ 
+@@ -12,12 +12,24 @@ export const canonicalProductSavePricing = (
+   },
+   toolsCost: Amount = 0,
+   finishingCost: Amount = 0
+-) => ({
+-  authority: 'canonical-current-save' as const,
+-  materialBase: Number(facts.materialBase),
+-  mandatoryAmount: Number(facts.mandatoryAmount ?? 0),
+-  cuttingCost: Number(facts.cuttingCost),
+-  toolsCost: Number(toolsCost),
+-  finishingCost: Number(finishingCost),
+-  totalPrice: Number(sumContractMonetaryAmounts([facts.totalAmount, toolsCost, finishingCost]))
+-});
++) => {
++  const exactAmounts = {
++    policyVersion: 'canonical-save-decimal-v1' as const,
++    materialBase: parseCanonicalDecimal(String(facts.materialBase)),
++    mandatoryAmount: parseCanonicalDecimal(String(facts.mandatoryAmount ?? 0)),
++    cuttingCost: parseCanonicalDecimal(String(facts.cuttingCost)),
++    toolsCost: parseCanonicalDecimal(String(toolsCost)),
++    finishingCost: parseCanonicalDecimal(String(finishingCost)),
++    totalPrice: sumContractMonetaryAmounts([facts.totalAmount, toolsCost, finishingCost])
++  };
++  return {
++    authority: 'canonical-current-save' as const,
++    materialBase: Number(facts.materialBase),
++    mandatoryAmount: Number(facts.mandatoryAmount ?? 0),
++    cuttingCost: Number(facts.cuttingCost),
++    toolsCost: Number(toolsCost),
++    finishingCost: Number(finishingCost),
++    totalPrice: Number(exactAmounts.totalPrice),
++    exactAmounts
++  };
++};
+diff --git a/frontend/src/features/contract-creation/utils/contractProductPricing.ts b/frontend/src/features/contract-creation/utils/contractProductPricing.ts
+index 8aa9cc8e..b45007f0 100644
+--- a/frontend/src/features/contract-creation/utils/contractProductPricing.ts
++++ b/frontend/src/features/contract-creation/utils/contractProductPricing.ts
+@@ -2,6 +2,39 @@ import { toFiniteNumber } from '@/lib/numberFormat';
+ import { multiplyContractMonetaryAmounts, roundContractPayableTotal, sumContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
+ import type { ContractProduct, ContractServiceRow } from '../types/contract.types';
+ import { getBillableCuttingCost } from './mandatoryCuttingPricing';
++import { getContractServiceRowExactAmount } from './contractServiceRows';
++
++const exactAmountFields = ['materialBase', 'mandatoryAmount', 'cuttingCost', 'toolsCost', 'finishingCost', 'totalPrice'] as const;
++
++/** Exact witnesses travel with the numeric UI projection, under an explicit producer policy. */
++export const getContractProductExactAmounts = (product: ContractProduct) => {
++  const pricing = product.meta?.pricing;
++  const exact = pricing?.exactAmounts;
++  if (pricing?.authority !== 'canonical-current-save' || exact?.policyVersion !== 'canonical-save-decimal-v1') return undefined;
++  try {
++    if (exactAmountFields.some(field => typeof exact[field] !== 'string' ||
++      Number(exact[field]) !== Number(pricing[field]))) return undefined;
++    if (Number(exact.totalPrice) !== Number(product.totalPrice)) return undefined;
++    const components = sumContractMonetaryAmounts(exactAmountFields.slice(0, -1).map(field => exact[field]));
++    if (components !== sumContractMonetaryAmounts([exact.totalPrice])) return undefined;
++    return exact as Record<typeof exactAmountFields[number], string>;
++  } catch { return undefined; }
++};
++
++export const serializeContractProductMonetaryAmounts = (product: ContractProduct) => {
++  const exact = getContractProductExactAmounts(product);
++  return product.productType === 'prepared' && exact ? {
++    ...product,
++    originalTotalPrice: exact.materialBase,
++    totalPrice: exact.totalPrice
++  } : product;
++};
++
++const getExactProductPayableTotal = (product: ContractProduct): string | number => {
++  const exact = getContractProductExactAmounts(product);
++  return exact && Number(exact.totalPrice) === getContractProductPayableTotal(product)
++    ? exact.totalPrice : getContractProductPayableTotal(product);
++};
+ 
+ export interface ContractProductPriceComponents {
+   savedTotal: number;
+@@ -140,14 +173,14 @@ export const reconcileContractProductPricing = (product: ContractProduct): Contr
+ };
+ 
+ export const getContractProductsPayableTotal = (products: ContractProduct[]): number =>
+-  Number(sumContractMonetaryAmounts(products.map(getContractProductPayableTotal)));
++  Number(sumContractMonetaryAmounts(products.map(getExactProductPayableTotal)));
+ 
+ export const getContractGrossPayableTotal = (
+   products: ContractProduct[],
+   standaloneServiceRows: ContractServiceRow[] = []
+ ): number => Number(sumContractMonetaryAmounts([
+-  getContractProductsPayableTotal(products),
+-  ...standaloneServiceRows.map(row => toFiniteNumber(row.totalPrice))
++  ...products.map(getExactProductPayableTotal),
++  ...standaloneServiceRows.map(getContractServiceRowExactAmount)
+ ]));
+ 
+ export const getContractPayableTotal = (
+@@ -164,8 +197,8 @@ export const getContractUnroundedPayableTotal = (
+   products: ContractProduct[], standaloneServiceRows: ContractServiceRow[] = [], discountAmount = 0
+ ): string => {
+   const source = sumContractMonetaryAmounts([
+-    ...products.map(getContractProductPayableTotal),
+-    ...standaloneServiceRows.map(row => toFiniteNumber(row.totalPrice)),
++    ...products.map(getExactProductPayableTotal),
++    ...standaloneServiceRows.map(getContractServiceRowExactAmount),
+     -Math.max(toFiniteNumber(discountAmount), 0)
+   ]);
+   return source.startsWith('-') ? '0' : source;
+diff --git a/frontend/src/features/contract-creation/utils/contractServiceRows.ts b/frontend/src/features/contract-creation/utils/contractServiceRows.ts
+index f6b92eca..a5934722 100644
+--- a/frontend/src/features/contract-creation/utils/contractServiceRows.ts
++++ b/frontend/src/features/contract-creation/utils/contractServiceRows.ts
+@@ -6,6 +6,7 @@ import type {
+   StoneFinishing,
+   SubService
+ } from '../types/contract.types';
++import { multiplyContractMonetaryAmounts } from '@sabalanerp/contract-product-graph';
+ 
+ type ServiceCatalogItem = SubService | CuttingType | StoneFinishing;
+ 
+@@ -63,7 +64,7 @@ export const createContractServiceRow = (
+     unit: getServiceRowUnitFromCatalog(sourceType, item),
+     quantity: normalizedQuantity,
+     unitPrice: normalizedUnitPrice,
+-    totalPrice: normalizedQuantity * normalizedUnitPrice,
++    totalPrice: Number(multiplyContractMonetaryAmounts(normalizedQuantity, normalizedUnitPrice)),
+     currency: 'تومان',
+     images: Array.isArray((item as any).images) ? [...(item as any).images] : []
+   };
+@@ -80,6 +81,14 @@ export const recalculateContractServiceRow = (
+     ...updates,
+     quantity,
+     unitPrice,
+-    totalPrice: Math.max(quantity, 0) * Math.max(unitPrice, 0)
++    totalPrice: Number(multiplyContractMonetaryAmounts(Math.max(quantity, 0), Math.max(unitPrice, 0)))
+   };
+ };
++
++export const getContractServiceRowExactAmount = (row: ContractServiceRow): string =>
++  multiplyContractMonetaryAmounts(Math.max(row.quantity, 0), Math.max(row.unitPrice, 0));
++
++export const serializeContractServiceRow = (row: ContractServiceRow) => ({
++  ...row,
++  totalPrice: getContractServiceRowExactAmount(row)
++});

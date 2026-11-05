@@ -44,3 +44,7 @@ Validation:
 - Four design-system infrastructure tests and the database ownership architecture check passed. The previously observed two unrelated design-system application assertion failures are not claimed fixed. Full Docker rebuild is still blocked by unrelated deleted package sources.
 
 Operational evidence and private configuration snapshots are retained under `reports/deploy/local-inquiry-recovery-7dc0a8a1d03e42fd84c2d23f35aed1d2` (ignored by Git); database contents remain inside the existing Linux volumes. This is a verified **local** service recovery, not production or historical #411/#419 acceptance. Subsequent business writes belong to the restored copy; blindly switching back to the old source would lose those new writes and is not a rollback procedure.
+
+## Subsequent build repair
+
+The user separately authorized recovery of the deleted package inputs while preserving existing work. That repair restored all 144 missing tracked files and subsequently passed complete backend and production frontend image builds. It also repaired a stale workspace checker and two dependency-install transport/lifecycle issues. The earlier missing-input build limitation above is historical; see [build input recovery](build-input-repair-2026-11-05.md). The unrelated design-system application assertions and historical #411/#419 acceptance remain separate. Serving services were not replaced during the build repair.

@@ -11,17 +11,29 @@ assert.equal(
   'Frontend must keep using the repository-local canonical graph package.'
 );
 
-const frontendBuild = compose.match(
-  /frontend:\s*\n\s*build:\s*\n([\s\S]*?)\n\s*restart:/
-)?.[1] ?? '';
+// Inspect only this mapping's indented children. Sibling keys such as image
+// and restart may occur before or after build without changing its meaning.
+function mappingBody(source, key, indentation) {
+  const lines = source.split(/\r?\n/);
+  const start = lines.findIndex(line => new RegExp(`^ {${indentation}}${key}:\\s*(?:#.*)?$`).test(line));
+  if (start < 0) return '';
+  let end = start + 1;
+  while (end < lines.length) {
+    const line = lines[end];
+    if (line.trim() && !line.trimStart().startsWith('#') && line.search(/\S/) <= indentation) break;
+    end++;
+  }
+  return lines.slice(start + 1, end).join('\n');
+}
+const frontendBuild = mappingBody(mappingBody(compose, 'frontend', 2), 'build', 4);
 assert.match(
   frontendBuild,
-  /^\s*context:\s*\.\s*$/m,
+  /^ {6}context:\s*\.\s*$/m,
   'Frontend production build context must be the repository root.'
 );
 assert.match(
   frontendBuild,
-  /^\s*dockerfile:\s*frontend\/Dockerfile\s*$/m,
+  /^ {6}dockerfile:\s*frontend\/Dockerfile\s*$/m,
   'Frontend production build must use frontend/Dockerfile from the root context.'
 );
 
@@ -45,10 +57,16 @@ assert.match(
   /COPY frontend \./,
   'Frontend source must be copied from the repository-root build context.'
 );
-assert.match(
-  dockerfile,
-  /COPY --from=builder \/packages\/contract-product-graph \/packages\/contract-product-graph/,
-  'Runtime image must preserve the target of the frontend package symlink.'
+const runtimePackageStage = dockerfile.match(
+  /^COPY --from=(\S+) \/packages\/contract-product-graph \/packages\/contract-product-graph\s*$/m
+)?.[1];
+assert.ok(
+  runtimePackageStage === 'builder' || runtimePackageStage === 'production-builder',
+  'Runtime image must preserve the target of the frontend package symlink from its compiled builder.'
 );
+if (runtimePackageStage === 'production-builder') {
+  assert.match(dockerfile, /^FROM builder AS production-builder\s*$/im,
+    'Production builder must inherit the canonical packages compiled by builder.');
+}
 
 console.log('frontend Docker workspace dependency check passed');

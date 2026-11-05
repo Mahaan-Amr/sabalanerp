@@ -42,7 +42,7 @@ RUN --mount=type=cache,target=/root/.npm \
   && cd /packages/contract-product-graph \
   && npm prune --omit=dev \
   && cd /app \
-  && npm ci --prefer-offline --no-audit --fund=false
+  && PRISMA_SKIP_POSTINSTALL_GENERATE=true npm ci --prefer-offline --no-audit --fund=false
 
 COPY backend/prisma ./prisma
 COPY backend/tsconfig.json ./
@@ -50,6 +50,7 @@ COPY backend/tsconfig.cutover.json ./
 COPY backend/scripts/shipment-statement-cutover.ts ./scripts/shipment-statement-cutover.ts
 COPY backend/src ./src
 
+# Generate once the real schema is present, rather than during dependency install.
 RUN npx prisma generate
 # Bound compiler memory independently of the production runtime's default heap.
 RUN NODE_OPTIONS=--max-old-space-size=3072 npm run build
@@ -76,7 +77,13 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
   ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: %s\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$DEBIAN_MIRROR" "$DEBIAN_SECURITY_MIRROR" > /etc/apt/sources.list.d/debian.sources \
+# The preceding layer installs CA certificates. Use verified HTTPS for the
+# official archives before downloading large application packages; keep any
+# explicitly configured private mirror unchanged.
+RUN sed -i \
+  -e 's|http://deb.debian.org/|https://deb.debian.org/|g' \
+  -e 's|http://security.debian.org/|https://security.debian.org/|g' \
+  /etc/apt/sources.list.d/debian.sources \
   && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \
   apt-get -o Acquire::ForceIPv4=true update \
   && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= \

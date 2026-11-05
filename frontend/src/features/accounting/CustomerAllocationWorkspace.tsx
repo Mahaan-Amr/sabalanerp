@@ -18,6 +18,16 @@ type AllocationCommand = {
 function responseStatus(error: unknown) {
   return (error as { response?: { status?: number } })?.response?.status;
 }
+function accountingContextAt(context: CustomerFinanceContext | undefined, date: string) {
+  const at = new Date(`${date}T00:00:00.000Z`).getTime();
+  return {
+    periods: context?.periods.filter(row => new Date(row.startsAt).getTime() <= at && new Date(row.endsAt).getTime() >= at) || [],
+    rules: context?.rules.filter(row => new Date(row.effectiveFrom).getTime() <= at && (!row.effectiveTo || new Date(row.effectiveTo).getTime() >= at)) || [],
+  };
+}
+function preferredContextId(current: string, choices: { id: string }[]) {
+  return choices.some(row => row.id === current) ? current : choices.length === 1 ? choices[0].id : '';
+}
 
 export default function CustomerAllocationWorkspace({ accountId, account, onRefresh, sourceSelection }: {
   accountId: string; account: CustomerAccount; onRefresh: () => Promise<void>; sourceSelection?: { key: string; revision: number };
@@ -47,9 +57,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
   const plan = useMemo(() => customerAllocationPlan(data, draft), [data, draft]);
   const locked = pending || uncertain || posted;
   const canAllocate = account.capabilities.canManageTreasury;
-  const at = new Date(`${date}T00:00:00.000Z`).getTime();
-  const matchingPeriods = context?.periods.filter(row => new Date(row.startsAt).getTime() <= at && new Date(row.endsAt).getTime() >= at) || [];
-  const matchingRules = context?.rules.filter(row => new Date(row.effectiveFrom).getTime() <= at && (!row.effectiveTo || new Date(row.effectiveTo).getTime() >= at)) || [];
+  const { periods: matchingPeriods, rules: matchingRules } = accountingContextAt(context, date);
   const validContext = matchingPeriods.some(row => row.id === periodId) && matchingRules.some(row => row.id === ruleId) && date <= todayTehran();
   const validEvidence = reason.trim().length >= 8 && Boolean(reference.trim()) && validContext;
   const unusableSelectedSource = draft.enabled.some(key => !data.sources.some(row => row.key === key && !row.unavailable));
@@ -66,11 +74,9 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
   }, [sourceSelection, canAllocate, locked]);
   useEffect(() => {
     if (!context) return;
-    const timestamp = new Date(`${date}T00:00:00.000Z`).getTime();
-    const periods = context.periods.filter(row => new Date(row.startsAt).getTime() <= timestamp && new Date(row.endsAt).getTime() >= timestamp);
-    const rules = context.rules.filter(row => new Date(row.effectiveFrom).getTime() <= timestamp && (!row.effectiveTo || new Date(row.effectiveTo).getTime() >= timestamp));
-    setPeriodId(current => periods.some(row => row.id === current) ? current : periods.length === 1 ? periods[0].id : '');
-    setRuleId(current => rules.some(row => row.id === current) ? current : rules.length === 1 ? rules[0].id : '');
+    const { periods, rules } = accountingContextAt(context, date);
+    setPeriodId(current => preferredContextId(current, periods));
+    setRuleId(current => preferredContextId(current, rules));
   }, [context, date]);
 
   const loadContext = useCallback(async () => {
@@ -80,11 +86,9 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
       const response = await accountingAPI.getCustomerWorkspaceContext(accountId);
       if (mounted.current && sequence === contextSequence.current) {
         const next: CustomerFinanceContext = response.data.data;
-        const timestamp = new Date(`${date}T00:00:00.000Z`).getTime();
-        const periods = next.periods.filter(row => new Date(row.startsAt).getTime() <= timestamp && new Date(row.endsAt).getTime() >= timestamp);
-        const rules = next.rules.filter(row => new Date(row.effectiveFrom).getTime() <= timestamp && (!row.effectiveTo || new Date(row.effectiveTo).getTime() >= timestamp));
-        setPeriodId(current => periods.some(row => row.id === current) ? current : periods.length === 1 ? periods[0].id : '');
-        setRuleId(current => rules.some(row => row.id === current) ? current : rules.length === 1 ? rules[0].id : '');
+        const { periods, rules } = accountingContextAt(next, date);
+        setPeriodId(current => preferredContextId(current, periods));
+        setRuleId(current => preferredContextId(current, rules));
         setContext(next);
       }
     } catch (failure) {
@@ -139,6 +143,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
         setUncertain(true);
         setError('نتیجه ثبت مشخص نیست؛ با «تلاش دوباره همان درخواست» نتیجه را بررسی کنید. اطلاعات درخواست تا روشن‌شدن نتیجه حفظ می‌شود.');
       } else {
+        setUncertain(false);
         setConfirmed(false);
         setError(accountingFailureMessage(failure, 'تخصیص ثبت نشد؛ اطلاعات را بررسی کنید.'));
         if (status === 409) {

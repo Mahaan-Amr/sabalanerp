@@ -52,7 +52,7 @@ export default function CustomerAccountDetailPage() {
     const request = ++sequence.current;
     setLoading(true); setError(null);
     try { const response = await accountingAPI.getCustomerWorkspace(accountId); if (request === sequence.current) setData(response.data.data); }
-    catch (reason) { if (request === sequence.current) { setData(undefined); setError(accountingFailureMessage(reason, 'پرونده مالی مشتری بارگیری نشد.')); } }
+    catch (reason) { if (request === sequence.current) setError(accountingFailureMessage(reason, 'پرونده مالی مشتری بارگیری نشد.')); }
     finally { if (request === sequence.current) setLoading(false); }
   }, [accountId]);
   useEffect(() => { setData(undefined); setTab(searchParams.get('tab') === 'allocation' || searchParams.get('variant') === 'A' ? 'allocation' : 'overview'); setAllocationSource(undefined); setSuccess(undefined); setOperation(undefined); setItemId(undefined); setOperationsOpen(false); setEvidence(undefined); setSearch(''); setItemSearch(''); setItemFilter('open'); void load(); return () => { sequence.current++; }; }, [load, searchParams]);
@@ -103,7 +103,8 @@ export default function CustomerAccountDetailPage() {
     {loading && <ErpInlineState kind="empty" title="در حال بارگیری پرونده مالی…" />}
     {error && <ErpInlineState kind="error" title={error} action={{ label: 'تلاش دوباره', onClick: () => void load() }} />}
     {success && <ErpInlineState kind="success" title={success} />}
-    {data && !loading && <>
+    {/* Refresh keeps mounted drafts and their unresolved command identities. */}
+    {data && <>
       <div className="flex flex-wrap gap-2">
         {data.capabilities.canManageTreasury && <><ErpButton label="ثبت دریافت" icon={FaMoneyBillWave} tone="success" variant="solid" onClick={() => openOperation('RECEIPT')} /><ErpButton label="تخصیص به بدهی" onClick={() => openOperation('ALLOCATION')} /></>}
         {(operations.length > 0 || data.capabilities.canExport) && <ErpButton label="سایر عملیات" tone="neutral" onClick={() => setOperationsOpen(true)} />}

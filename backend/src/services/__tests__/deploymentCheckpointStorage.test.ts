@@ -22,6 +22,10 @@ const run = async () => {
     await fs.promises.mkdir(path.join(enumerationRoot, 'empty-historical-directory'), { recursive: true });
     const protectedArchive = path.join(enumerationRoot, 'protected.sabrec');
     await fs.promises.writeFile(protectedArchive, 'retained-checkpoint');
+    const oldIncomplete = path.join(enumerationRoot, 'old-checkpoint.sabrec.uploading');
+    await fs.promises.writeFile(oldIncomplete, 'incomplete-but-protected');
+    const oldTime = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    await fs.promises.utimes(oldIncomplete, oldTime, oldTime);
     const originalReaddir = fs.promises.readdir;
     let enumerationAttempts = 0;
     try {
@@ -61,6 +65,8 @@ const run = async () => {
       );
       assert.equal(enumerationAttempts, 1, 'permission failures must not be hidden by storage retries');
       assert.equal(await fs.promises.readFile(protectedArchive, 'utf8'), 'retained-checkpoint');
+      assert.equal(await fs.promises.readFile(oldIncomplete, 'utf8'), 'incomplete-but-protected',
+        'availability checks must never delete incomplete upload custody');
     } finally {
       fs.promises.readdir = originalReaddir;
     }

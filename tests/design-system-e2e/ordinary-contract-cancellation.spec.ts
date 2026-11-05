@@ -26,8 +26,8 @@ for (const width of [1280, 390]) test(`ordinary editor stages cancellation and p
       signature: null },
   };
   let immediateCancellations = 0;
-  let holdStatus = false;
-  let releaseStatus: (() => void) | undefined;
+  let holdConfirmationStatus = false;
+  let releaseConfirmationStatus: (() => void) | undefined;
   const saves: any[] = [];
   await loginAsAdmin(page);
   await page.setViewportSize({ width, height: 900 });
@@ -35,9 +35,9 @@ for (const width of [1280, 390]) test(`ordinary editor stages cancellation and p
     contentType: 'application/json', body: JSON.stringify({ success: true, data: route.request().url().endsWith('/acquire')
       ? { session: { leaseToken: 'qa-cancellation-lease' }, recovery: null } : {} }) }));
   await page.route(`**/sales/contracts/${id}/confirmation-status`, async route => {
-    if (holdStatus) await new Promise<void>(resolve => { releaseStatus = resolve; });
-    return route.fulfill({ status: 200,
-      contentType: 'application/json', body: JSON.stringify({ success: true, data: { contractStatus: 'DRAFT', commercialFlowVersion: 1 } }) });
+    if (holdConfirmationStatus) await new Promise<void>(resolve => { releaseConfirmationStatus = resolve; });
+    return route.fulfill({ json: { success: true, data: { contractStatus: 'DRAFT', commercialFlowVersion: 1,
+      ...(holdConfirmationStatus ? { sessionStatus: 'PENDING' } : {}) } } });
   });
   await page.route(`**/sales/contracts/${id}/cancel`, route => {
     immediateCancellations += 1;
@@ -60,16 +60,14 @@ for (const width of [1280, 390]) test(`ordinary editor stages cancellation and p
   const pending = page.getByText('لغو قرارداد با «ذخیره تغییرات» ثبت می‌شود.', { exact: true });
   await expect(pending).toBeVisible();
   await expect(page.getByRole('button', { name: 'ارسال برای تایید', exact: true })).toBeDisabled();
-  holdStatus = true;
+  // A status response captured before withdrawal must not restore the old local intent.
+  holdConfirmationStatus = true;
   await page.getByRole('button', { name: 'بروزرسانی وضعیت', exact: true }).click();
-  await expect.poll(() => Boolean(releaseStatus)).toBe(true);
+  await expect.poll(() => Boolean(releaseConfirmationStatus)).toBe(true);
   await page.getByRole('button', { name: 'انصراف از لغو', exact: true }).click();
   await expect(pending).toBeHidden();
-  holdStatus = false;
-  const statusResponse = page.waitForResponse(response => response.url().endsWith('/confirmation-status'));
-  releaseStatus?.();
-  await statusResponse;
-  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  releaseConfirmationStatus?.();
+  await expect(page.getByRole('button', { name: 'ارسال مجدد کد', exact: true })).toBeEnabled();
   await expect(pending).toBeHidden();
   await cancel.click();
   await page.getByRole('button', { name: 'ذخیره تغییرات', exact: true }).click();

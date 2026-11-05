@@ -45,13 +45,13 @@ services:
     restart: unless-stopped
 
   clamav:
-    image: sabalanerp-clamav:repair-local
+    image: sabalanerp-clamav:c3sl-local
     platform: linux/amd64
     extra_hosts:
       - "sabalan-clamav-egress:host-gateway"
     build:
       context: .
-      dockerfile: deploy/clamav/Dockerfile
+      dockerfile: deploy/clamav/Dockerfile.local
     environment:
       CLAMAV_UPDATE_INTERVAL_SECONDS: "7200"
     volumes:

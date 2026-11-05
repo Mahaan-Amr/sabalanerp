@@ -4545,34 +4545,26 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       const statusData = response.data.data;
       setWizardData(current => {
         const existingSignature = current.signature;
-        if (existingSignature?.contractId !== signatureContractId) return current;
-        return { ...current, signature: {
-          ...(existingSignature || {
-            phoneNumber: null,
-            contractId: signatureContractId,
-            confirmationSent: false,
-            confirmationStatus: null,
-            linkExpiresAt: null,
-            otpExpiresAt: null,
-            attemptsUsed: 0,
-            maxAttempts: 5,
-            resendCount: 0,
-            lastSentAt: null,
-            lastOpenedAt: null
-          }),
-          phoneNumber: statusData.phoneNumber || existingSignature?.phoneNumber || null,
-          contractStatus: statusData.contractStatus || existingSignature?.contractStatus || null,
-          commercialFlowVersion: statusData.commercialFlowVersion ?? existingSignature?.commercialFlowVersion,
-          confirmationSent: !!statusData.sessionStatus,
-          confirmationStatus: statusData.sessionStatus,
-          linkExpiresAt: statusData.linkExpiresAt || null,
-          otpExpiresAt: statusData.otpExpiresAt || null,
-          attemptsUsed: statusData.attemptsUsed || 0,
-          maxAttempts: statusData.maxAttempts || 5,
-          resendCount: statusData.resendCount || 0,
-          lastSentAt: statusData.lastSentAt || null,
-          lastOpenedAt: statusData.lastOpenedAt || null
-        } };
+        if (!existingSignature || existingSignature.contractId !== signatureContractId) return current;
+        // Status reads must preserve local edits made while the request was in flight.
+        return {
+          ...current,
+          signature: {
+            ...existingSignature,
+            phoneNumber: statusData.phoneNumber || existingSignature.phoneNumber || null,
+            contractStatus: statusData.contractStatus || existingSignature.contractStatus || null,
+            commercialFlowVersion: statusData.commercialFlowVersion ?? existingSignature.commercialFlowVersion,
+            confirmationSent: !!statusData.sessionStatus,
+            confirmationStatus: statusData.sessionStatus,
+            linkExpiresAt: statusData.linkExpiresAt || null,
+            otpExpiresAt: statusData.otpExpiresAt || null,
+            attemptsUsed: statusData.attemptsUsed || 0,
+            maxAttempts: statusData.maxAttempts || 5,
+            resendCount: statusData.resendCount || 0,
+            lastSentAt: statusData.lastSentAt || null,
+            lastOpenedAt: statusData.lastOpenedAt || null
+          }
+        };
       });
       clearSignatureError(errorSource);
     } catch (error: any) {

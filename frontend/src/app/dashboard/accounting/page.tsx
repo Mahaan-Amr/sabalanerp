@@ -1,18 +1,17 @@
 'use client';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { FaBalanceScale, FaClipboardCheck, FaFileInvoice, FaMoneyCheckAlt, FaSync } from 'react-icons/fa';
 import {
-  FaBalanceScale,
-  FaFileInvoice,
-  FaSync,
-} from 'react-icons/fa';
-import {
+  ErpActionGrid,
   ErpInlineState,
   ErpNeumorphicActionGrid,
   ErpPage,
 } from '@/components/erp';
 import { accountingAPI, hrHiringMetricsAPI } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { AccountingWorkInbox } from '@/features/accounting/AccountingWorkInbox';
+import { accountingGroupHref, accountingNavigationGroups } from '@/features/accounting/accountingNavigation';
 import { AccountingFinancialTrend } from '@/features/accounting/AccountingFinancialTrend';
 import { AccountingDashboardSkeleton, AccountingOperationalMetricGrid } from '@/features/accounting/AccountingDashboardPresentation';
 import {
@@ -257,11 +256,9 @@ export default function AccountingDashboardPage() {
         { label: 'به‌روزرسانی', icon: FaSync, onClick: refreshDashboard, tone: 'neutral' },
       ]}
     >
-      <ErpInlineState
-        kind="permission"
-        title={<span>مرجع رسمی حسابداری، دفترکل جدید است.<small className="mt-1 block font-normal">رکوردهای مالی قدیمی فقط نمای عملیاتی و ارجاع سپیدار هستند و مانده رسمی نمی‌سازند.</small></span>}
-        action={{ label: 'ورود به دفترکل و کدینگ', onClick: () => router.push('/dashboard/accounting/ledger'), tone: 'primary' }}
-      />
+      <ErpInlineState kind="permission"
+        title="رکوردهای مالی قدیمی، مانده رسمی دفترکل جدید نمی‌سازند. مرجعیت نهایی پس از تطبیق و انتقال کنترل‌شده تعیین می‌شود."
+        action={{ label: 'دفترکل و کدینگ', onClick: () => router.push('/dashboard/accounting/ledger'), tone: 'primary' }} />
       {workspaceState.stale && (
         <ErpInlineState
           kind="stale"
@@ -273,6 +270,7 @@ export default function AccountingDashboardPage() {
         <p role="status" className="sds-text-muted text-sm">در حال به‌روزرسانی داده‌های حسابداری…</p>
       )}
 
+      <AccountingWorkInbox contracts={workspace.queues?.contracts || []} />
       <AccountingOperationalMetricGrid commandCenter={commandCenter} hrMetrics={dashboardHrMetrics} />
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,.9fr)]">
@@ -285,6 +283,12 @@ export default function AccountingDashboardPage() {
           />
         </div>
       </div>
+
+      <ErpActionGrid columns={4} compact items={accountingNavigationGroups.map((group) => ({
+        title: group.label, description: group.description, href: accountingGroupHref(group.id),
+        icon: ({ review: FaClipboardCheck, money: FaMoneyCheckAlt, records: FaBalanceScale, reports: FaBalanceScale })[group.id],
+        tone: 'primary' as const,
+      }))} />
 
       <ErpNeumorphicActionGrid
         title="دسترسی‌های مالی"

@@ -85,6 +85,38 @@ const run = async () => {
     }, async () => ({ authorizationRevision: 1, grants: [{ purpose: purposes[0] }] as never }));
     assert.equal(admitted.allowed, true, `${path} must accept an explicit Partner-domain grant`);
   }
+  // Approval and draft management are independent permissions. The review detail
+  // belongs to the former; the list remains protected by the latter.
+  const approverOnly = { ...clientWith('accounting'), featurePermission: {
+    ...emptyClient.featurePermission,
+    findMany: async () => [
+      { id: 'approve', userId: 'operator', workspace: 'accounting', feature: 'accounting_records_approve_void', permissionLevel: 'edit', isActive: true, expiresAt: null },
+      { id: 'no-manage', userId: 'operator', workspace: 'accounting', feature: 'accounting_invoice_candidates_manage', permissionLevel: 'none', isActive: true, expiresAt: null },
+    ],
+  } };
+  const review = await resolveWorkspaceRouteAvailability(approverOnly as never, {
+    userId: 'operator', role: 'USER', path: '/dashboard/accounting/invoice-candidates/record-1',
+  });
+  const list = await resolveWorkspaceRouteAvailability(approverOnly as never, {
+    userId: 'operator', role: 'USER', path: '/dashboard/accounting/invoice-candidates',
+  });
+  assert.equal(review.allowed, true, 'authorized approver must be able to open exact invoice review');
+  assert.equal(list.allowed, false, 'approval alone must not grant candidate-list management');
+  const managerOnly = { ...clientWith('accounting'), featurePermission: {
+    ...emptyClient.featurePermission,
+    findMany: async () => [
+      { id: 'no-approve', userId: 'operator', workspace: 'accounting', feature: 'accounting_records_approve_void', permissionLevel: 'none', isActive: true, expiresAt: null },
+      { id: 'manage', userId: 'operator', workspace: 'accounting', feature: 'accounting_invoice_candidates_manage', permissionLevel: 'edit', isActive: true, expiresAt: null },
+    ],
+  } };
+  const managerReview = await resolveWorkspaceRouteAvailability(managerOnly as never, {
+    userId: 'operator', role: 'USER', path: '/dashboard/accounting/invoice-candidates/record-1',
+  });
+  const managerList = await resolveWorkspaceRouteAvailability(managerOnly as never, {
+    userId: 'operator', role: 'USER', path: '/dashboard/accounting/invoice-candidates',
+  });
+  assert.equal(managerReview.allowed, false, 'candidate management must not grant approval review access');
+  assert.equal(managerList.allowed, true, 'candidate manager must retain list access');
   console.log('Workspace direct-route authority matrix tests passed.');
 };
 

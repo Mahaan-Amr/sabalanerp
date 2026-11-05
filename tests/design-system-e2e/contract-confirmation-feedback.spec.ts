@@ -14,11 +14,13 @@ for (const surface of ['detail', 'list'] as const) for (const width of [1280, 39
     let attempts = 0;
     let refreshHeld = false;
     let releaseRefresh: (() => void) | undefined;
+    let releaseConfirmation: (() => void) | undefined;
     // Intercept every Partner command: these browser assertions never submit customer SMS.
     await page.route('**/api/partner/**', async route => {
       const path = new URL(route.request().url()).pathname;
       if (path.endsWith('/confirmation') && route.request().method() === 'POST') {
         attempts++;
+        if (attempts === 2) await new Promise<void>(resolve => { releaseConfirmation = resolve; });
         return route.fulfill({ json: attempts === 1
           ? { success: false, error: 'ارسال پیامک تأیید انجام نشد.' }
           : { success: true, data: { messageId: 'qa-provider-accepted' } } });
@@ -51,16 +53,16 @@ for (const surface of ['detail', 'list'] as const) for (const width of [1280, 39
     await expect.poll(() => attempts).toBe(1);
     await expect(send).toBeEnabled();
     await expect(success).toHaveCount(0);
-    // Keep the authenticated browser's current epoch. Fix time while the
-    // install/pause commands cross IPC, then restore advancing Date semantics
-    // while paused so only explicit runFor calls consume the success lifetime.
+    // Click with animation frames running; pause only after the request arrives.
+    // Hold its response so no success lifetime elapses before the clock is paused.
     const confirmationClockStart = await page.evaluate(() => Date.now());
     await page.clock.install({ time: confirmationClockStart });
     await page.clock.setFixedTime(confirmationClockStart);
-    await page.clock.pauseAt(confirmationClockStart);
-    await page.clock.setSystemTime(confirmationClockStart);
     await send.click();
     await expect.poll(() => attempts).toBe(2);
+    await page.clock.pauseAt(confirmationClockStart);
+    await page.clock.setSystemTime(confirmationClockStart);
+    releaseConfirmation?.();
     await expect(success).toBeVisible();
     if (surface === 'list') await expect.poll(() => refreshHeld).toBe(true);
     // Start the paused browser clock before the successful response, so UI polling

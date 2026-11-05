@@ -67,6 +67,9 @@ for (const width of [1280, 390]) test(`Partner confirmation keeps private respon
     if (path.endsWith('/creation-context')) return route.fulfill({ json: { success: true, data: { schemaVersion: 1, kind: 'ORDINARY_SALES' } } });
     if (path.endsWith('/changes-v2')) return route.fulfill({ json: { success: true, data: { version: `sha256-v1:${String(revision).padStart(64, '0')}` } } });
     let data: unknown;
+    if (path.endsWith('/creation-context')) return route.fulfill({ json: { success: true,
+      data: { schemaVersion: 1, kind: 'PARTNER', actorId: 'qa-partner-actor', profileId: 'qa-partner-profile',
+        writable: true, inquiryIds: [], customers: [], projects: [], recoverableDrafts: [] } } });
     if (path.endsWith('/query-v2')) data = { cases: [{
       view: { ...fixture.partner, state: 'DRAFT', commercialFlowVersion: 1, pricingState: 'AWAITING_INQUIRY', customerConfirmationState: 'NOT_SENT', products: fixture.partner.products.map(({ wholesaleUnitPrice, ...row }) => row), sabalanTotals: undefined, sabalanPaymentPlan: undefined, resaleDifference: undefined },
       commercial: { version: 1, revision, status: approved ? 'DRAFT' : 'NOTE', salesApproved: approved,
@@ -81,7 +84,7 @@ for (const width of [1280, 390]) test(`Partner confirmation keeps private respon
     else data = null;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data }) });
   });
-  await page.goto(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(fixture.partner.owner.caseId)}`);
+  await page.goto(`/dashboard/sales/contracts?caseId=${encodeURIComponent(fixture.partner.owner.caseId)}`);
   await page.getByRole('button', { name: 'ارسال پیامک تأیید', exact: true }).click();
   await expect(page.getByText('پیامک با موفقیت ارسال شد ✨', { exact: true })).toBeVisible();
   await expect(page.getByText('654321', { exact: true })).toHaveCount(0);
@@ -109,6 +112,9 @@ for (const width of [1280, 390]) test(`Partner approval creates draft and reject
     const input = route.request().postData() ? route.request().postDataJSON() : {};
     if (path.endsWith('/changes-v2')) return route.fulfill({ json: { success: true, data: { version: `sha256-v1:${'4'.repeat(64)}` } } });
     let data: unknown = null;
+    if (path.endsWith('/creation-context')) return route.fulfill({ json: { success: true,
+      data: { schemaVersion: 1, kind: 'PARTNER', actorId: 'qa-partner-actor', profileId: 'qa-partner-profile',
+        writable: true, inquiryIds: [], customers: [], projects: [], recoverableDrafts: [] } } });
     if (path.endsWith('/query-v2')) data = { cases: [{
       view: { ...fixture.partner, state: cancelled ? 'CANCELLED' : 'DRAFT', commercialFlowVersion: 1,
         pricingState: 'AWAITING_INQUIRY', customerConfirmationState: 'NOT_SENT',
@@ -130,7 +136,7 @@ for (const width of [1280, 390]) test(`Partner approval creates draft and reject
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data }) });
   });
-  await page.goto(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(fixture.partner.owner.caseId)}`);
+  await page.goto(`/dashboard/sales/contracts?caseId=${encodeURIComponent(fixture.partner.owner.caseId)}`);
   await expect(page.getByRole('button', { name: 'امضا', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'رد', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'تایید', exact: true }).click();

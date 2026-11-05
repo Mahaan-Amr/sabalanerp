@@ -17,10 +17,18 @@ const compose = (repositoryRoot: string, command: string) => {
 
 /** Exact-schema concurrency database without copying unrelated local data. */
 export async function createPartnerLifecycleDatabase(input: { repositoryRoot: string; sourceDatabaseUrl: string }) {
+  const source = new URL(input.sourceDatabaseUrl);
+  const sourceName = source.pathname.slice(1);
+  if (source.hostname !== '127.0.0.1' || source.port !== '55432'
+    || !(sourceName === 'sabalanerp' || /^sabalanerp_qa_[a-z0-9_]{1,48}$/.test(sourceName))) {
+    throw new Error('Unsafe Partner lifecycle source database');
+  }
   const runId = randomBytes(8).toString('hex');
   const databaseName = `sabalanerp_concurrency_${runId}`;
   if (!namePattern.test(databaseName)) throw new Error('Unsafe Partner lifecycle database name');
-  const databaseUrl = temporaryDatabaseUrl(input.sourceDatabaseUrl, databaseName);
+  const localBase = new URL(input.sourceDatabaseUrl);
+  localBase.pathname = '/sabalanerp';
+  const databaseUrl = temporaryDatabaseUrl(localBase.toString(), databaseName);
   const composeFile = path.join(input.repositoryRoot, 'docker-compose.local.yml');
   const status = execFileSync('docker', ['compose', '-f', composeFile, 'ps', '--format', 'json', 'postgres'],
     { cwd: input.repositoryRoot, encoding: 'utf8', timeout: 30_000 });
@@ -29,7 +37,7 @@ export async function createPartnerLifecycleDatabase(input: { repositoryRoot: st
   compose(input.repositoryRoot,
     `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'CREATE DATABASE ${quoted}'`);
   try {
-    compose(input.repositoryRoot, `set -o pipefail; pg_dump --schema-only --username postgres --dbname sabalanerp ` +
+    compose(input.repositoryRoot, `set -o pipefail; pg_dump --schema-only --username postgres --dbname ${sourceName} ` +
       `--no-owner --no-privileges | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
   } catch (error) {
     compose(input.repositoryRoot,

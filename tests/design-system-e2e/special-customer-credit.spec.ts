@@ -1,3 +1,4 @@
+import { scopeContractNavigationFixture } from './support/contract-navigation-fixture';
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { loginAsAdmin, seedContractNavigation, setViewportAndZoom, setTheme, assertNoHorizontalOverflow } from './support/design-system';
@@ -13,7 +14,7 @@ for (const width of [1280, 390]) {
       return { status: response.status, body: await response.json() };
     }, { path, method, body });
     try {
-      const created = await request('/crm/customers', 'POST', { firstName: 'آزمون', lastName, customerType: 'Individual', activityCategory: 'NONE', status: 'Active', phoneNumbers: [], projectAddresses: [] });
+      const created = await request('/crm/customers', 'POST', { firstName: 'آزمون', lastName, customerType: 'Individual', activityCategory: 'ARCHITECT', status: 'Active', phoneNumbers: [], projectAddresses: [] });
       expect(created.status, JSON.stringify(created.body)).toBe(201);
       customerId = created.body.data.id;
       await page.goto(`/dashboard/crm/customers/${customerId}`);
@@ -56,8 +57,10 @@ for (const width of [1280, 390]) {
             lengthUnit: 'm', widthUnit: 'cm', isMandatory: false, mandatoryPercentage: 0, meta: { isLayer: false },
             remainingStones: [], cutDetails: [], appliedSubServices: [] }], serviceRows: [], deliveries: [],
           payment: { payments: [], currency: 'تومان', totalContractAmount: 1000 }, discount: null, signature: null,
-        } });
-      await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=7');
+        } }));
+      }, { customerId, lastName });
+      await scopeContractNavigationFixture(page);
+      await page.goto('/dashboard/sales/contracts/create?fresh=1&returnTo=contract&step=7');
       await page.locator('main.sds-workspace').getByRole('button', { name: /^افزودن پرداخت/ }).click();
       const paymentDialog = page.getByRole('dialog', { name: 'افزودن پرداخت', exact: true });
       const method = paymentDialog.getByRole('combobox', { name: 'نوع پرداخت' });

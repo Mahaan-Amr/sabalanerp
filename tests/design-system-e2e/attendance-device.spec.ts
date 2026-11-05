@@ -90,7 +90,7 @@ test('shadow initial review shows latest scan and saves inside or unknown withou
   await page.screenshot({ path: testInfo.outputPath('shadow-initial-review-mobile.png') });
 });
 
-test('local machine delivery is applied automatically and stays idempotent; mobile review is accessible', async ({ page }, testInfo) => {
+test('ordinary valid device delivery appears automatically without a fabricated Guard confirmation and stays idempotent; mobile review is accessible', async ({ page }, testInfo) => {
   // The preceding shadow-review case uses this same isolated synthetic terminal.
   await db.attendancePunch.deleteMany({ where: { terminalId } });
   await db.attendanceDeviceAudit.deleteMany({ where: { terminalId, action: 'CLOCK_MEASURED' } });
@@ -105,13 +105,18 @@ test('local machine delivery is applied automatically and stays idempotent; mobi
   const payload = { punches: [{ deviceCode: '1', occurredAt: at, verifyMode: 1, inOutRaw: 255 }], readOk: true, clockSample: { offsetMs: 0, uncertaintyMs: 1000, measuredAt: new Date().toISOString() } };
   const response = await page.request.post(`/api/attendance-device/connector/${terminalId}/punches`, { headers: { Authorization: `Bearer ${terminalSecret}` }, data: payload });
   expect(response.ok()).toBeTruthy();
-  await expect.poll(() => db.attendanceInterval.count({ where: { attendanceRecord: { personnelId: personId } } }), { timeout: 5000 }).toBe(1);
+  const checkbox = card.getByRole('checkbox', { name: /انتخاب بازه/ });
+  await expect(card.getByText('داخل مجموعه', { exact: true })).toBeVisible({ timeout: 5000 });
+  await expect(checkbox).toHaveCount(0);
   const latencyMs = Date.now() - new Date(at).getTime();
   expect(latencyMs).toBeLessThan(5000);
   await testInfo.attach('local-simulated-punch-latency', { body: JSON.stringify({ latencyMs, source: 'simulated local HTTP punch; no physical SDK', limitMs: 5000 }), contentType: 'application/json' });
-  await expect(card.getByRole('checkbox', { name: /انتخاب بازه/ })).toHaveCount(0);
-  await expect(panel.getByRole('button', { name: /تأیید.*بازه انتخاب‌شده/ })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: /تأیید .*بازه انتخاب‌شده/ })).toHaveCount(0);
   const interval = await db.attendanceInterval.findFirstOrThrow({ where: { attendanceRecord: { personnelId: personId } } });
+  expect(interval.confirmedRevision).toBe(0);
+  expect(interval.confirmedBy).toBeNull();
+  expect(interval.confirmedAt).toBeNull();
+  expect(interval.entrySource).toBe('DEVICE');
   expect(interval.entryRecordedBy).toBeNull();
   const replay = await page.request.post(`/api/attendance-device/connector/${terminalId}/punches`, { headers: { Authorization: `Bearer ${terminalSecret}` }, data: payload });
   expect(replay.ok()).toBeTruthy();

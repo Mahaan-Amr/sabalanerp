@@ -6,7 +6,7 @@ async function run() {
   assert(['localhost', '127.0.0.1'].includes(url.hostname) && url.port === '55432',
     'This test only reads the existing sabalanerp-local database');
   const { prisma } = await import('../../lib/prisma');
-  const { listAccountingContracts, buildAccountingSummaryForContracts } = await import('../accountingService');
+  const { listAccountingContracts, buildAccountingSummaryForContracts, listFinancialRecords } = await import('../accountingService');
   const { accountingContractListSelect, attachAccountingListDates } = await import('../accountingListProjection');
   const { withAccountingReadScope } = await import('../partnerSales/accounting/readScope');
   try {
@@ -61,6 +61,36 @@ async function run() {
     const persian = await listAccountingContracts({ search: sample.contractNumber.replace(/\d/g, digit => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]) });
     assert.deepEqual(persian.items.map(row => row.contractId), english.items.map(row => row.contractId),
       'REGRESSION: Persian digits cannot find the same accounting contract');
+    const existingInvoice = await prisma.accountingFinancialRecord.findFirst({
+      where: { kind: 'INVOICE_CANDIDATE' }, select: { id: true },
+    });
+    assert(existingInvoice, 'Local financial-record fixture required');
+    const focusedInvoice = await listFinancialRecords({ kind: 'INVOICE_CANDIDATE', recordId: existingInvoice.id, pageSize: 1 });
+    assert.equal(focusedInvoice.total, 1, 'A financial detail lookup must return only its exact record');
+    assert.equal(focusedInvoice.items[0].id, existingInvoice.id);
+    // Compare the real nested projection with canonical persisted currencies; invoice,
+    // receivable and payment currencies may differ and must not be relabelled.
+    const currencyFixture = await prisma.accountingFinancialRecord.findFirst({
+      where: { kind: 'INVOICE_CANDIDATE', contractId: { not: null }, receivables: { some: { paymentStatuses: { some: {} } } } },
+      select: { id: true, receivables: { select: { id: true, currency: true,
+        paymentStatuses: { select: { id: true, currency: true } } } } },
+    });
+    if (currencyFixture) {
+      const detail = await listFinancialRecords({ kind: 'INVOICE_CANDIDATE', recordId: currencyFixture.id, pageSize: 1 });
+      const projectedReceivables = detail.items[0].receivables as unknown as Array<{ id: string; currency: string; paymentStatuses: Array<{ id: string; currency: string }> }>;
+      for (const expected of currencyFixture.receivables) {
+        const actual = projectedReceivables.find((row: { id: string }) => row.id === expected.id);
+        assert(actual, 'The focused invoice must expose its authorized receivable');
+        assert.equal(actual.currency, expected.currency, 'Receivable unit must remain its own persisted unit');
+        for (const payment of expected.paymentStatuses) {
+          const projectedPayment = actual.paymentStatuses.find((row: { id: string }) => row.id === payment.id);
+          assert(projectedPayment, 'The focused invoice must expose its authorized payment');
+          assert.equal(projectedPayment.currency, payment.currency, 'Payment unit must remain its own persisted unit');
+        }
+      }
+    } else console.log('SKIP: no local ordinary invoice with a receivable and payment for currency projection');
+    const missingInvoice = await listFinancialRecords({ kind: 'INVOICE_CANDIDATE', recordId: 'missing-financial-record', pageSize: 1 });
+    assert.equal(missingInvoice.total, 0, 'An unknown detail identity must not fall back to another record');
     // Exercise the actual composed marker query and access predicates, not just
     // the standalone SQL plan fixture. No actor means no authorization audit writes.
     await withAccountingReadScope(prisma, undefined, async scope => {

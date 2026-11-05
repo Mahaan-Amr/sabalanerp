@@ -109,8 +109,7 @@ export class FilesystemRemoteCheckpointStore implements RemoteCheckpointStore {
     await fs.promises.access(this.root, fs.constants.R_OK | fs.constants.W_OK);
     // Incomplete remote objects are custody, not age-based garbage. Only the
     // backup storage owner may retire them after proving the original operation closed.
-    // A readable mount must also permit a complete listing; access/statfs alone
-    // cannot detect a transient or persistent directory read failure on SSHFS.
+    // A successful access/statfs alone does not prove that the remote directory can be read.
     await this.readRemoteDirectory(this.root);
     const stats = await fs.promises.statfs(this.root);
     const availableBytes = stats.bavail * stats.bsize;

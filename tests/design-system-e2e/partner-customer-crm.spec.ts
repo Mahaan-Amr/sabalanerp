@@ -58,7 +58,7 @@ test('exact contact capability opens a canonical editor and failed save preserve
   await expect(dialog).toHaveAttribute('aria-busy', 'true'); await page.keyboard.press('Escape'); await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'انصراف' })).toBeDisabled();
   await expect.poll(() => Boolean(release)).toBe(true);
-  release!();
+  release?.();
   await expect(dialog).toContainText('اطلاعات همزمان تغییر کرده است');
   await expect(dialog.getByRole('textbox', { name: 'نام', exact: true })).toHaveValue('نام محفوظ');
 });

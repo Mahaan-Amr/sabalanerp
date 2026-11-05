@@ -1,12 +1,14 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { loginAsAdmin, setViewportAndZoom } from './support/design-system';
 import { createPartnerFixtures } from '../../packages/partner-sales-contracts/dist/testing';
 
-test.beforeEach(async ({ page }) => {
-  await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({
-    json: { success: true, data: { allowed: true } },
-  }));
-});
+const installPartnerListEntry = async (page: Page) => {
+  await page.route('**/api/partner/cases/creation-context*', route => route.fulfill({ json: { success: true, data: {
+    schemaVersion: 1, kind: 'PARTNER', actorId: 'partner-navigation-test', profileId: 'partner-navigation-profile',
+    writable: true, inquiryIds: [], customers: [], projects: [], recoverableDrafts: [],
+  } } }));
+  await page.route('**/api/partner/cases/changes-v2*', route => route.fulfill({ json: { success: true, data: { version: null } } }));
+};
 
 for (const allowed of [true, false]) {
   test(`Sales dashboard exposes Partner drafts only when route access is ${allowed}`, async ({ page }) => {
@@ -30,8 +32,9 @@ for (const allowed of [true, false]) {
     await page.route('**/api/partner/cases/query-v2', route => route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { cases: [] } }),
     }));
+    await installPartnerListEntry(page);
     await drafts.click();
-    await expect(page).toHaveURL(/\/dashboard\/sales\/partner-cases$/);
+    await expect(page).toHaveURL(/\/dashboard\/sales\/contracts$/);
     await expect(page.getByRole('heading', { name: 'قراردادهای فروش', exact: true })).toBeVisible();
   });
 }
@@ -49,6 +52,7 @@ test('Partner Sales menu keeps contract browsing and exposes saved drafts', asyn
   await page.goto('/dashboard/sales');
   const drafts = page.getByRole('link', { name: 'قراردادها و پرونده‌های فروش', exact: true });
   await expect(drafts).toHaveCount(1);
+  await expect(page.getByRole('link', { name: 'پیش‌نویس‌ها و پرونده‌های من', exact: true })).toHaveCount(0);
   for (const link of await drafts.all()) await expect(link).toHaveAttribute('href', '/dashboard/sales/partner-cases');
   await expect(page.getByRole('link', { name: 'مشاهده قراردادها', exact: true })).toHaveCount(2);
 });
@@ -64,7 +68,14 @@ test('Partner global account is reachable from reports and stays outside individ
   });
   await page.route('**/api/partner/cases/query-v2', route => route.fulfill({ status: 200,
     contentType: 'application/json', body: JSON.stringify({ success: true, data: { cases: [] } }) }));
-  await page.goto('/dashboard/sales/partner-cases?caseId=account-separation-test');
+  await page.route('**/api/dashboard/route-availability?*', route => {
+    const path = new URL(route.request().url()).searchParams.get('path');
+    return path === '/dashboard/sales/partner-reports'
+      ? route.fulfill({ json: { success: true, data: { allowed: true, workspace: 'sales' } } })
+      : route.fallback();
+  });
+  await installPartnerListEntry(page);
+  await page.goto('/dashboard/sales/contracts?caseId=account-separation-test');
   await expect(page.getByText('پرونده‌ای ثبت نشده است', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'حساب من با سبلان', exact: true })).toHaveCount(0);
   expect(accountReads).toBe(0);
@@ -94,7 +105,8 @@ test('saved draft destination requests and displays only the newly saved Case de
   });
   await page.route('**/api/partner/corrections/query', route => route.fulfill({ status: 200,
     contentType: 'application/json', body: JSON.stringify({ success: true, data: null }) }));
-  await page.goto(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(caseId)}`);
+  await installPartnerListEntry(page);
+  await page.goto(`/dashboard/sales/contracts?caseId=${encodeURIComponent(caseId)}`);
   await expect(page.getByRole('heading', { name: 'پرونده‌های فروش همکار', exact: true })).toBeVisible();
   await expect(page.getByText('اطلاعات قرارداد', { exact: true }).first()).toBeVisible();
   expect(requestedIds.length).toBeGreaterThan(0);
@@ -124,6 +136,7 @@ test('Partner draft list tags filter all records before ten-item pagination and 
     contentType: 'application/json', body: JSON.stringify({ success: true, data: { cases } }) }));
   await page.route('**/api/partner/corrections/query', route => route.fulfill({ status: 200,
     contentType: 'application/json', body: JSON.stringify({ success: true, data: null }) }));
+  await page.route('**/api/partner/cases/changes-v2*', route => route.fulfill({ json: { success: true, data: { version: null } } }));
   await page.goto('/dashboard/sales/contracts');
   const table = page.getByRole('table');
   await expect(table.getByRole('row')).toHaveCount(11);

@@ -45,6 +45,7 @@ const rules: Rule[] = [
   { pattern: /^\/dashboard\/accounting\/settings\/biometric-connector/, workspace: 'accounting', features: ['accounting_biometric_diagnostics_view'], narrow: true },
   { pattern: /^\/dashboard\/accounting\/settings/, workspace: 'accounting', features: ['accounting_actions_manage'], level: 'edit', narrow: true },
   { pattern: /^\/dashboard\/accounting\/correction-requests/, workspace: 'accounting', features: ['accounting_corrections_manage', 'accounting_corrections_approve', 'accounting_corrections_verify'], narrow: true },
+  { pattern: /^\/dashboard\/accounting\/invoice-candidates\/[^/]+\/?$/, workspace: 'accounting', features: ['accounting_records_approve_void'] },
   { pattern: /^\/dashboard\/accounting\/invoice-candidates/, workspace: 'accounting', features: ['accounting_invoice_candidates_manage'] },
   { pattern: /^\/dashboard\/accounting\/receivables/, workspace: 'accounting', features: ['accounting_receivables_manage'] },
   { pattern: /^\/dashboard\/accounting\/payments/, workspace: 'accounting', features: ['accounting_payments_manage'] },

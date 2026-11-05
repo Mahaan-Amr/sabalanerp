@@ -5,21 +5,13 @@ import {assertNoHorizontalOverflow,assertNoSeriousAxeViolations,setTheme,setView
 
 // Compiled Next/SDS acceptance with controlled auth/API boundaries, matching
 // other catalog UI lanes. This does not qualify native auth or server writes.
-// The default pins the original measured candidate; an explicitly measured
-// local candidate must provide all three values together, including its hash.
-const overrides = [process.env.SUPPORT_QA_BUILD_ID, process.env.SUPPORT_QA_ASSET, process.env.SUPPORT_QA_ASSET_SHA];
-if (overrides.some(Boolean) && !overrides.every(Boolean)) throw new Error('SUPPORT_COMPILED_EVIDENCE_INCOMPLETE');
-const buildId=overrides[0] || 'erp_online_final_20261019_bdbe201e523baab8';
-const asset=overrides[1] || '/_next/static/chunks/app/dashboard/support/new/page-8d6f1034aa11002c.js';
-const assetSha=overrides[2] || '3677223b7e5724863297ccfc8ec40cc1e86a0beeef91e421b919ecc16ee69ebd';
-if (!/^erp_[a-z0-9_-]{8,90}$/.test(buildId) || !/^\/_next\/static\/chunks\/[A-Za-z0-9_./-]+\.js$/.test(asset) || !/^[a-f0-9]{64}$/.test(assetSha)) {
-  throw new Error('SUPPORT_COMPILED_EVIDENCE_INVALID');
-}
+// Qualify the current identified compiled build, rather than a retired asset hash.
 test('final compiled Support preserves original bytes and explicit recovery at desktop,390px and canonical200percent zoom',async({page},info)=>{
  test.setTimeout(180_000);
  const errors:string[]=[],mutations:string[]=[];
  const consoleErrors:string[]=[],apiRequests:Array<{method:string;path:string;elapsedMs:number}>=[],failedRequests:Array<{path:string;error:string|null}>=[];
  const started=Date.now();
+ const buildIds=new Set<string>();
  page.on('pageerror',error=>errors.push(error.message));
  page.on('console',message=>{if(message.type()==='error'&&consoleErrors.length<20)consoleErrors.push(message.text().slice(0,1500));});
  page.on('requestfailed',request=>{if(failedRequests.length<64)failedRequests.push({path:new URL(request.url()).pathname,error:request.failure()?.errorText||null});});
@@ -29,6 +21,7 @@ test('final compiled Support preserves original bytes and explicit recovery at d
  await page.route('**/socket.io/**',route=>route.abort());
  await page.route('**/api/**',async route=>{
   const request=route.request(),path=new URL(request.url()).pathname;
+  const buildId=request.headers()['x-deployment-id'];if(buildId)buildIds.add(buildId);
   if(apiRequests.length<64)apiRequests.push({method:request.method(),path,elapsedMs:Date.now()-started});
   if(!['GET','HEAD','OPTIONS'].includes(request.method())){
    mutations.push(request.method()+' '+path);return route.fulfill({status:409,json:{success:false,error:'UI_ACCEPTANCE_MUST_NOT_MUTATE'}});
@@ -44,11 +37,20 @@ test('final compiled Support preserves original bytes and explicit recovery at d
   return send([]);
  });
  const response=await page.goto('/dashboard/support/new');expect(response?.ok()).toBe(true);
- expect(await response!.text()).toContain(buildId);
+ const html=await response!.text();
+ expect(html).not.toContain('/_next/static/development/');
+ const asset=html.match(/src="([^"]*\/_next\/static\/chunks\/app\/dashboard\/support\/new\/page-[a-f0-9]+\.js[^"]*)"/)?.[1]?.replaceAll('&amp;','&');
+ expect(asset,'Compiled Support page asset must be present').toBeTruthy();
  expect(await page.evaluate(()=>window.isSecureContext),'Archive requires genuine localhost/HTTPS, never an insecure-origin flag').toBe(true);
- const compiled=await page.request.get(asset);expect(compiled.ok()).toBe(true);
- expect(createHash('sha256').update(await compiled.body()).digest('hex')).toBe(assetSha);
+ const compiled=await page.request.get(asset!);expect(compiled.ok()).toBe(true);
+ const assetSha=createHash('sha256').update(await compiled.body()).digest('hex');
+ const repeated=await page.request.get(asset!);expect(repeated.ok()).toBe(true);
+ expect(createHash('sha256').update(await repeated.body()).digest('hex')).toBe(assetSha);
+ await info.attach('compiled-support-asset',{body:JSON.stringify({asset,sha256:assetSha}),contentType:'application/json'});
  await expect(page.getByRole('button',{name:'حفظ پیش‌نویس',exact:true})).toBeEnabled({timeout:8_000});
+ expect(buildIds.size,'An identified compiled frontend is required').toBe(1);
+ expect([...buildIds][0]).toMatch(/^erp_[a-z0-9_-]{8,90}$/);
+ expect(html).toContain([...buildIds][0]);
  const title='درخواست اصلی برای بازیابیِ آگاهانه';
  await page.getByRole('textbox',{name:'عنوان',exact:true}).fill(title);
  await page.getByRole('textbox',{name:'شرح مشکل',exact:true}).fill('اصل نوشتهٔ فارسی؛ ارسال فقط با تصمیم کاربر انجام می‌شود.');

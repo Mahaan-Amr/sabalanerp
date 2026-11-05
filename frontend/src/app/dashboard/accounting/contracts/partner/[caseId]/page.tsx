@@ -14,7 +14,7 @@ import PartnerContractLifecyclePanel from '@/features/accounting/PartnerContract
 import PartnerFinancialVoidPanel from '@/features/accounting/PartnerFinancialVoidPanel';
 import { accountingCorrectionFields } from '@/features/accounting/accountingCorrectionFields';
 import AccountingActionModal from '@/features/accounting/AccountingActionModal';
-import { money, type FinancialInvoiceApprovalPayload } from '@/features/accounting/accountingUi';
+import { money } from '@/features/accounting/accountingUi';
 import { PartnerAccountingDetailView, type PartnerInternalDocument as InternalDocument, type PartnerDetailSection } from '@/features/accounting/PartnerAccountingDetailView';
 
 export default function PartnerInternalAccountingContractPage() {
@@ -25,28 +25,16 @@ export default function PartnerInternalAccountingContractPage() {
   const [flagTarget, setFlagTarget] = useState<InternalDocument['flags'][number]>();
   const [resolutionReason, setResolutionReason] = useState('');
   const [section, setSection] = useState<PartnerDetailSection>('summary');
-  const [invoiceOpen, setInvoiceOpen] = useState(false);
   const openInvoice = async () => {
     if (!document?.actions.canCreateInvoice || pending) return;
     setError(undefined);
     if (document.preparationOnly) {
       if (!document.owner) return;
       setPending(true);
-      try { await api.post('/partner/accounting/enqueue', document.owner); await load(); setSection('financial'); setInvoiceOpen(true); }
+      try { await api.post('/partner/accounting/enqueue', document.owner); await load(); setSection('financial'); }
       catch { setError('ایجاد پیش‌نویس مالی انجام نشد؛ وضعیت قرارداد را تازه‌سازی کنید.'); }
       finally { setPending(false); }
-    } else { setSection('financial'); setInvoiceOpen(true); }
-  };
-  const approveInvoice = async (payload: FinancialInvoiceApprovalPayload) => {
-    if (!document || pending || !document.actions.canReviewInvoice || payload.invoiceId !== document.id) return;
-    setPending(true); setError(undefined);
-    try {
-      await accountingAPI.executeAction({ kind: 'APPROVE_FINANCIAL_INVOICE', ...payload });
-      await load();
-    } catch (failure) {
-      const response = (failure as { response?: { data?: { error?: string; message?: string } } }).response?.data;
-      setError(response?.message || response?.error || 'تأیید مالی ثبت نشد؛ وضعیت سند را بررسی و دوباره تلاش کنید.');
-    } finally { setPending(false); }
+    } else { setSection('financial'); }
   };
   const [receivableOpen, setReceivableOpen] = useState(false);
   const createReceivable = async () => {
@@ -150,7 +138,7 @@ export default function PartnerInternalAccountingContractPage() {
         {document.customerSignature.canRecordPaperSignature && <ErpButton label="ثبت امضای کاغذی مشتری" icon={FaCheckCircle} tone="success" disabled={pending || !document.customerSignature.canRecordPaperSignature} onClick={() => void recordPaperSignature()} />}
       </ContractDispatchCreditPanel>
     </ErpSection>} lifecyclePanel={<PartnerContractLifecyclePanel caseId={caseId} onChanged={load} />} financialVoidPanel={<PartnerFinancialVoidPanel document={document} pending={pending} refresh={load} />} document={document} section={section} onSection={setSection}
-      invoiceOpen={invoiceOpen} onOpenInvoice={openInvoice} onApproveInvoice={approveInvoice}
+      onOpenInvoice={openInvoice}
       onCreateReceivable={() => { setError(undefined); setReceivableOpen(true); }}
       printVariant={printVariant} onPrintVariant={setPrintVariant} customPrintSettings={customPrintSettings}
       setCustomPrintSettings={setCustomPrintSettings} applyCustomPreset={applyCustomPreset}

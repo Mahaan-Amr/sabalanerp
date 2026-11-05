@@ -13,6 +13,8 @@ import { readOrdinaryFinancialRegistration } from './ordinaryContractReactivatio
 import { accountingContractListSelect, accountingFinancialSummarySelect, attachAccountingListDates,
   accountingFinancialRegisterSelect, accountingAuditRegisterSelect, attachPartnerRegisterSnapshots } from './accountingListProjection';
 import { attachAccountingTrendAuditState } from './accountingReadProjection';
+import { resolveAccountingWorkAttention } from './accountingWorkAttention';
+import { accountingProjectedRialCurrency } from './accountingProjectedRialCurrency';
 import { normalizePersianSearchTokens } from './crmCustomerSearch';
 import { randomUUID } from 'node:crypto';
 import { canonicalHash, InstantSchema, partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
@@ -103,6 +105,7 @@ import {
 import { executePartnerCollectionAction } from './partnerSales/accounting/paymentCommands';
 import { withAccountingReadScope, type AccountingReadActor, type AccountingReadScope } from './partnerSales/accounting/readScope';
 import { partnerAccountingContractRow } from './accountingUnifiedContracts';
+import { readAccountingDashboardSnapshot } from './accountingDashboardSnapshot';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend, accountingCurrencyTotals } from './partnerSales/accounting/history';
 import { partnerTaxTransitions } from './partnerSales/accounting/taxPolicy';
 import { hasConflictingPartnerAccountingEvidence } from './partnerSales/accounting/provenance';
@@ -961,6 +964,22 @@ const buildContractRow = async (contract: any, settings: any) => {
     }
   ];
 
+  const attention = resolveAccountingWorkAttention({
+    eligible,
+    invoiceStatus,
+    receivableStatus,
+    taxStatus,
+    hasReceivable: receivables.some((item: any) => item.status !== ReceivableStatus.VOIDED),
+    missingTaxFields: missingFields,
+    openCorrections,
+    openBlockerFlags: openFlags.filter((flag: any) => flag.severity === AccountingFlagSeverity.BLOCKER),
+    openInvoiceCandidates,
+    overdueReceivables,
+    assignedUsers: contract.accountingAssignees || {},
+    signedAt: contract.signedAt,
+    createdAt: contract.createdAt,
+  });
+
   return {
     contractId: contract.id,
     contractNumber: contract.contractNumber,
@@ -1002,12 +1021,14 @@ const buildContractRow = async (contract: any, settings: any) => {
       openFlags: openFlags.length,
       openBlockerFlags: openFlags.filter((flag: any) => flag.severity === AccountingFlagSeverity.BLOCKER).length,
       openCorrections: openCorrections.length,
+      currency: accountingProjectedRialCurrency(contract.currency, records, payments),
       totalContractAmount: decimalToString(contractAmount),
       invoicedAmount: decimalToString(invoicedAmount),
       receivedAmount: decimalToString(receivedAmount),
       remainingAmount: decimalToString(remainingAmount)
     },
     financialRecords: normalizeFinancialRecords(records, contractAmount),
+    attention,
     nextBestActions
   };
 };
@@ -1124,7 +1145,7 @@ const attachAccountingCollections = async (contracts: any[]) => {
     }),
     prisma.accountingPaymentStatus.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, amount: true },
+      select: { contractId: true, status: true, amount: true, currency: true },
       orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }]
     }),
     prisma.accountingTaxRecord.findMany({
@@ -1134,15 +1155,23 @@ const attachAccountingCollections = async (contracts: any[]) => {
     }),
     prisma.accountingContractFlag.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, severity: true },
+      select: { contractId: true, status: true, severity: true, title: true, createdAt: true, assignedToUserId: true },
       orderBy: { createdAt: 'desc' }
     }),
     prisma.accountingCorrectionRequest.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true },
+      select: { contractId: true, status: true, createdAt: true, assignedToUserId: true },
       orderBy: { createdAt: 'desc' }
     })
   ]);
+
+  const assigneeIds = [...new Set([...flags, ...corrections]
+    .map((item) => item.assignedToUserId).filter((id): id is string => Boolean(id)))];
+  const assignees = assigneeIds.length ? await prisma.user.findMany({
+    where: { id: { in: assigneeIds } }, select: { id: true, firstName: true, lastName: true },
+  }) : [];
+  const assigneeNames = Object.fromEntries(assignees.map((user) =>
+    [user.id, `${user.firstName} ${user.lastName}`.trim()]));
 
   const group = <T extends { contractId: string | null }>(rows: T[]) => {
     const grouped = new Map<string, T[]>();
@@ -1163,7 +1192,8 @@ const attachAccountingCollections = async (contracts: any[]) => {
     accountingPayments: byContract.payments.get(contract.id) ?? [],
     accountingTaxRecords: byContract.taxes.get(contract.id) ?? [],
     accountingFlags: byContract.flags.get(contract.id) ?? [],
-    accountingCorrections: byContract.corrections.get(contract.id) ?? []
+    accountingCorrections: byContract.corrections.get(contract.id) ?? [],
+    accountingAssignees: assigneeNames,
   }));
 };
 
@@ -1182,7 +1212,8 @@ export const buildAccountingSummaryForContracts = async (contracts: any[]) => {
 const accountingAmountInRials = (amount: string, currency?: string) =>
   new Prisma.Decimal(amount).mul(currency === 'IRT' ? 10 : 1);
 
-export const listAccountingContracts = async (query: ListContractsQuery = {}, actor?: AccountingReadActor) => {
+export const listAccountingContracts = async (query: ListContractsQuery = {}, actor?: AccountingReadActor,
+  existingScope?: Promise<AccountingReadScope>) => {
   const page = Math.max(Number(query.page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(query.pageSize) || DEFAULT_PAGE_SIZE, 1), 100);
   const skip = (page - 1) * pageSize;
@@ -1226,26 +1257,34 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       orderBy
     }),
     getDefaultSettings(),
-    actor ? withAccountingReadScope(prisma, actor, async scope => {
+    actor ? (async () => {
+      const readPartnerSources = async (scope: AccountingReadScope) => {
       const records = await scope.database.accountingFinancialRecord.findMany({
         where: scope.financial({ sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
           kind: FinancialRecordKind.INVOICE_CANDIDATE, contractId: null, customerId: null }),
-        include: { receivables: { where: scope.receivable(), select: { status: true, paidAmount: true, remainingAmount: true } } },
+        include: { receivables: { where: scope.receivable(), select: { status: true, currency: true, dueDate: true, paidAmount: true, remainingAmount: true } } },
         orderBy: { createdAt: 'desc' },
       });
       const contextualized = await scope.contextualize('FINANCIAL', records);
       const flags = await scope.database.accountingContractFlag.findMany({ where: {
         sourceFinancialRecordId: { in: contextualized.map(record => record.id) }, status: 'OPEN' },
-        select: { sourceFinancialRecordId: true, severity: true } });
+        select: { sourceFinancialRecordId: true, severity: true, createdAt: true, assignedToUserId: true, title: true } });
       const corrections = await scope.database.accountingCorrectionRequest.findMany({ where: scope.correction({
         recordId: { in: contextualized.map(record => record.id) },
-        status: { in: activeCorrectionStatuses() } }), select: { recordId: true } });
+        status: { in: activeCorrectionStatuses() } }), select: { recordId: true, createdAt: true, assignedToUserId: true } });
+      const assigneeIds = [...new Set([...flags, ...corrections].map(item => item.assignedToUserId)
+        .filter((id): id is string => Boolean(id)))];
+      const assignees = assigneeIds.length ? await scope.database.user.findMany({ where: { id: { in: assigneeIds } },
+        select: { id: true, firstName: true, lastName: true } }) : [];
+      const partnerAssignees = Object.fromEntries(assignees.map(user => [user.id, `${user.firstName} ${user.lastName}`.trim()]));
       const partnerRecords = contextualized.map(record => ({ ...record, partnerFlags: flags.filter(flag =>
-        flag.sourceFinancialRecordId === record.id), partnerOpenCorrections: corrections.filter(item =>
-          item.recordId === record.id).length }));
+        flag.sourceFinancialRecordId === record.id), partnerCorrections: corrections.filter(item => item.recordId === record.id),
+        partnerOpenCorrections: corrections.filter(item => item.recordId === record.id).length, partnerAssignees }));
       const preparations = await listPartnerPreparationDocumentsInScope(scope, actor.userId, lifecycleView);
       return { partnerRecords, preparations };
-    }) : Promise.resolve({ partnerRecords: [], preparations: [] }),
+      };
+      return existingScope ? readPartnerSources(await existingScope) : withAccountingReadScope(prisma, actor, readPartnerSources);
+    })() : Promise.resolve({ partnerRecords: [], preparations: [] }),
   ]);
   const { partnerRecords, preparations } = partnerSources;
 
@@ -1282,7 +1321,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
     const projected = (lifecycleView === 'active' ? partnerRecords : []).map(record => partnerAccountingContractRow(record)).filter((row): row is NonNullable<typeof row> => row !== null);
     for (const document of preparations) {
       const existing = projected.find(row => row.partnerContext === undefined ? false : (row.partnerContext as any).caseId === document.owner.caseId);
-      const row: any = existing ?? partnerAccountingContractRow({ ...document, amount: new Prisma.Decimal(document.amount) });
+      const row: any = existing ?? partnerAccountingContractRow({ ...document, amount: new Prisma.Decimal(document.amount), receivables: [] });
       if (!row) continue;
       row.partnerCommercialStatus = document.commercial.status;
       row.contractDate = document.contractDate ?? row.contractDate;
@@ -1294,6 +1333,11 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
         row.accounting.invoiceStatus = 'NONE';
         row.accounting.sourceStatus = document.commercial.status === 'FINAL' ? 'ELIGIBLE' : 'VISIBLE_ONLY';
         row.accounting.eligibleForFinancialRecords = document.canRegister;
+        row.attention = document.canRegister ? {
+          priority: 3, reason: 'صورتحساب مالی هنوز آماده نشده',
+          evidence: 'مدرک و مبلغ خرید سبلان در پرونده بررسی شوند.', owner: 'حسابداری',
+          waitingSince: null, nextAction: 'بررسی قرارداد',
+        } : null;
         row.nextBestActions = [{ kind: 'CREATE_INVOICE', labelFa: 'ایجاد پیش‌نویس صورتحساب', enabled: document.canRegister },
           { kind: 'CREATE_CORRECTION_REQUEST', labelFa: 'درخواست اصلاح', enabled: ['COMMITTED', 'VOIDED'].includes(document.caseState || '') }];
         projected.push(row);
@@ -1362,7 +1406,16 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       });
     }
   }
-  if (reviewableView || query.sort === 'attention') {
+  if (query.sort === 'work_queue') {
+    items = [...items].sort((left, right) => {
+      const leftPriority = left.attention?.priority ?? Number.MAX_SAFE_INTEGER;
+      const rightPriority = right.attention?.priority ?? Number.MAX_SAFE_INTEGER;
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      const leftSince = left.attention?.waitingSince ? new Date(left.attention.waitingSince).getTime() : Number.MAX_SAFE_INTEGER;
+      const rightSince = right.attention?.waitingSince ? new Date(right.attention.waitingSince).getTime() : Number.MAX_SAFE_INTEGER;
+      return leftSince - rightSince;
+    });
+  } else if (reviewableView || query.sort === 'attention') {
     items = orderReviewableContracts(items);
   } else {
     const amountInRials = (item: any) => accountingAmountInRials(item.accounting.totalContractAmount, item.accounting.currency);
@@ -1404,12 +1457,12 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
 };
 
 const getAccountingWorkspaceInScope = async (scope: AccountingReadScope, query: any = {},
-  preloadedContracts?: Promise<Awaited<ReturnType<typeof listAccountingContracts>>>) => {
+  preloadedContracts?: Promise<Awaited<ReturnType<typeof listAccountingContracts>>>, actor?: AccountingReadActor) => {
   const prisma = scope.database;
   const now = new Date();
   const [period, contractResponse, records, receivables, payments, taxRecords, corrections, auditLogs] = await Promise.all([
     getOrCreateCurrentPeriod(),
-    preloadedContracts || listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }),
+    preloadedContracts || listAccountingContracts({ view: 'reviewable', sort: 'work_queue', page: 1, pageSize: 12 }, actor, Promise.resolve(scope)),
     prisma.accountingFinancialRecord.findMany({ where: scope.financial(), orderBy: { createdAt: 'desc' }, take: 8 }),
     prisma.accountingReceivable.findMany({ where: scope.receivable(), orderBy: { dueDate: 'asc' }, take: 8 }),
     prisma.accountingPaymentStatus.findMany({ where: scope.payment(), orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }], take: 8 }),
@@ -1535,7 +1588,7 @@ const getAccountingWorkspaceInScope = async (scope: AccountingReadScope, query: 
 };
 
 export const getAccountingWorkspace = async (query: any = {}, actor?: AccountingReadActor) =>
-  withAccountingReadScope(prisma, actor, scope => getAccountingWorkspaceInScope(scope, query));
+  withAccountingReadScope(prisma, actor, scope => getAccountingWorkspaceInScope(scope, query, undefined, actor));
 
 const getAccountingFinancialTrendInScope = async (scope: AccountingReadScope, requestedRange: unknown, now: Date) => {
   const prisma = scope.database;
@@ -1598,30 +1651,16 @@ export const getAccountingFinancialTrend = async (requestedRange: unknown, now =
  * Range changes continue to use the independent financial-trend endpoint. */
 export const getAccountingDashboard = async (query: any = {}, requestedRange: unknown = '6m',
   now = new Date(), actor?: AccountingReadActor) => {
-  let workspaceCompleted = false;
-  // Ordinary contract summaries already use their own read path. Start that
-  // independent work before waiting for the Partner authorization snapshot.
-  const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 });
-  void contracts.catch(() => {});
-  try {
-    return await withAccountingReadScope(prisma, actor, async scope => {
-      const workspace = await getAccountingWorkspaceInScope(scope, query, contracts);
-      workspaceCompleted = true;
-      try {
-        const trend = await getAccountingFinancialTrendInScope(scope, requestedRange, now);
-        return { workspace, trend, trendError: false };
-      } catch (error) {
-        console.error('Accounting dashboard trend error:', error);
-        return { workspace, trend: null, trendError: true };
-      }
-    });
-  } catch (error) {
-    if (!workspaceCompleted) throw error;
-    // A failed database statement may abort the shared transaction. Re-read
-    // the workspace under fresh authority before returning partial content.
-    console.error('Accounting dashboard transaction error after workspace read:', error);
-    return { workspace: await getAccountingWorkspace(query, actor), trend: null, trendError: true };
-  }
+  return readAccountingDashboardSnapshot<AccountingReadScope,
+    Awaited<ReturnType<typeof getAccountingWorkspaceInScope>>,
+    Awaited<ReturnType<typeof getAccountingFinancialTrendInScope>>>({
+    withScope: read => withAccountingReadScope(prisma, actor, read),
+    readWorkspace: scope => getAccountingWorkspaceInScope(scope, query, undefined, actor),
+    readTrend: scope => getAccountingFinancialTrendInScope(scope, requestedRange, now),
+    retryWorkspace: () => getAccountingWorkspace(query, actor),
+    onTrendError: error => console.error('Accounting dashboard trend error:', error),
+    onTransactionError: error => console.error('Accounting dashboard transaction error after workspace read:', error),
+  });
 };
 
 export const getAccountingContractDetail = async (contractId: string) => {
@@ -2243,8 +2282,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
   const sepidarAmount = toDecimal(command.sepidarAmount);
   if (sepidarAmount.lte(0)) throw new Error('Sepidar amount is required');
 
-  let partnerApproval = false;
-  const runFinancialApprovalTransaction = createFinancialApprovalTransactionRunner(prisma, () => partnerApproval);
+  const runFinancialApprovalTransaction = createFinancialApprovalTransactionRunner(prisma, () => true);
   const result = await runFinancialApprovalTransaction(async (tx) => {
     let partnerCommand: { actorId: string; operation: string; targetScope: string; key: string; payloadHash: string } | undefined;
     let partnerAuthorization: PartnerFinancialApprovalAuthorization | undefined;
@@ -2254,7 +2292,6 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       throw new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'منبع صورتحساب همکار معتبر نیست؛ بررسی پرونده در حسابداری لازم است.');
     }
     if (unlockedSource?.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
-      partnerApproval = true;
       const decision = await authorizePartnerFinancialApproval(tx, unlockedSource, { actorId: actor.userId,
         correlationId: approvalCorrelationId, downstreamNote: command.downstreamNote || command.note });
       if (!decision.ok) return { partnerDenied: true as const };
@@ -2275,6 +2312,19 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     await lockFinancialApprovalRecord(tx, invoiceId);
     let before = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
     if (!before) throw new Error('Invoice record not found');
+    let ordinaryReceipt: { actorId: string; idempotencyKey: string; payloadHash: string } | undefined;
+    if (before.sourceKind !== PARTNER_INTERNAL_ACCOUNTING_SOURCE) {
+      const { correlationId: _correlationId, ...payload } = command;
+      ordinaryReceipt = { actorId: actor.userId, idempotencyKey: approvalIdempotencyKey,
+        payloadHash: await canonicalHash(payload) };
+      const previous = await tx.accountingFinancialApprovalReceipt.findUnique({ where: { financialRecordId: invoiceId } });
+      if (previous && previous.actorId === ordinaryReceipt.actorId && previous.idempotencyKey === ordinaryReceipt.idempotencyKey) {
+        if (previous.payloadHash !== ordinaryReceipt.payloadHash) {
+          throw accountingVoidInputError('این درخواست تأیید قبلاً با اطلاعات دیگری ثبت شده است؛ صفحه را تازه کنید.');
+        }
+        return { ordinaryResponse: previous.response as ReturnType<typeof actionResponse> };
+      }
+    }
     if (before.kind !== FinancialRecordKind.INVOICE_CANDIDATE) {
       throw new Error('Only invoice records can be financially approved');
     }
@@ -2526,6 +2576,14 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
     if (partnerCommand) await tx.partnerCommandOutcome.create({ data: {
       id: `partner-accounting:${(await canonicalHash(partnerCommand)).slice(10)}`, ...partnerCommand, outcome: { invoiceId: updated.id },
     } });
+    if (ordinaryReceipt) {
+      const response = actionResponse('APPLIED', 'تایید مالی ثبت شد',
+        { contractId: updated.contractId || undefined, financialRecordIds: [updated.id] });
+      await tx.accountingFinancialApprovalReceipt.create({ data: {
+        financialRecordId: updated.id, response: toJsonValue(response), ...ordinaryReceipt,
+      } });
+      return { ordinaryResponse: response };
+    }
     return updated;
   }).catch((error: unknown) => {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -2539,6 +2597,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
 
   if ('partnerDenied' in result) throw new PartnerAccountingCommandError('FORBIDDEN',
     'مجوز تأیید مالی این پرونده همکار فعال نیست؛ مدیر حسابداری باید دسترسی پرونده را بررسی کند.');
+  if ('ordinaryResponse' in result) return result.ordinaryResponse;
   return actionResponse('APPLIED', 'تایید مالی ثبت شد', { contractId: result.contractId || undefined, financialRecordIds: [result.id] });
 };
 
@@ -3918,6 +3977,7 @@ const applyContractSearch = async (where: { contractId?: any; AND?: any }, query
 export const listFinancialRecords = async (query: any = {}, actor?: AccountingReadActor) => withAccountingReadScope(prisma, actor, async scope => {
   const prisma = scope.database;
   const where: Prisma.AccountingFinancialRecordWhereInput = scope.financial();
+  if (query.recordId) where.id = String(query.recordId);
   // Filter the Partner source before pagination. Filtering contextualized page
   // results would omit valid cases as soon as ordinary records fill the page.
   if (query.sourceKind === PARTNER_INTERNAL_ACCOUNTING_SOURCE) where.sourceKind = PARTNER_INTERNAL_ACCOUNTING_SOURCE;
@@ -3953,7 +4013,8 @@ export const listFinancialRecords = async (query: any = {}, actor?: AccountingRe
     prisma.accountingFinancialRecord.findMany({
       where: scope.financial(where),
       select: { ...accountingFinancialRegisterSelect, invoiceItems: true,
-        taxRecords: { where: scope.tax() }, receivables: { where: scope.receivable() } },
+        taxRecords: { where: scope.tax() }, receivables: { where: scope.receivable(),
+          ...(query.recordId ? { include: { paymentStatuses: { where: scope.payment(), orderBy: { createdAt: 'desc' } } } } : {}) } },
       orderBy: { createdAt: 'desc' },
       skip,
       take: pageSize

@@ -1,12 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
 import { assertNoSeriousAxeViolations } from '../design-system-e2e/support/design-system';
+import { installAccountingSessionFixture } from './support/accountingSessionFixture';
 
 const login = async (page: Page) => {
-  await page.goto('/login');
-  await page.getByRole('textbox', { name: 'ایمیل، نام کاربری یا شماره تماس' }).fill('admin');
-  await page.locator('input[type="password"]').fill('admin123');
-  await page.getByRole('button', { name: 'ورود', exact: true }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 60_000 });
+  await installAccountingSessionFixture(page);
 };
 const context = {
   periods: [{ id: 'period', titlePersian: 'دوره باز', startsAt: '2026-01-01', endsAt: '2026-12-31', fiscalYear: { titlePersian: 'سال مالی' } }],
@@ -70,13 +67,15 @@ test('opening uses the confirmed total and matched source; every changed field r
 test('accountant confirms the cash and uncleared cheque shares together; refund hides uncollected cheque', async ({ page }) => {
   await login(page); const commands = await installFixture(page);
   await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click(); await page.getByRole('button', { name: 'تخصیص اعتبار', exact: true }).click();
-  await page.getByRole('button', { name: /نقدی.*مانده/ }).click();
-  await page.getByRole('textbox', { name: 'بدهی آزمون', exact: true }).fill('100');
-  await page.getByRole('button', { name: /نقدی.*مانده/ }).click();
-  await page.getByRole('button', { name: /چک.*دریافت‌شده.*مانده/ }).click();
-  await page.getByRole('textbox', { name: 'بدهی آزمون', exact: true }).fill('50');
-  await commonEvidence(page); await page.getByRole('checkbox').check();
-  await page.getByRole('button', { name: 'ثبت قطعی', exact: true }).click(); await expect(page.getByRole('dialog')).toHaveCount(0);
+  const workspace = page.getByRole('region', { name: 'تخصیص به بدهی‌های مشتری', exact: true });
+  await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
+  await workspace.getByRole('checkbox', { name: /^چک/ }).check();
+  await workspace.getByRole('checkbox', { name: 'انتخاب بدهی آزمون', exact: true }).check();
+  await workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();
+  await workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
+  await commonEvidence(page);
+  await page.getByRole('dialog').getByRole('checkbox', { name: 'مبلغ بدهی‌ها و سهم دقیق منابع را بررسی و تأیید می‌کنم.', exact: true }).check();
+  await page.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click(); await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(commands[0].sourceAllocations).toEqual([{ receiptId: 'cash', allocations: [{ openItemId: 'debt', amountRials: '100' }] }, { receiptId: 'cheque', allocations: [{ openItemId: 'debt', amountRials: '50' }] }]);
   await page.getByRole('button', { name: 'سایر عملیات', exact: true }).click(); await page.getByRole('button', { name: 'استرداد وجه', exact: true }).click();
   await page.getByRole('combobox', { name: 'منبع وجه' }).click();

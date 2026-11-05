@@ -7,12 +7,12 @@ import { ErpButton, ErpCheckbox, ErpDisclosure, ErpField, ErpInlineState, ErpInp
 import { accountingAPI } from '@/lib/api';
 import { accountingFailureMessage, dateFa } from './accountingUi';
 import { accountMoney, accountOperationLabels, accountStatusLabels, normalizeAccountAmount, receiptIsCheck, receiptRemainingRials, type AccountOperationKind, type CustomerAccount } from './customerAccountModel';
-import { allocationPlanPayload, newOpeningLine, newReceiptPart, openingLinesPayload, receiptPartsPayload, rialsInput, type OpeningLineDraft, type ReceiptPartDraft } from './customerFinanceDraft';
+import { newOpeningLine, newReceiptPart, openingLinesPayload, receiptPartsPayload, rialsInput, type OpeningLineDraft, type ReceiptPartDraft } from './customerFinanceDraft';
 import CustomerReceiptPartsFields, { type CustomerFinanceContext } from './CustomerReceiptPartsFields';
 import CustomerOpeningFields from './CustomerOpeningFields';
 
 export default function CustomerAccountOperationFlow({ accountId, account, kind, allocationId, onClose, onSaved }: {
-  accountId: string; account: CustomerAccount; kind: AccountOperationKind; allocationId?: string; onClose: () => void; onSaved: () => Promise<void>;
+  accountId: string; account: CustomerAccount; kind: Exclude<AccountOperationKind, 'ALLOCATION'>; allocationId?: string; onClose: () => void; onSaved: () => Promise<void>;
 }) {
   const [context, setContext] = useState<CustomerFinanceContext>();
   const [contextError, setContextError] = useState<string>();
@@ -49,11 +49,11 @@ export default function CustomerAccountOperationFlow({ accountId, account, kind,
   useUnarchivedDraftGuard('customer-account-operation',true);
   const isResolution = kind === 'RESOLVE_RECEIPT';
   const isEndorsement = kind === 'CHECK_ENDORSE' || kind === 'CHECK_RECIPIENT_RETURN';
-  const isTreasury = ['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION', 'CORRECT_RECEIPT', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'CHECK_SETTLE', 'RESOLVE_RECEIPT', 'CHECK_ENDORSE', 'CHECK_RECIPIENT_RETURN'].includes(kind);
+  const isTreasury = ['RECEIPT', 'REVERSE_ALLOCATION', 'CORRECT_RECEIPT', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'CHECK_SETTLE', 'RESOLVE_RECEIPT', 'CHECK_ENDORSE', 'CHECK_RECIPIENT_RETURN'].includes(kind);
   const isCheckBank = kind === 'CHECK_DEPOSIT' || kind === 'CHECK_SETTLE';
   const isCorrection = kind === 'CORRECT_RECEIPT' || kind === 'CANCEL_RECEIPT';
   const isCash = kind === 'REFUND' || isCheckBank;
-  const hasAmount = !['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'ATTRIBUTION', 'RESOLVE_RECEIPT', 'CHECK_ENDORSE', 'CHECK_RECIPIENT_RETURN'].includes(kind);
+  const hasAmount = !['RECEIPT', 'REVERSE_ALLOCATION', 'CANCEL_RECEIPT', 'CHECK_DEPOSIT', 'ATTRIBUTION', 'RESOLVE_RECEIPT', 'CHECK_ENDORSE', 'CHECK_RECIPIENT_RETURN'].includes(kind);
   const isBalance = kind === 'OPENING' || kind === 'SET_BALANCE';
   const receiptSources = account.receipts.filter(row => kind === 'REFUND' ? BigInt(row.refundableRials ?? (receiptIsCheck(row) ? '0' : receiptRemainingRials(row))) > BigInt(0) : isResolution ? !row.checkInstrumentId && !row.sourceParentId && BigInt(row.effectiveAmountRials ?? row.amountRials) > BigInt(0) : isCheckBank || isEndorsement ? receiptIsCheck(row) : isCorrection ? BigInt(row.effectiveAmountRials ?? row.amountRials) > BigInt(0) : BigInt(receiptRemainingRials(row)) > BigInt(0));
   const creditSources = account.openItems.filter(row => row.kind === 'CREDIT');
@@ -102,7 +102,6 @@ export default function CustomerAccountOperationFlow({ accountId, account, kind,
       receiptId: source.startsWith('receipt:') ? source.slice(8) : undefined, creditItemId: source.startsWith('credit:') ? source.slice(7) : undefined,
       allocationId, occurredAt: new Date(date).toISOString(), reason, reference, confirmed, allocations: kind === 'CHECK_ENDORSE' ? Object.entries(shares.supplier || {}).filter(([, amount]) => amount.trim()).map(([openItemId, amount]) => ({ openItemId, amountRials: rialsInput(amount) })) : [], supplierPartyId: supplierId || undefined,
       expectedBalanceRials: kind === 'SET_BALANCE' ? account.netBalanceRials : undefined, parts: componentPayload,
-      sourceAllocations: kind === 'ALLOCATION' ? allocationPlanPayload(shares) : undefined,
       expectedAmountRials: isCorrection || isResolution ? receipt?.effectiveAmountRials ?? receipt?.amountRials : undefined,
       expectedSequence: isCheckBank || isEndorsement ? check?.events?.[0]?.sequence : undefined, collectionLedgerId: collectionId || undefined,
       resolvedShares: isResolution ? parts.map(part => ({ partKey: part.key, allocations: Object.entries(shares[part.key] || {}).filter(([, amount]) => amount.trim()).map(([openItemId, amount]) => ({ openItemId, amountRials: rialsInput(amount) })),
@@ -180,12 +179,6 @@ export default function CustomerAccountOperationFlow({ accountId, account, kind,
           { label: 'اثر سند اصلاحی', value: accountMoney((BigInt(normalizeAccountAmount(value)) - BigInt(account.netBalanceRials)).toString()) },
         ]} />}
         {kind === 'REFUND' && BigInt(account.receivableRials) > BigInt(0) && <ErpInlineState kind="stale" title={`این مشتری ${accountMoney(account.receivableRials)} مانده دریافتنی دارد؛ پیش از استرداد بررسی کنید.`} />}
-        {kind === 'ALLOCATION' && <div className="space-y-3">{[
-          ...receiptSources.map(row => ({ key: `receipt:${row.id}`, label: `${accountStatusLabels[row.componentKind ?? 'BANK'] || 'دریافت'} ${dateFa(row.occurredAt)}${receiptIsCheck(row) ? ` · ${accountStatusLabels[account.treasuryChecks.find(check => check.id === (row.checkInstrumentId ?? row.source?.id))?.status ?? ''] || 'وضعیت نیازمند بررسی'}` : ''}`, remaining: receiptRemainingRials(row) })),
-          ...creditSources.map(row => ({ key: `credit:${row.id}`, label: row.invoiceNumber, remaining: row.remainingRials })),
-        ].map(source => <ErpDisclosure key={source.key} title={`${source.label} · مانده ${accountMoney(source.remaining)}`}><div className="grid gap-3 md:grid-cols-2">{account.openItems.filter(row => row.kind === 'RECEIVABLE').map(row => <ErpField key={row.id} label={row.invoiceNumber} hint={`مانده بدهی: ${accountMoney(row.remainingRials)}`}>
-          <FormattedNumberInput decimalScale={null} value={shares[source.key]?.[row.id] || ''} onTextChange={next => setShares(current => ({ ...current, [source.key]: { ...current[source.key], [row.id]: next } }))} placeholder="سهم این منبع به ریال" />
-        </ErpField>)}</div></ErpDisclosure>)}</div>}
         {(isCorrection || kind === 'CHECK_SETTLE') && receipt && <>
           <ErpSummaryGrid items={[{ label: 'مبلغ مؤثر', value: accountMoney(receipt.effectiveAmountRials ?? receipt.amountRials) }, { label: 'تخصیص فعال', value: accountMoney(receipt.allocatedRials) }, { label: 'استرداد قبلی', value: accountMoney(receipt.refundedRials) }]} />
           {kind === 'CANCEL_RECEIPT' ? <ErpInlineState kind="stale" title="لغو همه تخصیص‌های مؤثر همین دریافت را برمی‌گرداند؛ استرداد قبلی باید تعیین تکلیف شود." /> : receipt.allocations.filter(row => !row.reversedAt).map(allocation => <ErpDisclosure key={allocation.id} title={`برگشت مصرف · ${dateFa(allocation.createdAt)}`}><div className="grid gap-3 md:grid-cols-2">{allocation.lines.map(line => <ErpField key={line.openItemId} label={account.activityItems.find(item => item.id === line.openItemId)?.invoiceNumber || 'بدهی'} hint={`تخصیص فعلی: ${accountMoney(line.amountRials)}`}><FormattedNumberInput decimalScale={null} value={reversals[allocation.id]?.[line.openItemId] || ''} onTextChange={next => setReversals(current => ({ ...current, [allocation.id]: { ...current[allocation.id], [line.openItemId]: next } }))} placeholder="مبلغ مصرف نامعتبر برای برگشت" /></ErpField>)}</div></ErpDisclosure>)}

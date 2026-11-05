@@ -1,3 +1,4 @@
+import { purchasingTaskPage } from '../services/purchasing/tasks';
 import {purchasingCatalog} from '../services/purchasing/catalog';
 import { contractPurchaseEntry, compatibleContractInquiries } from '../services/purchasing/contractEntry';
 import express, { type Response } from 'express';
@@ -7,10 +8,10 @@ import { randomUUID } from 'node:crypto';
 import { protect, type AuthRequest } from '../middleware/auth';
 import { prisma } from '../lib/prisma';
 import { executePurchasing } from '../services/purchasing/service';
-import { purchasingWorkspace, purchasingLookups, purchasingDetail } from '../services/purchasing/read';
+import { purchasingWorkspace, purchasingLookups, purchasingDetail, purchasingContractPage } from '../services/purchasing/read';
 import { PurchasingError } from '../services/purchasing/domain';
 import { document } from '../services/purchasing/repository';
-import { renderPurchaseOrder } from '../services/purchasing/print';
+import { renderPurchaseOrder, renderPurchaseReceipt } from '../services/purchasing/print';
 import { generatePdfBufferFromHtml } from '../utils/pdf';
 import { accessFor, assertCapability, purchasingSections } from '../services/purchasing/access';
 import { SupplyChainAccountingError } from '../services/accountingSupplyChain';
@@ -30,13 +31,19 @@ router.get('/inquiries/:id/compatible',handle(async(req,res)=>res.json({success:
 router.get('/catalog',handle(async(req,res)=>res.json({success:true,data:await purchasingCatalog(actor(req),String(req.query.q||''),String(req.query.cursor||''),undefined,String(req.query.family||''))})));
 router.get('/access',handle(async(req,res)=>{const access=await accessFor(prisma,actor(req));return res.json({success:true,data:{access,sections:purchasingSections(access)}});}));
 router.get('/contract-entry', handle(async (req, res) => res.json({ success: true, data: await contractPurchaseEntry(actor(req), String(req.query.contractId || ''), String(req.query.rowId || '')) })));
+router.get('/tasks', handle(async (req, res) => res.json({ success: true, data: await purchasingTaskPage(actor(req), String(req.query.q || ''), Number(req.query.page || 1)) })));
 router.get('/workspace', handle(async (req, res) => res.json({ success: true, data: await purchasingWorkspace(actor(req), String(req.query.q || '')) })));
+router.get('/contracts', handle(async (req, res) => res.json({ success: true, data: await purchasingContractPage(actor(req), String(req.query.q || ''), Number(req.query.page || 1)) })));
 router.get('/lookups', handle(async (req, res) => res.json({ success: true, data: await purchasingLookups(actor(req), String(req.query.q || ''), String(req.query.kind || 'contracts'), String(req.query.sourceId || '')) })));
 router.get('/documents/:id/pdf', handle(async (req, res) => {
-  const access = await accessFor(prisma, actor(req)); assertCapability(access.prices);
-  const doc = await document(prisma, req.params.id, 'ORDER');
-  const pdf = await generatePdfBufferFromHtml({ htmlContent: renderPurchaseOrder(doc), landscape: false, displayHeaderFooter: false, margin: { top: '8mm', bottom: '10mm', left: '6mm', right: '6mm' } });
-  res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="purchase-order-${doc.number}.pdf"`); return res.send(pdf);
+  const access = await accessFor(prisma, actor(req));
+  const doc = await document(prisma, req.params.id); assertCapability(await canReadDocument(prisma,access,doc));
+  let htmlContent:string;
+  if(doc.kind==='ORDER'){assertCapability(access.prices);htmlContent=renderPurchaseOrder(doc);}
+  else if(doc.kind==='RECEIPT'){assertCapability(access.all);const order=await document(prisma,doc.parentId || '', 'ORDER');htmlContent=renderPurchaseReceipt(doc,order);}
+  else throw new PurchasingError('DOCUMENT_NOT_FOUND','فایل PDF برای این سند موجود نیست.',404);
+  const pdf = await generatePdfBufferFromHtml({ htmlContent, landscape: false, displayHeaderFooter: false, margin: { top: '8mm', bottom: '10mm', left: '6mm', right: '6mm' } });
+  res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="purchase-${doc.kind==='ORDER'?'order':'receipt'}-${doc.number}.pdf"`); return res.send(pdf);
 }));
 router.get('/documents/:id', handle(async (req, res) => res.json({ success: true, data: await purchasingDetail(actor(req), req.params.id) })));
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:10*1024*1024,files:1,fields:4}}).single('file');

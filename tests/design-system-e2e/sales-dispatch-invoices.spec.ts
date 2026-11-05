@@ -4,7 +4,6 @@ import {
   setViewportAndZoom,
   assertNoHorizontalOverflow,
 } from "./support/design-system";
-test.afterAll(async ({ browser }) => { await browser.close(); });
 test('operational PDFs stay disabled before financial approval', async ({page}) => {
   await loginAsAdmin(page);
   const caseId='qa-operational-print-gate';

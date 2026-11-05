@@ -26,14 +26,19 @@ for (const width of [1280, 390]) test(`ordinary editor stages cancellation and p
       signature: null },
   };
   let immediateCancellations = 0;
+  let holdStatus = false;
+  let releaseStatus: (() => void) | undefined;
   const saves: any[] = [];
   await loginAsAdmin(page);
   await page.setViewportSize({ width, height: 900 });
   await page.route('**/sales/contract-edit-sessions/**', route => route.fulfill({ status: 200,
     contentType: 'application/json', body: JSON.stringify({ success: true, data: route.request().url().endsWith('/acquire')
       ? { session: { leaseToken: 'qa-cancellation-lease' }, recovery: null } : {} }) }));
-  await page.route(`**/sales/contracts/${id}/confirmation-status`, route => route.fulfill({ status: 200,
-    contentType: 'application/json', body: JSON.stringify({ success: true, data: { contractStatus: 'DRAFT', commercialFlowVersion: 1 } }) }));
+  await page.route(`**/sales/contracts/${id}/confirmation-status`, async route => {
+    if (holdStatus) await new Promise<void>(resolve => { releaseStatus = resolve; });
+    return route.fulfill({ status: 200,
+      contentType: 'application/json', body: JSON.stringify({ success: true, data: { contractStatus: 'DRAFT', commercialFlowVersion: 1 } }) });
+  });
   await page.route(`**/sales/contracts/${id}/cancel`, route => {
     immediateCancellations += 1;
     return route.fulfill({ status: 500, body: '{}' });
@@ -55,7 +60,16 @@ for (const width of [1280, 390]) test(`ordinary editor stages cancellation and p
   const pending = page.getByText('لغو قرارداد با «ذخیره تغییرات» ثبت می‌شود.', { exact: true });
   await expect(pending).toBeVisible();
   await expect(page.getByRole('button', { name: 'ارسال برای تایید', exact: true })).toBeDisabled();
+  holdStatus = true;
+  await page.getByRole('button', { name: 'بروزرسانی وضعیت', exact: true }).click();
+  await expect.poll(() => Boolean(releaseStatus)).toBe(true);
   await page.getByRole('button', { name: 'انصراف از لغو', exact: true }).click();
+  await expect(pending).toBeHidden();
+  holdStatus = false;
+  const statusResponse = page.waitForResponse(response => response.url().endsWith('/confirmation-status'));
+  releaseStatus?.();
+  await statusResponse;
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await expect(pending).toBeHidden();
   await cancel.click();
   await page.getByRole('button', { name: 'ذخیره تغییرات', exact: true }).click();

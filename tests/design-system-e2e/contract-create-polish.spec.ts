@@ -3,9 +3,14 @@ import { assertNoHorizontalOverflow, assertNoSeriousAxeViolations, loginAsAdmin,
 
 test('contract creation keeps date, customer selection and return navigation intact with readable RTL', async ({ page }, info) => {
   await loginAsAdmin(page);
+  // This visual/navigation acceptance must not acquire or restore another test's real draft.
+  await page.route('**/api/sales/contract-edit-sessions/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    const data = path.endsWith('/acquire') ? { session: { leaseToken: 'qa-navigation-only' }, recovery: null } : null;
+    return route.fulfill({ json: { success: true, data } });
+  });
   // Complete cold Next dev compilation before leaving the current document.
   expect((await page.request.get('/dashboard/sales/contracts/create')).ok()).toBe(true);
-  await page.waitForLoadState('networkidle');
   await page.goto('/dashboard/sales/contracts/create');
   const workflow = page.locator('main.sds-workspace');
   await expect(workflow.getByRole('heading', { name: 'اطلاعات ثبت', exact: true })).toBeVisible();

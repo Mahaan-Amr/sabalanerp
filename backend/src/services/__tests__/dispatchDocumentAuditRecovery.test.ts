@@ -512,7 +512,11 @@ test('mandatory Prisma truth verifier accepts only immutable writer-owned pricin
       documentArtifacts: [{ kind: 'WAYBILL', statementAdjustmentId: null, sourceIntegrityHash: sourceHash }, { kind: 'STATEMENT', statementAdjustmentId: null, sourceIntegrityHash: sourceHash }] }] } };
   const tx = { logisticsAllocationRevision: { findUnique: async () => revision },
     logisticsAllocationRevisionPricing: { findMany: async () => [{ contractId: 'contract-1', pricingVersionId: version.id, expectedPricingHash: version.integrityHash, readinessEvidenceHash: 'd'.repeat(64), pricingVersion: version }] },
-    dispatchPricedAllocationEvent: { findMany: async () => [event] } };
+    dispatchPricedAllocationEvent: { findMany: async () => [event] },
+    // The production reader verifies the global sequence against both kinds
+    // of correction evidence, including when no correction has occurred.
+    dispatchStatementAdjustment: { findMany: async () => [] },
+    salesInvoiceCorrection: { findMany: async () => [] } };
   const verifier = createPrismaDispatchReplayTruthVerifier({ $transaction: async (work: (database: typeof tx) => unknown) => work(tx) } as never);
   const input = { allocationRevisionId: revision.id, allocationIntegrityHash: revision.integrityHash, expectedSourceIntegrityHash: sourceHash, pricingVersionIds: [version.id], pricedEventIntegrityHashes: [event.integrityHash] };
   assert.equal(await verifier.verifyPrimarySource(input), true);

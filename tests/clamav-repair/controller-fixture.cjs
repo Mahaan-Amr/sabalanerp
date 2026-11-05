@@ -25,7 +25,20 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   else if(!['diff','fetch','checkout','pull','submodule'].includes(a[0]))throw Error('Unexpected Git operation');
   return;
  }
+ if(kind==='python3'){
+  if(!a[0]?.endsWith('/legacy-backend-signal.py')&&!a[0]?.endsWith('/protected-dispatch-root-prepare.py'))throw Error('Unexpected Python operation');
+  if(failure==='legacy-signal'&&a.includes('--preflight'))process.exit(48);
+  return;
+ }
  if(kind==='node'){
+  if(a[0]?.endsWith('/backup-retention-host.mjs')){
+   if(a[1]==='--inspect')return;
+   const [, , deploymentId, stage, receipt, holds]=a;
+   if(!['BEFORE_CHECKPOINT','AFTER_CHECKPOINT'].includes(stage)||!deploymentId||!fs.existsSync(holds))throw Error('Invalid retention fixture inputs');
+   fs.writeFileSync(receipt,JSON.stringify({deploymentId,stage,fixture:true}),{mode:0o400});return;
+  }
+  if(a[0]?.endsWith('/deployment-capacity.mjs')){console.log('1000000 1000000');return;}
+  if(a[0]?.endsWith('/storage-preflight.mjs')){if(failure==='storage-preflight')process.exit(47);return;}
   if(a[0]?.endsWith('/clamav-incident-recovery.mjs')){
    const {validateIncidentSnapshot}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-incident-policy.mjs')));
    const evidence=JSON.parse(fs.readFileSync(a[3]));validateIncidentSnapshot(evidence,image('clamav'));
@@ -62,6 +75,7 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   else {const name=a.at(-1); console.log(name.startsWith('sha256:')?name:name.startsWith('fixture/backend:')?'sha256:'+'8'.repeat(64):name.startsWith('fixture/frontend:')?'sha256:'+'9'.repeat(64):name.startsWith('fixture/inquiry:')?'sha256:'+'a'.repeat(64):image('nginx'));}return;
  }
  if(a[0]==='builder')return;
+ if(a[0]==='volume'&&a[1]==='inspect'){console.log(root);return;}
  if(a[0]==='inspect'){
   if(a.includes('--format')){
    const format=a[a.indexOf('--format')+1],service=a.at(-1);
@@ -82,7 +96,8 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  if(a[0]!=='compose')throw Error('Unexpected Docker command');
  if(a.includes('ps')){console.log(a.at(-1));return;}
- if(a.includes('config')){console.log('services: {}');return;}
+ if(a.includes('config')){console.log(a.includes('json')?'{"name":"fixture"}':'services: {}');return;}
+ if(a.some(value=>value.includes('exec python3 - --assert-closed'))){if(failure==='runtime-not-closed')process.exit(49);return;}
  if(a.includes('build')||a.includes('create')||a.includes('stop')||a.includes('start'))return;
  if(a.includes('up')){
   if(a.includes('clamav')){const state=read('runtime.json');state.clamav=process.env.DEPLOYMENT_CLAMAV_IMAGE;save('runtime.json',state);}return;
@@ -111,6 +126,15 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  if(a.includes('dist/scripts/deployment-performance-identity.js')){
   save('reports/performance-database-'+env('DEPLOYMENT_ID')+'.json',{schemaHash:'b'.repeat(64),policyHash:'b'.repeat(64)});return;
+ }
+ if(a.includes('dist/scripts/deployment-retention-local.js')){
+  const index=a.indexOf('dist/scripts/deployment-retention-local.js');
+  const [command,stage]=a.slice(index+1);
+  if(command==='export-holds'&&['BEFORE_CHECKPOINT','AFTER_CHECKPOINT'].includes(stage)){
+   save('reports/retention-holds-'+env('DEPLOYMENT_ID')+'-'+stage+'.json',{fixture:true});return;
+  }
+  if(command==='apply'&&stage==='AFTER_CHECKPOINT')return;
+  throw Error('Unexpected retention fixture operation');
  }
  const id=env('DEPLOYMENT_ID'),unit=path.join(coordination,'clamav-checkpoint-'+id);
  if(a.includes('scripts/clamav-checkpoint.mjs')){
@@ -151,7 +175,7 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   const {verifyUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
   await verifyUnit({unit,id,checkpoint});save('checkpoint.json',checkpoint);return;
  }
- if(a.includes('db:migrate:deploy')){if(['post-mutation','rollback-qualifier'].includes(failure))process.exit(44);return;}
+ if(a.includes('dist/scripts/deployment-owned-migrations.js')){if(['post-mutation','rollback-qualifier'].includes(failure))process.exit(44);return;}
  if(a.includes('dist/scripts/deployment-rollback.js')){
   installTsHook();const {decryptRecoveryArchive}=require(path.join(repository,'backend/src/services/recoveryCrypto.ts'));
   const {requireBoundary,recoverUnit,restoreUnit}=await import(require('node:url').pathToFileURL(path.join(repository,'backend/scripts/clamav-checkpoint.mjs')));
@@ -173,7 +197,7 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
   else if(!text.includes('pg_terminate_backend')&&!text.includes('HR_HIRING_ANTIVIRUS_COMMAND'))throw Error('Unexpected exec');
   return;
  }
- const allowed=['validate-production-environment','deployment-drill-preflight','deployment-notify','deployment-gates','deployment-finalize-recovery','dry-run-contract-product-graph-migration','audit-hr-onboarding-task-retirement','migrate-all-contract-product-graphs','reconcile-contract-financial-evidence'];
+ const allowed=['validate-production-environment','deployment-drill-preflight','deployment-notify','deployment-gates','deployment-finalize-recovery','deployment-inquiry','dry-run-contract-product-graph-migration','audit-hr-onboarding-task-retirement','migrate-all-contract-product-graphs','reconcile-contract-financial-evidence'];
  if(a.includes('dist/scripts/deployment-notify.js')&&a.includes('retry-blocker')&&failure==='before-maintenance')process.exit(22);
  if(allowed.some(script=>a.includes('dist/scripts/'+script+'.js')))return;
  throw Error('Unexpected fixture CLI operation: '+JSON.stringify(a));

@@ -20,6 +20,7 @@ type Access = 'ASSIGNEE' | 'MANAGER_TRIAGE' | 'AVAILABLE' | 'SHARED';
 const WORKSPACE_CODES: Record<string, string> = {
   accounting: 'ACCOUNTING',
   sales: 'SALES',
+  purchasing: 'PURCHASING',
   crm: 'CRM',
   inventory: 'INVENTORY',
   security: 'SECURITY',
@@ -198,7 +199,7 @@ const envelopeIsCurrent = (duty: any) => {
 const isManager = async (database: Database, userId: string, workspaceCode: string, now: Date) => {
   const user = await database.user.findUnique({ where: { id: userId }, select: { role: true, isActive: true } });
   if (!user?.isActive) return false;
-  if (user.role === 'ADMIN') return true;
+  if (user.role === 'ADMIN' || workspaceCode === 'PURCHASING' && user.role === 'MANAGER') return true;
   const workspace = crossWorkspaceDutyDestinationSlug(workspaceCode);
   return (await resolveWorkspaceDutyAuthority(database, {
     userId, workspace, feature: '__destination_manager_scope__', at: now,

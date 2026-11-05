@@ -23,7 +23,8 @@ test('segmented control makes the pressed option visually and accessibly distinc
   assert.match(pressedButton, /text-\[var\(--sds-text-primary\)\]/);
   assert.match(pressedButton, /focus-visible:ring-2/);
   assert.doesNotMatch(pressedButton, /<svg/);
-  assert.match(html, /tabindex="0"/);
+  // Native enabled buttons are keyboard-focusable without a tabindex attribute.
+  assert.doesNotMatch(html, /tabindex="-1"/);
   assert.match(html, /aria-label="گزینه‌ها"/);
   assert.match(html, /focus-visible:ring-2/);
 });

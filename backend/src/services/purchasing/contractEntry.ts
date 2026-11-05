@@ -2,7 +2,7 @@ import {catalogInquirySource,quoteMatch,validSpecReview} from './catalog';
 import { randomUUID } from 'node:crypto';
 import {ordinaryPurchaseDemands} from './ordinaryDemand';
 import { prisma } from '../../lib/prisma';
-import { accessFor, assertCapability, canReadDocument, redact, type Actor, type Access } from './access';
+import { accessFor, assertCapability, canReadDocument, canManagePersonalInquiry, redact, type Actor, type Access } from './access';
 import { contractSource } from './source';
 import { asDoc, createDocument, document, hash, json, updateDocument, type Tx } from './repository';
 import { add, sub, max, min, gt, quantity, optionalQuantity, proportionalQuantity, optionalLeadDays,money, text, required, date, label, PurchasingError, type Doc, type JsonObject } from './domain';
@@ -23,6 +23,7 @@ export async function contractPurchaseSource(tx: Tx, access: Access, contractId:
 }
 export const offerValid = (offer: JsonObject) => offer.status === 'VALID' && (!offer.validUntil || new Date(`${offer.validUntil}T23:59:59.999+03:30`).getTime() >= Date.now());
 function currentOffer(doc: Doc, id: string) {
+  if(doc.status!=='OPEN')throw new PurchasingError('INQUIRY_CLOSED','این استعلام لغو یا بسته شده است؛ پیشنهاد دیگری انتخاب کنید.');
   const offer = (doc.data.offers || []).find((o: JsonObject) => o.id === id);
   if (!offer || !offerValid(offer)) throw new PurchasingError('OFFER_NO_LONGER_VALID', 'این پیشنهاد دیگر معتبر نیست؛ مسئول خرید باید پیشنهاد معتبر را دوباره انتخاب کند.');
   return offer;
@@ -66,7 +67,7 @@ export async function inquiryCommand(tx: Tx, actor: Actor, access: Access, type:
     }
     if (q && source.quantity && gt(q, source.quantity)) throw new PurchasingError('QUANTITY_EXCEEDED', 'مقدار استعلام از مقدار همین ردیف قرارداد بیشتر است.', 400, 'quantity');
     const owner = await tx.user.findUnique({ where: { id: required(input.ownerId, 'ownerId', 'مسئول خرید') }, select: { id: true, role: true, isActive: true } });
-    assertCapability(Boolean(owner?.isActive && (await accessFor(tx, owner)).buyer), 'مسئول پیگیری باید کاربر فعال دارای اختیار خرید باشد.');
+    assertCapability(Boolean(owner?.isActive && ((await accessFor(tx, owner)).buyer || owner.id===actor.id && access.seller)), 'مسئول پیگیری باید خود فروشنده یا کاربر فعال دارای اختیار خرید باشد.');
     if (input.groupId) {
       const group = await document(tx, input.groupId, 'INQUIRY_CASE');
       assertCapability(await canReadDocument(tx, access, group));
@@ -82,6 +83,7 @@ export async function inquiryCommand(tx: Tx, actor: Actor, access: Access, type:
   }
   const inquiry = await document(tx, required(input.documentId, 'documentId', 'استعلام'), 'INQUIRY');
   assertCapability(await canReadDocument(tx, access, inquiry));
+  if(inquiry.status!=='OPEN')throw new PurchasingError('INQUIRY_CLOSED','این استعلام لغو یا بسته شده است؛ سابقه آن همچنان قابل مشاهده است.');
   if (input.expectedVersion !== inquiry.version) throw new PurchasingError('VERSION_CONFLICT', 'استعلام تغییر کرده است؛ پاسخ‌های تازه را بررسی و دوباره ثبت کنید.');
   const data = { ...inquiry.data };
   if(type==='INQUIRY_CONTINUE') {
@@ -106,7 +108,7 @@ export async function inquiryCommand(tx: Tx, actor: Actor, access: Access, type:
     return updateDocument(tx, actor.id, inquiry, type, { ...data, ...source, quantity: data.quantity, reason: 'contract', priorNeed: { stone: data.stone, technical: data.technical, specKey: data.specKey }, boundAt: new Date().toISOString() }, inquiry.version, { contractId: source.contractId, customerId: source.customerId });
   }
   if (type === 'INQUIRY_OFFER') {
-    assertCapability(access.buyer);
+    assertCapability(access.buyer || canManagePersonalInquiry(access,inquiry));
     const supplier = await tx.purchasingSupplier.findUnique({ where: { id: required(input.supplierId, 'supplierId', 'تأمین‌کننده') } });
     if (!supplier?.isActive) throw new PurchasingError('INVALID_SUPPLIER', 'تأمین‌کننده فعال را انتخاب کنید.', 400, 'supplierId');
     if ((data.offers || []).length >= 100) throw new PurchasingError('OFFER_LIMIT', 'این استعلام به سقف پیشنهادها رسیده است؛ پرونده تازه ایجاد کنید.');

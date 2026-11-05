@@ -2,7 +2,13 @@ import { test, expect } from '@playwright/test';
 import { createPartnerWorkspaceFixturesV2 } from '../../packages/partner-sales-contracts/dist/testing';
 import { loginAsAdmin, setTheme, assertNoSeriousAxeViolations, setViewportAndZoom } from './support/design-system';
 
-for (const width of [1280, 390]) test(`Partner contract inbox keeps drafts across five-contract pages ${width}px`, async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({
+    json: { success: true, data: { allowed: true } },
+  }));
+});
+
+for (const width of [1280, 390]) test(`Partner contract inbox filters and paginates contract results ${width}px`, async ({ page }) => {
   await loginAsAdmin(page);
   await page.setViewportSize({ width, height: 900 });
   const fixture = createPartnerWorkspaceFixturesV2();
@@ -27,33 +33,20 @@ for (const width of [1280, 390]) test(`Partner contract inbox keeps drafts acros
       ...(!query.cursor && !query.search ? { nextCursor: 'page-two' } : {}) } } });
   });
   await page.goto('/dashboard/sales/partner-inquiries');
-  await expect(page.getByRole('heading', { name: 'صندوق کار استعلام‌های همکار' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^100\d+ · همکار/ })).toHaveCount(5);
-  await expect(page.getByText('دلیل رد قیمت توسط همکار: قیمت پیشنهادی بالا است؛ کاهش قیمت', { exact: true })).toBeVisible();
-  const amount = page.getByRole('textbox', { name: /قیمت هر واحد/ });
-  await amount.fill('1750000');
-  if (width === 390) {
-    const responseBox = await amount.boundingBox();
-    const listBox = await page.getByRole('heading', { name: 'قراردادها', exact: true }).boundingBox();
-    expect(listBox!.y).toBeGreaterThan(responseBox!.y);
-  }
+  await expect(page.getByRole('heading', { name: 'استعلام های همکار', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'مشاهده قرارداد', exact: true })).toHaveCount(5);
+  await expect(page.getByRole('link', { name: 'مشاهده قرارداد', exact: true }).first()).toHaveAttribute('href', '/dashboard/sales/partner-inquiries/case-1');
   await page.getByRole('button', { name: 'صفحه بعد', exact: true }).click();
-  await expect(page.getByRole('button', { name: '1006 · همکار 6', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^100\d+ · همکار/ })).toHaveCount(5);
+  await expect(page.getByRole('link', { name: 'مشاهده قرارداد', exact: true }).first()).toHaveAttribute('href', '/dashboard/sales/partner-inquiries/case-6');
+  await expect(page.getByRole('link', { name: 'مشاهده قرارداد', exact: true })).toHaveCount(5);
   await page.getByRole('button', { name: 'صفحه قبل', exact: true }).click();
-  await expect(amount).toHaveValue('1,750,000');
-  await page.getByRole('button', { name: /پاسخ داده‌شده/ }).click();
-  await expect(page.getByText('سنگ قرارداد 1', { exact: true })).toBeVisible();
-  await expect(amount).toHaveCount(0);
-  await page.getByRole('button', { name: /سوابق/ }).click();
-  await expect(page.getByRole('button', { name: /پیشنهادها و دلایل قبلی/ }).first()).toBeVisible();
-  await page.getByRole('textbox', { name: 'جستجوی قرارداد یا همکار' }).fill('10011');
-  await expect(page.getByRole('button', { name: /^100\d+ · همکار/ })).toHaveCount(1);
-  expect(queries.every(query => query.limit === 5)).toBe(true);
+  await expect(page.getByRole('link', { name: 'مشاهده قرارداد', exact: true }).first()).toHaveAttribute('href', '/dashboard/sales/partner-inquiries/case-1');
+  await page.getByRole('combobox', { name: 'وضعیت پاسخ' }).click();
+  await page.getByRole('option', { name: 'سوابق', exact: true }).click();
+  await page.getByRole('searchbox', { name: 'جستجو' }).fill('10011');
+  await expect(page.getByRole('link', { name: 'مشاهده قرارداد', exact: true })).toHaveCount(1);
   expect(queries.some(query => query.view === 'history' && query.search === '10011')).toBe(true);
-  await page.getByRole('textbox', { name: 'جستجوی قرارداد یا همکار' }).fill('');
-  await page.getByRole('button', { name: /نیازمند پاسخ/ }).click();
-  await expect(amount).toHaveValue('1,750,000');
+  await page.getByRole('searchbox', { name: 'جستجو' }).fill('');
   for (const theme of ['light', 'dark'] as const) {
     await setTheme(page, theme);
     await assertNoSeriousAxeViolations(page);
@@ -63,7 +56,7 @@ for (const width of [1280, 390]) test(`Partner contract inbox keeps drafts acros
   if (width === 1280) {
     await setViewportAndZoom(page, { width, height: 900 }, 2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-    await expect(amount).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'استعلام های همکار', exact: true })).toBeVisible();
   }
 });
 
@@ -79,17 +72,20 @@ test('a repricing duty outside the first inbox page opens its exact row and reje
         { rowId: 'second-price', price: { amount: '1500000', currency: 'IRT' }, rejectionReason: 'قیمت جدید هم بالا است؛ لطفاً کاهش دهید' },
       ] }] };
   await page.route('**/api/partner/cases/creation-context', route => route.fulfill({ json: { success: true, data: { schemaVersion: 1, kind: 'ORDINARY_SALES' } } }));
-  await page.route('**/api/partner/workspaces/query-v2', route => route.fulfill({ json: { success: true,
-    data: { ...fixture.responderWorkspace, inquiries: [], contractCounts: { pending: 6, answered: 0, history: 0 } } } }));
+  await page.route('**/api/partner/workspaces/query-v2', route => {
+    const query = route.request().postDataJSON();
+    return route.fulfill({ json: { success: true, data: { ...fixture.responderWorkspace,
+      inquiries: query.contractId === target.caseId ? [target] : [], contractCounts: { pending: 6, answered: 0, history: 0 } } } });
+  });
   await page.route('**/api/partner/inquiries/query-v2', route => {
     expect(route.request().postDataJSON()).toMatchObject({ purpose: 'RESPONDER_INQUIRY', inquiryId: target.inquiryId });
     return route.fulfill({ json: { success: true, data: target } });
   });
   await page.goto(`/dashboard/sales/partner-inquiries?inquiryId=${target.inquiryId}`);
   await expect(page.getByText('سنگ درخواست قیمت مجدد', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /جزئیات ۱ ردیف اصلی/ }).click();
   await expect(page.getByText(`دلیل رد قیمت توسط همکار: ${target.rows[0].partnerRejectionReason}`, { exact: true })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: /قیمت هر واحد/ })).toBeEnabled();
-  await page.getByRole('button', { name: /پیشنهادها و دلایل قبلی/ }).click();
-  await expect(page.getByText('دلیل رد: قیمت اول زیاد است', { exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /قیمت هر متر/ })).toBeEnabled();
+  await expect(page.getByText(/دلیل رد: قیمت اول زیاد است/)).toBeVisible();
   await expect(page.getByText(/شواهد پرونده با نسخه فعلی سازگار نیست/)).toHaveCount(0);
 });

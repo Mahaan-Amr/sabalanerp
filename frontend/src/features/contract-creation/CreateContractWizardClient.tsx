@@ -4543,9 +4543,10 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
       assertSuccessfulSalesResponse(response);
 
       const statusData = response.data.data;
-      const existingSignature = wizardData.signature;
-      updateWizardData({
-        signature: {
+      setWizardData(current => {
+        const existingSignature = current.signature;
+        if (existingSignature?.contractId !== signatureContractId) return current;
+        return { ...current, signature: {
           ...(existingSignature || {
             phoneNumber: null,
             contractId: signatureContractId,
@@ -4571,7 +4572,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
           resendCount: statusData.resendCount || 0,
           lastSentAt: statusData.lastSentAt || null,
           lastOpenedAt: statusData.lastOpenedAt || null
-        }
+        } };
       });
       clearSignatureError(errorSource);
     } catch (error: any) {
@@ -6055,7 +6056,7 @@ const getLayerEdgeDemands = (_part: StairStepperPart, draft: StairPartDraftV2): 
               setDiscountPercentInput(entry.percentInput);
             }}
             onDiscountPercentChange={value => {
-              const entry = enterContractDiscount('PERCENT', value, discountBaseSubtotal);
+              const entry = enterContractDiscount('PERCENT', value, discountBaseSubtotal, maxDiscountPercent);
               setDiscountTouched(true);
               setErrors(previous => ({ ...previous, discount: '' }));
               setDiscountInputBaseSubtotal(entry.inputBaseSubtotal);

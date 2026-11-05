@@ -1,4 +1,5 @@
-import { inquiryCommand, bindInquiryOrder, validateOfferPriceRanges, contractPurchaseSource } from './contractEntry';
+import { createPurchasingInquiryDuty, closePurchasingInquiryDuty, reassignPurchasingInquiryDuty } from '../crossWorkspaceDutyAdapters/purchasingInquiryDutyAdapter';
+import { inquiryCommand, bindInquiryOrder, validateOfferPriceRanges, contractPurchaseSource, offerValid } from './contractEntry';
 import { startInquiryCase } from './inquiryCase';
 import { acceptedPurchaseShares, recordAcceptedCustody, returnedPurchaseShares, mergeAcceptedShares } from './custody';
 import { purchasingAccountingCommand } from './accounting';
@@ -35,7 +36,8 @@ async function notify(tx: Tx, doc: Doc, actor: Actor) {
   const allocations = doc.kind === 'ORDER' ? doc.data.allocations || [] : doc.kind === 'RECEIPT' && doc.parentId ? (await document(tx, doc.parentId)).data.allocations || [] : [];
   for (const allocation of allocations) { const request = await tx.purchasingDocument.findUnique({ where: { id: allocation.requestId } }); if (request) { recipients.add(request.ownerId); recipients.add(request.creatorId); await publishNotificationEvent(tx, { type: 'PURCHASING_UPDATED', deduplicationKey: `purchasing:${doc.id}:${doc.version}:request:${request.id}`, recipientIds: [...new Set([request.creatorId, request.ownerId])], actorId: actor.id, workspace: 'purchasing', resourceType: 'PURCHASING_DOCUMENT', resourceId: request.id, actionUrl: `/dashboard/purchasing?document=${request.id}`, payload: {} }); } }
   const active = await tx.user.findMany({ where: { id: { in: [...recipients] }, isActive: true }, select: { id: true } });
-  await publishNotificationEvent(tx, { type: 'PURCHASING_UPDATED', deduplicationKey: `purchasing:${doc.id}:${doc.version}`, recipientIds: active.map(u => u.id), actorId: actor.id, workspace: 'purchasing', resourceType: 'PURCHASING_DOCUMENT', resourceId: doc.id, actionUrl: `/dashboard/purchasing?document=${doc.id}`, payload: {} });
+  const destination = ['INQUIRY', 'INQUIRY_CASE'].includes(doc.kind) ? '/dashboard/purchasing/inquiries' : '/dashboard/purchasing';
+  await publishNotificationEvent(tx, { type: 'PURCHASING_UPDATED', deduplicationKey: `purchasing:${doc.id}:${doc.version}`, recipientIds: active.map(u => u.id), actorId: actor.id, workspace: 'purchasing', resourceType: 'PURCHASING_DOCUMENT', resourceId: doc.id, actionUrl: `${destination}?document=${encodeURIComponent(doc.id)}`, payload: {} });
 }
 async function requestCommand(tx: Tx, actor: Actor, a: Access, input: JsonObject) {
   assertCapability(a.requester);
@@ -270,7 +272,18 @@ async function miscellaneous(tx: Tx, actor: Actor, a: Access, type: string, inpu
   if (type === 'CHANGE') {
     assertCapability(a.requester); return createDocument(tx, actor.id, 'CHANGE', { requestedAction: input.requestedAction === 'CANCEL' ? 'CANCEL' : 'EDIT', notes: required(input.notes, 'notes', 'شرح تغییر'), resolution: null }, { parentId: doc.id, contractId: doc.contractId, customerId: doc.customerId, ownerId: doc.ownerId });
   }
-  if (type === 'ASSIGN') { assertCapability(a.manager); const ownerId = await internalBuyer(tx, required(input.ownerId, 'ownerId', 'مسئول جدید')); return updateDocument(tx, actor.id, doc, type, { ...doc.data, priorOwnerId: doc.ownerId }, input.expectedVersion, { ownerId }); }
+  if (type === 'ASSIGN') {
+    assertCapability(a.manager);
+    const ownerId = await internalBuyer(tx, required(input.ownerId, 'ownerId', 'مسئول جدید'));
+    if (doc.kind === 'INQUIRY_CASE') {
+      const lines = (await tx.purchasingDocument.findMany({ where: { parentId: doc.id, kind: 'INQUIRY', status: 'OPEN' } })).map(asDoc);
+      for (const line of lines) {
+        await updateDocument(tx, actor.id, line, type, { ...line.data, priorOwnerId: line.ownerId }, line.version, { ownerId });
+        await reassignPurchasingInquiryDuty(tx, line.id, actor.id, ownerId);
+      }
+    }
+    return updateDocument(tx, actor.id, doc, type, { ...doc.data, priorOwnerId: doc.ownerId }, input.expectedVersion, { ownerId });
+  }
   if (type === 'QUOTE') {
     assertCapability(a.buyer); ensureOpen(doc);
     return updateDocument(tx, actor.id, doc, type, { ...doc.data, quoteHistory: [...(doc.data.quoteHistory || []), { price: money(input.price), quantity: optionalQuantity(input.quantity), readyDate: date(input.readyDate), arrivalDate: date(input.date), result: text(input.result), replacement: text(input.replacement), createdAt: new Date().toISOString(), actorId: actor.id }] }, input.expectedVersion);
@@ -283,9 +296,23 @@ async function miscellaneous(tx: Tx, actor: Actor, a: Access, type: string, inpu
   }
   if (type === 'CANCEL') {
     assertCapability(a.manager || doc.kind === 'REQUEST' && doc.creatorId === actor.id);
+    ensureOpen(doc);
+    const reason=required(input.reason,'reason','علت لغو');
+    if(doc.kind==='ORDER') {
+      assertCapability(a.manager);
+      return closeOrderRemainder(tx,actor,doc,{...input,notes:reason});
+    }
+    if(doc.kind==='INQUIRY_CASE' || doc.kind==='INQUIRY') {
+      assertCapability(a.manager);
+      if(doc.kind==='INQUIRY_CASE') {
+        const children=(await tx.purchasingDocument.findMany({where:{kind:'INQUIRY',parentId:doc.id,status:'OPEN'}})).map(asDoc);
+        for(const child of children)await updateDocument(tx,actor.id,child,'CANCEL',{...child.data,cancelReason:reason},child.version,{status:'CANCELLED'});
+      }
+      return updateDocument(tx,actor.id,doc,type,{...doc.data,cancelReason:reason},input.expectedVersion,{status:'CANCELLED'});
+    }
     const linked = await tx.purchasingLink.count({ where: { targetId: doc.id, purpose: 'ALLOCATION' } });
     if (doc.kind !== 'REQUEST' || linked) throw new PurchasingError('CHANGE_REQUIRED', 'برای تعهد ایجادشده، درخواست تغییر یا لغو و نتیجه واقعی تأمین‌کننده را ثبت کنید؛ سابقه حذف نمی‌شود.');
-    return updateDocument(tx, actor.id, doc, type, doc.data, input.expectedVersion, { status: 'CANCELLED' });
+    return updateDocument(tx, actor.id, doc, type, {...doc.data,cancelReason:reason}, input.expectedVersion, { status: 'CANCELLED' });
   }
   if (type === 'CLOSE_REMAINDER') { assertCapability(a.buyer); if (doc.kind !== 'ORDER') throw new PurchasingError('ORDER_REQUIRED', 'سفارش خرید را انتخاب کنید.'); return closeOrderRemainder(tx, actor, doc, input); }
   if (type === 'RESOLVE_CHANGE') { assertCapability(a.buyer); if (doc.kind !== 'CHANGE') throw new PurchasingError('CHANGE_REQUIRED', 'درخواست تغییر را انتخاب کنید.'); return updateDocument(tx, actor.id, doc, type, { ...doc.data, resolution: required(input.notes, 'notes', 'نتیجه واقعی'), resolvedAt: new Date().toISOString() }, input.expectedVersion, { status: 'RESOLVED' }); }
@@ -314,6 +341,18 @@ export async function executePurchasingInTransaction(tx: Tx, actor: Actor, key: 
     if (type === 'SUPPLIER') result = { supplier: await supplierCommand(tx, actor, a, input) };
     else {
       const doc = type==='ATTACHMENT_UPLOAD' ? await attachmentCommand(tx,actor,a,input) : type==='STOCK_SURPLUS' ? await transferSurplus(tx,actor,a,input) : type==='HISTORICAL_PURCHASE' ? await historicalPurchase(tx,actor,a,input) : type.startsWith('ACCOUNTING_') ? await purchasingAccountingCommand(tx,actor,a,type,input) : type === 'INQUIRY_START' ? await startInquiryCase(tx, actor, a, input) : type.startsWith('INQUIRY_') ? await inquiryCommand(tx, actor, a, type, input) : type === 'REQUEST' ? await requestCommand(tx, actor, a, input) : type === 'ORDER' ? await orderCommand(tx, actor, a, input) : type === 'RECEIPT' ? await receiptCommand(tx, actor, a, input) : ['ACCEPT', 'REJECT', 'RETURN', 'EXCHANGE', 'RETURN_ACCEPTED'].includes(type) ? await dispositionCommand(tx, actor, a, type, input) : type === 'LINK_EXISTING' ? await existingCommand(tx, actor, a, input) : await miscellaneous(tx, actor, a, type, input);
+      if (type === 'INQUIRY_CREATE') await createPurchasingInquiryDuty(tx, doc, actor.id);
+      if (type === 'INQUIRY_START') {
+        const lines = await tx.purchasingDocument.findMany({ where: { parentId: doc.id, kind: 'INQUIRY' } });
+        for (const line of lines) await createPurchasingInquiryDuty(tx, line, actor.id);
+      }
+      if (type === 'INQUIRY_OFFER' && (doc.data.offers || []).some(offerValid)) await closePurchasingInquiryDuty(tx, doc.id, actor.id, 'COMPLETED');
+      if (type === 'ASSIGN' && doc.kind === 'INQUIRY') await reassignPurchasingInquiryDuty(tx, doc.id, actor.id, doc.ownerId);
+      if (type === 'CANCEL' && doc.kind === 'INQUIRY') await closePurchasingInquiryDuty(tx, doc.id, actor.id, 'CANCELLED');
+      if (type === 'CANCEL' && doc.kind === 'INQUIRY_CASE') {
+        const lines = await tx.purchasingDocument.findMany({ where: { parentId: doc.id, kind: 'INQUIRY' }, select: { id: true } });
+        for (const line of lines) await closePurchasingInquiryDuty(tx, line.id, actor.id, 'CANCELLED');
+      }
       await notify(tx, doc, actor);
       result = { id: doc.id, number: label(doc), version: doc.version, kind: doc.kind, ...(['PRICE_MISMATCH','COST_MISMATCH'].includes(doc.data.paymentStatus)?{messageType:'warning'}:{}), message: ['PRICE_MISMATCH','COST_MISMATCH'].includes(doc.data.paymentStatus)?'مغایرت فاکتور ثبت شد؛ بدهی یا سند مالی ایجاد نشد. مسئول خرید باید قیمت و هزینه توافقی را بررسی کند.':`${label(doc)} ثبت شد؛ اطلاعات پرونده به‌روز شد.` };
     }

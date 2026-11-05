@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { getEffectiveUserAccess } from '../effectiveAccessService';
 import { PurchasingError, type Doc } from './domain';
 export type Actor = { id: string; role: string };
-export type Access = { actorId: string; manager: boolean; buyer: boolean; receiver: boolean; accountant: boolean; requester: boolean; prices: boolean; all: boolean };
+export type Access = { actorId: string; manager: boolean; buyer: boolean; receiver: boolean; accountant: boolean; requester: boolean; seller: boolean; prices: boolean; all: boolean };
 export async function accessFor(db: PrismaClient | Prisma.TransactionClient, actor: Actor): Promise<Access> {
   const [effective, partner] = await Promise.all([getEffectiveUserAccess(db, { userId: actor.id, userRole: actor.role }), db.partnerProfile.findUnique({ where: { userId: actor.id }, select: { id: true } })]);
   if (partner) throw new PurchasingError('PARTNER_SELF_SERVICE_DENIED', 'درخواست خرید بیرونی باید توسط کاربر داخلی سبلان ثبت شود.', 403);
@@ -15,8 +15,9 @@ export async function accessFor(db: PrismaClient | Prisma.TransactionClient, act
   const buyer = manager || edit('purchasing'), receiver = manager || edit('inventory'), accountant = ['edit', 'admin'].includes(accountingGrant?.permissionLevel || '');
   const requester = buyer || receiver || Boolean(level('sales'));
   if (!requester && !accountant && !level('purchasing') && !level('inventory')) throw new PurchasingError('PURCHASING_ACCESS_DENIED', 'دسترسی فضای خرید برای شما فعال نیست؛ با مدیر سامانه پیگیری کنید.', 403);
-  return { actorId: actor.id, manager, buyer, receiver, accountant, requester, prices: buyer || accountant, all: buyer || receiver || accountant || manager };
+  return { actorId: actor.id, manager, buyer, receiver, accountant, requester, seller:Boolean(level('sales')), prices: buyer || accountant, all: buyer || receiver || accountant || manager };
 }
+export function canManagePersonalInquiry(access:Access,doc:Doc) { return access.seller && ['INQUIRY','INQUIRY_CASE'].includes(doc.kind) && doc.ownerId===access.actorId; }
 export const assertCapability = (allowed: boolean, message = 'مجوز انجام این کار را ندارید؛ از مسئول خرید یا مدیریت پیگیری کنید.') => { if (!allowed) throw new PurchasingError('PURCHASING_PERMISSION_REQUIRED', message, 403); };
 export function purchasingSections(access: Access) {
   return ['requests','inquiries','changes',...(access.all?['orders','receipts','exchanges','suppliers','inventory']:[]),...(access.prices?['finance']:[])];
@@ -32,7 +33,7 @@ export async function canReadDocument(db: Prisma.TransactionClient | PrismaClien
   return false;
 }
 export function redact(doc: Doc, access: Access): Doc {
-  if (access.prices) return doc;
+  if (access.prices || canManagePersonalInquiry(access,doc)) return doc;
   const data = { ...doc.data };
   if(data.lastAttachment?.visibility==='COMMERCIAL')delete data.lastAttachment;
   for (const key of ['price', 'costs', 'paymentTerms', 'invoiceNumber', 'historicalEvidence', 'supplierContact', 'advanceAmount', 'notesFinancial', 'priceHistory','replanHistory']) delete data[key];

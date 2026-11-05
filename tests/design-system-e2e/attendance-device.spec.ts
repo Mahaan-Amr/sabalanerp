@@ -77,6 +77,7 @@ test('shadow initial review shows latest scan and saves inside or unknown withou
   await expect(card.getByRole('button', { name: 'تعیین وضعیت اولیه', exact: true })).toHaveCount(0);
   await card.getByRole('button', { name: 'بررسی تردد', exact: true }).click();
   const review = page.getByRole('dialog', { name: `بررسی تردد ${personName}` });
+  await review.getByRole('button', { name: 'سوابق و شواهد', exact: true }).click();
   await expect(review.getByText('دریافت مقایسه‌ای', { exact: true })).toBeVisible();
   await expect(review.getByRole('button', { name: 'ثبت به‌عنوان ورود', exact: true })).toHaveCount(0);
   await page.keyboard.press('Escape');
@@ -89,7 +90,7 @@ test('shadow initial review shows latest scan and saves inside or unknown withou
   await page.screenshot({ path: testInfo.outputPath('shadow-initial-review-mobile.png') });
 });
 
-test('local machine delivery appears automatically, is confirmed by Guard and stays idempotent; mobile review is accessible', async ({ page }, testInfo) => {
+test('local machine delivery is applied automatically and stays idempotent; mobile review is accessible', async ({ page }, testInfo) => {
   // The preceding shadow-review case uses this same isolated synthetic terminal.
   await db.attendancePunch.deleteMany({ where: { terminalId } });
   await db.attendanceDeviceAudit.deleteMany({ where: { terminalId, action: 'CLOCK_MEASURED' } });
@@ -104,23 +105,21 @@ test('local machine delivery appears automatically, is confirmed by Guard and st
   const payload = { punches: [{ deviceCode: '1', occurredAt: at, verifyMode: 1, inOutRaw: 255 }], readOk: true, clockSample: { offsetMs: 0, uncertaintyMs: 1000, measuredAt: new Date().toISOString() } };
   const response = await page.request.post(`/api/attendance-device/connector/${terminalId}/punches`, { headers: { Authorization: `Bearer ${terminalSecret}` }, data: payload });
   expect(response.ok()).toBeTruthy();
-  const checkbox = card.getByRole('checkbox', { name: /انتخاب بازه/ });
-  await expect(checkbox).toBeVisible({ timeout: 5000 });
+  await expect.poll(() => db.attendanceInterval.count({ where: { attendanceRecord: { personnelId: personId } } }), { timeout: 5000 }).toBe(1);
   const latencyMs = Date.now() - new Date(at).getTime();
   expect(latencyMs).toBeLessThan(5000);
   await testInfo.attach('local-simulated-punch-latency', { body: JSON.stringify({ latencyMs, source: 'simulated local HTTP punch; no physical SDK', limitMs: 5000 }), contentType: 'application/json' });
-  await checkbox.check();
-  await panel.getByRole('button', { name: /تأیید ۱ بازه انتخاب‌شده/ }).click();
-  await expect(checkbox).toHaveCount(0);
+  await expect(card.getByRole('checkbox', { name: /انتخاب بازه/ })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: /تأیید.*بازه انتخاب‌شده/ })).toHaveCount(0);
   const interval = await db.attendanceInterval.findFirstOrThrow({ where: { attendanceRecord: { personnelId: personId } } });
-  expect(interval.confirmedRevision).toBe(interval.revision);
   expect(interval.entryRecordedBy).toBeNull();
   const replay = await page.request.post(`/api/attendance-device/connector/${terminalId}/punches`, { headers: { Authorization: `Bearer ${terminalSecret}` }, data: payload });
   expect(replay.ok()).toBeTruthy();
   expect(await db.attendancePunch.count({ where: { terminalId } })).toBe(1);
   await card.getByRole('button', { name: 'بررسی تردد', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: `بررسی تردد ${personName}` });
-  await expect(dialog.getByText('تأییدشده', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'سوابق و شواهد', exact: true }).click();
+  await expect(dialog.getByText('ثبت سیستمی', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(dialog).toBeVisible();
   const axeDialog = await new AxeBuilder({ page }).include('[role="dialog"]').analyze();
@@ -218,7 +217,9 @@ test('audited correction stays pending through preview and requires every fact b
   await page.context().addCookies([{ name: 'sabalan_session', value: sessionToken, url: 'http://localhost:3000', httpOnly: true, sameSite: 'Lax' }]);
   await page.goto('/dashboard/security/attendance');
   await page.locator(`[data-personnel-id="${personId}"]`).getByRole('button', { name: 'بررسی تردد', exact: true }).click();
-  await page.getByRole('dialog', { name: `بررسی تردد ${personName}` }).getByRole('button', { name: 'اصلاح حسابرسی‌شده', exact: true }).click();
+  const review = page.getByRole('dialog', { name: `بررسی تردد ${personName}` });
+  await review.getByRole('button', { name: 'سوابق و شواهد', exact: true }).click();
+  await review.getByRole('button', { name: 'بررسی ابطال یا خروج نامعلوم', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: `اصلاح حسابرسی‌شده ${personName}` });
   await expect(dialog).toBeVisible();
   await dialog.getByLabel('نوع اصلاح', { exact: true }).selectOption('UNKNOWN_EXIT');

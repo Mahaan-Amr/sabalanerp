@@ -33,8 +33,14 @@ export function contractDiscountSnapshotError(discount: DiscountSnapshot | null 
 }
 
 /** Conversion follows an explicit field edit only. Invalid entries remain visible, never clamped. */
-export function enterContractDiscount(mode: 'AMOUNT_TOMAN' | 'PERCENT', value: number, baseSubtotal: number) {
-  const amount = mode === 'AMOUNT_TOMAN' ? value : Math.round(baseSubtotal * value / 100);
+export function enterContractDiscount(mode: 'AMOUNT_TOMAN' | 'PERCENT', value: number, baseSubtotal: number, maxPercent?: number) {
+  const converted = Math.round(baseSubtotal * value / 100);
+  // A valid percentage can round up past the largest permitted whole toman.
+  // Preserve an excessive percentage unchanged so validation still rejects it.
+  const amount = mode === 'AMOUNT_TOMAN' ? value
+    : maxPercent !== undefined && Number.isFinite(maxPercent) && value <= maxPercent
+      ? Math.min(converted, maximumContractDiscountToman(baseSubtotal, maxPercent))
+      : converted;
   return {
     amount,
     percentInput: mode === 'PERCENT' ? value : contractDiscountEquivalentPercent(amount, baseSubtotal),

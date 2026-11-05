@@ -186,7 +186,7 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-      target: local-dev
+      target: ${LOCAL_FRONTEND_BUILD_TARGET:-local-dev}
       args:
         NEXT_PUBLIC_API_URL: /api
         BACKEND_API_ORIGIN: http://backend:5000
@@ -194,13 +194,16 @@ services:
         NPM_CONFIG_REGISTRY: https://mirror.abrha.net/repository/npm/
         PERFORMANCE_SOURCE_COMMIT: ${PERFORMANCE_SOURCE_COMMIT:-unattested}
         PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_SOURCE_HASH:-unattested}
+        SABALAN_BROWSER_BUILD_ID: ${LOCAL_BROWSER_BUILD_ID:-}
     environment:
-      NODE_ENV: development
-      NEXT_DIST_DIR: .next-local
+      NODE_ENV: ${LOCAL_FRONTEND_NODE_ENV:-development}
+      NEXT_DIST_DIR: ${LOCAL_FRONTEND_DIST_DIR:-.next-local}
       PORT: 3000
       NEXT_PUBLIC_API_URL: /api
       BACKEND_API_ORIGIN: http://backend:5000
       NEXT_PUBLIC_ENABLE_PROTOTYPES: "1"
+      SABALAN_BROWSER_BUILD_ID: ${LOCAL_BROWSER_BUILD_ID:-}
+      NODE_OPTIONS: ${LOCAL_FRONTEND_NODE_OPTIONS:---max-old-space-size=4096}
     ports:
       - "127.0.0.1:${LOCAL_FRONTEND_HOST_PORT:-3000}:3000"
     depends_on:

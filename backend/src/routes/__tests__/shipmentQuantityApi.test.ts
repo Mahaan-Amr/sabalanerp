@@ -62,8 +62,10 @@ const authenticatedAs = (role: string) => (req: any, _res: any, next: any) => {
 };
 
 test('global MANAGER eligibility follows the canonical feature policy', async () => {
-  const unavailable = { findUnique: async () => { throw new Error('global role must not query grants'); } };
-  const prisma = { workspacePermission: unavailable, roleWorkspacePermission: unavailable, featurePermission: unavailable, roleFeaturePermission: unavailable } as any;
+  const unavailable = { findUnique: async () => { throw new Error('global role must not query fallback grants'); } };
+  // A direct deny is checked even for globally eligible roles.
+  const prisma = { workspacePermission: unavailable, roleWorkspacePermission: unavailable,
+    featurePermission: { findUnique: async () => null }, roleFeaturePermission: unavailable } as any;
   const app = express();
   app.use('/api/shipment-quantities', createShipmentQuantityRouter({
     prisma, authenticate: authenticatedAs('MANAGER'), readProjection: (async () => projection) as any,

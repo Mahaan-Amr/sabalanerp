@@ -38,7 +38,10 @@ const run = async () => {
   const repositoryRoot = path.resolve(process.cwd(), '..');
   const source = new PrismaClient();
   const sourceBefore = await countSourceEvidence(source);
-  const database = await createDispatchDocumentsTemporaryDatabase({ repositoryRoot, sourceDatabaseUrl });
+  // These CRM and partner lookup tables are not used by ordinary dispatch
+  // issuance; omit unrelated fixture data while retaining their schema.
+  const database = await createDispatchDocumentsTemporaryDatabase({ repositoryRoot, sourceDatabaseUrl,
+    excludedDataTables: ['crm_customer_cards', 'partner_case_tracking_codes', 'partner_inquiry_notification_deliveries'] });
   const firstRaw = database.client();
   const secondRaw = database.client();
   const observer = database.client();
@@ -68,6 +71,7 @@ const run = async () => {
       activatedAt: new Date(), activatedBy: actor.id, manifestId: manifest.id,
       integrityHash: createHash('sha256').update(`cutover-${database.runId}`).digest('hex'),
     } });
+    await observer.shipmentStatementOperationsControl.update({ where: { id: 'customer-shipment-statements' }, data: { paused: false } });
     const number = (await observer.$queryRawUnsafe<Array<{ number: bigint }>>(
       `SELECT nextval('accounting_dispatch_waybill_number_seq') AS number`))[0].number.toString();
     const waybillId = randomUUID();
@@ -208,6 +212,12 @@ const run = async () => {
     });
     const session = await confirmation.startSession({ waybillId, actorId: actor.id,
       workstationId: `issue260-${database.runId}` });
+    await confirmation.recordInternalBiometricResult({ sessionId: session.id, actorId: actor.id, result: {
+      availability: 'UNAVAILABLE', device: { model: 'test', serial: 'test', connectorVersion: 'test', sdkVersion: 'test' },
+      captureQuality: { state: 'NOT_EVALUATED' }, liveness: { state: 'NOT_EVALUATED' },
+      match: { state: 'NOT_EVALUATED' }, errorCategory: 'DEVICE_DISCONNECTED', retryable: true,
+    } });
+    await confirmation.beginInternalFallback({ sessionId: session.id, actorId: actor.id });
     assert.match(deliveredOtp, /^\d{6}$/);
     await confirmation.verifyOtp({ sessionId: session.id, code: deliveredOtp, actorId: actor.id });
     const { actor: guard, authority: guardAuthority } = await createAuthorizedActorFixture(observer, {

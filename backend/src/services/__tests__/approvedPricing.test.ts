@@ -6,6 +6,7 @@ import { AccountingRecordStatus, FinancialRecordKind, Prisma } from '@prisma/cli
 import { projectCanonicalProductGraph, roundContractPayableTotal } from '@sabalanerp/contract-product-graph';
 import {
   buildApprovedPricingVersion,
+  approvedPricingInvoiceObligation,
   canonicalApprovedPricingHash,
   sealApprovedPricing,
 } from '../approvedPricing/domain';
@@ -33,7 +34,8 @@ test('seals the rounded contractual obligation while retaining precise rows and 
   data.payment.totalContractAmount = '1150';
   data.monetaryRounding = roundContractPayableTotal('1149.6', 'تومان');
   const result = buildApprovedPricingVersion(source, 1, 'whole-payable-version');
-  assert.equal(new Prisma.Decimal(result.netAmount).toString(), '1150');
+  assert.equal(new Prisma.Decimal(result.netAmount).toString(), '1149.6');
+  assert.equal((result.sourceEvidence.financialApproval as any).payable.amount, '1150.000000000000');
   assert.equal(new Prisma.Decimal(result.discountAmount).toString(), '100.4');
   assert.equal(new Prisma.Decimal(result.rows[0].canonicalAllInTotal).toString(), '1250');
   source.leaf.amount = '11496';
@@ -42,7 +44,80 @@ test('seals the rounded contractual obligation while retaining precise rows and 
   data.payment.totalContractAmount = '1192';
   data.monetaryRounding = roundContractPayableTotal('1192', 'تومان');
   source.leaf.amount = '11920';
-  assert.equal(new Prisma.Decimal(buildApprovedPricingVersion(source, 1, 'with-services').netAmount).toString(), '1192');
+  const withServices = buildApprovedPricingVersion(source, 1, 'with-services');
+  assert.equal(new Prisma.Decimal(withServices.netAmount).toString(), '1149.6');
+  assert.equal((withServices.sourceEvidence.financialApproval as any).payable.amount, '1192.000000000000');
+  assert.equal(approvedPricingInvoiceObligation(withServices), '1192.000000000000');
+  assert.equal((withServices.sourceEvidence.financialApproval as any).payable.serviceAmount, '42.400000000000');
+  assert(new Prisma.Decimal(withServices.grossAmount).minus(withServices.discountAmount).eq(withServices.netAmount));
+});
+
+test('separates independent services from shipment pricing and rejects an invoice omitting them', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as Record<string, any>;
+  data.discount = { enabled: false, baseSubtotal: '1000', percent: '0', amount: '0', currency: 'تومان' };
+  data.serviceRows = [{ id: 'cutting', title: 'برش مستقل', totalPrice: '1500000' }];
+  data.payment.totalContractAmount = '1501250';
+  data.monetaryRounding = roundContractPayableTotal('1501250', 'تومان');
+  source.leaf.amount = '15012500';
+  const version = buildApprovedPricingVersion(source, 1, 'independent-service');
+  assert.equal(version.grossAmount, '1250.000000000000');
+  assert.equal(version.netAmount, '1250.000000000000');
+  assert.equal(approvedPricingInvoiceObligation(version), '1501250.000000000000');
+  assert.equal((version.sourceEvidence.financialApproval as any).payable.serviceAmount, '1500000.000000000000');
+  assert.equal((version.sourceEvidence.financialApproval as any).payable.serviceRows[0].id, 'cutting');
+  source.leaf.amount = '12500';
+  assert.throws(() => buildApprovedPricingVersion(source, 1, 'omitted-service'), /invoice amount conflicts/);
+  data.payment.totalContractAmount = '1501251';
+  assert.throws(() => buildApprovedPricingVersion(source, 1, 'wrong-contract-total'), /rounding evidence conflicts/);
+});
+
+test('approves a reconciled older contract with standalone services and no rounding metadata', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as Record<string, any>;
+  data.discount = { enabled: false, baseSubtotal: '1000', percent: '0', amount: '0', currency: 'تومان' };
+  data.serviceRows = [{ id: 'legacy-cutting', totalPrice: '100' }];
+  data.payment.totalContractAmount = '1350';
+  source.leaf.amount = '13500';
+  const version = buildApprovedPricingVersion(source, 1, 'legacy-service');
+  assert.equal(version.netAmount, '1250.000000000000');
+  assert.equal(approvedPricingInvoiceObligation(version), '1350.000000000000');
+  assert.equal((version.sourceEvidence.financialApproval as any).payable.serviceAmount, '100.000000000000');
+  data.payment.totalContractAmount = '1349';
+  assert.throws(() => buildApprovedPricingVersion(source, 1, 'legacy-service-conflict'), /service.*payable|payable.*service/i);
+  data.payment.totalContractAmount = '1350';
+  data.serviceRows = [{ totalPrice: '-1' }, { totalPrice: '101' }];
+  assert.throws(() => buildApprovedPricingVersion(source, 1, 'negative-service'), /cannot be negative/);
+});
+
+test('separates legacy service and an agreed discount without changing either amount', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as Record<string, any>;
+  data.serviceRows = [{ id: 'service', totalPrice: '100' }];
+  data.payment.totalContractAmount = '1250';
+  source.leaf.amount = '12500';
+  const version = buildApprovedPricingVersion(source, 1, 'legacy-discount-service');
+  assert.equal(version.grossAmount, '1250.000000000000');
+  assert.equal(version.discountAmount, '100.000000000000');
+  assert.equal(version.netAmount, '1150.000000000000');
+  assert.equal(approvedPricingInvoiceObligation(version), '1250.000000000000');
+});
+
+test('replacement after correction retains the complete invoice including standalone services', () => {
+  const source = approvedPricingSourceFixture();
+  const data = source.contract.contractData as Record<string, any>;
+  source.leaf.metadata = { mode: 'REPLACEMENT_AFTER_CORRECTION' };
+  data.discount = { enabled: false, baseSubtotal: '1000', percent: '0', amount: '0', currency: 'تومان' };
+  data.serviceRows = [{ id: 'service', totalPrice: '100' }];
+  data.payment.totalContractAmount = '1350';
+  data.monetaryRounding = roundContractPayableTotal('1350', 'تومان');
+  source.leaf.amount = '13500';
+  const rounded = buildApprovedPricingVersion(source, 1, 'replacement-service');
+  assert.equal(approvedPricingInvoiceObligation(rounded), '1350.000000000000');
+  assert.equal(rounded.netAmount, '1250.000000000000');
+  delete data.monetaryRounding;
+  const legacy = buildApprovedPricingVersion(source, 1, 'replacement-legacy-service');
+  assert.equal(approvedPricingInvoiceObligation(legacy), '1350.000000000000');
 });
 import {
   bindFrozenRowsToPostSnapshotCanonicalGraph,
@@ -1831,6 +1906,13 @@ test('FROM_SELECTED_ITEMS seals only the financially approved subset and allocat
   source.leaf.amount = '5498';
   const preciseSubset = buildApprovedPricingVersion(source, 1, 'precise-selected-version');
   assert.equal(preciseSubset.netAmount, '549.800000000000');
+  data.serviceRows = [{ id: 'independent-service', totalPrice: '100' }];
+  data.payment.totalContractAmount = '1799';
+  data.monetaryRounding = roundContractPayableTotal('1799.4', 'تومان');
+  const subsetWithService = buildApprovedPricingVersion(source, 1, 'selected-with-service');
+  assert.equal(subsetWithService.netAmount, '549.800000000000');
+  assert.equal(approvedPricingInvoiceObligation(subsetWithService), '549.800000000000');
+  assert.equal((subsetWithService.sourceEvidence.financialApproval as any).payable, undefined);
 });
 
 test('financial-record evidence and post-candidate contract edits fail closed', () => {

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { calculateSlab, parseSlabPolicyInput } from '@sabalanerp/contract-product-graph';
+import { calculateSlab, parseSlabPolicyInput, roundContractPayableTotal } from '@sabalanerp/contract-product-graph';
 import { buildLegacyContractMigrationPlan, CURRENT_CONTRACT_PRODUCT_POLICY_V3 } from '../contractProductGraphMigration';
 import { createAuthoritativeSession, SESSION_COOKIE } from '../identitySessionService';
 import { bindFinalizedAllocationPricing } from '../allocationPricingBinding';
@@ -22,6 +24,13 @@ const runId = cleanupRunId || `qa-slab-100795-${randomUUID()}`;
 assert(/^qa-slab-100795-[0-9a-f-]{36}$/.test(runId), 'Only this synthetic fixture namespace may be cleaned');
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const object = (value: unknown) => value as Record<string, any>;
+const withService = process.argv.includes('--with-service');
+const legacyService = process.argv.includes('--legacy-service');
+const directAccounting = process.argv.includes('--direct-accounting');
+const replacement = process.argv.includes('--replacement');
+const documentsConcurrency = process.argv.includes('--documents-concurrency');
+const documentsBrowser = process.argv.includes('--documents-browser');
+const payable = withService ? 359703750 : 358203750;
 
 async function cleanup() {
   await db.$transaction(async tx => {
@@ -72,6 +81,7 @@ async function cleanup() {
     await tx.accountingInvoiceCandidateItem.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
     await tx.accountingAuditLog.deleteMany({ where: { contractId } });
     await tx.accountingContractFlag.deleteMany({ where: { contractId } });
+    await tx.accountingCorrectionRequest.deleteMany({ where: { contractId } });
     await tx.accountingFinancialRecord.deleteMany({ where: { contractId } });
     await tx.salesContract.deleteMany({ where: { id: contractId } });
     await tx.projectAddress.deleteMany({ where: { id: projectId, projectName: runId } });
@@ -118,10 +128,11 @@ async function run() {
     meta: { isLayer: false } };
   const data = { contractKind: 'collaboration', projectId, project: { id: projectId, address: project.address, projectName: runId }, customerId: template.customerId,
     customer: { id: template.customerId, firstName: template.customer.firstName, lastName: template.customer.lastName },
-    products: [product], serviceRows: [], discount: { enabled: false, baseSubtotal: '350460000',
+    products: [product], serviceRows: withService ? [{ id: 'qa-independent-cut', title: 'برش توافقی', totalPrice: '1500000' }] : [], discount: { enabled: false, baseSubtotal: '350460000',
       amount: '0', percent: '0', currency: 'تومان' },
-    payment: { currency: 'تومان', totalContractAmount: 358203750 } };
-  const plan = buildLegacyContractMigrationPlan({ id: contractId, totalAmount: '358203750', contractData: data },
+    payment: { currency: 'تومان', totalContractAmount: payable },
+    ...(withService && !legacyService ? { monetaryRounding: roundContractPayableTotal(String(payable), 'تومان') } : {}) };
+  const plan = buildLegacyContractMigrationPlan({ id: contractId, totalAmount: String(payable), contractData: data },
     1, CURRENT_CONTRACT_PRODUCT_POLICY_V3, true);
   assert(plan.ok, JSON.stringify(plan));
   await db.user.create({ data: { id: actorId, email: `${runId}@example.invalid`, username: runId,
@@ -130,7 +141,7 @@ async function run() {
   await db.salesContract.create({ data: { id: contractId, contractNumber: runId,
     title: runId, titlePersian: 'آزمون متراژ حسابداری اسلب', content: '', status: 'SIGNED',
     customerId: template.customerId, departmentId: template.departmentId,
-    createdBy: actorId, responsibleSellerId: actorId, totalAmount: '358203750', currency: 'تومان', contractData: json(data),
+    createdBy: actorId, responsibleSellerId: actorId, totalAmount: String(payable), currency: 'تومان', contractData: json(data),
     items: { create: { productId, productRowId: rowId, productType: 'slab', quantity: 3,
       unitPrice: '22000000', totalPrice: '358203750' } },
     productGraphState: { create: { schemaVersion: plan.graph.schemaVersion, revision: plan.graph.revision,
@@ -152,31 +163,56 @@ async function run() {
     assert.equal(result.success, true, JSON.stringify(result));
     return result.data;
   };
-  const action = (body: Record<string, unknown>) => request('accounting/actions', body);
-  const created = await action({ kind: 'CREATE_INVOICE', contractId, mode: 'FROM_CONTRACT_TOTAL',
-    idempotencyKey: `${runId}:create`, correlationId: `${runId}:create` });
+  const action = async (body: Record<string, unknown>) => {
+    if (!directAccounting) return request('accounting/actions', body);
+    const { executeAccountingAction } = await import('../accountingService');
+    return executeAccountingAction(body as any, { userId: actorId, role: 'ADMIN', effectiveAuthority: {
+      actorRole: 'ADMIN', workspace: 'accounting', workspacePermission: 'ADMIN',
+      feature: 'accounting-actions-manage', featurePermission: 'EDIT',
+    } });
+  };
+  let createCommand: Record<string, unknown> = { kind: 'CREATE_INVOICE', contractId, mode: 'FROM_CONTRACT_TOTAL',
+    idempotencyKey: `${runId}:create`, correlationId: `${runId}:create` };
+  if (replacement) {
+    const prior = await db.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', status: 'VOIDED', sourceKind: 'SALES_CONTRACT', sourceId: contractId,
+      contractId, customerId: template.customerId, amount: new Prisma.Decimal(payable * 10 - 10), currency: 'ریال',
+      financiallyApprovedAt: new Date('2026-01-01T00:00:00Z'), financiallyApprovedBy: actorId, createdBy: actorId,
+    } });
+    const correction = await db.accountingCorrectionRequest.create({ data: { contractId, recordId: prior.id,
+      category: 'OTHER', status: 'SALES_EDITED', accountantNote: 'Synthetic replacement approval', createdBy: actorId } });
+    createCommand = { kind: 'CREATE_REPLACEMENT_INVOICE', contractId, correctionRequestId: correction.id,
+      replacesRecordId: prior.id, idempotencyKey: `${runId}:replacement`, correlationId: `${runId}:replacement` };
+  }
+  const created = await action(createCommand);
   const invoiceId = String(created.affected.financialRecordIds[0]);
   const before = await db.salesContract.findUniqueOrThrow({ where: { id: contractId }, include: { items: true, productGraphState: true } });
   const draft = await db.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId }, include: { invoiceItems: true } });
   await action({ kind: 'APPROVE_FINANCIAL_INVOICE', invoiceId,
     systemInvoiceNumber: `QA-SLAB-${randomUUID()}`, systemInvoiceDate: new Date().toISOString().slice(0, 10),
-    sepidarAmount: '3582037500', idempotencyKey: `${runId}:approve`, correlationId: `${runId}:approve` });
+    sepidarAmount: String(payable * 10), idempotencyKey: `${runId}:approve`, correlationId: `${runId}:approve` });
   const approved = await db.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId }, include: { invoiceItems: true } });
   assert.equal(approved.status, 'ISSUED');
   assert(approved.financiallyApprovedAt);
-  assert.equal(approved.amount.toString(), '3582037500');
-  assert.equal(approved.sepidarAmount!.toString(), '3582037500');
+  assert.equal(approved.amount.toString(), String(payable * 10));
+  assert.equal(approved.sepidarAmount!.toString(), String(payable * 10));
   assert.deepEqual(approved.sourceSnapshot, draft.sourceSnapshot);
   assert.deepEqual(approved.invoiceItems, draft.invoiceItems);
   const after = await db.salesContract.findUniqueOrThrow({ where: { id: contractId }, include: { items: true, productGraphState: true } });
   assert.deepEqual(after.contractData, before.contractData);
   assert.deepEqual(after.items, before.items);
   assert.deepEqual(after.productGraphState, before.productGraphState);
-  assert.equal(after.totalAmount!.toString(), '358203750');
+  assert.equal(after.totalAmount!.toString(), String(payable));
   const version = await db.contractApprovedPricingVersion.findFirstOrThrow({ where: { contractId }, include: { rows: true } });
   assert.equal(version.rows.length, 1);
   assert.equal(version.rows[0].contractedQuantity.toString(), '15.4875');
   assert.equal(version.rows[0].canonicalAllInTotal.toString(), '358203750');
+  if (withService) {
+    assert.equal(version.grossAmount.toString(), '358203750');
+    assert.equal(version.netAmount.toString(), '358203750');
+    assert.equal(object(version.sourceEvidence).financialApproval.payable.serviceAmount, '1500000.000000000000');
+    assert.equal(object(version.sourceEvidence).financialApproval.payable.amount, '359703750.000000000000');
+  }
   const normalization = object(version.sourceEvidence).quantityPrecisionEvidence[0];
   assert.equal(normalization.rawSnapshotAreaSquareMeters, '15.4875');
   assert.equal(normalization.rawCanonicalAreaSquareMeters, '15.4875');
@@ -188,6 +224,10 @@ async function run() {
   assert.equal(shipmentQuantity.quantity.toString(), '15.4875');
   assert.equal(await db.shipmentQuantityEvidence.count({ where: { contractId, kind: 'EVIDENCE_CONFLICT' } }), 0);
   assert.equal(await db.accountingAuditLog.count({ where: { contractId, action: 'APPROVE_FINANCIAL_INVOICE' } }), 1);
+  if (directAccounting) {
+    console.log(`Real accounting service and database approval${withService ? ' with independent service' : ''}: PASS`);
+    return;
+  }
   const finalized: Array<{ id: string; lines: any[]; finalizedAt: Date }> = [];
   for (const [index, amount] of ['5.1625', '10.325'].entries()) {
     const driverId = randomUUID(), vehicleId = randomUUID(), loadingId = randomUUID(), turnId = randomUUID();
@@ -229,12 +269,37 @@ async function run() {
   assert.equal(projection.rows[0].quantities!.contracted, '15.4875');
   assert.equal(projection.rows[0].quantities!.finalizedReserved, '15.4875');
   assert.equal(projection.rows[0].quantities!.availableToLoad, '0.000');
+  if (documentsConcurrency || documentsBrowser) {
+    for (const revision of finalized) {
+      const existing = await db.accountingDispatchCandidate.findUnique({ where: { allocationRevisionId: revision.id }, include: { workItem: true } });
+      if (existing) {
+        assert.equal(existing.status, 'PENDING');
+        assert.equal(existing.workItem?.status, 'OPEN');
+      } else {
+        await db.accountingDispatchCandidate.create({ data: { allocationRevisionId: revision.id, workItem: { create: {} } } });
+      }
+    }
+    if (documentsConcurrency) execFileSync(process.execPath, [require.resolve('tsx/cli'), path.join(__dirname, 'dispatchDocumentsIssuanceConcurrency.test.ts')], {
+      cwd: path.resolve(__dirname, '../../..'), env: { ...process.env, CUSTOMER_SHIPMENT_STATEMENTS_ENABLED: 'true' },
+      stdio: 'inherit', timeout: 240_000,
+    });
+    if (documentsBrowser) execFileSync('npm', ['run', 'test:accounting-dispatch-documents:e2e:real'], {
+      cwd: path.resolve(__dirname, '../../../..'), env: process.env, stdio: 'inherit', timeout: 240_000,
+    });
+  }
   // Exercise the persisted financial/logistics binding without activating the
   // globally paused statement workflow for other local contracts.
   const rollback = Symbol('isolated priced ledger rollback');
   const controlsBefore = [await db.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' } }),
     await db.shipmentStatementOperationsControl.findUnique({ where: { id: 'customer-shipment-statements' } })];
-  try {
+  const existingEvents = await db.dispatchPricedAllocationEvent.findMany({ where: { allocationRevisionId: { in: finalized.map(row => row.id) } } });
+  const boundDuringFinalization = existingEvents.length > 0;
+  if (boundDuringFinalization) {
+    assert.equal(existingEvents.length, 2);
+    assert.equal(existingEvents.reduce((sum, event) => sum.plus(event.quantity), new Prisma.Decimal(0)).toString(), '15.4875');
+    assert.equal(existingEvents.reduce((sum, event) => sum.plus(event.grossAmount), new Prisma.Decimal(0)).toString(), '358203750');
+    assert.equal(await db.logisticsAllocationRevisionPricing.count({ where: { allocationRevisionId: { in: finalized.map(row => row.id) }, contractId } }), 2);
+  } else try {
     await db.$transaction(async tx => {
       const manifest = await tx.shipmentStatementMigrationManifest.create({ data: { migrationName: runId,
         schemaVersion: 1, sourceSchemaHash: 'e'.repeat(64), createdBy: actorId } });
@@ -265,7 +330,7 @@ async function run() {
     amountToman: after.totalAmount!.toString(), invoiceRial: approved.amount.toString(), readiness: readiness.status,
     normalization, immutableContractAndGraph: true, immutableInvoiceSnapshotAndItems: true,
     logistics: { partialQuantities: ['5.1625', '10.325'], reserved: '15.4875', available: '0.000',
-      overAllocationRejected: true, pricedGrossToman: '358203750', pricedBindingRolledBack: true } }));
+      overAllocationRejected: true, pricedGrossToman: '358203750', boundDuringFinalization, pricedBindingRolledBack: !boundDuringFinalization } }));
 }
 
 async function main() {

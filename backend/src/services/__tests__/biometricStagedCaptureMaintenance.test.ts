@@ -9,7 +9,7 @@ test('biometric expiry worker skips protected modes and participates in write dr
   process.env.RECOVERY_COORDINATION_DIR = directory;
   const runtime = await import('../recoveryRuntime');
   const worker = await import('../biometricStagedCaptureMaintenance');
-  let tick!: () => Promise<void>;
+  let tick!: () => void;
   let writes = 0;
   let release!: () => void;
   const holding = new Promise<void>(resolve => { release = resolve; });
@@ -23,23 +23,23 @@ test('biometric expiry worker skips protected modes and participates in write dr
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(writes, 0);
     runtime.setRecoveryRuntimeState('MAINTENANCE');
-    await tick();
+    tick(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(writes, 0);
     runtime.setRecoveryRuntimeState('NORMAL');
     fs.writeFileSync(path.join(directory, 'deployment-maintenance.json'), JSON.stringify({ mode: 'MAINTENANCE' }));
-    await tick();
+    tick(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(writes, 0);
     fs.unlinkSync(path.join(directory, 'deployment-maintenance.json'));
-    const admitted = tick();
+    tick(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(writes, 1);
     await assert.rejects(runtime.waitForActiveWrites(1), /Active writes did not drain/);
     runtime.setRecoveryRuntimeState('MAINTENANCE');
-    await tick();
+    tick(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(writes, 1);
     release();
-    await admitted;
+    await new Promise(resolve => setImmediate(resolve));
     await runtime.waitForActiveWrites(1);
-    await tick();
+    tick(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(writes, 1);
   } finally {
     release(); stop?.(); mock.restoreAll();

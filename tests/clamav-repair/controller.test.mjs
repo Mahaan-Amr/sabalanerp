@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8');
 test('protected release captures the stopped bank before checkpoint, applies target after journaled mutation, and verifies before reopening',()=>{
- const steps=['phase SERVICES_DRAINED\ncapture_clamav_checkpoint','run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js','phase REMOTE_CHECKPOINT_VERIFIED','phase MUTATION_STARTED','node scripts/clamav-checkpoint.mjs activate','phase RELEASE_STARTED','verify_clamav_repair_runtime\nremaining_mutation_seconds','phase TRAFFIC_OPENED'];
+ const steps=['phase SERVICES_DRAINED','preserved_clamav_guard identity || exit 1\ncapture_clamav_checkpoint','run_original_owned_with_heartbeat host_backup_retention BEFORE_CHECKPOINT','bind_host_backup_retention_receipt BEFORE_CHECKPOINT','run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js','phase REMOTE_CHECKPOINT_VERIFIED','run_original_owned_with_heartbeat host_backup_retention AFTER_CHECKPOINT','bind_host_backup_retention_receipt AFTER_CHECKPOINT','run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-retention-local.js apply AFTER_CHECKPOINT','phase MUTATION_STARTED','node scripts/clamav-checkpoint.mjs activate','phase RELEASE_STARTED','verify_clamav_repair_runtime\nremaining_mutation_seconds','phase TRAFFIC_OPENED'];
  let previous=-1;
  for(const step of steps) {const index=source.indexOf(step);assert.ok(index>previous,`missing or out of order: ${step}`);previous=index;}
  assert.doesNotMatch(source,/compose up -d postgres clamav/,'pre-checkpoint must not replace AV');
@@ -15,7 +15,7 @@ test('protected release captures the stopped bank before checkpoint, applies tar
 
 // Execute the real controller against fail-closed CLI adapters. All files, leases,
 // image state and backup transport are private fixtures; no real deployment occurs.
-for(const scenario of ['qualification','remote-tamper','post-mutation','rollback-qualifier','after-open','success','incident-success','incident-remote-tamper','incident-post-mutation','incident-after-open','incident-stale-target','incident-updater-refusal','incident-install-interrupted','incident-lease-expired',
+for(const scenario of ['qualification','remote-tamper','post-mutation','rollback-qualifier','after-open','success','storage-preflight','legacy-signal','runtime-not-closed','incident-success','incident-remote-tamper','incident-post-mutation','incident-after-open','incident-stale-target','incident-updater-refusal','incident-install-interrupted','incident-lease-expired',
  'incident-before-maintenance','incident-acquire-failure','incident-after-acquire','incident-marker-interrupted',
  ...['PREFLIGHT','LEASE_ACQUIRED','MAINTENANCE_REQUESTED-before','MAINTENANCE_REQUESTED','TRAFFIC_BLOCKED','SERVICES_DRAINED','LOCAL_CHECKPOINT_VERIFIED','REMOTE_CHECKPOINT_VERIFIED'].map(phase=>'incident-resume-'+phase)]) test(`complete controller fixture: ${scenario}`,{timeout:120000},async()=>{
  const incident=scenario.startsWith('incident-'), failure=scenario.replace(/^incident-/,'');
@@ -64,23 +64,35 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
   }
   const environment=path.join(root,'.env.prod');
   fs.writeFileSync(environment,`DEPLOYMENT_SECRET_DIR=${root}/secrets\nDEPLOYMENT_REMOTE_MOUNT_HOST=${root}/remote\nDEPLOYMENT_REPORT_DIR_HOST=${root}/reports\nDEPLOYMENT_OWNER=fixture\nDEPLOYMENT_BACKEND_IMAGE_REPOSITORY=fixture/backend\nDEPLOYMENT_FRONTEND_IMAGE_REPOSITORY=fixture/frontend\nDEPLOYMENT_INQUIRY_IMAGE_REPOSITORY=fixture/inquiry\nDOMAIN=fixture.invalid\nINQUIRY_DOMAIN=inquiry.fixture.invalid\n`);
-  for(const kind of ['git','docker','node'])fs.writeFileSync(path.join(root,'bin',kind),`#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} ${kind} "$@"\n`,{mode:0o755});
+  fs.appendFileSync(environment,`DEPLOYMENT_BACKUP_HOST=fixture.invalid\nDEPLOYMENT_BACKUP_USER=sabalan-backup\nDEPLOYMENT_BACKUP_OPERATIONS_USER=sabalan-backup-ops\nDEPLOYMENT_BACKUP_SSH_KEY_FILE=${root}/secrets/local-rollback-key\nDEPLOYMENT_BACKUP_OPERATIONS_SSH_KEY_FILE=${root}/secrets/local-rollback-key\nDEPLOYMENT_BACKUP_KNOWN_HOSTS_FILE=${root}/secrets/local-rollback-key\n`);
+  for(const kind of ['git','docker','node','python3'])fs.writeFileSync(path.join(root,'bin',kind),`#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} ${kind} "$@"\n`,{mode:0o755});
+  fs.writeFileSync(path.join(root,'bin','ssh'),'#!/bin/sh\nexit 0\n',{mode:0o755});
+  fs.writeFileSync(path.join(root,'bin','findmnt'),"#!/bin/sh\nprintf 'sabalan-backup@fixture.invalid:/checkpoints\\n'\n",{mode:0o755});
   const shims={flock:'exit 0',curl:'printf 503',df:"printf 'Filesystem 1024-blocks Used Available Capacity Mounted\\nfixture 900000000 1 899999999 1%% /\\n'",sleep:'exec /bin/sleep 0.02',timeout:'shift; exec "$@"'};
   for(const [name,body]of Object.entries(shims))fs.writeFileSync(path.join(root,'bin',name),'#!/bin/sh\n'+body+'\n',{mode:0o755});
   const result=spawnSync('/bin/sh',[path.join(repository,'deploy/scripts/deploy.sh'),environment],{cwd:root,encoding:'utf8',timeout:110000,env:{...process.env,PATH:path.join(root,'bin')+':'+process.env.PATH,TEST_RELEASE_ROOT:root,TEST_SOURCE_ROOT:repository,TEST_RELEASE_FAILURE:failure,TEST_TYPESCRIPT_JS:typescript,DEPLOYMENT_REPO_ROOT:root,DEPLOYMENT_MODE:'release',DEPLOYMENT_CLAMAV_OPERATION:resumed?'repair':incident?'incident-recovery':'repair',DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE:incident?path.join(root,'incident.json'):'',DEPLOYMENT_CLAMAV_TARGET_IMAGE:resumed?'':targetImage,DEPLOYMENT_CLAMAV_BASE_COMMIT:'a'.repeat(40),DEPLOYMENT_CLAMAV_ROLLBACK_PROOF_FILE:incident?'':path.join(root,'proof.json'),DEPLOYMENT_CLAMAV_READY_FILE:path.join(root,'candidate/target.json')}});
-  const expected=resumed?1:{qualification:41,'remote-tamper':43,'post-mutation':44,'rollback-qualifier':44,'after-open':46,success:0,'stale-target':90,'updater-refusal':90,'install-interrupted':90,'lease-expired':90,'before-maintenance':22,'acquire-failure':23,'after-acquire':24,'marker-interrupted':25}[failure];
+  const expected=resumed?1:{qualification:41,'remote-tamper':43,'post-mutation':44,'rollback-qualifier':44,'after-open':46,success:0,'storage-preflight':47,'legacy-signal':48,'runtime-not-closed':1,'stale-target':90,'updater-refusal':90,'install-interrupted':90,'lease-expired':90,'before-maintenance':22,'acquire-failure':23,'after-acquire':24,'marker-interrupted':25}[failure];
   assert.equal(result.status,expected,`${result.stdout}\n${result.stderr}`);
   const commands=fs.readFileSync(path.join(root,'commands.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line));
   const includes=text=>commands.filter(c=>c.args.includes(text));
   const controls=verb=>commands.filter(c=>c.args.includes('dist/scripts/deployment-control.js')&&c.args.at(-1)===verb);
+  if(failure==='success') {
+   for(const stage of ['BEFORE_CHECKPOINT','AFTER_CHECKPOINT']) {
+    assert.ok(commands.some(c=>c.kind==='node'&&c.args[0]?.endsWith('/backup-retention-host.mjs')&&c.args.includes(stage)), `missing host retention ${stage}`);
+    assert.ok(commands.some(c=>c.args.includes('dist/scripts/deployment-retention-local.js')&&c.args.includes('export-holds')&&c.args.includes(stage)), `missing retention holds ${stage}`);
+   }
+   assert.ok(commands.some(c=>c.kind==='python3'&&c.args.includes('--preflight')),'missing legacy preflight');
+   assert.ok(commands.some(c=>c.kind==='python3'&&c.args.includes('--forward')),'missing legacy drain');
+   assert.ok(commands.some(c=>c.args.some(arg=>arg.includes('exec python3 - --assert-closed'))),'missing native closure check');
+  }
   const activation=commands.findIndex(c=>c.args.includes('scripts/clamav-checkpoint.mjs')&&c.args.at(-1)==='activate');
   const remotePhase=commands.findIndex(c=>c.args.includes('DEPLOYMENT_PHASE=REMOTE_CHECKPOINT_VERIFIED'));
   if(['post-mutation','rollback-qualifier','after-open','success','install-interrupted','lease-expired'].includes(failure))assert.ok(activation>remotePhase&&remotePhase>=0,'activation requires both verified checkpoints');
   else assert.equal(activation,-1,'failed qualification or checkpoint must never activate');
   assert.equal(includes('dist/scripts/deployment-rollback.js').length,['post-mutation','rollback-qualifier','install-interrupted','lease-expired'].includes(failure)?1:0,'never replay rollback or restore old data after public writes');
-  const beforeBoundary=['before-maintenance','acquire-failure','after-acquire','resume-PREFLIGHT','resume-LEASE_ACQUIRED','resume-MAINTENANCE_REQUESTED-before'].includes(failure);
+  const beforeBoundary=['before-maintenance','acquire-failure','after-acquire','storage-preflight','legacy-signal','resume-PREFLIGHT','resume-LEASE_ACQUIRED','resume-MAINTENANCE_REQUESTED-before'].includes(failure);
   if(['qualification','stale-target','updater-refusal'].includes(failure)||beforeBoundary)assert.equal(controls('maintenance-on').length,0);
-  else if(failure==='rollback-qualifier'||failure==='after-open'||(incident&&(['remote-tamper','post-mutation','install-interrupted','lease-expired','marker-interrupted'].includes(failure)||resumed))){
+  else if(failure==='rollback-qualifier'||failure==='after-open'||failure==='runtime-not-closed'||(incident&&(['remote-tamper','post-mutation','install-interrupted','lease-expired','marker-interrupted'].includes(failure)||resumed))){
    assert.ok(fs.existsSync(path.join(root,'maintenance.json')),'failed rollback verification or post-open failure retains maintenance');
    assert.equal(controls('maintenance-off').length,failure==='after-open'?1:0);
   } else assert.equal(fs.existsSync(path.join(root,'maintenance.json')),false);

@@ -3,14 +3,21 @@ import {ordinaryPurchaseDemands} from './ordinaryDemand';
 import {offerValid, withOfferAvailability} from './contractEntry';
 import { Prisma, UserRole } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
-import { accessFor, canReadDocument, redact, assertCapability, type Actor } from './access';
+import { accessFor, canReadDocument, canManagePersonalInquiry, redact, assertCapability, type Actor, type Access } from './access';
 import { partnerPurchaseSource, partnerFinancialReady, ordinaryItemUnit, purchasingUnit } from './source';
 import { contactsFor } from './service';
 import { asDoc, document, json } from './repository';
 import { add, sub, max, min, gt,Decimal, text, label, orderProgress, receiptProgress, exchangeProgress, cleanDigits, PurchasingError, type Doc } from './domain';
 
 type Database = typeof prisma | Prisma.TransactionClient;
-export async function purchasingLookups(actor: Actor, search = '', kind = 'contracts', sourceId = '', db: Database = prisma) {
+const contractLookupWhere = (access:Access, actor:Actor, q:string): Prisma.SalesContractWhereInput => ({ isInactive:false, status:{notIn:['CANCELLED','EXPIRED']}, ...(!access.buyer&&!access.manager?{responsibleSellerId:actor.id}:{}), ...(q?{OR:[{contractNumber:{contains:q}},{customer:{OR:[{firstName:{contains:q}},{lastName:{contains:q}},{companyName:{contains:q}}]}}]}:{}) });
+export async function purchasingContractPage(actor:Actor, search:string, requestedPage:number, db:Database=prisma) {
+  const access=await accessFor(db,actor), q=cleanDigits(text(search,100));
+  const total=await db.salesContract.count({where:contractLookupWhere(access,actor,q)});
+  const page=Math.min(Math.max(1,Number.isSafeInteger(requestedPage)?requestedPage:1),Math.max(1,Math.ceil(total/20)));
+  return {items:await purchasingLookups(actor,search,'contracts','',db,page),total,page,pageSize:20};
+}
+export async function purchasingLookups(actor: Actor, search = '', kind = 'contracts', sourceId = '', db: Database = prisma, page = 0) {
   const a = await accessFor(db, actor), q = cleanDigits(text(search, 100));
   if(kind==='accounting-periods') {
     assertCapability(a.accountant);
@@ -29,7 +36,7 @@ export async function purchasingLookups(actor: Actor, search = '', kind = 'contr
     return visible;
   }
   if (kind === 'contracts') {
-    const rows = await db.salesContract.findMany({ where: { isInactive: false, status: { notIn: ['CANCELLED', 'EXPIRED'] }, ...(!a.buyer && !a.manager ? { responsibleSellerId: actor.id } : {}), ...(q ? { OR: [{ contractNumber: { contains: q } }, { customer: { OR: [{ firstName: { contains: q } }, { lastName: { contains: q } }, { companyName: { contains: q } }] } }] } : {}) }, select: { id: true, contractNumber: true, commercialRevision: true, partnerCaseId: true, productGraphState:true, customerId: true, customer: { select: { firstName: true, lastName: true, companyName: true } }, items: { where: { retiredAt: null }, select: { id: true, productId:true, productRowId:true, description: true, quantity: true, productType: true, product: { select: { code:true,name: true, namePersian: true, preparedSalesUnit: true, volumetricSalesUnit: true } } } } }, orderBy: { createdAt: 'desc' }, take: 40 });
+    const rows = await db.salesContract.findMany({ where: contractLookupWhere(a, actor, q), select: { id: true, contractNumber: true, commercialRevision: true, partnerCaseId: true, productGraphState:true, customerId: true, customer: { select: { firstName: true, lastName: true, companyName: true } }, items: { where: { retiredAt: null }, select: { id: true, productId:true, productRowId:true, description: true, quantity: true, productType: true, product: { select: { code:true,name: true, namePersian: true, preparedSalesUnit: true, volumetricSalesUnit: true } } } } }, orderBy: page ? [{updatedAt:'desc'},{id:'desc'}] : [{createdAt:'desc'},{id:'desc'}], take: page ? 20 : 40, ...(page ? {skip:(page-1)*20} : {}) });
     const ids = rows.map(x => x.id);
     const needs = await db.purchasingDocument.findMany({where:{contractId:{in:ids},kind:'REQUEST',status:{not:'CANCELLED'}},select:{contractId:true,data:true,targetLinks:{where:{purpose:'ALLOCATION',source:{status:{not:'VOID'}}},select:{quantity:true}}}});
     const needFor = (contractId:string,itemId:string,total:string) => {const relevant=needs.filter(n=>n.contractId===contractId && (n.data as any).itemId===itemId);const requested=add(...relevant.map(n=>(n.data as any).quantity));return {requested,ordered:add(...relevant.flatMap(n=>n.targetLinks.map(l=>l.quantity?.toFixed()))),remaining:max('0',sub(total,requested))};};
@@ -50,12 +57,14 @@ export async function purchasingLookups(actor: Actor, search = '', kind = 'contr
     const rows = customerIds.length ? await db.crmCustomer.findMany({ where: { id: { in: customerIds }, isActive: true }, select: { id: true, firstName: true, lastName: true, companyName: true } }) : await db.crmCustomer.findMany({ where: { isActive: true, cardDeletedAt: null, ...(q ? { OR: [{ firstName: { contains: q } }, { lastName: { contains: q } }, { companyName: { contains: q } }] } : {}) }, select: { id: true, firstName: true, lastName: true, companyName: true }, take: 30 });
     return Promise.all(rows.map(async c => ({ id: c.id, name: `${c.firstName} ${c.lastName}`.trim() || c.companyName, contacts: await contactsFor(db, c.id) })));
   }
-  if (kind === 'suppliers') { assertCapability(a.all); return db.purchasingSupplier.findMany({ where: { isActive: true, ...(q ? { OR: [{ name: { contains: q } }, { contact: { contains: q } }] } : {}) }, select: { id: true, name: true, ...(a.prices ? { contact: true, accountingPartyId: true, customerId: true } : {}) }, orderBy: { name: 'asc' }, take: 100 }); }
+  if (kind === 'suppliers') { const personal=sourceId ? await document(db,sourceId,'INQUIRY').then(doc=>canManagePersonalInquiry(a,doc)&&canReadDocument(db,a,doc)) : false;assertCapability(a.all||Boolean(await personal)); return db.purchasingSupplier.findMany({ where: { isActive: true, ...(q ? { OR: [{ name: { contains: q } }, { contact: { contains: q } }] } : {}) }, select: { id: true, name: true, ...(a.prices ? { contact: true, accountingPartyId: true, customerId: true } : {}) }, orderBy: { name: 'asc' }, take: 100 }); }
   if (kind === 'buyers') {
     const roles = await db.roleWorkspacePermission.findMany({ where: { workspace: 'purchasing', isActive: true, permissionLevel: { in: ['edit', 'admin'] } }, select: { role: true } });
     const users = await db.user.findMany({ where: { isActive: true, OR: [{ role: { in: ['ADMIN', 'MANAGER', ...Object.values(UserRole).filter(role => roles.some(r => r.role === role))] } }, { workspacePermissions: { some: { workspace: 'purchasing', isActive: true, permissionLevel: { in: ['edit', 'admin'] }, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] } } }] }, select: { id: true, firstName: true, lastName: true, role: true }, take: 100 });
     const eligible = await Promise.all(users.map(async u => ({ u, eligible: await accessFor(db, u).then(a => a.buyer).catch(() => false) })));
-    return eligible.filter(x => x.eligible).map(({ u }) => ({ id: u.id, name: `${u.firstName} ${u.lastName}`.trim() }));
+    const choices=eligible.filter(x => x.eligible).map(({ u }) => ({ id: u.id, name: `${u.firstName} ${u.lastName}`.trim() }));
+    if(a.seller&&!choices.some(u=>u.id===actor.id))choices.unshift({id:actor.id,name:'خودم'});
+    return choices;
   }
   if (kind === 'parties') {
     assertCapability(a.buyer||a.accountant);
@@ -75,7 +84,7 @@ export async function purchasingLookups(actor: Actor, search = '', kind = 'contr
   }
   throw new PurchasingError('INVALID_LOOKUP', 'فهرست انتخاب‌شده معتبر نیست.', 400);
 }
-export async function purchasingWorkspace(actor: Actor, q = '', db: Database = prisma) {
+export async function purchasingWorkspace(actor: Actor, q = '', db: Database = prisma, allRows = false) {
   const a = await accessFor(db, actor);
   let visibleIds: string[] | null = null;
   if (!a.all) {
@@ -87,7 +96,7 @@ export async function purchasingWorkspace(actor: Actor, q = '', db: Database = p
   const matchingContracts = search ? await db.salesContract.findMany({ where: { contractNumber: { contains: search } }, select: { id: true }, take: 100 }) : [];
   const childMatches=search?await db.purchasingDocument.findMany({where:{kind:'INQUIRY',parentId:{not:null},OR:[{data:{path:['stone'],string_contains:search}},...(number===null?[]:[{number}])]},select:{parentId:true},take:500}):[];
   const where: Prisma.PurchasingDocumentWhereInput = { kind: { in: visibleKinds }, AND:[{OR:[{kind:{not:'INQUIRY'}},{parentId:null}]}], ...(visibleIds ? { id: { in: visibleIds } } : {}), ...(search ? { OR: [{ id: { contains: search } },{id:{in:childMatches.map(c=>c.parentId!)}}, { contractId: { in: matchingContracts.map(c => c.id) } }, { data: { path: ['stone'], string_contains: search } }, {data:{path:['title'],string_contains:search}}, { data: { path: ['supplierName'], string_contains: search } }, ...(number === null ? [] : [{ number }])] } : {}) };
-  const [rows, total] = await Promise.all([db.purchasingDocument.findMany({ where, orderBy: { createdAt: 'desc' }, take: 500 }), db.purchasingDocument.count({ where })]);
+  const [rows, total] = await Promise.all([db.purchasingDocument.findMany({ where, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], ...(allRows ? {} : {take: 500}) }), db.purchasingDocument.count({ where })]);
   const requested = rows.map(asDoc);
   const caseIds=requested.filter(d=>d.kind==='INQUIRY_CASE').map(d=>d.id);
   const caseLines=caseIds.length?(await db.purchasingDocument.findMany({where:{kind:'INQUIRY',parentId:{in:caseIds}}})).map(asDoc):[];
@@ -125,7 +134,7 @@ export async function purchasingWorkspace(actor: Actor, q = '', db: Database = p
     const currentNeed = source?.integrityUnavailable ? doc.data.quantity : doc.status === 'CANCELLED' || source && (source.isInactive || terminalStatus(source.status) || !item || item.retiredAt) ? '0' : doc.data.quantity ? item ? min(doc.data.quantity,max('0',sub(item.quantity.toFixed(),earlierNeed))) : doc.data.quantity : null;
     const accepted = currentNeed ? min(delivered, currentNeed) : delivered;
     const quoteCommitments=active.flatMap(l=>(l.data as any).quoteBindings||[]);
-    const quoteAvailability=(doc.data.inquirySelection||[]).map((split:any)=>{const offer=offerSources.find(s=>s.id===split.inquiryId)?.data.offers?.find((o:any)=>o.id===split.offerId);const own=max('0',sub(split.quantity,add(...quoteCommitments.filter((b:any)=>b.inquiryId===split.inquiryId&&b.offerId===split.offerId).map((b:any)=>b.quantity))));return {inquiryId:split.inquiryId,offerId:split.offerId,quantity:!offer||!offerValid(offer)||offer.price!==split.price?'0':offer.capacity==='limited'?min(own,offer.availableQuantity):own};});
+    const quoteAvailability=(doc.data.inquirySelection||[]).map((split:any)=>{const inquiry=offerSources.find(s=>s.id===split.inquiryId),offer=inquiry?.data.offers?.find((o:any)=>o.id===split.offerId);const own=max('0',sub(split.quantity,add(...quoteCommitments.filter((b:any)=>b.inquiryId===split.inquiryId&&b.offerId===split.offerId).map((b:any)=>b.quantity))));return {inquiryId:split.inquiryId,offerId:split.offerId,quantity:inquiry?.status!=='OPEN'||!offer||!offerValid(offer)||offer.price!==split.price?'0':offer.capacity==='limited'?min(own,offer.availableQuantity):own};});
     const purchaseOrdered=add(...active.map(l=>(l.data as any).purchaseQuantity||l.quantity?.toFixed()));
     const quoteChanged=Boolean(doc.data.inquirySelection&&gt(sub(doc.data.purchaseQuantity||doc.data.quantity||'0',purchaseOrdered),add(...quoteAvailability.map((b:any)=>b.quantity))));
     return { ...encode(doc),...(a.prices?{quoteCommitments,quoteAvailability}:{}),progress: { quoteChanged,purchaseOrdered,financialBlocked:Boolean(source&&!source.financialReady),ordered, accepted, toOrder: currentNeed ? max('0', sub(currentNeed, ordered)) : null, missing: currentNeed ? max('0', sub(currentNeed, accepted)) : null, stockSurplus: max('0', sub(delivered, accepted)), currentNeed, sourceChanged: Boolean(source && (source.integrityUnavailable || source.commercialRevision !== doc.data.sourceVersion)) }, source: source ? { number: source.contractNumber, customer: `${source.customer.firstName} ${source.customer.lastName}`.trim() || source.customer.companyName, revision: source.commercialRevision } : null };

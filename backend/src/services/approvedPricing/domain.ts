@@ -148,6 +148,15 @@ export const approvedPricingVersionIntegrityPayload = (input: ApprovedPricingVer
 export const approvedPricingVersionIntegrityHash = (input: ApprovedPricingVersionIntegrityInput) =>
   canonicalApprovedPricingHash(approvedPricingVersionIntegrityPayload(input));
 
+/** Invoice obligation is distinct from the product-only shipment pricing total. */
+export const approvedPricingInvoiceObligation = (version: Pick<ApprovedPricingVersionInsert, 'netAmount' | 'currency' | 'sourceEvidence'>): string => {
+  const approval = record(version.sourceEvidence.financialApproval, 'Financial approval evidence');
+  if (approval.payable === undefined) return money(version.netAmount, 'Approved pricing net amount');
+  const payable = record(approval.payable, 'Financial approval payable evidence');
+  if (payable.currency !== version.currency) throw new ApprovedPricingEvidenceError('Approved invoice payable currency conflicts with pricing');
+  return money(payable.amount, 'Approved invoice payable amount');
+};
+
 const productRows = (contractData: unknown) => {
   const data = record(contractData, 'Contract snapshot');
   if (!Array.isArray(data.products) || data.products.length === 0) throw new ApprovedPricingEvidenceError('Contract product snapshots are missing');
@@ -667,26 +676,65 @@ export const buildApprovedPricingVersion = (
     : new Prisma.Decimal(0);
   const discountAmount = money(selectedDiscountValue, 'Approved pricing discount amount');
   const rawNetAmount = money(gross.minus(selectedDiscountValue), 'Approved pricing net amount');
-  // Replay the Contract's sealed policy, never round historical obligations on read.
-  let netAmount = rawNetAmount;
+  // The pricing rows and their totals belong to shipment allocation. Independent
+  // services and whole-contract rounding belong to the invoice obligation, not
+  // to a product row; retain both scopes in the immutable approval evidence.
+  const netAmount = rawNetAmount;
+  let invoiceObligation = netAmount;
+  let payableEvidence: Readonly<Record<string, unknown>> | undefined;
+  let standaloneServiceTotal = new Prisma.Decimal(0);
   if (data.monetaryRounding !== undefined) {
     try {
       const services = Array.isArray(data.serviceRows) ? data.serviceRows : [];
-      const completePayable = completeGraphTotal.plus(services.reduce((sum, row) =>
-        sum.plus(money(record(row, 'Contract service row').totalPrice, 'Contract service amount')), new Prisma.Decimal(0)))
-        .minus(discountValue);
+      const serviceTotal = services.reduce((sum, row) =>
+        sum.plus(money(record(row, 'Contract service row').totalPrice, 'Contract service amount')), new Prisma.Decimal(0));
+      standaloneServiceTotal = serviceTotal;
+      const completePayable = completeGraphTotal.plus(serviceTotal).minus(discountValue);
       const agreed = verifyContractMonetaryRounding(Prisma.Decimal.max(completePayable, 0).toFixed(), currency, data.monetaryRounding);
       if (!new Prisma.Decimal(agreed).eq(String(payment.totalContractAmount))) throw new Error('Contract payment total conflict');
       // Partial invoices retain their precise selected-row obligation. The policy
       // rounds the final Contract total, never individual rows or subsets.
-      if (mode === 'FROM_CONTRACT_TOTAL') {
+      if (mode !== 'FROM_SELECTED_ITEMS') {
         const rounded = roundContractPayableTotal(Prisma.Decimal.max(completePayable, 0).toFixed(), currency);
-        netAmount = money(rounded.roundedAmount, 'Rounded approved pricing net amount');
+        invoiceObligation = money(rounded.roundedAmount, 'Rounded approved invoice amount');
+        payableEvidence = {
+          productGross: grossAmount,
+          productDiscount: discountAmount,
+          productNet: netAmount,
+          serviceAmount: money(serviceTotal, 'Contract service amount'),
+          serviceRows: canonicalize(services),
+          rounding: canonicalize(rounded),
+          amount: invoiceObligation,
+          currency,
+        };
         financialAmountNormalizations.push({ scope: 'contract-payable', ...rounded });
       }
     } catch {
       throw new ApprovedPricingEvidenceError('Contract payable rounding evidence conflicts with financial approval');
     }
+  } else if (mode !== 'FROM_SELECTED_ITEMS' && Array.isArray(data.serviceRows) && data.serviceRows.length > 0) {
+    const services = data.serviceRows;
+    const serviceTotal = services.reduce((sum, row) => {
+      const amount = new Prisma.Decimal(money(record(row, 'Contract service row').totalPrice, 'Contract service amount'));
+      if (amount.lt(0)) throw new ApprovedPricingEvidenceError('Contract service amount cannot be negative');
+      return sum.plus(amount);
+    }, new Prisma.Decimal(0));
+    const completePayable = completeGraphTotal.plus(serviceTotal).minus(discountValue);
+    if (completePayable.lt(0) || !completePayable.eq(money(payment.totalContractAmount, 'Legacy contract payable total'))) {
+      throw new ApprovedPricingEvidenceError('Contract service total conflicts with legacy payable evidence');
+    }
+    standaloneServiceTotal = serviceTotal;
+    invoiceObligation = money(completePayable, 'Approved invoice payable amount');
+    payableEvidence = {
+      productGross: grossAmount,
+      productDiscount: discountAmount,
+      productNet: netAmount,
+      serviceAmount: money(serviceTotal, 'Contract service amount'),
+      serviceRows: canonicalize(services),
+      rounding: null,
+      amount: invoiceObligation,
+      currency,
+    };
   }
   const rowByItem = new Map(rows.map(row => [row.contractItemId, row]));
   for (const invoiceItem of source.leaf.invoiceItems) {
@@ -739,14 +787,14 @@ export const buildApprovedPricingVersion = (
       });
     }
   }
-  const expectedInvoiceAmount = new Prisma.Decimal(netAmount).mul(currencyFactor);
+  const expectedInvoiceAmount = new Prisma.Decimal(invoiceObligation).mul(currencyFactor);
   const leafAmount = new Prisma.Decimal(source.leaf.amount);
   const legacyRawSelectedGross = selectedGraphRows.some(row => row.legacyRawTotalAmountToman != null)
     ? selectedGraphRows.reduce((sum, row) => sum.plus(
         new Prisma.Decimal(row.legacyRawTotalAmountToman ?? row.totalAmountToman!).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP),
       ), new Prisma.Decimal(0))
     : null;
-  const legacyExpectedInvoiceAmount = !discount.enabled && legacyRawSelectedGross
+  const legacyExpectedInvoiceAmount = !discount.enabled && legacyRawSelectedGross && standaloneServiceTotal.isZero()
     ? legacyRawSelectedGross.mul(currencyFactor).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
     : null;
   if (!leafAmount.eq(expectedInvoiceAmount) && !legacyExpectedInvoiceAmount?.eq(leafAmount)) {
@@ -804,6 +852,7 @@ export const buildApprovedPricingVersion = (
     financialApproval: {
       financialRecordId: source.leaf.id,
       mode,
+      ...(payableEvidence ? { payable: payableEvidence } : {}),
       amount: money(source.leaf.amount, 'Approved invoice evidence amount'),
       currency: invoiceCurrency,
       sourceSnapshotHash: canonicalApprovedPricingHash(source.leaf.sourceSnapshot),

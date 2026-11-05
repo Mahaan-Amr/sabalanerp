@@ -60,6 +60,7 @@ export const createDispatchDocumentsTemporaryDatabase = async (input: {
   sourceDatabaseUrl: string;
   schemaOnly?: boolean;
   referenceDataTables?: string[];
+  excludedDataTables?: string[];
 }) => {
   const runId = randomBytes(8).toString('hex');
   const databaseName = checkedName(`${DATABASE_PREFIX}${runId}`);
@@ -71,10 +72,14 @@ export const createDispatchDocumentsTemporaryDatabase = async (input: {
   databaseUrl.pathname = `/${databaseName}`;
   assertDispatchDocumentsMigrationTarget(databaseUrl.toString(), databaseName);
   const quoted = `"${databaseName}"`;
+  const excludedTables = (input.excludedDataTables ?? []).map(table => {
+    if (!/^[a-z][a-z0-9_]*$/.test(table)) throw new Error(`Invalid excluded-data table: ${table}`);
+    return `--exclude-table-data=public.${table}`;
+  }).join(' ');
   verifySabalanerpLocalPostgres(input.repositoryRoot);
   compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'CREATE DATABASE ${quoted}'`);
   try {
-    compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges ${input.schemaOnly ? '--schema-only' : ''} | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
+    compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges ${input.schemaOnly ? '--schema-only' : excludedTables} | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);
     if (input.schemaOnly) {
       // Keep the source migration identities/checksums, but no business rows.
       compose(input.repositoryRoot, `set -o pipefail; pg_dump --username postgres --dbname sabalanerp --no-owner --no-privileges --data-only --table=public._prisma_migrations | psql -v ON_ERROR_STOP=1 --username postgres --dbname ${quoted}`);

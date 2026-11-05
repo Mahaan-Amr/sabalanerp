@@ -5,7 +5,7 @@ import { assertNoHorizontalOverflow, assertNoSeriousAxeViolations, setTheme, set
 // responses are controlled here; real cookie/database enforcement is separately
 // exercised by notificationServiceDevice.fixture.ts, never inferred from mocks.
 async function setup(page: Page) {
-  const state = { owner: 'notification_owner_a', sessionId: 'notification_session_a', logins: 0, revision: 1, privateRequests: 0, mutations: 0, probesDenied: 0 };
+  const state = { owner: 'notification_owner_a', sessionId: 'notification_session_a', logins: 0, revision: 1, privateRequests: 0, mutations: 0, mutationAttemptsAfterChange: 0, probesDenied: 0, switchOwnerOnAction: false };
   const user = { id: 'notification_owner_a', firstName: 'آزمون', lastName: 'اعلان', username: 'notification-qa', email: 'notification@example.invalid', role: 'ADMIN', isActive: true };
   await page.route('**/socket.io/**', route => route.abort());
   await page.route('**/api/**', async route => {
@@ -20,6 +20,10 @@ async function setup(page: Page) {
       return send({ user }, { session: { id: state.sessionId } });
     }
     if (path === '/api/auth/me') {
+      if (state.switchOwnerOnAction && await page.evaluate(() => document.documentElement.dataset.notificationActionClicked === 'true')) {
+        state.owner = 'notification_owner_b';
+        state.switchOwnerOnAction = false;
+      }
       if (request.headers()['x-sabalan-expected-user'] && state.owner !== user.id) {
         state.probesDenied++;
         return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ code: 'AUTH_CONTEXT_CHANGED', error: 'نشست این صفحه تغییر کرده است' }) });
@@ -35,8 +39,12 @@ async function setup(page: Page) {
       state.privateRequests++;
       expect(request.headers()['x-sabalan-expected-user']).toBe(user.id);
       expect(request.headers()['x-sabalan-expected-session']).toBe(state.sessionId);
-      // A rejected fresh probe must prevent any subsequent private operation.
-      expect(state.owner).toBe(user.id);
+      // A previously scheduled read may arrive after the account changes; the
+      // real expected-owner guard rejects it. Mutations must not be attempted.
+      if (state.owner !== user.id) {
+        if (request.method() !== 'GET') state.mutationAttemptsAfterChange++;
+        return route.fulfill({ status: 401, json: { code: 'AUTH_CONTEXT_CHANGED', error: 'نشست این صفحه تغییر کرده است' } });
+      }
       if (request.method() !== 'GET') { state.mutations++; return send({}); }
       if (path.endsWith('/unread-count')) return send({ count: 1 });
       if (path.endsWith('/metadata')) return send({ workspaces: [], categories: [] });
@@ -145,6 +153,7 @@ for (const operation of ['read-all', 'disable-device'] as const) test(`changed a
   await expect(page.getByText('دستگاه خصوصی', { exact: true })).toHaveCount(0);
   await expect(page).toHaveURL(/\/dashboard\/personal\/notifications$/);
   expect(state.mutations).toBe(0); expect(state.probesDenied).toBeGreaterThan(0);
+  expect(state.mutationAttemptsAfterChange).toBe(0);
 });
 
 for (const operation of ['read-all', 'read-one'] as const) test(`changed account clears the shell notification preview on ${operation}`, async ({ page }) => {
@@ -154,11 +163,19 @@ for (const operation of ['read-all', 'read-one'] as const) test(`changed account
   await expect(dialog.getByText('اعلان خصوصی 1', { exact: true })).toBeVisible();
   const desktopSheet = await dialog.boundingBox();
   expect(Math.abs(desktopSheet!.height - page.viewportSize()!.height)).toBeLessThanOrEqual(2);
-  state.owner = 'notification_owner_b';
-  if (operation === 'read-all') await dialog.getByRole('button', { name: 'خواندن همه', exact: true }).click();
-  else await dialog.getByRole('button').filter({ hasText: 'اعلان خصوصی 1' }).click();
+  const action = operation === 'read-all'
+    ? dialog.getByRole('button', { name: 'خواندن همه', exact: true })
+    : dialog.getByRole('button').filter({ hasText: 'اعلان خصوصی 1' });
+  // Change the account when this action starts its session probe, so an
+  // unrelated background poll cannot close the sheet before the click.
+  await action.evaluate(button => button.addEventListener('click', () => {
+    document.documentElement.dataset.notificationActionClicked = 'true';
+  }, { capture: true, once: true }));
+  state.switchOwnerOnAction = true;
+  await action.click();
   await expect(dialog.getByText('اعلان خصوصی 1', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'ادامهٔ کار با همین حساب' })).toBeVisible();
   await expect(page).toHaveURL(/\/dashboard\/personal\/notifications$/);
   expect(state.mutations).toBe(0); expect(state.probesDenied).toBeGreaterThan(0);
+  expect(state.mutationAttemptsAfterChange).toBe(0);
 });

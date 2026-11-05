@@ -55,6 +55,9 @@ const preflight = deploy.indexOf('run_backend node dist/scripts/validate-product
 assert.ok(preflight > 0);
 assert.ok(preflight < deploy.indexOf('\ncontrol prepare\n'), 'invalid startup configuration must fail before the maintenance session exists');
 const startup = fs.readFileSync(path.resolve(process.cwd(), 'src/index.ts'), 'utf8');
-assert.match(startup, /import \{ validateProductionEnvironment \} from '\.\/services\/productionEnvironment'/);
-assert.match(startup, /validateProductionEnvironment\(\)/);
+assert.match(startup, /import \{ createApplication \} from '\.\/application'/);
+assert.match(startup, /createApplication\(\{/);
+const application = fs.readFileSync(path.resolve(process.cwd(), 'src/application.ts'), 'utf8');
+assert.match(application, /import \{ validateProductionEnvironment \} from '\.\/services\/productionEnvironment'/);
+assert.match(application, /validateProductionEnvironment\(\)/);
 console.log('production environment preflight tests passed');

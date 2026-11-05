@@ -24,6 +24,7 @@ const responsibilities = {
   accounting: ['Accountant', 'Accounting manager', 'ADMIN'], hr: ['HR action holder', 'HR manager', 'ADMIN'],
   inventory: ['Inventory/Production operator', 'Inventory manager', 'ADMIN'], security: ['Guard', 'Guard supervisor', 'ADMIN'],
   logistics: ['Logistics operator', 'Logistics manager', 'ADMIN'], bi: ['Scoped reporting user', 'ADMIN'],
+  purchasing: ['Authorized Purchasing user', 'Purchasing manager', 'ADMIN'],
   admin: ['ADMIN', 'explicitly authorized manager'], personal: ['Authenticated User'],
   support: ['Reporter', 'Handler', 'Scoped support manager'], public: ['Anonymous customer/applicant'],
   core: ['Authenticated User', 'ADMIN'], inquiry: ['Inquiry user', 'Inquiry admin'],
@@ -56,10 +57,11 @@ export async function buildInventory() {
       }
     }
   }
-  const source = await readFile(path.join(repositoryRoot, 'backend/src/middleware/feature.ts'), 'utf8');
+  const source = await readFile(path.join(repositoryRoot, 'backend/src/middleware/featureCatalog.ts'), 'utf8');
   const constants = source.split('export const FEATURES = {')[1]?.split('} as const;')[0];
   if (!constants) throw new Error('Feature catalog shape changed; review inventory extraction.');
   const workspaceMap = source.split('export const FEATURE_WORKSPACE_MAP:')[1]?.split('\n};')[0] || '';
+  if (!workspaceMap) throw new Error('Feature workspace catalog shape changed; review inventory extraction.');
   const actions = [...constants.matchAll(/^\s*(\w+):\s*'([^']+)'/gm)].map(([, key, action]) => {
     const workspace = workspaceMap.match(new RegExp(`\\[FEATURES\\.${key}\\]:\\s*'([^']+)'`))?.[1] || 'core';
     return { action, workspace, roles: responsibilities[workspace] || responsibilities.core,

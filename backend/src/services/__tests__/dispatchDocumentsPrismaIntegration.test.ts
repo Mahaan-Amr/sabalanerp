@@ -9,6 +9,8 @@ const prisma = new PrismaClient();
 const rollback = Symbol('dispatch-documents-integration-rollback');
 
 const run = async () => {
+  const database = new URL(process.env.DATABASE_URL ?? '');
+  assert(['127.0.0.1', 'localhost'].includes(database.hostname) && database.port === '55432' && database.pathname === '/sabalanerp', 'Only the existing sabalanerp-local database is allowed');
   const before = {
     artifacts: await prisma.dispatchDocumentArtifact.count(),
     handoffs: await prisma.dispatchDocumentPrintHandoff.count(),
@@ -102,10 +104,21 @@ const run = async () => {
         idempotencyKey: { in: [`retrieve:${runId}:retrieval-failed`, `retrieve:${runId}:retrieval-success`] } } }), 2,
       'failed and later successful retrieval attempts remain append-only');
 
-      const pending = await tx.accountingDispatchCandidate.findFirst({
+      let pending = await tx.accountingDispatchCandidate.findFirst({
         where: { status: 'PENDING', workItem: { status: 'OPEN' } }, select: { id: true }, orderBy: { createdAt: 'asc' },
       });
-      assert.ok(pending, 'An open pending candidate is required for rollback-only evidence-conflict verification.');
+      if (!pending) {
+        const sourceWaybill = await tx.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: waybill.id },
+          include: { candidate: { include: { allocationRevision: true } } } });
+        const source = sourceWaybill.candidate.allocationRevision;
+        const last = await tx.logisticsAllocationRevision.aggregate({ where: { loadingId: source.loadingId, queueTurnId: source.queueTurnId }, _max: { revisionNumber: true } });
+        const revision = await tx.logisticsAllocationRevision.create({ data: { batchId: source.batchId,
+          loadingId: source.loadingId, queueTurnId: source.queueTurnId, revisionNumber: (last._max.revisionNumber ?? 0) + 1,
+          snapshot: {}, integrityHash: createHash('sha256').update(`test-revision-${runId}`).digest('hex'),
+          finalizedBy: source.finalizedBy } });
+        pending = await tx.accountingDispatchCandidate.create({ data: { allocationRevisionId: revision.id,
+          workItem: { create: {} } }, select: { id: true } });
+      }
       const candidateWaybillsBefore = await tx.accountingDispatchWaybill.count({ where: { candidateId: pending.id } });
       const evidenceConflict = await repository.recordEvidenceConflict({ candidateId: pending.id,
         reason: 'integration malformed evidence', idempotencyKey: `${runId}:evidence-conflict`,

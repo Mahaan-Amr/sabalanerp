@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { createContract, updateContract, ContractProductGraphValidationError } from '../contractService';
-import { buildLegacyContractMigrationPlan, readContractProductGraphWithoutWriting } from '../contractProductGraphMigration';
+import { buildLegacyContractMigrationPlan, readContractProductGraphWithoutWriting, CURRENT_CONTRACT_PRODUCT_POLICY_V3 } from '../contractProductGraphMigration';
 import { parseCanonicalProductGraph, projectCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 
 const databaseUrl = new URL(process.env.DATABASE_URL ?? 'missing://configuration');
@@ -71,7 +71,8 @@ const run = async () => {
       const editedGraph = parseCanonicalProductGraph(edited.productGraphState!.graph);
       assert.equal(editedGraph.revision, 2);
       assert.equal(editedGraph.allocations.length, 3);
-      assert.equal(editedGraph.calculationPolicy.rounding, historical.graph.calculationPolicy.rounding, 'Existing contract policy retained');
+      assert.equal(editedGraph.calculationPolicy.rounding, CURRENT_CONTRACT_PRODUCT_POLICY_V3.rounding,
+        'Editing an unfinanced draft adopts the current quantity policy');
       assert.equal(edited.totalAmount!.toString(), '23071875');
       assert.deepEqual(edited.items.map(i => i.id), saved.items.map(i => i.id));
 
@@ -86,7 +87,9 @@ const run = async () => {
       await assert.rejects(createContract({ ...data, contractData: broken }, user.id, undefined, client), ContractProductGraphValidationError);
       assert.equal(await tx.salesContract.count(), countBefore, 'Invalid create inserts no contract');
 
-      await tx.salesContract.update({ where: { id: created.id }, data: { status: 'SIGNED' } });
+      // Legacy signed contracts require formal correction; new ordinary-flow
+      // contracts use their separate commercial approval lifecycle.
+      await tx.salesContract.update({ where: { id: created.id }, data: { status: 'SIGNED', commercialFlowVersion: 0 } });
       const signedBefore = JSON.stringify(await state());
       await assert.rejects(updateContract(created.id, { contractData: saved.contractData }, user.id, client), /approved formal correction/);
       assert.equal(JSON.stringify(await state()), signedBefore, 'Repair never bypasses signed-contract correction authorization');

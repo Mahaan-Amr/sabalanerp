@@ -6,24 +6,19 @@ test('Partner contract header exposes Sales toolbar actions with the preserved S
   await loginAsAdmin(page);
   const fixture = createPartnerFixtures();
   const view = { ...fixture.partner, state: 'COMMITTED' as const };
-  let status = 'DRAFT';
-  const decisions: string[] = [];
-  for (const action of ['approve', 'reject', 'sign']) await page.route(`**/api/sales/contracts/partner-toolbar-e2e/${action}`, route => {
-    decisions.push(action);
-    status = action === 'approve' ? 'APPROVED' : action === 'reject' ? 'CANCELLED' : 'SIGNED';
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
-  });
+  await page.route('**/api/partner/cases/changes-v2', route => route.fulfill({ json: { success: true, data: { version: `sha256-v1:${'4'.repeat(64)}` } } }));
   await page.route('**/api/sales/contracts/partner-toolbar-e2e', route => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {
       id: 'partner-toolbar-e2e', partnerKind: 'PARTNER_CUSTOMER', partnerCaseId: view.owner.caseId,
       partnerRevision: view.owner.revision, partnerIntegrityHash: view.owner.integrityHash,
-      partnerCaseView: view, products: [], status,
+      partnerCaseView: view, products: [], status: 'SIGNED', commercialFlowVersion: 2,
     } }),
   }));
   await page.route('**/api/partner/cases/query-v2', route => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { cases: [{
       view, snapshotId: null, customerOutput: fixture.customer, history: [],
-      actions: { canContinue: false, canPreview: false, canIssue: false, canFinalize: false,
+      editRecovery: { recoveryId: 'toolbar-draft', baseRevision: 0 },
+      actions: { canContinue: true, canPreview: false, canIssue: false, canFinalize: false,
         canSendConfirmation: true, canRequestCorrection: true, canCancel: false, canRequestVoid: true },
     }] } }),
   }));
@@ -32,21 +27,9 @@ test('Partner contract header exposes Sales toolbar actions with the preserved S
     await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
   }
   await expect(page.getByRole('button', { name: 'ارسال دوباره کد تایید', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'تایید', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'رد', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'امضا', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'تایید', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'امضا', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'رد', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'امضا', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'امضا', exact: true })).toHaveCount(0);
-  expect(decisions).toEqual(['approve', 'sign']);
-  status = 'DRAFT';
-  await page.reload();
-  await page.getByRole('button', { name: 'رد', exact: true }).click();
   await expect(page.getByRole('button', { name: 'تایید', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'رد', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'امضا', exact: true })).toHaveCount(0);
-  expect(decisions).toEqual(['approve', 'sign', 'reject']);
   await setViewportAndZoom(page, { width: 390, height: 844 });
   await expect(page.getByRole('button', { name: 'ارسال پیامک تأیید', exact: true })).toBeVisible();
   await assertNoSeriousAxeViolations(page);
@@ -448,6 +431,10 @@ for (const expireLease of [false, true]) test(expireLease
 
 test('Partner case list shows current offered prices before acceptance and uses the requested title', async ({ page }) => {
   await loginAsAdmin(page);
+  await page.route('**/api/partner/cases/creation-context?*', route => route.fulfill({ json: { success: true, data: {
+    schemaVersion: 1, kind: 'PARTNER', actorId: 'qa-partner', profileId: 'qa-profile', writable: true,
+    inquiryIds: [], customers: [], projects: [], recoverableDrafts: [],
+  } } }));
   const fixture = createPartnerFixtures();
   const unpriced = { ...fixture.partner, state: 'DRAFT', pricingState: 'AWAITING_INQUIRY',
     products: fixture.partner.products.map(({ wholesaleUnitPrice: _price, approvalEvidenceId: _approval, ...product }) => product),
@@ -457,14 +444,15 @@ test('Partner case list shows current offered prices before acceptance and uses 
     actions: { canContinue: false, canPreview: false, canIssue: false, canFinalize: false,
       canSendConfirmation: false, canRequestCorrection: false, canCancel: true, canRequestVoid: false },
   }] } } }));
-  await page.goto('/dashboard/sales/partner-cases');
-  await expect(page.getByRole('heading', { name: 'پیش نویس ها و پرونده ها', exact: true })).toBeVisible();
+  await page.goto('/dashboard/sales/contracts');
+  await expect(page.getByRole('heading', { name: 'قراردادهای فروش', exact: true })).toBeVisible();
   await expect(page.locator('table').getByText('آماده تکمیل', { exact: true })).toBeVisible();
   await expect(page.locator('table').getByText('در انتظار پاسخ سبلان', { exact: true })).toHaveCount(0);
 });
 
 test('committed Partner output buttons work without a confirmation snapshot', async ({ page }) => {
   await loginAsAdmin(page);
+  await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({ json: { success: true, data: { allowed: true } } }));
   const fixture = createPartnerFixtures();
   const view = { ...fixture.partner, state: 'COMMITTED' as const };
   await page.route('**/api/partner/cases/query-v2', route => route.fulfill({ json: { success: true, data: { cases: [{
@@ -480,11 +468,11 @@ test('committed Partner output buttons work without a confirmation snapshot', as
   });
   await page.goto(`/dashboard/sales/partner-cases?caseId=${encodeURIComponent(view.owner.caseId)}`);
   const section = page;
-  await expect(section.getByRole('button', { name: 'پیش‌نمایش', exact: true })).toBeEnabled();
-  await section.getByRole('button', { name: 'پیش‌نمایش', exact: true }).click();
+  await expect(section.getByRole('button', { name: 'پیش‌نمایش قرارداد', exact: true })).toBeEnabled();
+  await section.getByRole('button', { name: 'پیش‌نمایش قرارداد', exact: true }).click();
   await expect.poll(() => requests.length).toBe(1);
   expect(requests[0]).toEqual({ mode: 'PREVIEW', expected: view.owner });
-  await section.getByRole('button', { name: 'صدور PDF نهایی', exact: true }).click();
+  await section.getByRole('button', { name: 'صدور نهایی PDF', exact: true }).click();
   await expect.poll(() => requests.length).toBe(2);
   expect(requests[1]).toEqual({ mode: 'FINAL', expected: view.owner });
 });

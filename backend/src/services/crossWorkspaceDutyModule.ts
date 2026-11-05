@@ -1,3 +1,4 @@
+import { PURCHASING_INQUIRY_DUTY_DEFINITIONS, purchasingInquiryDutyAdapter, syncPurchasingInquiryDutyDefinitions } from './crossWorkspaceDutyAdapters/purchasingInquiryDutyAdapter';
 import { startBackgroundJob } from './backgroundJobLifecycle';
 import type { PrismaClient } from '@prisma/client';
 import { CONTRACT_DISPATCH_DUTY_DEFINITIONS, contractDispatchDutyAdapter, syncContractDispatchDutyDefinitions } from './crossWorkspaceDutyAdapters/contractDispatchDutyAdapter';
@@ -40,6 +41,7 @@ import {
 
 const sourceAdapters = new Map<string, CrossWorkspaceDutySourceAdapter>([
   [contractDispatchDutyAdapter.sourceType, contractDispatchDutyAdapter],
+  [purchasingInquiryDutyAdapter.sourceType, purchasingInquiryDutyAdapter],
   [hrWorkItemDutyAdapter.sourceType, hrWorkItemDutyAdapter],
   [salesContractCorrectionDutyAdapter.sourceType, salesContractCorrectionDutyAdapter],
   [hrHiringFinanceDutyAdapter.sourceType, hrHiringFinanceDutyAdapter],
@@ -60,6 +62,7 @@ const adapterForDuty = async (database: CrossWorkspaceDutyDatabase, dutyId: stri
 
 export const CROSS_WORKSPACE_DUTY_DEFINITIONS = Object.freeze({
   ...CONTRACT_DISPATCH_DUTY_DEFINITIONS,
+  ...PURCHASING_INQUIRY_DUTY_DEFINITIONS,
   ...HR_DUTY_DEFINITIONS,
   ...SALES_CONTRACT_CORRECTION_DUTY_DEFINITIONS,
   ...HR_HIRING_FINANCE_DUTY_DEFINITIONS,
@@ -73,12 +76,13 @@ export const synchronizeCrossWorkspaceDutyDefinitions = async (
   database: CrossWorkspaceDutyDatabase,
   actorUserId = 'SYSTEM',
 ) => {
+  const purchasing = await syncPurchasingInquiryDutyDefinitions(database, actorUserId);
   const hr = await syncHrDutyEnvelopeDefinitions(database, actorUserId);
   const salesCorrection = await syncSalesContractCorrectionDutyDefinitions(database, actorUserId);
   const hiringFinance = await syncHrHiringFinanceDutyDefinitions(database, actorUserId);
   const partnerPricing = await syncPartnerPricingDutyDefinitions(database, actorUserId);
   const contractDispatch = await syncContractDispatchDutyDefinitions(database, actorUserId);
-  return [...hr, ...salesCorrection, ...hiringFinance, ...partnerPricing, ...contractDispatch];
+  return [...purchasing, ...hr, ...salesCorrection, ...hiringFinance, ...partnerPricing, ...contractDispatch];
 };
 
 export const synchronizeCrossWorkspaceDutySource = async (

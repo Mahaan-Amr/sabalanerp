@@ -5,10 +5,16 @@ import {assertNoHorizontalOverflow,assertNoSeriousAxeViolations,setTheme,setView
 
 // Compiled Next/SDS acceptance with controlled auth/API boundaries, matching
 // other catalog UI lanes. This does not qualify native auth or server writes.
-// Run only against the measured final bdbe image in the existing local project.
-const buildId='erp_online_final_20261019_bdbe201e523baab8';
-const asset='/_next/static/chunks/app/dashboard/support/new/page-8d6f1034aa11002c.js';
-const assetSha='3677223b7e5724863297ccfc8ec40cc1e86a0beeef91e421b919ecc16ee69ebd';
+// The default pins the original measured candidate; an explicitly measured
+// local candidate must provide all three values together, including its hash.
+const overrides = [process.env.SUPPORT_QA_BUILD_ID, process.env.SUPPORT_QA_ASSET, process.env.SUPPORT_QA_ASSET_SHA];
+if (overrides.some(Boolean) && !overrides.every(Boolean)) throw new Error('SUPPORT_COMPILED_EVIDENCE_INCOMPLETE');
+const buildId=overrides[0] || 'erp_online_final_20261019_bdbe201e523baab8';
+const asset=overrides[1] || '/_next/static/chunks/app/dashboard/support/new/page-8d6f1034aa11002c.js';
+const assetSha=overrides[2] || '3677223b7e5724863297ccfc8ec40cc1e86a0beeef91e421b919ecc16ee69ebd';
+if (!/^erp_[a-z0-9_-]{8,90}$/.test(buildId) || !/^\/_next\/static\/chunks\/[A-Za-z0-9_./-]+\.js$/.test(asset) || !/^[a-f0-9]{64}$/.test(assetSha)) {
+  throw new Error('SUPPORT_COMPILED_EVIDENCE_INVALID');
+}
 test('final compiled Support preserves original bytes and explicit recovery at desktop,390px and canonical200percent zoom',async({page},info)=>{
  test.setTimeout(180_000);
  const errors:string[]=[],mutations:string[]=[];

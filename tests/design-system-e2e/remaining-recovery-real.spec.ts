@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { PrismaClient } from '../../backend/node_modules/@prisma/client';
 import { parseCanonicalProductGraph, projectCanonicalProductGraph } from '../../packages/contract-product-graph/src';
-import { loginAsAdmin, setTheme, assertNoHorizontalOverflow } from './support/design-system';
+import { loginAsAdmin, setTheme, assertNoHorizontalOverflow, seedContractNavigation } from './support/design-system';
 import {sdsDatabaseScope,assertSdsDatabaseIdentity} from './support/sds-database-scope';
 
 const fixture = JSON.parse(readFileSync('packages/contract-product-graph/src/__tests__/fixtures/remaining-child-chain.json', 'utf8'));
@@ -59,7 +59,7 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
       payment: { payments: [{ id: key, method: 'CASH_CARD', amount: 23071875, paymentDate: '1405/06/05', status: 'WILL_BE_PAID' }],
         currency: 'تومان', totalContractAmount: 23071875 } };
     // Exercise the real recovered-draft entry point, without intercepting any application endpoint.
-    await page.evaluate(data => localStorage.setItem('contractWizardState', JSON.stringify({ currentStep: 8, wizardData: data })), wizardData);
+    await seedContractNavigation(page, { currentStep: 8, wizardData });
     await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=8', { waitUntil: 'domcontentloaded' });
     const submit = page.getByRole('button', { name: 'ثبت قرارداد', exact: true });
     await expect(submit).toBeEnabled({ timeout: 60_000 });
@@ -136,6 +136,9 @@ test('real remaining-chain draft saves, reloads, edits and reaches accounting wi
         await db.notificationEvent.deleteMany({ where: { id: { in: events.map(e => e.id) } } });
         await db.salesContractEditSession.deleteMany({ where: { OR: [{ contractId: { in: ids } }, { draftId: { in: [...draftIds] } }] } });
         await db.salesContractDraftAudit.deleteMany({ where: { draftId: { in: [...draftIds] } } });
+        // The customer deletion guard intentionally refuses customers with
+        // contract history. Remove only this run's synthetic contracts first.
+        await db.salesContract.deleteMany({ where: { id: { in: ids }, customerId } });
         await db.crmCustomer.delete({ where: { id: customerId } });
       }
       await db.product.deleteMany({ where: { id: { in: productIds } } });

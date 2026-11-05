@@ -29,6 +29,13 @@ test('real purchasing uses shared workspace cards and compact centered Persian f
   await expect(page.locator('nav').getByRole('link', { name: 'استعلام‌های ثبت‌شده', exact: true })).toHaveAttribute('href', '/dashboard/purchasing/inquiries');
   await expect(page.locator('[data-dashboard-main]').getByRole('link',{name:'استعلام‌های ثبت‌شده',exact:true})).toHaveAttribute('href','/dashboard/purchasing/inquiries');
   await expect(page.locator('.sds-neumorphic-scope').first()).toBeVisible();
+  const taskSearch=page.getByRole('textbox',{name:'جست‌وجوی کارهای باز',exact:true});
+  const missingTask=`not-found-${randomUUID()}`;
+  const taskResponse=page.waitForResponse(r=>r.url().includes('/purchasing/tasks') && new URL(r.url()).searchParams.get('q')===missingTask);
+  await taskSearch.fill(missingTask); expect((await taskResponse).status()).toBe(200);
+  await expect(page.getByText('کاری مطابق جست‌وجو پیدا نشد',{exact:true})).toBeVisible();
+  await taskSearch.clear();
+
   for(const [label,section,title] of [['درخواست نیازمند تأمین در فهرست','requests','درخواست‌ها'],['سفارش منتظر دریافت در فهرست','orders','سفارش‌های خرید'],['رسید منتظر کیفیت در فهرست','receipts','دریافت بار']]){
     const card=page.getByRole('link').filter({hasText:label});
     await expect(card).toHaveAttribute('href',`/dashboard/purchasing/${section}?view=attention`);

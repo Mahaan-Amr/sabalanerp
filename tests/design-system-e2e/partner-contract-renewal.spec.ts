@@ -45,6 +45,7 @@ for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const)
     if (surface === 'list') {
       await expect(page.getByText('۶۲۹٬۳۵۰٬۱۰۰ تومان', { exact: true }).filter({ visible: true }).first()).toBeVisible();
       await expect(page.getByText(/IRT/)).toHaveCount(0);
+      await page.getByRole('button', { name: 'سایر عملیات', exact: true }).filter({ visible: true }).click();
     }
     await page.getByRole('button', { name: 'تمدید مهلت', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'تمدید مهلت قرارداد', exact: true });
@@ -56,6 +57,7 @@ for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const)
     await page.screenshot({ path: `tmp/qa/partner-renewal/${surface}-${width}-${theme}.png`, fullPage: true });
     await submit.click();
     await expect(dialog).toHaveCount(0);
+    if (surface === 'list') await page.getByRole('button', { name: 'سایر عملیات', exact: true }).filter({ visible: true }).click();
     await expect(page.getByRole('button', { name: 'تمدید مهلت', exact: true })).toHaveCount(0);
     expect(renewals).toBe(1);
   });

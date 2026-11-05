@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAsAdmin, assertNoHorizontalOverflow } from './support/design-system';
+import { loginAsAdmin, seedContractNavigation, assertNoHorizontalOverflow } from './support/design-system';
 
 const stones = ['گوهره', 'تراورتن'].map((namePersian, index) => ({
   id: `qa-stair-selection-${index}`, code: `QA-STAIR-${index}`, name: namePersian, namePersian,
@@ -13,18 +13,23 @@ const stones = ['گوهره', 'تراورتن'].map((namePersian, index) => ({
 for (const width of [1280, 390]) {
   test(`stair selection persists across tabs and staging without rewriting summary at ${width}px`, async ({ page }) => {
     await loginAsAdmin(page);
+    await page.route('**/api/sales/contract-edit-sessions/**', route => {
+      const path = new URL(route.request().url()).pathname;
+      const data = path.endsWith('/acquire') ? { session: { leaseToken: 'qa-stair-selection' }, recovery: null } : null;
+      return route.fulfill({ json: { success: true, data } });
+    });
     await page.setViewportSize({ width, height: 900 });
     await page.route('**/api/products?**', route => route.fulfill({
       status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: stones })
     }));
-    await page.evaluate(() => localStorage.setItem('contractWizardState', JSON.stringify({
+    await seedContractNavigation(page, {
       currentStep: 4, wizardData: {
         contractKind: 'standard', contractDate: '1405/07/15', contractNumber: '',
         customerId: '', customer: null, projectId: '', project: null,
         selectedProductTypeForAddition: null, products: [], serviceRows: [], deliveries: [],
         payment: { payments: [], currency: 'تومان', totalContractAmount: 0 }, discount: null, signature: null
       }
-    })));
+    });
     await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=4');
     await page.getByRole('tab', { name: 'پله', exact: true }).click();
     await page.getByRole('option', { name: /گوهره/ }).first().click();

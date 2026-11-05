@@ -46,7 +46,8 @@ for (const width of [1280, 390]) test(`company vehicle fields preserve plate ord
   const arrowBox = await arrow.boundingBox();
   const letterBox = await letter.boundingBox();
   expect(arrowBox!.x - letterBox!.x).toBeGreaterThanOrEqual(10);
-  expect(Math.abs((arrowBox!.y + arrowBox!.height / 2) - (letterBox!.y + letterBox!.height / 2))).toBeLessThan(1);
+  // Font rasterization differs slightly between development and compiled builds.
+  expect(Math.abs((arrowBox!.y + arrowBox!.height / 2) - (letterBox!.y + letterBox!.height / 2))).toBeLessThan(2);
   await serial.fill('۰۲۳۴');
   await expect(serial).toHaveValue('023');
   await region.fill('٠٤');

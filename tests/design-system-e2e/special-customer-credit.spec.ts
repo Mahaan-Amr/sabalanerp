@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
-import { loginAsAdmin, setViewportAndZoom, setTheme, assertNoHorizontalOverflow } from './support/design-system';
+import { loginAsAdmin, seedContractNavigation, setViewportAndZoom, setTheme, assertNoHorizontalOverflow } from './support/design-system';
 
 for (const width of [1280, 390]) {
   test(`CRM customer credit persists category and finite/unlimited settings at ${width}px`, async ({ page }, testInfo) => {
@@ -13,7 +13,7 @@ for (const width of [1280, 390]) {
       return { status: response.status, body: await response.json() };
     }, { path, method, body });
     try {
-      const created = await request('/crm/customers', 'POST', { firstName: 'آزمون', lastName, customerType: 'Individual', status: 'Active', phoneNumbers: [], projectAddresses: [] });
+      const created = await request('/crm/customers', 'POST', { firstName: 'آزمون', lastName, customerType: 'Individual', activityCategory: 'NONE', status: 'Active', phoneNumbers: [], projectAddresses: [] });
       expect(created.status, JSON.stringify(created.body)).toBe(201);
       customerId = created.body.data.id;
       await page.goto(`/dashboard/crm/customers/${customerId}`);
@@ -46,8 +46,7 @@ for (const width of [1280, 390]) {
       const stale = await request(`/crm/customers/${customerId}/credit`, 'PUT', { trustCategory: 'NORMAL', limitRials: null, policyVersion: 0, reason: 'آزمون نسخه قدیمی' });
       expect(stale.status).toBe(409);
       // Recovered selections may contain an old NORMAL category. The payment modal must use live CRM eligibility.
-      await page.evaluate(({ customerId, lastName }) => {
-        localStorage.setItem('contractWizardState', JSON.stringify({ currentStep: 7, wizardData: {
+      await seedContractNavigation(page, { currentStep: 7, wizardData: {
           contractKind: 'standard', contractDate: '1405/07/12', contractNumber: '', creatorSequenceNumber: null,
           customerId, customer: { id: customerId, firstName: 'آزمون', lastName, trustCategory: 'NORMAL',
             customerType: 'Individual', status: 'Active', phoneNumbers: [], projectAddresses: [] }, projectId: '', project: null,
@@ -57,8 +56,7 @@ for (const width of [1280, 390]) {
             lengthUnit: 'm', widthUnit: 'cm', isMandatory: false, mandatoryPercentage: 0, meta: { isLayer: false },
             remainingStones: [], cutDetails: [], appliedSubServices: [] }], serviceRows: [], deliveries: [],
           payment: { payments: [], currency: 'تومان', totalContractAmount: 1000 }, discount: null, signature: null,
-        } }));
-      }, { customerId, lastName });
+        } });
       await page.goto('/dashboard/sales/contracts/create?returnTo=contract&step=7');
       await page.locator('main.sds-workspace').getByRole('button', { name: /^افزودن پرداخت/ }).click();
       const paymentDialog = page.getByRole('dialog', { name: 'افزودن پرداخت', exact: true });
@@ -70,7 +68,6 @@ for (const width of [1280, 390]) {
       await assertNoHorizontalOverflow(page);
       await page.screenshot({ path: testInfo.outputPath(`special-credit-payment-${width}.png`), fullPage: true });
     } finally {
-      await page.evaluate(() => localStorage.removeItem('contractWizardState'));
       if (customerId) {
         const preview = await request(`/crm/customers/${customerId}/deletion-preview`);
         const removed = await request(`/crm/customers/${customerId}`, 'DELETE', { reason: 'پاکسازی مشتری آزمون خودکار', confirmed: true, previewToken: preview.body.data.previewToken });

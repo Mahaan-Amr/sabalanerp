@@ -43,7 +43,7 @@ test('read-only managerial card shows empty sections without mutation buttons in
 test('exact contact capability opens a canonical editor and failed save preserves input and pending state', async ({ page }) => {
   const card = { ...fixture(), crmCapabilities: { ...fixture().crmCapabilities, contacts_create: true } };
   await page.route('**/api/crm/customers/partner-crm-fixture', route => route.fulfill({ json: { success: true, data: card } }));
-  let release: () => void = () => {};
+  let release: (() => void) | undefined;
   await page.route('**/api/crm/customers/partner-crm-fixture/crm-actions', async route => {
     const body = route.request().postDataJSON(); expect(body.resource).toBe('contacts'); expect(body.expectedCrmVersion).toBe('fixture-crm');
     await new Promise<void>(resolve => { release = resolve; });
@@ -56,7 +56,9 @@ test('exact contact capability opens a canonical editor and failed save preserve
   await dialog.getByRole('textbox', { name: 'نام خانوادگی', exact: true }).fill('آزمون');
   await dialog.getByRole('button', { name: 'ذخیره', exact: true }).click();
   await expect(dialog).toHaveAttribute('aria-busy', 'true'); await page.keyboard.press('Escape'); await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'انصراف' })).toBeDisabled(); release();
+  await expect(dialog.getByRole('button', { name: 'انصراف' })).toBeDisabled();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  release!();
   await expect(dialog).toContainText('اطلاعات همزمان تغییر کرده است');
   await expect(dialog.getByRole('textbox', { name: 'نام', exact: true })).toHaveValue('نام محفوظ');
 });

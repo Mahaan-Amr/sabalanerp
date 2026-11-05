@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {renderPurchaseOrder} from '../purchasing/print';
+import {renderPurchaseOrder,renderPurchaseReceipt} from '../purchasing/print';
 import {renderContractHtml,renderContractPdfHeaderTemplate} from '../../utils/printTemplate';
 import type {Doc} from '../purchasing/domain';
 
@@ -18,4 +18,11 @@ assert(!defaultHeader.includes('سفارش قطعی خرید'),'Optional Purchas
 document.data.price=null;
 assert(renderPurchaseOrder(document).includes('در انتظار توافق'));
 assert(!renderPurchaseOrder(document).includes('۲۶۲٬۹۳۷٬۵۰۰'));
+const receipt:Doc={...document,id:'qa-receipt',kind:'RECEIPT',number:1002,parentId:document.id,data:{stone:'سنگ <script>bad</script>',unit:'مترمربع',quantity:'40',accepted:'15',rejected:'10',returned:'4',location:'انبار',recipient:{name:'نماینده <ناشناخته>'}}};
+const receiptHtml=renderPurchaseReceipt(receipt,document);
+assert(receiptHtml.includes('رسید دریافت بار خرید'));
+assert(receiptHtml.includes('۱۵')&&receiptHtml.includes('۱۰')&&receiptHtml.includes('۴'));
+assert(receiptHtml.includes('&lt;script&gt;')&&!receiptHtml.includes('<script>'));
+assert(receiptHtml.includes('این سند به‌تنهایی فاکتور یا تأیید پرداخت نیست'));
+assert(!receiptHtml.includes('۳٬۵۰۰٬۰۰۰'));
 console.log('Purchasing PDF: 10 canonical-template, amount, promise and escaping checks passed.');

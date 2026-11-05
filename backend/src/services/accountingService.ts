@@ -44,7 +44,7 @@ import {
 import { classifyInvoiceStatus, isOpenInvoiceCandidate, isValidFinanciallyApprovedInvoice } from './accountingStatus';
 import { lockFinancialApprovalRecord, publishCurrentApprovedPricingReadinessWithinTransaction,
   sealApprovedPricingAtFinancialApproval, FinancialEvidenceConflictError,
-  ApprovedPricingEvidenceError, preflightApprovedPricingAtFinancialApproval } from './approvedPricing';
+  ApprovedPricingEvidenceError, preflightApprovedPricingAtFinancialApproval, approvedPricingInvoiceObligation } from './approvedPricing';
 import {
   assertGeneralFlagTransitionAllowed,
   FINANCIAL_EVIDENCE_REVIEW_PREFIX,
@@ -2437,7 +2437,7 @@ const approveFinancialInvoice = async (command: AccountingActionRequest, actor: 
       }, partnerAuthorization);
     }
     const canonicalInvoiceAmount = pricingSeal ? toRialDecimal(
-      new Prisma.Decimal(pricingSeal.version.netAmount),
+      new Prisma.Decimal(approvedPricingInvoiceObligation(pricingSeal.version)),
       pricingSeal.version.currency,
     ) : updated.amount;
     if (pricingSeal && !amountsEqual(updated.amount, canonicalInvoiceAmount)) {

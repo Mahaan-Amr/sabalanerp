@@ -7,13 +7,13 @@ import { purchasingAPI, purchaseError, type Option } from './api';
 import { usePurchasingCommand } from './usePurchasingCommand';
 import { purchaseDimensions } from './presentation';
 
-type Entry = {source: {contractId: string; contractNumber: string; itemId: string;technical?: Record<string,unknown>; stone: string; unit: string}; remaining: string; documents: any[]; access: {buyer: boolean; actorId: string}};
+type Entry = {source: {contractId: string; contractNumber: string; itemId: string;technical?: Record<string,unknown>; stone: string; unit: string}; remaining: string; documents: any[]; access: {buyer: boolean; seller: boolean; actorId: string}};
 export function ContractPurchaseAction({contractId, rowId, enabled = true}: {contractId: string; rowId?: string; enabled?: boolean}) {
   const router = useRouter();
   const [open, setOpen] = useState(false), [entry, setEntry] = useState<Entry | null>(null), [buyers, setBuyers] = useState<Option[]>([]), [quantity, setQuantity] = useState(''), [ownerId, setOwnerId] = useState(''), [loading, setLoading] = useState(false), [error, setError] = useState(''), [success, setSuccess] = useState('');
   async function load() {
     setLoading(true); setError('');
-    try { const [r, b] = await Promise.all([purchasingAPI.contractEntry(contractId, rowId || ''), purchasingAPI.lookup('buyers')]); const data = r.data.data as Entry; setEntry(data); setBuyers(b.data.data); setQuantity(data.remaining); setOwnerId(data.access.buyer ? data.access.actorId : b.data.data.length === 1 ? b.data.data[0].id : ''); }
+    try { const [r, b] = await Promise.all([purchasingAPI.contractEntry(contractId, rowId || ''), purchasingAPI.lookup('buyers')]); const data = r.data.data as Entry; setEntry(data); setBuyers(b.data.data); setQuantity(data.remaining); setOwnerId(data.access.buyer || data.access.seller ? data.access.actorId : b.data.data.length === 1 ? b.data.data[0].id : ''); }
     catch(e) { setError(purchaseError(e)); } finally {setLoading(false);}
   }
   const command = usePurchasingCommand(async r => {setSuccess(r.message);setOpen(false);router.push(`/dashboard/purchasing/inquiries?document=${encodeURIComponent(r.id)}`);});

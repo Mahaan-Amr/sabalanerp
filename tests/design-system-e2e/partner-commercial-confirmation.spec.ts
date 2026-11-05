@@ -19,6 +19,7 @@ for (const width of [1280, 390]) test(`Partner Sales contract detail confirms re
   } } }));
   await page.route('**/api/partner/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/creation-context')) return route.fulfill({ json: { success: true, data: { schemaVersion: 1, kind: 'ORDINARY_SALES' } } });
     if (path.endsWith('/changes-v2')) return route.fulfill({ json: { success: true, data: { version: `sha256-v1:${'4'.repeat(64)}` } } });
     if (path.endsWith('/query-v2')) return route.fulfill({ json: { success: true, data: { cases: [{ view,
       commercial: { version: 1, revision: 1, status: 'DRAFT', salesApproved: true, customerAccepted: false,
@@ -60,8 +61,10 @@ for (const width of [1280, 390]) test(`Partner confirmation keeps private respon
   let revision = 1;
   let approved = true;
   await loginAsAdmin(page);
+  await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({ json: { success: true, data: { allowed: true } } }));
   await page.route('**/api/partner/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/creation-context')) return route.fulfill({ json: { success: true, data: { schemaVersion: 1, kind: 'ORDINARY_SALES' } } });
     if (path.endsWith('/changes-v2')) return route.fulfill({ json: { success: true, data: { version: `sha256-v1:${String(revision).padStart(64, '0')}` } } });
     let data: unknown;
     if (path.endsWith('/query-v2')) data = { cases: [{
@@ -96,11 +99,13 @@ for (const width of [1280, 390]) test(`Partner confirmation keeps private respon
 for (const width of [1280, 390]) test(`Partner approval creates draft and rejection cancels by cancellation ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 });
   await loginAsAdmin(page);
+  await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({ json: { success: true, data: { allowed: true } } }));
   const fixture = createPartnerFixtures();
   let approved = false, cancelled = false;
   const commands: string[] = [];
   await page.route('**/api/partner/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/creation-context')) return route.fulfill({ json: { success: true, data: { schemaVersion: 1, kind: 'ORDINARY_SALES' } } });
     const input = route.request().postData() ? route.request().postDataJSON() : {};
     if (path.endsWith('/changes-v2')) return route.fulfill({ json: { success: true, data: { version: `sha256-v1:${'4'.repeat(64)}` } } });
     let data: unknown = null;

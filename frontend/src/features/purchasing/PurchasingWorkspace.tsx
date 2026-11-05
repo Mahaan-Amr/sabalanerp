@@ -14,7 +14,7 @@ import { PurchaseStart,type PurchaseInquirySeed } from './PurchaseStart';
 import { InquiryCaseView } from './InquiryCaseView';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter,useSearchParams } from 'next/navigation';
-import { FaPlus, FaEye, FaSync, FaClipboardList, FaTruck, FaBoxOpen } from 'react-icons/fa';
+import { FaPlus, FaEye, FaCopy, FaTimes, FaSync, FaClipboardList, FaTruck, FaBoxOpen } from 'react-icons/fa';
 import { ErpPresentationProvider, ErpListPage, ErpButton, ErpCard, ErpBadge, ErpField, ErpInput, ErpTextarea, ErpSearchableSelect, ErpSheet, ErpInlineState, ErpLoading, ErpEmptyState, ErpFieldView, ErpDisclosure, ErpCheckbox, ErpPersianDateField, type ErpAction, type ErpColumn } from '@/components/erp';
 import { purchasingAPI, purchaseError, type PurchaseDocument as Doc, type PurchaseWorkspace, type ContractOption, type Option, type CommandResult } from './api';
 const tabs = { inquiries: 'استعلام‌های ثبت‌شده', requests: 'درخواست‌ها', orders: 'سفارش‌های خرید', receipts: 'دریافت بار', exchanges: 'تعویض‌ها', suppliers: 'تأمین‌کنندگان', inventory: 'بارهای پذیرفته‌شده', finance: 'پیگیری حسابداری', changes: 'تغییر و لغو' };
@@ -89,6 +89,13 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
       const usable=lines.length>0&&lines.every(line=>line.data.productId&&!line.data.raw);
       setStartingContract(null);setInquirySeed({sourceTitle:purchaseTitle(doc),items:usable?lines.map(line=>({productId:line.data.productId,productCode:line.data.productCode,stone:line.data.stone,unit:line.data.unit,quantity:'',dimensions:line.data.technical?.dimensions||'',quoteScope:line.data.technical?.dimensions?'specific':'general'})):[],query:usable?'':lines[0]?.data.stone||''});setSheet('START');
     }catch(error){setSheet('');setFeedback({kind:'error',title:purchaseError(error)});}
+  }
+  async function openInquiryOffers(doc:Doc) {
+    if(doc.kind==='INQUIRY'){navigateInquiry(doc.id);return;}
+    try {
+      const response=await purchasingAPI.detail(doc.id),lines:Doc[]=response.data.data.lines||[];
+      navigateInquiry(lines.length===1?lines[0].id:doc.id);
+    } catch(error){setFeedback({kind:'error',title:purchaseError(error)});}
   }
   function changeStatusFilter(value:string) {
     setFilter(value);const query=new URLSearchParams(params.toString());
@@ -203,7 +210,7 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
   ];
   const actionsFor = (d: Doc): ErpAction[] => {
     const actions: ErpAction[] = [];
-    if (d.kind === 'INQUIRY' || d.kind === 'INQUIRY_CASE') {actions.push({label:'مشاهده استعلام',icon:FaEye,onClick:() => navigateInquiry(d.id)});if(access.requester)actions.push({label:d.kind==='INQUIRY_CASE'?'استعلام جدید برای این اقلام':'استعلام جدید برای این سنگ',icon:FaPlus,onClick:()=>repeatInquiry(d)});}
+    if (d.kind === 'INQUIRY' || d.kind === 'INQUIRY_CASE') {actions.push({label:'مشاهده استعلام',icon:FaEye,onClick:() => navigateInquiry(d.id)});if((access.buyer||access.seller&&d.ownerId===access.actorId)&&d.status==='OPEN')actions.push({label:'ثبت و مقایسه پیشنهادها',icon:FaPlus,onClick:()=>openInquiryOffers(d)});if(access.requester)actions.push({label:d.kind==='INQUIRY_CASE'?'استعلام جدید برای این اقلام':'استعلام جدید برای این سنگ',icon:FaCopy,onClick:()=>repeatInquiry(d)});if(access.manager&&d.status==='OPEN')actions.push({label:'لغو استعلام',icon:FaTimes,tone:'danger',onClick:()=>open('CANCEL',d)});}
     if (d.kind === 'REQUEST') {
       if(access.buyer&&d.parentId&&d.data.inquirySelection)actions.push({label:'بازبینی پیشنهادهای این درخواست',onClick:()=>router.push(`/dashboard/purchasing/inquiries?document=${encodeURIComponent(d.parentId!)}`)});
       if(access.buyer&&positive(d.progress.stockSurplus))actions.push({label:'انتقال مازاد مشتری به سهم انبار',onClick:()=>open('STOCK_SURPLUS',d)});
@@ -214,6 +221,7 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
       if (access.manager) actions.push({ label: 'واگذاری مسئول پیگیری', onClick: () => open('ASSIGN', d) });
     }
     if (d.kind === 'ORDER') {
+      if(access.manager&&positive(d.progress.remaining))actions.push({label:'لغو مانده سفارش',tone:'danger',onClick:()=>open('CANCEL',d)});
       if(access.buyer&&positive(d.progress.accepted))actions.push({label:'ارسال دریافت‌های این سفارش به حسابداری',onClick:()=>open('ACCOUNTING_HANDOFF',d)});
       if ((d.data.route === 'direct' ? access.buyer : access.receiver) && positive(d.progress.remaining)) actions.push({ label: d.data.route === 'direct' ? 'ثبت تحویل در مقصد' : 'ثبت دریافت بار', onClick: () => open('RECEIPT', d) });
       if (access.prices) actions.push({ label: 'PDF سفارش خرید', onClick: () => print(d) });
@@ -222,6 +230,7 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
     }
     if(d.kind==='WAREHOUSE_TRANSFER'&&access.buyer)actions.push({label:'ارسال برای تطبیق حسابداری',onClick:()=>open('ACCOUNTING_HANDOFF',d)});
     if (d.kind === 'RECEIPT') {
+      if(access.all)actions.push({label:'PDF رسید دریافت بار',onClick:()=>print(d)});
       if(access.buyer&&positive(d.progress.accepted)&&!d.data.existingOnly)actions.push({label:'ارسال برای تطبیق حسابداری',onClick:()=>open('ACCOUNTING_HANDOFF',d)});
       if (d.data.existingOnly && (access.accountant || access.manager)) actions.push({ label: 'اتصال دریافت قبلی انبار', onClick: () => open('LINK_EXISTING', d) });
       if (positive(d.progress.pending) && (access.manager || d.data.route === 'direct' && access.buyer || d.data.route === 'warehouse' && access.receiver)) actions.push({ label: 'بررسی و تأیید کیفیت', onClick: () => open('ACCEPT', d) }, { label: 'ثبت رد قطعی', tone: 'danger', onClick: () => open('REJECT', d) });
@@ -242,7 +251,7 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
     return actions;
   };
   const primary: ErpAction[] = ['requests','inquiries'].includes(tab) && access.requester ? [{ label: 'استعلام جدید', onClick: () => {setStartingContract(null);setInquirySeed(null);setSheet('START');}, icon: FaPlus, variant: 'solid' }] : tab === 'orders' && access.buyer ? [{ label: 'سفارش خرید جدید', onClick: () => open('ORDER'), icon: FaPlus, variant: 'solid' }] : tab === 'receipts' && (access.buyer || access.receiver) ? [{ label: 'ثبت دریافت بار', onClick: () => open('RECEIPT'), icon: FaPlus, variant: 'solid' }] : tab === 'suppliers' && access.buyer ? [{ label: 'تأمین‌کننده جدید', onClick: () => open('SUPPLIER'), icon: FaPlus, variant: 'solid' }] : [];
-  const titles: Record<string, string> = { ACCOUNTING_HANDOFF_CANCEL:'لغو ارسال به حسابداری', STOCK_SURPLUS:'انتقال مازاد مشتری به سهم انبار', HISTORICAL_PURCHASE:'خرید انجام‌شده', ACCOUNTING_HANDOFF:'ارسال برای تطبیق حسابداری', ACCOUNTING_RECOGNIZE:'فاکتور حسابداری', ACCOUNTING_SUPPLIER_LINK:'تطبیق طرف‌حساب', CANCEL: 'لغو درخواست خرید', REQUEST: 'ویرایش درخواست خرید', ORDER: 'سفارش خرید', RECEIPT: draft.exchangeId ? 'دریافت بار جایگزین' : 'دریافت بار', ACCEPT: 'پذیرش کیفیت', REJECT: 'رد قطعی کیفیت', RETURN: 'برگشت واقعی بار', EXCHANGE: 'تعویض با تأمین‌کننده', RETURN_ACCEPTED: 'برگشت پس از پذیرش', SUPPLIER: 'تأمین‌کننده', DETAIL: 'جزئیات و سوابق', QUOTE: 'پاسخ مسئول خرید', CHANGE: 'درخواست تغییر یا لغو', ASSIGN: 'واگذاری مسئول پیگیری', PRICE: 'قیمت توافقی', ADVANCE: 'درخواست پیش‌پرداخت', CLOSE_REMAINDER: 'بستن باقی سفارش کارخانه', LINK_EXISTING: 'اتصال به سابقه موجود', RESOLVE_CHANGE: 'نتیجه واقعی تغییر' };
+  const titles: Record<string, string> = { ACCOUNTING_HANDOFF_CANCEL:'لغو ارسال به حسابداری', STOCK_SURPLUS:'انتقال مازاد مشتری به سهم انبار', HISTORICAL_PURCHASE:'خرید انجام‌شده', ACCOUNTING_HANDOFF:'ارسال برای تطبیق حسابداری', ACCOUNTING_RECOGNIZE:'فاکتور حسابداری', ACCOUNTING_SUPPLIER_LINK:'تطبیق طرف‌حساب', CANCEL: selected?.kind==='ORDER'?'لغو مانده سفارش':selected?.kind?.startsWith('INQUIRY')?'لغو استعلام':'لغو درخواست خرید', REQUEST: 'ویرایش درخواست خرید', ORDER: 'سفارش خرید', RECEIPT: draft.exchangeId ? 'دریافت بار جایگزین' : 'دریافت بار', ACCEPT: 'پذیرش کیفیت', REJECT: 'رد قطعی کیفیت', RETURN: 'برگشت واقعی بار', EXCHANGE: 'تعویض با تأمین‌کننده', RETURN_ACCEPTED: 'برگشت پس از پذیرش', SUPPLIER: 'تأمین‌کننده', DETAIL: 'جزئیات و سوابق', QUOTE: 'پاسخ مسئول خرید', CHANGE: 'درخواست تغییر یا لغو', ASSIGN: 'واگذاری مسئول پیگیری', PRICE: 'قیمت توافقی', ADVANCE: 'درخواست پیش‌پرداخت', CLOSE_REMAINDER: 'بستن باقی سفارش کارخانه', LINK_EXISTING: 'اتصال به سابقه موجود', RESOLVE_CHANGE: 'نتیجه واقعی تغییر' };
   if (sheet === 'INQUIRY_DETAIL' && selected) return <ErpPresentationProvider scope="workspace"><InquiryComparison id={selected.id} access={access} onBack={() => backInquiry(selected.parentId)} onChanged={load} onOrderRequest={openInquiryOrder}/></ErpPresentationProvider>;
   if (sheet === 'INQUIRY_CASE' && selected) return <ErpPresentationProvider scope="workspace"><InquiryCaseView id={selected.id} access={access} onBack={()=>backInquiry()} onChanged={load} onOpenLine={navigateInquiry}/></ErpPresentationProvider>;
   if(sheet==='OPENING_INQUIRY')return <ErpLoading/>;
@@ -330,7 +339,7 @@ export default function PurchasingWorkspace({ tab = 'requests', dashboard = fals
         {sheet === 'CHANGE' && <>{select('requestedAction', 'نوع درخواست', [{ id: 'EDIT', name: 'اصلاح' }, { id: 'CANCEL', name: 'لغو' }])}<ErpField label="شرح تغییر موردنیاز" required error={errors.notes}><ErpTextarea value={get('notes')} onChange={e => set('notes', e.target.value)} /></ErpField></>}
         {sheet === 'RESOLVE_CHANGE' && <><ErpInlineState kind="permission" title="نتیجه پیگیری ثبت می‌شود؛ بستن تعهد باقی کارخانه و اصلاح قرارداد، اقدام‌های جداگانه‌اند." /><ErpField label="نتیجه واقعی نزد تأمین‌کننده" required error={errors.notes}><ErpTextarea value={get('notes')} onChange={e => set('notes', e.target.value)} /></ErpField></>}
         {sheet === 'ADVANCE' && <>{field('amount', 'مبلغ درخواستی (تومان)', { required: true, decimal: true })}<ErpInlineState kind="permission" title="این ثبت، درخواست به حسابداری است؛ پرداخت واقعی یا تسویه انجام نمی‌دهد." />{notes}</>}
-        {sheet === 'CANCEL' && <ErpInlineState kind="permission" title="درخواست لغو می‌شود؛ سابقه آن باقی می‌ماند. این کار تعهد سفارش ایجادشده را لغو نمی‌کند." />}
+        {sheet === 'CANCEL' && <><ErpInlineState kind="permission" title={selected?.kind==='ORDER'?'فقط مانده تحویل‌نشده سفارش بسته می‌شود؛ دریافت‌ها و اسناد مالی قبلی باقی می‌مانند. نتیجه هماهنگی با تأمین‌کننده را ثبت کنید.':selected?.kind?.startsWith('INQUIRY')?'استعلام بسته می‌شود؛ پیشنهادها و سفارش‌های قبلی در سابقه باقی می‌مانند.':'درخواست لغو می‌شود؛ سابقه آن باقی می‌ماند.'}/><ErpField label={selected?.kind==='ORDER'?'علت لغو و نتیجه هماهنگی با تأمین‌کننده':'علت لغو'} required error={errors.reason}><ErpTextarea value={get('reason')} onChange={e=>set('reason',e.target.value)}/></ErpField></>}
         {sheet === 'CLOSE_REMAINDER' && <><ErpInlineState kind="permission" title="باقی سفارش این کارخانه بسته می‌شود؛ کسری نیاز مشتری همچنان باز می‌ماند." />{notes}</>}
         {sheet === 'LINK_EXISTING' && <>{select('sourceType', 'نوع سابقه', [...(access.accountant ? [{ id: 'SUPPLIER_INVOICE', name: 'فاکتور تأمین‌کننده' }, { id: 'PAYMENT', name: 'پرداخت حسابداری' }] : []), ...(access.receiver ? [{ id: 'INVENTORY_EVENT', name: 'رویداد موجودی' }] : [])])}{existing.filter(e => e.type === draft.sourceType).length > 0 && select('sourceId', 'انتخاب سابقه موجود', existing.filter(e => e.type === draft.sourceType).map(e => ({ id: e.id, name: e.label || e.name })))}{!existing.filter(e => e.type === draft.sourceType).length && field('sourceId', 'شناسه سابقه معتبر', { required: true })}<ErpInlineState kind="permission" title="اتصال فقط سابقه موجود را پیوند می‌دهد؛ موجودی، بدهی یا پرداخت دوباره ثبت نمی‌شود." /></>}
       </fieldset></div>

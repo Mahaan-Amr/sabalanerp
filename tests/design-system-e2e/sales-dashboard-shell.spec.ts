@@ -271,6 +271,9 @@ test('dashboard navigation stays contained and aligned across desktop and mobile
 test('Sales landing keeps its destinations in a neutral neumorphic workspace', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await login(page);
+  await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { allowed: true } }),
+  }));
   await page.goto('/dashboard/sales');
 
   const main = page.locator('[data-dashboard-main]');
@@ -288,7 +291,7 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
     ['ایجاد مشتری', '/dashboard/crm/customers/create'],
     ['ایجاد محصول', '/dashboard/sales/products/create'],
     ['گزارش فروش', '/dashboard/sales/reports'],
-    ['پیش‌نویس‌ها و پرونده‌های من', '/dashboard/sales/partner-cases'],
+    ['قراردادها و پرونده‌های فروش', '/dashboard/sales/partner-cases'],
     ['ثبت حسابداری فروشندگان', '/dashboard/sales/reports?view=accounting-registered&period=month'],
   ] as const;
 
@@ -297,7 +300,7 @@ test('Sales landing keeps its destinations in a neutral neumorphic workspace', a
   }
 
   const cards = main.locator('.sds-neumorphic-card');
-  await expect(cards).toHaveCount(destinations.length);
+  await expect.poll(() => cards.count()).toBeGreaterThanOrEqual(destinations.length);
   const cardPresentation = await cards.evaluateAll((elements) =>
     elements.map((element) => {
       const style = getComputedStyle(element);

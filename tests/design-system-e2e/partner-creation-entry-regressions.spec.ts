@@ -331,7 +331,7 @@ test('fourteen-product correction preserves mandatory intent on timeout, retries
   expect(attempts).toBe(2);
   // Initial hydration is reused. The new Case revision requires one fresh
   // commercial read; StrictMode callers must share its in-flight response.
-  expect(caseReads, 'one hydration and one fresh post-command commercial read').toBe(2);
+  await expect.poll(() => caseReads, { message: 'one hydration and one fresh post-command commercial read' }).toBe(2);
   expect(catalogProductReads, 'prepared transition must retain the loaded catalog').toBe(1);
   console.log(JSON.stringify({ workflow: 'fourteen-product-correction', attempts, caseReads, contextReads, catalogProductReads }));
   // Let the 700ms autosave consume the acknowledged no-op before changing intent.
@@ -463,7 +463,7 @@ test('rapid Start New confirmation sends one DELETE throughout the transition', 
   } finally { release(); }
   await expect(workflow(page).getByRole('button', { name: 'تاریخ قرارداد', exact: true }).last()).toBeVisible();
   expect(state.deletes).toEqual([oldRecoveryId]);
-  expect(new Set(state.acquisitions).size).toBe(1);
+  await expect.poll(() => new Set(state.acquisitions).size).toBe(1);
 });
 
 test('valid explicit resume restores its live runtime and preserves actor isolation', async ({ page }) => {
@@ -876,6 +876,7 @@ for (const scenario of [
     retailDiscount: { amount: '0', currency: 'IRT' }, belowCostConfirmed: false };
   const requestedVersions: number[] = [];
   const savedIntents: unknown[] = [];
+  let wizardReads = 0;
   let blockedQuoteRequests = 0;
   await loginAsAdmin(page);
   await mockPartner(page, true);
@@ -910,6 +911,7 @@ for (const scenario of [
   } } }));
   await page.route(`**/api/partner/cases/drafts/${oldRecoveryId}/wizard`, route => {
     if (route.request().method() === 'PUT') savedIntents.push(route.request().postDataJSON().intent);
+    if (route.request().method() === 'GET') wizardReads++;
     return route.fulfill({ json: { success: true, data: {
       schemaVersion: 1, wizardRevision: 1, step: scenario.step, intent, updatedAt: new Date().toISOString(),
     } } });
@@ -925,8 +927,8 @@ for (const scenario of [
   if (scenario.step === 'delivery') await expect(workflow(page).getByRole('textbox', { name: 'آدرس تحویل', exact: true })).toHaveValue('نشانی ذخیره‌شده');
   await expect(workflow(page).getByText('محاسبه مبلغ محصولات انجام نشد؛ دوباره تلاش کنید.', { exact: true })).toHaveCount(0);
   expect(blockedQuoteRequests).toBe(0);
-  await expect.poll(() => savedIntents.length).toBeGreaterThan(0);
-  for (const savedIntent of savedIntents) expect(savedIntent).toEqual(intent);
+  expect(wizardReads).toBeGreaterThanOrEqual(2);
+  expect(savedIntents).toEqual([]); // Reopening an unchanged, acknowledged checkpoint must not overwrite it.
   await assertNoHorizontalOverflow(page);
 });
 

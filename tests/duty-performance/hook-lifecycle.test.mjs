@@ -21,13 +21,15 @@ test('actual count hooks isolate workspace/auth changes, unmounts, failures and 
   const bundle = path.join(output, 'hook-browser-fixture.js');
   backendRequire('esbuild').buildSync({ entryPoints: ['frontend/e2e/fixtures/duty-count-hook.tsx'],
     bundle: true, platform: 'browser', format: 'iife', tsconfig: 'frontend/tsconfig.json', outfile: bundle,
-    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_API_URL': '"/api"' } });
+    define: { 'process.env.NODE_ENV': '"production"', 'process.env.NEXT_PUBLIC_API_URL': '"/api"',
+      'process.env.NEXT_PUBLIC_BROWSER_BUILD_ID': '"erp_duty_fixture_20261104"' } });
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     const user = { id: 'fixture-session', username: 'fixture', role: 'ADMIN' };
     await page.route('**/api/auth/**', route => route.fulfill({ json: { success: true,
-      data: route.request().url().endsWith('/login') ? { user } : user } }));
+      data: route.request().url().endsWith('/login') ? { user } : user,
+      session: { id: 'fixture-session-id' } } }));
     const pending = [];
     await page.route('**/api/duties/workspaces/*/summary', route => new Promise(resolve => {
       pending.push(async (attention, status = 200) => { await route.fulfill({ status,

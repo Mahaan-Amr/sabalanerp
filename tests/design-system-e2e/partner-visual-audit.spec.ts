@@ -8,8 +8,10 @@ for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const)
     const fixture = createPartnerFixtures();
     await page.setViewportSize({ width, height: 900 });
     await loginAsAdmin(page);
+    await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({ json: { success: true, data: { allowed: true } } }));
     await page.route('**/api/partner/**', async route => {
       const path = new URL(route.request().url()).pathname;
+      if (path.endsWith('/creation-context')) return route.fulfill({ json: { success: true, data: { schemaVersion: 1, kind: 'ORDINARY_SALES' } } });
       const data = ['/api/partner/cases/query-v2', '/api/partner/cases/changes-v2'].includes(path) ? { cases: [{
         view: { ...fixture.partner, state: 'DRAFT', commercialFlowVersion: 1, pricingState: 'AWAITING_INQUIRY',
           customerConfirmationState: 'NOT_SENT', products: fixture.partner.products.map(({ wholesaleUnitPrice, ...row }) => row),
@@ -105,38 +107,47 @@ for (const width of [1280, 390]) for (const theme of ['light', 'dark'] as const)
 
 for (const width of [1280, 390]) test(`Accounting requires explicit financial registration ${width}px`, async ({ page }) => {
   const fixture = createPartnerFixtures(); let registrations = 0;
-  const row = { caseId: fixture.partner.owner.caseId, contractNumber: 'همکار-QA-قطعی', owner: fixture.partner.owner,
-    commercial: { version: 1, revision: 1, status: 'FINAL', salesApproved: true, customerAccepted: true,
-      inquiry: 'ACCEPTED', expiresAt: null, firstFinancialRecordAt: null }, canRegister: true, canPaper: false };
+  const row = (id: string, contractNumber: string, final: boolean) => ({
+    contractId: `partner:${id}`, contractNumber, titlePersian: 'فروش سبلان به همکار',
+    sourceKind: 'PARTNER_INTERNAL_RECORD', preparationOnly: true,
+    owner: fixture.partner.owner, partnerCommercialStatus: final ? 'FINAL' : 'CUSTOMER_SIGNED',
+    partnerContext: { caseId: id, caseNumber: id, customerContractNumber: contractNumber,
+      internalRecordNumber: id, debtor: { displayName: 'همکار آزمایشی' }, endCustomer: { displayName: 'مشتری آزمایشی' } },
+    customer: { displayName: 'مشتری آزمایشی' }, status: final ? 'SIGNED' : 'APPROVED',
+    accounting: { sourceStatus: final ? 'ELIGIBLE' : 'VISIBLE_ONLY', eligibleForFinancialRecords: final,
+      invoiceStatus: 'NONE', receivableStatus: 'NONE', taxStatus: 'NOT_APPLICABLE',
+      openFlags: 0, openBlockerFlags: 0, openCorrections: 0, totalContractAmount: '1000',
+      invoicedAmount: '0', receivedAmount: '0', remainingAmount: '1000', currency: 'IRT' },
+    nextBestActions: [{ kind: 'CREATE_INVOICE', labelFa: 'ایجاد پیش‌نویس صورتحساب', enabled: final }],
+  });
   await loginAsAdmin(page);
-  await page.route('**/api/accounting/contracts?**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: { items: [], total: 0, page: 1, pageSize: 50 } }) }));
-  await page.route('**/api/partner/accounting/commercial-candidates', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: registrations ? [] : [row,
-    { ...row, caseId: 'waiting', contractNumber: 'همکار-QA-منتظر', commercial: { ...row.commercial, status: 'CUSTOMER_SIGNED', inquiry: 'WAITING' }, canRegister: false, canPaper: false },
-    { ...row, caseId: 'paper', contractNumber: 'همکار-QA-کاغذی', commercial: { ...row.commercial, status: 'DRAFT', customerAccepted: false }, canRegister: false, canPaper: true },
-  ] }) }));
+  await page.route('**/api/accounting/contracts?**', route => {
+    const items = [row('waiting', 'همکار-QA-منتظر', false), ...(registrations ? [] : [row(fixture.partner.owner.caseId, 'همکار-QA-قطعی', true)])];
+    return route.fulfill({ json: { success: true, data: { items, total: items.length, page: 1, pageSize: 50 } } });
+  });
   await page.route('**/api/partner/accounting/enqueue', async route => {
     expect(route.request().postDataJSON()).toEqual(fixture.partner.owner); registrations++;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {} }) });
   });
   await page.goto('/dashboard/accounting/contracts');
-  const title = page.getByText('قراردادهای همکار پیش از ثبت مالی', { exact: true });
-  await expect(title).toBeVisible(); await title.click();
-  await expect(page.getByRole('button', { name: 'ثبت پیش‌نویس مالی', exact: true })).toHaveCount(1);
-  await expect(page.getByRole('button', { name: 'ثبت امضای کاغذی مشتری', exact: true })).toHaveCount(1);
-  await expect(page.getByText('همکار-QA-منتظر', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'قراردادهای قابل بررسی' })).toBeVisible();
+  await expect(page.getByText('همکار-QA-منتظر', { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ثبت رکورد مالی', exact: true }).filter({ visible: true })).toHaveCount(1);
   expect(registrations).toBe(0);
   await setViewportAndZoom(page, { width, height: 900 });
   await page.screenshot({ path: `tmp/qa/partner-visual-2026-10-03/accounting-${width}.png`, fullPage: true, animations: 'disabled' });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-  await page.getByRole('button', { name: 'ثبت پیش‌نویس مالی', exact: true }).click();
-  await expect(title).toHaveCount(0); expect(registrations).toBe(1);
+  await page.getByRole('button', { name: 'ثبت رکورد مالی', exact: true }).filter({ visible: true }).click();
+  await expect(page.getByText('همکار-QA-قطعی', { exact: true })).toHaveCount(0); expect(registrations).toBe(1);
 });
 
 for (const width of [1280, 390]) test(`All commercial and inquiry statuses remain independent ${width}px`, async ({ page }) => {
   const fixture = createPartnerFixtures(); let inquiry = 'WAITING'; let status = 'DRAFT';
   await loginAsAdmin(page);
+  await page.route('**/api/dashboard/route-availability?*', route => route.fulfill({ json: { success: true, data: { allowed: true } } }));
   await page.route('**/api/partner/**', async route => {
     const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/creation-context')) return route.fulfill({ json: { success: true, data: { schemaVersion: 1, kind: 'ORDINARY_SALES' } } });
     const data = ['/api/partner/cases/query-v2', '/api/partner/cases/changes-v2'].includes(path) ? { cases: [{
       view: { ...fixture.partner, state: 'DRAFT', commercialFlowVersion: 1 },
       commercial: { version: 1, revision: 1, status, salesApproved: status !== 'NOTE', customerAccepted: ['CUSTOMER_SIGNED', 'FINAL'].includes(status), inquiry, expiresAt: null, firstFinancialRecordAt: null },
@@ -192,9 +203,9 @@ for (const width of [1280, 390]) test(`New stone customer price remains empty ${
   await page.getByRole('button', { name: 'تلاش مجدد دریافت کاتالوگ', exact: true }).click();
   await page.getByRole('option', { name: /سنگ قیمت خالی آزمون/ }).click();
   const modal = page.getByRole('dialog', { name: 'تنظیمات محصول', exact: true });
-  await expect(modal.getByRole('textbox', { name: /قیمت فروش به مشتری/ })).toHaveValue('');
+  await expect(modal.getByRole('textbox', { name: 'فی هر مترمربع (تومان)', exact: true })).toHaveValue('');
   await setViewportAndZoom(page, { width, height: 900 });
-  await modal.getByRole('textbox', { name: /قیمت فروش به مشتری/ }).scrollIntoViewIfNeeded();
+  await modal.getByRole('textbox', { name: 'فی هر مترمربع (تومان)', exact: true }).scrollIntoViewIfNeeded();
   await modal.screenshot({ path: `tmp/qa/partner-visual-2026-10-03/empty-price-${width}.png`, animations: 'disabled' });
   await modal.getByRole('button', { name: 'انصراف', exact: true }).click();
   await expect(modal).toHaveCount(0);

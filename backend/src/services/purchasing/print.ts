@@ -1,5 +1,5 @@
 import {renderContractHtml,renderContractPdfHeaderTemplate} from '../../utils/printTemplate';
-import {Decimal,label,type Doc} from './domain';
+import {Decimal,label,receiptProgress,type Doc} from './domain';
 
 const escape=(v:unknown)=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 const fa=(value:unknown)=>String(value??'—').replace(/[0-9]/g,d=>'۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
@@ -19,6 +19,26 @@ const promise=(term:Doc['data'],stage:'ready'|'arrival')=>{
   if(days!=null)return `${fa(days)} ${term.dayKind==='working'?'روز کاری':term.dayKind==='calendar'?'روز تقویمی':'روز (نوع روز تعیین نشده)'} پس از ${term.leadBasis==='OFFER_DATE'?`تاریخ پیشنهاد ${fa(term.offerDate)}`:'سفارش قطعی'}`;
   return date?new Date(`${date}T12:00:00+03:30`).toLocaleDateString('fa-IR',{timeZone:'Asia/Tehran'}):'تعیین نشده';
 };
+
+/** Current receipt state, never a payment or inventory transaction. */
+export function renderPurchaseReceipt(doc:Doc,order:Doc) {
+  const d=doc.data,p=receiptProgress(doc,[]);
+  const base=renderContractHtml({id:doc.id,contractNumber:String(doc.number),items:[]},{variant:'accounting'});
+  const styles=base.slice(base.indexOf('<style>'));
+  const header=renderContractPdfHeaderTemplate({contractNumber:fa(doc.number),createdAt:doc.createdAt,status:'APPROVED'},undefined,{number:'شماره رسید دریافت',date:'تاریخ ثبت',statusValue:'رسید بار خرید'}).replace('<span class="pageNumber"></span>','<span>۱</span>');
+  const value=(v:unknown)=>`<bdi dir="ltr">${escape(amount(v))}</bdi> ${escape(d.unit)}`;
+  return `<!DOCTYPE html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>${escape(label(doc))}</title></head><body><main class="sheet">
+    <div style="height:34mm;break-inside:avoid;page-break-inside:avoid">${header}</div>
+    <section class="section"><h2>رسید دریافت بار خرید</h2><div class="grid two-col balanced-info">
+      <div><strong>سفارش خرید:</strong> ${escape(label(order))}</div><div><strong>تأمین‌کننده:</strong> ${escape(order.data.supplierName)}</div>
+      <div><strong>محل دریافت:</strong> ${escape(d.location)}</div><div><strong>نسخه رسید:</strong> ${fa(doc.version)}</div>
+      ${d.recipient?.name?`<div><strong>تأییدکننده مقصد:</strong> ${escape(d.recipient.name)}</div>`:''}
+    </div></section>
+    <section class="section"><h2>سنگ و وضعیت دریافت</h2><table class="main-products-table"><thead><tr><th>سنگ</th><th>مقدار رسیده</th><th>پذیرفته‌شده</th><th>در انتظار بررسی</th><th>رد قطعی</th><th>برگشت واقعی</th></tr></thead><tbody class="product-group"><tr><td>${escape(d.stone)}</td><td>${value(d.quantity)}</td><td>${value(p.accepted)}</td><td>${value(p.pending)}</td><td>${value(p.rejected)}</td><td>${value(p.returned)}</td></tr></tbody></table></section>
+    ${d.notes?`<section class="section"><h2>توضیحات دریافت</h2><div>${escape(d.notes)}</div></section>`:''}
+    <footer class="footer">${escape(label(doc))} · نسخه ${fa(doc.version)} | این سند به‌تنهایی فاکتور یا تأیید پرداخت نیست.</footer>
+    </main>${styles}<style>@page{size:A4 portrait;margin:8mm 6mm 10mm}.section,.product-group{break-inside:avoid}td{overflow-wrap:anywhere}</style></body></html>`;
+}
 
 /** Canonical Sabalan Accounting-variant typography, sections, grids, tables,
  * embedded Yekan font and branded header, as used by Sales invoices. */

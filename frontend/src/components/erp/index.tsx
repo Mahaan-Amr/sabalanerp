@@ -1647,7 +1647,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
     const closingOverlay = overlayRootRef.current;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    window.setTimeout(() => {
+    const initialFocusTimer = window.setTimeout(() => {
       const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button:not([disabled]):not([tabindex="-1"]),a[href]:not([tabindex="-1"]),input:not([disabled]):not([tabindex="-1"]),select:not([disabled]):not([tabindex="-1"]),textarea:not([disabled]):not([tabindex="-1"]),[tabindex]:not([tabindex="-1"])');
       firstFocusable?.focus();
     }, 0);
@@ -1668,6 +1668,7 @@ export function ErpSheet({ open, onClose, title, children, footer, presentation 
     };
     window.addEventListener('keydown', onKeyDown);
     return () => {
+      window.clearTimeout(initialFocusTimer);
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', onKeyDown);
       restoreErpSheetWorkflowFocus(restoreFocusRef.current, restoreWorkflowForm, closingOverlay);

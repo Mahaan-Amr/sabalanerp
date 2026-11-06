@@ -22,7 +22,8 @@ def fixture():
     value = dict(Id='1' * 64, Created='2026-10-19T00:00:00Z', Image=bridge.LEGACY_IMAGE,
                  Config=dict(Cmd=bridge.LEGACY_COMMAND, Entrypoint=['docker-entrypoint.sh'], Labels={
                      'com.docker.compose.project': 'sabalanerp', 'com.docker.compose.service': 'backend',
-                     'io.sabalan.performance.source-commit': bridge.LEGACY_COMMIT}),
+                     'io.sabalan.performance.source-commit': bridge.LEGACY_SOURCE_LABEL,
+                     'io.sabalan.performance.source-hash': bridge.LEGACY_SOURCE_LABEL}),
                  State=dict(Running=True, Pid=120, OOMKilled=False, StartedAt='2026-10-20T00:00:00Z'), Mounts=[])
     container = bridge.classify_container(value, bridge.LEGACY_IMAGE)
     init = dict(pid=120, ppid=10, startTicks='1234', pidNamespace='pid:[123]', exe='/usr/bin/dash',
@@ -81,6 +82,7 @@ class LegacyGuards(unittest.TestCase):
                        lambda v: v['Config'].update(Cmd=['sh', '-c', 'node other.js']),
                        lambda v: v['Config']['Labels'].update({'com.docker.compose.project': 'fintech'}),
                        lambda v: v['Config']['Labels'].update({'io.sabalan.performance.source-commit': 'f' * 40}),
+                       lambda v: v['Config']['Labels'].update({'io.sabalan.performance.source-hash': 'f' * 64}),
                        lambda v: v['Mounts'].append(dict(Destination='/app'))]:
             changed = copy.deepcopy(value)
             mutate(changed)

@@ -78,6 +78,11 @@ const waybillHtml = renderDispatchDocumentHtml({
 });
 assert.match(waybillHtml, /بارنامه خروج محموله/);
 assert.doesNotMatch(waybillHtml, /مبلغ ناخالص|تخفیف تخصیص‌یافته|مبلغ خالص|ریال/);
+const reconstructed = renderDispatchDocumentHtml({ ...common, kind: 'WAYBILL', reconstructionLabel: 'LEGACY_RECONSTRUCTED',
+  payload: { allocationRevisionId: 'revision', contracts: [] } });
+assert.match(reconstructed, /نسخه بازسازی‌شده از اطلاعات ثبت‌شده/);
+assert.match(reconstructed, /فایل اصلی بازیابی نشده است/);
+assert.doesNotMatch(waybillHtml, /نسخه بازسازی‌شده/);
 
 const adjustmentHtml = renderDispatchDocumentHtml({
   ...common,

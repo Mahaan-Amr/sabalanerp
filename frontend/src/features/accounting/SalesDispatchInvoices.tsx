@@ -30,11 +30,19 @@ export default function SalesDispatchInvoices({
   workspace,
   canManage = false,
   refreshKey,
+  onActiveInvoiceChange,
+  onIssueAll,
+  onPrintAll,
+  documentBlockReason,
 }: {
   loadingId: string;
   workspace: "accounting" | "logistics";
   canManage?: boolean;
   refreshKey?: unknown;
+  onActiveInvoiceChange?: (invoiceId: string | null) => void;
+  onIssueAll?: () => Promise<void>;
+  onPrintAll?: () => Promise<void>;
+  documentBlockReason?: string;
 }) {
   const [data, setData] = useState<ReadModel | null>(null),
     [error, setError] = useState(""),
@@ -48,11 +56,13 @@ export default function SalesDispatchInvoices({
     try {
       const response = await api.get(base);
       setData(response.data.data);
+      onActiveInvoiceChange?.(response.data.data.invoices.find((invoice: Invoice) => invoice.status === "ISSUED")?.id || null);
       setError("");
     } catch (e) {
+      onActiveInvoiceChange?.(null);
       setError(userFacingError(e, "فاکتورهای فروش دریافت نشد."));
     }
-  }, [base]);
+  }, [base, onActiveInvoiceChange]);
   useEffect(() => {
     void load();
   }, [load, refreshKey]);
@@ -103,14 +113,16 @@ export default function SalesDispatchInvoices({
           />
           {canManage && workspace === "accounting" && (
             <ErpButton
-              label="صدور فاکتور فروش"
+              label={onIssueAll ? "تأیید و صدور اسناد" : "صدور فاکتور فروش"}
               disabled={
                 pending ||
-                !data?.ready ||
-                data.invoices.some((i) => i.status !== "VOIDED")
+                (!onIssueAll && !data?.ready) ||
+                !data ||
+                (!onIssueAll && data.invoices.some((i) => i.status !== "VOIDED"))
               }
               onClick={() =>
                 void run(async () => {
+                  if (onIssueAll) { await onIssueAll(); return; }
                   requestKey.current ||= crypto.randomUUID();
                   await api.post(base, { idempotencyKey: requestKey.current });
                   requestKey.current = null;
@@ -118,9 +130,14 @@ export default function SalesDispatchInvoices({
               }
             />
           )}
+          {onPrintAll && data?.invoices.some(invoice => invoice.status === "ISSUED") && (
+            <ErpButton label="چاپ فاکتور و بارنامه‌ها" variant="soft" disabled={pending || Boolean(documentBlockReason)}
+              onClick={() => void run(onPrintAll)} />
+          )}
         </div>
       </div>
       {error && <ErpInlineState kind="error" title={error} />}
+      {documentBlockReason && <ErpInlineState kind="stale" title={documentBlockReason} />}
       {!data && !error && <ErpLoading />}
       {data?.blockedReason && (
         <ErpInlineState kind="stale" title={data.blockedReason} />

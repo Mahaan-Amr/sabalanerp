@@ -3392,9 +3392,27 @@ model AccountingDispatchWaybill {
   printHandoffs        DispatchDocumentPrintHandoff[]
   statementAdjustments DispatchStatementAdjustment[]
   commandResults       DispatchDocumentCommandResult[]
+  legacyReconstruction LegacyWaybillReconstruction?
 
   @@index([candidateId, issuedAt])
   @@map("accounting_dispatch_waybills")
+}
+
+// An explicitly marked reconstruction, never an original issued artifact.
+model LegacyWaybillReconstruction {
+  id                   String   @id @default(cuid())
+  waybillId            String   @unique
+  allocationRevisionId String
+  sourceIntegrityHash  String
+  waybillIntegrityHash String
+  pdfSha256            String
+  pdf                  Bytes
+  createdAt            DateTime @default(now())
+  createdBy            String
+  reason               String
+  waybill              AccountingDispatchWaybill @relation(fields: [waybillId], references: [id], onDelete: Restrict)
+
+  @@map("legacy_waybill_reconstructions")
 }
 
 model AccountingDispatchCommand {

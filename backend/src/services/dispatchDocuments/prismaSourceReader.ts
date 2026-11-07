@@ -50,7 +50,7 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
     const base = { schemaVersion: 1 as const, waybillNumber: identity.number, issuedAt: identity.issuedAt,
       customerName: String(customer.companyName || customer.name || customer.id || ''),
       projectOrDestination: String(loading.destination || project.address || project.name || project.id || ''),
-      vehiclePlate: String(admission.vehiclePlate || record(admission.vehicle).plate || ''), templateVersion };
+      vehiclePlate: String(admission.vehiclePlate || record(admission.plate).plate || record(admission.vehicle).plate || ''), templateVersion };
     const sourceIntegrityHash = dispatchDocumentSourceIntegrityHash({ allocationRevisionId: candidate.allocationRevisionId,
       allocationIntegrityHash: candidate.allocationRevision.integrityHash, pricedAllocation });
     const pricing = pricedAllocation.pricingVersions[0];
@@ -89,7 +89,7 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
   const base = { schemaVersion: 1 as const, waybillNumber: identity.number, issuedAt: identity.issuedAt,
     customerName: String(customer.companyName || customer.name || customer.id || ''),
     projectOrDestination: String(project.address || project.name || project.id || ''),
-    vehiclePlate: String(admission.vehiclePlate || record(admission.vehicle).plate || ''), templateVersion };
+    vehiclePlate: String(admission.vehiclePlate || record(admission.plate).plate || record(admission.vehicle).plate || ''), templateVersion };
   const sourceIntegrityHash = dispatchDocumentSourceIntegrityHash({ allocationRevisionId: candidate.allocationRevisionId,
     allocationIntegrityHash: candidate.allocationRevision.integrityHash, pricedAllocation });
   const sourceVersionIdentities = Object.fromEntries([

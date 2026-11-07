@@ -1,7 +1,7 @@
 'use client';
 import { LogisticsPage } from '@/features/logistics/LogisticsWorkspace';
 import { useEffect, useState } from 'react';
-import { FaBan, FaCheck, FaClipboardList, FaPlus, FaPrint, FaSync, FaTrash, FaTruck, FaUsers } from 'react-icons/fa';
+import { FaBan, FaCheck, FaClipboardList, FaPlus, FaSync, FaTrash, FaTruck, FaUsers } from 'react-icons/fa';
 import { ErpActionMenu, ErpBadge, ErpButton, ErpEmptyState, ErpInlineState, ErpNeumorphicMetricGrid, ErpLoading, ErpSection, type ErpNeumorphicMetric } from '@/components/erp';
 import { dashboardAPI, logisticsAPI } from '@/lib/api';
 import { hrDutyApi, type DestinationDuty } from '@/features/hr-duties/hrDutyApi';
@@ -74,7 +74,6 @@ export default function LogisticsDashboardPage() {
                       <ErpButton label={canEdit ? 'ادامه' : 'مشاهده'} href={canEdit ? `/dashboard/logistics/loadings/new?draftId=${row.id}` : href} variant="soft" />
                       <ErpActionMenu portal label={`اقدامات ${dispatchCaseReference(row.loadingNumber)}`} actions={[
                         ...(row.status === 'DRAFT' && availability.FINALIZE_LOADING?.enabled === true ? [{ label: 'نهایی‌سازی', icon: FaCheck, tone: 'success' as const, href: `${href}?action=finalize` }] : []),
-                        { label: 'چاپ', icon: FaPrint, href: `${href}?print=1` },
                         ...(row.status !== 'CANCELLED' && availability.CANCEL_LOADING?.enabled === true ? [{ label: 'لغو بارگیری', icon: FaBan, tone: 'danger' as const, href: `${href}?action=cancel` }] : []),
                         ...(canEdit ? [{ label: 'حذف پیش‌نویس', icon: FaTrash, tone: 'danger' as const, href: `${href}?action=delete` }] : []),
                       ]} />

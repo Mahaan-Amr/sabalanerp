@@ -62,6 +62,8 @@ const run = async () => {
     const { actor, authority: accountingAuthority } = await createAuthorizedActorFixture(observer, {
       runId: database.runId, workspace: 'accounting', feature: 'accounting_dispatch_candidates_manage',
       workspacePermission: 'admin' });
+    const priorCutover = await observer.shipmentStatementCutover.findUniqueOrThrow({ where: { id: 'customer-shipment-statements' } });
+    if (!priorCutover.enabled) {
     const manifest = await observer.shipmentStatementMigrationManifest.create({ data: {
       migrationName: `dispatch-documents-concurrency-${database.runId}`, schemaVersion: 1,
       sourceSchemaHash: createHash('sha256').update(`source-${database.runId}`).digest('hex'), createdBy: actor.id,
@@ -72,6 +74,12 @@ const run = async () => {
       integrityHash: createHash('sha256').update(`cutover-${database.runId}`).digest('hex'),
     } });
     await observer.shipmentStatementOperationsControl.update({ where: { id: 'customer-shipment-statements' }, data: { paused: false } });
+    } else {
+      assert.ok(priorCutover.cutoverAt && priorCutover.cutoverAt <= candidate.allocationRevision.finalizedAt,
+        'cloned parent cutover must cover the finalized test candidate');
+      const control = await observer.shipmentStatementOperationsControl.findUniqueOrThrow({ where: { id: 'customer-shipment-statements' } });
+      assert.equal(control.paused, false, 'cloned parent operations must be active');
+    }
     const number = (await observer.$queryRawUnsafe<Array<{ number: bigint }>>(
       `SELECT nextval('accounting_dispatch_waybill_number_seq') AS number`))[0].number.toString();
     const waybillId = randomUUID();

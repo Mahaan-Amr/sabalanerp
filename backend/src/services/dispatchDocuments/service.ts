@@ -254,6 +254,27 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     return bytes;
   };
 
+  // Internal integrity checks do not represent a document handoff to a user.
+  const verifyArtifactForIssuance = async (input: { artifactId: string; waybillId: string; actorId: string; correlationId: string }) => {
+    const actorId = required(input.actorId, 'actorId');
+    const waybillId = required(input.waybillId, 'waybillId');
+    const artifactId = required(input.artifactId, 'artifactId');
+    const correlationId = required(input.correlationId, 'correlationId');
+    await assertAccess(actorId, waybillId);
+    const artifact = await dependencies.repository.getArtifact({ artifactId, waybillId });
+    if (!artifact || !await dependencies.access.canReadDocuments({ actorId, waybillId, kinds: [artifact.kind] })) {
+      throw new DispatchDocumentNotAvailableError();
+    }
+    try {
+      await verifiedBytes(artifact);
+    } catch (error) {
+      await dependencies.incidents.report({ waybillId, artifactId, actorId, correlationId,
+        failureCode: 'ARTIFACT_INTEGRITY_FAILURE', evidence: { expectedSha256: artifact.sha256,
+          expectedByteLength: artifact.byteLength, storageKey: artifact.storageKey } });
+      throw error;
+    }
+  };
+
   const retrieveArtifact = async (input: { artifactId: string; waybillId: string; actorId: string; correlationId: string }) => {
     await assertAccess(required(input.actorId, 'actorId'), required(input.waybillId, 'waybillId'));
     const retrievalFingerprint = intentFingerprint({ command: 'RETRIEVE', waybillId: input.waybillId, artifactId: input.artifactId });
@@ -365,5 +386,5 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     return model;
   };
 
-  return { decideCandidate, voidWaybill, replaceWaybill, retrieveArtifact, printHandoff, getCombinedReadModel };
+  return { decideCandidate, voidWaybill, replaceWaybill, retrieveArtifact, verifyArtifactForIssuance, printHandoff, getCombinedReadModel };
 };

@@ -108,19 +108,16 @@ test('external admission requires assigned vehicle and enrollment; open operatio
   assert.deepEqual((await f.tx.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: turn.id } })).admissionSnapshot, turn.admissionSnapshot);
 }));
 
-test('external biometrics issues authorization, suspension blocks exit, restoration permits single physical exit', () => fixture(async f => {
+test('external biometrics issues authorization and exit rejects a loading without a sales invoice', () => fixture(async f => {
   await f.assign(); await f.enroll(); const { turn, bill } = await f.waybill();
   const session = await f.service.startSession({ waybillId: bill.id, actorId: f.actor.id, workstationId: 'TEST' });
   assert.equal(session.method, 'EXTERNAL_BIOMETRIC'); assert.equal(f.messages.length, 0);
   await assert.rejects(() => f.service.resendOtp(session.id), /مسیر جایگزین/);
   const result = await f.service.verifyInternalBiometric({ sessionId: session.id, actorId: f.actor.id }); assert.ok(result.authorization);
-  await f.tx.externalDriver.update({ where: { id: f.driver.id }, data: { status: 'RESTRICTED' } });
   const exit = new PhysicalGateExitService(f.client);
   const input = { authorizationId: result.authorization.id, actorId: f.actor.id, effectiveAuthority: {}, idempotencyKey: f.key, correlationId: f.key };
-  await assert.rejects(() => exit.recordExit(input), /خروج مجاز نیست/);
-  await f.tx.externalDriver.update({ where: { id: f.driver.id }, data: { status: 'ACTIVE' } });
-  const recorded = await exit.recordExit(input); assert.equal((await exit.recordExit(input)).id, recorded.id);
-  assert.equal((await f.tx.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: turn.id } })).status, 'EXIT_RECORDED');
+  await assert.rejects(() => exit.recordExit(input), /فاکتور فروش کل بارگیری هنوز صادر نشده/);
+  assert.equal((await f.tx.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: turn.id } })).status, 'LOADING_FINALIZED');
 }));
 
 test('external fallback requires qualifying failures, OTP, separate Guard actor and exception reason', () => fixture(async f => {

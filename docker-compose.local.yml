@@ -123,6 +123,7 @@ services:
       - ${LOCAL_BACKEND_STORAGE_CONTRACTS_SOURCE:-backend_storage_contracts}:/app/storage/contracts
       - ${LOCAL_BACKEND_STORAGE_HR_SOURCE:-backend_storage_hr_hiring}:/app/storage/hr-hiring
       - ${LOCAL_BACKEND_STORAGE_ACCOUNTING_SOURCE:-backend_storage_accounting_contracts}:/app/storage/accounting-contracts
+      - ${LOCAL_BACKEND_STORAGE_DISPATCH_SOURCE:-backend_storage_dispatch_documents}:/app/storage/dispatch-documents
       - ${LOCAL_BACKEND_STORAGE_SUPPORT_SOURCE:-backend_storage_support_tickets}:/app/storage/support-tickets
       - ${LOCAL_BACKEND_UPLOADS_SOURCE:-backend_uploads}:/app/uploads
       - ${LOCAL_BACKEND_RECOVERY_SOURCE:-backend_recovery}:/app/storage/recovery
@@ -227,6 +228,7 @@ volumes:
   backend_storage_contracts:
   backend_storage_hr_hiring:
   backend_storage_accounting_contracts:
+  backend_storage_dispatch_documents:
   backend_storage_support_tickets:
   backend_uploads:
   backend_recovery:

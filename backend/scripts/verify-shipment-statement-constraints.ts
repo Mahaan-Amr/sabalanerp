@@ -47,9 +47,9 @@ const run = async () => {
     `, versionId, source.contractId, source.financialRecordId, hash('a'));
     await tx.$executeRawUnsafe(`
       INSERT INTO "contract_approved_pricing_rows"
-        ("id", "pricingVersionId", "contractItemId", "productRowId", "ordinal", "contractedQuantity", "unit",
+        ("id", "pricingVersionId", "contractItemId", "linkedContractItemId", "productRowId", "ordinal", "contractedQuantity", "unit",
          "canonicalAllInTotal", "discountEligible", "componentEvidence", "integrityHash")
-      VALUES ($1, $2, $3, $4, 1, 1.000, 'unit', 100, true, '{}'::jsonb, $5)
+      VALUES ($1, $2, $3, $3, $4, 1, 1.000, 'unit', 100, true, '{}'::jsonb, $5)
     `, randomUUID(), versionId, source.contractItemId, `${source.productRowId}-wrong`, hash('b'));
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), /pricing row stable product identity differs from contract item/);
 
@@ -72,9 +72,9 @@ const run = async () => {
     `, versionId, source.contractId, source.financialRecordId, hash('a'));
     await tx.$executeRawUnsafe(`
       INSERT INTO "contract_approved_pricing_rows"
-        ("id", "pricingVersionId", "contractItemId", "productRowId", "ordinal", "contractedQuantity", "unit",
+        ("id", "pricingVersionId", "contractItemId", "linkedContractItemId", "productRowId", "ordinal", "contractedQuantity", "unit",
          "canonicalAllInTotal", "discountEligible", "componentEvidence", "integrityHash")
-      VALUES ($1, $2, $3, $4, 1, 1.000, 'unit', 100, true, '{}'::jsonb, $5)
+      VALUES ($1, $2, $3, $3, $4, 1, 1.000, 'unit', 100, true, '{}'::jsonb, $5)
     `, pricingRowId, versionId, source.contractItemId, source.productRowId, hash('b'));
     await tx.$executeRawUnsafe(`
       INSERT INTO "logistics_allocation_revision_pricing"
@@ -89,7 +89,7 @@ const run = async () => {
     `, randomUUID(), unrelatedAllocationLine.revisionId, unrelatedAllocationLine.id, versionId, pricingRowId, hash('d'));
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), /priced event source contract differs from approved pricing/);
 
-  const waybill = await prisma.accountingDispatchWaybill.findFirst({ select: { id: true } });
+  const waybill = await prisma.accountingDispatchWaybill.findFirst({ select: { id: true, candidateId: true } });
   assert.ok(waybill, 'An existing waybill is required for the adjustment constraint verification.');
   await expectConstraintFailure(() => prisma.$transaction(async (tx) => {
     const correctionId = randomUUID();
@@ -104,18 +104,22 @@ const run = async () => {
     `, randomUUID(), waybill.id, correctionId, hash('c'));
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), /statement adjustment requires a posted correction/);
 
-  const [replacement] = await prisma.$queryRaw<Array<{ predecessorId: string; successorId: string }>>`
-    SELECT predecessor."id" AS "predecessorId", successor."id" AS "successorId"
-    FROM "accounting_dispatch_waybills" successor
-    JOIN "accounting_dispatch_waybills" predecessor ON predecessor."id" = successor."replacesWaybillId"
-    LIMIT 1
-  `;
-  assert.ok(replacement, 'An existing replacement waybill pair is required for artifact history verification.');
   const rollback = new Error('ROLLBACK_VERIFIED_ARTIFACT_INSERTS');
   try {
     await prisma.$transaction(async (tx) => {
+      // Build an isolated pair in this rollback-only transaction instead of
+      // requiring or mutating a real customer's replacement history.
+      const predecessorId = randomUUID();
+      const successorId = randomUUID();
+      const number = BigInt(`0x${randomUUID().replace(/-/g, '').slice(0, 12)}`) + 1000000000000000n;
+      const common = { candidateId: waybill.candidateId, status: 'VOIDED' as const,
+        snapshot: {}, issuedBy: 'constraint-verifier', voidedAt: new Date(), voidedBy: 'constraint-verifier',
+        voidReason: 'rollback-only verification' };
+      await tx.accountingDispatchWaybill.create({ data: { ...common, id: predecessorId, number, integrityHash: randomUUID() } });
+      await tx.accountingDispatchWaybill.create({ data: { ...common, id: successorId, number: number + 1n,
+        integrityHash: randomUUID(), replacesWaybillId: predecessorId } });
       const sharedChecksum = hash('d');
-      for (const [ordinal, waybillId] of [replacement.predecessorId, replacement.successorId].entries()) {
+      for (const [ordinal, waybillId] of [predecessorId, successorId].entries()) {
         await tx.dispatchDocumentArtifact.create({
           data: {
             id: randomUUID(),

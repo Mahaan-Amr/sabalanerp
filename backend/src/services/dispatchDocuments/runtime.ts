@@ -46,5 +46,7 @@ export const configureDispatchDocumentsRuntime = (input: {
       },
     }),
   });
-  return service;
+  // The invoice command uses the identical private storage owner and locking
+  // protocol when checking retained documents before committing an invoice.
+  return Object.assign(service, { documentStorage: storage });
 };

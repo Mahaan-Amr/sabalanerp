@@ -6,6 +6,12 @@ import { createAuditedPartnerAuthorization } from "../partnerSales/authorization
 import { authorizePartnerLoading } from "../partnerSales/fulfillment/loadingAuthority";
 import { assertCanonicalDispatchCommandAllowed } from "../dispatchCutover";
 import { dispatchDocumentLifecycleAuditEventHash } from "../dispatchDocuments/prismaRepository";
+import { loadShipmentStatementRuntimeStateUnderLock } from "../dispatchDocuments/runtimeState";
+import { isPostCutoverFinalization, isShipmentStatementFlowActive } from "../dispatchDocuments/featureGate";
+import { verifyDispatchArtifactStorageUnderLock } from "../dispatchDocuments/artifactStorageLock";
+import type { DispatchArtifactStorage } from "../dispatchDocuments/ports";
+import { DispatchDocumentIntegrityError } from "../dispatchDocuments/service";
+import { allocationPricingIntegrityVerifier } from "../dispatchDocuments/prismaSourceReader";
 import { isRetryableDispatchTransactionError } from "../dispatchAllocation";
 import { generatePdfBufferFromHtml } from "../../utils/pdf";
 import {
@@ -18,6 +24,8 @@ import { renderSalesInvoice, type IssuedInvoiceSnapshot } from "./render";
 export type InvoiceContext = {
   actorId: string;
   workspace: "accounting" | "logistics";
+  requireDispatchDocumentGate?: boolean;
+  expectedRevisionIds?: readonly string[];
 };
 const lock = async (tx: Prisma.TransactionClient, loadingId: string) => {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`SALES_INVOICE:${loadingId}`}))`;
@@ -181,6 +189,7 @@ export function createSalesInvoiceService(
       htmlContent: renderSalesInvoice(snapshot, reason),
       displayHeaderFooter: false,
     }),
+  documentStorage?: DispatchArtifactStorage,
 ) {
   return {
     list: async (ctx: InvoiceContext, loadingId: string) =>
@@ -232,6 +241,67 @@ export function createSalesInvoiceService(
         await authorize(tx, ctx, loadingId, true);
         await assertCanonicalDispatchCommandAllowed(tx);
         await lock(tx, loadingId);
+        if (ctx.requireDispatchDocumentGate) {
+          const gate = await loadShipmentStatementRuntimeStateUnderLock(tx);
+          if (!gate) throw new SalesInvoiceError('وضعیت گذار اسناد قابل بررسی نیست.');
+          const revisions = await tx.logisticsAllocationRevision.findMany({ where: { loadingId },
+            orderBy: [{ queueTurnId: 'asc' }, { revisionNumber: 'desc' }],
+            select: { id: true, queueTurnId: true, sourceKind: true, finalizedAt: true, sealedAt: true,
+              candidate: { select: { status: true, waybills: { where: { status: { in: ['ISSUED', 'EXIT_RECORDED'] } },
+                select: { integrityHash: true, legacyReconstruction: { select: { allocationRevisionId: true, sourceIntegrityHash: true,
+                  waybillIntegrityHash: true, pdfSha256: true, pdf: true } }, documentArtifacts: { where: { kind: { in: ['WAYBILL', 'STATEMENT'] } },
+                  select: { kind: true, storageKey: true, byteLength: true, sha256: true } } } } } } } });
+          const latest = new Map<string, typeof revisions[number]>();
+          for (const revision of revisions) if (!latest.has(revision.queueTurnId)) latest.set(revision.queueTurnId, revision);
+          if (!latest.size || [...latest.values()].some(revision => revision.sourceKind !== 'PARTNER_CASE' && gate?.cutoverAt &&
+            isPostCutoverFinalization(revision.finalizedAt, gate.cutoverAt) && !isShipmentStatementFlowActive(process.env, gate))) {
+            throw new SalesInvoiceError('مسیر صدور اسناد در حال حاضر فعال نیست؛ دوباره وضعیت بارگیری را بررسی کنید.');
+          }
+          const actualRevisionIds = [...latest.values()].map(revision => revision.id).sort();
+          const expectedRevisionIds = [...(ctx.expectedRevisionIds ?? [])].sort();
+          if (actualRevisionIds.length !== expectedRevisionIds.length ||
+            actualRevisionIds.some((id, index) => id !== expectedRevisionIds[index])) {
+            throw new SalesInvoiceError('تخصیص راننده‌ها تغییر کرده است؛ اطلاعات را دوباره بررسی کنید.');
+          }
+          const artifacts: Array<{ storageKey: string; byteLength: number; sha256: string }> = [];
+          for (const revision of latest.values()) {
+            const waybills = revision.candidate?.waybills ?? [];
+            const documents = waybills[0]?.documentArtifacts ?? [];
+            const waybill = waybills[0];
+            const legacy = revision.sourceKind === 'SALES_CONTRACT' && (!gate?.cutoverAt || !isPostCutoverFinalization(revision.finalizedAt, gate.cutoverAt));
+            const waybillDocuments = documents.filter(document => document.kind === 'WAYBILL');
+            if (!revision.sealedAt || revision.candidate?.status !== 'ACCEPTED' || waybills.length !== 1) {
+              throw new SalesInvoiceError('فایل‌های بارنامه یکی از راننده‌ها کامل نیست.');
+            }
+            if (legacy && waybill.legacyReconstruction && waybillDocuments.length === 0) {
+              const reconstructed = waybill.legacyReconstruction;
+              if (reconstructed.allocationRevisionId !== revision.id || reconstructed.waybillIntegrityHash !== waybill.integrityHash ||
+                bytesHash(reconstructed.pdf) !== reconstructed.pdfSha256) throw new SalesInvoiceError('بارنامه بازسازی‌شده معتبر نیست.');
+              const freshness = await allocationPricingIntegrityVerifier.assess({ transaction: tx, allocationRevisionId: revision.id,
+                expectedSourceIntegrityHash: reconstructed.sourceIntegrityHash });
+              if (freshness.status !== 'CURRENT') throw new SalesInvoiceError('شواهد قیمت بارگیری به بررسی نیاز دارند.');
+            } else if (waybillDocuments.length !== 1 || (legacy && waybill.legacyReconstruction) ||
+              (!legacy && documents.filter(document => document.kind === 'STATEMENT').length !== 1)) {
+              throw new SalesInvoiceError('فایل‌های بارنامه یکی از راننده‌ها کامل نیست.');
+            }
+            for (const document of legacy ? waybillDocuments : documents) {
+              const byteLength = Number(document.byteLength);
+              if (!Number.isSafeInteger(byteLength) || byteLength < 1) throw new SalesInvoiceError('اندازه فایل سند معتبر نیست.');
+              artifacts.push({ storageKey: document.storageKey, byteLength, sha256: document.sha256 });
+            }
+          }
+          if (artifacts.length && !documentStorage) throw new SalesInvoiceError('بررسی فایل اسناد در دسترس نیست.');
+          // The transaction holds the same storage-key locks used by publication
+          // and removal until the invoice transaction commits.
+          try {
+            if (artifacts.length) await verifyDispatchArtifactStorageUnderLock({ transaction: tx, storage: documentStorage!, artifacts });
+          } catch (error) {
+            if (error instanceof DispatchDocumentIntegrityError) {
+              throw new SalesInvoiceError('فایل بارنامه یا صورت‌حساب ناقص یا مخدوش است؛ ابتدا بازیابی اسناد را بررسی کنید.');
+            }
+            throw error;
+          }
+        }
         const replay = await tx.salesDispatchInvoice.findUnique({
           where: { loadingId_requestKey: { loadingId, requestKey } },
         });
@@ -350,7 +420,7 @@ export function createSalesInvoiceService(
         );
         return { id };
       }),
-    download: async (ctx: InvoiceContext, loadingId: string, id: string) =>
+    download: async (ctx: InvoiceContext, loadingId: string, id: string, requireCurrent = false) =>
       transaction(db, async (tx) => {
         await authorize(tx, ctx, loadingId);
         const invoice = await tx.salesDispatchInvoice.findFirst({
@@ -373,6 +443,7 @@ export function createSalesInvoiceService(
             if (!(error instanceof SalesInvoiceError)) throw error;
             reason = error.message;
           }
+        if (requireCurrent && reason) throw new SalesInvoiceError('فاکتور فروش معتبر برای چاپ موجود نیست.');
         const bytes = reason
           ? await render(
               invoice.snapshot as unknown as IssuedInvoiceSnapshot,

@@ -5,11 +5,13 @@ import { shipmentQuantityEvidenceIntegrityHash } from '../../shipmentQuantityPro
 // The adjustment test owns these rows and rolls its enclosing transaction back.
 // They represent an already exited shipment, not a second test stack or a real dispatch.
 export async function createStatementAdjustmentFixture(tx: Prisma.TransactionClient) {
-  const [actor, department, product] = await Promise.all([
-    tx.user.findFirst(), tx.department.findFirst(), tx.product.findFirst(),
-  ]);
-  if (!actor || !department || !product) throw new Error('Local seed requires a user, department and product.');
   const key = randomUUID();
+  const [actor, department, product] = await Promise.all([
+    tx.user.create({ data: { email: `statement-${key}@example.invalid`, username: `statement-${key}`,
+      password: 'test-only-not-a-login', firstName: 'QA', lastName: 'Statement', role: 'ADMIN', isActive: true } }),
+    tx.department.findFirst(), tx.product.findFirst(),
+  ]);
+  if (!department || !product) throw new Error('Local seed requires a department and product.');
   const digest = (tag: string) => createHash('sha256').update(`${key}:${tag}`).digest('hex');
   const customer = await tx.crmCustomer.create({ data: { firstName: 'QA', lastName: `statement-${key}` } });
   const rowId = `statement-row-${key}`;

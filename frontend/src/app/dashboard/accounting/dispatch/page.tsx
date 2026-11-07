@@ -18,17 +18,19 @@ import {
 } from "@/components/erp";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
 import SalesDispatchInvoices from "@/features/accounting/SalesDispatchInvoices";
+import { createDispatchDocumentsHttpClient } from "@/features/accounting/dispatch-documents/dispatchDocumentsClient";
+import { formatDisplayedMoney, type DispatchDocumentCase } from "@/features/accounting/dispatch-documents/dispatchDocumentsViewModel";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
 import { confirmationActionsFor } from "@/features/biometric/dispatchConfirmationPresentation";
-import { accountingAPI, dispatchConfirmationAPI } from "@/lib/api";
+import api, { accountingAPI, dispatchConfirmationAPI } from "@/lib/api";
 import { biometricConnectorClient } from "@/lib/biometricConnector";
 
 type DispatchNotice = { kind: "success" | "error"; text: string };
 type DispatchSection = "candidates" | "confirmation" | "cases";
 type ReasonAction = {
-  type: "reject" | "void" | "replace" | "revoke";
+  type: "reject" | "void" | "replace" | "revoke" | "reconstruct";
   id: string;
 };
 
@@ -37,11 +39,13 @@ const dispatchStatusLabels: Record<string, string> = {
   ACCEPTED: "پذیرفته‌شده",
   REJECTED: "برای اصلاح بازگردانده‌شده",
 };
+const quantityUnitLabels: Record<string, string> = { meter: "متر طول", squareMeter: "متر مربع", count: "عدد", ton: "تن" };
 
 export default function AccountingDispatchPage() {
   const [section, setSection] = useState<DispatchSection>("candidates");
   const [loading, setLoading] = useState(true);
   const [dispatchCandidates, setDispatchCandidates] = useState<any[]>([]);
+  const [dispatchDetails, setDispatchDetails] = useState<Record<string, DispatchDocumentCase>>({});
   const [dispatchReason, setDispatchReason] = useState("");
   const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
@@ -62,9 +66,10 @@ export default function AccountingDispatchPage() {
     setLoading(true);
     setDispatchNotice(null);
     try {
-      const [candidates, capabilities] = await Promise.allSettled([
+      const [candidates, capabilities, details] = await Promise.allSettled([
         accountingAPI.getDispatchCandidates(),
         dispatchConfirmationAPI.getCapabilities(),
+        createDispatchDocumentsHttpClient().load(),
       ]);
       if (candidates.status === "fulfilled" && candidates.value.data.success)
         setDispatchCandidates(candidates.value.data.data || []);
@@ -73,6 +78,9 @@ export default function AccountingDispatchPage() {
         capabilities.value.data.success
       )
         setDispatchCapabilities(capabilities.value.data.data);
+      setDispatchDetails(details.status === "fulfilled"
+        ? Object.fromEntries(details.value.cases.map((item) => [item.id, item]))
+        : {});
       if (
         candidates.status === "rejected" &&
         capabilities.status === "rejected"
@@ -109,7 +117,10 @@ export default function AccountingDispatchPage() {
       try {
         const refreshed = await accountingAPI.getDispatchCandidates();
         setDispatchCandidates(refreshed.data.data || []);
+        const details = await createDispatchDocumentsHttpClient().load();
+        setDispatchDetails(Object.fromEntries(details.cases.map((item) => [item.id, item])));
       } catch {
+        setDispatchDetails({});
         // Confirmation-only actors may not have permission to list candidates.
       }
       return true;
@@ -176,6 +187,9 @@ export default function AccountingDispatchPage() {
           dispatchConfirmationAPI.revokeAuthorization(reasonAction.id, reason),
         "مجوز خروج لغو شد.",
       );
+    if (reasonAction.type === "reconstruct")
+      succeeded = await runDispatch(() => accountingAPI.reconstructLegacyWaybill(reasonAction.id, reason),
+        "نسخه بازسازی‌شده بارنامه با حفظ سابقه ثبت شد.");
     if (succeeded) {
       setReasonAction(null);
       setDispatchReason("");
@@ -227,10 +241,19 @@ export default function AccountingDispatchPage() {
             <ErpEmptyState title="پرونده‌ای برای صدور بارنامه وجود ندارد" />
           ) : (
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {dispatchCandidates.map((candidate) => {
+              {Object.values(dispatchCandidates.reduce<Record<string, any[]>>((groups, candidate) => {
+                const key = candidate.loadingId || `candidate:${candidate.id}`;
+                (groups[key] ||= []).push(candidate);
+                return groups;
+              }, Object.create(null) as Record<string, any[]>)).map((group) => {
+                const first = group[0];
+                return <ErpCard key={first.loadingId || first.id} className="space-y-3 p-4">
+                  <strong>{first.summary?.loadingNumber ? dispatchCaseReference(first.summary.loadingNumber) : 'بارگیری'}</strong>
+                  {group.map((candidate) => {
                 const activeWaybill = candidate.waybills?.find(
-                  (waybill: any) => waybill.status === "ISSUED",
+                  (waybill: any) => waybill.status === "ISSUED" || waybill.status === "EXIT_RECORDED",
                 );
+                const detail = dispatchDetails[candidate.id];
                 return (
                   <ErpCard key={candidate.id} className="p-4">
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -250,6 +273,12 @@ export default function AccountingDispatchPage() {
                             .filter(Boolean)
                             .join(" · ") || "جزئیات تخصیص ثبت نشده است"}
                         </p>
+                        <p className="mt-1 text-sm sds-text-secondary">
+                          مشتری: {candidate.summary?.customerName || "ثبت نشده"} · پروژه: {candidate.summary?.projectName || "ثبت نشده"}
+                        </p>
+                        <p className="mt-1 text-sm sds-text-secondary">
+                          آدرس پروژه: {candidate.summary?.projectAddress || "ثبت نشده"}
+                        </p>
                       </div>
                       <ErpBadge
                         tone={
@@ -264,28 +293,34 @@ export default function AccountingDispatchPage() {
                           operationalStatusLabel(candidate.status)}
                       </ErpBadge>
                     </div>
+                    {detail?.contracts.length > 0 ? (
+                      <div className="mt-3 space-y-2 border-t border-[var(--sds-border-subtle)] pt-3">
+                        <strong>اقلام و مبلغ این راننده</strong>
+                        {detail.contracts.map(contract => (
+                          <div key={contract.id}>
+                            <p className="text-sm font-semibold">قرارداد {contract.number}</p>
+                            {contract.rows.map(row => (
+                              <p key={row.id} className="text-sm sds-text-secondary">{row.label} · {row.quantity} {quantityUnitLabels[row.unit] || "واحد ثبت‌شده"} · {formatDisplayedMoney(row.net)}</p>
+                            ))}
+                          </div>
+                        ))}
+                        <p className="text-sm font-semibold">جمع این راننده: {formatDisplayedMoney(detail.total)}</p>
+                      </div>
+                    ) : candidate.lines?.length > 0 && (
+                      <div className="mt-3 space-y-2 border-t border-[var(--sds-border-subtle)] pt-3">
+                        <strong>اقلام این راننده</strong>
+                        {candidate.lines.map((line: any, index: number) => (
+                          <p key={index} className="text-sm sds-text-secondary">
+                            قرارداد {line.contractNumber || "ثبت نشده"} · {line.productName || "محصول ثبت نشده"} · {line.quantity} {quantityUnitLabels[line.unit] || "واحد ثبت‌شده"}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {!detail && <ErpInlineState kind="stale" title="جزئیات قیمت این پرونده در دسترس نیست؛ پیش از تصمیم اطلاعات حسابداری را بررسی کنید." />}
                     {candidate.status === "PENDING" &&
                       candidate.canManage &&
                       dispatchCapabilities.canManageAccountingCandidates && (
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <ErpButton
-                            label="پذیرش و صدور بارنامه"
-                            disabled={dispatchTimelineStale || dispatchPending}
-                            onClick={() =>
-                              void runDispatch(
-                                () =>
-                                  accountingAPI.decideDispatchCandidate(
-                                    candidate.id,
-                                    {
-                                      action: "ACCEPT",
-                                      reason: "",
-                                      idempotencyKey: crypto.randomUUID(),
-                                    },
-                                  ),
-                                "پرونده پذیرفته و بارنامه صادر شد.",
-                              )
-                            }
-                          />
                           <ErpButton
                             label="بازگرداندن برای اصلاح"
                             tone="danger"
@@ -308,7 +343,18 @@ export default function AccountingDispatchPage() {
                           {Number(activeWaybill.number).toLocaleString("fa-IR")}
                         </p>
                         <div className="flex flex-wrap gap-2">
-                          {dispatchCapabilities.canManageAccountingConfirmation && (
+                          {activeWaybill.legacyReconstruction && <ErpButton label="مشاهده بارنامه بازسازی‌شده" variant="soft"
+                            disabled={dispatchPending} onClick={() => void (async () => {
+                              const preview = window.open('', '_blank');
+                              if (!preview) { setDispatchNotice({ kind: 'error', text: 'مرورگر پنجره سند را مسدود کرد.' }); return; }
+                              try {
+                                const response = await api.get(`/accounting/dispatch-waybills/${encodeURIComponent(activeWaybill.id)}/reconstruction/pdf`, { responseType: 'blob' });
+                                const url = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+                                preview.location.href = url;
+                                window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+                              } catch (error) { preview.close(); setDispatchNotice({ kind: 'error', text: userFacingError(error, 'بارنامه بازسازی‌شده در دسترس نیست.') }); }
+                            })()} />}
+                          {activeWaybill.status === 'ISSUED' && dispatchCapabilities.canManageAccountingConfirmation && (
                             <ErpButton
                               label="تأیید هویت راننده"
                               variant="soft"
@@ -320,11 +366,16 @@ export default function AccountingDispatchPage() {
                               }
                             />
                           )}
-                          {candidate.canManage &&
+                          {activeWaybill.status === 'ISSUED' && candidate.canManage &&
                             dispatchCapabilities.canManageAccountingCandidates && (
                               <ErpActionMenu
                                 label="اقدامات بارنامه"
                                 actions={[
+                                  ...(!activeWaybill.legacyReconstruction &&
+                                    dispatchDetails[candidate.id]?.bundle?.artifacts.filter(artifact => artifact.kind === 'WAYBILL').length !== 1 ? [{
+                                      label: "بازسازی بارنامه قدیمی",
+                                      onClick: () => { setDispatchReason(''); setReasonAction({ type: 'reconstruct' as const, id: activeWaybill.id }); },
+                                    }] : []),
                                   {
                                     label: "صدور نسخه جایگزین",
                                     tone: "warning",
@@ -353,13 +404,39 @@ export default function AccountingDispatchPage() {
                         </div>
                       </div>
                     )}
-                    {candidate.loadingId && dispatchCandidates.find((item) => item.loadingId === candidate.loadingId)?.id === candidate.id && (
-                      <SalesDispatchInvoices workspace="accounting" loadingId={candidate.loadingId}
-                        canManage={candidate.canManage && dispatchCapabilities.canManageAccountingCandidates}
-                        refreshKey={dispatchCandidates}/>
-                    )}
                   </ErpCard>
                 );
+                  })}
+                  {first.loadingId && <SalesDispatchInvoices workspace="accounting" loadingId={first.loadingId}
+                    canManage={group.every((candidate) => candidate.canManage) && dispatchCapabilities.canManageAccountingCandidates && !dispatchTimelineStale && !dispatchPending}
+                    documentBlockReason={group.some(candidate => candidate.status === 'ACCEPTED' &&
+                      !candidate.waybills?.some((waybill: any) => ['ISSUED', 'EXIT_RECORDED'].includes(waybill.status) && waybill.legacyReconstruction) &&
+                      dispatchDetails[candidate.id]?.bundle?.artifacts.filter(artifact => artifact.kind === 'WAYBILL').length !== 1)
+                      ? 'فایل بارنامه موجود نیست؛ برای بارنامه قدیمی، صدور اسناد نسخه بازسازی‌شده را ایجاد می‌کند.' : undefined}
+                    onIssueAll={async () => {
+                      try { await accountingAPI.issueLoadingDocuments(first.loadingId); await loadDispatch(); }
+                      catch (error) {
+                        setDispatchNotice({ kind: 'error', text: userFacingError(error, 'صدور همه اسناد کامل نشد؛ وضعیت راننده‌ها را بررسی کنید.') });
+                        const [candidates, details] = await Promise.allSettled([
+                          accountingAPI.getDispatchCandidates(), createDispatchDocumentsHttpClient().load(),
+                        ]);
+                        if (candidates.status === 'fulfilled') setDispatchCandidates(candidates.value.data.data || []);
+                        if (details.status === 'fulfilled') setDispatchDetails(Object.fromEntries(details.value.cases.map(item => [item.id, item])));
+                        throw error;
+                      }
+                    }}
+                    onPrintAll={async () => {
+                      const preview = window.open('', '_blank');
+                      if (!preview) throw new Error('مرورگر پنجره چاپ را مسدود کرد.');
+                      try {
+                        const response = await api.post(`/accounting/loadings/${encodeURIComponent(first.loadingId)}/print-documents`, {}, { responseType: 'blob' });
+                        const url = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+                        preview.location.href = url;
+                        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+                      } catch (error) { preview.close(); throw error; }
+                    }}
+                    refreshKey={dispatchCandidates}/>}
+                </ErpCard>;
               })}
             </div>
           ))}
@@ -517,6 +594,8 @@ export default function AccountingDispatchPage() {
         title={
           reasonAction?.type === "reject"
             ? "بازگرداندن برای اصلاح"
+            : reasonAction?.type === "reconstruct"
+              ? "بازسازی بارنامه قدیمی"
             : reasonAction?.type === "replace"
               ? "صدور نسخه جایگزین بارنامه"
               : reasonAction?.type === "void"
@@ -538,7 +617,7 @@ export default function AccountingDispatchPage() {
             />
             <ErpButton
               label="تأیید و ثبت"
-              tone={reasonAction?.type === "replace" ? "warning" : "danger"}
+              tone={reasonAction?.type === "replace" || reasonAction?.type === "reconstruct" ? "warning" : "danger"}
               disabled={
                 dispatchTimelineStale ||
                 dispatchPending ||
@@ -556,6 +635,15 @@ export default function AccountingDispatchPage() {
           <p className="text-sm leading-7 sds-text-muted">
             دلیل این تصمیم در سابقه پرونده باقی می‌ماند.
           </p>
+          {reasonAction?.type === 'reconstruct' && <ErpInlineState kind="stale"
+            title="فایل جدید بر اساس شواهد ثبت‌شده ساخته می‌شود و به‌عنوان نسخه بازسازی‌شده مشخص خواهد بود؛ فایل اصلی بازیابی نمی‌شود." />}
+          {reasonAction?.type === "reject" && (
+            <div className="flex flex-wrap gap-2" aria-label="دلیل‌های رایج">
+              {["اشتباه در مقدار", "اشتباه در راننده", "اشتباه در اقلام"].map(reason => (
+                <ErpButton key={reason} label={reason} variant="outline" disabled={dispatchPending} onClick={() => setDispatchReason(reason)} />
+              ))}
+            </div>
+          )}
           <ErpInput
             aria-label="دلیل تصمیم"
             value={dispatchReason}

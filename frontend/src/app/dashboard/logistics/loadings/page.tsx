@@ -14,7 +14,6 @@ import {
   FaBan,
   FaCheck,
   FaPlus,
-  FaPrint,
   FaSearch,
   FaSync,
   FaTrash,
@@ -399,15 +398,6 @@ export default function LogisticsLoadingsPage() {
                 variant="outline"
                 disabled={!selectedRows.some(canDelete) || acting}
               />
-              <ErpButton
-                label="چاپ انتخاب‌شده‌ها"
-                icon={FaPrint}
-                onClick={() => {
-                  void runBulk("print");
-                }}
-                tone="neutral"
-                disabled={!selectedRows.length || acting}
-              />
             </div>
           </div>
         </ErpCard>
@@ -452,14 +442,6 @@ export default function LogisticsLoadingsPage() {
                                   },
                                 ]
                               : []),
-                            {
-                              label: "چاپ",
-                              icon: FaPrint,
-                              disabled: acting,
-                              onClick: () => {
-                                void runSingle(row, "print");
-                              },
-                            },
                             ...(canCancel(row)
                               ? [
                                   {

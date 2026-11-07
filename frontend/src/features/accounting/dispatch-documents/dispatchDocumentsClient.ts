@@ -142,9 +142,9 @@ export function mapDispatchDocumentReadModel(
       ),
       quantity: text(line.quantity),
       unit: text(line.unit),
-      gross: money(priced.grossAmount, currency),
-      discount: money(priced.discountAmount, currency),
-      net: money(priced.netAmount, currency),
+      gross: money(priced.grossAmount ?? "UNKNOWN", currency),
+      discount: money(priced.discountAmount ?? "UNKNOWN", currency),
+      net: money(priced.netAmount ?? "UNKNOWN", currency),
     });
     contractGroups.set(contractId, group);
   }
@@ -169,8 +169,13 @@ export function mapDispatchDocumentReadModel(
     : status === "PENDING"
       ? "READY"
       : "BLOCKED";
-  const total = events.length
-    ? addDecimals(events.map((event) => text(event.netAmount, "0")))
+  const revisionLines = list(revision.lines);
+  const completeAmounts = revisionLines.length > 0 && revisionLines.every((line) => {
+    const event = eventByLine.get(text(line.id));
+    return event && /^[+-]?\d+(?:\.\d+)?$/.test(text(event.netAmount));
+  });
+  const total = completeAmounts
+    ? addDecimals(revisionLines.map((line) => text(eventByLine.get(text(line.id))?.netAmount)))
     : "UNKNOWN";
   const contracts = Array.from(contractGroups.values());
 

@@ -13,6 +13,7 @@ import {
 } from "../salesDispatchInvoice/source";
 import { renderSalesInvoice } from "../salesDispatchInvoice/render";
 import { freezeSalesInvoiceCorrection } from "../salesDispatchInvoice/correction";
+import { issueLoadingDocuments } from "../loadingDocumentIssuance";
 import {
   approvedPricingRowIntegrityHash,
   approvedPricingVersionIntegrityHash,
@@ -366,6 +367,16 @@ async function run() {
             Buffer.from(renderSalesInvoice(snapshot, reason)),
         );
         const ctx = { actorId: actor.id, workspace: "accounting" as const };
+        const previousStatementFlag = process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED;
+        process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED = 'false';
+        try {
+          await assert.rejects(() => service.issue({ ...ctx, requireDispatchDocumentGate: true }, loading.id, 'gate-blocked'),
+            /تخصیص راننده‌ها تغییر کرده است|فایل‌های بارنامه/);
+          assert.equal(await tx.salesDispatchInvoice.count({ where: { loadingId: loading.id } }), 0);
+        } finally {
+          if (previousStatementFlag === undefined) delete process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED;
+          else process.env.CUSTOMER_SHIPMENT_STATEMENTS_ENABLED = previousStatementFlag;
+        }
         await assert.rejects(
           () => assertLoadingSalesInvoice(tx, loading.id),
           /هنوز صادر نشده/,
@@ -378,6 +389,16 @@ async function run() {
         assert.equal(source.lines[0].width, "0.4");
         assert.match(source.lines[0].label, /سنگ مصوب/);
         const financialCount = await tx.accountingFinancialRecord.count();
+        const issuedParts = await tx.accountingDispatchCandidate.findMany({
+          where: { id: { in: candidates } }, select: { id: true, allocationRevisionId: true },
+        });
+        const group = { loadingId: loading.id, invoicePredecessorId: null,
+          parts: issuedParts.map(part => ({ candidateId: part.id, revisionId: part.allocationRevisionId, state: 'COMPLETE' as const })),
+          issueWaybill: async () => { throw new Error('A completed waybill must not be reissued.'); },
+          issueInvoice: async (key: string) => { await service.issue(ctx, loading.id, key); },
+        };
+        await issueLoadingDocuments(group);
+        await issueLoadingDocuments(group);
         const issued = await service.issue(ctx, loading.id, "same-key");
         assert.deepEqual(
           await service.issue(ctx, loading.id, "same-key"),

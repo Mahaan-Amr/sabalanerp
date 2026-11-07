@@ -87,3 +87,14 @@ test('incomplete historical snapshots stay explicit and never become blank ident
   assert.equal(item.driverName, 'نام راننده در تصویر ثابت ثبت نشده');
   assert.equal(item.total.amount, 'UNKNOWN');
 });
+
+test('a missing priced line never displays a partial total or a zero row', () => {
+  const item = mapDispatchDocumentReadModel({ id: 'case', status: 'PENDING', allocationRevision: {
+    snapshot: {}, pricingReferences: [],
+    lines: [{ id: 'a', sourceContractId: 'c', snapshot: {}, quantity: '1', unit: 'meter' },
+      { id: 'b', sourceContractId: 'c', snapshot: {}, quantity: '1', unit: 'meter' }],
+    pricedAllocationEvents: [{ allocationRevisionLineId: 'a', netAmount: '20' }],
+  }, waybills: [] });
+  assert.equal(item.total.amount, 'UNKNOWN');
+  assert.equal(item.contracts[0].rows[1].net.amount, 'UNKNOWN');
+});

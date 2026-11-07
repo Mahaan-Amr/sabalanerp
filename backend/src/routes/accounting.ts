@@ -1,5 +1,13 @@
 import { prisma } from '../lib/prisma';
 import { createSalesInvoiceRouter } from '../services/salesDispatchInvoice/routes';
+import { createSalesInvoiceService } from '../services/salesDispatchInvoice/service';
+import { SalesInvoiceError } from '../services/salesDispatchInvoice/source';
+import { classifyLoadingDocumentPart, issueLoadingDocuments, LoadingDocumentIssuanceError } from '../services/loadingDocumentIssuance';
+import { mergeDispatchPdfs } from '../services/mergeDispatchPdfs';
+import { completeHandoffs } from '../services/dispatchDocuments/completeHandoffs';
+import { readLegacyWaybillReconstruction, recordLegacyReconstructionHandoff,
+  reconstructLegacyWaybill, LegacyWaybillReconstructionError } from '../services/legacyWaybillReconstruction';
+import { isShipmentStatementFlowActive, isPostCutoverFinalization } from '../services/dispatchDocuments/featureGate';
 import { lockPartnerOperationsControl } from '../services/partnerSales/authorization/technicalRollout';
 import { markCustomerAcceptance, isOrdinaryCommercialFlow, commercialDeadlinePassed, lockOrdinaryContract } from '../services/ordinaryContractLifecycle';
 import { ordinaryFinancialActionsAllowed, OrdinaryAccountingCommercialError } from '../services/ordinaryAccountingCommercialGate';
@@ -66,7 +74,7 @@ import {
 } from '../services/dispatchCorrectionOutage';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { configureDispatchDocumentsRuntime, createAccountingDispatchDocumentRouter,
-  DispatchDocumentAuthorizationError, dispatchDocumentHttpStatus } from '../services/dispatchDocuments';
+  bindPrintHandoffCompletion, DispatchDocumentAuthorizationError, dispatchDocumentHttpStatus } from '../services/dispatchDocuments';
 import { renderDispatchDocumentPdf } from '../documents/dispatch/dispatchDocumentPdf';
 import { versionedDispatchDocumentFiles } from '../services/dispatchFileRuntime';
 import { getStatementAdjustmentArtifactPreparer } from '../services/statementAdjustmentRuntime';
@@ -87,7 +95,7 @@ import { PartnerAccountingCommandError, PartnerAccountingTechnicalError } from '
 import { readPartnerSnapshot } from '../services/partnerSales/authorization/readSnapshot';
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { randomUUID } from 'node:crypto';
-import { projectAccountingDispatchCandidateSummary } from '../services/accountingDispatchCandidatePresentation';
+import { projectAccountingDispatchCandidateSummary, projectAccountingDispatchLines } from '../services/accountingDispatchCandidatePresentation';
 import { readPartnerDispatchAccountingViewCapability } from '../services/partnerSales/accounting/capabilities';
 import accountingLedgerRouter from './accountingLedger';
 import accountingPeriodEndRouter from './accountingPeriodEnd';
@@ -302,6 +310,155 @@ const dispatchError = (res: Response, error: unknown) => {
   return res.status(500).json({ success: false, error: 'Accounting dispatch command failed.' });
 };
 
+router.post('/dispatch-waybills/:waybillId/reconstruct-legacy', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  try {
+    const waybill = await prisma.accountingDispatchWaybill.findUnique({ where: { id: req.params.waybillId },
+      select: { candidate: { select: { allocationRevision: { select: { loadingId: true } } } } } });
+    if (!waybill) throw new LegacyWaybillReconstructionError('بارنامه پیدا نشد.');
+    await createSalesInvoiceService(prisma).list({ actorId: req.user!.id, workspace: 'accounting' }, waybill.candidate.allocationRevision.loadingId);
+    const result = await reconstructLegacyWaybill(prisma, { waybillId: req.params.waybillId, actorId: req.user!.id, reason: req.body.reason });
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    if (error instanceof LegacyWaybillReconstructionError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof SalesInvoiceError) return res.status(error.status).json({ success: false, error: error.message });
+    return dispatchError(res, error);
+  }
+});
+
+router.get('/dispatch-waybills/:waybillId/reconstruction/pdf', accountingDispatchView, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  try {
+    const waybill = await prisma.accountingDispatchWaybill.findUnique({ where: { id: req.params.waybillId },
+      select: { candidate: { select: { allocationRevision: { select: { loadingId: true } } } } } });
+    if (!waybill) throw new LegacyWaybillReconstructionError('بارنامه پیدا نشد.');
+    await createSalesInvoiceService(prisma).list({ actorId: req.user!.id, workspace: 'accounting' }, waybill.candidate.allocationRevision.loadingId);
+    const document = await readLegacyWaybillReconstruction(prisma, req.params.waybillId);
+    const record = (status: 'SUCCEEDED' | 'FAILED') => recordLegacyReconstructionHandoff(prisma,
+      { waybillId: req.params.waybillId, reconstructionId: document.id, actorId: req.user!.id, status });
+    bindPrintHandoffCompletion(res, { succeeded: () => record('SUCCEEDED'), failed: () => record('FAILED') });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="reconstructed-waybill.pdf"');
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.send(Buffer.from(document.bytes));
+  } catch (error) {
+    if (error instanceof LegacyWaybillReconstructionError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof SalesInvoiceError) return res.status(error.status).json({ success: false, error: error.message });
+    return dispatchError(res, error);
+  }
+});
+
+router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  try {
+    const loadingId = req.params.loadingId;
+    const invoices = createSalesInvoiceService(prisma, undefined, dispatchDocuments.documentStorage);
+    const context = { actorId: req.user!.id, workspace: 'accounting' as const };
+    const invoiceState = await invoices.list(context, loadingId);
+    if (invoiceState.invoices.some(invoice => invoice.status === 'INVALIDATED')) {
+      throw new LoadingDocumentIssuanceError('فاکتور موجود نامعتبر است؛ ابتدا حسابداری باید آن را تعیین‌تکلیف کند.');
+    }
+    const [loading, cutover, control] = await Promise.all([
+      prisma.logisticsLoading.findUnique({ where: { id: loadingId }, select: { status: true,
+        canonicalAllocationRevisions: { orderBy: [{ queueTurnId: 'asc' }, { revisionNumber: 'desc' }],
+          include: { candidate: { include: { waybills: { include: { documentArtifacts: { select: { kind: true } },
+            legacyReconstruction: { select: { id: true } } } } } } } } } }),
+      prisma.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' }, select: { enabled: true, cutoverAt: true } }),
+      prisma.shipmentStatementOperationsControl.findUnique({ where: { id: 'customer-shipment-statements' }, select: { paused: true } }),
+    ]);
+    if (!loading || loading.status !== 'FINALIZED') throw new LoadingDocumentIssuanceError('بارگیری نهایی‌شده و فعال پیدا نشد.');
+    const latest = new Map<string, typeof loading.canonicalAllocationRevisions[number]>();
+    for (const revision of loading.canonicalAllocationRevisions) if (!latest.has(revision.queueTurnId)) latest.set(revision.queueTurnId, revision);
+    const gate = cutover ? { ...cutover, operationalPaused: control?.paused ?? true } : null;
+    if (!gate || !control) throw new LoadingDocumentIssuanceError('وضعیت گذار اسناد قابل بررسی نیست.');
+    const parts = [...latest.values()].map(revision => {
+      const legacy = revision.sourceKind === 'SALES_CONTRACT' && (!gate?.cutoverAt || !isPostCutoverFinalization(revision.finalizedAt, gate.cutoverAt));
+      return classifyLoadingDocumentPart(revision, revision.sourceKind === 'PARTNER_CASE' || Boolean(gate && gate.cutoverAt &&
+        isShipmentStatementFlowActive(process.env, gate) && isPostCutoverFinalization(revision.finalizedAt, gate.cutoverAt)), legacy);
+    });
+    await issueLoadingDocuments({ loadingId, parts, invoicePredecessorId: invoiceState.invoices[0]?.id ?? null,
+      issueWaybill: async (candidateId, idempotencyKey) => {
+        const result = await decideAccountingDispatchCandidate(prisma, { candidateId, action: 'ACCEPT', idempotencyKey,
+          actorId: req.user!.id, effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace,
+            workspacePermission: req.workspacePermission, feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE,
+            featurePermission: req.featurePermission } });
+        if (!result || typeof result !== 'object' || !('status' in result) || result.status !== 'ACCEPTED') {
+          throw new LoadingDocumentIssuanceError('بارنامه یکی از راننده‌ها صادر نشد؛ وضعیت پرونده را بررسی کنید.');
+        }
+      },
+      reconstructWaybill: async candidateId => {
+        const candidate = await prisma.accountingDispatchCandidate.findUnique({ where: { id: candidateId }, select: {
+          waybills: { where: { status: { in: ['ISSUED', 'EXIT_RECORDED'] } }, select: { id: true } } } });
+        if (!candidate || candidate.waybills.length !== 1) throw new LoadingDocumentIssuanceError('بارنامه معتبر راننده برای بازسازی پیدا نشد.');
+        await reconstructLegacyWaybill(prisma, { waybillId: candidate.waybills[0].id, actorId: req.user!.id,
+          reason: 'ساخت نسخه بازسازی‌شده برای بارنامه قدیمی فاقد فایل' });
+      },
+      issueInvoice: async idempotencyKey => { await invoices.issue({ ...context, requireDispatchDocumentGate: true,
+        expectedRevisionIds: parts.map(part => part.revisionId) }, loadingId, idempotencyKey); },
+    });
+    return res.json({ success: true, data: { status: 'ISSUED' } });
+  } catch (error) {
+    if (error instanceof LoadingDocumentIssuanceError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof SalesInvoiceError) return res.status(error.status).json({ success: false, error: error.message });
+    return dispatchError(res, error);
+  }
+});
+
+router.post('/loadings/:loadingId/print-documents', accountingDispatchView, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  const handoffs: Array<Awaited<ReturnType<typeof dispatchDocuments.printHandoff>>> = [];
+  const legacyHandoffs: Array<{ waybillId: string; reconstructionId: string }> = [];
+  try {
+    const loadingId = req.params.loadingId;
+    const context = { actorId: req.user!.id, workspace: 'accounting' as const };
+    const invoices = createSalesInvoiceService(prisma);
+    const state = await invoices.list(context, loadingId);
+    const issued = state.invoices.filter(invoice => invoice.status === 'ISSUED');
+    if (issued.length !== 1) throw new SalesInvoiceError('برای چاپ همه اسناد، ابتدا فاکتور فروش معتبر صادر کنید.');
+    const revisions = await prisma.logisticsAllocationRevision.findMany({ where: { loadingId },
+      orderBy: [{ queueTurnId: 'asc' }, { revisionNumber: 'desc' }],
+      select: { queueTurnId: true, candidate: { select: { status: true, waybills: {
+        where: { status: { in: ['ISSUED', 'EXIT_RECORDED'] } }, select: { id: true,
+          legacyReconstruction: { select: { id: true } } } } } } } });
+    const latest = new Map<string, typeof revisions[number]>();
+    for (const revision of revisions) if (!latest.has(revision.queueTurnId)) latest.set(revision.queueTurnId, revision);
+    if (!latest.size || latest.size > 100 || [...latest.values()].some(revision =>
+      revision.candidate?.status !== 'ACCEPTED' || revision.candidate.waybills.length !== 1)) {
+      throw new SalesInvoiceError('بارنامه معتبر همه راننده‌ها برای چاپ لازم است.');
+    }
+    const waybillBytes: Uint8Array[] = [];
+    for (const revision of latest.values()) {
+      const waybill = revision.candidate!.waybills[0];
+      if (waybill.legacyReconstruction) {
+        const document = await readLegacyWaybillReconstruction(prisma, waybill.id);
+        legacyHandoffs.push({ waybillId: waybill.id, reconstructionId: document.id });
+        waybillBytes.push(document.bytes);
+      } else {
+        const handoff = await dispatchDocuments.printHandoff({ waybillId: waybill.id,
+          kinds: ['WAYBILL'], idempotencyKey: randomUUID(), correlationId: randomUUID(), actorId: req.user!.id });
+        handoffs.push(handoff);
+        if (handoff.documents.length !== 1) throw new SalesInvoiceError('فایل بارنامه یکی از راننده‌ها معتبر نیست.');
+        waybillBytes.push(handoff.documents[0].bytes);
+      }
+    }
+    const invoice = await invoices.download(context, loadingId, issued[0].id, true);
+    const pdf = await mergeDispatchPdfs([invoice.bytes, ...waybillBytes]);
+    const complete = (status: 'SUCCEEDED' | 'FAILED') => completeHandoffs([
+      ...handoffs.map(handoff => () => status === 'SUCCEEDED' ? handoff.complete.succeeded() : handoff.complete.failed('RESPONSE_FAILED')),
+      ...legacyHandoffs.map(handoff => () => recordLegacyReconstructionHandoff(prisma, { ...handoff, actorId: req.user!.id, status })),
+    ]);
+    bindPrintHandoffCompletion(res, { succeeded: () => complete('SUCCEEDED'), failed: () => complete('FAILED') });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="loading-documents.pdf"');
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.send(pdf);
+  } catch (error) {
+    try { await completeHandoffs([
+      ...handoffs.map(handoff => () => handoff.complete.failed('COMBINED_PRINT_FAILED')),
+      ...legacyHandoffs.map(handoff => () => recordLegacyReconstructionHandoff(prisma, { ...handoff, actorId: req.user!.id, status: 'FAILED' })),
+    ]); } catch (auditError) { console.error('Combined print failure audit failed:', auditError); }
+    if (error instanceof LegacyWaybillReconstructionError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof SalesInvoiceError) return res.status(error.status).json({ success: false, error: error.message });
+    return dispatchError(res, error);
+  }
+});
+
 router.get('/dispatch-corrections', accountingDispatchView, async (_req: AuthRequest, res: Response) => {
   try { return res.json({ success: true, data: await prisma.dispatchCorrection.findMany({ include: { lines: true, waybill: true }, orderBy: { createdAt: 'desc' } }) }); }
   catch (error) { return dispatchError(res, error); }
@@ -391,15 +548,17 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
       const candidates = await tx.accountingDispatchCandidate.findMany({ where: { id: { in: allowedIds } }, select: {
         id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
-        allocationRevision: { select: { snapshot: true, loadingId: true } },
+        allocationRevision: { select: { snapshot: true, loadingId: true, lines: { select: { snapshot: true, quantity: true, unit: true } } } },
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
-          issuedAt: true, voidedAt: true, replacesWaybillId: true } },
+          issuedAt: true, voidedAt: true, replacesWaybillId: true,
+          legacyReconstruction: { select: { id: true, createdAt: true } } } },
       }, orderBy: { createdAt: 'asc' } });
       const ownerById = new Map(owners.map(owner => [owner.id, owner.allocationRevision]));
       return { manage, candidates: candidates.map(candidate => {
         const owner = ownerById.get(candidate.id);
         const { allocationRevision, ...candidateData } = candidate;
         return { ...candidateData, loadingId: allocationRevision.loadingId, summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
+          lines: owner?.sourceKind === 'SALES_CONTRACT' ? projectAccountingDispatchLines(allocationRevision.lines) : [],
           canManage: manage.allowed && Boolean(owner && (owner.sourceKind === 'SALES_CONTRACT'
           || (owner.sourceKind === 'PARTNER_CASE' && owner.partnerCaseId && writablePartnerCases.has(owner.partnerCaseId)))) };
       }) };

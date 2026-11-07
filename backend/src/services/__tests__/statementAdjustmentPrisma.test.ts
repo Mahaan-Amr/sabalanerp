@@ -95,8 +95,9 @@ const run = async () => {
         ORDER BY w."issuedAt", arl."id"
         LIMIT 1
       `) : [];
-      const candidate = existingCandidate || (!runConcurrency ? await createStatementAdjustmentFixture(tx) : undefined);
-      assert(candidate, 'sabalanerp-local needs one exited waybill with an unsealed stable contract row');
+      // The race runs only in an explicitly named temporary database, so it
+      // can safely author its own exited shipment when no legacy fixture exists.
+      const candidate = existingCandidate || await createStatementAdjustmentFixture(tx);
 
       const repository = new PrismaApprovedPricingRepository(tx);
       const versionId = randomUUID();
@@ -286,8 +287,10 @@ const run = async () => {
     const { actor: guard, authority: guardAuthority } = await createAuthorizedActorFixture(prisma, {
       runId: process.env.ISSUE260_PARENT_RUN_ID || randomUUID(), workspace: 'security',
       feature: 'security_dispatch_confirmation_approve', withSecurityPersonnel: true });
+    const originalLoading = await prisma.logisticsLoading.findUniqueOrThrow({ where: { id: committedFixture.loadingId }, select: { projectId: true } });
     const inbound = await recordGuardInboundMovement(prisma, { purpose: 'SALES_RETURN',
       loadingId: committedFixture.loadingId, customerId: committedFixture.customerId,
+      projectId: originalLoading.projectId,
       occurredAt: new Date(Date.now() - 1_000), actorId: guard.id });
     await completeGuardInboundMovement(prisma, { movementId: inbound.id });
     const concurrentReturn = await verifyGuardPhysicalReturn(prisma, { movementId: inbound.id,

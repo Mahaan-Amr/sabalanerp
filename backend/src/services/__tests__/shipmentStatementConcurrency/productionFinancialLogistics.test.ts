@@ -61,6 +61,7 @@ const run = async () => {
   await observer.externalDriver.create({ data: { id: externalDriverId, firstName: 'Issue', lastName: '260',
     nationalCode: createHash('sha256').update(`driver:${externalDriverId}`).digest('hex').slice(0, 10),
     phone: `09${createHash('sha256').update(externalDriverId).digest('hex').replace(/[a-f]/g, '1').slice(0, 9)}`,
+    licenceNumber: `QA-${externalDriverId}`, licenceClass: 'B', licenceExpiresAt: expiresAt,
     status: 'ACTIVE', statusRecordedBy: logisticsActor.id, createdBy: logisticsActor.id,
     documents: { create: { documentType: 'DRIVING_LICENCE', reference: `issue260-${externalDriverId}`,
       expiresAt, recordedBy: logisticsActor.id } } } });
@@ -71,6 +72,10 @@ const run = async () => {
       reason: 'Issue 260 isolated concurrency fixture', recordedBy: logisticsActor.id } },
     documents: { create: { documentType: 'VEHICLE_REGISTRATION', reference: `issue260-${externalVehicleId}`,
       expiresAt, recordedBy: logisticsActor.id } } } });
+  await observer.externalDriverVehicleAssignment.create({ data: { driverId: externalDriverId, vehicleId: externalVehicleId,
+    effectiveFrom: new Date(), reason: 'isolated dispatch concurrency test', recordedBy: logisticsActor.id } });
+  await observer.driverBiometricEnrollment.create({ data: { externalDriverId, status: 'ACTIVE',
+    confirmationPhone: '09120000000', enrolledBy: logisticsActor.id } });
   const loading = await observer.logisticsLoading.create({ data: { id: loadingId,
     loadingNumber: `ISSUE260-${Date.now()}-${Math.floor(Math.random() * 10_000)}`,
     customerId: contract.customerId, projectId: project.id, status: 'DRAFT', createdBy: logisticsActor.id,
@@ -80,7 +85,8 @@ const run = async () => {
   await observer.guardDriverQueueTurn.create({ data: { id: queueTurnId,
     driverSource: 'EXTERNAL', status: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING,
     externalDriverId, externalVehicleId, admittedAt: new Date(), admittedBy: logisticsActor.id,
-    snapshotSchemaVersion: 1, admissionSnapshot: json({ schemaVersion: 1, externalDriverId, externalVehicleId }),
+    snapshotSchemaVersion: 1, admissionSnapshot: json({ schemaVersion: 1, externalDriverId, externalVehicleId,
+      driver: { firstName: 'Issue', lastName: '260' }, plate: { plate: `260-${externalVehicleId.slice(0, 8)}` } }),
     integrityHash: createHash('sha256').update(`queue:${queueTurnId}`).digest('hex'), loadingId: loading.id,
     availableAt: new Date(), availableBy: logisticsActor.id, reservedAt: new Date(), reservedBy: logisticsActor.id } });
   await observer.logisticsAllocationDraft.create({ data: { loadingId: loading.id, queueTurnId, createdBy: logisticsActor.id,

@@ -27,7 +27,7 @@ import {
   ErpSummaryGrid,
   ErpTextarea,
 } from "@/components/erp";
-import { dashboardAPI, logisticsAPI } from "@/lib/api";
+import api, { dashboardAPI, logisticsAPI } from "@/lib/api";
 import RoleAwareDispatchCases from "@/features/dispatch-case/RoleAwareDispatchCases";
 import SalesDispatchInvoices from "@/features/accounting/SalesDispatchInvoices";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
@@ -53,6 +53,7 @@ export default function LoadingDetailPage() {
   const [section, setSection] = useState<DetailSection>("summary");
   const [action, setAction] = useState<DetailAction>(null);
   const [loading, setLoading] = useState<any>(null);
+  const [activeInvoiceId, setActiveInvoiceId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState("");
@@ -85,10 +86,25 @@ export default function LoadingDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
-  useEffect(() => {
-    if (!isLoading && loading && searchParams.get("print") === "1")
-      window.setTimeout(() => window.print(), 250);
-  }, [isLoading, loading, searchParams]);
+  const printInvoice = async () => {
+    if (!activeInvoiceId) return;
+    const preview = window.open("", "_blank");
+    if (!preview) { setActionError("مرورگر پنجره چاپ را مسدود کرد."); return; }
+    try {
+      const list = await api.get(`/logistics/loadings/${encodeURIComponent(params.id)}/sales-invoices`);
+      if (!list.data.data.invoices.some((invoice: { id: string; status: string }) => invoice.id === activeInvoiceId && invoice.status === "ISSUED")) {
+        throw new Error("فاکتور دیگر معتبر نیست؛ اطلاعات را به‌روزرسانی کنید.");
+      }
+      const response = await api.get(`/logistics/loadings/${encodeURIComponent(params.id)}/sales-invoices/${encodeURIComponent(activeInvoiceId)}/pdf`, { responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
+      preview.location.href = url;
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) {
+      preview.close();
+      setActiveInvoiceId(null);
+      setActionError(userFacingError(error, "فاکتور معتبر برای چاپ در دسترس نیست."));
+    }
+  };
 
   const runAction = async (command: () => Promise<any>): Promise<boolean> => {
     if (mutationLock.current) return false;
@@ -255,12 +271,12 @@ export default function LoadingDetailPage() {
               },
             ]
           : []),
-        {
-          label: "چاپ",
+        ...(activeInvoiceId ? [{
+          label: "چاپ فاکتور فروش",
           icon: FaPrint,
-          onClick: () => window.print(),
-          tone: "neutral",
-        },
+          onClick: () => void printInvoice(),
+          tone: "neutral" as const,
+        }] : []),
         { label: "به‌روزرسانی", icon: FaSync, onClick: load, tone: "neutral" },
       ]}
     >
@@ -364,7 +380,7 @@ export default function LoadingDetailPage() {
       {section === "print" && (
         <ErpSection
           title="برگه چاپی بارگیری"
-          description="پیش‌نمایش سند؛ برای نسخه چاپی از دکمه «چاپ» بالای صفحه استفاده کنید."
+          description="خلاصه اطلاعات بارگیری؛ فاکتور فروش صادرشده سند چاپی این صفحه است."
         >
           <div className="rounded-lg border border-[var(--sds-border-default)] bg-[var(--sds-surface-raised)] p-5 text-sm leading-7 sds-text-primary">
             <div className="mb-4 flex items-start justify-between gap-4 border-b pb-3">
@@ -414,7 +430,7 @@ export default function LoadingDetailPage() {
         </ErpSection>
       )}
 
-      {loading.status !== 'DRAFT' && section !== 'print' && <SalesDispatchInvoices workspace="logistics" loadingId={loading.id} refreshKey={loading}/>}
+      {loading.status !== 'DRAFT' && <div hidden={section === 'print'}><SalesDispatchInvoices workspace="logistics" loadingId={loading.id} refreshKey={loading} onActiveInvoiceChange={setActiveInvoiceId}/></div>}
       <div hidden={section !== "cases"}>
         <RoleAwareDispatchCases
           workspace="logistics"

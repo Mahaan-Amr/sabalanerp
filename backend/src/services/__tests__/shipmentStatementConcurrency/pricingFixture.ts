@@ -36,6 +36,7 @@ export const authorConcurrentPricingFixture = async (
     await client.externalDriver.create({ data: { id: driverId, firstName: 'Issue', lastName: `260-${index}`,
       nationalCode: createHash('sha256').update(driverId).digest('hex').slice(0, 10),
       phone: `09${createHash('sha256').update(driverId).digest('hex').replace(/[a-f]/g, '1').slice(0, 9)}`,
+      licenceNumber: `QA-${driverId}`, licenceClass: 'B', licenceExpiresAt: expiresAt,
       status: 'ACTIVE', statusRecordedBy: logistics.actor.id, createdBy: logistics.actor.id,
       documents: { create: { documentType: 'DRIVING_LICENCE', reference: `issue260-${driverId}`,
         expiresAt, recordedBy: logistics.actor.id } } } });
@@ -45,6 +46,10 @@ export const authorConcurrentPricingFixture = async (
         effectiveFrom: new Date(), reason: 'Issue 260 isolated concurrency fixture', recordedBy: logistics.actor.id } },
       documents: { create: { documentType: 'VEHICLE_REGISTRATION', reference: `issue260-${vehicleId}`,
         expiresAt, recordedBy: logistics.actor.id } } } });
+    await client.externalDriverVehicleAssignment.create({ data: { driverId, vehicleId, effectiveFrom: new Date(),
+      reason: 'isolated dispatch concurrency test', recordedBy: logistics.actor.id } });
+    await client.driverBiometricEnrollment.create({ data: { externalDriverId: driverId, status: 'ACTIVE',
+      confirmationPhone: '09120000000', enrolledBy: logistics.actor.id } });
     const loading = await client.logisticsLoading.create({ data: { id: loadingId,
       loadingNumber: `ISSUE260-${runId}-${index}`, customerId: approved.contract.customerId, projectId: approved.project.id,
       status: 'DRAFT', createdBy: logistics.actor.id, lines: { create: { sourceContractId: approved.contract.id,
@@ -53,7 +58,8 @@ export const authorConcurrentPricingFixture = async (
     await client.guardDriverQueueTurn.create({ data: { id: queueTurnId, driverSource: 'EXTERNAL',
       status: GuardDriverQueueTurnStatus.RESERVED_FOR_LOADING, externalDriverId: driverId, externalVehicleId: vehicleId,
       admittedAt: new Date(), admittedBy: logistics.actor.id, snapshotSchemaVersion: 1,
-      admissionSnapshot: json({ schemaVersion: 1, externalDriverId: driverId, externalVehicleId: vehicleId }),
+      admissionSnapshot: json({ schemaVersion: 1, externalDriverId: driverId, externalVehicleId: vehicleId,
+        driver: { firstName: 'Issue', lastName: `260-${index}` }, plate: { plate: `260-${vehicleId.slice(0, 8)}` } }),
       integrityHash: createHash('sha256').update(`queue:${queueTurnId}`).digest('hex'), loadingId: loading.id,
       availableAt: new Date(), availableBy: logistics.actor.id, reservedAt: new Date(), reservedBy: logistics.actor.id } });
     await client.logisticsAllocationDraft.create({ data: { loadingId: loading.id, queueTurnId, createdBy: logistics.actor.id,

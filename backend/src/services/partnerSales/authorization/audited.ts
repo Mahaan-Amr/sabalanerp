@@ -35,7 +35,10 @@ export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, 
     if (result.ok && isAdmin && !readActions.has(action) && !audit.reason?.trim()) {
       result = { ok: false, error: partnerError('FORBIDDEN') };
     }
-    const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+    // Source evidence already carries the database evaluation time. Only
+    // early policy denials, which do not read evidence, need a separate clock.
+    const evaluatedAt = evidence ? new Date(evidence.evaluatedAt)
+      : (await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0].now;
     await appendAuthorizationDecision(tx, { domain: 'PARTNER', actorId: binding.actorId, action,
       rootKind: root.kind, rootId: root.id, purpose: binding.purpose, channel: binding.channel,
       allowed: result.ok, isAdmin, code: result.ok ? 'ALLOWED' : result.error.code,
@@ -43,7 +46,7 @@ export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, 
       authorizationRevision: evidence?.authorizationRevision ?? null, lifecycleRevision: evidence?.resource?.lifecycleRevision ?? null,
       assignmentId: evidence?.resource?.assignment?.assignmentId ?? null,
       assignmentRevision: evidence?.resource?.assignment?.revision ?? null,
-      evaluatedAt: evidence ? new Date(evidence.evaluatedAt) : clock.now,
+      evaluatedAt,
       evaluatedGrantIds: evidence?.grants.filter(grant => grant.rootKind === root.kind && grant.purpose === binding.purpose)
         .flatMap(grant => grant.provenance ? [grant.provenance.grantId] : []) ?? [],
     });

@@ -56,7 +56,7 @@ export async function buildInventory() {
       }
     }
   }
-  const source = await readFile(path.join(repositoryRoot, 'backend/src/middleware/feature.ts'), 'utf8');
+  const source = await readFile(path.join(repositoryRoot, 'backend/src/middleware/featureCatalog.ts'), 'utf8');
   const constants = source.split('export const FEATURES = {')[1]?.split('} as const;')[0];
   if (!constants) throw new Error('Feature catalog shape changed; review inventory extraction.');
   const workspaceMap = source.split('export const FEATURE_WORKSPACE_MAP:')[1]?.split('\n};')[0] || '';

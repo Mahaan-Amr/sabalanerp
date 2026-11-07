@@ -22,8 +22,9 @@ export async function attachAccountingTrendAuditState<T extends AuditHeader>(
 /** Reject private audit owners using relational headers before decoding their
  * historical bodies. Authorized witnesses still receive complete validation. */
 export async function readAuthorizedPartnerAuditWitnesses(
-  database: Pick<Prisma.TransactionClient, 'accountingAuditLog'>,
+  database: Pick<Prisma.TransactionClient, 'accountingAuditLog'> & Partial<Pick<Prisma.TransactionClient, '$queryRaw'>>,
   markedIds: string[], invoiceByEntity: ReadonlyMap<string, string>,
+  options: { projectStates?: boolean } = {},
 ) {
   const headers = markedIds.length ? await database.accountingAuditLog.findMany({
     where: { id: { in: markedIds } },
@@ -38,9 +39,24 @@ export async function readAuthorizedPartnerAuditWitnesses(
     if (!invoiceId || owners.some(owner => owner !== invoiceId) || row.contractId) rejectedIds.push(row.id);
     else ownerByAudit.set(row.id, invoiceId);
   }
-  const witnesses = ownerByAudit.size ? await database.accountingAuditLog.findMany({
-    where: { id: { in: [...ownerByAudit.keys()] } },
-    select: { id: true, beforeState: true, afterState: true },
-  }) : [];
+  const project = (column: Prisma.Sql) => Prisma.sql`COALESCE((
+    SELECT jsonb_agg((SELECT jsonb_object_agg(entry.key, entry.value)
+      FROM jsonb_each(node.value) AS entry
+      WHERE entry.key = ANY(ARRAY['partnerCaseId', 'internalRecordId', 'partnerSellerId',
+        'commercialAccountId', 'owner', 'partnerPreparation'])))
+    FROM jsonb_path_query(COALESCE(${column}, 'null'::jsonb), 'strict $.**'::jsonpath) AS node(value)
+    WHERE jsonb_typeof(node.value) = 'object' AND node.value ?| ARRAY['partnerCaseId', 'internalRecordId',
+      'partnerSellerId', 'commercialAccountId', 'owner', 'partnerPreparation']
+  ), '[]'::jsonb)`;
+  if (options.projectStates && !database.$queryRaw) throw new Error('Audit witness projection requires database access');
+  const witnesses = !ownerByAudit.size ? [] : options.projectStates
+    ? await database.$queryRaw!<Array<{ id: string; beforeState: Prisma.JsonValue; afterState: Prisma.JsonValue }>>(Prisma.sql`
+      SELECT id, ${project(Prisma.raw('"beforeState"'))} AS "beforeState",
+        ${project(Prisma.raw('"afterState"'))} AS "afterState"
+      FROM accounting_audit_logs WHERE id IN (${Prisma.join([...ownerByAudit.keys()])})`)
+    : await database.accountingAuditLog.findMany({
+      where: { id: { in: [...ownerByAudit.keys()] } },
+      select: { id: true, beforeState: true, afterState: true },
+    });
   return { rejectedIds, witnesses: witnesses.map(row => ({ ...row, invoiceId: ownerByAudit.get(row.id)! })) };
 }

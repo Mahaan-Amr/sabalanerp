@@ -28,20 +28,49 @@ async function run() {
     console.log(JSON.stringify({ fullContractBytes: Buffer.byteLength(JSON.stringify(reference)),
       listProjectionBytes: Buffer.byteLength(JSON.stringify(projected)) }));
     const expected = await buildAccountingSummaryForContracts(reference);
-    let listQuery: any;
+    const captured: { listQuery: any } = { listQuery: undefined };
+    const readCapturedQuery = (): any => captured.listQuery;
     prisma.$use(async (params, next) => {
-      if (params.model === 'SalesContract' && params.action === 'findMany') listQuery = params.args;
+      if (params.model === 'SalesContract' && params.action === 'findMany') captured.listQuery = params.args;
       return next(params);
     });
     const start = performance.now();
     const actual = await listAccountingContracts({ page: 1, pageSize: 100 });
     console.log(JSON.stringify({ elapsedMs: Math.round(performance.now() - start), total: actual.total }));
+    assert.equal(readCapturedQuery()?.take, 100, 'the default first page limits ordinary contract rows at the database');
+    const expectedTotals = { contractAmount: 0n, invoicedAmount: 0n, receivedAmount: 0n, remainingAmount: 0n };
+    for (const summary of expected.values()) {
+      expectedTotals.contractAmount += BigInt(summary.totalContractAmount);
+      expectedTotals.invoicedAmount += BigInt(summary.invoicedAmount);
+      expectedTotals.receivedAmount += BigInt(summary.receivedAmount);
+      expectedTotals.remainingAmount += BigInt(summary.remainingAmount);
+    }
+    assert.deepEqual(actual.totals, Object.fromEntries(Object.entries(expectedTotals).map(([key, value]) => [key, value.toString()])),
+      'database pagination preserves totals across all matching contracts');
     assert.equal(actual.total, reference.length);
     const internal = await listAccountingContracts({ sourceKind: 'SALES_CONTRACT', pageSize: 1 });
     assert.equal(internal.total, actual.total, 'origin filtering retains the full count before pagination');
     assert.equal(internal.items.length, 1);
     assert.deepEqual(internal.totals, actual.totals);
+    assert.deepEqual(internal.items[0], actual.items[0], 'page size must not change the visible row');
+    const second = await listAccountingContracts({ sourceKind: 'SALES_CONTRACT', page: 2, pageSize: 1 });
+    assert.deepEqual(second.totals, actual.totals, 'totals include the complete filtered population on every page');
+    assert.deepEqual(second.items[0], actual.items[1], 'later pages preserve the same row details and ordering');
+    for (const query of [
+      { sort: 'attention' },
+      { sort: 'amount_desc' },
+      { sourceStatus: 'ELIGIBLE' },
+      { taxStatus: 'NOT_READY' },
+    ]) {
+      const complete = await listAccountingContracts({ ...query, sourceKind: 'SALES_CONTRACT', pageSize: 100 });
+      const one = await listAccountingContracts({ ...query, sourceKind: 'SALES_CONTRACT', pageSize: 1 });
+      assert.equal(one.total, complete.total, 'filter count does not depend on page size');
+      assert.deepEqual(one.totals, complete.totals, 'filtered totals do not depend on page size');
+      assert.deepEqual(one.items[0], complete.items[0], 'filter and sort return the same first row');
+    }
+    captured.listQuery = undefined;
     const partner = await listAccountingContracts({ sourceKind: 'PARTNER_INTERNAL_RECORD', pageSize: 1 });
+    assert.equal(captured.listQuery, undefined, 'Partner-only filtering avoids fetching ordinary contracts');
     assert.equal(partner.total, 0, 'Partner filter excludes ordinary contracts and does not bypass actor scope');
     assert.deepEqual(partner.items, []);
     assert.deepEqual(partner.totals, { contractAmount: '0', invoicedAmount: '0', receivedAmount: '0', remainingAmount: '0' });
@@ -50,10 +79,21 @@ async function run() {
       allRows.push(...(await listAccountingContracts({ page, pageSize: 100 })).items);
     }
     assert.equal(new Set(allRows.map(row => row.contractId)).size, reference.length);
-    for (const row of allRows) assert.deepEqual(row.accounting, expected.get(row.contractId));
-    assert(listQuery.select, 'REGRESSION: accounting list fetches full contracts');
+    for (const row of allRows) {
+      assert.deepEqual(row.accounting, expected.get(row.contractId));
+      const customer = reference.find(contract => contract.id === row.contractId)?.customer;
+      assert.ok(customer);
+      assert.deepEqual(row.customer, { id: customer.id,
+        displayName: `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || customer.companyName || 'مشتری بدون نام',
+        trustCategory: customer.trustCategory ?? null, partnerOwnerProfileId: customer.partnerOwnerProfileId ?? null,
+        nationalCode: customer.nationalCode, economicCode: (customer.customFields as any)?.economicCode });
+    }
+    await listAccountingContracts({ pageSize: 1 });
+    const recordedQuery = readCapturedQuery();
+    assert(recordedQuery?.select, 'REGRESSION: accounting list fetches full contracts');
+    assert(recordedQuery.select.customer?.select, 'list must request only customer fields used by Accounting');
     for (const field of ['content', 'contractData', 'productGraphState', 'productGraphAudits', 'deliveries', 'payments']) {
-      assert(!listQuery.select[field], `REGRESSION: list fetched heavy ${field}`);
+      assert(!recordedQuery.select[field], `REGRESSION: list fetched heavy ${field}`);
     }
     const sample = actual.items.find(row => /^\d+$/.test(row.contractNumber));
     assert(sample, 'A numeric local contract number is required');

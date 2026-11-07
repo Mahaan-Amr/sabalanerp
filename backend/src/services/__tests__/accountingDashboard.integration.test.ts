@@ -19,4 +19,11 @@ test('complete Accounting dashboard preserves authorized workspace and fresh cha
   assert.deepEqual(dashboard.workspace.commandCenter, workspace.commandCenter);
   assert.deepEqual(dashboard.workspace.deadlines.typeCounts, workspace.deadlines.typeCounts);
   assert.deepEqual(dashboard.trend, trend);
+  for (const row of dashboard.workspace.queues.invoiceCandidates) {
+    assert.equal('sourceSnapshot' in row, false, 'dashboard summaries must not expose complete invoice snapshots');
+  }
+  for (const row of dashboard.workspace.queues.audit) {
+    assert.equal('beforeState' in row, false, 'dashboard summaries must not include audit snapshots');
+    assert.equal('afterState' in row, false, 'dashboard summaries must not include audit snapshots');
+  }
 });

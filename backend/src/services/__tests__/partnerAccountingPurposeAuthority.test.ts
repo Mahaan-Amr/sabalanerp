@@ -14,6 +14,7 @@ for (const scenario of [
   { role: 'USER', active: true, partner: false, level: 'none' },
   { role: 'USER', active: true, partner: false, level: 'admin', expired: true },
 ]) test(`Accounting purpose preserves full bridge grants ${JSON.stringify(scenario)}`, async () => {
+  let effectiveFeatureReads = 0;
   const workspace = { id: 'workspace', workspace: 'accounting', permissionLevel: scenario.level,
     isActive: true, expiresAt: scenario.expired ? new Date('2020-01-01') : null };
   const features = [FEATURES.ACCOUNTING_CONTRACTS_VIEW, FEATURES.ACCOUNTING_INVOICE_CANDIDATES_MANAGE,
@@ -28,8 +29,10 @@ for (const scenario of [
     partnerProfile: { findUnique: async () => null },
     workspacePermission: { findMany: async () => [workspace], findUnique: async () => workspace },
     roleWorkspacePermission: { findMany: async () => [], findUnique: async () => null },
-    featurePermission: { findMany: async (args: any) => features.filter(row =>
-      !args?.where?.permissionLevel || row.permissionLevel === args.where.permissionLevel),
+    featurePermission: { findMany: async (args: any) => {
+      if (args?.where?.isActive === true) effectiveFeatureReads++;
+      return features.filter(row => !args?.where?.permissionLevel || row.permissionLevel === args.where.permissionLevel);
+    },
       findUnique: async (args: any) => features.find(row => row.feature === args?.where?.userId_workspace_feature?.feature) ?? null },
     roleFeaturePermission: { findMany: async () => [], findUnique: async () => null },
     hrWorkspaceAccessGrant: { findMany: async () => [] }, hrFeatureAccessGrant: { findMany: async () => [] },
@@ -37,8 +40,40 @@ for (const scenario of [
     $queryRaw: async (query: TemplateStringsArray) => query.join('').includes('effective_authorization_state') ? [{ revision: 1 }] : [],
   } as unknown as Prisma.TransactionClient;
   const full = await resolvePartnerWorkspaceAuthority(tx, 'actor');
-  const accounting = await resolvePartnerWorkspaceAuthority(tx, 'actor', 'ACCOUNTING');
+  effectiveFeatureReads = 0;
+  const accounting = await resolvePartnerWorkspaceAuthority(tx, 'actor', 'ACCOUNTING', { fencedPermissionReads: true });
   assert.deepEqual(accounting.grants, full.grants.filter(grant => grant.purpose === 'ACCOUNTING'));
   assert.deepEqual(accounting.disabledFeatures, full.disabledFeatures);
+  assert.equal(effectiveFeatureReads, scenario.active && !scenario.partner ? 1 : 0,
+    'Accounting resolves permission rows once per decision');
   if (scenario.role === 'ADMIN') assert(accounting.grants.some(grant => grant.action === 'CREDIT_TERMS_MANAGE' && grant.rootKind === 'PROFILE'));
+  if (scenario.role === 'USER' && scenario.active && !scenario.partner && scenario.level === 'admin' && !scenario.expired) {
+    assert(accounting.grants.some(grant => grant.action === 'ACCOUNTING_READ'));
+    workspace.expiresAt = new Date('2020-01-01');
+    for (const feature of features) feature.expiresAt = workspace.expiresAt;
+    const expired = await resolvePartnerWorkspaceAuthority(tx, 'actor', 'ACCOUNTING', { fencedPermissionReads: true });
+    assert.equal(expired.grants.some(grant => grant.action === 'ACCOUNTING_READ'), false,
+      'the next decision must not reuse rows from a previous decision');
+  }
+});
+
+test('a permission expiring during one fenced Accounting resolution is re-evaluated', async t => {
+  const start = Date.UTC(2026, 0, 1);
+  t.mock.timers.enable({ apis: ['Date'], now: start });
+  const workspace = { id: 'workspace', workspace: 'accounting', permissionLevel: 'admin',
+    isActive: true, expiresAt: new Date(start + 10) };
+  let actorReads = 0;
+  const tx = {
+    user: { findUnique: async () => {
+      if (++actorReads === 2) t.mock.timers.tick(20);
+      return { id: 'actor', role: 'USER', isActive: true, partnerProfile: null };
+    } },
+    workspacePermission: { findMany: async () => [workspace], findUnique: async () => workspace },
+    roleWorkspacePermission: { findMany: async () => [], findUnique: async () => null },
+    featurePermission: { findMany: async () => [], findUnique: async () => null },
+    roleFeaturePermission: { findMany: async () => [], findUnique: async () => null },
+    hrWorkspaceAccessGrant: { findMany: async () => [] }, hrFeatureAccessGrant: { findMany: async () => [] },
+  } as unknown as Prisma.TransactionClient;
+  const authority = await resolvePartnerWorkspaceAuthority(tx, 'actor', 'ACCOUNTING', { fencedPermissionReads: true });
+  assert.equal(authority.grants.some(grant => grant.action === 'ACCOUNTING_READ'), false);
 });

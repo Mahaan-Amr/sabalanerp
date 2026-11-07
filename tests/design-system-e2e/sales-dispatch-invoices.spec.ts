@@ -38,6 +38,7 @@ for (const width of [1280, 390]) {
     await loginAsAdmin(page);
     await setViewportAndZoom(page, { width, height: 900 });
     const loadingId = "qa-sales-invoice-loading";
+    const blockedReason = "تأیید همه راننده‌ها هنوز کامل نشده است.";
     let ready = false,
       issued = 0,
       voided = 0;
@@ -67,25 +68,27 @@ for (const width of [1280, 390]) {
     );
     await page.route(
       `**/api/accounting/loadings/${loadingId}/sales-invoices`,
+      (route) => {
+        expect(route.request().method()).toBe("GET");
+        return reply(route, { ready, blockedReason: ready ? null : blockedReason, invoices });
+      },
+    );
+    await page.route(
+      `**/api/accounting/loadings/${loadingId}/issue-dispatch-documents`,
       async (route) => {
-        if (route.request().method() === "POST") {
-          expect(route.request().postDataJSON().idempotencyKey).toBeTruthy();
-          issued++;
-          invoices.push({
-            id: "invoice-1",
-            number: "1",
-            status: "ISSUED",
-            voidReason: null,
-          });
-          await reply(route, { id: "invoice-1", number: "1" });
-        } else
-          await reply(route, {
-            ready,
-            blockedReason: ready
-              ? null
-              : "تأیید همه راننده‌ها هنوز کامل نشده است.",
-            invoices,
-          });
+        expect(route.request().method()).toBe("POST");
+        if (!ready) {
+          await route.fulfill({ status: 409, json: { success: false, error: blockedReason } });
+          return;
+        }
+        issued++;
+        invoices.push({
+          id: "invoice-1",
+          number: "1",
+          status: "ISSUED",
+          voidReason: null,
+        });
+        await reply(route, { status: "ISSUED" });
       },
     );
     await page.route(
@@ -103,10 +106,15 @@ for (const width of [1280, 390]) {
       page.getByText("فاکتور فروش کل بارگیری", { exact: true }),
     ).toHaveCount(1);
     const issue = page.getByRole("button", {
-      name: "صدور فاکتور فروش",
+      name: "تأیید و صدور اسناد",
       exact: true,
     });
-    await expect(issue).toBeDisabled();
+    const blockedIssuance = page.waitForResponse((response) =>
+      response.url().endsWith(`/loadings/${loadingId}/issue-dispatch-documents`) && response.status() === 409,
+    );
+    await issue.click();
+    await blockedIssuance;
+    await expect(page.getByText("فاکتور فروش صادر نشده است.")).toBeVisible();
     ready = true;
     await page
       .getByRole("button", { name: "به‌روزرسانی فاکتورها", exact: true })
@@ -116,7 +124,7 @@ for (const width of [1280, 390]) {
     await expect(
       page.getByText("فاکتور ۱ · صادرشده", { exact: true }),
     ).toBeVisible();
-    await expect(issue).toBeDisabled();
+    await expect(page.getByRole("button", { name: "چاپ فاکتور و بارنامه‌ها" })).toBeDisabled();
     await page
       .getByRole("button", { name: "ابطال فاکتور", exact: true })
       .click();

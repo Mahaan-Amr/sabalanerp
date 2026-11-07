@@ -18,7 +18,9 @@ import threading
 import time
 
 LEGACY_IMAGE = 'sha256:e407ff125c6fb0b441f6fa782101a4ec5159e928a5ebae7ddc32faef869afed3'
-LEGACY_COMMIT = 'b58c53c0f88d2d89da3cb6a45949e6eca97e4308'
+# This immutable legacy image predates source attestation. Its recorded labels
+# are both literally unattested; neither is evidence of a Git commit.
+LEGACY_SOURCE_LABEL = 'unattested'
 LEGACY_COMMAND = ['sh', '-c', 'node dist/scripts/recovery-database-preflight.js && node dist/index.js']
 NATIVE_COMMAND = ['sh', 'scripts/with-backend-control-ownership.sh', 'sh', 'scripts/start-backend.sh']
 FORMAT = 'sabalan-legacy-backend-signal/v1'
@@ -180,7 +182,8 @@ def classify_container(value, expected_image):
     command = value['Config'].get('Cmd')
     if command == LEGACY_COMMAND:
         require(expected_image == LEGACY_IMAGE
-                and labels.get('io.sabalan.performance.source-commit') == LEGACY_COMMIT,
+                and labels.get('io.sabalan.performance.source-commit') == LEGACY_SOURCE_LABEL
+                and labels.get('io.sabalan.performance.source-hash') == LEGACY_SOURCE_LABEL,
                 'LEGACY_SIGNAL_UNKNOWN_IMMUTABLE_IMAGE')
         kind = 'KNOWN_LEGACY_SHELL'
     else:

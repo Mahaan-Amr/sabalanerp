@@ -57,6 +57,8 @@ services:
       dockerfile: backend/Dockerfile
       network: host
       args:
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-http://deb.debian.org/debian}
+        DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-http://security.debian.org/debian-security}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         http_proxy: ${http_proxy:-}
@@ -229,6 +231,9 @@ services:
       context: .
       dockerfile: deploy/docker/inquiry.Dockerfile
       network: host
+      args:
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-http://deb.debian.org/debian}
+        DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-http://security.debian.org/debian-security}
     restart: unless-stopped
     stop_grace_period: 30s
     environment:

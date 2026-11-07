@@ -28,6 +28,7 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  if(kind==='python3'){
   const [script,mode,compose,environment,previousImage,plan,session]=a;
   if(!script?.endsWith('/deploy/scripts/legacy-backend-signal.py')||!['--preflight','--forward','--assert-resolved'].includes(mode))throw Error('Unexpected fixture python command');
+  if(failure==='legacy-signal'&&mode==='--preflight')process.exit(48);
   if(compose!==path.join(root,'docker-compose.prod.yml')||environment!==path.join(root,'.env.prod')||previousImage!==image('backend')||plan!==path.join(root,'.deploy-state','legacy-backend-drain-'+process.env.DEPLOYMENT_ID+'.json'))throw Error('Legacy signal fixture identity mismatch');
   const marker=path.join(root,'reports/fixture-legacy-preflight.json');
   const forwarded=path.join(root,'reports/fixture-legacy-forward.json');
@@ -150,15 +151,6 @@ const rollbackEnvironment={PERFORMANCE_RELEASE_COMMIT:'a'.repeat(40),PERFORMANCE
  }
  if(a.includes('dist/scripts/deployment-performance-identity.js')){
   save('reports/performance-database-'+env('DEPLOYMENT_ID')+'.json',{schemaHash:'b'.repeat(64),policyHash:'b'.repeat(64)});return;
- }
- if(a.includes('dist/scripts/deployment-retention-local.js')){
-  const index=a.indexOf('dist/scripts/deployment-retention-local.js');
-  const [command,stage]=a.slice(index+1);
-  if(command==='export-holds'&&['BEFORE_CHECKPOINT','AFTER_CHECKPOINT'].includes(stage)){
-   save('reports/retention-holds-'+env('DEPLOYMENT_ID')+'-'+stage+'.json',{fixture:true});return;
-  }
-  if(command==='apply'&&stage==='AFTER_CHECKPOINT')return;
-  throw Error('Unexpected retention fixture operation');
  }
  const id=env('DEPLOYMENT_ID'),unit=path.join(coordination,'clamav-checkpoint-'+id);
  if(a.includes('scripts/clamav-checkpoint.mjs')){

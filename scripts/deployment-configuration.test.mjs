@@ -187,7 +187,6 @@ else{process.exit(99);}`);
     fs.writeFileSync(path.join(bin, 'flock'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     // The controller fixture replaces external process ownership at its CLI
     // boundary; the legacy owner itself has its own Linux integration tests.
-    fs.writeFileSync(path.join(bin, 'python3'), '#!/bin/sh\ncase "$1:$2" in */legacy-backend-signal.py:--preflight|*/legacy-backend-signal.py:--forward|*/legacy-backend-signal.py:--assert-resolved) printf \'["legacy-backend-signal","%s"]\\n\' "$2" >> "$TEST_LOG"; exit 0;; *) exit 99;; esac\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'sh'), '#!/bin/sh\ncase "$1" in */storage-preflight.sh) printf \'["storage-preflight"]\\n\' >> "$TEST_LOG"; [ "$TEST_FAILURE" != storage ] || exit 45; exit 0;; *) exec /usr/bin/sh "$@";; esac\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'curl'), '#!/bin/sh\nprintf 503\n', { mode: 0o755 });
     fs.writeFileSync(path.join(bin, 'sleep'), '#!/bin/sh\nexec /usr/bin/sleep 0.02\n', { mode: 0o755 });

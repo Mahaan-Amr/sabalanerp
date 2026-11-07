@@ -55,7 +55,7 @@ assert.match(statementHtml, /Yekan Bakh/);
 assert.match(statementHtml, /صورت‌حساب محموله مشتری/);
 assert.match(statementHtml, /WB-1405-0042/);
 assert.match(statementHtml, /SC-10042/);
-assert.match(statementHtml, /row-stable-1/);
+assert.doesNotMatch(statementHtml, /row-stable-1/);
 assert.match(statementHtml, /شامل خدمات متصل/);
 assert.match(statementHtml, /<thead>/);
 assert.match(statementHtml, /display:\s*table-header-group/);
@@ -77,6 +77,10 @@ const waybillHtml = renderDispatchDocumentHtml({
   },
 });
 assert.match(waybillHtml, /بارنامه خروج محموله/);
+assert.doesNotMatch(waybillHtml, /row-stable-1|شناسه ردیف/);
+const englishUnitWaybill = renderDispatchDocumentHtml({ ...common, kind: 'WAYBILL', payload: { allocationRevisionId: 'revision', contracts: [{ contractId: 'contract', contractNumber: '۱۰۰', lines: [{ contractItemId: 'item', productRowId: 'contract-row-123', label: 'سنگ', quantity: '2', unit: 'meter' }] }] } });
+assert.match(englishUnitWaybill, /متر طول/);
+assert.doesNotMatch(englishUnitWaybill, /contract-row-123|>meter</);
 assert.doesNotMatch(waybillHtml, /مبلغ ناخالص|تخفیف تخصیص‌یافته|مبلغ خالص|ریال/);
 const reconstructed = renderDispatchDocumentHtml({ ...common, kind: 'WAYBILL', reconstructionLabel: 'LEGACY_RECONSTRUCTED',
   payload: { allocationRevisionId: 'revision', contracts: [] } });
@@ -158,7 +162,7 @@ const partnerWaybillHtml = renderDispatchDocumentHtml({
 });
 assert.match(partnerWaybillHtml, /PC-1405-0042/);
 assert.match(partnerWaybillHtml, /تحویل شهریور/);
-assert.match(partnerWaybillHtml, /partner-row-1/);
+assert.doesNotMatch(partnerWaybillHtml, /partner-row-1/);
 assert.doesNotMatch(partnerWaybillHtml,
   /مبلغ|قیمت|ناخالص|تخفیف|خالص|ریال|wholesale|financialApproval|internalRecord|contractItem/i,
   'the Partner customer waybill must remain price-free and must not expose internal wholesale evidence');

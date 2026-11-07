@@ -70,7 +70,12 @@ for (const width of [1280, 390]) {
       `**/api/accounting/loadings/${loadingId}/sales-invoices`,
       (route) => {
         expect(route.request().method()).toBe("GET");
-        return reply(route, { ready, blockedReason: ready ? null : blockedReason, invoices });
+        return reply(route, {
+          ready,
+          blockedReason: ready ? null : blockedReason,
+          documentsComplete: issued > 0,
+          invoices,
+        });
       },
     );
     await page.route(
@@ -106,7 +111,7 @@ for (const width of [1280, 390]) {
       page.getByText("فاکتور فروش کل بارگیری", { exact: true }),
     ).toHaveCount(1);
     const issue = page.getByRole("button", {
-      name: "تأیید و صدور اسناد",
+      name: "صدور بارنامه‌ها و فاکتور فروش",
       exact: true,
     });
     const blockedIssuance = page.waitForResponse((response) =>
@@ -124,6 +129,8 @@ for (const width of [1280, 390]) {
     await expect(
       page.getByText("فاکتور ۱ · صادرشده", { exact: true }),
     ).toBeVisible();
+    await expect(issue).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "تکمیل صدور بارنامه‌ها" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "چاپ فاکتور و بارنامه‌ها" })).toBeDisabled();
     await page
       .getByRole("button", { name: "ابطال فاکتور", exact: true })

@@ -12,6 +12,7 @@ import { verifyDispatchArtifactStorageUnderLock } from "../dispatchDocuments/art
 import type { DispatchArtifactStorage } from "../dispatchDocuments/ports";
 import { DispatchDocumentIntegrityError } from "../dispatchDocuments/service";
 import { allocationPricingIntegrityVerifier } from "../dispatchDocuments/prismaSourceReader";
+import { classifyLoadingDocumentPart } from "../loadingDocumentIssuance";
 import { isRetryableDispatchTransactionError } from "../dispatchAllocation";
 import { generatePdfBufferFromHtml } from "../../utils/pdf";
 import {
@@ -216,8 +217,23 @@ export function createSalesInvoiceService(
           if (!(error instanceof SalesInvoiceError)) throw error;
           reason = error.message;
         }
+        const [revisions, cutover] = await Promise.all([
+          tx.logisticsAllocationRevision.findMany({ where: { loadingId },
+            orderBy: [{ queueTurnId: 'asc' }, { revisionNumber: 'desc' }],
+            include: { candidate: { include: { waybills: { include: {
+              documentArtifacts: { select: { kind: true } }, legacyReconstruction: { select: { id: true } },
+            } } } } } } ),
+          tx.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' }, select: { cutoverAt: true } }),
+        ]);
+        const latest = new Map<string, typeof revisions[number]>();
+        for (const revision of revisions) if (!latest.has(revision.queueTurnId)) latest.set(revision.queueTurnId, revision);
+        const documentsComplete = Boolean(cutover && latest.size && [...latest.values()].every(revision => {
+          const legacy = revision.sourceKind === 'SALES_CONTRACT' && (!cutover.cutoverAt || !isPostCutoverFinalization(revision.finalizedAt, cutover.cutoverAt));
+          return classifyLoadingDocumentPart(revision, true, legacy).state === 'COMPLETE';
+        }));
         return {
           ready: Boolean(hash),
+          documentsComplete,
           blockedReason: reason,
           invoices: rows.map((row) => ({
             ...row,

@@ -23,6 +23,7 @@ type Invoice = {
 type ReadModel = {
   ready: boolean;
   blockedReason: string | null;
+  documentsComplete?: boolean;
   invoices: Invoice[];
 };
 export default function SalesDispatchInvoices({
@@ -111,9 +112,9 @@ export default function SalesDispatchInvoices({
             disabled={pending}
             onClick={() => void load()}
           />
-          {canManage && workspace === "accounting" && (
+          {canManage && workspace === "accounting" && !(onIssueAll && data?.documentsComplete && data.invoices.some(i => i.status === "ISSUED")) && (
             <ErpButton
-              label={onIssueAll ? "تأیید و صدور اسناد" : "صدور فاکتور فروش"}
+              label={onIssueAll ? (data?.invoices.some(i => i.status === "ISSUED") ? "تکمیل صدور بارنامه‌ها" : "صدور بارنامه‌ها و فاکتور فروش") : "صدور فاکتور فروش"}
               disabled={
                 pending ||
                 (!onIssueAll && !data?.ready) ||

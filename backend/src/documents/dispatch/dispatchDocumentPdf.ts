@@ -198,45 +198,47 @@ const renderHeader = (input: DispatchDocumentRenderData, assets: DispatchDocumen
     <div><span>پلاک خودرو</span><strong>${escapeHtml(input.vehiclePlate)}</strong></div>
   </section>`;
 
-const quantityColumns = '<th class="row-number">ردیف</th><th>شرح محصول</th><th class="identity-column">شناسه ردیف</th><th class="number-column">مقدار</th><th class="unit-column">واحد</th>';
+const displayUnit = (unit: string): string => ({ meter: 'متر طول', m: 'متر طول', squareMeter: 'متر مربع', squareMeters: 'متر مربع', m2: 'متر مربع', count: 'عدد', piece: 'عدد', ton: 'تن' } as Record<string, string>)[unit] ?? unit;
+const quantityColumns = '<th class="row-number">ردیف</th><th>شرح محصول</th><th class="number-column">مقدار</th><th class="unit-column">واحد</th>';
+const adjustmentColumns = quantityColumns.replace('<th class="number-column">', '<th class="identity-column">شناسه ردیف</th><th class="number-column">');
 const moneyColumns = `${quantityColumns}<th class="money-column">مبلغ ناخالص</th><th class="money-column">تخفیف تخصیص‌یافته</th><th class="money-column">مبلغ خالص</th>`;
 const renderTableHead = (columns: string, columnCount: number, title: string, number: string) => `<thead><tr class="continuation-header"><th colspan="${columnCount}"><span>${escapeHtml(title)}</span><b>${escapeHtml(number)}</b></th></tr><tr>${columns}</tr></thead>`;
 
 const renderWaybill = (input: Extract<DispatchDocumentRenderData, { kind: 'WAYBILL' }>, assets: DispatchDocumentAssets) => {
   let row = 0;
   if ('sourceKind' in input.payload) {
-    const rows = input.payload.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value" data-pdf-cell>${escapeHtml(line.productRowId)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td></tr>`).join('');
-    return `${renderHeader(input, assets, 'بارنامه خروج محموله', input.waybillNumber)}<table>${renderTableHead(quantityColumns, 5, 'بارنامه خروج محموله', input.waybillNumber)}<tbody>
-      <tr class="contract-heading"><td colspan="5">پرونده ${escapeHtml(input.payload.caseNumber)} · ${escapeHtml(input.payload.deliveryReference)}</td></tr>${rows}</tbody></table>`;
+    const rows = input.payload.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(displayUnit(line.unit))}</td></tr>`).join('');
+    return `${renderHeader(input, assets, 'بارنامه خروج محموله', input.waybillNumber)}<table>${renderTableHead(quantityColumns, 4, 'بارنامه خروج محموله', input.waybillNumber)}<tbody>
+      <tr class="contract-heading"><td colspan="4">پرونده ${escapeHtml(input.payload.caseNumber)} · ${escapeHtml(input.payload.deliveryReference)}</td></tr>${rows}</tbody></table>`;
   }
   const groups = input.payload.contracts.map((contract) => `<tbody>
-    <tr class="contract-heading"><td colspan="5">قرارداد ${escapeHtml(contract.contractNumber)}</td></tr>
-    ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value" data-pdf-cell>${escapeHtml(line.productRowId)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td></tr>`).join('')}
+    <tr class="contract-heading"><td colspan="4">قرارداد ${escapeHtml(contract.contractNumber)}</td></tr>
+    ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(displayUnit(line.unit))}</td></tr>`).join('')}
   </tbody>`).join('');
-  return `${renderHeader(input, assets, 'بارنامه خروج محموله', input.waybillNumber)}<table>${renderTableHead(quantityColumns, 5, 'بارنامه خروج محموله', input.waybillNumber)}${groups}</table>`;
+  return `${renderHeader(input, assets, 'بارنامه خروج محموله', input.waybillNumber)}<table>${renderTableHead(quantityColumns, 4, 'بارنامه خروج محموله', input.waybillNumber)}${groups}</table>`;
 };
 
 const renderStatement = (input: Extract<DispatchDocumentRenderData, { kind: 'STATEMENT' }>, assets: DispatchDocumentAssets) => {
   let row = 0;
   if ('sourceKind' in input.payload) {
-    const rows = input.payload.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value" data-pdf-cell>${escapeHtml(line.productRowId)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.grossAmount)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.allocatedDiscount)}</td><td class="numeric money strong" data-pdf-cell>${formatMoney(line.netAmount)}</td></tr>`).join('');
-    return `${renderHeader(input, assets, 'صورت‌حساب محموله مشتری', input.waybillNumber)}<table>${renderTableHead(moneyColumns, 8, 'صورت‌حساب محموله مشتری', input.waybillNumber)}<tbody>
-      <tr class="contract-heading"><td colspan="8">پرونده ${escapeHtml(input.payload.caseNumber)} · ${escapeHtml(input.payload.deliveryReference)}</td></tr>${rows}</tbody></table>
+    const rows = input.payload.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(displayUnit(line.unit))}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.grossAmount)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.allocatedDiscount)}</td><td class="numeric money strong" data-pdf-cell>${formatMoney(line.netAmount)}</td></tr>`).join('');
+    return `${renderHeader(input, assets, 'صورت‌حساب محموله مشتری', input.waybillNumber)}<table>${renderTableHead(moneyColumns, 7, 'صورت‌حساب محموله مشتری', input.waybillNumber)}<tbody>
+      <tr class="contract-heading"><td colspan="7">پرونده ${escapeHtml(input.payload.caseNumber)} · ${escapeHtml(input.payload.deliveryReference)}</td></tr>${rows}</tbody></table>
       <section class="grand-total"><span>جمع کل محموله</span><div><small>ناخالص</small><strong>${formatMoney(input.payload.grossAmount)}</strong></div><div><small>تخفیف</small><strong>${formatMoney(input.payload.allocatedDiscount)}</strong></div><div class="net"><small>خالص (${escapeHtml(input.payload.currency)})</small><strong>${formatMoney(input.payload.netAmount)}</strong></div></section>`;
   }
   const groups = input.payload.contracts.map((contract) => `<tbody>
-    <tr class="contract-heading"><td colspan="8">قرارداد ${escapeHtml(contract.contractNumber)}</td></tr>
-    ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value" data-pdf-cell>${escapeHtml(line.productRowId)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(line.unit)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.grossAmount)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.allocatedDiscount)}</td><td class="numeric money strong" data-pdf-cell>${formatMoney(line.netAmount)}</td></tr>`).join('')}
-    <tr class="contract-subtotal"><td colspan="5">جمع قرارداد</td><td class="numeric">${formatMoney(contract.grossAmount)}</td><td class="numeric">${formatMoney(contract.allocatedDiscount)}</td><td class="numeric strong">${formatMoney(contract.netAmount)}</td></tr>
+    <tr class="contract-heading"><td colspan="7">قرارداد ${escapeHtml(contract.contractNumber)}</td></tr>
+    ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(displayUnit(line.unit))}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.grossAmount)}</td><td class="numeric money" data-pdf-cell>${formatMoney(line.allocatedDiscount)}</td><td class="numeric money strong" data-pdf-cell>${formatMoney(line.netAmount)}</td></tr>`).join('')}
+    <tr class="contract-subtotal"><td colspan="4">جمع قرارداد</td><td class="numeric">${formatMoney(contract.grossAmount)}</td><td class="numeric">${formatMoney(contract.allocatedDiscount)}</td><td class="numeric strong">${formatMoney(contract.netAmount)}</td></tr>
   </tbody>`).join('');
-  return `${renderHeader(input, assets, 'صورت‌حساب محموله مشتری', input.waybillNumber)}<table>${renderTableHead(moneyColumns, 8, 'صورت‌حساب محموله مشتری', input.waybillNumber)}${groups}</table>
+  return `${renderHeader(input, assets, 'صورت‌حساب محموله مشتری', input.waybillNumber)}<table>${renderTableHead(moneyColumns, 7, 'صورت‌حساب محموله مشتری', input.waybillNumber)}${groups}</table>
     <section class="grand-total"><span>جمع کل محموله</span><div><small>ناخالص</small><strong>${formatMoney(input.payload.grossAmount)}</strong></div><div><small>تخفیف</small><strong>${formatMoney(input.payload.allocatedDiscount)}</strong></div><div class="net"><small>خالص (${escapeHtml(input.payload.currency)})</small><strong>${formatMoney(input.payload.netAmount)}</strong></div></section>`;
 };
 
 const renderAdjustment = (input: Extract<DispatchDocumentRenderData, { kind: 'STATEMENT_ADJUSTMENT' }>, assets: DispatchDocumentAssets) => {
   const number = `${input.waybillNumber} / اصلاحیه ${localizeDigits(String(input.payload.sequence))}`;
-  const rows = input.payload.lines.map((line, index) => `<tr><td>${localizeDigits(String(index + 1))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value attribution" data-pdf-cell><span>قرارداد: ${escapeHtml(line.contractId)}</span><span>قلم: ${escapeHtml(line.contractItemId)}</span><span>ردیف: ${escapeHtml(line.productRowId)}</span></td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantityDelta))}</td><td>${escapeHtml(line.unit)}</td><td class="numeric money" data-pdf-cell>${formatSignedMoney(line.grossAmountDelta)}</td><td class="numeric money" data-pdf-cell>${formatSignedMoney(line.discountDelta)}</td><td class="numeric money strong" data-pdf-cell>${formatSignedMoney(line.netAmountDelta)}</td></tr>`).join('');
-  return `${renderHeader(input, assets, 'اصلاحیه صورت‌حساب محموله', number)}<div class="adjustment-reason"><span>علت اصلاح</span><strong>${escapeHtml(input.payload.reason)}</strong></div><table>${renderTableHead(moneyColumns.replace('مقدار', 'تغییر مقدار').replace('مبلغ ناخالص', 'تغییر ناخالص').replace('تخفیف تخصیص‌یافته', 'تغییر تخفیف').replace('مبلغ خالص', 'تغییر خالص'), 8, 'اصلاحیه صورت‌حساب محموله', number)}<tbody>${rows}</tbody></table>
+  const rows = input.payload.lines.map((line, index) => `<tr><td>${localizeDigits(String(index + 1))}</td><td>${escapeHtml(line.label)}</td><td class="identity-value attribution" data-pdf-cell><span>قرارداد: ${escapeHtml(line.contractId)}</span><span>قلم: ${escapeHtml(line.contractItemId)}</span><span>ردیف: ${escapeHtml(line.productRowId)}</span></td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantityDelta))}</td><td>${escapeHtml(displayUnit(line.unit))}</td><td class="numeric money" data-pdf-cell>${formatSignedMoney(line.grossAmountDelta)}</td><td class="numeric money" data-pdf-cell>${formatSignedMoney(line.discountDelta)}</td><td class="numeric money strong" data-pdf-cell>${formatSignedMoney(line.netAmountDelta)}</td></tr>`).join('');
+  return `${renderHeader(input, assets, 'اصلاحیه صورت‌حساب محموله', number)}<div class="adjustment-reason"><span>علت اصلاح</span><strong>${escapeHtml(input.payload.reason)}</strong></div><table>${renderTableHead(`${adjustmentColumns}<th class="money-column">مبلغ ناخالص</th><th class="money-column">تخفیف تخصیص‌یافته</th><th class="money-column">مبلغ خالص</th>`.replace('مقدار', 'تغییر مقدار').replace('مبلغ ناخالص', 'تغییر ناخالص').replace('تخفیف تخصیص‌یافته', 'تغییر تخفیف').replace('مبلغ خالص', 'تغییر خالص'), 8, 'اصلاحیه صورت‌حساب محموله', number)}<tbody>${rows}</tbody></table>
     <section class="grand-total adjustment-total"><span>جمع خالص اصلاحیه</span><div><small>تغییر ناخالص</small><strong>${formatSignedMoney(input.payload.grossAmountDelta)}</strong></div><div><small>تغییر تخفیف</small><strong>${formatSignedMoney(input.payload.discountDelta)}</strong></div><div class="net"><small>تغییر خالص (${escapeHtml(input.payload.currency)})</small><strong>${formatSignedMoney(input.payload.netAmountDelta)}</strong></div></section>`;
 };
 

@@ -29,8 +29,11 @@ count 0, HTTP 200 and SQLite integrity `ok` were checked first. SIGCONT through
 Docker left PID 707 running with restart count 0. TERM to PID 1 from inside the
 same container then produced `exited`, exit code 0, PID 0 and restart count 0;
 Docker did not restart it. `docker start` restored the same ID/image/creation
-identity and healthy HTTP 200, with SQLite integrity still `ok`. All six local
-services were preserved. This tests the restart-policy mechanism on local
+identity and healthy HTTP 200, with SQLite integrity still `ok`. A read-only
+check of that exact container's root-owned, mode 0600 `config.v2.json` after
+restart showed `HasBeenManuallyStopped=false`, restoring normal automatic
+restart behavior. All six local services were preserved. This tests the
+restart-policy mechanism on local
 Docker 29.9.2; it is not production admission or a recovery drill.
 
 The production Docker daemon and metadata were inspected read-only: Engine

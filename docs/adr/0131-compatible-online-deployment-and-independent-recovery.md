@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded by ADR-0039 (2026-11-12)
 ---
 
 # Compatible online deployment and independent recovery
+
+The online deployment program was retired for production updates under [Issue #427](https://github.com/Mahaan-Amr/sabalanerp/issues/427). This document remains as design history and grants no production admission. Protected maintenance deployment under ADR-0039 is the supported release method. Its lease, no-public-write checkpoint boundary, independent remote verification, immutable rollback, complete release gates, and fail-closed recovery remain mandatory. The reference-aware storage cleanup and two newest complete healthy independently verified recovery points remain applicable to protected updates.
 
 The owner approved this contract on 2026-10-14; implementation and acceptance are tracked in [Issue #405](https://github.com/Mahaan-Amr/sabalanerp/issues/405). Accepted design is not certification of a production-ready release path. Implementation status is recorded in `docs/operations/online-deployment.md`.
 

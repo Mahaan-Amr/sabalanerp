@@ -9,12 +9,6 @@ const known = {
     sha256: 'c0dea142d206b5538fd81c98961aaf86926c999cdd8fb722e0aab3d72ab23289', statements: 4,
     tables: ['driver_vehicle_assignment_plans'], functions: [] as string[],
   },
-  '20261014140000_online_deployment_control': {
-    sha256: '872f0f0858473546cee56b836fa64c95d668997304ae462ac2c18428e69f4cb2', statements: 29,
-    tables: ['online_releases', 'online_runtime_slots', 'online_migration_steps'],
-    functions: ['sabalan_protect_online_release_identity', 'sabalan_protect_online_runtime_identity',
-      'sabalan_protect_online_migration_identity', 'sabalan_prevent_online_registry_delete'],
-  },
 } as const;
 export const protectedBridgeMigrationNames: readonly string[] = Object.freeze(Object.keys(known));
 function failure(code: string): never { throw Object.assign(new Error(code), { code }); }
@@ -42,9 +36,9 @@ export function assertBootstrapNativeCompletion(directory: string) {
   } finally { fs.closeSync(fd); }
 }
 
-/** Only these two byte-exact, reviewed additive bootstrap files. The splitter
+/** Only this byte-exact, reviewed additive bootstrap file. The splitter
  * is deliberately NOT an arbitrary SQL parser: the complete SHA is checked
- * first, and both exact statement counts are frozen. Dollar-quoted function
+ * first, and its exact statement count is frozen. Dollar-quoted function
  * bodies in these files contain no CREATE/ALTER statement boundary.
  */
 export function compileProtectedBridgeMigration(name: string, bytes: Buffer) {

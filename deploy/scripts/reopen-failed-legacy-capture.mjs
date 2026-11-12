@@ -43,9 +43,10 @@ function read(file,expected,mode=0o400,maximum=32*1024**2){
 }
 function verifyHostPrismaTree(directory){
  assert.equal(fs.realpathSync(directory),directory);const entries=[];
- function visit(file,relative){const stat=fs.lstatSync(file);assert.equal(stat.uid,0);assert.equal(stat.mode&0o022,0);assert.equal(stat.isSymbolicLink(),false);
-  if(stat.isDirectory()){for(const name of fs.readdirSync(file).sort())visit(path.join(file,name),relative?relative+'/'+name:name);return;}
-  assert.equal(stat.isFile(),true);assert.equal(stat.nlink,1);const bytes=fs.readFileSync(file);entries.push([relative,stat.mode&0o777,bytes.length,hash(bytes)].join('\0'));
+ function visit(file,relative){const before=fs.lstatSync(file,{bigint:true});assert.equal(fs.realpathSync(file),file);assert.equal(before.uid,0n);assert.equal(before.mode&0o022n,0n);assert.equal(before.isSymbolicLink(),false);
+  if(before.isDirectory()){for(const name of fs.readdirSync(file).sort())visit(path.join(file,name),relative?relative+'/'+name:name);assert.equal(pin(before),pin(fs.lstatSync(file,{bigint:true})));return;}
+  assert.equal(before.isFile(),true);assert.equal(before.nlink,1n);const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+  try{assert.equal(pin(before),pin(fs.fstatSync(fd,{bigint:true})));const bytes=fs.readFileSync(fd);assert.equal(pin(before),pin(fs.fstatSync(fd,{bigint:true})));assert.equal(pin(before),pin(fs.lstatSync(file,{bigint:true})));entries.push([relative,Number(before.mode&0o777n),bytes.length,hash(bytes)].join('\0'));}finally{fs.closeSync(fd);}
  }
  visit(directory,'');assert.equal(entries.length,20);assert.equal(hash(Buffer.from(entries.join('\n')+'\n')),INCIDENT_PRISMA_TREE_SHA,'INCIDENT_PRISMA_TREE_CHANGED');
  const pkg=JSON.parse(fs.readFileSync(path.join(directory,'package.json'),'utf8'));assert.equal(pkg.version,'5.22.0');
@@ -129,7 +130,6 @@ async function main(){
  assert.equal(plan.controlSourceCommit,'75cf7231cdc186875057f9ab88723cf8c2a11685');
  assert.equal(plan.controlSourceHash,'a190a9fccba8c62a9c043587c6a98e1799e54fc34e18f50572507ab6017d76e5');
  assert.equal(plan.prismaTreeSha256,INCIDENT_PRISMA_TREE_SHA);
- const prismaDependency=verifyHostPrismaTree(path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client'));
  const directory=plan.operationDirectory;assert.ok(path.isAbsolute(directory)&&path.dirname(directory)==='/opt/sabalanerp/.deploy-state'&&path.basename(directory).startsWith('failed-legacy-reopen-')&&!fs.existsSync(directory));fs.mkdirSync(directory,{mode:0o700});
  const audit=(name,value)=>{assert.match(name,/^[a-z0-9-]+$/);const target=path.join(directory,name+'.json'),fd=fs.openSync(target,'wx',0o400);try{fs.writeFileSync(fd,encoded(value));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}const d=fs.openSync(directory,'r');try{fs.fsyncSync(d);}finally{fs.closeSync(d);}};
  const children=[];async function run(executable,args,environment={}){
@@ -184,7 +184,10 @@ async function main(){
  const backendMount=original.rows.find(row=>row.Config.Labels['com.docker.compose.service']==='backend').Mounts.find(row=>row.Destination==='/app/recovery-coordination'&&row.RW===true);assert.ok(backendMount);assert.equal(plan.coordinationRoot,backendMount.Source);
  const token=randomBytes(32).toString('hex'),maint=path.join(plan.coordinationRoot,'deployment-maintenance.json');
  const maintenanceRaw=read(maint,undefined,0o600),maintenance=JSON.parse(maintenanceRaw);assert.equal(maintenance.deploymentId,plan.deploymentId);
- const require=createRequire(import.meta.url),{PrismaClient}=require('./online-release-host-dependencies/node_modules/@prisma/client'),database=new PrismaClient({datasources:{db:{url:url.href}}});let acquired=false,done=false,heartbeat,timerFailure,pulse=Promise.resolve();
+ const prismaDependency=verifyHostPrismaTree(path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client'));
+ const require=createRequire(import.meta.url),preRequireCache=new Set(Object.keys(require.cache)),{PrismaClient}=require('./online-release-host-dependencies/node_modules/@prisma/client');
+ const loadedPrisma=Object.keys(require.cache).filter(file=>!preRequireCache.has(file)).sort(),expectedPrismaModules=[path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client/index.js'),path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client/runtime/library.js')].sort();assert.deepEqual(loadedPrisma,expectedPrismaModules,'INCIDENT_PRISMA_MODULE_CLOSURE_CHANGED');
+ const database=new PrismaClient({datasources:{db:{url:url.href}}});let acquired=false,done=false,heartbeat,timerFailure,pulse=Promise.resolve();
  async function advisory(){const rows=await database.$queryRawUnsafe("SELECT pg_backend_pid() AS pid,(SELECT backend_start::text FROM pg_stat_activity WHERE pid=pg_backend_pid()) AS birth,EXISTS(SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='advisory' AND classid=0 AND objid=741936425 AND objsubid=1 AND granted AND mode='ExclusiveLock') AS owned");assert.equal(rows.length,1);assert.equal(rows[0].owned,true);return rows[0];}
  try{
   const [claim]=await database.$queryRawUnsafe('SELECT pg_try_advisory_lock(741936425) AS owned');assert.equal(claim.owned,true);const birth=await advisory();progress('ADVISORY_VERIFIED');
@@ -222,6 +225,8 @@ async function main(){
   assert.equal(fs.existsSync('/proc/'+signalProof.originalNode.pid),false,'ORIGINAL_LEGACY_NODE_REAPPEARED');
   const finalOldSql=await database.$queryRawUnsafe('SELECT count(*)::int AS count FROM pg_stat_activity WHERE client_addr=$1::inet AND backend_start <= $2::timestamptz',backendIp[0],backend.State.FinishedAt);assert.equal(finalOldSql[0].count,0,'OLD_BACKEND_SQL_SESSION_REAPPEARED');
   const [finalDatabaseIdentity]=await database.$queryRawUnsafe('SELECT current_database() AS name,p.system_identifier::text AS "systemIdentifier",d.oid::text AS oid FROM pg_control_system() p CROSS JOIN pg_database d WHERE d.datname=current_database()');assert.equal(finalDatabaseIdentity.name,plan.databaseIdentity.name);assert.equal(finalDatabaseIdentity.systemIdentifier,plan.databaseIdentity.systemIdentifier);assert.equal(finalDatabaseIdentity.oid,plan.databaseIdentity.oid);
+  assert.deepEqual(verifyHostPrismaTree(path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client')),prismaDependency,'INCIDENT_PRISMA_TREE_CHANGED_BEFORE_REOPEN');
+  assert.deepEqual(Object.keys(require.cache).filter(file=>!preRequireCache.has(file)).sort(),expectedPrismaModules,'INCIDENT_PRISMA_LAZY_MODULE_CLOSURE_CHANGED');
   for(const item of Object.values(plan.legacySignal))read(item.file,item.sha256);
   await noIncidentTransport();
   const reconciliationProofs=[{name:'original-terminal-journal-no-mutation-or-checkpoint',passed:true,journalSha256:plan.journal.sha256},{name:'failed-legacy-signal-and-restarted-previous-runtime',passed:true,signalPlanSha256:plan.legacySignal.plan.sha256,signalResultSha256:plan.legacySignal.result.sha256,incarnations},{name:'source-database-migration-history-and-previous-images',passed:true,sourceDatabase:plan.databaseIdentity,migrationProof},{name:'canonical-previous-config-and-private-bind-bytes',passed:true,snapshotSha256:plan.originalSnapshot.sha256}];

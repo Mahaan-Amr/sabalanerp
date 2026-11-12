@@ -4,7 +4,10 @@ import { canonicalHash } from '@sabalanerp/partner-sales-contracts';
 import { historicalAccountingFixture, writerBoundAccountingFixture } from './partnerAccountingHistoricalReadFixture';
 const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
 
-export async function seedHistoricalAccountingRead(database: PrismaClient, password = 'HistoricalAccountingQa2026!', writerBound = false) {
+export async function seedHistoricalAccountingRead(database: PrismaClient, password = 'HistoricalAccountingQa2026!', writerBound = false): Promise<{
+  fixture: Awaited<ReturnType<typeof historicalAccountingFixture>> | Awaited<ReturnType<typeof writerBoundAccountingFixture>>;
+  actorId: string; username: string; password: string;
+}> {
     const f = writerBound ? await writerBoundAccountingFixture(true) : await historicalAccountingFixture();
     const row = f.row;
     await database.$transaction(async tx => {

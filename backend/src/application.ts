@@ -92,9 +92,8 @@ import partnerActivationRoutes from "./routes/partner-activation";
 
 let applicationConstructed = false;
 /** Construct the canonical HTTP/Socket.IO application without starting a
- * listener, recovery, schedulers or process signal handlers. Private native
- * entries must bind the platform ownership BEFORE importing this module.
- * runtimeRole retains the ordinary candidate admission restrictions. */
+ * listener, recovery, schedulers or process signal handlers. The protected
+ * runtime binds platform ownership before application startup. */
 export function createApplication({ runtimeRole, isShuttingDown }: {
   runtimeRole: BackendRuntimeRole;
   isShuttingDown: () => boolean;

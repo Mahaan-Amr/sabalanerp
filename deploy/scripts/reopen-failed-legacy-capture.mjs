@@ -28,6 +28,9 @@ const INCIDENT_SIGNAL_RESULT_SHA='c14ccec02c1a44baedc78c651bd1f791b10a8fe6269eb2
 const INCIDENT_SIGNAL_HELD_SHA='19442e44fb7388a6f652cd84e4bf02a490448e47087117a39db606b4bda33fe4';
 const INCIDENT_BACKEND_ID='4bb3a88e376d81038a5650e76b7ce29de9e256538602bb7f678acab09d105b21';
 const INCIDENT_NGINX_ID='0274de7f7b3c3f33803829ebeefb5742920b40bd64cf29bce00167c6233db0e0';
+const INCIDENT_NGINX_HOST_CONFIG_SHA='5cd510b5dc778a504048b35135362ea9ca2d17349c8f7f882e233e5267a13e0d';
+const INCIDENT_NGINX_ORIGINAL_HOST_CONFIG_SHA='ac5cdad3aa442fcaf25e54e29d4c1b7aa28f231b9929ba8dafcd2e79d5b2db79';
+const INCIDENT_NGINX_BIND_ORDER=[2,3,4,5,6,0,1];
 const INCIDENT_PRISMA_TREE_SHA='7f9cac9400fbf76d5b8ec9a528fa9b3e7bb39351804715646db39e9643410492';
 const LEGACY_IMAGE='sha256:e407ff125c6fb0b441f6fa782101a4ec5159e928a5ebae7ddc32faef869afed3';
 const hostEnvironment={PATH:'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',HOME:'/root',DOCKER_HOST:'unix:///var/run/docker.sock'};
@@ -136,6 +139,7 @@ async function main(){
  const [file,expected]=process.argv.slice(2),raw=read(file,expected,0o600),plan=JSON.parse(raw),ownedLock=lock();assert.equal(plan.format,'sabalan-failed-legacy-capture-reopen/v1');
  assert.equal(plan.repositoryRoot,'/opt/sabalanerp');assert.match(plan.deploymentId,/^[A-Za-z0-9_-]{8,160}$/);assert.match(plan.targetCommit,/^[a-f0-9]{40}$/);assert.match(plan.controlImage,/^sha256:[a-f0-9]{64}$/);
  assert.equal(plan.deploymentId,INCIDENT_ID);assert.equal(plan.releaseId,INCIDENT_ID.slice('deploy-'.length));assert.equal(plan.targetCommit,INCIDENT_SOURCE);assert.equal(plan.checkoutCommit,INCIDENT_CHECKOUT);assert.equal(plan.journal.sha256,INCIDENT_JOURNAL_SHA);assert.equal(plan.originalSnapshot.sha256,INCIDENT_SNAPSHOT_SHA);assert.equal(plan.legacySignal.plan.sha256,INCIDENT_SIGNAL_PLAN_SHA);assert.equal(plan.legacySignal.intent.sha256,INCIDENT_SIGNAL_INTENT_SHA);assert.equal(plan.legacySignal.result.sha256,INCIDENT_SIGNAL_RESULT_SHA);assert.equal(plan.legacySignal.held.sha256,INCIDENT_SIGNAL_HELD_SHA);
+ assert.equal(plan.currentNginxHostConfigSha256,INCIDENT_NGINX_HOST_CONFIG_SHA);
  assert.equal(plan.environmentFile,'/opt/sabalanerp/deploy/.env.prod');assert.equal(plan.originalSnapshot.file,'/opt/sabalanerp/.deploy-state/capture-only-'+plan.deploymentId+'.json');assert.equal(plan.journal.file,'/opt/sabalanerp/reports/deploy/'+plan.deploymentId+'.journal.jsonl');
  assert.equal(plan.ownerSourceSha256,hash(fs.readFileSync(fileURLToPath(import.meta.url))),'INCIDENT_OWNER_SOURCE_CHANGED');
  assert.equal(plan.controlImage,'sha256:33defd04a0d04e1cde7d4047e7bfaee536d60705bbf4781ae78c40fcb8ba6dcd');
@@ -170,12 +174,21 @@ async function main(){
  async function configuration(){
   const rows=await census(),bindings=configurationBytes(rows,plan.environmentFile),currentIdentities=originalContainerIdentities(rows);
   assert.deepEqual(bindings,snapshot.configurationBytes,'PREVIOUS_RELEASE_BIND_BYTES_CHANGED');
+  const currentServices=originalServiceConfiguration(rows),frontend=rows.find(row=>row.Config.Labels['com.docker.compose.service']==='frontend');
+  for(const role of roles.filter(role=>role!=='nginx'))assert.deepEqual(currentServices[role],snapshot.services[role],'UNCHANGED_PREVIOUS_SERVICE_CONFIGURATION_CHANGED');
   const projected=structuredClone(rows),nginx=projected.find(row=>row.Config.Labels['com.docker.compose.service']==='nginx');
+  assert.equal(currentServices.nginx.hostConfigSha256,INCIDENT_NGINX_HOST_CONFIG_SHA,'RECREATED_NGINX_HOST_CONFIG_CHANGED');
+  for(const key of ['Dns','DnsOptions','DnsSearch']){assert.equal(nginx.HostConfig[key],null,'RECREATED_NGINX_DNS_NOT_DEFAULT');assert.deepEqual(frontend.HostConfig[key],[],'ORIGINAL_FRONTEND_DNS_NOT_DEFAULT');nginx.HostConfig[key]=frontend.HostConfig[key];}
+  assert.equal(nginx.HostConfig.Binds.length,INCIDENT_NGINX_BIND_ORDER.length);
+  const bindTargets=nginx.HostConfig.Binds.map(bind=>{const parts=bind.split(':');assert.ok(parts.length===2||parts.length===3);assert.ok(parts[0]&&path.posix.isAbsolute(parts[1]));return parts[1].replace(/\/$/,'');});
+  assert.deepEqual([...bindTargets].sort(),snapshot.services.nginx.mounts.map(mount=>mount.destination).sort(),'RECREATED_NGINX_BINDS_CHANGED');
+  for(const [i,target] of bindTargets.entries())for(const [j,other] of bindTargets.entries())if(i!==j)assert.ok(target!==other&&!target.startsWith(other+'/'),'RECREATED_NGINX_BINDS_OVERLAP');
+  nginx.HostConfig.Binds=INCIDENT_NGINX_BIND_ORDER.map(index=>nginx.HostConfig.Binds[index]);
   const order=plan.nginxEnvPermutation;assert.ok(Array.isArray(order)&&order.length===nginx.Config.Env.length&&new Set(order).size===order.length&&order.every((n,i)=>Number.isSafeInteger(n)&&n>=0&&n<order.length));
   nginx.Config.Env=order.map(index=>nginx.Config.Env[index]);
-  const services=originalServiceConfiguration(projected);assert.deepEqual(services,snapshot.services,'PREVIOUS_RELEASE_CONFIGURATION_CHANGED');
+  const services=originalServiceConfiguration(projected);assert.equal(snapshot.services.nginx.hostConfigSha256,INCIDENT_NGINX_ORIGINAL_HOST_CONFIG_SHA);assert.deepEqual(services,snapshot.services,'PREVIOUS_RELEASE_CONFIGURATION_CHANGED');
   for(const role of roles)assert.equal(currentIdentities[role].image,snapshot.originalContainerIdentities[role].image);
-  return {rows,services,configurationBytes:bindings,currentIdentities};
+  return {rows,services,configurationBytes:bindings,currentIdentities,nginxHostConfigProof:{currentSha256:INCIDENT_NGINX_HOST_CONFIG_SHA,originalSha256:snapshot.services.nginx.hostConfigSha256,dnsCurrent:'null',dnsOriginal:'empty-arrays',bindOrder:INCIDENT_NGINX_BIND_ORDER,originalCaptureGuardPassed:false}};
  }
  function currentLegacyNode(backend){
   const expected=plan.currentNode,pid=expected.pid;assert.equal(backend.State.Pid,expected.initPid);assert.notEqual(pid,signalProof.originalNode.pid);
@@ -225,7 +238,7 @@ async function main(){
   const currentIdentities=original.currentIdentities;
   const incarnations=verifyRecoveredPreviousIncarnations({services:snapshot.services,identities:snapshot.originalContainerIdentities,currentServices:original.services,currentIdentities,facts:{backendOriginalStartedAt:signalProof.originalContainer.startedAt,backendCurrentStartedAt:backend.State.StartedAt,backendPreviousFinishedAt:backend.State.FinishedAt,oldNodeAbsent:true,oldSqlSessions:oldSql[0].count,backendRestartCountNow:backend.RestartCount}});
   assert.equal(plan.recreatedNginxContainerId,INCIDENT_NGINX_ID);assert.equal(currentIdentities.nginx.id,INCIDENT_NGINX_ID);
-  const ownerStat=fs.readFileSync('/proc/self/stat','utf8'),ownerBirth={pid:process.pid,startTicks:ownerStat.slice(ownerStat.lastIndexOf(')')+2).split(' ')[19],kernelBootId:fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim()};audit('incident-lease-intent',{deploymentId:plan.deploymentId,ownerBirth,leaseTokenSha256:hash(token),signalProof,incarnations,prismaDependency,nativeEngine});
+  const ownerStat=fs.readFileSync('/proc/self/stat','utf8'),ownerBirth={pid:process.pid,startTicks:ownerStat.slice(ownerStat.lastIndexOf(')')+2).split(' ')[19],kernelBootId:fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim()};audit('incident-lease-intent',{deploymentId:plan.deploymentId,ownerBirth,leaseTokenSha256:hash(token),signalProof,incarnations,prismaDependency,nativeEngine,nginxHostConfigProof:original.nginxHostConfigProof});
   assert.deepEqual(await advisory(),birth);assert.equal(lock(),ownedLock);await database.$transaction(async tx=>{const rows=await tx.$queryRawUnsafe('SELECT * FROM deployment_operations WHERE id=$1 FOR UPDATE',plan.deploymentId);assert.equal(rows.length,1);assert.deepEqual(rows[0],baseline,'INCIDENT_ROW_CHANGED_DURING_READONLY_PROOF');const active=await tx.deploymentOperation.findUnique({where:{activeKey:'production'}});assert.equal(active,null);await tx.deploymentOperation.update({where:{id:plan.deploymentId},data:{activeKey:'production',leaseToken:token,leaseExpiresAt:new Date(Date.now()+120000),heartbeatAt:new Date()}});});acquired=true;audit('incident-lease-acquired',{deploymentId:plan.deploymentId,originalRow:baseline,ownerBirth,leaseTokenSha256:hash(token),originalJournalSha256:plan.journal.sha256,originalJournal:journal,originalSnapshotSha256:plan.originalSnapshot.sha256,legacySignal:plan.legacySignal,failedCapturePreserved:true,publicBoundary});progress('INCIDENT_LEASE_ACQUIRED');
   heartbeat=setInterval(()=>{pulse=pulse.then(async()=>{assert.equal(lock(),ownedLock);assert.deepEqual(await advisory(),birth);const result=await database.deploymentOperation.updateMany({where:{id:plan.deploymentId,phase:'RECOVERY_REQUIRED',activeKey:'production',leaseToken:token},data:{heartbeatAt:new Date(),leaseExpiresAt:new Date(Date.now()+120000)}});assert.equal(result.count,1);}).catch(error=>{timerFailure=error;});},15000);
   const currentEnv=Object.fromEntries(backend.Config.Env.map(row=>{const i=row.indexOf('=');return [row.slice(0,i),row.slice(i+1)];}));
@@ -244,7 +257,7 @@ async function main(){
   assert.deepEqual(Object.keys(require.cache).filter(file=>!preRequireCache.has(file)).sort(),expectedPrismaModules,'INCIDENT_PRISMA_LAZY_MODULE_CLOSURE_CHANGED');
   for(const item of Object.values(plan.legacySignal))read(item.file,item.sha256);
   await noIncidentTransport();
-  const reconciliationProofs=[{name:'original-terminal-journal-no-mutation-or-checkpoint',passed:true,journalSha256:plan.journal.sha256},{name:'failed-legacy-signal-and-restarted-previous-runtime',passed:true,signalPlanSha256:plan.legacySignal.plan.sha256,signalResultSha256:plan.legacySignal.result.sha256,incarnations},{name:'source-database-migration-history-and-previous-images',passed:true,sourceDatabase:plan.databaseIdentity,migrationProof},{name:'canonical-previous-config-and-private-bind-bytes',passed:true,snapshotSha256:plan.originalSnapshot.sha256}];
+  const reconciliationProofs=[{name:'original-terminal-journal-no-mutation-or-checkpoint',passed:true,journalSha256:plan.journal.sha256},{name:'failed-legacy-signal-and-restarted-previous-runtime',passed:true,signalPlanSha256:plan.legacySignal.plan.sha256,signalResultSha256:plan.legacySignal.result.sha256,incarnations},{name:'source-database-migration-history-and-previous-images',passed:true,sourceDatabase:plan.databaseIdentity,migrationProof},{name:'canonical-previous-config-and-private-bind-bytes',passed:true,snapshotSha256:plan.originalSnapshot.sha256,nginxHostConfigProof:original.nginxHostConfigProof}];
   audit('verified-before-reopen',{deploymentId:plan.deploymentId,canonicalPreviousGates:gates,reconciliationProofs,historicalUntracked,originalCaptureGuardPassed:false,captureQualified:false,checkpointCreated:false,databaseRestored:false,originalJournalPreserved:true,allOriginalChildrenClosed:children.every(row=>row.closed),children});
   // Do not reset the failed row or pretend it was a successful capture.
   // Normal maintenance semantics: exact owner marker, same inode, unlink.

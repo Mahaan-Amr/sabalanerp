@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {spawn} from 'node:child_process';
-import {validateFailedLegacyCaptureJournal, validateFailedLegacySignal, verifyRecoveredPreviousIncarnations, validateCurrentLegacyNode, observeBoundedChild} from '../../deploy/scripts/reopen-failed-legacy-capture.mjs';
+import {spawn,execFileSync} from 'node:child_process';
+import {validateFailedLegacyCaptureJournal, validateFailedLegacySignal, verifyRecoveredPreviousIncarnations, validateCurrentLegacyNode, observeBoundedChild, validateHistoricalCheckoutMigrationDelta} from '../../deploy/scripts/reopen-failed-legacy-capture.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 function journal(phases=['PREFLIGHT','LEASE_ACQUIRED','MAINTENANCE_REQUESTED','TRAFFIC_BLOCKED','RECOVERY_REQUIRED']){
@@ -13,6 +13,14 @@ test('failed pre-checkpoint capture journal proves terminal no-mutation and reje
  assert.equal(validateFailedLegacyCaptureJournal(journal(),'deploy_incident').checkpointReached,false);
  for(const phases of [['PREFLIGHT','TRAFFIC_BLOCKED','SERVICES_DRAINED','RECOVERY_REQUIRED'],['PREFLIGHT','TRAFFIC_BLOCKED','LOCAL_CHECKPOINT_VERIFIED','RECOVERY_REQUIRED'],['PREFLIGHT','TRAFFIC_BLOCKED','MUTATION_STARTED','RECOVERY_REQUIRED'],['PREFLIGHT','RECOVERY_REQUIRED']])assert.throws(()=>validateFailedLegacyCaptureJournal(journal(phases),'deploy_incident'));
  assert.throws(()=>validateFailedLegacyCaptureJournal(Buffer.from(journal().toString().replace('phase-transition','altered')),'deploy_incident'));
+});
+const older='b58c53c0f88d2d89da3cb6a45949e6eca97e4308',checkout='aa7d384b2fce1dee7cface249699e0d82d495f6a';
+let localGitObjects=true;try{execFileSync('git',['rev-parse','--verify',older],{stdio:'ignore'});}catch{localGitObjects=false;}
+test('the clean live checkout may add exactly the known fifteen migrations after the failed operation target',{skip:!localGitObjects},()=>{
+ const delta=execFileSync('git',['diff','--name-status',older,checkout,'--','backend/prisma/migrations'],{encoding:'utf8'});
+ assert.equal(validateHistoricalCheckoutMigrationDelta(delta).added,15);
+ assert.throws(()=>validateHistoricalCheckoutMigrationDelta(delta.replace(/^A\t/m,'M\t')));
+ assert.throws(()=>validateHistoricalCheckoutMigrationDelta(delta+'A\tbackend/prisma/migrations/unknown/migration.sql\n'));
 });
 test('failed signal receipt binds original stopped Node and refuses a successful or replaced observation',()=>{
  const snapshot={container:{kind:'KNOWN_LEGACY_SHELL',containerId:'a'.repeat(64),image:'sha256:'+ 'b'.repeat(64),created:'2026-11-06T22:01:49Z',startedAt:'2026-11-12T08:41:47Z',initHostPid:128083},node:{pid:128146,startTicks:'379448204'},bootId:'boot'};

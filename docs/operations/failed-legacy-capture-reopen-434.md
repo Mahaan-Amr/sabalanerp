@@ -26,8 +26,9 @@ it does not replace the original failed operation's journal or report row.
 The plan format is `sabalan-failed-legacy-capture-reopen/v1`. It pins:
 
 - `repositoryRoot`, `environmentFile`, `coordinationRoot`, `operationDirectory`;
-- original `deploymentId`, `releaseId`, `targetCommit`, PostgreSQL connection
-  URL and database name/system identifier/OID;
+- original `deploymentId`, `releaseId`, `targetCommit` (`b58c53c0…`), separate
+  clean live `checkoutCommit` (`aa7d384b…`), PostgreSQL connection URL and
+  database name/system identifier/OID;
 - immutable `controlImage`, `controlSourceCommit`, `controlSourceHash`, and
   `ownerSourceSha256`;
 - original `journal` and `originalSnapshot` paths and SHA-256 values;
@@ -48,7 +49,11 @@ zero old backend SQL sessions, same old backend container and image with a
 verified changed process birth, only Nginx replaced, and complete previous service configuration
 and private bind bytes. Nginx Env ordering may be projected only by the pinned
 permutation; every other configuration field must match the original snapshot.
-The source commit, migration checksums, PostgreSQL identity, both public 503
+The clean live checkout is a descendant of the failed operation's target
+commit and adds exactly the fifteen reviewed migration SQL files; it does not
+establish the e407 image's compiled source provenance. The 439 earlier SQL
+files are unchanged in the checkout and their checksums must match the
+successful production migration ledger. PostgreSQL identity, both public 503
 responses, and all fourteen `PREVIOUS_UNCHANGED` gates must pass. The owner
 rechecks six container births and private evidence before removing the exact
 maintenance marker under the live lease and recording `ABORTED` with the

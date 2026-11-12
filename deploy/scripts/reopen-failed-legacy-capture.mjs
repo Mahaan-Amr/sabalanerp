@@ -14,6 +14,12 @@ const roles=['backend','frontend','inquiry','nginx','postgres','clamav'];
 const INCIDENT_ID='deploy-20261112T100637Z-b58c53c0f88d-release';
 const INCIDENT_GATE_ID='incident-434-20261112T100637Z-b58c53c0f88d-release';
 const INCIDENT_SOURCE='b58c53c0f88d2d89da3cb6a45949e6eca97e4308';
+const INCIDENT_CHECKOUT='aa7d384b2fce1dee7cface249699e0d82d495f6a';
+const LATER_MIGRATIONS=[
+ '20261014140000_online_deployment_control','20261019010000_customer_semantic_barrier','20261019020000_hr_versioned_file_cleanup','20261020010000_online_realtime_completion','20261020093000_online_serving_epochs',
+ '20261021120000_attendance_effective_rest_windows','20261025120000_preserve_exact_fulfillment_quantities','20261028090000_sales_dispatch_invoices','20261028093000_sales_invoice_evidence_constraints','20261028100000_sales_invoice_correction_evidence',
+ '20261031130000_purchasing_operational_workspace','20261101160000_supply_chain_exact_purchase_quantities','20261101170000_purchasing_private_attachments','20261102120000_accounting_financial_approval_receipts','20261104150000_purchasing_duty_optional_deadline',
+].map(name=>'backend/prisma/migrations/'+name+'/migration.sql');
 const INCIDENT_JOURNAL_SHA='9034e93d1e8e3a2e3d7f9aa9a23d83f35751e4da06cae3691702b6461544586c';
 const INCIDENT_SNAPSHOT_SHA='9e71679fa0d549926bc2b2a326e1ef9ff6875dd7d18998f7b12224a2b2e38d86';
 const INCIDENT_SIGNAL_PLAN_SHA='c4249d28c726f7416e05073a9a12557fa8e6f0cfb01dd12ab98de8f5bdee2a1d';
@@ -44,6 +50,10 @@ export function validateFailedLegacyCaptureJournal(raw,deploymentId){
  }
  assert.ok(entries.some(row=>row.phase==='TRAFFIC_BLOCKED'));assert.equal(entries.at(-1).phase,'RECOVERY_REQUIRED');assert.equal(entries.at(-1).event,'deployment-finished');
  return {entries:entries.length,finalHash:previousHash,checkpointReached:false,mutationStarted:false};
+}
+export function validateHistoricalCheckoutMigrationDelta(raw){
+ const rows=raw.trim().split(/\r?\n/).filter(Boolean).map(line=>{const [status,file,...extra]=line.split('\t');assert.equal(extra.length,0);assert.equal(status,'A','OLD_MIGRATION_MODIFIED_OR_REMOVED');return file;});
+ assert.deepEqual(rows.sort(),[...LATER_MIGRATIONS].sort(),'HISTORICAL_CHECKOUT_MIGRATION_DELTA_CHANGED');return {added:rows.length};
 }
 export function validateFailedLegacySignal(plan,intent,result,held,expected){
  assert.equal(plan.format,'sabalan-legacy-backend-signal/v2');assert.equal(plan.deploymentId,expected.deploymentId);assert.equal(plan.releaseId,expected.releaseId);
@@ -101,7 +111,7 @@ async function main(){
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);assert.equal(process.argv.length,4);
  const [file,expected]=process.argv.slice(2),raw=read(file,expected,0o600),plan=JSON.parse(raw),ownedLock=lock();assert.equal(plan.format,'sabalan-failed-legacy-capture-reopen/v1');
  assert.equal(plan.repositoryRoot,'/opt/sabalanerp');assert.match(plan.deploymentId,/^[A-Za-z0-9_-]{8,160}$/);assert.match(plan.targetCommit,/^[a-f0-9]{40}$/);assert.match(plan.controlImage,/^sha256:[a-f0-9]{64}$/);
- assert.equal(plan.deploymentId,INCIDENT_ID);assert.equal(plan.releaseId,INCIDENT_ID.slice('deploy-'.length));assert.equal(plan.targetCommit,INCIDENT_SOURCE);assert.equal(plan.journal.sha256,INCIDENT_JOURNAL_SHA);assert.equal(plan.originalSnapshot.sha256,INCIDENT_SNAPSHOT_SHA);assert.equal(plan.legacySignal.plan.sha256,INCIDENT_SIGNAL_PLAN_SHA);assert.equal(plan.legacySignal.intent.sha256,INCIDENT_SIGNAL_INTENT_SHA);assert.equal(plan.legacySignal.result.sha256,INCIDENT_SIGNAL_RESULT_SHA);assert.equal(plan.legacySignal.held.sha256,INCIDENT_SIGNAL_HELD_SHA);
+ assert.equal(plan.deploymentId,INCIDENT_ID);assert.equal(plan.releaseId,INCIDENT_ID.slice('deploy-'.length));assert.equal(plan.targetCommit,INCIDENT_SOURCE);assert.equal(plan.checkoutCommit,INCIDENT_CHECKOUT);assert.equal(plan.journal.sha256,INCIDENT_JOURNAL_SHA);assert.equal(plan.originalSnapshot.sha256,INCIDENT_SNAPSHOT_SHA);assert.equal(plan.legacySignal.plan.sha256,INCIDENT_SIGNAL_PLAN_SHA);assert.equal(plan.legacySignal.intent.sha256,INCIDENT_SIGNAL_INTENT_SHA);assert.equal(plan.legacySignal.result.sha256,INCIDENT_SIGNAL_RESULT_SHA);assert.equal(plan.legacySignal.held.sha256,INCIDENT_SIGNAL_HELD_SHA);
  assert.equal(plan.environmentFile,'/opt/sabalanerp/deploy/.env.prod');assert.equal(plan.originalSnapshot.file,'/opt/sabalanerp/.deploy-state/capture-only-'+plan.deploymentId+'.json');assert.equal(plan.journal.file,'/opt/sabalanerp/reports/deploy/'+plan.deploymentId+'.journal.jsonl');
  assert.equal(plan.ownerSourceSha256,hash(fs.readFileSync(fileURLToPath(import.meta.url))),'INCIDENT_OWNER_SOURCE_CHANGED');
  assert.equal(plan.controlImage,'sha256:33defd04a0d04e1cde7d4047e7bfaee536d60705bbf4781ae78c40fcb8ba6dcd');
@@ -129,7 +139,7 @@ async function main(){
  const signalProof=validateFailedLegacySignal(signalPlan,signalIntent,signalResult,signalHeld,{deploymentId:plan.deploymentId,releaseId:plan.releaseId,planSha256:plan.legacySignal.plan.sha256,backendImage:LEGACY_IMAGE});
  assert.equal(signalProof.originalContainer.containerId,snapshot.originalContainerIdentities.backend.id);
  assert.equal(signalProof.originalContainer.containerId,INCIDENT_BACKEND_ID);
- async function sourceUnchanged(){assert.equal((await run('git',['rev-parse','HEAD'])).toString().trim(),plan.targetCommit);await run('git',['diff','--quiet','HEAD','--']);await run('git',['diff','--cached','--quiet','--']);const raw=await run('git',['ls-files','--others','--exclude-standard','-z']);const actual=raw.toString('utf8').split('\0').filter(Boolean);return validateHistoricalUntrackedSourcePaths(actual,plan.historicalUntrackedSourcePaths);}
+ async function sourceUnchanged(){assert.equal((await run('git',['rev-parse','HEAD'])).toString().trim(),plan.checkoutCommit);await run('git',['diff','--quiet','HEAD','--']);await run('git',['diff','--cached','--quiet','--']);await run('git',['merge-base','--is-ancestor',INCIDENT_SOURCE,INCIDENT_CHECKOUT]);const delta=validateHistoricalCheckoutMigrationDelta((await run('git',['diff','--name-status',INCIDENT_SOURCE,INCIDENT_CHECKOUT,'--','backend/prisma/migrations'])).toString());const raw=await run('git',['ls-files','--others','--exclude-standard','-z']);const actual=raw.toString('utf8').split('\0').filter(Boolean);return {untracked:validateHistoricalUntrackedSourcePaths(actual,plan.historicalUntrackedSourcePaths),migrationDelta:delta};}
  const historicalUntracked=await sourceUnchanged();progress('SOURCE_VERIFIED');
  async function census(){const ids=[];for(const role of roles){const value=(await docker([...compose,'ps','--all','--quiet',role])).toString().trim();assert.match(value,/^[a-f0-9]{64}$/);ids.push(value);}const rows=JSON.parse((await docker(['inspect',...ids])).toString());for(const row of rows)assert.ok(row.State.Running&&row.State.Health?.Status==='healthy');return rows;}
  async function configuration(){
@@ -171,10 +181,11 @@ async function main(){
    const [identity]=await tx.$queryRawUnsafe('SELECT current_database() AS name,p.system_identifier::text AS "systemIdentifier",d.oid::text AS oid FROM pg_control_system() p CROSS JOIN pg_database d WHERE d.datname=current_database()');assert.equal(identity.name,plan.databaseIdentity.name);assert.equal(identity.systemIdentifier,plan.databaseIdentity.systemIdentifier);assert.equal(identity.oid,plan.databaseIdentity.oid);
    return row;
   });
-  const migrationRoot=path.join(plan.repositoryRoot,'backend/prisma/migrations'),checksums={};for(const name of fs.readdirSync(migrationRoot).sort()){const file=path.join(migrationRoot,name,'migration.sql');if(!fs.existsSync(file))continue;assert.equal(fs.realpathSync(file),file);checksums[name]=hash(fs.readFileSync(file));}
+  const tree=(await run('git',['ls-tree','-r','--name-only',INCIDENT_SOURCE,'--','backend/prisma/migrations'])).toString().trim().split(/\r?\n/).filter(file=>file.endsWith('/migration.sql'));assert.equal(tree.length,439,'HISTORICAL_MIGRATION_CATALOG_CHANGED');const checksums={};for(const relative of tree){assert.match(relative,/^backend\/prisma\/migrations\/[A-Za-z0-9_]+\/migration\.sql$/);const name=path.posix.basename(path.posix.dirname(relative)),file=path.join(plan.repositoryRoot,relative);assert.equal(fs.realpathSync(file),file);assert.equal(Object.hasOwn(checksums,name),false);checksums[name]=hash(fs.readFileSync(file));}
   const migrations=await database.$queryRawUnsafe('SELECT migration_name,checksum,finished_at IS NOT NULL AS finished,rolled_back_at IS NOT NULL AS rolled_back FROM _prisma_migrations ORDER BY migration_name,id');const migrationProof=validatePreviousMigrationHistory(migrations,checksums);progress('MIGRATION_LEDGER_VERIFIED');
   const backend=original.rows.find(row=>row.Config.Labels['com.docker.compose.service']==='backend');
   assert.equal(backend.Id,signalProof.originalContainer.containerId);assert.equal(backend.Image,LEGACY_IMAGE);
+  for(const mount of backend.Mounts){const target=mount.Destination.replace(/\/$/,'');for(const code of ['/app/dist','/app/node_modules','/app/scripts','/usr/local/bin/node','/usr/bin/dash'])assert.ok(!(code===target||code.startsWith(target+'/')),'LEGACY_RUNTIME_CODE_BIND_MOUNT_UNPROVEN');}
   assert.equal(backend.State.StartedAt,plan.restartedBackend.startedAt);assert.equal(backend.State.FinishedAt,plan.restartedBackend.previousFinishedAt);assert.equal(backend.RestartCount,plan.restartedBackend.restartCount);
   const currentNodeProof=currentLegacyNode(backend);
   assert.equal(fs.existsSync('/proc/'+signalProof.originalNode.pid),false,'ORIGINAL_LEGACY_NODE_STILL_ALIVE');

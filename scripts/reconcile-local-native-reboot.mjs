@@ -76,16 +76,27 @@ async function streamDocker(args, destination) {
   return bytes;
 }
 
-async function verifyPgDump(file) {
-  const child = spawn('docker', ['exec', '-i', `${PROJECT}-postgres-1`, 'pg_restore', '--list'],
-    { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
-  let listing = '', error = '';
-  child.stdout.on('data', chunk => { listing += chunk.toString('utf8'); });
-  child.stderr.on('data', chunk => { error += chunk.toString('utf8').slice(0, 2048); });
-  fs.createReadStream(file).pipe(child.stdin);
-  const code = await waitDockerStream(child, 5 * 60 * 1000);
-  assert.equal(code, 0, `pg_restore --list failed: ${error}`);
-  assert.match(listing, /TABLE DATA|TABLE/);
+export function verifyPgDump(file, runner = execute, suffix = randomBytes(8).toString('hex')) {
+  assert.match(suffix, /^[a-f0-9]{16}$/);
+  const staged = `/tmp/sabalan-native-checkpoint-${suffix}.dump`;
+  let failure;
+  try {
+    runner(['cp', file, `${PROJECT}-postgres-1:${staged}`], { timeout: 10 * 60 * 1000 });
+    const stagedSha = runner(['exec', `${PROJECT}-postgres-1`, 'sha256sum', staged],
+      { timeout: 60 * 1000 }).trim().split(/\s+/)[0];
+    assert.equal(stagedSha, readback(file), 'Staged PostgreSQL dump differs from host checkpoint.');
+    const listing = runner(['exec', `${PROJECT}-postgres-1`, 'pg_restore', '--list', staged],
+      { timeout: 5 * 60 * 1000 });
+    assert.match(listing, /TABLE DATA|TABLE/);
+  } catch (error) { failure = error; }
+  try {
+    runner(['exec', `${PROJECT}-postgres-1`, 'rm', '-f', '--', staged], { timeout: 60 * 1000 });
+  } catch (cleanupError) {
+    if (failure) throw new AggregateError([failure, cleanupError], 'Dump verification and temporary cleanup failed.');
+    throw cleanupError;
+  }
+  if (failure) throw failure;
+  return true;
 }
 
 export function assertExistingTarget(rows, containers) {
@@ -208,7 +219,7 @@ async function checkpoint(primaryRoot, independentRoot, containers, state) {
   entries.push({ name: path.basename(oldRootfs), sha256: readback(oldRootfs), bytes: fs.statSync(oldRootfs).size });
   const dump = path.join(primary, 'postgres-sabalanerp.dump');
   await streamDocker(['exec', `${PROJECT}-postgres-1`, 'pg_dump', '-U', 'postgres', '-d', 'sabalanerp', '-Fc'], dump);
-  await verifyPgDump(dump);
+  verifyPgDump(dump);
   entries.push({ name: path.basename(dump), sha256: readback(dump), bytes: fs.statSync(dump).size });
   for (const mount of sourceMounts) {
     const name = `volume-${mount.name}.tar`;

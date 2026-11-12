@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { assertExistingTarget, assertCheckpointReadback, waitDockerStream }
+import { assertExistingTarget, assertCheckpointReadback, verifyPgDump, waitDockerStream }
   from '../../scripts/reconcile-local-native-reboot.mjs';
 
 const services = ['backend', 'clamav', 'frontend', 'inquiry', 'postgres', 'redis'];
@@ -70,4 +70,39 @@ test('stream timeout rejects even when inherited pipes never close', async () =>
   child.kill = () => { killed = true; return true; };
   await assert.rejects(waitDockerStream(child, 5), /exceeded/);
   assert.equal(killed, true);
+});
+
+test('dump listing stages bytes by path and cleans up when pg_restore closes early', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sabalan-local-dump-test-'));
+  assert(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep));
+  try {
+    const dump = path.join(root, 'dump');
+    fs.writeFileSync(dump, 'custom-dump-fixture');
+    const sha = createHash('sha256').update(fs.readFileSync(dump)).digest('hex');
+    const calls = [];
+    const runner = args => {
+      calls.push(args);
+      if (args[0] === 'cp') return '';
+      if (args[2] === 'sha256sum') return `${sha}  staged.dump\n`;
+      if (args[2] === 'pg_restore') return 'TABLE DATA public test\n';
+      if (args[2] === 'rm') return '';
+      throw new Error('unexpected Docker command');
+    };
+    assert.equal(verifyPgDump(dump, runner, '0123456789abcdef'), true);
+    assert.deepEqual(calls.map(args => args[0] === 'cp' ? 'cp' : args[2]),
+      ['cp', 'sha256sum', 'pg_restore', 'rm']);
+    assert(calls.every(args => !args.includes('-i')));
+    calls.length = 0;
+    const earlyClose = args => {
+      calls.push(args);
+      if (args[0] === 'cp') return '';
+      if (args[2] === 'sha256sum') return `${sha}  staged.dump\n`;
+      if (args[2] === 'pg_restore') throw Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+      if (args[2] === 'rm') return '';
+      throw new Error('unexpected Docker command');
+    };
+    assert.throws(() => verifyPgDump(dump, earlyClose, 'fedcba9876543210'), /EPIPE/);
+    assert.equal(calls.at(-1)[2], 'rm');
+    assert.equal(fs.readFileSync(dump, 'utf8'), 'custom-dump-fixture');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

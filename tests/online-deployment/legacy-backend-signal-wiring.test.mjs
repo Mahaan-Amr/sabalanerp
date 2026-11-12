@@ -7,11 +7,11 @@ const shell=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin
 const start=source.indexOf('drain_current_services() {'),end=source.indexOf('\n}\n',start)+3,drain=source.slice(start,end);
 test('actual leased drain forwards only inside proven maintenance and preserves compose stop/native/SQL checks',()=>{
  for(const [lease,maintenance,phase,forwardCode,expected]of [
-  [1,1,'TRAFFIC_BLOCKED',0,['VERIFY','HEARTBEAT','FORWARD','STOP','NATIVE','STATUS:0:PENDING:0']],
+  [1,1,'TRAFFIC_BLOCKED',0,['VERIFY','HEARTBEAT','FORWARD','CURRENT','STOP','NATIVE','CURRENT','STATUS:0:PENDING:1']],
   [1,1,'TRAFFIC_BLOCKED',7,['VERIFY','HEARTBEAT','FORWARD','STATUS:1:PENDING:1']],
   [1,0,'TRAFFIC_BLOCKED',0,['STATUS:1:PENDING:0']],
   [1,1,'MAINTENANCE_REQUESTED',0,['STATUS:1:PENDING:0']],
-  [0,1,'MAINTENANCE_REQUESTED',0,['STOP','NATIVE','STATUS:0:PENDING:0']],
+  [0,1,'MAINTENANCE_REQUESTED',0,['UNLEASED','STOP','NATIVE','STATUS:0:PENDING:0']],
  ]){
   const script=[
    'set -eu',
@@ -23,7 +23,8 @@ test('actual leased drain forwards only inside proven maintenance and preserves 
    'verify_public_maintenance(){ echo VERIFY; }',
    'control(){ [ "$1" = heartbeat ] || exit 92; echo HEARTBEAT; }',
    'run_original_owned_with_heartbeat(){ "$@"; }',
-   `python3(){ [ "$3" = /repo/docker-compose.prod.yml ] || exit 93; echo FORWARD; return ${forwardCode}; }`,
+   `python3(){ [ "$3" = /repo/docker-compose.prod.yml ] || exit 93; if [ "$2" = --assert-unleased-drain-allowed ]; then echo UNLEASED; return 0; fi; echo FORWARD; return ${forwardCode}; }`,
+   'assert_original_legacy_still_stopped(){ echo CURRENT; }',
    'assert_native_runtime_closed(){ echo NATIVE; }',drain,
    'set +e','drain_current_services','status=$?','echo STATUS:$status:PENDING:$LEGACY_BACKEND_SIGNAL_PENDING',
   ].join('\n');
@@ -37,6 +38,30 @@ test('unresolved original signal refuses automatic reopening and is checked befo
  const result=spawnSync(shell,['-c',script],{encoding:'utf8'});assert.equal(result.status,9);assert.doesNotMatch(result.stdout,/UNSAFE_REOPEN/);assert.match(result.stderr,/shutdown was not proven/);
  const closure=source.slice(source.indexOf('assert_native_runtime_closed() {'),source.indexOf('\ndrain_current_services()'));
  assert.ok(closure.indexOf('--assert-resolved')<closure.indexOf("run_backend sh -c"));
+});
+test('unleased legacy refusal and current-stop failures keep automatic reopen held',()=>{
+ for(const [lease,failAt,expected]of [
+  [0,0,['UNLEASED_REFUSED','STATUS:1:PENDING:0']],
+  [1,1,['FORWARD','CURRENT','STATUS:1:PENDING:1']],
+  [1,2,['FORWARD','CURRENT','STOP','NATIVE','CURRENT','STATUS:1:PENDING:1']],
+ ]){
+  const script=[
+   'set -eu',`DB_LEASE_ACQUIRED=${lease}; MAINTENANCE_ACTIVE=1; DEPLOYMENT_PHASE=TRAFFIC_BLOCKED; LEGACY_BACKEND_SIGNAL_PENDING=0; calls=0`,
+   'OPERATIONS_ROOT=/ops; REPO_ROOT=/repo; COMPOSE_FILE=docker-compose.prod.yml; ENV_FILE=/private/env; DEPLOYMENT_PREVIOUS_BACKEND_IMAGE=immutable; DEPLOYMENT_ID=original_deployment; SESSION_HOST_PATH=/private/session',
+   'compose(){ case "$*" in "ps -q backend") echo original;; "stop -t 300 frontend backend inquiry") echo STOP;; *max_connections*) echo 10;; *pg_stat_activity*) echo 0;; esac; }',
+   'docker(){ echo 10.0.0.2; }; verify_public_maintenance(){ :; }; control(){ :; }; run_original_owned_with_heartbeat(){ "$@"; }',
+   'python3(){ if [ "$2" = --assert-unleased-drain-allowed ]; then echo UNLEASED_REFUSED; return 1; fi; echo FORWARD; }',
+   `assert_original_legacy_still_stopped(){ calls=$((calls+1)); echo CURRENT; [ "$calls" -ne ${failAt} ]; }`,
+   'assert_native_runtime_closed(){ echo NATIVE; }',drain,
+   'set +e','drain_current_services','status=$?','echo STATUS:$status:PENDING:$LEGACY_BACKEND_SIGNAL_PENDING',
+  ].join('\n');
+  const result=spawnSync(shell,['-c',script],{encoding:'utf8'});assert.ifError(result.error);assert.equal(result.status,0,result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n'),expected);
+ }
+ const checkpoint=source.indexOf('run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-checkpoint.js');
+ assert.ok(source.lastIndexOf('LEGACY_BACKEND_SIGNAL_PENDING=1',checkpoint)>source.lastIndexOf('LEGACY_BACKEND_SIGNAL_PENDING=0',checkpoint));
+ assert.ok(source.lastIndexOf('assert_original_legacy_still_stopped',checkpoint)>source.lastIndexOf('LEGACY_BACKEND_SIGNAL_PENDING=1',checkpoint));
+ assert.ok(source.indexOf('assert_original_legacy_still_stopped',checkpoint)>checkpoint);
 });
 test('read-only legacy preflight occurs before session preparation or maintenance and helper belongs to host pack',()=>{
  const preflight=source.indexOf('legacy-backend-signal.py" --preflight'),prepare=source.indexOf('\ncontrol prepare\n');

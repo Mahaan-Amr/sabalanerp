@@ -11,14 +11,25 @@ The first-update bridge now binds the running container and Docker daemon to
 preflight, records durable intent, sends SIGCONT to the exact container, and
 reads `HasBeenManuallyStopped=true` from the root-owned `config.v2.json` while
 the original Node is still alive. It rechecks the lease, public 503 boundary,
-container and Node birth before the one pidfd SIGTERM. Post-signal acceptance
+container and Node birth and the persisted flag again immediately before the
+one pidfd SIGTERM. If SIGCONT is attempted but its barrier fails, the result
+records exact read-only daemon and container-metadata observations; the release
+remains held. Post-signal acceptance
 requires bounded wait, clean exit 0, unchanged daemon birth and restart count,
 and persisted stopped metadata for the same immutable container. An ambiguous
-barrier or result holds the release. This establishes the database work
+barrier or result holds the release. The same stopped-state guard runs before
+and after service drain, prior to checkpoint capture. Moby 29.2.1 deliberately
+does not serialize its transient manual-restart flag (`json:"-"`), so the
+guard detects any observed competing restart through changed container/start
+identity, daemon birth, or restart count. This establishes the database work
 boundary, not completion or exactly-once delivery of SMS or Web Push effects.
 
-Focused Python tests: 20 passed in the existing `sabalanerp-local-inquiry-1`
-container. The local backend's unrelated ACTIVE recovery owner remains
+Focused tests: 29 Python and 4 shell-wiring Node tests passed in the existing
+`sabalanerp-local-inquiry-1` container; `sh -n` accepted the deployment shell.
+The tests include partial SIGCONT audit, signal-point recheck, exact stopped
+identity, matching session/environment/SQL lease phases, hold-on-failure trap
+routing, and refusal to drain the legacy backend before DB lease acquisition.
+The local backend's unrelated ACTIVE recovery owner remains
 unresolved, so no full two-version rehearsal was attempted.
 
 Mechanical Docker test on 12 November 2026 used only the existing local

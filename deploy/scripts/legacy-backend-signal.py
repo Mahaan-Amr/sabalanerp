@@ -359,7 +359,19 @@ class OriginalHost:
                 'LEGACY_SIGNAL_DOCKER_STOPPED_CHECKPOINT_UNPROVEN')
         return dict(manuallyStopped=True, sha256=sha, restartCount=state['RestartCount'])
 
-    def manual_stop_barrier(self, plan):
+    def manual_stop_observation(self, snapshot):
+        container = snapshot['container']
+        identifier = container['containerId']
+        state, sha = private(Path('/var/lib/docker/containers') / identifier / 'config.v2.json',
+                             0o600, 16 * 1024**2)
+        require(state['ID'] == identifier and state['Image'] == container['image']
+                and state['Created'] == container['created'],
+                'LEGACY_SIGNAL_DOCKER_PARTIAL_BARRIER_IDENTITY_CHANGED')
+        return dict(sha256=sha, manuallyStopped=state.get('HasBeenManuallyStopped'),
+                    restartCount=state.get('RestartCount'), running=state['State'].get('Running'),
+                    pid=state['State'].get('Pid'), startedAt=state['State'].get('StartedAt'))
+
+    def manual_stop_barrier(self, plan, mark_cont_attempt):
         snapshot = plan['snapshot']
         before_daemon = self.daemon_identity()
         require(before_daemon == plan['manualStopPreflight']['dockerDaemon'],
@@ -369,6 +381,7 @@ class OriginalHost:
                 'LEGACY_SIGNAL_DOCKER_CHECKPOINT_CHANGED')
         require(before['manuallyStopped'] is False, 'LEGACY_SIGNAL_DOCKER_ALREADY_MANUALLY_STOPPED')
         identifier = snapshot['container']['containerId']
+        mark_cont_attempt()
         result = self.docker(['kill', '--signal=SIGCONT', identifier])
         require(result.strip() == identifier.encode(), 'LEGACY_SIGNAL_DOCKER_CONT_UNPROVEN')
         after_daemon = self.daemon_identity()
@@ -382,6 +395,29 @@ class OriginalHost:
                     beforeSha256=before['sha256'], afterSha256=after['sha256'],
                     restartCount=after['restartCount'], manualStopPersisted=True,
                     barrierSignal='SIGCONT')
+
+    def confirm_manual_stop_at_signal(self, plan, barrier):
+        daemon = self.daemon_identity()
+        require(daemon == barrier['dockerDaemon'],
+                'LEGACY_SIGNAL_DOCKER_DAEMON_CHANGED')
+        checkpoint = self.persisted_manual_stop(plan['snapshot'])
+        require(checkpoint['manuallyStopped'] is True
+                and checkpoint['restartCount'] == barrier['restartCount'],
+                'LEGACY_SIGNAL_MANUAL_STOP_LOST_BEFORE_TERM')
+        return dict(checkpoint, dockerDaemon=daemon)
+
+    def assert_current_stopped(self, plan, result):
+        snapshot = plan['snapshot']
+        barrier = result['manualStopBarrier']
+        require(self.daemon_identity() == barrier['dockerDaemon'],
+                'LEGACY_SIGNAL_DOCKER_DAEMON_CHANGED')
+        current = self.inspect(snapshot['container']['containerId'])
+        verify_exited(current, snapshot['container'], b'0')
+        require(current['RestartCount'] == barrier['restartCount'],
+                'LEGACY_SIGNAL_DOCKER_RESTARTED_AFTER_SIGNAL')
+        self.persisted_stopped(snapshot, barrier)
+        require(not Path('/proc', str(snapshot['node']['pid'])).exists(),
+                'LEGACY_SIGNAL_OLD_NODE_STILL_PRESENT')
 
     def snapshot(self, expected_image):
         ids = self.docker(['ps', '--no-trunc', '--filter', 'label=com.docker.compose.project=sabalanerp',
@@ -401,11 +437,13 @@ class OriginalHost:
                 'LEGACY_SIGNAL_CONTAINER_CHANGED_DURING_INSPECTION')
         return dict(container=container, init=init, node=node, bootId=self.boot)
 
-    def protected_boundary(self, plan, session_file):
+    def protected_boundary(self, plan, session_file, phases=('TRAFFIC_BLOCKED',)):
         session, _ = private(session_file, 0o600)
         for field in ['deploymentId', 'releaseId']:
             require(session[field] == plan[field] == os.environ.get('DEPLOYMENT_' + ('ID' if field == 'deploymentId' else 'RELEASE_ID')))
-        require(session['phase'] == os.environ.get('DEPLOYMENT_PHASE') == 'TRAFFIC_BLOCKED')
+        phase = session['phase']
+        require(phase == os.environ.get('DEPLOYMENT_PHASE') and phase in phases
+                and phase in ('TRAFFIC_BLOCKED', 'SERVICES_DRAINED', 'REMOTE_CHECKPOINT_VERIFIED'))
         token = session['leaseToken']
         require(re.fullmatch('[A-Za-z0-9_-]{8,128}', token))
         value = self.inspect(plan['snapshot']['container']['containerId'])
@@ -415,7 +453,8 @@ class OriginalHost:
         require(marker['deploymentId'] == session['deploymentId'] and marker['releaseId'] == session['releaseId'])
         sql = ("SELECT json_build_object('owned',EXISTS(SELECT 1 FROM deployment_operations WHERE id='"
                + session['deploymentId'] + "' AND \"releaseId\"='" + session['releaseId'] + "' AND \"leaseToken\"='"
-               + token + "' AND \"activeKey\"='production' AND phase='TRAFFIC_BLOCKED' AND \"leaseExpiresAt\">clock_timestamp()+interval '30 seconds'))::text;\n").encode()
+               + token + "' AND \"activeKey\"='production' AND phase='" + phase
+               + "' AND \"leaseExpiresAt\">clock_timestamp()+interval '30 seconds'))::text;\n").encode()
         result = observed(self.compose + ['exec', '-T', 'postgres', 'sh', '-c',
                           'exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'],
                           stdin=sql, role='read-only-original-lease')
@@ -451,7 +490,7 @@ def verify_exited(actual, expected, wait_output):
 def forward_original(host, plan, plan_sha, intent_file, result_file, session_file):
     report = dict(format=FORMAT, passResult=False, signalDelivered=False, deploymentId=plan['deploymentId'],
                   releaseId=plan['releaseId'], planSha256=plan_sha, applicationNativeClosureInferred=False,
-                  legacyExternalEffectRisk=plan.get('legacyExternalEffectRisk'))
+                  legacyExternalEffectRisk=plan.get('legacyExternalEffectRisk'), dockerContAttempted=False)
     fd = None
     try:
         host.protected_boundary(plan, session_file)
@@ -469,14 +508,19 @@ def forward_original(host, plan, plan_sha, intent_file, result_file, session_fil
             require(proc_identity(snapshot['node']['pid']) == snapshot['node'] and not interrupted)
             save(intent_file, dict(format=FORMAT, deploymentId=plan['deploymentId'], releaseId=plan['releaseId'],
                                    planSha256=plan_sha, target=snapshot, signal='SIGTERM', originalHostPid=os.getpid(),
+                                   dockerContAttemptPlanned=True,
                                    legacyExternalEffectRisk=plan['legacyExternalEffectRisk']))
             host.protected_boundary(plan, session_file)
             require(proc_identity(snapshot['node']['pid']) == snapshot['node'] and not interrupted)
             require(time.monotonic_ns() + 30_000_000_000 < capture_deadline_ns(), 'LEGACY_SIGNAL_INSUFFICIENT_CAPTURE_BUDGET')
-            report['manualStopBarrier'] = host.manual_stop_barrier(plan)
+            report['manualStopBarrier'] = host.manual_stop_barrier(
+                plan, lambda: report.update(dockerContAttempted=True))
             host.protected_boundary(plan, session_file)
             require(host.snapshot(snapshot['container']['image']) == snapshot)
             require(proc_identity(snapshot['node']['pid']) == snapshot['node'] and not interrupted)
+            report['signalPointCheckpoint'] = host.confirm_manual_stop_at_signal(
+                plan, report['manualStopBarrier'])
+            require(not interrupted)
             report['signalAttempted'] = True
             signal.pidfd_send_signal(fd, signal.SIGTERM, None, 0)
             report['signalDelivered'] = True
@@ -498,6 +542,7 @@ def forward_original(host, plan, plan_sha, intent_file, result_file, session_fil
         require(time.monotonic_ns() < capture_deadline_ns(), 'LEGACY_SIGNAL_CAPTURE_BUDGET_EXCEEDED_HELD')
         return report
     except BaseException as error:
+        report['passResult'] = False
         report['error'] = str(error)[:160]
         if report.get('signalDelivered') and not report['passResult']:
             try:
@@ -516,6 +561,16 @@ def forward_original(host, plan, plan_sha, intent_file, result_file, session_fil
     finally:
         if fd is not None:
             os.close(fd)
+        if report['dockerContAttempted'] and not report['passResult']:
+            report['partialBarrierAudit'] = {}
+            for field, method in [('dockerDaemon', 'daemon_identity'),
+                                  ('persistedContainer', 'manual_stop_observation')]:
+                try:
+                    observer = getattr(host, method)
+                    report['partialBarrierAudit'][field] = (observer() if field == 'dockerDaemon'
+                                                             else observer(plan['snapshot']))
+                except BaseException as error:
+                    report['partialBarrierAudit'][field + 'Error'] = str(error)[:160]
         report['originalChildren'] = original_child_facts()
         report['interrupted'] = interrupted
         if interrupted:
@@ -527,7 +582,8 @@ def main():
     global deadline_file
     require(len(sys.argv) in [6, 7])
     mode, base, environment, argument, plan_name = sys.argv[1:6]
-    require(mode in ['--preflight', '--forward', '--assert-resolved'])
+    require(mode in ['--preflight', '--forward', '--assert-resolved', '--assert-current-stopped',
+                     '--assert-unleased-drain-allowed'])
     host = OriginalHost(base, environment)
     plan_file = Path(plan_name)
     deployment = os.environ.get('DEPLOYMENT_ID', '')
@@ -537,7 +593,19 @@ def main():
     intent = plan_file.with_suffix('.signal-intent.json')
     result_file = plan_file.with_suffix('.signal-result.json')
     deadline_file = plan_file.with_suffix('.observer-deadline.json')
-    if mode == '--assert-resolved':
+    if mode == '--assert-unleased-drain-allowed':
+        require(len(sys.argv) == 6)
+        plan, _ = private(plan_file, 0o400)
+        require(plan['format'] == FORMAT and plan['deploymentId'] == deployment
+                and plan['releaseId'] == release and plan['snapshot']['container']['image'] == argument
+                and plan['snapshot']['container']['kind'] == 'NATIVE_WRAPPER_NOT_REQUIRED',
+                'LEGACY_SIGNAL_LEASE_REQUIRED_BEFORE_DRAIN')
+        require_effect_receipt(plan)
+        require(host.snapshot(argument) == plan['snapshot'],
+                'LEGACY_SIGNAL_UNLEASED_RUNTIME_CHANGED')
+        return
+    if mode in ['--assert-resolved', '--assert-current-stopped']:
+        require(len(sys.argv) == (7 if mode == '--assert-current-stopped' else 6))
         if intent.exists():
             plan, plan_sha = private(plan_file, 0o400)
             require_effect_receipt(plan)
@@ -546,6 +614,12 @@ def main():
             require(intent_value['planSha256'] == result['planSha256'] == plan_sha and result['passResult'] is True
                     and result.get('legacyContainerExitedCleanly') is True and result['interrupted'] is False
                     and result['manualStopBarrier']['manualStopPersisted'] is True
+                    and result['manualStopBarrier']['dockerDaemon'] == plan['manualStopPreflight']['dockerDaemon']
+                    and intent_value['dockerContAttemptPlanned'] is True
+                    and result['dockerContAttempted'] is True
+                    and result['signalPointCheckpoint']['manuallyStopped'] is True
+                    and result['signalPointCheckpoint']['dockerDaemon'] == result['manualStopBarrier']['dockerDaemon']
+                    and result['signalPointCheckpoint']['restartCount'] == result['manualStopBarrier']['restartCount']
                     and result['stoppedCheckpoint']['manuallyStopped'] is True
                     and result['stoppedCheckpoint']['restartCount'] == result['manualStopBarrier']['restartCount']
                     == result['exitObservation']['RestartCount']
@@ -558,6 +632,18 @@ def main():
             # container. This is only an unresolved-attempt hold; historical
             # exit evidence never certifies the current runtime's closure.
             verify_exited(result['exitObservation'], plan['snapshot']['container'], b'0')
+            if mode == '--assert-current-stopped':
+                require(plan['snapshot']['container']['kind'] == 'KNOWN_LEGACY_SHELL')
+                host.protected_boundary(plan, sys.argv[6],
+                                        ('TRAFFIC_BLOCKED', 'SERVICES_DRAINED', 'REMOTE_CHECKPOINT_VERIFIED'))
+                host.assert_current_stopped(plan, result)
+        else:
+            plan, _ = private(plan_file, 0o400)
+            require(plan['format'] == FORMAT and plan['deploymentId'] == deployment
+                    and plan['releaseId'] == release and plan['snapshot']['container']['image'] == argument
+                    and plan['snapshot']['container']['kind'] == 'NATIVE_WRAPPER_NOT_REQUIRED',
+                    'LEGACY_SIGNAL_CURRENT_STOP_UNPROVEN')
+            require_effect_receipt(plan)
         return
     if mode == '--preflight':
         require(len(sys.argv) == 6 and re.fullmatch('sha256:[a-f0-9]{64}', argument))

@@ -103,6 +103,40 @@ class LegacyGuards(unittest.TestCase):
                 bridge.main()
         saved.assert_not_called()
 
+    def test_unleased_drain_refuses_legacy_before_compose_stop(self):
+        _, snapshot = fixture()
+        plan = dict(format=bridge.FORMAT, deploymentId='original_deployment', releaseId='original_release',
+                    snapshot=snapshot, legacyExternalEffectRisk=bridge.legacy_effect_receipt(snapshot))
+        host = SimpleNamespace(root=Path('/repo'), snapshot=lambda _image: copy.deepcopy(plan['snapshot']))
+        argv = ['legacy-backend-signal.py', '--assert-unleased-drain-allowed', '/repo/docker-compose.prod.yml',
+                '/private/env', bridge.LEGACY_IMAGE, '/repo/.deploy-state/legacy-backend-drain-original_deployment.json']
+        env = dict(DEPLOYMENT_ID=plan['deploymentId'], DEPLOYMENT_RELEASE_ID=plan['releaseId'])
+        with patch.object(sys, 'argv', argv), patch.dict(os.environ, env), \
+                patch.object(bridge, 'OriginalHost', return_value=host), \
+                patch.object(bridge, 'private', return_value=(plan, 'a'*64)):
+            with self.assertRaisesRegex(RuntimeError, 'LEASE_REQUIRED_BEFORE_DRAIN'):
+                bridge.main()
+            plan['snapshot']['container']['kind'] = 'NATIVE_WRAPPER_NOT_REQUIRED'
+            plan['legacyExternalEffectRisk'] = None
+            bridge.main()
+
+    def test_missing_signal_intent_never_certifies_legacy_closure(self):
+        _, snapshot = fixture()
+        plan = dict(format=bridge.FORMAT, deploymentId='original_deployment', releaseId='original_release',
+                    snapshot=snapshot, legacyExternalEffectRisk=bridge.legacy_effect_receipt(snapshot))
+        host = SimpleNamespace(root=Path('/repo'))
+        env = dict(DEPLOYMENT_ID=plan['deploymentId'], DEPLOYMENT_RELEASE_ID=plan['releaseId'])
+        for mode in ['--assert-resolved', '--assert-current-stopped']:
+            argv = ['legacy-backend-signal.py', mode, '/repo/docker-compose.prod.yml', '/private/env',
+                    bridge.LEGACY_IMAGE, '/repo/.deploy-state/legacy-backend-drain-original_deployment.json']
+            if mode == '--assert-current-stopped': argv.append('/private/session')
+            with patch.object(sys, 'argv', argv), patch.dict(os.environ, env), \
+                    patch.object(bridge, 'OriginalHost', return_value=host), \
+                    patch.object(bridge, 'private', return_value=(plan, 'a'*64)), \
+                    patch.object(Path, 'exists', return_value=False):
+                with self.assertRaisesRegex(RuntimeError, 'CURRENT_STOP_UNPROVEN'):
+                    bridge.main()
+
     def test_actual_observer_passes_fd9_and_late_natural_close_is_failed_without_killing_child(self):
         clock = [1_000_000_000]
         class Child:
@@ -266,7 +300,8 @@ class LegacyGuards(unittest.TestCase):
         class Host:
             def protected_boundary(self, *_args): events.append('BOUNDARY')
             def snapshot(self, _image): events.append('SNAPSHOT'); return copy.deepcopy(snapshot)
-            def manual_stop_barrier(self, _plan): events.append('DURABLE_MANUAL_STOP'); return dict(manualStopPersisted=True, restartCount=3, dockerDaemon=dict(pid=7))
+            def manual_stop_barrier(self, _plan, mark): mark(); events.append('DURABLE_MANUAL_STOP'); return dict(manualStopPersisted=True, restartCount=3, dockerDaemon=dict(pid=7))
+            def confirm_manual_stop_at_signal(self, _plan, _barrier): return dict(manuallyStopped=True, restartCount=3, dockerDaemon=dict(pid=7))
             def daemon_identity(self): return dict(pid=7)
             def persisted_stopped(self, _snapshot, _barrier): return dict(manuallyStopped=True, restartCount=3)
             def docker(self, argv): events.append(argv[0]); return b'0\n'
@@ -300,10 +335,14 @@ class LegacyGuards(unittest.TestCase):
         class Host:
             def protected_boundary(self, *_args): events.append('BOUNDARY')
             def snapshot(self, _image): return copy.deepcopy(snapshot)
-            def manual_stop_barrier(self, expected):
+            def manual_stop_barrier(self, expected, mark):
+                mark()
                 events.append('DURABLE_MANUAL_STOP')
                 self_outer.assertEqual(expected['snapshot'], snapshot)
                 return dict(dockerDaemon=dict(pid=7), restartCount=3, manualStopPersisted=True)
+            def confirm_manual_stop_at_signal(self, _plan, _barrier):
+                events.append('SIGNAL_POINT_CHECKPOINT')
+                return dict(manuallyStopped=True, restartCount=3, dockerDaemon=dict(pid=7))
             def daemon_identity(self): return dict(pid=7)
             def persisted_stopped(self, _snapshot, _barrier): return dict(manuallyStopped=True, restartCount=3)
             def docker(self, argv):
@@ -322,6 +361,7 @@ class LegacyGuards(unittest.TestCase):
                 patch.object(bridge, 'save', side_effect=lambda _file, value: audits.append(copy.deepcopy(value))):
             bridge.forward_original(Host(), plan, 'a'*64, Path(directory)/'intent', Path(directory)/'result', 'session')
         self.assertLess(events.index('DURABLE_MANUAL_STOP'), events.index('NODE_SIGTERM'))
+        self.assertLess(events.index('SIGNAL_POINT_CHECKPOINT'), events.index('NODE_SIGTERM'))
         self.assertTrue(audits[-1]['manualStopBarrier']['manualStopPersisted'])
 
     def test_forward_refuses_to_signal_node_when_docker_manual_stop_was_not_persisted(self):
@@ -386,6 +426,134 @@ class LegacyGuards(unittest.TestCase):
         sent.assert_not_called()
         self.assertFalse(audits[-1]['passResult'])
 
+    def test_partial_cont_barrier_is_audited_without_node_term(self):
+        _, snapshot = fixture()
+        plan = dict(deploymentId='original_deployment', releaseId='original_release', snapshot=snapshot,
+                    legacyExternalEffectRisk=bridge.legacy_effect_receipt(snapshot))
+        audits = {}
+
+        class Host:
+            def protected_boundary(self, *_args): pass
+            def snapshot(self, _image): return copy.deepcopy(snapshot)
+            def manual_stop_barrier(self, _plan, mark):
+                mark()
+                raise RuntimeError('LEGACY_SIGNAL_DOCKER_CONT_UNPROVEN')
+            def daemon_identity(self): return dict(pid=7, startTicks='original')
+            def manual_stop_observation(self, _snapshot):
+                return dict(manuallyStopped=True, sha256='b'*64, restartCount=3,
+                            running=True, pid=120, startedAt=snapshot['container']['startedAt'])
+
+        def save(file, value): audits[str(file)] = copy.deepcopy(value)
+        with tempfile.TemporaryDirectory() as directory, patch.object(bridge.os, 'pidfd_open', create=True, return_value=44), \
+                patch.object(bridge.os, 'close'), patch.object(bridge.signal, 'pidfd_send_signal', create=True) as sent, \
+                patch.object(bridge, 'proc_identity', return_value=snapshot['node']), \
+                patch.object(bridge, 'save', side_effect=save):
+            with self.assertRaisesRegex(RuntimeError, 'DOCKER_CONT_UNPROVEN'):
+                bridge.forward_original(Host(), plan, 'a'*64, Path(directory)/'intent', Path(directory)/'result', 'session')
+        result = audits[next(key for key in audits if key.endswith('result'))]
+        intent = audits[next(key for key in audits if key.endswith('intent'))]
+        self.assertTrue(intent['dockerContAttemptPlanned'])
+        self.assertTrue(result['dockerContAttempted'])
+        self.assertTrue(result['partialBarrierAudit']['persistedContainer']['manuallyStopped'])
+        self.assertFalse(result['passResult'])
+        sent.assert_not_called()
+
+    def test_manual_stop_lost_at_signal_point_refuses_node_term(self):
+        _, snapshot = fixture()
+        plan = dict(deploymentId='original_deployment', releaseId='original_release', snapshot=snapshot,
+                    legacyExternalEffectRisk=bridge.legacy_effect_receipt(snapshot))
+        audits = []
+
+        class Host:
+            def protected_boundary(self, *_args): pass
+            def snapshot(self, _image): return copy.deepcopy(snapshot)
+            def manual_stop_barrier(self, _plan, mark):
+                mark()
+                return dict(manualStopPersisted=True, dockerDaemon=dict(pid=7), restartCount=3)
+            def confirm_manual_stop_at_signal(self, _plan, _barrier):
+                raise RuntimeError('LEGACY_SIGNAL_MANUAL_STOP_LOST_BEFORE_TERM')
+            def daemon_identity(self): return dict(pid=7)
+            def manual_stop_observation(self, _snapshot): return dict(manuallyStopped=False)
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(bridge.os, 'pidfd_open', create=True, return_value=44), \
+                patch.object(bridge.os, 'close'), patch.object(bridge.signal, 'pidfd_send_signal', create=True) as sent, \
+                patch.object(bridge, 'proc_identity', return_value=snapshot['node']), \
+                patch.object(bridge, 'save', side_effect=lambda _file, value: audits.append(copy.deepcopy(value))):
+            with self.assertRaisesRegex(RuntimeError, 'MANUAL_STOP_LOST_BEFORE_TERM'):
+                bridge.forward_original(Host(), plan, 'a'*64, Path(directory)/'intent', Path(directory)/'result', 'session')
+        self.assertFalse(audits[-1]['passResult'])
+        self.assertFalse(audits[-1]['partialBarrierAudit']['persistedContainer']['manuallyStopped'])
+        sent.assert_not_called()
+
+    def test_actual_signal_point_guard_rejects_lost_flag_or_restart(self):
+        _, snapshot = fixture()
+        daemon = dict(pid=7, startTicks='original')
+        plan = dict(snapshot=snapshot)
+        barrier = dict(dockerDaemon=daemon, restartCount=3)
+        class Host:
+            confirm_manual_stop_at_signal = bridge.OriginalHost.confirm_manual_stop_at_signal
+            def __init__(self, checkpoint): self.checkpoint = checkpoint
+            def daemon_identity(self): return daemon
+            def persisted_manual_stop(self, _snapshot): return self.checkpoint
+        self.assertTrue(Host(dict(manuallyStopped=True, restartCount=3)).confirm_manual_stop_at_signal(plan, barrier)['manuallyStopped'])
+        for checkpoint in [dict(manuallyStopped=False, restartCount=3),
+                           dict(manuallyStopped=True, restartCount=4)]:
+            with self.assertRaisesRegex(RuntimeError, 'MANUAL_STOP_LOST_BEFORE_TERM'):
+                Host(checkpoint).confirm_manual_stop_at_signal(plan, barrier)
+
+    def test_current_stopped_guard_rejects_manual_restart_of_same_container(self):
+        _, snapshot = fixture()
+        container = snapshot['container']
+        barrier = dict(dockerDaemon=dict(pid=7), restartCount=3)
+        plan = dict(snapshot=snapshot)
+        result = dict(manualStopBarrier=barrier)
+        class Host:
+            assert_current_stopped = bridge.OriginalHost.assert_current_stopped
+            def daemon_identity(self): return dict(pid=7)
+            def inspect(self, _id):
+                return dict(Id=container['containerId'], Image=container['image'], Created=container['created'],
+                            RestartCount=3, State=dict(StartedAt='replacement', Pid=0, Running=False,
+                                                        OOMKilled=False, ExitCode=0, Error=''))
+            def persisted_stopped(self, _snapshot, _barrier): raise AssertionError('must not reach metadata')
+        with self.assertRaisesRegex(RuntimeError, 'GRACEFUL_EXIT_UNPROVEN'):
+            Host().assert_current_stopped(plan, result)
+
+    def test_resolved_receipt_requires_final_signal_point_checkpoint(self):
+        _, snapshot = fixture()
+        daemon = dict(pid=7, startTicks='original')
+        plan = dict(format=bridge.FORMAT, deploymentId='original_deployment',
+                    releaseId='original_release', snapshot=snapshot,
+                    legacyExternalEffectRisk=bridge.legacy_effect_receipt(snapshot),
+                    manualStopPreflight=dict(dockerDaemon=daemon))
+        c = snapshot['container']
+        result = dict(passResult=True, legacyContainerExitedCleanly=True, interrupted=False,
+                      planSha256='a'*64, deploymentId=plan['deploymentId'], releaseId=plan['releaseId'],
+                      legacyExternalEffectRisk=plan['legacyExternalEffectRisk'], dockerContAttempted=True,
+                      manualStopBarrier=dict(manualStopPersisted=True, dockerDaemon=daemon, restartCount=3),
+                      stoppedCheckpoint=dict(manuallyStopped=True, restartCount=3),
+                      exitObservation=dict(Id=c['containerId'], Image=c['image'], Created=c['created'], RestartCount=3,
+                                           State=dict(StartedAt=c['startedAt'], Pid=0, Running=False,
+                                                      OOMKilled=False, ExitCode=0, Error='')),
+                      originalChildren=[dict(closed=True, code=0, overflow=False, pumpFailed=False,
+                                             deadlineExceeded=False, deadlineAuditFailed=False)])
+        intent = dict(planSha256='a'*64, deploymentId=plan['deploymentId'], releaseId=plan['releaseId'],
+                      legacyExternalEffectRisk=plan['legacyExternalEffectRisk'], dockerContAttemptPlanned=True)
+        host = SimpleNamespace(root=Path('/repo'))
+        argv = ['legacy-backend-signal.py', '--assert-resolved', '/repo/docker-compose.prod.yml', '/private/env',
+                bridge.LEGACY_IMAGE, '/repo/.deploy-state/legacy-backend-drain-original_deployment.json']
+        env = dict(DEPLOYMENT_ID=plan['deploymentId'], DEPLOYMENT_RELEASE_ID=plan['releaseId'])
+        def read(file, _mode):
+            name = str(file)
+            return (intent if name.endswith('intent.json') else result if name.endswith('result.json') else plan), 'a'*64
+        with patch.object(sys, 'argv', argv), patch.dict(os.environ, env), \
+                patch.object(bridge, 'OriginalHost', return_value=host), \
+                patch.object(bridge, 'private', side_effect=read), \
+                patch.object(Path, 'exists', return_value=True):
+            with self.assertRaises((RuntimeError, KeyError)):
+                bridge.main()
+            result['signalPointCheckpoint'] = dict(manuallyStopped=True, dockerDaemon=daemon, restartCount=3)
+            bridge.main()
+
     def test_forward_records_same_container_new_runtime_after_wait_failure(self):
         _, snapshot = fixture()
         plan = dict(deploymentId='original_deployment', releaseId='original_release', snapshot=snapshot,
@@ -394,7 +562,8 @@ class LegacyGuards(unittest.TestCase):
         class Host:
             def protected_boundary(self, *_args): pass
             def snapshot(self, _image): return copy.deepcopy(snapshot)
-            def manual_stop_barrier(self, _snapshot): return dict(manualStopPersisted=True)
+            def manual_stop_barrier(self, _snapshot, mark): mark(); return dict(manualStopPersisted=True)
+            def confirm_manual_stop_at_signal(self, _plan, _barrier): return dict(manuallyStopped=True)
             def docker(self, _argv): raise RuntimeError('LEGACY_SIGNAL_OBSERVER_NOT_CLOSED')
             def inspect(self, _container):
                 return dict(Id=snapshot['container']['containerId'], Image=snapshot['container']['image'],
@@ -424,7 +593,8 @@ class LegacyGuards(unittest.TestCase):
                 def protected_boundary(self, *_args):
                     if failure == 'boundary': raise RuntimeError('lease or public boundary lost')
                 def snapshot(self, _image): return copy.deepcopy(snapshot)
-                def manual_stop_barrier(self, _snapshot): return dict(manualStopPersisted=True)
+                def manual_stop_barrier(self, _snapshot, mark): mark(); return dict(manualStopPersisted=True)
+                def confirm_manual_stop_at_signal(self, _plan, _barrier): return dict(manuallyStopped=True)
                 def docker(self, _argv): return b'1'
                 def inspect(self, _container): return {}
 
@@ -479,6 +649,42 @@ class LegacyGuards(unittest.TestCase):
                     else:
                         bridge.OriginalHost.protected_boundary(host, plan, Path(directory) / 'session')
                         self.assertEqual(events, ['LEASE', 'erp.example', 'inquiry.example', 'ORIGINAL'])
+
+    def test_current_stopped_boundary_binds_each_permitted_phase_to_session_env_and_sql(self):
+        _, snapshot = fixture()
+        plan = dict(deploymentId='original_deployment', releaseId='original_release', snapshot=snapshot)
+        for phase in ['TRAFFIC_BLOCKED', 'SERVICES_DRAINED', 'REMOTE_CHECKPOINT_VERIFIED']:
+            with tempfile.TemporaryDirectory() as directory:
+                env_file = Path(directory) / 'environment'
+                env_file.write_text('DOMAIN=erp.example\nINQUIRY_DOMAIN=inquiry.example\n')
+                session = dict(deploymentId=plan['deploymentId'], releaseId=plan['releaseId'],
+                               leaseToken='original_lease_token', phase=phase)
+                marker = dict(deploymentId=plan['deploymentId'], releaseId=plan['releaseId'])
+                host = SimpleNamespace(inspect=lambda _id: dict(Mounts=[dict(
+                    Destination='/app/recovery-coordination', RW=True, Source=directory)]),
+                    compose=['docker', 'compose'], environment=env_file, assert_original=lambda: None)
+                class Connection:
+                    def __init__(self, *_args, **_kwargs): pass
+                    def request(self, *_args): pass
+                    def getresponse(self): return SimpleNamespace(status=503)
+                    def close(self): pass
+                def private(file, _mode):
+                    return (marker if str(file).endswith('deployment-maintenance.json') else session), 'hash'
+                def observed(_argv, stdin=None, role=None):
+                    self.assertEqual(role, 'read-only-original-lease')
+                    self.assertIn(("phase='" + phase + "'").encode(), stdin)
+                    return b'{"owned":true}'
+                environment = dict(DEPLOYMENT_ID=plan['deploymentId'],
+                                   DEPLOYMENT_RELEASE_ID=plan['releaseId'], DEPLOYMENT_PHASE=phase)
+                with patch.dict(os.environ, environment), patch.object(bridge, 'private', side_effect=private), \
+                        patch.object(bridge, 'observed', side_effect=observed), \
+                        patch.object(bridge.http.client, 'HTTPSConnection', Connection):
+                    bridge.OriginalHost.protected_boundary(host, plan, Path(directory)/'session',
+                        ('TRAFFIC_BLOCKED', 'SERVICES_DRAINED', 'REMOTE_CHECKPOINT_VERIFIED'))
+                    os.environ['DEPLOYMENT_PHASE'] = 'TRAFFIC_BLOCKED' if phase != 'TRAFFIC_BLOCKED' else 'SERVICES_DRAINED'
+                    with self.assertRaises(RuntimeError):
+                        bridge.OriginalHost.protected_boundary(host, plan, Path(directory)/'session',
+                            ('TRAFFIC_BLOCKED', 'SERVICES_DRAINED', 'REMOTE_CHECKPOINT_VERIFIED'))
 
 
 if __name__ == '__main__':

@@ -398,7 +398,18 @@ assert_native_runtime_closed() {
   ' < "${OPERATIONS_ROOT}/deploy/scripts/backend-runtime-owner.py"
 }
 
+assert_original_legacy_still_stopped() {
+  python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --assert-current-stopped \
+    "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE:-}" \
+    "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json" "${SESSION_HOST_PATH}"
+}
+
 drain_current_services() {
+  if [ "${DB_LEASE_ACQUIRED}" -eq 0 ]; then
+    python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --assert-unleased-drain-allowed \
+      "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE:-}" \
+      "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json" || return 1
+  fi
   old_backend_container="$(compose ps -q backend)"
   old_backend_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${old_backend_container}")"
   NATIVE_RUNTIME_CLOSURE_REQUIRED=1
@@ -410,10 +421,11 @@ drain_current_services() {
     run_original_owned_with_heartbeat python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --forward \
       "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
       "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json" "${SESSION_HOST_PATH}" || return 1
-    LEGACY_BACKEND_SIGNAL_PENDING=0
+    assert_original_legacy_still_stopped || return 1
   fi
   compose stop -t 300 frontend backend inquiry
   assert_native_runtime_closed || return 1
+  if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then assert_original_legacy_still_stopped || return 1; fi
   remaining_old_sessions="$(compose exec -T postgres sh -c "psql -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM pg_stat_activity WHERE client_addr = '${old_backend_ip}'::inet\"")"
   [ "${remaining_old_sessions}" = "0" ] || { echo "The previous backend retained ${remaining_old_sessions} database sessions after drain." >&2; return 1; }
   utilization="$(compose exec -T postgres sh -c 'psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT round(100.0 * count(*) / current_setting('"'"'max_connections'"'"')::int, 2) FROM pg_stat_activity"')"
@@ -1271,18 +1283,27 @@ esac
 if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   # Retain the original checkpoint owner; exceeding the qualification budget
   # never kills/adopts a live backup. Its actual pause is measured on reopen.
+  LEGACY_BACKEND_SIGNAL_PENDING=1
+  assert_original_legacy_still_stopped
   (umask 077; set -C; : > "${CAPTURE_ONLY_OUTPUT}")
   run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-checkpoint.js > "${CAPTURE_ONLY_OUTPUT}"
   chmod 400 "${CAPTURE_ONLY_OUTPUT}"
 else
+  LEGACY_BACKEND_SIGNAL_PENDING=1
+  assert_original_legacy_still_stopped
   run_backend_timed_with_heartbeat "${checkpoint_timeout}" node dist/scripts/deployment-checkpoint.js
 fi
+assert_original_legacy_still_stopped
+LEGACY_BACKEND_SIGNAL_PENDING=0
 phase LOCAL_CHECKPOINT_VERIFIED
 phase REMOTE_CHECKPOINT_VERIFIED
 run_original_owned_with_heartbeat host_backup_retention AFTER_CHECKPOINT
 bind_host_backup_retention_receipt AFTER_CHECKPOINT
 run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-retention-local.js apply AFTER_CHECKPOINT
 if [ "${CAPTURE_ONLY}" -eq 1 ]; then
+  LEGACY_BACKEND_SIGNAL_PENDING=1
+  assert_original_legacy_still_stopped
+  LEGACY_BACKEND_SIGNAL_PENDING=0
   complete_capture_only || exit 1
   exit 0
 fi
@@ -1292,6 +1313,9 @@ if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   eval "${prebuilt_exports}"
 fi
 preserved_clamav_guard identity || exit 1
+LEGACY_BACKEND_SIGNAL_PENDING=1
+assert_original_legacy_still_stopped
+LEGACY_BACKEND_SIGNAL_PENDING=0
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"

@@ -53,10 +53,33 @@ The tax endpoint is checked again against the exact running container at signal
 time, rather than inferred from the earlier environment observation.
 
 After the deployment lease and both public 503 responses are proven, the runner
-rechecks that exact runtime and sends one SIGTERM through its pidfd. A failed or
-ambiguous signal, nonzero exit, replaced process, missing lease, or failed
-maintenance boundary stops the release. The protected runner then stops the
-services, verifies process closure and zero old-backend SQL sessions, captures
+rechecks the exact e407 container, Node birth, and Docker daemon birth. This
+first-update path is pinned to Docker Engine 29.2.1 and its `/var/lib/docker`
+metadata layout. It sends SIGCONT to the exact container through Docker, then
+requires `HasBeenManuallyStopped=true` in the root-owned, identity-matched
+`config.v2.json` before sending one SIGTERM to the exact Node pidfd. A durable
+intent is written before SIGCONT, and a failed or partial SIGCONT attempt
+records read-only daemon and container-metadata observations in its result.
+The persisted flag and daemon birth are checked again immediately before Node
+SIGTERM. This manual-stop barrier prevents the `unless-stopped` policy from
+immediately restarting the old backend. The runner then requires a bounded
+`docker wait`, clean exit 0, unchanged container/image/creation/start identity,
+unchanged daemon birth and restart count, and a persisted stopped checkpoint.
+The exact stopped container is checked again before service drain and after
+it, before database checkpoint capture. Docker's transient manual-restart flag
+is deliberately not serialized in `config.v2.json` in Engine 29.2.1; competing
+root Docker commands cannot be excluded by the deployment lock, so any
+observed changed start identity, restart count, daemon birth or stopped
+checkpoint fails closed.
+If the PostgreSQL advisory lease cannot be acquired before the early drain,
+this e407 first-update path stops before Compose can stop the backend; only
+the native wrapper path may use the existing unleased saturation drain.
+An unproven barrier, daemon replacement, failed or ambiguous signal, nonzero
+exit, restarted or replaced process, missing lease, or failed maintenance
+boundary stops the release. A partially applied manual-stop barrier is held
+for explicit recovery; it cannot be retried as a fresh silent attempt. The
+protected runner then stops the services, verifies process closure and zero
+old-backend SQL sessions, captures
 and independently verifies local and off-server checkpoints, and only then
 permits migration. A zero exit and vanished SQL sessions are database-boundary
 evidence, never proof of SMS or Web Push completion. An interrupted attempt is

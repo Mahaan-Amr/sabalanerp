@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {spawn,execFileSync} from 'node:child_process';
+import fs from 'node:fs';
 import {validateFailedLegacyCaptureJournal, validateFailedLegacySignal, verifyRecoveredPreviousIncarnations, validateCurrentLegacyNode, observeBoundedChild, validateHistoricalCheckoutMigrationDelta} from '../../deploy/scripts/reopen-failed-legacy-capture.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
@@ -16,8 +17,9 @@ test('failed pre-checkpoint capture journal proves terminal no-mutation and reje
 });
 const older='b58c53c0f88d2d89da3cb6a45949e6eca97e4308',checkout='aa7d384b2fce1dee7cface249699e0d82d495f6a';
 let localGitObjects=true;try{execFileSync('git',['rev-parse','--verify',older],{stdio:'ignore'});}catch{localGitObjects=false;}
-test('the clean live checkout may add exactly the known fifteen migrations after the failed operation target',{skip:!localGitObjects},()=>{
- const delta=execFileSync('git',['diff','--name-status',older,checkout,'--','backend/prisma/migrations'],{encoding:'utf8'});
+const gitDeltaFixture=process.env.INCIDENT434_GIT_DELTA_FILE;
+test('the clean live checkout may add exactly the known fifteen migrations after the failed operation target',{skip:!localGitObjects&&!gitDeltaFixture},()=>{
+ const delta=gitDeltaFixture?fs.readFileSync(gitDeltaFixture,'utf8'):execFileSync('git',['diff','--name-status',older,checkout,'--','backend/prisma/migrations'],{encoding:'utf8'});
  assert.equal(validateHistoricalCheckoutMigrationDelta(delta).added,15);
  assert.throws(()=>validateHistoricalCheckoutMigrationDelta(delta.replace(/^A\t/m,'M\t')));
  assert.throws(()=>validateHistoricalCheckoutMigrationDelta(delta+'A\tbackend/prisma/migrations/unknown/migration.sql\n'));

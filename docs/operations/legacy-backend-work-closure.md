@@ -31,6 +31,14 @@ runs immediately and every 5 seconds and can POST to its delivery broker with
 a 20-second request timeout. Other producers may also cause external effects;
 the three extracted files are not a complete external-effect inventory.
 
+Read-only inspection of the running e407 container on 12 November 2026 found
+`NODE_ENV=production` and `SMS_IR_ENVIRONMENT=production`, with the SMS API key,
+URL and several templates configured. `TAXPAYER_DELIVERY_BROKER_ENDPOINT` was
+absent, so this particular taxpayer worker cannot submit to its broker under
+that measured environment. `BACKEND_RUNTIME_ROLE` was absent. These flags are
+time-specific and do not disable the other producers. In particular, live SMS
+configuration prevents treating all provider effects as inactive.
+
 ## Admission decision
 
 The protected launcher calls `legacy-backend-signal.py --preflight` before

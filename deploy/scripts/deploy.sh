@@ -131,7 +131,7 @@ verify_prebuilt_release() {
 
 capture_remaining_seconds() {
   [ "${CAPTURE_ONLY}" -eq 1 ] && [ -n "${capture_pause_started:-}" ] || return 1
-  node -e 'const elapsed=process.hrtime.bigint()-BigInt(process.argv[1]);if(elapsed<0n)process.exit(1);const left=(600000000000n-elapsed)/1000000000n;const requested=BigInt(process.argv[2]);if(left<=0n||requested<=0n)process.exit(1);process.stdout.write((left<requested?left:requested).toString())' "${capture_pause_started}" "$1"
+  node -e 'const elapsed=process.hrtime.bigint()-BigInt(process.argv[1]);if(elapsed<0n)process.exit(1);const left=(900000000000n-elapsed)/1000000000n;const requested=BigInt(process.argv[2]);if(left<=0n||requested<=0n)process.exit(1);process.stdout.write((left<requested?left:requested).toString())' "${capture_pause_started}" "$1"
 }
 
 start_release_services() {
@@ -635,9 +635,9 @@ complete_capture_only() {
   switch_to_previous_images || return 1
   start_release_services 300 || return 1
   verify_capture_only_configuration || return 1
-  capture_remaining_seconds 600 >/dev/null || return 1
+  capture_remaining_seconds 900 >/dev/null || return 1
   DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js || return 1
-  capture_remaining_seconds 600 >/dev/null || return 1
+  capture_remaining_seconds 900 >/dev/null || return 1
   control maintenance-off || return 1
   MAINTENANCE_ACTIVE=0
   PUBLIC_TRAFFIC_OPEN=1
@@ -738,9 +738,9 @@ recover_failure() {
     if { [ "${NATIVE_RUNTIME_CLOSURE_REQUIRED}" -eq 0 ] || assert_native_runtime_closed; } \
       && start_release_services 300 \
       && verify_capture_only_configuration \
-      && { [ "${CAPTURE_ONLY}" -eq 0 ] || capture_remaining_seconds 600 >/dev/null; } \
+      && { [ "${CAPTURE_ONLY}" -eq 0 ] || capture_remaining_seconds 900 >/dev/null; } \
       && DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js \
-      && { [ "${CAPTURE_ONLY}" -eq 0 ] || capture_remaining_seconds 600 >/dev/null; }; then
+      && { [ "${CAPTURE_ONLY}" -eq 0 ] || capture_remaining_seconds 900 >/dev/null; }; then
       if [ "${CAPTURE_ONLY}" -eq 1 ]; then
         if ! control maintenance-off; then
           DEPLOYMENT_PHASE=RECOVERY_REQUIRED; DEPLOYMENT_RESULT=RECOVERY_REQUIRED

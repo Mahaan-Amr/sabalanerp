@@ -6,6 +6,8 @@ Every production deployment must preserve every write acknowledged before mainte
 
 The target normal maintenance duration is under five minutes. The ordinary hard limit is fifteen minutes after mutation begins. Safety overrides availability: rollback or emergency recovery may keep maintenance active beyond that limit until a complete release is proven healthy.
 
+The separately owned capture-only path has a finite **15-minute total maintenance pause** from its original maintenance request through verified checkpoint, exact previous-container restart, unchanged-release gates, and public reopening. Issue #432 measured 529 seconds from maintenance request to remote checkpoint proof on the November 6 production-state capture, leaving insufficient room for restart and gates under the former 600-second total. The owner approved a preannounced window up to 15 minutes for this no-mutation capture. Expiry never authorizes reopening; the original owner, lease, checkpoint and fail-closed recovery rules remain in force. This capture budget does not extend the release mutation deadline or any other deployment mode.
+
 ## Non-negotiable invariants
 
 - Only one deployment or rollback may be active.

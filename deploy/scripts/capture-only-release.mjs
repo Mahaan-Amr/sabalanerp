@@ -72,7 +72,7 @@ async function startPinned(file,environmentFile,composeFile,waitSeconds,startedN
  const snapshotRaw=read(file),snapshot=JSON.parse(snapshotRaw),snapshotSha256=sha(snapshotRaw);
  environmentFile=fs.realpathSync(environmentFile);composeFile=fs.realpathSync(composeFile);assert.ok(path.isAbsolute(sessionFile)&&fs.realpathSync(sessionFile)===sessionFile);
  assert.match(startedNs,/^[0-9]{1,20}$/);assert.ok(BigInt(startedNs)<=process.hrtime.bigint());
- const now=()=>Number(process.hrtime.bigint()/1000000n),overallDeadlineMs=Number((BigInt(startedNs)+600000000000n)/1000000n),deadline=Math.min(now()+waitSeconds*1000,overallDeadlineMs);
+ const now=()=>Number(process.hrtime.bigint()/1000000n),overallDeadlineMs=Number((BigInt(startedNs)+900000000000n)/1000000n),deadline=Math.min(now()+waitSeconds*1000,overallDeadlineMs);
  const intentFile=file+'.startup-intent.json',completionFile=file+'.startup-completion.json',heldFile=file+'.startup-held.json';
  assert.ok(!fs.existsSync(heldFile),'CAPTURE_ORIGINAL_PRIOR_HOLD_REQUIRES_EXPLICIT_RECOVERY');
  const parentPid=process.ppid,boot=fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim();
@@ -126,7 +126,7 @@ async function startPinned(file,environmentFile,composeFile,waitSeconds,startedN
 export function checkpointCompletion(raw,pauseSeconds,snapshot){
  assert.ok(Number.isSafeInteger(pauseSeconds)&&pauseSeconds>=0);const values=raw.toString().trim().split('\n').map(line=>{try{return JSON.parse(line);}catch{return null;}}).filter(v=>v?.ok===true&&v.checkpoint);assert.equal(values.length,1);const point=values[0].checkpoint;
  assert.equal(point.captureMethod,'PROTECTED_MAINTENANCE_COMPLETE');for(const key of ['sourceMachineUuidSha256','sourceKernelBootIdSha256','checksum'])assert.match(point[key],/^[a-f0-9]{64}$/);assert.ok(point.localVerified&&point.remoteVerified&&point.restoreVerified);assert.ok(point.sourceDatabase?.name&&/^[1-9][0-9]*$/.test(point.sourceDatabase.systemIdentifier)&&/^[1-9][0-9]*$/.test(point.sourceDatabase.oid));
- return {format:'sabalan-protected-capture-only-completion/v1',phase:'ABORTED',checkpoint:point,originalConfigurationSha256:sha(bytes(snapshot)),checkpointOutputSha256:sha(raw),pauseSeconds,pauseBudgetSeconds:600,pauseQualified:pauseSeconds<=600,mutationStarted:false,publicReleaseChanged:false,independentRestoreQualified:false};
+ return {format:'sabalan-protected-capture-only-completion/v1',phase:'ABORTED',checkpoint:point,originalConfigurationSha256:sha(bytes(snapshot)),checkpointOutputSha256:sha(raw),pauseSeconds,pauseBudgetSeconds:900,pauseQualified:pauseSeconds<=900,mutationStarted:false,publicReleaseChanged:false,independentRestoreQualified:false};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);const [command,file,output,pause]=process.argv.slice(2);assert.ok(path.isAbsolute(file)&&fs.realpathSync(path.dirname(file))===path.dirname(file));

@@ -5,22 +5,27 @@ import os from 'node:os';
 import path from 'node:path';
 import { startRuntime } from '../runtimeStartup';
 
-test('a candidate can start its probe listener without touching live recovery or starting deliveries', async () => {
+test('protected application startup runs recovery and workers before listening', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sabalan-candidate-'));
   const marker = path.join(root, 'recovery.json');
   try {
     await fs.writeFile(marker, 'RECOVERY_IN_PROGRESS');
-    let listening = false;
-    await startRuntime('candidate', {
-      assertControlOwnership: () => { throw new Error('candidate attempted control ownership'); },
-      initializeRecovery: async () => { await fs.writeFile(marker, 'RESET'); },
-      verifyCutover: async () => { throw new Error('candidate attempted activation'); },
-      startWorkers: () => { throw new Error('candidate attempted delivery'); },
-      listen: () => { listening = true; },
+    const effects: string[] = [];
+    await startRuntime('standalone', {
+      assertControlOwnership: () => { effects.push('ownership'); },
+      initializeRecovery: async () => { effects.push('recovery'); await fs.writeFile(marker, 'RESET'); },
+      verifyCutover: async () => { effects.push('cutover'); },
+      startWorkers: () => { effects.push('workers'); },
+      listen: () => { effects.push('listen'); },
     });
-    assert.equal(listening, true);
-    assert.equal(await fs.readFile(marker, 'utf8'), 'RECOVERY_IN_PROGRESS');
+    assert.deepEqual(effects, ['ownership', 'recovery', 'cutover', 'workers', 'listen']);
+    assert.equal(await fs.readFile(marker, 'utf8'), 'RESET');
   } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('an online candidate role cannot bypass protected startup', async () => {
+  const { resolveRuntimeRole } = await import('../runtimeStartup');
+  assert.throws(() => resolveRuntimeRole('candidate'), /BACKEND_RUNTIME_ROLE_INVALID/);
 });
 
 test('an unfenced owner cannot initialize recovery, activate workers or listen', async () => {

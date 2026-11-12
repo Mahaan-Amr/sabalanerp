@@ -1,4 +1,3 @@
-import { configureOnlineHrInvalidation,configurePrivateQualificationHrInvalidation } from './services/onlineHrInvalidation';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -10,9 +9,6 @@ import { Server } from 'socket.io';
 import { prisma } from './lib/prisma';
 import type { BackendRuntimeRole } from './services/runtimeStartup';
 import { resolveRuntimeRole } from './services/runtimeStartup';
-import { assertOnlineComposedRuntime,assertOnlineQualifiedRuntime,type OnlineQualifiedRuntime, type OnlineComposedRuntime } from './services/onlineRuntimeComposition';
-import {onlineRealtimeSuspendedForProtectedBootstrap} from './services/onlineReleaseAdmission';
-import {protectedBootstrapReadinessProbe} from './services/onlineProtectedBootstrapAuthority';
 import { runtimeHttpRequests } from './services/httpRequestLifecycle';
 import { RealtimeDeliveryLifecycle } from './services/realtimeDeliveryLifecycle';
 import { deploymentMaintenanceActive } from './services/deploymentMaintenance';
@@ -22,8 +18,7 @@ import { authorizeHrUser } from './services/hrAuthorizationService';
 import { normalizeStructuredNumeralsMiddleware } from './middleware/normalizeStructuredNumerals';
 import { errorHandler } from './middleware/errorHandler';
 import { notFound } from './middleware/notFound';
-import { getRecoveryRuntimeState, RECOVERY_COORDINATION_DIR, recoveryWriteGuard } from './services/recoveryRuntime';
-import { executeRealtimeCallback } from './services/onlineRuntimeWork';
+import { getRecoveryRuntimeState, RECOVERY_COORDINATION_DIR, recoveryWriteGuard, withRecoveryBackgroundWrite } from './services/recoveryRuntime';
 import { registerPartnerNotificationAccess } from './services/partnerSales/notifications/access';
 import { inquiryNotificationAccess } from './services/partnerSales/notifications/inquiryDelivery';
 import { resolveHrRedesignCutoverStartup } from './services/hrRedesignCutoverStartup';
@@ -96,23 +91,6 @@ import partnerActivationRoutes from "./routes/partner-activation";
 
 
 let applicationConstructed = false;
-const onlineRealtimeApplications = new WeakMap<object, Readonly<{runtime:OnlineComposedRuntime;
-  database:typeof prisma;lifecycle:RealtimeDeliveryLifecycle}>>();
-const privateQualificationApplications=new WeakMap<object,Readonly<{runtime:OnlineQualifiedRuntime;database:typeof prisma;lifecycle:RealtimeDeliveryLifecycle}>>();
-export function assertPrivateQualificationApplicationRealtimeOwner(application:unknown,runtime:OnlineQualifiedRuntime){
- assertOnlineQualifiedRuntime(runtime,'http');
- const owner=application&&typeof application==='object'?privateQualificationApplications.get(application):undefined;
- if(!owner||owner.runtime!==runtime)throw Error('PRIVATE_QUALIFICATION_CANONICAL_APPLICATION_REQUIRED');return owner;
-}
-export function assertOnlineApplicationRealtimeOwner(application:unknown,runtime:OnlineComposedRuntime){
-  assertOnlineComposedRuntime(runtime,'http');
-  const owner=application&&typeof application==='object'?onlineRealtimeApplications.get(application):undefined;
-  if(!owner||owner.runtime!==runtime)throw Error('REALTIME_CANONICAL_APPLICATION_REQUIRED');
-  return owner;
-}
-
-
-
 /** Construct the canonical HTTP/Socket.IO application without starting a
  * listener, recovery, schedulers or process signal handlers. Private native
  * entries must bind the platform ownership BEFORE importing this module.
@@ -124,38 +102,10 @@ export function createApplication({ runtimeRole, isShuttingDown }: {
   return createHttpApplication({ runtimeRole: resolveRuntimeRole(runtimeRole), isShuttingDown });
 }
 
-/** The original admitted composition is the only online constructor input.
- * No string role, manifest, environment flag or caller callback can mint it. */
-export function createOnlineApplication({ runtime, isShuttingDown }: {
-  runtime: OnlineComposedRuntime;
+function createHttpApplication({ runtimeRole, isShuttingDown }: {
+  runtimeRole: BackendRuntimeRole;
   isShuttingDown: () => boolean;
 }) {
-  const composed=assertOnlineComposedRuntime(runtime, 'http');
-  const application=createHttpApplication({ runtimeRole: 'serving', isShuttingDown,
-    assertAdmission: () => { assertOnlineComposedRuntime(runtime, 'http'); },
-    restrictToReadiness:()=>onlineRealtimeSuspendedForProtectedBootstrap(composed.admission) });
-  configureOnlineHrInvalidation(runtime,prisma);
-  onlineRealtimeApplications.set(application,Object.freeze({runtime,database:prisma,lifecycle:application.realtimeDelivery}));
-  return application;
-}
-
-/** Canonical implementation, distinct opaque qualification wrapper. */
-export function createPrivateQualificationApplication({runtime,isShuttingDown}:{runtime:OnlineQualifiedRuntime;isShuttingDown:()=>boolean}){
- assertOnlineQualifiedRuntime(runtime,'http');
- const application=createHttpApplication({runtimeRole:'private-qualification',isShuttingDown,
-  assertAdmission:()=>{assertOnlineQualifiedRuntime(runtime,'http');}});
- configurePrivateQualificationHrInvalidation(runtime,prisma);
- privateQualificationApplications.set(application,Object.freeze({runtime,database:prisma,lifecycle:application.realtimeDelivery}));
- return application;
-}
-
-function createHttpApplication({ runtimeRole, isShuttingDown, assertAdmission,restrictToReadiness }: {
-  runtimeRole: BackendRuntimeRole | 'serving' | 'private-qualification';
-  isShuttingDown: () => boolean;
-  assertAdmission?: () => void;
-  restrictToReadiness?:()=>boolean;
-}) {
-  assertAdmission?.();
   if (applicationConstructed) throw new Error('APPLICATION_ALREADY_CONSTRUCTED');
   // HTTP completion and realtime publication are process-owned singletons.
   // Failed construction also closes this incarnation; there is no reset path.
@@ -194,42 +144,27 @@ function createHttpApplication({ runtimeRole, isShuttingDown, assertAdmission,re
     },
   });
   const accepting = () => {
-    if (isShuttingDown() || runtimeRole === 'candidate' || getRecoveryRuntimeState().mode !== 'NORMAL'
+    if (isShuttingDown() || getRecoveryRuntimeState().mode !== 'NORMAL'
       || deploymentMaintenanceActive(RECOVERY_COORDINATION_DIR)) return false;
-    try { assertAdmission?.(); return true; } catch { return false; }
+    return true;
   };
   const realtimeDelivery = new RealtimeDeliveryLifecycle(prisma, () => io.sockets.sockets.values(), async userId => {
     const authorization = await authorizeHrUser(prisma, userId, {
       workspaceLevel: 'VIEW', feature: { code: 'PERSONNEL', level: 'VIEW' },
     });
     return authorization.allowed;
-  }, accepting, executeRealtimeCallback);
-
-  if (assertAdmission) io.engine.use((request, _response, next) => {
-    // Keep existing Engine.IO connections while admitted callbacks finish.
-    const continuing=!!new URL(request.url||'/', 'http://private.invalid').searchParams.get('sid');
-    if ((!continuing&&externalAdmissionClosed)||!accepting()) { next(new Error('ONLINE_RUNTIME_NOT_ACCEPTING')); return; }
-    next();
+  }, accepting, async work => {
+    const result = await withRecoveryBackgroundWrite(async () => ({ value: await work() }));
+    if (!result) throw new Error('REALTIME_DELIVERY_UNAVAILABLE');
+    return result.value;
   });
 
   // Middleware
   app.use(helmet());
   app.use((req, res, next) => {
-    if (assertAdmission) {
-      try { assertAdmission(); } catch {
-        res.status(503).json({ success: false, error: 'ONLINE_RELEASE_ADMISSION_UNPROVEN',
-          message: 'این نسخه فعلاً آمادهٔ پاسخ‌گویی نیست؛ کمی بعد دوباره تلاش کنید.' });
-        return;
-      }
-    }
     const probe = req.path === '/api/health' || req.path === '/api/ready';
-    // Protected bootstrap exposes only read-only startup probes. In particular
-    // it cannot inherit System Recovery/logout maintenance exceptions.
-    if(restrictToReadiness?.()&&!protectedBootstrapReadinessProbe(req.method,req.path)){
-      res.status(503).json({success:false,error:'ONLINE_PROTECTED_BOOTSTRAP_PRIVATE'});return;
-    }
-    if (!probe && (externalAdmissionClosed || isShuttingDown() || runtimeRole === 'candidate')) {
-      res.status(503).json({ success: false, error: externalAdmissionClosed || isShuttingDown() ? 'RUNTIME_DRAINING' : 'CANDIDATE_NOT_ACTIVE',
+    if (!probe && (externalAdmissionClosed || isShuttingDown())) {
+      res.status(503).json({ success: false, error: 'RUNTIME_DRAINING',
         message: 'سامانه در حال آماده‌سازی نسخه است؛ کمی بعد دوباره تلاش کنید.' });
       return;
     }

@@ -46,8 +46,6 @@ import { getHrReconciliationWorkspace, recordHrReconciliationReview } from '../s
 import { loadCurrentPersonnelUnits } from '../services/hrPersonnelUnits';
 import { buildPersonnelCollection, personnelOriginFeature } from '../services/hrPersonnelCollection';
 import { publishRealtime } from '../services/realtimePublisher';
-import { loadOnlineRuntimeScope } from '../services/onlineRuntimeScope';
-import { prepareOnlineHrPersonnelInvalidation,hasOnlineHrInvalidationOwner } from '../services/onlineHrInvalidation';
 import { loadHrOperationalReference } from '../services/hrOperationalReferenceProjection';
 import { normalizeApplicantDigits } from '../services/hrCandidateAccess';
 import {
@@ -92,8 +90,6 @@ router.use((req: WorkspaceRequest, res, next) => {
 });
 router.use((req: WorkspaceRequest, res, next) => {
   if (req.method !== 'GET' && /^\/(?:personnel|relationships|assignments)(?:\/|$)/.test(req.path)) {
-    if(loadOnlineRuntimeScope())return prepareOnlineHrPersonnelInvalidation(req,res,next);
-    if(hasOnlineHrInvalidationOwner())return next(Error('HR_INVALIDATION_OWNER_LOST'));
     res.once('finish', () => {
       if (res.statusCode >= 200 && res.statusCode < 300) {
         publishRealtime('hr.personnel.changed', {});

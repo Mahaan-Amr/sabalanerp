@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import type {OnlineRetainedRoot} from '../services/onlineReleaseEvidence';
+type OnlineRetainedRoot = Readonly<{ live: string; store: string; liveDevice: string; liveInode: string;
+  storeDevice: string; storeInode: string; baselineSha256: string }>;
 function required(value:unknown,code:string):asserts value{if(!value)throw Error(code);}
 const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex');
 const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;

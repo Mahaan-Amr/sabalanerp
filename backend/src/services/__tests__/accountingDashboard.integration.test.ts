@@ -23,4 +23,11 @@ test('complete Accounting dashboard preserves authorized workspace and fresh cha
   assert.deepEqual(dashboard.trend, trend);
   assert.deepEqual(dashboard.workspace.queues.contracts.map(row => row.contractId), contracts.items.map(row => row.contractId),
     'the dashboard must use the same authorized Partner and ordinary work population before pagination');
+  for (const row of dashboard.workspace.queues.invoiceCandidates) {
+    assert.equal('sourceSnapshot' in row, false, 'dashboard summaries must not expose complete invoice snapshots');
+  }
+  for (const row of dashboard.workspace.queues.audit) {
+    assert.equal('beforeState' in row, false, 'dashboard summaries must not include audit snapshots');
+    assert.equal('afterState' in row, false, 'dashboard summaries must not include audit snapshots');
+  }
 });

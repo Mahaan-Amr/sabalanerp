@@ -16,14 +16,31 @@ import {SupplyChainAccountingError} from '../accountingSupplyChain';
 
 // Uses only the existing sabalanerp-local database; every fixture/effect is rolled back.
 const target = new URL(process.env.DATABASE_URL || 'postgresql://invalid');
-assert(['127.0.0.1', 'localhost'].includes(target.hostname) && target.port === '55432' && target.pathname === '/sabalanerp', 'Purchasing QA must target the existing sabalanerp-local host database on port 55432.');
+assert(['127.0.0.1', 'localhost'].includes(target.hostname) && target.port === '55432'
+  && ['/sabalanerp', '/sabalanerp_qa_protected_430'].includes(target.pathname),
+  'Purchasing QA must target the existing sabalanerp-local PostgreSQL service on port 55432.');
 const database = new PrismaClient();
 const rollback = new Error('PURCHASING_TEST_ROLLBACK');
 let checks = 0;
 async function execute() {
   try {
     await database.$transaction(async tx => {
-      const token = randomUUID(), admin = await tx.user.findFirst({ where: { role: 'ADMIN', isActive: true } });
+      const token = randomUUID(), isolated = target.pathname === '/sabalanerp_qa_protected_430';
+      if (isolated) {
+        await tx.user.create({ data: { email: `admin-${token}@example.invalid`, username: `admin-${token}`,
+          password: 'unused-qa-password', firstName: 'QA', lastName: 'Admin', role: 'ADMIN' } });
+        await tx.department.create({ data: { name: `qa-${token}`, namePersian: `آزمایش ${token}` } });
+        await tx.product.create({ data: {
+          code: `qa-${token}`, name: 'QA stone', namePersian: 'سنگ آزمایش',
+          cuttingDimensionCode: 'QA', cuttingDimensionName: 'QA', cuttingDimensionNamePersian: 'آزمایش',
+          stoneTypeCode: 'QA', stoneTypeName: 'QA', stoneTypeNamePersian: 'آزمایش',
+          widthCode: 'QA', widthValue: '1', widthName: 'QA', thicknessCode: 'QA', thicknessValue: '1', thicknessName: 'QA',
+          mineCode: 'QA', mineName: 'QA', mineNamePersian: 'آزمایش', finishCode: 'QA', finishName: 'QA', finishNamePersian: 'آزمایش',
+          colorCode: 'QA', colorName: 'QA', colorNamePersian: 'آزمایش', qualityCode: 'QA', qualityName: 'QA', qualityNamePersian: 'آزمایش',
+          images: [],
+        } });
+      }
+      const admin = await tx.user.findFirst({ where: { role: 'ADMIN', isActive: true } });
       assert(admin, 'Existing local admin required');
       const actor = { id: admin.id, role: admin.role };
       const [product, department] = await Promise.all([tx.product.findFirst(), tx.department.findFirst()]);
@@ -241,6 +258,7 @@ async function execute() {
       await command('ORDER',{requestId:reused.id,stone:reused.data.stone,unit:reused.data.unit,quantity:'10',supplierId:supplier.supplier.id,price:'1'});checks++;
       ri=await document(tx,ri.id);await expect(command('INQUIRY_SELECT',{documentId:ri.id,expectedVersion:ri.version,selection:[{offerId:rangeOffer.id,quantity:'20'}]}),'OFFER_CAPACITY_EXCEEDED');
       // Fresh read-only reproduction against the screenshot's real canonical graph: raw piece count is not m² demand.
+      if (!isolated) {
       const realContract=await tx.salesContract.findUniqueOrThrow({where:{contractNumber:'100312'},select:{id:true,contractData:true,items:{where:{retiredAt:null},select:{id:true,productRowId:true,quantity:true}}}});
       const realRows=(realContract.contractData as any).products;
       const zeroCountItem=realContract.items.find(i=>i.quantity.eq(0) && realRows.some((r:any)=>r.rowId===i.productRowId && r.squareMeters>0))!;
@@ -252,6 +270,7 @@ async function execute() {
       assert.equal(manualSource.quantity,String(realRows.find((r:any)=>r.rowId===manualItem.productRowId).squareMeters));checks++;
       const cutRow=realRows.find((r:any)=>r.squareMeters && r.smartCutPlan?.consumedAreaSqm && String(r.squareMeters)!==String(r.smartCutPlan.consumedAreaSqm));
       assert(cutRow);const cutSource=await contractPurchaseSource(tx,await accessFor(tx,actor),realContract.id,cutRow.rowId);assert.equal(cutSource.quantity,String(cutRow.squareMeters));assert.notEqual(cutSource.quantity,String(cutRow.smartCutPlan.consumedAreaSqm));checks++;
+      }
       await expect(command('REQUEST',{reason:'stock',stone:'درخواست بدون استعلام',unit:'مترمربع',quantity:'1',ownerId:admin.id}),'INQUIRY_REQUIRED');
       // Multi-line cases are atomic and ready lines need not wait for other lines.
       const batchContract=await tx.salesContract.create({data:{contractNumber:`QA-BATCH-${token}`,title:'Batch',titlePersian:'چندقلمی',content:'',customerId:customer.id,departmentId:department.id,createdBy:user.id,responsibleSellerId:user.id}});
@@ -473,4 +492,4 @@ async function execute() {
   } catch (error) { if (error !== rollback) throw error; }
   console.log(`Purchasing integration: ${checks} checks passed; transaction rolled back.`);
 }
-void execute().catch(error => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; }).finally(() => database.$disconnect());
+void execute().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => database.$disconnect());

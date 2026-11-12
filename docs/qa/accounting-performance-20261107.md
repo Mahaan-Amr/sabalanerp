@@ -1,0 +1,11 @@
+# Accounting read performance — local verification
+
+These exploratory measurements use the existing `sabalanerp-local` PostgreSQL service. They are not production p95 measurements and do not establish a production latency target.
+
+- On 869 local ordinary contracts, an alternating comparison of the default first page against the equivalent complete-population path returned identical rows, counts, and totals. After warm-up, the complete path took 298–303 ms and the database-paged path took 23–27 ms in three samples each. This comparison did not include an authenticated Partner scope or browser/network time.
+- For 200 synthetic authorized audit witnesses with large unrelated JSON, the full states occupied 13,362,491 serialized bytes and the projected witnesses 25,891 bytes. Four alternating local reads took 105–128 ms for full states and 52–60 ms for projected states. The same recursive witness validator is applied to the projection; the full audit evidence remains stored unchanged.
+- A separate isolated-database fixture exercised 35 Partner cases and 30 large audit records. For a normal Accounting user, one scope took approximately 2.7 seconds and two concurrent scopes approximately 5.4 seconds in one sample. These synthetic cases contain only one historical invoice and are not a substitute for production-size concurrency or browser measurements.
+
+The default active, unfiltered date-ordered register may use database paging and a full-population aggregate. Complex filters and precision-sensitive populations use the existing complete-population calculation. Tests compare mixed ordinary/Partner pages, totals, tie ordering, currency whitespace, fractional amounts, and a high-precision fallback; they also check authorization expiry, concurrent permission changes, per-case audit decisions and nested witness validation.
+
+Local checks include `npm run architecture:check`, `npm --prefix backend run build`, `npm run test:partner-sales`, the Accounting projection and Partner authorization tests, and the isolated Accounting scope integration tests. No production deployment was performed. Production behavior, end-to-end latency and p95 remain to be measured after an authorized release.

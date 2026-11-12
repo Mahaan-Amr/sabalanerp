@@ -53,9 +53,20 @@ The tax endpoint is checked again against the exact running container at signal
 time, rather than inferred from the earlier environment observation.
 
 After the deployment lease and both public 503 responses are proven, the runner
-rechecks that exact runtime and sends one SIGTERM through its pidfd. A failed or
-ambiguous signal, nonzero exit, replaced process, missing lease, or failed
-maintenance boundary stops the release. The protected runner then stops the
+rechecks the exact e407 container, Node birth, and Docker daemon birth. This
+first-update path is pinned to Docker Engine 29.2.1 and its `/var/lib/docker`
+metadata layout. It sends SIGCONT to the exact container through Docker, then
+requires `HasBeenManuallyStopped=true` in the root-owned, identity-matched
+`config.v2.json` before sending one SIGTERM to the exact Node pidfd. This
+persisted manual-stop barrier prevents the `unless-stopped` policy from
+immediately restarting the old backend. The runner then requires a bounded
+`docker wait`, clean exit 0, unchanged container/image/creation/start identity,
+unchanged daemon birth and restart count, and a persisted stopped checkpoint.
+An unproven barrier, daemon replacement, failed or ambiguous signal, nonzero
+exit, restarted or replaced process, missing lease, or failed maintenance
+boundary stops the release. A partially applied manual-stop barrier is held
+for explicit recovery; it cannot be retried as a fresh silent attempt. The
+protected runner then stops the
 services, verifies process closure and zero old-backend SQL sessions, captures
 and independently verifies local and off-server checkpoints, and only then
 permits migration. A zero exit and vanished SQL sessions are database-boundary

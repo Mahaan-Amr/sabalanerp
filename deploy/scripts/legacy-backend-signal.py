@@ -301,6 +301,88 @@ class OriginalHost:
         require(len(values) == 1 and values[0]['Id'] == container)
         return values[0]
 
+    def daemon_identity(self):
+        pidfile = Path('/run/docker.pid')
+        require(pidfile.resolve(strict=True) == pidfile)
+        fd = os.open(pidfile, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            require(stat.S_ISREG(before.st_mode) and before.st_uid == 0 and before.st_nlink == 1
+                    and not before.st_mode & 0o022 and 0 < before.st_size <= 32)
+            raw = os.read(fd, 33)
+            after = os.fstat(fd)
+            named = pidfile.lstat()
+            fields = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns,
+                                    value.st_ctime_ns, value.st_uid, value.st_mode, value.st_nlink)
+            require(fields(before) == fields(after) == fields(named))
+        finally:
+            os.close(fd)
+        require(re.fullmatch(rb'[1-9][0-9]{1,9}\n?', raw), 'LEGACY_SIGNAL_DOCKER_PIDFILE_INVALID')
+        pid = int(raw)
+        process = proc_identity(pid)
+        require(process['exe'] == '/usr/bin/dockerd' and process['pid'] == pid,
+                'LEGACY_SIGNAL_DOCKER_DAEMON_CHANGED')
+        version = self.docker(['version', '--format', '{{.Server.Version}}']).decode().strip()
+        root = self.docker(['info', '--format', '{{.DockerRootDir}}']).decode().strip()
+        require(version == '29.2.1' and root == '/var/lib/docker', 'LEGACY_SIGNAL_DOCKER_VERSION_UNREVIEWED')
+        return dict(pid=pid, startTicks=process['startTicks'], bootId=self.boot,
+                    serverVersion=version, dockerRoot=root)
+
+    def persisted_manual_stop(self, snapshot):
+        container = snapshot['container']
+        identifier = container['containerId']
+        require(re.fullmatch('[a-f0-9]{64}', identifier))
+        state, sha = private(Path('/var/lib/docker/containers') / identifier / 'config.v2.json', 0o600, 16 * 1024**2)
+        require(state['ID'] == identifier and state['Image'] == container['image']
+                and state['Created'] == container['created']
+                and state['State']['StartedAt'] == container['startedAt']
+                and state['State']['Running'] is True
+                and state['State']['Pid'] == container['initHostPid']
+                and isinstance(state['RestartCount'], int) and state['RestartCount'] >= 0,
+                'LEGACY_SIGNAL_DOCKER_CHECKPOINT_IDENTITY_CHANGED')
+        require(type(state.get('HasBeenManuallyStopped')) is bool,
+                'LEGACY_SIGNAL_DOCKER_CHECKPOINT_FLAG_MISSING')
+        return dict(manuallyStopped=state['HasBeenManuallyStopped'], sha256=sha,
+                    restartCount=state['RestartCount'])
+
+    def persisted_stopped(self, snapshot, barrier):
+        container = snapshot['container']
+        identifier = container['containerId']
+        state, sha = private(Path('/var/lib/docker/containers') / identifier / 'config.v2.json', 0o600, 16 * 1024**2)
+        require(state['ID'] == identifier and state['Image'] == container['image']
+                and state['Created'] == container['created']
+                and state['State']['StartedAt'] == container['startedAt']
+                and state['State']['Running'] is False and state['State']['Pid'] == 0
+                and state['State']['ExitCode'] == 0 and state['State']['OOMKilled'] is False
+                and state['HasBeenManuallyStopped'] is True
+                and state['RestartCount'] == barrier['restartCount'],
+                'LEGACY_SIGNAL_DOCKER_STOPPED_CHECKPOINT_UNPROVEN')
+        return dict(manuallyStopped=True, sha256=sha, restartCount=state['RestartCount'])
+
+    def manual_stop_barrier(self, plan):
+        snapshot = plan['snapshot']
+        before_daemon = self.daemon_identity()
+        require(before_daemon == plan['manualStopPreflight']['dockerDaemon'],
+                'LEGACY_SIGNAL_DOCKER_DAEMON_CHANGED')
+        before = self.persisted_manual_stop(snapshot)
+        require(before == plan['manualStopPreflight']['checkpoint'],
+                'LEGACY_SIGNAL_DOCKER_CHECKPOINT_CHANGED')
+        require(before['manuallyStopped'] is False, 'LEGACY_SIGNAL_DOCKER_ALREADY_MANUALLY_STOPPED')
+        identifier = snapshot['container']['containerId']
+        result = self.docker(['kill', '--signal=SIGCONT', identifier])
+        require(result.strip() == identifier.encode(), 'LEGACY_SIGNAL_DOCKER_CONT_UNPROVEN')
+        after_daemon = self.daemon_identity()
+        require(after_daemon == before_daemon, 'LEGACY_SIGNAL_DOCKER_DAEMON_CHANGED')
+        after = self.persisted_manual_stop(snapshot)
+        require(after['manuallyStopped'] is True, 'LEGACY_SIGNAL_MANUAL_STOP_NOT_PERSISTED')
+        require(after['restartCount'] == before['restartCount'], 'LEGACY_SIGNAL_DOCKER_RESTARTED_DURING_BARRIER')
+        require(self.snapshot(snapshot['container']['image']) == snapshot,
+                'LEGACY_SIGNAL_ORIGINAL_RUNTIME_CHANGED_DURING_BARRIER')
+        return dict(format='sabalan-legacy-manual-stop-barrier/v1', dockerDaemon=after_daemon,
+                    beforeSha256=before['sha256'], afterSha256=after['sha256'],
+                    restartCount=after['restartCount'], manualStopPersisted=True,
+                    barrierSignal='SIGCONT')
+
     def snapshot(self, expected_image):
         ids = self.docker(['ps', '--no-trunc', '--filter', 'label=com.docker.compose.project=sabalanerp',
                            '--filter', 'label=com.docker.compose.service=backend', '--format', '{{.ID}}']).decode().split()
@@ -391,16 +473,27 @@ def forward_original(host, plan, plan_sha, intent_file, result_file, session_fil
             host.protected_boundary(plan, session_file)
             require(proc_identity(snapshot['node']['pid']) == snapshot['node'] and not interrupted)
             require(time.monotonic_ns() + 30_000_000_000 < capture_deadline_ns(), 'LEGACY_SIGNAL_INSUFFICIENT_CAPTURE_BUDGET')
+            report['manualStopBarrier'] = host.manual_stop_barrier(plan)
+            host.protected_boundary(plan, session_file)
+            require(host.snapshot(snapshot['container']['image']) == snapshot)
+            require(proc_identity(snapshot['node']['pid']) == snapshot['node'] and not interrupted)
             report['signalAttempted'] = True
             signal.pidfd_send_signal(fd, signal.SIGTERM, None, 0)
             report['signalDelivered'] = True
             wait_output = host.docker(['wait', snapshot['container']['containerId']])
             actual = host.inspect(snapshot['container']['containerId'])
             verify_exited(actual, snapshot['container'], wait_output)
+            require(actual['RestartCount'] == report['manualStopBarrier']['restartCount'],
+                    'LEGACY_SIGNAL_DOCKER_RESTARTED_AFTER_SIGNAL')
+            require(host.daemon_identity() == report['manualStopBarrier']['dockerDaemon'],
+                    'LEGACY_SIGNAL_DOCKER_DAEMON_CHANGED')
+            report['stoppedCheckpoint'] = host.persisted_stopped(snapshot, report['manualStopBarrier'])
+            require(not Path('/proc', str(snapshot['node']['pid'])).exists(),
+                    'LEGACY_SIGNAL_OLD_NODE_STILL_PRESENT')
             require(not interrupted)
             report.update(passResult=True, action='NORMAL_SIGTERM', legacyContainerExitedCleanly=True,
                           stoppedContainer=snapshot['container'], exitObservation=dict(
-                              Id=actual['Id'], Image=actual['Image'], Created=actual['Created'], State={key: actual['State'].get(key)
+                              Id=actual['Id'], Image=actual['Image'], Created=actual['Created'], RestartCount=actual['RestartCount'], State={key: actual['State'].get(key)
                                   for key in ['StartedAt', 'Pid', 'Running', 'OOMKilled', 'ExitCode', 'Error']}))
         require(time.monotonic_ns() < capture_deadline_ns(), 'LEGACY_SIGNAL_CAPTURE_BUDGET_EXCEEDED_HELD')
         return report
@@ -452,6 +545,10 @@ def main():
             result, _ = private(result_file, 0o400)
             require(intent_value['planSha256'] == result['planSha256'] == plan_sha and result['passResult'] is True
                     and result.get('legacyContainerExitedCleanly') is True and result['interrupted'] is False
+                    and result['manualStopBarrier']['manualStopPersisted'] is True
+                    and result['stoppedCheckpoint']['manuallyStopped'] is True
+                    and result['stoppedCheckpoint']['restartCount'] == result['manualStopBarrier']['restartCount']
+                    == result['exitObservation']['RestartCount']
                     and intent_value['deploymentId'] == result['deploymentId'] == plan['deploymentId'] == deployment
                     and intent_value['releaseId'] == result['releaseId'] == plan['releaseId'] == release
                     and intent_value['legacyExternalEffectRisk'] == result['legacyExternalEffectRisk'] == plan['legacyExternalEffectRisk']
@@ -465,6 +562,13 @@ def main():
     if mode == '--preflight':
         require(len(sys.argv) == 6 and re.fullmatch('sha256:[a-f0-9]{64}', argument))
         snapshot = host.snapshot(argument)
+        manual_stop_preflight = None
+        if snapshot['container']['kind'] == 'KNOWN_LEGACY_SHELL':
+            daemon = host.daemon_identity()
+            checkpoint = host.persisted_manual_stop(snapshot)
+            require(checkpoint['manuallyStopped'] is False,
+                    'LEGACY_SIGNAL_DOCKER_ALREADY_MANUALLY_STOPPED')
+            manual_stop_preflight = dict(dockerDaemon=daemon, checkpoint=checkpoint)
         if snapshot['node']:
             require(hasattr(os, 'pidfd_open') and hasattr(signal, 'pidfd_send_signal'), 'LEGACY_SIGNAL_PIDFD_UNAVAILABLE')
             fd = os.pidfd_open(snapshot['node']['pid'], 0)
@@ -474,7 +578,8 @@ def main():
                 os.close(fd)
         save(plan_file, dict(format=FORMAT, deploymentId=deployment, releaseId=release, snapshot=snapshot,
                              signalDelivered=False, productionMutation=False, originalChildren=original_child_facts(),
-                             legacyExternalEffectRisk=legacy_effect_receipt(snapshot)))
+                             legacyExternalEffectRisk=legacy_effect_receipt(snapshot),
+                             manualStopPreflight=manual_stop_preflight))
     else:
         require(len(sys.argv) == 7)
         plan, plan_sha = private(plan_file, 0o400)

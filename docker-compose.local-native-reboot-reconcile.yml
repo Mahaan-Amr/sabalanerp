@@ -1,0 +1,8 @@
+# One-shot incident-only command for the existing sabalanerp-local backend.
+# Apply only after an independently reviewed local data checkpoint and host
+# verification of image ID, boot IDs, exact ACTIVE SHA and loopback ingress.
+name: sabalanerp-local
+services:
+  backend:
+    command: ["sh", "scripts/with-backend-control-ownership.sh", "--reconcile-local-reboot"]
+    restart: "no"

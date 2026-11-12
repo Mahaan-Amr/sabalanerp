@@ -90,6 +90,143 @@ def assert_closed(directory, filename='deployment-runtime-native.json'):
     return previous, raw
 
 
+def assert_local_reboot_abandonment(directory, previous, previous_raw):
+    """Permit only a host-attested local reboot incident before a new owner.
+
+    The original ACTIVE bytes stay in history. This is not used by --assert-closed
+    or online admission and does not claim the old workers completed.
+    """
+    require(os.environ.get('NODE_ENV') == 'development'
+            and os.environ.get('COMPOSE_PROJECT_NAME') == 'sabalanerp-local'
+            and os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone') == 'standalone'
+            and not any(key.startswith('BACKEND_ONLINE_') for key in os.environ))
+    require(os.environ.get('SMS_IR_ENVIRONMENT') == 'sandbox'
+            and not any(os.environ.get(key) for key in [
+                'SMS_IR_API_KEY', 'WEB_PUSH_VAPID_PRIVATE_KEY', 'TAXPAYER_DELIVERY_BROKER_ENDPOINT', 'TAXPAYER_BROKER_URL',
+                'TAXPAYER_BROKER_TOKEN', 'TAXPAYER_API_KEY']))
+    require(os.environ.get('PUBLIC_APP_URL', '').startswith('http://localhost:')
+            and os.environ.get('FRONTEND_URL', '').startswith('http://localhost:'))
+    source = urlsplit(os.environ.get('DATABASE_URL', ''))
+    require(source.hostname == 'postgres' and unquote(source.path[1:]) == 'sabalanerp')
+    image_id = os.environ.get('LOCAL_NATIVE_REBOOT_IMAGE_ID', '')
+    require(re.fullmatch(r'sha256:[a-f0-9]{64}', image_id))
+    archived = directory / 'deployment-runtime-history' / (hashlib.sha256(previous_raw).hexdigest() + '.json')
+    require(read_state(archived)[1] == previous_raw)
+    receipt, receipt_raw = read_state(directory / 'deployment-runtime-abandonment.json')
+    require(receipt_raw is not None)
+    boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    history = []
+    for path in sorted(directory.glob('deployment-runtime-native.preserved-*.json')):
+        raw = read_state(path)[1]
+        require(raw is not None)
+        history.append(dict(name=path.name, sha256=hashlib.sha256(raw).hexdigest()))
+    incidents = []
+    for pattern in ['local-forced-recovery-incident-*.json', 'local-reboot-incident-*.json']:
+        for path in sorted(directory.glob(pattern)):
+            raw = read_state(path)[1]
+            require(raw is not None)
+            incidents.append(dict(name=path.name, sha256=hashlib.sha256(raw).hexdigest()))
+    incidents.sort(key=lambda item: item['name'])
+    helper = Path(__file__).resolve(strict=True).parent / 'local-native-reboot.py'
+    spec = importlib.util.spec_from_file_location('sabalan_local_reboot', helper)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    observed = dict(project='sabalanerp-local', nodeEnv='development', role='standalone',
+                    imageId=image_id, bootId=boot, systemIdentifier=receipt.get('clusterIdentifier'),
+                    databaseOid=receipt.get('databaseOid'), oldSessions=0, allTaggedSessions=0,
+                    prepared=0, publicIngress=False, externalCredentials=False,
+                    historicalActive=history, historicalIncidentEvidence=incidents)
+    require(module.valid_receipt(previous, hashlib.sha256(previous_raw).hexdigest(), receipt, observed))
+    return receipt
+
+
+def reconcile_local_reboot(directory):
+    """One-shot opt-in incident command under the existing FD9 control lock.
+
+    The operator first checkpoints local data and verifies the existing Compose
+    service's image and loopback ingress on the host. This command never starts
+    application code and refuses an already published incident receipt.
+    """
+    active, raw = read_state(directory / 'deployment-runtime-native.json')
+    require(raw is not None and isinstance(active, dict) and active.get('phase') == 'ACTIVE')
+    active_sha = hashlib.sha256(raw).hexdigest()
+    require(os.environ.get('LOCAL_NATIVE_REBOOT_EXPECTED_ACTIVE_SHA256') == active_sha
+            and os.environ.get('LOCAL_NATIVE_REBOOT_EXPECTED_OLD_BOOT_ID') == active['guardian']['bootId']
+            and os.environ.get('LOCAL_NATIVE_REBOOT_HOST_INGRESS') == 'loopback-verified'
+            and read_state(directory / 'deployment-runtime-abandonment.json')[1] is None)
+    source = urlsplit(os.environ.get('DATABASE_URL', ''))
+    require(source.hostname == 'postgres' and unquote(source.path[1:]) == 'sabalanerp')
+    pg_env = {key: value for key, value in os.environ.items() if not key.startswith('PG')}
+    pg_env.update(PGHOST='postgres', PGPORT=str(source.port or 5432), PGDATABASE='postgres',
+                  PGUSER=unquote(source.username or ''), PGPASSWORD=unquote(source.password or ''),
+                  PGAPPNAME='sabalan-local-reboot-observer', PGCONNECT_TIMEOUT='5',
+                  PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=250 -c default_transaction_read_only=on')
+    namespace = active['namespace'].replace("'", "''")
+    sql = """SELECT json_build_object('system',c.system_identifier::text,
+      'visible',r.rolsuper OR pg_has_role(current_user,'pg_read_all_stats','USAGE'),
+      'sourceOid',(SELECT oid::text FROM pg_database WHERE datname='sabalanerp'),
+      'oldSessions',(SELECT count(*) FROM pg_stat_activity WHERE application_name='""" + namespace + """'),
+      'allTaggedSessions',(SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'sabalan-rt-%'),
+      'prepared',(SELECT count(*) FROM pg_prepared_xacts))
+      FROM pg_control_system() c CROSS JOIN pg_roles r WHERE r.rolname=current_user"""
+    observed_sql = subprocess.run(['psql', '-X', '-q', '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-c', sql],
+                                  env=pg_env, stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+    require(observed_sql.returncode == 0 and len(observed_sql.stdout) < 16384)
+    sql_state = json.loads(observed_sql.stdout)
+    require(sql_state['visible'] is True)
+    history = []
+    for path in sorted(directory.glob('deployment-runtime-native.preserved-*.json')):
+        old_raw = read_state(path)[1]
+        require(old_raw is not None)
+        history.append(dict(name=path.name, sha256=hashlib.sha256(old_raw).hexdigest()))
+    incidents = []
+    for pattern in ['local-forced-recovery-incident-*.json', 'local-reboot-incident-*.json']:
+        for path in sorted(directory.glob(pattern)):
+            old_raw = read_state(path)[1]
+            require(old_raw is not None)
+            incidents.append(dict(name=path.name, sha256=hashlib.sha256(old_raw).hexdigest()))
+    incidents.sort(key=lambda item: item['name'])
+    helper = Path(__file__).resolve(strict=True).parent / 'local-native-reboot.py'
+    spec = importlib.util.spec_from_file_location('sabalan_local_reboot', helper)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    observed = dict(project=os.environ.get('COMPOSE_PROJECT_NAME'), nodeEnv=os.environ.get('NODE_ENV'),
+                    role=os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone'),
+                    imageId=os.environ.get('LOCAL_NATIVE_REBOOT_IMAGE_ID'),
+                    bootId=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+                    systemIdentifier=sql_state['system'], databaseOid=sql_state['sourceOid'],
+                    oldSessions=sql_state['oldSessions'], allTaggedSessions=sql_state['allTaggedSessions'],
+                    prepared=sql_state['prepared'], publicIngress=False,
+                    externalCredentials=not (os.environ.get('SMS_IR_ENVIRONMENT') == 'sandbox'
+                      and not any(os.environ.get(key) for key in [
+                        'SMS_IR_API_KEY', 'WEB_PUSH_VAPID_PRIVATE_KEY', 'TAXPAYER_DELIVERY_BROKER_ENDPOINT', 'TAXPAYER_BROKER_URL',
+                        'TAXPAYER_BROKER_TOKEN', 'TAXPAYER_API_KEY'])), historicalActive=history,
+                    historicalIncidentEvidence=incidents)
+    receipt = module.reconcile(active, active_sha, observed)
+    # These checks tie the local-only scope to the actual runtime environment.
+    require(os.environ.get('PUBLIC_APP_URL', '').startswith('http://localhost:')
+            and os.environ.get('FRONTEND_URL', '').startswith('http://localhost:'))
+    archived_directory = directory / 'deployment-runtime-history'
+    archived_directory.mkdir(mode=0o700, exist_ok=True)
+    archived = archived_directory / (active_sha + '.json')
+    try:
+        write_exclusive(archived, raw)
+    except FileExistsError:
+        require(read_state(archived)[1] == raw)
+    archive_fd = os.open(archived_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(archive_fd)
+    finally:
+        os.close(archive_fd)
+    require(read_state(directory / 'deployment-runtime-native.json')[1] == raw)
+    write_exclusive(directory / 'deployment-runtime-abandonment.json', encode(receipt))
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def assert_no_online_fleet(directory):
     # Legacy/protected commands require complete host-controller retirement.
     # Even QUIESCENT metadata is not fresh SQL/image/grant-revocation proof.
@@ -200,6 +337,10 @@ def run():
         require(loaded is None)
         assert_closed(directory)
         return 0
+    if sys.argv[1:] == ['--reconcile-local-reboot']:
+        require(loaded is None and os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone') == 'standalone')
+        reconcile_local_reboot(directory)
+        return 0
     role = os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone')
     require(role in (['serving', 'control'] if loaded else ['standalone', 'control']))
     capture_gate = assert_capture_gate()
@@ -222,7 +363,16 @@ def run():
             else:
                 admission.state()
     file = directory / 'deployment-runtime-native.json'
-    previous, previous_raw = assert_closed(directory)
+    local_abandonment = None
+    try:
+        previous, previous_raw = assert_closed(directory)
+    except RuntimeError:
+        # Only this exact standalone local path may examine an ACTIVE record.
+        # The ordinary control and online paths retain their existing refusal.
+        require(loaded is None and role == 'standalone')
+        previous, previous_raw = read_state(directory / 'deployment-runtime-native.json')
+        require(previous_raw is not None and previous.get('phase') == 'ACTIVE')
+        local_abandonment = assert_local_reboot_abandonment(directory, previous, previous_raw)
     extra_boundaries = []
     worker_file = coordination / 'deployment-online-worker-native.json'
     if loaded:
@@ -277,6 +427,7 @@ def run():
       'visible',r.rolsuper OR pg_has_role(current_user,'pg_read_all_stats','USAGE'),
       'sourceOid',(SELECT oid::text FROM pg_database WHERE datname='""" + database_literal + """'),
       'sessions',(SELECT count(*) FROM pg_stat_activity WHERE application_name='""" + namespace + """'),
+      'allTagged',(SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'sabalan-rt-%'),
       'prepared',(SELECT count(*) FROM pg_prepared_xacts))
       FROM pg_control_system() c CROSS JOIN pg_roles r WHERE r.rolname=current_user"""
 
@@ -287,6 +438,7 @@ def run():
         result = json.loads(value.stdout)
         require(result['visible'] is True and re.fullmatch(r'[1-9][0-9]*', result['system'])
                 and isinstance(result['sessions'], int) and result['sessions'] >= 0
+                and isinstance(result['allTagged'], int) and result['allTagged'] >= 0
                 and isinstance(result['prepared'], int) and result['prepared'] >= 0)
         return result
 
@@ -295,6 +447,17 @@ def run():
     # rename before the application pool opens. The current name may briefly
     # be absent; native ownership and observation remain bound to this cluster.
     require(initial['sessions'] == 0 and initial['prepared'] == 0)
+    if local_abandonment is not None:
+        require(initial['system'] == previous['clusterIdentifier']
+                and initial['sourceOid'] == previous['initialDatabase']['oid']
+                and initial['allTagged'] == 0)
+        old_sql = sql.replace(namespace, previous['namespace'])
+        old = subprocess.run(['psql', '-X', '-q', '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-c', old_sql],
+                             env=pg_env, stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+        require(old.returncode == 0 and len(old.stdout) < 16384)
+        old_work = json.loads(old.stdout)
+        require(old_work['system'] == initial['system'] and old_work['sessions'] == 0
+                and old_work['allTagged'] == 0 and old_work['prepared'] == 0)
     if loaded:
         require(initial['system'] == loaded['scope']['database']['systemIdentifier']
                 and requested_database == loaded['scope']['database']['name'] and initial['sourceOid'] is not None)
@@ -313,6 +476,9 @@ def run():
                 and old_work['sessions'] == 0 and old_work['prepared'] == 0)
     directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     previous_sha = hashlib.sha256(previous_raw).hexdigest() if previous_raw else None
+    if local_abandonment is not None:
+        require(read_state(directory / 'deployment-runtime-abandonment.json')[0] == local_abandonment
+                and read_state(directory / 'deployment-runtime-history' / (previous_sha + '.json'))[1] == previous_raw)
     if previous_raw:
         history = directory / 'deployment-runtime-history'
         try:
@@ -341,6 +507,9 @@ def run():
                     startTicks=Path('/proc/self/stat').read_text().rsplit(') ', 1)[1].split()[19]),
                   lock=dict(device=str(named.st_dev), inode=str(named.st_ino)), previousSha256=previous_sha,
                   commandSha256=hashlib.sha256(encode(sys.argv[1:])).hexdigest())
+    if local_abandonment is not None:
+        record['localAbandonmentSha256'] = hashlib.sha256(
+            read_state(directory / 'deployment-runtime-abandonment.json')[1]).hexdigest()
     if loaded:
         record['onlineScope'] = loaded
         record['onlineLocks'] = online_locks

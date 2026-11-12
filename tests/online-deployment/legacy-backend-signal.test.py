@@ -39,6 +39,37 @@ class LegacyGuards(unittest.TestCase):
         bridge.children.clear()
         bridge.interrupted = False
 
+    def test_known_legacy_image_cannot_claim_background_work_completion_from_clean_exit(self):
+        _, snapshot = fixture()
+        with self.assertRaisesRegex(RuntimeError, 'LEGACY_WORK_COMPLETION_UNPROVEN'):
+            bridge.assert_work_completion_path(snapshot)
+        native = copy.deepcopy(snapshot)
+        native['container']['kind'] = 'NATIVE_WRAPPER_NOT_REQUIRED'
+        bridge.assert_work_completion_path(native)
+
+    def test_forward_refuses_known_legacy_before_any_signal_even_with_old_plan(self):
+        _, snapshot = fixture()
+        plan = dict(deploymentId='original_deployment', releaseId='original_release', snapshot=snapshot)
+        host = SimpleNamespace(protected_boundary=lambda *_: None, snapshot=lambda _: copy.deepcopy(snapshot))
+        with tempfile.TemporaryDirectory() as directory, patch.object(bridge.signal, 'pidfd_send_signal', create=True) as sent, \
+                patch.object(bridge, 'save') as saved:
+            with self.assertRaisesRegex(RuntimeError, 'LEGACY_WORK_COMPLETION_UNPROVEN'):
+                bridge.forward_original(host, plan, 'a'*64, Path(directory)/'intent', Path(directory)/'result', 'session')
+        sent.assert_not_called()
+        self.assertFalse(saved.call_args.args[1]['passResult'])
+
+    def test_preflight_refuses_actual_legacy_shape_before_writing_a_plan(self):
+        _, snapshot = fixture()
+        host = SimpleNamespace(root=Path('/repo'), snapshot=lambda _: snapshot)
+        argv = ['legacy-backend-signal.py', '--preflight', '/repo/docker-compose.prod.yml', '/private/env',
+                bridge.LEGACY_IMAGE, '/repo/.deploy-state/legacy-backend-drain-original_deployment.json']
+        env = dict(DEPLOYMENT_ID='original_deployment', DEPLOYMENT_RELEASE_ID='original_release')
+        with patch.object(sys, 'argv', argv), patch.dict(os.environ, env), \
+                patch.object(bridge, 'OriginalHost', return_value=host), patch.object(bridge, 'save') as saved:
+            with self.assertRaisesRegex(RuntimeError, 'LEGACY_WORK_COMPLETION_UNPROVEN'):
+                bridge.main()
+        saved.assert_not_called()
+
     def test_actual_observer_passes_fd9_and_late_natural_close_is_failed_without_killing_child(self):
         clock = [1_000_000_000]
         class Child:
@@ -108,6 +139,7 @@ class LegacyGuards(unittest.TestCase):
                 patch.object(bridge.os, 'pidfd_open', create=True, return_value=44), patch.object(bridge.os, 'close'), \
                 patch.object(bridge.signal, 'pidfd_send_signal', create=True) as sent, \
                 patch.object(bridge, 'proc_identity', return_value=snapshot['node']), \
+                patch.object(bridge, 'assert_work_completion_path'), \
                 patch.object(bridge, 'save', side_effect=lambda _, value: audits.append(copy.deepcopy(value))):
             with self.assertRaisesRegex(RuntimeError, 'INSUFFICIENT_CAPTURE_BUDGET'):
                 bridge.forward_original(host, plan, 'a'*64, Path(directory)/'intent', Path(directory)/'result', 'session')
@@ -160,7 +192,8 @@ class LegacyGuards(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.object(bridge.os, 'pidfd_open', create=True, return_value=44) as opened, \
                 patch.object(bridge.signal, 'pidfd_send_signal', create=True) as sent, patch.object(bridge.os, 'close') as closed, \
                 patch.object(bridge, 'proc_identity', return_value=snapshot['node']), patch.object(bridge, 'save', side_effect=save):
-            result = bridge.forward_original(Host(), plan, 'a' * 64, Path(directory) / 'intent', Path(directory) / 'result', 'session')
+            with patch.object(bridge, 'assert_work_completion_path'):
+                result = bridge.forward_original(Host(), plan, 'a' * 64, Path(directory) / 'intent', Path(directory) / 'result', 'session')
         opened.assert_called_once_with(121, 0)
         sent.assert_called_once_with(44, signal.SIGTERM, None, 0)
         closed.assert_called_once_with(44)
@@ -189,8 +222,9 @@ class LegacyGuards(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory, patch.object(bridge.os, 'pidfd_open', create=True, return_value=44), \
                     patch.object(bridge.signal, 'pidfd_send_signal', create=True) as sent, patch.object(bridge.os, 'close'), \
                     patch.object(bridge, 'proc_identity', return_value=identity), patch.object(bridge, 'save', side_effect=save):
-                with self.assertRaises((RuntimeError, KeyError)):
-                    bridge.forward_original(Host(), plan, 'a' * 64, Path(directory) / 'intent', Path(directory) / 'result', 'session')
+                with patch.object(bridge, 'assert_work_completion_path'):
+                    with self.assertRaises((RuntimeError, KeyError)):
+                        bridge.forward_original(Host(), plan, 'a' * 64, Path(directory) / 'intent', Path(directory) / 'result', 'session')
                 self.assertEqual(sent.call_count, 1 if failure == 'exit' else 0)
             self.assertFalse(audits[-1]['passResult'])
 

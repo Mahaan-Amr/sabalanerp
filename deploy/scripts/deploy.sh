@@ -71,6 +71,7 @@ MUTATION_STARTED=0
 BOOTSTRAP=0
 SESSION_PREPARED=0
 MAINTENANCE_ACTIVE=0
+CAPTURE_MAINTENANCE_PROVEN=0
 FINISHED=0
 DRAINED_EARLY=0
 NATIVE_RUNTIME_CLOSURE_REQUIRED=0
@@ -325,7 +326,12 @@ control() {
 }
 
 enter_maintenance() {
-  if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
+  if [ "${CAPTURE_ONLY}" -eq 1 ]; then
+    # Capture must restart the exact original Nginx container after the
+    # checkpoint. Its mounted marker check takes effect without recreation.
+    MAINTENANCE_ACTIVE=1
+    control maintenance-on
+  elif [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
     # Make the durable boundary own every subsequent runtime change. A crash
     # before the shell flag is set is detected through the marker and journal.
     control maintenance-on
@@ -336,7 +342,8 @@ enter_maintenance() {
     control maintenance-on
     MAINTENANCE_ACTIVE=1
   fi
-  verify_public_maintenance
+  verify_public_maintenance || return 1
+  if [ "${CAPTURE_ONLY}" -eq 1 ]; then CAPTURE_MAINTENANCE_PROVEN=1; fi
 }
 
 phase() {
@@ -700,6 +707,18 @@ recover_failure() {
     control finish || true
     cleanup_locks
     echo 'Legacy shutdown was not proven; no automatic reopen or rollback is permitted.' >&2
+    exit "${exit_code}"
+  fi
+
+  if [ "${CAPTURE_ONLY}" -eq 1 ] && [ "${MAINTENANCE_ACTIVE}" -eq 1 ] \
+    && [ "${CAPTURE_MAINTENANCE_PROVEN}" -eq 0 ]; then
+    control maintenance-on || true
+    DEPLOYMENT_PHASE=RECOVERY_REQUIRED
+    DEPLOYMENT_RESULT=RECOVERY_REQUIRED
+    export DEPLOYMENT_PHASE DEPLOYMENT_RESULT
+    if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then control finish || true; fi
+    cleanup_locks
+    echo 'Capture maintenance boundary was not proven; no automatic reopen is permitted.' >&2
     exit "${exit_code}"
   fi
 

@@ -12,6 +12,17 @@ failed operation row. The plan is root-owned `0600`, checksum pinned, and names
 a new private incident directory. Do not run it concurrently with any original
 deployment owner or other incident controller.
 
+Stage this script in a private root-owned operations bundle outside the live
+Git checkout. Its sibling paths must include `capture-only-release.mjs`,
+`reconcile-premutation-capture.mjs`, and
+`online-release-host-dependencies/node_modules/@prisma/client` with the same
+reviewed hashes and module layout. Confirm the staged script's SHA-256 equals
+`ownerSourceSha256`, resolve all imports and the Prisma package from that exact
+location, and leave the production tracked checkout clean. The immutable
+control image must remain the exact pinned image. The gate run uses a separate
+`incident-434-...` deployment ID for its report and transient Docker label;
+it does not replace the original failed operation's journal or report row.
+
 The plan format is `sabalan-failed-legacy-capture-reopen/v1`. It pins:
 
 - `repositoryRoot`, `environmentFile`, `coordinationRoot`, `operationDirectory`;

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {validateFailedLegacyCaptureJournal, validateFailedLegacySignal, verifyRecoveredPreviousIncarnations, validateCurrentLegacyNode} from '../../deploy/scripts/reopen-failed-legacy-capture.mjs';
+import {spawn} from 'node:child_process';
+import {validateFailedLegacyCaptureJournal, validateFailedLegacySignal, verifyRecoveredPreviousIncarnations, validateCurrentLegacyNode, observeBoundedChild} from '../../deploy/scripts/reopen-failed-legacy-capture.mjs';
 
 const sha=value=>createHash('sha256').update(value).digest('hex');
 function journal(phases=['PREFLIGHT','LEASE_ACQUIRED','MAINTENANCE_REQUESTED','TRAFFIC_BLOCKED','RECOVERY_REQUIRED']){
@@ -34,4 +35,18 @@ test('current old-release Node birth is pinned and cannot silently change before
  const expected={pid:293012,startTicks:'379962651'},actual={pid:293012,ppid:292960,startTicks:'379962651',argv:['node','dist/index.js']},old={pid:128146,startTicks:'379448204'};
  assert.deepEqual(validateCurrentLegacyNode(expected,actual,292960,old),expected);
  for(const change of [v=>{v.actual.pid=123},v=>{v.actual.ppid=123},v=>{v.actual.startTicks='379962652'},v=>{v.actual.argv=['node','other.js']},v=>{v.old.pid=293012}]){const v={expected:structuredClone(expected),actual:structuredClone(actual),old:structuredClone(old)};change(v);assert.throws(()=>validateCurrentLegacyNode(v.expected,v.actual,292960,v.old));}
+});
+test('a stuck native observer is terminated, reaped and reported as timed out',async()=>{
+ const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:['ignore','pipe','pipe']});
+ const events=[];const result=await observeBoundedChild(child,50,75,kind=>events.push(kind));
+ assert.equal(result.deadlineExceeded,true);assert.equal(result.closed,true);assert.ok(result.code!==0||result.signal);assert.ok(events.includes('deadline'));
+});
+test('isolated Docker-like process group reaps an inherited-pipe grandchild', {skip:process.platform!=='linux'}, async()=>{
+ const source="const {spawn}=require('node:child_process');const c=spawn(process.execPath,['-e','process.on(\"SIGTERM\",()=>{});setInterval(()=>{},1000)'],{stdio:['ignore',1,2]});console.log(c.pid);process.on('SIGTERM',()=>process.exit(0));setInterval(()=>{},1000)";
+ const child=spawn(process.execPath,['-e',source],{stdio:['ignore','pipe','pipe'],detached:true});let stdout='';child.stdout.on('data',part=>{stdout+=part;});child.stderr.resume();
+ const events=[];const result=await observeBoundedChild(child,200,100,kind=>events.push(kind),{ownedProcessGroup:true});
+ assert.equal(result.closed,true);assert.equal(result.deadlineExceeded,true);assert.ok(events.includes('deadline')&&events.includes('force'));
+ const descendant=Number(stdout.trim());assert.ok(Number.isSafeInteger(descendant)&&descendant>1);
+ await new Promise(resolve=>setTimeout(resolve,100));const fs=await import('node:fs');
+ if(fs.existsSync('/proc/'+descendant)){const raw=fs.readFileSync('/proc/'+descendant+'/stat','utf8');assert.equal(raw.slice(raw.lastIndexOf(')')+2).split(' ')[0],'Z');}
 });

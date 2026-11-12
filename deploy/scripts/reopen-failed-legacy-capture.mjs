@@ -11,9 +11,19 @@ import {originalServiceConfiguration,originalContainerIdentities,configurationBy
 import {validateReconciliationGates,validatePreviousMigrationHistory,validateHistoricalUntrackedSourcePaths,reconciliationComposeArguments} from './reconcile-premutation-capture.mjs';
 
 const roles=['backend','frontend','inquiry','nginx','postgres','clamav'];
+const INCIDENT_ID='deploy-20261112T100637Z-b58c53c0f88d-release';
+const INCIDENT_GATE_ID='incident-434-20261112T100637Z-b58c53c0f88d-release';
+const INCIDENT_SOURCE='b58c53c0f88d2d89da3cb6a45949e6eca97e4308';
+const INCIDENT_JOURNAL_SHA='9034e93d1e8e3a2e3d7f9aa9a23d83f35751e4da06cae3691702b6461544586c';
+const INCIDENT_SNAPSHOT_SHA='9e71679fa0d549926bc2b2a326e1ef9ff6875dd7d18998f7b12224a2b2e38d86';
+const INCIDENT_SIGNAL_PLAN_SHA='c4249d28c726f7416e05073a9a12557fa8e6f0cfb01dd12ab98de8f5bdee2a1d';
+const INCIDENT_SIGNAL_INTENT_SHA='f3efed653881bd25be88e7f8c0f0f6dbd83773f9f978b2d552147242dc3f9c50';
+const INCIDENT_SIGNAL_RESULT_SHA='c14ccec02c1a44baedc78c651bd1f791b10a8fe6269eb27d4f4a127d9238ebd0';
+const INCIDENT_SIGNAL_HELD_SHA='19442e44fb7388a6f652cd84e4bf02a490448e47087117a39db606b4bda33fe4';
+const INCIDENT_BACKEND_ID='4bb3a88e376d81038a5650e76b7ce29de9e256538602bb7f678acab09d105b21';
+const INCIDENT_NGINX_ID='0274de7f7b3c3f33803829ebeefb5742920b40bd64cf29bce00167c6233db0e0';
 const LEGACY_IMAGE='sha256:e407ff125c6fb0b441f6fa782101a4ec5159e928a5ebae7ddc32faef869afed3';
 const hostEnvironment={PATH:'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',HOME:'/root',DOCKER_HOST:'unix:///var/run/docker.sock'};
-const gateNames=['postgres-query-and-isolated-write','inquiry-sqlite-integrity','backend-readiness','frontend-health','inquiry-health','nginx-health','contracts-storage','hr-storage','accounting-storage','support-storage','performance-export-storage','uploads-storage','database-file-references','database-connection-capacity'];
 const hash=raw=>createHash('sha256').update(raw).digest('hex');
 const canonical=value=>value instanceof Date?value.toISOString():Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
 const encoded=value=>Buffer.from(JSON.stringify(canonical(value))+'\n');
@@ -60,6 +70,30 @@ export function validateCurrentLegacyNode(expected,actual,backendInitPid,old){
  assert.notEqual(actual.pid,old.pid);assert.notEqual(String(actual.startTicks),String(old.startTicks));
  return expected;
 }
+/** The owner keeps FD9 while a child is reaped; a deadline never grants success. */
+export async function observeBoundedChild(child,timeoutMs,termGraceMs,onEvent=()=>{},{ownedProcessGroup=false}={}){
+ assert.ok(Number.isSafeInteger(timeoutMs)&&timeoutMs>0&&Number.isSafeInteger(termGraceMs)&&termGraceMs>0);
+ let closed=false,deadlineExceeded=false,auditFailed=false,killFailed=false;
+ const procStat=pid=>{const raw=fs.readFileSync('/proc/'+pid+'/stat','utf8'),fields=raw.slice(raw.lastIndexOf(')')+2).split(' ');return {pid,processGroup:Number(fields[2]),session:Number(fields[3]),startTicks:fields[19]};};
+ const members=()=>fs.readdirSync('/proc').filter(name=>/^[1-9][0-9]*$/.test(name)).flatMap(name=>{try{const row=procStat(Number(name));return row.processGroup===child.pid&&row.session===child.pid?[row]:[];}catch{return [];}});
+ let groupBirth=null;if(ownedProcessGroup){try{groupBirth=procStat(child.pid).startTicks;}catch(error){if(error.code!=='ENOENT')throw error;}}
+ let deadlineMembers=[];
+ const signal=kind=>{
+  if(!ownedProcessGroup)return child.kill(kind);
+  assert.ok(groupBirth,'INCIDENT_CHILD_GROUP_BIRTH_UNOBSERVED');
+  const current=members();
+  if(kind==='SIGTERM'){
+   assert.ok(current.some(row=>row.pid===child.pid&&row.startTicks===groupBirth),'INCIDENT_CHILD_GROUP_LEADER_CHANGED');deadlineMembers=current;
+  }else assert.ok(current.some(row=>deadlineMembers.some(original=>original.pid===row.pid&&original.startTicks===row.startTicks)),'INCIDENT_CHILD_GROUP_MEMBERSHIP_UNPROVEN');
+  process.kill(-child.pid,kind);return true;
+ };
+ const record=kind=>{try{onEvent(kind);}catch{auditFailed=true;}};
+ const completion=new Promise(resolve=>child.once('close',(code,signal)=>{closed=true;resolve({code,signal});}));
+ const term=setTimeout(()=>{if(closed)return;deadlineExceeded=true;record('deadline');try{if(!signal('SIGTERM'))killFailed=true;}catch{killFailed=true;}},timeoutMs);
+ const force=setTimeout(()=>{if(closed)return;record('force');try{if(!signal('SIGKILL'))killFailed=true;}catch{killFailed=true;}},timeoutMs+termGraceMs);
+ try{const result=await completion;return {...result,closed,deadlineExceeded,auditFailed,killFailed};}
+ finally{clearTimeout(term);clearTimeout(force);}
+}
 function lock(){
  const file='/opt/sabalanerp/.deploy-state/deployment.lock',named=fs.lstatSync(file,{bigint:true}),owned=fs.fstatSync(9,{bigint:true});assert.equal(fs.realpathSync(file),file);assert.ok(owned.isFile()&&owned.uid===0n&&owned.nlink===1n&&!(owned.mode&0o022n));assert.equal(owned.dev,named.dev);assert.equal(owned.ino,named.ino);assert.ok([...fs.readFileSync('/proc/self/fdinfo/9','utf8').matchAll(/^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+[0-9a-f]+:[0-9a-f]+:(\d+)\s+0\s+EOF\s*$/gm)].some(v=>v[1]===String(owned.ino)));return String(owned.dev)+':'+String(owned.ino);
 }
@@ -67,6 +101,7 @@ async function main(){
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);assert.equal(process.argv.length,4);
  const [file,expected]=process.argv.slice(2),raw=read(file,expected,0o600),plan=JSON.parse(raw),ownedLock=lock();assert.equal(plan.format,'sabalan-failed-legacy-capture-reopen/v1');
  assert.equal(plan.repositoryRoot,'/opt/sabalanerp');assert.match(plan.deploymentId,/^[A-Za-z0-9_-]{8,160}$/);assert.match(plan.targetCommit,/^[a-f0-9]{40}$/);assert.match(plan.controlImage,/^sha256:[a-f0-9]{64}$/);
+ assert.equal(plan.deploymentId,INCIDENT_ID);assert.equal(plan.releaseId,INCIDENT_ID.slice('deploy-'.length));assert.equal(plan.targetCommit,INCIDENT_SOURCE);assert.equal(plan.journal.sha256,INCIDENT_JOURNAL_SHA);assert.equal(plan.originalSnapshot.sha256,INCIDENT_SNAPSHOT_SHA);assert.equal(plan.legacySignal.plan.sha256,INCIDENT_SIGNAL_PLAN_SHA);assert.equal(plan.legacySignal.intent.sha256,INCIDENT_SIGNAL_INTENT_SHA);assert.equal(plan.legacySignal.result.sha256,INCIDENT_SIGNAL_RESULT_SHA);assert.equal(plan.legacySignal.held.sha256,INCIDENT_SIGNAL_HELD_SHA);
  assert.equal(plan.environmentFile,'/opt/sabalanerp/deploy/.env.prod');assert.equal(plan.originalSnapshot.file,'/opt/sabalanerp/.deploy-state/capture-only-'+plan.deploymentId+'.json');assert.equal(plan.journal.file,'/opt/sabalanerp/reports/deploy/'+plan.deploymentId+'.journal.jsonl');
  assert.equal(plan.ownerSourceSha256,hash(fs.readFileSync(fileURLToPath(import.meta.url))),'INCIDENT_OWNER_SOURCE_CHANGED');
  assert.equal(plan.controlImage,'sha256:33defd04a0d04e1cde7d4047e7bfaee536d60705bbf4781ae78c40fcb8ba6dcd');
@@ -75,12 +110,13 @@ async function main(){
  const directory=plan.operationDirectory;assert.ok(path.isAbsolute(directory)&&path.dirname(directory)==='/opt/sabalanerp/.deploy-state'&&path.basename(directory).startsWith('failed-legacy-reopen-')&&!fs.existsSync(directory));fs.mkdirSync(directory,{mode:0o700});
  const audit=(name,value)=>{assert.match(name,/^[a-z0-9-]+$/);const target=path.join(directory,name+'.json'),fd=fs.openSync(target,'wx',0o400);try{fs.writeFileSync(fd,encoded(value));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}const d=fs.openSync(directory,'r');try{fs.fsyncSync(d);}finally{fs.closeSync(d);}};
  const children=[];async function run(executable,args,environment={}){
-  assert.equal(lock(),ownedLock);assert.equal(hash(read(file,expected,0o600)),expected);const inherited=Array(10).fill('ignore');inherited[1]='pipe';inherited[2]='pipe';inherited[9]=9;const child=spawn(executable,args,{cwd:plan.repositoryRoot,env:{...hostEnvironment,...environment},stdio:inherited});const row={pid:child.pid,closed:false,code:null,signal:null};children.push(row);let count=0,overflow=false;const out=[],err=[];for(const [stream,parts]of [[child.stdout,out],[child.stderr,err]])stream.on('data',b=>{count+=b.length;if(count<=16*1024**2)parts.push(b);else overflow=true;});let failure;child.on('error',error=>{failure=error;});await new Promise(resolve=>child.once('close',(code,signal)=>{Object.assign(row,{closed:true,code,signal});resolve();}));
+  assert.equal(lock(),ownedLock);assert.equal(hash(read(file,expected,0o600)),expected);const inherited=Array(10).fill('ignore');inherited[1]='pipe';inherited[2]='pipe';inherited[9]=9;const child=spawn(executable,args,{cwd:plan.repositoryRoot,env:{...hostEnvironment,...environment},stdio:inherited,detached:true});const row={pid:child.pid,processGroup:child.pid,closed:false,code:null,signal:null};children.push(row);let count=0,overflow=false;const out=[],err=[];for(const [stream,parts]of [[child.stdout,out],[child.stderr,err]])stream.on('data',b=>{count+=b.length;if(count<=16*1024**2)parts.push(b);else overflow=true;});let failure;child.on('error',error=>{failure=error;});const number=String(children.length).padStart(3,'0'),gate=args.includes('dist/scripts/deployment-gates.js'),observed=await observeBoundedChild(child,gate?300000:60000,15000,kind=>audit('child-'+number+'-'+kind,{pid:child.pid,processGroup:child.pid,kind,deadlineExceeded:true,originalOwnerRetained:true}),{ownedProcessGroup:true});Object.assign(row,observed);
   for(const [name,parts]of [['stdout',out],['stderr',err]]){const bytes=Buffer.concat(parts),target=path.join(directory,'child-'+String(children.length).padStart(3,'0')+'-'+name+'.log'),fd=fs.openSync(target,'wx',0o600);try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}row[name+'Sha256']=hash(bytes);row[name+'File']=target;}row.outputBoundExceeded=overflow;audit('child-'+String(children.length).padStart(3,'0'),row);
-  assert.ifError(failure);assert.equal(row.code,0);assert.equal(row.signal,null);assert.equal(overflow,false);return Buffer.concat(out);
+  assert.ifError(failure);assert.equal(row.deadlineExceeded,false,'INCIDENT_CHILD_DEADLINE_EXCEEDED');assert.equal(row.auditFailed,false,'INCIDENT_CHILD_DEADLINE_AUDIT_FAILED');assert.equal(row.killFailed,false,'INCIDENT_CHILD_KILL_FAILED');assert.equal(row.code,0);assert.equal(row.signal,null);assert.equal(overflow,false);return Buffer.concat(out);
  }
  const compose=reconciliationComposeArguments(plan.environmentFile);
  const docker=async(args,environment={})=>{await run('docker',[...compose,'ps','--format','json'],environment);return run('docker',args,environment);};
+ async function noIncidentTransport(){for(const id of [INCIDENT_ID,INCIDENT_GATE_ID]){const ids=(await docker(['ps','--all','--quiet','--filter','label=io.sabalan.deployment.id='+id])).toString().trim();assert.equal(ids,'','INCIDENT_TRANSIENT_CONTAINER_REMAINS');}}
  const [controlImage]=JSON.parse((await docker(['image','inspect',plan.controlImage])).toString());assert.equal(controlImage.Id,plan.controlImage);assert.equal(controlImage.Config.Labels['io.sabalan.performance.source-commit'],plan.controlSourceCommit);assert.equal(controlImage.Config.Labels['io.sabalan.performance.source-hash'],plan.controlSourceHash);
  const journalRaw=read(plan.journal.file,plan.journal.sha256,0o600),journal=validateFailedLegacyCaptureJournal(journalRaw,plan.deploymentId);
  const snapshotRaw=read(plan.originalSnapshot.file,plan.originalSnapshot.sha256),snapshot=JSON.parse(snapshotRaw);
@@ -92,6 +128,7 @@ async function main(){
  const signalHeld=JSON.parse(read(plan.legacySignal.held.file,plan.legacySignal.held.sha256));
  const signalProof=validateFailedLegacySignal(signalPlan,signalIntent,signalResult,signalHeld,{deploymentId:plan.deploymentId,releaseId:plan.releaseId,planSha256:plan.legacySignal.plan.sha256,backendImage:LEGACY_IMAGE});
  assert.equal(signalProof.originalContainer.containerId,snapshot.originalContainerIdentities.backend.id);
+ assert.equal(signalProof.originalContainer.containerId,INCIDENT_BACKEND_ID);
  async function sourceUnchanged(){assert.equal((await run('git',['rev-parse','HEAD'])).toString().trim(),plan.targetCommit);await run('git',['diff','--quiet','HEAD','--']);await run('git',['diff','--cached','--quiet','--']);const raw=await run('git',['ls-files','--others','--exclude-standard','-z']);const actual=raw.toString('utf8').split('\0').filter(Boolean);return validateHistoricalUntrackedSourcePaths(actual,plan.historicalUntrackedSourcePaths);}
  const historicalUntracked=await sourceUnchanged();progress('SOURCE_VERIFIED');
  async function census(){const ids=[];for(const role of roles){const value=(await docker([...compose,'ps','--all','--quiet',role])).toString().trim();assert.match(value,/^[a-f0-9]{64}$/);ids.push(value);}const rows=JSON.parse((await docker(['inspect',...ids])).toString());for(const row of rows)assert.ok(row.State.Running&&row.State.Health?.Status==='healthy');return rows;}
@@ -115,6 +152,7 @@ async function main(){
   return validateCurrentLegacyNode(expected,actual,backend.State.Pid,signalProof.originalNode);
  }
  const original=await configuration();progress('CONFIGURATION_VERIFIED');
+ await noIncidentTransport();
  const envRows=fs.readFileSync(plan.environmentFile,'utf8').split(/\r?\n/),setting=key=>{const rows=envRows.filter(v=>v.startsWith(key+'='));assert.equal(rows.length,1);let value=rows[0].slice(key.length+1);if(/^(['"]).*\1$/.test(value))value=value.slice(1,-1);return value;};
  const domains=['DOMAIN','INQUIRY_DOMAIN'].map(key=>setting(key));for(const domain of domains)assert.match(domain,/^[A-Za-z0-9][A-Za-z0-9.-]*$/);
  async function publicMaintenance(){for(const domain of domains){const status=(await run('curl',['-k','-sS','--max-time','30','-o','/dev/null','-w','%{http_code}','https://'+domain+'/'])).toString().trim();assert.equal(status,'503','PUBLIC_MAINTENANCE_UNPROVEN');}return {domains,status:503};}
@@ -145,21 +183,23 @@ async function main(){
   assert.equal(oldSql[0].count,0,'OLD_BACKEND_SQL_SESSION_REMAINS');
   const currentIdentities=original.currentIdentities;
   const incarnations=verifyRecoveredPreviousIncarnations({services:snapshot.services,identities:snapshot.originalContainerIdentities,currentServices:original.services,currentIdentities,facts:{backendOriginalStartedAt:signalProof.originalContainer.startedAt,backendCurrentStartedAt:backend.State.StartedAt,backendPreviousFinishedAt:backend.State.FinishedAt,oldNodeAbsent:true,oldSqlSessions:oldSql[0].count,backendRestartCountNow:backend.RestartCount}});
-  assert.equal(currentIdentities.nginx.id,plan.recreatedNginxContainerId);
+  assert.equal(plan.recreatedNginxContainerId,INCIDENT_NGINX_ID);assert.equal(currentIdentities.nginx.id,INCIDENT_NGINX_ID);
   const ownerStat=fs.readFileSync('/proc/self/stat','utf8'),ownerBirth={pid:process.pid,startTicks:ownerStat.slice(ownerStat.lastIndexOf(')')+2).split(' ')[19],kernelBootId:fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim()};audit('incident-lease-intent',{deploymentId:plan.deploymentId,ownerBirth,leaseTokenSha256:hash(token),signalProof,incarnations});
   assert.deepEqual(await advisory(),birth);assert.equal(lock(),ownedLock);await database.$transaction(async tx=>{const rows=await tx.$queryRawUnsafe('SELECT * FROM deployment_operations WHERE id=$1 FOR UPDATE',plan.deploymentId);assert.equal(rows.length,1);assert.deepEqual(rows[0],baseline,'INCIDENT_ROW_CHANGED_DURING_READONLY_PROOF');const active=await tx.deploymentOperation.findUnique({where:{activeKey:'production'}});assert.equal(active,null);await tx.deploymentOperation.update({where:{id:plan.deploymentId},data:{activeKey:'production',leaseToken:token,leaseExpiresAt:new Date(Date.now()+120000),heartbeatAt:new Date()}});});acquired=true;audit('incident-lease-acquired',{deploymentId:plan.deploymentId,originalRow:baseline,ownerBirth,leaseTokenSha256:hash(token),originalJournalSha256:plan.journal.sha256,originalJournal:journal,originalSnapshotSha256:plan.originalSnapshot.sha256,legacySignal:plan.legacySignal,failedCapturePreserved:true,publicBoundary});progress('INCIDENT_LEASE_ACQUIRED');
   heartbeat=setInterval(()=>{pulse=pulse.then(async()=>{assert.equal(lock(),ownedLock);assert.deepEqual(await advisory(),birth);const result=await database.deploymentOperation.updateMany({where:{id:plan.deploymentId,phase:'RECOVERY_REQUIRED',activeKey:'production',leaseToken:token},data:{heartbeatAt:new Date(),leaseExpiresAt:new Date(Date.now()+120000)}});assert.equal(result.count,1);}).catch(error=>{timerFailure=error;});},15000);
   const currentEnv=Object.fromEntries(backend.Config.Env.map(row=>{const i=row.indexOf('=');return [row.slice(0,i),row.slice(i+1)];}));
-  const gateEnvironment={...currentEnv,DEPLOYMENT_ID:plan.deploymentId,DEPLOYMENT_RELEASE_ID:plan.releaseId,DEPLOYMENT_TARGET_COMMIT:plan.targetCommit,DEPLOYMENT_GATE_MODE:'PREVIOUS_UNCHANGED',DEPLOYMENT_CONTROL_IMAGE:plan.controlImage,DEPLOYMENT_BACKEND_IMAGE:plan.controlImage};
+  const gateEnvironment={...currentEnv,DEPLOYMENT_ID:INCIDENT_GATE_ID,DEPLOYMENT_RELEASE_ID:plan.releaseId,DEPLOYMENT_TARGET_COMMIT:plan.targetCommit,DEPLOYMENT_GATE_MODE:'PREVIOUS_UNCHANGED',DEPLOYMENT_CONTROL_IMAGE:plan.controlImage,DEPLOYMENT_BACKEND_IMAGE:plan.controlImage};
   // Every argument is fixed except validated identities. No shell/source eval.
-  const args=[...compose,'run','-T','--rm','--no-deps','--label','io.sabalan.deployment.id='+plan.deploymentId,'-e','BACKEND_RUNTIME_ROLE=control'];
+  const args=[...compose,'run','-T','--rm','--no-deps','--label','io.sabalan.deployment.id='+INCIDENT_GATE_ID,'-e','BACKEND_RUNTIME_ROLE=control'];
   for(const key of ['DEPLOYMENT_ID','DEPLOYMENT_RELEASE_ID','DEPLOYMENT_TARGET_COMMIT','DEPLOYMENT_GATE_MODE','DEPLOYMENT_CONTROL_IMAGE','DEPLOYMENT_BACKEND_IMAGE'])args.push('-e',key+'='+gateEnvironment[key]);args.push('deployment','node','dist/scripts/deployment-gates.js');
-  progress('GATES_STARTED');const stdout=await docker(args,{...gateEnvironment,DEPLOYMENT_BACKEND_IMAGE:plan.controlImage,BACKEND_DB_CONNECTION_LIMIT:'2',DATABASE_APPLICATION_NAME:'sabalanerp-deployment'});const values=stdout.toString().trim().split(/\r?\n/).flatMap(line=>{try{return [JSON.parse(line)];}catch{return [];}}).filter(v=>v.ok===true&&Array.isArray(v.gates));assert.equal(values.length,1);const gates=validateReconciliationGates(values[0],plan.deploymentId);progress('GATES_VERIFIED');
+  progress('GATES_STARTED');const stdout=await docker(args,{...gateEnvironment,DEPLOYMENT_BACKEND_IMAGE:plan.controlImage,BACKEND_DB_CONNECTION_LIMIT:'2',DATABASE_APPLICATION_NAME:'sabalanerp-deployment'});const values=stdout.toString().trim().split(/\r?\n/).flatMap(line=>{try{return [JSON.parse(line)];}catch{return [];}}).filter(v=>v.ok===true&&Array.isArray(v.gates));assert.equal(values.length,1);const gates=validateReconciliationGates(values[0],INCIDENT_GATE_ID);progress('GATES_VERIFIED');
+  await noIncidentTransport();
   const after=await configuration();assert.deepEqual(after.services,original.services);const births=rows=>rows.map(row=>({id:row.Id,image:row.Image,startedAt:row.State.StartedAt,restarts:row.RestartCount})).sort((a,b)=>a.id.localeCompare(b.id));assert.deepEqual(births(after.rows),births(original.rows),'ORIGINAL_SIX_SERVICE_BIRTH_CHANGED');assert.deepEqual(currentLegacyNode(after.rows.find(row=>row.Config.Labels['com.docker.compose.service']==='backend')),currentNodeProof);assert.deepEqual(await sourceUnchanged(),historicalUntracked);const finalMigrations=await database.$queryRawUnsafe('SELECT migration_name,checksum,finished_at IS NOT NULL AS finished,rolled_back_at IS NOT NULL AS rolled_back FROM _prisma_migrations ORDER BY migration_name,id');assert.deepEqual(validatePreviousMigrationHistory(finalMigrations,checksums),migrationProof);await publicMaintenance();clearInterval(heartbeat);heartbeat=undefined;await pulse;assert.ifError(timerFailure);assert.equal(hash(read(plan.journal.file,plan.journal.sha256,0o600)),hash(journalRaw));assert.equal(hash(read(maint,undefined,0o600)),hash(maintenanceRaw));assert.deepEqual(await advisory(),birth);
   assert.equal(fs.existsSync('/proc/'+signalProof.originalNode.pid),false,'ORIGINAL_LEGACY_NODE_REAPPEARED');
   const finalOldSql=await database.$queryRawUnsafe('SELECT count(*)::int AS count FROM pg_stat_activity WHERE client_addr=$1::inet AND backend_start <= $2::timestamptz',backendIp[0],backend.State.FinishedAt);assert.equal(finalOldSql[0].count,0,'OLD_BACKEND_SQL_SESSION_REAPPEARED');
   const [finalDatabaseIdentity]=await database.$queryRawUnsafe('SELECT current_database() AS name,p.system_identifier::text AS "systemIdentifier",d.oid::text AS oid FROM pg_control_system() p CROSS JOIN pg_database d WHERE d.datname=current_database()');assert.equal(finalDatabaseIdentity.name,plan.databaseIdentity.name);assert.equal(finalDatabaseIdentity.systemIdentifier,plan.databaseIdentity.systemIdentifier);assert.equal(finalDatabaseIdentity.oid,plan.databaseIdentity.oid);
   for(const item of Object.values(plan.legacySignal))read(item.file,item.sha256);
+  await noIncidentTransport();
   const reconciliationProofs=[{name:'original-terminal-journal-no-mutation-or-checkpoint',passed:true,journalSha256:plan.journal.sha256},{name:'failed-legacy-signal-and-restarted-previous-runtime',passed:true,signalPlanSha256:plan.legacySignal.plan.sha256,signalResultSha256:plan.legacySignal.result.sha256,incarnations},{name:'source-database-migration-history-and-previous-images',passed:true,sourceDatabase:plan.databaseIdentity,migrationProof},{name:'canonical-previous-config-and-private-bind-bytes',passed:true,snapshotSha256:plan.originalSnapshot.sha256}];
   audit('verified-before-reopen',{deploymentId:plan.deploymentId,canonicalPreviousGates:gates,reconciliationProofs,historicalUntracked,originalCaptureGuardPassed:false,captureQualified:false,checkpointCreated:false,databaseRestored:false,originalJournalPreserved:true,allOriginalChildrenClosed:children.every(row=>row.closed),children});
   // Do not reset the failed row or pretend it was a successful capture.

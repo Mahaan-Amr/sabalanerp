@@ -8,4 +8,6 @@ Subsequent bounded `/bin/cat /etc/wsl.conf` also timed out at 8.0 seconds with e
 
 A later controlled comparison briefly passed: `/bin/sh -c ps` exited 0 in 1.35 seconds, `/bin/sh -c ':'` in 0.85 seconds, and direct `/bin/true` in 0.82 seconds. The next three-repeat stability probe immediately timed out on its first `/bin/true` after 8.08 seconds. The probe was stopped; no Docker install followed. The startup is intermittent, so one successful invocation cannot qualify the host. PID1, systemd and independent-socket gates remain untested pending a stable WSL command loop.
 
+A final scoped systemd test stopped at its prerequisite: a bounded full read of `/etc/wsl.conf` failed to return reliably. The file was not edited, no distro was unregistered, and no systemd before/after claim was made. The host remains NO-GO.
+
 The next owner must diagnose WSL startup with a bounded command loop before installing Docker. Candidate causes are new-distro systemd user-session initialization, Docker Desktop integration bootstrap, or incomplete first-registration state; none is proven. Prove a stable independent daemon with its own socket, root/PID/config files, pidfd and FD9 view before any QA stack. The existing six `sabalanerp-local` services were independently observed healthy after the WSL install. #432 remains NO-GO.

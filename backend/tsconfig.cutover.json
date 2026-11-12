@@ -11,5 +11,5 @@
     "scripts/shipment-statement-cutover.ts",
     "src/**/*"
   ],
-  "exclude": ["node_modules", "dist", "dist-cutover", "src/**/__tests__/**", "src/online*.ts", "src/scripts/online-*.ts", "src/scripts/deployment-online-*.ts", "src/services/online*.ts"]
+  "exclude": ["node_modules", "dist", "dist-cutover", "src/**/__tests__/**"]
 }

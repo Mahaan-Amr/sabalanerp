@@ -50,8 +50,8 @@ async function startAll(database:PrismaClient,publish:RealtimeNotificationPublis
  }catch(error){
   stopNewTicks();const closureErrors:unknown[]=[];
   try{await stopBackgroundJobs(240_000);}catch(drainError){closureErrors.push(drainError);}
-  // Partial startup did not return an owner to the entry. Keep its ORIGINAL
-  // producer promise/latch in this catch; never skip it after a group error.
+  // Partial startup did not return an owner to the entry; account for every
+  // started background callback before propagating the failure.
   if(closureErrors.length)throw Object.assign(new Error('APPLICATION_WORKER_STARTUP_CLOSURE_UNPROVEN'),{cause:error,errors:Object.freeze([error,...closureErrors])});
   throw error;
  }

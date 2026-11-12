@@ -1,7 +1,7 @@
-"""One known legacy shell's normal shutdown, inside the original deployment.
+"""Protect the original deployment from unproven legacy work completion.
 
-This bridge never owns/adopts application work, creates a guardian, or declares
-SQL/native quiescence. Existing deployment closure and recovery gates remain.
+The known legacy image exits zero while external-effecting workers can still be
+running. Container and SQL closure cannot qualify that image for migration.
 """
 import hashlib
 import http.client
@@ -215,6 +215,16 @@ def validate_process_shape(container, init, node, top, host_namespace):
             and (node['pid'], init['pid']) in top, 'LEGACY_SIGNAL_UNKNOWN_DESCENDANTS')
 
 
+def assert_work_completion_path(snapshot):
+    # The measured e407 dist/index.js stops only biometric and vehicle timers,
+    # then closes HTTP/Prisma and calls process.exit(0). Dispatch SMS, taxpayer,
+    # notifications and other workers are not joined. A bounded outside observer
+    # cannot infer their promise or provider outcome from exit 0, no SQL sessions,
+    # or a quiet network socket. Hold before the signal and before maintenance.
+    require(snapshot['container']['kind'] == 'NATIVE_WRAPPER_NOT_REQUIRED',
+            'LEGACY_WORK_COMPLETION_UNPROVEN')
+
+
 class OriginalHost:
     def __init__(self, base, environment):
         require(sys.platform == 'linux' and os.getuid() == 0)
@@ -330,6 +340,7 @@ def forward_original(host, plan, plan_sha, intent_file, result_file, session_fil
         host.protected_boundary(plan, session_file)
         snapshot = host.snapshot(plan['snapshot']['container']['image'])
         require(snapshot == plan['snapshot'], 'LEGACY_SIGNAL_PREFLIGHT_IDENTITY_CHANGED')
+        assert_work_completion_path(snapshot)
         if snapshot['container']['kind'] == 'NATIVE_WRAPPER_NOT_REQUIRED':
             report.update(passResult=True, action='NOT_REQUIRED')
         else:
@@ -387,6 +398,7 @@ def main():
     if mode == '--assert-resolved':
         if intent.exists():
             plan, plan_sha = private(plan_file, 0o400)
+            assert_work_completion_path(plan['snapshot'])
             intent_value, _ = private(intent, 0o400)
             result, _ = private(result_file, 0o400)
             require(intent_value['planSha256'] == result['planSha256'] == plan_sha and result['passResult'] is True
@@ -403,6 +415,7 @@ def main():
     if mode == '--preflight':
         require(len(sys.argv) == 6 and re.fullmatch('sha256:[a-f0-9]{64}', argument))
         snapshot = host.snapshot(argument)
+        assert_work_completion_path(snapshot)
         if snapshot['node']:
             require(hasattr(os, 'pidfd_open') and hasattr(signal, 'pidfd_send_signal'), 'LEGACY_SIGNAL_PIDFD_UNAVAILABLE')
             fd = os.pidfd_open(snapshot['node']['pid'], 0)

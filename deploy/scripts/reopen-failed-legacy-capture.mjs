@@ -52,6 +52,16 @@ function verifyHostPrismaTree(directory){
  const pkg=JSON.parse(fs.readFileSync(path.join(directory,'package.json'),'utf8'));assert.equal(pkg.version,'5.22.0');
  return {treeSha256:INCIDENT_PRISMA_TREE_SHA,fileCount:entries.length,packageVersion:pkg.version};
 }
+function mappedPrismaEngine(directory){
+ const engine=path.join(directory,'libquery_engine-debian-openssl-3.0.x.so.node');
+ assert.equal(fs.realpathSync(engine),engine);
+ const stat=fs.lstatSync(engine,{bigint:true});assert.ok(stat.isFile()&&stat.uid===0n&&stat.nlink===1n);
+ const mapped=fs.readFileSync('/proc/self/maps','utf8').split('\n').filter(row=>row.includes('libquery_engine-')).map(row=>row.trim().split(/\s+/));
+ assert.ok(mapped.length>0,'INCIDENT_PRISMA_ENGINE_NOT_MAPPED');
+ for(const row of mapped){assert.equal(row[5],engine,'INCIDENT_PRISMA_ENGINE_PATH_CHANGED');assert.equal(row[4],String(stat.ino),'INCIDENT_PRISMA_ENGINE_INODE_CHANGED');}
+ assert.equal(pin(stat),pin(fs.lstatSync(engine,{bigint:true})));
+ return {path:engine,inode:String(stat.ino),sha256:'35860a5c0fb2f79e7b38c40747c4d212318d97e1910ca528b133c802716de0b8'};
+}
 /** A distinct terminal shape: the original owner never reached service drain or checkpoint. */
 export function validateFailedLegacyCaptureJournal(raw,deploymentId){
  const entries=raw.toString().trim().split(/\r?\n/).map(line=>JSON.parse(line));let previousHash=null;
@@ -121,6 +131,8 @@ function lock(){
 }
 async function main(){
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);assert.equal(process.argv.length,4);
+ assert.deepEqual(Object.keys(process.env).sort(),Object.keys(hostEnvironment).sort(),'INCIDENT_OWNER_ENVIRONMENT_NOT_MINIMAL');
+ for(const [key,value] of Object.entries(hostEnvironment))assert.equal(process.env[key],value,'INCIDENT_OWNER_ENVIRONMENT_CHANGED');
  const [file,expected]=process.argv.slice(2),raw=read(file,expected,0o600),plan=JSON.parse(raw),ownedLock=lock();assert.equal(plan.format,'sabalan-failed-legacy-capture-reopen/v1');
  assert.equal(plan.repositoryRoot,'/opt/sabalanerp');assert.match(plan.deploymentId,/^[A-Za-z0-9_-]{8,160}$/);assert.match(plan.targetCommit,/^[a-f0-9]{40}$/);assert.match(plan.controlImage,/^sha256:[a-f0-9]{64}$/);
  assert.equal(plan.deploymentId,INCIDENT_ID);assert.equal(plan.releaseId,INCIDENT_ID.slice('deploy-'.length));assert.equal(plan.targetCommit,INCIDENT_SOURCE);assert.equal(plan.checkoutCommit,INCIDENT_CHECKOUT);assert.equal(plan.journal.sha256,INCIDENT_JOURNAL_SHA);assert.equal(plan.originalSnapshot.sha256,INCIDENT_SNAPSHOT_SHA);assert.equal(plan.legacySignal.plan.sha256,INCIDENT_SIGNAL_PLAN_SHA);assert.equal(plan.legacySignal.intent.sha256,INCIDENT_SIGNAL_INTENT_SHA);assert.equal(plan.legacySignal.result.sha256,INCIDENT_SIGNAL_RESULT_SHA);assert.equal(plan.legacySignal.held.sha256,INCIDENT_SIGNAL_HELD_SHA);
@@ -184,12 +196,14 @@ async function main(){
  const backendMount=original.rows.find(row=>row.Config.Labels['com.docker.compose.service']==='backend').Mounts.find(row=>row.Destination==='/app/recovery-coordination'&&row.RW===true);assert.ok(backendMount);assert.equal(plan.coordinationRoot,backendMount.Source);
  const token=randomBytes(32).toString('hex'),maint=path.join(plan.coordinationRoot,'deployment-maintenance.json');
  const maintenanceRaw=read(maint,undefined,0o600),maintenance=JSON.parse(maintenanceRaw);assert.equal(maintenance.deploymentId,plan.deploymentId);
- const prismaDependency=verifyHostPrismaTree(path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client'));
+ const prismaDirectory=path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client');
+ const prismaDependency=verifyHostPrismaTree(prismaDirectory);
  const require=createRequire(import.meta.url),preRequireCache=new Set(Object.keys(require.cache)),{PrismaClient}=require('./online-release-host-dependencies/node_modules/@prisma/client');
  const loadedPrisma=Object.keys(require.cache).filter(file=>!preRequireCache.has(file)).sort(),expectedPrismaModules=[path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client/index.js'),path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client/runtime/library.js')].sort();assert.deepEqual(loadedPrisma,expectedPrismaModules,'INCIDENT_PRISMA_MODULE_CLOSURE_CHANGED');
  const database=new PrismaClient({datasources:{db:{url:url.href}}});let acquired=false,done=false,heartbeat,timerFailure,pulse=Promise.resolve();
  async function advisory(){const rows=await database.$queryRawUnsafe("SELECT pg_backend_pid() AS pid,(SELECT backend_start::text FROM pg_stat_activity WHERE pid=pg_backend_pid()) AS birth,EXISTS(SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='advisory' AND classid=0 AND objid=741936425 AND objsubid=1 AND granted AND mode='ExclusiveLock') AS owned");assert.equal(rows.length,1);assert.equal(rows[0].owned,true);return rows[0];}
  try{
+  await database.$connect();const nativeEngine=mappedPrismaEngine(prismaDirectory);
   const [claim]=await database.$queryRawUnsafe('SELECT pg_try_advisory_lock(741936425) AS owned');assert.equal(claim.owned,true);const birth=await advisory();progress('ADVISORY_VERIFIED');
   const baseline=await database.$transaction(async tx=>{
    const rows=await tx.$queryRawUnsafe('SELECT * FROM deployment_operations WHERE id=$1 FOR UPDATE',plan.deploymentId);assert.equal(rows.length,1);const row=rows[0];assert.equal(row.phase,'RECOVERY_REQUIRED');assert.equal(row.targetCommit,plan.targetCommit);assert.equal(row.releaseId,plan.releaseId);assert.ok(row.completedAt);
@@ -211,7 +225,7 @@ async function main(){
   const currentIdentities=original.currentIdentities;
   const incarnations=verifyRecoveredPreviousIncarnations({services:snapshot.services,identities:snapshot.originalContainerIdentities,currentServices:original.services,currentIdentities,facts:{backendOriginalStartedAt:signalProof.originalContainer.startedAt,backendCurrentStartedAt:backend.State.StartedAt,backendPreviousFinishedAt:backend.State.FinishedAt,oldNodeAbsent:true,oldSqlSessions:oldSql[0].count,backendRestartCountNow:backend.RestartCount}});
   assert.equal(plan.recreatedNginxContainerId,INCIDENT_NGINX_ID);assert.equal(currentIdentities.nginx.id,INCIDENT_NGINX_ID);
-  const ownerStat=fs.readFileSync('/proc/self/stat','utf8'),ownerBirth={pid:process.pid,startTicks:ownerStat.slice(ownerStat.lastIndexOf(')')+2).split(' ')[19],kernelBootId:fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim()};audit('incident-lease-intent',{deploymentId:plan.deploymentId,ownerBirth,leaseTokenSha256:hash(token),signalProof,incarnations,prismaDependency});
+  const ownerStat=fs.readFileSync('/proc/self/stat','utf8'),ownerBirth={pid:process.pid,startTicks:ownerStat.slice(ownerStat.lastIndexOf(')')+2).split(' ')[19],kernelBootId:fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim()};audit('incident-lease-intent',{deploymentId:plan.deploymentId,ownerBirth,leaseTokenSha256:hash(token),signalProof,incarnations,prismaDependency,nativeEngine});
   assert.deepEqual(await advisory(),birth);assert.equal(lock(),ownedLock);await database.$transaction(async tx=>{const rows=await tx.$queryRawUnsafe('SELECT * FROM deployment_operations WHERE id=$1 FOR UPDATE',plan.deploymentId);assert.equal(rows.length,1);assert.deepEqual(rows[0],baseline,'INCIDENT_ROW_CHANGED_DURING_READONLY_PROOF');const active=await tx.deploymentOperation.findUnique({where:{activeKey:'production'}});assert.equal(active,null);await tx.deploymentOperation.update({where:{id:plan.deploymentId},data:{activeKey:'production',leaseToken:token,leaseExpiresAt:new Date(Date.now()+120000),heartbeatAt:new Date()}});});acquired=true;audit('incident-lease-acquired',{deploymentId:plan.deploymentId,originalRow:baseline,ownerBirth,leaseTokenSha256:hash(token),originalJournalSha256:plan.journal.sha256,originalJournal:journal,originalSnapshotSha256:plan.originalSnapshot.sha256,legacySignal:plan.legacySignal,failedCapturePreserved:true,publicBoundary});progress('INCIDENT_LEASE_ACQUIRED');
   heartbeat=setInterval(()=>{pulse=pulse.then(async()=>{assert.equal(lock(),ownedLock);assert.deepEqual(await advisory(),birth);const result=await database.deploymentOperation.updateMany({where:{id:plan.deploymentId,phase:'RECOVERY_REQUIRED',activeKey:'production',leaseToken:token},data:{heartbeatAt:new Date(),leaseExpiresAt:new Date(Date.now()+120000)}});assert.equal(result.count,1);}).catch(error=>{timerFailure=error;});},15000);
   const currentEnv=Object.fromEntries(backend.Config.Env.map(row=>{const i=row.indexOf('=');return [row.slice(0,i),row.slice(i+1)];}));
@@ -226,6 +240,7 @@ async function main(){
   const finalOldSql=await database.$queryRawUnsafe('SELECT count(*)::int AS count FROM pg_stat_activity WHERE client_addr=$1::inet AND backend_start <= $2::timestamptz',backendIp[0],backend.State.FinishedAt);assert.equal(finalOldSql[0].count,0,'OLD_BACKEND_SQL_SESSION_REAPPEARED');
   const [finalDatabaseIdentity]=await database.$queryRawUnsafe('SELECT current_database() AS name,p.system_identifier::text AS "systemIdentifier",d.oid::text AS oid FROM pg_control_system() p CROSS JOIN pg_database d WHERE d.datname=current_database()');assert.equal(finalDatabaseIdentity.name,plan.databaseIdentity.name);assert.equal(finalDatabaseIdentity.systemIdentifier,plan.databaseIdentity.systemIdentifier);assert.equal(finalDatabaseIdentity.oid,plan.databaseIdentity.oid);
   assert.deepEqual(verifyHostPrismaTree(path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client')),prismaDependency,'INCIDENT_PRISMA_TREE_CHANGED_BEFORE_REOPEN');
+  assert.deepEqual(mappedPrismaEngine(prismaDirectory),nativeEngine,'INCIDENT_PRISMA_ENGINE_CHANGED_BEFORE_REOPEN');
   assert.deepEqual(Object.keys(require.cache).filter(file=>!preRequireCache.has(file)).sort(),expectedPrismaModules,'INCIDENT_PRISMA_LAZY_MODULE_CLOSURE_CHANGED');
   for(const item of Object.values(plan.legacySignal))read(item.file,item.sha256);
   await noIncidentTransport();

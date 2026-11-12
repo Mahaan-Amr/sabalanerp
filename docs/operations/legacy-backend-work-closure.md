@@ -39,26 +39,32 @@ that measured environment. `BACKEND_RUNTIME_ROLE` was absent. These flags are
 time-specific and do not disable the other producers. In particular, live SMS
 configuration prevents treating all provider effects as inactive.
 
-## Admission decision
+## First-update admission decision
 
-The protected launcher calls `legacy-backend-signal.py --preflight` before
-preparing a deployment session or entering maintenance. The known legacy image
-now returns `LEGACY_WORK_COMPLETION_UNPROVEN` there. The signal path checks the
-same gate again, including for an older saved plan. A prior clean-exit record
-cannot satisfy the resolution check. Thus this image cannot receive SIGTERM
-through the protected update, and migrations cannot begin on the strength of a
-zero exit code, vanished SQL sessions, or an empty queue sample. A timeout or
-unknown result remains a hold; it never authorizes a retry of an external
-effect or public reopening.
+On 12 November 2026, the owner accepted possible duplicate or unknown SMS
+outcomes for the first database-preserving update. The protected launcher calls
+`legacy-backend-signal.py --preflight` before preparing a session or entering
+maintenance. It binds an explicit risk receipt to the measured image, running
+container, start time and Node process birth. The receipt says external-effect
+completion and exactly-once SMS are **unproven**. It also discloses Web Push
+notification uncertainty. A newly enabled taxpayer delivery broker remains a
+hold because the SMS decision did not authorize a financial provider effect.
+The tax endpoint is checked again against the exact running container at signal
+time, rather than inferred from the earlier environment observation.
 
-The native runtime wrapper path remains eligible for its existing completion
-owner and release gates. For the measured legacy image, first-release admission
-is blocked until a separately reviewed, bounded, independent protocol proves
-completion of **all** admitted work and reconciles every uncertain provider
-effect. It must bind the actual image and process incarnation, establish that
-no producer can start new work after the boundary, and persist a result that
-survives interruption before any signal or migration. Current image behavior
-does not expose such a completion signal. Database sessions, HTTP maintenance,
-container exit, and a quiet network interval do not supply it. Do not claim a
-successful first-release rehearsal from fixture results or restart this image
-as a supposedly passive retained runtime.
+After the deployment lease and both public 503 responses are proven, the runner
+rechecks that exact runtime and sends one SIGTERM through its pidfd. A failed or
+ambiguous signal, nonzero exit, replaced process, missing lease, or failed
+maintenance boundary stops the release. The protected runner then stops the
+services, verifies process closure and zero old-backend SQL sessions, captures
+and independently verifies local and off-server checkpoints, and only then
+permits migration. A zero exit and vanished SQL sessions are database-boundary
+evidence, never proof of SMS or Web Push completion. An interrupted attempt is
+durably held; no stale result can silently authorize reopening.
+
+The native runtime wrapper path retains its completion owner and release gates.
+The legacy receipt is a first-update risk record, not a general waiver or a
+claim that the e407 application has completion-aware shutdown. The previous
+strict external-effect reconciliation analysis remains in
+`reports/qa/legacy-e407-work-reconciliation-blocker.md` as historical evidence
+of the limitation; its pre-decision admission conclusion is superseded here.

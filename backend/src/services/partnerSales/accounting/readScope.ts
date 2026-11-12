@@ -283,7 +283,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   // unknown or ordinary reference cannot authorize a private snapshot.
   const markedAuditIds = markedIds('AUDIT');
   const { rejectedIds: rejectedAuditIds, witnesses } = await readAuthorizedPartnerAuditWitnesses(
-    database, markedAuditIds, invoiceByEntity,
+    database, markedAuditIds, invoiceByEntity, { projectStates: true },
   );
   for (const audit of witnesses) {
     const preparation = preparationByInvoice.get(audit.invoiceId)!;

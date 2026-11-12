@@ -28,6 +28,7 @@ const INCIDENT_SIGNAL_RESULT_SHA='c14ccec02c1a44baedc78c651bd1f791b10a8fe6269eb2
 const INCIDENT_SIGNAL_HELD_SHA='19442e44fb7388a6f652cd84e4bf02a490448e47087117a39db606b4bda33fe4';
 const INCIDENT_BACKEND_ID='4bb3a88e376d81038a5650e76b7ce29de9e256538602bb7f678acab09d105b21';
 const INCIDENT_NGINX_ID='0274de7f7b3c3f33803829ebeefb5742920b40bd64cf29bce00167c6233db0e0';
+const INCIDENT_PRISMA_TREE_SHA='7f9cac9400fbf76d5b8ec9a528fa9b3e7bb39351804715646db39e9643410492';
 const LEGACY_IMAGE='sha256:e407ff125c6fb0b441f6fa782101a4ec5159e928a5ebae7ddc32faef869afed3';
 const hostEnvironment={PATH:'/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',HOME:'/root',DOCKER_HOST:'unix:///var/run/docker.sock'};
 const hash=raw=>createHash('sha256').update(raw).digest('hex');
@@ -39,6 +40,16 @@ const pin=st=>['dev','ino','size','mtimeNs','ctimeNs','uid','mode','nlink'].map(
 function read(file,expected,mode=0o400,maximum=32*1024**2){
  assert.ok(path.isAbsolute(file)&&fs.realpathSync(file)===file);const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
  try{const before=fs.fstatSync(fd,{bigint:true});assert.ok(before.isFile()&&before.uid===0n&&before.nlink===1n&&(before.mode&0o777n)===BigInt(mode)&&before.size>0n&&before.size<=BigInt(maximum));const raw=fs.readFileSync(fd);assert.equal(pin(before),pin(fs.fstatSync(fd,{bigint:true})));assert.equal(pin(before),pin(fs.lstatSync(file,{bigint:true})));if(expected){digest(expected);assert.equal(hash(raw),expected);}return raw;}finally{fs.closeSync(fd);}
+}
+function verifyHostPrismaTree(directory){
+ assert.equal(fs.realpathSync(directory),directory);const entries=[];
+ function visit(file,relative){const stat=fs.lstatSync(file);assert.equal(stat.uid,0);assert.equal(stat.mode&0o022,0);assert.equal(stat.isSymbolicLink(),false);
+  if(stat.isDirectory()){for(const name of fs.readdirSync(file).sort())visit(path.join(file,name),relative?relative+'/'+name:name);return;}
+  assert.equal(stat.isFile(),true);assert.equal(stat.nlink,1);const bytes=fs.readFileSync(file);entries.push([relative,stat.mode&0o777,bytes.length,hash(bytes)].join('\0'));
+ }
+ visit(directory,'');assert.equal(entries.length,20);assert.equal(hash(Buffer.from(entries.join('\n')+'\n')),INCIDENT_PRISMA_TREE_SHA,'INCIDENT_PRISMA_TREE_CHANGED');
+ const pkg=JSON.parse(fs.readFileSync(path.join(directory,'package.json'),'utf8'));assert.equal(pkg.version,'5.22.0');
+ return {treeSha256:INCIDENT_PRISMA_TREE_SHA,fileCount:entries.length,packageVersion:pkg.version};
 }
 /** A distinct terminal shape: the original owner never reached service drain or checkpoint. */
 export function validateFailedLegacyCaptureJournal(raw,deploymentId){
@@ -117,6 +128,8 @@ async function main(){
  assert.equal(plan.controlImage,'sha256:33defd04a0d04e1cde7d4047e7bfaee536d60705bbf4781ae78c40fcb8ba6dcd');
  assert.equal(plan.controlSourceCommit,'75cf7231cdc186875057f9ab88723cf8c2a11685');
  assert.equal(plan.controlSourceHash,'a190a9fccba8c62a9c043587c6a98e1799e54fc34e18f50572507ab6017d76e5');
+ assert.equal(plan.prismaTreeSha256,INCIDENT_PRISMA_TREE_SHA);
+ const prismaDependency=verifyHostPrismaTree(path.join(path.dirname(fileURLToPath(import.meta.url)),'online-release-host-dependencies/node_modules/@prisma/client'));
  const directory=plan.operationDirectory;assert.ok(path.isAbsolute(directory)&&path.dirname(directory)==='/opt/sabalanerp/.deploy-state'&&path.basename(directory).startsWith('failed-legacy-reopen-')&&!fs.existsSync(directory));fs.mkdirSync(directory,{mode:0o700});
  const audit=(name,value)=>{assert.match(name,/^[a-z0-9-]+$/);const target=path.join(directory,name+'.json'),fd=fs.openSync(target,'wx',0o400);try{fs.writeFileSync(fd,encoded(value));fs.fsyncSync(fd);}finally{fs.closeSync(fd);}const d=fs.openSync(directory,'r');try{fs.fsyncSync(d);}finally{fs.closeSync(d);}};
  const children=[];async function run(executable,args,environment={}){
@@ -195,7 +208,7 @@ async function main(){
   const currentIdentities=original.currentIdentities;
   const incarnations=verifyRecoveredPreviousIncarnations({services:snapshot.services,identities:snapshot.originalContainerIdentities,currentServices:original.services,currentIdentities,facts:{backendOriginalStartedAt:signalProof.originalContainer.startedAt,backendCurrentStartedAt:backend.State.StartedAt,backendPreviousFinishedAt:backend.State.FinishedAt,oldNodeAbsent:true,oldSqlSessions:oldSql[0].count,backendRestartCountNow:backend.RestartCount}});
   assert.equal(plan.recreatedNginxContainerId,INCIDENT_NGINX_ID);assert.equal(currentIdentities.nginx.id,INCIDENT_NGINX_ID);
-  const ownerStat=fs.readFileSync('/proc/self/stat','utf8'),ownerBirth={pid:process.pid,startTicks:ownerStat.slice(ownerStat.lastIndexOf(')')+2).split(' ')[19],kernelBootId:fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim()};audit('incident-lease-intent',{deploymentId:plan.deploymentId,ownerBirth,leaseTokenSha256:hash(token),signalProof,incarnations});
+  const ownerStat=fs.readFileSync('/proc/self/stat','utf8'),ownerBirth={pid:process.pid,startTicks:ownerStat.slice(ownerStat.lastIndexOf(')')+2).split(' ')[19],kernelBootId:fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim()};audit('incident-lease-intent',{deploymentId:plan.deploymentId,ownerBirth,leaseTokenSha256:hash(token),signalProof,incarnations,prismaDependency});
   assert.deepEqual(await advisory(),birth);assert.equal(lock(),ownedLock);await database.$transaction(async tx=>{const rows=await tx.$queryRawUnsafe('SELECT * FROM deployment_operations WHERE id=$1 FOR UPDATE',plan.deploymentId);assert.equal(rows.length,1);assert.deepEqual(rows[0],baseline,'INCIDENT_ROW_CHANGED_DURING_READONLY_PROOF');const active=await tx.deploymentOperation.findUnique({where:{activeKey:'production'}});assert.equal(active,null);await tx.deploymentOperation.update({where:{id:plan.deploymentId},data:{activeKey:'production',leaseToken:token,leaseExpiresAt:new Date(Date.now()+120000),heartbeatAt:new Date()}});});acquired=true;audit('incident-lease-acquired',{deploymentId:plan.deploymentId,originalRow:baseline,ownerBirth,leaseTokenSha256:hash(token),originalJournalSha256:plan.journal.sha256,originalJournal:journal,originalSnapshotSha256:plan.originalSnapshot.sha256,legacySignal:plan.legacySignal,failedCapturePreserved:true,publicBoundary});progress('INCIDENT_LEASE_ACQUIRED');
   heartbeat=setInterval(()=>{pulse=pulse.then(async()=>{assert.equal(lock(),ownedLock);assert.deepEqual(await advisory(),birth);const result=await database.deploymentOperation.updateMany({where:{id:plan.deploymentId,phase:'RECOVERY_REQUIRED',activeKey:'production',leaseToken:token},data:{heartbeatAt:new Date(),leaseExpiresAt:new Date(Date.now()+120000)}});assert.equal(result.count,1);}).catch(error=>{timerFailure=error;});},15000);
   const currentEnv=Object.fromEntries(backend.Config.Env.map(row=>{const i=row.indexOf('=');return [row.slice(0,i),row.slice(i+1)];}));

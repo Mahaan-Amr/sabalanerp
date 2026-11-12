@@ -22,6 +22,11 @@ location, and leave the production tracked checkout clean. The immutable
 control image must remain the exact pinned image. The gate run uses a separate
 `incident-434-...` deployment ID for its report and transient Docker label;
 it does not replace the original failed operation's journal or report row.
+The one-incident owner pins the 20-file root-owned Prisma dependency tree to
+SHA-256 `7f9cac9400fbf76d5b8ec9a528fa9b3e7bb39351804715646db39e9643410492`.
+The copied tree was compared byte-for-byte to its private source; its Linux
+OpenSSL 3 engine, required DeploymentOperation fields, and a read-only
+single-connection production query were verified before making a plan.
 
 The plan format is `sabalan-failed-legacy-capture-reopen/v1`. It pins:
 
@@ -30,7 +35,7 @@ The plan format is `sabalan-failed-legacy-capture-reopen/v1`. It pins:
   clean live `checkoutCommit` (`aa7d384b…`), PostgreSQL connection URL and
   database name/system identifier/OID;
 - immutable `controlImage`, `controlSourceCommit`, `controlSourceHash`, and
-  `ownerSourceSha256`;
+  `ownerSourceSha256`, plus `prismaTreeSha256`;
 - original `journal` and `originalSnapshot` paths and SHA-256 values;
 - `legacySignal.plan`, `.intent`, `.result`, `.held` paths and SHA-256 values;
 - `restartedBackend` currently observed restart count, current `startedAt` and

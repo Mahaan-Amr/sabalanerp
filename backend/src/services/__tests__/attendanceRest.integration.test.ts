@@ -2,16 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
-import { saveRestPolicy, assignRestPolicy } from '../attendanceRestPolicy';
+import { saveRestPolicy as saveRestPolicyAt, assignRestPolicy as assignRestPolicyAt } from '../attendanceRestPolicy';
 import { loadPersonnelAttendanceAccounting } from '../personnelAttendanceAccounting';
 import { parsePersonnelAttendanceReportOptions } from '../personnelAttendanceReport';
 import { confirmFactualAbsence, unresolvedAbsenceDays } from '../attendanceAbsenceDecision';
 import { lockAttendance } from '../attendanceDevice';
-if (!process.env.DATABASE_URL?.includes('@127.0.0.1:55432/sabalanerp?') && !(process.env.ATTENDANCE_DOCKER_FIXTURE === '1' && new URL(process.env.DATABASE_URL!).hostname === 'postgres' && new URL(process.env.DATABASE_URL!).pathname === '/sabalanerp')) throw new Error('Existing local Docker only');
+import { assertDispatchDocumentsMigrationTarget } from './dispatchDocumentsTemporaryDatabase';
+const candidateDatabaseName = process.env.SABALAN_CANDIDATE_QA_DATABASE_NAME;
+if (candidateDatabaseName && process.env.DATABASE_URL) assertDispatchDocumentsMigrationTarget(process.env.DATABASE_URL, candidateDatabaseName);
+else if (!process.env.DATABASE_URL?.includes('@127.0.0.1:55432/sabalanerp?') && !(process.env.ATTENDANCE_DOCKER_FIXTURE === '1' && new URL(process.env.DATABASE_URL!).hostname === 'postgres' && new URL(process.env.DATABASE_URL!).pathname === '/sabalanerp')) throw new Error('Existing local Docker only');
 const db = new PrismaClient();
 test.after(() => db.$disconnect());
 const rollback = new Error('rollback rest fixture');
 const day = '2026-11-02', date = new Date(`${day}T00:00:00Z`), now = new Date('2026-11-04T12:00:00Z');
+const writeNow = new Date('2026-11-01T12:00:00Z');
+const saveRestPolicy = (db: Prisma.TransactionClient, input: Parameters<typeof saveRestPolicyAt>[1], actorId: string) => saveRestPolicyAt(db, input, actorId, writeNow);
+const assignRestPolicy = (db: Prisma.TransactionClient, input: Parameters<typeof assignRestPolicyAt>[1], actorId: string) => assignRestPolicyAt(db, input, actorId, writeNow);
 const instant = (time: string) => new Date(`${day}T${time}:00+03:30`);
 async function fixture(work: (tx: Prisma.TransactionClient, f: any) => Promise<void>) {
   await assert.rejects(db.$transaction(async tx => {

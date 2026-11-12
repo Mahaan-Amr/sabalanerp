@@ -14,6 +14,7 @@ import {
 import { renderSalesInvoice } from "../salesDispatchInvoice/render";
 import { freezeSalesInvoiceCorrection } from "../salesDispatchInvoice/correction";
 import { issueLoadingDocuments } from "../loadingDocumentIssuance";
+import { assertDispatchDocumentsMigrationTarget } from "./dispatchDocumentsTemporaryDatabase";
 import {
   approvedPricingRowIntegrityHash,
   approvedPricingVersionIntegrityHash,
@@ -23,14 +24,14 @@ import { pricedAllocationIntegrityHash } from "../pricedAllocationLedger";
 
 // Explicit local URL only; the harness rolls back every business row and never consumes the real invoice sequence.
 const url = process.env.DATABASE_URL;
-if (
-  !url ||
-  new URL(url).hostname !== "127.0.0.1" ||
-  new URL(url).port !== "55432"
-)
+const target = url && new URL(url);
+const candidateDatabaseName = process.env.SABALAN_CANDIDATE_QA_DATABASE_NAME;
+if (!target || target.hostname !== "127.0.0.1" || target.port !== "55432")
   throw new Error(
     "Use the existing sabalanerp-local database at 127.0.0.1:55432.",
   );
+if (candidateDatabaseName) assertDispatchDocumentsMigrationTarget(url, candidateDatabaseName);
+else if (target.pathname !== '/sabalanerp') throw new Error('Only the existing local database or a verified candidate QA clone is allowed.');
 const db = new PrismaClient(),
   rollback = Symbol("invoice-test-rollback");
 const json = (v: unknown) => v as Prisma.InputJsonValue;

@@ -88,7 +88,7 @@ class LegacyGuards(unittest.TestCase):
             pid = 123
             stdout = io.BytesIO(b'0\n')
             stderr = io.BytesIO(b'')
-            def wait(self):
+            def wait(self, timeout=None):
                 clock[0] += 46_000_000_000
                 return 0
         with patch.object(bridge.subprocess, 'Popen', return_value=Child()) as popen, patch.object(bridge.time, 'monotonic_ns', side_effect=lambda: clock[0]), patch.dict(os.environ, {}, clear=True):
@@ -98,6 +98,38 @@ class LegacyGuards(unittest.TestCase):
         self.assertTrue(bridge.children[-1]['closed'])
         self.assertEqual(bridge.children[-1]['code'], 0)
         self.assertTrue(bridge.children[-1]['deadlineExceeded'])
+
+    def test_docker_wait_timeout_closes_only_observer_and_fails_held(self):
+        class Child:
+            pid = 123
+            stdout = io.BytesIO(b'')
+            stderr = io.BytesIO(b'')
+            calls = 0
+            terminated = False
+            killed = False
+            def wait(self, timeout=None):
+                self.calls += 1
+                if self.calls == 1:
+                    raise bridge.subprocess.TimeoutExpired(['docker', 'wait'], timeout)
+                return 143
+            def terminate(self):
+                self.terminated = True
+            def kill(self):
+                self.killed = True
+        child = Child()
+        with patch.object(bridge.subprocess, 'Popen', return_value=child), patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, 'OBSERVER_NOT_CLOSED'):
+                bridge.observed(['docker', 'wait', 'original'], role='docker-wait')
+        self.assertTrue(child.terminated)
+        self.assertFalse(child.killed)
+        self.assertTrue(bridge.children[-1]['closed'])
+        self.assertTrue(bridge.children[-1]['deadlineExceeded'])
+        self.assertEqual(bridge.children[-1]['code'], 143)
+
+    def test_capture_clock_is_nine_hundred_seconds(self):
+        with patch.dict(os.environ, {'DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS': '0'}), \
+                patch.object(bridge.time, 'monotonic_ns', return_value=599_000_000_000):
+            self.assertEqual(bridge.capture_deadline_ns(), 900_000_000_000)
 
     @unittest.skipUnless(os.name == 'posix', 'actual inherited FD9 is Linux-only')
     def test_actual_native_child_inherits_original_fd9(self):
@@ -148,7 +180,7 @@ class LegacyGuards(unittest.TestCase):
         host = SimpleNamespace(protected_boundary=lambda *_: None, snapshot=lambda _: copy.deepcopy(snapshot))
         audits = []
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS': '0'}), \
-                patch.object(bridge.time, 'monotonic_ns', return_value=599_000_000_000), \
+                patch.object(bridge.time, 'monotonic_ns', return_value=899_000_000_000), \
                 patch.object(bridge.os, 'pidfd_open', create=True, return_value=44), patch.object(bridge.os, 'close'), \
                 patch.object(bridge.signal, 'pidfd_send_signal', create=True) as sent, \
                 patch.object(bridge, 'proc_identity', return_value=snapshot['node']), \
@@ -216,6 +248,32 @@ class LegacyGuards(unittest.TestCase):
         self.assertLess(events.index('AUDIT'), events.index('BOUNDARY', events.index('BOUNDARY') + 1))
         self.assertIn('wait', events)
         self.assertTrue(audits[next(key for key in audits if key.endswith('result'))]['passResult'])
+
+    def test_forward_records_same_container_new_runtime_after_wait_failure(self):
+        _, snapshot = fixture()
+        plan = dict(deploymentId='original_deployment', releaseId='original_release', snapshot=snapshot,
+                    legacyExternalEffectRisk=bridge.legacy_effect_receipt(snapshot))
+        audits = {}
+        class Host:
+            def protected_boundary(self, *_args): pass
+            def snapshot(self, _image): return copy.deepcopy(snapshot)
+            def docker(self, _argv): raise RuntimeError('LEGACY_SIGNAL_OBSERVER_NOT_CLOSED')
+            def inspect(self, _container):
+                return dict(Id=snapshot['container']['containerId'], Image=snapshot['container']['image'],
+                            Created=snapshot['container']['created'], RestartCount=8,
+                            State=dict(StartedAt='2026-10-20T00:01:00Z', FinishedAt='2026-10-20T00:00:59Z',
+                                       Pid=222, Running=True, OOMKilled=False, ExitCode=0, Error=''))
+        with tempfile.TemporaryDirectory() as directory, patch.object(bridge.os, 'pidfd_open', create=True, return_value=44), \
+                patch.object(bridge.os, 'close'), patch.object(bridge.signal, 'pidfd_send_signal', create=True), \
+                patch.object(bridge, 'proc_identity', return_value=snapshot['node']), \
+                patch.object(bridge, 'save', side_effect=lambda file, value: audits.setdefault(str(file), copy.deepcopy(value))):
+            with self.assertRaisesRegex(RuntimeError, 'OBSERVER_NOT_CLOSED'):
+                bridge.forward_original(Host(), plan, 'a'*64, Path(directory)/'intent', Path(directory)/'result', 'session')
+        result = audits[next(key for key in audits if key.endswith('result'))]
+        self.assertFalse(result['passResult'])
+        self.assertTrue(result['restartObserved'])
+        self.assertEqual(result['postSignalContainer']['RestartCount'], 8)
+        self.assertTrue(result['postSignalContainer']['State']['Running'])
 
     def test_changed_birth_bad_boundary_or_nonzero_exit_cannot_turn_into_success(self):
         _, snapshot = fixture()

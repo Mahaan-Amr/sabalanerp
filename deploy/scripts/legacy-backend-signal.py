@@ -122,7 +122,7 @@ def observed(argv, stdin=None, role='read-only-docker'):
         except BaseException:
             row['pumpFailed'] = True
 
-    pumps = [threading.Thread(target=drain, args=(stream, key))
+    pumps = [threading.Thread(target=drain, args=(stream, key), daemon=True)
              for stream, key in [(child.stdout, 'stdout'), (child.stderr, 'stderr')]]
     for pump in pumps:
         pump.start()
@@ -132,10 +132,28 @@ def observed(argv, stdin=None, role='read-only-docker'):
             child.stdin.close()
         except BrokenPipeError:
             row['pumpFailed'] = True
-    row['code'] = child.wait()
-    row['closed'] = True
+    try:
+        row['code'] = child.wait(timeout=max(0.001, (limit - time.monotonic_ns()) / 1e9))
+        row['closed'] = True
+    except subprocess.TimeoutExpired:
+        overdue()
+        # Only the read-only Docker observer is stopped here. The container and
+        # the original deployment owner remain untouched and fail closed.
+        child.terminate()
+        try:
+            row['code'] = child.wait(timeout=5)
+            row['closed'] = True
+        except subprocess.TimeoutExpired:
+            child.kill()
+            row['code'] = child.wait(timeout=5)
+            row['closed'] = True
     for pump in pumps:
-        pump.join()
+        pump.join(timeout=5)
+    if any(pump.is_alive() for pump in pumps):
+        row['pumpFailed'] = True
+    else:
+        child.stdout.close()
+        child.stderr.close()
     watchdog.cancel()
     watchdog.join()
     row['deadlineExceeded'] = row['deadlineExceeded'] or time.monotonic_ns() >= limit
@@ -156,7 +174,7 @@ def capture_deadline_ns():
         return time.monotonic_ns() + 600_000_000_000
     require(re.fullmatch('[0-9]{1,20}', started), 'LEGACY_SIGNAL_INVALID_CAPTURE_CLOCK')
     require(int(started) <= time.monotonic_ns(), 'LEGACY_SIGNAL_INVALID_CAPTURE_CLOCK')
-    return int(started) + 600_000_000_000
+    return int(started) + 900_000_000_000
 
 
 def proc_identity(pid):
@@ -388,6 +406,19 @@ def forward_original(host, plan, plan_sha, intent_file, result_file, session_fil
         return report
     except BaseException as error:
         report['error'] = str(error)[:160]
+        if report.get('signalDelivered') and not report['passResult']:
+            try:
+                current = host.inspect(plan['snapshot']['container']['containerId'])
+                state = current['State']
+                report['postSignalContainer'] = dict(Id=current['Id'], Image=current['Image'],
+                    Created=current['Created'], RestartCount=current.get('RestartCount'),
+                    State={key: state.get(key) for key in ['StartedAt', 'FinishedAt', 'Pid',
+                        'Running', 'OOMKilled', 'ExitCode', 'Error']})
+                report['restartObserved'] = (current['Id'] == plan['snapshot']['container']['containerId']
+                    and current['Created'] == plan['snapshot']['container']['created']
+                    and state['StartedAt'] != plan['snapshot']['container']['startedAt'])
+            except BaseException:
+                report['postSignalInspectionFailed'] = True
         raise
     finally:
         if fd is not None:

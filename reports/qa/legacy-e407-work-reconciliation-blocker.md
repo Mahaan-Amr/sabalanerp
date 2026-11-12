@@ -1,5 +1,11 @@
 # Legacy e407 work reconciliation: first-release decision
 
+Historical analysis before the owner's 12 November 2026 decision. The owner
+subsequently accepted possible duplicate or unknown SMS outcomes for the first
+database-preserving update. The admission conclusion below is superseded by
+`docs/operations/legacy-backend-work-closure.md`; the observed handler and
+provider limitations remain relevant evidence.
+
 Issue #429 remains blocked for the first protected update. This is a read-only
 code and evidence review, not a production admission receipt. The protected
 runner's `LEGACY_WORK_COMPLETION_UNPROVEN` preflight must remain in force.

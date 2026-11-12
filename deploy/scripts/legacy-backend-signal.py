@@ -1,7 +1,7 @@
-"""Protect the original deployment from unproven legacy work completion.
+"""Bind the legacy stop to the protected database boundary and disclose effects.
 
 The known legacy image exits zero while external-effecting workers can still be
-running. Container and SQL closure cannot qualify that image for migration.
+running. Its exit is a process observation, never a provider-completion receipt.
 """
 import hashlib
 import http.client
@@ -23,7 +23,7 @@ LEGACY_IMAGE = 'sha256:e407ff125c6fb0b441f6fa782101a4ec5159e928a5ebae7ddc32faef8
 LEGACY_SOURCE_LABEL = 'unattested'
 LEGACY_COMMAND = ['sh', '-c', 'node dist/scripts/recovery-database-preflight.js && node dist/index.js']
 NATIVE_COMMAND = ['sh', 'scripts/with-backend-control-ownership.sh', 'sh', 'scripts/start-backend.sh']
-FORMAT = 'sabalan-legacy-backend-signal/v1'
+FORMAT = 'sabalan-legacy-backend-signal/v2'
 children = []
 interrupted = False
 deadline_file = None
@@ -185,6 +185,11 @@ def classify_container(value, expected_image):
                 and labels.get('io.sabalan.performance.source-commit') == LEGACY_SOURCE_LABEL
                 and labels.get('io.sabalan.performance.source-hash') == LEGACY_SOURCE_LABEL,
                 'LEGACY_SIGNAL_UNKNOWN_IMMUTABLE_IMAGE')
+        # Owner acceptance covers SMS only. A newly enabled tax broker would
+        # introduce a financial provider effect outside that decision.
+        tax_endpoint = [row.split('=', 1)[1] for row in value['Config'].get('Env', [])
+                        if row.startswith('TAXPAYER_DELIVERY_BROKER_ENDPOINT=')]
+        require(not tax_endpoint or tax_endpoint == [''], 'LEGACY_TAX_BROKER_EFFECT_UNACCEPTED')
         kind = 'KNOWN_LEGACY_SHELL'
     else:
         require(command == NATIVE_COMMAND, 'LEGACY_SIGNAL_UNKNOWN_STARTUP')
@@ -215,14 +220,25 @@ def validate_process_shape(container, init, node, top, host_namespace):
             and (node['pid'], init['pid']) in top, 'LEGACY_SIGNAL_UNKNOWN_DESCENDANTS')
 
 
-def assert_work_completion_path(snapshot):
-    # The measured e407 dist/index.js stops only biometric and vehicle timers,
-    # then closes HTTP/Prisma and calls process.exit(0). Dispatch SMS, taxpayer,
-    # notifications and other workers are not joined. A bounded outside observer
-    # cannot infer their promise or provider outcome from exit 0, no SQL sessions,
-    # or a quiet network socket. Hold before the signal and before maintenance.
-    require(snapshot['container']['kind'] == 'NATIVE_WRAPPER_NOT_REQUIRED',
-            'LEGACY_WORK_COMPLETION_UNPROVEN')
+def legacy_effect_receipt(snapshot):
+    container = snapshot['container']
+    if container['kind'] == 'NATIVE_WRAPPER_NOT_REQUIRED':
+        return None
+    require(container['kind'] == 'KNOWN_LEGACY_SHELL' and container['image'] == LEGACY_IMAGE,
+            'LEGACY_EFFECT_UNKNOWN_IMAGE')
+    # This is the owner's first-update acceptance, not a completion claim. The
+    # measured handler joins neither dispatch SMS nor notification delivery.
+    return dict(image=container['image'], containerId=container['containerId'],
+                startedAt=container['startedAt'], nodeStartTicks=snapshot['node']['startTicks'],
+                ownerAcceptedPossibleDuplicateOrUnknownSms=True,
+                externalEffectsCompleted=False, exactlyOnceSmsProven=False,
+                additionalNotificationUncertainty='Web Push delivery may be unknown or duplicated',
+                taxpayerBrokerEndpointVerifiedAbsentAtPreflight=True)
+
+
+def require_effect_receipt(plan):
+    require(plan.get('legacyExternalEffectRisk') == legacy_effect_receipt(plan['snapshot']),
+            'LEGACY_EFFECT_RECEIPT_REQUIRED')
 
 
 class OriginalHost:
@@ -334,13 +350,14 @@ def verify_exited(actual, expected, wait_output):
 
 def forward_original(host, plan, plan_sha, intent_file, result_file, session_file):
     report = dict(format=FORMAT, passResult=False, signalDelivered=False, deploymentId=plan['deploymentId'],
-                  releaseId=plan['releaseId'], planSha256=plan_sha, applicationNativeClosureInferred=False)
+                  releaseId=plan['releaseId'], planSha256=plan_sha, applicationNativeClosureInferred=False,
+                  legacyExternalEffectRisk=plan.get('legacyExternalEffectRisk'))
     fd = None
     try:
         host.protected_boundary(plan, session_file)
         snapshot = host.snapshot(plan['snapshot']['container']['image'])
         require(snapshot == plan['snapshot'], 'LEGACY_SIGNAL_PREFLIGHT_IDENTITY_CHANGED')
-        assert_work_completion_path(snapshot)
+        require_effect_receipt(plan)
         if snapshot['container']['kind'] == 'NATIVE_WRAPPER_NOT_REQUIRED':
             report.update(passResult=True, action='NOT_REQUIRED')
         else:
@@ -351,7 +368,8 @@ def forward_original(host, plan, plan_sha, intent_file, result_file, session_fil
             require(host.snapshot(snapshot['container']['image']) == snapshot)
             require(proc_identity(snapshot['node']['pid']) == snapshot['node'] and not interrupted)
             save(intent_file, dict(format=FORMAT, deploymentId=plan['deploymentId'], releaseId=plan['releaseId'],
-                                   planSha256=plan_sha, target=snapshot, signal='SIGTERM', originalHostPid=os.getpid()))
+                                   planSha256=plan_sha, target=snapshot, signal='SIGTERM', originalHostPid=os.getpid(),
+                                   legacyExternalEffectRisk=plan['legacyExternalEffectRisk']))
             host.protected_boundary(plan, session_file)
             require(proc_identity(snapshot['node']['pid']) == snapshot['node'] and not interrupted)
             require(time.monotonic_ns() + 30_000_000_000 < capture_deadline_ns(), 'LEGACY_SIGNAL_INSUFFICIENT_CAPTURE_BUDGET')
@@ -398,13 +416,14 @@ def main():
     if mode == '--assert-resolved':
         if intent.exists():
             plan, plan_sha = private(plan_file, 0o400)
-            assert_work_completion_path(plan['snapshot'])
+            require_effect_receipt(plan)
             intent_value, _ = private(intent, 0o400)
             result, _ = private(result_file, 0o400)
             require(intent_value['planSha256'] == result['planSha256'] == plan_sha and result['passResult'] is True
                     and result.get('legacyContainerExitedCleanly') is True and result['interrupted'] is False
                     and intent_value['deploymentId'] == result['deploymentId'] == plan['deploymentId'] == deployment
                     and intent_value['releaseId'] == result['releaseId'] == plan['releaseId'] == release
+                    and intent_value['legacyExternalEffectRisk'] == result['legacyExternalEffectRisk'] == plan['legacyExternalEffectRisk']
                     and len(result['originalChildren']) > 0
                     and all(row['closed'] and row['code'] == 0 and not row['overflow'] and not row['pumpFailed'] and not row['deadlineExceeded'] and not row['deadlineAuditFailed'] for row in result['originalChildren']))
             # A later canonical Compose promotion can replace the stopped old
@@ -415,7 +434,6 @@ def main():
     if mode == '--preflight':
         require(len(sys.argv) == 6 and re.fullmatch('sha256:[a-f0-9]{64}', argument))
         snapshot = host.snapshot(argument)
-        assert_work_completion_path(snapshot)
         if snapshot['node']:
             require(hasattr(os, 'pidfd_open') and hasattr(signal, 'pidfd_send_signal'), 'LEGACY_SIGNAL_PIDFD_UNAVAILABLE')
             fd = os.pidfd_open(snapshot['node']['pid'], 0)
@@ -424,13 +442,15 @@ def main():
             finally:
                 os.close(fd)
         save(plan_file, dict(format=FORMAT, deploymentId=deployment, releaseId=release, snapshot=snapshot,
-                             signalDelivered=False, productionMutation=False, originalChildren=original_child_facts()))
+                             signalDelivered=False, productionMutation=False, originalChildren=original_child_facts(),
+                             legacyExternalEffectRisk=legacy_effect_receipt(snapshot)))
     else:
         require(len(sys.argv) == 7)
         plan, plan_sha = private(plan_file, 0o400)
         require(plan['format'] == FORMAT and plan['deploymentId'] == deployment and plan['releaseId'] == release
                 and plan['signalDelivered'] is False and plan['productionMutation'] is False
                 and argument == plan['snapshot']['container']['image'])
+        require_effect_receipt(plan)
         forward_original(host, plan, plan_sha, intent, result_file, sys.argv[6])
     require(not interrupted and all(not row['deadlineExceeded'] and not row['deadlineAuditFailed'] for row in children),
             'LEGACY_SIGNAL_INTERRUPTED_OR_LATE_HELD')

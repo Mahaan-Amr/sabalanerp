@@ -4,7 +4,7 @@ import fs from 'node:fs';
 
 const source = fs.readFileSync(new URL('../../deploy/scripts/deploy.sh', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
 
-test('protected release runner keeps the legacy hold and canonical release and rollback gates without online bootstrap artifacts', () => {
+test('protected release runner records legacy risk before maintenance and keeps canonical release and rollback gates', () => {
   const legacyPreflight = source.indexOf('legacy-backend-signal.py" --preflight');
   const sessionPreparation = source.indexOf('\ncontrol prepare\n');
   const migration = source.indexOf('dist/scripts/deployment-owned-migrations.js');

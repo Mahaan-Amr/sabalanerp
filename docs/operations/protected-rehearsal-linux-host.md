@@ -1,0 +1,13 @@
+# Isolated Linux host for #432 rehearsal
+
+The owner authorized one independent Linux host for the complete production-state-copy rehearsal in #432. This is the sole exception to the local `sabalanerp-local` project rule. The existing six local services, their data, and both #436 checkpoints remain untouched. Issue #439 owns host preparation; #438 reviews the QA controller and backup target, using the unchanged production runner wherever its exact identity and lease gates pass. Neither host provisioning nor a component restore qualifies #432.
+
+## Host preparation boundary
+
+1. Pin the Linux distribution source, disk location, Docker Engine version, and daemon configuration. Use a native daemon on the rehearsal host, with a socket and data root distinct from Docker Desktop. Verify actual daemon PID/birth, `/run/docker.pid`, root-owned `/var/lib/docker/containers/<id>/config.v2.json`, `/proc` FD9 flock, pidfd and shared kernel/PID view before creating QA services. Record the checks and stop if any fail.
+2. Measure host and Docker data-root free space for verified previous and candidate image archives, full restored PostgreSQL/files, two checkpoint generations, independent readback, and safety reserve. Preserve the newest two healthy backup points and incident holds. A capacity failure stops before image transfer or service creation.
+3. Create only the private six-service QA project with separate PostgreSQL, ClamAV, backend, frontend, Inquiry, and Nginx data. Bind QA ingress to loopback. Pin exact immutable previous and candidate image identities. Every QA mount, database, lock, marker, and key path is separate from production and `sabalanerp-local`.
+4. Work from a size/hash-verified copy of the 2026-11-12 encrypted checkpoint and a distinct writable sidecar copy. Keep the original independent object and sidecar in custody. Supply the matching private recovery and application keys through reviewed private mounts; do not print or commit key bytes. Prove application payload decryption in the isolated restore.
+5. Execute the real plan-bound protected controller through one complete candidate update and a separate injected post-mutation rollback on reset QA state. Record all lease, maintenance 503, local and remote checkpoint, image, migration, health, acknowledged-write preservation, and fail-closed receipts. #432 remains NO-GO until both runs and representative business writes pass.
+
+The [#438 conditional design](../../reports/qa/protected-rehearsal-438-conditional-design-20261112.md) records the source blockers and exact image/key scope. Production `deploy.sh` defaults and ADR-0039 remain authoritative; any QA-specific target change requires independent review.

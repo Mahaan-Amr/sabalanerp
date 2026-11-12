@@ -18,6 +18,8 @@ Use the existing Docker Compose project named `sabalanerp-local` for all local r
 
 Do not create or start a second Compose project, disposable PostgreSQL container, parallel test stack, or ad-hoc replacement service when `sabalanerp-local` is available. Run migrations and tests against the existing local services with isolated test data or transactions where needed, without creating another Docker stack. Before any Docker action, verify the target with `docker compose -f docker-compose.local.yml ps` or `npm run docker:local:ps`.
 
+For issue #432 only, the owner authorized one isolated Linux rehearsal host with a private six-service `sabalanerp-qa` Compose project and PostgreSQL service. Follow `docs/operations/protected-rehearsal-linux-host.md` before provisioning or running it. Keep all six `sabalanerp-local` instances, their data, and the #436 C:/D: checkpoints intact. This exception grants no production release admission or change to the protected deployment gates.
+
 ### Database connection ownership
 
 The long-running backend owns exactly one application `PrismaClient`, exported by `backend/src/lib/prisma.ts`. Routes, middleware, services, utilities, and background workers must reuse that client or accept it through dependency injection; they must never construct their own client or disconnect the shared client.

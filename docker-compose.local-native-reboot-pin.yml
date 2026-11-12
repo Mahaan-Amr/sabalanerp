@@ -1,0 +1,5 @@
+# Restore the existing backend service with its immutable reviewed image ID.
+name: sabalanerp-local
+services:
+  backend:
+    image: ${LOCAL_NATIVE_REBOOT_IMAGE_ID:?immutable image ID required}

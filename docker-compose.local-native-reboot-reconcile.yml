@@ -4,5 +4,6 @@
 name: sabalanerp-local
 services:
   backend:
+    image: ${LOCAL_NATIVE_REBOOT_IMAGE_ID:?immutable image ID required}
     command: ["sh", "scripts/with-backend-control-ownership.sh", "--reconcile-local-reboot"]
     restart: "no"

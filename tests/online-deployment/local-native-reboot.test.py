@@ -1,5 +1,8 @@
 """The local reboot exception never asserts graceful native completion."""
 import importlib.util
+import hashlib
+import json
+import copy
 from pathlib import Path
 import unittest
 
@@ -23,11 +26,51 @@ class LocalNativeRebootPolicy(unittest.TestCase):
                              systemIdentifier='7703877635514671138', databaseOid='57567',
                              oldSessions=0, allTaggedSessions=0, prepared=0,
                              publicIngress=False, externalCredentials=False,
-                             historicalActive=[dict(name='deployment-runtime-native.preserved-' + format(i, '064x') + '.json',
-                                                    sha256=format(i, '064x')) for i in range(1, 8)],
-                             historicalIncidentEvidence=[
-                                 dict(name='local-forced-recovery-incident-a.json', sha256='a' * 64),
-                                 dict(name='local-reboot-incident-b.json', sha256='b' * 64)])
+                             historicalActive=[dict(name='deployment-runtime-native.preserved-' + sha + '.json',
+                                                    sha256=sha) for sha in module.PRESERVED],
+                             historicalIncidentEvidence=[dict(name=name, sha256=sha)
+                                                         for name, sha in module.INCIDENT_EVIDENCE])
+        self.observed['hostProofSha256'] = 'e' * 64
+        self.observed['hostProof'] = dict(format='sabalan-local-native-reboot-host-proof/v1',
+                                         project='sabalanerp-local',
+                                         backendContainerId=module.INCIDENT['oldContainerId'],
+                                         oldImageId=module.INCIDENT['oldImageId'],
+                                         retainedOldImageTag='sabalanerp-local-backend:pre-reboot-20261112',
+                                         activeSha256=module.INCIDENT['activeSha256'],
+                                         candidateImageId=self.observed['imageId'],
+                                         bootId=self.observed['bootId'], publicIngress=False,
+                                         historicalActive=self.observed['historicalActive'],
+                                         historicalIncidentEvidence=self.observed['historicalIncidentEvidence'],
+                                         database=dict(system=module.INCIDENT['systemIdentifier'],
+                                                       oid=module.INCIDENT['databaseOid'],
+                                                       oldSessions=0, allTagged=0, prepared=0),
+                                         checkpoint=dict(manifestSha256='f' * 64,
+                                                         independentManifestSha256='f' * 64,
+                                                         primaryPath='C:/checkpoint',
+                                                         independentPath='D:/checkpoint',
+                                                         primaryReadbackVerified=True,
+                                                         independentReadbackVerified=True,
+                                                         manifest=dict(format='sabalan-local-native-reboot-checkpoint/v1',
+                                                                       activeSha256=module.INCIDENT['activeSha256'],
+                                                                       postgresSystemIdentifier=module.INCIDENT['systemIdentifier'],
+                                                                       databaseOid=module.INCIDENT['databaseOid'],
+                                                                       inquiryDatabase='consistent-sqlite-backup',
+                                                                       redis='consistent-rdb-snapshot',
+                                                                       clamavSignatures='regenerable-service-untouched',
+                                                                       volumeArchives='file-copy-only',
+                                                                       absentBeforeReconciliation=[module.ABSENT_VOLUME],
+                                                                       entries=[dict(name=name, sha256='f' * 64, bytes=1024)
+                                                                                for name in ['backend-old-container-inspect.json',
+                                                                                             'backend-old-rootfs.tar',
+                                                                                             'postgres-sabalanerp.dump',
+                                                                                             'inquiry-consistent.db',
+                                                                                             'redis-consistent.rdb'] +
+                                                                                ['volume-' + name + '.tar'
+                                                                                 for name in module.VOLUMES]])))
+        manifest = self.observed['hostProof']['checkpoint']['manifest']
+        sha = hashlib.sha256((json.dumps(manifest, separators=(',', ':')) + '\n').encode()).hexdigest()
+        self.observed['hostProof']['checkpoint']['manifestSha256'] = sha
+        self.observed['hostProof']['checkpoint']['independentManifestSha256'] = sha
 
     def test_exact_local_reboot_produces_truthful_exception(self):
         receipt = module.reconcile(self.active, module.INCIDENT['activeSha256'], self.observed)
@@ -44,7 +87,7 @@ class LocalNativeRebootPolicy(unittest.TestCase):
                            ('systemIdentifier', '1'), ('databaseOid', '1'), ('oldSessions', 1),
                            ('allTaggedSessions', 1), ('prepared', 1), ('publicIngress', True),
                            ('externalCredentials', True), ('historicalActive', []),
-                           ('historicalIncidentEvidence', [])]:
+                           ('historicalIncidentEvidence', []), ('hostProofSha256', '')]:
             with self.subTest(key=key):
                 changed = dict(self.observed, **{key: value})
                 if key == 'imageId':
@@ -62,6 +105,27 @@ class LocalNativeRebootPolicy(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertFalse(module.valid_receipt(self.active, module.INCIDENT['activeSha256'],
                                  dict(receipt, **{key: value}), self.observed))
+
+    def test_host_and_checkpoint_proof_are_required_before_archive(self):
+        for mutation in [
+            lambda value: value['hostProof'].update(publicIngress=True),
+            lambda value: value['hostProof'].update(oldImageId='sha256:' + '0' * 64),
+            lambda value: value['hostProof']['database'].update(prepared=1),
+            lambda value: value['hostProof']['checkpoint'].update(independentReadbackVerified=False),
+            lambda value: value['hostProof']['checkpoint']['manifest']['entries'].pop(),
+            lambda value: value['hostProof']['checkpoint'].update(manifestSha256='0' * 64),
+            lambda value: value['historicalActive'].pop(),
+        ]:
+            observed = copy.deepcopy(self.observed)
+            mutation(observed)
+            with self.assertRaises(RuntimeError):
+                module.reconcile(self.active, module.INCIDENT['activeSha256'], observed)
+
+    def test_incident_does_not_apply_to_other_active_record(self):
+        for change in [dict(namespace='sabalan-rt-' + '0' * 48),
+                       dict(guardian=dict(self.active['guardian'], startTicks='83033'))]:
+            with self.assertRaises(RuntimeError):
+                module.reconcile(dict(self.active, **change), module.INCIDENT['activeSha256'], self.observed)
 
 
 if __name__ == '__main__':

@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import select
 import signal
 import stat
 import subprocess
@@ -103,13 +104,17 @@ def assert_local_reboot_abandonment(directory, previous, previous_raw):
     require(os.environ.get('SMS_IR_ENVIRONMENT') == 'sandbox'
             and not any(os.environ.get(key) for key in [
                 'SMS_IR_API_KEY', 'WEB_PUSH_VAPID_PRIVATE_KEY', 'TAXPAYER_DELIVERY_BROKER_ENDPOINT', 'TAXPAYER_BROKER_URL',
-                'TAXPAYER_BROKER_TOKEN', 'TAXPAYER_API_KEY']))
+                'TAXPAYER_BROKER_TOKEN', 'TAXPAYER_API_KEY', 'ACCOUNTING_RECONCILIATION_URL']))
     require(os.environ.get('PUBLIC_APP_URL', '').startswith('http://localhost:')
             and os.environ.get('FRONTEND_URL', '').startswith('http://localhost:'))
     source = urlsplit(os.environ.get('DATABASE_URL', ''))
     require(source.hostname == 'postgres' and unquote(source.path[1:]) == 'sabalanerp')
-    image_id = os.environ.get('LOCAL_NATIVE_REBOOT_IMAGE_ID', '')
-    require(re.fullmatch(r'sha256:[a-f0-9]{64}', image_id))
+    proof, proof_raw = read_state(directory / 'deployment-runtime-recovery-host-proof.json')
+    require(proof_raw is not None and hashlib.sha256(proof_raw).hexdigest() ==
+            os.environ.get('LOCAL_NATIVE_REBOOT_HOST_PROOF_SHA256'))
+    image_id = proof.get('candidateImageId')
+    require(re.fullmatch(r'sha256:[a-f0-9]{64}', image_id)
+            and image_id == os.environ.get('LOCAL_NATIVE_REBOOT_IMAGE_ID'))
     archived = directory / 'deployment-runtime-history' / (hashlib.sha256(previous_raw).hexdigest() + '.json')
     require(read_state(archived)[1] == previous_raw)
     receipt, receipt_raw = read_state(directory / 'deployment-runtime-abandonment.json')
@@ -135,9 +140,32 @@ def assert_local_reboot_abandonment(directory, previous, previous_raw):
                     imageId=image_id, bootId=boot, systemIdentifier=receipt.get('clusterIdentifier'),
                     databaseOid=receipt.get('databaseOid'), oldSessions=0, allTaggedSessions=0,
                     prepared=0, publicIngress=False, externalCredentials=False,
-                    historicalActive=history, historicalIncidentEvidence=incidents)
+                    historicalActive=history, historicalIncidentEvidence=incidents,
+                    hostProof=proof, hostProofSha256=hashlib.sha256(proof_raw).hexdigest())
     require(module.valid_receipt(previous, hashlib.sha256(previous_raw).hexdigest(), receipt, observed))
     return receipt
+
+
+def acquire_local_reboot_advisory(pg_env):
+    advisory_env = dict(pg_env)
+    advisory_env['PGOPTIONS'] = '-c statement_timeout=5000 -c lock_timeout=250'
+    advisory = subprocess.Popen(['psql', '-X', '-q', '-t', '-A', '-v', 'ON_ERROR_STOP=1'],
+                                env=advisory_env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True)
+    advisory.stdin.write("SELECT 'SABALAN_LOCAL_REBOOT_LOCKED' FROM pg_advisory_lock(436, 20261112);\n")
+    advisory.stdin.flush()
+    ready = False
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and advisory.poll() is None:
+        readable, _, _ = select.select([advisory.stdout], [], [], max(0, deadline - time.monotonic()))
+        if readable and advisory.stdout.readline().strip() == 'SABALAN_LOCAL_REBOOT_LOCKED':
+            ready = True
+            break
+    if not ready or advisory.poll() is not None:
+        advisory.kill()
+        advisory.wait(timeout=5)
+        require(False)
+    return advisory
 
 
 def reconcile_local_reboot(directory):
@@ -152,8 +180,11 @@ def reconcile_local_reboot(directory):
     active_sha = hashlib.sha256(raw).hexdigest()
     require(os.environ.get('LOCAL_NATIVE_REBOOT_EXPECTED_ACTIVE_SHA256') == active_sha
             and os.environ.get('LOCAL_NATIVE_REBOOT_EXPECTED_OLD_BOOT_ID') == active['guardian']['bootId']
-            and os.environ.get('LOCAL_NATIVE_REBOOT_HOST_INGRESS') == 'loopback-verified'
             and read_state(directory / 'deployment-runtime-abandonment.json')[1] is None)
+    proof, proof_raw = read_state(directory / 'deployment-runtime-recovery-host-proof.json')
+    require(proof_raw is not None and hashlib.sha256(proof_raw).hexdigest() ==
+            os.environ.get('LOCAL_NATIVE_REBOOT_HOST_PROOF_SHA256'))
+    require(proof.get('candidateImageId') == os.environ.get('LOCAL_NATIVE_REBOOT_IMAGE_ID'))
     source = urlsplit(os.environ.get('DATABASE_URL', ''))
     require(source.hostname == 'postgres' and unquote(source.path[1:]) == 'sabalanerp')
     pg_env = {key: value for key, value in os.environ.items() if not key.startswith('PG')}
@@ -161,19 +192,22 @@ def reconcile_local_reboot(directory):
                   PGUSER=unquote(source.username or ''), PGPASSWORD=unquote(source.password or ''),
                   PGAPPNAME='sabalan-local-reboot-observer', PGCONNECT_TIMEOUT='5',
                   PGOPTIONS='-c statement_timeout=5000 -c lock_timeout=250 -c default_transaction_read_only=on')
+    advisory = acquire_local_reboot_advisory(pg_env)
     namespace = active['namespace'].replace("'", "''")
     sql = """SELECT json_build_object('system',c.system_identifier::text,
       'visible',r.rolsuper OR pg_has_role(current_user,'pg_read_all_stats','USAGE'),
       'sourceOid',(SELECT oid::text FROM pg_database WHERE datname='sabalanerp'),
       'oldSessions',(SELECT count(*) FROM pg_stat_activity WHERE application_name='""" + namespace + """'),
       'allTaggedSessions',(SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'sabalan-rt-%'),
+      'advisoryHeld',(SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND classid=436
+                         AND objid=20261112 AND objsubid=2 AND granted),
       'prepared',(SELECT count(*) FROM pg_prepared_xacts))
       FROM pg_control_system() c CROSS JOIN pg_roles r WHERE r.rolname=current_user"""
     observed_sql = subprocess.run(['psql', '-X', '-q', '-t', '-A', '-v', 'ON_ERROR_STOP=1', '-c', sql],
                                   env=pg_env, stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
     require(observed_sql.returncode == 0 and len(observed_sql.stdout) < 16384)
     sql_state = json.loads(observed_sql.stdout)
-    require(sql_state['visible'] is True)
+    require(sql_state['visible'] is True and sql_state['advisoryHeld'] == 1 and advisory.poll() is None)
     history = []
     for path in sorted(directory.glob('deployment-runtime-native.preserved-*.json')):
         old_raw = read_state(path)[1]
@@ -192,7 +226,7 @@ def reconcile_local_reboot(directory):
     spec.loader.exec_module(module)
     observed = dict(project=os.environ.get('COMPOSE_PROJECT_NAME'), nodeEnv=os.environ.get('NODE_ENV'),
                     role=os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone'),
-                    imageId=os.environ.get('LOCAL_NATIVE_REBOOT_IMAGE_ID'),
+                    imageId=proof.get('candidateImageId'),
                     bootId=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
                     systemIdentifier=sql_state['system'], databaseOid=sql_state['sourceOid'],
                     oldSessions=sql_state['oldSessions'], allTaggedSessions=sql_state['allTaggedSessions'],
@@ -200,12 +234,15 @@ def reconcile_local_reboot(directory):
                     externalCredentials=not (os.environ.get('SMS_IR_ENVIRONMENT') == 'sandbox'
                       and not any(os.environ.get(key) for key in [
                         'SMS_IR_API_KEY', 'WEB_PUSH_VAPID_PRIVATE_KEY', 'TAXPAYER_DELIVERY_BROKER_ENDPOINT', 'TAXPAYER_BROKER_URL',
-                        'TAXPAYER_BROKER_TOKEN', 'TAXPAYER_API_KEY'])), historicalActive=history,
-                    historicalIncidentEvidence=incidents)
+                        'TAXPAYER_BROKER_TOKEN', 'TAXPAYER_API_KEY', 'ACCOUNTING_RECONCILIATION_URL'])),
+                    historicalActive=history,
+                    historicalIncidentEvidence=incidents, hostProof=proof,
+                    hostProofSha256=hashlib.sha256(proof_raw).hexdigest())
     receipt = module.reconcile(active, active_sha, observed)
     # These checks tie the local-only scope to the actual runtime environment.
     require(os.environ.get('PUBLIC_APP_URL', '').startswith('http://localhost:')
             and os.environ.get('FRONTEND_URL', '').startswith('http://localhost:'))
+    require(advisory.poll() is None)
     archived_directory = directory / 'deployment-runtime-history'
     archived_directory.mkdir(mode=0o700, exist_ok=True)
     archived = archived_directory / (active_sha + '.json')
@@ -219,12 +256,17 @@ def reconcile_local_reboot(directory):
     finally:
         os.close(archive_fd)
     require(read_state(directory / 'deployment-runtime-native.json')[1] == raw)
+    require(read_state(directory / 'deployment-runtime-recovery-host-proof.json')[1] == proof_raw)
+    require(advisory.poll() is None)
     write_exclusive(directory / 'deployment-runtime-abandonment.json', encode(receipt))
     directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
+    require(advisory.poll() is None)
+    advisory.stdin.close()
+    require(advisory.wait(timeout=5) == 0)
 
 
 def assert_no_online_fleet(directory):
@@ -478,7 +520,9 @@ def run():
     previous_sha = hashlib.sha256(previous_raw).hexdigest() if previous_raw else None
     if local_abandonment is not None:
         require(read_state(directory / 'deployment-runtime-abandonment.json')[0] == local_abandonment
-                and read_state(directory / 'deployment-runtime-history' / (previous_sha + '.json'))[1] == previous_raw)
+                and read_state(directory / 'deployment-runtime-history' / (previous_sha + '.json'))[1] == previous_raw
+                and hashlib.sha256(read_state(directory / 'deployment-runtime-recovery-host-proof.json')[1]).hexdigest()
+                == local_abandonment['hostProofSha256'])
     if previous_raw:
         history = directory / 'deployment-runtime-history'
         try:

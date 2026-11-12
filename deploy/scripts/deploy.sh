@@ -63,7 +63,6 @@ fi
 DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 COMPOSE_FILE="docker-compose.prod.yml"
-COMPOSE_ONLINE_FLAGS=""
 ADVISORY_LOCK_KEY="741936425"
 LOCK_FILE="${REPO_ROOT}/.deploy-state/deployment.lock"
 ADVISORY_PID=""
@@ -82,15 +81,9 @@ ROLLBACK_ALREADY_ATTEMPTED=0
 FINANCIAL_EVIDENCE_REFERRAL_REQUIRED=0
 FINANCIAL_EVIDENCE_DRY_RUN_REPORT=""
 FINANCIAL_EVIDENCE_REFERRAL_REPORT=""
-ONLINE_BOOTSTRAP_SEQUENCE=0
 if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}${DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD:-}" ]; then
-  [ "${DEPLOYMENT_MODE}" = "release" ] && [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ] && [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD:-}" ] || {
-    echo "Initial online installation requires both original controller pipes and a protected code release." >&2; exit 1;
-  }
-  [ "${CAPTURE_ONLY}" -eq 0 ] || { echo "Capture-only cannot join a bootstrap publication." >&2; exit 1; }
-  # Fixed words only, deliberately split below; never accept caller-supplied
-  # Compose files/flags for a protected initial installation.
-  COMPOSE_ONLINE_FLAGS="-f docker-compose.online.yml"
+  echo "Online bootstrap is unavailable in this protected maintenance runner." >&2
+  exit 1
 fi
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${DEPLOYMENT_MODE}" = release ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] \
@@ -128,33 +121,12 @@ compose() {
   if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
     preserved_clamav_guard compose "$@" || return 1
   fi
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} "$@"
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
 }
 
 verify_prebuilt_release() {
   DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" node "${OPERATIONS_ROOT}/deploy/scripts/prebuilt-release-plan.mjs" \
     "${PREBUILT_RELEASE_PLAN}" "${PREBUILT_RELEASE_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
-}
-
-online_bootstrap_boundary() {
-  ONLINE_BOOTSTRAP_SEQUENCE=$((ONLINE_BOOTSTRAP_SEQUENCE + 1))
-  DEPLOYMENT_ONLINE_BOOTSTRAP_SEQUENCE="${ONLINE_BOOTSTRAP_SEQUENCE}" \
-    DEPLOYMENT_ID="${DEPLOYMENT_ID}" DEPLOYMENT_RELEASE_ID="${DEPLOYMENT_RELEASE_ID}" \
-    DEPLOYMENT_TARGET_COMMIT="${DEPLOYMENT_TARGET_COMMIT}" \
-    node "${OPERATIONS_ROOT}/deploy/scripts/online-bootstrap-boundary.mjs" "$1" &
-  online_boundary_pid=$!
-  online_boundary_heartbeat_elapsed=0
-  # The same deploy process renews its lease while the ORIGINAL controller
-  # retains unknown work. No timeout kills/adopts its native children.
-  while kill -0 "${online_boundary_pid}" 2>/dev/null; do
-    sleep 5
-    online_boundary_heartbeat_elapsed=$((online_boundary_heartbeat_elapsed + 5))
-    if [ "${online_boundary_heartbeat_elapsed}" -ge 60 ] && kill -0 "${online_boundary_pid}" 2>/dev/null; then
-      control heartbeat || { echo "Original bootstrap remains held; deployment lease renewal failed." >&2; }
-      online_boundary_heartbeat_elapsed=0
-    fi
-  done
-  wait "${online_boundary_pid}"
 }
 
 capture_remaining_seconds() {
@@ -198,7 +170,7 @@ start_release_services() {
 
 run_backend() {
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} run -T --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
@@ -242,7 +214,7 @@ run_backend_timed() {
     DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
     BACKEND_DB_CONNECTION_LIMIT=2 \
     DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} run -T --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
@@ -468,7 +440,7 @@ try_acquire_advisory() {
   lock_token="SABALAN_DEPLOYMENT_LOCK_${DEPLOYMENT_ID}"
   ADVISORY_APPLICATION_NAME="sabalan-lock-${DEPLOYMENT_ID}"
   rm -f "${REPO_ROOT}/.deploy-state/advisory-lock.log"
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} exec -T \
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T \
     -e "PGAPPNAME=${ADVISORY_APPLICATION_NAME}" postgres sh -c \
     "psql -At -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT pg_advisory_lock(741936425); SELECT '${lock_token}'; SELECT pg_sleep(21600);\"" \
     >"${REPO_ROOT}/.deploy-state/advisory-lock.log" 2>&1 &
@@ -520,9 +492,6 @@ cleanup_configuration_snapshot() {
 }
 
 switch_to_previous_images() {
-  # Initial bootstrap's predecessor is the verified ordinary release. Its
-  # rollback must retain that release's entrypoint, never the new hold script.
-  COMPOSE_ONLINE_FLAGS=""
   if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
     node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" persist "${REPO_ROOT}" previous || return 1
     configuration_exports="$(node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" exports "${REPO_ROOT}" previous)" || return 1
@@ -916,11 +885,6 @@ if ! flock -n 9; then
   echo "Another host deployment owns ${LOCK_FILE}; no state was changed." >&2
   exit 1
 fi
-if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
-  # Reuse THIS inherited deployment lock; no launcher pre-lock or key rotation.
-  node "${OPERATIONS_ROOT}/deploy/scripts/install-online-controller-trust.mjs" --install
-fi
-
 case "${DEPLOYMENT_REPORT_DIR_HOST}" in
   /*) SESSION_HOST_PATH="${DEPLOYMENT_REPORT_DIR_HOST}/active-deployment-session.json" ;;
   *) SESSION_HOST_PATH="${REPO_ROOT}/${DEPLOYMENT_REPORT_DIR_HOST#./}/active-deployment-session.json" ;;
@@ -1283,17 +1247,6 @@ if [ "${DRAINED_EARLY}" -eq 0 ]; then drain_current_services; fi
 phase SERVICES_DRAINED
 preserved_clamav_guard identity || exit 1
 capture_clamav_checkpoint
-if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
-  # The stopped legacy overlay is inspected/copied under the actual original
-  # host mutex + both coordination EX gates BEFORE any new Dispatch mount.
-  control heartbeat
-  run_original_owned_with_heartbeat python3 "${OPERATIONS_ROOT}/deploy/scripts/protected-dispatch-root-prepare.py" \
-    "${REPO_ROOT}/${COMPOSE_FILE}" "$(realpath "${ENV_FILE}")" \
-    "${old_backend_container}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}"
-  control heartbeat
-  COMPOSE_ONLINE_FLAGS="-f docker-compose.online.yml -f docker-compose.online-storage.yml"
-fi
-
 postgres_available_kb="$(compose exec -T postgres sh -c 'df -Pk "$PGDATA" | awk "NR==2 {print \$4}"')"
 postgres_database_bytes="$(compose exec -T postgres sh -c 'psql -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT pg_database_size(current_database())"')"
 postgres_required_bytes=$((postgres_database_bytes * 5 / 4 + 536870912))
@@ -1372,13 +1325,6 @@ else
   run_backend_timed "${remaining}" sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-owned-migrations.js
 fi
 phase MIGRATIONS_APPLIED
-if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
-  # No SH application context is fabricated under EX. The fixed original
-  # guardian owns FD9/10 and its one Node/SQL namespace through actual closure.
-  run_original_owned_with_heartbeat run_backend sh scripts/with-backend-control-ownership.sh \
-    python3 scripts/protected-file-adoption-owner.py
-fi
-
 # Inquiry's existing SQLite shape is adopted under the same checkpoint,
 # maintenance boundary, database lease and inherited single-control-owner lock.
 # Normal Inquiry restarts only verify; they never push schema or reset passwords.
@@ -1491,35 +1437,12 @@ run_backend_timed "${remaining}" node dist/scripts/reconcile-contract-financial-
 phase RELEASE_STARTED
 refresh_performance_database_identity
 remaining="$(remaining_mutation_seconds)" || exit 1
-if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
-  # The fixed online overlay creates the NEW immutable backend in control-only
-  # mode; the original host owns its real native HTTP actor. Never also start
-  # the ordinary standalone backend entry or adopt the old image as accepted.
-  if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
-    preserved_clamav_guard health || exit 1
-    compose up -d --no-deps --no-build --wait --wait-timeout "${remaining}" postgres
-  else
-    compose up -d --no-build --wait --wait-timeout "${remaining}" postgres clamav
-  fi
-  run_original_owned_with_heartbeat run_backend sh scripts/with-backend-control-ownership.sh \
-    python3 scripts/retire-protected-online-legacy-records.py
-  compose up -d --no-deps --no-build backend release-edge
-  online_bootstrap_boundary BOOTSTRAP_PREPARE
-  remaining="$(remaining_mutation_seconds)" || exit 1
-  compose up -d --no-deps --no-build --wait --wait-timeout "${remaining}" frontend inquiry
-  compose up -d --no-deps --force-recreate --wait --wait-timeout "${remaining}" nginx
-else
-  start_release_services "${remaining}"
-fi
+start_release_services "${remaining}"
 
 remaining="$(remaining_mutation_seconds)" || exit 1
-if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
-  online_bootstrap_boundary BOOTSTRAP_GATES
-else
-  run_backend_timed "${remaining}" node dist/scripts/deployment-gates.js
-fi
+run_backend_timed "${remaining}" node dist/scripts/deployment-gates.js
 remaining="$(remaining_mutation_seconds)" || exit 1
-timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ${COMPOSE_ONLINE_FLAGS} exec -T backend sh -c '
+timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T backend sh -c '
   set -eu
   test "${HR_HIRING_ANTIVIRUS_COMMAND:-}" = "/app/scripts/hr-clamdscan.sh"
   command -v clamdscan >/dev/null
@@ -1532,13 +1455,6 @@ remaining_mutation_seconds >/dev/null
 verify_clamav_repair_runtime
 remaining_mutation_seconds >/dev/null
 phase GATES_PASSED
-if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
-  online_bootstrap_boundary BOOTSTRAP_PUBLISH
-  online_bootstrap_boundary BOOTSTRAP_ACTIVATE
-  remaining="$(remaining_mutation_seconds)" || exit 1
-  run_backend_timed "${remaining}" node dist/scripts/deployment-online-bootstrap-gate.js
-fi
-
 if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
   node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" mark-open "${REPO_ROOT}"
 fi
@@ -1546,12 +1462,6 @@ phase TRAFFIC_OPENED
 PUBLIC_TRAFFIC_OPEN=1
 control maintenance-off
 MAINTENANCE_ACTIVE=0
-if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ]; then
-  # Jobs start only AFTER real public maintenance removal. The original host
-  # must observe genuine native jobs READY while this SAME lease is still live.
-  # A failure here follows the existing post-open no-data-rewind recovery path.
-  online_bootstrap_boundary BOOTSTRAP_OPENED
-fi
 finish_with_notification_result COMPLETED
 cleanup_configuration_snapshot
 

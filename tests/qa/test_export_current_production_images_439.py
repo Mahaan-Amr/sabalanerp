@@ -75,9 +75,11 @@ class ExportProofTests(unittest.TestCase):
             self.proof(data, image)
 
     def test_accepts_public_ca_certificate_symlink(self):
-        data, image = archive_fixture(layer_entries=[
-            ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/example.crt')])
-        self.assertEqual(self.proof(data, image)['index'], image)
+        for target in ('../../../usr/share/ca-certificates/example.crt',
+                       '/usr/share/ca-certificates/mozilla/example.crt'):
+            with self.subTest(target=target):
+                data, image = archive_fixture(layer_entries=[('etc/ssl/certs/example.pem', target)])
+                self.assertEqual(self.proof(data, image)['index'], image)
 
     def test_rejects_private_material_despite_public_ca_symlink_exception(self):
         entries = [
@@ -85,6 +87,8 @@ class ExportProofTests(unittest.TestCase):
             ('etc/ssl/certs/example.pem', '../../../app/example.crt'),
             ('etc/ssl/certs/example.pem', '../../../etc/ssl/private/example.crt'),
             ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/../../app/example.crt'),
+            ('etc/ssl/certs/example.pem', '/usr/share/ca-certificates/../../app/example.crt'),
+            ('etc/ssl/certs/example.pem', '/etc/ssl/private/example.crt'),
             ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/example.pem'),
             ('app/client.pem', '../../../usr/share/ca-certificates/example.crt'),
             ('app/.env.local', b'private'),
@@ -96,6 +100,18 @@ class ExportProofTests(unittest.TestCase):
                 data, image = archive_fixture(layer_entries=[(name, content)])
                 with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EMBEDDED_SECRET_PATH'):
                     self.proof(data, image)
+
+    def test_reports_multiple_blocked_paths_without_file_contents(self):
+        data, image = archive_fixture(layer_entries=[
+            ('app/client.pem', b'PRIVATE BYTES'),
+            ('app/.env.local', b'OTHER PRIVATE BYTES'),
+        ])
+        with self.assertRaises(EXPORT.ExportGuardError) as caught:
+            self.proof(data, image)
+        message = str(caught.exception)
+        self.assertIn('app/client.pem', message)
+        self.assertIn('app/.env.local', message)
+        self.assertNotIn('PRIVATE BYTES', message)
 
     def test_rejects_other_common_secret_paths(self):
         for name in ('app/.env.local', 'app/secrets/value', 'app/service-account.json',

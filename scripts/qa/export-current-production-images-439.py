@@ -197,8 +197,11 @@ def public_ca_certificate_symlink(entry):
         return False
     if posixpath.dirname(name) != 'etc/ssl/certs' or not name.endswith('.pem'):
         return False
-    if posixpath.isabs(entry.linkname) or '\\' in entry.linkname:
+    if '\\' in entry.linkname:
         return False
+    if posixpath.isabs(entry.linkname):
+        target = posixpath.normpath(entry.linkname)
+        return target.startswith('/usr/share/ca-certificates/') and target.endswith('.crt')
     target = posixpath.normpath(posixpath.join(posixpath.dirname(name), entry.linkname))
     return target.startswith('usr/share/ca-certificates/') and target.endswith('.crt')
 
@@ -226,6 +229,7 @@ def oci_proof(path, image):
         require(not any('-----BEGIN PRIVATE KEY-----' in row.get('created_by', '')
                         for row in config.get('history', [])), 'EMBEDDED_HISTORY_KEY')
         require(len(manifest['layers']) == len(proof['rootfsDiffIds']), 'ROOTFS_LAYER_COUNT_MISMATCH')
+        blocked_paths = []
         for layer, expected in zip(manifest['layers'], proof['rootfsDiffIds']):
             raw = blob(layer['digest'])
             if layer['mediaType'].endswith('+gzip'):
@@ -241,8 +245,11 @@ def oci_proof(path, image):
             with tarfile.open(fileobj=raw, mode=mode) as expanded:
                 for entry in expanded:
                     name = entry.name.removeprefix('./')
-                    require(not secret_path(name) or public_ca_certificate_symlink(entry),
-                            'EMBEDDED_SECRET_PATH')
+                    if secret_path(name) and not public_ca_certificate_symlink(entry):
+                        if len(blocked_paths) < 20:
+                            blocked_paths.append({'path': name, 'type': entry.type.decode('ascii', errors='replace'),
+                                                  'target': entry.linkname if entry.issym() else None})
+        require(not blocked_paths, 'EMBEDDED_SECRET_PATH:' + json.dumps(blocked_paths))
     return proof
 
 

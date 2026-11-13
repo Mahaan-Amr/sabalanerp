@@ -101,6 +101,20 @@ class FakeSSH:
 
 
 class TransferTests(unittest.TestCase):
+    def test_main_requires_encrypted_stage_before_backup_ssh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / 'complete-images'
+            with mock.patch.object(EXPORT, 'DEST', destination), \
+                 mock.patch.object(EXPORT.sys, 'argv', ['export.py', '--execute-after-review']), \
+                 mock.patch.object(EXPORT.os, 'name', 'nt'), \
+                 mock.patch.object(EXPORT.Path, 'cwd', return_value=ROOT), \
+                 mock.patch.object(EXPORT.shutil, 'disk_usage', return_value=mock.Mock(free=EXPORT.D_ENVELOPE)), \
+                 mock.patch.object(EXPORT, 'private_destination', side_effect=EXPORT.ExportGuardError('EFS_REQUIRED')), \
+                 mock.patch.object(EXPORT, 'backup_preflight') as backup:
+                with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EFS_REQUIRED'):
+                    EXPORT.main()
+                backup.assert_not_called()
+
     def test_unencrypted_stage_stops_before_contacting_production(self):
         with tempfile.TemporaryDirectory() as directory:
             with mock.patch.object(EXPORT, 'require_efs', side_effect=EXPORT.ExportGuardError('EFS_REQUIRED')):

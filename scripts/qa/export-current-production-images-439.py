@@ -316,10 +316,11 @@ def main():
     require(os.name == 'nt' and Path.cwd().samefile(Path(__file__).resolve().parents[2]), 'WRONG_HOST_OR_DIRECTORY')
     require(not DEST.exists(), 'DESTINATION_ALREADY_EXISTS')
     require(shutil.disk_usage('D:\\').free >= D_ENVELOPE, 'DESTINATION_CAPACITY_PREFLIGHT_FAILED')
-    backup = backup_preflight()
     stage = DEST.with_name(DEST.name + '.staging-' + uuid.uuid4().hex)
     try:
         private_destination(stage)
+        require_efs(stage)
+        backup = backup_preflight()
         results = []
         for service, image in IMAGES.items():
             results.append(stream_one(stage, service, image, sum(row['bytes'] for row in results)))

@@ -877,6 +877,18 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Working tree has local changes. Deployment stopped before any state change." >&2
   exit 1
 fi
+if [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ]; then
+  [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ] \
+    && [ "${PREBUILT_RELEASE}" -eq 0 ] && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] \
+    && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}" ] \
+    && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ] || {
+    echo 'QA_REHEARSAL_MODE_INVALID' >&2; exit 1;
+  }
+  COMPOSE_FILE="$(node "${OPERATIONS_ROOT}/deploy/scripts/qa-rehearsal-target.mjs" \
+    "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE}" "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256}" \
+    "${REPO_ROOT}" "${ENV_FILE}")" || exit 1
+  [ "${COMPOSE_FILE}" = docker-compose.rehearsal.yml ] || { echo 'QA_REHEARSAL_COMPOSE_INVALID' >&2; exit 1; }
+fi
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   # Select only the already-installed CONFIGs before taking the host/DB lease.
   # A plan selects content; it never grants original qualification authority.
@@ -1025,18 +1037,22 @@ fi
 node "${OPERATIONS_ROOT}/deploy/scripts/backup-retention-host.mjs" --inspect "${ENV_FILE}"
 
 if [ "${DEPLOYMENT_MODE}" = "configuration" ]; then
-  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0
+  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0 "${COMPOSE_FILE}"
 fi
 
 if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ]; then
 if [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 1 ]; then
   node "${OPERATIONS_ROOT}/scripts/clamav-release-readiness.mjs" offline-source-import "${OFFLINE_CLAMAV_MANIFEST}" "${OFFLINE_CLAMAV_MANIFEST_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
 else
-echo "Fetching ${DEPLOY_REMOTE}/${DEPLOY_BRANCH} and requiring a fast-forward update..."
-git fetch --prune "${DEPLOY_REMOTE}"
-git checkout "${DEPLOY_BRANCH}"
-git pull --ff-only "${DEPLOY_REMOTE}" "${DEPLOY_BRANCH}"
-git submodule update --init --recursive
+if [ "${COMPOSE_FILE}" = docker-compose.rehearsal.yml ]; then
+  echo 'Using the plan-pinned clean QA checkout; no remote source change.'
+else
+  echo "Fetching ${DEPLOY_REMOTE}/${DEPLOY_BRANCH} and requiring a fast-forward update..."
+  git fetch --prune "${DEPLOY_REMOTE}"
+  git checkout "${DEPLOY_BRANCH}"
+  git pull --ff-only "${DEPLOY_REMOTE}" "${DEPLOY_BRANCH}"
+  git submodule update --init --recursive
+fi
 fi
 fi
 
@@ -1103,7 +1119,7 @@ docker_required_bytes=$((backend_image_size + frontend_image_size + inquiry_imag
 
 # A failed cleanup or capacity proof leaves the current release serving users.
 # The helper rechecks recovery/image references and holds the same host lock.
-sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" "${docker_required_bytes}" 0
+sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" "${docker_required_bytes}" 0 "${COMPOSE_FILE}"
 docker_root="$(docker info --format '{{.DockerRootDir}}')"
 docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
 docker_available_bytes=$((docker_available_kb * 1024))
@@ -1159,7 +1175,7 @@ else
   # workspace in this lane. The canonical data/checkpoint/restore reserve and
   # its 1 GiB margin remain fully enforced on both hosts by storage-preflight.
   docker_required_bytes=0
-  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" "${docker_required_bytes}" 0
+  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" "${docker_required_bytes}" 0 "${COMPOSE_FILE}"
   # No fetch, tag, build or derived browser BUILD_ID can replace qualified bytes.
   prebuilt_exports="$(verify_prebuilt_release)" || exit 1
   eval "${prebuilt_exports}"

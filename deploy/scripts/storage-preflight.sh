@@ -7,6 +7,8 @@ repo_root="$2"
 operations_root="$3"
 required_local="$4"
 required_remote="$5"
+compose_file="${6:-docker-compose.prod.yml}"
+[ "$compose_file" = docker-compose.prod.yml ] || [ "$compose_file" = docker-compose.rehearsal.yml ] || { echo 'STORAGE_COMPOSE_INVALID' >&2; exit 1; }
 # Validate the actual distinct operations identity before any cleanup request.
 # Inspection only reads local prerequisites under this inherited host lock.
 node "$operations_root/deploy/scripts/backup-retention-host.mjs" --inspect "$env_file"
@@ -20,7 +22,7 @@ operations_key="$(env_value DEPLOYMENT_BACKUP_OPERATIONS_SSH_KEY_FILE)"
 backup_known_hosts="$(env_value DEPLOYMENT_BACKUP_KNOWN_HOSTS_FILE)"
 remote_root="$(env_value DEPLOYMENT_REMOTE_MOUNT_HOST)"
 report_root="$(env_value DEPLOYMENT_REPORT_DIR_HOST)"
-project="$(docker compose --env-file "$env_file" -f "$repo_root/docker-compose.prod.yml" config --format json | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>console.log(JSON.parse(s).name))')"
+project="$(docker compose --env-file "$env_file" -f "$repo_root/$compose_file" config --format json | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>console.log(JSON.parse(s).name))')"
 case "$project" in ''|*[!a-z0-9_-]*) echo 'STORAGE_PROJECT_INVALID' >&2; exit 1;; esac
 for value in "$backup_host" "$backup_user" "$operations_user"; do
   case "$value" in ''|-*|*[!a-zA-Z0-9._:-]*) echo 'STORAGE_BACKUP_HOST_INVALID' >&2; exit 1;; esac

@@ -18,7 +18,7 @@ Use the existing Docker Compose project named `sabalanerp-local` for all local r
 
 Do not create or start a second Compose project, disposable PostgreSQL container, parallel test stack, or ad-hoc replacement service when `sabalanerp-local` is available. Run migrations and tests against the existing local services with isolated test data or transactions where needed, without creating another Docker stack. Before any Docker action, verify the target with `docker compose -f docker-compose.local.yml ps` or `npm run docker:local:ps`.
 
-For issue #432 only, the owner authorized one isolated Linux rehearsal host with a private six-service `sabalanerp-qa` Compose project and PostgreSQL service. Follow `docs/operations/protected-rehearsal-linux-host.md` before provisioning or running it. Keep all six `sabalanerp-local` instances, their data, and the #436 C:/D: checkpoints intact. This exception grants no production release admission or change to the protected deployment gates.
+For issue #432 only, the owner authorized one isolated Linux rehearsal host with a private six-service Compose project and PostgreSQL service. On that distinct native Docker Engine, use the protected controller's exact `sabalanerp` project identity so its existing identity gates run unchanged; the Engine socket, data root, host checkout, volumes, and loopback-only ingress must remain isolated from production and `sabalanerp-local`. Follow `docs/operations/protected-rehearsal-linux-host.md` before provisioning or running it. Keep all six `sabalanerp-local` instances, their data, and the #436 C:/D: checkpoints intact. This exception grants no production release admission or change to the protected deployment gates.
 
 ### Database connection ownership
 

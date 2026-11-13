@@ -101,6 +101,27 @@ class FakeSSH:
 
 
 class TransferTests(unittest.TestCase):
+    def test_unencrypted_stage_stops_before_contacting_production(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(EXPORT, 'require_efs', side_effect=EXPORT.ExportGuardError('EFS_REQUIRED')):
+                with mock.patch.object(EXPORT.subprocess, 'Popen') as popen:
+                    with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EFS_REQUIRED'):
+                        EXPORT.stream_one(Path(directory), 'backend', EXPORT.IMAGES['backend'], 0)
+            popen.assert_not_called()
+
+    def test_unencrypted_archive_stops_before_contacting_production(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stage = Path(directory)
+            def verify(path):
+                if path.name.endswith('.partial'):
+                    raise EXPORT.ExportGuardError('EFS_REQUIRED')
+            with mock.patch.object(EXPORT, 'require_efs', side_effect=verify):
+                with mock.patch.object(EXPORT.subprocess, 'Popen') as popen:
+                    with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EFS_REQUIRED'):
+                        EXPORT.stream_one(stage, 'backend', EXPORT.IMAGES['backend'], 0)
+            popen.assert_not_called()
+            self.assertEqual(list(stage.iterdir()), [])
+
     def test_failed_stage_is_removed_for_clean_rerun(self):
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / 'complete-images'
@@ -116,10 +137,11 @@ class TransferTests(unittest.TestCase):
     def test_archive_size_limit_removes_partial_file(self):
         with tempfile.TemporaryDirectory() as directory:
             stage = Path(directory)
-            with mock.patch.object(EXPORT.subprocess, 'Popen', return_value=FakeSSH(b'abc')):
-                with mock.patch.object(EXPORT, 'MAX_ARCHIVE_BYTES', 2):
-                    with self.assertRaisesRegex(EXPORT.ExportGuardError, 'ARCHIVE_SIZE_LIMIT_EXCEEDED'):
-                        EXPORT.stream_one(stage, 'backend', EXPORT.IMAGES['backend'], 0)
+            with mock.patch.object(EXPORT, 'require_efs'):
+                with mock.patch.object(EXPORT.subprocess, 'Popen', return_value=FakeSSH(b'abc')):
+                    with mock.patch.object(EXPORT, 'MAX_ARCHIVE_BYTES', 2):
+                        with self.assertRaisesRegex(EXPORT.ExportGuardError, 'ARCHIVE_SIZE_LIMIT_EXCEEDED'):
+                            EXPORT.stream_one(stage, 'backend', EXPORT.IMAGES['backend'], 0)
             self.assertEqual(list(stage.iterdir()), [])
 
     def test_large_stderr_is_drained_and_bounded_while_stdout_streams(self):
@@ -132,10 +154,11 @@ class TransferTests(unittest.TestCase):
             source['after'] = source['before'].copy()
             stderr = b'x' * (1024 * 1024) + b'\nSABALAN439_PROOF=' + json.dumps(source).encode() + b'\n'
             fake = FakeSSH(b'a' * 2048, stderr)
-            with mock.patch.object(EXPORT.subprocess, 'Popen', return_value=fake):
-                with mock.patch.object(EXPORT, 'D_RESERVE', 0):
-                    with mock.patch.object(EXPORT, 'oci_proof', return_value={'rootfsDiffIds':source['rootfsDiffIds']}):
-                        row = EXPORT.stream_one(stage, 'backend', EXPORT.IMAGES['backend'], 0)
+            with mock.patch.object(EXPORT, 'require_efs'):
+                with mock.patch.object(EXPORT.subprocess, 'Popen', return_value=fake):
+                    with mock.patch.object(EXPORT, 'D_RESERVE', 0):
+                        with mock.patch.object(EXPORT, 'oci_proof', return_value={'rootfsDiffIds':source['rootfsDiffIds']}):
+                            row = EXPORT.stream_one(stage, 'backend', EXPORT.IMAGES['backend'], 0)
             self.assertEqual(row['bytes'], 2048)
             self.assertTrue((stage / 'backend.docker.tar').exists())
 

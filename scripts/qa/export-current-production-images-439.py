@@ -43,6 +43,16 @@ def require(condition, message):
         raise ExportGuardError(message)
 
 
+def require_efs(path):
+    """Prove NTFS encrypts this path before any image bytes are written."""
+    require(os.name == 'nt', 'WINDOWS_EFS_REQUIRED')
+    attributes = ctypes.windll.kernel32.GetFileAttributesW
+    attributes.argtypes = [ctypes.c_wchar_p]
+    attributes.restype = ctypes.c_uint32
+    flags = attributes(str(path))
+    require(flags != 0xffffffff and flags & 0x4000, 'EFS_REQUIRED')
+
+
 def durable_rename(source, destination):
     """Publish a flushed file/directory with Windows write-through metadata."""
     require(not destination.exists(), 'DESTINATION_ALREADY_EXISTS')
@@ -151,6 +161,8 @@ def private_destination(path):
          '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F'], timeout=30)
     acl = run(['icacls', str(path)], timeout=30).decode(errors='replace')
     require(owner.lower() in acl.lower() and '(F)' in acl and '(I)' not in acl, 'PRIVATE_ACL_NOT_VERIFIED')
+    run(['cipher', '/e', '/b', str(path)], timeout=60)
+    require_efs(path)
     return acl
 
 
@@ -216,15 +228,26 @@ def oci_proof(path, image):
 
 
 def stream_one(stage, service, image, previous_bytes):
+    require_efs(stage)
     encoded = base64.b64encode(SOURCE.encode()).decode()
     remote = "python3 -c 'import base64;exec(base64.b64decode(\"" + encoded + "\"))' '" + json.dumps(IMAGES, separators=(',', ':')) + "' '" + image + "'"
     remote = f'timeout --signal=TERM --kill-after=5s {TRANSFER_TIMEOUT_SECONDS}s ' + remote
     partial = stage / (service + '.docker.tar.partial')
     final = stage / (service + '.docker.tar')
     require(not partial.exists() and not final.exists(), 'ARCHIVE_ALREADY_EXISTS')
-    process = subprocess.Popen(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
-                                '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
-                                'sabalan-prod', remote], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        with partial.open('xb'):
+            require_efs(partial)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    try:
+        process = subprocess.Popen(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
+                                    '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
+                                    'sabalan-prod', remote], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except BaseException:
+        partial.unlink()
+        raise
     digest = hashlib.sha256()
     size = 0
     stderr_tail = bytearray()
@@ -245,7 +268,8 @@ def stream_one(stage, service, image, previous_bytes):
     timer = threading.Timer(TRANSFER_TIMEOUT_SECONDS + 30, expire)
     timer.start()
     try:
-        with partial.open('xb') as output:
+        with partial.open('ab') as output:
+            require_efs(partial)
             for chunk in iter(lambda: process.stdout.read(1024 * 1024), b''):
                 require(size + len(chunk) <= MAX_ARCHIVE_BYTES, 'ARCHIVE_SIZE_LIMIT_EXCEEDED')
                 require(previous_bytes + size + len(chunk) <= MAX_TOTAL_BYTES, 'EXPORT_TOTAL_SIZE_LIMIT_EXCEEDED')
@@ -254,6 +278,7 @@ def stream_one(stage, service, image, previous_bytes):
                 digest.update(chunk)
                 size += len(chunk)
             output.flush(); os.fsync(output.fileno())
+        require_efs(partial)
         process.wait(timeout=30)
         stderr_reader.join(timeout=10)
         timer.cancel()
@@ -270,6 +295,7 @@ def stream_one(stage, service, image, previous_bytes):
         proof = oci_proof(partial, image)
         require(proof['rootfsDiffIds'] == source['rootfsDiffIds'], 'ROOTFS_SOURCE_PROOF_MISMATCH')
         durable_rename(partial, final)
+        require_efs(final)
         return {'service':service,'image':image,'bytes':size,'sha256':digest.hexdigest(),
                 'source':source,'oci':proof,'file':str(DEST / final.name)}
     except BaseException:
@@ -301,12 +327,20 @@ def main():
         require(all(row['source']['before'] == results[0]['source']['before'] for row in results),
                 'SOURCE_CENSUS_CHANGED_BETWEEN_EXPORTS')
         with (stage / 'proof.json').open('x', encoding='utf-8') as output:
+            require_efs(stage / 'proof.json')
             json.dump({'format':'sabalan-439-image-export/v1','productionAdmission':False,
                        'backupPreflightAvailableBytes':backup,'images':results,
                        'secretScan':'Common paths and OCI config/history only; content secret absence is not established.'},
                       output, indent=2)
             output.flush(); os.fsync(output.fileno())
+        require_efs(stage / 'proof.json')
+        for service in IMAGES:
+            require_efs(stage / (service + '.docker.tar'))
         durable_rename(stage, DEST)
+        require_efs(DEST)
+        require_efs(DEST / 'proof.json')
+        for service in IMAGES:
+            require_efs(DEST / (service + '.docker.tar'))
     except BaseException:
         if stage.exists():
             try:

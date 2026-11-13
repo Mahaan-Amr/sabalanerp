@@ -95,6 +95,20 @@ class ExportProofTests(unittest.TestCase):
         with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EMBEDDED_SECRET_PATH'):
             self.proof(data, image)
 
+    def test_only_tracked_public_inquiry_env_example_is_allowed(self):
+        sample = (b'DATABASE_URL="file:./dev.db"\n'
+                  b'ADMIN_EMAIL="admin@sabalan.local"\n'
+                  b'ADMIN_PASSWORD="ChangeMe123!"\n'
+                  b'SESSION_SECRET="change-this-session-secret-to-a-long-random-value"\n')
+        data, image = archive_fixture(layer_entries=[('app/.env.example', sample)])
+        self.assertEqual(self.proof(data, image)['index'], image)
+        for name, content in (('app/.env.example', sample + b'override\n'),
+                              ('app/.env.prod', sample), ('other/.env.example', sample)):
+            with self.subTest(name=name):
+                data, image = archive_fixture(layer_entries=[(name, content)])
+                with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EMBEDDED_SECRET_PATH'):
+                    self.proof(data, image)
+
     def test_rejects_private_material_despite_public_ca_symlink_exception(self):
         entries = [
             ('etc/ssl/certs/example.pem', b'certificate bytes'),

@@ -217,6 +217,14 @@ def empty_ssh_directory_entry(entry):
     return entry.isdir() and entry.name.removeprefix('./') == 'root/.ssh'
 
 
+def public_inquiry_env_example(entry, expanded):
+    """Match only the tracked, public Inquiry sample; never accept arbitrary env files."""
+    if entry.name.removeprefix('./') != 'app/.env.example' or not entry.isfile() or entry.size != 160:
+        return False
+    return hashlib.sha256(expanded.extractfile(entry).read()).hexdigest() == \
+        '7559e1a51bd57102d70c79faddc066576518c8ef8f8db0f14a448cc1427a8bf2'
+
+
 def oci_proof(path, image):
     root = Path(__file__).resolve().parents[2]
     code = ("import {inspectPrivateDockerArchive} from './scripts/lib/private-docker-image-archive.mjs';"
@@ -256,7 +264,9 @@ def oci_proof(path, image):
             with tarfile.open(fileobj=raw, mode=mode) as expanded:
                 for entry in expanded:
                     name = entry.name.removeprefix('./')
-                    if secret_path(name) and not (public_ca_certificate_symlink(entry) or empty_ssh_directory_entry(entry)):
+                    if secret_path(name) and not (public_ca_certificate_symlink(entry) or
+                                                  empty_ssh_directory_entry(entry) or
+                                                  public_inquiry_env_example(entry, expanded)):
                         if len(blocked_paths) < 20:
                             blocked_paths.append({'path': name, 'type': entry.type.decode('ascii', errors='replace'),
                                                   'target': entry.linkname if entry.issym() else None})

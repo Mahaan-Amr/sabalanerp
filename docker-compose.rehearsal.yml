@@ -1,0 +1,57 @@
+# Opt-in #432 rehearsal graph. The six service definitions remain inherited
+# from the protected production graph; only the QA network boundary differs.
+# The protected controller must select this file from a reviewed QA-only plan.
+services:
+  postgres:
+    extends:
+      file: docker-compose.prod.yml
+      service: postgres
+  clamav:
+    extends:
+      file: docker-compose.prod.yml
+      service: clamav
+    networks:
+      - app_network
+      - clamav_egress
+  backend:
+    extends:
+      file: docker-compose.prod.yml
+      service: backend
+  deployment:
+    extends:
+      file: docker-compose.prod.yml
+      service: deployment
+  frontend:
+    extends:
+      file: docker-compose.prod.yml
+      service: frontend
+  inquiry:
+    extends:
+      file: docker-compose.prod.yml
+      service: inquiry
+  nginx:
+    extends:
+      file: docker-compose.prod.yml
+      service: nginx
+
+volumes:
+  postgres_data:
+  backend_storage_contracts:
+  backend_storage_hr_hiring:
+  backend_storage_accounting_contracts:
+  backend_storage_support_tickets:
+  backend_storage_performance_exports:
+  backend_uploads:
+  backend_recovery:
+  recovery_coordination:
+  inquiry_data:
+  certbot_www:
+  certbot_conf:
+  clamav_database:
+
+networks:
+  app_network:
+    driver: bridge
+    internal: true
+  clamav_egress:
+    driver: bridge

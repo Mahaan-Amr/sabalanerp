@@ -125,7 +125,11 @@ preflight=['node','deploy/scripts/storage-preflight.mjs','--mode','plan','--proj
 capacity=json.loads(call(preflight))
 require(capacity['ok'] and capacity['availableBytes']>=6461124544 and not capacity['plan']['images'] and not capacity['plan']['containers'], 'SOURCE_CAPACITY_PREFLIGHT_FAILED')
 p=subprocess.Popen(['docker','image','save',selected],stdout=sys.stdout.buffer,stderr=subprocess.PIPE)
-error=p.communicate()[1]
+error=bytearray()
+for chunk in iter(lambda: p.stderr.read(8192), b''):
+ error.extend(chunk)
+ if len(error)>65536: del error[:-65536]
+p.wait()
 require(p.returncode==0, 'DOCKER_SAVE_FAILED:'+error.decode(errors='replace')[-300:])
 sys.stdout.buffer.flush()
 after=census(); require(after==before, 'SOURCE_CENSUS_CHANGED')

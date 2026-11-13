@@ -24,7 +24,10 @@ def pack(entries):
     with tarfile.open(fileobj=output, mode='w') as archive:
         for name, content in entries:
             info = tarfile.TarInfo(name)
-            if isinstance(content, str):
+            if content is None:
+                info.type = tarfile.DIRTYPE
+                archive.addfile(info)
+            elif isinstance(content, str):
                 info.type = tarfile.SYMTYPE
                 info.linkname = content
                 archive.addfile(info)
@@ -75,11 +78,20 @@ class ExportProofTests(unittest.TestCase):
             self.proof(data, image)
 
     def test_accepts_public_ca_certificate_symlink(self):
-        for target in ('../../../usr/share/ca-certificates/example.crt',
-                       '/usr/share/ca-certificates/mozilla/example.crt'):
-            with self.subTest(target=target):
-                data, image = archive_fixture(layer_entries=[('etc/ssl/certs/example.pem', target)])
+        for name, target in (
+                ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/example.crt'),
+                ('etc/ssl/certs/example.pem', '/usr/share/ca-certificates/mozilla/example.crt'),
+                ('usr/lib/ssl/cert.pem', '/etc/ssl/certs/ca-certificates.crt')):
+            with self.subTest(name=name, target=target):
+                data, image = archive_fixture(layer_entries=[(name, target)])
                 self.assertEqual(self.proof(data, image)['index'], image)
+
+    def test_empty_root_ssh_directory_entry_does_not_allow_keys(self):
+        data, image = archive_fixture(layer_entries=[('root/.ssh', None)])
+        self.assertEqual(self.proof(data, image)['index'], image)
+        data, image = archive_fixture(layer_entries=[('root/.ssh', None), ('root/.ssh/id_ed25519', b'key')])
+        with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EMBEDDED_SECRET_PATH'):
+            self.proof(data, image)
 
     def test_rejects_private_material_despite_public_ca_symlink_exception(self):
         entries = [
@@ -89,6 +101,7 @@ class ExportProofTests(unittest.TestCase):
             ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/../../app/example.crt'),
             ('etc/ssl/certs/example.pem', '/usr/share/ca-certificates/../../app/example.crt'),
             ('etc/ssl/certs/example.pem', '/etc/ssl/private/example.crt'),
+            ('usr/lib/ssl/cert.pem', '/etc/ssl/private/example.crt'),
             ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/example.pem'),
             ('app/client.pem', '../../../usr/share/ca-certificates/example.crt'),
             ('app/.env.local', b'private'),

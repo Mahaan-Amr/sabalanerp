@@ -195,6 +195,8 @@ def public_ca_certificate_symlink(entry):
     name = entry.name.removeprefix('./')
     if not entry.issym() or name != posixpath.normpath(name):
         return False
+    if name == 'usr/lib/ssl/cert.pem' and entry.linkname == '/etc/ssl/certs/ca-certificates.crt':
+        return True
     if posixpath.dirname(name) != 'etc/ssl/certs' or not name.endswith('.pem'):
         return False
     if '\\' in entry.linkname:
@@ -204,6 +206,11 @@ def public_ca_certificate_symlink(entry):
         return target.startswith('/usr/share/ca-certificates/') and target.endswith('.crt')
     target = posixpath.normpath(posixpath.join(posixpath.dirname(name), entry.linkname))
     return target.startswith('usr/share/ca-certificates/') and target.endswith('.crt')
+
+
+def empty_ssh_directory_entry(entry):
+    """The directory entry carries no key material; descendants remain blocked."""
+    return entry.isdir() and entry.name.removeprefix('./') == 'root/.ssh'
 
 
 def oci_proof(path, image):
@@ -245,7 +252,7 @@ def oci_proof(path, image):
             with tarfile.open(fileobj=raw, mode=mode) as expanded:
                 for entry in expanded:
                     name = entry.name.removeprefix('./')
-                    if secret_path(name) and not public_ca_certificate_symlink(entry):
+                    if secret_path(name) and not (public_ca_certificate_symlink(entry) or empty_ssh_directory_entry(entry)):
                         if len(blocked_paths) < 20:
                             blocked_paths.append({'path': name, 'type': entry.type.decode('ascii', errors='replace'),
                                                   'target': entry.linkname if entry.issym() else None})

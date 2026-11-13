@@ -29,6 +29,83 @@ export function validateQaRenderedConfig(config) {
   ]);
 }
 
+const QA_MOUNTS = {
+  postgres: { '/var/lib/postgresql/data': 'postgres_data' },
+  clamav: { '/var/lib/clamav': 'clamav_database' },
+  backend: {
+    '/app/storage/contracts': 'backend_storage_contracts',
+    '/app/storage/hr-hiring': 'backend_storage_hr_hiring',
+    '/app/storage/accounting-contracts': 'backend_storage_accounting_contracts',
+    '/app/storage/support-tickets': 'backend_storage_support_tickets',
+    '/app/storage/performance-exports': 'backend_storage_performance_exports',
+    '/app/uploads': 'backend_uploads',
+    '/app/storage/recovery': 'backend_recovery',
+    '/app/recovery-coordination': 'recovery_coordination',
+    '/app/recovery-sources/inquiry': 'inquiry_data',
+    '/run/deployment-secrets/partner-release-trust-public.der': 'secret-trust',
+  },
+  deployment: {
+    '/app/recovery-sources/clamav': 'clamav_database',
+    '/run/deployment-secrets': 'secret-dir',
+    '/app/deployment-remote': 'remote-dir',
+    '/app/deployment-reports': 'report-dir',
+  },
+  frontend: {},
+  inquiry: { '/data': 'inquiry_data', '/app/recovery-coordination': 'recovery_coordination' },
+  nginx: {
+    '/etc/nginx/nginx.conf': 'nginx-conf',
+    '/etc/nginx/conf.d/app.conf.template': 'nginx-app',
+    '/etc/nginx/maintenance-check.conf': 'nginx-check',
+    '/usr/share/nginx/html/maintenance.html': 'nginx-maintenance',
+    '/app/recovery-coordination': 'recovery_coordination',
+    '/var/www/certbot': 'certbot_www',
+    '/etc/letsencrypt': 'certbot_conf',
+  },
+};
+
+export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment }) {
+  assert.equal(fs.realpathSync(qaRoot), qaRoot);
+  const binds = {
+    'secret-trust': path.join(environment.DEPLOYMENT_SECRET_DIR, 'partner-release-trust-public.der'),
+    'secret-dir': environment.DEPLOYMENT_SECRET_DIR,
+    'remote-dir': environment.DEPLOYMENT_REMOTE_MOUNT_HOST,
+    'report-dir': environment.DEPLOYMENT_REPORT_DIR_HOST,
+    'nginx-conf': path.join(repositoryRoot, 'deploy/nginx/nginx.conf'),
+    'nginx-app': path.join(repositoryRoot, 'deploy/nginx/conf.d/app.conf.template'),
+    'nginx-check': path.join(repositoryRoot, 'deploy/nginx/maintenance-check.conf'),
+    'nginx-maintenance': path.join(repositoryRoot, 'deploy/nginx/maintenance.html'),
+  };
+  for (const [service, targets] of Object.entries(QA_MOUNTS)) {
+    if (!config.services[service]) continue;
+    const volumes = config.services[service].volumes ?? [];
+    assert.deepEqual(volumes.map(volume => volume.target).sort(), keys(targets));
+    for (const volume of volumes) {
+      const expected = targets[volume.target];
+      if (Object.hasOwn(binds, expected)) {
+        assert.equal(volume.type, 'bind');
+        assert.equal(volume.source, binds[expected]);
+        assert.ok(path.isAbsolute(volume.source));
+        assert.equal(fs.realpathSync(volume.source), volume.source);
+        const boundary = expected.startsWith('nginx-') ? repositoryRoot : qaRoot;
+        assert.ok(volume.source.startsWith(`${boundary}${path.sep}`));
+        if (!['remote-dir', 'report-dir'].includes(expected)) assert.equal(volume.read_only, true);
+      } else {
+        assert.equal(volume.type, 'volume');
+        assert.equal(volume.source, expected);
+      }
+    }
+  }
+  if (config.volumes) {
+    assert.deepEqual(keys(config.volumes), [...new Set(Object.values(QA_MOUNTS).flatMap(Object.values)
+      .filter(name => !Object.hasOwn(binds, name)))].sort());
+    for (const [name, definition] of Object.entries(config.volumes)) {
+      assert.notEqual(definition.external, true);
+      assert.ok(definition.name === undefined || definition.name === `sabalanerp_${name}`);
+      assert.equal(definition.driver_opts, undefined);
+    }
+  }
+}
+
 export function validateQaRuntimeEnvironment(environment, inherited) {
   for (const name of keys(inherited)) {
     assert.ok(!name.startsWith('COMPOSE_') && name !== 'DOCKER_HOST' && name !== 'DOCKER_CONTEXT');
@@ -86,6 +163,7 @@ export function validateQaTargetBinding(plan, observed) {
   for (const privatePath of privatePaths) {
     assert.ok(typeof privatePath === 'string' && privatePath.startsWith(`${plan.qaRoot}/`));
     assert.equal(path.posix.normalize(privatePath), privatePath);
+    assert.ok(!privatePath.includes('$'));
   }
   assert.equal(new Set(privatePaths).size, privatePaths.length);
   assert.equal(env.DOCKER_HOST, undefined);
@@ -145,6 +223,14 @@ function main() {
     environmentSha256: sha256(envRaw), environment,
   };
   validateQaTargetBinding(plan, observed);
+  assert.equal(fs.realpathSync(plan.qaRoot), plan.qaRoot);
+  for (const name of [
+    'DEPLOYMENT_SECRET_DIR', 'DEPLOYMENT_REMOTE_MOUNT_HOST', 'DEPLOYMENT_REPORT_DIR_HOST',
+    'DEPLOYMENT_BACKUP_SSH_KEY_FILE', 'DEPLOYMENT_BACKUP_OPERATIONS_SSH_KEY_FILE',
+    'DEPLOYMENT_BACKUP_KNOWN_HOSTS_FILE',
+  ]) {
+    assert.equal(fs.realpathSync(environment[name]), environment[name]);
+  }
   const rendered = JSON.parse(execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp',
     '--env-file', environmentFile, '-f', composePath, 'config', '--format', 'json'], {
     cwd: repositoryRoot,
@@ -153,6 +239,7 @@ function main() {
     stdio: ['ignore', 'pipe', 'ignore'],
   }));
   validateQaRenderedConfig(rendered);
+  validateQaRenderedMounts(rendered, { qaRoot: plan.qaRoot, repositoryRoot, environment });
   process.stdout.write(`${COMPOSE_FILE}\n`);
 }
 

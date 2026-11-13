@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
-import { validateQaRenderedConfig, validateQaRuntimeEnvironment, validateQaTargetBinding } from '../../deploy/scripts/qa-rehearsal-target.mjs';
+import { validateQaRenderedConfig, validateQaRenderedMounts, validateQaRuntimeEnvironment, validateQaTargetBinding } from '../../deploy/scripts/qa-rehearsal-target.mjs';
 
 const qaEnvironment = {
   DOMAIN: 'erp.qa.test',
@@ -40,6 +43,65 @@ test('QA target refuses shell variables that would override private Compose valu
   assert.throws(() => validateQaRuntimeEnvironment(qaEnvironment, { DOMAIN: 'production.example' }));
   assert.throws(() => validateQaRuntimeEnvironment(qaEnvironment, { COMPOSE_PROJECT_NAME: 'sabalanerp-local' }));
   assert.throws(() => validateQaRuntimeEnvironment(qaEnvironment, { DOCKER_HOST: 'tcp://production.example:2375' }));
+});
+
+test('QA target refuses interpolation in a protected path even when the inherited variable is otherwise allowed', () => {
+  const environment = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: '/srv/sabalanerp-qa/${QA_ESCAPE}' };
+  assert.throws(() => validateQaTargetBinding({
+    format: 'sabalan-qa-rehearsal-target/v1', repositoryRoot: '/opt/sabalanerp', qaRoot: '/srv/sabalanerp-qa',
+    machineId: 'qa-machine-id', hostname: 'qa-host', engineId: 'qa-engine-id',
+    applicationCommit: 'c'.repeat(40), applicationTree: 'd'.repeat(40),
+    composeSha256: 'a'.repeat(64), environmentSha256: 'b'.repeat(64),
+    domain: 'erp.qa.test', inquiryDomain: 'inquiry.qa.test', backupHost: 'qa-backup.test',
+    productionBackupHost: 'production-backup.example',
+  }, {
+    platform: 'linux', uid: 0, repositoryRoot: '/opt/sabalanerp', machineId: 'qa-machine-id',
+    hostname: 'qa-host', engineId: 'qa-engine-id', applicationCommit: 'c'.repeat(40),
+    applicationTree: 'd'.repeat(40), cleanCheckout: true, dockerRoot: '/var/lib/docker',
+    composeSha256: 'a'.repeat(64), environmentSha256: 'b'.repeat(64), environment,
+  }));
+});
+
+test('QA target refuses an escaped rendered secret bind and symlinked custody source', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-mount-test-'));
+  try {
+    const qaRoot = path.join(root, 'qa');
+    const repositoryRoot = path.join(root, 'repository');
+    fs.mkdirSync(qaRoot);
+    fs.mkdirSync(repositoryRoot);
+    const secretDir = path.join(qaRoot, 'secrets');
+    const remoteDir = path.join(qaRoot, 'remote');
+    const reportDir = path.join(qaRoot, 'reports');
+    const outside = path.join(root, 'production-secrets');
+    fs.mkdirSync(secretDir);
+    fs.mkdirSync(remoteDir);
+    fs.mkdirSync(reportDir);
+    fs.mkdirSync(outside);
+    const config = { services: { deployment: { volumes: [
+      { type: 'volume', source: 'clamav_database', target: '/app/recovery-sources/clamav' },
+      { type: 'bind', source: secretDir, target: '/run/deployment-secrets', read_only: true },
+      { type: 'bind', source: remoteDir, target: '/app/deployment-remote' },
+      { type: 'bind', source: reportDir, target: '/app/deployment-reports' },
+    ] } } };
+    const env = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir,
+      DEPLOYMENT_REMOTE_MOUNT_HOST: remoteDir, DEPLOYMENT_REPORT_DIR_HOST: reportDir };
+    assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    config.services.deployment.volumes[0] = {
+      type: 'bind', source: outside, target: '/app/recovery-sources/clamav',
+    };
+    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    config.services.deployment.volumes[0] = {
+      type: 'volume', source: 'clamav_database', target: '/app/recovery-sources/clamav',
+    };
+    config.services.deployment.volumes[1].source = outside;
+    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    fs.symlinkSync(outside, path.join(qaRoot, 'linked-secrets'), process.platform === 'win32' ? 'junction' : 'dir');
+    env.DEPLOYMENT_SECRET_DIR = path.join(qaRoot, 'linked-secrets');
+    config.services.deployment.volumes[1].source = env.DEPLOYMENT_SECRET_DIR;
+    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('QA target rejects another Engine and a live SMS endpoint before controller selection', () => {

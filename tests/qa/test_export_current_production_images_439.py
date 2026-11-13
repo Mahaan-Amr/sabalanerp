@@ -81,7 +81,9 @@ class ExportProofTests(unittest.TestCase):
         for name, target in (
                 ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/example.crt'),
                 ('etc/ssl/certs/example.pem', '/usr/share/ca-certificates/mozilla/example.crt'),
-                ('usr/lib/ssl/cert.pem', '/etc/ssl/certs/ca-certificates.crt')):
+                ('usr/lib/ssl/cert.pem', '/etc/ssl/certs/ca-certificates.crt'),
+                ('etc/ssl/cert.pem', 'certs/ca-certificates.crt'),
+                ('etc/ssl1.1/cert.pem', '/etc/ssl/cert.pem')):
             with self.subTest(name=name, target=target):
                 data, image = archive_fixture(layer_entries=[(name, target)])
                 self.assertEqual(self.proof(data, image)['index'], image)
@@ -102,6 +104,8 @@ class ExportProofTests(unittest.TestCase):
             ('etc/ssl/certs/example.pem', '/usr/share/ca-certificates/../../app/example.crt'),
             ('etc/ssl/certs/example.pem', '/etc/ssl/private/example.crt'),
             ('usr/lib/ssl/cert.pem', '/etc/ssl/private/example.crt'),
+            ('etc/ssl/cert.pem', '../private/example.crt'),
+            ('etc/ssl1.1/cert.pem', '/etc/ssl/private/example.crt'),
             ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/example.pem'),
             ('app/client.pem', '../../../usr/share/ca-certificates/example.crt'),
             ('app/.env.local', b'private'),

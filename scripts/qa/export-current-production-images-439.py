@@ -195,6 +195,10 @@ def public_ca_certificate_symlink(entry):
     name = entry.name.removeprefix('./')
     if not entry.issym() or name != posixpath.normpath(name):
         return False
+    if (name, entry.linkname) in {
+            ('etc/ssl/cert.pem', 'certs/ca-certificates.crt'),
+            ('etc/ssl1.1/cert.pem', '/etc/ssl/cert.pem')}:
+        return True
     if name == 'usr/lib/ssl/cert.pem' and entry.linkname == '/etc/ssl/certs/ca-certificates.crt':
         return True
     if posixpath.dirname(name) != 'etc/ssl/certs' or not name.endswith('.pem'):

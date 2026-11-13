@@ -24,13 +24,18 @@ def pack(entries):
     with tarfile.open(fileobj=output, mode='w') as archive:
         for name, content in entries:
             info = tarfile.TarInfo(name)
-            info.size = len(content)
-            archive.addfile(info, io.BytesIO(content))
+            if isinstance(content, str):
+                info.type = tarfile.SYMTYPE
+                info.linkname = content
+                archive.addfile(info)
+            else:
+                info.size = len(content)
+                archive.addfile(info, io.BytesIO(content))
     return output.getvalue()
 
 
-def archive_fixture(diff_override=None, secret_path=False):
-    layer = pack([('.env.prod' if secret_path else 'app/ready.txt', b'ready')])
+def archive_fixture(diff_override=None, secret_path=False, layer_entries=None):
+    layer = pack(layer_entries or [('.env.prod' if secret_path else 'app/ready.txt', b'ready')])
     compressed = gzip.compress(layer, mtime=0)
     digest = lambda content: 'sha256:' + hashlib.sha256(content).hexdigest()
     diff = diff_override or digest(layer)
@@ -68,6 +73,29 @@ class ExportProofTests(unittest.TestCase):
         data, image = archive_fixture(secret_path=True)
         with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EMBEDDED_SECRET_PATH'):
             self.proof(data, image)
+
+    def test_accepts_public_ca_certificate_symlink(self):
+        data, image = archive_fixture(layer_entries=[
+            ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/example.crt')])
+        self.assertEqual(self.proof(data, image)['index'], image)
+
+    def test_rejects_private_material_despite_public_ca_symlink_exception(self):
+        entries = [
+            ('etc/ssl/certs/example.pem', b'certificate bytes'),
+            ('etc/ssl/certs/example.pem', '../../../app/example.crt'),
+            ('etc/ssl/certs/example.pem', '../../../etc/ssl/private/example.crt'),
+            ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/../../app/example.crt'),
+            ('etc/ssl/certs/example.pem', '../../../usr/share/ca-certificates/example.pem'),
+            ('app/client.pem', '../../../usr/share/ca-certificates/example.crt'),
+            ('app/.env.local', b'private'),
+            ('app/secrets/value', b'private'),
+            ('app/service-account.json', b'private'),
+        ]
+        for name, content in entries:
+            with self.subTest(name=name, content_type=type(content).__name__):
+                data, image = archive_fixture(layer_entries=[(name, content)])
+                with self.assertRaisesRegex(EXPORT.ExportGuardError, 'EMBEDDED_SECRET_PATH'):
+                    self.proof(data, image)
 
     def test_rejects_other_common_secret_paths(self):
         for name in ('app/.env.local', 'app/secrets/value', 'app/service-account.json',

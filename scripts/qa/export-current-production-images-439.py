@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import posixpath
 import re
 import shutil
 import subprocess
@@ -189,6 +190,19 @@ def secret_path(name):
             or base.endswith(('.pem', '.p12', '.pfx', '.key')))
 
 
+def public_ca_certificate_symlink(entry):
+    """Allow only a public OS CA link whose target stays in the CA store."""
+    name = entry.name.removeprefix('./')
+    if not entry.issym() or name != posixpath.normpath(name):
+        return False
+    if posixpath.dirname(name) != 'etc/ssl/certs' or not name.endswith('.pem'):
+        return False
+    if posixpath.isabs(entry.linkname) or '\\' in entry.linkname:
+        return False
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(name), entry.linkname))
+    return target.startswith('usr/share/ca-certificates/') and target.endswith('.crt')
+
+
 def oci_proof(path, image):
     root = Path(__file__).resolve().parents[2]
     code = ("import {inspectPrivateDockerArchive} from './scripts/lib/private-docker-image-archive.mjs';"
@@ -227,7 +241,8 @@ def oci_proof(path, image):
             with tarfile.open(fileobj=raw, mode=mode) as expanded:
                 for entry in expanded:
                     name = entry.name.removeprefix('./')
-                    require(not secret_path(name), 'EMBEDDED_SECRET_PATH')
+                    require(not secret_path(name) or public_ca_certificate_symlink(entry),
+                            'EMBEDDED_SECRET_PATH')
     return proof
 
 

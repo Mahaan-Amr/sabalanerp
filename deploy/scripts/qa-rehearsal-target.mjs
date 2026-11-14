@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertQaRemoteMountAtRuntime } from './qa-remote-mount-guard.mjs';
 
 const COMPOSE_FILE = 'docker-compose.rehearsal.yml';
 const SERVICE_NAMES = ['backend', 'clamav', 'deployment', 'frontend', 'inquiry', 'nginx', 'postgres'];
@@ -295,6 +296,9 @@ function main() {
     environmentSha256: sha256(envRaw), environment,
   };
   validateQaTargetBinding(plan, observed);
+  // Docker resolves bind sources in the daemon's mount namespace. A mounted
+  // SSHFS path in this controller alone does not prove remote checkpointing.
+  assertQaRemoteMountAtRuntime(environment.DEPLOYMENT_REMOTE_MOUNT_HOST, plan.backupHost);
   assert.equal(fs.realpathSync(plan.qaRoot), plan.qaRoot);
   for (const name of [
     'DEPLOYMENT_SECRET_DIR', 'DEPLOYMENT_REMOTE_MOUNT_HOST', 'DEPLOYMENT_REPORT_DIR_HOST',

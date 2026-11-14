@@ -208,6 +208,16 @@ run_backend() {
       deployment "$@"
 }
 
+# QA only: prove the remote bind in the controller, Docker daemon and the
+# actual one-off deployment container. A local directory under an SSHFS mount
+# in another mount namespace must never satisfy remote checkpoint admission.
+assert_qa_remote_checkpoint_mount() {
+  [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}" ] || return 0
+  qa_mountinfo="$(run_backend node -e 'process.stdout.write(require("node:fs").readFileSync("/proc/self/mountinfo", "utf8"))')" || return 1
+  printf '%s\n' "${qa_mountinfo}" | node "${OPERATIONS_ROOT}/deploy/scripts/qa-remote-mount-guard.mjs" \
+    --container "${DEPLOYMENT_REMOTE_MOUNT_HOST}" "$(env_value DEPLOYMENT_BACKUP_HOST)"
+}
+
 run_backend_timed() {
   duration="$1"
   shift
@@ -1311,6 +1321,7 @@ postgres_available_bytes=$((postgres_available_kb * 1024))
   exit 1
 }
 
+assert_qa_remote_checkpoint_mount
 run_original_owned_with_heartbeat host_backup_retention BEFORE_CHECKPOINT
 bind_host_backup_retention_receipt BEFORE_CHECKPOINT
 echo "Creating, decrypt-validating, uploading, and reading back the coordinated checkpoint..."
@@ -1338,6 +1349,7 @@ else
 fi
 assert_original_legacy_still_stopped
 LEGACY_BACKEND_SIGNAL_PENDING=0
+assert_qa_remote_checkpoint_mount
 phase LOCAL_CHECKPOINT_VERIFIED
 phase REMOTE_CHECKPOINT_VERIFIED
 run_original_owned_with_heartbeat host_backup_retention AFTER_CHECKPOINT
@@ -1359,6 +1371,7 @@ preserved_clamav_guard identity || exit 1
 LEGACY_BACKEND_SIGNAL_PENDING=1
 assert_original_legacy_still_stopped
 LEGACY_BACKEND_SIGNAL_PENDING=0
+assert_qa_remote_checkpoint_mount
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"

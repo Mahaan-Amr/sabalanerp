@@ -45,7 +45,7 @@ docker_root="$(docker info --format '{{.DockerRootDir}}')"
 mount_source="$(findmnt --noheadings --output SOURCE --target "$remote_root")"
 [ "$mount_source" = "$backup_user@$backup_host:/checkpoints" ] || { echo 'STORAGE_BACKUP_MOUNT_IDENTITY_MISMATCH' >&2; exit 1; }
 set --
-for volume in postgres_data backend_storage_contracts backend_storage_hr_hiring backend_storage_accounting_contracts backend_storage_support_tickets backend_storage_performance_exports backend_uploads inquiry_data recovery_coordination; do
+for volume in postgres_data backend_storage_contracts backend_storage_hr_hiring backend_storage_accounting_contracts backend_storage_dispatch_documents backend_storage_support_tickets backend_storage_performance_exports backend_uploads inquiry_data recovery_coordination; do
   source_root="$(docker volume inspect "${project}_$volume" --format '{{.Mountpoint}}')"
   set -- "$@" "$source_root"
 done

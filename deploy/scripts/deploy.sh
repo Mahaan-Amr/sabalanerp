@@ -1225,6 +1225,7 @@ fi
 node "${OPERATIONS_ROOT}/deploy/scripts/backup-retention-host.mjs" --inspect "${ENV_FILE}"
 refresh_performance_database_identity
 
+node "${OPERATIONS_ROOT}/deploy/scripts/dispatch-volume-preflight.mjs" "${ENV_FILE}" "${COMPOSE_FILE}"
 run_backend node dist/scripts/validate-production-environment.js
 run_backend node dist/scripts/deployment-drill-preflight.js
 python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --preflight \

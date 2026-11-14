@@ -119,6 +119,7 @@ const main = async () => {
     { name: 'contracts-storage', run: writableDirectoryGate('/app/storage/contracts') },
     { name: 'hr-storage', run: writableDirectoryGate('/app/storage/hr-hiring') },
     { name: 'accounting-storage', run: writableDirectoryGate('/app/storage/accounting-contracts') },
+    { name: 'dispatch-storage', run: writableDirectoryGate('/app/storage/dispatch-documents') },
     { name: 'support-storage', run: writableDirectoryGate('/app/storage/support-tickets') },
     { name: 'performance-export-storage', run: performanceExportStorageGate },
     { name: 'uploads-storage', run: writableDirectoryGate('/app/uploads') },

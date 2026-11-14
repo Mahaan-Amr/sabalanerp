@@ -8,7 +8,7 @@ import {validatePrebuiltReleasePlan,prebuiltReleaseExports,requirePrebuiltScanne
 
 const hash=character=>character.repeat(64),image=character=>'sha256:'+hash(character);
 function fixture(){
- const operations={receiptSha256:hash('a'),files:Object.fromEntries(['deploy/scripts/deploy.sh','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'].map(name=>[name,hash('b')]))};
+ const operations={receiptSha256:hash('a'),files:Object.fromEntries(['deploy/scripts/deploy.sh','deploy/scripts/dispatch-volume-preflight.mjs','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'].map(name=>[name,hash('b')]))};
  const plan={format:'sabalan-prebuilt-protected-release-plan/v1',applicationCommit:'a'.repeat(40),applicationTree:'b'.repeat(40),applicationSourceHash:hash('c'),inquirySourceCommit:'d'.repeat(40),images:{},operations};
  const actual={head:plan.applicationCommit,tree:plan.applicationTree,status:'',inquiryGitlink:plan.inquirySourceCommit,inquiryHead:plan.inquirySourceCommit,inquiryStatus:'',operations:structuredClone(operations),images:{},buildReceipts:{},archiveReceipts:{},linuxCheckoutByteHash:hash('f')};
  for(const [index,role]of ['backend','frontend','inquiry'].entries()){

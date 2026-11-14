@@ -91,6 +91,27 @@ def assert_closed(directory, filename='deployment-runtime-native.json'):
     return previous, raw
 
 
+SECOND_REBOOT_ACTIVE_SHA = 'b820bfa60ec642b87c17a34fcbc527021164708a33df1227d7e19c39c4f8be8a'
+
+
+def local_reboot_policy(active_sha):
+    # Each incident has its own reviewed policy and append-only proof/receipt.
+    if active_sha == SECOND_REBOOT_ACTIVE_SHA:
+        helper_name = 'local-native-reboot-440.py'
+        proof_name = 'deployment-runtime-recovery-host-proof-440.json'
+        receipt_name = 'deployment-runtime-abandonment-440.json'
+    else:
+        helper_name = 'local-native-reboot.py'
+        proof_name = 'deployment-runtime-recovery-host-proof.json'
+        receipt_name = 'deployment-runtime-abandonment.json'
+    helper = Path(__file__).resolve(strict=True).parent / helper_name
+    spec = importlib.util.spec_from_file_location('sabalan_local_reboot', helper)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    require(active_sha == module.INCIDENT['activeSha256'])
+    return module, proof_name, receipt_name
+
+
 def assert_local_reboot_abandonment(directory, previous, previous_raw):
     """Permit only a host-attested local reboot incident before a new owner.
 
@@ -109,7 +130,9 @@ def assert_local_reboot_abandonment(directory, previous, previous_raw):
             and os.environ.get('FRONTEND_URL', '').startswith('http://localhost:'))
     source = urlsplit(os.environ.get('DATABASE_URL', ''))
     require(source.hostname == 'postgres' and unquote(source.path[1:]) == 'sabalanerp')
-    proof, proof_raw = read_state(directory / 'deployment-runtime-recovery-host-proof.json')
+    active_sha = hashlib.sha256(previous_raw).hexdigest()
+    module, proof_name, receipt_name = local_reboot_policy(active_sha)
+    proof, proof_raw = read_state(directory / proof_name)
     require(proof_raw is not None and hashlib.sha256(proof_raw).hexdigest() ==
             os.environ.get('LOCAL_NATIVE_REBOOT_HOST_PROOF_SHA256'))
     image_id = proof.get('candidateImageId')
@@ -117,7 +140,7 @@ def assert_local_reboot_abandonment(directory, previous, previous_raw):
             and image_id == os.environ.get('LOCAL_NATIVE_REBOOT_IMAGE_ID'))
     archived = directory / 'deployment-runtime-history' / (hashlib.sha256(previous_raw).hexdigest() + '.json')
     require(read_state(archived)[1] == previous_raw)
-    receipt, receipt_raw = read_state(directory / 'deployment-runtime-abandonment.json')
+    receipt, receipt_raw = read_state(directory / receipt_name)
     require(receipt_raw is not None)
     boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     history = []
@@ -132,17 +155,17 @@ def assert_local_reboot_abandonment(directory, previous, previous_raw):
             require(raw is not None)
             incidents.append(dict(name=path.name, sha256=hashlib.sha256(raw).hexdigest()))
     incidents.sort(key=lambda item: item['name'])
-    helper = Path(__file__).resolve(strict=True).parent / 'local-native-reboot.py'
-    spec = importlib.util.spec_from_file_location('sabalan_local_reboot', helper)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    prior_receipt = read_state(directory / 'deployment-runtime-abandonment.json')[1]
+    prior_proof = read_state(directory / 'deployment-runtime-recovery-host-proof.json')[1]
     observed = dict(project='sabalanerp-local', nodeEnv='development', role='standalone',
                     imageId=image_id, bootId=boot, systemIdentifier=receipt.get('clusterIdentifier'),
                     databaseOid=receipt.get('databaseOid'), oldSessions=0, allTaggedSessions=0,
                     prepared=0, publicIngress=False, externalCredentials=False,
                     historicalActive=history, historicalIncidentEvidence=incidents,
-                    hostProof=proof, hostProofSha256=hashlib.sha256(proof_raw).hexdigest())
-    require(module.valid_receipt(previous, hashlib.sha256(previous_raw).hexdigest(), receipt, observed))
+                    hostProof=proof, hostProofSha256=hashlib.sha256(proof_raw).hexdigest(),
+                    priorReceiptSha256=hashlib.sha256(prior_receipt).hexdigest() if prior_receipt else None,
+                    priorHostProofSha256=hashlib.sha256(prior_proof).hexdigest() if prior_proof else None)
+    require(module.valid_receipt(previous, active_sha, receipt, observed))
     return receipt
 
 
@@ -178,10 +201,11 @@ def reconcile_local_reboot(directory):
     active, raw = read_state(directory / 'deployment-runtime-native.json')
     require(raw is not None and isinstance(active, dict) and active.get('phase') == 'ACTIVE')
     active_sha = hashlib.sha256(raw).hexdigest()
+    module, proof_name, receipt_name = local_reboot_policy(active_sha)
     require(os.environ.get('LOCAL_NATIVE_REBOOT_EXPECTED_ACTIVE_SHA256') == active_sha
             and os.environ.get('LOCAL_NATIVE_REBOOT_EXPECTED_OLD_BOOT_ID') == active['guardian']['bootId']
-            and read_state(directory / 'deployment-runtime-abandonment.json')[1] is None)
-    proof, proof_raw = read_state(directory / 'deployment-runtime-recovery-host-proof.json')
+            and read_state(directory / receipt_name)[1] is None)
+    proof, proof_raw = read_state(directory / proof_name)
     require(proof_raw is not None and hashlib.sha256(proof_raw).hexdigest() ==
             os.environ.get('LOCAL_NATIVE_REBOOT_HOST_PROOF_SHA256'))
     require(proof.get('candidateImageId') == os.environ.get('LOCAL_NATIVE_REBOOT_IMAGE_ID'))
@@ -220,10 +244,8 @@ def reconcile_local_reboot(directory):
             require(old_raw is not None)
             incidents.append(dict(name=path.name, sha256=hashlib.sha256(old_raw).hexdigest()))
     incidents.sort(key=lambda item: item['name'])
-    helper = Path(__file__).resolve(strict=True).parent / 'local-native-reboot.py'
-    spec = importlib.util.spec_from_file_location('sabalan_local_reboot', helper)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    prior_receipt = read_state(directory / 'deployment-runtime-abandonment.json')[1]
+    prior_proof = read_state(directory / 'deployment-runtime-recovery-host-proof.json')[1]
     observed = dict(project=os.environ.get('COMPOSE_PROJECT_NAME'), nodeEnv=os.environ.get('NODE_ENV'),
                     role=os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone'),
                     imageId=proof.get('candidateImageId'),
@@ -237,7 +259,9 @@ def reconcile_local_reboot(directory):
                         'TAXPAYER_BROKER_TOKEN', 'TAXPAYER_API_KEY', 'ACCOUNTING_RECONCILIATION_URL'])),
                     historicalActive=history,
                     historicalIncidentEvidence=incidents, hostProof=proof,
-                    hostProofSha256=hashlib.sha256(proof_raw).hexdigest())
+                    hostProofSha256=hashlib.sha256(proof_raw).hexdigest(),
+                    priorReceiptSha256=hashlib.sha256(prior_receipt).hexdigest() if prior_receipt else None,
+                    priorHostProofSha256=hashlib.sha256(prior_proof).hexdigest() if prior_proof else None)
     receipt = module.reconcile(active, active_sha, observed)
     # These checks tie the local-only scope to the actual runtime environment.
     require(os.environ.get('PUBLIC_APP_URL', '').startswith('http://localhost:')
@@ -256,9 +280,14 @@ def reconcile_local_reboot(directory):
     finally:
         os.close(archive_fd)
     require(read_state(directory / 'deployment-runtime-native.json')[1] == raw)
-    require(read_state(directory / 'deployment-runtime-recovery-host-proof.json')[1] == proof_raw)
+    require(read_state(directory / proof_name)[1] == proof_raw)
+    if active_sha == SECOND_REBOOT_ACTIVE_SHA:
+        require(hashlib.sha256(read_state(directory / 'deployment-runtime-abandonment.json')[1]).hexdigest()
+                == module.PRIOR_RECEIPT_SHA)
+        require(hashlib.sha256(read_state(directory / 'deployment-runtime-recovery-host-proof.json')[1]).hexdigest()
+                == module.PRIOR_PROOF_SHA)
     require(advisory.poll() is None)
-    write_exclusive(directory / 'deployment-runtime-abandonment.json', encode(receipt))
+    write_exclusive(directory / receipt_name, encode(receipt))
     directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         os.fsync(directory_fd)
@@ -519,9 +548,10 @@ def run():
     directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     previous_sha = hashlib.sha256(previous_raw).hexdigest() if previous_raw else None
     if local_abandonment is not None:
-        require(read_state(directory / 'deployment-runtime-abandonment.json')[0] == local_abandonment
+        _policy, proof_name, receipt_name = local_reboot_policy(previous_sha)
+        require(read_state(directory / receipt_name)[0] == local_abandonment
                 and read_state(directory / 'deployment-runtime-history' / (previous_sha + '.json'))[1] == previous_raw
-                and hashlib.sha256(read_state(directory / 'deployment-runtime-recovery-host-proof.json')[1]).hexdigest()
+                and hashlib.sha256(read_state(directory / proof_name)[1]).hexdigest()
                 == local_abandonment['hostProofSha256'])
     if previous_raw:
         history = directory / 'deployment-runtime-history'
@@ -553,7 +583,7 @@ def run():
                   commandSha256=hashlib.sha256(encode(sys.argv[1:])).hexdigest())
     if local_abandonment is not None:
         record['localAbandonmentSha256'] = hashlib.sha256(
-            read_state(directory / 'deployment-runtime-abandonment.json')[1]).hexdigest()
+            read_state(directory / receipt_name)[1]).hexdigest()
     if loaded:
         record['onlineScope'] = loaded
         record['onlineLocks'] = online_locks

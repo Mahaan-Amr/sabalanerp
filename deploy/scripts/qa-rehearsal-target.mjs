@@ -62,10 +62,7 @@ export function validateQaRenderedConfig(config, planSha256) {
   ]);
 }
 
-const QA_MOUNTS = {
-  postgres: { '/var/lib/postgresql/data': 'postgres_data' },
-  clamav: { '/var/lib/clamav': 'clamav_database' },
-  backend: {
+const BACKEND_MOUNTS = {
     '/app/storage/contracts': 'backend_storage_contracts',
     '/app/storage/hr-hiring': 'backend_storage_hr_hiring',
     '/app/storage/accounting-contracts': 'backend_storage_accounting_contracts',
@@ -77,8 +74,14 @@ const QA_MOUNTS = {
     '/app/recovery-coordination': 'recovery_coordination',
     '/app/recovery-sources/inquiry': 'inquiry_data',
     '/run/deployment-secrets/partner-release-trust-public.der': 'secret-trust',
-  },
+};
+
+const QA_MOUNTS = {
+  postgres: { '/var/lib/postgresql/data': 'postgres_data' },
+  clamav: { '/var/lib/clamav': 'clamav_database' },
+  backend: BACKEND_MOUNTS,
   deployment: {
+    ...BACKEND_MOUNTS,
     '/app/recovery-sources/clamav': 'clamav_database',
     '/run/deployment-secrets': 'secret-dir',
     '/app/deployment-remote': 'remote-dir',

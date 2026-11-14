@@ -48,6 +48,38 @@ test('real rehearsal Compose graph isolates business services and allows only Cl
   assert.doesNotThrow(() => validateQaRenderedConfig(renderedConfig()));
 });
 
+test('real rehearsal graph binds every deployment recovery volume to the QA project', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-real-mount-test-'));
+  try {
+    const qaRoot = path.join(root, 'qa');
+    const secretDir = path.join(qaRoot, 'secrets');
+    const remoteDir = path.join(qaRoot, 'remote');
+    const reportDir = path.join(qaRoot, 'reports');
+    for (const dir of [qaRoot, secretDir, remoteDir, reportDir]) fs.mkdirSync(dir);
+    const trust = path.join(secretDir, 'partner-release-trust-public.der');
+    fs.writeFileSync(trust, 'QA-only public trust fixture');
+    const config = renderedConfig();
+    const sources = {
+      '/run/deployment-secrets/partner-release-trust-public.der': trust,
+      '/run/deployment-secrets': secretDir,
+      '/app/deployment-remote': remoteDir,
+      '/app/deployment-reports': reportDir,
+    };
+    for (const service of Object.values(config.services)) {
+      for (const volume of service.volumes ?? []) {
+        if (Object.hasOwn(sources, volume.target)) volume.source = sources[volume.target];
+      }
+    }
+    const environment = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir,
+      DEPLOYMENT_REMOTE_MOUNT_HOST: remoteDir, DEPLOYMENT_REPORT_DIR_HOST: reportDir };
+    assert.doesNotThrow(() => validateQaRenderedMounts(config, {
+      qaRoot, repositoryRoot: process.cwd(), environment,
+    }));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('QA target refuses shell variables that would override private Compose values', () => {
   assert.doesNotThrow(() => validateQaRuntimeEnvironment(qaEnvironment, { PATH: '/usr/bin' }));
   assert.throws(() => validateQaRuntimeEnvironment(qaEnvironment, { DOMAIN: 'production.example' }));
@@ -88,27 +120,30 @@ test('QA target refuses an escaped rendered secret bind and symlinked custody so
     fs.mkdirSync(remoteDir);
     fs.mkdirSync(reportDir);
     fs.mkdirSync(outside);
-    const config = { services: { deployment: { volumes: [
-      { type: 'volume', source: 'clamav_database', target: '/app/recovery-sources/clamav' },
-      { type: 'bind', source: secretDir, target: '/run/deployment-secrets', read_only: true },
-      { type: 'bind', source: remoteDir, target: '/app/deployment-remote' },
-      { type: 'bind', source: reportDir, target: '/app/deployment-reports' },
-    ] } } };
+    const trust = path.join(secretDir, 'partner-release-trust-public.der');
+    fs.writeFileSync(trust, 'QA-only public trust fixture');
+    const sources = {
+      '/run/deployment-secrets/partner-release-trust-public.der': trust,
+      '/run/deployment-secrets': secretDir,
+      '/app/deployment-remote': remoteDir,
+      '/app/deployment-reports': reportDir,
+    };
+    const volumes = renderedConfig().services.deployment.volumes.map(volume =>
+      Object.hasOwn(sources, volume.target) ? { ...volume, source: sources[volume.target] } : { ...volume });
+    const config = { services: { deployment: { volumes } } };
+    const clamav = volumes.find(volume => volume.target === '/app/recovery-sources/clamav');
+    const secret = volumes.find(volume => volume.target === '/run/deployment-secrets');
     const env = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir,
       DEPLOYMENT_REMOTE_MOUNT_HOST: remoteDir, DEPLOYMENT_REPORT_DIR_HOST: reportDir };
     assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
-    config.services.deployment.volumes[0] = {
-      type: 'bind', source: outside, target: '/app/recovery-sources/clamav',
-    };
+    clamav.type = 'bind'; clamav.source = outside;
     assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
-    config.services.deployment.volumes[0] = {
-      type: 'volume', source: 'clamav_database', target: '/app/recovery-sources/clamav',
-    };
-    config.services.deployment.volumes[1].source = outside;
+    clamav.type = 'volume'; clamav.source = 'clamav_database';
+    secret.source = outside;
     assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
     fs.symlinkSync(outside, path.join(qaRoot, 'linked-secrets'), process.platform === 'win32' ? 'junction' : 'dir');
     env.DEPLOYMENT_SECRET_DIR = path.join(qaRoot, 'linked-secrets');
-    config.services.deployment.volumes[1].source = env.DEPLOYMENT_SECRET_DIR;
+    secret.source = env.DEPLOYMENT_SECRET_DIR;
     assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

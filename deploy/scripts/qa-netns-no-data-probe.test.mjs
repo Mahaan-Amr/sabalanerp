@@ -13,15 +13,34 @@ const stopper = path.join(here, 'qa-netns-stop.sh');
 const signal = path.join(here, 'qa-owned-pid-signal.pl');
 const resolverParent = path.join(here, 'qa-netns-resolver-parent.sh');
 const ownedSocket = path.join(here, 'qa-netns-owned-socket.sh');
+const cgroupChild = path.join(here, 'qa-netns-cgroup-child.sh');
 const bash = spawnSync('bash', ['--version'], { encoding: 'utf8' });
 const unavailable = bash.error || bash.status !== 0 ? 'bash unavailable' : false;
 
 test('the network owner scripts have valid Bash syntax', { skip: unavailable }, () => {
-  for (const script of [launcher, stopper, resolverParent, ownedSocket]) {
+  for (const script of [launcher, stopper, resolverParent, ownedSocket, cgroupChild]) {
     const result = spawnSync('bash', ['-n', script], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
   }
 });
+
+test('cgroup wrapper refuses the initial mount namespace before any mount',
+  { skip: process.platform !== 'linux' || process.getuid?.() !== 0 || process.env.WSL_DISTRO_NAME !== 'sabalanerp-qa-debian' }, () => {
+    const evidence = fs.mkdtempSync('/srv/sabalanerp-qa/qa-cgroup-guard-test-');
+    try {
+      const netns = fs.readlinkSync('/proc/self/ns/net');
+      const mntns = fs.readlinkSync('/proc/self/ns/mnt');
+      const cgroupns = fs.readlinkSync('/proc/self/ns/cgroup');
+      const statfs = spawnSync('stat', ['-fc', '%T:%t', '/sys/fs/cgroup'], { encoding: 'utf8' }).stdout;
+      fs.writeFileSync(path.join(evidence, 'initial-cgroup-membership.before'), fs.readFileSync('/proc/self/cgroup'));
+      const result = spawnSync('bash', [cgroupChild, evidence, netns, mntns, cgroupns], { encoding: 'utf8' });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /mount namespace is not private/);
+      assert.equal(spawnSync('stat', ['-fc', '%T:%t', '/sys/fs/cgroup'], { encoding: 'utf8' }).stdout, statfs);
+    } finally {
+      fs.rmSync(evidence, { recursive: true, force: true });
+    }
+  });
 
 test('a live or changed Unix socket is preserved; only the owned stale inode is removed',
   { skip: process.platform !== 'linux' || process.getuid?.() !== 0 }, async () => {

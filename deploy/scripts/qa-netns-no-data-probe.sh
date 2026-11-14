@@ -21,7 +21,7 @@ source "$script_dir/qa-netns-owned-socket.sh"
 # This is the last read-only gate before any namespace or Docker operation. It
 # refuses a pre-existing daemon, socket, PID file, container record or namespace.
 node "$script_dir/qa-zero-state-preflight.mjs" "$manifest" || die 'zero-state preflight failed'
-for command in ip slirp4netns dockerd docker curl node perl ss getent cut timeout iptables-save ip6tables-save; do
+for command in ip slirp4netns dockerd docker curl node perl ss getent cut timeout findmnt mount iptables-save ip6tables-save; do
   command -v "$command" >/dev/null || die "missing $command"
 done
 [[ ! -e /run/netns/sabalanerp-qa-probe && ! -e /etc/netns/sabalanerp-qa-probe ]] || die 'probe namespace pre-exists'
@@ -46,13 +46,13 @@ cleanup() {
     timeout 10 ip netns exec sabalanerp-qa docker --host unix:///run/docker.sock network rm qa439-probe >/dev/null 2>&1 || result=1
   fi
   if [[ -n $dockerd_birth ]]; then
-    owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 15 2>/dev/null || result=1
+    owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/bash,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 15 2>/dev/null || result=1
     for ((i=0; i<30; i++)); do
-      owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 0 2>/dev/null || break
+      owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/bash,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 0 2>/dev/null || break
       sleep 0.2
     done
-    if owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 0 2>/dev/null; then
-      owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 9 2>/dev/null || :
+    if owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/bash,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 0 2>/dev/null; then
+      owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/bash,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 9 2>/dev/null || :
       result=1
     fi
     wait "$dockerd_pid" 2>/dev/null || :
@@ -69,7 +69,7 @@ cleanup() {
   qa_resolver_parent_cleanup /etc/netns || result=1
   if [[ -e $evidence/initial-netns.before ]]; then
     snapshot after || result=1
-    for item in initial-netns initial-iptables-v4 initial-iptables-v6 initial-routes-v4 initial-routes-v6 initial-links host-pid1 host-pid1-exe host-wsl-config; do
+    for item in initial-netns initial-iptables-v4 initial-iptables-v6 initial-routes-v4 initial-routes-v6 initial-links initial-cgroup-statfs initial-cgroup-mount initial-cgroup-ns initial-mount-ns initial-cgroup-membership host-pid1 host-pid1-exe host-wsl-config; do
       cmp -s "$evidence/$item.before" "$evidence/$item.after" || result=1
     done
   fi
@@ -92,11 +92,17 @@ snapshot() {
   ip -4 route show table all > "$evidence/initial-routes-v4.$phase"
   ip -6 route show table all > "$evidence/initial-routes-v6.$phase"
   ip -details link show > "$evidence/initial-links.$phase"
+  stat -fc '%T:%t' /sys/fs/cgroup > "$evidence/initial-cgroup-statfs.$phase"
+  findmnt -n -T /sys/fs/cgroup -o TARGET,SOURCE,FSTYPE,OPTIONS,PROPAGATION > "$evidence/initial-cgroup-mount.$phase"
+  readlink /proc/self/ns/cgroup > "$evidence/initial-cgroup-ns.$phase"
+  readlink /proc/self/ns/mnt > "$evidence/initial-mount-ns.$phase"
+  cat /proc/self/cgroup > "$evidence/initial-cgroup-membership.$phase"
   cat /proc/1/comm > "$evidence/host-pid1.$phase"
   readlink /proc/1/exe > "$evidence/host-pid1-exe.$phase"
   cat /etc/wsl.conf > "$evidence/host-wsl-config.$phase"
 }
 snapshot before
+[[ $(cat "$evidence/initial-cgroup-statfs.before") == cgroup2fs:63677270 ]] || die 'initial cgroup2 mount unavailable'
 umask 077
 qa_resolver_parent_prepare /etc/netns || die 'unsafe /etc/netns resolver parent'
 
@@ -117,7 +123,7 @@ ip -n sabalanerp-qa link show tap0 >/dev/null || die 'slirp TAP absent'
 qa_ns=$(stat -c 'net:[%i]' /run/netns/sabalanerp-qa)
 [[ $qa_ns != "$initial_ns" && $qa_ns == "$(ip netns exec sabalanerp-qa readlink /proc/self/ns/net)" ]] || die 'QA namespace identity mismatch'
 
-ip netns exec sabalanerp-qa dockerd --host=unix:///run/docker.sock --data-root=/var/lib/docker --pidfile=/run/docker.pid --bridge=none --iptables=true > "$evidence/dockerd.log" 2>&1 & dockerd_pid=$!
+ip netns exec sabalanerp-qa bash "$script_dir/qa-netns-cgroup-child.sh" "$evidence" "$qa_ns" "$(cat "$evidence/initial-mount-ns.before")" "$(cat "$evidence/initial-cgroup-ns.before")" > "$evidence/dockerd.log" 2>&1 & dockerd_pid=$!
 dockerd_birth=$(birth_of "$dockerd_pid") || die 'dockerd birth unavailable'
 docker_gid=$(getent group docker | cut -d: -f3)
 [[ $docker_gid =~ ^[1-9][0-9]*$ ]] || die 'docker group absent'

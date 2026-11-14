@@ -34,8 +34,9 @@ function main() {
   assert.equal(sha(qaPlanFile), qaPlanSha256);
   assert.equal(sha(restorePlanFile), restorePlanSha256);
   const restorePlan = JSON.parse(fs.readFileSync(restorePlanFile, 'utf8'));
-  assert.equal(restorePlan.format, 'sabalan-qa-production-state-restore/v1');
+  assert.equal(restorePlan.format, 'sabalan-qa-production-state-restore/v2');
   assert.equal(restorePlan.qaOnly, true);
+  assert.equal(restorePlan.retainedOldState, true);
   assert.equal(restorePlan.qaTargetPlanSha256, qaPlanSha256);
   const runRoot = path.dirname(restorePlanFile);
   assert.match(runRoot, /^\/srv\/sabalanerp-qa\/restore-runs\/[a-zA-Z0-9_-]+$/);
@@ -57,6 +58,17 @@ function main() {
     '-f', path.join(repository, selected), '--profile', 'deployment', 'config', '--format', 'json'], {
     cwd: repository, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
   }));
+  const previousRoles = ['backend', 'frontend', 'inquiry', 'nginx', 'postgres', 'clamav'];
+  assert.deepEqual(Object.keys(restorePlan.previousImages || {}).sort(), previousRoles.sort());
+  for (const role of previousRoles) {
+    const previous = restorePlan.previousImages[role];
+    assert.match(previous, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(base.services[role]?.image, previous);
+    const [observed] = JSON.parse(execFileSync('docker', ['image', 'inspect', previous], {
+      cwd: repository, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }));
+    assert.equal(observed.Id, previous);
+  }
   const rendered = JSON.parse(execFileSync('docker', [...compose, '--profile', 'deployment', 'config', '--format', 'json'], {
     cwd: repository, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
   }));

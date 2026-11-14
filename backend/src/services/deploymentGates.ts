@@ -10,7 +10,7 @@ export const mandatoryReleaseDeploymentGateNames = [
   'postgres-query-and-isolated-write', 'migration-history', 'shipment-statement-runtime-state',
   'contract-financial-evidence', 'inquiry-sqlite-integrity', 'backend-readiness', 'frontend-health',
   'inquiry-health', 'nginx-health', 'contracts-storage', 'hr-storage', 'accounting-storage',
-  'support-storage', 'performance-export-storage', 'uploads-storage', 'database-file-references',
+  'dispatch-storage', 'support-storage', 'performance-export-storage', 'uploads-storage', 'database-file-references',
   'checkpoint-manifest', 'database-connection-capacity',
 ] as const;
 

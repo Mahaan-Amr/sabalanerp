@@ -42,6 +42,7 @@ volumes:
   backend_storage_contracts:
   backend_storage_hr_hiring:
   backend_storage_accounting_contracts:
+  backend_storage_dispatch_documents:
   backend_storage_support_tickets:
   backend_storage_performance_exports:
   backend_uploads:

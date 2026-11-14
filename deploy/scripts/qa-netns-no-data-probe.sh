@@ -10,6 +10,7 @@ manifest=$1 evidence=$2 hold=${3:-}
 owner_file=/srv/sabalanerp-qa/qa-netns-owner.pid
 script_dir=$(dirname "$0")
 signal_helper=$script_dir/qa-owned-pid-signal.pl
+source "$script_dir/qa-netns-resolver-parent.sh"
 [[ $EUID == 0 && ${WSL_DISTRO_NAME:-} == sabalanerp-qa-debian ]] || die 'pinned root WSL host required'
 [[ $(dirname -- "$evidence") == /srv/sabalanerp-qa && -d $evidence && ! -L $evidence ]] || die 'private existing evidence directory required'
 [[ $(stat -c '%u:%a' -- "$evidence") == 0:700 ]] || die 'unsafe evidence directory'
@@ -61,6 +62,7 @@ cleanup() {
   if [[ $owned_qa == 1 ]]; then ip netns del sabalanerp-qa 2>/dev/null || result=1; fi
   if [[ $owned_peer_dir == 1 ]]; then rm -f /etc/netns/sabalanerp-qa-probe/resolv.conf; rmdir /etc/netns/sabalanerp-qa-probe 2>/dev/null || result=1; fi
   if [[ $owned_qa_dir == 1 ]]; then rm -f /etc/netns/sabalanerp-qa/resolv.conf; rmdir /etc/netns/sabalanerp-qa 2>/dev/null || result=1; fi
+  qa_resolver_parent_cleanup /etc/netns || result=1
   if [[ -e $evidence/initial-netns.before ]]; then
     snapshot after || result=1
     for item in initial-netns initial-iptables-v4 initial-iptables-v6 initial-routes-v4 initial-routes-v6 initial-links host-pid1 host-pid1-exe host-wsl-config; do
@@ -91,6 +93,7 @@ snapshot() {
   cat /etc/wsl.conf > "$evidence/host-wsl-config.$phase"
 }
 snapshot before
+qa_resolver_parent_prepare /etc/netns || die 'unsafe /etc/netns resolver parent'
 
 # ip netns add runs in the persistent initial mount namespace. Never create a
 # named namespace from ip netns exec, whose mount namespace is temporary.

@@ -5,20 +5,44 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import os from 'node:os';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const launcher = path.join(here, 'qa-netns-no-data-probe.sh');
 const stopper = path.join(here, 'qa-netns-stop.sh');
 const signal = path.join(here, 'qa-owned-pid-signal.pl');
+const resolverParent = path.join(here, 'qa-netns-resolver-parent.sh');
 const bash = spawnSync('bash', ['--version'], { encoding: 'utf8' });
 const unavailable = bash.error || bash.status !== 0 ? 'bash unavailable' : false;
 
 test('the network owner scripts have valid Bash syntax', { skip: unavailable }, () => {
-  for (const script of [launcher, stopper]) {
+  for (const script of [launcher, stopper, resolverParent]) {
     const result = spawnSync('bash', ['-n', script], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
   }
 });
+
+test('resolver parent is removed only when this run created it and it is empty',
+  { skip: process.platform !== 'linux' || process.getuid?.() !== 0 }, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-resolver-parent-'));
+    const absent = path.join(root, 'absent');
+    const existing = path.join(root, 'existing');
+    try {
+      const run = (body, dir) => spawnSync('bash', ['-c', `set -euo pipefail; source "$1"; ${body}`, '--', resolverParent, dir], { encoding: 'utf8' });
+      const created = run('qa_resolver_parent_prepare "$2"; test -d "$2"; qa_resolver_parent_cleanup "$2"; test ! -e "$2"', absent);
+      assert.equal(created.status, 0, created.stderr);
+      const occupied = run('qa_resolver_parent_prepare "$2"; touch "$2/foreign"; if qa_resolver_parent_cleanup "$2"; then exit 1; fi; test -e "$2/foreign"; rm "$2/foreign"; qa_resolver_parent_cleanup "$2"; test ! -e "$2"', absent);
+      assert.equal(occupied.status, 0, occupied.stderr);
+      fs.mkdirSync(existing, { mode: 0o700 });
+      const preserved = run('qa_resolver_parent_prepare "$2"; qa_resolver_parent_cleanup "$2"; test -d "$2"', existing);
+      assert.equal(preserved.status, 0, preserved.stderr);
+      fs.writeFileSync(path.join(existing, 'foreign'), 'x');
+      const nonEmpty = run('qa_resolver_parent_prepare "$2"; test "$QA_RESOLVER_PARENT_OWNED" = 0', existing);
+      assert.equal(nonEmpty.status, 0, nonEmpty.stderr);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 
 test('the launcher refuses an unreviewed invocation before any network action', { skip: unavailable }, () => {
   const result = spawnSync('bash', [launcher], { encoding: 'utf8' });

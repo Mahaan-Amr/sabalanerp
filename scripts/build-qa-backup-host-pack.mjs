@@ -28,7 +28,7 @@ if(args.length===1&&args[0]==='--inspect'){
   assert.deepEqual(args.slice(0,2),['--build','--output']);assert.equal(args.length,3);
   assert.ok(path.isAbsolute(args[2]));const output=path.resolve(args[2]);
   const relative=path.relative(root,output);
-  assert.ok(relative==='..'||relative.startsWith('..'+path.sep),'QA pack must be outside checkout');
+  assert.ok(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative),'QA pack must be outside checkout');
   assert.ok(!fs.existsSync(output),'Fresh output directory required');
   const sources={};
   function read(relative){

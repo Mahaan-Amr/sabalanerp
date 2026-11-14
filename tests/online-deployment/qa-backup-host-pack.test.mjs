@@ -43,3 +43,23 @@ test('QA backup host pack builds a pinned isolated bundle', () => {
     fs.rmSync(base,{recursive:true,force:true});
   }
 });
+
+test('QA backup host pack accepts a fresh output on another Windows volume', {skip:process.platform!=='win32'||!fs.existsSync('D:\\')}, () => {
+  const base=fs.mkdtempSync('D:\\sabalan-qa-pack-cross-volume-test-');
+  try{
+    const output=path.join(base,'pack');
+    const result=JSON.parse(execFileSync(process.execPath,['scripts/build-qa-backup-host-pack.mjs','--build','--output',output],{encoding:'utf8'}));
+    assert.equal(path.resolve(result.output),path.resolve(output));
+    assert.ok(fs.existsSync(path.join(output,'qa-backup-host-pack-receipt.json')));
+  }finally{
+    assert.ok(base.startsWith('D:\\sabalan-qa-pack-cross-volume-test-'));
+    fs.rmSync(base,{recursive:true,force:true});
+  }
+});
+
+test('QA backup host pack still refuses output inside the checkout', () => {
+  const output=path.join(process.cwd(),'.qa-pack-refusal-test');
+  assert.equal(fs.existsSync(output),false);
+  assert.throws(()=>execFileSync(process.execPath,['scripts/build-qa-backup-host-pack.mjs','--build','--output',output],{encoding:'utf8',stdio:['ignore','pipe','pipe']}),/QA pack must be outside checkout/);
+  assert.equal(fs.existsSync(output),false);
+});

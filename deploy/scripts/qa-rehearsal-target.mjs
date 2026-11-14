@@ -45,16 +45,21 @@ function observeQaNetworkNamespace() {
 export function validateQaRenderedConfig(config, planSha256) {
   assert.equal(config.name, 'sabalanerp');
   assert.deepEqual(keys(config.services), SERVICE_NAMES);
-  assert.deepEqual(keys(config.networks), ['app_network', 'clamav_egress']);
+  assert.deepEqual(keys(config.networks), ['app_network', 'clamav_egress', 'qa_ingress']);
   assert.equal(config.networks.app_network.internal, true);
   assert.notEqual(config.networks.clamav_egress.internal, true);
+  assert.equal(config.networks.qa_ingress.driver, 'bridge');
+  assert.notEqual(config.networks.qa_ingress.internal, true);
+  assert.deepEqual(config.networks.qa_ingress.driver_opts,
+    { 'com.docker.network.bridge.enable_ip_masquerade': 'false' });
   assert.equal(config.services.clamav.extra_hosts, undefined);
   assert.equal(config.services.deployment.environment.SABALAN_BACKUP_TARGET, 'qa');
   assert.match(config.services.deployment.environment.SABALAN_QA_PLAN_SHA256,/^[a-f0-9]{64}$/);
   if(planSha256)assert.equal(config.services.deployment.environment.SABALAN_QA_PLAN_SHA256,planSha256);
   for (const service of SERVICE_NAMES) {
     assert.deepEqual(keys(config.services[service].networks), service === 'clamav'
-      ? ['app_network', 'clamav_egress'] : ['app_network']);
+      ? ['app_network', 'clamav_egress'] : service === 'nginx'
+        ? ['app_network', 'qa_ingress'] : ['app_network']);
     if (service !== 'nginx') assert.equal(config.services[service].ports, undefined);
   }
   assert.deepEqual(config.services.nginx.ports.map(({ target, published, host_ip }) => ({ target, published, host_ip })), [

@@ -34,6 +34,7 @@ class LocalNativeRebootPolicy(unittest.TestCase):
                              publicIngress=False, externalCredentials=False,
                              priorReceiptSha256=module.PRIOR_RECEIPT_SHA,
                              priorHostProofSha256=module.PRIOR_PROOF_SHA,
+                             failedHostProofSha256=module.FAILED_PROOF_SHA,
                              historicalActive=[dict(name='deployment-runtime-native.preserved-' + sha + '.json',
                                                     sha256=sha) for sha in module.PRESERVED],
                              historicalIncidentEvidence=[dict(name=name, sha256=sha)
@@ -47,6 +48,7 @@ class LocalNativeRebootPolicy(unittest.TestCase):
                                          priorReceiptSha256=module.PRIOR_RECEIPT_SHA,
                                          priorHostProofSha256=module.PRIOR_PROOF_SHA,
                                          priorCheckpointManifestSha256=module.PRIOR_MANIFEST_SHA,
+                                         supersedesHostProofSha256=module.FAILED_PROOF_SHA,
                                          activeSha256=module.INCIDENT['activeSha256'],
                                          candidateImageId=self.observed['imageId'],
                                          bootId=self.observed['bootId'], publicIngress=False,
@@ -82,6 +84,24 @@ class LocalNativeRebootPolicy(unittest.TestCase):
         sha = hashlib.sha256((json.dumps(manifest, separators=(',', ':')) + '\n').encode()).hexdigest()
         self.observed['hostProof']['checkpoint']['manifestSha256'] = sha
         self.observed['hostProof']['checkpoint']['independentManifestSha256'] = sha
+        failed_manifest = dict(format='sabalan-local-native-reboot-failed-one-shot/v1',
+                               containerId=module.FAILED_CONTAINER_ID, imageId=module.FAILED_IMAGE_ID,
+                               activeSha256=module.INCIDENT['activeSha256'],
+                               hostProofSha256=module.FAILED_PROOF_SHA,
+                               checkpointManifestSha256=module.FAILED_MANIFEST_SHA,
+                               entries=[dict(name=name, bytes=1024, sha256='a' * 64) for name in
+                                        ['failed-container-inspect.json', 'failed-container-rootfs.tar',
+                                         'failed-image-inspect.json']])
+        failed_sha = hashlib.sha256((json.dumps(failed_manifest, separators=(',', ':')) + '\n').encode()).hexdigest()
+        self.observed['hostProof']['failedOneShotEvidence'] = dict(
+            format=failed_manifest['format'], containerId=module.FAILED_CONTAINER_ID,
+            imageId=module.FAILED_IMAGE_ID,
+            retainedImageTag='sabalanerp-local-backend:failed-reboot-20261114',
+            activeSha256=module.INCIDENT['activeSha256'], hostProofSha256=module.FAILED_PROOF_SHA,
+            checkpointManifestSha256=module.FAILED_MANIFEST_SHA,
+            primaryPath='C:/failed-evidence', independentPath='D:/failed-evidence',
+            primaryReadbackVerified=True, independentReadbackVerified=True,
+            manifestSha256=failed_sha, independentManifestSha256=failed_sha, manifest=failed_manifest)
 
     def test_exact_local_reboot_produces_truthful_exception(self):
         receipt = module.reconcile(self.active, module.INCIDENT['activeSha256'], self.observed)
@@ -95,7 +115,7 @@ class LocalNativeRebootPolicy(unittest.TestCase):
     def test_owner_routes_only_second_sha_to_new_append_only_files(self):
         selected, proof, receipt = owner.local_reboot_policy(module.INCIDENT['activeSha256'])
         self.assertEqual(selected.INCIDENT['activeSha256'], module.INCIDENT['activeSha256'])
-        self.assertEqual(proof, 'deployment-runtime-recovery-host-proof-440.json')
+        self.assertEqual(proof, 'deployment-runtime-recovery-host-proof-440-retry.json')
         self.assertEqual(receipt, 'deployment-runtime-abandonment-440.json')
         with self.assertRaises(RuntimeError):
             owner.local_reboot_policy('0' * 64)
@@ -108,6 +128,7 @@ class LocalNativeRebootPolicy(unittest.TestCase):
                            ('externalCredentials', True), ('historicalActive', []),
                            ('priorReceiptSha256', '0' * 64),
                            ('priorHostProofSha256', '0' * 64),
+                           ('failedHostProofSha256', '0' * 64),
                            ('historicalIncidentEvidence', []), ('hostProofSha256', '')]:
             with self.subTest(key=key):
                 changed = dict(self.observed, **{key: value})
@@ -133,6 +154,9 @@ class LocalNativeRebootPolicy(unittest.TestCase):
             lambda value: value['hostProof'].update(oldImageId='sha256:' + '0' * 64),
             lambda value: value['hostProof'].update(priorReceiptSha256='0' * 64),
             lambda value: value['hostProof'].update(priorCheckpointManifestSha256='0' * 64),
+            lambda value: value['hostProof'].update(supersedesHostProofSha256='0' * 64),
+            lambda value: value['hostProof']['failedOneShotEvidence'].update(containerId='0' * 64),
+            lambda value: value['hostProof']['failedOneShotEvidence'].update(independentReadbackVerified=False),
             lambda value: value['hostProof']['database'].update(prepared=1),
             lambda value: value['hostProof']['checkpoint'].update(independentReadbackVerified=False),
             lambda value: value['hostProof']['checkpoint']['manifest']['entries'].pop(),

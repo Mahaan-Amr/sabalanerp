@@ -98,7 +98,7 @@ def local_reboot_policy(active_sha):
     # Each incident has its own reviewed policy and append-only proof/receipt.
     if active_sha == SECOND_REBOOT_ACTIVE_SHA:
         helper_name = 'local-native-reboot-440.py'
-        proof_name = 'deployment-runtime-recovery-host-proof-440.json'
+        proof_name = 'deployment-runtime-recovery-host-proof-440-retry.json'
         receipt_name = 'deployment-runtime-abandonment-440.json'
     else:
         helper_name = 'local-native-reboot.py'
@@ -157,6 +157,7 @@ def assert_local_reboot_abandonment(directory, previous, previous_raw):
     incidents.sort(key=lambda item: item['name'])
     prior_receipt = read_state(directory / 'deployment-runtime-abandonment.json')[1]
     prior_proof = read_state(directory / 'deployment-runtime-recovery-host-proof.json')[1]
+    failed_proof = read_state(directory / 'deployment-runtime-recovery-host-proof-440.json')[1]
     observed = dict(project='sabalanerp-local', nodeEnv='development', role='standalone',
                     imageId=image_id, bootId=boot, systemIdentifier=receipt.get('clusterIdentifier'),
                     databaseOid=receipt.get('databaseOid'), oldSessions=0, allTaggedSessions=0,
@@ -164,7 +165,8 @@ def assert_local_reboot_abandonment(directory, previous, previous_raw):
                     historicalActive=history, historicalIncidentEvidence=incidents,
                     hostProof=proof, hostProofSha256=hashlib.sha256(proof_raw).hexdigest(),
                     priorReceiptSha256=hashlib.sha256(prior_receipt).hexdigest() if prior_receipt else None,
-                    priorHostProofSha256=hashlib.sha256(prior_proof).hexdigest() if prior_proof else None)
+                    priorHostProofSha256=hashlib.sha256(prior_proof).hexdigest() if prior_proof else None,
+                    failedHostProofSha256=hashlib.sha256(failed_proof).hexdigest() if failed_proof else None)
     require(module.valid_receipt(previous, active_sha, receipt, observed))
     return receipt
 
@@ -246,6 +248,7 @@ def reconcile_local_reboot(directory):
     incidents.sort(key=lambda item: item['name'])
     prior_receipt = read_state(directory / 'deployment-runtime-abandonment.json')[1]
     prior_proof = read_state(directory / 'deployment-runtime-recovery-host-proof.json')[1]
+    failed_proof = read_state(directory / 'deployment-runtime-recovery-host-proof-440.json')[1]
     observed = dict(project=os.environ.get('COMPOSE_PROJECT_NAME'), nodeEnv=os.environ.get('NODE_ENV'),
                     role=os.environ.get('BACKEND_RUNTIME_ROLE', 'standalone'),
                     imageId=proof.get('candidateImageId'),
@@ -261,7 +264,8 @@ def reconcile_local_reboot(directory):
                     historicalIncidentEvidence=incidents, hostProof=proof,
                     hostProofSha256=hashlib.sha256(proof_raw).hexdigest(),
                     priorReceiptSha256=hashlib.sha256(prior_receipt).hexdigest() if prior_receipt else None,
-                    priorHostProofSha256=hashlib.sha256(prior_proof).hexdigest() if prior_proof else None)
+                    priorHostProofSha256=hashlib.sha256(prior_proof).hexdigest() if prior_proof else None,
+                    failedHostProofSha256=hashlib.sha256(failed_proof).hexdigest() if failed_proof else None)
     receipt = module.reconcile(active, active_sha, observed)
     # These checks tie the local-only scope to the actual runtime environment.
     require(os.environ.get('PUBLIC_APP_URL', '').startswith('http://localhost:')
@@ -286,6 +290,8 @@ def reconcile_local_reboot(directory):
                 == module.PRIOR_RECEIPT_SHA)
         require(hashlib.sha256(read_state(directory / 'deployment-runtime-recovery-host-proof.json')[1]).hexdigest()
                 == module.PRIOR_PROOF_SHA)
+        require(hashlib.sha256(read_state(directory / 'deployment-runtime-recovery-host-proof-440.json')[1]).hexdigest()
+                == module.FAILED_PROOF_SHA)
     require(advisory.poll() is None)
     write_exclusive(directory / receipt_name, encode(receipt))
     directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)

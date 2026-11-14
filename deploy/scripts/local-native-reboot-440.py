@@ -32,6 +32,10 @@ VOLUMES = sorted([
 PRIOR_RECEIPT_SHA = '44c60ad9d492eab6997fa32f3c44c0370f3d9020bd046b5e5ced3664bc44e6a3'
 PRIOR_PROOF_SHA = 'da0ac9ca538c3f6b7506affd83a73e69482a0e606e6675efc29e74d539e95841'
 PRIOR_MANIFEST_SHA = 'ac45cb21320c484cb71fac2e812cb1463eb85d6480c381164af750e1594f773b'
+FAILED_PROOF_SHA = 'd96d4a1e369cafc96766a251effdeec7ddc77a2cc0c9e2b750b4fb243626babe'
+FAILED_MANIFEST_SHA = '61e05b366521390357cdbde41e43c2aacce76d2859d16fc984f6a90836cce17c'
+FAILED_CONTAINER_ID = 'b458b387a52ceeff66d101298764846b64701b2ca6fc78a45856efb1911763e4'
+FAILED_IMAGE_ID = 'sha256:84d6cadf143013d289efb80d5f533d31bfe06d43a285bf5611e88c23e213a5d2'
 PRESERVED = [
     '23f4614a94022f620734db73518c133cc9a611a6ec34c39b20a3964cf249a209',
     '6822650bc17ebfa79eb752bc0e82855bb6364cb03a96b5cb43a686a1a80a8d99',
@@ -83,7 +87,8 @@ def reconcile(active, active_sha, observed):
             and observed.get('prepared') == 0 and observed.get('publicIngress') is False
             and observed.get('externalCredentials') is False)
     require(observed.get('priorReceiptSha256') == PRIOR_RECEIPT_SHA
-            and observed.get('priorHostProofSha256') == PRIOR_PROOF_SHA)
+            and observed.get('priorHostProofSha256') == PRIOR_PROOF_SHA
+            and observed.get('failedHostProofSha256') == FAILED_PROOF_SHA)
     historical = observed.get('historicalActive')
     require(isinstance(historical, list) and len(historical) == len(PRESERVED) and all(
         isinstance(item, dict) and HISTORY.fullmatch(item.get('name', ''))
@@ -106,11 +111,42 @@ def reconcile(active, active_sha, observed):
             and proof.get('priorReceiptSha256') == PRIOR_RECEIPT_SHA
             and proof.get('priorHostProofSha256') == PRIOR_PROOF_SHA
             and proof.get('priorCheckpointManifestSha256') == PRIOR_MANIFEST_SHA
+            and proof.get('supersedesHostProofSha256') == FAILED_PROOF_SHA
             and proof.get('candidateImageId') == observed['imageId']
             and proof.get('bootId') == observed['bootId']
             and proof.get('publicIngress') is False
             and proof.get('historicalActive') == historical
             and proof.get('historicalIncidentEvidence') == incidents)
+    failed = proof.get('failedOneShotEvidence')
+    require(isinstance(failed, dict)
+            and failed.get('format') == 'sabalan-local-native-reboot-failed-one-shot/v1'
+            and failed.get('containerId') == FAILED_CONTAINER_ID
+            and failed.get('imageId') == FAILED_IMAGE_ID
+            and failed.get('retainedImageTag') == 'sabalanerp-local-backend:failed-reboot-20261114'
+            and failed.get('activeSha256') == active_sha
+            and failed.get('hostProofSha256') == FAILED_PROOF_SHA
+            and failed.get('checkpointManifestSha256') == FAILED_MANIFEST_SHA
+            and failed.get('primaryPath') and failed.get('independentPath')
+            and re.match(r'^C:[\\/]', failed['primaryPath'], re.IGNORECASE)
+            and re.match(r'^D:[\\/]', failed['independentPath'], re.IGNORECASE)
+            and failed.get('primaryReadbackVerified') is True
+            and failed.get('independentReadbackVerified') is True
+            and HEX.fullmatch(failed.get('manifestSha256', ''))
+            and failed.get('manifestSha256') == failed.get('independentManifestSha256'))
+    failure_manifest = failed.get('manifest')
+    require(isinstance(failure_manifest, dict)
+            and failure_manifest.get('format') == failed['format']
+            and failure_manifest.get('containerId') == FAILED_CONTAINER_ID
+            and failure_manifest.get('imageId') == FAILED_IMAGE_ID
+            and failure_manifest.get('activeSha256') == active_sha
+            and failure_manifest.get('hostProofSha256') == FAILED_PROOF_SHA
+            and failure_manifest.get('checkpointManifestSha256') == FAILED_MANIFEST_SHA
+            and sorted(item.get('name') for item in failure_manifest.get('entries', []) if isinstance(item, dict)) ==
+            ['failed-container-inspect.json', 'failed-container-rootfs.tar', 'failed-image-inspect.json']
+            and all(isinstance(item.get('bytes'), int) and item['bytes'] > 0
+                    and HEX.fullmatch(item.get('sha256', '')) for item in failure_manifest['entries'])
+            and hashlib.sha256((json.dumps(failure_manifest, separators=(',', ':')) + '\n').encode()).hexdigest()
+            == failed['manifestSha256'])
     database = proof.get('database')
     require(isinstance(database, dict) and database.get('system') == INCIDENT['systemIdentifier']
             and database.get('oid') == INCIDENT['databaseOid']
@@ -158,6 +194,8 @@ def reconcile(active, active_sha, observed):
                 priorReceiptSha256=PRIOR_RECEIPT_SHA,
                 priorHostProofSha256=PRIOR_PROOF_SHA,
                 priorCheckpointManifestSha256=PRIOR_MANIFEST_SHA,
+                supersedesHostProofSha256=FAILED_PROOF_SHA,
+                failedOneShotEvidenceManifestSha256=failed['manifestSha256'],
                 hostProofSha256=observed['hostProofSha256'],
                 checkpointManifestSha256=checkpoint['manifestSha256'])
 

@@ -45,7 +45,15 @@ function renderedConfig() {
 }
 
 test('real rehearsal Compose graph isolates business services and allows only ClamAV egress', () => {
-  assert.doesNotThrow(() => validateQaRenderedConfig(renderedConfig()));
+  const config = renderedConfig();
+  assert.equal(config.services.clamav.extra_hosts, undefined);
+  assert.doesNotThrow(() => validateQaRenderedConfig(config));
+});
+
+test('QA selector refuses a ClamAV host-gateway alias reintroduced by an override', () => {
+  const config = renderedConfig();
+  config.services.clamav.extra_hosts = ['sabalan-clamav-egress=host-gateway'];
+  assert.throws(() => validateQaRenderedConfig(config));
 });
 
 test('real rehearsal graph binds every deployment recovery volume to the QA project', () => {

@@ -10,6 +10,9 @@ services:
     extends:
       file: docker-compose.prod.yml
       service: clamav
+    # The native QA daemon has no default bridge/host-gateway address. ClamAV
+    # gets its updater route from the separate private-namespace egress bridge.
+    extra_hosts: !reset []
     networks:
       - app_network
       - clamav_egress

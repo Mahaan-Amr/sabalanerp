@@ -26,6 +26,13 @@ const qaEnvironment = {
   SMS_IR_ENVIRONMENT: 'production',
   SMS_IR_API_URL: 'http://127.0.0.1:9',
   SMS_IR_API_KEY: `qa-disabled-${'0'.repeat(32)}`,
+  WEB_PUSH_VAPID_SUBJECT: 'mailto:qa-disabled@erp.qa.test',
+  WEB_PUSH_VAPID_PUBLIC_KEY: 'A'.repeat(87),
+  WEB_PUSH_VAPID_PRIVATE_KEY: 'B'.repeat(43),
+  BIOMETRIC_CONNECTOR_MODE: 'unconfigured',
+  BIOMETRIC_WORKSTATIONS_JSON: '{}',
+  TAXPAYER_DELIVERY_BROKER_ENDPOINT: '',
+  TAXPAYER_BROKER_URL: '',
 };
 
 function renderedConfig() {
@@ -145,6 +152,46 @@ test('QA target rejects another Engine and a live SMS endpoint before controller
   }));
   assert.throws(() => validateQaTargetBinding(plan, {
     ...observed, environment: { ...qaEnvironment, DEPLOYMENT_BACKUP_SSH_KEY_FILE: '/srv/sabalanerp-qa/secrets/production-key' },
+  }));
+});
+
+test('QA target refuses configured external delivery effects before controller selection', () => {
+  const plan = {
+    format: 'sabalan-qa-rehearsal-target/v2', repositoryRoot: '/opt/sabalanerp', qaRoot: '/srv/sabalanerp-qa',
+    machineId: 'qa-machine-id', hostname: 'qa-host', engineId: 'qa-engine-id',
+    networkNamespace: 'sabalanerp-qa', networkNamespaceIdentity: 'net:[4026533001]',
+    applicationCommit: 'c'.repeat(40), applicationTree: 'd'.repeat(40),
+    composeSha256: 'a'.repeat(64), environmentSha256: 'b'.repeat(64),
+    domain: 'erp.qa.test', inquiryDomain: 'inquiry.qa.test', backupHost: 'qa-backup.test',
+    productionBackupHost: 'production-backup.example',
+  };
+  const observed = {
+    platform: 'linux', uid: 0, repositoryRoot: '/opt/sabalanerp', machineId: 'qa-machine-id',
+    hostname: 'qa-host', engineId: 'qa-engine-id', applicationCommit: 'c'.repeat(40),
+    applicationTree: 'd'.repeat(40), cleanCheckout: true, dockerRoot: '/var/lib/docker',
+    composeSha256: 'a'.repeat(64), environmentSha256: 'b'.repeat(64), environment: qaEnvironment,
+  };
+  assert.equal(validateQaTargetBinding(plan, observed), 'docker-compose.rehearsal.yml');
+  for (const [name, value] of [
+    ['WEB_PUSH_VAPID_SUBJECT', 'mailto:production@example.com'],
+    ['WEB_PUSH_VAPID_PRIVATE_KEY', ''],
+    ['WEB_PUSH_VAPID_PUBLIC_KEY', ''],
+    ['BIOMETRIC_CONNECTOR_MODE', 'physical'],
+    ['BIOMETRIC_WORKSTATIONS_JSON', '{"station":"host"}'],
+    ['TAXPAYER_DELIVERY_BROKER_ENDPOINT', 'https://broker.example'],
+    ['TAXPAYER_BROKER_URL', 'https://broker.example'],
+  ]) {
+    assert.throws(() => validateQaTargetBinding(plan, {
+      ...observed, environment: { ...qaEnvironment, [name]: value },
+    }), name);
+  }
+  const missingDisabledSetting = { ...qaEnvironment };
+  delete missingDisabledSetting.WEB_PUSH_VAPID_PRIVATE_KEY;
+  assert.throws(() => validateQaTargetBinding(plan, {
+    ...observed, environment: missingDisabledSetting,
+  }));
+  assert.throws(() => validateQaRuntimeEnvironment(missingDisabledSetting, {
+    WEB_PUSH_VAPID_PRIVATE_KEY: 'inherited-live-key',
   }));
 });
 

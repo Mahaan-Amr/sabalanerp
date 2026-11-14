@@ -140,6 +140,11 @@ export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, envir
 }
 
 export function validateQaRuntimeEnvironment(environment, inherited) {
+  for (const name of [
+    'WEB_PUSH_VAPID_SUBJECT', 'WEB_PUSH_VAPID_PUBLIC_KEY', 'WEB_PUSH_VAPID_PRIVATE_KEY',
+    'TAXPAYER_DELIVERY_BROKER_ENDPOINT', 'TAXPAYER_BROKER_URL',
+    'BIOMETRIC_CONNECTOR_MODE', 'BIOMETRIC_WORKSTATIONS_JSON',
+  ]) assert.ok(Object.hasOwn(environment, name));
   for (const name of keys(inherited)) {
     assert.ok(!name.startsWith('COMPOSE_') && name !== 'DOCKER_HOST' && name !== 'DOCKER_CONTEXT');
     if (Object.hasOwn(environment, name)) assert.equal(inherited[name], environment[name]);
@@ -214,6 +219,14 @@ export function validateQaTargetBinding(plan, observed) {
   assert.equal(env.SMS_IR_ENVIRONMENT, 'production');
   assert.equal(env.SMS_IR_API_URL, 'http://127.0.0.1:9');
   assert.match(env.SMS_IR_API_KEY, /^qa-disabled-[a-zA-Z0-9]{32,}$/);
+  assert.equal(env.WEB_PUSH_VAPID_SUBJECT, `mailto:qa-disabled@${plan.domain}`);
+  assert.match(env.WEB_PUSH_VAPID_PUBLIC_KEY, /^[A-Za-z0-9_-]{87}$/);
+  assert.match(env.WEB_PUSH_VAPID_PRIVATE_KEY, /^[A-Za-z0-9_-]{43}$/);
+  for (const name of ['TAXPAYER_DELIVERY_BROKER_ENDPOINT', 'TAXPAYER_BROKER_URL']) {
+    assert.equal(env[name], '');
+  }
+  assert.equal(env.BIOMETRIC_CONNECTOR_MODE, 'unconfigured');
+  assert.equal(env.BIOMETRIC_WORKSTATIONS_JSON, '{}');
   return COMPOSE_FILE;
 }
 

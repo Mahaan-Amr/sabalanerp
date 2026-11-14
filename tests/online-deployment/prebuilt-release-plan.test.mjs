@@ -8,7 +8,7 @@ import {validatePrebuiltReleasePlan,prebuiltReleaseExports,requirePrebuiltScanne
 
 const hash=character=>character.repeat(64),image=character=>'sha256:'+hash(character);
 function fixture(){
- const operations={receiptSha256:hash('a'),files:Object.fromEntries(['deploy/scripts/deploy.sh','deploy/scripts/dispatch-volume-preflight.mjs','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'].map(name=>[name,hash('b')]))};
+ const operations={receiptSha256:hash('a'),files:Object.fromEntries(['deploy/scripts/deploy.sh','deploy/scripts/dispatch-volume-preflight.mjs','deploy/scripts/dispatch-volume-transition.py','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'].map(name=>[name,hash('b')]))};
  const plan={format:'sabalan-prebuilt-protected-release-plan/v1',applicationCommit:'a'.repeat(40),applicationTree:'b'.repeat(40),applicationSourceHash:hash('c'),inquirySourceCommit:'d'.repeat(40),images:{},operations};
  const actual={head:plan.applicationCommit,tree:plan.applicationTree,status:'',inquiryGitlink:plan.inquirySourceCommit,inquiryHead:plan.inquirySourceCommit,inquiryStatus:'',operations:structuredClone(operations),images:{},buildReceipts:{},archiveReceipts:{},linuxCheckoutByteHash:hash('f')};
  for(const [index,role]of ['backend','frontend','inquiry'].entries()){
@@ -45,14 +45,15 @@ test('changed source, dirty gitlink, images, graph, build bytes, operations and 
 const script=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),bash=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh';
 test('prebuilt real shell lane retains cleanup/capacity and never fetches, builds, retags or derives a browser ID',()=>{
  const start=script.indexOf('if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then\nif [ "${PREBUILT_RELEASE}" -eq 0 ]; then'),end=script.indexOf('elif [ "${CAPTURE_ONLY}" -eq 1 ]; then',start);assert.ok(start>0&&end>start);const block=script.slice(start,end)+'fi\n';
- for(const [capacity,verifyExit,status,events]of [[2097152,0,0,['CLEANUP','MEASURE','VERIFY','CONFIG','READY']],[10,0,1,['CLEANUP','MEASURE']],[2097152,7,1,['CLEANUP','MEASURE','VERIFY']]]){
+ for(const [capacity,verifyExit,status,events]of [[2097152,0,0,['STAGE','CLEANUP','MEASURE','VERIFY','CONFIG','READY']],[10,0,1,['STAGE','CLEANUP','MEASURE']],[2097152,7,1,['STAGE','CLEANUP','MEASURE','VERIFY']]]){
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'prebuilt-release-'));try{
    const result=spawnSync(bash,['-c',`set -eu
-DEPLOYMENT_MODE=release; CAPTURE_ONLY=0; PREBUILT_RELEASE=1; OPERATIONS_ROOT=/operations; ENV_FILE=/private/env; REPO_ROOT=/repository
+DEPLOYMENT_MODE=release; CAPTURE_ONLY=0; PREBUILT_RELEASE=1; OPERATIONS_ROOT=/operations; ENV_FILE=/private/env; REPO_ROOT=/repository; COMPOSE_FILE=docker-compose.prod.yml
 DEPLOYMENT_PREVIOUS_BACKEND_IMAGE=oldbackend; DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE=oldfrontend; DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE=oldinquiry
 DEPLOYMENT_PREVIOUS_NGINX_IMAGE=oldnginx; DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE=oldpostgres; DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE=oldclamav
 DEPLOYMENT_BROWSER_BUILD_ID=erp_original_actual123
 : > events
+dispatch_volume_transition(){ [ "$1" = stage ] || exit 97; echo STAGE >> events; }
 sh(){ [ "$5" = 0 ] && [ "$6" = 0 ] || exit 96; echo CLEANUP >> events; echo MEASURE >> events; [ ${capacity} -ge 1024 ]; }
 df(){ echo MEASURE >> events; printf 'Filesystem Blocks Used Available Capacity Mounted\\nmock 0 0 ${capacity} 0 /\\n'; }
 docker(){ case "$*" in 'image inspect --format {{.Size}} '*) echo 1;; 'info --format {{.DockerRootDir}}') echo /mock;; *) exit 99;; esac; }

@@ -24,7 +24,7 @@ export function validatePrebuiltReleasePlan(plan,actual){
  assert.equal(actual.status,'','PREBUILT_APPLICATION_CHECKOUT_DIRTY');assert.equal(actual.inquiryStatus,'','PREBUILT_INQUIRY_CHECKOUT_DIRTY');
  assert.equal(actual.inquiryGitlink,plan.inquirySourceCommit);assert.equal(actual.inquiryHead,plan.inquirySourceCommit);
  assert.deepEqual(actual.operations,plan.operations,'PREBUILT_OPERATIONS_CHANGED');
- for(const name of ['deploy/scripts/deploy.sh','deploy/scripts/dispatch-volume-preflight.mjs','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'])assert.match(plan.operations.files[name],digest);
+ for(const name of ['deploy/scripts/deploy.sh','deploy/scripts/dispatch-volume-preflight.mjs','deploy/scripts/dispatch-volume-transition.py','deploy/scripts/online-release-launcher.py','deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-storage.mjs','scripts/deployment-capacity.mjs'])assert.match(plan.operations.files[name],digest);
  for(const role of roles){
   const selected=plan.images[role],observed=actual.images[role],receipt=actual.buildReceipts[role];
   keys(selected,['image','sourceCommit','archiveGraph','archiveReceipt','buildReceipt',...(role==='backend'?[]:['browser'])]);

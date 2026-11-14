@@ -23,7 +23,7 @@ test('host pack defaults to a nonmutating plan with separate generated-client de
  assert.equal(plan.mutated,false);assert.equal(plan.productionAdmission,false);assert.equal(plan.requiresReviewedOperationsCheckout,true);
  assert.equal(plan.kernel,'deploy/scripts/online-release-host-kernel.cjs');
  assert.equal(plan.client,'deploy/scripts/online-release-host-dependencies/node_modules/@prisma/client');
- for(const file of ['deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-capacity.mjs'])assert.ok(plan.hostFiles.includes(file),'Missing protected release host port: '+file);
+ for(const file of ['deploy/scripts/prebuilt-release-plan.mjs','deploy/scripts/dispatch-volume-transition.py','deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-capacity.mjs'])assert.ok(plan.hostFiles.includes(file),'Missing protected release host port: '+file);
  assert.ok(!plan.hostFiles.some(file=>file.includes('private-key')||file.includes('.env')));
 });
 test('host pack refuses shared-checkout output or relative authority paths before any build or client read',()=>{

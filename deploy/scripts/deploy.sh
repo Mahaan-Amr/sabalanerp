@@ -78,6 +78,8 @@ NATIVE_RUNTIME_CLOSURE_REQUIRED=0
 LEGACY_BACKEND_SIGNAL_PENDING=0
 DB_LEASE_ACQUIRED=0
 PUBLIC_TRAFFIC_OPEN=0
+DISPATCH_TRANSITION_REQUIRED=0
+DISPATCH_TRANSITION_ATTESTED=0
 ROLLBACK_ALREADY_ATTEMPTED=0
 FINANCIAL_EVIDENCE_REFERRAL_REQUIRED=0
 FINANCIAL_EVIDENCE_DRY_RUN_REPORT=""
@@ -206,6 +208,22 @@ run_backend() {
       -e "DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256=${DEPLOYMENT_REMOTE_RETENTION_RECEIPT_SHA256:-}" \
       -e "INQUIRY_ALREADY_DRAINED=true" \
       deployment "$@"
+}
+
+dispatch_volume_transition() {
+  transition_mode="$1"
+  transition_backend="$(compose ps -a -q backend)"
+  [ -n "${transition_backend}" ] || { echo 'DISPATCH_TRANSITION_UNPROVEN' >&2; return 1; }
+  transition_backend="$(docker inspect --format '{{.Id}}' "${transition_backend}")" || return 1
+  transition_result="$(python3 "${OPERATIONS_ROOT}/deploy/scripts/dispatch-volume-transition.py" \
+    "${transition_mode}" "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" \
+    "${transition_backend}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}")" || return 1
+  case "${transition_result}" in
+    legacy) DISPATCH_TRANSITION_REQUIRED=1;;
+    mounted) DISPATCH_TRANSITION_REQUIRED=0;;
+    *) echo 'DISPATCH_TRANSITION_UNPROVEN' >&2; return 1;;
+  esac
+  if [ "${transition_mode}" = attest ]; then DISPATCH_TRANSITION_ATTESTED=1; fi
 }
 
 # QA only: prove the remote bind in the controller, Docker daemon and the
@@ -745,6 +763,29 @@ recover_failure() {
   fi
 
   if [ "${MUTATION_STARTED}" -eq 0 ]; then
+    if [ "${DISPATCH_TRANSITION_REQUIRED}" -eq 1 ] && [ "${DISPATCH_TRANSITION_ATTESTED}" -eq 0 ]; then
+      if [ "${MAINTENANCE_ACTIVE}" -eq 1 ] || [ "${DEPLOYMENT_PHASE:-}" = MAINTENANCE_REQUESTED ] \
+        || [ "${DEPLOYMENT_PHASE:-}" = TRAFFIC_BLOCKED ] || [ "${DEPLOYMENT_PHASE:-}" = SERVICES_DRAINED ]; then
+        control maintenance-on || true
+        MAINTENANCE_ACTIVE=1
+        DEPLOYMENT_PHASE=RECOVERY_REQUIRED
+        DEPLOYMENT_RESULT=RECOVERY_REQUIRED
+        export DEPLOYMENT_PHASE DEPLOYMENT_RESULT
+        if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then control finish || true; fi
+        cleanup_locks
+        echo 'Unattested legacy dispatch layer; maintenance remains active for protected recovery.' >&2
+        exit "${exit_code}"
+      fi
+      # The old backend has never been recreated or stopped. Preserve it as-is.
+      if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then
+        DEPLOYMENT_PHASE=ABORTED DEPLOYMENT_RESULT=ABORTED control finish || true
+      else
+        control cancel-preflight || true
+      fi
+      cleanup_locks
+      echo 'Unattested dispatch transition aborted before maintenance; original backend remains running.' >&2
+      exit "${exit_code}"
+    fi
     if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
       incident_boundary="$(control incident-boundary-state)" || { cleanup_locks; exit "${exit_code}"; }
       if [ "${incident_boundary}" = PRE_MAINTENANCE ]; then
@@ -1005,6 +1046,9 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   drain_release_for_rollback
   case "${DEPLOYMENT_PHASE}" in
     PREFLIGHT|LEASE_ACQUIRED|MAINTENANCE_REQUESTED|TRAFFIC_BLOCKED|SERVICES_DRAINED|LOCAL_CHECKPOINT_VERIFIED|REMOTE_CHECKPOINT_VERIFIED)
+      if [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then
+        dispatch_volume_transition attest || { echo 'Interrupted dispatch transition remains in maintenance.' >&2; exit 1; }
+      fi
       if start_release_services 300 \
         && DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js; then
         control maintenance-off
@@ -1129,6 +1173,7 @@ docker_required_bytes=$((backend_image_size + frontend_image_size + inquiry_imag
 
 # A failed cleanup or capacity proof leaves the current release serving users.
 # The helper rechecks recovery/image references and holds the same host lock.
+dispatch_volume_transition stage
 sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" "${docker_required_bytes}" 0 "${COMPOSE_FILE}"
 docker_root="$(docker info --format '{{.DockerRootDir}}')"
 docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
@@ -1192,6 +1237,7 @@ else
   # workspace in this lane. The canonical data/checkpoint/restore reserve and
   # its 1 GiB margin remain fully enforced on both hosts by storage-preflight.
   docker_required_bytes=0
+  dispatch_volume_transition stage
   sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" "${docker_required_bytes}" 0 "${COMPOSE_FILE}"
   # No fetch, tag, build or derived browser BUILD_ID can replace qualified bytes.
   prebuilt_exports="$(verify_prebuilt_release)" || exit 1
@@ -1310,6 +1356,14 @@ fi
 phase TRAFFIC_BLOCKED
 if [ "${DRAINED_EARLY}" -eq 0 ]; then drain_current_services; fi
 phase SERVICES_DRAINED
+if [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then
+  verify_public_maintenance || exit 1
+  control heartbeat || exit 1
+  assert_original_legacy_still_stopped || exit 1
+  dispatch_volume_transition attest || exit 1
+  control heartbeat || exit 1
+  assert_original_legacy_still_stopped || exit 1
+fi
 preserved_clamav_guard identity || exit 1
 capture_clamav_checkpoint
 postgres_available_kb="$(compose exec -T postgres sh -c 'df -Pk "$PGDATA" | awk "NR==2 {print \$4}"')"

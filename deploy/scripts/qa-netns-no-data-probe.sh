@@ -11,6 +11,7 @@ owner_file=/srv/sabalanerp-qa/qa-netns-owner.pid
 script_dir=$(dirname "$0")
 signal_helper=$script_dir/qa-owned-pid-signal.pl
 source "$script_dir/qa-netns-resolver-parent.sh"
+source "$script_dir/qa-netns-owned-socket.sh"
 [[ $EUID == 0 && ${WSL_DISTRO_NAME:-} == sabalanerp-qa-debian ]] || die 'pinned root WSL host required'
 [[ $(dirname -- "$evidence") == /srv/sabalanerp-qa && -d $evidence && ! -L $evidence ]] || die 'private existing evidence directory required'
 [[ $(stat -c '%u:%a' -- "$evidence") == 0:700 ]] || die 'unsafe evidence directory'
@@ -20,7 +21,7 @@ source "$script_dir/qa-netns-resolver-parent.sh"
 # This is the last read-only gate before any namespace or Docker operation. It
 # refuses a pre-existing daemon, socket, PID file, container record or namespace.
 node "$script_dir/qa-zero-state-preflight.mjs" "$manifest" || die 'zero-state preflight failed'
-for command in ip slirp4netns dockerd docker curl node perl timeout iptables-save ip6tables-save; do
+for command in ip slirp4netns dockerd docker curl node perl ss getent cut timeout iptables-save ip6tables-save; do
   command -v "$command" >/dev/null || die "missing $command"
 done
 [[ ! -e /run/netns/sabalanerp-qa-probe && ! -e /etc/netns/sabalanerp-qa-probe ]] || die 'probe namespace pre-exists'
@@ -32,7 +33,7 @@ birth_of() { sed 's/^.*) //' "/proc/$1/stat" | awk '{print $20}'; }
 owned_signal() { perl "$signal_helper" "$1" "$2" "$3" "$4" "$5"; }
 [[ ! $(node -e 'const s=require("fs").readFileSync("/etc/resolv.conf","utf8");process.stdout.write(/^\s*nameserver\s+(?:127\.|::1(?:\s|$))/m.test(s)?"bad":"")') ]] || die 'loopback initial DNS is unsafe'
 
-owned_qa=0 owned_peer=0 owned_qa_dir=0 owned_peer_dir=0 owned_network=0 owner_file_ours=0 slirp_pid= slirp_birth= dockerd_pid= dockerd_birth= initial_server= initial_server_birth= qa_server= qa_server_birth= watchdog_pid= watchdog_birth=
+owned_qa=0 owned_peer=0 owned_qa_dir=0 owned_peer_dir=0 owned_network=0 owner_file_ours=0 slirp_pid= slirp_birth= dockerd_pid= dockerd_birth= initial_server= initial_server_birth= qa_server= qa_server_birth= watchdog_pid= watchdog_birth= QA_OWNED_SOCKET_IDENTITY=
 cleanup() {
   local result=$?; trap - EXIT INT TERM
   if [[ -n $watchdog_birth ]] && ! owned_signal "$watchdog_pid" "$watchdog_birth" '/usr/bin/bash,/usr/bin/sleep' "$initial_ns" 15 2>/dev/null; then result=1; fi
@@ -55,6 +56,9 @@ cleanup() {
       result=1
     fi
     wait "$dockerd_pid" 2>/dev/null || :
+  fi
+  if [[ -e /run/docker.sock || -L /run/docker.sock ]]; then
+    qa_owned_socket_cleanup /run/docker.sock "$QA_OWNED_SOCKET_IDENTITY" || result=1
   fi
   if [[ -n $slirp_birth ]]; then owned_signal "$slirp_pid" "$slirp_birth" '/usr/bin/slirp4netns' "$initial_ns" 15 2>/dev/null || result=1; fi
   [[ -z $slirp_pid ]] || wait "$slirp_pid" 2>/dev/null || :
@@ -93,6 +97,7 @@ snapshot() {
   cat /etc/wsl.conf > "$evidence/host-wsl-config.$phase"
 }
 snapshot before
+umask 077
 qa_resolver_parent_prepare /etc/netns || die 'unsafe /etc/netns resolver parent'
 
 # ip netns add runs in the persistent initial mount namespace. Never create a
@@ -101,7 +106,7 @@ ip netns add sabalanerp-qa; owned_qa=1
 mkdir /etc/netns/sabalanerp-qa
 owned_qa_dir=1
 printf 'nameserver 10.0.2.3\n' > /etc/netns/sabalanerp-qa/resolv.conf
-slirp4netns --configure --disable-host-loopback --netns-type=path /run/netns/sabalanerp-qa tap0 >/dev/null 2>&1 & slirp_pid=$!
+slirp4netns --configure --disable-host-loopback --netns-type=path /run/netns/sabalanerp-qa tap0 > "$evidence/slirp.log" 2>&1 & slirp_pid=$!
 slirp_birth=$(birth_of "$slirp_pid") || die 'slirp birth unavailable'
 for ((i=0; i<50; i++)); do
   kill -0 "$slirp_pid" 2>/dev/null || die 'slirp exited'
@@ -112,9 +117,14 @@ ip -n sabalanerp-qa link show tap0 >/dev/null || die 'slirp TAP absent'
 qa_ns=$(stat -c 'net:[%i]' /run/netns/sabalanerp-qa)
 [[ $qa_ns != "$initial_ns" && $qa_ns == "$(ip netns exec sabalanerp-qa readlink /proc/self/ns/net)" ]] || die 'QA namespace identity mismatch'
 
-ip netns exec sabalanerp-qa dockerd --host=unix:///run/docker.sock --data-root=/var/lib/docker --pidfile=/run/docker.pid --bridge=none --iptables=true >/dev/null 2>&1 & dockerd_pid=$!
+ip netns exec sabalanerp-qa dockerd --host=unix:///run/docker.sock --data-root=/var/lib/docker --pidfile=/run/docker.pid --bridge=none --iptables=true > "$evidence/dockerd.log" 2>&1 & dockerd_pid=$!
 dockerd_birth=$(birth_of "$dockerd_pid") || die 'dockerd birth unavailable'
+docker_gid=$(getent group docker | cut -d: -f3)
+[[ $docker_gid =~ ^[1-9][0-9]*$ ]] || die 'docker group absent'
 for ((i=0; i<100; i++)); do
+  if [[ -S /run/docker.sock && -z $QA_OWNED_SOCKET_IDENTITY ]] && owned_signal "$dockerd_pid" "$dockerd_birth" '/usr/bin/dockerd' "$qa_ns" 0 2>/dev/null; then
+    qa_owned_socket_capture /run/docker.sock "$docker_gid" || die 'daemon socket ownership mismatch'
+  fi
   kill -0 "$dockerd_pid" 2>/dev/null || die 'owned dockerd exited'
   if [[ -S /run/docker.sock && -f /run/docker.pid ]] && timeout 2 ip netns exec sabalanerp-qa docker --host unix:///run/docker.sock info --format '{{.ID}}' >/dev/null 2>&1; then break; fi
   sleep 0.2

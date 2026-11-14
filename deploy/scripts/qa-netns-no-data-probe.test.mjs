@@ -12,15 +12,49 @@ const launcher = path.join(here, 'qa-netns-no-data-probe.sh');
 const stopper = path.join(here, 'qa-netns-stop.sh');
 const signal = path.join(here, 'qa-owned-pid-signal.pl');
 const resolverParent = path.join(here, 'qa-netns-resolver-parent.sh');
+const ownedSocket = path.join(here, 'qa-netns-owned-socket.sh');
 const bash = spawnSync('bash', ['--version'], { encoding: 'utf8' });
 const unavailable = bash.error || bash.status !== 0 ? 'bash unavailable' : false;
 
 test('the network owner scripts have valid Bash syntax', { skip: unavailable }, () => {
-  for (const script of [launcher, stopper, resolverParent]) {
+  for (const script of [launcher, stopper, resolverParent, ownedSocket]) {
     const result = spawnSync('bash', ['-n', script], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
   }
 });
+
+test('a live or changed Unix socket is preserved; only the owned stale inode is removed',
+  { skip: process.platform !== 'linux' || process.getuid?.() !== 0 }, async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-owned-socket-'));
+    const socket = path.join(root, 'daemon.sock');
+    const server = spawn(process.execPath, ['-e',
+      'const fs=require("fs"),net=require("net");net.createServer().listen(process.argv[1],()=>{fs.chmodSync(process.argv[1],0o660);console.log("READY")})', socket],
+    { stdio: ['ignore', 'pipe', 'ignore'] });
+    try {
+      await new Promise((resolve, reject) => {
+        server.stdout.once('data', resolve);
+        server.once('error', reject);
+      });
+      const run = (body, ...args) => spawnSync('bash', ['-c', `set -euo pipefail; source "$1"; ${body}`, '--', ownedSocket, ...args], { encoding: 'utf8' });
+      const captured = run('qa_owned_socket_capture "$2" "$3"; printf "%s" "$QA_OWNED_SOCKET_IDENTITY"', socket, String(process.getgid()));
+      assert.equal(captured.status, 0, captured.stderr);
+      const identity = captured.stdout;
+      const live = run('qa_owned_socket_cleanup "$2" "$3"', socket, identity);
+      assert.notEqual(live.status, 0);
+      assert.ok(fs.existsSync(socket));
+      server.kill('SIGKILL');
+      await new Promise(resolve => server.once('exit', resolve));
+      const changed = run('qa_owned_socket_cleanup "$2" "$3"', socket, `${identity}0`);
+      assert.notEqual(changed.status, 0);
+      assert.ok(fs.existsSync(socket));
+      const stale = run('qa_owned_socket_cleanup "$2" "$3"', socket, identity);
+      assert.equal(stale.status, 0, stale.stderr);
+      assert.equal(fs.existsSync(socket), false);
+    } finally {
+      if (server.exitCode === null && server.signalCode === null) server.kill('SIGKILL');
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 
 test('resolver parent is removed only when this run created it and it is empty',
   { skip: process.platform !== 'linux' || process.getuid?.() !== 0 }, () => {

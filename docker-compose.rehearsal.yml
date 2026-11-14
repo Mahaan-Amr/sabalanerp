@@ -39,6 +39,12 @@ services:
     extends:
       file: docker-compose.prod.yml
       service: nginx
+    # Docker does not publish loopback ports from an internal-only bridge.
+    # This bridge exists only inside the named QA network namespace; disable
+    # masquerading so Nginx gains loopback ingress without external egress.
+    networks:
+      - app_network
+      - qa_ingress
 
 volumes:
   postgres_data:
@@ -62,3 +68,7 @@ networks:
     internal: true
   clamav_egress:
     driver: bridge
+  qa_ingress:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"

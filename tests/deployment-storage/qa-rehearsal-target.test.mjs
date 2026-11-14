@@ -44,10 +44,26 @@ function renderedConfig() {
   return JSON.parse(output);
 }
 
-test('real rehearsal Compose graph isolates business services and allows only ClamAV egress', () => {
+test('real rehearsal Compose graph isolates business services and scopes ingress to Nginx loopback', () => {
   const config = renderedConfig();
   assert.equal(config.services.clamav.extra_hosts, undefined);
+  assert.deepEqual(Object.keys(config.networks).sort(), ['app_network', 'clamav_egress', 'qa_ingress']);
+  assert.deepEqual(Object.keys(config.services.nginx.networks).sort(), ['app_network', 'qa_ingress']);
+  assert.deepEqual(config.networks.qa_ingress.driver_opts,
+    { 'com.docker.network.bridge.enable_ip_masquerade': 'false' });
   assert.doesNotThrow(() => validateQaRenderedConfig(config));
+});
+
+test('QA selector refuses unexpected ingress attachments or internal-only Nginx', () => {
+  const config = renderedConfig();
+  config.services.backend.networks.qa_ingress = null;
+  assert.throws(() => validateQaRenderedConfig(config));
+  delete config.services.backend.networks.qa_ingress;
+  delete config.services.nginx.networks.qa_ingress;
+  assert.throws(() => validateQaRenderedConfig(config));
+  config.services.nginx.networks.qa_ingress = null;
+  config.networks.qa_ingress.driver_opts['com.docker.network.bridge.enable_ip_masquerade'] = 'true';
+  assert.throws(() => validateQaRenderedConfig(config));
 });
 
 test('QA selector refuses a ClamAV host-gateway alias reintroduced by an override', () => {

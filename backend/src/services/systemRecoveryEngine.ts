@@ -836,7 +836,7 @@ const validateStoredFileReferences = async (client: PrismaClient, payloadRoot: s
   }
 };
 
-export const validateLiveStoredFileReferences = async (client: PrismaClient) => {
+export const validateLiveStoredFileReferences = async (client: PrismaClient, dispatchRoot = DISPATCH_DOCUMENT_STORAGE_DIR) => {
   const columns = await client.$queryRawUnsafe<Array<{ tableName: string; columnName: string }>>(`
     SELECT table_name AS "tableName", column_name AS "columnName"
     FROM information_schema.columns
@@ -885,7 +885,37 @@ export const validateLiveStoredFileReferences = async (client: PrismaClient) => 
       details: missingPerformanceExports.slice(0, 25),
     });
   }
-  return { checkedColumns: columns.length, readyPerformanceExports: readyPerformanceExports.length };
+  const dispatchArtifacts = await client.dispatchDocumentArtifact.findMany({
+    select: { id: true, storageKey: true, byteLength: true, sha256: true },
+  });
+  const missingDispatchArtifacts: Array<{ id: string; storageKey: string }> = [];
+  const root = path.resolve(dispatchRoot);
+  for (const artifact of dispatchArtifacts) {
+    const key = String(artifact.storageKey).replace(/\\/g, '/');
+    const candidate = path.resolve(root, key);
+    if (!key.startsWith('dispatch-documents/') || key.split('/').some((part) => !part || part === '.' || part === '..')
+      || !candidate.startsWith(`${root}${path.sep}`)) {
+      missingDispatchArtifacts.push({ id: artifact.id, storageKey: artifact.storageKey });
+      continue;
+    }
+    const [stat, real] = await Promise.all([
+      fs.promises.lstat(candidate).catch(() => null),
+      fs.promises.realpath(candidate).catch(() => null),
+    ]);
+    if (!stat?.isFile() || stat.isSymbolicLink() || !real?.startsWith(`${root}${path.sep}`)
+      || BigInt(stat.size) !== BigInt(artifact.byteLength)
+      || await sha256File(candidate) !== artifact.sha256) {
+      missingDispatchArtifacts.push({ id: artifact.id, storageKey: artifact.storageKey });
+    }
+  }
+  if (missingDispatchArtifacts.length) {
+    throw Object.assign(new Error(`Live storage has missing or corrupt dispatch-document artifacts (${missingDispatchArtifacts.length}).`), {
+      code: 'DEPLOYMENT_DISPATCH_ARTIFACT_MISSING',
+      details: missingDispatchArtifacts.slice(0, 25),
+    });
+  }
+  return { checkedColumns: columns.length, readyPerformanceExports: readyPerformanceExports.length,
+    dispatchArtifacts: dispatchArtifacts.length };
 };
 
 export const stageAndPromoteRecovery = async (input: {

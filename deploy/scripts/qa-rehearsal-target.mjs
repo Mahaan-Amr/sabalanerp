@@ -69,6 +69,7 @@ const QA_MOUNTS = {
     '/app/storage/contracts': 'backend_storage_contracts',
     '/app/storage/hr-hiring': 'backend_storage_hr_hiring',
     '/app/storage/accounting-contracts': 'backend_storage_accounting_contracts',
+    '/app/storage/dispatch-documents': 'backend_storage_dispatch_documents',
     '/app/storage/support-tickets': 'backend_storage_support_tickets',
     '/app/storage/performance-exports': 'backend_storage_performance_exports',
     '/app/uploads': 'backend_uploads',

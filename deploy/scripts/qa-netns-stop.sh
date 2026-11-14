@@ -15,9 +15,10 @@ actual_daemon_birth=$(sed 's/^.*) //' "/proc/$daemon/stat" | awk '{print $20}')
 [[ $(readlink "/proc/$daemon/exe") == /usr/bin/dockerd && $(readlink "/proc/$daemon/ns/net") == "$namespace" && $(stat -c 'net:[%i]' /run/netns/sabalanerp-qa) == "$namespace" ]] || die 'daemon or namespace changed'
 tr '\0' ' ' < "/proc/$owner/cmdline" | grep -Fq 'qa-netns-no-data-probe.sh' || die 'owner executable changed'
 tr '\0' ' ' < "/proc/$owner/cmdline" | grep -Fq -- '--hold' || die 'owner is not in hold mode'
-kill -TERM "$owner"
+initial_ns=$(readlink /proc/1/ns/net)
+perl "$(dirname "$0")/qa-owned-pid-signal.pl" "$owner" "$owner_birth" '/usr/bin/bash' "$initial_ns" 15 || die 'owner PID identity changed before stop'
 for ((i=0; i<150; i++)); do
-  [[ -d /proc/$owner ]] || break
+  perl "$(dirname "$0")/qa-owned-pid-signal.pl" "$owner" "$owner_birth" '/usr/bin/bash' "$initial_ns" 0 >/dev/null 2>&1 || break
   sleep 0.2
 done
 [[ ! -d /proc/$owner && ! -e $record && ! -e /run/netns/sabalanerp-qa && ! -e /run/docker.sock && ! -e /run/docker.pid ]] || die 'owner teardown incomplete; manual review required'

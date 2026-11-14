@@ -8,6 +8,8 @@ die() { printf 'REFUSE: %s\n' "$*" >&2; exit 1; }
 [[ $# == 2 || ( $# == 3 && $3 == --hold ) ]] || die 'usage: qa-netns-no-data-probe.sh MANIFEST EVIDENCE_DIR [--hold]'
 manifest=$1 evidence=$2 hold=${3:-}
 owner_file=/srv/sabalanerp-qa/qa-netns-owner.pid
+script_dir=$(dirname "$0")
+signal_helper=$script_dir/qa-owned-pid-signal.pl
 [[ $EUID == 0 && ${WSL_DISTRO_NAME:-} == sabalanerp-qa-debian ]] || die 'pinned root WSL host required'
 [[ $(dirname -- "$evidence") == /srv/sabalanerp-qa && -d $evidence && ! -L $evidence ]] || die 'private existing evidence directory required'
 [[ $(stat -c '%u:%a' -- "$evidence") == 0:700 ]] || die 'unsafe evidence directory'
@@ -16,38 +18,52 @@ owner_file=/srv/sabalanerp-qa/qa-netns-owner.pid
 
 # This is the last read-only gate before any namespace or Docker operation. It
 # refuses a pre-existing daemon, socket, PID file, container record or namespace.
-node "$(dirname "$0")/qa-zero-state-preflight.mjs" "$manifest" || die 'zero-state preflight failed'
-for command in ip slirp4netns dockerd docker curl node timeout iptables-save ip6tables-save; do
+node "$script_dir/qa-zero-state-preflight.mjs" "$manifest" || die 'zero-state preflight failed'
+for command in ip slirp4netns dockerd docker curl node perl timeout iptables-save ip6tables-save; do
   command -v "$command" >/dev/null || die "missing $command"
 done
 [[ ! -e /run/netns/sabalanerp-qa-probe && ! -e /etc/netns/sabalanerp-qa-probe ]] || die 'probe namespace pre-exists'
 initial_ns=$(readlink /proc/self/ns/net)
 [[ $initial_ns == "$(readlink /proc/1/ns/net)" ]] || die 'not in initial namespace'
+ip_exe=$(readlink -f "$(command -v ip)")
+owner_birth=$(sed 's/^.*) //' "/proc/$$/stat" | awk '{print $20}')
+birth_of() { sed 's/^.*) //' "/proc/$1/stat" | awk '{print $20}'; }
+owned_signal() { perl "$signal_helper" "$1" "$2" "$3" "$4" "$5"; }
 [[ ! $(node -e 'const s=require("fs").readFileSync("/etc/resolv.conf","utf8");process.stdout.write(/^\s*nameserver\s+(?:127\.|::1(?:\s|$))/m.test(s)?"bad":"")') ]] || die 'loopback initial DNS is unsafe'
 
-owned_qa=0 owned_peer=0 owned_qa_dir=0 owned_peer_dir=0 owned_network=0 owner_file_ours=0 slirp_pid= dockerd_pid= initial_server= qa_server= watchdog_pid=
+owned_qa=0 owned_peer=0 owned_qa_dir=0 owned_peer_dir=0 owned_network=0 owner_file_ours=0 slirp_pid= slirp_birth= dockerd_pid= dockerd_birth= initial_server= initial_server_birth= qa_server= qa_server_birth= watchdog_pid= watchdog_birth=
 cleanup() {
   local result=$?; trap - EXIT INT TERM
-  [[ -z $watchdog_pid ]] || { kill "$watchdog_pid" 2>/dev/null || :; wait "$watchdog_pid" 2>/dev/null || :; }
-  [[ -z $qa_server ]] || { kill "$qa_server" 2>/dev/null || :; wait "$qa_server" 2>/dev/null || :; }
-  [[ -z $initial_server ]] || { kill "$initial_server" 2>/dev/null || :; wait "$initial_server" 2>/dev/null || :; }
-  if [[ $owned_network == 1 && -n $dockerd_pid && -d /proc/$dockerd_pid ]]; then
+  if [[ -n $watchdog_birth ]] && ! owned_signal "$watchdog_pid" "$watchdog_birth" '/usr/bin/bash,/usr/bin/sleep' "$initial_ns" 15 2>/dev/null; then result=1; fi
+  [[ -z $watchdog_pid ]] || wait "$watchdog_pid" 2>/dev/null || :
+  if [[ -n $qa_server_birth ]] && ! owned_signal "$qa_server" "$qa_server_birth" "$ip_exe,/usr/bin/node" "$initial_ns,${qa_ns:-$initial_ns}" 15 2>/dev/null; then result=1; fi
+  [[ -z $qa_server ]] || wait "$qa_server" 2>/dev/null || :
+  if [[ -n $initial_server_birth ]] && ! owned_signal "$initial_server" "$initial_server_birth" '/usr/bin/node' "$initial_ns" 15 2>/dev/null; then result=1; fi
+  [[ -z $initial_server ]] || wait "$initial_server" 2>/dev/null || :
+  if [[ $owned_network == 1 && -n $dockerd_birth ]] && owned_signal "$dockerd_pid" "$dockerd_birth" '/usr/bin/dockerd' "$qa_ns" 0 2>/dev/null; then
     timeout 10 ip netns exec sabalanerp-qa docker --host unix:///run/docker.sock network rm qa439-probe >/dev/null 2>&1 || result=1
   fi
-  if [[ -n $dockerd_pid ]]; then
-    kill -TERM "$dockerd_pid" 2>/dev/null || :
-    for ((i=0; i<30 && -d /proc/$dockerd_pid; i++)); do sleep 0.2; done
-    if [[ -d /proc/$dockerd_pid ]]; then kill -KILL "$dockerd_pid" 2>/dev/null || :; result=1; fi
+  if [[ -n $dockerd_birth ]]; then
+    owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 15 2>/dev/null || result=1
+    for ((i=0; i<30; i++)); do
+      owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 0 2>/dev/null || break
+      sleep 0.2
+    done
+    if owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 0 2>/dev/null; then
+      owned_signal "$dockerd_pid" "$dockerd_birth" "$ip_exe,/usr/bin/dockerd" "$initial_ns,${qa_ns:-$initial_ns}" 9 2>/dev/null || :
+      result=1
+    fi
     wait "$dockerd_pid" 2>/dev/null || :
   fi
-  [[ -z $slirp_pid ]] || { kill -TERM "$slirp_pid" 2>/dev/null || :; wait "$slirp_pid" 2>/dev/null || :; }
+  if [[ -n $slirp_birth ]]; then owned_signal "$slirp_pid" "$slirp_birth" '/usr/bin/slirp4netns' "$initial_ns" 15 2>/dev/null || result=1; fi
+  [[ -z $slirp_pid ]] || wait "$slirp_pid" 2>/dev/null || :
   if [[ $owned_peer == 1 ]]; then ip netns del sabalanerp-qa-probe 2>/dev/null || result=1; fi
   if [[ $owned_qa == 1 ]]; then ip netns del sabalanerp-qa 2>/dev/null || result=1; fi
   if [[ $owned_peer_dir == 1 ]]; then rm -f /etc/netns/sabalanerp-qa-probe/resolv.conf; rmdir /etc/netns/sabalanerp-qa-probe 2>/dev/null || result=1; fi
   if [[ $owned_qa_dir == 1 ]]; then rm -f /etc/netns/sabalanerp-qa/resolv.conf; rmdir /etc/netns/sabalanerp-qa 2>/dev/null || result=1; fi
   if [[ -e $evidence/initial-netns.before ]]; then
     snapshot after || result=1
-    for item in initial-netns initial-iptables-v4 initial-iptables-v6 initial-routes-v4 initial-routes-v6 initial-links host-pid1 host-wsl-config; do
+    for item in initial-netns initial-iptables-v4 initial-iptables-v6 initial-routes-v4 initial-routes-v6 initial-links host-pid1 host-pid1-exe host-wsl-config; do
       cmp -s "$evidence/$item.before" "$evidence/$item.after" || result=1
     done
   fi
@@ -59,7 +75,8 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
-( sleep 180; kill -TERM "$$" ) & watchdog_pid=$!
+( sleep 180; owned_signal "$$" "$owner_birth" '/usr/bin/bash' "$initial_ns" 15 ) & watchdog_pid=$!
+watchdog_birth=$(birth_of "$watchdog_pid") || die 'watchdog birth unavailable'
 
 snapshot() {
   local phase=$1
@@ -70,6 +87,7 @@ snapshot() {
   ip -6 route show table all > "$evidence/initial-routes-v6.$phase"
   ip -details link show > "$evidence/initial-links.$phase"
   cat /proc/1/comm > "$evidence/host-pid1.$phase"
+  readlink /proc/1/exe > "$evidence/host-pid1-exe.$phase"
   cat /etc/wsl.conf > "$evidence/host-wsl-config.$phase"
 }
 snapshot before
@@ -81,6 +99,7 @@ mkdir /etc/netns/sabalanerp-qa
 owned_qa_dir=1
 printf 'nameserver 10.0.2.3\n' > /etc/netns/sabalanerp-qa/resolv.conf
 slirp4netns --configure --disable-host-loopback --netns-type=path /run/netns/sabalanerp-qa tap0 >/dev/null 2>&1 & slirp_pid=$!
+slirp_birth=$(birth_of "$slirp_pid") || die 'slirp birth unavailable'
 for ((i=0; i<50; i++)); do
   kill -0 "$slirp_pid" 2>/dev/null || die 'slirp exited'
   if ip -n sabalanerp-qa link show tap0 >/dev/null 2>&1; then break; fi
@@ -91,6 +110,7 @@ qa_ns=$(stat -c 'net:[%i]' /run/netns/sabalanerp-qa)
 [[ $qa_ns != "$initial_ns" && $qa_ns == "$(ip netns exec sabalanerp-qa readlink /proc/self/ns/net)" ]] || die 'QA namespace identity mismatch'
 
 ip netns exec sabalanerp-qa dockerd --host=unix:///run/docker.sock --data-root=/var/lib/docker --pidfile=/run/docker.pid --bridge=none --iptables=true >/dev/null 2>&1 & dockerd_pid=$!
+dockerd_birth=$(birth_of "$dockerd_pid") || die 'dockerd birth unavailable'
 for ((i=0; i<100; i++)); do
   kill -0 "$dockerd_pid" 2>/dev/null || die 'owned dockerd exited'
   if [[ -S /run/docker.sock && -f /run/docker.pid ]] && timeout 2 ip netns exec sabalanerp-qa docker --host unix:///run/docker.sock info --format '{{.ID}}' >/dev/null 2>&1; then break; fi
@@ -137,7 +157,9 @@ timeout 20 ip netns exec sabalanerp-qa-probe curl --noproxy '*' --proxy '' --pro
 # Positive controls make the negative loopback checks meaningful. The only
 # listener in each namespace binds 127.0.0.1 and is killed during teardown.
 node -e 'require("http").createServer((_,r)=>r.end("initial-ok")).listen(43991,"127.0.0.1")' >/dev/null 2>&1 & initial_server=$!
+initial_server_birth=$(birth_of "$initial_server") || die 'initial server birth unavailable'
 ip netns exec sabalanerp-qa node -e 'require("http").createServer((_,r)=>r.end("qa-ok")).listen(43992,"127.0.0.1")' >/dev/null 2>&1 & qa_server=$!
+qa_server_birth=$(birth_of "$qa_server") || die 'QA server birth unavailable'
 sleep 0.3
 [[ $(timeout 3 curl --noproxy '*' --silent http://127.0.0.1:43991) == initial-ok ]] || die 'initial loopback positive control failed'
 [[ $(timeout 3 ip netns exec sabalanerp-qa curl --noproxy '*' --silent http://127.0.0.1:43992) == qa-ok ]] || die 'QA loopback positive control failed'
@@ -148,7 +170,8 @@ printf 'positive initial/QA listeners; negative slirp gateway, private peer, ini
 
 printf 'PASS: bounded private bridge, direct ClamAV DNS/HTTPS and loopback controls; Desktop census, backup endpoint and teardown require independent verification\n'
 if [[ $hold == --hold ]]; then
-  kill "$watchdog_pid" 2>/dev/null || :; wait "$watchdog_pid" 2>/dev/null || :; watchdog_pid=
+  owned_signal "$watchdog_pid" "$watchdog_birth" '/usr/bin/bash,/usr/bin/sleep' "$initial_ns" 15 || die 'watchdog identity changed'
+  wait "$watchdog_pid" 2>/dev/null || :; watchdog_pid= watchdog_birth=
   umask 077
   owner_birth=$(sed 's/^.*) //' "/proc/$$/stat" | awk '{print $20}')
   daemon_birth=$(sed 's/^.*) //' "/proc/$dockerd_pid/stat" | awk '{print $20}')
@@ -156,6 +179,6 @@ if [[ $hold == --hold ]]; then
   ( set -C; printf '%s\n' "$owner_record" > "$owner_file" ) || die 'owner record already exists'
   owner_file_ours=1
   printf 'HOLD: owner PID %s; private namespace %s; stop only with qa-netns-stop.sh\n' "$$" "$qa_ns"
-  while kill -0 "$dockerd_pid" 2>/dev/null && kill -0 "$slirp_pid" 2>/dev/null; do sleep 1; done
+  while owned_signal "$dockerd_pid" "$dockerd_birth" '/usr/bin/dockerd' "$qa_ns" 0 2>/dev/null && owned_signal "$slirp_pid" "$slirp_birth" '/usr/bin/slirp4netns' "$initial_ns" 0 2>/dev/null; do sleep 1; done
   die 'owned daemon or slirp exited'
 fi

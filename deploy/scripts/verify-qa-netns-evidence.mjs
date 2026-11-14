@@ -7,7 +7,7 @@ const shared = [
   'initial-netns', 'initial-iptables-v4', 'initial-iptables-v6',
   'initial-routes-v4', 'initial-routes-v6', 'initial-links',
   'desktop-netns', 'desktop-docker-id', 'desktop-service-census',
-  'local-service-census', 'host-pid1', 'host-wsl-config',
+  'local-service-census', 'host-pid1', 'host-pid1-exe', 'host-wsl-config',
 ];
 
 function read(root, name) {
@@ -33,8 +33,9 @@ try {
     const after = read(root, `${name}.after`);
     if (!before.equals(after)) throw new Error(`shared state changed: ${name}`);
   }
-  if (read(root, 'host-pid1.after').toString('utf8').trim() !== 'init') {
-    throw new Error('unexpected PID 1: expected the pinned no-systemd WSL host');
+  if (!['init', 'init(sabalanerp'].includes(read(root, 'host-pid1.after').toString('utf8').trim()) ||
+      read(root, 'host-pid1-exe.after').toString('utf8').trim() !== '/init') {
+    throw new Error('unexpected PID 1: expected the pinned no-systemd WSL init');
   }
   const config = read(root, 'host-wsl-config.after').toString('utf8');
   let section = '';

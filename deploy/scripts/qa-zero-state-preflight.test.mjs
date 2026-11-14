@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assertNoSystemdWslConfig, inspectCustodyPath, validateManifest } from './qa-zero-state-preflight.mjs';
+import { assertNoSystemdWslConfig, assertPinnedWslInit, inspectCustodyPath, validateManifest } from './qa-zero-state-preflight.mjs';
 
 const initial = 'net:[4026531833]';
 const packageHash = 'c294a4df952b9ae54e19e0ab19ac09a7e398fbf7aa8969cfcae07f92dc4f30ac';
@@ -53,6 +53,10 @@ test('root-owned mode 0400 file in private custody passes path inspection', () =
   assert.doesNotThrow(() => inspectCustodyPath('/srv/sabalanerp-qa/pinned.json', '/srv/sabalanerp-qa', fakeCustody(), [0o400, 0o600])));
 test('single no-systemd boot setting passes', () =>
   assert.doesNotThrow(() => assertNoSystemdWslConfig('[boot]\nsystemd=false\n')));
+test('pinned WSL init accepts the observed truncated comm and /init executable', () =>
+  assert.doesNotThrow(() => assertPinnedWslInit('init(sabalanerp', '/init')));
+test('PID 1 with matching comm but a different executable refuses', () =>
+  assert.throws(() => assertPinnedWslInit('init(sabalanerp', '/usr/lib/systemd/systemd')));
 test('duplicate boot section with conflicting systemd setting refuses', () =>
   assert.throws(() => assertNoSystemdWslConfig('[boot]\nsystemd=false\n[boot]\nsystemd=true\n')));
 test('duplicate systemd setting in one boot section refuses', () =>

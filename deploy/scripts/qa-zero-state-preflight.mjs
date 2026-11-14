@@ -79,10 +79,15 @@ export function assertNoSystemdWslConfig(config) {
   }
   if (bootSections !== 1 || systemd.length !== 1 || systemd[0] !== 'false') refuse('WSL boot mode must contain exactly one systemd=false');
 }
+export function assertPinnedWslInit(comm, exe) {
+  if (!['init', 'init(sabalanerp'].includes(comm) || exe !== '/init') {
+    refuse('PID 1 is not the pinned WSL init executable');
+  }
+}
 function zero() {
   if (process.getuid?.() !== 0) refuse('root required');
   if (process.env.WSL_DISTRO_NAME !== 'sabalanerp-qa-debian') refuse('unexpected WSL distro');
-  if (fs.readFileSync('/proc/1/comm', 'utf8').trim() !== 'init') refuse('PID 1 is not WSL init');
+  assertPinnedWslInit(fs.readFileSync('/proc/1/comm', 'utf8').trim(), fs.readlinkSync('/proc/1/exe'));
   assertNoSystemdWslConfig(fs.readFileSync('/etc/wsl.conf', 'utf8'));
   const initial = fs.readlinkSync('/proc/self/ns/net');
   if (initial !== 'net:[4026531833]' || fs.readlinkSync('/proc/1/ns/net') !== initial) refuse('initial namespace changed');

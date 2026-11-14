@@ -10,7 +10,7 @@ const shared = [
   'initial-netns', 'initial-iptables-v4', 'initial-iptables-v6',
   'initial-routes-v4', 'initial-routes-v6', 'initial-links',
   'desktop-netns', 'desktop-docker-id', 'desktop-service-census',
-  'local-service-census', 'host-pid1', 'host-wsl-config',
+  'local-service-census', 'host-pid1', 'host-pid1-exe', 'host-wsl-config',
 ];
 
 function withEvidence(run) {
@@ -20,7 +20,8 @@ function withEvidence(run) {
       for (const phase of ['before', 'after']) {
         fs.writeFileSync(path.join(root, `${name}.${phase}`),
           name.endsWith('netns') ? 'net:[4026531833]\n'
-            : name === 'host-pid1' ? 'init\n'
+            : name === 'host-pid1' ? 'init(sabalanerp\n'
+              : name === 'host-pid1-exe' ? '/init\n'
               : name === 'host-wsl-config' ? '[boot]\nsystemd=false\n'
                 : `${name}: stable\n`);
       }
@@ -73,6 +74,11 @@ test('systemd host refuses even if other snapshots match', () => withEvidence((r
 
 test('missing host init proof refuses', () => withEvidence((root, check) => {
   fs.unlinkSync(path.join(root, 'host-pid1.before'));
+  assert.notEqual(check().status, 0);
+}));
+
+test('a non-WSL PID 1 executable refuses', () => withEvidence((root, check) => {
+  fs.writeFileSync(path.join(root, 'host-pid1-exe.after'), '/usr/lib/systemd/systemd\n');
   assert.notEqual(check().status, 0);
 }));
 

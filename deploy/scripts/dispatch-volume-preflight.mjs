@@ -38,7 +38,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     assert.equal(backend.Id, id, 'DISPATCH_PREVIOUS_BACKEND_ID_INVALID');
     const mounted = backend.Mounts?.some(mount => mount.Destination === target);
     const legacyEntry = mounted ? '' : execFileSync('docker', ['exec', id, 'sh', '-c',
-      'if [ -e /app/storage/dispatch-documents ] || [ -L /app/storage/dispatch-documents ]; then find /app/storage/dispatch-documents -mindepth 1 -print -quit; fi'],
+      'p=/app/storage/dispatch-documents; if [ -e "$p" ] || [ -L "$p" ]; then if [ -L "$p" ] || [ ! -d "$p" ]; then printf "%s\\n" "$p"; else find "$p" -mindepth 1 -print -quit; fi; fi'],
     { encoding: 'utf8', timeout: 30_000 }).trim();
     assertDispatchVolumeTransition(config, backend, legacyEntry);
   } catch (error) {

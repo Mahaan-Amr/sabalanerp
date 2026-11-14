@@ -39,6 +39,62 @@ class LegacyGuards(unittest.TestCase):
         bridge.children.clear()
         bridge.interrupted = False
 
+    def test_qa_compose_requires_revalidated_exact_private_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compose = root / 'docker-compose.rehearsal.yml'
+            compose.write_text('services: {}\n')
+            environment = root / 'qa.env'
+            environment.write_text('DOMAIN=erp.qa.test\n')
+            plan = root / 'plan.json'
+            plan.write_text('{}')
+            selector = root / 'qa-rehearsal-target.mjs'
+            sha = 'a' * 64
+            settings = {'DEPLOYMENT_QA_REHEARSAL_PLAN_FILE': str(plan),
+                        'DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256': sha}
+            with patch.object(bridge.sys, 'platform', 'linux'), patch.object(bridge.os, 'getuid', return_value=0), \
+                    patch.object(bridge, 'proc_identity', return_value={'pid': 100}), \
+                    patch.object(bridge.os, 'readlink', return_value='pid:[100]'), \
+                    patch.object(bridge.Path, 'read_text', return_value='boot-id'), \
+                    patch.object(bridge.OriginalHost, 'assert_original'), \
+                    patch.object(bridge, 'observed', return_value=b'docker-compose.rehearsal.yml\n') as run, \
+                    patch.object(bridge, '__file__', str(root / 'legacy-backend-signal.py')):
+                with patch.dict(os.environ, settings, clear=True):
+                    host = bridge.OriginalHost(str(compose), str(environment))
+                self.assertEqual(host.base, compose)
+                run.assert_called_once_with(['node', str(selector), str(plan), sha, str(root), str(environment)],
+                                            role='qa-target-selector')
+                for bad in [{}, {'DEPLOYMENT_QA_REHEARSAL_PLAN_FILE': str(plan)},
+                            {'DEPLOYMENT_QA_REHEARSAL_PLAN_FILE': str(plan),
+                             'DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256': 'bad'}]:
+                    run.reset_mock()
+                    with patch.dict(os.environ, bad, clear=True), self.assertRaises(RuntimeError):
+                        bridge.OriginalHost(str(compose), str(environment))
+                    run.assert_not_called()
+                with patch.dict(os.environ, settings, clear=True), \
+                        patch.object(bridge, 'observed', return_value=b'docker-compose.prod.yml\n'):
+                    with self.assertRaises(RuntimeError):
+                        bridge.OriginalHost(str(compose), str(environment))
+
+    def test_qa_plan_cannot_select_non_rehearsal_compose(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compose = root / 'other.yml'
+            compose.touch()
+            environment = root / 'qa.env'
+            environment.touch()
+            with patch.object(bridge.sys, 'platform', 'linux'), patch.object(bridge.os, 'getuid', return_value=0), \
+                    patch.object(bridge, 'proc_identity', return_value={'pid': 100}), \
+                    patch.object(bridge.os, 'readlink', return_value='pid:[100]'), \
+                    patch.object(bridge.Path, 'read_text', return_value='boot-id'), \
+                    patch.object(bridge.OriginalHost, 'assert_original'), \
+                    patch.object(bridge, 'observed') as run, \
+                    patch.dict(os.environ, {'DEPLOYMENT_QA_REHEARSAL_PLAN_FILE': str(root / 'plan'),
+                                             'DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256': 'a' * 64}, clear=True):
+                with self.assertRaises(RuntimeError):
+                    bridge.OriginalHost(str(compose), str(environment))
+                run.assert_not_called()
+
     def test_known_legacy_image_records_accepted_sms_risk_without_claiming_completion(self):
         _, snapshot = fixture()
         receipt = bridge.legacy_effect_receipt(snapshot)

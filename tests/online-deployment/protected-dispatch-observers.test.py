@@ -2,6 +2,9 @@ import importlib.util
 from pathlib import Path
 import sys
 import unittest
+import os
+import tempfile
+from unittest.mock import patch
 
 source=Path(__file__).resolve().parents[2]/'deploy/scripts/protected-dispatch-root-prepare.py'
 
@@ -12,6 +15,32 @@ def module():
 
 
 class OriginalObserverTests(unittest.TestCase):
+    def test_private_qa_compose_is_selected_only_by_validated_plan(self):
+        owner=module()
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            base=root/'docker-compose.rehearsal.yml';base.touch()
+            env=root/'qa.env';env.touch()
+            plan=root/'plan.json';plan.touch()
+            selector=root/'qa-rehearsal-target.mjs'
+            settings={'DEPLOYMENT_QA_REHEARSAL_PLAN_FILE':str(plan),
+                      'DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256':'a'*64}
+            with patch.object(owner,'__file__',str(root/'protected-dispatch-root-prepare.py')), \
+                    patch.object(owner,'observed',return_value=b'docker-compose.rehearsal.yml\n') as observed:
+                with patch.dict(os.environ,settings,clear=True):
+                    owner.validate_compose(base,env)
+                observed.assert_called_once_with(['node',str(selector),str(plan),'a'*64,str(root),str(env)])
+                for bad in [{},{'DEPLOYMENT_QA_REHEARSAL_PLAN_FILE':str(plan)},
+                            {'DEPLOYMENT_QA_REHEARSAL_PLAN_FILE':str(plan),
+                             'DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256':'bad'}]:
+                    observed.reset_mock()
+                    with patch.dict(os.environ,bad,clear=True),self.assertRaises(RuntimeError):
+                        owner.validate_compose(base,env)
+                    observed.assert_not_called()
+                with patch.dict(os.environ,settings,clear=True), \
+                        patch.object(owner,'observed',return_value=b'docker-compose.prod.yml\n'):
+                    with self.assertRaises(RuntimeError):owner.validate_compose(base,env)
+
     def test_actual_original_child_closes_before_nonzero_is_rejected(self):
         owner=module()
         with self.assertRaisesRegex(RuntimeError,'PROTECTED_DISPATCH_ROOT_UNPROVEN'):

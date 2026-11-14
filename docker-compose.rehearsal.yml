@@ -20,6 +20,17 @@ services:
     extends:
       file: docker-compose.prod.yml
       service: backend
+    # The sealed QA plan may deliberately fail only the candidate's readiness
+    # check for the separate rollback rehearsal. Empty values preserve the
+    # real /api/ready check; the retained old image never matches the target.
+    environment:
+      QA_REHEARSAL_FAIL_BACKEND_COMMIT: ${QA_REHEARSAL_FAIL_BACKEND_COMMIT:-}
+      QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH: ${QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH:-}
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const e=process.env;const c=e.QA_REHEARSAL_FAIL_BACKEND_COMMIT||'';const h=e.QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH||'';const armed=c.length===40&&h.length===64&&!/[^a-f0-9]/.test(c+h);if(armed&&e.APP_COMMIT===c&&e.PERFORMANCE_RELEASE_SOURCE_HASH===h)process.exit(51);require('http').get({hostname:'127.0.0.1',port:Number(e.PORT)||5000,path:'/api/ready'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));\""]
+      interval: 15s
+      timeout: 8s
+      retries: 8
   deployment:
     extends:
       file: docker-compose.prod.yml

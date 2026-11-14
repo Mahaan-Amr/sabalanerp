@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertQaRemoteMountAtRuntime } from './qa-remote-mount-guard.mjs';
+import { performanceSourceHash } from '../../scripts/performance-source-identity.mjs';
 
 const COMPOSE_FILE = 'docker-compose.rehearsal.yml';
 const SERVICE_NAMES = ['backend', 'clamav', 'deployment', 'frontend', 'inquiry', 'nginx', 'postgres'];
@@ -157,6 +158,9 @@ export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, envir
 }
 
 export function validateQaRuntimeEnvironment(environment, inherited) {
+  for (const name of ['QA_REHEARSAL_FAIL_BACKEND_COMMIT', 'QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH']) {
+    if (Object.hasOwn(inherited, name)) assert.equal(inherited[name], environment[name] || '');
+  }
   for (const name of [
     'WEB_PUSH_VAPID_SUBJECT', 'WEB_PUSH_VAPID_PUBLIC_KEY', 'WEB_PUSH_VAPID_PRIVATE_KEY',
     'TAXPAYER_DELIVERY_BROKER_ENDPOINT', 'TAXPAYER_BROKER_URL',
@@ -244,6 +248,14 @@ export function validateQaTargetBinding(plan, observed) {
   }
   assert.equal(env.BIOMETRIC_CONNECTOR_MODE, 'unconfigured');
   assert.equal(env.BIOMETRIC_WORKSTATIONS_JSON, '{}');
+  const faultCommit = env.QA_REHEARSAL_FAIL_BACKEND_COMMIT || '';
+  const faultSourceHash = env.QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH || '';
+  if (faultCommit || faultSourceHash) {
+    assert.match(faultCommit, /^[a-f0-9]{40}$/);
+    assert.match(faultSourceHash, /^[a-f0-9]{64}$/);
+    assert.equal(faultCommit, plan.applicationCommit);
+    assert.equal(faultSourceHash, observed.performanceSourceHash);
+  }
   return COMPOSE_FILE;
 }
 
@@ -273,7 +285,7 @@ function environmentValues(raw) {
   return result;
 }
 
-function main() {
+async function main() {
   assert.equal(process.argv.length, 6);
   const [planFile, planSha256, repositoryRoot, environmentFile] = process.argv.slice(2);
   assert.match(planSha256, /^[a-f0-9]{64}$/);
@@ -295,6 +307,9 @@ function main() {
     composeSha256: sha256(fs.readFileSync(composePath)),
     environmentSha256: sha256(envRaw), environment,
   };
+  if (environment.QA_REHEARSAL_FAIL_BACKEND_COMMIT || environment.QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH) {
+    observed.performanceSourceHash = await performanceSourceHash();
+  }
   validateQaTargetBinding(plan, observed);
   // Docker resolves bind sources in the daemon's mount namespace. A mounted
   // SSHFS path in this controller alone does not prove remote checkpointing.
@@ -320,5 +335,5 @@ function main() {
 }
 
 if (typeof process !== 'undefined' && process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { main(); } catch { process.stderr.write('QA_REHEARSAL_TARGET_INVALID\n'); process.exitCode = 1; }
+  main().catch(() => { process.stderr.write('QA_REHEARSAL_TARGET_INVALID\n'); process.exitCode = 1; });
 }

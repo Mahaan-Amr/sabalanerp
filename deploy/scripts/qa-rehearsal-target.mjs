@@ -120,6 +120,12 @@ export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, envir
         assert.equal(volume.source, binds[expected]);
         assert.ok(path.isAbsolute(volume.source));
         assert.equal(fs.realpathSync(volume.source), volume.source);
+        const sourceStat = fs.lstatSync(volume.source);
+        if (expected === 'secret-trust' || expected.startsWith('nginx-')) {
+          assert.equal(sourceStat.isFile(), true);
+        } else {
+          assert.equal(sourceStat.isDirectory(), true);
+        }
         const boundary = expected.startsWith('nginx-') ? repositoryRoot : qaRoot;
         assert.ok(volume.source.startsWith(`${boundary}${path.sep}`));
         if (!['remote-dir', 'report-dir'].includes(expected)) assert.equal(volume.read_only, true);

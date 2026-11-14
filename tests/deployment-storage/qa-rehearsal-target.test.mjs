@@ -115,6 +115,30 @@ test('QA target refuses an escaped rendered secret bind and symlinked custody so
   }
 });
 
+test('QA target refuses a directory in place of the Partner trust public-key file', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-trust-mount-test-'));
+  try {
+    const qaRoot = path.join(root, 'qa');
+    const repositoryRoot = path.join(root, 'repository');
+    const secretDir = path.join(qaRoot, 'secrets');
+    const trust = path.join(secretDir, 'partner-release-trust-public.der');
+    fs.mkdirSync(qaRoot);
+    fs.mkdirSync(repositoryRoot);
+    fs.mkdirSync(secretDir);
+    fs.writeFileSync(trust, 'public test fixture');
+    const config = { services: { backend: { volumes: renderedConfig().services.backend.volumes.map(volume =>
+      volume.target === '/run/deployment-secrets/partner-release-trust-public.der'
+        ? { ...volume, source: trust } : volume) } } };
+    const env = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir };
+    assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+    fs.rmSync(trust);
+    fs.mkdirSync(trust);
+    assert.throws(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('QA target rejects another Engine and a live SMS endpoint before controller selection', () => {
   const plan = {
     format: 'sabalan-qa-rehearsal-target/v2',

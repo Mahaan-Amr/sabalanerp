@@ -59,11 +59,31 @@ function readCustodyFile(file, exactMode) {
     return fs.readFileSync(fd);
   } finally { fs.closeSync(fd); }
 }
+export function assertNoSystemdWslConfig(config) {
+  if (typeof config !== 'string') refuse('invalid WSL configuration');
+  let section = '';
+  let bootSections = 0;
+  const systemd = [];
+  for (const raw of config.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+    const header = /^\[([^\]]+)\]$/.exec(line);
+    if (header) {
+      section = header[1].trim().toLowerCase();
+      if (section === 'boot') bootSections++;
+      continue;
+    }
+    const setting = /^([^=]+)=(.*)$/.exec(line);
+    if (!setting || !section) refuse('malformed WSL configuration');
+    if (section === 'boot' && setting[1].trim().toLowerCase() === 'systemd') systemd.push(setting[2].trim());
+  }
+  if (bootSections !== 1 || systemd.length !== 1 || systemd[0] !== 'false') refuse('WSL boot mode must contain exactly one systemd=false');
+}
 function zero() {
   if (process.getuid?.() !== 0) refuse('root required');
   if (process.env.WSL_DISTRO_NAME !== 'sabalanerp-qa-debian') refuse('unexpected WSL distro');
   if (fs.readFileSync('/proc/1/comm', 'utf8').trim() !== 'init') refuse('PID 1 is not WSL init');
-  if (!/^\[boot\]\s*systemd=false\s*$/m.test(fs.readFileSync('/etc/wsl.conf', 'utf8'))) refuse('systemd=false not pinned');
+  assertNoSystemdWslConfig(fs.readFileSync('/etc/wsl.conf', 'utf8'));
   const initial = fs.readlinkSync('/proc/self/ns/net');
   if (initial !== 'net:[4026531833]' || fs.readlinkSync('/proc/1/ns/net') !== initial) refuse('initial namespace changed');
   for (const path of ['/run/docker.sock', '/run/docker.pid', '/run/netns/sabalanerp-qa', '/etc/netns/sabalanerp-qa']) {

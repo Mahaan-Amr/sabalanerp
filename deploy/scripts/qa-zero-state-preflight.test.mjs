@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { inspectCustodyPath, validateManifest } from './qa-zero-state-preflight.mjs';
+import { assertNoSystemdWslConfig, inspectCustodyPath, validateManifest } from './qa-zero-state-preflight.mjs';
 
 const initial = 'net:[4026531833]';
 const packageHash = 'c294a4df952b9ae54e19e0ab19ac09a7e398fbf7aa8969cfcae07f92dc4f30ac';
@@ -51,3 +51,11 @@ test('symlink under private custody refuses even when its target could hash-pass
 });
 test('root-owned mode 0400 file in private custody passes path inspection', () =>
   assert.doesNotThrow(() => inspectCustodyPath('/srv/sabalanerp-qa/pinned.json', '/srv/sabalanerp-qa', fakeCustody(), [0o400, 0o600])));
+test('single no-systemd boot setting passes', () =>
+  assert.doesNotThrow(() => assertNoSystemdWslConfig('[boot]\nsystemd=false\n')));
+test('duplicate boot section with conflicting systemd setting refuses', () =>
+  assert.throws(() => assertNoSystemdWslConfig('[boot]\nsystemd=false\n[boot]\nsystemd=true\n')));
+test('duplicate systemd setting in one boot section refuses', () =>
+  assert.throws(() => assertNoSystemdWslConfig('[boot]\nsystemd=false\nsystemd=false\n')));
+test('later false setting cannot override an earlier true setting', () =>
+  assert.throws(() => assertNoSystemdWslConfig('[boot]\nsystemd=true\nsystemd=false\n')));

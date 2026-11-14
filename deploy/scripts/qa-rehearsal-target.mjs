@@ -42,12 +42,15 @@ function observeQaNetworkNamespace() {
   };
 }
 
-export function validateQaRenderedConfig(config) {
+export function validateQaRenderedConfig(config, planSha256) {
   assert.equal(config.name, 'sabalanerp');
   assert.deepEqual(keys(config.services), SERVICE_NAMES);
   assert.deepEqual(keys(config.networks), ['app_network', 'clamav_egress']);
   assert.equal(config.networks.app_network.internal, true);
   assert.notEqual(config.networks.clamav_egress.internal, true);
+  assert.equal(config.services.deployment.environment.SABALAN_BACKUP_TARGET, 'qa');
+  assert.match(config.services.deployment.environment.SABALAN_QA_PLAN_SHA256,/^[a-f0-9]{64}$/);
+  if(planSha256)assert.equal(config.services.deployment.environment.SABALAN_QA_PLAN_SHA256,planSha256);
   for (const service of SERVICE_NAMES) {
     assert.deepEqual(keys(config.services[service].networks), service === 'clamav'
       ? ['app_network', 'clamav_egress'] : ['app_network']);
@@ -186,6 +189,13 @@ export function validateQaTargetBinding(plan, observed) {
   }
   assert.equal(env.DEPLOYMENT_NGINX_BIND_ADDRESS, '127.0.0.1');
   assert.equal(env.DEPLOYMENT_BACKUP_HOST, plan.backupHost);
+  assert.equal(env.DEPLOYMENT_BACKUP_TARGET, 'qa');
+  assert.equal(env.DEPLOYMENT_BACKUP_USER, 'sabalan-qa-backup');
+  assert.equal(env.DEPLOYMENT_BACKUP_OPERATIONS_USER, 'sabalan-qa-backup-ops');
+  assert.equal(env.DEPLOYMENT_REMOTE_MOUNT_HOST, `${plan.qaRoot}/remote`);
+  for (const name of ['DEPLOYMENT_BACKUP_SSH_KEY_FILE', 'DEPLOYMENT_BACKUP_OPERATIONS_SSH_KEY_FILE', 'DEPLOYMENT_BACKUP_KNOWN_HOSTS_FILE']) {
+    assert.match(env[name], /^\/srv\/sabalanerp-qa\/ssh\/[a-zA-Z0-9_.-]+$/);
+  }
   const privatePaths = [
     'DEPLOYMENT_SECRET_DIR', 'DEPLOYMENT_REMOTE_MOUNT_HOST', 'DEPLOYMENT_REPORT_DIR_HOST',
     'DEPLOYMENT_BACKUP_SSH_KEY_FILE', 'DEPLOYMENT_BACKUP_OPERATIONS_SSH_KEY_FILE',
@@ -271,7 +281,7 @@ function main() {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
   }));
-  validateQaRenderedConfig(rendered);
+  validateQaRenderedConfig(rendered,planSha256);
   validateQaRenderedMounts(rendered, { qaRoot: plan.qaRoot, repositoryRoot, environment });
   process.stdout.write(`${COMPOSE_FILE}\n`);
 }

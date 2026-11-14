@@ -5,8 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import {enforceFilesystemRemoteRetention,readLocalCheckpointRetentionHolds,FilesystemRemoteCheckpointStore} from '../deploymentCheckpointStorage';
 import {withHealthyDrill} from './deploymentCheckpointDrill.fixture';
-import {parseBackupRetentionRequest,canonicalRetentionBytes,retentionSha256,verifyHostBackupRetentionReceipt} from '../deploymentBackupRetention';
+import {parseBackupRetentionRequest,canonicalRetentionBytes,retentionSha256,verifyHostBackupRetentionReceipt,backupRetentionTarget} from '../deploymentBackupRetention';
 const request={format:'sabalan-restricted-backup-retention-request/v1',deploymentId:'deploy-original',requestId:'a'.repeat(64),protectedCheckpointIds:['backup-held']};
+test('backup owner QA target selects only the separate root and FD9 lock',()=>{
+ assert.deepEqual(backupRetentionTarget('qa'),{root:'/srv/sabalanerp-qa-recovery/checkpoints',lock:'/run/lock/sabalan-qa-backup-storage.lock'});
+ assert.deepEqual(backupRetentionTarget(undefined),{root:'/srv/sabalanerp-recovery/checkpoints',lock:'/run/lock/sabalan-backup-storage.lock'});
+ for(const value of ['production','/srv/sabalanerp-recovery/checkpoints',null])assert.throws(()=>backupRetentionTarget(value));
+});
 test('fixed retention request cannot choose repository, command, duplicate holds or caller lock',()=>{
  assert.deepEqual(parseBackupRetentionRequest(canonicalRetentionBytes(request)),request);
  for(const row of [{...request,root:'/other'},{...request,command:'rm'},{...request,protectedCheckpointIds:['same','same']},{...request,requestId:'invalid'}])assert.throws(()=>parseBackupRetentionRequest(canonicalRetentionBytes(row)));
@@ -16,6 +21,14 @@ test('host receipt binds closed original SSH, request, stage and retained source
  const responseRaw=Buffer.concat([canonicalRetentionBytes(response),Buffer.from('\n')]);const receipt={format:'sabalan-original-host-backup-retention/v1',deploymentId:request.deploymentId,stage:'BEFORE_CHECKPOINT',request,originalSsh:{pid:20,code:0,signal:null},originalHostOwner:{pid:21,code:0,signal:null},originalPipesClosed:true,responseRawBase64:responseRaw.toString('base64'),responseSha256:retentionSha256(responseRaw)};
  const verify=(row:any,stage:any='BEFORE_CHECKPOINT')=>{const raw=canonicalRetentionBytes(row);return verifyHostBackupRetentionReceipt(raw,{sha256:retentionSha256(raw),deploymentId:request.deploymentId,stage});};assert.equal(verify(receipt).response.requestId,request.requestId);
  for(const row of [{...receipt,originalHostOwner:{pid:20,code:0,signal:null}},{...receipt,originalHostOwner:{pid:21,code:1,signal:null}},{...receipt,originalPipesClosed:false},{...receipt,originalSsh:{pid:20,code:1,signal:null}},{...receipt,responseSha256:'0'.repeat(64)}])assert.throws(()=>verify(row));assert.throws(()=>verify(receipt,'AFTER_CHECKPOINT'));
+});
+test('QA host receipt binds the separate QA root and refuses production root',()=>{
+ const response={format:'sabalan-original-backup-retention-result/v1',requestSha256:retentionSha256(canonicalRetentionBytes(request)),requestId:request.requestId,deploymentId:request.deploymentId,storageRoot:'/srv/sabalanerp-qa-recovery/checkpoints',originalPid:44,originalStorageLock:{device:'1',inode:'2',ownerUid:0,descriptor:9},retainedPoints:[]};
+ const wrap=()=>{const responseRaw=Buffer.concat([canonicalRetentionBytes(response),Buffer.from('\n')]);return {format:'sabalan-original-host-backup-retention/v1',qaPlanSha256:'f'.repeat(64),deploymentId:request.deploymentId,stage:'BEFORE_CHECKPOINT',request,originalSsh:{pid:20,code:0,signal:null},originalHostOwner:{pid:21,code:0,signal:null},originalPipesClosed:true,responseRawBase64:responseRaw.toString('base64'),responseSha256:retentionSha256(responseRaw)};};
+ const verify=(target:'qa'|undefined,plan='f'.repeat(64))=>{const raw=canonicalRetentionBytes(wrap());return verifyHostBackupRetentionReceipt(raw,{sha256:retentionSha256(raw),deploymentId:request.deploymentId,stage:'BEFORE_CHECKPOINT',target,qaPlanSha256:plan});};
+ assert.equal(verify('qa').response.storageRoot,response.storageRoot);
+ assert.throws(()=>verify(undefined));
+ assert.throws(()=>verify('qa','e'.repeat(64)));
 });
 test('production inspect never deletes; backup owner path normalizes actual archive root and respects additional local holds',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'owned-remote-retention-'));

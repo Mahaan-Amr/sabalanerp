@@ -14,6 +14,9 @@ const qaEnvironment = {
   NEXT_PUBLIC_API_URL: 'https://erp.qa.test',
   DEPLOYMENT_NGINX_BIND_ADDRESS: '127.0.0.1',
   DEPLOYMENT_BACKUP_HOST: 'qa-backup.test',
+  DEPLOYMENT_BACKUP_TARGET: 'qa',
+  DEPLOYMENT_BACKUP_USER: 'sabalan-qa-backup',
+  DEPLOYMENT_BACKUP_OPERATIONS_USER: 'sabalan-qa-backup-ops',
   DEPLOYMENT_SECRET_DIR: '/srv/sabalanerp-qa/secrets',
   DEPLOYMENT_REMOTE_MOUNT_HOST: '/srv/sabalanerp-qa/remote',
   DEPLOYMENT_REPORT_DIR_HOST: '/srv/sabalanerp-qa/reports',
@@ -27,7 +30,7 @@ const qaEnvironment = {
 
 function renderedConfig() {
   const output = execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp', '-f', 'docker-compose.rehearsal.yml', 'config', '--format', 'json'], {
-    env: { ...process.env, ...qaEnvironment },
+    env: { ...process.env, ...qaEnvironment, DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:'a'.repeat(64) },
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
   });
@@ -139,6 +142,9 @@ test('QA target rejects another Engine and a live SMS endpoint before controller
   }));
   assert.throws(() => validateQaTargetBinding(plan, {
     ...observed, environment: { ...qaEnvironment, DEPLOYMENT_REMOTE_MOUNT_HOST: '/srv/production/checkpoints' },
+  }));
+  assert.throws(() => validateQaTargetBinding(plan, {
+    ...observed, environment: { ...qaEnvironment, DEPLOYMENT_BACKUP_SSH_KEY_FILE: '/srv/sabalanerp-qa/secrets/production-key' },
   }));
 });
 

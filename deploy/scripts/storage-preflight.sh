@@ -27,7 +27,17 @@ case "$project" in ''|*[!a-z0-9_-]*) echo 'STORAGE_PROJECT_INVALID' >&2; exit 1;
 for value in "$backup_host" "$backup_user" "$operations_user"; do
   case "$value" in ''|-*|*[!a-zA-Z0-9._:-]*) echo 'STORAGE_BACKUP_HOST_INVALID' >&2; exit 1;; esac
 done
-[ "$backup_user" = sabalan-backup ] && [ "$operations_user" = sabalan-backup-ops ] || { echo 'STORAGE_BACKUP_ACCOUNT_INVALID' >&2; exit 1; }
+backup_target="$(env_value DEPLOYMENT_BACKUP_TARGET)"
+if [ "$backup_target" = qa ]; then
+  [ "$compose_file" = docker-compose.rehearsal.yml ] \
+    && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}" ] \
+    && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ] \
+    && [ "$backup_user" = sabalan-qa-backup ] \
+    && [ "$operations_user" = sabalan-qa-backup-ops ] || { echo 'STORAGE_QA_BACKUP_TARGET_INVALID' >&2; exit 1; }
+else
+  [ -z "$backup_target" ] || [ "$backup_target" = production ] || { echo 'STORAGE_BACKUP_TARGET_INVALID' >&2; exit 1; }
+  [ "$backup_user" = sabalan-backup ] && [ "$operations_user" = sabalan-backup-ops ] || { echo 'STORAGE_BACKUP_ACCOUNT_INVALID' >&2; exit 1; }
+fi
 [ -r "$backup_key" ] && [ -r "$operations_key" ] && [ -r "$backup_known_hosts" ] || { echo 'STORAGE_BACKUP_KEY_MISSING' >&2; exit 1; }
 recovery_root="$(docker volume inspect "${project}_backend_recovery" --format '{{.Mountpoint}}')"
 coordination_root="$(docker volume inspect "${project}_recovery_coordination" --format '{{.Mountpoint}}')"

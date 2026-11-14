@@ -13,7 +13,7 @@ function lock(){
 }
 async function main(){
  assert.equal(process.platform,'linux');assert.equal(process.getuid(),0);assert.equal(process.cwd(),'/opt/sabalanerp');
- const [host,user,key,knownHosts]=process.argv.slice(2);assert.equal(process.argv.length,6);assert.match(host,/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/);assert.equal(user,'sabalan-backup-ops');
+ const [host,user,key,knownHosts]=process.argv.slice(2);assert.equal(process.argv.length,6);assert.match(host,/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/);assert.ok(['sabalan-backup-ops','sabalan-qa-backup-ops'].includes(user));
  for(const file of [key,knownHosts]){assert.equal(fs.realpathSync(file),file);const s=fs.lstatSync(file);assert.ok(s.isFile()&&s.uid===0&&s.nlink===1&&(s.mode&0o022)===0);}
  const originalLock=lock(),chunks=[];let size=0;for await(const raw of process.stdin){size+=raw.length;assert.ok(size<=1024*1024);chunks.push(raw);}assert.ok(size>0);
  assert.equal(interrupted,null);

@@ -21,6 +21,9 @@ services:
     extends:
       file: docker-compose.prod.yml
       service: deployment
+    environment:
+      SABALAN_BACKUP_TARGET: qa
+      SABALAN_QA_PLAN_SHA256: ${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:?QA plan hash required}
   frontend:
     extends:
       file: docker-compose.prod.yml

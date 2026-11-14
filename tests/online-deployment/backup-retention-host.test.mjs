@@ -26,3 +26,16 @@ test('premaintenance configuration requires separate transfer and restricted ope
  }
  assert.throws(()=>readOriginalBackupRetentionSettings(Buffer.concat([encode(settings),Buffer.from('\nDEPLOYMENT_BACKUP_OPERATIONS_SSH_KEY_FILE=/other')])));
 });
+
+test('QA rehearsal uses only the pinned QA backup accounts and response root',()=>{
+ const settings={DEPLOYMENT_BACKUP_HOST:'backup-qa.example',DEPLOYMENT_BACKUP_TARGET:'qa',DEPLOYMENT_BACKUP_USER:'sabalan-qa-backup',DEPLOYMENT_BACKUP_OPERATIONS_USER:'sabalan-qa-backup-ops',DEPLOYMENT_BACKUP_SSH_KEY_FILE:'/srv/sabalanerp-qa/ssh/transfer',DEPLOYMENT_BACKUP_OPERATIONS_SSH_KEY_FILE:'/srv/sabalanerp-qa/ssh/operations',DEPLOYMENT_BACKUP_KNOWN_HOSTS_FILE:'/srv/sabalanerp-qa/ssh/known-hosts'};
+ const encode=value=>Buffer.from(Object.entries(value).map(([name,value])=>name+'='+value).join('\n'));
+ const parsed=readOriginalBackupRetentionSettings(encode(settings));
+ assert.equal(parsed.user,'sabalan-qa-backup-ops');
+ const value=response();value.storageRoot='/srv/sabalanerp-qa-recovery/checkpoints';
+ assert.deepEqual(validateOriginalBackupRetentionResponse(request,wire(value),parsed),value);
+ assert.throws(()=>validateOriginalBackupRetentionResponse(request,wire(response()),parsed));
+ for(const change of [value=>{value.DEPLOYMENT_BACKUP_USER='sabalan-backup';},value=>{value.DEPLOYMENT_BACKUP_OPERATIONS_USER='sabalan-backup-ops';},value=>{value.DEPLOYMENT_BACKUP_TARGET='production';}]){
+  const changed={...settings};change(changed);assert.throws(()=>readOriginalBackupRetentionSettings(encode(changed)));
+ }
+});

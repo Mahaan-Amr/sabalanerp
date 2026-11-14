@@ -20,8 +20,8 @@ function withEvidence(run) {
       for (const phase of ['before', 'after']) {
         fs.writeFileSync(path.join(root, `${name}.${phase}`),
           name.endsWith('netns') ? 'net:[4026531833]\n'
-            : name === 'host-pid1' ? 'systemd\n'
-              : name === 'host-wsl-config' ? '[boot]\nsystemd=true\n'
+            : name === 'host-pid1' ? 'init\n'
+              : name === 'host-wsl-config' ? '[boot]\nsystemd=false\n'
                 : `${name}: stable\n`);
       }
     }
@@ -63,10 +63,10 @@ test('Desktop network namespace change refuses', () => withEvidence((root, check
   assert.notEqual(check().status, 0);
 }));
 
-test('WSL init with systemd disabled refuses even if other snapshots match', () => withEvidence((root, check) => {
+test('systemd host refuses even if other snapshots match', () => withEvidence((root, check) => {
   for (const phase of ['before', 'after']) {
-    fs.writeFileSync(path.join(root, `host-pid1.${phase}`), 'init\n');
-    fs.writeFileSync(path.join(root, `host-wsl-config.${phase}`), '[boot]\nsystemd=false\n');
+    fs.writeFileSync(path.join(root, `host-pid1.${phase}`), 'systemd\n');
+    fs.writeFileSync(path.join(root, `host-wsl-config.${phase}`), '[boot]\nsystemd=true\n');
   }
   assert.notEqual(check().status, 0);
 }));

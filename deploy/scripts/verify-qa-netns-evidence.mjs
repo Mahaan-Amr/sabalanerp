@@ -33,8 +33,8 @@ try {
     const after = read(root, `${name}.after`);
     if (!before.equals(after)) throw new Error(`shared state changed: ${name}`);
   }
-  if (read(root, 'host-pid1.after').toString('utf8').trim() !== 'systemd') {
-    throw new Error('unsupported PID 1: the systemd runbook cannot operate');
+  if (read(root, 'host-pid1.after').toString('utf8').trim() !== 'init') {
+    throw new Error('unexpected PID 1: expected the pinned no-systemd WSL host');
   }
   const config = read(root, 'host-wsl-config.after').toString('utf8');
   let section = '';
@@ -44,8 +44,8 @@ try {
     if (line.startsWith('[') && line.endsWith(']')) section = line.slice(1, -1);
     else if (section === 'boot' && /^systemd\s*=/.test(line)) bootSystemd.push(line.split('=')[1].trim());
   }
-  if (bootSystemd.length !== 1 || bootSystemd[0] !== 'true') {
-    throw new Error('unsupported WSL boot mode: systemd must be explicitly true');
+  if (bootSystemd.length !== 1 || bootSystemd[0] !== 'false') {
+    throw new Error('unexpected WSL boot mode: systemd must be explicitly false');
   }
   const initial = namespace(read(root, 'initial-netns.after'), 'initial');
   const desktop = namespace(read(root, 'desktop-netns.after'), 'Desktop');

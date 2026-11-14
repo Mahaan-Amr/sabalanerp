@@ -2,7 +2,34 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { compileProtectedBridgeMigration } from '../protectedBridgeMigrations';
+import { compileProtectedBridgeMigration, compileProtectedCurrentRelease } from '../protectedBridgeMigrations';
+
+test('the complete current release is admitted only with its reviewed ordered SQL bytes', () => {
+  const directory = path.resolve(__dirname, '../../../prisma/migrations');
+  const names = [
+    '20261021120000_attendance_effective_rest_windows',
+    '20261025120000_preserve_exact_fulfillment_quantities',
+    '20261028090000_sales_dispatch_invoices',
+    '20261028093000_sales_invoice_evidence_constraints',
+    '20261028100000_sales_invoice_correction_evidence',
+    '20261031130000_purchasing_operational_workspace',
+    '20261101160000_supply_chain_exact_purchase_quantities',
+    '20261101170000_purchasing_private_attachments',
+    '20261102120000_accounting_financial_approval_receipts',
+    '20261104150000_purchasing_duty_optional_deadline',
+    '20261107000100_restart_dispatch_waybill_sequence_at_zero',
+    '20261107120000_legacy_waybill_reconstructions',
+  ];
+  const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
+  const release = compileProtectedCurrentRelease(files);
+  assert.deepEqual(release.map(row => row.name), names);
+  assert.ok(release.every(row => row.statements.length > 0));
+  assert.ok(release.flatMap(row => row.statements).every(sql => !/^\s*(?:BEGIN|COMMIT)\s*;?\s*$/i.test(sql)));
+  assert.ok(!release.at(-2)!.statements.join(' ').includes('setval('));
+  assert.throws(() => compileProtectedCurrentRelease(files.slice(1)), /CURRENT_RELEASE_SET_UNPROVEN/);
+  const changed = files.map(([name, bytes], index) => index === 3 ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
+  assert.throws(() => compileProtectedCurrentRelease(changed), /SQL_IDENTITY_MISMATCH/);
+});
 
 test('protected bootstrap accepts only the reviewed complete SQL bytes, including original comments and line endings', () => {
   for (const name of ['20261014120000_hr_vehicle_assignment_plans']) {

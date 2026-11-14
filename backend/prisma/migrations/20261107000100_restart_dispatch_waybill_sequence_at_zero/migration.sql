@@ -1,5 +1,4 @@
 -- Preserve every issued number. Refuse the restart if the new range is already in use.
-BEGIN;
 LOCK TABLE accounting_dispatch_waybills IN ACCESS EXCLUSIVE MODE;
 DO $$
 BEGIN
@@ -9,5 +8,5 @@ BEGIN
 END $$;
 
 ALTER SEQUENCE accounting_dispatch_waybill_number_seq MINVALUE 0;
-SELECT setval('accounting_dispatch_waybill_number_seq', 0, false);
-COMMIT;
+-- RESTART is transactional; setval would survive a failed migration transaction.
+ALTER SEQUENCE accounting_dispatch_waybill_number_seq RESTART WITH 0;

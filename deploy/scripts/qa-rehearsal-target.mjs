@@ -48,6 +48,7 @@ export function validateQaRenderedConfig(config, planSha256) {
   assert.deepEqual(keys(config.networks), ['app_network', 'clamav_egress']);
   assert.equal(config.networks.app_network.internal, true);
   assert.notEqual(config.networks.clamav_egress.internal, true);
+  assert.equal(config.services.clamav.extra_hosts, undefined);
   assert.equal(config.services.deployment.environment.SABALAN_BACKUP_TARGET, 'qa');
   assert.match(config.services.deployment.environment.SABALAN_QA_PLAN_SHA256,/^[a-f0-9]{64}$/);
   if(planSha256)assert.equal(config.services.deployment.environment.SABALAN_QA_PLAN_SHA256,planSha256);

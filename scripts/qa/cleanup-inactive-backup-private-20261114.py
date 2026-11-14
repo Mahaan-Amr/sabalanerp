@@ -179,7 +179,8 @@ def execute(plan):
         mounts_and_open_paths([path])
         shutil.rmtree(path)
         require(not path.exists(), f'TARGET_REMAINS: {path}')
-        with PROGRESS.open('a', encoding='utf8') as output:
+        fd = os.open(PROGRESS, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'a', encoding='utf8') as output:
             output.write(json.dumps({'removed': str(path), 'afterFreeBytes': disk_free()}, sort_keys=True) + '\n')
             output.flush()
             os.fsync(output.fileno())

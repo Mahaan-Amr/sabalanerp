@@ -1,5 +1,7 @@
 # Zero-data-loss production deployment
 
+For the next ordinary release after the first resumed protected update, use the [short operator runbook](protected-maintenance-next-update.md) together with the invariants below.
+
 ## Purpose
 
 Every production deployment must preserve every write acknowledged before maintenance begins and must either open one fully verified new release or restore one fully verified previous release. A partially promoted or unproven state never receives public traffic.

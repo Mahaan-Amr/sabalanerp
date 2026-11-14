@@ -1,6 +1,7 @@
 import importlib.util
 import unittest
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -64,10 +65,34 @@ class DispatchVolumeTransitionTests(unittest.TestCase):
         script = (SOURCE.parent / 'deploy.sh').read_text()
         stage = 'dispatch_volume_transition stage'
         attest = 'dispatch_volume_transition attest'
+        helper = script.index('dispatch_volume_transition() {')
+        flag = script.index('DISPATCH_TRANSITION_REQUIRED=1', helper)
+        invocation = script.index('transition_result="$(python3', helper)
+        self.assertLess(flag, invocation)
         self.assertLess(script.index(stage), script.index('storage-preflight.sh', script.index(stage)))
         drained = script.index('phase SERVICES_DRAINED')
         self.assertLess(drained, script.index(attest, drained))
         self.assertLess(script.index(attest, drained), script.index('capture_clamav_checkpoint\n', drained))
+
+    def test_failed_stage_after_volume_creation_keeps_legacy_recovery_guard(self):
+        script = (SOURCE.parent / 'deploy.sh').read_text()
+        start = script.index('dispatch_volume_transition() {')
+        helper = script[start:script.index('\n}\n', start) + 3]
+        result = subprocess.run(['sh', '-c', '''
+            DISPATCH_TRANSITION_REQUIRED=0
+            OPERATIONS_ROOT=/operations REPO_ROOT=/repository COMPOSE_FILE=docker-compose.prod.yml
+            ENV_FILE=/private/env DEPLOYMENT_PREVIOUS_BACKEND_IMAGE=sha256:old
+            compose() { printf '%s\\n' backendid; }
+            docker() { printf '%s\\n' oldcontainerid; }
+            python3() { echo VOLUME_CREATED >&2; return 9; }
+            ''' + helper + '''
+            dispatch_volume_transition stage
+            result=$?
+            printf '%s %s\\n' "$result" "$DISPATCH_TRANSITION_REQUIRED"
+            '''], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), '1 1')
+        self.assertIn('VOLUME_CREATED', result.stderr)
 
 
 if __name__ == '__main__':

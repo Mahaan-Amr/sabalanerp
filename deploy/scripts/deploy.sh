@@ -212,6 +212,10 @@ run_backend() {
 
 dispatch_volume_transition() {
   transition_mode="$1"
+  # Until the helper proves an already mounted volume, recovery must assume
+  # the old backend could have unmounted layer files. A failed stage may have
+  # allocated the new volume without returning its legacy result yet.
+  DISPATCH_TRANSITION_REQUIRED=1
   transition_backend="$(compose ps -a -q backend)"
   [ -n "${transition_backend}" ] || { echo 'DISPATCH_TRANSITION_UNPROVEN' >&2; return 1; }
   transition_backend="$(docker inspect --format '{{.Id}}' "${transition_backend}")" || return 1

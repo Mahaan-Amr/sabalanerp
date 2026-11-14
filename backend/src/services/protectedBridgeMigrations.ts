@@ -284,10 +284,24 @@ async function sequenceProof(tx: Prisma.TransactionClient, after: boolean) {
     WHERE schemaname='public' AND sequencename='accounting_dispatch_waybill_number_seq'`;
   if (rows.length !== 1 || rows[0].minimum !== BigInt(after ? 0 : 1)
     || rows[0].start !== 1000000001n) failure('PROTECTED_CURRENT_RELEASE_SEQUENCE_UNPROVEN');
+  let stateProof: string | null = null;
   if (after) {
     const state = await tx.$queryRaw<Array<{ last_value: bigint; is_called: boolean }>>`
       SELECT last_value,is_called FROM public.accounting_dispatch_waybill_number_seq`;
     if (state.length !== 1 || state[0].last_value !== 0n || state[0].is_called) failure('PROTECTED_CURRENT_RELEASE_SEQUENCE_UNPROVEN');
+    stateProof = sha(JSON.stringify({ minimum: rows[0].minimum.toString(), start: rows[0].start.toString(),
+      last: state[0].last_value.toString(), called: state[0].is_called }));
+  }
+  return stateProof;
+}
+
+type RetryProof = { quantityProofSha256: string | null; dutyRows: string | null; sequenceProofSha256: string | null };
+export function assertProtectedCurrentReleaseRetryEvidence(receipt: any, owner: Owner, observed: RetryProof) {
+  if (typeof receipt?.deploymentId !== 'string' || !receipt.deploymentId
+    || typeof receipt.releaseId !== 'string' || !receipt.releaseId) failure('PROTECTED_CURRENT_RELEASE_HISTORY_UNPROVEN');
+  if (receipt.deploymentId !== owner.deploymentId || receipt.releaseId !== owner.releaseId) return;
+  for (const key of ['quantityProofSha256', 'dutyRows', 'sequenceProofSha256'] as const) {
+    if (receipt[key] !== observed[key]) failure('PROTECTED_CURRENT_RELEASE_RETRY_DATA_DRIFT');
   }
 }
 
@@ -319,6 +333,13 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
         || receipt.order !== files.indexOf(file) || receipt.releaseSetSha256 !== sha(files.map(row => row.sha256).join('\n'))) {
         failure('PROTECTED_CURRENT_RELEASE_HISTORY_UNPROVEN');
       }
+      const sameOperation = receipt.deploymentId === owner.deploymentId && receipt.releaseId === owner.releaseId;
+      const observed: RetryProof = {
+        quantityProofSha256: sameOperation && quantityNames.has(file.name) ? await quantityProof(tx, file, false) : null,
+        dutyRows: sameOperation && file.name === dutyName ? await dutyProof(tx, true) : null,
+        sequenceProofSha256: sameOperation && file.name === waybillName ? await sequenceProof(tx, true) : null,
+      };
+      assertProtectedCurrentReleaseRetryEvidence(receipt, owner, observed);
       if (file === files[completed - 1] && receipt.catalogSha256 !== await catalog(tx, currentCatalogScope(files, completed - 1))) {
         failure('PROTECTED_CURRENT_RELEASE_SCHEMA_DRIFT');
       }
@@ -343,12 +364,13 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       for (const statement of file.statements) { assertBoundary(); await tx.$executeRawUnsafe(statement); }
       if (beforeQuantity && beforeQuantity !== await quantityProof(tx, file, false)) failure('PROTECTED_CURRENT_RELEASE_QUANTITY_CHANGED');
       if (beforeDuty !== null && beforeDuty !== await dutyProof(tx, true)) failure('PROTECTED_CURRENT_RELEASE_DUTY_ROWS_CHANGED');
-      if (file.name === waybillName) await sequenceProof(tx, true);
+      const sequenceProofSha256 = file.name === waybillName ? await sequenceProof(tx, true) : null;
       const catalogSha256 = await catalog(tx, currentCatalogScope(files, index));
       await assertLease(tx, owner, false); assertBoundary();
       const receipt = JSON.stringify({ format: 'sabalan-protected-current-release/v1', sqlSha256: file.sha256,
         releaseSetSha256: sha(files.map(row => row.sha256).join('\n')), order: index, catalogSha256,
-        quantityProofSha256: beforeQuantity });
+        deploymentId: owner.deploymentId, releaseId: owner.releaseId,
+        quantityProofSha256: beforeQuantity, dutyRows: beforeDuty, sequenceProofSha256 });
       await tx.$executeRaw`INSERT INTO public._prisma_migrations (id,checksum,finished_at,migration_name,logs,started_at,applied_steps_count)
         VALUES (${randomUUID()},${file.sha256},clock_timestamp(),${file.name},${receipt},clock_timestamp(),1)`;
       assertBoundary();

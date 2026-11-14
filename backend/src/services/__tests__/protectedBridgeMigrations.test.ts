@@ -2,7 +2,24 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { compileProtectedBridgeMigration, compileProtectedCurrentRelease } from '../protectedBridgeMigrations';
+import { compileProtectedBridgeMigration, compileProtectedCurrentRelease,
+  assertProtectedCurrentReleaseRetryEvidence } from '../protectedBridgeMigrations';
+
+test('same-operation retry rejects changed quantity, duty, or waybill evidence', () => {
+  const owner = { deploymentId: 'operation-1', releaseId: 'release-1', leaseToken: 'lease-1' };
+  const receipt = { deploymentId: owner.deploymentId, releaseId: owner.releaseId,
+    quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's' };
+  const observed = { quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's' };
+  assert.doesNotThrow(() => assertProtectedCurrentReleaseRetryEvidence(receipt, owner, observed));
+  for (const key of Object.keys(observed) as Array<keyof typeof observed>) {
+    assert.throws(() => assertProtectedCurrentReleaseRetryEvidence(receipt, owner,
+      { ...observed, [key]: 'changed' }), /RETRY_DATA_DRIFT/);
+  }
+  assert.throws(() => assertProtectedCurrentReleaseRetryEvidence({ ...receipt, deploymentId: '' }, owner, observed),
+    /HISTORY_UNPROVEN/);
+  assert.doesNotThrow(() => assertProtectedCurrentReleaseRetryEvidence(receipt,
+    { ...owner, deploymentId: 'later-operation' }, observed));
+});
 
 test('the complete current release is admitted only with its reviewed ordered SQL bytes', () => {
   const directory = path.resolve(__dirname, '../../../prisma/migrations');

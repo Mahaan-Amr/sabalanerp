@@ -1140,6 +1140,9 @@ DEPLOYMENT_POSTGRES_IMAGE="${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"
 DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
 export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE DEPLOYMENT_POSTGRES_IMAGE DEPLOYMENT_CLAMAV_IMAGE
 
+PERFORMANCE_SOURCE_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
+PERFORMANCE_SOURCE_HASH="$(node --input-type=module -e 'import { performanceSourceHash } from "./scripts/performance-source-identity.mjs"; console.log(await performanceSourceHash());')"
+export PERFORMANCE_SOURCE_COMMIT PERFORMANCE_SOURCE_HASH
 compose config --quiet
 echo "Building immutable release ${DEPLOYMENT_RELEASE_ID} before maintenance..."
 # Keep compiler heaps from competing with the live release on the production host.
@@ -1153,6 +1156,10 @@ DEPLOYMENT_FRONTEND_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYME
 DEPLOYMENT_INQUIRY_IMAGE="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_INQUIRY_IMAGE}")"
 DEPLOYMENT_NGINX_IMAGE="$(docker image inspect --format '{{.Id}}' nginx:1.27-alpine)"
 export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE
+for release_image in "${DEPLOYMENT_BACKEND_IMAGE}" "${DEPLOYMENT_FRONTEND_IMAGE}" "${DEPLOYMENT_INQUIRY_IMAGE}"; do
+  [ "$(docker image inspect --format '{{ index .Config.Labels "io.sabalan.performance.source-commit" }}' "${release_image}")" = "${PERFORMANCE_SOURCE_COMMIT}" ] || exit 1
+  [ "$(docker image inspect --format '{{ index .Config.Labels "io.sabalan.performance.source-hash" }}' "${release_image}")" = "${PERFORMANCE_SOURCE_HASH}" ] || exit 1
+done
 # Re-measure actual capacity after every image export has finished.
 # Insufficient space aborts while the current release still serves users.
 docker_available_kb="$(df -Pk "${docker_root}" | awk 'NR==2 {print $4}')"
@@ -1164,7 +1171,7 @@ docker_available_bytes=$((docker_available_kb * 1024))
 DEPLOYMENT_TARGET_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
 export DEPLOYMENT_TARGET_BACKEND_IMAGE
 PERFORMANCE_RELEASE_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
-PERFORMANCE_RELEASE_SOURCE_HASH="$(node --input-type=module -e 'import { performanceSourceHash } from "./scripts/performance-source-identity.mjs"; console.log(await performanceSourceHash());')"
+PERFORMANCE_RELEASE_SOURCE_HASH="${PERFORMANCE_SOURCE_HASH}"
 PERFORMANCE_RELEASE_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
 PERFORMANCE_RELEASE_FRONTEND_IMAGE="${DEPLOYMENT_FRONTEND_IMAGE}"
 PERFORMANCE_RELEASE_INQUIRY_IMAGE="${DEPLOYMENT_INQUIRY_IMAGE}"

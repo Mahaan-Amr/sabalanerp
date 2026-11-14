@@ -57,6 +57,8 @@ services:
       dockerfile: backend/Dockerfile
       network: host
       args:
+        PERFORMANCE_SOURCE_COMMIT: ${PERFORMANCE_SOURCE_COMMIT}
+        PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_SOURCE_HASH}
         DEBIAN_MIRROR: ${DEBIAN_MIRROR:-http://deb.debian.org/debian}
         DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-http://security.debian.org/debian-security}
         HTTP_PROXY: ${HTTP_PROXY:-}
@@ -202,6 +204,8 @@ services:
       dockerfile: frontend/Dockerfile
       network: host
       args:
+        PERFORMANCE_SOURCE_COMMIT: ${PERFORMANCE_SOURCE_COMMIT}
+        PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_SOURCE_HASH}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
         SABALAN_BROWSER_BUILD_ID: ${DEPLOYMENT_BROWSER_BUILD_ID:-}
         HTTP_PROXY: ${HTTP_PROXY:-}
@@ -233,6 +237,8 @@ services:
       dockerfile: deploy/docker/inquiry.Dockerfile
       network: host
       args:
+        PERFORMANCE_SOURCE_COMMIT: ${PERFORMANCE_SOURCE_COMMIT}
+        PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_SOURCE_HASH}
         DEBIAN_MIRROR: ${DEBIAN_MIRROR:-http://deb.debian.org/debian}
         DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-http://security.debian.org/debian-security}
     restart: unless-stopped

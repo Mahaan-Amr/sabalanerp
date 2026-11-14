@@ -12,6 +12,7 @@ script_dir=$(dirname "$0")
 signal_helper=$script_dir/qa-owned-pid-signal.pl
 source "$script_dir/qa-netns-resolver-parent.sh"
 source "$script_dir/qa-netns-owned-socket.sh"
+source "$script_dir/qa-netns-cgroup-membership.sh"
 [[ $EUID == 0 && ${WSL_DISTRO_NAME:-} == sabalanerp-qa-debian ]] || die 'pinned root WSL host required'
 [[ $(dirname -- "$evidence") == /srv/sabalanerp-qa && -d $evidence && ! -L $evidence ]] || die 'private existing evidence directory required'
 [[ $(stat -c '%u:%a' -- "$evidence") == 0:700 ]] || die 'unsafe evidence directory'
@@ -21,7 +22,7 @@ source "$script_dir/qa-netns-owned-socket.sh"
 # This is the last read-only gate before any namespace or Docker operation. It
 # refuses a pre-existing daemon, socket, PID file, container record or namespace.
 node "$script_dir/qa-zero-state-preflight.mjs" "$manifest" || die 'zero-state preflight failed'
-for command in ip slirp4netns dockerd docker curl node perl ss getent cut timeout findmnt mount iptables-save ip6tables-save; do
+for command in ip slirp4netns dockerd docker curl node perl ss getent cut sha256sum timeout findmnt mount iptables-save ip6tables-save; do
   command -v "$command" >/dev/null || die "missing $command"
 done
 [[ ! -e /run/netns/sabalanerp-qa-probe && ! -e /etc/netns/sabalanerp-qa-probe ]] || die 'probe namespace pre-exists'
@@ -96,7 +97,7 @@ snapshot() {
   findmnt -n -T /sys/fs/cgroup -o TARGET,SOURCE,FSTYPE,OPTIONS,PROPAGATION > "$evidence/initial-cgroup-mount.$phase"
   readlink /proc/self/ns/cgroup > "$evidence/initial-cgroup-ns.$phase"
   readlink /proc/self/ns/mnt > "$evidence/initial-mount-ns.$phase"
-  cat /proc/self/cgroup > "$evidence/initial-cgroup-membership.$phase"
+  qa_cgroup_capture_membership /proc/self/cgroup "$evidence/initial-cgroup-membership.$phase"
   cat /proc/1/comm > "$evidence/host-pid1.$phase"
   readlink /proc/1/exe > "$evidence/host-pid1-exe.$phase"
   cat /etc/wsl.conf > "$evidence/host-wsl-config.$phase"

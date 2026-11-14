@@ -14,15 +14,36 @@ const signal = path.join(here, 'qa-owned-pid-signal.pl');
 const resolverParent = path.join(here, 'qa-netns-resolver-parent.sh');
 const ownedSocket = path.join(here, 'qa-netns-owned-socket.sh');
 const cgroupChild = path.join(here, 'qa-netns-cgroup-child.sh');
+const cgroupMembership = path.join(here, 'qa-netns-cgroup-membership.sh');
 const bash = spawnSync('bash', ['--version'], { encoding: 'utf8' });
 const unavailable = bash.error || bash.status !== 0 ? 'bash unavailable' : false;
 
 test('the network owner scripts have valid Bash syntax', { skip: unavailable }, () => {
-  for (const script of [launcher, stopper, resolverParent, ownedSocket, cgroupChild]) {
+  for (const script of [launcher, stopper, resolverParent, ownedSocket, cgroupChild, cgroupMembership]) {
     const result = spawnSync('bash', ['-n', script], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
   }
 });
+
+test('Bash reads its own cgroup membership and records redacted evidence on mismatch',
+  { skip: process.platform !== 'linux' }, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qa-cgroup-membership-'));
+    const baseline = path.join(root, 'baseline');
+    const evidence = path.join(root, 'evidence');
+    try {
+      const run = body => spawnSync('bash', ['-c', `set -euo pipefail; source "$1"; ${body}`, '--', cgroupMembership, baseline, evidence], { encoding: 'utf8' });
+      const same = run('qa_cgroup_capture_membership /proc/self/cgroup "$2"; qa_cgroup_membership_matches /proc/self/cgroup "$2" "$3"');
+      assert.equal(same.status, 0, same.stderr);
+      assert.match(fs.readFileSync(evidence, 'utf8'), /match=yes/);
+      fs.writeFileSync(baseline, '0::/different\n');
+      const different = run('qa_cgroup_membership_matches /proc/self/cgroup "$2" "$3"');
+      assert.equal(different.status, 1);
+      assert.match(fs.readFileSync(evidence, 'utf8'), /match=no/);
+      assert.doesNotMatch(fs.readFileSync(evidence, 'utf8'), /0::\//);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 
 test('cgroup wrapper refuses the initial mount namespace before any mount',
   { skip: process.platform !== 'linux' || process.getuid?.() !== 0 || process.env.WSL_DISTRO_NAME !== 'sabalanerp-qa-debian' }, () => {

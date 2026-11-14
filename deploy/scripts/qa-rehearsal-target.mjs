@@ -12,6 +12,36 @@ const SERVICE_NAMES = ['backend', 'clamav', 'deployment', 'frontend', 'inquiry',
 const sha256 = raw => createHash('sha256').update(raw).digest('hex');
 const keys = value => Object.keys(value ?? {}).sort();
 
+export function validateQaNetworkNamespace(plan, observed) {
+  assert.equal(plan.networkNamespace, 'sabalanerp-qa');
+  assert.match(plan.networkNamespaceIdentity, /^net:\[[1-9][0-9]*\]$/);
+  assert.equal(observed.networkNamespaceIdentity, plan.networkNamespaceIdentity);
+  assert.equal(observed.namedNetworkNamespaceIdentity, plan.networkNamespaceIdentity);
+  assert.equal(observed.daemonNetworkNamespaceIdentity, plan.networkNamespaceIdentity);
+  assert.notEqual(observed.initialNetworkNamespaceIdentity, plan.networkNamespaceIdentity);
+  assert.equal(observed.daemonExecutable, '/usr/bin/dockerd');
+  for (const flag of ['--host=unix:///run/docker.sock', '--data-root=/var/lib/docker',
+    '--pidfile=/run/docker.pid', '--bridge=none', '--iptables=true']) {
+    assert.ok(observed.daemonArguments.includes(flag));
+  }
+  assert.equal(observed.daemonArguments.some(arg => arg.startsWith('--iptables=') && arg !== '--iptables=true'), false);
+}
+
+function observeQaNetworkNamespace() {
+  const daemonPid = fs.readFileSync('/run/docker.pid', 'utf8').trim();
+  assert.match(daemonPid, /^[1-9][0-9]*$/);
+  const daemonProc = `/proc/${daemonPid}`;
+  const daemonArguments = fs.readFileSync(`${daemonProc}/cmdline`, 'utf8').split('\0').filter(Boolean).slice(1);
+  const named = fs.statSync('/run/netns/sabalanerp-qa');
+  return {
+    networkNamespaceIdentity: fs.readlinkSync('/proc/self/ns/net'),
+    namedNetworkNamespaceIdentity: `net:[${named.ino}]`,
+    daemonNetworkNamespaceIdentity: fs.readlinkSync(`${daemonProc}/ns/net`),
+    initialNetworkNamespaceIdentity: fs.readlinkSync('/proc/1/ns/net'),
+    daemonExecutable: fs.readlinkSync(`${daemonProc}/exe`), daemonArguments,
+  };
+}
+
 export function validateQaRenderedConfig(config) {
   assert.equal(config.name, 'sabalanerp');
   assert.deepEqual(keys(config.services), SERVICE_NAMES);
@@ -119,9 +149,10 @@ export function validateQaRuntimeEnvironment(environment, inherited) {
 export function validateQaTargetBinding(plan, observed) {
   assert.deepEqual(keys(plan), [
     'applicationCommit', 'applicationTree', 'backupHost', 'composeSha256', 'domain', 'engineId', 'environmentSha256', 'format',
-    'hostname', 'inquiryDomain', 'machineId', 'productionBackupHost', 'qaRoot', 'repositoryRoot',
+    'hostname', 'inquiryDomain', 'machineId', 'networkNamespace', 'networkNamespaceIdentity',
+    'productionBackupHost', 'qaRoot', 'repositoryRoot',
   ]);
-  assert.equal(plan.format, 'sabalan-qa-rehearsal-target/v1');
+  assert.equal(plan.format, 'sabalan-qa-rehearsal-target/v2');
   assert.equal(observed.platform, 'linux');
   assert.equal(observed.uid, 0);
   assert.equal(plan.repositoryRoot, '/opt/sabalanerp');
@@ -207,6 +238,8 @@ function main() {
   const [planFile, planSha256, repositoryRoot, environmentFile] = process.argv.slice(2);
   assert.match(planSha256, /^[a-f0-9]{64}$/);
   const plan = JSON.parse(privateRead(planFile, planSha256, 65536));
+  const networkNamespace = observeQaNetworkNamespace();
+  validateQaNetworkNamespace(plan, networkNamespace);
   const envRaw = privateRead(environmentFile, plan.environmentSha256, 1024 * 1024);
   const environment = environmentValues(envRaw);
   validateQaRuntimeEnvironment(environment, process.env);

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { validateQaRenderedConfig, validateQaRenderedMounts, validateQaRuntimeEnvironment, validateQaTargetBinding } from '../../deploy/scripts/qa-rehearsal-target.mjs';
+import { validateQaNetworkNamespace, validateQaRenderedConfig, validateQaRenderedMounts, validateQaRuntimeEnvironment, validateQaTargetBinding } from '../../deploy/scripts/qa-rehearsal-target.mjs';
 
 const qaEnvironment = {
   DOMAIN: 'erp.qa.test',
@@ -48,8 +48,9 @@ test('QA target refuses shell variables that would override private Compose valu
 test('QA target refuses interpolation in a protected path even when the inherited variable is otherwise allowed', () => {
   const environment = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: '/srv/sabalanerp-qa/${QA_ESCAPE}' };
   assert.throws(() => validateQaTargetBinding({
-    format: 'sabalan-qa-rehearsal-target/v1', repositoryRoot: '/opt/sabalanerp', qaRoot: '/srv/sabalanerp-qa',
+    format: 'sabalan-qa-rehearsal-target/v2', repositoryRoot: '/opt/sabalanerp', qaRoot: '/srv/sabalanerp-qa',
     machineId: 'qa-machine-id', hostname: 'qa-host', engineId: 'qa-engine-id',
+    networkNamespace: 'sabalanerp-qa', networkNamespaceIdentity: 'net:[4026533001]',
     applicationCommit: 'c'.repeat(40), applicationTree: 'd'.repeat(40),
     composeSha256: 'a'.repeat(64), environmentSha256: 'b'.repeat(64),
     domain: 'erp.qa.test', inquiryDomain: 'inquiry.qa.test', backupHost: 'qa-backup.test',
@@ -106,12 +107,14 @@ test('QA target refuses an escaped rendered secret bind and symlinked custody so
 
 test('QA target rejects another Engine and a live SMS endpoint before controller selection', () => {
   const plan = {
-    format: 'sabalan-qa-rehearsal-target/v1',
+    format: 'sabalan-qa-rehearsal-target/v2',
     repositoryRoot: '/opt/sabalanerp',
     qaRoot: '/srv/sabalanerp-qa',
     machineId: 'qa-machine-id',
     hostname: 'qa-host',
     engineId: 'qa-engine-id',
+    networkNamespace: 'sabalanerp-qa',
+    networkNamespaceIdentity: 'net:[4026533001]',
     applicationCommit: 'c'.repeat(40),
     applicationTree: 'd'.repeat(40),
     composeSha256: 'a'.repeat(64),
@@ -136,5 +139,31 @@ test('QA target rejects another Engine and a live SMS endpoint before controller
   }));
   assert.throws(() => validateQaTargetBinding(plan, {
     ...observed, environment: { ...qaEnvironment, DEPLOYMENT_REMOTE_MOUNT_HOST: '/srv/production/checkpoints' },
+  }));
+});
+
+test('QA target requires the controller and native daemon inside the pinned private network namespace', () => {
+  const plan = { networkNamespace: 'sabalanerp-qa', networkNamespaceIdentity: 'net:[4026533001]' };
+  const observed = {
+    networkNamespaceIdentity: 'net:[4026533001]',
+    namedNetworkNamespaceIdentity: 'net:[4026533001]',
+    daemonNetworkNamespaceIdentity: 'net:[4026533001]',
+    initialNetworkNamespaceIdentity: 'net:[4026531833]',
+    daemonExecutable: '/usr/bin/dockerd',
+    daemonArguments: ['--host=unix:///run/docker.sock', '--data-root=/var/lib/docker',
+      '--pidfile=/run/docker.pid', '--bridge=none', '--iptables=true'],
+  };
+  assert.doesNotThrow(() => validateQaNetworkNamespace(plan, observed));
+  assert.throws(() => validateQaNetworkNamespace(plan, {
+    ...observed, initialNetworkNamespaceIdentity: observed.networkNamespaceIdentity,
+  }));
+  assert.throws(() => validateQaNetworkNamespace(plan, {
+    ...observed, daemonNetworkNamespaceIdentity: observed.initialNetworkNamespaceIdentity,
+  }));
+  assert.throws(() => validateQaNetworkNamespace(plan, {
+    ...observed, daemonArguments: observed.daemonArguments.filter(arg => arg !== '--iptables=true'),
+  }));
+  assert.throws(() => validateQaNetworkNamespace(plan, {
+    ...observed, namedNetworkNamespaceIdentity: 'net:[4026533002]',
   }));
 });

@@ -7,7 +7,7 @@ const shared = [
   'initial-netns', 'initial-iptables-v4', 'initial-iptables-v6',
   'initial-routes-v4', 'initial-routes-v6', 'initial-links',
   'desktop-netns', 'desktop-docker-id', 'desktop-service-census',
-  'local-service-census',
+  'local-service-census', 'host-pid1', 'host-wsl-config',
 ];
 
 function read(root, name) {
@@ -32,6 +32,20 @@ try {
     const before = read(root, `${name}.before`);
     const after = read(root, `${name}.after`);
     if (!before.equals(after)) throw new Error(`shared state changed: ${name}`);
+  }
+  if (read(root, 'host-pid1.after').toString('utf8').trim() !== 'systemd') {
+    throw new Error('unsupported PID 1: the systemd runbook cannot operate');
+  }
+  const config = read(root, 'host-wsl-config.after').toString('utf8');
+  let section = '';
+  const bootSystemd = [];
+  for (const raw of config.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith('[') && line.endsWith(']')) section = line.slice(1, -1);
+    else if (section === 'boot' && /^systemd\s*=/.test(line)) bootSystemd.push(line.split('=')[1].trim());
+  }
+  if (bootSystemd.length !== 1 || bootSystemd[0] !== 'true') {
+    throw new Error('unsupported WSL boot mode: systemd must be explicitly true');
   }
   const initial = namespace(read(root, 'initial-netns.after'), 'initial');
   const desktop = namespace(read(root, 'desktop-netns.after'), 'Desktop');

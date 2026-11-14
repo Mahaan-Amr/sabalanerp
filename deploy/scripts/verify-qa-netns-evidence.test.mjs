@@ -10,7 +10,7 @@ const shared = [
   'initial-netns', 'initial-iptables-v4', 'initial-iptables-v6',
   'initial-routes-v4', 'initial-routes-v6', 'initial-links',
   'desktop-netns', 'desktop-docker-id', 'desktop-service-census',
-  'local-service-census',
+  'local-service-census', 'host-pid1', 'host-wsl-config',
 ];
 
 function withEvidence(run) {
@@ -19,7 +19,10 @@ function withEvidence(run) {
     for (const name of shared) {
       for (const phase of ['before', 'after']) {
         fs.writeFileSync(path.join(root, `${name}.${phase}`),
-          name.endsWith('netns') ? 'net:[4026531833]\n' : `${name}: stable\n`);
+          name.endsWith('netns') ? 'net:[4026531833]\n'
+            : name === 'host-pid1' ? 'systemd\n'
+              : name === 'host-wsl-config' ? '[boot]\nsystemd=true\n'
+                : `${name}: stable\n`);
       }
     }
     fs.writeFileSync(path.join(root, 'qa-netns.after'), 'net:[4026532999]\n');
@@ -57,6 +60,19 @@ test('named probe and daemon inode mismatch refuses', () => withEvidence((root, 
 
 test('Desktop network namespace change refuses', () => withEvidence((root, check) => {
   fs.writeFileSync(path.join(root, 'desktop-netns.after'), 'net:[4026532999]\n');
+  assert.notEqual(check().status, 0);
+}));
+
+test('WSL init with systemd disabled refuses even if other snapshots match', () => withEvidence((root, check) => {
+  for (const phase of ['before', 'after']) {
+    fs.writeFileSync(path.join(root, `host-pid1.${phase}`), 'init\n');
+    fs.writeFileSync(path.join(root, `host-wsl-config.${phase}`), '[boot]\nsystemd=false\n');
+  }
+  assert.notEqual(check().status, 0);
+}));
+
+test('missing host init proof refuses', () => withEvidence((root, check) => {
+  fs.unlinkSync(path.join(root, 'host-pid1.before'));
   assert.notEqual(check().status, 0);
 }));
 

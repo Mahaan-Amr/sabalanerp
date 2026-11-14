@@ -11,7 +11,7 @@ const launcher = path.join(here, 'qa-netns-no-data-probe.sh');
 const stopper = path.join(here, 'qa-netns-stop.sh');
 const signal = path.join(here, 'qa-owned-pid-signal.pl');
 const bash = spawnSync('bash', ['--version'], { encoding: 'utf8' });
-const unavailable = bash.error ? 'bash unavailable' : false;
+const unavailable = bash.error || bash.status !== 0 ? 'bash unavailable' : false;
 
 test('the network owner scripts have valid Bash syntax', { skip: unavailable }, () => {
   for (const script of [launcher, stopper]) {

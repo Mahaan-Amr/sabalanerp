@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertQaRemoteMountAtRuntime } from './qa-remote-mount-guard.mjs';
+import { performanceSourceHash } from '../../scripts/performance-source-identity.mjs';
 
 const COMPOSE_FILE = 'docker-compose.rehearsal.yml';
 const SERVICE_NAMES = ['backend', 'clamav', 'deployment', 'frontend', 'inquiry', 'nginx', 'postgres'];
@@ -45,16 +47,21 @@ function observeQaNetworkNamespace() {
 export function validateQaRenderedConfig(config, planSha256) {
   assert.equal(config.name, 'sabalanerp');
   assert.deepEqual(keys(config.services), SERVICE_NAMES);
-  assert.deepEqual(keys(config.networks), ['app_network', 'clamav_egress']);
+  assert.deepEqual(keys(config.networks), ['app_network', 'clamav_egress', 'qa_ingress']);
   assert.equal(config.networks.app_network.internal, true);
   assert.notEqual(config.networks.clamav_egress.internal, true);
+  assert.equal(config.networks.qa_ingress.driver, 'bridge');
+  assert.notEqual(config.networks.qa_ingress.internal, true);
+  assert.deepEqual(config.networks.qa_ingress.driver_opts,
+    { 'com.docker.network.bridge.enable_ip_masquerade': 'false' });
   assert.equal(config.services.clamav.extra_hosts, undefined);
   assert.equal(config.services.deployment.environment.SABALAN_BACKUP_TARGET, 'qa');
   assert.match(config.services.deployment.environment.SABALAN_QA_PLAN_SHA256,/^[a-f0-9]{64}$/);
   if(planSha256)assert.equal(config.services.deployment.environment.SABALAN_QA_PLAN_SHA256,planSha256);
   for (const service of SERVICE_NAMES) {
     assert.deepEqual(keys(config.services[service].networks), service === 'clamav'
-      ? ['app_network', 'clamav_egress'] : ['app_network']);
+      ? ['app_network', 'clamav_egress'] : service === 'nginx'
+        ? ['app_network', 'qa_ingress'] : ['app_network']);
     if (service !== 'nginx') assert.equal(config.services[service].ports, undefined);
   }
   assert.deepEqual(config.services.nginx.ports.map(({ target, published, host_ip }) => ({ target, published, host_ip })), [
@@ -151,6 +158,9 @@ export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, envir
 }
 
 export function validateQaRuntimeEnvironment(environment, inherited) {
+  for (const name of ['QA_REHEARSAL_FAIL_BACKEND_COMMIT', 'QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH']) {
+    if (Object.hasOwn(inherited, name)) assert.equal(inherited[name], environment[name] || '');
+  }
   for (const name of [
     'WEB_PUSH_VAPID_SUBJECT', 'WEB_PUSH_VAPID_PUBLIC_KEY', 'WEB_PUSH_VAPID_PRIVATE_KEY',
     'TAXPAYER_DELIVERY_BROKER_ENDPOINT', 'TAXPAYER_BROKER_URL',
@@ -238,6 +248,14 @@ export function validateQaTargetBinding(plan, observed) {
   }
   assert.equal(env.BIOMETRIC_CONNECTOR_MODE, 'unconfigured');
   assert.equal(env.BIOMETRIC_WORKSTATIONS_JSON, '{}');
+  const faultCommit = env.QA_REHEARSAL_FAIL_BACKEND_COMMIT || '';
+  const faultSourceHash = env.QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH || '';
+  if (faultCommit || faultSourceHash) {
+    assert.match(faultCommit, /^[a-f0-9]{40}$/);
+    assert.match(faultSourceHash, /^[a-f0-9]{64}$/);
+    assert.equal(faultCommit, plan.applicationCommit);
+    assert.equal(faultSourceHash, observed.performanceSourceHash);
+  }
   return COMPOSE_FILE;
 }
 
@@ -267,7 +285,7 @@ function environmentValues(raw) {
   return result;
 }
 
-function main() {
+async function main() {
   assert.equal(process.argv.length, 6);
   const [planFile, planSha256, repositoryRoot, environmentFile] = process.argv.slice(2);
   assert.match(planSha256, /^[a-f0-9]{64}$/);
@@ -289,7 +307,13 @@ function main() {
     composeSha256: sha256(fs.readFileSync(composePath)),
     environmentSha256: sha256(envRaw), environment,
   };
+  if (environment.QA_REHEARSAL_FAIL_BACKEND_COMMIT || environment.QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH) {
+    observed.performanceSourceHash = await performanceSourceHash();
+  }
   validateQaTargetBinding(plan, observed);
+  // Docker resolves bind sources in the daemon's mount namespace. A mounted
+  // SSHFS path in this controller alone does not prove remote checkpointing.
+  assertQaRemoteMountAtRuntime(environment.DEPLOYMENT_REMOTE_MOUNT_HOST, plan.backupHost);
   assert.equal(fs.realpathSync(plan.qaRoot), plan.qaRoot);
   for (const name of [
     'DEPLOYMENT_SECRET_DIR', 'DEPLOYMENT_REMOTE_MOUNT_HOST', 'DEPLOYMENT_REPORT_DIR_HOST',
@@ -311,5 +335,5 @@ function main() {
 }
 
 if (typeof process !== 'undefined' && process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { main(); } catch { process.stderr.write('QA_REHEARSAL_TARGET_INVALID\n'); process.exitCode = 1; }
+  main().catch(() => { process.stderr.write('QA_REHEARSAL_TARGET_INVALID\n'); process.exitCode = 1; });
 }

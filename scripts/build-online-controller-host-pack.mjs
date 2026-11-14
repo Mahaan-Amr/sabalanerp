@@ -18,7 +18,7 @@ const hostFiles=['deploy/scripts/preserved-clamav.mjs','backend/scripts/preserve
  'deploy/scripts/online-production-gates.mjs','deploy/scripts/online-client-terminal-observation.py','deploy/scripts/online-owner-install-guard.mjs',
  'deploy/scripts/browser-routing-store.mjs','deploy/scripts/browser-release-routing.mjs',
  'deploy/scripts/online-bootstrap-boundary.mjs','deploy/scripts/install-online-controller-trust.mjs','deploy/scripts/deploy.sh','deploy/scripts/capture-only-release.mjs','deploy/scripts/prebuilt-release-plan.mjs',
- 'deploy/scripts/legacy-backend-signal.py','deploy/scripts/dispatch-volume-preflight.mjs',
+ 'deploy/scripts/legacy-backend-signal.py','deploy/scripts/dispatch-volume-preflight.mjs','deploy/scripts/dispatch-volume-transition.py',
  'deploy/scripts/canonical-previous-release-configuration.mjs','deploy/scripts/verify-premutation-configuration-repair.mjs','deploy/scripts/reconcile-premutation-capture.mjs',
  'deploy/scripts/storage-preflight.sh','deploy/scripts/storage-preflight.mjs','scripts/deployment-capacity.mjs',
  'deploy/scripts/backup-preflight-client.sh','deploy/scripts/backup-preflight-root.sh','deploy/scripts/backup-retention-root.sh','deploy/scripts/backup-retention-host.mjs','deploy/scripts/backup-retention-ssh-owner.mjs','deploy/scripts/provision-backup-host.sh',

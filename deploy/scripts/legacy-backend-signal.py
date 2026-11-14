@@ -263,7 +263,7 @@ class OriginalHost:
     def __init__(self, base, environment):
         require(sys.platform == 'linux' and os.getuid() == 0)
         self.base, self.environment = Path(base), Path(environment).absolute()
-        require(self.base.name == 'docker-compose.prod.yml' and self.base.resolve(strict=True) == self.base
+        require(self.base.resolve(strict=True) == self.base
                 and self.environment.resolve(strict=True) == self.environment)
         self.root = self.base.parent
         self.parent = proc_identity(os.getppid())
@@ -272,6 +272,17 @@ class OriginalHost:
         self.lock_identity = None
         self.compose = ['docker', 'compose', '--env-file', str(self.environment), '-f', str(self.base), '-p', 'sabalanerp']
         self.assert_original()
+        if self.base.name == 'docker-compose.rehearsal.yml':
+            plan = os.environ.get('DEPLOYMENT_QA_REHEARSAL_PLAN_FILE', '')
+            sha = os.environ.get('DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256', '')
+            require(Path(plan).is_absolute() and re.fullmatch('[a-f0-9]{64}', sha))
+            selected = observed(['node', str(Path(__file__).resolve().with_name('qa-rehearsal-target.mjs')),
+                                 plan, sha, str(self.root), str(self.environment)], role='qa-target-selector')
+            require(selected == b'docker-compose.rehearsal.yml\n')
+        else:
+            require(self.base.name == 'docker-compose.prod.yml'
+                    and not os.environ.get('DEPLOYMENT_QA_REHEARSAL_PLAN_FILE')
+                    and not os.environ.get('DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256'))
 
     def assert_original(self):
         file = self.root / '.deploy-state/deployment.lock'

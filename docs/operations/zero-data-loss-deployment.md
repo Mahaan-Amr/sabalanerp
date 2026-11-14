@@ -17,6 +17,7 @@ Capture-only keeps the exact Nginx container pinned before maintenance. Its exis
 - No production write is accepted between the checkpoint boundary and completion of the final release gate.
 - No mutation starts without a verified local checkpoint and a verified encrypted off-server copy.
 - PostgreSQL, Inquiry SQLite, business-owned files, recovery coordination data, and the application release set move together.
+- On the first release introducing the dispatch-document volume, an empty Compose-owned volume may be allocated under the host lock before control jobs start. The old running backend never mounts it. After public maintenance, the database lease and old-backend drain, the controller must prove the stopped old container layer has no dispatch files or masking mount, the dispatch artifact table has zero rows, and the new volume remains empty and correctly owned before checkpoint capture. A failed proof retains maintenance and forbids recreating the old backend with an empty mount over legacy files. Later releases keep the normal mounted-volume path.
 - Rollback uses immutable pre-built image digests; it never rebuilds the previous release during an incident.
 - No `force`, bypass, partial success, or manual lock deletion path exists.
 - If neither the new nor previous complete release can be proven, the system remains fail-closed in maintenance.

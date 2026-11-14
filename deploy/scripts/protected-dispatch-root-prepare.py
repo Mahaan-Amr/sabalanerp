@@ -45,6 +45,21 @@ def observed(args):
     return b''.join(state['stdout'])
 
 
+def validate_compose(base,environment):
+    require(base.resolve(strict=True)==base and environment.resolve(strict=True)==environment)
+    if base.name=='docker-compose.rehearsal.yml':
+        plan=os.environ.get('DEPLOYMENT_QA_REHEARSAL_PLAN_FILE','')
+        sha=os.environ.get('DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256','')
+        require(Path(plan).is_absolute() and re.fullmatch('[a-f0-9]{64}',sha))
+        selected=observed(['node',str(Path(__file__).resolve().with_name('qa-rehearsal-target.mjs')),
+                           plan,sha,str(base.parent),str(environment)])
+        require(selected==b'docker-compose.rehearsal.yml\n')
+    else:
+        require(base.name=='docker-compose.prod.yml'
+                and not os.environ.get('DEPLOYMENT_QA_REHEARSAL_PLAN_FILE')
+                and not os.environ.get('DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256'))
+
+
 def interrupt(_number,_frame):
     global interrupted
     interrupted=True
@@ -57,12 +72,13 @@ def run():
     base,environment,old_id,old_image=sys.argv[1:]
     require(re.fullmatch('[a-f0-9]{64}',old_id) and re.fullmatch('sha256:[a-f0-9]{64}',old_image))
     base=Path(base);environment=Path(environment);root=base.parent
-    require(base.name=='docker-compose.prod.yml' and base.resolve(strict=True)==base and environment.resolve(strict=True)==environment)
+    require(base.resolve(strict=True)==base and environment.resolve(strict=True)==environment)
     deployment=os.environ['DEPLOYMENT_ID'];release=os.environ['DEPLOYMENT_RELEASE_ID']
     require(re.fullmatch('[A-Za-z0-9_-]{8,128}',deployment) and re.fullmatch('[A-Za-z0-9_-]{8,128}',release))
     host_lock=root/'.deploy-state/deployment.lock';held=os.fstat(9);named=host_lock.lstat()
     require((held.st_dev,held.st_ino)==(named.st_dev,named.st_ino) and stat.S_ISREG(held.st_mode) and held.st_uid==0 and held.st_nlink==1)
     require(re.search(r'^lock:\s+\d+:\s+FLOCK\s+ADVISORY\s+WRITE\s+\S+\s+[0-9a-f]+:[0-9a-f]+:'+str(held.st_ino)+r'\s+0\s+EOF\s*$',''.join(Path('/proc/self/fdinfo/9').read_text()),re.M))
+    validate_compose(base,environment)
     compose=['docker','compose','--env-file',str(environment),'-f',str(base)]
     def ps():observed(compose+['ps','--all','--format','json'])
     def docker(args):ps();return observed(['docker']+args)

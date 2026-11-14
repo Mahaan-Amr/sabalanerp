@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -35,19 +36,67 @@ const qaEnvironment = {
   TAXPAYER_BROKER_URL: '',
 };
 
-function renderedConfig() {
+function renderedConfig(overrides = {}) {
   const output = execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp', '-f', 'docker-compose.rehearsal.yml', 'config', '--format', 'json'], {
-    env: { ...process.env, ...qaEnvironment, DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:'a'.repeat(64) },
+    env: { ...process.env, ...qaEnvironment, QA_REHEARSAL_FAIL_BACKEND_COMMIT: '',
+      QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH: '', ...overrides, DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:'a'.repeat(64) },
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
   });
   return JSON.parse(output);
 }
 
-test('real rehearsal Compose graph isolates business services and allows only ClamAV egress', () => {
+test('real rehearsal Compose graph isolates business services and scopes ingress to Nginx loopback', () => {
   const config = renderedConfig();
   assert.equal(config.services.clamav.extra_hosts, undefined);
+  assert.deepEqual(Object.keys(config.networks).sort(), ['app_network', 'clamav_egress', 'qa_ingress']);
+  assert.deepEqual(Object.keys(config.services.nginx.networks).sort(), ['app_network', 'qa_ingress']);
+  assert.deepEqual(config.networks.qa_ingress.driver_opts,
+    { 'com.docker.network.bridge.enable_ip_masquerade': 'false' });
   assert.doesNotThrow(() => validateQaRenderedConfig(config));
+});
+
+test('QA backend healthcheck uses real readiness except for the exact sealed candidate identity', async () => {
+  const candidate = 'c'.repeat(40), sourceHash = 'd'.repeat(64);
+  const armed = renderedConfig({ QA_REHEARSAL_FAIL_BACKEND_COMMIT: candidate,
+    QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH: sourceHash });
+  const command = armed.services.backend.healthcheck.test[1];
+  assert.ok(command.startsWith('node -e "') && command.endsWith('"'));
+  const script = command.slice(9, -1);
+  const defaultEnvironment = renderedConfig().services.backend.environment;
+  let readinessStatus = 200;
+  const server = createServer((request, response) => {
+    response.writeHead(request.url === '/api/ready' ? readinessStatus : 404).end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const check = (commit, hash, environment = armed.services.backend.environment) => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', script], { stdio: 'ignore', env: {
+      ...process.env, ...environment, PORT: String(server.address().port),
+      APP_COMMIT: commit, PERFORMANCE_RELEASE_SOURCE_HASH: hash,
+    } });
+    child.on('error', reject);
+    child.on('exit', code => resolve(code));
+  });
+  try {
+    assert.equal(await check(candidate, sourceHash, defaultEnvironment), 0);
+    assert.equal(await check('b'.repeat(40), sourceHash), 0);
+    assert.equal(await check(candidate, 'e'.repeat(64)), 0);
+    assert.equal(await check(candidate, sourceHash), 51);
+    readinessStatus = 503;
+    assert.equal(await check(candidate, sourceHash, defaultEnvironment), 1);
+  } finally { server.close(); }
+});
+
+test('QA selector refuses unexpected ingress attachments or internal-only Nginx', () => {
+  const config = renderedConfig();
+  config.services.backend.networks.qa_ingress = null;
+  assert.throws(() => validateQaRenderedConfig(config));
+  delete config.services.backend.networks.qa_ingress;
+  delete config.services.nginx.networks.qa_ingress;
+  assert.throws(() => validateQaRenderedConfig(config));
+  config.services.nginx.networks.qa_ingress = null;
+  config.networks.qa_ingress.driver_opts['com.docker.network.bridge.enable_ip_masquerade'] = 'true';
+  assert.throws(() => validateQaRenderedConfig(config));
 });
 
 test('QA selector refuses a ClamAV host-gateway alias reintroduced by an override', () => {
@@ -93,6 +142,8 @@ test('QA target refuses shell variables that would override private Compose valu
   assert.throws(() => validateQaRuntimeEnvironment(qaEnvironment, { DOMAIN: 'production.example' }));
   assert.throws(() => validateQaRuntimeEnvironment(qaEnvironment, { COMPOSE_PROJECT_NAME: 'sabalanerp-local' }));
   assert.throws(() => validateQaRuntimeEnvironment(qaEnvironment, { DOCKER_HOST: 'tcp://production.example:2375' }));
+  assert.throws(() => validateQaRuntimeEnvironment(qaEnvironment,
+    { QA_REHEARSAL_FAIL_BACKEND_COMMIT: 'c'.repeat(40) }));
 });
 
 test('QA target refuses interpolation in a protected path even when the inherited variable is otherwise allowed', () => {
@@ -220,6 +271,17 @@ test('QA target rejects another Engine and a live SMS endpoint before controller
   assert.throws(() => validateQaTargetBinding(plan, {
     ...observed, environment: { ...qaEnvironment, DEPLOYMENT_BACKUP_SSH_KEY_FILE: '/srv/sabalanerp-qa/secrets/production-key' },
   }));
+  const sourceHash = 'e'.repeat(64);
+  const fault = { ...qaEnvironment, QA_REHEARSAL_FAIL_BACKEND_COMMIT: plan.applicationCommit,
+    QA_REHEARSAL_FAIL_BACKEND_SOURCE_HASH: sourceHash };
+  assert.throws(() => validateQaTargetBinding(plan, { ...observed,
+    environment: { ...fault, QA_REHEARSAL_FAIL_BACKEND_COMMIT: '' }, performanceSourceHash: sourceHash }));
+  assert.throws(() => validateQaTargetBinding(plan, { ...observed,
+    environment: { ...fault, QA_REHEARSAL_FAIL_BACKEND_COMMIT: 'f'.repeat(40) }, performanceSourceHash: sourceHash }));
+  assert.throws(() => validateQaTargetBinding(plan, { ...observed,
+    environment: fault, performanceSourceHash: 'f'.repeat(64) }));
+  assert.equal(validateQaTargetBinding(plan, { ...observed, environment: fault,
+    performanceSourceHash: sourceHash }), 'docker-compose.rehearsal.yml');
 });
 
 test('QA target refuses configured external delivery effects before controller selection', () => {

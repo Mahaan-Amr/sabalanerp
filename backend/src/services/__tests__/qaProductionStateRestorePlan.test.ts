@@ -4,7 +4,11 @@ import { assertQaProductionStateRestorePlan } from '../qaProductionStateRestoreP
 
 const hash = (character: string) => character.repeat(64);
 const plan = () => ({
-  format: 'sabalan-qa-production-state-restore/v1', qaOnly: true,
+  format: 'sabalan-qa-production-state-restore/v2', qaOnly: true, retainedOldState: true,
+  previousCommit: 'b58c53c0f88d2d89da3cb6a45949e6eca97e4308',
+  previousImages: Object.fromEntries(['backend', 'frontend', 'inquiry', 'nginx', 'postgres', 'clamav'].map(role => [role, `sha256:${hash('a')}`])),
+  sourceMigrationLedger: { successful: 439, rolledBack: 1, latest: '20261017100000_attendance_review_and_clock' },
+  rawInquirySha256: hash('f'),
   checkpointId: 'deploy-20261112T133543Z-b58c53c0f88d-release',
   databaseName: 'sabalanerp',
   qaTargetPlanSha256: hash('e'),
@@ -13,6 +17,8 @@ const plan = () => ({
   runSidecarPath: '/qa-evidence/checkpoint.json', reportPath: '/qa-evidence/restore-report.json',
 });
 const metadata = () => ({ id: plan().checkpointId, deploymentId: plan().checkpointId, releaseId: 'previous',
+  manifest: { commit: plan().previousCommit }, targetCommit: plan().previousCommit,
+  rollbackReleaseSet: plan().previousImages,
   remotePath: '/remote/original.sabrec', checksum: hash('a'), size: 1476223433, remoteVerified: true,
   sourceMachineUuidSha256: hash('c'), sourceKernelBootIdSha256: hash('d'), independentRestoreVerified: false });
 
@@ -29,4 +35,12 @@ test('refuses paths outside QA mounts and an unscoped plan', () => {
   assert.throws(() => assertQaProductionStateRestorePlan({ ...plan(), sourceObject: { ...plan().sourceObject, path: '/app/storage/recovery/source.sabrec' } }, metadata(), { ...metadata(), remotePath: plan().sourceObject.path }), /QA_RESTORE_PLAN_INVALID/);
   assert.throws(() => assertQaProductionStateRestorePlan({ ...plan(), qaOnly: false }, metadata(), { ...metadata(), remotePath: plan().sourceObject.path }), /QA_RESTORE_PLAN_INVALID/);
   assert.throws(() => assertQaProductionStateRestorePlan({ ...plan(), qaTargetPlanSha256: 'unbound' }, metadata(), { ...metadata(), remotePath: plan().sourceObject.path }), /QA_RESTORE_PLAN_INVALID/);
+});
+
+test('retained-old-state plan refuses missing mode, old commit mismatch and a mutable prior image', () => {
+  const run = { ...metadata(), remotePath: plan().sourceObject.path };
+  assert.throws(() => assertQaProductionStateRestorePlan({ ...plan(), retainedOldState: false }, metadata(), run), /QA_RESTORE_PLAN_INVALID/);
+  assert.throws(() => assertQaProductionStateRestorePlan({ ...plan(), previousCommit: hash('f').slice(0, 40) }, metadata(), run), /QA_RESTORE_SOURCE_INVALID/);
+  assert.throws(() => assertQaProductionStateRestorePlan({ ...plan(), previousImages: { ...plan().previousImages, inquiry: 'sabalanerp-inquiry:current' } }, metadata(), run), /QA_RESTORE_PLAN_INVALID/);
+  assert.throws(() => assertQaProductionStateRestorePlan({ ...plan(), previousImages: { ...plan().previousImages, inquiry: `sha256:${hash('b')}` } }, metadata(), run), /QA_RESTORE_SOURCE_INVALID/);
 });

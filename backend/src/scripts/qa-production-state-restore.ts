@@ -11,6 +11,8 @@ import { assertRecoveryBusinessProof } from '../services/deploymentRecoveryDataP
 import { sha256File } from '../services/recoveryCrypto';
 import { nativePostgresCliConnection } from '../services/nativePostgresCli';
 import { assertQaProductionStateRestorePlan, QaProductionStateRestorePlan } from '../services/qaProductionStateRestorePlan';
+import { assertQaRestoreBootstrap, BUSINESS_TABLES } from '../services/qaRestoreBootstrap';
+import { assertQaRetainedOldStateProof } from '../services/qaRetainedOldStateProof';
 import { readRestoreJournal, stageAndPromoteRecovery, validateLiveStoredFileReferences,
   validateRecoveryPackage, verifyPromotedRecoveryFiles } from '../services/systemRecoveryEngine';
 import { initializeSystemRecovery } from '../services/systemRecoveryLifecycle';
@@ -24,6 +26,28 @@ const regular = async (file: string, mode: number, owner = 0) => {
   return stat;
 };
 const readJson = async (file: string) => JSON.parse(await fs.promises.readFile(file, 'utf8')) as Record<string, unknown>;
+
+const bootstrapEmptyQaTarget = async (application: ReturnType<typeof nativePostgresCliConnection>) => {
+  // The current database becomes the safety database during promotion. The
+  // canonical erasure replay reads its schema even when it contains no rows.
+  const entries = await fs.promises.readdir(path.join(process.cwd(), 'prisma', 'migrations'), { withFileTypes: true });
+  const expected = (await Promise.all(entries.filter(entry => entry.isDirectory()).map(async entry => {
+    const migration = path.join(process.cwd(), 'prisma', 'migrations', entry.name, 'migration.sql');
+    return (await fs.promises.stat(migration).catch(() => null))?.isFile() ? entry.name : null;
+  }))).filter((name): name is string => name !== null).sort();
+  await execFileAsync('npx', ['prisma', 'migrate', 'deploy'], {
+    cwd: process.cwd(), env: process.env, timeout: 900_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
+  });
+  const query = async (sql: string) => (await execFileAsync('psql', [application.url, '-At', '-v', 'ON_ERROR_STOP=1', '-c', sql], {
+    env: { ...process.env, ...application.environment }, timeout: 30_000, windowsHide: true,
+  })).stdout.trim();
+  const ledger = (await query('SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name'))
+    .split('\n').filter(Boolean);
+  const total = Number(await query('SELECT count(*) FROM "_prisma_migrations"'));
+  if (total !== ledger.length) fail('QA_RESTORE_BOOTSTRAP_SCHEMA_INCOMPLETE');
+  const counts = JSON.parse(await query(`SELECT json_build_object(${BUSINESS_TABLES.map(table => `'${table}', (SELECT count(*) FROM "${table}")`).join(', ')})::text`)) as Record<string, number>;
+  return assertQaRestoreBootstrap(expected, ledger, counts);
+};
 
 const assertQaEnvironment = () => {
   if (process.platform !== 'linux' || process.env.NODE_ENV !== 'test') fail('QA_RESTORE_NOT_ISOLATED');
@@ -99,9 +123,14 @@ async function main() {
   const validation = await validateRecoveryPackage({ sourcePath: plan.sourceObject.path, passphrase: key, prisma,
     verifyRestore: true, verifyApplicationPayloads: true, verifyBusinessData: true });
   if (validation.manifest.packageType !== 'COMPLETE' || !validation.compatibility.compatible
-    || !validation.inquiryBusinessProof) fail('QA_RESTORE_PACKAGE_INCOMPATIBLE');
+    || !validation.inquiryBusinessProof || validation.manifest.commit !== plan.previousCommit) fail('QA_RESTORE_PACKAGE_INCOMPATIBLE');
+  const sourceInquiryComponents = validation.manifest.components.filter(component => component.path === 'inquiry/inquiry.db');
+  if (sourceInquiryComponents.length !== 1 || sourceInquiryComponents[0].sha256 !== plan.rawInquirySha256) {
+    fail('QA_RESTORE_SOURCE_INQUIRY_CHANGED');
+  }
   const businessDataProof = validation.businessDataProof;
   if (!businessDataProof) throw Object.assign(new Error('QA_RESTORE_PACKAGE_INCOMPATIBLE'), { code: 'QA_RESTORE_PACKAGE_INCOMPATIBLE' });
+  const qaTargetSchemaBootstrap = await bootstrapEmptyQaTarget(application);
   if (await sha256File(plan.sourceObject.path) !== plan.sourceObject.sha256
     || await sha256File(plan.sourceSidecar.path) !== sourceHash
     || await sha256File(plan.runSidecarPath) !== runHash) fail('QA_RESTORE_EVIDENCE_CHANGED');
@@ -111,13 +140,35 @@ async function main() {
     passphrase: key, packageType: 'COMPLETE', checksum: plan.sourceObject.sha256,
     actorId: 'qa-production-state-copy', actorDisplay: 'Isolated QA production-state copy',
     authorizationMode: 'BREAK_GLASS', breakGlassReason: `QA-only production-state copy of ${source.releaseId}`,
-    applyMigrations: true, preservePackage: true,
+    // Keep the restored production-state copy at the retained image's schema.
+    // The protected release controller, not this QA preparation, owns candidate migrations.
+    applyMigrations: false, preservePackage: true,
     onProgress: async progress => { console.log(JSON.stringify({ event: 'qa-restore-progress', progress })); },
   });
   const inquiryTransformation = result.journal.inquiryTransformation;
-  if (!result.promoted || inquiryTransformation?.operationId !== operationId
-    || inquiryTransformation.archiveSha256 !== plan.sourceObject.sha256) fail('QA_RESTORE_PROMOTION_UNPROVEN');
+  if (!result.promoted || inquiryTransformation) fail('QA_RESTORE_PROMOTION_UNPROVEN');
   const initialPromotedFiles = await verifyPromotedRecoveryFiles(validation.manifest, [], inquiryTransformation, validation.inquiryBusinessProof);
+  const rawInquiryPath = path.join(String(process.env.INQUIRY_RECOVERY_SOURCE_DIR), 'inquiry.db');
+  const rawInquirySha256 = await sha256File(rawInquiryPath);
+  const inquiryLedger = await execFileAsync('sqlite3', [rawInquiryPath,
+    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='_sabalan_inquiry_migrations';"], {
+    timeout: 30_000, windowsHide: true,
+  });
+  const sourceLedger = await execFileAsync('psql', [application.url, '-At', '-v', 'ON_ERROR_STOP=1', '-c',
+    `SELECT json_build_object(
+      'successful', count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL),
+      'rolledBack', count(*) FILTER (WHERE rolled_back_at IS NOT NULL),
+      'unfinished', count(*) FILTER (WHERE finished_at IS NULL AND rolled_back_at IS NULL),
+      'latest', max(migration_name) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL))::text
+     FROM "_prisma_migrations"`], {
+    env: { ...process.env, ...application.environment }, timeout: 30_000, windowsHide: true,
+  });
+  const retainedOldStateProof = assertQaRetainedOldStateProof(plan, {
+    promoted: result.promoted, inquiryTransformation, manifestCommit: validation.manifest.commit,
+    manifestInquirySha256: sourceInquiryComponents[0].sha256, liveInquirySha256: rawInquirySha256,
+    inquiryLedgerTables: Number(inquiryLedger.stdout.trim()),
+    sourceMigrationLedger: JSON.parse(sourceLedger.stdout.trim()),
+  });
   let erasureReplay: { replayed: number; erasedArtifactPaths: string[] } | undefined;
   await initializeSystemRecovery(prisma, { onVerifiedErasureReplay: evidence => { erasureReplay = evidence; } });
   if (await readRestoreJournal() || getRecoveryRuntimeState().mode !== 'NORMAL') fail('QA_RESTORE_FINALIZATION_FAILED');
@@ -140,6 +191,7 @@ async function main() {
     sourceSidecarSha256: sourceHash, runSidecarSha256: runHash, compatibility: validation.compatibility,
     stagedPostgresRestore: true, stagedSqliteIntegrity: true, verifiedFiles: true,
     verifiedApplicationPayloads: true, verifiedBusinessData: true, initialPromotedFiles, promotedFiles,
+    qaTargetSchemaBootstrap, retainedOldState: true, retainedPreviousImages: plan.previousImages, ...retainedOldStateProof,
     liveFileReferences, applicationPayloads, businessData,
     verifiedErasureReplay: { operations: erasureReplay?.replayed ?? 0, erasedArtifacts: erasureReplay?.erasedArtifactPaths.length ?? 0 },
     inquiryTransformation };

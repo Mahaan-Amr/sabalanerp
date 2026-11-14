@@ -4,7 +4,7 @@ PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 # Run only on the reviewed backup host, from its separate root-owned QA bundle.
 [ "$(id -u)" -eq 0 ] && [ "$#" -eq 2 ] || exit 64
-for tool in node docker flock ssh-keygen sshd sudo visudo useradd getent install; do
+for tool in node docker flock ssh-keygen sshd sudo visudo useradd getent install mountpoint readlink; do
   command -v "$tool" >/dev/null 2>&1 || { echo 'QA_BACKUP_HOST_REQUIRED_COMMAND_MISSING' >&2; exit 1; }
 done
 bundle="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
@@ -34,6 +34,21 @@ read_key() {
 transfer_key="$(read_key "$1")"
 operations_key="$(read_key "$2")"
 [ -n "$transfer_key" ] && [ -n "$operations_key" ] && [ "$transfer_key" != "$operations_key" ] || exit 1
+# Reject aliases before account or directory mutation: install -d -o can chown
+# an existing bind-mounted production checkpoint directory.
+for qa_path in /srv/sabalanerp-qa-recovery /srv/sabalanerp-qa-recovery/checkpoints; do
+  [ ! -L "$qa_path" ] || exit 1
+  if [ -e "$qa_path" ]; then
+    [ "$(readlink -f "$qa_path")" = "$qa_path" ] || exit 1
+    mountpoint -q "$qa_path" && exit 1
+  fi
+done
+if [ -e /srv/sabalanerp-qa-recovery ] && [ -e /srv/sabalanerp-recovery ]; then
+  [ "$(stat -c '%d:%i' /srv/sabalanerp-qa-recovery)" != "$(stat -c '%d:%i' /srv/sabalanerp-recovery)" ] || exit 1
+fi
+if [ -e /srv/sabalanerp-qa-recovery/checkpoints ] && [ -e /srv/sabalanerp-recovery/checkpoints ]; then
+  [ "$(stat -c '%d:%i' /srv/sabalanerp-qa-recovery/checkpoints)" != "$(stat -c '%d:%i' /srv/sabalanerp-recovery/checkpoints)" ] || exit 1
+fi
 # Never reuse an existing SSH identity from another backup account.
 for existing in /etc/ssh/authorized_keys/*; do
   case "$existing" in
@@ -74,6 +89,41 @@ if [ ! -d /etc/ssh/authorized_keys ]; then
 fi
 [ "$(stat -c %u /etc/ssh/authorized_keys)" -eq 0 ] && \
   [ -z "$(find /etc/ssh/authorized_keys -maxdepth 0 -perm /022 -print)" ] || exit 1
+rollback_dir="$(mktemp -d /tmp/sabalan-qa-provision.XXXXXX)"
+backup_target() {
+  if [ -e "$1" ]; then cp -a "$1" "$rollback_dir/$2"; else : > "$rollback_dir/$2.absent"; fi
+}
+restore_target() {
+  if [ -f "$rollback_dir/$2.absent" ]; then
+    rm -f "$1"
+  elif [ -f "$rollback_dir/$2" ]; then
+    cp -a "$rollback_dir/$2" "$1"
+  fi
+}
+finish() {
+  rc="$1"
+  trap - 0
+  if [ "$rc" -ne 0 ]; then
+    restore_target /usr/local/bin/sabalan-qa-backup-preflight-client client
+    restore_target /usr/local/sbin/sabalan-qa-backup-preflight preflight
+    restore_target /usr/local/sbin/sabalan-qa-backup-retention retention
+    restore_target /etc/ssh/authorized_keys/sabalan-qa-backup transfer
+    restore_target /etc/ssh/authorized_keys/sabalan-qa-backup-ops operations
+    restore_target /etc/sudoers.d/sabalan-qa-backup-preflight sudoers
+    restore_target /etc/ssh/sshd_config.d/91-sabalan-qa-backup.conf sshd
+    sshd -t && systemctl reload ssh || true
+  fi
+  rm -rf -- "$rollback_dir"
+  exit "$rc"
+}
+trap 'finish $?' 0
+backup_target /usr/local/bin/sabalan-qa-backup-preflight-client client
+backup_target /usr/local/sbin/sabalan-qa-backup-preflight preflight
+backup_target /usr/local/sbin/sabalan-qa-backup-retention retention
+backup_target /etc/ssh/authorized_keys/sabalan-qa-backup transfer
+backup_target /etc/ssh/authorized_keys/sabalan-qa-backup-ops operations
+backup_target /etc/sudoers.d/sabalan-qa-backup-preflight sudoers
+backup_target /etc/ssh/sshd_config.d/91-sabalan-qa-backup.conf sshd
 install -o root -g root -m 0755 "$bundle/deploy/scripts/qa-backup-preflight-client.sh" /usr/local/bin/sabalan-qa-backup-preflight-client
 install -o root -g root -m 0755 "$bundle/deploy/scripts/qa-backup-preflight-root.sh" /usr/local/sbin/sabalan-qa-backup-preflight
 install -o root -g root -m 0755 "$bundle/deploy/scripts/qa-backup-retention-root.sh" /usr/local/sbin/sabalan-qa-backup-retention
@@ -84,9 +134,6 @@ printf 'sabalan-qa-backup-ops ALL=(root) NOPASSWD: /usr/local/sbin/sabalan-qa-ba
 chmod 0440 /etc/sudoers.d/sabalan-qa-backup-preflight
 visudo -cf /etc/sudoers.d/sabalan-qa-backup-preflight >/dev/null
 configuration=/etc/ssh/sshd_config.d/91-sabalan-qa-backup.conf
-previous="$(mktemp)"
-had_previous=0
-if [ -f "$configuration" ]; then cp "$configuration" "$previous"; had_previous=1; fi
 cat > "$configuration" <<'CONFIG'
 Match User sabalan-qa-backup
     AuthorizedKeysFile /etc/ssh/authorized_keys/%u
@@ -105,11 +152,6 @@ Match User sabalan-qa-backup-ops
     PermitTTY no
 Match all
 CONFIG
-if ! sshd -t; then
-  if [ "$had_previous" -eq 1 ]; then cp "$previous" "$configuration"; else rm "$configuration"; fi
-  rm "$previous"
-  exit 1
-fi
-rm "$previous"
+sshd -t
 systemctl reload ssh
 echo 'QA backup transfer and operations accounts provisioned; independent authentication and forced-command tests are still required.'

@@ -15,7 +15,7 @@ test('QA backup host provisioning uses separate accounts, custody and SSH policy
   assert.match(script, /ForceCommand internal-sftp -d \/checkpoints/);
   assert.match(script, /\/etc\/ssh\/sshd_config\.d\/91-sabalan-qa-backup\.conf/);
   assert.doesNotMatch(script, /(?<!qa-)sabalan-backup(?:-ops)?/);
-  assert.doesNotMatch(script, /\/srv\/sabalanerp-recovery/);
+  assert.doesNotMatch(script, /(?:install -d|chmod|chown|rm -[fr]|ForceCommand).*\/srv\/sabalanerp-recovery/);
 });
 
 test('QA operations commands hold the QA lock and cannot invoke the production owner', () => {

@@ -19,6 +19,22 @@ Twenty sequential, complete HTTP requests were made for each surface, with neare
 
 No request returned a Prisma `P2028` or 30-second read expiry. This establishes the two local fixture p95 values below three seconds under this sequential workload. It does not establish concurrent-load or production-state p95.
 
+## Integration replay with concurrent local work
+
+After merging into integration, the same opt-in qualification passed on 2026-11-15 with the ownership-safe temporary database cleanup change (`a417a66b`). During this replay, a backend TypeScript build ran concurrently, and the separate temporary-database cleanup probe overlapped the later part of the run. The dashboard p95 was **3,744 ms**, above the original run's three-second observation; the reviewable list p95 was **2,115 ms**. This replay passed all count, source-filter, route, and revocation assertions and had no `P2028`. The concurrent work is a possible source of timing variation, not a proven cause.
+
+| Complete request | Replay samples (ms), sorted | Nearest-rank p95 |
+| --- | --- | ---: |
+| Dashboard | 2022, 2175, 2316, 2347, 2391, 2400, 2403, 2563, 2662, 2665, 2795, 2870, 2991, 3152, 3179, 3293, 3440, 3531, 3744, 3778 | 3744 ms |
+| Reviewable list | 1820, 1834, 1840, 1872, 1880, 1896, 1907, 1916, 1930, 1936, 1964, 1997, 2006, 2009, 2013, 2015, 2056, 2109, 2115, 2166 | 2115 ms |
+
+After the build, cleanup probe, and another isolated qualification had fully exited, the same qualification passed again without concurrent QA work. The quiet replay measured dashboard p95 **2,133 ms** and reviewable list p95 **1,948 ms**. The difference is consistent with local contention affecting the earlier replay, but these runs alone do not isolate its cause or establish a concurrent-load target.
+
+| Complete request | Quiet replay samples (ms), sorted | Nearest-rank p95 |
+| --- | --- | ---: |
+| Dashboard | 1834, 1873, 1884, 1901, 1901, 1913, 1933, 1936, 1948, 1954, 1965, 1971, 1973, 2017, 2029, 2053, 2063, 2064, 2133, 2199 | 2133 ms |
+| Reviewable list | 1776, 1806, 1810, 1813, 1817, 1819, 1824, 1827, 1830, 1844, 1859, 1872, 1873, 1880, 1893, 1899, 1910, 1922, 1948, 2303 | 1948 ms |
+
 ## Reproduction and remaining gates
 
 Set `CONTRACT_RECOVERY_TEST_DATABASE_URL` to the existing local PostgreSQL URL for `/sabalanerp`, set `ACCOUNTING_447_QUALIFICATION=1`, then run `tsx --test --test-name-pattern='Accounting qualification creates' backend/src/services/__tests__/partnerCaseDraft.integration.test.ts` from the repository root. The test manages the temporary database and cleanup. It is skipped during ordinary test runs.

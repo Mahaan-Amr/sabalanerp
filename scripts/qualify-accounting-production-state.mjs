@@ -15,16 +15,16 @@ const hex = (value, length) => typeof value === 'string' && new RegExp(`^[a-f0-9
 const digest = value => typeof value === 'string' && /^sha256:[a-f0-9]{64}$/i.test(value);
 const percentile = (sorted, fraction) => sorted[Math.ceil(sorted.length * fraction) - 1] ?? null;
 const summarize = requests => {
-  const durations = requests.map(r => r.durationMs).filter(n => Number.isFinite(n) && n >= 0).sort((a, b) => a - b);
+  const durations = requests.map(r => r?.durationMs).filter(n => Number.isFinite(n) && n >= 0).sort((a, b) => a - b);
   return {
     count: requests.length,
-    coldCount: requests.filter(r => r.phase === 'cold').length,
-    warmCount: requests.filter(r => r.phase === 'warm').length,
+    coldCount: requests.filter(r => r?.phase === 'cold').length,
+    warmCount: requests.filter(r => r?.phase === 'warm').length,
     p50Ms: percentile(durations, .50), p95Ms: percentile(durations, .95),
     p99Ms: percentile(durations, .99), maxMs: durations.at(-1) ?? null,
-    errorCount: requests.filter(r => r.status !== 200 || r.errorCode).length,
-    p2024Count: requests.filter(r => r.errorCode === 'P2024').length,
-    p2028Count: requests.filter(r => r.errorCode === 'P2028').length,
+    errorCount: requests.filter(r => r?.status !== 200 || r?.errorCode !== undefined).length,
+    p2024Count: requests.filter(r => r?.errorCode === 'P2024').length,
+    p2028Count: requests.filter(r => r?.errorCode === 'P2028').length,
     durationsMs: durations,
   };
 };
@@ -39,12 +39,12 @@ if (data?.format !== 'sabalan-accounting-production-state-requests/v1') reasons.
 if (data?.provenance?.kind !== 'protected-production-state-recovery-copy' || data.provenance.privateIngress !== true || !hex(data.provenance.recoveryManifestSha256, 64) || !data.provenance.evidenceRef || !data.provenance.workloadSource) reasons.push('Protected production-state provenance incomplete');
 if (!hex(data?.candidate?.commit, 40) || !hex(data?.candidate?.tree, 40) || !digest(data?.candidate?.backendImage) || !digest(data?.candidate?.frontendImage)) reasons.push('Candidate source or immutable image identity incomplete');
 const w = data?.workload;
-if (w?.actorClass !== 'authorized-accountant' || !hex(w.actorSha256, 64) || !Number.isSafeInteger(w.ordinaryContracts) || w.ordinaryContracts < 0 || !Number.isSafeInteger(w.committedPartnerCases) || w.committedPartnerCases < 0 || !Number.isSafeInteger(w.concurrency) || w.concurrency < 1 || !Number.isSafeInteger(w.pageSize) || w.pageSize < 1 || !Array.isArray(w.filters) || !w.filters.includes('reviewable') || w.observation !== 'full HTTP responses' || w.endpoints?.dashboard !== '/api/accounting/dashboard' || w.endpoints?.['reviewable-list'] !== '/api/accounting/contracts?view=reviewable') reasons.push('Workload shape incomplete');
+if (w?.actorClass !== 'authorized-accountant' || !hex(w.actorSha256, 64) || !Number.isSafeInteger(w.ordinaryContracts) || w.ordinaryContracts < 935 || !Number.isSafeInteger(w.committedPartnerCases) || w.committedPartnerCases < 30 || !Number.isSafeInteger(w.concurrency) || w.concurrency < 1 || !Number.isSafeInteger(w.pageSize) || w.pageSize < 1 || !Array.isArray(w.filters) || !w.filters.includes('reviewable') || w.observation !== 'full HTTP responses' || w.endpoints?.dashboard !== '/api/accounting/dashboard' || w.endpoints?.['reviewable-list'] !== '/api/accounting/contracts?view=reviewable') reasons.push('Workload shape incomplete or below observed fixture population floor (935 ordinary Contracts, 30 committed Partner Cases)');
 if (!Array.isArray(data?.requests)) reasons.push('Request records missing');
 const requests = Array.isArray(data?.requests) ? data.requests : [];
 const ids = new Set();
 for (const r of requests) {
-  if (!['dashboard', 'reviewable-list'].includes(r?.surface) || !Number.isFinite(r.durationMs) || r.durationMs < 0 || !Number.isInteger(r.status) || typeof r.requestId !== 'string' || !r.requestId || !['cold', 'warm'].includes(r.phase) || (r.errorCode !== undefined && typeof r.errorCode !== 'string')) reasons.push('Invalid request record');
+  if (!['dashboard', 'reviewable-list'].includes(r?.surface) || !Number.isFinite(r?.durationMs) || r.durationMs < 0 || !Number.isInteger(r?.status) || typeof r?.requestId !== 'string' || !r.requestId || !['cold', 'warm'].includes(r.phase) || (r.errorCode !== undefined && (typeof r.errorCode !== 'string' || !r.errorCode.trim()))) reasons.push('Invalid request record');
   if (ids.has(r?.requestId)) reasons.push('Duplicate request ID');
   ids.add(r?.requestId);
 }

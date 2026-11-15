@@ -63,3 +63,23 @@ test('P2024 and malformed durations fail closed', () => {
   assert.equal(receipt.surfaces.dashboard.p2024Count, 1);
   assert.match(receipt.reasons.join(' '), /Invalid request record/);
 });
+test('empty population and empty error code cannot produce a pass receipt', () => {
+  const data = input();
+  data.workload.ordinaryContracts = 0;
+  data.workload.committedPartnerCases = 0;
+  data.requests[0].errorCode = '';
+  const { process, receipt } = run(data);
+  assert.equal(process.status, 2);
+  assert.equal(receipt.decision, 'MEASUREMENT_FAIL');
+  assert.match(receipt.reasons.join(' '), /population floor/);
+  assert.match(receipt.reasons.join(' '), /Invalid request record/);
+  assert.equal(receipt.surfaces.dashboard.errorCount, 1);
+});
+test('null request records fail with a receipt', () => {
+  const data = input();
+  data.requests[0] = null;
+  const { process, receipt } = run(data);
+  assert.equal(process.status, 2);
+  assert.equal(receipt.decision, 'MEASUREMENT_FAIL');
+  assert.match(receipt.reasons.join(' '), /Invalid request record/);
+});

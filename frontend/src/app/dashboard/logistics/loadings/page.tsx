@@ -30,6 +30,7 @@ import {
   ErpQuickFilters,
 } from "@/components/erp";
 import { dashboardAPI, logisticsAPI } from "@/lib/api";
+import { normalizeDigits } from "@/lib/numberFormat";
 import { StatusBadge, dateFa, loadingDriversName } from "../logistics-ui";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
@@ -105,7 +106,7 @@ export default function LogisticsLoadingsPage() {
   );
 
   const filteredRows = useMemo(() => {
-    const normalized = search.trim().toLowerCase();
+    const normalized = normalizeDigits(search.trim()).toLowerCase();
     return rows.filter((row) => {
       if (status !== "ALL" && row.status !== status) return false;
       if (!normalized) return true;
@@ -116,7 +117,7 @@ export default function LogisticsLoadingsPage() {
         loadingDriversName(row),
         row.status,
       ].some((value) =>
-        String(value || "")
+        normalizeDigits(String(value || ""))
           .toLowerCase()
           .includes(normalized),
       );

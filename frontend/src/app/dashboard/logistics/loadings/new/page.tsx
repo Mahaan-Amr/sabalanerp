@@ -9,7 +9,7 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { LogisticsPage } from "@/features/logistics/LogisticsWorkspace";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   FaBuilding,
@@ -40,8 +40,10 @@ import {
   ErpSummaryGrid,
   ErpSection,
   ErpSegmentedControl,
+  ErpSkeleton,
 } from "@/components/erp";
 import { logisticsAPI } from "@/lib/api";
+import { normalizeDigits } from "@/lib/numberFormat";
 import { saveCanonicalLoadingDraft } from "@/features/logistics/canonicalLoadingDraftWorkflow";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
@@ -210,7 +212,13 @@ const lineFromLoadingLine = (line: any): DraftLine => {
   };
 };
 
-const normalizeSearch = (value: string) => value.trim().toLowerCase();
+type CustomerLookup =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; customers: any[] };
+
+const customerLookupError = "دریافت مشتری‌های قابل بارگیری ناموفق بود.";
+const normalizeSearch = (value: string) => normalizeDigits(value).trim().toLowerCase();
 
 export default function NewLoadingPage() {
   const mutationLock = useRef(false);
@@ -221,7 +229,8 @@ export default function NewLoadingPage() {
   const [activeQuantityDriverId, setActiveQuantityDriverId] = useState("");
   const [step, setStep] = useState<WizardStep>("customer");
   const [customerSearch, setCustomerSearch] = useState("");
-  const [customers, setCustomers] = useState<any[]>([]);
+  const [customerLookup, setCustomerLookup] = useState<CustomerLookup>({ status: "loading" });
+  const customerRequest = useRef(0);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [projects, setProjects] = useState<any[]>([]);
   const [draft, setDraft] = useState<any>(null);
@@ -329,26 +338,31 @@ export default function NewLoadingPage() {
         driver.vehicleType,
         driver.reservedLoading?.loadingNumber,
       ].some((value) =>
-        String(value || "")
-          .toLowerCase()
-          .includes(search),
+        normalizeSearch(String(value || "")).includes(search),
       ),
     );
   }, [drivers, driverSearch, selectedDriverIds]);
 
-  const loadCustomers = async () => {
-    setError("");
+  const loadCustomers = useCallback(async (query = "") => {
+    const request = ++customerRequest.current;
+    setCustomerLookup({ status: "loading" });
+    const search = normalizeDigits(query.trim());
     try {
-      const response = await logisticsAPI.getLoadableCustomers(
-        customerSearch ? { search: customerSearch } : undefined,
+      const { data } = await logisticsAPI.getLoadableCustomers(
+        search ? { search } : undefined,
       );
-      if (response.data.success) setCustomers(response.data.data);
-    } catch (err: any) {
-      setError(
-        userFacingError(err, "دریافت مشتری‌های قابل بارگیری ناموفق بود."),
-      );
+      if (request !== customerRequest.current) return;
+      setCustomerLookup(data.success
+        ? { status: "ready", customers: data.data }
+        : { status: "error", message: customerLookupError });
+    } catch (err) {
+      if (request !== customerRequest.current) return;
+      setCustomerLookup({
+        status: "error",
+        message: userFacingError(err, customerLookupError),
+      });
     }
-  };
+  }, []);
 
   const loadCustomerProjects = async (customer: any) => {
     setError("");
@@ -422,7 +436,11 @@ export default function NewLoadingPage() {
   };
 
   useEffect(() => {
-    loadCustomers();
+    void loadCustomers();
+    return () => { customerRequest.current++; };
+  }, [loadCustomers]);
+
+  useEffect(() => {
     loadDrivers();
   }, []);
 
@@ -858,14 +876,31 @@ export default function NewLoadingPage() {
             value={customerSearch}
             onChange={(event) => setCustomerSearch(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter") loadCustomers();
+              if (event.key === "Enter" && customerLookup.status !== "loading") {
+                void loadCustomers(customerSearch);
+              }
             }}
           />
         </ErpField>
-        <ErpButton label="جستجو" icon={FaSearch} onClick={loadCustomers} />
+        <ErpButton
+          label="جستجو"
+          icon={FaSearch}
+          disabled={customerLookup.status === "loading"}
+          onClick={() => loadCustomers(customerSearch)}
+        />
       </div>
       <div className="mt-4 flex flex-col gap-2">
-        {customers.map((customer) => (
+        {customerLookup.status === "loading" && (
+          <ErpSkeleton label="در حال دریافت مشتری‌های قابل بارگیری" />
+        )}
+        {customerLookup.status === "error" && (
+          <ErpInlineState
+            kind="error"
+            title={customerLookup.message}
+            action={{ label: "تلاش دوباره", onClick: () => loadCustomers(customerSearch) }}
+          />
+        )}
+        {customerLookup.status === "ready" && customerLookup.customers.map((customer) => (
           <ErpNeumorphicInteractiveCard
             key={customer.id}
             type="button"
@@ -906,7 +941,7 @@ export default function NewLoadingPage() {
             </div>
           </ErpNeumorphicInteractiveCard>
         ))}
-        {!customers.length && (
+        {customerLookup.status === "ready" && customerLookup.customers.length === 0 && (
           <ErpEmptyState icon={FaUser} title="مشتری قابل بارگیری پیدا نشد" />
         )}
       </div>
@@ -1125,6 +1160,7 @@ export default function NewLoadingPage() {
           <>
             <ErpField label="خط راس">
               <ErpInput
+                inputMode="decimal"
                 value={line.khatRas}
                 onChange={(event) =>
                   updateLine(line.key, { khatRas: event.target.value })
@@ -1133,6 +1169,7 @@ export default function NewLoadingPage() {
             </ErpField>
             <ErpField label="تعداد">
               <ErpInput
+                inputMode="numeric"
                 value={line.pieceCount}
                 onChange={(event) =>
                   updateLine(line.key, { pieceCount: event.target.value })
@@ -1141,6 +1178,7 @@ export default function NewLoadingPage() {
             </ErpField>
             <ErpField label="اضافه">
               <ErpInput
+                inputMode="decimal"
                 value={line.plus}
                 onChange={(event) =>
                   updateLine(line.key, { plus: event.target.value })
@@ -1149,6 +1187,7 @@ export default function NewLoadingPage() {
             </ErpField>
             <ErpField label="کسر">
               <ErpInput
+                inputMode="decimal"
                 value={line.minus}
                 onChange={(event) =>
                   updateLine(line.key, { minus: event.target.value })
@@ -1159,6 +1198,7 @@ export default function NewLoadingPage() {
         ) : (
           <ErpField label="مقدار مستقیم">
             <ErpInput
+              inputMode="decimal"
               value={line.quantity}
               onChange={(event) =>
                 updateLine(line.key, { quantity: event.target.value })
@@ -1219,12 +1259,14 @@ export default function NewLoadingPage() {
             <>
               <ErpField label="خط راس">
                 <ErpInput
+                  inputMode="decimal"
                   value={driverLine.khatRas}
                   onChange={(event) => update({ khatRas: event.target.value })}
                 />
               </ErpField>
               <ErpField label="تعداد">
                 <ErpInput
+                  inputMode="numeric"
                   value={driverLine.pieceCount}
                   onChange={(event) =>
                     update({ pieceCount: event.target.value })
@@ -1233,12 +1275,14 @@ export default function NewLoadingPage() {
               </ErpField>
               <ErpField label="اضافه">
                 <ErpInput
+                  inputMode="decimal"
                   value={driverLine.plus}
                   onChange={(event) => update({ plus: event.target.value })}
                 />
               </ErpField>
               <ErpField label="کسر">
                 <ErpInput
+                  inputMode="decimal"
                   value={driverLine.minus}
                   onChange={(event) => update({ minus: event.target.value })}
                 />
@@ -1247,6 +1291,7 @@ export default function NewLoadingPage() {
           ) : (
             <ErpField label="مقدار مستقیم">
               <ErpInput
+                inputMode="decimal"
                 value={driverLine.quantity}
                 onChange={(event) => update({ quantity: event.target.value })}
               />

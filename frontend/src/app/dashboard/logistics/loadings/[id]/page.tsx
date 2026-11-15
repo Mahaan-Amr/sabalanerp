@@ -33,6 +33,7 @@ import SalesDispatchInvoices from "@/features/accounting/SalesDispatchInvoices";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { loadingDriverSnapshots } from '../../loading-driver-snapshots';
 import { userFacingError } from "@/features/dispatch/userFacingError";
+import { normalizeDigits } from "@/lib/numberFormat";
 import {
   StatusBadge,
   dateFa,
@@ -643,7 +644,7 @@ export default function LoadingDetailPage() {
               onChange={(event) =>
                 setCorrection((current) => ({
                   ...current,
-                  deltaQuantity: event.target.value,
+                  deltaQuantity: normalizeDigits(event.target.value),
                 }))
               }
               placeholder="برای کاهش از علامت منفی استفاده کنید"

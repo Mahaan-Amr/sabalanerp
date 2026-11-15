@@ -127,7 +127,7 @@ export async function readCustomerWorkspace(database: PrismaClient, input: { id:
       netBalanceRials: receivableRials - unallocatedCreditRials, contracts, financialRecords, receivables, payments, treasuryChecks,
       openingReview, openingAttributions, openingSnapshotHash: opening?.snapshotHash, openingSources: opening?.sources ?? [], creditAllocations: projection?.creditAllocations ?? [],
       openItems: projection?.openItems ?? [], activityItems: projection?.activityItems ?? [], receipts: projection?.receipts ?? [], receiptHistory: projection?.receiptHistory ?? [], refunds: projection?.refunds ?? [] };
-  });
+  }, { ordinaryOnly: true });
 }
 
 export type CustomerAccountOperation = {

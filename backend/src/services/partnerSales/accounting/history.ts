@@ -6,12 +6,13 @@ import { PartnerAccountingCommandError } from './errors';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource,
   type PartnerFinancialPreparation } from './source';
 import { sum, negate } from '../reporting/money';
-import { readPartnerCollections } from './collections';
+import { sumPartnerCollections } from './collections';
 import type { FinancialTrendPeriod } from '../../accountingFinancialTrend';
 import { PARTNER_REPLACEMENT_MODE, matchesPartnerStagedApproval } from './sharedCorrection';
 import { readPartnerRevisionProjections } from '../cases/lifecycle';
 import { readPartnerInvoiceSource } from './invoiceSource';
 import { validatePendingPartnerApproval } from './financialApproval';
+import { groupPaymentsByReceivable } from './groupPaymentsByReceivable';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -104,11 +105,17 @@ async function publishedInvoices(tx: Prisma.TransactionClient, input: { invoiceI
 export async function readPartnerOutstandingHistory(tx: Prisma.TransactionClient, input: {
   invoiceIds: readonly string[]; cutoff: Date; asOf: Date;
 }) {
+  return projectPartnerOutstandingHistory(tx, input, await publishedInvoices(tx, input));
+}
+
+async function projectPartnerOutstandingHistory(tx: Prisma.TransactionClient, input: {
+  cutoff: Date; asOf: Date;
+}, published: Awaited<ReturnType<typeof publishedInvoices>>) {
   const rows: Array<Omit<AccountingReceivable, 'paidAmount' | 'remainingAmount' | 'originalAmount' | 'status' | 'metadata'> & {
     paidAmount: string; remainingAmount: string; originalAmount: string; status: string; metadata: Record<string, unknown>;
   }> = [];
   const activeCases = new Set<string>();
-  for (const { invoice, approval, effectiveAt } of await publishedInvoices(tx, input)) {
+  for (const { invoice, approval, effectiveAt } of published) {
     if (effectiveAt >= input.cutoff ||
         (invoice.voidedAt && invoice.voidedAt < input.cutoff)) continue;
     if (activeCases.has(approval.owner.caseId)) throw conflict();
@@ -131,6 +138,11 @@ export async function readPartnerAccountingTrend(tx: Prisma.TransactionClient, i
   invoiceIds: readonly string[]; periods: readonly FinancialTrendPeriod[]; asOf: Date;
 }) {
   const published = await publishedInvoices(tx, input);
+  const receivableIds = [...new Set(published.map(({ approval }) => approval.accountingReceivableId))];
+  const payments = receivableIds.length ? await tx.accountingPaymentStatus.findMany({ where: {
+    receivableId: { in: receivableIds }, createdAt: { lte: input.asOf },
+  } }) : [];
+  const paymentsByReceivable = groupPaymentsByReceivable(payments);
   const currencies = [...new Set(published.map(({ invoice }) => invoice.currency))].sort();
   const series: Array<{ currency: string; points: Array<{ periodKey: string; label: string; startsAt: string; endsAt: string;
     invoiced: string; received: string; outstanding: string }> }> = [];
@@ -145,15 +157,15 @@ export async function readPartnerAccountingTrend(tx: Prisma.TransactionClient, i
       ]));
       const receivedAmounts: string[] = [];
       for (const { invoice, approval, preparation } of selected) {
-        const before = await readPartnerCollections(tx, { receivableId: approval.accountingReceivableId, currency,
+        const ledger = paymentsByReceivable.get(approval.accountingReceivableId) ?? [];
+        const before = sumPartnerCollections(ledger, { currency,
           cutoff: new Date(period.startsAt.getTime() - 1), asOf: input.asOf, preparation });
-        const after = await readPartnerCollections(tx, { receivableId: approval.accountingReceivableId, currency,
+        const after = sumPartnerCollections(ledger, { currency,
           cutoff: new Date(period.endsAt.getTime() - 1), asOf: input.asOf, preparation });
         if (before === null || after === null || invoice.receivables[0].id !== approval.accountingReceivableId) throw conflict();
         receivedAmounts.push(after, negate(before));
       }
-      const outstanding = await readPartnerOutstandingHistory(tx, { invoiceIds: selected.map(({ invoice }) => invoice.id),
-        cutoff: period.endsAt, asOf: input.asOf });
+      const outstanding = await projectPartnerOutstandingHistory(tx, { cutoff: period.endsAt, asOf: input.asOf }, selected);
       points.push({ periodKey: period.key, label: period.label, startsAt: period.startsAt.toISOString(), endsAt: period.endsAt.toISOString(),
         invoiced, received: sum(receivedAmounts), outstanding: sum(outstanding.map(row => row.remainingAmount)) });
     }

@@ -1225,6 +1225,10 @@ export const accountingAPI = {
   getWorkspace: (params?: any) => api.get('/accounting/workspace', { params }),
   getDashboard: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string }) =>
     api.get('/accounting/dashboard', { params }),
+  getDashboardChange: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string;
+    accessRevision?: string; workspaceRevision?: string; trendRevision?: string }) => api.get('/accounting/dashboard/change', { params }),
+  getDashboardWorkspace: (params: { range: '1m' | '3m' | '6m' | '1y'; due?: string; deadlineType?: string }) =>
+    api.get('/accounting/dashboard/workspace', { params }),
   getFinancialTrend: (range: '1m' | '3m' | '6m' | '1y') => api.get('/accounting/financial-trend', { params: { range } }),
   getDispatchCandidates: () => api.get('/accounting/dispatch-candidates'),
   issueLoadingDocuments: (loadingId: string) => api.post(`/accounting/loadings/${encodeURIComponent(loadingId)}/issue-dispatch-documents`),

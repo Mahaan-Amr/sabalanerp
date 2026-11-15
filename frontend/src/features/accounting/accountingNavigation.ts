@@ -16,7 +16,7 @@ export const accountingNavigationGroups: readonly AccountingNavigationGroup[] = 
   {
     id: 'review', label: 'بررسی و پیگیری', description: 'قراردادها، صورتحساب‌ها و اصلاحات',
     links: [
-      { label: 'قراردادهای قابل بررسی', href: '/dashboard/accounting/contracts' },
+      { label: 'قراردادهای قابل بررسی', href: '/dashboard/accounting/contracts?view=reviewable' },
       { label: 'پیش‌نویس صورتحساب‌ها', href: '/dashboard/accounting/invoice-candidates' },
       { label: 'درخواست‌های اصلاح', href: '/dashboard/accounting/correction-requests' },
       { label: 'اسناد ارسال مشتری', href: '/dashboard/accounting/dispatch-documents' },

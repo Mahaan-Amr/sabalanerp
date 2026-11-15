@@ -32,7 +32,7 @@ export type AccountingWorkspaceLoadState<T = any> = {
 
 export type AccountingWorkspaceLoadEvent<T = any> =
   | { type: 'reset' }
-  | { type: 'start' }
+  | { type: 'start'; preservePrivate?: boolean }
   | { type: 'success'; data: T }
   | { type: 'failure'; message: string };
 
@@ -51,7 +51,8 @@ export const reduceAccountingWorkspaceLoad = <T = any>(
   if (event.type === 'reset') return { data: null, loading: true, stale: false, error: null };
   const privateData = Boolean(state.data && typeof state.data === 'object' &&
     'partnerAccountingIncluded' in state.data && state.data.partnerAccountingIncluded);
-  if (event.type === 'start') return { ...state, data: privateData ? null : state.data, loading: true, stale: false, error: null };
+  if (event.type === 'start') return { ...state, data: privateData && !event.preservePrivate ? null : state.data,
+    loading: true, stale: false, error: null };
   if (event.type === 'success') return { data: event.data, loading: false, stale: false, error: null };
   return {
     ...state,

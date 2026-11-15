@@ -65,6 +65,10 @@ export async function historicalAccountingFixture(status = 'DRAFT') {
     throw new Error(`Unexpected persistence mutation: ${String(method)}`);
   } });
   const persistence: Record<string, unknown> = {
+    effectiveAuthorizationAudit: { createMany: async (args: { data: unknown[] }) => {
+      writes.push(...args.data.map(() => 'AUTHORIZATION_AUDIT'));
+      return { count: args.data.length };
+    } },
     partnerSaleCase: { findMany: async () => [row], findUnique: async () => row },
     partnerCaseRevision: { findUnique: async () => revision },
     partnerProfile: { findUnique: async () => ({ id: row.profileId, userId: row.profile.userId, state: 'ACTIVE', revision: 1 }) },

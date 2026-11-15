@@ -74,6 +74,24 @@ async function run() {
     assert.equal(partner.total, 0, 'Partner filter excludes ordinary contracts and does not bypass actor scope');
     assert.deepEqual(partner.items, []);
     assert.deepEqual(partner.totals, { contractAmount: '0', invoicedAmount: '0', receivedAmount: '0', remainingAmount: '0' });
+    const reviewer = await prisma.user.findFirst({ where: { role: 'ADMIN', isActive: true }, select: { id: true } });
+    assert(reviewer, 'An active local accounting reviewer is required');
+    const reviewablePartner = await listAccountingContracts({ view: 'reviewable', sourceKind: 'PARTNER_INTERNAL_RECORD', pageSize: 100 },
+      { userId: reviewer.id });
+    assert(reviewablePartner.items.every(row => row.partnerContext?.caseState === 'COMMITTED'),
+      'Financial review excludes numbered Partner cases that were never committed');
+    const fullPartner = await listAccountingContracts({ sourceKind: 'PARTNER_INTERNAL_RECORD', pageSize: 100 },
+      { userId: reviewer.id });
+    const fullById = new Map(fullPartner.items.map(row => [row.contractId, row]));
+    for (const row of reviewablePartner.items) {
+      assert.deepEqual(row, fullById.get(row.contractId),
+        'Bounded review preparation preserves the complete committed row and source-specific actions');
+    }
+    const combined50 = await listAccountingContracts({ view: 'reviewable', pageSize: 50 }, { userId: reviewer.id });
+    const combined100 = await listAccountingContracts({ view: 'reviewable', pageSize: 100 }, { userId: reviewer.id });
+    assert.equal(combined50.total, combined100.total, 'The mixed authorized total is independent of page size');
+    assert.deepEqual(combined50.totals, combined100.totals, 'The mixed financial totals are independent of page size');
+    assert.deepEqual(combined50.items, combined100.items.slice(0, 50), 'Mixed attention order and tie order are stable across pages');
     const allRows = [...actual.items];
     for (let page = 2; (page - 1) * 100 < actual.total; page += 1) {
       allRows.push(...(await listAccountingContracts({ page, pageSize: 100 })).items);

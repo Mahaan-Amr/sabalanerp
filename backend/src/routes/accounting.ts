@@ -40,6 +40,8 @@ import {
   getAccountingContractDetail,
   getAccountingFinancialTrend,
   getAccountingDashboard,
+  getAccountingDashboardChange,
+  getAccountingDashboardWorkspace,
   getAccountingWorkspace,
   listAccountingContracts,
   listAuditLogs,
@@ -770,6 +772,28 @@ export const createAccountingDashboardResponse = (
 };
 
 router.get('/dashboard', accountingView, createAccountingDashboardResponse());
+
+export const createAccountingDashboardChangeResponse = (
+  check: typeof getAccountingDashboardChange = getAccountingDashboardChange,
+) => async (req: AuthRequest, res: Response) => {
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    res.json({ success: true, data: await check(req.query, { userId: req.user!.id }) });
+  } catch (error) {
+    accountingReadFailure(res, error);
+  }
+};
+
+router.get('/dashboard/change', accountingView, createAccountingDashboardChangeResponse());
+
+router.get('/dashboard/workspace', accountingView, async (req: AuthRequest, res: Response) => {
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    res.json({ success: true, data: await getAccountingDashboardWorkspace(req.query, { userId: req.user!.id }) });
+  } catch (error) {
+    accountingReadFailure(res, error);
+  }
+});
 
 export const createAccountingFinancialTrendResponse = (
   loadTrend: typeof getAccountingFinancialTrend = getAccountingFinancialTrend,

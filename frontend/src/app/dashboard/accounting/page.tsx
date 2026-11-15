@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FaBalanceScale,
+  FaClipboardCheck,
   FaFileInvoice,
   FaSync,
 } from 'react-icons/fa';
@@ -377,6 +378,13 @@ export default function AccountingDashboardPage() {
         title="دسترسی‌های مالی"
         desktopColumns={2}
         items={[
+          {
+            id: 'review',
+            title: 'بررسی و پیگیری',
+            description: 'قراردادها، صورتحساب‌ها و اصلاحات',
+            href: '/dashboard/accounting/workflows/review',
+            icon: FaClipboardCheck,
+          },
           {
             id: 'ledger',
             title: 'دفترکل و کدینگ',

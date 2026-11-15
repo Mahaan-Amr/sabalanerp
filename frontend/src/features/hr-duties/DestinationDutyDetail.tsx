@@ -90,6 +90,7 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
   );
   const [reason, setReason] = useState('');
   const [correctionAction, setCorrectionAction] = useState<string | null>(null);
+  const [loadingCancellationConfirmationOpen, setLoadingCancellationConfirmationOpen] = useState(false);
   const [collateralDecisionAction, setCollateralDecisionAction] = useState('');
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -133,6 +134,7 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
       announceCrossWorkspaceDutyChanged();
       setReason('');
       setCorrectionAction(null);
+      setLoadingCancellationConfirmationOpen(false);
       await load();
     } catch (error) {
       setActionError(failureMessage(error));
@@ -232,6 +234,7 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
   }
 
   const duty = state.data;
+  const loadingCancellationDecision = duty.sourceActionCode === 'LOADING_CANCELLATION_REVIEW';
   const contractDispatchDecision = duty.sourceActionCode === 'CONTRACT_DISPATCH_DECISION' && !!duty.destinationHref;
   const isCollateralVerificationDecision = ['HIRING_COLLATERAL_VERIFY_RECEIPT', 'HIRING_COLLATERAL_VERIFY_ORIGINAL_RETURN'].includes(duty.sourceActionCode);
   const structuredResult = duty.result && typeof duty.result === 'object' && !Array.isArray(duty.result)
@@ -375,7 +378,7 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
         <ErpButton label="مشاهده قرارداد و ثبت تصمیم" href={duty.destinationHref!} tone="primary" />
       </ErpSection>}
       {!contractDispatchDecision && !isCollateralVerificationDecision && duty.allowedActionCodes.length > 0 && ['ASSIGNEE', 'SHARED'].includes(duty.access) && duty.status === 'OPEN' && (
-        <ErpSection title="ثبت نتیجه" description="نتیجه مستقیماً و یک‌بار به فرایند مبدأ بازگردانده می‌شود.">
+        <ErpSection title="ثبت نتیجه" description={loadingCancellationDecision ? undefined : "نتیجه مستقیماً و یک‌بار به فرایند مبدأ بازگردانده می‌شود."}>
           {correctionAction && (
             <div className="mb-4">
               <label className="sds-text-secondary mb-3 block text-sm font-semibold" htmlFor="duty-reason">دلیل اقدام</label>
@@ -387,7 +390,8 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
                 aria-invalid={Boolean(reasonError)}
                 aria-describedby={reasonError ? 'duty-reason-hint duty-reason-error' : 'duty-reason-hint'}
               />
-              <p id="duty-reason-hint" className="sds-text-muted mt-2 text-xs">مشکل و اقدام اصلاحی لازم را کوتاه و روشن بنویسید.</p>
+              <p id="duty-reason-hint" className="sds-text-muted mt-2 text-xs">{loadingCancellationDecision
+                ? 'دلیل رد به کاربر لجستیک نمایش داده می‌شود.' : 'مشکل و اقدام اصلاحی لازم را کوتاه و روشن بنویسید.'}</p>
               {reasonError && <p id="duty-reason-error" role="alert" className="mt-2 text-sm font-semibold text-[var(--sds-danger)]">{reasonError}</p>}
               <div className="mt-3 flex flex-wrap gap-2">
                 <ErpButton label="ثبت تصمیم" tone="warning" disabled={Boolean(pendingAction) || state.loading || state.stale} onClick={() => respond(correctionAction)} />
@@ -405,12 +409,13 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
                   label={pendingAction === actionCode ? 'در حال ثبت…'
                     : duty.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION' && actionCode === 'VERIFY' && duty.responseRequiresReason ? 'بستن درخواست'
                     : duty.sourceActionCode === 'ACCOUNTING_VERIFY_CONTRACT_CORRECTION' && actionCode === 'RETURN_TO_SELLER' ? 'درخواست فرصت مجدد از مدیر'
-                    : presentation.label}
+                    : loadingCancellationDecision && actionCode === 'APPROVE' ? 'تأیید درخواست لغو' : presentation.label}
                   icon={presentation.icon}
                   tone={presentation.tone}
                   variant={actionCode === 'APPROVE' ? 'solid' : 'soft'}
                   disabled={Boolean(pendingAction) || state.loading || state.stale || Boolean(correctionAction && correctionAction === actionCode)}
-                  onClick={() => !duty.responseRequiresReason && ['APPROVE', 'FORWARD_TO_MANAGER', 'VERIFY'].includes(actionCode)
+                  onClick={() => loadingCancellationDecision && actionCode === 'APPROVE'
+                    ? setLoadingCancellationConfirmationOpen(true) : !duty.responseRequiresReason && ['APPROVE', 'FORWARD_TO_MANAGER', 'VERIFY'].includes(actionCode)
                     ? respond(actionCode) : setCorrectionAction(actionCode)}
                 />
               );
@@ -464,6 +469,27 @@ export function DestinationDutyDetail({ workspace, dutyId, overlayScope = 'defau
             {uniqueAccessProvenance(duty.accessProvenance).map((item) => <ErpFieldView key={item} label="مجوز مؤثر" value={item} />)}
           </div>
         </ErpSection>
+      )}
+      {loadingCancellationDecision && (
+        <ErpSheet
+          open={loadingCancellationConfirmationOpen}
+          onClose={() => setLoadingCancellationConfirmationOpen(false)}
+          title="تأیید ابطال اسناد و لغو بارگیری"
+          presentation="modal"
+          scope={overlayScope}
+          pending={pendingAction === 'APPROVE'}
+          footer={
+            <div className="flex gap-2">
+              <ErpButton label="انصراف" variant="soft" onClick={() => setLoadingCancellationConfirmationOpen(false)} disabled={Boolean(pendingAction)} />
+              <ErpButton label="ابطال اسناد و لغو بارگیری" tone="danger" variant="solid" onClick={() => {
+                setLoadingCancellationConfirmationOpen(false);
+                respond('APPROVE');
+              }} disabled={Boolean(pendingAction) || duty.status !== 'OPEN' || state.loading || state.stale} />
+            </div>
+          }
+        >
+          <p className="sds-text-secondary">اسناد این درخواست باطل و بار آزاد می‌شود. پذیرش راننده و خودرو در گارد باز می‌ماند.</p>
+        </ErpSheet>
       )}
       <ErpSheet
         open={reassignmentConfirmationOpen}

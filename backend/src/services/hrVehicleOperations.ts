@@ -10,7 +10,8 @@ import { FEATURES } from "../middleware/feature";
 type Tx = Prisma.TransactionClient & { assignmentSource?: "EXTERNAL" };
 /** Explicit transaction scope: both registries use one assignment engine and transaction. */
 export const externalAssignmentScope = (tx: Prisma.TransactionClient): Tx =>
-  Object.assign(Object.create(tx), { assignmentSource: "EXTERNAL" as const });
+  // Define an own property so Prisma's inherited proxy setter cannot tag the client.
+  Object.defineProperty(Object.create(tx), "assignmentSource", { value: "EXTERNAL" });
 // Both stores expose the same scalar command contract; relation includes remain source-specific.
 export const assignmentStore = (tx: Tx): Prisma.TransactionClient["driverVehicleAssignment"] =>
   (tx.assignmentSource === "EXTERNAL" ? tx.externalDriverVehicleAssignment : tx.driverVehicleAssignment) as Prisma.TransactionClient["driverVehicleAssignment"];

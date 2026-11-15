@@ -5,7 +5,7 @@ import { resolveNarrowFeatureAccess } from "../narrowFeatureAccess";
 import { createAuditedPartnerAuthorization } from "../partnerSales/authorization/audited";
 import { authorizePartnerLoading } from "../partnerSales/fulfillment/loadingAuthority";
 import { assertCanonicalDispatchCommandAllowed } from "../dispatchCutover";
-import { dispatchDocumentLifecycleAuditEventHash } from "../dispatchDocuments/prismaRepository";
+import { auditSalesInvoice, voidSalesInvoiceInTransaction as persistInvoiceVoid } from "./lifecycle";
 import { loadShipmentStatementRuntimeStateUnderLock } from "../dispatchDocuments/runtimeState";
 import { isPostCutoverFinalization, isShipmentStatementFlowActive } from "../dispatchDocuments/featureGate";
 import { verifyDispatchArtifactStorageUnderLock } from "../dispatchDocuments/artifactStorageLock";
@@ -117,6 +117,46 @@ async function authorize(
   )
     throw new SalesInvoiceError("دسترسی مجاز نیست.", 403);
 }
+export async function voidSalesInvoiceInTransaction(
+  tx: Prisma.TransactionClient, ctx: InvoiceContext, loadingId: string, id: string | null,
+  reason: string, requireCurrent = false,
+) {
+  if (
+    typeof reason !== "string" ||
+    reason.trim().length < 3 ||
+    reason.length > 2000
+  )
+    throw new SalesInvoiceError("دلیل ابطال را وارد کنید.", 400);
+  if (!requireCurrent || id !== null) await authorize(tx, ctx, loadingId, true);
+  await lock(tx, loadingId);
+  const invoice = await tx.salesDispatchInvoice.findFirst({
+    where: requireCurrent ? { loadingId, voidedAt: null } : { id: id ?? undefined, loadingId },
+  });
+  if (requireCurrent && (invoice?.id ?? null) !== id)
+    throw new SalesInvoiceError("وضعیت فاکتور تغییر کرده است. جدول را به‌روزرسانی کنید و دوباره تأیید کنید.", 409);
+  if (requireCurrent && !invoice) return null;
+  if (!invoice) throw new SalesInvoiceError("فاکتور پیدا نشد.", 404);
+  if (invoice.voidedAt) return { id: invoice.id };
+  const exited = await tx.logisticsAllocationRevision.findFirst({
+    where: {
+      loadingId,
+      OR: [
+        { physicalExit: { isNot: null } },
+        { manualOutageExit: { status: "REGISTERED" } },
+      ],
+    },
+  });
+  if (exited) {
+    const corrected = await readInvoiceSource(tx, loadingId);
+    if (sourceHash(corrected) === invoice.sourceHash)
+      throw new SalesInvoiceError(
+        "پس از خروج، ابتدا گردش اصلاح ارسال را تکمیل کنید.",
+      );
+  }
+  await persistInvoiceVoid(tx, invoice, { actorId: ctx.actorId, reason: reason.trim() });
+  return { id: invoice.id };
+}
+
 const transaction = async <T>(
   db: PrismaClient,
   work: (tx: Prisma.TransactionClient) => Promise<T>,
@@ -146,42 +186,6 @@ const transaction = async <T>(
           "اطلاعات فاکتور هم‌زمان تغییر کرد؛ تازه‌سازی کنید و دوباره تلاش کنید.",
         );
     }
-};
-const audit = async (
-  tx: Prisma.TransactionClient,
-  id: string,
-  eventType: string,
-  payload: unknown,
-  actorId: string,
-) => {
-  const at = new Date(),
-    aggregateType = "SALES_DISPATCH_INVOICE";
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`SALES_INVOICE_AUDIT:${id}`}))`;
-  const previous = await tx.dispatchLifecycleAudit.findFirst({
-    where: { aggregateType, aggregateId: id },
-    orderBy: [{ recordedAt: "desc" }, { id: "desc" }],
-  });
-  const previousHash = previous?.eventHash ?? null;
-  await tx.dispatchLifecycleAudit.create({
-    data: {
-      aggregateType,
-      aggregateId: id,
-      eventType,
-      payload: payload as Prisma.InputJsonValue,
-      actorId,
-      recordedAt: at,
-      previousHash,
-      eventHash: dispatchDocumentLifecycleAuditEventHash({
-        aggregateType,
-        aggregateId: id,
-        eventType,
-        payload,
-        actorId,
-        at,
-        previousHash,
-      }),
-    },
-  });
 };
 export function createSalesInvoiceService(
   db: PrismaClient,
@@ -364,7 +368,7 @@ export function createSalesInvoiceService(
             replacesId: predecessor?.id,
           },
         });
-        await audit(
+        await auditSalesInvoice(
           tx,
           id,
           "ISSUED",
@@ -386,55 +390,7 @@ export function createSalesInvoiceService(
       reason: string,
     ) =>
       transaction(db, async (tx) => {
-        if (
-          typeof reason !== "string" ||
-          reason.trim().length < 3 ||
-          reason.length > 2000
-        )
-          throw new SalesInvoiceError("دلیل ابطال را وارد کنید.", 400);
-        await authorize(tx, ctx, loadingId, true);
-        await lock(tx, loadingId);
-        const invoice = await tx.salesDispatchInvoice.findFirst({
-          where: { id, loadingId },
-        });
-        if (!invoice) throw new SalesInvoiceError("فاکتور پیدا نشد.", 404);
-        if (invoice.voidedAt) return { id };
-        const exited = await tx.logisticsAllocationRevision.findFirst({
-          where: {
-            loadingId,
-            OR: [
-              { physicalExit: { isNot: null } },
-              { manualOutageExit: { status: "REGISTERED" } },
-            ],
-          },
-        });
-        if (exited) {
-          const corrected = await readInvoiceSource(tx, loadingId);
-          if (sourceHash(corrected) === invoice.sourceHash)
-            throw new SalesInvoiceError(
-              "پس از خروج، ابتدا گردش اصلاح ارسال را تکمیل کنید.",
-            );
-        }
-        await tx.salesDispatchInvoice.update({
-          where: { id },
-          data: {
-            voidedAt: new Date(),
-            voidedBy: ctx.actorId,
-            voidReason: reason.trim(),
-          },
-        });
-        await audit(
-          tx,
-          id,
-          "VOIDED",
-          {
-            loadingId,
-            reason: reason.trim(),
-            number: invoice.number.toString(),
-          },
-          ctx.actorId,
-        );
-        return { id };
+        return (await voidSalesInvoiceInTransaction(tx, ctx, loadingId, id, reason))!;
       }),
     download: async (ctx: InvoiceContext, loadingId: string, id: string, requireCurrent = false) =>
       transaction(db, async (tx) => {
@@ -466,7 +422,7 @@ export function createSalesInvoiceService(
               reason,
             )
           : invoice.pdf;
-        await audit(
+        await auditSalesInvoice(
           tx,
           id,
           "DOWNLOADED",

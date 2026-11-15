@@ -1,4 +1,4 @@
-import { expect, test, type Route } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 import {
   loginAsAdmin,
   setViewportAndZoom,
@@ -31,6 +31,21 @@ const reply = (route: Route, data: unknown) =>
     contentType: "application/json",
     body: JSON.stringify({ success: true, data }),
   });
+const expectInvoicePreview = async (page: Page, workspace: "accounting" | "logistics", loadingId: string) => {
+  await page.route(`**/api/${workspace}/loadings/${loadingId}/sales-invoices/invoice-1/pdf?*`, async route => {
+    expect(new URL(route.request().url()).searchParams.get("download")).toBe("false");
+    // The click must already have opened the window before the PDF is delivered.
+    await expect.poll(() => page.context().pages().length).toBe(2);
+    await route.fulfill({ contentType: "application/pdf", body: "%PDF-1.4" });
+  });
+  const [preview] = await Promise.all([
+    page.waitForEvent("popup"),
+    page.getByRole("button", { name: "مشاهده فاکتور", exact: true }).click(),
+  ]);
+  await preview.waitForURL(/^blob:/);
+  await preview.close();
+};
+
 for (const width of [1280, 390]) {
   test(`sales dispatch invoice Accounting issuance and void history at ${width}px`, async ({
     page,
@@ -41,8 +56,13 @@ for (const width of [1280, 390]) {
     const blockedReason = "تأیید همه راننده‌ها هنوز کامل نشده است.";
     let ready = false,
       issued = 0,
-      voided = 0;
+      voided = 0,
+      voidAttempts = 0;
     const invoices: any[] = [];
+    const replacementInvoice = width === 1280 ? { id: "invoice-2", number: "2" } : null;
+    let currentInvoice: { id: string; number: string } | null = null;
+    let initialVoidKey: string;
+
     await page.route("**/api/accounting/dispatch-candidates", (route) =>
       reply(
         route,
@@ -56,7 +76,10 @@ for (const width of [1280, 390]) {
             loadingNumber: "27",
             plate: "۱۲ ب ۳۴۵",
           },
-          waybills: [],
+          currentSalesInvoice: currentInvoice,
+          waybills: issued && i === 0 ? [{
+            id: "waybill-1", number: "42", status: voided ? "VOIDED" : "ISSUED", legacyReconstruction: { id: "reconstruction-1" },
+          }] : [],
         })),
       ),
     );
@@ -87,6 +110,7 @@ for (const width of [1280, 390]) {
           return;
         }
         issued++;
+        currentInvoice = { id: "invoice-1", number: "1" };
         invoices.push({
           id: "invoice-1",
           number: "1",
@@ -97,16 +121,50 @@ for (const width of [1280, 390]) {
       },
     );
     await page.route(
-      `**/api/accounting/loadings/${loadingId}/sales-invoices/invoice-1/void`,
+      "**/api/accounting/dispatch-waybills/waybill-1/void",
       async (route) => {
-        expect(route.request().postDataJSON().reason).toBe("اصلاح بارگیری");
+        const body = route.request().postDataJSON();
+        expect(body.reason).toBe("اصلاح بارگیری");
+        if (++voidAttempts === 1) {
+          expect(body.expectedInvoiceId).toBe("invoice-1");
+          initialVoidKey = body.idempotencyKey;
+          currentInvoice = replacementInvoice;
+          invoices[0].status = "VOIDED";
+          invoices[0].voidReason = "ابطال توسط کاربر دیگر";
+          if (replacementInvoice) invoices.push({ ...replacementInvoice, status: "ISSUED", voidReason: null });
+          return route.fulfill({ status: 409, json: { success: false, error: "وضعیت فاکتور تغییر کرده است." } });
+        }
+        expect(body.expectedInvoiceId).toBe(replacementInvoice?.id ?? null);
+        expect(body.idempotencyKey).not.toBe(initialVoidKey);
+        if (replacementInvoice) {
+          invoices[1].status = "VOIDED";
+          invoices[1].voidReason = "اصلاح بارگیری";
+        }
+        currentInvoice = null;
         voided++;
-        invoices[0].status = "VOIDED";
-        invoices[0].voidReason = "اصلاح بارگیری";
-        await reply(route, { id: "invoice-1" });
+        await reply(route, { id: "waybill-1" });
       },
     );
     await page.goto("/dashboard/accounting/dispatch");
+    const table = page.getByRole("table");
+    await expect(table.getByRole("row")).toHaveCount(3);
+    await expect(table.getByRole("button", { name: /ابطال.*فاکتور فروش/ })).toHaveCount(0);
+    const search = page.getByPlaceholder("شماره بارگیری، مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه");
+    await search.fill("راننده ۱");
+    await expect(table.getByRole("row")).toHaveCount(2);
+    await expect(table.getByText("راننده 1", { exact: true })).toBeVisible();
+    await search.fill("۲۷");
+    await expect(table.getByRole("row")).toHaveCount(3);
+    await assertNoHorizontalOverflow(page);
+    await table.getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).first().click();
+    const details = page.getByRole("dialog", { name: "جزئیات اقلام و اسناد بارگیری" });
+    await expect(details).toBeVisible();
+    await expect(async () => {
+      const bounds = (await details.boundingBox())!;
+      const viewport = page.viewportSize()!;
+      expect(Math.abs(bounds.x + bounds.width / 2 - viewport.width / 2)).toBeLessThan(3);
+      expect(Math.abs(bounds.y + bounds.height / 2 - viewport.height / 2)).toBeLessThan(3);
+    }).toPass({ timeout: 5000 });
     await expect(
       page.getByText("فاکتور فروش کل بارگیری", { exact: true }),
     ).toHaveCount(1);
@@ -129,24 +187,39 @@ for (const width of [1280, 390]) {
     await expect(
       page.getByText("فاکتور ۱ · صادرشده", { exact: true }),
     ).toBeVisible();
+    await expectInvoicePreview(page, "accounting", loadingId);
     await expect(issue).toHaveCount(0);
     await expect(page.getByRole("button", { name: "تکمیل صدور بارنامه‌ها" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "چاپ فاکتور و بارنامه‌ها" })).toBeDisabled();
-    await page
-      .getByRole("button", { name: "ابطال فاکتور", exact: true })
-      .click();
-    const dialog = page.getByRole("dialog", {
-      name: "ابطال فاکتور فروش",
+    await expect(details.getByRole("button", { name: "ابطال فاکتور فروش", exact: true })).toHaveCount(0);
+    await details.getByRole("button", { name: "بستن", exact: true }).click();
+    await expect(details).toBeHidden();
+    const voidDocuments = table.getByRole("button", { name: "ابطال بارنامه و فاکتور فروش", exact: true });
+    await expect(voidDocuments).toHaveCount(1);
+    await voidDocuments.click();
+    const dialog = page.getByRole("dialog", { name: "ابطال بارنامه و فاکتور فروش" });
+    await expect(dialog).toContainText("فاکتور فروش شماره");
+    await expect(dialog).toContainText("تا صدور فاکتور معتبر");
+    await dialog.getByRole("textbox", { name: "دلیل تصمیم" }).fill("ا");
+    await expect(dialog.getByRole("button", { name: "تأیید و ثبت" })).toBeDisabled();
+    await dialog.getByRole("textbox", { name: "دلیل تصمیم" }).fill("اصلاح بارگیری");
+    await dialog.getByRole("button", { name: "تأیید و ثبت" }).click();
+    const refreshedDialog = page.getByRole("dialog", {
+      name: replacementInvoice ? "ابطال بارنامه و فاکتور فروش" : "ابطال بارنامه",
       exact: true,
     });
-    await expect(dialog).toBeVisible();
-    await dialog
-      .getByRole("textbox", { name: "دلیل ابطال" })
-      .fill("اصلاح بارگیری");
-    await dialog
-      .getByRole("button", { name: "ثبت ابطال با حفظ سابقه" })
-      .click();
-    await expect(dialog).toBeHidden();
+    await expect(refreshedDialog.getByText(replacementInvoice ? /شمارهٔ سندها را بررسی/ : /فاکتور فروش فعال ندارد/)).toBeVisible();
+    await expect(refreshedDialog.getByRole("textbox", { name: "دلیل تصمیم" })).toHaveValue("اصلاح بارگیری");
+    if (replacementInvoice) await expect(refreshedDialog).toContainText(/فاکتور فروش شماره 2/);
+    expect(voidAttempts).toBe(1);
+    expect(voided).toBe(0);
+    await refreshedDialog.getByRole("button", { name: "تأیید دوباره و ثبت" }).click();
+    await expect(refreshedDialog).toBeHidden();
+    await expect(page.getByText(replacementInvoice
+      ? "بارنامه و فاکتور فروش با حفظ سابقه باطل شدند."
+      : "بارنامه با حفظ سابقه باطل شد.")).toBeVisible();
+    await expect(table.getByRole("button", { name: /ابطال.*فاکتور فروش/ })).toHaveCount(0);
+    await table.getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).first().click();
     await expect(
       page.getByText("فاکتور ۱ · باطل‌شده", { exact: true }),
     ).toBeVisible();
@@ -208,6 +281,7 @@ for (const width of [1280, 390]) {
     await expect(
       page.getByRole("button", { name: "ابطال فاکتور", exact: true }),
     ).toHaveCount(0);
+    await expectInvoicePreview(page, "logistics", loadingId);
     await assertNoHorizontalOverflow(page);
     await page.screenshot({
       path: info.outputPath(`invoice-logistics-${width}.png`),

@@ -142,6 +142,26 @@ const completeCandidateWithoutIssue = async (tx: Tx, input: { candidateId: strin
   return result;
 };
 
+// The caller owns document authority, the waybill lock, and the transaction.
+export async function voidDispatchBundleInTransaction(
+  tx: Prisma.TransactionClient,
+  waybill: { id: string; number: bigint; status: string; integrityHash: string; physicalExit?: unknown; manualOutageExit?: unknown },
+  input: Parameters<DispatchDocumentRepository['voidWaybill']>[0] & { at?: Date },
+) {
+  if (waybill.status !== 'ISSUED' || waybill.physicalExit || waybill.manualOutageExit) throw new DispatchDocumentConflictError('Only an unexited issued waybill can be voided.');
+  const at = input.at ?? new Date();
+  await tx.dispatchExitAuthorization.updateMany({ where: { waybillId: waybill.id, status: 'ACTIVE' }, data: { status: 'REVOKED', revokedAt: at, revokedBy: input.actorId, revocationReason: input.reason } });
+  await tx.accountingDispatchWaybill.update({ where: { id: waybill.id }, data: { status: AccountingDispatchWaybillStatus.VOIDED, voidedAt: at, voidedBy: input.actorId, voidReason: input.reason } });
+  const result = { id: waybill.id, number: waybill.number.toString(), status: 'VOIDED' as const };
+  await tx.dispatchDocumentCommandResult.create({ data: { waybillId: waybill.id, scope: 'WAYBILL', scopeId: waybill.id,
+    idempotencyKey: input.idempotencyKey, command: 'VOID', status: 'SUCCEEDED', result: storedCommandResult(result, input.intentFingerprint), actorId: input.actorId,
+    correlationId: input.correlationId, completedAt: at } });
+  await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id, eventType: 'DOCUMENT_BUNDLE_VOIDED',
+    payload: { reason: input.reason, authority: input.authority, correlationId: input.correlationId, idempotencyKey: input.idempotencyKey,
+      waybillIntegrityHash: waybill.integrityHash, before: { status: 'ISSUED' }, after: { status: 'VOIDED' } }, actorId: input.actorId, at });
+  return result;
+}
+
 export class PrismaDispatchDocumentRepository implements DispatchDocumentRepository {
   constructor(private readonly prisma: PrismaClient, private readonly verifier: DispatchSourceIntegrityVerifier<Tx>,
     private readonly artifactStorage: DispatchArtifactStorage) {}
@@ -327,7 +347,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       await lock(tx, [`ACCOUNTING_DISPATCH_WAYBILL:${input.waybillId}`]);
       const waybill = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId }, include: {
         physicalExit: true, manualOutageExit: true,
-        candidate: { include: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true } } } },
+        candidate: { include: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true, loadingId: true } } } },
       } });
       if (!waybill) throw new DispatchDocumentValidationError('Dispatch waybill was not found.');
       if (waybill.candidate.allocationRevision.sourceKind === 'PARTNER_CASE' && !await authorizePartnerAccountingWrite(tx, {
@@ -336,18 +356,12 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       })) return partnerAuthorizationDenied;
       const prior = await commandResult(tx, 'WAYBILL', input.waybillId, input.idempotencyKey, 'VOID', input.intentFingerprint);
       if (prior) return prior;
-      if (waybill.status !== 'ISSUED' || waybill.physicalExit || waybill.manualOutageExit) throw new DispatchDocumentConflictError('Only an unexited issued waybill can be voided.');
-      const at = new Date();
-      await tx.dispatchExitAuthorization.updateMany({ where: { waybillId: waybill.id, status: 'ACTIVE' }, data: { status: 'REVOKED', revokedAt: at, revokedBy: input.actorId, revocationReason: input.reason } });
-      await tx.accountingDispatchWaybill.update({ where: { id: waybill.id }, data: { status: AccountingDispatchWaybillStatus.VOIDED, voidedAt: at, voidedBy: input.actorId, voidReason: input.reason } });
-      const result = { id: waybill.id, number: waybill.number.toString(), status: 'VOIDED' as const };
-      await tx.dispatchDocumentCommandResult.create({ data: { waybillId: waybill.id, scope: 'WAYBILL', scopeId: waybill.id,
-        idempotencyKey: input.idempotencyKey, command: 'VOID', status: 'SUCCEEDED', result: storedCommandResult(result, input.intentFingerprint), actorId: input.actorId,
-        correlationId: input.correlationId, completedAt: at } });
-      await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: waybill.id, eventType: 'DOCUMENT_BUNDLE_VOIDED',
-        payload: { reason: input.reason, authority: input.authority, correlationId: input.correlationId, idempotencyKey: input.idempotencyKey,
-          waybillIntegrityHash: waybill.integrityHash, before: { status: 'ISSUED' }, after: { status: 'VOIDED' } }, actorId: input.actorId, at });
-      return result;
+      if (input.expectedInvoiceId !== undefined) {
+        const { voidSalesInvoiceInTransaction } = await import('../salesDispatchInvoice/service');
+        await voidSalesInvoiceInTransaction(tx, { actorId: input.actorId, workspace: 'accounting' },
+          waybill.candidate.allocationRevision.loadingId, input.expectedInvoiceId, input.reason, true);
+      }
+      return voidDispatchBundleInTransaction(tx, waybill, input);
     });
     if (isPartnerAuthorizationDenied(result)) throw new DispatchDocumentAuthorizationError('Current Case-scoped Accounting dispatch authority is required.');
     return result;

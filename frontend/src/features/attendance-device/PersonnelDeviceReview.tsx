@@ -13,20 +13,74 @@ type Mapping = { id: string; personnelId: string | null; deviceCode: string; ign
 type Terminal = { id: string; name: string; mode: string; activatedAt: string | null; lastSeenAt: string | null; lastReadAt: string | null; mappings: Mapping[] };
 type Interval = { id: string; enteredAt: string | null; exitedAt: string | null; exitUnknown: boolean; exitSource?: string | null; hasConflict?: boolean; handoverRequired?: boolean; revision: number; confirmedRevision: number; attendanceRecord: { personnelId: string | null } };
 type Punch = { id: string; personnelId: string | null; occurredAt: string; correctedOccurredAt: string | null; receivedAt: string; status: string; reason: string | null; deviceCode: string; nameSnapshot: string | null };
-type State = { capabilities: { manage: boolean; review: boolean; report: boolean }; terminals: Terminal[]; personPending: { personnelId: string; count: number }[]; initialReview: { dateKey: string; rows: { mappingId: string; latestScanAt: string | null; latestCorrectedScanAt?: string | null }[] }; clockSamples: ClockSample[]; intervals: Interval[]; punches: Punch[]; reviewCount: number; assignees: { userId: string; user: { firstName: string; lastName: string } }[]; handovers: { id: string; assigneeId: string; reason: string }[] };
+type PendingCase =
+  | { id: string; kind: 'punch'; occurredAt: string; status: string; reason: string | null; deviceCode: string }
+  | { id: string; kind: 'interval'; enteredAt: string | null; exitedAt: string | null; exitUnknown: boolean; hasConflict: boolean };
+type PendingPerson = { personnelId: string; count: number; name?: string | null; cases?: PendingCase[] };
+type State = { capabilities: { manage: boolean; review: boolean; report: boolean }; terminals: Terminal[]; personPending: PendingPerson[]; initialReview: { dateKey: string; rows: { mappingId: string; latestScanAt: string | null; latestCorrectedScanAt?: string | null }[] }; clockSamples: ClockSample[]; intervals: Interval[]; punches: Punch[]; reviewCount: number; assignees: { userId: string; user: { firstName: string; lastName: string } }[]; handovers: { id: string; assigneeId: string; reason: string }[] };
 const stamp = (v?: string | null) => v ? new Date(v).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' }) : 'اسکنی دریافت نشده';
 const labels: Record<string, string> = { SHADOW: 'دریافت مقایسه‌ای', REVIEW: 'نیازمند بررسی', DUPLICATE: 'تکرار احتمالی', UNMATCHED: 'نیازمند تطبیق', APPLIED: 'ثبت سیستمی', LINKED: 'شاهد ثبت دستی', CONFIRMED: 'تأییدشده', IGNORED: 'کنارگذاشته‌شده', BEFORE_START: 'پیش از شروع', DISMISSED: 'رسیدگی‌شده' };
 
-export function usePersonnelDeviceReview() {
+export function usePersonnelDeviceReview(includePendingCases: boolean) {
   const [state, setState] = useState<State | null>(null);
   const [error, setError] = useState('');
-  const load = useCallback(async () => { const r = await api.get('/attendance-device/state'); setState(r.data.data); }, []);
+  const fetchState = useCallback(async (): Promise<State> => {
+    const response = await api.get('/attendance-device/state', {
+      params: { includePendingCases: includePendingCases || undefined },
+    });
+    return response.data.data;
+  }, [includePendingCases]);
+  const load = useCallback(async () => { setState(await fetchState()); }, [fetchState]);
   useEffect(() => {
     let active = true; let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => { try { const r = await api.get('/attendance-device/state'); if (active) { setState(r.data.data); setError(''); } } catch { if (active) setError('دریافت وضعیت دستگاه ناموفق بود.'); } finally { if (active) timer = setTimeout(poll, 1500); } };
+    const poll = async () => { try { const next = await fetchState(); if (active) { setState(next); setError(''); } } catch { if (active) setError('دریافت وضعیت دستگاه ناموفق بود.'); } finally { if (active) timer = setTimeout(poll, 1500); } };
     void poll(); return () => { active = false; clearTimeout(timer); };
-  }, []);
+  }, [fetchState]);
   return { state, load, error };
+}
+
+function intervalIssue(interval: Pick<Interval, 'hasConflict' | 'exitUnknown' | 'enteredAt' | 'exitedAt'>) {
+  if (interval.hasConflict) return 'زمان این بازه با تردد دیگری هم‌پوشانی دارد';
+  if (interval.exitUnknown) return 'ساعت خروج ثبت نشده است';
+  if (!interval.enteredAt) return 'ساعت ورود مشخص نیست';
+  if (!interval.exitedAt) return 'خروج این حضور ثبت نشده است';
+  return 'بازه ثبت‌شده';
+}
+
+export function AttendancePendingList({ state, error, onReview }: {
+  state: State | null;
+  error: string;
+  onReview: (person: { id: string; name: string }) => void;
+}) {
+  const people = state?.personPending;
+  if (!people || people.some(person => !person.cases)) return error ? null : <ErpSkeleton lines={3} />;
+  if (!people.length) return <ErpEmptyState title="موردی برای رسیدگی باقی نمانده است" />;
+
+  return <div className="grid gap-3">
+    <p className="text-sm sds-text-secondary">این فهرست همهٔ موارد باز را مستقل از فیلترهای حضور و غیاب روزانه نشان می‌دهد.</p>
+    {people.map(person => {
+      const name = person.name || 'نام پرسنل ثبت نشده است';
+      return <ErpCard key={person.personnelId} className="space-y-3 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <strong>{name}</strong>
+          <ErpStatus label={`${person.count.toLocaleString('fa-IR')} مورد نیازمند رسیدگی`} tone="warning" />
+          <ErpButton label="بررسی تردد" aria-label={`بررسی تردد ${name}`} variant="ghost" onClick={() => onReview({ id: person.personnelId, name })} />
+        </div>
+        <ul className="space-y-2">
+          {person.cases?.map(item => <li key={`${item.kind}-${item.id}`} className="border-t border-[var(--sds-border-subtle)] pt-2 text-sm sds-text-secondary">
+            <strong>{item.kind === 'punch' ? labels[item.status] : intervalIssue(item)}</strong>
+            {item.kind === 'punch' ? <>
+              <p>اسکن: <bdi>{stamp(item.occurredAt)}</bdi> · کد دستگاه <bdi>{item.deviceCode}</bdi></p>
+              {item.reason && <p>{item.reason}</p>}
+            </> : <>
+              <p>ورود: <bdi>{item.enteredAt ? stamp(item.enteredAt) : 'ساعت نامعلوم'}</bdi></p>
+              <p>خروج: <bdi>{item.exitUnknown ? 'ساعت نامعلوم' : item.exitedAt ? stamp(item.exitedAt) : 'ثبت نشده'}</bdi></p>
+            </>}
+          </li>)}
+        </ul>
+      </ErpCard>;
+    })}
+  </div>;
 }
 
 export function personnelDeviceInfo(state: State | null, personnelId: string) {
@@ -86,7 +140,7 @@ export function PersonnelReviewDialogs({ state, person, initial, onClose, onSave
         {details && !details.intervals.length && !details.punches.length && <ErpEmptyState title={view === 'pending' ? 'موردی برای رسیدگی باقی نمانده است' : 'سابقه‌ای در این بخش نیست'} />}
         {details?.intervals.map(i => {
           const deferred = i.handoverRequired === false || (i.exitUnknown && i.exitSource === 'DAY_ROLLOVER');
-          const issue = i.hasConflict ? 'زمان این بازه با تردد دیگری هم‌پوشانی دارد' : i.exitUnknown ? 'ساعت خروج ثبت نشده است' : !i.enteredAt ? 'ساعت ورود مشخص نیست' : !i.exitedAt ? 'خروج این حضور ثبت نشده است' : 'بازه ثبت‌شده';
+          const issue = intervalIssue(i);
           return <ErpCard key={i.id} className="space-y-3 p-3">
             <ErpStatus label={issue} tone={i.hasConflict || i.exitUnknown || !i.enteredAt || !i.exitedAt ? 'warning' : 'neutral'} />
             <div className="grid gap-1 text-sm sds-text-secondary"><p>ورود: <bdi>{i.enteredAt ? stamp(i.enteredAt) : 'ساعت نامعلوم'}</bdi></p><p>خروج: <bdi>{i.exitUnknown ? 'ساعت نامعلوم' : i.exitedAt ? stamp(i.exitedAt) : 'ثبت نشده'}</bdi></p></div>

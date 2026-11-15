@@ -1,3 +1,4 @@
+import { LOADING_CANCELLATION_DUTY } from './crossWorkspaceDutyAdapters/loadingCancellationDutyCode';
 import { exactQuantityText, ExactQuantityDecimal } from './exactQuantity';
 import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
 import { createHash } from 'node:crypto';
@@ -40,6 +41,11 @@ import { allocatePricedRevision, pricedAllocationIntegrityHash,
   type LockedPartnerApprovedPricingVersion, type PartnerPricedRevisionLine } from './pricedAllocationLedger';
 import { readPartnerShipmentQuantityProjection } from './partnerSales/fulfillment/quantityStore';
 import { ordinaryAllocationLine } from './allocationSource';
+
+import { getEffectiveUserAccess } from './effectiveAccessService';
+import { resolveNarrowFeatureAccess } from './narrowFeatureAccess';
+import { voidDispatchBundleInTransaction } from './dispatchDocuments/prismaRepository';
+import { voidSalesInvoiceInTransaction } from './salesDispatchInvoice/lifecycle';
 
 type Database = PrismaClient;
 type Tx = Prisma.TransactionClient;
@@ -1079,6 +1085,189 @@ const issueWaybill = async (tx: Tx, candidate: any, actorId: string, replacesWay
   return waybill;
 };
 
+export class LoadingCancellationAccountingAccessError extends Error {}
+
+export async function loadingCancellationAccountingAuthority(db: Tx, actorId: string) {
+  const actor = await db.user.findUnique({ where: { id: actorId },
+    select: { role: true, isActive: true, partnerProfile: { select: { id: true } } } });
+  if (!actor?.isActive || actor.partnerProfile) return null;
+  const workspace = 'accounting';
+  const feature = 'accounting_dispatch_candidates_manage';
+  const [access, grant] = await Promise.all([
+    getEffectiveUserAccess(db, { userId: actorId, userRole: actor.role }),
+    resolveNarrowFeatureAccess(db, { userId: actorId, role: actor.role, workspace, feature, requiredPermission: 'edit' }),
+  ]);
+  const workspacePermission = access.workspaces.find(item => item.workspace === workspace)?.permission;
+  if (!workspacePermission || !['edit', 'admin'].includes(workspacePermission) || !grant.allowed) return null;
+  return { actorRole: actor.role, workspace, workspacePermission, feature, featurePermission: grant.permissionLevel };
+}
+
+type FinalizedLoadingCancellation = {
+  loadingId: string; reason: string; actorId: string; expectedDocumentIds?: string[];
+};
+
+export const cancelFinalizedOrdinaryLoading = (prisma: Database, input: FinalizedLoadingCancellation) =>
+  serializable(prisma, tx => cancelFinalizedOrdinaryLoadingInTransaction(tx, input));
+
+export const cancelFinalizedOrdinaryLoadingInTransaction = async (tx: Tx, input: FinalizedLoadingCancellation) => {
+  const reason = required(input.reason, 'reason');
+  if (input.expectedDocumentIds?.length) {
+    await tx.$queryRaw`SELECT id FROM users WHERE id=${input.actorId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT revision FROM effective_authorization_state WHERE id=1 FOR UPDATE`;
+  }
+  await assertCanonicalDispatchCommandAllowed(tx);
+  await lockKeys(tx, [`LOGISTICS_LOADING:${input.loadingId}`, `SALES_INVOICE:${input.loadingId}`]);
+  const pending = await tx.crossWorkspaceDuty.findFirst({
+    where: { sourceActionCode: LOADING_CANCELLATION_DUTY, sourceId: input.loadingId, status: 'OPEN' },
+    select: { id: true },
+  });
+  if (pending) throw new DispatchAllocationConflictError('درخواست لغو این بارگیری در انتظار تصمیم حسابداری است.');
+  const loading = await tx.logisticsLoading.findUnique({
+    where: { id: input.loadingId },
+    include: {
+      salesDispatchInvoices: { where: { voidedAt: null }, select: { id: true, number: true, loadingId: true } },
+      guardQueueTurns: { include: { physicalExit: true, manualOutageExit: true } },
+      canonicalAllocationRevisions: { include: {
+        lines: true, physicalExit: true, manualOutageExit: true,
+        candidate: { include: { waybills: { include: {
+          physicalExit: true, manualOutageExit: true,
+          exitAuthorizations: { where: { status: { in: ['ACTIVE', 'CONSUMED'] } }, select: { id: true, status: true } },
+        } } } },
+      } },
+    },
+  });
+  if (!loading || loading.sourceKind !== 'SALES_CONTRACT') {
+    throw new DispatchAllocationConflictError('بارگیری فروش عادی پیدا نشد.');
+  }
+  const revisions = loading.canonicalAllocationRevisions;
+  if (!revisions.length) throw new DispatchAllocationConflictError('تخصیص نهایی این بارگیری در گردش کار جدید ثبت نشده است.');
+  if (loading.status === 'CANCELLED') {
+    const cancellation = await tx.dispatchLifecycleAudit.findFirst({
+      where: { aggregateType: 'LOGISTICS_LOADING', aggregateId: loading.id, eventType: 'FINALIZED_LOADING_CANCELLED' },
+    });
+    if (cancellation) return loading.id;
+  }
+  const alreadyCancelled = loading.status === 'CANCELLED' && Boolean(loading.finalizedAt && loading.cancelledAt);
+  if (loading.status !== 'FINALIZED' && !alreadyCancelled) {
+    throw new DispatchAllocationConflictError('بارگیری در وضعیت قابل لغو نیست.');
+  }
+
+  const waybills = revisions.flatMap(revision => revision.candidate?.waybills ?? []);
+  const turnIds = [...new Set(revisions.map(revision => revision.queueTurnId))];
+  const turns = loading.guardQueueTurns;
+  await lockKeys(tx, [
+    ...turnIds.map(id => `GUARD_QUEUE:${id}`),
+    ...revisions.map(revision => `LOGISTICS_ALLOCATION_REVISION:${revision.id}`),
+    ...revisions.flatMap(revision => revision.candidate ? [`ACCOUNTING_DISPATCH_CANDIDATE:${revision.candidate.id}`] : []),
+    ...waybills.map(waybill => `ACCOUNTING_DISPATCH_WAYBILL:${waybill.id}`),
+  ]);
+  if (turns.length !== turnIds.length || turns.some(turn => !turnIds.includes(turn.id) ||
+    turn.status !== 'LOADING_FINALIZED' || turn.physicalExit || turn.manualOutageExit) ||
+    revisions.some(revision => revision.physicalExit || revision.manualOutageExit) ||
+    waybills.some(waybill => waybill.status === 'EXIT_RECORDED' || waybill.physicalExit || waybill.manualOutageExit ||
+      waybill.exitAuthorizations.some(authorization => authorization.status === 'CONSUMED'))) {
+    throw new DispatchAllocationConflictError('لغو فقط پیش از ثبت خروج و برای نوبت‌های نهایی‌شدهٔ همین بارگیری ممکن است.');
+  }
+  const issuedWaybills = waybills.filter(waybill => waybill.status === 'ISSUED');
+  const activeInvoices = loading.salesDispatchInvoices;
+  const documentIds = [...issuedWaybills.map(doc => doc.id), ...activeInvoices.map(doc => doc.id)].sort();
+  if (input.expectedDocumentIds && JSON.stringify([...input.expectedDocumentIds].sort()) !== JSON.stringify(documentIds)) {
+    throw new DispatchAllocationConflictError('اسناد بارگیری تغییر کرده‌اند. صفحه را به‌روز کنید و دوباره تأیید کنید.');
+  }
+  const authority = documentIds.length && input.expectedDocumentIds
+    ? await loadingCancellationAccountingAuthority(tx, input.actorId) : null;
+  if (documentIds.length && !input.expectedDocumentIds) {
+    throw new DispatchAllocationConflictError('برای لغو، اسناد فعال را بررسی و ابطال آن‌ها را تأیید کنید.');
+  }
+  if (documentIds.length && reason.length < 3) throw new DispatchAllocationConflictError('دلیل ابطال اسناد حداقل سه نویسه است.');
+  if (documentIds.length && !authority) {
+    throw new LoadingCancellationAccountingAccessError('برای ابطال اسناد فعال، دسترسی ویرایش حسابداری و مجوز مدیریت اسناد ارسال لازم است.');
+  }
+  if (waybills.some(waybill => waybill.status === 'VOIDED' && waybill.exitAuthorizations.length > 0)) {
+    throw new DispatchAllocationConflictError('مجوز خروج یکی از بارنامه‌های ابطال‌شده هنوز تعیین تکلیف نشده است.');
+  }
+
+  // A successor already settled its predecessor. A returned or rejected candidate already released its own lines.
+  const superseded = new Set(revisions.flatMap(revision => revision.predecessorRevisionId ? [revision.predecessorRevisionId] : []));
+  const current = revisions.filter(revision => !superseded.has(revision.id));
+  if (current.length !== turnIds.length || new Set(current.map(revision => revision.queueTurnId)).size !== turnIds.length ||
+    current.some(revision => !revision.sealedAt || !revision.lines.length || !revision.candidate ||
+      !['PENDING', 'ACCEPTED', 'RETURNED', 'REJECTED', 'STALE_REQUIRES_SUCCESSOR'].includes(revision.candidate.status))) {
+    throw new DispatchAllocationConflictError('سوابق تخصیص این بارگیری کامل یا قابل لغو نیست.');
+  }
+
+  const lines = current.flatMap(revision => revision.lines.map(ordinaryAllocationLine));
+  const itemIds = lines.map(line => line.sourceContractItemId);
+  await lockKeys(tx, itemIds.flatMap(id => [
+    `SHIPMENT_CONTRACT_ITEM:${id}`, `SHIPMENT_EVIDENCE_HEAD:${id}`, `SHIPMENT_PROJECTION:${id}`,
+  ]));
+  await lockShipmentTruth(tx, itemIds);
+  const at = new Date();
+  if (authority) {
+    const correlationId = `cancel-loading:${loading.id}`;
+    for (const waybill of issuedWaybills) {
+      const idempotencyKey = correlationId;
+      await voidDispatchBundleInTransaction(tx, waybill, {
+        waybillId: waybill.id, actorId: input.actorId, reason, at, authority,
+        correlationId, idempotencyKey, intentFingerprint: digest({ command: 'VOID', waybillId: waybill.id, reason, authority }),
+      });
+    }
+    for (const invoice of activeInvoices) {
+      await voidSalesInvoiceInTransaction(tx, invoice, { actorId: input.actorId, reason, at });
+    }
+  }
+  for (const revision of current) {
+    const candidate = revision.candidate!;
+    if (!['REJECTED', 'RETURNED'].includes(candidate.status)) {
+      for (const row of revision.lines) {
+        const line = ordinaryAllocationLine(row);
+        const evidence = {
+          id: row.id, contractId: line.sourceContractId, contractItemId: line.sourceContractItemId,
+          productRowId: line.productRowId, unit: line.unit, kind: 'ALLOCATION_RELEASED' as const,
+          quantity: exactQuantityText(line.quantity), effectiveAt: at.toISOString(), recordedAt: at.toISOString(),
+          sourceType: 'FINALIZED_LOADING_CANCELLATION', sourceId: row.id, sourceVersion: 1,
+          integrityHash: '', metadata: { loadingId: loading.id, revisionId: revision.id, revisionLineId: row.id },
+        };
+        evidence.integrityHash = shipmentQuantityEvidenceIntegrityHash(evidence);
+        await tx.shipmentQuantityEvidence.create({ data: {
+          contractId: evidence.contractId, contractItemId: evidence.contractItemId, productRowId: evidence.productRowId,
+          unit: evidence.unit, kind: evidence.kind, quantity: line.quantity, effectiveAt: at, recordedAt: at,
+          sourceType: evidence.sourceType, sourceId: evidence.sourceId, sourceVersion: 1,
+          integrityHash: evidence.integrityHash, metadata: json(evidence.metadata),
+        } });
+      }
+      await tx.accountingDispatchCandidate.update({ where: { id: candidate.id }, data: {
+        status: 'WITHDRAWN', dispositionAt: at, dispositionBy: input.actorId, dispositionReason: reason,
+      } });
+      await tx.accountingDispatchWorkItem.updateMany({ where: { candidateId: candidate.id, status: 'OPEN' },
+        data: { status: 'COMPLETED', completedAt: at } });
+      await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_CANDIDATE', aggregateId: candidate.id,
+        eventType: 'CANDIDATE_WITHDRAWN', payload: { loadingId: loading.id, reason, previousStatus: candidate.status },
+        actorId: input.actorId, recordedAt: at });
+    }
+  }
+  for (const turn of turns) {
+    await tx.guardDriverQueueTurn.update({ where: { id: turn.id }, data: {
+      status: 'AVAILABLE_FOR_LOADING', loadingId: null, availableAt: at, availableBy: input.actorId,
+      reservedAt: null, reservedBy: null, finalizedAt: null, finalizedBy: null,
+    } });
+    await appendQueueEvent(tx, {
+      turnId: turn.id, eventType: 'FINALIZED_LOADING_CANCELLED', fromStatus: 'LOADING_FINALIZED', toStatus: 'AVAILABLE_FOR_LOADING',
+      actorId: input.actorId, reason, payload: { loadingId: loading.id },
+    });
+  }
+  if (!alreadyCancelled) {
+    await tx.logisticsLoading.update({ where: { id: loading.id }, data: {
+      status: 'CANCELLED', cancelledAt: at, cancelledBy: input.actorId, cancellationReason: reason,
+    } });
+  }
+  await refreshProjectionContracts(tx, lines.map(line => line.sourceContractId));
+  await appendAudit(tx, { aggregateType: 'LOGISTICS_LOADING', aggregateId: loading.id,
+    eventType: 'FINALIZED_LOADING_CANCELLED', payload: { reason, alreadyCancelled, documentIds, queueTurnIds: turnIds, revisionIds: current.map(revision => revision.id) },
+    actorId: input.actorId, recordedAt: at });
+  return loading.id;
+};
+
 const publicCandidateResult = (candidate: any, waybill?: any) => ({
   candidateId: candidate.id, status: candidate.status,
   waybill: waybill ? { id: waybill.id, number: waybill.number.toString(), status: waybill.status } : null,
@@ -1157,7 +1346,7 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
 };
 
 export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
-  waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
+  waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown; expectedInvoiceId?: string | null;
 }) => {
   if (await waybillRequiresAtomicDocuments(prisma, input.waybillId)) {
     return requiredDispatchDocumentsCommands().voidWaybill({ ...input, authority: input.effectiveAuthority });
@@ -1167,7 +1356,9 @@ export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
   const initial = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId } });
   if (!initial) throw new DispatchAllocationValidationError('Dispatch waybill was not found.');
   await lockKeys(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${initial.candidateId}`, `ACCOUNTING_DISPATCH_WAYBILL:${input.waybillId}`]);
-  const action = `VOID_WAYBILL:${input.waybillId}`;
+  const action = input.expectedInvoiceId === undefined
+    ? `VOID_WAYBILL:${input.waybillId}`
+    : `VOID_WAYBILL_AND_INVOICE:${input.waybillId}:${input.expectedInvoiceId ?? ''}`;
   const previous = await tx.accountingDispatchCommand.findUnique({ where: {
     candidateId_idempotencyKey: { candidateId: initial.candidateId, idempotencyKey },
   } });
@@ -1178,6 +1369,14 @@ export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
   const waybill = await tx.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: input.waybillId } });
   if (waybill.status !== AccountingDispatchWaybillStatus.ISSUED) throw new DispatchAllocationConflictError('Only an issued waybill can be voided.');
   const reason = required(input.reason, 'reason');
+  if (input.expectedInvoiceId !== undefined) {
+    const candidate = await tx.accountingDispatchCandidate.findUniqueOrThrow({
+      where: { id: waybill.candidateId }, select: { allocationRevision: { select: { loadingId: true } } },
+    });
+    const { voidSalesInvoiceInTransaction } = await import('./salesDispatchInvoice/service');
+    await voidSalesInvoiceInTransaction(tx, { actorId: input.actorId, workspace: 'accounting' },
+      candidate.allocationRevision.loadingId, input.expectedInvoiceId, reason, true);
+  }
   const now = new Date();
   await revokeActiveExitAuthorization(tx, { waybillId: waybill.id, actorId: input.actorId,
     reason: `Waybill voided: ${reason}`, eventType: 'REVOKED_FOR_WAYBILL_VOID', at: now, effectiveAuthority: input.effectiveAuthority });

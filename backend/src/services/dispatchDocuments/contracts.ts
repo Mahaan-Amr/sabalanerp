@@ -94,6 +94,7 @@ export type DispatchDocumentRenderBase = {
 
 export type WaybillRenderInput = DispatchDocumentRenderBase & {
   kind: 'WAYBILL';
+  driverName?: string;
   payload: {
     allocationRevisionId: string;
     contracts: DispatchDocumentContractGroup[];

@@ -30,6 +30,11 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
   const project = record(loading.project);
   const queueTurn = record(revisionSnapshot.queueTurn);
   const admission = record(queueTurn.admissionSnapshot);
+  const driver = record(admission.driver);
+  const driverName = [admission.driverName, admission.fullName, driver.fullName,
+    [driver.firstName || admission.firstName, driver.lastName || admission.lastName]
+      .filter(part => typeof part === 'string' && part.trim()).join(' ')]
+    .find((name): name is string => typeof name === 'string' && Boolean(name.trim()))?.trim();
   const lineSnapshots = new Map(candidate.allocationRevision.lines.map(line => [line.id, record(line.snapshot)]));
   if (pricedAllocation.sourceKind === 'PARTNER_CASE') {
     const partnerCase = await tx.partnerSaleCase.findUnique({ where: { id: candidate.allocationRevision.partnerCaseId || '' },
@@ -65,7 +70,7 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
     return { candidateId: candidate.id, allocationRevisionId: candidate.allocationRevisionId, sourceIntegrityHash,
       pricedAllocation, provenance: { generatorVersion, sourceVersionIdentities },
       waybillSnapshot: { ...revisionSnapshot, documentProvenance: provenance },
-      waybill: { ...base, kind: 'WAYBILL' as const, documentId: identity.waybillDocumentId,
+      waybill: { ...base, kind: 'WAYBILL' as const, driverName, documentId: identity.waybillDocumentId,
         payload: { ...shared, allocationRevisionId: candidate.allocationRevisionId,
           lines: lines.map(({ grossAmount: _gross, allocatedDiscount: _discount, netAmount: _net, ...line }) => line) } },
       statement: { ...base, kind: 'STATEMENT' as const, documentId: identity.statementDocumentId,
@@ -104,7 +109,7 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
     candidateId: candidate.id, allocationRevisionId: candidate.allocationRevisionId, sourceIntegrityHash, pricedAllocation,
     provenance: { generatorVersion, sourceVersionIdentities },
     waybillSnapshot: { ...revisionSnapshot, documentProvenance: provenance },
-    waybill: { ...base, kind: 'WAYBILL' as const, documentId: identity.waybillDocumentId,
+    waybill: { ...base, kind: 'WAYBILL' as const, driverName, documentId: identity.waybillDocumentId,
       payload: { allocationRevisionId: candidate.allocationRevisionId, contracts: groups.map(group => ({ ...group,
         lines: group.lines.map(({ grossAmount: _gross, allocatedDiscount: _discount, netAmount: _net, ...line }) => line) })) } },
     statement: { ...base, kind: 'STATEMENT' as const, documentId: identity.statementDocumentId,

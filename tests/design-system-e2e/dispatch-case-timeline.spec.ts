@@ -20,7 +20,7 @@ test('role-aware dispatch timeline preserves authorized LSV and clears it on den
     const detail = /\/dispatch-cases\/turn-1/.test(route.request().url());
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detail ? { success: true, data: {
       case: { id: 'turn-1' }, currentAction: 'GUARD_REVIEW', recovery: 'RETRY_AT_GUARD', capabilities: { canMutateTimeline: false },
-      events: [{ id: 'event-1', station: 'GUARD', eventType: 'ADMITTED', occurredAt: '2026-08-08T08:00:00.000Z', detail: { state: 'READY' } }],
+      events: [...Array.from({ length: 16 }, (_, index) => ({ id: `earlier-${index}`, station: 'GUARD', eventType: 'RESERVED_FOR_LOADING', occurredAt: '2026-08-08T07:00:00.000Z' })), { id: 'event-1', station: 'GUARD', eventType: 'ADMITTED', occurredAt: '2026-08-08T08:00:00.000Z', detail: { state: 'READY' } }],
     } } : { success: true, access: { workspace: 'security', permission: 'edit' }, data: [{ id: 'turn-1', driverName: 'راننده آزمون', loadingNumber: 'L-100', status: 'WAITING_AT_GATE' }] }) });
   });
 
@@ -36,13 +36,33 @@ test('role-aware dispatch timeline preserves authorized LSV and clears it on den
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText('پرونده در انتظار بررسی گارد است', { exact: true })).toBeVisible();
   await expect(sheet.getByText('ورود راننده ثبت شد', { exact: true })).toBeVisible();
-  await sheet.getByRole('button', { name: 'مشاهده جزئیات این مرحله', exact: true }).click();
-  await expect(sheet.getByText('جزئیات مرحله', { exact: true })).toBeVisible();
-  await expect(sheet.getByText('گارد', { exact: true }).first()).toBeVisible();
+  const stage = sheet.getByRole('listitem').filter({ hasText: 'ورود راننده ثبت شد' });
+  await expect(sheet.getByRole('listitem').first().getByText('۱.', { exact: true })).toBeVisible();
+  await expect(stage.getByText('۱۷.', { exact: true })).toBeVisible();
+  const disclosure = stage.getByRole('button', { name: 'مشاهده جزئیات این مرحله', exact: true });
+  await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+  await disclosure.press('Enter');
+  await expect(stage.getByRole('button', { name: 'بستن جزئیات', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(sheet.getByText('جزئیات مرحله', { exact: true })).toBeInViewport();
+  await expect(stage.getByText('جزئیات مرحله', { exact: true })).toBeVisible();
+  await stage.getByRole('button', { name: 'بستن جزئیات', exact: true }).click();
+  await expect(stage.getByText('جزئیات مرحله', { exact: true })).toBeHidden();
+  await stage.getByText('ورود راننده ثبت شد', { exact: true }).click();
+  await expect(stage.getByText('جزئیات مرحله', { exact: true })).toBeInViewport();
+  await stage.getByRole('button', { name: 'نمایش اطلاعات تخصصی سامانه' }).click();
+  await expect(stage.getByText('وضعیت داخلی', { exact: true })).toBeVisible();
   await page.evaluate(() => { document.documentElement.style.zoom = '2'; });
   expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   await page.evaluate(() => { document.documentElement.style.zoom = '1'; });
   await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
+  await page.getByRole('button', { name: 'تازه‌سازی', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'تازه‌سازی', exact: true })).toBeEnabled();
+  await expect(sheet).toBeHidden();
+  await page.reload();
+  await page.getByRole('button', { name: 'پرونده‌های ارسال', exact: true }).click();
+  await expect(timelineButton).toBeVisible();
+  await expect(sheet).toBeHidden();
 
   responseMode = 'transient';
   await page.getByRole('button', { name: 'تازه‌سازی', exact: true }).click();

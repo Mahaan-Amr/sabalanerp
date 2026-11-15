@@ -119,6 +119,7 @@ if (largeDecimalStatement.kind === 'STATEMENT') {
 const ordinaryWaybill: DispatchDocumentRenderData = {
   ...base,
   documentId: 'waybill-ordinary',
+  driverName: 'راننده آزمایشی سبلان',
   waybillNumber: ordinaryStatement.waybillNumber,
   kind: 'WAYBILL',
   payload: {

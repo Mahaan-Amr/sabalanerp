@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import api from "@/lib/api";
+import { FaDownload, FaEye, FaFileInvoice, FaPrint, FaSync } from "react-icons/fa";
 import {
   ErpButton,
   ErpCard,
@@ -9,6 +10,7 @@ import {
   ErpInlineState,
   ErpLoading,
   ErpSheet,
+  ErpSelect,
   ErpTextarea,
 } from "@/components/erp";
 import { userFacingError } from "@/features/dispatch/userFacingError";
@@ -33,22 +35,26 @@ export default function SalesDispatchInvoices({
   refreshKey,
   onActiveInvoiceChange,
   onIssueAll,
+  onVoided,
   onPrintAll,
   documentBlockReason,
+  onCloseVoid,
 }: {
   loadingId: string;
   workspace: "accounting" | "logistics";
   canManage?: boolean;
   refreshKey?: unknown;
   onActiveInvoiceChange?: (invoiceId: string | null) => void;
+  onVoided?: () => Promise<void>;
   onIssueAll?: () => Promise<void>;
   onPrintAll?: () => Promise<void>;
   documentBlockReason?: string;
+  onCloseVoid?: () => void;
 }) {
   const [data, setData] = useState<ReadModel | null>(null),
     [error, setError] = useState(""),
     [pending, setPending] = useState(false);
-  const [target, setTarget] = useState<Invoice | null>(null),
+  const [targetId, setTargetId] = useState(""),
     [reason, setReason] = useState("");
   const busy = useRef(false),
     requestKey = useRef<string | null>(null);
@@ -82,38 +88,87 @@ export default function SalesDispatchInvoices({
       setPending(false);
     }
   };
-  const file = async (invoice: Invoice, download: boolean) =>
-    run(async () => {
-      const response = await api.get(`${base}/${invoice.id}/pdf`, {
-        responseType: "blob",
-        params: { download },
-      });
-      const url = URL.createObjectURL(
-        new Blob([response.data], { type: "application/pdf" }),
-      );
-      if (download) {
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `sales_invoice_${invoice.number}.pdf`;
-        link.click();
-      } else {
-        window.open(url, "_blank", "noopener,noreferrer");
+  const file = async (invoice: Invoice, download: boolean) => {
+    if (busy.current) return;
+    // Safari requires the preview window to open during the click.
+    const preview = download ? null : window.open("", "_blank");
+    if (!download && !preview) {
+      setError("مرورگر پنجره پیش‌نمایش فاکتور را مسدود کرد.");
+      return;
+    }
+    if (preview) preview.opener = null;
+    await run(async () => {
+      try {
+        const response = await api.get(`${base}/${invoice.id}/pdf`, {
+          responseType: "blob",
+          params: { download },
+        });
+        const url = URL.createObjectURL(
+          new Blob([response.data], { type: "application/pdf" }),
+        );
+        if (preview) {
+          preview.location.href = url;
+        } else {
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `sales_invoice_${invoice.number}.pdf`;
+          link.click();
+        }
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (error) {
+        preview?.close();
+        throw error;
       }
-      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
     });
+  };
+  if (onCloseVoid) {
+    const eligible = data?.invoices.filter(invoice => invoice.status !== "VOIDED") ?? [];
+    const target = targetId ? eligible.find(invoice => invoice.id === targetId) : eligible.length === 1 ? eligible[0] : undefined;
+    return (
+      <ErpSheet open onClose={onCloseVoid} title="ابطال فاکتور فروش" presentation="modal" pending={pending}>
+        <div className="space-y-3">
+          {error && <ErpInlineState kind="error" title={error} />}
+          {!data && !error && <ErpLoading />}
+          {data && eligible.length === 0 && <ErpInlineState kind="stale" title="این بارگیری فاکتور قابل ابطال ندارد." />}
+          {eligible.length > 1 && (
+            <ErpField label="فاکتور فروش" required>
+              <ErpSelect value={targetId} onChange={event => setTargetId(event.target.value)} disabled={pending}>
+                <option value="">انتخاب فاکتور</option>
+                {eligible.map(invoice => <option key={invoice.id} value={invoice.id}>فاکتور {invoice.number}</option>)}
+              </ErpSelect>
+            </ErpField>
+          )}
+          {target && <>
+            <p>فاکتور فروش شماره <bdi>{target.number}</bdi> · کل بارگیری</p>
+            <ErpField label="دلیل ابطال" required>
+              <ErpTextarea value={reason} onChange={event => setReason(event.target.value)} disabled={pending || !canManage} />
+            </ErpField>
+            <ErpButton label="ثبت ابطال فاکتور فروش" tone="danger"
+              disabled={!canManage || pending || reason.trim().length < 3}
+              onClick={() => void run(async () => {
+                await api.post(`${base}/${target.id}/void`, { reason: reason.trim() });
+                onCloseVoid();
+                await onVoided?.();
+              })} />
+          </>}
+        </div>
+      </ErpSheet>
+    );
+  }
   return (
     <ErpCard className="mt-4 space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <strong>فاکتور فروش کل بارگیری</strong>
         <div className="flex flex-wrap gap-2">
           <ErpButton
-            label="به‌روزرسانی فاکتورها"
+            label="به‌روزرسانی فاکتورها" icon={FaSync}
             variant="ghost"
             disabled={pending}
             onClick={() => void load()}
           />
           {canManage && workspace === "accounting" && !(onIssueAll && data?.documentsComplete && data.invoices.some(i => i.status === "ISSUED")) && (
             <ErpButton
+              icon={FaFileInvoice}
               label={onIssueAll ? (data?.invoices.some(i => i.status === "ISSUED") ? "تکمیل صدور بارنامه‌ها" : "صدور بارنامه‌ها و فاکتور فروش") : "صدور فاکتور فروش"}
               disabled={
                 pending ||
@@ -132,7 +187,7 @@ export default function SalesDispatchInvoices({
             />
           )}
           {onPrintAll && data?.invoices.some(invoice => invoice.status === "ISSUED") && (
-            <ErpButton label="چاپ فاکتور و بارنامه‌ها" variant="soft" disabled={pending || Boolean(documentBlockReason)}
+            <ErpButton label="چاپ فاکتور و بارنامه‌ها" icon={FaPrint} variant="soft" disabled={pending || Boolean(documentBlockReason)}
               onClick={() => void run(onPrintAll)} />
           )}
         </div>
@@ -158,7 +213,7 @@ export default function SalesDispatchInvoices({
               ? "صادرشده"
               : invoice.status === "VOIDED"
                 ? "باطل‌شده"
-                : "باطل‌شده؛ نیازمند بررسی حسابداری"}
+                : "نامعتبر؛ ابطال ثبت نشده است"}
           </p>
           {invoice.status !== "ISSUED" && (
             <p className="text-sm sds-text-secondary">
@@ -167,64 +222,20 @@ export default function SalesDispatchInvoices({
           )}
           <div className="flex flex-wrap gap-2">
             <ErpButton
-              label="مشاهده فاکتور"
+              label="مشاهده فاکتور" icon={FaEye}
               variant="outline"
               disabled={pending}
               onClick={() => void file(invoice, false)}
             />
             <ErpButton
-              label="دانلود فاکتور"
+              label="دانلود فاکتور" icon={FaDownload}
               variant="soft"
               disabled={pending}
               onClick={() => void file(invoice, true)}
             />
-            {canManage &&
-              workspace === "accounting" &&
-              invoice.status !== "VOIDED" && (
-                <ErpButton
-                  label="ابطال فاکتور"
-                  tone="danger"
-                  variant="ghost"
-                  disabled={pending}
-                  onClick={() => {
-                    setTarget(invoice);
-                    setReason("");
-                  }}
-                />
-              )}
           </div>
         </div>
       ))}
-      <ErpSheet
-        open={Boolean(target)}
-        onClose={() => {
-          if (!pending) setTarget(null);
-        }}
-        title="ابطال فاکتور فروش"
-        presentation="modal"
-        pending={pending}
-      >
-        <ErpField label="دلیل ابطال" required>
-          <ErpTextarea
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            disabled={pending}
-          />
-        </ErpField>
-        {error && <ErpInlineState kind="error" title={error} />}
-        <ErpButton
-          label="ثبت ابطال با حفظ سابقه"
-          tone="danger"
-          disabled={pending || reason.trim().length < 3}
-          onClick={() =>
-            void run(async () => {
-              await api.post(`${base}/${target!.id}/void`, { reason });
-              setTarget(null);
-              requestKey.current = null;
-            })
-          }
-        />
-      </ErpSheet>
     </ErpCard>
   );
 }

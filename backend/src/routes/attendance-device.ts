@@ -60,7 +60,8 @@ router.get('/state', protect, attendanceDeviceView, async (req: AuthRequest, res
     const personFilter = req.query.personnelId ? { personnelId: String(req.query.personnelId) } : {};
     const pendingOnly = req.query.status === 'pending';
     const overlaps = await overlappingAttendanceIds(prisma, req.query.personnelId ? String(req.query.personnelId) : undefined);
-    const actionable = actionableAttendanceIntervals(overlaps, parseSecurityBusinessDate());
+    const today = parseSecurityBusinessDate();
+    const actionable = actionableAttendanceIntervals(overlaps, today);
     const [terminals, punches, pending, reviewCount, personnel, assignees, handovers, initialReview, clockSamples] = await Promise.all([
       prisma.attendanceTerminal.findMany({ include: { mappings: { where: { effectiveTo: null } } }, orderBy: { createdAt: 'asc' } }),
       prisma.attendancePunch.findMany({ where: { ...personFilter, ...(req.query.status === 'all' ? {} : pendingOnly ? { status: { in: ['REVIEW', 'DUPLICATE', 'UNMATCHED'] } } : { status: { in: ['REVIEW', 'UNMATCHED', 'DUPLICATE', 'APPLIED', 'LINKED', 'SHADOW'] } }) }, orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }], take: 100, ...(req.query.cursor ? { skip: 1, cursor: { id: String(req.query.cursor) } } : {}) }),
@@ -72,7 +73,48 @@ router.get('/state', protect, attendanceDeviceView, async (req: AuthRequest, res
       todayMappingScans(prisma),
       prisma.attendanceDeviceAudit.findMany({ where: { action: 'CLOCK_MEASURED', createdAt: { gte: new Date(Date.now() - 120000) } }, distinct: ['terminalId'], orderBy: { createdAt: 'desc' }, select: { terminalId: true, evidence: true } }),
     ]);
-    const personPending = await prisma.$queryRaw<{ personnelId: string; count: number }[]>`SELECT "personnelId", sum(n)::int AS count FROM (SELECT p."personnelId", count(*) AS n FROM attendance_punches p WHERE p.status IN ('REVIEW','DUPLICATE') GROUP BY p."personnelId" UNION ALL SELECT r."personnelId", count(*) AS n FROM attendance_intervals i JOIN attendance_records r ON r.id = i."attendanceRecordId" WHERE i.status = 'ACTIVE' AND (i."exitUnknown" OR i."enteredAt" IS NULL OR (i."exitedAt" IS NULL AND r.date < ${parseSecurityBusinessDate()}) OR ${overlaps.length ? Prisma.sql`i.id IN (${Prisma.join(overlaps)})` : Prisma.sql`FALSE`}) GROUP BY r."personnelId") pending WHERE "personnelId" IS NOT NULL GROUP BY "personnelId"`;
+    const includeCases = req.query.includePendingCases === 'true' && !req.query.personnelId;
+    const personPending = await prisma.$queryRaw<{
+      personnelId: string;
+      count: number;
+      name?: string | null;
+      cases?: Prisma.JsonArray;
+    }[]>(Prisma.sql`
+      WITH pending AS (
+        SELECT p."personnelId", p.id, COALESCE(p."correctedOccurredAt", p."occurredAt") AS sort_at,
+          ${includeCases ? Prisma.sql`jsonb_build_object(
+            'id', p.id, 'kind', 'punch', 'status', p.status, 'reason', p.reason,
+            'deviceCode', p."deviceCode",
+            'occurredAt', COALESCE(p."correctedOccurredAt", p."occurredAt") AT TIME ZONE 'UTC'
+          )` : Prisma.sql`NULL::jsonb`} AS detail,
+          p."nameSnapshot" AS recorded_name
+        FROM attendance_punches p
+        WHERE p.status IN ('REVIEW', 'DUPLICATE') AND p."personnelId" IS NOT NULL
+        UNION ALL
+        SELECT r."personnelId", i.id, COALESCE(i."enteredAt", i."exitedAt", i."createdAt"),
+          ${includeCases ? Prisma.sql`jsonb_build_object(
+            'id', i.id, 'kind', 'interval', 'enteredAt', i."enteredAt" AT TIME ZONE 'UTC',
+            'exitedAt', i."exitedAt" AT TIME ZONE 'UTC', 'exitUnknown', i."exitUnknown",
+            'hasConflict', ${overlaps.length ? Prisma.sql`i.id IN (${Prisma.join(overlaps)})` : Prisma.sql`FALSE`}
+          )` : Prisma.sql`NULL::jsonb`},
+          NULLIF(concat_ws(' ', r."personnelFirstName", r."personnelLastName"), '')
+        FROM attendance_intervals i JOIN attendance_records r ON r.id = i."attendanceRecordId"
+        WHERE r."personnelId" IS NOT NULL AND i.status = 'ACTIVE'
+          AND (i."exitUnknown" OR i."enteredAt" IS NULL
+            OR (i."exitedAt" IS NULL AND r.date < ${today})
+            OR ${overlaps.length ? Prisma.sql`i.id IN (${Prisma.join(overlaps)})` : Prisma.sql`FALSE`})
+      )
+      SELECT pending."personnelId", count(*)::int AS count
+        ${includeCases ? Prisma.sql`,
+          COALESCE(NULLIF(concat_ws(' ', person."firstName", person."lastName"), ''),
+            max(NULLIF(pending.recorded_name, ''))) AS name,
+          jsonb_agg(pending.detail ORDER BY pending.sort_at DESC, pending.id DESC) AS cases
+        ` : Prisma.empty}
+      FROM pending
+      ${includeCases ? Prisma.sql`LEFT JOIN personnel person ON person.id = pending."personnelId"` : Prisma.empty}
+      GROUP BY pending."personnelId"
+        ${includeCases ? Prisma.sql`, person."firstName", person."lastName" ORDER BY name, pending."personnelId"` : Prisma.empty}
+    `);
     const pendingIntervalsCount = await prisma.attendanceInterval.count({ where: actionable });
     const rosterDate = parseSecurityBusinessDate();
     const roster = capabilities.manage ? await prisma.securityAttendanceRosterMembership.findMany({ where: { effectiveFrom: { lte: rosterDate }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: rosterDate } }] }, select: { personnelId: true } }) : [];

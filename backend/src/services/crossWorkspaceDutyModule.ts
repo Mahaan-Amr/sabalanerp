@@ -1,3 +1,5 @@
+import { Prisma } from '@prisma/client';
+import { LOADING_CANCELLATION_DUTY_DEFINITIONS, loadingCancellationDutyAdapter } from './crossWorkspaceDutyAdapters/loadingCancellationDutyAdapter';
 import { PURCHASING_INQUIRY_DUTY_DEFINITIONS, purchasingInquiryDutyAdapter, syncPurchasingInquiryDutyDefinitions } from './crossWorkspaceDutyAdapters/purchasingInquiryDutyAdapter';
 import { startBackgroundJob } from './backgroundJobLifecycle';
 import type { PrismaClient } from '@prisma/client';
@@ -40,6 +42,7 @@ import {
 } from './crossWorkspaceDutyAdapters/hrWorkItemDutyLifecycle';
 
 const sourceAdapters = new Map<string, CrossWorkspaceDutySourceAdapter>([
+  [loadingCancellationDutyAdapter.sourceType, loadingCancellationDutyAdapter],
   [contractDispatchDutyAdapter.sourceType, contractDispatchDutyAdapter],
   [purchasingInquiryDutyAdapter.sourceType, purchasingInquiryDutyAdapter],
   [hrWorkItemDutyAdapter.sourceType, hrWorkItemDutyAdapter],
@@ -62,6 +65,7 @@ const adapterForDuty = async (database: CrossWorkspaceDutyDatabase, dutyId: stri
 
 export const CROSS_WORKSPACE_DUTY_DEFINITIONS = Object.freeze({
   ...CONTRACT_DISPATCH_DUTY_DEFINITIONS,
+  ...LOADING_CANCELLATION_DUTY_DEFINITIONS,
   ...PURCHASING_INQUIRY_DUTY_DEFINITIONS,
   ...HR_DUTY_DEFINITIONS,
   ...SALES_CONTRACT_CORRECTION_DUTY_DEFINITIONS,
@@ -123,9 +127,21 @@ export const respondToCrossWorkspaceDuty = async (
   input: RespondToCrossWorkspaceDutyInput,
 ) => {
   if ('$transaction' in database) {
-    return database.$transaction(async (tx) => (
-      (await adapterForDuty(tx, input.dutyId)).respond(tx, input)
-    ));
+    const adapter = await adapterForDuty(database, input.dutyId);
+    if (adapter === loadingCancellationDutyAdapter) {
+      const { isRetryableDispatchTransactionError } = await import('./dispatchAllocation');
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          return await database.$transaction(tx => adapter.respond(tx, input), {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          });
+        } catch (error) {
+          if (!isRetryableDispatchTransactionError(error)) throw error;
+          if (attempt >= 2) throw new Error('DUTY_RESPONSE_CONFLICT');
+        }
+      }
+    }
+    return database.$transaction(tx => adapter.respond(tx, input));
   }
   return (await adapterForDuty(database, input.dutyId)).respond(database, input);
 };

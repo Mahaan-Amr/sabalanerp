@@ -8,7 +8,7 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { LogisticsPage } from "@/features/logistics/LogisticsWorkspace";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaBan,
@@ -30,6 +30,7 @@ import {
   ErpQuickFilters,
 } from "@/components/erp";
 import { dashboardAPI, logisticsAPI } from "@/lib/api";
+import { normalizeDigits } from "@/lib/numberFormat";
 import { StatusBadge, dateFa, loadingDriversName } from "../logistics-ui";
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
@@ -43,6 +44,7 @@ const actionLabel = (action: "finalize" | "delete" | "cancel" | "print") =>
   })[action];
 
 export default function LogisticsLoadingsPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [rows, setRows] = useState<any[]>([]);
   const [status, setStatus] = useState("ALL");
@@ -105,7 +107,7 @@ export default function LogisticsLoadingsPage() {
   );
 
   const filteredRows = useMemo(() => {
-    const normalized = search.trim().toLowerCase();
+    const normalized = normalizeDigits(search.trim()).toLowerCase();
     return rows.filter((row) => {
       if (status !== "ALL" && row.status !== status) return false;
       if (!normalized) return true;
@@ -116,7 +118,7 @@ export default function LogisticsLoadingsPage() {
         loadingDriversName(row),
         row.status,
       ].some((value) =>
-        String(value || "")
+        normalizeDigits(String(value || ""))
           .toLowerCase()
           .includes(normalized),
       );
@@ -179,6 +181,11 @@ export default function LogisticsLoadingsPage() {
     setMessage("");
     setError("");
 
+    if (action === "cancel" && row.status === "FINALIZED") {
+      router.push(`/dashboard/logistics/loadings/${row.id}?action=cancel`);
+      return;
+    }
+
     if (action === "print") {
       window.open(
         `/dashboard/logistics/loadings/${row.id}?print=1`,
@@ -195,7 +202,7 @@ export default function LogisticsLoadingsPage() {
   const eligibleRows = (action: "finalize" | "delete" | "cancel" | "print") => {
     if (action === "finalize") return selectedRows.filter(canFinalize);
     if (action === "delete") return selectedRows.filter(canDelete);
-    if (action === "cancel") return selectedRows.filter(canCancel);
+    if (action === "cancel") return selectedRows.filter(row => row.status === "DRAFT" && canCancel(row));
     return selectedRows;
   };
 
@@ -445,7 +452,7 @@ export default function LogisticsLoadingsPage() {
                             ...(canCancel(row)
                               ? [
                                   {
-                                    label: "لغو بارگیری",
+                                    label: row.status === "FINALIZED" ? "لغو بارگیری نهایی‌شده پیش از خروج" : "لغو بارگیری",
                                     icon: FaBan,
                                     tone: "danger" as const,
                                     disabled: acting,
@@ -545,6 +552,9 @@ export default function LogisticsLoadingsPage() {
             }
           />
           {error && <ErpInlineState kind="error" title={error} />}
+          {actionRequest?.action === "cancel" && actionRequest.targets.some(row => row.status === "FINALIZED") && (
+            <ErpInlineState kind="stale" title="برای لغو پیش از خروج، ابتدا فاکتور و بارنامه‌های صادرشده را در حسابداری ابطال کنید." />
+          )}
           {actionRequest?.action === "cancel" && (
             <ErpField label="دلیل لغو" required>
               <ErpTextarea

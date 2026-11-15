@@ -5,7 +5,7 @@ import { resolveNarrowFeatureAccess } from "../narrowFeatureAccess";
 import { createAuditedPartnerAuthorization } from "../partnerSales/authorization/audited";
 import { authorizePartnerLoading } from "../partnerSales/fulfillment/loadingAuthority";
 import { assertCanonicalDispatchCommandAllowed } from "../dispatchCutover";
-import { dispatchDocumentLifecycleAuditEventHash } from "../dispatchDocuments/prismaRepository";
+import { auditSalesInvoice, voidSalesInvoiceInTransaction } from "./lifecycle";
 import { loadShipmentStatementRuntimeStateUnderLock } from "../dispatchDocuments/runtimeState";
 import { isPostCutoverFinalization, isShipmentStatementFlowActive } from "../dispatchDocuments/featureGate";
 import { verifyDispatchArtifactStorageUnderLock } from "../dispatchDocuments/artifactStorageLock";
@@ -146,42 +146,6 @@ const transaction = async <T>(
           "اطلاعات فاکتور هم‌زمان تغییر کرد؛ تازه‌سازی کنید و دوباره تلاش کنید.",
         );
     }
-};
-const audit = async (
-  tx: Prisma.TransactionClient,
-  id: string,
-  eventType: string,
-  payload: unknown,
-  actorId: string,
-) => {
-  const at = new Date(),
-    aggregateType = "SALES_DISPATCH_INVOICE";
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`SALES_INVOICE_AUDIT:${id}`}))`;
-  const previous = await tx.dispatchLifecycleAudit.findFirst({
-    where: { aggregateType, aggregateId: id },
-    orderBy: [{ recordedAt: "desc" }, { id: "desc" }],
-  });
-  const previousHash = previous?.eventHash ?? null;
-  await tx.dispatchLifecycleAudit.create({
-    data: {
-      aggregateType,
-      aggregateId: id,
-      eventType,
-      payload: payload as Prisma.InputJsonValue,
-      actorId,
-      recordedAt: at,
-      previousHash,
-      eventHash: dispatchDocumentLifecycleAuditEventHash({
-        aggregateType,
-        aggregateId: id,
-        eventType,
-        payload,
-        actorId,
-        at,
-        previousHash,
-      }),
-    },
-  });
 };
 export function createSalesInvoiceService(
   db: PrismaClient,
@@ -364,7 +328,7 @@ export function createSalesInvoiceService(
             replacesId: predecessor?.id,
           },
         });
-        await audit(
+        await auditSalesInvoice(
           tx,
           id,
           "ISSUED",
@@ -415,25 +379,7 @@ export function createSalesInvoiceService(
               "پس از خروج، ابتدا گردش اصلاح ارسال را تکمیل کنید.",
             );
         }
-        await tx.salesDispatchInvoice.update({
-          where: { id },
-          data: {
-            voidedAt: new Date(),
-            voidedBy: ctx.actorId,
-            voidReason: reason.trim(),
-          },
-        });
-        await audit(
-          tx,
-          id,
-          "VOIDED",
-          {
-            loadingId,
-            reason: reason.trim(),
-            number: invoice.number.toString(),
-          },
-          ctx.actorId,
-        );
+        await voidSalesInvoiceInTransaction(tx, invoice, { actorId: ctx.actorId, reason: reason.trim() });
         return { id };
       }),
     download: async (ctx: InvoiceContext, loadingId: string, id: string, requireCurrent = false) =>
@@ -466,7 +412,7 @@ export function createSalesInvoiceService(
               reason,
             )
           : invoice.pdf;
-        await audit(
+        await auditSalesInvoice(
           tx,
           id,
           "DOWNLOADED",

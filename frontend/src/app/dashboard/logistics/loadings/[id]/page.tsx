@@ -45,6 +45,11 @@ import {
 type DetailSection = "summary" | "items" | "print" | "cases";
 type DetailAction = "finalize" | "delete" | "cancel" | "correct" | null;
 
+type CancellationPreview = {
+  documents: { id: string; number: string; kind: "INVOICE" | "WAYBILL" }[];
+  canVoidDocuments: boolean;
+};
+
 export default function LoadingDetailPage() {
   const mutationLock = useRef(false);
   const requestedActionHandled = useRef(false);
@@ -60,6 +65,22 @@ export default function LoadingDetailPage() {
   const [actionError, setActionError] = useState("");
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [cancellationPreview, setCancellationPreview] = useState<CancellationPreview | null>(null);
+  const [previewError, setPreviewError] = useState("");
+  const [previewRefresh, setPreviewRefresh] = useState(0);
+  const usesUnifiedCancellation = Boolean(loading?.canonicalAllocationRevisions?.length);
+  useEffect(() => {
+    setCancellationPreview(null);
+    setPreviewError("");
+    if (action !== "cancel" || !usesUnifiedCancellation) return;
+    let current = true;
+    logisticsAPI.getCancellationDocuments(params.id).then(response => {
+      if (current) setCancellationPreview(response.data.data);
+    }).catch(error => {
+      if (current) setPreviewError(userFacingError(error, "بررسی اسناد بارگیری انجام نشد."));
+    });
+    return () => { current = false; };
+  }, [action, params.id, previewRefresh, usesUnifiedCancellation]);
   const [correction, setCorrection] = useState({
     sourceContractItemId: "",
     loadingLineId: "",
@@ -541,14 +562,15 @@ export default function LoadingDetailPage() {
               }}
             />
             <ErpButton
-              label="تأیید لغو"
+              label={cancellationPreview?.documents.length ? "ابطال اسناد و تأیید لغو" : "تأیید لغو"}
               icon={FaBan}
               tone="danger"
-              disabled={dispatchTimelineStale || saving || !cancelReason.trim()}
+              disabled={dispatchTimelineStale || saving || !cancelReason.trim() ||
+                (usesUnifiedCancellation && (!cancellationPreview?.canVoidDocuments || cancelReason.trim().length < 3))}
               onClick={async () => {
                 if (
                   await runAction(() =>
-                    logisticsAPI.cancelLoading(loading.id, cancelReason.trim()),
+                    logisticsAPI.cancelLoading(loading.id, cancelReason.trim(), cancellationPreview?.documents.map(doc => doc.id)),
                   )
                 ) {
                   setAction(null);
@@ -561,14 +583,28 @@ export default function LoadingDetailPage() {
       >
         <div className="space-y-4">
           {sheetError}
-          {(loading.status === "FINALIZED" || canCompleteCancellation) && (
-            <ErpInlineState kind="stale" title="ابتدا اسناد صادرشده را در حسابداری ابطال کنید. پس از لغو، بار آزاد می‌شود و گارد می‌تواند راننده و خودروی واجد شرایط را دوباره پذیرش کند." />
+          {usesUnifiedCancellation && (
+            previewError ? <ErpInlineState kind="error" title={previewError}
+              action={{ label: "تلاش مجدد", onClick: () => setPreviewRefresh(value => value + 1) }} />
+            : !cancellationPreview ? <ErpLoading />
+            : <>
+                {cancellationPreview.documents.length > 0 && <ul className="space-y-1 text-sm">
+                  {cancellationPreview.documents.map(doc => <li key={doc.id}>
+                    {doc.kind === "INVOICE" ? "فاکتور فروش" : "بارنامه"} شمارهٔ {doc.number.replace(/\d/g, digit => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)])}
+                  </li>)}
+                </ul>}
+                {cancellationPreview.canVoidDocuments
+                  ? <p className="text-sm sds-text-secondary">{cancellationPreview.documents.length ? "اسناد بالا ابطال می‌شوند. " : ""}بار آزاد می‌شود و گارد می‌تواند راننده و خودروی واجد شرایط را دوباره پذیرش کند.</p>
+                  : <ErpInlineState kind="stale" title="ابطال اسناد فعال به مجوز حسابداری نیاز دارد."
+                      action={{ label: "بازبینی اسناد", onClick: () => setPreviewRefresh(value => value + 1) }} />}
+              </>
           )}
           <ErpField label="دلیل لغو" required>
             <ErpTextarea
               value={cancelReason}
               onChange={(event) => setCancelReason(event.target.value)}
               rows={4}
+              maxLength={2000}
             />
           </ErpField>
         </div>

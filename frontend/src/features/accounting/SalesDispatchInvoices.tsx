@@ -158,7 +158,7 @@ export default function SalesDispatchInvoices({
               ? "صادرشده"
               : invoice.status === "VOIDED"
                 ? "باطل‌شده"
-                : "باطل‌شده؛ نیازمند بررسی حسابداری"}
+                : "نامعتبر؛ ابطال ثبت نشده است"}
           </p>
           {invoice.status !== "ISSUED" && (
             <p className="text-sm sds-text-secondary">

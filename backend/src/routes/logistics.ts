@@ -9,7 +9,7 @@ import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../mi
 import { requireFeatureAccess, requireNarrowFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
 import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
-import { cancelFinalizedOrdinaryLoading, createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
+import { cancelFinalizedOrdinaryLoading, loadingCancellationAccountingAuthority, LoadingCancellationAccountingAccessError, createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { allocateLoadingNumber } from '../services/logisticsLoadingNumber';
 import { createPartnerCaseLoading, readPartnerCaseLoading, withLogisticsLoadingReadScope } from '../services/dispatchAllocation';
@@ -1198,8 +1198,36 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
   }
 });
 
+router.get('/loadings/:id/cancellation-documents', canEdit, canCancelLoadings, async (req: any, res: Response) => {
+  try {
+    const loading = await prisma.logisticsLoading.findUnique({
+      where: { id: req.params.id, sourceKind: 'SALES_CONTRACT' },
+      select: {
+        salesDispatchInvoices: { where: { voidedAt: null }, select: { id: true, number: true } },
+        canonicalAllocationRevisions: { select: { candidate: { select: {
+          waybills: { where: { status: 'ISSUED' }, select: { id: true, number: true } },
+        } } } },
+      },
+    });
+    if (!loading) return res.status(404).json({ success: false, error: 'بارگیری پیدا نشد.' });
+    const documents = [
+      ...loading.salesDispatchInvoices.map(doc => ({ ...doc, number: doc.number.toString(), kind: 'INVOICE' })),
+      ...loading.canonicalAllocationRevisions.flatMap(revision => revision.candidate?.waybills ?? [])
+        .map(doc => ({ ...doc, number: doc.number.toString(), kind: 'WAYBILL' })),
+    ];
+    const canVoidDocuments = documents.length === 0 || Boolean(await loadingCancellationAccountingAuthority(prisma, req.user.id));
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json({ success: true, data: { documents, canVoidDocuments } });
+  } catch (error) {
+    console.error('Loading cancellation documents error:', error);
+    return res.status(500).json({ success: false, error: 'بررسی اسناد بارگیری انجام نشد.' });
+  }
+});
+
 router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
-  body('reason').notEmpty().withMessage('Cancellation reason is required')
+  body('reason').isString().trim().isLength({ min: 1, max: 2000 }).withMessage('دلیل لغو باید بین ۱ تا ۲۰۰۰ نویسه باشد.'),
+  body('expectedDocumentIds').optional().isArray(),
+  body('expectedDocumentIds.*').isString().notEmpty()
 ], async (req: any, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -1212,7 +1240,7 @@ router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
     const reason = String(req.body.reason || '').trim();
     if (!reason) return res.status(400).json({ success: false, error: 'دلیل لغو لازم است.' });
     if (loading._count.canonicalAllocationRevisions > 0) {
-      const id = await cancelFinalizedOrdinaryLoading(prisma, { loadingId: loading.id, reason, actorId: req.user.id });
+      const id = await cancelFinalizedOrdinaryLoading(prisma, { loadingId: loading.id, reason, actorId: req.user.id, expectedDocumentIds: req.body.expectedDocumentIds });
       return res.json({ success: true, data: await loadLoading(id) });
     }
     if (loading.status === CANCELLED_STATUS) return res.status(400).json({ success: false, error: 'Loading is already cancelled' });
@@ -1228,6 +1256,9 @@ router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
 
     res.json({ success: true, data: await loadLoading(loading.id) });
   } catch (error: any) {
+    if (error instanceof LoadingCancellationAccountingAccessError) {
+      return res.status(403).json({ success: false, error: error.message });
+    }
     if (error instanceof DispatchAllocationConflictError || error instanceof PilotSafetyPauseError) {
       return res.status(409).json({ success: false, error: error.message });
     }

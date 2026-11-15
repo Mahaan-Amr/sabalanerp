@@ -60,22 +60,29 @@ test('Accounting dashboard keeps its position and only refreshes changed section
     }) });
   });
 
+  const initialDashboardResponse = page.waitForResponse(response =>
+    response.url().includes('/api/accounting/dashboard?'));
   await page.goto('/dashboard/accounting');
+  expect((await initialDashboardResponse).status()).toBe(200);
+  await expect(page.getByLabel('در حال بارگذاری داشبورد حسابداری')).toHaveCount(0);
   await expect(page.getByText('قراردادهای قابل بررسی').first()).toBeVisible();
   expect(initialDashboard?.data?.revisions).toBeTruthy();
-  expect(fullReads).toBe(1);
   await page.waitForTimeout(250);
+  // The local Next development server mounts effects twice under React Strict Mode.
+  const initialFullReads = fullReads;
+  expect(initialFullReads).toBeGreaterThanOrEqual(1);
+  expect(initialFullReads).toBeLessThanOrEqual(2);
   checks = 0;
   await page.evaluate(() => window.scrollTo(0, 280));
   const scrollBefore = await page.evaluate(() => window.scrollY);
   expect(scrollBefore).toBeGreaterThan(0);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.evaluate(y => window.scrollTo(0, y), scrollBefore);
-  expect(fullReads).toBe(1);
+  expect(fullReads).toBe(initialFullReads);
 
   await returnToVisibleTab(page);
   await expect.poll(() => checks).toBe(1);
-  expect(fullReads).toBe(1);
+  expect(fullReads).toBe(initialFullReads);
   expect(workspaceReads).toBe(0);
   expect(trendReads).toBe(0);
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
@@ -88,15 +95,19 @@ test('Accounting dashboard keeps its position and only refreshes changed section
   await expect(page.getByText('۹۱').first()).toBeVisible();
   const chart = page.locator('section[aria-labelledby="accounting-financial-trend-title"]');
   await expect(chart.getByText(/آخرین نمایش موفق نشان داده می‌شود|روند مالی در دسترس نیست/)).toBeVisible();
-  expect(fullReads).toBe(1);
+  expect(fullReads).toBe(initialFullReads);
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
   await expect(page.getByLabel('در حال بارگذاری داشبورد حسابداری')).toHaveCount(0);
 
   failTrend = false;
   await chart.getByRole('button', { name: 'تلاش دوباره' }).click();
   await expect.poll(() => trendReads).toBe(2);
+  const explicitRefreshResponse = page.waitForResponse(response =>
+    response.url().includes('/api/accounting/dashboard?'));
   await page.getByRole('button', { name: 'به‌روزرسانی', exact: true }).click();
-  await expect.poll(() => fullReads).toBe(2);
+  expect((await explicitRefreshResponse).status()).toBe(200);
+  await expect.poll(() => fullReads).toBe(initialFullReads + 1);
+  await expect(page.getByText('در حال به‌روزرسانی داده‌های حسابداری…')).toHaveCount(0);
 
   revoked = true;
   await returnToVisibleTab(page);

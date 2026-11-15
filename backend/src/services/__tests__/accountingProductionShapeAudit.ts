@@ -2,16 +2,18 @@ import { PrismaClient } from '@prisma/client';
 
 /** Read-only preflight and post-cleanup witness for the existing local database. */
 export async function auditAccountingProductionShape(database: PrismaClient) {
-  const [ordinary, cases, committed, incomplete] = await Promise.all([
+  const [ordinary, cases, committed, internalFinancialRecords, incomplete] = await Promise.all([
     database.salesContract.count({ where: { partnerCaseId: null } }),
     database.partnerSaleCase.count(),
     database.partnerSaleCase.count({ where: { state: 'COMMITTED' } }),
+    database.accountingFinancialRecord.count({ where: { sourceKind: 'PARTNER_INTERNAL_RECORD' } }),
     database.partnerSaleCase.findMany({
       where: { state: 'COMMITTED' },
       select: { id: true, headRevision: true, committedRevision: true,
         internalRecordId: true, customerContractId: true, commitmentEventId: true,
         head: { select: { revision: true, internalProjection: true, customerProjection: true } },
         commitmentRevision: { select: { revision: true } },
+        commitmentEvent: { select: { id: true, type: true } },
         internalRecord: { select: { id: true } },
         customerContract: { select: { id: true } },
       },
@@ -22,9 +24,11 @@ export async function auditAccountingProductionShape(database: PrismaClient) {
     !row.commitmentRevision || row.commitmentRevision.revision !== row.committedRevision ||
     !row.internalRecord || row.internalRecord.id !== row.internalRecordId ||
     !row.customerContract || row.customerContract.id !== row.customerContractId ||
-    !row.commitmentEventId || !row.head.internalProjection || !row.head.customerProjection,
+    !row.commitmentEvent || row.commitmentEvent.id !== row.commitmentEventId ||
+    row.commitmentEvent.type !== 'CASE_COMMITTED' ||
+    !row.head.internalProjection || !row.head.customerProjection,
   ).map(row => row.id);
-  return { ordinary, cases, committed, missingWitnesses };
+  return { ordinary, cases, committed, internalFinancialRecords, missingWitnesses };
 }
 
 if (process.argv[1]?.endsWith('accountingProductionShapeAudit.ts')) {

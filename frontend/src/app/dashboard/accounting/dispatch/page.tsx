@@ -10,6 +10,7 @@ import {
   ErpEmptyState,
   ErpInlineState,
   ErpInput,
+  ErpField,
   ErpLoading,
   ErpPage,
   ErpSection,
@@ -43,6 +44,7 @@ const quantityUnitLabels: Record<string, string> = { meter: "متر طول", squ
 
 export default function AccountingDispatchPage() {
   const [section, setSection] = useState<DispatchSection>("candidates");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [dispatchCandidates, setDispatchCandidates] = useState<any[]>([]);
   const [dispatchDetails, setDispatchDetails] = useState<Record<string, DispatchDocumentCase>>({});
@@ -202,6 +204,22 @@ export default function AccountingDispatchPage() {
 
   if (loading) return <ErpLoading />;
 
+  const normalize = (value: unknown) => String(value ?? "").toLowerCase().replace(/[۰-۹٠-٩]/g, digit => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit) >= 0 ? "۰۱۲۳۴۵۶۷۸۹".indexOf(digit) : "٠١٢٣٤٥٦٧٨٩".indexOf(digit))).replace(/ي/g, "ی").replace(/ك/g, "ک").trim();
+  const groups = Object.values(dispatchCandidates.reduce<Record<string, any[]>>((result, candidate) => {
+    const key = candidate.loadingId || `candidate:${candidate.id}`;
+    (result[key] ||= []).push(candidate);
+    return result;
+  }, Object.create(null) as Record<string, any[]>));
+  const query = normalize(search);
+  const filteredGroups = groups.filter(group => !query || group.some(candidate => {
+    const detail = dispatchDetails[candidate.id];
+    const values = [candidate.summary?.loadingNumber, candidate.summary?.driverName, candidate.summary?.plate,
+      candidate.summary?.customerName, candidate.summary?.projectName, candidate.summary?.projectAddress,
+      ...(candidate.waybills || []).map((waybill: any) => waybill.number),
+      ...(candidate.lines || []).map((line: any) => line.contractNumber),
+      ...(detail?.contracts || []).map(contract => contract.number)];
+    return values.some(value => normalize(value).includes(query));
+  }));
   return (
     <ErpPage
       eyebrow="حسابداری"
@@ -236,16 +254,15 @@ export default function AccountingDispatchPage() {
           ]}
         />
 
+        {section === "candidates" && <ErpField label="جست‌وجوی بارگیری‌ها"><ErpInput value={search} onChange={event => setSearch(event.target.value)} placeholder="مشتری، پروژه، قرارداد، راننده، پلاک یا شماره بارنامه" /></ErpField>}
         {section === "candidates" &&
           (!dispatchCandidates.length ? (
             <ErpEmptyState title="پرونده‌ای برای صدور بارنامه وجود ندارد" />
+          ) : !filteredGroups.length ? (
+            <ErpEmptyState title="بارگیری مطابق جست‌وجو پیدا نشد" />
           ) : (
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {Object.values(dispatchCandidates.reduce<Record<string, any[]>>((groups, candidate) => {
-                const key = candidate.loadingId || `candidate:${candidate.id}`;
-                (groups[key] ||= []).push(candidate);
-                return groups;
-              }, Object.create(null) as Record<string, any[]>)).map((group) => {
+            <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {filteredGroups.map((group) => {
                 const first = group[0];
                 return <ErpCard key={first.loadingId || first.id} className="space-y-3 p-4">
                   <strong>{first.summary?.loadingNumber ? dispatchCaseReference(first.summary.loadingNumber) : 'بارگیری'}</strong>

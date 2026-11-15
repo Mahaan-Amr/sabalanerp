@@ -21,6 +21,7 @@ import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvi
 import { resolveCurrentSabalanPlan, resolveInvoiceSabalanPlan } from './sabalanPlanEvidence';
 import { readAuthorizedPartnerAuditWitnesses } from '../../accountingReadProjection';
 import { batchAccountingCaseAuthority } from './batchCaseAuthority';
+import { groupPaymentsByReceivable } from './groupPaymentsByReceivable';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -260,13 +261,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   ]);
   const invoiceByEntity = new Map(invoiceIds.map(id => [id, id]));
   const asOf = new Date();
-  const paymentsByReceivable = new Map<string, typeof ownedPayments>();
-  for (const payment of ownedPayments) {
-    if (!payment.receivableId) continue;
-    const payments = paymentsByReceivable.get(payment.receivableId) ?? [];
-    payments.push(payment);
-    paymentsByReceivable.set(payment.receivableId, payments);
-  }
+  const paymentsByReceivable = groupPaymentsByReceivable(ownedPayments);
   for (const receivable of ownedReceivables) {
     const preparation = preparationByInvoice.get(receivable.invoiceRecordId!)!;
     readPartnerReceivableEvidence(receivable, preparation);

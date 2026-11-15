@@ -106,6 +106,8 @@ import { withAccountingReadScope, type AccountingReadActor, type AccountingReadS
 import { createAuditedPartnerAuthorization } from './partnerSales/authorization/audited';
 import { resolvePartnerAccountingScopedAuthority } from './partnerSales/authorization/centralAuthority';
 import { readPartnerSnapshot } from './partnerSales/authorization/readSnapshot';
+import { batchAccountingCaseAuthority } from './partnerSales/accounting/batchCaseAuthority';
+import { appendAuthorizationDecisions, type AuthorizationDecisionAudit } from './effectiveAuthorization/audit';
 import { partnerAccountingContractRow } from './accountingUnifiedContracts';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend, accountingCurrencyTotals } from './partnerSales/accounting/history';
 import { partnerTaxTransitions } from './partnerSales/accounting/taxPolicy';
@@ -1697,75 +1699,66 @@ const compactDashboardWorkspace = (workspace: Awaited<ReturnType<typeof getAccou
 
 const dashboardRevision = (parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 
-/** Fixed aggregate probes avoid workspace, trend and Partner evidence hydration.
- * The actor and its authorized Case set are bound into both private revisions. */
+/** Transactional write-time versions avoid scans and timestamp gaps. The
+ * authorized Case set binds private versions to the current actor. */
 const getDashboardRevisions = async (database: Prisma.TransactionClient, actorId: string,
   allowedInternalIds: string[], query: any, range: unknown, now: Date) => {
-  const [contracts, partnerCases, records, receivables, payments, taxes, corrections, audits] = await Promise.all([
-    database.salesContract.aggregate({ where: { partnerCaseId: null, partnerKind: null },
-      _count: { _all: true }, _max: { updatedAt: true } }),
+  const scopes = ['ordinary:workspace', 'ordinary:trend',
+    ...allowedInternalIds.flatMap(id => [`partner:${id}:workspace`, `partner:${id}:trend`])];
+  const [versions, partnerCases] = await Promise.all([
+    database.$queryRaw<Array<{ scope: string; bucket: number; revision: bigint }>>`
+      SELECT scope, bucket, revision FROM accounting_dashboard_change_versions
+      WHERE scope IN (${Prisma.join(scopes)})
+      ORDER BY scope, bucket`,
     database.partnerSaleCase.findMany({ where: { internalRecordId: { in: allowedInternalIds } },
       select: { id: true, headRevision: true, stateRevision: true, state: true }, orderBy: { id: 'asc' } }),
-    database.accountingFinancialRecord.aggregate({ where: { OR: [
-      { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } },
-      { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, sourceId: { in: allowedInternalIds } },
-    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
-    database.accountingReceivable.aggregate({ where: { OR: [
-      { invoiceRecordId: null },
-      { invoiceRecord: { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } } },
-      { invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
-        sourceId: { in: allowedInternalIds } } },
-    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
-    database.accountingPaymentStatus.aggregate({ where: { OR: [
-      { receivableId: null },
-      { receivable: { invoiceRecordId: null } },
-      { receivable: { invoiceRecord: { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } } } },
-      { receivable: { invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
-        sourceId: { in: allowedInternalIds } } } },
-    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
-    database.accountingTaxRecord.aggregate({ where: { OR: [
-      { invoiceRecordId: null },
-      { invoiceRecord: { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } } },
-      { invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
-        sourceId: { in: allowedInternalIds } } },
-    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
-    database.accountingCorrectionRequest.aggregate({ _count: { _all: true }, _max: { updatedAt: true } }),
-    database.accountingAuditLog.aggregate({ _count: { _all: true }, _max: { createdAt: true } }),
   ]);
+  const versionByScope = new Map<string, Array<[number, string]>>();
+  for (const row of versions) {
+    const buckets = versionByScope.get(row.scope) ?? [];
+    buckets.push([row.bucket, row.revision.toString()]);
+    versionByScope.set(row.scope, buckets);
+  }
+  const version = (scope: string) => versionByScope.get(scope) ?? [];
   const day = tehranAccountingDayKey(now);
   const common = [actorId, allowedInternalIds, day];
-  const financial = [records, receivables, payments, audits];
+  const workspaceVersions = ['ordinary:workspace',
+    ...allowedInternalIds.map(id => `partner:${id}:workspace`)].map(scope => [scope, version(scope)]);
+  const trendVersions = ['ordinary:trend',
+    ...allowedInternalIds.map(id => `partner:${id}:trend`)].map(scope => [scope, version(scope)]);
   return {
     access: dashboardRevision([actorId, allowedInternalIds]),
-    workspace: dashboardRevision([...common, query.due ?? '', query.deadlineType ?? '', contracts,
-      partnerCases, ...financial, taxes, corrections]),
-    trend: dashboardRevision([...common, range, ...financial]),
+    workspace: dashboardRevision([...common, query.due ?? '', query.deadlineType ?? '',
+      partnerCases, workspaceVersions]),
+    trend: dashboardRevision([...common, range, partnerCases, trendVersions]),
   };
 };
 
 export const getAccountingDashboardChange = async (query: any = {}, actor: AccountingReadActor) => {
   const check = async (database: Prisma.TransactionClient) => {
     const allowedInternalIds: string[] = [];
-    if (query.partnerIncluded === 'true') {
+    {
       const cases = await database.partnerSaleCase.findMany({ where: { internalRecordId: { not: null },
         customerContractId: { not: null } }, select: { id: true, internalRecordId: true }, orderBy: { id: 'asc' } });
       let actorAuthority: ReturnType<typeof resolvePartnerAccountingScopedAuthority> | undefined;
       const readActorAuthority: typeof resolvePartnerAccountingScopedAuthority = (tx, input) =>
         actorAuthority ??= resolvePartnerAccountingScopedAuthority(tx, input);
+      const decisions: AuthorizationDecisionAudit[] = [];
+      const evidenceSource = await batchAccountingCaseAuthority(database, actor.userId, cases.map(row => row.id));
       const authority = createAuditedPartnerAuthorization(database,
         { actorId: actor.userId, purpose: 'ACCOUNTING', channel: 'LIST' },
-        { correlationId: randomUUID(), reason: 'بررسی تغییر دسترسی داشبورد حسابداری' }, undefined, readActorAuthority);
+        { correlationId: randomUUID(), reason: 'بررسی تغییر دسترسی داشبورد حسابداری' },
+        undefined, readActorAuthority, async decision => { decisions.push(decision); }, evidenceSource);
       for (const row of cases) {
         if (row.internalRecordId && (await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: row.id })).ok) {
           allowedInternalIds.push(row.internalRecordId);
         }
       }
+      await appendAuthorizationDecisions(database, decisions);
     }
     return getDashboardRevisions(database, actor.userId, allowedInternalIds, query, query.range ?? '6m', new Date());
   };
-  const revisions = query.partnerIncluded === 'true'
-    ? await readPartnerSnapshot(prisma, check, { multiRootAuthority: true })
-    : await prisma.$transaction(check, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 10_000 });
+  const revisions = await readPartnerSnapshot(prisma, check, { multiRootAuthority: true });
   return { revisions,
     accessChanged: query.accessRevision !== revisions.access,
     workspaceChanged: query.workspaceRevision !== revisions.workspace,
@@ -1774,10 +1767,11 @@ export const getAccountingDashboardChange = async (query: any = {}, actor: Accou
 
 export const getAccountingDashboardWorkspace = async (query: any = {}, actor: AccountingReadActor) => {
   return withAccountingReadScope(prisma, actor, async scope => {
-    const revisions = await getDashboardRevisions(scope.database, actor.userId,
-      scope.partnerAccountingIncluded ? scope.authorizedPartnerInternalIds : [], query, query.range ?? '6m', new Date());
+    const revisionsPromise = getDashboardRevisions(scope.database, actor.userId,
+      scope.authorizedPartnerInternalIds, query, query.range ?? '6m', new Date());
     const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope);
     void contracts.catch(() => {});
+    const revisions = await revisionsPromise;
     return { workspace: compactDashboardWorkspace(await getAccountingWorkspaceInScope(scope, query, contracts, true)),
       revisions };
   });
@@ -1790,10 +1784,11 @@ export const getAccountingDashboard = async (query: any = {}, requestedRange: un
   let workspaceCompleted = false;
   try {
     return await withAccountingReadScope(prisma, actor, async scope => {
-      const revisions = actor ? await getDashboardRevisions(scope.database, actor.userId,
-        scope.partnerAccountingIncluded ? scope.authorizedPartnerInternalIds : [], query, requestedRange, now) : undefined;
+      const revisionsPromise = actor ? getDashboardRevisions(scope.database, actor.userId,
+        scope.authorizedPartnerInternalIds, query, requestedRange, now) : undefined;
       const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope);
       void contracts.catch(() => {});
+      const revisions = await revisionsPromise;
       const workspace = await getAccountingWorkspaceInScope(scope, query, contracts, true);
       workspaceCompleted = true;
       try {

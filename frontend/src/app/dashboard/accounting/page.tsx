@@ -197,8 +197,7 @@ export default function AccountingDashboardPage() {
       const response = await accountingAPI.getDashboardChange({ ...dashboardParams(),
         accessRevision: dashboardRevisionsRef.current.access,
         workspaceRevision: dashboardRevisionsRef.current.workspace,
-        trendRevision: dashboardRevisionsRef.current.trend,
-        partnerIncluded: Boolean(workspaceState.data?.partnerAccountingIncluded) });
+        trendRevision: dashboardRevisionsRef.current.trend });
       if (dashboardOwnerRef.current !== ownerId) return;
       if (!response.data.success) throw new Error('Accounting change check failed');
       const change = response.data.data;

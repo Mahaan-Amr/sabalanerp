@@ -20,5 +20,3 @@ The existing local database contained 869 ordinary contracts and 39 Partner Case
 | Reviewable list | 2031, 2466, 2081, 2061, 2077, 2045, 1986, 2070 | 2466 ms |
 
 The reviewable total was 896 and no dashboard trend error occurred. The synthetic 935/43 authority fixture cannot stand in for a complete page workload: its additional Cases have no valid revision/preparation financial witnesses. Production-state complete-page p95 under three seconds, zero 30-second expiry, exact parity under the production population, and release admission remain open qualification gates. Current production baseline has 935 ordinary contracts and 43 Partner Cases (30 committed); sampled production logs have no request durations.
-
-

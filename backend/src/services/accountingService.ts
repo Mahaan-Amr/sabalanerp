@@ -15,7 +15,7 @@ import { accountingContractListSelect, accountingFinancialSummarySelect, attachA
   aggregateActiveOrdinaryContracts } from './accountingListProjection';
 import { attachAccountingTrendAuditState } from './accountingReadProjection';
 import { normalizePersianSearchTokens } from './crmCustomerSearch';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { canonicalHash, InstantSchema, partnerTrackingCode } from '@sabalanerp/partner-sales-contracts';
 import { buildAccountingContractSourceSnapshot } from './contractSnapshotBoundary';
 import { publishCustomerPaymentOperationalEvidence } from './accountingOperationalEvidence';
@@ -103,6 +103,9 @@ import {
 } from './partnerSales/accounting/financialApproval';
 import { executePartnerCollectionAction } from './partnerSales/accounting/paymentCommands';
 import { withAccountingReadScope, type AccountingReadActor, type AccountingReadScope } from './partnerSales/accounting/readScope';
+import { createAuditedPartnerAuthorization } from './partnerSales/authorization/audited';
+import { resolvePartnerAccountingScopedAuthority } from './partnerSales/authorization/centralAuthority';
+import { readPartnerSnapshot } from './partnerSales/authorization/readSnapshot';
 import { partnerAccountingContractRow } from './accountingUnifiedContracts';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend, accountingCurrencyTotals } from './partnerSales/accounting/history';
 import { partnerTaxTransitions } from './partnerSales/accounting/taxPolicy';
@@ -1183,7 +1186,11 @@ export const buildAccountingSummaryForContracts = async (contracts: any[]) => {
 const accountingAmountInRials = (amount: string, currency?: string) =>
   new Prisma.Decimal(amount).mul(currency === 'IRT' ? 10 : 1);
 
-export const listAccountingContracts = async (query: ListContractsQuery = {}, actor?: AccountingReadActor) => {
+export const listAccountingContracts = async (query: ListContractsQuery = {}, actor?: AccountingReadActor,
+  existingScope?: AccountingReadScope) => {
+  if (existingScope && existingScope.actorId !== (actor?.userId ?? null)) {
+    throw new Error('Accounting read scope actor mismatch');
+  }
   const page = Math.max(Number(query.page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(query.pageSize) || DEFAULT_PAGE_SIZE, 1), 100);
   const skip = (page - 1) * pageSize;
@@ -1242,10 +1249,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
     : (query.sourceKind === 'PARTNER_INTERNAL_RECORD' ? Promise.resolve([]) : prisma.salesContract.findMany({
       where, select: accountingContractListSelect, orderBy: stableOrderBy,
     })).then(rows => ({ rows, prepared: null, aggregate: null }));
-  const [ordinary, settings, partnerSources] = await Promise.all([
-    ordinaryRead,
-    getDefaultSettings(),
-    actor ? withAccountingReadScope(prisma, actor, async scope => {
+  const readPartnerSources = async (scope: AccountingReadScope, actorId: string) => {
       const records = await scope.database.accountingFinancialRecord.findMany({
         where: scope.financial({ sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
           kind: FinancialRecordKind.INVOICE_CANDIDATE, contractId: null, customerId: null }),
@@ -1264,13 +1268,19 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
           item.recordId === record.id).length }));
       const reviewablePartner = query.view === 'reviewable';
       const existingInternalIds = contextualized.flatMap(record => record.sourceId ? [record.sourceId] : []);
-      const preparations = await listPartnerPreparationDocumentsInScope(scope, actor.userId, lifecycleView,
+      const preparations = await listPartnerPreparationDocumentsInScope(scope, actorId, lifecycleView,
         reviewablePartner ? { existingInternalIds } : undefined);
       const preparationOverlays = reviewablePartner
         ? await readPartnerPreparationOverlaysInScope(scope, existingInternalIds)
         : new Map();
       return { partnerRecords, preparations, preparationOverlays };
-    }) : Promise.resolve({ partnerRecords: [], preparations: [], preparationOverlays: new Map() }),
+  };
+  const [ordinary, settings, partnerSources] = await Promise.all([
+    ordinaryRead,
+    getDefaultSettings(),
+    actor ? (existingScope ? readPartnerSources(existingScope, actor.userId)
+      : withAccountingReadScope(prisma, actor, scope => readPartnerSources(scope, actor.userId)))
+      : Promise.resolve({ partnerRecords: [], preparations: [], preparationOverlays: new Map() }),
   ]);
   const rawContracts = ordinary.rows;
   let ordinaryAggregate = ordinary.aggregate;
@@ -1481,12 +1491,13 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
 };
 
 const getAccountingWorkspaceInScope = async (scope: AccountingReadScope, query: any = {},
-  preloadedContracts?: Promise<Awaited<ReturnType<typeof listAccountingContracts>>>, compact = false) => {
+  preloadedContracts?: Promise<Awaited<ReturnType<typeof listAccountingContracts>>>, compact = false,
+  actor?: AccountingReadActor) => {
   const prisma = scope.database;
   const now = new Date();
   const [period, contractResponse, records, receivables, payments, taxRecords, corrections, auditLogs] = await Promise.all([
     getOrCreateCurrentPeriod(),
-    preloadedContracts || listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }),
+    preloadedContracts || listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope),
     prisma.accountingFinancialRecord.findMany({ where: scope.financial(), orderBy: { createdAt: 'desc' }, take: 8,
       ...(compact ? { select: accountingFinancialRegisterSelect } : {}) }),
     prisma.accountingReceivable.findMany({ where: scope.receivable(), orderBy: { dueDate: 'asc' }, take: 8 }),
@@ -1614,7 +1625,7 @@ const getAccountingWorkspaceInScope = async (scope: AccountingReadScope, query: 
 };
 
 export const getAccountingWorkspace = async (query: any = {}, actor?: AccountingReadActor) =>
-  withAccountingReadScope(prisma, actor, scope => getAccountingWorkspaceInScope(scope, query));
+  withAccountingReadScope(prisma, actor, scope => getAccountingWorkspaceInScope(scope, query, undefined, false, actor));
 
 const getAccountingFinancialTrendInScope = async (scope: AccountingReadScope, requestedRange: unknown, now: Date) => {
   const prisma = scope.database;
@@ -1684,25 +1695,113 @@ const compactDashboardWorkspace = (workspace: Awaited<ReturnType<typeof getAccou
   },
 });
 
+const dashboardRevision = (parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+
+/** Fixed aggregate probes avoid workspace, trend and Partner evidence hydration.
+ * The actor and its authorized Case set are bound into both private revisions. */
+const getDashboardRevisions = async (database: Prisma.TransactionClient, actorId: string,
+  allowedInternalIds: string[], query: any, range: unknown, now: Date) => {
+  const [contracts, partnerCases, records, receivables, payments, taxes, corrections, audits] = await Promise.all([
+    database.salesContract.aggregate({ where: { partnerCaseId: null, partnerKind: null },
+      _count: { _all: true }, _max: { updatedAt: true } }),
+    database.partnerSaleCase.findMany({ where: { internalRecordId: { in: allowedInternalIds } },
+      select: { id: true, headRevision: true, stateRevision: true, state: true }, orderBy: { id: 'asc' } }),
+    database.accountingFinancialRecord.aggregate({ where: { OR: [
+      { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } },
+      { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, sourceId: { in: allowedInternalIds } },
+    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
+    database.accountingReceivable.aggregate({ where: { OR: [
+      { invoiceRecordId: null },
+      { invoiceRecord: { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } } },
+      { invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+        sourceId: { in: allowedInternalIds } } },
+    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
+    database.accountingPaymentStatus.aggregate({ where: { OR: [
+      { receivableId: null },
+      { receivable: { invoiceRecordId: null } },
+      { receivable: { invoiceRecord: { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } } } },
+      { receivable: { invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+        sourceId: { in: allowedInternalIds } } } },
+    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
+    database.accountingTaxRecord.aggregate({ where: { OR: [
+      { invoiceRecordId: null },
+      { invoiceRecord: { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } } },
+      { invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+        sourceId: { in: allowedInternalIds } } },
+    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
+    database.accountingCorrectionRequest.aggregate({ _count: { _all: true }, _max: { updatedAt: true } }),
+    database.accountingAuditLog.aggregate({ _count: { _all: true }, _max: { createdAt: true } }),
+  ]);
+  const day = tehranAccountingDayKey(now);
+  const common = [actorId, allowedInternalIds, day];
+  const financial = [records, receivables, payments, audits];
+  return {
+    access: dashboardRevision([actorId, allowedInternalIds]),
+    workspace: dashboardRevision([...common, query.due ?? '', query.deadlineType ?? '', contracts,
+      partnerCases, ...financial, taxes, corrections]),
+    trend: dashboardRevision([...common, range, ...financial]),
+  };
+};
+
+export const getAccountingDashboardChange = async (query: any = {}, actor: AccountingReadActor) => {
+  const check = async (database: Prisma.TransactionClient) => {
+    const allowedInternalIds: string[] = [];
+    if (query.partnerIncluded === 'true') {
+      const cases = await database.partnerSaleCase.findMany({ where: { internalRecordId: { not: null },
+        customerContractId: { not: null } }, select: { id: true, internalRecordId: true }, orderBy: { id: 'asc' } });
+      let actorAuthority: ReturnType<typeof resolvePartnerAccountingScopedAuthority> | undefined;
+      const readActorAuthority: typeof resolvePartnerAccountingScopedAuthority = (tx, input) =>
+        actorAuthority ??= resolvePartnerAccountingScopedAuthority(tx, input);
+      const authority = createAuditedPartnerAuthorization(database,
+        { actorId: actor.userId, purpose: 'ACCOUNTING', channel: 'LIST' },
+        { correlationId: randomUUID(), reason: 'بررسی تغییر دسترسی داشبورد حسابداری' }, undefined, readActorAuthority);
+      for (const row of cases) {
+        if (row.internalRecordId && (await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: row.id })).ok) {
+          allowedInternalIds.push(row.internalRecordId);
+        }
+      }
+    }
+    return getDashboardRevisions(database, actor.userId, allowedInternalIds, query, query.range ?? '6m', new Date());
+  };
+  const revisions = query.partnerIncluded === 'true'
+    ? await readPartnerSnapshot(prisma, check, { multiRootAuthority: true })
+    : await prisma.$transaction(check, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 10_000 });
+  return { revisions,
+    accessChanged: query.accessRevision !== revisions.access,
+    workspaceChanged: query.workspaceRevision !== revisions.workspace,
+    trendChanged: query.trendRevision !== revisions.trend };
+};
+
+export const getAccountingDashboardWorkspace = async (query: any = {}, actor: AccountingReadActor) => {
+  return withAccountingReadScope(prisma, actor, async scope => {
+    const revisions = await getDashboardRevisions(scope.database, actor.userId,
+      scope.partnerAccountingIncluded ? scope.authorizedPartnerInternalIds : [], query, query.range ?? '6m', new Date());
+    const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope);
+    void contracts.catch(() => {});
+    return { workspace: compactDashboardWorkspace(await getAccountingWorkspaceInScope(scope, query, contracts, true)),
+      revisions };
+  });
+};
+
 /** Initial dashboard uses one authorization snapshot and one Partner read lock.
  * Range changes continue to use the independent financial-trend endpoint. */
 export const getAccountingDashboard = async (query: any = {}, requestedRange: unknown = '6m',
   now = new Date(), actor?: AccountingReadActor) => {
   let workspaceCompleted = false;
-  // Ordinary contract summaries already use their own read path. Start that
-  // independent work before waiting for the Partner authorization snapshot.
-  const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 });
-  void contracts.catch(() => {});
   try {
     return await withAccountingReadScope(prisma, actor, async scope => {
+      const revisions = actor ? await getDashboardRevisions(scope.database, actor.userId,
+        scope.partnerAccountingIncluded ? scope.authorizedPartnerInternalIds : [], query, requestedRange, now) : undefined;
+      const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope);
+      void contracts.catch(() => {});
       const workspace = await getAccountingWorkspaceInScope(scope, query, contracts, true);
       workspaceCompleted = true;
       try {
         const trend = await getAccountingFinancialTrendInScope(scope, requestedRange, now);
-        return { workspace: compactDashboardWorkspace(workspace), trend, trendError: false };
+        return { workspace: compactDashboardWorkspace(workspace), trend, trendError: false, revisions };
       } catch (error) {
         console.error('Accounting dashboard trend error:', error);
-        return { workspace: compactDashboardWorkspace(workspace), trend: null, trendError: true };
+        return { workspace: compactDashboardWorkspace(workspace), trend: null, trendError: true, revisions };
       }
     });
   } catch (error) {

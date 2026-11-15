@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../../lib/prisma';
 import {
   getAccountingDashboard,
@@ -219,4 +220,231 @@ test('an authorized Partner Case without an invoice is tracked despite a false c
   const withHint = await getAccountingDashboardChange({ range: '3m', partnerIncluded: 'true' }, { userId: actor.id });
   assert.deepEqual(withoutHint.revisions, withHint.revisions,
     'authorized pre-invoice Cases remain in the actor-scoped revision');
+});
+
+test('Partner correction, flag and audit changes stay out of ordinary revisions', async () => {
+  const admin = await prisma.user.findFirst({ where: { role: 'ADMIN' }, select: { id: true } });
+  assert.ok(admin);
+  const authorized = await withAccountingReadScope(prisma, { userId: admin.id },
+    async scope => scope.authorizedPartnerInternalIds);
+  const invoice = await prisma.accountingFinancialRecord.findFirst({ where: {
+    sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: { in: authorized },
+  }, select: { id: true, sourceId: true } });
+  assert.ok(invoice?.sourceId);
+  const partnerCase = await prisma.partnerSaleCase.findFirst({ where: {
+    internalRecordId: invoice.sourceId,
+  }, select: { customerContractId: true } });
+  assert.ok(partnerCase?.customerContractId);
+  const candidates = await prisma.user.findMany({ where: { id: { not: admin.id } }, select: { id: true } });
+  let ordinaryActor: string | undefined;
+  for (const candidate of candidates) {
+    const ids = await withAccountingReadScope(prisma, { userId: candidate.id },
+      async scope => scope.authorizedPartnerInternalIds);
+    if (!ids.includes(invoice.sourceId)) { ordinaryActor = candidate.id; break; }
+  }
+  assert.ok(ordinaryActor, 'local Accounting verification needs an actor denied this Partner Case');
+  const revision = async (userId: string) => (await getAccountingDashboardChange({ range: '3m' }, { userId })).revisions;
+  const assertPrivateWrite = async (write: () => Promise<unknown>, remove: () => Promise<unknown>) => {
+    const beforeAdmin = await revision(admin.id);
+    const beforeOrdinary = await revision(ordinaryActor);
+    await write();
+    const afterAdmin = await revision(admin.id);
+    const afterOrdinary = await revision(ordinaryActor);
+    assert.notEqual(afterAdmin.workspace, beforeAdmin.workspace);
+    assert.equal(afterOrdinary.workspace, beforeOrdinary.workspace);
+    assert.equal(afterOrdinary.trend, beforeOrdinary.trend);
+    await remove();
+    const deletedAdmin = await revision(admin.id);
+    const deletedOrdinary = await revision(ordinaryActor);
+    assert.notEqual(deletedAdmin.workspace, afterAdmin.workspace);
+    assert.equal(deletedOrdinary.workspace, afterOrdinary.workspace);
+  };
+  let correctionId: string | undefined;
+  let flagId: string | undefined;
+  let auditId: string | undefined;
+  let receivableId: string | undefined;
+  let paymentId: string | undefined;
+  let taxId: string | undefined;
+  let mixedFinancialId: string | undefined;
+  const auditEntityIds: string[] = [];
+  try {
+    await assertPrivateWrite(async () => {
+      correctionId = (await prisma.accountingCorrectionRequest.create({ data: {
+        recordId: invoice.id, category: 'OTHER', accountantNote: 'temporary private revision probe',
+        createdBy: admin.id,
+      } })).id;
+    }, async () => { await prisma.accountingCorrectionRequest.delete({ where: { id: correctionId! } }); });
+    correctionId = undefined;
+    await assertPrivateWrite(async () => {
+      flagId = (await prisma.accountingContractFlag.create({ data: {
+        contractId: partnerCase.customerContractId!, sourceFinancialRecordId: invoice.id,
+        category: 'OTHER', title: 'temporary private revision probe', createdBy: admin.id,
+      } })).id;
+    }, async () => { await prisma.accountingContractFlag.delete({ where: { id: flagId! } }); });
+    flagId = undefined;
+    await assertPrivateWrite(async () => {
+      auditId = (await prisma.accountingAuditLog.create({ data: {
+        actorId: admin.id, action: 'DASHBOARD_PRIVATE_REVISION_TEST', recordId: invoice.id,
+        entityType: 'AccountingFinancialRecord', entityId: invoice.id,
+      } })).id;
+    }, async () => { await prisma.accountingAuditLog.delete({ where: { id: auditId! } }); });
+    auditId = undefined;
+    await assertPrivateWrite(async () => {
+      receivableId = (await prisma.accountingReceivable.create({ data: {
+        contractId: partnerCase.customerContractId!, originalAmount: 1, remainingAmount: 1,
+        dueDate: new Date('2027-01-01'), createdBy: admin.id,
+      } })).id;
+    }, async () => { await prisma.accountingReceivable.delete({ where: { id: receivableId! } }); });
+    receivableId = undefined;
+    await assertPrivateWrite(async () => {
+      paymentId = (await prisma.accountingPaymentStatus.create({ data: {
+        contractId: partnerCase.customerContractId!, method: 'CASH', amount: 1, createdBy: admin.id,
+      } })).id;
+    }, async () => { await prisma.accountingPaymentStatus.delete({ where: { id: paymentId! } }); });
+    paymentId = undefined;
+    await assertPrivateWrite(async () => {
+      taxId = (await prisma.accountingTaxRecord.create({ data: {
+        contractId: partnerCase.customerContractId!, missingFields: [], createdBy: admin.id,
+      } })).id;
+    }, async () => { await prisma.accountingTaxRecord.delete({ where: { id: taxId! } }); });
+    taxId = undefined;
+    const ordinaryBeforeMixedSource = await revision(ordinaryActor);
+    mixedFinancialId = (await prisma.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', sourceKind: 'MANUAL', contractId: partnerCase.customerContractId!,
+      amount: 1, createdBy: admin.id,
+    } })).id;
+    assert.deepEqual(await revision(ordinaryActor), ordinaryBeforeMixedSource,
+      'a financial row tied to a Partner contract cannot signal ordinary actors');
+    await prisma.accountingFinancialRecord.delete({ where: { id: mixedFinancialId } });
+    mixedFinancialId = undefined;
+    const ordinaryBeforeMarkedFinancial = await revision(ordinaryActor);
+    mixedFinancialId = (await prisma.accountingFinancialRecord.create({ data: {
+      kind: 'INVOICE_CANDIDATE', sourceKind: 'MANUAL', amount: 1, createdBy: admin.id,
+      metadata: { partnerPreparation: { retained: true } },
+    } })).id;
+    assert.deepEqual(await revision(ordinaryActor), ordinaryBeforeMarkedFinancial,
+      'an unresolved marked financial record cannot signal ordinary actors');
+    await prisma.accountingFinancialRecord.delete({ where: { id: mixedFinancialId } });
+    mixedFinancialId = undefined;
+    const ordinaryBeforeMarker = await revision(ordinaryActor);
+    auditId = (await prisma.accountingAuditLog.create({ data: {
+      actorId: admin.id, action: 'DASHBOARD_UNKNOWN_PRIVATE_MARKER_TEST',
+      beforeState: { partnerPreparation: { retained: true } },
+    } })).id;
+    assert.deepEqual(await revision(ordinaryActor), ordinaryBeforeMarker,
+      'unresolved retained private snapshot must not signal ordinary actors');
+    await prisma.accountingAuditLog.delete({ where: { id: auditId } });
+    auditId = undefined;
+    const ordinaryBeforeMove = await revision(ordinaryActor);
+    correctionId = (await prisma.accountingCorrectionRequest.create({ data: {
+      recordId: invoice.id, category: 'OTHER', accountantNote: 'temporary source move probe', createdBy: admin.id,
+    } })).id;
+    assert.deepEqual(await revision(ordinaryActor), ordinaryBeforeMove);
+    await prisma.accountingCorrectionRequest.update({ where: { id: correctionId }, data: { recordId: null } });
+    assert.notEqual((await revision(ordinaryActor)).workspace, ordinaryBeforeMove.workspace,
+      'moving a row into ordinary scope must signal ordinary actors');
+    await prisma.accountingCorrectionRequest.update({ where: { id: correctionId }, data: { recordId: invoice.id } });
+    await prisma.accountingCorrectionRequest.delete({ where: { id: correctionId } });
+    correctionId = undefined;
+    correctionId = (await prisma.accountingCorrectionRequest.create({ data: {
+      recordId: invoice.id, category: 'OTHER', accountantNote: 'private audit entity probe', createdBy: admin.id,
+    } })).id;
+    flagId = (await prisma.accountingContractFlag.create({ data: {
+      contractId: partnerCase.customerContractId!, sourceFinancialRecordId: invoice.id,
+      category: 'OTHER', title: 'private audit entity probe', createdBy: admin.id,
+    } })).id;
+    auditEntityIds.push((await prisma.accountingAuditLog.create({ data: {
+      actorId: admin.id, action: 'PRIVATE_CORRECTION_ENTITY_TEST',
+      entityType: 'AccountingCorrectionRequest', entityId: correctionId,
+    } })).id);
+    auditEntityIds.push((await prisma.accountingAuditLog.create({ data: {
+      actorId: admin.id, action: 'PRIVATE_FLAG_ENTITY_TEST',
+      entityType: 'AccountingContractFlag', entityId: flagId,
+    } })).id);
+    const visibleAuditIds = async (userId: string) => withAccountingReadScope(prisma, { userId },
+      async scope => (await scope.database.accountingAuditLog.findMany({
+        where: scope.audit({ id: { in: auditEntityIds } }), select: { id: true },
+      })).map(row => row.id));
+    assert.deepEqual(await visibleAuditIds(ordinaryActor), [],
+      'an ordinary actor cannot read audit rows whose only reference is a private correction or flag');
+    assert.deepEqual((await visibleAuditIds(admin.id)).sort(), [...auditEntityIds].sort());
+  } finally {
+    if (auditEntityIds.length) await prisma.accountingAuditLog.deleteMany({ where: { id: { in: auditEntityIds } } });
+    if (mixedFinancialId) await prisma.accountingFinancialRecord.deleteMany({ where: { id: mixedFinancialId } });
+    if (taxId) await prisma.accountingTaxRecord.deleteMany({ where: { id: taxId } });
+    if (paymentId) await prisma.accountingPaymentStatus.deleteMany({ where: { id: paymentId } });
+    if (receivableId) await prisma.accountingReceivable.deleteMany({ where: { id: receivableId } });
+    if (auditId) await prisma.accountingAuditLog.deleteMany({ where: { id: auditId } });
+    if (flagId) await prisma.accountingContractFlag.deleteMany({ where: { id: flagId } });
+    if (correctionId) await prisma.accountingCorrectionRequest.deleteMany({ where: { id: correctionId } });
+  }
+});
+
+test('ordinary contract summary excludes a Partner-source flag while Partner review retains it', async () => {
+  const actor = await prisma.user.findFirst({ where: { role: 'ADMIN' }, select: { id: true } });
+  assert.ok(actor);
+  const ordinary = await prisma.salesContract.findFirst({ where: {
+    partnerCaseId: null, partnerKind: null, isInactive: false,
+  }, select: { id: true, contractNumber: true } });
+  assert.ok(ordinary);
+  const authorized = await withAccountingReadScope(prisma, { userId: actor.id },
+    async scope => scope.authorizedPartnerInternalIds);
+  const invoice = await prisma.accountingFinancialRecord.findFirst({ where: {
+    sourceKind: 'PARTNER_INTERNAL_RECORD', sourceId: { in: authorized },
+  }, select: { id: true } });
+  assert.ok(invoice);
+  const ordinaryRow = async () => {
+    const list = await listAccountingContracts({ sourceKind: 'SALES_CONTRACT', search: ordinary.contractNumber,
+      page: 1, pageSize: 100 }, { userId: actor.id });
+    const row = list.items.find(item => item.contractId === ordinary.id);
+    assert.ok(row);
+    return row;
+  };
+  const partnerRow = async () => {
+    const list = await listAccountingContracts({ sourceKind: 'PARTNER_INTERNAL_RECORD',
+      page: 1, pageSize: 100 }, { userId: actor.id });
+    const row = list.items.find(item => item.contractId === `partner:${invoice.id}`);
+    assert.ok(row);
+    return row;
+  };
+  const baseOrdinary = await ordinaryRow();
+  const basePartner = await partnerRow();
+  let privateFlagId: string | undefined;
+  let ordinaryFlagId: string | undefined;
+  try {
+    privateFlagId = (await prisma.accountingContractFlag.create({ data: {
+      contractId: ordinary.id, sourceFinancialRecordId: invoice.id,
+      category: 'OTHER', title: 'temporary mixed-source flag', createdBy: actor.id,
+    } })).id;
+    assert.equal((await ordinaryRow()).accounting.openFlags, baseOrdinary.accounting.openFlags);
+    assert.equal((await partnerRow()).accounting.openFlags, basePartner.accounting.openFlags + 1);
+    ordinaryFlagId = (await prisma.accountingContractFlag.create({ data: {
+      contractId: ordinary.id, category: 'OTHER', title: 'temporary ordinary flag', createdBy: actor.id,
+    } })).id;
+    assert.equal((await ordinaryRow()).accounting.openFlags, baseOrdinary.accounting.openFlags + 1);
+  } finally {
+    if (ordinaryFlagId) await prisma.accountingContractFlag.deleteMany({ where: { id: ordinaryFlagId } });
+    if (privateFlagId) await prisma.accountingContractFlag.deleteMany({ where: { id: privateFlagId } });
+  }
+});
+
+test('unrelated user display edits do not refresh ordinary Accounting evidence', async () => {
+  const actor = await prisma.user.findFirst({ select: { id: true } });
+  assert.ok(actor);
+  const unique = randomUUID();
+  const user = await prisma.user.create({ data: {
+    email: `dashboard-probe-${unique}@example.test`, username: `dashboard-probe-${unique}`,
+    password: 'temporary-fixture', firstName: 'Before', lastName: 'Probe',
+  } });
+  try {
+    const first = await getAccountingDashboardChange({ range: '3m' }, { userId: actor.id });
+    await prisma.user.update({ where: { id: user.id }, data: { firstName: 'After' } });
+    const changed = await getAccountingDashboardChange({ range: '3m',
+      accessRevision: first.revisions.access, workspaceRevision: first.revisions.workspace,
+      trendRevision: first.revisions.trend }, { userId: actor.id });
+    assert.equal(changed.workspaceChanged, false);
+    assert.equal(changed.trendChanged, false);
+  } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
 });

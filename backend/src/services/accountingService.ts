@@ -111,7 +111,8 @@ import { appendAuthorizationDecisions, type AuthorizationDecisionAudit } from '.
 import { partnerAccountingContractRow } from './accountingUnifiedContracts';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend, accountingCurrencyTotals } from './partnerSales/accounting/history';
 import { partnerTaxTransitions } from './partnerSales/accounting/taxPolicy';
-import { hasConflictingPartnerAccountingEvidence } from './partnerSales/accounting/provenance';
+import { hasConflictingPartnerAccountingEvidence, hasPartnerAccountingEvidence,
+  PARTNER_ACCOUNTING_MARKER_JSON_PATH } from './partnerSales/accounting/provenance';
 import { PartnerAccountingCommandError } from './partnerSales/accounting/errors';
 import { runPartnerAwareTaxMutation } from './partnerSales/accounting/taxCommands';
 import {
@@ -1125,30 +1126,78 @@ const attachAccountingCollections = async (contracts: any[], database: PrismaCli
     }),
     database.accountingReceivable.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, dueDate: true },
+      select: { id: true, contractId: true, invoiceRecordId: true, metadata: true, status: true, dueDate: true },
       orderBy: { dueDate: 'asc' }
     }),
     database.accountingPaymentStatus.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, amount: true },
+      select: { id: true, contractId: true, receivableId: true, metadata: true, status: true, amount: true },
       orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }]
     }),
     database.accountingTaxRecord.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, submissionStatus: true },
+      select: { id: true, contractId: true, invoiceRecordId: true, metadata: true, submissionStatus: true },
       orderBy: { createdAt: 'desc' }
     }),
     database.accountingContractFlag.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, severity: true },
+      select: { id: true, contractId: true, sourceFinancialRecordId: true, evidence: true,
+        status: true, severity: true },
       orderBy: { createdAt: 'desc' }
     }),
     database.accountingCorrectionRequest.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true },
+      select: { id: true, contractId: true, recordId: true, status: true },
       orderBy: { createdAt: 'desc' }
     })
   ]);
+
+  // ContractId alone does not make an imported mixed-source child ordinary.
+  // Resolve only the referenced sources; scanning every ordinary row through
+  // Partner validation would make the reviewable list unbounded again.
+  const paymentReceivableIds = [...new Set(payments.flatMap(row => row.receivableId ? [row.receivableId] : []))];
+  const paymentReceivables = paymentReceivableIds.length
+    ? await database.accountingReceivable.findMany({ where: { id: { in: paymentReceivableIds } },
+      select: { id: true, contractId: true, invoiceRecordId: true, metadata: true } }) : [];
+  const allReceivables = [...receivables, ...paymentReceivables];
+  const financialIds = [...new Set([
+    ...records.map(row => row.id),
+    ...allReceivables.flatMap(row => row.invoiceRecordId ? [row.invoiceRecordId] : []),
+    ...taxRecords.flatMap(row => row.invoiceRecordId ? [row.invoiceRecordId] : []),
+    ...flags.flatMap(row => row.sourceFinancialRecordId ? [row.sourceFinancialRecordId] : []),
+    ...corrections.flatMap(row => row.recordId ? [row.recordId] : []),
+  ])];
+  const markerPath = Prisma.raw(`'${PARTNER_ACCOUNTING_MARKER_JSON_PATH}'::jsonpath`);
+  const [partnerSources, markedSources, partnerContractSources] = await Promise.all([
+    financialIds.length ? database.accountingFinancialRecord.findMany({ where: {
+      id: { in: financialIds }, sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+    }, select: { id: true } }) : Promise.resolve([]),
+    // This exact predicate uses accounting_financial_scoped_private_evidence_idx.
+    database.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM accounting_financial_records
+      WHERE metadata @? ${markerPath}
+        OR CASE WHEN "sourceKind" = 'SALES_CONTRACT' AND "contractId" IS NOT NULL
+            AND "sourceId" = "contractId" AND "sourceSnapshot" -> 'partnerCaseId' = 'null'::jsonb
+          THEN ("sourceSnapshot" - 'partnerCaseId') @? ${markerPath}
+          ELSE "sourceSnapshot" @? ${markerPath} END`,
+    financialIds.length ? database.$queryRaw<Array<{ id: string }>>`
+      SELECT f.id FROM accounting_financial_records AS f
+      JOIN sales_contracts AS owner ON owner.id = f."contractId"
+      WHERE f.id IN (${Prisma.join(financialIds)})
+        AND (owner."partnerCaseId" IS NOT NULL OR owner."partnerKind" IS NOT NULL)` : Promise.resolve([]),
+  ]);
+  const candidates = new Set(financialIds);
+  const privateFinancialIds = new Set([...partnerSources, ...markedSources, ...partnerContractSources]
+    .filter(row => candidates.has(row.id)).map(row => row.id));
+  const parentContractIds = [...new Set(paymentReceivables.flatMap(row => row.contractId ? [row.contractId] : []))];
+  const parentContracts = parentContractIds.length
+    ? await database.salesContract.findMany({ where: { id: { in: parentContractIds } },
+      select: { id: true, partnerCaseId: true, partnerKind: true } }) : [];
+  const privateContractIds = new Set(parentContracts.filter(row => row.partnerCaseId || row.partnerKind).map(row => row.id));
+  const privateReceivableIds = new Set(allReceivables.filter(row =>
+    Boolean(row.invoiceRecordId && privateFinancialIds.has(row.invoiceRecordId)) ||
+    Boolean(row.contractId && privateContractIds.has(row.contractId)) ||
+    hasPartnerAccountingEvidence(row.metadata)).map(row => row.id));
 
   const group = <T extends { contractId: string | null }>(rows: T[]) => {
     const grouped = new Map<string, T[]>();
@@ -1160,8 +1209,17 @@ const attachAccountingCollections = async (contracts: any[], database: PrismaCli
     }
     return grouped;
   };
-  const byContract = { records: group(records), receivables: group(receivables), payments: group(payments),
-    taxes: group(taxRecords), flags: group(flags), corrections: group(corrections) };
+  const byContract = {
+    records: group(records.filter(row => !privateFinancialIds.has(row.id))),
+    receivables: group(receivables.filter(row => !privateReceivableIds.has(row.id))),
+    payments: group(payments.filter(row => !hasPartnerAccountingEvidence(row.metadata) &&
+      !(row.receivableId && privateReceivableIds.has(row.receivableId)))),
+    taxes: group(taxRecords.filter(row => !hasPartnerAccountingEvidence(row.metadata) &&
+      !(row.invoiceRecordId && privateFinancialIds.has(row.invoiceRecordId)))),
+    flags: group(flags.filter(row => !hasPartnerAccountingEvidence(row.evidence) &&
+      !(row.sourceFinancialRecordId && privateFinancialIds.has(row.sourceFinancialRecordId)))),
+    corrections: group(corrections.filter(row => !(row.recordId && privateFinancialIds.has(row.recordId)))),
+  };
   return contracts.map((contract) => ({
     ...contract,
     accountingRecords: byContract.records.get(contract.id) ?? [],

@@ -145,8 +145,20 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     database.accountingTaxRecord.findMany({ where: { NOT: taxAccess }, select: { id: true } }),
   ]);
   const recordIds = hiddenRecords.map(row => row.id);
+  const hiddenCaseContractIds = cases.filter(row => !allowedInternalIds.includes(row.internalRecordId))
+    .map(row => row.customerContractId);
+  const [hiddenCorrections, hiddenFlags] = selection.focusedCaseId || selection.ordinaryOnly
+    ? [[], []] as const : await Promise.all([
+    database.accountingCorrectionRequest.findMany({ where: { OR: [
+      { recordId: { in: recordIds } }, { contractId: { in: hiddenCaseContractIds } },
+    ] }, select: { id: true } }),
+    database.accountingContractFlag.findMany({ where: { OR: [
+      { sourceFinancialRecordId: { in: recordIds } }, { contractId: { in: hiddenCaseContractIds } },
+    ] }, select: { id: true } }),
+  ]);
   const hiddenEntityIds = [...recordIds, ...hiddenReceivables.map(row => row.id),
-    ...hiddenPayments.map(row => row.id), ...hiddenTax.map(row => row.id)];
+    ...hiddenPayments.map(row => row.id), ...hiddenTax.map(row => row.id),
+    ...hiddenCorrections.map(row => row.id), ...hiddenFlags.map(row => row.id)];
   const auditAccess: Prisma.AccountingAuditLogWhereInput = { AND: [ordinaryContract,
     { OR: [{ recordId: null }, { recordId: { notIn: recordIds } }] },
     { OR: [{ entityId: null }, { entityId: { notIn: hiddenEntityIds } }] },

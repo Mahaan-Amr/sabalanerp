@@ -9,7 +9,7 @@ import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from '../
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource, type PartnerFinancialPreparation, type PartnerAccountingSource } from './source';
 import { subtract } from '../reporting/money';
 import { PartnerAccountingCommandError } from './errors';
-import { PartnerCollectionIntegrityError, readPartnerCollections } from './collections';
+import { PartnerCollectionIntegrityError, sumPartnerCollections } from './collections';
 import { partnerCheckTransitions } from './paymentPolicy';
 import { readPartnerAccountingCapabilities } from './capabilities';
 import { readPartnerSnapshot } from '../authorization/readSnapshot';
@@ -257,12 +257,19 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   ]);
   const invoiceByEntity = new Map(invoiceIds.map(id => [id, id]));
   const asOf = new Date();
+  const paymentsByReceivable = new Map<string, typeof ownedPayments>();
+  for (const payment of ownedPayments) {
+    if (!payment.receivableId) continue;
+    const payments = paymentsByReceivable.get(payment.receivableId) ?? [];
+    payments.push(payment);
+    paymentsByReceivable.set(payment.receivableId, payments);
+  }
   for (const receivable of ownedReceivables) {
     const preparation = preparationByInvoice.get(receivable.invoiceRecordId!)!;
     readPartnerReceivableEvidence(receivable, preparation);
     let collected;
     try {
-      collected = await readPartnerCollections(database, { receivableId: receivable.id, currency: receivable.currency,
+      collected = sumPartnerCollections(paymentsByReceivable.get(receivable.id) ?? [], { currency: receivable.currency,
         cutoff: asOf, asOf, preparation });
     } catch (error) {
       if (error instanceof PartnerCollectionIntegrityError) throw conflict();

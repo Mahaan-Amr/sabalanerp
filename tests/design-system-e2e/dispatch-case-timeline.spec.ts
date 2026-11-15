@@ -43,6 +43,14 @@ test('role-aware dispatch timeline preserves authorized LSV and clears it on den
   expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
   await page.evaluate(() => { document.documentElement.style.zoom = '1'; });
   await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
+  await page.getByRole('button', { name: 'تازه‌سازی', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'تازه‌سازی', exact: true })).toBeEnabled();
+  await expect(sheet).toBeHidden();
+  await page.reload();
+  await page.getByRole('button', { name: 'پرونده‌های ارسال', exact: true }).click();
+  await expect(timelineButton).toBeVisible();
+  await expect(sheet).toBeHidden();
 
   responseMode = 'transient';
   await page.getByRole('button', { name: 'تازه‌سازی', exact: true }).click();

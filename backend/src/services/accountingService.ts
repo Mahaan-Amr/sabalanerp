@@ -1172,23 +1172,22 @@ const attachAccountingCollections = async (contracts: any[], database: PrismaCli
     financialIds.length ? database.accountingFinancialRecord.findMany({ where: {
       id: { in: financialIds }, sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
     }, select: { id: true } }) : Promise.resolve([]),
-    // This exact predicate uses accounting_financial_scoped_private_evidence_idx.
-    database.$queryRaw<Array<{ id: string }>>`
+    financialIds.length ? database.$queryRaw<Array<{ id: string }>>`
       SELECT id FROM accounting_financial_records
-      WHERE metadata @? ${markerPath}
-        OR CASE WHEN "sourceKind" = 'SALES_CONTRACT' AND "contractId" IS NOT NULL
-            AND "sourceId" = "contractId" AND "sourceSnapshot" -> 'partnerCaseId' = 'null'::jsonb
-          THEN ("sourceSnapshot" - 'partnerCaseId') @? ${markerPath}
-          ELSE "sourceSnapshot" @? ${markerPath} END`,
+      WHERE id IN (${Prisma.join(financialIds)})
+        AND (metadata @? ${markerPath}
+          OR CASE WHEN "sourceKind" = 'SALES_CONTRACT' AND "contractId" IS NOT NULL
+              AND "sourceId" = "contractId" AND "sourceSnapshot" -> 'partnerCaseId' = 'null'::jsonb
+            THEN ("sourceSnapshot" - 'partnerCaseId') @? ${markerPath}
+            ELSE "sourceSnapshot" @? ${markerPath} END)` : Promise.resolve([]),
     financialIds.length ? database.$queryRaw<Array<{ id: string }>>`
       SELECT f.id FROM accounting_financial_records AS f
       JOIN sales_contracts AS owner ON owner.id = f."contractId"
       WHERE f.id IN (${Prisma.join(financialIds)})
         AND (owner."partnerCaseId" IS NOT NULL OR owner."partnerKind" IS NOT NULL)` : Promise.resolve([]),
   ]);
-  const candidates = new Set(financialIds);
   const privateFinancialIds = new Set([...partnerSources, ...markedSources, ...partnerContractSources]
-    .filter(row => candidates.has(row.id)).map(row => row.id));
+    .map(row => row.id));
   const parentContractIds = [...new Set(paymentReceivables.flatMap(row => row.contractId ? [row.contractId] : []))];
   const parentContracts = parentContractIds.length
     ? await database.salesContract.findMany({ where: { id: { in: parentContractIds } },

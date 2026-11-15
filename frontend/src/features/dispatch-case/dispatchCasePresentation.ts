@@ -37,7 +37,37 @@ const eventLabels: Record<string, string> = {
   RESERVATION_RELEASED: "رزرو بارگیری آزاد شد",
   LOADING_FINALIZED: "بارگیری نهایی شد",
   FINALIZED_LOADING_CANCELLED: "بارگیری نهایی‌شده پیش از خروج لغو شد",
-  CANDIDATE_WITHDRAWN: "پروندهٔ صدور اسناد بسته شد",
+  CANDIDATE_WITHDRAWN: "درخواست صدور اسناد خروج پس گرفته شد",
+  ACCEPT: "حسابداری درخواست صدور اسناد خروج را پذیرفت",
+  REJECT: "حسابداری درخواست صدور اسناد خروج را رد کرد",
+  RETURN: "حسابداری درخواست صدور اسناد خروج را برای اصلاح برگرداند",
+  CANDIDATE_RETURNED: "درخواست صدور اسناد خروج برای اصلاح بازگردانده شد",
+  CANDIDATE_ACCEPTED_FOR_ISSUANCE: "درخواست صدور اسناد خروج تأیید شد",
+  VOID_WAYBILL: "حواله خروج باطل شد",
+  REPLACE_WAYBILL: "حواله خروج جایگزین شد",
+  WAYBILL_REPLACED: "حواله خروج جایگزین شد",
+  DOCUMENT_BUNDLE_REPLACED: "مجموعه اسناد خروج جایگزین شد",
+  DOCUMENT_BUNDLE_VOIDED: "مجموعه اسناد خروج باطل شد",
+  PRIMARY_BUNDLE_ISSUED: "مجموعه اسناد خروج صادر شد",
+  PRICED_ALLOCATION_RECORDED: "قیمت‌گذاری بار تخصیص‌یافته ثبت شد",
+  PRICING_EVIDENCE_CONFLICT: "مغایرت در مستندات قیمت‌گذاری ثبت شد",
+  PRICING_STALE_REQUIRES_SUCCESSOR: "قیمت‌گذاری دیگر معتبر نیست و باید جایگزین شود",
+  RESERVATION_RELEASED_FOR_DEPARTURE: "رزرو بارگیری برای خروج راننده آزاد شد",
+  RESERVATION_RELEASED_FOR_VOID: "رزرو بارگیری به علت ابطال نوبت آزاد شد",
+  RETURNED_TO_GATE_WAITING: "راننده به صف انتظار گارد برگشت",
+  CLOSED_WITHOUT_LOADING: "نوبت راننده بدون بارگیری بسته شد",
+  VOIDED: "نوبت راننده باطل شد",
+  REVOKED_FOR_WAYBILL_VOID: "مجوز خروج به علت ابطال حواله لغو شد",
+  REVOKED_FOR_WAYBILL_REPLACEMENT: "مجوز خروج به علت جایگزینی حواله لغو شد",
+  MANUAL_EXIT_PENDING_APPROVALS: "خروج ثبت‌شده روی برگه دستی در انتظار تأیید است",
+  MANUAL_EXIT_SPOILED: "برگه ثبت دستی خروج باطل شد",
+  MANUAL_EXIT_CONFLICT: "در ثبت دستی خروج مغایرت شناسایی شد",
+  CORRECTION_DRAFT_CREATED: "پیش‌نویس اصلاح پرونده ارسال ایجاد شد",
+  CORRECTION_POSTED: "اصلاح پرونده ارسال نهایی شد",
+  PAPER_EXIT_REGISTERED_PENDING_APPROVALS: "خروج با برگه دستی ثبت شد و در انتظار تأیید است",
+  PAPER_EXIT_SPOILED: "برگه ثبت دستی خروج باطل شد",
+  INTERNAL_BIOMETRIC_FALLBACK: "تأیید راننده داخلی با روش جایگزین ثبت شد",
+  EXTERNAL_BIOMETRIC_FALLBACK: "تأیید راننده بیرونی با روش جایگزین ثبت شد",
   PHYSICAL_EXIT_RECORDED: "خروج فیزیکی از مجموعه ثبت شد",
   MANUAL_OUTAGE_EXIT_REGISTERED: "خروج زمان قطعی سامانه ثبت شد",
   ALLOCATION_FINALIZED: "تخصیص بار نهایی شد",
@@ -84,6 +114,11 @@ export const dispatchRecoveryLabel = (recovery?: string | null) =>
 export const dispatchEventLabel = (eventType?: string | null) => {
   if (!eventType) return "رویداد ثبت‌شده";
   if (eventLabels[eventType]) return eventLabels[eventType];
+  const [command, , invoiceId] = eventType.split(":", 3);
+  if (command === "VOID_WAYBILL_AND_INVOICE")
+    return invoiceId ? "حواله خروج و فاکتور فروش باطل شدند" : eventLabels.VOID_WAYBILL;
+  if (command === "VOID_WAYBILL" || command === "REPLACE_WAYBILL")
+    return eventLabels[command];
   if (eventType.startsWith("CANDIDATE_"))
     return `پرونده اسناد خروج ${dispatchStatusLabel(eventType.slice("CANDIDATE_".length))}`;
   if (eventType.startsWith("CONFIRMATION_"))

@@ -12,7 +12,8 @@ import { DispatchConfirmationService } from '../dispatchConfirmation';
 import { ProtectedTemplateVault } from '../biometricTemplateVault';
 import { DeterministicBiometricSimulator } from '../biometricSimulator';
 import { PhysicalGateExitService } from '../physicalGateExit';
-import { listGuardQueueAdmissionOptions } from '../guardDriverQueue';
+import { closeGuardQueueTurnWithoutLoading, listGuardQueueAdmissionOptions, releaseGuardQueueReservation, reserveGuardQueueTurn, voidGuardQueueTurn } from '../guardDriverQueue';
+import { getDispatchCaseTimeline, listDispatchCases } from '../dispatchCaseTimeline';
 import { readShipmentQuantityProjection } from '../shipmentQuantityProjectionStore';
 
 async function run() {
@@ -100,9 +101,31 @@ async function run() {
     assert.equal(cancelledLoading.status, 'CANCELLED');
     assert.equal(cancelledLoading.cancellationReason, priorCancellationReason);
     assert.equal((await db.accountingDispatchCandidate.findUniqueOrThrow({ where: { id: revision.candidate.id } })).status, 'WITHDRAWN');
-    const closedTurn = await db.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: originalTurn.id } });
-    assert.equal(closedTurn.status, 'VOIDED');
-    assert.equal(closedTurn.loadingId, cancelInput.loadingId, 'cancelled turn keeps its historical link');
+    const readyForLoading = await db.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: originalTurn.id } });
+    assert.equal(readyForLoading.status, 'AVAILABLE_FOR_LOADING');
+    assert.equal(readyForLoading.loadingId, null);
+    assert.equal(readyForLoading.admittedAt.toISOString(), originalTurn.admittedAt.toISOString());
+    assert.equal(readyForLoading.voidedAt, null);
+    assert.ok(!(await listGuardQueueAdmissionOptions(db)).externalDrivers.some(driver => driver.id === driverId));
+    const guardDecision = { turnId: originalTurn.id, actorId: fixture.actorId, reason: 'رسیدگی آزمایشی گارد' };
+    const nextLoading = { ...guardDecision, loadingId: fixture.loadings[1].id };
+    const reservation = await reserveGuardQueueTurn(db, nextLoading);
+    assert.equal(reservation.loadingId, nextLoading.loadingId);
+    assert.equal(reservation.status, 'RESERVED_FOR_LOADING');
+    const logisticsScope = { workspace: 'logistics', permission: 'edit' };
+    const oldCases = await listDispatchCases(db, logisticsScope, { loadingId: cancelInput.loadingId });
+    assert.equal(oldCases[0]?.loadingId, cancelInput.loadingId);
+    const oldCase = await getDispatchCaseTimeline(db, originalTurn.id, logisticsScope, { loadingId: cancelInput.loadingId });
+    assert.equal(oldCase?.currentAction, 'COMPLETE');
+    const liveCase = await getDispatchCaseTimeline(db, originalTurn.id, logisticsScope, { loadingId: nextLoading.loadingId });
+    assert.equal(liveCase?.currentAction, 'REVIEW_CURRENT_STATION');
+
+    await releaseGuardQueueReservation(db, nextLoading);
+    const completed = process.env.TEST_CANCEL_GUARD_VOID === 'true'
+      ? await voidGuardQueueTurn(db, guardDecision) : await closeGuardQueueTurnWithoutLoading(db, guardDecision);
+    assert.equal(completed.status, process.env.TEST_CANCEL_GUARD_VOID === 'true' ? 'VOIDED' : 'CLOSED_WITHOUT_LOADING');
+    assert.equal(await cancelFinalizedOrdinaryLoading(db, cancelInput), cancelInput.loadingId);
+    assert.equal((await db.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: originalTurn.id } })).status, completed.status);
     const admission = await listGuardQueueAdmissionOptions(db);
     assert.ok(admission.externalDrivers.some(driver => driver.id === driverId));
     assert.ok(admission.externalVehicles.some(vehicle => vehicle.id === originalTurn.externalVehicleId));

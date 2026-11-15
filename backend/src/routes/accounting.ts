@@ -551,17 +551,37 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
         allocationRevision: { select: { snapshot: true, loadingId: true, lines: { select: { snapshot: true, quantity: true, unit: true } } } },
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true,
-          legacyReconstruction: { select: { id: true, createdAt: true } } } },
-      }, orderBy: { createdAt: 'asc' } });
+          legacyReconstruction: { select: { id: true, createdAt: true } },
+          physicalExit: { select: { recordedAt: true } } } },
+      } });
+      const currentInvoices = await tx.salesDispatchInvoice.findMany({
+        where: { loadingId: { in: [...new Set(candidates.map(candidate => candidate.allocationRevision.loadingId))] }, voidedAt: null },
+        select: { loadingId: true, id: true, number: true },
+      });
+      const currentInvoiceByLoading = new Map(currentInvoices.map(invoice =>
+        [invoice.loadingId, { id: invoice.id, number: invoice.number.toString() }]));
+      const invoiceActivity = await tx.salesDispatchInvoice.groupBy({
+        by: ['loadingId'],
+        where: { loadingId: { in: [...new Set(candidates.map(candidate => candidate.allocationRevision.loadingId))] } },
+        _max: { issuedAt: true, voidedAt: true },
+      });
+      const invoiceActivityByLoading = new Map(invoiceActivity.map(invoice => [invoice.loadingId, invoice._max]));
+      const time = (value?: Date | null) => value?.getTime() ?? 0;
       const ownerById = new Map(owners.map(owner => [owner.id, owner.allocationRevision]));
       return { manage, candidates: candidates.map(candidate => {
         const owner = ownerById.get(candidate.id);
         const { allocationRevision, ...candidateData } = candidate;
-        return { ...candidateData, loadingId: allocationRevision.loadingId, summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
+        const invoice = invoiceActivityByLoading.get(allocationRevision.loadingId);
+        const lastActivityAt = new Date(Math.max(time(candidate.createdAt), time(candidate.dispositionAt),
+          time(invoice?.issuedAt), time(invoice?.voidedAt), ...candidate.waybills.map(waybill => Math.max(
+            time(waybill.issuedAt), time(waybill.voidedAt), time(waybill.legacyReconstruction?.createdAt), time(waybill.physicalExit?.recordedAt),
+          ))));
+        return { ...candidateData, lastActivityAt, currentSalesInvoice: currentInvoiceByLoading.get(allocationRevision.loadingId) ?? null, loadingId: allocationRevision.loadingId, summary: projectAccountingDispatchCandidateSummary(allocationRevision.snapshot),
           lines: owner?.sourceKind === 'SALES_CONTRACT' ? projectAccountingDispatchLines(allocationRevision.lines) : [],
           canManage: manage.allowed && Boolean(owner && (owner.sourceKind === 'SALES_CONTRACT'
           || (owner.sourceKind === 'PARTNER_CASE' && owner.partnerCaseId && writablePartnerCases.has(owner.partnerCaseId)))) };
-      }) };
+      }).sort((left, right) => right.lastActivityAt.getTime() - left.lastActivityAt.getTime()
+        || right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id)) };
     });
     res.setHeader('X-Dispatch-Documents-Permission', manage.allowed ? 'MANAGE' : 'VIEW');
     return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,
@@ -583,12 +603,18 @@ router.post('/dispatch-candidates/:id/decision', accountingDispatchEdit, async (
 
 router.post('/dispatch-waybills/:id/void', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
   try {
-    const data = await voidAccountingDispatchWaybill(prisma, { waybillId: req.params.id, reason: req.body.reason,
+    const { expectedInvoiceId } = req.body;
+    if (expectedInvoiceId != null && (typeof expectedInvoiceId !== 'string' || !expectedInvoiceId.trim()))
+      return res.status(400).json({ success: false, error: 'شناسه فاکتور معتبر نیست.' });
+    const data = await voidAccountingDispatchWaybill(prisma, { waybillId: req.params.id, reason: req.body.reason, expectedInvoiceId,
       idempotencyKey: String(req.get('Idempotency-Key') || req.body.idempotencyKey || ''), actorId: req.user!.id,
       effectiveAuthority: { actorRole: req.user!.role, workspace: req.workspace, workspacePermission: req.workspacePermission,
         feature: FEATURES.ACCOUNTING_DISPATCH_CANDIDATES_MANAGE, featurePermission: req.featurePermission } });
     return res.json({ success: true, data });
-  } catch (error) { return dispatchError(res, error); }
+  } catch (error) {
+    if (error instanceof SalesInvoiceError) return res.status(error.status).json({ success: false, error: error.message });
+    return dispatchError(res, error);
+  }
 });
 
 router.post('/dispatch-waybills/:id/replace', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {

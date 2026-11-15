@@ -1183,10 +1183,11 @@ export const cancelFinalizedOrdinaryLoading = async (prisma: Database, input: {
   }
   for (const turn of turns) {
     await tx.guardDriverQueueTurn.update({ where: { id: turn.id }, data: {
-      status: 'VOIDED', voidedAt: at, voidedBy: input.actorId, voidReason: reason,
+      status: 'AVAILABLE_FOR_LOADING', loadingId: null, availableAt: at, availableBy: input.actorId,
+      reservedAt: null, reservedBy: null, finalizedAt: null, finalizedBy: null,
     } });
     await appendQueueEvent(tx, {
-      turnId: turn.id, eventType: 'FINALIZED_LOADING_CANCELLED', fromStatus: 'LOADING_FINALIZED', toStatus: 'VOIDED',
+      turnId: turn.id, eventType: 'FINALIZED_LOADING_CANCELLED', fromStatus: 'LOADING_FINALIZED', toStatus: 'AVAILABLE_FOR_LOADING',
       actorId: input.actorId, reason, payload: { loadingId: loading.id },
     });
   }
@@ -1280,7 +1281,7 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
 };
 
 export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
-  waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown;
+  waybillId: string; reason: string; idempotencyKey: string; actorId: string; effectiveAuthority: unknown; expectedInvoiceId?: string | null;
 }) => {
   if (await waybillRequiresAtomicDocuments(prisma, input.waybillId)) {
     return requiredDispatchDocumentsCommands().voidWaybill({ ...input, authority: input.effectiveAuthority });
@@ -1290,7 +1291,9 @@ export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
   const initial = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId } });
   if (!initial) throw new DispatchAllocationValidationError('Dispatch waybill was not found.');
   await lockKeys(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${initial.candidateId}`, `ACCOUNTING_DISPATCH_WAYBILL:${input.waybillId}`]);
-  const action = `VOID_WAYBILL:${input.waybillId}`;
+  const action = input.expectedInvoiceId === undefined
+    ? `VOID_WAYBILL:${input.waybillId}`
+    : `VOID_WAYBILL_AND_INVOICE:${input.waybillId}:${input.expectedInvoiceId ?? ''}`;
   const previous = await tx.accountingDispatchCommand.findUnique({ where: {
     candidateId_idempotencyKey: { candidateId: initial.candidateId, idempotencyKey },
   } });
@@ -1301,6 +1304,14 @@ export const voidAccountingDispatchWaybill = async (prisma: Database, input: {
   const waybill = await tx.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: input.waybillId } });
   if (waybill.status !== AccountingDispatchWaybillStatus.ISSUED) throw new DispatchAllocationConflictError('Only an issued waybill can be voided.');
   const reason = required(input.reason, 'reason');
+  if (input.expectedInvoiceId !== undefined) {
+    const candidate = await tx.accountingDispatchCandidate.findUniqueOrThrow({
+      where: { id: waybill.candidateId }, select: { allocationRevision: { select: { loadingId: true } } },
+    });
+    const { voidSalesInvoiceInTransaction } = await import('./salesDispatchInvoice/service');
+    await voidSalesInvoiceInTransaction(tx, { actorId: input.actorId, workspace: 'accounting' },
+      candidate.allocationRevision.loadingId, input.expectedInvoiceId, reason, true);
+  }
   const now = new Date();
   await revokeActiveExitAuthorization(tx, { waybillId: waybill.id, actorId: input.actorId,
     reason: `Waybill voided: ${reason}`, eventType: 'REVOKED_FOR_WAYBILL_VOID', at: now, effectiveAuthority: input.effectiveAuthority });

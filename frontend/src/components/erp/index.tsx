@@ -968,22 +968,12 @@ function ErpListRowActions({ actions, mode }: { actions: ErpAction[]; mode: 'ico
   </>;
 }
 
-export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayout = 'default', showFilterLabels = false, sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, emptyState, isLoading, footer, children, ...pageProps }: {
-  rows: T[];
-  rowKey: (row: T) => string;
-  columns: ErpColumn<T>[];
+export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayout = 'default', showFilterLabels = false, sectionNavigation, rowActions, rowActionMode = 'icons', rowClassName, focusedRowKey, emptyState, isLoading, footer, children, mobileLayout = 'cards', ...pageProps }: {
   filters?: ErpFilter[];
   filterLayout?: 'default' | 'wide-search';
   showFilterLabels?: boolean;
   sectionNavigation?: React.ReactNode;
-  rowActions?: (row: T) => ErpAction[];
-  rowActionMode?: 'icons' | 'menu';
-  rowClassName?: (row: T) => string;
-  focusedRowKey?: string;
-  emptyState?: React.ReactNode;
-  isLoading?: boolean;
-  footer?: React.ReactNode;
-} & Omit<Parameters<typeof ErpPage>[0], 'children'> & { children?: React.ReactNode }) {
+} & Parameters<typeof ErpListContent<T>>[0] & Omit<Parameters<typeof ErpPage>[0], 'children'> & { children?: React.ReactNode }) {
   React.useEffect(() => {
     if (!focusedRowKey) return;
     const frame = window.requestAnimationFrame(() => {
@@ -1001,74 +991,97 @@ export function ErpListPage<T>({ rows, rowKey, columns, filters = [], filterLayo
       {sectionNavigation}
       <ErpFilters filters={filters} layout={filterLayout} showLabels={showFilterLabels} />
       {children}
-      <ErpSection>
-        {isLoading ? (
-          <ErpLoading />
-        ) : rows.length === 0 ? (
-          emptyState
-        ) : (
-          <>
-            <div className="space-y-3 lg:hidden">
-              {rows.map((row) => (
-                <div key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined}>
-                <ErpCard
-                  interactive
-                  className={cx('scroll-mt-24 p-4', rowClassName?.(row), focusedRowKey === rowKey(row) && 'ring-2 ring-[var(--sds-focus-ring)]')}
-                >
-                  <div className="space-y-3">
-                    {columns.filter((column) => column.priority !== 'hidden-mobile').map((column) => (
-                      <div key={column.id} className={column.priority === 'primary' ? '' : 'flex items-start justify-between gap-3 text-sm'}>
-                        {column.priority !== 'primary' && <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{column.mobileLabel || column.header}</span>}
-                        <div className={cx('min-w-0 break-words', column.priority === 'primary' ? '' : 'text-left text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]')}>{column.cell(row)}</div>
-                      </div>
+      <ErpListContent rows={rows} rowKey={rowKey} columns={columns} rowActions={rowActions}
+        rowActionMode={rowActionMode} rowClassName={rowClassName} focusedRowKey={focusedRowKey}
+        emptyState={emptyState} isLoading={isLoading} footer={footer} mobileLayout={mobileLayout} />
+    </ErpPage>
+  );
+}
+
+export function ErpListContent<T>({
+  rows, rowKey, columns, rowActions, rowActionMode = 'icons', rowClassName,
+  focusedRowKey, emptyState, isLoading, footer, mobileLayout = 'cards',
+}: {
+  rows: T[];
+  rowKey: (row: T) => string;
+  columns: ErpColumn<T>[];
+  rowActions?: (row: T) => ErpAction[];
+  rowActionMode?: 'icons' | 'menu';
+  rowClassName?: (row: T) => string;
+  focusedRowKey?: string;
+  emptyState?: React.ReactNode;
+  isLoading?: boolean;
+  footer?: React.ReactNode;
+  mobileLayout?: 'cards' | 'table';
+}) {
+  return (
+    <ErpSection>
+      {isLoading ? (
+        <ErpLoading />
+      ) : rows.length === 0 ? (
+        emptyState
+      ) : (
+        <>
+          {mobileLayout === "cards" && <div className="space-y-3 lg:hidden">
+            {rows.map((row) => (
+              <div key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined}>
+              <ErpCard
+                interactive
+                className={cx('scroll-mt-24 p-4', rowClassName?.(row), focusedRowKey === rowKey(row) && 'ring-2 ring-[var(--sds-focus-ring)]')}
+              >
+                <div className="space-y-3">
+                  {columns.filter((column) => column.priority !== 'hidden-mobile').map((column) => (
+                    <div key={column.id} className={column.priority === 'primary' ? '' : 'flex items-start justify-between gap-3 text-sm'}>
+                      {column.priority !== 'primary' && <span className="text-xs text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">{column.mobileLabel || column.header}</span>}
+                      <div className={cx('min-w-0 break-words', column.priority === 'primary' ? '' : 'text-left text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]')}>{column.cell(row)}</div>
+                    </div>
+                  ))}
+                  {rowActions && (
+                    <div className="flex flex-wrap gap-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-strong)]">
+                      <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
+                    </div>
+                  )}
+                </div>
+              </ErpCard>
+              </div>
+            ))}
+          </div>}
+          <div className={cx("overflow-x-auto", mobileLayout === "cards" && "hidden lg:block")}>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
+                  {columns.map((column) => (
+                    <th key={column.id} className={cx('px-3 py-3 text-right text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
+                      {column.header}
+                    </th>
+                  ))}
+                  {rowActions && <th className="px-3 py-3 text-left text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined} className={cx('border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]', rowClassName?.(row), focusedRowKey === rowKey(row) && 'bg-[var(--sds-accent-soft)] ring-2 ring-inset ring-[var(--sds-focus-ring)]')}>
+                    {columns.map((column) => (
+                      <td key={column.id} className={cx('px-3 py-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
+                        {column.cell(row)}
+                      </td>
                     ))}
                     {rowActions && (
-                      <div className="flex flex-wrap gap-2 border-t border-[var(--sds-border-default)] pt-3 dark:border-[var(--sds-border-strong)]">
-                        <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
-                      </div>
+                      <td className="px-3 py-4">
+                        <div className="flex justify-end gap-1">
+                          <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
+                        </div>
+                      </td>
                     )}
-                  </div>
-                </ErpCard>
-                </div>
-              ))}
-            </div>
-            <div className="hidden overflow-x-auto lg:block">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]">
-                    {columns.map((column) => (
-                      <th key={column.id} className={cx('px-3 py-3 text-right text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
-                        {column.header}
-                      </th>
-                    ))}
-                    {rowActions && <th className="px-3 py-3 text-left text-xs font-semibold text-[var(--sds-text-secondary)] dark:text-[var(--sds-text-muted)]">عملیات</th>}
                   </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={rowKey(row)} data-erp-focused-row={focusedRowKey === rowKey(row) ? 'true' : undefined} className={cx('border-b border-[var(--sds-border-default)] transition hover:bg-[var(--sds-surface-subtle)] dark:border-[var(--sds-border-strong)] dark:hover:bg-[var(--sds-surface-raised)]', rowClassName?.(row), focusedRowKey === rowKey(row) && 'bg-[var(--sds-accent-soft)] ring-2 ring-inset ring-[var(--sds-focus-ring)]')}>
-                      {columns.map((column) => (
-                        <td key={column.id} className={cx('px-3 py-4 text-[var(--sds-text-primary)] dark:text-[var(--sds-text-primary)]', column.align === 'end' && 'text-left', column.align === 'center' && 'text-center')}>
-                          {column.cell(row)}
-                        </td>
-                      ))}
-                      {rowActions && (
-                        <td className="px-3 py-4">
-                          <div className="flex justify-end gap-1">
-                            <ErpListRowActions actions={rowActions(row)} mode={rowActionMode} />
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {footer && <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4 dark:border-[var(--sds-border-strong)]">{footer}</div>}
-          </>
-        )}
-      </ErpSection>
-    </ErpPage>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {footer && <div className="mt-4 border-t border-[var(--sds-border-default)] pt-4 dark:border-[var(--sds-border-strong)]">{footer}</div>}
+        </>
+      )}
+    </ErpSection>
   );
 }
 

@@ -562,7 +562,7 @@ export default function LoadingDetailPage() {
         <div className="space-y-4">
           {sheetError}
           {(loading.status === "FINALIZED" || canCompleteCancellation) && (
-            <ErpInlineState kind="stale" title="ابتدا اسناد صادرشده را در حسابداری ابطال کنید. پس از لغو، بار آزاد می‌شود و گارد می‌تواند راننده و خودروی واجد شرایط را دوباره پذیرش کند." />
+            <ErpInlineState kind="stale" title="ابتدا اسناد صادرشده را در حسابداری ابطال کنید. پس از لغو، بار آزاد می‌شود و پذیرش راننده باز می‌ماند و راننده و خودروی واجد شرایط برای بارگیری بعدی آماده می‌شوند." />
           )}
           <ErpField label="دلیل لغو" required>
             <ErpTextarea

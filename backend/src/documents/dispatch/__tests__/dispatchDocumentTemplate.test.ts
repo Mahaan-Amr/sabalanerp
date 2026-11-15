@@ -82,10 +82,12 @@ const englishUnitWaybill = renderDispatchDocumentHtml({ ...common, kind: 'WAYBIL
 assert.match(englishUnitWaybill, /متر طول/);
 assert.doesNotMatch(englishUnitWaybill, /contract-row-123|>meter</);
 assert.doesNotMatch(waybillHtml, /مبلغ ناخالص|تخفیف تخصیص‌یافته|مبلغ خالص|ریال/);
-const reconstructed = renderDispatchDocumentHtml({ ...common, kind: 'WAYBILL', reconstructionLabel: 'LEGACY_RECONSTRUCTED',
-  payload: { allocationRevisionId: 'revision', contracts: [] } });
-assert.match(reconstructed, /نسخه بازسازی‌شده از اطلاعات ثبت‌شده/);
-assert.match(reconstructed, /فایل اصلی بازیابی نشده است/);
+const reconstructedInput: DispatchDocumentRenderData = { ...common, kind: 'WAYBILL', reconstructionLabel: 'LEGACY_RECONSTRUCTED',
+  payload: { allocationRevisionId: 'revision', contracts: [] } };
+const reconstructed = renderDispatchDocumentHtml(reconstructedInput);
+assert.doesNotMatch(reconstructed, /فایل اصلی بازیابی نشده است|نشان رسمی سبلان/);
+assert.match(renderDispatchDocumentHeaderTemplate(reconstructedInput), /نسخه بازسازی‌شده/);
+assert.match(reconstructed, /<\/table><section class="recipient-signature">امضای تحویل‌گیرنده/);
 assert.doesNotMatch(waybillHtml, /نسخه بازسازی‌شده/);
 
 const adjustmentHtml = renderDispatchDocumentHtml({

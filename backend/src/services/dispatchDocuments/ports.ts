@@ -99,6 +99,7 @@ export interface DispatchDocumentRepository {
   }): Promise<CandidateDecisionResult>;
   voidWaybill(input: {
     waybillId: string;
+    expectedInvoiceId?: string | null;
     reason: string;
     idempotencyKey: string;
     actorId: string;

@@ -1231,7 +1231,7 @@ export const accountingAPI = {
   reconstructLegacyWaybill: (waybillId: string, reason: string) => api.post(`/accounting/dispatch-waybills/${encodeURIComponent(waybillId)}/reconstruct-legacy`, { reason }),
   decideDispatchCandidate: (id: string, data: { action: 'ACCEPT' | 'REJECT'; reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-candidates/${id}/decision`, data),
-  voidDispatchWaybill: (id: string, data: { reason: string; idempotencyKey: string }) =>
+  voidDispatchWaybill: (id: string, data: { reason: string; idempotencyKey: string; expectedInvoiceId?: string | null }) =>
     api.post(`/accounting/dispatch-waybills/${id}/void`, data),
   replaceDispatchWaybill: (id: string, data: { reason: string; idempotencyKey: string }) =>
     api.post(`/accounting/dispatch-waybills/${id}/replace`, data),

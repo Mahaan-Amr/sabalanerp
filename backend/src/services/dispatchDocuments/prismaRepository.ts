@@ -327,7 +327,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       await lock(tx, [`ACCOUNTING_DISPATCH_WAYBILL:${input.waybillId}`]);
       const waybill = await tx.accountingDispatchWaybill.findUnique({ where: { id: input.waybillId }, include: {
         physicalExit: true, manualOutageExit: true,
-        candidate: { include: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true } } } },
+        candidate: { include: { allocationRevision: { select: { sourceKind: true, partnerCaseId: true, loadingId: true } } } },
       } });
       if (!waybill) throw new DispatchDocumentValidationError('Dispatch waybill was not found.');
       if (waybill.candidate.allocationRevision.sourceKind === 'PARTNER_CASE' && !await authorizePartnerAccountingWrite(tx, {
@@ -337,6 +337,11 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       const prior = await commandResult(tx, 'WAYBILL', input.waybillId, input.idempotencyKey, 'VOID', input.intentFingerprint);
       if (prior) return prior;
       if (waybill.status !== 'ISSUED' || waybill.physicalExit || waybill.manualOutageExit) throw new DispatchDocumentConflictError('Only an unexited issued waybill can be voided.');
+      if (input.expectedInvoiceId !== undefined) {
+        const { voidSalesInvoiceInTransaction } = await import('../salesDispatchInvoice/service');
+        await voidSalesInvoiceInTransaction(tx, { actorId: input.actorId, workspace: 'accounting' },
+          waybill.candidate.allocationRevision.loadingId, input.expectedInvoiceId, input.reason, true);
+      }
       const at = new Date();
       await tx.dispatchExitAuthorization.updateMany({ where: { waybillId: waybill.id, status: 'ACTIVE' }, data: { status: 'REVOKED', revokedAt: at, revokedBy: input.actorId, revocationReason: input.reason } });
       await tx.accountingDispatchWaybill.update({ where: { id: waybill.id }, data: { status: AccountingDispatchWaybillStatus.VOIDED, voidedAt: at, voidedBy: input.actorId, voidReason: input.reason } });

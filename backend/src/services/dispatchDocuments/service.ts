@@ -201,16 +201,16 @@ export const createDispatchDocuments = (dependencies: Dependencies) => {
     }
   };
 
-  const voidWaybill = async (input: { waybillId: string; reason: string; idempotencyKey: string; actorId: string; correlationId?: string; authority?: unknown }) => {
+  const voidWaybill = async (input: { waybillId: string; expectedInvoiceId?: string | null; reason: string; idempotencyKey: string; actorId: string; correlationId?: string; authority?: unknown }) => {
     const waybillId = required(input.waybillId, 'waybillId');
     const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
     const actorId = required(input.actorId, 'actorId');
     const correlationId = input.correlationId?.trim() || id();
-    const fingerprint = intentFingerprint({ command: 'VOID', waybillId, reason: input.reason?.trim() || null, authority: input.authority ?? {} });
+    const fingerprint = intentFingerprint({ command: 'VOID', waybillId, ...(input.expectedInvoiceId === undefined ? {} : { expectedInvoiceId: input.expectedInvoiceId }), reason: input.reason?.trim() || null, authority: input.authority ?? {} });
     const prior = await dependencies.repository.findCommandResult({ scope: 'WAYBILL', scopeId: waybillId, idempotencyKey,
       command: 'VOID', intentFingerprint: fingerprint, actorId, correlationId });
     if (prior) return prior;
-    return dependencies.repository.voidWaybill({ waybillId, reason: required(input.reason, 'reason'), idempotencyKey,
+    return dependencies.repository.voidWaybill({ waybillId, expectedInvoiceId: input.expectedInvoiceId, reason: required(input.reason, 'reason'), idempotencyKey,
       actorId, correlationId, authority: input.authority ?? {},
       intentFingerprint: fingerprint });
   };

@@ -23,6 +23,13 @@ test("replaces dispatch workflow codes with plain Persian labels", () => {
   );
 });
 
+test("distinguishes waybill-only and combined cancellation without exposing command identifiers", () => {
+  assert.equal(dispatchEventLabel("VOID_WAYBILL:waybill-1"), "حواله خروج باطل شد");
+  assert.equal(dispatchEventLabel("VOID_WAYBILL_AND_INVOICE:waybill-1:invoice-1"), "حواله خروج و فاکتور فروش باطل شدند");
+  assert.equal(dispatchEventLabel("VOID_WAYBILL_AND_INVOICE:waybill-1:"), "حواله خروج باطل شد");
+  assert.equal(dispatchEventLabel("CANDIDATE_WITHDRAWN"), "درخواست صدور اسناد خروج پس گرفته شد");
+});
+
 test("unknown backend codes are never exposed on the normal user surface", () => {
   assert.equal(
     dispatchStatusLabel("NEW_BACKEND_STATUS"),

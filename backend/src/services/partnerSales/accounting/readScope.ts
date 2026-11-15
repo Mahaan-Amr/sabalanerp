@@ -299,9 +299,11 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   }
   auditAccess.AND = [...auditAccess.AND as Prisma.AccountingAuditLogWhereInput[], { id: { notIn: rejectedAuditIds } }];
   return { database,
+    actorId: actor?.userId ?? null,
     readActorAuthority,
     commercialForCase: (caseId: string) => commercialByCase.get(caseId),
     partnerAccountingIncluded: authorizedInvoices.length > 0,
+    authorizedPartnerInternalIds: allowedInternalIds,
     contextualize,
     search: async (kind: ListKind | 'CORRECTION', ordinaryContractIds: string[], text: string) => {
       const normalized = text.toLocaleLowerCase();

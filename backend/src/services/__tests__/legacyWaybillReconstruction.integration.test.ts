@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
 import { createConcurrentPricingFixture } from './shipmentStatementConcurrency/pricingFixture';
 import { createAuthorizedActorFixture } from './shipmentStatementConcurrency/authorityFixture';
-import { decideAccountingDispatchCandidate, finalizeCanonicalLoadingAllocations } from '../dispatchAllocation';
+import { cancelFinalizedOrdinaryLoading, decideAccountingDispatchCandidate, finalizeCanonicalLoadingAllocations, voidAccountingDispatchWaybill } from '../dispatchAllocation';
 import { readLegacyWaybillReconstruction, reconstructLegacyWaybill } from '../legacyWaybillReconstruction';
 import { createSalesInvoiceService } from '../salesDispatchInvoice/service';
 import { classifyLoadingDocumentPart, issueLoadingDocuments } from '../loadingDocumentIssuance';
@@ -12,6 +12,8 @@ import { DispatchConfirmationService } from '../dispatchConfirmation';
 import { ProtectedTemplateVault } from '../biometricTemplateVault';
 import { DeterministicBiometricSimulator } from '../biometricSimulator';
 import { PhysicalGateExitService } from '../physicalGateExit';
+import { listGuardQueueAdmissionOptions } from '../guardDriverQueue';
+import { readShipmentQuantityProjection } from '../shipmentQuantityProjectionStore';
 
 async function run() {
   const sourceDatabaseUrl = process.env.DATABASE_URL;
@@ -70,6 +72,41 @@ async function run() {
     await issueLoadingDocuments(group);
     assert.equal(await db.salesDispatchInvoice.count({ where: { loadingId: fixture.loadings[0].id } }), 1);
     assert.equal(await db.accountingDispatchWaybill.count({ where: { candidateId: revision.candidate.id } }), 1);
+    const cancelInput = { loadingId: fixture.loadings[0].id, actorId: fixture.actorId, reason: 'لغو بارگیری آزمایشی پیش از خروج' };
+    const originalTurn = await db.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: revision.queueTurnId } });
+    const driverId = originalTurn.externalDriverId!;
+    assert.ok(driverId);
+    assert.ok(!(await listGuardQueueAdmissionOptions(db)).externalDrivers.some(driver => driver.id === driverId));
+    await assert.rejects(() => cancelFinalizedOrdinaryLoading(db, cancelInput), /ابتدا در حسابداری/);
+    const invoice = await db.salesDispatchInvoice.findFirstOrThrow({ where: { loadingId: fixture.loadings[0].id } });
+    await invoices.void(invoiceContext, fixture.loadings[0].id, invoice.id, cancelInput.reason);
+    await assert.rejects(() => cancelFinalizedOrdinaryLoading(db, cancelInput), /ابتدا در حسابداری/);
+    await voidAccountingDispatchWaybill(db, { waybillId, actorId: actor.id, effectiveAuthority: authority,
+      idempotencyKey: `void-${database.runId}`, reason: cancelInput.reason });
+    const line = await db.logisticsAllocationRevisionLine.findFirstOrThrow({ where: { revisionId: revision.id } });
+    const projection = () => readShipmentQuantityProjection(db, { contractId: line.sourceContractId! });
+    const available = async () => (await projection()).rows.find(row => row.contractItemId === line.sourceContractItemId)?.quantities?.availableToLoad;
+    assert.equal(Number(await available()), 1);
+    const priorCancellationReason = 'ثبت لغو با گردش کار قدیمی';
+    await db.logisticsLoading.update({ where: { id: cancelInput.loadingId }, data: {
+      status: 'CANCELLED', cancelledAt: new Date(), cancelledBy: fixture.actorId, cancellationReason: priorCancellationReason,
+    } });
+
+    assert.equal(await cancelFinalizedOrdinaryLoading(db, cancelInput), cancelInput.loadingId);
+    assert.equal(await cancelFinalizedOrdinaryLoading(db, cancelInput), cancelInput.loadingId);
+    assert.equal(Number(await available()), 2);
+    assert.equal(await db.shipmentQuantityEvidence.count({ where: { sourceType: 'FINALIZED_LOADING_CANCELLATION', sourceId: line.id } }), 1);
+    const cancelledLoading = await db.logisticsLoading.findUniqueOrThrow({ where: { id: cancelInput.loadingId } });
+    assert.equal(cancelledLoading.status, 'CANCELLED');
+    assert.equal(cancelledLoading.cancellationReason, priorCancellationReason);
+    assert.equal((await db.accountingDispatchCandidate.findUniqueOrThrow({ where: { id: revision.candidate.id } })).status, 'WITHDRAWN');
+    const closedTurn = await db.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: originalTurn.id } });
+    assert.equal(closedTurn.status, 'VOIDED');
+    assert.equal(closedTurn.loadingId, cancelInput.loadingId, 'cancelled turn keeps its historical link');
+    const admission = await listGuardQueueAdmissionOptions(db);
+    assert.ok(admission.externalDrivers.some(driver => driver.id === driverId));
+    assert.ok(admission.externalVehicles.some(vehicle => vehicle.id === originalTurn.externalVehicleId));
+
     await finalizeCanonicalLoadingAllocations(db, { loadingId: fixture.loadings[1].id, actorId: fixture.actorId,
       effectiveAuthority: fixture.effectiveAuthority, idempotencyKey: `legacy-second-${database.runId}` });
     const loadSecond = () => db.logisticsAllocationRevision.findFirstOrThrow({ where: { loadingId: fixture.loadings[1].id },
@@ -118,6 +155,9 @@ async function run() {
     const exit = await gate.recordExit(exitInput);
     assert.equal((await gate.recordExit(exitInput)).id, exit.id);
     assert.equal((await db.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: secondTurn.id } })).status, 'EXIT_RECORDED');
+    await assert.rejects(() => cancelFinalizedOrdinaryLoading(db, { ...cancelInput, loadingId: fixture.loadings[1].id }), /لغو فقط پیش از ثبت خروج/);
+    assert.equal((await db.logisticsLoading.findUniqueOrThrow({ where: { id: fixture.loadings[1].id } })).status, 'FINALIZED');
+
     console.log('legacy waybill reconstruction local integration: PASS');
   } finally { await db.$disconnect(); await database.cleanup(); }
 }

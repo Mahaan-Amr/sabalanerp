@@ -121,7 +121,8 @@ export const getDispatchCaseTimeline = async (prisma: PrismaClient, queueTurnId:
   const audits = await prisma.dispatchLifecycleAudit.findMany({ where: { aggregateId: { in: aggregateIds } }, orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }] });
   for (const audit of audits) events.push({ id: `audit:${audit.id}`, station: 'AUDIT', eventType: audit.eventType,
     occurredAt: audit.recordedAt.toISOString(), actorId: audit.actorId, detail: { aggregateType: audit.aggregateType, ...(audit.payload as any) } });
+  const loadingCancelled = turn.events.some(event => event.eventType === 'FINALIZED_LOADING_CANCELLED');
   return { case: { id: turn.id, status: turn.status, loadingId: turn.loadingId, admittedAt: turn.admittedAt },
-    currentAction: turn.status === 'EXIT_RECORDED' || turn.status === 'CLOSED_WITHOUT_LOADING' ? 'COMPLETE' : 'REVIEW_CURRENT_STATION',
-    recovery: turn.status === 'VOIDED' ? 'FOLLOW_REPLACEMENT' : null, ...projectDispatchCaseTimeline(events, access) };
+    currentAction: loadingCancelled || turn.status === 'EXIT_RECORDED' || turn.status === 'CLOSED_WITHOUT_LOADING' ? 'COMPLETE' : 'REVIEW_CURRENT_STATION',
+    recovery: turn.status === 'VOIDED' && !loadingCancelled ? 'FOLLOW_REPLACEMENT' : null, ...projectDispatchCaseTimeline(events, access) };
 };

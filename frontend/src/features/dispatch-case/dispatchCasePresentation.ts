@@ -36,6 +36,8 @@ const eventLabels: Record<string, string> = {
   RESERVED_FOR_LOADING: "بارگیری برای راننده رزرو شد",
   RESERVATION_RELEASED: "رزرو بارگیری آزاد شد",
   LOADING_FINALIZED: "بارگیری نهایی شد",
+  FINALIZED_LOADING_CANCELLED: "بارگیری نهایی‌شده پیش از خروج لغو شد",
+  CANDIDATE_WITHDRAWN: "پروندهٔ صدور اسناد بسته شد",
   PHYSICAL_EXIT_RECORDED: "خروج فیزیکی از مجموعه ثبت شد",
   MANUAL_OUTAGE_EXIT_REGISTERED: "خروج زمان قطعی سامانه ثبت شد",
   ALLOCATION_FINALIZED: "تخصیص بار نهایی شد",

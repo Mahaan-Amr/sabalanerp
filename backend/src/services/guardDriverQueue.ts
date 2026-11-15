@@ -23,7 +23,7 @@ const activeAt = (at: Date) => ({ effectiveFrom: { lte: at }, OR: [{ effectiveTo
 type GuardQueueEventType = 'ADMITTED' | 'MADE_AVAILABLE_FOR_LOADING' | 'RESERVED_FOR_LOADING' | 'RESERVATION_RELEASED'
   | 'LOADING_FINALIZED' | 'PHYSICAL_EXIT_RECORDED' | 'MANUAL_OUTAGE_EXIT_REGISTERED'
   | 'RETURNED_TO_GATE_WAITING' | 'RESERVATION_RELEASED_FOR_DEPARTURE' | 'CLOSED_WITHOUT_LOADING'
-  | 'RESERVATION_RELEASED_FOR_VOID' | 'VOIDED';
+  | 'RESERVATION_RELEASED_FOR_VOID' | 'VOIDED' | 'FINALIZED_LOADING_CANCELLED';
 
 export class GuardQueueConflictError extends Error {}
 export class GuardQueueValidationError extends Error {}

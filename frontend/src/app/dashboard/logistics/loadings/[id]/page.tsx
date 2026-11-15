@@ -198,9 +198,13 @@ export default function LoadingDetailPage() {
   const canEditDraft =
     actionAvailability.EDIT_LOADING?.enabled === true &&
     loading.status === "DRAFT";
+  const canCompleteCancellation = loading.status === "CANCELLED" && Boolean(loading.finalizedAt) &&
+    loading.guardQueueTurns?.some((turn: { status: string }) => turn.status === "LOADING_FINALIZED");
+  const cancelLabel = canCompleteCancellation ? "تکمیل لغو و آزادسازی نوبت گارد" :
+    loading.status === "FINALIZED" ? "لغو بارگیری نهایی‌شده پیش از خروج" : "لغو بارگیری";
   const canCancel =
     actionAvailability.CANCEL_LOADING?.enabled === true &&
-    loading.status !== "CANCELLED";
+    (loading.status !== "CANCELLED" || canCompleteCancellation);
   const canCorrect =
     actionAvailability.CREATE_CORRECTION?.enabled === true &&
     loading.status === "FINALIZED";
@@ -228,7 +232,7 @@ export default function LoadingDetailPage() {
     ...(canCancel
       ? [
           {
-            label: "لغو بارگیری",
+            label: cancelLabel,
             icon: FaBan,
             tone: "danger" as const,
             onClick: () => {
@@ -327,7 +331,7 @@ export default function LoadingDetailPage() {
               title="این بارگیری هنوز پیش‌نویس است و مانده قرارداد را کاهش نمی‌دهد."
             />
           )}
-          {loading.status === "FINALIZED" && (
+          {(loading.status === "FINALIZED" || canCompleteCancellation) && (
             <ErpInlineState
               className="mt-4"
               kind="success"
@@ -521,7 +525,7 @@ export default function LoadingDetailPage() {
             setCancelReason("");
           }
         }}
-        title="لغو بارگیری"
+        title={cancelLabel}
         presentation="modal"
         scope="workspace"
         pending={saving}
@@ -557,6 +561,9 @@ export default function LoadingDetailPage() {
       >
         <div className="space-y-4">
           {sheetError}
+          {(loading.status === "FINALIZED" || canCompleteCancellation) && (
+            <ErpInlineState kind="stale" title="ابتدا اسناد صادرشده را در حسابداری ابطال کنید. پس از لغو، بار آزاد می‌شود و گارد می‌تواند راننده و خودروی واجد شرایط را دوباره پذیرش کند." />
+          )}
           <ErpField label="دلیل لغو" required>
             <ErpTextarea
               value={cancelReason}

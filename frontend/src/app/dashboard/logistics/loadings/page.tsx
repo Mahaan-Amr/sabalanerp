@@ -446,7 +446,7 @@ export default function LogisticsLoadingsPage() {
                             ...(canCancel(row)
                               ? [
                                   {
-                                    label: "لغو بارگیری",
+                                    label: row.status === "FINALIZED" ? "لغو بارگیری نهایی‌شده پیش از خروج" : "لغو بارگیری",
                                     icon: FaBan,
                                     tone: "danger" as const,
                                     disabled: acting,
@@ -546,6 +546,9 @@ export default function LogisticsLoadingsPage() {
             }
           />
           {error && <ErpInlineState kind="error" title={error} />}
+          {actionRequest?.action === "cancel" && actionRequest.targets.some(row => row.status === "FINALIZED") && (
+            <ErpInlineState kind="stale" title="برای لغو پیش از خروج، ابتدا فاکتور و بارنامه‌های صادرشده را در حسابداری ابطال کنید." />
+          )}
           {actionRequest?.action === "cancel" && (
             <ErpField label="دلیل لغو" required>
               <ErpTextarea

@@ -9,7 +9,7 @@ import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../mi
 import { requireFeatureAccess, requireNarrowFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
 import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
-import { createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
+import { cancelFinalizedOrdinaryLoading, createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { allocateLoadingNumber } from '../services/logisticsLoadingNumber';
 import { createPartnerCaseLoading, readPartnerCaseLoading, withLogisticsLoadingReadScope } from '../services/dispatchAllocation';
@@ -1205,17 +1205,32 @@ router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, error: 'Validation failed', details: errors.array() });
 
-    const loading = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id, sourceKind: 'SALES_CONTRACT' } });
+    const loading = await prisma.logisticsLoading.findUnique({ where: { id: req.params.id, sourceKind: 'SALES_CONTRACT' },
+      include: { _count: { select: { canonicalAllocationRevisions: true } } },
+    });
     if (!loading) return res.status(404).json({ success: false, error: 'Loading not found' });
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ success: false, error: 'دلیل لغو لازم است.' });
+    if (loading._count.canonicalAllocationRevisions > 0) {
+      const id = await cancelFinalizedOrdinaryLoading(prisma, { loadingId: loading.id, reason, actorId: req.user.id });
+      return res.json({ success: true, data: await loadLoading(id) });
+    }
     if (loading.status === CANCELLED_STATUS) return res.status(400).json({ success: false, error: 'Loading is already cancelled' });
 
-    const updated = await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx) => {
+      const changed = await tx.logisticsLoading.updateMany({
+        where: { id: loading.id, status: loading.status },
+        data: { status: CANCELLED_STATUS, cancelledAt: new Date(), cancelledBy: req.user.id, cancellationReason: reason },
+      });
+      if (changed.count !== 1) throw new DispatchAllocationConflictError('وضعیت بارگیری تغییر کرده است. صفحه را به‌روز کنید.');
       await releaseQueueTurn(tx, loading.id);
-      return tx.logisticsLoading.update({ where: { id: loading.id }, data: { status: CANCELLED_STATUS as any, cancelledAt: new Date(), cancelledBy: req.user.id, cancellationReason: req.body.reason } });
     });
 
-    res.json({ success: true, data: await loadLoading(updated.id) });
+    res.json({ success: true, data: await loadLoading(loading.id) });
   } catch (error: any) {
+    if (error instanceof DispatchAllocationConflictError || error instanceof PilotSafetyPauseError) {
+      return res.status(409).json({ success: false, error: error.message });
+    }
     console.error('Cancel loading error:', error);
     res.status(error.statusCode || 500).json({ success: false, error: error.message || 'Server error' });
   }

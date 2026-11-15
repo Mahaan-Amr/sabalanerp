@@ -21,6 +21,7 @@ import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvi
 import { resolveCurrentSabalanPlan, resolveInvoiceSabalanPlan } from './sabalanPlanEvidence';
 import { readAuthorizedPartnerAuditWitnesses } from '../../accountingReadProjection';
 import { batchAccountingCaseAuthority } from './batchCaseAuthority';
+import { groupPaymentsByReceivable } from './groupPaymentsByReceivable';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -144,8 +145,20 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     database.accountingTaxRecord.findMany({ where: { NOT: taxAccess }, select: { id: true } }),
   ]);
   const recordIds = hiddenRecords.map(row => row.id);
+  const hiddenCaseContractIds = cases.filter(row => !allowedInternalIds.includes(row.internalRecordId))
+    .map(row => row.customerContractId);
+  const [hiddenCorrections, hiddenFlags] = selection.focusedCaseId || selection.ordinaryOnly
+    ? [[], []] as const : await Promise.all([
+    database.accountingCorrectionRequest.findMany({ where: { OR: [
+      { recordId: { in: recordIds } }, { contractId: { in: hiddenCaseContractIds } },
+    ] }, select: { id: true } }),
+    database.accountingContractFlag.findMany({ where: { OR: [
+      { sourceFinancialRecordId: { in: recordIds } }, { contractId: { in: hiddenCaseContractIds } },
+    ] }, select: { id: true } }),
+  ]);
   const hiddenEntityIds = [...recordIds, ...hiddenReceivables.map(row => row.id),
-    ...hiddenPayments.map(row => row.id), ...hiddenTax.map(row => row.id)];
+    ...hiddenPayments.map(row => row.id), ...hiddenTax.map(row => row.id),
+    ...hiddenCorrections.map(row => row.id), ...hiddenFlags.map(row => row.id)];
   const auditAccess: Prisma.AccountingAuditLogWhereInput = { AND: [ordinaryContract,
     { OR: [{ recordId: null }, { recordId: { notIn: recordIds } }] },
     { OR: [{ entityId: null }, { entityId: { notIn: hiddenEntityIds } }] },
@@ -260,13 +273,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   ]);
   const invoiceByEntity = new Map(invoiceIds.map(id => [id, id]));
   const asOf = new Date();
-  const paymentsByReceivable = new Map<string, typeof ownedPayments>();
-  for (const payment of ownedPayments) {
-    if (!payment.receivableId) continue;
-    const payments = paymentsByReceivable.get(payment.receivableId) ?? [];
-    payments.push(payment);
-    paymentsByReceivable.set(payment.receivableId, payments);
-  }
+  const paymentsByReceivable = groupPaymentsByReceivable(ownedPayments);
   for (const receivable of ownedReceivables) {
     const preparation = preparationByInvoice.get(receivable.invoiceRecordId!)!;
     readPartnerReceivableEvidence(receivable, preparation);

@@ -12,6 +12,7 @@ import { PARTNER_REPLACEMENT_MODE, matchesPartnerStagedApproval } from './shared
 import { readPartnerRevisionProjections } from '../cases/lifecycle';
 import { readPartnerInvoiceSource } from './invoiceSource';
 import { validatePendingPartnerApproval } from './financialApproval';
+import { groupPaymentsByReceivable } from './groupPaymentsByReceivable';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -141,13 +142,7 @@ export async function readPartnerAccountingTrend(tx: Prisma.TransactionClient, i
   const payments = receivableIds.length ? await tx.accountingPaymentStatus.findMany({ where: {
     receivableId: { in: receivableIds }, createdAt: { lte: input.asOf },
   } }) : [];
-  const paymentsByReceivable = new Map<string, typeof payments>();
-  for (const payment of payments) {
-    if (!payment.receivableId) continue;
-    const rows = paymentsByReceivable.get(payment.receivableId) ?? [];
-    rows.push(payment);
-    paymentsByReceivable.set(payment.receivableId, rows);
-  }
+  const paymentsByReceivable = groupPaymentsByReceivable(payments);
   const currencies = [...new Set(published.map(({ invoice }) => invoice.currency))].sort();
   const series: Array<{ currency: string; points: Array<{ periodKey: string; label: string; startsAt: string; endsAt: string;
     invoiced: string; received: string; outstanding: string }> }> = [];

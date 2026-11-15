@@ -106,10 +106,13 @@ import { withAccountingReadScope, type AccountingReadActor, type AccountingReadS
 import { createAuditedPartnerAuthorization } from './partnerSales/authorization/audited';
 import { resolvePartnerAccountingScopedAuthority } from './partnerSales/authorization/centralAuthority';
 import { readPartnerSnapshot } from './partnerSales/authorization/readSnapshot';
+import { batchAccountingCaseAuthority } from './partnerSales/accounting/batchCaseAuthority';
+import { appendAuthorizationDecisions, type AuthorizationDecisionAudit } from './effectiveAuthorization/audit';
 import { partnerAccountingContractRow } from './accountingUnifiedContracts';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend, accountingCurrencyTotals } from './partnerSales/accounting/history';
 import { partnerTaxTransitions } from './partnerSales/accounting/taxPolicy';
-import { hasConflictingPartnerAccountingEvidence } from './partnerSales/accounting/provenance';
+import { hasConflictingPartnerAccountingEvidence, hasPartnerAccountingEvidence,
+  PARTNER_ACCOUNTING_MARKER_JSON_PATH } from './partnerSales/accounting/provenance';
 import { PartnerAccountingCommandError } from './partnerSales/accounting/errors';
 import { runPartnerAwareTaxMutation } from './partnerSales/accounting/taxCommands';
 import {
@@ -1123,30 +1126,77 @@ const attachAccountingCollections = async (contracts: any[], database: PrismaCli
     }),
     database.accountingReceivable.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, dueDate: true },
+      select: { id: true, contractId: true, invoiceRecordId: true, metadata: true, status: true, dueDate: true },
       orderBy: { dueDate: 'asc' }
     }),
     database.accountingPaymentStatus.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, amount: true },
+      select: { id: true, contractId: true, receivableId: true, metadata: true, status: true, amount: true },
       orderBy: [{ checkDueDate: 'asc' }, { createdAt: 'desc' }]
     }),
     database.accountingTaxRecord.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, submissionStatus: true },
+      select: { id: true, contractId: true, invoiceRecordId: true, metadata: true, submissionStatus: true },
       orderBy: { createdAt: 'desc' }
     }),
     database.accountingContractFlag.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true, severity: true },
+      select: { id: true, contractId: true, sourceFinancialRecordId: true, evidence: true,
+        status: true, severity: true },
       orderBy: { createdAt: 'desc' }
     }),
     database.accountingCorrectionRequest.findMany({
       where: { contractId: { in: contractIds } },
-      select: { contractId: true, status: true },
+      select: { id: true, contractId: true, recordId: true, status: true },
       orderBy: { createdAt: 'desc' }
     })
   ]);
+
+  // ContractId alone does not make an imported mixed-source child ordinary.
+  // Resolve only the referenced sources; scanning every ordinary row through
+  // Partner validation would make the reviewable list unbounded again.
+  const paymentReceivableIds = [...new Set(payments.flatMap(row => row.receivableId ? [row.receivableId] : []))];
+  const paymentReceivables = paymentReceivableIds.length
+    ? await database.accountingReceivable.findMany({ where: { id: { in: paymentReceivableIds } },
+      select: { id: true, contractId: true, invoiceRecordId: true, metadata: true } }) : [];
+  const allReceivables = [...receivables, ...paymentReceivables];
+  const financialIds = [...new Set([
+    ...records.map(row => row.id),
+    ...allReceivables.flatMap(row => row.invoiceRecordId ? [row.invoiceRecordId] : []),
+    ...taxRecords.flatMap(row => row.invoiceRecordId ? [row.invoiceRecordId] : []),
+    ...flags.flatMap(row => row.sourceFinancialRecordId ? [row.sourceFinancialRecordId] : []),
+    ...corrections.flatMap(row => row.recordId ? [row.recordId] : []),
+  ])];
+  const markerPath = Prisma.raw(`'${PARTNER_ACCOUNTING_MARKER_JSON_PATH}'::jsonpath`);
+  const [partnerSources, markedSources, partnerContractSources] = await Promise.all([
+    financialIds.length ? database.accountingFinancialRecord.findMany({ where: {
+      id: { in: financialIds }, sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
+    }, select: { id: true } }) : Promise.resolve([]),
+    financialIds.length ? database.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM accounting_financial_records
+      WHERE id IN (${Prisma.join(financialIds)})
+        AND (metadata @? ${markerPath}
+          OR CASE WHEN "sourceKind" = 'SALES_CONTRACT' AND "contractId" IS NOT NULL
+              AND "sourceId" = "contractId" AND "sourceSnapshot" -> 'partnerCaseId' = 'null'::jsonb
+            THEN ("sourceSnapshot" - 'partnerCaseId') @? ${markerPath}
+            ELSE "sourceSnapshot" @? ${markerPath} END)` : Promise.resolve([]),
+    financialIds.length ? database.$queryRaw<Array<{ id: string }>>`
+      SELECT f.id FROM accounting_financial_records AS f
+      JOIN sales_contracts AS owner ON owner.id = f."contractId"
+      WHERE f.id IN (${Prisma.join(financialIds)})
+        AND (owner."partnerCaseId" IS NOT NULL OR owner."partnerKind" IS NOT NULL)` : Promise.resolve([]),
+  ]);
+  const privateFinancialIds = new Set([...partnerSources, ...markedSources, ...partnerContractSources]
+    .map(row => row.id));
+  const parentContractIds = [...new Set(paymentReceivables.flatMap(row => row.contractId ? [row.contractId] : []))];
+  const parentContracts = parentContractIds.length
+    ? await database.salesContract.findMany({ where: { id: { in: parentContractIds } },
+      select: { id: true, partnerCaseId: true, partnerKind: true } }) : [];
+  const privateContractIds = new Set(parentContracts.filter(row => row.partnerCaseId || row.partnerKind).map(row => row.id));
+  const privateReceivableIds = new Set(allReceivables.filter(row =>
+    Boolean(row.invoiceRecordId && privateFinancialIds.has(row.invoiceRecordId)) ||
+    Boolean(row.contractId && privateContractIds.has(row.contractId)) ||
+    hasPartnerAccountingEvidence(row.metadata)).map(row => row.id));
 
   const group = <T extends { contractId: string | null }>(rows: T[]) => {
     const grouped = new Map<string, T[]>();
@@ -1158,8 +1208,17 @@ const attachAccountingCollections = async (contracts: any[], database: PrismaCli
     }
     return grouped;
   };
-  const byContract = { records: group(records), receivables: group(receivables), payments: group(payments),
-    taxes: group(taxRecords), flags: group(flags), corrections: group(corrections) };
+  const byContract = {
+    records: group(records.filter(row => !privateFinancialIds.has(row.id))),
+    receivables: group(receivables.filter(row => !privateReceivableIds.has(row.id))),
+    payments: group(payments.filter(row => !hasPartnerAccountingEvidence(row.metadata) &&
+      !(row.receivableId && privateReceivableIds.has(row.receivableId)))),
+    taxes: group(taxRecords.filter(row => !hasPartnerAccountingEvidence(row.metadata) &&
+      !(row.invoiceRecordId && privateFinancialIds.has(row.invoiceRecordId)))),
+    flags: group(flags.filter(row => !hasPartnerAccountingEvidence(row.evidence) &&
+      !(row.sourceFinancialRecordId && privateFinancialIds.has(row.sourceFinancialRecordId)))),
+    corrections: group(corrections.filter(row => !(row.recordId && privateFinancialIds.has(row.recordId)))),
+  };
   return contracts.map((contract) => ({
     ...contract,
     accountingRecords: byContract.records.get(contract.id) ?? [],
@@ -1697,75 +1756,66 @@ const compactDashboardWorkspace = (workspace: Awaited<ReturnType<typeof getAccou
 
 const dashboardRevision = (parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 
-/** Fixed aggregate probes avoid workspace, trend and Partner evidence hydration.
- * The actor and its authorized Case set are bound into both private revisions. */
+/** Transactional write-time versions avoid scans and timestamp gaps. The
+ * authorized Case set binds private versions to the current actor. */
 const getDashboardRevisions = async (database: Prisma.TransactionClient, actorId: string,
   allowedInternalIds: string[], query: any, range: unknown, now: Date) => {
-  const [contracts, partnerCases, records, receivables, payments, taxes, corrections, audits] = await Promise.all([
-    database.salesContract.aggregate({ where: { partnerCaseId: null, partnerKind: null },
-      _count: { _all: true }, _max: { updatedAt: true } }),
+  const scopes = ['ordinary:workspace', 'ordinary:trend',
+    ...allowedInternalIds.flatMap(id => [`partner:${id}:workspace`, `partner:${id}:trend`])];
+  const [versions, partnerCases] = await Promise.all([
+    database.$queryRaw<Array<{ scope: string; bucket: number; revision: bigint }>>`
+      SELECT scope, bucket, revision FROM accounting_dashboard_change_versions
+      WHERE scope IN (${Prisma.join(scopes)})
+      ORDER BY scope, bucket`,
     database.partnerSaleCase.findMany({ where: { internalRecordId: { in: allowedInternalIds } },
       select: { id: true, headRevision: true, stateRevision: true, state: true }, orderBy: { id: 'asc' } }),
-    database.accountingFinancialRecord.aggregate({ where: { OR: [
-      { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } },
-      { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE, sourceId: { in: allowedInternalIds } },
-    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
-    database.accountingReceivable.aggregate({ where: { OR: [
-      { invoiceRecordId: null },
-      { invoiceRecord: { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } } },
-      { invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
-        sourceId: { in: allowedInternalIds } } },
-    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
-    database.accountingPaymentStatus.aggregate({ where: { OR: [
-      { receivableId: null },
-      { receivable: { invoiceRecordId: null } },
-      { receivable: { invoiceRecord: { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } } } },
-      { receivable: { invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
-        sourceId: { in: allowedInternalIds } } } },
-    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
-    database.accountingTaxRecord.aggregate({ where: { OR: [
-      { invoiceRecordId: null },
-      { invoiceRecord: { sourceKind: { not: PARTNER_INTERNAL_ACCOUNTING_SOURCE } } },
-      { invoiceRecord: { sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
-        sourceId: { in: allowedInternalIds } } },
-    ] }, _count: { _all: true }, _max: { updatedAt: true } }),
-    database.accountingCorrectionRequest.aggregate({ _count: { _all: true }, _max: { updatedAt: true } }),
-    database.accountingAuditLog.aggregate({ _count: { _all: true }, _max: { createdAt: true } }),
   ]);
+  const versionByScope = new Map<string, Array<[number, string]>>();
+  for (const row of versions) {
+    const buckets = versionByScope.get(row.scope) ?? [];
+    buckets.push([row.bucket, row.revision.toString()]);
+    versionByScope.set(row.scope, buckets);
+  }
+  const version = (scope: string) => versionByScope.get(scope) ?? [];
   const day = tehranAccountingDayKey(now);
   const common = [actorId, allowedInternalIds, day];
-  const financial = [records, receivables, payments, audits];
+  const workspaceVersions = ['ordinary:workspace',
+    ...allowedInternalIds.map(id => `partner:${id}:workspace`)].map(scope => [scope, version(scope)]);
+  const trendVersions = ['ordinary:trend',
+    ...allowedInternalIds.map(id => `partner:${id}:trend`)].map(scope => [scope, version(scope)]);
   return {
     access: dashboardRevision([actorId, allowedInternalIds]),
-    workspace: dashboardRevision([...common, query.due ?? '', query.deadlineType ?? '', contracts,
-      partnerCases, ...financial, taxes, corrections]),
-    trend: dashboardRevision([...common, range, ...financial]),
+    workspace: dashboardRevision([...common, query.due ?? '', query.deadlineType ?? '',
+      partnerCases, workspaceVersions]),
+    trend: dashboardRevision([...common, range, partnerCases, trendVersions]),
   };
 };
 
 export const getAccountingDashboardChange = async (query: any = {}, actor: AccountingReadActor) => {
   const check = async (database: Prisma.TransactionClient) => {
     const allowedInternalIds: string[] = [];
-    if (query.partnerIncluded === 'true') {
+    {
       const cases = await database.partnerSaleCase.findMany({ where: { internalRecordId: { not: null },
         customerContractId: { not: null } }, select: { id: true, internalRecordId: true }, orderBy: { id: 'asc' } });
       let actorAuthority: ReturnType<typeof resolvePartnerAccountingScopedAuthority> | undefined;
       const readActorAuthority: typeof resolvePartnerAccountingScopedAuthority = (tx, input) =>
         actorAuthority ??= resolvePartnerAccountingScopedAuthority(tx, input);
+      const decisions: AuthorizationDecisionAudit[] = [];
+      const evidenceSource = await batchAccountingCaseAuthority(database, actor.userId, cases.map(row => row.id));
       const authority = createAuditedPartnerAuthorization(database,
         { actorId: actor.userId, purpose: 'ACCOUNTING', channel: 'LIST' },
-        { correlationId: randomUUID(), reason: 'بررسی تغییر دسترسی داشبورد حسابداری' }, undefined, readActorAuthority);
+        { correlationId: randomUUID(), reason: 'بررسی تغییر دسترسی داشبورد حسابداری' },
+        undefined, readActorAuthority, async decision => { decisions.push(decision); }, evidenceSource);
       for (const row of cases) {
         if (row.internalRecordId && (await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: row.id })).ok) {
           allowedInternalIds.push(row.internalRecordId);
         }
       }
+      await appendAuthorizationDecisions(database, decisions);
     }
     return getDashboardRevisions(database, actor.userId, allowedInternalIds, query, query.range ?? '6m', new Date());
   };
-  const revisions = query.partnerIncluded === 'true'
-    ? await readPartnerSnapshot(prisma, check, { multiRootAuthority: true })
-    : await prisma.$transaction(check, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 10_000 });
+  const revisions = await readPartnerSnapshot(prisma, check, { multiRootAuthority: true });
   return { revisions,
     accessChanged: query.accessRevision !== revisions.access,
     workspaceChanged: query.workspaceRevision !== revisions.workspace,
@@ -1774,10 +1824,11 @@ export const getAccountingDashboardChange = async (query: any = {}, actor: Accou
 
 export const getAccountingDashboardWorkspace = async (query: any = {}, actor: AccountingReadActor) => {
   return withAccountingReadScope(prisma, actor, async scope => {
-    const revisions = await getDashboardRevisions(scope.database, actor.userId,
-      scope.partnerAccountingIncluded ? scope.authorizedPartnerInternalIds : [], query, query.range ?? '6m', new Date());
+    const revisionsPromise = getDashboardRevisions(scope.database, actor.userId,
+      scope.authorizedPartnerInternalIds, query, query.range ?? '6m', new Date());
     const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope);
     void contracts.catch(() => {});
+    const revisions = await revisionsPromise;
     return { workspace: compactDashboardWorkspace(await getAccountingWorkspaceInScope(scope, query, contracts, true)),
       revisions };
   });
@@ -1790,10 +1841,11 @@ export const getAccountingDashboard = async (query: any = {}, requestedRange: un
   let workspaceCompleted = false;
   try {
     return await withAccountingReadScope(prisma, actor, async scope => {
-      const revisions = actor ? await getDashboardRevisions(scope.database, actor.userId,
-        scope.partnerAccountingIncluded ? scope.authorizedPartnerInternalIds : [], query, requestedRange, now) : undefined;
+      const revisionsPromise = actor ? getDashboardRevisions(scope.database, actor.userId,
+        scope.authorizedPartnerInternalIds, query, requestedRange, now) : undefined;
       const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope);
       void contracts.catch(() => {});
+      const revisions = await revisionsPromise;
       const workspace = await getAccountingWorkspaceInScope(scope, query, contracts, true);
       workspaceCompleted = true;
       try {

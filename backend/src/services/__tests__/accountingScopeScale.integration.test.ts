@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { createPartnerLifecycleDatabase } from './partnerCaseLifecycleDatabase';
 import { seedHistoricalAccountingRead } from './partnerAccountingHistoricalReadSeed';
 
-for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-case decisions with 35 Partner cases for ${role}`, async () => {
+for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-case decisions with 43 Partner cases for ${role}`, async () => {
   const source = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
   assert.equal(source.hostname, '127.0.0.1');
   assert.equal(source.port, '55432');
@@ -20,7 +20,7 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
     }
     await database.$transaction(async tx => {
       await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
-      for (let index = 0; index < 34; index++) {
+      for (let index = 0; index < 42; index++) {
         const suffix = `scale-${index}`;
         await tx.partnerSaleCase.create({ data: { id: suffix, caseNumber: suffix,
           profileId: fixture.row.profileId, customerId: 'historical-customer', internalRecordId: `internal-${suffix}`,
@@ -35,6 +35,17 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
           partnerKind: 'PARTNER_CUSTOMER', partnerCaseId: suffix, partnerRevision: 1,
           partnerIntegrityHash: fixture.row.integrityHash } });
       }
+      await tx.salesContract.createMany({ data: Array.from({ length: 935 }, (_, index) => ({
+        id: `ordinary-scale-${index}`, contractNumber: `ordinary-scale-number-${index}`,
+        title: 'Fixture', titlePersian: 'آزمون', content: 'Fixture', customerId: 'historical-customer',
+        departmentId: 'historical-department', createdBy: 'historical-admin',
+        responsibleSellerId: 'historical-admin',
+      })) });
+      if (role === 'USER') await tx.contractLifecycleRequest.create({ data: {
+        contractId: 'contract-scale-0', contractNumberSnapshot: 'number-scale-0',
+        kind: 'DELETE', status: 'EXECUTED', reason: 'Fixture deletion',
+        requestedBy: 'historical-admin', decidedBy: 'historical-admin', executedAt: new Date(),
+      } });
       await tx.accountingAuditLog.createMany({ data: Array.from({ length: 30 }, (_, index) => ({
         id: `heavy-audit-${index}`, action: 'SCALE_AUDIT_FIXTURE', actorId: 'historical-admin',
         recordId: 'historical-invoice', afterState: { partnerCaseId: fixture.row.id, unrelated: 'x'.repeat(100_000) },
@@ -43,11 +54,13 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
     const script = `
       import assert from 'node:assert/strict';
       import { prisma } from './backend/src/lib/prisma';
+      import { PrismaClient } from './backend/node_modules/@prisma/client/index.js';
       import { withAccountingReadScope } from './backend/src/services/partnerSales/accounting/readScope';
       import { readPartnerInternalDocument } from './backend/src/services/partnerSales/accounting/internalDocument';
       import { readCustomerWorkspace } from './backend/src/services/accountingCustomerWorkspace';
       (async () => { try {
-        const expectedIds = new Set([${JSON.stringify(fixture.row.id)}, ...Array.from({ length: 34 }, (_, index) => 'scale-' + index)]);
+        const expectedIds = new Set([${JSON.stringify(fixture.row.id)}, ...Array.from({ length: 42 }, (_, index) => 'scale-' + index)]);
+        const deletedId = '${role}' === 'USER' ? 'scale-0' : null;
         const read = () => withAccountingReadScope(prisma, { userId: 'historical-admin' }, async scope => {
           const visible = await scope.database.accountingFinancialRecord.findMany({ where: scope.financial(), select: { id: true } });
           assert.ok(visible.some(row => row.id === 'historical-invoice'));
@@ -59,22 +72,29 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
           const groups = new Map();
           for (const event of events) {
             assert.equal(event.actorId, 'historical-admin'); assert.equal(event.rootKind, 'CASE');
-            assert.equal(event.allowed, true); assert.equal(event.code, 'ALLOWED');
+            if (event.rootId === deletedId) {
+              assert.equal(event.action, 'ACCOUNTING_READ'); assert.equal(event.allowed, false);
+            } else {
+              assert.equal(event.allowed, true); assert.equal(event.code, 'ALLOWED');
+            }
             assert.ok(event.authorizationRevision > 0 && event.evaluatedAt instanceof Date);
             const group = groups.get(event.correlationId) ?? []; group.push(event); groups.set(event.correlationId, group);
           }
           assert.equal(groups.size, expectedGroups);
           for (const group of groups.values()) {
-            assert.equal(group.length, 70);
+            assert.equal(group.length, deletedId ? 85 : 86);
             for (const action of ['ACCOUNTING_READ', 'ACCOUNTING_WRITE']) {
               const ids = group.filter(event => event.action === action).map(event => event.rootId);
-              assert.equal(ids.length, 35); assert.deepEqual(new Set(ids), expectedIds);
+              assert.equal(ids.length, action === 'ACCOUNTING_WRITE' && deletedId ? 42 : 43);
+              assert.deepEqual(new Set(ids), action === 'ACCOUNTING_WRITE' && deletedId
+                ? new Set([...expectedIds].filter(id => id !== deletedId)) : expectedIds);
             }
           }
         };
         const started = performance.now();
         await read();
         const singleMs = Math.round(performance.now() - started);
+        assert.ok(singleMs < 1000, '43-Case Accounting scope should finish within the local read budget; took ' + singleMs + ' ms');
         await checkAudits(1);
         const concurrentStarted = performance.now();
         await Promise.all([read(), read()]);
@@ -90,7 +110,60 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
         assert.equal(customer.customerId, 'historical-customer');
         const afterCustomer = await prisma.effectiveAuthorizationAudit.count({ where: { purpose: 'ACCOUNTING', channel: 'LIST' } });
         assert.equal(afterCustomer, beforeCustomer, 'ordinary customer statement must not authorize unrelated Partner Cases');
-        console.log(JSON.stringify({ role: '${role}', cases: 35, singleMs, twoConcurrentMs }));
+        if ('${role}' === 'USER') {
+          const writer = new PrismaClient();
+          try {
+            let releaseCaseRead;
+            let enteredCaseRead;
+            const caseEntered = new Promise(resolve => { enteredCaseRead = resolve; });
+            const caseRelease = new Promise(resolve => { releaseCaseRead = resolve; });
+            const caseRead = withAccountingReadScope(prisma, { userId: 'historical-admin' }, async scope => {
+              const current = await scope.database.partnerProfile.findUnique({ where: { id: '${fixture.row.profileId}' },
+                select: { state: true } });
+              enteredCaseRead(); await caseRelease; return current?.state;
+            });
+            await caseEntered;
+            let mutated = false;
+            const mutate = writer.partnerProfile.update({ where: { id: '${fixture.row.profileId}' },
+              data: { state: 'SUSPENDED', revision: { increment: 1 } } }).then(() => { mutated = true; });
+            await new Promise(resolve => setTimeout(resolve, 40));
+            assert.equal(mutated, false, 'profile mutation must wait for the authorized snapshot');
+            releaseCaseRead();
+            assert.equal(await caseRead, 'ACTIVE');
+            await mutate;
+            assert.equal(await withAccountingReadScope(prisma, { userId: 'historical-admin' }, async scope =>
+              (await scope.database.partnerProfile.findUnique({ where: { id: '${fixture.row.profileId}' },
+                select: { state: true } }))?.state), 'SUSPENDED');
+            let releaseRead;
+            let enteredRead;
+            const entered = new Promise(resolve => { enteredRead = resolve; });
+            const release = new Promise(resolve => { releaseRead = resolve; });
+            const inFlight = withAccountingReadScope(prisma, { userId: 'historical-admin' }, async scope => {
+              const visible = await scope.database.accountingFinancialRecord.count({ where: scope.financial() });
+              enteredRead(); await release; return visible;
+            });
+            await entered;
+            let revoked = false;
+            const revoke = writer.user.update({ where: { id: 'historical-admin' }, data: { isActive: false } })
+              .then(() => { revoked = true; });
+            await new Promise(resolve => setTimeout(resolve, 40));
+            assert.equal(revoked, false, 'actor revocation must wait for the authorized snapshot');
+            releaseRead();
+            assert.ok(await inFlight > 0);
+            await revoke;
+            await withAccountingReadScope(prisma, { userId: 'historical-admin' }, async scope => {
+              assert.equal(await scope.database.accountingFinancialRecord.count({ where: scope.financial({
+                sourceKind: 'PARTNER_INTERNAL_RECORD',
+              }) }), 0, 'new snapshot must exclude revoked Partner evidence');
+            });
+            const denied = await prisma.effectiveAuthorizationAudit.findMany({ where: {
+              actorId: 'historical-admin', purpose: 'ACCOUNTING', channel: 'LIST', allowed: false,
+            }, orderBy: { evaluatedAt: 'desc' }, take: 44 });
+            assert.ok(denied.length >= 43);
+            assert.ok(denied.some(event => event.rootId === 'historical-case'));
+          } finally { await writer.$disconnect(); }
+        }
+        console.log(JSON.stringify({ role: '${role}', cases: 43, ordinary: 935, singleMs, twoConcurrentMs }));
       } finally { await prisma.$disconnect(); } })().catch(error => { console.error(error); process.exitCode = 1; });`;
     const output = execFileSync(process.execPath, [path.resolve('backend/node_modules/tsx/dist/cli.mjs'), '-e', script], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 90_000, env: { ...process.env, DATABASE_URL: temporary.databaseUrl },

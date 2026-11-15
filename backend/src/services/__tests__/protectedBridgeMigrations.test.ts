@@ -36,13 +36,14 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261104150000_purchasing_duty_optional_deadline',
     '20261107000100_restart_dispatch_waybill_sequence_at_zero',
     '20261107120000_legacy_waybill_reconstructions',
+    '20261115131000_accounting_private_marker_index',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
   assert.deepEqual(release.map(row => row.name), names);
   assert.ok(release.every(row => row.statements.length > 0));
   assert.ok(release.flatMap(row => row.statements).every(sql => !/^\s*(?:BEGIN|COMMIT)\s*;?\s*$/i.test(sql)));
-  assert.ok(!release.at(-2)!.statements.join(' ').includes('setval('));
+  assert.ok(!release.at(-3)!.statements.join(' ').includes('setval('));
   assert.throws(() => compileProtectedCurrentRelease(files.slice(1)), /CURRENT_RELEASE_SET_UNPROVEN/);
   const changed = files.map(([name, bytes], index) => index === 3 ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
   assert.throws(() => compileProtectedCurrentRelease(changed), /SQL_IDENTITY_MISMATCH/);

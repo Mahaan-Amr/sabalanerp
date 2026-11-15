@@ -26,6 +26,7 @@ const currentRelease = {
   '20261104150000_purchasing_duty_optional_deadline': ['54fd7acd7a0cd15dc15a77a1f03a6c25534eefc2202ff6d59d1d9769320e1646', 2],
   '20261107000100_restart_dispatch_waybill_sequence_at_zero': ['0e50811c771006cb5142c9f5430942d0e360f2d976232925bbf2ff1600802541', 4],
   '20261107120000_legacy_waybill_reconstructions': ['4bd5fa92a5693fc8690ee99e490db239792377ebdb9e84eb7f7a7b5f31496972', 2],
+  '20261115131000_accounting_private_marker_index': ['31ab2f1cd447819b9f1863337c230fe1c23959eb01e260232f54e044d0bdba30', 1],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 

@@ -76,9 +76,12 @@ test('complete dashboard uses the accounting view permission and passes one acto
 test('dashboard change check is protected, actor scoped, and never cacheable', async () => {
   const workspace = route('/workspace');
   const change = route('/dashboard/change');
+  const dashboardWorkspace = route('/dashboard/workspace');
   assert.ok(workspace);
   assert.ok(change);
+  assert.ok(dashboardWorkspace);
   assert.deepEqual(change.stack.slice(0, 3).map((layer) => layer.handle), workspace.stack.slice(0, 3).map((layer) => layer.handle));
+  assert.deepEqual(dashboardWorkspace.stack.slice(0, 3).map((layer) => layer.handle), workspace.stack.slice(0, 3).map((layer) => layer.handle));
   let requested: unknown;
   let responseBody: unknown;
   let cacheControl: unknown;

@@ -6,6 +6,7 @@ import {
   getAccountingDashboardChange,
   getAccountingFinancialTrend,
   getAccountingWorkspace,
+  listAccountingContracts,
 } from '../accountingService';
 
 test('complete Accounting dashboard preserves authorized workspace and fresh chart results', async () => {
@@ -18,8 +19,20 @@ test('complete Accounting dashboard preserves authorized workspace and fresh cha
 
   assert.equal(dashboard.trendError, false);
   assert.deepEqual(dashboard.workspace.commandCenter, workspace.commandCenter);
+  const reviewable = await listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, { userId: actor.id });
+  assert.equal(dashboard.workspace.commandCenter.reviewableContracts.count, reviewable.total,
+    'dashboard reviewable count must match the complete authorized ordinary and Partner list');
   assert.deepEqual(dashboard.workspace.deadlines.typeCounts, workspace.deadlines.typeCounts);
   assert.deepEqual(dashboard.trend, trend);
+  assert.ok(dashboard.revisions);
+  const freshCheck = await getAccountingDashboardChange({ range: '3m',
+    partnerIncluded: String(dashboard.workspace.partnerAccountingIncluded),
+    accessRevision: dashboard.revisions.access,
+    workspaceRevision: dashboard.revisions.workspace,
+    trendRevision: dashboard.revisions.trend }, { userId: actor.id });
+  assert.equal(freshCheck.accessChanged, false);
+  assert.equal(freshCheck.workspaceChanged, false);
+  assert.equal(freshCheck.trendChanged, false);
   for (const row of dashboard.workspace.queues.invoiceCandidates) {
     assert.equal('sourceSnapshot' in row, false, 'dashboard summaries must not expose complete invoice snapshots');
   }

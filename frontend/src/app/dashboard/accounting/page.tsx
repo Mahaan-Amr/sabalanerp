@@ -55,6 +55,7 @@ export default function AccountingDashboardPage() {
   const [trendRange, setTrendRange] = useState<FinancialTrendRange>('6m');
   const [financialTrend, setFinancialTrend] = useState<FinancialTrendState>(pendingFinancialTrend);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [checkingDashboard, setCheckingDashboard] = useState(false);
   const hrRequestGeneration = useRef(0);
   const workspaceRequestGeneration = useRef(0);
   const trendRequestGeneration = useRef(0);
@@ -88,6 +89,7 @@ export default function AccountingDashboardPage() {
     dispatchWorkspace({ type: 'reset' });
     setFinancialTrend(pendingFinancialTrend());
     setHrMetrics(clearHrHiringMetrics('unavailable'));
+    setCheckingDashboard(false);
     setAccessDenied(true);
   }, []);
 
@@ -190,6 +192,7 @@ export default function AccountingDashboardPage() {
     if (checkInFlightRef.current || dashboardOwnerRef.current !== ownerId || accessDenied ||
         !workspaceState.data) return;
     checkInFlightRef.current = true;
+    setCheckingDashboard(true);
     try {
       const response = await accountingAPI.getDashboardChange({ ...dashboardParams(),
         accessRevision: dashboardRevisionsRef.current.access,
@@ -210,6 +213,7 @@ export default function AccountingDashboardPage() {
       }
     } finally {
       checkInFlightRef.current = false;
+      setCheckingDashboard(false);
     }
   }, [accessDenied, clearDenied, dashboardParams, loadFinancialTrend, loadWorkspace, workspaceState.data]);
 
@@ -219,6 +223,7 @@ export default function AccountingDashboardPage() {
       dashboardOwnerRef.current = null;
       dashboardRevisionsRef.current = {};
       setAccessDenied(false);
+      setCheckingDashboard(false);
       workspaceRequestGeneration.current += 1;
       trendRequestGeneration.current += 1;
       dispatchWorkspace({ type: 'reset' });
@@ -229,6 +234,7 @@ export default function AccountingDashboardPage() {
       dashboardOwnerRef.current = currentUserId;
       dashboardRevisionsRef.current = {};
       setAccessDenied(false);
+      setCheckingDashboard(false);
       workspaceRequestGeneration.current += 1;
       trendRequestGeneration.current += 1;
       dispatchWorkspace({ type: 'reset' });
@@ -279,6 +285,7 @@ export default function AccountingDashboardPage() {
     <AccountingFinancialTrend
       range={trendRange}
       state={financialTrend}
+      checking={checkingDashboard}
       onRangeChange={(range) => {
         trendRangeRef.current = range;
         setTrendRange(range);

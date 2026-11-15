@@ -104,6 +104,7 @@ import {
 import { executePartnerCollectionAction } from './partnerSales/accounting/paymentCommands';
 import { withAccountingReadScope, type AccountingReadActor, type AccountingReadScope } from './partnerSales/accounting/readScope';
 import { createAuditedPartnerAuthorization } from './partnerSales/authorization/audited';
+import { resolvePartnerAccountingScopedAuthority } from './partnerSales/authorization/centralAuthority';
 import { readPartnerSnapshot } from './partnerSales/authorization/readSnapshot';
 import { partnerAccountingContractRow } from './accountingUnifiedContracts';
 import { readPartnerOutstandingHistory, readPartnerAccountingTrend, accountingCurrencyTotals } from './partnerSales/accounting/history';
@@ -1185,7 +1186,11 @@ export const buildAccountingSummaryForContracts = async (contracts: any[]) => {
 const accountingAmountInRials = (amount: string, currency?: string) =>
   new Prisma.Decimal(amount).mul(currency === 'IRT' ? 10 : 1);
 
-export const listAccountingContracts = async (query: ListContractsQuery = {}, actor?: AccountingReadActor) => {
+export const listAccountingContracts = async (query: ListContractsQuery = {}, actor?: AccountingReadActor,
+  existingScope?: AccountingReadScope) => {
+  if (existingScope && existingScope.actorId !== (actor?.userId ?? null)) {
+    throw new Error('Accounting read scope actor mismatch');
+  }
   const page = Math.max(Number(query.page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(query.pageSize) || DEFAULT_PAGE_SIZE, 1), 100);
   const skip = (page - 1) * pageSize;
@@ -1244,10 +1249,7 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
     : (query.sourceKind === 'PARTNER_INTERNAL_RECORD' ? Promise.resolve([]) : prisma.salesContract.findMany({
       where, select: accountingContractListSelect, orderBy: stableOrderBy,
     })).then(rows => ({ rows, prepared: null, aggregate: null }));
-  const [ordinary, settings, partnerSources] = await Promise.all([
-    ordinaryRead,
-    getDefaultSettings(),
-    actor ? withAccountingReadScope(prisma, actor, async scope => {
+  const readPartnerSources = async (scope: AccountingReadScope, actorId: string) => {
       const records = await scope.database.accountingFinancialRecord.findMany({
         where: scope.financial({ sourceKind: PARTNER_INTERNAL_ACCOUNTING_SOURCE,
           kind: FinancialRecordKind.INVOICE_CANDIDATE, contractId: null, customerId: null }),
@@ -1266,13 +1268,19 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
           item.recordId === record.id).length }));
       const reviewablePartner = query.view === 'reviewable';
       const existingInternalIds = contextualized.flatMap(record => record.sourceId ? [record.sourceId] : []);
-      const preparations = await listPartnerPreparationDocumentsInScope(scope, actor.userId, lifecycleView,
+      const preparations = await listPartnerPreparationDocumentsInScope(scope, actorId, lifecycleView,
         reviewablePartner ? { existingInternalIds } : undefined);
       const preparationOverlays = reviewablePartner
         ? await readPartnerPreparationOverlaysInScope(scope, existingInternalIds)
         : new Map();
       return { partnerRecords, preparations, preparationOverlays };
-    }) : Promise.resolve({ partnerRecords: [], preparations: [], preparationOverlays: new Map() }),
+  };
+  const [ordinary, settings, partnerSources] = await Promise.all([
+    ordinaryRead,
+    getDefaultSettings(),
+    actor ? (existingScope ? readPartnerSources(existingScope, actor.userId)
+      : withAccountingReadScope(prisma, actor, scope => readPartnerSources(scope, actor.userId)))
+      : Promise.resolve({ partnerRecords: [], preparations: [], preparationOverlays: new Map() }),
   ]);
   const rawContracts = ordinary.rows;
   let ordinaryAggregate = ordinary.aggregate;
@@ -1483,12 +1491,13 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
 };
 
 const getAccountingWorkspaceInScope = async (scope: AccountingReadScope, query: any = {},
-  preloadedContracts?: Promise<Awaited<ReturnType<typeof listAccountingContracts>>>, compact = false) => {
+  preloadedContracts?: Promise<Awaited<ReturnType<typeof listAccountingContracts>>>, compact = false,
+  actor?: AccountingReadActor) => {
   const prisma = scope.database;
   const now = new Date();
   const [period, contractResponse, records, receivables, payments, taxRecords, corrections, auditLogs] = await Promise.all([
     getOrCreateCurrentPeriod(),
-    preloadedContracts || listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }),
+    preloadedContracts || listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope),
     prisma.accountingFinancialRecord.findMany({ where: scope.financial(), orderBy: { createdAt: 'desc' }, take: 8,
       ...(compact ? { select: accountingFinancialRegisterSelect } : {}) }),
     prisma.accountingReceivable.findMany({ where: scope.receivable(), orderBy: { dueDate: 'asc' }, take: 8 }),
@@ -1616,7 +1625,7 @@ const getAccountingWorkspaceInScope = async (scope: AccountingReadScope, query: 
 };
 
 export const getAccountingWorkspace = async (query: any = {}, actor?: AccountingReadActor) =>
-  withAccountingReadScope(prisma, actor, scope => getAccountingWorkspaceInScope(scope, query));
+  withAccountingReadScope(prisma, actor, scope => getAccountingWorkspaceInScope(scope, query, undefined, false, actor));
 
 const getAccountingFinancialTrendInScope = async (scope: AccountingReadScope, requestedRange: unknown, now: Date) => {
   const prisma = scope.database;
@@ -1740,9 +1749,12 @@ export const getAccountingDashboardChange = async (query: any = {}, actor: Accou
     if (query.partnerIncluded === 'true') {
       const cases = await database.partnerSaleCase.findMany({ where: { internalRecordId: { not: null },
         customerContractId: { not: null } }, select: { id: true, internalRecordId: true }, orderBy: { id: 'asc' } });
+      let actorAuthority: ReturnType<typeof resolvePartnerAccountingScopedAuthority> | undefined;
+      const readActorAuthority: typeof resolvePartnerAccountingScopedAuthority = (tx, input) =>
+        actorAuthority ??= resolvePartnerAccountingScopedAuthority(tx, input);
       const authority = createAuditedPartnerAuthorization(database,
         { actorId: actor.userId, purpose: 'ACCOUNTING', channel: 'LIST' },
-        { correlationId: randomUUID(), reason: 'بررسی تغییر دسترسی داشبورد حسابداری' });
+        { correlationId: randomUUID(), reason: 'بررسی تغییر دسترسی داشبورد حسابداری' }, undefined, readActorAuthority);
       for (const row of cases) {
         if (row.internalRecordId && (await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: row.id })).ok) {
           allowedInternalIds.push(row.internalRecordId);
@@ -1764,7 +1776,7 @@ export const getAccountingDashboardWorkspace = async (query: any = {}, actor: Ac
   return withAccountingReadScope(prisma, actor, async scope => {
     const revisions = await getDashboardRevisions(scope.database, actor.userId,
       scope.partnerAccountingIncluded ? scope.authorizedPartnerInternalIds : [], query, query.range ?? '6m', new Date());
-    const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 });
+    const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope);
     void contracts.catch(() => {});
     return { workspace: compactDashboardWorkspace(await getAccountingWorkspaceInScope(scope, query, contracts, true)),
       revisions };
@@ -1780,7 +1792,7 @@ export const getAccountingDashboard = async (query: any = {}, requestedRange: un
     return await withAccountingReadScope(prisma, actor, async scope => {
       const revisions = actor ? await getDashboardRevisions(scope.database, actor.userId,
         scope.partnerAccountingIncluded ? scope.authorizedPartnerInternalIds : [], query, requestedRange, now) : undefined;
-      const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 });
+      const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope);
       void contracts.catch(() => {});
       const workspace = await getAccountingWorkspaceInScope(scope, query, contracts, true);
       workspaceCompleted = true;

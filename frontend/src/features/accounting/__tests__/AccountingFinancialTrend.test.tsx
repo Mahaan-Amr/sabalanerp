@@ -54,6 +54,15 @@ test('trend presentation exposes range switching, Toman values, and every point 
   assert.match(html, /date=1405-05-02/);
 });
 
+test('a visible chart is labeled as prior evidence while the dashboard checks for changes', () => {
+  const html = renderToStaticMarkup(<AccountingFinancialTrend range="1m" checking
+    state={{ status: 'available', data: { range: '1m', currency: 'RIAL', hasLegacyFallback: false,
+      points: [point('1405-05-01', true)] } }}
+    onRangeChange={() => undefined} onRetry={() => undefined} />);
+  assert.match(html, /نمایش قبلی روند مالی است؛ تغییرات در حال بررسی است/);
+  assert.match(html, /href="\/invoices\?date=1405-05-01"/);
+});
+
 test('range control forwards the selected production range', () => {
   let selected = '';
   const state: FinancialTrendState = { status: 'loading', data: null };

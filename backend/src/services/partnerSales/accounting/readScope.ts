@@ -299,6 +299,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   }
   auditAccess.AND = [...auditAccess.AND as Prisma.AccountingAuditLogWhereInput[], { id: { notIn: rejectedAuditIds } }];
   return { database,
+    actorId: actor?.userId ?? null,
     readActorAuthority,
     commercialForCase: (caseId: string) => commercialByCase.get(caseId),
     partnerAccountingIncluded: authorizedInvoices.length > 0,

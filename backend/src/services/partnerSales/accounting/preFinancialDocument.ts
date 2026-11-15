@@ -1,7 +1,9 @@
 import { readPartnerCustomerSignature } from './customerSignature';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import type { PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
+import { resolvePartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
 import { hasSharedOperationAuthority } from '../authorization/sharedOperationAuthority';
 import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { projectPartnerInternalContent, projectPartnerInternalSummary, partnerInternalPhysicalFacts } from './internalDocumentContent';
@@ -15,9 +17,11 @@ const object = (value: unknown): Record<string, any> => value && typeof value ==
 /** A read-only preparation projection, never a persisted financial record.
  * Retail rates, totals and customer payment terms are not returned. */
 export async function readPartnerPreparationDocument(tx: Prisma.TransactionClient, actorId: string, caseId: string,
-  presentation: 'detail' | 'list' = 'detail') {
+  presentation: 'detail' | 'list' = 'detail',
+  accountingAuthority: typeof resolvePartnerAccountingScopedAuthority = resolvePartnerAccountingScopedAuthority,
+  commercialInSnapshot?: PartnerCommercialState) {
   const allowed = await createAuditedPartnerAuthorization(tx, { actorId, purpose: 'ACCOUNTING', channel: 'LIST' },
-    { correlationId: randomUUID() }).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
+    { correlationId: randomUUID() }, undefined, accountingAuthority).authorize('ACCOUNTING_READ', { kind: 'CASE', id: caseId });
   if (!allowed.ok) return null;
   const root = await tx.partnerSaleCase.findUnique({ where: { id: caseId }, include: {
     head: true, internalRecord: true, customerContract: true, trackingCode: true,
@@ -25,10 +29,11 @@ export async function readPartnerPreparationDocument(tx: Prisma.TransactionClien
     customer: { select: partnerCustomerPrintSelect },
   } });
   if (!root?.internalRecord || !root.customerContract) return null;
-  const commercial = await readPartnerCommercialState(tx, caseId);
+  const commercial = commercialInSnapshot ?? await readPartnerCommercialState(tx, caseId);
   if (!commercial) return null;
   const write = !root.customerContract.isInactive && commercial.status === 'FINAL' && (await createAuditedPartnerAuthorization(tx,
-    { actorId, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: randomUUID(), reason: 'بررسی امکان ثبت مالی قرارداد قطعی همکار' })
+    { actorId, purpose: 'ACCOUNTING', channel: 'API' }, { correlationId: randomUUID(), reason: 'بررسی امکان ثبت مالی قرارداد قطعی همکار' },
+    undefined, accountingAuthority)
     .authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok &&
     await hasSharedOperationAuthority(tx, actorId, 'accounting', 'accounting_invoice_candidates_manage');
   const owner = { caseId, revision: root.headRevision, integrityHash: root.integrityHash };
@@ -87,17 +92,40 @@ export async function listPartnerPreparationDocuments(actorId: string, lifecycle
 /** Reuse this request's validated authorization snapshot, never a second root
  * transaction competing for the global operations lock. List rows need no print geometry. */
 export async function listPartnerPreparationDocumentsInScope(scope: AccountingReadScope, actorId: string,
-  lifecycleView: 'active' | 'inactive' | 'pending' = 'active') {
+  lifecycleView: 'active' | 'inactive' | 'pending' = 'active',
+  reviewable?: { existingInternalIds: readonly string[] }) {
     const pending = lifecycleView === 'pending' ? await scope.database.contractLifecycleRequest.findMany({
       where: { status: 'PENDING' }, select: { contractId: true } }) : [];
     const roots = await scope.database.partnerSaleCase.findMany({ where: { commercialFlowVersion: 1,
       internalRecordId: { not: null }, customerContractId: { not: null }, customerContract: lifecycleView === 'pending'
-        ? { id: { in: pending.map(row => row.contractId) } } : { isInactive: lifecycleView === 'inactive' } },
+        ? { id: { in: pending.map(row => row.contractId) } } : { isInactive: lifecycleView === 'inactive' },
+      ...(reviewable ? { state: 'COMMITTED', NOT: { internalRecordId: { in: [...reviewable.existingInternalIds] } } } : {}) },
       select: { id: true }, orderBy: { id: 'asc' } });
     const documents: NonNullable<Awaited<ReturnType<typeof readPartnerPreparationDocument>>>[] = [];
     for (const root of roots) {
-      const document = await readPartnerPreparationDocument(scope.database, actorId, root.id, 'list');
+      const document = await readPartnerPreparationDocument(scope.database, actorId, root.id, 'list', scope.readActorAuthority,
+        scope.commercialForCase(root.id));
       if (document) documents.push(document);
     }
     return documents;
+}
+
+/** Existing financial rows only need these preparation overlays. Their Case
+ * authority and commercial state were already validated in this snapshot. */
+export async function readPartnerPreparationOverlaysInScope(scope: AccountingReadScope, internalIds: readonly string[]) {
+  if (!internalIds.length) return new Map<string, { contractDate?: string; amountKnown: boolean; isInactive: boolean }>();
+  const roots = await scope.database.partnerSaleCase.findMany({ where: { internalRecordId: { in: [...internalIds] } },
+    select: { id: true, headRevision: true, integrityHash: true,
+      head: { select: { customerContent: true, internalProjection: true } },
+      customerContract: { select: { isInactive: true } } } });
+  return new Map(roots.map(root => {
+    const context = object(root.head.customerContent);
+    const accounting = object(object(root.head.internalProjection).accounting);
+    const content = projectPartnerInternalSummary({ partnerPreparation: {
+      owner: { caseId: root.id, revision: root.headRevision, integrityHash: root.integrityHash },
+      products: accounting.products, totals: accounting.totals, paymentPlan: accounting.sabalanPaymentPlan,
+    } });
+    return [root.id, { contractDate: typeof context.contractDate === 'string' ? context.contractDate : undefined,
+      amountKnown: Boolean(content.totals), isInactive: root.customerContract?.isInactive ?? false }] as const;
+  }));
 }

@@ -13,12 +13,13 @@ import { readActions } from './capabilities';
  * the transaction (not thrown) to retain its audit. Business commands must not
  * mutate before authorization. Rollback rolls back both mutation and evidence. */
 export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
-  audit: { correlationId: string; reason?: string }, target?: PartnerAuthorizationTarget): PartnerAuthorizationV2Port {
+  audit: { correlationId: string; reason?: string }, target?: PartnerAuthorizationTarget,
+  accountingAuthority: typeof resolvePartnerAccountingScopedAuthority = resolvePartnerAccountingScopedAuthority): PartnerAuthorizationV2Port {
   if (!audit.correlationId.trim() || audit.correlationId.length > 200 || (audit.reason?.length ?? 0) > 2000) {
     throw new Error('Valid authorization audit context required');
   }
   const source = prismaAuthorizationSource(tx, binding.purpose === 'ACCOUNTING'
-    ? resolvePartnerAccountingScopedAuthority : resolvePartnerScopedAuthority, target);
+    ? accountingAuthority : resolvePartnerScopedAuthority, target);
   return { async authorize(action, root) {
     // Malformed transport input is not a resource decision and must never be
     // copied into retained audit data. The transport owns request-error logs.

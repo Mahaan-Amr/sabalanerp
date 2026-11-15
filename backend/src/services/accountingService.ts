@@ -3,7 +3,7 @@ import { readPartnerInvoiceSource } from './partnerSales/accounting/invoiceSourc
 import { lockPartnerFinancialVoidSource } from './partnerSales/accounting/financialVoidSource';
 import { assertPartnerFinancialFinality } from './partnerSales/cases/commercialLifecycle';
 import { prisma } from '../lib/prisma';
-import { listPartnerPreparationDocumentsInScope } from './partnerSales/accounting/preFinancialDocument';
+import { listPartnerPreparationDocumentsInScope, readPartnerPreparationOverlaysInScope } from './partnerSales/accounting/preFinancialDocument';
 import { accountingContractSearch } from './accountingContractSearch';
 import { recordFinancialCreditTransition } from './contractDispatchCredit';
 import { isNewOrdinaryCommercialFlow, ordinaryFinancialActionsAllowed, OrdinaryAccountingCommercialError,
@@ -1262,13 +1262,19 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
       const partnerRecords = contextualized.map(record => ({ ...record, partnerFlags: flags.filter(flag =>
         flag.sourceFinancialRecordId === record.id), partnerOpenCorrections: corrections.filter(item =>
           item.recordId === record.id).length }));
-      const preparations = await listPartnerPreparationDocumentsInScope(scope, actor.userId, lifecycleView);
-      return { partnerRecords, preparations };
-    }) : Promise.resolve({ partnerRecords: [], preparations: [] }),
+      const reviewablePartner = query.view === 'reviewable';
+      const existingInternalIds = contextualized.flatMap(record => record.sourceId ? [record.sourceId] : []);
+      const preparations = await listPartnerPreparationDocumentsInScope(scope, actor.userId, lifecycleView,
+        reviewablePartner ? { existingInternalIds } : undefined);
+      const preparationOverlays = reviewablePartner
+        ? await readPartnerPreparationOverlaysInScope(scope, existingInternalIds)
+        : new Map();
+      return { partnerRecords, preparations, preparationOverlays };
+    }) : Promise.resolve({ partnerRecords: [], preparations: [], preparationOverlays: new Map() }),
   ]);
   const rawContracts = ordinary.rows;
   let ordinaryAggregate = ordinary.aggregate;
-  const { partnerRecords, preparations } = partnerSources;
+  const { partnerRecords, preparations, preparationOverlays } = partnerSources;
 
   const financialStatuses = ['ELIGIBLE', 'VISIBLE_ONLY', 'NEEDS_CORRECTION', 'HAS_FINANCIAL_RECORDS',
     'NONE', ...Object.values(AccountingRecordStatus), ...Object.values(ReceivableStatus), ...Object.values(TaxSubmissionStatus)];
@@ -1301,11 +1307,22 @@ export const listAccountingContracts = async (query: ListContractsQuery = {}, ac
   const rowTime = new Date();
   let items: any[] = await Promise.all(contracts.map((contract) => buildContractRow(contract, settings, true, rowTime)));
   {
-    const projected = (lifecycleView === 'active' ? partnerRecords : []).map(record => partnerAccountingContractRow(record)).filter((row): row is NonNullable<typeof row> => row !== null);
+    const projected = (lifecycleView === 'active' ? partnerRecords : [])
+      .filter(record => query.view !== 'reviewable' || record.partnerContext?.caseState === 'COMMITTED')
+      .map(record => partnerAccountingContractRow(record)).filter((row): row is NonNullable<typeof row> => row !== null);
+    if (query.view === 'reviewable') for (const projectedRow of projected) {
+      const row: any = projectedRow;
+      const overlay = preparationOverlays.get(row.partnerContext.caseId);
+      if (!overlay) continue;
+      row.partnerCommercialStatus = row.partnerContext.commercialStatus;
+      row.contractDate = overlay.contractDate ?? row.contractDate;
+      row.amountKnown = overlay.amountKnown; row.isInactive = overlay.isInactive;
+    }
     for (const document of preparations) {
       const existing = projected.find(row => row.partnerContext === undefined ? false : (row.partnerContext as any).caseId === document.owner.caseId);
       const row: any = existing ?? partnerAccountingContractRow({ ...document, amount: new Prisma.Decimal(document.amount) });
       if (!row) continue;
+      if (row.partnerContext) row.partnerContext.caseState = document.caseState;
       row.partnerCommercialStatus = document.commercial.status;
       row.contractDate = document.contractDate ?? row.contractDate;
       row.amountKnown = document.amountKnown; row.isInactive = document.isInactive;

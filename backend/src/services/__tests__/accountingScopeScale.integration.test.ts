@@ -44,6 +44,8 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
       import assert from 'node:assert/strict';
       import { prisma } from './backend/src/lib/prisma';
       import { withAccountingReadScope } from './backend/src/services/partnerSales/accounting/readScope';
+      import { readPartnerInternalDocument } from './backend/src/services/partnerSales/accounting/internalDocument';
+      import { readCustomerWorkspace } from './backend/src/services/accountingCustomerWorkspace';
       (async () => { try {
         const expectedIds = new Set([${JSON.stringify(fixture.row.id)}, ...Array.from({ length: 34 }, (_, index) => 'scale-' + index)]);
         const read = () => withAccountingReadScope(prisma, { userId: 'historical-admin' }, async scope => {
@@ -78,6 +80,16 @@ for (const role of ['ADMIN', 'USER'] as const) test(`Accounting scope keeps per-
         await Promise.all([read(), read()]);
         const twoConcurrentMs = Math.round(performance.now() - concurrentStarted);
         await checkAudits(3);
+        const document = await readPartnerInternalDocument('historical-case', 'historical-admin');
+        assert.ok(document?.financialRecords.some(row => row.id === 'historical-invoice'));
+        const documentAudits = await prisma.$queryRaw\`SELECT "rootId", action FROM effective_authorization_audit WHERE purpose = 'ACCOUNTING' AND channel = 'LIST' ORDER BY "evaluatedAt" DESC LIMIT 2\`;
+        assert.deepEqual(new Set(documentAudits.map(row => row.rootId)), new Set(['historical-case']),
+          'single-Case document read must not authorize unrelated Cases');
+        const beforeCustomer = await prisma.effectiveAuthorizationAudit.count({ where: { purpose: 'ACCOUNTING', channel: 'LIST' } });
+        const customer = await readCustomerWorkspace(prisma, { id: 'customer:historical-customer', asOf: new Date(), userId: 'historical-admin' });
+        assert.equal(customer.customerId, 'historical-customer');
+        const afterCustomer = await prisma.effectiveAuthorizationAudit.count({ where: { purpose: 'ACCOUNTING', channel: 'LIST' } });
+        assert.equal(afterCustomer, beforeCustomer, 'ordinary customer statement must not authorize unrelated Partner Cases');
         console.log(JSON.stringify({ role: '${role}', cases: 35, singleMs, twoConcurrentMs }));
       } finally { await prisma.$disconnect(); } })().catch(error => { console.error(error); process.exitCode = 1; });`;
     const output = execFileSync(process.execPath, [path.resolve('backend/node_modules/tsx/dist/cli.mjs'), '-e', script], {

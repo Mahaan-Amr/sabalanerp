@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PartnerActionV2Schema, PermissionContextSchema, partnerError, type PartnerActionV2, type PartnerAuthorizationV2Port, type Result } from '@sabalanerp/partner-sales-contracts';
-import { appendAuthorizationDecision, readAuthorizationDecisions } from '../../effectiveAuthorization/audit';
+import { appendAuthorizationDecision, readAuthorizationDecisions, type AuthorizationDecisionAudit } from '../../effectiveAuthorization/audit';
 import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot } from './contracts';
 import { prismaAuthorizationSource } from './prisma';
 import type { PartnerAuthorizationTarget } from './prisma';
@@ -14,7 +14,8 @@ import { readActions } from './capabilities';
  * mutate before authorization. Rollback rolls back both mutation and evidence. */
 export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
   audit: { correlationId: string; reason?: string }, target?: PartnerAuthorizationTarget,
-  accountingAuthority: typeof resolvePartnerAccountingScopedAuthority = resolvePartnerAccountingScopedAuthority): PartnerAuthorizationV2Port {
+  accountingAuthority: typeof resolvePartnerAccountingScopedAuthority = resolvePartnerAccountingScopedAuthority,
+  recordDecision: (event: AuthorizationDecisionAudit) => Promise<unknown> = event => appendAuthorizationDecision(tx, event)): PartnerAuthorizationV2Port {
   if (!audit.correlationId.trim() || audit.correlationId.length > 200 || (audit.reason?.length ?? 0) > 2000) {
     throw new Error('Valid authorization audit context required');
   }
@@ -40,7 +41,7 @@ export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, 
     // early policy denials, which do not read evidence, need a separate clock.
     const evaluatedAt = evidence ? new Date(evidence.evaluatedAt)
       : (await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0].now;
-    await appendAuthorizationDecision(tx, { domain: 'PARTNER', actorId: binding.actorId, action,
+    await recordDecision({ domain: 'PARTNER', actorId: binding.actorId, action,
       rootKind: root.kind, rootId: root.id, purpose: binding.purpose, channel: binding.channel,
       allowed: result.ok, isAdmin, code: result.ok ? 'ALLOWED' : result.error.code,
       scope: result.ok ? result.value.scope : null, reason: audit.reason?.trim() || null, correlationId: audit.correlationId,

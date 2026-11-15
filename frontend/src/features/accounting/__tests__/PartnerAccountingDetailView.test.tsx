@@ -6,11 +6,6 @@ import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared
 import { PartnerAccountingDetailView, type PartnerInternalDocument, type PartnerDetailSection } from '../PartnerAccountingDetailView';
 const noop = () => {};
 
-test('Partner financial form uses rial for Sepidar input', () => {
-  const html = render('financial', true);
-  assert.match(html, /مبلغ سپیدار \(ریال\)/);
-  assert.doesNotMatch(html, /مبلغ سپیدار \(تومان\)/);
-});
 const doc: PartnerInternalDocument = {
   id: 'internal-invoice', caseState: 'COMMITTED', status: 'DRAFT', amount: '12000000', currency: 'IRT',
   receivedAmount: '0', remainingAmount: '12000000', systemInvoiceNumber: null,
@@ -20,9 +15,9 @@ const doc: PartnerInternalDocument = {
   items: [{ productRowId: 'row-1', description: 'سنگ تست', quantity: '3', unit: 'count', unitPrice: '4000000', totalPrice: '12000000', details: ['لایه دوبل · جلو'] }],
   receivables: [], taxRecords: [], flags: [],
 };
-const render = (section: PartnerDetailSection, invoiceOpen = false) => renderToStaticMarkup(<AppRouterContext.Provider value={{ back: noop, forward: noop, refresh: noop, push: noop, replace: noop, prefetch: async () => {} }}>
-  <PartnerAccountingDetailView document={{ ...doc, ...{ retailPrice: 'PRIVATE_CUSTOMER_PRICE', customerPaymentPlan: 'PRIVATE_PLAN' } }}
-    section={section} invoiceOpen={invoiceOpen} onOpenInvoice={noop} onApproveInvoice={noop} onSection={noop} pending={false} onRefresh={noop} onPdf={noop} onFlag={noop} onCorrection={noop} onResolve={noop} />
+const render = (section: PartnerDetailSection, invoiceOpen = false, canReview = false) => renderToStaticMarkup(<AppRouterContext.Provider value={{ back: noop, forward: noop, refresh: noop, push: noop, replace: noop, prefetch: async () => {} }}>
+  <PartnerAccountingDetailView document={{ ...doc, actions: { ...doc.actions, canReviewInvoice: canReview }, ...{ retailPrice: 'PRIVATE_CUSTOMER_PRICE', customerPaymentPlan: 'PRIVATE_PLAN' } }}
+    section={section} onOpenInvoice={noop} onSection={noop} pending={false} onRefresh={noop} onPdf={noop} onFlag={noop} onCorrection={noop} onResolve={noop} />
 </AppRouterContext.Provider>);
 test('all Partner sections share Accounting metrics/tabs and exclude customer pricing', () => {
   for (const section of ['summary', 'items', 'financial', 'collections', 'compliance'] as const) {
@@ -44,13 +39,12 @@ test('committed case never exposes ordinary hard-delete or duplicate invoice cre
   assert.match(render('collections'), /دریافتنی ثبت نشده است/);
   assert.match(render('compliance'), /پرونده مالیاتی هنوز ایجاد نشده است/);
 });
-test('draft action stays on the contract and opens the canonical inline financial form', () => {
-  const closed = render('financial');
-  const links = Array.from(closed.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/g)).map(match => match[0]);
-  assert(!links.some(link => link.includes('ایجاد پیش‌نویس صورتحساب')));
-  const opened = render('financial', true);
-  for (const label of ['شماره فاکتور سیستمی', 'تاریخ فاکتور سیستمی', 'مبلغ سپیدار', 'تایید مالی']) assert(opened.includes(label), label);
-  assert.doesNotMatch(opened, /PRIVATE_CUSTOMER_PRICE|PRIVATE_PLAN/);
+test('financial review opens the exact partner record and preserves return to the case', () => {
+  const html = render('financial', false, true);
+  assert.match(html, /\/dashboard\/accounting\/invoice-candidates\/internal-invoice/);
+  assert.match(html, /returnTo=%2Fdashboard%2Faccounting%2Fcontracts%2Fpartner%2Fcase-1/);
+  assert.doesNotMatch(html, /مبلغ سپیدار/);
+  assert.doesNotMatch(render('financial', true, false), /\/dashboard\/accounting\/invoice-candidates\/internal-invoice/);
 });
 
 test('Partner total and its toman equivalent wrap instead of being truncated on narrow screens', () => {

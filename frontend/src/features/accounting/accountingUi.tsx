@@ -199,6 +199,14 @@ export const money = (amount?: string | number | null, _currency = 'ریال') =
   return formatPrice(value, 'ریال');
 };
 
+/** Preserve the recorded amount and unit in financial evidence; unknown currency stays unknown. */
+export const evidenceMoney = (amount: string | number | null | undefined, currency?: string | null) => {
+  const canonical = currency === 'ریال' ? 'IRR' : currency === 'تومان' ? 'IRT' : currency;
+  return canonical === 'IRR' || canonical === 'IRT'
+    ? formatPartnerMoney(amount, canonical, canonical)
+    : 'داده معتبر در دسترس نیست';
+};
+
 export const dateFa = (value?: string | Date | null) => {
   if (!value) return '—';
   return PersianCalendar.formatForDisplay(String(value));

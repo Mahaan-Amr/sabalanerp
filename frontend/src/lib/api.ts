@@ -1360,7 +1360,11 @@ export const logisticsAPI = {
     const request = buildLoadingFinalizeRequest(id);
     return api.post(request.path, request.body, request.config);
   },
-  cancelLoading: (id: string, reason: string) => api.post(`/logistics/loadings/${id}/cancel`, { reason }),
+  requestLoadingCancellation: (id: string, reason: string) =>
+    api.post(`/logistics/loadings/${encodeURIComponent(id)}/cancellation-request`, { reason }),
+  getCancellationDocuments: (id: string) => api.get(`/logistics/loadings/${encodeURIComponent(id)}/cancellation-documents`),
+  cancelLoading: (id: string, reason: string, expectedDocumentIds?: string[]) =>
+    api.post(`/logistics/loadings/${encodeURIComponent(id)}/cancel`, { reason, expectedDocumentIds }),
   createCorrection: (id: string, data: any) => api.post(`/logistics/loadings/${id}/corrections`, data),
   getDrivers: (params?: any) => api.get('/logistics/drivers', { params }),
   reserveCanonicalDriver: (queueTurnId: string, loadingId: string) =>

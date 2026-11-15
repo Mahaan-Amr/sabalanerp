@@ -1,3 +1,4 @@
+import { latestLoadingCancellationRequest, readLoadingCancellationDocuments, requestLoadingCancellation } from '../services/crossWorkspaceDutyAdapters/loadingCancellationDutyAdapter';
 import { exactQuantityText, ExactQuantityDecimal } from '../services/exactQuantity';
 import { prisma } from '../lib/prisma';
 import { createSalesInvoiceRouter } from '../services/salesDispatchInvoice/routes';
@@ -9,7 +10,7 @@ import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../mi
 import { requireFeatureAccess, requireNarrowFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
 import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
-import { cancelFinalizedOrdinaryLoading, createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
+import { cancelFinalizedOrdinaryLoading, loadingCancellationAccountingAuthority, LoadingCancellationAccountingAccessError, createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { allocateLoadingNumber } from '../services/logisticsLoadingNumber';
 import { createPartnerCaseLoading, readPartnerCaseLoading, withLogisticsLoadingReadScope } from '../services/dispatchAllocation';
@@ -723,6 +724,7 @@ const loadLoading = async (id: string) => {
   if (!loading) return null;
   return {
     ...loading,
+    cancellationRequest: await latestLoadingCancellationRequest(prisma, id),
     canonicalAllocationRevisions: loading.canonicalAllocationRevisions.map(revision => ({
       ...revision,
       candidate: revision.candidate ? {
@@ -1198,8 +1200,41 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
   }
 });
 
+router.get('/loadings/:id/cancellation-documents', canEdit, canCancelLoadings, async (req: any, res: Response) => {
+  try {
+    const loading = await readLoadingCancellationDocuments(prisma, req.params.id);
+    if (!loading) return res.status(404).json({ success: false, error: 'بارگیری پیدا نشد.' });
+    if (!loading.eligible) return res.status(409).json({ success: false, error: 'لغو بارگیری نهایی‌شده فقط پیش از ثبت خروج ممکن است.' });
+    const { documents } = loading;
+    const canVoidDocuments = documents.length === 0 || Boolean(await loadingCancellationAccountingAuthority(prisma, req.user.id));
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json({ success: true, data: { documents, canVoidDocuments } });
+  } catch (error) {
+    console.error('Loading cancellation documents error:', error);
+    return res.status(500).json({ success: false, error: 'بررسی اسناد بارگیری انجام نشد.' });
+  }
+});
+
+router.post('/loadings/:id/cancellation-request', canEdit, canCancelLoadings, [
+  body('reason').isString().trim().isLength({ min: 3, max: 2000 }),
+], async (req: any, res: Response) => {
+  if (!validationResult(req).isEmpty()) {
+    return res.status(400).json({ success: false, error: 'دلیل لغو باید بین ۳ تا ۲۰۰۰ نویسه باشد.' });
+  }
+  try {
+    const data = await requestLoadingCancellation(prisma, { loadingId: req.params.id, actorId: req.user.id, reason: req.body.reason });
+    return res.json({ success: true, data });
+  } catch (error) {
+    if (error instanceof DispatchAllocationConflictError) return res.status(409).json({ success: false, error: error.message });
+    console.error('Request loading cancellation error:', error);
+    return res.status(500).json({ success: false, error: 'ثبت درخواست لغو بارگیری انجام نشد.' });
+  }
+});
+
 router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
-  body('reason').notEmpty().withMessage('Cancellation reason is required')
+  body('reason').isString().trim().isLength({ min: 1, max: 2000 }).withMessage('دلیل لغو باید بین ۱ تا ۲۰۰۰ نویسه باشد.'),
+  body('expectedDocumentIds').optional().isArray(),
+  body('expectedDocumentIds.*').isString().notEmpty()
 ], async (req: any, res: Response) => {
   try {
     const errors = validationResult(req);
@@ -1212,7 +1247,7 @@ router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
     const reason = String(req.body.reason || '').trim();
     if (!reason) return res.status(400).json({ success: false, error: 'دلیل لغو لازم است.' });
     if (loading._count.canonicalAllocationRevisions > 0) {
-      const id = await cancelFinalizedOrdinaryLoading(prisma, { loadingId: loading.id, reason, actorId: req.user.id });
+      const id = await cancelFinalizedOrdinaryLoading(prisma, { loadingId: loading.id, reason, actorId: req.user.id, expectedDocumentIds: req.body.expectedDocumentIds });
       return res.json({ success: true, data: await loadLoading(id) });
     }
     if (loading.status === CANCELLED_STATUS) return res.status(400).json({ success: false, error: 'Loading is already cancelled' });
@@ -1228,6 +1263,9 @@ router.post('/loadings/:id/cancel', canEdit, canCancelLoadings, [
 
     res.json({ success: true, data: await loadLoading(loading.id) });
   } catch (error: any) {
+    if (error instanceof LoadingCancellationAccountingAccessError) {
+      return res.status(403).json({ success: false, error: error.message });
+    }
     if (error instanceof DispatchAllocationConflictError || error instanceof PilotSafetyPauseError) {
       return res.status(409).json({ success: false, error: error.message });
     }

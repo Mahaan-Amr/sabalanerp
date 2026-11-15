@@ -8,7 +8,7 @@ import {
   ErpTextarea,
 } from "@/components/erp";
 import { LogisticsPage } from "@/features/logistics/LogisticsWorkspace";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FaBan,
@@ -44,6 +44,7 @@ const actionLabel = (action: "finalize" | "delete" | "cancel" | "print") =>
   })[action];
 
 export default function LogisticsLoadingsPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [rows, setRows] = useState<any[]>([]);
   const [status, setStatus] = useState("ALL");
@@ -180,6 +181,11 @@ export default function LogisticsLoadingsPage() {
     setMessage("");
     setError("");
 
+    if (action === "cancel" && row.status === "FINALIZED") {
+      router.push(`/dashboard/logistics/loadings/${row.id}?action=cancel`);
+      return;
+    }
+
     if (action === "print") {
       window.open(
         `/dashboard/logistics/loadings/${row.id}?print=1`,
@@ -196,7 +202,7 @@ export default function LogisticsLoadingsPage() {
   const eligibleRows = (action: "finalize" | "delete" | "cancel" | "print") => {
     if (action === "finalize") return selectedRows.filter(canFinalize);
     if (action === "delete") return selectedRows.filter(canDelete);
-    if (action === "cancel") return selectedRows.filter(canCancel);
+    if (action === "cancel") return selectedRows.filter(row => row.status === "DRAFT" && canCancel(row));
     return selectedRows;
   };
 

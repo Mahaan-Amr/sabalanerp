@@ -1360,6 +1360,8 @@ export const logisticsAPI = {
     const request = buildLoadingFinalizeRequest(id);
     return api.post(request.path, request.body, request.config);
   },
+  requestLoadingCancellation: (id: string, reason: string) =>
+    api.post(`/logistics/loadings/${encodeURIComponent(id)}/cancellation-request`, { reason }),
   getCancellationDocuments: (id: string) => api.get(`/logistics/loadings/${encodeURIComponent(id)}/cancellation-documents`),
   cancelLoading: (id: string, reason: string, expectedDocumentIds?: string[]) =>
     api.post(`/logistics/loadings/${encodeURIComponent(id)}/cancel`, { reason, expectedDocumentIds }),

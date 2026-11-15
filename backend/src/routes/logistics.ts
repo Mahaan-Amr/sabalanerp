@@ -1,3 +1,4 @@
+import { latestLoadingCancellationRequest, readLoadingCancellationDocuments, requestLoadingCancellation } from '../services/crossWorkspaceDutyAdapters/loadingCancellationDutyAdapter';
 import { exactQuantityText, ExactQuantityDecimal } from '../services/exactQuantity';
 import { prisma } from '../lib/prisma';
 import { createSalesInvoiceRouter } from '../services/salesDispatchInvoice/routes';
@@ -723,6 +724,7 @@ const loadLoading = async (id: string) => {
   if (!loading) return null;
   return {
     ...loading,
+    cancellationRequest: await latestLoadingCancellationRequest(prisma, id),
     canonicalAllocationRevisions: loading.canonicalAllocationRevisions.map(revision => ({
       ...revision,
       candidate: revision.candidate ? {
@@ -1200,27 +1202,32 @@ router.post('/loadings/:id/finalize', canEdit, canFinalizeLoadings, async (req: 
 
 router.get('/loadings/:id/cancellation-documents', canEdit, canCancelLoadings, async (req: any, res: Response) => {
   try {
-    const loading = await prisma.logisticsLoading.findUnique({
-      where: { id: req.params.id, sourceKind: 'SALES_CONTRACT' },
-      select: {
-        salesDispatchInvoices: { where: { voidedAt: null }, select: { id: true, number: true } },
-        canonicalAllocationRevisions: { select: { candidate: { select: {
-          waybills: { where: { status: 'ISSUED' }, select: { id: true, number: true } },
-        } } } },
-      },
-    });
+    const loading = await readLoadingCancellationDocuments(prisma, req.params.id);
     if (!loading) return res.status(404).json({ success: false, error: 'بارگیری پیدا نشد.' });
-    const documents = [
-      ...loading.salesDispatchInvoices.map(doc => ({ ...doc, number: doc.number.toString(), kind: 'INVOICE' })),
-      ...loading.canonicalAllocationRevisions.flatMap(revision => revision.candidate?.waybills ?? [])
-        .map(doc => ({ ...doc, number: doc.number.toString(), kind: 'WAYBILL' })),
-    ];
+    if (!loading.eligible) return res.status(409).json({ success: false, error: 'لغو بارگیری نهایی‌شده فقط پیش از ثبت خروج ممکن است.' });
+    const { documents } = loading;
     const canVoidDocuments = documents.length === 0 || Boolean(await loadingCancellationAccountingAuthority(prisma, req.user.id));
     res.setHeader('Cache-Control', 'private, no-store');
     return res.json({ success: true, data: { documents, canVoidDocuments } });
   } catch (error) {
     console.error('Loading cancellation documents error:', error);
     return res.status(500).json({ success: false, error: 'بررسی اسناد بارگیری انجام نشد.' });
+  }
+});
+
+router.post('/loadings/:id/cancellation-request', canEdit, canCancelLoadings, [
+  body('reason').isString().trim().isLength({ min: 3, max: 2000 }),
+], async (req: any, res: Response) => {
+  if (!validationResult(req).isEmpty()) {
+    return res.status(400).json({ success: false, error: 'دلیل لغو باید بین ۳ تا ۲۰۰۰ نویسه باشد.' });
+  }
+  try {
+    const data = await requestLoadingCancellation(prisma, { loadingId: req.params.id, actorId: req.user.id, reason: req.body.reason });
+    return res.json({ success: true, data });
+  } catch (error) {
+    if (error instanceof DispatchAllocationConflictError) return res.status(409).json({ success: false, error: error.message });
+    console.error('Request loading cancellation error:', error);
+    return res.status(500).json({ success: false, error: 'ثبت درخواست لغو بارگیری انجام نشد.' });
   }
 });
 

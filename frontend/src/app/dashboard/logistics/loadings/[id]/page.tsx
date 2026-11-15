@@ -170,7 +170,7 @@ export default function LoadingDetailPage() {
     const requested = searchParams.get('action');
     if (requested === 'finalize' && loading.status === 'DRAFT' && actionAvailability.FINALIZE_LOADING?.enabled === true) setAction('finalize');
     if (requested === 'delete' && loading.status === 'DRAFT' && actionAvailability.EDIT_LOADING?.enabled === true) setAction('delete');
-    if (requested === 'cancel' && loading.status !== 'CANCELLED' && actionAvailability.CANCEL_LOADING?.enabled === true) setAction('cancel');
+    if (requested === 'cancel' && loading.cancellationRequest?.status !== "PENDING" && loading.status !== 'CANCELLED' && actionAvailability.CANCEL_LOADING?.enabled === true) setAction('cancel');
   }, [isLoading, loading, actionAvailability, searchParams]);
 
   if (isLoading) return <ErpLoading />;
@@ -223,7 +223,10 @@ export default function LoadingDetailPage() {
     loading.guardQueueTurns?.some((turn: { status: string }) => turn.status === "LOADING_FINALIZED");
   const cancelLabel = canCompleteCancellation ? "تکمیل لغو و آزادسازی نوبت گارد" :
     loading.status === "FINALIZED" ? "لغو بارگیری نهایی‌شده پیش از خروج" : "لغو بارگیری";
+  const cancellationRequest = loading.cancellationRequest;
+  const needsAccountingReview = cancellationPreview?.canVoidDocuments === false;
   const canCancel =
+    cancellationRequest?.status !== "PENDING" &&
     actionAvailability.CANCEL_LOADING?.enabled === true &&
     (loading.status !== "CANCELLED" || canCompleteCancellation);
   const canCorrect =
@@ -306,6 +309,12 @@ export default function LoadingDetailPage() {
         { label: "به‌روزرسانی", icon: FaSync, onClick: load, tone: "neutral" },
       ]}
     >
+      {cancellationRequest?.status === "PENDING" && (
+        <ErpInlineState kind="stale" title="درخواست لغو در انتظار تصمیم حسابداری است." />
+      )}
+      {cancellationRequest?.status === "REJECTED" && loading.status !== "CANCELLED" && (
+        <ErpInlineState kind="stale" title={`حسابداری درخواست لغو را رد کرد. دلیل رد: ${cancellationRequest.reason || "ثبت نشده"}`} />
+      )}
       {actionError && (
         <ErpInlineState
           kind="error"
@@ -562,15 +571,16 @@ export default function LoadingDetailPage() {
               }}
             />
             <ErpButton
-              label={cancellationPreview?.documents.length ? "ابطال اسناد و تأیید لغو" : "تأیید لغو"}
+              label={needsAccountingReview ? "ارسال درخواست به حسابداری" : cancellationPreview?.documents.length ? "ابطال اسناد و تأیید لغو" : "تأیید لغو"}
               icon={FaBan}
               tone="danger"
               disabled={dispatchTimelineStale || saving || !cancelReason.trim() ||
-                (usesUnifiedCancellation && (!cancellationPreview?.canVoidDocuments || cancelReason.trim().length < 3))}
+                (usesUnifiedCancellation && (!cancellationPreview || (cancellationPreview.documents.length > 0 && cancelReason.trim().length < 3)))}
               onClick={async () => {
                 if (
-                  await runAction(() =>
-                    logisticsAPI.cancelLoading(loading.id, cancelReason.trim(), cancellationPreview?.documents.map(doc => doc.id)),
+                  await runAction(() => needsAccountingReview
+                    ? logisticsAPI.requestLoadingCancellation(loading.id, cancelReason.trim())
+                    : logisticsAPI.cancelLoading(loading.id, cancelReason.trim(), cancellationPreview?.documents.map(doc => doc.id)),
                   )
                 ) {
                   setAction(null);
@@ -594,9 +604,11 @@ export default function LoadingDetailPage() {
                   </li>)}
                 </ul>}
                 {cancellationPreview.canVoidDocuments
-                  ? <p className="text-sm sds-text-secondary">{cancellationPreview.documents.length ? "اسناد بالا ابطال می‌شوند. " : ""}بار آزاد می‌شود و گارد می‌تواند راننده و خودروی واجد شرایط را دوباره پذیرش کند.</p>
-                  : <ErpInlineState kind="stale" title="ابطال اسناد فعال به مجوز حسابداری نیاز دارد."
-                      action={{ label: "بازبینی اسناد", onClick: () => setPreviewRefresh(value => value + 1) }} />}
+                  ? <p className="text-sm sds-text-secondary">{cancellationPreview.documents.length ? "اسناد بالا ابطال می‌شوند. " : ""}بار آزاد می‌شود و پذیرش راننده باز می‌ماند و راننده و خودروی واجد شرایط برای بارگیری بعدی آماده می‌شوند.</p>
+                  : <div className="space-y-2">
+                      <ErpInlineState kind="stale" title="برای این بارگیری سند فعال صادر شده است. ابطال فاکتور و بارنامه به دسترسی ویرایش حسابداری و مجوز مدیریت اسناد ارسال نیاز دارد. حساب کاربری شما مجوز لازم برای ابطال این اسناد را ندارد." />
+                      <p className="text-sm sds-text-secondary">دلیل لغو را بنویسید و درخواست را ارسال کنید. حسابداری آن را در وظایف بین‌واحدی بررسی می‌کند. با تأیید حسابداری، اسناد ابطال می‌شوند و بار آزاد می‌شود. پذیرش راننده و خودرو در گارد باز می‌ماند.</p>
+                    </div>}
               </>
           )}
           <ErpField label="دلیل لغو" required>

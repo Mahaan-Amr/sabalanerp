@@ -47,6 +47,7 @@ const manageHrWork = requireHrFeature('HR_WORK_MANAGEMENT', 'EDIT');
 const dutyOperationalMessage = (code: string) => ({
   SEPARATION_OF_DUTIES_CONFLICT: 'تفکیک وظایف این نوع درخواست اجازه اقدام توسط ثبت‌کننده را نمی‌دهد.',
   REASON_REQUIRED: 'برای رد، بازگرداندن یا واگذاری مجدد، دلیل کوتاه و روشن وارد کنید.',
+  DUTY_LOADING_CANCELLATION_CHANGED: 'اسناد یا وضعیت خروج بارگیری تغییر کرده است. اگر درخواست قابل انجام نیست، آن را با ذکر دلیل رد کنید تا لجستیک بتواند دوباره بررسی کند.',
   DUTY_ALREADY_DECIDED: 'این درخواست لحظاتی پیش توسط کاربر دیگری تعیین تکلیف شد.',
   DUTY_ALREADY_CLAIMED: 'این وظیفه قبلاً توسط کاربر دیگری دریافت شده است. فهرست را به‌روزرسانی کنید.',
   DUTY_CLAIM_CONFLICT: 'دریافت وظیفه متوقف شد؛ وضعیت آن هم‌زمان تغییر کرده است. فهرست را به‌روزرسانی کنید.',
@@ -65,7 +66,7 @@ const asyncHandler = (
 ) => (req: AuthRequest, res: Response, next: NextFunction) => handler(req, res, next).catch((error) => {
   if (!(error instanceof Error) || !/^(?:(?:HR_)?DUTY_|SOURCE_|ENVELOPE_|ASSIGNEE_|RESPONSIBILITY_|SEPARATION_OF_DUTIES_|CONTRACT_|COLLATERAL_|RESPONSIBLE_SELLER_|ACTION_NOT_ALLOWED|REASON_REQUIRED)/.test(error.message)) return next(error);
   const conflictCodes = new Set([
-    'DUTY_NOT_OPEN', 'DUTY_ALREADY_DECIDED', 'DUTY_RESPONSE_CONFLICT', 'SOURCE_VERSION_CHANGED',
+    'DUTY_NOT_OPEN', 'DUTY_ALREADY_DECIDED', 'DUTY_LOADING_CANCELLATION_CHANGED', 'DUTY_RESPONSE_CONFLICT', 'SOURCE_VERSION_CHANGED',
     'ENVELOPE_VERSION_CHANGED', 'SOURCE_STATE_CHANGED', 'RESPONSIBILITY_CHANGED',
     'DUTY_DESTINATION_CHANGED', 'DUTY_ENVELOPE_CHANGED', 'DUTY_SOURCE_CHANGED',
     'DUTY_ASSIGNMENT_CHANGED',

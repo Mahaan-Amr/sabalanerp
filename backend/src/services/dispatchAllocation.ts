@@ -1,3 +1,4 @@
+import { LOADING_CANCELLATION_DUTY } from './crossWorkspaceDutyAdapters/loadingCancellationDutyCode';
 import { exactQuantityText, ExactQuantityDecimal } from './exactQuantity';
 import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
 import { createHash } from 'node:crypto';
@@ -1101,9 +1102,14 @@ export async function loadingCancellationAccountingAuthority(db: Tx, actorId: st
   return { actorRole: actor.role, workspace, workspacePermission, feature, featurePermission: grant.permissionLevel };
 }
 
-export const cancelFinalizedOrdinaryLoading = async (prisma: Database, input: {
+type FinalizedLoadingCancellation = {
   loadingId: string; reason: string; actorId: string; expectedDocumentIds?: string[];
-}) => serializable(prisma, async (tx) => {
+};
+
+export const cancelFinalizedOrdinaryLoading = (prisma: Database, input: FinalizedLoadingCancellation) =>
+  serializable(prisma, tx => cancelFinalizedOrdinaryLoadingInTransaction(tx, input));
+
+export const cancelFinalizedOrdinaryLoadingInTransaction = async (tx: Tx, input: FinalizedLoadingCancellation) => {
   const reason = required(input.reason, 'reason');
   if (input.expectedDocumentIds?.length) {
     await tx.$queryRaw`SELECT id FROM users WHERE id=${input.actorId} FOR UPDATE`;
@@ -1111,6 +1117,11 @@ export const cancelFinalizedOrdinaryLoading = async (prisma: Database, input: {
   }
   await assertCanonicalDispatchCommandAllowed(tx);
   await lockKeys(tx, [`LOGISTICS_LOADING:${input.loadingId}`, `SALES_INVOICE:${input.loadingId}`]);
+  const pending = await tx.crossWorkspaceDuty.findFirst({
+    where: { sourceActionCode: LOADING_CANCELLATION_DUTY, sourceId: input.loadingId, status: 'OPEN' },
+    select: { id: true },
+  });
+  if (pending) throw new DispatchAllocationConflictError('درخواست لغو این بارگیری در انتظار تصمیم حسابداری است.');
   const loading = await tx.logisticsLoading.findUnique({
     where: { id: input.loadingId },
     include: {
@@ -1237,10 +1248,11 @@ export const cancelFinalizedOrdinaryLoading = async (prisma: Database, input: {
   }
   for (const turn of turns) {
     await tx.guardDriverQueueTurn.update({ where: { id: turn.id }, data: {
-      status: 'VOIDED', voidedAt: at, voidedBy: input.actorId, voidReason: reason,
+      status: 'AVAILABLE_FOR_LOADING', loadingId: null, availableAt: at, availableBy: input.actorId,
+      reservedAt: null, reservedBy: null, finalizedAt: null, finalizedBy: null,
     } });
     await appendQueueEvent(tx, {
-      turnId: turn.id, eventType: 'FINALIZED_LOADING_CANCELLED', fromStatus: 'LOADING_FINALIZED', toStatus: 'VOIDED',
+      turnId: turn.id, eventType: 'FINALIZED_LOADING_CANCELLED', fromStatus: 'LOADING_FINALIZED', toStatus: 'AVAILABLE_FOR_LOADING',
       actorId: input.actorId, reason, payload: { loadingId: loading.id },
     });
   }
@@ -1254,7 +1266,7 @@ export const cancelFinalizedOrdinaryLoading = async (prisma: Database, input: {
     eventType: 'FINALIZED_LOADING_CANCELLED', payload: { reason, alreadyCancelled, documentIds, queueTurnIds: turnIds, revisionIds: current.map(revision => revision.id) },
     actorId: input.actorId, recordedAt: at });
   return loading.id;
-});
+};
 
 const publicCandidateResult = (candidate: any, waybill?: any) => ({
   candidateId: candidate.id, status: candidate.status,

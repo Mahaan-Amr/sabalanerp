@@ -1603,7 +1603,7 @@ const getAccountingWorkspaceInScope = async (scope: AccountingReadScope, query: 
   const now = new Date();
   const [period, contractResponse, records, receivables, payments, taxRecords, corrections, auditLogs] = await Promise.all([
     getOrCreateCurrentPeriod(),
-    preloadedContracts || listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope),
+    preloadedContracts || listAccountingContracts({ view: 'reviewable', sort: 'work_queue', page: 1, pageSize: 12 }, actor, scope),
     prisma.accountingFinancialRecord.findMany({ where: scope.financial(), orderBy: { createdAt: 'desc' }, take: 8,
       ...(compact ? { select: accountingFinancialRegisterSelect } : {}) }),
     prisma.accountingReceivable.findMany({ where: scope.receivable(), orderBy: { dueDate: 'asc' }, take: 8 }),
@@ -1873,7 +1873,7 @@ export const getAccountingDashboardWorkspace = async (query: any = {}, actor: Ac
   return withAccountingReadScope(prisma, actor, async scope => {
     const revisionsPromise = getDashboardRevisions(scope.database, actor.userId,
       scope.authorizedPartnerInternalIds, query, query.range ?? '6m', new Date());
-    const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope);
+    const contracts = listAccountingContracts({ view: 'reviewable', sort: 'work_queue', page: 1, pageSize: 12 }, actor, scope);
     void contracts.catch(() => {});
     const revisions = await revisionsPromise;
     return { workspace: compactDashboardWorkspace(await getAccountingWorkspaceInScope(scope, query, contracts, true)),
@@ -1890,7 +1890,7 @@ export const getAccountingDashboard = async (query: any = {}, requestedRange: un
     return await withAccountingReadScope(prisma, actor, async scope => {
       const revisionsPromise = actor ? getDashboardRevisions(scope.database, actor.userId,
         scope.authorizedPartnerInternalIds, query, requestedRange, now) : undefined;
-      const contracts = listAccountingContracts({ view: 'reviewable', page: 1, pageSize: 12 }, actor, scope);
+      const contracts = listAccountingContracts({ view: 'reviewable', sort: 'work_queue', page: 1, pageSize: 12 }, actor, scope);
       void contracts.catch(() => {});
       const revisions = await revisionsPromise;
       const workspace = await getAccountingWorkspaceInScope(scope, query, contracts, true);

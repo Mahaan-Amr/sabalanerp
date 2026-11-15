@@ -1,8 +1,9 @@
 import { readPartnerCommercialState } from '../cases/commercialLifecycle';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { RevisionRefSchema } from '@sabalanerp/partner-sales-contracts';
+import { RevisionRefSchema, type PartnerCommercialState } from '@sabalanerp/partner-sales-contracts';
 import { createAuditedPartnerAuthorization } from '../authorization/audited';
+import { resolvePartnerAccountingScopedAuthority } from '../authorization/centralAuthority';
 import { readCurrentPartnerCaseViews, readPartnerRevisionProjections } from '../cases/lifecycle';
 import { PARTNER_INTERNAL_ACCOUNTING_SOURCE, matchesFinancialPreparation, preparePartnerFinancialSource, type PartnerFinancialPreparation, type PartnerAccountingSource } from './source';
 import { subtract } from '../reporting/money';
@@ -60,9 +61,15 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   const writableCases = new Set<string>();
   let canManagePayments = false;
   let canManageTax = false;
+  let actorAuthority: ReturnType<typeof resolvePartnerAccountingScopedAuthority> | undefined;
+  const readActorAuthority: typeof resolvePartnerAccountingScopedAuthority = (tx, input) =>
+    actorAuthority ??= resolvePartnerAccountingScopedAuthority(tx, input);
   if (actor) {
+    // The central actor grants and workspace bridge are identical for every
+    // Case in this repeatable-read snapshot. Root locks, resource evidence,
+    // expiry checks and a distinct audited decision still run for each Case.
     const authority = createAuditedPartnerAuthorization(database, { actorId: actor.userId, purpose: 'ACCOUNTING', channel: 'LIST' },
-      { correlationId: randomUUID(), reason: 'بررسی دسترسی اقدامات حسابداری پرونده' });
+      { correlationId: randomUUID(), reason: 'بررسی دسترسی اقدامات حسابداری پرونده' }, undefined, readActorAuthority);
     for (const row of cases) {
       if ((await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: row.id })).ok) {
         allowedInternalIds.push(row.internalRecordId);
@@ -137,7 +144,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   const currentAccountingByCase = new Map<string, PartnerAccountingSource['view']>();
   const committedCases = new Set<string>();
   const finalCases = new Set<string>();
-  const commercialByCase = new Map<string, string>();
+  const commercialByCase = new Map<string, PartnerCommercialState>();
   const frozenCases = new Set<string>();
   const preparationByInvoice = new Map<string, PartnerFinancialPreparation>();
   const conflict = () => new PartnerAccountingCommandError('INTEGRITY_CONFLICT', 'شواهد صورتحساب همکار نیاز به بررسی دارد؛ پرونده را در حسابداری بررسی کنید.');
@@ -169,7 +176,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
         currentAccountingByCase.set(row.id, current.accounting);
         if (current.row.state === 'COMMITTED') committedCases.add(row.id);
         const commercial = await readPartnerCommercialState(database, row.id);
-        if (commercial) commercialByCase.set(row.id, commercial.status);
+        if (commercial) commercialByCase.set(row.id, commercial);
         if (current.row.state === 'COMMITTED' && (!commercial || commercial.status === 'FINAL')) finalCases.add(row.id);
         if (await partnerPredecessorIsFrozen(database, row.id, current.row.headRevision)) frozenCases.add(row.id);
         healthyCases.add(row.id);
@@ -200,7 +207,7 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
         commercialAccountId: views.accounting.commercialAccountId, debtor: views.accounting.debtor,
         endCustomer: { displayName: row.customer.companyName ||
           `${row.customer.firstName} ${row.customer.lastName}`.trim() },
-        revision: owner.data.revision, caseState: row.state, commercialStatus: commercialByCase.get(row.id),
+        revision: owner.data.revision, caseState: row.state, commercialStatus: commercialByCase.get(row.id)?.status,
         accountingWritable: writableCases.has(row.id) && finalCases.has(row.id),
         accountingDraftDeletionWritable: writableCases.has(row.id),
         actionUrl: `/dashboard/accounting/invoice-candidates?search=${encodeURIComponent(views.accounting.caseNumber)}` });
@@ -292,6 +299,8 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
   }
   auditAccess.AND = [...auditAccess.AND as Prisma.AccountingAuditLogWhereInput[], { id: { notIn: rejectedAuditIds } }];
   return { database,
+    readActorAuthority,
+    commercialForCase: (caseId: string) => commercialByCase.get(caseId),
     partnerAccountingIncluded: authorizedInvoices.length > 0,
     authorizedPartnerInternalIds: allowedInternalIds,
     contextualize,

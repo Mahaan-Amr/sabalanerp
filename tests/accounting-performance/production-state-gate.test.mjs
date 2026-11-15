@@ -11,7 +11,7 @@ const sha = 'a'.repeat(64);
 const sample = (surface, durationMs, i, extra = {}) => ({ surface, durationMs, status: 200, requestId: `${surface}-${i}`, phase: i === 0 ? 'cold' : 'warm', ...extra });
 const input = () => ({
   format: 'sabalan-accounting-production-state-requests/v1',
-  provenance: { kind: 'protected-production-state-recovery-copy', recoveryManifestSha256: sha, privateIngress: true, evidenceRef: 'private/restore-123', workloadSource: 'recovery-copy-123' },
+  provenance: { kind: 'protected-production-state-recovery-copy', recoveryManifestSha256: sha, populationEvidenceSha256: sha, sourcePopulation: { ordinaryContracts: 935, committedPartnerCases: 30 }, privateIngress: true, evidenceRef: 'private/restore-123', workloadSource: 'recovery-copy-123' },
   candidate: { commit: '1'.repeat(40), tree: '2'.repeat(40), backendImage: `sha256:${sha}`, frontendImage: `sha256:${'b'.repeat(64)}` },
   workload: { actorClass: 'authorized-accountant', actorSha256: 'c'.repeat(64), ordinaryContracts: 935, committedPartnerCases: 30, concurrency: 1, filters: ['reviewable'], pageSize: 100, observation: 'full HTTP responses', endpoints: { dashboard: '/api/accounting/dashboard', 'reviewable-list': '/api/accounting/contracts?view=reviewable' } },
   requests: [...Array.from({ length: 20 }, (_, i) => sample('dashboard', 1000 + i, i)), ...Array.from({ length: 20 }, (_, i) => sample('reviewable-list', 2000 + i, i))],
@@ -63,7 +63,7 @@ test('P2024 and malformed durations fail closed', () => {
   assert.equal(receipt.surfaces.dashboard.p2024Count, 1);
   assert.match(receipt.reasons.join(' '), /Invalid request record/);
 });
-test('empty population and empty error code cannot produce a pass receipt', () => {
+test('unmatched population and empty error code cannot produce a pass receipt', () => {
   const data = input();
   data.workload.ordinaryContracts = 0;
   data.workload.committedPartnerCases = 0;
@@ -71,9 +71,18 @@ test('empty population and empty error code cannot produce a pass receipt', () =
   const { process, receipt } = run(data);
   assert.equal(process.status, 2);
   assert.equal(receipt.decision, 'MEASUREMENT_FAIL');
-  assert.match(receipt.reasons.join(' '), /population floor/);
+  assert.match(receipt.reasons.join(' '), /population invalid/);
   assert.match(receipt.reasons.join(' '), /Invalid request record/);
   assert.equal(receipt.surfaces.dashboard.errorCount, 1);
+});
+test('actual production population can contain no ordinary contracts when independently bound to the source', () => {
+  const data = input();
+  data.provenance.sourcePopulation.ordinaryContracts = 0;
+  data.workload.ordinaryContracts = 0;
+  const { process, receipt } = run(data);
+  assert.equal(process.status, 0);
+  assert.equal(receipt.decision, 'MEASUREMENT_PASS_ONLY');
+  assert.equal(receipt.provenance.sourcePopulation.ordinaryContracts, 0);
 });
 test('null request records fail with a receipt', () => {
   const data = input();

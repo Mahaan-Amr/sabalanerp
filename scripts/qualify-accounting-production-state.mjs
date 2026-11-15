@@ -36,10 +36,11 @@ catch { process.stderr.write('Cannot read valid request input.\n'); process.exit
 
 const reasons = [];
 if (data?.format !== 'sabalan-accounting-production-state-requests/v1') reasons.push('Unknown input format');
-if (data?.provenance?.kind !== 'protected-production-state-recovery-copy' || data.provenance.privateIngress !== true || !hex(data.provenance.recoveryManifestSha256, 64) || !data.provenance.evidenceRef || !data.provenance.workloadSource) reasons.push('Protected production-state provenance incomplete');
+if (data?.provenance?.kind !== 'protected-production-state-recovery-copy' || data.provenance.privateIngress !== true || !hex(data.provenance.recoveryManifestSha256, 64) || !hex(data.provenance.populationEvidenceSha256, 64) || !data.provenance.evidenceRef || !data.provenance.workloadSource) reasons.push('Protected production-state provenance incomplete');
 if (!hex(data?.candidate?.commit, 40) || !hex(data?.candidate?.tree, 40) || !digest(data?.candidate?.backendImage) || !digest(data?.candidate?.frontendImage)) reasons.push('Candidate source or immutable image identity incomplete');
 const w = data?.workload;
-if (w?.actorClass !== 'authorized-accountant' || !hex(w.actorSha256, 64) || !Number.isSafeInteger(w.ordinaryContracts) || w.ordinaryContracts < 935 || !Number.isSafeInteger(w.committedPartnerCases) || w.committedPartnerCases < 30 || !Number.isSafeInteger(w.concurrency) || w.concurrency < 1 || !Number.isSafeInteger(w.pageSize) || w.pageSize < 1 || !Array.isArray(w.filters) || !w.filters.includes('reviewable') || w.observation !== 'full HTTP responses' || w.endpoints?.dashboard !== '/api/accounting/dashboard' || w.endpoints?.['reviewable-list'] !== '/api/accounting/contracts?view=reviewable') reasons.push('Workload shape incomplete or below observed fixture population floor (935 ordinary Contracts, 30 committed Partner Cases)');
+const population = data?.provenance?.sourcePopulation;
+if (w?.actorClass !== 'authorized-accountant' || !hex(w.actorSha256, 64) || !Number.isSafeInteger(w.ordinaryContracts) || w.ordinaryContracts < 0 || !Number.isSafeInteger(w.committedPartnerCases) || w.committedPartnerCases < 0 || !Number.isSafeInteger(population?.ordinaryContracts) || population.ordinaryContracts < 0 || !Number.isSafeInteger(population?.committedPartnerCases) || population.committedPartnerCases < 0 || w.ordinaryContracts !== population.ordinaryContracts || w.committedPartnerCases !== population.committedPartnerCases || w.ordinaryContracts + w.committedPartnerCases < 1 || !Number.isSafeInteger(w.concurrency) || w.concurrency < 1 || !Number.isSafeInteger(w.pageSize) || w.pageSize < 1 || !Array.isArray(w.filters) || !w.filters.includes('reviewable') || w.observation !== 'full HTTP responses' || w.endpoints?.dashboard !== '/api/accounting/dashboard' || w.endpoints?.['reviewable-list'] !== '/api/accounting/contracts?view=reviewable') reasons.push('Workload shape or measured production-copy population invalid');
 if (!Array.isArray(data?.requests)) reasons.push('Request records missing');
 const requests = Array.isArray(data?.requests) ? data.requests : [];
 const ids = new Set();
@@ -60,7 +61,7 @@ const receipt = {
   decision: reasons.length ? 'MEASUREMENT_FAIL' : 'MEASUREMENT_PASS_ONLY',
   reasons: [...new Set(reasons)],
   sourceSha256: createHash('sha256').update(source).digest('hex'),
-  provenance: { kind: data?.provenance?.kind, recoveryManifestSha256: data?.provenance?.recoveryManifestSha256, privateIngress: data?.provenance?.privateIngress, evidenceRef: data?.provenance?.evidenceRef, workloadSource: data?.provenance?.workloadSource },
+  provenance: { kind: data?.provenance?.kind, recoveryManifestSha256: data?.provenance?.recoveryManifestSha256, populationEvidenceSha256: data?.provenance?.populationEvidenceSha256, sourcePopulation: population, privateIngress: data?.provenance?.privateIngress, evidenceRef: data?.provenance?.evidenceRef, workloadSource: data?.provenance?.workloadSource },
   candidate: { commit: data?.candidate?.commit, tree: data?.candidate?.tree, backendImage: data?.candidate?.backendImage, frontendImage: data?.candidate?.frontendImage },
   workload: { actorClass: w?.actorClass, actorSha256: w?.actorSha256, ordinaryContracts: w?.ordinaryContracts, committedPartnerCases: w?.committedPartnerCases, concurrency: w?.concurrency, filters: w?.filters, pageSize: w?.pageSize, observation: w?.observation, endpoints: w?.endpoints },
   surfaces,

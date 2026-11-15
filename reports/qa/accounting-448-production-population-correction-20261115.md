@@ -1,0 +1,7 @@
+# Accounting #448: bind measurements to the observed production population
+
+Read-only SQL on the serving production database and on the independently restored November 12 QA copy returned the same relevant counts on November 15, 2026: `contracts` contains **0** ordinary Contracts; `partner_sale_cases` contains **30** `COMMITTED` Cases (plus 6 cancelled, 5 draft, and 2 voided). No database rows were changed by this census.
+
+The earlier #448 measurement CLI incorrectly required at least 935 ordinary Contracts on the production-state copy. That number came from the separate #447 synthetic stress fixture, not production. A genuine copy cannot truthfully satisfy the old input rule. The CLI now requires an evidence SHA-256 and an explicit source-population record, then requires the workload counts to match that record. It still requires protected-copy provenance, private ingress, 20 complete cold/warm HTTP requests for each surface, zero errors/P2028, and p95 below 3 seconds. A passing CLI receipt remains measurement-only and requires independent review of the actual SQL evidence and runtime identities.
+
+The 935 ordinary/30 committed Partner fixture remains a separate load and correctness regression. A production-copy result with 0 ordinary/30 committed Partner must not be described as the fixture stress result, and vice versa. Neither result has yet been captured for the final release candidate in this record.

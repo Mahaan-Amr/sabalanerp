@@ -74,6 +74,9 @@ export function AccountingFinancialTrend({
       {state.status === 'stale' && (
         <ErpInlineState kind="stale" title="آخرین نمایش موفق نشان داده می‌شود؛ به‌روزرسانی روند ناموفق بود." action={{ label: 'تلاش دوباره', onClick: onRetry }} />
       )}
+      {state.status === 'loading' && source && (
+        <ErpInlineState kind="stale" title="نمایش قبلی روند مالی است؛ داده‌های تازه در حال دریافت است." />
+      )}
       {source?.hasLegacyFallback && (
         <ErpInlineState kind="stale" title="بخشی از تاریخ‌ها با شواهد قدیمی و اطمینان کمتر نسبت داده شده‌اند." />
       )}

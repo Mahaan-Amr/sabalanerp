@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { compileProtectedBridgeMigration, compileProtectedCurrentRelease,
   assertProtectedCurrentReleaseRetryEvidence } from '../protectedBridgeMigrations';
@@ -36,6 +37,15 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261104150000_purchasing_duty_optional_deadline',
     '20261107000100_restart_dispatch_waybill_sequence_at_zero',
     '20261107120000_legacy_waybill_reconstructions',
+    '20261108000100_start_new_waybill_numbers_at_one',
+    '20261115120000_accounting_dashboard_change_versions',
+    '20261115121000_accounting_dashboard_partner_sources',
+    '20261115122000_accounting_dashboard_partner_revision_key',
+    '20261115123000_accounting_dashboard_presentation_sources',
+    '20261115124000_accounting_dashboard_private_owner_scope',
+    '20261115125000_accounting_dashboard_mixed_financial_owner',
+    '20261115130000_accounting_dashboard_user_name_scope',
+    '20261115130000_loading_cancellation_duty',
     '20261115131000_accounting_private_marker_index',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
@@ -43,7 +53,12 @@ test('the complete current release is admitted only with its reviewed ordered SQ
   assert.deepEqual(release.map(row => row.name), names);
   assert.ok(release.every(row => row.statements.length > 0));
   assert.ok(release.flatMap(row => row.statements).every(sql => !/^\s*(?:BEGIN|COMMIT)\s*;?\s*$/i.test(sql)));
-  assert.ok(!release.at(-3)!.statements.join(' ').includes('setval('));
+  assert.equal(createHash('sha256').update(release.slice(0, 12).map(row => row.sha256).join('\n')).digest('hex'),
+    'af48acb67350bc35b1ac156029d41011a9dc301cc605bce2729e978ae65e07e2');
+  assert.ok(!release[10].statements.join(' ').includes('setval('));
+  assert.equal(release[12].statements.length, 2);
+  assert.match(release[12].statements[0], /^LOCK TABLE/);
+  assert.ok(release.at(-1)!.tables.includes('accounting_financial_records'));
   assert.throws(() => compileProtectedCurrentRelease(files.slice(1)), /CURRENT_RELEASE_SET_UNPROVEN/);
   const changed = files.map(([name, bytes], index) => index === 3 ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
   assert.throws(() => compileProtectedCurrentRelease(changed), /SQL_IDENTITY_MISMATCH/);

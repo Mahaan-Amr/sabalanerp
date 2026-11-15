@@ -26,9 +26,23 @@ const currentRelease = {
   '20261104150000_purchasing_duty_optional_deadline': ['54fd7acd7a0cd15dc15a77a1f03a6c25534eefc2202ff6d59d1d9769320e1646', 2],
   '20261107000100_restart_dispatch_waybill_sequence_at_zero': ['0e50811c771006cb5142c9f5430942d0e360f2d976232925bbf2ff1600802541', 4],
   '20261107120000_legacy_waybill_reconstructions': ['4bd5fa92a5693fc8690ee99e490db239792377ebdb9e84eb7f7a7b5f31496972', 2],
+  '20261108000100_start_new_waybill_numbers_at_one': ['0919aa0d52d804324e5754d2f4b31291567778bb35aa77e6b50ca0fb7281e637', 2],
+  '20261115120000_accounting_dashboard_change_versions': ['ac3aa99a189dc8f3b0d7d60875c4417c9b4aa0492985de56087fa0ab2b6bb1af', 17],
+  '20261115121000_accounting_dashboard_partner_sources': ['fa27471c48917f3a5284810f239e36c20e1139b200fd80062a92205ad949c1ad', 4],
+  '20261115122000_accounting_dashboard_partner_revision_key': ['d6b7bdf78d40fb3184c84770c0b89f8c055e908f20e7a8427aff792c4188e66c', 1],
+  '20261115123000_accounting_dashboard_presentation_sources': ['80da646e392176c2a03511155481bd9f72f56cb080297ecbd79fa2b0e43b06cf', 6],
+  '20261115124000_accounting_dashboard_private_owner_scope': ['7be715e823f3cb4f8732b4abc5ad9f35d5f898dd4b66782302f886f629bf3169', 3],
+  '20261115125000_accounting_dashboard_mixed_financial_owner': ['3bd0372a0b6991016767d740571486a85584821f21941c777a0d44c4bd1ceeee', 4],
+  '20261115130000_accounting_dashboard_user_name_scope': ['a5cbaa020f79977ed303de19641d65a011eef69e7f3e7cf96cde9f4beadaf374', 3],
+  '20261115130000_loading_cancellation_duty': ['d65885e6ab6881153b1547d0ba6c9cadc06db67e82afa8b01f8362bd871a6ecc', 3],
   '20261115131000_accounting_private_marker_index': ['31ab2f1cd447819b9f1863337c230fe1c23959eb01e260232f54e044d0bdba30', 1],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
+// The first twelve receipts already exist on production with their original
+// release-set hash. Later releases extend the ledger without rewriting history.
+const protectedReleaseEpochEnds = Object.freeze([12, 22]);
+const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
+  protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
 /** Split only byte-pinned PostgreSQL source, respecting quoted bodies. */
 function splitCurrentReleaseSql(sql: string) {
@@ -58,15 +72,30 @@ function splitCurrentReleaseSql(sql: string) {
 
 export function compileProtectedCurrentRelease(files: ReadonlyArray<readonly [string, Buffer]>) {
   const names = protectedCurrentReleaseNames;
+  if (names.length !== protectedReleaseEpochEnds.at(-1)) failure('PROTECTED_CURRENT_RELEASE_EPOCH_UNPROVEN');
   if (files.length !== names.length || files.some(([name], index) => name !== names[index])) failure('PROTECTED_CURRENT_RELEASE_SET_UNPROVEN');
   return files.map(([name, bytes]) => {
     const [sha256, expectedCount] = currentRelease[name as keyof typeof currentRelease];
     if (!Buffer.isBuffer(bytes) || sha(bytes) !== sha256) failure('PROTECTED_CURRENT_RELEASE_SQL_IDENTITY_MISMATCH');
-    const sql = bytes.toString('utf8'), statements = splitCurrentReleaseSql(sql);
+    const sql = bytes.toString('utf8');
+    let statements = splitCurrentReleaseSql(sql);
+    if (name === '20261108000100_start_new_waybill_numbers_at_one') {
+      if (statements.length !== 4 || statements[0] !== 'BEGIN;' || statements[3] !== 'COMMIT;') {
+        failure('PROTECTED_CURRENT_RELEASE_TRANSACTION_WRAPPER_UNPROVEN');
+      }
+      // The byte-pinned source wraps the same two statements in a transaction;
+      // this runner supplies that transaction together with its history receipt.
+      statements = statements.slice(1, -1);
+    }
     if (statements.length !== expectedCount || statements.some(statement => /^\s*(BEGIN|COMMIT|ROLLBACK)\s*;/i.test(statement))) {
       failure('PROTECTED_CURRENT_RELEASE_STATEMENTS_UNPROVEN');
     }
-    const tables = [...new Set([...sql.matchAll(/\b(?:CREATE|ALTER)\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map(match => match[1]))];
+    const tables = [...new Set([
+      ...[...sql.matchAll(/\b(?:CREATE|ALTER)\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map(match => match[1]),
+      ...(names.indexOf(name) >= protectedReleaseEpochEnds[0]
+        ? [...sql.matchAll(/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+"?[A-Za-z_][A-Za-z_0-9]*"?\s+ON\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map(match => match[1])
+        : []),
+    ])];
     const functions = [...new Set([...sql.matchAll(/\bCREATE\s+FUNCTION\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map(match => match[1]))];
     return { name, sha256, statements, tables, functions };
   });
@@ -331,7 +360,7 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       }
       let receipt: any; try { receipt = JSON.parse(history[0].logs!); } catch { failure('PROTECTED_CURRENT_RELEASE_HISTORY_UNPROVEN'); }
       if (receipt?.format !== 'sabalan-protected-current-release/v1' || receipt.sqlSha256 !== file.sha256
-        || receipt.order !== files.indexOf(file) || receipt.releaseSetSha256 !== sha(files.map(row => row.sha256).join('\n'))) {
+        || receipt.order !== files.indexOf(file) || receipt.releaseSetSha256 !== releaseSetSha256(files, files.indexOf(file))) {
         failure('PROTECTED_CURRENT_RELEASE_HISTORY_UNPROVEN');
       }
       const sameOperation = receipt.deploymentId === owner.deploymentId && receipt.releaseId === owner.releaseId;
@@ -369,7 +398,7 @@ export async function applyProtectedCurrentRelease(database: PrismaClient, input
       const catalogSha256 = await catalog(tx, currentCatalogScope(files, index));
       await assertLease(tx, owner, false); assertBoundary();
       const receipt = JSON.stringify({ format: 'sabalan-protected-current-release/v1', sqlSha256: file.sha256,
-        releaseSetSha256: sha(files.map(row => row.sha256).join('\n')), order: index, catalogSha256,
+        releaseSetSha256: releaseSetSha256(files, index), order: index, catalogSha256,
         deploymentId: owner.deploymentId, releaseId: owner.releaseId,
         quantityProofSha256: beforeQuantity, dutyRows: beforeDuty, sequenceProofSha256 });
       await tx.$executeRaw`INSERT INTO public._prisma_migrations (id,checksum,finished_at,migration_name,logs,started_at,applied_steps_count)

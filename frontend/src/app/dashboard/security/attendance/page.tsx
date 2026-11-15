@@ -28,7 +28,7 @@ import {
   type DashboardAttendanceCondition,
 } from '../securityDashboardViewModel';
 import { formatAttendanceDelay } from './attendancePresentation';
-import { usePersonnelDeviceReview, personnelDeviceInfo, PersonnelDeviceStatus, PersonnelReviewDialogs, AttendanceReviewToolbar, IntervalReviewSelection } from '@/features/attendance-device/PersonnelDeviceReview';
+import { usePersonnelDeviceReview, personnelDeviceInfo, PersonnelDeviceStatus, PersonnelReviewDialogs, AttendancePendingList, AttendanceReviewToolbar, IntervalReviewSelection } from '@/features/attendance-device/PersonnelDeviceReview';
 
 import { AuditedAttendanceCorrection, type CorrectionTarget } from '@/features/attendance-device/AuditedAttendanceCorrection';
 
@@ -184,7 +184,7 @@ interface AttendanceDialogState {
 interface IntervalDialogState {
   action: 'correct' | 'void';
   interval: NonNullable<AttendanceRecord['intervals']>[number];
-  record: AttendanceRecord;
+  name: string;
   enteredAt: string;
   exitedAt: string;
   reason: string;
@@ -199,10 +199,10 @@ const localDateTimeValue = (value?: string | null) => {
 const persianDateTimeIso = (value: string) => PersianCalendar.toGregorian(value, 'jYYYY/jMM/jDD HH:mm').toISOString();
 
 export default function AttendancePage() {
-  const device = usePersonnelDeviceReview();
   const [reviewPerson, setReviewPerson] = useState<{ id: string; name: string } | null>(null);
   const [initialMapping, setInitialMapping] = useState<Parameters<typeof PersonnelReviewDialogs>[0]['initial']>(null);
   const [pendingOnly, setPendingOnly] = useState(false);
+  const device = usePersonnelDeviceReview(pendingOnly);
   const [selectedIntervals, setSelectedIntervals] = useState<Record<string, number>>({});
   const router = useRouter();
   const pathname = usePathname();
@@ -303,8 +303,8 @@ export default function AttendancePage() {
       record.employee.lastName.toLowerCase().includes(search) ||
       (record.employee.username || '').toLowerCase().includes(search);
     const matchesStatus = matchesAttendanceFilter(record, statusFilter, conditionFilter);
-    return matchesSearch && matchesStatus && (!pendingOnly || personnelDeviceInfo(device.state, record.employee.id).pending > 0);
-  }), [attendanceRecords, searchTerm, statusFilter, conditionFilter, pendingOnly, device.state]);
+    return matchesSearch && matchesStatus;
+  }), [attendanceRecords, searchTerm, statusFilter, conditionFilter]);
 
   const openAttendanceDialog = (record: AttendanceRecord, action: AttendanceAction) => {
     const defaultTime = currentTimeValue();
@@ -341,8 +341,8 @@ export default function AttendancePage() {
     }
   };
 
-  const openIntervalDialog = (record: AttendanceRecord, interval: NonNullable<AttendanceRecord['intervals']>[number], action: IntervalDialogState['action']) => {
-    setIntervalDialog({ action, record, interval, enteredAt: localDateTimeValue(interval.enteredAt), exitedAt: localDateTimeValue(interval.exitedAt), reason: '' });
+  const openIntervalDialog = (name: string, interval: NonNullable<AttendanceRecord['intervals']>[number], action: IntervalDialogState['action']) => {
+    setIntervalDialog({ action, name, interval, enteredAt: localDateTimeValue(interval.enteredAt), exitedAt: localDateTimeValue(interval.exitedAt), reason: '' });
   };
 
   const submitIntervalDialog = async () => {
@@ -426,7 +426,9 @@ export default function AttendancePage() {
             {device.error && <ErpInlineState kind="error" title={device.error} />}
             <ErpCheckbox label="فقط موارد نیازمند رسیدگی" checked={pendingOnly} onChange={e => setPendingOnly(e.target.checked)} />
 
-        {filteredRecords.length === 0 && rosterScopeEmpty ? (
+        {pendingOnly ? (
+          <AttendancePendingList state={device.state} error={device.error} onReview={setReviewPerson} />
+        ) : filteredRecords.length === 0 && rosterScopeEmpty ? (
           <ErpEmptyState
             icon={FaUsers}
             title="فهرست حضور و غیاب گارد هنوز تنظیم نشده است"
@@ -459,7 +461,7 @@ export default function AttendancePage() {
                     <IntervalReviewSelection state={device.state} personnelId={record.employee.id} selected={selectedIntervals} onSelect={setSelectedIntervals} />
                     <div className="mt-2 flex flex-wrap gap-2">
                       {record.openPreviousAttendance ? <ErpButton label="ثبت خروج قبلی" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'close-previous')} tone="warning" variant="solid" disabled={Boolean(actionLoadingId)} /> : canCheckOut(record) ? <ErpButton label="خروج" icon={FaSignOutAlt} onClick={() => openAttendanceDialog(record, 'checkout')} disabled={Boolean(actionLoadingId)} tone="neutral" variant="soft" /> : canCheckIn(record) ? <ErpButton label="ورود" icon={FaSignInAlt} onClick={() => openAttendanceDialog(record, 'checkin')} disabled={Boolean(actionLoadingId)} variant="soft" /> : null}
-                      <ErpButton label="اصلاح ورود/خروج" onClick={() => { if (record.intervals?.length) openIntervalDialog(record, record.intervals[record.intervals.length - 1], 'correct'); else openAttendanceDialog(record, 'checkin'); }} variant="ghost" />
+                      <ErpButton label="اصلاح ورود/خروج" onClick={() => { if (record.intervals?.length) openIntervalDialog(`${record.employee.firstName} ${record.employee.lastName}`, record.intervals[record.intervals.length - 1], 'correct'); else openAttendanceDialog(record, 'checkin'); }} variant="ghost" />
                       {delayLabel && <ErpStatus label={`تأخیر: ${delayLabel}`} tone="warning" emphasis="strong" />}
                       <ErpButton label={expanded ? 'بستن جزئیات' : 'جزئیات'} onClick={() => setExpandedRecordId(expanded ? null : record.id)} tone="neutral" variant="ghost" />
                     </div>
@@ -471,7 +473,7 @@ export default function AttendancePage() {
                         <div><dt className="text-xs sds-text-muted">خارج از محل</dt><dd className="mt-1 font-semibold">{(record.outsideMinutes || 0).toLocaleString('fa-IR')} دقیقه</dd></div>
                         <div><dt className="text-xs sds-text-muted">کارکرد محاسبه‌شده</dt><dd className="mt-1 font-semibold">{record.accountedWorkMinutes === null || record.accountedWorkMinutes === undefined ? 'در انتظار تکمیل' : `${record.accountedWorkMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
                         {record.movementTimeline?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">خط زمانی روز</dt><dd className="mt-2 space-y-1">{record.movementTimeline.map((segment, index) => <p key={`${segment.kind}-${segment.startsAt}-${index}`} className="rounded bg-[var(--sds-surface-panel)] px-2 py-1 text-xs"><strong>{segment.kind === 'PRESENCE' ? 'حضور در محل' : segment.kind === 'HOURLY_LEAVE' ? 'مرخصی ساعتی' : 'خارج از محل'}:</strong> {new Date(segment.startsAt).toLocaleString('fa-IR')} تا {segment.endsAt ? new Date(segment.endsAt).toLocaleString('fa-IR') : 'باز'}</p>)}</dd></div> : null}
-                        {record.intervals?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">جزئیات تردد</dt><dd className="mt-2 space-y-1">{record.intervals.map((interval, index) => <div key={interval.id} className="rounded bg-[var(--sds-surface-panel)] px-2 py-2 text-xs"><p>{(index + 1).toLocaleString('fa-IR')}. {interval.enteredAt ? new Date(interval.enteredAt).toLocaleString('fa-IR') : 'ورود با ساعت نامعلوم'} تا {interval.exitUnknown ? 'خروج با ساعت نامعلوم' : interval.exitedAt ? new Date(interval.exitedAt).toLocaleString('fa-IR') : 'باز'} · ثبت‌کننده ورود: {interval.entryRecorder ? `${interval.entryRecorder.firstName} ${interval.entryRecorder.lastName}` : '-'}</p><div className="mt-2 flex gap-2"><ErpPressable className="min-h-11 px-2 font-semibold" tone="primary" onClick={() => openIntervalDialog(record, interval, 'correct')}>اصلاح</ErpPressable><ErpPressable className="min-h-11 px-2 font-semibold" tone="danger" onClick={() => setCorrectionTarget({ id: interval.id, name: `${record.employee.firstName} ${record.employee.lastName}` })}>بررسی اصلاح سابقه</ErpPressable></div></div>)}</dd></div> : null}
+                        {record.intervals?.length ? <div className="col-span-2"><dt className="sds-text-muted text-xs">جزئیات تردد</dt><dd className="mt-2 space-y-1">{record.intervals.map((interval, index) => <div key={interval.id} className="rounded bg-[var(--sds-surface-panel)] px-2 py-2 text-xs"><p>{(index + 1).toLocaleString('fa-IR')}. {interval.enteredAt ? new Date(interval.enteredAt).toLocaleString('fa-IR') : 'ورود با ساعت نامعلوم'} تا {interval.exitUnknown ? 'خروج با ساعت نامعلوم' : interval.exitedAt ? new Date(interval.exitedAt).toLocaleString('fa-IR') : 'باز'} · ثبت‌کننده ورود: {interval.entryRecorder ? `${interval.entryRecorder.firstName} ${interval.entryRecorder.lastName}` : '-'}</p><div className="mt-2 flex gap-2"><ErpPressable className="min-h-11 px-2 font-semibold" tone="primary" onClick={() => openIntervalDialog(`${record.employee.firstName} ${record.employee.lastName}`, interval, 'correct')}>اصلاح</ErpPressable><ErpPressable className="min-h-11 px-2 font-semibold" tone="danger" onClick={() => setCorrectionTarget({ id: interval.id, name: `${record.employee.firstName} ${record.employee.lastName}` })}>بررسی اصلاح سابقه</ErpPressable></div></div>)}</dd></div> : null}
                         <div><dt className="text-xs sds-text-muted">ساعت کاری</dt><dd className="mt-1 font-semibold" dir="ltr">{record.scheduledStartTime && record.scheduledEndTime ? `${formatTime12(record.scheduledStartTime)} – ${formatTime12(record.scheduledEndTime)}` : record.workScheduleStatus === 'NON_WORKING_DAY' ? 'روز غیرکاری' : 'تعریف نشده'}</dd></div>
                         <div><dt className="text-xs sds-text-muted">تأخیر</dt><dd className="mt-1 font-semibold">{delayLabel || '-'}</dd></div>
                         <div><dt className="text-xs sds-text-muted">اضافه‌کار</dt><dd className="mt-1 font-semibold">{record.overtimePending ? 'در انتظار ثبت خروج' : record.overtimeMinutes === null || record.overtimeMinutes === undefined ? '-' : `${record.overtimeMinutes.toLocaleString('fa-IR')} دقیقه`}</dd></div>
@@ -491,7 +493,11 @@ export default function AttendancePage() {
         )}
       </ErpSection>
       </>}
-      <PersonnelReviewDialogs onCorrect={interval => { const record = attendanceRecords.find(r => r.employee.id === reviewPerson?.id); if (record) { openIntervalDialog(record, interval, 'correct'); setReviewPerson(null); } }} state={device.state} person={reviewPerson} initial={initialMapping} onClose={() => { setReviewPerson(null); setInitialMapping(null); }} onSaved={async () => { await device.load(); await fetchAttendanceData(true); }} />
+      <PersonnelReviewDialogs onCorrect={interval => {
+        if (!reviewPerson) return;
+        openIntervalDialog(reviewPerson.name, interval, 'correct');
+        setReviewPerson(null);
+      }} state={device.state} person={reviewPerson} initial={initialMapping} onClose={() => { setReviewPerson(null); setInitialMapping(null); }} onSaved={async () => { await device.load(); await fetchAttendanceData(true); }} />
       <ErpSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} title="فیلترهای حضور و غیاب" footer={<div className="flex justify-end"><ErpButton label="مشاهده نتایج" onClick={() => setFiltersOpen(false)} variant="solid" /></div>}>
         {filterControls}
       </ErpSheet>
@@ -521,7 +527,7 @@ export default function AttendancePage() {
       <AuditedAttendanceCorrection target={correctionTarget} onClose={() => setCorrectionTarget(null)} onSaved={async () => { await fetchAttendanceData(true); await device.load(); }} />
       {intervalDialog && (
         <ErpSheet presentation="modal" pending={Boolean(actionLoadingId)} open onClose={() => setIntervalDialog(null)} title={intervalDialog.action === 'correct' ? 'اصلاح بازه تردد' : 'ابطال بازه تردد'} footer={<div className="flex justify-end gap-2"><ErpButton label="انصراف" onClick={() => setIntervalDialog(null)} tone="neutral" variant="ghost" /><ErpButton label={intervalDialog.action === 'correct' ? 'ثبت اصلاح' : 'تأیید ابطال'} onClick={submitIntervalDialog} tone={intervalDialog.action === 'void' ? 'danger' : undefined} variant="solid" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} /></div>}>
-            <p className="mt-1 text-sm sds-text-muted">{intervalDialog.record.employee.firstName} {intervalDialog.record.employee.lastName}</p>
+            <p className="mt-1 text-sm sds-text-muted">{intervalDialog.name}</p>
             {intervalDialog.action === 'correct' && (
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <label><span className={labelClass}>ورود</span><PersianCalendarComponent showTime value={intervalDialog.enteredAt} onChange={(enteredAt) => setIntervalDialog((current) => current ? { ...current, enteredAt } : current)} /></label>
@@ -529,7 +535,7 @@ export default function AttendancePage() {
               </div>
             )}
             <label className="mt-4 block"><span className={labelClass}>دلیل (الزامی)</span><ErpTextarea value={intervalDialog.reason} onChange={(event) => setIntervalDialog((current) => current ? { ...current, reason: event.target.value } : current)} /></label>
-            {intervalDialog.action === 'correct' && !intervalDialog.interval.exitedAt && !intervalDialog.interval.exitUnknown && <ErpButton label="خروج رخ داده؛ ساعت نامعلوم است" tone="warning" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} onClick={() => { setCorrectionTarget({ id: intervalDialog.interval.id, name: `${intervalDialog.record.employee.firstName} ${intervalDialog.record.employee.lastName}` }); setIntervalDialog(null); }} />}
+            {intervalDialog.action === 'correct' && !intervalDialog.interval.exitedAt && !intervalDialog.interval.exitUnknown && <ErpButton label="خروج رخ داده؛ ساعت نامعلوم است" tone="warning" disabled={Boolean(actionLoadingId) || !intervalDialog.reason.trim()} onClick={() => { setCorrectionTarget({ id: intervalDialog.interval.id, name: intervalDialog.name }); setIntervalDialog(null); }} />}
             <p className="mt-2 text-xs sds-text-muted">سابقه قبلی حذف نمی‌شود و همراه عامل و دلیل در لاگ ممیزی باقی می‌ماند.</p>
         </ErpSheet>
       )}

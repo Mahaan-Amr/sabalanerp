@@ -118,6 +118,17 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
     assert.equal(pendingState.status, 200);
     const pendingData = (await pendingState.json() as { data: any }).data;
     assert(pendingData.intervals.some((i: any) => i.id === interval.id), 'Unknown exits remain in the actionable list');
+    const previousDate = new Date(Date.parse(`${date}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+    const previousDaily = await fetch(base.replace('/attendance-device', '/security') + `/attendance/daily?date=${previousDate}&personnelId=${personnelId}`, { headers: { Cookie: cookie } });
+    assert.equal(previousDaily.status, 200);
+    assert.deepEqual((await previousDaily.json() as { data: any }).data.attendanceSummary, [], 'person is outside the selected daily roster');
+    const reviewResponse = await call('/state?includePendingCases=true', undefined, undefined, viewerCookie);
+    assert.equal(reviewResponse.status, 200);
+    const review = (await reviewResponse.json() as { data: any }).data;
+    const pendingPerson = review.personPending.find((row: any) => row.personnelId === personnelId);
+    assert.equal(pendingPerson.name, `${person.firstName} ${person.lastName}`);
+    assert.deepEqual(pendingPerson.cases.map((item: any) => [item.id, item.kind, item.exitUnknown]), [[interval.id, 'interval', true]]);
+    assert.ok(review.personPending.every((row: any) => row.count === row.cases.length), 'list includes exactly the cases counted in the banner');
     // Filter before pagination: many recent ordinary intervals must not hide an older unresolved one.
     const ordinaryRecord = await prisma.attendanceRecord.create({ data: { personnelId, date: new Date('2097-01-01T00:00:00Z'), status: 'PRESENT' } });
     for (let n = 0; n < 101; n++) {
@@ -138,6 +149,14 @@ test('real HTTP: browser authority, terminal-scoped machine credential, replay a
     assert.equal(invalidClock.status, 200, 'bad clock sample must not discard device evidence');
     assert.equal((await invalidClock.json() as { data: any }).data.accepted[0].status, 'REVIEW');
     assert.equal(await prisma.attendanceInterval.count({ where: { attendanceRecord: { personnelId } } }), 1, 'bad clock sample creates no operational interval');
+    const mixedReview = (await (await call('/state?includePendingCases=true', undefined, undefined, viewerCookie)).json() as { data: any }).data;
+    const mixedPendingPerson = mixedReview.personPending.find((row: any) => row.personnelId === personnelId);
+    assert.equal(mixedPendingPerson.count, 2);
+    assert.deepEqual(mixedPendingPerson.cases.map((item: any) => item.kind).sort(), ['interval', 'punch']);
+    const reviewPunch = mixedPendingPerson.cases.find((item: any) => item.kind === 'punch');
+    assert.equal(reviewPunch.deviceCode, 'CLOCK_INVALID');
+    assert.ok(reviewPunch.reason && Number.isFinite(Date.parse(reviewPunch.occurredAt)));
+
     await prisma.securityPersonnel.update({ where: { userId: viewer.id }, data: { isActive: false } });
     assert.equal((await call('/confirm', { intervals: [] }, undefined, viewerCookie)).status, 403);
 

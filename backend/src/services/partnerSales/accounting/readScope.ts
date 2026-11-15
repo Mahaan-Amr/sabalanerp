@@ -20,6 +20,7 @@ import { assertPartnerAccountingWitnesses as assertWitnesses, readPartnerReceiva
 import { assertPartnerTaxEvidence, assertSinglePartnerTaxRecord } from './taxEvidence';
 import { resolveCurrentSabalanPlan, resolveInvoiceSabalanPlan } from './sabalanPlanEvidence';
 import { readAuthorizedPartnerAuditWitnesses } from '../../accountingReadProjection';
+import { batchAccountingCaseAuthority } from './batchCaseAuthority';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -72,9 +73,11 @@ async function createScope(database: Prisma.TransactionClient, actor: Accounting
     // Case in this repeatable-read snapshot. Root locks, resource evidence,
     // expiry checks and a distinct audited decision still run for each Case.
     const decisions: AuthorizationDecisionAudit[] = [];
+    const evidenceSource = selection.focusedCaseId ? undefined
+      : await batchAccountingCaseAuthority(database, actor.userId, cases.map(row => row.id));
     const authority = createAuditedPartnerAuthorization(database, { actorId: actor.userId, purpose: 'ACCOUNTING', channel: 'LIST' },
       { correlationId: randomUUID(), reason: 'بررسی دسترسی اقدامات حسابداری پرونده' }, undefined, readActorAuthority,
-      async decision => { decisions.push(decision); });
+      async decision => { decisions.push(decision); }, evidenceSource);
     for (const row of cases) {
       if ((await authority.authorize('ACCOUNTING_READ', { kind: 'CASE', id: row.id })).ok) {
         allowedInternalIds.push(row.internalRecordId);

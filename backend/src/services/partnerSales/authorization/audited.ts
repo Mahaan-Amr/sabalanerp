@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PartnerActionV2Schema, PermissionContextSchema, partnerError, type PartnerActionV2, type PartnerAuthorizationV2Port, type Result } from '@sabalanerp/partner-sales-contracts';
 import { appendAuthorizationDecision, readAuthorizationDecisions, type AuthorizationDecisionAudit } from '../../effectiveAuthorization/audit';
-import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot } from './contracts';
+import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot, AuthorizationSource } from './contracts';
 import { prismaAuthorizationSource } from './prisma';
 import type { PartnerAuthorizationTarget } from './prisma';
 import { resolvePartnerAccountingScopedAuthority, resolvePartnerScopedAuthority } from './centralAuthority';
@@ -15,11 +15,12 @@ import { readActions } from './capabilities';
 export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
   audit: { correlationId: string; reason?: string }, target?: PartnerAuthorizationTarget,
   accountingAuthority: typeof resolvePartnerAccountingScopedAuthority = resolvePartnerAccountingScopedAuthority,
-  recordDecision: (event: AuthorizationDecisionAudit) => Promise<unknown> = event => appendAuthorizationDecision(tx, event)): PartnerAuthorizationV2Port {
+  recordDecision: (event: AuthorizationDecisionAudit) => Promise<unknown> = event => appendAuthorizationDecision(tx, event),
+  evidenceSource?: AuthorizationSource<PartnerActionV2>): PartnerAuthorizationV2Port {
   if (!audit.correlationId.trim() || audit.correlationId.length > 200 || (audit.reason?.length ?? 0) > 2000) {
     throw new Error('Valid authorization audit context required');
   }
-  const source = prismaAuthorizationSource(tx, binding.purpose === 'ACCOUNTING'
+  const source = evidenceSource ?? prismaAuthorizationSource(tx, binding.purpose === 'ACCOUNTING'
     ? accountingAuthority : resolvePartnerScopedAuthority, target);
   return { async authorize(action, root) {
     // Malformed transport input is not a resource decision and must never be

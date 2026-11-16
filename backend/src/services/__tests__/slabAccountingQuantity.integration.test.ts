@@ -37,6 +37,14 @@ async function cleanup() {
   await db.$transaction(async tx => {
     const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
     const actor = await tx.user.findUnique({ where: { id: actorId } });
+    const permissionActor = await tx.user.findUnique({ where: { username: `${runId}-draft-auth` } });
+    if (permissionActor) {
+      await tx.authSession.deleteMany({ where: { userId: permissionActor.id } });
+      await tx.recognizedBrowserProfile.deleteMany({ where: { userId: permissionActor.id } });
+      await tx.featurePermission.deleteMany({ where: { userId: permissionActor.id } });
+      await tx.workspacePermission.deleteMany({ where: { userId: permissionActor.id } });
+      await tx.user.delete({ where: { id: permissionActor.id } });
+    }
     if (contract) assert.equal(contract.contractNumber, runId);
     if (actor) assert.equal(actor.username, runId);
     const invoices = await tx.accountingFinancialRecord.findMany({ where: { contractId }, select: { id: true } });
@@ -96,6 +104,7 @@ async function cleanup() {
   assert.equal(await db.accountingFinancialRecord.count({ where: { contractId } }), 0);
   assert.equal(await db.contractApprovedPricingVersion.count({ where: { contractId } }), 0);
   assert.equal(await db.user.count({ where: { id: actorId } }), 0);
+  assert.equal(await db.user.count({ where: { username: `${runId}-draft-auth` } }), 0);
   assert.equal(await db.contractPricingReadinessResult.count({ where: { contractId } }), 0);
   assert.equal(await db.shipmentQuantityEvidence.count({ where: { contractId } }), 0);
   assert.equal(await db.accountingContractFlag.count({ where: { contractId } }), 0);
@@ -196,7 +205,7 @@ async function run() {
   const invoiceId = String(created.affected.financialRecordIds[0]);
   if (draftPermission) {
     const key = randomUUID();
-    const user = await db.user.create({ data: { username: `draft-auth-${key}`, email: `${key}@draft-auth.invalid`,
+    const user = await db.user.create({ data: { username: `${runId}-draft-auth`, email: `${key}@draft-auth.invalid`,
       password: 'non-login-fixture', firstName: 'آزمون', lastName: 'مجوز', role: 'USER', isActive: true, mustChangePassword: false } });
     try {
       await db.workspacePermission.create({ data: { userId: user.id, workspace: 'accounting', permissionLevel: 'edit' } });

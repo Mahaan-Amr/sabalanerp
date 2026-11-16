@@ -48,6 +48,7 @@ async function openWorkspace(page: Page, transform = (data: typeof fixture) => d
     if (path.includes('/treasury/allocation-intent/')) {
       const canceled = path.endsWith('/cancel') && serverCommand &&
         route.request().postDataJSON().idempotencyKey === serverCommand.idempotencyKey;
+      if (canceled && serverCommand) serverCommand.status = 'CLOSED';
       return route.fulfill({ json: { success: true, data: { status: canceled ? 'CANCELED' : 'UNKNOWN' } } });
     }
     if (route.request().method() !== 'GET') {
@@ -63,6 +64,40 @@ async function openWorkspace(page: Page, transform = (data: typeof fixture) => d
   await expect(workspace).toBeVisible();
   return { workspace, commands };
 }
+
+test('after canceling a local key, the workspace discovers another pending server key before allowing edits', async ({ page }) => {
+  const { workspace, commands } = await openWorkspace(page);
+  let discoverOther = false;
+  let localCommand: any;
+  const other = {
+    kind: 'ALLOCATION', amountRials: '0', allocations: [], sourceAllocations: [{ receiptId: 'cash', allocations: [{ openItemId: 'd1', amountRials: '20' }] }],
+    occurredAt: '2026-10-01T00:00:00.000Z', periodId: 'period', postingRuleId: 'rule', confirmed: true,
+    reason: 'تخصیص ثبت شده در دستگاه دوم', reference: 'درخواست دستگاه دوم', idempotencyKey: 'ea8cef1d-859c-4847-8b6b-a1be5eca371c',
+  };
+  await page.route('**/api/accounting/ledger/customer-accounts/profile/treasury/allocation-intent', route => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: { success: true, data: discoverOther
+      ? { status: 'PENDING', accountId: 'profile', idempotencyKey: other.idempotencyKey, command: other }
+      : { status: 'UNKNOWN' } } });
+    localCommand = route.request().postDataJSON();
+    return route.fulfill({ status: 409, json: { success: false, code: 'ALLOCATION_INTENT_PENDING' } });
+  });
+  await page.route('**/api/accounting/ledger/customer-accounts/profile/treasury/allocation-intent/cancel', route => {
+    expect(route.request().postDataJSON()).toEqual(localCommand);
+    discoverOther = true;
+    return route.fulfill({ json: { success: true, data: { status: 'CANCELED' } } });
+  });
+  await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
+  await workspace.getByRole('checkbox', { name: 'انتخاب هزینه حمل مستقل', exact: true }).check();
+  await workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();
+  await workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
+  const review = await confirmReview(page);
+  await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
+  await review.getByRole('button', { name: 'لغو درخواست تخصیص', exact: true }).click();
+  await expect(workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true })).toBeDisabled();
+  await workspace.getByRole('button', { name: 'ادامه بررسی درخواست قبلی', exact: true }).click();
+  await expect(review.getByText(other.reference, { exact: true })).toBeVisible();
+  expect(commands).toHaveLength(0);
+});
 
 test('an authorized manager supplies a reason and cancels only the discovered pending intent', async ({ page }) => {
   const discovery = { status: 'BLOCKED', reconciliationId: 'pending-intent' };

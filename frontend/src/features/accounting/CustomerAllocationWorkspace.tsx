@@ -306,6 +306,8 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
         });
         durableRequest.current = undefined; request.current = undefined;
         setUncertain(false); setRecovered(false); setConfirmed(false); setReview(false); setNotice('درخواست تخصیص لغو شد.');
+        setStorageState('checking');
+        setDiscoveryRevision(value => value + 1);
       }
       else setError('نتیجهٔ درخواست هنوز تأیید نشده است؛ ثبت جدید انجام ندهید.');
     } catch { if (mounted.current) setError('بررسی وضعیت فعلاً در دسترس نیست؛ درخواست قبلی محفوظ است.'); }

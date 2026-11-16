@@ -895,7 +895,7 @@ export const allocateCustomerCreditPrisma = async (database: Database, input: {
   bookId: string; fiscalYearId: string; periodId: string; receivableLedgerId: string;
   documentDate: Date; reason: string; reference: string; idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
 }) => customerTransaction(database, async tx => {
-  await requireCustomerSourceSharesWithin(tx);
+  await requireCustomerSourceSharesWithin(tx, input.sourcePlanHash ? 'grouped-allocation' : 'other');
   const creditOwner = await tx.accountingCustomerOpenItem.findUnique({
     where: { id: input.creditItemId },
     select: { kind: true, profile: { select: { partySourceId: true } } },
@@ -974,8 +974,18 @@ export const reverseCustomerAllocationPrisma = async (database: Database, input:
   const original = await tx.accountingSettlementAllocation.findUnique({ where: { id: input.allocationId }, include: {
     lines: true, transaction: { include: { profile: true } }, creditSource: { include: { profile: true } }, reversedBy: true,
   } });
-  if (original && (original.creditItemId !== null || original.treasuryTransactionId === null)) await requireCustomerSourceSharesWithin(tx);
   const profile = original?.transaction?.profile ?? original?.creditSource?.profile;
+  if (original && (original.creditItemId !== null || original.treasuryTransactionId === null)) {
+    const suffix = original.creditItemId ? `:${original.creditItemId}` : '';
+    const parentKey = suffix && original.idempotencyKey.endsWith(suffix) ? original.idempotencyKey.slice(0, -suffix.length) : '';
+    const intent = parentKey && profile ? await tx.accountingCustomerAllocationIntent.findFirst({
+      where: { idempotencyKey: parentKey, profileId: profile.id, state: 'COMMITTED' }, select: { result: true },
+    }) : null;
+    const result = intent?.result;
+    const grouped = result && typeof result === 'object' && !Array.isArray(result) &&
+      Array.isArray(result.allocationIds) && result.allocationIds.includes(original.id);
+    await requireCustomerSourceSharesWithin(tx, grouped ? 'grouped-credit-reversal' : 'other');
+  }
   if (!original || original.reversesId || !profile || profile.partySourceId !== lockedCustomer) throw new AccountingCustomerTreasuryError('ALLOCATION_NOT_FOUND', 'تخصیص پیدا نشد.', 404);
   if (original.transaction && original.transaction.kind !== 'CUSTOMER_RECEIPT') throw new AccountingCustomerTreasuryError('REFUND_REVERSAL_REQUIRES_CORRECTION', 'اصلاح استرداد باید همراه با برگشت سند پرداخت انجام شود.', 409);
   if (original.reversedBy) return original.reversedBy;

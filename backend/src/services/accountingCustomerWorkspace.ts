@@ -190,7 +190,10 @@ export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id
   return database.$transaction(async tx => {
     if (!['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION'].includes(input.kind)
       || input.parts !== undefined || input.sourceAllocations !== undefined
-      || (input.kind === 'ALLOCATION' && input.creditItemId !== undefined)) await requireCustomerSourceSharesWithin(tx);
+      || (input.kind === 'ALLOCATION' && input.creditItemId !== undefined)) {
+      const isGrouped = input.kind === 'ALLOCATION' && input.sourceAllocations !== undefined && input.parts === undefined;
+      await requireCustomerSourceSharesWithin(tx, isGrouped ? 'grouped-allocation' : 'other');
+    }
     const resolved = await resolveCustomerWorkspace(tx, id);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${resolved.customerId}`}))`;
     const profile = await ensureCustomerWorkspaceProfile(tx, id, input.actor, input.occurredAt);

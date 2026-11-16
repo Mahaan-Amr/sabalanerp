@@ -13,7 +13,14 @@ test('admitted grouped posting commits exact shares once and reverses independen
   const moduleEntry = require.cache[compatibilityPath]!;
   // Replace admission only in this test process. The application has no test
   // switch, and every financial write uses the owned temporary database.
-  moduleEntry.exports = { ...compatibility, requireCustomerSourceSharesWithin: async () => {} };
+  moduleEntry.exports = { ...compatibility, requireCustomerSourceSharesWithin: async (
+    tx: import('@prisma/client').Prisma.TransactionClient,
+    operation?: import('../customerSemanticCompatibility').CustomerSourceShareOperation,
+  ) => {
+    if (operation !== 'grouped-allocation' && operation !== 'grouped-credit-reversal') {
+      await compatibility.requireCustomerSourceSharesWithin(tx, operation);
+    }
+  } };
   try {
     const { customerFinanceFixture } = require('./customerFinanceFixture') as typeof import('./customerFinanceFixture');
     const { recordCustomerAccountOperation, recordCustomerWorkspaceTreasury, readCustomerWorkspace } =
@@ -37,6 +44,10 @@ test('admitted grouped posting commits exact shares once and reverses independen
       const before = await read();
       const debt = before.openItems.find(row => row.kind === 'RECEIVABLE')!;
       const credit = before.openItems.find(row => row.kind === 'CREDIT')!;
+      await assert.rejects(recordCustomerWorkspaceTreasury(f.db, customer, {
+        ...f.common, kind: 'ALLOCATION', amountRials: 0n, creditItemId: credit.id,
+        allocations: [{ openItemId: debt.id, amountRials: 1n }], idempotencyKey: randomUUID(),
+      }), { code: 'CUSTOMER_SOURCE_SHARES_CLOSED' });
       const command = {
         ...f.common, kind: 'ALLOCATION' as const, amountRials: 0n, allocations: [], idempotencyKey: randomUUID(),
         sourceAllocations: [

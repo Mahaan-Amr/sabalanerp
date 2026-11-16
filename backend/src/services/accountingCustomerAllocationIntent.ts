@@ -17,7 +17,7 @@ const allocationKey = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]
  * Do not expose this until all writers and cancellation share a proven fence.
  */
 export function prepareAdmittedCustomerAllocationIntent(database: PrismaClient, accountId: string, input: AllocationInput) {
-  return prepareCustomerAllocationIntent(database, accountId, input, requireCustomerSourceSharesWithin);
+  return prepareCustomerAllocationIntent(database, accountId, input, tx => requireCustomerSourceSharesWithin(tx, 'grouped-allocation'));
 }
 
 export async function prepareCustomerAllocationIntent(database: PrismaClient, accountId: string, input: AllocationInput,

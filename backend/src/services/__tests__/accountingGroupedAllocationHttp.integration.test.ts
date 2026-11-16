@@ -16,7 +16,14 @@ test('authenticated grouped allocation reserves, posts and recovers the same res
   const compatibilityPath = require.resolve('../customerSemanticCompatibility');
   const original = require(compatibilityPath);
   const entry = require.cache[compatibilityPath]!;
-  entry.exports = { ...original, requireCustomerSourceSharesWithin: async () => {} };
+  entry.exports = { ...original, requireCustomerSourceSharesWithin: async (
+    tx: import('@prisma/client').Prisma.TransactionClient,
+    operation?: import('../customerSemanticCompatibility').CustomerSourceShareOperation,
+  ) => {
+    if (operation !== 'grouped-allocation' && operation !== 'grouped-credit-reversal') {
+      await original.requireCustomerSourceSharesWithin(tx, operation);
+    }
+  } };
   const { prisma } = require('../../lib/prisma') as typeof import('../../lib/prisma');
   let server: ReturnType<express.Express['listen']> | undefined;
   try {

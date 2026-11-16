@@ -287,7 +287,7 @@ router.get(allocationIntentPath, ...treasuryCommandAccess, privateAllocationInte
   const intent = await readCustomerAllocationIntent(prisma, req.params.id, { ...actorOf(req), profile: profileOf(req) });
   if (intent.status !== 'UNKNOWN') return intent;
   try {
-    await prisma.$transaction(tx => requireCustomerSourceSharesWithin(tx));
+    await prisma.$transaction(tx => requireCustomerSourceSharesWithin(tx, 'grouped-allocation'));
   } catch (error) {
     if (error instanceof AccountingCustomerTreasuryError && error.code === 'CUSTOMER_SOURCE_SHARES_CLOSED') {
       return { status: 'CLOSED' };

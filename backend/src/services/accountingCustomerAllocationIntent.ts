@@ -24,8 +24,13 @@ export async function prepareCustomerAllocationIntent(database: PrismaClient, ac
   const plan = input.sourceAllocations;
   if (input.kind !== 'ALLOCATION' || !input.confirmed || input.amountRials !== 0n || input.allocations.length !== 0
     || input.receiptId || input.creditItemId || !plan?.length || plan.length > 100
-    || input.idempotencyKey.length < 8 || input.idempotencyKey.length > 128
-    || !Number.isFinite(input.occurredAt.getTime()) || input.reason.trim().length < 8 || !input.reference.trim()
+    || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.idempotencyKey)
+    || !Number.isFinite(input.occurredAt.getTime()) || input.occurredAt > new Date()
+    || !input.periodId || !input.postingRuleId || input.reason.trim().length < 8 || !input.reference.trim()
+    || [input.periodId, input.postingRuleId, input.reason, input.reference].some(value => value.length > 4096)
+    || [input.financialAccountId, input.bankLedgerId, input.receiptId, input.creditItemId, input.allocationId,
+      input.supplierPartyId, input.parts, input.resolvedShares, input.expectedAmountRials, input.reversals,
+      input.expectedSequence, input.collectionLedgerId, input.unpaidRials].some(value => value !== undefined)
     || plan.some(row => Boolean(row.receiptId) === Boolean(row.creditItemId) || !row.allocations.length || row.allocations.length > 500
       || row.allocations.some(line => !line.openItemId || line.amountRials <= 0n))
     || new Set(plan.map(row => row.receiptId ?? row.creditItemId)).size !== plan.length) {

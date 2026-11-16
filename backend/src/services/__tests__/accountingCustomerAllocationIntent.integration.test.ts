@@ -37,6 +37,9 @@ test('one immutable pending intent is shared across devices without admitting a 
     const makeCommand = () => ({ ...f.common, kind: 'ALLOCATION' as const, amountRials: 0n, allocations: [], idempotencyKey: randomUUID(),
       sourceAllocations: [{ creditItemId: 'synthetic-source', allocations: [{ openItemId: debt.id, amountRials: 1n }] }] });
     const first = makeCommand(), second = makeCommand();
+    await assert.rejects(prepareCustomerAllocationIntent(f.db, customer, { ...first, idempotencyKey: 'not-a-browser-command' }), { code: 'INVALID_ALLOCATION_INTENT' });
+    await assert.rejects(prepareCustomerAllocationIntent(f.db, customer, { ...first, allocationId: 'unrelated-reversal' }), { code: 'INVALID_ALLOCATION_INTENT' });
+    assert.equal(await f.db.accountingCustomerAllocationIntent.count(), 0);
     const before = await Promise.all([f.db.accountingLedgerVoucher.count(), f.db.accountingSettlementAllocation.count(), f.db.accountingCustomerCommand.count()]);
     const attempts = await Promise.allSettled([prepareCustomerAllocationIntent(f.db, customer, first), prepareCustomerAllocationIntent(f.db, customer, second)]);
     assert.equal(attempts.filter(row => row.status === 'fulfilled').length, 1);

@@ -98,7 +98,7 @@ fi
 # A distinct runtime/control credential needs checkpoint-bound custody of the
 # previous environment and role-aware restore. The ordinary runner cannot yet
 # prove either, so refuse the opt-in before any lease, fetch or Compose action.
-if [ -n "${BACKEND_DATABASE_URL:-}${DEPLOYMENT_DATABASE_URL:-}${DEPLOYMENT_DATABASE_ROLE_SPLIT:-}" ]; then
+if [ "${BACKEND_DATABASE_URL+x}" = x ] || [ "${DEPLOYMENT_DATABASE_URL+x}" = x ] || [ "${DEPLOYMENT_DATABASE_ROLE_SPLIT+x}" = x ]; then
   echo 'Role-split deployment is unavailable in the protected runner.' >&2
   exit 1
 fi
@@ -112,7 +112,7 @@ env_value() {
   awk -F= -v key="${key}" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "${ENV_FILE}"
 }
 
-if [ -f "${ENV_FILE}" ] && [ -n "$(env_value BACKEND_DATABASE_URL)$(env_value DEPLOYMENT_DATABASE_URL)$(env_value DEPLOYMENT_DATABASE_ROLE_SPLIT)" ]; then
+if [ -f "${ENV_FILE}" ] && awk '/^[[:space:]]*(export[[:space:]]+)?(BACKEND_DATABASE_URL|DEPLOYMENT_DATABASE_URL|DEPLOYMENT_DATABASE_ROLE_SPLIT)[[:space:]]*=/ { found = 1; exit } END { exit !found }' "${ENV_FILE}"; then
   echo 'Role-split deployment is unavailable in the protected runner.' >&2
   exit 1
 fi

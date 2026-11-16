@@ -41,6 +41,10 @@ test('allocation migrations preserve a populated ledger and allow ordinary settl
       await tx.$executeRaw`ALTER TABLE public.accounting_customer_commands DISABLE TRIGGER bind_customer_allocation_intent_result`;
       await verifyCustomerAllocationDeploymentState(tx);
     }), /protections are incomplete/);
+    await assert.rejects(db.$transaction(async tx => {
+      await tx.$executeRaw`ALTER TABLE public.accounting_customer_command_key_fences DROP CONSTRAINT accounting_customer_command_key_fences_pkey`;
+      await verifyCustomerAllocationDeploymentState(tx);
+    }), /protections are incomplete/);
     assert.deepEqual(await verifyCustomerAllocationDeploymentState(db), { customerAllocationDatabaseProtections: 'verified' });
     assert.deepEqual(await evidence(), vouchers);
     assert.equal(after.profile?.id, before.profile?.id);

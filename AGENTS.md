@@ -34,6 +34,10 @@ Production deployment and rollback must follow `docs/operations/zero-data-loss-d
 
 Before every production update, run reference-aware storage preflight on both production and the independent backup host, before image builds, heavy transfers or maintenance. Remove only proven eligible Sabalan artifacts; preserve running services, foreign projects, supported browser builds, rollback/recovery dependencies, active operations and incident holds. Measure capacity again after cleanup. Never blanket-prune images, containers or volumes to make capacity pass. Keep the newest two complete healthy independently verified recovery points, verifying replacements before pruning. ADR-0131 and `docs/operations/online-deployment.md` record the online-deployment contract and status; online mutations and switching remain blocked until the required evidence exists.
 
+### Shared development and release handoff
+
+Before combining work from another device or developer, and before preparing a production candidate, follow `docs/operations/developer-release-handoff.md`. Preserve each checkout's uncommitted work, reconcile all intended branches against the current remote, and freeze one clean, published commit with its Inquiry submodule identity. Run the affected acceptance checks and hand the exact commit and results to the protected release operator. The operator uses `docs/operations/protected-maintenance-next-update.md`; the developer handoff never substitutes for its deployment gates.
+
 ### Sabalan Design System
 
 Every interactive frontend change must use the platform-owned Sabalan Design System. Read `docs/design-system/catalog.md` before changing UI and use `frontend/src/components/erp` plus `frontend/src/styles/design-system-tokens.css`; Guard and Contract Product Selection are references, not sources of domain-specific shared concepts.

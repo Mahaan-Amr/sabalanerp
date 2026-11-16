@@ -49,7 +49,7 @@ export async function prepareCustomerAllocationIntent(database: PrismaClient, ac
     if (resolved.customerId !== initial.customerId || !resolved.profile) return fail('CUSTOMER_PROFILE_NOT_FOUND', 'پرونده مالی مشتری پیدا نشد.', 404);
     const prior = await tx.accountingCustomerAllocationIntent.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
     if (prior) {
-      if (prior.profileId !== resolved.profile.id || prior.ownerId !== input.actor.id || prior.accountId !== accountId || prior.commandHash !== commandHash)
+      if (prior.profileId !== resolved.profile.id || prior.ownerId !== input.actor.id || prior.commandHash !== commandHash)
         return fail('ALLOCATION_INTENT_MISMATCH', 'این درخواست متعلق به اطلاعات یا حساب دیگری است.');
       return { status: prior.state, idempotencyKey: prior.idempotencyKey };
     }
@@ -59,7 +59,7 @@ export async function prepareCustomerAllocationIntent(database: PrismaClient, ac
     if (await tx.accountingCustomerAllocationIntent.findFirst({ where: { profileId: resolved.profile.id, state: 'PENDING' }, select: { id: true } }))
       return fail('ALLOCATION_INTENT_PENDING', 'درخواست قبلی این حساب هنوز تعیین تکلیف نشده است.');
     const created = await tx.accountingCustomerAllocationIntent.create({ data: {
-      profileId: resolved.profile.id, accountId, ownerId: input.actor.id, idempotencyKey: input.idempotencyKey, commandHash, command,
+      profileId: resolved.profile.id, accountId: resolved.profile.id, ownerId: input.actor.id, idempotencyKey: input.idempotencyKey, commandHash, command,
     } });
     return { status: created.state, idempotencyKey: created.idempotencyKey };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
@@ -77,7 +77,7 @@ export async function cancelCustomerAllocationIntent(database: PrismaClient, acc
     const resolved = await resolveCustomerWorkspace(tx, accountId);
     if (resolved.customerId !== initial.customerId || !resolved.profile) return unknown();
     const identity = {
-      idempotencyKey: input.idempotencyKey, profileId: resolved.profile.id, ownerId: input.actor.id, accountId, commandHash,
+      idempotencyKey: input.idempotencyKey, profileId: resolved.profile.id, ownerId: input.actor.id, commandHash,
     };
     await serializeCustomerAllocationWithin(tx, resolved.profile.id);
     const canceled = await tx.accountingCustomerAllocationIntent.updateMany({
@@ -100,7 +100,7 @@ export async function readCustomerAllocationIntent(database: PrismaClient, accou
   const pending = await database.accountingCustomerAllocationIntent.findFirst({ where: { profileId: resolved.profile.id, state: 'PENDING' } });
   if (!pending) return unknown();
   if (pending.ownerId !== actor.id) return { status: 'BLOCKED' as const };
-  return { status: 'PENDING' as const, accountId: pending.accountId, idempotencyKey: pending.idempotencyKey, command: pending.command };
+  return { status: 'PENDING' as const, accountId: pending.profileId, idempotencyKey: pending.idempotencyKey, command: pending.command };
 }
 
 /** Reconcile a known exact command, including terminal results. Missing or
@@ -112,7 +112,7 @@ export async function readCustomerAllocationIntentByCommand(database: PrismaClie
   const resolved = await resolveCustomerWorkspace(database, accountId);
   if (!resolved.profile) return unknown();
   const intent = await database.accountingCustomerAllocationIntent.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
-  if (!intent || intent.profileId !== resolved.profile.id || intent.accountId !== accountId || intent.ownerId !== input.actor.id
+  if (!intent || intent.profileId !== resolved.profile.id || intent.ownerId !== input.actor.id
     || intent.commandHash !== hashAccountingEvidence({ ...input, actor: undefined })) return unknown();
   if (intent.state === 'PENDING') return { status: 'PENDING' as const };
   if (intent.state === 'CANCELED') return { status: 'CANCELED' as const };

@@ -249,7 +249,7 @@ export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id
         // parent-command trigger records completion in this same transaction.
         const sourcePlanHash = hashAccountingEvidence({ ...input, actor: undefined });
         const intent = await tx.accountingCustomerAllocationIntent.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
-        if (!intent || intent.profileId !== profile.id || intent.accountId !== id ||
+        if (!intent || intent.profileId !== profile.id ||
           intent.ownerId !== input.actor.id || intent.commandHash !== sourcePlanHash) {
           return fail('ALLOCATION_INTENT_REQUIRED', 'درخواست تخصیص مطابق اطلاعات تأییدشده پیدا نشد.');
         }

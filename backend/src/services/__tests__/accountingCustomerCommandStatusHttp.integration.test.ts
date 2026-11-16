@@ -76,17 +76,24 @@ test('status HTTP boundary requires treasury authority and the exact original no
       idempotencyKey: pendingBody.idempotencyKey, command: pendingBody,
       commandHash: hashAccountingEvidence({ ...normalized, idempotencyKey: pendingBody.idempotencyKey, actor: undefined }),
     } });
-    const discover = (token: string) => fetch(`${base}/allocation-intent`, { headers: { cookie: `sabalan_session=${token}` } });
+    const aliasBase = base.replace(encodeURIComponent(customer), encodeURIComponent(account.profile!.id));
+    const discover = (token: string, origin = base) => fetch(`${origin}/allocation-intent`, { headers: { cookie: `sabalan_session=${token}` } });
     const found = await discover(owner.token);
     assert.match(found.headers.get('cache-control') || '', /no-store/);
     assert.deepEqual((await found.json() as any).data, {
-      status: 'PENDING', accountId: customer, idempotencyKey: pendingBody.idempotencyKey, command: pendingBody,
+      status: 'PENDING', accountId: account.profile!.id, idempotencyKey: pendingBody.idempotencyKey, command: pendingBody,
     });
     assert.deepEqual((await (await discover(another.token)).json() as any).data, { status: 'BLOCKED' });
     assert.equal((await discover(denied.token)).status, 403);
     assert.equal((await send('/allocation-intent/cancel', undefined, pendingBody)).status, 401);
     assert.deepEqual((await (await send('/allocation-intent/cancel', another.token, pendingBody)).json() as any).data, { status: 'UNKNOWN' });
-    assert.deepEqual((await (await send('/allocation-intent/cancel', owner.token, pendingBody)).json() as any).data, { status: 'CANCELED' });
+    assert.deepEqual((await (await discover(owner.token, aliasBase)).json() as any).data, {
+      status: 'PENDING', accountId: account.profile!.id, idempotencyKey: pendingBody.idempotencyKey, command: pendingBody,
+    });
+    const cancelFromAlias = await fetch(`${aliasBase}/allocation-intent/cancel`, {
+      method: 'POST', headers: { 'content-type': 'application/json', cookie: `sabalan_session=${owner.token}` }, body: JSON.stringify(pendingBody),
+    });
+    assert.deepEqual((await cancelFromAlias.json() as any).data, { status: 'CANCELED' });
     assert.deepEqual((await (await send('/allocation-intent/status', owner.token, pendingBody)).json() as any).data, { status: 'CANCELED' });
     assert.deepEqual((await (await discover(owner.token)).json() as any).data, { status: 'CLOSED' });
     assert.deepEqual(await Promise.all([f.db.accountingCustomerCommand.count(), f.db.accountingLedgerVoucher.count(), f.db.accountingSettlementAllocation.count()]), before);

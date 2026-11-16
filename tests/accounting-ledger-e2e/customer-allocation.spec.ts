@@ -32,7 +32,7 @@ const fixture = {
   receipts: [receipt('cash', '500000000', 'CASH'), receipt('cheque', '300000000', 'CHECK')],
   treasuryChecks: [{ id: 'check', serialNumber: '۱۲۳', bankName: 'بانک آزمون', amountRials: '300000000', dueAt: '2026-12-01', status: 'RECEIVED', direction: 'RECEIVABLE' }],
 };
-async function openWorkspace(page: Page, transform = (data: typeof fixture) => data, discovery?: Record<string, unknown> | 'CLOSED') {
+async function openWorkspace(page: Page, transform = (data: typeof fixture) => data, discovery?: Record<string, unknown> | 'CLOSED', accountId = 'profile') {
   await installAccountingSessionFixture(page);
   const commands: any[] = [];
   await page.route('**/api/accounting/ledger/customer-accounts/**', route => {
@@ -55,7 +55,7 @@ async function openWorkspace(page: Page, transform = (data: typeof fixture) => d
     }
     return route.fulfill({ json: { success: true, data: new URL(route.request().url()).pathname.endsWith('/context') ? context : transform(fixture) } });
   });
-  await page.goto('/dashboard/accounting/customer-accounts/profile');
+  await page.goto(`/dashboard/accounting/customer-accounts/${encodeURIComponent(accountId)}`);
   if (transform(fixture).capabilities.canManageTreasury) await page.getByRole('button', { name: 'تخصیص به بدهی', exact: true }).click();
   else await page.getByRole('button', { name: 'تخصیص', exact: true }).click();
   const workspace = page.getByRole('region', { name: 'تخصیص به بدهی‌های مشتری', exact: true });
@@ -105,7 +105,7 @@ test('a fresh browser discovers and cancels the authoritative pending request wi
     occurredAt: '2026-10-01T00:00:00.000Z', periodId: 'period', postingRuleId: 'rule', reason: 'تخصیص با مدرک مشتری',
     reference: 'نامه تخصیص', confirmed: true, idempotencyKey: '11c890ec-4697-418e-8bd7-08d502cb1100',
   };
-  const { workspace, commands } = await openWorkspace(page, data => data, command);
+  const { workspace, commands } = await openWorkspace(page, data => data, command, 'customer:customer');
   await workspace.getByRole('button', { name: 'ادامه بررسی درخواست قبلی', exact: true }).click();
   const review = page.getByRole('dialog', { name: 'بررسی و تأیید تخصیص', exact: true });
   await review.getByRole('button', { name: 'لغو درخواست تخصیص', exact: true }).click();

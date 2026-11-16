@@ -21,6 +21,9 @@ type AllocationCommand = {
 function responseCode(error: unknown) {
   return (error as { response?: { data?: { code?: string } } })?.response?.data?.code;
 }
+function matchesAllocationAccount(savedId: string, routeId: string, customerId: string, profileId?: string) {
+  return savedId === routeId || savedId === profileId || savedId === `customer:${customerId}`;
+}
 function accountingContextAt(context: CustomerFinanceContext | undefined, date: string) {
   const at = new Date(`${date}T00:00:00.000Z`).getTime();
   return {
@@ -101,9 +104,9 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
             setStorageState('closed');
             return;
           }
-          if (intent?.status === 'PENDING' && intent.accountId === accountId &&
+          if (intent?.status === 'PENDING' && intent.accountId === account.profile?.id &&
             intent.command?.idempotencyKey === intent.idempotencyKey && intent.command?.kind === 'ALLOCATION') {
-            saved = await reservePendingAllocation({ owner, bookId, customerId, accountId,
+            saved = await reservePendingAllocation({ owner, bookId, customerId, accountId: intent.accountId,
               command: intent.command, draft: emptyAllocationDraft() }, assertOwner);
           } else if (intent?.status !== 'UNKNOWN') {
             throw new Error('ALLOCATION_INTENT_UNAVAILABLE');
@@ -111,7 +114,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
         }
         assertOwner();
         if (saved) {
-          if (saved.owner !== owner || saved.accountId !== accountId) throw new Error('ALLOCATION_OWNER_CHANGED');
+          if (saved.owner !== owner || !matchesAllocationAccount(saved.accountId, accountId, customerId, account.profile?.id)) throw new Error('ALLOCATION_OWNER_CHANGED');
           const command = saved.command as unknown as AllocationCommand;
           durableRequest.current = saved;
           request.current = { fingerprint: JSON.stringify(command), command };
@@ -125,7 +128,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
       }
     })();
     return () => { cancelled = true; };
-  }, [user?.id, accountId, account.bookId, account.customerId, canAllocate]);
+  }, [user?.id, accountId, account.bookId, account.customerId, account.profile?.id, canAllocate]);
   useEffect(() => { setConfirmed(false); }, [draft, date, periodId, ruleId, reason, reference, account]);
   useEffect(() => {
     if (!sourceSelection || !canAllocate || consumedSelection.current === sourceSelection.revision) return;
@@ -174,7 +177,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
       await onRefresh();
       if (!mounted.current) return;
       if (!durableRequest.current || !ownerRef.current || durableRequest.current.owner !== ownerRef.current
-        || durableRequest.current.accountId !== accountId) throw new Error('ALLOCATION_PENDING_UNVERIFIED');
+        || !matchesAllocationAccount(durableRequest.current.accountId, accountId, account.customerId, account.profile?.id)) throw new Error('ALLOCATION_PENDING_UNVERIFIED');
       const owner = ownerRef.current, lease = await browserSessionContinuation.acquire();
       const assertOwner = () => { if (!mounted.current || ownerRef.current !== owner || lease.userId !== owner || scopeRef.current.accountId !== accountId
         || scopeRef.current.bookId !== durableRequest.current?.bookId || scopeRef.current.customerId !== durableRequest.current?.customerId) throw new Error('ALLOCATION_OWNER_CHANGED'); browserSessionContinuation.assertCurrent(lease); };
@@ -212,9 +215,9 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
         || scopeRef.current.bookId !== bookId || scopeRef.current.customerId !== customerId) throw new Error('ALLOCATION_OWNER_CHANGED'); browserSessionContinuation.assertCurrent(lease); };
       assertOwner();
       if (!durableRequest.current) {
-        durableRequest.current = await reservePendingAllocation({ owner, bookId, customerId, accountId, command: request.current.command, draft }, assertOwner);
+        durableRequest.current = await reservePendingAllocation({ owner, bookId, customerId, accountId: account.profile?.id ?? accountId, command: request.current.command, draft }, assertOwner);
       }
-      if (durableRequest.current.owner !== owner || durableRequest.current.accountId !== accountId) throw new Error('ALLOCATION_OWNER_CHANGED');
+      if (durableRequest.current.owner !== owner || !matchesAllocationAccount(durableRequest.current.accountId, accountId, customerId, account.profile?.id)) throw new Error('ALLOCATION_OWNER_CHANGED');
       assertOwner();
       const command = request.current.command;
       const reservation = await accountingAPI.customerAllocationIntent(accountId, 'prepare', command, lease);
@@ -253,9 +256,9 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
     let committed = false;
     try {
       const owner = ownerRef.current, saved = durableRequest.current;
-      if (!owner || !saved || saved.owner !== owner || saved.accountId !== accountId) throw new Error('ALLOCATION_OWNER_UNPROVEN');
+      if (!owner || !saved || saved.owner !== owner || !matchesAllocationAccount(saved.accountId, accountId, account.customerId, account.profile?.id)) throw new Error('ALLOCATION_OWNER_UNPROVEN');
       const lease = await browserSessionContinuation.acquire();
-      if (!mounted.current || ownerRef.current !== owner || lease.userId !== owner || scopeRef.current.accountId !== saved.accountId
+      if (!mounted.current || ownerRef.current !== owner || lease.userId !== owner || scopeRef.current.accountId !== accountId
         || scopeRef.current.bookId !== saved.bookId || scopeRef.current.customerId !== saved.customerId) throw new Error('ALLOCATION_OWNER_CHANGED');
       browserSessionContinuation.assertCurrent(lease);
       const command = request.current.command;
@@ -273,13 +276,13 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
         status = legacy.data?.data?.status;
       }
       if (!mounted.current) return;
-      if (ownerRef.current !== owner || scopeRef.current.accountId !== saved.accountId || scopeRef.current.bookId !== saved.bookId
+      if (ownerRef.current !== owner || scopeRef.current.accountId !== accountId || scopeRef.current.bookId !== saved.bookId
         || scopeRef.current.customerId !== saved.customerId) throw new Error('ALLOCATION_OWNER_CHANGED');
       browserSessionContinuation.assertCurrent(lease);
       if (status === 'COMMITTED') { setUncertain(false); setPosted(true); committed = true; }
       else if (status === 'CANCELED') {
         await retirePendingAllocation(saved, () => {
-          if (!mounted.current || ownerRef.current !== owner || scopeRef.current.accountId !== saved.accountId
+          if (!mounted.current || ownerRef.current !== owner || scopeRef.current.accountId !== accountId
             || scopeRef.current.bookId !== saved.bookId || scopeRef.current.customerId !== saved.customerId) throw new Error('ALLOCATION_OWNER_CHANGED');
           browserSessionContinuation.assertCurrent(lease);
         });

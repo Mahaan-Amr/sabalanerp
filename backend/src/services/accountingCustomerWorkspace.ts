@@ -267,7 +267,8 @@ export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id
         // Every child carries the entire confirmed plan: a retry cannot append another source.
         const results: Array<Awaited<ReturnType<typeof allocateCustomerCreditPrisma>>> = [];
         for (const row of plan) {
-          const command = { ...context, sourcePlanHash, idempotencyKey: `${input.idempotencyKey}:${row.receiptId ?? row.creditItemId}`,
+          const command = { ...context, sourcePlanHash, parentCommandKey: input.idempotencyKey,
+            idempotencyKey: `${input.idempotencyKey}:${row.receiptId ?? row.creditItemId}`,
             allocations: row.allocations, documentDate: input.occurredAt, reason: input.reason.trim(), reference: input.reference.trim(),
             receivableLedgerId: rule.receivableAccountId };
           if (row.creditItemId) {

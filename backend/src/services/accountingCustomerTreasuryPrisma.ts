@@ -818,6 +818,7 @@ export async function lockCustomerReceiptWithin(tx: Prisma.TransactionClient, re
 export const allocateCustomerReceiptPrisma = async (database: Database, input: {
   treasuryTransactionId: string; allocations: Array<{ openItemId: string; amountRials: bigint }>;
   sourcePlanHash?: string;
+  parentCommandKey?: string;
   bookId: string; fiscalYearId: string; periodId: string; customerAdvanceLedgerId: string; receivableLedgerId: string;
   documentDate: Date; reason?: string; reference?: string; idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
 }) => customerTransaction(database, async (tx) => {
@@ -886,12 +887,14 @@ export const allocateCustomerReceiptPrisma = async (database: Database, input: {
     ] });
   const voucher = await app.postVoucher({ voucherId: draft.id, actor: input.actor, reason: input.reason?.trim() || 'ثبت قطعی تخصیص دریافت به مطالبات' });
   return tx.accountingSettlementAllocation.create({ data: { treasuryTransactionId: receipt.id, idempotencyKey: input.idempotencyKey, ledgerVoucherId: voucher.id,
+    parentCommandKey: input.parentCommandKey, sourcePlanHash: input.sourcePlanHash,
     reason: input.reason?.trim(), createdBy: input.actor.id, lines: { create: input.allocations.map((item) => ({ openItemId: item.openItemId, amountRials: item.amountRials.toString() })) } }, include: { lines: true } });
 });
 
 export const allocateCustomerCreditPrisma = async (database: Database, input: {
   creditItemId: string; allocations: Array<{ openItemId: string; amountRials: bigint }>;
   sourcePlanHash?: string;
+  parentCommandKey?: string;
   bookId: string; fiscalYearId: string; periodId: string; receivableLedgerId: string;
   documentDate: Date; reason: string; reference: string; idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
 }) => customerTransaction(database, async tx => {
@@ -949,6 +952,7 @@ export const allocateCustomerCreditPrisma = async (database: Database, input: {
       ledgerLine({ accountId: input.receivableLedgerId, creditRials: total, partyId: credit.profile.accountingPartyId, evidence, description: 'تسویه بدهی مشتری' })] });
   const voucher = await app.postVoucher({ voucherId: draft.id, actor: input.actor, reason: input.reason });
   return tx.accountingSettlementAllocation.create({ data: { creditItemId: credit.id, idempotencyKey: input.idempotencyKey,
+    parentCommandKey: input.parentCommandKey, sourcePlanHash: input.sourcePlanHash,
     ledgerVoucherId: voucher.id, reason: input.reason, createdBy: input.actor.id,
     lines: { create: input.allocations.map(line => ({ openItemId: line.openItemId, amountRials: line.amountRials.toString() })) } }, include: { lines: true } });
 });
@@ -976,10 +980,9 @@ export const reverseCustomerAllocationPrisma = async (database: Database, input:
   } });
   const profile = original?.transaction?.profile ?? original?.creditSource?.profile;
   if (original && (original.creditItemId !== null || original.treasuryTransactionId === null)) {
-    const suffix = original.creditItemId ? `:${original.creditItemId}` : '';
-    const parentKey = suffix && original.idempotencyKey.endsWith(suffix) ? original.idempotencyKey.slice(0, -suffix.length) : '';
-    const intent = parentKey && profile ? await tx.accountingCustomerAllocationIntent.findFirst({
-      where: { idempotencyKey: parentKey, profileId: profile.id, state: 'COMMITTED' }, select: { result: true },
+    const intent = original.parentCommandKey && profile ? await tx.accountingCustomerAllocationIntent.findFirst({
+      where: { idempotencyKey: original.parentCommandKey, profileId: profile.id,
+        commandHash: original.sourcePlanHash ?? '', state: 'COMMITTED' }, select: { result: true },
     }) : null;
     const result = intent?.result;
     const grouped = result && typeof result === 'object' && !Array.isArray(result) &&

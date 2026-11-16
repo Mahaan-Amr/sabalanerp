@@ -2,6 +2,12 @@
 
 **Status: design and local reader diagnostic only. NO-GO for activation, merge as a working feature, or production release.** This plan grants no permission to deploy and is not an alternative deployment controller. The source-share guard stays closed until a separately reviewed implementation and all applicable evidence below exist. Follow `developer-release-handoff.md`, `protected-maintenance-next-update.md`, `zero-data-loss-deployment.md`, and ADR-0039 for every release.
 
+## Database role split precursor
+
+`docker-compose.database-role-split.yml` is an opt-in render/qualification overlay. It puts an independently supplied, URL-encoded `BACKEND_DATABASE_URL` on the long-running backend and `DEPLOYMENT_DATABASE_URL` on the control runner. The production Compose file and protected deployment command do not select the overlay. `scripts/production-database-role-boundary.mjs` checks URL shape, bounded pool parameters, target identity, and distinct decoded login names. These checks do not establish PostgreSQL role attributes, membership, grants, or object ownership.
+
+The protected runner currently reuses its environment file when starting a previous image during rollback, while its recovery scripts require a privileged `DATABASE_URL`. A cutover must first preserve exact previous environment bytes and credentials with protected rollback custody, prove that interrupted recovery can select them, and restore them with the previous image and checkpoint. Role/grant provisioning, actual direct-login negative probes, and restored-schema grant verification are still required. Do not select this overlay in production or activate allocations from its render test.
+
 ## Problem and boundaries
 
 The proposed workspace submits one confirmed `sourceAllocations` plan containing receipt and independent-credit shares. Its transaction requires the currently deny-only `requireCustomerSourceSharesWithin`. The independent-credit writer represents a settlement with `creditItemId` and a null `treasuryTransactionId`. The historical production-425 schema requires that transaction ID and its generated reader returned P2032 for this representation. No UI-only change, migration count, environment flag, or successful mock can establish safe admission.

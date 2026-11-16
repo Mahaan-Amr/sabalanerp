@@ -19,6 +19,8 @@ import {
 } from './shipmentQuantityProjectionStore';
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
 import { isPostCutoverFinalization } from './dispatchDocuments/featureGate';
+import { loadShipmentStatementRuntimeStateUnderLock } from './dispatchDocuments/runtimeState';
+import { assessBoundAllocationPricingFreshness } from './allocationPricingReadModel';
 import type { createDispatchDocuments } from './dispatchDocuments/service';
 import { AllocationPricingBindingError, assertExactStableReservationTransfer, bindFinalizedAllocationPricing, bindApprovedAllocationPriceEvidence } from './allocationPricingBinding';
 import { createPrismaAllocationPricingBindingPort } from './allocationPricingPrismaAdapter';
@@ -1101,6 +1103,88 @@ export async function loadingCancellationAccountingAuthority(db: Tx, actorId: st
   if (!workspacePermission || !['edit', 'admin'].includes(workspacePermission) || !grant.allowed) return null;
   return { actorRole: actor.role, workspace, workspacePermission, feature, featurePermission: grant.permissionLevel };
 }
+
+export async function readLegacyLoadingRecovery(tx: Tx, loadingId: string, cutoverAt: Date | null) {
+  const loading = await tx.logisticsLoading.findUnique({
+    where: { id: loadingId },
+    select: {
+      status: true, sourceKind: true,
+      salesDispatchInvoices: { orderBy: { number: 'desc' }, select: { id: true, number: true, voidedAt: true } },
+      canonicalAllocationRevisions: { take: 2, include: {
+        physicalExit: { select: { id: true } }, manualOutageExit: { select: { id: true } },
+        queueTurn: { include: { physicalExit: { select: { id: true } }, manualOutageExit: { select: { id: true } } } },
+        lines: { select: { sourceKind: true, sourceContractId: true, sourceContractItemId: true, productId: true } },
+        candidate: { select: { id: true, status: true, waybills: { orderBy: { number: 'desc' }, select: {
+          id: true, number: true, status: true, voidedAt: true, replacesWaybillId: true,
+          physicalExit: { select: { id: true } }, manualOutageExit: { select: { id: true } },
+          exitAuthorizations: { where: { status: { in: ['ACTIVE', 'CONSUMED'] } }, select: { id: true } },
+        } } } },
+      } },
+    },
+  });
+  if (!loading || loading.status !== 'FINALIZED' || loading.sourceKind !== 'SALES_CONTRACT' ||
+      loading.canonicalAllocationRevisions.length !== 1 || loading.salesDispatchInvoices.some(invoice => !invoice.voidedAt)) return null;
+  const [revision] = loading.canonicalAllocationRevisions;
+  const candidate = revision.candidate;
+  const invoice = loading.salesDispatchInvoices[0];
+  if (!invoice || !revision.sealedAt || revision.sourceKind !== 'SALES_CONTRACT' ||
+      (cutoverAt && isPostCutoverFinalization(revision.finalizedAt, cutoverAt)) ||
+      revision.physicalExit || revision.manualOutageExit || revision.queueTurn.physicalExit || revision.queueTurn.manualOutageExit ||
+      revision.queueTurn.status !== 'LOADING_FINALIZED' || revision.queueTurn.loadingId !== loadingId ||
+      candidate?.status !== 'ACCEPTED' || candidate.waybills.some(waybill =>
+        waybill.status !== 'VOIDED' || !waybill.voidedAt || waybill.physicalExit || waybill.manualOutageExit ||
+        waybill.exitAuthorizations.length)) return null;
+  const [waybill] = candidate.waybills;
+  if (!waybill || candidate.waybills.some(item => item.replacesWaybillId === waybill.id)) return null;
+  const cancellation = await tx.accountingDispatchCommand.findFirst({ where: {
+    candidateId: candidate.id, action: `VOID_WAYBILL_AND_INVOICE:${waybill.id}:${invoice.id}`,
+  }, select: { id: true } });
+  const pending = await tx.crossWorkspaceDuty.findFirst({ where: {
+    sourceActionCode: LOADING_CANCELLATION_DUTY, sourceId: loadingId, status: 'OPEN',
+  }, select: { id: true } });
+  return cancellation && !pending ? { revision, candidate, waybill, invoice } : null;
+}
+
+export const recoverLegacyLoadingWaybill = (prisma: Database, input: {
+  loadingId: string; waybillId: string; invoiceId: string; reason: string; actorId: string;
+}) => serializable(prisma, async tx => {
+  const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+  if (reason.length < 3 || reason.length > 2000) {
+    throw new DispatchAllocationValidationError('دلیل صدور مجدد باید بین ۳ و ۲۰۰۰ نویسه باشد.');
+  }
+  await tx.$queryRaw`SELECT id FROM users WHERE id=${input.actorId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT revision FROM effective_authorization_state WHERE id=1 FOR UPDATE`;
+  if (!await loadingCancellationAccountingAuthority(tx, input.actorId)) {
+    throw new LoadingCancellationAccountingAccessError('مجوز مدیریت اسناد ارسال برای صدور مجدد لازم است.');
+  }
+  await assertCanonicalDispatchCommandAllowed(tx);
+  await lockKeys(tx, [`LOGISTICS_LOADING:${input.loadingId}`, `SALES_INVOICE:${input.loadingId}`]);
+  const gate = await loadShipmentStatementRuntimeStateUnderLock(tx);
+  const control = await tx.shipmentStatementOperationsControl.findUnique({
+    where: { id: 'customer-shipment-statements' }, select: { id: true },
+  });
+  const target = gate && control && await readLegacyLoadingRecovery(tx, input.loadingId, gate.cutoverAt);
+  if (!target || target.waybill.id !== input.waybillId || target.invoice.id !== input.invoiceId) {
+    throw new DispatchAllocationConflictError('وضعیت اسناد بارگیری تغییر کرده یا صدور مجدد مجاز نیست. اسناد را به‌روزرسانی کنید.');
+  }
+  const { candidate, revision, waybill, invoice } = target;
+  await lockKeys(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${candidate.id}`,
+    `ACCOUNTING_DISPATCH_WAYBILL:${waybill.id}`, `GUARD_QUEUE:${revision.queueTurnId}`,
+    `LOGISTICS_ALLOCATION_REVISION:${revision.id}`]);
+  await lockQueueTurns(tx, [revision.queueTurnId]);
+  const contractIds = [...new Set(revision.lines.map(line => ordinaryAllocationLine(line).sourceContractId))];
+  await lockPricingContracts(tx, contractIds);
+  await assertOrdinaryContractsDispatchEligible(tx, contractIds, DispatchAllocationConflictError);
+  if (!await isGuardQueueTurnCurrentlyReady(tx, revision.queueTurn) ||
+      (await assessBoundAllocationPricingFreshness(tx, revision.id)).status !== 'CURRENT') {
+    throw new DispatchAllocationConflictError('آمادگی راننده و خودرو یا شواهد قیمت بارگیری نیاز به بررسی دارد.');
+  }
+  const replacement = await issueWaybill(tx, { ...candidate, allocationRevision: revision }, input.actorId, waybill.id);
+  await appendAudit(tx, { aggregateType: 'ACCOUNTING_DISPATCH_WAYBILL', aggregateId: replacement.id,
+    eventType: 'WAYBILL_REISSUED_AFTER_VOID', actorId: input.actorId,
+    payload: { reason, loadingId: input.loadingId, voidedWaybillId: waybill.id, voidedInvoiceId: invoice.id } });
+  return replacement.id;
+});
 
 type FinalizedLoadingCancellation = {
   loadingId: string; reason: string; actorId: string; expectedDocumentIds?: string[];

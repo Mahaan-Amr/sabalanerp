@@ -157,7 +157,10 @@ export default function AccountingDispatchPage() {
         /* External-driver OTP sessions do not require the scanner. */
       }
       return dispatchConfirmationAPI.startSession(waybillId, workstationId);
-    }, "تأیید راننده آماده انجام است.");
+    }, data => ({
+      kind: "success",
+      text: data?.authorization?.id ? "هویت راننده قبلاً تأیید شده است." : "تأیید راننده آماده انجام است.",
+    }));
     if (succeeded) setSection("confirmation");
   };
 
@@ -226,12 +229,17 @@ export default function AccountingDispatchPage() {
           }),
         "بارنامه جایگزین صادر شد.",
       );
-    if (reasonAction.type === "revoke")
+    if (reasonAction.type === "revoke") {
       succeeded = await runDispatch(
         () =>
           dispatchConfirmationAPI.revokeAuthorization(reasonAction.id, reason),
         "مجوز خروج لغو شد.",
       );
+      if (succeeded) {
+        setConfirmation(null);
+        setSection("candidates");
+      }
+    }
     if (reasonAction.type === "reconstruct")
       succeeded = await runDispatch(() => accountingAPI.reconstructLegacyWaybill(reasonAction.id, reason),
         "نسخه بازسازی‌شده بارنامه با حفظ سابقه ثبت شد.");
@@ -348,6 +356,7 @@ export default function AccountingDispatchPage() {
       eyebrow="حسابداری"
       title="فرمان‌های ارسال"
       backHref="/dashboard/accounting"
+      onBack={section === "confirmation" ? () => setSection("candidates") : undefined}
       actions={[{ label: "به‌روزرسانی", icon: FaSync, onClick: loadDispatch, tone: "neutral" }]}
       sectionNavigation={
         <ErpSegmentedControl
@@ -393,10 +402,10 @@ export default function AccountingDispatchPage() {
           dispatchCapabilities.canManageAccountingConfirmation && (
             <ErpCard className="p-4">
               <strong>تأیید هویت راننده</strong>
-              <p className="mt-1 text-sm sds-text-muted">
+              {confirmationActions.biometric && <p className="mt-1 text-sm sds-text-muted">
                 یک انگشت ثبت‌شده را انتخاب کنید و تا پایان بررسی روی حسگر نگه
                 دارید.
-              </p>
+              </p>}
               <div className="mt-3 flex flex-wrap gap-2">
                 {confirmationActions.biometric &&
                   (["RIGHT_INDEX", "LEFT_INDEX"] as const).map((finger) => (
@@ -558,12 +567,13 @@ export default function AccountingDispatchPage() {
           {!detail && <ErpInlineState kind="stale" title="جزئیات قیمت این پرونده در دسترس نیست؛ پیش از تصمیم اطلاعات حسابداری را بررسی کنید." />}
           {loadingId && <SalesDispatchInvoices workspace="accounting" loadingId={loadingId}
             canManage={canManageLoadingInvoices(loadingId)}
+            onVoided={loadDispatch}
             documentBlockReason={group.some(candidate => candidate.status === 'ACCEPTED' &&
               !candidate.waybills?.some((waybill: any) => ['ISSUED', 'EXIT_RECORDED'].includes(waybill.status) && waybill.legacyReconstruction) &&
               dispatchDetails[candidate.id]?.bundle?.artifacts.filter(artifact => artifact.kind === 'WAYBILL').length !== 1)
               ? 'فایل بارنامه موجود نیست؛ برای بارنامه قدیمی، صدور اسناد نسخه بازسازی‌شده را ایجاد می‌کند.' : undefined}
-            onIssueAll={async () => {
-              try { await accountingAPI.issueLoadingDocuments(loadingId); await loadDispatch(); }
+            onIssueAll={async recovery => {
+              try { await accountingAPI.issueLoadingDocuments(loadingId, recovery); await loadDispatch(); }
               catch (error) {
                 setDispatchNotice({ kind: 'error', text: userFacingError(error, 'صدور همه اسناد کامل نشد؛ وضعیت راننده‌ها را بررسی کنید.') });
                 const [candidates, details] = await Promise.allSettled([

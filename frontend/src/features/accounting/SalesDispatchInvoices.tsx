@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import api from "@/lib/api";
-import { FaDownload, FaEye, FaFileInvoice, FaPrint, FaSync } from "react-icons/fa";
+import { FaBan, FaDownload, FaEye, FaFileInvoice, FaPrint, FaSync } from "react-icons/fa";
 import {
   ErpButton,
   ErpCard,
@@ -26,8 +26,10 @@ type ReadModel = {
   ready: boolean;
   blockedReason: string | null;
   documentsComplete?: boolean;
+  recovery?: { waybillId: string; waybillNumber: string; invoiceId: string; invoiceNumber: string } | null;
   invoices: Invoice[];
 };
+type RecoveryRequest = { waybillId: string; invoiceId: string; reason: string };
 export default function SalesDispatchInvoices({
   loadingId,
   workspace,
@@ -46,7 +48,7 @@ export default function SalesDispatchInvoices({
   refreshKey?: unknown;
   onActiveInvoiceChange?: (invoiceId: string | null) => void;
   onVoided?: () => Promise<void>;
-  onIssueAll?: () => Promise<void>;
+  onIssueAll?: (recovery?: RecoveryRequest) => Promise<void>;
   onPrintAll?: () => Promise<void>;
   documentBlockReason?: string;
   onCloseVoid?: () => void;
@@ -56,6 +58,8 @@ export default function SalesDispatchInvoices({
     [pending, setPending] = useState(false);
   const [targetId, setTargetId] = useState(""),
     [reason, setReason] = useState("");
+  const [recoveryDraft, setRecoveryDraft] = useState<{ waybillId: string; reason: string } | null>(null);
+  const [invalidInvoiceVoid, setInvalidInvoiceVoid] = useState<{ invoiceId: string; reason: string } | null>(null);
   const busy = useRef(false),
     requestKey = useRef<string | null>(null);
   const base = `/${workspace}/loadings/${encodeURIComponent(loadingId)}/sales-invoices`;
@@ -155,6 +159,10 @@ export default function SalesDispatchInvoices({
       </ErpSheet>
     );
   }
+  const recovery = canManage && workspace === "accounting" && onIssueAll ? data?.recovery : null;
+  const hasInvalidInvoice = data?.invoices.some(invoice => invoice.status === "INVALIDATED");
+  const canIssueReplacement = data?.documentsComplete && data.ready && data.invoices.length > 0 &&
+    data.invoices.every(invoice => invoice.status === "VOIDED");
   return (
     <ErpCard className="mt-4 space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -166,12 +174,18 @@ export default function SalesDispatchInvoices({
             disabled={pending}
             onClick={() => void load()}
           />
-          {canManage && workspace === "accounting" && !(onIssueAll && data?.documentsComplete && data.invoices.some(i => i.status === "ISSUED")) && (
+          {recovery && recoveryDraft?.waybillId !== recovery.waybillId && (
+            <ErpButton label="صدور مجدد بارنامه و فاکتور" icon={FaFileInvoice} disabled={pending}
+              onClick={() => setRecoveryDraft({ waybillId: recovery.waybillId, reason: "" })} />
+          )}
+          {!recovery && canManage && workspace === "accounting" && !(onIssueAll && data?.documentsComplete && data.invoices.some(i => i.status === "ISSUED")) && (
             <ErpButton
               icon={FaFileInvoice}
-              label={onIssueAll ? (data?.invoices.some(i => i.status === "ISSUED") ? "تکمیل صدور بارنامه‌ها" : "صدور بارنامه‌ها و فاکتور فروش") : "صدور فاکتور فروش"}
+              label={canIssueReplacement ? "صدور فاکتور جایگزین" :
+                onIssueAll ? (data?.invoices.some(i => i.status === "ISSUED") ? "تکمیل صدور بارنامه‌ها" : "صدور بارنامه‌ها و فاکتور فروش") : "صدور فاکتور فروش"}
               disabled={
                 pending ||
+                hasInvalidInvoice ||
                 (!onIssueAll && !data?.ready) ||
                 !data ||
                 (!onIssueAll && data.invoices.some((i) => i.status !== "VOIDED"))
@@ -192,10 +206,32 @@ export default function SalesDispatchInvoices({
           )}
         </div>
       </div>
+      {recovery && recoveryDraft?.waybillId === recovery.waybillId && (
+        <div className="space-y-3">
+          <p>اسناد جدید برای همین بارگیری صادر می‌شوند. بارنامه <bdi>{recovery.waybillNumber}</bdi> و فاکتور <bdi>{recovery.invoiceNumber}</bdi> در سوابق ابطال می‌مانند.</p>
+          <ErpField label="دلیل صدور مجدد" required>
+            <ErpTextarea autoFocus value={recoveryDraft.reason} maxLength={2000} disabled={pending}
+              onChange={event => setRecoveryDraft({ waybillId: recovery.waybillId, reason: event.target.value })} />
+          </ErpField>
+          <div className="flex flex-wrap gap-2">
+            <ErpButton label="تأیید و صدور مجدد" disabled={pending || recoveryDraft.reason.trim().length < 3}
+              onClick={() => void run(async () => {
+                try {
+                  await onIssueAll?.({ waybillId: recovery.waybillId, invoiceId: recovery.invoiceId, reason: recoveryDraft.reason.trim() });
+                  setRecoveryDraft(null);
+                } catch (error) {
+                  await load();
+                  throw error;
+                }
+              })} />
+            <ErpButton label="انصراف" variant="ghost" disabled={pending} onClick={() => setRecoveryDraft(null)} />
+          </div>
+        </div>
+      )}
       {error && <ErpInlineState kind="error" title={error} />}
-      {documentBlockReason && <ErpInlineState kind="stale" title={documentBlockReason} />}
+      {!recovery && documentBlockReason && <ErpInlineState kind="stale" title={documentBlockReason} />}
       {!data && !error && <ErpLoading />}
-      {data?.blockedReason && (
+      {!recovery && data?.blockedReason && (
         <ErpInlineState kind="stale" title={data.blockedReason} />
       )}
       {data?.invoices.length === 0 && (
@@ -233,7 +269,31 @@ export default function SalesDispatchInvoices({
               disabled={pending}
               onClick={() => void file(invoice, true)}
             />
+            {canManage && workspace === "accounting" && invoice.status === "INVALIDATED" &&
+              invalidInvoiceVoid?.invoiceId !== invoice.id && (
+                <ErpButton label="ابطال فاکتور نامعتبر" icon={FaBan} variant="outline" tone="danger" disabled={pending}
+                  onClick={() => setInvalidInvoiceVoid({ invoiceId: invoice.id, reason: "" })} />
+              )}
           </div>
+          {canManage && workspace === "accounting" && invoice.status === "INVALIDATED" &&
+            invalidInvoiceVoid?.invoiceId === invoice.id && (
+              <div className="space-y-3">
+                <p>ابطال فقط برای همین فاکتور ثبت می‌شود. بارنامه و مجوز خروج آن حفظ می‌شوند.</p>
+                <ErpField label="دلیل ابطال" required>
+                  <ErpTextarea autoFocus value={invalidInvoiceVoid.reason} maxLength={2000} disabled={pending}
+                    onChange={event => setInvalidInvoiceVoid({ invoiceId: invoice.id, reason: event.target.value })} />
+                </ErpField>
+                <div className="flex flex-wrap gap-2">
+                  <ErpButton label="ثبت ابطال فاکتور فروش" tone="danger" disabled={pending || invalidInvoiceVoid.reason.trim().length < 3}
+                    onClick={() => void run(async () => {
+                      await api.post(`${base}/${invoice.id}/void`, { reason: invalidInvoiceVoid.reason.trim(), onlyIfInvalidated: true });
+                      setInvalidInvoiceVoid(null);
+                      await onVoided?.();
+                    })} />
+                  <ErpButton label="انصراف" variant="ghost" disabled={pending} onClick={() => setInvalidInvoiceVoid(null)} />
+                </div>
+              </div>
+            )}
         </div>
       ))}
     </ErpCard>

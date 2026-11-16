@@ -13,7 +13,7 @@ import type { DispatchArtifactStorage } from "../dispatchDocuments/ports";
 import { DispatchDocumentIntegrityError } from "../dispatchDocuments/service";
 import { allocationPricingIntegrityVerifier } from "../dispatchDocuments/prismaSourceReader";
 import { classifyLoadingDocumentPart } from "../loadingDocumentIssuance";
-import { isRetryableDispatchTransactionError } from "../dispatchAllocation";
+import { isRetryableDispatchTransactionError, readLegacyLoadingRecovery } from "../dispatchAllocation";
 import { generatePdfBufferFromHtml } from "../../utils/pdf";
 import {
   bytesHash,
@@ -27,6 +27,7 @@ export type InvoiceContext = {
   workspace: "accounting" | "logistics";
   requireDispatchDocumentGate?: boolean;
   expectedRevisionIds?: readonly string[];
+  expectedWaybillId?: string;
 };
 const lock = async (tx: Prisma.TransactionClient, loadingId: string) => {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`SALES_INVOICE:${loadingId}`}))`;
@@ -119,7 +120,7 @@ async function authorize(
 }
 export async function voidSalesInvoiceInTransaction(
   tx: Prisma.TransactionClient, ctx: InvoiceContext, loadingId: string, id: string | null,
-  reason: string, requireCurrent = false,
+  reason: string, requireCurrent = false, onlyIfInvalidated = false,
 ) {
   if (
     typeof reason !== "string" ||
@@ -146,11 +147,17 @@ export async function voidSalesInvoiceInTransaction(
       ],
     },
   });
-  if (exited) {
-    const corrected = await readInvoiceSource(tx, loadingId);
-    if (invoiceSourceHash(corrected) === invoice.sourceHash)
+  if (exited || onlyIfInvalidated) {
+    let currentHash: string | null = null;
+    try {
+      currentHash = invoiceSourceHash(await readInvoiceSource(tx, loadingId));
+    } catch (error) {
+      if (exited || !(error instanceof SalesInvoiceError)) throw error;
+    }
+    if (currentHash === invoice.sourceHash)
       throw new SalesInvoiceError(
-        "پس از خروج، ابتدا گردش اصلاح ارسال را تکمیل کنید.",
+        exited ? "پس از خروج، ابتدا گردش اصلاح ارسال را تکمیل کنید."
+          : "فاکتور فروش در حال حاضر معتبر است. وضعیت اسناد را به‌روزرسانی کنید.",
       );
   }
   await persistInvoiceVoid(tx, invoice, { actorId: ctx.actorId, reason: reason.trim() });
@@ -236,10 +243,17 @@ export function createSalesInvoiceService(
           const legacy = revision.sourceKind === 'SALES_CONTRACT' && (!cutover.cutoverAt || !isPostCutoverFinalization(revision.finalizedAt, cutover.cutoverAt));
           return classifyLoadingDocumentPart(revision, true, legacy).state === 'COMPLETE';
         }));
+        const recovery = ctx.workspace === 'accounting' && cutover && latest.size === 1 &&
+          rows.length && rows.every(row => row.voidedAt) && !documentsComplete
+          ? await readLegacyLoadingRecovery(tx, loadingId, cutover.cutoverAt) : null;
         return {
           ready: Boolean(hash),
           documentsComplete,
           blockedReason: reason,
+          recovery: recovery ? {
+            waybillId: recovery.waybill.id, waybillNumber: recovery.waybill.number.toString(),
+            invoiceId: recovery.invoice.id, invoiceNumber: recovery.invoice.number.toString(),
+          } : null,
           invoices: rows.map((row) => ({
             ...row,
             number: row.number.toString(),
@@ -269,7 +283,7 @@ export function createSalesInvoiceService(
             orderBy: [{ queueTurnId: 'asc' }, { revisionNumber: 'desc' }],
             select: { id: true, queueTurnId: true, sourceKind: true, finalizedAt: true, sealedAt: true,
               candidate: { select: { status: true, waybills: { where: { status: { in: ['ISSUED', 'EXIT_RECORDED'] } },
-                select: { integrityHash: true, legacyReconstruction: { select: { allocationRevisionId: true, sourceIntegrityHash: true,
+                select: { id: true, integrityHash: true, legacyReconstruction: { select: { allocationRevisionId: true, sourceIntegrityHash: true,
                   waybillIntegrityHash: true, pdfSha256: true, pdf: true } }, documentArtifacts: { where: { kind: { in: ['WAYBILL', 'STATEMENT'] } },
                   select: { kind: true, storageKey: true, byteLength: true, sha256: true } } } } } } } });
           const latest = new Map<string, typeof revisions[number]>();
@@ -283,6 +297,10 @@ export function createSalesInvoiceService(
           if (actualRevisionIds.length !== expectedRevisionIds.length ||
             actualRevisionIds.some((id, index) => id !== expectedRevisionIds[index])) {
             throw new SalesInvoiceError('تخصیص راننده‌ها تغییر کرده است؛ اطلاعات را دوباره بررسی کنید.');
+          }
+          if (ctx.expectedWaybillId && (latest.size !== 1 ||
+              [...latest.values()][0].candidate?.waybills[0]?.id !== ctx.expectedWaybillId)) {
+            throw new SalesInvoiceError('بارنامه صادرشده تغییر کرده است؛ اسناد را به‌روزرسانی کنید.');
           }
           const artifacts: Array<{ storageKey: string; byteLength: number; sha256: string }> = [];
           for (const revision of latest.values()) {
@@ -389,9 +407,10 @@ export function createSalesInvoiceService(
       loadingId: string,
       id: string,
       reason: string,
+      onlyIfInvalidated = false,
     ) =>
       transaction(db, async (tx) => {
-        return (await voidSalesInvoiceInTransaction(tx, ctx, loadingId, id, reason))!;
+        return (await voidSalesInvoiceInTransaction(tx, ctx, loadingId, id, reason, false, onlyIfInvalidated))!;
       }),
     download: async (ctx: InvoiceContext, loadingId: string, id: string, requireCurrent = false) =>
       transaction(db, async (tx) => {

@@ -296,6 +296,8 @@ export class DispatchConfirmationService {
   }
 
   async startSession(input: { waybillId: string; actorId: string; workstationId: string }) {
+    const accountingActorId = required(input.actorId, 'actorId');
+    const workstationId = required(input.workstationId, 'workstationId');
     const at = this.now();
     const waybill = await this.loadWaybill(input.waybillId);
     if (!waybill || waybill.status !== 'ISSUED') throw new DispatchConfirmationConflictError('An issued waybill is required.');
@@ -315,21 +317,47 @@ export class DispatchConfirmationService {
         await appendAudit(tx, { aggregateType: 'DISPATCH_EXIT_AUTHORIZATION', aggregateId: stale.id, eventType: 'EXPIRED', payload: {}, actorId: input.actorId, at });
       }
     });
-    if (await this.prisma.dispatchExitAuthorization.findFirst({ where: { waybillId: waybill.id, status: 'ACTIVE' } })) throw new DispatchConfirmationConflictError('The waybill already has an active exit authorization.');
     const method = turn.driverSource === GuardDriverSource.INTERNAL ? 'INTERNAL_BIOMETRIC' : 'EXTERNAL_BIOMETRIC';
-    const subject = await this.sessionSubject({ driverSource: turn.driverSource, driverId });
-    const enrollment = await this.prisma.driverBiometricEnrollment.findFirst({ where: { ...subject.where, status: 'ACTIVE' } });
-    if (!enrollment) throw new DispatchConfirmationConflictError('راننده ثبت بیومتریک فعال ندارد. ابتدا پرونده راننده را تکمیل کنید.');
-    const session = await this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
+      const currentWaybill = await tx.accountingDispatchWaybill.findUnique({
+        where: { id: waybill.id }, select: { status: true, integrityHash: true },
+      });
+      if (currentWaybill?.status !== 'ISSUED' || currentWaybill.integrityHash !== waybill.integrityHash) {
+        throw new DispatchConfirmationConflictError('An issued waybill is required.');
+      }
+      const authorization = await tx.dispatchExitAuthorization.findFirst({
+        where: { waybillId: waybill.id, status: 'ACTIVE' },
+        select: { id: true, sessionId: true, method: true, driverSource: true, waybillIntegrityHash: true },
+      });
+      if (authorization) {
+        if (authorization.waybillIntegrityHash !== waybill.integrityHash) {
+          throw new DispatchConfirmationConflictError('The bound waybill snapshot is no longer valid.');
+        }
+        return {
+          id: authorization.sessionId, waybillId: waybill.id, status: 'CONFIRMED' as const,
+          method: authorization.method, driverSource: authorization.driverSource,
+          authorization: { id: authorization.id },
+        };
+      }
+      const subject = await this.sessionSubject({ driverSource: turn.driverSource, driverId }, tx);
+      const enrollment = await tx.driverBiometricEnrollment.findFirst({ where: { ...subject.where, status: 'ACTIVE' } });
+      if (!enrollment) throw new DispatchConfirmationConflictError('راننده ثبت بیومتریک فعال ندارد. ابتدا پرونده راننده را تکمیل کنید.');
+      const active = await tx.dispatchConfirmationSession.findFirst({ where: { waybillId: waybill.id, status: 'ACTIVE' } });
+      if (active) {
+        if (active.accountingActorId !== accountingActorId || active.workstationId !== workstationId ||
+          active.waybillIntegrityHash !== waybill.integrityHash) {
+          throw new DispatchConfirmationConflictError('برای این بارنامه نوبت فعال دیگری وجود دارد. از همان حساب کاربری و ایستگاه شروع‌کننده ادامه دهید یا تا پایان مهلت نوبت صبر کنید.');
+        }
+        return active;
+      }
       const created = await tx.dispatchConfirmationSession.create({ data: { waybillId: waybill.id, method, driverSource: turn.driverSource,
-        driverId, accountingActorId: required(input.actorId, 'actorId'), waybillIntegrityHash: waybill.integrityHash,
-        workstationId: required(input.workstationId, 'workstationId'), expiresAt: addMinutes(at, this.dependencies.sessionMinutes || 10) } });
+        driverId, accountingActorId, waybillIntegrityHash: waybill.integrityHash,
+        workstationId, expiresAt: addMinutes(at, this.dependencies.sessionMinutes || 10) } });
       await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: created.id,
         eventType: 'SESSION_STARTED', payload: { waybillId: waybill.id, method, waybillIntegrityHash: waybill.integrityHash }, actorId: input.actorId, at });
       return created;
     });
-    return session;
   }
 
   private async activeSession(sessionId: string, actorId?: string) {

@@ -61,6 +61,8 @@ import {
   decideAccountingDispatchCandidate,
   DispatchAllocationConflictError,
   DispatchAllocationValidationError,
+  LoadingCancellationAccountingAccessError,
+  recoverLegacyLoadingWaybill,
   replaceAccountingDispatchWaybill,
   voidAccountingDispatchWaybill,
 } from '../services/dispatchAllocation';
@@ -357,6 +359,18 @@ router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchE
     if (invoiceState.invoices.some(invoice => invoice.status === 'INVALIDATED')) {
       throw new LoadingDocumentIssuanceError('فاکتور موجود نامعتبر است؛ ابتدا حسابداری باید آن را تعیین‌تکلیف کند.');
     }
+    const recovery = req.body?.recovery;
+    let recoveredWaybillId: string | undefined;
+    if (recovery !== undefined) {
+      if (!recovery || typeof recovery.waybillId !== 'string' || typeof recovery.invoiceId !== 'string' ||
+          typeof recovery.reason !== 'string') {
+        return res.status(400).json({ success: false, error: 'اسناد باطل‌شده و دلیل صدور مجدد را مشخص کنید.' });
+      }
+      recoveredWaybillId = await recoverLegacyLoadingWaybill(prisma, {
+        loadingId, actorId: context.actorId, waybillId: recovery.waybillId,
+        invoiceId: recovery.invoiceId, reason: recovery.reason,
+      });
+    }
     const [loading, cutover, control] = await Promise.all([
       prisma.logisticsLoading.findUnique({ where: { id: loadingId }, select: { status: true,
         canonicalAllocationRevisions: { orderBy: [{ queueTurnId: 'asc' }, { revisionNumber: 'desc' }],
@@ -388,16 +402,21 @@ router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchE
       reconstructWaybill: async candidateId => {
         const candidate = await prisma.accountingDispatchCandidate.findUnique({ where: { id: candidateId }, select: {
           waybills: { where: { status: { in: ['ISSUED', 'EXIT_RECORDED'] } }, select: { id: true } } } });
-        if (!candidate || candidate.waybills.length !== 1) throw new LoadingDocumentIssuanceError('بارنامه معتبر راننده برای بازسازی پیدا نشد.');
+        if (!candidate || candidate.waybills.length !== 1 ||
+            (recoveredWaybillId && candidate.waybills[0].id !== recoveredWaybillId)) {
+          throw new LoadingDocumentIssuanceError('بارنامه معتبر راننده برای بازسازی پیدا نشد.');
+        }
         await reconstructLegacyWaybill(prisma, { waybillId: candidate.waybills[0].id, actorId: req.user!.id,
           reason: 'ساخت نسخه بازسازی‌شده برای بارنامه قدیمی فاقد فایل' });
       },
       issueInvoice: async idempotencyKey => { await invoices.issue({ ...context, requireDispatchDocumentGate: true,
-        expectedRevisionIds: parts.map(part => part.revisionId) }, loadingId, idempotencyKey); },
+        expectedRevisionIds: parts.map(part => part.revisionId), expectedWaybillId: recoveredWaybillId }, loadingId, idempotencyKey); },
     });
     return res.json({ success: true, data: { status: 'ISSUED' } });
   } catch (error) {
     if (error instanceof LoadingDocumentIssuanceError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof LegacyWaybillReconstructionError) return res.status(409).json({ success: false, error: error.message });
+    if (error instanceof LoadingCancellationAccountingAccessError) return res.status(403).json({ success: false, error: error.message });
     if (error instanceof SalesInvoiceError) return res.status(error.status).json({ success: false, error: error.message });
     return dispatchError(res, error);
   }

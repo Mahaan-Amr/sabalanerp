@@ -84,6 +84,7 @@ export function createSalesInvoiceRouter(input: {
             req.params.loadingId,
             req.params.invoiceId,
             req.body.reason,
+            req.body.onlyIfInvalidated === true,
           ),
         }),
       ),

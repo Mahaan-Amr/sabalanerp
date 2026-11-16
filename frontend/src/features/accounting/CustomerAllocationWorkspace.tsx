@@ -19,6 +19,9 @@ type AllocationCommand = {
 function responseStatus(error: unknown) {
   return (error as { response?: { status?: number } })?.response?.status;
 }
+function responseCode(error: unknown) {
+  return (error as { response?: { data?: { code?: string } } })?.response?.data?.code;
+}
 function accountingContextAt(context: CustomerFinanceContext | undefined, date: string) {
   const at = new Date(`${date}T00:00:00.000Z`).getTime();
   return {
@@ -155,9 +158,14 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
     } catch (failure) {
       if (!mounted.current) return;
       const status = responseStatus(failure);
-      if (!status || status >= 500) {
+      // A later error may have occurred before the server checked the earlier
+      // idempotency record (for example after rollback or authorization loss).
+      // It cannot prove that an already uncertain command did not commit.
+      if (uncertain || !status || status >= 500) {
         setUncertain(true);
-        setError('نتیجه ثبت مشخص نیست؛ با «تلاش دوباره همان درخواست» نتیجه را بررسی کنید. اطلاعات درخواست تا روشن‌شدن نتیجه حفظ می‌شود.');
+        setError(responseCode(failure) === 'CUSTOMER_SOURCE_SHARES_CLOSED'
+          ? 'نتیجه درخواست قبلی مشخص نیست و بررسی خودکار فعلاً در دسترس نیست؛ اطلاعات درخواست را حفظ کنید.'
+          : 'نتیجه ثبت مشخص نیست؛ با «تلاش دوباره همان درخواست» نتیجه را بررسی کنید. اطلاعات درخواست تا روشن‌شدن نتیجه حفظ می‌شود.');
       } else {
         setUncertain(false);
         setConfirmed(false);

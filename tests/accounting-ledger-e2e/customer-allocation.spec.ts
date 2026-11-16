@@ -151,7 +151,7 @@ test('one rial precision, pending protection and an unknown result retry keep ex
   expect(commands[0].sourceAllocations).toEqual([{ receiptId: 'cash', allocations: [{ openItemId: 'd3', amountRials: '11' }] }]);
 });
 
-test('a definite rejection after an unknown result unlocks correction and requires a fresh confirmation', async ({ page }) => {
+test('a rejection after an unknown result keeps the original request locked', async ({ page }) => {
   const { workspace, commands } = await openWorkspace(page);
   await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
   await workspace.getByRole('checkbox', { name: 'انتخاب هزینه حمل مستقل', exact: true }).check();
@@ -165,13 +165,28 @@ test('a definite rejection after an unknown result unlocks correction and requir
   const review = await confirmReview(page);
   await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
   await review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true }).click();
-  await expect(review.getByRole('checkbox', { name: 'مبلغ بدهی‌ها و سهم دقیق منابع را بررسی و تأیید می‌کنم.', exact: true })).not.toBeChecked();
-  await review.getByRole('button', { name: 'بازگشت و ویرایش', exact: true }).click();
-  const amount = workspace.getByRole('textbox', { name: 'تخصیص هزینه حمل مستقل', exact: true });
-  await expect(amount).toBeEnabled();
-  await amount.fill('1');
+  await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toBeEnabled();
+  await expect(review.getByRole('textbox', { name: 'مرجع مستندات', exact: true })).toBeDisabled();
+  expect(commands).toHaveLength(2);
+  expect(commands[1]).toEqual(commands[0]);
+});
+
+test('a closed compatibility guard does not discard a previously uncertain command', async ({ page }) => {
+  const { workspace, commands } = await openWorkspace(page);
+  await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
+  await workspace.getByRole('checkbox', { name: 'انتخاب هزینه حمل مستقل', exact: true }).check();
+  await workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();
+  await page.route('**/api/accounting/ledger/customer-accounts/profile/treasury', route => {
+    commands.push(route.request().postDataJSON());
+    return commands.length === 1 ? route.fulfill({ status: 503, json: { success: false } })
+      : route.fulfill({ status: 409, json: { success: false, code: 'CUSTOMER_SOURCE_SHARES_CLOSED' } });
+  });
   await workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
-  await expect(review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true })).toBeDisabled();
+  const review = await confirmReview(page);
+  await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
+  await review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true }).click();
+  await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toBeEnabled();
+  await expect(review.getByRole('textbox', { name: 'مرجع مستندات', exact: true })).toBeDisabled();
   expect(commands).toHaveLength(2);
   expect(commands[1]).toEqual(commands[0]);
 });

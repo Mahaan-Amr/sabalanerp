@@ -153,6 +153,23 @@ export async function readCustomerWorkspaceContext(database: PrismaClient, id: s
     invoiceNumber: row.invoice.supplierInvoiceNumber, remainingRials: amount(row.amountRials) - row.allocations.reduce((sum, line) => sum + amount(line.amountRials), 0n) })).filter(row => row.remainingRials > 0n) };
 }
 
+/** Read-only reconciliation of a previously committed grouped allocation.
+ * UNKNOWN is not proof of failure: the original transaction may still be in flight. */
+export async function readCustomerAllocationCommandStatus(database: PrismaClient, id: string, input: Parameters<typeof recordCustomerWorkspaceTreasury>[2]) {
+  if (input.actor.profile === 'VIEWER') return fail('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز ثبت عملیات مالی ندارید.', 403);
+  if (input.kind !== 'ALLOCATION' || !input.sourceAllocations || input.idempotencyKey.length < 8) {
+    return fail('INVALID_OPERATION', 'اطلاعات درخواست تخصیص معتبر نیست.', 400);
+  }
+  const resolved = await resolveCustomerWorkspace(database, id);
+  if (!resolved.profile) return { status: 'UNKNOWN' as const };
+  const prior = await database.accountingCustomerCommand.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+  if (!prior || prior.profileId !== resolved.profile.id || prior.kind !== input.kind || prior.createdBy !== input.actor.id
+    || prior.commandHash !== hashAccountingEvidence({ ...input, actor: undefined })) {
+    return { status: 'UNKNOWN' as const };
+  }
+  return { status: 'COMMITTED' as const, result: prior.result };
+}
+
 export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id: string, input: {
   kind: 'RECEIPT' | 'ALLOCATION' | 'REVERSE_ALLOCATION' | 'CORRECT_RECEIPT' | 'CANCEL_RECEIPT' | 'CHECK_DEPOSIT' | 'CHECK_SETTLE' | 'RESOLVE_RECEIPT' | 'CHECK_ENDORSE' | 'CHECK_RECIPIENT_RETURN'; amountRials: bigint; occurredAt: Date;
   periodId: string; postingRuleId: string; financialAccountId?: string; bankLedgerId?: string; receiptId?: string; creditItemId?: string;

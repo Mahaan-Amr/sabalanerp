@@ -11,7 +11,7 @@ import { AccountingCustomerTreasuryError } from '../services/accountingCustomerT
 import { attributeCustomerOpening } from '../services/accountingCustomerOpeningAttribution';
 import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '../services/accountingBankFileImport';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
-import { listCustomerWorkspaceAccounts, readCustomerWorkspace, readCustomerWorkspaceContext, recordCustomerAccountOperation, recordCustomerWorkspaceTreasury } from '../services/accountingCustomerWorkspace';
+import { listCustomerWorkspaceAccounts, readCustomerWorkspace, readCustomerWorkspaceContext, readCustomerAllocationCommandStatus, recordCustomerAccountOperation, recordCustomerWorkspaceTreasury } from '../services/accountingCustomerWorkspace';
 import {
   allocateCustomerReceiptPrisma,
   backfillApprovedSalesContractCustomers,
@@ -238,7 +238,7 @@ router.post('/customer-accounts/:id/operations', ...customerPostingAccess, (req,
     })),
   },
 })));
-router.post('/customer-accounts/:id/treasury', ...treasuryCommandAccess, run(req => recordCustomerWorkspaceTreasury(prisma, req.params.id, {
+const customerTreasuryInput = (req: WorkspaceRequest): Parameters<typeof recordCustomerWorkspaceTreasury>[2] => ({
   kind: req.body.kind, amountRials: wholeRials(req.body.amountRials || '0'), occurredAt: validDate(req.body.occurredAt, 'تاریخ عملیات'),
   periodId: String(req.body.periodId || ''), postingRuleId: String(req.body.postingRuleId || ''), financialAccountId: req.body.financialAccountId,
   bankLedgerId: req.body.bankLedgerId, receiptId: req.body.receiptId, creditItemId: req.body.creditItemId, allocationId: req.body.allocationId, supplierPartyId: req.body.supplierPartyId,
@@ -265,7 +265,13 @@ router.post('/customer-accounts/:id/treasury', ...treasuryCommandAccess, run(req
     check: part.check == null ? undefined : { serialNumber: String(part.check.serialNumber || ''), bankName: String(part.check.bankName || ''), sayadId: part.check.sayadId,
       dueAt: validDate(part.check.dueAt, 'سررسید چک') },
   })),
-})));
+});
+router.post('/customer-accounts/:id/treasury', ...treasuryCommandAccess, run(req => recordCustomerWorkspaceTreasury(prisma, req.params.id, customerTreasuryInput(req))));
+const readCustomerAllocationStatus = run(req => readCustomerAllocationCommandStatus(prisma, req.params.id, customerTreasuryInput(req)));
+router.post('/customer-accounts/:id/treasury/status', ...treasuryCommandAccess, (req: WorkspaceRequest, res: Response) => {
+  res.set('Cache-Control', 'private, no-store');
+  return readCustomerAllocationStatus(req, res);
+});
 
 router.post('/customer-accounts/:id/opening-attribution', ...customerPostingAccess, run(req => attributeCustomerOpening(prisma, req.params.id, {
   lineKey: String(req.body.lineKey || ''), expectedSequence: Number(req.body.expectedSequence), expectedSnapshotHash: String(req.body.expectedSnapshotHash || ''),

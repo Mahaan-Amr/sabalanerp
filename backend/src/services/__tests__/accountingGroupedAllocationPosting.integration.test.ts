@@ -93,6 +93,18 @@ test('admitted grouped posting commits exact shares once and reverses independen
       assert.equal((await read()).debitOpenRials, 0n);
       assert.equal(await f.db.accountingSettlementAllocation.count(), 2);
       const creditShare = await f.db.accountingSettlementAllocation.findFirstOrThrow({ where: { creditItemId: credit.id } });
+      assert.equal(creditShare.parentCommandKey, command.idempotencyKey);
+      assert.equal(creditShare.sourcePlanHash, (await f.db.accountingCustomerAllocationIntent.findUniqueOrThrow({
+        where: { idempotencyKey: command.idempotencyKey },
+      })).commandHash);
+      await assert.rejects(f.db.$executeRaw`UPDATE accounting_settlement_allocations
+        SET "parentCommandKey" = ${randomUUID()} WHERE id = ${creditShare.id}`,
+      /ACCOUNTING_ALLOCATION_IMMUTABLE/);
+      await assert.rejects(f.db.$executeRaw`INSERT INTO accounting_settlement_allocations
+        (id, "creditItemId", "idempotencyKey", "createdBy")
+        VALUES (${randomUUID()}, ${credit.id}, ${randomUUID()}, ${f.actor.id})`,
+      /GROUPED_ALLOCATION_CHILD_UNPROVEN/);
+      assert.equal(await f.db.accountingSettlementAllocation.count(), 2);
       await recordCustomerWorkspaceTreasury(f.db, customer, {
         ...f.common, kind: 'REVERSE_ALLOCATION', allocationId: creditShare.id, amountRials: 0n, allocations: [], idempotencyKey: randomUUID(),
       });

@@ -40,7 +40,8 @@ async function openWorkspace(page: Page, transform = (data: typeof fixture) => d
     const serverCommand = typeof discovery === 'object' ? discovery : undefined;
     if (path.endsWith('/treasury/allocation-intent')) {
       const data = route.request().method() === 'GET'
-        ? serverCommand ? { status: 'PENDING', accountId: 'profile', idempotencyKey: serverCommand.idempotencyKey, command: serverCommand } : { status: discovery ?? 'UNKNOWN' }
+        ? serverCommand?.status === 'BLOCKED' || serverCommand?.status === 'CLOSED' ? serverCommand
+          : serverCommand ? { status: 'PENDING', accountId: 'profile', idempotencyKey: serverCommand.idempotencyKey, command: serverCommand } : { status: discovery ?? 'UNKNOWN' }
         : { status: 'PENDING', idempotencyKey: route.request().postDataJSON().idempotencyKey };
       return route.fulfill({ json: { success: true, data } });
     }
@@ -62,6 +63,26 @@ async function openWorkspace(page: Page, transform = (data: typeof fixture) => d
   await expect(workspace).toBeVisible();
   return { workspace, commands };
 }
+
+test('an authorized manager supplies a reason and cancels only the discovered pending intent', async ({ page }) => {
+  const discovery = { status: 'BLOCKED', reconciliationId: 'pending-intent' };
+  const { workspace, commands } = await openWorkspace(page, data => data, discovery);
+  const requests: unknown[] = [];
+  await page.route('**/api/accounting/ledger/customer-accounts/profile/treasury/allocation-intent/reconcile', route => {
+    requests.push(route.request().postDataJSON());
+    discovery.status = 'CLOSED';
+    return route.fulfill({ json: { success: true, data: { status: 'CANCELED' } } });
+  });
+  await workspace.getByRole('button', { name: 'تعیین تکلیف درخواست معلق', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'تعیین تکلیف درخواست معلق', exact: true });
+  const submit = dialog.getByRole('button', { name: 'لغو درخواست معلق', exact: true });
+  await expect(submit).toBeDisabled();
+  await dialog.getByRole('textbox', { name: 'دلیل لغو' }).fill('مالک دیگر دسترسی خزانه ندارد.');
+  await submit.click();
+  await expect(workspace.getByText('درخواست معلق لغو شد.', { exact: true })).toBeVisible();
+  expect(requests).toEqual([{ intentId: 'pending-intent', reason: 'مالک دیگر دسترسی خزانه ندارد.' }]);
+  expect(commands).toHaveLength(0);
+});
 
 test('a closed server capability prevents a new allocation draft', async ({ page }) => {
   const { workspace, commands } = await openWorkspace(page, data => data, 'CLOSED');

@@ -62,6 +62,10 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
   const [notice, setNotice] = useState<string>();
   const [storageState, setStorageState] = useState<'checking' | 'ready' | 'blocked' | 'closed'>('checking');
   const [recovered, setRecovered] = useState(false);
+  const [reconciliationId, setReconciliationId] = useState<string>();
+  const [reconciliationOpen, setReconciliationOpen] = useState(false);
+  const [reconciliationReason, setReconciliationReason] = useState('');
+  const [discoveryRevision, setDiscoveryRevision] = useState(0);
   const durableRequest = useRef<PendingAllocation>();
   const request = useRef<{ fingerprint: string; command: AllocationCommand }>();
   const inFlight = useRef(false);
@@ -81,6 +85,8 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
   useEffect(() => {
     let cancelled = false;
     setStorageState('checking');
+    setReconciliationId(undefined);
+    setReconciliationOpen(false); setReconciliationReason('');
     durableRequest.current = undefined; request.current = undefined;
     setUncertain(false); setRecovered(false); setPosted(false);
     if (!user?.id || !account.bookId || !account.customerId) { setStorageState('blocked'); return; }
@@ -100,6 +106,12 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
           const response = await accountingAPI.discoverCustomerAllocationIntent(accountId, lease);
           assertOwner();
           const intent = response.data?.data;
+          if (intent?.status === 'BLOCKED') {
+            if (typeof intent.reconciliationId === 'string' && intent.reconciliationId) setReconciliationId(intent.reconciliationId);
+            setStorageState('blocked');
+            setError('درخواست تخصیص کاربر دیگری برای این مشتری معلق است.');
+            return;
+          }
           if (intent?.status === 'CLOSED') {
             setStorageState('closed');
             return;
@@ -128,7 +140,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
       }
     })();
     return () => { cancelled = true; };
-  }, [user?.id, accountId, account.bookId, account.customerId, account.profile?.id, canAllocate]);
+  }, [user?.id, accountId, account.bookId, account.customerId, account.profile?.id, canAllocate, discoveryRevision]);
   useEffect(() => { setConfirmed(false); }, [draft, date, periodId, ruleId, reason, reference, account]);
   useEffect(() => {
     if (!sourceSelection || !canAllocate || consumedSelection.current === sourceSelection.revision) return;
@@ -295,6 +307,38 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
     if (committed) await refreshPosted();
   }
 
+  async function reconcilePendingIntent() {
+    const reason = reconciliationReason.trim();
+    if (!reconciliationId || reason.length < 8 || reason.length > 4096 || !canAllocate || inFlight.current) return;
+    const owner = ownerRef.current;
+    const { bookId, customerId } = scopeRef.current;
+    inFlight.current = true; setPending(true); setError(undefined);
+    try {
+      const lease = await browserSessionContinuation.acquire();
+      const assertCurrent = () => {
+        if (!mounted.current || !owner || ownerRef.current !== owner || lease.userId !== owner ||
+          scopeRef.current.accountId !== accountId || scopeRef.current.bookId !== bookId ||
+          scopeRef.current.customerId !== customerId) throw new Error('ALLOCATION_OWNER_CHANGED');
+        browserSessionContinuation.assertCurrent(lease);
+      };
+      assertCurrent();
+      const response = await accountingAPI.customerAllocationIntent(accountId, 'reconcile', { intentId: reconciliationId, reason }, lease);
+      assertCurrent();
+      const status = response.data?.data?.status;
+      if (status !== 'CANCELED' && status !== 'COMMITTED') throw new Error('ALLOCATION_INTENT_UNVERIFIED');
+      if (status === 'COMMITTED') await onRefresh();
+      assertCurrent();
+      setNotice(status === 'CANCELED' ? 'درخواست معلق لغو شد.' : 'درخواست پیش‌تر ثبت شده بود؛ مانده‌ها به‌روز شدند.');
+      setReconciliationOpen(false); setReconciliationReason('');
+      setDiscoveryRevision(value => value + 1);
+    } catch {
+      if (mounted.current) setError('تعیین تکلیف درخواست تأیید نشد. دوباره بررسی کنید.');
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setPending(false);
+    }
+  }
+
   const sourceUse = (key: string) => plan.shares.filter(row => row.sourceKey === key).reduce((sum, row) => sum + row.amountRials, ZERO);
   const footer = <div className={styles.footer}><span>{draft.selected.length.toLocaleString('fa-IR')} بدهی انتخاب‌شده · {tomanMoney(plan.total)}</span><div className="flex flex-wrap gap-2">
     <ErpButton label="تکمیل مانده انتخاب‌شده" tone="neutral" disabled={!canAllocate || locked || !draft.selected.length || plan.capacity === ZERO || Boolean(Object.keys(plan.sourceErrors).length)} onClick={() => changeDraft(fillCustomerAllocation(data, draft))} />
@@ -308,7 +352,8 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
       { label: 'تخصیص این‌بار', value: tomanMoney(plan.total) },
     ]} />
     {notice && <ErpInlineState kind="success" title={notice} />}
-    {storageState === 'blocked' && <ErpInlineState kind="error" title="دسترسی به وضعیت محفوظ درخواست تأیید نشد؛ ثبت جدید ممکن نیست." />}
+    {storageState === 'blocked' && <ErpInlineState kind="error" title={reconciliationId ? 'درخواست معلق این مشتری باید تعیین تکلیف شود.' : 'دسترسی به وضعیت محفوظ درخواست تأیید نشد؛ ثبت جدید ممکن نیست.'}
+      action={reconciliationId ? { label: 'تعیین تکلیف درخواست معلق', onClick: () => setReconciliationOpen(true) } : undefined} />}
     {storageState === 'closed' && <ErpInlineState kind="stale" title="ثبت تخصیص گروهی پس از تکمیل به‌روزرسانی در دسترس قرار می‌گیرد." />}
     {!canAllocate && <ErpInlineState kind="permission" title="دسترسی ثبت تخصیص برای این حساب ندارید." />}
     {uncertain && <ErpInlineState kind="error" title="نتیجه درخواست قبلی هنوز مشخص نیست؛ پیش‌نویس آن حفظ شده است." action={{ label: 'ادامه بررسی درخواست قبلی', onClick: () => setReview(true) }} />}
@@ -334,6 +379,16 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
     {plan.error && <ErpInlineState kind="error" title={plan.error} action={unusableSelectedSource ? { label: 'حذف منابع بدون مانده', disabled: locked || !canAllocate,
       onClick: () => changeDraft({ ...draft, enabled: draft.enabled.filter(key => data.sources.some(row => row.key === key && !row.unavailable)) }) } : undefined} />}
     {!review && error && <ErpInlineState kind="error" title={error} />}
+    <ErpSheet open={reconciliationOpen && Boolean(reconciliationId)} onClose={() => setReconciliationOpen(false)}
+      title="تعیین تکلیف درخواست معلق" presentation="modal" pending={pending}
+      footer={<ErpButton label="لغو درخواست معلق" variant="solid" disabled={pending || reconciliationReason.trim().length < 8}
+        onClick={() => void reconcilePendingIntent()} />}>
+      {error && <ErpInlineState kind="error" title={error} />}
+      <ErpField label="دلیل لغو" required hint="حداقل ۸ نویسه">
+        <ErpTextarea value={reconciliationReason} minLength={8} maxLength={4096} required disabled={pending}
+          onChange={event => setReconciliationReason(event.target.value)} />
+      </ErpField>
+    </ErpSheet>
     <ErpSheet open={review} onClose={() => setReview(false)} title="بررسی و تأیید تخصیص" presentation="modal" size="wide" pending={pending}
       footer={<div className="flex flex-wrap gap-2"><ErpButton label="بازگشت و ویرایش" tone="neutral" disabled={pending} onClick={() => setReview(false)} />
         {posted ? <ErpButton label="به‌روزرسانی مانده‌ها" variant="solid" disabled={pending} onClick={() => void refreshPosted()} />

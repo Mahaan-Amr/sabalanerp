@@ -1114,7 +1114,7 @@ export const accountingAPI = {
   discoverCustomerAllocationIntent: (id: string, expected: { userId: string; sessionId: string }) =>
     api.get(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/treasury/allocation-intent`,
       { headers: { 'x-sabalan-expected-user': expected.userId, 'x-sabalan-expected-session': expected.sessionId } }),
-  customerAllocationIntent: (id: string, action: 'prepare' | 'status' | 'cancel', data: unknown, expected: { userId: string; sessionId: string }) =>
+  customerAllocationIntent: (id: string, action: 'prepare' | 'status' | 'cancel' | 'reconcile', data: unknown, expected: { userId: string; sessionId: string }) =>
     api.post(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/treasury/allocation-intent${action === 'prepare' ? '' : `/${action}`}`, data,
       { headers: { 'x-sabalan-expected-user': expected.userId, 'x-sabalan-expected-session': expected.sessionId } }),
   attributeCustomerOpening: (id: string, data: unknown) => api.post(`/accounting/ledger/customer-accounts/${encodeURIComponent(id)}/opening-attribution`, data),

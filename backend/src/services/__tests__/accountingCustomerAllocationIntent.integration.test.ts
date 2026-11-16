@@ -45,6 +45,11 @@ test('one immutable pending intent is shared across devices without admitting a 
     assert.equal(attempts.filter(row => row.status === 'fulfilled').length, 1);
     assert.equal(attempts.filter(row => row.status === 'rejected').length, 1);
     const winner = attempts[0].status === 'fulfilled' ? first : second;
+    const unreceived = makeCommand();
+    assert.deepEqual(await readCustomerAllocationIntentByCommand(f.db, customer, unreceived), { status: 'UNKNOWN' });
+    assert.deepEqual(await cancelCustomerAllocationIntent(f.db, customer, unreceived), { status: 'CANCELED' });
+    assert.deepEqual(await prepareCustomerAllocationIntent(f.db, customer, unreceived), { status: 'CANCELED', idempotencyKey: unreceived.idempotencyKey });
+    assert.deepEqual(await readCustomerAllocationIntentByCommand(f.db, customer, winner), { status: 'PENDING' });
     assert.deepEqual(await prepareCustomerAllocationIntent(f.db, customer, winner), { status: 'PENDING', idempotencyKey: winner.idempotencyKey });
     await assert.rejects(prepareCustomerAllocationIntent(f.db, customer, { ...winner, reference: 'different evidence' }),
       (error: any) => error.code === 'ALLOCATION_INTENT_MISMATCH');
@@ -67,7 +72,7 @@ test('one immutable pending intent is shared across devices without admitting a 
     const row = await f.db.accountingCustomerAllocationIntent.findUniqueOrThrow({ where: { idempotencyKey: winner.idempotencyKey } });
     await assert.rejects(f.db.accountingCustomerAllocationIntent.delete({ where: { id: row.id } }), /ALLOCATION_INTENT_EVIDENCE_IMMUTABLE/);
     await assert.rejects(f.db.accountingCustomerAllocationIntent.update({ where: { id: row.id }, data: { commandHash: 'a'.repeat(64) } }), /ALLOCATION_INTENT_EVIDENCE_IMMUTABLE/);
-    assert.equal(await f.db.accountingCustomerAllocationIntent.count(), 1);
+    assert.equal(await f.db.accountingCustomerAllocationIntent.count({ where: { state: 'PENDING' } }), 1);
     // A synthetic parent isolates the atomic binding from the closed financial writer.
     const result = { allocationIds: ['synthetic'] };
     const parent = { profileId: row.profileId, kind: 'ALLOCATION', createdBy: row.ownerId,

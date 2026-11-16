@@ -9,6 +9,7 @@ import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrisma
 type AllocationInput = Parameters<typeof recordCustomerWorkspaceTreasury>[2];
 const fail = (code: string, message: string, status = 409): never => { throw new AccountingCustomerTreasuryError(code, message, status); };
 const unknown = () => ({ status: 'UNKNOWN' as const });
+const allocationKey = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 
 /**
  * Persist denial/recovery evidence only. This is not an activation authority,
@@ -25,7 +26,7 @@ export async function prepareCustomerAllocationIntent(database: PrismaClient, ac
   const plan = input.sourceAllocations;
   if (input.kind !== 'ALLOCATION' || !input.confirmed || input.amountRials !== 0n || input.allocations.length !== 0
     || input.receiptId || input.creditItemId || !plan?.length || plan.length > 100
-    || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(input.idempotencyKey)
+    || !allocationKey.test(input.idempotencyKey)
     || !Number.isFinite(input.occurredAt.getTime()) || input.occurredAt > new Date()
     || !input.periodId || !input.postingRuleId || input.reason.trim().length < 8 || !input.reference.trim()
     || [input.periodId, input.postingRuleId, input.reason, input.reference].some(value => value.length > 4096)
@@ -66,12 +67,14 @@ export async function prepareCustomerAllocationIntent(database: PrismaClient, ac
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
-/** Cancel only a positively identified intent. The database transition also
- * fences the parent-command insert, including when it arrives concurrently. */
+/** Cancel the exact command, reserving its key even if preparation never arrived. */
 export async function cancelCustomerAllocationIntent(database: PrismaClient, accountId: string, input: AllocationInput) {
   if (input.actor.profile === 'VIEWER') return fail('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز ثبت عملیات مالی ندارید.', 403);
-  if (input.kind !== 'ALLOCATION' || !input.sourceAllocations || input.idempotencyKey.length < 8) return unknown();
-  const commandHash = hashAccountingEvidence({ ...input, actor: undefined });
+  if (input.kind !== 'ALLOCATION' || !input.confirmed || !input.sourceAllocations || !allocationKey.test(input.idempotencyKey)) return unknown();
+  const payload = { ...input, actor: undefined };
+  const serialized = JSON.stringify(payload, (_key, value) => typeof value === 'bigint' ? value.toString() : value);
+  if (Buffer.byteLength(serialized, 'utf8') > 1_000_000) return unknown();
+  const commandHash = hashAccountingEvidence(payload);
   return database.$transaction(async tx => {
     const initial = await resolveCustomerWorkspace(tx, accountId);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${initial.customerId}`}))`;
@@ -88,7 +91,17 @@ export async function cancelCustomerAllocationIntent(database: PrismaClient, acc
     const intent = await tx.accountingCustomerAllocationIntent.findFirst({ where: identity });
     if (intent?.state === 'CANCELED') return { status: 'CANCELED' as const };
     if (intent?.state === 'COMMITTED' && intent.result !== null) return { status: 'COMMITTED' as const, result: intent.result };
-    return unknown();
+    const prior = await tx.accountingCustomerCommand.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+    if (prior) {
+      return prior.kind === 'ALLOCATION' && prior.profileId === identity.profileId &&
+        prior.createdBy === identity.ownerId && prior.commandHash === commandHash
+        ? { status: 'COMMITTED' as const, result: prior.result } : unknown();
+    }
+    const tombstone = await tx.accountingCustomerAllocationIntent.createMany({
+      data: { ...identity, accountId: identity.profileId, command: JSON.parse(serialized), state: 'CANCELED' },
+      skipDuplicates: true,
+    });
+    return tombstone.count === 1 ? { status: 'CANCELED' as const } : unknown();
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 

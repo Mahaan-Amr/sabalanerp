@@ -32,6 +32,8 @@ The actual grouped receipt/credit domain integration test remains red with `CUST
 
 ## Preliminary command-status work
 
+An explicit cancel for an exact key with no server reservation creates an immutable canceled record under the same database fence as allocation posting. A late prepare cannot reopen that key. A matching legacy posting returns its committed result, while an absent status without an explicit cancellation remains unknown.
+
 The isolated grouped-posting test exercises the real ledger and database transaction after substituting the admission decision in its test process. It proves exact receipt and independent-credit shares, replay, rollback of a rejected group, and a one-rial credit reversal. The deployed admission gate and exact retained image require separate verification.
 
 The separate `codex/allocation-safe-activation-20261116` work-in-progress adds a status endpoint that uses the same server-side treasury-command parser, treasury authorization, owner, account, kind and canonical payload hash. It returns `UNKNOWN` when no matching committed command is visible; this does not prove failure or permit a new command. The read path does not create financial records or open the existing guard; ordinary authentication and denial auditing can still write their usual audit/session data. Current matching is deliberately restricted to the original actor, so recovery by a different authorized accountant is not yet supported.

@@ -24,7 +24,10 @@ test('admitted grouped posting commits exact shares once and reverses independen
     const f = await customerFinanceFixture(url!);
     try {
       const customer = await f.customer();
-      const read = () => readCustomerWorkspace(f.db, { id: customer, asOf: new Date(), userId: f.actor.id });
+      const read = async () => {
+        const [{ at }] = await f.db.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at`;
+        return readCustomerWorkspace(f.db, { id: customer, asOf: at, userId: f.actor.id });
+      };
       for (const [kind, amountRials] of [['DEBIT', 3n], ['CREDIT', 1n]] as const) {
         await recordCustomerAccountOperation(f.db, customer, { ...f.common, kind, amountRials, idempotencyKey: randomUUID() });
       }

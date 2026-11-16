@@ -129,6 +129,8 @@ test('a fresh browser discovers and cancels the authoritative pending request wi
   const { workspace, commands } = await openWorkspace(page, data => data, command, 'customer:customer');
   await workspace.getByRole('button', { name: 'ادامه بررسی درخواست قبلی', exact: true }).click();
   const review = page.getByRole('dialog', { name: 'بررسی و تأیید تخصیص', exact: true });
+  await expect(review.getByText('۰٫۱ تومان', { exact: true })).toBeVisible();
+  await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toHaveCount(0);
   await review.getByRole('button', { name: 'لغو درخواست تخصیص', exact: true }).click();
   await expect(workspace.getByText('درخواست تخصیص لغو شد.', { exact: true })).toBeVisible();
   expect(commands).toHaveLength(0);
@@ -220,7 +222,8 @@ test('one rial precision, pending protection and an unknown result retry keep ex
   expect(commands).toHaveLength(1);
   release();
   await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toBeEnabled();
-  await expect(review.getByRole('textbox', { name: 'مرجع مستندات', exact: true })).toBeDisabled();
+  await expect(review.getByRole('textbox', { name: 'مرجع مستندات', exact: true })).toHaveCount(0);
+  await expect(review.getByText('جمع درخواست محفوظ', { exact: true })).toBeVisible();
   await review.getByRole('button', { name: 'بازگشت و ویرایش', exact: true }).click();
   await page.getByRole('button', { name: 'به‌روزرسانی', exact: true }).click();
   const resume = workspace.getByRole('button', { name: 'ادامه بررسی درخواست قبلی', exact: true });
@@ -248,7 +251,7 @@ test('a rejection after an unknown result keeps the original request locked', as
   await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
   await review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true }).click();
   await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toBeEnabled();
-  await expect(review.getByRole('textbox', { name: 'مرجع مستندات', exact: true })).toBeDisabled();
+  await expect(review.getByRole('textbox', { name: 'مرجع مستندات', exact: true })).toHaveCount(0);
   expect(commands).toHaveLength(2);
   expect(commands[1]).toEqual(commands[0]);
 });
@@ -268,7 +271,7 @@ test('a closed compatibility guard does not discard a previously uncertain comma
   await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
   await review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true }).click();
   await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toBeEnabled();
-  await expect(review.getByRole('textbox', { name: 'مرجع مستندات', exact: true })).toBeDisabled();
+  await expect(review.getByRole('textbox', { name: 'مرجع مستندات', exact: true })).toHaveCount(0);
   expect(commands).toHaveLength(2);
   expect(commands[1]).toEqual(commands[0]);
 });

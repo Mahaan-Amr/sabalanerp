@@ -27,6 +27,12 @@ function validate(value: unknown): PendingAllocation {
     || typeof command.idempotencyKey !== 'string' || !/^[a-f0-9-]{36}$/.test(command.idempotencyKey)
     || !Array.isArray(command.allocations) || command.allocations.length !== 0 || !Array.isArray(command.sourceAllocations)) throw fail();
   for (const field of ['occurredAt', 'periodId', 'postingRuleId', 'reason', 'reference']) if (typeof command[field] !== 'string' || !command[field] || (command[field] as string).length > 4096) throw fail();
+  for (const source of command.sourceAllocations) {
+    if (!source || typeof source !== 'object' || !Array.isArray(source.allocations) || !source.allocations.length) throw fail();
+    for (const line of source.allocations) {
+      if (!line || typeof line.openItemId !== 'string' || typeof line.amountRials !== 'string' || !/^\d{1,20}$/.test(line.amountRials)) throw fail();
+    }
+  }
   if (!row.draft || Object.keys(row.draft).sort().join(',') !== 'amounts,budgets,enabled,selected'
     || !Array.isArray(row.draft.selected) || !Array.isArray(row.draft.enabled)
     || !row.draft.selected.every(value => typeof value === 'string') || !row.draft.enabled.every(value => typeof value === 'string')

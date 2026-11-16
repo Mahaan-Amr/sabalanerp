@@ -24,6 +24,10 @@ function responseCode(error: unknown) {
 function matchesAllocationAccount(savedId: string, routeId: string, customerId: string, profileId?: string) {
   return savedId === routeId || savedId === profileId || savedId === `customer:${customerId}`;
 }
+function allocationCommandTotal(command: AllocationCommand) {
+  return command.sourceAllocations.reduce((total, source) => total + source.allocations.reduce(
+    (sum, line) => sum + BigInt(line.amountRials), ZERO), ZERO);
+}
 function accountingContextAt(context: CustomerFinanceContext | undefined, date: string) {
   const at = new Date(`${date}T00:00:00.000Z`).getTime();
   return {
@@ -73,6 +77,8 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
   const contextSequence = useRef(0);
   const consumedSelection = useRef<number>();
   const plan = useMemo(() => customerAllocationPlan(data, draft), [data, draft]);
+  const retainedCommand = uncertain ? request.current?.command : undefined;
+  const remoteOnly = recovered && draft.selected.length === 0;
   const locked = pending || uncertain || posted || storageState !== 'ready';
   useUnarchivedDraftGuard('customer-allocation', review || locked || draft.selected.length > 0 || draft.enabled.length > 0 || Object.keys(draft.amounts).length > 0 || Object.keys(draft.budgets).length > 0 || Boolean(reason || reference || periodId || ruleId) || date !== todayTehran());
   const canAllocate = account.capabilities.canManageTreasury;
@@ -102,7 +108,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
         assertOwner();
         let saved = await readPendingAllocation(bookId, customerId, assertOwner);
         assertOwner();
-        if (!saved && canAllocate) {
+        if ((!saved || saved.owner !== owner) && canAllocate) {
           const response = await accountingAPI.discoverCustomerAllocationIntent(accountId, lease);
           assertOwner();
           const intent = response.data?.data;
@@ -116,7 +122,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
             setStorageState('closed');
             return;
           }
-          if (intent?.status === 'PENDING' && intent.accountId === account.profile?.id &&
+          if (!saved && intent?.status === 'PENDING' && intent.accountId === account.profile?.id &&
             intent.command?.idempotencyKey === intent.idempotencyKey && intent.command?.kind === 'ALLOCATION') {
             saved = await reservePendingAllocation({ owner, bookId, customerId, accountId: intent.accountId,
               command: intent.command, draft: emptyAllocationDraft() }, assertOwner);
@@ -206,7 +212,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
     }
   }
   async function save() {
-    if (inFlight.current || !canAllocate || posted || storageState !== 'ready') return;
+    if (inFlight.current || !canAllocate || posted || remoteOnly || storageState !== 'ready') return;
     if (!uncertain) {
       if (!plan.valid || !validEvidence || !confirmed) return;
       // Persist the same JSON shape sent over HTTP; optional source IDs may be undefined in the view model.
@@ -240,7 +246,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
       else if (state !== 'COMMITTED') throw new Error('ALLOCATION_INTENT_UNAVAILABLE');
       assertOwner();
       if (!mounted.current) return;
-      setUncertain(false); setPosted(true); setNotice(`تخصیص ${tomanMoney(plan.total)} ثبت شد.`);
+      setUncertain(false); setPosted(true); setNotice(`تخصیص ${tomanMoney(allocationCommandTotal(command))} ثبت شد.`);
       saved = true;
     } catch (failure) {
       if (!mounted.current) return;
@@ -395,10 +401,15 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
           : recovered ? <ErpButton label="بررسی وضعیت درخواست" variant="solid" disabled={pending || !canAllocate} onClick={() => void checkRecoveredStatus()} />
           : <ErpButton label={pending ? 'در حال ثبت…' : uncertain ? 'تلاش دوباره همان درخواست' : 'ثبت قطعی تخصیص'} variant="solid" disabled={pending || !canAllocate || (!uncertain && (!plan.valid || !validEvidence || !confirmed))} onClick={() => void save()} />}
         {uncertain && request.current && <ErpButton label="لغو درخواست تخصیص" tone="neutral" disabled={pending || !canAllocate} onClick={() => void checkRecoveredStatus('cancel')} />}
-        {recovered && uncertain && request.current && <ErpButton label="تلاش دوباره همان درخواست" tone="neutral" disabled={pending || !canAllocate} onClick={() => void save()} />}
+        {recovered && !remoteOnly && uncertain && request.current && <ErpButton label="تلاش دوباره همان درخواست" tone="neutral" disabled={pending || !canAllocate} onClick={() => void save()} />}
       </div>}>
       <div className={styles.review}>
         {error && <ErpInlineState kind="error" title={error} />}
+        {retainedCommand ? <ErpSummaryGrid columns={3} items={[
+          { label: 'جمع درخواست محفوظ', value: tomanMoney(allocationCommandTotal(retainedCommand)) },
+          { label: 'مرجع مستندات', value: retainedCommand.reference },
+          { label: 'تاریخ عملیات', value: retainedCommand.occurredAt.slice(0, 10) },
+        ]} /> : <>
         {plan.error && <ErpInlineState kind="stale" title={plan.error} />}
         <ErpSummaryGrid columns={3} items={[{ label: 'جمع تخصیص', value: tomanMoney(plan.total) }, { label: 'تعداد بدهی', value: plan.selectedDebts.filter(row => (tomanRials(draft.amounts[row.item.id] || '') ?? ZERO) > ZERO).length.toLocaleString('fa-IR') },
           { label: 'مانده منابع منتخب پس از تخصیص', value: tomanMoney(plan.enabledSources.reduce((sum, row) => sum + row.remaining, ZERO) - plan.total) }]} />
@@ -420,6 +431,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
           </ErpDisclosure>
           <ErpCheckbox checked={confirmed} onChange={event => setConfirmed(event.target.checked)} label="مبلغ بدهی‌ها و سهم دقیق منابع را بررسی و تأیید می‌کنم." />
         </fieldset>}
+        </>}
       </div>
     </ErpSheet>
   </section>;

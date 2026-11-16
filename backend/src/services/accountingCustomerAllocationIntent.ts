@@ -62,3 +62,20 @@ export async function readCustomerAllocationIntent(database: PrismaClient, accou
   if (pending.ownerId !== actor.id) return { status: 'BLOCKED' as const };
   return { status: 'PENDING' as const, accountId: pending.accountId, idempotencyKey: pending.idempotencyKey, command: pending.command };
 }
+
+/** Reconcile a known exact command, including terminal results. Missing or
+ * mismatched evidence is never proof that a financial command did not run.
+ * This is not an activation or cancellation authority and is not exposed. */
+export async function readCustomerAllocationIntentByCommand(database: PrismaClient, accountId: string, input: AllocationInput) {
+  if (input.actor.profile === 'VIEWER') return fail('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز ثبت عملیات مالی ندارید.', 403);
+  if (input.kind !== 'ALLOCATION' || !input.sourceAllocations || input.idempotencyKey.length < 8) return unknown();
+  const resolved = await resolveCustomerWorkspace(database, accountId);
+  if (!resolved.profile) return unknown();
+  const intent = await database.accountingCustomerAllocationIntent.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+  if (!intent || intent.profileId !== resolved.profile.id || intent.accountId !== accountId || intent.ownerId !== input.actor.id
+    || intent.commandHash !== hashAccountingEvidence({ ...input, actor: undefined })) return unknown();
+  if (intent.state === 'PENDING') return { status: 'PENDING' as const };
+  if (intent.state === 'CANCELED') return { status: 'CANCELED' as const };
+  if (intent.state === 'COMMITTED' && intent.result !== null) return { status: 'COMMITTED' as const, result: intent.result };
+  return unknown();
+}

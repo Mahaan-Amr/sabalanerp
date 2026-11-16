@@ -14,9 +14,11 @@ This is a local integration snapshot, not a production release or a GitHub merge
 - Database client ownership, Sabalan Design System adoption and foundation checks passed.
 - The InvoiceDraftEditor, slab accounting quantity, biometric diagnostics workflow and biometric connector unit tests passed.
 - The repository's Git commit hook could not launch `/bin/bash` under this Windows environment. Equivalent architecture and design checks were run directly before the local merge commit.
+- At the PR #453 head, GitHub checks for adoption, hiring workflow and contracts passed. The `database-client-ownership` job failed in ten deployment-storage tests invoking `docker compose config`; the browser-acceptance job was still queued at the time of inspection. This CI result is not covered by the successful local ownership check.
 
 ## Before release
 
 - Refresh `main`, PR #453 and any later contributions; resolve any new conflicts and rerun affected tests.
 - Run the database integration and browser acceptance checks in an environment with the existing `sabalanerp-local` Docker project. Docker Desktop was unavailable during this local preparation. PR #453 reports its own browser and HTTP evidence and a separate `docker:verify` limitation.
+- Investigate and clear the PR #453 deployment-storage CI failure before promoting the combined candidate.
 - Use the protected production deployment workflow only after the combined candidate and its release gates are reviewed. No production service or GitHub ref was changed by this preparation.

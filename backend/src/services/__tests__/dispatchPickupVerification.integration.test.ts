@@ -13,7 +13,7 @@ import { processPickupVerification, requirePickupVerification } from '../dispatc
 const target = new URL(process.env.DATABASE_URL || 'postgresql://invalid');
 assert.equal(target.hostname, '127.0.0.1');
 assert.equal(target.port, '55432');
-assert.equal(target.pathname, '/sabalanerp');
+assert.match(target.pathname, /^\/sabalanerp_dispatchdocs_[a-f0-9]{16}$/);
 
 const db = new PrismaClient();
 const rollback = Symbol('Customer pickup verification rollback');

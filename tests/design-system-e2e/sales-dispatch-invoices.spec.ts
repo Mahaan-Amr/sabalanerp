@@ -31,6 +31,105 @@ const reply = (route: Route, data: unknown) =>
     contentType: "application/json",
     body: JSON.stringify({ success: true, data }),
   });
+
+test("Accounting reissues a paired cancellation on the same loading", async ({ page }) => {
+  await loginAsAdmin(page);
+  await setViewportAndZoom(page, { width: 390, height: 900 });
+  const loadingId = "qa-recover-loading-12";
+  const recovery = { waybillId: "waybill-11", waybillNumber: "11", invoiceId: "invoice-9", invoiceNumber: "9" };
+  let requests = 0;
+  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+    id: "recovery-candidate", loadingId, status: "ACCEPTED", canManage: true,
+    summary: { loadingNumber: "12", driverName: "راننده آزمون" },
+    waybills: [
+      { id: "waybill-8", number: "8", status: "VOIDED" },
+      { id: "waybill-11", number: "11", status: "VOIDED" },
+      ...(requests ? [{ id: "waybill-12", number: "12", status: "ISSUED", legacyReconstruction: { id: "pdf-12" } }] : []),
+    ],
+  }]));
+  await page.route("**/api/dispatch-confirmation/capabilities", route => reply(route, {
+    canManageAccountingCandidates: true, canManageAccountingConfirmation: false,
+  }));
+  await page.route(`**/api/accounting/loadings/${loadingId}/sales-invoices`, route => reply(route, {
+    ready: Boolean(requests), documentsComplete: Boolean(requests), recovery: requests ? null : recovery,
+    invoices: [
+      ...(requests ? [{ id: "invoice-12", number: "12", status: "ISSUED" }] : []),
+      { id: "invoice-9", number: "9", status: "VOIDED", voidReason: "ابطال ثبت‌شده" },
+    ],
+  }));
+  await page.route(`**/api/accounting/loadings/${loadingId}/issue-dispatch-documents`, async route => {
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().postDataJSON()).toEqual({
+      recovery: { waybillId: "waybill-11", invoiceId: "invoice-9", reason: "صدور مجدد برای همان بارگیری" },
+    });
+    requests++;
+    await reply(route, { status: "ISSUED" });
+  });
+  await page.goto("/dashboard/accounting/dispatch");
+  await page.getByRole("table").getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).click();
+  const details = page.getByRole("dialog", { name: "جزئیات اقلام و اسناد بارگیری" });
+  const recover = details.getByRole("button", { name: "صدور مجدد بارنامه و فاکتور", exact: true });
+  await recover.click();
+  const confirm = details.getByRole("button", { name: "تأیید و صدور مجدد" });
+  await expect(confirm).toBeDisabled();
+  await details.getByRole("button", { name: "انصراف", exact: true }).click();
+  expect(requests).toBe(0);
+  await recover.click();
+  await details.getByRole("textbox", { name: "دلیل صدور مجدد" }).fill("صدور مجدد برای همان بارگیری");
+  await assertNoHorizontalOverflow(page);
+  await confirm.click();
+  await expect(details.getByText("فاکتور ۱۲ · صادرشده", { exact: true })).toBeVisible();
+  await expect(details.getByText("فاکتور ۹ · باطل‌شده", { exact: true })).toBeVisible();
+  await expect(recover).toHaveCount(0);
+  expect(requests).toBe(1);
+});
+
+test("Accounting repairs an invalid invoice while its replacement waybill remains active", async ({ page }) => {
+  await loginAsAdmin(page);
+  const loadingId = "qa-repair-loading-13";
+  const oldInvoice = { id: "invoice-10", number: "10" };
+  let status = "INVALIDATED";
+  let replacementIssued = false;
+  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+    id: "repair-candidate", loadingId, status: "ACCEPTED", canManage: true,
+    summary: { loadingNumber: "13", driverName: "راننده آزمون" },
+    currentSalesInvoice: status === "INVALIDATED" ? oldInvoice : null,
+    waybills: [{ id: "active-waybill", number: "21", status: "ISSUED", legacyReconstruction: { id: "waybill-pdf" } }],
+  }]));
+  await page.route("**/api/dispatch-confirmation/capabilities", route => reply(route, {
+    canManageAccountingCandidates: true, canManageAccountingConfirmation: false,
+  }));
+  await page.route(`**/api/accounting/loadings/${loadingId}/sales-invoices`, route => reply(route, {
+    ready: true, documentsComplete: true, invoices: [
+      ...(replacementIssued ? [{ id: "invoice-replacement", number: "22", status: "ISSUED" }] : []),
+      { ...oldInvoice, status, voidReason: status === "VOIDED" ? "تغییر شماره بارنامه" : null },
+    ],
+  }));
+  await page.route(`**/api/accounting/loadings/${loadingId}/sales-invoices/${oldInvoice.id}/void`, route => {
+    expect(route.request().postDataJSON()).toEqual({ reason: "تغییر شماره بارنامه", onlyIfInvalidated: true });
+    status = "VOIDED";
+    return reply(route, oldInvoice);
+  });
+  await page.route(`**/api/accounting/loadings/${loadingId}/issue-dispatch-documents`, route => {
+    expect(status).toBe("VOIDED");
+    replacementIssued = true;
+    return reply(route, { status: "ISSUED" });
+  });
+  await page.goto("/dashboard/accounting/dispatch");
+  const row = page.getByRole("table").getByRole("row", { name: /راننده آزمون/ });
+  await row.getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).click();
+  const details = page.getByRole("dialog", { name: "جزئیات اقلام و اسناد بارگیری" });
+  await details.getByRole("button", { name: "ابطال فاکتور نامعتبر" }).click();
+  const confirm = details.getByRole("button", { name: "ثبت ابطال فاکتور فروش" });
+  await expect(confirm).toBeDisabled();
+  await details.getByRole("textbox", { name: "دلیل ابطال" }).fill("تغییر شماره بارنامه");
+  await confirm.click();
+  await expect(details.getByText("فاکتور ۱۰ · باطل‌شده", { exact: true })).toBeVisible();
+  await details.getByRole("button", { name: "صدور فاکتور جایگزین" }).click();
+  await expect(details.getByText("فاکتور ۲۲ · صادرشده", { exact: true })).toBeVisible();
+  await expect(row.getByText("۲۱", { exact: true })).toBeVisible();
+});
+
 const expectInvoicePreview = async (page: Page, workspace: "accounting" | "logistics", loadingId: string) => {
   await page.route(`**/api/${workspace}/loadings/${loadingId}/sales-invoices/invoice-1/pdf?*`, async route => {
     expect(new URL(route.request().url()).searchParams.get("download")).toBe("false");

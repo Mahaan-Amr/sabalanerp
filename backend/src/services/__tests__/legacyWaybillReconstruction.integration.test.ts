@@ -7,7 +7,9 @@ import path from 'node:path';
 import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
 import { createConcurrentPricingFixture } from './shipmentStatementConcurrency/pricingFixture';
 import { createAuthorizedActorFixture } from './shipmentStatementConcurrency/authorityFixture';
-import { cancelFinalizedOrdinaryLoading, decideAccountingDispatchCandidate, finalizeCanonicalLoadingAllocations, LoadingCancellationAccountingAccessError } from '../dispatchAllocation';
+import { cancelFinalizedOrdinaryLoading, decideAccountingDispatchCandidate, finalizeCanonicalLoadingAllocations,
+  LoadingCancellationAccountingAccessError, recoverLegacyLoadingWaybill, replaceAccountingDispatchWaybill,
+  voidAccountingDispatchWaybill } from '../dispatchAllocation';
 import { readLegacyWaybillReconstruction, reconstructLegacyWaybill } from '../legacyWaybillReconstruction';
 import { createSalesInvoiceService } from '../salesDispatchInvoice/service';
 import { classifyLoadingDocumentPart, issueLoadingDocuments } from '../loadingDocumentIssuance';
@@ -173,8 +175,8 @@ async function run() {
     const second = await loadSecond();
     assert.equal(classifyLoadingDocumentPart(second, false, true).state, 'PENDING');
     let failOnce = true;
-    const issueSecond = async (part: ReturnType<typeof classifyLoadingDocumentPart>) => issueLoadingDocuments({
-      loadingId: fixture.loadings[1].id, invoicePredecessorId: null, parts: [part],
+    const issueSecond = async (part: ReturnType<typeof classifyLoadingDocumentPart>, invoicePredecessorId: string | null = null) => issueLoadingDocuments({
+      loadingId: fixture.loadings[1].id, invoicePredecessorId, parts: [part],
       issueWaybill: async (candidateId, idempotencyKey) => { await decideAccountingDispatchCandidate(db,
         { candidateId, idempotencyKey, action: 'ACCEPT', actorId: actor.id, effectiveAuthority: authority }); },
       reconstructWaybill: async candidateId => {
@@ -190,6 +192,49 @@ async function run() {
     await issueSecond(classifyLoadingDocumentPart(retry, false, true));
     assert.equal(await db.accountingDispatchWaybill.count({ where: { candidateId: second.candidate!.id } }), 1);
     assert.equal(await db.salesDispatchInvoice.count({ where: { loadingId: fixture.loadings[1].id } }), 1);
+    const secondLoadingId = fixture.loadings[1].id;
+    const originalWaybill = await db.accountingDispatchWaybill.findFirstOrThrow({ where: { candidateId: second.candidate!.id } });
+    const originalInvoice = await db.salesDispatchInvoice.findFirstOrThrow({ where: { loadingId: secondLoadingId } });
+    const replacementInput = { waybillId: originalWaybill.id, actorId: actor.id, effectiveAuthority: authority,
+      reason: 'آزمون جایگزینی بارنامه', idempotencyKey: `replace-${database.runId}` };
+    await replaceAccountingDispatchWaybill(db, replacementInput);
+    const cancelledWaybill = await db.accountingDispatchWaybill.findFirstOrThrow({ where: { replacesWaybillId: originalWaybill.id } });
+    await reconstructLegacyWaybill(db, { ...command, waybillId: cancelledWaybill.id }, render);
+    await voidAccountingDispatchWaybill(db, { ...replacementInput, waybillId: cancelledWaybill.id,
+      idempotencyKey: `void-${database.runId}`, expectedInvoiceId: originalInvoice.id });
+    const recoveryInput = { loadingId: secondLoadingId, waybillId: cancelledWaybill.id,
+      invoiceId: originalInvoice.id, reason: 'آزمون صدور مجدد پس از ابطال', actorId: actor.id };
+    const recoveryContext = { ...invoiceContext, expectedRevisionIds: [second.id] };
+    assert.equal((await invoices.list(recoveryContext, secondLoadingId)).recovery?.waybillId, cancelledWaybill.id);
+    await assert.rejects(() => recoverLegacyLoadingWaybill(db, { ...recoveryInput, actorId: fixture.actorId }), LoadingCancellationAccountingAccessError);
+    await assert.rejects(() => recoverLegacyLoadingWaybill(db, { ...recoveryInput, waybillId: originalWaybill.id }), /صدور مجدد مجاز نیست/);
+    const attempts = await Promise.allSettled([
+      recoverLegacyLoadingWaybill(db, recoveryInput),
+      recoverLegacyLoadingWaybill(db, recoveryInput),
+    ]);
+    const successes = attempts.filter(result => result.status === 'fulfilled');
+    assert.equal(successes.length, 1);
+    const recoveredWaybillId = successes[0].value;
+    await assert.rejects(() => recoverLegacyLoadingWaybill(db, recoveryInput), /صدور مجدد مجاز نیست/);
+    const recoveredPart = classifyLoadingDocumentPart(await loadSecond(), false, true);
+    assert.equal(recoveredPart.state, 'RECONSTRUCT');
+    failOnce = true;
+    await assert.rejects(() => issueSecond(recoveredPart, originalInvoice.id), /simulated render failure/);
+    await issueSecond(classifyLoadingDocumentPart(await loadSecond(), false, true), originalInvoice.id);
+    await issueSecond(classifyLoadingDocumentPart(await loadSecond(), false, true), originalInvoice.id);
+    assert.deepEqual(await db.accountingDispatchWaybill.findMany({ where: { candidateId: second.candidate!.id },
+      orderBy: { number: 'asc' }, select: { id: true, status: true, replacesWaybillId: true } }), [
+      { id: originalWaybill.id, status: 'VOIDED', replacesWaybillId: null },
+      { id: cancelledWaybill.id, status: 'VOIDED', replacesWaybillId: originalWaybill.id },
+      { id: recoveredWaybillId, status: 'ISSUED', replacesWaybillId: cancelledWaybill.id },
+    ]);
+    const recoveredInvoice = await db.salesDispatchInvoice.findFirstOrThrow({ where: { loadingId: secondLoadingId, voidedAt: null } });
+    assert.equal(recoveredInvoice.replacesId, originalInvoice.id);
+    await assert.rejects(() => invoices.issue({ ...recoveryContext, expectedWaybillId: cancelledWaybill.id },
+      secondLoadingId, 'stale-recovery-waybill'), /بارنامه صادرشده تغییر کرده است/);
+    assert.ok((await db.salesDispatchInvoice.findUniqueOrThrow({ where: { id: originalInvoice.id } })).voidedAt);
+    assert.equal(await db.legacyWaybillReconstruction.count({ where: { waybillId: { in: [originalWaybill.id, cancelledWaybill.id, recoveredWaybillId] } } }), 3);
+    assert.equal((await invoices.list(recoveryContext, secondLoadingId)).recovery, null);
     const secondTurn = await db.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: second.queueTurnId } });
     assert.ok(secondTurn.externalDriverId);
     const simulator = new DispatchConfirmationService(db, { vault: new ProtectedTemplateVault({ activeKeyId: 'test', keys: { test: Buffer.alloc(32, 7) } }),
@@ -199,7 +244,13 @@ async function run() {
     await simulator.enrollInternalDriver({ personnelId: `external:${secondTurn.externalDriverId}`, confirmationPhone: '09123333333', actorId: actor.id,
       templates: ['RIGHT_INDEX', 'LEFT_INDEX'].map(finger => ({ finger, format: 'ISO-19794-2', material: Buffer.from(`test-${finger}`),
         deviceEvidence: {}, provenance: 'APPROVED_CONNECTOR' as const })) });
-    const secondWaybill = await db.accountingDispatchWaybill.findFirstOrThrow({ where: { candidateId: second.candidate!.id } });
+    await assert.rejects(() => invoices.void(recoveryContext, secondLoadingId, recoveredInvoice.id, 'آزمون فاکتور معتبر', true),
+      /در حال حاضر معتبر است/);
+    await replaceAccountingDispatchWaybill(db, { ...replacementInput, waybillId: recoveredWaybillId,
+      idempotencyKey: `replace-invoice-repair-${database.runId}` });
+    const secondWaybill = await db.accountingDispatchWaybill.findUniqueOrThrow({ where: { replacesWaybillId: recoveredWaybillId } });
+    await reconstructLegacyWaybill(db, { ...command, waybillId: secondWaybill.id }, render);
+    assert.equal((await invoices.list(recoveryContext, secondLoadingId)).invoices[0].status, 'INVALIDATED');
     const session = await simulator.startSession({ waybillId: secondWaybill.id, actorId: actor.id, workstationId: 'ISOLATED-TEST' });
     const confirmation = await simulator.verifyInternalBiometric({ sessionId: session.id, actorId: actor.id });
     assert.ok(confirmation.authorization);
@@ -208,12 +259,27 @@ async function run() {
     const gate = new PhysicalGateExitService(db);
     const exitInput = { authorizationId: confirmation.authorization.id, actorId: guard.id, effectiveAuthority: guardAuthority,
       idempotencyKey: `isolated-exit-${database.runId}`, correlationId: `isolated-exit-${database.runId}` };
+    await assert.rejects(() => gate.recordExit(exitInput), /فاکتور کل بارگیری معتبر نیست/);
+    const authorizationBeforeRepair = await db.dispatchExitAuthorization.findUniqueOrThrow({ where: { id: exitInput.authorizationId } });
+    assert.equal(authorizationBeforeRepair.status, 'ACTIVE');
+    await invoices.void(recoveryContext, secondLoadingId, recoveredInvoice.id, 'ارجاع فاکتور به بارنامه جایگزین', true);
+    await assert.rejects(() => gate.recordExit(exitInput), /فاکتور فروش کل بارگیری هنوز صادر نشده است/);
+    const repairedPart = classifyLoadingDocumentPart(await loadSecond(), false, true);
+    assert.equal(repairedPart.state, 'COMPLETE');
+    await issueSecond(repairedPart, recoveredInvoice.id);
+    const repairedInvoice = await db.salesDispatchInvoice.findFirstOrThrow({ where: { loadingId: secondLoadingId, voidedAt: null } });
+    assert.equal(repairedInvoice.replacesId, recoveredInvoice.id);
+    assert.deepEqual(await db.dispatchExitAuthorization.findUniqueOrThrow({ where: { id: exitInput.authorizationId } }), authorizationBeforeRepair);
+    assert.deepEqual(await db.accountingDispatchWaybill.findUniqueOrThrow({ where: { id: secondWaybill.id } }), secondWaybill);
     await db.externalDriver.update({ where: { id: secondTurn.externalDriverId }, data: { status: 'RESTRICTED' } });
     await assert.rejects(() => gate.recordExit(exitInput), /خروج مجاز نیست/);
     await db.externalDriver.update({ where: { id: secondTurn.externalDriverId }, data: { status: 'ACTIVE' } });
     const requestBeforeExit = await requestLoadingCancellation(db, { ...cancelInput, loadingId: fixture.loadings[1].id });
     assert.ok(requestBeforeExit);
     const exit = await gate.recordExit(exitInput);
+    assert.equal(exit.authorizationId, exitInput.authorizationId);
+    assert.equal(exit.waybillId, secondWaybill.id);
+    assert.match(JSON.stringify(exit.snapshot), new RegExp(repairedInvoice.id));
     assert.equal((await gate.recordExit(exitInput)).id, exit.id);
     assert.equal((await db.guardDriverQueueTurn.findUniqueOrThrow({ where: { id: secondTurn.id } })).status, 'EXIT_RECORDED');
     const decideAfterExit = { ...response, dutyId: requestBeforeExit.id, expectedSourceVersion: requestBeforeExit.sourceVersion };

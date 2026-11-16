@@ -840,13 +840,14 @@ export function ErpSummaryGrid({ items, columns = 2 }: {
   );
 }
 
-export function ErpPage({ eyebrow, title, description, actions = [], metrics = [], children, backHref }: WithChildren & {
+export function ErpPage({ eyebrow, title, description, actions = [], metrics = [], children, backHref, onBack }: WithChildren & {
   eyebrow?: React.ReactNode;
   title: React.ReactNode;
   description?: React.ReactNode;
   actions?: ErpAction[];
   metrics?: ErpMetric[];
   backHref?: string;
+  onBack?: () => void;
 }) {
   const handleBack = useWorkspaceBack(backHref);
 
@@ -854,8 +855,8 @@ export function ErpPage({ eyebrow, title, description, actions = [], metrics = [
     <main className="sds-workspace mx-auto w-full max-w-7xl space-y-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
-          {backHref && (
-            <ErpIconButton label="بازگشت" onClick={handleBack} icon={FaArrowRight} tone="neutral" />
+          {(onBack || backHref) && (
+            <ErpIconButton label="بازگشت" onClick={onBack ?? handleBack} icon={FaArrowRight} tone="neutral" />
           )}
           <div className="min-w-0">
             {eyebrow && <p className="text-xs font-semibold uppercase tracking-wide text-[var(--sds-accent)] dark:text-[var(--sds-accent)]">{eyebrow}</p>}

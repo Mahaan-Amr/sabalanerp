@@ -1,9 +1,14 @@
 export type DispatchConfirmationIdentity = {
   driverSource?: string | null;
   method?: string | null;
+  status?: string | null;
+  authorization?: { id?: string } | null;
 };
 
 export const confirmationActionsFor = (confirmation: DispatchConfirmationIdentity) => {
+  if (confirmation.status === 'CONFIRMED' || confirmation.authorization?.id) {
+    return { biometric: false, fallback: false, otp: false };
+  }
   const internalBiometric = (confirmation.driverSource === 'INTERNAL' && confirmation.method === 'INTERNAL_BIOMETRIC')
     || (confirmation.driverSource === 'EXTERNAL' && confirmation.method === 'EXTERNAL_BIOMETRIC');
   const externalOtp = (confirmation.driverSource === 'EXTERNAL' && confirmation.method === 'EXTERNAL_FALLBACK')

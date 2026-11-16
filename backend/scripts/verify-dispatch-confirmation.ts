@@ -76,7 +76,7 @@ const main = async () => {
   };
 
   const external = await service.startSession({ waybillId: externalWaybill!.id, actorId: actor.id, workstationId: 'ACCOUNTING-01' });
-  await assert.rejects(service.startSession({ waybillId: externalWaybill!.id, actorId: actor.id, workstationId: 'ACCOUNTING-02' }), /unique|active/i);
+  await assert.rejects(service.startSession({ waybillId: externalWaybill!.id, actorId: actor.id, workstationId: 'ACCOUNTING-02' }), /نوبت فعال/);
   assert.equal(external.method, 'EXTERNAL_OTP_GUARD');
   assert.equal(deliveries.at(-1)?.code.length, 6);
   assert.equal(deliveries.at(-1)?.dispatchNumber, externalWaybill!.number.toString());

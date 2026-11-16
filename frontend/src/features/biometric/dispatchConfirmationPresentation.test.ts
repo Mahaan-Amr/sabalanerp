@@ -35,6 +35,14 @@ test('unknown or inconsistent sessions fail closed', () => {
   });
 });
 
+test('an issued exit authorization suppresses scan and fallback actions immediately and on reopen', () => {
+  const active = { driverSource: 'INTERNAL', method: 'INTERNAL_BIOMETRIC', status: 'ACTIVE' };
+  const authorization = { id: 'authorization' };
+  const hiddenActions = { biometric: false, fallback: false, otp: false };
+  assert.deepEqual(confirmationActionsFor({ ...active, authorization }), hiddenActions);
+  assert.deepEqual(confirmationActionsFor({ ...active, status: 'CONFIRMED', authorization }), hiddenActions);
+});
+
 for (const source of ['INTERNAL', 'EXTERNAL']) {
  test(`${source} biometric and fallback sessions expose identical actions`, () => {
   assert.deepEqual(confirmationActionsFor({driverSource: source, method: `${source}_BIOMETRIC`}), {biometric:true, fallback:true, otp:false});

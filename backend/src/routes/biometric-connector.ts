@@ -54,8 +54,14 @@ router.post('/diagnostics/result', ...access, async (req: AuthRequest, res) => {
   try {
     const claimed = await gateway().claimHealth({ challengeId: String(req.body.challengeId || ''), actorId: req.user!.id, signedResponse: req.body.signedResponse });
     await gateway().complete([claimed.challenge.id], true);
+    const latestEnrollment = await prisma.biometricConnectorChallenge.findFirst({
+      where: { workstationId: claimed.challenge.workstationId, operation: 'CAPTURE', status: 'CONSUMED', enrollmentId: { not: null } },
+      orderBy: { completedAt: 'desc' },
+      select: { completedAt: true },
+    });
     res.json({ success: true, data: { mode: 'PHYSICAL', availability: claimed.response.result.availability, liveEnrollmentEnabled: liveEnrollmentReady(),
-      checkedAt: claimed.response.completedAt, device: claimed.response.result.device, supportedChecks: ['capture-quality', 'liveness', 'one-to-one-match', 'retry-recovery', 'licensing'] } });
+      checkedAt: claimed.response.completedAt, lastCompletedEnrollmentAt: latestEnrollment?.completedAt?.toISOString() || null,
+      device: claimed.response.result.device, supportedChecks: ['capture-quality', 'liveness', 'one-to-one-match', 'retry-recovery', 'licensing'] } });
   } catch (error) { res.status(409).json({ success: false, error: error instanceof Error ? error.message : 'Biometric diagnostics are unavailable.' }); }
 });
 

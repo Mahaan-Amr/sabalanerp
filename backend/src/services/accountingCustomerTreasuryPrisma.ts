@@ -801,18 +801,32 @@ export const recordInternalTreasuryTransferPrisma = async (database: PrismaClien
   return tx.accountingTreasuryTransaction.findMany({ where: { sourceType: 'INTERNAL_TRANSFER', sourceId: input.idempotencyKey }, orderBy: { direction: 'asc' } });
 }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
 
+export async function lockCustomerReceiptWithin(tx: Prisma.TransactionClient, receiptId: string) {
+  const source = await tx.accountingTreasuryTransaction.findUnique({
+    where: { id: receiptId },
+    select: { profile: { select: { partySourceId: true } } },
+  });
+  if (source?.profile) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${source.profile.partySourceId}`}))`;
+  }
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${receiptId}))`;
+  return source?.profile?.partySourceId;
+}
+
 export const allocateCustomerReceiptPrisma = async (database: Database, input: {
   treasuryTransactionId: string; allocations: Array<{ openItemId: string; amountRials: bigint }>;
   sourcePlanHash?: string;
   bookId: string; fiscalYearId: string; periodId: string; customerAdvanceLedgerId: string; receivableLedgerId: string;
   documentDate: Date; reason?: string; reference?: string; idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
 }) => customerTransaction(database, async (tx) => {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.treasuryTransactionId}))`;
+  const lockedCustomer = await lockCustomerReceiptWithin(tx, input.treasuryTransactionId);
   const receipt = await tx.accountingTreasuryTransaction.findUnique({ where: { id: input.treasuryTransactionId }, include: {
     allocations: { where: { reversesId: null, reversedById: null }, include: { lines: true } }, profile: true,
     adjustments: { include: { ledgerVoucher: true } }, checkInstrument: true, sourceResolution: true,
   } });
-  if (!receipt || receipt.kind !== 'CUSTOMER_RECEIPT' || !receipt.profile) throw new AccountingCustomerTreasuryError('RECEIPT_NOT_FOUND', 'دریافت مشتری پیدا نشد.', 404);
+  if (!receipt || receipt.kind !== 'CUSTOMER_RECEIPT' || !receipt.profile || receipt.profile.partySourceId !== lockedCustomer) {
+    throw new AccountingCustomerTreasuryError('RECEIPT_NOT_FOUND', 'دریافت مشتری پیدا نشد.', 404);
+  }
   await lockSettlementContracts(tx, input.allocations.map(item => item.openItemId));
   const payload = { treasuryTransactionId: receipt.id, ...(input.sourcePlanHash ? { sourcePlanHash: input.sourcePlanHash } : {}),
     allocations: [...input.allocations].map((item) => ({ openItemId: item.openItemId, amountRials: item.amountRials }))
@@ -879,14 +893,23 @@ export const allocateCustomerCreditPrisma = async (database: Database, input: {
   documentDate: Date; reason: string; reference: string; idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
 }) => customerTransaction(database, async tx => {
   await requireCustomerSourceSharesWithin(tx);
+  const creditOwner = await tx.accountingCustomerOpenItem.findUnique({
+    where: { id: input.creditItemId },
+    select: { kind: true, profile: { select: { partySourceId: true } } },
+  });
+  if (!creditOwner || creditOwner.kind !== 'CREDIT') {
+    throw new AccountingCustomerTreasuryError('CREDIT_NOT_FOUND', 'بستانکاری مستقل پیدا نشد.', 404);
+  }
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${creditOwner.profile.partySourceId}`}))`;
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.creditItemId}))`;
   const credit = await tx.accountingCustomerOpenItem.findUnique({ where: { id: input.creditItemId }, include: {
     invoice: true,
     profile: true, sourceSettlements: { where: { reversesId: null, reversedById: null }, include: { lines: true } },
     allocationLines: { where: { allocation: { reversesId: null, reversedById: null } } },
   } });
-  if (!credit || credit.kind !== 'CREDIT') throw new AccountingCustomerTreasuryError('CREDIT_NOT_FOUND', 'بستانکاری مستقل پیدا نشد.', 404);
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${credit.profile.partySourceId}`}))`;
+  if (!credit || credit.kind !== 'CREDIT' || credit.profile.partySourceId !== creditOwner.profile.partySourceId) {
+    throw new AccountingCustomerTreasuryError('CREDIT_NOT_FOUND', 'بستانکاری مستقل پیدا نشد.', 404);
+  }
   await lockSettlementContracts(tx, input.allocations.map(line => line.openItemId));
   const payload = { ...input, actor: undefined, allocations: [...input.allocations].sort((a, b) => a.openItemId.localeCompare(b.openItemId)) };
   const prior = await tx.accountingSettlementAllocation.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: { lines: true } });
@@ -932,13 +955,24 @@ export const reverseCustomerAllocationPrisma = async (database: Database, input:
   idempotencyKey: string; correlationId: string; actor: CustomerTreasuryActor;
 }) => customerTransaction(database, async (tx) => {
   if (input.reason.trim().length < 8) throw new AccountingCustomerTreasuryError('REVERSAL_REASON_REQUIRED', 'دلیل برگشت تخصیص الزامی است.', 400);
+  const source = await tx.accountingSettlementAllocation.findUnique({
+    where: { id: input.allocationId },
+    select: {
+      transaction: { select: { profile: { select: { partySourceId: true } } } },
+      creditSource: { select: { profile: { select: { partySourceId: true } } } },
+    },
+  });
+  const lockedCustomer = (source?.transaction?.profile ?? source?.creditSource?.profile)?.partySourceId;
+  if (lockedCustomer) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${lockedCustomer}`}))`;
+  }
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.allocationId}))`;
   const original = await tx.accountingSettlementAllocation.findUnique({ where: { id: input.allocationId }, include: {
     lines: true, transaction: { include: { profile: true } }, creditSource: { include: { profile: true } }, reversedBy: true,
   } });
   if (original && (original.creditItemId !== null || original.treasuryTransactionId === null)) await requireCustomerSourceSharesWithin(tx);
   const profile = original?.transaction?.profile ?? original?.creditSource?.profile;
-  if (!original || original.reversesId || !profile) throw new AccountingCustomerTreasuryError('ALLOCATION_NOT_FOUND', 'تخصیص پیدا نشد.', 404);
+  if (!original || original.reversesId || !profile || profile.partySourceId !== lockedCustomer) throw new AccountingCustomerTreasuryError('ALLOCATION_NOT_FOUND', 'تخصیص پیدا نشد.', 404);
   if (original.transaction && original.transaction.kind !== 'CUSTOMER_RECEIPT') throw new AccountingCustomerTreasuryError('REFUND_REVERSAL_REQUIRES_CORRECTION', 'اصلاح استرداد باید همراه با برگشت سند پرداخت انجام شود.', 409);
   if (original.reversedBy) return original.reversedBy;
   await requireSettlementSource(tx, original.ledgerVoucherId, input.bookId, input.documentDate);

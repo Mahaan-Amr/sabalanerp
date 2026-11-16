@@ -40,6 +40,7 @@ import AccountingCustomPrintSettings, { defaultCustomPrintSettings, salesPdfVari
 import AccountingContractPrintActions, { accountingContractTabs } from "@/features/accounting/AccountingContractPrintActions";
 import { accountingReviewReturn, financialRecordReviewHref } from "@/features/accounting/financialRecordReviewHref";
 import AccountingActionModal from "@/features/accounting/AccountingActionModal";
+import { InvoiceDraftEditor } from "@/features/accounting/InvoiceDraftEditor";
 import AccountingVoidWorkflowPanel, {
   type AccountingVoidWorkflowView,
 } from "@/features/accounting/AccountingVoidWorkflowPanel";
@@ -119,6 +120,7 @@ export default function AccountingContractDetailPage(props: {
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reviewActionUrl, setReviewActionUrl] = useState<string | null>(null);
@@ -1193,8 +1195,17 @@ export default function AccountingContractDetailPage(props: {
                           amount={money(record.amount, record.currency)}
                           status={<StatusBadge status={record.status} />}
                           footer={
-                            canActFinancially && record.kind === "INVOICE_CANDIDATE" ? (
+                            record.kind === "INVOICE_CANDIDATE" && (canActFinancially || canUseAccountingAction("CREATE_INVOICE")) ? (
                               <div className="space-y-3">
+                                {record.status === "DRAFT" && (canUseAccountingAction("CREATE_INVOICE") || (canActFinancially && canExecuteAccountingAction("APPROVE_FINANCIAL_INVOICE"))) && (
+                                  editingDraftId === record.id ? <InvoiceDraftEditor record={record}
+                                    canSave={canUseAccountingAction("CREATE_INVOICE")}
+                                    canApprove={canActFinancially && canExecuteAccountingAction("APPROVE_FINANCIAL_INVOICE")}
+                                    busy={actionLoading}
+                                    onSave={details => execute({ kind: "SAVE_INVOICE_DRAFT", invoiceId: record.id, ...details })}
+                                    onApprove={details => execute({ kind: "APPROVE_FINANCIAL_INVOICE", invoiceId: record.id, ...details })} />
+                                    : <ErpButton label="ادامه تکمیل" onClick={() => setEditingDraftId(record.id)} />
+                                )}
                                 {(contract.accounting.openCorrections > 0 ||
                                   contract.accounting.openBlockerFlags > 0) &&
                                 !["ISSUED", "POSTED", "VOIDED"].includes(
@@ -1205,11 +1216,11 @@ export default function AccountingContractDetailPage(props: {
                                     مسدودکننده باز را بررسی و ببندید؛ سپس تایید
                                     مالی انجام می‌شود.
                                   </div>
-                                ) : (
+                                ) : canActFinancially ? (
                                   <ErpButton label="بررسی رکورد مالی" href={financialRecordReviewHref(record.id,
                                     `/dashboard/accounting/contracts/${encodeURIComponent(params.contractId)}?section=financial`)} />
-                                )}
-                                {record.status === "DRAFT" && (
+                                ) : null}
+                                {canActFinancially && record.status === "DRAFT" && (
                                   <div className="flex justify-end">
                                     <ErpButton
                                       label="حذف پیش‌نویس"
@@ -1221,7 +1232,7 @@ export default function AccountingContractDetailPage(props: {
                                     />
                                   </div>
                                 )}
-                                {["ISSUED", "POSTED"].includes(record.status) &&
+                                {canActFinancially && ["ISSUED", "POSTED"].includes(record.status) &&
                                   !(data.voidWorkflows || []).some(
                                     (workflow: AccountingVoidWorkflowView) =>
                                       workflow.sourceRecordId === record.id &&

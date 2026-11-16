@@ -77,6 +77,7 @@ async function cleanup() {
     await tx.externalDriver.deleteMany({ where: { createdBy: actorId } });
     await tx.externalVehicle.deleteMany({ where: { createdBy: actorId } });
     await tx.accountingInvoiceNumberClaim.deleteMany({ where: { financialRecordId: { in: invoiceIds } } });
+    await tx.accountingFinancialApprovalReceipt.deleteMany({ where: { financialRecordId: { in: invoiceIds } } });
     await tx.accountingTaxRecord.deleteMany({ where: { contractId } });
     await tx.accountingInvoiceCandidateItem.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
     await tx.accountingAuditLog.deleteMany({ where: { contractId } });
@@ -184,8 +185,26 @@ async function run() {
     createCommand = { kind: 'CREATE_REPLACEMENT_INVOICE', contractId, correctionRequestId: correction.id,
       replacesRecordId: prior.id, idempotencyKey: `${runId}:replacement`, correlationId: `${runId}:replacement` };
   }
-  const created = await action(createCommand);
+  const created = replacement ? await action(createCommand) : (await Promise.all([
+    action(createCommand), action({ ...createCommand, idempotencyKey: runId + ':retry' }),
+  ]).then(([first, replay]) => {
+    assert.deepEqual(replay.affected.financialRecordIds, first.affected.financialRecordIds, 'concurrent draft starts resume the same full invoice');
+    return first;
+  }));
   const invoiceId = String(created.affected.financialRecordIds[0]);
+  if (directAccounting && !replacement) {
+    await action({ kind: 'SAVE_INVOICE_DRAFT', invoiceId, systemInvoiceNumber: 'partial-number', systemInvoiceDate: '', sepidarAmount: '' });
+    const { getAccountingContractDetail } = await import('../accountingService');
+    const detail = await getAccountingContractDetail(contractId);
+    const saved = (detail as any).financialRecords.find((record: any) => record.id === invoiceId);
+    assert.equal(saved.draftDetails.systemInvoiceNumber, 'partial-number');
+    assert.equal(saved.draftDetails.systemInvoiceDate, '');
+    assert.equal(saved.systemInvoiceNumber, null, 'saving does not financially approve or reserve the number');
+    await assert.rejects(action({ kind: 'APPROVE_FINANCIAL_INVOICE', invoiceId, systemInvoiceNumber: 'partial-number',
+      systemInvoiceDate: '', sepidarAmount: '', idempotencyKey: `${runId}:incomplete`, correlationId: `${runId}:incomplete` }));
+    assert.equal(await db.accountingAuditLog.count({ where: { recordId: invoiceId, action: 'SAVE_INVOICE_DRAFT' } }), 1);
+    assert.equal(await db.accountingAuditLog.count({ where: { recordId: invoiceId, action: 'APPROVE_FINANCIAL_INVOICE' } }), 0);
+  }
   const before = await db.salesContract.findUniqueOrThrow({ where: { id: contractId }, include: { items: true, productGraphState: true } });
   const draft = await db.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId }, include: { invoiceItems: true } });
   await action({ kind: 'APPROVE_FINANCIAL_INVOICE', invoiceId,

@@ -62,4 +62,3 @@ test('unsaved invoice changes can be kept or discarded when changing sections', 
   await page.getByRole('button', { name: 'رکوردهای مالی', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'شماره فاکتور سیستمی' })).toHaveValue('saved again');
 });
-

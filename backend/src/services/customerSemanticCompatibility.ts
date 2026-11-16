@@ -5,8 +5,18 @@ import { AccountingCustomerTreasuryError } from './accountingCustomerTreasury';
  * Every affected command checks this inside its transaction before mutation. */
 export type CustomerSourceShareOperation = 'grouped-allocation' | 'grouped-credit-reversal' | 'other';
 
-export async function requireCustomerSourceSharesWithin(tx: Prisma.TransactionClient, _operation: CustomerSourceShareOperation = 'other'): Promise<void> {
+export async function requireCustomerSourceSharesWithin(tx: Prisma.TransactionClient, operation: CustomerSourceShareOperation = 'other'): Promise<void> {
   if ('$transaction' in tx) throw new Error('CUSTOMER_SEMANTIC_TRANSACTION_REQUIRED');
+  if (operation === 'grouped-allocation') {
+    // Lock in the posting transaction. A future controller must coordinate closure
+    // with this lock; the current migration makes ACTIVE structurally impossible.
+    try {
+      await tx.$queryRaw`SELECT state FROM customer_allocation_release_control
+        WHERE id = 'grouped-allocation' FOR SHARE`;
+    } catch {
+      // A missing migration or unavailable control is also closed.
+    }
+  }
   throw new AccountingCustomerTreasuryError('CUSTOMER_SOURCE_SHARES_CLOSED',
     'این عملیات مالی پس از تکمیل به‌روزرسانی در دسترس قرار می‌گیرد. درخواست ثبت نشد.', 409);
 }

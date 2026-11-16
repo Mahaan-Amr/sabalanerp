@@ -9,7 +9,9 @@ async function main() {
     repositoryRoot: path.resolve(process.cwd(), '..'), sourceDatabaseUrl: source, migrateEmptySchema: true,
   });
   try {
-    const result = spawnSync(process.execPath, ['node_modules/tsx/dist/cli.mjs', '--test', 'src/services/__tests__/accountingCustomerCommandStatusHttp.integration.test.ts'], {
+    const file = process.argv.includes('--posting')
+      ? 'accountingGroupedAllocationHttp.integration.test.ts' : 'accountingCustomerCommandStatusHttp.integration.test.ts';
+    const result = spawnSync(process.execPath, ['node_modules/tsx/dist/cli.mjs', '--test', `src/services/__tests__/${file}`], {
       cwd: process.cwd(), env: { ...process.env, DATABASE_URL: temporary.databaseUrl }, stdio: 'inherit', timeout: 300_000,
     });
     if (result.error) throw result.error;

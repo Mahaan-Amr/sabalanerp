@@ -14,13 +14,13 @@ test('status HTTP boundary requires treasury authority and the exact original no
   const target = new URL(url!);
   assert.ok(['127.0.0.1:55432', 'localhost:55432'].includes(target.host));
   assert.match(target.pathname, /^\/sabalanerp_concurrency_[a-f0-9]{16}$/);
-  const f = { ...await customerFinanceData(prisma), db: prisma };
   const shared = prisma;
   let server: ReturnType<express.Express['listen']> | undefined;
   try {
-    const [{ name }] = await f.db.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
+    const [{ name }] = await shared.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
     assert.match(name, /^sabalanerp_concurrency_[a-f0-9]{16}$/);
     assert.equal(target.pathname, `/${name}`);
+    const f = { ...await customerFinanceData(shared), db: shared };
     const { default: router } = await import('../../routes/accountingLedger');
     const [sharedDatabase] = await shared.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
     assert.equal(sharedDatabase.name, name, 'HTTP application must use the isolated fixture database');

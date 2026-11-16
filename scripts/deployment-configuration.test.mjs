@@ -225,12 +225,12 @@ else{process.exit(99);}`);
     if (failure === 'after-mutation') assert.ok(commands.includes('deployment-rollback.js'));
     assert.ok(!/fetch|pull|checkout/.test(fs.readFileSync(path.join(f.root, 'git.log'), 'utf8')));
     if (failure === 'success') { assert.ok(fs.readFileSync(f.environment, 'utf8').includes('LAPTOP-01')); assert.ok(!commands.includes('deployment-rollback.js')); } else assert.equal(fs.readFileSync(f.environment, 'utf8'), before);
-    if (failure === 'native-closure') {
-      assert.ok(fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')), 'uncertain native work keeps recovery evidence');
-      assert.ok(!commands.includes('maintenance-off'), 'failure before mutation cannot reopen an orphan runtime');
-      assert.ok(!commands.includes('deployment-rollback.js'), 'uncertain native work cannot restore older data');
+    if (['native-closure', 'checkpoint'].includes(failure)) {
+      assert.ok(fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')), 'uncertain original work keeps recovery evidence');
+      assert.ok(!commands.includes('maintenance-off'), 'uncertain original work cannot reopen the application');
+      assert.ok(!commands.includes('deployment-rollback.js'), 'uncertain original work cannot restore older data');
       const rows = commands.trim().split(/\r?\n/).map(line => JSON.parse(line));
-      assert.ok(!rows.some(row => row.includes('up') && row.includes('backend')), 'uncertain native work cannot start the prior application');
+      assert.ok(!rows.some(row => row.includes('up') && row.includes('backend')), 'uncertain original work cannot start the prior application');
     } else {
       const sessionFile = path.join(reports, 'active-deployment-session.json');
       const phase = fs.existsSync(sessionFile) ? JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase : 'none';

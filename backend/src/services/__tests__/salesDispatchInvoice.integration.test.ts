@@ -11,6 +11,8 @@ import {
   bytesHash,
   SalesInvoiceError,
 } from "../salesDispatchInvoice/source";
+import { PrismaDispatchDocumentSourceReader } from "../dispatchDocuments/prismaSourceReader";
+import { renderDispatchDocumentHtml } from "../../documents/dispatch/dispatchDocumentPdf";
 import { renderSalesInvoice } from "../salesDispatchInvoice/render";
 import { freezeSalesInvoiceCorrection } from "../salesDispatchInvoice/correction";
 import { issueLoadingDocuments } from "../loadingDocumentIssuance";
@@ -89,6 +91,8 @@ async function run() {
           const sourceSnapshot = {
             customerId: customer.id,
             contractData: {
+              project: { projectName: `پروژه ${index}`, address: `نشانی ذخیره‌شدهٔ قرارداد ${index}`,
+                projectManagerName: "مدیر آزمون", projectManagerNumber: "09120000000" },
               products: [
                 {
                   rowId,
@@ -97,7 +101,18 @@ async function run() {
                   lengthUnit: "m",
                   width: "40",
                   widthUnit: "cm",
-                  description: "ابزار نیم‌لول؛ ساب براق",
+                  description: "شرح ذخیره‌شده",
+                  originalTotalPrice: 13,
+                  totalPrice: 30,
+                  unitPrice: 11,
+                  tools: [{ code: "TEST-TOOL", name: "ابزار نیم‌لول",
+                    computedMeters: 2, pricePerMeter: 4, totalPrice: 8 }],
+                  cuttingBreakdown: [{ type: "longitudinal", meters: 1, rate: 3, cost: 3 }],
+                  finishingId: "test-finishing",
+                  finishingName: "ساب آزمون",
+                  finishingUnitPrice: 2,
+                  finishingCost: 6,
+                  squareMeters: 3,
                 },
               ],
             },
@@ -388,6 +403,16 @@ async function run() {
         assert.equal(source.netAmount, "20.000000000000");
         assert.equal(source.lines[0].width, "0.4");
         assert.match(source.lines[0].label, /سنگ مصوب/);
+        const waybillSource = await new PrismaDispatchDocumentSourceReader(client, "dispatch-test", "chromium-pdf-v1")
+          .readPrimaryBundle({ candidateId: candidates[0], waybill: {
+            waybillId: "test-waybill", waybillDocumentId: "test-waybill-pdf",
+            statementDocumentId: "test-statement-pdf", number: "42", issuedAt: new Date().toISOString(),
+          } });
+        const waybillHtml = renderDispatchDocumentHtml(waybillSource.waybill);
+        assert.match(waybillHtml, /نشانی ذخیره‌شدهٔ قرارداد/);
+        assert.doesNotMatch(waybillHtml, /نشانی فرضی|نرخ - ریال|مبلغ کل - ریال|۴۰ \/ متر طول/);
+        assert.match(waybillHtml, /سنگ مصوب[\s\S]*برش طولی[\s\S]*ابزار نیم‌لول[\s\S]*ساب آزمون/);
+        assert.doesNotMatch(JSON.stringify(waybillSource.waybill.print), /"rate"|"total"/);
         const financialCount = await tx.accountingFinancialRecord.count();
         const issuedParts = await tx.accountingDispatchCandidate.findMany({
           where: { id: { in: candidates } }, select: { id: true, allocationRevisionId: true },
@@ -420,6 +445,13 @@ async function run() {
         const first = await service.download(ctx, loading.id, issued.id),
           second = await service.download(ctx, loading.id, issued.id);
         assert.equal(bytesHash(first.bytes), bytesHash(second.bytes));
+        const invoiceHtml = Buffer.from(first.bytes).toString();
+        assert.match(invoiceHtml, /نشانی ذخیره‌شدهٔ قرارداد/);
+        assert.doesNotMatch(invoiceHtml, /نشانی فرضی/);
+        assert.match(invoiceHtml, /سنگ مصوب[\s\S]*ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);
+        assert.match(invoiceHtml, /برش طولی[\s\S]*۳۰ \/ متر طول/);
+        assert.match(invoiceHtml, /ساب آزمون[\s\S]*۲۰ \/ متر مربع/);
+        assert.match(invoiceHtml, /امضای تحویل‌گیرنده/);
         assert.equal(
           (await service.list(ctx, loading.id)).invoices[0].status,
           "ISSUED",

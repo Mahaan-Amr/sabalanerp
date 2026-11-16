@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { confirmationActionsFor } from './dispatchConfirmationPresentation';
+import { biometricAttemptNotice, confirmationActionsFor } from './dispatchConfirmationPresentation';
 
 test('historical OTP-only external sessions do not offer new confirmation actions', () => {
   assert.deepEqual(confirmationActionsFor({
@@ -41,3 +41,19 @@ for (const source of ['INTERNAL', 'EXTERNAL']) {
   assert.deepEqual(confirmationActionsFor({driverSource: source, method: `${source}_FALLBACK`}), {biometric:false, fallback:false, otp:true});
  });
 }
+
+test('a recorded biometric attempt reports its outcome independently of HTTP success', () => {
+  const live = { captureQuality: { state: 'ACCEPTED' }, liveness: { state: 'LIVE' } };
+  assert.match(biometricAttemptNotice({ result: { ...live, match: { state: 'NO_MATCH' } } }).text, /تطابق ندارد/);
+  assert.match(biometricAttemptNotice({ result: { errorCategory: 'POOR_CAPTURE_QUALITY' } }).text, /کیفیت/);
+  assert.match(biometricAttemptNotice({ result: { errorCategory: 'LIVENESS_FAILED' } }).text, /زنده‌بودن/);
+  const timedOut = biometricAttemptNotice({ result: { errorCategory: 'CAPTURE_TIMEOUT' }, fallbackEligible: true });
+  assert.equal(timedOut.kind, 'error');
+  assert.match(timedOut.text, /مهلت.*روش جایگزین/);
+  assert.match(biometricAttemptNotice({ result: { errorCategory: 'DEVICE_DISCONNECTED' } }).text, /اتصال حسگر/);
+  assert.equal(biometricAttemptNotice({ result: { ...live, match: { state: 'MATCH' } } }).kind, 'error');
+  assert.equal(biometricAttemptNotice(undefined).kind, 'error');
+  assert.deepEqual(biometricAttemptNotice({ authorization: { id: 'authorization' } }), {
+    kind: 'success', text: 'اثر انگشت راننده تأیید شد.',
+  });
+});

@@ -71,10 +71,12 @@ router.get('/external-drivers/:id/eligibility', view, async (req: AuthRequest, r
   try {
     const driver = await prisma.externalDriver.findUnique({ where: { id: req.params.id }, include: externalDriverInclude });
     if (!driver) throw new HrVehicleError('راننده بیرونی پیدا نشد.', 404);
+    const capabilities = await capabilitiesFor(req);
     const enrollment = await prisma.driverBiometricEnrollment.findFirst({ where: { externalDriverId: driver.id, status: 'ACTIVE' }, select: {
-      id: true, enrolledAt: true, confirmationPhone: true, templates: { select: { finger: true, format: true, imageMimeType: true, imageWidth: true, imageHeight: true, imageByteLength: true } } } });
+      id: true, enrolledAt: true, confirmationPhone: capabilities.canManageBiometricEnrollment, templates: { select: { finger: true, format: true, imageMimeType: true, imageWidth: true, imageHeight: true, imageByteLength: true } } } });
     const { externalLinks: _links, ...identity } = driver;
-    return res.json({ success: true, data: { identity, driver: { ...identity, currentEligibility: { status: driver.status === 'ACTIVE' ? 'ELIGIBLE' : driver.status === 'RESTRICTED' ? 'SUSPENDED' : 'ENDED', effectiveFrom: driver.statusEffectiveFrom, reason: driver.statusReason } }, activeBiometricEnrollment: enrollment }, capabilities: await capabilitiesFor(req) });
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json({ success: true, data: { identity, driver: { ...identity, currentEligibility: { status: driver.status === 'ACTIVE' ? 'ELIGIBLE' : driver.status === 'RESTRICTED' ? 'SUSPENDED' : 'ENDED', effectiveFrom: driver.statusEffectiveFrom, reason: driver.statusReason } }, activeBiometricEnrollment: enrollment }, capabilities });
   } catch (e) { return fail(res, e, 'External driver dossier'); }
 });
 router.post('/external-drivers', profiles, async (req: AuthRequest, res) => {

@@ -15,7 +15,8 @@ import {
   persistedApprovedPricingInclude,
 } from "../approvedPricing/prismaEvidence";
 import { projectPartnerInternalContent } from "../partnerSales/accounting/internalDocumentContent";
-import { restoreLongitudinalCustomerRequest } from "../../utils/printTemplate";
+import { readDispatchContractPrintSources, type DispatchContractContact } from "../dispatchDocuments/contractPrintSource";
+import { createDispatchProductRows, type DispatchProductPrintRow, restoreLongitudinalCustomerRequest } from "../../utils/printTemplate";
 
 export class SalesInvoiceError extends Error {
   constructor(
@@ -45,6 +46,9 @@ export const sourceHash = (value: unknown) =>
   createHash("sha256")
     .update(JSON.stringify(stable(value)))
     .digest("hex");
+// Print data is frozen with the PDF without changing the preexisting
+// accounting source hash or the validity of previously issued invoices.
+export const invoiceSourceHash = ({ print: _print, ...source }: InvoiceSource) => sourceHash(source);
 export const bytesHash = (value: Uint8Array) =>
   createHash("sha256").update(value).digest("hex");
 export type InvoiceLine = {
@@ -92,6 +96,11 @@ export type InvoiceSource = {
   grossAmount: string;
   discountAmount: string;
   netAmount: string;
+  print?: {
+    contacts: DispatchContractContact[];
+    rows: Record<string, DispatchProductPrintRow[]>;
+    contractedGross: Record<string, string>;
+  };
 };
 const ExactDecimal = Prisma.Decimal.clone({ precision: 100 });
 const amount = (value: string) => new ExactDecimal(value);
@@ -119,9 +128,10 @@ export const validFinancialRecord = (
 export async function readInvoiceSource(
   tx: Prisma.TransactionClient,
   loadingId: string,
+  includePrint = false,
 ): Promise<InvoiceSource> {
   try {
-    return await buildInvoiceSource(tx, loadingId);
+    return await buildInvoiceSource(tx, loadingId, includePrint);
   } catch (error) {
     if (
       error instanceof SalesInvoiceError ||
@@ -138,6 +148,7 @@ export async function readInvoiceSource(
 async function buildInvoiceSource(
   tx: Prisma.TransactionClient,
   loadingId: string,
+  includePrint: boolean,
 ): Promise<InvoiceSource> {
   const loading = await tx.logisticsLoading.findUnique({
     where: { id: loadingId },
@@ -196,6 +207,21 @@ async function buildInvoiceSource(
     discountAmount: "0",
     netAmount: "0",
   };
+  const print = includePrint ? { contacts: new Map<string, DispatchContractContact>(),
+    rows: Object.create(null) as Record<string, DispatchProductPrintRow[]>,
+    contractedGross: Object.create(null) as Record<string, string> } : undefined;
+  if (print) {
+    const contractIds = revisions.flatMap(revision => revision.lines.flatMap(
+      line => line.sourceContractId ? [line.sourceContractId] : [],
+    ));
+    if (loading.partnerCaseId) {
+      const linked = await tx.partnerSaleCase.findUnique({ where: { id: loading.partnerCaseId },
+        select: { customerContractId: true } });
+      if (linked?.customerContractId) contractIds.push(linked.customerContractId);
+    }
+    const saved = await readDispatchContractPrintSources(tx, contractIds);
+    for (const [id, contract] of saved) print.contacts.set(id, contract.contact);
+  }
   const counterparties = new Set<string>();
   for (const revision of revisions) {
     const candidate = revision.candidate;
@@ -347,6 +373,8 @@ async function buildInvoiceSource(
       }
     }
     const currentLines: InvoiceLine[] = [];
+    const siblingDispatchRows = new Set(priced.lines.map(line => line.productRowId));
+    const contractRows = new Map<string, ReturnType<typeof createDispatchProductRows>>();
     for (const line of priced.lines) {
       const allocationLine = revision.lines.find(
         (l) => l.id === line.allocationRevisionLineId,
@@ -373,6 +401,22 @@ async function buildInvoiceSource(
             )
           : null,
       );
+      if (print) {
+        let projectRows = contractRows.get(contractId);
+        if (partner) {
+          projectRows = createDispatchProductRows({ products: [{ ...product,
+            stoneCode: product.productCode, stoneName: product.description }] },
+            { currency: priced.currency, partnerDetails: product.printDetails });
+        } else if (!projectRows) {
+          projectRows = createDispatchProductRows(source.contractData, { currency: priced.currency, siblingDispatchRows });
+          contractRows.set(contractId, projectRows);
+        }
+        const approved = partner ? product.totalPrice : version?.rows?.find(
+          (approvedRow: { productRowId: string }) => approvedRow.productRowId === line.productRowId,
+        )?.canonicalAllInTotal;
+        if (approved != null) print.contractedGross[line.allocationRevisionLineId] = String(approved);
+        print.rows[line.allocationRevisionLineId] = projectRows(line.productRowId);
+      }
       const evidence = record(version?.sourceEvidence);
       const technical = partner
         ? product
@@ -539,5 +583,6 @@ async function buildInvoiceSource(
     throw new SalesInvoiceError(
       "فاکتور باید متعلق به یک مشتری و یک طرف‌حساب باشد.",
     );
+  if (print) result.print = { contacts: [...print.contacts.values()], rows: print.rows, contractedGross: print.contractedGross };
   return result;
 }

@@ -79,6 +79,7 @@ router.get(
             id: true,
             status: true,
             enrolledAt: true,
+            confirmationPhone: true,
             templates: {
               select: {
                 finger: true,
@@ -93,6 +94,7 @@ router.get(
           orderBy: { enrolledAt: "desc" },
         }),
       ]);
+      res.setHeader("Cache-Control", "private, no-store");
       if (!personnel)
         return res
           .status(404)

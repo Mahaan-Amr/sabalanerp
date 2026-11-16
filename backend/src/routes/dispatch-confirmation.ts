@@ -159,6 +159,14 @@ router.post(['/internal-drivers/:personnelId/enrollment', '/external-drivers/:pe
       confirmationPhone: req.body.confirmationPhone, templates, actorId: req.user!.id }) });
   } catch (error) { return handle(res, error); }
 });
+router.patch('/enrollments/:enrollmentId/confirmation-phone', hrManage, async (req: AuthRequest, res) => {
+  try {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const data = await service().updateEnrollmentConfirmationPhone({ enrollmentId: req.params.enrollmentId,
+      actorId: req.user!.id, confirmationPhone: req.body?.confirmationPhone });
+    return res.json({ success: true, data });
+  } catch (error) { return handle(res, error); }
+});
 router.post('/enrollments/:enrollmentId/deactivate', hrManage, async (req: AuthRequest, res) => {
   try { return res.json({ success: true, data: await service().deactivateEnrollment({ enrollmentId: req.params.enrollmentId, actorId: req.user!.id, reason: 'غیرفعال‌سازی ثبت بیومتریک توسط منابع انسانی' }) }); }
   catch (error) { return handle(res, error); }

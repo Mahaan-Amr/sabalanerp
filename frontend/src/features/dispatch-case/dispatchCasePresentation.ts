@@ -1,3 +1,5 @@
+import { biometricAttemptEventLabel } from "../biometric/dispatchConfirmationPresentation";
+
 type PresentedField = { label: string; value: string };
 
 const persianDigits = (value: string | number) =>
@@ -111,7 +113,12 @@ export const dispatchRecoveryLabel = (recovery?: string | null) =>
     RETRY_AT_GUARD: "بررسی را در ایستگاه گارد دوباره انجام دهید",
   })[recovery || ""] || "برای ادامه، وضعیت پرونده را دوباره بررسی کنید";
 
-export const dispatchEventLabel = (eventType?: string | null) => {
+export const dispatchEventLabel = (eventType?: string | null, detail?: Record<string, any>) => {
+  if (eventType === "BIOMETRIC_ATTEMPT_RECORDED") {
+    const result = detail?.result ?? detail;
+    if (result?.match || result?.captureQuality || result?.liveness || result?.errorCategory)
+      return biometricAttemptEventLabel(result);
+  }
   if (!eventType) return "رویداد ثبت‌شده";
   if (eventLabels[eventType]) return eventLabels[eventType];
   const [command, , invoiceId] = eventType.split(":", 3);

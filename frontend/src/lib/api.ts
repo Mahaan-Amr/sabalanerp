@@ -1305,6 +1305,8 @@ export const dispatchConfirmationAPI = {
   cancelEnrollmentSession: (personnelId: string, enrollmentSessionId: string) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-session/cancel`, { enrollmentSessionId }),
   acceptEnrollmentCapture: (personnelId: string, data: any) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-captures`, data),
   createEnrollmentCommand: (personnelId: string, data: { workstationId: string; finger: string; enrollmentSessionId: string }) => api.post(`/dispatch-confirmation/${biometricDriverPath(personnelId)}/enrollment-commands`, data),
+  updateEnrollmentConfirmationPhone: (enrollmentId: string, confirmationPhone: string) =>
+    api.patch(`/dispatch-confirmation/enrollments/${enrollmentId}/confirmation-phone`, { confirmationPhone }),
   deactivateEnrollment: (enrollmentId: string, reason: string) => api.post(`/dispatch-confirmation/enrollments/${enrollmentId}/deactivate`, { reason }),
   getEnrollmentImage: (enrollmentId: string, finger: string) => api.get(`/dispatch-confirmation/enrollments/${enrollmentId}/images/${finger}`, { responseType: 'blob' }),
   startSession: (waybillId: string, workstationId: string) => api.post(`/dispatch-confirmation/waybills/${waybillId}/sessions`, { workstationId }),
@@ -1347,7 +1349,8 @@ export const salesReportsAPI = {
 export const logisticsAPI = {
   getDashboard: () => api.get('/logistics/dashboard'),
   getLoadableCustomers: (params?: any) => api.get('/logistics/customers', { params }),
-  getCustomerProjects: (customerId: string) => api.get(`/logistics/customers/${customerId}/projects`),
+  getCustomerProjects: (customerId: string, projectId?: string) =>
+    api.get(`/logistics/customers/${customerId}/projects`, { params: { projectId } }),
   getProjects: (params?: any) => api.get('/logistics/projects', { params }),
   getRemaining: (projectId: string) => api.get(`/logistics/projects/${projectId}/remaining`),
   createOrResumeDraft: (projectId: string, data?: any) => api.post(`/logistics/projects/${projectId}/draft`, data || {}),

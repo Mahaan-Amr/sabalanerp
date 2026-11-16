@@ -372,7 +372,7 @@ export default function NewLoadingPage() {
     setRemaining(null);
     setLines([]);
     try {
-      const response = await logisticsAPI.getCustomerProjects(customer.id);
+      const response = await logisticsAPI.getCustomerProjects(customer.id, customer.projectId);
       if (response.data.success) setProjects(response.data.data);
       setStep("project");
     } catch (err: any) {
@@ -902,12 +902,12 @@ export default function NewLoadingPage() {
         )}
         {customerLookup.status === "ready" && customerLookup.customers.map((customer) => (
           <ErpNeumorphicInteractiveCard
-            key={customer.id}
+            key={customer.projectId ?? customer.id}
             type="button"
             onClick={() => loadCustomerProjects(customer)}
-            aria-pressed={selectedCustomer?.id === customer.id}
+            aria-pressed={selectedCustomer?.id === customer.id && selectedCustomer?.projectId === customer.projectId}
             className={`min-w-0 p-4 text-right ${
-              selectedCustomer?.id === customer.id
+              selectedCustomer?.id === customer.id && selectedCustomer?.projectId === customer.projectId
                 ? "border-[var(--sds-accent)] bg-[var(--sds-accent-soft)]"
                 : "border-[var(--sds-border-default)] dark:border-[var(--sds-border-strong)]"
             }`}

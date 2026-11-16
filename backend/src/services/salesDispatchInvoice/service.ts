@@ -19,7 +19,7 @@ import {
   bytesHash,
   readInvoiceSource,
   SalesInvoiceError,
-  sourceHash,
+  invoiceSourceHash,
 } from "./source";
 import { renderSalesInvoice, type IssuedInvoiceSnapshot } from "./render";
 export type InvoiceContext = {
@@ -148,7 +148,7 @@ export async function voidSalesInvoiceInTransaction(
   });
   if (exited) {
     const corrected = await readInvoiceSource(tx, loadingId);
-    if (sourceHash(corrected) === invoice.sourceHash)
+    if (invoiceSourceHash(corrected) === invoice.sourceHash)
       throw new SalesInvoiceError(
         "پس از خروج، ابتدا گردش اصلاح ارسال را تکمیل کنید.",
       );
@@ -192,6 +192,7 @@ export function createSalesInvoiceService(
   render = (snapshot: IssuedInvoiceSnapshot, reason?: string) =>
     generatePdfBufferFromHtml({
       htmlContent: renderSalesInvoice(snapshot, reason),
+      margin: { top: "10mm", right: "8mm", bottom: "10mm", left: "8mm" },
       displayHeaderFooter: false,
     }),
   documentStorage?: DispatchArtifactStorage,
@@ -216,7 +217,7 @@ export function createSalesInvoiceService(
         let hash: string | null = null,
           reason: string | null = null;
         try {
-          hash = sourceHash(await readInvoiceSource(tx, loadingId));
+          hash = invoiceSourceHash(await readInvoiceSource(tx, loadingId));
         } catch (error) {
           if (!(error instanceof SalesInvoiceError)) throw error;
           reason = error.message;
@@ -326,8 +327,8 @@ export function createSalesInvoiceService(
           where: { loadingId_requestKey: { loadingId, requestKey } },
         });
         if (replay) return { id: replay.id, number: replay.number.toString() };
-        const source = await readInvoiceSource(tx, loadingId),
-          hash = sourceHash(source);
+        const source = await readInvoiceSource(tx, loadingId, true),
+          hash = invoiceSourceHash(source);
         const active = await tx.salesDispatchInvoice.findFirst({
           where: { loadingId, voidedAt: null },
         });
@@ -407,7 +408,7 @@ export function createSalesInvoiceService(
         if (!reason)
           try {
             if (
-              sourceHash(await readInvoiceSource(tx, loadingId)) !==
+              invoiceSourceHash(await readInvoiceSource(tx, loadingId)) !==
               invoice.sourceHash
             )
               reason = "شواهد بارگیری تغییر کرده است.";
@@ -454,7 +455,7 @@ export async function assertLoadingSalesInvoice(
     );
   const source = await readInvoiceSource(tx, loadingId);
   if (
-    sourceHash(source) !== invoice.sourceHash ||
+    invoiceSourceHash(source) !== invoice.sourceHash ||
     bytesHash(invoice.pdf) !== invoice.pdfSha256
   )
     throw new SalesInvoiceError(

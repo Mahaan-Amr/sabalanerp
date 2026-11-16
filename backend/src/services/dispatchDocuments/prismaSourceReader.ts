@@ -1,3 +1,7 @@
+import { createDispatchProductRows } from '../../utils/printTemplate';
+import { partnerPhysicalPrintDetails } from '../../utils/partnerProductPrint';
+import { readDispatchContractPrintSources } from './contractPrintSource';
+import type { WaybillPrintData } from './contracts';
 import { createHash } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { assessBoundAllocationPricingFreshness, readBoundPricedAllocation,
@@ -36,17 +40,37 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
       .filter(part => typeof part === 'string' && part.trim()).join(' ')]
     .find((name): name is string => typeof name === 'string' && Boolean(name.trim()))?.trim();
   const lineSnapshots = new Map(candidate.allocationRevision.lines.map(line => [line.id, record(line.snapshot)]));
+  const waybillTemplateVersion = `${templateVersion}-contract-table`;
+  const print: WaybillPrintData = { loadingNumber: String(loading.number || ''), contacts: [], rows: Object.create(null) };
+  const siblingDispatchRows = new Set(pricedAllocation.lines.map(line => line.productRowId));
+  const physicalRows = (rows: ReturnType<ReturnType<typeof createDispatchProductRows>>) =>
+    rows.map(({ rate: _rate, total: _total, ...physical }) => physical);
   if (pricedAllocation.sourceKind === 'PARTNER_CASE') {
     const partnerCase = await tx.partnerSaleCase.findUnique({ where: { id: candidate.allocationRevision.partnerCaseId || '' },
-      select: { caseNumber: true } });
+      select: { caseNumber: true, customerContractId: true } });
     if (!partnerCase || pricedAllocation.pricingVersions.length !== 1) {
       throw new DispatchDocumentEvidenceConflictError('Partner document ownership evidence is incomplete.');
     }
+    const contract = partnerCase.customerContractId
+      ? (await readDispatchContractPrintSources(tx, [partnerCase.customerContractId])).get(partnerCase.customerContractId)
+      : undefined;
+    if (contract) print.contacts.push(contract.contact);
+    const revisionNumber = candidate.allocationRevision.partnerCaseRevision;
+    const frozen = revisionNumber == null ? null : await tx.partnerCaseRevision.findUnique({
+      where: { caseId_revision: { caseId: pricedAllocation.pricingVersions[0].caseId, revision: revisionNumber } },
+      select: { graph: true, integrityHash: true },
+    });
     const lines = pricedAllocation.lines.map(line => {
       const sourceLine = candidate.allocationRevision.lines.find(item => item.id === line.allocationRevisionLineId);
       if (!sourceLine) throw new DispatchDocumentConflictError('Priced allocation line is absent from its allocation revision.');
       const snapshot = lineSnapshots.get(sourceLine.id) || {};
       const nestedRow = record(snapshot.row);
+      if (frozen && frozen.integrityHash === candidate.allocationRevision.partnerIntegrityHash) {
+        const details = partnerPhysicalPrintDetails(line.productRowId, frozen.graph);
+        print.rows[line.productRowId] = physicalRows(createDispatchProductRows({ products: [{
+          productRowId: line.productRowId, stoneName: nestedRow.description || snapshot.label,
+        }] }, { partnerDetails: details })(line.productRowId));
+      }
       return { productRowId: line.productRowId,
         label: String(nestedRow.description || snapshot.description || snapshot.label || line.productRowId),
         unit: line.unit, quantity: line.quantity, grossAmount: line.grossAmount,
@@ -61,7 +85,7 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
     const pricing = pricedAllocation.pricingVersions[0];
     const sourceVersionIdentities = { allocationRevision: candidate.allocationRevisionId,
       [`partnerFinancialApproval:${pricing.caseId}`]: pricing.financialApprovalEvidenceId };
-    const provenance = { generatorVersion, templateVersion, sourceVersionIdentities,
+    const provenance = { generatorVersion, templateVersion, waybillTemplateVersion, sourceVersionIdentities,
       allocationRevisionId: candidate.allocationRevisionId,
       allocationIntegrityHash: candidate.allocationRevision.integrityHash, sourceIntegrityHash,
       pricingVersions: pricedAllocation.pricingVersions };
@@ -69,8 +93,11 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
       deliveryReference: String(loading.plannedDate || 'تحویل مصوب') };
     return { candidateId: candidate.id, allocationRevisionId: candidate.allocationRevisionId, sourceIntegrityHash,
       pricedAllocation, provenance: { generatorVersion, sourceVersionIdentities },
-      waybillSnapshot: { ...revisionSnapshot, documentProvenance: provenance },
-      waybill: { ...base, kind: 'WAYBILL' as const, driverName, documentId: identity.waybillDocumentId,
+      waybillSnapshot: { ...revisionSnapshot, documentProvenance: provenance, documentPrint: print },
+      waybill: { ...base, kind: 'WAYBILL' as const,
+        customerName: String(customer.companyName || customer.name || 'نام مشتری ثبت نشده'),
+        projectOrDestination: String(loading.destination || project.address || project.name || ''),
+        templateVersion: waybillTemplateVersion, driverName, print, documentId: identity.waybillDocumentId,
         payload: { ...shared, allocationRevisionId: candidate.allocationRevisionId,
           lines: lines.map(({ grossAmount: _gross, allocatedDiscount: _discount, netAmount: _net, ...line }) => line) } },
       statement: { ...base, kind: 'STATEMENT' as const, documentId: identity.statementDocumentId,
@@ -78,13 +105,19 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
           grossAmount: pricedAllocation.totals.grossAmount, allocatedDiscount: pricedAllocation.totals.discountAmount,
           netAmount: pricedAllocation.totals.netAmount } } };
   }
+  const saved = await readDispatchContractPrintSources(tx, pricedAllocation.pricingVersions.map(version => version.contractId));
+  print.contacts = [...saved.values()].map(contract => contract.contact);
+  const rowsByContract = new Map([...saved].map(([id, contract]) =>
+    [id, createDispatchProductRows(contract.contractData, { siblingDispatchRows })]));
   const contracts = new Map<string, { contractId: string; contractNumber: string; lines: any[] }>();
   for (const line of pricedAllocation.lines) {
     const sourceLine = candidate.allocationRevision.lines.find(item => item.id === line.allocationRevisionLineId);
     if (!sourceLine) throw new DispatchDocumentConflictError('Priced allocation line is absent from its allocation revision.');
     const snapshot = lineSnapshots.get(sourceLine.id) || {};
     const group = contracts.get(line.contractId) || { contractId: line.contractId,
-      contractNumber: String(snapshot.contractNumber || line.contractId), lines: [] };
+      contractNumber: String(snapshot.contractNumber || saved.get(line.contractId)?.contact.contractNumber || 'ثبت نشده'), lines: [] };
+    const projectRows = rowsByContract.get(line.contractId);
+    if (projectRows) print.rows[`${line.contractId}:${line.productRowId}`] = physicalRows(projectRows(line.productRowId));
     group.lines.push({ contractItemId: line.contractItemId, productRowId: line.productRowId,
       label: String(snapshot.productName || snapshot.label || line.productRowId), unit: line.unit, quantity: line.quantity,
       grossAmount: line.grossAmount, allocatedDiscount: line.discountAmount, netAmount: line.netAmount });
@@ -101,15 +134,18 @@ const sourceFrom = async (tx: Tx, candidateId: string, identity: PrimaryBundleId
     ['allocationRevision', candidate.allocationRevisionId],
     ...pricedAllocation.pricingVersions.map(version => [`approvedPricing:${version.contractId}`, version.pricingVersionId]),
   ]);
-  const provenance = { generatorVersion, templateVersion, sourceVersionIdentities,
+  const provenance = { generatorVersion, templateVersion, waybillTemplateVersion, sourceVersionIdentities,
     allocationRevisionId: candidate.allocationRevisionId,
     allocationIntegrityHash: candidate.allocationRevision.integrityHash, sourceIntegrityHash,
     pricingVersions: pricedAllocation.pricingVersions };
   return {
     candidateId: candidate.id, allocationRevisionId: candidate.allocationRevisionId, sourceIntegrityHash, pricedAllocation,
     provenance: { generatorVersion, sourceVersionIdentities },
-    waybillSnapshot: { ...revisionSnapshot, documentProvenance: provenance },
-    waybill: { ...base, kind: 'WAYBILL' as const, driverName, documentId: identity.waybillDocumentId,
+    waybillSnapshot: { ...revisionSnapshot, documentProvenance: provenance, documentPrint: print },
+    waybill: { ...base, kind: 'WAYBILL' as const,
+        customerName: String(customer.companyName || customer.name || 'نام مشتری ثبت نشده'),
+        projectOrDestination: String(loading.destination || project.address || project.name || ''),
+        templateVersion: waybillTemplateVersion, driverName, print, documentId: identity.waybillDocumentId,
       payload: { allocationRevisionId: candidate.allocationRevisionId, contracts: groups.map(group => ({ ...group,
         lines: group.lines.map(({ grossAmount: _gross, allocatedDiscount: _discount, netAmount: _net, ...line }) => line) })) } },
     statement: { ...base, kind: 'STATEMENT' as const, documentId: identity.statementDocumentId,

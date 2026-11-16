@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { partnerError, type Result } from '@sabalanerp/partner-sales-contracts';
 import { ordinaryContractDispatchEligible, assertOrdinaryContractsDispatchEligible } from '../services/ordinaryContractDispatchEligibility';
 import { PartnerLoadingCommandError } from '../services/partnerSales/fulfillment/loadingAuthority';
+import { expandPersianSearchTokenVariants, normalizePersianSearchTokens } from '../services/crmCustomerSearch';
 import { resolveLogisticsContractRow } from '../services/logisticsContractRow';
 import { readShipmentQuantityProjection } from '../services/shipmentQuantityProjectionStore';
 
@@ -391,21 +392,41 @@ const customerDisplayName = (customer: any) => {
   return `${customer.firstName || ''} ${customer.lastName || ''}`.trim() || customer.companyName || 'Customer';
 };
 
-const customerSearchWhere = (search: string, phoneContains: any) => ({
+const searchFields = (term: string) => {
+  const contains = { contains: term, mode: 'insensitive' as const };
+  return [
+    { firstName: contains },
+    { lastName: contains },
+    { companyName: contains },
+    { brandName: contains },
+    { nationalCode: contains },
+    { projectManagerName: contains },
+    { referrerFirstName: contains },
+    { referrerLastName: contains }
+  ];
+};
+
+const projectNameSearch = (terms: string[]): Prisma.ProjectAddressWhereInput => ({
+  isActive: true,
+  OR: (['projectName', 'projectManagerName'] as const).map(field => ({
+    AND: terms.map(term => ({
+      OR: expandPersianSearchTokenVariants(term).map(variant => ({
+        [field]: { contains: variant, mode: 'insensitive' }
+      }))
+    }))
+  }))
+});
+
+const customerSearchWhere = (search: string, terms: string[], phoneContains: any): Prisma.CrmCustomerWhereInput => ({
   isActive: true,
   ...(search ? {
     OR: [
-      { firstName: { contains: search, mode: 'insensitive' as const } },
-      { lastName: { contains: search, mode: 'insensitive' as const } },
-      { companyName: { contains: search, mode: 'insensitive' as const } },
-      { brandName: { contains: search, mode: 'insensitive' as const } },
-      { nationalCode: { contains: search, mode: 'insensitive' as const } },
-      { projectManagerName: { contains: search, mode: 'insensitive' as const } },
-      { referrerFirstName: { contains: search, mode: 'insensitive' as const } },
-      { referrerLastName: { contains: search, mode: 'insensitive' as const } },
-      { projectAddresses: { some: { projectName: { contains: search, mode: 'insensitive' as const } } } },
-      { projectAddresses: { some: { address: { contains: search, mode: 'insensitive' as const } } } },
-      { projectAddresses: { some: { projectManagerName: { contains: search, mode: 'insensitive' as const } } } },
+      ...searchFields(search),
+      ...(terms.length ? [
+        { AND: terms.map(term => ({ OR: expandPersianSearchTokenVariants(term).flatMap(searchFields) })) },
+        { projectAddresses: { some: projectNameSearch(terms) } }
+      ] : []),
+      { projectAddresses: { some: { isActive: true, address: { contains: search, mode: 'insensitive' } } } },
       ...(phoneContains ? [
         { phoneNumbers: { some: { number: phoneContains } } },
         { homeNumber: phoneContains },
@@ -422,9 +443,9 @@ const customerSearchWhere = (search: string, phoneContains: any) => ({
   } : {})
 });
 
-const loadableProjectsForCustomer = async (customerId: string) => {
+const loadableProjectsForCustomer = async (customerId: string, projectId?: string) => {
   const projects = await prisma.projectAddress.findMany({
-    where: { customerId, isActive: true },
+    where: { customerId, isActive: true, ...(projectId ? { id: projectId } : {}) },
     include: { customer: true },
     orderBy: { updatedAt: 'desc' }
   });
@@ -813,21 +834,48 @@ router.get('/customers', canView, canCreateLoadings, async (req: any, res: Respo
     const search = String(req.query.search || '').trim();
     const phoneSearch = normalizePhoneSearch(search);
     const phoneContains = phoneSearch.length >= 3 ? { contains: phoneSearch, mode: 'insensitive' as const } : null;
+    const terms = normalizePersianSearchTokens(search);
     const customers = await prisma.crmCustomer.findMany({
-      where: customerSearchWhere(search, phoneContains),
+      where: customerSearchWhere(search, terms, phoneContains),
       include: {
         phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
-        projectAddresses: { where: { isActive: true }, orderBy: { updatedAt: 'desc' } },
+        projectAddresses: {
+          where: terms.length ? projectNameSearch(terms) : { id: { in: [] } },
+          select: { id: true, projectName: true, projectManagerName: true, projectManagerNumber: true }
+        },
         primaryContact: true
       },
       orderBy: { updatedAt: 'desc' },
       take: 50
     });
 
+    const projectMatches: any[] = [];
     const loadableCustomers: any[] = [];
     for (const customer of customers) {
       const projects = await loadableProjectsForCustomer(customer.id);
-      if (projects.length > 0) {
+      const matchingProjects = new Map(customer.projectAddresses.map(project => [project.id, project]));
+      const matchesName = [customerDisplayName(customer), customer.companyName, customer.brandName]
+        .some(name => {
+          const normalized = normalizePersianSearchTokens(name).join(' ');
+          return terms.every(term => normalized.includes(term));
+        });
+
+      for (const { project, remainingCount } of projects) {
+        const match = matchingProjects.get(project.id);
+        if (!match || matchesName) continue;
+        const managerName = normalizePersianSearchTokens(match.projectManagerName).join(' ');
+        projectMatches.push({
+          id: customer.id,
+          projectId: match.id,
+          customerName: (terms.every(term => managerName.includes(term)) ? match.projectManagerName?.trim() : match.projectName?.trim())
+            || match.projectManagerName?.trim() || customerDisplayName(customer),
+          primaryPhone: match.projectManagerNumber,
+          loadableProjectCount: 1,
+          remainingGroupCount: remainingCount
+        });
+      }
+
+      if (projects.length > 0 && (matchesName || matchingProjects.size === 0)) {
         loadableCustomers.push({
           id: customer.id,
           customerName: customerDisplayName(customer),
@@ -842,7 +890,7 @@ router.get('/customers', canView, canCreateLoadings, async (req: any, res: Respo
       }
     }
 
-    res.json({ success: true, data: loadableCustomers });
+    res.json({ success: true, data: [...projectMatches, ...loadableCustomers] });
   } catch (error) {
     console.error('Logistics customers error:', error);
     res.status(500).json({ success: false, error: 'Server error' });
@@ -854,7 +902,8 @@ router.get('/customers/:customerId/projects', canView, canCreateLoadings, async 
     const customer = await prisma.crmCustomer.findUnique({ where: { id: req.params.customerId } });
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
 
-    const projects = await loadableProjectsForCustomer(customer.id);
+    const projectId = typeof req.query.projectId === 'string' ? req.query.projectId : undefined;
+    const projects = await loadableProjectsForCustomer(customer.id, projectId);
     res.json({
       success: true,
       data: projects.map(({ project, remainingCount, remainingTotal }) => ({

@@ -185,4 +185,21 @@ const partnerStatementHtml = renderDispatchDocumentHtml({
 assert.match(partnerStatementHtml, /۷٬۲۵۰٬۰۰۰/);
 assert.match(partnerStatementHtml, /صورت‌حساب محموله مشتری/);
 
+const localizedWaybill = renderDispatchDocumentHtml({
+  ...common,
+  kind: 'WAYBILL',
+  print: { loadingNumber: 'L-0042', contacts: [], rows: {} },
+  payload: { allocationRevisionId: 'revision', contracts: [{
+    contractId: 'contract', contractNumber: '۱۰۰',
+    lines: [
+      { contractItemId: 'item', productRowId: 'internal-product-key', label: 'internal-product-key', quantity: '2', unit: 'unknownUnit' },
+      { contractItemId: 'item-2', productRowId: 'row-2', label: 'سنگ با ضخامت 3cm', quantity: '2', unit: 'physicalPiece' },
+    ],
+  }] },
+});
+assert.match(localizedWaybill, /شرح کالا ثبت نشده/);
+assert.match(localizedWaybill, /واحد نامشخص/);
+assert.match(localizedWaybill, /ضخامت ۳ سانتی‌متر/);
+assert.doesNotMatch(localizedWaybill, /internal-product-key|unknownUnit|physicalPiece|3cm/);
+
 console.log('Dispatch document HTML template tests passed.');

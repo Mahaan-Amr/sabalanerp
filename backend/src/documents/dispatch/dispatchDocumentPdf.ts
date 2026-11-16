@@ -1,3 +1,8 @@
+import {
+  printSection, shipmentHeader, shipmentHtml, shipmentItemTable, shipmentParties,
+  shipmentQuantity, shipmentSignature, shipmentTable, shipmentUnitLabel,
+} from './dispatchPrintLayout';
+import type { WaybillPrintData } from '../../services/dispatchDocuments/contracts';
 import crypto from 'node:crypto';
 import { generatePdfBufferFromHtml } from '../../utils/pdf';
 import { getPrintTemplateLogoDataUri, renderYekanFontFaces } from '../../utils/printTemplate';
@@ -40,6 +45,7 @@ type PartnerMonetaryLine = PartnerQuantityLine & {
 export type DispatchDocumentRenderData = CommonRenderInput & ({
   kind: 'WAYBILL';
   driverName?: string;
+  print?: WaybillPrintData;
   payload: {
     allocationRevisionId: string;
     contracts: Array<{
@@ -237,13 +243,13 @@ const waybillPrintStyles = `
 const renderWaybill = (input: Extract<DispatchDocumentRenderData, { kind: 'WAYBILL' }>, assets: DispatchDocumentAssets) => {
   let row = 0;
   if ('sourceKind' in input.payload) {
-    const rows = input.payload.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(displayUnit(line.unit))}</td></tr>`).join('');
+    const rows = input.payload.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(shipmentUnitLabel(line.unit))}</td></tr>`).join('');
     return `${renderHeader(input, assets, 'بارنامه خروج محموله', input.waybillNumber)}<table>${waybillColumns}${renderTableHead(quantityColumns, 4, 'بارنامه خروج محموله', input.waybillNumber)}<tbody>
       <tr class="contract-heading"><td colspan="4">پرونده ${escapeHtml(input.payload.caseNumber)} · ${escapeHtml(input.payload.deliveryReference)}</td></tr>${rows}</tbody></table>`;
   }
   const groups = input.payload.contracts.map((contract) => `<tbody>
     <tr class="contract-heading"><td colspan="4">قرارداد ${escapeHtml(contract.contractNumber)}</td></tr>
-    ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(displayUnit(line.unit))}</td></tr>`).join('')}
+    ${contract.lines.map((line) => `<tr><td>${localizeDigits(String(++row))}</td><td>${escapeHtml(line.label)}</td><td class="numeric" data-pdf-cell>${escapeHtml(formatExactQuantity(line.quantity))}</td><td>${escapeHtml(shipmentUnitLabel(line.unit))}</td></tr>`).join('')}
   </tbody>`).join('');
   return `${renderHeader(input, assets, 'بارنامه خروج محموله', input.waybillNumber)}<table>${waybillColumns}${renderTableHead(quantityColumns, 4, 'بارنامه خروج محموله', input.waybillNumber)}${groups}</table>`;
 };
@@ -272,11 +278,41 @@ const renderAdjustment = (input: Extract<DispatchDocumentRenderData, { kind: 'ST
     <section class="grand-total adjustment-total"><span>جمع خالص اصلاحیه</span><div><small>تغییر ناخالص</small><strong>${formatSignedMoney(input.payload.grossAmountDelta)}</strong></div><div><small>تغییر تخفیف</small><strong>${formatSignedMoney(input.payload.discountDelta)}</strong></div><div class="net"><small>تغییر خالص (${escapeHtml(input.payload.currency)})</small><strong>${formatSignedMoney(input.payload.netAmountDelta)}</strong></div></section>`;
 };
 
+function renderShipmentWaybill(input: Extract<DispatchDocumentRenderData, { kind: 'WAYBILL' }>,
+  print: WaybillPrintData, assets: DispatchDocumentAssets) {
+  const title = documentTitle(input);
+  let index = 0;
+  const group = (reference: string, lines: Array<PartnerQuantityLine>, contractId?: string) => lines.map((line, lineIndex) => {
+    const [saved, ...services] = print.rows[contractId ? `${contractId}:${line.productRowId}` : line.productRowId] || [];
+    const quantity = shipmentQuantity(line.quantity, line.unit);
+    return {
+      reference: lineIndex === 0 ? reference : undefined,
+      rows: [{
+        index: String(++index), code: saved?.code || '',
+        description: saved?.description && saved.description !== '—' ? saved.description
+          : line.label && line.label !== line.productRowId ? line.label : 'شرح کالا ثبت نشده',
+        category: saved?.category || 'محصول', length: saved?.length || '', width: saved?.width || '',
+        ...quantity, count: quantity.count || (saved?.count === '۰' ? '' : saved?.count) || '',
+      }, ...services],
+    };
+  });
+  const groups = 'sourceKind' in input.payload
+    ? group(`پرونده ${input.payload.caseNumber} · ${input.payload.deliveryReference}`, input.payload.lines)
+    : input.payload.contracts.flatMap(contract => group(`قرارداد ${contract.contractNumber}`, contract.lines, contract.contractId));
+  return shipmentHtml(title, shipmentHeader({ title, number: input.waybillNumber, numberLabel: 'شماره بارنامه',
+    loadingNumber: print.loadingNumber, date: formatIssuedAt(input.issuedAt), logo: assets.logoDataUri })
+    + shipmentParties(input.customerName, print.contacts, false)
+    + printSection('مشخصات حمل', shipmentTable(['نام راننده', 'پلاک خودرو', 'مقصد بارگیری'],
+      [[input.driverName || '—', input.vehiclePlate, input.projectOrDestination || '—']]))
+    + printSection('مشخصات کالای محموله', shipmentItemTable(groups, false)) + shipmentSignature, assets.fontFacesCss);
+}
+
 export const renderDispatchDocumentHtml = (
   input: DispatchDocumentRenderData,
   assets: DispatchDocumentAssets = loadDispatchDocumentAssets(),
 ): string => {
   if (input.schemaVersion !== 1) throw new Error(`Unsupported dispatch render schema version: ${input.schemaVersion}`);
+  if (input.kind === 'WAYBILL' && input.print) return renderShipmentWaybill(input, input.print, assets);
   const body = input.kind === 'WAYBILL'
     ? renderWaybill(input, assets)
     : input.kind === 'STATEMENT'
@@ -292,13 +328,15 @@ export const renderDispatchDocumentPdf = async (
   input: DispatchDocumentRenderData,
 ): Promise<RenderedDispatchDocument> => {
   const assets = loadDispatchDocumentAssets();
+  const useShipmentLayout = input.kind === 'WAYBILL' && !!input.print;
   const bytes = await generatePdfBufferFromHtml({
     htmlContent: renderDispatchDocumentHtml(input, assets),
     widthMm: 210,
     heightMm: 297,
-    margin: { top: '24mm', right: '9mm', bottom: '11mm', left: '9mm' },
-    displayHeaderFooter: true,
-    headerTemplate: renderDispatchDocumentHeaderTemplate(input, assets),
+    margin: useShipmentLayout ? { top: '10mm', right: '8mm', bottom: '10mm', left: '8mm' }
+      : { top: '24mm', right: '9mm', bottom: '11mm', left: '9mm' },
+    displayHeaderFooter: !useShipmentLayout,
+    headerTemplate: useShipmentLayout ? undefined : renderDispatchDocumentHeaderTemplate(input, assets),
     footerTemplate: '<span></span>',
     assertNoOverflowSelector: '[data-pdf-cell], .grand-total strong',
   });

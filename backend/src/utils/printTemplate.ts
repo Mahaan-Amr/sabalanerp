@@ -412,6 +412,7 @@ type PrintMoneyOptions = {
   unavailableMoneyLabel?: string;
   includeRialEquivalent?: boolean;
   displayInRials?: boolean;
+  moneyFractionDigits?: number;
 };
 
 const convertToRials = (value: unknown, currency = 'تومان'): number =>
@@ -447,7 +448,7 @@ const formatPrintMoneyCell = (
   if (options.displayInRials) return formatRialAmount(value, currency);
   return options.includeRialEquivalent
     ? formatAccountingAmount(value, currency)
-    : formatMoneyNumber(value);
+    : toFaNumber(value, options.moneyFractionDigits);
 };
 
 const formatPrintRate = (
@@ -1899,6 +1900,7 @@ const buildFlatProductRows = (
     includeRialEquivalent?: boolean;
     displayInRials?: boolean;
     accountingDetail?: boolean;
+    moneyFractionDigits?: number;
     productRowsMode?: 'detailed' | 'summarized';
     showExplanatoryRows?: boolean;
     showTotals?: boolean;
@@ -2385,6 +2387,35 @@ const buildFlatProductRows = (
 
   return rows;
 };
+
+/** Dispatch uses the same saved measurement and service rows as contract print. */
+export type DispatchProductPrintRow = Pick<FlatProductRow, 'code' | 'description' | 'category' |
+  'length' | 'width' | 'count' | 'linearMeasurement' | 'squareMeasurement' | 'rate' | 'total'>;
+
+export function createDispatchProductRows(contractData: unknown, options: {
+  currency?: string;
+  partnerDetails?: PartnerProductPrintDetails;
+  siblingDispatchRows?: ReadonlySet<string>;
+} = {}) {
+  const currency = options.currency || 'ریال';
+  const products = normalizeProducts({ contractData });
+  const byRowId = new Map(products.map(product => [product.rowId, product]));
+  return (rowId: string): DispatchProductPrintRow[] => {
+    const product = byRowId.get(rowId);
+    if (!product) return [];
+    const children = products.filter(item => item.layer?.parentRowId === rowId &&
+      !options.siblingDispatchRows?.has(item.rowId || item.id));
+    const rows = options.partnerDetails
+      ? buildPartnerProductRows(product, options.partnerDetails, 1, currency, { moneyFractionDigits: 12 })
+      : buildFlatProductRows([product, ...children], [], currency, 0, undefined,
+          { showTotals: false, accountingDetail: true, moneyFractionDigits: 12 });
+    return rows.map(({ code, description, category, length, width, count, linearMeasurement, squareMeasurement, rate, total }) => {
+      const rateUnit = squareMeasurement ? 'متر مربع' : linearMeasurement ? 'متر طول' : '';
+      const displayRate = category === 'برش' && rate && rateUnit && !rate.includes(' / ') ? `${rate} / ${rateUnit}` : rate;
+      return { code, description, category, length, width, count, linearMeasurement, squareMeasurement, rate: displayRate, total };
+    });
+  };
+}
 
 const renderProductMainRows = (
   products: NormalizedProduct[],

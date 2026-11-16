@@ -71,3 +71,12 @@ test("presents evidence as translated fields and keeps identifiers in technical 
     { label: "کد صحت داده", value: "abc۱۲۳" },
   ]);
 });
+
+test("biometric history distinguishes a failed attempt, a match and missing historical evidence", () => {
+  const type = "BIOMETRIC_ATTEMPT_RECORDED";
+  assert.match(dispatchEventLabel(type, { result: { errorCategory: "CAPTURE_TIMEOUT" } }), /ناموفق.*مهلت/);
+  assert.match(dispatchEventLabel(type, {
+    match: { state: "MATCH" }, captureQuality: { state: "ACCEPTED" }, liveness: { state: "LIVE" },
+  }), /تطابق داشت/);
+  assert.equal(dispatchEventLabel(type), "نتیجه بررسی اثر انگشت ثبت شد");
+});

@@ -9,6 +9,7 @@ import {
   ErpButton,
   ErpCard,
   ErpEmptyState,
+  ErpField,
   ErpFieldView,
   ErpInlineState,
   ErpInput,
@@ -70,6 +71,7 @@ export default function DriverEligibilityWorkspace({ external = false, workspace
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dispatchTimelineStale, setDispatchTimelineStale] = useState(false);
+  const [phoneEdit, setPhoneEdit] = useState<{ enrollmentId: string; value: string } | null>(null);
   const [confirmationPhone, setConfirmationPhone] = useState("");
   const [enrollmentId, setEnrollmentId] = useState<string | null>(null);
   const [pendingFinger, setPendingFinger] = useState<EnrollmentFinger | null>(
@@ -347,6 +349,14 @@ export default function DriverEligibilityWorkspace({ external = false, workspace
       }
     }
   };
+  const saveConfirmationPhone = async () => {
+    if (!phoneEdit || phoneEdit.enrollmentId !== enrollmentId || !phoneEdit.value.trim()) return;
+    const succeeded = await run(
+      () => dispatchConfirmationAPI.updateEnrollmentConfirmationPhone(phoneEdit.enrollmentId, phoneEdit.value),
+      "شماره تأیید راننده به‌روزرسانی شد.",
+    );
+    if (succeeded) setPhoneEdit(null);
+  };
   const deactivateEnrollment = async () => {
     if (!enrollmentId) return;
     const succeeded = await run(
@@ -480,6 +490,37 @@ export default function DriverEligibilityWorkspace({ external = false, workspace
               kind="success"
               title="ثبت بیومتریک راننده فعال است."
             />
+            {phoneEdit && phoneEdit.enrollmentId === enrollmentId ? (
+              <div className="max-w-sm space-y-3">
+                <ErpField label="شماره موبایل دریافت رمز">
+                  <ErpInput
+                    type="tel"
+                    dir="ltr"
+                    value={phoneEdit.value}
+                    disabled={saving}
+                    onChange={event => setPhoneEdit({ ...phoneEdit, value: event.target.value })}
+                  />
+                </ErpField>
+                <div className="flex flex-wrap gap-2">
+                  <ErpButton
+                    label="ذخیره شماره"
+                    disabled={dispatchTimelineStale || saving || !phoneEdit.value.trim() || phoneEdit.value.trim() === enrollment?.confirmationPhone}
+                    onClick={() => void saveConfirmationPhone()}
+                  />
+                  <ErpButton label="انصراف" variant="ghost" disabled={saving} onClick={() => setPhoneEdit(null)} />
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <ErpFieldView label="شماره موبایل دریافت رمز" value={<bdi dir="ltr">{enrollment?.confirmationPhone || "—"}</bdi>} />
+                <ErpButton
+                  label="ویرایش شماره"
+                  variant="outline"
+                  disabled={dispatchTimelineStale || saving || !enrollmentId}
+                  onClick={() => enrollmentId && setPhoneEdit({ enrollmentId, value: enrollment?.confirmationPhone || "" })}
+                />
+              </div>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               {templates.map((item: any) => (
                 <ErpCard key={item.finger} className="p-4">

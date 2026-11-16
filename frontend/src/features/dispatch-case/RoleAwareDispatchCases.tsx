@@ -149,7 +149,7 @@ export default function RoleAwareDispatchCases({ workspace, subjectId, loadingId
                   <span className="min-w-0">
                     <strong className="flex items-baseline gap-2 text-sm sds-text-primary">
                       <span className="shrink-0 tabular-nums sds-text-secondary">{(index + 1).toLocaleString('fa-IR', { useGrouping: false })}.</span>
-                      <span className="min-w-0 break-words">{dispatchEventLabel(event.eventType)}</span>
+                      <span className="min-w-0 break-words">{dispatchEventLabel(event.eventType, event.detail)}</span>
                     </strong>
                     <span className="mt-1 flex flex-wrap items-center gap-2">
                       <ErpBadge tone="neutral">{dispatchStationLabel(event.station)}</ErpBadge>

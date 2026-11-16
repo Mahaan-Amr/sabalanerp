@@ -21,7 +21,7 @@ import { formatDisplayedMoney, type DispatchDocumentCase } from "@/features/acco
 import { dispatchCaseReference } from "@/features/dispatch-case/dispatchCasePresentation";
 import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPresentation";
 import { userFacingError } from "@/features/dispatch/userFacingError";
-import { confirmationActionsFor } from "@/features/biometric/dispatchConfirmationPresentation";
+import { biometricAttemptNotice, confirmationActionsFor } from "@/features/biometric/dispatchConfirmationPresentation";
 import api, { accountingAPI, dispatchConfirmationAPI } from "@/lib/api";
 import { biometricConnectorClient } from "@/lib/biometricConnector";
 import { normalizeDigits } from "@/lib/numberFormat";
@@ -108,7 +108,7 @@ export default function AccountingDispatchPage() {
 
   const runDispatch = async (
     command: () => Promise<any>,
-    success: string,
+    notice: string | ((data: any) => DispatchNotice),
     recover?: (error: any) => Promise<boolean>,
   ): Promise<boolean> => {
     if (dispatchPendingRef.current) return false;
@@ -117,7 +117,7 @@ export default function AccountingDispatchPage() {
     setDispatchNotice(null);
     try {
       const response = await command();
-      setDispatchNotice({ kind: "success", text: success });
+      setDispatchNotice(typeof notice === "string" ? { kind: "success", text: notice } : notice(response.data?.data));
       if (response.data?.data?.id && response.data?.data?.waybillId)
         setConfirmation(response.data.data);
       if (response.data?.data?.authorization)
@@ -429,7 +429,7 @@ export default function AccountingDispatchPage() {
                               },
                             },
                           );
-                        }, "اثر انگشت راننده بررسی شد.")
+                        }, biometricAttemptNotice)
                       }
                     />
                   ))}

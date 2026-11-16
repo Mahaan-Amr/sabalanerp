@@ -8,6 +8,7 @@ import { ProtectedTemplateEnvelope, ProtectedTemplateVault } from './biometricTe
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
 import { SafeConnectorResult } from './biometricWorkstationProtocol';
 import { isGuardQueueTurnCurrentlyReady } from './guardDriverQueue';
+import { normalizeApplicantMobile } from './hrCandidateAccess';
 import { lockHrVehicleOperations } from './hrVehicleOperations';
 
 type Tx = Prisma.TransactionClient;
@@ -235,26 +236,63 @@ export class DispatchConfirmationService {
     });
   }
 
+  async updateEnrollmentConfirmationPhone(input: { enrollmentId: string; actorId: string; confirmationPhone: unknown }) {
+    const raw = input.confirmationPhone;
+    const phone = typeof raw === 'string' && /^[+۰-۹٠-٩0-9 ()-]+$/.test(raw.trim()) ? normalizeApplicantMobile(raw) : null;
+    if (!phone) throw new DispatchConfirmationValidationError('شماره موبایل تأیید راننده را به‌صورت معتبر وارد کنید.');
+    return this.prisma.$transaction(async tx => {
+      await assertCanonicalDispatchCommandAllowed(tx);
+      await lockHrVehicleOperations(tx);
+      const enrollment = await tx.driverBiometricEnrollment.findUnique({ where: { id: input.enrollmentId },
+        select: { id: true, status: true, confirmationPhone: true, externalDriverId: true, personnelId: true } });
+      if (!enrollment || enrollment.status !== 'ACTIVE') {
+        throw new DispatchConfirmationConflictError('ثبت بیومتریک فعال پیدا نشد؛ پرونده راننده را به‌روزرسانی کنید.');
+      }
+      const driverSource = enrollment.externalDriverId ? GuardDriverSource.EXTERNAL : GuardDriverSource.INTERNAL;
+      const driverId = enrollment.externalDriverId ?? (await tx.internalDriverProfile.findUniqueOrThrow({
+        where: { personnelId: enrollment.personnelId! }, select: { id: true },
+      })).id;
+      if (enrollment.confirmationPhone === phone) return { id: enrollment.id, confirmationPhone: phone };
+      const at = this.now();
+      const updated = await tx.driverBiometricEnrollment.update({ where: { id: enrollment.id },
+        data: { confirmationPhone: phone }, select: { id: true, confirmationPhone: true } });
+      const invalidated = await tx.dispatchOtpChallenge.updateMany({
+        where: { session: { driverSource, driverId, status: 'ACTIVE' }, verifiedAt: null, invalidatedAt: null, expiresAt: { gt: at } },
+        data: { invalidatedAt: at },
+      });
+      await appendAudit(tx, { aggregateType: 'DRIVER_BIOMETRIC_ENROLLMENT', aggregateId: enrollment.id,
+        eventType: 'CONFIRMATION_PHONE_UPDATED', payload: { invalidatedChallengeCount: invalidated.count },
+        actorId: input.actorId, at });
+      return updated;
+    });
+  }
+
   private async loadWaybill(waybillId: string) {
     return this.prisma.accountingDispatchWaybill.findUnique({ where: { id: waybillId }, include: { candidate: { include: {
       allocationRevision: { include: { queueTurn: { include: { internalDriver: { include: { personnel: true } }, externalDriver: true } } } }
     } } } });
   }
 
-  private async createOtp(sessionId: string, phone: string, dispatchNumber: string) {
-    const at = this.now();
-    const current = await this.prisma.dispatchOtpChallenge.findFirst({ where: { sessionId, invalidatedAt: null }, orderBy: { createdAt: 'desc' } });
-    if (current && current.resendAfter > at) throw new DispatchConfirmationConflictError('OTP resend is not available yet.');
+  private async createOtp(session: { id: string; driverSource: GuardDriverSource; driverId: string; waybill: { number: unknown } }) {
+    const sessionId = session.id;
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
     const id = randomUUID();
-    const expiresAt = addMinutes(at, 10);
-    await this.prisma.$transaction(async (tx) => {
+    const { phone, expiresAt, resendAfter } = await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
+      const at = this.now();
+      const subject = await this.sessionSubject(session, tx);
+      const enrollment = await tx.driverBiometricEnrollment.findFirstOrThrow({ where: { ...subject.where, status: 'ACTIVE' },
+        select: { confirmationPhone: true } });
+      const current = await tx.dispatchOtpChallenge.findFirst({ where: { sessionId, invalidatedAt: null }, orderBy: { createdAt: 'desc' } });
+      if (current && current.resendAfter > at) throw new DispatchConfirmationConflictError('OTP resend is not available yet.');
+      const expiresAt = addMinutes(at, 10);
+      const resendAfter = addMinutes(at, 1);
       await tx.dispatchOtpChallenge.updateMany({ where: { sessionId, invalidatedAt: null }, data: { invalidatedAt: at } });
-      await tx.dispatchOtpChallenge.create({ data: { id, sessionId, digest: this.otpDigest(id, code), expiresAt, resendAfter: addMinutes(at, 1) } });
+      await tx.dispatchOtpChallenge.create({ data: { id, sessionId, digest: this.otpDigest(id, code), expiresAt, resendAfter } });
+      return { phone: enrollment.confirmationPhone, expiresAt, resendAfter };
     });
-    await this.dependencies.sendOtp({ phone, code, dispatchNumber, sessionId, expiresAt });
-    return { expiresAt, resendAfter: addMinutes(at, 1) };
+    await this.dependencies.sendOtp({ phone, code, dispatchNumber: String(session.waybill.number), sessionId, expiresAt });
+    return { expiresAt, resendAfter };
   }
 
   async startSession(input: { waybillId: string; actorId: string; workstationId: string }) {
@@ -419,7 +457,8 @@ export class DispatchConfirmationService {
     const session = await this.activeSession(input.sessionId, input.actorId);
     if (session.method !== `${session.driverSource}_BIOMETRIC` || !session.fallbackEligibleAt) throw new DispatchConfirmationConflictError('A qualifying biometric failure is required.');
     const subject = await this.sessionSubject(session);
-    const enrollment = await this.prisma.driverBiometricEnrollment.findFirstOrThrow({ where: { ...subject.where, status: 'ACTIVE' } });
+    const enrollment = await this.prisma.driverBiometricEnrollment.findFirst({ where: { ...subject.where, status: 'ACTIVE' }, select: { id: true } });
+    if (!enrollment) throw new DispatchConfirmationConflictError('The protected enrollment is unavailable.');
     const method = session.driverSource === GuardDriverSource.INTERNAL ? 'INTERNAL_FALLBACK' : 'EXTERNAL_FALLBACK';
     await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
@@ -427,16 +466,14 @@ export class DispatchConfirmationService {
       await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: session.id, eventType: 'FALLBACK_STARTED',
         payload: { failure: session.fallbackFailure }, actorId: input.actorId, at: this.now() });
     });
-    await this.createOtp(session.id, enrollment.confirmationPhone, String(session.waybill.number));
+    await this.createOtp(session);
     return { sessionId: session.id, method };
   }
 
   async resendOtp(sessionId: string) {
     const session = await this.activeSession(sessionId);
     if (session.method !== `${session.driverSource}_FALLBACK`) throw new DispatchConfirmationConflictError('ابتدا مسیر جایگزین بیومتریک را با خطای معتبر فعال کنید.');
-    const subject = await this.sessionSubject(session);
-    const phone = (await this.prisma.driverBiometricEnrollment.findFirstOrThrow({ where: { ...subject.where, status: 'ACTIVE' } })).confirmationPhone;
-    return this.createOtp(session.id, phone, String(session.waybill.number));
+    return this.createOtp(session);
   }
 
   async verifyOtp(input: { sessionId: string; code: string; actorId?: string }) {

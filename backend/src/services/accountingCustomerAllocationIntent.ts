@@ -4,6 +4,7 @@ import { hashAccountingEvidence } from './accountingLedgerFoundation';
 import { resolveCustomerWorkspace, type recordCustomerWorkspaceTreasury } from './accountingCustomerWorkspace';
 import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { serializeCustomerAllocationWithin } from './accountingCustomerAllocationFence';
+import { createAccountingLedgerPrismaRepository } from './accountingLedgerPrismaRepository';
 
 type AllocationInput = Parameters<typeof recordCustomerWorkspaceTreasury>[2];
 const fail = (code: string, message: string, status = 409): never => { throw new AccountingCustomerTreasuryError(code, message, status); };
@@ -99,8 +100,43 @@ export async function readCustomerAllocationIntent(database: PrismaClient, accou
   if (!resolved.profile) return unknown();
   const pending = await database.accountingCustomerAllocationIntent.findFirst({ where: { profileId: resolved.profile.id, state: 'PENDING' } });
   if (!pending) return unknown();
-  if (pending.ownerId !== actor.id) return { status: 'BLOCKED' as const };
+  if (pending.ownerId !== actor.id) return actor.profile === 'ACCOUNTING_MANAGER'
+    ? { status: 'BLOCKED' as const, reconciliationId: pending.id }
+    : { status: 'BLOCKED' as const };
   return { status: 'PENDING' as const, accountId: pending.profileId, idempotencyKey: pending.idempotencyKey, command: pending.command };
+}
+
+export async function reconcileCustomerAllocationIntent(database: PrismaClient, accountId: string, input: {
+  intentId: string; reason: string; actor: AllocationInput['actor'];
+}) {
+  if (input.actor.profile !== 'ACCOUNTING_MANAGER') return fail('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز تعیین تکلیف درخواست را ندارید.', 403);
+  const reason = input.reason.trim();
+  if (!input.intentId || input.intentId.length > 128 || reason.length < 8 || reason.length > 4096) {
+    return fail('ACCOUNTING_EVIDENCE_REQUIRED', 'شناسه درخواست و دلیل مستند لغو لازم است.', 400);
+  }
+  return database.$transaction(async tx => {
+    const initial = await resolveCustomerWorkspace(tx, accountId);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${initial.customerId}`}))`;
+    const resolved = await resolveCustomerWorkspace(tx, accountId);
+    if (resolved.customerId !== initial.customerId || !resolved.profile) return unknown();
+    const intent = await tx.accountingCustomerAllocationIntent.findFirst({
+      where: { id: input.intentId, profileId: resolved.profile.id },
+    });
+    if (!intent) return unknown();
+    if (intent.state === 'CANCELED') return { status: 'CANCELED' as const };
+    if (intent.state === 'COMMITTED') return { status: 'COMMITTED' as const };
+    await serializeCustomerAllocationWithin(tx, resolved.profile.id);
+    const changed = await tx.accountingCustomerAllocationIntent.updateMany({
+      where: { id: intent.id, state: 'PENDING' }, data: { state: 'CANCELED' },
+    });
+    if (changed.count !== 1) return fail('ALLOCATION_INTENT_CHANGED', 'وضعیت درخواست تغییر کرد؛ پرونده را به‌روز کنید.');
+    await createAccountingLedgerPrismaRepository(tx, true).appendAudit({
+      action: 'CUSTOMER_ALLOCATION_INTENT_RECONCILED', result: 'SUCCEEDED', actorId: input.actor.id,
+      effectiveProfile: input.actor.profile, entityType: 'CUSTOMER_ALLOCATION_INTENT', entityId: intent.id,
+      correlationId: intent.idempotencyKey, reason, payloadHash: intent.commandHash,
+    });
+    return { status: 'CANCELED' as const };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 }
 
 /** Reconcile a known exact command, including terminal results. Missing or

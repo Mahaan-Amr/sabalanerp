@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { customerFinanceFixture } from './customerFinanceFixture';
-import { cancelCustomerAllocationIntent, prepareCustomerAllocationIntent, readCustomerAllocationIntent, readCustomerAllocationIntentByCommand } from '../accountingCustomerAllocationIntent';
+import { cancelCustomerAllocationIntent, prepareCustomerAllocationIntent, readCustomerAllocationIntent, readCustomerAllocationIntentByCommand, reconcileCustomerAllocationIntent } from '../accountingCustomerAllocationIntent';
 import { readCustomerWorkspace, recordCustomerAccountOperation, recordCustomerWorkspaceTreasury } from '../accountingCustomerWorkspace';
 
 const url = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL;
@@ -106,5 +106,19 @@ test('one immutable pending intent is shared across devices without admitting a 
     assert.equal(cancel.status, 'fulfilled');
     assert.deepEqual(cancel.value, post.status === 'fulfilled' ? { status: 'COMMITTED', result } : { status: 'CANCELED' });
     if (post.status === 'rejected') assert.match(String(post.reason), /ALLOCATION_INTENT_COMMAND_MISMATCH/);
+    const orphan = makeCommand();
+    await prepareCustomerAllocationIntent(f.db, customer, orphan);
+    const manager = { id: 'reconciliation-manager', profile: 'ACCOUNTING_MANAGER' as const };
+    const pending = await f.db.accountingCustomerAllocationIntent.findUniqueOrThrow({ where: { idempotencyKey: orphan.idempotencyKey } });
+    assert.deepEqual(await readCustomerAllocationIntent(f.db, customer, manager), { status: 'BLOCKED', reconciliationId: pending.id });
+    const resolution = { intentId: pending.id, reason: 'مالک درخواست دیگر به خزانه دسترسی ندارد.', actor: manager };
+    await assert.rejects(reconcileCustomerAllocationIntent(f.db, customer, { ...resolution, actor: f.actor }), { code: 'ACCOUNTING_WRITE_FORBIDDEN' });
+    assert.deepEqual(await reconcileCustomerAllocationIntent(f.db, await f.customer(), resolution), { status: 'UNKNOWN' });
+    assert.deepEqual(await reconcileCustomerAllocationIntent(f.db, customer, resolution), { status: 'CANCELED' });
+    assert.deepEqual(await reconcileCustomerAllocationIntent(f.db, customer, resolution), { status: 'CANCELED' });
+    const audit = await f.db.accountingLedgerAuditEntry.findMany({ where: { entityId: pending.id } });
+    assert.equal(audit.length, 1);
+    assert.equal(audit[0].actorId, manager.id);
+    assert.equal(audit[0].reason, resolution.reason);
   } finally { await f.close(); }
 });

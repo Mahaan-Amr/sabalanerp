@@ -24,7 +24,7 @@ test('status HTTP boundary requires treasury authority and the exact original no
     const { default: router } = await import('../../routes/accountingLedger');
     const [sharedDatabase] = await shared.$queryRaw<Array<{ name: string }>>`SELECT current_database() AS name`;
     assert.equal(sharedDatabase.name, name, 'HTTP application must use the isolated fixture database');
-    const mkUser = async (id: string, role: 'ADMIN' | 'USER', permission: 'edit' | 'view', disabled = false) => {
+    const mkUser = async (id: string, role: 'ADMIN' | 'USER', permission: 'admin' | 'edit' | 'view', disabled = false) => {
       await f.db.user.create({ data: { id, email: `${id}@example.invalid`, username: id, password: 'not-a-login', firstName: 'Test', lastName: 'User', role } });
       await f.db.workspacePermission.create({ data: { userId: id, workspace: 'accounting', permissionLevel: permission } });
       if (disabled) await f.db.featurePermission.create({ data: { userId: id, workspace: 'accounting', feature: 'accounting_treasury_manage', permissionLevel: 'none' } });
@@ -32,6 +32,7 @@ test('status HTTP boundary requires treasury authority and the exact original no
     };
     const owner = await mkUser(f.actor.id, 'ADMIN', 'edit');
     const another = await mkUser('other-accountant', 'ADMIN', 'edit');
+    const supervisor = await mkUser('treasury-supervisor', 'ADMIN', 'admin');
     const viewer = await mkUser('viewer', 'USER', 'view');
     const denied = await mkUser('no-treasury', 'USER', 'edit', true);
     const customer = await f.customer();
@@ -83,7 +84,10 @@ test('status HTTP boundary requires treasury authority and the exact original no
     assert.deepEqual((await found.json() as any).data, {
       status: 'PENDING', accountId: account.profile!.id, idempotencyKey: pendingBody.idempotencyKey, command: pendingBody,
     });
-    assert.deepEqual((await (await discover(another.token)).json() as any).data, { status: 'BLOCKED' });
+    const blockedDiscovery = (await (await discover(another.token)).json() as any).data;
+    assert.equal(blockedDiscovery.status, 'BLOCKED');
+    assert.equal(blockedDiscovery.command, undefined);
+    assert.equal(blockedDiscovery.idempotencyKey, undefined);
     assert.equal((await discover(denied.token)).status, 403);
     assert.equal((await send('/allocation-intent/cancel', undefined, pendingBody)).status, 401);
     assert.deepEqual((await (await send('/allocation-intent/cancel', another.token, pendingBody)).json() as any).data, { status: 'UNKNOWN' });
@@ -96,6 +100,19 @@ test('status HTTP boundary requires treasury authority and the exact original no
     assert.deepEqual((await cancelFromAlias.json() as any).data, { status: 'CANCELED' });
     assert.deepEqual((await (await send('/allocation-intent/status', owner.token, pendingBody)).json() as any).data, { status: 'CANCELED' });
     assert.deepEqual((await (await discover(owner.token)).json() as any).data, { status: 'CLOSED' });
+    const orphan = await f.db.accountingCustomerAllocationIntent.create({ data: {
+      profileId: account.profile!.id, accountId: account.profile!.id, ownerId: f.actor.id,
+      idempotencyKey: randomUUID(), command: pendingBody, commandHash: hashAccountingEvidence(normalized),
+    } });
+    const reconciliation = { intentId: orphan.id, reason: 'مالک دیگر دسترسی خزانه ندارد.' };
+    assert.equal((await send('/allocation-intent/reconcile', viewer.token, reconciliation)).status, 403);
+    assert.equal((await send('/allocation-intent/reconcile', denied.token, reconciliation)).status, 403);
+    assert.equal((await send('/allocation-intent/reconcile', another.token, reconciliation)).status, 403);
+    const manager = (await (await discover(supervisor.token)).json() as any).data;
+    assert.deepEqual(manager, { status: 'BLOCKED', reconciliationId: orphan.id });
+    const reconciled = await send('/allocation-intent/reconcile', supervisor.token, reconciliation);
+    assert.equal(reconciled.status, 200);
+    assert.deepEqual((await reconciled.json() as any).data, { status: 'CANCELED' });
     assert.deepEqual(await Promise.all([f.db.accountingCustomerCommand.count(), f.db.accountingLedgerVoucher.count(), f.db.accountingSettlementAllocation.count()]), before);
     // A missing visible row cannot be treated as a failed transaction: the
     // original command may be committed while this read is in progress.

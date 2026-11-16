@@ -813,6 +813,22 @@ export async function lockCustomerReceiptWithin(tx: Prisma.TransactionClient, re
   return source?.profile?.partySourceId;
 }
 
+async function requireAllocationReservationWithin(tx: Prisma.TransactionClient, profileId: string, input?: {
+  sourcePlanHash?: string; correlationId: string; actor: CustomerTreasuryActor;
+}) {
+  const pending = await tx.accountingCustomerAllocationIntent.findFirst({
+    where: { profileId, state: 'PENDING' },
+    select: { idempotencyKey: true, commandHash: true, ownerId: true },
+  });
+  if (pending && (pending.idempotencyKey !== input?.correlationId ||
+    pending.commandHash !== input?.sourcePlanHash || pending.ownerId !== input?.actor.id)) {
+    throw new AccountingCustomerTreasuryError('ALLOCATION_INTENT_PENDING', 'ابتدا درخواست تخصیص معلق این مشتری را تعیین تکلیف کنید.', 409);
+  }
+  if (!pending && input?.sourcePlanHash) {
+    throw new AccountingCustomerTreasuryError('ALLOCATION_INTENT_REQUIRED', 'درخواست تخصیص تأییدشده پیدا نشد.', 409);
+  }
+}
+
 export const allocateCustomerReceiptPrisma = async (database: Database, input: {
   treasuryTransactionId: string; allocations: Array<{ openItemId: string; amountRials: bigint }>;
   sourcePlanHash?: string;
@@ -845,6 +861,7 @@ export const allocateCustomerReceiptPrisma = async (database: Database, input: {
     }
     return prior;
   }
+  await requireAllocationReservationWithin(tx, receipt.profile.id, input);
   const requestedTotal = input.allocations.reduce((total, item) => total + item.amountRials, 0n);
   await requireCustomerConsumptionDate(tx, { receiptId: receipt.id }, input.documentDate);
   await requireCustomerReceiptSourceDate(tx, receipt, input.documentDate);
@@ -918,6 +935,7 @@ export const allocateCustomerCreditPrisma = async (database: Database, input: {
     if (prior.creditItemId !== credit.id || voucher?.sourceHash !== hashAccountingEvidence(payload)) throw new AccountingCustomerTreasuryError('IDEMPOTENCY_KEY_REUSED', 'کلید تخصیص برای اطلاعات دیگری استفاده شده است.', 409);
     return prior;
   }
+  await requireAllocationReservationWithin(tx, credit.profile.id, input);
   const total = input.allocations.reduce((sum, line) => sum + line.amountRials, 0n);
   await requireCustomerConsumptionDate(tx, { creditItemId: credit.id }, input.documentDate);
   await requireSettlementSource(tx, credit.invoice?.ledgerVoucherId ?? credit.ledgerVoucherId, input.bookId, input.documentDate);
@@ -975,6 +993,7 @@ export const reverseCustomerAllocationPrisma = async (database: Database, input:
   if (!original || original.reversesId || !profile || profile.partySourceId !== lockedCustomer) throw new AccountingCustomerTreasuryError('ALLOCATION_NOT_FOUND', 'تخصیص پیدا نشد.', 404);
   if (original.transaction && original.transaction.kind !== 'CUSTOMER_RECEIPT') throw new AccountingCustomerTreasuryError('REFUND_REVERSAL_REQUIRES_CORRECTION', 'اصلاح استرداد باید همراه با برگشت سند پرداخت انجام شود.', 409);
   if (original.reversedBy) return original.reversedBy;
+  await requireAllocationReservationWithin(tx, profile.id);
   await requireSettlementSource(tx, original.ledgerVoucherId, input.bookId, input.documentDate);
   await lockSettlementContracts(tx, original.lines.map(line => line.openItemId));
   const total = original.lines.reduce((sum, line) => sum + toBigInt(line.amountRials), 0n);

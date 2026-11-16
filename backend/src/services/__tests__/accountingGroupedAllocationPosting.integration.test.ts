@@ -50,6 +50,10 @@ test('admitted grouped posting commits exact shares once and reverses independen
       assert.deepEqual(await cancelCustomerAllocationIntent(f.db, customer, invalid), { status: 'CANCELED' });
       await assert.rejects(recordCustomerWorkspaceTreasury(f.db, customer, invalid), { code: 'ALLOCATION_INTENT_NOT_PENDING' });
       await prepareAdmittedCustomerAllocationIntent(f.db, customer, command);
+      await assert.rejects(recordCustomerWorkspaceTreasury(f.db, customer, {
+        ...f.common, kind: 'ALLOCATION', amountRials: 0n, receiptId: receipt.id,
+        allocations: [{ openItemId: debt.id, amountRials: 1n }], idempotencyKey: randomUUID(),
+      }), { code: 'ALLOCATION_INTENT_PENDING' });
       const result = await recordCustomerWorkspaceTreasury(f.db, customer, command);
       assert.deepEqual(await recordCustomerWorkspaceTreasury(f.db, customer, command), result);
       assert.deepEqual(await readCustomerAllocationIntentByCommand(f.db, customer, command), { status: 'COMMITTED', result });

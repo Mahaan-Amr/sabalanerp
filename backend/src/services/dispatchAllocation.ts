@@ -1,3 +1,4 @@
+import { requirePickupVerification } from './dispatchPickupVerification';
 import { LOADING_CANCELLATION_DUTY } from './crossWorkspaceDutyAdapters/loadingCancellationDutyCode';
 import { exactQuantityText, ExactQuantityDecimal } from './exactQuantity';
 import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
@@ -1378,10 +1379,11 @@ export const decideAccountingDispatchCandidate = async (prisma: Database, input:
     return previous.result;
   }
   const candidate = await tx.accountingDispatchCandidate.findUnique({
-    where: { id: input.candidateId }, include: { allocationRevision: { include: { lines: true } }, workItem: true, waybills: true },
+    where: { id: input.candidateId }, include: { allocationRevision: { include: { lines: true, queueTurn: { select: { driverSource: true } } } }, workItem: true, waybills: true },
   });
   if (!candidate) throw new DispatchAllocationValidationError('Accounting dispatch candidate was not found.');
   if (candidate.status !== AccountingDispatchCandidateStatus.PENDING) throw new DispatchAllocationConflictError('Only a pending candidate can be decided.');
+  if (input.action === 'ACCEPT') await requirePickupVerification(tx, candidate.id, candidate.allocationRevision.queueTurn.driverSource, DispatchAllocationConflictError);
   if (input.action === 'ACCEPT') await assertOrdinaryContractsDispatchEligible(tx,
     candidate.allocationRevision.lines.map(line => line.sourceContractId), DispatchAllocationConflictError);
   const reason = input.action === 'ACCEPT' ? null : required(input.reason, 'reason');

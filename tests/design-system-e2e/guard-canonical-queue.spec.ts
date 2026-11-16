@@ -54,7 +54,17 @@ test('Guard admits a canonical visit and advances it while legacy history remain
     }
     if (request.method() === 'POST' && url.pathname.endsWith('/canonical-driver-queue')) {
       admissions += 1;
-      const external = request.postDataJSON().source === 'EXTERNAL';
+      const data = request.postDataJSON();
+      if (data.source === 'CUSTOMER_PICKUP') {
+        expect(data).toEqual({ source: 'CUSTOMER_PICKUP', vehicleType: 'وانت', plate: '۱۲ ب ۳۴۵ ایران ۶۷', phone: '09123456789' });
+        canonicalTurns = [{ id: 'turn-1', status: 'WAITING_AT_GATE', driverSource: data.source,
+          admittedAt: '2026-08-07T08:00:00.000Z', admissionSnapshot: {
+            driver: { firstName: 'راننده متفرقه' }, vehicle: { vehicleType: data.vehicleType }, plate: { plate: data.plate },
+          } }];
+        await route.fulfill({ status: 201, json: { success: true, data: canonicalTurns[0] } });
+        return;
+      }
+      const external = data.source === 'EXTERNAL';
       if (external) expect(request.postDataJSON()).toMatchObject({ source: 'EXTERNAL', driverId: 'external-driver-1', vehicleId: 'external-vehicle-1' });
       canonicalTurns = [{
         id: external ? 'turn-2' : 'turn-1', status: 'WAITING_AT_GATE', driverSource: external ? 'EXTERNAL' : 'INTERNAL', admittedAt: '2026-08-07T08:00:00.000Z',
@@ -92,7 +102,7 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   await closeWithoutLoading.getByRole('button', { name: 'تأیید و ثبت', exact: true }).click();
   await workspace.getByRole('button', { name: 'پذیرش راننده', exact: true }).last().click();
   const externalAdmission = page.getByRole('dialog', { name: 'پذیرش راننده و خودرو' });
-  await externalAdmission.getByRole('button', { name: 'راننده متفرقه', exact: true }).click();
+  await externalAdmission.getByRole('button', { name: 'راننده بیرونی', exact: true }).click();
   await externalAdmission.getByRole('combobox', { name: 'راننده' }).selectOption('external-driver-1');
   const assignedVehicle = externalAdmission.getByRole('combobox', { name: 'خودرو' });
   await expect(assignedVehicle).toBeDisabled();
@@ -106,6 +116,21 @@ test('Guard admits a canonical visit and advances it while legacy history remain
   expect(voids).toBe(0);
   await confirmation.getByRole('button', { name: 'تأیید ابطال', exact: true }).click();
   await expect.poll(() => voids).toBe(1);
+  await workspace.getByRole('button', { name: 'پذیرش راننده', exact: true }).last().click();
+  await admission.getByRole('button', { name: 'راننده متفرقه', exact: true }).click();
+  await expect(admission.getByRole('combobox')).toHaveCount(1);
+  await expect(admission.getByRole('textbox')).toHaveCount(2);
+  const vehicleType = admission.getByRole('combobox', { name: 'نوع خودرو' });
+  await expect(vehicleType.locator('option')).toHaveText(['انتخاب کنید', 'کامیون', 'وانت']);
+  await vehicleType.selectOption('وانت');
+  await admission.getByRole('textbox', { name: 'شماره پلاک' }).fill('۱۲ ب ۳۴۵ ایران ۶۷');
+  await expect(admission.getByRole('button', { name: 'ثبت پذیرش', exact: true })).toBeDisabled();
+  await admission.getByRole('textbox', { name: 'شماره همراه مشتری یا راننده' }).fill('۰۹۱۲۳۴۵۶۷۸۹');
+  await admission.getByRole('button', { name: 'ثبت پذیرش', exact: true }).click();
+  await expect.poll(() => admissions).toBe(3);
+  await expect(workspace.getByText('راننده متفرقه · ۱۲ ب ۳۴۵ ایران ۶۷', { exact: true })).toBeVisible();
+  await workspace.getByRole('button', { name: 'ورود برای بارگیری', exact: true }).click();
+  await expect(workspace.getByText('آماده بارگیری', { exact: true })).toBeVisible();
   await workspace.getByRole('button', { name: 'خروج مجاز', exact: true }).click();
   await expect(workspace.getByRole('heading', { name: 'خروج مجاز گیت', exact: true })).toBeVisible();
   await expect(workspace.getByText('بارنامه 1000000001', { exact: true })).toBeVisible();

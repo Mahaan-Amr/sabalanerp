@@ -388,3 +388,55 @@ for (const width of [1280, 390]) {
     });
   });
 }
+
+test("Accounting verifies a customer pickup before issuing its waybill and sales invoice", async ({ page }) => {
+  await loginAsAdmin(page);
+  await setViewportAndZoom(page, { width: 390, height: 900 });
+  const loadingId = "qa-pickup-loading";
+  const candidateId = "qa-pickup-candidate";
+  let sent = false;
+  let verified = false;
+  let issued = false;
+  await page.route("**/api/accounting/dispatch-candidates", route => reply(route, [{
+    id: candidateId, loadingId, status: issued ? "ACCEPTED" : "PENDING", canManage: true,
+    summary: { loadingNumber: "14", driverName: "راننده متفرقه", driverSource: "CUSTOMER_PICKUP", plate: "۱۲ ب ۳۴۵ ایران ۶۷" },
+    pickupVerification: verified ? { verifiedAt: new Date().toISOString() } : null,
+    waybills: issued ? [{ id: "pickup-waybill", number: "21", status: "ISSUED", legacyReconstruction: { id: "pickup-pdf" } }] : [],
+  }]));
+  await page.route("**/api/dispatch-confirmation/capabilities", route => reply(route, {
+    canManageAccountingCandidates: true, canManageAccountingConfirmation: true,
+  }));
+  await page.route(`**/api/accounting/dispatch-candidates/${candidateId}/pickup-verification/send`, route => {
+    expect(route.request().postDataJSON()).toEqual({});
+    sent = true;
+    return reply(route, { verified: false });
+  });
+  await page.route(`**/api/accounting/dispatch-candidates/${candidateId}/pickup-verification/verify`, route => {
+    expect(sent).toBe(true);
+    expect(route.request().postDataJSON()).toEqual({ code: "123456" });
+    verified = true;
+    return reply(route, { verified: true });
+  });
+  await page.route(`**/api/accounting/loadings/${loadingId}/sales-invoices`, route => reply(route, {
+    ready: issued, documentsComplete: issued, invoices: issued ? [{ id: "pickup-invoice", number: "22", status: "ISSUED" }] : [],
+  }));
+  await page.route(`**/api/accounting/loadings/${loadingId}/issue-dispatch-documents`, route => {
+    expect(verified).toBe(true);
+    issued = true;
+    return reply(route, { status: "ISSUED" });
+  });
+  await page.goto("/dashboard/accounting/dispatch");
+  await page.getByRole("table").getByRole("button", { name: "جزئیات اقلام و اسناد بارگیری" }).click();
+  const details = page.getByRole("dialog", { name: "جزئیات اقلام و اسناد بارگیری" });
+  const issue = details.getByRole("button", { name: "صدور بارنامه‌ها و فاکتور فروش" });
+  await expect(issue).toBeDisabled();
+  await details.getByRole("button", { name: "ارسال کد پیامکی" }).click();
+  await expect(details.getByText("کد به شماره همراه ثبت‌شده در پذیرش ارسال شد.")).toBeVisible();
+  await details.getByRole("textbox", { name: "کد پیامکی راننده متفرقه" }).fill("۱۲۳۴۵۶");
+  await details.getByRole("button", { name: "تأیید کد", exact: true }).click();
+  await expect(details.getByText("شماره همراه تأیید شده است")).toBeVisible();
+  await assertNoHorizontalOverflow(page);
+  await expect(issue).toBeEnabled();
+  await issue.click();
+  await expect(details.getByText("فاکتور ۲۲ · صادرشده", { exact: true })).toBeVisible();
+});

@@ -1,6 +1,6 @@
 import {
   printSection, shipmentHeader, shipmentHtml, shipmentItemTable, shipmentParties,
-  shipmentQuantity, shipmentSignature, shipmentTable, shipmentUnitLabel,
+  shipmentQuantity, shipmentSignature, shipmentTable, shipmentTerms, shipmentUnitLabel,
 } from './dispatchPrintLayout';
 import type { WaybillPrintData } from '../../services/dispatchDocuments/contracts';
 import crypto from 'node:crypto';
@@ -304,7 +304,10 @@ function renderShipmentWaybill(input: Extract<DispatchDocumentRenderData, { kind
     + shipmentParties(input.customerName, print.contacts, false)
     + printSection('مشخصات حمل', shipmentTable(['نام راننده', 'پلاک خودرو', 'مقصد بارگیری'],
       [[input.driverName || '—', input.vehiclePlate, input.projectOrDestination || '—']]))
-    + printSection('مشخصات کالای محموله', shipmentItemTable(groups, false)) + shipmentSignature, assets.fontFacesCss);
+    + printSection('مشخصات کالای محموله', shipmentItemTable(groups, false))
+    + shipmentTerms('sourceKind' in input.payload ? print.contacts.map(contact => contact.contractNumber)
+      : input.payload.contracts.map(contract => contract.contractNumber))
+    + shipmentSignature, assets.fontFacesCss);
 }
 
 export const renderDispatchDocumentHtml = (

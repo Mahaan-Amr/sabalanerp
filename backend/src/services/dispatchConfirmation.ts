@@ -1,3 +1,4 @@
+import { requirePickupVerification } from './dispatchPickupVerification';
 import { externalDriverInclude, externalDriverBlockers, externalBlockerText, externalOperationalReadiness } from "./externalVehicleOperations";
 import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillment/commercialSettlement';
 import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
@@ -7,7 +8,7 @@ import { BiometricConnector, SimulatorScenario } from './biometricProtocol';
 import { ProtectedTemplateEnvelope, ProtectedTemplateVault } from './biometricTemplateVault';
 import { assertCanonicalDispatchCommandAllowed } from './dispatchCutover';
 import { SafeConnectorResult } from './biometricWorkstationProtocol';
-import { isGuardQueueTurnCurrentlyReady } from './guardDriverQueue';
+import { isGuardQueueTurnCurrentlyReady, queueTurnDriverIdentity } from './guardDriverQueue';
 import { normalizeApplicantMobile } from './hrCandidateAccess';
 import { lockHrVehicleOperations } from './hrVehicleOperations';
 
@@ -302,7 +303,8 @@ export class DispatchConfirmationService {
     const waybill = await this.loadWaybill(input.waybillId);
     if (!waybill || waybill.status !== 'ISSUED') throw new DispatchConfirmationConflictError('An issued waybill is required.');
     const turn = waybill.candidate.allocationRevision.queueTurn;
-    const driverId = turn.driverSource === GuardDriverSource.INTERNAL ? turn.internalDriverId : turn.externalDriverId;
+    const driverId = queueTurnDriverIdentity(turn);
+    const customerPickup = turn.driverSource === 'CUSTOMER_PICKUP';
     if (!driverId) throw new DispatchConfirmationConflictError('The waybill has no immutable driver identity.');
     await this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
@@ -317,9 +319,10 @@ export class DispatchConfirmationService {
         await appendAudit(tx, { aggregateType: 'DISPATCH_EXIT_AUTHORIZATION', aggregateId: stale.id, eventType: 'EXPIRED', payload: {}, actorId: input.actorId, at });
       }
     });
-    const method = turn.driverSource === GuardDriverSource.INTERNAL ? 'INTERNAL_BIOMETRIC' : 'EXTERNAL_BIOMETRIC';
+    const method = customerPickup ? 'CUSTOMER_PICKUP_OTP' : turn.driverSource === 'INTERNAL' ? 'INTERNAL_BIOMETRIC' : 'EXTERNAL_BIOMETRIC';
     return this.prisma.$transaction(async (tx) => {
       await assertCanonicalDispatchCommandAllowed(tx);
+      if (customerPickup) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`ACCOUNTING_DISPATCH_WAYBILL:${waybill.id}`}))`;
       const currentWaybill = await tx.accountingDispatchWaybill.findUnique({
         where: { id: waybill.id }, select: { status: true, integrityHash: true },
       });
@@ -340,9 +343,11 @@ export class DispatchConfirmationService {
           authorization: { id: authorization.id },
         };
       }
-      const subject = await this.sessionSubject({ driverSource: turn.driverSource, driverId }, tx);
-      const enrollment = await tx.driverBiometricEnrollment.findFirst({ where: { ...subject.where, status: 'ACTIVE' } });
-      if (!enrollment) throw new DispatchConfirmationConflictError('راننده ثبت بیومتریک فعال ندارد. ابتدا پرونده راننده را تکمیل کنید.');
+      if (!customerPickup) {
+        const subject = await this.sessionSubject({ driverSource: turn.driverSource, driverId }, tx);
+        const enrollment = await tx.driverBiometricEnrollment.findFirst({ where: { ...subject.where, status: 'ACTIVE' } });
+        if (!enrollment) throw new DispatchConfirmationConflictError('راننده ثبت بیومتریک فعال ندارد. ابتدا پرونده راننده را تکمیل کنید.');
+      }
       const active = await tx.dispatchConfirmationSession.findFirst({ where: { waybillId: waybill.id, status: 'ACTIVE' } });
       if (active) {
         if (active.accountingActorId !== accountingActorId || active.workstationId !== workstationId ||
@@ -356,6 +361,10 @@ export class DispatchConfirmationService {
         workstationId, expiresAt: addMinutes(at, this.dependencies.sessionMinutes || 10) } });
       await appendAudit(tx, { aggregateType: 'DISPATCH_CONFIRMATION_SESSION', aggregateId: created.id,
         eventType: 'SESSION_STARTED', payload: { waybillId: waybill.id, method, waybillIntegrityHash: waybill.integrityHash }, actorId: input.actorId, at });
+      if (customerPickup) {
+        const authorization = await this.createAuthorizationLocked(tx, created.id, accountingActorId, at);
+        return { ...created, status: 'CONFIRMED', authorization: { id: authorization.id } };
+      }
       return created;
     });
   }
@@ -392,13 +401,22 @@ export class DispatchConfirmationService {
     });
     if (!revision || !await isGuardQueueTurnCurrentlyReady(tx, revision.queueTurn, at))
       throw new DispatchConfirmationConflictError('شرایط رانندگی یا خودروی این پرونده دیگر معتبر نیست. مجوز، گواهینامه، بیومتریک و تخصیص جاری را بررسی کنید.');
-    const subject = await this.sessionSubject(session, tx);
-    await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', subject.lockKey);
-    if (!await tx.driverBiometricEnrollment.findFirst({ where: { ...subject.where, status: 'ACTIVE' } }))
-      throw new DispatchConfirmationConflictError('ثبت بیومتریک راننده پیش از تأیید غیرفعال شده است.');
+    const pickupVerification = await requirePickupVerification(
+      tx, session.waybill.candidateId, revision.queueTurn.driverSource, DispatchConfirmationConflictError,
+    );
+    if (pickupVerification) {
+      if (session.method !== 'CUSTOMER_PICKUP_OTP' || session.driverId !== revision.queueTurn.id ||
+          revision.queueTurn.status !== 'LOADING_FINALIZED' || revision.queueTurn.loadingId !== revision.loadingId)
+        throw new DispatchConfirmationConflictError('تخصیص راننده متفرقه برای خروج معتبر نیست.');
+    } else {
+      const subject = await this.sessionSubject(session, tx);
+      await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', subject.lockKey);
+      if (!await tx.driverBiometricEnrollment.findFirst({ where: { ...subject.where, status: 'ACTIVE' } }))
+        throw new DispatchConfirmationConflictError('ثبت بیومتریک راننده پیش از تأیید غیرفعال شده است.');
+    }
     const evidenceSnapshot = { sessionId: session.id, method: session.method, confirmedAt: at.toISOString(), workstationId: session.workstationId,
       biometricAttemptIds: session.attempts.map((item) => item.id), otpChallengeIds: session.otpChallenges.filter((item) => item.verifiedAt && !item.invalidatedAt).map((item) => item.id),
-      guardApprovalIds: session.guardApprovals.map((item) => item.id) };
+      guardApprovalIds: session.guardApprovals.map((item) => item.id), ...(pickupVerification ? { pickupVerification } : {}) };
     const validUntil = addHours(at, this.dependencies.authorizationHours || 12);
     const authorization = await tx.dispatchExitAuthorization.create({ data: { waybillId: session.waybillId, sessionId: session.id,
       method: session.method, driverSource: session.driverSource, driverId: session.driverId, waybillIntegrityHash: session.waybillIntegrityHash,

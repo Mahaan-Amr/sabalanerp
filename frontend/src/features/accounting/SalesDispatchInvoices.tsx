@@ -40,6 +40,7 @@ export default function SalesDispatchInvoices({
   onVoided,
   onPrintAll,
   documentBlockReason,
+  issuanceBlockReason,
   onCloseVoid,
 }: {
   loadingId: string;
@@ -51,6 +52,7 @@ export default function SalesDispatchInvoices({
   onIssueAll?: (recovery?: RecoveryRequest) => Promise<void>;
   onPrintAll?: () => Promise<void>;
   documentBlockReason?: string;
+  issuanceBlockReason?: string;
   onCloseVoid?: () => void;
 }) {
   const [data, setData] = useState<ReadModel | null>(null),
@@ -185,6 +187,7 @@ export default function SalesDispatchInvoices({
                 onIssueAll ? (data?.invoices.some(i => i.status === "ISSUED") ? "تکمیل صدور بارنامه‌ها" : "صدور بارنامه‌ها و فاکتور فروش") : "صدور فاکتور فروش"}
               disabled={
                 pending ||
+                Boolean(issuanceBlockReason) ||
                 hasInvalidInvoice ||
                 (!onIssueAll && !data?.ready) ||
                 !data ||
@@ -229,6 +232,7 @@ export default function SalesDispatchInvoices({
         </div>
       )}
       {error && <ErpInlineState kind="error" title={error} />}
+      {!recovery && issuanceBlockReason && <ErpInlineState kind="stale" title={issuanceBlockReason} />}
       {!recovery && documentBlockReason && <ErpInlineState kind="stale" title={documentBlockReason} />}
       {!data && !error && <ErpLoading />}
       {!recovery && data?.blockedReason && (

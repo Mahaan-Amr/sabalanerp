@@ -66,6 +66,7 @@ export default function AccountingDispatchPage() {
   );
   const [confirmation, setConfirmation] = useState<any>(null);
   const [otpCode, setOtpCode] = useState("");
+  const [pickupCode, setPickupCode] = useState("");
   const [dispatchCapabilities, setDispatchCapabilities] = useState({
     canManageAccountingCandidates: false,
     canManageAccountingConfirmation: false,
@@ -148,13 +149,13 @@ export default function AccountingDispatchPage() {
     }
   };
 
-  const beginConfirmation = async (waybillId: string) => {
+  const beginConfirmation = async (waybillId: string, pickup: boolean) => {
     const succeeded = await runDispatch(async () => {
       let workstationId = "ACCOUNTING-WEB";
       try {
-        workstationId = (await biometricConnectorClient.status()).workstationId;
+        if (!pickup) workstationId = (await biometricConnectorClient.status()).workstationId;
       } catch {
-        /* External-driver OTP sessions do not require the scanner. */
+        /* Keep the web workstation identifier when the connector is unavailable. */
       }
       return dispatchConfirmationAPI.startSession(waybillId, workstationId);
     }, data => ({
@@ -270,6 +271,18 @@ export default function AccountingDispatchPage() {
   const detail = detailCandidateId ? dispatchDetails[detailCandidateId] : undefined;
   const loadingId = selectedCandidate?.loadingId;
   const group = loadingId ? dispatchCandidates.filter(candidate => candidate.loadingId === loadingId) : [];
+  const pendingPickupVerification = (candidate: any) =>
+    candidate.summary?.driverSource === "CUSTOMER_PICKUP" && candidate.status === "PENDING" && !candidate.pickupVerification?.verifiedAt;
+  const showCandidate = (id: string) => {
+    setPickupCode("");
+    setDispatchNotice(null);
+    setDetailCandidateId(id);
+  };
+  const pickupVerification = (id: string, command: "send" | "verify") => runDispatch(
+    () => api.post(`/accounting/dispatch-candidates/${encodeURIComponent(id)}/pickup-verification/${command}`,
+      command === "verify" ? { code: pickupCode } : {}),
+    data => ({ kind: "success", text: data?.verified ? "شماره همراه تأیید شد." : "کد به شماره همراه ثبت‌شده در پذیرش ارسال شد." }),
+  );
   const actionsBlocked = dispatchTimelineStale || dispatchPending;
   const canManageLoadingInvoices = (id: string) =>
     !actionsBlocked && dispatchCapabilities.canManageAccountingCandidates &&
@@ -294,7 +307,7 @@ export default function AccountingDispatchPage() {
     const waybill = activeWaybillFor(candidate);
     const canManage = candidate.canManage && dispatchCapabilities.canManageAccountingCandidates;
     const actions: ErpAction[] = [
-      { label: "جزئیات اقلام و اسناد بارگیری", icon: FaFileAlt, onClick: () => setDetailCandidateId(candidate.id) },
+      { label: "جزئیات اقلام و اسناد بارگیری", icon: FaFileAlt, onClick: () => showCandidate(candidate.id) },
     ];
     if (["REJECTED", "RETURNED"].includes(candidate.status) && candidate.loadingId) {
       actions.push({ label: "پیگیری بارگیری در لجستیک", icon: FaTruck, href: `/dashboard/logistics/loadings/${encodeURIComponent(candidate.loadingId)}` });
@@ -323,7 +336,9 @@ export default function AccountingDispatchPage() {
     }
     if (waybill?.status === "ISSUED") {
       if (dispatchCapabilities.canManageAccountingConfirmation) {
-        actions.push({ label: "تأیید هویت راننده", icon: FaFingerprint, disabled: actionsBlocked, onClick: () => void beginConfirmation(waybill.id) });
+        const pickup = candidate.summary?.driverSource === "CUSTOMER_PICKUP";
+        actions.push({ label: pickup ? "ثبت مجوز خروج" : "تأیید هویت راننده", icon: pickup ? FaTruck : FaFingerprint,
+          disabled: actionsBlocked, onClick: () => void beginConfirmation(waybill.id, pickup) });
       }
       if (canManage) {
         if (!waybill.legacyReconstruction && dispatchDetails[candidate.id]?.bundle?.artifacts.filter(artifact => artifact.kind === "WAYBILL").length !== 1) {
@@ -537,6 +552,26 @@ export default function AccountingDispatchPage() {
       <ErpSheet open={Boolean(selectedCandidate)} onClose={() => setDetailCandidateId(null)} title="جزئیات اقلام و اسناد بارگیری" presentation="modal" size="wide">
         {selectedCandidate && <>
           <strong>{selectedCandidate.summary?.driverName || "راننده نامشخص"}</strong>
+          {selectedCandidate.summary?.driverSource === "CUSTOMER_PICKUP" && (
+            <div className="mt-3 space-y-2">
+              <p className="text-sm sds-text-secondary">پلاک {selectedCandidate.summary.plate}</p>
+              {selectedCandidate.pickupVerification?.verifiedAt && <ErpInlineState kind="success" title="شماره همراه تأیید شده است" />}
+              {pendingPickupVerification(selectedCandidate) && selectedCandidate.canManage && (
+                <div className="flex flex-wrap items-end gap-2">
+                  <ErpButton label="ارسال کد پیامکی" variant="soft" disabled={actionsBlocked}
+                    onClick={() => void pickupVerification(selectedCandidate.id, "send")} />
+                  <ErpInput aria-label="کد پیامکی راننده متفرقه" placeholder="کد پیامکی" dir="ltr"
+                    inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={pickupCode}
+                    onChange={event => setPickupCode(event.target.value)} />
+                  <ErpButton label="تأیید کد" disabled={actionsBlocked || pickupCode.trim().length !== 6}
+                    onClick={async () => {
+                      if (await pickupVerification(selectedCandidate.id, "verify")) setPickupCode("");
+                    }} />
+                </div>
+              )}
+              {dispatchNotice && <ErpInlineState kind={dispatchNotice.kind} title={dispatchNotice.text} />}
+            </div>
+          )}
           {selectedCandidate.summary?.projectAddress && <p className="text-sm sds-text-secondary">{selectedCandidate.summary.projectAddress}</p>}
           {["REJECTED", "RETURNED"].includes(selectedCandidate.status) && selectedCandidate.dispositionReason && (
             <ErpInlineState kind="stale" title={`دلیل بازگرداندن: ${selectedCandidate.dispositionReason}`} />
@@ -568,6 +603,7 @@ export default function AccountingDispatchPage() {
           {loadingId && <SalesDispatchInvoices workspace="accounting" loadingId={loadingId}
             canManage={canManageLoadingInvoices(loadingId)}
             onVoided={loadDispatch}
+            issuanceBlockReason={group.some(pendingPickupVerification) ? "کد پیامکی همه راننده‌های متفرقه این بارگیری را تأیید کنید." : undefined}
             documentBlockReason={group.some(candidate => candidate.status === 'ACCEPTED' &&
               !candidate.waybills?.some((waybill: any) => ['ISSUED', 'EXIT_RECORDED'].includes(waybill.status) && waybill.legacyReconstruction) &&
               dispatchDetails[candidate.id]?.bundle?.artifacts.filter(artifact => artifact.kind === 'WAYBILL').length !== 1)

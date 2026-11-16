@@ -1,8 +1,9 @@
 import { externalDriverBlockers, externalVehicleBlockers, externalOperationalReadiness } from './externalVehicleOperations';
 import { HrVehicleError, externalAssignmentScope, lockHrDriverFacts } from './hrVehicleOperations';
-import { createHash } from 'node:crypto';
+import { normalizePlateDigits, requireCompanyPlate } from './companyVehicleEntry';
+import { createHash, randomUUID } from 'node:crypto';
 import { GuardDriverQueueTurnStatus, GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
-import { projectExternalDriverReadiness, projectExternalVehicleReadiness, projectInternalDriverReadiness } from './dispatchMasterDataPolicy';
+import { normalizeIranianPlate, projectExternalDriverReadiness, projectExternalVehicleReadiness, projectInternalDriverReadiness } from './dispatchMasterDataPolicy';
 import { assertCanonicalDispatchCommandAllowed, recordFirstCanonicalAdmission } from './dispatchCutover';
 import { preparePartnerLoadingQueueChange, preparePartnerGuardQueueRelease } from './partnerSales/fulfillment/loadingQueue';
 import { PartnerLoadingCommandError } from './partnerSales/fulfillment/loadingAuthority';
@@ -35,13 +36,27 @@ type QueueTurnIdentity = {
   companyVehicleId: string | null;
   externalVehicleId: string | null;
   assignmentId: string | null;
+  admissionSnapshot?: Prisma.JsonValue;
 };
+
+export function customerPickupPhone(snapshot: Prisma.JsonValue | undefined) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
+  const driver = snapshot.driver;
+  if (!driver || typeof driver !== 'object' || Array.isArray(driver)) return null;
+  return driver.source === 'CUSTOMER_PICKUP' && typeof driver.phone === 'string' && /^09\d{9}$/.test(driver.phone)
+    ? driver.phone : null;
+}
+
+export const queueTurnDriverIdentity = (turn: QueueTurnIdentity & { id: string }) =>
+  turn.driverSource === 'CUSTOMER_PICKUP' ? turn.id :
+    turn.driverSource === 'INTERNAL' ? turn.internalDriverId : turn.externalDriverId;
 
 export const isGuardQueueTurnCurrentlyReady = async (
   db: Prisma.TransactionClient | PrismaClient,
   turn: QueueTurnIdentity,
   at = new Date(),
 ) => {
+  if (turn.driverSource === GuardDriverSource.CUSTOMER_PICKUP) return Boolean(customerPickupPhone(turn.admissionSnapshot));
   if (turn.driverSource === GuardDriverSource.INTERNAL) {
     if (!turn.internalDriverId || !turn.companyVehicleId || !turn.assignmentId) return false;
     if (!('$transaction' in db)) await lockHrDriverFacts(db, turn.internalDriverId, at, turn.companyVehicleId);
@@ -162,26 +177,62 @@ const buildExternalAdmission = async (tx: Prisma.TransactionClient, driverId: st
   return { driver, vehicle, snapshot };
 };
 
-export const admitGuardDriverQueueTurn = async (prisma: PrismaClient, input: {
-  source: GuardDriverSource;
-  driverId: string;
-  vehicleId?: string;
-  actorId: string;
-}) => prisma.$transaction(async (tx) => {
+const openQueueStatuses: GuardDriverQueueTurnStatus[] = ['WAITING_AT_GATE', 'AVAILABLE_FOR_LOADING', 'RESERVED_FOR_LOADING', 'LOADING_FINALIZED'];
+
+type AdmissionInput = { actorId: string } & (
+  | { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string }
+  | { source: 'CUSTOMER_PICKUP'; vehicleType: unknown; plate: unknown; phone: unknown }
+);
+
+const buildAdmission = async (tx: Prisma.TransactionClient, input: AdmissionInput, admittedAt: Date) => {
+  if (input.source === 'INTERNAL') {
+    const { driver, assignment, snapshot } = await buildInternalAdmission(tx, input.driverId, input.actorId, admittedAt);
+    return { snapshot, identity: { internalDriverId: driver.id, companyVehicleId: assignment.vehicleId, assignmentId: assignment.id } };
+  }
+  if (input.source === 'EXTERNAL') {
+    const { driver, vehicle, snapshot } = await buildExternalAdmission(tx, input.driverId, input.vehicleId || '', input.actorId, admittedAt);
+    return { snapshot, identity: { externalDriverId: driver.id, externalVehicleId: vehicle.id } };
+  }
+  if (input.source !== 'CUSTOMER_PICKUP') throw new GuardQueueValidationError('نوع راننده معتبر نیست.');
+  const { vehicleType } = input;
+  if (vehicleType !== 'کامیون' && vehicleType !== 'وانت') throw new GuardQueueValidationError('نوع خودرو را انتخاب کنید.');
+  const phone = typeof input.phone === 'string' ? normalizePlateDigits(input.phone.trim()).replace(/[\s-]/g, '').replace(/^(?:\+98|0098|98)/, '0') : '';
+  if (!/^09\d{9}$/.test(phone)) throw new GuardQueueValidationError('شماره همراه معتبر وارد کنید.');
+  let plate: string;
+  try { plate = requireCompanyPlate(input.plate); }
+  catch (error) { throw new GuardQueueValidationError((error as Error).message); }
+  const id = randomUUID();
+  const snapshot = {
+    schemaVersion: 1, admittedAt, actorId: input.actorId,
+    driver: { source: input.source, id, firstName: 'راننده متفرقه', phone },
+    vehicle: { source: input.source, id, vehicleType },
+    plate: { plate, normalizedPlate: normalizeIranianPlate(plate) },
+    readiness: { status: 'READY', checkedAt: admittedAt },
+  };
+  return { snapshot, identity: { id } };
+};
+
+export const admitGuardDriverQueueTurn = async (prisma: PrismaClient, input: AdmissionInput) => prisma.$transaction(async (tx) => {
   await assertCanonicalDispatchCommandAllowed(tx);
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('HR_VEHICLE_OPERATIONS'))`;
   const admittedAt = new Date();
-  const resolved = input.source === GuardDriverSource.INTERNAL
-    ? await buildInternalAdmission(tx, input.driverId, input.actorId, admittedAt)
-    : await buildExternalAdmission(tx, input.driverId, String(input.vehicleId || ''), input.actorId, admittedAt);
-  const integrityHash = digest(resolved.snapshot);
+  const resolved = await buildAdmission(tx, input, admittedAt);
+  const snapshot = stableValue(resolved.snapshot) as Prisma.InputJsonObject;
+  const plate = snapshot.plate as { plate: string; normalizedPlate?: string };
+  const duplicate = await tx.guardDriverQueueTurn.findFirst({ where: {
+    status: { in: openQueueStatuses },
+    ...(input.source === 'CUSTOMER_PICKUP' ? {} : { driverSource: 'CUSTOMER_PICKUP' }),
+    OR: [
+      { admissionSnapshot: { path: ['plate', 'normalizedPlate'], equals: normalizeIranianPlate(plate.plate) } },
+      { admissionSnapshot: { path: ['plate', 'plate'], equals: plate.plate } },
+    ],
+  }, select: { id: true } });
+  if (duplicate) throw new GuardQueueConflictError('برای این پلاک پذیرش باز وجود دارد.');
+  const integrityHash = digest(snapshot);
   try {
     const turn = await tx.guardDriverQueueTurn.create({ data: {
-      driverSource: input.source,
-      ...(input.source === GuardDriverSource.INTERNAL
-        ? { internalDriverId: (resolved as Awaited<ReturnType<typeof buildInternalAdmission>>).driver.id, companyVehicleId: (resolved as Awaited<ReturnType<typeof buildInternalAdmission>>).assignment.vehicleId, assignmentId: (resolved as Awaited<ReturnType<typeof buildInternalAdmission>>).assignment.id }
-        : { externalDriverId: (resolved as Awaited<ReturnType<typeof buildExternalAdmission>>).driver.id, externalVehicleId: (resolved as Awaited<ReturnType<typeof buildExternalAdmission>>).vehicle.id }),
-      admittedAt, admittedBy: input.actorId, admissionSnapshot: resolved.snapshot as Prisma.InputJsonValue, integrityHash,
+      driverSource: input.source, ...resolved.identity,
+      admittedAt, admittedBy: input.actorId, admissionSnapshot: snapshot, integrityHash,
     } });
     await appendQueueEvent(tx, {
       turnId: turn.id, eventType: 'ADMITTED', fromStatus: null, toStatus: turn.status, actorId: input.actorId,

@@ -49,6 +49,7 @@ async function run() {
             password: "test-not-login",
             firstName: "آزمون",
             lastName: "فاکتور",
+            profile: { create: { phone: "09121234567" } },
             role: "ADMIN",
             isActive: true,
           },
@@ -410,6 +411,12 @@ async function run() {
             statementDocumentId: "test-statement-pdf", number: "42", issuedAt: new Date().toISOString(),
           } });
         const waybillHtml = renderDispatchDocumentHtml(waybillSource.waybill);
+        assert.match(waybillHtml, /کارشناس فروش<\/strong> آزمون فاکتور/);
+        assert.match(waybillHtml, /بلوار دکتر حسابی/);
+        assert.match(waybillHtml, /تلفن ثابت<\/strong> <bdi dir="ltr">۰۷۱۹۱۰۱۰۹۰۰/);
+        assert.match(waybillHtml, /قیمت اقلام و نحوهٔ تسویه طبق قرارداد شمارهٔ <bdi dir="ltr">IT-/);
+        assert.match(waybillHtml, /تلفن فروشنده<\/strong> <bdi dir="ltr">۰۹۱۲۱۲۳۴۵۶۷/);
+        assert.doesNotMatch(waybillHtml, /صنایع سنگ سبلان/);
         assert.match(waybillHtml, /نشانی ذخیره‌شدهٔ قرارداد/);
         assert.doesNotMatch(waybillHtml, /نشانی فرضی|نرخ - ریال|مبلغ کل - ریال|۴۰ \/ متر طول/);
         assert.match(waybillHtml, /سنگ مصوب[\s\S]*برش طولی[\s\S]*ابزار نیم‌لول[\s\S]*ساب آزمون/);
@@ -447,6 +454,12 @@ async function run() {
           second = await service.download(ctx, loading.id, issued.id);
         assert.equal(bytesHash(first.bytes), bytesHash(second.bytes));
         const invoiceHtml = Buffer.from(first.bytes).toString();
+        assert.match(invoiceHtml, /کارشناس فروش<\/strong> آزمون فاکتور/);
+        assert.match(invoiceHtml, /بلوار دکتر حسابی/);
+        assert.match(invoiceHtml, /تلفن ثابت<\/strong> <bdi dir="ltr">۰۷۱۹۱۰۱۰۹۰۰/);
+        assert.match(invoiceHtml, /قیمت اقلام و نحوهٔ تسویه طبق قراردادهای شمارهٔ <bdi dir="ltr">IT-/);
+        assert.match(invoiceHtml, /تلفن فروشنده<\/strong> <bdi dir="ltr">۰۹۱۲۱۲۳۴۵۶۷/);
+        assert.doesNotMatch(invoiceHtml, /صنایع سنگ سبلان/);
         assert.match(invoiceHtml, /نشانی ذخیره‌شدهٔ قرارداد/);
         assert.doesNotMatch(invoiceHtml, /نشانی فرضی/);
         assert.match(invoiceHtml, /سنگ مصوب[\s\S]*ابزار نیم‌لول[\s\S]*۴۰ \/ متر طول/);

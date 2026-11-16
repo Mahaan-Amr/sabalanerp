@@ -7,6 +7,8 @@ export type DispatchContractContact = {
   customerPhone: string;
   manager: string;
   managerPhone: string;
+  sellerName?: string;
+  sellerPhone?: string;
 };
 
 const object = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
@@ -19,6 +21,9 @@ const select = {
   id: true,
   contractNumber: true,
   contractData: true,
+  responsibleSeller: { select: {
+    firstName: true, lastName: true, profile: { select: { phone: true } },
+  } },
   customer: { select: {
     phoneNumbers: { where: { isActive: true }, orderBy: [{ isPrimary: 'desc' }, { id: 'asc' }],
       select: { number: true } },
@@ -50,6 +55,8 @@ export async function readDispatchContractPrintSources(tx: Prisma.TransactionCli
       customerPhone: text(profile.phoneNumbers[0]?.number, primaryContact?.mobile, primaryContact?.phone,
         customer.phone, customer.mobile, customer.workNumber, customer.homeNumber, profile.workNumber, profile.homeNumber),
       manager,
+      sellerName: [contract.responsibleSeller.firstName, contract.responsibleSeller.lastName].map(name => name.trim()).filter(Boolean).join(' '),
+      sellerPhone: text(contract.responsibleSeller.profile?.phone),
       managerPhone: text(project.projectManagerNumber, project.managerPhone,
         manager && manager === text(customer.projectManagerName) ? customer.projectManagerNumber : undefined,
         manager && manager === text(profile.projectManagerName) ? profile.projectManagerNumber : undefined),

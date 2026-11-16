@@ -52,6 +52,7 @@ test('role configuration requires distinct bounded logins on one database', () =
   for (const changed of [
     { runtimeUrl: controlUrl },
     { runtimeUrl: runtimeUrl.replace('connection_limit=10&', '') },
+    { runtimeUrl: runtimeUrl.replace('connection_limit=10', 'connection_limit=999999') },
     { runtimeUrl: runtimeUrl.replace('/sabalanerp?', '/different?') },
     { controlUrl: controlUrl.replace('pool_timeout=10', 'pool_timeout=') },
   ]) {

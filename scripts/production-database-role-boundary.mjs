@@ -8,9 +8,11 @@ export function assertProductionDatabaseRoleConfiguration({ runtimeUrl, controlU
       || !url.hostname || url.pathname.length < 2 || url.hash || url.searchParams.has('options')) {
       throw new Error(`${label} must be a bounded PostgreSQL URL.`);
     }
-    for (const key of ['connection_limit', 'pool_timeout']) {
+    for (const [key, maximum] of [['connection_limit', 128], ['pool_timeout', 120]]) {
       const values = url.searchParams.getAll(key);
-      if (values.length !== 1 || !/^[1-9][0-9]*$/.test(values[0])) throw new Error(`${label} requires ${key}.`);
+      if (values.length !== 1 || !/^[1-9][0-9]*$/.test(values[0]) || Number(values[0]) > maximum) {
+        throw new Error(`${label} requires bounded ${key}.`);
+      }
     }
     let username;
     try { username = decodeURIComponent(url.username); } catch { throw new Error(`${label} has an invalid login name.`); }

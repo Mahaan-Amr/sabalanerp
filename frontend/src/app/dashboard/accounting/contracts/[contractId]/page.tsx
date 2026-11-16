@@ -140,7 +140,8 @@ export default function AccountingContractDetailPage(props: {
     const guard = (event: MouseEvent) => {
       if (!draftDirtyRef.current || replayingDraftAction.current || !(event.target instanceof Element)) return;
       const action = event.target.closest('a[href], button');
-      if (!(action instanceof HTMLElement) || action.closest('[data-invoice-draft-editor], [role=dialog]')) return;
+      if (!(action instanceof HTMLElement) || action.closest('[data-invoice-draft-editor]')) return;
+      if (action.closest('[role=dialog]')?.querySelector('[data-draft-exit-dialog]')) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       setPendingDraftAction(() => () => { if (action.isConnected) action.click(); });

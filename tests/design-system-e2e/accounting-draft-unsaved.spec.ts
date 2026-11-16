@@ -19,6 +19,21 @@ test('unsaved invoice changes can be kept or discarded when changing sections', 
   await page.getByRole('button', { name: 'ادامه تکمیل' }).click();
   const invoice = page.getByRole('textbox', { name: 'شماره فاکتور سیستمی' });
   await invoice.fill('changed');
+  // Model an unrelated portal dialog whose action would otherwise bypass the guard.
+  await page.evaluate(() => {
+    const otherDialog = document.createElement('div');
+    otherDialog.setAttribute('role', 'dialog');
+    otherDialog.innerHTML = '<button type="button">Unrelated dialog action</button>';
+    otherDialog.querySelector('button')!.addEventListener('click', () => { otherDialog.dataset.executed = 'yes'; });
+    document.body.appendChild(otherDialog);
+  });
+  await page.getByRole('button', { name: 'Unrelated dialog action' }).click();
+  const exitDialog = page.getByRole('dialog').filter({ has: page.locator('[data-draft-exit-dialog]') });
+  await expect(exitDialog).toBeVisible();
+  await expect(page.getByRole('dialog').filter({ hasText: 'Unrelated dialog action' })).not.toHaveAttribute('data-executed', 'yes');
+  await exitDialog.getByRole('button', { name: 'بازگشت به ویرایش' }).click();
+  await expect(invoice).toHaveValue('changed');
+  await page.getByRole('dialog').filter({ hasText: 'Unrelated dialog action' }).evaluate(element => element.remove());
   await page.getByRole('button', { name: 'خلاصه', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();

@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { ErpButton, ErpField, ErpInput, ErpInlineState, ErpPersianDateField } from '@/components/erp';
+import { ErpButton, ErpField, ErpInput, ErpPersianDateField } from '@/components/erp';
 
 type Details = { systemInvoiceNumber: string; systemInvoiceDate: string; sepidarAmount: string };
 type RecordView = { id: string; amount: string; currency?: string; draftDetails?: Partial<Details> | null };
@@ -22,7 +22,6 @@ export function InvoiceDraftEditor({ record, canSave, canApprove, busy, onSave, 
   const update = (name: keyof Details, value: string) => setDetails(current => ({ ...current, [name]: value }));
   const save = async () => { if (await onSave(details)) setInitial(details); };
   return <div className="space-y-3">
-    <ErpInlineState kind="empty" title="پیش‌نویس ذخیره‌شده هنوز تأیید مالی نشده است." />
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
       <ErpField label="شماره فاکتور سیستمی"><ErpInput value={details.systemInvoiceNumber} disabled={busy || (!canSave && !canApprove)} onChange={e => update('systemInvoiceNumber', e.target.value)} /></ErpField>
       <ErpPersianDateField label="تاریخ فاکتور سیستمی" valueFormat="iso-date" value={details.systemInvoiceDate} disabled={busy || (!canSave && !canApprove)} onChange={value => update('systemInvoiceDate', value)} />

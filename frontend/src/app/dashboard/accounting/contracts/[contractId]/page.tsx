@@ -42,6 +42,7 @@ import AccountingContractPrintActions, { accountingContractTabs } from "@/featur
 import { accountingReviewReturn, financialRecordReviewHref } from "@/features/accounting/financialRecordReviewHref";
 import AccountingActionModal from "@/features/accounting/AccountingActionModal";
 import { InvoiceDraftEditor } from "@/features/accounting/InvoiceDraftEditor";
+import { invoiceDraftApprovalCommand, type InvoiceDraftApprovalIdentity } from "@/features/accounting/invoiceDraftApproval";
 import { workspaceHistoryPosition } from "@/lib/workspaceBackNavigation";
 import AccountingVoidWorkflowPanel, {
   type AccountingVoidWorkflowView,
@@ -126,6 +127,7 @@ export default function AccountingContractDetailPage(props: {
   const [draftDirty, setDraftDirty] = useState(false);
   const [pendingDraftAction, setPendingDraftAction] = useState<(() => void) | null>(null);
   const draftDirtyRef = useRef(false);
+  const approvalIdentityRef = useRef<InvoiceDraftApprovalIdentity | null>(null);
   const draftHistoryPosition = useRef<number | undefined>(undefined);
   const replayingDraftAction = useRef(false);
   const onDraftDirtyChange = useCallback((dirty: boolean) => {
@@ -334,6 +336,12 @@ export default function AccountingContractDetailPage(props: {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const approveInvoiceDraft = (invoiceId: string, details: { systemInvoiceNumber: string; systemInvoiceDate: string; sepidarAmount: string }) => {
+    const { identity, command } = invoiceDraftApprovalCommand(approvalIdentityRef.current, invoiceId, details);
+    approvalIdentityRef.current = identity;
+    return execute(command);
   };
 
   const submitLifecycle = async (values: Record<string, string | number>) => {
@@ -1286,15 +1294,15 @@ export default function AccountingContractDetailPage(props: {
                           amount={money(record.amount, record.currency)}
                           status={<StatusBadge status={record.status} />}
                           footer={
-                            record.kind === "INVOICE_CANDIDATE" && (canActFinancially || canUseAccountingAction("CREATE_INVOICE")) ? (
+                            record.kind === "INVOICE_CANDIDATE" && (canActFinancially || canUseAccountingAction("SAVE_INVOICE_DRAFT")) ? (
                               <div className="space-y-3">
-                                {record.status === "DRAFT" && (canUseAccountingAction("CREATE_INVOICE") || (canActFinancially && canExecuteAccountingAction("APPROVE_FINANCIAL_INVOICE"))) && (
+                                {record.status === "DRAFT" && (canUseAccountingAction("SAVE_INVOICE_DRAFT") || (canActFinancially && canExecuteAccountingAction("APPROVE_FINANCIAL_INVOICE"))) && (
                                   editingDraftId === record.id ? <div data-invoice-draft-editor><InvoiceDraftEditor record={record}
-                                    canSave={canUseAccountingAction("CREATE_INVOICE")}
+                                    canSave={canExecuteAccountingAction("SAVE_INVOICE_DRAFT")}
                                     canApprove={canActFinancially && canExecuteAccountingAction("APPROVE_FINANCIAL_INVOICE")}
                                     busy={actionLoading}
                                     onSave={details => execute({ kind: "SAVE_INVOICE_DRAFT", invoiceId: record.id, ...details })}
-                                    onApprove={details => execute({ kind: "APPROVE_FINANCIAL_INVOICE", invoiceId: record.id, ...details })} onDirtyChange={onDraftDirtyChange} /></div>
+                                    onApprove={details => approveInvoiceDraft(record.id, details)} onDirtyChange={onDraftDirtyChange} /></div>
                                     : <ErpButton label="ادامه تکمیل" onClick={() => setEditingDraftId(record.id)} />
                                 )}
                                 {(contract.accounting.openCorrections > 0 ||

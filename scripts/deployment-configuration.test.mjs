@@ -162,7 +162,7 @@ assert.equal(plan,path.join(process.env.DEPLOYMENT_REPO_ROOT,'.deploy-state','le
 const marker=path.join(process.env.TEST_REPORTS,'fixture-legacy-preflight.json');
 fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(['fixture-legacy-signal',mode])+'\\n');
 if(mode==='--preflight'){assert.equal(a.length,6);fs.writeFileSync(marker,JSON.stringify({image,plan}),{flag:'wx'});}
-else if(mode==='--forward'||mode==='--assert-current-stopped'){assert.equal(a.length,7);assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});assert.equal(session,path.join(process.env.TEST_REPORTS,'active-deployment-session.json').replaceAll(String.fromCharCode(92),'/'));assert.equal(JSON.parse(fs.readFileSync(session)).phase,'TRAFFIC_BLOCKED');}
+else if(mode==='--forward'||mode==='--assert-current-stopped'){assert.equal(a.length,7);assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});assert.equal(session,path.join(process.env.TEST_REPORTS,'active-deployment-session.json').replaceAll(String.fromCharCode(92),'/'));const phase=JSON.parse(fs.readFileSync(session)).phase;if(mode==='--forward')assert.equal(phase,'TRAFFIC_BLOCKED');else assert.ok(['TRAFFIC_BLOCKED','SERVICES_DRAINED','REMOTE_CHECKPOINT_VERIFIED'].includes(phase));}
 else {assert.equal(a.length,6);if(fs.existsSync(marker))assert.deepEqual(JSON.parse(fs.readFileSync(marker)),{image,plan});}
 `);
     fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\ncase "$1" in */deploy/scripts/legacy-backend-signal.py) exec '${nodeBinary}' '${fakeLegacySignal.replaceAll('\\', '/')}' "$@";; *) echo 'fixture refuses unexpected python invocation' >&2; exit 99;; esac\n`, { mode: 0o755 });

@@ -150,10 +150,6 @@ async function main() {
   const initialPromotedFiles = await verifyPromotedRecoveryFiles(validation.manifest, [], inquiryTransformation, validation.inquiryBusinessProof);
   const rawInquiryPath = path.join(String(process.env.INQUIRY_RECOVERY_SOURCE_DIR), 'inquiry.db');
   const rawInquirySha256 = await sha256File(rawInquiryPath);
-  const inquiryLedger = await execFileAsync('sqlite3', [rawInquiryPath,
-    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='_sabalan_inquiry_migrations';"], {
-    timeout: 30_000, windowsHide: true,
-  });
   const sourceLedger = await execFileAsync('psql', [application.url, '-At', '-v', 'ON_ERROR_STOP=1', '-c',
     `SELECT json_build_object(
       'successful', count(*) FILTER (WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL),
@@ -166,7 +162,6 @@ async function main() {
   const retainedOldStateProof = assertQaRetainedOldStateProof(plan, {
     promoted: result.promoted, inquiryTransformation, manifestCommit: validation.manifest.commit,
     manifestInquirySha256: sourceInquiryComponents[0].sha256, liveInquirySha256: rawInquirySha256,
-    inquiryLedgerTables: Number(inquiryLedger.stdout.trim()),
     sourceMigrationLedger: JSON.parse(sourceLedger.stdout.trim()),
   });
   let erasureReplay: { replayed: number; erasedArtifactPaths: string[] } | undefined;

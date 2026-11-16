@@ -13,6 +13,7 @@ import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '.
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
 import { listCustomerWorkspaceAccounts, readCustomerWorkspace, readCustomerWorkspaceContext, readCustomerAllocationCommandStatus, recordCustomerAccountOperation, recordCustomerWorkspaceTreasury } from '../services/accountingCustomerWorkspace';
 import { cancelCustomerAllocationIntent, prepareAdmittedCustomerAllocationIntent, readCustomerAllocationIntent, readCustomerAllocationIntentByCommand } from '../services/accountingCustomerAllocationIntent';
+import { requireCustomerSourceSharesWithin } from '../services/customerSemanticCompatibility';
 import {
   allocateCustomerReceiptPrisma,
   backfillApprovedSalesContractCustomers,
@@ -282,8 +283,19 @@ const privateAllocationIntent = (handler: (req: WorkspaceRequest) => Promise<unk
   };
 };
 const allocationIntentPath = '/customer-accounts/:id/treasury/allocation-intent';
-router.get(allocationIntentPath, ...treasuryCommandAccess, privateAllocationIntent(req =>
-  readCustomerAllocationIntent(prisma, req.params.id, actorOf(req))));
+router.get(allocationIntentPath, ...treasuryCommandAccess, privateAllocationIntent(async req => {
+  const intent = await readCustomerAllocationIntent(prisma, req.params.id, actorOf(req));
+  if (intent.status !== 'UNKNOWN') return intent;
+  try {
+    await prisma.$transaction(tx => requireCustomerSourceSharesWithin(tx));
+  } catch (error) {
+    if (error instanceof AccountingCustomerTreasuryError && error.code === 'CUSTOMER_SOURCE_SHARES_CLOSED') {
+      return { status: 'CLOSED' };
+    }
+    throw error;
+  }
+  return intent;
+}));
 router.post(allocationIntentPath, ...treasuryCommandAccess, privateAllocationIntent(req =>
   prepareAdmittedCustomerAllocationIntent(prisma, req.params.id, customerTreasuryInput(req))));
 router.post(`${allocationIntentPath}/status`, ...treasuryCommandAccess, privateAllocationIntent(req =>

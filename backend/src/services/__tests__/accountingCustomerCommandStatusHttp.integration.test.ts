@@ -88,6 +88,7 @@ test('status HTTP boundary requires treasury authority and the exact original no
     assert.deepEqual((await (await send('/allocation-intent/cancel', another.token, pendingBody)).json() as any).data, { status: 'UNKNOWN' });
     assert.deepEqual((await (await send('/allocation-intent/cancel', owner.token, pendingBody)).json() as any).data, { status: 'CANCELED' });
     assert.deepEqual((await (await send('/allocation-intent/status', owner.token, pendingBody)).json() as any).data, { status: 'CANCELED' });
+    assert.deepEqual((await (await discover(owner.token)).json() as any).data, { status: 'CLOSED' });
     assert.deepEqual(await Promise.all([f.db.accountingCustomerCommand.count(), f.db.accountingLedgerVoucher.count(), f.db.accountingSettlementAllocation.count()]), before);
     // A missing visible row cannot be treated as a failed transaction: the
     // original command may be committed while this read is in progress.

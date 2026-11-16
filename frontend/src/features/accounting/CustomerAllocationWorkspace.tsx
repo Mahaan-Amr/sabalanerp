@@ -57,7 +57,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
   const [posted, setPosted] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
-  const [storageState, setStorageState] = useState<'checking' | 'ready' | 'blocked'>('checking');
+  const [storageState, setStorageState] = useState<'checking' | 'ready' | 'blocked' | 'closed'>('checking');
   const [recovered, setRecovered] = useState(false);
   const durableRequest = useRef<PendingAllocation>();
   const request = useRef<{ fingerprint: string; command: AllocationCommand }>();
@@ -97,6 +97,10 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
           const response = await accountingAPI.discoverCustomerAllocationIntent(accountId, lease);
           assertOwner();
           const intent = response.data?.data;
+          if (intent?.status === 'CLOSED') {
+            setStorageState('closed');
+            return;
+          }
           if (intent?.status === 'PENDING' && intent.accountId === accountId &&
             intent.command?.idempotencyKey === intent.idempotencyKey && intent.command?.kind === 'ALLOCATION') {
             saved = await reservePendingAllocation({ owner, bookId, customerId, accountId,
@@ -296,6 +300,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
     ]} />
     {notice && <ErpInlineState kind="success" title={notice} />}
     {storageState === 'blocked' && <ErpInlineState kind="error" title="دسترسی به وضعیت محفوظ درخواست تأیید نشد؛ ثبت جدید ممکن نیست." />}
+    {storageState === 'closed' && <ErpInlineState kind="stale" title="ثبت تخصیص گروهی پس از تکمیل به‌روزرسانی در دسترس قرار می‌گیرد." />}
     {!canAllocate && <ErpInlineState kind="permission" title="دسترسی ثبت تخصیص برای این حساب ندارید." />}
     {uncertain && <ErpInlineState kind="error" title="نتیجه درخواست قبلی هنوز مشخص نیست؛ پیش‌نویس آن حفظ شده است." action={{ label: 'ادامه بررسی درخواست قبلی', onClick: () => setReview(true) }} />}
     {posted && <ErpInlineState kind="stale" title="تخصیص ثبت شده است؛ مانده‌ها باید بازخوانی شوند." action={{ label: 'به‌روزرسانی مانده‌ها', onClick: () => void refreshPosted() }} />}

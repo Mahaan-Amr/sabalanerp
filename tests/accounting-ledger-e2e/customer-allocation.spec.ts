@@ -32,14 +32,15 @@ const fixture = {
   receipts: [receipt('cash', '500000000', 'CASH'), receipt('cheque', '300000000', 'CHECK')],
   treasuryChecks: [{ id: 'check', serialNumber: '۱۲۳', bankName: 'بانک آزمون', amountRials: '300000000', dueAt: '2026-12-01', status: 'RECEIVED', direction: 'RECEIVABLE' }],
 };
-async function openWorkspace(page: Page, transform = (data: typeof fixture) => data, serverCommand?: Record<string, unknown>) {
+async function openWorkspace(page: Page, transform = (data: typeof fixture) => data, discovery?: Record<string, unknown> | 'CLOSED') {
   await installAccountingSessionFixture(page);
   const commands: any[] = [];
   await page.route('**/api/accounting/ledger/customer-accounts/**', route => {
     const path = new URL(route.request().url()).pathname;
+    const serverCommand = typeof discovery === 'object' ? discovery : undefined;
     if (path.endsWith('/treasury/allocation-intent')) {
       const data = route.request().method() === 'GET'
-        ? serverCommand ? { status: 'PENDING', accountId: 'profile', idempotencyKey: serverCommand.idempotencyKey, command: serverCommand } : { status: 'UNKNOWN' }
+        ? serverCommand ? { status: 'PENDING', accountId: 'profile', idempotencyKey: serverCommand.idempotencyKey, command: serverCommand } : { status: discovery ?? 'UNKNOWN' }
         : { status: 'PENDING', idempotencyKey: route.request().postDataJSON().idempotencyKey };
       return route.fulfill({ json: { success: true, data } });
     }
@@ -61,6 +62,14 @@ async function openWorkspace(page: Page, transform = (data: typeof fixture) => d
   await expect(workspace).toBeVisible();
   return { workspace, commands };
 }
+
+test('a closed server capability prevents a new allocation draft', async ({ page }) => {
+  const { workspace, commands } = await openWorkspace(page, data => data, 'CLOSED');
+  await expect(workspace.getByText('ثبت تخصیص گروهی پس از تکمیل به‌روزرسانی در دسترس قرار می‌گیرد.', { exact: true })).toBeVisible();
+  await expect(workspace.getByRole('checkbox', { name: /^نقدی/ })).toBeDisabled();
+  await expect(workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true })).toBeDisabled();
+  expect(commands).toHaveLength(0);
+});
 
 test('a fresh browser discovers and cancels the authoritative pending request without posting it', async ({ page }) => {
   const command = {

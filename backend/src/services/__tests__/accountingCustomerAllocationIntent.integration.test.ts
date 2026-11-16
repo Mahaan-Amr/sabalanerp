@@ -125,5 +125,16 @@ test('one immutable pending intent is shared across devices without admitting a 
     assert.equal(audit.length, 1);
     assert.equal(audit[0].actorId, manager.id);
     assert.equal(audit[0].reason, resolution.reason);
+    const otherCustomer = await f.customer();
+    await recordCustomerAccountOperation(f.db, otherCustomer, { ...f.common, kind: 'DEBIT', amountRials: 5n, idempotencyKey: randomUUID() });
+    const otherProfile = (await readCustomerWorkspace(f.db, { id: otherCustomer, asOf: new Date(), userId: f.actor.id })).profile!;
+    const crossKey = makeCommand();
+    const [crossParent, crossCancel] = await Promise.allSettled([
+      f.db.accountingCustomerCommand.create({ data: { ...parent, kind: 'RECEIPT', profileId: otherProfile.id, idempotencyKey: crossKey.idempotencyKey } }),
+      cancelCustomerAllocationIntent(f.db, customer, crossKey),
+    ]);
+    assert.equal(crossCancel.status, 'fulfilled');
+    assert.deepEqual(crossCancel.value, { status: crossParent.status === 'fulfilled' ? 'UNKNOWN' : 'CANCELED' });
+    if (crossParent.status === 'rejected') assert.match(String(crossParent.reason), /ALLOCATION_INTENT_COMMAND_MISMATCH/);
   } finally { await f.close(); }
 });

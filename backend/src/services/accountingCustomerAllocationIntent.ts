@@ -84,6 +84,7 @@ export async function cancelCustomerAllocationIntent(database: PrismaClient, acc
       idempotencyKey: input.idempotencyKey, profileId: resolved.profile.id, ownerId: input.actor.id, commandHash,
     };
     await serializeCustomerAllocationWithin(tx, resolved.profile.id);
+    await tx.$executeRaw`SELECT public.serialize_customer_command_key_within(${input.idempotencyKey})`;
     const canceled = await tx.accountingCustomerAllocationIntent.updateMany({
       where: { ...identity, state: 'PENDING' }, data: { state: 'CANCELED' },
     });

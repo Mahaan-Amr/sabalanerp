@@ -6139,6 +6139,12 @@ model AccountingCustomerCommand {
 }
 
 // A durable denial/recovery record. It does not authorize any financial write.
+model AccountingCustomerCommandKeyFence {
+  idempotencyKey String @id
+
+  @@map("accounting_customer_command_key_fences")
+}
+
 model AccountingCustomerAllocationFence {
   profileId String @id
   profile AccountingCustomerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)

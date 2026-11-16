@@ -191,7 +191,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
     }
   }
   async function save() {
-    if (inFlight.current || !canAllocate || posted || recovered || storageState !== 'ready') return;
+    if (inFlight.current || !canAllocate || posted || storageState !== 'ready') return;
     if (!uncertain) {
       if (!plan.valid || !validEvidence || !confirmed) return;
       // Persist the same JSON shape sent over HTTP; optional source IDs may be undefined in the view model.
@@ -259,8 +259,14 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
         || scopeRef.current.bookId !== saved.bookId || scopeRef.current.customerId !== saved.customerId) throw new Error('ALLOCATION_OWNER_CHANGED');
       browserSessionContinuation.assertCurrent(lease);
       const command = request.current.command;
-      const response = await accountingAPI.customerAllocationIntent(accountId, action, command, lease);
-      let status = response.data?.data?.status;
+      let status: string | undefined;
+      try {
+        const response = await accountingAPI.customerAllocationIntent(accountId, action, command, lease);
+        status = response.data?.data?.status;
+      } catch (failure) {
+        if (action !== 'status' || (failure as { response?: { status?: number } })?.response?.status !== 404) throw failure;
+        status = 'UNKNOWN';
+      }
       if (action === 'status' && status === 'UNKNOWN') {
         browserSessionContinuation.assertCurrent(lease);
         const legacy = await accountingAPI.getCustomerAllocationCommandStatus(accountId, command, lease);
@@ -331,6 +337,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
           : recovered ? <ErpButton label="بررسی وضعیت درخواست" variant="solid" disabled={pending || !canAllocate} onClick={() => void checkRecoveredStatus()} />
           : <ErpButton label={pending ? 'در حال ثبت…' : uncertain ? 'تلاش دوباره همان درخواست' : 'ثبت قطعی تخصیص'} variant="solid" disabled={pending || !canAllocate || (!uncertain && (!plan.valid || !validEvidence || !confirmed))} onClick={() => void save()} />}
         {uncertain && request.current && <ErpButton label="لغو درخواست تخصیص" tone="neutral" disabled={pending || !canAllocate} onClick={() => void checkRecoveredStatus('cancel')} />}
+        {recovered && uncertain && request.current && <ErpButton label="تلاش دوباره همان درخواست" tone="neutral" disabled={pending || !canAllocate} onClick={() => void save()} />}
       </div>}>
       <div className={styles.review}>
         {error && <ErpInlineState kind="error" title={error} />}

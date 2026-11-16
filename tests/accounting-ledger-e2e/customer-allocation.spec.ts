@@ -71,6 +71,34 @@ test('a closed server capability prevents a new allocation draft', async ({ page
   expect(commands).toHaveLength(0);
 });
 
+test('a lost reservation request can be retried explicitly after reload with the exact original command', async ({ page }) => {
+  const { workspace, commands } = await openWorkspace(page);
+  const reservations: unknown[] = [];
+  await page.route('**/api/accounting/ledger/customer-accounts/profile/treasury/allocation-intent', route => {
+    if (route.request().method() === 'GET') return route.fallback();
+    const command = route.request().postDataJSON();
+    reservations.push(command);
+    if (reservations.length === 1) return route.abort('failed');
+    return route.fulfill({ json: { success: true, data: { status: 'PENDING', idempotencyKey: command.idempotencyKey } } });
+  });
+  await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
+  await workspace.getByRole('checkbox', { name: 'انتخاب هزینه حمل مستقل', exact: true }).check();
+  await workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();
+  await workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
+  const review = await confirmReview(page);
+  await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
+  await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toBeEnabled();
+  expect(commands).toHaveLength(0);
+  await page.reload();
+  await page.getByRole('button', { name: 'تخصیص به بدهی', exact: true }).click();
+  await workspace.getByRole('button', { name: 'ادامه بررسی درخواست قبلی', exact: true }).click();
+  expect(reservations).toHaveLength(1);
+  await review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true }).click();
+  await expect(review).toHaveCount(0);
+  expect(reservations).toEqual([commands[0], commands[0]]);
+  expect(commands).toHaveLength(1);
+});
+
 test('a fresh browser discovers and cancels the authoritative pending request without posting it', async ({ page }) => {
   const command = {
     kind: 'ALLOCATION', amountRials: '0', allocations: [], sourceAllocations: [{ receiptId: 'cash', allocations: [{ openItemId: 'd1', amountRials: '1' }] }],

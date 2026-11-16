@@ -91,7 +91,7 @@ test('accountant reviews several debts and sources in the approved editable tabl
   expect(commands[0].idempotencyKey).toBeTruthy();
 });
 
-test('a concurrent consumption refresh keeps entered amounts and lets the accountant remove an exhausted source', async ({ page }) => {
+test('a conflict without authoritative final status keeps the entered request locked', async ({ page }) => {
   let exhausted = false;
   const { workspace } = await openWorkspace(page, data => exhausted ? { ...data, receipts: [data.receipts[1]] } : data);
   await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
@@ -104,12 +104,10 @@ test('a concurrent consumption refresh keeps entered amounts and lets the accoun
   await workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
   const review = await confirmReview(page);
   await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
-  await expect(review.getByRole('checkbox').last()).not.toBeChecked();
+  await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toBeEnabled();
   await review.getByRole('button', { name: 'بازگشت و ویرایش', exact: true }).click();
-  await workspace.getByRole('button', { name: 'حذف منابع بدون مانده', exact: true }).click();
   await expect(workspace.getByRole('textbox', { name: 'تخصیص فاکتور ۹۸۷', exact: true })).toHaveValue('1');
-  await workspace.getByRole('checkbox', { name: 'بستانکاری · تخفیف توافقی', exact: true }).check();
-  await expect(workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true })).toBeEnabled();
+  await expect(workspace.getByRole('textbox', { name: 'تخصیص فاکتور ۹۸۷', exact: true })).toBeDisabled();
 });
 
 test('one rial precision, pending protection and an unknown result retry keep exactly the same confirmed command', async ({ page }) => {
@@ -191,29 +189,120 @@ test('a closed compatibility guard does not discard a previously uncertain comma
   expect(commands[1]).toEqual(commands[0]);
 });
 
-test('a failed conflict refresh blocks another command until current balances are reloaded', async ({ page }) => {
+test('a lost response survives reload and only a proven committed status releases the same request', async ({ page }) => {
   const { workspace, commands } = await openWorkspace(page);
   await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
   await workspace.getByRole('checkbox', { name: 'انتخاب هزینه حمل مستقل', exact: true }).check();
   await workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();
-  let conflicted = false;
-  let reads = 0;
-  await page.route('**/api/accounting/ledger/customer-accounts/profile', route => {
-    if (conflicted && ++reads === 1) return route.fulfill({ status: 503, json: { success: false } });
-    return route.fulfill({ json: { success: true, data: fixture } });
-  });
   await page.route('**/api/accounting/ledger/customer-accounts/profile/treasury', route => {
-    conflicted = true; commands.push(route.request().postDataJSON());
-    return route.fulfill({ status: 409, json: { success: false, message: 'مانده تغییر کرده است.' } });
+    commands.push(route.request().postDataJSON());
+    return route.fulfill({ status: 503, json: { success: false } });
+  });
+  let statusAvailable = false;
+  const statusCommands: any[] = [];
+  await page.route('**/api/accounting/ledger/customer-accounts/profile/treasury/status', route => {
+    statusCommands.push(route.request().postDataJSON());
+    return statusAvailable ? route.fulfill({ json: { success: true, data: { status: 'COMMITTED', result: { id: 'saved' } } } })
+      : route.fulfill({ status: 404, json: { success: false } });
   });
   await workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
   const review = await confirmReview(page);
   await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
-  await expect(review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true })).toHaveCount(0);
-  await review.getByRole('button', { name: 'به‌روزرسانی مانده‌ها', exact: true }).click();
-  await expect(review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true })).toBeDisabled();
+  await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toBeEnabled();
+  await page.reload();
+  await page.getByRole('button', { name: 'تخصیص', exact: true }).click();
+  const restored = page.getByRole('region', { name: 'تخصیص به بدهی‌های مشتری', exact: true });
+  await restored.getByRole('button', { name: 'ادامه بررسی درخواست قبلی', exact: true }).click();
+  const restoredReview = page.getByRole('dialog', { name: 'بررسی و تأیید تخصیص', exact: true });
+  await restoredReview.getByRole('button', { name: 'بررسی وضعیت درخواست', exact: true }).click();
+  await expect(restoredReview.getByRole('button', { name: 'بررسی وضعیت درخواست', exact: true })).toBeEnabled();
   expect(commands).toHaveLength(1);
-  expect(reads).toBe(2);
+  expect(statusCommands[0]).toEqual(commands[0]);
+  statusAvailable = true;
+  await restoredReview.getByRole('button', { name: 'بررسی وضعیت درخواست', exact: true }).click();
+  await expect(restoredReview).toHaveCount(0);
+  expect(commands).toHaveLength(1);
+  expect(statusCommands[1]).toEqual(commands[0]);
+});
+
+test('unavailable browser storage refuses a new allocation before any command is sent', async ({ page }) => {
+  await page.addInitScript(() => { Object.defineProperty(window, 'indexedDB', { get() { throw new Error('storage unavailable'); } }); });
+  const { workspace, commands } = await openWorkspace(page);
+  await expect(workspace.getByText('دسترسی به وضعیت محفوظ درخواست تأیید نشد؛ ثبت جدید ممکن نیست.')).toBeVisible();
+  await expect(workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true })).toBeDisabled();
+  expect(commands).toHaveLength(0);
+});
+
+test('a storage write failure refuses dispatch even after a valid review', async ({ page }) => {
+  const { workspace, commands } = await openWorkspace(page);
+  await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
+  await workspace.getByRole('checkbox', { name: 'انتخاب هزینه حمل مستقل', exact: true }).check();
+  await workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();
+  await workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
+  const review = await confirmReview(page);
+  await page.evaluate(() => { Object.defineProperty(IDBObjectStore.prototype, 'add', { value() { throw new Error('quota'); } }); });
+  await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
+  await expect(review.getByText('حفظ درخواست تأیید نشد؛ برای جلوگیری از ثبت تکراری، این صفحه را بازبینی کنید.')).toBeVisible();
+  expect(commands).toHaveLength(0);
+});
+
+test('a second tab cannot start another command while an earlier request is unresolved', async ({ page, context }) => {
+  const first = await openWorkspace(page);
+  await first.workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
+  await first.workspace.getByRole('checkbox', { name: 'انتخاب هزینه حمل مستقل', exact: true }).check();
+  await first.workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();
+  await page.route('**/api/accounting/ledger/customer-accounts/profile/treasury', route => {
+    first.commands.push(route.request().postDataJSON()); return route.fulfill({ status: 503, json: { success: false } });
+  });
+  await first.workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
+  const review = await confirmReview(page);
+  await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
+  await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toBeEnabled();
+  const secondPage = await context.newPage();
+  const second = await openWorkspace(secondPage);
+  await expect(second.workspace.getByRole('button', { name: 'ادامه بررسی درخواست قبلی', exact: true })).toBeVisible();
+  await expect(second.workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true })).toBeDisabled();
+  expect(first.commands).toHaveLength(1);
+  expect(second.commands).toHaveLength(0);
+});
+
+test('two already-open tabs reserve at most one command for the same customer', async ({ page, context }) => {
+  const first = await openWorkspace(page);
+  const secondPage = await context.newPage();
+  const second = await openWorkspace(secondPage);
+  for (const workspace of [first.workspace, second.workspace]) {
+    await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
+    await workspace.getByRole('checkbox', { name: 'انتخاب هزینه حمل مستقل', exact: true }).check();
+    await workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();
+    await workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
+  }
+  const firstReview = await confirmReview(page), secondReview = await confirmReview(secondPage);
+  for (const [target, commands] of [[page, first.commands], [secondPage, second.commands]] as const) {
+    await target.route('**/api/accounting/ledger/customer-accounts/profile/treasury', route => {
+      commands.push(route.request().postDataJSON()); return route.fulfill({ status: 503, json: { success: false } });
+    });
+  }
+  await Promise.all([firstReview.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click(),
+    secondReview.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click()]);
+  await expect.poll(() => first.commands.length + second.commands.length).toBe(1);
+  await expect.poll(async () => (await firstReview.getByText('حفظ درخواست تأیید نشد؛ برای جلوگیری از ثبت تکراری، این صفحه را بازبینی کنید.').count())
+    + (await secondReview.getByText('حفظ درخواست تأیید نشد؛ برای جلوگیری از ثبت تکراری، این صفحه را بازبینی کنید.').count())).toBe(1);
+});
+
+test('a non-authoritative timeout keeps the same command locked', async ({ page }) => {
+  const { workspace, commands } = await openWorkspace(page);
+  await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
+  await workspace.getByRole('checkbox', { name: 'انتخاب هزینه حمل مستقل', exact: true }).check();
+  await workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();
+  await page.route('**/api/accounting/ledger/customer-accounts/profile/treasury', route => {
+    commands.push(route.request().postDataJSON());
+    return route.fulfill({ status: 408, json: { success: false } });
+  });
+  await workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
+  const review = await confirmReview(page);
+  await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
+  await expect(review.getByRole('button', { name: 'تلاش دوباره همان درخواست', exact: true })).toBeEnabled();
+  expect(commands).toHaveLength(1);
 });
 
 test('a failed refresh after a successful allocation retries only the read, never the financial command', async ({ page }) => {

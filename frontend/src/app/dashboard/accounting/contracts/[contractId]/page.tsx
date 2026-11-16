@@ -5,7 +5,7 @@ import ContractCustomerPostedAccount from '@/features/accounting/ContractCustome
 import AccountingCustomerCategoryBadge from '@/features/accounting/AccountingCustomerCategoryBadge';
 import { contractLifecycleLabel, contractLifecycleFilterOptions } from '@/features/sales/contractLifecyclePresentation';
 import { ErpInput, ErpSearchableSelect } from "@/components/erp";
-import { useCallback, useEffect, useState, use } from "react";
+import { useCallback, useEffect, useState, useRef, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   FaBalanceScale,
@@ -28,6 +28,7 @@ import {
   ErpLoading,
   ErpPage,
   ErpSection,
+  ErpSheet,
   ErpSegmentedControl,
   ErpSummaryGrid,
   ErpTwoColumn,
@@ -121,6 +122,60 @@ export default function AccountingContractDetailPage(props: {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [draftDirty, setDraftDirty] = useState(false);
+  const [pendingDraftAction, setPendingDraftAction] = useState<(() => void) | null>(null);
+  const draftDirtyRef = useRef(false);
+  const replayingDraftAction = useRef(false);
+  const onDraftDirtyChange = useCallback((dirty: boolean) => {
+    draftDirtyRef.current = dirty;
+    setDraftDirty(dirty);
+  }, []);
+
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!draftDirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const guard = (event: MouseEvent) => {
+      if (!draftDirtyRef.current || replayingDraftAction.current || !(event.target instanceof Element)) return;
+      const action = event.target.closest('a[href], button');
+      if (!(action instanceof HTMLElement) || action.closest('[data-invoice-draft-editor], [role=dialog]')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setPendingDraftAction(() => () => { if (action.isConnected) action.click(); });
+    };
+    // Navigation API can cancel same-document Back/Forward without modifying the history stack.
+    const navigation = (window as Window & { navigation?: EventTarget & { traverseTo: (key: string) => unknown } }).navigation;
+    const guardTraversal = (raw: Event) => {
+      const event = raw as Event & { navigationType?: string; destination?: { key?: string } };
+      const key = event.destination?.key;
+      if (!draftDirtyRef.current || event.navigationType !== 'traverse' || !event.cancelable || !key) return;
+      event.preventDefault();
+      setPendingDraftAction(() => () => { void navigation?.traverseTo(key); });
+    };
+    navigation?.addEventListener('navigate', guardTraversal);
+    window.addEventListener('beforeunload', warn);
+    document.addEventListener('click', guard, true);
+    return () => {
+      navigation?.removeEventListener('navigate', guardTraversal);
+      window.removeEventListener('beforeunload', warn);
+      document.removeEventListener('click', guard, true);
+    };
+  }, []);
+
+  const discardDraftAndContinue = () => {
+    const action = pendingDraftAction;
+    setPendingDraftAction(null);
+    draftDirtyRef.current = false;
+    setDraftDirty(false);
+    setEditingDraftId(null);
+    if (action) {
+      replayingDraftAction.current = true;
+      action();
+      replayingDraftAction.current = false;
+    }
+  };
   const [pdfActionLoading, setPdfActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reviewActionUrl, setReviewActionUrl] = useState<string | null>(null);
@@ -246,7 +301,7 @@ export default function AccountingContractDetailPage(props: {
       const response = (error as any)?.response?.data;
       setActionError(userFacingError(error, "اقدام حسابداری انجام نشد"));
       const exactReviewUrl = financialEvidenceReviewFromConflict(response);
-      if (exactReviewUrl) await loadDetail();
+      if (exactReviewUrl && !draftDirtyRef.current) await loadDetail();
       setReviewActionUrl(exactReviewUrl);
       return false;
     } finally {
@@ -697,6 +752,15 @@ export default function AccountingContractDetailPage(props: {
         },
       ]}
     >
+      <ErpSheet open={Boolean(pendingDraftAction) && draftDirty} onClose={() => setPendingDraftAction(null)} title="تغییرات ذخیره‌نشده" presentation="modal">
+        <div data-draft-exit-dialog className="space-y-4">
+          <p>تغییرات این پیش‌نویس ذخیره نشده است. می‌خواهید بدون ذخیره خارج شوید؟</p>
+          <div className="flex flex-wrap gap-2">
+            <ErpButton label="بازگشت به ویرایش" onClick={() => setPendingDraftAction(null)} />
+            <ErpButton label="خروج بدون ذخیره" tone="danger" onClick={discardDraftAndContinue} />
+          </div>
+        </div>
+      </ErpSheet>
       {actionError &&
         !deleteTarget &&
         !voidTarget &&
@@ -1198,12 +1262,12 @@ export default function AccountingContractDetailPage(props: {
                             record.kind === "INVOICE_CANDIDATE" && (canActFinancially || canUseAccountingAction("CREATE_INVOICE")) ? (
                               <div className="space-y-3">
                                 {record.status === "DRAFT" && (canUseAccountingAction("CREATE_INVOICE") || (canActFinancially && canExecuteAccountingAction("APPROVE_FINANCIAL_INVOICE"))) && (
-                                  editingDraftId === record.id ? <InvoiceDraftEditor record={record}
+                                  editingDraftId === record.id ? <div data-invoice-draft-editor><InvoiceDraftEditor record={record}
                                     canSave={canUseAccountingAction("CREATE_INVOICE")}
                                     canApprove={canActFinancially && canExecuteAccountingAction("APPROVE_FINANCIAL_INVOICE")}
                                     busy={actionLoading}
                                     onSave={details => execute({ kind: "SAVE_INVOICE_DRAFT", invoiceId: record.id, ...details })}
-                                    onApprove={details => execute({ kind: "APPROVE_FINANCIAL_INVOICE", invoiceId: record.id, ...details })} />
+                                    onApprove={details => execute({ kind: "APPROVE_FINANCIAL_INVOICE", invoiceId: record.id, ...details })} onDirtyChange={onDraftDirtyChange} /></div>
                                     : <ErpButton label="ادامه تکمیل" onClick={() => setEditingDraftId(record.id)} />
                                 )}
                                 {(contract.accounting.openCorrections > 0 ||

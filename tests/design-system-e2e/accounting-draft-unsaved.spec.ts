@@ -1,0 +1,44 @@
+import { expect, test } from '@playwright/test';
+import { loginAsAdmin } from './support/design-system';
+
+test('unsaved invoice changes can be kept or discarded when changing sections', async ({ page }) => {
+  await loginAsAdmin(page);
+  const id = 'draft-guard-qa';
+  const record = { id: 'invoice-qa', kind: 'INVOICE_CANDIDATE', status: 'DRAFT', amount: 100, currency: 'IRR', createdAt: '2026-08-20T08:00:00Z', draftDetails: { systemInvoiceNumber: 'saved' } };
+  const contract = { contractId: id, contractNumber: 'QA', status: 'SIGNED', isInactive: false, customer: { displayName: 'مشتری آزمون' }, accounting: { totalContractAmount: 100, invoicedAmount: 0, receivedAmount: 0, remainingAmount: 100, sourceStatus: 'READY', invoiceStatus: 'DRAFT', receivableStatus: 'NOT_CREATED', taxStatus: 'NOT_READY', eligibleForFinancialRecords: true, openCorrections: 0, openBlockerFlags: 0 } };
+  await page.route(`**/api/accounting/contracts/${id}/lifecycle`, route => route.fulfill({ json: { success: true, data: { deactivationEligibility: { blockers: [] }, deleteEligibility: { blockers: [] } } } }));
+  await page.route(`**/api/accounting/contracts/${id}`, route => route.fulfill({ json: { success: true, data: { contract, sourceSnapshot: { items: [], deliveries: [], paymentSchedule: [] }, financialRecords: [record], flags: [], financialEvidenceReviewCases: [], correctionRequests: [], lifecycleRequests: [], receivables: [], paymentEvents: [], tax: [], replacementWorkflow: null } } }));
+  await page.route('**/api/accounting/actions', async route => {
+    const payload = route.request().postDataJSON();
+    expect(payload.kind).toBe('SAVE_INVOICE_DRAFT');
+    record.draftDetails.systemInvoiceNumber = payload.systemInvoiceNumber;
+    await route.fulfill({ json: { success: true, data: {} } });
+  });
+  await page.goto(`/dashboard/accounting/contracts/${id}?section=financial`);
+  await page.evaluate(() => history.pushState(history.state, '', location.href));
+  await page.getByRole('button', { name: 'ادامه تکمیل' }).click();
+  const invoice = page.getByRole('textbox', { name: 'شماره فاکتور سیستمی' });
+  await invoice.fill('changed');
+  await page.getByRole('button', { name: 'خلاصه', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'بازگشت به ویرایش' }).click();
+  await expect(invoice).toHaveValue('changed');
+  await page.evaluate(() => history.back());
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'بازگشت به ویرایش' }).click();
+  await expect(invoice).toHaveValue('changed');
+  await page.getByRole('button', { name: 'خلاصه', exact: true }).click();
+  await dialog.getByRole('button', { name: 'خروج بدون ذخیره' }).click();
+  await page.getByRole('button', { name: 'رکوردهای مالی', exact: true }).click();
+  await page.getByRole('button', { name: 'ادامه تکمیل' }).click();
+  await expect(invoice).toHaveValue('saved');
+  await invoice.fill('saved again');
+  await page.getByRole('button', { name: 'ذخیره پیش‌نویس' }).click();
+  await expect(invoice).toHaveValue('saved again');
+  await page.getByRole('button', { name: 'خلاصه', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole('button', { name: 'رکوردهای مالی', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'شماره فاکتور سیستمی' })).toHaveValue('saved again');
+});
+

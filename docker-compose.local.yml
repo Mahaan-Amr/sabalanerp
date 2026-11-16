@@ -134,7 +134,11 @@ services:
       - ${LOCAL_BACKEND_RECOVERY_SOURCE:-backend_recovery}:/app/storage/recovery
       - ${LOCAL_BACKEND_SEPIDAR_BACKUP_SOURCE:-backend_storage_sepidar_backups}:/app/storage/sepidar-backups
       - ${LOCAL_RECOVERY_COORDINATION_SOURCE:-recovery_coordination}:/app/recovery-coordination
-      - ${LOCAL_INQUIRY_RECOVERY_SOURCE:-inquiry_data}:/app/recovery-sources/inquiry
+      - type: volume
+        source: ${LOCAL_INQUIRY_RECOVERY_SOURCE:-inquiry_data}
+        target: /app/recovery-sources/inquiry
+        volume:
+          subpath: ${LOCAL_INQUIRY_DATA_SUBPATH:-.}
     depends_on:
       postgres:
         condition: service_healthy
@@ -151,7 +155,7 @@ services:
     mem_limit: 1536m
     cpus: 2
     logging: *local-logging
-    restart: unless-stopped
+    restart: ${LOCAL_BACKEND_RESTART_POLICY:-unless-stopped}
 
   inquiry:
     build:
@@ -165,6 +169,7 @@ services:
         PERFORMANCE_SOURCE_HASH: ${PERFORMANCE_SOURCE_HASH:-unattested}
     environment:
       NODE_ENV: development
+      INQUIRY_LOCAL_RESTORED: ${LOCAL_INQUIRY_RESTORED:-0}
       PORT: 3001
       DATABASE_URL: file:/data/inquiry.db
       ADMIN_EMAIL: local-inquiry@example.invalid
@@ -173,9 +178,15 @@ services:
       RECOVERY_COORDINATION_DIR: /app/recovery-coordination
     ports:
       - "127.0.0.1:${LOCAL_INQUIRY_HOST_PORT:-3001}:3001"
+    command: ["sh", "-c", "if [ \"$$INQUIRY_LOCAL_RESTORED\" = 1 ]; then exec node /app/run-inquiry-local-restored.cjs; else exec /app/run-inquiry-with-recovery.sh; fi"]
     volumes:
-      - inquiry_data:/data
+      - type: volume
+        source: inquiry_data
+        target: /data
+        volume:
+          subpath: ${LOCAL_INQUIRY_DATA_SUBPATH:-.}
       - recovery_coordination:/app/recovery-coordination
+      - ./deploy/scripts/run-inquiry-local-restored.cjs:/app/run-inquiry-local-restored.cjs:ro
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3001',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1));\""]
       interval: 10s

@@ -70,7 +70,7 @@ services:
           path: ./frontend/package-lock.json
 
   inquiry:
-    command: ["sh", "-c", "npm run db:push && npm run db:seed && exec npm run dev -- --hostname 0.0.0.0 --port 3001"]
+    command: ["sh", "-c", "if [ \"$$INQUIRY_LOCAL_RESTORED\" = 1 ]; then exec node /app/run-inquiry-local-restored.cjs; else npm run db:push && npm run db:seed && exec npm run dev -- --hostname 0.0.0.0 --port 3001; fi"]
     environment:
       NODE_ENV: development
     develop:

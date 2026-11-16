@@ -10,6 +10,7 @@ import { sha256File } from '../services/recoveryCrypto';
 import { validateLiveStoredFileReferences } from '../services/systemRecoveryEngine';
 import { verifyShipmentStatementDeploymentState } from '../services/shipmentStatementOperations';
 import { verifyInquiryBaseline, inspectInquiryBaseline } from '../services/inquiryMigrationPlan';
+import { verifyCustomerAllocationDeploymentState } from '../services/accountingCustomerAllocationDeployment';
 
 const execFileAsync = promisify(execFile);
 const deploymentId = String(process.env.DEPLOYMENT_ID || '').trim();
@@ -78,7 +79,7 @@ const main = async () => {
       run: async () => {
         const result = await execFileAsync('npx', ['prisma', 'migrate', 'status'], { env: process.env, timeout: 60_000, windowsHide: true });
         if (!/up to date/i.test(`${result.stdout}\n${result.stderr}`)) throw new Error('Prisma migration history is not up to date.');
-        return { status: 'up-to-date' };
+        return { status: 'up-to-date', ...await verifyCustomerAllocationDeploymentState(prisma) };
       },
     }, {
       name: 'shipment-statement-runtime-state',

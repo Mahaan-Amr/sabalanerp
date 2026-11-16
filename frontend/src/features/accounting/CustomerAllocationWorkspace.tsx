@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ErpBadge, ErpButton, ErpCard, ErpCheckbox, ErpDisclosure, ErpEmptyState, ErpField, ErpInlineState, ErpInput, ErpPersianDateField, ErpSearchableSelect, ErpSheet, ErpSummaryGrid, ErpTextarea } from '@/components/erp';
 import { accountingAPI } from '@/lib/api';
+import { useUnarchivedDraftGuard } from '@/lib/useUnarchivedDraftGuard';
 import { accountingFailureMessage } from './accountingUi';
 import type { CustomerAccount } from './customerAccountModel';
 import type { CustomerFinanceContext } from './CustomerReceiptPartsFields';
@@ -47,6 +48,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
   const [pending, setPending] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [posted, setPosted] = useState(false);
+  const [stale, setStale] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
   const request = useRef<{ fingerprint: string; command: AllocationCommand }>();
@@ -55,7 +57,8 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
   const contextSequence = useRef(0);
   const consumedSelection = useRef<number>();
   const plan = useMemo(() => customerAllocationPlan(data, draft), [data, draft]);
-  const locked = pending || uncertain || posted;
+  const locked = pending || uncertain || posted || stale;
+  useUnarchivedDraftGuard('customer-allocation', review || locked || draft.selected.length > 0 || draft.enabled.length > 0 || Object.keys(draft.amounts).length > 0 || Object.keys(draft.budgets).length > 0 || Boolean(reason || reference || periodId || ruleId) || date !== todayTehran());
   const canAllocate = account.capabilities.canManageTreasury;
   const { periods: matchingPeriods, rules: matchingRules } = accountingContextAt(context, date);
   const validContext = matchingPeriods.some(row => row.id === periodId) && matchingRules.some(row => row.id === ruleId) && date <= todayTehran();
@@ -111,7 +114,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
       await onRefresh();
       if (!mounted.current) return;
       setDraft(emptyAllocationDraft()); setPosted(false); setUncertain(false); setReview(false); setConfirmed(false);
-      setReason(''); setReference(''); setError(undefined); request.current = undefined;
+      setReason(''); setReference(''); setContext(undefined); setPeriodId(''); setRuleId(''); setDate(todayTehran()); setError(undefined); request.current = undefined;
     } catch (failure) {
       if (mounted.current) setError(accountingFailureMessage(failure, 'تخصیص ثبت شده است؛ برای دیدن مانده تازه، به‌روزرسانی را دوباره انجام دهید.'));
     } finally {
@@ -119,8 +122,21 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
       if (mounted.current) setPending(false);
     }
   }
+  async function refreshConflict() {
+    if (inFlight.current) return;
+    inFlight.current = true; setPending(true);
+    try {
+      await onRefresh();
+      if (mounted.current) { setStale(false); setError(undefined); setConfirmed(false); }
+    } catch {
+      if (mounted.current) setError('مانده‌ها تغییر کرده‌اند و بازخوانی انجام نشد؛ ابتدا مانده‌ها را به‌روزرسانی کنید.');
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setPending(false);
+    }
+  }
   async function save() {
-    if (inFlight.current || !canAllocate || posted) return;
+    if (inFlight.current || !canAllocate || posted || stale) return;
     if (!uncertain) {
       if (!plan.valid || !validEvidence || !confirmed) return;
       const payload = { kind: 'ALLOCATION' as const, amountRials: '0', allocations: [] as never[], sourceAllocations: plan.sourceAllocations,
@@ -147,7 +163,8 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
         setConfirmed(false);
         setError(accountingFailureMessage(failure, 'تخصیص ثبت نشد؛ اطلاعات را بررسی کنید.'));
         if (status === 409) {
-          try { await onRefresh(); } catch { if (mounted.current) setError('مانده‌ها تغییر کرده‌اند و بازخوانی انجام نشد؛ ابتدا مانده‌ها را به‌روزرسانی کنید.'); }
+          setStale(true);
+          try { await onRefresh(); if (mounted.current) setStale(false); } catch { if (mounted.current) setError('مانده‌ها تغییر کرده‌اند و بازخوانی انجام نشد؛ ابتدا مانده‌ها را به‌روزرسانی کنید.'); }
         }
       }
     } finally {
@@ -172,6 +189,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
     {notice && <ErpInlineState kind="success" title={notice} />}
     {!canAllocate && <ErpInlineState kind="permission" title="دسترسی ثبت تخصیص برای این حساب ندارید." />}
     {uncertain && <ErpInlineState kind="error" title="نتیجه درخواست قبلی هنوز مشخص نیست؛ پیش‌نویس آن حفظ شده است." action={{ label: 'ادامه بررسی درخواست قبلی', onClick: () => setReview(true) }} />}
+    {stale && <ErpInlineState kind="stale" title="مانده‌ها نیاز به بازخوانی دارند." action={{ label: 'به‌روزرسانی مانده‌ها', disabled: pending, onClick: () => void refreshConflict() }} />}
     {posted && <ErpInlineState kind="stale" title="تخصیص ثبت شده است؛ مانده‌ها باید بازخوانی شوند." action={{ label: 'به‌روزرسانی مانده‌ها', onClick: () => void refreshPosted() }} />}
     <ErpDisclosure title={`منابع تخصیص · ${draft.enabled.length.toLocaleString('fa-IR')} منبع انتخاب‌شده`} expanded>
       <div className={styles.sourceBudgets}>
@@ -196,7 +214,7 @@ export default function CustomerAllocationWorkspace({ accountId, account, onRefr
     {!review && error && <ErpInlineState kind="error" title={error} />}
     <ErpSheet open={review} onClose={() => setReview(false)} title="بررسی و تأیید تخصیص" presentation="modal" size="wide" pending={pending}
       footer={<div className="flex flex-wrap gap-2"><ErpButton label="بازگشت و ویرایش" tone="neutral" disabled={pending} onClick={() => setReview(false)} />
-        {posted ? <ErpButton label="به‌روزرسانی مانده‌ها" variant="solid" disabled={pending} onClick={() => void refreshPosted()} />
+        {stale ? <ErpButton label="به‌روزرسانی مانده‌ها" variant="solid" disabled={pending} onClick={() => void refreshConflict()} /> : posted ? <ErpButton label="به‌روزرسانی مانده‌ها" variant="solid" disabled={pending} onClick={() => void refreshPosted()} />
           : <ErpButton label={pending ? 'در حال ثبت…' : uncertain ? 'تلاش دوباره همان درخواست' : 'ثبت قطعی تخصیص'} variant="solid" disabled={pending || !canAllocate || (!uncertain && (!plan.valid || !validEvidence || !confirmed))} onClick={() => void save()} />}
       </div>}>
       <div className={styles.review}>

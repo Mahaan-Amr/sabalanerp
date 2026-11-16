@@ -9,6 +9,6 @@ export async function installAccountingSessionFixture(page: Page) {
       : path.endsWith('/auth/login') ? { user, mustChangePassword: false }
       : path.endsWith('/workspace-permissions/user-workspaces') ? [{ workspace: 'accounting', permission: 'admin' }]
       : { items: [], total: 0, notifications: [], unreadCount: 0 };
-    return route.fulfill({ json: { success: true, data } });
+    return route.fulfill({ json: { success: true, data, ...(path.endsWith('/auth/me') || path.endsWith('/auth/login') ? { session: { id: 'accounting_fixture_session' } } : {}) } });
   });
 }

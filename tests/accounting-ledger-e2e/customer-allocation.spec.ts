@@ -176,6 +176,31 @@ test('a definite rejection after an unknown result unlocks correction and requir
   expect(commands[1]).toEqual(commands[0]);
 });
 
+test('a failed conflict refresh blocks another command until current balances are reloaded', async ({ page }) => {
+  const { workspace, commands } = await openWorkspace(page);
+  await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();
+  await workspace.getByRole('checkbox', { name: 'انتخاب هزینه حمل مستقل', exact: true }).check();
+  await workspace.getByRole('button', { name: 'تکمیل مانده انتخاب‌شده', exact: true }).click();
+  let conflicted = false;
+  let reads = 0;
+  await page.route('**/api/accounting/ledger/customer-accounts/profile', route => {
+    if (conflicted && ++reads === 1) return route.fulfill({ status: 503, json: { success: false } });
+    return route.fulfill({ json: { success: true, data: fixture } });
+  });
+  await page.route('**/api/accounting/ledger/customer-accounts/profile/treasury', route => {
+    conflicted = true; commands.push(route.request().postDataJSON());
+    return route.fulfill({ status: 409, json: { success: false, message: 'مانده تغییر کرده است.' } });
+  });
+  await workspace.getByRole('button', { name: 'بررسی تخصیص', exact: true }).click();
+  const review = await confirmReview(page);
+  await review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true }).click();
+  await expect(review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true })).toHaveCount(0);
+  await review.getByRole('button', { name: 'به‌روزرسانی مانده‌ها', exact: true }).click();
+  await expect(review.getByRole('button', { name: 'ثبت قطعی تخصیص', exact: true })).toBeDisabled();
+  expect(commands).toHaveLength(1);
+  expect(reads).toBe(2);
+});
+
 test('a failed refresh after a successful allocation retries only the read, never the financial command', async ({ page }) => {
   const { workspace, commands } = await openWorkspace(page);
   await workspace.getByRole('checkbox', { name: /^نقدی/ }).check();

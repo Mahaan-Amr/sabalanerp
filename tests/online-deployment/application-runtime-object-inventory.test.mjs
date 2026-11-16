@@ -14,15 +14,25 @@ test('runtime object inventory stays closed while business grants are unreviewed
   const result = check(manifest);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /APPLICATION_RUNTIME_GRANTS_UNREVIEWED/);
-  assert.equal(manifest.objects.length, 985);
+  assert.equal(manifest.objects.length, 986);
   assert.equal(manifest.review, 'UNREVIEWED');
   assert.deepEqual(manifest.defaultGrants, []);
   assert.equal(manifest.provenance.headMigration.name, '20261116133000_customer_allocation_controller_transition');
+  assert.equal(manifest.provenance.migrationCount, 477);
+  assert.equal(manifest.provenance.repositoryMigrationCount, 472);
+  assert.equal(manifest.provenance.schemaSourceCommit, '54aecfa9d1467324e0bcc7968a1a891a6fbba90b');
   for (const identity of [
+    'public.dispatch_pickup_verifications',
     'public.customer_allocation_release_control',
     'public.customer_allocation_release_audit',
     'public.customer_allocation_controller_lock(p_deployment_id text, p_lease_token text)',
   ]) assert.ok(manifest.objects.some((object) => object.identity === identity), identity);
+});
+
+test('runtime object inventory rejects a restored schema missing the combined pickup relation', () => {
+  const missing = structuredClone(manifest);
+  missing.objects = missing.objects.filter((object) => object.identity !== 'public.dispatch_pickup_verifications');
+  assert.match(check(missing).stderr, /APPLICATION_RUNTIME_INVENTORY_DRIFT/);
 });
 
 test('runtime object inventory rejects a restored schema with an extra object', () => {

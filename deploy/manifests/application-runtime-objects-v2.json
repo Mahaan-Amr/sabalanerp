@@ -3,7 +3,7 @@
   "schema": "public",
   "review": "UNREVIEWED",
   "defaultGrants": [],
-  "provenance": {"kind":"local-isolated-restore-and-candidate-sql","sourceDatabase":"sabalanerp","migrationCount":475,"repositoryMigrationCount":470,"retiredLedgerMigrations":["20261014140000_online_deployment_control","20261019010000_customer_semantic_barrier","20261019020000_hr_versioned_file_cleanup","20261020010000_online_realtime_completion","20261020093000_online_serving_epochs"],"checksumMismatches":["20261115130000_accounting_dashboard_user_name_scope"],"migrationSetSha256":"9e7eac79e95556e7dc4292a99f4609e438eefc2a65ede4150cf8f0f6f148ef1a","headMigration":{"name":"20261116133000_customer_allocation_controller_transition","checksum":"8f8389793094eb9ea72abb292a419e0ac547412c44559c6a2c03e00b06bc5cdc"}},
+  "provenance": {"kind":"local-isolated-restore-and-combined-candidate-sql","sourceDatabase":"sabalanerp","schemaSourceCommit":"54aecfa9d1467324e0bcc7968a1a891a6fbba90b","migrationCount":477,"repositoryMigrationCount":472,"retiredLedgerMigrations":["20261014140000_online_deployment_control","20261019010000_customer_semantic_barrier","20261019020000_hr_versioned_file_cleanup","20261020010000_online_realtime_completion","20261020093000_online_serving_epochs"],"checksumMismatches":["20261115130000_accounting_dashboard_user_name_scope"],"migrationSetSha256":"87de0f50ae56853f0167d14d869a4c2fa86e4eed0adccda9fcbee171b4236a1e","headMigration":{"name":"20261116133000_customer_allocation_controller_transition","checksum":"8f8389793094eb9ea72abb292a419e0ac547412c44559c6a2c03e00b06bc5cdc"}},
   "objects": [
     {"kind":"function","owner":"postgres","identity":"public.accounting_dashboard_contract_owner(contract_id text)","securityDefiner":false},
     {"kind":"function","owner":"postgres","identity":"public.accounting_dashboard_financial_owner(record_id text)","securityDefiner":false},
@@ -615,6 +615,7 @@
     {"kind":"relation","owner":"postgres","identity":"public.dispatch_master_data_audits","relationKind":"r"},
     {"kind":"relation","owner":"postgres","identity":"public.dispatch_otp_challenges","relationKind":"r"},
     {"kind":"relation","owner":"postgres","identity":"public.dispatch_outages","relationKind":"r"},
+    {"kind":"relation","owner":"postgres","identity":"public.dispatch_pickup_verifications","relationKind":"r"},
     {"kind":"relation","owner":"postgres","identity":"public.dispatch_pilot_resume_approvals","relationKind":"r"},
     {"kind":"relation","owner":"postgres","identity":"public.dispatch_priced_allocation_events","relationKind":"r"},
     {"kind":"relation","owner":"postgres","identity":"public.dispatch_statement_adjustments","relationKind":"r"},

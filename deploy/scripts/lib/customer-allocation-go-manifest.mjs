@@ -7,8 +7,8 @@ const exactKeys = (value, keys) => object(value) &&
   Object.keys(value).sort().join('\0') === [...keys].sort().join('\0');
 const hex = (value, length) => typeof value === 'string' && new RegExp(`^[0-9a-f]{${length}}$`).test(value);
 const nonempty = value => typeof value === 'string' && value.length > 0 && value.trim() === value;
-const images = value => object(value) && Object.keys(value).length > 0 &&
-  Object.keys(value).every(name => nonempty(name) && /^sha256:[0-9a-f]{64}$/.test(value[name]));
+const images = value => exactKeys(value, ['backend', 'frontend', 'inquiry']) &&
+  Object.values(value).every(image => /^sha256:[0-9a-f]{64}$/.test(image));
 const evidence = value => exactKeys(value, ['reader', 'populatedQa', 'rollback']) &&
   Object.values(value).every(hash => hex(hash, 64));
 const timestamp = value => typeof value === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value)
@@ -33,7 +33,8 @@ export function verifyCustomerAllocationGoManifest(envelope, observed, trustedAp
     'releaseId', 'deploymentId', 'candidateCommit', 'candidateTree', 'inquiryCommit', 'migrationSha256',
     'candidateImages', 'predecessorImages', 'cohortSha256', 'evidence'])) reject();
   if (p.schemaVersion !== 1 || p.decision !== 'GO' || p.operation !== 'GROUPED_ALLOCATION' ||
-    !nonempty(p.keyId) || p.keyId !== trustedApprover.keyId || !trustedApprover.publicKey ||
+    !nonempty(p.keyId) || p.keyId !== trustedApprover.keyId ||
+    trustedApprover.publicKey?.asymmetricKeyType !== 'ed25519' ||
     !timestamp(p.issuedAt) || !timestamp(p.expiresAt) || !timestamp(observed.dbClock) ||
     !timestamp(observed.leaseExpiresAt) || !nonempty(p.releaseId) || !nonempty(p.deploymentId) ||
     !hex(p.candidateCommit, 40) || !hex(p.candidateTree, 40) || !hex(p.inquiryCommit, 40) ||

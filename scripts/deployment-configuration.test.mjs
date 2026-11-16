@@ -14,12 +14,12 @@ const key = Buffer.alloc(32, 7).toString('base64');
 const workstation = { commandSecretBase64: key, activeTransportKeyId: 'transport-v1', transportKeysBase64: { 'transport-v1': key } };
 function containers(coordination) {
   const records = ['backend', 'frontend', 'inquiry', 'nginx', 'postgres', 'clamav'].map((service, index) => ({
-    Id: service, Image: `sha256:${String(index + 1).repeat(64)}`,
+    Id: String(index + 1).repeat(12), Image: `sha256:${String(index + 1).repeat(64)}`,
     Config: { Labels: { 'com.docker.compose.service': service }, Env: [] },
     State: { Running: true, Health: { Status: 'healthy' } },
     Mounts: [],
   }));
-  const identity = Object.fromEntries(releaseEnvironmentKeys.map(name => [name, name.endsWith('_COMMIT') ? 'a'.repeat(40) : name.endsWith('_IMAGE') ? records.find(c => name.includes(c.Id.toUpperCase()))?.Image : 'b'.repeat(64)]));
+  const identity = Object.fromEntries(releaseEnvironmentKeys.map(name => [name, name.endsWith('_COMMIT') ? 'a'.repeat(40) : name.endsWith('_IMAGE') ? records.find(c => name.includes(c.Config.Labels['com.docker.compose.service'].toUpperCase()))?.Image : 'b'.repeat(64)]));
   records[0].Config.Env = [...Object.entries(identity).map(([name, value]) => `${name}=${value}`), 'BIOMETRIC_WORKSTATIONS_JSON={}', 'RECOVERY_COORDINATION_DIR=/app/recovery-coordination', 'JWT_SECRET=secret-do-not-output'];
   records[0].Mounts = [{ Destination: '/app/recovery-coordination', Source: coordination, RW: true }];
   return records;
@@ -170,8 +170,8 @@ else {assert.equal(a.length,6);if(fs.existsSync(marker))assert.deepEqual(JSON.pa
     fs.writeFileSync(fakeDocker, `const fs=require('fs');const path=require('path');const a=process.argv.slice(2);fs.appendFileSync(process.env.TEST_LOG,JSON.stringify(a)+'\\n');const records=JSON.parse(fs.readFileSync(process.env.TEST_CONTAINERS));const env=k=>(a.find(v=>v.startsWith(k+'='))||'').slice(k.length+1);const session=path.join(process.env.TEST_REPORTS,'active-deployment-session.json');
 if(a[0]==='inspect' && a.includes('--format')){console.log(a.includes('{{.Image}}')?records.find(r=>r.Id===a.at(-1)).Image:'10.0.0.2');}
 else if(a[0]==='inspect'){console.log(JSON.stringify(records.filter(r=>a.slice(1).includes(r.Id))));}
-else if(a.includes('ps')){console.log(a.at(-1));}
-else if(a.includes('config')){console.log('services: {}');}
+else if(a.includes('ps')){console.log(records.find(r=>r.Config.Labels['com.docker.compose.service']===a.at(-1))?.Id||'');}
+else if(a.includes('config')){console.log(a.includes('--format')&&a[a.indexOf('--format')+1]==='json'?JSON.stringify({name:'sabalanerp',services:{backend:{volumes:[{type:'volume',source:'backend_storage_dispatch_documents',target:'/app/storage/dispatch-documents',read_only:false}]}},volumes:{backend_storage_dispatch_documents:{name:'sabalanerp_backend_storage_dispatch_documents'}}}):'services: {}');}
 else if(a.includes('dist/scripts/deployment-performance-identity.js')){fs.writeFileSync(require('path').join(process.env.TEST_REPORTS,'performance-database-'+a.find(v=>v.startsWith('DEPLOYMENT_ID=')).slice(14)+'.json'),JSON.stringify({schemaHash:'b'.repeat(64),policyHash:'b'.repeat(64)}));}
 else if(a.includes('dist/scripts/validate-production-environment.js')){if(process.env.TEST_FAILURE==='preflight')process.exit(42);}
 else if(a.includes('dist/scripts/deployment-control.js')){const c=a[a.indexOf('dist/scripts/deployment-control.js')+1];if(c==='prepare'){fs.writeFileSync(session,JSON.stringify({phase:'PREFLIGHT',leaseToken:'fixture-lease',rollbackPerformanceEnvironment:Object.fromEntries(records[0].Config.Env.filter(v=>v.startsWith('PERFORMANCE_')).map(v=>[v.split('=')[0],v.slice(v.indexOf('=')+1)]))}));}else if(c==='acquire'||c==='transition'){const s=JSON.parse(fs.readFileSync(session));s.phase=c==='acquire'?'LEASE_ACQUIRED':env('DEPLOYMENT_PHASE');fs.writeFileSync(session,JSON.stringify(s));}else if(c==='finish'||c==='cancel-preflight'){fs.rmSync(session,{force:true});}}

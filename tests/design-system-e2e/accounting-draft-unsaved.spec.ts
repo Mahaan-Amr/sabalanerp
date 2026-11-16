@@ -5,7 +5,7 @@ test('unsaved invoice changes can be kept or discarded when changing sections', 
   await loginAsAdmin(page);
   const id = 'draft-guard-qa';
   const record = { id: 'invoice-qa', kind: 'INVOICE_CANDIDATE', status: 'DRAFT', amount: 100, currency: 'IRR', createdAt: '2026-08-20T08:00:00Z', draftDetails: { systemInvoiceNumber: 'saved' } };
-  const contract = { contractId: id, contractNumber: 'QA', status: 'SIGNED', isInactive: false, customer: { displayName: 'مشتری آزمون' }, accounting: { totalContractAmount: 100, invoicedAmount: 0, receivedAmount: 0, remainingAmount: 100, sourceStatus: 'READY', invoiceStatus: 'DRAFT', receivableStatus: 'NOT_CREATED', taxStatus: 'NOT_READY', eligibleForFinancialRecords: true, openCorrections: 0, openBlockerFlags: 0 } };
+  const contract = { contractId: id, contractNumber: 'QA', status: 'SIGNED', isInactive: false, customer: { displayName: 'مشتری آزمون' }, nextBestActions: [{ kind: 'CREATE_INVOICE', labelFa: 'ایجاد صورتحساب', visible: true, enabled: true }], accounting: { totalContractAmount: 100, invoicedAmount: 0, receivedAmount: 0, remainingAmount: 100, sourceStatus: 'READY', invoiceStatus: 'DRAFT', receivableStatus: 'NOT_CREATED', taxStatus: 'NOT_READY', eligibleForFinancialRecords: true, openCorrections: 0, openBlockerFlags: 0 } };
   await page.route(`**/api/accounting/contracts/${id}/lifecycle`, route => route.fulfill({ json: { success: true, data: { deactivationEligibility: { blockers: [] }, deleteEligibility: { blockers: [] } } } }));
   await page.route(`**/api/accounting/contracts/${id}`, route => route.fulfill({ json: { success: true, data: { contract, sourceSnapshot: { items: [], deliveries: [], paymentSchedule: [] }, financialRecords: [record], flags: [], financialEvidenceReviewCases: [], correctionRequests: [], lifecycleRequests: [], receivables: [], paymentEvents: [], tax: [], replacementWorkflow: null } } }));
   await page.route('**/api/accounting/actions', async route => {
@@ -40,10 +40,11 @@ test('unsaved invoice changes can be kept or discarded when changing sections', 
   await dialog.getByRole('button', { name: 'بازگشت به ویرایش' }).click();
   await expect(invoice).toHaveValue('changed');
   const unloadDialog = page.waitForEvent('dialog');
-  await page.evaluate(() => { location.reload(); });
+  const reload = page.evaluate(() => { location.reload(); });
   const warning = await unloadDialog;
   expect(warning.type()).toBe('beforeunload');
   await warning.dismiss();
+  await reload;
   await expect(invoice).toHaveValue('changed');
   await page.evaluate(() => history.back());
   await expect(dialog).toBeVisible();

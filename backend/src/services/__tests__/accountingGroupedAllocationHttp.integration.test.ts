@@ -67,6 +67,20 @@ test('authenticated grouped allocation reserves, posts and recovers the same res
     const prepared = await send('/allocation-intent');
     assert.equal(prepared.status, 200);
     assert.deepEqual((await prepared.json() as any).data, { status: 'PENDING', idempotencyKey: body.idempotencyKey });
+    const vouchersBefore = await prisma.accountingLedgerVoucher.count();
+    const blocked = await send('');
+    assert.equal(blocked.status, 409);
+    assert.equal((await blocked.json() as any).code, 'CUSTOMER_SOURCE_SHARES_CLOSED');
+    assert.equal(await prisma.accountingSettlementAllocation.count(), 0);
+    assert.equal(await prisma.accountingLedgerVoucher.count(), vouchersBefore);
+    const pending = await prisma.accountingCustomerAllocationIntent.findUniqueOrThrow({
+      where: { idempotencyKey: body.idempotencyKey },
+    });
+    assert.equal(pending.state, 'PENDING');
+    assert.equal(pending.result, null);
+    // The HTTP harness owns this isolated database and simulates an admitted
+    // release. Preserve all child lineage and financial constraints.
+    await prisma.$executeRawUnsafe('DROP TRIGGER require_active_grouped_allocation_child ON public.accounting_settlement_allocations');
     const posting = await send('');
     assert.equal(posting.status, 200);
     const result = (await posting.json() as any).data;

@@ -30,6 +30,10 @@ test('admitted grouped posting commits exact shares once and reverses independen
     const { allocateCustomerReceiptPrisma } = require('../accountingCustomerTreasuryPrisma') as typeof import('../accountingCustomerTreasuryPrisma');
     const f = await customerFinanceFixture(url!);
     try {
+      // This legacy simulated-admission test owns an isolated database. Its
+      // application guard is replaced above; remove only the new DB admission
+      // trigger here so the real lineage and financial constraints remain.
+      await f.db.$executeRawUnsafe('DROP TRIGGER require_active_grouped_allocation_child ON public.accounting_settlement_allocations');
       const customer = await f.customer();
       const read = async () => {
         const [{ at }] = await f.db.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at`;

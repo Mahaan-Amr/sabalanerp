@@ -98,7 +98,7 @@ export async function readPartnerInternalDocument(caseId: string, actorUserId: s
       flags: flags.map(flag => ({ id: flag.id, title: flag.title, note: flag.note,
         severity: flag.severity, status: flag.status })),
     };
-  });
+  }, { focusedCaseId: caseId });
 }
 
 /** Resolve the internal financial record under the same Partner read and write
@@ -124,7 +124,7 @@ export async function withPartnerInternalAccountingTarget<T>(caseId: string, act
     if (!(await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok) return null;
     if (!await hasSharedOperationAuthority(scope.database, actorUserId, 'accounting', 'accounting_actions_manage')) return null;
     return work(scope.database, { customerContractId: sale.customerContractId, invoiceRecordId: invoice.id });
-  });
+  }, { focusedCaseId: caseId });
 }
 
 /** A fresh allowlisted input to the ordinary Sabalan print template. Never pass

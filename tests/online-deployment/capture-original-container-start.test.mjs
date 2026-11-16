@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
@@ -34,7 +35,7 @@ test('signal during original start retains its native observer through natural c
  child.stdout.end('0\n');child.stderr.end();child.emit('close',0,null);await assert.rejects(running,/INTERRUPTION_HELD/);assert.equal(receipts[0].closed,true);assert.equal(receipts[0].interrupted,true);assert.equal(f.events.length,1);
 });
 test('actual shell capture completion and pre-mutation failure share pinned start; ordinary release retains compose path',()=>{
- const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),begin=source.indexOf('start_release_services() {'),end=source.indexOf('\n}\n',begin)+3,body=source.slice(begin,end),shell=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh';
+ const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),begin=source.indexOf('start_release_services() {'),end=source.indexOf('\n}\n',begin)+3,body=source.slice(begin,end),shell=process.platform==='win32'?path.resolve(spawnSync('git',['--exec-path'],{encoding:'utf8'}).stdout.trim(),'../../../usr/bin/sh.exe'):'/bin/sh';
  for(const capture of [0,1]){const script=['set -eu',`CAPTURE_ONLY=${capture}; MUTATION_STARTED=0; MAINTENANCE_ACTIVE=1; DB_LEASE_ACQUIRED=1; capture_pause_started=123`, 'SESSION_HOST_PATH=/private/original-session; CAPTURE_ONLY_SNAPSHOT=/private/snapshot; ENV_FILE=deploy/.env.prod; REPO_ROOT=/opt/sabalanerp; OPERATIONS_ROOT=/private/ops; COMPOSE_FILE=docker-compose.prod.yml','DEPLOYMENT_CLAMAV_OPERATION=repair; DEPLOYMENT_CLAMAV_REPAIR=false; DEPLOYMENT_PHASE=REMOTE_CHECKPOINT_VERIFIED','capture_remaining_seconds(){ echo 19; }','node(){ printf "PINNED:%s:%s:%s:%s:%s:%s\\n" "$2" "$3" "$4" "$5" "$6" "$7"; }','run_original_owned_with_heartbeat(){ echo HEARTBEAT_OWNER; "$@"; }','compose(){ echo COMPOSE:$*; }',body,'start_release_services 30'].join('\n');const result=spawnSync(shell,['-c',script],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);if(capture){assert.match(result.stdout,/HEARTBEAT_OWNER/);assert.match(result.stdout,/PINNED:start-original:\/private\/snapshot:deploy\/\.env.prod:\/opt\/sabalanerp\/docker-compose.prod.yml:19:123/);assert.doesNotMatch(result.stdout,/COMPOSE:/);}else{assert.match(result.stdout,/COMPOSE:up -d --no-build/);assert.match(result.stdout,/force-recreate/);assert.doesNotMatch(result.stdout,/PINNED:/);}}
  for(const name of ['complete_capture_only() {','recover_failure() {']){const from=source.indexOf(name);assert.ok(source.indexOf('start_release_services 300',from)>from);}
 });

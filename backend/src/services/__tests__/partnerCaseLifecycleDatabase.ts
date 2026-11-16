@@ -51,8 +51,13 @@ export async function createPartnerLifecycleDatabase(input: { repositoryRoot: st
     cleanup: async () => {
       if (cleaned) return;
       if (!namePattern.test(databaseName)) throw new Error('Unsafe Partner lifecycle cleanup target');
-      compose(input.repositoryRoot, `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command ` +
-        `"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${databaseName}' AND pid <> pg_backend_pid()"`);
+      const outstanding = compose(input.repositoryRoot,
+        `psql -v ON_ERROR_STOP=1 --tuples-only --no-align --username postgres --dbname postgres --command ` +
+        `"SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = '${databaseName}') + ` +
+        `(SELECT count(*) FROM pg_prepared_xacts WHERE database = '${databaseName}')"`).trim();
+      if (outstanding !== '0') {
+        throw new Error(`Temporary Partner lifecycle database ${databaseName} still has sessions or prepared transactions; preserving its data.`);
+      }
       compose(input.repositoryRoot,
         `psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres --command 'DROP DATABASE IF EXISTS ${quoted}'`);
       cleaned = true;

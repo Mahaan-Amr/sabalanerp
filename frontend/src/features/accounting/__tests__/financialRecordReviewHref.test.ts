@@ -15,3 +15,10 @@ test('return target accepts Accounting dashboard and rejects foreign destination
   assert.equal(accountingReviewReturn('//example.test'), '/dashboard/accounting/invoice-candidates');
   assert.equal(accountingReviewReturn('/dashboard/accounting-foreign'), '/dashboard/accounting/invoice-candidates');
 });
+
+test('contract detail return falls back to contracts while preserving an Accounting deep link', () => {
+  assert.equal(accountingReviewReturn('//outside.test', '/dashboard/accounting/contracts'),
+    '/dashboard/accounting/contracts');
+  assert.equal(accountingReviewReturn('/dashboard/accounting/payments?page=2', '/dashboard/accounting/contracts'),
+    '/dashboard/accounting/payments?page=2');
+});

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { parseCanonicalProductGraph } from '@sabalanerp/contract-product-graph';
 import { canonicalHash, type PartnerCommand } from '@sabalanerp/partner-sales-contracts';
@@ -190,8 +191,9 @@ test('family-aware technical measures bind longitudinal quantity instead of the 
 });
 
 async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, string>) => Promise<void>,
-  approvalTtlMs = 48 * 60 * 60 * 1000, pricingDefinition = false) {
-  const database = new PrismaClient({ datasources: { db: { url: databaseUrl() } } });
+  approvalTtlMs = 48 * 60 * 60 * 1000, pricingDefinition = false,
+  qualification?: { databaseUrl: string; commit: true }) {
+  const database = new PrismaClient({ datasources: { db: { url: qualification?.databaseUrl ?? databaseUrl() } } });
   const rollback = new Error('rollback partner Case fixture');
   try {
     await database.$transaction(async tx => {
@@ -209,7 +211,8 @@ async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, s
         { id: ids.responderId, username: ids.responderId, email: `${ids.responderId}@example.invalid`, password: 'not-a-login',
           firstName: 'Responder', lastName: 'Case', role: 'ADMIN' },
       ] });
-      await tx.department.create({ data: { id: ids.departmentId, name: ids.departmentId, namePersian: 'فروش تستی' } });
+      await tx.department.create({ data: { id: ids.departmentId, name: ids.departmentId,
+        namePersian: qualification?.commit ? `فروش تستی ${ids.departmentId}` : 'فروش تستی' } });
       await tx.user.update({ where: { id: ids.partnerId }, data: { departmentId: ids.departmentId } });
       await tx.partnerProfile.create({ data: { id: ids.profileId, userId: ids.partnerId, state: 'ACTIVE' } });
       await tx.$executeRaw`SELECT set_config('sabalan.partner_crm_profile', ${ids.profileId}, true)`;
@@ -250,8 +253,8 @@ async function fixture(run: (tx: Prisma.TransactionClient, ids: Record<string, s
         assignmentId: ids.assignmentId, actorId: ids.responderId, commandId: `${prefix}-approval-command`,
         authorizationEvidenceId: `${prefix}-approval-authorization`, wholesaleUnitPrice: '100', currency: 'IRT',
         evidenceHash: approvalEvidenceHash, approvedAt: clock.now, expiresAt: new Date(clock.now.getTime() + approvalTtlMs) } });
-      await run(tx, ids); throw rollback;
-    }, { timeout: 30_000 });
+      await run(tx, ids); if (!qualification?.commit) throw rollback;
+    }, { timeout: qualification?.commit ? 300_000 : 30_000 });
   } catch (error) { if (error !== rollback) throw error; }
   finally { await database.$disconnect(); }
 }
@@ -1601,6 +1604,62 @@ async function finalCommercialFixture(tx: Prisma.TransactionClient, ids: Record<
   assert.equal(root.state, 'COMMITTED');
   return { input: { ...input, intent: priced.intent }, owner: finalized.value.case.owner, root };
 }
+
+test('Accounting qualification creates a lifecycle committed Case in an isolated local database',
+  { skip: process.env.ACCOUNTING_447_QUALIFICATION !== '1' }, async () => {
+  const temporary = await createPartnerLifecycleDatabase({ repositoryRoot: path.resolve(__dirname, '../../../..'),
+    sourceDatabaseUrl: databaseUrl() });
+  const setup = temporary.client();
+  try {
+    await setup.partnerOperationsControl.create({ data: { id: 'partner-operations' } });
+    await setup.effectiveAuthorizationState.create({ data: { id: 1, revision: 1 } });
+    const caseIds: string[] = [];
+    let ordinaryOwner: Record<string, string> | undefined;
+    for (let index = 0; index < 43; index++) {
+      await fixture(async (tx, ids) => {
+        ordinaryOwner ??= ids;
+        if (index < 30) await finalCommercialFixture(tx, ids);
+        else assert.ok((await service(tx, ids).execute(await command(ids))).ok);
+        caseIds.push(ids.caseId);
+      }, undefined, false, { databaseUrl: temporary.databaseUrl, commit: true });
+    }
+    const owner = ordinaryOwner;
+    assert.ok(owner);
+    const directCustomerId = `accounting-447-direct-customer-${temporary.runId}`;
+    await setup.crmCustomer.create({ data: { id: directCustomerId, firstName: 'Accounting', lastName: 'Direct',
+      ownerUserId: owner.managerId, createdBy: owner.managerId } });
+    await setup.workspacePermission.create({ data: { userId: owner.managerId,
+      workspace: 'accounting', permissionLevel: 'admin' } });
+    await setup.salesContract.createMany({ data: Array.from({ length: 935 }, (_, index) => ({
+      id: `accounting-447-ordinary-${index}`, contractNumber: `accounting-447-ordinary-${index}`,
+      title: 'Qualification', titlePersian: 'آزمون', content: 'Qualification',
+      customerId: directCustomerId, departmentId: owner.departmentId,
+      createdBy: owner.managerId, responsibleSellerId: owner.managerId,
+      createdAt: new Date('2026-11-14T00:00:00.000Z'),
+    })) });
+    assert.equal(await setup.partnerSaleCase.count({ where: { id: { in: caseIds } } }), 43);
+    assert.equal(await setup.partnerSaleCase.count({ where: { id: { in: caseIds }, state: 'COMMITTED' } }), 30);
+    assert.equal(await setup.partnerCaseRevision.count({ where: { caseId: { in: caseIds } } }), 73);
+    assert.equal(await setup.partnerCaseEvent.count({ where: { caseId: { in: caseIds }, type: 'CASE_COMMITTED' } }), 30);
+    assert.equal(await setup.salesContract.count({ where: { id: { startsWith: 'accounting-447-ordinary-' } } }), 935);
+    const committed = await setup.partnerSaleCase.findMany({ where: { id: { in: caseIds }, state: 'COMMITTED' },
+      select: { id: true, internalRecordId: true } });
+    const partnerRows = committed.map(row => ({ caseId: row.id, contractId: `partner:${row.internalRecordId}` }));
+    assert.ok(partnerRows.every(row => !row.contractId.endsWith('undefined')));
+    const probeDatabaseUrl = new URL(temporary.databaseUrl);
+    probeDatabaseUrl.searchParams.set('connection_limit', '10');
+    const probe = execFileSync(process.execPath, [path.resolve(__dirname, '../../../node_modules/tsx/dist/cli.mjs'),
+      path.resolve(__dirname, 'accounting447IsolatedHttpProbe.ts')], { cwd: path.resolve(__dirname, '../../../..'),
+      encoding: 'utf8', timeout: 360_000, env: { ...process.env, DATABASE_URL: probeDatabaseUrl.toString(),
+        ACCOUNTING_447_ACTOR_ID: owner.managerId, ACCOUNTING_447_CUSTOMER_ID: directCustomerId,
+        ACCOUNTING_447_DEPARTMENT_ID: owner.departmentId,
+        ACCOUNTING_447_PARTNER_ROWS: JSON.stringify(partnerRows) } });
+    console.log(probe);
+  } finally {
+    await setup.$disconnect();
+    await temporary.cleanup();
+  }
+});
 
 async function approvePartnerEdit(tx: Prisma.TransactionClient, input: {
   contractId: string; actorUserId: string; reason: string; requestKey: string; now: Date;

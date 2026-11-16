@@ -24,6 +24,7 @@ export type CheckpointObject = {
   onlineDirectoryEvidence?: OnlineDirectoryEvidence;
   localVerified?: boolean;
   manifestReadable?: boolean;
+  manifest?: { packageType?: string };
   compatibility?: { local?: { compatible?: boolean } };
 };
 
@@ -650,4 +651,91 @@ export const enforceLocalCheckpointRetention = async (
     deletedIds.push(artifact.id);
   }
   return { deletedIds };
+};
+
+/** Keep the two newest complete local release checkpoints after a verified capture.
+ * Remote retention remains independently governed by its recovery-drill policy.
+ */
+export const enforceTwoNewestLocalCheckpoints = async (
+  root: string, remoteRoot: string, activeDeploymentId: string,
+) => {
+  const localRoot = await fs.promises.realpath(root);
+  const independentRoot = await fs.promises.realpath(remoteRoot);
+  const artifacts: CheckpointObject[] = [];
+  for (const metadataPath of await findMetadataFiles(localRoot)) {
+    const stat = await fs.promises.lstat(metadataPath);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new Error('DEPLOYMENT_TWO_LOCAL_METADATA_UNSAFE');
+    const artifact = JSON.parse(await fs.promises.readFile(metadataPath, 'utf8')) as CheckpointObject;
+    if (!artifact.id || !/^[a-zA-Z0-9_-]{1,160}$/.test(artifact.id)
+      || !Number.isFinite(Date.parse(artifact.createdAt))
+      || path.resolve(artifact.metadataPath) !== metadataPath
+      || !artifact.archivePath || path.basename(artifact.archivePath) !== `${artifact.id}.sabrec`
+      || artifact.metadataPath !== `${artifact.archivePath}.json`
+      || !path.resolve(artifact.archivePath).startsWith(`${localRoot}${path.sep}`)) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_METADATA_INVALID');
+    }
+    artifacts.push(artifact);
+  }
+  if (artifacts.length <= 2) return { deletedIds: [], heldIds: [] };
+  artifacts.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id));
+  if (new Set(artifacts.map(artifact => artifact.id)).size !== artifacts.length) throw new Error('DEPLOYMENT_TWO_LOCAL_DUPLICATE_ID');
+  const keep = artifacts.slice(0, 2);
+  const remoteFingerprints = new Map<string, RemoteCheckpointFingerprint>();
+  for (const artifact of keep) {
+    if (!artifact.localVerified || !artifact.remoteVerified || !artifact.restoreVerified
+      || artifact.manifest?.packageType !== 'COMPLETE'
+      || !artifact.remotePath || path.basename(artifact.remotePath) !== `${artifact.id}.sabrec`
+      || !artifact.checksum || !artifact.size) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_REPLACEMENT_UNVERIFIED');
+    }
+    const localArchive = await fs.promises.realpath(artifact.archivePath);
+    const remoteArchive = await fs.promises.realpath(artifact.remotePath);
+    const localStat = await fs.promises.lstat(artifact.archivePath);
+    const remoteStat = await fs.promises.lstat(artifact.remotePath);
+    if (!localArchive.startsWith(`${localRoot}${path.sep}`)
+      || !remoteArchive.startsWith(`${independentRoot}${path.sep}`)
+      || !localStat.isFile() || localStat.isSymbolicLink() || localStat.nlink !== 1
+      || !remoteStat.isFile() || remoteStat.isSymbolicLink() || remoteStat.nlink !== 1
+      || localStat.size !== artifact.size || remoteStat.size !== artifact.size
+      || await sha256File(localArchive) !== artifact.checksum
+      || await remoteCheckpointChecksum(remoteArchive) !== artifact.checksum) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_REPLACEMENT_INVALID');
+    }
+    remoteFingerprints.set(artifact.id, { size: remoteStat.size, mtimeMs: remoteStat.mtimeMs });
+    const remoteSidecarStat = await fs.promises.lstat(`${artifact.remotePath}.json`);
+    if (!remoteSidecarStat.isFile() || remoteSidecarStat.isSymbolicLink() || remoteSidecarStat.nlink !== 1) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_REMOTE_SIDECAR_INVALID');
+    }
+    const remoteMetadata = JSON.parse(await fs.promises.readFile(`${remoteArchive}.json`, 'utf8')) as CheckpointObject;
+    if (remoteMetadata.id !== artifact.id || remoteMetadata.checksum !== artifact.checksum
+      || remoteMetadata.size !== artifact.size || !remoteMetadata.remoteVerified) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_REMOTE_SIDECAR_INVALID');
+    }
+  }
+  const deletedIds: string[] = [];
+  const heldIds: string[] = [];
+  for (const artifact of artifacts.slice(2)) {
+    if (artifact.active || artifact.incidentOpen || artifact.id === activeDeploymentId) {
+      heldIds.push(artifact.id);
+      continue;
+    }
+    if (!path.resolve(artifact.archivePath).startsWith(`${localRoot}${path.sep}`)
+      || path.resolve(artifact.metadataPath) !== path.join(localRoot, path.relative(localRoot, artifact.metadataPath))
+      || !(await fs.promises.lstat(artifact.metadataPath)).isFile()) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_CANDIDATE_UNSAFE');
+    }
+    const archivePresent = await checkpointArchivePresent(localRoot, artifact.archivePath, artifact);
+    const current = JSON.parse(await fs.promises.readFile(artifact.metadataPath, 'utf8')) as CheckpointObject;
+    if (current.id !== artifact.id || current.checksum !== artifact.checksum || current.active || current.incidentOpen) {
+      throw new Error('DEPLOYMENT_TWO_LOCAL_CANDIDATE_CHANGED');
+    }
+    for (const point of keep) await assertRemoteCheckpointFingerprint(point.remotePath!, remoteFingerprints.get(point.id));
+    await appendRetentionAudit(localRoot, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_INTENT', reason: 'TWO_NEWEST_LOCAL' });
+    if (archivePresent) await fs.promises.unlink(artifact.archivePath);
+    await appendRetentionAudit(localRoot, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_ARCHIVE_REMOVED', reason: 'TWO_NEWEST_LOCAL' });
+    await fs.promises.unlink(artifact.metadataPath);
+    await appendRetentionAudit(localRoot, { id: artifact.id, checksum: artifact.checksum, event: 'RETENTION_COMPLETED', reason: 'TWO_NEWEST_LOCAL' });
+    deletedIds.push(artifact.id);
+  }
+  return { deletedIds, heldIds };
 };

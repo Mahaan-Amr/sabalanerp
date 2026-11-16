@@ -1,8 +1,7 @@
-export type BackendRuntimeRole = 'standalone' | 'candidate';
+export type BackendRuntimeRole = 'standalone';
 
 export function resolveRuntimeRole(value: string | undefined): BackendRuntimeRole {
   if (value === undefined || value === '' || value === 'standalone') return 'standalone';
-  if (value === 'candidate') return value;
   throw new Error('BACKEND_RUNTIME_ROLE_INVALID');
 }
 
@@ -13,11 +12,9 @@ export async function startRuntime(role: BackendRuntimeRole, operations: {
   startWorkers: () => void | Promise<void>;
   listen: () => void;
 }) {
-  if (role === 'standalone') {
-    operations.assertControlOwnership();
-    await operations.initializeRecovery();
-    await operations.verifyCutover();
-    await operations.startWorkers();
-  }
+  operations.assertControlOwnership();
+  await operations.initializeRecovery();
+  await operations.verifyCutover();
+  await operations.startWorkers();
   operations.listen();
 }

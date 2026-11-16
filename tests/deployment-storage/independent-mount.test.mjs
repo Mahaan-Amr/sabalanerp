@@ -33,3 +33,11 @@ test('host and key paths cannot inject unit options or select arbitrary secret f
     assert.throws(() => renderIndependentBackupMount({ ...configuration, keyFile }), /KEY_PATH_INVALID/);
   }
 });
+test('QA transport binds its separate account and private mount without accepting production keys',()=>{
+ const qa={host:'qa-backup.test',target:'qa',keyFile:'/srv/sabalanerp-qa/ssh/transfer',knownHostsFile:'/srv/sabalanerp-qa/ssh/known-hosts'};
+ const unit=renderIndependentBackupMount(qa);
+ assert.match(unit,/What=sabalan-qa-backup@qa-backup\.test:\/checkpoints\n/);
+ assert.match(unit,/Where=\/srv\/sabalanerp-qa\/remote\n/);
+ assert.throws(()=>renderIndependentBackupMount({...qa,keyFile:configuration.keyFile}),/KEY_PATH_INVALID/);
+ assert.throws(()=>renderIndependentBackupMount({...configuration,target:'qa'}),/KEY_PATH_INVALID/);
+});

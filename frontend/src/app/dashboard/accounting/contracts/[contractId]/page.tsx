@@ -38,7 +38,7 @@ import { operationalStatusLabel } from "@/features/dispatch/operationalStatusPre
 import { userFacingError } from "@/features/dispatch/userFacingError";
 import AccountingCustomPrintSettings, { defaultCustomPrintSettings, salesPdfVariantLabels, type SalesPdfVariant, type CustomPrintPreset, type CustomProductRowsMode, type CustomPrintSettings } from '@/features/accounting/AccountingCustomPrintSettings';
 import AccountingContractPrintActions, { accountingContractTabs } from "@/features/accounting/AccountingContractPrintActions";
-import { financialRecordReviewHref } from "@/features/accounting/financialRecordReviewHref";
+import { accountingReviewReturn, financialRecordReviewHref } from "@/features/accounting/financialRecordReviewHref";
 import AccountingActionModal from "@/features/accounting/AccountingActionModal";
 import AccountingVoidWorkflowPanel, {
   type AccountingVoidWorkflowView,
@@ -106,8 +106,7 @@ export default function AccountingContractDetailPage(props: {
       : null;
   const focusedRecordId = (searchParams.get("recordId") || "").trim();
   const requestedReturn = searchParams.get("returnTo") || "";
-  const backHref = (requestedReturn === "/dashboard/accounting" || requestedReturn.startsWith("/dashboard/accounting/") || requestedReturn.startsWith("/dashboard/accounting?")) && !requestedReturn.startsWith("//")
-    ? requestedReturn : "/dashboard/accounting/contracts";
+  const backHref = accountingReviewReturn(requestedReturn, "/dashboard/accounting/contracts");
   const [data, setData] = useState<any>(null);
   const [detailSection, setDetailSection] = useState<
     "summary" | "items" | "financial" | "collections" | "compliance"

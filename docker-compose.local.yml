@@ -86,6 +86,11 @@ services:
     environment:
       NODE_ENV: development
       PORT: 5000
+      COMPOSE_PROJECT_NAME: sabalanerp-local
+      LOCAL_NATIVE_REBOOT_IMAGE_ID: ${LOCAL_NATIVE_REBOOT_IMAGE_ID:-}
+      LOCAL_NATIVE_REBOOT_EXPECTED_ACTIVE_SHA256: ${LOCAL_NATIVE_REBOOT_EXPECTED_ACTIVE_SHA256:-}
+      LOCAL_NATIVE_REBOOT_EXPECTED_OLD_BOOT_ID: ${LOCAL_NATIVE_REBOOT_EXPECTED_OLD_BOOT_ID:-}
+      LOCAL_NATIVE_REBOOT_HOST_PROOF_SHA256: ${LOCAL_NATIVE_REBOOT_HOST_PROOF_SHA256:-}
       DATABASE_URL: postgresql://postgres:${LOCAL_POSTGRES_PASSWORD:-sabalanerp-local-only}@postgres:5432/${LOCAL_POSTGRES_DATABASE:-sabalanerp}?schema=public&connection_limit=${BACKEND_DB_CONNECTION_LIMIT:-10}&pool_timeout=${BACKEND_DB_POOL_TIMEOUT_SECONDS:-10}&application_name=${DATABASE_APPLICATION_NAME:-sabalanerp-backend-local}
       JWT_SECRET: local-docker-jwt-secret-at-least-32-characters
       ACCOUNTING_RECONCILIATION_PRODUCERS: '[{"id":"local-subledger","secret":"local-subledger-reconciliation-secret-0001","sourceSystem":"ACCOUNTING_SUBLEDGER","reconciliationCodes":["SUBLEDGERS"],"legalEntityCodes":["1"]},{"id":"local-treasury","secret":"local-treasury-reconciliation-secret-0001","sourceSystem":"TREASURY","reconciliationCodes":["TREASURY"],"legalEntityCodes":["1"]},{"id":"local-inventory","secret":"local-inventory-reconciliation-secret-0001","sourceSystem":"INVENTORY","reconciliationCodes":["INVENTORY"],"legalEntityCodes":["1"]},{"id":"local-tax","secret":"local-tax-reconciliation-secret-0001","sourceSystem":"TAX","reconciliationCodes":["VAT"],"legalEntityCodes":["1"]}]'

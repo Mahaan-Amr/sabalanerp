@@ -16,6 +16,7 @@ import { AccountingFinancialTrend } from '@/features/accounting/AccountingFinanc
 import { AccountingDashboardSkeleton, AccountingOperationalMetricGrid } from '@/features/accounting/AccountingDashboardPresentation';
 import {
   pendingFinancialTrend,
+  failFinancialTrend,
   resolveFinancialTrend,
   type FinancialTrendRange,
   type FinancialTrendState,
@@ -51,11 +52,17 @@ export default function AccountingDashboardPage() {
   const [hrMetricsOwnerId, setHrMetricsOwnerId] = useState<string | null>(null);
   const [trendRange, setTrendRange] = useState<FinancialTrendRange>('6m');
   const [financialTrend, setFinancialTrend] = useState<FinancialTrendState>(pendingFinancialTrend);
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [checkingDashboard, setCheckingDashboard] = useState(false);
   const hrRequestGeneration = useRef(0);
   const workspaceRequestGeneration = useRef(0);
   const trendRequestGeneration = useRef(0);
   const trendRangeRef = useRef<FinancialTrendRange>('6m');
   const dashboardOwnerRef = useRef<string | null>(null);
+  const dashboardRevisionsRef = useRef<{ access?: string; workspace?: string; trend?: string }>({});
+  const checkInFlightRef = useRef(false);
+  const workspaceRefreshInFlightRef = useRef(false);
+  const trendRefreshInFlightRef = useRef(false);
   const rawSearchParams = searchParams.toString();
   const dashboardQuery = useMemo(
     () => canonicalizeAccountingDashboardQuery(new URLSearchParams(rawSearchParams)),
@@ -63,6 +70,26 @@ export default function AccountingDashboardPage() {
   );
   const workspace = workspaceState.data;
   const loading = workspaceState.loading;
+  const dashboardParams = useCallback((range = trendRangeRef.current) => ({
+    range,
+    due: dashboardQuery.state.due || undefined,
+    deadlineType: dashboardQuery.state.deadlineType === 'all' ? undefined : dashboardQuery.state.deadlineType,
+  }), [dashboardQuery.state.deadlineType, dashboardQuery.state.due]);
+  const revoked = (error: unknown) => {
+    const status = (error as { response?: { status?: number } })?.response?.status;
+    return status === 401 || status === 403;
+  };
+  const clearDenied = useCallback(() => {
+    workspaceRequestGeneration.current += 1;
+    trendRequestGeneration.current += 1;
+    hrRequestGeneration.current += 1;
+    dashboardRevisionsRef.current = {};
+    dispatchWorkspace({ type: 'reset' });
+    setFinancialTrend(pendingFinancialTrend());
+    setHrMetrics(clearHrHiringMetrics('unavailable'));
+    setCheckingDashboard(false);
+    setAccessDenied(true);
+  }, []);
 
   const loadDashboard = useCallback(async () => {
     const requestGeneration = ++workspaceRequestGeneration.current;
@@ -71,17 +98,15 @@ export default function AccountingDashboardPage() {
     dispatchWorkspace({ type: 'start' });
     setFinancialTrend((previous) => pendingFinancialTrend(previous, requestedRange));
     try {
-      const response = await accountingAPI.getDashboard({
-        range: requestedRange,
-        due: dashboardQuery.state.due || undefined,
-        deadlineType: dashboardQuery.state.deadlineType === 'all' ? undefined : dashboardQuery.state.deadlineType,
-      });
+      const response = await accountingAPI.getDashboard(dashboardParams(requestedRange));
       if (requestGeneration !== workspaceRequestGeneration.current) return;
       if (!response.data.success) {
         dispatchWorkspace({ type: 'failure', message: 'داده‌های حسابداری دریافت نشد.' });
         if (trendGeneration === trendRequestGeneration.current) setFinancialTrend({ status: 'error', data: null });
         return;
       }
+      dashboardRevisionsRef.current = response.data.data.revisions || {};
+      setAccessDenied(false);
       dispatchWorkspace({ type: 'success', data: response.data.data.workspace });
       if (trendGeneration === trendRequestGeneration.current) {
         setFinancialTrend(response.data.data.trendError || !response.data.data.trend
@@ -90,11 +115,33 @@ export default function AccountingDashboardPage() {
       }
     } catch (error) {
       if (requestGeneration !== workspaceRequestGeneration.current) return;
+      if (revoked(error)) { clearDenied(); return; }
       console.error('Error loading accounting workspace:', error);
       dispatchWorkspace({ type: 'failure', message: 'ارتباط با حسابداری برقرار نشد.' });
       if (trendGeneration === trendRequestGeneration.current) setFinancialTrend({ status: 'error', data: null });
     }
-  }, [dashboardQuery.state.deadlineType, dashboardQuery.state.due]);
+  }, [clearDenied, dashboardParams]);
+
+  const loadWorkspace = useCallback(async (ownerId: string, accessChanged = false) => {
+    if (workspaceRefreshInFlightRef.current) return;
+    workspaceRefreshInFlightRef.current = true;
+    const requestGeneration = ++workspaceRequestGeneration.current;
+    dispatchWorkspace({ type: 'start', preservePrivate: !accessChanged });
+    try {
+      const response = await accountingAPI.getDashboardWorkspace(dashboardParams());
+      if (requestGeneration !== workspaceRequestGeneration.current || dashboardOwnerRef.current !== ownerId) return;
+      if (!response.data.success) throw new Error('Accounting workspace read failed');
+      dashboardRevisionsRef.current.access = response.data.data.revisions.access;
+      dashboardRevisionsRef.current.workspace = response.data.data.revisions.workspace;
+      dispatchWorkspace({ type: 'success', data: response.data.data.workspace });
+    } catch (error) {
+      if (requestGeneration !== workspaceRequestGeneration.current || dashboardOwnerRef.current !== ownerId) return;
+      if (revoked(error)) { clearDenied(); return; }
+      dispatchWorkspace({ type: 'failure', message: 'به‌روزرسانی حسابداری انجام نشد.' });
+    } finally {
+      workspaceRefreshInFlightRef.current = false;
+    }
+  }, [clearDenied, dashboardParams]);
 
   const loadHrMetrics = useCallback(async (userId: string) => {
     const requestGeneration = ++hrRequestGeneration.current;
@@ -115,28 +162,65 @@ export default function AccountingDashboardPage() {
     }
   }, []);
 
-  const loadFinancialTrend = useCallback(async (range: FinancialTrendRange) => {
+  const loadFinancialTrend = useCallback(async (range: FinancialTrendRange, revision?: string) => {
+    if (revision && trendRefreshInFlightRef.current) return;
+    trendRefreshInFlightRef.current = true;
     const requestGeneration = ++trendRequestGeneration.current;
     setFinancialTrend((previous) => pendingFinancialTrend(previous, range));
     try {
       const response = await accountingAPI.getFinancialTrend(range);
       if (requestGeneration !== trendRequestGeneration.current) return;
       if (!response.data.success) {
-        setFinancialTrend({ status: 'error', data: null });
+        setFinancialTrend(failFinancialTrend);
         return;
       }
+      if (revision) dashboardRevisionsRef.current.trend = revision;
       setFinancialTrend((previous) => resolveFinancialTrend(previous, response.data.data));
-    } catch {
+    } catch (error) {
       if (requestGeneration === trendRequestGeneration.current) {
-        setFinancialTrend({ status: 'error', data: null });
+        if (revoked(error)) { clearDenied(); return; }
+        setFinancialTrend(failFinancialTrend);
       }
+    } finally {
+      if (requestGeneration === trendRequestGeneration.current) trendRefreshInFlightRef.current = false;
     }
-  }, []);
+  }, [clearDenied]);
+
+  const checkDashboard = useCallback(async (ownerId: string) => {
+    if (checkInFlightRef.current || dashboardOwnerRef.current !== ownerId || accessDenied ||
+        !workspaceState.data) return;
+    checkInFlightRef.current = true;
+    setCheckingDashboard(true);
+    try {
+      const response = await accountingAPI.getDashboardChange({ ...dashboardParams(),
+        accessRevision: dashboardRevisionsRef.current.access,
+        workspaceRevision: dashboardRevisionsRef.current.workspace,
+        trendRevision: dashboardRevisionsRef.current.trend });
+      if (dashboardOwnerRef.current !== ownerId) return;
+      if (!response.data.success) throw new Error('Accounting change check failed');
+      const change = response.data.data;
+      if (change.workspaceChanged && !workspaceRefreshInFlightRef.current) void loadWorkspace(ownerId, change.accessChanged);
+      if (change.trendChanged && !trendRefreshInFlightRef.current) void loadFinancialTrend(trendRangeRef.current, change.revisions.trend);
+    } catch (error) {
+      if (dashboardOwnerRef.current !== ownerId) return;
+      if (revoked(error)) clearDenied();
+      else {
+        dispatchWorkspace({ type: 'failure', message: 'بررسی تغییرات حسابداری انجام نشد.' });
+        setFinancialTrend(failFinancialTrend);
+      }
+    } finally {
+      checkInFlightRef.current = false;
+      setCheckingDashboard(false);
+    }
+  }, [accessDenied, clearDenied, dashboardParams, loadFinancialTrend, loadWorkspace, workspaceState.data]);
 
   useEffect(() => {
     if (authLoading) return;
     if (!currentUserId) {
       dashboardOwnerRef.current = null;
+      dashboardRevisionsRef.current = {};
+      setAccessDenied(false);
+      setCheckingDashboard(false);
       workspaceRequestGeneration.current += 1;
       trendRequestGeneration.current += 1;
       dispatchWorkspace({ type: 'reset' });
@@ -145,6 +229,9 @@ export default function AccountingDashboardPage() {
     }
     if (dashboardOwnerRef.current !== currentUserId) {
       dashboardOwnerRef.current = currentUserId;
+      dashboardRevisionsRef.current = {};
+      setAccessDenied(false);
+      setCheckingDashboard(false);
       workspaceRequestGeneration.current += 1;
       trendRequestGeneration.current += 1;
       dispatchWorkspace({ type: 'reset' });
@@ -155,8 +242,8 @@ export default function AccountingDashboardPage() {
       router.replace(`/dashboard/accounting${canonicalSearch ? `?${canonicalSearch}` : ''}`, { scroll: false });
       return;
     }
-    void loadDashboard();
-  }, [authLoading, currentUserId, dashboardQuery.params, loadDashboard, rawSearchParams, router]);
+    if (!accessDenied) void loadDashboard();
+  }, [accessDenied, authLoading, currentUserId, dashboardQuery.params, loadDashboard, rawSearchParams, router]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -178,7 +265,7 @@ export default function AccountingDashboardPage() {
           focusTimer = null;
           if (document.visibilityState !== 'visible') return;
           void loadHrMetrics(currentUserId);
-          void loadDashboard();
+          void checkDashboard(currentUserId);
         }, 100);
       }
     };
@@ -189,12 +276,13 @@ export default function AccountingDashboardPage() {
       window.removeEventListener('focus', revalidateOnFocus);
       document.removeEventListener('visibilitychange', revalidateOnFocus);
     };
-  }, [currentUserId, loadHrMetrics, loadDashboard]);
+  }, [currentUserId, loadHrMetrics, checkDashboard]);
 
   const financialTrendPanel = (
     <AccountingFinancialTrend
       range={trendRange}
       state={financialTrend}
+      checking={checkingDashboard}
       onRangeChange={(range) => {
         trendRangeRef.current = range;
         setTrendRange(range);
@@ -212,8 +300,13 @@ export default function AccountingDashboardPage() {
       <ErpInlineState kind="permission" title="برای مشاهده حسابداری وارد حساب خود شوید." />
     </ErpPage>;
   }
-  if (authLoading || dashboardOwnerRef.current !== currentUserId || loading ||
-      (workspace && hrMetricsPending)) {
+  if (accessDenied) {
+    return <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری" backHref="/dashboard">
+      <ErpInlineState kind="permission" title="دسترسی شما به داشبورد حسابداری پایان یافته است." />
+    </ErpPage>;
+  }
+  if (authLoading || dashboardOwnerRef.current !== currentUserId || (!workspace && loading) ||
+      (!workspace && hrMetricsPending)) {
     return (
       <ErpPage eyebrow="حسابداری" title="داشبورد حسابداری" backHref="/dashboard">
         <AccountingDashboardSkeleton />
@@ -294,6 +387,13 @@ export default function AccountingDashboardPage() {
         title="دسترسی‌های مالی"
         desktopColumns={2}
         items={[
+          {
+            id: 'review',
+            title: 'بررسی و پیگیری',
+            description: 'قراردادها، صورتحساب‌ها و اصلاحات',
+            href: '/dashboard/accounting/workflows/review',
+            icon: FaClipboardCheck,
+          },
           {
             id: 'ledger',
             title: 'دفترکل و کدینگ',

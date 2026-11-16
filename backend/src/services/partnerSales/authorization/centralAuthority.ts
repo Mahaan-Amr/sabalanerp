@@ -19,7 +19,8 @@ export const resolvePartnerAccountingScopedAuthority: ResolvePartnerAuthority<Pa
 async function resolvePartnerScopedAuthorityInPurpose(tx: Prisma.TransactionClient,
   input: { actorId: string; root: AuthorizationRoot }, purpose?: 'ACCOUNTING') {
   const current = await resolveScopedActions(tx, input.actorId, 'PARTNER');
-  const workspace = await resolvePartnerWorkspaceAuthority(tx, input.actorId, purpose);
+  const workspace = await resolvePartnerWorkspaceAuthority(tx, input.actorId, purpose,
+    { fencedPermissionReads: purpose === 'ACCOUNTING' });
   const explicit = await readExplicitPartnerDecisions(tx, input.actorId);
   const grants: AuthorizationEvidence<PartnerActionV2>['grants'] = [];
   for (const grant of current.grants) {

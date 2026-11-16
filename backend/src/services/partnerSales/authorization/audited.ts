@@ -1,8 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PartnerActionV2Schema, PermissionContextSchema, partnerError, type PartnerActionV2, type PartnerAuthorizationV2Port, type Result } from '@sabalanerp/partner-sales-contracts';
-import { appendAuthorizationDecision, readAuthorizationDecisions } from '../../effectiveAuthorization/audit';
-import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot } from './contracts';
+import { appendAuthorizationDecision, readAuthorizationDecisions, type AuthorizationDecisionAudit } from '../../effectiveAuthorization/audit';
+import type { AuthorizationBinding, AuthorizationEvidence, AuthorizationRoot, AuthorizationSource } from './contracts';
 import { prismaAuthorizationSource } from './prisma';
 import type { PartnerAuthorizationTarget } from './prisma';
 import { resolvePartnerAccountingScopedAuthority, resolvePartnerScopedAuthority } from './centralAuthority';
@@ -13,12 +13,15 @@ import { readActions } from './capabilities';
  * the transaction (not thrown) to retain its audit. Business commands must not
  * mutate before authorization. Rollback rolls back both mutation and evidence. */
 export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, binding: AuthorizationBinding,
-  audit: { correlationId: string; reason?: string }, target?: PartnerAuthorizationTarget): PartnerAuthorizationV2Port {
+  audit: { correlationId: string; reason?: string }, target?: PartnerAuthorizationTarget,
+  accountingAuthority: typeof resolvePartnerAccountingScopedAuthority = resolvePartnerAccountingScopedAuthority,
+  recordDecision: (event: AuthorizationDecisionAudit) => Promise<unknown> = event => appendAuthorizationDecision(tx, event),
+  evidenceSource?: AuthorizationSource<PartnerActionV2>): PartnerAuthorizationV2Port {
   if (!audit.correlationId.trim() || audit.correlationId.length > 200 || (audit.reason?.length ?? 0) > 2000) {
     throw new Error('Valid authorization audit context required');
   }
-  const source = prismaAuthorizationSource(tx, binding.purpose === 'ACCOUNTING'
-    ? resolvePartnerAccountingScopedAuthority : resolvePartnerScopedAuthority, target);
+  const source = evidenceSource ?? prismaAuthorizationSource(tx, binding.purpose === 'ACCOUNTING'
+    ? accountingAuthority : resolvePartnerScopedAuthority, target);
   return { async authorize(action, root) {
     // Malformed transport input is not a resource decision and must never be
     // copied into retained audit data. The transport owns request-error logs.
@@ -35,15 +38,18 @@ export function createAuditedPartnerAuthorization(tx: Prisma.TransactionClient, 
     if (result.ok && isAdmin && !readActions.has(action) && !audit.reason?.trim()) {
       result = { ok: false, error: partnerError('FORBIDDEN') };
     }
-    const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
-    await appendAuthorizationDecision(tx, { domain: 'PARTNER', actorId: binding.actorId, action,
+    // Source evidence already carries the database evaluation time. Only
+    // early policy denials, which do not read evidence, need a separate clock.
+    const evaluatedAt = evidence ? new Date(evidence.evaluatedAt)
+      : (await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`)[0].now;
+    await recordDecision({ domain: 'PARTNER', actorId: binding.actorId, action,
       rootKind: root.kind, rootId: root.id, purpose: binding.purpose, channel: binding.channel,
       allowed: result.ok, isAdmin, code: result.ok ? 'ALLOWED' : result.error.code,
       scope: result.ok ? result.value.scope : null, reason: audit.reason?.trim() || null, correlationId: audit.correlationId,
       authorizationRevision: evidence?.authorizationRevision ?? null, lifecycleRevision: evidence?.resource?.lifecycleRevision ?? null,
       assignmentId: evidence?.resource?.assignment?.assignmentId ?? null,
       assignmentRevision: evidence?.resource?.assignment?.revision ?? null,
-      evaluatedAt: evidence ? new Date(evidence.evaluatedAt) : clock.now,
+      evaluatedAt,
       evaluatedGrantIds: evidence?.grants.filter(grant => grant.rootKind === root.kind && grant.purpose === binding.purpose)
         .flatMap(grant => grant.provenance ? [grant.provenance.grantId] : []) ?? [],
     });

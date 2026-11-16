@@ -12,7 +12,7 @@ test('capture-only unchanged proof ignores births but refuses actual code, confi
 });
 test('capture-only reports actual deadline overrun and refuses old missing-host checkpoint metadata',()=>{
  const checkpoint={captureMethod:'PROTECTED_MAINTENANCE_COMPLETE',sourceMachineUuidSha256:'a'.repeat(64),sourceKernelBootIdSha256:'b'.repeat(64),checksum:'c'.repeat(64),localVerified:true,remoteVerified:true,restoreVerified:true,sourceDatabase:{name:'actual',oid:'123',systemIdentifier:'456'}};
- const raw=()=>Buffer.from(JSON.stringify({ok:true,checkpoint})+'\n');assert.equal(checkpointCompletion(raw(),599,{}).pauseQualified,true);const late=checkpointCompletion(raw(),601,{});assert.equal(late.pauseQualified,false);assert.equal(late.mutationStarted,false);assert.equal(late.independentRestoreQualified,false);delete checkpoint.sourceMachineUuidSha256;assert.throws(()=>checkpointCompletion(raw(),10,{}));
+ const raw=()=>Buffer.from(JSON.stringify({ok:true,checkpoint})+'\n');const onTime=checkpointCompletion(raw(),900,{});assert.equal(onTime.pauseBudgetSeconds,900);assert.equal(onTime.pauseQualified,true);const late=checkpointCompletion(raw(),901,{});assert.equal(late.pauseQualified,false);assert.equal(late.mutationStarted,false);assert.equal(late.independentRestoreQualified,false);delete checkpoint.sourceMachineUuidSha256;assert.throws(()=>checkpointCompletion(raw(),10,{}));
 });
 
 test('capture-only accepts only the exact prebuilt control image and frozen operations source',()=>{

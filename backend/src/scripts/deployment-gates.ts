@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import {createHash} from 'node:crypto';
 import { disconnectDatabase, prisma } from '../lib/prisma';
 import { assertMandatoryDeploymentGates, connectionUtilizationDecision, runMandatoryDeploymentGates } from '../services/deploymentGates';
 import { assertRemoteCheckpointFingerprint } from '../services/deploymentCheckpointStorage';
@@ -11,13 +10,8 @@ import { sha256File } from '../services/recoveryCrypto';
 import { validateLiveStoredFileReferences } from '../services/systemRecoveryEngine';
 import { verifyShipmentStatementDeploymentState } from '../services/shipmentStatementOperations';
 import { verifyInquiryBaseline, inspectInquiryBaseline } from '../services/inquiryMigrationPlan';
-import {readOnlineDeploymentGateContext} from '../services/onlineDeploymentGateContext';
-import {readOnlineCheckpointDirectory,assertOnlineCheckpointDirectoryUnchanged} from '../services/onlineCheckpointDirectory';
 
 const execFileAsync = promisify(execFile);
-const canonicalGateValue=(value:any):any=>Array.isArray(value)?value.map(canonicalGateValue):value&&typeof value==='object'
-  ?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonicalGateValue(value[key])])):value;
-const createCheckpointSha=(value:any)=>createHash('sha256').update(JSON.stringify(canonicalGateValue(value))).digest('hex');
 const deploymentId = String(process.env.DEPLOYMENT_ID || '').trim();
 const reportRoot = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
 const gateMode = process.env.DEPLOYMENT_GATE_MODE || 'RELEASE';
@@ -64,20 +58,7 @@ const performanceExportStorageGate = async () => {
 
 const main = async () => {
   if (!deploymentId) throw Object.assign(new Error('DEPLOYMENT_ID is required.'), { code: 'DEPLOYMENT_CONFIGURATION_MISSING' });
-  const onlineContextFile=process.env.DEPLOYMENT_ONLINE_GATE_CONTEXT;
-  const online=onlineContextFile?readOnlineDeploymentGateContext(onlineContextFile,{deploymentId,releaseId:String(process.env.DEPLOYMENT_RELEASE_ID||'')}):null;
-  const assertControlLedger=async()=>{
-    if(!online?.decision.controlRunner)return;
-    const rows=await prisma.$queryRaw<Array<{value:string}>>`SELECT coalesce(json_agg(t ORDER BY migration_name,id),'[]'::json)::text AS value FROM public._prisma_migrations t`;
-    if(rows.length!==1||createHash('sha256').update(rows[0].value).digest('hex')!==online.decision.controlRunner.migrationLedgerSha256)throw Error('ONLINE_GATE_CONTROL_MIGRATION_LEDGER_CHANGED');
-  };
-  if(online){
-    if(!releaseMode)throw Error('ONLINE_RELEASE_GATES_MODE_REQUIRED');
-    const rows=await prisma.$queryRawUnsafe<Array<{phase:string}>>('SELECT phase FROM deployment_operations WHERE id=$1 AND "activeKey"=\'production\' AND "leaseExpiresAt">clock_timestamp()',deploymentId);
-    if(rows.length!==1||!['ONLINE_READY','ONLINE_PUBLISHING','ONLINE_ROLLBACK_PUBLISHING','GATES_PASSED','RELEASE_STARTED'].includes(rows[0].phase))throw Error('ONLINE_GATE_OWNED_LEASE_REQUIRED');
-  }
-  await assertControlLedger();
-  const health=(role:'backend'|'frontend'|'inquiry'|'nginx',fallback:string)=>online?.decision.targets[role].url||fallback;
+  if (process.env.DEPLOYMENT_ONLINE_GATE_CONTEXT) throw new Error('ONLINE_GATE_RETIRED');
   const inquiryDatabase = process.env.INQUIRY_RECOVERY_SOURCE_DIR
     ? path.join(process.env.INQUIRY_RECOVERY_SOURCE_DIR, 'inquiry.db')
     : '/app/recovery-sources/inquiry/inquiry.db';
@@ -131,13 +112,14 @@ const main = async () => {
         return { integrity: 'ok', identity };
       },
     },
-    { name: 'backend-readiness', run: httpGate(health('backend','http://backend:5000/api/ready')) },
-    { name: 'frontend-health', run: httpGate(health('frontend','http://frontend:3000')) },
-    { name: 'inquiry-health', run: httpGate(health('inquiry','http://inquiry:3001')) },
-    { name: 'nginx-health', run: httpGate(health('nginx','http://nginx/healthz')) },
+    { name: 'backend-readiness', run: httpGate('http://backend:5000/api/ready') },
+    { name: 'frontend-health', run: httpGate('http://frontend:3000') },
+    { name: 'inquiry-health', run: httpGate('http://inquiry:3001') },
+    { name: 'nginx-health', run: httpGate('http://nginx/healthz') },
     { name: 'contracts-storage', run: writableDirectoryGate('/app/storage/contracts') },
     { name: 'hr-storage', run: writableDirectoryGate('/app/storage/hr-hiring') },
     { name: 'accounting-storage', run: writableDirectoryGate('/app/storage/accounting-contracts') },
+    { name: 'dispatch-storage', run: writableDirectoryGate('/app/storage/dispatch-documents') },
     { name: 'support-storage', run: writableDirectoryGate('/app/storage/support-tickets') },
     { name: 'performance-export-storage', run: performanceExportStorageGate },
     { name: 'uploads-storage', run: writableDirectoryGate('/app/uploads') },
@@ -145,17 +127,8 @@ const main = async () => {
     ...(!previousUnchangedMode ? [{
       name: 'checkpoint-manifest',
       run: async () => {
-        const operation=online?await prisma.deploymentOperation.findUnique({where:{id:deploymentId},select:{checkpointJson:true}}):null;
-        const checkpoint:any=online?operation?.checkpointJson:JSON.parse(await fs.promises.readFile(checkpointPath, 'utf8'));
+        const checkpoint:any=JSON.parse(await fs.promises.readFile(checkpointPath, 'utf8'));
         if(!checkpoint)throw Error('DEPLOYMENT_CHECKPOINT_REQUIRED');
-        if(online&&checkpoint.captureMethod==='ONLINE_COHERENT_WAL'){
-          const metadataSha=createCheckpointSha(checkpoint.canonicalMetadata||checkpoint);
-          if(metadataSha!==online.decision.checkpointSha256)throw Error('ONLINE_GATE_CHECKPOINT_CHANGED');
-          const remoteRoot=String(process.env.DEPLOYMENT_REMOTE_MOUNT||'');
-          const directory=await readOnlineCheckpointDirectory(remoteRoot,path.join(remoteRoot,path.basename(checkpoint.remotePath)));
-          await assertOnlineCheckpointDirectoryUnchanged(directory.evidence);
-          return {checksum:checkpoint.checksum,releaseId:checkpoint.releaseId,remoteReadBack:true,canonicalMetadataSha256:metadataSha};
-        }
         if (!checkpoint.localVerified || !checkpoint.remoteVerified || !checkpoint.manifestReadable) throw new Error('Checkpoint verification flags are incomplete.');
         const configuredRemoteRoot = String(process.env.DEPLOYMENT_REMOTE_MOUNT || '').trim();
         if (!configuredRemoteRoot) throw new Error('DEPLOYMENT_REMOTE_MOUNT is required for checkpoint read-back.');
@@ -192,7 +165,6 @@ const main = async () => {
     },
   ]);
 
-  await assertControlLedger();
   const report = {
     format: 'sabalan-deployment-report',
     version: 1,
@@ -201,8 +173,6 @@ const main = async () => {
     releaseId: process.env.DEPLOYMENT_RELEASE_ID,
     targetCommit: process.env.DEPLOYMENT_TARGET_COMMIT,
     createdAt: new Date().toISOString(),
-    ...(online?{manifestSha256:online.decision.manifestSha256,checkpointSha256:online.decision.checkpointSha256,originalGateContextSha256:online.sha256,originalTargets:online.decision.targets,
-      ...(online.decision.controlRunner?{originalControlRunner:online.decision.controlRunner}:{})}:{}),
     gates,
   };
   await fs.promises.mkdir(reportRoot, { recursive: true });
@@ -216,7 +186,7 @@ const main = async () => {
   await fs.promises.writeFile(coordinationPath, serialized, { encoding: 'utf8', mode: 0o600 });
   if (releaseMode) await prisma.deploymentOperation.update({ where: { id: deploymentId }, data: { reportJson: report as any } });
   assertMandatoryDeploymentGates(gates);
-  console.log(JSON.stringify({ ok: true, reportPath, gates, ...(online?{report}: {}) }));
+  console.log(JSON.stringify({ ok: true, reportPath, gates }));
 };
 
 main()

@@ -7,6 +7,8 @@ repo_root="$2"
 operations_root="$3"
 required_local="$4"
 required_remote="$5"
+compose_file="${6:-docker-compose.prod.yml}"
+[ "$compose_file" = docker-compose.prod.yml ] || [ "$compose_file" = docker-compose.rehearsal.yml ] || { echo 'STORAGE_COMPOSE_INVALID' >&2; exit 1; }
 # Validate the actual distinct operations identity before any cleanup request.
 # Inspection only reads local prerequisites under this inherited host lock.
 node "$operations_root/deploy/scripts/backup-retention-host.mjs" --inspect "$env_file"
@@ -20,12 +22,22 @@ operations_key="$(env_value DEPLOYMENT_BACKUP_OPERATIONS_SSH_KEY_FILE)"
 backup_known_hosts="$(env_value DEPLOYMENT_BACKUP_KNOWN_HOSTS_FILE)"
 remote_root="$(env_value DEPLOYMENT_REMOTE_MOUNT_HOST)"
 report_root="$(env_value DEPLOYMENT_REPORT_DIR_HOST)"
-project="$(docker compose --env-file "$env_file" -f "$repo_root/docker-compose.prod.yml" config --format json | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>console.log(JSON.parse(s).name))')"
+project="$(docker compose --env-file "$env_file" -f "$repo_root/$compose_file" config --format json | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>console.log(JSON.parse(s).name))')"
 case "$project" in ''|*[!a-z0-9_-]*) echo 'STORAGE_PROJECT_INVALID' >&2; exit 1;; esac
 for value in "$backup_host" "$backup_user" "$operations_user"; do
   case "$value" in ''|-*|*[!a-zA-Z0-9._:-]*) echo 'STORAGE_BACKUP_HOST_INVALID' >&2; exit 1;; esac
 done
-[ "$backup_user" = sabalan-backup ] && [ "$operations_user" = sabalan-backup-ops ] || { echo 'STORAGE_BACKUP_ACCOUNT_INVALID' >&2; exit 1; }
+backup_target="$(env_value DEPLOYMENT_BACKUP_TARGET)"
+if [ "$backup_target" = qa ]; then
+  [ "$compose_file" = docker-compose.rehearsal.yml ] \
+    && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}" ] \
+    && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ] \
+    && [ "$backup_user" = sabalan-qa-backup ] \
+    && [ "$operations_user" = sabalan-qa-backup-ops ] || { echo 'STORAGE_QA_BACKUP_TARGET_INVALID' >&2; exit 1; }
+else
+  [ -z "$backup_target" ] || [ "$backup_target" = production ] || { echo 'STORAGE_BACKUP_TARGET_INVALID' >&2; exit 1; }
+  [ "$backup_user" = sabalan-backup ] && [ "$operations_user" = sabalan-backup-ops ] || { echo 'STORAGE_BACKUP_ACCOUNT_INVALID' >&2; exit 1; }
+fi
 [ -r "$backup_key" ] && [ -r "$operations_key" ] && [ -r "$backup_known_hosts" ] || { echo 'STORAGE_BACKUP_KEY_MISSING' >&2; exit 1; }
 recovery_root="$(docker volume inspect "${project}_backend_recovery" --format '{{.Mountpoint}}')"
 coordination_root="$(docker volume inspect "${project}_recovery_coordination" --format '{{.Mountpoint}}')"
@@ -33,7 +45,7 @@ docker_root="$(docker info --format '{{.DockerRootDir}}')"
 mount_source="$(findmnt --noheadings --output SOURCE --target "$remote_root")"
 [ "$mount_source" = "$backup_user@$backup_host:/checkpoints" ] || { echo 'STORAGE_BACKUP_MOUNT_IDENTITY_MISMATCH' >&2; exit 1; }
 set --
-for volume in postgres_data backend_storage_contracts backend_storage_hr_hiring backend_storage_accounting_contracts backend_storage_support_tickets backend_storage_performance_exports backend_uploads inquiry_data recovery_coordination; do
+for volume in postgres_data backend_storage_contracts backend_storage_hr_hiring backend_storage_accounting_contracts backend_storage_dispatch_documents backend_storage_support_tickets backend_storage_performance_exports backend_uploads inquiry_data recovery_coordination; do
   source_root="$(docker volume inspect "${project}_$volume" --format '{{.Mountpoint}}')"
   set -- "$@" "$source_root"
 done

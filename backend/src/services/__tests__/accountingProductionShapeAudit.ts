@@ -1,0 +1,48 @@
+import { PrismaClient } from '@prisma/client';
+
+/** Read-only preflight and post-cleanup witness for the existing local database. */
+export async function auditAccountingProductionShape(database: PrismaClient) {
+  const [ordinary, cases, committed, internalFinancialRecords, incomplete] = await Promise.all([
+    database.salesContract.count({ where: { partnerCaseId: null } }),
+    database.partnerSaleCase.count(),
+    database.partnerSaleCase.count({ where: { state: 'COMMITTED' } }),
+    database.accountingFinancialRecord.count({ where: { sourceKind: 'PARTNER_INTERNAL_RECORD' } }),
+    database.partnerSaleCase.findMany({
+      where: { state: 'COMMITTED' },
+      select: { id: true, headRevision: true, committedRevision: true,
+        internalRecordId: true, customerContractId: true, commitmentEventId: true,
+        head: { select: { revision: true, internalProjection: true, customerProjection: true } },
+        commitmentRevision: { select: { revision: true } },
+        commitmentEvent: { select: { id: true, type: true } },
+        internalRecord: { select: { id: true } },
+        customerContract: { select: { id: true } },
+      },
+    }),
+  ]);
+  const missingWitnesses = incomplete.filter(row =>
+    !row.head || row.head.revision !== row.headRevision ||
+    !row.commitmentRevision || row.commitmentRevision.revision !== row.committedRevision ||
+    !row.internalRecord || row.internalRecord.id !== row.internalRecordId ||
+    !row.customerContract || row.customerContract.id !== row.customerContractId ||
+    !row.commitmentEvent || row.commitmentEvent.id !== row.commitmentEventId ||
+    row.commitmentEvent.type !== 'CASE_COMMITTED' ||
+    !row.head.internalProjection || !row.head.customerProjection,
+  ).map(row => row.id);
+  return { ordinary, cases, committed, internalFinancialRecords, missingWitnesses };
+}
+
+if (process.argv[1]?.endsWith('accountingProductionShapeAudit.ts')) {
+  const url = new URL(process.env.CONTRACT_RECOVERY_TEST_DATABASE_URL ?? '');
+  if (url.hostname !== '127.0.0.1' || url.port !== '55432' || url.pathname !== '/sabalanerp') {
+    throw new Error('The existing sabalanerp-local PostgreSQL URL is required');
+  }
+  url.searchParams.set('connection_limit', '2');
+  url.searchParams.set('pool_timeout', '10');
+  const database = new PrismaClient({ datasources: { db: { url: url.toString() } } });
+  auditAccountingProductionShape(database).then(result => {
+    console.log(JSON.stringify(result));
+  }).catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  }).finally(() => database.$disconnect());
+}

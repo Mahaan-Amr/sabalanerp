@@ -1,11 +1,71 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { compileProtectedBridgeMigration } from '../protectedBridgeMigrations';
+import { compileProtectedBridgeMigration, compileProtectedCurrentRelease,
+  assertProtectedCurrentReleaseRetryEvidence } from '../protectedBridgeMigrations';
+
+test('same-operation retry rejects changed quantity, duty, or waybill evidence', () => {
+  const owner = { deploymentId: 'operation-1', releaseId: 'release-1', leaseToken: 'lease-1' };
+  const receipt = { deploymentId: owner.deploymentId, releaseId: owner.releaseId,
+    quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's' };
+  const observed = { quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's' };
+  assert.doesNotThrow(() => assertProtectedCurrentReleaseRetryEvidence(receipt, owner, observed));
+  for (const key of Object.keys(observed) as Array<keyof typeof observed>) {
+    assert.throws(() => assertProtectedCurrentReleaseRetryEvidence(receipt, owner,
+      { ...observed, [key]: 'changed' }), /RETRY_DATA_DRIFT/);
+  }
+  assert.throws(() => assertProtectedCurrentReleaseRetryEvidence({ ...receipt, deploymentId: '' }, owner, observed),
+    /HISTORY_UNPROVEN/);
+  assert.doesNotThrow(() => assertProtectedCurrentReleaseRetryEvidence(receipt,
+    { ...owner, deploymentId: 'later-operation' }, observed));
+});
+
+test('the complete current release is admitted only with its reviewed ordered SQL bytes', () => {
+  const directory = path.resolve(__dirname, '../../../prisma/migrations');
+  const names = [
+    '20261021120000_attendance_effective_rest_windows',
+    '20261025120000_preserve_exact_fulfillment_quantities',
+    '20261028090000_sales_dispatch_invoices',
+    '20261028093000_sales_invoice_evidence_constraints',
+    '20261028100000_sales_invoice_correction_evidence',
+    '20261031130000_purchasing_operational_workspace',
+    '20261101160000_supply_chain_exact_purchase_quantities',
+    '20261101170000_purchasing_private_attachments',
+    '20261102120000_accounting_financial_approval_receipts',
+    '20261104150000_purchasing_duty_optional_deadline',
+    '20261107000100_restart_dispatch_waybill_sequence_at_zero',
+    '20261107120000_legacy_waybill_reconstructions',
+    '20261108000100_start_new_waybill_numbers_at_one',
+    '20261115120000_accounting_dashboard_change_versions',
+    '20261115121000_accounting_dashboard_partner_sources',
+    '20261115122000_accounting_dashboard_partner_revision_key',
+    '20261115123000_accounting_dashboard_presentation_sources',
+    '20261115124000_accounting_dashboard_private_owner_scope',
+    '20261115125000_accounting_dashboard_mixed_financial_owner',
+    '20261115130000_accounting_dashboard_user_name_scope',
+    '20261115130000_loading_cancellation_duty',
+    '20261115131000_accounting_private_marker_index',
+  ];
+  const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
+  const release = compileProtectedCurrentRelease(files);
+  assert.deepEqual(release.map(row => row.name), names);
+  assert.ok(release.every(row => row.statements.length > 0));
+  assert.ok(release.flatMap(row => row.statements).every(sql => !/^\s*(?:BEGIN|COMMIT)\s*;?\s*$/i.test(sql)));
+  assert.equal(createHash('sha256').update(release.slice(0, 12).map(row => row.sha256).join('\n')).digest('hex'),
+    'af48acb67350bc35b1ac156029d41011a9dc301cc605bce2729e978ae65e07e2');
+  assert.ok(!release[10].statements.join(' ').includes('setval('));
+  assert.equal(release[12].statements.length, 2);
+  assert.match(release[12].statements[0], /^LOCK TABLE/);
+  assert.ok(release.at(-1)!.tables.includes('accounting_financial_records'));
+  assert.throws(() => compileProtectedCurrentRelease(files.slice(1)), /CURRENT_RELEASE_SET_UNPROVEN/);
+  const changed = files.map(([name, bytes], index) => index === 3 ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
+  assert.throws(() => compileProtectedCurrentRelease(changed), /SQL_IDENTITY_MISMATCH/);
+});
 
 test('protected bootstrap accepts only the reviewed complete SQL bytes, including original comments and line endings', () => {
-  for (const name of ['20261014120000_hr_vehicle_assignment_plans', '20261014140000_online_deployment_control']) {
+  for (const name of ['20261014120000_hr_vehicle_assignment_plans']) {
     const bytes = fs.readFileSync(path.resolve(__dirname, '../../../prisma/migrations', name, 'migration.sql'));
     assert.equal(compileProtectedBridgeMigration(name, bytes).name, name);
     for (const position of [0, Math.floor(bytes.length / 2), bytes.length - 1]) {
@@ -17,7 +77,7 @@ test('protected bootstrap accepts only the reviewed complete SQL bytes, includin
       assert.throws(() => compileProtectedBridgeMigration(name, changed), /SQL_IDENTITY_MISMATCH/);
     }
   }
-  for (const name of ['toString', '__proto__', '20261014140001_other', '../20261014140000_online_deployment_control']) {
+  for (const name of ['toString', '__proto__', '20261014140000_online_deployment_control', '../20261014140000_online_deployment_control']) {
     assert.throws(() => compileProtectedBridgeMigration(name, Buffer.from('CREATE TABLE arbitrary (id text)')), /MIGRATION_UNSUPPORTED/);
   }
 });

@@ -1,6 +1,5 @@
 import type { Notification, Prisma, PrismaClient } from '@prisma/client';
 import { startBackgroundJob } from './backgroundJobLifecycle';
-import { loadOnlineRuntimeScope } from './onlineRuntimeScope';
 import webPush from 'web-push';
 import {
   materializeNotificationEvent,
@@ -208,10 +207,7 @@ export const deliverPendingNotificationOutbox = async (
   publishRealtime: RealtimeNotificationPublisher,
   now = new Date(),
 ): Promise<{ delivered: number; failed: number; businessCode: string }> => {
-  const onlineOwner=loadOnlineRuntimeScope();
-  if(onlineOwner&&onlineOwner.scope.purpose!=='jobs')throw Error('RUNTIME_WORKER_OWNERSHIP_REQUIRED');
-  // Online incarnations never reclaim an original PROCESSING owner by age.
-  if(!onlineOwner)await prisma.notificationOutbox.updateMany({
+  await prisma.notificationOutbox.updateMany({
     where: {
       status: 'PROCESSING',
       claimedAt: { lt: new Date(now.getTime() - 5 * 60 * 1_000) },
@@ -264,7 +260,7 @@ export const deliverPendingNotificationOutbox = async (
         });
         delivered += 1;
       } catch (error) {
-        const outcomeUnknown=!!onlineOwner&&!!error&&typeof error==='object'
+        const outcomeUnknown=!!error&&typeof error==='object'
           &&'realtimeOutcomeUnknown'in error&&error.realtimeOutcomeUnknown===true;
         await prisma.notificationDeliveryAttempt.create({
           data: {
@@ -329,7 +325,7 @@ export const deliverPendingNotificationOutbox = async (
   }
 
   if (unknown) console.error('NOTIFICATION_PROVIDER_OUTCOME_UNKNOWN', { outboxId: candidate.id, devices: unknown });
-  if (failed&&!(onlineOwner&&unknown)) {
+  if (failed && !unknown) {
     const delaySeconds = Math.min(300, 2 ** Math.min(candidate.attempts + 1, 8));
     await prisma.notificationOutbox.update({
       where: { id: candidate.id },

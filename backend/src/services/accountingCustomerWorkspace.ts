@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { projectCustomerAccountPrisma, projectCustomerAccountsPrisma, customerStatementMovements, recordCustomerReceiptPrisma, allocateCustomerReceiptPrisma, allocateCustomerCreditPrisma, reverseCustomerAllocationPrisma, requireSettlementSource, requireCustomerConsumptionDate } from './accountingCustomerTreasuryPrisma';
+import { requireAllocationReservationWithin } from './accountingCustomerAllocationFence';
 import { collectedCustomerCheckRials } from './accountingCustomerReceiptBalance';
 import { resolveCustomerReceiptWithin, type CustomerResolvedReceiptShare } from './accountingCustomerReceiptResolution';
 import { requireCustomerReceiptSourceDate } from './accountingCustomerReceiptSource';
@@ -385,6 +386,7 @@ export async function recordCustomerAccountOperation(database: PrismaClient, id:
     let customerAccount = rule.receivableAccountId;
     let counterAccount = input.counterAccountId;
     if (input.kind === 'REFUND') {
+      await requireAllocationReservationWithin(tx, profile.id);
       if (Boolean(input.receiptId) === Boolean(input.creditItemId)) return fail('REFUND_SOURCE_REQUIRED', 'یک دریافت تخصیص‌نیافته یا بستانکاری را برای استرداد انتخاب کنید.', 400);
       await requireCustomerConsumptionDate(tx, { receiptId: input.receiptId, creditItemId: input.creditItemId }, input.occurredAt);
       if (input.receiptId) {

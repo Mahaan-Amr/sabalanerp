@@ -23,7 +23,7 @@ import { collectedCustomerCheckRials, effectiveCustomerReceiptRials } from './ac
 import { requireNewCustomerSaleAfterOpening } from './accountingCustomerSaleOpeningGuard';
 import { requireCustomerReceiptSourceDate } from './accountingCustomerReceiptSource';
 import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
-import { serializeCustomerAllocationWithin } from './accountingCustomerAllocationFence';
+import { requireAllocationReservationWithin } from './accountingCustomerAllocationFence';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 const customerTransaction = <T>(database: Database, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> =>
@@ -814,22 +814,6 @@ export async function lockCustomerReceiptWithin(tx: Prisma.TransactionClient, re
   return source?.profile?.partySourceId;
 }
 
-async function requireAllocationReservationWithin(tx: Prisma.TransactionClient, profileId: string, input?: {
-  sourcePlanHash?: string; correlationId: string; actor: CustomerTreasuryActor;
-}) {
-  await serializeCustomerAllocationWithin(tx, profileId);
-  const pending = await tx.accountingCustomerAllocationIntent.findFirst({
-    where: { profileId, state: 'PENDING' },
-    select: { idempotencyKey: true, commandHash: true, ownerId: true },
-  });
-  if (pending && (pending.idempotencyKey !== input?.correlationId ||
-    pending.commandHash !== input?.sourcePlanHash || pending.ownerId !== input?.actor.id)) {
-    throw new AccountingCustomerTreasuryError('ALLOCATION_INTENT_PENDING', 'ابتدا درخواست تخصیص معلق این مشتری را تعیین تکلیف کنید.', 409);
-  }
-  if (!pending && input?.sourcePlanHash) {
-    throw new AccountingCustomerTreasuryError('ALLOCATION_INTENT_REQUIRED', 'درخواست تخصیص تأییدشده پیدا نشد.', 409);
-  }
-}
 
 export const allocateCustomerReceiptPrisma = async (database: Database, input: {
   treasuryTransactionId: string; allocations: Array<{ openItemId: string; amountRials: bigint }>;

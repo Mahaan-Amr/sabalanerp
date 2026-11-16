@@ -28,13 +28,16 @@ const run = async () => {
     console.log(`Pickup candidate passed in ${database.databaseName} with ${migrations.length} applied migrations.`);
   } finally {
     await client.$disconnect();
-    try {
-      await database.cleanup();
-    } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('still has sessions or prepared transactions')) throw error;
-      // The child Prisma process can release its final PostgreSQL session after exit.
-      await new Promise(resolve => setTimeout(resolve, 5_000));
-      await database.cleanup();
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      try {
+        await database.cleanup();
+        break;
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes('still has sessions or prepared transactions')
+          || attempt === 11) throw error;
+        // A full-data clone can trigger autovacuum after the test clients disconnect.
+        await new Promise(resolve => setTimeout(resolve, 5_000));
+      }
     }
     console.log(`Temporary database ${database.databaseName} removed.`);
   }

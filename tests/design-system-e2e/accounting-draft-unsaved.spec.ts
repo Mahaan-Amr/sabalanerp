@@ -24,6 +24,12 @@ test('unsaved invoice changes can be kept or discarded when changing sections', 
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'بازگشت به ویرایش' }).click();
   await expect(invoice).toHaveValue('changed');
+  const unloadDialog = page.waitForEvent('dialog');
+  await page.evaluate(() => { location.reload(); });
+  const warning = await unloadDialog;
+  expect(warning.type()).toBe('beforeunload');
+  await warning.dismiss();
+  await expect(invoice).toHaveValue('changed');
   await page.evaluate(() => history.back());
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'بازگشت به ویرایش' }).click();

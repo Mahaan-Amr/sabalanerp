@@ -20,6 +20,7 @@ test('admitted grouped posting commits exact shares once and reverses independen
       require('../accountingCustomerWorkspace') as typeof import('../accountingCustomerWorkspace');
     const { prepareAdmittedCustomerAllocationIntent, cancelCustomerAllocationIntent, readCustomerAllocationIntentByCommand } =
       require('../accountingCustomerAllocationIntent') as typeof import('../accountingCustomerAllocationIntent');
+    const { allocateCustomerReceiptPrisma } = require('../accountingCustomerTreasuryPrisma') as typeof import('../accountingCustomerTreasuryPrisma');
     const f = await customerFinanceFixture(url!);
     try {
       const customer = await f.customer();
@@ -49,7 +50,19 @@ test('admitted grouped posting commits exact shares once and reverses independen
       assert.equal(await f.db.accountingSettlementAllocation.count(), 0);
       assert.deepEqual(await cancelCustomerAllocationIntent(f.db, customer, invalid), { status: 'CANCELED' });
       await assert.rejects(recordCustomerWorkspaceTreasury(f.db, customer, invalid), { code: 'ALLOCATION_INTENT_NOT_PENDING' });
-      await prepareAdmittedCustomerAllocationIntent(f.db, customer, command);
+      await assert.rejects(f.db.$transaction(async tx => {
+        // Establish the old snapshot before preparing the request on another connection.
+        assert.equal(await tx.accountingCustomerAllocationIntent.count({ where: { state: 'PENDING' } }), 0);
+        await prepareAdmittedCustomerAllocationIntent(f.db, customer, command);
+        const key = randomUUID();
+        await allocateCustomerReceiptPrisma(tx, {
+          treasuryTransactionId: receipt.id, allocations: [{ openItemId: debt.id, amountRials: 1n }],
+          bookId: f.book.id, fiscalYearId: f.year.id, periodId: f.common.periodId,
+          customerAdvanceLedgerId: f.advance.id, receivableLedgerId: f.receivable.id,
+          documentDate: f.common.occurredAt, idempotencyKey: key, correlationId: key, actor: f.actor,
+        });
+      }, { isolationLevel: 'Serializable', timeout: 30_000 }), /40001|serialize|write conflict/i);
+      assert.equal(await f.db.accountingSettlementAllocation.count(), 0);
       await assert.rejects(recordCustomerWorkspaceTreasury(f.db, customer, {
         ...f.common, kind: 'ALLOCATION', amountRials: 0n, receiptId: receipt.id,
         allocations: [{ openItemId: debt.id, amountRials: 1n }], idempotencyKey: randomUUID(),

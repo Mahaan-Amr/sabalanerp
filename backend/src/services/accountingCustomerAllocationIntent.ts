@@ -3,6 +3,7 @@ import { AccountingCustomerTreasuryError } from './accountingCustomerTreasury';
 import { hashAccountingEvidence } from './accountingLedgerFoundation';
 import { resolveCustomerWorkspace, type recordCustomerWorkspaceTreasury } from './accountingCustomerWorkspace';
 import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
+import { serializeCustomerAllocationWithin } from './accountingCustomerAllocationFence';
 
 type AllocationInput = Parameters<typeof recordCustomerWorkspaceTreasury>[2];
 const fail = (code: string, message: string, status = 409): never => { throw new AccountingCustomerTreasuryError(code, message, status); };
@@ -49,6 +50,7 @@ export async function prepareCustomerAllocationIntent(database: PrismaClient, ac
     }
     if (await tx.accountingCustomerCommand.findUnique({ where: { idempotencyKey: input.idempotencyKey }, select: { id: true } }))
       return fail('ALLOCATION_INTENT_RECONCILIATION_REQUIRED', 'نتیجه درخواست قبلی باید بررسی شود.');
+    await serializeCustomerAllocationWithin(tx, resolved.profile.id);
     if (await tx.accountingCustomerAllocationIntent.findFirst({ where: { profileId: resolved.profile.id, state: 'PENDING' }, select: { id: true } }))
       return fail('ALLOCATION_INTENT_PENDING', 'درخواست قبلی این حساب هنوز تعیین تکلیف نشده است.');
     const created = await tx.accountingCustomerAllocationIntent.create({ data: {
@@ -72,6 +74,7 @@ export async function cancelCustomerAllocationIntent(database: PrismaClient, acc
     const identity = {
       idempotencyKey: input.idempotencyKey, profileId: resolved.profile.id, ownerId: input.actor.id, accountId, commandHash,
     };
+    await serializeCustomerAllocationWithin(tx, resolved.profile.id);
     const canceled = await tx.accountingCustomerAllocationIntent.updateMany({
       where: { ...identity, state: 'PENDING' }, data: { state: 'CANCELED' },
     });

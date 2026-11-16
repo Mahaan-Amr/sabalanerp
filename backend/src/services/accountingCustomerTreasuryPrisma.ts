@@ -23,6 +23,7 @@ import { collectedCustomerCheckRials, effectiveCustomerReceiptRials } from './ac
 import { requireNewCustomerSaleAfterOpening } from './accountingCustomerSaleOpeningGuard';
 import { requireCustomerReceiptSourceDate } from './accountingCustomerReceiptSource';
 import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
+import { serializeCustomerAllocationWithin } from './accountingCustomerAllocationFence';
 
 type Database = PrismaClient | Prisma.TransactionClient;
 const customerTransaction = <T>(database: Database, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> =>
@@ -816,6 +817,7 @@ export async function lockCustomerReceiptWithin(tx: Prisma.TransactionClient, re
 async function requireAllocationReservationWithin(tx: Prisma.TransactionClient, profileId: string, input?: {
   sourcePlanHash?: string; correlationId: string; actor: CustomerTreasuryActor;
 }) {
+  await serializeCustomerAllocationWithin(tx, profileId);
   const pending = await tx.accountingCustomerAllocationIntent.findFirst({
     where: { profileId, state: 'PENDING' },
     select: { idempotencyKey: true, commandHash: true, ownerId: true },

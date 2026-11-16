@@ -6080,6 +6080,7 @@ model AccountingCustomerProfile {
   openingReview        AccountingCustomerOpeningReview?
   customerCommands     AccountingCustomerCommand[]
   allocationIntents    AccountingCustomerAllocationIntent[]
+  allocationFence      AccountingCustomerAllocationFence?
 
   @@unique([legalEntityId, partySourceKind, partySourceId])
   @@index([accountingPartyId, activeTo])
@@ -6138,6 +6139,13 @@ model AccountingCustomerCommand {
 }
 
 // A durable denial/recovery record. It does not authorize any financial write.
+model AccountingCustomerAllocationFence {
+  profileId String @id
+  profile AccountingCustomerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@map("accounting_customer_allocation_fences")
+}
+
 model AccountingCustomerAllocationIntent {
   id             String   @id @default(cuid())
   profileId      String

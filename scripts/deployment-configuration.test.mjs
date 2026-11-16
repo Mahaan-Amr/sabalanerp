@@ -231,7 +231,12 @@ else{process.exit(99);}`);
       assert.ok(!commands.includes('deployment-rollback.js'), 'uncertain native work cannot restore older data');
       const rows = commands.trim().split(/\r?\n/).map(line => JSON.parse(line));
       assert.ok(!rows.some(row => row.includes('up') && row.includes('backend')), 'uncertain native work cannot start the prior application');
-    } else assert.ok(!fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')));
+    } else {
+      const sessionFile = path.join(reports, 'active-deployment-session.json');
+      const phase = fs.existsSync(sessionFile) ? JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase : 'none';
+      assert.ok(!fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')),
+        `configuration snapshot retained: phase=${phase}, maintenanceOff=${commands.includes('maintenance-off')}, previousGate=${commands.includes('deployment-gates.js')}, nativeCheck=${commands.includes('exec python3 - --assert-closed')}`);
+    }
     assert.ok(!`${result.stdout}${result.stderr}`.includes(key));
   } catch (error) { originalFailure = error; throw error; }
   finally { try { dispose(f); } catch (error) { if (!originalFailure) throw error; } }

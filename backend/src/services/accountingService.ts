@@ -902,6 +902,8 @@ const buildContractRow = async (contract: any, settings: any, summaryOnly = fals
   const openFlags = flags.filter((item: any) => item.status === 'OPEN');
   const issuedInvoices = records.filter(isValidFinanciallyApprovedInvoice);
   const openInvoiceCandidates = records.filter(isOpenInvoiceCandidate);
+  const editableInvoiceDraft = records.some((record: any) => record.kind === FinancialRecordKind.INVOICE_CANDIDATE
+    && record.status === AccountingRecordStatus.DRAFT && record.sourceKind === AccountingSourceKind.SALES_CONTRACT);
   const invoiceStatus = classifyInvoiceStatus(records);
 
   const overdueReceivables = receivables.filter((receivable: any) => (
@@ -943,6 +945,12 @@ const buildContractRow = async (contract: any, settings: any, summaryOnly = fals
       labelFa: 'ایجاد پیش‌نویس صورتحساب',
       enabled: eligible,
       disabledReason
+    },
+    {
+      kind: 'SAVE_INVOICE_DRAFT',
+      labelFa: 'ذخیره پیش‌نویس',
+      enabled: editableInvoiceDraft,
+      disabledReason: editableInvoiceDraft ? undefined : 'پیش‌نویس قابل ویرایش وجود ندارد'
     },
     {
       kind: 'CREATE_RECEIVABLE',

@@ -21,7 +21,7 @@ test('migration-owned allocation control is closed and cannot be opened by the a
   } finally { await db.$disconnect(); await temporary.cleanup(); }
 });
 
-test('only the dedicated controller login can activate once under a live locked deployment', async () => {
+test('controller session authorization can activate once under a live locked deployment', async () => {
   const url = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL;
   if (!url) return;
   const temporary = await createTemporaryConcurrencyDatabase({ repositoryRoot: path.resolve(process.cwd(), '..'), sourceDatabaseUrl: url, migrateEmptySchema: true });

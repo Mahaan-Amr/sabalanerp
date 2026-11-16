@@ -1,8 +1,17 @@
 -- This role has no password at migration time. A separate protected credential
 -- must be provisioned before the dormant controller can connect.
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'sabalan_allocation_controller') THEN
-    CREATE ROLE sabalan_allocation_controller NOLOGIN NOINHERIT;
+DO $$
+DECLARE existing pg_authid%ROWTYPE;
+BEGIN
+  SELECT * INTO existing FROM pg_authid WHERE rolname = 'sabalan_allocation_controller';
+  IF NOT FOUND THEN
+    CREATE ROLE sabalan_allocation_controller
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOLOGIN NOREPLICATION NOBYPASSRLS;
+  ELSIF existing.rolsuper OR existing.rolcreatedb OR existing.rolcreaterole OR
+    existing.rolinherit OR existing.rolcanlogin OR existing.rolreplication OR
+    existing.rolbypassrls OR existing.rolpassword IS NOT NULL OR
+    EXISTS (SELECT 1 FROM pg_auth_members WHERE roleid = existing.oid OR member = existing.oid) THEN
+    RAISE EXCEPTION 'CUSTOMER_ALLOCATION_CONTROLLER_ROLE_UNSAFE';
   END IF;
 END $$;
 

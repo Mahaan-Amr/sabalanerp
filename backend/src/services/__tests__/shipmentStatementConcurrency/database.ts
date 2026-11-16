@@ -63,6 +63,7 @@ export const createTemporaryConcurrencyDatabase = async (input: {
   sourceDatabaseUrl: string;
   runId?: string;
   migrateEmptySchema?: boolean;
+  migrationSchema?: string;
 }): Promise<TemporaryConcurrencyDatabase> => {
   const runId = input.runId ?? randomBytes(8).toString('hex');
   if (!/^[a-f0-9]{16}$/.test(runId)) throw new Error('Concurrency runId must be exactly 16 lowercase hexadecimal characters.');
@@ -74,7 +75,8 @@ export const createTemporaryConcurrencyDatabase = async (input: {
   try {
     if (input.migrateEmptySchema) {
       const prismaExecutable = path.join(input.repositoryRoot, 'backend', 'node_modules', 'prisma', 'build', 'index.js');
-      execFileSync(process.execPath, [prismaExecutable, 'migrate', 'deploy', '--schema', path.join(input.repositoryRoot, 'backend', 'prisma', 'schema.prisma')], {
+      execFileSync(process.execPath, [prismaExecutable, 'migrate', 'deploy', '--schema',
+        input.migrationSchema ?? path.join(input.repositoryRoot, 'backend', 'prisma', 'schema.prisma')], {
         cwd: input.repositoryRoot,
         env: { ...process.env, DATABASE_URL: databaseUrl },
         stdio: 'pipe',

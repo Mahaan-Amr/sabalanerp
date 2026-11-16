@@ -9,17 +9,16 @@ const expected = {
 };
 const observation = () => ({ promoted: true, inquiryTransformation: undefined, manifestCommit: expected.previousCommit,
   manifestInquirySha256: expected.rawInquirySha256, liveInquirySha256: expected.rawInquirySha256,
-  inquiryLedgerTables: 0, sourceMigrationLedger: { ...expected.sourceMigrationLedger, unfinished: 0 } });
+  sourceMigrationLedger: { ...expected.sourceMigrationLedger, unfinished: 0 } });
 
-test('retained old state accepts only raw Inquiry bytes and the source migration ledger', () => {
+test('retained old state accepts raw Inquiry bytes including existing migration metadata and the source ledger', () => {
   assert.deepEqual(assertQaRetainedOldStateProof(expected, observation()), {
     previousCommit: expected.previousCommit, rawInquirySha256: expected.rawInquirySha256,
     sourceMigrationLedger: expected.sourceMigrationLedger, candidateMigrationsApplied: false,
   });
 });
 
-test('retained old state refuses adopted Inquiry, candidate migrations, and changed raw bytes', () => {
-  assert.throws(() => assertQaRetainedOldStateProof(expected, { ...observation(), inquiryLedgerTables: 1 }), /QA_RESTORE_OLD_STATE_CHANGED/);
+test('retained old state refuses transformed Inquiry, candidate migrations, and changed raw bytes', () => {
   assert.throws(() => assertQaRetainedOldStateProof(expected, { ...observation(), sourceMigrationLedger: { ...expected.sourceMigrationLedger, successful: 451 } }), /QA_RESTORE_OLD_STATE_CHANGED/);
   assert.throws(() => assertQaRetainedOldStateProof(expected, { ...observation(), liveInquirySha256: 'f'.repeat(64) }), /QA_RESTORE_OLD_STATE_CHANGED/);
   assert.throws(() => assertQaRetainedOldStateProof(expected, { ...observation(), inquiryTransformation: {} }), /QA_RESTORE_OLD_STATE_CHANGED/);

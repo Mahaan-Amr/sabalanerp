@@ -349,6 +349,42 @@ test('confirmed source plans commit atomically, reject changed parent identities
   } finally { await f.close(); }
 });
 
+test('a grouped receipt and independent credit plan preserves exact one-rial shares across two debts and rolls back all shares on rejection', { skip: !url, timeout: 240_000 }, async () => {
+  const f = await customerFinanceFixture(url!);
+  try {
+    const id = await f.customer();
+    await recordCustomerAccountOperation(f.db, id, { ...f.common, kind: 'DEBIT', amountRials: 41n, idempotencyKey: randomUUID() });
+    await recordCustomerAccountOperation(f.db, id, { ...f.common, kind: 'DEBIT', amountRials: 70n, idempotencyKey: randomUUID() });
+    await recordCustomerAccountOperation(f.db, id, { ...f.common, kind: 'CREDIT', amountRials: 41n, idempotencyKey: randomUUID() });
+    await recordCustomerWorkspaceTreasury(f.db, id, { ...f.common, kind: 'RECEIPT', amountRials: 70n, allocations: [], idempotencyKey: randomUUID(),
+      parts: [{ key: 'cash', kind: 'CASH', amountRials: 70n, financialAccountId: f.financial.id, ledgerAccountId: f.bank.id }] });
+    const before = await readCustomerWorkspace(f.db, { id, asOf: new Date(), userId: f.actor.id });
+    const first = before.openItems.find(row => row.kind === 'RECEIVABLE' && row.originalRials === 41n)!;
+    const second = before.openItems.find(row => row.kind === 'RECEIVABLE' && row.originalRials === 70n)!;
+    const credit = before.openItems.find(row => row.kind === 'CREDIT')!;
+    const receipt = before.receipts[0];
+    const command = { ...f.common, kind: 'ALLOCATION' as const, amountRials: 0n, allocations: [], idempotencyKey: randomUUID(), sourceAllocations: [
+      { receiptId: receipt.id, allocations: [{ openItemId: first.id, amountRials: 41n }, { openItemId: second.id, amountRials: 29n }] },
+      { creditItemId: credit.id, allocations: [{ openItemId: second.id, amountRials: 42n }] },
+    ] };
+    await assert.rejects(recordCustomerWorkspaceTreasury(f.db, id, command), /مانده/);
+    const rejected = await readCustomerWorkspace(f.db, { id, asOf: new Date(), userId: f.actor.id });
+    assert.equal(rejected.debitOpenRials, 111n);
+    assert.equal(rejected.receipts[0].allocations.length, 0);
+    assert.equal(rejected.standaloneCreditRials, 41n);
+    command.sourceAllocations[1].allocations[0].amountRials = 41n;
+    const saved = await recordCustomerWorkspaceTreasury(f.db, id, command);
+    assert.deepEqual(await recordCustomerWorkspaceTreasury(f.db, id, command), saved);
+    const after = await readCustomerWorkspace(f.db, { id, asOf: new Date(), userId: f.actor.id });
+    assert.equal(after.debitOpenRials, 0n);
+    assert.equal(after.unallocatedCreditRials, 0n);
+    assert.equal(after.standaloneCreditRials, 0n);
+    assert.equal(after.netBalanceRials, before.netBalanceRials);
+    assert.deepEqual(after.receipts[0].allocations[0].lines.map(row => row.amountRials).sort(), [29n, 41n]);
+    assert.equal(after.creditAllocations[0].lines[0].amountRials, 41n);
+  } finally { await f.close(); }
+});
+
 test('zero-transfer opening keeps reviewed history and later attribution never reposts; stale confirmations and closed periods reject', { skip: !url, timeout: 240_000 }, async () => {
   const f = await customerFinanceFixture(url!);
   try {

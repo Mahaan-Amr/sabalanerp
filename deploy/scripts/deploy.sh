@@ -95,6 +95,14 @@ if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   }
 fi
 
+# A distinct runtime/control credential needs checkpoint-bound custody of the
+# previous environment and role-aware restore. The ordinary runner cannot yet
+# prove either, so refuse the opt-in before any lease, fetch or Compose action.
+if [ "${BACKEND_DATABASE_URL+x}" = x ] || [ "${DEPLOYMENT_DATABASE_URL+x}" = x ] || [ "${DEPLOYMENT_DATABASE_ROLE_SPLIT+x}" = x ]; then
+  echo 'Role-split deployment is unavailable in the protected runner.' >&2
+  exit 1
+fi
+
 cd "${REPO_ROOT}"
 DEPLOYMENT_PRESERVED_CLAMAV_EVIDENCE_DIR="${REPO_ROOT}/.deploy-state"
 export DEPLOYMENT_PRESERVED_CLAMAV_EVIDENCE_DIR
@@ -103,6 +111,11 @@ env_value() {
   key="$1"
   awk -F= -v key="${key}" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "${ENV_FILE}"
 }
+
+if [ -f "${ENV_FILE}" ] && awk '/^[[:space:]]*(export[[:space:]]+)?(BACKEND_DATABASE_URL|DEPLOYMENT_DATABASE_URL|DEPLOYMENT_DATABASE_ROLE_SPLIT)[[:space:]]*=/ { found = 1; exit } END { exit !found }' "${ENV_FILE}"; then
+  echo 'Role-split deployment is unavailable in the protected runner.' >&2
+  exit 1
+fi
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || { echo "Required command is missing: $1" >&2; exit 1; }

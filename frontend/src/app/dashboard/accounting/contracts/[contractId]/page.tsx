@@ -42,6 +42,7 @@ import AccountingContractPrintActions, { accountingContractTabs } from "@/featur
 import { accountingReviewReturn, financialRecordReviewHref } from "@/features/accounting/financialRecordReviewHref";
 import AccountingActionModal from "@/features/accounting/AccountingActionModal";
 import { InvoiceDraftEditor } from "@/features/accounting/InvoiceDraftEditor";
+import { workspaceHistoryPosition } from "@/lib/workspaceBackNavigation";
 import AccountingVoidWorkflowPanel, {
   type AccountingVoidWorkflowView,
 } from "@/features/accounting/AccountingVoidWorkflowPanel";
@@ -125,8 +126,12 @@ export default function AccountingContractDetailPage(props: {
   const [draftDirty, setDraftDirty] = useState(false);
   const [pendingDraftAction, setPendingDraftAction] = useState<(() => void) | null>(null);
   const draftDirtyRef = useRef(false);
+  const draftHistoryPosition = useRef<number | undefined>(undefined);
   const replayingDraftAction = useRef(false);
   const onDraftDirtyChange = useCallback((dirty: boolean) => {
+    if (dirty && !draftDirtyRef.current) {
+      draftHistoryPosition.current = workspaceHistoryPosition(history.state);
+    }
     draftDirtyRef.current = dirty;
     setDraftDirty(dirty);
   }, []);
@@ -148,18 +153,39 @@ export default function AccountingContractDetailPage(props: {
     };
     // Navigation API can cancel same-document Back/Forward without modifying the history stack.
     const navigation = (window as Window & { navigation?: EventTarget & { traverseTo: (key: string) => unknown } }).navigation;
+    let pendingHistoryDistance: number | undefined;
     const guardTraversal = (raw: Event) => {
       const event = raw as Event & { navigationType?: string; destination?: { key?: string } };
       const key = event.destination?.key;
-      if (!draftDirtyRef.current || event.navigationType !== 'traverse' || !event.cancelable || !key) return;
+      if (pendingHistoryDistance !== undefined || !draftDirtyRef.current || event.navigationType !== 'traverse' || !event.cancelable || !key) return;
       event.preventDefault();
       setPendingDraftAction(() => () => { void navigation?.traverseTo(key); });
     };
     navigation?.addEventListener('navigate', guardTraversal);
+    const guardCommittedTraversal = (event: PopStateEvent) => {
+      const origin = draftHistoryPosition.current;
+      const destination = workspaceHistoryPosition(event.state);
+      if (pendingHistoryDistance !== undefined && destination === origin) {
+        const distance = pendingHistoryDistance;
+        pendingHistoryDistance = undefined;
+        event.stopImmediatePropagation();
+        setPendingDraftAction(() => () => history.go(distance));
+        return;
+      }
+      if (!draftDirtyRef.current || origin === undefined || destination === undefined || destination === origin) return;
+      const distance = destination - origin;
+      // Return to the existing entry before Next processes the traversal.
+      // Adding an entry here would erase the user's forward history.
+      event.stopImmediatePropagation();
+      pendingHistoryDistance = distance;
+      history.go(-distance);
+    };
+    window.addEventListener('popstate', guardCommittedTraversal, true);
     window.addEventListener('beforeunload', warn);
     document.addEventListener('click', guard, true);
     return () => {
       navigation?.removeEventListener('navigate', guardTraversal);
+      window.removeEventListener('popstate', guardCommittedTraversal, true);
       window.removeEventListener('beforeunload', warn);
       document.removeEventListener('click', guard, true);
     };

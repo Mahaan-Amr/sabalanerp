@@ -147,11 +147,17 @@ export default function SecurityVehiclesPage() {
     externalVehicles: [],
   });
   const [admissionSource, setAdmissionSource] = useState<
-    "INTERNAL" | "EXTERNAL"
+    "INTERNAL" | "EXTERNAL" | "CUSTOMER_PICKUP"
   >("INTERNAL");
   const [internalDriverId, setInternalDriverId] = useState("");
   const [externalDriverId, setExternalDriverId] = useState("");
   const [externalVehicleId, setExternalVehicleId] = useState("");
+  const [pickupVehicleType, setPickupVehicleType] = useState("");
+  const [pickupPlate, setPickupPlate] = useState("");
+  const [pickupPhone, setPickupPhone] = useState("");
+  const admissionReady = admissionSource === "INTERNAL" ? Boolean(internalDriverId)
+    : admissionSource === "EXTERNAL" ? Boolean(externalDriverId && externalVehicleId)
+    : Boolean(pickupVehicleType && pickupPlate.trim() && pickupPhone.trim());
   const [queueReason, setQueueReason] = useState("");
   const [voidTarget, setVoidTarget] = useState<any>(null);
   const [queueActionTarget, setQueueActionTarget] = useState<{
@@ -345,21 +351,21 @@ export default function SecurityVehiclesPage() {
         : externalDriverId;
     const vehicleId =
       admissionSource === "INTERNAL" ? undefined : externalVehicleId;
-    if (!driverId || (admissionSource === "EXTERNAL" && !vehicleId))
-      return false;
+    if (!admissionReady) return false;
     if (mutationLock.current) return false;
     mutationLock.current = true;
     setSaving(true);
     setError("");
     try {
-      await securityAPI.admitCanonicalQueueTurn({
-        source: admissionSource,
-        driverId,
-        vehicleId,
-      });
+      await securityAPI.admitCanonicalQueueTurn(admissionSource === "CUSTOMER_PICKUP"
+        ? { source: admissionSource, vehicleType: pickupVehicleType, plate: pickupPlate.trim(), phone: pickupPhone.trim() }
+        : { source: admissionSource, driverId, vehicleId });
       setInternalDriverId("");
       setExternalDriverId("");
       setExternalVehicleId("");
+      setPickupVehicleType("");
+      setPickupPlate("");
+      setPickupPhone("");
       setMessage("پذیرش راننده و خودرو در صف ثبت شد.");
       await loadData(true);
       return true;
@@ -641,9 +647,7 @@ export default function SecurityVehiclesPage() {
                   disabled={
                     dispatchTimelineStale ||
                     saving ||
-                    (admissionSource === "INTERNAL"
-                      ? !internalDriverId
-                      : !externalDriverId || !externalVehicleId)
+                    !admissionReady
                   }
                   onClick={async () => {
                     if (await admitQueueTurn()) setAdmissionOpen(false);
@@ -654,15 +658,37 @@ export default function SecurityVehiclesPage() {
           >
             <div className="space-y-4">
               {error && <ErpInlineState kind="error" title={error} />}
-              <ErpSegmentedControl<"INTERNAL" | "EXTERNAL">
+              <ErpSegmentedControl<"INTERNAL" | "EXTERNAL" | "CUSTOMER_PICKUP">
                 value={admissionSource}
                 onChange={setAdmissionSource}
                 options={[
                   { value: "INTERNAL", label: "راننده داخلی" },
-                  { value: "EXTERNAL", label: "راننده متفرقه" },
+                  { value: "EXTERNAL", label: "راننده بیرونی" },
+                  { value: "CUSTOMER_PICKUP", label: "راننده متفرقه" },
                 ]}
               />
-              {admissionSource === "INTERNAL" ? (
+              {admissionSource === "CUSTOMER_PICKUP" ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label>
+                    <span className={labelClass}>نوع خودرو</span>
+                    <ErpSelect value={pickupVehicleType} onChange={event => setPickupVehicleType(event.target.value)}>
+                      <option value="">انتخاب کنید</option>
+                      <option value="کامیون">کامیون</option>
+                      <option value="وانت">وانت</option>
+                    </ErpSelect>
+                  </label>
+                  <label>
+                    <span className={labelClass}>شماره پلاک</span>
+                    <ErpInput value={pickupPlate} maxLength={40} placeholder="۱۲ ب ۳۴۵ ایران ۶۷"
+                      onChange={event => setPickupPlate(event.target.value)} />
+                  </label>
+                  <label>
+                    <span className={labelClass}>شماره همراه مشتری یا راننده</span>
+                    <ErpInput type="tel" dir="ltr" value={pickupPhone} maxLength={20}
+                      onChange={event => setPickupPhone(event.target.value)} />
+                  </label>
+                </div>
+              ) : admissionSource === "INTERNAL" ? (
                 <label>
                   <span className={labelClass}>راننده و خودروی آماده</span>
                   <ErpSelect

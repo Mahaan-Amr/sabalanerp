@@ -1,10 +1,10 @@
 import { prisma } from '../lib/prisma';
 import express from 'express';
 import { HrVehicleError } from '../services/hrVehicleOperations';
-import { GuardDriverSource, PrismaClient } from '@prisma/client';
+import { GuardDriverSource, Prisma, PrismaClient } from '@prisma/client';
 import { AuthRequest, protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WorkspaceRequest, WORKSPACES, WORKSPACE_PERMISSIONS } from '../middleware/workspace';
-import { admitGuardDriverQueueTurn, closeGuardQueueTurnWithoutLoading, GuardQueueConflictError, GuardQueueValidationError, listGuardQueueAdmissionOptions, makeGuardQueueTurnAvailable, returnGuardQueueTurnToWaiting, voidGuardQueueTurn } from '../services/guardDriverQueue';
+import { admitGuardDriverQueueTurn, closeGuardQueueTurnWithoutLoading, GuardQueueConflictError, GuardQueueValidationError, listGuardQueueAdmissionOptions, makeGuardQueueTurnAvailable, queueTurnDriverIdentity, returnGuardQueueTurnToWaiting, voidGuardQueueTurn } from '../services/guardDriverQueue';
 import { PhysicalGateExitConflictError, PhysicalGateExitService, PhysicalGateExitValidationError } from '../services/physicalGateExit';
 import { approveManualOutageExit, DispatchRecoveryConflictError, DispatchRecoveryValidationError,
   registerManualOutageExit, reportMissingManualOutagePaper, spoilManualOutageExit, verifyGuardPhysicalReturn } from '../services/dispatchCorrectionOutage';
@@ -18,7 +18,7 @@ const physicalExitService = new PhysicalGateExitService(prisma);
 const guardView = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.VIEW);
 const guardEdit = requireWorkspaceAccess(WORKSPACES.SECURITY, WORKSPACE_PERMISSIONS.EDIT);
 const responseTurn = (turn: any, redacted = false) => {
-  if (!redacted) return { ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId };
+  if (!redacted) return { ...turn, driverId: queueTurnDriverIdentity(turn), vehicleId: turn.driverSource === 'CUSTOMER_PICKUP' ? turn.id : turn.companyVehicleId || turn.externalVehicleId };
   const snapshot = turn.admissionSnapshot || {};
   const plate = String(snapshot.plate?.plate || '');
   return {
@@ -38,6 +38,8 @@ const responseTurn = (turn: any, redacted = false) => {
   };
 };
 const fail = (res: any, error: unknown, context: string) => {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034')
+    return res.status(409).json({ success: false, error: 'وضعیت صف تغییر کرده است. دوباره تلاش کنید.' });
   if (error instanceof HrVehicleError) return res.status(error.statusCode).json({ success: false, error: error.message });
   if (error instanceof PartnerLoadingCommandError) return res.status(error.error.status).json({ success: false,
     code: error.error.code, error: error.error.message });
@@ -132,8 +134,11 @@ router.post('/canonical-driver-queue', protect, guardEdit, async (req: AuthReque
     const source = String(req.body.source || '') as GuardDriverSource;
     if (!Object.values(GuardDriverSource).includes(source)) return res.status(400).json({ success: false, error: 'A valid driver source is required.' });
     const driverId = String(req.body.driverId || '').trim();
-    if (!driverId) return res.status(400).json({ success: false, error: 'driverId is required.' });
-    const turn = await admitGuardDriverQueueTurn(prisma, { source, driverId, vehicleId: req.body.vehicleId, actorId: req.user!.id });
+    if (source !== 'CUSTOMER_PICKUP' && !driverId) return res.status(400).json({ success: false, error: 'driverId is required.' });
+    const actorId = req.user!.id;
+    const turn = await admitGuardDriverQueueTurn(prisma, source === 'CUSTOMER_PICKUP'
+      ? { source, actorId, vehicleType: req.body.vehicleType, plate: req.body.plate, phone: req.body.phone }
+      : { source, actorId, driverId, vehicleId: req.body.vehicleId });
     return res.status(201).json({ success: true, data: responseTurn(turn) });
   } catch (error) {
     return fail(res, error, 'Canonical Guard queue admission error:');

@@ -9,7 +9,7 @@ import { protect } from '../middleware/auth';
 import { requireWorkspaceAccess, WORKSPACE_PERMISSIONS, WORKSPACES } from '../middleware/workspace';
 import { requireFeatureAccess, requireNarrowFeatureAccess, FEATURE_PERMISSIONS, FEATURES } from '../middleware/feature';
 import { assertNoLegacyDispatchReferences } from '../services/dispatchMasterDataPolicy';
-import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
+import { GuardQueueConflictError, GuardQueueValidationError, isGuardQueueTurnCurrentlyReady, queueTurnDriverIdentity, releaseGuardQueueReservation, reserveGuardQueueTurn } from '../services/guardDriverQueue';
 import { cancelFinalizedOrdinaryLoading, loadingCancellationAccountingAuthority, LoadingCancellationAccountingAccessError, createSuccessorAllocationRevision, DispatchAllocationConflictError, DispatchAllocationValidationError, finalizeCanonicalLoadingAllocations, saveCanonicalAllocationDraft } from '../services/dispatchAllocation';
 import { PilotSafetyPauseError } from '../services/dispatchCutover';
 import { allocateLoadingNumber } from '../services/logisticsLoadingNumber';
@@ -56,7 +56,7 @@ router.post('/canonical-driver-queue/:id/reserve', canEdit, canManageDrivers, as
     const turn = await reserveGuardQueueTurn(prisma, { turnId: req.params.id, loadingId, actorId: req.user.id,
       expected: req.body.expected, reason: req.body.reason, correlationId: req.get('X-Correlation-Id') });
     return res.json({ success: true, data: {
-      ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId,
+      ...turn, driverId: queueTurnDriverIdentity(turn), vehicleId: turn.driverSource === 'CUSTOMER_PICKUP' ? turn.id : turn.companyVehicleId || turn.externalVehicleId,
     } });
   } catch (error) {
     if (error instanceof PartnerLoadingCommandError) return respondPartnerLoading(res, { ok: false, error: error.error });
@@ -75,7 +75,7 @@ router.post('/canonical-driver-queue/:id/release', canEdit, canManageDrivers, as
       correlationId: req.get('X-Correlation-Id'),
     });
     return res.json({ success: true, data: {
-      ...turn, driverId: turn.internalDriverId || turn.externalDriverId, vehicleId: turn.companyVehicleId || turn.externalVehicleId,
+      ...turn, driverId: queueTurnDriverIdentity(turn), vehicleId: turn.driverSource === 'CUSTOMER_PICKUP' ? turn.id : turn.companyVehicleId || turn.externalVehicleId,
     } });
   } catch (error) {
     if (error instanceof PartnerLoadingCommandError) return respondPartnerLoading(res, { ok: false, error: error.error });

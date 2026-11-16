@@ -886,6 +886,7 @@ enum ExternalRegistryLifecycleStatus {
 enum GuardDriverSource {
   INTERNAL
   EXTERNAL
+  CUSTOMER_PICKUP
 }
 
 enum GuardDriverQueueTurnStatus {
@@ -3282,9 +3283,26 @@ model AccountingDispatchCandidate {
   workItem             AccountingDispatchWorkItem?
   waybills             AccountingDispatchWaybill[]
   commands             AccountingDispatchCommand[]
+  pickupVerification   DispatchPickupVerification?
 
   @@index([status, createdAt])
   @@map("accounting_dispatch_candidates")
+}
+
+model DispatchPickupVerification {
+  candidateId  String   @id
+  challengeId  String   @unique
+  digest       String
+  expiresAt    DateTime
+  resendAfter  DateTime
+  attempts     Int      @default(0)
+  sendCount    Int      @default(1)
+  windowStart  DateTime
+  verifiedAt   DateTime?
+  verifiedBy   String?
+  candidate    AccountingDispatchCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+
+  @@map("dispatch_pickup_verifications")
 }
 
 model AccountingDispatchWorkItem {

@@ -1,3 +1,5 @@
+import { DispatchPickupVerificationError, processPickupVerification, requirePickupVerification } from '../services/dispatchPickupVerification';
+import smsService from '../services/smsService';
 import { prisma } from '../lib/prisma';
 import { createSalesInvoiceRouter } from '../services/salesDispatchInvoice/routes';
 import { createSalesInvoiceService } from '../services/salesDispatchInvoice/service';
@@ -100,7 +102,7 @@ import { readPartnerSnapshot } from '../services/partnerSales/authorization/read
 import { createAuditedPartnerAuthorization } from '../services/partnerSales/authorization/audited';
 import { randomUUID } from 'node:crypto';
 import { projectAccountingDispatchCandidateSummary, projectAccountingDispatchLines } from '../services/accountingDispatchCandidatePresentation';
-import { readPartnerDispatchAccountingViewCapability } from '../services/partnerSales/accounting/capabilities';
+import { readPartnerDispatchAccountingCapability, readPartnerDispatchAccountingViewCapability } from '../services/partnerSales/accounting/capabilities';
 import accountingLedgerRouter from './accountingLedger';
 import accountingPeriodEndRouter from './accountingPeriodEnd';
 import accountingSupplyChainRouter from './accountingSupplyChain';
@@ -307,6 +309,7 @@ const featuresForAccountingAction = (body: Record<string, unknown>) => (
 );
 
 const dispatchError = (res: Response, error: unknown) => {
+  if (error instanceof DispatchPickupVerificationError) return res.status(409).json({ success: false, error: error.message });
   const documentStatus = dispatchDocumentHttpStatus(error);
   if (documentStatus) return res.status(documentStatus).json({ success: false, error: (error as Error).message });
   if (error instanceof PilotSafetyPauseError || error instanceof DispatchAllocationConflictError || error instanceof DispatchRecoveryConflictError) return res.status(409).json({ success: false, error: error.message });
@@ -375,7 +378,7 @@ router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchE
     const [loading, cutover, control] = await Promise.all([
       prisma.logisticsLoading.findUnique({ where: { id: loadingId }, select: { status: true,
         canonicalAllocationRevisions: { orderBy: [{ queueTurnId: 'asc' }, { revisionNumber: 'desc' }],
-          include: { candidate: { include: { waybills: { include: { documentArtifacts: { select: { kind: true } },
+          include: { queueTurn: { select: { driverSource: true } }, candidate: { include: { waybills: { include: { documentArtifacts: { select: { kind: true } },
             legacyReconstruction: { select: { id: true } } } } } } } } } }),
       prisma.shipmentStatementCutover.findUnique({ where: { id: 'customer-shipment-statements' }, select: { enabled: true, cutoverAt: true } }),
       prisma.shipmentStatementOperationsControl.findUnique({ where: { id: 'customer-shipment-statements' }, select: { paused: true } }),
@@ -385,6 +388,8 @@ router.post('/loadings/:loadingId/issue-dispatch-documents', accountingDispatchE
     for (const revision of loading.canonicalAllocationRevisions) if (!latest.has(revision.queueTurnId)) latest.set(revision.queueTurnId, revision);
     const gate = cutover ? { ...cutover, operationalPaused: control?.paused ?? true } : null;
     if (!gate || !control) throw new LoadingDocumentIssuanceError('وضعیت گذار اسناد قابل بررسی نیست.');
+    await Promise.all([...latest.values()].map(revision => revision.candidate && requirePickupVerification(
+      prisma, revision.candidate.id, revision.queueTurn.driverSource, LoadingDocumentIssuanceError)));
     const parts = [...latest.values()].map(revision => {
       const legacy = revision.sourceKind === 'SALES_CONTRACT' && (!gate?.cutoverAt || !isPostCutoverFinalization(revision.finalizedAt, gate.cutoverAt));
       return classifyLoadingDocumentPart(revision, revision.sourceKind === 'PARTNER_CASE' || Boolean(gate && gate.cutoverAt &&
@@ -570,6 +575,7 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
           && allowedPartnerCases.has(owner.allocationRevision.partnerCaseId)) ? [owner.id] : []);
       const candidates = await tx.accountingDispatchCandidate.findMany({ where: { id: { in: allowedIds } }, select: {
         id: true, status: true, createdAt: true, dispositionAt: true, dispositionReason: true,
+        pickupVerification: { select: { verifiedAt: true } },
         allocationRevision: { select: { snapshot: true, loadingId: true, lines: { select: { snapshot: true, quantity: true, unit: true } } } },
         waybills: { orderBy: { issuedAt: 'asc' }, select: { id: true, number: true, status: true,
           issuedAt: true, voidedAt: true, replacesWaybillId: true,
@@ -608,6 +614,29 @@ router.get('/dispatch-candidates', accountingDispatchView, async (req: AuthReque
     res.setHeader('X-Dispatch-Documents-Permission', manage.allowed ? 'MANAGE' : 'VIEW');
     return res.json({ success: true, data: candidates.map((candidate) => ({ ...candidate,
       waybills: candidate.waybills.map((waybill) => ({ ...waybill, number: waybill.number.toString() })) })) });
+  } catch (error) { return dispatchError(res, error); }
+});
+
+router.post('/dispatch-candidates/:id/pickup-verification/:command', accountingDispatchEdit, async (req: WorkspaceRequest & FeatureRequest, res: Response) => {
+  try {
+    const command = req.params.command;
+    if (command !== 'send' && command !== 'verify') return res.sendStatus(404);
+    const actorId = req.user!.id;
+    const result = await processPickupVerification(prisma, {
+      candidateId: req.params.id, actorId, command: command === 'send' ? 'SEND' : 'VERIFY', code: req.body?.code,
+      secret: process.env.DISPATCH_CONFIRMATION_OTP_SECRET || '',
+      authorizePartnerCase: async (tx, caseId) => {
+        const authority = createAuditedPartnerAuthorization(tx, { actorId, purpose: 'ACCOUNTING', channel: 'API' }, {
+          correlationId: String(req.get('X-Correlation-Id') || randomUUID()), reason: 'تأیید پیامکی راننده متفرقه',
+        });
+        return (await authority.authorize('ACCOUNTING_WRITE', { kind: 'CASE', id: caseId })).ok &&
+          await readPartnerDispatchAccountingCapability(tx, actorId);
+      },
+      sendSms: async (phoneNumber, code, dispatchNumber) =>
+        (await smsService.sendDispatchConfirmationOtp({ phoneNumber, code, dispatchNumber })).success,
+    });
+    if (result.denied) return res.sendStatus(403);
+    return res.json({ success: true, data: { verified: result.verified } });
   } catch (error) { return dispatchError(res, error); }
 });
 

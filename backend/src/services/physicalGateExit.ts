@@ -5,7 +5,7 @@ import { assertPartnerCommercialDispatchEligible } from './partnerSales/fulfillm
 import { createHash, randomUUID } from 'node:crypto';
 import { assertOrdinaryContractsDispatchEligible, ordinaryDispatchSourcesEligible } from './ordinaryContractDispatchEligibility';
 import { AccountingDispatchWaybillStatus, DispatchBuyerSmsStatus, GuardDriverQueueTurnStatus, Prisma, PrismaClient } from '@prisma/client';
-import { isGuardQueueTurnCurrentlyReady } from './guardDriverQueue';
+import { isGuardQueueTurnCurrentlyReady, queueTurnDriverIdentity } from './guardDriverQueue';
 import { lockHrVehicleOperations } from './hrVehicleOperations';
 import { refreshProjectionContracts } from './dispatchAllocation';
 import { appendQueueEvent } from './guardDriverQueue';
@@ -138,7 +138,7 @@ export class PhysicalGateExitService {
       if (turn.status !== GuardDriverQueueTurnStatus.LOADING_FINALIZED || turn.loadingId !== revision.loadingId) {
         throw new PhysicalGateExitConflictError('The Guard queue turn is not awaiting physical exit.');
       }
-      const expectedDriverId = turn.driverSource === 'INTERNAL' ? turn.internalDriverId : turn.externalDriverId;
+      const expectedDriverId = queueTurnDriverIdentity(turn);
       if (!expectedDriverId || expectedDriverId !== authorization.driverId || turn.driverSource !== authorization.driverSource) {
         throw new PhysicalGateExitConflictError('The authorization does not match the admitted driver snapshot.');
       }

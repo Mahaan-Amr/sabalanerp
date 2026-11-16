@@ -23,8 +23,16 @@ export function shipmentHeader(input: {
 }
 
 export function shipmentParties(name: string, contracts: DispatchContractContact[], invoice: boolean, counterparty?: string) {
-  const contacts = contracts.length ? contracts : [{ contractNumber: '', project: '', address: '', customerPhone: '', manager: '', managerPhone: '' }];
-  return printSection(invoice ? 'مشخصات فروشنده' : 'مشخصات فرستنده', grid(field('نام', 'صنایع سنگ سبلان')), 'contact-section')
+  const contacts: DispatchContractContact[] = contracts.length ? contracts : [{ contractNumber: '', project: '', address: '', customerPhone: '', manager: '', managerPhone: '' }];
+  const distinctSellers = new Set(contacts.map(contact => JSON.stringify([contact.sellerName || '', contact.sellerPhone || ''])));
+  const sellerFields = (contact: DispatchContractContact) =>
+    field('کارشناس فروش', escapePrint(contact.sellerName || '_')) + field('تلفن فروشنده', ltr(contact.sellerPhone || ''));
+  const company = field('نام', 'سنگ سبلان') + field('نشانی', 'بلوار دکتر حسابی')
+    + field('تلفن ثابت', ltr('07191010900'));
+  const sender = distinctSellers.size === 1 ? grid(company + sellerFields(contacts[0]))
+    : grid(company) + contacts.map(contact =>
+      grid(field('قرارداد', ltr(contact.contractNumber)) + sellerFields(contact))).join('');
+  return printSection(invoice ? 'مشخصات فروشنده' : 'مشخصات فرستنده', sender, 'contact-section')
     + contacts.map(contact => printSection(
       contacts.length > 1 ? `مشخصات خریدار و پروژه · قرارداد ${escapePrint(printDigits(contact.contractNumber))}` : 'مشخصات خریدار و پروژه',
       grid(field('خریدار', escapePrint(name)) + field('تلفن مشتری', ltr(contact.customerPhone))
@@ -33,6 +41,19 @@ export function shipmentParties(name: string, contracts: DispatchContractContact
         + field('تلفن مدیر پروژه', ltr(contact.managerPhone))
         + `<div class="address">${field('نشانی پروژه', escapePrint(contact.address || '_'))}</div>`), 'contact-section',
     )).join('');
+}
+
+export function shipmentTerms(contractNumbers: string[]) {
+  const numbers = [...new Set(contractNumbers.map(number => number.trim()).filter(number => number && number !== 'ثبت نشده'))];
+  const contract = numbers.length > 1 ? 'قراردادهای شمارهٔ' : 'قرارداد شمارهٔ';
+  const reference = numbers.length ? `${contract} ${numbers.map(ltr).join('، ')}` : 'قرارداد';
+  return printSection('توضیحات', `<ul class="shipment-terms">
+    <li>قیمت اقلام و نحوهٔ تسویه طبق ${reference} مورد تأیید می‌باشد.</li>
+    <li>هزینهٔ ارسال بار بر عهدهٔ خریدار می‌باشد.</li>
+    <li>تحویل‌گیرندهٔ گرامی و رسیدکنندهٔ فاکتورهای ارسالی به پروژه، به‌عنوان نمایندهٔ قانونی خریدار محسوب می‌شوند.</li>
+    <li>خریدار گرامی، لطفاً قبل از تخلیهٔ بار از کیفیت، سالم بودن و متراژ سنگ تحویلی اطمینان حاصل فرمایید. تمامی سفارشات فوق تا تسویه‌حساب نهایی نزد خریدار به امانت می‌باشد.</li>
+    <li>قرارداد فروش صادرشده صرفاً در صورت تسویهٔ کامل مبلغ توسط خریدار دارای اعتبار می‌باشد، در غیر این صورت فاقد اعتبار است.</li>
+  </ul>`, 'terms-section');
 }
 
 export function shipmentTable(heads: string[], rows: string[][]) {
@@ -108,7 +129,7 @@ export function shipmentHtml(title: string, content: string, fonts = renderYekan
     table { border-collapse: collapse; width: 100%; font-size: 11px }
     th, td { padding: .9mm; text-align: center; border: 1px solid #d1d5db }
     th { background: #f3f4f6; font-size: 10px }
-    .items { table-layout: fixed }
+    .items { table-layout: fixed; line-height: 1.4 }
     .items td { overflow-wrap: anywhere }
     .items .desc { text-align: right }
     .items .operation td { padding-block: .6mm }
@@ -116,11 +137,20 @@ export function shipmentHtml(title: string, content: string, fonts = renderYekan
     .items th:first-child, .items td:first-child { border-right: 0 }
     .items th:last-child, .items td:last-child { border-left: 0 }
     .ref, .note-cell { padding: 1mm 3mm; text-align: right; background: #f9fafb }
+    .settlement-panel { display: grid; grid-template-columns: minmax(0, 1fr) 64mm; gap: 3mm; align-items: start; break-inside: avoid }
+    .settlement-panel .summary { display: flex; flex-direction: column; gap: 0 }
+    .settlement-panel .summary p { order: 1 }
+    .settlement-panel .summary table { width: 100% }
     .summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 4mm; margin-bottom: 2mm }
     .summary p { margin: 2mm 0 }
     .summary table { width: 64mm; flex: none }
     .summary tr:last-child { background: #f3f4f6; font-weight: 700 }
+    .shipment-end { display: grid; grid-template-columns: minmax(0, 1fr) 62mm; gap: 3mm; align-items: stretch; margin-top: 2mm }
+    .shipment-end .signature { width: auto }
     .signature { width: 70mm; min-height: 18mm; padding: 2mm 3mm }
+    .shipment-terms { margin: 1mm 0; padding-inline-start: 6mm; padding-inline-end: 3mm; font-size: 10px }
+    .shipment-terms li { break-inside: avoid }
+    .terms-section { break-inside: avoid }
     .note { color: #4b5563; font-size: 10px; margin: 1mm 3mm }
     thead { display: table-header-group }
     thead, tr, header, .summary, .signature, .contact-section, .shipment-end { break-inside: avoid }

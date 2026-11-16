@@ -1,3 +1,4 @@
+import { requirePickupVerification } from '../dispatchPickupVerification';
 import { exactQuantityText } from '../exactQuantity';
 import { createHash, randomUUID } from 'node:crypto';
 import { assertOrdinaryContractsDispatchEligible } from '../ordinaryContractDispatchEligibility';
@@ -194,7 +195,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
     const result = await runSerializableDispatchOperation(this.prisma, async (tx) => {
       await lock(tx, [`ACCOUNTING_DISPATCH_CANDIDATE:${input.candidateId}`]);
       const candidate = await tx.accountingDispatchCandidate.findUnique({ where: { id: input.candidateId }, include: {
-        workItem: true, allocationRevision: { select: { sourceKind: true, partnerCaseId: true } },
+        workItem: true, allocationRevision: { select: { sourceKind: true, partnerCaseId: true, queueTurn: { select: { driverSource: true } } } },
       } });
       if (!candidate) throw new DispatchDocumentValidationError('Accounting dispatch candidate was not found.');
       if (candidate.allocationRevision.sourceKind === 'PARTNER_CASE' && !await authorizePartnerAccountingWrite(tx, {
@@ -206,6 +207,7 @@ export class PrismaDispatchDocumentRepository implements DispatchDocumentReposit
       if (candidate.status !== AccountingDispatchCandidateStatus.PENDING || candidate.allocationRevisionId !== input.allocationRevisionId) {
         throw new DispatchDocumentConflictError('Only the current pending candidate can be issued.');
       }
+      await requirePickupVerification(tx, candidate.id, candidate.allocationRevision.queueTurn?.driverSource, DispatchDocumentConflictError);
       await assertCanonicalDispatchCommandAllowed(tx);
       const [cutover, revision] = await Promise.all([
         loadShipmentStatementRuntimeStateUnderLock(tx),

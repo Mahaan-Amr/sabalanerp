@@ -1617,7 +1617,8 @@ export const securityAPI = {
   getDriverQueue: (history = false) => api.get('/security/driver-queue', { params: { history } }),
   getCanonicalDriverQueue: (history = false) => api.get('/security/canonical-driver-queue', { params: { history } }),
   getCanonicalQueueAdmissionOptions: () => api.get('/security/canonical-driver-queue/admission-options'),
-  admitCanonicalQueueTurn: (data: { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string }) => api.post('/security/canonical-driver-queue', data),
+  admitCanonicalQueueTurn: (data: { source: 'INTERNAL' | 'EXTERNAL'; driverId: string; vehicleId?: string } |
+    { source: 'CUSTOMER_PICKUP'; vehicleType: string; plate: string; phone: string }) => api.post('/security/canonical-driver-queue', data),
   makeCanonicalQueueTurnAvailable: (id: string) => api.post(`/security/canonical-driver-queue/${id}/available`),
   returnCanonicalQueueTurnToWaiting: (id: string, reason: string) => api.post(`/security/canonical-driver-queue/${id}/return-to-waiting`, { reason }),
   closeCanonicalQueueTurnWithoutLoading: (id: string, reason: string) => api.post(`/security/canonical-driver-queue/${id}/close-without-loading`, { reason }),

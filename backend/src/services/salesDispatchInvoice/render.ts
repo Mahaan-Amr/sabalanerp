@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import {
   escapePrint, printDigits, printSection, shipmentHeader, shipmentHtml, shipmentItemTable,
-  shipmentParties, shipmentQuantity, shipmentSignature, shipmentTable, shipmentUnitLabel, type ShipmentPrintRow,
+  shipmentParties, shipmentQuantity, shipmentSignature, shipmentTable, shipmentTerms, shipmentUnitLabel, type ShipmentPrintRow,
 } from '../../documents/dispatch/dispatchPrintLayout';
 import type { DispatchProductPrintRow } from '../../utils/printTemplate';
 import { pricingCurrencyKind } from '../approvedPricing/domain';
@@ -102,12 +102,14 @@ export function renderSalesInvoice(snapshot: IssuedInvoiceSnapshot, voidReason?:
       `<p class="note">${voidReason ? `باطل‌شده · ${escapePrint(voidReason)}` : ''}${snapshot.replacesNumber ? ` · جایگزین فاکتور ${escapePrint(invoiceNumber(snapshot.replacesNumber))}` : ''}</p>`) : '')
     + shipmentParties(snapshot.customerName, snapshot.print?.contacts || [], true, snapshot.counterparty)
     + printSection('مشخصات کالا یا خدمات مورد معامله', shipmentItemTable(groups, true))
-    + `<div class="summary"><p><strong>مبلغ به حروف</strong><br>${rialsInWords(new Decimal(snapshot.netAmount).mul(multiplier).toFixed(0))} ریال</p>
+    + `<div class="settlement-panel">${shipmentTerms(snapshot.print?.contacts.map(contact => contact.contractNumber)
+      ?? snapshot.lines.map(line => line.contractNumber))}
+      <div class="summary"><p><strong>مبلغ به حروف</strong><br>${rialsInWords(new Decimal(snapshot.netAmount).mul(multiplier).toFixed(0))} ریال</p>
       ${shipmentTable(['شرح', 'مبلغ (ریال)'], [
         ['جمع کل', money(snapshot.grossAmount)], ['اضافات', '—'],
         ['تخفیف', money(snapshot.discountAmount)], ['مالیات و عوارض', '—'],
         ['مبلغ پرداختنی', money(snapshot.netAmount)],
-      ])}</div>`
+      ])}</div></div>`
     + `<div class="shipment-end">${printSection('مشخصات راننده و سهم بار',
       shipmentTable(['نام راننده', 'پلاک خودرو', 'شماره بارنامه', 'اقلام و مقدار بار'], transport))}${shipmentSignature}</div>`);
 }

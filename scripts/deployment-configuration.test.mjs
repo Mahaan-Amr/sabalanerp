@@ -234,8 +234,11 @@ else{process.exit(99);}`);
     } else {
       const sessionFile = path.join(reports, 'active-deployment-session.json');
       const phase = fs.existsSync(sessionFile) ? JSON.parse(fs.readFileSync(sessionFile, 'utf8')).phase : 'none';
+      const recoveryErrors = result.stderr.split(/\r?\n/)
+        .filter(line => /not proven|remains|failed|error|invalid|fixture/i.test(line)).slice(-5)
+        .map(line => line.replaceAll(key, '[redacted]').replaceAll('secret-do-not-output', '[redacted]')).join(' | ');
       assert.ok(!fs.existsSync(path.join(f.root, '.deploy-state/biometric-configuration.json')),
-        `configuration snapshot retained: phase=${phase}, maintenanceOff=${commands.includes('maintenance-off')}, previousGate=${commands.includes('deployment-gates.js')}, nativeCheck=${commands.includes('exec python3 - --assert-closed')}`);
+        `configuration snapshot retained: phase=${phase}, maintenanceOff=${commands.includes('maintenance-off')}, previousGate=${commands.includes('deployment-gates.js')}, nativeCheck=${commands.includes('exec python3 - --assert-closed')}, restart=${commands.includes('"up"')}, recoveryErrors=${recoveryErrors}`);
     }
     assert.ok(!`${result.stdout}${result.stderr}`.includes(key));
   } catch (error) { originalFailure = error; throw error; }

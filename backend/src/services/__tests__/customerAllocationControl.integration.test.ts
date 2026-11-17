@@ -150,10 +150,41 @@ test('dedicated PostgreSQL logins enforce allocation authority on real connectio
       const workspace = load(path.join(backend, 'dist/services/accountingCustomerWorkspace.js')) as typeof import('../accountingCustomerWorkspace');
       const intents = load(path.join(backend, 'dist/services/accountingCustomerAllocationIntent.js')) as typeof import('../accountingCustomerAllocationIntent');
       await intents.prepareAdmittedCustomerAllocationIntent(runtime, customer, command);
-      await workspace.recordCustomerWorkspaceTreasury(runtime, customer, command);
+      const posted = await workspace.recordCustomerWorkspaceTreasury(runtime, customer, command);
       assert.equal((await read()).debitOpenRials, 0n);
       assert.equal((await read()).standaloneCreditRials, 0n);
       assert.equal(await admin.accountingSettlementAllocation.count(), 2);
+      const closureId = randomUUID();
+      const closureToken = randomUUID();
+      const rollbackRelease = 'direct-login-rollback';
+      await admin.deploymentOperation.create({ data: {
+        id: closureId, activeKey: 'production', releaseId: rollbackRelease, targetCommit: 'c'.repeat(40),
+        owner: 'isolated-direct-login-fixture', phase: 'MUTATION_STARTED', leaseToken: closureToken,
+        leaseExpiresAt: new Date(Date.now() + 90_000), heartbeatAt: new Date(), startedAt: new Date(),
+        checkpointJson: { deploymentId: closureId, releaseId: rollbackRelease, localVerified: true,
+          remoteVerified: true, restoreVerified: true, manifestReadable: true, checksum: 'c'.repeat(64) },
+      } });
+      const [closed] = await controller.$queryRaw<Array<{ state: string }>>`
+        SELECT * FROM public.customer_allocation_controller_close(
+          ${closureId}, ${closureToken}, ${rollbackRelease}, ${'b'.repeat(64)})
+      `;
+      assert.equal(closed.state, 'CLOSED');
+      assert.equal(await admitted(), false);
+      assert.deepEqual(await workspace.readCustomerAllocationCommandStatus(runtime, customer, command), {
+        status: 'COMMITTED', result: posted,
+      });
+      await assert.rejects(workspace.recordCustomerWorkspaceTreasury(runtime, customer, {
+        ...command, idempotencyKey: randomUUID(),
+      }), { code: 'CUSTOMER_SOURCE_SHARES_CLOSED' });
+      const creditShare = await admin.accountingSettlementAllocation.findFirstOrThrow({ where: { creditItemId: credit.id } });
+      const reversal = { ...f.common, kind: 'REVERSE_ALLOCATION' as const, allocationId: creditShare.id,
+        amountRials: 0n, allocations: [], idempotencyKey: randomUUID() };
+      const reversed = await workspace.recordCustomerWorkspaceTreasury(runtime, customer, reversal);
+      assert.deepEqual(await workspace.recordCustomerWorkspaceTreasury(runtime, customer, reversal), reversed);
+      assert.equal(await admin.accountingSettlementAllocation.count(), 3);
+      const corrected = await read();
+      assert.equal(corrected.debitOpenRials, 1n);
+      assert.equal(corrected.standaloneCreditRials, 1n);
     } finally {
       if (previousRelease === undefined) delete process.env.DEPLOYMENT_RELEASE_ID;
       else process.env.DEPLOYMENT_RELEASE_ID = previousRelease;

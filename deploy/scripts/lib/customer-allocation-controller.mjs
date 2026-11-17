@@ -7,6 +7,20 @@ export function customerAllocationControllerDatabase(client) {
   return { transaction: async work => {
     await client.query('BEGIN');
     try {
+      const role = await client.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM pg_catalog.pg_roles AS r
+          WHERE r.rolname = 'sabalan_allocation_controller'
+            AND r.rolname = session_user AND r.rolname = current_user
+            AND r.rolcanlogin AND NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole
+              OR r.rolinherit OR r.rolreplication OR r.rolbypassrls)
+            AND NOT EXISTS (
+              SELECT 1 FROM pg_catalog.pg_auth_members AS m
+              WHERE m.roleid = r.oid OR m.member = r.oid
+            )
+        ) AS admitted_controller_session
+      `);
+      if (role.rows.length !== 1 || role.rows[0].admitted_controller_session !== true) reject();
       const result = await work({
         lock: async (deploymentId, leaseToken) => {
           const { rows } = await client.query(
@@ -43,7 +57,9 @@ export async function activateCustomerAllocation({ db, envelope, expected, deplo
     const locked = await tx.lock(deploymentId, leaseToken);
     if (!locked || locked.deploymentId !== deploymentId || locked.leaseToken !== leaseToken) reject();
     const verified = verifyCustomerAllocationGoManifest(envelope, { ...expected, ...locked }, approver);
-    return tx.activate({ deploymentId, leaseToken, releaseId: verified.releaseId,
+    const receipt = await tx.activate({ deploymentId, leaseToken, releaseId: verified.releaseId,
       manifestSha256: verified.manifestSha256, expiresAt: verified.expiresAt });
+    if (receipt?.state !== 'ACTIVE' || receipt.manifest_sha256 !== verified.manifestSha256) reject();
+    return receipt;
   });
 }

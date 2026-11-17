@@ -28,7 +28,10 @@ const authority = () => {
   return { state, get activated() { return activated; },
     transaction: async work => work({
       lock: async () => ({ deploymentId: 'deployment-456', ...state.boundary }),
-      activate: async () => { activated += 1; return { state: 'ACTIVE', manifestSha256: 'receipt' }; },
+      activate: async ({ manifestSha256 }) => {
+        activated += 1;
+        return { state: 'ACTIVE', manifest_sha256: manifestSha256 };
+      },
     }),
   };
 };
@@ -47,16 +50,44 @@ test('database adapter retains the lock and writes the receipt in one transactio
   const { activeKey, phase, leaseToken, targetCommit, releaseId, controlState } = boundary();
   const client = { query: async (sql, values) => {
     calls.push({ sql, values });
+    if (sql.includes('admitted_controller_session')) return { rows: [{ admitted_controller_session: true }] };
     if (sql.includes('controller_lock')) return { rows: [{ deployment_id: 'deployment-456',
       activeKey, phase, leaseToken, targetCommit, releaseId, controlState,
       dbClock: new Date(now), leaseExpiresAt: new Date('2026-11-16T12:03:00.000Z') }] };
-    if (sql.includes('controller_activate')) return { rows: [{ state: 'ACTIVE', manifest_sha256: h('a') }] };
+    if (sql.includes('controller_activate')) return { rows: [{ state: 'ACTIVE', manifest_sha256: values[3] }] };
     return { rows: [] };
   } };
   const result = await activateCustomerAllocation(input(customerAllocationControllerDatabase(client)));
   assert.equal(result.state, 'ACTIVE');
-  assert.deepEqual(calls.map(call => call.sql.startsWith('SELECT') ? 'SELECT' : call.sql),
-    ['BEGIN', 'SELECT', 'SELECT', 'COMMIT']);
+  assert.deepEqual(calls.map(call => call.sql.trimStart().startsWith('SELECT') ? 'SELECT' : call.sql),
+    ['BEGIN', 'SELECT', 'SELECT', 'SELECT', 'COMMIT']);
+  assert.match(calls[1].sql, /rolname = session_user AND r.rolname = current_user/);
+  assert.match(calls[1].sql, /pg_auth_members/);
+
+  calls.length = 0;
+  const query = client.query;
+  client.query = async (sql, values) => {
+    if (sql.includes('controller_activate')) {
+      calls.push({ sql, values });
+      return { rows: [{ state: 'ACTIVE', manifest_sha256: h('f') }] };
+    }
+    return query(sql, values);
+  };
+  await assert.rejects(activateCustomerAllocation(input(customerAllocationControllerDatabase(client))));
+  assert.equal(calls.at(-1).sql, 'ROLLBACK');
+});
+
+test('database adapter rejects an unqualified controller session before acquiring the deployment lock', async () => {
+  const calls = [];
+  const db = customerAllocationControllerDatabase({
+    query: async sql => {
+      calls.push(sql);
+      return { rows: sql.includes('admitted_controller_session') ? [{ admitted_controller_session: false }] : [] };
+    },
+  });
+  await assert.rejects(activateCustomerAllocation(input(db)), /CUSTOMER_ALLOCATION_CONTROLLER_REJECTED/);
+  assert.equal(calls.at(-1), 'ROLLBACK');
+  assert.ok(calls.every(sql => !sql.includes('controller_lock')));
 });
 
 test('wrong phase, lease, image, signature and replay never write control', async () => {

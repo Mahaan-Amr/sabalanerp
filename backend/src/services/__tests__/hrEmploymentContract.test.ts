@@ -23,6 +23,8 @@ const storedEvidence = {
 };
 
 assert.equal(canReusePaperContractStoredEvidence(storedEvidence), true);
+assert.equal(canReusePaperContractStoredEvidence({ ...storedEvidence, malwareScanStatus: null }), true);
+assert.equal(canReusePaperContractStoredEvidence({ ...storedEvidence, malwareScanStatus: "INFECTED" }), false);
 assert.equal(canReusePaperContractStoredEvidence({
   ...storedEvidence,
   returnedAt: null,

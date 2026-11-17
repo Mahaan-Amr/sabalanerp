@@ -18,6 +18,9 @@ test('asset posting binds every scanned document to its real bytes and source', 
     const input = { proofs: [proof], proofIds: ['proof'], sourceId: 'proof', assetId: 'asset', bookId: 'book',
       evidenceType: 'ASSET_COST', applicationRoot: root };
     await assertAssetEvidenceFiles(input);
+    await assertAssetEvidenceFiles({ ...input, proofs: [{ ...proof, malwareScanStatus: null, malwareScanAt: null }] });
+    await assert.rejects(() => assertAssetEvidenceFiles({ ...input, proofs: [{ ...proof, malwareScanStatus: 'INFECTED' }] }));
+    await assert.rejects(() => assertAssetEvidenceFiles({ ...input, proofs: [{ ...proof, malwareScanAt: null }] }));
     await assert.rejects(() => assertAssetEvidenceFiles({ ...input, proofIds: ['other'] }));
     await assert.rejects(() => assertAssetEvidenceFiles({ ...input, proofs: [{ ...proof, malwareScanAt: null }] }));
     await assert.rejects(() => assertAssetEvidenceFiles({ ...input, proofs: [{ ...proof, sourceEntityId: 'other' }] }));

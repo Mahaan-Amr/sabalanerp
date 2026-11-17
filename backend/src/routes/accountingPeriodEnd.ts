@@ -27,7 +27,7 @@ import { retainOfficialReportArtifact } from '../services/accountingOfficialRepo
 import { ACCOUNTING_OFFICIAL_REPORT_ROOT, versionedAccountingReportFiles } from '../services/accountingFileRuntime';
 import { archiveWritePath, resolveArchiveReadPath } from '../services/accountingArchiveStorage';
 import { publishDurableFile } from '../services/durableFilePublication';
-import { assertAssetEvidenceFiles } from '../services/accountingAssetEvidenceIntegrity';
+import { assertAssetEvidenceFiles, canReadArchiveScanEvidence } from '../services/accountingAssetEvidenceIntegrity';
 import { assetUploadIdentity, assertMatchingAssetUpload } from '../services/accountingAssetUploadIdentity';
 import { createAssetPolicyWithinTransaction } from '../services/accountingAssetPolicyIntervals';
 
@@ -262,7 +262,7 @@ router.post('/evidence', ...editAccess, run(async (req) => {
       const requiredProofType = evidence.kind === 'ASSET_COST' ? 'ASSET_COST' : 'ASSET_READY_FOR_USE';
       if (!proof || proof.bookId !== asset.bookId || proof.sourceEntityType !== 'FIXED_ASSET'
         || proof.sourceEntityId !== asset.id || proof.evidenceType !== requiredProofType
-        || proof.malwareScanStatus !== 'CLEAN' || !proof.malwareScanAt) {
+        || !canReadArchiveScanEvidence(proof)) {
         throw new Error('مدرک معتبر و بررسی‌شدهٔ همین دارایی لازم است.');
       }
       const proofIds = evidence.kind === 'ASSET_COST' ? evidence.documentIds : [evidence.sourceId];
@@ -946,7 +946,9 @@ router.post('/close-runs', ...managerAccess, run(async (req) => prisma.$transact
     tx.accountingTaxObligation.count({ where: { bookId: stored.bookId, dueAt: { lt: checkedAt }, status: { notIn: ['SETTLED', 'RECONCILED'] } } }),
     tx.accountingRecognitionSchedule.count({ where: { bookId: stored.bookId, status: 'ACTIVE', nextReviewAt: { lt: checkedAt } } }),
     tx.accountingOfficialReportSnapshot.findMany({ where: { bookId: stored.bookId, generatedAt: { gte: new Date(checkedAt.getTime() - 86_400_000) } }, select: { id: true, reportType: true, datasetHash: true, parameters: true, cutoffAt: true } }),
-    tx.accountingArchiveEvidence.findMany({ where: { bookId: stored.bookId, sourceEntityType: 'OFFICIAL_REPORT_SNAPSHOT', malwareScanStatus: 'CLEAN' }, select: { sourceEntityId: true, evidenceType: true, contentHash: true } }),
+    tx.accountingArchiveEvidence.findMany({ where: { bookId: stored.bookId, sourceEntityType: 'OFFICIAL_REPORT_SNAPSHOT',
+      OR: [{ malwareScanStatus: 'CLEAN' }, { malwareScanStatus: null, malwareScanAt: null }],
+    }, select: { sourceEntityId: true, evidenceType: true, contentHash: true } }),
     tx.accountingLedgerLine.aggregate({ where: { voucher: voucherScope }, _sum: { debitRials: true, creditRials: true } }),
     tx.accountingOperationalReconciliation.findMany({ where: { bookId: stored.bookId, fiscalYearId: stored.fiscalYearId, periodId: stored.periodId, reconciledAt: { gte: new Date(checkedAt.getTime() - 86_400_000) } } }),
     tx.accountingFixedAsset.findMany({ where: { bookId: stored.bookId, status: 'ACTIVE' }, select: { id: true, readyForUseAt: true, events: { select: { eventIdentity: true, sourceHash: true } } } }),
@@ -1203,7 +1205,7 @@ router.get('/assets/:id/evidence/:evidenceId/download', ...editAccess, async (re
       id: req.params.evidenceId, bookId, sourceEntityType: 'FIXED_ASSET', sourceEntityId: asset.id,
     } });
     if (!evidence) throw new Error('مدرک این دارایی پیدا نشد.');
-    if (evidence.malwareScanStatus !== 'CLEAN' || !evidence.malwareScanAt) {
+    if (!canReadArchiveScanEvidence(evidence)) {
       throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل دریافت نیست.');
     }
     const filePath = await resolveArchiveReadPath(evidence.storageKey);
@@ -1351,7 +1353,7 @@ router.post('/archive-evidence', ...managerAccess, run(async (req) => {
 
 const accessArchiveEvidence = (action: 'VIEW' | 'DOWNLOAD') => run(async (req) => {
   const evidence = await prisma.accountingArchiveEvidence.findUniqueOrThrow({ where: { id: req.params.id } });
-  if (evidence.malwareScanStatus !== 'CLEAN' || !evidence.malwareScanAt) throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل مشاهده یا دریافت نیست.');
+  if (!canReadArchiveScanEvidence(evidence)) throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل مشاهده یا دریافت نیست.');
   await createAccountingLedgerPrismaRepository(prisma).transaction((tx) => tx.appendAudit({
     action: `LEGAL_ARCHIVE_${action}`,
     result: 'SUCCEEDED',
@@ -1378,7 +1380,7 @@ router.post('/archive-evidence/:id/download', ...managerAccess, accessArchiveEvi
 router.get('/archive-evidence/:id/download', ...managerAccess, async (req: WorkspaceRequest, res: Response) => {
   try {
     const evidence = await prisma.accountingArchiveEvidence.findUniqueOrThrow({ where: { id: req.params.id } });
-    if (evidence.malwareScanStatus !== 'CLEAN' || !evidence.malwareScanAt) throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل دریافت نیست.');
+    if (!canReadArchiveScanEvidence(evidence)) throw new Error('مدرک تا پیش از تأیید بررسی بدافزار قابل دریافت نیست.');
     const filePath = await resolveArchiveReadPath(evidence.storageKey);
     const contentHash = await sha256File(filePath);
     if (contentHash !== evidence.contentHash) throw new Error('تمامیت فایل بایگانی تأیید نشد.');

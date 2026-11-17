@@ -14,7 +14,8 @@ import { prisma } from '../../lib/prisma';
 test('asset upload retries preserve one evidence row and audit on real PostgreSQL', async () => {
   const db = new URL(process.env.DATABASE_URL || '');
   assert(['127.0.0.1', 'localhost'].includes(db.hostname) && db.port === '55432');
-  assert.equal(db.pathname, '/sabalanerp_qa_finance_clean_20261102');
+  assert(db.pathname === '/sabalanerp_qa_finance_clean_20261102'
+    || /^\/sabalanerp_concurrency_[a-f0-9]{16}$/.test(db.pathname));
   const suffix = randomUUID();
   const entity = await prisma.accountingLegalEntity.create({ data: { code: `qa-${suffix}`, namePersian: 'آزمون', activeFrom: new Date('2026-01-01'), createdBy: 'qa' } });
   const book = await prisma.accountingBook.create({ data: { legalEntityId: entity.id, code: `qa-${suffix}`, namePersian: 'آزمون', createdBy: 'qa' } });
@@ -38,6 +39,10 @@ test('asset upload retries preserve one evidence row and audit on real PostgreSQ
   const layer = (router as any).stack.find((item: any) => item.route?.path === '/assets/:id/evidence' && item.route.methods.post);
   assert(layer, 'actual asset upload endpoint must be registered');
   app.post('/assets/:id/evidence', ...layer.route.stack.slice(-2).map((entry: any) => entry.handle));
+  const downloadRoute = '/assets/:id/evidence/:evidenceId/download';
+  const downloadLayer = (router as any).stack.find((item: any) => item.route?.path === downloadRoute && item.route.methods.get);
+  assert(downloadLayer);
+  app.get(downloadRoute, downloadLayer.route.stack.at(-1).handle);
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -56,6 +61,8 @@ test('asset upload retries preserve one evidence row and audit on real PostgreSQ
     assert.equal(json[0].data.id, json[1].data.id, 'concurrent identical command must replay its outcome');
     const evidence = await prisma.accountingArchiveEvidence.findMany({ where: { sourceEntityId: asset.id } });
     assert.equal(evidence.length, 1);
+    assert.equal(evidence[0].malwareScanStatus, 'CLEAN');
+    assert.ok(evidence[0].malwareScanAt);
     const audits = await prisma.accountingLedgerAuditEntry.findMany({ where: { entityId: evidence[0].id, action: 'ASSET_EVIDENCE_UPLOADED' } });
     assert.equal(audits.length, 1, 'one durable audit accompanies the single evidence row');
     const conflict = await send('%PDF-1.4\nqa-two');
@@ -86,6 +93,25 @@ test('asset upload retries preserve one evidence row and audit on real PostgreSQ
     assert.equal(recoveredBody.data.id, lostEvidence.id);
     assert.equal(await prisma.accountingArchiveEvidence.count({ where: { sourceEntityId: asset.id } }), 2);
     assert.equal(await prisma.accountingLedgerAuditEntry.count({ where: { entityId: lostEvidence.id, action: 'ASSET_EVIDENCE_UPLOADED' } }), 1);
+    const seededEvidence = { bookId: book.id, sourceEntityId: asset.id,
+      sourceEntityType: lostEvidence.sourceEntityType, evidenceType: lostEvidence.evidenceType,
+      storageKey: lostEvidence.storageKey, mimeType: lostEvidence.mimeType, sizeBytes: lostEvidence.sizeBytes,
+      contentHash: lostEvidence.contentHash, retentionPolicyId: lostEvidence.retentionPolicyId,
+      uploadedBy: lostEvidence.uploadedBy };
+    const scannerFree = await prisma.accountingArchiveEvidence.create({ data: {
+      ...seededEvidence, evidenceIdentity: `qa-unscanned-${suffix}`,
+    } });
+    const rejected = await prisma.accountingArchiveEvidence.create({ data: {
+      ...seededEvidence, evidenceIdentity: `qa-rejected-${suffix}`,
+      malwareScanStatus: 'INFECTED', malwareScanAt: new Date(),
+    } });
+    const url = (id: string) => `${base}/assets/${asset.id}/evidence/${id}/download?bookId=${book.id}`;
+    const download = await fetch(url(scannerFree.id));
+    assert.equal(download.status, 200);
+    assert.equal(await download.text(), '%PDF-1.4\nqa-lost-response');
+    const rejectedDownload = await fetch(url(rejected.id));
+    assert.equal(rejectedDownload.status, 400);
+    await rejectedDownload.arrayBuffer();
   } finally {
     if (oldScanner === undefined) delete process.env.HR_HIRING_ANTIVIRUS_COMMAND; else process.env.HR_HIRING_ANTIVIRUS_COMMAND = oldScanner;
     server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

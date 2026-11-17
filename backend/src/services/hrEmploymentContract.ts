@@ -83,7 +83,7 @@ export const canReusePaperContractStoredEvidence = (
   contract.size !== null &&
   contract.size !== undefined &&
   contract.sha256 &&
-  contract.malwareScanStatus,
+  (contract.malwareScanStatus === 'CLEAN' || contract.malwareScanStatus === null),
 );
 
 export const projectPaperContractWorkflowCapabilities = (input: {

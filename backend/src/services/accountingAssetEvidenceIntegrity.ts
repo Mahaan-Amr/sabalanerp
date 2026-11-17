@@ -1,8 +1,15 @@
 import { promises as fs } from 'node:fs';
 import { resolveArchiveReadPath, sha256ArchiveFile } from './accountingArchiveStorage';
 
-type Proof = { id: string; bookId: string; sourceEntityType: string; sourceEntityId: string;
-  evidenceType: string; malwareScanStatus: string; malwareScanAt: Date | null;
+type ArchiveScanMetadata = { malwareScanStatus: string | null; malwareScanAt: Date | null };
+
+export function canReadArchiveScanEvidence({ malwareScanStatus, malwareScanAt }: ArchiveScanMetadata) {
+  return (malwareScanStatus === 'CLEAN' && malwareScanAt !== null)
+    || (malwareScanStatus === null && malwareScanAt === null);
+}
+
+type Proof = ArchiveScanMetadata & { id: string; bookId: string; sourceEntityType: string; sourceEntityId: string;
+  evidenceType: string;
   storageKey: string; sizeBytes: bigint; contentHash: string };
 export async function assertAssetEvidenceFiles(input: { proofs: Proof[]; proofIds: string[]; sourceId: string;
   assetId: string; bookId: string; evidenceType: string; applicationRoot?: string }) {
@@ -15,7 +22,7 @@ export async function assertAssetEvidenceFiles(input: { proofs: Proof[]; proofId
   for (const item of input.proofs) {
     if (item.bookId !== input.bookId || item.sourceEntityType !== 'FIXED_ASSET'
       || item.sourceEntityId !== input.assetId || item.evidenceType !== input.evidenceType
-      || item.malwareScanStatus !== 'CLEAN' || !item.malwareScanAt) {
+      || !canReadArchiveScanEvidence(item)) {
       throw new Error('مدرک معتبر و بررسی‌شدهٔ همین دارایی لازم است.');
     }
     const filePath = await resolveArchiveReadPath(item.storageKey, input.applicationRoot);

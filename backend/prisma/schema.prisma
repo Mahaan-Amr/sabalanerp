@@ -573,7 +573,7 @@ model SupportTicketAttachment {
   sha256            String
   durationSeconds   Int?
   sensitive         Boolean                         @default(false)
-  malwareScanStatus String                          @default("PENDING")
+  malwareScanStatus String?
   retentionClass    String
   redactedAt        DateTime?
   redactionReason   String?
@@ -5832,7 +5832,7 @@ model AccountingArchiveEvidence {
   storageKey        String
   mimeType          String
   sizeBytes         BigInt
-  malwareScanStatus String
+  malwareScanStatus String?
   malwareScanAt     DateTime?
   retentionPolicyId String
   retainUntil       DateTime?
@@ -9399,7 +9399,7 @@ model HrEmploymentContractDocument {
   mimeType          String
   size              Int
   sha256            String
-  malwareScanStatus String
+  malwareScanStatus String?
   uploadedBy        String
   submittedBy       String?
   submittedAt       DateTime?
@@ -13084,7 +13084,7 @@ model PurchasingAttachment {
   sha256 String
   visibility String
   bytes Bytes @db.ByteA
-  scanStatus String
+  scanStatus String?
   createdBy String
   createdAt DateTime @default(now())
   document PurchasingDocument @relation(fields:[documentId],references:[id],onDelete:Restrict)

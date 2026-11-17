@@ -49,6 +49,7 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261115131000_accounting_private_marker_index',
     '20261116100000_customer_pickup_driver_source',
     '20261116100100_customer_pickup_dispatch',
+    '20261117120000_retire_attachment_scan_status',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
@@ -66,10 +67,12 @@ test('the complete current release is admitted only with its reviewed ordered SQ
   assert.deepEqual(release[23].tables.sort(), [
     'dispatch_confirmation_sessions', 'dispatch_pickup_verifications', 'guard_driver_queue_turns',
   ]);
+  assert.equal(release[24].statements.length, 5);
+  assert.ok(release[24].statements.every(sql => /^ALTER TABLE/.test(sql)));
   assert.throws(() => compileProtectedCurrentRelease(files.slice(1)), /CURRENT_RELEASE_SET_UNPROVEN/);
   const changed = files.map(([name, bytes], index) => index === 3 ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
   assert.throws(() => compileProtectedCurrentRelease(changed), /SQL_IDENTITY_MISMATCH/);
-  for (const pickupIndex of [22, 23]) {
+  for (const pickupIndex of [22, 23, 24]) {
     const changedPickup = files.map(([name, bytes], index) => index === pickupIndex
       ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
     assert.throws(() => compileProtectedCurrentRelease(changedPickup), /SQL_IDENTITY_MISMATCH/);

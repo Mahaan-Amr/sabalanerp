@@ -13,6 +13,7 @@ const known = {
 export const protectedBridgeMigrationNames: readonly string[] = Object.freeze(Object.keys(known));
 const pickupSourceName = '20261116100000_customer_pickup_driver_source';
 const pickupDispatchName = '20261116100100_customer_pickup_dispatch';
+const retireAttachmentScanStatusName = '20261117120000_retire_attachment_scan_status';
 // This is the exact source delta from the retained 2026-11-12 production
 // release. It is intentionally separate from the frozen historical bootstrap.
 const currentRelease = {
@@ -40,10 +41,11 @@ const currentRelease = {
   '20261115131000_accounting_private_marker_index': ['31ab2f1cd447819b9f1863337c230fe1c23959eb01e260232f54e044d0bdba30', 1],
   [pickupSourceName]: ['37ebbfab7f1c7dde67450e9117bcc54ea186835e9cc1b448f0e8c97a3229122a', 1],
   [pickupDispatchName]: ['1ae2687716e07ecdc08b4c89aa2dd21c3399ed3853d4e7a1124b4932131268a9', 6],
+  [retireAttachmentScanStatusName]: ['9fad9a9544c0c5da8fe58b4f636c2b35ad420fd871c3a7392e12911c5fd4ab91', 5],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -82,8 +84,9 @@ export function compileProtectedCurrentRelease(files: ReadonlyArray<readonly [st
     if (!Buffer.isBuffer(bytes) || sha(bytes) !== sha256) failure('PROTECTED_CURRENT_RELEASE_SQL_IDENTITY_MISMATCH');
     const sql = bytes.toString('utf8');
     let statements = splitCurrentReleaseSql(sql);
-    if (name === '20261108000100_start_new_waybill_numbers_at_one') {
-      if (statements.length !== 4 || statements[0] !== 'BEGIN;' || statements[3] !== 'COMMIT;') {
+    if (name === '20261108000100_start_new_waybill_numbers_at_one' || name === retireAttachmentScanStatusName) {
+      const opening = statements[0]?.replace(/^(?:--[^\r\n]*\r?\n\s*)+/, '');
+      if (statements.length !== expectedCount + 2 || opening !== 'BEGIN;' || statements.at(-1) !== 'COMMIT;') {
         failure('PROTECTED_CURRENT_RELEASE_TRANSACTION_WRAPPER_UNPROVEN');
       }
       // The byte-pinned source wraps the same two statements in a transaction;

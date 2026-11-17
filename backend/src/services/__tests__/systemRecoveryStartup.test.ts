@@ -3,9 +3,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 
-test('recovery startup keeps pending and unreadable journals closed for the restricted runtime', async () => {
+test('restricted recovery startup preserves pending owner requests and keeps restore journals closed', async () => {
   const coordination = await fs.mkdtemp(path.join(os.tmpdir(), 'sabalan-recovery-startup-'));
   const previousCoordination = process.env.RECOVERY_COORDINATION_DIR;
   const previousUrl = process.env.DATABASE_URL;
@@ -15,6 +15,27 @@ test('recovery startup keeps pending and unreadable journals closed for the rest
     const { RESTORE_JOURNAL_PATH, readRestoreJournal } = await import('../systemRecoveryEngine');
     const { initializeSystemRecovery } = await import('../systemRecoveryLifecycle');
     const { getRecoveryRuntimeState } = await import('../recoveryRuntime');
+    const updates: Prisma.RecoveryOperationUpdateManyArgs[] = [];
+    const startupDatabase = {
+      recoveryOperation: {
+        updateMany: async (update: Prisma.RecoveryOperationUpdateManyArgs) => { updates.push(update); },
+        findMany: async () => [],
+        findFirst: async () => ({ downloadedAt: new Date() }),
+      },
+    } as unknown as PrismaClient;
+    const ownerRequest = {
+      status: 'CREATING', source: 'CREATED', packageType: 'COMPLETE', progress: 0, storageName: null,
+      auditEvents: { some: { eventType: 'RECOVERY_OWNER_BACKUP_REQUESTED' } },
+    };
+    await initializeSystemRecovery(startupDatabase);
+    assert.deepEqual(updates[0]?.where, {
+      status: { in: ['CREATING', 'VALIDATING', 'RESTORING'] },
+      NOT: ownerRequest,
+    });
+    const { expiresAt, ...expired } = updates[1]?.where ?? {};
+    assert.deepEqual(expired, ownerRequest);
+    assert(typeof expiresAt === 'object' && expiresAt !== null && 'lte' in expiresAt && expiresAt.lte instanceof Date);
+    assert.deepEqual(updates[1]?.data, { status: 'EXPIRED' });
     let databaseCalls = 0;
     const restrictedDatabase = new Proxy({} as PrismaClient, {
       get() {

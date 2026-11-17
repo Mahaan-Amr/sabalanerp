@@ -113,6 +113,28 @@ const requireLegacyRecoveryExecution: express.RequestHandler = (_req, res, next)
   next();
 };
 
+router.post('/owner-backup-requests', async (req: AuthRequest, res) => {
+  if (!isRestrictedRecoveryRuntime(process.env)) {
+    return res.status(404).json({ success: false, error: 'SYSTEM_RECOVERY_OWNER_REQUEST_UNAVAILABLE' });
+  }
+  if (Object.keys(req.body ?? {}).length !== 1 || typeof req.body?.adminPassword !== 'string') {
+    return res.status(400).json({ success: false, error: 'SYSTEM_RECOVERY_OWNER_REQUEST_INVALID' });
+  }
+  try {
+    const operation = await runtimeHttpRequests.trackWork(req, async () => {
+      await verifyAdminPassword(req);
+      return createBackupRequest(prisma, { packageType: 'COMPLETE', actorId: req.user!.id, ownerExecution: true });
+    });
+    return res.status(202).json({ success: true, data: { id: operation.id, status: operation.status } });
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code === 'ADMIN_PASSWORD_INCORRECT' || code === 'RECOVERY_WRITE_ADMISSION_CLOSED') {
+      return respondError(res, error);
+    }
+    return res.status(500).json({ success: false, error: 'SYSTEM_RECOVERY_OWNER_REQUEST_FAILED' });
+  }
+});
+
 router.post('/backups', requireLegacyRecoveryExecution, async (req: AuthRequest, res) => {
   let lockAcquired = false;
   let backgroundStarted = false;

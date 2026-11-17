@@ -120,8 +120,11 @@ test('real rehearsal graph binds every deployment recovery volume to the QA proj
     const trust = path.join(secretDir, 'partner-release-trust-public.der');
     fs.writeFileSync(trust, 'QA-only public trust fixture');
     const config = renderedConfig();
+    const ownerPublic = path.join(secretDir, 'system-recovery-owner-public.pem');
+    fs.writeFileSync(ownerPublic, '-----BEGIN PUBLIC KEY-----\nQA-fixture\n'); fs.chmodSync(ownerPublic, 0o444);
     const sources = {
       '/run/deployment-secrets/partner-release-trust-public.der': trust,
+      '/run/deployment-secrets/system-recovery-owner-public.pem': ownerPublic,
       '/run/deployment-secrets': secretDir,
       '/app/deployment-remote': remoteDir,
       '/app/deployment-reports': reportDir,
@@ -185,8 +188,11 @@ test('QA target refuses an escaped rendered secret bind and symlinked custody so
     fs.mkdirSync(outside);
     const trust = path.join(secretDir, 'partner-release-trust-public.der');
     fs.writeFileSync(trust, 'QA-only public trust fixture');
+    const ownerPublic = path.join(secretDir, 'system-recovery-owner-public.pem');
+    fs.writeFileSync(ownerPublic, '-----BEGIN PUBLIC KEY-----\nQA-fixture\n'); fs.chmodSync(ownerPublic, 0o444);
     const sources = {
       '/run/deployment-secrets/partner-release-trust-public.der': trust,
+      '/run/deployment-secrets/system-recovery-owner-public.pem': ownerPublic,
       '/run/deployment-secrets': secretDir,
       '/app/deployment-remote': remoteDir,
       '/app/deployment-reports': reportDir,
@@ -224,9 +230,12 @@ test('QA target refuses a directory in place of the Partner trust public-key fil
     fs.mkdirSync(repositoryRoot);
     fs.mkdirSync(secretDir);
     fs.writeFileSync(trust, 'public test fixture');
+    const ownerPublic = path.join(secretDir, 'system-recovery-owner-public.pem');
+    fs.writeFileSync(ownerPublic, '-----BEGIN PUBLIC KEY-----\nQA-fixture\n'); fs.chmodSync(ownerPublic, 0o444);
     const config = { services: { backend: { volumes: renderedConfig().services.backend.volumes.map(volume =>
       volume.target === '/run/deployment-secrets/partner-release-trust-public.der'
-        ? { ...volume, source: trust } : volume) } } };
+        ? { ...volume, source: trust } : volume.target === '/run/deployment-secrets/system-recovery-owner-public.pem'
+          ? { ...volume, source: ownerPublic } : volume) } } };
     const env = { ...qaEnvironment, DEPLOYMENT_SECRET_DIR: secretDir };
     assert.doesNotThrow(() => validateQaRenderedMounts(config, { qaRoot, repositoryRoot, environment: env }));
     fs.rmSync(trust);

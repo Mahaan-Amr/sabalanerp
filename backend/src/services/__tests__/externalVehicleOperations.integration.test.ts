@@ -133,7 +133,7 @@ test('external fallback requires qualifying failures, OTP, separate Guard actor 
   assert.equal(f.messages[0].phone, '09123333333');
   const challenge = await f.tx.dispatchOtpChallenge.findFirstOrThrow({ where: { sessionId: session.id } });
   assert.match(f.messages[0].code, /^\d{6}$/);
-  assert.equal(Object.hasOwn(challenge, 'code'), false, 'the generated client exposes only digest custody');
+  assert.equal('code' in challenge, false, 'the generated client exposes only digest custody');
   const [persisted] = await f.tx.$queryRaw<Array<{ code: string | null }>>`
     SELECT code FROM public.dispatch_otp_challenges WHERE id = ${challenge.id}
   `;

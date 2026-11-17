@@ -76,3 +76,9 @@ The retained QA backend's native coordination guardian names a different kernel 
 ### Cross-release asset evidence read
 
 The candidate asset upload and download fixture passed on a disposable local database initialized from its complete migration catalog. The candidate uploaded a PDF with both scan metadata columns NULL. A separate process loaded the compiled scanner-retaining predecessor at cc55111e3, opened its own generated Prisma client, and downloaded the same evidence through the predecessor's actual asset handler. The response bytes matched the uploaded PDF. The test used the existing actor fixture and a shared temporary file directory. Exact-image authentication, protected rollback, and read coverage for other attachment domains remain separate acceptance work.
+
+### OTP client and predecessor role qualification
+
+The candidate generated Prisma client ignores the legacy plaintext field. The original migration SQL remains byte-identical between both release branches. All 11 external driver integration cases passed on a disposable database with the complete candidate migration catalog. The fallback case observed an SMS code in the injected sender, verified the code through the service, and queried PostgreSQL directly to confirm that the ignored field was NULL.
+
+The scanner-retaining branch was advanced to b544fe739. Its protected runner and isolated role fixture verified live runtime identity, denied protected control-table access, and enforced CLOSED allocation before use as a reader. The current production application uses the existing role topology. The first role cutover and the recovery behavior of ordinary in-app workflows require separate populated QA evidence. In particular, the privileged database staging operations used by recovery require an owned control process when the application login is restricted.

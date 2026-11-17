@@ -15,7 +15,7 @@ const { Client } = require('pg') as { Client: new (config: {
   connectionString: string; connectionTimeoutMillis: number;
 }) => Client };
 
-export const PROTECTED_DATABASE_ROLE_COMPONENT = 'database/protected-role-acls.json';
+export { PROTECTED_DATABASE_ROLE_COMPONENT } from './deploymentCheckpointPolicy';
 
 const privileges = {
   DATABASE: ['CONNECT', 'CREATE', 'TEMPORARY'],
@@ -238,6 +238,23 @@ export function applyProtectedDatabaseRoles(databaseUrl: string, roles: RoleSpli
       fail('Staged role and object privileges did not verify against the checkpoint.');
     }
     assertRestrictedAccess(verified, roles);
+  });
+}
+
+/** Verify the promoted database without modifying roles, ownership or grants. */
+export function verifyPromotedProtectedDatabaseRoles(databaseUrl: string, roles: RoleSplit, snapshot: RoleSnapshot, expectedSource: string) {
+  return withTransaction(databaseUrl, 'READ ONLY', async client => {
+    const identity = await readIdentity(client, roles);
+    if (snapshot?.version !== 1 || snapshot.sourceDatabase !== expectedSource || snapshot.control !== identity.control
+      || identity.connectionLimit !== -1 || JSON.stringify(snapshot.roles) !== JSON.stringify(identity.roles)) {
+      fail('The promoted role checkpoint identity differs from the archive.');
+    }
+    const catalog = await readCatalog(client);
+    assertRestrictedAccess(catalog, roles);
+    if (JSON.stringify(canonicalObjects(catalog, identity.control, roles))
+      !== JSON.stringify(canonicalObjects(snapshot.objects, identity.control, roles))) {
+      fail('The promoted ACLs differ from the protected checkpoint.');
+    }
   });
 }
 

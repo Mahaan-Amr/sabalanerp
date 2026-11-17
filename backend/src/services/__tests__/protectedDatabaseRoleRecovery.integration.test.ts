@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import test from 'node:test';
-import { applyProtectedDatabaseRoles, captureProtectedDatabaseRoles, promoteProtectedDatabaseStage } from '../protectedDatabaseRoleRecovery';
+import { applyProtectedDatabaseRoles, captureProtectedDatabaseRoles, promoteProtectedDatabaseStage, verifyPromotedProtectedDatabaseRoles } from '../protectedDatabaseRoleRecovery';
 
 const { Client } = require('pg') as { Client: new (config: { connectionString: string }) => {
   connect(): Promise<void>;
@@ -19,6 +19,7 @@ test('protected staging recovers exact ACLs including security-definer revocatio
   assert.equal(base.pathname, '/postgres');
   const suffix = randomBytes(6).toString('hex');
   const source = `sabalan_acl_source_${suffix}`;
+  const target = `sabalan_acl_target_${suffix}`;
   const safety = `sabalan_safety_${suffix}`;
   const stage = `sabalan_restore_${suffix}`;
   const roles = { runtime: `sabalan_acl_runtime_${suffix}`, controller: `sabalan_acl_control_${suffix}` };
@@ -32,6 +33,7 @@ test('protected staging recovers exact ACLs including security-definer revocatio
   try {
     await admin.query(`CREATE ROLE ${roles.runtime} LOGIN NOINHERIT PASSWORD '${runtimeSecret}'; CREATE ROLE ${roles.controller} NOINHERIT`);
     await admin.query(`CREATE DATABASE ${source}`);
+    await admin.query(`CREATE DATABASE ${target}`);
     await admin.query(`CREATE DATABASE ${stage} CONNECTION LIMIT 0`);
     const createObjects = `
       CREATE TABLE public.business (id serial PRIMARY KEY);
@@ -102,14 +104,24 @@ test('protected staging recovers exact ACLs including security-definer revocatio
       assert.deepEqual(rows, [{ exact_snapshot: 1, schema_usage: true, schema_create: false, business_read: true, business_delete: false, sequence_use: true, connect: true,
         temp: false, controller_denied: false, controller_allowed: true, overload_allowed: true, revoke_only: false }]);
     } finally { await db.end(); }
-    await promoteProtectedDatabaseStage(urlFor(source), stage, safety);
-    runtimeUrl.pathname = `/${source}`;
+    await promoteProtectedDatabaseStage(urlFor(target), stage, safety);
+    await verifyPromotedProtectedDatabaseRoles(urlFor(target), roles, captured, source);
+    const drifted = structuredClone(captured);
+    drifted.roles[0].connectionLimit = 5;
+    await assert.rejects(verifyPromotedProtectedDatabaseRoles(urlFor(target), roles, drifted, source), /promoted role checkpoint identity/);
+    runtimeUrl.pathname = `/${target}`;
     const promoted = new Client({ connectionString: runtimeUrl.toString() });
     await promoted.connect();
     try {
       assert.deepEqual((await promoted.query('SELECT id FROM public.business')).rows, [{ id: 1 }]);
       await assert.rejects(promoted.query("SELECT public.authority('denied'::text)"), { code: '42501' });
     } finally { await promoted.end(); }
+    const driftedClient = new Client({ connectionString: urlFor(target) });
+    await driftedClient.connect();
+    try {
+      await driftedClient.query(`GRANT DELETE ON public.business TO ${roles.runtime}`);
+      await assert.rejects(verifyPromotedProtectedDatabaseRoles(urlFor(target), roles, captured, source), /promoted ACLs/);
+    } finally { await driftedClient.end(); }
     runtimeUrl.pathname = `/${safety}`;
     const privateSafety = new Client({ connectionString: runtimeUrl.toString() });
     try {
@@ -119,6 +131,7 @@ test('protected staging recovers exact ACLs including security-definer revocatio
     try {
       await admin.query(`DROP DATABASE IF EXISTS ${safety} WITH (FORCE)`);
       await admin.query(`DROP DATABASE IF EXISTS ${stage} WITH (FORCE)`);
+      await admin.query(`DROP DATABASE IF EXISTS ${target} WITH (FORCE)`);
       await admin.query(`DROP DATABASE IF EXISTS ${source} WITH (FORCE)`);
       await admin.query(`DROP ROLE IF EXISTS ${roles.runtime}, ${roles.controller}`);
     } finally { await admin.end(); }

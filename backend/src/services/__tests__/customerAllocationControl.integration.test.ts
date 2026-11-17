@@ -88,5 +88,36 @@ test('controller session authorization can activate once under a live locked dep
       await tx.$queryRawUnsafe('SELECT * FROM public.customer_allocation_controller_activate($1, $2, $3, $4, $5)',
         deploymentId, leaseToken, 'release-456', 'b'.repeat(64), new Date(Date.now() + 60_000));
     }), /CUSTOMER_ALLOCATION_CONTROL_REPLAY/);
+
+    const closureId = `${deploymentId}-close`;
+    const closureLease = `${leaseToken}-close`;
+    await db.deploymentOperation.update({ where: { id: deploymentId }, data: { activeKey: null, phase: 'COMPLETED' } });
+    await db.deploymentOperation.create({ data: {
+      id: closureId, activeKey: 'production', releaseId: 'rollback-release', targetCommit: 'c'.repeat(40),
+      owner: 'controller-test', phase: 'MUTATION_STARTED', leaseToken: closureLease,
+      leaseExpiresAt: new Date(Date.now() + 120_000), heartbeatAt: new Date(), startedAt: new Date(),
+    } });
+    const close = (manifest: string) => db.$transaction(async tx => {
+      await tx.$executeRawUnsafe('SET SESSION AUTHORIZATION sabalan_allocation_controller');
+      const receipt = await tx.$queryRaw<Array<{ state: string; manifest_sha256: string }>>`
+        SELECT * FROM public.customer_allocation_controller_close(${closureId}, ${closureLease}, 'rollback-release', ${manifest})
+      `;
+      await tx.$executeRawUnsafe('RESET SESSION AUTHORIZATION');
+      return receipt;
+    });
+    await assert.rejects(close('b'.repeat(64)), /CUSTOMER_ALLOCATION_CLOSURE_BOUNDARY_REJECTED/);
+    await db.deploymentOperation.update({ where: { id: closureId }, data: { checkpointJson: {
+      deploymentId: closureId, releaseId: 'rollback-release', localVerified: true, remoteVerified: true,
+      restoreVerified: true, manifestReadable: true, checksum: 'c'.repeat(64),
+    } } });
+    await assert.rejects(close('f'.repeat(64)), /CUSTOMER_ALLOCATION_CLOSURE_RECEIPT_MISMATCH/);
+    assert.deepEqual(await close('b'.repeat(64)), [{ state: 'CLOSED', manifest_sha256: 'b'.repeat(64) }]);
+    assert.deepEqual(await close('b'.repeat(64)), [{ state: 'CLOSED', manifest_sha256: 'b'.repeat(64) }]);
+    const history = await db.$queryRaw<Array<{ event: string; manifest_sha256: string }>>`
+      SELECT event, manifest_sha256 FROM public.customer_allocation_release_audit ORDER BY id
+    `;
+    assert.deepEqual(history.map(row => row.event), ['ACTIVATED', 'CLOSED']);
+    assert.ok(history.every(row => row.manifest_sha256 === 'b'.repeat(64)));
+    assert.deepEqual(await verifyCustomerAllocationDeploymentState(db), { customerAllocationDatabaseProtections: 'verified' });
   } finally { await db.$disconnect(); await temporary.cleanup(); }
 });

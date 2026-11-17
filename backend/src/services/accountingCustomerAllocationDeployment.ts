@@ -41,6 +41,21 @@ export async function verifyCustomerAllocationDeploymentState(database: Pick<Pri
         AND i.indnkeyatts = 1 AND pg_get_indexdef(i.indexrelid, 1, false) = '"profileId"'
         AND pg_get_expr(i.indpred, i.indrelid) = '(state = ''PENDING''::text)'
     ) AS "pendingIndexReady", to_regprocedure('public.serialize_customer_command_key_within(text)') IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM pg_proc p
+      WHERE p.oid = to_regprocedure('public.customer_allocation_controller_close(text,text,text,text)')
+        AND p.prosecdef
+    )
+    AND EXISTS (
+      SELECT 1 FROM pg_index i
+      WHERE i.indexrelid = to_regclass('public.customer_allocation_release_audit_activation_once')
+        AND i.indrelid = to_regclass('public.customer_allocation_release_audit')
+        AND i.indisunique AND i.indisvalid AND i.indisready
+        AND i.indnkeyatts = 2
+        AND pg_get_indexdef(i.indexrelid, 1, false) = 'deployment_id'
+        AND pg_get_indexdef(i.indexrelid, 2, false) = 'release_id'
+        AND pg_get_expr(i.indpred, i.indrelid) = '(event = ''ACTIVATED''::text)'
+    )
     AND NOT EXISTS (
       SELECT 1 FROM expected_fences e WHERE NOT EXISTS (
         SELECT 1 FROM pg_index i

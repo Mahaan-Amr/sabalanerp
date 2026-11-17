@@ -55,6 +55,10 @@ const nextReleaseCatalog = {
   '20261117130000_store_dispatch_exit_otp_code': {
     tables: ['dispatch_otp_challenges'], functions: [],
   },
+  '20261117140000_customer_allocation_controller_closure': {
+    tables: ['customer_allocation_release_control', 'customer_allocation_release_audit'],
+    functions: ['customer_allocation_controller_close'],
+  },
 };
 // This is the exact source delta from the retained 2026-11-12 production
 // release. It is intentionally separate from the frozen historical bootstrap.
@@ -94,10 +98,11 @@ const currentRelease = {
   '20261116132000_close_grouped_allocation_child_backstop': ['bc83e4c5dbf13051374ebaaab5bb1a5b75682b6044eb179ac03e94a971c18c90', 2],
   [allocationControllerTransitionName]: ['8f8389793094eb9ea72abb292a419e0ac547412c44559c6a2c03e00b06bc5cdc', 18],
   '20261117130000_store_dispatch_exit_otp_code': ['375715f6a9930906e9cfae9b5bfbd59c4e4371d5d70587ec651de81afb7e2353', 1],
+  '20261117140000_customer_allocation_controller_closure': ['3f063d8699ce903cecab90eb22dc1fa9f4bf3aeda8bd37176f9e2ea602efcb72', 6],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 25, 35, 36]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 

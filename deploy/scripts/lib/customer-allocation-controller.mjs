@@ -66,6 +66,13 @@ export function customerAllocationControllerDatabase(client, runtimeClient) {
       if (role.rows.length !== 1 || role.rows[0].admitted_controller_session !== true
         || role.rows[0].admitted_runtime_session !== true) reject();
       const result = await work({
+        close: async ({ deploymentId, leaseToken, releaseId, manifestSha256 }) => {
+          const { rows } = await client.query(
+            'SELECT * FROM public.customer_allocation_controller_close($1, $2, $3, $4)',
+            [deploymentId, leaseToken, releaseId, manifestSha256]);
+          if (rows.length !== 1) reject();
+          return rows[0];
+        },
         lock: async (deploymentId, leaseToken) => {
           const { rows } = await client.query(
             'SELECT * FROM public.customer_allocation_controller_lock($1, $2)', [deploymentId, leaseToken]);
@@ -89,6 +96,17 @@ export function customerAllocationControllerDatabase(client, runtimeClient) {
       throw error;
     }
   } };
+}
+
+export async function closeCustomerAllocation({ db, deploymentId, leaseToken, releaseId, manifestSha256 }) {
+  if (!db || typeof db.transaction !== 'function'
+    || ![deploymentId, leaseToken, releaseId].every(value => typeof value === 'string' && value.length > 0)
+    || typeof manifestSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(manifestSha256)) reject();
+  return db.transaction(async tx => {
+    const receipt = await tx.close({ deploymentId, leaseToken, releaseId, manifestSha256 });
+    if (receipt?.state !== 'CLOSED' || receipt.manifest_sha256 !== manifestSha256) reject();
+    return receipt;
+  });
 }
 
 /** Dormant controller seam. The transaction adapter must use the dedicated database

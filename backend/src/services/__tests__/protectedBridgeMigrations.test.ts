@@ -60,6 +60,7 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261116132000_close_grouped_allocation_child_backstop',
     '20261116133000_customer_allocation_controller_transition',
     '20261117130000_store_dispatch_exit_otp_code',
+    '20261117140000_customer_allocation_controller_closure',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);

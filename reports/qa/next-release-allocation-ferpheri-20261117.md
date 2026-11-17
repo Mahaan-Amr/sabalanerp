@@ -7,7 +7,7 @@
 - Production was rechecked after the financial amount hotfix and runs `6e8d91fc66007f967809646f5ccec061cd7d9ea1`. That hotfix is merged into this integration. It adds no migrations. Refresh the running image set before operator handoff.
 - GitHub main and Ferpheri both resolved to `917e044419cd9eb88483fad96d83544d545c9579`. The dispatch and attachment scanning changes are already included. The Inquiry gitlink is `92b96e265cb1a32deeeed3da494501df3db9a544`.
 - The integration merges allocation candidate `95c270717`. PR #462 is an older deny-only review branch. Its deployment code is not the base for this integration.
-- The protected migration catalog appends eleven byte-pinned migrations. The attachment compatibility migration occupies its own receipt epoch for the scanner-retaining predecessor. The final epoch adds nine allocation migrations and one nullable dispatch OTP column. Previously deployed epochs retain their identities.
+- The protected migration catalog appends twelve byte-pinned migrations. The attachment compatibility migration occupies its own receipt epoch for the scanner-retaining predecessor. The next epoch adds nine allocation migrations and one nullable dispatch OTP column. The closure migration has a separate receipt epoch. Previous epochs retain their identities.
 
 ## Verified in this integration
 

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { canonicalGoPayload } from '../../deploy/scripts/lib/customer-allocation-go-manifest.mjs';
-import { activateCustomerAllocation, customerAllocationControllerDatabase } from '../../deploy/scripts/lib/customer-allocation-controller.mjs';
+import { activateCustomerAllocation, closeCustomerAllocation, customerAllocationControllerDatabase } from '../../deploy/scripts/lib/customer-allocation-controller.mjs';
 
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
 const h = value => value.repeat(64);
@@ -97,6 +97,27 @@ test('database adapter rejects an unqualified controller or runtime before acqui
     assert.equal(calls.at(-1), 'ROLLBACK');
     assert.ok(calls.every(sql => !sql.includes('controller_lock')));
   }
+});
+
+test('closure passes the exact activation digest and rolls back a mismatched receipt', async () => {
+  const calls = [];
+  const values = ['rollback-deployment', 'rollback-lease', 'rollback-release', h('a')];
+  const db = customerAllocationControllerDatabase({
+    query: async (sql, parameters) => {
+      calls.push(sql);
+      if (sql.includes('admitted_controller_session')) return { rows: [{
+        admitted_controller_session: true, admitted_runtime_session: true,
+      }] };
+      if (sql.includes('controller_close')) {
+        assert.deepEqual(parameters, values);
+        return { rows: [{ state: 'CLOSED', manifest_sha256: h('b') }] };
+      }
+      return { rows: [] };
+    },
+  }, runtime);
+  const [deploymentId, leaseToken, releaseId, manifestSha256] = values;
+  await assert.rejects(closeCustomerAllocation({ db, deploymentId, leaseToken, releaseId, manifestSha256 }));
+  assert.equal(calls.at(-1), 'ROLLBACK');
 });
 
 test('wrong phase, lease, image, signature and replay never write control', async () => {

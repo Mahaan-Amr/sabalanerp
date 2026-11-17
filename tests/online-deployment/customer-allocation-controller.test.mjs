@@ -38,6 +38,7 @@ const authority = () => {
 const input = (db, signed = envelope(payload())) => ({ db, envelope: signed,
   expected: facts(), deploymentId: 'deployment-456', leaseToken: 'lease-456',
   approver: { keyId: 'independent-approver-1', publicKey } });
+const runtime = { query: async () => ({ rows: [{ pid: 42 }] }) };
 
 test('a signed exact GO changes control once under the locked deployment operation', async () => {
   const db = authority();
@@ -50,19 +51,23 @@ test('database adapter retains the lock and writes the receipt in one transactio
   const { activeKey, phase, leaseToken, targetCommit, releaseId, controlState } = boundary();
   const client = { query: async (sql, values) => {
     calls.push({ sql, values });
-    if (sql.includes('admitted_controller_session')) return { rows: [{ admitted_controller_session: true }] };
+    if (sql.includes('admitted_controller_session')) return { rows: [{
+      admitted_controller_session: true, admitted_runtime_session: true,
+    }] };
     if (sql.includes('controller_lock')) return { rows: [{ deployment_id: 'deployment-456',
       activeKey, phase, leaseToken, targetCommit, releaseId, controlState,
       dbClock: new Date(now), leaseExpiresAt: new Date('2026-11-16T12:03:00.000Z') }] };
     if (sql.includes('controller_activate')) return { rows: [{ state: 'ACTIVE', manifest_sha256: values[3] }] };
     return { rows: [] };
   } };
-  const result = await activateCustomerAllocation(input(customerAllocationControllerDatabase(client)));
+  const result = await activateCustomerAllocation(input(customerAllocationControllerDatabase(client, runtime)));
   assert.equal(result.state, 'ACTIVE');
   assert.deepEqual(calls.map(call => call.sql.trimStart().startsWith('SELECT') ? 'SELECT' : call.sql),
     ['BEGIN', 'SELECT', 'SELECT', 'SELECT', 'COMMIT']);
   assert.match(calls[1].sql, /rolname = session_user AND r.rolname = current_user/);
   assert.match(calls[1].sql, /pg_auth_members/);
+  assert.match(calls[1].sql, /a.pid = \$1 AND a.datname = current_database/);
+  assert.deepEqual(calls[1].values, [42]);
 
   calls.length = 0;
   const query = client.query;
@@ -73,21 +78,25 @@ test('database adapter retains the lock and writes the receipt in one transactio
     }
     return query(sql, values);
   };
-  await assert.rejects(activateCustomerAllocation(input(customerAllocationControllerDatabase(client))));
+  await assert.rejects(activateCustomerAllocation(input(customerAllocationControllerDatabase(client, runtime))));
   assert.equal(calls.at(-1).sql, 'ROLLBACK');
 });
 
-test('database adapter rejects an unqualified controller session before acquiring the deployment lock', async () => {
-  const calls = [];
-  const db = customerAllocationControllerDatabase({
-    query: async sql => {
-      calls.push(sql);
-      return { rows: sql.includes('admitted_controller_session') ? [{ admitted_controller_session: false }] : [] };
-    },
-  });
-  await assert.rejects(activateCustomerAllocation(input(db)), /CUSTOMER_ALLOCATION_CONTROLLER_REJECTED/);
-  assert.equal(calls.at(-1), 'ROLLBACK');
-  assert.ok(calls.every(sql => !sql.includes('controller_lock')));
+test('database adapter rejects an unqualified controller or runtime before acquiring the deployment lock', async () => {
+  for (const [controller, application] of [[false, true], [true, false]]) {
+    const calls = [];
+    const db = customerAllocationControllerDatabase({
+      query: async sql => {
+        calls.push(sql);
+        return { rows: sql.includes('admitted_controller_session') ? [{
+          admitted_controller_session: controller, admitted_runtime_session: application,
+        }] : [] };
+      },
+    }, runtime);
+    await assert.rejects(activateCustomerAllocation(input(db)), /CUSTOMER_ALLOCATION_CONTROLLER_REJECTED/);
+    assert.equal(calls.at(-1), 'ROLLBACK');
+    assert.ok(calls.every(sql => !sql.includes('controller_lock')));
+  }
 });
 
 test('wrong phase, lease, image, signature and replay never write control', async () => {

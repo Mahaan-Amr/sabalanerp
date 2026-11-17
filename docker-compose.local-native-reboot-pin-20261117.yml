@@ -1,0 +1,8 @@
+# Restart the existing backend only after its incident receipt is verified.
+name: sabalanerp-local
+services:
+  backend:
+    image: ${LOCAL_NATIVE_REBOOT_IMAGE_ID:?immutable image ID required}
+    entrypoint: ["docker-entrypoint.sh"]
+    command: ["sh", "scripts/with-backend-control-ownership.sh", "sh", "scripts/start-backend.sh"]
+    stop_grace_period: 5m

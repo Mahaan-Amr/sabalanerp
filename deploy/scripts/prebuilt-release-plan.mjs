@@ -18,10 +18,15 @@ export function validateImmutableApplicationGraph(selected,observed,archiveRecei
   assert.equal(store==='containerd'?graph.index:graph.config,selected.image,'PREBUILT_ACTIVATION_EXECUTION_NAMESPACE_CHANGED');assert.match(graph.archiveSha256,digest);assert.ok(Number.isSafeInteger(graph.archiveBytes)&&graph.archiveBytes>0);
   assert.ok(Array.isArray(graph.rootfsDiffIds)&&graph.rootfsDiffIds.length>0&&graph.rootfsDiffIds.length<=128);for(const layer of graph.rootfsDiffIds)assert.match(layer,image);
   for(const key of graphKeys)assert.deepEqual(archiveReceipt[key],graph[key],'PREBUILT_ARCHIVE_GRAPH_CHANGED');
+  validateInstalledApplicationGraph(selected,observed,store);
+  return graph;
+}
+export function validateInstalledApplicationGraph(selected,observed,store){
+  const graph=selected.archiveGraph;
   assert.equal(observed.Id,selected.image,'PREBUILT_INSTALLED_EXECUTION_CHANGED');assert.equal(observed.Os,'linux');assert.equal(observed.Architecture,'amd64');assert.deepEqual(observed.RootFS.Layers,graph.rootfsDiffIds,'PREBUILT_INSTALLED_LAYERS_CHANGED');
   if(store==='containerd'){assert.equal(observed.Descriptor?.digest,graph.index);assert.ok(['application/vnd.oci.image.index.v1+json','application/vnd.docker.distribution.manifest.list.v2+json'].includes(observed.Descriptor?.mediaType));assert.ok(Number.isSafeInteger(observed.Descriptor.size)&&observed.Descriptor.size>0);}
   else assert.ok(!observed.Descriptor);
-  return selected.archiveGraph;
+  return graph;
 }
 export function requirePrebuiltScannerSelection(plan){assert.ok(plan.preservedClamav,'PREBUILT_SCANNER_PRESERVATION_SELECTION_REQUIRED');return validateSelection(plan.preservedClamav);}
 export function validatePrebuiltReleasePlan(plan,actual){

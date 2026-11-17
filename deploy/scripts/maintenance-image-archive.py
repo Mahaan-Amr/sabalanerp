@@ -22,22 +22,34 @@ def browser_from_layers(archive, graph, role):
         for layer in manifest['layers']:
             raw = outer.extractfile('blobs/sha256/' + layer['digest'][7:])
             mode = 'r|gz' if layer['mediaType'].endswith('+gzip') else 'r|'
+            additions, whiteouts = {}, []
             with tarfile.open(fileobj=raw, mode=mode) as expanded:
                 for entry in expanded:
-                    name = entry.name.removeprefix('./')
+                    name = entry.name.removeprefix('./').rstrip('/')
+                    if name in ('', '.'):
+                        assert entry.isdir(), 'BROWSER_ROOT_ENTRY_INVALID'
+                        continue
+                    assert not name.startswith('/') and not any(part in ('.', '..') for part in name.split('/')), 'BROWSER_LAYER_PATH_ALIAS'
                     # Refuse ambiguous link/whiteout ancestry for identity files.
                     if any(target == name or target.startswith(name + '/') for target in wanted):
                         if name in wanted:
                             assert entry.isfile() and entry.size <= 1024 * 1024, 'BROWSER_IDENTITY_NOT_REGULAR'
-                            files[name] = expanded.extractfile(entry).read()
+                            additions[name] = expanded.extractfile(entry).read()
                         else:
                             assert entry.isdir(), 'BROWSER_IDENTITY_LINK_ANCESTOR'
-                    if '/.wh.' in name:
-                        directory, whiteout = name.rsplit('/', 1)
-                        target = directory + '/' + whiteout[4:]
-                        for selected in list(files):
-                            if (whiteout == '.wh..wh..opq' and selected.startswith(directory + '/')) or selected == target or selected.startswith(target + '/'):
-                                del files[selected]
+                    directory, _, whiteout = name.rpartition('/')
+                    if whiteout.startswith('.wh.'):
+                        assert entry.isfile(), 'BROWSER_WHITEOUT_NOT_REGULAR'
+                        whiteouts.append((directory, whiteout))
+            # OCI whiteouts remove lower-layer entries, independent of member
+            # order. Same-layer additions survive even a root opaque marker.
+            for directory, whiteout in whiteouts:
+                prefix_path = directory + '/' if directory else ''
+                target = prefix_path + whiteout[4:]
+                for selected in list(files):
+                    if (whiteout == '.wh..wh..opq' and selected.startswith(prefix_path)) or selected == target or selected.startswith(target + '/'):
+                        del files[selected]
+            files.update(additions)
     assert set(files) == wanted, 'COMPILED_BROWSER_FILES_REQUIRED'
     native = files[prefix + 'BUILD_ID'].decode().strip()
     assert re.fullmatch(r'[A-Za-z0-9_-]{1,128}', native)

@@ -61,7 +61,9 @@ class ColdBrowserTests(unittest.TestCase):
 
     def test_changed_native_identity_whiteout_and_symlink_refuse(self):
         valid = {'app/.next-build/BUILD_ID': b'erp_exact_image123', 'app/.next-build/browser-build-identity.json': json.dumps({'format': 'sabalan-browser-build/v1', 'browserBuildId': 'erp_exact_image123', 'nativeBuildId': 'erp_exact_image123'}).encode()}
-        for later in [{'app/.next-build/BUILD_ID': b'erp_other_image123'}, {'app/.next-build/.wh.BUILD_ID': b''}, {'app/.next-build': None}]:
+        for same_layer in [{**valid, '.wh..wh..opq': b''}, {'.wh..wh..opq': b'', **valid}]:
+            self.assertEqual(self.observe('frontend', [valid, same_layer])['id'], 'erp_exact_image123')
+        for later in [{'.wh.app': b''}, {'.wh..wh..opq': b''}, {'app/.wh..wh..opq': b''}, {'app/.next-build/BUILD_ID': b'erp_other_image123'}, {'app/.next-build/.wh.BUILD_ID': b''}, {'app/.next-build': None}]:
             with self.assertRaises(AssertionError):
                 self.observe('frontend', [valid, later])
 

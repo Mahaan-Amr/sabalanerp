@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {validateBinding,canonical,type PreservedClamavBinding} from '../../scripts/preserved-clamav-policy.mjs';
+import {validateMaintenanceBinding,readMaintenanceRecord,validateMaintenanceResume,type MaintenanceImageBinding} from '../../scripts/maintenance-image-binding.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { disconnectDatabase, prisma } from '../lib/prisma';
@@ -41,6 +42,7 @@ type Session = {
   allocationControllerProvisioning?: true;
   controlImage: string;
   preservedClamav?: PreservedClamavBinding;
+  maintenanceImages?: MaintenanceImageBinding;
   clamavOperation?: 'repair' | 'incident-recovery';
   clamavIncidentSnapshotSha256?: string;
   rollbackReleaseSet: Record<'backend' | 'frontend' | 'inquiry' | 'nginx' | 'postgres' | 'clamav', string>;
@@ -63,8 +65,27 @@ const environmentPreservation = (): PreservedClamavBinding | undefined => {
   if (!/^(?:[a-f0-9]{2}){1,16384}$/.test(hex)) throw new Error('Invalid scanner preservation metadata.');
   return validateBinding(JSON.parse(Buffer.from(hex, 'hex').toString('utf8')));
 };
+const maintenanceMetadataName = (deploymentId: string) => {
+  if (!/^[a-zA-Z0-9_-]{1,160}$/.test(deploymentId)) throw new Error('Invalid maintenance content deployment identity.');
+  return `maintenance-images-${deploymentId}.json`;
+};
+const environmentMaintenanceImages = (): MaintenanceImageBinding | undefined => {
+  const hex = process.env.DEPLOYMENT_MAINTENANCE_IMAGE_BINDING_HEX;
+  if (!hex) return undefined;
+  if (!/^(?:[a-f0-9]{2}){1,65536}$/.test(hex)) throw new Error('Invalid maintenance image binding.');
+  return validateMaintenanceBinding(JSON.parse(Buffer.from(hex, 'hex').toString('utf8')));
+};
 const readSession = async (): Promise<Session> => {
   const session = JSON.parse(await fs.promises.readFile(SESSION_PATH, 'utf8')) as Session;
+  const maintenanceImages = environmentMaintenanceImages();
+  if (session.maintenanceImages || maintenanceImages) {
+    if (!session.maintenanceImages || !maintenanceImages) throw new Error('Maintenance image session binding missing.');
+    const first = (await validateDeploymentHostJournal(JOURNAL_PATH))[0];
+    for (const directory of [REPORT_DIR, RECOVERY_COORDINATION_DIR]) {
+      const record = readMaintenanceRecord(path.join(directory, maintenanceMetadataName(session.deploymentId)), maintenanceImages);
+      validateMaintenanceResume(session, first, record, maintenanceImages);
+    }
+  }
   const binding = environmentPreservation();
   if (session.preservedClamav || binding) {
     if (!session.preservedClamav || !binding || canonical(validateBinding(session.preservedClamav)) !== canonical(binding)) throw new Error('Scanner preservation session binding changed.');
@@ -119,6 +140,7 @@ const prepare = async (purpose?: Session['purpose'], provisionController = false
     throw new Error('Invalid previous performance runtime identity.');
   }
   const preservedClamav = environmentPreservation();
+  const maintenanceImages = environmentMaintenanceImages();
   if (preservedClamav && (process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true' || clamavOperation === 'incident-recovery')) throw new Error('Scanner preservation cannot perform repair.');
   const session: Session = {
     deploymentId: process.env.DEPLOYMENT_ID || `deploy-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
@@ -135,6 +157,7 @@ const prepare = async (purpose?: Session['purpose'], provisionController = false
     ...(clamavOperation === 'incident-recovery' ? { clamavIncidentSnapshotSha256: incidentSha } : {}),
     rollbackPerformanceEnvironment,
     ...(preservedClamav ? {preservedClamav} : {}),
+    ...(maintenanceImages ? {maintenanceImages} : {}),
     rollbackReleaseSet: {
       backend: required('DEPLOYMENT_PREVIOUS_BACKEND_IMAGE'),
       frontend: required('DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE'),
@@ -144,6 +167,16 @@ const prepare = async (purpose?: Session['purpose'], provisionController = false
       clamav: required('DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE'),
     },
   };
+  if (maintenanceImages) {
+    const name = maintenanceMetadataName(session.deploymentId);
+    const record = readMaintenanceRecord(path.join(REPORT_DIR, name), maintenanceImages);
+    validateMaintenanceResume(session, {deploymentId: session.deploymentId, sequence: 1, event: 'deployment-prepared', details: {maintenanceImages}}, record, maintenanceImages);
+    await fs.promises.mkdir(RECOVERY_COORDINATION_DIR, {recursive: true});
+    const handle = await fs.promises.open(path.join(RECOVERY_COORDINATION_DIR, name), 'wx', 0o600);
+    try { await handle.writeFile(canonical(record)); await handle.sync(); } finally { await handle.close(); }
+    const parent = await fs.promises.open(RECOVERY_COORDINATION_DIR, 'r');
+    try { await parent.sync(); } finally { await parent.close(); }
+  }
   if (preservedClamav) {
     const name = preservationMetadataName(session.deploymentId);
     for (const directory of [REPORT_DIR, RECOVERY_COORDINATION_DIR]) {
@@ -159,6 +192,7 @@ const prepare = async (purpose?: Session['purpose'], provisionController = false
   await journal(session, 'deployment-prepared', {
     clamavOperation: session.clamavOperation,
     ...(provisionController ? { allocationControllerProvisioning: true } : {}),
+    ...(maintenanceImages ? {maintenanceImages} : {}),
     ...(preservedClamav ? {preservedClamav} : {}),
     ...(session.clamavIncidentSnapshotSha256 ? { clamavIncidentSnapshotSha256: session.clamavIncidentSnapshotSha256 } : {}),
   });

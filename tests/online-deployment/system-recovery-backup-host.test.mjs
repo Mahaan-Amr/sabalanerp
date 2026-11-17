@@ -47,6 +47,7 @@ exec 8<&0 </dev/null
 exec 7<&8
 id() { printf '0\n'; }
 realpath() { printf '%s\n' "$2"; }
+mktemp() { command mktemp; }
 env_value() { printf 'sabalan_application_runtime\n'; }
 sh() { case "$*" in *storage-preflight.sh*) echo 'storage-preflight';; *) command sh "$@";; esac; }
 compose() { case "$*" in *system-recovery-runtime-proof.js*) printf '{"role":"sabalan_application_runtime","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","releaseId":"release-current","admitted":false}\n';; *) printf 'container-id\n';; esac; }
@@ -182,6 +183,36 @@ echo "returned $status"
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /phase ROLLBACK_STARTED/);
   assert.match(result.stdout, /stop .*stop-gates exact-gates exact-image deploy-current operation-current[\s\S]*original-child-closed[\s\S]*returned 124/);
+});
+
+test('expiry while capturing the runtime proof retains rollback phase in its original shell', () => {
+  const script = String.raw`set -eu
+. "$1"
+SYSTEM_RECOVERY_OWNER_ACTION=RESTORE
+OPERATIONS_ROOT=/fake
+SESSION_HOST_PATH="$(mktemp)"
+DEPLOYMENT_PHASE=RELEASE_STARTED
+restore_mutation_started=0
+checks=0
+node() { checks=$((checks+1)); [ "$checks" -lt 2 ]; }
+phase() {
+ [ "$DEPLOYMENT_PHASE" != "$1" ] || { echo 'forbidden-self-transition' >&2; return 1; }
+ DEPLOYMENT_PHASE="$1"
+ echo "phase $1" >&2
+}
+sleep() { command sleep 0.01; }
+compose() { command sleep 0.1; printf '{"admitted":false}\n'; }
+status=0
+capture_system_recovery_runtime_after || status=$?
+echo "captured $status $DEPLOYMENT_PHASE"
+if [ "$DEPLOYMENT_PHASE" != ROLLBACK_STARTED ]; then phase ROLLBACK_STARTED; fi
+echo 'checkpoint-rollback-admitted'
+rm -f "$SESSION_HOST_PATH" "$SESSION_HOST_PATH".runtime-proof.*
+`;
+  const result = runShell(['-c', script, 'sh', backupRunner], { encoding: 'utf8', timeout: 15000 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /captured 124 ROLLBACK_STARTED[\s\S]*checkpoint-rollback-admitted/);
+  assert.doesNotMatch(result.stderr, /forbidden-self-transition/);
 });
 
 test('restore health failure or elapsed mutation deadline runs one checkpoint rollback, while a failed rollback stays closed', () => {

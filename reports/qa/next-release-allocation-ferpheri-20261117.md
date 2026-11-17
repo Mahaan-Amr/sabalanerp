@@ -17,6 +17,7 @@
 - Next.js compiled, completed its type check, generated 145 static pages and produced its browser identity artifact.
 - All 11 external vehicle integration tests passed on an isolated local PostgreSQL database after the OTP change. The fallback test verifies that the numeric code reaches the SMS sender, the stored raw code is null, and the same code still completes verification.
 - The lineage branch imports the existing closed-control work. Against isolated PostgreSQL, a bypassed application decision still could not commit the grouped child, voucher or parent intent outcome while the database is closed. The HTTP posting test still passes under its isolated test-only admission substitutions.
+- A populated fixture initialized from the production `b43fc1f0` migration catalog preserved its profile, debt, receipt and voucher rows through Prisma migration. The candidate then read the original balances and posted an ordinary one-rial settlement. The test compares shared ledger rows directly before migration because the candidate Prisma reader selects new lineage columns. This test did not use the protected runner, retained image or production data.
 - The local Git hook launcher could not start its shell. All three checks in the hook were run explicitly before the integration commit.
 
 ## Remaining release evidence

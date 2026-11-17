@@ -26,12 +26,18 @@ test('allocation migrations preserve a populated ledger and allow ordinary settl
     });
     const [{ at }] = await db.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at`;
     const read = () => readCustomerWorkspace(db, { id: customer, asOf: at, userId: f.actor.id });
-    const evidence = () => db.accountingLedgerVoucher.findMany({ orderBy: { id: 'asc' } });
-    const before = await read();
+    // The candidate reader selects new lineage columns. Snapshot the shared
+    // ledger tables directly before applying the candidate schema.
+    const evidence = () => Promise.all([
+      db.accountingCustomerProfile.findMany({ orderBy: { id: 'asc' } }),
+      db.accountingCustomerOpenItem.findMany({ orderBy: { id: 'asc' } }),
+      db.accountingTreasuryTransaction.findMany({ orderBy: { id: 'asc' } }),
+      db.accountingLedgerVoucher.findMany({ orderBy: { id: 'asc' } }),
+    ]);
     await assert.rejects(verifyCustomerAllocationDeploymentState(db), /protections are incomplete/);
-    const vouchers = await evidence();
-    assert.equal(before.debitOpenRials, 41n);
-    assert.equal(before.unallocatedCreditRials, 30n);
+    const before = await evidence();
+    assert.equal(before[1].find(item => item.kind === 'RECEIVABLE')?.originalRials.toString(), '41');
+    assert.equal(before[2].find(row => row.id === receipt.id)?.amountRials.toString(), '30');
     execFileSync(process.execPath, [path.resolve('node_modules/prisma/build/index.js'), 'migrate', 'deploy', '--schema', path.resolve('prisma/schema.prisma')], {
       env: { ...process.env, DATABASE_URL: isolated.databaseUrl }, stdio: 'pipe', timeout: 180_000,
     });
@@ -46,10 +52,9 @@ test('allocation migrations preserve a populated ledger and allow ordinary settl
       await verifyCustomerAllocationDeploymentState(tx);
     }), /protections are incomplete/);
     assert.deepEqual(await verifyCustomerAllocationDeploymentState(db), { customerAllocationDatabaseProtections: 'verified' });
-    assert.deepEqual(await evidence(), vouchers);
-    assert.equal(after.profile?.id, before.profile?.id);
-    assert.deepEqual(after.openItems, before.openItems);
-    assert.deepEqual(after.receipts, before.receipts);
+    assert.deepEqual(await evidence(), before);
+    assert.equal(after.debitOpenRials, 41n);
+    assert.equal(after.unallocatedCreditRials, 30n);
     const debt = after.openItems.find(item => item.kind === 'RECEIVABLE')!;
     await recordCustomerWorkspaceTreasury(db, customer, {
       ...f.common, kind: 'ALLOCATION', amountRials: 0n, receiptId: receipt.id,

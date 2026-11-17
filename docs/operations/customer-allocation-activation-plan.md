@@ -43,3 +43,17 @@ Command matching binds the canonical customer profile, original actor, key and p
 The browser keeps the exact command before dispatch and checks the server reservation. After reload it can reconcile without reposting. It retires the local record after a committed result and a successful balance refresh, or after authoritative cancellation. Unknown and storage errors keep the local record pending. Cross-device coordination uses the server reservation.
 
 The intent service reserves and cancels an exact request under the customer lock. The grouped writer checks the same reservation after the existing admission gate. A database trigger binds completion to the parent command in the posting transaction. Isolated PostgreSQL tests use a synthetic parent to check rollback and a race with cancellation. The treasury-authorized HTTP routes let owners recover and cancel a known intent, and block new reservations under the closed admission gate. The browser discovers an outstanding intent when no local request is saved, requires an exact server reservation before dispatch, and retires a canceled request only after an authoritative response. Activation still requires real cross-device financial posting and reversal tests, coordination with other writers, reconciliation of older requests, and the exact-image rollback rehearsal.
+
+## Protected current-data rollback after reopening
+
+Use the canonical runner with the independently qualified scanner-retaining predecessor and the historical evidence directory from the successful activation. Keep the activation selection unset. Supply the private allocation closure credential and pinned approver as for protected activation. The historical directory supplies the approved decision and reader evidence. The original manifest's validity window applies to activation. Closure instead requires the exact manifest digest recorded by the database for the active allocation release.
+
+```sh
+sh deploy/scripts/deploy.sh --customer-allocation-current-data-rollback <protected-env-file> <historical-go-evidence-directory>
+```
+
+The controller selects the exact approved predecessor backend, frontend and Inquiry image IDs, including the original browser build. It checks the predecessor's catalog matches the activation catalog and verifies the exact retained, stopped scanner container and image. Keep those images, the stopped container and its scanner bank under retention. The operation takes a new lease, drains the scanner-free release, and verifies a fresh current-data checkpoint locally and on the independent backup host. It proves the target catalog is already applied, closes allocation against the original manifest digest under that lease, and starts the retained scanner and application images. All normal release gates and the scanner smoke check must pass before reopening.
+
+A failed attempt after its mutation boundary can restore only the fresh checkpoint captured by this operation, under the normal automatic recovery procedure. That checkpoint contains the acknowledged allocations and files present at the start of the attempt. If the controller cannot verify recovery, maintenance stays active.
+
+The exact images, reader evidence and cross-topology rehearsal remain prerequisites. The local controller and database fixtures cannot grant a production rollback or activation.

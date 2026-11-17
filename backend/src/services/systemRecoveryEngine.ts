@@ -1142,11 +1142,26 @@ export const stageAndPromoteRecovery = async (input: {
 };
 
 export const readRestoreJournal = async (): Promise<RestoreJournal | null> => {
+  let stat: fs.Stats;
   try {
-    return JSON.parse(await fs.promises.readFile(RESTORE_JOURNAL_PATH, 'utf8')) as RestoreJournal;
-  } catch {
-    return null;
+    stat = await fs.promises.lstat(RESTORE_JOURNAL_PATH);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
   }
+  if (!stat.isFile()) throw new Error('RECOVERY_RESTORE_JOURNAL_INVALID');
+  const contents = await fs.promises.readFile(RESTORE_JOURNAL_PATH, 'utf8');
+  let journal: RestoreJournal;
+  try {
+    journal = JSON.parse(contents);
+  } catch {
+    throw new Error('RECOVERY_RESTORE_JOURNAL_INVALID');
+  }
+  if (!journal || typeof journal.operationId !== 'string' || !journal.operationId
+    || !['STAGED', 'FILES_PROMOTED', 'DATABASE_PROMOTED'].includes(journal.phase)) {
+    throw new Error('RECOVERY_RESTORE_JOURNAL_INVALID');
+  }
+  return journal;
 };
 
 export const finalizePromotedRecovery = async (prisma: PrismaClient, journal: RestoreJournal) => {

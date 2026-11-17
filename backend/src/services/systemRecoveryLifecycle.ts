@@ -9,7 +9,7 @@ import {
   rollbackInterruptedRecovery,
   withSystemRecoveryDatabaseClient,
 } from './systemRecoveryEngine';
-import { RECOVERY_FRESHNESS_MS } from './systemRecoveryPolicy';
+import { isRestrictedRecoveryRuntime, RECOVERY_FRESHNESS_MS } from './systemRecoveryPolicy';
 import { setRecoveryRuntimeState } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
 import { replayPerformanceErasureAfterRestore } from './personnelPerformanceErasureStore';
@@ -34,6 +34,10 @@ const recoverInterruptedRestore = async (prisma: PrismaClient, options: Recovery
       data: { status: 'FAILED', errorCode: 'PROCESS_INTERRUPTED', errorMessage: 'The recovery worker was interrupted before completion.' },
     });
     return;
+  }
+  if (isRestrictedRecoveryRuntime()) {
+    setRecoveryRuntimeState('MAINTENANCE', journal.operationId, 'The protected owner must finish the pending restore.');
+    return false;
   }
   setRecoveryRuntimeState('MAINTENANCE', journal.operationId, 'Completing recovery startup checks.');
   const databases = await prisma.$queryRawUnsafe<Array<{ datname: string }>>(
@@ -90,7 +94,7 @@ const notifyStaleBackup = async (prisma: PrismaClient) => {
 
 export const initializeSystemRecovery = async (prisma: PrismaClient, options: RecoveryInitializationOptions = {}) => {
   try {
-    await recoverInterruptedRestore(prisma, options);
+    if (await recoverInterruptedRestore(prisma, options) === false) return;
     await cleanupExpiredPackages(prisma);
     await notifyStaleBackup(prisma);
   } catch (error) {

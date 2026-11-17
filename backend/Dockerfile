@@ -1,3 +1,4 @@
+ARG RECOVERY_POSTGRES_IMAGE=postgres:15-alpine
 FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
@@ -56,6 +57,25 @@ RUN npx prisma generate
 RUN NODE_OPTIONS=--max-old-space-size=3072 npm run build
 RUN npm prune --omit=dev --no-audit --fund=false
 
+FROM node:22-bookworm-slim AS recovery-postgres-launcher
+
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=http://security.debian.org/debian-security
+RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n\nTypes: deb\nURIs: %s\nSuites: bookworm-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$DEBIAN_MIRROR" "$DEBIAN_SECURITY_MIRROR" > /etc/apt/sources.list.d/debian.sources \
+  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= apt-get -o Acquire::ForceIPv4=true update \
+  && HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
+    gcc libc6-dev \
+  && rm -rf /var/lib/apt/lists/*
+COPY backend/scripts/recovery-postgres-sandbox.c /tmp/recovery-postgres-sandbox.c
+RUN mkdir -p /usr/local/libexec \
+  && gcc -O2 -Wall -Wextra -Werror -o /usr/local/libexec/recovery-postgres-sandbox /tmp/recovery-postgres-sandbox.c
+
+# Preserve the running database image's PostgreSQL, libc and locale semantics.
+FROM ${RECOVERY_POSTGRES_IMAGE} AS recovery-postgres
+ARG RECOVERY_POSTGRES_IMAGE_ID=unattested
+COPY backend/scripts/build-recovery-postgres-root.sh /tmp/build-recovery-postgres-root.sh
+RUN RECOVERY_POSTGRES_IMAGE_ID="$RECOVERY_POSTGRES_IMAGE_ID" sh /tmp/build-recovery-postgres-root.sh
+
 FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
@@ -96,6 +116,9 @@ RUN printf 'Types: deb\nURIs: %s\nSuites: bookworm\nComponents: main\nSigned-By:
 ENV NODE_ENV=production
 ENV PORT=5000
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+COPY --from=recovery-postgres-launcher /usr/local/libexec/recovery-postgres-sandbox /usr/local/libexec/recovery-postgres-sandbox
+COPY --from=recovery-postgres /opt/recovery-postgres-root /opt/recovery-postgres-root
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules

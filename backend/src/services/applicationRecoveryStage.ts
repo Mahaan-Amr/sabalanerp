@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { nativePostgresCliConnection } from './nativePostgresCli';
+import { canonicalRecoverySchema, recoveryDatabaseSemanticsSql, type RecoveryDatabaseSemantics } from './recoverySchemaIdentity';
+import { APPLICATION_RECOVERY_CONTROL_TABLES, APPLICATION_RECOVERY_CONTROL_SEQUENCES } from './recoveryControlData';
 import { captureProtectedDatabaseRoles, applyProtectedDatabaseRoles,
   type ProtectedDatabaseRoleRecovery } from './protectedDatabaseRoleRecovery';
 
@@ -32,15 +34,7 @@ async function schema(url: string, snapshot?: string) {
     '--no-comments', ...(snapshot ? ['--snapshot', snapshot] : [])], {
     env: { ...process.env, ...target.environment }, windowsHide: true, maxBuffer: 32 * 1024 * 1024,
   });
-  // PostgreSQL 17+ generates one matched psql restriction wrapper per dump.
-  // Never erase directive-shaped lines embedded in a function definition.
-  const output = result.stdout.replace(/\r\n/g, '\n');
-  const directives = [...output.matchAll(/^\\(unrestrict|restrict) ([A-Za-z0-9_]+)\n/gm)];
-  if (directives.length === 2 && directives[0][1] === 'restrict' && directives[1][1] === 'unrestrict'
-    && directives[0][2] === directives[1][2]) {
-    return output.replace(directives[0][0], '').replace(directives[1][0], '');
-  }
-  return output;
+  return canonicalRecoverySchema(result.stdout);
 }
 
 /** Retire only the exact stage login persisted in the owner restore journal. */
@@ -77,14 +71,24 @@ export async function retireApplicationRecoveryStageRole(ownerUrl: string, stage
 
 /** Untrusted archive SQL authenticates as this disposable, non-privileged stage owner. */
 export async function prepareApplicationRecoveryStage(ownerUrl: string, stage: string,
-  scope: ProtectedDatabaseRoleRecovery & { assertBoundary(): Promise<void> }) {
+  scope: ProtectedDatabaseRoleRecovery & { assertBoundary(): Promise<void> }, authorityDataPath?: string) {
   const role = applicationRecoveryStageRole(stage);
   await scope.assertBoundary();
   let trustedSchema = '';
   const trustedRoles = await captureProtectedDatabaseRoles(ownerUrl, scope.roles, async snapshot => {
     trustedSchema = await schema(ownerUrl, snapshot);
+    if (authorityDataPath) {
+      const target = nativePostgresCliConnection(ownerUrl);
+      await run('pg_dump', ['--dbname', target.url, '--format=custom', '--data-only', '--no-owner', '--no-privileges',
+        '--snapshot', snapshot, '--file', authorityDataPath,
+        ...[...APPLICATION_RECOVERY_CONTROL_TABLES, ...APPLICATION_RECOVERY_CONTROL_SEQUENCES].map(table => `--table=${table}`)], {
+        env: { ...process.env, ...target.environment }, windowsHide: true, maxBuffer: 32 * 1024 * 1024,
+      });
+    }
   });
   if (trustedRoles.sourceDatabase !== scope.source) throw new Error('Application recovery target changed.');
+  const databaseSemantics = (await command(ownerUrl, recoveryDatabaseSemanticsSql)).rows[0] as RecoveryDatabaseSemantics;
+  if (!databaseSemantics || !['c', 'i'].includes(databaseSemantics.provider)) throw new Error('Unsupported target database locale provider.');
   const password = crypto.randomBytes(32).toString('hex');
   const control = trustedRoles.control;
   const stageUrl = new URL(ownerUrl);
@@ -101,6 +105,13 @@ export async function prepareApplicationRecoveryStage(ownerUrl: string, stage: s
     await scope.assertBoundary();
     if (await schema(stageUrl.toString()) !== trustedSchema) {
       throw Object.assign(new Error('The migrated application schema differs from the trusted current target.'),
+        { code: 'APPLICATION_RECOVERY_SCHEMA_MISMATCH' });
+    }
+  };
+  const verifyMigratedSchema = async (schemaSql: string) => {
+    await scope.assertBoundary();
+    if (canonicalRecoverySchema(schemaSql) !== trustedSchema) {
+      throw Object.assign(new Error('The privately migrated schema differs from the trusted current target.'),
         { code: 'APPLICATION_RECOVERY_SCHEMA_MISMATCH' });
     }
   };
@@ -121,6 +132,9 @@ export async function prepareApplicationRecoveryStage(ownerUrl: string, stage: s
     return {
       loginUrl: loginUrl.toString(),
       trustedRoles,
+      databaseSemantics,
+      authorityDataPath,
+      verifyMigratedSchema,
       verifySchema,
       async finalize() {
         await verifySchema();

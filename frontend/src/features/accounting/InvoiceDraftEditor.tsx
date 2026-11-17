@@ -25,7 +25,7 @@ export function InvoiceDraftEditor({ record, canSave, canApprove, busy, onSave, 
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
       <ErpField label="شماره فاکتور سیستمی"><ErpInput value={details.systemInvoiceNumber} disabled={busy || (!canSave && !canApprove)} onChange={e => update('systemInvoiceNumber', e.target.value)} /></ErpField>
       <ErpPersianDateField label="تاریخ فاکتور سیستمی" valueFormat="iso-date" value={details.systemInvoiceDate} disabled={busy || (!canSave && !canApprove)} onChange={value => update('systemInvoiceDate', value)} />
-      <ErpField label="مبلغ سپیدار (ریال)"><ErpInput value={details.sepidarAmount} disabled={busy || (!canSave && !canApprove)} onChange={e => update('sepidarAmount', e.target.value)} inputMode="decimal" dir="ltr" /></ErpField>
+      <ErpField label="مبلغ سپیدار (ریال)"><ErpInput numberFormat="money" value={details.sepidarAmount} disabled={busy || (!canSave && !canApprove)} onChange={e => update('sepidarAmount', e.target.value)} dir="ltr" /></ErpField>
     </div>
     {missing.length > 0 && <p className="sds-text-secondary text-sm">برای تأیید لازم است: {missing.join('، ')}</p>}
     <div className="flex flex-wrap gap-2">

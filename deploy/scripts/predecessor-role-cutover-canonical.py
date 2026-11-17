@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
+from urllib.parse import urlsplit
 
 
 DIRECTORY = Path(__file__).resolve().parent
@@ -384,3 +385,127 @@ def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight,
                                         gates=gates, verify_current=prove_current_graph, renewal=renew,
                                         maintenance=maintenance)
     return {"runtimeProof": proof, "nginxProof": nginx, "gateAcknowledgement": gate_proof, "canOpenTraffic": False}
+
+
+def publish_canonical_terminal(root, env, report_dir, coordination_dir, gate_ack):
+    """Publish and finish an already-owned same-image cutover under inherited FD9."""
+    terminal_spec = importlib.util.spec_from_file_location("predecessor_role_terminal", DIRECTORY / "predecessor-role-cutover-terminal.py")
+    terminal = importlib.util.module_from_spec(terminal_spec)
+    terminal_spec.loader.exec_module(terminal)
+    authority = owner_context(root, env, report_dir, coordination_dir)
+    session, checkpoint, binding = authority
+    phase = session["phase"]
+    compose = root / "docker-compose.prod.yml"
+    private, _ = host.transaction_paths(root, session["deploymentId"])
+    env_raw = host.read_private(env)[0]
+    point_raw = host.read_private(coordination_dir / "deployment-checkpoint.json")[0]
+    runtime_file = private.with_name("backend-runtime-" + gate_ack["state"].lower() + "-proof.json")
+    nginx_file = private.with_name("nginx-" + gate_ack["state"].lower() + "-proof.json")
+    runtime_raw = host.read_private(runtime_file)[0]
+    nginx_raw = host.read_private(nginx_file)[0]
+    host.require(host.digest(runtime_raw) == gate_ack["roleProofSha256"] and host.digest(nginx_raw) == gate_ack["nginxProofSha256"])
+    runtime = json.loads(runtime_raw)
+    nginx = json.loads(nginx_raw)
+    original = json.loads(host.read_private(private.with_name("backend-runtime-preimage.json"))[0])
+    host.require(original["binding"] == binding)
+    gate_digest = host.digest(host.json_bytes(gate_ack))
+    expected_terminal = "COMPLETED" if phase == "MUTATION_STARTED" else "ROLLED_BACK"
+    terminal_result = {"deploymentId": binding["deploymentId"], "releaseId": binding["releaseId"],
+                       "targetCommit": binding["targetCommit"], "checkpointSha256": binding["checkpointSha256"],
+                       "gateAcknowledgementSha256": gate_digest, "phase": expected_terminal, "activeLeases": 0}
+
+    environment = env_raw.decode("utf8").splitlines()
+    origins = []
+    for key in ("DOMAIN", "INQUIRY_DOMAIN"):
+        values = [line.removeprefix(key + "=") for line in environment if line.startswith(key + "=")]
+        host.require(len(values) == 1 and host.matches(r"[A-Za-z0-9.-]{1,253}", values[0]))
+        origins.append(values[0])
+
+    def marker_sealed():
+        return os.path.lexists(coordination_dir / terminal.MAINTENANCE)
+
+    def read_terminal():
+        response = read_owner_json(root, canonical_shell(env, compose, "control", "read-predecessor-role-terminal"))
+        host.require(response == {"ok": True, "result": terminal_result})
+        return response["result"]
+
+    def probe():
+        host.verify_lock(root)
+        host.require(host.read_private(env)[0] == env_raw
+                     and host.read_private(coordination_dir / "deployment-checkpoint.json")[0] == point_raw)
+        if marker_sealed():
+            host.require(host.context(root, report_dir, coordination_dir, phase) == authority)
+        else:
+            notice = json.loads(host.read_private(report_dir / terminal.OPEN_INTENT)[0])
+            host.require(notice["deploymentId"] == binding["deploymentId"] and notice["checkpointSha256"] == binding["checkpointSha256"]
+                         and notice["gateAcknowledgementSha256"] == gate_digest and notice["trafficMayHaveOpened"] is True)
+            try:
+                live_session = json.loads(host.read_private(report_dir / terminal.SESSION)[0])
+            except FileNotFoundError:
+                read_terminal()
+            else:
+                host.require(live_session == session)
+        return authority
+
+    def renew(actual, point):
+        if (actual, point) != authority[:2]:
+            return False
+        if held_owner_command(root, canonical_shell(env, compose, "renewal")):
+            return True
+        return not marker_sealed() and read_terminal() == terminal_result
+
+    def control(command, frame=None):
+        raw, _ = native.run_native_child(root, report_dir, coordination_dir, phase, command,
+                                        canonical_shell(env, compose, "control", command), stdin=frame,
+                                        renewal=renew, terminal_probe=probe)
+        reply = json.loads(raw)
+        host.require(set(reply) == {"ok", "result"} and reply["ok"] is True)
+        return reply["result"]
+
+    def authorise(actual, point, held_gate):
+        host.require((actual, point) == authority[:2] and held_gate == gate_ack and marker_sealed()
+                     and held_owner_command(root, canonical_shell(env, compose, "public-maintenance")))
+        ready = control("authorise-predecessor-role-terminal", host.json_bytes(held_gate))
+        return ready["gateAcknowledgementSha256"] == gate_digest and ready["expectedTerminal"] == expected_terminal
+
+    def open_marker(intent):
+        host.require(intent["gateAcknowledgementSha256"] == gate_digest)
+        result = control("open-predecessor-role-terminal")
+        return result == {"intentSha256": host.digest(host.json_bytes(intent))}
+
+    def observe_open(actual, intent):
+        host.require(actual == session and not marker_sealed())
+        return control("observe-predecessor-role-terminal") == {"intentSha256": host.digest(host.json_bytes(intent))}
+
+    def observe_public(expected):
+        ids = subprocess.check_output(canonical_compose(env, compose, "ps", "--all", "--quiet",
+                                                        *sorted(binding["rollbackReleaseSet"])),
+                                      cwd=root, stderr=subprocess.DEVNULL, timeout=30).decode("ascii").split()
+        host.require(len(ids) == 6 and all(host.matches(r"[a-f0-9]{64}", value) for value in ids))
+        rows = host.container_state(read_owner_json(root, (*DOCKER, "inspect", *ids)), binding["rollbackReleaseSet"])
+        host.verify_runtime_graph(rows, original["containers"])
+        host.require(rows["backend"]["Id"] == runtime["backendId"] == expected["backendId"]
+                     and [network["IPAddress"] for network in rows["backend"]["NetworkSettings"]["Networks"].values()] == [runtime["backendAddress"]]
+                     and rows["nginx"]["Id"] == nginx["nginxId"] == expected["nginxId"]
+                     and rows["nginx"]["State"]["StartedAt"] == nginx["refreshedStartedAt"]
+                     and all(rows[key]["State"]["Health"]["Status"] == "healthy" for key in ("backend", "nginx")))
+        observed = {}
+        for origin, endpoint in zip(origins, ("/api/ready", "/")):
+            raw = subprocess.check_output(("curl", "--silent", "--show-error", "--max-time", "15", "--location",
+                                           "--max-redirs", "4", "--proto", "=https", "--proto-redir", "=https",
+                                           "--output", "/dev/null", "--write-out", "%{http_code} %{url_effective}",
+                                           "https://" + origin + endpoint), cwd=root, stderr=subprocess.DEVNULL, timeout=20)
+            status, url = raw.decode("ascii").split(" ", 1)
+            final = urlsplit(url)
+            host.require(status == "200" and final.scheme == "https" and final.hostname == origin.lower()
+                         and final.username is None and final.password is None and final.port in (None, 443))
+            observed[origin] = 200
+        host.require(observed == expected["origins"])
+        return expected
+
+    public = terminal.open_owned_traffic(root, report_dir, coordination_dir, phase, gate_ack, tuple(origins),
+                                         authorise=authorise, remove_maintenance=open_marker,
+                                         renew_without_marker=observe_open, observe_public=observe_public)
+    host.require(control("finish-predecessor-role-terminal", host.json_bytes(public)) == {"phase": expected_terminal})
+    return terminal.archive_terminal_holds(root, report_dir, coordination_dir, binding["deploymentId"],
+                                           read_terminal=lambda _: read_terminal(), observe_public=observe_public)

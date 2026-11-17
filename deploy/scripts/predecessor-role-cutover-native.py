@@ -29,6 +29,14 @@ CONTROL_ACTIONS = {
     "ROLLBACK_STARTED": {"restore-predecessor-role-grants", "attest-predecessor-backend-runtime", "recreate-backend", "refresh-nginx", "deployment-gates", "start-original-siblings"},
 }
 CREDENTIAL_ACTION = "activate-predecessor-runtime-login"
+TERMINAL_ACTIONS = {
+    "authorise-predecessor-role-terminal", "open-predecessor-role-terminal",
+    "observe-predecessor-role-terminal", "finish-predecessor-role-terminal",
+}
+TERMINAL_FRAMES = {
+    "authorise-predecessor-role-terminal": "sabalan-predecessor-role-gate-acknowledgement-v1",
+    "finish-predecessor-role-terminal": "sabalan-predecessor-role-public-readback/v1",
+}
 MAX_OUTPUT_BYTES = 64 * 1024
 
 
@@ -42,7 +50,7 @@ def require(condition):
 
 
 def run_native_child(root, report_dir, coordination_dir, phase, action, argv, *, renewal, stdin=None,
-                     budget_seconds=180, heartbeat_seconds=60):
+                     budget_seconds=180, heartbeat_seconds=60, terminal_probe=None):
     """Return private stdout and a redacted receipt after the original child closes.
 
     The callback must renew and authenticate the existing protected database lease
@@ -52,14 +60,16 @@ def run_native_child(root, report_dir, coordination_dir, phase, action, argv, *,
     """
     try:
         return _run_native_child(root, report_dir, coordination_dir, phase, action, argv, renewal, stdin,
-                                 budget_seconds, heartbeat_seconds)
+                                 budget_seconds, heartbeat_seconds, terminal_probe)
     except Exception:
         raise ProtectedNativeChildError("PREDECESSOR_ROLE_NATIVE_CHILD_HELD") from None
 
 
 def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, renewal, stdin,
-                      budget_seconds, heartbeat_seconds):
-    require(action in CONTROL_ACTIONS.get(phase, ())
+                      budget_seconds, heartbeat_seconds, terminal_probe):
+    terminal_action = action in TERMINAL_ACTIONS
+    require((action in CONTROL_ACTIONS.get(phase, ()) or (terminal_action and phase in CONTROL_ACTIONS))
+            and terminal_action == (terminal_probe is not None)
             and isinstance(argv, (tuple, list)) and 0 < len(argv) <= 256
             and all(isinstance(arg, str) and len(arg) <= 8192 and "\x00" not in arg for arg in argv)
             and 0 < heartbeat_seconds <= budget_seconds <= 900)
@@ -68,17 +78,25 @@ def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, r
         password = stdin[64:]
         require(not any(password in os.fsencode(arg) for arg in argv)
                 and not any(password in value for value in os.environb.values()))
+    elif action in TERMINAL_FRAMES:
+        require(isinstance(stdin, bytes) and 0 < len(stdin) <= 16384
+                and json.loads(stdin)["format"] == TERMINAL_FRAMES[action])
     else:
         require(stdin is None)
 
-    authority = configuration.context(root, report_dir, coordination_dir, phase)
+    def read_owner():
+        configuration.verify_lock(root)
+        return terminal_probe() if terminal_action else configuration.context(root, report_dir, coordination_dir, phase)
+
+    authority = read_owner()
     session, checkpoint, binding = authority
+    require(session["phase"] == phase and session["purpose"] == "predecessor-role-cutover")
 
     def refresh():
         try:
-            return (configuration.context(root, report_dir, coordination_dir, phase) == authority
+            return (read_owner() == authority
                     and renewal(session, checkpoint) is True
-                    and configuration.context(root, report_dir, coordination_dir, phase) == authority)
+                    and read_owner() == authority)
         except Exception:
             return False
 
@@ -156,7 +174,7 @@ def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, r
             returncode = process.wait()
         heartbeat_failed = not refresh() or heartbeat_failed
         deadline_exceeded = deadline_exceeded or time.monotonic() - started >= budget_seconds
-        credential_echoed = stdin is not None and stdin[64:] in stdout
+        credential_echoed = action == CREDENTIAL_ACTION and stdin[64:] in stdout
         intent_unchanged = configuration.read_private(intent_path)[0] == intent
         healthy = (returncode == 0 and all(closed.values()) and not interrupted and not heartbeat_failed
                    and intent_unchanged

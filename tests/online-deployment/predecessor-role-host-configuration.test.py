@@ -686,6 +686,37 @@ class HostConfigurationTest(unittest.TestCase):
                 read_terminal=lambda expected: expected, observe_public=lambda expected: expected,
             ))
 
+    def test_native_terminal_open_can_observe_owned_marker_disappearance(self):
+        reports, coordination = self.root / "reports", self.root / "coordination"
+        marker = coordination / terminal.MAINTENANCE
+        command = (sys.executable, "-c",
+                   "import os, sys, pathlib; assert os.readlink('/proc/self/fd/9').endswith('/deployment.lock');"
+                   "pathlib.Path(sys.argv[1]).unlink(); print('native marker removed')", str(marker))
+        with self.owner():
+            authority = native.configuration.context(self.root, reports, coordination, "MUTATION_STARTED")
+            observed = []
+
+            def terminal_probe():
+                observed.append(marker.exists())
+                self.assertEqual(json.loads((reports / terminal.SESSION).read_bytes()), self.session)
+                return authority
+
+            stdout, closure = native.run_native_child(
+                self.root, reports, coordination, "MUTATION_STARTED", "open-predecessor-role-terminal",
+                command, renewal=lambda session, checkpoint: (session, checkpoint) == authority[:2],
+                terminal_probe=terminal_probe, heartbeat_seconds=0.03, budget_seconds=2,
+            )
+            self.assertEqual(stdout.strip(), b"native marker removed")
+            self.assertTrue(observed[0])
+            self.assertIn(False, observed)
+            self.assertEqual(closure["outcome"], "CLOSED")
+            self.assertFalse(closure["canOpenTraffic"])
+            with self.assertRaises(native.ProtectedNativeChildError):
+                native.run_native_child(
+                    self.root, reports, coordination, "MUTATION_STARTED", "stage-predecessor-role-grants",
+                    command, renewal=lambda *_: True, terminal_probe=terminal_probe,
+                )
+
     def test_restore_if_receipt_publication_fails_after_env_replacement(self):
         receipt = self.root / ".deploy-state" / ("predecessor-role-host-" + self.session["deploymentId"]) / "receipt.json"
         receipt.parent.mkdir(mode=0o700)

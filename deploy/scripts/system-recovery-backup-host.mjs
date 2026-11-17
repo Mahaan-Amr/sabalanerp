@@ -34,7 +34,7 @@ async function relayInput(runner, envFile, operationId, action) {
     const child = spawn('/bin/sh', [runner, action ? '--system-recovery-owner-input' : '--system-recovery-backup-input',
       realpathSync(envFile), operationId, ...(action ? [action] : [])], {
       detached: true,
-      stdio: ['pipe', 'inherit', 'inherit'],
+      stdio: action ? ['pipe', 'inherit', 'inherit', 'ignore', 'ignore', 'ignore', 'ignore', 'pipe'] : ['pipe', 'inherit', 'inherit'],
     });
     const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
     let interrupted = false;
@@ -44,7 +44,13 @@ async function relayInput(runner, envFile, operationId, action) {
     });
     signals.forEach((signal, index) => process.on(signal, handlers[index]));
     child.stdin.on('error', () => {});
-    child.stdin.end(passphrase.subarray(0, length), () => passphrase.fill(0));
+    let pendingStreams = action ? 2 : 1;
+    const consumed = () => { if (--pendingStreams === 0) passphrase.fill(0); };
+    child.stdin.end(passphrase.subarray(0, length), consumed);
+    if (action) {
+      child.stdio[7].on('error', () => {});
+      child.stdio[7].end(passphrase.subarray(0, length), consumed);
+    }
     try {
       const code = await new Promise(resolve => {
         child.once('error', () => {

@@ -114,11 +114,28 @@ async function consume(envFile, keyFile, watch) {
   } while (watch);
 }
 
+function serviceUnit(envFile, keyFile) {
+  if ([envFile, keyFile].some(value => !/^\/[a-zA-Z0-9/_.-]+$/.test(value || ''))) throw rejected();
+  return `[Unit]\nDescription=Sabalan authenticated System Recovery owner consumer\nAfter=docker.service\nRequires=docker.service\n\n[Service]\nType=simple\nUser=root\nWorkingDirectory=${root}\nExecStart=/usr/bin/node ${root}/deploy/scripts/system-recovery-owner-host.mjs consume ${envFile} ${keyFile} --watch\nRestart=on-failure\nRestartSec=30\nStandardInput=null\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n`;
+}
+
+function verify(envFile, keyFile) {
+  requireNativeRoot();
+  const publicKey = createPublicKey(privateFile(keyFile)).export({ type: 'spki', format: 'pem' });
+  const publicPath = join(dirname(keyFile), 'system-recovery-owner-public.pem');
+  if (realpathSync(publicPath) !== publicPath || readFileSync(publicPath, 'utf8') !== publicKey) throw rejected();
+  const unitPath = '/etc/systemd/system/sabalanerp-system-recovery.service';
+  const stat = lstatSync(unitPath);
+  if (!stat.isFile() || stat.uid !== 0 || (stat.mode & 0o022) || readFileSync(unitPath, 'utf8') !== serviceUnit(envFile, keyFile)) throw rejected();
+  execFileSync('systemctl', ['is-enabled', '--quiet', 'sabalanerp-system-recovery.service']);
+  const state = execFileSync('systemctl', ['show', '--property=ActiveState', '--value', 'sabalanerp-system-recovery.service'], { encoding: 'utf8' }).trim();
+  if (!['active', 'activating'].includes(state)) throw rejected();
+}
+
 function install(envFile, keyFile) {
   requireNativeRoot();
-  if ([envFile, keyFile].some(value => !/^\/[a-zA-Z0-9/_.-]+$/.test(value || ''))) throw rejected();
   privateFile(keyFile);
-  const unit = `[Unit]\nDescription=Sabalan authenticated System Recovery owner consumer\nAfter=docker.service\nRequires=docker.service\n\n[Service]\nType=simple\nUser=root\nWorkingDirectory=${root}\nExecStart=/usr/bin/node ${root}/deploy/scripts/system-recovery-owner-host.mjs consume ${envFile} ${keyFile} --watch\nRestart=on-failure\nRestartSec=30\nStandardInput=null\nUMask=0077\n\n[Install]\nWantedBy=multi-user.target\n`;
+  const unit = serviceUnit(envFile, keyFile);
   writeFileSync('/etc/systemd/system/sabalanerp-system-recovery.service', unit, { mode: 0o644 });
   execFileSync('systemctl', ['daemon-reload']);
   execFileSync('systemctl', ['enable', '--now', 'sabalanerp-system-recovery.service']);
@@ -129,6 +146,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
   try {
     if (command === 'provision' && args.length === 1) provision(args[0]);
     else if (command === 'install' && args.length === 2) install(...args);
+    else if (command === 'verify' && args.length === 2) verify(...args);
     else if (command === 'consume' && (args.length === 2 || (args.length === 3 && args[2] === '--watch'))) await consume(args[0], args[1], args[2] === '--watch');
     else throw rejected();
   } catch { console.error('SYSTEM_RECOVERY_OWNER_HOST_FAILED'); process.exitCode = 1; }

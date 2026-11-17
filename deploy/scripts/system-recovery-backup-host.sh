@@ -43,7 +43,6 @@ run_system_recovery_backup() {
     ;;
   esac
   ENV_FILE="$(realpath -- "${ENV_FILE}")"
-  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0 "${COMPOSE_FILE}"
 
   # Pin the scanner-retaining predecessor's entire six-service graph.
   previous_backend_id="$(compose ps -q backend)"
@@ -69,6 +68,22 @@ run_system_recovery_backup() {
   capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" snapshot "${backup_snapshot}" "${ENV_FILE}"
   run_backend test -f dist/scripts/system-recovery-owner.js
   verify_predecessor_database_roles
+  if [ "${SYSTEM_RECOVERY_OWNER_HANDOFF:-0}" -eq 1 ]; then
+    preflight_status=0
+    run_backend node dist/scripts/system-recovery-owner-preflight.js --sealed \
+      "${SYSTEM_RECOVERY_OPERATION_ID}" "${SYSTEM_RECOVERY_OWNER_ACTION}" <&7 7<&- 8<&- || preflight_status=$?
+    exec 7<&-
+    if [ "${preflight_status}" -eq 75 ]; then
+      cleanup_locks
+      trap - EXIT INT TERM HUP
+      return 0
+    fi
+    [ "${preflight_status}" -eq 0 ] || return "${preflight_status}"
+  fi
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
+    run_backend node -e 'const fs=require("node:fs"),expected=process.env.SYSTEM_RECOVERY_POSTGRES_IMAGE_ID;const actual=JSON.parse(fs.readFileSync("/opt/recovery-postgres-root/identity.json","utf8"));if(!/^sha256:[a-f0-9]{64}$/.test(expected||"")||actual.imageId!==expected)process.exit(1)'
+  fi
+  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0 "${COMPOSE_FILE}"
   python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --preflight \
     "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
     "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json"
@@ -89,6 +104,10 @@ run_system_recovery_backup() {
   control maintenance-on
   verify_public_maintenance
   phase TRAFFIC_BLOCKED
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
+    SYSTEM_RECOVERY_RUNTIME_BEFORE="$(compose exec -T backend node dist/scripts/system-recovery-runtime-proof.js)"
+    export SYSTEM_RECOVERY_RUNTIME_BEFORE
+  fi
   drain_current_services
   phase SERVICES_DRAINED
   verify_public_maintenance
@@ -152,12 +171,16 @@ run_system_recovery_backup() {
     # Keep the full maintenance start above for its separate pause measurement.
     reopen_budget_started="${restore_mutation_started}"
   fi
-  run_original_owned_with_heartbeat node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" start-original \
+  original_start_command=start-original
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then original_start_command=start-restored; fi
+  run_original_owned_with_heartbeat node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" "${original_start_command}" \
     "${backup_snapshot}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" 300 "${reopen_budget_started}" "${SESSION_HOST_PATH}"
   capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" verify "${backup_snapshot}" "${ENV_FILE}"
   verify_predecessor_database_roles
   if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
-    DEPLOYMENT_GATE_MODE=RELEASE run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-gates.js
+    SYSTEM_RECOVERY_RUNTIME_AFTER="$(compose exec -T backend node dist/scripts/system-recovery-runtime-proof.js)"
+    export SYSTEM_RECOVERY_RUNTIME_AFTER
+    DEPLOYMENT_GATE_MODE=APPLICATION_RECOVERY run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-gates.js
   else
     DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-gates.js
   fi

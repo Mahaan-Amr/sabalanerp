@@ -1066,6 +1066,10 @@ public_key_path="${DEPLOYMENT_SECRET_DIR}/remote-recovery-public.pem"
   echo "Missing or invalid off-server recovery public key: ${public_key_path}" >&2
   exit 1
 }
+if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 0 ] && [ "$(env_value BACKEND_DATABASE_USER)" = sabalan_application_runtime ]; then
+  node "${OPERATIONS_ROOT}/deploy/scripts/system-recovery-owner-host.mjs" verify \
+    "$(realpath -- "${ENV_FILE}")" "$(realpath -- "${DEPLOYMENT_SECRET_DIR}/system-recovery-owner-private.pem")"
+fi
 [ -d "${DEPLOYMENT_REMOTE_MOUNT_HOST}" ] && [ -r "${DEPLOYMENT_REMOTE_MOUNT_HOST}" ] && [ -w "${DEPLOYMENT_REMOTE_MOUNT_HOST}" ] || {
   echo "Independent remote checkpoint mount is unavailable: ${DEPLOYMENT_REMOTE_MOUNT_HOST}" >&2
   exit 1
@@ -1350,6 +1354,12 @@ export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMA
 PERFORMANCE_SOURCE_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
 PERFORMANCE_SOURCE_HASH="$(node --input-type=module -e 'import { performanceSourceHash } from "./scripts/performance-source-identity.mjs"; console.log(await performanceSourceHash());')"
 export PERFORMANCE_SOURCE_COMMIT PERFORMANCE_SOURCE_HASH
+RECOVERY_POSTGRES_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${DEPLOYMENT_POSTGRES_IMAGE}")"
+case "${RECOVERY_POSTGRES_IMAGE_ID}" in sha256:????????????????????????????????????????????????????????????????) ;; *) exit 1;; esac
+RECOVERY_POSTGRES_IMAGE="sabalanerp-recovery-postgres:${RECOVERY_POSTGRES_IMAGE_ID#sha256:}"
+docker tag "${RECOVERY_POSTGRES_IMAGE_ID}" "${RECOVERY_POSTGRES_IMAGE}"
+[ "$(docker image inspect --format '{{.Id}}' "${RECOVERY_POSTGRES_IMAGE}")" = "${RECOVERY_POSTGRES_IMAGE_ID}" ] || exit 1
+export RECOVERY_POSTGRES_IMAGE RECOVERY_POSTGRES_IMAGE_ID
 compose config --quiet
 echo "Building immutable release ${DEPLOYMENT_RELEASE_ID} before maintenance..."
 # Keep compiler heaps from competing with the live release on the production host.
@@ -1450,6 +1460,9 @@ node "${OPERATIONS_ROOT}/deploy/scripts/dispatch-volume-preflight.mjs" "${ENV_FI
 run_backend node dist/scripts/validate-production-environment.js
 run_backend node dist/scripts/deployment-drill-preflight.js
 verify_predecessor_database_roles
+if [ "$(env_value BACKEND_DATABASE_USER)" = sabalan_application_runtime ]; then
+  run_backend node -e 'const fs=require("node:fs"),expected=process.env.SYSTEM_RECOVERY_POSTGRES_IMAGE_ID;const actual=JSON.parse(fs.readFileSync("/opt/recovery-postgres-root/identity.json","utf8"));if(!/^sha256:[a-f0-9]{64}$/.test(expected||"")||actual.imageId!==expected)process.exit(1)'
+fi
 python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --preflight \
   "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
   "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json"

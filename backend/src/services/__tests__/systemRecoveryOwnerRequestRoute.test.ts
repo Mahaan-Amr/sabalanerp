@@ -23,7 +23,7 @@ async function loadModule(file: string, replacements: Record<string, unknown>, e
   }).outputText;
   vm.runInNewContext(code, {
     exports: exported, require: (name: string) => replacements[name] ?? requireModule(name),
-    process: { env: environment, cwd: process.cwd, platform: process.platform }, console, Buffer, setImmediate,
+    process: { env: environment, cwd: process.cwd, platform: process.platform }, console, Buffer, setImmediate, setTimeout, clearTimeout,
   }, { filename });
   return exported;
 }
@@ -173,7 +173,9 @@ test(`restricted ADMIN validates an encrypted upload and queues ${intent} withou
       return [{ version: '15.0' }];
     },
   };
-  const runtime = { ...await import('../recoveryRuntime'), RECOVERY_ROOT: root, RECOVERY_COORDINATION_DIR: path.join(root, 'coordination') };
+  const runtime = await loadModule('../recoveryRuntime.ts', {
+    './httpRequestLifecycle': await loadModule('../httpRequestLifecycle.ts', {}, environment),
+  }, environment);
   t.after(() => runtime.releaseRecoveryOperation());
   const engine = await loadModule('../systemRecoveryEngine.ts', {
     './recoveryRuntime': runtime,
@@ -254,6 +256,7 @@ test(`restricted ADMIN validates an encrypted upload and queues ${intent} withou
     const restored: any = await restoreResponse.json();
     assert.equal(restored.data.operationId, receipt.data.id);
     assert.equal(restored.data.restarting, true);
+    await runtime.waitForRecoveryOperationDrain(20);
     const sealed = await fs.readFile(path.join(root, 'owner-inbox', receipt.data.id + '.json'));
     const request = handoff.openRecoveryOwnerRequest(sealed, keys.privateKey);
     assert.equal(request.action, 'RESTORE');
@@ -269,6 +272,7 @@ test(`restricted ADMIN validates an encrypted upload and queues ${intent} withou
   assert.equal(backupResponse.status, 202);
   const backup: any = await backupResponse.json();
   assert.equal(backup.data.packageType, 'SANITIZED_TEST');
+  await runtime.waitForRecoveryOperationDrain(20);
   const sealed = await fs.readFile(path.join(root, 'owner-inbox', backup.data.id + '.json'));
   assert.equal(sealed.includes(Buffer.from(passphrase)), false);
   const request = handoff.openRecoveryOwnerRequest(sealed, keys.privateKey);

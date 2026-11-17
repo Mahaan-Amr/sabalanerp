@@ -46,11 +46,12 @@ ADVISORY_PID=""
 PREDECESSOR_DATABASE_MODE=split:original
 if [ "$BACKUP_FIXTURE_FAILURE" = legacy ]; then PREDECESSOR_DATABASE_MODE=legacy; fi
 exec 8<&0 </dev/null
+exec 7<&8
 id() { printf '0\n'; }
 realpath() { printf '%s\n' "$2"; }
 env_value() { printf 'sabalan_application_runtime\n'; }
 sh() { case "$*" in *storage-preflight.sh*) echo 'storage-preflight';; *) command sh "$@";; esac; }
-compose() { printf 'container-id\n'; }
+compose() { case "$*" in *system-recovery-runtime-proof.js*) printf '{"role":"sabalan_application_runtime","commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","releaseId":"release-current","admitted":false}\n';; *) printf 'container-id\n';; esac; }
 docker() { printf '[]\n'; }
 predecessor_database_topology() {
   [ "$*" = retained ]
@@ -67,6 +68,7 @@ node() {
       ;;
     *performance-deployment-environment.mjs*) printf 'release\n' ;;
     *'start-original'*) [ "$DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE" = clamav ]; echo 'start-original-six-services' ;;
+    *'start-restored'*) [ "$DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE" = clamav ]; echo 'start-restored' ;;
     *' hold '*) echo 'persist-hold' ;;
     *' clear '*) echo 'complete-intent' ;;
     *'randomBytes'*) printf 'unique\n' ;;
@@ -76,6 +78,10 @@ node() {
 python3() { echo 'drain-preflight'; }
 run_backend() {
   case "$*" in
+    *system-recovery-owner-preflight.js*)
+      if [ "$BACKUP_FIXTURE_FAILURE" = stale ]; then echo 'request-rejected'; return 75; fi
+      echo 'request-admitted'
+      ;;
     *"system-recovery-owner.js "*)
       IFS= read -r supplied || [ -n "$supplied" ]
       [ "$supplied" = 'synthetic1passphrase' ]
@@ -83,7 +89,7 @@ run_backend() {
       [ "$BACKUP_FIXTURE_FAILURE" != owner ]
       ;;
     *deployment-gates.js*)
-      if [ "$SYSTEM_RECOVERY_OWNER_ACTION" = RESTORE ]; then [ "$DEPLOYMENT_GATE_MODE" = RELEASE ]; else [ "$DEPLOYMENT_GATE_MODE" = PREVIOUS_UNCHANGED ]; fi
+      if [ "$SYSTEM_RECOVERY_OWNER_ACTION" = RESTORE ]; then [ "$DEPLOYMENT_GATE_MODE" = APPLICATION_RECOVERY ]; else [ "$DEPLOYMENT_GATE_MODE" = PREVIOUS_UNCHANGED ]; fi
       echo 'gates'
       [ "$BACKUP_FIXTURE_FAILURE" != gates ]
       ;;
@@ -145,6 +151,13 @@ test('application restore requires independent checkpoint verification before mu
   const failed = runBackupFixture('checkpoint', 'RESTORE');
   assert.equal(failed.status, 1, failed.stderr);
   assert.doesNotMatch(failed.stdout, /owner\n|maintenance-off|complete-intent/);
+});
+
+test('a stale sealed request is rejected before advisory ownership, drain or public maintenance', () => {
+  const result = runBackupFixture('stale', 'RESTORE');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /request-rejected/);
+  assert.doesNotMatch(result.stdout, /persist-hold|control acquire|maintenance-on|drain|owner\n/);
 });
 
 test('owner or unchanged release gate failures keep the durable hold and maintenance', () => {

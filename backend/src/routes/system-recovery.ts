@@ -149,6 +149,8 @@ router.post('/backups', async (req: AuthRequest, res) => {
           status: 'FAILED', errorCode: 'SYSTEM_RECOVERY_OWNER_HANDOFF_FAILED', errorMessage: 'Owner handoff failed.' } });
         throw error;
       }
+      releaseRecoveryOperation();
+      lockAcquired = false;
       backgroundStarted = true;
       return res.status(202).json({ success: true, data: serializeOperation(operation) });
     }
@@ -414,6 +416,8 @@ router.post('/:id/restore', async (req: AuthRequest, res) => {
         } });
         throw error;
       }
+      releaseRecoveryOperation();
+      lockAcquired = false;
       backgroundStarted = true;
       return res.status(202).json({ success: true, data: { operationId: operation.id, restarting: true,
         bootstrapAdmin: bootstrapPassword ? { username: 'local_recovery_admin', temporaryPassword: bootstrapPassword } : null } });

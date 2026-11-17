@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,7 +13,9 @@ import { sha256File } from '../services/recoveryCrypto';
 import { validateLiveStoredFileReferences } from '../services/systemRecoveryEngine';
 import { verifyShipmentStatementDeploymentState } from '../services/shipmentStatementOperations';
 import { verifyInquiryBaseline, inspectInquiryBaseline } from '../services/inquiryMigrationPlan';
-import { verifyCustomerAllocationDeploymentState } from '../services/accountingCustomerAllocationDeployment';
+import { verifyCustomerAllocationDatabaseProtections, verifyCustomerAllocationDeploymentState } from '../services/accountingCustomerAllocationDeployment';
+import { assertRecoveryAllocationContinuity, readRecoveryAllocationAuthority, readRecoveryOwnerReceipt,
+  type RecoveryRuntimeProof } from '../services/systemRecoveryAllocationAuthority';
 
 const execFileAsync = promisify(execFile);
 const deploymentId = String(process.env.DEPLOYMENT_ID || '').trim();
@@ -21,6 +24,7 @@ const gateMode = process.env.DEPLOYMENT_GATE_MODE || 'RELEASE';
 const rolePhase = predecessorRoleGatePhase(gateMode);
 const rollbackMode = gateMode === 'ROLLBACK' || gateMode === predecessorRoleGateModes.rollback;
 const previousUnchangedMode = gateMode === 'PREVIOUS_UNCHANGED';
+const applicationRecoveryMode = gateMode === 'APPLICATION_RECOVERY';
 const releaseMode = !rollbackMode && !previousUnchangedMode;
 
 const httpGate = (url: string) => async () => {
@@ -123,7 +127,33 @@ const main = async () => {
       run: async () => {
         const result = await execFileAsync('npx', ['prisma', 'migrate', 'status'], { env: process.env, timeout: 60_000, windowsHide: true });
         if (!/up to date/i.test(`${result.stdout}\n${result.stderr}`)) throw new Error('Prisma migration history is not up to date.');
-        return { status: 'up-to-date', ...await verifyCustomerAllocationDeploymentState(prisma) };
+        const manifestSha256 = process.env.DEPLOYMENT_CUSTOMER_ALLOCATION_MANIFEST_SHA256;
+        const expectedAllocation = manifestSha256 === undefined ? undefined : {
+          manifestSha256, deploymentId, releaseId: process.env.DEPLOYMENT_RELEASE_ID ?? '',
+          targetCommit: process.env.DEPLOYMENT_TARGET_COMMIT ?? '', leaseToken: process.env.DEPLOYMENT_LEASE_TOKEN ?? '',
+        };
+        let allocation;
+        let recoveredRuntime: RecoveryRuntimeProof | undefined;
+        if (applicationRecoveryMode) {
+          if (expectedAllocation) throw new Error('Application recovery cannot publish new allocation authority.');
+          const receipt = await readRecoveryOwnerReceipt(deploymentId);
+          await verifyCustomerAllocationDatabaseProtections(prisma);
+          recoveredRuntime = JSON.parse(process.env.SYSTEM_RECOVERY_RUNTIME_AFTER || 'null') as RecoveryRuntimeProof;
+          assertRecoveryAllocationContinuity(receipt.allocation, await readRecoveryAllocationAuthority(prisma), recoveredRuntime);
+          allocation = { customerAllocationDatabaseProtections: 'verified', preservedCurrentAllocationAuthority: receipt.allocation.state };
+        } else allocation = await verifyCustomerAllocationDeploymentState(prisma);
+        if (expectedAllocation || applicationRecoveryMode) {
+          const runtimeAddress = recoveredRuntime?.address || process.env.DEPLOYMENT_CUSTOMER_ALLOCATION_RUNTIME_ADDRESS || '';
+          if (!isIP(runtimeAddress)) throw new Error('Customer allocation runtime address is unverified.');
+          const [sessions] = await prisma.$queryRaw<Array<{ admitted: boolean }>>`
+            SELECT count(*) > 0 AND bool_and(usename = 'sabalan_application_runtime') AS admitted
+            FROM pg_catalog.pg_stat_activity
+            WHERE client_addr = CAST(${runtimeAddress} AS inet)
+              AND datname = current_database() AND backend_type = 'client backend'
+          `;
+          if (!sessions?.admitted) throw new Error('Customer allocation runtime database sessions are unverified.');
+        }
+        return { status: 'up-to-date', ...allocation };
       },
     }, {
       name: 'shipment-statement-runtime-state',

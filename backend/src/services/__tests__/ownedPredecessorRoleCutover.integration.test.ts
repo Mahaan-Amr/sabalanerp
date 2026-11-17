@@ -97,6 +97,16 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
     assert.equal(wrongRemote.status, 1, wrongRemote.stderr);
     assert.match(wrongRemote.stderr, /CHECKPOINT_METADATA_UNPROVEN/);
     await writeFile(`${remotePath}.json`, remoteSidecar);
+    await db.deploymentOperation.update({ where: { id }, data: {
+      checkpointJson: { ...checkpoint, checksum: '0'.repeat(64) },
+    } });
+    await db.$disconnect();
+    const wrongLeaseCheckpoint = control('stage-predecessor-role-grants');
+    assert.equal(wrongLeaseCheckpoint.status, 1, wrongLeaseCheckpoint.stderr);
+    assert.match(wrongLeaseCheckpoint.stderr, /lease or verified checkpoint has changed/);
+    await db.deploymentOperation.update({ where: { id }, data: {
+      checkpointJson: { ...checkpoint, remoteFingerprint: { ...checkpoint.remoteFingerprint, mtimeMs: remoteStat.mtimeMs + 0.00025 } },
+    } });
     await db.$queryRaw`SELECT 1`;
     const connected = control('stage-predecessor-role-grants');
     assert.equal(connected.status, 1, connected.stderr);

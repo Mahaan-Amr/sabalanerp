@@ -574,6 +574,16 @@ type CutoverSession = {
 const receiptFormat = 'sabalan-predecessor-role-acl-cutover-v1';
 const hexSha = /^[a-f0-9]{64}$/;
 
+// PostgreSQL's checkpoint row binds the durable archive identity and verification flags.
+// Prisma can round fractional JSON observations such as mtimeMs. The canonical sidecars
+// preserve those observations, and the stage command rechecks them against the remote file.
+function cutoverCheckpointBinding(metadata: Record<string, unknown>) {
+  const keys = ['captureMethod', 'id', 'deploymentId', 'releaseId', 'targetCommit', 'sourceDatabase',
+    'createdAt', 'checksum', 'size', 'archivePath', 'localPath', 'remotePath',
+    'localVerified', 'remoteVerified', 'localRestoreVerified', 'manifestReadable'];
+  return checkpointMetadataTransport(Object.fromEntries(keys.map(key => [key, metadata[key]]))).canonicalMetadataSha256;
+}
+
 function cutoverCatalogFingerprint(cutover: Awaited<ReturnType<typeof inspectCutover>>, objects = cutover.objects) {
   return sha256(JSON.stringify({ identity: cutover.identity, objects, oids: cutover.catalog.map(object => object.oid) }));
 }
@@ -666,6 +676,7 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
     if (remote.sha256 !== metadataSha256) fail('The verified remote cutover checkpoint metadata changed.');
   }
   const manifest = await readCutoverManifest(input.catalogFile);
+  const checkpointBinding = cutoverCheckpointBinding(metadata);
   return withTransaction(input.databaseUrl, 'READ WRITE', async client => {
     await client.query("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '30s'");
     const liveLease = async (lock = false) => {
@@ -677,7 +688,7 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
         ${lock ? 'FOR UPDATE' : ''}
       `, [session.deploymentId, session.releaseId, session.targetCommit, session.owner, phase, session.leaseToken]);
       if (rows.length !== 1 || !rows[0].checkpoint
-        || checkpointMetadataTransport(rows[0].checkpoint).canonicalMetadataSha256 !== metadataSha256) {
+        || cutoverCheckpointBinding(rows[0].checkpoint) !== checkpointBinding) {
         fail('The cutover deployment lease or verified checkpoint has changed.');
       }
       return rows[0].report;

@@ -14,7 +14,9 @@ export async function verifyCustomerAllocationDeploymentState(database: Pick<Pri
         ('accounting_customer_allocation_intents', 'serialize_customer_allocation_intent_insert', 'serialize_customer_allocation_intent_insert', 7, false),
         ('accounting_settlement_allocations', 'verify_grouped_allocation_child', 'verify_grouped_allocation_child', 5, true),
         ('accounting_settlement_allocations', 'require_active_grouped_allocation_child', 'require_active_grouped_allocation_child', 5, true),
-        ('customer_allocation_release_control', 'keep_customer_allocation_control_closed', 'keep_customer_allocation_control_closed', 62, false)
+        ('customer_allocation_release_control', 'guard_customer_allocation_control_row', 'guard_customer_allocation_control', 31, false),
+        ('customer_allocation_release_control', 'guard_customer_allocation_control_truncate', 'guard_customer_allocation_control', 34, false),
+        ('customer_allocation_release_audit', 'guard_customer_allocation_audit', 'guard_customer_allocation_audit', 58, false)
     ), expected_fences(table_name, key_name) AS (
       VALUES ('public.accounting_customer_allocation_fences', 'profileId'),
         ('public.accounting_customer_command_key_fences', 'idempotencyKey')

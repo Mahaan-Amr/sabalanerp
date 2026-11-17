@@ -14,6 +14,7 @@ export const protectedBridgeMigrationNames: readonly string[] = Object.freeze(Ob
 const pickupSourceName = '20261116100000_customer_pickup_driver_source';
 const pickupDispatchName = '20261116100100_customer_pickup_dispatch';
 const retireAttachmentScanStatusName = '20261117120000_retire_attachment_scan_status';
+const allocationControllerTransitionName = '20261116133000_customer_allocation_controller_transition';
 const nextReleaseCatalog = {
   '20261116120000_customer_allocation_intents': {
     tables: ['accounting_customer_allocation_intents'],
@@ -41,6 +42,11 @@ const nextReleaseCatalog = {
   },
   '20261116132000_close_grouped_allocation_child_backstop': {
     tables: ['accounting_settlement_allocations'], functions: ['require_active_grouped_allocation_child'],
+  },
+  [allocationControllerTransitionName]: {
+    tables: ['customer_allocation_release_control', 'customer_allocation_release_audit'],
+    functions: ['guard_customer_allocation_control', 'guard_customer_allocation_audit',
+      'customer_allocation_controller_lock', 'customer_allocation_controller_activate'],
   },
   [retireAttachmentScanStatusName]: {
     tables: ['support_ticket_attachments', 'accounting_archive_evidence', 'hr_employment_contract_documents', 'purchasing_attachments'],
@@ -85,12 +91,13 @@ const currentRelease = {
   '20261116130000_grouped_allocation_child_lineage': ['64b0e0bae723c37775e9d67b36dc607c156fa9d02476d132f925e1011fb64135', 5],
   '20261116131000_customer_allocation_closed_control': ['a2d5edfe312f2e85d2a17e0deb26c6d7838534cf40713a741349b1e65bf2131c', 4],
   '20261116132000_close_grouped_allocation_child_backstop': ['bc83e4c5dbf13051374ebaaab5bb1a5b75682b6044eb179ac03e94a971c18c90', 2],
+  [allocationControllerTransitionName]: ['8f8389793094eb9ea72abb292a419e0ac547412c44559c6a2c03e00b06bc5cdc', 18],
   [retireAttachmentScanStatusName]: ['9fad9a9544c0c5da8fe58b4f636c2b35ad420fd871c3a7392e12911c5fd4ab91', 5],
   '20261117130000_store_dispatch_exit_otp_code': ['375715f6a9930906e9cfae9b5bfbd59c4e4371d5d70587ec651de81afb7e2353', 1],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 34]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 35]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -326,8 +333,12 @@ const quantityNames = new Set([protectedCurrentReleaseNames[1], protectedCurrent
 const dutyName = protectedCurrentReleaseNames[9], waybillName = protectedCurrentReleaseNames[10];
 function currentCatalogScope(files: CurrentFile[], through: number) {
   const applied = files.slice(0, through + 1);
+  const functions = new Set(applied.flatMap(file => file.functions));
+  if (applied.some(file => file.name === allocationControllerTransitionName)) {
+    functions.delete('keep_customer_allocation_control_closed');
+  }
   return { tables: [...new Set(applied.flatMap(file => file.tables))].sort(),
-    functions: [...new Set(applied.flatMap(file => file.functions))].sort(),
+    functions: [...functions].sort(),
     pickupSource: applied.some(file => file.name === pickupSourceName) };
 }
 

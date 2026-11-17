@@ -13,6 +13,34 @@ const known = {
 export const protectedBridgeMigrationNames: readonly string[] = Object.freeze(Object.keys(known));
 const pickupSourceName = '20261116100000_customer_pickup_driver_source';
 const pickupDispatchName = '20261116100100_customer_pickup_dispatch';
+const retireAttachmentScanStatusName = '20261117120000_retire_attachment_scan_status';
+const nextReleaseCatalog = {
+  '20261116120000_customer_allocation_intents': {
+    tables: ['accounting_customer_allocation_intents'],
+    functions: ['protect_allocation_intent_evidence'],
+  },
+  '20261116121000_bind_allocation_intent_result': {
+    tables: ['accounting_customer_commands', 'accounting_customer_allocation_intents'],
+    functions: ['bind_customer_allocation_intent_result', 'verify_customer_allocation_intent_result'],
+  },
+  '20261116122000_serialize_customer_allocation_reservations': {
+    tables: ['accounting_customer_allocation_fences'], functions: [],
+  },
+  '20261116123000_cancel_unreceived_allocation_intents': {
+    tables: ['accounting_customer_commands'], functions: ['serialize_customer_allocation_parent'],
+  },
+  '20261116124000_serialize_allocation_command_keys': {
+    tables: ['accounting_customer_command_key_fences', 'accounting_customer_allocation_intents'],
+    functions: ['serialize_customer_command_key_within', 'serialize_customer_allocation_intent_insert'],
+  },
+  [retireAttachmentScanStatusName]: {
+    tables: ['support_ticket_attachments', 'accounting_archive_evidence', 'hr_employment_contract_documents', 'purchasing_attachments'],
+    functions: [],
+  },
+  '20261117130000_store_dispatch_exit_otp_code': {
+    tables: ['dispatch_otp_challenges'], functions: [],
+  },
+};
 // This is the exact source delta from the retained 2026-11-12 production
 // release. It is intentionally separate from the frozen historical bootstrap.
 const currentRelease = {
@@ -40,10 +68,17 @@ const currentRelease = {
   '20261115131000_accounting_private_marker_index': ['31ab2f1cd447819b9f1863337c230fe1c23959eb01e260232f54e044d0bdba30', 1],
   [pickupSourceName]: ['37ebbfab7f1c7dde67450e9117bcc54ea186835e9cc1b448f0e8c97a3229122a', 1],
   [pickupDispatchName]: ['1ae2687716e07ecdc08b4c89aa2dd21c3399ed3853d4e7a1124b4932131268a9', 6],
+  '20261116120000_customer_allocation_intents': ['b6213e3838399149f6c61da9ae079abb0a6eb1afcbba7bd46e247a9bd0d225ea', 6],
+  '20261116121000_bind_allocation_intent_result': ['04c84e72ee82adc229bc1c5c2fe131998058d5357f0efaa17f958afcb77dac08', 4],
+  '20261116122000_serialize_customer_allocation_reservations': ['a21cc1a12f8bfae622302c39d258ca881c0be2847e1329cae70f9baa5d272670', 1],
+  '20261116123000_cancel_unreceived_allocation_intents': ['f46bae03614df7d3dfca3e611bedc91f597f87571bc94142e251a7763340ff12', 3],
+  '20261116124000_serialize_allocation_command_keys': ['2f2f1742ea48a8e11bb8b9db4829532278af27356af4308df03264b9248d6e99', 5],
+  [retireAttachmentScanStatusName]: ['9fad9a9544c0c5da8fe58b4f636c2b35ad420fd871c3a7392e12911c5fd4ab91', 5],
+  '20261117130000_store_dispatch_exit_otp_code': ['375715f6a9930906e9cfae9b5bfbd59c4e4371d5d70587ec651de81afb7e2353', 1],
 } as const;
 export const protectedCurrentReleaseNames: readonly string[] = Object.freeze(Object.keys(currentRelease));
 // Each release extends the ledger while preserving the prior release-set hashes.
-const protectedReleaseEpochEnds = Object.freeze([12, 22, 24]);
+const protectedReleaseEpochEnds = Object.freeze([12, 22, 24, 31]);
 const releaseSetSha256 = (files: CurrentFile[], index: number) => sha(files.slice(0,
   protectedReleaseEpochEnds.find(end => index < end)!).map(file => file.sha256).join('\n'));
 
@@ -82,8 +117,9 @@ export function compileProtectedCurrentRelease(files: ReadonlyArray<readonly [st
     if (!Buffer.isBuffer(bytes) || sha(bytes) !== sha256) failure('PROTECTED_CURRENT_RELEASE_SQL_IDENTITY_MISMATCH');
     const sql = bytes.toString('utf8');
     let statements = splitCurrentReleaseSql(sql);
-    if (name === '20261108000100_start_new_waybill_numbers_at_one') {
-      if (statements.length !== 4 || statements[0] !== 'BEGIN;' || statements[3] !== 'COMMIT;') {
+    if (name === '20261108000100_start_new_waybill_numbers_at_one' || name === retireAttachmentScanStatusName) {
+      const opening = statements[0]?.replace(/^(?:--[^\r\n]*\r?\n\s*)+/, '');
+      if (statements.length !== expectedCount + 2 || opening !== 'BEGIN;' || statements.at(-1) !== 'COMMIT;') {
         failure('PROTECTED_CURRENT_RELEASE_TRANSACTION_WRAPPER_UNPROVEN');
       }
       // The byte-pinned source wraps the same two statements in a transaction;
@@ -93,6 +129,8 @@ export function compileProtectedCurrentRelease(files: ReadonlyArray<readonly [st
     if (statements.length !== expectedCount || statements.some(statement => /^\s*(BEGIN|COMMIT|ROLLBACK)\s*;/i.test(statement))) {
       failure('PROTECTED_CURRENT_RELEASE_STATEMENTS_UNPROVEN');
     }
+    const reviewedScope = nextReleaseCatalog[name as keyof typeof nextReleaseCatalog];
+    if (reviewedScope) return { name, sha256, statements, ...reviewedScope };
     const tables = [...new Set([
       ...[...sql.matchAll(/\b(?:CREATE|ALTER)\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map(match => match[1]),
       ...(names.indexOf(name) >= protectedReleaseEpochEnds[0]

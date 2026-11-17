@@ -25,6 +25,9 @@ test('ordinary recovery stops on a dedicated session or a surviving role-cutover
     fs.writeFileSync(hold, 'interrupted');
     fs.unlinkSync(session);
     assert.equal(pendingRoleCutover(root, session), true);
+    fs.unlinkSync(hold);
+    fs.writeFileSync(path.join(reports, 'predecessor-role-cutover-open-intent.json'), 'opening may have happened');
+    assert.equal(pendingRoleCutover(root, session), true);
   } finally {
     fs.rmSync(root, { force: true, recursive: true });
   }

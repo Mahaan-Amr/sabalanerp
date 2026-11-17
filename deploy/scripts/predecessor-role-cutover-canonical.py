@@ -208,6 +208,16 @@ def acknowledge_role_gates(root, report_dir, coordination_dir, phase, proof, ngi
                        "nginxProofSha256": host.digest(nginx_raw), "gateReport": report_name,
                        "gateReportSha256": host.digest(report_raw),
                        "nativeClosureSha256": host.digest(closure_raw), "canOpenTraffic": False}
+    host_hold = root / ".deploy-state/predecessor-role-cutover-active.json"
+    if state == "RESTORED" and not os.path.lexists(host_hold):
+        # A staged-only failure may never have attempted host login activation.
+        # An exact restored runtime and passing rollback gates can fence it now.
+        host.write_private(host_hold, host.json_bytes({
+            "format": "sabalan-predecessor-role-cutover-restored-host-hold/v1",
+            "deploymentId": binding["deploymentId"], "releaseId": binding["releaseId"],
+            "checkpointMetadataSha256": binding["checkpointMetadataSha256"],
+            "gateReportSha256": acknowledgement["gateReportSha256"],
+        }))
     host.write_private(private.with_name("role-gates-" + state.lower() + "-acknowledgement.json"),
                        host.json_bytes(acknowledgement))
     return acknowledgement

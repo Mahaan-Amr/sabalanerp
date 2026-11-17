@@ -19,7 +19,7 @@ const hostFiles=['deploy/scripts/preserved-clamav.mjs','backend/scripts/preserve
  'deploy/scripts/browser-routing-store.mjs','deploy/scripts/browser-release-routing.mjs',
  'deploy/scripts/online-bootstrap-boundary.mjs','deploy/scripts/install-online-controller-trust.mjs','deploy/scripts/deploy.sh',
  'deploy/scripts/protected-owner-transport.sh','deploy/scripts/system-recovery-backup-host.mjs','deploy/scripts/system-recovery-backup-host.sh','deploy/scripts/capture-only-release.mjs','deploy/scripts/prebuilt-release-plan.mjs',
- 'deploy/scripts/predecessor-database-topology.mjs','deploy/scripts/predecessor-role-cutover-operation.mjs','deploy/scripts/predecessor-role-host-configuration.py','deploy/scripts/predecessor-role-cutover-native.py','deploy/scripts/predecessor-role-cutover-canonical.py',
+ 'deploy/scripts/predecessor-database-topology.mjs','deploy/scripts/predecessor-role-cutover-operation.mjs','deploy/scripts/predecessor-role-host-configuration.py','deploy/scripts/predecessor-role-cutover-native.py','deploy/scripts/predecessor-role-cutover-canonical.py','deploy/scripts/predecessor-role-cutover-terminal.py',
  'scripts/deployment-existing-release.mjs','scripts/performance-deployment-environment.mjs',
  'deploy/scripts/legacy-backend-signal.py','deploy/scripts/dispatch-volume-preflight.mjs','deploy/scripts/dispatch-volume-transition.py',
  'deploy/scripts/canonical-previous-release-configuration.mjs','deploy/scripts/verify-premutation-configuration-repair.mjs','deploy/scripts/reconcile-premutation-capture.mjs',

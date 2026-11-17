@@ -349,6 +349,7 @@ def restore(root, env, report_dir, coordination_dir, *, observe, verify_boundary
 
 
 def _restore(root, env, report_dir, coordination_dir, *, observe, verify_boundary):
+    require(not os.path.lexists(report_dir / "predecessor-role-cutover-open-intent.json"))
     phase = "ROLLBACK_STARTED"
     session, checkpoint, binding = context(root, report_dir, coordination_dir, phase)
     require(verify_boundary(session, checkpoint, None) is True)
@@ -464,6 +465,7 @@ def _continue_backend(root, env, report_dir, coordination_dir, pinned_containers
     authority = context(root, report_dir, coordination_dir, phase)
     session, checkpoint, binding = authority
     restoring = phase == "ROLLBACK_STARTED"
+    require(not restoring or not os.path.lexists(report_dir / "predecessor-role-cutover-open-intent.json"))
     require(verify_boundary(session, checkpoint) is True)
     private_path, receipt_path = transaction_paths(root, binding["deploymentId"])
     saved, previous = load_snapshot(private_path, env, binding)
@@ -555,6 +557,7 @@ def _foreground(root, env, report_dir, coordination_dir, preflight, credential_f
     require(phase in ("MUTATION_STARTED", "ROLLBACK_STARTED"))
     session, checkpoint, binding = context(root, report_dir, coordination_dir, phase)
     restoring = phase == "ROLLBACK_STARTED"
+    require(not restoring or not os.path.lexists(report_dir / "predecessor-role-cutover-open-intent.json"))
     require(verify_boundary(session, checkpoint) is True)
     require(set(preflight) == {
         "format", "sourceCommit", "sourceHash", "browserBuildId", "images", "containers",

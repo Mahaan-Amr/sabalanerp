@@ -142,7 +142,16 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
     const reopen = control('maintenance-off');
     assert.equal(reopen.status, 1, reopen.stderr);
     assert.match(reopen.stderr, /qualified host recovery/);
+    const openIntentPath = path.join(root, 'predecessor-role-cutover-open-intent.json');
+    await writeFile(openIntentPath, 'uncertain opening');
+    const forbiddenTransition = control('transition', { DEPLOYMENT_PHASE: 'ROLLBACK_STARTED' });
+    assert.equal(forbiddenTransition.status, 1, forbiddenTransition.stderr);
+    assert.match(forbiddenTransition.stderr, /may have received public traffic/);
     await phase('ROLLBACK_STARTED');
+    const forbiddenRestore = control('restore-predecessor-role-grants');
+    assert.equal(forbiddenRestore.status, 1, forbiddenRestore.stderr);
+    assert.match(forbiddenRestore.stderr, /may have received public traffic/);
+    await rm(openIntentPath);
     await db.$executeRaw`REVOKE UPDATE ON public.recovery_operations FROM postgres`;
     await db.$disconnect();
     const drifted = control('restore-predecessor-role-grants');

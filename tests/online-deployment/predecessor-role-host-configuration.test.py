@@ -21,6 +21,9 @@ NATIVE_SPEC.loader.exec_module(native)
 CANONICAL_SPEC = importlib.util.spec_from_file_location("role_canonical", MODULE.with_name("predecessor-role-cutover-canonical.py"))
 canonical = importlib.util.module_from_spec(CANONICAL_SPEC)
 CANONICAL_SPEC.loader.exec_module(canonical)
+TERMINAL_SPEC = importlib.util.spec_from_file_location("role_terminal", MODULE.with_name("predecessor-role-cutover-terminal.py"))
+terminal = importlib.util.module_from_spec(TERMINAL_SPEC)
+TERMINAL_SPEC.loader.exec_module(terminal)
 
 SERVICES = ("backend", "frontend", "inquiry", "nginx", "postgres", "clamav")
 GRAPH = {name: "sha256:" + str(i) * 64 for i, name in enumerate(SERVICES, 1)}
@@ -625,6 +628,63 @@ class HostConfigurationTest(unittest.TestCase):
                     self.assertEqual(ack["gateCount"], count)
                     self.assertFalse(ack["canOpenTraffic"])
                     self.assertEqual(ack["gateReportSha256"], hashlib.sha256(report_raw).hexdigest())
+
+    def test_unknown_open_does_not_replay_and_terminal_readback_archives_both_holds(self):
+        reports, coordination = self.root / "reports", self.root / "coordination"
+        source_marker = coordination / "deployment-maintenance.json"
+        calls = []
+        with self.owner():
+            _, _, binding = terminal.host.context(self.root, reports, coordination, "MUTATION_STARTED")
+            private, _ = terminal.host.transaction_paths(self.root, binding["deploymentId"])
+            gate = {"format": "sabalan-predecessor-role-gate-acknowledgement-v1", **binding, "state": "APPLIED",
+                    "canOpenTraffic": False, "gateMode": "PREDECESSOR_ROLE_APPLIED", "gateCount": 19,
+                    **{key: "9" * 64 for key in ("gateReportSha256", "roleProofSha256", "nginxProofSha256",
+                                                 "nativeClosureSha256", "backendId", "nginxId")}}
+            private_write(private.with_name("role-gates-applied-acknowledgement.json"), terminal.host.json_bytes(gate))
+            holds = (self.root / ".deploy-state" / terminal.HOLD, reports / terminal.HOLD)
+            for hold in holds:
+                private_write(hold, terminal.host.json_bytes(binding))
+
+            def interrupted_open(intent):
+                calls.append(intent)
+                self.assertTrue((reports / terminal.OPEN_INTENT).exists())
+                source_marker.unlink()
+                return False
+
+            retained = {"authorise": lambda session, point, ack: ack == gate, "remove_maintenance": interrupted_open,
+                        "renew_without_marker": lambda session, intent: True, "observe_public": lambda expected: expected}
+            with self.assertRaises(terminal.host.RoleHostConfigurationError):
+                terminal.open_owned_traffic(self.root, reports, coordination, "MUTATION_STARTED", gate,
+                                            ("erp.fixture.test", "inquiry.fixture.test"), **retained)
+            with self.assertRaises(terminal.host.RoleHostConfigurationError):
+                terminal.open_owned_traffic(self.root, reports, coordination, "MUTATION_STARTED", gate,
+                                            ("erp.fixture.test", "inquiry.fixture.test"), **retained)
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(all(hold.exists() for hold in holds))
+
+            visible = terminal.observe_open_owned_traffic(
+                self.root, reports, coordination, binding["deploymentId"],
+                renew_without_marker=retained["renew_without_marker"], observe_public=retained["observe_public"],
+            )
+            self.assertEqual(visible["origins"], {"erp.fixture.test": 200, "inquiry.fixture.test": 200})
+            (reports / terminal.SESSION).unlink()
+            with self.assertRaises(terminal.host.RoleHostConfigurationError):
+                terminal.archive_terminal_holds(
+                    self.root, reports, coordination, binding["deploymentId"],
+                    read_terminal=lambda expected: {**expected, "activeLeases": 1}, observe_public=lambda expected: expected,
+                )
+            self.assertTrue(all(hold.exists() for hold in holds))
+            archived = terminal.archive_terminal_holds(
+                self.root, reports, coordination, binding["deploymentId"],
+                read_terminal=lambda expected: expected, observe_public=lambda expected: expected,
+            )
+            self.assertEqual(archived["phase"], "COMPLETED")
+            self.assertTrue(all(not hold.exists() for hold in holds))
+            self.assertFalse((reports / terminal.OPEN_INTENT).exists())
+            self.assertEqual(archived, terminal.archive_terminal_holds(
+                self.root, reports, coordination, binding["deploymentId"],
+                read_terminal=lambda expected: expected, observe_public=lambda expected: expected,
+            ))
 
     def test_restore_if_receipt_publication_fails_after_env_replacement(self):
         receipt = self.root / ".deploy-state" / ("predecessor-role-host-" + self.session["deploymentId"]) / "receipt.json"

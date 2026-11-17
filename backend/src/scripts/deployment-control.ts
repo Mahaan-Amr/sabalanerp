@@ -20,7 +20,7 @@ import {
 import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 import { assertProtectedBootstrapBoundary, compileProtectedBootstrapSource, runProtectedBootstrapBaseline } from '../services/protectedBootstrapMigrations';
 import { assertBootstrapNativeCompletion } from '../services/protectedBridgeMigrations';
-import { changeProtectedPredecessorRoleGrants, protectedPredecessorRoleCutoverPurpose } from '../services/protectedDatabaseRoleRecovery';
+import { assertPredecessorRoleRollbackBeforeTraffic, changeProtectedPredecessorRoleGrants, protectedPredecessorRoleCutoverPurpose } from '../services/protectedDatabaseRoleRecovery';
 
 const REPORT_DIR = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
 const SESSION_PATH = path.join(REPORT_DIR, 'active-deployment-session.json');
@@ -354,6 +354,9 @@ const main = async () => {
     console.log(JSON.stringify({ ok: true, deployment }));
   } else if (command === 'transition') {
     const nextPhase = required('DEPLOYMENT_PHASE') as DeploymentPhase;
+    if (session.purpose === protectedPredecessorRoleCutoverPurpose && nextPhase === 'ROLLBACK_STARTED') {
+      await assertPredecessorRoleRollbackBeforeTraffic(REPORT_DIR);
+    }
     if (session.purpose === protectedPredecessorRoleCutoverPurpose && session.phase === 'MUTATION_STARTED'
       && nextPhase !== 'ROLLBACK_STARTED') throw new Error('The ACL staging operation cannot promote a release.');
     const deployment = await transitionDeployment(store, { ...session, nextPhase, now: new Date() });

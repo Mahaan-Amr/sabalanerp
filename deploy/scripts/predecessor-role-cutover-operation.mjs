@@ -43,7 +43,8 @@ function readPrivate(file, before, limit) {
 }
 
 export function pendingRoleCutover(root, session) {
-  if (namedFile(path.join(path.dirname(session), holdName)) || namedFile(path.join(root, '.deploy-state', holdName))) return true;
+  if (namedFile(path.join(path.dirname(session), holdName)) || namedFile(path.join(root, '.deploy-state', holdName))
+      || namedFile(path.join(path.dirname(session), 'predecessor-role-cutover-open-intent.json'))) return true;
   const stat = namedFile(session);
   if (!stat) return false;
   const current = JSON.parse(readPrivate(session, stat, 1024 * 1024));

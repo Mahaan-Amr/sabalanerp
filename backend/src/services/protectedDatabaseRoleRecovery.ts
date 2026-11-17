@@ -570,6 +570,16 @@ export async function verifyPredecessorRoleCutover(input: CutoverSource & { stag
 
 export const protectedPredecessorRoleCutoverPurpose = 'predecessor-role-cutover';
 
+export async function assertPredecessorRoleRollbackBeforeTraffic(reportDirectory: string) {
+  try {
+    await fs.lstat(path.join(reportDirectory, 'predecessor-role-cutover-open-intent.json'));
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  fail('The predecessor role cutover may have received public traffic. Automatic rollback is forbidden.');
+}
+
 type CutoverSession = {
   deploymentId: string; releaseId: string; targetCommit: string; owner: string; controlImage: string;
   leaseToken: string; phase: string; bootstrap: boolean; purpose?: string;
@@ -731,6 +741,7 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
     fail('The runtime credential frame is invalid.');
   }
   const phase = restoring ? 'ROLLBACK_STARTED' : 'MUTATION_STARTED';
+  if (restoring) await assertPredecessorRoleRollbackBeforeTraffic(path.dirname(input.journalPath));
   const session = input.session;
   const assertMarker = async () => {
     const marker = await readDeploymentMaintenance(input.coordinationDir);

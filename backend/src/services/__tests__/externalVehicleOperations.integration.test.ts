@@ -132,8 +132,8 @@ test('external fallback requires qualifying failures, OTP, separate Guard actor 
   assert.equal((await f.service.beginInternalFallback({ sessionId: session.id, actorId: f.actor.id })).method, 'EXTERNAL_FALLBACK');
   assert.equal(f.messages[0].phone, '09123333333');
   const challenge = await f.tx.dispatchOtpChallenge.findFirstOrThrow({ where: { sessionId: session.id } });
-  assert.match(challenge.code ?? '', /^\d{6}$/);
-  assert.equal(challenge.code, f.messages[0].code, 'persist the exact code delivered by SMS');
+  assert.match(f.messages[0].code, /^\d{6}$/);
+  assert.equal(challenge.code, null, 'the SMS code must not be stored as plaintext');
   await f.service.verifyOtp({ sessionId: session.id, code: f.messages[0].code });
   await assert.rejects(() => f.service.approveByGuard({ sessionId: session.id, guardActorId: f.actor.id, reauthenticatedAt: new Date(), reason: 'test' }), /different actor/);
   await assert.rejects(() => f.service.approveByGuard({ sessionId: session.id, guardActorId: 'other-guard', reauthenticatedAt: new Date() }), /reason/);

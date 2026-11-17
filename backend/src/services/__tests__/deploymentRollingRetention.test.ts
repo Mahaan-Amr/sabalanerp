@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { withHealthyDrill } from './deploymentCheckpointDrill.fixture';
 import { test } from 'node:test';
 import { hasHealthyIndependentCheckpointDrill, planRemoteCheckpointRetention, PROTECTED_DATABASE_ROLE_COMPONENT } from '../deploymentCheckpointPolicy';
-import { assertRoleDrillDatabase, type RoleDrillTarget } from '../deploymentDrillRoleTarget';
+import { assertRoleDrillDatabase, replaceRoleDrillSidecar, type RoleDrillTarget } from '../deploymentDrillRoleTarget';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -235,4 +235,27 @@ test('retention resumes interrupted deletions and carries remote retirement evid
     for (const id of [1, 2]) await assert.rejects(fs.stat(path.join(local, `backup-${id}.sabrec.json`)), { code: 'ENOENT' });
     for (const id of [3, 4]) assert.equal(await fs.readFile(path.join(local, `backup-${id}.sabrec`), 'utf8'), `backup-${id}`);
   } finally { context.mock.restoreAll(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('role drill evidence is replaced whole and an interrupted publish preserves the old receipt', async (context) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'sabalan-role-sidecar-'));
+  const sidecar = path.join(directory, 'point.sabrec.json');
+  try {
+    await fs.writeFile(sidecar, 'original evidence');
+    await assert.rejects(replaceRoleDrillSidecar(sidecar, 'stale evidence', 'new evidence'),
+      /DEPLOYMENT_DRILL_EVIDENCE_CHANGED/);
+    context.mock.method(fs, 'rename', async () => { throw new Error('simulated interrupted publish'); });
+    await assert.rejects(replaceRoleDrillSidecar(sidecar, 'original evidence', 'new evidence'),
+      /simulated interrupted publish/);
+    assert.equal(await fs.readFile(sidecar, 'utf8'), 'original evidence');
+    assert.deepEqual(await fs.readdir(directory), ['point.sabrec.json']);
+    context.mock.restoreAll();
+
+    await replaceRoleDrillSidecar(sidecar, 'original evidence', 'new evidence');
+    assert.equal(await fs.readFile(sidecar, 'utf8'), 'new evidence');
+    assert.deepEqual(await fs.readdir(directory), ['point.sabrec.json']);
+  } finally {
+    context.mock.restoreAll();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });

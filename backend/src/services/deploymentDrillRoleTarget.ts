@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 type RecoveryHost = { machineUuidSha256: string; kernelBootIdSha256: string };
 type DatabaseIdentity = { name: string; oid: string; systemIdentifier: string };
@@ -75,4 +75,27 @@ export function assertRoleDrillDatabase(plan: RoleDrillTarget, actual: RoleDrill
   if (!actual?.admitted || !actual.controlSchemaAvailable || actual.name !== target.name || actual.owner !== target.owner
     || actual.systemIdentifier !== target.systemIdentifier || !oid(actual.oid)
     || (promoted ? actual.oid === target.oid : actual.oid !== target.oid)) return unproven();
+}
+
+/** Publish a complete replacement without truncating the recorded evidence. */
+export async function replaceRoleDrillSidecar(file: string, expected: string, next: string) {
+  const changed = () => new Error('DEPLOYMENT_DRILL_EVIDENCE_CHANGED');
+  const previous = await fs.promises.lstat(file);
+  if (!previous.isFile() || previous.nlink !== 1) throw changed();
+  const staged = path.join(path.dirname(file), '.role-drill-' + randomUUID() + '.tmp');
+  const handle = await fs.promises.open(staged, 'wx', 0o600);
+  try {
+    try {
+      await handle.writeFile(next, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    const current = await fs.promises.lstat(file);
+    if (!current.isFile() || current.nlink !== 1 || current.dev !== previous.dev || current.ino !== previous.ino
+      || await fs.promises.readFile(file, 'utf8') !== expected) throw changed();
+    await fs.promises.rename(staged, file);
+  } finally {
+    await fs.promises.rm(staged, { force: true });
+  }
 }

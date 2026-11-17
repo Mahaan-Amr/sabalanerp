@@ -14,7 +14,7 @@ import { assertIndependentRecoveryApplicationKeys, verifyRecoveredApplicationPay
 import { assertRecoveryBusinessProof } from '../services/deploymentRecoveryDataProof';
 import { readRecoveryHostIdentity } from '../services/deploymentRecoveryHostIdentity';
 import { hasHealthyIndependentCheckpointDrill, protectedCheckpointRoleComponent, type RemoteCheckpointArtifact } from '../services/deploymentCheckpointPolicy';
-import { assertRoleDrillDatabase, loadRoleDrillTarget, type RoleDrillTarget } from '../services/deploymentDrillRoleTarget';
+import { assertRoleDrillDatabase, loadRoleDrillTarget, replaceRoleDrillSidecar, type RoleDrillTarget } from '../services/deploymentDrillRoleTarget';
 
 type RemoteMetadata = {
   id: string;
@@ -116,7 +116,8 @@ const main = async () => {
     operationId, checkpointId: metadata.id, releaseId: metadata.releaseId, checksum: metadata.checksum,
     size: metadata.size, startedAt: startedAt.toISOString(),
   } }, null, 2)}\n`;
-  await fs.promises.writeFile(metadataPath, runningMetadataBytes, { encoding: 'utf8', mode: 0o600 });
+  if (roleTarget) await replaceRoleDrillSidecar(metadataPath, metadataBytes, runningMetadataBytes);
+  else await fs.promises.writeFile(metadataPath, runningMetadataBytes, { encoding: 'utf8', mode: 0o600 });
   metadataBytes = runningMetadataBytes;
   const validation = await validateRecoveryPackage({ sourcePath: metadata.remotePath, passphrase: remoteKey, prisma,
     verifyRestore: true, verifyApplicationPayloads: true, verifyBusinessData: true, protectedDatabaseRoles });
@@ -212,7 +213,9 @@ const main = async () => {
   const reportRoot = process.env.DEPLOYMENT_REPORT_DIR || path.join(process.cwd(), 'reports', 'deploy');
   await fs.promises.mkdir(reportRoot, { recursive: true });
   await fs.promises.writeFile(path.join(reportRoot, `${operationId}.json`), `${JSON.stringify({ metadata, drill }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-  await fs.promises.writeFile(metadataPath, `${JSON.stringify({ ...metadata, independentRestoreVerified: true, lastDrill: drill }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  const completedMetadataBytes = `${JSON.stringify({ ...metadata, independentRestoreVerified: true, lastDrill: drill }, null, 2)}\n`;
+  if (roleTarget) await replaceRoleDrillSidecar(metadataPath, metadataBytes, completedMetadataBytes);
+  else await fs.promises.writeFile(metadataPath, completedMetadataBytes, { encoding: 'utf8', mode: 0o600 });
   console.log(JSON.stringify({ ok: true, drill }));
 };
 

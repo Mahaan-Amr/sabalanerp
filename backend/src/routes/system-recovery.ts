@@ -225,7 +225,9 @@ router.post('/:id/download', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/uploads', requireLegacyRecoveryExecution, upload.single('file'), async (req: AuthRequest, res) => {
+// Intake authenticates archive bytes and checks compatibility without restoring
+// SQL or creating a database, so it also runs under the restricted serving role.
+router.post('/uploads', upload.single('file'), async (req: AuthRequest, res) => {
   const temporaryPath = req.file?.path;
   let operationId: string | null = null;
   let storedPath: string | null = null;

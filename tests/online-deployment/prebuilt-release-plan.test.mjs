@@ -42,7 +42,7 @@ test('changed source, dirty gitlink, images, graph, build bytes, operations and 
  ]){const input=fixture();mutate(input);assert.throws(()=>validatePrebuiltReleasePlan(input.plan,input.actual));}
 });
 
-const script=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),bash=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh';
+const script=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),bash=process.env.SABALAN_TEST_SHELL??(process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh');
 test('prebuilt real shell lane retains cleanup/capacity and never fetches, builds, retags or derives a browser ID',()=>{
  const start=script.indexOf('if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ]; then\nif [ "${PREBUILT_RELEASE}" -eq 0 ]; then'),end=script.indexOf('elif [ "${CAPTURE_ONLY}" -eq 1 ]; then',start);assert.ok(start>0&&end>start);const block=script.slice(start,end)+'fi\n';
  for(const [capacity,verifyExit,status,events]of [[2097152,0,0,['STAGE','CLEANUP','MEASURE','VERIFY','CONFIG','READY']],[10,0,1,['STAGE','CLEANUP','MEASURE']],[2097152,7,1,['STAGE','CLEANUP','MEASURE','VERIFY']]]){

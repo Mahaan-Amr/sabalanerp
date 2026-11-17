@@ -59,9 +59,17 @@ esac
 CAPTURE_ONLY=0
 unset DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS
 PREBUILT_RELEASE=0
+MAINTENANCE_IMAGE_SELECTION=0
 unset DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX
 PREBUILT_RELEASE_PLAN=""
 PREBUILT_RELEASE_SHA256=""
+if [ "${1:-}" = "--maintenance-images" ]; then
+  MAINTENANCE_IMAGE_SELECTION=1
+  PREBUILT_RELEASE=1; shift
+  [ "$#" -eq 3 ] || { echo 'Usage: deploy.sh --maintenance-images <env> <private-plan> <sha256>' >&2; exit 1; }
+  PREBUILT_RELEASE_PLAN="$2"
+  PREBUILT_RELEASE_SHA256="$3"
+fi
 if [ "${1:-}" = "--prebuilt-release" ]; then
   PREBUILT_RELEASE=1; shift
   [ "$#" -eq 3 ] || { echo 'Usage: deploy.sh --prebuilt-release <env> <private-plan> <sha256>' >&2; exit 1; }
@@ -148,7 +156,12 @@ if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}${DEPLOYMENT_ONLINE_BOOTSTRA
   echo "Online bootstrap is unavailable in this protected maintenance runner." >&2
   exit 1
 fi
-if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
+if [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; then
+  [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${DEPLOYMENT_MODE}" = release ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] \
+    && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] && [ "${SYSTEM_RECOVERY_BACKUP}" -eq 0 ] || {
+    echo 'Maintenance image selection requires an ordinary full protected release.' >&2; exit 1;
+  }
+elif [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${DEPLOYMENT_MODE}" = release ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] \
     && [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}" ] && [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD:-}" ] || {
     echo 'Prebuilt release requires the same original protected release pipes; configuration, capture and scanner repair cannot substitute.' >&2; exit 1;
@@ -205,6 +218,12 @@ verify_predecessor_database_roles() {
 }
 
 verify_prebuilt_release() {
+  if [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; then
+    DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" node "${OPERATIONS_ROOT}/deploy/scripts/maintenance-image-selection.mjs" "${1:-verify}" \
+      "${PREBUILT_RELEASE_PLAN}" "${PREBUILT_RELEASE_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" \
+      "${COMPOSE_FILE}" "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-production}"
+    return $?
+  fi
   DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" node "${OPERATIONS_ROOT}/deploy/scripts/prebuilt-release-plan.mjs" \
     "${PREBUILT_RELEASE_PLAN}" "${PREBUILT_RELEASE_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
 }
@@ -1024,7 +1043,7 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 if [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ]; then
   { [ "${DEPLOYMENT_MODE}" = release ] || [ "${ROLE_CUTOVER}" -eq 1 ]; } && [ "${CAPTURE_ONLY}" -eq 0 ] \
-    && [ "${PREBUILT_RELEASE}" -eq 0 ] && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] \
+    && { [ "${PREBUILT_RELEASE}" -eq 0 ] || [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; } && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] \
     && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}" ] \
     && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ] || {
     echo 'QA_REHEARSAL_MODE_INVALID' >&2; exit 1;
@@ -1295,6 +1314,9 @@ if [ "${DEPLOYMENT_MODE}" = "configuration" ] || [ "${CAPTURE_ONLY}" -eq 1 ]; th
   eval "${existing_exports}"
 fi
 DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TARGET_COMMIT}" | cut -c1-12)-${DEPLOYMENT_MODE}"
+if [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; then
+  DEPLOYMENT_RELEASE_ID="${DEPLOYMENT_RELEASE_ID}-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(6).toString("hex"))')"
+fi
 DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
 APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
 export DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_ID DEPLOYMENT_OWNER APP_COMMIT
@@ -1487,6 +1509,10 @@ fi
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   prebuilt_exports="$(verify_prebuilt_release)" || exit 1
   eval "${prebuilt_exports}"
+fi
+if [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; then
+  # Fsynced content identity survives interruption; journal/leases retain authority.
+  verify_prebuilt_release bind >/dev/null || exit 1
 fi
 if [ "${ROLE_CUTOVER}" -eq 1 ]; then
   current_selection="$(node "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-operation.mjs" \

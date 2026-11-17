@@ -18,6 +18,7 @@ async function main() {
   )
     .finally(() => clearTimeout(inputDeadline));
 
+  const advisoryApplicationName = 'sabalan-lock-' + deploymentId;
   const assertBoundary = async () => {
     assertRuntimeControlOwnership();
     await assertProtectedRoleCheckpointBoundary({
@@ -27,6 +28,10 @@ async function main() {
     const [database] = await prisma.$queryRaw<Array<{ admitted: boolean }>>`
       SELECT current_database() = ${scope.source} AND r.rolsuper AND r.rolcanlogin
         AND current_user = session_user AND d.datdba = r.oid
+        AND EXISTS (SELECT FROM pg_locks l JOIN pg_stat_activity a USING (pid)
+          WHERE a.application_name = ${advisoryApplicationName} AND a.datname = 'postgres'
+            AND l.locktype = 'advisory' AND l.mode = 'ExclusiveLock' AND l.granted
+            AND l.classid = 0 AND l.objid = 741936425 AND l.objsubid = 1)
         AND NOT EXISTS (SELECT FROM pg_stat_activity
           WHERE datname = current_database() AND usename = ${scope.roles.runtime})
         AS admitted

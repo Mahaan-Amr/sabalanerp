@@ -4,6 +4,23 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="${DEPLOYMENT_REPO_ROOT:-$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
+SYSTEM_RECOVERY_BACKUP_HOST="${SCRIPT_DIR}/system-recovery-backup-host.mjs"
+SYSTEM_RECOVERY_BACKUP=0
+case "${1:-}" in
+  --system-recovery-backup)
+    [ "$#" -eq 3 ] || { echo 'Usage: deploy.sh --system-recovery-backup <env> <operation-id>' >&2; exit 1; }
+    exec node "${SYSTEM_RECOVERY_BACKUP_HOST}" launch "${SCRIPT_DIR}/deploy.sh" "$2" "$3"
+    ;;
+  --system-recovery-backup-input)
+    [ "$#" -eq 3 ] && [ ! -t 0 ] || exit 1
+    case "$2" in /*) ;; *) exit 1;; esac
+    SYSTEM_RECOVERY_BACKUP=1
+    SYSTEM_RECOVERY_OPERATION_ID="$3"
+    shift
+    exec 8<&0 </dev/null
+    export COMPOSE_PROJECT_NAME=sabalanerp
+    ;;
+esac
 CAPTURE_ONLY=0
 unset DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS
 PREBUILT_RELEASE=0
@@ -38,6 +55,13 @@ case "${DEPLOYMENT_MODE}" in
 esac
 [ "${CAPTURE_ONLY}" -eq 0 ] || [ "${DEPLOYMENT_MODE}" = "release" ] || { echo "Capture-only cannot change configuration." >&2; exit 1; }
 CONFIGURATION_STATE="${REPO_ROOT}/.deploy-state/biometric-configuration.json"
+SYSTEM_RECOVERY_BACKUP_INTENT="${REPO_ROOT}/.deploy-state/system-recovery-backup-active.json"
+if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then
+  [ "${DEPLOYMENT_MODE}" = release ] && [ -z "${DEPLOYMENT_CLAMAV_TARGET_IMAGE:-}${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ] || {
+    echo 'System Recovery backup requires the unchanged canonical production release.' >&2
+    exit 1
+  }
+fi
 CONFIGURATION_ACTIVE=0
 DEPLOYMENT_CLAMAV_TARGET_IMAGE="${DEPLOYMENT_CLAMAV_TARGET_IMAGE:-}"
 DEPLOYMENT_CLAMAV_REPAIR=false
@@ -192,8 +216,10 @@ start_release_services() {
 }
 
 run_backend() {
+  backend_pull_policy=""
+  if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then backend_pull_policy="--pull=never"; fi
   DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" BACKEND_DB_CONNECTION_LIMIT=2 DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps ${backend_pull_policy} \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
@@ -263,11 +289,13 @@ assert_qa_remote_checkpoint_mount() {
 run_backend_timed() {
   duration="$1"
   shift
+  backend_pull_policy=""
+  if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then backend_pull_policy="--pull=never"; fi
   timeout "${duration}" env \
     DEPLOYMENT_BACKEND_IMAGE="${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
     BACKEND_DB_CONNECTION_LIMIT=2 \
     DATABASE_APPLICATION_NAME=sabalanerp-deployment \
-    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps \
+    docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run -T --rm --no-deps ${backend_pull_policy} \
       --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
       -e "BACKEND_RUNTIME_ROLE=control" \
       -e DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX \
@@ -1008,7 +1036,17 @@ case "${DEPLOYMENT_REPORT_DIR_HOST}" in
   *) SESSION_HOST_PATH="${REPO_ROOT}/${DEPLOYMENT_REPORT_DIR_HOST#./}/active-deployment-session.json" ;;
 esac
 
+if [ -e "${SYSTEM_RECOVERY_BACKUP_INTENT}" ] || [ -L "${SYSTEM_RECOVERY_BACKUP_INTENT}" ]; then
+  echo 'An unresolved System Recovery backup owns the protected boundary. Preserve its intent and journal for controlled recovery.' >&2
+  exit 1
+fi
 PREDECESSOR_DATABASE_MODE="$(predecessor_database_topology retained)" || exit 1
+if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then
+  # shellcheck source=deploy/scripts/system-recovery-backup-host.sh
+  . "${SCRIPT_DIR}/system-recovery-backup-host.sh"
+  run_system_recovery_backup
+  exit 0
+fi
 
 if [ -f "${SESSION_HOST_PATH}" ]; then
   preservation_resume="$(node "${OPERATIONS_ROOT}/deploy/scripts/preserved-clamav.mjs" resume "${SESSION_HOST_PATH}")" || exit 1

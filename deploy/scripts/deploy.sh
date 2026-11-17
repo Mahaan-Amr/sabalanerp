@@ -65,6 +65,7 @@ DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 COMPOSE_FILE="docker-compose.prod.yml"
 ADVISORY_LOCK_KEY="741936425"
 LOCK_FILE="${REPO_ROOT}/.deploy-state/deployment.lock"
+PREDECESSOR_DATABASE_MODE=""
 ADVISORY_PID=""
 ADVISORY_APPLICATION_NAME=""
 MUTATION_STARTED=0
@@ -127,6 +128,24 @@ compose() {
   docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
 }
 
+predecessor_database_topology() {
+  predecessor_container="$(compose ps -aq backend)" || return 1
+  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" --profile deployment config --format json \
+    | node "${OPERATIONS_ROOT}/deploy/scripts/predecessor-database-topology.mjs" "$1" "${predecessor_container}"
+}
+
+verify_predecessor_database_roles() {
+  predecessor_roles="$(predecessor_database_topology running)" || return 1
+  if [ "${PREDECESSOR_DATABASE_MODE}" = "legacy" ]; then
+    [ "${predecessor_roles}" = "legacy" ]
+    return $?
+  fi
+  [ "${predecessor_roles%% *}" = "${PREDECESSOR_DATABASE_MODE}" ] && [ "${predecessor_roles}" != "legacy" ] || return 1
+  predecessor_roles="${predecessor_roles#* }"
+  # The topology helper emits only the configuration hash, role name and IPv4 address.
+  run_backend_timed 30 node dist/scripts/predecessor-database-roles.js "${predecessor_roles% *}" "${predecessor_roles##* }"
+}
+
 verify_prebuilt_release() {
   DEPLOYMENT_PREBUILT_ENV_FILE="${ENV_FILE}" node "${OPERATIONS_ROOT}/deploy/scripts/prebuilt-release-plan.mjs" \
     "${PREBUILT_RELEASE_PLAN}" "${PREBUILT_RELEASE_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
@@ -168,7 +187,8 @@ start_release_services() {
   # Nginx resolves Compose service names when its workers start. Recreate it
   # after application containers have their final addresses so rollout and
   # rollback cannot reopen traffic through stale upstream IPs.
-  compose up -d --no-deps --force-recreate --wait --wait-timeout "${wait_seconds}" nginx
+  compose up -d --no-deps --force-recreate --wait --wait-timeout "${wait_seconds}" nginx || return 1
+  verify_predecessor_database_roles
 }
 
 run_backend() {
@@ -988,6 +1008,8 @@ case "${DEPLOYMENT_REPORT_DIR_HOST}" in
   *) SESSION_HOST_PATH="${REPO_ROOT}/${DEPLOYMENT_REPORT_DIR_HOST#./}/active-deployment-session.json" ;;
 esac
 
+PREDECESSOR_DATABASE_MODE="$(predecessor_database_topology retained)" || exit 1
+
 if [ -f "${SESSION_HOST_PATH}" ]; then
   preservation_resume="$(node "${OPERATIONS_ROOT}/deploy/scripts/preserved-clamav.mjs" resume "${SESSION_HOST_PATH}")" || exit 1
   eval "${preservation_resume}"
@@ -1109,6 +1131,7 @@ else
   git fetch --prune "${DEPLOY_REMOTE}"
   git checkout "${DEPLOY_BRANCH}"
   git pull --ff-only "${DEPLOY_REMOTE}" "${DEPLOY_BRANCH}"
+  [ "$(predecessor_database_topology retained)" = "${PREDECESSOR_DATABASE_MODE}" ] || exit 1
   git submodule update --init --recursive
 fi
 fi
@@ -1295,6 +1318,7 @@ refresh_performance_database_identity
 node "${OPERATIONS_ROOT}/deploy/scripts/dispatch-volume-preflight.mjs" "${ENV_FILE}" "${COMPOSE_FILE}"
 run_backend node dist/scripts/validate-production-environment.js
 run_backend node dist/scripts/deployment-drill-preflight.js
+verify_predecessor_database_roles
 python3 "${OPERATIONS_ROOT}/deploy/scripts/legacy-backend-signal.py" --preflight \
   "${REPO_ROOT}/${COMPOSE_FILE}" "${ENV_FILE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
   "${REPO_ROOT}/.deploy-state/legacy-backend-drain-${DEPLOYMENT_ID}.json"

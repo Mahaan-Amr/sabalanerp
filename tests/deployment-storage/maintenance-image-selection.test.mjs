@@ -53,7 +53,7 @@ test('actual runner entry reaches maintenance selection with QA and custody whil
 test('QA selector precedes content selection and predecessor maintenance keeps activation closed',()=>{
  const ordered=['COMPOSE_FILE="$(node "${OPERATIONS_ROOT}/deploy/scripts/qa-rehearsal-target.mjs"','exec 9<>"${LOCK_FILE}"','maintenance-image-selection.mjs" resume','  prebuilt_exports="$(verify_prebuilt_release)"','verify_prebuilt_release bind','control prepare','control acquire','phase MAINTENANCE_REQUESTED','phase TRAFFIC_BLOCKED','phase SERVICES_DRAINED','phase LOCAL_CHECKPOINT_VERIFIED','phase REMOTE_CHECKPOINT_VERIFIED','phase MUTATION_STARTED','phase MIGRATIONS_APPLIED','phase RELEASE_STARTED','phase GATES_PASSED','phase TRAFFIC_OPENED'];
  let cursor=0;for(const token of ordered){const next=script.indexOf(token,cursor);assert.ok(next>=cursor,token);cursor=next+token.length;}
- const verify=script.slice(script.indexOf('verify_prebuilt_release() {'),script.indexOf('customer_allocation_retention_path() {'));
+ const verify=script.slice(script.indexOf('verify_prebuilt_release() {'),script.indexOf('capture_remaining_seconds() {'));
  assert.match(verify,/maintenance-image-selection.mjs/);assert.match(verify,/"\$\{COMPOSE_FILE\}"/);
  assert.doesNotMatch(script,/run_customer_allocation_controller activate/);
  assert.match(script,/prepare-predecessor-role-cutover/);
@@ -81,7 +81,7 @@ test('retained predecessor observes its mandatory scanner image and keeps the si
  assert.doesNotMatch(script,/LEGACY_RELEASE_GRAPH=0/);
 });
 test('readonly maintenance verification needs no session path while binding requires its canonical report parent',()=>{
- const from=script.indexOf('verify_prebuilt_release() {'),to=script.indexOf('\ncustomer_allocation_retention_path() {',from);assert.ok(from>=0&&to>from);
+ const from=script.indexOf('verify_prebuilt_release() {'),to=script.indexOf('\ncapture_remaining_seconds() {',from);assert.ok(from>=0&&to>from);
  const verifier=script.slice(from,to);
  for(const [mode,session,lease,status,expected]of [['verify',null,0,0,'NODE:verify:unset:/private/env'],['bind',null,0,1,''],['bind','/reports/active-deployment-session.json',0,0,'NODE:bind:/reports:/private/env'],['verify',null,1,0,'OWNED;NODE:verify:unset:/private/env']]){
   const code=`set -eu\nunset SESSION_HOST_PATH DEPLOYMENT_MAINTENANCE_REPORT_DIR\nMAINTENANCE_IMAGE_SELECTION=1; DB_LEASE_ACQUIRED=${lease}; OPERATIONS_ROOT=/operations; PREBUILT_RELEASE_PLAN=/private/plan; PREBUILT_RELEASE_SHA256=hash; REPO_ROOT=/repository; COMPOSE_FILE=docker-compose.prod.yml; ENV_FILE=/private/env\n${session?"SESSION_HOST_PATH='"+session+"'":''}\nnode(){ printf 'NODE:%s:%s:%s' "$2" "${'$'}{DEPLOYMENT_MAINTENANCE_REPORT_DIR-unset}" "$DEPLOYMENT_PREBUILT_ENV_FILE"; }\nrun_original_owned_with_heartbeat(){ printf 'OWNED;'; "$@"; }\n${verifier}\nverify_prebuilt_release ${mode}\n`;

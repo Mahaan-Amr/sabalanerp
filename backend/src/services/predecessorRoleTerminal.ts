@@ -15,6 +15,7 @@ type TerminalPhase = 'COMPLETED' | 'ROLLED_BACK';
 type Session = {
   deploymentId: string; releaseId: string; targetCommit: string; owner: string; leaseToken: string;
   phase: string; purpose?: string; bootstrap: boolean; controlImage: string; rollbackReleaseSet: Record<string, string>;
+  allocationControllerProvisioning?: true;
 };
 
 function requireProof(condition: unknown): asserts condition {
@@ -85,8 +86,11 @@ async function activeOwner(context: Context, marker: boolean) {
     && isDeepStrictEqual(metadata.rollbackReleaseSet, session.rollbackReleaseSet)
     && isDeepStrictEqual(point.sourceDatabase, metadata.sourceDatabase)
     && report?.binding?.checkpointMetadataSha256 === sha256 && report.binding.checkpointSha256 === metadata.checksum
+    && report.allocationControllerProvisioning === session.allocationControllerProvisioning
     && (applied ? report.state === 'staged' && hex.test(report.loginVerifierSha256)
-      : report.state === 'restored' && report.loginVerifierSha256 === undefined));
+      && (session.allocationControllerProvisioning === true ? hex.test(report.controllerLoginVerifierSha256)
+        : report.controllerLoginVerifierSha256 === undefined)
+      : report.state === 'restored' && report.loginVerifierSha256 === undefined && report.controllerLoginVerifierSha256 === undefined));
   const [source] = await prisma.$queryRaw<Array<{name: string; oid: string; systemIdentifier: string}>>`
     SELECT current_database() AS name, (SELECT oid::text FROM pg_database WHERE datname = current_database()) AS oid,
       (SELECT system_identifier::text FROM pg_control_system()) AS "systemIdentifier"`;

@@ -74,14 +74,19 @@ const assertRoleGateBoundary = async () => {
   }
   const active = await prisma.deploymentOperation.findUnique({ where: { activeKey: 'production' } });
   const checkpoint = active?.checkpointJson as { checksum?: string; releaseId?: string; localVerified?: boolean; remoteVerified?: boolean } | null;
-  const report = active?.reportJson as { state?: string; loginVerifierSha256?: string } | null;
+  const report = active?.reportJson as { state?: string; loginVerifierSha256?: string; controllerLoginVerifierSha256?: string;
+    allocationControllerProvisioning?: true } | null;
   const applied = gateMode === predecessorRoleGateModes.applied;
+  const provisionController = session.allocationControllerProvisioning;
   if (!active || active.id !== deploymentId || active.releaseId !== releaseId || active.targetCommit !== commit
     || active.owner !== session.owner || active.phase !== rolePhase || active.leaseToken !== token || active.leaseExpiresAt.getTime() <= Date.now()
     || checkpoint?.releaseId !== releaseId || !/^[a-f0-9]{64}$/.test(checkpoint?.checksum || '')
     || checkpoint?.localVerified !== true || checkpoint?.remoteVerified !== true
+    || report?.allocationControllerProvisioning !== provisionController
     || (applied ? report?.state !== 'staged' || !/^[a-f0-9]{64}$/.test(report.loginVerifierSha256 || '')
-      : report?.state !== 'restored' || report.loginVerifierSha256 !== undefined)) {
+      || (provisionController === true ? !/^[a-f0-9]{64}$/.test(report.controllerLoginVerifierSha256 || '')
+        : report.controllerLoginVerifierSha256 !== undefined)
+      : report?.state !== 'restored' || report.loginVerifierSha256 !== undefined || report.controllerLoginVerifierSha256 !== undefined)) {
     throw new Error('The role cutover gate requires its exact checkpoint and credential state.');
   }
   return { checksum: checkpoint!.checksum!, releaseId: releaseId! };

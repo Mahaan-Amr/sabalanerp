@@ -11,6 +11,7 @@ import { assertSabalanerpLocalPostgresTarget, createTemporaryConcurrencyDatabase
 const source = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL;
 const optIn = process.env.PREDECESSOR_DATABASE_ROLE_TEST_DIRECT_LOGIN === '1';
 const role = 'sabalan_application_runtime';
+const controllerRole = 'sabalan_allocation_controller';
 
 test('the predecessor gate inspects the actual PostgreSQL runtime principal and denies protected grants',
   { skip: !source || !optIn, timeout: 240_000 }, async () => {
@@ -25,20 +26,23 @@ test('the predecessor gate inspects the actual PostgreSQL runtime principal and 
     lockDatabase.pathname = '/postgres';
     const lockClient = new Client({ connectionString: lockDatabase.href });
     const password = randomBytes(32).toString('hex');
+    const controllerPassword = randomBytes(32).toString('hex');
     const expires = new Date(Date.now() + 90_000).toISOString();
-    const dormant = () => control.$queryRaw<Array<{ safe: boolean }>>`
+    const dormant = (principal = role) => control.$queryRaw<Array<{ safe: boolean }>>`
       SELECT NOT (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit OR rolreplication OR rolbypassrls)
         AND rolpassword IS NULL AND (rolvaliduntil IS NULL OR rolvaliduntil = 'infinity'::timestamptz)
         AND NOT EXISTS (SELECT 1 FROM pg_auth_members WHERE roleid = r.oid OR member = r.oid) AS safe
-      FROM pg_authid r WHERE rolname = ${role}
+      FROM pg_authid r WHERE rolname = ${principal}
     `;
     let runtime: ChildProcessWithoutNullStreams | undefined;
     let configured = false;
+    let controllerConfigured = false;
     try {
       await lockClient.connect();
       const lock = await lockClient.query('SELECT pg_try_advisory_lock(456, 2) AS acquired');
       assert.equal(lock.rows[0].acquired, true);
       assert.deepEqual(await dormant(), [{ safe: true }]);
+      assert.deepEqual(await dormant(controllerRole), [{ safe: true }]);
       await control.$executeRawUnsafe(`ALTER ROLE "${role}" LOGIN PASSWORD '${password}' VALID UNTIL '${expires}'`);
       configured = true;
       runtime = spawn('docker', [...compose, 'exec', '-T', 'postgres', 'sh', '-c',
@@ -58,6 +62,24 @@ test('the predecessor gate inspects the actual PostgreSQL runtime principal and 
       await assert.rejects(gate(), /PREDECESSOR_DATABASE_ROLES_UNPROVEN/);
       await control.$executeRaw`REVOKE SELECT (id) ON public.deployment_operations FROM sabalan_application_runtime`;
       assert.equal((await gate()).runtime, 'restricted');
+      await control.$executeRawUnsafe(`ALTER ROLE "${controllerRole}" LOGIN PASSWORD '${controllerPassword}' VALID UNTIL '${expires}'`);
+      controllerConfigured = true;
+      assert.deepEqual(await gate(), { control: 'owner', controller: 'restricted', runtime: 'restricted', allocation: 'closed' });
+      const controllerUrl = new URL(fixture.databaseUrl);
+      controllerUrl.username = controllerRole;
+      controllerUrl.password = controllerPassword;
+      const controller = new Client({ connectionString: controllerUrl.href });
+      try {
+        await controller.connect();
+        assert.equal((await controller.query('SELECT session_user AS role')).rows[0].role, controllerRole);
+        await assert.rejects(controller.query('SELECT id FROM public.deployment_operations'), { code: '42501' });
+      } finally {
+        await controller.end();
+      }
+      await control.$executeRaw`GRANT SELECT (id) ON public.deployment_operations TO sabalan_allocation_controller`;
+      await assert.rejects(gate(), /PREDECESSOR_DATABASE_ROLES_UNPROVEN/);
+      await control.$executeRaw`REVOKE SELECT (id) ON public.deployment_operations FROM sabalan_allocation_controller`;
+      assert.equal((await gate()).controller, 'restricted');
     } finally {
       try {
         if (runtime) {
@@ -65,9 +87,11 @@ test('the predecessor gate inspects the actual PostgreSQL runtime principal and 
           runtime.stdin.end();
           if (runtime.exitCode === null) await closed;
         }
-        if (configured) {
-          await control.$executeRawUnsafe(`ALTER ROLE "${role}" NOLOGIN PASSWORD NULL VALID UNTIL 'infinity'`);
-          assert.deepEqual(await dormant(), [{ safe: true }]);
+        for (const [principal, changed] of [[controllerRole, controllerConfigured], [role, configured]] as const) {
+          if (changed) {
+            await control.$executeRawUnsafe(`ALTER ROLE "${principal}" NOLOGIN PASSWORD NULL VALID UNTIL 'infinity'`);
+            assert.deepEqual(await dormant(principal), [{ safe: true }]);
+          }
         }
       } finally {
         await lockClient.end();

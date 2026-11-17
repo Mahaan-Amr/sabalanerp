@@ -73,11 +73,13 @@ def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, r
             and isinstance(argv, (tuple, list)) and 0 < len(argv) <= 256
             and all(isinstance(arg, str) and len(arg) <= 8192 and "\x00" not in arg for arg in argv)
             and 0 < heartbeat_seconds <= budget_seconds <= 900)
+    credentials = ()
     if action == CREDENTIAL_ACTION:
-        require(isinstance(stdin, bytes) and re.fullmatch(rb"[a-f0-9]{64}[A-Za-z0-9_-]{43}", stdin))
-        password = stdin[64:]
-        require(not any(password in os.fsencode(arg) for arg in argv)
-                and not any(password in value for value in os.environb.values()))
+        require(isinstance(stdin, bytes) and re.fullmatch(rb"[a-f0-9]{64}(?:[A-Za-z0-9_-]{43}){1,2}", stdin))
+        credentials = tuple(stdin[start:start + 43] for start in range(64, len(stdin), 43))
+        for password in credentials:
+            require(not any(password in os.fsencode(arg) for arg in argv)
+                    and not any(password in value for value in os.environb.values()))
     elif action in TERMINAL_FRAMES:
         require(isinstance(stdin, bytes) and 0 < len(stdin) <= 16384
                 and json.loads(stdin)["format"] == TERMINAL_FRAMES[action])
@@ -124,8 +126,10 @@ def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, r
     started = time.monotonic()
     next_heartbeat = started + heartbeat_seconds
     heartbeat_failed = deadline_exceeded = input_failed = output_overflow = stream_failed = False
+    credential_echoed = False
     stdout = bytearray()
     closed = {"stdout": False, "stderr": False}
+    overlap = dict.fromkeys(closed, b"")
     process = None
     returncode = None
     try:
@@ -170,14 +174,18 @@ def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, r
                             closed[key.data] = True
                             streams.unregister(key.fileobj)
                             key.fileobj.close()
-                        elif key.data == "stdout":
+                            continue
+                        if credentials and not credential_echoed:
+                            window = overlap[key.data] + block
+                            credential_echoed = any(password in window for password in credentials)
+                            overlap[key.data] = window[-42:]
+                        if key.data == "stdout":
                             output_overflow = output_overflow or len(stdout) + len(block) > MAX_OUTPUT_BYTES
-                            if not output_overflow:
+                            if not output_overflow and not credential_echoed:
                                 stdout.extend(block)
             returncode = process.wait()
         heartbeat_failed = not refresh() or heartbeat_failed
         deadline_exceeded = deadline_exceeded or time.monotonic() - started >= budget_seconds or not within_global_budget()
-        credential_echoed = action == CREDENTIAL_ACTION and stdin[64:] in stdout
         intent_unchanged = configuration.read_private(intent_path)[0] == intent
         healthy = (returncode == 0 and all(closed.values()) and not interrupted and not heartbeat_failed
                    and intent_unchanged

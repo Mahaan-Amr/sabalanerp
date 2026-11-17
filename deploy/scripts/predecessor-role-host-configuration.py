@@ -112,13 +112,53 @@ def verify_lock(root):
                       + str(fd.st_ino) + r"\s+0\s+EOF\s*$", details, re.MULTILINE))
 
 
-def read_credential(fd):
+def valid_credential(password):
+    return (re.fullmatch(rb"[A-Za-z0-9_-]{43}", password)
+            and base64.urlsafe_b64encode(base64.urlsafe_b64decode(password + b"=")).rstrip(b"=") == password)
+
+
+def read_credentials(fd):
     require(fd != 9 and os.readlink(f"/proc/self/fd/{fd}").startswith("/memfd:")
             and fcntl.fcntl(fd, fcntl.F_GET_SEALS) & REQUIRED_CREDENTIAL_SEALS == REQUIRED_CREDENTIAL_SEALS)
-    password = os.pread(fd, 44, 0)
-    require(re.fullmatch(rb"[A-Za-z0-9_-]{43}", password))
-    require(base64.urlsafe_b64encode(base64.urlsafe_b64decode(password + b"=")).rstrip(b"=") == password)
-    return password
+    payload = os.pread(fd, 87, 0)
+    runtime, controller = payload[:43], payload[43:]
+    require(valid_credential(runtime) and (not controller or (valid_credential(controller) and controller != runtime)))
+    return runtime, controller
+
+
+def read_controller_password(directory, approver_sha256, installed_url, *, expected_sha256=None):
+    info = directory.lstat()
+    require(not info.st_mode & 0o077)
+    raw, _ = read_private(directory / "authority.json")
+    require(len(raw) <= 16 * 1024)
+    authority_sha256 = digest(raw)
+    require(expected_sha256 is None or authority_sha256 == expected_sha256)
+    authority = json.loads(raw)
+    require(set(authority) == {"allocationControllerUrl", "keyId", "publicKeyPem"})
+    approver = authority["publicKeyPem"]
+    key_id = authority["keyId"]
+    require(isinstance(approver, str) and digest(approver.encode()) == approver_sha256
+            and isinstance(key_id, str) and key_id and key_id == key_id.strip())
+    pem = re.fullmatch(r"-----BEGIN PUBLIC KEY-----\r?\n([A-Za-z0-9+/]{59}=)\r?\n-----END PUBLIC KEY-----(?:\r?\n)?", approver)
+    require(pem is not None)
+    # Ed25519 SubjectPublicKeyInfo has this fixed DER header followed by 32 public key bytes.
+    public_key = base64.b64decode(pem[1], validate=True)
+    require(len(public_key) == 44 and public_key.startswith(bytes.fromhex("302a300506032b6570032100")))
+    url = urlsplit(authority["allocationControllerUrl"])
+    installed = urlsplit(installed_url)
+    settings = parse_qs(url.query, keep_blank_values=True, strict_parsing=True)
+    require(url.scheme in ("postgresql", "postgres") and url.username == CONTROLLER and not url.fragment
+            and (url.hostname, url.port, url.path) == (installed.hostname, installed.port, installed.path)
+            and matches(r"/[A-Za-z0-9_]+", url.path)
+            and set(settings) <= {"schema", "connection_limit", "pool_timeout", "application_name"}
+            and settings.get("schema") == ["public"]
+            and all(len(settings.get(name, [])) == 1 and matches(r"[1-9][0-9]*", settings[name][0])
+                    for name in ("connection_limit", "pool_timeout"))
+            and matches(r"[A-Za-z0-9_-]{43}", url.password)
+            and url.password != unquote(installed.password or ""))
+    password = url.password.encode("ascii")
+    require(valid_credential(password))
+    return password, authority_sha256
 
 
 def context(root, report_dir, coordination_dir, phase):
@@ -258,12 +298,15 @@ def activate_login(root, report_dir, coordination_dir, credential_fd, stage_rece
         phase = "MUTATION_STARTED"
         authority = context(root, report_dir, coordination_dir, phase)
         stage = assert_stage(stage_receipt, authority[2], authority[1])
-        password = read_credential(credential_fd)
+        runtime, controller = read_credentials(credential_fd)
+        provisioning = authority[0].get("allocationControllerProvisioning") is True
+        require(bool(controller) == provisioning)
         hold_credential_activation(root, authority[2], stage)
-        proof = invoke(stage["stagedAclSha256"].encode("ascii") + password)
+        proof = invoke(stage["stagedAclSha256"].encode("ascii") + runtime + controller)
         receipt = proof["roleCutover"]
         require(set(proof) == {"ok", "roleCutover"} and proof["ok"] is True and receipt["outcome"] in ("login-activated", "login-already-active")
-                and receipt == {**stage, "outcome": receipt["outcome"]})
+                and receipt == {**stage, "outcome": receipt["outcome"],
+                                **({"controllerProvisioned": True} if provisioning else {})})
         require(context(root, report_dir, coordination_dir, phase) == authority)
         return proof
     except Exception:
@@ -292,7 +335,7 @@ def _apply(root, env, report_dir, coordination_dir, credential_fd, stage_receipt
     session, checkpoint, binding = context(root, report_dir, coordination_dir, phase)
     stage = assert_stage(stage_receipt, binding, checkpoint)
     require(verify_boundary(session, checkpoint, stage_receipt) is True)
-    password = read_credential(credential_fd)
+    password, _ = read_credentials(credential_fd)
     current, metadata = read_private(env)
     private_path, receipt_path = transaction_paths(root, binding["deploymentId"])
     stage_digest = digest(stage_receipt)
@@ -524,6 +567,8 @@ def _continue_backend(root, env, report_dir, coordination_dir, pinned_containers
     expected_proof = {"deploymentId": binding["deploymentId"], "checkpointSha256": binding["checkpointSha256"],
                       "backendId": backend["Id"], "backendAddress": address,
                       "role": saved["previousRuntimeUser"] if restoring else RUNTIME_USER}
+    if not restoring and session.get("allocationControllerProvisioning") is True:
+        expected_proof["controllerProvisioned"] = True
     require(prove_role(expected_proof.copy()) == expected_proof)
     require(context(root, report_dir, coordination_dir, phase) == authority)
     require(verify_boundary(session, checkpoint) is True)
@@ -578,7 +623,7 @@ def _foreground(root, env, report_dir, coordination_dir, preflight, credential_f
     if restoring:
         require(credential_fd is None)
     else:
-        read_credential(credential_fd)
+        read_credentials(credential_fd)
     try:
         owned = json.loads(read_private(plan_path)[0])
     except FileNotFoundError:

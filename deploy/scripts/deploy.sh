@@ -1093,6 +1093,15 @@ if [ "${ROLE_CUTOVER}" -eq 1 ]; then
   ROLE_CUTOVER_ENV_SHA256="$(printf '%s' "${role_selection}" | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0,"utf8")).environmentSha256)')"
   DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX="$(printf '%s' "${role_selection}" | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0,"utf8")).scannerBindingHex)')"
   export DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX
+  ROLE_CUTOVER_AUTHORITY_SHA256=""
+  if [ -n "${DEPLOYMENT_CUSTOMER_ALLOCATION_AUTHORITY_DIR:-}${DEPLOYMENT_CUSTOMER_ALLOCATION_APPROVER_SHA256:-}" ]; then
+    role_backend_id="$(printf '%s' "${ROLE_CUTOVER_PROOF}" | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0,"utf8")).containers.backend)')"
+    ROLE_CUTOVER_AUTHORITY_SHA256="$(python3 "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-canonical.py" \
+      --controller-authority-preflight "${REPO_ROOT}" "${role_backend_id}")" || exit 1
+    [ "${#ROLE_CUTOVER_AUTHORITY_SHA256}" -eq 64 ] || exit 1
+  fi
+  readonly ROLE_CUTOVER_AUTHORITY_SHA256
+  export ROLE_CUTOVER_AUTHORITY_SHA256
   preserved_clamav_guard health
 else
   # Keep the existing nginx maintenance page readable in ordinary releases.
@@ -1451,7 +1460,11 @@ if [ "${ROLE_CUTOVER}" -eq 1 ]; then
     inspect-start "${REPO_ROOT}" "${SESSION_HOST_PATH}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" \
     "${ROLE_CUTOVER_PLAN}" "${ROLE_CUTOVER_PLAN_SHA256}")"
   [ "${current_selection}" = "${role_selection}" ] || exit 1
-  control prepare-predecessor-role-cutover
+  if [ -n "${ROLE_CUTOVER_AUTHORITY_SHA256}" ]; then
+    control prepare-predecessor-role-cutover controller
+  else
+    control prepare-predecessor-role-cutover
+  fi
 else
   control prepare
 fi

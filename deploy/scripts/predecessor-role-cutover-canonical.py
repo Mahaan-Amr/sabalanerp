@@ -607,6 +607,16 @@ def publish_canonical_terminal(root, env, report_dir, coordination_dir, gate_ack
     return terminal.archive_terminal_holds(root, report_dir, coordination_dir, binding["deploymentId"],
                                            read_terminal=lambda _: read_terminal(), observe_public=observe_public)
 
+def allocation_controller_password(backend, *, expected_sha256=None):
+    directory = os.environ.get("DEPLOYMENT_CUSTOMER_ALLOCATION_AUTHORITY_DIR", "")
+    pin = os.environ.get("DEPLOYMENT_CUSTOMER_ALLOCATION_APPROVER_SHA256", "")
+    host.require(bool(directory) == bool(pin))
+    if not directory:
+        host.require(expected_sha256 is None)
+        return b"", ""
+    return host.read_controller_password(Path(directory), pin, host.backend_runtime_url(backend), expected_sha256=expected_sha256)
+
+
 def launch_owned_role_cutover(root, env, report_dir, compose, phase, preflight):
     """CLI handoff from the exact canonical shell after its owned checkpoint."""
     host.require(os.geteuid() == 0 and root.resolve() == root
@@ -633,8 +643,15 @@ def launch_owned_role_cutover(root, env, report_dir, compose, phase, preflight):
     try:
         if phase == "MUTATION_STARTED":
             credential = os.memfd_create("sabalan-role-cutover", os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC)
-            password = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=")
-            host.require(os.write(credential, password) == len(password))
+            runtime = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=")
+            authority_sha256 = os.environ.get("ROLE_CUTOVER_AUTHORITY_SHA256", "")
+            require_controller = session.get("allocationControllerProvisioning") is True
+            host.require((host.matches(r"[a-f0-9]{64}", authority_sha256) if require_controller else authority_sha256 == ""))
+            controller, observed_sha256 = allocation_controller_password(rows[0], expected_sha256=authority_sha256 or None)
+            host.require(observed_sha256 == authority_sha256 and bool(controller) == require_controller)
+            host.require(runtime != controller)
+            payload = runtime + controller
+            host.require(os.write(credential, payload) == len(payload))
             fcntl.fcntl(credential, fcntl.F_ADD_SEALS, host.REQUIRED_CREDENTIAL_SEALS)
         outcome = run_canonical_foreground(root, env, report_dir, coordination, preflight, credential, compose=compose)
         return publish_canonical_terminal(root, env, report_dir, coordination, outcome["gateAcknowledgement"], compose=compose)
@@ -645,6 +662,17 @@ def launch_owned_role_cutover(root, env, report_dir, compose, phase, preflight):
 
 if __name__ == "__main__":
     try:
+        if len(sys.argv) == 4 and sys.argv[1] == "--controller-authority-preflight":
+            root = Path(sys.argv[2])
+            host.verify_lock(root)
+            backend_id = sys.argv[3]
+            host.require(os.geteuid() == 0 and host.matches(r"[a-f0-9]{64}", backend_id))
+            rows = read_owner_json(root, (*DOCKER, "inspect", backend_id))
+            host.require(len(rows) == 1 and rows[0]["Id"] == backend_id)
+            _, authority_sha256 = allocation_controller_password(rows[0])
+            host.require(bool(authority_sha256))
+            print(authority_sha256)
+            sys.exit(0)
         if len(sys.argv) == 7 and sys.argv[1] == "--clock":
             verb, root, reports, kind, value = sys.argv[2:]
             if verb == "start":

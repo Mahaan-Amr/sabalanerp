@@ -414,10 +414,10 @@ async function readCutoverManifest(file: string) {
   return JSON.parse(bytes.toString('utf8')) as CutoverCatalog;
 }
 
-async function inspectCutover(client: Client, directory: string, manifest: CutoverCatalog, runtimeLogin = false) {
+async function inspectCutover(client: Client, directory: string, manifest: CutoverCatalog, runtimeLogin = false, controllerLogin = false) {
   const identity = await readIdentity(client, cutoverRoles, runtimeLogin);
-  if (identity.roles.some(role => role.name === cutoverRoles.controller && role.login)) {
-    fail('The allocation controller must remain dormant throughout the role cutover.');
+  if (identity.roles.find(role => role.name === cutoverRoles.controller)?.login !== controllerLogin) {
+    fail('The allocation controller login does not match the owned cutover receipt.');
   }
   const migrations = await verifyCutoverMigrationLedger(client, directory, manifest.migrationSha256);
   const catalog = await readCatalog(client);
@@ -582,7 +582,7 @@ export async function assertPredecessorRoleRollbackBeforeTraffic(reportDirectory
 
 type CutoverSession = {
   deploymentId: string; releaseId: string; targetCommit: string; owner: string; controlImage: string;
-  leaseToken: string; phase: string; bootstrap: boolean; purpose?: string;
+  leaseToken: string; phase: string; bootstrap: boolean; purpose?: string; allocationControllerProvisioning?: true;
   rollbackReleaseSet?: Record<string, string>; preservedClamav?: { selection: { image: string } };
 };
 
@@ -637,7 +637,7 @@ function cutoverCheckpointBinding(metadata: Record<string, unknown>) {
 function cutoverCatalogFingerprint(cutover: Awaited<ReturnType<typeof inspectCutover>>, objects = cutover.objects) {
   const identity = {
     ...cutover.identity,
-    roles: cutover.identity.roles.map(role => role.name === cutoverRoles.runtime ? { ...role, login: false } : role),
+    roles: cutover.identity.roles.map(role => ({ ...role, login: false })),
   };
   return sha256(JSON.stringify({ identity, objects, oids: cutover.catalog.map(object => object.oid) }));
 }
@@ -665,14 +665,14 @@ async function applyCutoverAclDelta(client: Client, cutover: Awaited<ReturnType<
 async function assertDatabaseDrained(client: Client) {
   await client.query('SELECT pg_stat_clear_snapshot()');
   const { rows: [state] } = await client.query(`
-    SELECT NOT EXISTS (SELECT FROM pg_stat_activity WHERE (datname = current_database() OR usename = $1)
+    SELECT NOT EXISTS (SELECT FROM pg_stat_activity WHERE (datname = current_database() OR usename IN ($1, $2))
       AND backend_type = 'client backend' AND pid <> pg_backend_pid())
       AND NOT EXISTS (SELECT FROM pg_prepared_xacts WHERE database = current_database()) AS drained
-  `, [cutoverRoles.runtime]);
+  `, [cutoverRoles.runtime, cutoverRoles.controller]);
   if (!state.drained) fail('The cutover requires the source database to remain drained.');
 }
 
-function runtimeCredentialVerifier(password: Buffer, salt: Buffer) {
+function cutoverCredentialVerifier(password: Buffer, salt: Buffer) {
   const salted = pbkdf2Sync(password, salt, 4096, 32, 'sha256');
   try {
     const client = createHmac('sha256', salted).update('Client Key').digest();
@@ -685,23 +685,23 @@ function runtimeCredentialVerifier(password: Buffer, salt: Buffer) {
   }
 }
 
-async function readOwnedRuntimeVerifier(client: Client, expectedSha256: string) {
-  const { rows: [row] } = await client.query('SELECT rolpassword AS verifier FROM pg_authid WHERE rolname = $1', [cutoverRoles.runtime]);
+async function readOwnedCutoverVerifier(client: Client, role: string, expectedSha256: string) {
+  const { rows: [row] } = await client.query('SELECT rolpassword AS verifier FROM pg_authid WHERE rolname = $1', [role]);
   const verifier: string | undefined = row?.verifier;
   if (!verifier || !/^SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{22}==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$/.test(verifier)
-    || sha256(verifier) !== expectedSha256) fail('The active runtime credential differs from the owned cutover receipt.');
+    || sha256(verifier) !== expectedSha256) fail('The active credential differs from the owned cutover receipt.');
   return verifier!;
 }
 
 /** Authenticate with PostgreSQL itself after the LOGIN transaction commits. */
-async function proveRuntimeCredential(databaseUrl: string, password: Buffer) {
+async function proveCutoverCredential(databaseUrl: string, role: string, password: Buffer) {
   const url = new URL(nativePostgresCliConnection(databaseUrl).url);
-  url.username = cutoverRoles.runtime;
+  url.username = role;
   url.searchParams.set('application_name', 'sabalan-predecessor-role-auth-proof');
   url.password = randomBytes(32).toString('base64url');
   try {
     await withTransaction(url.toString(), 'READ ONLY', async () => {});
-    fail('The source database accepted an unowned runtime credential.');
+    fail('The source database accepted an unowned cutover credential.');
   } catch (error: unknown) {
     if ((error as { code?: string }).code !== '28P01') throw error;
   }
@@ -713,15 +713,15 @@ async function proveRuntimeCredential(databaseUrl: string, password: Buffer) {
         AND NOT has_table_privilege('public.deployment_operations', 'SELECT')
         AND NOT has_table_privilege('public.customer_allocation_release_control', 'SELECT')
         AND NOT has_database_privilege(current_database(), 'CREATE') AS admitted
-    `, [cutoverRoles.runtime]);
-    if (!proof?.admitted) fail('The authenticated runtime credential did not prove the source database boundary.');
+    `, [role]);
+    if (!proof?.admitted) fail('The authenticated cutover credential did not prove the source database boundary.');
   });
 }
 
 /** Own the lease row and ACLs in one transaction. A failed or unacknowledged commit can be resolved by rerunning the command. */
 export async function changeProtectedPredecessorRoleGrants(input: CutoverSource & {
   action: 'stage' | 'restore' | 'activate' | 'attest';
-  credential?: { password: Buffer; stagedAclSha256: string };
+  credential?: { password: Buffer; controllerPassword?: Buffer; stagedAclSha256: string };
   backend?: { id: string; address: string };
   session: CutoverSession; coordinationDir: string; journalPath: string;
   deploymentId: string; leaseToken: string; controlImage: string; remoteRoot?: string;
@@ -734,11 +734,16 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
   const restoring = input.action === 'restore' || (attesting && input.session.phase === 'ROLLBACK_STARTED');
   const activating = input.action === 'activate';
   const credential = input.credential;
-  if (activating !== Boolean(credential) || (credential && (!hexSha.test(credential.stagedAclSha256)
-    || !/^[A-Za-z0-9_-]{43}$/.test(credential.password.toString('latin1'))
-    || Buffer.from(credential.password.toString('latin1'), 'base64url').toString('base64url') !== credential.password.toString('latin1')
-    || credential.password.toString('latin1') === nativePostgresCliConnection(input.databaseUrl).environment.PGPASSWORD))) {
-    fail('The runtime credential frame is invalid.');
+  const provisionController = input.session.allocationControllerProvisioning;
+  const controlPassword = activating ? nativePostgresCliConnection(input.databaseUrl).environment.PGPASSWORD : undefined;
+  const validPassword = (password: Buffer) => /^[A-Za-z0-9_-]{43}$/.test(password.toString('latin1'))
+    && Buffer.from(password.toString('latin1'), 'base64url').toString('base64url') === password.toString('latin1')
+    && password.toString('latin1') !== controlPassword;
+  if (activating !== Boolean(credential) || (credential && (Boolean(credential.controllerPassword) !== Boolean(provisionController)
+    || !hexSha.test(credential.stagedAclSha256)
+    || !validPassword(credential.password) || (credential.controllerPassword
+      && (!validPassword(credential.controllerPassword) || credential.password.equals(credential.controllerPassword)))))) {
+    fail('The cutover credential frame is invalid.');
   }
   const phase = restoring ? 'ROLLBACK_STARTED' : 'MUTATION_STARTED';
   if (restoring) await assertPredecessorRoleRollbackBeforeTraffic(path.dirname(input.journalPath));
@@ -761,6 +766,10 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
   if (restoring) sequence.push('ROLLBACK_STARTED');
   if (journal.some(entry => entry.deploymentId !== session.deploymentId)) fail('The cutover journal belongs to another deployment.');
   const markerIndex = journal.findIndex(entry => entry.event === 'maintenance-activated');
+  const prepared = journal.find(entry => entry.event === 'deployment-prepared');
+  if (prepared?.details?.allocationControllerProvisioning !== provisionController) {
+    fail('The allocation controller selection differs from the owned journal.');
+  }
   const journalPhases = journal.slice(markerIndex + 1)
     .filter(entry => entry.event === 'phase-transition' && sequence.includes(entry.phase)).map(entry => entry.phase);
   if (markerIndex === -1 || JSON.stringify(journalPhases) !== JSON.stringify(sequence)) {
@@ -820,7 +829,8 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
       || rows[0].systemIdentifier !== source.systemIdentifier) fail('The cutover database differs from the checkpoint source.');
     if (!attesting) await assertDatabaseDrained(client);
     const runtimeLogin = report?.state === 'staged' && hexSha.test(report.loginVerifierSha256 || '');
-    const cutover = await inspectCutover(client, input.migrationsDirectory, manifest, runtimeLogin);
+    const controllerLogin = runtimeLogin && hexSha.test(report.controllerLoginVerifierSha256 || '');
+    const cutover = await inspectCutover(client, input.migrationsDirectory, manifest, runtimeLogin, controllerLogin);
     if (cutover.identity.connectionLimit !== -1) fail('The cutover database has a custom connection limit.');
     const binding = {
       format: receiptFormat, deploymentId: session.deploymentId, releaseId: session.releaseId, controlImage: session.controlImage,
@@ -832,7 +842,10 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
     if (report !== null && (!report?.binding || checkpointMetadataTransport(report.binding).canonicalMetadataSha256
       !== checkpointMetadataTransport(binding).canonicalMetadataSha256 || !hexSha.test(report.before || '') || !hexSha.test(report.staged || '')
       || (report.state !== 'staged' && report.state !== 'restored')
-      || (report.loginVerifierSha256 !== undefined && !runtimeLogin))) {
+      || report.allocationControllerProvisioning !== provisionController
+      || (runtimeLogin && controllerLogin !== Boolean(provisionController))
+      || (report.loginVerifierSha256 !== undefined && !runtimeLogin)
+      || (report.controllerLoginVerifierSha256 !== undefined && !controllerLogin))) {
       fail('The owned cutover ACL receipt is invalid.');
     }
     if (restoring && !report) fail('No owned staged ACL preimage is available for restoration.');
@@ -857,7 +870,9 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
     }
     if (!restoring && !activating && !attesting && runtimeLogin) fail('The owned cutover runtime is no longer dormant.');
     await holdPredecessorRoleCutover(input.journalPath, binding, !attesting);
-    const verifier = runtimeLogin ? await readOwnedRuntimeVerifier(client, report.loginVerifierSha256) : null;
+    const verifier = runtimeLogin ? await readOwnedCutoverVerifier(client, cutoverRoles.runtime, report.loginVerifierSha256) : null;
+    const controllerVerifier = controllerLogin
+      ? await readOwnedCutoverVerifier(client, cutoverRoles.controller, report.controllerLoginVerifierSha256) : null;
     if (attesting && backend) {
       if (!report || (restoring ? report.state !== 'restored' || runtimeLogin : report.state !== 'staged' || !verifier)) {
         fail('The backend runtime differs from the required owned ACL and credential state.');
@@ -872,30 +887,44 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
       await assertMarker();
       await liveLease();
       return { deploymentId: binding.deploymentId, checkpointSha256: binding.checkpointSha256,
-        backendId: backend.id, backendAddress: backend.address, role };
+        backendId: backend.id, backendAddress: backend.address, role,
+        ...(!restoring && provisionController ? { controllerProvisioned: true } : {}) };
     }
     if (activating && credential) {
+      const credentials = [
+        { role: cutoverRoles.runtime, password: credential.password, existing: verifier, key: 'loginVerifierSha256' },
+        { role: cutoverRoles.controller, password: credential.controllerPassword, existing: controllerVerifier, key: 'controllerLoginVerifierSha256' },
+      ];
       if (verifier) {
-        const salt = Buffer.from(verifier.split('$')[1].split(':')[1], 'base64');
-        if (!timingSafeEqual(Buffer.from(runtimeCredentialVerifier(credential.password, salt)), Buffer.from(verifier))) {
-          fail('The credential does not match the already-owned runtime login.');
+        if (Boolean(credential.controllerPassword) !== controllerLogin) fail('The owned cutover credential set changed.');
+        for (const { password, existing } of credentials) {
+          if (!password || !existing) continue;
+          const salt = Buffer.from(existing.split('$')[1].split(':')[1], 'base64');
+          if (!timingSafeEqual(Buffer.from(cutoverCredentialVerifier(password, salt)), Buffer.from(existing))) {
+            fail('The credential does not match the already-owned cutover login.');
+          }
         }
       } else {
-        const replacement = runtimeCredentialVerifier(credential.password, randomBytes(16));
         await client.query("SET LOCAL log_statement = 'none'; SET LOCAL log_min_error_statement = 'panic'; "
           + "SET LOCAL log_min_duration_statement = '-1'; SET LOCAL log_min_duration_sample = '-1'");
-        // PostgreSQL utility statements cannot bind a password parameter. Send
-        // only the well-formed SCRAM verifier, never the plaintext password.
-        await client.query("ALTER ROLE " + quoteIdentifier(cutoverRoles.runtime) + " LOGIN PASSWORD '" + replacement + "'");
-        await readOwnedRuntimeVerifier(client, sha256(replacement));
+        const ownedDigests: Record<string, string> = {};
+        for (const { role, password, key } of credentials) {
+          if (!password) continue;
+          const replacement = cutoverCredentialVerifier(password, randomBytes(16));
+          // PostgreSQL utility statements accept a precomputed SCRAM verifier.
+          await client.query("ALTER ROLE " + quoteIdentifier(role) + " LOGIN PASSWORD '" + replacement + "'");
+          ownedDigests[key] = sha256(replacement);
+          await readOwnedCutoverVerifier(client, role, ownedDigests[key]);
+        }
         await client.query('UPDATE public.deployment_operations SET "reportJson" = $1::jsonb, "updatedAt" = clock_timestamp() AT TIME ZONE \'UTC\' WHERE id = $2',
-          [JSON.stringify({ ...report, loginVerifierSha256: sha256(replacement) }), session.deploymentId]);
+          [JSON.stringify({ ...report, ...ownedDigests }), session.deploymentId]);
       }
       await assertDatabaseDrained(client);
       await assertMarker();
       await liveLease();
       return { outcome: verifier ? 'login-already-active' : 'login-activated', ...binding,
-        preimageSha256: report.before as string, stagedAclSha256: report.staged as string };
+        preimageSha256: report.before as string, stagedAclSha256: report.staged as string,
+        ...(provisionController ? { controllerProvisioned: true } : {}) };
     }
     if (report && (!restoring || report.state === 'restored')) {
       await assertDatabaseDrained(client);
@@ -917,6 +946,9 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
     if (restoring && verifier) {
       await client.query('ALTER ROLE ' + quoteIdentifier(cutoverRoles.runtime) + ' NOLOGIN PASSWORD NULL');
     }
+    if (restoring && controllerVerifier) {
+      await client.query('ALTER ROLE ' + quoteIdentifier(cutoverRoles.controller) + ' NOLOGIN PASSWORD NULL');
+    }
     await applyCutoverAclDelta(client, cutover, restoring);
     const verified = await inspectCutover(client, input.migrationsDirectory, manifest);
     assertCutoverProfile(verified, restoring ? 'before-grants' : 'grants-staged');
@@ -925,13 +957,19 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
     await assertDatabaseDrained(client);
     await assertMarker();
     await liveLease();
-    const receipt = restoring ? { binding, before: report.before, staged: report.staged, state: 'restored' }
-      : { binding, before: current, staged: next, state: 'staged' };
+    const receipt = {
+      binding, before: restoring ? report.before : current, staged: restoring ? report.staged : next,
+      state: restoring ? 'restored' : 'staged',
+      ...(provisionController ? { allocationControllerProvisioning: true } : {}),
+    };
     await client.query('UPDATE public.deployment_operations SET "reportJson" = $1::jsonb, "updatedAt" = clock_timestamp() AT TIME ZONE \'UTC\' WHERE id = $2',
       [JSON.stringify(receipt), session.deploymentId]);
     return { outcome: restoring ? 'restored' : 'staged', ...binding,
       preimageSha256: receipt.before as string, stagedAclSha256: receipt.staged as string };
   });
-  if (activating && credential) await proveRuntimeCredential(input.databaseUrl, credential.password);
+  if (activating && credential) {
+    await proveCutoverCredential(input.databaseUrl, cutoverRoles.runtime, credential.password);
+    if (credential.controllerPassword) await proveCutoverCredential(input.databaseUrl, cutoverRoles.controller, credential.controllerPassword);
+  }
   return receipt;
 }

@@ -109,7 +109,7 @@ class HostConfigurationTest(unittest.TestCase):
         return {"name": "sabalanerp", "services": services}, GRAPH, CONTROL_URL
 
     @contextlib.contextmanager
-    def owner(self, *, sealed=True, lock=True):
+    def owner(self, *, sealed=True, lock=True, payload=PASSWORD):
         lock_fd = os.open(self.lock, os.O_RDWR)
         if lock_fd != 9:
             os.dup2(lock_fd, 9)
@@ -119,7 +119,7 @@ class HostConfigurationTest(unittest.TestCase):
             subprocess.run(["flock", "-n", "9"], check=True, pass_fds=(9,))
         credential = os.memfd_create("runtime-credential", os.MFD_ALLOW_SEALING)
         try:
-            os.write(credential, PASSWORD)
+            os.write(credential, payload)
             if sealed:
                 fcntl.fcntl(credential, fcntl.F_ADD_SEALS, roles.REQUIRED_CREDENTIAL_SEALS)
             yield credential
@@ -175,6 +175,65 @@ class HostConfigurationTest(unittest.TestCase):
             self.assertEqual(proof["roleCutover"]["outcome"], "login-activated")
             self.assertNotIn(PASSWORD, json.dumps(proof).encode())
         self.assertEqual(self.env.read_bytes(), ORIGINAL)
+
+    def test_controller_secret_reaches_only_the_owned_login_frame(self):
+        controller = b"b" * 42 + b"Y"
+        paths = (self.root, self.root / "reports", self.root / "coordination")
+        self.session["allocationControllerProvisioning"] = True
+        self.write_phase("MUTATION_STARTED")
+
+        def invoke(frame):
+            stage = json.loads(self.stage)["roleCutover"]
+            self.assertEqual(frame, stage["stagedAclSha256"].encode() + PASSWORD + controller)
+            return {"ok": True, "roleCutover": {**stage, "outcome": "login-activated", "controllerProvisioned": True}}
+
+        with self.owner() as credential:
+            with self.assertRaises(roles.RoleHostConfigurationError):
+                roles.activate_login(*paths, credential, self.stage, invoke=lambda _: self.fail("The runtime-only frame reached the child"))
+        with self.owner(payload=PASSWORD + controller) as credential:
+            def missing_controller_proof(frame):
+                proof = invoke(frame)
+                del proof["roleCutover"]["controllerProvisioned"]
+                return proof
+            with self.assertRaises(roles.RoleHostConfigurationError):
+                roles.activate_login(*paths, credential, self.stage, invoke=missing_controller_proof)
+            proof = roles.activate_login(*paths, credential, self.stage, invoke=invoke)
+            self.assertNotIn(controller, json.dumps(proof).encode())
+            self.transaction(credential)
+        self.assertEqual(self.env.read_bytes(), TARGET)
+        for receipt in (self.root / ".deploy-state").rglob("*.json"):
+            self.assertNotIn(controller, receipt.read_bytes())
+
+    def test_provisioning_reads_only_private_authority_for_the_installed_database_and_pinned_approver(self):
+        authority = self.root / "authority"
+        authority.mkdir(mode=0o700)
+        controller = "b" * 42 + "Y"
+        key = ("-----BEGIN PUBLIC KEY-----\n"
+               "MCowBQYDK2VwAyEAiTHerNlheKSyARB8XU1Gfh9XaftcnxEa+4HAdRZ/8Qg=\n"
+               "-----END PUBLIC KEY-----\n")
+        pin = hashlib.sha256(key.encode()).hexdigest()
+        target = authority / "authority.json"
+        url = "postgresql://sabalan_allocation_controller:" + controller + SUFFIX
+        private_write(target, roles.json_bytes({"allocationControllerUrl": url, "keyId": "approver", "publicKeyPem": key}))
+        password, authority_digest = roles.read_controller_password(authority, pin, CONTROL_URL)
+        self.assertEqual(password, controller.encode())
+        self.assertEqual(authority_digest, hashlib.sha256(target.read_bytes()).hexdigest())
+        self.assertEqual(roles.read_controller_password(authority, pin, CONTROL_URL, expected_sha256=authority_digest)[0], password)
+        private_write(target, target.read_bytes() + b"\n")
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.read_controller_password(authority, pin, CONTROL_URL, expected_sha256=authority_digest)
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.read_controller_password(authority, "1" * 64, CONTROL_URL)
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.read_controller_password(authority, pin, CONTROL_URL.replace("@postgres:", "@foreign:"))
+        fake_private_key = key.replace("PUBLIC KEY", "PRIVATE KEY")
+        private_write(target, roles.json_bytes({"allocationControllerUrl": url, "keyId": "approver", "publicKeyPem": fake_private_key}))
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.read_controller_password(authority, hashlib.sha256(fake_private_key.encode()).hexdigest(), CONTROL_URL)
+        private_write(target, roles.json_bytes({"allocationControllerUrl": url, "keyId": "approver", "publicKeyPem": key}))
+        authority.chmod(0o750)
+        with self.assertRaises(roles.RoleHostConfigurationError):
+            roles.read_controller_password(authority, pin, CONTROL_URL)
 
     def test_recreate_pinned_backend_and_prove_exact_runtime_and_rollback(self):
         original = {name: str(i) * 64 for i, name in enumerate(SERVICES, 1)}
@@ -451,7 +510,7 @@ class HostConfigurationTest(unittest.TestCase):
         command = (sys.executable, "-c",
                    "import os, sys, time; assert os.readlink('/proc/self/fd/9').endswith('/deployment.lock');"
                    "data = sys.stdin.buffer.read(); assert len(data) == 107;"
-                   "sys.stderr.buffer.write(data); time.sleep(0.12); print('safe acknowledgement')")
+                   "print('safe progress', file=sys.stderr); time.sleep(0.12); print('safe acknowledgement')")
         calls = []
 
         def renewal(session, checkpoint):
@@ -475,6 +534,32 @@ class HostConfigurationTest(unittest.TestCase):
         files = list((self.root / ".deploy-state").glob("**/native-*.json"))
         self.assertEqual(len(files), 2)
         self.assertTrue(all(PASSWORD not in item.read_bytes() for item in files))
+
+    def test_native_child_holds_either_credential_echo_in_either_pipe(self):
+        controller = b"b" * 42 + b"Y"
+        raw = b"6" * 64 + PASSWORD + controller
+        for pipe in (1, 2):
+            for start in (64, 107):
+                command = (sys.executable, "-c",
+                           "import os, sys, time; data = sys.stdin.buffer.read();"
+                           "offset, fd = map(int, sys.argv[1:]);"
+                           "os.write(fd, data[offset:offset+19]); time.sleep(0.08);"
+                           "os.write(fd, data[offset+19:offset+43])", str(start), str(pipe))
+                with self.subTest(pipe=pipe, start=start), self.owner():
+                    with self.assertRaises(native.ProtectedNativeChildError):
+                        native.run_native_child(
+                            self.root, self.root / "reports", self.root / "coordination",
+                            "MUTATION_STARTED", "activate-predecessor-runtime-login", command,
+                            stdin=raw, renewal=lambda *_: True, budget_seconds=2, heartbeat_seconds=0.03,
+                        )
+        receipts = list((self.root / ".deploy-state").glob("**/native-*-result.json"))
+        self.assertEqual(len(receipts), 4)
+        for path in receipts:
+            receipt = path.read_bytes()
+            self.assertTrue(json.loads(receipt)["credentialEchoed"])
+            self.assertEqual(json.loads(receipt)["outcome"], "HELD")
+            self.assertNotIn(PASSWORD, receipt)
+            self.assertNotIn(controller, receipt)
 
     def test_native_child_keeps_heartbeat_after_failure_until_descendant_pipe_eof(self):
         marker = self.root / "native-closed.txt"

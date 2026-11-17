@@ -38,6 +38,7 @@ type Session = {
   phase: DeploymentPhase;
   bootstrap: boolean;
   purpose?: typeof protectedPredecessorRoleCutoverPurpose;
+  allocationControllerProvisioning?: true;
   controlImage: string;
   preservedClamav?: PreservedClamavBinding;
   clamavOperation?: 'repair' | 'incident-recovery';
@@ -103,7 +104,7 @@ const journal = async (session: Session, event: string, details?: Record<string,
     details,
   });
 
-const prepare = async (purpose?: Session['purpose']) => {
+const prepare = async (purpose?: Session['purpose'], provisionController = false) => {
   const clamavOperation = process.env.DEPLOYMENT_CLAMAV_OPERATION || 'repair';
   if (!['repair', 'incident-recovery'].includes(clamavOperation)) throw new Error('Unknown ClamAV operation.');
   const incidentSha = process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256;
@@ -128,6 +129,7 @@ const prepare = async (purpose?: Session['purpose']) => {
     phase: 'PREFLIGHT',
     bootstrap: false,
     ...(purpose ? { purpose } : {}),
+    ...(provisionController ? { allocationControllerProvisioning: true as const } : {}),
     controlImage: required('DEPLOYMENT_CONTROL_IMAGE'),
     clamavOperation: clamavOperation as 'repair' | 'incident-recovery',
     ...(clamavOperation === 'incident-recovery' ? { clamavIncidentSnapshotSha256: incidentSha } : {}),
@@ -156,6 +158,7 @@ const prepare = async (purpose?: Session['purpose']) => {
   await fs.promises.rm(JOURNAL_PATH, { force: true });
   await journal(session, 'deployment-prepared', {
     clamavOperation: session.clamavOperation,
+    ...(provisionController ? { allocationControllerProvisioning: true } : {}),
     ...(preservedClamav ? {preservedClamav} : {}),
     ...(session.clamavIncidentSnapshotSha256 ? { clamavIncidentSnapshotSha256: session.clamavIncidentSnapshotSha256 } : {}),
   });
@@ -179,9 +182,9 @@ const cutoverPreMutationPhases: DeploymentPhase[] = [
   'LOCAL_CHECKPOINT_VERIFIED', 'REMOTE_CHECKPOINT_VERIFIED', 'ABORTED',
 ];
 
-function readRuntimeCredentialFrame() {
-  // One ACL digest and one canonical 32-byte unpadded base64url password.
-  const input = Buffer.alloc(108);
+function readCutoverCredentialFrame() {
+  // One ACL digest, the runtime password and an optional independent controller password.
+  const input = Buffer.alloc(151);
   try {
     let length = 0;
     while (length < input.length) {
@@ -189,8 +192,9 @@ function readRuntimeCredentialFrame() {
       if (!next) break;
       length += next;
     }
-    if (length !== 107) throw new Error('The cutover credential frame is invalid.');
-    return { stagedAclSha256: input.toString('latin1', 0, 64), password: Buffer.from(input.subarray(64, 107)) };
+    if (length !== 107 && length !== 150) throw new Error('The cutover credential frame is invalid.');
+    return { stagedAclSha256: input.toString('latin1', 0, 64), password: Buffer.from(input.subarray(64, 107)),
+      controllerPassword: length === 150 ? Buffer.from(input.subarray(107, 150)) : undefined };
   } finally {
     input.fill(0);
   }
@@ -243,12 +247,13 @@ const main = async () => {
   const store = new PrismaDeploymentStore(prisma);
   if (command === 'prepare' || command === 'prepare-predecessor-role-cutover') {
     const purpose = command === 'prepare-predecessor-role-cutover' ? protectedPredecessorRoleCutoverPurpose : undefined;
-    if (purpose && (process.env.BACKEND_RUNTIME_ROLE !== 'control' || process.argv.length !== 3
+    const provisionController = Boolean(purpose && process.argv.length === 4 && process.argv[3] === 'controller');
+    if (purpose && (process.env.BACKEND_RUNTIME_ROLE !== 'control' || (process.argv.length !== 3 && !provisionController)
       || !/^sha256:[a-f0-9]{64}$/.test(required('DEPLOYMENT_CONTROL_IMAGE'))
       || process.env.DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP === 'true' || process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true')) {
       throw new Error('A control session for a dedicated, immutable first role cutover is required.');
     }
-    console.log(JSON.stringify({ ok: true, session: await prepare(purpose), journalPath: JOURNAL_PATH }));
+    console.log(JSON.stringify({ ok: true, session: await prepare(purpose, provisionController), journalPath: JOURNAL_PATH }));
     return;
   }
   if (command === 'verify-host-journal') {
@@ -295,7 +300,7 @@ const main = async () => {
     }
     const action = command === 'stage-predecessor-role-grants' ? 'stage'
       : command === 'restore-predecessor-role-grants' ? 'restore' : attesting ? 'attest' : 'activate';
-    const credential = action === 'activate' ? readRuntimeCredentialFrame() : undefined;
+    const credential = action === 'activate' ? readCutoverCredentialFrame() : undefined;
     try {
       const roleCutover = await changeProtectedPredecessorRoleGrants({
         action, credential, session,
@@ -309,11 +314,12 @@ const main = async () => {
       console.log(JSON.stringify(attesting ? { ok: true, runtimeProof: roleCutover } : { ok: true, roleCutover }));
     } catch (error: any) {
       if (action === 'activate' && error?.code !== 'PROTECTED_DATABASE_ROLE_RECOVERY_REJECTED') {
-        throw new Error('The first cutover runtime credential could not be proven.');
+        throw new Error('The first cutover database credentials could not be proven.');
       }
       throw error;
     } finally {
       credential?.password.fill(0);
+      credential?.controllerPassword?.fill(0);
     }
   } else if (command === 'incident-boundary-state') {
     if (session.clamavOperation !== 'incident-recovery' || session.deploymentId !== required('DEPLOYMENT_ID')

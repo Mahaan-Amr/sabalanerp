@@ -39,7 +39,9 @@ The foreground adapter is callable by the existing protected owner after it reac
 
 The native adapter wraps the canonical owner's selected control and Compose command vectors under FD9. It renews the same lease and drains native output until the original child and both pipes close, including after a failed renewal, deadline, or interruption. It passes the credential only on standard input. Its durable intent and closure receipts carry operation and checkpoint identities and process status without command arguments, output or credentials. A clean closure supplies private stdout to the choreography. Neither closure nor an interrupted receipt authorizes release.
 
-The canonical runner exposes preflight only. Its foreground process still needs to supply the canonical command vectors and renewal callback, refresh the original nginx instance's upstream addresses under maintenance, and prove the normal release or rollback gates against the resulting graph. A durable acknowledgement must bind those gates to the exact checkpoint, configuration, and live backend incarnation before the runner can open traffic or release the holds.
+The import-only canonical adapter uses the existing one-off control transport, verifies the original advisory session, and renews the same lease. It distinguishes the serving release identity used for backend recreation from the operation identity used by control commands. Its nginx refresh restarts the original pinned container ID, proves the new process birth and health, and checks both public maintenance endpoints before emitting a receipt. No refresh retries an unknown attempt by restarting again.
+
+The canonical runner exposes preflight only. A future protected launcher must enter the owned, already-checkpointed configuration phase and attach this adapter as the foreground continuation. The launcher must then prove the normal release or rollback gates against the resulting graph. A durable acknowledgement must bind those gates to the exact checkpoint, configuration, and live backend incarnation before the runner can open traffic or release the holds.
 
 ## Backend incarnation and live role proof
 

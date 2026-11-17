@@ -7,16 +7,9 @@ system_recovery_owner_command() {
 }
 
 assert_system_recovery_advisory() {
-  [ -n "${ADVISORY_PID}" ] && kill -0 "${ADVISORY_PID}" 2>/dev/null || return 1
-  owner_count="$(compose exec -T postgres sh -c "
-    psql -XAt -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d postgres -c \"
-      SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a USING (pid)
-      WHERE a.application_name = '${ADVISORY_APPLICATION_NAME}' AND a.datname = 'postgres'
-        AND l.locktype = 'advisory' AND l.mode = 'ExclusiveLock' AND l.granted
-        AND l.classid = 0 AND l.objid = ${ADVISORY_LOCK_KEY} AND l.objsubid = 1\";
-  ")"
-  [ "${owner_count}" = 1 ]
+  protected_advisory_owned
 }
+
 
 system_recovery_backup_failure() {
   backup_status="$1"

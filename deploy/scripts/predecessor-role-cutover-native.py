@@ -24,9 +24,9 @@ SPEC.loader.exec_module(configuration)
 CONTROL_ACTIONS = {
     "MUTATION_STARTED": {
         "stage-predecessor-role-grants", "activate-predecessor-runtime-login",
-        "attest-predecessor-backend-runtime", "recreate-backend",
+        "attest-predecessor-backend-runtime", "recreate-backend", "refresh-nginx",
     },
-    "ROLLBACK_STARTED": {"restore-predecessor-role-grants", "attest-predecessor-backend-runtime", "recreate-backend"},
+    "ROLLBACK_STARTED": {"restore-predecessor-role-grants", "attest-predecessor-backend-runtime", "recreate-backend", "refresh-nginx"},
 }
 CREDENTIAL_ACTION = "activate-predecessor-runtime-login"
 MAX_OUTPUT_BYTES = 64 * 1024

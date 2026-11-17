@@ -9,6 +9,7 @@ import tempfile
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 MODULE = Path(__file__).resolve().parents[2] / "deploy/scripts/predecessor-role-host-configuration.py"
 SPEC = importlib.util.spec_from_file_location("role_configuration", MODULE)
@@ -17,6 +18,9 @@ SPEC.loader.exec_module(roles)
 NATIVE_SPEC = importlib.util.spec_from_file_location("role_native", MODULE.with_name("predecessor-role-cutover-native.py"))
 native = importlib.util.module_from_spec(NATIVE_SPEC)
 NATIVE_SPEC.loader.exec_module(native)
+CANONICAL_SPEC = importlib.util.spec_from_file_location("role_canonical", MODULE.with_name("predecessor-role-cutover-canonical.py"))
+canonical = importlib.util.module_from_spec(CANONICAL_SPEC)
+CANONICAL_SPEC.loader.exec_module(canonical)
 
 SERVICES = ("backend", "frontend", "inquiry", "nginx", "postgres", "clamav")
 GRAPH = {name: "sha256:" + str(i) * 64 for i, name in enumerate(SERVICES, 1)}
@@ -274,6 +278,7 @@ class HostConfigurationTest(unittest.TestCase):
         installed = CONTROL_URL
         running = False
         address = "172.24.0.5"
+        nginx_started = "2026-11-17T00:00:00Z"
         paths = (self.root, self.env, self.root / "reports", self.root / "coordination")
 
         def control(command, args, stdin):
@@ -311,7 +316,8 @@ class HostConfigurationTest(unittest.TestCase):
                     "Config": {"Hostname": identifier[:12], "Env": ["DATABASE_URL=" + installed] if name == "backend" else [],
                                "Labels": {"com.docker.compose.service": name, "com.docker.compose.project": "sabalanerp"}},
                     "HostConfig": {}, "Mounts": [],
-                    "State": {"StartedAt": "2026-11-17", "Pid": 17, "Health": {"Status": "healthy"},
+                    "State": {"StartedAt": nginx_started if name == "nginx" else "2026-11-17",
+                              "Pid": 17, "Health": {"Status": "healthy"},
                               "Running": running if name == "backend" else True, "Restarting": False, "Dead": False},
                     "NetworkSettings": {"Networks": {"app_network": {"IPAddress": address}}},
                 })
@@ -352,6 +358,27 @@ class HostConfigurationTest(unittest.TestCase):
                                      "activate-predecessor-runtime-login", "recreate", "attest-predecessor-backend-runtime"])
             self.assertEqual(self.env.read_bytes(), TARGET)
             self.assertFalse(target["canOpenTraffic"])
+            proxy_calls = []
+
+            def failed_refresh(identifier):
+                proxy_calls.append(identifier)
+                return False
+
+            proxy_args = (self.root, self.root / "reports", self.root / "coordination",
+                          self.session["phase"], target, original["nginx"])
+            options = {"inspect": inspect, "renewal": boundary, "maintenance": lambda: True,
+                       "restart": failed_refresh, "wait_for_healthy": lambda: None}
+            with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                canonical.refresh_original_nginx(*proxy_args, **options)
+            with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                canonical.refresh_original_nginx(*proxy_args, **options)
+            self.assertEqual(proxy_calls, [original["nginx"]])
+            nginx_started = "2026-11-17T00:02:00Z"
+            proxy = canonical.refresh_original_nginx(*proxy_args, **options)
+            self.assertEqual(proxy["nginxId"], original["nginx"])
+            self.assertEqual(proxy["refreshedStartedAt"], nginx_started)
+            self.assertFalse(proxy["canOpenTraffic"])
+            self.assertEqual(proxy_calls, [original["nginx"]])
 
             self.write_phase("ROLLBACK_STARTED")
             running = False
@@ -474,6 +501,48 @@ class HostConfigurationTest(unittest.TestCase):
         self.assertTrue(receipt["heartbeatFailed"])
         self.assertTrue(receipt["stdoutClosed"] and receipt["stderrClosed"] and receipt["childClosed"])
         self.assertFalse(receipt["canOpenTraffic"])
+
+    def test_canonical_transport_reuses_original_control_image_and_lease_heartbeat(self):
+        binary = self.root / "bin"
+        binary.mkdir()
+        fake = binary / "docker"
+        log = self.root / "native-docker-arguments.jsonl"
+        compose = self.root / "docker-compose.prod.yml"
+        compose.write_text("name: sabalanerp\n")
+        fake.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, sys\n"
+            "args = sys.argv[1:]\n"
+            "with open(os.environ['ROLE_FIXTURE_LOG'], 'a') as out:\n"
+            " out.write(json.dumps({'args': args, 'selectedImage': os.environ.get('DEPLOYMENT_BACKEND_IMAGE')}) + '\\n')\n"
+            "if 'exec' in args: print('1')\n"
+        )
+        fake.chmod(0o700)
+        exports = {
+            "PATH": str(binary) + ":" + os.environ["PATH"], "ROLE_FIXTURE_LOG": str(log),
+            "DEPLOYMENT_ID": self.session["deploymentId"], "DEPLOYMENT_RELEASE_ID": self.session["releaseId"],
+            "DEPLOYMENT_MODE": "configuration", "DEPLOYMENT_TARGET_COMMIT": self.session["targetCommit"],
+            "DEPLOYMENT_TARGET_BACKEND_IMAGE": GRAPH["backend"], "DEPLOYMENT_OWNER": self.session["owner"],
+            "DEPLOYMENT_CLAMAV_REPAIR": "false", "DEPLOYMENT_CLAMAV_OPERATION": "repair",
+            "DEPLOYMENT_CLAMAV_TARGET_IMAGE": "", "DEPLOYMENT_BACKEND_IMAGE": GRAPH["backend"],
+            "DEPLOYMENT_LEASE_TOKEN": self.session["leaseToken"], "DEPLOYMENT_PHASE": "MUTATION_STARTED",
+            "ADVISORY_PID": str(os.getpid()), "ADVISORY_LOCK_KEY": "741936425",
+            "ADVISORY_APPLICATION_NAME": "sabalan-lock-" + self.session["deploymentId"],
+        }
+        exports.update({"DEPLOYMENT_PREVIOUS_" + key.upper() + "_IMAGE": image for key, image in GRAPH.items()})
+        with self.owner(), patch.dict(os.environ, exports):
+            control = canonical.canonical_shell(self.env, compose, "control", "stage-predecessor-role-grants")
+            self.assertTrue(canonical.held_owner_command(self.root, control))
+            self.assertTrue(canonical.held_owner_command(self.root, canonical.canonical_shell(self.env, compose, "renewal")))
+        observations = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(len(observations), 3)
+        self.assertEqual(observations[0]["selectedImage"], GRAPH["backend"])
+        self.assertIn("--pull=never", observations[0]["args"])
+        self.assertEqual(observations[0]["args"][-4:],
+                         ["deployment", "node", "dist/scripts/deployment-control.js", "stage-predecessor-role-grants"])
+        self.assertIn("exec", observations[1]["args"])
+        self.assertIn("741936425", observations[1]["args"][-1])
+        self.assertEqual(observations[2]["args"][-4:], ["deployment", "node", "dist/scripts/deployment-control.js", "heartbeat"])
 
     def test_native_signal_cannot_detach_a_mutating_child_or_authorize_output(self):
         marker = self.root / "native-signal-closed.txt"

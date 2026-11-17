@@ -13,6 +13,12 @@ import { isRestrictedRecoveryRuntime, RECOVERY_FRESHNESS_MS } from './systemReco
 import { setRecoveryRuntimeState } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
 import { replayPerformanceErasureAfterRestore } from './personnelPerformanceErasureStore';
+import { OWNER_BACKUP_REQUESTED } from './systemRecoveryBackupRequest';
+
+const pendingOwnerBackup = {
+  status: 'CREATING', source: 'CREATED', packageType: 'COMPLETE', progress: 0, storageName: null,
+  auditEvents: { some: { eventType: OWNER_BACKUP_REQUESTED } },
+};
 
 const replayPerformanceErasureFromSafetyDatabase = async (prisma: PrismaClient, safetyDatabase: string) => {
   // System Recovery deliberately reads its alternate pre-restore database and
@@ -30,7 +36,7 @@ const recoverInterruptedRestore = async (prisma: PrismaClient, options: Recovery
     await fs.promises.rm(INQUIRY_RESTART_MARKER, { force: true });
     setRecoveryRuntimeState('NORMAL');
     await prisma.recoveryOperation.updateMany({
-      where: { status: { in: ['CREATING', 'VALIDATING', 'RESTORING'] } },
+      where: { status: { in: ['CREATING', 'VALIDATING', 'RESTORING'] }, NOT: pendingOwnerBackup },
       data: { status: 'FAILED', errorCode: 'PROCESS_INTERRUPTED', errorMessage: 'The recovery worker was interrupted before completion.' },
     });
     return;
@@ -56,8 +62,13 @@ const recoverInterruptedRestore = async (prisma: PrismaClient, options: Recovery
 };
 
 const cleanupExpiredPackages = async (prisma: PrismaClient) => {
+  const now = new Date();
+  await prisma.recoveryOperation.updateMany({
+    where: { ...pendingOwnerBackup, expiresAt: { lte: now } },
+    data: { status: 'EXPIRED' },
+  });
   const expired = await prisma.recoveryOperation.findMany({
-    where: { expiresAt: { lte: new Date() }, storageName: { not: null }, status: { notIn: ['RESTORING'] } },
+    where: { expiresAt: { lte: now }, storageName: { not: null }, status: { notIn: ['RESTORING'] } },
     select: { id: true, source: true, storageName: true },
   });
   for (const item of expired) {

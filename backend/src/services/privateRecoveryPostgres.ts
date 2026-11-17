@@ -122,7 +122,8 @@ export async function migrateRecoveryArchivePrivately(input: {
       value.searchParams.set('host', path.join(root, 'run'));
       return value.toString();
     };
-    child = spawn(LAUNCHER, [root], { env: environment(), stdio: ['ignore', 'ignore', 'ignore'] });
+    child = spawn(LAUNCHER, [root], { env: { ...environment(), SABALAN_RECOVERY_PARENT_PID: String(process.pid) },
+      stdio: ['ignore', 'ignore', 'ignore'] });
     started = true;
     childSettled = new Promise(resolve => {
       child!.once('error', error => { failed = error; settled = true; resolve(); });

@@ -53,7 +53,7 @@ async function fixture(options: { checksum?: string; uploadedSchema?: string } =
   vm.runInNewContext(ts.transpileModule(await fs.readFile(filename, 'utf8'), { compilerOptions: {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true,
   } }).outputText, { exports: exported, require: localRequire, Buffer, URL, setTimeout, console,
-    clearTimeout, process: { platform: 'linux', getuid: () => 0, cwd: () => '/image/app', execPath: '/usr/bin/node',
+    clearTimeout, process: { platform: 'linux', pid: 41, getuid: () => 0, cwd: () => '/image/app', execPath: '/usr/bin/node',
       env: { DATABASE_URL: 'postgresql://owner:production-secret@production/live', SECRET: 'production-secret',
         SYSTEM_RECOVERY_POSTGRES_IMAGE_ID: imageId } } }, { filename });
   const run = () => exported.migrateRecoveryArchivePrivately({ sourceDump: '/private/upload.dump', workDirectory: '/private/job',
@@ -66,6 +66,7 @@ test('private archive migration never passes production credentials to child pro
   const result = await run();
   assert.equal(result.dumpPath, '/private/job/migrated-application.dump');
   assert.equal(calls.every(call => !JSON.stringify(call.env).includes('production-secret')), true);
+  assert.equal(calls.find(call => call.tool.endsWith('recovery-postgres-sandbox') && call.args[0] !== '--stop')?.env.SABALAN_RECOVERY_PARENT_PID, '41');
   const uploaded = calls.find(call => call.tool === 'pg_restore')!;
   assert.equal(new URL(uploaded.args[1]).username, 'recovery_import');
   assert.equal(new URL(uploaded.args[1]).searchParams.get('host'), '/tmp/sbr-ABC123/root/run');

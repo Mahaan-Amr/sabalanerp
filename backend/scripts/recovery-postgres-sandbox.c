@@ -48,6 +48,15 @@ static void confine(void) {
 #ifdef __NR_pidfd_getfd
     DENY(__NR_pidfd_getfd),
 #endif
+    /* Descendants may bind SIGKILL to their real parent, but cannot clear or
+       weaken the launcher's parent-death contract after it has been installed. */
+    BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_prctl, 0, 5),
+    BPF_STMT(BPF_LD|BPF_W|BPF_ABS, ARG(0)),
+    BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, PR_SET_PDEATHSIG, 0, 3),
+    BPF_STMT(BPF_LD|BPF_W|BPF_ABS, ARG(1)),
+    BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, SIGKILL, 1, 0),
+    BPF_STMT(BPF_RET|BPF_K, SECCOMP_RET_ERRNO|EPERM),
+    BPF_STMT(BPF_LD|BPF_W|BPF_ABS, offsetof(struct seccomp_data, nr)),
     /* Keep same-UID /proc root inspection available to the cleanup process. */
     BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, __NR_prctl, 0, 5),
     BPF_STMT(BPF_LD|BPF_W|BPF_ABS, ARG(0)),
@@ -152,10 +161,17 @@ int main(int argc, char **argv) {
   const char *rootpath = argv[argc - 1];
   struct stat root = checked_root(rootpath);
   if (argc == 3) return stop_private(root);
+  const char *parent_text = getenv("SABALAN_RECOVERY_PARENT_PID");
+  char *end;
+  long parent = parent_text ? strtol(parent_text, &end, 10) : 0;
+  if (!parent_text || !*parent_text || *end || parent < 1 || (long)getppid() != parent) fail("recovery parent identity");
   /* libuv closes non-stdio descriptors as well; enforce it at the native seam. */
   if (syscall(SYS_close_range, 3U, ~0U, 0U) != 0) fail("recovery close descriptors");
   if (chroot(rootpath) || chdir("/")) fail("recovery chroot");
   if (setgroups(0, NULL) || setgid(65532) || setuid(65532)) fail("recovery drop identity");
+  /* setuid/setgid clear PDEATHSIG. Arm it only after both, then close the
+     parent-exit race using the root Node process identity supplied at spawn. */
+  if (prctl(PR_SET_PDEATHSIG, SIGKILL) || (long)getppid() != parent) fail("recovery parent death signal");
   confine();
   char *const arguments[] = { "/usr/local/bin/postgres", "-D", "/data", "-k", "/run",
     "-c", "listen_addresses=", "-c", "unix_socket_permissions=0700", "-c", "ssl=off",

@@ -11,7 +11,9 @@ import { AccountingCustomerTreasuryError } from '../services/accountingCustomerT
 import { attributeCustomerOpening } from '../services/accountingCustomerOpeningAttribution';
 import { importBankStatementFilePrisma, resolveBankFileExceptionPrisma } from '../services/accountingBankFileImport';
 import { resolveNarrowFeatureAccess } from '../services/narrowFeatureAccess';
-import { listCustomerWorkspaceAccounts, readCustomerWorkspace, readCustomerWorkspaceContext, recordCustomerAccountOperation, recordCustomerWorkspaceTreasury } from '../services/accountingCustomerWorkspace';
+import { listCustomerWorkspaceAccounts, readCustomerWorkspace, readCustomerWorkspaceContext, readCustomerAllocationCommandStatus, recordCustomerAccountOperation, recordCustomerWorkspaceTreasury } from '../services/accountingCustomerWorkspace';
+import { cancelCustomerAllocationIntent, prepareAdmittedCustomerAllocationIntent, readCustomerAllocationIntent, readCustomerAllocationIntentByCommand, reconcileCustomerAllocationIntent } from '../services/accountingCustomerAllocationIntent';
+import { requireCustomerSourceSharesWithin } from '../services/customerSemanticCompatibility';
 import {
   allocateCustomerReceiptPrisma,
   backfillApprovedSalesContractCustomers,
@@ -238,7 +240,7 @@ router.post('/customer-accounts/:id/operations', ...customerPostingAccess, (req,
     })),
   },
 })));
-router.post('/customer-accounts/:id/treasury', ...treasuryCommandAccess, run(req => recordCustomerWorkspaceTreasury(prisma, req.params.id, {
+const customerTreasuryInput = (req: WorkspaceRequest): Parameters<typeof recordCustomerWorkspaceTreasury>[2] => ({
   kind: req.body.kind, amountRials: wholeRials(req.body.amountRials || '0'), occurredAt: validDate(req.body.occurredAt, 'تاریخ عملیات'),
   periodId: String(req.body.periodId || ''), postingRuleId: String(req.body.postingRuleId || ''), financialAccountId: req.body.financialAccountId,
   bankLedgerId: req.body.bankLedgerId, receiptId: req.body.receiptId, creditItemId: req.body.creditItemId, allocationId: req.body.allocationId, supplierPartyId: req.body.supplierPartyId,
@@ -265,7 +267,46 @@ router.post('/customer-accounts/:id/treasury', ...treasuryCommandAccess, run(req
     check: part.check == null ? undefined : { serialNumber: String(part.check.serialNumber || ''), bankName: String(part.check.bankName || ''), sayadId: part.check.sayadId,
       dueAt: validDate(part.check.dueAt, 'سررسید چک') },
   })),
-})));
+});
+router.post('/customer-accounts/:id/treasury', ...treasuryCommandAccess, run(req => recordCustomerWorkspaceTreasury(prisma, req.params.id, customerTreasuryInput(req))));
+const readCustomerAllocationStatus = run(req => readCustomerAllocationCommandStatus(prisma, req.params.id, customerTreasuryInput(req)));
+router.post('/customer-accounts/:id/treasury/status', ...treasuryCommandAccess, (req: WorkspaceRequest, res: Response) => {
+  res.set('Cache-Control', 'private, no-store');
+  return readCustomerAllocationStatus(req, res);
+});
+
+const privateAllocationIntent = (handler: (req: WorkspaceRequest) => Promise<unknown>) => {
+  const respond = run(handler);
+  return (req: WorkspaceRequest, res: Response) => {
+    res.set('Cache-Control', 'private, no-store');
+    return respond(req, res);
+  };
+};
+const allocationIntentPath = '/customer-accounts/:id/treasury/allocation-intent';
+router.get(allocationIntentPath, ...treasuryCommandAccess, privateAllocationIntent(async req => {
+  const intent = await readCustomerAllocationIntent(prisma, req.params.id, { ...actorOf(req), profile: profileOf(req) });
+  if (intent.status !== 'UNKNOWN') return intent;
+  try {
+    await prisma.$transaction(tx => requireCustomerSourceSharesWithin(tx, 'grouped-allocation'));
+  } catch (error) {
+    if (error instanceof AccountingCustomerTreasuryError && error.code === 'CUSTOMER_SOURCE_SHARES_CLOSED') {
+      return { status: 'CLOSED' };
+    }
+    throw error;
+  }
+  return intent;
+}));
+router.post(allocationIntentPath, ...treasuryCommandAccess, privateAllocationIntent(req =>
+  prepareAdmittedCustomerAllocationIntent(prisma, req.params.id, customerTreasuryInput(req))));
+router.post(`${allocationIntentPath}/status`, ...treasuryCommandAccess, privateAllocationIntent(req =>
+  readCustomerAllocationIntentByCommand(prisma, req.params.id, customerTreasuryInput(req))));
+router.post(`${allocationIntentPath}/cancel`, ...treasuryCommandAccess, privateAllocationIntent(req =>
+  cancelCustomerAllocationIntent(prisma, req.params.id, customerTreasuryInput(req))));
+router.post(`${allocationIntentPath}/reconcile`, ...managerAccess,
+  requireFeatureAccess(FEATURES.ACCOUNTING_TREASURY_MANAGE, FEATURE_PERMISSIONS.EDIT), privateAllocationIntent(req =>
+    reconcileCustomerAllocationIntent(prisma, req.params.id, {
+      intentId: String(req.body?.intentId ?? ''), reason: String(req.body?.reason ?? ''), actor: actorOf(req),
+    })));
 
 router.post('/customer-accounts/:id/opening-attribution', ...customerPostingAccess, run(req => attributeCustomerOpening(prisma, req.params.id, {
   lineKey: String(req.body.lineKey || ''), expectedSequence: Number(req.body.expectedSequence), expectedSnapshotHash: String(req.body.expectedSnapshotHash || ''),

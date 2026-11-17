@@ -24,6 +24,9 @@ def tar_bytes(files):
                 entry.type = tarfile.SYMTYPE
                 entry.linkname = '/untrusted'
                 archive.addfile(entry)
+            elif value is True:
+                entry.type = tarfile.DIRTYPE
+                archive.addfile(entry)
             else:
                 entry.size = len(value)
                 archive.addfile(entry, io.BytesIO(value))
@@ -61,11 +64,16 @@ class ColdBrowserTests(unittest.TestCase):
 
     def test_changed_native_identity_whiteout_and_symlink_refuse(self):
         valid = {'app/.next-build/BUILD_ID': b'erp_exact_image123', 'app/.next-build/browser-build-identity.json': json.dumps({'format': 'sabalan-browser-build/v1', 'browserBuildId': 'erp_exact_image123', 'nativeBuildId': 'erp_exact_image123'}).encode()}
+        conventional = {'./app/': True, './app/.next-build/': True, **{'./' + name: raw for name, raw in valid.items()}}
+        self.assertEqual(self.observe('frontend', [conventional])['id'], 'erp_exact_image123')
         for same_layer in [{**valid, '.wh..wh..opq': b''}, {'.wh..wh..opq': b'', **valid}]:
             self.assertEqual(self.observe('frontend', [valid, same_layer])['id'], 'erp_exact_image123')
-        for later in [{'.wh.app': b''}, {'.wh..wh..opq': b''}, {'app/.wh..wh..opq': b''}, {'app/.next-build/BUILD_ID': b'erp_other_image123'}, {'app/.next-build/.wh.BUILD_ID': b''}, {'app/.next-build': None}]:
+        for later in [{'.wh.app': b''}, {'.wh..wh..opq': b''}, {'app/.wh..wh..opq': b''}, {'app/.next-build/BUILD_ID': b'erp_other_image123'}, {'app/.next-build/.wh.BUILD_ID': b''}, {'app/.next-build': None}, {'app//.next-build': None}, {'app///.next-build': None}]:
             with self.assertRaises(AssertionError):
                 self.observe('frontend', [valid, later])
+        inquiry = {'app/.next/BUILD_ID': b'build-native-next', 'app/.next/required-server-files.json': b'{"config":{}}'}
+        with self.assertRaises(AssertionError):
+            self.observe('inquiry', [inquiry, {'app//.next': None}])
 
 
 if __name__ == '__main__':

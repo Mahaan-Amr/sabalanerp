@@ -19,6 +19,21 @@ EXPORT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(EXPORT)
 
 
+class ReviewedStoragePlanTests(unittest.TestCase):
+    def test_backup_capacity_uses_existing_lock_without_an_audit_path(self):
+        with mock.patch.object(EXPORT, 'run', return_value=json.dumps({
+            'ok': True, 'availableBytes': EXPORT.BACKUP_RESERVE,
+            'plan': {'images': [], 'containers': []},
+        }).encode()) as run:
+            self.assertEqual(EXPORT.backup_preflight(EXPORT.BACKUP_RESERVE), EXPORT.BACKUP_RESERVE)
+        command = run.call_args.args[0][-1]
+        self.assertIn('exec 9</run/lock/sabalan-backup-storage.lock', command)
+        self.assertNotIn('exec 9>', command)
+        self.assertNotIn('--audit', command)
+        self.assertIn('adapter.snapshot()', EXPORT.READ_ONLY_STORAGE_PLAN)
+        self.assertNotIn('adapter.record', EXPORT.READ_ONLY_STORAGE_PLAN)
+
+
 def pack(entries):
     output = io.BytesIO()
     with tarfile.open(fileobj=output, mode='w') as archive:

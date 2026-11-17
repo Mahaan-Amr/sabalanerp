@@ -135,11 +135,37 @@ def discard_incomplete_stage(stage, destination=None):
 
 # Executed only in the existing production host via `python3 -c`; no source
 # file/archive staging. Docker save receives exact immutable IDs, never tags.
+READ_ONLY_STORAGE_PLAN = r'''
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { dockerStorageAdapter, planStorageCleanup } from './scripts/deployment-storage.mjs';
+
+const [project, lockPath, storageRoot, rootsJson, journalsJson, documentsJson] = process.argv.slice(1);
+const assertLock = async () => {
+  const file = fs.statSync(lockPath);
+  const descriptor = fs.fstatSync(9);
+  if (file.dev !== descriptor.dev || file.ino !== descriptor.ino) throw new Error('STORAGE_LOCK_INVALID');
+  const stdio = Array(10).fill('ignore');
+  stdio[9] = 9;
+  execFileSync('flock', ['--nonblock', '9'], { stdio, timeout: 5000 });
+};
+await assertLock();
+const adapter = dockerStorageAdapter({
+  project, storageRoot, assertLock, protectedImages: [],
+  checkpointRoots: JSON.parse(rootsJson), journalRoots: JSON.parse(journalsJson),
+  documents: JSON.parse(documentsJson),
+});
+const plan = planStorageCleanup(await adapter.snapshot());
+console.log(JSON.stringify({ ok: true, plan, availableBytes: await adapter.availableBytes() }));
+'''
+
+
 SOURCE = r'''
-import fcntl, hashlib, json, os, subprocess, sys
+import base64, fcntl, hashlib, json, os, subprocess, sys
 expected=json.loads(sys.argv[1]); selected=sys.argv[2]
 source_reserve=int(sys.argv[3]) if len(sys.argv)>3 else 6461124544
 expected_commit=sys.argv[4] if len(sys.argv)>4 else None
+read_only_plan=base64.b64decode(sys.argv[5]).decode() if len(sys.argv)>5 else None
 def require(condition, message):
  if not condition: raise RuntimeError(message)
 require(selected in expected.values(), 'UNEXPECTED_IMAGE')
@@ -176,6 +202,10 @@ preflight=['node','deploy/scripts/storage-preflight.mjs','--mode','plan','--proj
  '--document','/var/lib/docker/volumes/sabalanerp_recovery_coordination/_data/pending-restore.json',
  '--document','/opt/sabalanerp/reports/deploy/active-deployment-session.json',
  '--audit','/opt/sabalanerp/reports/deploy/storage-cleanup-local.jsonl']
+if read_only_plan:
+ preflight=['node','--input-type=module','-e',read_only_plan,'sabalanerp','.deploy-state/deployment.lock','/var/lib/docker',
+  json.dumps([preflight[preflight.index('--checkpoint-root')+1],'/mnt/sabalanerp-independent-recovery']),
+  json.dumps(['/opt/sabalanerp/reports/deploy']),json.dumps([preflight[i+1] for i,arg in enumerate(preflight) if arg=='--document'])]
 capacity=json.loads(call(preflight))
 require(capacity['ok'] and capacity['availableBytes']>=source_reserve and not capacity['plan']['images'] and not capacity['plan']['containers'], 'SOURCE_CAPACITY_PREFLIGHT_FAILED')
 p=subprocess.Popen(['docker','image','save',selected],stdout=sys.stdout.buffer,stderr=subprocess.PIPE)
@@ -198,6 +228,7 @@ def run(args, timeout):
 
 
 def backup_preflight(required_bytes=None):
+    reviewed = required_bytes is not None
     required_bytes = BACKUP_RESERVE if required_bytes is None else required_bytes
     cmd = ("exec 9>/run/lock/sabalan-backup-storage.lock; flock -n 9 || exit 75; "
            "node /opt/sabalanerp-recovery/deploy/scripts/storage-preflight.mjs "
@@ -205,6 +236,13 @@ def backup_preflight(required_bytes=None):
            f"--lock-fd 9 --storage-root /srv/sabalanerp-recovery --required-bytes {required_bytes} "
            "--checkpoint-root /srv/sabalanerp-recovery/checkpoints "
            "--audit /var/log/sabalanerp-backup/storage-cleanup.jsonl")
+    if reviewed:
+        encoded = base64.b64encode(READ_ONLY_STORAGE_PLAN.encode()).decode()
+        cmd = ("cd /opt/sabalanerp-recovery || exit 75; exec 9</run/lock/sabalan-backup-storage.lock || exit 75; "
+               "flock -n 9 || exit 75; "
+               f'node --input-type=module -e "$(printf %s {encoded} | base64 -d)" '
+               "sabalanerp-backup /run/lock/sabalan-backup-storage.lock /srv/sabalanerp-recovery "
+               "'[\"/srv/sabalanerp-recovery/checkpoints\"]' '[]' '[]'")
     value = json.loads(run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
                             '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
                             'sabalan-backup', cmd], timeout=180))
@@ -340,7 +378,8 @@ def stream_one(stage, service, image, previous_bytes, plan=None):
     encoded = base64.b64encode(SOURCE.encode()).decode()
     remote = "python3 -c 'import base64;exec(base64.b64decode(\"" + encoded + "\"))' '" + json.dumps(images, separators=(',', ':')) + "' '" + image + "'"
     if plan:
-        remote += f' {source_reserve} {plan.commit}'
+        read_only_plan = base64.b64encode(READ_ONLY_STORAGE_PLAN.encode()).decode()
+        remote += f' {source_reserve} {plan.commit} {read_only_plan}'
     remote = f'timeout --signal=TERM --kill-after=5s {TRANSFER_TIMEOUT_SECONDS}s ' + remote
     partial = stage / (service + '.docker.tar.partial')
     final = stage / (service + '.docker.tar')
@@ -395,7 +434,7 @@ def stream_one(stage, service, image, previous_bytes, plan=None):
         require(not stderr_reader.is_alive(), 'SOURCE_STDERR_NOT_CLOSED')
         require(not timed_out.is_set(), 'SOURCE_EXPORT_TIMED_OUT')
         stderr = stderr_tail.decode(errors='replace')
-        require(process.returncode == 0, 'SOURCE_EXPORT_FAILED:' + stderr[-500:])
+        require(process.returncode == 0, 'SOURCE_EXPORT_FAILED')
         markers = [line[17:] for line in stderr.splitlines() if line.startswith('SABALAN439_PROOF=')]
         require(len(markers) == 1, 'SOURCE_PROOF_MISSING')
         source = json.loads(markers[0])

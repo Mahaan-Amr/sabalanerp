@@ -35,6 +35,7 @@ import {
 import { publishNotificationEvent } from '../services/notificationService';
 import { createBackupRequest, executeBackupRequest } from '../services/systemRecoveryBackupRequest';
 import { runtimeHttpRequests } from '../services/httpRequestLifecycle';
+import { queueRecoveryOwnerRequest } from '../services/systemRecoveryOwnerHandoff';
 
 const router = express.Router();
 const uploadTemp = path.join(RECOVERY_ROOT, 'upload-temp');
@@ -105,14 +106,6 @@ router.get('/', async (req: AuthRequest, res) => {
   });
 });
 
-const requireLegacyRecoveryExecution: express.RequestHandler = (_req, res, next) => {
-  if (isRestrictedRecoveryRuntime(process.env)) {
-    res.status(503).json({ success: false, error: 'SYSTEM_RECOVERY_OWNER_HANDOFF_UNAVAILABLE' });
-    return;
-  }
-  next();
-};
-
 router.post('/owner-backup-requests', async (req: AuthRequest, res) => {
   if (!isRestrictedRecoveryRuntime(process.env)) {
     return res.status(404).json({ success: false, error: 'SYSTEM_RECOVERY_OWNER_REQUEST_UNAVAILABLE' });
@@ -135,7 +128,7 @@ router.post('/owner-backup-requests', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/backups', requireLegacyRecoveryExecution, async (req: AuthRequest, res) => {
+router.post('/backups', async (req: AuthRequest, res) => {
   let lockAcquired = false;
   let backgroundStarted = false;
   try {
@@ -145,7 +138,20 @@ router.post('/backups', requireLegacyRecoveryExecution, async (req: AuthRequest,
     const passphrase = assertStrongBackupPassphrase(req.body.passphrase);
     if (!acquireRecoveryOperation()) return res.status(409).json({ success: false, error: 'RECOVERY_OPERATION_IN_PROGRESS' });
     lockAcquired = true;
-    const operation = await createBackupRequest(prisma, { packageType, actorId: req.user!.id });
+    const ownerExecution = isRestrictedRecoveryRuntime(process.env);
+    const operation = await createBackupRequest(prisma, { packageType, actorId: req.user!.id, ownerExecution });
+    if (ownerExecution) {
+      try {
+        await queueRecoveryOwnerRequest(prisma, { operationId: operation.id, actorId: req.user!.id,
+          action: 'BACKUP', packageType, passphrase });
+      } catch (error) {
+        await prisma.recoveryOperation.update({ where: { id: operation.id }, data: {
+          status: 'FAILED', errorCode: 'SYSTEM_RECOVERY_OWNER_HANDOFF_FAILED', errorMessage: 'Owner handoff failed.' } });
+        throw error;
+      }
+      backgroundStarted = true;
+      return res.status(202).json({ success: true, data: serializeOperation(operation) });
+    }
     res.status(202).json({ success: true, data: serializeOperation(operation) });
     backgroundStarted = true;
     setImmediate(async () => {
@@ -337,7 +343,7 @@ router.post('/:id/approve', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/restore', requireLegacyRecoveryExecution, async (req: AuthRequest, res) => {
+router.post('/:id/restore', async (req: AuthRequest, res) => {
   let lockAcquired = false;
   let backgroundStarted = false;
   try {
@@ -394,6 +400,24 @@ router.post('/:id/restore', requireLegacyRecoveryExecution, async (req: AuthRequ
       });
     });
     await audit(operation.id, req.user!.id, 'RECOVERY_RESTORE_STARTED', operation.encryptedSha256, { authorizationMode: authorization.mode });
+    if (isRestrictedRecoveryRuntime(process.env)) {
+      try {
+        await queueRecoveryOwnerRequest(prisma, { operationId: operation.id, actorId: req.user!.id,
+          action: 'RESTORE', packageType: operation.packageType as RecoveryPackageType, passphrase,
+          checksum: operation.encryptedSha256, approvedById: operation.approvedById,
+          approvalExpiresAt: operation.approvalExpiresAt?.toISOString() || null,
+          breakGlassReason: authorization.mode === 'BREAK_GLASS' ? String(req.body.breakGlassReason).trim() : undefined,
+          confirmationPhrase: req.body.confirmationPhrase, bootstrapPassword });
+      } catch (error) {
+        await prisma.recoveryOperation.update({ where: { id: operation.id }, data: {
+          status: operation.status, progress: 100, restoreStartedAt: null,
+        } });
+        throw error;
+      }
+      backgroundStarted = true;
+      return res.status(202).json({ success: true, data: { operationId: operation.id, restarting: true,
+        bootstrapAdmin: bootstrapPassword ? { username: 'local_recovery_admin', temporaryPassword: bootstrapPassword } : null } });
+    }
     setRecoveryRuntimeState('MAINTENANCE', operation.id, 'A validated system recovery is being promoted.');
     res.status(202).json({
       success: true,

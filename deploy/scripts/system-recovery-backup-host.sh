@@ -2,6 +2,11 @@
 # Sourced only by the protected host runner after its canonical host lock.
 
 system_recovery_owner_command() {
+  if [ "${SYSTEM_RECOVERY_OWNER_HANDOFF:-0}" -eq 1 ]; then
+    run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/system-recovery-owner.js \
+      --sealed "${SYSTEM_RECOVERY_OPERATION_ID}" "${SYSTEM_RECOVERY_OWNER_ACTION}" <&8 8<&-
+    return
+  fi
   run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/system-recovery-owner.js \
     "${SYSTEM_RECOVERY_OPERATION_ID}" <&8 8<&-
 }
@@ -44,6 +49,7 @@ run_system_recovery_backup() {
     return 1
   }
   ENV_FILE="$(realpath -- "${ENV_FILE}")"
+  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0 "${COMPOSE_FILE}"
 
   # Snapshot the immutable running set and keep the original topology,
   # including a legacy scanner when the existing release uses it.
@@ -104,6 +110,25 @@ run_system_recovery_backup() {
   assert_system_recovery_advisory
   capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" verify "${backup_snapshot}" "${ENV_FILE}"
 
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
+    # Application recovery uses the same independently read-back safety point
+    # as release mutation. The uploaded archive never replaces this checkpoint.
+    capture_clamav_checkpoint
+    assert_qa_remote_checkpoint_mount
+    run_original_owned_with_heartbeat host_backup_retention BEFORE_CHECKPOINT
+    bind_host_backup_retention_receipt BEFORE_CHECKPOINT
+    run_backend_timed_with_heartbeat 3600 node dist/scripts/deployment-checkpoint.js
+    assert_original_legacy_still_stopped
+    assert_qa_remote_checkpoint_mount
+    phase LOCAL_CHECKPOINT_VERIFIED
+    phase REMOTE_CHECKPOINT_VERIFIED
+    run_original_owned_with_heartbeat host_backup_retention AFTER_CHECKPOINT
+    bind_host_backup_retention_receipt AFTER_CHECKPOINT
+    run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-retention-local.js apply AFTER_CHECKPOINT
+    phase MUTATION_STARTED
+    restore_mutation_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"
+  fi
+
   system_recovery_owner_command &
   backup_owner_pid=$!
   exec 8<&-
@@ -112,7 +137,7 @@ run_system_recovery_backup() {
   while kill -0 "${backup_owner_pid}" 2>/dev/null; do
     sleep 5
     backup_heartbeat_elapsed=$((backup_heartbeat_elapsed + 5))
-    if [ "${backup_heartbeat_elapsed}" -ge 60 ]; then
+    if [ "${backup_heartbeat_elapsed}" -ge 15 ]; then
       if ! assert_system_recovery_advisory || ! verify_public_maintenance || ! control heartbeat; then
         backup_heartbeat_good=0
       fi
@@ -127,19 +152,40 @@ run_system_recovery_backup() {
   assert_original_legacy_still_stopped
   assert_native_runtime_closed
 
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
+    phase MIGRATIONS_APPLIED
+    phase RELEASE_STARTED
+  fi
+
   # The restart helper guards the original FD9, lease, configuration bytes,
   # and exact container IDs before starting the original service set.
+  reopen_budget_started="${backup_pause_started}"
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
+    # The normal release mutation budget starts after checkpoint verification.
+    # Keep the full maintenance start above for its separate pause measurement.
+    reopen_budget_started="${restore_mutation_started}"
+  fi
   run_original_owned_with_heartbeat node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" start-original \
-    "${backup_snapshot}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" 300 "${backup_pause_started}" "${SESSION_HOST_PATH}"
+    "${backup_snapshot}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" 300 "${reopen_budget_started}" "${SESSION_HOST_PATH}"
   capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" verify "${backup_snapshot}" "${ENV_FILE}"
   verify_database_role_pin "$(compose ps -q backend)" "$(compose ps -q postgres)"
-  DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-gates.js
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
+    DEPLOYMENT_GATE_MODE=RELEASE run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-gates.js
+  else
+    DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-gates.js
+  fi
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then phase GATES_PASSED; fi
   verify_public_maintenance
   assert_system_recovery_advisory
   control heartbeat
-  node -e 'if(process.hrtime.bigint()-BigInt(process.argv[1])>=900000000000n)process.exit(1)' "${backup_pause_started}"
+  node -e 'if(process.hrtime.bigint()-BigInt(process.argv[1])>=900000000000n)process.exit(1)' "${reopen_budget_started}"
   control maintenance-off
-  DEPLOYMENT_PHASE=ABORTED DEPLOYMENT_RESULT=ABORTED control finish
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
+    phase TRAFFIC_OPENED
+    DEPLOYMENT_PHASE=COMPLETED DEPLOYMENT_RESULT=COMPLETED control finish
+  else
+    DEPLOYMENT_PHASE=ABORTED DEPLOYMENT_RESULT=ABORTED control finish
+  fi
   MAINTENANCE_ACTIVE=0
   node "${SYSTEM_RECOVERY_BACKUP_HOST}" clear "${SYSTEM_RECOVERY_BACKUP_INTENT}" "${DEPLOYMENT_ID}" "${SYSTEM_RECOVERY_OPERATION_ID}"
   cleanup_locks

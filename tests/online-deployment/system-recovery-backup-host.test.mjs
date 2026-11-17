@@ -28,6 +28,9 @@ const backupRunner = fileURLToPath(new URL('../../deploy/scripts/system-recovery
 const fixture = String.raw`set -eu
 . "$1"
 BACKUP_FIXTURE_FAILURE="$2"
+SYSTEM_RECOVERY_OWNER_ACTION="$3"
+SYSTEM_RECOVERY_OWNER_HANDOFF=0
+[ "$SYSTEM_RECOVERY_OWNER_ACTION" != RESTORE ] || SYSTEM_RECOVERY_OWNER_HANDOFF=1
 REPO_ROOT=/opt/sabalanerp
 OPERATIONS_ROOT=/fake
 COMPOSE_FILE=docker-compose.prod.yml
@@ -44,6 +47,7 @@ exec 8<&0 </dev/null
 id() { printf '0\n'; }
 realpath() { printf '%s\n' "$2"; }
 env_value() { printf 'sabalan_application_runtime\n'; }
+sh() { case "$*" in *storage-preflight.sh*) echo 'storage-preflight';; *) command sh "$@";; esac; }
 compose() { printf 'container-id\n'; }
 docker() { case "$*" in *--format*) printf 'no-malware-scan\n';; *) printf '[]\n';; esac; }
 database_role_pin_path() { printf '/fake/pin\n'; }
@@ -72,10 +76,11 @@ run_backend() {
       [ "$BACKUP_FIXTURE_FAILURE" != owner ]
       ;;
     *deployment-gates.js*)
-      [ "$DEPLOYMENT_GATE_MODE" = PREVIOUS_UNCHANGED ]
+      if [ "$SYSTEM_RECOVERY_OWNER_ACTION" = RESTORE ]; then [ "$DEPLOYMENT_GATE_MODE" = RELEASE ]; else [ "$DEPLOYMENT_GATE_MODE" = PREVIOUS_UNCHANGED ]; fi
       echo 'gates'
       [ "$BACKUP_FIXTURE_FAILURE" != gates ]
       ;;
+    *deployment-checkpoint.js*) echo 'checkpoint'; [ "$BACKUP_FIXTURE_FAILURE" != checkpoint ] ;;
   esac
 }
 try_acquire_advisory() { echo 'advisory'; }
@@ -90,12 +95,17 @@ assert_native_runtime_closed() { echo 'native-closed'; }
 verify_database_role_pin() { echo 'roles-verified'; }
 run_original_owned_with_heartbeat() { "$@"; }
 cleanup_locks() { echo 'cleanup'; }
+capture_clamav_checkpoint() { echo 'capture-scanner'; }
+assert_qa_remote_checkpoint_mount() { echo 'remote-mount'; }
+host_backup_retention() { echo "retention $*"; }
+bind_host_backup_retention_receipt() { echo "retention-bound $*"; }
+run_backend_timed_with_heartbeat() { shift; run_backend "$@"; }
 sleep() { :; }
 run_system_recovery_backup
 `;
 
-function runBackupFixture(failure = '') {
-  const result = runShell(['-c', fixture, 'sh', backupRunner, failure], {
+function runBackupFixture(failure = '', action = 'BACKUP') {
+  const result = runShell(['-c', fixture, 'sh', backupRunner, failure, action], {
     input: 'synthetic1passphrase', encoding: 'utf8', timeout: 15000,
   });
   assert.equal(result.error, undefined);
@@ -107,6 +117,15 @@ test('the protected backup opens traffic after the owner and unchanged release g
   const result = runBackupFixture();
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /persist-hold[\s\S]*control acquire[\s\S]*public-503[\s\S]*drain\n[\s\S]*phase SERVICES_DRAINED[\s\S]*owner\n[\s\S]*native-closed[\s\S]*start-original[\s\S]*gates[\s\S]*public-503[\s\S]*control maintenance-off[\s\S]*control finish[\s\S]*complete-intent/);
+});
+
+test('application restore requires independent checkpoint verification before mutation and all release gates before reopening', () => {
+  const result = runBackupFixture('', 'RESTORE');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /storage-preflight[\s\S]*phase SERVICES_DRAINED[\s\S]*checkpoint[\s\S]*phase LOCAL_CHECKPOINT_VERIFIED[\s\S]*phase REMOTE_CHECKPOINT_VERIFIED[\s\S]*phase MUTATION_STARTED[\s\S]*owner\n[\s\S]*phase MIGRATIONS_APPLIED[\s\S]*phase RELEASE_STARTED[\s\S]*gates[\s\S]*phase GATES_PASSED[\s\S]*control maintenance-off[\s\S]*phase TRAFFIC_OPENED[\s\S]*control finish/);
+  const failed = runBackupFixture('checkpoint', 'RESTORE');
+  assert.equal(failed.status, 1, failed.stderr);
+  assert.doesNotMatch(failed.stdout, /owner\n|maintenance-off|complete-intent/);
 });
 
 test('owner or unchanged release gate failures keep the durable hold and maintenance', () => {

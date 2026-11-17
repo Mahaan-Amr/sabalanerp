@@ -11,7 +11,6 @@ export function createBackupRequest(prisma: PrismaClient, input: {
   actorId: string;
   ownerExecution?: boolean;
 }) {
-  if (input.ownerExecution && input.packageType !== 'COMPLETE') throw new Error('SYSTEM_RECOVERY_OWNER_PACKAGE_TYPE_INVALID');
   return prisma.$transaction(async tx => {
     const operation = await tx.recoveryOperation.create({
       data: {

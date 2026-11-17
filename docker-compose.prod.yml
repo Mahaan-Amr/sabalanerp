@@ -113,6 +113,7 @@ services:
       PUBLIC_APP_URL: ${PUBLIC_APP_URL}
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       RECOVERY_STORAGE_DIR: /app/storage/recovery
+      SYSTEM_RECOVERY_OWNER_PUBLIC_KEY_FILE: /run/deployment-secrets/system-recovery-owner-public.pem
       RECOVERY_COORDINATION_DIR: /app/recovery-coordination
       INQUIRY_RECOVERY_SOURCE_DIR: /app/recovery-sources/inquiry
       INQUIRY_RECOVERY_COORDINATED: "true"
@@ -132,6 +133,7 @@ services:
       - backend_storage_performance_exports:/app/storage/performance-exports
       - backend_uploads:/app/uploads
       - backend_recovery:/app/storage/recovery
+      - ${DEPLOYMENT_SECRET_DIR:-./deploy/secrets}/system-recovery-owner-public.pem:/run/deployment-secrets/system-recovery-owner-public.pem:ro
       - recovery_coordination:/app/recovery-coordination
       - inquiry_data:/app/recovery-sources/inquiry
       - ${DEPLOYMENT_SECRET_DIR:-./deploy/secrets}/partner-release-trust-public.der:/run/deployment-secrets/partner-release-trust-public.der:ro

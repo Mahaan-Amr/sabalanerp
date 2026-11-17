@@ -14,11 +14,15 @@ import { setRecoveryRuntimeState } from './recoveryRuntime';
 import { publishNotificationEvent } from './notificationService';
 import { replayPerformanceErasureAfterRestore } from './personnelPerformanceErasureStore';
 import { OWNER_BACKUP_REQUESTED } from './systemRecoveryBackupRequest';
+import { OWNER_HANDOFF_REQUESTED } from './systemRecoveryOwnerHandoff';
 
 const pendingOwnerBackup = {
-  status: 'CREATING', source: 'CREATED', packageType: 'COMPLETE', progress: 0, storageName: null,
+  status: 'CREATING', source: 'CREATED', progress: 0, storageName: null,
   auditEvents: { some: { eventType: OWNER_BACKUP_REQUESTED } },
 };
+const pendingOwnerRequest = { OR: [pendingOwnerBackup, {
+  status: 'RESTORING', progress: 0, auditEvents: { some: { eventType: OWNER_HANDOFF_REQUESTED } },
+}] };
 
 const replayPerformanceErasureFromSafetyDatabase = async (prisma: PrismaClient, safetyDatabase: string) => {
   // System Recovery deliberately reads its alternate pre-restore database and
@@ -36,7 +40,7 @@ const recoverInterruptedRestore = async (prisma: PrismaClient, options: Recovery
     await fs.promises.rm(INQUIRY_RESTART_MARKER, { force: true });
     setRecoveryRuntimeState('NORMAL');
     await prisma.recoveryOperation.updateMany({
-      where: { status: { in: ['CREATING', 'VALIDATING', 'RESTORING'] }, NOT: pendingOwnerBackup },
+      where: { status: { in: ['CREATING', 'VALIDATING', 'RESTORING'] }, NOT: pendingOwnerRequest },
       data: { status: 'FAILED', errorCode: 'PROCESS_INTERRUPTED', errorMessage: 'The recovery worker was interrupted before completion.' },
     });
     return;
@@ -64,7 +68,7 @@ const recoverInterruptedRestore = async (prisma: PrismaClient, options: Recovery
 const cleanupExpiredPackages = async (prisma: PrismaClient) => {
   const now = new Date();
   await prisma.recoveryOperation.updateMany({
-    where: { ...pendingOwnerBackup, expiresAt: { lte: now } },
+    where: { ...pendingOwnerRequest, expiresAt: { lte: now } },
     data: { status: 'EXPIRED' },
   });
   const expired = await prisma.recoveryOperation.findMany({

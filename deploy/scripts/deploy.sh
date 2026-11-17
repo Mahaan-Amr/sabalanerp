@@ -6,7 +6,26 @@ REPO_ROOT="${DEPLOYMENT_REPO_ROOT:-$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)
 OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
 SYSTEM_RECOVERY_BACKUP_HOST="${SCRIPT_DIR}/system-recovery-backup-host.mjs"
 SYSTEM_RECOVERY_BACKUP=0
+SYSTEM_RECOVERY_OWNER_HANDOFF=0
+SYSTEM_RECOVERY_OWNER_ACTION=BACKUP
 case "${1:-}" in
+  --system-recovery-owner)
+    [ "$#" -eq 4 ] || exit 1
+    exec node "${SYSTEM_RECOVERY_BACKUP_HOST}" launch-owner "${SCRIPT_DIR}/deploy.sh" "$2" "$3" "$4"
+    ;;
+  --system-recovery-owner-input)
+    [ "$#" -eq 4 ] && [ ! -t 0 ] || exit 1
+    case "$2" in /*) ;; *) exit 1;; esac
+    case "$4" in BACKUP|RESTORE) ;; *) exit 1;; esac
+    SYSTEM_RECOVERY_BACKUP=1
+    SYSTEM_RECOVERY_OWNER_HANDOFF=1
+    SYSTEM_RECOVERY_OWNER_ACTION="$4"
+    SYSTEM_RECOVERY_OPERATION_ID="$3"
+    shift
+    set -- "$1" "$2"
+    exec 8<&0 </dev/null
+    export COMPOSE_PROJECT_NAME=sabalanerp
+    ;;
   --system-recovery-backup)
     [ "$#" -eq 3 ] || { echo 'Usage: deploy.sh --system-recovery-backup <env> <operation-id>' >&2; exit 1; }
     exec node "${SYSTEM_RECOVERY_BACKUP_HOST}" launch "${SCRIPT_DIR}/deploy.sh" "$2" "$3"

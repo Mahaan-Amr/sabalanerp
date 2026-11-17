@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { promisify } from 'node:util';
 import bcrypt from 'bcryptjs';
 import express from 'express';
@@ -23,7 +23,7 @@ async function loadModule(file: string, replacements: Record<string, unknown>, e
   }).outputText;
   vm.runInNewContext(code, {
     exports: exported, require: (name: string) => replacements[name] ?? requireModule(name),
-    process: { env: environment, cwd: process.cwd }, console, Buffer, setImmediate,
+    process: { env: environment, cwd: process.cwd, platform: process.platform }, console, Buffer, setImmediate,
   }, { filename });
   return exported;
 }
@@ -112,9 +112,9 @@ test('restricted System Recovery records an authenticated complete backup reques
   assert.equal((await post({ adminPassword: password }, 'user')).status, 403);
   assert.equal((await post({ adminPassword: 'incorrect' }, 'admin')).status, 403);
   assert.equal((await post({ adminPassword: password, passphrase: 'separate-secret' }, 'admin')).status, 400);
-  assert.equal((await post({ adminPassword: password }, 'admin', '/backups')).status, 503);
+  assert.equal((await post({ adminPassword: password }, 'admin', '/backups')).status, 400);
   assert.equal((await post({ adminPassword: password }, 'admin', '/uploads')).status, 400);
-  assert.equal((await post({ adminPassword: password }, 'admin', '/id/restore')).status, 503);
+  assert.equal((await post({ adminPassword: password }, 'admin', '/id/restore')).status, 400);
   writeAdmitted = false;
   const held = await post({ adminPassword: password }, 'admin');
   assert.equal(held.status, 503);
@@ -131,40 +131,54 @@ test('restricted System Recovery records an authenticated complete backup reques
   assert.equal((await post({ adminPassword: password }, 'admin')).status, 404);
 });
 
-test('restricted ADMIN uploads and validates an encrypted recovery package without database control privileges', async t => {
+for (const intent of ['BACKUP', 'RESTORE'] as const) {
+test(`restricted ADMIN validates an encrypted upload and queues ${intent} without database control privileges`, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'sabalan-recovery-upload-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const environment = {
     DATABASE_URL: 'postgresql://sabalan_application_runtime@localhost/test',
     RECOVERY_STORAGE_DIR: root,
     NODE_ENV: 'production',
+    SYSTEM_RECOVERY_OWNER_PUBLIC_KEY_FILE: path.join(root, 'owner-public.pem'),
   };
+  const keys = generateKeyPairSync('rsa', { modulusLength: 3072,
+    publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs8', format: 'pem' } });
+  await fs.writeFile(environment.SYSTEM_RECOVERY_OWNER_PUBLIC_KEY_FILE, keys.publicKey);
   const password = 'isolated-admin-password';
   const passphrase = 'Recovery-passphrase-123';
   const passwordHash = await bcrypt.hash(password, 4);
   const operations = new Map<string, any>();
+  const events: any[] = [];
+  let operationNumber = 0;
   const database = {
-    user: { findUnique: async () => ({ password: passwordHash }) },
+    user: {
+      findUnique: async () => ({ password: passwordHash, firstName: 'Test', lastName: 'Admin', username: 'admin' }),
+      findMany: async () => [], count: async () => 1,
+    },
     recoveryOperation: {
       create: async ({ data }: any) => {
-        const operation = { id: 'cm12345678901234567890123', ...data };
+        const operation = { id: 'c' + String(++operationNumber).padStart(24, '0'), ...data };
         operations.set(operation.id, operation);
         return operation;
       },
       update: async ({ where, data }: any) => Object.assign(operations.get(where.id), data),
       findMany: async () => [...operations.values()],
       findFirst: async () => null,
+      findUnique: async ({ where }: any) => operations.get(where.id),
     },
-    recoveryAuditEvent: { create: async () => ({}) },
+    recoveryAuditEvent: { create: async ({ data }: any) => { events.push(data); return data; } },
+    async $transaction(work: (tx: object) => Promise<any>): Promise<any> { return work(database); },
     $queryRawUnsafe: async (sql: string) => {
       assert.equal(sql, 'SHOW server_version', 'upload validation must not execute privileged SQL');
       return [{ version: '15.0' }];
     },
   };
   const runtime = { ...await import('../recoveryRuntime'), RECOVERY_ROOT: root, RECOVERY_COORDINATION_DIR: path.join(root, 'coordination') };
+  t.after(() => runtime.releaseRecoveryOperation());
   const engine = await loadModule('../systemRecoveryEngine.ts', {
     './recoveryRuntime': runtime,
   }, environment);
+  const handoff = await loadModule('../systemRecoveryOwnerHandoff.ts', { './recoveryRuntime': runtime }, environment);
   const auth = await loadModule('../../middleware/auth.ts', {
     '../lib/prisma': { prisma: database },
     '../services/identitySessionService': {
@@ -179,10 +193,12 @@ test('restricted ADMIN uploads and validates an encrypted recovery package witho
     '../lib/prisma': { prisma: database },
     '../middleware/auth': auth,
     '../services/systemRecoveryEngine': engine,
+    '../services/systemRecoveryOwnerHandoff': handoff,
     '../services/recoveryRuntime': runtime,
     '../services/notificationService': {},
   }, environment);
   const app = express();
+  app.use(express.json());
   app.use('/api/system-recovery', route.default);
   const server = app.listen(0, '127.0.0.1');
   t.after(() => new Promise<void>(resolve => {
@@ -194,7 +210,7 @@ test('restricted ADMIN uploads and validates an encrypted recovery package witho
   assert(address && typeof address === 'object');
   const baseUrl = `http://127.0.0.1:${address.port}/api/system-recovery`;
   const payload = path.join(root, 'fixture');
-  const components = [];
+  const components: Array<{ path: string; size: number; sha256: string }> = [];
   for (const [name, bytes] of [['database/main.dump', 'opaque-dump'], ['inquiry/inquiry.db', 'opaque-sqlite']]) {
     await fs.mkdir(path.dirname(path.join(payload, name)), { recursive: true });
     await fs.writeFile(path.join(payload, name), bytes);
@@ -218,7 +234,8 @@ test('restricted ADMIN uploads and validates an encrypted recovery package witho
   assert.equal(receipt.data.originalName, 'complete.sabrec');
   assert.equal(receipt.data.storageName, undefined);
   let result: any;
-  for (let attempt = 0; attempt < 100; attempt++) {
+  const validationDeadline = Date.now() + 30_000;
+  while (Date.now() < validationDeadline) {
     const listing: any = await (await fetch(baseUrl, { headers: { Cookie: 'session=admin' } })).json();
     result = listing.data.operations.find((operation: any) => operation.id === receipt.data.id);
     if (result.status !== 'VALIDATING') break;
@@ -228,4 +245,39 @@ test('restricted ADMIN uploads and validates an encrypted recovery package witho
   assert.equal(result.packageType, 'COMPLETE');
   assert.equal(result.progress, 100);
   assert.equal(result.compatibility.compatible, true);
+  if (intent === 'RESTORE') {
+    const restoreResponse = await fetch(`${baseUrl}/${receipt.data.id}/restore`, { method: 'POST',
+      headers: { Cookie: 'session=admin', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adminPassword: password, passphrase, confirmationPhrase: 'RESTORE SABALAN ERP',
+        breakGlassReason: 'Restore the approved complete backup after operator verification.' }) });
+    assert.equal(restoreResponse.status, 202);
+    const restored: any = await restoreResponse.json();
+    assert.equal(restored.data.operationId, receipt.data.id);
+    assert.equal(restored.data.restarting, true);
+    const sealed = await fs.readFile(path.join(root, 'owner-inbox', receipt.data.id + '.json'));
+    const request = handoff.openRecoveryOwnerRequest(sealed, keys.privateKey);
+    assert.equal(request.action, 'RESTORE');
+    assert.equal(request.actorId, 'admin');
+    assert.equal(request.checksum, result.encryptedSha256);
+    assert.equal(request.confirmationPhrase, 'RESTORE SABALAN ERP');
+    assert.equal(sealed.includes(Buffer.from(passphrase)), false);
+    return;
+  }
+  const backupResponse = await fetch(`${baseUrl}/backups`, { method: 'POST',
+    headers: { Cookie: 'session=admin', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminPassword: password, passphrase, packageType: 'SANITIZED_TEST' }) });
+  assert.equal(backupResponse.status, 202);
+  const backup: any = await backupResponse.json();
+  assert.equal(backup.data.packageType, 'SANITIZED_TEST');
+  const sealed = await fs.readFile(path.join(root, 'owner-inbox', backup.data.id + '.json'));
+  assert.equal(sealed.includes(Buffer.from(passphrase)), false);
+  const request = handoff.openRecoveryOwnerRequest(sealed, keys.privateKey);
+  assert.equal(request.operationId, backup.data.id);
+  assert.equal(request.actorId, 'admin');
+  assert.equal(request.action, 'BACKUP');
+  assert.equal(request.packageType, 'SANITIZED_TEST');
+  assert.equal(request.passphrase, passphrase);
+  assert(events.some(event => event.operationId === backup.data.id && event.eventType === 'RECOVERY_OWNER_HANDOFF_REQUESTED'
+    && event.details.sealedSha256 === createHash('sha256').update(sealed).digest('hex')));
 });
+}

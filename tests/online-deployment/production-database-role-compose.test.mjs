@@ -38,6 +38,12 @@ test('rendered production services separate application and privileged database 
   assert.equal(services.backend.environment.POSTGRES_PASSWORD, undefined);
   assert.ok(!JSON.stringify(services.backend.environment).includes('control-private'));
   assert.ok(!JSON.stringify(services).includes('allocation-private'));
+  const publicKey = services.backend.volumes.filter(mount => mount.target === '/run/deployment-secrets/system-recovery-owner-public.pem');
+  assert.equal(publicKey.length, 1);
+  assert.equal(publicKey[0].read_only, true);
+  assert.equal(services.backend.environment.SYSTEM_RECOVERY_OWNER_PUBLIC_KEY_FILE, publicKey[0].target);
+  assert.ok(!JSON.stringify(services.backend).includes('system-recovery-owner-private'));
+  assert.ok(!services.backend.volumes.some(mount => mount.target === '/run/deployment-secrets'));
 });
 
 test('role configuration rejects a URL-encoded bootstrap login without disclosing credentials', () => {

@@ -43,7 +43,7 @@ test('host pack carries all canonical inspector imports and preservation policy 
  const result=spawnSync(process.execPath,['scripts/build-online-controller-host-pack.mjs','--inspect'],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);const files=JSON.parse(result.stdout).hostFiles;
  for(const file of preservationSources)assert.equal(files.filter(name=>name===file).length,1,file);
  for(const file of ['deploy/scripts/online-owner-service.py','deploy/scripts/online-release-launcher.py','deploy/scripts/capture-only-release.mjs','deploy/scripts/legacy-backend-signal.py',
-  'deploy/scripts/predecessor-role-cutover-operation.mjs','deploy/scripts/predecessor-role-host-configuration.py'])assert.ok(files.includes(file));
+  'deploy/scripts/predecessor-role-cutover-operation.mjs','deploy/scripts/predecessor-role-host-configuration.py','deploy/scripts/predecessor-role-cutover-native.py'])assert.ok(files.includes(file));
 });
 
 test('resume cannot silently drop preservation after lost plan metadata or mismatched original journal',()=>{

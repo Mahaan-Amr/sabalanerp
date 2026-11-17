@@ -7,12 +7,16 @@ import os
 from pathlib import Path
 import tempfile
 import subprocess
+import sys
 import unittest
 
 MODULE = Path(__file__).resolve().parents[2] / "deploy/scripts/predecessor-role-host-configuration.py"
 SPEC = importlib.util.spec_from_file_location("role_configuration", MODULE)
 roles = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(roles)
+NATIVE_SPEC = importlib.util.spec_from_file_location("role_native", MODULE.with_name("predecessor-role-cutover-native.py"))
+native = importlib.util.module_from_spec(NATIVE_SPEC)
+NATIVE_SPEC.loader.exec_module(native)
 
 SERVICES = ("backend", "frontend", "inquiry", "nginx", "postgres", "clamav")
 GRAPH = {name: "sha256:" + str(i) * 64 for i, name in enumerate(SERVICES, 1)}
@@ -410,6 +414,88 @@ class HostConfigurationTest(unittest.TestCase):
             self.assertEqual(self.env.read_bytes(), ORIGINAL)
             self.assertEqual(called, ["stage-predecessor-role-grants", "restore-predecessor-role-grants",
                                       "attest-predecessor-backend-runtime"])
+
+    def test_native_child_inherits_lock_and_retains_only_redacted_closure_evidence(self):
+        raw = b"6" * 64 + PASSWORD
+        command = (sys.executable, "-c",
+                   "import os, sys, time; assert os.readlink('/proc/self/fd/9').endswith('/deployment.lock');"
+                   "data = sys.stdin.buffer.read(); assert len(data) == 107;"
+                   "sys.stderr.buffer.write(data); time.sleep(0.12); print('safe acknowledgement')")
+        calls = []
+
+        def renewal(session, checkpoint):
+            self.assertEqual((session, checkpoint), (self.session, self.checkpoint))
+            calls.append(1)
+            return True
+
+        with self.owner():
+            stdout, receipt = native.run_native_child(
+                self.root, self.root / "reports", self.root / "coordination",
+                "MUTATION_STARTED", "activate-predecessor-runtime-login", command,
+                stdin=raw, renewal=renewal, budget_seconds=2, heartbeat_seconds=0.03,
+            )
+        self.assertEqual(stdout.strip(), b"safe acknowledgement")
+        self.assertGreaterEqual(len(calls), 3)
+        self.assertTrue(receipt["childClosed"])
+        self.assertTrue(receipt["stdoutClosed"])
+        self.assertTrue(receipt["stderrClosed"])
+        self.assertFalse(receipt["canOpenTraffic"])
+        self.assertEqual(receipt["outcome"], "CLOSED")
+        files = list((self.root / ".deploy-state").glob("**/native-*.json"))
+        self.assertEqual(len(files), 2)
+        self.assertTrue(all(PASSWORD not in item.read_bytes() for item in files))
+
+    def test_native_child_keeps_heartbeat_after_failure_until_descendant_pipe_eof(self):
+        marker = self.root / "native-closed.txt"
+        command = (sys.executable, "-c",
+                   "import subprocess, sys; subprocess.Popen([sys.executable, '-c',"
+                   "'import time, pathlib, sys; time.sleep(0.15); pathlib.Path(sys.argv[1]).touch()', sys.argv[1]])",
+                   str(marker))
+        calls = []
+
+        def renewal(session, checkpoint):
+            calls.append(marker.exists())
+            return len(calls) != 2
+
+        with self.owner():
+            with self.assertRaises(native.ProtectedNativeChildError):
+                native.run_native_child(
+                    self.root, self.root / "reports", self.root / "coordination",
+                    "MUTATION_STARTED", "stage-predecessor-role-grants", command,
+                    renewal=renewal, budget_seconds=0.05, heartbeat_seconds=0.02,
+                )
+        self.assertTrue(marker.exists())
+        self.assertGreaterEqual(len(calls), 3)
+        status = list((self.root / ".deploy-state").glob("**/native-*-result.json"))
+        self.assertEqual(len(status), 1)
+        receipt = json.loads(status[0].read_bytes())
+        self.assertEqual(receipt["outcome"], "HELD")
+        self.assertTrue(receipt["deadlineExceeded"])
+        self.assertTrue(receipt["heartbeatFailed"])
+        self.assertTrue(receipt["stdoutClosed"] and receipt["stderrClosed"] and receipt["childClosed"])
+        self.assertFalse(receipt["canOpenTraffic"])
+
+    def test_native_signal_cannot_detach_a_mutating_child_or_authorize_output(self):
+        marker = self.root / "native-signal-closed.txt"
+        command = (sys.executable, "-c",
+                   "import os, signal, time, pathlib, sys; os.kill(os.getppid(), signal.SIGTERM);"
+                   "time.sleep(0.12); pathlib.Path(sys.argv[1]).touch(); print('no release authorization')",
+                   str(marker))
+        with self.owner():
+            with self.assertRaises(native.ProtectedNativeChildError):
+                native.run_native_child(
+                    self.root, self.root / "reports", self.root / "coordination",
+                    "MUTATION_STARTED", "recreate-backend", command, renewal=lambda session, point: True,
+                    budget_seconds=2, heartbeat_seconds=0.03,
+                )
+        self.assertTrue(marker.exists())
+        result = list((self.root / ".deploy-state").glob("**/native-*-result.json"))
+        self.assertEqual(len(result), 1)
+        receipt = json.loads(result[0].read_bytes())
+        self.assertTrue(receipt["interruptSignals"])
+        self.assertTrue(receipt["childClosed"])
+        self.assertEqual(receipt["outcome"], "HELD")
+        self.assertFalse(receipt["canOpenTraffic"])
 
     def test_restore_if_receipt_publication_fails_after_env_replacement(self):
         receipt = self.root / ".deploy-state" / ("predecessor-role-host-" + self.session["deploymentId"]) / "receipt.json"

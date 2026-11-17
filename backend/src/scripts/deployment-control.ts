@@ -20,6 +20,7 @@ import {
 import { RECOVERY_COORDINATION_DIR } from '../services/recoveryRuntime';
 import { assertProtectedBootstrapBoundary, compileProtectedBootstrapSource, runProtectedBootstrapBaseline } from '../services/protectedBootstrapMigrations';
 import { assertBootstrapNativeCompletion } from '../services/protectedBridgeMigrations';
+import { changeProtectedPredecessorRoleGrants, protectedPredecessorRoleCutoverPurpose } from '../services/protectedDatabaseRoleRecovery';
 
 const REPORT_DIR = process.env.DEPLOYMENT_REPORT_DIR || '/app/deployment-reports';
 const SESSION_PATH = path.join(REPORT_DIR, 'active-deployment-session.json');
@@ -34,6 +35,7 @@ type Session = {
   owner: string;
   phase: DeploymentPhase;
   bootstrap: boolean;
+  purpose?: typeof protectedPredecessorRoleCutoverPurpose;
   controlImage: string;
   preservedClamav?: PreservedClamavBinding;
   clamavOperation?: 'repair' | 'incident-recovery';
@@ -99,7 +101,7 @@ const journal = async (session: Session, event: string, details?: Record<string,
     details,
   });
 
-const prepare = async () => {
+const prepare = async (purpose?: Session['purpose']) => {
   const clamavOperation = process.env.DEPLOYMENT_CLAMAV_OPERATION || 'repair';
   if (!['repair', 'incident-recovery'].includes(clamavOperation)) throw new Error('Unknown ClamAV operation.');
   const incidentSha = process.env.DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256;
@@ -123,6 +125,7 @@ const prepare = async () => {
     owner: required('DEPLOYMENT_OWNER'),
     phase: 'PREFLIGHT',
     bootstrap: false,
+    ...(purpose ? { purpose } : {}),
     controlImage: required('DEPLOYMENT_CONTROL_IMAGE'),
     clamavOperation: clamavOperation as 'repair' | 'incident-recovery',
     ...(clamavOperation === 'incident-recovery' ? { clamavIncidentSnapshotSha256: incidentSha } : {}),
@@ -169,11 +172,22 @@ const localTransitions: Partial<Record<DeploymentPhase, DeploymentPhase[]>> = {
   ROLLBACK_STARTED: ['ROLLED_BACK', 'RECOVERY_REQUIRED'],
 };
 
+const cutoverPreMutationPhases: DeploymentPhase[] = [
+  'PREFLIGHT', 'LEASE_ACQUIRED', 'MAINTENANCE_REQUESTED', 'TRAFFIC_BLOCKED', 'SERVICES_DRAINED',
+  'LOCAL_CHECKPOINT_VERIFIED', 'REMOTE_CHECKPOINT_VERIFIED', 'ABORTED',
+];
+
 const main = async () => {
   const command = process.argv[2];
   const store = new PrismaDeploymentStore(prisma);
-  if (command === 'prepare') {
-    console.log(JSON.stringify({ ok: true, session: await prepare(), journalPath: JOURNAL_PATH }));
+  if (command === 'prepare' || command === 'prepare-predecessor-role-cutover') {
+    const purpose = command === 'prepare-predecessor-role-cutover' ? protectedPredecessorRoleCutoverPurpose : undefined;
+    if (purpose && (process.env.BACKEND_RUNTIME_ROLE !== 'control' || process.argv.length !== 3
+      || !/^sha256:[a-f0-9]{64}$/.test(required('DEPLOYMENT_CONTROL_IMAGE'))
+      || process.env.DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP === 'true' || process.env.DEPLOYMENT_CLAMAV_REPAIR === 'true')) {
+      throw new Error('A control session for a dedicated, immutable first role cutover is required.');
+    }
+    console.log(JSON.stringify({ ok: true, session: await prepare(purpose), journalPath: JOURNAL_PATH }));
     return;
   }
   if (command === 'verify-host-journal') {
@@ -186,7 +200,20 @@ const main = async () => {
   }
 
   const session = await readSession();
-  if (command === 'incident-boundary-state') {
+  if (command === 'stage-predecessor-role-grants' || command === 'restore-predecessor-role-grants') {
+    if (process.env.BACKEND_RUNTIME_ROLE !== 'control' || process.argv.length !== 3) {
+      throw new Error('The first role cutover requires the dedicated control-plane command.');
+    }
+    const roleCutover = await changeProtectedPredecessorRoleGrants({
+      action: command === 'stage-predecessor-role-grants' ? 'stage' : 'restore', session,
+      coordinationDir: RECOVERY_COORDINATION_DIR, journalPath: JOURNAL_PATH,
+      deploymentId: required('DEPLOYMENT_ID'), leaseToken: required('DEPLOYMENT_LEASE_TOKEN'),
+      controlImage: required('DEPLOYMENT_CONTROL_IMAGE'), databaseUrl: required('DATABASE_URL'),
+      remoteRoot: process.env.DEPLOYMENT_REMOTE_MOUNT,
+      migrationsDirectory: path.resolve('prisma', 'migrations'), catalogFile: path.resolve('scripts', 'predecessor-role-catalog.json'),
+    });
+    console.log(JSON.stringify({ ok: true, roleCutover }));
+  } else if (command === 'incident-boundary-state') {
     if (session.clamavOperation !== 'incident-recovery' || session.deploymentId !== required('DEPLOYMENT_ID')
       || session.clamavIncidentSnapshotSha256 !== required('DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_SHA256')) {
       throw new Error('Incident boundary inspection requires its exact prepared operation.');
@@ -295,6 +322,8 @@ const main = async () => {
     console.log(JSON.stringify({ ok: true, deployment }));
   } else if (command === 'transition') {
     const nextPhase = required('DEPLOYMENT_PHASE') as DeploymentPhase;
+    if (session.purpose === protectedPredecessorRoleCutoverPurpose && session.phase === 'MUTATION_STARTED'
+      && nextPhase !== 'ROLLBACK_STARTED') throw new Error('The ACL staging operation cannot promote a release.');
     const deployment = await transitionDeployment(store, { ...session, nextPhase, now: new Date() });
     session.phase = nextPhase;
     await writeSession(session);
@@ -310,11 +339,20 @@ const main = async () => {
     await journal(session, 'maintenance-activated');
     console.log(JSON.stringify({ ok: true, maintenance }));
   } else if (command === 'maintenance-off') {
+    if (session.purpose === protectedPredecessorRoleCutoverPurpose) {
+      const entries = await validateDeploymentHostJournal(JOURNAL_PATH);
+      if (!entries.length || !cutoverPreMutationPhases.includes(session.phase)
+        || entries.some(entry => !cutoverPreMutationPhases.includes(entry.phase as DeploymentPhase))) {
+        throw new Error('Role cutover staging requires a qualified host recovery or continuation before reopening maintenance.');
+      }
+    }
     await journal(session, 'maintenance-deactivation-requested');
     await deactivateDeploymentMaintenance(RECOVERY_COORDINATION_DIR, session.deploymentId);
     console.log(JSON.stringify({ ok: true }));
   } else if (command === 'finish') {
     const phase = required('DEPLOYMENT_PHASE') as DeploymentPhase;
+    if (session.purpose === protectedPredecessorRoleCutoverPurpose && !cutoverPreMutationPhases.includes(session.phase)
+      && phase !== 'RECOVERY_REQUIRED') throw new Error('Role cutover staging requires a qualified host continuation before ending the lease.');
     const deployment = session.bootstrap
       ? null
       : await finishDeployment(store, { ...session, phase, now: new Date() });

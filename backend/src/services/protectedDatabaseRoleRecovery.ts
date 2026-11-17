@@ -2,8 +2,12 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { PrismaClient } from '@prisma/client';
+import { checkpointMetadataTransport, readCanonicalCheckpointMetadata } from './deploymentCheckpointMetadataIdentity';
+import { assertRemoteCheckpointFingerprint } from './deploymentCheckpointStorage';
+import { validateDeploymentHostJournal } from './deploymentHostJournal';
 import { readDeploymentMaintenance } from './deploymentMaintenance';
 import { nativePostgresCliConnection } from './nativePostgresCli';
+import { sha256File } from './recoveryCrypto';
 
 type RoleSplit = { runtime: string; controller: string };
 type Client = {
@@ -30,7 +34,7 @@ const privileges = {
 type Kind = keyof typeof privileges;
 type Grant = { grantee: string; privilege: string; grantable: boolean; grantor: string };
 type ObjectAcl = { kind: Kind; name: string; arguments: string; owner: string; securityDefiner: boolean; grants: Grant[] };
-type CatalogAcl = ObjectAcl & { target: string };
+type CatalogAcl = ObjectAcl & { target: string; oid: string };
 type RoleAttributes = { name: string; login: boolean; connectionLimit: number; validUntil: string | null };
 export type RoleSnapshot = {
   version: 1;
@@ -51,24 +55,24 @@ const byText = (left: string, right: string) => left < right ? -1 : left > right
 const aclCatalog = `
   WITH objects AS (
     SELECT 'DATABASE' AS kind, '' AS name, '' AS arguments,
-      format('%I', datname) AS target, datdba AS owner, 'd'::"char" AS code, datacl AS acl, false AS security_definer
+      format('%I', datname) AS target, datdba AS owner, 'd'::"char" AS code, datacl AS acl, false AS security_definer, oid
     FROM pg_database WHERE datname = current_database()
     UNION ALL
-    SELECT 'SCHEMA', nspname, '', format('%I', nspname), nspowner, 'n', nspacl, false
+    SELECT 'SCHEMA', nspname, '', format('%I', nspname), nspowner, 'n', nspacl, false, oid
     FROM pg_namespace WHERE nspname = 'public'
     UNION ALL
     SELECT CASE WHEN c.relkind = 'S' THEN 'SEQUENCE' ELSE 'TABLE' END,
       c.relname, '', format('%I.%I', 'public', c.relname), c.relowner,
-      CASE WHEN c.relkind = 'S' THEN 's'::"char" ELSE 'r'::"char" END, c.relacl, false
+      CASE WHEN c.relkind = 'S' THEN 's'::"char" ELSE 'r'::"char" END, c.relacl, false, c.oid
     FROM pg_class c
     WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
     UNION ALL
     SELECT CASE WHEN p.prokind = 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
       p.proname, oidvectortypes(p.proargtypes), format('%I.%I(%s)', 'public', p.proname, oidvectortypes(p.proargtypes)),
-      p.proowner, 'f', p.proacl, p.prosecdef
+      p.proowner, 'f', p.proacl, p.prosecdef, p.oid
     FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
   )
-  SELECT kind, name, arguments, target, pg_get_userbyid(owner) AS owner, security_definer AS "securityDefiner",
+  SELECT kind, name, arguments, target, oid::text, pg_get_userbyid(owner) AS owner, security_definer AS "securityDefiner",
     COALESCE((
       SELECT jsonb_agg(jsonb_build_object(
         'grantee', CASE WHEN a.grantee = 0 THEN '' ELSE pg_get_userbyid(a.grantee) END,
@@ -109,7 +113,7 @@ async function readIdentity(client: Client, roles: RoleSplit, requireRuntimeLogi
     fail('The protected recovery connection does not own the database under its authenticated control role.');
   }
   const { rows: attributes } = await client.query(`
-    SELECT r.rolname AS name, r.rolcanlogin AS login, r.rolconnlimit AS "connectionLimit", r.rolvaliduntil::text AS "validUntil",
+    SELECT r.oid::text, r.rolname AS name, r.rolcanlogin AS login, r.rolconnlimit AS "connectionLimit", r.rolvaliduntil::text AS "validUntil",
       NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolinherit OR r.rolreplication OR r.rolbypassrls)
       AND r.rolconfig IS NULL AND (r.rolcanlogin OR auth.rolpassword IS NULL)
       AND NOT EXISTS (SELECT FROM pg_auth_members WHERE member = r.oid OR roleid = r.oid)
@@ -127,7 +131,8 @@ async function readIdentity(client: Client, roles: RoleSplit, requireRuntimeLogi
   }
   const roleAttributes: RoleAttributes[] = attributes.map(({ name, login, connectionLimit, validUntil }) => ({ name, login, connectionLimit, validUntil }));
   roleAttributes.sort((a, b) => byText(a.name, b.name));
-  return { database: identity.database as string, control: identity.control as string, connectionLimit: identity.connectionLimit as number, roles: roleAttributes };
+  const roleOids = roleAttributes.map(({ name }) => attributes.find(role => role.name === name)!.oid as string);
+  return { database: identity.database as string, control: identity.control as string, connectionLimit: identity.connectionLimit as number, roles: roleAttributes, roleOids };
 }
 
 async function readCatalog(client: Client): Promise<CatalogAcl[]> {
@@ -354,6 +359,7 @@ type CutoverCatalog = {
 };
 const cutoverRoles = { runtime: 'sabalan_application_runtime', controller: 'sabalan_allocation_controller' };
 const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
+const cutoverCatalogSha256 = '88d1a3381641dbae0c3223f3c343eb43b23730cde98519cd8923c8361851cbfa';
 
 async function verifyCutoverMigrationLedger(client: Client, directory: string, expectedDigest: string) {
   const names = (await fs.readdir(directory, { withFileTypes: true }))
@@ -397,138 +403,344 @@ async function verifyCutoverViews(client: Client, views: CutoverCatalog['views']
   return approved;
 }
 
+type CutoverSource = { databaseUrl: string; migrationsDirectory: string; catalogFile: string };
+type CutoverStage = 'before-grants' | 'grants-staged';
+type CutoverGrant = { recipient: string; privilege: string };
+
+async function readCutoverManifest(file: string) {
+  const bytes = await fs.readFile(file);
+  if (sha256(bytes) !== cutoverCatalogSha256) fail('The pinned predecessor cutover catalog changed.');
+  return JSON.parse(bytes.toString('utf8')) as CutoverCatalog;
+}
+
+async function inspectCutover(client: Client, directory: string, manifest: CutoverCatalog) {
+  const identity = await readIdentity(client, cutoverRoles, false);
+  const migrations = await verifyCutoverMigrationLedger(client, directory, manifest.migrationSha256);
+  const catalog = await readCatalog(client);
+  const objects = canonicalObjects(catalog, identity.control, cutoverRoles);
+  const { rows: [state] } = await client.query(`
+    SELECT
+      (SELECT count(*) = 1 AND bool_and(id = 'grouped-allocation' AND state = 'CLOSED')
+        FROM public.customer_allocation_release_control) AS closed,
+      NOT EXISTS (SELECT FROM pg_class WHERE relnamespace = 'public'::regnamespace
+        AND relkind IN ('p', 'f', 'm')) AS relations
+  `);
+  if (!state.closed || !state.relations) fail('The cutover requires a closed allocation boundary and the reviewed relation types.');
+
+  const tables = new Map<string, string[]>();
+  for (const [profile, names] of Object.entries(manifest.tables)) {
+    if (!/^(NONE|SELECT( INSERT)?( UPDATE)?( DELETE)?)$/.test(profile)) fail('Unknown cutover table privilege profile.');
+    for (const name of names) {
+      if (tables.has(name)) fail('Duplicate cutover table identity.');
+      tables.set(name, profile === 'NONE' ? [] : profile.split(' '));
+    }
+  }
+  const protectedTables = ['_prisma_migrations', 'deployment_operations', 'customer_allocation_release_control',
+    'customer_allocation_release_audit', 'shipment_statement_migration_evidence',
+    'shipment_statement_migration_manifests', 'shipment_statement_migration_runs'];
+  if (protectedTables.some(name => tables.get(name)?.length !== 0)) fail('A protected table is outside the cutover denial inventory.');
+  if (tables.get('recovery_operations')?.join(' ') !== 'SELECT INSERT UPDATE'
+    || tables.get('recovery_audit_events')?.join(' ') !== 'SELECT INSERT') fail('The cutover recovery status or audit permissions changed.');
+  const sequences = new Set([...manifest.sequences, ...manifest.protectedSequences]);
+  if (manifest.sequences.includes('customer_allocation_release_audit_id_seq') ||
+      !manifest.protectedSequences.includes('customer_allocation_release_audit_id_seq')) {
+    fail('The allocation audit sequence is outside the cutover denial inventory.');
+  }
+  const definerRoutines = new Map(manifest.definerRoutines.map(routine =>
+    [routineKey(routine.name, routine.arguments), routine]));
+  const { rows: routineDefinitions } = await client.query(`
+    SELECT proname AS name, oidvectortypes(proargtypes) AS arguments, pg_get_functiondef(oid) AS definition
+    FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND prosecdef
+  `);
+  const approvedExecutors: Record<string, CutoverRoutine['execute']> = {
+    [routineKey('customer_allocation_controller_activate', 'text, text, text, text, timestamp with time zone')]: 'controller',
+    [routineKey('customer_allocation_controller_close', 'text, text, text, text')]: 'controller',
+    [routineKey('customer_allocation_controller_lock', 'text, text')]: 'controller',
+    [routineKey('customer_allocation_runtime_admitted', 'text, text')]: 'runtime',
+    [routineKey('require_active_grouped_allocation_child', '')]: 'owner',
+  };
+  if (definerRoutines.size !== Object.keys(approvedExecutors).length || routineDefinitions.length !== definerRoutines.size
+    || routineDefinitions.some(row => {
+      const key = routineKey(row.name, row.arguments);
+      const routine = definerRoutines.get(key);
+      return !routine || routine.execute !== approvedExecutors[key]
+        || sha256(row.definition.replace(/\r\n/g, '\n')) !== routine.definitionSha256;
+    })) fail('A privileged routine differs from the reviewed cutover inventory.');
+
+  const views = await verifyCutoverViews(client, manifest.views);
+  const viewCount = views.size;
+  const tableCount = tables.size;
+  const sequenceCount = sequences.size;
+  const invokers: string[] = [];
+  const profiles: { before: CutoverGrant[]; staged: CutoverGrant[] }[] = [];
+  for (const object of objects) {
+    const before: CutoverGrant[] = [];
+    const staged: CutoverGrant[] = [];
+    const addGrants = (profile: CutoverGrant[], recipient: string, ...verbs: string[]) =>
+      profile.push(...verbs.map(privilege => ({ recipient, privilege })));
+    switch (object.kind) {
+      case 'DATABASE':
+        addGrants(staged, cutoverRoles.runtime, 'CONNECT');
+        addGrants(staged, cutoverRoles.controller, 'CONNECT');
+        addGrants(before, '', 'CONNECT', 'TEMPORARY');
+        break;
+      case 'SCHEMA':
+        addGrants(staged, cutoverRoles.runtime, 'USAGE');
+        addGrants(staged, cutoverRoles.controller, 'USAGE');
+        addGrants(before, '', 'USAGE');
+        break;
+      case 'TABLE': {
+        if (views.delete(object.name)) {
+          addGrants(before, cutoverRoles.runtime, 'SELECT');
+          addGrants(staged, cutoverRoles.runtime, 'SELECT');
+          break;
+        }
+        const verbs = tables.get(object.name) ?? fail(`Unexpected cutover table: ${object.name}`);
+        addGrants(staged, cutoverRoles.runtime, ...verbs);
+        tables.delete(object.name);
+        break;
+      }
+      case 'SEQUENCE':
+        if (!sequences.delete(object.name)) fail(`Unexpected cutover sequence: ${object.name}`);
+        if (manifest.sequences.includes(object.name)) addGrants(staged, cutoverRoles.runtime, 'USAGE');
+        break;
+      case 'FUNCTION': {
+        const key = routineKey(object.name, object.arguments);
+        if (object.securityDefiner) {
+          const executor = approvedExecutors[key];
+          if (executor === 'runtime' || executor === 'controller') {
+            addGrants(before, cutoverRoles[executor], 'EXECUTE');
+            addGrants(staged, cutoverRoles[executor], 'EXECUTE');
+          }
+        } else {
+          invokers.push(key);
+          addGrants(before, '', 'EXECUTE');
+          addGrants(staged, '', 'EXECUTE');
+        }
+        break;
+      }
+      default:
+        fail(`Unexpected cutover object kind: ${object.kind}`);
+    }
+    profiles.push({ before, staged });
+  }
+  if (tables.size || views.size || sequences.size || sha256(JSON.stringify(invokers.sort())) !== manifest.invokerRoutinesSha256) {
+    fail('The cutover object identities differ from the reviewed inventory.');
+  }
+  const summary = {
+    catalogSha256: cutoverCatalogSha256,
+    migrationSha256: manifest.migrationSha256,
+    migrations,
+    tables: tableCount,
+    views: viewCount,
+    sequences: sequenceCount,
+    securityDefinerRoutines: routineDefinitions.length,
+  };
+  return { identity, catalog, objects, profiles, summary };
+}
+
+const grantKey = (grant: CutoverGrant) => `${grant.recipient}:${grant.privilege}`;
+
+function assertCutoverProfile(cutover: Awaited<ReturnType<typeof inspectCutover>>, stage: CutoverStage) {
+  for (const [index, object] of cutover.objects.entries()) {
+    const profile = cutover.profiles[index];
+    const expected = (stage === 'grants-staged' ? profile.staged : profile.before).map(grantKey).sort();
+    const actual = object.grants.filter(grant => grant.grantee !== object.owner)
+      .map(grant => grantKey({ recipient: grant.grantee, privilege: grant.privilege })).sort();
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      fail(`Cutover privilege drift on ${object.kind} ${object.name || '(current database)'}.`);
+    }
+  }
+}
+
 /** Read-only admission for the first split, before the runtime receives a credential. */
-export function verifyPredecessorRoleCutover(input: {
-  databaseUrl: string;
-  migrationsDirectory: string;
-  catalogFile: string;
-  stage: 'before-grants' | 'grants-staged';
-}) {
+export async function verifyPredecessorRoleCutover(input: CutoverSource & { stage: CutoverStage }) {
+  if (input.stage !== 'before-grants' && input.stage !== 'grants-staged') fail('Unknown cutover verification stage.');
+  const manifest = await readCutoverManifest(input.catalogFile);
   return withTransaction(input.databaseUrl, 'READ ONLY', async client => {
-    if (input.stage !== 'before-grants' && input.stage !== 'grants-staged') fail('Unknown cutover verification stage.');
-    const { control } = await readIdentity(client, cutoverRoles, false);
-    const catalogBytes = await fs.readFile(input.catalogFile);
-    const manifest = JSON.parse(catalogBytes.toString('utf8')) as CutoverCatalog;
-    const migrations = await verifyCutoverMigrationLedger(client, input.migrationsDirectory, manifest.migrationSha256);
-    const objects = canonicalObjects(await readCatalog(client), control, cutoverRoles);
-    const { rows: [state] } = await client.query(`
-      SELECT
-        (SELECT count(*) = 1 AND bool_and(id = 'grouped-allocation' AND state = 'CLOSED')
-          FROM public.customer_allocation_release_control) AS closed,
-        NOT EXISTS (SELECT FROM pg_class WHERE relnamespace = 'public'::regnamespace
-          AND relkind IN ('p', 'f', 'm')) AS relations
-    `);
-    if (!state.closed || !state.relations) fail('The cutover requires a closed allocation boundary and the reviewed relation types.');
+    const cutover = await inspectCutover(client, input.migrationsDirectory, manifest);
+    assertCutoverProfile(cutover, input.stage);
+    return { stage: input.stage, ...cutover.summary };
+  });
+}
 
-    const tables = new Map<string, string[]>();
-    for (const [profile, names] of Object.entries(manifest.tables)) {
-      if (!/^(NONE|SELECT( INSERT)?( UPDATE)?( DELETE)?)$/.test(profile)) fail('Unknown cutover table privilege profile.');
-      for (const name of names) {
-        if (tables.has(name)) fail('Duplicate cutover table identity.');
-        tables.set(name, profile === 'NONE' ? [] : profile.split(' '));
-      }
-    }
-    const protectedTables = ['_prisma_migrations', 'deployment_operations', 'customer_allocation_release_control',
-      'customer_allocation_release_audit', 'shipment_statement_migration_evidence',
-      'shipment_statement_migration_manifests', 'shipment_statement_migration_runs'];
-    if (protectedTables.some(name => tables.get(name)?.length !== 0)) fail('A protected table is outside the cutover denial inventory.');
-    if (tables.get('recovery_operations')?.join(' ') !== 'SELECT INSERT UPDATE'
-      || tables.get('recovery_audit_events')?.join(' ') !== 'SELECT INSERT') fail('The cutover recovery status or audit permissions changed.');
-    const sequences = new Set([...manifest.sequences, ...manifest.protectedSequences]);
-    if (manifest.sequences.includes('customer_allocation_release_audit_id_seq') ||
-        !manifest.protectedSequences.includes('customer_allocation_release_audit_id_seq')) {
-      fail('The allocation audit sequence is outside the cutover denial inventory.');
-    }
-    const definerRoutines = new Map(manifest.definerRoutines.map(routine =>
-      [routineKey(routine.name, routine.arguments), routine]));
-    const { rows: routineDefinitions } = await client.query(`
-      SELECT proname AS name, oidvectortypes(proargtypes) AS arguments, pg_get_functiondef(oid) AS definition
-      FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND prosecdef
-    `);
-    const approvedExecutors: Record<string, CutoverRoutine['execute']> = {
-      [routineKey('customer_allocation_controller_activate', 'text, text, text, text, timestamp with time zone')]: 'controller',
-      [routineKey('customer_allocation_controller_close', 'text, text, text, text')]: 'controller',
-      [routineKey('customer_allocation_controller_lock', 'text, text')]: 'controller',
-      [routineKey('customer_allocation_runtime_admitted', 'text, text')]: 'runtime',
-      [routineKey('require_active_grouped_allocation_child', '')]: 'owner',
-    };
-    if (definerRoutines.size !== Object.keys(approvedExecutors).length || routineDefinitions.length !== definerRoutines.size
-      || routineDefinitions.some(row => {
-        const key = routineKey(row.name, row.arguments);
-        const routine = definerRoutines.get(key);
-        return !routine || routine.execute !== approvedExecutors[key]
-          || sha256(row.definition.replace(/\r\n/g, '\n')) !== routine.definitionSha256;
-      })) fail('A privileged routine differs from the reviewed cutover inventory.');
+export const protectedPredecessorRoleCutoverPurpose = 'predecessor-role-cutover';
 
-    const views = await verifyCutoverViews(client, manifest.views);
-    const viewCount = views.size;
-    const tableCount = tables.size;
-    const sequenceCount = sequences.size;
-    const invokers: string[] = [];
-    const staged = input.stage === 'grants-staged';
-    for (const object of objects) {
-      const expected: string[] = [];
-      const expectGrants = (recipient: string, ...verbs: string[]) =>
-        expected.push(...verbs.map(verb => `${recipient}:${verb}`));
-      switch (object.kind) {
-        case 'DATABASE':
-          if (staged) {
-            expectGrants(cutoverRoles.runtime, 'CONNECT');
-            expectGrants(cutoverRoles.controller, 'CONNECT');
-          } else expectGrants('', 'CONNECT', 'TEMPORARY');
-          break;
-        case 'SCHEMA':
-          if (staged) {
-            expectGrants(cutoverRoles.runtime, 'USAGE');
-            expectGrants(cutoverRoles.controller, 'USAGE');
-          } else expectGrants('', 'USAGE');
-          break;
-        case 'TABLE': {
-          if (views.delete(object.name)) {
-            expectGrants(cutoverRoles.runtime, 'SELECT');
-            break;
-          }
-          const verbs = tables.get(object.name) ?? fail(`Unexpected cutover table: ${object.name}`);
-          if (staged) expectGrants(cutoverRoles.runtime, ...verbs);
-          tables.delete(object.name);
-          break;
-        }
-        case 'SEQUENCE':
-          if (!sequences.delete(object.name)) fail(`Unexpected cutover sequence: ${object.name}`);
-          if (staged && manifest.sequences.includes(object.name)) expectGrants(cutoverRoles.runtime, 'USAGE');
-          break;
-        case 'FUNCTION': {
-          const key = routineKey(object.name, object.arguments);
-          if (object.securityDefiner) {
-            const executor = approvedExecutors[key];
-            if (executor === 'runtime' || executor === 'controller') expectGrants(cutoverRoles[executor], 'EXECUTE');
-          } else {
-            invokers.push(key);
-            expectGrants('', 'EXECUTE');
-          }
-          break;
-        }
-        default:
-          fail(`Unexpected cutover object kind: ${object.kind}`);
-      }
-      const actual = object.grants.filter(grant => grant.grantee !== object.owner)
-        .map(grant => `${grant.grantee}:${grant.privilege}`).sort();
-      if (JSON.stringify(actual) !== JSON.stringify(expected.sort())) {
-        fail(`Cutover privilege drift on ${object.kind} ${object.name || '(current database)'}.`);
-      }
+type CutoverSession = {
+  deploymentId: string; releaseId: string; targetCommit: string; owner: string; controlImage: string;
+  leaseToken: string; phase: string; bootstrap: boolean; purpose?: string;
+};
+
+const receiptFormat = 'sabalan-predecessor-role-acl-cutover-v1';
+const hexSha = /^[a-f0-9]{64}$/;
+
+function cutoverCatalogFingerprint(cutover: Awaited<ReturnType<typeof inspectCutover>>, objects = cutover.objects) {
+  return sha256(JSON.stringify({ identity: cutover.identity, objects, oids: cutover.catalog.map(object => object.oid) }));
+}
+
+async function applyCutoverAclDelta(client: Client, cutover: Awaited<ReturnType<typeof inspectCutover>>, restoring: boolean) {
+  const statements: string[] = [];
+  for (const [index, object] of cutover.catalog.entries()) {
+    const { before, staged } = cutover.profiles[index];
+    const [from, to] = restoring ? [staged, before] : [before, staged];
+    const difference = (left: CutoverGrant[], right: CutoverGrant[]) =>
+      left.filter(grant => !right.some(other => grantKey(grant) === grantKey(other)));
+    const grantee = (grant: CutoverGrant) => grant.recipient ? quoteIdentifier(grant.recipient) : 'PUBLIC';
+    const target = `${object.kind} ${object.target}`;
+    for (const grant of difference(from, to)) {
+      statements.push(`REVOKE ${grant.privilege} ON ${target} FROM ${grantee(grant)} RESTRICT`);
     }
-    if (tables.size || views.size || sequences.size || sha256(JSON.stringify(invokers.sort())) !== manifest.invokerRoutinesSha256) {
-      fail('The cutover object identities differ from the reviewed inventory.');
+    for (const grant of difference(to, from)) {
+      statements.push(`GRANT ${grant.privilege} ON ${target} TO ${grantee(grant)}`);
     }
-    return {
-      stage: input.stage,
-      catalogSha256: sha256(catalogBytes),
-      migrationSha256: manifest.migrationSha256,
-      migrations,
-      tables: tableCount,
-      views: viewCount,
-      sequences: sequenceCount,
-      securityDefinerRoutines: routineDefinitions.length,
+  }
+  if (!statements.length) fail('The cutover manifest contains no ACL transition.');
+  await client.query(statements.join(';\n'));
+}
+
+async function assertDatabaseDrained(client: Client) {
+  await client.query('SELECT pg_stat_clear_snapshot()');
+  const { rows: [state] } = await client.query(`
+    SELECT NOT EXISTS (SELECT FROM pg_stat_activity WHERE datname = current_database()
+      AND backend_type = 'client backend' AND pid <> pg_backend_pid())
+      AND NOT EXISTS (SELECT FROM pg_prepared_xacts WHERE database = current_database()) AS drained
+  `);
+  if (!state.drained) fail('The cutover requires the source database to remain drained.');
+}
+
+/** Own the lease row and ACLs in one transaction. A failed or unacknowledged commit can be resolved by rerunning the command. */
+export async function changeProtectedPredecessorRoleGrants(input: CutoverSource & {
+  action: 'stage' | 'restore'; session: CutoverSession; coordinationDir: string; journalPath: string;
+  deploymentId: string; leaseToken: string; controlImage: string; remoteRoot?: string;
+}) {
+  const restoring = input.action === 'restore';
+  const phase = restoring ? 'ROLLBACK_STARTED' : 'MUTATION_STARTED';
+  const session = input.session;
+  const assertMarker = async () => {
+    const marker = await readDeploymentMaintenance(input.coordinationDir);
+    if (marker?.deploymentId !== session.deploymentId || marker?.releaseId !== session.releaseId) {
+      fail('The first role cutover requires the owned maintenance marker.');
+    }
+  };
+  if (session.purpose !== protectedPredecessorRoleCutoverPurpose || session.bootstrap || session.phase !== phase
+    || session.deploymentId !== input.deploymentId || session.leaseToken !== input.leaseToken
+    || !hexSha.test(input.leaseToken) || session.controlImage !== input.controlImage
+    || !/^sha256:[a-f0-9]{64}$/.test(input.controlImage) || !/^[a-f0-9]{40}$/.test(session.targetCommit)) {
+    fail('The first role cutover requires its owned maintenance session, phase and immutable control image.');
+  }
+  await assertMarker();
+  const journal = await validateDeploymentHostJournal(input.journalPath);
+  const sequence = ['SERVICES_DRAINED', 'LOCAL_CHECKPOINT_VERIFIED', 'REMOTE_CHECKPOINT_VERIFIED', 'MUTATION_STARTED'];
+  if (restoring) sequence.push('ROLLBACK_STARTED');
+  if (journal.some(entry => entry.deploymentId !== session.deploymentId)) fail('The cutover journal belongs to another deployment.');
+  const markerIndex = journal.findIndex(entry => entry.event === 'maintenance-activated');
+  const journalPhases = journal.slice(markerIndex + 1)
+    .filter(entry => entry.event === 'phase-transition' && sequence.includes(entry.phase)).map(entry => entry.phase);
+  if (markerIndex === -1 || JSON.stringify(journalPhases) !== JSON.stringify(sequence)) {
+    fail('The cutover journal does not prove drain and checkpoint verification.');
+  }
+
+  const sidecarPath = path.join(input.coordinationDir, 'deployment-checkpoint.json');
+  const { metadata, sha256: metadataSha256 } = readCanonicalCheckpointMetadata(JSON.parse(await fs.readFile(sidecarPath, 'utf8')));
+  if (metadata.id !== session.deploymentId || metadata.deploymentId !== session.deploymentId
+    || metadata.releaseId !== session.releaseId || metadata.targetCommit !== session.targetCommit
+    || metadata.captureMethod !== 'PROTECTED_MAINTENANCE_COMPLETE' || metadata.localVerified !== true
+    || metadata.remoteVerified !== true || metadata.localRestoreVerified !== true || metadata.manifestReadable !== true
+    || typeof metadata.remotePath !== 'string' || !path.isAbsolute(metadata.remotePath)
+    || !metadata.remoteFingerprint || metadata.remoteFingerprint.size !== metadata.size
+    || !Number.isFinite(metadata.remoteFingerprint.mtimeMs) || !hexSha.test(metadata.checksum || '')
+    || typeof metadata.localPath !== 'string' || !path.isAbsolute(metadata.localPath)) {
+    fail('The cutover requires its exact locally and remotely verified checkpoint.');
+  }
+  const archive = await fs.lstat(metadata.localPath);
+  if (!archive.isFile() || archive.size !== metadata.size || await sha256File(metadata.localPath) !== metadata.checksum) {
+    fail('The locally verified cutover checkpoint bytes changed.');
+  }
+  if (!restoring) {
+    if (!input.remoteRoot || !path.isAbsolute(input.remoteRoot)
+      || !path.resolve(metadata.remotePath).startsWith(`${path.resolve(input.remoteRoot)}${path.sep}`)) {
+      fail('The verified cutover checkpoint is outside the configured remote mount.');
+    }
+    await assertRemoteCheckpointFingerprint(metadata.remotePath, metadata.remoteFingerprint);
+    const remote = readCanonicalCheckpointMetadata(JSON.parse(await fs.readFile(`${metadata.remotePath}.json`, 'utf8')));
+    if (remote.sha256 !== metadataSha256) fail('The verified remote cutover checkpoint metadata changed.');
+  }
+  const manifest = await readCutoverManifest(input.catalogFile);
+  return withTransaction(input.databaseUrl, 'READ WRITE', async client => {
+    await client.query("SET LOCAL lock_timeout = '5s'; SET LOCAL statement_timeout = '30s'");
+    const liveLease = async (lock = false) => {
+      const { rows } = await client.query(`
+        SELECT "checkpointJson" AS checkpoint, "reportJson" AS report
+        FROM public.deployment_operations
+        WHERE "activeKey" = 'production' AND id = $1 AND "releaseId" = $2 AND "targetCommit" = $3
+          AND owner = $4 AND phase = $5 AND "leaseToken" = $6 AND "leaseExpiresAt" > clock_timestamp() AT TIME ZONE 'UTC'
+        ${lock ? 'FOR UPDATE' : ''}
+      `, [session.deploymentId, session.releaseId, session.targetCommit, session.owner, phase, session.leaseToken]);
+      if (rows.length !== 1 || !rows[0].checkpoint
+        || checkpointMetadataTransport(rows[0].checkpoint).canonicalMetadataSha256 !== metadataSha256) {
+        fail('The cutover deployment lease or verified checkpoint has changed.');
+      }
+      return rows[0].report;
     };
+    const report = await liveLease(true);
+    const { rows } = await client.query(`
+      SELECT current_database() AS name, (SELECT oid::text FROM pg_database WHERE datname = current_database()) AS oid,
+        (SELECT system_identifier::text FROM pg_control_system()) AS "systemIdentifier"
+    `);
+    const source = metadata.sourceDatabase;
+    if (!source || rows.length !== 1 || rows[0].name !== source.name || rows[0].oid !== source.oid
+      || rows[0].systemIdentifier !== source.systemIdentifier) fail('The cutover database differs from the checkpoint source.');
+    await assertDatabaseDrained(client);
+    const cutover = await inspectCutover(client, input.migrationsDirectory, manifest);
+    if (cutover.identity.connectionLimit !== -1) fail('The cutover database has a custom connection limit.');
+    const binding = {
+      format: receiptFormat, deploymentId: session.deploymentId, releaseId: session.releaseId, controlImage: session.controlImage,
+      checkpointSha256: metadata.checksum as string, checkpointMetadataSha256: metadataSha256,
+      sourceDatabase: { name: source.name as string, oid: source.oid as string, systemIdentifier: source.systemIdentifier as string },
+      ...cutover.summary,
+    };
+    const current = cutoverCatalogFingerprint(cutover);
+    if (report !== null && (!report?.binding || checkpointMetadataTransport(report.binding).canonicalMetadataSha256
+      !== checkpointMetadataTransport(binding).canonicalMetadataSha256 || !hexSha.test(report.before || '') || !hexSha.test(report.staged || '')
+      || (report.state !== 'staged' && report.state !== 'restored'))) {
+      fail('The owned cutover ACL receipt is invalid.');
+    }
+    if (restoring && !report) fail('No owned staged ACL preimage is available for restoration.');
+    if (!restoring && report?.state === 'restored') fail('The owned operation has already restored its ACL preimage.');
+    const currentStage = report?.state === 'staged' ? 'grants-staged' : 'before-grants';
+    assertCutoverProfile(cutover, currentStage);
+    if (report && current !== (currentStage === 'grants-staged' ? report.staged : report.before)) {
+      fail('The live ACLs differ from the owned cutover receipt.');
+    }
+    if (report && (!restoring || report.state === 'restored')) {
+      await assertDatabaseDrained(client);
+      await assertMarker();
+      await liveLease();
+      return { outcome: restoring ? 'already-restored' : 'already-staged', ...binding,
+        preimageSha256: report.before as string, stagedAclSha256: report.staged as string };
+    }
+    const expectedObjects = canonicalObjects(cutover.objects.map((object, index) => ({
+      ...object,
+      grants: [
+        ...object.grants.filter(grant => grant.grantee === object.owner),
+        ...(restoring ? cutover.profiles[index].before : cutover.profiles[index].staged).map(({ recipient, privilege }) =>
+          ({ grantee: recipient, grantor: object.owner, privilege, grantable: false })),
+      ],
+    })), cutover.identity.control, cutoverRoles);
+    const expected = cutoverCatalogFingerprint(cutover, expectedObjects);
+    if (restoring && expected !== report.before) fail('The expected ACL rollback differs from the owned cutover preimage.');
+    await applyCutoverAclDelta(client, cutover, restoring);
+    const verified = await inspectCutover(client, input.migrationsDirectory, manifest);
+    assertCutoverProfile(verified, restoring ? 'before-grants' : 'grants-staged');
+    const next = cutoverCatalogFingerprint(verified);
+    if (next !== expected) fail('The resulting ACLs differ from the expected cutover catalog.');
+    await assertDatabaseDrained(client);
+    await assertMarker();
+    await liveLease();
+    const receipt = restoring ? { ...report, state: 'restored' } : { binding, before: current, staged: next, state: 'staged' };
+    await client.query('UPDATE public.deployment_operations SET "reportJson" = $1::jsonb, "updatedAt" = clock_timestamp() AT TIME ZONE \'UTC\' WHERE id = $2',
+      [JSON.stringify(receipt), session.deploymentId]);
+    return { outcome: restoring ? 'restored' : 'staged', ...binding,
+      preimageSha256: receipt.before as string, stagedAclSha256: receipt.staged as string };
   });
 }

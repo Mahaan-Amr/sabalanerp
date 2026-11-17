@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import test from 'node:test';
 import { PrismaClient } from '@prisma/client';
 import { requireCustomerSourceSharesWithin } from '../customerSemanticCompatibility';
 import { verifyCustomerAllocationDeploymentState } from '../accountingCustomerAllocationDeployment';
 import path from 'node:path';
 import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
+import { customerFinanceData } from './customerFinanceFixture';
+import { readCustomerWorkspace, recordCustomerAccountOperation, recordCustomerWorkspaceTreasury } from '../accountingCustomerWorkspace';
 
 test('dedicated PostgreSQL logins enforce allocation authority on real connections', {
   skip: process.env.ACCOUNTING_ALLOCATION_TEST_DIRECT_LOGINS !== '1', timeout: 180_000,
@@ -79,14 +83,82 @@ test('dedicated PostgreSQL logins enforce allocation authority on real connectio
       return row.admitted;
     };
     assert.equal(await admitted(), false);
-    const [receipt] = await controller.$queryRaw<Array<{ state: string }>>`
+    const [activationReceipt] = await controller.$queryRaw<Array<{ state: string }>>`
       SELECT * FROM public.customer_allocation_controller_activate(
         ${deploymentId}, ${token}, ${release}, ${'b'.repeat(64)}, ${new Date(Date.now() + 60_000)})
     `;
-    assert.equal(receipt.state, 'ACTIVE');
+    assert.equal(activationReceipt.state, 'ACTIVE');
     assert.equal(await admitted(), false);
     await admin.deploymentOperation.update({ where: { id: deploymentId }, data: { phase: 'COMPLETED', activeKey: null } });
     assert.equal(await admitted(), true);
+
+    const f = await customerFinanceData(admin);
+    const customer = await f.customer();
+    await recordCustomerAccountOperation(admin, customer, { ...f.common, kind: 'DEBIT', amountRials: 3n, idempotencyKey: randomUUID() });
+    await recordCustomerAccountOperation(admin, customer, { ...f.common, kind: 'CREDIT', amountRials: 1n, idempotencyKey: randomUUID() });
+    const receipt = await recordCustomerWorkspaceTreasury(admin, customer, {
+      ...f.common, kind: 'RECEIPT', amountRials: 2n, financialAccountId: f.financial.id,
+      bankLedgerId: f.bank.id, allocations: [], idempotencyKey: randomUUID(),
+    });
+    const read = () => readCustomerWorkspace(admin, { id: customer, asOf: new Date(), userId: f.actor.id });
+    const before = await read();
+    const debt = before.openItems.find(row => row.kind === 'RECEIVABLE')!;
+    const credit = before.openItems.find(row => row.kind === 'CREDIT')!;
+    const command = { ...f.common, kind: 'ALLOCATION' as const, amountRials: 0n, allocations: [], idempotencyKey: randomUUID(),
+      sourceAllocations: [
+        { receiptId: receipt.id, allocations: [{ openItemId: debt.id, amountRials: 2n }] },
+        { creditItemId: credit.id, allocations: [{ openItemId: debt.id, amountRials: 1n }] },
+      ],
+    };
+    // These per-object grants belong to this disposable fixture. Production
+    // privileges must also qualify the rest of the application's workflows.
+    await admin.$executeRaw`GRANT SELECT ON
+      public.crm_customers, public.accounting_books, public.accounting_legal_entities, public.accounting_customer_profiles,
+      public.accounting_customer_posting_rules, public.accounting_posting_periods, public.accounting_fiscal_years,
+      public.accounting_treasury_transactions, public.accounting_customer_open_items,
+      public.accounting_commercial_customer_invoices, public.accounting_customer_receipt_adjustments,
+      public.accounting_customer_receipt_resolutions, public.accounting_dimension_types,
+      public.accounting_dimension_members, public.accounting_ledger_account_dimension_rules,
+      public.accounting_parties, public.accounting_financial_accounts, public.accounting_check_instruments,
+      public.accounting_check_instrument_events, public.accounting_sepidar_target_links,
+      public.accounting_sepidar_source_snapshots, public.accounting_sepidar_source_records
+      TO sabalan_application_runtime`;
+    await admin.$executeRaw`GRANT SELECT, INSERT ON public.accounting_customer_commands,
+      public.accounting_ledger_lines, public.accounting_ledger_line_dimensions, public.accounting_ledger_audit_entries,
+      public.accounting_settlement_allocation_lines TO sabalan_application_runtime`;
+    await admin.$executeRaw`GRANT SELECT, UPDATE ON public.accounting_ledger_accounts TO sabalan_application_runtime`;
+    // The existing voucher trigger locks the cutover row and records the first authoritative posting.
+    await admin.$executeRaw`GRANT SELECT ON public.accounting_replacement_cutover_runs TO sabalan_application_runtime`;
+    await admin.$executeRaw`GRANT UPDATE ("firstAuthoritativeVoucherId", "firstAuthoritativePostingAt", "rollbackAllowed")
+      ON public.accounting_replacement_cutover_runs TO sabalan_application_runtime`;
+    await admin.$executeRaw`GRANT SELECT, INSERT, UPDATE ON public.accounting_customer_allocation_fences,
+      public.accounting_customer_command_key_fences, public.accounting_customer_allocation_intents,
+      public.accounting_settlement_allocations, public.accounting_ledger_vouchers, public.accounting_voucher_sequences
+      TO sabalan_application_runtime`;
+    const scratch = path.resolve('node_modules/.cache');
+    mkdirSync(scratch, { recursive: true });
+    const imageFixture = mkdtempSync(path.join(scratch, 'allocation-backend-'));
+    const previousRelease = process.env.DEPLOYMENT_RELEASE_ID;
+    try {
+      const backend = path.join(imageFixture, 'backend');
+      mkdirSync(backend);
+      cpSync(path.resolve('dist'), path.join(backend, 'dist'), { recursive: true });
+      symlinkSync(path.resolve('../packages'), path.join(imageFixture, 'packages'), 'junction');
+      writeFileSync(path.join(backend, '.allocation-build-commit'), `${commit}\n`, { flag: 'wx' });
+      process.env.DEPLOYMENT_RELEASE_ID = release;
+      const load = createRequire(__filename);
+      const workspace = load(path.join(backend, 'dist/services/accountingCustomerWorkspace.js')) as typeof import('../accountingCustomerWorkspace');
+      const intents = load(path.join(backend, 'dist/services/accountingCustomerAllocationIntent.js')) as typeof import('../accountingCustomerAllocationIntent');
+      await intents.prepareAdmittedCustomerAllocationIntent(runtime, customer, command);
+      await workspace.recordCustomerWorkspaceTreasury(runtime, customer, command);
+      assert.equal((await read()).debitOpenRials, 0n);
+      assert.equal((await read()).standaloneCreditRials, 0n);
+      assert.equal(await admin.accountingSettlementAllocation.count(), 2);
+    } finally {
+      if (previousRelease === undefined) delete process.env.DEPLOYMENT_RELEASE_ID;
+      else process.env.DEPLOYMENT_RELEASE_ID = previousRelease;
+      rmSync(imageFixture, { recursive: true, force: true });
+    }
   } finally {
     try {
       await Promise.allSettled(clients.map(client => client.$disconnect()));

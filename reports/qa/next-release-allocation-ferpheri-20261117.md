@@ -36,3 +36,7 @@
 ## Dispatch OTP decision
 
 The owner approved digest-only storage. The application sends the code by SMS and stores its keyed digest. The published migration remains byte-identical and the nullable column is left empty by the application.
+
+## Authenticated grouped posting evidence
+
+The opt-in authenticated PostgreSQL fixture also ran the compiled application posting path as the limited runtime login, using a synthetic protected activation decision and a disposable database. A receipt and independent credit settled the three-rial debt, left both balances at zero, and produced two settlement allocations. The existing voucher trigger required read access and update permission on three cutover columns. Both temporary logins were subsequently verified as NOLOGIN with no password. Exact release images, production credentials and canonical rollback still require evidence.

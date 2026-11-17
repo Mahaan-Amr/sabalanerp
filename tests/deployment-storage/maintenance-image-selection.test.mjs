@@ -69,16 +69,14 @@ test('candidate and retained QA graphs use the same shared decision without requ
  for(const [compose,legacy,policy,expected]of [['docker-compose.rehearsal.yml','0','no-malware-scan','docker-compose.rehearsal-scanner-free.yml'],['docker-compose.rehearsal.yml','1','no-malware-scan','docker-compose.rehearsal.yml'],['docker-compose.rehearsal.yml','1','legacy-scanner','docker-compose.rehearsal.yml'],['docker-compose.prod.yml','0','no-malware-scan','docker-compose.prod.yml']]){
   const result=spawnSync(shell,[selector.pathname.replace(/^\/([A-Za-z]:)/,'$1'),compose,legacy,policy],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);assert.equal(result.stdout.trim(),expected);
  }
- assert.match(script,/release-compose-file.sh/);
+ assert.match(script,/docker compose --env-file "\$\{ENV_FILE\}" -f "\$\{COMPOSE_FILE\}"/);
 });
 test('scanner-retaining source cannot select incompatible scanner-free operations before runtime changes',()=>{
  const {plan,actual}=fixture();plan.uploadPolicy=actual.uploadPolicy='legacy-scanner';actual.scannerRetained=true;actual.operationsScannerRetained=false;delete actual.images.backend.Config.Labels['io.sabalan.release.upload-policy'];
  assert.throws(()=>validateMaintenanceSelection(plan,actual),/MAINTENANCE_OPERATIONS_SCANNER_GRAPH_INCOMPATIBLE/);
 });
-test('ordinary QA retains the observed legacy scanner for rollback while executing the selected scanner-free target',()=>{
- const from=script.indexOf('case "${previous_upload_policy}" in'),to=script.indexOf('export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE',from);const block=script.slice(from,to);assert.ok(from>0&&to>from);
- for(const [policy,expected]of [['no-malware-scan','0'],['legacy-scanner','1']]){
-  const code=`set -eu\nprevious_upload_policy=''; LEGACY_RELEASE_GRAPH=0; DEPLOYMENT_CLAMAV_REPAIR=false; DEPLOYMENT_MODE=release; CAPTURE_ONLY=0; COMPOSE_FILE=docker-compose.rehearsal.yml; ALLOCATION_EVIDENCE_DIR=''; DEPLOYMENT_MAINTENANCE_UPLOAD_POLICY=${policy}\nimage_of_service(){ printf retained-scanner-image; }; compose(){ printf retained-scanner-container; }; docker(){ printf healthy; }\n${block}\nprintf '%s:%s' "$LEGACY_RELEASE_GRAPH" "$DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE"\n`;
-  const result=spawnSync(shell,['-c',code],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);assert.equal(result.stdout,expected+':retained-scanner-image');
- }
+test('retained predecessor observes its mandatory scanner image and keeps the six-service source graph',()=>{
+ const from=script.indexOf('DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE="$(image_of_service clamav)"');assert.ok(from>0);
+ assert.match(script,/verify_predecessor_database_roles/);
+ assert.doesNotMatch(script,/LEGACY_RELEASE_GRAPH=0/);
 });

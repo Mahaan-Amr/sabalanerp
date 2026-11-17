@@ -92,3 +92,9 @@ The reviewed deployment runner keeps a private fingerprint of the effective prio
 The complete candidate migration catalog was also applied to a disposable local database and inspected without granting any application permissions. It produced 571 public tables, five sequences, and five public security-definer routines related to allocation. Both allocation roles were dormant non-superusers. The count defines the scope of the cutover inventory. Initial login provisioning, preserving in-app System Recovery through an owner-isolated path, an independent role-aware recovery drill, and populated exact-image activation and rollback are still open.
 
 Both backend builds passed. The cross-release dedicated-login fixture ran against the current scanner-retaining build. It reversed the credit and receipt shares after closure, rejected conflicting receipt evidence, and verified a single receipt reversal and restoration of exactly three rials of debt.
+
+### Protected controller regressions and independent host census
+
+The prebuilt shell fixture now extracts the current controller branch directly. It executes the real storage preflight invocation and requires the selected immutable identities to survive without another fetch, build, tag or browser build derivation. The combined Linux regression run passed all 39 cases across prebuilt selection, controller activation and closure, credential pinning, rollback retention and configuration release behavior.
+
+A read-only comparison confirmed that production and the existing backup host report different valid DMI UUIDs. The backup host had Docker installed, two CPUs, roughly 4 GB of RAM and 10.44 GB free on its shared disk. This census measured the host only. A prepared and authorized recovery target, exact owner and role provisioning, capacity under the drill workload, and independent recovery evidence are still required.

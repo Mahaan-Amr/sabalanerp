@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
+import { privateDirectoryReader } from './customer-allocation-controller.mjs';
 import { canonicalGoPayload } from './customer-allocation-go-manifest.mjs';
 
 const roles = ['backend', 'frontend', 'inquiry'];
@@ -26,8 +28,24 @@ function assertScanner(scanner, id, image, expectedStatus) {
     || (expectedStatus && (scanner.State?.Status !== expectedStatus || scanner.State.Running !== false))) fail();
 }
 
+export function createAllocationRetention(payload, readerBytes, manifestSha256) {
+  if (payload?.schemaVersion !== 1 || payload.decision !== 'GO' || payload.operation !== 'GROUPED_ALLOCATION'
+    || !digest.test(manifestSha256) || sha256(canonicalGoPayload(payload)) !== manifestSha256
+    || payload.evidence?.reader !== sha256(readerBytes)) fail();
+  const reader = JSON.parse(readerBytes);
+  if (!digest.test(reader.predecessorScannerContainerId) || !imageId.test(reader.predecessorScannerImage)
+    || !roles.every(role => imageId.test(payload.predecessorImages?.[role]))) fail();
+  return {
+    format: 'sabalan-customer-allocation-image-retention/v1', manifestSha256,
+    predecessorImages: Object.fromEntries(roles.map(role => [role, payload.predecessorImages[role]])),
+    scannerId: reader.predecessorScannerContainerId, scannerImage: reader.predecessorScannerImage,
+  };
+}
+
 /** The locked DB closure checks the historical payload digest against the active receipt. */
-export function selectCurrentDataPredecessor({ payload, readerBytes, current, selected, scanner }) {
+export function selectCurrentDataPredecessor({ payload, readerBytes, retention, current, selected, scanner }) {
+  const manifestSha256 = sha256(canonicalGoPayload(payload));
+  if (!isDeepStrictEqual(retention, createAllocationRetention(payload, readerBytes, manifestSha256))) fail();
   if (payload?.schemaVersion !== 1 || payload.decision !== 'GO' || payload.operation !== 'GROUPED_ALLOCATION'
     || !commit.test(payload.candidateCommit) || !digest.test(payload.migrationSha256)
     || payload.evidence?.reader !== sha256(readerBytes)) fail();
@@ -50,7 +68,7 @@ export function selectCurrentDataPredecessor({ payload, readerBytes, current, se
   }
   assertScanner(scanner, evidence.predecessorScannerContainerId, evidence.predecessorScannerImage, 'exited');
   return {
-    manifestSha256: sha256(canonicalGoPayload(payload)), targetCommit: evidence.predecessorCommit, targetSourceHash,
+    manifestSha256, targetCommit: evidence.predecessorCommit, targetSourceHash,
     browserBuildId: evidence.predecessorBrowserBuildId, images: payload.predecessorImages,
     scannerId: scanner.Id, scannerImage: scanner.Image,
   };
@@ -71,6 +89,20 @@ function readPrivate(file, maxBytes) {
     if (BigInt(bytes.length) !== before.size) fail();
     return bytes;
   } finally { closeSync(fd); }
+}
+
+function syncDirectory(file) {
+  const parent = openSync(path.dirname(file), constants.O_DIRECTORY | constants.O_RDONLY);
+  try { fsyncSync(parent); } finally { closeSync(parent); }
+}
+
+function writePrivate(file, content) {
+  const fd = openSync(file, 'wx', 0o600);
+  try {
+    writeFileSync(fd, JSON.stringify(content));
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
+  syncDirectory(file);
 }
 
 function inspect(kind, id) {
@@ -103,8 +135,20 @@ function exportsForSelection({ targetCommit, targetSourceHash, browserBuildId, i
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const [action, input, backend, frontend, inquiry] = process.argv.slice(2);
-    if (action === 'select' && process.argv.length === 7) {
+    const [action, input, backend, frontend, inquiry, retentionFile] = process.argv.slice(2);
+    if (action === 'retain' && process.argv.length === 6) {
+      const read = privateDirectoryReader(input);
+      const { payload } = JSON.parse(read('decision.json', 64 * 1024));
+      const readerBytes = read('reader.json', 4 * 1024 * 1024);
+      writePrivate(frontend, createAllocationRetention(payload, readerBytes, backend));
+    } else if (action === 'retire' && process.argv.length === 5) {
+      const reference = JSON.parse(readPrivate(input, 4096));
+      if (reference.format !== 'sabalan-customer-allocation-image-retention/v1'
+        || !digest.test(backend) || reference.manifestSha256 !== backend) fail();
+      unlinkSync(input);
+      syncDirectory(input);
+    } else if (action === 'select' && process.argv.length === 8) {
+      const retention = JSON.parse(readPrivate(retentionFile, 4096));
       if (!path.isAbsolute(input) || realpathSync(input) !== input) fail();
       const directory = lstatSync(input);
       if (!directory.isDirectory() || directory.uid !== process.getuid() || (directory.mode & 0o077)) fail();
@@ -117,17 +161,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const selected = Object.fromEntries(roles.map(role => [role, inspect('image', payload.predecessorImages?.[role])]));
       inspect('image', reader.predecessorScannerImage);
       const scanner = inspect('container', reader.predecessorScannerContainerId);
-      process.stdout.write(exportsForSelection(selectCurrentDataPredecessor({ payload, readerBytes, current, selected, scanner })));
+      process.stdout.write(exportsForSelection(selectCurrentDataPredecessor({ payload, readerBytes, retention, current, selected, scanner })));
     } else if (action === 'stage-scanner' && process.argv.length === 6) {
       const [id, image] = [backend, frontend];
       assertScanner(inspect('container', id), id, image, 'exited');
-      const fd = openSync(input, 'wx', 0o600);
-      try {
-        writeFileSync(fd, JSON.stringify({ id, image }));
-        fsyncSync(fd);
-      } finally { closeSync(fd); }
-      const parent = openSync(path.dirname(input), constants.O_DIRECTORY | constants.O_RDONLY);
-      try { fsyncSync(parent); } finally { closeSync(parent); }
+      writePrivate(input, { id, image });
     } else if (action === 'stop-staged-scanner' && process.argv.length === 4) {
       const { id, image } = JSON.parse(readPrivate(input, 4096));
       const scanner = inspect('container', id);

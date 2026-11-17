@@ -174,6 +174,10 @@ compose() {
   if [ -n "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ]; then
     preserved_clamav_guard compose "$@" || return 1
   fi
+  run_compose "$@"
+}
+
+run_compose() {
   if [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ] && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ]; then
     docker compose --env-file "${ENV_FILE}" -f "$(runtime_compose_file)" -f "${LEGACY_SCANNER_COMPOSE}" "$@"
   else
@@ -186,10 +190,39 @@ verify_prebuilt_release() {
     "${PREBUILT_RELEASE_PLAN}" "${PREBUILT_RELEASE_SHA256}" "${REPO_ROOT}" "${OPERATIONS_ROOT}"
 }
 
+customer_allocation_retention_path() {
+  coordination_mount="$(docker volume inspect sabalanerp_recovery_coordination --format '{{.Mountpoint}}')" || return 1
+  case "${coordination_mount}" in /*) ;; *) return 1;; esac
+  printf '%s\n' "${coordination_mount}/customer-allocation-active-retention.json"
+}
+
+verify_allocation_promotion_allowed() {
+  if [ "${CAPTURE_ONLY}" -eq 1 ] || [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then return 0; fi
+  allocation_control_state="$(compose exec -T postgres sh -c '
+    exec env PGCONNECT_TIMEOUT=5 PGOPTIONS="-c statement_timeout=10000 -c default_transaction_read_only=on" \
+      psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+  ' <<'SQL'
+SELECT to_regclass('public.customer_allocation_release_control') IS NOT NULL AS present \gset
+\if :present
+SELECT state FROM public.customer_allocation_release_control WHERE id = 'grouped-allocation';
+\else
+SELECT 'ABSENT';
+\endif
+SQL
+  )" || return 1
+  case "${allocation_control_state}" in
+    CLOSED|ABSENT) return 0 ;;
+    ACTIVE) echo 'Close the active customer allocation release through verified current-data rollback before promoting different application images.' >&2 ;;
+    *) echo 'The customer allocation release state could not be proven.' >&2 ;;
+  esac
+  return 1
+}
+
 select_customer_allocation_predecessor() {
+  allocation_reference="$(customer_allocation_retention_path)" || return 1
   node "${OPERATIONS_ROOT}/deploy/scripts/lib/customer-allocation-current-data.mjs" select \
     "${CUSTOMER_ALLOCATION_ROLLBACK_EVIDENCE}" "${DEPLOYMENT_PREVIOUS_BACKEND_IMAGE}" \
-    "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}" "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}"
+    "${DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE}" "${DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE}" "${allocation_reference}"
 }
 
 capture_remaining_seconds() {
@@ -198,6 +231,7 @@ capture_remaining_seconds() {
 }
 
 start_release_services() {
+  verify_database_role_pin || return 1
   wait_seconds="$1"
   if [ "${CAPTURE_ONLY}" -eq 1 ]; then
     [ "${MUTATION_STARTED}" -eq 0 ] && [ "${MAINTENANCE_ACTIVE}" -eq 1 ] && [ -n "${CAPTURE_ONLY_SNAPSHOT:-}" ] && [ -n "${capture_pause_started:-}" ] || return 1
@@ -243,10 +277,16 @@ start_release_services() {
   # Nginx resolves Compose service names when its workers start. Recreate it
   # after application containers have their final addresses so rollout and
   # rollback cannot reopen traffic through stale upstream IPs.
-  compose up -d --no-deps --force-recreate --wait --wait-timeout "${wait_seconds}" nginx
+  compose up -d --no-deps --force-recreate --wait --wait-timeout "${wait_seconds}" nginx || return 1
+  verify_database_role_pin "$(compose ps -q backend)" "$(compose ps -q postgres)"
 }
 
 run_backend() {
+  # The marker writer uses the host journal and filesystem only. It must
+  # still be able to close public traffic if a later pin check fails.
+  if [ "$#" -ne 3 ] || [ "$1" != node ] || [ "$2" != dist/scripts/deployment-control.js ] || [ "$3" != maintenance-on ]; then
+    verify_database_role_pin || return 1
+  fi
   legacy_control_files=""
   if [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] \
     && { [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || \
@@ -322,6 +362,7 @@ assert_qa_remote_checkpoint_mount() {
 }
 
 run_backend_timed() {
+  verify_database_role_pin || return 1
   duration="$1"
   shift
   legacy_control_files=""
@@ -440,13 +481,23 @@ wait_for_cutover_approval() {
   done
 }
 
-allocation_compose_config() {
-  # This runs locally and its credential-bearing output is consumed only by
-  # the allocation helper via a pipe.
-  COMPOSE_PROFILES=deployment compose config --format json
+protected_compose_config() {
+  # The credential-bearing rendering goes only to private helper stdin.
+  COMPOSE_PROFILES=deployment run_compose config --format json
+}
+
+database_role_pin_path() {
+  case "${DEPLOYMENT_ID:-}" in ''|*[!a-zA-Z0-9_-]*) return 1;; esac
+  printf '%s\n' "${REPO_ROOT}/.deploy-state/database-roles-${DEPLOYMENT_ID}.sha256"
+}
+
+verify_database_role_pin() {
+  database_role_pin="$(database_role_pin_path)" || return 1
+  protected_compose_config | node "${OPERATIONS_ROOT}/deploy/scripts/protected-database-role-pin.mjs" verify "${database_role_pin}" "$@"
 }
 
 run_customer_allocation_controller() {
+  verify_database_role_pin || return 1
   allocation_mode="$1"
   allocation_control_image="$2"
   allocation_close_digest="${3:-}"
@@ -457,7 +508,7 @@ run_customer_allocation_controller() {
   else
     return 1
   fi
-  allocation_compose_config | node "${ALLOCATION_RELEASE_SCRIPT}" input \
+  protected_compose_config | node "${ALLOCATION_RELEASE_SCRIPT}" input \
     "${allocation_predecessor}" "${ALLOCATION_AUTHORITY_DIR}" "${ALLOCATION_APPROVER_SHA256}" \
     "${allocation_mode}" "${allocation_request:-}" "${allocation_close_digest}" \
     | docker run --rm -i --pull never --network "${allocation_network}" \
@@ -473,6 +524,7 @@ control() {
 }
 
 enter_maintenance() {
+  verify_database_role_pin || return 1
   if [ "${CAPTURE_ONLY}" -eq 1 ]; then
     # Capture must restart the exact original Nginx container after the
     # checkpoint. Its mounted marker check takes effect without recreation.
@@ -952,18 +1004,14 @@ recover_failure() {
       && { [ "${CAPTURE_ONLY}" -eq 0 ] || capture_remaining_seconds 900 >/dev/null; } \
       && DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_backend node dist/scripts/deployment-gates.js \
       && { [ "${CAPTURE_ONLY}" -eq 0 ] || capture_remaining_seconds 900 >/dev/null; }; then
-      if [ "${CAPTURE_ONLY}" -eq 1 ]; then
-        if ! control maintenance-off; then
-          DEPLOYMENT_PHASE=RECOVERY_REQUIRED; DEPLOYMENT_RESULT=RECOVERY_REQUIRED
-          export DEPLOYMENT_PHASE DEPLOYMENT_RESULT
-          if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then control finish || true; fi
-          cleanup_locks
-          exit "${exit_code}"
-        fi
-        PUBLIC_TRAFFIC_OPEN=1
-      else
-        control maintenance-off || true
+      if ! control maintenance-off; then
+        DEPLOYMENT_PHASE=RECOVERY_REQUIRED; DEPLOYMENT_RESULT=RECOVERY_REQUIRED
+        export DEPLOYMENT_PHASE DEPLOYMENT_RESULT
+        if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then control finish || true; fi
+        cleanup_locks
+        exit "${exit_code}"
       fi
+      PUBLIC_TRAFFIC_OPEN=1
       MAINTENANCE_ACTIVE=0
       if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then
         finish_with_notification_result ABORTED || true
@@ -991,13 +1039,14 @@ recover_failure() {
   fi
 
   echo "Mutation had started. Running the single permitted automatic rollback attempt." >&2
-  if drain_release_for_rollback; then
+  if verify_database_role_pin && drain_release_for_rollback; then
     DEPLOYMENT_PHASE="ROLLBACK_STARTED"
     export DEPLOYMENT_PHASE
     if [ "${BOOTSTRAP}" -eq 1 ]; then control local-transition || true; else control transition || true; fi
   fi
 
   if [ "${DEPLOYMENT_PHASE:-}" = "ROLLBACK_STARTED" ] \
+    && verify_database_role_pin \
     && run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-rollback.js \
     && run_backend sh scripts/with-backend-control-ownership.sh node dist/scripts/deployment-finalize-recovery.js \
     && switch_to_previous_images; then
@@ -1014,8 +1063,7 @@ recover_failure() {
           echo "Rollback succeeded, but durable financial-evidence referral failed; maintenance remains active." >&2
         fi
       fi
-      if [ "${referral_ready}" -eq 1 ]; then
-        control maintenance-off
+      if [ "${referral_ready}" -eq 1 ] && control maintenance-off; then
         MAINTENANCE_ACTIVE=0
         finish_with_notification_result ROLLED_BACK || true
         cleanup_locks
@@ -1119,6 +1167,7 @@ if [ -f "${SESSION_HOST_PATH}" ]; then
   preserved_clamav_guard identity || exit 1
   echo "An interrupted deployment journal was found; automatic recovery runs before any new deployment." >&2
   DEPLOYMENT_ID="$(session_value deploymentId)"
+  verify_database_role_pin || exit 1
   DEPLOYMENT_RELEASE_ID="$(session_value releaseId)"
   DEPLOYMENT_TARGET_COMMIT="$(session_value targetCommit)"
   DEPLOYMENT_OWNER="$(session_value owner)"
@@ -1220,10 +1269,6 @@ fi
 # Interrupted releases above retain their existing recovery path.
 node "${OPERATIONS_ROOT}/deploy/scripts/backup-retention-host.mjs" --inspect "${ENV_FILE}"
 
-if [ "${DEPLOYMENT_MODE}" = "configuration" ]; then
-  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0 "${COMPOSE_FILE}"
-fi
-
 if [ "${DEPLOYMENT_MODE}" = "release" ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ] \
   && [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 0 ]; then
 if [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 1 ]; then
@@ -1295,7 +1340,7 @@ elif [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
     "$(compose ps -q backend)" "$(compose ps -q postgres)")" || exit 1
 fi
 if [ -n "${allocation_predecessor:-}" ]; then
-  allocation_network="$(allocation_compose_config | node "${ALLOCATION_RELEASE_SCRIPT}" prepare \
+  allocation_network="$(protected_compose_config | node "${ALLOCATION_RELEASE_SCRIPT}" prepare \
     "${allocation_predecessor}" "${ALLOCATION_AUTHORITY_DIR}" "${ALLOCATION_APPROVER_SHA256}")" || exit 1
 fi
 
@@ -1314,6 +1359,13 @@ DEPLOYMENT_RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%s' "${DEPLOYMENT_TA
 DEPLOYMENT_ID="deploy-${DEPLOYMENT_RELEASE_ID}"
 APP_COMMIT="${DEPLOYMENT_TARGET_COMMIT}"
 export DEPLOYMENT_TARGET_COMMIT DEPLOYMENT_RELEASE_ID DEPLOYMENT_ID DEPLOYMENT_OWNER APP_COMMIT
+database_role_pin="$(database_role_pin_path)" || exit 1
+protected_compose_config | node "${OPERATIONS_ROOT}/deploy/scripts/protected-database-role-pin.mjs" pin \
+  "${database_role_pin}" "${previous_backend_id}" "$(compose ps -q postgres)" || exit 1
+verify_allocation_promotion_allowed || exit 1
+if [ "${DEPLOYMENT_MODE}" = "configuration" ]; then
+  sh "${OPERATIONS_ROOT}/deploy/scripts/storage-preflight.sh" "${ENV_FILE}" "${REPO_ROOT}" "${OPERATIONS_ROOT}" 0 0 "${COMPOSE_FILE}"
+fi
 if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
   if [ "${DEPLOYMENT_CLAMAV_OPERATION}" = incident-recovery ]; then
     [ -f "${DEPLOYMENT_CLAMAV_INCIDENT_SNAPSHOT_FILE:-}" ] || { echo 'A fresh degraded-instance snapshot is required before incident maintenance.' >&2; exit 1; }
@@ -1476,6 +1528,7 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" snapshot "${CAPTURE_ONLY_SNAPSHOT}" "${ENV_FILE}"
 fi
 node "${OPERATIONS_ROOT}/deploy/scripts/backup-retention-host.mjs" --inspect "${ENV_FILE}"
+verify_database_role_pin || exit 1
 refresh_performance_database_identity
 
 if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
@@ -1505,6 +1558,7 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   # up could apply this operation's environment and replace its configuration.
   verify_capture_only_configuration
 else
+  verify_database_role_pin || exit 1
   compose up -d --no-deps postgres
 fi
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
@@ -1625,6 +1679,8 @@ LEGACY_BACKEND_SIGNAL_PENDING=1
 assert_original_legacy_still_stopped
 LEGACY_BACKEND_SIGNAL_PENDING=0
 assert_qa_remote_checkpoint_mount
+verify_database_role_pin || exit 1
+verify_allocation_promotion_allowed || exit 1
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"
@@ -1804,6 +1860,9 @@ if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
     ''|*[!a-f0-9]*) echo 'Customer allocation activation receipt is invalid.' >&2; exit 1 ;;
   esac
   [ "${#DEPLOYMENT_CUSTOMER_ALLOCATION_MANIFEST_SHA256}" -eq 64 ] || exit 1
+  allocation_reference="$(customer_allocation_retention_path)" || exit 1
+  node "${OPERATIONS_ROOT}/deploy/scripts/lib/customer-allocation-current-data.mjs" retain \
+    "${ALLOCATION_EVIDENCE_DIR}" "${DEPLOYMENT_CUSTOMER_ALLOCATION_MANIFEST_SHA256}" "${allocation_reference}" || exit 1
 fi
 
 phase RELEASE_STARTED
@@ -1845,6 +1904,7 @@ if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
     "$(compose ps -q backend)" "$(compose ps -q frontend)" "$(compose ps -q inquiry)" "${legacy_scanner_id}")" || exit 1
   [ "${checked_allocation_runtime_address}" = "${allocation_runtime_address}" ] || exit 1
 fi
+verify_database_role_pin || exit 1
 phase GATES_PASSED
 if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
   node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" mark-open "${REPO_ROOT}"
@@ -1857,6 +1917,12 @@ finish_with_notification_result COMPLETED
 cleanup_configuration_snapshot
 
 FINISHED=1
+if [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK}" -eq 1 ]; then
+  allocation_reference="$(customer_allocation_retention_path)" && \
+  node "${OPERATIONS_ROOT}/deploy/scripts/lib/customer-allocation-current-data.mjs" retire \
+    "${allocation_reference}" "${CUSTOMER_ALLOCATION_CLOSE_MANIFEST_SHA256}" || \
+    echo 'Closed allocation images remain protected pending reconciliation of their retention receipt.' >&2
+fi
 cleanup_locks
 trap - EXIT INT TERM
 echo "Deployment ${DEPLOYMENT_ID} completed with verified local/remote checkpoints and all mandatory gates passed."

@@ -6,8 +6,9 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
+import { planStorageCleanup, readStorageProtection } from '../../scripts/deployment-storage.mjs';
 import { canonicalGoPayload } from '../../deploy/scripts/lib/customer-allocation-go-manifest.mjs';
-import { selectCurrentDataPredecessor } from '../../deploy/scripts/lib/customer-allocation-current-data.mjs';
+import { createAllocationRetention, selectCurrentDataPredecessor } from '../../deploy/scripts/lib/customer-allocation-current-data.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 const id = character => 'sha256:' + character.repeat(64);
@@ -40,8 +41,13 @@ const fixture = () => {
   return { payload, readerBytes, current, selected, scanner };
 };
 
+function retainedFixture() {
+  const input = fixture();
+  return { ...input, retention: createAllocationRetention(input.payload, input.readerBytes, digest(canonicalGoPayload(input.payload))) };
+}
+
 test('selects the original qualified scanner predecessor and binds closure to the historical GO digest', () => {
-  const observed = fixture();
+  const observed = retainedFixture();
   assert.deepEqual(selectCurrentDataPredecessor(observed), {
     manifestSha256: digest(canonicalGoPayload(observed.payload)),
     targetCommit: commit('b'), targetSourceHash: 'c'.repeat(64), browserBuildId: 'erp_retained_build',
@@ -61,13 +67,33 @@ test('refuses rollback when the running release or retained dependencies drift',
     input => { input.scanner.Config.Labels['com.docker.compose.project'] = 'other'; },
     input => { input.payload.migrationSha256 = 'f'.repeat(64); },
     input => { input.readerBytes = Buffer.from('{}'); },
+    input => { delete input.retention; },
+    input => { input.retention.predecessorImages.backend = id('9'); },
   ]) {
-    const observed = fixture();
+    const observed = retainedFixture();
     change(observed);
     assert.throws(() => selectCurrentDataPredecessor(observed), /CUSTOMER_ALLOCATION_CURRENT_DATA_UNPROVEN/);
   }
 });
 
+
+test('canonical cleanup preserves all retained predecessor images after the activation checkpoint ages out', async () => {
+  const { retention } = retainedFixture();
+  const directory = mkdtempSync(join(tmpdir(), 'allocation-retention-'));
+  try {
+    const reference = join(directory, 'customer-allocation-active-retention.json');
+    writeFileSync(reference, JSON.stringify(retention));
+    const protectedImages = await readStorageProtection([], [reference]);
+    const images = [...Object.values(retention.predecessorImages), retention.scannerImage, id('9')].map(image => ({
+      id: image, project: 'sabalanerp', createdAt: '2026-01-01T00:00:00Z',
+    }));
+    const plan = planStorageCleanup({ evidenceComplete: true, project: 'sabalanerp', protectedImages,
+      protectedContainers: [], containers: [], images, now: Date.parse('2026-11-17T00:00:00Z') });
+    assert.deepEqual(plan.images, [id('9')]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('scanner cleanup is limited to the retained stopped container recorded by the operation', { skip: !process.getuid }, () => {
   const directory = mkdtempSync(join(tmpdir(), 'allocation-scanner-'));

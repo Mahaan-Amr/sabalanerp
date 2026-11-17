@@ -120,6 +120,24 @@ test('authenticated grouped allocation reserves, posts and recovers the same res
     assert.equal(corrected.debitOpenRials, 1n);
     assert.equal(corrected.standaloneCreditRials, 1n);
     assert.ok(corrected.creditAllocations[0]?.reversalVoucherId);
+    const receiptShare = await prisma.accountingSettlementAllocation.findFirstOrThrow({
+      where: { id: { in: result.allocationIds }, treasuryTransactionId: { not: null } },
+    });
+    const receiptReversal = { ...reversalBase, kind: 'REVERSE_ALLOCATION', allocationId: receiptShare.id, idempotencyKey: randomUUID() };
+    const receiptResponse = await send('', receiptReversal);
+    assert.equal(receiptResponse.status, 200, await receiptResponse.clone().text());
+    const receiptResult = (await receiptResponse.json() as any).data;
+    assert.equal(receiptResult.reversesId, receiptShare.id);
+    const receiptReplay = await send('', receiptReversal);
+    assert.equal(receiptReplay.status, 200);
+    assert.equal((await receiptReplay.json() as any).data.id, receiptResult.id);
+    for (const changed of [{ reference: 'different evidence' }, { idempotencyKey: randomUUID() }]) {
+      const receiptConflict = await send('', { ...receiptReversal, ...changed });
+      assert.equal(receiptConflict.status, 409);
+      assert.equal((await receiptConflict.json() as any).code, 'ALLOCATION_REVERSAL_CONFLICT');
+    }
+    assert.equal(await prisma.accountingSettlementAllocation.count(), 4);
+    assert.equal((await read()).debitOpenRials, 3n);
   } finally {
     if (server) { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve())); }
     await prisma.$disconnect();

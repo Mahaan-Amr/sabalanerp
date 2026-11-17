@@ -1004,7 +1004,9 @@ export const reverseCustomerAllocationPrisma = async (database: Database, input:
   if (original.transaction && original.transaction.kind !== 'CUSTOMER_RECEIPT') throw new AccountingCustomerTreasuryError('REFUND_REVERSAL_REQUIRES_CORRECTION', 'اصلاح استرداد باید همراه با برگشت سند پرداخت انجام شود.', 409);
   const payload = { reversesAllocationId: original.id, reason: input.reason.trim(), ...(input.reference ? { reference: input.reference.trim() } : {}), originalLines: original.lines.map((line) => ({ openItemId: line.openItemId, amountRials: line.amountRials.toString() })) };
   const evidence = lineEvidence('SETTLEMENT_ALLOCATION_REVERSAL', original.id, 1, payload);
-  if (original.reversedBy && groupedCredit) {
+  const groupedReceipt = original.treasuryTransactionId !== null
+    && (original.parentCommandKey !== null || original.sourcePlanHash !== null);
+  if (original.reversedBy && (groupedCredit || groupedReceipt)) {
     const voucher = original.reversedBy.ledgerVoucherId ? await tx.accountingLedgerVoucher.findUnique({
       where: { id: original.reversedBy.ledgerVoucherId },
     }) : null;

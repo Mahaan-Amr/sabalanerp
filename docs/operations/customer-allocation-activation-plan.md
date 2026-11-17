@@ -56,4 +56,6 @@ The controller selects the exact approved predecessor backend, frontend and Inqu
 
 A failed attempt after its mutation boundary can restore only the fresh checkpoint captured by this operation, under the normal automatic recovery procedure. That checkpoint contains the acknowledged allocations and files present at the start of the attempt. If the controller cannot verify recovery, maintenance stays active.
 
+The scanner-free Compose path must support the five serving services with the retained scanner container stopped. The predecessor path must support starting the same scanner container with its existing bank and running the scanner-dependent backend. The original six-service #432 rehearsal graph requires ClamAV for backend startup and cannot exercise the scanner-free starting state. Use a separately qualified, isolated QA graph that exercises both sides of that transition with the same protected controller and independent checkpoint checks.
+
 The exact images, reader evidence and cross-topology rehearsal remain prerequisites. The local controller and database fixtures cannot grant a production rollback or activation.

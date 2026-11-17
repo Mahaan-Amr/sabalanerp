@@ -20,6 +20,9 @@ function assertScanner(scanner, id, image, expectedStatus) {
   if (!digest.test(id) || !imageId.test(image) || scanner?.Id !== id || scanner.Image !== image
     || labels(scanner)['com.docker.compose.project'] !== 'sabalanerp'
     || labels(scanner)['com.docker.compose.service'] !== 'clamav'
+    || scanner.Mounts?.filter(mount => mount.Destination === '/var/lib/clamav').length !== 1
+    || !scanner.Mounts.some(mount => mount.Destination === '/var/lib/clamav'
+      && mount.Type === 'volume' && mount.Name === 'sabalanerp_clamav_database' && mount.RW === true)
     || (expectedStatus && (scanner.State?.Status !== expectedStatus || scanner.State.Running !== false))) fail();
 }
 

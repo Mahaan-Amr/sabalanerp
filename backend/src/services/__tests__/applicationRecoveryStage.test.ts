@@ -150,4 +150,3 @@ test('interrupted stage retirement refuses a role with authority outside its jou
   await assert.rejects(api.retireApplicationRecoveryStageRole('postgresql://postgres:secret@localhost/main',
     'sabalan_restore_abcdef012345', 'other_role'), /journal identity differs/);
 });
-

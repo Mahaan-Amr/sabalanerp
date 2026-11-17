@@ -8,6 +8,13 @@ const run = async () => {
   ]);
   assert.equal(results[0].passed, true);
   assert.equal(results[1].passed, false);
+  let now = 1n;
+  let laterGateRan = false;
+  await assert.rejects(runMandatoryDeploymentGates([
+    { name: 'uses-remaining-budget', run: async () => { now = 900n; } },
+    { name: 'must-not-be-admitted', run: async () => { laterGateRan = true; } },
+  ], { deadlineNs: 900n, nowNs: () => now }), (error: any) => error?.code === 'DEPLOYMENT_MUTATION_DEADLINE_EXCEEDED');
+  assert.equal(laterGateRan, false);
   assert.throws(() => assertMandatoryDeploymentGates(results), (error: any) => error?.code === 'DEPLOYMENT_GATES_FAILED');
   assert.equal(connectionUtilizationDecision(59, 100).level, 'HEALTHY');
   assert.equal(connectionUtilizationDecision(60, 100).level, 'WARNING');

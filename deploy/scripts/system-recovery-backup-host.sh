@@ -15,6 +15,51 @@ assert_system_recovery_advisory() {
   protected_advisory_owned
 }
 
+# Every post-owner child shares the original absolute mutation deadline. A
+# native startup guardian retains its Docker children and already stops new
+# admission at that deadline; read-only probes are retained until actual exit.
+# Gates additionally have an exact named container that this owner may stop.
+run_system_recovery_postowner() {
+  if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" != RESTORE ]; then
+    run_original_owned_with_heartbeat "$@"
+    return
+  fi
+  node "${OPERATIONS_ROOT}/deploy/scripts/system-recovery-owner-host.mjs" within-budget "${restore_mutation_started}" || return 124
+  "$@" </dev/null &
+  owned_pid=$!
+  postowner_expired=0
+  postowner_heartbeat_elapsed=0
+  postowner_heartbeat_good=1
+  while kill -0 "${owned_pid}" 2>/dev/null; do
+    sleep 5
+    if [ "${postowner_expired}" -eq 0 ] \
+      && ! node "${OPERATIONS_ROOT}/deploy/scripts/system-recovery-owner-host.mjs" within-budget "${restore_mutation_started}"; then
+      postowner_expired=1
+      phase ROLLBACK_STARTED >&2 || postowner_heartbeat_good=0
+      if [ "${DEPLOYMENT_GATE_MODE:-}" = APPLICATION_RECOVERY ]; then
+        node "${OPERATIONS_ROOT}/deploy/scripts/system-recovery-owner-host.mjs" stop-gates \
+          "${SYSTEM_RECOVERY_GATES_CONTAINER}" "${DEPLOYMENT_TARGET_BACKEND_IMAGE}" \
+          "${DEPLOYMENT_ID}" "${SYSTEM_RECOVERY_OPERATION_ID}" || postowner_heartbeat_good=0
+      fi
+    fi
+    postowner_heartbeat_elapsed=$((postowner_heartbeat_elapsed + 5))
+    if [ "${postowner_heartbeat_elapsed}" -ge 15 ]; then
+      { assert_system_recovery_advisory && verify_public_maintenance && control heartbeat; } >&2 || postowner_heartbeat_good=0
+      postowner_heartbeat_elapsed=0
+    fi
+  done
+  postowner_status=0
+  wait "${owned_pid}" || postowner_status=$?
+  owned_pid=""
+  [ "${postowner_expired}" -eq 0 ] && [ "${postowner_heartbeat_good}" -eq 1 ] || return 124
+  node "${OPERATIONS_ROOT}/deploy/scripts/system-recovery-owner-host.mjs" within-budget "${restore_mutation_started}" || return 124
+  return "${postowner_status}"
+}
+
+verify_system_recovery_reopened_configuration() {
+  capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" verify "${backup_snapshot}" "${ENV_FILE}"
+  verify_predecessor_database_roles
+}
 
 system_recovery_backup_failure() {
   backup_status="$1"
@@ -26,7 +71,7 @@ system_recovery_backup_failure() {
   if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ] \
     && [ "${MUTATION_STARTED:-0}" -eq 1 ] && [ "${PUBLIC_TRAFFIC_OPEN:-0}" -eq 0 ] \
     && [ "${ROLLBACK_ALREADY_ATTEMPTED:-0}" -eq 0 ] \
-    && [ ! -e "${backup_snapshot}.startup-held.json" ]; then
+    && node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" verify-startup-closed "${backup_snapshot}"; then
     if system_recovery_checkpoint_rollback; then exit 0; fi
   fi
   if [ "${MAINTENANCE_ACTIVE}" -eq 1 ]; then
@@ -190,6 +235,8 @@ run_system_recovery_backup() {
     phase MUTATION_STARTED
     MUTATION_STARTED=1
     restore_mutation_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"
+    SYSTEM_RECOVERY_MUTATION_STARTED_NS="${restore_mutation_started}"
+    export SYSTEM_RECOVERY_MUTATION_STARTED_NS
     SYSTEM_RECOVERY_OWNER_CONTAINER="sabalanerp-recovery-owner-${DEPLOYMENT_ID}"
     export SYSTEM_RECOVERY_OWNER_CONTAINER
   fi
@@ -248,21 +295,22 @@ run_system_recovery_backup() {
   fi
   original_start_command=start-original
   if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then original_start_command=start-restored; fi
-  run_original_owned_with_heartbeat node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" "${original_start_command}" \
+  run_system_recovery_postowner node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" "${original_start_command}" \
     "${backup_snapshot}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" 300 "${reopen_budget_started}" "${SESSION_HOST_PATH}"
-  capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" verify "${backup_snapshot}" "${ENV_FILE}"
-  verify_predecessor_database_roles
+  run_system_recovery_postowner verify_system_recovery_reopened_configuration
   if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then
-    SYSTEM_RECOVERY_RUNTIME_AFTER="$(compose exec -T backend node dist/scripts/system-recovery-runtime-proof.js)"
+    SYSTEM_RECOVERY_RUNTIME_AFTER="$(run_system_recovery_postowner compose exec -T backend node dist/scripts/system-recovery-runtime-proof.js)"
     export SYSTEM_RECOVERY_RUNTIME_AFTER
-    DEPLOYMENT_GATE_MODE=APPLICATION_RECOVERY run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-gates.js
+    SYSTEM_RECOVERY_GATES_CONTAINER="sabalanerp-recovery-gates-${DEPLOYMENT_ID}"
+    export SYSTEM_RECOVERY_GATES_CONTAINER
+    DEPLOYMENT_GATE_MODE=APPLICATION_RECOVERY run_system_recovery_postowner run_backend node dist/scripts/deployment-gates.js
   else
     DEPLOYMENT_GATE_MODE=PREVIOUS_UNCHANGED run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-gates.js
   fi
   if [ "${SYSTEM_RECOVERY_OWNER_ACTION:-BACKUP}" = RESTORE ]; then phase GATES_PASSED; fi
-  verify_public_maintenance
-  assert_system_recovery_advisory
-  control heartbeat
+  run_system_recovery_postowner verify_public_maintenance
+  run_system_recovery_postowner assert_system_recovery_advisory
+  run_system_recovery_postowner control heartbeat
   node -e 'if(process.hrtime.bigint()-BigInt(process.argv[1])>=900000000000n)process.exit(1)' "${reopen_budget_started}"
   PUBLIC_TRAFFIC_OPEN=1
   control maintenance-off

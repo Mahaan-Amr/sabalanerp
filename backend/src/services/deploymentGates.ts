@@ -85,9 +85,15 @@ export function completeOnlinePrivateQualificationPrerequisite(value:unknown,exp
 
 export const runMandatoryDeploymentGates = async (
   gates: Array<{ name: string; run: () => Promise<Record<string, unknown> | void> }>,
+  budget?: { deadlineNs: bigint; nowNs?: () => bigint },
 ): Promise<DeploymentGateResult[]> => {
   const results: DeploymentGateResult[] = [];
   for (const gate of gates) {
+    if (budget && (budget.nowNs || process.hrtime.bigint)() >= budget.deadlineNs) {
+      throw Object.assign(new Error('The mutation deadline expired before mandatory gate admission.'), {
+        code: 'DEPLOYMENT_MUTATION_DEADLINE_EXCEEDED',
+      });
+    }
     const startedAt = Date.now();
     try {
       const details = await gate.run();

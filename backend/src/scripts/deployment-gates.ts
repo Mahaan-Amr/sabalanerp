@@ -109,6 +109,14 @@ const main = async () => {
     throw new Error('Ordinary gates cannot replace the owned predecessor role receipt.');
   }
   const roleCheckpoint = rolePhase ? await assertRoleGateBoundary() : null;
+  let mutationBudget: { deadlineNs: bigint } | undefined;
+  if (gateMode === 'APPLICATION_RECOVERY') {
+    const started = process.env.SYSTEM_RECOVERY_MUTATION_STARTED_NS || '';
+    if (!/^[0-9]{1,20}$/.test(started) || BigInt(started) > process.hrtime.bigint()) {
+      throw new Error('Application recovery requires its original monotonic mutation deadline.');
+    }
+    mutationBudget = { deadlineNs: BigInt(started) + 900_000_000_000n };
+  }
   const inquiryDatabase = process.env.INQUIRY_RECOVERY_SOURCE_DIR
     ? path.join(process.env.INQUIRY_RECOVERY_SOURCE_DIR, 'inquiry.db')
     : '/app/recovery-sources/inquiry/inquiry.db';
@@ -239,7 +247,7 @@ const main = async () => {
         return decision;
       },
     },
-  ]);
+  ], mutationBudget);
 
   const report = {
     format: 'sabalan-deployment-report',

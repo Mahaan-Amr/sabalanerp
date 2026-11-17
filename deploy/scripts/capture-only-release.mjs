@@ -80,6 +80,30 @@ export function assertApplicationRecoveryStart(session,intent,receipt,rollback=f
  assert.equal(receipt.operationId,intent.operationId);
  assert.match(receipt.allocation?.sha256,/^[a-f0-9]{64}$/);
 }
+export function assertClosedStartupFailure(held,intent,completion,expected){
+ assert.equal(held.format,'sabalan-capture-original-start-held/v1');
+ assert.equal(intent.format,'sabalan-capture-original-start-intent/v1');
+ assert.equal(completion.format,'sabalan-capture-original-start-completion/v1');
+ for(const row of [held,intent,completion]){
+  assert.equal(row.snapshotSha256,expected.snapshotSha256);
+  assert.deepEqual(row.owner,intent.owner);
+  for(const key of ['parentPid','parentStartTicks','kernelBootId'])assert.equal(row.owner[key],expected[key]);
+ }
+ assert.equal(completion.intentSha256,expected.intentSha256);
+ assert.equal(completion.interrupted,false);assert.equal(completion.allOriginalChildrenClosed,true);
+ assert.ok(Array.isArray(completion.originalChildren)&&completion.originalChildren.length>0);
+ for(const row of completion.originalChildren){
+  assert.equal(row.closed,true);assert.equal(row.signal,null);
+  assert.ok(Number.isInteger(row.code)&&row.code>=0&&!row.interrupted&&!row.overflow);
+ }
+}
+function verifyClosedStartupFailure(file){
+ const heldFile=file+'.startup-held.json';if(!fs.existsSync(heldFile))return;
+ const snapshotRaw=read(file),intentRaw=read(file+'.startup-intent.json');
+ const raw=fs.readFileSync('/proc/'+process.ppid+'/stat','utf8');
+ assertClosedStartupFailure(JSON.parse(read(heldFile)),JSON.parse(intentRaw),JSON.parse(read(file+'.startup-completion.json')),
+  {snapshotSha256:sha(snapshotRaw),intentSha256:sha(intentRaw),parentPid:process.ppid,parentStartTicks:raw.slice(raw.lastIndexOf(')')+2).split(' ')[19],kernelBootId:fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim()});
+}
 async function startPinned(file,environmentFile,composeFile,waitSeconds,startedNs,sessionFile,applicationRecovery=false){
  const snapshotRaw=read(file),snapshot=JSON.parse(snapshotRaw),snapshotSha256=sha(snapshotRaw);
  environmentFile=fs.realpathSync(environmentFile);composeFile=fs.realpathSync(composeFile);assert.ok(path.isAbsolute(sessionFile)&&fs.realpathSync(sessionFile)===sessionFile);
@@ -151,6 +175,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   if(command==='plan'){const root=output,operations={};for(const name of ['deploy/scripts/deploy.sh','deploy/scripts/capture-only-release.mjs'])operations[name]=sha(fs.readFileSync(path.join(root,name)));process.stdout.write(captureControlPlan(JSON.parse(read(file)),rows,operations));}
   else {const facts={services:originalServiceConfiguration(rows),configurationBytes:configurationBytes(rows,output),originalContainerIdentities:originalContainerIdentities(rows)};if(command==='snapshot')save(file,facts);else assert.deepEqual(facts,JSON.parse(read(file)));}
  }
+ else if(command==='verify-startup-closed'){assert.equal(process.argv.length,4);verifyClosedStartupFailure(file);}
  else if(command==='start-original'){assert.equal(process.argv.length,9);await startPinned(file,output,pause,Number(process.argv[6]),process.argv[7],process.argv[8]);}
  else if(command==='start-restored'){assert.equal(process.argv.length,9);await startPinned(file,output,pause,Number(process.argv[6]),process.argv[7],process.argv[8],true);}
  else if(command==='start-rolled-back'){assert.equal(process.argv.length,9);await startPinned(file,output,pause,Number(process.argv[6]),process.argv[7],process.argv[8],'rollback');}

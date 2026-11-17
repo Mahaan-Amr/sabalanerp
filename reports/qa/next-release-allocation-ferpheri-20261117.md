@@ -106,3 +106,11 @@ The production PostgreSQL server reported version 15.16. The authenticated boots
 The read-only backup-host census found 10,444,046,336 free bytes on the filesystem shared by Docker and both backup stores. Docker occupied about 5.39 GB. Production and QA recovery storage occupied about 11.71 GB and 5.00 GB respectively. The Docker daemon was active. These observations identify the filesystem that an isolated drill would compete with. No drill storage has been allocated there and no stored checkpoint was changed.
 
 The scanner-retaining branch at b60dcfddc carries the independent drill and owner-backup entry point. Focused tests passed for scanner preservation, checkpoint identity, PostgreSQL ACL replay and the owner command input. The command binds the application recovery request ID separately from the inherited protected deployment lease. A protected host launcher and role provisioning remain required before activating the restricted runtime.
+
+### Exact retained images for the QA rehearsal
+
+The authorized private QA Engine was reached through its named Linux network namespace and matched its pinned Engine ID. Of the six images observed on production, PostgreSQL, Nginx and ClamAV were already installed there. The exact production backend, frontend and Inquiry images were absent. Their inspected sizes total 1,206,190,284 bytes. The QA Engine's current application images and the encrypted November 16 Windows export belong to an older release. They cannot establish recovery of the currently running production release.
+
+The physical D: drive had 42,175,033,344 bytes free. The sparse QA virtual disk reports a larger virtual capacity, so future image export and import sizing must use the physical drive limit. The November 13 one-use exporter is hard-pinned to six different images, a reserved destination and a historical 69.11 GB envelope. A fresh reference-aware preflight and verified private export for the current images are required before transfer. No images were transferred or imported.
+
+Candidate backend build passed at 9ace49080. All 16 focused Linux controller, role pin, retention and supervised drill launcher checks passed.

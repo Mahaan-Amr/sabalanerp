@@ -85,6 +85,7 @@ const BACKEND_MOUNTS = {
     '/app/recovery-coordination': 'recovery_coordination',
     '/app/recovery-sources/inquiry': 'inquiry_data',
     '/run/deployment-secrets/partner-release-trust-public.der': 'secret-trust',
+    '/run/deployment-secrets/system-recovery-owner-public.pem': 'secret-recovery-owner-public',
 };
 
 const QA_MOUNTS = {
@@ -115,6 +116,7 @@ export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, envir
   assert.equal(fs.realpathSync(qaRoot), qaRoot);
   const binds = {
     'secret-trust': path.join(environment.DEPLOYMENT_SECRET_DIR, 'partner-release-trust-public.der'),
+    'secret-recovery-owner-public': path.join(environment.DEPLOYMENT_SECRET_DIR, 'system-recovery-owner-public.pem'),
     'secret-dir': environment.DEPLOYMENT_SECRET_DIR,
     'remote-dir': environment.DEPLOYMENT_REMOTE_MOUNT_HOST,
     'report-dir': environment.DEPLOYMENT_REPORT_DIR_HOST,
@@ -141,8 +143,16 @@ export function validateQaRenderedMounts(config, { qaRoot, repositoryRoot, envir
         assert.ok(path.isAbsolute(volume.source));
         assert.equal(fs.realpathSync(volume.source), volume.source);
         const sourceStat = fs.lstatSync(volume.source);
-        if (expected === 'secret-trust' || expected.startsWith('nginx-')) {
+        if (expected === 'secret-trust' || expected === 'secret-recovery-owner-public' || expected.startsWith('nginx-')) {
           assert.equal(sourceStat.isFile(), true);
+          if (expected === 'secret-recovery-owner-public') {
+            assert.equal(sourceStat.uid, 0);
+            assert.equal(sourceStat.nlink, 1);
+            assert.equal(sourceStat.mode & 0o022, 0);
+            const publicBytes = fs.readFileSync(volume.source, 'utf8');
+            assert.ok(publicBytes.startsWith('-----BEGIN PUBLIC KEY-----\n'));
+            assert.equal(publicBytes.includes('PRIVATE KEY'), false);
+          }
         } else {
           assert.equal(sourceStat.isDirectory(), true);
         }

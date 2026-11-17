@@ -13,6 +13,7 @@ import {
   type CheckpointObject,
 } from '../services/deploymentCheckpointStorage';
 import { createRecoveryPackage, validateRecoveryPackage } from '../services/systemRecoveryEngine';
+import { assertProtectedRoleCheckpointBoundary, configuredProtectedDatabaseRoleRecovery } from '../services/protectedDatabaseRoleRecovery';
 import { RECOVERY_COORDINATION_DIR, RECOVERY_ROOT } from '../services/recoveryRuntime';
 import { readRecoveryHostIdentity } from '../services/deploymentRecoveryHostIdentity';
 import {inspectOriginalHostRemoteRetention} from '../services/deploymentRemoteRetention';
@@ -96,6 +97,11 @@ const main = async () => {
   const preUploadLocalRetention = await enforceLocalCheckpointRetention(packagesRoot, remoteRoot, deploymentId, preUploadRemoteRetention);
   const remoteCapacity = await remote.assertAvailable(capacity.requiredRemoteBytes);
 
+  const protectedDatabaseRoles = configuredProtectedDatabaseRoleRecovery();
+  const assertRoleCheckpointBoundary = () => assertProtectedRoleCheckpointBoundary({
+    prisma, coordinationDir: RECOVERY_COORDINATION_DIR, id: deploymentId, phase: 'SERVICES_DRAINED',
+  });
+  if (protectedDatabaseRoles) await assertRoleCheckpointBoundary();
   const result = await createRecoveryPackage({
     operationId: deploymentId,
     packageType: 'COMPLETE',
@@ -104,9 +110,11 @@ const main = async () => {
       { keyId: 'remote-recovery', publicKeyPem: remotePublicKey },
     ],
     prisma,
+    protectedDatabaseRoles,
     onProgress: async (progress) => console.log(JSON.stringify({ event: 'checkpoint-progress', progress })),
   });
-  const localValidation = await validateRecoveryPackage({ sourcePath: result.destination, passphrase: localKey, prisma, verifyRestore: true });
+  const localValidation = await validateRecoveryPackage({ sourcePath: result.destination, passphrase: localKey, prisma, verifyRestore: true, protectedDatabaseRoles });
+  if (protectedDatabaseRoles) await assertRoleCheckpointBoundary();
   if (!localValidation.compatibility.compatible) throw new Error('DEPLOYMENT_CHECKPOINT_INCOMPATIBLE');
 
   const objectKey = `${releaseId}/${deploymentId}.sabrec`;

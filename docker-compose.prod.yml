@@ -177,6 +177,7 @@ services:
     restart: "no"
     environment:
       BACKEND_RUNTIME_ROLE: control
+      DEPLOYMENT_CHECKPOINT_RUNTIME_USER: ${BACKEND_DATABASE_USER:-${POSTGRES_USER}}
       DATABASE_URL: postgresql://${DEPLOYMENT_DATABASE_USER:-${POSTGRES_USER}}:${DEPLOYMENT_DATABASE_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=${BACKEND_DB_CONNECTION_LIMIT:-10}&pool_timeout=${BACKEND_DB_POOL_TIMEOUT_SECONDS:-10}&application_name=${DATABASE_APPLICATION_NAME:-sabalanerp-backend}
       DEPLOYMENT_LOCAL_ROLLBACK_KEY_FILE: /run/deployment-secrets/local-rollback-key
       DEPLOYMENT_REMOTE_RECOVERY_PUBLIC_KEY_FILE: /run/deployment-secrets/remote-recovery-public.pem

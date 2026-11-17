@@ -33,6 +33,8 @@ test('predecessor renders restricted backend and privileged control without chan
   assert.deepEqual(topology, { split: true, controlUser: 'fixture_owner' });
   assert.equal(new URL(backend.environment.DATABASE_URL).username, env.BACKEND_DATABASE_USER);
   assert.equal(new URL(deployment.environment.DATABASE_URL).username, env.DEPLOYMENT_DATABASE_USER);
+  assert.equal(deployment.environment.DEPLOYMENT_CHECKPOINT_RUNTIME_USER, env.BACKEND_DATABASE_USER);
+  assert.equal(backend.environment.DEPLOYMENT_CHECKPOINT_RUNTIME_USER, undefined);
   assert.ok(!JSON.stringify(backend.environment).includes(env.POSTGRES_PASSWORD));
   assert.equal(backend.depends_on.clamav.condition, 'service_healthy');
   assert.ok(clamav);
@@ -43,6 +45,7 @@ test('split and unsplit credentials cannot be substituted during protected rollo
   const runtimeUrl = config.services.backend.environment.DATABASE_URL;
   const legacy = render(Object.fromEntries(Object.keys(env).filter(key => key.includes('DATABASE_')).map(key => [key, ''])));
   assert.deepEqual(readPredecessorDatabaseTopology(legacy, legacy.services.backend.environment.DATABASE_URL), { split: false });
+  assert.equal(legacy.services.deployment.environment.DEPLOYMENT_CHECKPOINT_RUNTIME_USER, env.POSTGRES_USER);
   for (const attempt of [
     () => readPredecessorDatabaseTopology(legacy, runtimeUrl),
     () => readPredecessorDatabaseTopology(config, legacy.services.backend.environment.DATABASE_URL),

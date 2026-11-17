@@ -14,6 +14,8 @@ import { publishNotificationEvent } from './notificationService';
 import { decryptPerformanceExportArtifact, encryptPerformanceExportArtifact, performanceExportKeyFromEnvironment, performanceExportStorageDirectory } from './personnelPerformanceDisclosureStore';
 import { verifyRestoredFiles } from './deploymentRestoreEvidence';
 import { verifyRecoveredApplicationPayloads } from './deploymentDrillApplicationKeys';
+import { PROTECTED_DATABASE_ROLE_COMPONENT, applyProtectedDatabaseRoles, captureProtectedDatabaseRoles, promoteProtectedDatabaseStage,
+  type ProtectedDatabaseRoleRecovery, type RoleSnapshot } from './protectedDatabaseRoleRecovery';
 import { captureRecoveryBusinessProof, type RecoveryBusinessTableProof } from './deploymentRecoveryDataProof';
 import { adoptRecoveryStagedInquiry, captureInquiryBusinessProof, verifyInquiryTransformation,
   type InquiryBusinessProof, type InquiryTransformation } from './inquiryMigrationPlan';
@@ -142,16 +144,16 @@ const safeDatabaseName = (prefix: string) => `${prefix}_${crypto.randomBytes(6).
 
 const psql = async (databaseUrl: string, database: string, sql: string) => {
   const args = databaseArgs(databaseUrl, database);
-  await execFileAsync('psql', [...args.connection, '--set', 'ON_ERROR_STOP=1', '--command', sql], {
+  return execFileAsync('psql', [...args.connection, '--set', 'ON_ERROR_STOP=1', '--command', sql], {
     env: args.env,
     windowsHide: true,
     maxBuffer: 4 * 1024 * 1024,
   });
 };
 
-const createDatabase = async (databaseUrl: string, name: string) => {
+const createDatabase = async (databaseUrl: string, name: string, protectedStage = false) => {
   const config = databaseConfig(databaseUrl);
-  await psql(databaseUrl, 'postgres', `CREATE DATABASE "${name.replace(/"/g, '""')}"`);
+  await psql(databaseUrl, 'postgres', `CREATE DATABASE "${name.replace(/"/g, '""')}"${protectedStage ? ' CONNECTION LIMIT 0' : ''}`);
   return { ...config, database: name };
 };
 
@@ -185,9 +187,10 @@ export const withSystemRecoveryDatabaseClient = async <T>(database: string, work
   return withRecoveryDatabaseClient(databaseUrlWithName(configured, database), work);
 };
 
-const dumpDatabase = async (databaseUrl: string, destination: string) => {
+const dumpDatabase = async (databaseUrl: string, destination: string, snapshot?: string) => {
   const args = databaseArgs(databaseUrl);
-  await execFileAsync('pg_dump', [...args.connection, '--format=custom', '--no-owner', '--no-privileges', '--file', destination], {
+  await execFileAsync('pg_dump', [...args.connection, '--format=custom', '--no-owner', '--no-privileges',
+    ...(snapshot ? ['--snapshot', snapshot] : []), '--file', destination], {
     env: args.env,
     windowsHide: true,
     maxBuffer: 4 * 1024 * 1024,
@@ -416,12 +419,35 @@ export const currentPostgresVersion = async (prisma: PrismaClient) => {
   return result[0]?.version || 'unknown';
 };
 
+async function readProtectedRoleSnapshot(payloadRoot: string, manifest: RecoveryManifest,
+  scope?: ProtectedDatabaseRoleRecovery | null): Promise<RoleSnapshot | undefined> {
+  if (manifest?.format !== 'sabalan-recovery' || !Array.isArray(manifest.components)) {
+    throw new Error('Invalid protected checkpoint manifest.');
+  }
+  const components = manifest.components.filter(item => item.path === PROTECTED_DATABASE_ROLE_COMPONENT);
+  if (!scope && !components.length) return undefined;
+  if (!scope || components.length !== 1 || manifest.packageType !== 'COMPLETE') {
+    throw new Error('Protected role checkpoint scope is missing or differs from this recovery package.');
+  }
+  const component = components[0];
+  const bytes = await fs.promises.readFile(path.join(payloadRoot, PROTECTED_DATABASE_ROLE_COMPONENT));
+  if (bytes.length !== component.size || crypto.createHash('sha256').update(bytes).digest('hex') !== component.sha256) {
+    throw new Error('Protected role checkpoint component failed integrity validation.');
+  }
+  const snapshot = JSON.parse(bytes.toString('utf8')) as RoleSnapshot;
+  if (snapshot?.version !== 1 || snapshot.sourceDatabase !== scope.source) {
+    throw new Error('The role snapshot does not match the protected checkpoint database identity.');
+  }
+  return snapshot;
+}
+
 export const createRecoveryPackage = async (input: {
   operationId: string;
   packageType: RecoveryPackageType;
   passphrase?: string;
   recipients?: Array<{ keyId: string; passphrase: string } | { keyId: string; publicKeyPem: string }>;
   prisma: PrismaClient;
+  protectedDatabaseRoles?: ProtectedDatabaseRoleRecovery;
   onProgress: (progress: number) => Promise<void>;
 }) => {
   await ensureDirectories();
@@ -431,11 +457,18 @@ export const createRecoveryPackage = async (input: {
   const sanitized = input.packageType === 'SANITIZED_TEST';
   let sanitizedDatabase: string | null = null;
   try {
+    if (sanitized && input.protectedDatabaseRoles) throw new Error('Protected role checkpoints must be complete.');
     await fs.promises.mkdir(path.dirname(databaseDump), { recursive: true });
     await input.onProgress(10);
     if (sanitized) {
       const sourceDump = path.join(jobRoot, 'source.dump');
       await dumpDatabase(process.env.DATABASE_URL || '', sourceDump);
+    } else if (input.protectedDatabaseRoles) {
+      const databaseUrl = process.env.DATABASE_URL || '';
+      const roles = await captureProtectedDatabaseRoles(databaseUrl, input.protectedDatabaseRoles.roles,
+        snapshot => dumpDatabase(databaseUrl, databaseDump, snapshot));
+      if (roles.sourceDatabase !== input.protectedDatabaseRoles.source) throw new Error('Protected checkpoint database identity changed.');
+      await fs.promises.writeFile(path.join(payloadRoot, PROTECTED_DATABASE_ROLE_COMPONENT), JSON.stringify(roles), { mode: 0o600 });
     } else {
       await dumpDatabase(process.env.DATABASE_URL || '', databaseDump);
     }
@@ -527,6 +560,7 @@ export const validateRecoveryPackage = async (input: {
   passphrase: string;
   prisma: PrismaClient;
   verifyRestore?: boolean;
+  protectedDatabaseRoles?: ProtectedDatabaseRoleRecovery | null;
   verifyApplicationPayloads?: boolean;
   verifyBusinessData?: boolean;
 }) => {
@@ -561,6 +595,9 @@ export const validateRecoveryPackage = async (input: {
         throw Object.assign(new Error(`Recovery component failed integrity validation: ${component.path}`), { code: 'RECOVERY_INTEGRITY_FAILED' });
       }
     }
+    const protectedRoles = input.protectedDatabaseRoles !== undefined || input.verifyRestore
+      ? await readProtectedRoleSnapshot(payloadRoot, manifest, input.protectedDatabaseRoles)
+      : undefined;
     const compatibility = recoveryCompatibility({
       sourceFormatVersion: manifest.formatVersion,
       sourceAppVersion: manifest.appVersion,
@@ -575,9 +612,13 @@ export const validateRecoveryPackage = async (input: {
       }
       inquiryBusinessProof=await captureInquiryBusinessProof(path.join(payloadRoot,'inquiry','inquiry.db'));
       stagedDatabase = safeDatabaseName('sabalan_checkpoint_verify');
-      await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
+      await createDatabase(process.env.DATABASE_URL || '', stagedDatabase, Boolean(protectedRoles));
       await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
-      const stagedClient = new PrismaClient({ datasources: { db: { url: databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase) } } });
+      const stagedUrl = databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase);
+      if (protectedRoles && input.protectedDatabaseRoles) {
+        await applyProtectedDatabaseRoles(stagedUrl, input.protectedDatabaseRoles.roles, protectedRoles, input.protectedDatabaseRoles.source);
+      }
+      const stagedClient = new PrismaClient({ datasources: { db: { url: stagedUrl } } });
       try {
         await stagedClient.$queryRawUnsafe('SELECT 1');
         await validateStoredFileReferences(stagedClient, payloadRoot);
@@ -933,6 +974,7 @@ export const stageAndPromoteRecovery = async (input: {
   bootstrapPassword?: string;
   applyMigrations?: boolean;
   preservePackage?: boolean;
+  protectedDatabaseRoles?: ProtectedDatabaseRoleRecovery & { assertBoundary(): Promise<void> };
   onProgress: (progress: number) => Promise<void>;
 }) => {
   assertNoUnclosedContinuousWalOwners(RECOVERY_COORDINATION_DIR);
@@ -970,10 +1012,19 @@ export const stageAndPromoteRecovery = async (input: {
     await fs.promises.mkdir(payloadRoot, { recursive: true });
     await extractRecoveryArchive(archivePath, payloadRoot);
     await fs.promises.unlink(archivePath);
+    const manifest = JSON.parse(await fs.promises.readFile(path.join(payloadRoot, 'manifest.json'), 'utf8')) as RecoveryManifest;
+    const protectedRoles = await readProtectedRoleSnapshot(payloadRoot, manifest, input.protectedDatabaseRoles);
+    if (protectedRoles && (input.packageType !== 'COMPLETE' || input.applyMigrations !== false)) {
+      throw new Error('Protected role recovery requires an exact-schema rollback.');
+    }
     await input.onProgress(20);
-    await createDatabase(process.env.DATABASE_URL || '', stagedDatabase);
+    await createDatabase(process.env.DATABASE_URL || '', stagedDatabase, Boolean(protectedRoles));
     await restoreDatabase(process.env.DATABASE_URL || '', stagedDatabase, path.join(payloadRoot, 'database', 'main.dump'));
     const stagedUrl = databaseUrlWithName(process.env.DATABASE_URL || '', stagedDatabase);
+    if (protectedRoles && input.protectedDatabaseRoles) {
+      await input.protectedDatabaseRoles.assertBoundary();
+      await applyProtectedDatabaseRoles(stagedUrl, input.protectedDatabaseRoles.roles, protectedRoles, input.protectedDatabaseRoles.source);
+    }
     if (input.applyMigrations !== false) await migrateDatabase(stagedUrl);
     if (input.packageType === 'SANITIZED_TEST') {
       if (process.env.NODE_ENV === 'production' || process.env.ALLOW_SANITIZED_RECOVERY !== 'true') {
@@ -1008,6 +1059,7 @@ export const stageAndPromoteRecovery = async (input: {
     }
     await writeRestoreJournal(journal);
     await input.onProgress(50);
+    await input.protectedDatabaseRoles?.assertBoundary();
     await pauseInquiryForRecovery(input.operationId);
     const mappings = [
       ...FILE_RECOVERY_MAPPINGS.map(({ payloadPath, livePath, safetyName }) => [payloadPath, livePath, safetyName] as const),
@@ -1019,6 +1071,7 @@ export const stageAndPromoteRecovery = async (input: {
     journal.phase = 'FILES_PROMOTED';
     await writeRestoreJournal(journal);
     await input.onProgress(70);
+    await input.protectedDatabaseRoles?.assertBoundary();
     const current = config.database.replace(/"/g, '""');
     const staged = stagedDatabase.replace(/"/g, '""');
     const safety = safetyDatabase.replace(/"/g, '""');
@@ -1027,12 +1080,16 @@ export const stageAndPromoteRecovery = async (input: {
       'postgres',
       `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('${current.replace(/'/g, "''")}', '${staged.replace(/'/g, "''")}') AND pid <> pg_backend_pid()`,
     );
-    await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${current}" RENAME TO "${safety}"`);
-    try {
-      await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${staged}" RENAME TO "${current}"`);
-    } catch (error) {
-      await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${safety}" RENAME TO "${current}"`).catch(() => undefined);
-      throw error;
+    if (protectedRoles) {
+      await promoteProtectedDatabaseStage(process.env.DATABASE_URL || '', stagedDatabase, safetyDatabase);
+    } else {
+      await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${current}" RENAME TO "${safety}"`);
+      try {
+        await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${staged}" RENAME TO "${current}"`);
+      } catch (error) {
+        await psql(process.env.DATABASE_URL || '', 'postgres', `ALTER DATABASE "${safety}" RENAME TO "${current}"`).catch(() => undefined);
+        throw error;
+      }
     }
     journal.phase = 'DATABASE_PROMOTED';
     await writeRestoreJournal(journal);
@@ -1047,6 +1104,20 @@ export const stageAndPromoteRecovery = async (input: {
     const currentJournal = fs.existsSync(RESTORE_JOURNAL_PATH)
       ? JSON.parse(await fs.promises.readFile(RESTORE_JOURNAL_PATH, 'utf8')) as RestoreJournal
       : journal;
+    if (input.protectedDatabaseRoles && currentJournal.phase === 'FILES_PROMOTED') {
+      // A failed client response can follow a committed rename. Leave an
+      // ambiguous journal for startup recovery instead of reverting live files.
+      const status = await psql(process.env.DATABASE_URL || '', 'postgres', `
+        COPY (SELECT CASE
+          WHEN EXISTS (SELECT FROM pg_database WHERE datname = '${safetyDatabase}')
+            AND NOT EXISTS (SELECT FROM pg_database WHERE datname = '${stagedDatabase}') THEN 'promoted'
+          WHEN EXISTS (SELECT FROM pg_database WHERE datname = '${stagedDatabase}')
+            AND NOT EXISTS (SELECT FROM pg_database WHERE datname = '${safetyDatabase}') THEN 'staged'
+          ELSE 'unknown' END) TO STDOUT
+      `);
+      if (status.stdout.trim() === 'promoted') return { promoted: true, journal: currentJournal };
+      if (status.stdout.trim() !== 'staged') throw error;
+    }
     if (currentJournal.phase === 'DATABASE_PROMOTED') {
       // The promoted database stays behind the inquiry restart marker until
       // startup replays every post-checkpoint erasure and finalizes recovery.
@@ -1060,9 +1131,9 @@ export const stageAndPromoteRecovery = async (input: {
       for (const [safetyName, destination] of mappings) {
         await restoreDirectoryFromSafety(path.join(safetyFilesRoot, safetyName), destination);
       }
-      await dropDatabase(process.env.DATABASE_URL || '', stagedDatabase);
-      await fs.promises.rm(RESTORE_JOURNAL_PATH, { force: true });
     }
+    await dropDatabase(process.env.DATABASE_URL || '', stagedDatabase);
+    await fs.promises.rm(RESTORE_JOURNAL_PATH, { force: true });
     await resumeInquiryAfterRecovery();
     throw error;
   } finally {

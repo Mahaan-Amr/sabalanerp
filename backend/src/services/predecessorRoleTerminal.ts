@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { isDeepStrictEqual } from 'node:util';
 import type { PrismaClient } from '@prisma/client';
 import { completePredecessorRoleGateReport, predecessorRoleGatePhase } from './deploymentGates';
@@ -33,7 +34,34 @@ async function privateFile(file: string) {
 
 type Context = { prisma: PrismaClient; reportDir: string; coordinationDir: string; session: Session; token: string };
 
-async function activeOwner({ prisma, session, token, coordinationDir }: Context, marker: boolean) {
+export async function predecessorRoleClockIdentity() {
+  if (process.platform !== 'linux') return { bootId: os.hostname(), timeNamespace: process.platform };
+  return {
+    bootId: (await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim(),
+    timeNamespace: await fs.readlink('/proc/self/ns/time'),
+  };
+}
+
+async function terminalDeadline(context: Context) {
+  const { session, token, reportDir } = context;
+  requireProof(idPattern.test(session.deploymentId) && token === session.leaseToken && hex.test(token)
+    && (session.phase === 'MUTATION_STARTED' || session.phase === 'ROLLBACK_STARTED'));
+  const kind = session.phase === 'ROLLBACK_STARTED' ? 'rollback' : 'mutation';
+  const raw = await privateFile(path.join(reportDir, 'predecessor-role-' + session.deploymentId + '-' + kind + '-deadline.json'));
+  const clock = JSON.parse(raw.toString('utf8'));
+  requireProof(clock.format === 'sabalan-predecessor-role-deadline-v1' && clock.kind === kind
+    && clock.deploymentId === session.deploymentId && clock.releaseId === session.releaseId && clock.targetCommit === session.targetCommit
+    && clock.leaseTokenSha256 === sha(Buffer.from(token)) && clock.budgetSeconds === 900
+    && /^[1-9][0-9]{0,19}$/.test(clock.startedNs) && /^[1-9][0-9]{0,19}$/.test(clock.deadlineNs)
+    && isDeepStrictEqual(clock.clock, await predecessorRoleClockIdentity()));
+  const now = process.hrtime.bigint(), start = BigInt(clock.startedNs), end = BigInt(clock.deadlineNs);
+  requireProof(start <= now && now < end && end - start === 900_000_000_000n);
+  return end;
+}
+
+async function activeOwner(context: Context, marker: boolean) {
+  const { prisma, session, token, coordinationDir } = context;
+  const deadline = await terminalDeadline(context);
   const phase = session.phase;
   requireProof(session.purpose === 'predecessor-role-cutover' && !session.bootstrap && session.leaseToken === token
     && hex.test(token) && idPattern.test(session.deploymentId) && idPattern.test(session.releaseId)
@@ -62,8 +90,8 @@ async function activeOwner({ prisma, session, token, coordinationDir }: Context,
   const [source] = await prisma.$queryRaw<Array<{name: string; oid: string; systemIdentifier: string}>>`
     SELECT current_database() AS name, (SELECT oid::text FROM pg_database WHERE datname = current_database()) AS oid,
       (SELECT system_identifier::text FROM pg_control_system()) AS "systemIdentifier"`;
-  requireProof(isDeepStrictEqual(source, metadata.sourceDatabase));
-  return { row, report, point, metadataSha256: sha256, state: applied ? 'APPLIED' : 'RESTORED',
+  requireProof(isDeepStrictEqual(source, metadata.sourceDatabase) && process.hrtime.bigint() < deadline);
+  return { row, report, point, deadline, metadataSha256: sha256, state: applied ? 'APPLIED' : 'RESTORED',
     terminal: (applied ? 'COMPLETED' : 'ROLLED_BACK') as TerminalPhase };
 }
 
@@ -89,7 +117,8 @@ export async function authorisePredecessorRoleTerminal(context: Context, input: 
   const ready = { gateAcknowledgementSha256: sha(input), checkpointSha256: owner.point.checksum,
     checkpointMetadataSha256: owner.metadataSha256, backendId: gate.backendId, nginxId: gate.nginxId,
     gateReport: gateName, gateReportSha256: gate.gateReportSha256, expectedTerminal: owner.terminal, state: owner.state };
-  requireProof(!owner.report.terminalReady || isDeepStrictEqual(ready, owner.report.terminalReady));
+  requireProof((!owner.report.terminalReady || isDeepStrictEqual(ready, owner.report.terminalReady))
+    && process.hrtime.bigint() < owner.deadline);
   const updated = await prisma.deploymentOperation.updateMany({
     where: { id: session.deploymentId, activeKey: 'production', phase: session.phase, leaseToken: token,
       leaseExpiresAt: { gt: new Date() }, reportJson: { equals: owner.report } },
@@ -125,12 +154,14 @@ async function armedOpening(context: Context, marker: boolean) {
 
 export async function openPredecessorRoleTerminal(context: Context) {
   const armed = await armedOpening(context, true);
+  requireProof(process.hrtime.bigint() < armed.owner.deadline);
   await deactivateDeploymentMaintenance(context.coordinationDir, context.session.deploymentId);
   return { intentSha256: armed.intentSha256 };
 }
 
 export async function observePredecessorRoleTerminalOpening(context: Context) {
   const armed = await armedOpening(context, false);
+  requireProof(process.hrtime.bigint() < armed.owner.deadline);
   return { intentSha256: armed.intentSha256 };
 }
 
@@ -140,6 +171,7 @@ function expectedTerminal(session: Session) {
 
 export async function finishPredecessorRoleTerminal(context: Context, framed: Buffer) {
   const { session, token, prisma, coordinationDir } = context;
+  const deadline = await terminalDeadline(context);
   const proof = JSON.parse(framed.toString('utf8'));
   const proofSha256 = sha(framed);
   requireProof(session.purpose === 'predecessor-role-cutover' && !session.bootstrap && token === session.leaseToken
@@ -154,7 +186,7 @@ export async function finishPredecessorRoleTerminal(context: Context, framed: Bu
     return terminal;
   }
   const { owner, intent, intentSha256 } = await armedOpening(context, false);
-  requireProof(isDeepStrictEqual(proof, {
+  requireProof(process.hrtime.bigint() < deadline && isDeepStrictEqual(proof, {
     format: 'sabalan-predecessor-role-public-readback/v1', deploymentId: session.deploymentId,
     checkpointSha256: intent.checkpointSha256, backendId: intent.backendId, nginxId: intent.nginxId,
     gateAcknowledgementSha256: intent.gateAcknowledgementSha256,

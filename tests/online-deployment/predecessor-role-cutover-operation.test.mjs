@@ -205,6 +205,7 @@ DEPLOYMENT_PHASE=MUTATION_STARTED
 DEPLOYMENT_ID=deploy-fixture
 REPO_ROOT="$1"
 SESSION_HOST_PATH="$REPO_ROOT/reports/active-deployment-session.json"
+role_clock() { printf 'clock-%s-%s-%s\\n' "$1" "$2" "$3"; }
 phase() { DEPLOYMENT_PHASE="$1"; printf 'phase-%s\\n' "$1"; }
 run_owned_role_foreground() { printf 'foreground-%s\\n' "$DEPLOYMENT_PHASE"; }
 verify_public_maintenance() { printf 'maintenance-503\\n'; }
@@ -220,7 +221,7 @@ cleanup_locks() { printf 'cleanup-owned-locks\\n'; }
     assert.match(applied.stdout, /phase-MUTATION_STARTED\nforeground-MUTATION_STARTED\ncleanup-owned-locks/);
     const rolledBack = run('role_cutover_failure');
     assert.equal(rolledBack.status, 0, rolledBack.stderr);
-    assert.match(rolledBack.stdout, /maintenance-503\nsame-advisory\ndrain-same-backend\nphase-ROLLBACK_STARTED\nforeground-ROLLBACK_STARTED/);
+    assert.match(rolledBack.stdout, /maintenance-503\nsame-advisory\nclock-start-rollback-900\ndrain-same-backend\nphase-ROLLBACK_STARTED\nforeground-ROLLBACK_STARTED/);
     fs.writeFileSync(fixed, 'unacknowledged opening');
     const unknown = run('role_cutover_failure');
     assert.equal(unknown.status, 1);

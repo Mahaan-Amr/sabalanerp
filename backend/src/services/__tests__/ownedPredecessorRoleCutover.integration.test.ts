@@ -9,7 +9,7 @@ import { appendDeploymentHostJournal } from '../deploymentHostJournal';
 import { checkpointMetadataTransport } from '../deploymentCheckpointMetadataIdentity';
 import { verifyPredecessorRoleCutover } from '../protectedDatabaseRoleRecovery';
 import { mandatoryReleaseDeploymentGateNames } from '../deploymentGates';
-import { finishPredecessorRoleTerminal } from '../predecessorRoleTerminal';
+import { finishPredecessorRoleTerminal, predecessorRoleClockIdentity } from '../predecessorRoleTerminal';
 import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
 
 const source = process.env.ACCOUNTING_LEDGER_TEST_DATABASE_URL;
@@ -208,6 +208,20 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
       nativeClosureSha256: '4'.repeat(64), backendId, nginxId: '5'.repeat(64), gateReport,
       gateReportSha256: hash(reportRaw), rollbackReleaseSet: graph,
     }));
+    const deadlineFile = path.join(root, 'predecessor-role-' + id + '-rollback-deadline.json');
+    const writeDeadline = async (age: bigint) => {
+      const start = process.hrtime.bigint() - age;
+      await writeFile(deadlineFile, JSON.stringify({
+        format: 'sabalan-predecessor-role-deadline-v1', kind: 'rollback', deploymentId: id, releaseId: id,
+        targetCommit: commit, leaseTokenSha256: hash(Buffer.from(token)), budgetSeconds: 900,
+        clock: await predecessorRoleClockIdentity(), startedNs: start.toString(), deadlineNs: (start + 900_000_000_000n).toString(),
+      }), { mode: 0o600 });
+    };
+    await writeDeadline(901_000_000_000n);
+    const expiredAuthority = terminalControl('authorise-predecessor-role-terminal', gateAck);
+    assert.equal(expiredAuthority.status, 1);
+    assert.match(expiredAuthority.stderr, /PREDECESSOR_ROLE_TERMINAL_UNPROVEN/);
+    await writeDeadline(1_000_000_000n);
     const authorise = terminalControl('authorise-predecessor-role-terminal', gateAck);
     assert.equal(authorise.status, 0, authorise.stderr);
     const ready = JSON.parse(authorise.stdout).result;
@@ -221,6 +235,11 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
       backendId, nginxId: ready.nginxId, gateAcknowledgementSha256: hash(gateAck), origins: originals, expectedTerminal: 'ROLLED_BACK',
     }));
     await writeFile(openIntentPath, intent, { mode: 0o600 });
+    await writeDeadline(901_000_000_000n);
+    const expiredOpening = terminalControl('open-predecessor-role-terminal');
+    assert.equal(expiredOpening.status, 1);
+    assert.ok(await stat(path.join(root, 'deployment-maintenance.json')));
+    await writeDeadline(1_000_000_000n);
     const opened = terminalControl('open-predecessor-role-terminal');
     assert.equal(opened.status, 0, opened.stderr);
     assert.equal(JSON.parse(opened.stdout).result.intentSha256, hash(intent));

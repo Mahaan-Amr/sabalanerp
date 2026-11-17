@@ -727,6 +727,11 @@ complete_capture_only() {
   return "${capture_qualification_code}"
 }
 
+role_clock() {
+  python3 "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-canonical.py" \
+    --clock "$1" "${REPO_ROOT}" "$(dirname -- "${SESSION_HOST_PATH}")" "$2" "$3"
+}
+
 run_owned_role_foreground() {
   if [ "${DEPLOYMENT_PHASE}" = MUTATION_STARTED ]; then
     node -e 'const [file,expected]=process.argv.slice(1);const bytes=require("node:fs").readFileSync(file);if(require("node:crypto").createHash("sha256").update(bytes).digest("hex")!==expected) process.exit(1);' \
@@ -757,7 +762,7 @@ role_cutover_failure() {
   if [ "${MUTATION_STARTED}" -eq 1 ] && [ "${DEPLOYMENT_PHASE}" = MUTATION_STARTED ] \
     && [ "${LEGACY_BACKEND_SIGNAL_PENDING}" -eq 0 ] \
     && verify_public_maintenance && protected_advisory_owned \
-    && drain_release_for_rollback && phase ROLLBACK_STARTED && run_owned_role_foreground; then
+    && role_clock start rollback 900 && drain_release_for_rollback && phase ROLLBACK_STARTED && run_owned_role_foreground; then
     echo 'The exact predecessor role and host configuration passed protected rollback and terminal readback.' >&2
     return 0
   fi
@@ -1534,7 +1539,10 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
 elif [ "${ROLE_CUTOVER}" -eq 1 ]; then
   LEGACY_BACKEND_SIGNAL_PENDING=1
   assert_original_legacy_still_stopped
-  run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-checkpoint.js
+  role_clock start checkpoint "${checkpoint_timeout}"
+  role_checkpoint_status=0
+  run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-checkpoint.js || role_checkpoint_status=$?
+  role_clock closed checkpoint "${role_checkpoint_status}"
 else
   LEGACY_BACKEND_SIGNAL_PENDING=1
   assert_original_legacy_still_stopped
@@ -1565,6 +1573,7 @@ LEGACY_BACKEND_SIGNAL_PENDING=1
 assert_original_legacy_still_stopped
 LEGACY_BACKEND_SIGNAL_PENDING=0
 assert_qa_remote_checkpoint_mount
+if [ "${ROLE_CUTOVER}" -eq 1 ]; then role_clock start mutation 900; fi
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"

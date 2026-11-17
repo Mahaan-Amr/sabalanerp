@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import subprocess
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -652,7 +653,14 @@ class HostConfigurationTest(unittest.TestCase):
                 return False
 
             retained = {"authorise": lambda session, point, ack: ack == gate, "remove_maintenance": interrupted_open,
-                        "renew_without_marker": lambda session, intent: True, "observe_public": lambda expected: expected}
+                        "renew_without_marker": lambda session, intent: True, "observe_public": lambda expected: expected,
+                        "before_intent": lambda: True}
+            with self.assertRaises(terminal.host.RoleHostConfigurationError):
+                terminal.open_owned_traffic(self.root, reports, coordination, "MUTATION_STARTED", gate,
+                                            ("erp.fixture.test", "inquiry.fixture.test"),
+                                            **{**retained, "before_intent": lambda: False})
+            self.assertFalse((reports / terminal.OPEN_INTENT).exists())
+            self.assertEqual(calls, [])
             with self.assertRaises(terminal.host.RoleHostConfigurationError):
                 terminal.open_owned_traffic(self.root, reports, coordination, "MUTATION_STARTED", gate,
                                             ("erp.fixture.test", "inquiry.fixture.test"), **retained)
@@ -716,6 +724,56 @@ class HostConfigurationTest(unittest.TestCase):
                     self.root, reports, coordination, "MUTATION_STARTED", "stage-predecessor-role-grants",
                     command, renewal=lambda *_: True, terminal_probe=terminal_probe,
                 )
+
+    def test_shared_deadline_keeps_native_child_owned_but_ineligible(self):
+        marker = self.root / "native-deadline-closed.txt"
+        command = (sys.executable, "-c",
+                   "import time, pathlib, sys; time.sleep(0.16); pathlib.Path(sys.argv[1]).touch()", str(marker))
+        renewals = []
+        with self.owner():
+            with self.assertRaises(native.ProtectedNativeChildError):
+                native.run_native_child(
+                    self.root, self.root / "reports", self.root / "coordination",
+                    "MUTATION_STARTED", "deployment-gates", command,
+                    renewal=lambda *_: renewals.append(marker.exists()) or True,
+                    budget_seconds=2, heartbeat_seconds=0.03, deadline_ns=time.monotonic_ns() + 80_000_000,
+                )
+        self.assertTrue(marker.exists())
+        self.assertGreaterEqual(len(renewals), 3)
+        receipt = json.loads(next((self.root / ".deploy-state").glob("**/native-*-result.json")).read_bytes())
+        self.assertTrue(receipt["deadlineExceeded"] and receipt["childClosed"])
+        self.assertEqual(receipt["outcome"], "HELD")
+        self.assertFalse(receipt["canOpenTraffic"])
+
+    def test_late_checkpoint_closure_cannot_start_mutation_and_rollback_uses_its_own_clock(self):
+        reports = self.root / "reports"
+        context = {"DEPLOYMENT_ID": self.session["deploymentId"], "DEPLOYMENT_LEASE_TOKEN": self.session["leaseToken"]}
+        with self.owner(), patch.dict(os.environ, context):
+            self.write_phase("SERVICES_DRAINED")
+            epoch = time.monotonic_ns()
+            with patch.object(canonical.time, "monotonic_ns", return_value=epoch):
+                canonical.start_deadline(self.root, reports, "checkpoint", 600)
+            with patch.object(canonical.time, "monotonic_ns", return_value=epoch + 601 * canonical.NS):
+                with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                    canonical.close_checkpoint_deadline(self.root, reports, 0)
+                self.write_phase("REMOTE_CHECKPOINT_VERIFIED")
+                with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                    canonical.start_deadline(self.root, reports, "mutation", 900)
+            receipt = next(reports.glob("*checkpoint-result.json"))
+            self.assertFalse(json.loads(receipt.read_bytes())["withinDeadline"])
+            receipt.unlink()
+            self.write_phase("SERVICES_DRAINED")
+            with patch.object(canonical.time, "monotonic_ns", return_value=epoch + canonical.NS):
+                canonical.close_checkpoint_deadline(self.root, reports, 0)
+                self.write_phase("REMOTE_CHECKPOINT_VERIFIED")
+                canonical.start_deadline(self.root, reports, "mutation", 900)
+            self.write_phase("MUTATION_STARTED")
+            with patch.object(canonical.time, "monotonic_ns", return_value=epoch + 902 * canonical.NS):
+                with self.assertRaises(canonical.host.RoleHostConfigurationError):
+                    canonical.mutation_deadline(reports, self.session)
+                canonical.start_deadline(self.root, reports, "rollback", 900)
+                self.write_phase("ROLLBACK_STARTED")
+                self.assertEqual(canonical.mutation_deadline(reports, self.session), epoch + 1802 * canonical.NS)
 
     def test_restore_if_receipt_publication_fails_after_env_replacement(self):
         receipt = self.root / ".deploy-state" / ("predecessor-role-host-" + self.session["deploymentId"]) / "receipt.json"

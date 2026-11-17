@@ -47,6 +47,94 @@ esac
 """
 
 
+CLOCK_PHASES = {"checkpoint": "SERVICES_DRAINED", "mutation": "REMOTE_CHECKPOINT_VERIFIED", "rollback": "MUTATION_STARTED"}
+MUTATION_SECONDS = 900
+NS = 1_000_000_000
+
+
+def clock_identity():
+    return {"bootId": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+            "timeNamespace": os.readlink("/proc/self/ns/time")}
+
+
+def clock_binding(session):
+    return {"deploymentId": session["deploymentId"], "releaseId": session["releaseId"],
+            "targetCommit": session["targetCommit"], "leaseTokenSha256": host.digest(session["leaseToken"].encode())}
+
+
+def clock_session(root, report_dir):
+    host.verify_lock(root)
+    session = json.loads(host.read_private(report_dir / "active-deployment-session.json")[0])
+    host.require(session["purpose"] == "predecessor-role-cutover" and not session["bootstrap"]
+                 and session["deploymentId"] == os.environ.get("DEPLOYMENT_ID")
+                 and session["leaseToken"] == os.environ.get("DEPLOYMENT_LEASE_TOKEN"))
+    return session
+
+
+def clock_file(report_dir, session, kind):
+    operation = session["deploymentId"]
+    host.require(host.matches(r"[A-Za-z0-9_-]{1,160}", operation) and kind in CLOCK_PHASES)
+    return report_dir / ("predecessor-role-" + operation + "-" + kind + "-deadline.json")
+
+
+def read_deadline(report_dir, session, kind):
+    raw = host.read_private(clock_file(report_dir, session, kind))[0]
+    record = json.loads(raw)
+    start, end, budget = record["startedNs"], record["deadlineNs"], record["budgetSeconds"]
+    host.require(record["format"] == "sabalan-predecessor-role-deadline-v1" and record["kind"] == kind
+                 and all(record[key] == value for key, value in clock_binding(session).items())
+                 and record["clock"] == clock_identity() and type(budget) is int
+                 and (600 <= budget <= 14400 if kind == "checkpoint" else budget == MUTATION_SECONDS)
+                 and host.matches(r"[1-9][0-9]{0,19}", start) and host.matches(r"[1-9][0-9]{0,19}", end)
+                 and int(start) <= time.monotonic_ns() and int(end) - int(start) == budget * NS)
+    return raw, int(end)
+
+
+def start_deadline(root, report_dir, kind, seconds):
+    session = clock_session(root, report_dir)
+    host.require(session["phase"] == CLOCK_PHASES.get(kind)
+                 and (600 <= seconds <= 14400 if kind == "checkpoint" else seconds == MUTATION_SECONDS))
+    file = clock_file(report_dir, session, kind)
+    host.require(not os.path.lexists(file))
+    if kind == "mutation":
+        prior, end = read_deadline(report_dir, session, "checkpoint")
+        result = json.loads(host.read_private(file.with_name(file.name.replace("mutation-deadline", "checkpoint-result")))[0])
+        host.require(result["format"] == "sabalan-predecessor-role-checkpoint-timing-v1"
+                     and result["deadlineSha256"] == host.digest(prior) and result["exitStatus"] == 0
+                     and result["withinDeadline"] is True and 0 < int(result["closedNs"]) < end)
+    elif kind == "rollback":
+        read_deadline(report_dir, session, "mutation")
+        host.require(not os.path.lexists(report_dir / "predecessor-role-cutover-open-intent.json"))
+    start = time.monotonic_ns()
+    host.write_private(file, host.json_bytes({
+        "format": "sabalan-predecessor-role-deadline-v1", **clock_binding(session), "kind": kind,
+        "clock": clock_identity(), "startedNs": str(start), "deadlineNs": str(start + seconds * NS),
+        "budgetSeconds": seconds,
+    }))
+
+
+def close_checkpoint_deadline(root, report_dir, status):
+    session = clock_session(root, report_dir)
+    host.require(session["phase"] == "SERVICES_DRAINED" and 0 <= status <= 255)
+    raw, end = read_deadline(report_dir, session, "checkpoint")
+    file = clock_file(report_dir, session, "checkpoint")
+    result = file.with_name(file.name.replace("checkpoint-deadline", "checkpoint-result"))
+    host.require(not os.path.lexists(result))
+    closed = time.monotonic_ns()
+    host.write_private(result, host.json_bytes({
+        "format": "sabalan-predecessor-role-checkpoint-timing-v1", "deadlineSha256": host.digest(raw),
+        "exitStatus": status, "closedNs": str(closed), "withinDeadline": closed < end,
+    }))
+    host.require(status == 0 and closed < end)
+
+
+def mutation_deadline(report_dir, session):
+    phase = session["phase"]
+    host.require(phase in ("MUTATION_STARTED", "ROLLBACK_STARTED"))
+    _, end = read_deadline(report_dir, session, "rollback" if phase == "ROLLBACK_STARTED" else "mutation")
+    host.require(time.monotonic_ns() < end)
+    return end
+
 def owner_context(root, env, report_dir, coordination_dir):
     host.verify_lock(root)
     phase = json.loads(host.read_private(report_dir / "active-deployment-session.json")[0])["phase"]
@@ -227,11 +315,12 @@ def acknowledge_role_gates(root, report_dir, coordination_dir, phase, proof, ngi
     return acknowledgement
 
 
-def start_original_siblings(root, report_dir, coordination_dir, phase, proof, planned, *, inspect, renewal, maintenance):
+def start_original_siblings(root, report_dir, coordination_dir, phase, proof, planned, *, inspect, renewal, maintenance, deadline_ns):
     session, checkpoint, binding = host.context(root, report_dir, coordination_dir, phase)
     private, _ = host.transaction_paths(root, binding["deploymentId"])
     original = json.loads(host.read_private(private.with_name("backend-runtime-preimage.json"))[0])
-    host.require(original["binding"] == binding and maintenance() is True and renewal(session, checkpoint) is True)
+    host.require(time.monotonic_ns() < deadline_ns and original["binding"] == binding
+                 and maintenance() is True and renewal(session, checkpoint) is True)
 
     def inspect_original():
         rows = host.container_state(inspect(), binding["rollbackReleaseSet"])
@@ -249,9 +338,9 @@ def start_original_siblings(root, report_dir, coordination_dir, phase, proof, pl
         host.require(not os.path.lexists(intent))
         host.write_private(intent, host.json_bytes({**binding, "containerIds": stopped, "backendId": proof["backendId"]}))
         native.run_native_child(root, report_dir, coordination_dir, phase, "start-original-siblings",
-                                (*DOCKER, "start", *stopped), renewal=renewal)
+                                (*DOCKER, "start", *stopped), renewal=renewal, deadline_ns=deadline_ns)
     deadline = time.monotonic() + 90
-    while time.monotonic() < deadline:
+    while time.monotonic() < deadline and time.monotonic_ns() < deadline_ns:
         host.require(renewal(session, checkpoint) is True and maintenance() is True)
         rows = inspect_original()
         if all(rows[name]["State"]["Running"] is True and rows[name]["State"]["Health"]["Status"] == "healthy" for name in names):
@@ -264,6 +353,7 @@ def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight,
     """Run the already-owned configuration continuation through native transports."""
     session, checkpoint, binding = owner_context(root, env, report_dir, coordination_dir)
     phase = session["phase"]
+    deadline_ns = mutation_deadline(report_dir, session)
     compose = compose or root / "docker-compose.prod.yml"
     host.require(compose.resolve() == compose and compose.is_file())
     graph = binding["rollbackReleaseSet"]
@@ -339,22 +429,23 @@ def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight,
     host.require(maintenance())
     proof = native.run_native_foreground(
         root, env, report_dir, coordination_dir, preflight, credential_fd,
-        renewal=lambda actual, point: renew(actual, point) and maintenance(),
+        renewal=renew, deadline_ns=deadline_ns,
+        verify_boundary=lambda actual, point: time.monotonic_ns() < deadline_ns and renew(actual, point) and maintenance(),
         observe=observe, inspect=inspect, compose_argv=compose_argv,
         control_argv=lambda command, args: canonical_shell(env, compose, "control", command, *args),
     )
 
     start_original_siblings(root, report_dir, coordination_dir, phase, proof, preflight["containers"],
-                            inspect=inspect, renewal=renew, maintenance=maintenance)
+                            inspect=inspect, renewal=renew, maintenance=maintenance, deadline_ns=deadline_ns)
 
     def restart(identifier):
         native.run_native_child(root, report_dir, coordination_dir, phase, "refresh-nginx",
-                                (*DOCKER, "restart", "--time", "30", identifier), renewal=renew)
+                                (*DOCKER, "restart", "--time", "30", identifier), renewal=renew, deadline_ns=deadline_ns)
         return True
 
     def wait_for_health():
         until = time.monotonic() + 60
-        while time.monotonic() < until:
+        while time.monotonic() < until and time.monotonic_ns() < deadline_ns:
             host.require(renew(session, checkpoint))
             rows = host.container_state(inspect(), graph)
             if rows["nginx"]["State"]["Health"]["Status"] == "healthy":
@@ -382,7 +473,8 @@ def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight,
 
     def gates(mode):
         return native.run_native_child(root, report_dir, coordination_dir, phase, "deployment-gates",
-                                       canonical_shell(env, compose, "gates", mode), renewal=renew, budget_seconds=600)
+                                       canonical_shell(env, compose, "gates", mode), renewal=renew, budget_seconds=600,
+                                       deadline_ns=deadline_ns)
 
     gate_proof = acknowledge_role_gates(root, report_dir, coordination_dir, phase, proof, nginx,
                                         gates=gates, verify_current=prove_current_graph, renewal=renew,
@@ -398,6 +490,7 @@ def publish_canonical_terminal(root, env, report_dir, coordination_dir, gate_ack
     authority = owner_context(root, env, report_dir, coordination_dir)
     session, checkpoint, binding = authority
     phase = session["phase"]
+    deadline_ns = mutation_deadline(report_dir, session)
     compose = compose or root / "docker-compose.prod.yml"
     private, _ = host.transaction_paths(root, session["deploymentId"])
     env_raw = host.read_private(env)[0]
@@ -460,7 +553,7 @@ def publish_canonical_terminal(root, env, report_dir, coordination_dir, gate_ack
     def control(command, frame=None):
         raw, _ = native.run_native_child(root, report_dir, coordination_dir, phase, command,
                                         canonical_shell(env, compose, "control", command), stdin=frame,
-                                        renewal=renew, terminal_probe=probe)
+                                        renewal=renew, terminal_probe=probe, deadline_ns=deadline_ns)
         reply = json.loads(raw)
         host.require(set(reply) == {"ok", "result"} and reply["ok"] is True)
         return reply["result"]
@@ -508,7 +601,8 @@ def publish_canonical_terminal(root, env, report_dir, coordination_dir, gate_ack
 
     public = terminal.open_owned_traffic(root, report_dir, coordination_dir, phase, gate_ack, tuple(origins),
                                          authorise=authorise, remove_maintenance=open_marker,
-                                         renew_without_marker=observe_open, observe_public=observe_public)
+                                         renew_without_marker=observe_open, observe_public=observe_public,
+                                         before_intent=lambda: mutation_deadline(report_dir, session) == deadline_ns)
     host.require(control("finish-predecessor-role-terminal", host.json_bytes(public)) == {"phase": expected_terminal})
     return terminal.archive_terminal_holds(root, report_dir, coordination_dir, binding["deploymentId"],
                                            read_terminal=lambda _: read_terminal(), observe_public=observe_public)
@@ -551,6 +645,14 @@ def launch_owned_role_cutover(root, env, report_dir, compose, phase, preflight):
 
 if __name__ == "__main__":
     try:
+        if len(sys.argv) == 7 and sys.argv[1] == "--clock":
+            verb, root, reports, kind, value = sys.argv[2:]
+            if verb == "start":
+                start_deadline(Path(root), Path(reports), kind, int(value))
+            else:
+                host.require(verb == "closed" and kind == "checkpoint")
+                close_checkpoint_deadline(Path(root), Path(reports), int(value))
+            sys.exit(0)
         host.require(len(sys.argv) == 6 and not sys.stdin.isatty())
         root, env, report_dir, compose = map(Path, sys.argv[1:5])
         frame = sys.stdin.buffer.read(65537)

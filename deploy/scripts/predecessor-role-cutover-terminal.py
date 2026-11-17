@@ -70,7 +70,7 @@ def assert_open_owner(root, report_dir, coordination_dir, session, intent, path,
 
 
 def open_owned_traffic(root, report_dir, coordination_dir, phase, gate_ack, origins, *, authorise, remove_maintenance,
-                       renew_without_marker, observe_public):
+                       renew_without_marker, observe_public, before_intent):
     """Announce the irreversible boundary before the single owned open attempt."""
     host.verify_lock(root)
     remote = report_dir / OPEN_INTENT
@@ -83,6 +83,7 @@ def open_owned_traffic(root, report_dir, coordination_dir, phase, gate_ack, orig
     host.require(owned_plan(root, report_dir, coordination_dir, phase, gate_ack, origins)
                  == (session, checkpoint, private, intent))
     raw = host.json_bytes(intent)
+    host.require(before_intent() is True)
     # The backend rollback gate observes the report-directory fence.
     host.write_private(remote, raw)
     host.write_private(local, raw)

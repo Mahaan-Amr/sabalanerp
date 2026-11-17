@@ -50,7 +50,7 @@ def require(condition):
 
 
 def run_native_child(root, report_dir, coordination_dir, phase, action, argv, *, renewal, stdin=None,
-                     budget_seconds=180, heartbeat_seconds=60, terminal_probe=None):
+                     budget_seconds=180, heartbeat_seconds=60, terminal_probe=None, deadline_ns=None):
     """Return private stdout and a redacted receipt after the original child closes.
 
     The callback must renew and authenticate the existing protected database lease
@@ -60,13 +60,13 @@ def run_native_child(root, report_dir, coordination_dir, phase, action, argv, *,
     """
     try:
         return _run_native_child(root, report_dir, coordination_dir, phase, action, argv, renewal, stdin,
-                                 budget_seconds, heartbeat_seconds, terminal_probe)
+                                 budget_seconds, heartbeat_seconds, terminal_probe, deadline_ns)
     except Exception:
         raise ProtectedNativeChildError("PREDECESSOR_ROLE_NATIVE_CHILD_HELD") from None
 
 
 def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, renewal, stdin,
-                      budget_seconds, heartbeat_seconds, terminal_probe):
+                      budget_seconds, heartbeat_seconds, terminal_probe, deadline_ns):
     terminal_action = action in TERMINAL_ACTIONS
     require((action in CONTROL_ACTIONS.get(phase, ()) or (terminal_action and phase in CONTROL_ACTIONS))
             and terminal_action == (terminal_probe is not None)
@@ -100,7 +100,10 @@ def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, r
         except Exception:
             return False
 
-    require(refresh())
+    def within_global_budget():
+        return deadline_ns is None or time.monotonic_ns() < deadline_ns
+
+    require(within_global_budget() and refresh() and within_global_budget())
     private_path, _ = configuration.transaction_paths(root, binding["deploymentId"])
     attempt_id = uuid.uuid4().hex
     intent_path = private_path.with_name("native-" + attempt_id + "-intent.json")
@@ -126,7 +129,7 @@ def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, r
     process = None
     returncode = None
     try:
-        if not interrupted:
+        if not interrupted and within_global_budget():
             try:
                 process = subprocess.Popen(
                     argv, cwd=root, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
@@ -147,7 +150,7 @@ def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, r
                     streams.register(getattr(process, name), selectors.EVENT_READ, name)
                 while process.poll() is None or streams.get_map():
                     now = time.monotonic()
-                    deadline_exceeded = deadline_exceeded or now - started >= budget_seconds
+                    deadline_exceeded = deadline_exceeded or now - started >= budget_seconds or not within_global_budget()
                     if now >= next_heartbeat:
                         heartbeat_failed = not refresh() or heartbeat_failed
                         next_heartbeat = time.monotonic() + heartbeat_seconds
@@ -173,7 +176,7 @@ def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, r
                                 stdout.extend(block)
             returncode = process.wait()
         heartbeat_failed = not refresh() or heartbeat_failed
-        deadline_exceeded = deadline_exceeded or time.monotonic() - started >= budget_seconds
+        deadline_exceeded = deadline_exceeded or time.monotonic() - started >= budget_seconds or not within_global_budget()
         credential_echoed = action == CREDENTIAL_ACTION and stdin[64:] in stdout
         intent_unchanged = configuration.read_private(intent_path)[0] == intent
         healthy = (returncode == 0 and all(closed.values()) and not interrupted and not heartbeat_failed
@@ -215,7 +218,7 @@ def _run_native_child(root, report_dir, coordination_dir, phase, action, argv, r
 
 
 def run_native_foreground(root, env, report_dir, coordination_dir, preflight, credential_fd, *, renewal,
-                          observe, inspect, control_argv, compose_argv):
+                          observe, inspect, control_argv, compose_argv, verify_boundary=None, deadline_ns=None):
     """Bind the existing cutover state machine to the canonical owner's native transports."""
     configuration.verify_lock(root)
     phase = json.loads(
@@ -224,14 +227,14 @@ def run_native_foreground(root, env, report_dir, coordination_dir, preflight, cr
 
     def control(command, args, stdin):
         stdout, _ = run_native_child(root, report_dir, coordination_dir, phase, command, control_argv(command, args),
-                                     renewal=renewal, stdin=stdin)
+                                     renewal=renewal, stdin=stdin, deadline_ns=deadline_ns)
         return stdout
 
     def recreate(command):
         run_native_child(root, report_dir, coordination_dir, phase, "recreate-backend", compose_argv(command),
-                         renewal=renewal, budget_seconds=240)
+                         renewal=renewal, budget_seconds=240, deadline_ns=deadline_ns)
         return True
 
     return configuration.foreground(root, env, report_dir, coordination_dir, preflight, credential_fd,
-                                    control=control, verify_boundary=renewal, observe=observe, inspect=inspect,
+                                    control=control, verify_boundary=verify_boundary or renewal, observe=observe, inspect=inspect,
                                     recreate_backend=recreate)

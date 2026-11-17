@@ -42,7 +42,7 @@ test('changed source, dirty gitlink, images, graph, build bytes, operations and 
  ]){const input=fixture();mutate(input);assert.throws(()=>validatePrebuiltReleasePlan(input.plan,input.actual));}
 });
 
-const script=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),bash=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh';
+const script=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n'),bash=process.env.SABALAN_TEST_SHELL??(process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh');
 test('prebuilt real shell lane retains cleanup/capacity and never fetches, builds, retags or derives a browser ID',()=>{
  const start=script.indexOf('  # All three immutable images are already imported and verified.');
  const end=script.indexOf('\nfi\nelif [ "${CAPTURE_ONLY}" -eq 1 ]; then',start);

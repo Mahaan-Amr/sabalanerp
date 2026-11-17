@@ -1,0 +1,2 @@
+FROM sabalanerp-local-backend:pre-recovery-20261117
+COPY deploy/scripts/backend-runtime-owner.py deploy/scripts/local-native-reboot-20261117.py /app/scripts/

@@ -485,6 +485,7 @@ const normalizeFinancialRecords = (records: Array<{
     systemInvoiceNumber: record.systemInvoiceNumber,
     systemInvoiceDate: record.systemInvoiceDate,
     sepidarAmount: record.sepidarAmount == null ? null : decimalToString(record.sepidarAmount),
+    draftDetails: record.status === AccountingRecordStatus.DRAFT ? metadataObject(record.metadata).draftDetails || null : null,
     financiallyApprovedAt: record.financiallyApprovedAt,
     createdAt: record.createdAt
   });
@@ -901,6 +902,8 @@ const buildContractRow = async (contract: any, settings: any, summaryOnly = fals
   const openFlags = flags.filter((item: any) => item.status === 'OPEN');
   const issuedInvoices = records.filter(isValidFinanciallyApprovedInvoice);
   const openInvoiceCandidates = records.filter(isOpenInvoiceCandidate);
+  const editableInvoiceDraft = records.some((record: any) => record.kind === FinancialRecordKind.INVOICE_CANDIDATE
+    && record.status === AccountingRecordStatus.DRAFT && record.sourceKind === AccountingSourceKind.SALES_CONTRACT);
   const invoiceStatus = classifyInvoiceStatus(records);
 
   const overdueReceivables = receivables.filter((receivable: any) => (
@@ -942,6 +945,12 @@ const buildContractRow = async (contract: any, settings: any, summaryOnly = fals
       labelFa: 'ایجاد پیش‌نویس صورتحساب',
       enabled: eligible,
       disabledReason
+    },
+    {
+      kind: 'SAVE_INVOICE_DRAFT',
+      labelFa: 'ذخیره پیش‌نویس',
+      enabled: editableInvoiceDraft,
+      disabledReason: editableInvoiceDraft ? undefined : 'پیش‌نویس قابل ویرایش وجود ندارد'
     },
     {
       kind: 'CREATE_RECEIVABLE',
@@ -2257,6 +2266,8 @@ export const executeAccountingAction = async (
       return cancelAccountingVoidCase(command, actor);
     case 'CREATE_INVOICE':
       return createInvoiceCandidate(command, actor, period.id, notificationHook);
+    case 'SAVE_INVOICE_DRAFT':
+      return saveInvoiceDraft(command, actor);
     case 'CREATE_REPLACEMENT_INVOICE':
       return createReplacementInvoiceCandidate(command, actor, period.id, notificationHook);
     case 'CREATE_RECEIVABLE':
@@ -2302,13 +2313,46 @@ export const executeAccountingAction = async (
   }
 };
 
+const saveInvoiceDraft = async (command: AccountingActionRequest, actor: Actor) => {
+  const invoiceId = command.invoiceId || command.recordId;
+  if (!invoiceId) throw new Error('invoiceId is required');
+  const fields = [command.systemInvoiceNumber, command.systemInvoiceDate, command.sepidarAmount,
+    command.externalReference, command.downstreamNote];
+  if (fields.some(value => value != null && typeof value !== 'string' && typeof value !== 'number')) throw new Error('Invalid draft details');
+  if (fields.some((value, index) => String(value ?? '').length > [200, 30, 100, 500, 2000][index])) throw new Error('Draft detail is too long');
+  const draftDetails = {
+    systemInvoiceNumber: String(command.systemInvoiceNumber ?? ''),
+    systemInvoiceDate: String(command.systemInvoiceDate ?? ''),
+    sepidarAmount: String(command.sepidarAmount ?? ''),
+    externalReference: String(command.externalReference ?? ''),
+    downstreamNote: String(command.downstreamNote ?? ''),
+  };
+  const record = await prisma.$transaction(async tx => {
+    await lockFinancialApprovalRecord(tx, invoiceId);
+    const before = await tx.accountingFinancialRecord.findUnique({ where: { id: invoiceId } });
+    if (!before || before.kind !== FinancialRecordKind.INVOICE_CANDIDATE || before.status !== AccountingRecordStatus.DRAFT || before.financiallyApprovedAt || before.sourceKind !== AccountingSourceKind.SALES_CONTRACT) throw new Error('Editable invoice draft not found');
+    if (hasConflictingPartnerAccountingEvidence(before)) throw new Error('Invoice source requires review');
+    const after = await tx.accountingFinancialRecord.update({ where: { id: invoiceId }, data: {
+      metadata: toJsonValue({ ...metadataObject(before.metadata), draftDetails }),
+    } });
+    await audit(tx, { action: 'SAVE_INVOICE_DRAFT', actorId: actor.userId, contractId: before.contractId,
+      recordId: before.id, entityType: 'AccountingFinancialRecord', entityId: before.id,
+      beforeState: toJsonValue(before), afterState: toJsonValue(after) });
+    return after;
+  });
+  return actionResponse('APPLIED', 'اطلاعات پیش‌نویس ذخیره شد', { contractId: record.contractId || undefined, financialRecordIds: [record.id] });
+};
+
 const createInvoiceCandidate = async (command: AccountingActionRequest, actor: Actor, periodId: string, notificationHook?: AccountingActionNotificationHook) => {
   if (!command.contractId) throw new Error('contractId is required');
   const contract = await ensureEligibleContract(command.contractId);
   const settings = await getDefaultSettings();
   const idempotencyKey = command.idempotencyKey || `invoice-candidate:${contract.id}:${command.mode || 'FROM_CONTRACT_TOTAL'}`;
   const existing = await prisma.accountingFinancialRecord.findUnique({ where: { idempotencyKey } });
-  if (existing) return actionResponse('APPLIED', 'پیش‌نویس صورتحساب قبلا ایجاد شده است', { financialRecordIds: [existing.id], contractId: contract.id });
+  if (existing) {
+    if (existing.contractId !== contract.id) throw new Error('Invoice idempotency key belongs to another contract');
+    return actionResponse('APPLIED', 'پیش‌نویس صورتحساب قبلا ایجاد شده است', { financialRecordIds: [existing.id], contractId: contract.id });
+  }
 
   const selectedItems = command.mode === 'FROM_SELECTED_ITEMS' && command.selectedContractItemIds?.length
     ? contract.items.filter((item) => command.selectedContractItemIds!.includes(item.id))
@@ -2324,6 +2368,21 @@ const createInvoiceCandidate = async (command: AccountingActionRequest, actor: A
 
   const record = await prisma.$transaction(async (tx) => {
     await assertOrdinaryAccountingCommercialGate(tx, contract.id, 'CREATE_INVOICE', contract.commercialRevision);
+    // The commercial gate holds the contract row lock. Check again under that
+    // lock so retries with different identities cannot create another full draft.
+    const replay = await tx.accountingFinancialRecord.findUnique({ where: { idempotencyKey } });
+    if (replay) {
+      if (replay.contractId !== contract.id) throw new Error('Invoice idempotency key belongs to another contract');
+      return replay;
+    }
+    if (!command.mode || command.mode === 'FROM_CONTRACT_TOTAL') {
+      const draft = await tx.accountingFinancialRecord.findFirst({ where: {
+        contractId: contract.id, kind: FinancialRecordKind.INVOICE_CANDIDATE,
+        status: AccountingRecordStatus.DRAFT, sourceKind: AccountingSourceKind.SALES_CONTRACT,
+        metadata: { path: ['mode'], equals: 'FROM_CONTRACT_TOTAL' },
+      }, orderBy: { createdAt: 'asc' } });
+      if (draft) return draft;
+    }
     const invoice = await tx.accountingFinancialRecord.create({
       data: {
         kind: FinancialRecordKind.INVOICE_CANDIDATE,

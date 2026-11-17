@@ -124,6 +124,7 @@
     "test:dispatch-cutover": "tsx src/services/__tests__/dispatchCutoverPolicy.test.ts && tsx src/services/__tests__/dispatchCaseTimeline.test.ts",
     "test:dispatch-document-contracts": "tsx src/services/__tests__/dispatchDocumentContracts.test.ts && tsx src/services/__tests__/shipmentStatementMigration.test.ts",
     "test:approved-pricing": "tsx --test src/services/__tests__/exactQuantity.test.ts src/services/__tests__/slabAccountingQuantity.test.ts && tsx src/services/__tests__/approvedPricing.test.ts && tsx src/services/__tests__/approvedPricingDiscountEligibility.test.ts && tsx src/services/__tests__/accountingFinancialApprovalTransactionPolicy.test.ts",
+    "test:accounting-draft-permission:local": "tsx src/services/__tests__/slabAccountingQuantity.integration.test.ts --draft-permission",
     "test:slab-accounting:local": "tsx src/services/__tests__/slabAccountingQuantity.integration.test.ts",
     "test:approved-pricing:db": "tsx src/services/__tests__/approvedPricingPrisma.test.ts",
     "test:approved-pricing:concurrency": "tsx src/services/__tests__/approvedPricingConcurrency.test.ts",

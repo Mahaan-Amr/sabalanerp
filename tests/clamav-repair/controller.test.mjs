@@ -95,8 +95,8 @@ for(const scenario of ['qualification','remote-tamper','post-mutation','rollback
   else assert.equal(activation,-1,'failed qualification or checkpoint must never activate');
   assert.equal(includes('dist/scripts/deployment-rollback.js').length,['post-mutation','rollback-qualifier','install-interrupted','lease-expired'].includes(failure)?1:0,'never replay rollback or restore old data after public writes');
   const beforeBoundary=['before-maintenance','acquire-failure','after-acquire','storage-preflight','legacy-signal','resume-PREFLIGHT','resume-LEASE_ACQUIRED','resume-MAINTENANCE_REQUESTED-before'].includes(failure);
-  if(['qualification','stale-target','updater-refusal'].includes(failure)||beforeBoundary)assert.equal(controls('maintenance-on').length,0);
-  else if(failure==='rollback-qualifier'||failure==='after-open'||failure==='runtime-not-closed'||(incident&&(['remote-tamper','post-mutation','install-interrupted','lease-expired','marker-interrupted'].includes(failure)||resumed))){
+  if(['qualification','stale-target','updater-refusal'].includes(failure)||(beforeBoundary&&failure!=='after-acquire'))assert.equal(controls('maintenance-on').length,0);
+  else if(failure==='remote-tamper'||failure==='rollback-qualifier'||failure==='after-open'||failure==='runtime-not-closed'||(incident&&(['remote-tamper','post-mutation','install-interrupted','lease-expired','marker-interrupted','after-acquire'].includes(failure)||resumed))){
    assert.ok(fs.existsSync(path.join(root,'maintenance.json')),'failed rollback verification or post-open failure retains maintenance');
    assert.equal(controls('maintenance-off').length,failure==='after-open'?1:0);
   } else assert.equal(fs.existsSync(path.join(root,'maintenance.json')),false);

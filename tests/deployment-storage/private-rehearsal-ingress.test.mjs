@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 function renderedNginxPorts(bindAddress) {
   const environment = {
@@ -11,6 +14,7 @@ function renderedNginxPorts(bindAddress) {
   if (bindAddress) environment.DEPLOYMENT_NGINX_BIND_ADDRESS = bindAddress;
   else delete environment.DEPLOYMENT_NGINX_BIND_ADDRESS;
   const output = execFileSync('docker', ['compose', '-f', 'docker-compose.prod.yml', 'config', '--format', 'json'], {
+    cwd: repositoryRoot,
     env: environment,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],

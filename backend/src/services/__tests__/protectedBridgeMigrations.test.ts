@@ -6,11 +6,11 @@ import test from 'node:test';
 import { compileProtectedBridgeMigration, compileProtectedCurrentRelease,
   assertProtectedCurrentReleaseRetryEvidence } from '../protectedBridgeMigrations';
 
-test('same-operation retry rejects changed quantity, duty, or waybill evidence', () => {
+test('same-operation retry rejects changed quantity, duty, waybill, or pickup evidence', () => {
   const owner = { deploymentId: 'operation-1', releaseId: 'release-1', leaseToken: 'lease-1' };
   const receipt = { deploymentId: owner.deploymentId, releaseId: owner.releaseId,
-    quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's' };
-  const observed = { quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's' };
+    quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's', pickupDispatchRows: '19:41' };
+  const observed = { quantityProofSha256: 'q', dutyRows: '437', sequenceProofSha256: 's', pickupDispatchRows: '19:41' };
   assert.doesNotThrow(() => assertProtectedCurrentReleaseRetryEvidence(receipt, owner, observed));
   for (const key of Object.keys(observed) as Array<keyof typeof observed>) {
     assert.throws(() => assertProtectedCurrentReleaseRetryEvidence(receipt, owner,
@@ -47,6 +47,8 @@ test('the complete current release is admitted only with its reviewed ordered SQ
     '20261115130000_accounting_dashboard_user_name_scope',
     '20261115130000_loading_cancellation_duty',
     '20261115131000_accounting_private_marker_index',
+    '20261116100000_customer_pickup_driver_source',
+    '20261116100100_customer_pickup_dispatch',
   ];
   const files = names.map(name => [name, fs.readFileSync(path.join(directory, name, 'migration.sql'))] as const);
   const release = compileProtectedCurrentRelease(files);
@@ -58,10 +60,20 @@ test('the complete current release is admitted only with its reviewed ordered SQ
   assert.ok(!release[10].statements.join(' ').includes('setval('));
   assert.equal(release[12].statements.length, 2);
   assert.match(release[12].statements[0], /^LOCK TABLE/);
-  assert.ok(release.at(-1)!.tables.includes('accounting_financial_records'));
+  assert.ok(release[21].tables.includes('accounting_financial_records'));
+  assert.deepEqual(release[22].statements, [`ALTER TYPE "GuardDriverSource" ADD VALUE 'CUSTOMER_PICKUP';`]);
+  assert.equal(release[23].statements.length, 6);
+  assert.deepEqual(release[23].tables.sort(), [
+    'dispatch_confirmation_sessions', 'dispatch_pickup_verifications', 'guard_driver_queue_turns',
+  ]);
   assert.throws(() => compileProtectedCurrentRelease(files.slice(1)), /CURRENT_RELEASE_SET_UNPROVEN/);
   const changed = files.map(([name, bytes], index) => index === 3 ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
   assert.throws(() => compileProtectedCurrentRelease(changed), /SQL_IDENTITY_MISMATCH/);
+  for (const pickupIndex of [22, 23]) {
+    const changedPickup = files.map(([name, bytes], index) => index === pickupIndex
+      ? [name, Buffer.concat([bytes, Buffer.from('\n-- drift')])] as const : [name, bytes] as const);
+    assert.throws(() => compileProtectedCurrentRelease(changedPickup), /SQL_IDENTITY_MISMATCH/);
+  }
 });
 
 test('protected bootstrap accepts only the reviewed complete SQL bytes, including original comments and line endings', () => {

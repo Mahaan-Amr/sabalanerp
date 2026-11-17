@@ -557,6 +557,7 @@ export const recoveryPackagePath = (source: string, storageName: string) =>
 
 export const validateRecoveryPackage = async (input: {
   sourcePath: string;
+  expectedChecksum?: string;
   passphrase: string;
   prisma: PrismaClient;
   verifyRestore?: boolean;
@@ -572,7 +573,7 @@ export const validateRecoveryPackage = async (input: {
   let businessDataProof: RecoveryBusinessTableProof[] | undefined;
   let inquiryBusinessProof:InquiryBusinessProof|undefined;
   try {
-    await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
+    await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase, input.expectedChecksum);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
     await extractRecoveryArchive(archivePath, payloadRoot);
     // Only this job's fully extracted intermediate is retired. The encrypted
@@ -1008,7 +1009,7 @@ export const stageAndPromoteRecovery = async (input: {
   };
   try {
     await writeRestoreJournal(journal);
-    await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase);
+    await decryptRecoveryArchive(input.sourcePath, archivePath, input.passphrase, input.checksum);
     await fs.promises.mkdir(payloadRoot, { recursive: true });
     await extractRecoveryArchive(archivePath, payloadRoot);
     await fs.promises.unlink(archivePath);

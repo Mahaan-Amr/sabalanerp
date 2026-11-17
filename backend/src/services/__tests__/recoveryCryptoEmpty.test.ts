@@ -17,15 +17,19 @@ for (const version of [1, 2]) test(`empty user file authenticates and restores t
     await fs.writeFile(source, Buffer.alloc(0));
     if (version === 1) await encryptRecoveryArchive(source, cipher, local);
     else await encryptRecoveryArchiveForRecipients(source, cipher, [{ keyId: 'local', passphrase: local }, { keyId: 'independent', publicKeyPem }]);
+    const good = await fs.readFile(cipher);
+    const checksum = crypto.createHash('sha256').update(good).digest('hex');
     for (const [index, key] of (version === 1 ? [local] : [local, privateKey]).entries()) {
       const restored = path.join(root, `restored-${index}`);
-      await decryptRecoveryArchive(cipher, restored, key);
+      await decryptRecoveryArchive(cipher, restored, key, checksum);
       assert.equal((await fs.stat(restored)).size, 0);
     }
-    const good = await fs.readFile(cipher);
     const corrupt = Buffer.from(good); corrupt[corrupt.length - 1] ^= 1;
     const tampered = path.join(root, 'tampered.sabrec'); await fs.writeFile(tampered, corrupt);
     const rejected = path.join(root, 'must-not-survive');
+    await assert.rejects(decryptRecoveryArchive(cipher, rejected, local, '0'.repeat(64)),
+      (error: any) => error.code === 'RECOVERY_INTEGRITY_FAILED');
+    await assert.rejects(fs.stat(rejected), (error: any) => error.code === 'ENOENT');
     await assert.rejects(decryptRecoveryArchive(tampered, rejected, local), (error: any) => error.code === 'RECOVERY_DECRYPTION_FAILED');
     await assert.rejects(fs.stat(rejected), (error: any) => error.code === 'ENOENT');
     await assert.rejects(decryptRecoveryArchive(cipher, rejected, 'wrong-test-key'), (error: any) => error.code === 'RECOVERY_DECRYPTION_FAILED');

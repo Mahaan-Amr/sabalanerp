@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import fs from 'fs';
-import { Readable } from 'stream';
+import { Readable, Transform } from 'stream';
 
 const MAGIC = Buffer.from('SABREC01');
 const TAG_BYTES = 16;
@@ -139,7 +139,13 @@ export const encryptRecoveryArchiveForRecipients = async (
   await fs.promises.appendFile(destinationPath, cipher.getAuthTag());
 };
 
-export const decryptRecoveryArchive = async (sourcePath: string, destinationPath: string, passphrase: string) => {
+export const decryptRecoveryArchive = async (
+  sourcePath: string, destinationPath: string, passphrase: string, expectedChecksum?: string,
+) => {
+  const checksumMismatch = () => Object.assign(new Error('Recovery archive does not match its recorded checksum.'), {
+    code: 'RECOVERY_INTEGRITY_FAILED',
+  });
+  if (expectedChecksum !== undefined && !/^[0-9a-f]{64}$/.test(expectedChecksum)) throw checksumMismatch();
   const descriptor = await fs.promises.open(sourcePath, 'r');
   try {
     const stat = await descriptor.stat();
@@ -190,14 +196,30 @@ export const decryptRecoveryArchive = async (sourcePath: string, destinationPath
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(header.iv, 'base64'));
     decipher.setAAD(encodedHeader);
     decipher.setAuthTag(tag);
+    const checksum = expectedChecksum === undefined ? null : crypto.createHash('sha256').update(prefix).update(encodedHeader);
     try {
       const ciphertext = ciphertextEnd === ciphertextStart - 1
         ? Readable.from([])
-        : fs.createReadStream(sourcePath, { start: ciphertextStart, end: ciphertextEnd });
-      await pipeline(ciphertext, decipher, fs.createWriteStream(destinationPath, { flags: 'wx' }));
+        : descriptor.createReadStream({ start: ciphertextStart, end: ciphertextEnd, autoClose: false });
+      const output = fs.createWriteStream(destinationPath, { flags: 'wx' });
+      if (checksum) {
+        const observeCiphertext = new Transform({
+          transform(chunk: Buffer, _encoding, callback) {
+            checksum.update(chunk);
+            callback(null, chunk);
+          },
+        });
+        await pipeline(ciphertext, observeCiphertext, decipher, output);
+      } else {
+        await pipeline(ciphertext, decipher, output);
+      }
     } catch {
       await fs.promises.rm(destinationPath, { force: true });
       throw Object.assign(new Error('Backup passphrase is incorrect or the package was modified.'), { code: 'RECOVERY_DECRYPTION_FAILED' });
+    }
+    if (checksum && checksum.update(tag).digest('hex') !== expectedChecksum) {
+      await fs.promises.rm(destinationPath, { force: true });
+      throw checksumMismatch();
     }
   } finally {
     await descriptor.close();

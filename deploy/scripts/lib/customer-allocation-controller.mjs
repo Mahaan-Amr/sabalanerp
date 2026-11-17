@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import path from 'node:path';
 import { verifyCustomerAllocationGoManifest } from './customer-allocation-go-manifest.mjs';
 
 const reject = () => { throw new Error('CUSTOMER_ALLOCATION_CONTROLLER_REJECTED'); };
@@ -112,16 +115,47 @@ export async function closeCustomerAllocation({ db, deploymentId, leaseToken, re
   });
 }
 
-/** Dormant controller seam. The transaction adapter must use the dedicated database
- * login and hold the deployment row lock from lock() through activate(). `expected`
- * must come from independently verified immutable image and evidence custody. */
-export async function activateCustomerAllocation({ db, envelope, expected, deploymentId, leaseToken, approver }) {
+/** The caller supplies observed source/image identities and the separately pinned approver. */
+export async function activateCustomerAllocation({ db, evidenceDirectory, expected, deploymentId, leaseToken, approver }) {
   if (!db || typeof db.transaction !== 'function' || !expected || !approver ||
     typeof deploymentId !== 'string' || !deploymentId || typeof leaseToken !== 'string' || !leaseToken) reject();
+  const uid = process.getuid?.();
+  if (uid === undefined || !path.isAbsolute(evidenceDirectory ?? '') || realpathSync(evidenceDirectory) !== evidenceDirectory) reject();
+  const directory = lstatSync(evidenceDirectory);
+  if (!directory.isDirectory() || directory.uid !== uid || (directory.mode & 0o077) !== 0) reject();
+  const read = (name, maxBytes) => {
+    const file = path.join(evidenceDirectory, name);
+    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const before = fstatSync(fd, { bigint: true });
+      if (!before.isFile() || before.uid !== BigInt(uid) || before.nlink !== 1n
+        || (before.mode & 0o077n) !== 0n || before.size < 1n || before.size > BigInt(maxBytes)) reject();
+      const bytes = readFileSync(fd);
+      const after = fstatSync(fd, { bigint: true });
+      const named = lstatSync(file, { bigint: true });
+      for (const key of ['dev', 'ino', 'mode', 'uid', 'nlink', 'size', 'mtimeNs', 'ctimeNs']) {
+        if (before[key] !== after[key] || before[key] !== named[key]) reject();
+      }
+      if (BigInt(bytes.length) !== before.size) reject();
+      return bytes;
+    } finally { closeSync(fd); }
+  };
+  const digest = name => createHash('sha256').update(read(name, 4 * 1024 * 1024)).digest('hex');
+  const envelope = JSON.parse(read('decision.json', 64 * 1024).toString('utf8'));
+  const observed = {
+    ...expected,
+    cohortSha256: digest('cohort.json'),
+    evidence: {
+      reader: digest('reader.json'), populatedQa: digest('populated-qa.json'), rollback: digest('rollback.json'),
+    },
+  };
   return db.transaction(async tx => {
     const locked = await tx.lock(deploymentId, leaseToken);
     if (!locked || locked.deploymentId !== deploymentId || locked.leaseToken !== leaseToken) reject();
-    const verified = verifyCustomerAllocationGoManifest(envelope, { ...expected, ...locked }, approver);
+    const { activeKey, phase, leaseExpiresAt, targetCommit, releaseId, dbClock, controlState } = locked;
+    const verified = verifyCustomerAllocationGoManifest(envelope, {
+      ...observed, deploymentId, leaseToken, activeKey, phase, leaseExpiresAt, targetCommit, releaseId, dbClock, controlState,
+    }, approver);
     const receipt = await tx.activate({ deploymentId, leaseToken, releaseId: verified.releaseId,
       manifestSha256: verified.manifestSha256, expiresAt: verified.expiresAt });
     if (receipt?.state !== 'ACTIVE' || receipt.manifest_sha256 !== verified.manifestSha256) reject();

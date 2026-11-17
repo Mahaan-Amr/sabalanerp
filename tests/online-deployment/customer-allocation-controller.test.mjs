@@ -1,25 +1,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { chmodSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { canonicalGoPayload } from '../../deploy/scripts/lib/customer-allocation-go-manifest.mjs';
 import { activateCustomerAllocation, closeCustomerAllocation, customerAllocationControllerDatabase } from '../../deploy/scripts/lib/customer-allocation-controller.mjs';
 
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
 const h = value => value.repeat(64);
+const hash = value => createHash('sha256').update(value).digest('hex');
+const sha = name => hash(`{"fixture":"${name}"}`);
+const directories = [];
+test.after(() => directories.forEach(directory => rmSync(directory, { recursive: true, force: true })));
+const custodyTest = (name, callback) => test(name, { skip: !process.getuid && 'requires POSIX custody checks' }, callback);
 const now = '2026-11-16T12:00:00.000Z';
 const facts = () => ({
   releaseId: 'release-456', deploymentId: 'deployment-456', candidateCommit: 'a'.repeat(40),
   candidateTree: 'b'.repeat(40), inquiryCommit: 'c'.repeat(40), migrationSha256: h('d'),
   candidateImages: { backend: `sha256:${h('1')}`, frontend: `sha256:${h('2')}`, inquiry: `sha256:${h('3')}` },
   predecessorImages: { backend: `sha256:${h('4')}`, frontend: `sha256:${h('5')}`, inquiry: `sha256:${h('6')}` },
-  cohortSha256: h('e'), evidence: { reader: h('7'), populatedQa: h('8'), rollback: h('9') },
+  cohortSha256: sha('cohort'), evidence: { reader: sha('reader'), populatedQa: sha('populated-qa'), rollback: sha('rollback') },
 });
 const payload = () => ({ schemaVersion: 1, decision: 'GO', operation: 'GROUPED_ALLOCATION',
   keyId: 'independent-approver-1', issuedAt: '2026-11-16T11:59:00.000Z', expiresAt: '2026-11-16T12:01:00.000Z',
   ...facts(),
 });
 const envelope = p => ({ payload: p, signature: sign(null, Buffer.from(canonicalGoPayload(p)), privateKey).toString('base64') });
-const boundary = () => ({ ...facts(), activeKey: 'production', phase: 'MIGRATIONS_APPLIED',
+const boundary = () => ({ releaseId: 'release-456', activeKey: 'production', phase: 'MIGRATIONS_APPLIED',
   leaseToken: 'lease-456', leaseExpiresAt: '2026-11-16T12:03:00.000Z', dbClock: now,
   targetCommit: 'a'.repeat(40), controlState: 'CLOSED' });
 const authority = () => {
@@ -35,18 +43,25 @@ const authority = () => {
     }),
   };
 };
-const input = (db, signed = envelope(payload())) => ({ db, envelope: signed,
-  expected: facts(), deploymentId: 'deployment-456', leaseToken: 'lease-456',
-  approver: { keyId: 'independent-approver-1', publicKey } });
+const input = (db, signed = envelope(payload())) => {
+  const evidenceDirectory = mkdtempSync(path.join(realpathSync(tmpdir()), 'allocation-go-'));
+  directories.push(evidenceDirectory);
+  writeFileSync(path.join(evidenceDirectory, 'decision.json'), JSON.stringify(signed), { mode: 0o600 });
+  for (const name of ['cohort', 'reader', 'populated-qa', 'rollback']) {
+    writeFileSync(path.join(evidenceDirectory, `${name}.json`), `{"fixture":"${name}"}`, { mode: 0o600 });
+  }
+  return { db, evidenceDirectory, expected: facts(), deploymentId: 'deployment-456', leaseToken: 'lease-456',
+    approver: { keyId: 'independent-approver-1', publicKey } };
+};
 const runtime = { query: async () => ({ rows: [{ pid: 42 }] }) };
 
-test('a signed exact GO changes control once under the locked deployment operation', async () => {
+custodyTest('a signed exact GO changes control once under the locked deployment operation', async () => {
   const db = authority();
   assert.equal((await activateCustomerAllocation(input(db))).state, 'ACTIVE');
   assert.equal(db.activated, 1);
 });
 
-test('database adapter retains the lock and writes the receipt in one transaction', async () => {
+custodyTest('database adapter retains the lock and writes the receipt in one transaction', async () => {
   const calls = [];
   const { activeKey, phase, leaseToken, targetCommit, releaseId, controlState } = boundary();
   const client = { query: async (sql, values) => {
@@ -82,7 +97,7 @@ test('database adapter retains the lock and writes the receipt in one transactio
   assert.equal(calls.at(-1).sql, 'ROLLBACK');
 });
 
-test('database adapter rejects an unqualified controller or runtime before acquiring the deployment lock', async () => {
+custodyTest('database adapter rejects an unqualified controller or runtime before acquiring the deployment lock', async () => {
   for (const [controller, application] of [[false, true], [true, false]]) {
     const calls = [];
     const db = customerAllocationControllerDatabase({
@@ -120,10 +135,9 @@ test('closure passes the exact activation digest and rolls back a mismatched rec
   assert.equal(calls.at(-1), 'ROLLBACK');
 });
 
-test('wrong phase, lease, image, signature and replay never write control', async () => {
+custodyTest('wrong phase, lease, image, signature and replay never write control', async () => {
   for (const changed of [
     { phase: 'RELEASE_STARTED' }, { leaseToken: 'other' }, { leaseExpiresAt: now },
-    { candidateImages: { ...facts().candidateImages, backend: `sha256:${h('f')}` } },
     { controlState: 'ACTIVE' },
   ]) {
     const db = authority(); Object.assign(db.state.boundary, changed);
@@ -131,6 +145,26 @@ test('wrong phase, lease, image, signature and replay never write control', asyn
     assert.equal(db.activated, 0);
   }
   const db = authority();
+  const wrongImage = input(db);
+  wrongImage.expected.candidateImages.backend = `sha256:${h('f')}`;
+  await assert.rejects(activateCustomerAllocation(wrongImage));
   await assert.rejects(activateCustomerAllocation(input(db, { ...envelope(payload()), signature: 'A'.repeat(88) })));
   assert.equal(db.activated, 0);
+});
+
+custodyTest('the controller rejects changed, shared or redirected evidence files', async () => {
+  const db = authority();
+  for (const modify of [
+    file => writeFileSync(file, '{"fixture":"different"}'),
+    file => chmodSync(file, 0o644),
+    file => {
+      unlinkSync(file);
+      symlinkSync(path.join(path.dirname(file), 'rollback.json'), file);
+    },
+  ]) {
+    const request = input(db);
+    modify(path.join(request.evidenceDirectory, 'reader.json'));
+    await assert.rejects(activateCustomerAllocation(request));
+    assert.equal(db.activated, 0);
+  }
 });

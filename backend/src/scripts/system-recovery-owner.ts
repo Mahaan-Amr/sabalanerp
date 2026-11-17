@@ -13,13 +13,15 @@ async function main() {
   const scope = configuredProtectedDatabaseRoleRecovery();
   if (process.env.BACKEND_RUNTIME_ROLE !== 'control' || !scope || process.stdin.isTTY) throw rejected();
   const inputDeadline = setTimeout(() => process.stdin.destroy(new Error('SYSTEM_RECOVERY_OWNER_INPUT_INVALID')), 10_000);
-  const { operationId, passphrase } = await readSystemRecoveryOwnerRequest(process.argv.slice(2), process.stdin)
+  const { operationId, deploymentId, passphrase } = await readSystemRecoveryOwnerRequest(
+    process.argv.slice(2), process.stdin, process.env.DEPLOYMENT_ID,
+  )
     .finally(() => clearTimeout(inputDeadline));
 
   const assertBoundary = async () => {
     assertRuntimeControlOwnership();
     await assertProtectedRoleCheckpointBoundary({
-      prisma, coordinationDir: RECOVERY_COORDINATION_DIR, id: operationId, phase: 'SERVICES_DRAINED',
+      prisma, coordinationDir: RECOVERY_COORDINATION_DIR, id: deploymentId, phase: 'SERVICES_DRAINED',
     });
     if (await readRestoreJournal()) throw rejected();
     const [database] = await prisma.$queryRaw<Array<{ admitted: boolean }>>`

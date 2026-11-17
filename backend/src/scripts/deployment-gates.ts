@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import { isIP } from 'node:net';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { disconnectDatabase, prisma } from '../lib/prisma';
@@ -84,7 +85,19 @@ const main = async () => {
           manifestSha256, deploymentId, releaseId: process.env.DEPLOYMENT_RELEASE_ID ?? '',
           targetCommit: process.env.DEPLOYMENT_TARGET_COMMIT ?? '', leaseToken: process.env.DEPLOYMENT_LEASE_TOKEN ?? '',
         };
-        return { status: 'up-to-date', ...await verifyCustomerAllocationDeploymentState(prisma, expectedAllocation) };
+        const allocation = await verifyCustomerAllocationDeploymentState(prisma, expectedAllocation);
+        if (expectedAllocation) {
+          const runtimeAddress = process.env.DEPLOYMENT_CUSTOMER_ALLOCATION_RUNTIME_ADDRESS ?? '';
+          if (!isIP(runtimeAddress)) throw new Error('Customer allocation runtime address is unverified.');
+          const [sessions] = await prisma.$queryRaw<Array<{ admitted: boolean }>>`
+            SELECT count(*) > 0 AND bool_and(usename = 'sabalan_application_runtime') AS admitted
+            FROM pg_catalog.pg_stat_activity
+            WHERE client_addr = CAST(${runtimeAddress} AS inet)
+              AND datname = current_database() AND backend_type = 'client backend'
+          `;
+          if (!sessions?.admitted) throw new Error('Customer allocation runtime database sessions are unverified.');
+        }
+        return { status: 'up-to-date', ...allocation };
       },
     }, {
       name: 'shipment-statement-runtime-state',

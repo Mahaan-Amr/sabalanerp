@@ -117,15 +117,12 @@ export async function closeCustomerAllocation({ db, deploymentId, leaseToken, re
   });
 }
 
-/** The caller supplies observed source/image identities and the separately pinned approver. */
-export async function activateCustomerAllocation({ db, evidenceDirectory, expected, deploymentId, leaseToken, approver }) {
-  if (!db || typeof db.transaction !== 'function' || !expected || !approver ||
-    typeof deploymentId !== 'string' || !deploymentId || typeof leaseToken !== 'string' || !leaseToken) reject();
+export function privateDirectoryReader(evidenceDirectory) {
   const uid = process.getuid?.();
   if (uid === undefined || !path.isAbsolute(evidenceDirectory ?? '') || realpathSync(evidenceDirectory) !== evidenceDirectory) reject();
   const directory = lstatSync(evidenceDirectory);
   if (!directory.isDirectory() || directory.uid !== uid || (directory.mode & 0o077) !== 0) reject();
-  const read = (name, maxBytes) => {
+  return (name, maxBytes) => {
     const file = path.join(evidenceDirectory, name);
     const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
@@ -142,13 +139,22 @@ export async function activateCustomerAllocation({ db, evidenceDirectory, expect
       return bytes;
     } finally { closeSync(fd); }
   };
+}
+
+/** The caller supplies observed source/image identities and the separately pinned approver. */
+export async function activateCustomerAllocation({ db, evidenceDirectory, expected, deploymentId, leaseToken, approver, validateReader }) {
+  if (!db || typeof db.transaction !== 'function' || !expected || !approver ||
+    typeof deploymentId !== 'string' || !deploymentId || typeof leaseToken !== 'string' || !leaseToken) reject();
+  const read = privateDirectoryReader(evidenceDirectory);
+  const reader = read('reader.json', 4 * 1024 * 1024);
+  if (validateReader) validateReader(JSON.parse(reader.toString('utf8')));
   const digest = name => createHash('sha256').update(read(name, 4 * 1024 * 1024)).digest('hex');
   const envelope = JSON.parse(read('decision.json', 64 * 1024).toString('utf8'));
   const observed = {
     ...expected,
     cohortSha256: digest('cohort.json'),
     evidence: {
-      reader: digest('reader.json'), populatedQa: digest('populated-qa.json'), rollback: digest('rollback.json'),
+      reader: createHash('sha256').update(reader).digest('hex'), populatedQa: digest('populated-qa.json'), rollback: digest('rollback.json'),
     },
   };
   return db.transaction(async tx => {

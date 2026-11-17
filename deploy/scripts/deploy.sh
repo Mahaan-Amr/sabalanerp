@@ -98,6 +98,24 @@ if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   }
 fi
 
+# A requested activation must use the ordinary protected release path. The
+# signed decision and its receipt are required for this invocation only.
+unset DEPLOYMENT_CUSTOMER_ALLOCATION_MANIFEST_SHA256
+ALLOCATION_EVIDENCE_DIR="${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}"
+ALLOCATION_AUTHORITY_DIR="${DEPLOYMENT_CUSTOMER_ALLOCATION_AUTHORITY_DIR:-}"
+ALLOCATION_APPROVER_SHA256="${DEPLOYMENT_CUSTOMER_ALLOCATION_APPROVER_SHA256:-}"
+ALLOCATION_RELEASE_SCRIPT="${OPERATIONS_ROOT}/deploy/scripts/customer-allocation-release.mjs"
+allocation_predecessor=""
+if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
+  [ -n "${ALLOCATION_EVIDENCE_DIR}" ] && [ -n "${ALLOCATION_AUTHORITY_DIR}" ] \
+    && [ -n "${ALLOCATION_APPROVER_SHA256}" ] && [ "${ALLOCATION_EVIDENCE_DIR}" != "${ALLOCATION_AUTHORITY_DIR}" ] \
+    && [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${PREBUILT_RELEASE}" -eq 0 ] \
+    && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] || {
+    echo 'Customer allocation activation requires private evidence and authority custody and an ordinary protected release.' >&2
+    exit 1
+  }
+fi
+
 cd "${REPO_ROOT}"
 DEPLOYMENT_PRESERVED_CLAMAV_EVIDENCE_DIR="${REPO_ROOT}/.deploy-state"
 export DEPLOYMENT_PRESERVED_CLAMAV_EVIDENCE_DIR
@@ -360,13 +378,14 @@ run_original_owned_with_heartbeat() {
 }
 
 wait_for_cutover_approval() {
+  approval_message="${3:-independently signed live cohort approval}"
   approval_path="$1"
   duration="$2"
   elapsed=0
   heartbeat_elapsed=0
   while [ ! -f "${approval_path}" ]; do
     [ "${elapsed}" -lt "${duration}" ] || {
-      echo "Timed out waiting for the independently signed live cohort approval." >&2
+      echo "Timed out waiting for the ${approval_message}." >&2
       return 1
     }
     sleep 5
@@ -377,6 +396,33 @@ wait_for_cutover_approval() {
       heartbeat_elapsed=0
     fi
   done
+}
+
+allocation_compose_config() {
+  # This runs locally and its credential-bearing output is consumed only by
+  # the allocation helper via a pipe.
+  COMPOSE_PROFILES=deployment compose config --format json
+}
+
+run_customer_allocation_controller() {
+  allocation_mode="$1"
+  allocation_control_image="$2"
+  allocation_close_digest="${3:-}"
+  if [ "${allocation_mode}" = activate ]; then
+    set -- --mount "type=bind,src=${ALLOCATION_EVIDENCE_DIR},dst=/allocation-evidence,readonly"
+  elif [ "${allocation_mode}" = close ]; then
+    set --
+  else
+    return 1
+  fi
+  allocation_compose_config | node "${ALLOCATION_RELEASE_SCRIPT}" input \
+    "${allocation_predecessor}" "${ALLOCATION_AUTHORITY_DIR}" "${ALLOCATION_APPROVER_SHA256}" \
+    "${allocation_mode}" "${allocation_request:-}" "${allocation_close_digest}" \
+    | docker run --rm -i --pull never --network "${allocation_network}" \
+      --user "$(id -u):$(id -g)" --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --label "io.sabalan.deployment.id=${DEPLOYMENT_ID}" \
+      --mount "type=bind,src=${ALLOCATION_AUTHORITY_DIR},dst=/allocation-authority,readonly" "$@" \
+      "${allocation_control_image}" node /app/operations/deploy/scripts/customer-allocation-release.mjs "${allocation_mode}"
 }
 
 control() {
@@ -1185,6 +1231,27 @@ case "${previous_upload_policy}" in
 esac
 export DEPLOYMENT_PREVIOUS_BACKEND_IMAGE DEPLOYMENT_PREVIOUS_FRONTEND_IMAGE DEPLOYMENT_PREVIOUS_INQUIRY_IMAGE DEPLOYMENT_PREVIOUS_NGINX_IMAGE DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE
 
+if [ -n "${ALLOCATION_EVIDENCE_DIR}" ] && [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK:-0}" -eq 1 ]; then
+  echo 'Customer allocation activation and current-data rollback require separate protected deployments.' >&2
+  exit 1
+fi
+if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
+  [ "${LEGACY_RELEASE_GRAPH}" -eq 0 ] && [ -n "${legacy_scanner_id:-}" ] && [ -z "${DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX:-}" ] || {
+    echo 'Customer allocation activation requires a scanner-free target and an exact running predecessor scanner.' >&2
+    exit 1
+  }
+  allocation_predecessor="$(node "${ALLOCATION_RELEASE_SCRIPT}" observe-predecessor \
+    "$(compose ps -q backend)" "$(compose ps -q frontend)" "$(compose ps -q inquiry)" \
+    "${legacy_scanner_id}" "$(compose ps -q postgres)")" || exit 1
+elif [ "${CUSTOMER_ALLOCATION_CURRENT_DATA_ROLLBACK:-0}" -eq 1 ]; then
+  allocation_predecessor="$(node "${ALLOCATION_RELEASE_SCRIPT}" observe-database \
+    "$(compose ps -q backend)" "$(compose ps -q postgres)")" || exit 1
+fi
+if [ -n "${allocation_predecessor:-}" ]; then
+  allocation_network="$(allocation_compose_config | node "${ALLOCATION_RELEASE_SCRIPT}" prepare \
+    "${allocation_predecessor}" "${ALLOCATION_AUTHORITY_DIR}" "${ALLOCATION_APPROVER_SHA256}")" || exit 1
+fi
+
 DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT="$(docker inspect "$(compose ps -q backend)" | node scripts/performance-deployment-environment.mjs capture)"
 export DEPLOYMENT_PREVIOUS_PERFORMANCE_ENVIRONMENT
 
@@ -1349,6 +1416,12 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
 fi
 node "${OPERATIONS_ROOT}/deploy/scripts/backup-retention-host.mjs" --inspect "${ENV_FILE}"
 refresh_performance_database_identity
+
+if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
+  allocation_request="$(node "${ALLOCATION_RELEASE_SCRIPT}" request "${allocation_predecessor}" "${DEPLOYMENT_TARGET_COMMIT}" \
+    "${DEPLOYMENT_BACKEND_IMAGE}" "${DEPLOYMENT_FRONTEND_IMAGE}" "${DEPLOYMENT_INQUIRY_IMAGE}" "${DEPLOYMENT_ID}" "${DEPLOYMENT_RELEASE_ID}")" || exit 1
+  node "${ALLOCATION_RELEASE_SCRIPT}" publish-request "${ALLOCATION_EVIDENCE_DIR}" "${allocation_request}" || exit 1
+fi
 
 node "${OPERATIONS_ROOT}/deploy/scripts/dispatch-volume-preflight.mjs" "${ENV_FILE}" "${COMPOSE_FILE}"
 run_backend node dist/scripts/validate-production-environment.js
@@ -1630,13 +1703,42 @@ remaining="$(remaining_mutation_seconds)" || exit 1
 run_backend_timed "${remaining}" node dist/scripts/reconcile-contract-financial-evidence.js --apply --deployment-checkpoint \
   --output="/app/deployment-reports/${evidence_apply_name}"
 
+if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
+  remaining="$(remaining_mutation_seconds)" || exit 1
+  echo "Waiting for an independent customer allocation decision for ${DEPLOYMENT_ID} under the verified maintenance boundary."
+  wait_for_cutover_approval "${ALLOCATION_EVIDENCE_DIR}/decision.json" "${remaining}" "independently signed customer allocation decision" || exit 1
+  remaining_mutation_seconds >/dev/null || exit 1
+  verify_public_maintenance || exit 1
+  assert_original_legacy_still_stopped || exit 1
+  assert_qa_remote_checkpoint_mount || exit 1
+  control heartbeat || exit 1
+  # Stop the exact predecessor scanner without recreating or removing it.
+  docker stop --time 60 "${legacy_scanner_id}" >/dev/null || exit 1
+  remaining_mutation_seconds >/dev/null || exit 1
+  DEPLOYMENT_CUSTOMER_ALLOCATION_MANIFEST_SHA256="$(run_original_owned_with_heartbeat run_customer_allocation_controller activate "${DEPLOYMENT_TARGET_BACKEND_IMAGE}")" || exit 1
+  case "${DEPLOYMENT_CUSTOMER_ALLOCATION_MANIFEST_SHA256}" in
+    ''|*[!a-f0-9]*) echo 'Customer allocation activation receipt is invalid.' >&2; exit 1 ;;
+  esac
+  [ "${#DEPLOYMENT_CUSTOMER_ALLOCATION_MANIFEST_SHA256}" -eq 64 ] || exit 1
+fi
+
 phase RELEASE_STARTED
 refresh_performance_database_identity
 remaining="$(remaining_mutation_seconds)" || exit 1
 start_release_services "${remaining}"
 
+if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
+  allocation_runtime_address="$(node "${ALLOCATION_RELEASE_SCRIPT}" verify-started "${allocation_request}" "${allocation_predecessor}" \
+    "$(compose ps -q backend)" "$(compose ps -q frontend)" "$(compose ps -q inquiry)" "${legacy_scanner_id}")" || exit 1
+fi
+
 remaining="$(remaining_mutation_seconds)" || exit 1
-run_backend_timed "${remaining}" node dist/scripts/deployment-gates.js
+if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
+  run_backend_timed "${remaining}" env "DEPLOYMENT_CUSTOMER_ALLOCATION_MANIFEST_SHA256=${DEPLOYMENT_CUSTOMER_ALLOCATION_MANIFEST_SHA256}" \
+    "DEPLOYMENT_CUSTOMER_ALLOCATION_RUNTIME_ADDRESS=${allocation_runtime_address}" node dist/scripts/deployment-gates.js
+else
+  run_backend_timed "${remaining}" node dist/scripts/deployment-gates.js
+fi
 if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ] || { [ "${DEPLOYMENT_MODE}" = configuration ] && [ "${LEGACY_RELEASE_GRAPH}" -eq 1 ]; }; then
   remaining="$(remaining_mutation_seconds)" || exit 1
   timeout "${remaining}" docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" exec -T backend sh -c '
@@ -1652,6 +1754,11 @@ fi
 remaining_mutation_seconds >/dev/null
 verify_clamav_repair_runtime
 remaining_mutation_seconds >/dev/null
+if [ -n "${ALLOCATION_EVIDENCE_DIR}" ]; then
+  checked_allocation_runtime_address="$(node "${ALLOCATION_RELEASE_SCRIPT}" verify-started "${allocation_request}" "${allocation_predecessor}" \
+    "$(compose ps -q backend)" "$(compose ps -q frontend)" "$(compose ps -q inquiry)" "${legacy_scanner_id}")" || exit 1
+  [ "${checked_allocation_runtime_address}" = "${allocation_runtime_address}" ] || exit 1
+fi
 phase GATES_PASSED
 if [ "${CONFIGURATION_ACTIVE}" -eq 1 ]; then
   node "${OPERATIONS_ROOT}/scripts/deployment-biometric-configuration.mjs" mark-open "${REPO_ROOT}"

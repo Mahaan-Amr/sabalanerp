@@ -54,7 +54,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5000
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=${BACKEND_DB_CONNECTION_LIMIT:-10}&pool_timeout=${BACKEND_DB_POOL_TIMEOUT_SECONDS:-10}&application_name=${DATABASE_APPLICATION_NAME:-sabalanerp-backend}
+      DATABASE_URL: postgresql://${BACKEND_DATABASE_USER:-${POSTGRES_USER}}:${BACKEND_DATABASE_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=${BACKEND_DB_CONNECTION_LIMIT:-10}&pool_timeout=${BACKEND_DB_POOL_TIMEOUT_SECONDS:-10}&application_name=${DATABASE_APPLICATION_NAME:-sabalanerp-backend}
       JWT_SECRET: ${JWT_SECRET}
       PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID: ${PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_ID}
       PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64: ${PERSONNEL_PERFORMANCE_ENCRYPTION_KEY_BASE64}
@@ -155,6 +155,7 @@ services:
     restart: "no"
     environment:
       BACKEND_RUNTIME_ROLE: control
+      DATABASE_URL: postgresql://${DEPLOYMENT_DATABASE_USER:-${POSTGRES_USER}}:${DEPLOYMENT_DATABASE_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB}?schema=public&connection_limit=${BACKEND_DB_CONNECTION_LIMIT:-10}&pool_timeout=${BACKEND_DB_POOL_TIMEOUT_SECONDS:-10}&application_name=${DATABASE_APPLICATION_NAME:-sabalanerp-backend}
       DEPLOYMENT_LOCAL_ROLLBACK_KEY_FILE: /run/deployment-secrets/local-rollback-key
       DEPLOYMENT_REMOTE_RECOVERY_PUBLIC_KEY_FILE: /run/deployment-secrets/remote-recovery-public.pem
       DEPLOYMENT_REMOTE_MOUNT: /app/deployment-remote

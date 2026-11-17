@@ -105,6 +105,9 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/dist-cutover ./dist-cutover
 COPY backend/public ./public
 COPY backend/scripts ./scripts
+COPY deploy/scripts/customer-allocation-release.mjs ./operations/deploy/scripts/
+COPY deploy/scripts/lib/customer-allocation-controller.mjs deploy/scripts/lib/customer-allocation-go-manifest.mjs ./operations/deploy/scripts/lib/
+COPY scripts/production-database-role-boundary.mjs ./operations/scripts/
 COPY deploy/scripts/with-backend-control-ownership.sh ./scripts/with-backend-control-ownership.sh
 COPY deploy/scripts/protected-bootstrap-owner.py deploy/scripts/protected-bootstrap-state.py ./scripts/
 COPY deploy/scripts/protected-file-adoption-owner.py deploy/scripts/protected-file-adoption-state.py ./scripts/

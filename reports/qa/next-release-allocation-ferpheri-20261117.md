@@ -52,3 +52,9 @@ The scanner-retaining recovery branch at cc55111e3 includes the identical alloca
 - Both local QA WSL distributions were stopped when listed. Exact-image release evidence requires an authorized running isolated target, a freshly verified production checkpoint, and the candidate-specific protected gates in #455 and #460.
 
 The production migration ledger contained 463 non-rolled-back rows, all finished. Its latest named migration was 20261116100100_customer_pickup_dispatch. No deployment operation had an active key. The independent backup host had both distinct QA accounts, sabalan-qa-backup and sabalan-qa-backup-ops. This confirms account presence only. QA credential custody, isolated Engine readiness, endpoint reachability and checkpoint readback remain open.
+
+### Checkpoint policy observations
+
+A read-only repeat of the deployed freshness calculation against the production mount observed five remote-verified sidecars. The oldest was created November 15, 2026 and the available sidecars did not record a HEALTHY monthly drill or quarterly rehearsal. The calculated 35-day and 100-day freshness checks were within initial checkpoint grace. This observation does not establish a successful recovery drill, validate the archive bytes, or fulfill the explicit candidate rehearsal in #460.
+
+All four migration catalog tests passed. All six allocation controller tests passed in a temporary POSIX directory in the existing local backend container, including signed activation, an exact closure receipt, permission rejection, replay and changed evidence custody. Windows skips five custody-sensitive cases, so Linux results are the applicable evidence for those checks. These controller tests use fixtures and do not exercise a canonical production release.

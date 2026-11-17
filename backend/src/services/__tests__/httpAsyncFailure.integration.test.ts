@@ -18,7 +18,7 @@ test('real expired Prisma transaction cannot crash either HTTP business or recov
     const files:Record<string,string>={'httpRequestLifecycle.js':ts.transpileModule(fs.readFileSync(path.join(repository,'backend/src/services/httpRequestLifecycle.ts'),'utf8'),
       {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText,
       'http-async-failure.fixture.cjs':fs.readFileSync(path.join(repository,'tests/online-deployment/http-async-failure.fixture.cjs'),'utf8')};
-    for(const [name,source]of [['system-recovery.js','backend/src/routes/system-recovery.ts'],['systemRecoveryPolicy.js','backend/src/services/systemRecoveryPolicy.ts']]){
+    for(const [name,source]of [['system-recovery.js','backend/src/routes/system-recovery.ts'],['systemRecoveryPolicy.js','backend/src/services/systemRecoveryPolicy.ts'],['systemRecoveryBackupRequest.js','backend/src/services/systemRecoveryBackupRequest.ts']]){
       files[name]=ts.transpileModule(fs.readFileSync(path.join(repository,source),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true}}).outputText;
     }
     files['http-control-completion.fixture.cjs']=fs.readFileSync(path.join(repository,'tests/online-deployment/http-control-completion.fixture.cjs'),'utf8');

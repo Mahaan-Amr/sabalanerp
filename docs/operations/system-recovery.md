@@ -52,3 +52,13 @@ Sanitized packages are rejected in production. In the explicitly enabled local D
 - permanently marks the recovered environment as sanitized test data.
 
 The temporary local ADMIN must change its password at first login.
+
+## Restricted database role handoff
+
+The restricted PostgreSQL role receives an explicit unavailable response for new backup, upload validation, and restore execution until the protected host handoff is qualified. Existing backup download and receipt paths remain available under the current ADMIN password check. The legacy single-role workflow retains its existing HTTP behavior.
+
+The owner backup command is a private continuation for a complete backup request. A future authorized API adapter can record the existing operation and its owner-request audit event in one transaction after verifying the ADMIN and current password. The control command claims that exact pending operation once, rechecks the initiating account and expiry, and checks the inherited FD 9 lock, operation-bound maintenance marker, active protected deployment lease in the SERVICES_DRAINED phase, and absence of serving-role database sessions. It runs only through the existing ephemeral deployment service and accepts the operation ID as its only argument and the passphrase as bounded UTF-8 over private stdin. It publishes downloadable metadata and the ready audit in one transaction after capture. The command does not reopen traffic.
+
+The host adapter still needs to bind an authenticated request to an ephemeral passphrase channel and prove the pinned Compose project, immutable backend image, and PostgreSQL role identities. It must acquire the existing host and database leases, prove ERP and Inquiry return maintenance responses, drain both services through the protected boundary, and hold those proofs until the owner command exits. The success path needs exact-service restart, file and database readiness, and release health checks before reopening. The failure path must keep maintenance closed until the existing release is independently reverified. The serving process may not receive control credentials or the container engine socket.
+
+Restricted-role restore remains pending. The existing ACL replay contract only permits an exact-schema protected rollback. The application restore accepts compatible older packages and migrates the staged database forward, so it needs a proven target ACL reconciliation and validation policy before promotion, including legacy packages. Restore additionally needs exact checksum and current approval or break-glass validation, a verified protected checkpoint and independent readback before mutation, and owner-side startup finalization and rollback proof before reopening.

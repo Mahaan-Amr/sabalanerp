@@ -8,7 +8,6 @@ import multer from 'multer';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest, authorize, protect } from '../middleware/auth';
 import {
-  createRecoveryPackage,
   isSanitizedRecoveryEnvironment,
   recoveryPackagePath,
   stageAndPromoteRecovery,
@@ -18,6 +17,7 @@ import {
 import {
   assertRestoreAuthorization,
   assertStrongBackupPassphrase,
+  isRestrictedRecoveryRuntime,
   packageExpired,
   RECOVERY_APPROVAL_MS,
   RECOVERY_FRESHNESS_MS,
@@ -33,6 +33,7 @@ import {
   waitForActiveWrites,
 } from '../services/recoveryRuntime';
 import { publishNotificationEvent } from '../services/notificationService';
+import { createBackupRequest, executeBackupRequest } from '../services/systemRecoveryBackupRequest';
 import { runtimeHttpRequests } from '../services/httpRequestLifecycle';
 
 const router = express.Router();
@@ -104,7 +105,15 @@ router.get('/', async (req: AuthRequest, res) => {
   });
 });
 
-router.post('/backups', async (req: AuthRequest, res) => {
+const requireLegacyRecoveryExecution: express.RequestHandler = (_req, res, next) => {
+  if (isRestrictedRecoveryRuntime(process.env)) {
+    res.status(503).json({ success: false, error: 'SYSTEM_RECOVERY_OWNER_HANDOFF_UNAVAILABLE' });
+    return;
+  }
+  next();
+};
+
+router.post('/backups', requireLegacyRecoveryExecution, async (req: AuthRequest, res) => {
   let lockAcquired = false;
   let backgroundStarted = false;
   try {
@@ -114,17 +123,7 @@ router.post('/backups', async (req: AuthRequest, res) => {
     const passphrase = assertStrongBackupPassphrase(req.body.passphrase);
     if (!acquireRecoveryOperation()) return res.status(409).json({ success: false, error: 'RECOVERY_OPERATION_IN_PROGRESS' });
     lockAcquired = true;
-    const operation = await prisma.recoveryOperation.create({
-      data: {
-        packageType,
-        source: 'CREATED',
-        status: 'CREATING',
-        progress: 0,
-        createdById: req.user!.id,
-        expiresAt: new Date(Date.now() + RECOVERY_RETENTION_MS),
-      },
-    });
-    await audit(operation.id, req.user!.id, 'RECOVERY_BACKUP_REQUESTED', null, { packageType });
+    const operation = await createBackupRequest(prisma, { packageType, actorId: req.user!.id });
     res.status(202).json({ success: true, data: serializeOperation(operation) });
     backgroundStarted = true;
     setImmediate(async () => {
@@ -132,11 +131,11 @@ router.post('/backups', async (req: AuthRequest, res) => {
       try {
         setRecoveryRuntimeState('READ_ONLY', operation.id, 'A consistent recovery snapshot is being captured.');
         await waitForActiveWrites();
-        const result = await createRecoveryPackage({
+        await executeBackupRequest(prisma, {
           operationId: operation.id,
+          actorId: req.user!.id,
           packageType,
           passphrase,
-          prisma,
           onProgress: async (progress) => {
             if (progress >= 55 && !snapshotReleased) {
               snapshotReleased = true;
@@ -146,24 +145,6 @@ router.post('/backups', async (req: AuthRequest, res) => {
           },
         });
         if (!snapshotReleased) setRecoveryRuntimeState('NORMAL');
-        const readyAt = new Date();
-        await prisma.recoveryOperation.update({
-          where: { id: operation.id },
-          data: {
-            status: 'READY',
-            progress: 100,
-            storageName: result.storageName,
-            originalName: `sabalan-${packageType.toLowerCase()}-${readyAt.toISOString().replace(/[:.]/g, '-')}.sabrec`,
-            encryptedSha256: result.sha256,
-            size: BigInt(result.size),
-            sourceAppVersion: result.manifest.appVersion,
-            sourceCommit: result.manifest.commit,
-            sourcePostgresVersion: result.manifest.postgresVersion,
-            compatibility: { compatible: true, reasons: [] },
-            readyAt,
-          },
-        });
-        await audit(operation.id, req.user!.id, 'RECOVERY_BACKUP_READY', result.sha256, { packageType, size: result.size });
       } catch (error: any) {
         setRecoveryRuntimeState('NORMAL');
         await prisma.recoveryOperation.update({
@@ -222,7 +203,7 @@ router.post('/:id/download', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/uploads', upload.single('file'), async (req: AuthRequest, res) => {
+router.post('/uploads', requireLegacyRecoveryExecution, upload.single('file'), async (req: AuthRequest, res) => {
   const temporaryPath = req.file?.path;
   let operationId: string | null = null;
   let storedPath: string | null = null;
@@ -330,7 +311,7 @@ router.post('/:id/approve', async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/:id/restore', async (req: AuthRequest, res) => {
+router.post('/:id/restore', requireLegacyRecoveryExecution, async (req: AuthRequest, res) => {
   let lockAcquired = false;
   let backgroundStarted = false;
   try {

@@ -45,18 +45,18 @@ test('actual runner entry reaches maintenance selection with QA and custody whil
  const prefix="set -eu; SCRIPT_DIR=/operations/deploy/scripts; OPERATIONS_ROOT=/operations; REPO_ROOT=/repository\n"+script.slice(script.indexOf('SYSTEM_RECOVERY_BACKUP_HOST='),script.indexOf('\ncd "${REPO_ROOT}"'));
  const run=(args,env={})=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'maintenance-entry-'));try{const file=path.join(dir,'entry.sh');fs.writeFileSync(file,prefix+'\nprintf "REACHED:%s:%s\\n" "$MAINTENANCE_IMAGE_SELECTION" "$PREBUILT_RELEASE"');return spawnSync(shell,[file,...args],{encoding:'utf8',env:{...process.env,...env}});}finally{fs.rmSync(dir,{recursive:true,force:true});}};
  const args=['--maintenance-images','/private/env','/private/plan',h('a')];
- for(const env of [{},{DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:'/qa/plan',DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:h('e')},{DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:'/private/evidence',DEPLOYMENT_CUSTOMER_ALLOCATION_AUTHORITY_DIR:'/private/authority',DEPLOYMENT_CUSTOMER_ALLOCATION_APPROVER_SHA256:h('f')}]){const result=run(args,env);assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/REACHED:1:1/);}
- for(const env of [{DEPLOYMENT_MODE:'configuration'},{DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:'4',DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD:'5'},{DEPLOYMENT_CLAMAV_TARGET_IMAGE:id('a')},{DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:'/private/evidence'}]){const result=run(args,env);assert.notEqual(result.status,0);assert.doesNotMatch(result.stdout,/REACHED/);}
+ for(const env of [{},{DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:'/qa/plan',DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:h('e')}]){const result=run(args,env);assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/REACHED:1:1/);}
+ for(const env of [{DEPLOYMENT_MODE:'configuration'},{DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:'4',DEPLOYMENT_ONLINE_BOOTSTRAP_RESPONSE_FD:'5'},{DEPLOYMENT_CLAMAV_TARGET_IMAGE:id('a')},{DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:'/private/evidence',DEPLOYMENT_CUSTOMER_ALLOCATION_AUTHORITY_DIR:'/private/authority',DEPLOYMENT_CUSTOMER_ALLOCATION_APPROVER_SHA256:h('f')},{DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:'/private/evidence'}]){const result=run(args,env);assert.notEqual(result.status,0);assert.doesNotMatch(result.stdout,/REACHED/);}
  assert.match(run(['/private/env']).stdout,/REACHED:0:0/);
  assert.notEqual(run(['--prebuilt-release','/private/env','/private/plan',h('a')]).status,0);
 });
-test('QA selector precedes content selection and full maintenance, signed activation and reopening keep their order',()=>{
- const ordered=['COMPOSE_FILE="$(node "${OPERATIONS_ROOT}/deploy/scripts/qa-rehearsal-target.mjs"','  prebuilt_exports="$(verify_prebuilt_release)"','exec 9>"${LOCK_FILE}"','verify_prebuilt_release bind','control prepare','control acquire','phase MAINTENANCE_REQUESTED','phase TRAFFIC_BLOCKED','phase SERVICES_DRAINED','phase LOCAL_CHECKPOINT_VERIFIED','phase REMOTE_CHECKPOINT_VERIFIED','phase MUTATION_STARTED','phase MIGRATIONS_APPLIED','run_customer_allocation_controller activate','phase RELEASE_STARTED','phase GATES_PASSED','phase TRAFFIC_OPENED'];
+test('QA selector precedes content selection and predecessor maintenance keeps activation closed',()=>{
+ const ordered=['COMPOSE_FILE="$(node "${OPERATIONS_ROOT}/deploy/scripts/qa-rehearsal-target.mjs"','  prebuilt_exports="$(verify_prebuilt_release)"','exec 9<>"${LOCK_FILE}"','verify_prebuilt_release bind','control prepare','control acquire','phase MAINTENANCE_REQUESTED','phase TRAFFIC_BLOCKED','phase SERVICES_DRAINED','phase LOCAL_CHECKPOINT_VERIFIED','phase REMOTE_CHECKPOINT_VERIFIED','phase MUTATION_STARTED','phase MIGRATIONS_APPLIED','phase RELEASE_STARTED','phase GATES_PASSED','phase TRAFFIC_OPENED'];
  let cursor=0;for(const token of ordered){const next=script.indexOf(token,cursor);assert.ok(next>=cursor,token);cursor=next+token.length;}
  const verify=script.slice(script.indexOf('verify_prebuilt_release() {'),script.indexOf('customer_allocation_retention_path() {'));
  assert.match(verify,/maintenance-image-selection.mjs/);assert.match(verify,/"\$\{COMPOSE_FILE\}"/);
- const signed=script.slice(script.indexOf('  echo "Waiting for an independent customer allocation decision'),script.indexOf('phase RELEASE_STARTED'));
- assert.match(signed,/wait_for_cutover_approval/);assert.match(signed,/verify_public_maintenance/);assert.match(signed,/assert_original_legacy_still_stopped/);assert.match(signed,/retain/);
+ assert.doesNotMatch(script,/run_customer_allocation_controller activate/);
+ assert.match(script,/prepare-predecessor-role-cutover/);
 });
 test('the same content selector supports a scanner-retaining predecessor only with its exact source graph',()=>{
  const {plan,actual}=fixture();plan.uploadPolicy=actual.uploadPolicy='legacy-scanner';delete actual.images.backend.Config.Labels['io.sabalan.release.upload-policy'];

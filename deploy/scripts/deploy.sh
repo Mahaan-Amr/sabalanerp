@@ -158,7 +158,8 @@ if [ -n "${DEPLOYMENT_ONLINE_BOOTSTRAP_REQUEST_FD:-}${DEPLOYMENT_ONLINE_BOOTSTRA
 fi
 if [ "${MAINTENANCE_IMAGE_SELECTION}" -eq 1 ]; then
   [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${DEPLOYMENT_MODE}" = release ] && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] \
-    && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] && [ "${SYSTEM_RECOVERY_BACKUP}" -eq 0 ] || {
+    && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] && [ "${SYSTEM_RECOVERY_BACKUP}" -eq 0 ] \
+    && [ -z "${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}" ] || {
     echo 'Maintenance image selection requires an ordinary full protected release.' >&2; exit 1;
   }
 elif [ "${PREBUILT_RELEASE}" -eq 1 ]; then

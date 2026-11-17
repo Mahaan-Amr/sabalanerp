@@ -1,5 +1,5 @@
 import { createHash, createPublicKey, generateKeyPairSync } from 'node:crypto';
-import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, readdirSync, writeFileSync } from 'node:fs';
+import { constants, closeSync, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -61,6 +61,29 @@ function privateFile(file) {
   } finally { closeSync(fd); }
 }
 
+export function ensureRecoveryOwnerPublicKey(publicPath, publicKey,
+  io = { openSync, closeSync, writeFileSync, fstatSync, lstatSync, realpathSync, readFileSync, fchmodSync, fsyncSync }) {
+  let fd, created = false;
+  try { fd = io.openSync(publicPath, 'wx', 0o444); created = true; }
+  catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    fd = io.openSync(publicPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  }
+  try {
+    if (created) io.writeFileSync(fd, publicKey);
+    const stat = io.fstatSync(fd), named = io.lstatSync(publicPath);
+    if (!stat.isFile() || stat.uid !== 0 || stat.nlink !== 1 || stat.size > 16384 || stat.size !== Buffer.byteLength(publicKey)
+      || !named.isFile() || named.isSymbolicLink() || named.dev !== stat.dev || named.ino !== stat.ino
+      || io.realpathSync(publicPath) !== publicPath
+      || (!created && ![0o400, 0o444].includes(stat.mode & 0o777))
+      || (!created && io.readFileSync(fd, 'utf8') !== publicKey)) throw rejected();
+    // open's requested mode is filtered by the supervisor's restrictive umask.
+    // Only the verified derived public key may receive world-readable mode.
+    io.fchmodSync(fd, 0o444);
+    io.fsyncSync(fd);
+  } finally { io.closeSync(fd); }
+}
+
 function provision(directory) {
   requireNativeRoot();
   if (!directory.startsWith('/')) throw rejected();
@@ -80,12 +103,7 @@ function provision(directory) {
     privateKey = pair.privateKey;
   }
   const publicKey = createPublicKey(privateKey).export({ type: 'spki', format: 'pem' });
-  try {
-    const fd = openSync(publicPath, 'wx', 0o444);
-    try { writeFileSync(fd, publicKey); fsyncSync(fd); } finally { closeSync(fd); }
-  } catch (error) {
-    if (error.code !== 'EEXIST' || readFileSync(publicPath, 'utf8') !== publicKey || realpathSync(publicPath) !== publicPath) throw rejected();
-  }
+  ensureRecoveryOwnerPublicKey(publicPath, publicKey);
   const fd = openSync(directory, constants.O_RDONLY | constants.O_DIRECTORY);
   try { fsyncSync(fd); } finally { closeSync(fd); }
 }

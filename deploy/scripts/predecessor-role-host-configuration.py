@@ -232,6 +232,21 @@ def publish_receipt(path, binding, stage_digest, state):
     return receipt
 
 
+def hold_credential_activation(root, binding, stage):
+    marker = root / ".deploy-state/predecessor-role-cutover-active.json"
+    raw = json_bytes({
+        "format": "sabalan-predecessor-role-cutover-host-hold/v1",
+        "deploymentId": binding["deploymentId"],
+        "releaseId": binding["releaseId"],
+        "checkpointMetadataSha256": binding["checkpointMetadataSha256"],
+        "stagedAclSha256": stage["stagedAclSha256"],
+    })
+    try:
+        require(read_private(marker)[0] == raw)
+    except FileNotFoundError:
+        write_private(marker, raw)
+
+
 def activate_login(root, report_dir, coordination_dir, credential_fd, stage_receipt, *, invoke):
     """Pass a sealed credential to the original protected control command by stdin.
 
@@ -243,6 +258,7 @@ def activate_login(root, report_dir, coordination_dir, credential_fd, stage_rece
         authority = context(root, report_dir, coordination_dir, phase)
         stage = assert_stage(stage_receipt, authority[2], authority[1])
         password = read_credential(credential_fd)
+        hold_credential_activation(root, authority[2], stage)
         proof = invoke(stage["stagedAclSha256"].encode("ascii") + password)
         receipt = proof["roleCutover"]
         require(set(proof) == {"ok", "roleCutover"} and proof["ok"] is True and receipt["outcome"] in ("login-activated", "login-already-active")

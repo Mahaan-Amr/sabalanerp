@@ -146,6 +146,10 @@ class HostConfigurationTest(unittest.TestCase):
         def invoke(frame):
             staged_hash = json.loads(self.stage)["roleCutover"]["stagedAclSha256"]
             self.assertEqual(frame, staged_hash.encode() + PASSWORD)
+            marker = self.root / ".deploy-state/predecessor-role-cutover-active.json"
+            binding = marker.read_bytes()
+            self.assertEqual(json.loads(binding)["stagedAclSha256"], staged_hash)
+            self.assertNotIn(PASSWORD, binding)
             return {"ok": True, "roleCutover": {
                 **json.loads(self.stage)["roleCutover"], "outcome": "login-activated",
             }}

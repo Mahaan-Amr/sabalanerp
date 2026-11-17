@@ -578,6 +578,37 @@ type CutoverSession = {
 const receiptFormat = 'sabalan-predecessor-role-acl-cutover-v1';
 const hexSha = /^[a-f0-9]{64}$/;
 
+async function holdPredecessorRoleCutover(journalPath: string, identity: {
+  deploymentId: string; releaseId: string; checkpointMetadataSha256: string; controlImage: string;
+}) {
+  const directory = path.dirname(journalPath);
+  const file = path.join(directory, 'predecessor-role-cutover-active.json');
+  const raw = JSON.stringify({
+    format: 'sabalan-predecessor-role-cutover-hold/v1',
+    deploymentId: identity.deploymentId, releaseId: identity.releaseId,
+    checkpointMetadataSha256: identity.checkpointMetadataSha256, controlImage: identity.controlImage,
+  }) + '\n';
+  try {
+    const handle = await fs.open(file, 'wx', 0o600);
+    try {
+      await handle.writeFile(raw);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    if (process.platform === 'linux') {
+      const parent = await fs.open(directory, 'r');
+      try { await parent.sync(); } finally { await parent.close(); }
+    }
+  } catch (error: any) {
+    if (error?.code !== 'EEXIST') throw error;
+    const state = await fs.lstat(file);
+    if (!state.isFile() || state.nlink !== 1 || state.size !== Buffer.byteLength(raw)
+      || (process.platform === 'linux' && (state.uid !== process.getuid?.() || (state.mode & 0o077)))
+      || await fs.readFile(file, 'utf8') !== raw) fail('The owned predecessor role cutover hold differs.');
+  }
+}
+
 // PostgreSQL's checkpoint row binds the durable archive identity and verification flags.
 // Prisma can round fractional JSON observations such as mtimeMs. The canonical sidecars
 // preserve those observations, and the stage command rechecks them against the remote file.
@@ -801,6 +832,7 @@ export async function changeProtectedPredecessorRoleGrants(input: CutoverSource 
       }
     }
     if (!restoring && !activating && runtimeLogin) fail('The owned cutover runtime is no longer dormant.');
+    await holdPredecessorRoleCutover(input.journalPath, binding);
     const verifier = runtimeLogin ? await readOwnedRuntimeVerifier(client, report.loginVerifierSha256) : null;
     if (activating && credential) {
       if (verifier) {

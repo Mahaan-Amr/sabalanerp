@@ -6,7 +6,17 @@ REPO_ROOT="${DEPLOYMENT_REPO_ROOT:-$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)
 OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
 SYSTEM_RECOVERY_BACKUP_HOST="${SCRIPT_DIR}/system-recovery-backup-host.mjs"
 SYSTEM_RECOVERY_BACKUP=0
+ROLE_CUTOVER_PREFLIGHT=0
 case "${1:-}" in
+  --predecessor-role-cutover-preflight)
+    [ "$#" -eq 4 ] || { echo 'Usage: deploy.sh --predecessor-role-cutover-preflight <absolute-env> <private-plan> <plan-sha256>' >&2; exit 1; }
+    case "$2" in /*) ;; *) exit 1;; esac
+    case "$3" in /*) ;; *) exit 1;; esac
+    ROLE_CUTOVER_PREFLIGHT=1
+    ROLE_CUTOVER_PLAN="$3"
+    ROLE_CUTOVER_PLAN_SHA256="$4"
+    shift
+    ;;
   --system-recovery-backup)
     [ "$#" -eq 3 ] || { echo 'Usage: deploy.sh --system-recovery-backup <env> <operation-id>' >&2; exit 1; }
     exec node "${SYSTEM_RECOVERY_BACKUP_HOST}" launch "${SCRIPT_DIR}/deploy.sh" "$2" "$3"
@@ -1021,12 +1031,9 @@ public_key_path="${DEPLOYMENT_SECRET_DIR}/remote-recovery-public.pem"
   exit 1
 }
 
-# This host file is bind-mounted into nginx. A restrictive checkout or copy
-# mode must never turn the intended public 503 boundary into nginx's 403 page.
-chmod 0644 "${REPO_ROOT}/deploy/nginx/maintenance.html"
 
 mkdir -p "${REPO_ROOT}/.deploy-state"
-exec 9>"${LOCK_FILE}"
+exec 9<>"${LOCK_FILE}"
 if ! flock -n 9; then
   echo "Another host deployment owns ${LOCK_FILE}; no state was changed." >&2
   exit 1
@@ -1040,6 +1047,23 @@ if [ -e "${SYSTEM_RECOVERY_BACKUP_INTENT}" ] || [ -L "${SYSTEM_RECOVERY_BACKUP_I
   echo 'An unresolved System Recovery backup owns the protected boundary. Preserve its intent and journal for controlled recovery.' >&2
   exit 1
 fi
+# A dedicated cutover can have changed PostgreSQL before the host env was
+# replaced. Ordinary release or backup recovery cannot resolve that state.
+node "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-operation.mjs" \
+  guard "${REPO_ROOT}" "${SESSION_HOST_PATH}" || exit 1
+
+if [ "${ROLE_CUTOVER_PREFLIGHT}" -eq 1 ]; then
+  [ "${DEPLOYMENT_MODE}" = release ] && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] \
+    && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] && [ "${DEPLOYMENT_CLAMAV_OPERATION}" = repair ] \
+    && [ -z "${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}" ] || exit 1
+  exec node "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-operation.mjs" \
+    inspect "${REPO_ROOT}" "${SESSION_HOST_PATH}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" \
+    "${ROLE_CUTOVER_PLAN}" "${ROLE_CUTOVER_PLAN_SHA256}"
+fi
+
+# This host file is bind-mounted into nginx. A restrictive checkout or copy
+# mode must never turn the intended public 503 boundary into nginx's 403 page.
+chmod 0644 "${REPO_ROOT}/deploy/nginx/maintenance.html"
 PREDECESSOR_DATABASE_MODE="$(predecessor_database_topology retained)" || exit 1
 if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then
   # shellcheck source=deploy/scripts/system-recovery-backup-host.sh

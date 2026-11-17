@@ -15,6 +15,12 @@ The ordinary predecessor release cannot change the runtime URL or provision the 
 
 The local opt-in database-role integration test uses the existing namespaced `sabalanerp-local` PostgreSQL fixture and a short-lived runtime-only credential. Its proof covers SQL authority and a genuine authenticated runtime session. It does not prove a first role cutover, a populated exact-image protected rehearsal, or production eligibility.
 
+## Read-only same-image preflight
+
+The canonical runner accepts `--predecessor-role-cutover-preflight <absolute-env> <absolute-private-plan> <plan-sha256>`. The root-private `sabalan-predecessor-role-cutover-plan/v1` JSON pins `sourceCommit`, `sourceHash`, `browserBuildId`, `environmentSha256`, `composeSha256`, `images`, `containers` and the existing `preservedClamav` binding. Both identity maps have exactly the six protected service names. The runner holds FD9 while observing the native Compose project and compares the serving runtime URL byte-for-byte with the rendered bootstrap configuration. The receipt grants no mutation or reopening authority.
+
+The owner writes a durable report-directory hold before changing database grants and a second host hold before passing a runtime credential. Ordinary releases and owner backups refuse either hold or a dedicated active role-cutover session before restarting services, even if the original session file disappeared during terminal recovery. Preserve the holds for continuation by the qualified role-cutover owner.
+
 ## Host configuration transaction for the first split
 
 The private host transaction in `deploy/scripts/predecessor-role-host-configuration.py` is an interface for the protected lifecycle owner. The owner must retain the canonical deployment lock on FD9 and authenticate the active PostgreSQL lease, maintenance marker, exact local and remotely read-back checkpoint, installed six-image graph, and preserved ClamAV selection. The dormant ACL staging receipt is bound to that operation, checkpoint and original database. The lifecycle owner must also authenticate runtime login activation on that database before calling the host transaction.

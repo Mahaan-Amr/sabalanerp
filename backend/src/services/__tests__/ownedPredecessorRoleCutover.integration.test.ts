@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -116,6 +116,12 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
     const staged = control('stage-predecessor-role-grants');
     assert.equal(staged.status, 0, staged.stderr);
     const receipt = JSON.parse(staged.stdout).roleCutover;
+    const holdPath = path.join(root, 'predecessor-role-cutover-active.json');
+    const hold = JSON.parse(await readFile(holdPath, 'utf8'));
+    assert.deepEqual(hold, {
+      format: 'sabalan-predecessor-role-cutover-hold/v1', deploymentId: id, releaseId: id,
+      checkpointMetadataSha256: receipt.checkpointMetadataSha256, controlImage: image,
+    });
     assert.equal(receipt.outcome, 'staged');
     assert.equal(receipt.checkpointSha256, checkpoint.checksum);
     assert.equal(receipt.migrations, 477);
@@ -149,6 +155,7 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
     assert.equal(restored.status, 0, restored.stderr);
     assert.deepEqual(JSON.parse(restored.stdout).roleCutover, { ...receipt, outcome: 'restored' });
     assert.deepEqual(await verify('before-grants'), initial);
+    assert.deepEqual(JSON.parse(await readFile(holdPath, 'utf8')), hold);
     const repeatedRestore = control('restore-predecessor-role-grants');
     assert.equal(repeatedRestore.status, 0, repeatedRestore.stderr);
     assert.deepEqual(JSON.parse(repeatedRestore.stdout).roleCutover, { ...receipt, outcome: 'already-restored' });

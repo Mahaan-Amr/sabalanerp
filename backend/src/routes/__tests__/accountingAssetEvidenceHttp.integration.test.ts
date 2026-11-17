@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import fs from 'node:fs/promises';
@@ -81,6 +82,40 @@ test('asset upload retries preserve one evidence row and audit on real PostgreSQ
     const download = await fetch(`${base}/assets/${asset.id}/evidence/${evidence[0].id}/download?bookId=${book.id}`);
     assert.equal(download.status, 200);
     assert.equal(await download.text(), '%PDF-1.4\nqa-one');
+    const rollbackBackend = process.env.SABALAN_QA_ATTACHMENT_ROLLBACK_BACKEND;
+    if (rollbackBackend) {
+      assert(path.isAbsolute(rollbackBackend));
+      // The two applications each own one Prisma singleton. Use a separate
+      // process so the retained application really uses its generated client.
+      execFileSync(process.execPath, ['-e', `
+        const assert = require('node:assert/strict');
+        const path = require('node:path');
+        const load = require('node:module').createRequire(path.join(process.argv[1], 'package.json'));
+        const app = load('express')();
+        const router = load('./dist/routes/accountingPeriodEnd.js').default;
+        const { disconnectDatabase } = load('./dist/lib/prisma.js');
+        const routePath = '/assets/:id/evidence/:evidenceId/download';
+        const route = router.stack.find(item => item.route?.path === routePath && item.route.methods.get);
+        assert(route, 'rollback backend must register the asset download route');
+        app.use((req, _res, next) => {
+          Object.assign(req, { user: { id: process.argv[5], role: 'ACCOUNTANT' }, workspacePermission: 'edit' });
+          next();
+        });
+        app.get(routePath, route.route.stack.at(-1).handle);
+        const server = app.listen(0, '127.0.0.1', async () => {
+          try {
+            const target = 'http://127.0.0.1:' + server.address().port + '/assets/' + process.argv[2]
+              + '/evidence/' + process.argv[3] + '/download?bookId=' + encodeURIComponent(process.argv[4]);
+            const response = await fetch(target);
+            assert.equal(response.status, 200);
+            assert.equal(await response.text(), process.argv[6]);
+          } catch (error) { console.error(error); process.exitCode = 1; }
+          finally { server.closeAllConnections(); server.close(); await disconnectDatabase(); }
+        });
+      `, rollbackBackend, asset.id, evidence[0].id, book.id, `qa-${suffix}`, '%PDF-1.4\nqa-one'], {
+        cwd: scratch, timeout: 30_000, stdio: 'pipe',
+      });
+    }
     const audits = await prisma.accountingLedgerAuditEntry.findMany({ where: { entityId: evidence[0].id, action: 'ASSET_EVIDENCE_UPLOADED' } });
     assert.equal(audits.length, 1, 'one durable audit accompanies the single evidence row');
     const conflict = await send('%PDF-1.4\nqa-two');
@@ -110,6 +145,8 @@ test('asset upload retries preserve one evidence row and audit on real PostgreSQ
     assert.equal(await prisma.accountingLedgerAuditEntry.count({ where: { entityId: lostEvidence.id, action: 'ASSET_EVIDENCE_UPLOADED' } }), 1);
   } finally {
     server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-    process.chdir(initialCwd); await fs.rm(scratch, { recursive: true, force: true }); await prisma.$disconnect();
+    process.chdir(initialCwd);
+    try { await fs.rm(scratch, { recursive: true, force: true }); }
+    finally { await prisma.$disconnect(); }
   }
 });

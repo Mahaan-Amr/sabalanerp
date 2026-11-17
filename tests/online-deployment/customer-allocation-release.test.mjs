@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { assertCustomerAllocationReleasePlan, observeCustomerAllocationCompose } from '../../deploy/scripts/customer-allocation-release.mjs';
+import { assertCustomerAllocationReleasePlan, immutablePredecessorIdentity, observeCustomerAllocationCompose } from '../../deploy/scripts/customer-allocation-release.mjs';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 const digest = digit => digit.repeat(64);
@@ -44,4 +44,22 @@ test('protected activation requires the same effective backend database configur
     /CUSTOMER_ALLOCATION_RUNTIME_CONFIGURATION_CHANGED/);
   assert.throws(() => observeCustomerAllocationCompose(rendered, { network: 'foreign_app_network' }, sha(runtimeUrl)),
     /CUSTOMER_ALLOCATION_DATABASE_TARGET_CHANGED/);
+});
+
+test('predecessor source and browser labels must agree with the immutable images', () => {
+  const source = 'io.sabalan.performance.source-commit';
+  const build = 'io.sabalan.browser.build-id';
+  const backendImage = { Id: image('2'), Config: { Labels: { [source]: facts.predecessorCommit } } };
+  const frontendImage = { Id: image('3'), Config: { Labels: { [build]: facts.predecessorBrowserBuildId } } };
+  const backend = { Image: backendImage.Id, Config: structuredClone(backendImage.Config) };
+  const frontend = { Image: frontendImage.Id, Config: structuredClone(frontendImage.Config) };
+  assert.deepEqual(immutablePredecessorIdentity(backend, frontend, backendImage, frontendImage), {
+    predecessorCommit: facts.predecessorCommit, predecessorBrowserBuildId: facts.predecessorBrowserBuildId,
+  });
+  frontend.Config.Labels[build] = 'compose_override';
+  assert.throws(() => immutablePredecessorIdentity(backend, frontend, backendImage, frontendImage),
+    /CUSTOMER_ALLOCATION_RELEASE_IDENTITY_MISMATCH/);
+  frontend.Config.Labels[build] = facts.predecessorBrowserBuildId;
+  assert.throws(() => immutablePredecessorIdentity(backend, frontend, backendImage, { ...frontendImage, Id: image('4') }),
+    /CUSTOMER_ALLOCATION_RELEASE_IDENTITY_MISMATCH/);
 });

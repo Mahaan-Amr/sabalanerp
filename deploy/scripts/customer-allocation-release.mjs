@@ -93,12 +93,27 @@ function observeDatabase(backend, postgres) {
   return { network: networks[0], runtimeSha256: sha256(envValue(backend, 'DATABASE_URL')) };
 }
 
+export function immutablePredecessorIdentity(backend, frontend, backendImage, frontendImage) {
+  const commitLabel = 'io.sabalan.performance.source-commit';
+  const browserBuildLabel = 'io.sabalan.browser.build-id';
+  const predecessorCommit = backendImage?.Config?.Labels?.[commitLabel];
+  const predecessorBrowserBuildId = frontendImage?.Config?.Labels?.[browserBuildLabel];
+  requireCondition(backendImage?.Id === backend.Image && frontendImage?.Id === frontend.Image
+    && commit(predecessorCommit) && backend.Config.Labels[commitLabel] === predecessorCommit
+    && typeof predecessorBrowserBuildId === 'string' && predecessorBrowserBuildId.length > 0
+    && frontend.Config.Labels[browserBuildLabel] === predecessorBrowserBuildId, mismatch);
+  return { predecessorCommit, predecessorBrowserBuildId };
+}
+
 function observePredecessor(ids) {
   const [backend, frontend, inquiry, scanner, postgres] = inspectContainers(ids);
   const database = observeDatabase(backend, postgres);
   assertRunningService(frontend, 'frontend');
   assertRunningService(inquiry, 'inquiry');
   assertRunningService(scanner, 'clamav');
+  const images = JSON.parse(run('docker', ['image', 'inspect', backend.Image, frontend.Image]));
+  requireCondition(images.length === 2, mismatch);
+  const identity = immutablePredecessorIdentity(backend, frontend, ...images);
   const predecessorMigrationSha256 = run('docker', ['exec', backend.Id, 'node', '-e',
     ["const {createHash}=require('node:crypto'),{readFileSync,readdirSync}=require('node:fs'),{resolve}=require('node:path');",
       sha256.toString().replace(/^/, 'const sha256='), requireCondition.toString().replace(/^/, ';const requireCondition='),
@@ -107,9 +122,9 @@ function observePredecessor(ids) {
   return {
     ...database,
     predecessorImages: { backend: backend.Image, frontend: frontend.Image, inquiry: inquiry.Image },
-    predecessorCommit: backend.Config.Labels['io.sabalan.performance.source-commit'],
+    ...identity,
     predecessorScannerImage: scanner.Image, predecessorScannerContainerId: scanner.Id,
-    predecessorBrowserBuildId: frontend.Config.Labels['io.sabalan.browser.build-id'], predecessorMigrationSha256,
+    predecessorMigrationSha256,
   };
 }
 
@@ -118,7 +133,7 @@ function releaseRequest([predecessorJson, candidateCommit, backend, frontend, in
   const candidateImages = { backend, frontend, inquiry };
   requireCondition(checkImages(candidateImages) && commit(candidateCommit), mismatch);
   requireCondition(run('git', ['rev-parse', 'HEAD']) === candidateCommit
-    && run('git', ['status', '--porcelain', '--untracked-files=no']) === '', mismatch);
+    && run('git', ['status', '--porcelain', '--untracked-files=all']) === '', mismatch);
   const inquiryCommit = run('git', ['rev-parse', 'HEAD:apps/sabalan-inquiry']);
   requireCondition(run('git', ['-C', 'apps/sabalan-inquiry', 'rev-parse', 'HEAD']) === inquiryCommit, mismatch);
   const imageData = JSON.parse(run('docker', ['image', 'inspect', ...Object.values(candidateImages)]));

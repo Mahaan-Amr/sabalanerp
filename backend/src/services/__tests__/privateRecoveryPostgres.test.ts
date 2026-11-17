@@ -66,6 +66,9 @@ test('private archive migration never passes production credentials to child pro
   const result = await run();
   assert.equal(result.dumpPath, '/private/job/migrated-application.dump');
   assert.equal(calls.every(call => !JSON.stringify(call.env).includes('production-secret')), true);
+  assert.equal(calls.filter(call => ['psql', 'pg_dump', 'pg_restore'].includes(call.tool))
+    .every(call => call.env.PGOPTIONS === '-csearch_path=pg_catalog'), true,
+  'every private CLI connection overrides archived database search_path, including public.pg_get_functiondef shadows');
   assert.equal(calls.find(call => call.tool.endsWith('recovery-postgres-sandbox') && call.args[0] !== '--stop')?.env.SABALAN_RECOVERY_PARENT_PID, '41');
   const uploaded = calls.find(call => call.tool === 'pg_restore')!;
   assert.equal(new URL(uploaded.args[1]).username, 'recovery_import');

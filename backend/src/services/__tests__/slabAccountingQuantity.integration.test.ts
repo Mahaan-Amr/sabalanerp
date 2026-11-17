@@ -28,6 +28,7 @@ const withService = process.argv.includes('--with-service');
 const legacyService = process.argv.includes('--legacy-service');
 const directAccounting = process.argv.includes('--direct-accounting');
 const replacement = process.argv.includes('--replacement');
+const draftPermission = process.argv.includes('--draft-permission');
 const documentsConcurrency = process.argv.includes('--documents-concurrency');
 const documentsBrowser = process.argv.includes('--documents-browser');
 const payable = withService ? 359703750 : 358203750;
@@ -36,6 +37,14 @@ async function cleanup() {
   await db.$transaction(async tx => {
     const contract = await tx.salesContract.findUnique({ where: { id: contractId } });
     const actor = await tx.user.findUnique({ where: { id: actorId } });
+    const permissionActor = await tx.user.findUnique({ where: { username: `${runId}-draft-auth` } });
+    if (permissionActor) {
+      await tx.authSession.deleteMany({ where: { userId: permissionActor.id } });
+      await tx.recognizedBrowserProfile.deleteMany({ where: { userId: permissionActor.id } });
+      await tx.featurePermission.deleteMany({ where: { userId: permissionActor.id } });
+      await tx.workspacePermission.deleteMany({ where: { userId: permissionActor.id } });
+      await tx.user.delete({ where: { id: permissionActor.id } });
+    }
     if (contract) assert.equal(contract.contractNumber, runId);
     if (actor) assert.equal(actor.username, runId);
     const invoices = await tx.accountingFinancialRecord.findMany({ where: { contractId }, select: { id: true } });
@@ -77,6 +86,7 @@ async function cleanup() {
     await tx.externalDriver.deleteMany({ where: { createdBy: actorId } });
     await tx.externalVehicle.deleteMany({ where: { createdBy: actorId } });
     await tx.accountingInvoiceNumberClaim.deleteMany({ where: { financialRecordId: { in: invoiceIds } } });
+    await tx.accountingFinancialApprovalReceipt.deleteMany({ where: { financialRecordId: { in: invoiceIds } } });
     await tx.accountingTaxRecord.deleteMany({ where: { contractId } });
     await tx.accountingInvoiceCandidateItem.deleteMany({ where: { invoiceId: { in: invoiceIds } } });
     await tx.accountingAuditLog.deleteMany({ where: { contractId } });
@@ -94,6 +104,7 @@ async function cleanup() {
   assert.equal(await db.accountingFinancialRecord.count({ where: { contractId } }), 0);
   assert.equal(await db.contractApprovedPricingVersion.count({ where: { contractId } }), 0);
   assert.equal(await db.user.count({ where: { id: actorId } }), 0);
+  assert.equal(await db.user.count({ where: { username: `${runId}-draft-auth` } }), 0);
   assert.equal(await db.contractPricingReadinessResult.count({ where: { contractId } }), 0);
   assert.equal(await db.shipmentQuantityEvidence.count({ where: { contractId } }), 0);
   assert.equal(await db.accountingContractFlag.count({ where: { contractId } }), 0);
@@ -138,6 +149,7 @@ async function run() {
   await db.user.create({ data: { id: actorId, email: `${runId}@example.invalid`, username: runId,
     firstName: 'QA', lastName: 'Slab accounting', password: 'test-only-no-login', role: 'ADMIN', isActive: true,
     mustChangePassword: false } });
+  if (draftPermission) await db.workspacePermission.create({ data: { userId: actorId, workspace: 'accounting', permissionLevel: 'admin' } });
   await db.salesContract.create({ data: { id: contractId, contractNumber: runId,
     title: runId, titlePersian: 'آزمون متراژ حسابداری اسلب', content: '', status: 'SIGNED',
     customerId: template.customerId, departmentId: template.departmentId,
@@ -184,8 +196,65 @@ async function run() {
     createCommand = { kind: 'CREATE_REPLACEMENT_INVOICE', contractId, correctionRequestId: correction.id,
       replacesRecordId: prior.id, idempotencyKey: `${runId}:replacement`, correlationId: `${runId}:replacement` };
   }
-  const created = await action(createCommand);
+  const created = replacement ? await action(createCommand) : (await Promise.all([
+    action(createCommand), action({ ...createCommand, idempotencyKey: runId + ':retry' }),
+  ]).then(([first, replay]) => {
+    assert.deepEqual(replay.affected.financialRecordIds, first.affected.financialRecordIds, 'concurrent draft starts resume the same full invoice');
+    return first;
+  }));
   const invoiceId = String(created.affected.financialRecordIds[0]);
+  if (draftPermission) {
+    const key = randomUUID();
+    const user = await db.user.create({ data: { username: `${runId}-draft-auth`, email: `${key}@draft-auth.invalid`,
+      password: 'non-login-fixture', firstName: 'آزمون', lastName: 'مجوز', role: 'USER', isActive: true, mustChangePassword: false } });
+    try {
+      await db.workspacePermission.create({ data: { userId: user.id, workspace: 'accounting', permissionLevel: 'edit' } });
+      const feature = 'accounting_invoice_candidates_manage';
+      await db.featurePermission.create({ data: { userId: user.id, workspace: 'accounting', feature, permissionLevel: 'none' } });
+      const testSession = await createAuthoritativeSession(db, user.id, { userAgent: 'draft-auth-test', ipAddress: '127.0.0.1' });
+      const send = async (number: string, cookie?: string) => fetch('http://127.0.0.1:5000/api/accounting/actions', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+        body: JSON.stringify({ kind: 'SAVE_INVOICE_DRAFT', invoiceId, systemInvoiceNumber: number, sepidarAmount: '' }),
+      });
+      const cookie = `${SESSION_COOKIE}=${testSession.token}`;
+      const before = await db.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId } });
+      assert.equal((await send('denied')).status, 401);
+      assert.equal((await send('denied', cookie)).status, 403);
+      assert.deepEqual(await db.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId } }), before,
+        'rejected saves leave the existing draft unchanged');
+      await db.featurePermission.update({ where: { userId_workspace_feature: { userId: user.id, workspace: 'accounting', feature } }, data: { permissionLevel: 'edit' } });
+      const saved = await send('permitted-partial', cookie);
+      assert.equal(saved.status, 200, await saved.text());
+      const detailResponse = await fetch(`http://127.0.0.1:5000/api/accounting/contracts/${contractId}`, { headers: { cookie: `${SESSION_COOKIE}=${session.token}` } });
+      assert.equal(detailResponse.status, 200);
+      const detail = await detailResponse.json() as any;
+      const record = detail.data.financialRecords.find((row: any) => row.id === invoiceId);
+      assert.equal(record.draftDetails.systemInvoiceNumber, 'permitted-partial');
+      assert.equal(record.draftDetails.sepidarAmount, '');
+      assert.equal(record.financiallyApprovedAt, null);
+      console.log('Draft HTTP authorization and persistence: PASS');
+    } finally {
+      await db.authSession.deleteMany({ where: { userId: user.id } });
+      await db.recognizedBrowserProfile.deleteMany({ where: { userId: user.id } });
+      await db.featurePermission.deleteMany({ where: { userId: user.id } });
+      await db.workspacePermission.deleteMany({ where: { userId: user.id } });
+      await db.user.deleteMany({ where: { id: user.id } });
+    }
+    return;
+  }
+  if (directAccounting && !replacement) {
+    await action({ kind: 'SAVE_INVOICE_DRAFT', invoiceId, systemInvoiceNumber: 'partial-number', systemInvoiceDate: '', sepidarAmount: '' });
+    const { getAccountingContractDetail } = await import('../accountingService');
+    const detail = await getAccountingContractDetail(contractId);
+    const saved = (detail as any).financialRecords.find((record: any) => record.id === invoiceId);
+    assert.equal(saved.draftDetails.systemInvoiceNumber, 'partial-number');
+    assert.equal(saved.draftDetails.systemInvoiceDate, '');
+    assert.equal(saved.systemInvoiceNumber, null, 'saving does not financially approve or reserve the number');
+    await assert.rejects(action({ kind: 'APPROVE_FINANCIAL_INVOICE', invoiceId, systemInvoiceNumber: 'partial-number',
+      systemInvoiceDate: '', sepidarAmount: '', idempotencyKey: `${runId}:incomplete`, correlationId: `${runId}:incomplete` }));
+    assert.equal(await db.accountingAuditLog.count({ where: { recordId: invoiceId, action: 'SAVE_INVOICE_DRAFT' } }), 1);
+    assert.equal(await db.accountingAuditLog.count({ where: { recordId: invoiceId, action: 'APPROVE_FINANCIAL_INVOICE' } }), 0);
+  }
   const before = await db.salesContract.findUniqueOrThrow({ where: { id: contractId }, include: { items: true, productGraphState: true } });
   const draft = await db.accountingFinancialRecord.findUniqueOrThrow({ where: { id: invoiceId }, include: { invoiceItems: true } });
   await action({ kind: 'APPROVE_FINANCIAL_INVOICE', invoiceId,

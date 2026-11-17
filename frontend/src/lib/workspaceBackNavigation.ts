@@ -1,4 +1,10 @@
 export const WORKSPACE_HISTORY_KEY = 'sabalanWorkspaceHistory';
+const HISTORY_POSITION_KEY = 'sabalanWorkspaceHistoryPosition';
+
+export function workspaceHistoryPosition(state: Record<string, unknown> | null): number | undefined {
+  const position = state?.[HISTORY_POSITION_KEY];
+  return typeof position === 'number' && Number.isSafeInteger(position) ? position : undefined;
+}
 
 export type WorkspaceHistoryEntry = { current: string; previous: string | null };
 
@@ -45,7 +51,8 @@ export function installWorkspaceHistoryTracking(host: {
   const originalReplace = history.replaceState;
   const currentPath = () => `${location.pathname}${location.search}`;
   const initial = trackWorkspaceHistory(currentPath(), null, history.state);
-  originalReplace.call(history, { ...history.state, [WORKSPACE_HISTORY_KEY]: initial }, '');
+  originalReplace.call(history, { ...history.state, [WORKSPACE_HISTORY_KEY]: initial,
+    [HISTORY_POSITION_KEY]: workspaceHistoryPosition(history.state) ?? 0 }, '');
   let active = true;
 
   function record(data: any, url: string | URL | null | undefined, pushing: boolean) {
@@ -55,7 +62,8 @@ export function installWorkspaceHistoryTracking(host: {
     const previousEntry = history.state?.[WORKSPACE_HISTORY_KEY] as WorkspaceHistoryEntry | undefined;
     // Replacing an entry must retain its actual predecessor, not the replaced page.
     const previous = pushing ? currentPath() : previousEntry?.current === currentPath() ? previousEntry.previous : null;
-    return { ...data, [WORKSPACE_HISTORY_KEY]: { current, previous: previous && dashboardPath(previous) ? previous : null } };
+    return { ...data, [WORKSPACE_HISTORY_KEY]: { current, previous: previous && dashboardPath(previous) ? previous : null },
+      [HISTORY_POSITION_KEY]: (workspaceHistoryPosition(history.state) ?? 0) + (pushing ? 1 : 0) };
   }
   const push: History['pushState'] = function (data, unused, url) {
     originalPush.call(history, record(data, url, true), unused, url);

@@ -107,14 +107,14 @@ const contractDetail = (caseOpen: boolean, presentedCase = reviewCase) => ({
   replacementWorkflow: null,
 });
 
-const installAccountingFixture = async (page: Page, initialCaseOpen = false, presentedCase = reviewCase) => {
+const installAccountingFixture = async (page: Page, initialCaseOpen = false, presentedCase = reviewCase, hasDraft = true) => {
   let caseOpen = initialCaseOpen;
   await page.route(`**/api/accounting/contracts/${contractId}/lifecycle`, route => json(route, 200, {
     success: true,
     data: { deactivationEligibility: { blockers: [] }, deleteEligibility: { blockers: [] } },
   }));
   await page.route(`**/api/accounting/contracts/${contractId}`, route => {
-    return json(route, 200, { success: true, data: contractDetail(caseOpen, presentedCase) });
+    return json(route, 200, { success: true, data: { ...contractDetail(caseOpen, presentedCase), financialRecords: hasDraft ? contractDetail(caseOpen, presentedCase).financialRecords : [] } });
   });
   await page.route('**/api/accounting/financial-records?**', route => json(route, 200, {
     success: true, data: { items: [{ ...contractDetail(caseOpen).financialRecords[0], contractId,
@@ -169,9 +169,9 @@ test('contract opens its financial record and approval conflict links the exact 
   await expect(page.getByText(/حذف پیش‌نویس/).first()).toBeVisible();
 });
 
-test('list opens the exact financial record before an evidence-conflict approval', async ({ page }) => {
+for (const hasDraft of [false, true]) test(`list opens the contract dossier ${hasDraft ? 'with' : 'without'} a pending draft`, async ({ page }) => {
   await loginAsAdmin(page);
-  await installAccountingFixture(page);
+  await installAccountingFixture(page, false, reviewCase, hasDraft);
   await page.route('**/api/accounting/contracts?**', route => {
     return json(route, 200, {
       success: true,
@@ -192,10 +192,10 @@ test('list opens the exact financial record before an evidence-conflict approval
             openFlags: 0, openBlockerFlags: 0, openCorrections: 0,
             totalContractAmount: '380300000', invoicedAmount: '380300000', receivedAmount: '0', remainingAmount: '380300000',
           },
-          financialRecords: [{
+          financialRecords: hasDraft ? [{
             id: invoiceId, kind: 'INVOICE_CANDIDATE', status: 'DRAFT', amount: '380300000', currency: 'IRR',
             createdAt: '2026-08-20T08:00:00.000Z',
-          }],
+          }] : [],
         }],
         page: 1,
         pageSize: 50,
@@ -206,15 +206,17 @@ test('list opens the exact financial record before an evidence-conflict approval
   await page.goto('/dashboard/accounting/contracts');
   await waitForStableState(page);
 
-  const recordLink = page.getByRole('link', { name: 'بررسی و تأیید مالی', exact: true }).first();
-  await expect(recordLink).toHaveAttribute('href', `/dashboard/accounting/invoice-candidates/${invoiceId}?returnTo=${encodeURIComponent('/dashboard/accounting/contracts')}`);
-  await recordLink.click();
-  await page.getByText('شماره فاکتور سیستمی', { exact: true }).locator('..').locator('input').fill('1168');
-  await page.getByText('مبلغ سپیدار (ریال)', { exact: true }).locator('..').locator('input').fill('380300000');
-  await page.getByRole('button', { name: 'تایید مالی', exact: true }).click();
-
-  await expect(page.getByRole('link', { name: 'پرونده بررسی شواهد', exact: true })).toHaveAttribute('href', caseHref);
-  await expect(page.getByRole('heading', { name: 'بررسی رکورد مالی', exact: true })).toBeVisible();
+  const dossierLink = page.getByRole('link', { name: 'مشاهده پرونده', exact: true }).first();
+  await expect(dossierLink).toHaveAttribute('href', `/dashboard/accounting/contracts/${contractId}?section=financial&returnTo=${encodeURIComponent('/dashboard/accounting/contracts')}`);
+  await dossierLink.click();
+  await expect(page).toHaveURL(new RegExp(`/dashboard/accounting/contracts/${contractId}\\?`));
+  await page.getByRole('button', { name: 'رکوردهای مالی', exact: true }).click();
+  const reviewLink = page.getByRole('link', { name: 'بررسی رکورد مالی', exact: true });
+  if (hasDraft) {
+    await expect(reviewLink).toHaveAttribute('href', `/dashboard/accounting/invoice-candidates/${invoiceId}?returnTo=${encodeURIComponent(`/dashboard/accounting/contracts/${contractId}?section=financial`)}`);
+  } else {
+    await expect(reviewLink).toHaveCount(0);
+  }
 });
 
 test('dedicated review remains usable in dark mobile layout', async ({ page }) => {

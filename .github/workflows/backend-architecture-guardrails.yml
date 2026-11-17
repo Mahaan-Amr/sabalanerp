@@ -37,9 +37,18 @@ jobs:
       - run: npm ci --prefix packages/partner-sales-contracts
       - run: npm run build:partner-sales-contracts
       - run: npm ci --prefix backend
-      - run: npm run lint:backend
+      - name: Lint backend
+        run: npm run lint:backend
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run build:backend
       - run: npm run test:personnel-performance-operations
+      - name: Diagnose deployment Compose rendering
+        run: |
+          docker compose version
+          docker compose --profile deployment -p sabalanerp -f docker-compose.prod.yml config --quiet
+          DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256=$(printf 'a%.0s' {1..64}) \
+            docker compose --profile deployment -p sabalanerp -f docker-compose.rehearsal.yml config --quiet
       - run: npm run test:deployment-control --prefix backend
       - run: npm run test:system-recovery --prefix backend
       - run: npm run test:notifications --prefix backend

@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { assertDispatchVolumeTransition } from '../../deploy/scripts/dispatch-volume-preflight.mjs';
 
 const read = file => fs.readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const mount = 'backend_storage_dispatch_documents:/app/storage/dispatch-documents';
 
 test('protected dispatch artifacts share one durable mount across restore and backend startup', () => {
@@ -27,6 +29,7 @@ test('protected dispatch artifacts share one durable mount across restore and ba
     < read('deploy/scripts/deploy.sh').indexOf('run_backend node dist/scripts/validate-production-environment.js'));
   for (const composeFile of ['docker-compose.prod.yml', 'docker-compose.rehearsal.yml']) {
     const config = JSON.parse(execFileSync('docker', ['compose', '--profile', 'deployment', '-p', 'sabalanerp', '-f', composeFile, 'config', '--format', 'json'], {
+      cwd: repositoryRoot,
       env: { ...process.env, DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256: 'a'.repeat(64) }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
     }));
     const target = '/app/storage/dispatch-documents';

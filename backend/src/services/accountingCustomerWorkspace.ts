@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { requireCustomerSourceSharesWithin } from './customerSemanticCompatibility';
 import { AccountingCustomerTreasuryError, type CustomerTreasuryActor } from './accountingCustomerTreasury';
 import { projectCustomerAccountPrisma, projectCustomerAccountsPrisma, customerStatementMovements, recordCustomerReceiptPrisma, allocateCustomerReceiptPrisma, allocateCustomerCreditPrisma, reverseCustomerAllocationPrisma, requireSettlementSource, requireCustomerConsumptionDate } from './accountingCustomerTreasuryPrisma';
+import { requireAllocationReservationWithin } from './accountingCustomerAllocationFence';
 import { collectedCustomerCheckRials } from './accountingCustomerReceiptBalance';
 import { resolveCustomerReceiptWithin, type CustomerResolvedReceiptShare } from './accountingCustomerReceiptResolution';
 import { requireCustomerReceiptSourceDate } from './accountingCustomerReceiptSource';
@@ -153,6 +154,23 @@ export async function readCustomerWorkspaceContext(database: PrismaClient, id: s
     invoiceNumber: row.invoice.supplierInvoiceNumber, remainingRials: amount(row.amountRials) - row.allocations.reduce((sum, line) => sum + amount(line.amountRials), 0n) })).filter(row => row.remainingRials > 0n) };
 }
 
+/** Read-only reconciliation of a previously committed grouped allocation.
+ * UNKNOWN is not proof of failure: the original transaction may still be in flight. */
+export async function readCustomerAllocationCommandStatus(database: PrismaClient, id: string, input: Parameters<typeof recordCustomerWorkspaceTreasury>[2]) {
+  if (input.actor.profile === 'VIEWER') return fail('ACCOUNTING_WRITE_FORBIDDEN', 'مجوز ثبت عملیات مالی ندارید.', 403);
+  if (input.kind !== 'ALLOCATION' || !input.sourceAllocations || input.idempotencyKey.length < 8) {
+    return fail('INVALID_OPERATION', 'اطلاعات درخواست تخصیص معتبر نیست.', 400);
+  }
+  const resolved = await resolveCustomerWorkspace(database, id);
+  if (!resolved.profile) return { status: 'UNKNOWN' as const };
+  const prior = await database.accountingCustomerCommand.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+  if (!prior || prior.profileId !== resolved.profile.id || prior.kind !== input.kind || prior.createdBy !== input.actor.id
+    || prior.commandHash !== hashAccountingEvidence({ ...input, actor: undefined })) {
+    return { status: 'UNKNOWN' as const };
+  }
+  return { status: 'COMMITTED' as const, result: prior.result };
+}
+
 export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id: string, input: {
   kind: 'RECEIPT' | 'ALLOCATION' | 'REVERSE_ALLOCATION' | 'CORRECT_RECEIPT' | 'CANCEL_RECEIPT' | 'CHECK_DEPOSIT' | 'CHECK_SETTLE' | 'RESOLVE_RECEIPT' | 'CHECK_ENDORSE' | 'CHECK_RECIPIENT_RETURN'; amountRials: bigint; occurredAt: Date;
   periodId: string; postingRuleId: string; financialAccountId?: string; bankLedgerId?: string; receiptId?: string; creditItemId?: string;
@@ -172,7 +190,10 @@ export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id
   return database.$transaction(async tx => {
     if (!['RECEIPT', 'ALLOCATION', 'REVERSE_ALLOCATION'].includes(input.kind)
       || input.parts !== undefined || input.sourceAllocations !== undefined
-      || (input.kind === 'ALLOCATION' && input.creditItemId !== undefined)) await requireCustomerSourceSharesWithin(tx);
+      || (input.kind === 'ALLOCATION' && input.creditItemId !== undefined)) {
+      const isGrouped = input.kind === 'ALLOCATION' && input.sourceAllocations !== undefined && input.parts === undefined;
+      await requireCustomerSourceSharesWithin(tx, isGrouped ? 'grouped-allocation' : 'other');
+    }
     const resolved = await resolveCustomerWorkspace(tx, id);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-account:${resolved.customerId}`}))`;
     const profile = await ensureCustomerWorkspaceProfile(tx, id, input.actor, input.occurredAt);
@@ -227,13 +248,22 @@ export async function recordCustomerWorkspaceTreasury(database: PrismaClient, id
     }
     if (input.kind === 'ALLOCATION') {
       if (input.sourceAllocations) {
+        // The customer lock above is shared with prepare and cancel. The SQL
+        // parent-command trigger records completion in this same transaction.
+        const sourcePlanHash = hashAccountingEvidence({ ...input, actor: undefined });
+        const intent = await tx.accountingCustomerAllocationIntent.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+        if (!intent || intent.profileId !== profile.id ||
+          intent.ownerId !== input.actor.id || intent.commandHash !== sourcePlanHash) {
+          return fail('ALLOCATION_INTENT_REQUIRED', 'درخواست تخصیص مطابق اطلاعات تأییدشده پیدا نشد.');
+        }
+        if (intent.state === 'COMMITTED' && intent.result !== null) return intent.result as { id: string; allocationIds: string[] };
+        if (intent.state !== 'PENDING') return fail('ALLOCATION_INTENT_NOT_PENDING', 'این درخواست تخصیص دیگر در انتظار ثبت نیست.');
         return customerCompoundCommandWithin(tx, { profileId: profile.id, kind: input.kind, idempotencyKey: input.idempotencyKey,
           actor: input.actor, payload: { ...input, actor: undefined } }, async () => {
         const plan = input.sourceAllocations!;
         if (!plan.length || input.receiptId || input.creditItemId || input.allocations.length
           || plan.some(row => Boolean(row.receiptId) === Boolean(row.creditItemId))
           || new Set(plan.map(row => row.receiptId ?? row.creditItemId)).size !== plan.length) return fail('ALLOCATION_SOURCE_REQUIRED', 'سهم منابع باید مستقل و بدون تکرار باشد.');
-        const sourcePlanHash = hashAccountingEvidence({ ...input, actor: undefined });
         // Every child carries the entire confirmed plan: a retry cannot append another source.
         const results: Array<Awaited<ReturnType<typeof allocateCustomerCreditPrisma>>> = [];
         for (const row of plan) {
@@ -359,6 +389,7 @@ export async function recordCustomerAccountOperation(database: PrismaClient, id:
     let customerAccount = rule.receivableAccountId;
     let counterAccount = input.counterAccountId;
     if (input.kind === 'REFUND') {
+      await requireAllocationReservationWithin(tx, profile.id);
       if (Boolean(input.receiptId) === Boolean(input.creditItemId)) return fail('REFUND_SOURCE_REQUIRED', 'یک دریافت تخصیص‌نیافته یا بستانکاری را برای استرداد انتخاب کنید.', 400);
       await requireCustomerConsumptionDate(tx, { receiptId: input.receiptId, creditItemId: input.creditItemId }, input.occurredAt);
       if (input.receiptId) {

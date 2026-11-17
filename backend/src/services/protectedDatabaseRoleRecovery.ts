@@ -330,6 +330,7 @@ type CutoverCatalog = {
   migrationSha256: string;
   tables: Record<string, string[]>;
   sequences: string[];
+  views: { name: string; definitionSha256: string; relationOptions: string[] }[];
   protectedSequences: string[];
   definerRoutines: CutoverRoutine[];
   invokerRoutinesSha256: string;
@@ -359,6 +360,26 @@ async function verifyCutoverMigrationLedger(client: Client, directory: string, e
 
 const routineKey = (name: string, argumentTypes: string) => JSON.stringify([name, argumentTypes]);
 
+async function verifyCutoverViews(client: Client, views: CutoverCatalog['views']) {
+  const approved = new Map(views.map(view => [view.name, view]));
+  const { rows } = await client.query(`
+    SELECT c.relname AS name, pg_get_viewdef(c.oid, false) AS definition,
+      COALESCE(c.reloptions, '{}'::text[]) AS "relationOptions",
+      ARRAY(SELECT a.attname || ':' || format_type(a.atttypid, a.atttypmod)
+        FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY a.attnum) AS "columnTypes"
+    FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'v'
+  `);
+  if (approved.size !== views.length || rows.length !== views.length || rows.some(row => {
+    const view = approved.get(row.name);
+    return !view || row.name !== 'partner_release_readiness_completed'
+      || JSON.stringify(row.columnTypes) !== '["id:text"]'
+      || sha256(row.definition.replace(/\r\n/g, '\n')) !== view.definitionSha256
+      || JSON.stringify(row.relationOptions.sort()) !== JSON.stringify(view.relationOptions);
+  })) fail('A view differs from the reviewed cutover inventory.');
+  return approved;
+}
+
 /** Read-only admission for the first split, before the runtime receives a credential. */
 export function verifyPredecessorRoleCutover(input: {
   databaseUrl: string;
@@ -378,7 +399,7 @@ export function verifyPredecessorRoleCutover(input: {
         (SELECT count(*) = 1 AND bool_and(id = 'grouped-allocation' AND state = 'CLOSED')
           FROM public.customer_allocation_release_control) AS closed,
         NOT EXISTS (SELECT FROM pg_class WHERE relnamespace = 'public'::regnamespace
-          AND relkind IN ('p', 'f', 'v', 'm')) AS relations
+          AND relkind IN ('p', 'f', 'm')) AS relations
     `);
     if (!state.closed || !state.relations) fail('The cutover requires a closed allocation boundary and the reviewed relation types.');
 
@@ -422,6 +443,8 @@ export function verifyPredecessorRoleCutover(input: {
           || sha256(row.definition.replace(/\r\n/g, '\n')) !== routine.definitionSha256;
       })) fail('A privileged routine differs from the reviewed cutover inventory.');
 
+    const views = await verifyCutoverViews(client, manifest.views);
+    const viewCount = views.size;
     const tableCount = tables.size;
     const sequenceCount = sequences.size;
     const invokers: string[] = [];
@@ -444,6 +467,10 @@ export function verifyPredecessorRoleCutover(input: {
           } else expectGrants('', 'USAGE');
           break;
         case 'TABLE': {
+          if (views.delete(object.name)) {
+            expectGrants(cutoverRoles.runtime, 'SELECT');
+            break;
+          }
           const verbs = tables.get(object.name) ?? fail(`Unexpected cutover table: ${object.name}`);
           if (staged) expectGrants(cutoverRoles.runtime, ...verbs);
           tables.delete(object.name);
@@ -473,7 +500,7 @@ export function verifyPredecessorRoleCutover(input: {
         fail(`Cutover privilege drift on ${object.kind} ${object.name || '(current database)'}.`);
       }
     }
-    if (tables.size || sequences.size || sha256(JSON.stringify(invokers.sort())) !== manifest.invokerRoutinesSha256) {
+    if (tables.size || views.size || sequences.size || sha256(JSON.stringify(invokers.sort())) !== manifest.invokerRoutinesSha256) {
       fail('The cutover object identities differ from the reviewed inventory.');
     }
     return {
@@ -482,6 +509,7 @@ export function verifyPredecessorRoleCutover(input: {
       migrationSha256: manifest.migrationSha256,
       migrations,
       tables: tableCount,
+      views: viewCount,
       sequences: sequenceCount,
       securityDefinerRoutines: routineDefinitions.length,
     };

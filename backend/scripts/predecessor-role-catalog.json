@@ -1,5 +1,5 @@
 {
-  "migrationSha256": "bc7e34f870d61da959f3bfb0c05596fddebd5676a90e507fd7f7f945b0a0d2a0",
+  "migrationSha256": "36820749e21953145d75fff0941673831996a90f318e7fc65e9cda242888d070",
   "tables": {
     "NONE": [
       "_prisma_migrations",
@@ -632,5 +632,14 @@
       "execute": "owner"
     }
   ],
-  "invokerRoutinesSha256": "a682a77a97407908be9148415ea436139830bf07023a56c551b3c6babfd69117"
+  "invokerRoutinesSha256": "a682a77a97407908be9148415ea436139830bf07023a56c551b3c6babfd69117",
+  "views": [
+    {
+      "name": "partner_release_readiness_completed",
+      "definitionSha256": "78cb24f5e9df3a970c3fda0b8f2a9930cf37cd866693f1df1697092ca2c8996c",
+      "relationOptions": [
+        "security_barrier=true"
+      ]
+    }
+  ]
 }

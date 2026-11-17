@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
+import { mandatoryReleaseDeploymentGateNames } from '../deploymentGates';
 import { verifyPredecessorRoleCutover } from '../protectedDatabaseRoleRecovery';
 import { createTemporaryConcurrencyDatabase } from './shipmentStatementConcurrency/database';
 
@@ -30,15 +31,23 @@ test('first split preflight requires the exact catalog and per-object grants', {
     const baseline = await before();
     assert.deepEqual(baseline, {
       stage: 'before-grants',
-      catalogSha256: '8bcf58b6506e19172874de79a7d2075bccbb82905db5283d290096b3d81f375e',
-      migrationSha256: 'bc7e34f870d61da959f3bfb0c05596fddebd5676a90e507fd7f7f945b0a0d2a0',
-      migrations: 476, tables: 571, sequences: 5, securityDefinerRoutines: 5,
+      catalogSha256: '88d1a3381641dbae0c3223f3c343eb43b23730cde98519cd8923c8361851cbfa',
+      migrationSha256: '36820749e21953145d75fff0941673831996a90f318e7fc65e9cda242888d070',
+      migrations: 477, tables: 571, views: 1, sequences: 5, securityDefinerRoutines: 5,
     });
     await assert.rejects(staged(), /Cutover privilege drift/);
 
     await database.$executeRaw`CREATE TABLE public.unreviewed_role_cutover_probe (id integer)`;
     await assert.rejects(before(), /Unexpected cutover table/);
     await database.$executeRaw`DROP TABLE public.unreviewed_role_cutover_probe`;
+
+    await database.$executeRaw`ALTER VIEW public.partner_release_readiness_completed SET (security_barrier = false)`;
+    await assert.rejects(before(), /view differs from the reviewed cutover inventory/);
+    await database.$executeRaw`ALTER VIEW public.partner_release_readiness_completed SET (security_barrier = true)`;
+
+    await database.$executeRaw`REVOKE SELECT ON public.partner_release_readiness_completed FROM sabalan_application_runtime`;
+    await assert.rejects(before(), /Cutover privilege drift on TABLE partner_release_readiness_completed/);
+    await database.$executeRaw`GRANT SELECT ON public.partner_release_readiness_completed TO sabalan_application_runtime`;
 
     await database.$executeRaw`CREATE FUNCTION public.unreviewed_role_cutover_probe() RETURNS integer
       LANGUAGE sql SECURITY DEFINER AS 'SELECT 1'`;
@@ -74,8 +83,23 @@ test('first split preflight requires the exact catalog and per-object grants', {
     await database.$executeRawUnsafe(`GRANT USAGE ON SEQUENCE ${sequences} TO sabalan_application_runtime`);
     assert.deepEqual(await staged(), { ...baseline, stage: 'grants-staged' });
 
+    const targetCommit = 'a'.repeat(40);
+    const now = new Date();
+    for (const phase of ['COMPLETED', 'TRAFFIC_OPENED']) {
+      const id = `projection-${phase}`;
+      await database.deploymentOperation.create({ data: { id, releaseId: id, targetCommit, owner: 'fixture', phase,
+        leaseToken: id, leaseExpiresAt: now, heartbeatAt: now, startedAt: now, completedAt: now,
+        reportJson: { format: 'sabalan-deployment-report', version: 1, mode: 'RELEASE', deploymentId: id, releaseId: id,
+          targetCommit, gates: mandatoryReleaseDeploymentGateNames.map(name => ({ name, passed: true })) } } });
+      await database.partnerReleaseReadinessPublication.create({ data: { id, deploymentId: id, releaseId: id, targetCommit,
+        schemaId: 'fixture', checkedAt: now, expiresAt: new Date(now.getTime() + 60_000), packageSha256: 'b'.repeat(64), trustEnvelopeSha256: 'c'.repeat(64),
+        trustKeyId: 'fixture', packageBytesBase64: 'e30=', trustEnvelopeBytesBase64: 'e30=', evidenceJson: {} } });
+    }
+
     await database.$transaction(async tx => {
       await tx.$executeRaw`SET LOCAL ROLE sabalan_application_runtime`;
+      assert.deepEqual(await tx.$queryRaw`SELECT * FROM public.partner_release_readiness_completed`,
+        [{ id: 'projection-COMPLETED' }]);
       const operation = await tx.recoveryOperation.create({ data: { packageType: 'DATA_ONLY', source: 'GENERATED', status: 'PENDING' } });
       await tx.recoveryOperation.update({ where: { id: operation.id }, data: { progress: 1 } });
       await tx.recoveryAuditEvent.create({ data: { operationId: operation.id, eventType: 'ROLE_CUTOVER_PROBE' } });
@@ -88,6 +112,11 @@ test('first split preflight requires the exact catalog and per-object grants', {
     await assert.rejects(database.$transaction(async tx => {
       await tx.$executeRaw`SET LOCAL ROLE sabalan_application_runtime`;
       await tx.$queryRaw`SELECT public.customer_allocation_controller_close('a', 'b', 'c', 'd')`;
+    }), /42501/);
+
+    await assert.rejects(database.$transaction(async tx => {
+      await tx.$executeRaw`SET LOCAL ROLE sabalan_allocation_controller`;
+      await tx.$queryRaw`SELECT id FROM public.partner_release_readiness_completed`;
     }), /42501/);
 
     await database.$executeRaw`REVOKE UPDATE ON public.recovery_operations FROM sabalan_application_runtime`;

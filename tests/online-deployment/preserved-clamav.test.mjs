@@ -22,8 +22,8 @@ test('exact existing scanner preserves stable fields while mutable health histor
  }
 });
 test('scanner mutation, implicit all services, unknown services and dependency recreation refuse',()=>{
- for(const args of [['run','--no-deps','clamav'],['exec','clamav','sh'],['run','--no-deps','unknown'],['up','--no-deps','--always-recreate-deps','postgres'],['up','--no-deps','--scale','clamav=0','postgres'],['up','--no-deps'],['up','frontend'],['up','--no-deps','clamav'],['down'],['stop'],['restart','backend']])assert.throws(()=>assertComposePreserves(args),args.join(' '));
- for(const args of [['up','-d','--no-deps','--no-build','--wait','--wait-timeout','300','postgres','backend','frontend','inquiry','nginx'],['stop','-t','300','frontend','backend','inquiry'],['run','-T','--rm','--no-deps','deployment','node','script'],['exec','-T','backend','sh','-c','test'],['ps','-q','clamav']])assertComposePreserves(args);
+ for(const args of [['run','--no-deps','clamav'],['exec','clamav','sh'],['run','--no-deps','unknown'],['up','--no-deps','--always-recreate-deps','postgres'],['up','--no-deps','--scale','clamav=0','postgres'],['up','--no-deps'],['up','frontend'],['up','--no-deps','clamav'],['up','--no-deps','--pull','always','backend'],['down'],['stop'],['restart','backend']])assert.throws(()=>assertComposePreserves(args),args.join(' '));
+ for(const args of [['up','-d','--no-deps','--no-build','--wait','--wait-timeout','300','postgres','backend','frontend','inquiry','nginx'],['up','--no-deps','--no-build','--force-recreate','--pull','never','--wait','--wait-timeout','180','backend'],['stop','-t','300','frontend','backend','inquiry'],['run','-T','--rm','--no-deps','deployment','node','script'],['exec','-T','backend','sh','-c','test'],['ps','-q','clamav']])assertComposePreserves(args);
 });
 test('binding refuses omitted or changed selection; desired alias hash differs from effective scanner hash',()=>{
  const {binding}=fixture();validateBinding(binding);const changed=structuredClone(binding);changed.selection.hostPid++;assert.throws(()=>validateBinding(changed));
@@ -35,14 +35,15 @@ test('abort and rollback execute preservation branch without scanner creation or
  const source=fs.readFileSync(new URL('../../deploy/scripts/deploy.sh',import.meta.url),'utf8').replaceAll('\r\n','\n');const start=source.indexOf('start_release_services() {'),end=source.indexOf('\nrun_backend()',start);assert.ok(start>0&&end>start);
  const shell=process.platform==='win32'?'C:/Program Files/Git/bin/bash.exe':'/bin/sh';
  for(const mutation of [0,1]){
-  const code=`set -eu\nCAPTURE_ONLY=0\nMUTATION_STARTED=${mutation}\nDEPLOYMENT_CLAMAV_OPERATION=repair\nDEPLOYMENT_CLAMAV_REPAIR=false\nDEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX=bound\npreserved_clamav_guard(){ [ "$1" = health ]; }\ncompose(){ printf '%s\\n' "$*"; }\n`+source.slice(start,end)+'\nstart_release_services 300\n';
+  const code=`set -eu\nCAPTURE_ONLY=0\nMUTATION_STARTED=${mutation}\nDEPLOYMENT_CLAMAV_OPERATION=repair\nDEPLOYMENT_CLAMAV_REPAIR=false\nDEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX=bound\npreserved_clamav_guard(){ [ "$1" = health ]; }\nverify_predecessor_database_roles(){ return 0; }\ncompose(){ printf '%s\\n' "$*"; }\n`+source.slice(start,end)+'\nstart_release_services 300\n';
   const result=spawnSync(shell,['-c',code],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);const lines=result.stdout.trim().split('\n');assert.equal(lines.length,2);for(const line of lines){assert.ok(line.includes('--no-deps'));assert.ok(!line.split(' ').includes('clamav'));}
  }
 });
 test('host pack carries all canonical inspector imports and preservation policy without dropping original ports',()=>{
  const result=spawnSync(process.execPath,['scripts/build-online-controller-host-pack.mjs','--inspect'],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);const files=JSON.parse(result.stdout).hostFiles;
  for(const file of preservationSources)assert.equal(files.filter(name=>name===file).length,1,file);
- for(const file of ['deploy/scripts/online-owner-service.py','deploy/scripts/online-release-launcher.py','deploy/scripts/capture-only-release.mjs','deploy/scripts/legacy-backend-signal.py'])assert.ok(files.includes(file));
+ for(const file of ['deploy/scripts/online-owner-service.py','deploy/scripts/online-release-launcher.py','deploy/scripts/capture-only-release.mjs','deploy/scripts/legacy-backend-signal.py',
+  'deploy/scripts/predecessor-role-cutover-operation.mjs','deploy/scripts/predecessor-role-host-configuration.py'])assert.ok(files.includes(file));
 });
 
 test('resume cannot silently drop preservation after lost plan metadata or mismatched original journal',()=>{

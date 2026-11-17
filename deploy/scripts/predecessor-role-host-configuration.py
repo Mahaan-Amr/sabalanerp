@@ -9,6 +9,7 @@ import base64
 import copy
 import fcntl
 import hashlib
+from ipaddress import IPv4Address
 import json
 import os
 from pathlib import Path
@@ -318,6 +319,7 @@ def _apply(root, env, report_dir, coordination_dir, credential_fd, stage_receipt
     snapshot = {"binding": binding, "environment": str(env), "stageReceiptSha256": stage_digest,
                 "previous": base64.b64encode(previous).decode(), "previousSha256": digest(previous),
                 "targetSha256": digest(target), "targetRuntimeSha256": digest(target_runtime.encode()),
+                "previousRuntimeSha256": digest(runtime.encode()), "previousRuntimeUser": unquote(url.username),
                 "baselineModelSha256": digest(json_bytes(before)),
                 "environmentMode": stat.S_IMODE(metadata.st_mode), "environmentGid": metadata.st_gid}
     if saved:
@@ -365,3 +367,167 @@ def _restore(root, env, report_dir, coordination_dir, *, observe, verify_boundar
         write_private(env, previous, original=metadata)
     require_current_environment(env, previous, saved)
     return publish_receipt(receipt_path, binding, saved["stageReceiptSha256"], "RESTORED")
+
+
+def container_state(rows, graph):
+    require(len(rows) == len(SERVICES))
+    containers = {}
+    for row in rows:
+        labels = row["Config"]["Labels"]
+        service = labels["com.docker.compose.service"]
+        require(service in SERVICES and service not in containers and labels["com.docker.compose.project"] == "sabalanerp"
+                and row["Image"] == graph[service] and matches(r"[a-f0-9]{64}", row["Id"]))
+        containers[service] = row
+    return containers
+
+
+def backend_runtime_url(row):
+    entries = [entry.removeprefix("DATABASE_URL=") for entry in row["Config"]["Env"] if entry.startswith("DATABASE_URL=")]
+    require(len(entries) == 1)
+    return entries[0]
+
+
+def container_config_digest(row):
+    config = copy.deepcopy(row["Config"])
+    if config["Hostname"] == row["Id"][:12]:
+        config["Hostname"] = ""
+    for label in ("com.docker.compose.config-hash", "com.docker.compose.replace"):
+        config["Labels"].pop(label, None)
+    environment = {}
+    for entry in config["Env"]:
+        key, value = entry.split("=", 1)
+        require(key and key not in environment)
+        environment[key] = "" if key == "DATABASE_URL" and config["Labels"]["com.docker.compose.service"] == "backend" else value
+    config["Env"] = environment
+    host = copy.deepcopy(row["HostConfig"])
+    if host.get("Binds") is not None:
+        host["Binds"].sort()
+    networks = {}
+    for name, value in row["NetworkSettings"]["Networks"].items():
+        aliases = value.get("Aliases") or []
+        networks[name] = {key: value.get(key) for key in ("NetworkID", "IPAMConfig", "Links", "DriverOpts")}
+        networks[name]["Aliases"] = sorted(alias for alias in aliases if alias not in (row["Id"], row["Id"][:12]))
+    return digest(json_bytes({
+        "config": config, "host": host, "mounts": sorted(row["Mounts"], key=lambda mount: mount["Destination"]),
+        "networks": networks,
+    }))
+
+
+def original_graph(containers):
+    return {
+        name: {"id": row["Id"], "created": row["Created"], "configSha256": container_config_digest(row),
+               **({"startedAt": row["State"]["StartedAt"], "pid": row["State"]["Pid"]} if name == "clamav" else {})}
+        for name, row in containers.items()
+    }
+
+
+def verify_runtime_graph(containers, original):
+    actual = original_graph(containers)
+    require(all(actual[name] == original[name] for name in SERVICES - {"backend"}))
+    require(actual["backend"]["configSha256"] == original["backend"]["configSha256"])
+    scanner = containers["clamav"]["State"]
+    require(scanner["Running"] is True and scanner["Health"]["Status"] == "healthy")
+
+
+def backend_observation(containers):
+    row = containers["backend"]
+    state = row["State"]
+    return (original_graph(containers), digest(backend_runtime_url(row).encode()), state["StartedAt"],
+            state["Pid"], state["Running"], state["Restarting"], state["Dead"], state["Health"]["Status"],
+            sorted((name, network["IPAddress"]) for name, network in row["NetworkSettings"]["Networks"].items()))
+
+
+def continue_backend(root, env, report_dir, coordination_dir, pinned_containers, *, inspect, recreate_backend,
+                     verify_boundary, prove_role):
+    """Continue only the pinned backend under the owned protected runner.
+
+    The owner supplies the plan-pinned IDs, a native Docker inspector and a
+    foreground command that does not return until its original child has closed.
+    The live boundary verifier must confirm lease, checkpoint and maintenance.
+    The role verifier must prove authentication from this backend's address on
+    the checkpointed database and confirm the phase-appropriate ACL boundary.
+    This receipt carries no admission to reopen traffic or finish the lease.
+    """
+    try:
+        return _continue_backend(root, env, report_dir, coordination_dir, pinned_containers,
+                                 inspect=inspect, recreate_backend=recreate_backend,
+                                 verify_boundary=verify_boundary, prove_role=prove_role)
+    except Exception:
+        raise RoleHostConfigurationError("PREDECESSOR_ROLE_HOST_RUNTIME_UNPROVEN") from None
+
+
+def _continue_backend(root, env, report_dir, coordination_dir, pinned_containers, *, inspect, recreate_backend,
+                      verify_boundary, prove_role):
+    verify_lock(root)
+    phase = json.loads(read_private(report_dir / "active-deployment-session.json")[0])["phase"]
+    require(phase in ("MUTATION_STARTED", "ROLLBACK_STARTED"))
+    authority = context(root, report_dir, coordination_dir, phase)
+    session, checkpoint, binding = authority
+    restoring = phase == "ROLLBACK_STARTED"
+    require(verify_boundary(session, checkpoint) is True)
+    private_path, receipt_path = transaction_paths(root, binding["deploymentId"])
+    saved, previous = load_snapshot(private_path, env, binding)
+    expected_host_state = "RESTORED" if restoring else "APPLIED"
+    receipt = json.loads(read_private(receipt_path)[0])
+    require(receipt == {"format": "sabalan-predecessor-role-host-config-v1", **binding,
+                        "stageReceiptSha256": saved["stageReceiptSha256"], "state": expected_host_state})
+    current = read_private(env)[0]
+    require(current == previous if restoring else digest(current) == saved["targetSha256"])
+    require_current_environment(env, current, saved)
+
+    graph = binding["rollbackReleaseSet"]
+    get_graph = lambda: container_state(inspect(), graph)
+    containers = get_graph()
+    baseline_path = private_path.with_name("backend-runtime-preimage.json")
+    try:
+        baseline = json.loads(read_private(baseline_path)[0])
+    except FileNotFoundError:
+        require({name: row["Id"] for name, row in containers.items()} == pinned_containers
+                and digest(backend_runtime_url(containers["backend"]).encode()) == saved["previousRuntimeSha256"])
+        baseline = {"binding": binding, "containers": original_graph(containers)}
+        write_private(baseline_path, json_bytes(baseline))
+    original = baseline["containers"]
+    require(baseline["binding"] == binding and {name: row["id"] for name, row in original.items()} == pinned_containers)
+    verify_runtime_graph(containers, original)
+
+    expected_runtime = saved["previousRuntimeSha256"] if restoring else saved["targetRuntimeSha256"]
+    backend = containers["backend"]
+    observed_runtime = digest(backend_runtime_url(backend).encode())
+    require(observed_runtime in (saved["previousRuntimeSha256"], saved["targetRuntimeSha256"]))
+    if observed_runtime != expected_runtime or backend["State"]["Running"] is not True:
+        # The protected runner must have drained the previous backend. A prior
+        # uncertain attempt can only be observed, never replayed automatically.
+        require(backend["State"]["Running"] is False)
+        intent_path = private_path.with_name("backend-runtime-" + expected_host_state.lower() + "-intent.json")
+        require(not os.path.lexists(intent_path))
+        require(context(root, report_dir, coordination_dir, phase) == authority)
+        require(verify_boundary(session, checkpoint) is True)
+        require(backend_observation(get_graph()) == backend_observation(containers))
+        require_current_environment(env, current, saved)
+        write_private(intent_path, json_bytes({**binding, "beforeBackendId": backend["Id"], "state": expected_host_state}))
+        require(recreate_backend(("up", "-d", "--no-deps", "--no-build", "--force-recreate", "--pull", "never",
+                                  "--wait", "--wait-timeout", "180", "backend")) is True)
+        containers = get_graph()
+        verify_runtime_graph(containers, original)
+        require(containers["backend"]["Id"] != backend["Id"])
+        backend = containers["backend"]
+
+    require(backend["State"]["Running"] is True and backend["State"]["Health"]["Status"] == "healthy"
+            and backend["State"]["Restarting"] is False and backend["State"]["Dead"] is False
+            and (restoring or backend["Id"] != pinned_containers["backend"])
+            and digest(backend_runtime_url(backend).encode()) == expected_runtime)
+    networks = list(backend["NetworkSettings"]["Networks"].values())
+    require(len(networks) == 1)
+    address = str(IPv4Address(networks[0]["IPAddress"]))
+    expected_proof = {"deploymentId": binding["deploymentId"], "checkpointSha256": binding["checkpointSha256"],
+                      "backendId": backend["Id"], "backendAddress": address,
+                      "role": saved["previousRuntimeUser"] if restoring else RUNTIME_USER}
+    require(prove_role(expected_proof.copy()) == expected_proof)
+    require(context(root, report_dir, coordination_dir, phase) == authority)
+    require(verify_boundary(session, checkpoint) is True)
+    require(backend_observation(get_graph()) == backend_observation(containers))
+    require_current_environment(env, current, saved)
+    proof = {"format": "sabalan-predecessor-role-host-runtime-v1", **expected_proof,
+             "backendImage": graph["backend"], "state": expected_host_state, "canOpenTraffic": False}
+    write_private(private_path.with_name("backend-runtime-" + expected_host_state.lower() + "-proof.json"), json_bytes(proof))
+    return proof

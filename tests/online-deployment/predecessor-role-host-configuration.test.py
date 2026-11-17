@@ -164,6 +164,97 @@ class HostConfigurationTest(unittest.TestCase):
             self.assertNotIn(PASSWORD, json.dumps(proof).encode())
         self.assertEqual(self.env.read_bytes(), ORIGINAL)
 
+    def test_recreate_pinned_backend_and_prove_exact_runtime_and_rollback(self):
+        original = {name: str(i) * 64 for i, name in enumerate(SERVICES, 1)}
+        backend_id = original["backend"]
+        installed = CONTROL_URL
+        running = False
+        calls = []
+        signed_role_is_correct = False
+        nginx_replaced = False
+
+        def inspect():
+            rows = []
+            for name, image in GRAPH.items():
+                identifier = backend_id if name == "backend" else original[name]
+                if nginx_replaced and name == "nginx":
+                    identifier = "d" * 64
+                rows.append({
+                    "Id": identifier, "Image": image, "Created": "2026-11-17T00:00:00Z",
+                    "State": {"Running": running if name == "backend" else True,
+                              "Health": {"Status": "healthy"}, "StartedAt": "2000-01-01", "Pid": 7,
+                              "Restarting": False, "Dead": False},
+                    "Config": {"Hostname": identifier[:12], "Env": ["DATABASE_URL=" + installed] if name == "backend" else [],
+                               "Labels": {"com.docker.compose.service": name, "com.docker.compose.project": "sabalanerp"}},
+                    "HostConfig": {}, "Mounts": [], "NetworkSettings": {"Networks": {
+                        "sabalanerp_app_network": {"NetworkID": "f" * 64, "IPAddress": "172.24.0.5"},
+                    }},
+                })
+            return rows
+
+        def recreate_backend(command):
+            nonlocal backend_id, installed, running
+            calls.append(command)
+            self.assertEqual(command, ("up", "-d", "--no-deps", "--no-build", "--force-recreate", "--pull", "never",
+                                       "--wait", "--wait-timeout", "180", "backend"))
+            staged = self.session["phase"] == "MUTATION_STARTED"
+            backend_id = ("a" if staged else "b") * 64
+            installed = RUNTIME_URL if staged else CONTROL_URL
+            running = not staged
+            # Simulate an interrupted native apply after the new exact container exists.
+            return not staged
+
+        def live_boundary(session, checkpoint):
+            self.assertEqual(session, self.session)
+            self.assertEqual(checkpoint, self.checkpoint)
+            return True
+
+        def prove_role(request):
+            return {"role": "sabalan_application_runtime" if signed_role_is_correct and self.session["phase"] == "MUTATION_STARTED" else "owner",
+                    "backendId": backend_id, "backendAddress": request["backendAddress"],
+                    "deploymentId": self.session["deploymentId"], "checkpointSha256": self.checkpoint["checksum"]}
+
+        def continue_backend():
+            return roles.continue_backend(
+                self.root, self.env, self.root / "reports", self.root / "coordination", original,
+                inspect=inspect, recreate_backend=recreate_backend, verify_boundary=live_boundary, prove_role=prove_role,
+            )
+
+        with self.owner() as credential:
+            self.transaction(credential)
+            with self.assertRaises(roles.RoleHostConfigurationError):
+                continue_backend()
+            self.assertEqual(len(calls), 1)
+            with self.assertRaises(roles.RoleHostConfigurationError):
+                continue_backend()
+            self.assertEqual(len(calls), 1)
+            running = True
+            with self.assertRaises(roles.RoleHostConfigurationError):
+                continue_backend()
+            self.assertEqual(len(calls), 1)
+            signed_role_is_correct = True
+            applied = continue_backend()
+            self.assertEqual(applied["backendId"], "a" * 64)
+            self.assertFalse(applied["canOpenTraffic"])
+            self.assertEqual(applied["role"], "sabalan_application_runtime")
+            self.assertEqual(continue_backend(), applied)
+            self.assertEqual(len(calls), 1)
+
+            self.write_phase("ROLLBACK_STARTED")
+            self.transaction()
+            running = False
+            nginx_replaced = True
+            with self.assertRaises(roles.RoleHostConfigurationError):
+                continue_backend()
+            self.assertEqual(len(calls), 1)
+            nginx_replaced = False
+            restored = continue_backend()
+            self.assertEqual(restored["backendId"], "b" * 64)
+            self.assertFalse(restored["canOpenTraffic"])
+            self.assertEqual(restored["role"], "owner")
+            self.assertEqual(self.env.read_bytes(), ORIGINAL)
+            self.assertEqual(len(calls), 2)
+
     def test_restore_if_receipt_publication_fails_after_env_replacement(self):
         receipt = self.root / ".deploy-state" / ("predecessor-role-host-" + self.session["deploymentId"]) / "receipt.json"
         receipt.parent.mkdir(mode=0o700)

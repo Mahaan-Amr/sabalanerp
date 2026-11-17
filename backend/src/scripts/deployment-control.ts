@@ -218,23 +218,25 @@ const main = async () => {
 
   const session = await readSession();
   if (command === 'stage-predecessor-role-grants' || command === 'restore-predecessor-role-grants'
-    || command === 'activate-predecessor-runtime-login') {
-    if (process.env.BACKEND_RUNTIME_ROLE !== 'control' || process.argv.length !== 3) {
+    || command === 'activate-predecessor-runtime-login' || command === 'attest-predecessor-backend-runtime') {
+    const attesting = command === 'attest-predecessor-backend-runtime';
+    if (process.env.BACKEND_RUNTIME_ROLE !== 'control' || process.argv.length !== (attesting ? 5 : 3)) {
       throw new Error('The first role cutover requires the dedicated control-plane command.');
     }
     const action = command === 'stage-predecessor-role-grants' ? 'stage'
-      : command === 'restore-predecessor-role-grants' ? 'restore' : 'activate';
+      : command === 'restore-predecessor-role-grants' ? 'restore' : attesting ? 'attest' : 'activate';
     const credential = action === 'activate' ? readRuntimeCredentialFrame() : undefined;
     try {
       const roleCutover = await changeProtectedPredecessorRoleGrants({
         action, credential, session,
+        backend: attesting ? { address: process.argv[3], id: process.argv[4] } : undefined,
         coordinationDir: RECOVERY_COORDINATION_DIR, journalPath: JOURNAL_PATH,
         deploymentId: required('DEPLOYMENT_ID'), leaseToken: required('DEPLOYMENT_LEASE_TOKEN'),
         controlImage: required('DEPLOYMENT_CONTROL_IMAGE'), databaseUrl: required('DATABASE_URL'),
         remoteRoot: process.env.DEPLOYMENT_REMOTE_MOUNT,
         migrationsDirectory: path.resolve('prisma', 'migrations'), catalogFile: path.resolve('scripts', 'predecessor-role-catalog.json'),
       });
-      console.log(JSON.stringify({ ok: true, roleCutover }));
+      console.log(JSON.stringify(attesting ? { ok: true, runtimeProof: roleCutover } : { ok: true, roleCutover }));
     } catch (error: any) {
       if (action === 'activate' && error?.code !== 'PROTECTED_DATABASE_ROLE_RECOVERY_REJECTED') {
         throw new Error('The first cutover runtime credential could not be proven.');

@@ -66,8 +66,8 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
     for (const value of ['SERVICES_DRAINED', 'LOCAL_CHECKPOINT_VERIFIED', 'REMOTE_CHECKPOINT_VERIFIED', 'MUTATION_STARTED']) {
       await phase(value);
     }
-    const control = (command: string, environment: NodeJS.ProcessEnv = {}, input?: Buffer) => {
-      const run = spawnSync(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'src/scripts/deployment-control.ts', command], {
+    const control = (command: string, environment: NodeJS.ProcessEnv = {}, input?: Buffer, args: string[] = []) => {
+      const run = spawnSync(process.execPath, ['node_modules/tsx/dist/cli.mjs', 'src/scripts/deployment-control.ts', command, ...args], {
         input, encoding: 'utf8', env: { ...process.env, DATABASE_URL: fixture.databaseUrl, BACKEND_RUNTIME_ROLE: 'control',
           DEPLOYMENT_ID: id, DEPLOYMENT_LEASE_TOKEN: token, DEPLOYMENT_CONTROL_IMAGE: image,
           DEPLOYMENT_REPORT_DIR: root, RECOVERY_COORDINATION_DIR: root, DEPLOYMENT_REMOTE_MOUNT: remoteRoot, ...environment },
@@ -159,6 +159,19 @@ test('owned deployment stages manifest ACLs and restores the matching preimage w
     const repeatedRestore = control('restore-predecessor-role-grants');
     assert.equal(repeatedRestore.status, 0, repeatedRestore.stderr);
     assert.deepEqual(JSON.parse(repeatedRestore.stdout).roleCutover, { ...receipt, outcome: 'already-restored' });
+    const backendId = 'e'.repeat(64);
+    const [{ address }] = await db.$queryRaw<Array<{ address: string }>>`SELECT host(inet_client_addr()) AS address`;
+    await db.$disconnect();
+    const missingSession = control('attest-predecessor-backend-runtime', {}, undefined, [address, backendId]);
+    assert.equal(missingSession.status, 1, missingSession.stderr);
+    assert.match(missingSession.stderr, /live backend session/);
+    await db.$connect();
+    await db.$queryRaw`SELECT 1`;
+    const liveSession = control('attest-predecessor-backend-runtime', {}, undefined, [address, backendId]);
+    assert.equal(liveSession.status, 0, liveSession.stderr);
+    assert.deepEqual(JSON.parse(liveSession.stdout).runtimeProof, {
+      deploymentId: id, checkpointSha256: checkpoint.checksum, backendId, backendAddress: address, role: 'postgres',
+    });
   } finally {
     await db.$disconnect();
     try { await fixture.cleanup(); } finally { await rm(root, { recursive: true, force: true }); }

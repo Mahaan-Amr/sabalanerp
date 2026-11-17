@@ -28,6 +28,7 @@ export function assertComposePreserves(args){
  for(let i=0;i<tail.length;i++){
   const arg=tail[i];
   if(flags.has(arg))continue;
+  if(arg==='--pull'){assert.equal(verb,'up');assert.equal(tail[++i],'never');continue;}
   if(values.has(arg)){assert.ok(i+1<tail.length);const value=tail[++i];assert.ok(value&&!value.startsWith('-'));if(['-t','--timeout','--wait-timeout'].includes(arg))assert.match(value,/^[1-9][0-9]*$/);continue;}
   assert.ok(services.has(arg),'PRESERVED_CLAMAV_UNKNOWN_OR_SCANNER_SERVICE');found++;
   // exec/run tail is the explicit other service's command, never a Compose target.

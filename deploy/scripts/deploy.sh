@@ -8,12 +8,19 @@ OPERATIONS_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/../.." && pwd)"
 SYSTEM_RECOVERY_BACKUP_HOST="${SCRIPT_DIR}/system-recovery-backup-host.mjs"
 SYSTEM_RECOVERY_BACKUP=0
 ROLE_CUTOVER_PREFLIGHT=0
+ROLE_CUTOVER=0
 case "${1:-}" in
-  --predecessor-role-cutover-preflight)
-    [ "$#" -eq 4 ] || { echo 'Usage: deploy.sh --predecessor-role-cutover-preflight <absolute-env> <private-plan> <plan-sha256>' >&2; exit 1; }
+  --predecessor-role-cutover-preflight|--predecessor-role-cutover)
+    [ "$#" -eq 4 ] || { echo 'Usage: deploy.sh --predecessor-role-cutover[-preflight] <absolute-env> <private-plan> <plan-sha256>' >&2; exit 1; }
     case "$2" in /*) ;; *) exit 1;; esac
     case "$3" in /*) ;; *) exit 1;; esac
-    ROLE_CUTOVER_PREFLIGHT=1
+    if [ "$1" = --predecessor-role-cutover ]; then
+      [ -z "${DOCKER_HOST:-}${DOCKER_CONTEXT:-}${COMPOSE_FILE:-}${COMPOSE_PROFILES:-}${COMPOSE_ENV_FILES:-}" ] || exit 1
+      ROLE_CUTOVER=1
+      DEPLOYMENT_MODE=configuration
+    else
+      ROLE_CUTOVER_PREFLIGHT=1
+    fi
     ROLE_CUTOVER_PLAN="$3"
     ROLE_CUTOVER_PLAN_SHA256="$4"
     shift
@@ -375,12 +382,12 @@ wait_for_cutover_approval() {
 }
 
 control() {
-  case "${1:-}" in prepare|maintenance-on) preserved_clamav_guard identity || return 1;; maintenance-off) preserved_clamav_guard health || return 1;; esac
+  case "${1:-}" in prepare|prepare-predecessor-role-cutover|maintenance-on) preserved_clamav_guard identity || return 1;; maintenance-off) preserved_clamav_guard health || return 1;; esac
   run_backend node dist/scripts/deployment-control.js "$@"
 }
 
 enter_maintenance() {
-  if [ "${CAPTURE_ONLY}" -eq 1 ]; then
+  if [ "${CAPTURE_ONLY}" -eq 1 ] || [ "${ROLE_CUTOVER:-0}" -eq 1 ]; then
     # Capture must restart the exact original Nginx container after the
     # checkpoint. Its mounted marker check takes effect without recreation.
     MAINTENANCE_ACTIVE=1
@@ -406,7 +413,7 @@ phase() {
   if [ "${BOOTSTRAP}" -eq 1 ]; then
     control local-transition
   else
-    control transition
+    control transition || return 1
     control heartbeat
   fi
 }
@@ -720,9 +727,52 @@ complete_capture_only() {
   return "${capture_qualification_code}"
 }
 
+run_owned_role_foreground() {
+  if [ "${DEPLOYMENT_PHASE}" = MUTATION_STARTED ]; then
+    node -e 'const [file,expected]=process.argv.slice(1);const bytes=require("node:fs").readFileSync(file);if(require("node:crypto").createHash("sha256").update(bytes).digest("hex")!==expected) process.exit(1);' \
+      "${ENV_FILE}" "${ROLE_CUTOVER_ENV_SHA256}" || return 1
+  fi
+  export ADVISORY_PID ADVISORY_APPLICATION_NAME ADVISORY_LOCK_KEY DEPLOYMENT_MODE
+  printf '%s\n' "${ROLE_CUTOVER_PROOF}" | python3 "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-canonical.py" \
+    "${REPO_ROOT}" "${ENV_FILE}" "$(dirname -- "${SESSION_HOST_PATH}")" "${REPO_ROOT}/${COMPOSE_FILE}" "${DEPLOYMENT_PHASE}"
+}
+
+role_cutover_failure() {
+  if [ "${SESSION_PREPARED}" -eq 0 ]; then return 0; fi
+  report_dir="$(dirname -- "${SESSION_HOST_PATH}")"
+  open_intent="${report_dir}/predecessor-role-cutover-open-intent.json"
+  terminal_ack="${REPO_ROOT}/.deploy-state/predecessor-role-host-${DEPLOYMENT_ID}/terminal-confirmation.json"
+  if [ -e "${open_intent}" ] || [ -L "${open_intent}" ] || [ -e "${terminal_ack}" ] || [ -L "${terminal_ack}" ]; then
+    echo 'Role cutover traffic may have opened. Preserve the serving release and evidence for controlled terminal readback.' >&2
+    return 1
+  fi
+  if [ "${MAINTENANCE_ACTIVE}" -eq 0 ]; then
+    if [ "${DB_LEASE_ACQUIRED}" -eq 1 ]; then
+      DEPLOYMENT_PHASE=ABORTED control finish
+    else
+      control cancel-preflight
+    fi
+    return $?
+  fi
+  if [ "${MUTATION_STARTED}" -eq 1 ] && [ "${DEPLOYMENT_PHASE}" = MUTATION_STARTED ] \
+    && [ "${LEGACY_BACKEND_SIGNAL_PENDING}" -eq 0 ] \
+    && verify_public_maintenance && protected_advisory_owned \
+    && drain_release_for_rollback && phase ROLLBACK_STARTED && run_owned_role_foreground; then
+    echo 'The exact predecessor role and host configuration passed protected rollback and terminal readback.' >&2
+    return 0
+  fi
+  echo 'The dedicated role cutover remains in maintenance. Preserve both holds, the exact checkpoint and the owner journal.' >&2
+  return 1
+}
+
 recover_failure() {
   exit_code="$1"
   trap - EXIT INT TERM
+  if [ "${ROLE_CUTOVER:-0}" -eq 1 ]; then
+    role_cutover_failure || true
+    cleanup_locks
+    exit "${exit_code}"
+  fi
   echo "Deployment failed; entering deterministic recovery (exit ${exit_code})." >&2
 
   if [ "${SESSION_PREPARED}" -eq 0 ]; then
@@ -951,7 +1001,7 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 if [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ]; then
-  [ "${DEPLOYMENT_MODE}" = release ] && [ "${CAPTURE_ONLY}" -eq 0 ] \
+  { [ "${DEPLOYMENT_MODE}" = release ] || [ "${ROLE_CUTOVER}" -eq 1 ]; } && [ "${CAPTURE_ONLY}" -eq 0 ] \
     && [ "${PREBUILT_RELEASE}" -eq 0 ] && [ "${OFFLINE_CLAMAV_INCIDENT}" -eq 0 ] \
     && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}" ] \
     && [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256:-}" ] || {
@@ -961,6 +1011,12 @@ if [ -n "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE:-}${DEPLOYMENT_QA_REHEARSAL_PLAN_SH
     "${DEPLOYMENT_QA_REHEARSAL_PLAN_FILE}" "${DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256}" \
     "${REPO_ROOT}" "${ENV_FILE}")" || exit 1
   [ "${COMPOSE_FILE}" = docker-compose.rehearsal.yml ] || { echo 'QA_REHEARSAL_COMPOSE_INVALID' >&2; exit 1; }
+fi
+if [ "${ROLE_CUTOVER}" -eq 1 ]; then
+  COMPOSE_PROJECT_NAME=sabalanerp
+  DOCKER_HOST=unix:///var/run/docker.sock
+  PROTECTED_BACKEND_NO_PULL=1
+  export COMPOSE_PROJECT_NAME DOCKER_HOST PROTECTED_BACKEND_NO_PULL
 fi
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   # Select only the already-installed CONFIGs before taking the host/DB lease.
@@ -1013,7 +1069,7 @@ node "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-operation.mjs" 
   guard "${REPO_ROOT}" "${SESSION_HOST_PATH}" || exit 1
 
 if [ "${ROLE_CUTOVER_PREFLIGHT}" -eq 1 ]; then
-  [ "${DEPLOYMENT_MODE}" = release ] && [ "${COMPOSE_FILE}" = docker-compose.prod.yml ] \
+  [ "${DEPLOYMENT_MODE}" = release ] \
     && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] && [ "${DEPLOYMENT_CLAMAV_OPERATION}" = repair ] \
     && [ -z "${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}" ] || exit 1
   exec node "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-operation.mjs" \
@@ -1021,10 +1077,24 @@ if [ "${ROLE_CUTOVER_PREFLIGHT}" -eq 1 ]; then
     "${ROLE_CUTOVER_PLAN}" "${ROLE_CUTOVER_PLAN_SHA256}"
 fi
 
-# This host file is bind-mounted into nginx. A restrictive checkout or copy
-# mode must never turn the intended public 503 boundary into nginx's 403 page.
-chmod 0644 "${REPO_ROOT}/deploy/nginx/maintenance.html"
+if [ "${ROLE_CUTOVER}" -eq 1 ]; then
+  [ "${DEPLOYMENT_MODE}" = configuration ] \
+    && [ "${DEPLOYMENT_CLAMAV_REPAIR}" = false ] && [ "${DEPLOYMENT_CLAMAV_OPERATION}" = repair ] \
+    && [ -z "${DEPLOYMENT_CUSTOMER_ALLOCATION_EVIDENCE_DIR:-}${DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE:-}" ] || exit 1
+  role_selection="$(node "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-operation.mjs" \
+    inspect-start "${REPO_ROOT}" "${SESSION_HOST_PATH}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" \
+    "${ROLE_CUTOVER_PLAN}" "${ROLE_CUTOVER_PLAN_SHA256}")"
+  ROLE_CUTOVER_PROOF="$(printf '%s' "${role_selection}" | node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("node:fs").readFileSync(0,"utf8")).proof))')"
+  ROLE_CUTOVER_ENV_SHA256="$(printf '%s' "${role_selection}" | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0,"utf8")).environmentSha256)')"
+  DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX="$(printf '%s' "${role_selection}" | node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(0,"utf8")).scannerBindingHex)')"
+  export DEPLOYMENT_PRESERVED_CLAMAV_BINDING_HEX
+  preserved_clamav_guard health
+else
+  # Keep the existing nginx maintenance page readable in ordinary releases.
+  chmod 0644 "${REPO_ROOT}/deploy/nginx/maintenance.html"
+fi
 PREDECESSOR_DATABASE_MODE="$(predecessor_database_topology retained)" || exit 1
+[ "${ROLE_CUTOVER}" -eq 0 ] || [ "${PREDECESSOR_DATABASE_MODE}" = legacy ] || exit 1
 if [ "${SYSTEM_RECOVERY_BACKUP}" -eq 1 ]; then
   # shellcheck source=deploy/scripts/system-recovery-backup-host.sh
   . "${SCRIPT_DIR}/system-recovery-backup-host.sh"
@@ -1310,6 +1380,12 @@ elif [ "${CAPTURE_ONLY}" -eq 1 ]; then
   DEPLOYMENT_POSTGRES_IMAGE="${DEPLOYMENT_PREVIOUS_POSTGRES_IMAGE}"
   DEPLOYMENT_CLAMAV_IMAGE="${DEPLOYMENT_PREVIOUS_CLAMAV_IMAGE}"
   export DEPLOYMENT_BACKEND_IMAGE DEPLOYMENT_FRONTEND_IMAGE DEPLOYMENT_INQUIRY_IMAGE DEPLOYMENT_NGINX_IMAGE DEPLOYMENT_POSTGRES_IMAGE DEPLOYMENT_CLAMAV_IMAGE
+elif [ "${ROLE_CUTOVER}" -eq 1 ]; then
+  DEPLOYMENT_TARGET_BACKEND_IMAGE="${DEPLOYMENT_BACKEND_IMAGE}"
+  export DEPLOYMENT_TARGET_BACKEND_IMAGE
+  compose config --quiet
+  run_backend test -f dist/services/predecessorRoleTerminal.js
+  run_backend node dist/scripts/predecessor-role-cutover.js before-grants
 else
   [ -n "${DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE:-}" ] && [ -f "${DEPLOYMENT_BIOMETRIC_PROVISIONING_FILE}" ] || {
     echo "Configuration release requires a private biometric workstation provisioning file." >&2
@@ -1335,7 +1411,7 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   capture_only_services | node "${OPERATIONS_ROOT}/deploy/scripts/capture-only-release.mjs" snapshot "${CAPTURE_ONLY_SNAPSHOT}" "${ENV_FILE}"
 fi
 node "${OPERATIONS_ROOT}/deploy/scripts/backup-retention-host.mjs" --inspect "${ENV_FILE}"
-refresh_performance_database_identity
+if [ "${ROLE_CUTOVER}" -eq 0 ]; then refresh_performance_database_identity; fi
 
 node "${OPERATIONS_ROOT}/deploy/scripts/dispatch-volume-preflight.mjs" "${ENV_FILE}" "${COMPOSE_FILE}"
 run_backend node dist/scripts/validate-production-environment.js
@@ -1358,17 +1434,26 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   # The already healthy original PostgreSQL is a capture prerequisite. Compose
   # up could apply this operation's environment and replace its configuration.
   verify_capture_only_configuration
-else
+elif [ "${ROLE_CUTOVER}" -eq 0 ]; then
   compose up -d --no-deps postgres
 fi
 if [ "${PREBUILT_RELEASE}" -eq 1 ]; then
   prebuilt_exports="$(verify_prebuilt_release)" || exit 1
   eval "${prebuilt_exports}"
 fi
-control prepare
+if [ "${ROLE_CUTOVER}" -eq 1 ]; then
+  current_selection="$(node "${OPERATIONS_ROOT}/deploy/scripts/predecessor-role-cutover-operation.mjs" \
+    inspect-start "${REPO_ROOT}" "${SESSION_HOST_PATH}" "${ENV_FILE}" "${REPO_ROOT}/${COMPOSE_FILE}" \
+    "${ROLE_CUTOVER_PLAN}" "${ROLE_CUTOVER_PLAN_SHA256}")"
+  [ "${current_selection}" = "${role_selection}" ] || exit 1
+  control prepare-predecessor-role-cutover
+else
+  control prepare
+fi
 SESSION_PREPARED=1
 
 if ! try_acquire_advisory; then
+  [ "${ROLE_CUTOVER}" -eq 0 ] || exit 1
   echo "Database connections are saturated; entering journaled maintenance to drain the previous backend automatically." >&2
   if [ "${CAPTURE_ONLY}" -eq 1 ]; then capture_pause_started="$(node -e 'process.stdout.write(process.hrtime.bigint().toString())')"; DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS="${capture_pause_started}"; export DEPLOYMENT_CAPTURE_PAUSE_STARTED_NS; fi
   enter_maintenance
@@ -1386,7 +1471,7 @@ control acquire
 acquire_code=$?
 set -e
 if [ "${acquire_code}" -eq 4 ]; then
-  [ "${CAPTURE_ONLY}" -eq 0 ] || { echo "Capture-only requires an existing canonical DB lease schema; no bootstrap mutation is permitted." >&2; exit 1; }
+  [ "${CAPTURE_ONLY}" -eq 0 ] && [ "${ROLE_CUTOVER}" -eq 0 ] || { echo "This operation requires an existing canonical DB lease schema; no bootstrap mutation is permitted." >&2; exit 1; }
   BOOTSTRAP=1
   DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP=true
   export DEPLOYMENT_INITIAL_SCHEMA_BOOTSTRAP
@@ -1446,6 +1531,10 @@ if [ "${CAPTURE_ONLY}" -eq 1 ]; then
   (umask 077; set -C; : > "${CAPTURE_ONLY_OUTPUT}")
   run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-checkpoint.js > "${CAPTURE_ONLY_OUTPUT}"
   chmod 400 "${CAPTURE_ONLY_OUTPUT}"
+elif [ "${ROLE_CUTOVER}" -eq 1 ]; then
+  LEGACY_BACKEND_SIGNAL_PENDING=1
+  assert_original_legacy_still_stopped
+  run_original_owned_with_heartbeat run_backend node dist/scripts/deployment-checkpoint.js
 else
   LEGACY_BACKEND_SIGNAL_PENDING=1
   assert_original_legacy_still_stopped
@@ -1479,6 +1568,15 @@ assert_qa_remote_checkpoint_mount
 phase MUTATION_STARTED
 MUTATION_STARTED=1
 mutation_started_at="$(date +%s)"
+if [ "${ROLE_CUTOVER}" -eq 1 ]; then
+  run_owned_role_foreground
+  MAINTENANCE_ACTIVE=0
+  FINISHED=1
+  cleanup_locks
+  trap - EXIT INT TERM
+  echo 'The exact scanner-retaining configuration passed owned terminal readback.'
+  exit 0
+fi
 if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then
   remaining="$(remaining_mutation_seconds)" || exit 1
   run_backend_timed "${remaining}" node scripts/clamav-checkpoint.mjs activate

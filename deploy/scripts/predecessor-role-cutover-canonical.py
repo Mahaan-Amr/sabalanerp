@@ -4,11 +4,14 @@ This adapter is import-only. It assumes the canonical runner already owns its
 host lock, PostgreSQL advisory session, maintenance marker and deployment lease.
 """
 
+import base64
+import fcntl
 import importlib.util
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.parse import urlsplit
@@ -257,11 +260,11 @@ def start_original_siblings(root, report_dir, coordination_dir, phase, proof, pl
     host.require(False)
 
 
-def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight, credential_fd):
+def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight, credential_fd, *, compose=None):
     """Run the already-owned configuration continuation through native transports."""
     session, checkpoint, binding = owner_context(root, env, report_dir, coordination_dir)
     phase = session["phase"]
-    compose = root / "docker-compose.prod.yml"
+    compose = compose or root / "docker-compose.prod.yml"
     host.require(compose.resolve() == compose and compose.is_file())
     graph = binding["rollbackReleaseSet"]
     private, _ = host.transaction_paths(root, binding["deploymentId"])
@@ -387,7 +390,7 @@ def run_canonical_foreground(root, env, report_dir, coordination_dir, preflight,
     return {"runtimeProof": proof, "nginxProof": nginx, "gateAcknowledgement": gate_proof, "canOpenTraffic": False}
 
 
-def publish_canonical_terminal(root, env, report_dir, coordination_dir, gate_ack):
+def publish_canonical_terminal(root, env, report_dir, coordination_dir, gate_ack, *, compose=None):
     """Publish and finish an already-owned same-image cutover under inherited FD9."""
     terminal_spec = importlib.util.spec_from_file_location("predecessor_role_terminal", DIRECTORY / "predecessor-role-cutover-terminal.py")
     terminal = importlib.util.module_from_spec(terminal_spec)
@@ -395,7 +398,7 @@ def publish_canonical_terminal(root, env, report_dir, coordination_dir, gate_ack
     authority = owner_context(root, env, report_dir, coordination_dir)
     session, checkpoint, binding = authority
     phase = session["phase"]
-    compose = root / "docker-compose.prod.yml"
+    compose = compose or root / "docker-compose.prod.yml"
     private, _ = host.transaction_paths(root, session["deploymentId"])
     env_raw = host.read_private(env)[0]
     point_raw = host.read_private(coordination_dir / "deployment-checkpoint.json")[0]
@@ -509,3 +512,50 @@ def publish_canonical_terminal(root, env, report_dir, coordination_dir, gate_ack
     host.require(control("finish-predecessor-role-terminal", host.json_bytes(public)) == {"phase": expected_terminal})
     return terminal.archive_terminal_holds(root, report_dir, coordination_dir, binding["deploymentId"],
                                            read_terminal=lambda _: read_terminal(), observe_public=observe_public)
+
+def launch_owned_role_cutover(root, env, report_dir, compose, phase, preflight):
+    """CLI handoff from the exact canonical shell after its owned checkpoint."""
+    host.require(os.geteuid() == 0 and root.resolve() == root
+                 and phase in ("MUTATION_STARTED", "ROLLBACK_STARTED"))
+    host.verify_lock(root)
+    session = json.loads(host.read_private(report_dir / "active-deployment-session.json")[0])
+    host.require(session["phase"] == phase and session["purpose"] == "predecessor-role-cutover"
+                 and session["deploymentId"] == os.environ.get("DEPLOYMENT_ID"))
+    host.require(compose.parent == root and compose.resolve() == compose and compose.is_file()
+                 and (compose.name == "docker-compose.prod.yml" or (
+                     compose.name == "docker-compose.rehearsal.yml"
+                     and os.environ.get("DEPLOYMENT_QA_REHEARSAL_PLAN_FILE")
+                     and host.matches(r"[a-f0-9]{64}", os.environ.get("DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256")))))
+    ids = subprocess.check_output(canonical_compose(env, compose, "ps", "--all", "--quiet", "backend"),
+                                  cwd=root, stderr=subprocess.DEVNULL, timeout=30).decode("ascii").split()
+    host.require(len(ids) == 1 and host.matches(r"[a-f0-9]{64}", ids[0]))
+    rows = read_owner_json(root, (*DOCKER, "inspect", ids[0]))
+    host.require(len(rows) == 1 and rows[0]["Id"] == ids[0]
+                 and rows[0]["Image"] == preflight["images"]["backend"])
+    mounts = [mount for mount in rows[0]["Mounts"] if mount["Destination"] == "/app/recovery-coordination"]
+    host.require(len(mounts) == 1 and mounts[0]["RW"] is True)
+    coordination = Path(mounts[0]["Source"])
+    credential = None
+    try:
+        if phase == "MUTATION_STARTED":
+            credential = os.memfd_create("sabalan-role-cutover", os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC)
+            password = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=")
+            host.require(os.write(credential, password) == len(password))
+            fcntl.fcntl(credential, fcntl.F_ADD_SEALS, host.REQUIRED_CREDENTIAL_SEALS)
+        outcome = run_canonical_foreground(root, env, report_dir, coordination, preflight, credential, compose=compose)
+        return publish_canonical_terminal(root, env, report_dir, coordination, outcome["gateAcknowledgement"], compose=compose)
+    finally:
+        if credential is not None:
+            os.close(credential)
+
+
+if __name__ == "__main__":
+    try:
+        host.require(len(sys.argv) == 6 and not sys.stdin.isatty())
+        root, env, report_dir, compose = map(Path, sys.argv[1:5])
+        frame = sys.stdin.buffer.read(65537)
+        host.require(0 < len(frame) <= 65536)
+        print(json.dumps(launch_owned_role_cutover(root, env, report_dir, compose, sys.argv[5], json.loads(frame))))
+    except Exception:
+        print("PREDECESSOR_ROLE_CUTOVER_CONTROLLED_RECOVERY_REQUIRED", file=sys.stderr)
+        sys.exit(1)

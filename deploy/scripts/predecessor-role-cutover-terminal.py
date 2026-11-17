@@ -1,7 +1,6 @@
 """Durable publication and hold custody for the first predecessor role split.
 
-The canonical command-line runner still exposes only preflight. An eventual
-foreground owner must supply the trusted database and public observation
+The dedicated canonical runner supplies the trusted database and ingress
 callbacks. Gate evidence on its own grants no public or terminal authority.
 """
 

@@ -7,7 +7,7 @@ import { existingRelease } from '../../scripts/deployment-existing-release.mjs';
 import { readPredecessorDatabaseTopology } from './predecessor-database-topology.mjs';
 import { validateBinding, validateIdentity } from './preserved-clamav.mjs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const holdName = 'predecessor-role-cutover-active.json';
 const services = ['backend', 'clamav', 'frontend', 'inquiry', 'nginx', 'postgres'];
@@ -127,11 +127,26 @@ function checkHostLock(root) {
   assert.match(fs.readFileSync('/proc/self/fdinfo/9', 'utf8'), lockPattern);
 }
 
-function inspectSameImage(root, session, environment, composeFile, planFile, expectedPlanSha) {
+function inspectSameImage(root, session, environment, composeFile, planFile, expectedPlanSha, includeScanner = false) {
   checkHostLock(root);
   assert.equal(pendingRoleCutover(root, session), false);
   assert.ok(!namedFile(session));
-  assert.equal(composeFile, path.join(root, 'docker-compose.prod.yml'));
+  const production = path.join(root, 'docker-compose.prod.yml');
+  const rehearsal = path.join(root, 'docker-compose.rehearsal.yml');
+  if (composeFile !== production) {
+    assert.equal(composeFile, rehearsal);
+    const supplied = process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_FILE;
+    const digest = process.env.DEPLOYMENT_QA_REHEARSAL_PLAN_SHA256;
+    assert.ok(supplied && digestPattern.test(digest));
+    const qaEnv = { ...process.env };
+    if (qaEnv.DOCKER_HOST === 'unix:///var/run/docker.sock') delete qaEnv.DOCKER_HOST;
+    if (qaEnv.COMPOSE_PROJECT_NAME === 'sabalanerp') delete qaEnv.COMPOSE_PROJECT_NAME;
+    const selected = execFileSync(process.execPath, [
+      path.join(path.dirname(fileURLToPath(import.meta.url)), 'qa-rehearsal-target.mjs'),
+      supplied, digest, root, environment,
+    ], { cwd: root, env: qaEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30000 }).trim();
+    assert.equal(selected, 'docker-compose.rehearsal.yml');
+  }
   assert.equal(fs.realpathSync(composeFile), composeFile);
   assert.match(expectedPlanSha, digestPattern);
   const rawPlan = readPrivate(planFile, fs.lstatSync(planFile), 64 * 1024);
@@ -154,21 +169,30 @@ function inspectSameImage(root, session, environment, composeFile, planFile, exp
   const rows = JSON.parse(docker(['inspect', ...expected]));
   const config = JSON.parse(docker([...compose, 'config', '--format', 'json']));
   const receipt = verifySameImageCutoverPlan({ plan, rows, config, bytes });
+  if (includeScanner) {
+    const backend = rows.find(row => row.Id === plan.containers.backend);
+    const volume = backend.Mounts.filter(mount => mount.Destination === '/app/storage/dispatch-documents');
+    assert.ok(volume.length === 1 && volume[0].RW === true && volume[0].Type === 'volume'
+      && volume[0].Name === 'sabalanerp_backend_storage_dispatch_documents');
+  }
   checkHostLock(root);
   assert.equal(pendingRoleCutover(root, session), false);
   assert.ok(!namedFile(session));
   assert.deepEqual(list(), expected);
   assert.equal(sha(readEnv()), plan.environmentSha256);
   assert.equal(sha(fs.readFileSync(composeFile)), plan.composeSha256);
-  return { ...receipt, planSha256: expectedPlanSha };
+  const proof = { ...receipt, planSha256: expectedPlanSha };
+  return includeScanner
+    ? { proof, environmentSha256: plan.environmentSha256, scannerBindingHex: Buffer.from(JSON.stringify(plan.preservedClamav)).toString('hex') }
+    : proof;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const [mode, root, session, ...args] = process.argv.slice(2);
     if (!root || !session) throw new Error();
-    if (mode === 'inspect' && args.length === 4) {
-      console.log(JSON.stringify(inspectSameImage(root, session, ...args)));
+    if (['inspect', 'inspect-start'].includes(mode) && args.length === 4) {
+      console.log(JSON.stringify(inspectSameImage(root, session, ...args, mode === 'inspect-start')));
     } else if (mode !== 'guard' || args.length !== 0) {
       throw new Error();
     } else if (pendingRoleCutover(root, session)) {

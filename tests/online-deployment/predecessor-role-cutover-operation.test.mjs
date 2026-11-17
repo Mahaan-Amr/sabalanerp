@@ -180,3 +180,53 @@ test('canonical launcher holds FD9 and performs only pinned read-only observatio
     fs.rmSync(root, { force: true, recursive: true });
   }
 });
+test('dedicated post-checkpoint routing publishes or rolls back under the same owner and never rolls back after intent', {
+  skip: process.platform !== 'linux',
+}, () => {
+  const script = fs.readFileSync(new URL('../../deploy/scripts/deploy.sh', import.meta.url), 'utf8');
+  const start = script.indexOf('role_cutover_failure() {');
+  const end = script.indexOf('\nrecover_failure() {', start);
+  const roleRecovery = script.slice(start, end);
+  const mutation = script.indexOf('phase MUTATION_STARTED\nMUTATION_STARTED=1');
+  const ordinary = script.indexOf('if [ "${DEPLOYMENT_CLAMAV_REPAIR}" = true ]; then', mutation);
+  const roleContinuation = script.slice(mutation, ordinary);
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'role-router-'));
+  try {
+    fs.mkdirSync(path.join(workspace, 'reports'));
+    const fixed = path.join(workspace, 'reports', 'predecessor-role-cutover-open-intent.json');
+    const inherited = `set -eu
+ROLE_CUTOVER=1
+SESSION_PREPARED=1
+MAINTENANCE_ACTIVE=1
+DB_LEASE_ACQUIRED=1
+MUTATION_STARTED=1
+LEGACY_BACKEND_SIGNAL_PENDING=0
+DEPLOYMENT_PHASE=MUTATION_STARTED
+DEPLOYMENT_ID=deploy-fixture
+REPO_ROOT="$1"
+SESSION_HOST_PATH="$REPO_ROOT/reports/active-deployment-session.json"
+phase() { DEPLOYMENT_PHASE="$1"; printf 'phase-%s\\n' "$1"; }
+run_owned_role_foreground() { printf 'foreground-%s\\n' "$DEPLOYMENT_PHASE"; }
+verify_public_maintenance() { printf 'maintenance-503\\n'; }
+protected_advisory_owned() { printf 'same-advisory\\n'; }
+drain_release_for_rollback() { printf 'drain-same-backend\\n'; }
+cleanup_locks() { printf 'cleanup-owned-locks\\n'; }
+`;
+    const run = suffix => spawnSync('/bin/sh', ['-c', inherited + roleRecovery + '\n' + suffix, 'role-fixture', workspace], {
+      cwd: workspace, encoding: 'utf8',
+    });
+    const applied = run(roleContinuation);
+    assert.equal(applied.status, 0, applied.stderr);
+    assert.match(applied.stdout, /phase-MUTATION_STARTED\nforeground-MUTATION_STARTED\ncleanup-owned-locks/);
+    const rolledBack = run('role_cutover_failure');
+    assert.equal(rolledBack.status, 0, rolledBack.stderr);
+    assert.match(rolledBack.stdout, /maintenance-503\nsame-advisory\ndrain-same-backend\nphase-ROLLBACK_STARTED\nforeground-ROLLBACK_STARTED/);
+    fs.writeFileSync(fixed, 'unacknowledged opening');
+    const unknown = run('role_cutover_failure');
+    assert.equal(unknown.status, 1);
+    assert.equal(unknown.stdout, '');
+    assert.match(unknown.stderr, /traffic may have opened/);
+  } finally {
+    fs.rmSync(workspace, { force: true, recursive: true });
+  }
+});
